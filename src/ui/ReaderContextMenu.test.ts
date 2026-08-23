@@ -14,8 +14,8 @@ describe("ReaderContextMenu helpers", () => {
       { width: 800, height: 600 },
       { width: 176, height: 48 },
     );
-    expect(placement.x).toBe(616);
-    expect(placement.y).toBe(544);
+    expect(placement.x).toBe(614);
+    expect(placement.y).toBe(542);
     expect(placement.horizontal).toBe("left");
     expect(placement.vertical).toBe("above");
   });

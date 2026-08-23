@@ -123,6 +123,7 @@
 - 浏览器 IndexedDB 仅为隔离预览后端，不承诺持久源路径；真实链接书库行为以 Tauri 后端为准。
 - 本次契约改变经用户明确同意不迁移测试书库。切换时可以删除旧托管正文和缓存，但不得扫描或删除用户原始 EPUB。
 - B-062/C-51：书架筛选只消费已持久化元数据，不得在打开抽屉或切换筛选时读取源 EPUB。`language` 是可选同步字段；旧记录缺失必须归入“未知语言”。浏览器和 Rust 新导入取 OPF 第一个非空 `dc:language`，portable archive v1 以可选字段向后兼容。
+- B-071/C-52：阅读器所有前台界面必须由单一 `ReaderForeground` 判别联合仲裁。普通 panel、正文 transient 和 modal 不得同时渲染；字体中心仅是 menu 子视图。modal 拒绝其它打开转换；替换 footnote/selection 时 App 必须分别完成 paginator dismiss/hover reset 与 iframe selection 清理。新增前台功能扩展 union 和 renderer，禁止新增独立 `xxxOpen` 真源或用 z-index 代替互斥。
 - B-062/C-51：作者分类键使用 NFKC，并仅移除 Han/Hiragana/Katakana 字符之间的 Unicode `White_Space`/`Cf`；不得覆盖原始 `creator`，不得删除西文姓名内部空格。UI 必须复用 `createShelfFilterModel` 的索引、匹配和交叉计数，不维护第二套规范化实现。
 
 ## 6. 渲染规则变更

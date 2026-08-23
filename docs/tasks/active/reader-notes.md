@@ -6,5 +6,6 @@
 - 渲染：使用 iframe 内 CSS Custom Highlight API 的 `reader-notes` 下划线，不包裹或修改 EPUB DOM，不参与测量、分页和阅读进度。没有 API 的内核只是不显示下划线，笔记数据和列表仍保留。
 - 存储：笔记属于书架记录，进入无设备路径的 portable archive；同 ID 合并采用较新的 `updatedAtMs`。选择上限 4096 code points，笔记内容上限 10000；前端和 Rust 同时校验。
 - 性能：不预扫描整书；只解析和高亮当前章节笔记。列表初始渲染最近 200 条，可分批显示全部记录。
-- 验证：前端 Vitest 50 files/393 tests、TypeScript、Vite production build（110 modules）；Rust fmt 与 18/18 tests。WSL Chromium 900×650 实测选区→添加→下划线→列表→跳转，保存前后章节 scrollWidth 均为 900，Highlight size=1，原生选区已清除，跳转后后退可用。5173 已释放。
+- 验证：首版前端 Vitest 50 files/393 tests、Rust 18/18；B-069 后当前全量 Vitest 52 files/411 tests、TypeScript、Vite production build（110 modules）通过。WSL Chromium 首版链路已通过；B-069 的 Windows WebView2 选区末端定位与 iframe 左键关闭待 beta.1 实机确认。
+- B-069 菜单生命周期：右键菜单以 Range 最后一个可见片段为锚点；仅在菜单打开后监听 iframe selectionchange，变化时刷新末端坐标，折叠/失效时关闭。宿主关闭同时清除 iframe 原生选区，普通选择过程不增加持续索引成本。
 - 待确认：Windows WebView2 的右键、剪贴板、CSS Highlight 颜色与大量笔记列表观感。

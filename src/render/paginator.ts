@@ -1686,8 +1686,10 @@ export class ChapterPaginator {
   /** Built once after current chapter layout is stable; never spans documents. */
   private textIndex: VisibleTextIndex | null = null;
   private notes: ReaderNoteForPaginator[] = [];
-  private selectionContextMenuHandler?: (payload: SelectionContextPayload) => void;
+  private selectionContextMenuHandler?: (payload: SelectionContextPayload | null) => void;
   private contextMenuHandler = (e: MouseEvent): void => this.handleContextMenu(e);
+  private selectionChangeHandler = (): void => this.handleSelectionChange();
+  private selectionContextMenuOpen = false;
   /** 本次加载需要“停在最后一页且翻好页再显示”（回翻上一章防闪页） */
   private pendingStartAtEnd = false;
   private lastState: ChapterState = { status: "loading" };
@@ -1770,7 +1772,7 @@ export class ChapterPaginator {
     /** 首次测量、分页与最终入口定位全部完成，iframe 已可安全交互。 */
     private onDisplayReady?: () => void,
     /** 有效正文选区的现代右键菜单数据；通过 setter 可保持最新 UI 回调。 */
-    onSelectionContextMenu?: (payload: SelectionContextPayload) => void
+    onSelectionContextMenu?: (payload: SelectionContextPayload | null) => void
   ) {
     this.selectionContextMenuHandler = onSelectionContextMenu;
     this.displayGate = new VisibilityGate(this.iframe, {
@@ -1779,13 +1781,15 @@ export class ChapterPaginator {
     this.footnoteHoverGate = new FootnoteHoverGate(() => this.onFootnoteClose?.());
   }
 
-  setSelectionContextMenuHandler(handler?: (payload: SelectionContextPayload) => void): void {
+  setSelectionContextMenuHandler(handler?: (payload: SelectionContextPayload | null) => void): void {
     this.selectionContextMenuHandler = handler;
   }
 
   /** 清除 iframe 内原生文本选区（关闭选区菜单或进入笔记编辑时使用）。 */
   clearTextSelection(): void {
+    this.selectionContextMenuOpen = false;
     this.contentDoc?.getSelection()?.removeAllRanges();
+    this.selectionContextMenuHandler?.(null);
   }
 
   /** 更新当前书籍笔记；只刷新当前章节的 Highlight，不触发重排或重新测量。 */
@@ -1946,6 +1950,7 @@ export class ChapterPaginator {
     doc.addEventListener("keydown", this.keyHandler);
     // 阅读器内始终屏蔽浏览器原生右键菜单；只有有效正文选区才回调 UI。
     doc.addEventListener("contextmenu", this.contextMenuHandler);
+    doc.addEventListener("selectionchange", this.selectionChangeHandler);
     void this.prepareChapterForDisplay(seq, atEnd)
       .then((prepared) => {
         if (!prepared || seq !== this.loadSeq || this.disposed) {
@@ -3232,7 +3237,30 @@ export class ChapterPaginator {
     const index = this.textIndex ?? buildVisibleTextIndex(doc, viewer);
     this.textIndex = index;
     const payload = captureTextSelection(doc, viewer, index);
-    if (payload) this.selectionContextMenuHandler?.({ ...payload, chapterPath: this._currentPath });
+    this.selectionContextMenuOpen = Boolean(payload);
+    this.selectionContextMenuHandler?.(payload ? { ...payload, chapterPath: this._currentPath } : null);
+  }
+
+  private handleSelectionChange(): void {
+    if (!this.selectionContextMenuOpen) return;
+    const doc = this.contentDoc;
+    const viewer = this.viewer;
+    if (!doc || !viewer) return;
+    const selection = doc.getSelection?.();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+      this.selectionContextMenuOpen = false;
+      this.selectionContextMenuHandler?.(null);
+      return;
+    }
+    const index = this.textIndex ?? buildVisibleTextIndex(doc, viewer);
+    this.textIndex = index;
+    const payload = captureTextSelection(doc, viewer, index, selection);
+    if (!payload) {
+      this.selectionContextMenuOpen = false;
+      this.selectionContextMenuHandler?.(null);
+      return;
+    }
+    this.selectionContextMenuHandler?.({ ...payload, chapterPath: this._currentPath });
   }
 
   private clearNoteHighlights(): void {
@@ -3953,6 +3981,8 @@ export class ChapterPaginator {
     this.lastFootnoteEl = null;
     this.footnotePinned = false;
     this.footnoteHoverGate.reset();
+    this.selectionContextMenuOpen = false;
+    this.selectionContextMenuHandler?.(null);
     this.restoreInlineBoxFixes();
     this.restoreFloatLayoutFixes();
     this.restoreTrailingFloatFixes();
@@ -3964,6 +3994,7 @@ export class ChapterPaginator {
     this.contentDoc?.removeEventListener("mouseover", this.footnoteHoverInHandler, true);
     this.contentDoc?.removeEventListener("mouseout", this.footnoteHoverOutHandler, true);
     this.contentDoc?.removeEventListener("contextmenu", this.contextMenuHandler);
+    this.contentDoc?.removeEventListener("selectionchange", this.selectionChangeHandler);
     this.clearNoteHighlights();
     this.contentDoc = null;
     this.viewer = null;

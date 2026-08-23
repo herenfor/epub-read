@@ -13,14 +13,14 @@ AI 只能修改隔离副本。源仓同步、提交和 GitHub 推送由用户完
 
 ## 当前基线
 
-- `0.1.9` 测试发布候选已经收口；隔离副本现已进入下一版本开发。B-067 阅读器菜单稳定滚动槽属于下一版本，不得混入 0.1.9 发布说明。
+- `0.1.9` 已收口；当前隔离副本版本为 `0.1.9-beta.1` 修复测试版，用于验证 Windows 搜索核心问题 B-068，并包含低风险的 B-067 菜单稳定滚动槽。
 - 已发布版本：`0.1.5`（已在 Windows 编译、打包并分发）
 - 0.1.5 发布提交：`4bb9c7b2e50ef3a13f2cc8cd06d91c25486911b7`
 - 当前源仓比较基线：`e8aabcdeb03543402338aee00fb2e33d52e39841`（`v0.1.6`，`origin/main`）。
 - 基线提交说明：`fix: use u64 for shelf timestamps (Tauri IPC rejects u128)`。
 - 排除本地测试产物后，隔离副本代码与该源仓提交一致；当前文档收尾差异见 `SOURCE_DELTA.md`。
 - 当前隔离副本单元测试基线：前端 46 个测试文件、377 个用例；Rust 测试 17/17；`tsc --noEmit`、Vite production build（106 modules）与 Rust fmt/check/test 均通过。
-- `package.json`、Tauri 配置、Cargo 清单和 Cargo 锁文件中的本项目版本均为 `0.1.9`。
+- `package.json`、Tauri 配置、Cargo 清单和 Cargo 锁文件中的本项目版本均为 `0.1.9-beta.1`。
 - 渲染规划：`docs/PRELOAD_PLAN.md` 的 P0 首帧显示门与 P1 前后相邻三槽预加载已实现；P2 动画仍只是后续预留，不要视为已实现。
 - 长期搜索/RAG 方向：`docs/SEARCH_TO_RAG_ROADMAP.md` 已记录“正文语料与全文搜索 → 语义检索与分类 → 带引用问答与分层总结”的开发边界；B-059/C-48 已实现当前书基础正文搜索切片，跨书检索、语义检索与 RAG 仍属后续分支范围。
 - 当前待审 B-029：CSS 注释边界保护已接入 `cssRewrite`、sanitize 和 paginator；递归 `@import` 共享保护 context，且已完成 sanitize 外链 CSS 的 Chromium 端到端验证；普通测试书回归与 Windows WebView2 仍按发布流程确认，详见 `docs/tasks/active/css-comment-boundaries.md`。
@@ -45,7 +45,11 @@ AI 只能修改隔离副本。源仓同步、提交和 GitHub 推送由用户完
 - 当前待审 B-060/C-49：可重排正文已支持选区右键添加笔记、本书笔记列表、编辑/删除、文本锚点跳转和既有三步历史。下划线只使用 CSS Custom Highlight，不修改书籍 DOM；notes 已进入前端/Tauri 书架记录及 portable archive。全量 Vitest 50 files/393 tests、Rust 18/18、tsc、Vite 110 modules与 WSL Chromium 真实链路通过，Windows WebView2 待确认；详见 `docs/tasks/active/reader-notes.md`。
 - 当前待审 B-061/C-50：菜单新增默认关闭的“高性能模式”。可重排书最多保留上一篇/当前篇/下一篇三个同尺寸槽位，后台严格先下一篇、后上一篇，顺序跨章直接提升并保留旧章为反向缓存；显式跳转与未命中仍走 P0。开关不重载当前章，设置/字体/尺寸变化和生命周期会销毁备用槽；fixed-layout 禁用。详细设置已统一为主题色浅卡片和 42×24 现代开关，纸色衬底不再过深；窄窗下滑块和开关卡片统一为同宽同高，步进按钮不溢出且开关标题无多余顶部空白。全量 Vitest 51 files/402 tests、tsc、Vite 110 modules 与 WSL Chromium 实书三 Blob/约 7ms 回翻及 640×520 菜单实测通过；Windows CPU/内存、连续快速翻章与视觉待确认，详见 `docs/tasks/active/next-chapter-preload.md`。
 - 当前待审 B-062/C-51（含 B-063～B-066）：书架新增带动画的二级筛选抽屉，收纳搜索、排列、密度、主题、存档导入/导出；可按作者、书名、保存时间、语言组合筛选。作者分组使用 NFKC 与 CJK 间 Unicode whitespace/Cf 清理但不改原 OPF 值，language 已进入浏览器/Rust/portable archive，旧记录显示未知且不扫描源文件。书架顶部 Toolbar 已移除，阅读器 Toolbar 保留；抽屉滚动区填满剩余高度并预留稳定滚动槽，搜索使用 SVG 图标严格居中，筛选展开不再引起横向缩窄。全量 Vitest 52 files/407 tests、Rust 19/19、tsc、Vite 110 modules 与 Chromium UI 链路通过；Windows 原生导入和 100+ 本实机待确认，详见 `docs/tasks/active/shelf-filter-drawer.md`。
-- 下一版本 B-067：阅读器 `.menu-panel` 预留稳定滚动槽，展开详细设置后设置卡片不再因滚动条出现而变窄；不属于 0.1.9 发布范围。
+- beta.1 B-067：阅读器 `.menu-panel` 预留稳定滚动槽，展开详细设置后设置卡片不再因滚动条出现而变窄。
+- beta.1 B-068：Windows 发布版正文搜索空结果的差异定位到 XHTML 被无条件按 HTML 解析；现改为严格 XML 优先、失败再回退 HTML。全量 Vitest 52/410 与 Vite 110 modules 通过，待 Windows 原故障书复验。
+- beta.1 B-069：正文选区菜单改以 Range 末尾可见片段定位；菜单打开期间 selectionchange 刷新位置，选区折叠/失效立即关闭，宿主关闭同步清除 iframe 选区。当前全量 Vitest 52/411，待 Windows WebView2 实机确认。
+- beta.1 B-070：搜索输入框屏蔽 WebView2 原生清除装饰，只保留自定义按钮；长查询单行内部滚动、不会撑宽面板或遮住按钮。当前全量 Vitest 52/414。
+- beta.1 B-071/C-52：阅读器菜单/目录/书签/搜索/笔记/日志、正文 transient 与笔记 modal 已收敛到单一 `ReaderForeground`；字体是菜单子视图，modal 全窗口独占。全量 Vitest 53/420、Vite 111 modules，详见 `tasks/active/reader-foreground-arbitration.md`。
 - 当前暂缓事项：第三方许可草案已因网络波动前任务延迟落盘，现有 `THIRD_PARTY_LICENSES.md`、许可证文本目录、NOTICE/README/贡献条款、package/Cargo SPDX 字段与 Tauri bundle resources；但逐包传递依赖/版权/NOTICE 审计、Windows 安装包实证、图标授权和 Linux LGPL 边界均未验收。`SOURCE_DELTA.md` 与 `HANDOFF.md` 将其明确标记为“草案已存在、暂时搁置”，后续对话不得视为正式完成。
 
 当前未同步变化以 `docs/SOURCE_DELTA.md` 为准，不要仅根据本节判断。
@@ -119,5 +123,5 @@ EPUB bytes
 - 渲染冲突台账：`rendering-layers.md`
 - 开发与发布说明：`HANDOFF.md`
 - 任务模板：`tasks/TEMPLATE.md`
-- 当前版本收尾记录：`RELEASE_0.1.9.md` 与 `tasks/active/version-0.1.9-release-candidate.md`；0.1.8 文件保留为阶段历史，Windows 安装包状态仍待用户确认。
+- 当前修复测试入口：`RELEASE_0.1.9-beta.1.md`；正式版历史为 `RELEASE_0.1.9.md` 与 `tasks/active/version-0.1.9-release-candidate.md`。
 - 搜索到 RAG 的长期路线：`SEARCH_TO_RAG_ROADMAP.md`（调研完成、尚未实现）。

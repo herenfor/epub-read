@@ -86,7 +86,7 @@ interface ReaderViewProps {
   /** 桌面端 hover 移出脚注标记时关闭弹层 */
   onFootnoteClose(): void;
   /** iframe 正文有效选区的自定义右键菜单数据（rect 已换算为宿主 viewport）。 */
-  onSelectionContextMenu?(payload: SelectionContextPayload): void;
+  onSelectionContextMenu?(payload: SelectionContextPayload | null): void;
   /** 打开书时恢复的阅读锚点（可选，页码之外的精确定位） */
   initialAnchor?: {
     index: number;
@@ -334,6 +334,10 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
       },
       (payload) => {
         if (!isActiveSlot(slot)) return;
+        if (!payload) {
+          onSelectionContextMenuRef.current?.(null);
+          return;
+        }
         const rect = slot.iframe.getBoundingClientRect();
         onSelectionContextMenuRef.current?.({
           ...payload,

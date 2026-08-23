@@ -947,9 +947,49 @@ CSS 规则的逐项冲突编号仍以 `rendering-layers.md` 为准；本文记�
 
 ## B-067：阅读器菜单展开后滚动条导致选项横向缩窄（2026-08-23）
 
-- 状态：已修复，归入 0.1.9 之后的下一版本，不回写 0.1.9 发布范围。
+- 状态：已修复，归入 `0.1.9-beta.1`，不回写正式 0.1.9 发布范围。
 - 现象：阅读器菜单初始内容未溢出时没有纵向滚动条；展开“详细设置”后出现滚动条并占用内容宽度，所有设置卡片突然变窄。
 - 根因：`.menu-panel` 直接承担纵向滚动，只在实际 overflow 时由 Chromium 分配滚动条槽，展开前后的可用 inline size 不一致。
 - 修复：为 `.menu-panel` 增加 `scrollbar-gutter:stable`，菜单打开时便预留单侧滚动槽；不改变菜单固定宽度、缩放、详细设置结构或滚动行为。
-- 验证：菜单 CSS 契约 8/8、`tsc --noEmit` 通过。应用内浏览器连接被 WSL 工作目录元数据拒绝，未把该环境失败记为产品失败；Windows WebView2 展开前后视觉留待下一版本实机验收。
+- 验证：菜单 CSS 契约 8/8、`tsc --noEmit` 通过。应用内浏览器连接被 WSL 工作目录元数据拒绝，未把该环境失败记为产品失败；Windows WebView2 展开前后视觉留待 beta.1 实机验收。
 - 关联：B-066（书架抽屉同类问题）。
+
+## B-068：Windows 发布版正文搜索始终无结果（2026-08-23）
+
+- 状态：代码与自动化修复完成，归入 `0.1.9-beta.1`；待 Windows WebView2 发布包复验。
+- 现象：Windows 发布版的搜索按钮、面板和输入均正常，但任意关键词均返回空结果；同一书在 WSL `pnpm dev` 的 Chromium 中可以搜索。
+- 根因判断：搜索提取器此前把 EPUB XHTML 无条件作为 `text/html` 解析。HTML 规则不承认一般 XML 自闭合标签，不同版本 WebView2 可能把 `<head>` 内自闭合结构错误延伸并吞入后续 body，使提取正文为空；渲染主链路本来已经使用 XML 优先策略，搜索链路没有同步该契约。
+- 修复：新增 `extractSearchText()`，有效 XHTML 优先使用严格 `application/xml`；只有检测到 parser error 才退回宽松 `text/html`，继续兼容不规范旧书。搜索缓存、查询算法、结果上限和跳转锚点均不改变。
+- 验证：新增有效 XHTML 自闭合 head 标签及畸形旧 HTML fallback 两项回归；全量 Vitest 52 文件/410 用例、TypeScript 与 Vite production build（110 modules）通过。Windows 发布包仍需用户用原故障书确认。
+- 关联：`docs/tasks/active/reader-text-search.md`、B-059/C-48。
+
+## B-069：正文选区右键菜单位置错误且无法随正文点击关闭（2026-08-23）
+
+- 状态：代码与自动化修复完成，归入 `0.1.9-beta.1`；待 Windows WebView2 实机复验。
+- 现象：多行选中文本后菜单长期靠在阅读区右侧，没有贴近所选文本末端；在 iframe 正文中左键取消选区后菜单仍残留，表现为无法关闭。
+- 根因：选区坐标使用所有 `Range.getClientRects()` 的联合包围盒，跨行/跨列时 `right/bottom` 不是文本终点；菜单的外部 pointer 监听位于宿主 document，无法接收 iframe 内事件；菜单打开后也没有监听 iframe `selectionchange`。
+- 修复：选区 payload 改用 Range 最后一个可见片段矩形；菜单边缘翻转以锚点为基准放到左侧/上方，而不是钳制到视口固定边缘；分页器仅在菜单已打开时监听 selectionchange，选区变化则重发最新末端坐标，选区折叠/无效则发送 null 关闭。Escape/宿主外部关闭同时清除 iframe 选区并结束该生命周期。
+- 性能边界：普通选择期间不建立额外索引、不持续回调；只有有效右键菜单已经打开时才处理 selectionchange，并复用当前章节文本索引。
+- 验证：新增多行选区末端矩形回归并更新边缘翻转回归；定向 3 文件/16 用例，全量 Vitest 52 文件/411 用例、TypeScript 与 Vite production build（110 modules）通过。
+- 关联：`docs/tasks/active/reader-notes.md`、B-060/C-49。
+
+## B-070：Windows 搜索输入框出现两个清除按钮（2026-08-23）
+
+- 状态：代码与自动化修复完成，归入 `0.1.9-beta.1`；待 Windows WebView2 视觉复验。
+- 现象：搜索框输入文字后右侧同时出现 WebView2 原生 `type=search` 清除按钮和应用自定义清除按钮；二者都能清空，但只有最右侧自定义按钮使用应用交互样式。
+- 根因：`SearchPanel` 有意提供自定义清除按钮，但 CSS 未屏蔽 Chromium/WebView2 为 search input 自动生成的 cancel/decoration/results 控件。
+- 修复：定向隐藏 `.search-input` 的四类 WebKit search 伪元素，只保留带主题 hover 的自定义按钮；输入容器与输入框补齐 `width/max-width/min-width` 收缩边界，右 padding 增至 40px，自定义按钮提升层级。
+- 长文本行为：维持原生单行输入和内部水平滚动；查询不会撑宽搜索面板，文本不会进入清除按钮的 40px 安全区，按钮始终可点击。不截断或修改实际查询值。
+- 验证：Luna High 完成实现与 SearchPanel 定向 7/7；主代理复核后全量 Vitest 52 文件/414 用例、TypeScript 与 Vite production build（110 modules）通过。
+- 关联：`docs/tasks/active/reader-text-search.md`、B-068。
+
+## B-071/C-52：阅读器多个前台界面可同时叠加（2026-08-23）
+
+- 状态：重构、自动化与生产构建完成，归入 `0.1.9-beta.1`；待 Windows WebView2 实机验收。
+- 现象：菜单、目录、书签、搜索、笔记、日志、脚注、选区菜单和笔记编辑分别使用独立 state；各入口手工关闭的对象不一致，多个界面可同时存在，再由不统一的 z-index 相互覆盖。
+- 根因：前台归属没有单一真源。新增功能必须记住所有既有 setter，遗漏即产生叠层；Escape、backdrop、导航和 iframe 回调也各维护一份不完整关闭列表。
+- 修复：新增可扩展 `ReaderForeground` 判别联合及纯转换函数，统一表达 none、普通 panel、正文 transient 和 modal；App 移除九组独立前台状态，从 foreground 派生所有可见性。字体中心成为 menu 子视图，笔记编辑器 modal 拒绝后台入口并用 fixed 遮罩覆盖完整应用。
+- 副作用边界：统一入口在替换脚注时同步 dismiss/hover reset，替换选区时清除 iframe selection；切书、回书架、Escape 和 backdrop 统一关闭。目录连续选择、搜索结果保留、书签/笔记跳转仍保持既有产品语义。
+- 扩展契约：以后新增普通前台功能扩展 `ReaderPanelId` 和对应 renderer/入口即可，禁止恢复 `xxxOpen` boolean 或依靠 z-index 实现业务互斥。
+- 验证：Luna High 完成状态模型与 App 迁移，定向 4 文件/16；主代理审核补充全窗口 modal 遮罩。最终全量 Vitest 53 文件/420 用例、TypeScript 与 Vite production build（111 modules）通过。
+- 关联：`docs/tasks/active/reader-foreground-arbitration.md`、B-054/B-060/B-069。

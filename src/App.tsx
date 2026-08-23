@@ -15,7 +15,7 @@ import {
   type ReaderSettings,
   type Theme,
 } from "./render/settings";
-import type { ChapterState, FootnotePayload, SelectionContextPayload } from "./render/paginator";
+import type { ChapterState } from "./render/paginator";
 import { Toolbar } from "./ui/Toolbar";
 import { MenuPanel } from "./ui/MenuPanel";
 import { FontSettingsPanel } from "./ui/FontSettingsPanel";
@@ -103,6 +103,16 @@ import { open as openFileDialog, save as saveFileDialog } from "@tauri-apps/plug
 import { readTextFile, stat as statFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { stepSettingValue } from "./ui/settingsStepper";
+import {
+  closeReaderForeground,
+  openNoteComposer,
+  openReaderPanel,
+  openReaderTransient,
+  setMenuSubview,
+  type ReaderForeground,
+  type ReaderPanelId,
+  type NoteComposerDraft,
+} from "./ui/readerForeground";
 
 function isTauriEnv(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -115,10 +125,6 @@ type AppPhase =
   | { phase: "ready" };
 
 type ReaderHistoryPosition = ReaderNavigationPosition;
-
-type NoteComposerState =
-  | { mode: "create"; selection: SelectionContextPayload; spineIndex: number }
-  | { mode: "edit"; note: ReaderNote };
 
 type PersistedReaderAnchor = {
   index: number;
@@ -198,7 +204,7 @@ export default function App() {
   const [anchor, setAnchor] = useState<string | undefined>(undefined);
   const [anchorNonce, setAnchorNonce] = useState(0);
   const [startAtEnd, setStartAtEnd] = useState({ nonce: 0, atEnd: false });
-  const [footnote, setFootnote] = useState<FootnotePayload | null>(null);
+  const [foreground, setForeground] = useState<ReaderForeground>({ kind: "none" });
   const [chapterState, setChapterState] = useState<ChapterState>({ status: "loading" });
   const [readerDisplayReady, setReaderDisplayReady] = useState(false);
   const [settings, setSettings] = useState<ReaderSettings>(() => {
@@ -228,9 +234,6 @@ export default function App() {
       ? saved.uiScale
       : 1;
   });
-  const [tocOpen, setTocOpen] = useState(false); // 悬浮目录默认收起
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [logOpen, setLogOpen] = useState(false);
   const [runtimeIssues, setRuntimeIssues] = useState<string[]>([]);
   const [diagText, setDiagText] = useState<string | null>(null);
   const [initialAnchor, setInitialAnchor] = useState<PersistedReaderAnchor | null>(null);
@@ -271,7 +274,6 @@ export default function App() {
   const [readerHistory, setReaderHistory] = useState<ReaderNavigationHistory>(
     emptyReaderNavigationHistory
   );
-  const [bookmarkMenuOpen, setBookmarkMenuOpen] = useState(false);
   // ---- 用户自定义字体 ----
   const [userFonts, setUserFonts] = useState<UserFont[]>([]);
   const [fontUrls, setFontUrls] = useState<Record<string, string>>({});
@@ -280,9 +282,7 @@ export default function App() {
   const [userFontsLoaded, setUserFontsLoaded] = useState(false);
   const [systemFontsStatus, setSystemFontsStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [systemFontsError, setSystemFontsError] = useState<string | null>(null);
-  const [fontSettingsOpen, setFontSettingsOpen] = useState(false);
   // ---- 当前书正文搜索（索引仅在本次打开书籍期间存在） ----
-  const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searchStatus, setSearchStatus] = useState<SearchStatus>("idle");
@@ -293,9 +293,6 @@ export default function App() {
   const searchAbortRef = useRef<AbortController | null>(null);
   const searchGenerationRef = useRef(0);
   // ---- 正文笔记 ----
-  const [notesOpen, setNotesOpen] = useState(false);
-  const [selectionContext, setSelectionContext] = useState<SelectionContextPayload | null>(null);
-  const [noteComposer, setNoteComposer] = useState<NoteComposerState | null>(null);
   const [noteBusy, setNoteBusy] = useState(false);
   const noteBusyRef = useRef(false);
   const fontRuntimeRef = useRef<ReturnType<typeof createLazyFontController> | null>(null);
@@ -324,6 +321,70 @@ export default function App() {
   }
   /** 指针是否悬停在交互式浮层（脚注弹窗等）上：此时不响应翻页键/后续可扩展书签等 */
   const overlayHoverRef = useRef(false);
+  const foregroundRef = useRef<ReaderForeground>({ kind: "none" });
+  foregroundRef.current = foreground;
+
+  // All reader-facing surfaces share one discriminated state. These values
+  // are deliberately derived, never independently writable booleans.
+  const menuOpen = foreground.kind === "panel" && foreground.panel === "menu";
+  const fontSettingsOpen = foreground.kind === "panel" && foreground.panel === "menu" && foreground.view === "fonts";
+  const tocOpen = foreground.kind === "panel" && foreground.panel === "toc";
+  const bookmarkMenuOpen = foreground.kind === "panel" && foreground.panel === "bookmarks";
+  const searchOpen = foreground.kind === "panel" && foreground.panel === "search";
+  const notesOpen = foreground.kind === "panel" && foreground.panel === "notes";
+  const logOpen = foreground.kind === "panel" && foreground.panel === "log";
+  const selectionContext = foreground.kind === "transient" && foreground.transient === "selection"
+    ? foreground.payload
+    : null;
+  const footnote = foreground.kind === "transient" && foreground.transient === "footnote"
+    ? foreground.payload
+    : null;
+  const noteComposer = foreground.kind === "modal" && foreground.modal === "note-composer"
+    ? foreground.draft
+    : null;
+
+  const openPanel = useCallback((panel: ReaderPanelId): void => {
+    const current = foregroundRef.current;
+    if (current.kind === "transient" && current.transient === "footnote") {
+      overlayHoverRef.current = false;
+      readerRef.current?.dismissFootnote();
+    } else if (current.kind === "transient" && current.transient === "selection") {
+      readerRef.current?.clearTextSelection();
+    }
+    setForeground((current) => openReaderPanel(current, panel));
+  }, []);
+  const openTransient = useCallback(
+    (transient: "selection" | "footnote", payload: Parameters<typeof openReaderTransient>[2]): void => {
+      const current = foregroundRef.current;
+      if (current.kind === "transient" && current.transient === "footnote" && transient === "selection") {
+        overlayHoverRef.current = false;
+        readerRef.current?.dismissFootnote();
+      } else if (current.kind === "transient" && current.transient === "selection" && transient === "footnote") {
+        readerRef.current?.clearTextSelection();
+      }
+      setForeground((state) => openReaderTransient(state, transient, payload));
+    },
+  []);
+  const openComposer = useCallback((draft: NoteComposerDraft): void => {
+    const current = foregroundRef.current;
+    if (current.kind === "transient" && current.transient === "footnote") {
+      overlayHoverRef.current = false;
+      readerRef.current?.dismissFootnote();
+    } else if (current.kind === "transient" && current.transient === "selection") {
+      readerRef.current?.clearTextSelection();
+    }
+    setForeground((state) => openNoteComposer(state, draft));
+  }, []);
+  const closePanel = useCallback((panel: ReaderPanelId): void => {
+    setForeground((current) =>
+      current.kind === "panel" && current.panel === panel ? closeReaderForeground() : current
+    );
+  }, []);
+  const closeForeground = useCallback((): void => {
+    setForeground(closeReaderForeground());
+    overlayHoverRef.current = false;
+    readerRef.current?.dismissFootnote();
+  }, []);
 
   const readerRef = useRef<ReaderHandle>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -517,12 +578,8 @@ export default function App() {
       historyCaptureAllowedRef.current = true;
       setCurrentShelfId(shelfId);
       setReaderHistory(emptyReaderNavigationHistory());
-      setBookmarkMenuOpen(false);
-      setSearchOpen(false);
+      setForeground(closeReaderForeground());
       setSearchQuery("");
-      setNotesOpen(false);
-      setSelectionContext(null);
-      setNoteComposer(null);
       setNoteBusy(false);
       noteBusyRef.current = false;
       setView("reader");
@@ -1184,12 +1241,9 @@ export default function App() {
       setAnchor(undefined);
       // 对象每次请求都新建：连续回翻多次时每次都能触发 atEnd 武装
       setStartAtEnd((prev) => ({ nonce: prev.nonce + 1, atEnd: opts?.atEnd === true }));
-      setSelectionContext(null);
-      setFootnote(null);
-      overlayHoverRef.current = false;
-      readerRef.current?.dismissFootnote();
+      closeForeground();
     },
-    []
+    [closeForeground]
   );
 
   const handleIssues = useCallback((issues: string[]) => {
@@ -1197,15 +1251,29 @@ export default function App() {
   }, []);
 
   const handleToggleLog = useCallback(() => {
-    setLogOpen((v) => {
-      const next = !v;
-      if (next) setDiagText(readerRef.current?.diagnose() ?? "（阅读器未初始化）");
-      return next;
+    setForeground((current) => {
+      if (current.kind === "modal") return current;
+      if (current.kind === "panel" && current.panel === "log") {
+        setDiagText(null);
+        return closeReaderForeground();
+      }
+      if (current.kind === "transient" && current.transient === "footnote") {
+        overlayHoverRef.current = false;
+        readerRef.current?.dismissFootnote();
+      } else if (current.kind === "transient" && current.transient === "selection") {
+        readerRef.current?.clearTextSelection();
+      }
+      setDiagText(readerRef.current?.diagnose() ?? "（阅读器未初始化）");
+      return openReaderPanel(current, "log");
     });
   }, []);
 
   const handleFootnoteClose = useCallback(() => {
-    setFootnote(null);
+    setForeground((current) =>
+      current.kind === "transient" && current.transient === "footnote"
+        ? closeReaderForeground()
+        : current
+    );
     overlayHoverRef.current = false;
     readerRef.current?.dismissFootnote();
   }, []);
@@ -1292,7 +1360,7 @@ export default function App() {
         a ? { fragment: a } : { toStart: true }
       );
       if (direct) {
-        setBookmarkMenuOpen(false);
+        closePanel("bookmarks");
         return true;
       }
       return false;
@@ -1302,7 +1370,7 @@ export default function App() {
       historyCaptureAllowedRef.current = false;
       readerDisplayReadyRef.current = false;
       setReaderDisplayReady(false);
-      setBookmarkMenuOpen(false);
+      closePanel("bookmarks");
       setSpineIndex(idx);
       setAnchor(a || undefined);
       setAnchorNonce((n) => n + 1);
@@ -1358,9 +1426,7 @@ export default function App() {
       if (direct) {
         commitReaderHistorySnapshot(snapshot);
         handleFootnoteClose();
-        setTocOpen(false);
-        setMenuOpen(false);
-        setBookmarkMenuOpen(false);
+        closeForeground();
         return;
       }
     }
@@ -1378,9 +1444,7 @@ export default function App() {
     setInitialPage(0);
     setInitialAnchor(targetAnchor);
     handleFootnoteClose();
-    setTocOpen(false);
-    setMenuOpen(false);
-    setBookmarkMenuOpen(false);
+    closeForeground();
   }, [
     book,
     searchNavigationBusy,
@@ -1440,8 +1504,7 @@ export default function App() {
     setInitialPage(pos.page ?? 0);
     setInitialAnchor(toPersistedReaderAnchor(pos.anchor));
     handleFootnoteClose();
-    setTocOpen(false);
-    setMenuOpen(false);
+    closeForeground();
   }, [readerHistory, currentReaderPosition, spineIndex, handleFootnoteClose]);
 
   const handleHistoryForward = useCallback(() => {
@@ -1487,8 +1550,7 @@ export default function App() {
     setInitialPage(pos.page);
     setInitialAnchor(toPersistedReaderAnchor(pos.anchor));
     handleFootnoteClose();
-    setTocOpen(false);
-    setMenuOpen(false);
+    closeForeground();
   }, [readerHistory, currentReaderPosition, spineIndex, handleFootnoteClose]);
 
   // ---- 正文笔记 ----
@@ -1578,7 +1640,7 @@ export default function App() {
         : note
       );
     }
-    if (await saveNotes(next)) setNoteComposer(null);
+    if (await saveNotes(next)) setForeground(closeReaderForeground());
   }, [noteComposer, book, currentShelfId, noteBusy, currentNotes, saveNotes]);
 
   const handleDeleteNote = useCallback(async (noteId: string): Promise<void> => {
@@ -1610,7 +1672,7 @@ export default function App() {
       const snapshot = currentReaderPosition();
       if (readerRef.current?.navigateWithinCurrentChapter({ readingAnchor: targetAnchor, fallbackPage: 0 })) {
         commitReaderHistorySnapshot(snapshot);
-        setNotesOpen(false);
+        closePanel("notes");
         return;
       }
     }
@@ -1624,11 +1686,9 @@ export default function App() {
     setAnchorNonce((nonce) => nonce + 1);
     setInitialPage(0);
     setInitialAnchor(targetAnchor);
-    setNotesOpen(false);
+    closePanel("notes");
     handleFootnoteClose();
-    setTocOpen(false);
-    setMenuOpen(false);
-    setBookmarkMenuOpen(false);
+    closeForeground();
   }, [
     book,
     noteBusy,
@@ -1741,10 +1801,7 @@ export default function App() {
         });
         if (direct) {
           commitReaderHistorySnapshot(snapshot);
-          setBookmarkMenuOpen(false);
-          handleFootnoteClose();
-          setTocOpen(false);
-          setMenuOpen(false);
+          closeForeground();
           return;
         }
       }
@@ -1758,10 +1815,7 @@ export default function App() {
       setAnchorNonce((n) => n + 1);
       setInitialPage(bookmark.page ?? 0);
       setInitialAnchor(bookmarkAnchor);
-      setBookmarkMenuOpen(false);
-      handleFootnoteClose();
-      setTocOpen(false);
-      setMenuOpen(false);
+      closeForeground();
     },
     [
       currentBookmarks,
@@ -1770,7 +1824,7 @@ export default function App() {
       captureReaderHistory,
       currentReaderPosition,
       commitReaderHistorySnapshot,
-      handleFootnoteClose,
+      closeForeground,
     ]
   );
 
@@ -1896,7 +1950,11 @@ export default function App() {
     if (!footnote) return;
     const r = readerRef.current?.getFootnoteMarkerRect();
     if (r) {
-      setFootnote((f) => (f ? { ...f, rect: r } : f));
+      setForeground((current) =>
+        current.kind === "transient" && current.transient === "footnote"
+          ? { ...current, payload: { ...current.payload, rect: r } }
+          : current
+      );
     } else {
       handleFootnoteClose(); // 文档被替换（字号变化等）：关闭弹层
     }
@@ -1931,10 +1989,7 @@ export default function App() {
         return;
       }
       if (e.key === "Escape") {
-        setMenuOpen(false);
-        setTocOpen(false);
-        setSearchOpen(false);
-        handleFootnoteClose();
+        closeForeground();
         return;
       }
       // 指针位于交互式浮层（脚注弹窗等）上时不翻页，滚轮/按钮交给浮层自身处理
@@ -1949,7 +2004,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [handleFootnoteClose]);
+  }, [closeForeground]);
 
   // ---- 拖拽打开 ----
   // Tauri 环境：打包后 WebView2 会拦截原生拖放，HTML5 drop 事件不会触发，
@@ -2136,16 +2191,8 @@ export default function App() {
     } catch (error) {
       setShelfError(`阅读进度保存失败：${String(error)}`);
     }
-    handleFootnoteClose();
-    setTocOpen(false);
-    setMenuOpen(false);
-    setSearchOpen(false);
+    closeForeground();
     setSearchQuery("");
-    setBookmarkMenuOpen(false);
-    setNotesOpen(false);
-    setSelectionContext(null);
-    setNoteComposer(null);
-    setLogOpen(false);
     setDiagText(null);
     chapterCountJobRef.current?.cancel();
     chapterCountJobRef.current = null;
@@ -2157,7 +2204,7 @@ export default function App() {
     setView("shelf");
     shelfBusyRef.current = false;
     setShelfBusy(false);
-  }, [persistShelfProgress, persistChapterCountCache, handleFootnoteClose]);
+  }, [persistShelfProgress, persistChapterCountCache, closeForeground]);
 
   // 视图提交后清空整本书会话状态。ResourceServer 的实际 revoke 由
   // ReaderView 的 server 依赖 cleanup 执行，并且发生在 paginator dispose 之后。
@@ -2185,8 +2232,7 @@ export default function App() {
     setReaderDisplayReady(false);
     setReaderHistory(emptyReaderNavigationHistory());
     overlayHoverRef.current = false;
-    readerRef.current?.dismissFootnote();
-    setFootnote(null);
+    closeForeground();
     navigationPendingRef.current = false;
     historyCaptureAllowedRef.current = true;
   }, [view]);
@@ -2302,42 +2348,25 @@ export default function App() {
         canHistoryForward={readerHistory.forward.length > 0 && readerDisplayReady && !navigationPendingRef.current}
         onToggleBookmark={view === "reader" ? handleToggleBookmark : undefined}
         isBookmarked={view === "reader" && isCurrentPageBookmarked}
-        onOpenBookmarks={view === "reader" ? () => setBookmarkMenuOpen(true) : undefined}
-        onCloseBookmarks={() => setBookmarkMenuOpen(false)}
+        onOpenBookmarks={view === "reader" ? () => openPanel("bookmarks") : undefined}
+        onCloseBookmarks={() => closePanel("bookmarks")}
         bookmarkMenuOpen={view === "reader" && bookmarkMenuOpen}
         bookmarks={view === "reader" ? sortedBookmarks : []}
         onSelectBookmark={handleSelectBookmark}
         onOpenToc={
           view === "reader"
-            ? () => {
-                setTocOpen(true);
-                setMenuOpen(false);
-              }
+            ? () => openPanel("toc")
             : undefined
         }
         onOpenSearch={
           view === "reader" && ready && !book!.fixedLayout
-            ? () => {
-                setSearchOpen(true);
-                setTocOpen(false);
-                setMenuOpen(false);
-                setFontSettingsOpen(false);
-                setBookmarkMenuOpen(false);
-                handleFootnoteClose();
-              }
+            ? () => openPanel("search")
             : undefined
         }
         onOpenNotes={
           view === "reader" && ready
             ? () => {
-                setNotesOpen(true);
-                setSelectionContext(null);
-                setTocOpen(false);
-                setSearchOpen(false);
-                setMenuOpen(false);
-                setFontSettingsOpen(false);
-                setBookmarkMenuOpen(false);
-                handleFootnoteClose();
+                openPanel("notes");
                 readerRef.current?.clearTextSelection();
               }
             : undefined
@@ -2345,8 +2374,8 @@ export default function App() {
         onToggleMenu={
           view === "reader"
             ? () => {
-                if (menuOpen) setFontSettingsOpen(false);
-                setMenuOpen((v) => !v);
+                if (menuOpen) closePanel("menu");
+                else openPanel("menu");
               }
             : undefined
         }
@@ -2378,7 +2407,7 @@ export default function App() {
           <>
             {menuOpen && (
               <>
-                <div className="menu-backdrop" onClick={() => { setMenuOpen(false); setFontSettingsOpen(false); }} />
+                <div className="menu-backdrop" onClick={closeForeground} />
                 {fontSettingsOpen ? <FontSettingsPanel
                   source={settings.fontSource}
                   customFontId={settings.customFontId}
@@ -2394,7 +2423,7 @@ export default function App() {
                   onSelectImported={(font) => setSettings((s) => ({ ...s, fontSource: "imported", customFontId: font.id, customFontName: font.family }))}
                   onDelete={(id) => void handleDeleteFont(id)}
                   onImport={(file) => void handleImportFont(file)}
-                  onClose={() => setFontSettingsOpen(false)}
+                  onClose={() => setForeground((current) => setMenuSubview(current, "main"))}
                 /> : <MenuPanel
                   fontSize={settings.fontSizePx}
                   uiScale={uiScale}
@@ -2418,7 +2447,7 @@ export default function App() {
                   onCustomCssChange={(css) =>
                     setSettings((s2) => ({ ...s2, customCss: css }))
                   }
-                  onOpenFontSettings={() => setFontSettingsOpen(true)}
+                  onOpenFontSettings={() => setForeground((current) => setMenuSubview(current, "fonts"))}
                   onForceHorizontalChange={(enabled) =>
                     setSettings((s2) => ({ ...s2, forceHorizontal: enabled }))
                   }
@@ -2427,7 +2456,7 @@ export default function App() {
                   }
                   onOpenFile={() => {
                     void handleChooseBooks();
-                    setMenuOpen(false);
+                    closeForeground();
                   }}
                   onFontDec={() => adjustFont(-2)}
                   onFontInc={() => adjustFont(2)}
@@ -2474,7 +2503,7 @@ export default function App() {
                   onUiScaleChange={(v) => setUiScale(clamp(v, 0.75, 1.5))}
                   onThemeChange={changeTheme}
                   onResetDefaults={resetDefaults}
-                  onClose={() => { setMenuOpen(false); setFontSettingsOpen(false); }}
+                  onClose={closeForeground}
                 />}
               </>
             )}
@@ -2482,12 +2511,12 @@ export default function App() {
               <>
                 {tocOpen && (
                   <>
-                    <div className="toc-backdrop" onClick={() => setTocOpen(false)} />
+                    <div className="toc-backdrop" onClick={() => closePanel("toc")} />
                     <TocPanel
                       toc={book!.toc}
                       activeHref={activeHref}
                       onNavigate={handleTocNavigate}
-                      onClose={() => setTocOpen(false)}
+                      onClose={() => closePanel("toc")}
                     />
                   </>
                 )}
@@ -2516,13 +2545,13 @@ export default function App() {
                       setSearchStatus("idle");
                       setSearchProgress({ processed: 0, total: 0 });
                     }}
-                    onClose={() => setSearchOpen(false)}
+                    onClose={() => closePanel("search")}
                   />
                 )}
                 {notesOpen && (
                   <NotesPanel
                     notes={noteViewModels}
-                    onClose={() => setNotesOpen(false)}
+                    onClose={() => closePanel("notes")}
                     onNavigate={(viewNote) => {
                       const note = currentNotes.find((candidate) => candidate.id === viewNote.id);
                       if (note) handleNoteNavigate(note);
@@ -2530,8 +2559,7 @@ export default function App() {
                     onEdit={(viewNote) => {
                       const note = currentNotes.find((candidate) => candidate.id === viewNote.id);
                       if (!note) return;
-                      setNotesOpen(false);
-                      setNoteComposer({ mode: "edit", note });
+                       openComposer({ mode: "edit", note });
                     }}
                     onDelete={(viewNote) => void handleDeleteNote(viewNote.id)}
                   />
@@ -2548,14 +2576,15 @@ export default function App() {
                   userFonts={renderUserFonts}
                   notes={currentChapterNotes}
                   onSelectionContextMenu={(payload) => {
-                    setSelectionContext(payload);
-                    setNotesOpen(false);
-                    setTocOpen(false);
-                    setSearchOpen(false);
-                    setMenuOpen(false);
-                    setFontSettingsOpen(false);
-                    setBookmarkMenuOpen(false);
-                    handleFootnoteClose();
+                    if (!payload) {
+                      setForeground((current) =>
+                        current.kind === "transient" && current.transient === "selection"
+                          ? closeReaderForeground()
+                          : current
+                      );
+                      return;
+                    }
+                     openTransient("selection", payload);
                   }}
                   onPageState={onPageState}
                   onDisplayReady={handleReaderDisplayReady}
@@ -2565,7 +2594,7 @@ export default function App() {
                   onBeforeInternalNavigate={captureReaderHistory}
                   onInternalNavigationSettled={handleReaderDisplayReady}
                   onExternalLink={handleExternalLink}
-                  onFootnote={(payload) => setFootnote(payload)}
+                   onFootnote={(payload) => openTransient("footnote", payload)}
                   onFootnoteClose={handleFootnoteClose}
                   initialAnchor={initialAnchor}
                   initialPage={initialPage}
@@ -2579,13 +2608,17 @@ export default function App() {
                       void navigator.clipboard.writeText(text).catch((error) =>
                         setRuntimeIssues((issues) => [...issues, `复制失败：${String(error)}`])
                       );
+                      closeForeground();
                       readerRef.current?.clearTextSelection();
                     }}
                     onAddNote={() => {
-                      setNoteComposer({ mode: "create", selection: selectionContext, spineIndex });
+                       openComposer({ mode: "create", selection: selectionContext, spineIndex });
                       readerRef.current?.clearTextSelection();
                     }}
-                    onClose={() => setSelectionContext(null)}
+                    onClose={() => {
+                      setForeground(closeReaderForeground());
+                      readerRef.current?.clearTextSelection();
+                    }}
                   />
                 )}
                 {noteComposer && (
@@ -2596,7 +2629,7 @@ export default function App() {
                       selectedText={noteComposer.mode === "create" ? noteComposer.selection.selectedText : noteComposer.note.selectedText}
                       initialContent={noteComposer.mode === "edit" ? noteComposer.note.content : undefined}
                       onSave={(content) => void handleSaveNote(content)}
-                      onCancel={() => setNoteComposer(null)}
+                      onCancel={closeForeground}
                     />
                   </>
                 )}
@@ -2650,7 +2683,7 @@ export default function App() {
           items={logItems}
           diagText={diagText}
           onClose={() => {
-            setLogOpen(false);
+            closePanel("log");
             setDiagText(null);
           }}
         />

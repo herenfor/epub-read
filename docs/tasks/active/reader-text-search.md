@@ -29,6 +29,8 @@
 - WSL Chromium 900×650 使用《ePub指南——从入门到放弃 20230418.epub》搜索“opacity 属性”：得到 4 条结果，标准化命中 `opacity属性` 并正确高亮。
 - 点击结果后 back 可用；back 后 forward 可用；forward 返回正文仍包含 `opacity`。
 - 临时测试脚本、截图和书籍文件均未进入仓库；开发服务器已停止，5173 无监听。
+- B-068 Windows 修复：章节正文提取改为严格 XML/XHTML 优先、parser error 时才退回 HTML，避免 WebView2 按 HTML 规则误解 XHTML 自闭合 head 标签并得到空正文。新增有效 XHTML 与畸形旧 HTML 两类回归；当前全量 Vitest 52 files/410 tests、tsc、Vite 110 modules 通过，`0.1.9-beta.1` Windows 发布包待复验。
+- B-070 输入框修复：隐藏 Chromium/WebView2 原生 search cancel/decoration/results 伪元素，只保留应用自定义清除按钮；长查询保持单行内部水平滚动，面板不扩宽并为按钮预留 40px。当前全量 Vitest 52 files/414 tests、tsc、Vite 110 modules 通过。
 
 ## 后续接口方向
 

@@ -19,7 +19,7 @@
 
 ## 当前未同步变化
 
-状态：**真实源仓仍以 `v0.1.6` 为比较基线；`0.1.9` 测试发布候选已收口，随后已进入下一版本开发并完成 B-067 阅读器菜单稳定滚动槽修复，该修复不属于 0.1.9 发布范围。0.1.9 收口基线为前端 Vitest 52 文件/407 用例、Rust 19/19、tsc、Vite 110 modules、cargo fmt/check/test 均通过。**
+状态：**真实源仓仍以 `v0.1.6` 为比较基线；`0.1.9` 已收口，当前隔离副本为 `0.1.9-beta.1` 修复测试版，包含 B-067～B-071/C-52。当前前端全量 Vitest 53 文件/420 用例、tsc 与 Vite 111 modules 通过，等待 Windows 实机验证。**
 
 | 路径 | 类型 | 变化与原因 | 验证 | 建议同步 |
 |---|---|---|---|---|
@@ -262,12 +262,16 @@ B-035 当前收尾：脚注宿主 CSS 契约定向 2/2、脚注/样式/消毒/�
 | `package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock` | 更新 | 四处产品版本统一提升为 0.1.9；Cargo.lock 仅修改 `epub-reader` 根包 | 四处版本一致；Cargo metadata 识别 `epub-reader@0.1.9`；Rust 19/19、fmt/check 通过 | 是 |
 | `docs/RELEASE_0.1.9.md`、`docs/tasks/active/version-0.1.9-release-candidate.md`、`docs/PROJECT_CONTEXT.md`、`docs/HANDOFF.md`、`docs/tasks/active/README.md`、`docs/SOURCE_DELTA.md` | 新增/更新 | 建立 0.1.9 发布入口、Windows 备份式干净同步命令、构建产物路径和重点验收矩阵；0.1.8 文件保留为阶段历史 | 文档路径/命令核对；Vitest 52/407、tsc、Vite 110 modules、Rust fmt/check/test 通过 | 是 |
 
-## 0.1.9 之后的下一版本开发
+## 0.1.9-beta.1 修复测试版
 
 | 文件 | 状态 | 变更摘要 | 验证 | 是否同步 |
 |---|---|---|---|---|
-| `src/styles.css`、`src/ui/menuPanel.test.ts` | 更新 | B-067：阅读器菜单预留稳定纵向滚动槽，详细设置展开前后卡片宽度保持一致 | 菜单契约 8/8、tsc；Windows WebView2 视觉待下一版本验收 | 下一版本 |
-| `docs/BUGFIX_LOG.md`、`docs/PROJECT_CONTEXT.md`、`docs/HANDOFF.md`、`docs/SOURCE_DELTA.md` | 更新 | 明确 B-067 在 0.1.9 收口后开发，不属于 0.1.9 发布范围 | 文档状态核对 | 下一版本 |
+| `src/styles.css`、`src/ui/menuPanel.test.ts` | 更新 | B-067：阅读器菜单预留稳定纵向滚动槽，详细设置展开前后卡片宽度保持一致 | 菜单契约 8/8、tsc；Windows WebView2 视觉待 beta.1 验收 | beta.1 |
+| `src/core/search.ts`、`src/core/search.test.ts` | 更新 | B-068：搜索章节改为 XML/XHTML 优先、解析失败回退 HTML，修复 Windows WebView2 可能因自闭合标签误解析而提取空正文 | 新增 2 项解析回归；全量 Vitest 52/410、tsc、Vite 110 modules | beta.1 |
+| `src/render/textAnchor.ts`、`src/render/paginator.ts`、`src/ui/ReaderView.tsx`、`src/ui/ReaderContextMenu.tsx`、`src/App.tsx` 及相关测试 | 更新 | B-069：选区菜单以末端片段定位，iframe selectionchange 更新坐标或关闭，宿主关闭同步清除选区 | 定向 3 files/16；全量 Vitest 52/411、tsc、Vite 110 modules | beta.1 |
+| `src/styles.css`、`src/ui/SearchPanel.test.ts` | 更新 | B-070：隐藏 WebView2 原生 search 清除装饰；长查询保持单行内部滚动并预留自定义按钮空间 | SearchPanel 7/7；全量 Vitest 52/414、tsc、Vite 110 modules | beta.1 |
+| `src/ui/readerForeground.ts`、`src/ui/readerForeground.test.ts`、`src/App.tsx`、`src/styles.css` | 新增/更新 | B-071/C-52：单一前台判别联合替代九组独立状态；panel/transient/modal 分层互斥，字体作为菜单子视图，modal 全窗口遮罩 | 状态契约 6/6；全量 Vitest 53/420、tsc、Vite 111 modules | beta.1 |
+| `package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`、`docs/RELEASE_0.1.9-beta.1.md` | 新增/更新 | 四处版本统一为 `0.1.9-beta.1`，建立 Windows 核心搜索修复测试入口 | 版本与 Cargo metadata 核对 | beta.1 |
 
 ## 推荐比较命令
 

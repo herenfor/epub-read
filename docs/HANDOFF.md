@@ -12,7 +12,15 @@
 
 > B-062/C-51 书架二级筛选抽屉已经进入隔离副本：作者/书名/保存时间/语言组合筛选、搜索/排列/密度/主题/存档迁移、轻量动画及书架顶部工具栏移除均完成。OPF language 已贯通浏览器、Rust 和 portable archive；旧记录不扫描源书，显示“未知语言”。B-063～B-066 已让滚动区填满抽屉标题以下空间、预留稳定滚动槽，并修复搜索图标视觉居中；展开筛选出现滚动条时选项宽度不再变化。Windows 原生导入与 100+ 本视觉性能待审核，见 [shelf-filter-drawer.md](tasks/active/shelf-filter-drawer.md)。
 
-> 0.1.9 已完成发布收口；其后隔离副本进入下一版本开发。B-067 为阅读器菜单增加稳定滚动槽，修复展开详细设置后卡片突然变窄；该项不得回记为 0.1.9 内容。
+> 0.1.9 已完成发布收口；当前隔离副本为 `0.1.9-beta.1` 修复测试版。B-067 为阅读器菜单增加稳定滚动槽，修复展开详细设置后卡片突然变窄。
+
+> `0.1.9-beta.1` 的 B-068 修复 Windows 发布版正文搜索始终空结果：搜索正文解析现在与渲染链路一致，先按 XML/XHTML 严格解析，仅在 parser error 时回退 HTML。自动化覆盖自闭合 head 标签和畸形旧 HTML；仍需 Windows 原故障书确认。
+
+> `0.1.9-beta.1` 的 B-069 修复正文选区菜单：锚点取选区最后一个可见片段，菜单打开后由 iframe selectionchange 更新或关闭；正文左键取消选区、Escape 和宿主外部关闭均结束菜单生命周期。全量 Vitest 52/411、tsc、Vite 110 modules 通过。
+
+> `0.1.9-beta.1` 的 B-070 隐藏 WebView2 原生 search 清除装饰，只保留应用自定义按钮；长查询维持单行内部滚动，面板不扩宽且按钮不被文字遮挡。Luna High 实现，主代理审核及全量 Vitest 52/414、tsc、Vite 110 modules 通过。
+
+> `0.1.9-beta.1` 的 B-071/C-52 将全部阅读器前台层收敛到单一 `ReaderForeground` 判别联合：普通 panel 严格互斥，脚注/选区 transient 替换 panel，笔记 modal 独占全窗口；字体中心是菜单子视图。Luna High 迁移、主代理审核，全量 Vitest 53/420、tsc、Vite 111 modules 通过，见 [reader-foreground-arbitration.md](tasks/active/reader-foreground-arbitration.md)。
 
 ## 技术栈
 
@@ -63,6 +71,7 @@ pnpm tauri build  # 桌面打包
 ```
 
 Windows 一键打包见 `scripts/build-windows.ps1`；0.1.9 的 WSL→Windows 安全同步与测试版验收见 `docs/RELEASE_0.1.9.md`。0.1.8 文档仅保留为阶段历史。
+当前 Windows 核心搜索修复测试入口见 `docs/RELEASE_0.1.9-beta.1.md`。
 
 ## 渲染分层规范
 

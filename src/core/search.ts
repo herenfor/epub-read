@@ -1,6 +1,6 @@
 import { spineItemPath } from "./book";
 import { splitHref } from "./paths";
-import { parseXmlText } from "./parseXml";
+import { hasParserError, parseXmlText } from "./parseXml";
 import { isElement, localNameOf, type XmlNodeLike } from "./xml";
 import type { Book, TocNode } from "./types";
 
@@ -157,6 +157,19 @@ function extractVisibleText(root: XmlNodeLike): string {
 
 function publicText(text: string): string {
   return text.replaceAll(BLOCK_BOUNDARY, "\n");
+}
+
+/**
+ * EPUB spine documents are XHTML, so parsing them as HTML first is unsafe:
+ * HTML treats XML self-closing syntax (notably inside <head>) differently and
+ * older WebView2 builds can swallow the following body into that element.
+ * Keep the renderer's established contract: strict XML first, HTML only as a
+ * compatibility fallback for malformed legacy books.
+ */
+export async function extractSearchText(source: string): Promise<string> {
+  let document = await parseXmlText(source, "application/xml");
+  if (hasParserError(document)) document = await parseXmlText(source, "text/html");
+  return extractVisibleText(document);
 }
 
 /**
@@ -405,7 +418,7 @@ export function createSearchSession(book: Book, options: SearchBookOptions = {})
             abortIfNeeded(signal);
             doc = source === undefined
               ? null
-              : buildDocument(extractVisibleText(await parseXmlText(source, "text/html")));
+              : buildDocument(await extractSearchText(source));
             cache.set(index, doc);
           }
           if (doc) {

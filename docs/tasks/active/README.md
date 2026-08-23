@@ -35,9 +35,10 @@
 - 待用户与 Windows WebView2 审核：[`reader-notes.md`](./reader-notes.md)（B-060/C-49）。正文选区自定义右键菜单、笔记创建/编辑/删除、按时间列表、文本锚点跳转与 CSS Highlight 下划线已接入；只处理当前章节，不修改 EPUB DOM。全量 Vitest 50 files/393 tests、Rust 18/18、tsc、Vite 110 modules及 WSL Chromium 实机链路通过。
 - 待用户与 Windows WebView2 审核：[`next-chapter-preload.md`](./next-chapter-preload.md)（B-061/C-50）。默认关闭的“高性能模式”最多保留上一篇/当前篇/下一篇三个静默槽位，按下一篇优先顺序预热，顺序命中后提升并保留反向缓存；关闭/固定版式仍为单 iframe。详细设置已统一主题卡片和现代开关，窄窗步进按钮/开关卡片对齐已回归。全量 Vitest 51 files/402 tests、tsc、Vite 110 modules 及 WSL Chromium 实书三 Blob/约 7ms 回翻通过。
 - 待 Windows WebView2 审核：[`shelf-filter-drawer.md`](./shelf-filter-drawer.md)（B-062/C-51，含 B-063～B-066）。书架二级抽屉已接入组合筛选及搜索、排列、密度、主题和存档操作；滚动区占满剩余高度并预留稳定滚动槽，搜索图标/文字间距与垂直居中已修复，筛选展开前后选项宽度不再跳变。全量 Vitest 52 files/407 tests、Rust 19/19、tsc/Vite 110 modules 与 Chromium UI 链路通过。
+- 待 Windows WebView2 审核：[`reader-foreground-arbitration.md`](./reader-foreground-arbitration.md)（B-071/C-52）。阅读器所有普通 panel、正文 transient 和笔记 modal 已由单一判别联合仲裁；全量 Vitest 53 files/420 tests、tsc、Vite 111 modules 通过。
 - 待 Windows 发布包验证：[`linked-library-refactor.md`](./linked-library-refactor.md)（B-031）。桌面书库已改为引用源 EPUB；可同步状态、设备路径和 100 MiB 有界缩略图缓存已分层，旧测试书库不迁移。自动化为前端 21 文件 218/218、Rust 9/9、TypeScript/Vite 与 Cargo 检查通过。
-- 当前隔离副本版本：`0.1.9` 测试发布候选；真实源仓 `main`/`origin/main` 仍以 `e8aabcd`（`v0.1.6`）为比较基线。
-- 当前收尾记录：[`version-0.1.9-release-candidate.md`](./version-0.1.9-release-candidate.md) 与 `../../RELEASE_0.1.9.md`；Windows 安装包尚待用户编译、分发与实机确认。0.1.8 及更早候选文件仅保留阶段历史。
+- 当前隔离副本版本：`0.1.9-beta.1` 修复测试版；真实源仓 `main`/`origin/main` 仍以 `e8aabcd`（`v0.1.6`）为比较基线。
+- 当前测试入口：`../../RELEASE_0.1.9-beta.1.md`；正式 0.1.9 收尾记录仍保留为 [`version-0.1.9-release-candidate.md`](./version-0.1.9-release-candidate.md) 与 `../../RELEASE_0.1.9.md`。
 - 已同步任务：B-020/B-021 导入与进度、自定义字体/CSS/全选、阅读跳转历史、书签、B-022。
 - 待用户审核、尚未同步：[`toc-percent-margin-resilience.md`](./toc-percent-margin-resilience.md)（B-023）。B-022 的 CSSOM 扫描已改记为部分修复，后续以 B-023 的 Typed OM/安全回退方案为准。
 - 待用户审核、尚未同步：[`toc-symmetric-margin-regression.md`](./toc-symmetric-margin-regression.md)（B-024）。C-18 的正对称 margin 豁免已收窄到具有 fit/max-content 原始意图的盒，普通目录标题恢复 C-04。

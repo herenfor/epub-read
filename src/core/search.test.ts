@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildDocument, createSearchSession, extractVisibleText, normalizeQueryPart, searchBook } from "./search";
+import { buildDocument, createSearchSession, extractSearchText, extractVisibleText, normalizeQueryPart, searchBook } from "./search";
 import type { Book } from "./types";
 
 function fakeBook(chapters: string[], tocLabels = chapters.map((_, i) => `第${i + 1}章`)): Book {
@@ -43,6 +43,21 @@ describe("current-book search core", () => {
     expect(doc.rawStarts).toBeInstanceOf(Uint32Array);
     expect(doc.rawEnds).toBeInstanceOf(Uint32Array);
     expect(doc.anchorStarts).toBeInstanceOf(Uint32Array);
+  });
+
+  it("parses valid EPUB XHTML as XML so self-closing head tags cannot swallow body text", async () => {
+    const source = `<?xml version="1.0" encoding="utf-8"?>
+      <html xmlns="http://www.w3.org/1999/xhtml"><head><title/><meta charset="utf-8"/></head>
+      <body><p>Windows WebView2 也必须可以搜索</p></body></html>`;
+    expect((await extractSearchText(source)).replaceAll("\u0000", "\n").trim()).toBe("Windows WebView2 也必须可以搜索");
+    const results = await searchBook(fakeBook([source]), "必须可以搜索", { yieldToHost: async () => {} });
+    expect(results).toHaveLength(1);
+  });
+
+  it("falls back to the tolerant HTML parser for malformed legacy chapters", async () => {
+    const source = "<html><body><p>旧书正文<p>仍能搜索</body></html>";
+    const results = await searchBook(fakeBook([source]), "仍能搜索", { yieldToHost: async () => {} });
+    expect(results).toHaveLength(1);
   });
 
   it("returns anchor-coordinate offsets and original ranges", async () => {

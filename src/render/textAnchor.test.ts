@@ -94,6 +94,34 @@ describe("visible text anchor index", () => {
     expect(captureTextSelection(document, viewer, index, selection)).toBeNull();
   });
 
+  it("anchors a multi-line selection menu to its terminal visible fragment", () => {
+    const { document, viewer } = chapter("<p>第一行<br>第二行</p>");
+    const paragraph = document.querySelector("p")!;
+    const start = paragraph.firstChild!;
+    const end = paragraph.lastChild!;
+    const index = buildVisibleTextIndex(document, viewer);
+    const range = {
+      collapsed: false,
+      startContainer: start,
+      endContainer: end,
+      startOffset: 0,
+      endOffset: (end as Text).data.length,
+      toString: () => "第一行第二行",
+      intersectsNode: () => false,
+      getClientRects: () => [
+        { left: 400, top: 20, right: 700, bottom: 40 },
+        { left: 120, top: 44, right: 210, bottom: 64 },
+      ],
+    } as unknown as Range;
+    const selection = { rangeCount: 1, isCollapsed: false, getRangeAt: () => range } as unknown as Selection;
+    expect(captureTextSelection(document, viewer, index, selection)?.rect).toEqual({
+      left: 120,
+      top: 44,
+      right: 210,
+      bottom: 64,
+    });
+  });
+
   it("rejects malformed persisted anchors and code-point snippets over the bounded limit", () => {
     expect(sanitizePersistedTextAnchor({ textOffset: -1, textSnippet: "甲" })).toEqual({ textOffset: null, textSnippet: null });
     expect(sanitizePersistedTextAnchor({ textOffset: 2 ** 53, textSnippet: "甲" })).toEqual({ textOffset: null, textSnippet: null });

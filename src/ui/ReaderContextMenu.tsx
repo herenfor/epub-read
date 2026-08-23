@@ -47,10 +47,12 @@ export function getContextMenuPlacement(
   const height = Math.max(1, size.height);
   const maxX = Math.max(margin, viewport.width - width - margin);
   const maxY = Math.max(margin, viewport.height - height - margin);
-  const x = Math.min(Math.max(margin, point.x), maxX);
-  const y = Math.min(Math.max(margin, point.y), maxY);
   const horizontal = point.x + width + margin > viewport.width ? "left" : "right";
   const vertical = point.y + height + margin > viewport.height ? "above" : "below";
+  const desiredX = horizontal === "left" ? point.x - width : point.x;
+  const desiredY = vertical === "above" ? point.y - height : point.y;
+  const x = Math.min(Math.max(margin, desiredX), maxX);
+  const y = Math.min(Math.max(margin, desiredY), maxY);
   return { x, y, horizontal, vertical };
 }
 

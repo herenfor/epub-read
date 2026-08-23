@@ -318,12 +318,12 @@ function rangeRect(range: Range): { left: number; top: number; right: number; bo
   const fallback = rects.length > 0 ? null : range.getBoundingClientRect?.();
   const all = rects.length > 0 ? rects : fallback ? [fallback] : [];
   if (!all.length) return null;
-  return {
-    left: Math.min(...all.map((r) => r.left)),
-    top: Math.min(...all.map((r) => r.top)),
-    right: Math.max(...all.map((r) => r.right)),
-    bottom: Math.max(...all.map((r) => r.bottom)),
-  };
+  // Range client rects follow document order. Anchor the context menu to the
+  // final visible fragment, not to the union bounding box: a multi-line or
+  // multi-column selection's union right edge is usually unrelated to where
+  // the selected text actually ends.
+  const terminal = all.at(-1)!;
+  return { left: terminal.left, top: terminal.top, right: terminal.right, bottom: terminal.bottom };
 }
 
 /** Capture a valid current-document selection as a stable normalized range. */
