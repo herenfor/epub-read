@@ -11,18 +11,34 @@
 
 ## 当前比较基线
 
-- 源仓提交：`e8aabcdeb03543402338aee00fb2e33d52e39841`
-- 提交时间：`2026-08-18T02:31:53+08:00`
-- 提交说明：`fix: use u64 for shelf timestamps (Tauri IPC rejects u128)`
-- 分支与标签：真实源仓 `main`、`origin/main` 和标签 `v0.1.6` 均指向该提交。
-- 基线结论：排除依赖、构建产物、浏览器、Rust target 和本地复现文件后，交接检查时两边代码完全一致。
+- 2026-09-11 只读核对：源仓 `main`、本地 `origin/main`、`v0.1.9-beta.1` 指向 `4aaa87137e5af237d0594bb64a2d9a285c2dd08c`，工作区干净。
+- 提交时间：`2026-08-23T12:50:46+08:00`。
+- 提交说明：`fix: v0.1.9-beta.1 (search parser strict XML, menu width, context menu anchoring, foreground arbitration B-067..B-071)`。
+- 下表早期条目曾按 `e8aabcdeb03543402338aee00fb2e33d52e39841` / `v0.1.6` 登记，作为历史保留；不能把整张历史表都当作相对 beta.1 的新增差异。同步前仍需逐文件比较。
+- 本轮只修改 `epub-reader`，未同步、提交、推送或修改真实源仓。
 
 ## 当前未同步变化
 
-状态：**真实源仓仍以 `v0.1.6` 为比较基线；`0.1.9` 已收口，当前隔离副本为 `0.1.9-beta.1` 修复测试版，包含 B-067～B-071/C-52。当前前端全量 Vitest 53 文件/420 用例、tsc 与 Vite 111 modules 通过，等待 Windows 实机验证。**
+状态：**隔离副本仍为 `0.1.9-beta.2`。2026-09-11 基础修复 B-082～B-084 已完成本地验证：预加载设置一致性、添加笔记、已索引书籍删除。Vitest 86 文件/547 用例，tsc，Core/AI 前端各 150 modules 与产物门禁；Rust Core 49/49、AI 87/87、fmt 通过。Chromium 实际主题/字号切换、相邻章往返、笔记创建/保存/重开/编辑通过。Windows WebView2 与原书库实测仍待复验；C-57.6 双安装包验收状态未改变。**
+
+2026-09-12 追加：B-085～B-087 三本目录/色块宽度修复已完成本地验证；当前前端基线为 **87 files / 552 tests**，两版构建/产物门禁通过。三本标题页保持原样，Windows 原书复验待用户完成。详见 `docs/tasks/active/toc-width-three-books.md`。
+
+2026-09-12 第二轮追加：B-088～B-090 火焰目录色块、赤月条目越界及相容同居标题百分比间距完成本地修复；当前 **89 files / 558 tests**、Core/AI 各 151 modules 与产物门禁通过。详见同一 `toc-width-three-books.md` 追加记录；Windows/汇报人确认待完成。
 
 | 路径 | 类型 | 变化与原因 | 验证 | 建议同步 |
 |---|---|---|---|---|
+| `src/render/paginator.ts`、`paginator.test.ts`、`paginator.clippedExtent.test.ts`、`percentageInsets.test.ts`、`percentageSpacing.ts`、`percentageSpacing.test.ts` | 更新/新增 | B-088～B-090：行内色块保留长短差异并排除被裁空白页；自动分组块固定边距计入限宽；页面百分比间距按有效版心计算并可恢复 | 89/558、双版构建/tsc/门禁；32 个实书组合、同文档重排和合成 padding/级联边界 | 是 |
+| `docs/tasks/active/toc-width-three-books.md`、活动 README、BUGFIX_LOG、rendering-layers、PROJECT_CONTEXT、SOURCE_DELTA | 更新 | 追加三项反馈、C-16b 与 C-25/C-04 的修订；首轮标题保持原样声明限定为首轮 | 相容同居标题百分比由本轮用户明确授权修复；背景图设计继续保留，Windows 待验 | 是 |
+| `src/render/paginator.ts`、`src/render/paginator.test.ts`、`src/render/percentageInsets.test.ts` | 更新/新增 | 2026-09-12 B-085～B-087：非标题自动盒的对称作者边距计入版心；对称百分比卡片保留限宽；竖排 float 不被横排 Canvas 撑宽并收进版心。保留标题与明确作者布局 | 全量 87/552、tsc、Core/AI 各 150 modules 和 artifact gate；三本目标、三本标题页及五本旧目录的原书矩阵，真实 reflow 通过 | 是 |
+| `docs/tasks/active/toc-width-three-books.md`、`docs/tasks/active/README.md`、`docs/BUGFIX_LOG.md`、`docs/rendering-layers.md`、`docs/PROJECT_CONTEXT.md`、`docs/SOURCE_DELTA.md` | 更新/新增 | 记录三本宽度修复及用户补充：相容同居实际为 message.xhtml 的蓝色卡片，标题背景图不属于修复范围 | Windows WebView2 待复验；本轮无 Rust 变更，不重复运行 Cargo | 是 |
+| `src/ui/ReaderView.tsx`、`src/render/paginator.ts`、`src/ui/ReaderView.preload.test.ts` | 更新/新增 | B-082：每个槽位记录实际设置，后台创建读取最新设置；防抖被换章取消时在同一次 load 应用最新设置，拒绝旧缓存提升 | 4 条真实 React 生命周期回归；Chromium 深色 24px → 下一章 → 浅色 18px → 下一章/回翻 | 是 |
+| `src/ui/ReaderContextMenu.tsx`、`src/ui/ReaderContextMenu.interaction.test.ts`、`src/test/reactDomHarness.ts` | 更新/新增 | B-083：菜单先关闭再打开笔记，防止前台仲裁覆盖编辑框 | 修复前真实 React 点击测试失败、修复后通过；实际创建/保存/重开/编辑通过 | 是 |
+| `src/App.tsx`、`src/ui/shelf.ts`、`src/ui/shelfDeletion.test.ts`、`src/ui/linkedShelf.test.ts`、`src-tauri/src/linked_library.rs`、`src-tauri/src/lib.rs`、`src-tauri/src/ai/mod.rs`、`src-tauri/src/ai/store.rs` | 更新/新增 | B-084：后台原生删除、批量 IPC/事务/书架写入；最后一个索引用同 schema 清空 FTS，其他情况合并删除；前端仅移除成功记录 | Core/AI Rust；FTS/staging/jobs 范围、回滚、遗留行、重建、无 DB 副作用回归；合成 SQL 性能对照详见任务 | 是 |
+| `docs/tasks/active/core-reader-fixes-september.md`、`docs/tasks/active/README.md`、`docs/tasks/active/next-chapter-preload.md`、`docs/tasks/active/reader-notes.md`、`docs/PROJECT_CONTEXT.md`、`docs/SOURCE_DELTA.md`、`docs/BUGFIX_LOG.md`、`docs/rendering-layers.md`、`docs/MODULE_CONTRACTS.md` | 更新/新增 | 登记三项基础修复、当前源仓基线、验证和 Windows 边界 | 与本轮代码、测试及只读 Git 状态核对 | 是 |
+| `src/App.tsx`、`src/ui/ShelfView.tsx`、`src/ui/SearchPanel.tsx`、`src/styles.css`、`src/features/ai/indexing/librarySearchRuntime*`、`corpusWorker*`、`corpusSink*`、`corpusConcurrency*`、`workerLibraryIndexer.ts`、`ftsCorpusSink.ts`、`vite.config.ts` | 新增/更新 | C-56 书架增加独立的“书名与作者/正文”模式；正文入口与阅读器“全部书籍”共享唯一应用级查询、结果、确认、任务、进度、取消和错误。语料生产与 FTS sink 解耦，生产构建使用真实 ES module Worker、transferable 字节、有界批次 ACK 和单 sink 写入；自动/手动并发受逻辑处理器、大书独占和阅读优先级约束，设备设置不进存档。索引卡说明自动推荐/手动最大值和内存代价，输入上限与当前设备一致 | 前端 72 files/504 tests、tsc、Vite 136 modules；并发说明定向 17/17；生成独立 28.70 kB `corpusWorker` chunk | 是 |
+| `src/App.tsx`、`src/ui/FontSettingsPanel.tsx`、`src/ui/fontDrop.ts`、`src/ui/fontDrop.test.ts`、`src/styles.css` | 新增/更新 | C-57 字体中心支持浏览器 HTML5 与 Windows Tauri 原生路径拖放；多字体串行导入、格式预筛选、busy 仲裁、坐标命中和防闪烁视觉态均复用原 FontStore 链路 | helper 5/5；全量 73/509、tsc、Vite 137 modules | 是 |
+| `src-tauri/src/ai/store.rs`、`src-tauri/src/ai/commands.rs`、`src-tauri/src/lib.rs`、`src/features/ai/indexing/indexTaskStore.ts` 及测试 | 更新 | C-56 新增幂等 `ai_task_acquire_library_index`：以即时事务取得唯一 `library-text-index` 任务，恢复 queued/paused，复用 running，同时允许其他 task kind 并行；前端启动不再先查后建产生竞态 | Rust fmt、39/39 tests；前端全量包含双入口快速启动只取得一个任务回归 | 是 |
+| `docs/tasks/active/shelf-library-search-pipeline.md`、`docs/MODULE_CONTRACTS.md`、`docs/HANDOFF.md`、`docs/PROJECT_CONTEXT.md`、`docs/AI_PLUGIN_ARCHITECTURE.md`、`docs/SEARCH_TO_RAG_ROADMAP.md`、`README.md` | 新增/更新 | 登记 C-56 的共享运行时、真实 Worker、互斥/恢复、资源边界、设备并发和 RAG sink 扩展契约；明确本轮未实现模型/向量/标签/生成且仍待 Windows 实机审核 | 与代码及最终验证结果核对 | 是 |
 | `docs/PROJECT_CONTEXT.md` | 更新 | 基线推进到 `e8aabcd`，记录 0.1.6、当前隔离副本 186 项测试、B-027 CSS 提交与 bgcolor 契约 | 与真实源仓、版本文件核对；全量 186/186 | 是 |
 | `docs/tasks/active/version-0.1.6-development.md` | 更新 | 将 0.1.6 从“开发中/未同步”改为“已同步，待 Windows 发布状态确认” | 与 `main`、`origin/main`、`v0.1.6` 核对 | 是 |
 | `docs/tasks/active/import-performance-duplicates-and-progress.md`、`custom-fonts-css-and-select-all.md`、`reader-history-back.md`、`bookmark-feature.md` | 更新 | 补齐源仓提交和同步状态；Windows 安装包未获确认的项目仍保留待确认 | 与 0.1.6 提交历史核对 | 是 |
@@ -273,6 +289,14 @@ B-035 当前收尾：脚注宿主 CSS 契约定向 2/2、脚注/样式/消毒/�
 | `src/ui/readerForeground.ts`、`src/ui/readerForeground.test.ts`、`src/App.tsx`、`src/styles.css` | 新增/更新 | B-071/C-52：单一前台判别联合替代九组独立状态；panel/transient/modal 分层互斥，字体作为菜单子视图，modal 全窗口遮罩 | 状态契约 6/6；全量 Vitest 53/420、tsc、Vite 111 modules | beta.1 |
 | `package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`、`docs/RELEASE_0.1.9-beta.1.md` | 新增/更新 | 四处版本统一为 `0.1.9-beta.1`，建立 Windows 核心搜索修复测试入口 | 版本与 Cargo metadata 核对 | beta.1 |
 
+## 0.1.9-beta.2 测试版
+
+| 文件 | 状态 | 变更摘要 | 验证 | 是否同步 |
+|---|---|---|---|---|
+| `package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`、`docs/RELEASE_0.1.9-beta.2.md` | 新增/更新 | 四处产品版本统一为 `0.1.9-beta.2`，建立包含 beta.1 修复和 C-53～C-56 的 Windows 测试发行入口 | 四处版本与 Cargo metadata 核对 | beta.2 |
+| `docs/tasks/active/shelf-library-search-pipeline.md` | 更新 | 登记用户观察到并发超过 8 后收益不明显；后续只调查 1/2/4/6/8/12/16 的阶段耗时和资源指标，当前不优化流水线、不提高自动推荐值 | 计划边界与现有并发实现核对 | beta.2 |
+| `docs/SEARCH_TO_RAG_ROADMAP.md`、`docs/AI_PLUGIN_ARCHITECTURE.md` | 更新 | 将当前阶段明确为第二阶段基础全文搜索的 beta2 Windows 验收/收尾；补正 C-54/C-56 已完成的 trigram、短查询、真实建库、共享运行时和 Rust FTS 状态，模型管理/Embedding/向量仍未开始 | 与 C-53～C-56 代码、任务和 beta2 范围核对 | beta.2 |
+
 ## 推荐比较命令
 
 仅用于只读核对，不执行复制：
@@ -445,3 +469,143 @@ Root 独立验收已完成：`pnpm exec vitest run` 全量 40 files/353 tests、
 |---|---|---|---|---|
 | `docs/SEARCH_TO_RAG_ROADMAP.md` | 新增 | 独立记录正文语料/全文搜索、模型管理、语义索引、混合检索、建议标签、智能书架、带引用 RAG 与分层总结的阶段清单；明确智能检索与分类是实现目标，AI 总结是最终目标 | 文档结构与用户确认方向核对；当前无代码实现、无运行测试 | 是 |
 | `docs/PROJECT_CONTEXT.md`、`docs/HANDOFF.md`、`docs/SOURCE_DELTA.md` | 更新 | 增加长期路线入口，并明确其不属于 0.1.8、不得误判为已实现功能 | 链接与状态措辞核对 | 是 |
+
+2026-08-23 方向补充：`docs/SEARCH_TO_RAG_ROADMAP.md` 增加插件化与发行路径，确定基础搜索核心常驻、智能检索/分类与生成式 AI 分层可选；能力插件和模型包分离，首版只采用项目维护的内建 Provider、受控 sidecar 和 HTTP Provider，不开放任意 DLL/JS 动态代码插件。文档同时明确现有 `SearchResult` 只是上游数据预留，AI Provider 注册表、capability manifest、模型运行时和向量数据库仍未实现。
+
+## RAG 可选能力模块预备路线细化（2026-08-23）
+
+| 路径 | 类型 | 变化与原因 | 验证 | 建议同步 |
+|---|---|---|---|---|
+| `docs/AI_PLUGIN_ARCHITECTURE.md` | 新增 | 明确 RAG 位于同一仓库/应用但保持可选隔离；固定三层边界、Provider/capability、稳定 chunk/引用、独立缓存、任务生命周期和 UI 接入契约 | 文档与当前 `SearchSession`、contentHash、ReaderForeground、Tauri command 结构逐项核对；无代码实现 | 是 |
+| `docs/tasks/active/rag-plugin-foundation.md` | 新增 | 将预备阶段拆成可执行顺序和验收清单；明确只使用 mock Provider 建立地基，暂不接真实模型、API、聊天或公开动态插件 | 范围与路线图交叉核对 | 是 |
+| `docs/SEARCH_TO_RAG_ROADMAP.md`、`README.md`、`docs/PROJECT_CONTEXT.md`、`docs/HANDOFF.md`、`docs/tasks/active/README.md` | 更新 | 注册同项目内可选模块方向，区分现有当前书搜索、预备阶段和长期生成目标；README 同步当前功能、测试基线和路线入口 | Markdown 链接、状态用语和 0.1.9-beta.1 基线检查；本轮仅文档，无运行测试 | 是 |
+
+## C-53：RAG 可选能力模块地基（2026-08-23）
+
+| 路径 | 类型 | 变化与原因 | 验证 | 建议同步 |
+|---|---|---|---|---|
+| `src/core/corpus.ts`、`src/core/chunking.ts`、`src/core/search.ts` 及测试 | 新增/更新 | 抽离搜索共享的 XML-first 可见语料层；区分正文/标题/目录/版权/脚注等类型，NFKC/空白规范化，按结构/句子确定性切块，保存版本、稳定 chunkId 和 paginator-compatible 文本锚点；搜索结果契约保持 | corpus/chunk/search 定向 19；全量 Vitest 58/443、tsc | 是 |
+| `src/features/ai/contracts`、`registry`、`lifecycle` 及测试 | 新增 | embedding/generation/reranking Provider、manifest、健康/隐私/取消/异步释放、项目内注册表和惰性 runtime；mock 确定性、本地且不联网 | Provider/runtime 覆盖注册冲突、取消、factory/health/dispose 异常及序列化生命周期；全量 58/443 | 是 |
+| `src/features/ai/ui/AiFoundationPanel.tsx`、`src/ui/aiEntry.ts`、`src/ui/readerForeground.ts`、`src/ui/Toolbar.tsx`、`src/App.tsx`、`src/styles.css` 及测试 | 新增/更新 | assistant 纳入单一前台仲裁；仅 DEV 显示“AI 地基”，显式启用才创建 mock，关闭/卸载等待释放；不调用 Rust/SQLite | release/dev 可见性、前台互斥和 runtime 测试；Vite production 120 modules | 是 |
+| `src-tauri/src/ai`、`src-tauri/src/lib.rs`、`src-tauri/src/linked_library.rs`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock` | 新增/更新 | 独立 `<app-data>/ai/ai.sqlite3` schema v1（books/chunks/jobs/provider_models）；任务状态/有限进度/取消/退出回收；单书/全库清理；删除书架记录前仅在 DB 已存在时清理，不删除源 EPUB | cargo fmt/check --locked；Rust 28/28 | 是 |
+| `THIRD_PARTY_LICENSES.md`、RAG 架构/路线/任务及维护入口 | 更新 | 登记 C-53 实现状态、Windows 待验收边界和 rusqlite/libsqlite3-sys MIT、bundled SQLite Public Domain | 文档链接/状态核对；无 GPL 新依赖 | 是 |
+
+2026-08-23 Windows 补验：PowerShell 自动验证完成前端测试、生产构建、Rust fmt/check 与 28/28 tests；用户完成人工开发面板检查并确认 C-53 阶段通过。PowerShell 5.1 的 UTF-8 JSON 读取和产物字符串扫描误报已在 `scripts/validate-windows-rag-foundation.ps1` 中改为严格 UTF-8及实际 DEV render gate 检查。
+
+## C-54：SQLite FTS5 跨书全文检索（2026-08-23）
+
+| 路径 | 类型 | 变化与原因 | 验证 | 建议同步 |
+|---|---|---|---|---|
+| `docs/tasks/active/cross-book-fts-search.md`、RAG 路线与维护入口 | 新增/更新 | C-53 验收后固定下一阶段范围：schema v2、持久化 chunk、FTS5 跨书查询、真实建库任务、过滤、结果打开与稳定锚点跳转；明确不接模型/向量/生成 | 文档范围与现有 C-53/当前书搜索契约核对；代码实现进行中 | 是 |
+| `src-tauri/src/ai/store.rs`、`src-tauri/src/ai/mod.rs`、`src-tauri/src/lib.rs` | 更新 | C-54 第一批：schema v2 增加检索元数据及 trigram FTS，v1 chunk 迁移；单书原子替换、1～2 字短查询、长查询 FTS、contentHash/contentType 过滤及 FTS 同步清理；注册索引/查询命令 | Rust 32/32，含 v1→v2、长短查询、事务回滚、换行/控制字符和清理；fmt/check 通过 | 是 |
+| `src/features/ai/indexing/indexStore.ts`、`indexStore.test.ts` | 新增 | C-54 前端 bridge 将稳定 `DocumentChunk`、三版本与 JSON 锚点映射到单一 Tauri 边界，并拒绝空块、混合指纹/版本 | 定向 3/3；全量 Vitest 59/446、tsc、Vite 120 modules | 是 |
+| `src-tauri/src/ai/store.rs`、`src-tauri/src/ai/mod.rs`、`src-tauri/src/lib.rs` | 更新 | C-54 完整 staging：schema v3、begin/append/commit/abort、单批256 chunks/8 MiB、单块4 MiB、全书1000000 chunks/512 MiB；live/暂存隔离、启动回收、同书 begin 取代旧 staging；索引状态与只清全文索引命令；查询增加书名/作者/章节/类型过滤 | Rust 全量 36/36、fmt/check；原子性、边界、迁移、回收、Provider 保留均覆盖 | 是 |
+| `src/core/bookCorpusIndex.ts` 及测试 | 新增 | 只在 core 层逐 linear spine 解码、提取结构语料并产生稳定 chunk 批次；缺章失败而非静默提交，支持 AbortSignal，不创建渲染 Blob | 定向 3/3；全量 Vitest 63/463 | 是 |
+| `src/features/ai/indexing/indexController.ts`、`libraryIndexer.ts`、`indexStore.ts` 及测试 | 新增/更新 | 框架无关单书/多书控制器；chunk 数+字符数双门控、逐章/批 yield、单调进度、取消/异常 abort、版本跳过、坏书隔离继续；Tauri bridge 对齐 staging/status/search/clear 命令并严格解析锚点 | indexing 定向 14；tsc；全量 Vitest 63/463 | 是 |
+| `src/ui/SearchPanel.tsx`、`src/ui/crossBookSearch.ts`、`src/App.tsx`、`src/styles.css` 及测试 | 更新/新增 | 阅读器搜索增加当前书/全部书籍分段入口；选择全部书籍显式建库并显示进度/取消，支持重建和只清索引；结果显示书名/作者/章节，NFKC 命中映射回原文高亮及精确文本锚点；跨书打开复用源文件重新定位和 display-ready 初始锚点 | SearchPanel/core/presentation 定向通过；全量 63/463、tsc、Vite 126 modules；Windows Tauri 真实链路待用户 | 是 |
+| C-54 维护文档 | 更新 | 标记自动化实现完成、Windows 待审；明确无模型/网络、索引缓存边界，以及跨书打开重建会话故当前三步历史不跨书返回来源书 | 文档与代码状态核对 | 是 |
+
+## B-072：Windows 跨书建库完成后搜索始终为空（2026-08-24）
+
+| 路径 | 类型 | 变化与原因 | 验证 | 建议同步 |
+|---|---|---|---|---|
+| `src/features/ai/indexing/indexStore.ts`、`indexController.ts` 及测试 | 更新 | 将旧书架的空白 `language` 规范化为未提供后再发送 staging/replace IPC，避免逐书被原生参数校验拒绝 | indexing 定向 16/16；全量 Vitest 63 files/465 tests | 是 |
+| `src-tauri/src/ai/store.rs` | 更新 | 原生索引边界将可选语言的空白值规范化为 `NULL`，同时保留非空值长度/控制字符校验，形成双层兼容 | Rust fmt；全量 37/37 | 是 |
+| `src/App.tsx` | 更新 | 全部候选书均建库失败时进入 error 并显示首个失败原因，不再把空数据库标记为 ready | TypeScript、Vite 126 modules | 是 |
+| `docs/tasks/active/cross-book-fts-search.md`、`docs/BUGFIX_LOG.md`、`docs/SOURCE_DELTA.md` | 更新 | 记录 Windows 数据证据、根因、修复和重新建库要求 | 文档与实现核对 | 是 |
+
+## B-073：图片封面章节使每本书因“无效的正文”建库失败（2026-08-24）
+
+| 路径 | 类型 | 变化与原因 | 验证 | 建议同步 |
+|---|---|---|---|---|
+| `src/core/corpus.ts`、`src/core/corpus.test.ts` | 更新 | 只将规范化后含可检索文字的结构块写入共享语料；`createCorpusChapter` 再做防御过滤；解析版本升至 `visible-xhtml-v2` 使旧索引自动失效重建 | corpus 7/7，覆盖图片-only XHTML 与手工空白块 | 是 |
+| `src/core/bookCorpusIndex.test.ts`、`src/features/ai/indexing/libraryIndexer.test.ts` | 更新 | 覆盖空封面 batch 后继续建立后续正文；版本比较测试改用当前常量，防止版本升级后测试伪通过 | 相关定向 24/24；全量 63 files/467 tests | 是 |
+| C-54 与维护文档 | 更新 | 登记 B-073 根因、版本升级、真实书回放和 Windows 重建要求 | Windows 测试目录 37 本/3094 chunks 无非法正文；Vite 126 modules、Rust 37/37 | 是 |
+
+## B-074/C-55：用户确认式建库、可靠取消、异常退出恢复与派生缓存边界（2026-08-24）
+
+| 路径 | 类型 | 相较源文件的修改 | 验证 | 建议同步 |
+|---|---|---|---|---|
+| `src/App.tsx`、`src/ui/SearchPanel.tsx`、`src/styles.css` 及测试 | 更新 | “全部书籍”改为只探测状态并先提示硬件/耗时，确认后才建库；进度卡固定取消区；部分索引可搜索；重建也先确认 | SearchPanel 11/11；全量前端 66/485；TypeScript、Vite | 是 |
+| `src/features/ai/indexing/libraryIndexer.ts`、`indexController.ts`、`libraryIndexStatus.ts`、`indexTaskStore.ts` 及测试 | 更新/新增 | cancel 改为可等待收口，阻止下一本和取消后的进度回调；持久任务按书更新；启动识别异常退出并从已提交书本续建 | indexing 定向通过；全量前端 66/485 | 是 |
+| `src/features/ai/cache/*`、`src-tauri/src/ai/*`、`src-tauri/src/lib.rs` | 新增/更新 | 建立统一派生缓存类别与状态/清理命令；全文查询增加三版本过滤；启动回收半本 staging 与运行中任务，清理不触碰用户数据和 Provider | Rust fmt；全量 38/38 | 是 |
+| `docs/BUGFIX_LOG.md`、`docs/HANDOFF.md`、C-54 任务文档 | 更新 | 登记确认、取消、恢复、缓存归属、验证和 Windows 待验收项 | 文档与实现核对 | 是 |
+
+## RAG C-57：模型资产管理（2026-08-24）
+
+> 本节使用“RAG C-57”消歧；历史字体拖放功能也曾使用 C-57 编号。以下均为隔离副本相对真实源文件的新增/修改，须由用户审核后同步。
+
+| 路径 | 类型 | 相较源文件的修改 | 验证/边界 | 建议同步 |
+|---|---|---|---|---|
+| `src-tauri/src/ai/models.rs` | 新增/更新 | 多文件 `ModelPackageManifest`、模型包扫描/注册/verify、文件白名单、路径/长度/slug/capability/mirror 校验、size/SHA 状态、默认 package ID、managed/linked 导入/重新定位/删除、开发固定 catalog 命令 | Rust tests 覆盖 manifest 无效项、绝对/父路径、扩展白名单、symlink/reparse、linked ownership、固定 15 字节 probe | 是 |
+| `src-tauri/src/ai/store.rs` | 更新 | AI SQLite schema v4→v6；新增/维护 `model_packages`、`model_package_files`、`model_sources`、`model_download_tasks`、`model_license_acceptance`；状态迁移、ownership、root 变更、missing/corrupt 收敛和安全删除 | Rust 71 tests 总通过；不删除源 EPUB/linked 外部文件 | 是 |
+| `src-tauri/src/ai/download.rs`、`src-tauri/src/ai/mod.rs`、`src-tauri/src/lib.rs` | 新增/更新 | 单 FIFO 下载 worker、enqueue/pause/resume/cancel/list、许可证 gate、Range/206/200/416、镜像切换、`.staging`/`.part`、实际进度、磁盘检查、SHA、原子安装、退出 paused 和崩溃目录收敛；注册 IPC 命令 | `cargo fmt --all -- --check`、`cargo test --locked` 71 passed、`cargo check --locked`；真实 Windows 大文件/Defender/多进程 IPC 仍待验收 | 是 |
+| `src-tauri/Cargo.toml`、`src-tauri/Cargo.lock` | 更新 | 直接依赖 `reqwest 0.13.4`（blocking/rustls）和 `fs2 0.4.3`（磁盘空间）；不接 Ollama/Provider/推理 | 直接依赖许可已记录；不是完整锁文件许可审计 | 是 |
+| `src/features/ai/models/modelAssets.ts`、`modelDownloads.ts`、`index.ts` | 新增/更新 | 薄 Tauri invoke adapter/types；model package、linked path、download task、license 和 fixed dev catalog 边界；`findAvailableModelPackages` 过滤 verified 非 probe 元数据 | 模型 adapter 定向测试；不创建/加载 Provider | 是 |
+| `src/features/ai/models/modelAssetsController.ts`、`modelAssetsViewModel.ts` 及测试 | 新增 | 独立 controller/view model；首开只读 path/packages/tasks；活动轮询、完成刷新、dispose/generation、busy gate、许可证接受→入队顺序和 action matrix | 模型定向 10 tests；全量前端 77 files/520 tests | 是 |
+| `src/features/ai/ui/AiFoundationPanel.tsx`、`ModelAssetsDevelopmentSection.tsx`、`ModelAssetLicenseDialog.tsx`、`src/styles.css` | 新增/更新 | DEV/Tauri-only 模型资产开发面板、目录选择、linked 管理、verify/delete/download/pause/resume/cancel、许可证来源、刷新元数据和实际 bytes/current file 展示；App 不持有资产状态 | 浏览器不 invoke；release 不显示公共模型市场；Vite build 143 modules | 是 |
+| `public/c57-dev-probe/probe.txt` | 新增 | 固定 15 字节纯文本开发 fixture，无代码、无推理能力；仅 debug catalog 登记后可显式下载 | dist 可包含该极小 fixture；release command 拒绝 | 是 |
+| `docs/tasks/active/rag-model-asset-management.md` | 新增 | 完整登记 C-57 目标、manifest/ownership/schema/download、安全、开发入口、测试证据、未做项与 C-58 交接 | 文档与代码接口核对 | 是 |
+| `docs/SEARCH_TO_RAG_ROADMAP.md`、`docs/AI_PLUGIN_ARCHITECTURE.md`、`docs/MODULE_CONTRACTS.md` | 更新 | beta2 Windows 已验收；全文 OR/前缀/邻近后置给 RAG；登记 C-57 资产层与 Provider/模型包分离、惰性边界和 C-58 元数据查询契约 | 链接与状态核对 | 是 |
+| `docs/PROJECT_CONTEXT.md`、`docs/HANDOFF.md`、`README.md`、`docs/tasks/active/README.md` | 更新 | 登记当前版本、开发入口、测试基线、Windows 待验收边界和正式版不显示公共模型市场 | 仅文档核对 | 是 |
+| `THIRD_PARTY_LICENSES.md` | 更新 | 登记 reqwest/fs2 直接依赖、版本、许可和源码；明确尚未完成完整锁文件/平台许可审计 | 本机 crate Cargo 元数据核对 | 是 |
+
+### B-075：开发 Strict Mode 使模型资产面板卡在读取中（2026-08-24）
+
+| 路径 | 类型 | 相较源文件的修改 | 验证/边界 | 建议同步 |
+|---|---|---|---|---|
+| `src/features/ai/models/modelAssetsController.ts`、`modelAssetsController.test.ts` | 更新 | controller 支持 React Strict Mode 的 setup → cleanup → setup：dispose 后可安全重启，旧 in-flight Promise 由 generation 隔离，旧 finally 不干扰新状态；真实卸载仍停止轮询 | controller 6/6；全量 Vitest 77 files/521 tests；TypeScript 通过；Rust 未修改 | 是 |
+| `docs/BUGFIX_LOG.md`、`docs/tasks/active/rag-model-asset-management.md`、`docs/SOURCE_DELTA.md` | 更新 | 登记 Windows Tauri dev 永久 loading 的现象、Strict Mode 根因、修复边界和复验步骤 | 文档与代码核对 | 是 |
+
+### B-076：Windows 开发探针地址与 Vite devUrl 不一致（2026-08-24）
+
+| 路径 | 类型 | 相较源文件的修改 | 验证/边界 | 建议同步 |
+|---|---|---|---|---|
+| `src-tauri/src/ai/models.rs`、`src-tauri/src/ai/store.rs` | 更新 | 固定开发探针由 `127.0.0.1:5173` 改为与 Tauri `devUrl` 相同的 `localhost:5173`；补 catalog 重新登记替换旧 source、failed 任务可重新排队的回归 | Rust fmt/check；71/71 tests；仅开发 fixture，不改变正式模型来源或 Provider | 是 |
+
+### B-077：Windows 模型校验栈溢出（2026-08-24）
+
+| 路径 | 类型 | 相较源文件的修改 | 验证/边界 | 建议同步 |
+|---|---|---|---|---|
+| `src-tauri/src/ai/models.rs` | 更新 | `sha256_file` 的 1 MiB 栈数组改为256 KiB `Vec` 堆缓冲，保持逐块流式 SHA；新增256 KiB小栈线程 digest 回归 | Rust fmt/check；72/72 tests；不把模型整体读入内存 | 是 |
+
+### B-078：删除模型精确清理历史 staging（2026-08-24）
+
+| 路径 | 类型 | 相较源文件的修改 | 验证/边界 | 建议同步 |
+|---|---|---|---|---|
+| `src-tauri/src/ai/store.rs`、`download.rs`、`models.rs` | 更新 | 删除 package 在 immediate transaction 内重查活动任务并读取精确 task IDs；安全清理对应历史 staging 后才删除正式 managed 目录/DB，保留 `.staging` 根、他包、相似前缀和 linked 外部文件 | Rust fmt/check；74/74 tests；清理失败回滚 DB，活动任务拒绝且不清理 | 是 |
+
+### B-079：Windows 短路径别名与 staging 安全边界（2026-08-27）
+
+| 路径 | 类型 | 相较源文件的修改 | 验证/边界 | 建议同步 |
+|---|---|---|---|---|
+| `src-tauri/src/ai/models.rs`及测试 | 更新 | staging 安全检查改为 canonical 根目录 + 最近存在祖先的真实包含关系，再逐级检查 symlink/reparse 与剩余词法组件；消除 Windows 8.3/长路径别名误报，同时继续拒绝真实越界 | Windows Cargo Core 38/38、AI 72/72，Rust fmt/check；真实 D 盘中文长路径待 Tauri 复验 | 是 |
+
+2026-08-24 Windows 实机补验：用户确认 Tauri dev 首次读取、D 盘模型库选择与保持、开发探针登记/许可证/下载、应用重启状态持久化和显式 SHA 校验全部通过；B-075～B-077 的修复均获得实机证据。删除、linked 导入/重新定位、真实大文件断点/镜像/磁盘/Defender/reparse/长路径仍未验收，不标记完整发布验收完成。
+
+2026-08-24 RAG 路线修订：默认本地 AI 不依赖 Ollama；C-58 优先项目维护的 Windows CPU Builtin ONNX Embedding Provider，生成阶段优先固定/审计的 llama.cpp sidecar。Ollama/OpenAI-compatible 后置为高级可选 Provider；普通用户使用推荐模型和必要加速模式，高级替换通过 C-57 manifest/linked 或受控能力插件，模型包不得携带可执行代码。同步更新 `SEARCH_TO_RAG_ROADMAP.md`、`AI_PLUGIN_ARCHITECTURE.md`、`MODULE_CONTRACTS.md`、`README.md` 与 `HANDOFF.md`，仅文档，无运行时代码变更。
+
+2026-08-24 GPU-first 路线修订：基于 CPU 大模型性能和整机响应风险，废止上述 C-58 CPU-first 默认路线。C-58 拆为 C-58A Windows GPU/后端能力探测、支持矩阵与资源准入，以及 C-58B GPU-first Builtin ONNX Embedding Provider；后续 llama.cpp 生成 Provider 同样 GPU-first。普通 UI 固定为自动推荐、GPU 兼容、NVIDIA CUDA、CPU 兼容；NVIDIA 以 CUDA 为性能路径，AMD/Intel/其他已验收设备以 WinML/DirectML（Embedding）和 Vulkan（生成）为通用路径，CPU 只显式限额启用且禁止静默回退。同步更新路线、架构、契约、README、项目上下文与交接文档；本轮仅文档，无运行时代码或依赖变化。
+
+## C-57.5：Core / AI发行隔离（2026-08-27）
+
+| 路径 | 类型 | 相较源文件的修改 | 验证/边界 | 建议同步 |
+|---|---|---|---|---|
+| `src/config/edition*.ts`、`vite.config.ts`、`src/features/ai/lifecycle/editionRuntime.ts`、`src/App.tsx`、`src/ui/aiEntry.ts`及测试 | 新增/更新 | 编译期`core/ai` edition；Core安全默认且不生成AI runtime/面板/模型资产chunk，AI production以lazy chunk保留开发入口 | 前端78 files/523 tests、tsc；Core/AI Vite各146 modules，Core目标字符串扫描为空 | 是 |
+| `src-tauri/Cargo.toml`、`src-tauri/src/ai/mod.rs`、`store.rs`、`src-tauri/src/lib.rs` | 更新 | Cargo `ai` feature门控models/download、模型IPC及optional reqwest/fs2；Core保留FTS/store/task/cache；Core v3→AI v6补齐provider/model schema | Windows Cargo Core 38/38、AI 72/72，Rust fmt/check通过；含Core v3→AI v6迁移 | 是 |
+| `scripts/build-windows.ps1`、`package.json`、`src-tauri/tauri.ai.conf.json`、`scripts/validate-windows-rag-foundation.ps1` | 更新/新增 | Windows脚本默认Core、显式AI；前后端edition成对传递、target隔离；AI使用独立`dev.epubreader.ai`身份/app-data；RAG验证脚本显式AI矩阵 | JSON解析和脚本静态核对；PowerShell/Tauri真实双打包待Windows | 是 |
+| `docs/tasks/active/core-ai-edition-split.md`及路线/架构/契约/README/交接入口 | 新增/更新 | 固定同代码树双发行、Core热修复回合并、schema兼容与未实现边界 | 文档与实现核对 | 是 |
+
+## C-57.6：Core / AI发行门禁设计与实现（2026-08-27～2026-08-28）
+
+> 代码与本地矩阵已完成；Windows双安装包、身份/app-data和人工功能链路仍待用户验收，不能据此标记完整发布通过。
+
+| 路径 | 类型 | 相较源文件的修改 | 验证/边界 | 建议同步 |
+|---|---|---|---|---|
+| `src/config/editionValue.ts`、`edition.ts`及测试 | 新增/更新 | 未设置edition安全默认为Core；显式值只接受规范化后的`core|ai`，空值/拼写错误不再静默降级 | 全量Vitest 83 files/537 tests；未知wrapper edition与`VITE_EDITION=preview`按预期失败 | 是 |
+| `src/config/appBuildInfo.ts`、`appBuildSession.ts`、`src/appBootstrap.tsx`、`src/main.tsx`及测试 | 新增/更新 | 桌面在动态导入`App`前读取无副作用build-info并校验协议/edition；失败显示独立错误页且不初始化App/FTS/AI前端运行时；验证后的只读session控制debug动作 | 两种mismatch方向、IPC失败、浏览器跳过IPC和import顺序自动化；tsc通过 | 是 |
+| `src/features/ai/ui/AiFoundationPanel.tsx`、`ModelAssetsDevelopmentSection.tsx`、`ai.css`、边界测试、`src/styles.css`、`public-ai/c57-dev-probe/probe.txt` | 新增/更新/迁移 | AI UI样式由lazy面板持有，探针只归AI静态目录；AI release隐藏mock/test catalog，保留模型库、linked、校验和资产管理 | Core无AI CSS/fixture/模型IPC；AI含lazy JS/CSS与15字节探针；双门禁通过 | 是 |
+| `src-tauri/Cargo.toml`、`build.rs`、`src/build_info_contract.rs`、`src/build_info.rs`、`src/lib.rs` | 新增/更新 | Cargo空默认，显式`core/ai`互斥；release强制expected edition；两版注册只返回编译常量的`app_build_info`，不读State/SQLite/模型目录/网络 | Rust Core45/45、AI83/83、fmt；冲突feature、mismatch和release缺expected按预期失败 | 是 |
+| `src-tauri/src/ai/store.rs`、`download.rs` | 小幅更新 | 非Windows reparse helper在Core编译时保持无副作用false分支；`download.rs`只有`cargo fmt`产生的换行变化，无行为修改 | Core/AI Rust矩阵通过；Core active tree无`reqwest/fs2` | 是 |
+| `vite.config.ts`、`package.json`、`scripts/build-frontend.mjs`、`verify-edition-artifacts.mjs`、`build-windows.ps1`、`validate-windows-rag-foundation.ps1`、Tauri base/Core/AI config、`.gitignore` | 新增/更新 | 单一edition派生Vite、Cargo、Tauri、identifier与独立`dist/target`；生成edition/artifact manifest；B-080后Node wrapper直接运行本地CLI；B-081按Tauri 2.11真实接口只传`--features core|ai`，Cargo空默认与build.rs继续保证唯一edition | WSL官方`pnpm build:core|ai`各150 modules并通过门禁；Tauri dev/build四组参数解析通过；Windows窗口与真实双打包待复验 | 是 |
+| `docs/tasks/active/core-ai-release-hardening.md`、路线/架构/契约/README/CONTRIBUTING/上下文/交接入口 | 新增/更新 | 从架构设计推进为真实实现，固定Core稳定线→AI回合并、全量tsc边界、C-58前置顺序和Windows待验收项 | 文档与代码、命令及上述验证证据核对；不得视为模型推理能力 | 是 |

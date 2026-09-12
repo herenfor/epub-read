@@ -1,11 +1,16 @@
 import { spineItemPath } from "./book";
 import { splitHref } from "./paths";
-import { hasParserError, parseXmlText } from "./parseXml";
-import { isElement, localNameOf, type XmlNodeLike } from "./xml";
+import {
+  BLOCK_BOUNDARY,
+  MAX_ANCHOR_SNIPPET_CODE_POINTS,
+  buildDocument,
+  extractSearchText,
+  extractVisibleText,
+  normalizeQueryPart,
+  type SearchDocument,
+} from "./corpus";
 import type { Book, TocNode } from "./types";
 
-/** Kept byte-for-byte compatible with the persisted paginator anchor contract. */
-const MAX_ANCHOR_SNIPPET_CODE_POINTS = 32;
 const ANCHOR_WHITESPACE = /\p{White_Space}/u;
 
 function decodeBytes(data: Uint8Array): string {
@@ -15,16 +20,6 @@ function decodeBytes(data: Uint8Array): string {
   }
   return new TextDecoder("utf-8").decode(data);
 }
-
-/** A private separator which is never produced by normal text normalization. */
-const BLOCK_BOUNDARY = "\u0000";
-const EXCLUDED_TAGS = new Set(["script", "style", "noscript", "template", "head"]);
-const BLOCK_TAGS = new Set([
-  "address", "article", "aside", "blockquote", "body", "caption", "dd", "div", "dl",
-  "dt", "figcaption", "figure", "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6",
-  "header", "hr", "li", "main", "nav", "ol", "p", "pre", "section", "table", "tbody",
-  "td", "tfoot", "th", "thead", "tr", "ul",
-]);
 
 export interface SearchProgress {
   completed: number;
@@ -69,18 +64,6 @@ export interface SearchResult {
   matchType: "phrase" | "keywords";
 }
 
-export interface SearchDocument {
-  text: string;
-  /** Normalized UTF-16 string; BLOCK_BOUNDARY prevents cross-block matches. */
-  normalized: string;
-  /** Maps each normalized UTF-16 code unit to its normalized code-point index. */
-  normalizedUnitToEntry: Uint32Array;
-  /** Compact mapping arrays indexed by normalized code-point index. */
-  rawStarts: Uint32Array;
-  rawEnds: Uint32Array;
-  anchorStarts: Uint32Array;
-}
-
 function abortIfNeeded(signal?: AbortSignal): void {
   if (!signal?.aborted) return;
   const error = new Error("搜索已取消");
@@ -92,139 +75,8 @@ function defaultYield(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-function isFootnoteElement(element: XmlNodeLike): boolean {
-  const tag = localNameOf(element).toLowerCase();
-  if (tag === "aside" && isElement(element)) {
-    const type = element.getAttribute("epub:type") ?? element.getAttribute("type") ?? "";
-    return /(?:^|\s)footnote(?:\s|$)/i.test(type);
-  }
-  if (!isElement(element)) return false;
-  const type = element.getAttribute("epub:type") ?? element.getAttribute("type") ?? "";
-  return /(?:^|\s)footnote(?:\s|$)/i.test(type);
-}
-
-function isExcluded(element: XmlNodeLike): boolean {
-  if (!isElement(element)) return false;
-  const tag = localNameOf(element).toLowerCase();
-  if (EXCLUDED_TAGS.has(tag) || isFootnoteElement(element)) return true;
-  const hasAttribute = (name: string): boolean => {
-    const candidate = element as XmlNodeLike & { hasAttribute?: (name: string) => boolean };
-    if (typeof candidate.hasAttribute === "function") return candidate.hasAttribute(name);
-    for (let i = 0; i < (element.attributes?.length ?? 0); i++) {
-      if (element.attributes?.[i]?.name.toLowerCase() === name) return true;
-    }
-    return false;
-  };
-  if (hasAttribute("hidden")) return true;
-  return (element.getAttribute("aria-hidden") ?? "").trim().toLowerCase() === "true";
-}
-
-/**
- * Convert an XHTML/HTML document to visible structural text. Block elements
- * become a boundary, while inline elements are joined without a separator.
- * The NUL marker is internal and is rendered as a newline in public snippets.
- */
-function extractVisibleText(root: XmlNodeLike): string {
-  const parts: string[] = [];
-  let current = "";
-  const flush = (): void => {
-    if (!current) return;
-    parts.push(current);
-    current = "";
-  };
-  const walk = (node: XmlNodeLike): void => {
-    if (node.nodeType === 3) {
-      current += node.textContent ?? "";
-      return;
-    }
-    if (!isElement(node) || isExcluded(node)) return;
-    const tag = localNameOf(node).toLowerCase();
-    if (tag === "br" || tag === "hr") {
-      flush();
-      parts.push(BLOCK_BOUNDARY);
-      return;
-    }
-    const block = BLOCK_TAGS.has(tag);
-    if (block) flush();
-    for (let i = 0; i < node.childNodes.length; i++) walk(node.childNodes[i]);
-    if (block) flush();
-  };
-  const documentElement = (root as unknown as { documentElement?: XmlNodeLike }).documentElement;
-  walk(documentElement ?? root);
-  flush();
-  return parts.join(BLOCK_BOUNDARY).replace(new RegExp(`${BLOCK_BOUNDARY}+`, "g"), BLOCK_BOUNDARY);
-}
-
 function publicText(text: string): string {
   return text.replaceAll(BLOCK_BOUNDARY, "\n");
-}
-
-/**
- * EPUB spine documents are XHTML, so parsing them as HTML first is unsafe:
- * HTML treats XML self-closing syntax (notably inside <head>) differently and
- * older WebView2 builds can swallow the following body into that element.
- * Keep the renderer's established contract: strict XML first, HTML only as a
- * compatibility fallback for malformed legacy books.
- */
-export async function extractSearchText(source: string): Promise<string> {
-  let document = await parseXmlText(source, "application/xml");
-  if (hasParserError(document)) document = await parseXmlText(source, "text/html");
-  return extractVisibleText(document);
-}
-
-/**
- * Build a second index on top of the existing anchor coordinate. NFKC can
- * expand one code point into several, so every normalized code point keeps
- * the source raw range and the anchor position which produced it.
- */
-function buildDocument(text: string): SearchDocument {
-  if (text.length > 0xffffffff) throw new Error("搜索章节过大，超过 32-bit 偏移范围");
-  const normalizedParts: string[] = [];
-  const rawStarts: number[] = [];
-  const rawEnds: number[] = [];
-  const anchorStarts: number[] = [];
-  let rawOffset = 0;
-  let anchorOffset = 0;
-  for (const rawPoint of Array.from(text)) {
-    const rawStart = rawOffset;
-    rawOffset += rawPoint.length;
-    if (rawPoint === BLOCK_BOUNDARY) {
-      normalizedParts.push(BLOCK_BOUNDARY);
-      rawStarts.push(rawStart);
-      rawEnds.push(rawOffset);
-      anchorStarts.push(anchorOffset);
-      continue;
-    }
-    if (ANCHOR_WHITESPACE.test(rawPoint)) continue;
-    anchorOffset++;
-    const normalized = rawPoint === "\u00ad" ? "" : rawPoint.normalize("NFKC").toLowerCase();
-    for (const value of Array.from(normalized)) {
-      if (/\p{White_Space}/u.test(value) || value === "\u00ad") continue;
-      normalizedParts.push(value);
-      rawStarts.push(rawStart);
-      rawEnds.push(rawOffset);
-      anchorStarts.push(anchorOffset - 1);
-    }
-  }
-  const normalized = normalizedParts.join("");
-  if (rawStarts.length > 0xffffffff || normalized.length > 0xffffffff) {
-    throw new Error("搜索章节索引超过 32-bit 偏移范围");
-  }
-  const normalizedUnitToEntry = new Uint32Array(normalized.length);
-  let unitOffset = 0;
-  let entryIndex = 0;
-  for (const point of Array.from(normalized)) {
-    for (let unit = 0; unit < point.length; unit++) normalizedUnitToEntry[unitOffset++] = entryIndex;
-    entryIndex++;
-  }
-  return {
-    text,
-    normalized,
-    normalizedUnitToEntry,
-    rawStarts: Uint32Array.from(rawStarts),
-    rawEnds: Uint32Array.from(rawEnds),
-    anchorStarts: Uint32Array.from(anchorStarts),
-  };
 }
 
 /** Build the persisted-anchor snippet without copying/splitting the whole chapter. */
@@ -236,12 +88,6 @@ function anchorSnippetFromRaw(text: string, rawStart: number): string {
     if (points.length >= MAX_ANCHOR_SNIPPET_CODE_POINTS) break;
   }
   return points.join("");
-}
-
-function normalizeQueryPart(value: string): string {
-  return Array.from(value.normalize("NFKC").toLowerCase())
-    .filter((point) => point !== "\u00ad" && !/\p{White_Space}/u.test(point))
-    .join("");
 }
 
 function findAll(haystack: string, needle: string, from = 0): number[] {
@@ -452,4 +298,5 @@ export async function searchBook(book: Book, query: string, options: SearchBookO
   }
 }
 
-export { extractVisibleText, buildDocument, normalizeQueryPart };
+export { extractSearchText, extractVisibleText, buildDocument, normalizeQueryPart };
+export type { SearchDocument };

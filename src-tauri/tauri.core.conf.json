@@ -1,0 +1,7 @@
+{
+  "build": {
+    "beforeDevCommand": "pnpm dev:core",
+    "beforeBuildCommand": "pnpm build:core",
+    "frontendDist": "../dist/core"
+  }
+}

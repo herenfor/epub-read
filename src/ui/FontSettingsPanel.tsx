@@ -1,5 +1,6 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import type { SystemFont, UserFont } from "./fontStore";
+import { createDragDepthTracker } from "./fontDrop";
 
 export interface FontSettingsPanelProps {
   source?: "system" | "imported";
@@ -12,8 +13,9 @@ export interface FontSettingsPanelProps {
   onSelectBook(): void;
   onSelectImported(font: UserFont): void;
   onDelete(id: string): void;
-  onImport(file: File): void;
+  onImport(files: File[]): Promise<void> | void;
   onClose(): void;
+  nativeDragActive?: boolean;
   systemFontsStatus?: "idle" | "loading" | "ready" | "error";
   systemFontsError?: string | null;
   onLoadSystemFonts?(): void;
@@ -51,8 +53,11 @@ export function FontSettingsPanel(props: FontSettingsPanelProps) {
   const [tab, setTab] = useState<"system" | "imported">("system");
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(520);
+  const [dropBusy, setDropBusy] = useState(false);
+  const [htmlDragActive, setHtmlDragActive] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const dragDepthRef = useRef(createDragDepthTracker());
   useEffect(() => {
     if (props.systemFontsStatus === "idle") props.onLoadSystemFonts?.();
   }, [props.systemFontsStatus, props.onLoadSystemFonts]);
@@ -87,7 +92,38 @@ export function FontSettingsPanel(props: FontSettingsPanelProps) {
     setScrollTop(0);
   };
   const selectTab = (next: "system" | "imported") => { setTab(next); resetScroll(); };
-  return <div className="font-settings-panel" role="dialog" aria-label="字体设置">
+  const importFiles = async (files: File[]) => {
+    if (props.busy || dropBusy || files.length === 0) return;
+    setDropBusy(true);
+    try {
+      await props.onImport(files);
+    } finally {
+      setDropBusy(false);
+    }
+  };
+  const onDragEnter = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!event.dataTransfer.types.includes("Files")) return;
+    setHtmlDragActive(dragDepthRef.current.enter());
+  };
+  const onDragLeave = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setHtmlDragActive(dragDepthRef.current.leave());
+  };
+  const onDrop = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setHtmlDragActive(dragDepthRef.current.reset());
+    void importFiles(Array.from(event.dataTransfer.files));
+  };
+  const dragActive = htmlDragActive || props.nativeDragActive === true;
+  const effectiveBusy = props.busy || dropBusy;
+  return <div className={`font-settings-panel${dragActive ? " font-drag-active" : ""}`} role="dialog" aria-label="字体设置"
+    onDragEnter={onDragEnter}
+    onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = effectiveBusy ? "none" : "copy"; }}
+    onDragLeave={onDragLeave} onDrop={onDrop}>
     <div className="menu-head"><span>字体设置</span><button className="tb-btn" onClick={props.onClose}>✕</button></div>
     <div className="font-settings-current">
       当前字体：{props.source === "system" || props.source === "imported" ? props.customFontName : "跟随书籍"}
@@ -112,14 +148,17 @@ export function FontSettingsPanel(props: FontSettingsPanelProps) {
         onClick={() => props.onSelectSystem((font as unknown as SystemFont).family)}>{(font as unknown as SystemFont).family}{props.source === "system" && props.customFontName === (font as unknown as SystemFont).family ? " ✓" : ""}</button> : <div key={(font as UserFont).id} className="font-settings-row-wrap">
         <button className={`font-settings-row${props.source === "imported" && props.customFontId === (font as UserFont).id ? " active" : ""}`}
           onClick={() => props.onSelectImported(font as UserFont)} title={(font as UserFont).fileName}>{(font as UserFont).family}{props.customFontId === (font as UserFont).id ? " ✓" : ""}</button>
-        <button className="font-delete" onClick={() => props.onDelete((font as UserFont).id)} disabled={props.busy} title="删除字体">✕</button>
+        <button className="font-delete" onClick={() => props.onDelete((font as UserFont).id)} disabled={effectiveBusy} title="删除字体">✕</button>
       </div>)}
         <div style={{ height: virtual.bottom }} />
       </div>
     </div>
-    <button className="menu-item" onClick={() => inputRef.current?.click()} disabled={props.busy}>＋ 导入字体</button>
-    <input ref={inputRef} type="file" accept=".ttf,.otf,.woff,.woff2" hidden onChange={(event) => {
-      const file = event.target.files?.[0]; if (file) props.onImport(file); event.target.value = "";
+    <div className="font-drop-zone" aria-live="polite" aria-label="拖入字体文件导入">
+      {effectiveBusy ? "正在导入字体…" : dragActive ? "松开以导入字体" : "可拖入 TTF、OTF、WOFF 或 WOFF2 字体"}
+    </div>
+    <button className="menu-item" onClick={() => inputRef.current?.click()} disabled={effectiveBusy}>＋ 导入字体</button>
+    <input ref={inputRef} type="file" accept=".ttf,.otf,.woff,.woff2" multiple hidden onChange={(event) => {
+      const files = Array.from(event.target.files ?? []); void importFiles(files); event.target.value = "";
     }} />
   </div>;
 }

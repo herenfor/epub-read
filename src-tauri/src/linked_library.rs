@@ -5,9 +5,11 @@
 //! contains an absolute path on this device.  The two JSON files are replaced
 //! atomically one at a time under one mutex.  They cannot be a single atomic
 //! filesystem transaction: imports write bindings first and records second, so
-//! a crash can at worst leave an ignored orphan binding; deletion removes the
-//! record first, so it can never remove a user-owned source file.
+//! a crash can at worst leave an ignored orphan binding; deletion clears only
+//! regenerable AI data before replacing the record files and never removes a
+//! user-owned source file.
 
+use crate::ai::AiState;
 use quick_xml::events::Event;
 use quick_xml::{Reader, XmlVersion};
 use serde::{Deserialize, Serialize};
@@ -1630,33 +1632,58 @@ pub fn linked_library_replace_records(
 }
 
 #[tauri::command]
-pub fn linked_library_delete_record(
+pub async fn linked_library_delete_record(
     app: AppHandle,
-    state: State<'_, LinkedLibraryWriteState>,
     content_hash: String,
 ) -> Result<(), String> {
-    if !valid_content_hash(&content_hash) {
+    linked_library_delete_records(app, vec![content_hash]).await
+}
+
+#[tauri::command]
+pub async fn linked_library_delete_records(
+    app: AppHandle,
+    content_hashes: Vec<String>,
+) -> Result<(), String> {
+    // SQLite FTS deletion and file writes must not run on the UI thread.
+    tauri::async_runtime::spawn_blocking(move || delete_records(&app, content_hashes))
+        .await
+        .map_err(|error| format!("删除书籍任务失败：{error}"))?
+}
+
+fn delete_records(app: &AppHandle, content_hashes: Vec<String>) -> Result<(), String> {
+    if content_hashes.iter().any(|hash| !valid_content_hash(hash)) {
         return Err("无效的书籍内容指纹".into());
     }
+    let hashes: HashSet<_> = content_hashes.into_iter().collect();
+    if hashes.is_empty() {
+        return Ok(());
+    }
+    let state = app.state::<LinkedLibraryWriteState>();
     let _guard = state
         .0
         .lock()
         .map_err(|_| "链接书库写入锁已损坏".to_string())?;
-    let mut records = load_records(&app)?;
-    let before = records.len();
-    records.retain(|record| record.content_hash != content_hash);
-    if records.len() == before {
-        return Err("书库中没有这本书".into());
+    let mut records = load_records(app)?;
+    if hashes
+        .iter()
+        .any(|hash| !records.iter().any(|record| &record.content_hash == hash))
+    {
+        return Err("书库中没有所选书籍，请刷新后重试".into());
     }
-    // Commit the visible state first.  What follows only removes regenerable,
-    // device-local data and never touches the user-owned EPUB.
-    save_records(&app, &records)?;
-    let mut bindings = load_bindings(&app)?;
-    bindings.retain(|binding| binding.content_hash != content_hash);
-    save_bindings(&app, &bindings)?;
-    let mut thumbnails = load_thumbnail_index(&app)?;
-    remove_thumbnail(&app, &mut thumbnails, &content_hash)?;
-    save_thumbnail_index(&app, &thumbnails)
+    let mut bindings = load_bindings(app)?;
+    let mut thumbnails = load_thumbnail_index(app)?;
+    app.state::<AiState>()
+        .cleanup_books_if_present(app, &hashes.iter().cloned().collect::<Vec<_>>())
+        .map_err(|error| format!("删除书籍前清理派生数据失败：{error}"))?;
+    // Only reader-owned records/caches are removed; source EPUBs are untouched.
+    records.retain(|record| !hashes.contains(&record.content_hash));
+    bindings.retain(|binding| !hashes.contains(&binding.content_hash));
+    for hash in &hashes {
+        remove_thumbnail(app, &mut thumbnails, hash)?;
+    }
+    save_bindings(app, &bindings)?;
+    save_thumbnail_index(app, &thumbnails)?;
+    save_records(app, &records)
 }
 
 #[tauri::command]

@@ -18,8 +18,47 @@ import {
   type ThumbnailProvider,
 } from "./thumbnail";
 import { hasReadPosition } from "./readEvidence";
+import {
+  getSearchStatusLabel,
+  SearchIndexCard,
+  SearchResultList,
+  type SearchIndexProgress,
+  type SearchIndexStatus,
+  type SearchPanelResult,
+  type SearchStatus,
+} from "./SearchPanel";
 
 export type ShelfDensity = "comfortable" | "standard" | "compact";
+export type ShelfSearchMode = "metadata" | "body";
+
+export interface ShelfBodySearchProps {
+  query: string;
+  onQueryChange(query: string): void;
+  results: SearchPanelResult[];
+  status: SearchStatus;
+  processed: number;
+  total: number;
+  truncated?: boolean;
+  errorMessage?: string;
+  onSelect(result: SearchPanelResult): void;
+  onCancel?(): void;
+  navigationBusy?: boolean;
+  statusMessage?: string;
+  indexStatus?: SearchIndexStatus;
+  indexProgress?: SearchIndexProgress;
+  onStartIndex?(): void;
+  onDeferIndex?(): void;
+  onCancelIndex?(): void;
+  indexErrorMessage?: string;
+  onRebuildIndex?(): void;
+  onClearIndex?(): void;
+  /** Reserved for the shared index controller's automatic/manual scheduler. */
+  concurrencyMode?: "automatic" | "manual";
+  concurrency?: number;
+  detectedCores?: number;
+  recommendedConcurrency?: number;
+  onConcurrencyChange?(mode: "automatic" | "manual", value?: number): void;
+}
 
 export interface ShelfViewProps {
   entries: ShelfEntry[];
@@ -36,6 +75,10 @@ export interface ShelfViewProps {
   onDeleteMany(ids: string[]): void;
   /** Optional native cache/source-cover bridge; browser compatibility uses ShelfStore. */
   thumbnailProvider?: ThumbnailProvider;
+  /** Optional shared library-body search projection; absent keeps the metadata-only shelf. */
+  searchMode?: ShelfSearchMode;
+  onSearchModeChange?(mode: ShelfSearchMode): void;
+  bodySearch?: ShelfBodySearchProps;
 }
 
 const Cover = memo(function Cover({
@@ -381,6 +424,9 @@ interface ShelfSettingsDrawerProps {
   onClose(): void;
   onImportArchive(): void;
   onExportArchive(): void;
+  searchMode: ShelfSearchMode;
+  onSearchModeChange?: (mode: ShelfSearchMode) => void;
+  bodySearch?: ShelfBodySearchProps;
 }
 
 function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
@@ -425,6 +471,11 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
     + props.filters.saved.size + props.filters.languages.size;
 
   if (!props.open) return null;
+  const body = props.bodySearch;
+  const bodyIndexBusy = body?.indexStatus === "indexing" || body?.indexStatus === "cancelling";
+  const bodyIndexUnavailable = body?.indexStatus === "checking" || bodyIndexBusy;
+  const bodyStatus = body?.statusMessage ?? (body ? getSearchStatusLabel(body.status, body.processed, body.total) : "");
+  const bodyHasQuery = Boolean(body?.query.trim());
   return (
     <div className="shelf-drawer-layer">
       <div className="shelf-drawer-backdrop" aria-hidden="true" onClick={props.onClose} />
@@ -440,6 +491,31 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
         </div>
 
         <div className="shelf-drawer-scroll">
+          {props.onSearchModeChange && body && (
+            <div className="shelf-search-mode" role="group" aria-label="书架搜索模式">
+              <button type="button" className={props.searchMode === "metadata" ? "active" : ""} aria-pressed={props.searchMode === "metadata"} onClick={() => props.onSearchModeChange?.("metadata")}>书名与作者</button>
+              <button type="button" className={props.searchMode === "body" ? "active" : ""} aria-pressed={props.searchMode === "body"} onClick={() => props.onSearchModeChange?.("body")}>正文</button>
+            </div>
+          )}
+
+          {props.searchMode === "body" && body ? <div className="shelf-body-search">
+            <label className="shelf-drawer-search-wrap">
+              <span className="shelf-drawer-search-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><circle cx="11" cy="11" r="7" /><path d="m16.25 16.25 4.25 4.25" /></svg></span>
+              <input className="shelf-drawer-search shelf-search" type="search" placeholder="搜索全部书籍正文" value={body.query} disabled={props.busy || bodyIndexUnavailable} onChange={(event) => body.onQueryChange(event.target.value)} />
+              {body.query && <button className="shelf-drawer-search-clear" type="button" onClick={() => body.onQueryChange("")} aria-label="清除正文搜索">×</button>}
+            </label>
+            {(body.onRebuildIndex || body.onClearIndex) && <div className="search-index-actions" aria-label="全文索引管理">
+              {body.onRebuildIndex && <button type="button" disabled={body.status === "searching" || bodyIndexBusy} onClick={body.onRebuildIndex}>重新建立索引</button>}
+              {body.onClearIndex && <button type="button" disabled={body.status === "searching" || bodyIndexBusy} onClick={body.onClearIndex}>清除索引</button>}
+            </div>}
+            {body.indexStatus && <SearchIndexCard props={{ ...body, onClose: () => undefined, scope: "all" }} />}
+            <div className="search-status" aria-live="polite">{bodyStatus}{body.status === "searching" && body.onCancel && <button className="search-cancel" type="button" onClick={body.onCancel}>取消</button>}{body.status === "error" && body.errorMessage && <span className="search-error">：{body.errorMessage}</span>}</div>
+            {!bodyHasQuery && body.status !== "searching" && <div className="search-empty">输入关键词搜索全部书籍的正文</div>}
+            {body.status === "complete" && bodyHasQuery && body.results.length === 0 && <div className="search-empty">未找到匹配内容</div>}
+            {body.navigationBusy && <div className="search-navigation-busy">正在定位结果…</div>}
+            <SearchResultList results={body.results} navigationBusy={body.navigationBusy} onSelect={body.onSelect} />
+            {body.truncated && body.results.length <= 100 && <div className="search-truncated">结果较多，仅显示前 100 条</div>}
+          </div> : <>
           <label className="shelf-drawer-search-wrap">
             <span className="shelf-drawer-search-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" focusable="false">
@@ -538,6 +614,9 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
               清除筛选（{activeFilterCount}）
             </button>
           )}
+
+          </>
+          }
 
           <div className="shelf-drawer-group-label">显示设置</div>
           <div className="shelf-drawer-setting">
@@ -747,6 +826,9 @@ export function ShelfView(props: ShelfViewProps) {
         onClose={closeDrawer}
         onImportArchive={props.onImportArchive}
         onExportArchive={props.onExportArchive}
+        searchMode={props.searchMode ?? "metadata"}
+        onSearchModeChange={props.onSearchModeChange}
+        bodySearch={props.bodySearch}
       />
 
       {props.entries.length === 0 ? (

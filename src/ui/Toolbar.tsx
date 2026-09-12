@@ -18,6 +18,8 @@ export interface ToolbarProps {
   onOpenSearch?: () => void;
   /** 打开当前书笔记页面。 */
   onOpenNotes?: () => void;
+  /** AI edition 的 AI 地基面板；Core edition 不传入该入口。 */
+  onOpenAssistant?: () => void;
   /** 书签：添加/移除当前页书签 */
   onToggleBookmark?: () => void;
   isBookmarked?: boolean;
@@ -82,6 +84,7 @@ export function Toolbar(props: ToolbarProps) {
     Boolean(props.onOpenToc),
     Boolean(props.onOpenSearch),
     Boolean(props.onOpenNotes),
+    Boolean(props.onOpenAssistant),
     Boolean(props.onToggleLog),
     props.issueCount > 0,
   ]);
@@ -197,6 +200,11 @@ export function Toolbar(props: ToolbarProps) {
         {props.onOpenNotes && (
           <button className="tb-btn" onClick={props.onOpenNotes} title="笔记" aria-label="打开笔记">
             📝
+          </button>
+        )}
+        {props.onOpenAssistant && (
+          <button className="tb-btn" onClick={props.onOpenAssistant} title="AI 地基" aria-label="打开 AI 地基">
+            AI
           </button>
         )}
       </div>

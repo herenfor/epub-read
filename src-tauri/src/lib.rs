@@ -1,3 +1,127 @@
+mod build_info;
+#[cfg(test)]
+mod build_info_contract;
+
+#[cfg(feature = "ai")]
+macro_rules! configure_invoke_handler {
+    ($builder:expr) => {
+        $builder.invoke_handler(tauri::generate_handler![
+            linked_library::linked_library_import_paths,
+            linked_library::linked_library_list_records,
+            linked_library::linked_library_read_source_raw,
+            linked_library::linked_library_read_cover_raw,
+            linked_library::linked_library_relink,
+            linked_library::linked_library_delete_record,
+            linked_library::linked_library_delete_records,
+            linked_library::linked_library_update_progress,
+            linked_library::linked_library_mark_opened,
+            linked_library::linked_library_update_bookmarks,
+            linked_library::linked_library_update_notes,
+            linked_library::linked_library_replace_records,
+            linked_library::linked_library_thumbnail_read,
+            linked_library::linked_library_thumbnail_write_raw,
+            linked_library::linked_library_thumbnail_delete,
+            fonts_import_raw,
+            fonts_list,
+            fonts_read,
+            fonts_delete,
+            system_fonts::system_fonts_list,
+            build_info::app_build_info,
+            ai::ai_initialize,
+            ai::ai_cleanup_book,
+            ai::ai_cleanup_all,
+            ai::ai_index_clear_all,
+            ai::ai_index_replace,
+            ai::ai_index_begin,
+            ai::ai_index_append,
+            ai::ai_index_commit,
+            ai::ai_index_abort,
+            ai::ai_index_status,
+            ai::ai_cache_status,
+            ai::ai_cache_clear,
+            ai::ai_search,
+            ai::ai_task_enqueue,
+            ai::ai_task_acquire_library_index,
+            ai::ai_task_start,
+            ai::ai_task_pause,
+            ai::ai_task_resume,
+            ai::ai_task_complete,
+            ai::ai_task_fail,
+            ai::ai_task_cancel,
+            ai::ai_task_update_progress,
+            ai::ai_task_list,
+            ai::ai_model_library_path_get,
+            ai::ai_model_library_path_set,
+            ai::ai_model_scan,
+            ai::ai_model_packages,
+            ai::ai_model_package_register,
+            ai::ai_model_package_verify,
+            ai::ai_model_package_register_linked,
+            ai::ai_model_package_relocate,
+            ai::ai_model_package_remove,
+            ai::ai_model_dev_catalog_register,
+            ai::ai_model_download_enqueue,
+            ai::ai_model_download_list,
+            ai::ai_model_download_pause,
+            ai::ai_model_download_resume,
+            ai::ai_model_download_cancel,
+            ai::ai_model_license_accept
+        ])
+    };
+}
+
+#[cfg(not(feature = "ai"))]
+macro_rules! configure_invoke_handler {
+    ($builder:expr) => {
+        $builder.invoke_handler(tauri::generate_handler![
+            linked_library::linked_library_import_paths,
+            linked_library::linked_library_list_records,
+            linked_library::linked_library_read_source_raw,
+            linked_library::linked_library_read_cover_raw,
+            linked_library::linked_library_relink,
+            linked_library::linked_library_delete_record,
+            linked_library::linked_library_delete_records,
+            linked_library::linked_library_update_progress,
+            linked_library::linked_library_mark_opened,
+            linked_library::linked_library_update_bookmarks,
+            linked_library::linked_library_update_notes,
+            linked_library::linked_library_replace_records,
+            linked_library::linked_library_thumbnail_read,
+            linked_library::linked_library_thumbnail_write_raw,
+            linked_library::linked_library_thumbnail_delete,
+            fonts_import_raw,
+            fonts_list,
+            fonts_read,
+            fonts_delete,
+            system_fonts::system_fonts_list,
+            build_info::app_build_info,
+            ai::ai_initialize,
+            ai::ai_cleanup_book,
+            ai::ai_cleanup_all,
+            ai::ai_index_clear_all,
+            ai::ai_index_replace,
+            ai::ai_index_begin,
+            ai::ai_index_append,
+            ai::ai_index_commit,
+            ai::ai_index_abort,
+            ai::ai_index_status,
+            ai::ai_cache_status,
+            ai::ai_cache_clear,
+            ai::ai_search,
+            ai::ai_task_enqueue,
+            ai::ai_task_acquire_library_index,
+            ai::ai_task_start,
+            ai::ai_task_pause,
+            ai::ai_task_resume,
+            ai::ai_task_complete,
+            ai::ai_task_fail,
+            ai::ai_task_cancel,
+            ai::ai_task_update_progress,
+            ai::ai_task_list
+        ])
+    };
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default();
@@ -14,33 +138,15 @@ pub fn run() {
         }
     }));
 
-    builder
+    let builder = builder
         .manage(FontWriteState::default())
         .manage(LinkedLibraryWriteState::default())
+        .manage(ai::AiState::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![
-            linked_library::linked_library_import_paths,
-            linked_library::linked_library_list_records,
-            linked_library::linked_library_read_source_raw,
-            linked_library::linked_library_read_cover_raw,
-            linked_library::linked_library_relink,
-            linked_library::linked_library_delete_record,
-            linked_library::linked_library_update_progress,
-            linked_library::linked_library_mark_opened,
-            linked_library::linked_library_update_bookmarks,
-            linked_library::linked_library_update_notes,
-            linked_library::linked_library_replace_records,
-            linked_library::linked_library_thumbnail_read,
-            linked_library::linked_library_thumbnail_write_raw,
-            linked_library::linked_library_thumbnail_delete,
-            fonts_import_raw,
-            fonts_list,
-            fonts_read,
-            fonts_delete,
-            system_fonts::system_fonts_list
-        ])
+        .plugin(tauri_plugin_opener::init());
+
+    configure_invoke_handler!(builder)
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
@@ -265,6 +371,7 @@ mod tests {
         );
     }
 }
+mod ai;
 mod linked_library;
 mod system_fonts;
 

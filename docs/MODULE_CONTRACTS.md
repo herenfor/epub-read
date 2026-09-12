@@ -124,6 +124,9 @@
 - 本次契约改变经用户明确同意不迁移测试书库。切换时可以删除旧托管正文和缓存，但不得扫描或删除用户原始 EPUB。
 - B-062/C-51：书架筛选只消费已持久化元数据，不得在打开抽屉或切换筛选时读取源 EPUB。`language` 是可选同步字段；旧记录缺失必须归入“未知语言”。浏览器和 Rust 新导入取 OPF 第一个非空 `dc:language`，portable archive v1 以可选字段向后兼容。
 - B-071/C-52：阅读器所有前台界面必须由单一 `ReaderForeground` 判别联合仲裁。普通 panel、正文 transient 和 modal 不得同时渲染；字体中心仅是 menu 子视图。modal 拒绝其它打开转换；替换 footnote/selection 时 App 必须分别完成 paginator dismiss/hover reset 与 iframe selection 清理。新增前台功能扩展 union 和 renderer，禁止新增独立 `xxxOpen` 真源或用 z-index 代替互斥。
+- C-57：字体导入的文件选择、浏览器 HTML5 drop 与 Windows Tauri 原生路径 drop 必须汇入同一串行批处理，并继续复用字节哈希与 `FontStore`。字体面板内的拖放优先于全局 EPUB 拖放；面板外不得读取字体路径。格式判断发生在读文件前，多批次由同步 busy gate 仲裁，禁止为每种入口复制存储逻辑。
+- C-53：AI/RAG 是同一应用内的可选能力模块，不是阅读器核心依赖或公开动态代码插件。禁用状态不得创建 Provider、访问网络、初始化 SQLite 或启动后台任务；Provider 按 capability 注册并支持取消/异步释放。持久化 chunk 身份必须包含书籍指纹与 parser/normalizer/chunker 版本，并携带 paginator-compatible 文本锚点。AI 数据只存放于独立可重建缓存；删除书架记录时仅在 AI DB 已存在的情况下先清理单书派生数据，不得删除用户源 EPUB。真实功能可用前，assistant 入口只允许出现在开发构建并继续服从 `ReaderForeground` 互斥。
+- C-56：书架正文搜索与阅读器“全部书籍”必须由同一个应用级 `LibrarySearchRuntime` 投影查询、结果、索引确认、任务、进度、取消和错误；面板生命周期不得拥有或取消建库。跨书建库只能通过 Rust 幂等 acquire 取得一个 `library-text-index` 持久任务。语料生产只输出版本化 `DocumentChunk`，FTS 通过 sink 消费；未来向量/标签 sink 不得复制 EPUB 解析链。发布构建使用真实 module Worker，按逻辑核心配置最高并发，EPUB 只在获得槽位后读取并 transferable 移交；FTS 单写入、大于 512 MiB 的书独占，阅读加载期间不启动新书且活动任务在有界批次边界让出。并发偏好属于设备设置，不进入 portable archive；取消/退出不得暴露半本 staging，已提交书可续用。
 - B-062/C-51：作者分类键使用 NFKC，并仅移除 Han/Hiragana/Katakana 字符之间的 Unicode `White_Space`/`Cf`；不得覆盖原始 `creator`，不得删除西文姓名内部空格。UI 必须复用 `createShelfFilterModel` 的索引、匹配和交叉计数，不维护第二套规范化实现。
 
 ## 6. 渲染规则变更
@@ -159,3 +162,42 @@
 - `sanitizeChapter` 仅在开启时注入 `writing-mode: horizontal-tb !important`、`-webkit-writing-mode: horizontal-tb !important` 和 `text-orientation: mixed !important`。规则覆盖 html/body/viewer 及不在 SVG 树内的普通后代，不声明 `direction`。
 - SVG 及其后代排除后代覆盖选择器；SVG 内显式声明的书写模式按 CSS 级联保留。仅依赖 html/body 继承、但 SVG 内未声明的原始竖排状态无法凭 CSS 恢复，这是已知边界。
 - light/dark/sepia 不改变横排规则；设置持久化与 portable archive 白名单必须同时保留该字段。
+
+## RAG C-57：模型资产层契约
+
+- 模型资产层位于 `src/features/ai/models` 与 `src-tauri/src/ai/models.rs`/`download.rs`，只管理 manifest、模型文件、来源、许可证和下载任务；不得 create/load Provider、读取 EPUB、建向量或推理。
+- `ModelPackageManifest` 与 `ProviderManifest` 是两种不同契约：前者描述“运行什么”，后者描述“怎样运行”。`providerKind` 只是模型元数据，不能被解释为 transport 或运行时加载指令；`builtin`/`sidecar`/`http`/`mock` Provider 边界不变。
+- 模型包支持多文件 `relativePath/sizeBytes/sha256/purpose`，路径必须是安全相对路径，扩展名必须在纯数据白名单中；绝对路径、`..`、未知/可执行脚本扩展、重复 capability/mirror、symlink/junction/reparse 组件均拒绝。坏包以逐项状态暴露，不阻断同一扫描的其他包。
+- `managed` 的 `packageDir` 只能是模型库内安全相对目录；`linked` 使用设备私有 `linkedExternalPath`，只登记和验证，不复制、不由下载器管理，删除登记永不删除外部文件。模型库换根只标记 managed missing，不影响 linked。
+- 模型库列表是纯 DB 查询；scan/verify/hash 必须由用户显式触发。模型资产开发入口首开只并行读取模型库、包列表和任务列表，不联网、不扫描、不哈希。普通发布 UI 不显示公共模型市场。
+- 下载任务状态与包状态分离；单 FIFO worker 使用 `.staging/<package>-<task>/<relative>.part`，逐文件 flush、Range/Content-Range、实际字节/SHA、镜像切换、磁盘余量、原子安装和退出 paused 恢复。未完成任务不得暴露半包，cancel 才精确清理 staging。
+- `findAvailableModelPackages` 仅返回已安装、全部文件 verified、capability 匹配且非 `text-fixture`/`mock` 的元数据；C-58 才能通过 Provider registry 实例化运行时。
+- 默认 AI 路径不依赖 Ollama：C-58A 先探测 Windows GPU/后端和资源预算且不得加载模型，C-58B 使用项目维护的 GPU-first Builtin ONNX Embedding Provider；生成阶段使用项目构建/审计/固定版本的 GPU-first llama.cpp sidecar。自动模式按已验收支持矩阵选择 CUDA 或通用 WinML/DirectML/Vulkan 路径；CPU 只能显式、限额启用，GPU 失败不得静默回退到高负载 CPU。Ollama 与 OpenAI-compatible 只在高级用户显式配置后注册或探测。
+- 普通用户默认使用推荐模型，模型 UI 不演变为公共市场；高级替换必须经过 `ModelPackageManifest`、digest、格式和 Provider 兼容性校验。运行 sidecar/后端属于受控能力插件，不得由普通模型包携带 EXE/DLL。
+
+## C-57.5：Core / AI 发行隔离契约
+
+- `core`与`ai`是同一代码树的编译edition，不是两套业务实现。当前书/跨书全文搜索、共享语料、SQLite FTS、稳定锚点、书架和阅读功能始终属于Core。
+- 前端Core生产构建必须由编译期edition常量裁掉模型资产面板与Provider实现；仅隐藏按钮不算隔离。AI edition可加载开发面板，但不得因此自动启用模型、网络或正文处理。
+- Cargo清单必须保持`default=[]`；Core只激活`core`并保留FTS/store/task/cache IPC，模型资产`models/download`、相关IPC及`reqwest/fs2`只能由`ai`激活。直接Cargo矩阵可使用`--no-default-features --features core|ai`。
+- 前端与Rust edition必须成对构建。Tauri 2.11 CLI只接受`--features core|ai`，不接受Cargo专用的`--no-default-features`；官方wrapper依靠空默认feature、显式唯一feature和expected-edition共同门禁。构建脚本不得产生AI前端/Core后端或Core前端/AI后端的混合产物。
+- AI开发版使用独立Windows identifier和app-data；Core热修复不得读写该实验目录。稳定AI将来是否共享Core身份和数据必须另建迁移任务。
+- Core schema v3与AI schema v6必须双向安全打开：AI从Core升级时补齐全部模型表；Core打开已知AI schema时不得降级、删除或访问模型资产数据。
+
+## C-57.6：发行门禁契约
+
+- 默认edition统一为Core；AI只能通过显式且成对的前端profile、Cargo feature和Tauri overlay构建。未知显式edition必须失败，不能静默回退。
+- Core/AI前端分别输出到`dist/core`与`dist/ai`，Rust分别使用`target-core`与`target-ai`；构建不得读取或清理另一个edition的上一次产物。官方PowerShell只接受一个edition输入并派生全部配置。
+- Cargo使用空默认feature和显式`core`/`ai`互斥意图；release缺失或不匹配`EPUB_READER_EXPECTED_EDITION`必须失败。Core active dependency tree不得包含AI feature引入的`reqwest/fs2`。
+- 两版共有的`app_build_info`只能返回编译元数据，不得初始化`AiState`、SQLite、模型目录或网络。桌面端在动态导入`App`之前完成握手；前后端edition不一致、协议错误或IPC失败时fail-closed，不得自动选择任一侧继续运行。
+- AI面板CSS、模型资产样式和`c57-dev-probe`归AI lazy/static资源所有；Core保留全文搜索与`corpusWorker`，但不产生AI UI/CSS/fixture或模型IPC。AI release不得显示只由debug后端支持的测试catalog/mock操作。
+- `tsc`仍全量检查Core和AI源码。C-57.6解决产物隔离，不保证损坏AI源码的同一checkout仍能typecheck Core；紧急发行依赖稳定Core Git线和修复回合并流程。
+- 本阶段不得修改Core v3/AI v6 schema、app-data身份、模型ownership、Provider或向量任务。完整设计和验收矩阵见`docs/tasks/active/core-ai-release-hardening.md`。
+
+## B-082～B-084：基础功能修复补充（2026-09-11）
+
+- 预加载槽位的可提升条件除 display-ready 外，还包括实际渲染设置与当前设置一致。长生命周期回调不得捕获初次 render 的设置；章节 load 可同时接收新设置，避免换章取消设置防抖后沿用旧值。这是 C-50 的生命周期修复，不新增 CSS 覆盖层。
+- 选区菜单向笔记 modal 转交时必须先关闭旧 transient，再执行打开 modal 的回调；不得由旧菜单的通用关闭动作覆盖新 modal。
+- 桌面单本/批量删除书架记录都在 blocking worker 执行，保持原链接书库写锁；批量入口验证整个选择集，派生数据合并到一个事务，书架/绑定/缩略图索引各保存一次。原 EPUB 永不删除，未使用的 SQLite 不得因删除而创建。
+- 删除最后一个已有全文索引时，确认 FTS 无未选中或 NULL 指纹行后，在同事务中重建相同空 FTS 表；部分删除使用临时指纹集合，一次处理全部选择。Core v3/AI v6 版本和模型表不变，不依赖 FTS 与 chunks 的 rowid 对应。
+- SQLite 失败必须回滚已执行的 FTS 清理；前端仅移除确认成功的记录。浏览器后端逐本回退保留失败项，原生批处理失败不自动重试 N 次。多个 JSON 文件仍沿用各自原子写入，不宣称与 SQLite 构成跨文件事务。

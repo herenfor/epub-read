@@ -18,6 +18,14 @@
 - 不同对话通过任务文档、Bug 记录和源仓差异文档交接，而不是依赖聊天记录。
 - 新对话若发现前一任务未结束，应先沿用其任务文件，不要另建重复方案。
 
+### Core / AI 发布线
+
+- Core与AI始终来自同一套业务源码，不复制第二个阅读器项目。
+- 当AI功能进入独立开发分支时，稳定Core线只接收阅读器/全文搜索修复和已经审核的基础变更；未完成AI提交不得反向进入Core发布线。
+- Core Bug先在稳定线修复、验证和发布，再将同一提交合并或cherry-pick到AI线，禁止分别实现两份修复。
+- AI线每次合入都必须保持Core构建矩阵通过；但当前`tsc`全量检查整个`src`，因此损坏的AI checkout不承诺仍能构建Core，紧急发行应从最新稳定Core tag/分支创建。
+- edition用于编译和打包裁剪，Git分支用于隔离未完成开发；两者不能互相替代。C-57.6 的发行门禁代码与本地矩阵已经落地，Windows 双包仍待验收，实施状态见`docs/tasks/active/core-ai-release-hardening.md`。
+
 ## 3. 模块职责
 
 | 区域 | 责任 | 不应承担 |
@@ -47,9 +55,12 @@
 
 ```bash
 pnpm test
-pnpm build
+pnpm build          # Core + Core产物门禁
+pnpm build:ai       # AI + AI产物门禁
 pnpm check <book.epub>
 ```
+
+桌面开发使用显式的 `pnpm tauri:dev:core` / `pnpm tauri:dev:ai`。正式 Windows 发行使用 `scripts/build-windows.ps1 -Edition Core|AI`；不要把缺少 expected-edition 元数据的裸 `pnpm tauri build` 当作发布入口。
 
 - 测试只要求在本地通过，不要求将测试工程、私有 EPUB、临时复现脚本或运行产物上传仓库。
 - 稳定且不包含私有内容的单元测试可以跟随功能代码同步；一次性或书籍专用复现留在本地。

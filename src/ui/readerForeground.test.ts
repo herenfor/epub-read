@@ -30,6 +30,7 @@ describe("reader foreground transitions", () => {
     const search = openReaderPanel(openReaderPanel(none, "toc"), "search");
     expect(search).toEqual({ kind: "panel", panel: "search" });
     expect(openReaderPanel(search, "bookmarks")).toEqual({ kind: "panel", panel: "bookmarks" });
+    expect(openReaderPanel(search, "assistant")).toEqual({ kind: "panel", panel: "assistant" });
   });
 
   it("models fonts as the menu subview", () => {

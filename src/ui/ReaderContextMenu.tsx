@@ -125,7 +125,7 @@ export function ReaderContextMenu(props: ReaderContextMenuProps) {
       onPointerDown={handlePointerDown}
     >
       <button type="button" role="menuitem" onClick={copy}>复制</button>
-      <button type="button" role="menuitem" onClick={() => { props.onAddNote(selection); props.onClose(); }}>添加笔记</button>
+      <button type="button" role="menuitem" onClick={() => { props.onClose(); props.onAddNote(selection); }}>添加笔记</button>
     </div>
   );
 }

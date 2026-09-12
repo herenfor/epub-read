@@ -42,4 +42,12 @@ describe("Tauri linked ShelfStore IPC", () => {
     expect(asset).toMatchObject({ mime: "image/jpeg" });
     expect(Array.from(asset?.bytes ?? [])).toEqual([4, 5]);
   });
+
+  it("uses one batch command for indexed shelf deletion", async () => {
+    invokeMock.mockResolvedValue(undefined);
+    await getShelfStore().deleteBooks!(["a".repeat(64), "b".repeat(64)]);
+    expect(invokeMock).toHaveBeenCalledExactlyOnceWith("linked_library_delete_records", {
+      contentHashes: ["a".repeat(64), "b".repeat(64)],
+    });
+  });
 });

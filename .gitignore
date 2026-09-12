@@ -1,6 +1,8 @@
 node_modules/
 dist/
 src-tauri/target/
+src-tauri/target-core/
+src-tauri/target-ai/
 targettmp/
 src-tauri/gen/
 .pnpm-store/

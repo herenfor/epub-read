@@ -124,6 +124,32 @@ export interface ShelfStore {
   writeThumbnail(contentHash: string, asset: ThumbnailAsset): Promise<void>;
   deleteThumbnail(contentHash: string): Promise<void>;
   deleteBook(id: string): Promise<void>;
+  /** Native batch cleanup shares one index transaction and one metadata write. */
+  deleteBooks?(ids: string[]): Promise<void>;
+}
+
+/** Keep failed rows visible; a native batch failure must not trigger expensive retries per book. */
+export async function deleteShelfBooks(
+  store: Pick<ShelfStore, "deleteBook" | "deleteBooks">,
+  ids: string[],
+): Promise<{ deleted: string[]; failed: Array<{ id: string; error: string }> }> {
+  const uniqueIds = [...new Set(ids)];
+  if (uniqueIds.length === 0) return { deleted: [], failed: [] };
+  if (store.deleteBooks) {
+    try {
+      await store.deleteBooks(uniqueIds);
+      return { deleted: uniqueIds, failed: [] };
+    } catch (error) {
+      return { deleted: [], failed: uniqueIds.map((id) => ({ id, error: String(error) })) };
+    }
+  }
+  const deleted: string[] = [];
+  const failed: Array<{ id: string; error: string }> = [];
+  for (const id of uniqueIds) {
+    try { await store.deleteBook(id); deleted.push(id); }
+    catch (error) { failed.push({ id, error: String(error) }); }
+  }
+  return { deleted, failed };
 }
 
 export function isTauriEnv(): boolean {
@@ -941,6 +967,10 @@ class TauriShelfStore implements ShelfStore {
 
   async deleteBook(id: string): Promise<void> {
     await invoke("linked_library_delete_record", { contentHash: id });
+  }
+
+  async deleteBooks(ids: string[]): Promise<void> {
+    await invoke("linked_library_delete_records", { contentHashes: ids });
   }
 }
 

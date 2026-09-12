@@ -375,6 +375,7 @@ describe("inline box compensation lifecycle", () => {
       removeAttribute: (name: string) => removed.push(name),
     } as unknown as HTMLElement;
     type LifecycleHost = {
+      inlineClipFixes: Array<{ el: HTMLElement; overflowX: { value: string; priority: string } }>;
       inlineBoxFixes: Array<{
         el: HTMLElement;
         display: { value: string; priority: string };
@@ -387,6 +388,7 @@ describe("inline box compensation lifecycle", () => {
       }
     ).restoreInlineBoxFixes;
     const host = {
+      inlineClipFixes: [{ el, overflowX: { value: "visible", priority: "important" } }],
       inlineBoxFixes: [
         {
           el,
@@ -397,6 +399,9 @@ describe("inline box compensation lifecycle", () => {
     } satisfies LifecycleHost;
 
     restore.call(host);
+    expect(host.inlineClipFixes).toHaveLength(0);
+    expect(values.get("overflow-x")).toBe("visible");
+    expect(priorities.get("overflow-x")).toBe("important");
     expect(removed).toEqual(["data-reader-inline-box-fixed"]);
     expect(host.inlineBoxFixes).toHaveLength(0);
     expect(values.get("text-indent")).toBe("12px");
@@ -1246,6 +1251,12 @@ describe("book margin layout", () => {
     expect(floatLayout({ direction: "rtl" })).toBeNull();
     expect(floatLayout({ authorFullWidthIntent: true })).toBeNull();
     expect(floatLayout({ width: 641 })).toBeNull();
+  });
+
+  it("横排包含块内的竖排引文仍按物理 right float 收进版心", () => {
+    expect(floatLayout({ writingMode: "vertical-rl", parentWritingMode: "horizontal-tb", width: 24,
+      marginRight: "38.4px", authoredHorizontalMargin: true })).toEqual({ left: 0, right: 358.4 });
+    expect(floatLayout({ writingMode: "vertical-rl", parentWritingMode: "vertical-rl" })).toBeNull();
   });
 
   it("无 margin 的顶层 float 仍复用 C-31 版心投影", () => {

@@ -9,3 +9,5 @@
 - 验证：首版前端 Vitest 50 files/393 tests、Rust 18/18；B-069 后当前全量 Vitest 52 files/411 tests、TypeScript、Vite production build（110 modules）通过。WSL Chromium 首版链路已通过；B-069 的 Windows WebView2 选区末端定位与 iframe 左键关闭待 beta.1 实机确认。
 - B-069 菜单生命周期：右键菜单以 Range 最后一个可见片段为锚点；仅在菜单打开后监听 iframe selectionchange，变化时刷新末端坐标，折叠/失效时关闭。宿主关闭同时清除 iframe 原生选区，普通选择过程不增加持续索引成本。
 - 待确认：Windows WebView2 的右键、剪贴板、CSS Highlight 颜色与大量笔记列表观感。
+
+- 2026-09-11：B-083 修复前台仲裁后新增的入口回归：菜单先关闭再打开笔记，避免同批更新把编辑框覆盖为 none。真实页面创建/保存/重开/编辑均通过。 完整验证见 [基础修复任务](./core-reader-fixes-september.md)，仍待 Windows WebView2 复验。

@@ -4,7 +4,13 @@
 
 > 项目自述与功能列表见根目录 [README.md](../README.md)。
 
-> 正文搜索、语义检索、智能分类、RAG 问答与正文总结的长期方向见 [SEARCH_TO_RAG_ROADMAP.md](SEARCH_TO_RAG_ROADMAP.md)。当前已完成 B-059/C-48 的当前书基础正文搜索；跨书检索、语义检索、智能分类、RAG 问答与正文总结仍是后续范围，不得视为已实现或稳定发布能力。
+> 正文搜索、语义检索、智能分类、RAG 问答与正文总结的长期方向见 [SEARCH_TO_RAG_ROADMAP.md](SEARCH_TO_RAG_ROADMAP.md)。当前已完成 B-059/C-48 的当前书基础正文搜索，并在隔离副本实现 C-54 跨书全文检索；语义检索、智能分类、RAG 问答与正文总结仍是后续范围，不得视为已实现或稳定发布能力。
+
+> C-53 已通过 Windows 验收。C-54 已在隔离副本接通 schema v3/trigram FTS、分批 staging、逐书真实建库、当前书/全部书籍 UI、索引管理和跨书锚点跳转；B-072/B-073 已修复 Windows 旧记录 `language=""` 和图片封面空正文导致的全库失败，解析版本升至 `visible-xhtml-v2`。自动化为前端 63/467、Rust 37/37，37 本真实 EPUB/3094 chunks 语料回放通过，等待 Windows 用原书库重新建库审核。真实模型、Embedding、向量、标签和生成仍未实现。架构见 [AI_PLUGIN_ARCHITECTURE.md](AI_PLUGIN_ARCHITECTURE.md)，当前任务见 [cross-book-fts-search.md](tasks/active/cross-book-fts-search.md)。
+
+> C-56 已在隔离副本完成书架正文搜索与共享语料流水线，并随 `0.1.9-beta.2` 完成 Windows 基础全文搜索验收：书架和阅读器共用一个全库运行时与持久任务，生产包使用真实 module Worker；并发可按核心自动/手动配置，FTS 单写入，大书独占并在阅读加载时让出。模型、向量、标签和生成仍未接入，见 [shelf-library-search-pipeline.md](tasks/active/shelf-library-search-pipeline.md)。
+
+> C-57 已为字体中心增加浏览器与 Windows 双通道拖放：字体面板内可批量拖入 TTF/OTF/WOFF/WOFF2，Windows 原生路径按坐标路由并复用原字体存储；多文件串行且不干扰面板外 EPUB 导入。主代理审核后前端 73/509、tsc、Vite 137 modules 通过，见 [font-drag-import.md](tasks/active/font-drag-import.md)。
 
 > B-060/C-49 正文笔记首版已经进入隔离副本：选区右键、创建/编辑/删除、按时间列表、文本锚点跳转、CSS Highlight 下划线和 portable archive 均已接入。Windows WebView2 实机仍待审核，契约见 [reader-notes.md](tasks/active/reader-notes.md)。
 
@@ -12,7 +18,7 @@
 
 > B-062/C-51 书架二级筛选抽屉已经进入隔离副本：作者/书名/保存时间/语言组合筛选、搜索/排列/密度/主题/存档迁移、轻量动画及书架顶部工具栏移除均完成。OPF language 已贯通浏览器、Rust 和 portable archive；旧记录不扫描源书，显示“未知语言”。B-063～B-066 已让滚动区填满抽屉标题以下空间、预留稳定滚动槽，并修复搜索图标视觉居中；展开筛选出现滚动条时选项宽度不再变化。Windows 原生导入与 100+ 本视觉性能待审核，见 [shelf-filter-drawer.md](tasks/active/shelf-filter-drawer.md)。
 
-> 0.1.9 已完成发布收口；当前隔离副本为 `0.1.9-beta.1` 修复测试版。B-067 为阅读器菜单增加稳定滚动槽，修复展开详细设置后卡片突然变窄。
+> 0.1.9 已完成发布收口；当前隔离副本为 `0.1.9-beta.2` 测试版。它包含 beta.1 修复以及 C-53～C-56 的跨书全文搜索、书架入口、共享状态和真实 Worker 流水线；beta.1 文档继续作为历史记录。
 
 > `0.1.9-beta.1` 的 B-068 修复 Windows 发布版正文搜索始终空结果：搜索正文解析现在与渲染链路一致，先按 XML/XHTML 严格解析，仅在 parser error 时回退 HTML。自动化覆盖自闭合 head 标签和畸形旧 HTML；仍需 Windows 原故障书确认。
 
@@ -59,19 +65,23 @@ src-tauri/    Tauri 2 壳（Rust 链接书库、缩略图缓存与字体命令�
 scripts/      构建/自检/测试工具
 ```
 
+AI/RAG 代码已经按独立 `src/features/ai` 与 `src-tauri/src/ai` 职责落地；`App.tsx` 只组合入口、书籍投影与跳转。后续 Provider、向量、标签和生成继续通过 feature controller/store 与语料 sink 扩展，禁止把任务或模型状态重新集中进 `App.tsx`。
+
 ## 开发命令
 
 ```bash
 pnpm install
-pnpm dev          # 浏览器开发模式（localhost:5173）
-pnpm test         # 单元测试（当前 407 项）
-pnpm build        # TypeScript 检查 + 生产构建
-pnpm tauri dev    # 桌面窗口调试（需要系统 Tauri 依赖）
-pnpm tauri build  # 桌面打包
+pnpm dev              # Core 浏览器开发模式（localhost:5173）
+pnpm dev:ai           # AI 浏览器开发模式
+pnpm test             # 单元测试（当前基线 83 files / 537 tests）
+pnpm build            # Core：TypeScript + dist/core + 产物门禁
+pnpm build:ai         # AI：TypeScript + dist/ai + 产物门禁
+pnpm tauri:dev:core   # Core 桌面调试
+pnpm tauri:dev:ai     # AI 桌面调试
 ```
 
-Windows 一键打包见 `scripts/build-windows.ps1`；0.1.9 的 WSL→Windows 安全同步与测试版验收见 `docs/RELEASE_0.1.9.md`。0.1.8 文档仅保留为阶段历史。
-当前 Windows 核心搜索修复测试入口见 `docs/RELEASE_0.1.9-beta.1.md`。
+Windows 正式打包使用 `scripts/build-windows.ps1 -Edition Core|AI`；裸 `pnpm tauri build` 因缺少 release expected-edition 元数据会主动失败。0.1.9 的 WSL→Windows 安全同步与测试版验收见 `docs/RELEASE_0.1.9.md`。0.1.8 文档仅保留为阶段历史。
+当前 Windows 测试发行入口见 `docs/RELEASE_0.1.9-beta.2.md`。
 
 ## 渲染分层规范
 
@@ -180,3 +190,40 @@ width: X% → width: min(X%, X/100 × 40rem)
 4. 版本号三处一致；
 5. 更新 README 功能列表与本文档变更记录；
 6. 若对外分发，确认第三方许可暂缓项已经完成，或明确本次发行仍不包含其合规收口。
+
+## 2026-08-24 跨书索引恢复交接
+
+- “全部书籍”现在只探测索引状态，必须由用户确认硬件/耗时提示后才开始读取 EPUB 和建库。
+- 取消按钮位于固定进度区；取消是异步收口操作，会停止后续书本，并等待当前 read/parse/staging 完成回收。
+- 已完成书本按原子事务保留；半本书不会成为可见索引。应用异常退出后，启动会回收运行中任务和 staging，再按缺失/版本过期书续建。
+- 已增加统一派生缓存结构，目前只有 `full-text-index`；缓存清理命令不会删除书架、源 EPUB、阅读进度、书签、笔记或 Provider 配置。本轮按要求不添加书架缓存清理 UI。
+- 部分索引可搜索，但查询只匹配当前 parser/normalizer/chunker 版本。该基础全文搜索链路已随 `0.1.9-beta.2` 通过 Windows 验收；后续仍必须保持版本过滤和半本 staging 不可见边界。
+- 该阶段当时的自动化基线：前端 66 files/485 tests，Rust 38/38；TypeScript、Rust fmt 和 Vite production build 均通过。最新总基线见本文 C-57.6 交接。
+
+## 2026-08-24 RAG C-57 模型资产交接
+
+`0.1.9-beta.2` 的基础全文搜索 Windows 验收已完成。RAG C-57 的 Windows Tauri dev 核心资产链路也已通过：首次读取、D 盘模型库、探针登记/许可/下载、重启持久化及显式校验均正常；当前剩余删除、linked 和真实大文件故障矩阵的发布版验收。实现位于 `src/features/ai/models`、`src/features/ai/ui/ModelAssetsDevelopmentSection.tsx` 和 `src-tauri/src/ai/models.rs`/`download.rs`/`store.rs`。
+
+本轮已完成：多文件 `ModelPackageManifest` 与纯数据扩展白名单；managed/linked ownership 和设备模型库路径；schema v4→v6 的模型包、文件、来源、任务和许可证表；单 FIFO 下载器的 Range、`.part`、SHA、磁盘、镜像、暂停/恢复/取消、原子安装和退出恢复；dev-only catalog/UI/controller。模型资产不会 create/load Provider，不读 EPUB、不建向量、不推理；能力插件与模型包分离，Provider `builtin/sidecar/http/mock` 契约不变。
+
+开发入口首开只调用模型库路径、包列表和下载任务列表；scan/verify/hash/network 都需要显式操作。`c57-dev-probe` 是 15 字节纯文本 fixture，release 命令拒绝，正式版不显示公共模型市场。C-58 后续才可把已安装且 verified 的资产交给 Provider registry 实例化；`findAvailableModelPackages` 目前只是元数据查询。
+
+路线决策补充：默认本地 AI 不依赖 Ollama。C-58 已调整为 C-58A Windows GPU/后端探测与资源准入、C-58B GPU-first Builtin ONNX Embedding Provider；生成阶段使用项目构建、审计并固定版本的 GPU-first llama.cpp sidecar。普通 UI 仅提供“自动推荐 / GPU 兼容 / NVIDIA CUDA / CPU 兼容”：NVIDIA 性能路径为 CUDA，AMD/Intel/其他已验收设备使用 WinML/DirectML（Embedding）与 Vulkan（生成），CPU 只显式限额启用且禁止 GPU 故障静默回退。Ollama/OpenAI-compatible 只作为后置高级 HTTP Provider，未配置时不探测、不联网；高级替换必须经过 C-57 manifest/linked 校验或未来受控能力插件，模型包不能携带运行二进制。
+
+该阶段历史基线为前端 Vitest 77 files/521 tests、`tsc --noEmit`、Vite production build 143 modules；Rust fmt/check 和 74 tests。C-57.5 当时的总基线为前端 78/523、Core 38、AI 72，最新总基线见下方 C-57.6。B-075～B-077 已获得 Windows 实机证据；B-078 与 B-079 已分别修复 staging 清理和 Windows 短路径别名误报，待 Windows 复验。真实慢速/断网大文件、错误 digest 镜像回退、磁盘不足、多进程/真实 IPC 并发、重启 `.part` 续传、junction/reparse、Defender 占用以及中文/日文长路径仍待验证。
+
+## 2026-08-27 C-57.5 Core / AI发行隔离交接
+
+Core与AI现在从同一代码树按编译edition生成，不维护两套阅读器。Windows官方脚本默认`-Edition Core`：前端`VITE_EDITION=core`，Tauri 2.11传`--features core`且Cargo清单`default=[]`，保留当前书/跨书全文搜索但不生成AI面板/模型chunk、不编译模型下载模块或注册相关IPC。`-Edition AI`使用前端AI edition、Cargo `ai` feature、独立target及`dev.epubreader.ai`设备目录，并在production包显示C-57模型资产面板。
+
+Rust schema边界为Core v3、AI v6；AI从Core升级会幂等补`provider_models`及模型资产表，Core打开已知v6不降级或访问模型表。这里记录的是C-57.5首轮状态；C-57.6现已把Cargo默认feature改为空并让裸debug入口安全归Core。桌面双edition开发仍必须优先使用`pnpm tauri:dev:core|ai`，正式发布必须使用`scripts/build-windows.ps1 -Edition Core|AI`。
+
+已验证前端78 files/523 tests、tsc、Core无AI chunk/目标字符串/开发探针、AI独立lazy chunks和探针，以及Windows Cargo Core 38/AI 72 tests。PowerShell双安装包与Core全文搜索/AI模型资产人工链路仍须在Windows完成。先读`docs/tasks/active/core-ai-edition-split.md`，不要开始C-58A，直到双安装包确认。
+
+## 2026-08-28 C-57.6 发行门禁实现交接
+
+C-57.6代码与本地矩阵已经完成。Core/AI分别写入`dist/core`、`dist/ai`和`target-core`、`target-ai`；Cargo空默认并显式互斥`core/ai`；未知前端edition、冲突Cargo feature、release缺失/错误expected edition都会失败。两版共有无副作用`app_build_info`，前端在动态导入`App`前完成协议/edition握手，失败时不初始化App、FTS或AI前端运行时。
+
+AI CSS和开发探针已移入lazy AI资源与`public-ai`，Core门禁同时拒绝AI UI/CSS、模型IPC、探针和AI identity；AI release根据已验证build-info隐藏mock和测试catalog操作。正式命令为`pnpm build[:ai]`、`pnpm tauri:dev:core|ai`及`scripts/build-windows.ps1 -Edition Core|AI`，裸`pnpm tauri build`有意fail-closed。
+
+本地证据：前端83 files/537 tests、tsc、Core/AI各150 modules及双产物门禁；Rust Core45/45、AI83/83、fmt、Core active tree无`reqwest/fs2`；预期失败矩阵与PowerShell 5.1解析通过。Windows首次验收依次发现B-080 `spawnSync pnpm.cmd EINVAL`与B-081 Tauri不接受Cargo专用参数；现已改为当前Node直接运行项目本地CLI，并仅向Tauri传其支持的显式edition feature，WSL构建和Tauri四组参数解析通过，等待Windows重新同步确认。未修改schema、app-data、Provider、GPU或向量逻辑。下一步只做Windows双安装包、安装身份、核心/模型资产链路和人为mismatch验收；完成前不要进入C-58真实Provider。详见`docs/tasks/active/core-ai-release-hardening.md`。

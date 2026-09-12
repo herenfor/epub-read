@@ -27,12 +27,30 @@ Each component remains subject to its respective license.
 | sha2 | 0.10.9 | MIT OR Apache-2.0 | https://github.com/RustCrypto/hashes |
 | quick-xml | 0.41.0 | MIT | https://github.com/tafia/quick-xml |
 | zip | 2.4.2 | MIT | https://github.com/zip-rs/zip2 |
+| rusqlite | 0.32.1 | MIT | https://github.com/rusqlite/rusqlite |
+| libsqlite3-sys | 0.30.1 | MIT | https://github.com/rusqlite/rusqlite/tree/master/libsqlite3-sys |
+| SQLite (bundled) | 3.x | Public Domain | https://www.sqlite.org/copyright.html |
 | windows (Windows target) | 0.61.3 | MIT OR Apache-2.0 | https://crates.io/crates/windows |
+| reqwest (Rust, blocking + rustls) | 0.13.4 | MIT OR Apache-2.0 | https://github.com/seanmonstar/reqwest |
+| fs2 (Rust disk-space checks) | 0.4.3 | MIT OR Apache-2.0 | https://github.com/danburkert/fs2-rs |
 
 The Windows target dependency `windows` 0.61.3 is used for DirectWrite system
 font enumeration and is recorded under its MIT OR Apache-2.0 terms. This
 feature adds no GPL dependency. Android system-font enumeration is not
 implemented in this release; only the frontend interface space is reserved.
+
+The optional AI/RAG derived-data store uses `rusqlite` with its bundled SQLite
+feature. `rusqlite` and `libsqlite3-sys` are MIT licensed; the bundled SQLite
+amalgamation is dedicated to the public domain. This does not add a GPL
+dependency or change the project's Apache-2.0 license.
+
+RAG C-57 directly uses `reqwest` 0.13.4 (`MIT OR Apache-2.0`) for the isolated
+blocking/rustls download worker and `fs2` 0.4.3 (`MIT/Apache-2.0`, recorded here
+as the equivalent dual-license choice) for disk-space checks. The repository
+and license values above were checked against the local crate Cargo metadata.
+This is a direct-dependency notice, not a complete Cargo.lock transitive
+license, copyright, NOTICE, SBOM, or target-platform audit; that audit remains
+explicitly deferred.
 
 ## Development dependencies
 
@@ -87,6 +105,7 @@ from their respective LICENSE files:
 - **serde / serde_json** — Copyright (c) 2019 Serde Authors (MIT OR Apache-2.0)
 - **quick-xml** — Copyright (c) 2016 the quick-xml authors (MIT)
 - **zip** — Copyright (c) 2023 zip-rs team (MIT)
+- **rusqlite / libsqlite3-sys** — Copyright (c) 2014 The rusqlite developers (MIT)
 
 ## License texts
 

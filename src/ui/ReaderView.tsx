@@ -109,6 +109,7 @@ interface PaginatorSlot {
   state: ChapterState;
   ready: boolean;
   generation: number;
+  renderSettings: ReaderSettings;
 }
 
 function parseViewport(vp: string | undefined): { w: number; h: number } | null {
@@ -254,13 +255,16 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
   };
 
   const buildPaginator = (slot: PaginatorSlot): ChapterPaginator => {
+    // Display-ready callbacks can outlive the render that created them.
+    slot.renderSettings = latestRenderSettingsRef.current;
     const paginator = new ChapterPaginator(
       slot.iframe,
       server,
-      renderSettings,
+      slot.renderSettings,
       book.version === 2,
       (state) => {
         slot.state = state;
+        if (state.status !== "ready") slot.ready = false;
         if (!isActiveSlot(slot)) return;
         lastStateRef.current = state.status;
         if (state.status === "loading" || state.status === "measuring") {
@@ -383,7 +387,8 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
       return;
     }
     const active = activeSlotRef.current;
-    if (!active?.paginator || active.spineIndex === null || !active.ready || active.state.status !== "ready") {
+    if (!active?.paginator || active.spineIndex === null || !active.ready || active.state.status !== "ready" ||
+      !sameRenderingSettings(active.renderSettings, latestRenderSettingsRef.current)) {
       return;
     }
     const wanted = [
@@ -399,7 +404,8 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
     // Keep only the two adjacent chapters.  This also evicts the chapter two
     // steps away immediately after a promotion.
     for (const slot of [...spareSlotsRef.current]) {
-      if (slot.spineIndex === null || !wantedPaths.has(slot.spineIndex) || slot.path !== wantedPaths.get(slot.spineIndex)) {
+      if (slot.spineIndex === null || !wantedPaths.has(slot.spineIndex) || slot.path !== wantedPaths.get(slot.spineIndex) ||
+        !sameRenderingSettings(slot.renderSettings, latestRenderSettingsRef.current)) {
         disposeSpareSlot(slot);
       }
     }
@@ -434,6 +440,7 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
         state: { status: "loading" },
         ready: false,
         generation: ++preloadGenerationRef.current,
+        renderSettings: latestRenderSettingsRef.current,
       };
       spareSlotsRef.current.push(slot);
       usedFrames.add(frame);
@@ -456,10 +463,12 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
     const next = spareSlotsRef.current.find((slot) => slot.path === path && slot.spineIndex === targetIndex);
     if (
       !current ||
+      !sameRenderingSettings(current.renderSettings, latestRenderSettingsRef.current) ||
       current.spineIndex === null ||
       (targetIndex !== nextLinearIndex(book, current.spineIndex, 1) &&
         targetIndex !== nextLinearIndex(book, current.spineIndex, -1)) ||
       !next ||
+      !sameRenderingSettings(next.renderSettings, latestRenderSettingsRef.current) ||
       !next.paginator ||
       !next.ready ||
       !next.paginator.isDisplayReady ||
@@ -525,6 +534,7 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
       state: { status: "loading" },
       ready: false,
       generation: 0,
+      renderSettings: latestRenderSettingsRef.current,
     };
     const p = buildPaginator(slot);
     activeSlotRef.current = slot;
@@ -587,15 +597,18 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
       if (!explicitNavigation && promotePreparedChapter(path, spineIndex, startAtEnd)) return;
       const activeSlot = activeSlotRef.current;
       const oldIndex = activeSlot?.spineIndex ?? null;
+      const settingsChanged = activeSlot && !sameRenderingSettings(activeSlot.renderSettings, latestRenderSettingsRef.current);
       if (activeSlot) {
         activeSlot.path = path;
         activeSlot.spineIndex = spineIndex;
+        activeSlot.renderSettings = latestRenderSettingsRef.current;
       }
       // Adjacent-but-not-ready and non-adjacent jumps both use the original
       // P0 load path; same-chapter anchor reloads may retain valid edge caches.
-      if (oldIndex !== spineIndex) disposeSpareSlots();
+      if (oldIndex !== spineIndex || settingsChanged) disposeSpareSlots();
       turnIntentRef.current.markLoading();
       await p.load(path, {
+        settings: latestRenderSettingsRef.current,
         anchor: props.anchor,
         resetPage: true,
         startAtEnd,
@@ -642,6 +655,7 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
     settingsReloadDebouncerRef.current?.schedule(() => {
       const current = paginatorRef.current;
       if (!current || current !== p) return;
+      if (activeSlotRef.current) activeSlotRef.current.renderSettings = latestRenderSettingsRef.current;
       void current.reloadWithSettings(latestRenderSettingsRef.current);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps

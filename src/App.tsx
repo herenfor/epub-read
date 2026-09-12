@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { loadBook, spineIndexForPath, spineItemPath, DrmError } from "./core/book";
 import type { Book } from "./core/types";
 import { isFragmentOnly, splitHref } from "./core/paths";
@@ -19,7 +19,17 @@ import type { ChapterState } from "./render/paginator";
 import { Toolbar } from "./ui/Toolbar";
 import { MenuPanel } from "./ui/MenuPanel";
 import { FontSettingsPanel } from "./ui/FontSettingsPanel";
-import { SearchPanel, type SearchPanelResult, type SearchStatus } from "./ui/SearchPanel";
+import { SearchPanel, type SearchPanelResult, type SearchScope, type SearchStatus } from "./ui/SearchPanel";
+import { presentCrossBookHit, type CrossBookPanelResult } from "./ui/crossBookSearch";
+import type { ResolvedCrossBookSearchHit } from "./features/ai/indexing/indexStore";
+import { createDefaultLibrarySearchRuntime } from "./features/ai/indexing/librarySearchRuntime";
+import {
+  detectedLogicalCores,
+  loadCorpusConcurrencyPreference,
+  normalizeCorpusConcurrencyPreference,
+  resolveCorpusConcurrency,
+  saveCorpusConcurrencyPreference,
+} from "./features/ai/indexing/corpusConcurrencyPreference";
 import { ReaderContextMenu } from "./ui/ReaderContextMenu";
 import { NoteComposer } from "./ui/NoteComposer";
 import { NotesPanel, type NoteViewModel } from "./ui/NotesPanel";
@@ -33,6 +43,7 @@ import { ShelfView } from "./ui/ShelfView";
 import {
   applyShelfProgressPatch,
   getShelfStore,
+  deleteShelfBooks,
   markShelfEntryOpened,
   readingAnchorFromShelfEntry,
   shelfThumbnailProvider,
@@ -98,9 +109,10 @@ import {
   type SavedProgress,
 } from "./ui/storage";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { isPhysicalPointInsideRect, partitionFontItems, runFontImportBatch } from "./ui/fontDrop";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open as openFileDialog, save as saveFileDialog } from "@tauri-apps/plugin-dialog";
-import { readTextFile, stat as statFile, writeTextFile } from "@tauri-apps/plugin-fs";
+import { readFile, readTextFile, stat as statFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { stepSettingValue } from "./ui/settingsStepper";
 import {
@@ -113,6 +125,16 @@ import {
   type ReaderPanelId,
   type NoteComposerDraft,
 } from "./ui/readerForeground";
+import { createEditionAiRuntime } from "./features/ai/lifecycle/editionRuntime";
+import { APP_EDITION, IS_AI_EDITION } from "./config/edition";
+import { shouldShowAiFoundationEntry } from "./ui/aiEntry";
+
+// This is intentionally a compile-time edition branch. The core build has no
+// static dependency on the AI panel or its model-asset subtree; AI builds keep
+// the existing development-only panel as a lazy chunk.
+const LazyAiFoundationPanel = IS_AI_EDITION
+  ? lazy(() => import("./features/ai/ui/AiFoundationPanel").then(({ AiFoundationPanel }) => ({ default: AiFoundationPanel })))
+  : null;
 
 function isTauriEnv(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -205,6 +227,15 @@ export default function App() {
   const [anchorNonce, setAnchorNonce] = useState(0);
   const [startAtEnd, setStartAtEnd] = useState({ nonce: 0, atEnd: false });
   const [foreground, setForeground] = useState<ReaderForeground>({ kind: "none" });
+  // The runtime is inert until the development panel explicitly enables it.
+  const aiRuntimeRef = useRef<ReturnType<typeof createEditionAiRuntime> | null>(null);
+  if (!aiRuntimeRef.current) aiRuntimeRef.current = createEditionAiRuntime();
+  const aiRuntime = aiRuntimeRef.current;
+  const aiRuntimeSnapshot = useSyncExternalStore(
+    aiRuntime.subscribe,
+    aiRuntime.getSnapshot,
+    aiRuntime.getSnapshot,
+  );
   const [chapterState, setChapterState] = useState<ChapterState>({ status: "loading" });
   const [readerDisplayReady, setReaderDisplayReady] = useState(false);
   const [settings, setSettings] = useState<ReaderSettings>(() => {
@@ -256,6 +287,7 @@ export default function App() {
   const lastCountProgressSignatureRef = useRef<string | null>(null);
   const [clock, setClock] = useState(() => new Date());
   const [dragActive, setDragActive] = useState(false);
+  const [fontNativeDragActive, setFontNativeDragActive] = useState(false);
   // ---- 书架 ----
   const [view, setView] = useState<"shelf" | "reader">("shelf");
   const [shelfEntries, setShelfEntries] = useState<ShelfEntry[]>([]);
@@ -289,6 +321,43 @@ export default function App() {
   const [searchProgress, setSearchProgress] = useState({ processed: 0, total: 0 });
   const [searchError, setSearchError] = useState<string | undefined>(undefined);
   const [searchNavigationBusy, setSearchNavigationBusy] = useState(false);
+  const [searchScope, setSearchScope] = useState<SearchScope>("current");
+  const [shelfSearchMode, setShelfSearchMode] = useState<"metadata" | "body">("metadata");
+  const readerPriorityBusyRef = useRef(false);
+  readerPriorityBusyRef.current = view === "reader"
+    && (!readerDisplayReady || chapterState.status === "loading" || searchNavigationBusy);
+  const librarySearchRuntimeRef = useRef<ReturnType<typeof createDefaultLibrarySearchRuntime> | null>(null);
+  if (!librarySearchRuntimeRef.current) {
+    librarySearchRuntimeRef.current = createDefaultLibrarySearchRuntime(isTauriEnv(), {
+      waitUntilRunnable: async (signal) => {
+        while (readerPriorityBusyRef.current && !signal.aborted) {
+          await new Promise<void>((resolve) => window.setTimeout(resolve, 50));
+        }
+      },
+    });
+  }
+  const librarySearchRuntime = librarySearchRuntimeRef.current;
+  const librarySearchSnapshot = useSyncExternalStore(
+    librarySearchRuntime.subscribe,
+    librarySearchRuntime.getSnapshot,
+    librarySearchRuntime.getSnapshot,
+  );
+  const logicalCores = useMemo(() => detectedLogicalCores(), []);
+  const [corpusConcurrencyPreference, setCorpusConcurrencyPreference] = useState(
+    () => loadCorpusConcurrencyPreference(undefined, logicalCores),
+  );
+  const recommendedCorpusConcurrency = useMemo(
+    () => resolveCorpusConcurrency({ mode: "automatic", maxConcurrency: 1 }, logicalCores),
+    [logicalCores],
+  );
+  const effectiveCorpusConcurrency = useMemo(
+    () => resolveCorpusConcurrency(corpusConcurrencyPreference, logicalCores),
+    [corpusConcurrencyPreference, logicalCores],
+  );
+  useEffect(() => {
+    librarySearchRuntime.setConcurrency(effectiveCorpusConcurrency);
+    saveCorpusConcurrencyPreference(corpusConcurrencyPreference);
+  }, [corpusConcurrencyPreference, effectiveCorpusConcurrency, librarySearchRuntime]);
   const searchSessionRef = useRef<SearchSession | null>(null);
   const searchAbortRef = useRef<AbortController | null>(null);
   const searchGenerationRef = useRef(0);
@@ -313,6 +382,9 @@ export default function App() {
     contentHashByIdRef.current.set(entry.id, entry.contentHash);
     entryByContentHashRef.current.set(entry.contentHash, entry);
   }
+  const libraryIndexSignature = shelfEntries
+    .map((entry) => `${entry.id}:${entry.contentHash ?? ""}:${entry.available === false ? 0 : 1}`)
+    .join("|");
   const progressWriterRef = useRef<ShelfProgressWriter | null>(null);
   if (!progressWriterRef.current) {
     progressWriterRef.current = new ShelfProgressWriter(async (id, patch) => {
@@ -333,6 +405,7 @@ export default function App() {
   const searchOpen = foreground.kind === "panel" && foreground.panel === "search";
   const notesOpen = foreground.kind === "panel" && foreground.panel === "notes";
   const logOpen = foreground.kind === "panel" && foreground.panel === "log";
+  const assistantOpen = foreground.kind === "panel" && foreground.panel === "assistant";
   const selectionContext = foreground.kind === "transient" && foreground.transient === "selection"
     ? foreground.payload
     : null;
@@ -386,6 +459,23 @@ export default function App() {
     readerRef.current?.dismissFootnote();
   }, []);
 
+  const reportAiLifecycleError = useCallback((error: unknown): void => {
+    const message = error instanceof Error ? error.message : String(error);
+    setRuntimeIssues((issues) => [...issues, `AI 地基：${message}`]);
+  }, []);
+  const enableAi = useCallback((): void => {
+    void aiRuntime.enable().catch(reportAiLifecycleError);
+  }, [aiRuntime, reportAiLifecycleError]);
+  const disableAi = useCallback((): void => {
+    void aiRuntime.disable().catch(reportAiLifecycleError);
+  }, [aiRuntime, reportAiLifecycleError]);
+
+  useEffect(() => () => {
+    void aiRuntime.dispose().catch((error: unknown) => {
+      console.error("AI runtime disposal failed", error);
+    });
+  }, [aiRuntime]);
+
   const readerRef = useRef<ReaderHandle>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chapterStateRef = useRef<ChapterState>(chapterState);
@@ -432,6 +522,27 @@ export default function App() {
     };
   }, [view, book, server]);
 
+  // 全库搜索属于应用级运行时：两个 UI 入口只订阅，不以面板生命周期
+  // 启停任务。书架变化只更新候选，下次状态检查/续建会精确补齐。
+  useEffect(() => {
+    librarySearchRuntime.setBooks(shelfEntries
+      .filter((entry): entry is ShelfEntry & { contentHash: string } => Boolean(entry.contentHash))
+      .map((entry) => ({
+        id: entry.id,
+        contentHash: entry.contentHash,
+        title: entry.title,
+        creator: entry.creator,
+        language: entry.language,
+        available: entry.available !== false,
+        fileSize: entry.fileSize,
+        read: () => getShelfStore().readBook(entry.id),
+      })));
+  }, [librarySearchRuntime, shelfEntries]);
+
+  useEffect(() => {
+    if (searchOpen && searchScope === "all") void librarySearchRuntime.checkIndex();
+  }, [librarySearchRuntime, searchOpen, searchScope]);
+
   // 输入防抖只延迟查询，不延迟取消：每次改字都会立即终止旧扫描，已完成
   // 的章节仍保留在 SearchSession 内供新查询复用。
   useEffect(() => {
@@ -440,7 +551,14 @@ export default function App() {
     const generation = ++searchGenerationRef.current;
     const query = searchQuery.trim();
     const session = searchSessionRef.current;
-    if (!searchOpen || !query || !session) {
+    if (!searchOpen || searchScope !== "current" || !session) {
+      setSearchResults([]);
+      setSearchStatus("idle");
+      setSearchProgress({ processed: 0, total: 0 });
+      setSearchError(undefined);
+      return;
+    }
+    if (!query) {
       setSearchResults([]);
       setSearchStatus("idle");
       setSearchProgress({ processed: 0, total: 0 });
@@ -448,19 +566,23 @@ export default function App() {
       return;
     }
     setSearchStatus("searching");
-    setSearchProgress({ processed: 0, total: book?.spine.filter((item) => item.linear).length ?? 0 });
+    setSearchProgress({
+      processed: 0,
+      total: book?.spine.filter((item) => item.linear).length ?? 0,
+    });
     setSearchError(undefined);
     const timer = window.setTimeout(() => {
       const controller = new AbortController();
       searchAbortRef.current = controller;
-      void session.search(query, {
+      const request = session.search(query, {
         signal: controller.signal,
         maxResults: 101,
         onProgress: ({ completed, total }) => {
           if (generation !== searchGenerationRef.current) return;
           setSearchProgress({ processed: completed, total });
         },
-      }).then((results) => {
+      });
+      void request.then((results) => {
         if (generation !== searchGenerationRef.current) return;
         setSearchResults(results);
         setSearchStatus("complete");
@@ -477,7 +599,7 @@ export default function App() {
       searchAbortRef.current?.abort();
       searchAbortRef.current = null;
     };
-  }, [searchOpen, searchQuery, book]);
+  }, [searchOpen, searchQuery, searchScope, book]);
 
   const applyCount = useCallback(
     (generation: number, index: number, value: number, source: "estimated" | "measured"): boolean => {
@@ -938,33 +1060,67 @@ export default function App() {
 
   useEffect(() => () => { fontRuntimeRef.current?.dispose(); }, []);
 
-  const handleImportFont = useCallback(async (file: File) => {
-    if (fontBusy) return;
-    if (!/\.(ttf|otf|woff|woff2)$/i.test(file.name)) {
-      setShelfNotice({ kind: "error", text: "仅支持 TTF/OTF/WOFF/WOFF2 字体文件" });
-      return;
-    }
+  const fontImportBusyRef = useRef(false);
+  const importFontFile = useCallback(async (file: File) => {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const hash = await sha256Hex(bytes);
+    const id = fontIdFromHash(hash);
+    const family = fontFamilyFromFileName(file.name);
+    const entry = await getFontStore().importFont({ id, fileName: file.name, family, bytes });
+    setUserFonts((prev) => [entry, ...prev.filter((f) => f.id !== id)]);
+    setSettings((previous) => ({
+      ...previous,
+      fontSource: "imported",
+      customFontId: id,
+      customFontName: entry.family,
+    }));
+  }, []);
+
+  const handleImportFontBatch = useCallback(async <T,>(items: T[], nameOf: (item: T) => string, toFile: (item: T) => Promise<File>) => {
+    if (fontImportBusyRef.current || items.length === 0) return;
+    fontImportBusyRef.current = true;
     setFontBusy(true);
+    const { supported, unsupported } = partitionFontItems(items, nameOf);
+    let imported = 0;
     try {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const hash = await sha256Hex(bytes);
-      const id = fontIdFromHash(hash);
-      const family = fontFamilyFromFileName(file.name);
-      const entry = await getFontStore().importFont({ id, fileName: file.name, family, bytes });
-      setUserFonts((prev) => [entry, ...prev.filter((f) => f.id !== id)]);
-      setSettings((previous) => ({
-        ...previous,
-        fontSource: "imported",
-        customFontId: id,
-        customFontName: entry.family,
-      }));
-      setShelfNotice({ kind: "ok", text: `已导入字体：${family}` });
+      await runFontImportBatch(supported, async (item) => {
+        const file = await toFile(item);
+        await importFontFile(file);
+        imported += 1;
+      });
+      if (unsupported.length > 0) {
+        setShelfNotice({
+          kind: "error",
+          text: imported > 0
+            ? `已导入 ${imported} 个字体；忽略 ${unsupported.length} 个非字体文件`
+            : `已忽略 ${unsupported.length} 个非字体文件，仅支持 TTF/OTF/WOFF/WOFF2`,
+        });
+      } else if (imported > 0) {
+        setShelfNotice({ kind: "ok", text: imported === 1 ? `已导入字体：${fontFamilyFromFileName(nameOf(supported[0]))}` : `已导入 ${imported} 个字体` });
+      }
     } catch (e) {
       setShelfNotice({ kind: "error", text: `字体导入失败：${String(e)}` });
     } finally {
+      fontImportBusyRef.current = false;
       setFontBusy(false);
     }
-  }, [fontBusy]);
+  }, [importFontFile]);
+
+  const handleImportFonts = useCallback((files: File[]) => handleImportFontBatch(files, (file) => file.name, async (file) => file), [handleImportFontBatch]);
+  const handleImportFont = useCallback((file: File) => handleImportFonts([file]), [handleImportFonts]);
+  const handleImportFontPaths = useCallback((paths: string[]) => handleImportFontBatch(
+    paths,
+    (path) => path.split(/[\\/]/).pop() || path,
+    async (path) => {
+      const name = path.split(/[\\/]/).pop() || "font";
+      const bytes = await readFile(path);
+      return new File([bytes.slice().buffer as ArrayBuffer], name);
+    }
+  ), [handleImportFontBatch]);
+
+  useEffect(() => {
+    if (!fontSettingsOpen) setFontNativeDragActive(false);
+  }, [fontSettingsOpen]);
 
   const handleDeleteFont = useCallback(
     async (id: string) => {
@@ -1007,17 +1163,19 @@ export default function App() {
 
   // ---- 从书架打开 ----
   const handleShelfOpen = useCallback(
-    async (id: string) => {
+    async (id: string, searchTarget?: ResolvedCrossBookSearchHit) => {
       if (shelfBusyRef.current) return;
       const originalEntry = shelfEntriesRef.current.find((e) => e.id === id);
       if (!originalEntry) return;
       shelfBusyRef.current = true;
       setShelfBusy(true);
       setShelfError(null);
+      if (searchTarget) setSearchNavigationBusy(true);
       setPhase({ phase: "loading", fileName: originalEntry.fileName });
       try {
         // A new open is a new session even when the same book is reopened.
         // Flush any prior session before resetting the immediate-write gate.
+        persistShelfProgressRef.current();
         await progressWriterRef.current?.flush();
         progressWriterRef.current?.beginSession(id);
         let entry = originalEntry;
@@ -1032,6 +1190,7 @@ export default function App() {
             shelfBusyRef.current = false;
             setShelfBusy(false);
             setPhase({ phase: "idle" });
+            setSearchNavigationBusy(false);
             return;
           }
           entry = await getShelfStore().relink(id, selected);
@@ -1053,14 +1212,36 @@ export default function App() {
           setShelfError("这本书没有可阅读的内容");
           shelfBusyRef.current = false;
           setShelfBusy(false);
+          setSearchNavigationBusy(false);
           return;
         }
         const srv = new ResourceServer(b);
-        const saved: SavedProgress = {
-          spineIndex: entry.spineIndex,
-          page: entry.page,
-          anchor: readingAnchorFromShelfEntry(entry),
-        };
+        let saved: SavedProgress;
+        if (searchTarget) {
+          let targetIndex = searchTarget.spineIndex;
+          if (spineItemPath(b, targetIndex) !== searchTarget.chapterPath) {
+            targetIndex = spineIndexForPath(b, searchTarget.chapterPath);
+          }
+          if (targetIndex < 0 || targetIndex >= b.spine.length) {
+            throw new Error("索引结果对应的章节已不存在，请重建该书索引");
+          }
+          saved = {
+            spineIndex: targetIndex,
+            page: 0,
+            anchor: {
+              index: -1,
+              ratio: 0,
+              anchorTextOffset: searchTarget.textAnchor.start,
+              anchorTextSnippet: searchTarget.textAnchor.snippet || null,
+            },
+          };
+        } else {
+          saved = {
+            spineIndex: entry.spineIndex,
+            page: entry.page,
+            anchor: readingAnchorFromShelfEntry(entry),
+          };
+        }
         // 第一次打开：立即清除“新”标记（后端落盘异步完成，不阻塞阅读）
         if (entry.isNew) {
           setShelfEntries((prev) => markShelfEntryOpened(prev, id));
@@ -1087,6 +1268,7 @@ export default function App() {
         shelfBusyRef.current = false;
         setShelfBusy(false);
         setShelfError(`打开失败：${(e as Error).message}`);
+        setSearchNavigationBusy(false);
       }
     },
     [openParsedBook]
@@ -1157,24 +1339,21 @@ export default function App() {
     if (shelfBusyRef.current || ids.length === 0) return;
     shelfBusyRef.current = true;
     setShelfBusy(true);
-    const failed: string[] = [];
-    for (const id of ids) {
-      try {
-        await getShelfStore().deleteBook(id);
-        if (currentShelfId === id) setCurrentShelfId(null);
-      } catch (e) {
-        failed.push(String(e));
+    try {
+      const { deleted, failed } = await deleteShelfBooks(getShelfStore(), ids);
+      const deletedIds = new Set(deleted);
+      setShelfEntries((prev) => prev.filter((entry) => !deletedIds.has(entry.id)));
+      if (currentShelfId && deletedIds.has(currentShelfId)) setCurrentShelfId(null);
+      if (failed.length === 0) {
+        setShelfError(null);
+        setShelfNotice({ kind: "ok", text: `已删除 ${deleted.length} 本` });
+      } else {
+        setShelfError(`删除失败 ${failed.length} 本：${[...new Set(failed.map((item) => item.error))].join("；")}`);
       }
+    } finally {
+      shelfBusyRef.current = false;
+      setShelfBusy(false);
     }
-    setShelfEntries((prev) => prev.filter((e) => !ids.includes(e.id)));
-    if (failed.length === 0) {
-      setShelfError(null);
-      setShelfNotice({ kind: "ok", text: `已删除 ${ids.length} 本` });
-    } else {
-      setShelfError(`删除失败 ${failed.length} 本：${failed.join("；")}`);
-    }
-    shelfBusyRef.current = false;
-    setShelfBusy(false);
   }, [currentShelfId]);
 
   // ---- 章节状态回调 ----
@@ -2031,15 +2210,37 @@ export default function App() {
     }
     let unlisten: (() => void) | undefined;
     let cancelled = false;
+    let nativeDragHasEpub = false;
+    const isOverFontPanel = (position: { x: number; y: number }): boolean => {
+      if (!fontSettingsOpen) return false;
+      const panel = document.querySelector<HTMLElement>(".font-settings-panel");
+      if (!panel) return false;
+      return isPhysicalPointInsideRect(position, window.devicePixelRatio, panel.getBoundingClientRect());
+    };
+    const updateNativeDragVisual = (overFontPanel: boolean): void => {
+      setFontNativeDragActive(overFontPanel);
+      setDragActive(!overFontPanel && nativeDragHasEpub);
+    };
     getCurrentWebview()
       .onDragDropEvent((event) => {
         const p = event.payload;
         if (p.type === "enter") {
-          setDragActive(true);
+          nativeDragHasEpub = p.paths.some((path) => path.toLowerCase().endsWith(".epub"));
+          updateNativeDragVisual(isOverFontPanel(p.position));
+        } else if (p.type === "over") {
+          updateNativeDragVisual(isOverFontPanel(p.position));
         } else if (p.type === "leave") {
+          nativeDragHasEpub = false;
           setDragActive(false);
+          setFontNativeDragActive(false);
         } else if (p.type === "drop") {
+          nativeDragHasEpub = false;
           setDragActive(false);
+          setFontNativeDragActive(false);
+          if (isOverFontPanel(p.position)) {
+            void handleImportFontPaths(p.paths);
+            return;
+          }
           const paths = p.paths.filter((x) => x.toLowerCase().endsWith(".epub"));
           if (paths.length === 0) return;
           void handleImportSources(
@@ -2061,7 +2262,7 @@ export default function App() {
       cancelled = true;
       unlisten?.();
     };
-  }, [handleImportSources]);
+  }, [fontSettingsOpen, handleImportFontPaths, handleImportSources]);
 
   // ---- 派生 ----
   const ready = phase.phase === "ready" && book !== null && server !== null;
@@ -2304,15 +2505,31 @@ export default function App() {
     [userFonts, fontUrls]
   );
 
+  const crossBookPanelResults = useMemo<CrossBookPanelResult[]>(() =>
+    librarySearchSnapshot.results.map((hit) => presentCrossBookHit(
+      hit,
+      librarySearchSnapshot.query,
+      entryByContentHashRef.current.has(hit.contentHash) ? undefined : "书架中未绑定源文件",
+    )), [librarySearchSnapshot.results, librarySearchSnapshot.query, libraryIndexSignature]);
   const searchPanelResults = useMemo<SearchPanelResult[]>(() =>
-    searchResults.map((result) => ({
-      id: `${result.spineIndex}:${result.originalRange.start}:${result.originalRange.end}:${result.matchType}`,
-      chapterTitle: result.chapterTitle,
-      chapterPath: result.chapterPath,
-      snippet: result.snippet,
-      matchRanges: result.snippetMatchRanges,
-    })), [searchResults]);
+    searchScope === "all"
+      ? crossBookPanelResults
+      : searchResults.map((result) => ({
+          id: `${result.spineIndex}:${result.originalRange.start}:${result.originalRange.end}:${result.matchType}`,
+          chapterTitle: result.chapterTitle,
+          chapterPath: result.chapterPath,
+          snippet: result.snippet,
+          matchRanges: result.snippetMatchRanges,
+        })), [searchScope, crossBookPanelResults, searchResults]);
 
+  const handleStartLibraryIndex = useCallback((): void => librarySearchRuntime.startIndex(), [librarySearchRuntime]);
+  const handleCancelLibraryIndex = useCallback((): void => librarySearchRuntime.cancelIndex(), [librarySearchRuntime]);
+  const handleDeferLibraryIndex = useCallback((): void => librarySearchRuntime.deferIndex(), [librarySearchRuntime]);
+  const handleRebuildTextIndex = useCallback((): void => librarySearchRuntime.requestRebuild(), [librarySearchRuntime]);
+  const handleClearTextIndex = useCallback((): void => {
+    setSearchNavigationBusy(true);
+    void librarySearchRuntime.clearIndex().finally(() => setSearchNavigationBusy(false));
+  }, [librarySearchRuntime]);
   const loadSystemFonts = useCallback(async (): Promise<void> => {
     if (systemFontsStatus === "loading" || systemFontsStatus === "ready") return;
     setSystemFontsStatus("loading");
@@ -2371,6 +2588,11 @@ export default function App() {
               }
             : undefined
         }
+        onOpenAssistant={
+          shouldShowAiFoundationEntry(APP_EDITION, view)
+            ? () => openPanel("assistant")
+            : undefined
+        }
         onToggleMenu={
           view === "reader"
             ? () => {
@@ -2401,6 +2623,57 @@ export default function App() {
               onExportArchive={() => void handleExportArchive()}
               onImportArchive={() => void handleImportArchive()}
               thumbnailProvider={shelfThumbnailProvider}
+              searchMode={shelfSearchMode}
+              onSearchModeChange={(mode) => {
+                setShelfSearchMode(mode);
+                if (mode === "body") void librarySearchRuntime.checkIndex();
+              }}
+              bodySearch={{
+                query: librarySearchSnapshot.query,
+                onQueryChange: librarySearchRuntime.setQuery.bind(librarySearchRuntime),
+                results: crossBookPanelResults,
+                status: librarySearchSnapshot.searchStatus,
+                processed: librarySearchSnapshot.indexSummary.indexed,
+                total: librarySearchSnapshot.indexSummary.total,
+                truncated: librarySearchSnapshot.results.length > 100,
+                errorMessage: librarySearchSnapshot.searchError,
+                navigationBusy: searchNavigationBusy,
+                indexStatus: librarySearchSnapshot.indexState,
+                indexProgress: {
+                  total: librarySearchSnapshot.indexState === "indexing" || librarySearchSnapshot.indexState === "cancelling"
+                    ? librarySearchSnapshot.indexProgress.total
+                    : librarySearchSnapshot.indexSummary.total,
+                  completed: librarySearchSnapshot.indexState === "indexing" || librarySearchSnapshot.indexState === "cancelling"
+                    ? librarySearchSnapshot.indexProgress.completed
+                    : librarySearchSnapshot.indexSummary.indexed,
+                  pending: librarySearchSnapshot.indexSummary.pending,
+                  currentBookTitle: librarySearchSnapshot.indexProgress.titles.join("、") || undefined,
+                },
+                indexErrorMessage: librarySearchSnapshot.rebuildRequested
+                  ? "重新建立会清除现有全文索引，并重新处理全部可用书籍。"
+                  : librarySearchSnapshot.indexError,
+                onStartIndex: handleStartLibraryIndex,
+                onDeferIndex: handleDeferLibraryIndex,
+                onCancelIndex: handleCancelLibraryIndex,
+                onRebuildIndex: handleRebuildTextIndex,
+                onClearIndex: handleClearTextIndex,
+                concurrencyMode: corpusConcurrencyPreference.mode,
+                concurrency: corpusConcurrencyPreference.maxConcurrency,
+                detectedCores: logicalCores,
+                recommendedConcurrency: recommendedCorpusConcurrency,
+                onConcurrencyChange: (mode, value) => {
+                  setCorpusConcurrencyPreference(normalizeCorpusConcurrencyPreference({
+                    mode,
+                    maxConcurrency: value ?? corpusConcurrencyPreference.maxConcurrency,
+                  }, logicalCores));
+                },
+                onSelect: (panelResult) => {
+                  const result = crossBookPanelResults.find((candidate) => candidate.id === panelResult.id);
+                  if (!result) return;
+                  const entry = entryByContentHashRef.current.get(result.hit.contentHash);
+                  if (entry) void handleShelfOpen(entry.id, result.hit);
+                },
+              }}
             />
           </div>
         ) : (
@@ -2422,7 +2695,8 @@ export default function App() {
                   onSelectBook={() => setSettings((s) => ({ ...s, fontSource: undefined, customFontName: undefined, customFontId: undefined }))}
                   onSelectImported={(font) => setSettings((s) => ({ ...s, fontSource: "imported", customFontId: font.id, customFontName: font.family }))}
                   onDelete={(id) => void handleDeleteFont(id)}
-                  onImport={(file) => void handleImportFont(file)}
+                  onImport={handleImportFonts}
+                  nativeDragActive={fontNativeDragActive}
                   onClose={() => setForeground((current) => setMenuSubview(current, "main"))}
                 /> : <MenuPanel
                   fontSize={settings.fontSizePx}
@@ -2522,29 +2796,76 @@ export default function App() {
                 )}
                 {searchOpen && (
                   <SearchPanel
-                    query={searchQuery}
-                    onQueryChange={setSearchQuery}
+                    query={searchScope === "all" ? librarySearchSnapshot.query : searchQuery}
+                    onQueryChange={searchScope === "all" ? librarySearchRuntime.setQuery.bind(librarySearchRuntime) : setSearchQuery}
+                    scope={searchScope}
+                    onScopeChange={(scope) => {
+                      searchAbortRef.current?.abort();
+                      searchAbortRef.current = null;
+                      searchGenerationRef.current++;
+                      setSearchScope(scope);
+                      setSearchResults([]);
+                      setSearchStatus("idle");
+                      setSearchError(undefined);
+                      if (scope === "all") void librarySearchRuntime.checkIndex();
+                    }}
                     results={searchPanelResults}
-                    status={searchStatus}
-                    processed={searchProgress.processed}
-                    total={searchProgress.total}
-                    truncated={searchResults.length > 100}
-                    errorMessage={searchError}
+                    status={searchScope === "all" ? librarySearchSnapshot.searchStatus : searchStatus}
+                    processed={searchScope === "all" ? librarySearchSnapshot.indexSummary.indexed : searchProgress.processed}
+                    total={searchScope === "all" ? librarySearchSnapshot.indexSummary.total : searchProgress.total}
+                    truncated={(searchScope === "all" ? librarySearchSnapshot.results.length : searchResults.length) > 100}
+                    errorMessage={searchScope === "all" ? librarySearchSnapshot.searchError : searchError}
                     navigationBusy={searchNavigationBusy}
+                    indexStatus={searchScope === "all" ? librarySearchSnapshot.indexState : undefined}
+                    indexProgress={searchScope === "all" ? {
+                      total: librarySearchSnapshot.indexState === "indexing" || librarySearchSnapshot.indexState === "cancelling"
+                        ? librarySearchSnapshot.indexProgress.total
+                        : librarySearchSnapshot.indexSummary.total,
+                      completed: librarySearchSnapshot.indexState === "indexing" || librarySearchSnapshot.indexState === "cancelling"
+                        ? librarySearchSnapshot.indexProgress.completed
+                        : librarySearchSnapshot.indexSummary.indexed,
+                      pending: librarySearchSnapshot.indexSummary.pending,
+                      currentBookTitle: librarySearchSnapshot.indexProgress.titles.join("、") || undefined,
+                    } : undefined}
+                    indexErrorMessage={librarySearchSnapshot.rebuildRequested
+                        ? "重新建立会清除现有全文索引，并重新处理全部可用书籍。"
+                        : librarySearchSnapshot.indexError}
+                    onStartIndex={searchScope === "all" ? handleStartLibraryIndex : undefined}
+                    onDeferIndex={searchScope === "all" ? handleDeferLibraryIndex : undefined}
+                    onCancelIndex={searchScope === "all" ? handleCancelLibraryIndex : undefined}
+                    onRebuildIndex={searchScope === "all" ? handleRebuildTextIndex : undefined}
+                    onClearIndex={searchScope === "all" ? handleClearTextIndex : undefined}
+                    concurrencyMode={searchScope === "all" ? corpusConcurrencyPreference.mode : undefined}
+                    concurrency={searchScope === "all" ? corpusConcurrencyPreference.maxConcurrency : undefined}
+                    detectedCores={searchScope === "all" ? logicalCores : undefined}
+                    recommendedConcurrency={searchScope === "all" ? recommendedCorpusConcurrency : undefined}
+                    onConcurrencyChange={searchScope === "all" ? (mode, value) => {
+                      setCorpusConcurrencyPreference(normalizeCorpusConcurrencyPreference({
+                        mode,
+                        maxConcurrency: value ?? corpusConcurrencyPreference.maxConcurrency,
+                      }, logicalCores));
+                    } : undefined}
                     onSelect={(panelResult) => {
+                      if (searchScope === "all") {
+                        const crossResult = crossBookPanelResults.find((candidate) => candidate.id === panelResult.id);
+                        if (!crossResult) return;
+                        const entry = entryByContentHashRef.current.get(crossResult.hit.contentHash);
+                        if (entry) void handleShelfOpen(entry.id, crossResult.hit);
+                        return;
+                      }
                       const result = searchResults.find((candidate) =>
                         `${candidate.spineIndex}:${candidate.originalRange.start}:${candidate.originalRange.end}:${candidate.matchType}` === panelResult.id
                       );
                       if (result) handleSearchNavigate(result);
                     }}
-                    onCancel={() => {
+                    onCancel={searchScope === "current" ? () => {
                       searchAbortRef.current?.abort();
                       searchAbortRef.current = null;
                       searchGenerationRef.current++;
                       setSearchResults([]);
                       setSearchStatus("idle");
                       setSearchProgress({ processed: 0, total: 0 });
-                    }}
+                    } : undefined}
                     onClose={() => closePanel("search")}
                   />
                 )}
@@ -2563,6 +2884,16 @@ export default function App() {
                     }}
                     onDelete={(viewNote) => void handleDeleteNote(viewNote.id)}
                   />
+                )}
+                {assistantOpen && LazyAiFoundationPanel && (
+                  <Suspense fallback={<aside className="ai-foundation-panel" role="status">正在加载 AI 开发面板…</aside>}>
+                    <LazyAiFoundationPanel
+                      snapshot={aiRuntimeSnapshot}
+                      onEnable={enableAi}
+                      onDisable={disableAi}
+                      onClose={() => closePanel("assistant")}
+                    />
+                  </Suspense>
                 )}
                 <ReaderView
                   key={bookKey}

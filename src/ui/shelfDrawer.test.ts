@@ -7,6 +7,16 @@ async function readStyles(): Promise<string> {
 }
 
 describe("书架抽屉布局契约", () => {
+  it("正文模式使用独立共享 query，并保留元数据模式与数据管理入口", async () => {
+    // @ts-expect-error The production project intentionally omits @types/node.
+    const source = await (await import("node:fs/promises")).readFile(new URL("./ShelfView.tsx", import.meta.url), "utf8");
+    expect(source).toContain('type ShelfSearchMode = "metadata" | "body"');
+    expect(source).toContain("bodySearch?: ShelfBodySearchProps");
+    expect(source).toContain("书名与作者");
+    expect(source).toContain("搜索全部书籍正文");
+    expect(source.indexOf("数据管理")).toBeGreaterThan(source.indexOf("shelf-body-search"));
+  });
+
   it("滚动区域填满抽屉标题栏以下空间", async () => {
     const styles = await readStyles();
     expect(styles).toMatch(

@@ -993,3 +993,215 @@ CSS 规则的逐项冲突编号仍以 `rendering-layers.md` 为准；本文记�
 - 扩展契约：以后新增普通前台功能扩展 `ReaderPanelId` 和对应 renderer/入口即可，禁止恢复 `xxxOpen` boolean 或依靠 z-index 实现业务互斥。
 - 验证：Luna High 完成状态模型与 App 迁移，定向 4 文件/16；主代理审核补充全窗口 modal 遮罩。最终全量 Vitest 53 文件/420 用例、TypeScript 与 Vite production build（111 modules）通过。
 - 关联：`docs/tasks/active/reader-foreground-arbitration.md`、B-054/B-060/B-069。
+
+## B-072：Windows 跨书建库看似完成但任意查询均无结果（2026-08-24）
+
+- 状态：根因确认并修复，自动化通过；待 Windows 用原书库重新建库复验。
+- 现象：选择“全部书籍”后能看到逐本建库进度，完成后输入任意正文均无结果。
+- 证据：Windows 实际 `<AppData>/Roaming/dev.epubreader.app/ai/ai.sqlite3` 已创建且 schema 为 v3，但 `books`、`chunks`、`chunk_fts` 均为 0；本机 linked-library 的旧记录普遍保存 `language: ""`。
+- 根因：C-54 将 ShelfEntry 的可选语言原样发送给 staging；旧记录用空字符串表达未知语言，Rust 却把 `Some("")` 作为非法非空字段拒绝。多书执行器按设计隔离失败并继续下一本，App 又在全部失败后无条件切到 `ready`，共同造成“有进度、无索引、无错误”的伪成功。
+- 修复：前端 staging/replace 边界将空白语言省略，Rust 再将空白可选语言规范化为 `NULL`；如果本轮没有任何成功或可跳过的索引且存在失败，App 保持 error 并展示首个失败原因。
+- 数据边界：无需迁移或删除书架；现有 AI 数据库是可重建缓存且当前为空。安装新构建后重新选择“全部书籍”即可写入索引。
+- 验证：indexing 定向 16/16；全量 Vitest 63 files/465 tests、TypeScript、Vite production build 126 modules、Rust fmt 与 37/37 tests 全部通过。
+- 关联：C-54、`docs/tasks/active/cross-book-fts-search.md`。
+
+## B-073：修复空语言后全书仍因“无效的正文”建库失败（2026-08-24）
+
+- 状态：根因确认并修复，自动化及真实测试书语料回放通过；待 Windows 重新建库复验。
+- 现象：B-072 后建库越过语言校验，但全部 33 本又以“无效的正文”失败。
+- 根因：图片封面页的 XHTML 只有 SVG/image 和缩进换行。`extractVisibleCorpus()` 的注释与设计要求空块不入库，但其 flush 仅判断字符串非空；换行/空格字符串因此被切成 `originalText` 全空白、`normalizedText` 为空的 chunk，随后被 Rust 正确拒绝。几乎每本 EPUB 都有封面，所以表现为全库失败。
+- 修复：语料提取和 `createCorpusChapter()` 双层丢弃规范化后为空的块；图片-only 章节产生零 chunk 的 batch，建库继续后续章节。没有放宽 Rust 非空校验。语料解析版本由 `visible-xhtml-v1` 升至 `visible-xhtml-v2`，已有索引会按派生数据版本自动重建。
+- 验证：目标《EPub指南——从入门到放弃》由封面首块失败恢复为 568 个有效 chunk；Windows 测试目录 37 本全部回放，共 3094 chunks，无空正文/非法正文。定向 5 files/24 tests、全量 Vitest 63 files/467 tests、TypeScript、Vite 126 modules、Rust fmt 与 37/37 tests 全部通过。
+- 关联：B-072、C-54、`docs/tasks/active/cross-book-fts-search.md`。
+
+## B-074/C-55：全库搜索误触发建库、取消按钮漂移及异常退出恢复（2026-08-24）
+
+- 状态：代码、自动化与生产构建完成；待 Windows WebView2 人工验收。
+- 现象：切换到“全部书籍”会立刻扫描整库；进度书名变化时取消按钮随之移动；关闭应用后未完成任务缺少明确恢复语义。
+- 修复：首次进入只读取索引状态，显示硬件/耗时提示，用户确认后才读取 EPUB；进度与当前书名、固定取消区分栏，取消进入明确的“正在停止”状态并等待当前 read/parse/staging 收口，不再启动下一本。
+- 恢复边界：每本书以 staging 原子提交；正常完成的书立即保留，正在处理的半本书在取消或下次启动时回收。持久任务按完成书本更新；异常退出会标记为已回收，重新进入时显示部分索引并只补缺失或版本过期的书。
+- 缓存边界：新增统一派生缓存契约与 `full-text-index` 类别，状态可报告条目数、体积、更新时间与构建状态；清理只删除全文索引、暂存数据及对应任务，不影响 EPUB、书架、进度、书签、笔记和 Provider 配置。本轮没有在书架增加缓存清理入口。
+- 搜索一致性：部分索引可立即使用，但查询强制匹配当前 parser/normalizer/chunker 版本，避免旧缓存混入；持久任务进度只在完成一本书时写入，避免章节级高频数据库更新。
+- 验证：前端 66 files/485 tests、TypeScript、Vite production build 通过；Rust fmt 与 38/38 tests 通过。
+- 关联：C-54、`docs/tasks/active/cross-book-fts-search.md`。
+
+## C-57：字体设置支持拖动批量导入（2026-08-24）
+
+- 状态：代码与自动化完成，待 Windows WebView2 实机验收。
+- 实现：浏览器字体面板接入 HTML5 drop；Windows 使用现有 Tauri 原生拖放事件，按物理坐标与设备缩放判断面板命中，并通过 fs 插件读取路径。两端均复用原有哈希、`FontStore` 与字体选择链路。
+- 性能与冲突边界：多字体严格串行，格式判断先于文件读取，同步 busy gate 防止批次并发；字体面板内阻止全局 EPUB drop，面板外维持 EPUB 导入。
+- 交互：拖入使用深度计数防止子元素切换闪烁，提供主题色虚线高亮、导入中状态和可访问提示；混合文件报告成功与忽略数量。
+- 验证：字体拖放 helper 5/5；全量 Vitest 73 文件/509 用例、TypeScript、Vite production build（137 modules）通过。
+- 关联：`docs/tasks/active/font-drag-import.md`、B-058/C-47。
+
+## B-075：Tauri 开发版模型资产面板永久停在“读取中”（2026-08-24）
+
+- 状态：根因确认并修复，自动化通过；待 Windows Tauri dev 复验。
+- 现象：打开“AI 与模型（开发）”后一直显示“读取中”，模型库仍显示未设置，刷新、选择模型库、linked 导入和登记测试包全部被禁用。
+- 根因：React 开发 Strict Mode 会对 effect 执行一次 setup → cleanup → setup 探测。第一次 setup 已将 controller 置为 loading/busy，cleanup 又永久 dispose 这个由 `useMemo` 保留的实例；第二次 setup 因 disposed/inFlight 直接返回，旧请求也因 generation 失效不能收口 UI。Rust IPC 和模型数据库不是此次卡死的根因。
+- 修复：controller 允许 dispose 后由下一次 `start()` 建立全新 generation；dispose/重启重置旧 in-flight gate，所有旧请求的 publish/finally 都受 generation 保护，不能覆盖或解锁新一轮状态；真实卸载仍停止轮询。
+- 验证：新增 `start → dispose → 立即 start` 回归，覆盖第二轮正常结束和第一轮迟到响应不覆盖；模型 controller 定向 6/6，全量 Vitest 77 files/521 tests，TypeScript 通过。Rust 未修改。
+- 关联：RAG C-57、`docs/tasks/active/rag-model-asset-management.md`。
+
+## B-076：Windows 开发探针下载请求失败（2026-08-24）
+
+- 状态：根因确认并修复，Rust 自动化通过；待 Windows Tauri dev 复验。
+- 现象：`c57-dev-probe` 登记成功，但下载立即 failed，0/15 bytes，Rust 报 `error sending request for url (http://127.0.0.1:5173/...)`。
+- 根因：Tauri `devUrl` 是 `http://localhost:5173`，开发 catalog 却硬编码 `127.0.0.1`。Windows 上 Vite 可能只绑定 localhost 解析出的 IPv6/特定接口，应用页面可用不代表独立的 IPv4 loopback 地址也在监听。
+- 修复：固定探针来源与 `devUrl` 统一为 `http://localhost:5173/c57-dev-probe`；重新登记开发 catalog 会事务性替换旧 `model_sources`，已有 failed 任务保持可重试，不要求清理 AI 数据库。
+- 边界：只改变 debug fixture 的本地来源，不改变正式模型下载源、网络策略、模型资产所有权或 Provider/能力插件接口。
+- 验证：Rust fmt/check 与 71/71 tests 通过；新增旧来源失败→重新登记→来源替换→任务重新排队回归。
+- 关联：RAG C-57、B-075、`docs/tasks/active/rag-model-asset-management.md`。
+
+## B-077：Windows 点击模型校验导致原生进程栈溢出（2026-08-24）
+
+- 状态：根因确认并修复，Rust 自动化通过；待 Windows Tauri dev 复验。
+- 现象：15 字节开发探针下载成功，点击“校验”后应用立即退出，状态码为 `0xc00000fd / STATUS_STACK_OVERFLOW`。
+- 根因：模型资产 `sha256_file` 在 Tauri command 调用栈上声明了 1 MiB 局部数组；Windows 应用线程默认栈通常也约为 1 MiB，加上校验调用链后在读取文件前即耗尽栈空间。路径、reparse 检查和 SQLite/serde 链路均无递归。
+- 修复：保持流式 SHA-256 语义，将缓冲改为256 KiB `Vec` 堆分配；没有把完整模型读入内存，也不改变 digest、Provider 或下载行为。
+- 验证：新增256 KiB小栈线程读取已知文件并核对 SHA-256 的专项回归；Rust fmt/check 与72/72 tests 通过。
+- 关联：RAG C-57、B-076、`docs/tasks/active/rag-model-asset-management.md`。
+
+## B-078：删除模型后遗留历史下载 staging（2026-08-24）
+
+- 状态：代码与自动化修复完成，待 Windows Tauri dev 复验。
+- 现象：删除已安装模型后正式包目录消失，但 `.staging` 下仍保留此前失败任务的空目录；这些不是模型文件，却会随着历史失败任务逐渐积累。
+- 根因：旧删除链路先删除 `model_packages`，数据库通过外键级联同时丢失历史任务 ID，却没有在此之前清理 `<root>/.staging/<package>-<task>`。
+- 修复：删除命令在 `BEGIN IMMEDIATE` 临界区重新检查活动任务，从数据库取得该 package 的精确历史 task IDs，逐项经过 symlink/reparse/越界防护清理 staging；全部成功后才删除正式 managed 目录和数据库记录。保留 `.staging` 根目录，不使用 glob/前缀扫描，linked 外部文件永不删除。
+- 失败与竞态：queued/downloading/verifying 存在时拒绝删除且不清 staging；任一 staging 安全检查或删除失败时事务回滚并保留 package/任务记录。paused/failed/cancelled/completed 的历史 staging 可清理。
+- 验证：覆盖多状态历史任务、无目录幂等、相似前缀及其他包不受影响、活动任务拒绝、linked 外部目录保留；Rust fmt/check 与74/74 tests 通过。
+- 关联：RAG C-57、B-077、`docs/tasks/active/rag-model-asset-management.md`。
+
+## B-079：Windows 短路径别名导致模型临时目录被误判为越界（2026-08-27）
+
+- 状态：根因确认、代码与自动化修复完成；待 Windows Tauri 在真实 D 盘/中文路径下复验。
+- 现象：AI feature 的 Windows 测试在创建模型下载 staging 时报告“模型临时目录越出 staging 根目录”；目录实际上位于正确根目录内。
+- 根因：安全检查先 canonicalize 根目录，使 Windows 的 8.3 短路径别名展开为长路径，却继续用尚不存在目标的词法短路径执行 `strip_prefix`。两条路径指向同一位置但字符串前缀不同，因此被错误判定为越界。
+- 修复：先 canonicalize 根目录，并从目标向上寻找最近存在的祖先；canonicalize 该祖先后验证其仍在根目录内，再逐级检查已有组件的 symlink/reparse point 和剩余词法路径。staging 创建函数返回经验证的 canonical 路径，仍拒绝 `..`、盘符/根前缀及真实越界路径。
+- 边界：没有放宽模型库写入范围，也没有关闭 junction/reparse 防护；只消除同一路径的 Windows 别名误报。Core edition 不编译模型下载模块，不受运行时影响。
+- 验证：新增不存在目标、真实越界和跨平台绝对路径回归；Windows Cargo Core 38/38、AI 72/72 tests 通过，Rust fmt/check 通过。
+- 关联：RAG C-57、C-57.5、B-078、`docs/tasks/active/core-ai-edition-split.md`。
+
+## B-080：Windows Core/AI 前端包装命令无法启动 pnpm.cmd（2026-08-28）
+
+- 状态：根因确认并修复；WSL Core/AI真实包装命令通过，待Windows原命令复验。
+- 现象：`pnpm build:core`和`pnpm build:ai`进入`build-frontend.mjs`后，以`spawnSync pnpm.cmd EINVAL`立即失败；随后独立运行产物门禁只会报告`dist/core`或`dist/ai`不存在。
+- 根因：跨平台Node wrapper在Windows中再次把`pnpm.cmd`作为`spawnSync`可执行文件直接启动；该调用组合会被Windows Node拒绝，TypeScript和Vite实际都没有开始运行。后续missing dist只是连锁结果。
+- 修复：wrapper不再嵌套调用pnpm。它统一使用当前`process.execPath`直接运行项目内的TypeScript、Vite、Tauri CLI和产物验证脚本；edition环境、参数及子进程退出码继续沿用原契约。
+- 边界：不修改依赖版本、Vite产物内容、Tauri feature、edition身份或Windows构建脚本；`pnpm test`原本正常的链路不受影响。
+- 验证：WSL依次执行`pnpm build:core`与`pnpm build:ai`，各150 modules并通过对应产物门禁；直接Node调用本地Tauri CLI返回`tauri-cli 2.11.4`。Windows仍需用户同步单个修复后复跑原四条命令。
+- 关联：C-57.6、`docs/tasks/active/core-ai-release-hardening.md`。
+
+## B-081：Tauri 2.11 dev/build拒绝Cargo专用参数（2026-08-28）
+
+- 状态：根因确认并修复；Tauri 2.11四组参数解析通过，待Windows Tauri dev/正式打包复验。
+- 现象：B-080修复后`pnpm tauri:dev:core`可以启动本地Tauri CLI，但立即报告`unexpected argument '--no-default-features'`，应用和开发服务器均未启动。
+- 根因：`--no-default-features`是Cargo参数，Tauri 2.11的`dev`与`build`子命令只暴露`--features`，并不接受该标志；原wrapper和PowerShell发行脚本把Cargo参数直接放进Tauri CLI参数层。
+- 修复：Tauri dev与build只传`--features core|ai`和对应config。Cargo清单已经固定`default=[]`，因此实际激活集合仍只有显式edition feature；`EPUB_READER_EXPECTED_EDITION`继续由`build.rs`校验，未来若默认错误加入另一edition会因feature冲突或mismatch失败。
+- 边界：直接调用Cargo的测试/检查仍可保留`--no-default-features`；此次只修正Tauri CLI层，不改变Cargo feature定义、前端edition、identifier或产物目录。
+- 验证：本地Tauri 2.11.4的`dev/build --features core|ai --config ... --help`四组均退出0；非法旧参数已从wrapper和Windows发行脚本移除。真实Windows窗口与NSIS仍待用户复验。
+- 关联：B-080、C-57.6、`docs/tasks/active/core-ai-release-hardening.md`。
+
+## B-082：高性能模式修改设置后下一 HTML 使用旧主题/字号（2026-09-11）
+
+- 状态：已修复并通过本地回归；待 Windows 原书复验。
+- 现象/触发：在目录章切换深浅主题、字号、字体后顺序翻章；设置防抖期间快速换章，或设置与章节在同一批更新中变化。
+- 根因：ReaderView 的 paginator/display-ready 回调跨 render 存活，后台构造闭包捕获首次 renderSettings。章节 effect 取消设置防抖后没有把新设置交给 load，且 ready 缓存没有设置身份校验。
+- 约束：保留三槽、完整显示门、稳定内容锚点、显式跳转边界和共享资源释放顺序；开关模式本身不增加章节重载。
+- 修复：槽位记录实际 renderSettings；构造、调度和提升读取/核对最新设置；loading/measuring/error 撤销 ready。LoadOptions 接收可选 settings，让替代防抖的章节加载同时应用新设置。
+- 选择原因：在产生/消费缓存的位置维护一致性，覆盖普通和快速操作时序；不加入额外 reload、延时猜测或 CSS 覆盖补丁。
+- 修改：`src/ui/ReaderView.tsx`、`src/render/paginator.ts`、`src/ui/ReaderView.preload.test.ts`、共享 React 测试 harness。
+- 验证：三个原始时序测试修复前均失败；修复后四项生命周期测试通过，包含连续设置及新字体资源。Chromium 合成三章 EPUB：目录→深色/24px→下一章，浅色/18px→下一章/回翻均核对正文 computed style 和 iframe 可见性；无 pageerror。
+- 剩余：Windows WebView2、用户原 EPUB 及大图片章性能待复验。
+- 关联：C-50、`docs/tasks/active/core-reader-fixes-september.md`。
+
+## B-083：选区菜单“添加笔记”刚打开就被关闭（2026-09-11）
+
+- 状态：已修复并通过本地回归；待 Windows 复验。
+- 现象/触发：选中文字后右键，点击添加笔记，没有可用的编辑框。
+- 根因：菜单先 onAddNote（打开 modal）、再 onClose（前台状态设 none）；React 同批更新后关闭动作覆盖新 modal。
+- 约束：继续使用 ReaderForeground 的唯一前台仲裁，不增加独立弹窗状态，不改笔记锚点或存储格式。
+- 修复：先关闭选区菜单，再把已保存的选区 payload 交给添加笔记回调。
+- 选择原因：修复交接顺序；不以延时打开或提高 z-index 掩盖状态覆盖。
+- 修改：`src/ui/ReaderContextMenu.tsx`、`src/ui/ReaderContextMenu.interaction.test.ts`、`src/test/reactDomHarness.ts`。
+- 验证：真实 React 点击测试修复前最终为 none、修复后为 composer；Chromium 实际选区→右键→添加→输入→保存→书架重开→笔记列表→编辑保存通过。
+- 剩余：Windows 原生右键/WebView2 的实际操作待复验。
+- 关联：C-49/C-52、`docs/tasks/active/reader-notes.md`、基础修复任务。
+
+## B-084：删除已索引书籍耗时长并阻塞窗口（2026-09-11）
+
+- 状态：已修复清理路径并通过本地回归；Windows 实际书库耗时待复验。
+- 现象/触发：用户确认主要是从书架删除已经建立全文索引的书籍。批量删除更慢。
+- 根因：同步 Tauri 命令在 UI 线程执行 SQLite/文件清理；逐本调用导致重复扫描 FTS 的 UNINDEXED content_hash、逐次提交和重写书架 JSON。即使已无其他书的索引，FTS 仍逐段分词删除。
+- 约束：原 EPUB 不删除；未建过索引的库不创建 DB；其他书、staging、任务和模型数据不误删；Core v3/AI v6 数据格式不变。
+- 修复：单本/批量入口共享 blocking worker；新增批量 IPC，一次验证完整选择集、一次 SQLite 清理事务、每份书架 JSON 保存一次。临时指纹集合避免绑定参数上限与逐本扫描；最后一本/全部索引被选择时，核对包括遗留 FTS 行在内没有其他数据后，在同事务中重建相同空 FTS 表。前端只隐藏成功项，失败不自动重试逐本删除。
+- 选择原因：后台执行解决 UI 阻塞，批量减少重复工作，最后索引快速路径避免重分词。未采用异步“假成功”、遗留索引延后清理、全库 VACUUM、依赖 chunks/FTS rowid 相等或新 schema 迁移。
+- 修改：`src/App.tsx`、`src/ui/shelf.ts` 及删除/IPC 测试，`src-tauri/src/linked_library.rs`、`lib.rs`、`ai/mod.rs`、`ai/store.rs`。
+- 验证：Rust 覆盖重复/空/非法 hash、其他书/staging/jobs 保留、rowid 不一致、清理失败回滚、遗留 FTS 行保护、清空后重建和 schema 版本不变；原无 DB 副作用测试继续通过。前端覆盖单次批量 IPC、浏览器部分失败保留、原生失败不循环重试。
+- 性能：WSL 同盘复制的约 193 MiB 合成 SQLite，20,000 chunks × 600 中文字符。100 本删 50 本：6.084s→4.360s；全部删除：13.986s→1.291s。单本占全部 20,000 chunks：10.196s→1.082s。100 本中仅删 1 本（还保留其他索引）：0.220s→0.217s，主要改善是后台执行而非 SQL 倍数加速。此为 SQL 清理对照，不代表 Windows 端到端延迟。
+- 剩余：SQLite 与多份 JSON 仍不是跨文件统一事务；保留逐文件原子保存。Windows 磁盘占用/故障、真实大书和建库未结束时同时删除的压力场景尚未实测。
+- 关联：C-53/C-54/C-56、`docs/tasks/active/core-reader-fixes-september.md`。
+
+## B-085：相容同居制作信息页的中间蓝色盒子向右突出（2026-09-12）
+
+- 状态：本地修复与真实书回归完成，待 Windows WebView2 复验。
+- 触发：用户最初称“目录页”，补充为中间蓝色盒子右缘突出；实际位于《和相容为负的同学同居 01》的 `OEBPS/Text/message.xhtml`。
+- 根因：上下卡片嵌套在限宽链接中，`margin:0 1em` 自然从父容器扣除；中间卡片是 viewer 直接子，L3 给它完整 40rem 宽度，C-04 又叠加作者 margin，造成 608px/640px/608px 三种宽度。
+- 修复：对无作者 sizing、包含块级内容的普通横排容器、明确非百分比且左右正对称的作者 margin，按版心内部留白计算 max-width 和两侧位置，使用原 marginFixes 保存/恢复。40rem、16px 字号下三个盒子统一为 `x=336..944,width=608`。
+- 约束/选择：保留 C-40 已明确居中的标题、fit/max-content、作者宽度、未知 CSSOM、单侧/负边距和 float 原路径；不按书名、颜色或 `.epub` 类名修补，不改 EPUB。所有 h1～h6 以及仅含行内内容的 div 展示标题继续走原标题对齐路径，避免改变 B-024/C-40 已验收的标题盒宽与位置。
+- 修改：`src/render/paginator.ts`、`paginator.test.ts`、`percentageInsets.test.ts`。
+- 验证：原书真实 before/after、1280/16px/light、900/24px/dark、640/16px/light 和同文档往返 reflow；卡片等宽同左缘断言通过。原 TOC.xhtml 本身未发现同类异常。
+- 关联：C-04/C-24/C-40、`docs/tasks/active/toc-width-three-books.md`。
+
+## B-086：前辈 04 目录百分比卡片绕过限宽（2026-09-12）
+
+- 状态：本地修复与真实书回归完成，待 Windows WebView2 复验。
+- 触发：《最喜欢的前辈小巧又可爱，所以想每天让她害羞三次 04》`OEBPS/Text/TOC.xhtml` 的目录卡片使用 `margin:0.5em 5%`，宽窗口铺到 1143px。
+- 根因：C-16 把所有非零百分比边距都当作页面定位，写入 `max-width:none`，忽略对称双侧留白与单侧百分比定位的区别。
+- 修复：只有明确无作者 sizing、普通横排块且左右正对称的百分比留白，按有效 40rem 版心比例计算；5% 两侧各 32px，卡片 border-box 为 576px。其他百分比定位仍沿用 C-16，不追加版心偏移。
+- 约束：窄窗仍使用实际包含块的百分比；content-box 扣除 padding/border；作者 width/min/max-width、未知级联、fullpage、非对称/负 margin 保持。所有临时 max-width/margin 在下一轮恢复。
+- 未采用：全局强制 max-width!important、删除百分比布局兼容规则或包裹目录 DOM。
+- 验证：目标原书宽窄/主题/字号/同文档 reflow；赤月单侧百分比定位对照通过，标题背景页前后布局一致。
+- 关联：C-16、B-085 共用 `getReaderSymmetricInsets`，基础目录宽度任务。
+
+## B-087：国王求婚 06 的竖排引文被撑宽且离开版心（2026-09-12）
+
+- 状态：本地修复与真实书回归完成，待 Windows WebView2 复验。
+- 触发：《国王的求婚 06》`OEBPS/Text/TOC.xhtml`，右浮动的 `vertical-rl` 引文。
+- 根因：C-08 把正常竖排的一行厚度误判为横排浮动塌缩，Canvas 水平测量后写入约 384px width；C-31 又完全排除竖排，导致引文仍贴窗口右侧。
+- 修复：横排 Canvas 补偿仅处理 horizontal-tb。对明确横排包含块内的 vertical-rl/vertical-lr 物理 left/right float，沿用已有版心侧 inset 与作者 margin；其他复杂书写组合不放宽。
+- 约束：不改变 writing-mode、字体或阅读器分页方向；百分比/负/未知边距、作者全宽、复杂定位、过宽与 RTL 保留原门控。
+- 验证：1280/16px 下引文恢复自然 `28.7969px` 宽，无补偿 inline width，右缘 `921.609px`，位于版心右缘 960px 以内并保留作者 2em margin；900/24px、640/16px 和往返 reflow 均通过。金木犀普通 right float 保持原结果。
+- 关联：C-08/C-31、基础目录宽度任务。
+
+本轮统一验证：Vitest 87 files / 552 tests、tsc、Core/AI production build 各 150 modules 与 artifact gate 通过。未修改 Rust，沿用前轮已通过的后端基线，不重复声称本轮运行 Cargo。标题页背景图显示不全按用户要求不处理，三本标题页的几何/页数对照一致。
+
+
+## B-088：火焰目录的行内色块被旧溢出补偿拉成等宽（2026-09-12）
+
+- 触发：《世界啊臣服于吾之火焰 01》TOC.xhtml；用户确认色块应长短不一。
+- 根因：C-25 的 inline-block 补偿使作者尾随全角空格参与宽度，原来的右对齐文字和不同可见背景长度变成约 249px 等宽盒。
+- 修复：对简单横排/ltr/右对齐行，先用 Range 检查所有非空白文字均在行边界内，再仅裁掉横向外溢背景；保留 inline 排列。复杂/不安全行保持原补偿。每轮恢复 overflow-x 值与 priority。
+- 分页：DOM rect 仍含被裁掉的空白，contentExtent 对本轮登记的裁剪行后代取可见水平边界，避免窄窗多出空白末页；保留真实后续内容列。
+- 验证：原书四种窗口/字号配置与同文档 reflow；640/16 仍 1 页，900/24 为 2 页；可见色块恢复多种长度。新增真实/被裁剪后续列统计回归，扩展样式恢复测试。
+- 关联：C-25；本地完成，待 Windows 复验。
+
+## B-089：赤月目录条目整体超过版心右缘（2026-09-12）
+
+- 触发：《试着向准备跳下去的同班同学提议「和我XX吧！」02》contents.xhtml。用户只确定“疑似”，同意先修测得的条目越界，之后与汇报人交流。
+- 根因：自动宽度目录容器的左侧 1.75em margin 被加到完整 40rem 宽盒之外，导致 1280/16 下 right=988，超过正文右缘 960；hover 背景也过长。
+- 修复：将 B-085 的普通分组块留白规则扩展到非负非对称固定边距，max-width 扣除作者边距，保持起点缩进和右边界。目录宽 640→612px，右缘 988→960。
+- 边界：仅含块级内容且没有作者 sizing 的普通横排块；标题/行内展示标题、作者宽度、未知级联、负 margin、float 和非对称百分比定位保留。右下角人物位置未修改。
+- 验证：原书四配置、同文档 reflow、单侧留白/盒模型/排除条件单测；等待汇报人确认视觉预期。
+- 关联：C-04，`getReaderAutoBlockInsets`。
+
+## B-090：标题页及页面级百分比间距采用完整页面宽度（2026-09-12）
+
+- 触发：相容同居 01 的 title.xhtml，margin-top:40%；用户要求同时检查 padding-top/bottom 等百分比。
+- 根因：40rem 只限制顶层盒宽，实际 CSS 包含块仍为整页 viewer；纵向 margin/padding 的百分比按包含块宽度解析，因此 1280px 下误得 512px 上边距。
+- 修复：页面级上下 margin 和四向 padding 的百分比项按有效版心宽度解析；root padding 先于分页尺寸计算。嵌套盒按真实父宽、无额外缩放；保留 CSS 宽度基准，不改按窗口高度计算。
+- 级联：Typed OM 读取最终值，calc/min/max/clamp 中长度项保持，引擎解析新值；临时 inline!important 穿过作者重要声明，measure/cleanup 恢复原值与 priority。未知 Typed OM、竖排/float/绝对定位、已突破版心的全宽和全页图保守跳过。
+- 验证：1280/16 下上边距 512→256px，标题 2→1 页；四配置/往返 reflow、root/top/nested padding、逻辑属性、calc、px!important、窄窗与排除边界通过。不改变另外两本标题背景图的几何/页数。
+- 关联：C-16b，新增 `percentageSpacing.ts`；待 Windows WebView2。
+
+B-088～B-090 统一验证：Vitest 89 文件 / 558 用例，Core/AI 构建含 TypeScript 检查和 artifact gate 通过，各 151 modules。原书和合成浏览器证据在 `.cache/width-spacing/`，不应同步；Rust 本轮未改未重测。源仓保持只读。

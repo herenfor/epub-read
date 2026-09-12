@@ -10,6 +10,21 @@
 
 ## 当前阶段
 
+- 2026-09-12 追加反馈已本地修复，待 Windows/汇报人确认：[`toc-width-three-books.md`](./toc-width-three-books.md)（B-088～B-090）。火焰长短色块、赤月条目右缘、相容同居标题及页面百分比间距；当前前端 89/558，双版构建通过。
+
+- 2026-09-12 本地修复完成，待 Windows 复验：[`toc-width-three-books.md`](./toc-width-three-books.md)（B-085～B-087）。修复相容同居蓝色卡片、前辈 04 目录卡片限宽、国王求婚 06 竖排引文；标题背景页保持原状。
+
+- 2026-09-11 本地修复完成，待 Windows 原书库复验：[`core-reader-fixes-september.md`](./core-reader-fixes-september.md)（B-082～B-084）。修复高性能模式设置/缓存错位、添加笔记入口、已索引书籍删除；记录了前后对照、性能数据及验证边界。
+
+- 代码与本地矩阵完成、待Windows双包验收：[`core-ai-release-hardening.md`](./core-ai-release-hardening.md)（C-57.6）。`dist/core`/`dist/ai`、独立target、Cargo Core安全默认、严格edition/build-info握手、AI CSS/fixture隔离和产物门禁已落地；前端83 files/537 tests、Core/AI 150 modules、Rust Core45/AI83及PowerShell 5.1语法通过。不修改GPU、Provider、schema或模型运行行为。
+- 被C-57.6收口、仍待Windows双安装包验收：[`core-ai-edition-split.md`](./core-ai-edition-split.md)（C-57.5）。该文件保留首轮隔离历史，当前构建命令与安全默认以C-57.6为准。
+- Windows Tauri dev 核心链路已通过、扩展边界待发布版验收：[`rag-model-asset-management.md`](./rag-model-asset-management.md)（RAG C-57）。D 盘模型库、固定探针登记/许可/下载、重启持久化和显式 SHA 校验已有实机证据；managed 删除的历史 staging 清理和 B-079 Windows 路径别名误报已修复待复验，linked、真实大文件和故障恢复矩阵仍待验证。不创建/加载 Provider、不读 EPUB、不建向量、不推理。当前总基线见 [`core-ai-edition-split.md`](./core-ai-edition-split.md)。
+- C-57 Windows 验收重点：真实慢速/断网大文件、digest 错误镜像回退、磁盘不足、多进程/真实 IPC 并发、重启续传、Windows junction/reparse、Defender 文件占用、中文/日文长路径。
+
+- 待 Windows WebView2 审核：[`font-drag-import.md`](./font-drag-import.md)（C-57）。字体中心已支持一次拖入多个 TTF/OTF/WOFF/WOFF2；浏览器与 Tauri 原生路径共用串行哈希/存储链路，面板外 EPUB 导入不变。全量 Vitest 73/509、tsc、Vite 137 modules 通过。
+- 已通过 `0.1.9-beta.2` Windows 基础全文搜索验收：[`shelf-library-search-pipeline.md`](./shelf-library-search-pipeline.md)（C-56）。书架“书名与作者/正文”切换和阅读器“全部书籍”共享唯一全库运行时；真实 module Worker、可配置核心并发、单写入、大书独占、阅读优先让出及 Rust 持久任务互斥均已接通。8 以上并发的收益与峰值资源保留为后续性能调查。
+- 已随 `0.1.9-beta.2` 通过 Windows 基础全文搜索验收：[`cross-book-fts-search.md`](./cross-book-fts-search.md)（C-54）。schema v3/trigram FTS、分批 staging、逐书建库、搜索范围 UI、索引管理与跨书锚点跳转已接通；真实模型、Embedding、向量、标签和生成不属于该阶段。
+- 已完成：[`rag-plugin-foundation.md`](./rag-plugin-foundation.md)（C-53）。共享语料/稳定 chunk、capability/Provider、惰性 mock runtime、开发面板、独立 SQLite schema 和任务状态机已通过前端 58/443、Rust 28/28 与 Windows Tauri 实机验收。
 - 待 Windows 发布包审核：[`cover-fallback-contract.md`](./cover-fallback-contract.md)（B-048/C-41）。桌面 Rust 链接导入和浏览器预览统一 `cover-image → meta cover → cover.*` 候选规则，修复 `id=image001; href=cover.webp` 漏封面；候选仅查 ZIP 中央目录，不解压、不扫描、不迁移旧库。
 - 待用户/Windows 审核：[`settings-stepper-bounds.md`](./settings-stepper-bounds.md)（B-049）。详细设置 +/- 改为纯数值有序档位，按可见默认值从自动档相邻步进；数值边界 no-op 保持原 settings identity，不触发无效阅读器重载。自动化 319/319、tsc、Vite build 与 WSL Chromium 真实点击/reload 计数均通过。
 - 待用户/Windows 审核：[`epub-guide-compatibility.md`](./epub-guide-compatibility.md)（B-041～B-047/C-40）。七项兼容修复的代码、定向与全量自动化、目标 EPUB 及相邻书 WSL Chromium 已完成；全量 Vitest 34 文件、314 测试、`tsc --noEmit` 与 `pnpm build`（95 modules）通过。C-40 同时回归 B-024 左对齐标题、C-18、B-023 百分比 margin 与 B-046 float；尚待 Windows WebView2/发布包实机验证及用户同步，不归档任务。
@@ -37,8 +52,8 @@
 - 待 Windows WebView2 审核：[`shelf-filter-drawer.md`](./shelf-filter-drawer.md)（B-062/C-51，含 B-063～B-066）。书架二级抽屉已接入组合筛选及搜索、排列、密度、主题和存档操作；滚动区占满剩余高度并预留稳定滚动槽，搜索图标/文字间距与垂直居中已修复，筛选展开前后选项宽度不再跳变。全量 Vitest 52 files/407 tests、Rust 19/19、tsc/Vite 110 modules 与 Chromium UI 链路通过。
 - 待 Windows WebView2 审核：[`reader-foreground-arbitration.md`](./reader-foreground-arbitration.md)（B-071/C-52）。阅读器所有普通 panel、正文 transient 和笔记 modal 已由单一判别联合仲裁；全量 Vitest 53 files/420 tests、tsc、Vite 111 modules 通过。
 - 待 Windows 发布包验证：[`linked-library-refactor.md`](./linked-library-refactor.md)（B-031）。桌面书库已改为引用源 EPUB；可同步状态、设备路径和 100 MiB 有界缩略图缓存已分层，旧测试书库不迁移。自动化为前端 21 文件 218/218、Rust 9/9、TypeScript/Vite 与 Cargo 检查通过。
-- 当前隔离副本版本：`0.1.9-beta.1` 修复测试版；真实源仓 `main`/`origin/main` 仍以 `e8aabcd`（`v0.1.6`）为比较基线。
-- 当前测试入口：`../../RELEASE_0.1.9-beta.1.md`；正式 0.1.9 收尾记录仍保留为 [`version-0.1.9-release-candidate.md`](./version-0.1.9-release-candidate.md) 与 `../../RELEASE_0.1.9.md`。
+- 当前隔离副本版本：`0.1.9-beta.2` 测试版；真实源仓 `main`/`origin/main` 仍以 `e8aabcd`（`v0.1.6`）为比较基线。
+- 当前测试入口：`../../RELEASE_0.1.9-beta.2.md`；beta.1 与正式 0.1.9 文档保留为阶段历史。
 - 已同步任务：B-020/B-021 导入与进度、自定义字体/CSS/全选、阅读跳转历史、书签、B-022。
 - 待用户审核、尚未同步：[`toc-percent-margin-resilience.md`](./toc-percent-margin-resilience.md)（B-023）。B-022 的 CSSOM 扫描已改记为部分修复，后续以 B-023 的 Typed OM/安全回退方案为准。
 - 待用户审核、尚未同步：[`toc-symmetric-margin-regression.md`](./toc-symmetric-margin-regression.md)（B-024）。C-18 的正对称 margin 豁免已收窄到具有 fit/max-content 原始意图的盒，普通目录标题恢复 C-04。

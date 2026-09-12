@@ -1,3 +1,4 @@
+import { applyReaderPercentageSpacing } from "./percentageSpacing";
 import { sanitizeChapter, VIEWER_ID } from "./sanitize";
 import { resolvePath, isExternalUrl, isFragmentOnly, splitHref } from "../core/paths";
 import { getFootnoteHoverAnchor, isFootnoteLink, resolveFootnote, type FootnoteInfo } from "./footnotes";
@@ -77,6 +78,8 @@ export interface SelectionContextPayload extends TextSelectionPayload {
 }
 
 export interface LoadOptions {
+  /** Apply current settings atomically when navigation supersedes a queued settings reload. */
+  settings?: ReaderSettings;
   /** 跳转到页内锚点（目录跳转用） */
   anchor?: string;
   /**
@@ -1198,16 +1201,18 @@ export interface ReaderTopFloatLayoutInput extends ReaderTopFloatContainmentInpu
   percentageMargin: boolean | undefined;
   position: string;
   writingMode: string;
+  /** Physical left/right float placement is owned by this containing block. */
+  parentWritingMode?: string;
   direction: string;
 }
 
 /**
  * 统一的顶层浮动布局单元门控。
  *
- * 只有物理水平书写、静态/相对定位、有限非负 margin 且没有明确突破
+ * 只有横排（或横排包含块内的竖排引文）、静态/相对定位、有限非负 margin 且没有明确突破
  * 版心意图的单项 float 才能投影到阅读器版心。返回的两侧 margin 是
  * border-box 外侧 margin：浮动侧加上阅读器版心 inset，另一侧保留书值。
- * 百分比、未知级联、负值、绝对定位和非水平书写全部返回 null，由调用方
+ * 百分比、未知级联、负值、绝对定位和其他书写组合返回 null，由调用方
  * 以原始测量值保留书籍布局，绝不落入 C-04/C-18。
  */
 export function getReaderTopFloatLayoutMargins(
@@ -1222,7 +1227,8 @@ export function getReaderTopFloatLayoutMargins(
     input.fullpage ||
     !/^(?:left|right)$/u.test(float) ||
     !/^(?:static|relative)$/u.test(position) ||
-    writingMode !== "horizontal-tb" ||
+    (writingMode !== "horizontal-tb" &&
+      !(/^(?:vertical-rl|vertical-lr)$/u.test(writingMode) && input.parentWritingMode === "horizontal-tb")) ||
     direction !== "ltr"
   ) return null;
   if (
@@ -1263,6 +1269,43 @@ export function getReaderTopFloatLayoutMargins(
   // Never create a new overflow while containing an otherwise valid float.
   if (left + input.width + right > input.parentWidth + 0.5) return null;
   return { left, right };
+}
+
+/** Nonnegative length insets on auto-sized grouping blocks belong inside L3.
+ * Percentage positioning only qualifies when symmetric; explicit/unknown sizing stays authored.
+ */
+export function getReaderAutoBlockInsets(input: {
+  /** Headings retain the established C-24/C-40 alignment contract. */
+  heading?: boolean;
+  /** Length insets are for grouping containers, not inline-only display titles. */
+  groupedBlockContent?: boolean;
+  percentage: boolean | undefined;
+  authoredSizing: boolean | undefined;
+  float: string;
+  display: string;
+  position: string;
+  writingMode: string;
+  parentWidth: number;
+  contentWidth: number;
+  marginLeft: number;
+  marginRight: number;
+  borderBoxExtra: number;
+}): { left: number; right: number; maxWidth: number } | null {
+  const { parentWidth, contentWidth, marginLeft, marginRight, borderBoxExtra } = input;
+  if (input.heading || input.percentage === undefined || input.authoredSizing !== false || input.float !== "none" ||
+    (input.percentage === false && input.groupedBlockContent !== true) ||
+    !/^(?:block|flow-root|flex|grid)$/u.test(input.display) ||
+    !/^(?:static|relative)$/u.test(input.position) || input.writingMode !== "horizontal-tb" ||
+    ![parentWidth, contentWidth, marginLeft, marginRight, borderBoxExtra].every(Number.isFinite) ||
+    parentWidth <= 0 || contentWidth <= 0 || marginLeft < 0 || marginRight < 0 || marginLeft + marginRight <= 0 ||
+    (input.percentage && (marginLeft <= 0 || marginRight <= 0 || Math.abs(marginLeft - marginRight) > 0.5)) || marginLeft + marginRight >= parentWidth || borderBoxExtra < 0
+  ) return null;
+  const measure = Math.min(parentWidth, contentWidth);
+  const inset = (parentWidth - measure) / 2;
+  const left = input.percentage ? marginLeft / parentWidth * measure : marginLeft;
+  const right = input.percentage ? marginRight / parentWidth * measure : marginRight;
+  const maxWidth = measure - left - right - borderBoxExtra;
+  return maxWidth > 0 ? { left: inset + left, right: inset + right, maxWidth } : null;
 }
 
 /**
@@ -1714,6 +1757,9 @@ export class ChapterPaginator {
     right: InlineStyleValue;
     maxWidth?: InlineStyleValue;
   }> = [];
+  /** 页面级百分比间距在重排/换章前完整恢复。 */
+  private restorePercentageSpacing: () => void = () => {};
+  private inlineClipFixes: Array<{ el: HTMLElement; overflowX: InlineStyleValue }> = [];
   /** fit-content 补偿写回过的元素与原始 inline max-width（下次测量前恢复） */
   private fitContentFixes: Array<{ el: HTMLElement; maxWidth: string }> = [];
   /** float 收缩补偿写回过的元素（下次测量前清除 width） */
@@ -1801,6 +1847,7 @@ export class ChapterPaginator {
 
   /** 加载一章。path 为规范化内部路径。 */
   async load(path: string, opts: LoadOptions = {}): Promise<void> {
+    if (opts.settings) this.settings = opts.settings;
     this.abortMeasureWaits();
     const seq = ++this.loadSeq;
     this.displayReadySeq = -1;
@@ -2056,6 +2103,8 @@ export class ChapterPaginator {
     this.restoreFitContentFix();
     this.restoreFloatWidths();
     this.restoreTrailingFloatFixes();
+    this.restorePercentageSpacing();
+    this.restorePercentageSpacing = applyReaderPercentageSpacing(doc, viewer, TEXT_MEASURE.maxEm * this.settings.fontSizePx);
     const parent = viewer.parentElement;
     const parentCs = parent && doc.defaultView ? doc.defaultView.getComputedStyle(parent) : null;
     const baseW = parent?.clientWidth || this.iframe.clientWidth || viewer.clientWidth;
@@ -2219,6 +2268,7 @@ export class ChapterPaginator {
     >();
     const authoredHorizontalMargins = new Map<HTMLElement, AuthoredHorizontalMarginResult>();
     const authoredSizingIntents = new Map<HTMLElement, AuthoredSizingIntentResult>();
+    const symmetricPercentageInsets = new Map<HTMLElement, { left: number; right: number; maxWidth: number }>();
     const restoreReaderMargins = readerSheet
       ? this.disableReaderTopMarginRules(readerSheet)
       : () => {};
@@ -2242,8 +2292,20 @@ export class ChapterPaginator {
         // 水平百分比 margin 是相对包含块的页面布局。若作者没有自己的 inline
         // max-width，暂时解除 L3 的 40rem 默认值，才能读到作者原本的剩余宽度。
         if (percentage === true) {
+          const parentStyle = win.getComputedStyle(viewer);
+          const parentWidth = viewer.clientWidth - (parseFloat(parentStyle.paddingLeft) || 0) - (parseFloat(parentStyle.paddingRight) || 0);
+          const symmetric = isSymmetricHorizontalMargin(cs.marginLeft, cs.marginRight);
+          const insets = symmetric ? getReaderAutoBlockInsets({
+            heading: /^h[1-6]$/iu.test(el.localName),
+            percentage, authoredSizing: hasAuthoredSizingIntent(doc, el),
+            float: cs.float, display: cs.display, position: cs.position, writingMode: cs.writingMode,
+            parentWidth, contentWidth: TEXT_MEASURE.maxEm * this.settings.fontSizePx,
+            marginLeft: parseFloat(cs.marginLeft), marginRight: parseFloat(cs.marginRight),
+            borderBoxExtra: Math.max(0, getBorderBoxWidth(cs) - parseFloat(cs.width)),
+          }) : null;
+          if (insets) symmetricPercentageInsets.set(el, insets);
           const maxWidth = snapshotInlineStyleProperty(el.style, "max-width");
-          const relaxedReaderMaxWidth = maxWidth.value === "";
+          const relaxedReaderMaxWidth = !insets && maxWidth.value === "";
           marginProbe.maxWidth = maxWidth;
           marginProbe.relaxedReaderMaxWidth = relaxedReaderMaxWidth;
           if (relaxedReaderMaxWidth) {
@@ -2262,12 +2324,12 @@ export class ChapterPaginator {
           // or customCss declaration before C-04 sees resolved px margins.
           authoredHorizontalMargins.set(el, hasAuthoredHorizontalMargin(doc, el));
           if (
-            cs.textAlign.trim().toLowerCase() === "center" &&
-            isSymmetricHorizontalMargin(cs.marginLeft, cs.marginRight)
+            isSymmetricHorizontalMargin(cs.marginLeft, cs.marginRight) ||
+            Array.from(el.children).some((child) => /^(?:block|flow-root|flex|grid|table|list-item)$/u.test(win.getComputedStyle(child).display))
           ) {
             // Fixed/unknown sizing intent must keep the conservative C-04 path;
-            // only a definite absence can authorize the C-40 natural-centering
-            // exemption below.
+            // only a definite absence can authorize C-40 natural centering or
+            // the auto-width bilateral inset below.
             authoredSizingIntents.set(el, hasAuthoredSizingIntent(doc, el));
           }
         }
@@ -2491,6 +2553,7 @@ export class ChapterPaginator {
                 percentageMargin: percentage?.percentage,
                 position: cs.position,
                 writingMode: cs.writingMode,
+                parentWritingMode: parentCs?.writingMode,
                 direction: cs.direction,
               });
           if (floatMargins) {
@@ -2508,17 +2571,19 @@ export class ChapterPaginator {
         // base。此时 max-width 已按需解除，computed width/margin 就是书的
         // 原始页面布局；用 inline important 穿过 L3 margin 默认值写回。
         if (isPercentageMarginLayout(percentage?.percentage === true, left, right)) {
+          const insets = symmetricPercentageInsets.get(el);
           const ml = parseFloat(left) || 0;
           const mr = parseFloat(right) || 0;
           this.marginFixes.push({
             el,
             left: snapshotInlineStyleProperty(el.style, "margin-left"),
             right: snapshotInlineStyleProperty(el.style, "margin-right"),
-            maxWidth: percentage?.relaxedReaderMaxWidth ? percentage.maxWidth : undefined,
+            maxWidth: insets || percentage?.relaxedReaderMaxWidth ? percentage?.maxWidth : undefined,
           });
           el.setAttribute("data-reader-margin-fixed", "1");
-          el.style.setProperty("margin-left", `${ml}px`, "important");
-          el.style.setProperty("margin-right", `${mr}px`, "important");
+          if (insets) el.style.setProperty("max-width", `${insets.maxWidth}px`);
+          el.style.setProperty("margin-left", `${insets?.left ?? ml}px`, "important");
+          el.style.setProperty("margin-right", `${insets?.right ?? mr}px`, "important");
           continue;
         }
 
@@ -2620,6 +2685,32 @@ export class ChapterPaginator {
         }
 
         if (!meaningful(left) && !meaningful(right)) continue;
+
+        // An auto-width grouping block's nonnegative margins fit *inside* the
+        // default measure, just as they do inside a constrained parent link.
+        // Otherwise a direct sibling is wider than an identical nested card.
+        const blockInsets = authoredHorizontalMargins.get(el) === true ? getReaderAutoBlockInsets({
+          heading: /^h[1-6]$/iu.test(el.localName),
+          groupedBlockContent: Array.from(el.children).some((child) =>
+            /^(?:block|flow-root|flex|grid|table|list-item)$/u.test(win.getComputedStyle(child).display)),
+          percentage: percentage?.percentage, authoredSizing: authoredSizingIntents.get(el),
+          float: cs.float, display: cs.display, position: cs.position, writingMode: cs.writingMode,
+          parentWidth: parentW, contentWidth: TEXT_MEASURE.maxEm * this.settings.fontSizePx,
+          marginLeft: parseFloat(left), marginRight: parseFloat(right),
+          borderBoxExtra: Math.max(0, width - parseFloat(cs.width)),
+        }) : null;
+        if (blockInsets) {
+          this.marginFixes.push({ el,
+            left: snapshotInlineStyleProperty(el.style, "margin-left"),
+            right: snapshotInlineStyleProperty(el.style, "margin-right"),
+            maxWidth: snapshotInlineStyleProperty(el.style, "max-width"),
+          });
+          el.setAttribute("data-reader-margin-fixed", "1");
+          el.style.setProperty("max-width", `${blockInsets.maxWidth}px`);
+          el.style.setProperty("margin-left", `${blockInsets.left}px`, "important");
+          el.style.setProperty("margin-right", `${blockInsets.right}px`, "important");
+          continue;
+        }
 
         // [L3/L4-C37] getComputedStyle exposes UA blockquote margins as px.
         // They are not author indentation and must retain the restored L3
@@ -2795,6 +2886,10 @@ export class ChapterPaginator {
 
   /** 恢复上一轮行尾行内盒原子化写回的 inline 值及优先级。 */
   private restoreInlineBoxFixes(): void {
+    for (const fix of this.inlineClipFixes ?? []) {
+      restoreInlineStyleProperty(fix.el.style, "overflow-x", fix.overflowX);
+    }
+    this.inlineClipFixes = [];
     for (const fix of this.inlineBoxFixes) {
       // The marker is only a per-measure guard.  It must not survive the
       // restore phase or a later resize/reflow would skip the candidate.
@@ -2829,7 +2924,7 @@ export class ChapterPaginator {
     const lineContainer = (
       el: HTMLElement,
       rect: DOMRect
-    ): { rect: DOMRect; textAlign: string } | null => {
+    ): { el: HTMLElement; rect: DOMRect; textAlign: string } | null => {
       for (let parent = el.parentElement; parent; parent = parent.parentElement) {
         const cs = win.getComputedStyle(parent);
         if (/^(?:inline|ruby)$/u.test(cs.display)) continue;
@@ -2837,7 +2932,7 @@ export class ChapterPaginator {
         const matching =
           rects.find((r) => r.bottom > rect.top + epsilon && r.top < rect.bottom - epsilon) ??
           parent.getBoundingClientRect();
-        return { rect: matching, textAlign: cs.textAlign };
+        return { el: parent, rect: matching, textAlign: cs.textAlign };
       }
       return null;
     };
@@ -2861,6 +2956,38 @@ export class ChapterPaginator {
         continue;
       }
       if (before.right <= container.rect.right + epsilon) continue;
+
+      // C-25: preserve inline alignment and unequal painted lengths. Clip
+      // only a simple line whose entire non-whitespace content is inside it;
+      // overflow:clip does not create a BFC or alter column fragmentation.
+      const line = container.el;
+      if (this.inlineClipFixes.some((fix) => fix.el === line)) continue;
+      const lineStyle = win.getComputedStyle(line);
+      const simpleLine = lineStyle.display === "block" && lineStyle.writingMode === "horizontal-tb" &&
+        lineStyle.direction === "ltr" && lineStyle.transform === "none" && lineStyle.overflowX === "visible" && lineStyle.overflowY === "visible" &&
+        Array.from(line.querySelectorAll("*")).every((child) =>
+          win.getComputedStyle(child).display === "inline" && !child.matches("img, svg, ruby, sup, input"));
+      if (simpleLine) {
+        const walker = doc.createTreeWalker(line, 4 /* SHOW_TEXT */);
+        const range = doc.createRange();
+        let safe = true;
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          const text = node.textContent ?? "";
+          const first = text.search(/\S/u);
+          if (first < 0) continue;
+          range.setStart(node, first);
+          range.setEnd(node, text.trimEnd().length);
+          if (Array.from(range.getClientRects()).some((r) => r.left < container.rect.left - epsilon || r.right > container.rect.right + epsilon)) {
+            safe = false;
+            break;
+          }
+        }
+        if (safe && win.CSS.supports("overflow-x", "clip")) {
+          this.inlineClipFixes.push({ el: line, overflowX: snapshotInlineStyleProperty(line.style, "overflow-x") });
+          line.style.setProperty("overflow-x", "clip", "important");
+          continue;
+        }
+      }
 
       const original = {
         display: snapshotInlineStyleProperty(el.style, "display"),
@@ -2948,6 +3075,9 @@ export class ChapterPaginator {
     for (const el of Array.from(viewer.querySelectorAll("*")) as HTMLElement[]) {
       const cs = win.getComputedStyle(el);
       if (cs.float === "none") continue;
+      // C-08 measures horizontal inline advance. An orthogonal paragraph's
+      // narrow physical width is the intended line thickness, not collapse.
+      if (cs.writingMode !== "horizontal-tb") continue;
       if (hasAuthoredInlineWidth(el.getAttribute("style") ?? "")) continue;
       // 只修复“塌缩成逐字宽”的浮动元素；已有明确宽度且正常布局
       // （如目录标题 width:100% + float:left）不处理。
@@ -3208,11 +3338,20 @@ export class ChapterPaginator {
     let maxX = -Infinity;
     if (!viewer) return { minX: 0, maxX: 0 };
     const scrollLeft = viewer.scrollLeft;
+    // C-25 clips only trailing painted whitespace. DOM rects still include
+    // that invisible tail; counting it would invent a final blank column.
+    const clipBounds = new Map<Element, DOMRect>();
+    for (const fix of this.inlineClipFixes) {
+      const bounds = fix.el.getBoundingClientRect();
+      for (const child of Array.from(fix.el.querySelectorAll("*"))) clipBounds.set(child, bounds);
+    }
     for (const el of Array.from(viewer.querySelectorAll("*"))) {
       const r = (el as HTMLElement).getBoundingClientRect();
       if (r.width === 0 && r.height === 0) continue; // display:none 等零尺寸元素
-      const x0 = r.left + scrollLeft;
-      const x1 = r.right + scrollLeft;
+      const clip = clipBounds.get(el);
+      const x0 = Math.max(r.left, clip?.left ?? -Infinity) + scrollLeft;
+      const x1 = Math.min(r.right, clip?.right ?? Infinity) + scrollLeft;
+      if (x1 <= x0) continue;
       if (x0 < minX) minX = x0;
       if (x1 > maxX) maxX = x1;
     }
@@ -3986,6 +4125,8 @@ export class ChapterPaginator {
     this.restoreInlineBoxFixes();
     this.restoreFloatLayoutFixes();
     this.restoreTrailingFloatFixes();
+    this.restorePercentageSpacing();
+    this.restorePercentageSpacing = () => {};
     this.contentDoc?.removeEventListener("load", this.imgHandler, true);
     this.contentDoc?.removeEventListener("click", this.linkHandler, true);
     this.contentDoc?.removeEventListener("click", this.handleDocClick, true);

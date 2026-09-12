@@ -1,0 +1,21 @@
+{
+  "productName": "EPUB Reader AI",
+  "identifier": "dev.epubreader.ai",
+  "build": {
+    "beforeDevCommand": "pnpm dev:ai",
+    "beforeBuildCommand": "pnpm build:ai",
+    "frontendDist": "../dist/ai"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "EPUB 阅读器 AI（开发）",
+        "width": 1080,
+        "height": 760,
+        "minWidth": 640,
+        "minHeight": 480,
+        "center": true
+      }
+    ]
+  }
+}
