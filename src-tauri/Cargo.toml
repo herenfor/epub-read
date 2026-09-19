@@ -1,6 +1,6 @@
 [package]
 name = "epub-reader"
-version = "0.1.9-beta.2"
+version = "0.2.0"
 description = "EPUB 阅读器（EPUB 2/3）"
 license = "Apache-2.0"
 authors = ["HeRenFor"]
@@ -11,7 +11,7 @@ edition = "2021"
 # still pass an explicit edition feature so build.rs can reject mixed builds.
 default = []
 core = []
-ai = ["dep:fs2", "dep:reqwest"]
+ai = ["dep:fs2", "dep:reqwest", "windows/Win32_Graphics_Dxgi", "windows/Win32_Graphics_Dxgi_Common", "windows/Win32_Graphics_Direct3D", "windows/Win32_Graphics_Direct3D12"]
 
 [lib]
 name = "epub_reader_lib"
@@ -41,6 +41,14 @@ tauri-plugin-single-instance = "2.4.3"
 # Official windows-rs bindings (MIT OR Apache-2.0), used only to enumerate
 # DirectWrite font-family metadata. Font files are never opened or copied.
 windows = { version = "0.61.3", features = ["Win32_Graphics_DirectWrite"] }
+# Native embedding runtime for the AI edition only.  `ort` binds ONNX Runtime
+# (MIT) and `download-binaries` fetches a hash-pinned Microsoft build with the
+# DirectML EP at build time; `copy-dylibs` places DirectML.dll next to the
+# executable.  Core never enables the `ai` feature, so it never compiles this.
+ort = { version = "=2.0.0-rc.13", features = ["directml"] }
+# HuggingFace tokenizer.json reader (Apache-2.0).  Tokenizers stay in Rust so a
+# front end never re-implements tokenization and cannot drift from the model.
+tokenizers = { version = "0.21.4", default-features = false, features = ["fancy-regex"] }
 
 [profile.release]
 codegen-units = 1

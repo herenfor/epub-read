@@ -6,7 +6,21 @@
 #[cfg(feature = "ai")]
 mod download;
 #[cfg(feature = "ai")]
+mod embedding;
+#[cfg(feature = "ai")]
+pub(crate) mod embedding_gateway;
+#[cfg(feature = "ai")]
+mod embedding_platform;
+#[cfg(feature = "ai")]
+pub(crate) mod hardware;
+#[cfg(feature = "ai")]
+mod model_locks;
+#[cfg(feature = "ai")]
 mod models;
+#[cfg(feature = "ai")]
+pub(crate) mod preparation;
+#[cfg(feature = "ai")]
+mod semantic_store;
 mod store;
 mod task;
 
@@ -15,6 +29,8 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Manager, State};
 
+#[cfg(feature = "ai")]
+pub(crate) use store::MAX_SUPPORTED_SCHEMA_VERSION;
 pub(crate) use store::{normalize_content_hash, AiStore};
 pub(crate) use task::{TaskState, TaskTransition};
 
@@ -119,6 +135,19 @@ impl Drop for AiState {
         self.downloads.pause_all(&store);
         store.reclaim_active_jobs();
     }
+}
+
+#[cfg(feature = "ai")]
+#[tauri::command]
+pub(crate) fn ai_model_lock_probe(app: AppHandle, state: State<'_, AiState>) -> Result<(), String> {
+    if !cfg!(debug_assertions) {
+        return Err("模型锁自检仅在 AI 调试版可用".into());
+    }
+    let root = state
+        .ensure(&app)?
+        .model_library_path()?
+        .ok_or_else(|| "请先选择模型库目录".to_string())?;
+    model_locks::ModelLock::probe(Path::new(&root))
 }
 
 #[cfg(feature = "ai")]
@@ -628,6 +657,25 @@ pub(crate) fn ai_task_list(
 ) -> Result<Vec<AiJob>, String> {
     state.ensure(&app)?.list_tasks()
 }
+
+/// Real semantic index storage.  Building and querying additionally require a
+/// native embedding session; this command only owns the derived-data boundary.
+#[cfg(feature = "ai")]
+#[tauri::command]
+pub(crate) async fn ai_semantic(
+    app: AppHandle,
+    state: State<'_, AiState>,
+    input: semantic_store::Request,
+) -> Result<semantic_store::Reply, String> {
+    let store = state.ensure(&app)?;
+    tauri::async_runtime::spawn_blocking(move || store.semantic(input))
+        .await
+        .map_err(|e| format!("语义索引存储线程失败：{e}"))?
+}
+
+#[cfg(all(test, windows, feature = "ai"))]
+#[path = "c58b_probe_tests.rs"]
+mod c58b_probe_tests;
 
 #[cfg(test)]
 mod tests {

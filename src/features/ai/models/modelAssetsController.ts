@@ -141,6 +141,13 @@ export function createModelAssetsDevelopmentController(
   return {
     start,
     state: () => state,
+    // A scan is what registers a package that was placed in the library root
+    // after the last scan; the guarded action re-lists packages afterwards, so
+    // a newly ready package becomes visible in one step.
+    refresh: () => run(async () => {
+      const scan = await ports.assets.scan();
+      if (scan.scanError) throw new Error(scan.scanError);
+    }),
     setLibraryPath: (path: string) => run(async () => { await ports.assets.setLibraryPath(path); }),
     registerLinked: (path: string) => run(async () => { await ports.assets.registerLinkedPackage(path); }),
     relocate: (packageId: string, path: string) => run(async () => { await ports.assets.relocatePackage(packageId, path); }),

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   ChapterPaginator,
   getBorderBoxWidth,
@@ -38,6 +38,7 @@ import {
   syncFragmentHash,
   isChapterMeasurementCurrent,
   resolveRestoredPage,
+  shouldRestoreReaderTopAutoMargin,
 } from "./paginator";
 
 const textNode = (text: string): Node =>
@@ -48,6 +49,27 @@ const elementNode = (tagName: string): Node =>
 
 const elementWithChildren = (tagName: string, children: Node[]): Node =>
   ({ nodeType: 1, textContent: children.map((child) => child.textContent ?? "").join(""), tagName, childNodes: children }) as unknown as Node;
+
+/**
+ * 分页提交路径上的真实方法（新入口复用同一实现，不再在 context 里复制一份）。
+ * 单栏旧步长：viewStepPx === step。
+ */
+const paginatedCommitInternals = {
+  effectiveColumns: 1 as const,
+  leadingColumns: 0,
+  viewStepPx: 100,
+  applyResolvedPosition: (
+    ChapterPaginator.prototype as unknown as {
+      applyResolvedPosition: (this: unknown, page: number, candidate: unknown) => void;
+    }
+  ).applyResolvedPosition,
+  contentX: (
+    ChapterPaginator.prototype as unknown as {
+      contentX: (this: unknown, clientLeft: number) => number;
+    }
+  ).contentX,
+  readyState: (empty: boolean) => ({ status: "ready", pageCount: 5, currentPage: 0, empty }),
+};
 
 describe("content-anchor restore precedence", () => {
   it("text/legacy anchor wins over saved page and consumes that fallback before later reflow", () => {
@@ -552,6 +574,7 @@ describe("same-chapter direct navigation", () => {
     }) => boolean;
   };
 
+
   it("restores a saved page without measuring or changing the iframe document", () => {
     const navigate = (ChapterPaginator.prototype as unknown as Harness).navigateWithinCurrentChapter;
     const commit = (ChapterPaginator.prototype as unknown as { commitWithinChapterPage: (page: number, candidate: unknown) => void }).commitWithinChapterPage;
@@ -573,7 +596,10 @@ describe("same-chapter direct navigation", () => {
       recompute() { recomputeCalls += 1; },
       emit() {},
       captureAnchor() {},
+      closeFootnoteForNavigation() {},
+      clearSearchHighlightForDocument() {},
       commitWithinChapterPage: commit,
+      ...paginatedCommitInternals,
     };
     const ok = navigate.call(context, { fallbackPage: 3 });
     expect(ok).toBe(true);
@@ -607,7 +633,10 @@ describe("same-chapter direct navigation", () => {
       resolveAnchorCol: () => null,
       emit() {},
       captureAnchor() {},
+      closeFootnoteForNavigation() {},
+      clearSearchHighlightForDocument() {},
       commitWithinChapterPage: (ChapterPaginator.prototype as unknown as { commitWithinChapterPage: (page: number, candidate: unknown) => void }).commitWithinChapterPage,
+      ...paginatedCommitInternals,
     };
     const before = { ...context.anchor };
     const ok = navigate.call(context, {
@@ -644,7 +673,10 @@ describe("same-chapter direct navigation", () => {
       measure() { measureCalls += 1; },
       emit() {},
       captureAnchor() {},
+      closeFootnoteForNavigation() {},
+      clearSearchHighlightForDocument() {},
       commitWithinChapterPage: (ChapterPaginator.prototype as unknown as { commitWithinChapterPage: (page: number, candidate: unknown) => void }).commitWithinChapterPage,
+      ...paginatedCommitInternals,
     };
     const ok = navigate.call(context, {
       readingAnchor: {
@@ -679,8 +711,11 @@ describe("same-chapter direct navigation", () => {
       anchorPath: undefined,
       iframe: { contentWindow: { location: { hash: "#old" } } },
       captureAnchor() {},
+      closeFootnoteForNavigation() {},
+      clearSearchHighlightForDocument() {},
       emit() {},
       commitWithinChapterPage: (ChapterPaginator.prototype as unknown as { commitWithinChapterPage: (page: number, candidate: unknown) => void }).commitWithinChapterPage,
+      ...paginatedCommitInternals,
       getWithinChapterFragmentPage: (ChapterPaginator.prototype as unknown as { getWithinChapterFragmentPage: (fragment: string) => unknown }).getWithinChapterFragmentPage,
     };
     expect(navigate.call(context, { fragment: "target" })).toBe(true);
@@ -718,7 +753,10 @@ describe("same-chapter direct navigation", () => {
       },
       emit() {},
       captureAnchor() {},
+      closeFootnoteForNavigation() {},
+      clearSearchHighlightForDocument() {},
       commitWithinChapterPage: (ChapterPaginator.prototype as unknown as { commitWithinChapterPage: (page: number, candidate: unknown) => void }).commitWithinChapterPage,
+      ...paginatedCommitInternals,
     };
     expect(
       navigate.call(context, {
@@ -736,6 +774,50 @@ describe("same-chapter direct navigation", () => {
     expect(context.anchor).toEqual(oldAnchor);
     expect(context.anchorPath).toBe("Text/chapter.xhtml");
     expect(context.iframe.contentWindow.location.hash).toBe("#old");
+  });
+
+  it("adapts anchorTextOffset/snippet before resolving the current chapter", () => {
+    const navigate = (ChapterPaginator.prototype as unknown as Harness).navigateWithinCurrentChapter;
+    let seenTextOffset: number | null | undefined;
+    let seenSnippet: string | null | undefined;
+    const context = {
+      disposed: false,
+      _currentPath: "Text/chapter.xhtml",
+      viewer: { scrollLeft: 0 } as unknown as HTMLElement,
+      contentDoc: {},
+      step: 100,
+      metrics: { pageCount: 5, currentPage: 0 },
+      lastState: { status: "ready", pageCount: 5, currentPage: 0, empty: false },
+      anchor: null,
+      anchorPath: undefined,
+      iframe: { contentWindow: { location: { hash: "#old" } } },
+      resolveAnchorCol() {
+        seenTextOffset = (this as unknown as { anchor?: { textOffset: number | null; textSnippet: string | null } }).anchor?.textOffset;
+        seenSnippet = (this as unknown as { anchor?: { textOffset: number | null; textSnippet: string | null } }).anchor?.textSnippet;
+        return { col: 3, source: "text" as const };
+      },
+      measure() { throw new Error("measured during direct navigation"); },
+      emit() {},
+      captureAnchor() {},
+      closeFootnoteForNavigation() {},
+      clearSearchHighlightForDocument() {},
+      commitWithinChapterPage: (ChapterPaginator.prototype as unknown as { commitWithinChapterPage: (page: number, candidate: unknown) => void }).commitWithinChapterPage,
+      ...paginatedCommitInternals,
+    };
+    expect(navigate.call(context, {
+      readingAnchor: {
+        index: -1,
+        ratio: 0,
+        anchorTextOffset: 12,
+        anchorTextSnippet: "正文",
+      },
+      fallbackPage: null,
+    })).toBe(true);
+    expect(seenTextOffset).toBe(12);
+    expect(seenSnippet).toBe("正文");
+    expect(context.metrics.currentPage).toBe(3);
+    expect(context.viewer.scrollLeft).toBe(300);
+    expect(context.iframe.contentWindow.location.hash).toBe("");
   });
 });
 
@@ -776,7 +858,10 @@ describe("internal link history notification", () => {
       navigateWithinCurrentChapter: (ChapterPaginator.prototype as unknown as { navigateWithinCurrentChapter: (options: unknown) => boolean }).navigateWithinCurrentChapter,
       getWithinChapterFragmentPage: (ChapterPaginator.prototype as unknown as { getWithinChapterFragmentPage: (fragment: string) => unknown }).getWithinChapterFragmentPage,
       commitWithinChapterPage: (ChapterPaginator.prototype as unknown as { commitWithinChapterPage: (page: number, candidate: unknown) => void }).commitWithinChapterPage,
+      ...paginatedCommitInternals,
       captureAnchor() {},
+      closeFootnoteForNavigation() {},
+      clearSearchHighlightForDocument() {},
       emit() {},
       onBeforeInternalNavigate: (value: string) => {
         // App 的真实回调会以 Book/spine 校验跨章目标；保留这个边界
@@ -786,6 +871,8 @@ describe("internal link history notification", () => {
       onNavigate: (value: string) => navigated.push(value),
       onExternalLink: (value: string) => external.push(value),
       jumpToAnchor: (value: string) => jumped.push(value),
+      // 图片激活只由活动章节的 UI 回调处理；这里用空实现隔离链接路由断言。
+      activateImage: () => false,
       onInternalNavigationSettled: () => {
         settled += 1;
       },
@@ -1207,6 +1294,48 @@ describe("book margin layout", () => {
   it("把宽视口的 right/left 顶层 float 内缩到 40rem 版心边缘", () => {
     expect(floatContainment()).toEqual({ left: 0, right: 320 });
     expect(floatContainment({ float: "left" })).toEqual({ left: 320, right: 0 });
+  });
+
+  const autoMarginRestore = (
+    overrides: Partial<Parameters<typeof shouldRestoreReaderTopAutoMargin>[0]> = {}
+  ) =>
+    shouldRestoreReaderTopAutoMargin({
+      readerTop: true,
+      float: "none",
+      display: "block",
+      position: "static",
+      writingMode: "horizontal-tb",
+      fullpage: false,
+      percentageMargin: false,
+      borderBoxWidth: 640,
+      contentWidth: 640,
+      ...overrides,
+    });
+
+  it("书的 !important 零水平 margin 在版心内的普通顶层块上恢复 auto 居中", () => {
+    // 样本 `div.toolbar{margin:.5em 0!important}`：book CSS 赢过 L3 的
+    // 零特异性 auto，块会贴栏左缘；只要宽度没超过版心就写回 auto。
+    expect(autoMarginRestore()).toBe(true);
+    expect(autoMarginRestore({ display: "flow-root" })).toBe(true);
+    expect(autoMarginRestore({ display: "flex" })).toBe(true);
+    expect(autoMarginRestore({ percentageMargin: undefined })).toBe(true);
+    expect(autoMarginRestore({ borderBoxWidth: 640.4 })).toBe(true);
+  });
+
+  it("float、百分比、全页图、竖排、定位和超过版心的块保持书的布局", () => {
+    expect(autoMarginRestore({ float: "left" })).toBe(false);
+    expect(autoMarginRestore({ percentageMargin: true })).toBe(false);
+    expect(autoMarginRestore({ fullpage: true })).toBe(false);
+    expect(autoMarginRestore({ writingMode: "vertical-rl" })).toBe(false);
+    expect(autoMarginRestore({ position: "absolute" })).toBe(false);
+    expect(autoMarginRestore({ position: "fixed" })).toBe(false);
+    expect(autoMarginRestore({ display: "inline-block" })).toBe(false);
+    expect(autoMarginRestore({ display: "inline" })).toBe(false);
+    expect(autoMarginRestore({ readerTop: false })).toBe(false);
+    expect(autoMarginRestore({ borderBoxWidth: 641 })).toBe(false);
+    expect(autoMarginRestore({ borderBoxWidth: 0 })).toBe(false);
+    expect(autoMarginRestore({ contentWidth: 0 })).toBe(false);
+    expect(autoMarginRestore({ borderBoxWidth: Number.NaN })).toBe(false);
   });
 
   const floatLayout = (
@@ -1725,5 +1854,320 @@ describe("book margin layout", () => {
     expect(style.getPropertyValue("margin-left")).toBe("35%");
     expect(style.getPropertyPriority("margin-left")).toBe("important");
     expect(style.getPropertyValue("max-width")).toBe("");
+  });
+});
+
+describe("footnote navigation lifecycle", () => {
+  function makeContext(visible = true, pinned = true) {
+    const gate = {
+      visible,
+      reset: vi.fn(() => {
+        gate.visible = false;
+      }),
+      isVisible: () => gate.visible,
+    };
+    const context = Object.create(ChapterPaginator.prototype) as {
+      viewer: { scrollLeft: number };
+      step: number;
+      metrics: { pageCount: number; currentPage: number };
+      footnotePinned: boolean;
+      footnoteHoverGate: typeof gate;
+      lastFootnoteEl: HTMLElement | null;
+      onFootnoteClose: ReturnType<typeof vi.fn>;
+      emit: ReturnType<typeof vi.fn>;
+      captureAnchor: ReturnType<typeof vi.fn>;
+      contentDoc: Document | null;
+      disposed: boolean;
+      textIndex: null;
+      searchHighlightTarget: null;
+    };
+    Object.assign(context, {
+      viewer: { scrollLeft: 0 },
+      step: 100,
+      effectiveColumns: 1,
+      leadingColumns: 0,
+      settings: { readingMode: "paginated" },
+      metrics: { pageCount: 5, currentPage: 0 },
+      footnotePinned: pinned,
+      footnoteHoverGate: gate,
+      lastFootnoteEl: { isConnected: true },
+      onFootnoteClose: vi.fn(),
+      emit: vi.fn(),
+      captureAnchor: vi.fn(),
+      contentDoc: null,
+      disposed: false,
+      textIndex: null,
+      searchHighlightTarget: null,
+    });
+    return { context, gate };
+  }
+
+  it("closes a pinned footnote only after a real page change", () => {
+    const { context, gate } = makeContext();
+    ChapterPaginator.prototype.setPage.call(context, 1);
+    expect(context.metrics.currentPage).toBe(1);
+    expect(context.viewer.scrollLeft).toBe(100);
+    expect(context.footnotePinned).toBe(false);
+    expect(context.lastFootnoteEl).toBeNull();
+    expect(gate.reset).toHaveBeenCalledTimes(1);
+    expect(context.onFootnoteClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not notify the host for a UI-initiated dismiss", () => {
+    const { context, gate } = makeContext();
+    ChapterPaginator.prototype.dismissFootnote.call(context);
+    expect(gate.reset).toHaveBeenCalledTimes(1);
+    expect(context.footnotePinned).toBe(false);
+    expect(context.lastFootnoteEl).toBeNull();
+    expect(context.onFootnoteClose).not.toHaveBeenCalled();
+  });
+});
+
+describe("reflow transient lifecycle", () => {
+  it("closes a pinned footnote only after a real viewport size change", async () => {
+    const close = vi.fn();
+    const measure = vi.fn(async () => false);
+    const context = Object.create(ChapterPaginator.prototype) as {
+      disposed: boolean;
+      iframe: { clientWidth: number; clientHeight: number };
+      measuredViewport: { width: number; height: number };
+      reflowSeq: number;
+      loadSeq: number;
+      closeFootnoteForNavigation: () => void;
+      measure: (seq: number) => Promise<boolean>;
+    };
+    Object.assign(context, {
+      disposed: false,
+      iframe: { clientWidth: 800, clientHeight: 600 },
+      measuredViewport: { width: 800, height: 600 },
+      reflowSeq: 0,
+      loadSeq: 1,
+      closeFootnoteForNavigation: close,
+      measure,
+    });
+    ChapterPaginator.prototype.reflow.call(context);
+    expect(close).not.toHaveBeenCalled();
+    expect(measure).not.toHaveBeenCalled();
+
+    context.iframe = { clientWidth: 900, clientHeight: 600 };
+    ChapterPaginator.prototype.reflow.call(context);
+    expect(close).toHaveBeenCalledTimes(1);
+    await Promise.resolve();
+    expect(measure).toHaveBeenCalledWith(1);
+  });
+});
+
+describe("precise cross-chapter request resolution", () => {
+  function contextWithAnchors(
+    originalAnchor: Record<string, unknown> | null,
+    liveAnchor: Record<string, unknown> | null,
+    kind: "search" | "note" = "note",
+  ) {
+    const status = vi.fn();
+    const legacyElement = {
+      getBoundingClientRect: () => ({ left: 0, width: 100 }),
+    };
+    const viewer = {
+      querySelectorAll: () => [legacyElement],
+      scrollLeft: 0,
+    };
+    const context = Object.create(ChapterPaginator.prototype) as {
+      pendingPrecise: unknown;
+      contentDoc: unknown;
+      textIndex: unknown;
+      viewer: unknown;
+      step: number;
+      metrics: { pageCount: number; currentPage: number };
+      _currentPath: string;
+      anchor: Record<string, unknown> | null;
+      anchorPath: string | undefined;
+      onPreciseNavigationStatus: (value: { requestId: number; status: string; exact: boolean }) => void;
+      applyPendingPreciseNavigation: () => string | null;
+    };
+    Object.assign(context, {
+      pendingPrecise: originalAnchor
+        ? { request: { requestId: 41, kind }, anchor: originalAnchor }
+        : null,
+      contentDoc: {},
+      textIndex: { codePoints: [], totalChars: 0, mediaUnits: 0 },
+      viewer,
+      step: 100,
+      metrics: { pageCount: 5, currentPage: 0 },
+      _currentPath: "Text/chapter.xhtml",
+      anchor: liveAnchor,
+      anchorPath: liveAnchor ? "Text/chapter.xhtml" : undefined,
+      onPreciseNavigationStatus: status,
+    });
+    return { context, status };
+  }
+
+  it("does not treat a page-center-sampled live anchor as proof when the original note anchor failed", () => {
+    const { context, status } = contextWithAnchors(
+      { index: 99, ratio: 0.5, textOffset: null, textSnippet: null, charsRead: 0, totalChars: 0 },
+      { index: 0, ratio: 0.5, textOffset: null, textSnippet: null, charsRead: 0, totalChars: 0 },
+    );
+    expect(context.applyPendingPreciseNavigation()).toBe("unresolved");
+    expect(status).toHaveBeenLastCalledWith({ requestId: 41, status: "unresolved", exact: false });
+    expect(context.anchor).toEqual({ index: 0, ratio: 0.5, textOffset: null, textSnippet: null, charsRead: 0, totalChars: 0 });
+  });
+
+  it("reports a note located only when the immutable original anchor resolves", () => {
+    const { context, status } = contextWithAnchors(
+      { index: 0, ratio: 0.5, textOffset: null, textSnippet: null, charsRead: 0, totalChars: 0 },
+      null,
+    );
+    expect(context.applyPendingPreciseNavigation()).toBe("located");
+    expect(status).toHaveBeenLastCalledWith({ requestId: 41, status: "located", exact: false });
+  });
+
+  it("reports a search reference only from the original anchor, never from the live page sample", () => {
+    const { context, status } = contextWithAnchors(
+      { index: 99, ratio: 0.5, textOffset: null, textSnippet: null, charsRead: 0, totalChars: 0 },
+      { index: 0, ratio: 0.5, textOffset: null, textSnippet: null, charsRead: 0, totalChars: 0 },
+      "search",
+    );
+    expect(context.applyPendingPreciseNavigation()).toBe("unresolved");
+    expect(status).toHaveBeenLastCalledWith({ requestId: 41, status: "unresolved", exact: false });
+  });
+
+  it("reports a search reference when the immutable original anchor resolves", () => {
+    const { context, status } = contextWithAnchors(
+      { index: 0, ratio: 0.5, textOffset: null, textSnippet: null, charsRead: 0, totalChars: 0 },
+      null,
+      "search",
+    );
+    expect(context.applyPendingPreciseNavigation()).toBe("located-reference");
+    expect(status).toHaveBeenLastCalledWith({ requestId: 41, status: "located-reference", exact: false });
+  });
+});
+
+describe("search highlight range drawing", () => {
+  it("deduplicates identical ranges but keeps distinct/overlapping real hit ranges", () => {
+    const dedupe = (ChapterPaginator.prototype as unknown as {
+      dedupeHighlightRanges: (ranges: Array<{ start: number; end: number }>) => Array<{ start: number; end: number }>;
+    }).dedupeHighlightRanges;
+    expect(dedupe.call(Object.create(ChapterPaginator.prototype), [
+      { start: 0, end: 2 },
+      { start: 0, end: 2 },
+      { start: 0, end: 3 },
+      { start: 3, end: 4 },
+    ])).toEqual([
+      { start: 0, end: 2 },
+      { start: 0, end: 3 },
+      { start: 3, end: 4 },
+    ]);
+  });
+});
+
+describe("measure viewport height locking", () => {
+  function makeFakeElement(props: Record<string, any> = {}) {
+    const style: Record<string, string> = {};
+    return {
+      style,
+      clientWidth: 800,
+      clientHeight: 600,
+      textContent: "Sample text content",
+      children: [],
+      querySelector: () => null,
+      querySelectorAll: () => [],
+      parentElement: null,
+      ...props,
+    };
+  }
+
+  it("locks viewer.style.height to explicit pixels subtracting parent padding to avoid reflow jitter during vertical drag", async () => {
+    const parent = makeFakeElement({ clientWidth: 800, clientHeight: 600 });
+    const viewer = makeFakeElement({ parentElement: parent });
+    const defaultView = {
+      getComputedStyle: (el: any) => {
+        if (el === parent) {
+          return {
+            paddingTop: "25px",
+            paddingBottom: "35px",
+            paddingLeft: "10px",
+            paddingRight: "10px",
+          };
+        }
+        return {};
+      },
+    };
+    const doc = {
+      defaultView,
+      documentElement: { clientWidth: 800 },
+      body: { clientWidth: 800 },
+      fonts: { ready: Promise.resolve() },
+    };
+
+    const measureControllers = new Set<AbortController>();
+    const context = Object.create(ChapterPaginator.prototype) as any;
+    Object.assign(context, {
+      contentDoc: doc,
+      viewer,
+      disposed: false,
+      loadSeq: 1,
+      iframe: { clientWidth: 800, clientHeight: 600 },
+      settings: { fontSizePx: 16, gapPx: 40, readingMode: "paginated" },
+      restoreBackdropCompatibility: vi.fn(),
+      restoreInlineBoxFixes: vi.fn(),
+      restoreFloatLayoutFixes: vi.fn(),
+      restoreBookMargins: vi.fn(),
+      restoreFitContentFix: vi.fn(),
+      restoreFloatWidths: vi.fn(),
+      restoreTrailingFloatFixes: vi.fn(),
+      restorePercentageSpacing: vi.fn(),
+      measureControllers,
+      fixedLayout: false,
+    });
+
+    const promise = (ChapterPaginator.prototype as any).measure.call(context, 1);
+
+    // Height should be 600 - 25 - 35 = 540px
+    expect(viewer.style.height).toBe("540px");
+    expect(viewer.style.columnWidth).toBe("780px");
+
+    // Abort so promise resolves without waiting
+    for (const c of measureControllers) {
+      c.abort();
+    }
+    await promise;
+  });
+
+  it("falls back to 100% when calculated height is non-positive", async () => {
+    const viewer = makeFakeElement({ clientWidth: 0, clientHeight: 0 });
+    const doc = {
+      defaultView: null,
+      documentElement: { clientWidth: 0 },
+      body: { clientWidth: 0 },
+      fonts: { ready: Promise.resolve() },
+    };
+
+    const measureControllers = new Set<AbortController>();
+    const context = Object.create(ChapterPaginator.prototype) as any;
+    Object.assign(context, {
+      contentDoc: doc,
+      viewer,
+      disposed: false,
+      loadSeq: 1,
+      iframe: { clientWidth: 0, clientHeight: 0 },
+      settings: { fontSizePx: 16, gapPx: 40, readingMode: "paginated" },
+      restoreBackdropCompatibility: vi.fn(),
+      restoreInlineBoxFixes: vi.fn(),
+      restoreFloatLayoutFixes: vi.fn(),
+      restoreBookMargins: vi.fn(),
+      restoreFitContentFix: vi.fn(),
+      restoreFloatWidths: vi.fn(),
+      restoreTrailingFloatFixes: vi.fn(),
+      restorePercentageSpacing: vi.fn(),
+      measureControllers,
+      fixedLayout: false,
+    });
+
+    const promise = (ChapterPaginator.prototype as any).measure.call(context, 1);
+    expect(viewer.style.height).toBe("100%");
+
+    for (const c of measureControllers) {
+      c.abort();
+    }
+    await promise;
   });
 });

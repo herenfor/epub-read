@@ -1,0 +1,114 @@
+/*
+ * 正文图片查看浮层（AI-A 模块私有样式，由 ImageViewer.tsx 直接 import）。
+ * 只作用于 .image-viewer 命名空间；不改共享 styles.css，也不给正文/body 加 touch-action。
+ */
+
+.image-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+  background: rgba(10, 10, 12, 0.94);
+  color: #f2f2f2;
+  overscroll-behavior: contain;
+  touch-action: none;
+}
+
+.image-viewer-stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  touch-action: none;
+  overscroll-behavior: contain;
+  cursor: grab;
+}
+
+.image-viewer-stage:active {
+  cursor: grabbing;
+}
+
+.image-viewer-image {
+  display: block;
+  max-width: none;
+  max-height: none;
+  object-fit: contain;
+  transform-origin: center center;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: none;
+  touch-action: none;
+  will-change: transform;
+}
+
+.image-viewer-controls {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.82), rgba(0, 0, 0, 0));
+}
+
+.image-viewer-btn {
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #f2f2f2;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.image-viewer-btn:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.image-viewer-btn:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+
+.image-viewer-link {
+  padding: 0 16px;
+}
+
+.image-viewer-original {
+  font-variant-numeric: tabular-nums;
+}
+
+.image-viewer-close {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.image-viewer-scale {
+  min-width: 52px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 480px) {
+  .image-viewer-controls {
+    gap: 6px;
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+}

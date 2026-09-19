@@ -19,6 +19,31 @@ describe("cross-book search presentation", () => {
     expect(result.snippet.slice(result.matchRanges![0].start, result.matchRanges![0].end)).toBe("ＡＢＣ 测试");
     expect(result.hit.textAnchor.start).toBe(102);
     expect(result.hit.textAnchor.snippet).toBe("ＡＢＣ测试后文");
+    expect(result.textHits).toEqual([{ start: 102, end: 107, exactText: "ＡＢＣ测试" }]);
+  });
+
+  it("adds the block start exactly once even beyond the KMP radius", () => {
+    const result = presentCrossBookHit({
+      contentHash: "d".repeat(64), title: "书", creator: "", chunkId: "c3", spineIndex: 5,
+      chapterPath: "c.xhtml", contentType: "paragraph",
+      originalText: "前文ABC",
+      normalizedText: "前文abc",
+      textAnchor: { start: 5000, end: 5010, snippet: "前文ABC" },
+    }, "ABC");
+    expect(result.textHits).toEqual([{ start: 5002, end: 5005, exactText: "ABC" }]);
+    expect(result.hit.textAnchor.start).toBe(5002);
+  });
+
+  it("does not turn an unproven FTS range into a one-character body highlight", () => {
+    const result = presentCrossBookHit({
+      contentHash: "c".repeat(64), title: "书", creator: "", chunkId: "c2", spineIndex: 1,
+      chapterPath: "c.xhtml", contentType: "body",
+      originalText: "关键词甲与前文",
+      normalizedText: "关键词甲与前文",
+      textAnchor: { start: 20, end: 21, snippet: "关键词甲" },
+    }, "关键词乙");
+    expect(result.textHits).toBeUndefined();
+    expect(result.hit.textAnchor).toEqual({ start: 20, end: 21, snippet: "关键词甲" });
   });
 
   it("retains an unavailable reason without losing the source hit", () => {

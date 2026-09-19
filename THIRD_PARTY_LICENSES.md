@@ -52,6 +52,38 @@ This is a direct-dependency notice, not a complete Cargo.lock transitive
 license, copyright, NOTICE, SBOM, or target-platform audit; that audit remains
 explicitly deferred.
 
+### C-58B local embedding runtime (AI edition only)
+
+The AI edition adds a local ONNX embedding path. Core never enables the `ai`
+feature, so it does not compile or link any of the following.
+
+| Component | Version | License | Source |
+|---|---:|---|---|
+| ort (Rust bindings) | 2.0.0-rc.13 | MIT OR Apache-2.0 | https://github.com/pykeio/ort |
+| ort-sys | 2.0.0-rc.13 | MIT OR Apache-2.0 | https://github.com/pykeio/ort |
+| ONNX Runtime (prebuilt, linked statically) | 1.28.0 | MIT | https://github.com/microsoft/onnxruntime |
+| tokenizers (Rust) | 0.21.4 | Apache-2.0 | https://github.com/huggingface/tokenizers |
+| esaxx-rs (tokenizers backend) | 0.1.10 | Apache-2.0 | https://github.com/huggingface/tokenizers |
+
+The Windows DirectML build of ONNX Runtime is fetched at build time by
+`ort-sys` from a hash-pinned Microsoft distribution
+(`ms@1.28.0/x86_64-pc-windows-msvc+directml.tar.lzma2`, SHA-256
+`f7c654b3729cb9e5ad2a36a0c38e5b48e63bf4eed22968931aed33a0ad0b527d`) and linked
+statically. `DirectML.dll` is copied next to the executable by the
+`copy-dylibs` feature and is redistributed under Microsoft's DirectML terms;
+it is not open-source software and its redistribution terms must be confirmed
+before any installer ships it. This batch records the dependency and the real
+digest instead of asserting a verified redistribution claim.
+
+The first validated model package is BAAI/bge-small-zh-v1.5 (MIT), used through
+the pinned ONNX conversion in `Xenova/bge-small-zh-v1.5` revision
+`75c43b069aac4d136ba6bc1122f995fedcfd2781` with tokenizer assets from
+`BAAI/bge-small-zh-v1.5` revision
+`7999e1d3359715c523056ef9478215996d62a620`. Model files are not redistributed
+with the application; `scripts/prepare-semantic-model.ps1` downloads them into
+the user's model library and records real SHA-256 digests in the package
+manifest.
+
 ## Development dependencies
 
 | Component | Version | License | Source |

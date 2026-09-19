@@ -75,6 +75,7 @@ describe("current-book search core", () => {
       snippetMatchRanges: [{ start: 0, end: 4 }],
     });
     expect(results[0].originalRange.end).toBeGreaterThan(results[0].originalRange.start);
+    expect(results[0].textHits).toEqual([{ start: 0, end: 3, exactText: "Ａbc" }]);
   });
 
   it("maps surrogate pairs and NFKC expansions without per-character objects", async () => {
@@ -102,7 +103,9 @@ describe("current-book search core", () => {
     const results = await searchBook(book, "校园 少女", { yieldToHost: async () => {} });
     expect(results.some((result) => result.matchType === "keywords")).toBe(true);
     expect(results.filter((result) => result.matchType === "keywords")).toHaveLength(1);
-    expect(results.find((result) => result.matchType === "keywords")?.snippetMatchRanges).toHaveLength(2);
+    const keyword = results.find((result) => result.matchType === "keywords");
+    expect(keyword?.snippetMatchRanges).toHaveLength(2);
+    expect(keyword?.textHits).toHaveLength(2);
     const cross = await searchBook(fakeBook(["<body><p>校园</p><p>少女</p></body>"]), "校园少女", { yieldToHost: async () => {} });
     expect(cross).toHaveLength(0);
   });

@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import type { SystemFont, UserFont } from "./fontStore";
 import { createDragDepthTracker } from "./fontDrop";
+import { CloseIcon } from "./readerIcons";
 
 export interface FontSettingsPanelProps {
   source?: "system" | "imported";
@@ -120,11 +121,19 @@ export function FontSettingsPanel(props: FontSettingsPanelProps) {
   };
   const dragActive = htmlDragActive || props.nativeDragActive === true;
   const effectiveBusy = props.busy || dropBusy;
-  return <div className={`font-settings-panel${dragActive ? " font-drag-active" : ""}`} role="dialog" aria-label="字体设置"
+  return <div className={`font-settings-panel${dragActive ? " font-drag-active" : ""}`} role="dialog" aria-modal="true" aria-label="字体设置"
     onDragEnter={onDragEnter}
     onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = effectiveBusy ? "none" : "copy"; }}
     onDragLeave={onDragLeave} onDrop={onDrop}>
-    <div className="menu-head"><span>字体设置</span><button className="tb-btn" onClick={props.onClose}>✕</button></div>
+    <div className="drawer-drag-handle" aria-hidden="true" />
+    <div className="menu-head">
+      <div className="drawer-title-wrap">
+        <span>字体设置</span>
+      </div>
+      <button className="tb-btn tb-close" onClick={props.onClose} title="关闭字体设置" aria-label="关闭字体设置">
+        <CloseIcon size={14} />
+      </button>
+    </div>
     <div className="font-settings-current">
       当前字体：{props.source === "system" || props.source === "imported" ? props.customFontName : "跟随书籍"}
     </div>

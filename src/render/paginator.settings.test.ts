@@ -53,6 +53,41 @@ describe("settings reload snapshots", () => {
     expect(options?.readingAnchor).not.toBe(paginator.anchor);
   });
 
+  it("carries the committed search highlight identity across a settings reload", async () => {
+    const paginator = new ChapterPaginator(
+      iframe(),
+      { textFor: () => "chapter" } as never,
+      DEFAULT_SETTINGS,
+      true,
+      vi.fn()
+    ) as unknown as {
+      anchor: ReadingAnchor | null;
+      anchorPath: string;
+      _currentPath: string;
+      metrics: { currentPage: number; pageCount: number };
+      searchHighlightTarget: { requestId: number; textHits: Array<{ start: number; end: number; exactText: string }> } | null;
+      load(path: string, options?: LoadOptions): Promise<void>;
+      reloadWithSettings(settings: typeof DEFAULT_SETTINGS, anchor?: string): Promise<void>;
+    };
+    paginator.anchor = anchor();
+    paginator.anchorPath = "chapter.xhtml";
+    paginator._currentPath = "chapter.xhtml";
+    paginator.metrics = { currentPage: 2, pageCount: 3 };
+    paginator.searchHighlightTarget = {
+      requestId: 7,
+      textHits: [{ start: 12, end: 14, exactText: "旧文" }],
+    };
+    const load = vi.spyOn(paginator, "load").mockResolvedValue();
+    await paginator.reloadWithSettings({ ...DEFAULT_SETTINGS, fontSizePx: 19 });
+    const [, options] = load.mock.calls[0] ?? [];
+    expect(options?.preserveSearchHighlight).toEqual({
+      requestId: 7,
+      textHits: [{ start: 12, end: 14, exactText: "旧文" }],
+    });
+    expect(options?.preserveSearchHighlight).not.toBe(paginator.searchHighlightTarget);
+    expect(options?.preserveSearchHighlight?.textHits[0]).not.toBe(paginator.searchHighlightTarget?.textHits[0]);
+  });
+
   it("keeps an existing anchor when capture has no document", async () => {
     const paginator = new ChapterPaginator(
       iframe(),

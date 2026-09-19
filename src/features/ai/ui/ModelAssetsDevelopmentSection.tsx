@@ -51,7 +51,7 @@ export function ModelAssetsDevelopmentSection({ allowDevelopmentActions }: { all
       <p className="model-assets-note">{explanation}</p>
       {state.error && <div className="model-assets-error" role="alert">{state.error}</div>}
       <div className="model-assets-actions">
-        <button disabled={controlsDisabled} onClick={() => void controller.start()}>刷新元数据</button>
+        <button disabled={controlsDisabled} onClick={() => void controller.refresh()}>刷新元数据</button>
         <button disabled={controlsDisabled} onClick={() => void execute(async () => { const path = await pickDirectorySafely(); if (path) await controller.setLibraryPath(path); })}>选择模型库</button>
         <button disabled={controlsDisabled} onClick={() => void execute(async () => { const path = await pickDirectorySafely(); if (path) await controller.registerLinked(path); })}>导入 linked 目录</button>
         {allowDevelopmentActions && <button disabled={controlsDisabled} onClick={() => void controller.registerDevelopmentCatalog()}>登记测试包</button>}

@@ -17,7 +17,15 @@ function fakePorts(tasks: ModelDownloadTask[] = []): ModelAssetsDevelopmentPorts
   const assets = {
     getLibraryPath: async () => { calls.push("library"); return { path: null, exists: false, isDirectory: false }; },
     setLibraryPath: async () => ({ path: null, exists: false, isDirectory: false }),
-    scan: async () => { calls.push("scan"); throw new Error("scan must not run"); },
+    scan: async () => {
+      calls.push("scan");
+      return {
+        root: { path: null, exists: false, isDirectory: false },
+        packages: [],
+        defaultPackageId: null,
+        scanError: null,
+      };
+    },
     listPackages: async () => { calls.push("packages"); return [pkg]; },
     registerPackage: async () => pkg,
     registerLinkedPackage: async () => pkg,
@@ -137,6 +145,42 @@ describe("model assets development controller", () => {
     await first;
     await second;
     expect(states.at(-1)?.busy).toBe(false);
+    controller.dispose();
+  });
+
+  it("refreshes metadata by scanning the library first, then re-listing packages", async () => {
+    const fake = fakePorts();
+    const controller = createModelAssetsDevelopmentController(fake.ports, () => undefined);
+    await controller.refresh();
+    expect(fake.calls).toEqual(["scan", "packages", "tasks"]);
+    controller.dispose();
+  });
+
+  it("surfaces a scan failure instead of showing a stale package list", async () => {
+    const fake = fakePorts();
+    fake.ports.assets.scan = vi.fn(async () => {
+      throw new Error("模型库目录不可写");
+    }) as unknown as ModelAssetPort["scan"];
+    const states: ModelAssetsDevelopmentState[] = [];
+    const controller = createModelAssetsDevelopmentController(fake.ports, (state) => states.push(state));
+    await controller.refresh();
+    expect(states.at(-1)?.error).toBe("模型库目录不可写");
+    expect(states.at(-1)?.busy).toBe(false);
+    controller.dispose();
+  });
+
+  it("reports a backend scan error carried inside a successful response", async () => {
+    const fake = fakePorts();
+    fake.ports.assets.scan = vi.fn(async () => ({
+      root: { path: "D:/models", exists: true, isDirectory: true },
+      packages: [],
+      defaultPackageId: null,
+      scanError: "模型库路径不是目录",
+    })) as unknown as ModelAssetPort["scan"];
+    const states: ModelAssetsDevelopmentState[] = [];
+    const controller = createModelAssetsDevelopmentController(fake.ports, (state) => states.push(state));
+    await controller.refresh();
+    expect(states.at(-1)?.error).toBe("模型库路径不是目录");
     controller.dispose();
   });
 

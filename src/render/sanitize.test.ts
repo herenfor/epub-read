@@ -49,6 +49,18 @@ describe("sanitizeChapter", () => {
     expect(out).not.toContain("reader-note-span");
   });
 
+  it("注入 iframe 内的搜索 Custom Highlight 背景/前景，不写入布局属性", async () => {
+    const { html: out } = await sanitizeChapter(
+      `<html xmlns="http://www.w3.org/1999/xhtml"><body><p>正文</p></body></html>`,
+      opts()
+    );
+    expect(out).toContain("::highlight(reader-search-hit)");
+    const searchRule = /::highlight\(reader-search-hit\)\s*\{([^}]*)\}/s.exec(out)?.[1] ?? "";
+    expect(searchRule).toContain("background-color");
+    expect(searchRule).toContain("color:");
+    expect(searchRule).not.toMatch(/margin|font-size|padding|width|height/);
+  });
+
   it("移除脚本与事件属性", async () => {
     const html = `<html xmlns="http://www.w3.org/1999/xhtml"><head>
 <script>alert(1)</script>
@@ -453,6 +465,36 @@ describe("sanitizeChapter", () => {
     expect(out).toContain("width:13em");
   });
 
+  it("唯一流体 width:100% 的单图页仍按整页 contain（学习路线不产生空列）", async () => {
+    // 样本 OEBPS/Text/Learning-Path.xhtml：单张 width:100% 的路线图，若按
+    // 普通正文图排，640px 版心宽会把 1688×2624 的图算成 995px 高，超过一栏
+    // 后被 Chromium 拆成 3 列，读者看到 2 张空页。
+    const html = `<html xmlns="http://www.w3.org/1999/xhtml"><head><title>学习路线</title></head><body>
+<div class="duokan-image-single"><img style="width: 100%;" alt="学习路线" src="../Images/Learning.png"/></div>
+</body></html>`;
+    const { html: out } = await sanitizeChapter(html, opts("OEBPS/Text/Learning-Path.xhtml"));
+
+    expect(out).toContain('class="fullpage-image"');
+    expect(out).toContain("object-fit: contain");
+    expect(out).toContain("height: 100% !important");
+  });
+
+  it("percentage width 不是 100%、或另有尺寸约束的单图页仍按书排版", async () => {
+    const cases = [
+      `<img alt="a" src="a.png" style="width: 90%"/>`,
+      `<img alt="b" src="b.png" style="width: 100%; height: 100%"/>`,
+      `<img alt="c" src="c.png" style="width: 100%; max-height: 80vh"/>`,
+      `<img alt="d" src="d.png" style="width: 100%; max-width: 30em"/>`,
+      `<img alt="e" src="e.png" style="width: 100%; width: 90%"/>`,
+      `<img alt="f" src="f.png" width="100%"/>`,
+    ];
+    for (const image of cases) {
+      const html = `<html xmlns="http://www.w3.org/1999/xhtml"><body><p>${image}</p></body></html>`;
+      const { html: out } = await sanitizeChapter(html, opts());
+      expect(out, image).not.toContain('class="fullpage-image"');
+    }
+  });
+
   it("正文被包进 #epub-viewer 分页容器", async () => {
     const html = `<html xmlns="http://www.w3.org/1999/xhtml"><head><title>t</title></head><body><h1>标题</h1><p>正文</p></body></html>`;
     const { html: out } = await sanitizeChapter(html, opts());
@@ -767,5 +809,33 @@ background-position:center center;background-size:cover;background-color:#f9ebdf
     expect(out).toContain('@font-face { font-family: "MyFont";');
     expect(out).toContain('src: url("blob:myfont")');
     expect(out).toContain('font-family: "MyFont" !important;');
+  });
+
+  it("滚动模式注入的样式让 viewer 保持唯一纵向滚动容器", async () => {
+    const html = `<html xmlns="http://www.w3.org/1999/xhtml"><body><p>正文</p></body></html>`;
+    const { html: out } = await sanitizeChapter(html, {
+      ...opts(),
+      settings: { ...DEFAULT_SETTINGS, readingMode: "scroll" },
+    });
+    // 回归：曾经用 height:auto + overflow:visible 让 viewer 不再是滚动容器，
+    // scrollTop 赋值静默失效，滚动模式整章都滚不动。
+    expect(out).toMatch(
+      new RegExp(`#${VIEWER_ID}\\s*\\{[^}]*overflow-y:\\s*auto\\s*!important;`, "s")
+    );
+    expect(out).toMatch(/scrollbar-width:\s*none\s*!important;/);
+    expect(out).toMatch(/::-webkit-scrollbar\s*\{[^}]*display:\s*none\s*!important;/s);
+    expect(out).toMatch(new RegExp(`#${VIEWER_ID}\\s*\\{[^}]*height:\\s*100%\\s*!important;`, "s"));
+    expect(out).not.toMatch(new RegExp(`#${VIEWER_ID}\\s*\\{[^}]*overflow:\\s*visible`, "s"));
+  });
+
+  it("滚动模式不给纯图片页注入整屏填充（长图按自身比例自然流动）", async () => {
+    const html = `<html xmlns="http://www.w3.org/1999/xhtml"><head><title>封面</title></head>
+<body><div class="cover"><img alt="cover" src="cover.jpg"/></div></body></html>`;
+    const { html: out } = await sanitizeChapter(html, {
+      ...opts("OEBPS/Text/cover.xhtml"),
+      settings: { ...DEFAULT_SETTINGS, readingMode: "scroll" },
+    });
+    expect(out).not.toContain('class="fullpage-image"');
+    expect(out).toContain('data-reader="scroll-mode"');
   });
 });

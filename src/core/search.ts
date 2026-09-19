@@ -10,6 +10,7 @@ import {
   type SearchDocument,
 } from "./corpus";
 import type { Book, TocNode } from "./types";
+import { buildExactTextHits, type ExactTextHit } from "./exactTextHits";
 
 const ANCHOR_WHITESPACE = /\p{White_Space}/u;
 
@@ -61,6 +62,8 @@ export interface SearchResult {
   textSnippet: string;
   /** The matched original text, with internal block separators rendered as newlines. */
   matchedText: string;
+  /** Runtime-only exact body ranges; never persisted to the corpus database. */
+  textHits?: ExactTextHit[];
   matchType: "phrase" | "keywords";
 }
 
@@ -173,6 +176,7 @@ function resultFor(
   const rawStart = snippet.rawStart;
   const rawEnd = snippet.rawEnd;
   const anchorOffset = doc.anchorStarts[start] ?? 0;
+  const textHits = buildExactTextHits(doc.text, rawRanges) ?? undefined;
   return {
     spineIndex,
     chapterPath,
@@ -183,6 +187,7 @@ function resultFor(
     textOffset: anchorOffset,
     textSnippet: anchorSnippetFromRaw(doc.text, rawStart),
     matchedText: publicText(doc.text.slice(rawStart, rawEnd)),
+    textHits,
     matchType,
   };
 }

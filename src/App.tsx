@@ -7,6 +7,7 @@ import {
   type SearchResult,
   type SearchSession,
 } from "./core/search";
+import type { ExactTextHit } from "./core/exactTextHits";
 import { ResourceServer } from "./render/resources";
 import { sanitizePersistedTextAnchor } from "./render/textAnchor";
 import { clearDocumentSelection, isSelectAllShortcut } from "./render/selectionGuard";
@@ -15,7 +16,10 @@ import {
   type ReaderSettings,
   type Theme,
 } from "./render/settings";
-import type { ChapterState } from "./render/paginator";
+import type { ChapterState, PreciseNavigationStatus } from "./render/paginator";
+import { normalizePageOptions } from "./render/pageLayout";
+import type { ImageViewRequest } from "./render/imageActivation";
+import { ImageViewer } from "./ui/ImageViewer";
 import { Toolbar } from "./ui/Toolbar";
 import { MenuPanel } from "./ui/MenuPanel";
 import { FontSettingsPanel } from "./ui/FontSettingsPanel";
@@ -191,6 +195,13 @@ function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
 }
 
+/** 页面四边距按值比较；用于避免同值对象触发章节重载。 */
+function samePageMarginsPx(a: ReaderSettings["pageMarginsPx"], b: ReaderSettings["pageMarginsPx"]): boolean {
+  if (a === b) return true;
+  const sides = ["top", "bottom", "left", "right"] as const;
+  return sides.every((side) => (a?.[side] ?? null) === (b?.[side] ?? null));
+}
+
 function firstLinear(b: Book): number {
   const i = b.spine.findIndex((s) => s.linear);
   return i >= 0 ? i : 0;
@@ -254,6 +265,13 @@ export default function App() {
       customCss: saved.customCss,
       forceHorizontal: saved.forceHorizontal === true,
       preloadNextChapter: saved.preloadNextChapter === true,
+      // 页面选项只在读取边界规范化一次；后续布局函数不再重复校验。
+      ...normalizePageOptions({
+        readingMode: saved.readingMode,
+        pageMarginsPx: saved.pageMarginsPx,
+        columnsPerView: saved.columnsPerView,
+        gapPx: saved.gapPx,
+      }),
     };
   });
   // UI 界面缩放（独立于正文字号）
@@ -268,7 +286,23 @@ export default function App() {
   const [runtimeIssues, setRuntimeIssues] = useState<string[]>([]);
   const [diagText, setDiagText] = useState<string | null>(null);
   const [initialAnchor, setInitialAnchor] = useState<PersistedReaderAnchor | null>(null);
-  const [initialPage, setInitialPage] = useState(0);
+  const [initialPage, setInitialPage] = useState<number | null>(0);
+  /** 正文图片浮层请求；null = 未打开。 */
+  const [imageRequest, setImageRequest] = useState<ImageViewRequest | null>(null);
+  const imageRequestRef = useRef<ImageViewRequest | null>(null);
+  const [preciseTarget, setPreciseTarget] = useState<{
+    requestId: number;
+    kind: "search" | "note";
+    chapterPath: string;
+    textHits?: ExactTextHit[];
+  } | null>(null);
+  const [readerNotice, setReaderNotice] = useState<{
+    kind: "ok" | "warn" | "error";
+    text: string;
+  } | null>(null);
+  const [readerNoticeFading, setReaderNoticeFading] = useState(false);
+  const preciseRequestRef = useRef(0);
+  const latestPreciseRequestRef = useRef<number | null>(null);
   /** 异步章节字数统计：ref 是权威，state 只是 UI/派生快照。 */
   const [chapterCountsState, setChapterCountsState] = useState<ChapterCountCollection>(() =>
     createChapterCountCollection(0, [])
@@ -458,6 +492,28 @@ export default function App() {
     overlayHoverRef.current = false;
     readerRef.current?.dismissFootnote();
   }, []);
+
+  /** 关闭正文图片浮层；不改变页码/滚动位置，也不记入阅读历史。 */
+  const closeImageOverlay = useCallback((): void => {
+    imageRequestRef.current = null;
+    setImageRequest(null);
+  }, []);
+
+  /**
+   * 正文图片激活（仅活动章节转发）：先收起弹注/选区菜单，再打开独立浮层。
+   * 浮层打开期间正文按键、滚轮与翻页输入由 ReaderView 暂停。
+   */
+  const handleImageActivation = useCallback(
+    (image: ImageViewRequest): void => {
+      readerRef.current?.dismissFootnote();
+      readerRef.current?.clearTextSelection();
+      overlayHoverRef.current = false;
+      setForeground(closeReaderForeground());
+      imageRequestRef.current = image;
+      setImageRequest(image);
+    },
+    []
+  );
 
   const reportAiLifecycleError = useCallback((error: unknown): void => {
     const message = error instanceof Error ? error.message : String(error);
@@ -970,6 +1026,16 @@ export default function App() {
         ...(typeof importedSettings.customCss === "string" ? { customCss: importedSettings.customCss } : {}),
         ...(typeof importedSettings.forceHorizontal === "boolean" ? { forceHorizontal: importedSettings.forceHorizontal } : {}),
         ...(typeof importedSettings.preloadNextChapter === "boolean" ? { preloadNextChapter: importedSettings.preloadNextChapter } : {}),
+        // 导入的页面选项与本地读取走同一处归一化。
+        ...normalizePageOptions({
+          readingMode: importedSettings.readingMode,
+          pageMarginsPx: importedSettings.pageMarginsPx,
+          columnsPerView: importedSettings.columnsPerView,
+          gapPx:
+            typeof importedSettings.gapPx === "number"
+              ? importedSettings.gapPx
+              : previous.gapPx,
+        }),
       }));
       if (typeof importedSettings.uiScale === "number" && importedSettings.uiScale >= 0.75 && importedSettings.uiScale <= 1.5) {
         setUiScale(importedSettings.uiScale);
@@ -1161,9 +1227,44 @@ export default function App() {
     };
   }, [shelfNotice]);
 
+  useEffect(() => {
+    if (!readerNotice) {
+      setReaderNoticeFading(false);
+      return;
+    }
+    setReaderNoticeFading(false);
+    const fadeTimer = window.setTimeout(() => setReaderNoticeFading(true), 3000);
+    const closeTimer = window.setTimeout(() => setReaderNotice(null), 4000);
+    return () => {
+      window.clearTimeout(fadeTimer);
+      window.clearTimeout(closeTimer);
+    };
+  }, [readerNotice]);
+
+  const showReaderNotice = useCallback((text: string, kind: "ok" | "warn" | "error" = "warn"): void => {
+    setReaderNotice({ kind, text });
+  }, []);
+
+  const handlePreciseNavigationStatus = useCallback((status: {
+    requestId: number;
+    status: PreciseNavigationStatus;
+    exact: boolean;
+  }): void => {
+    if (latestPreciseRequestRef.current !== status.requestId) return;
+    latestPreciseRequestRef.current = null;
+    setPreciseTarget(null);
+    if (status.status === "unresolved") {
+      showReaderNotice("未能定位原文，请重新搜索或检查笔记", "warn");
+    } else if (status.status === "located-reference") {
+      showReaderNotice("已定位结果段落，未能标出精确匹配", "warn");
+    } else if (status.status === "unsupported-highlight") {
+      showReaderNotice("当前内核不支持正文高亮；已定位原文", "warn");
+    }
+  }, [showReaderNotice]);
+
   // ---- 从书架打开 ----
   const handleShelfOpen = useCallback(
-    async (id: string, searchTarget?: ResolvedCrossBookSearchHit) => {
+    async (id: string, searchTarget?: ResolvedCrossBookSearchHit, searchTextHits?: ExactTextHit[]) => {
       if (shelfBusyRef.current) return;
       const originalEntry = shelfEntriesRef.current.find((e) => e.id === id);
       if (!originalEntry) return;
@@ -1172,6 +1273,7 @@ export default function App() {
       setShelfError(null);
       if (searchTarget) setSearchNavigationBusy(true);
       setPhase({ phase: "loading", fileName: originalEntry.fileName });
+      let preciseRequestId: number | null = null;
       try {
         // A new open is a new session even when the same book is reopened.
         // Flush any prior session before resetting the immediate-write gate.
@@ -1207,6 +1309,11 @@ export default function App() {
           );
           throw error;
         }
+        // Legacy browser shelf IDs may be UUIDs; index identity always comes from EPUB bytes.
+        if (IS_AI_EDITION && !isTauriEnv() && !/^[a-f0-9]{64}$/.test(entry.contentHash ?? "")) {
+          entry = await getShelfStore().setContentHash(id, await sha256Hex(buf));
+          setShelfEntries((prev) => prev.map((item) => item.id === id ? entry : item));
+        }
         const b = await loadBook(buf);
         if (b.spine.length === 0) {
           setShelfError("这本书没有可阅读的内容");
@@ -1225,6 +1332,7 @@ export default function App() {
           if (targetIndex < 0 || targetIndex >= b.spine.length) {
             throw new Error("索引结果对应的章节已不存在，请重建该书索引");
           }
+          preciseRequestId = ++preciseRequestRef.current;
           saved = {
             spineIndex: targetIndex,
             page: 0,
@@ -1262,6 +1370,16 @@ export default function App() {
           entry.contentHash ?? id,
           entry.progressPct,
         );
+        if (preciseRequestId !== null && searchTarget) {
+          latestPreciseRequestRef.current = preciseRequestId;
+          setInitialPage(null);
+          setPreciseTarget({
+            requestId: preciseRequestId,
+            kind: "search",
+            chapterPath: searchTarget.chapterPath,
+            textHits: searchTextHits,
+          });
+        }
         shelfBusyRef.current = false;
         setShelfBusy(false);
       } catch (e) {
@@ -1412,6 +1530,10 @@ export default function App() {
 
   const handleRequestChapter = useCallback(
     (index: number, opts?: { atEnd?: boolean }) => {
+      // 换章前先关闭图片浮层，避免继续引用即将撤销的资源 URL。
+      closeImageOverlay();
+      setPreciseTarget(null);
+      latestPreciseRequestRef.current = null;
       navigationPendingRef.current = true;
       historyCaptureAllowedRef.current = false;
       readerDisplayReadyRef.current = false;
@@ -1422,7 +1544,7 @@ export default function App() {
       setStartAtEnd((prev) => ({ nonce: prev.nonce + 1, atEnd: opts?.atEnd === true }));
       closeForeground();
     },
-    [closeForeground]
+    [closeForeground, closeImageOverlay]
   );
 
   const handleIssues = useCallback((issues: string[]) => {
@@ -1524,6 +1646,8 @@ export default function App() {
   /** 只执行 href 跳转，不记录历史；UI 入口和 paginator 通知入口共用。 */
   const navigateReaderHref = useCallback((href: string): boolean => {
     if (!book) return false;
+    setPreciseTarget(null);
+    latestPreciseRequestRef.current = null;
     const idx = spineIndexForPath(book, href);
     const { anchor: a } = splitHref(href);
     if (idx < 0) return false;
@@ -1539,6 +1663,7 @@ export default function App() {
         a ? { fragment: a } : { toStart: true }
       );
       if (direct) {
+        setAnchor(a || undefined);
         closePanel("bookmarks");
         return true;
       }
@@ -1589,6 +1714,8 @@ export default function App() {
       anchorTextOffset: result.textOffset,
       anchorTextSnippet: result.textSnippet,
     };
+    const requestId = ++preciseRequestRef.current;
+    const textHits = result.textHits ?? [];
     if (
       sameChapterRoute({
         currentSpineIndex: spineIndex,
@@ -1598,30 +1725,56 @@ export default function App() {
       }) === "direct"
     ) {
       const snapshot = currentReaderPosition();
+      if (textHits.length > 0) {
+        const status = readerRef.current?.navigateToSearchTarget({ requestId, kind: "search", textHits });
+        if (status === "located" || status === "unsupported-highlight") {
+          setAnchor(undefined);
+          commitReaderHistorySnapshot(snapshot);
+          if (status === "unsupported-highlight") {
+            showReaderNotice("当前内核不支持正文高亮；已定位原文", "warn");
+          }
+          handleFootnoteClose();
+          closeForeground();
+          return;
+        }
+        showReaderNotice("未能定位原文，请重新搜索", "warn");
+        return;
+      }
       const direct = readerRef.current?.navigateWithinCurrentChapter({
         readingAnchor: targetAnchor,
-        fallbackPage: 0,
+        fallbackPage: null,
       });
       if (direct) {
+        setAnchor(undefined);
         commitReaderHistorySnapshot(snapshot);
+        showReaderNotice("已定位结果段落，未能标出精确匹配", "warn");
         handleFootnoteClose();
         closeForeground();
         return;
       }
+      showReaderNotice("未能定位原文，请重新搜索", "warn");
+      return;
     }
 
-    // 同章 direct 失败也安全退回完整章节加载；加载门控期间禁止保存旧页进度。
+    // 跨章先进入目标章节；精确范围/高亮在显示门内解析，失败不冒充命中。
     captureReaderHistory(result.chapterPath);
     navigationPendingRef.current = true;
     historyCaptureAllowedRef.current = false;
     readerDisplayReadyRef.current = false;
     setReaderDisplayReady(false);
     setSearchNavigationBusy(true);
+    setInitialPage(null);
+    setInitialAnchor(targetAnchor);
+    latestPreciseRequestRef.current = requestId;
+    setPreciseTarget({
+      requestId,
+      kind: "search",
+      chapterPath: result.chapterPath,
+      textHits: textHits.length > 0 ? textHits : undefined,
+    });
     setSpineIndex(result.spineIndex);
     setAnchor(undefined);
     setAnchorNonce((nonce) => nonce + 1);
-    setInitialPage(0);
-    setInitialAnchor(targetAnchor);
     handleFootnoteClose();
     closeForeground();
   }, [
@@ -1632,6 +1785,7 @@ export default function App() {
     commitReaderHistorySnapshot,
     captureReaderHistory,
     handleFootnoteClose,
+    showReaderNotice,
   ]);
 
   /** iframe 普通书内链接：历史由 paginator 的 before 通知记录一次。 */
@@ -1639,7 +1793,9 @@ export default function App() {
     navigateReaderHref(href);
   }, [navigateReaderHref]);
 
-  const handleHistoryBack = useCallback(() => {
+
+  const handleHistoryBack = useCallback(() => {    setPreciseTarget(null);
+    latestPreciseRequestRef.current = null;
     const current = currentReaderPosition();
     const transition = readerHistoryBack(readerHistory, current);
     if (!transition.target) return;
@@ -1664,6 +1820,7 @@ export default function App() {
         fallbackPage: pos.page,
       });
       if (direct) {
+        setAnchor(undefined);
         setReaderHistory(commitHistoryTransition(readerHistory, transition, true));
         historyCaptureAllowedRef.current = true;
         readerDisplayReadyRef.current = true;
@@ -1687,6 +1844,8 @@ export default function App() {
   }, [readerHistory, currentReaderPosition, spineIndex, handleFootnoteClose]);
 
   const handleHistoryForward = useCallback(() => {
+    setPreciseTarget(null);
+    latestPreciseRequestRef.current = null;
     const current = currentReaderPosition();
     const transition = readerHistoryForward(readerHistory, current);
     if (!transition.target) return;
@@ -1711,6 +1870,7 @@ export default function App() {
         fallbackPage: pos.page,
       });
       if (direct) {
+        setAnchor(undefined);
         setReaderHistory(commitHistoryTransition(readerHistory, transition, true));
         historyCaptureAllowedRef.current = true;
         readerDisplayReadyRef.current = true;
@@ -1840,6 +2000,7 @@ export default function App() {
       anchorTextOffset: note.startTextOffset,
       anchorTextSnippet: note.startTextSnippet,
     };
+    const requestId = ++preciseRequestRef.current;
     if (
       sameChapterRoute({
         currentSpineIndex: spineIndex,
@@ -1849,22 +2010,35 @@ export default function App() {
       }) === "direct"
     ) {
       const snapshot = currentReaderPosition();
-      if (readerRef.current?.navigateWithinCurrentChapter({ readingAnchor: targetAnchor, fallbackPage: 0 })) {
+      if (readerRef.current?.navigateWithinCurrentChapter({
+        readingAnchor: targetAnchor,
+        fallbackPage: null,
+      })) {
+        setAnchor(undefined);
         commitReaderHistorySnapshot(snapshot);
         closePanel("notes");
+        closeForeground();
         return;
       }
+      showReaderNotice("未能定位笔记原文，请检查笔记锚点", "warn");
+      return;
     }
     captureReaderHistory(note.chapterPath);
     navigationPendingRef.current = true;
     historyCaptureAllowedRef.current = false;
     readerDisplayReadyRef.current = false;
     setReaderDisplayReady(false);
+    setInitialPage(null);
+    setInitialAnchor(targetAnchor);
+    latestPreciseRequestRef.current = requestId;
+    setPreciseTarget({
+      requestId,
+      kind: "note",
+      chapterPath: note.chapterPath,
+    });
     setSpineIndex(target);
     setAnchor(undefined);
     setAnchorNonce((nonce) => nonce + 1);
-    setInitialPage(0);
-    setInitialAnchor(targetAnchor);
     closePanel("notes");
     handleFootnoteClose();
     closeForeground();
@@ -1876,6 +2050,7 @@ export default function App() {
     commitReaderHistorySnapshot,
     captureReaderHistory,
     handleFootnoteClose,
+    showReaderNotice,
   ]);
 
   // ---- 书签 ----
@@ -1950,6 +2125,8 @@ export default function App() {
 
   const handleSelectBookmark = useCallback(
     (bookmarkId: string) => {
+      setPreciseTarget(null);
+      latestPreciseRequestRef.current = null;
       const bookmark = currentBookmarks.find((item) => item.id === bookmarkId);
       if (!bookmark || !book) return;
       const bookmarkAnchor = toPersistedReaderAnchor({
@@ -1979,6 +2156,7 @@ export default function App() {
           fallbackPage: bookmark.page,
         });
         if (direct) {
+          setAnchor(undefined);
           commitReaderHistorySnapshot(snapshot);
           closeForeground();
           return;
@@ -2065,6 +2243,10 @@ export default function App() {
       customCss: settings.customCss,
       forceHorizontal: settings.forceHorizontal === true,
       preloadNextChapter: settings.preloadNextChapter === true,
+      readingMode: settings.readingMode === "scroll" ? "scroll" : "paginated",
+      pageMarginsPx: settings.pageMarginsPx,
+      columnsPerView: settings.columnsPerView === 2 ? 2 : 1,
+      gapPx: settings.gapPx,
     });
   }, [
     settings.fontSizePx,
@@ -2079,6 +2261,10 @@ export default function App() {
     settings.customCss,
     settings.forceHorizontal,
     settings.preloadNextChapter,
+    settings.readingMode,
+    settings.pageMarginsPx,
+    settings.columnsPerView,
+    settings.gapPx,
     uiScale,
   ]);
 
@@ -2383,6 +2569,8 @@ export default function App() {
   }, [countProgressSignature, countSummary.complete, persistChapterCountCache]);
 
   const handleBackToShelf = useCallback(async () => {
+    // 返回书架前先关浮层，再释放整本书的 ResourceServer。
+    closeImageOverlay();
     persistShelfProgress();
     shelfBusyRef.current = true;
     setShelfBusy(true);
@@ -2405,7 +2593,7 @@ export default function App() {
     setView("shelf");
     shelfBusyRef.current = false;
     setShelfBusy(false);
-  }, [persistShelfProgress, persistChapterCountCache, closeForeground]);
+  }, [persistShelfProgress, persistChapterCountCache, closeForeground, closeImageOverlay]);
 
   // 视图提交后清空整本书会话状态。ResourceServer 的实际 revoke 由
   // ReaderView 的 server 依赖 cleanup 执行，并且发生在 paginator dispose 之后。
@@ -2434,9 +2622,19 @@ export default function App() {
     setReaderHistory(emptyReaderNavigationHistory());
     overlayHoverRef.current = false;
     closeForeground();
+    setSearchNavigationBusy(false);
+    setPreciseTarget(null);
+    latestPreciseRequestRef.current = null;
     navigationPendingRef.current = false;
     historyCaptureAllowedRef.current = true;
   }, [view]);
+
+  useEffect(() => {
+    if (chapterState.status !== "error") return;
+    setSearchNavigationBusy(false);
+    setPreciseTarget(null);
+    latestPreciseRequestRef.current = null;
+  }, [chapterState.status]);
 
   // 切到后台时尽快冲刷；Tauri 关闭窗口时等待最后位置落盘后再销毁窗口。
   useEffect(() => {
@@ -2549,6 +2747,16 @@ export default function App() {
     ...runtimeIssues.map((m) => ({ kind: "reader_error", source: "render", message: m })),
   ];
 
+  const isReaderPanelOpen =
+    menuOpen ||
+    fontSettingsOpen ||
+    tocOpen ||
+    searchOpen ||
+    notesOpen ||
+    logOpen ||
+    assistantOpen ||
+    noteComposer !== null;
+
   return (
     <div
       className={`app${dragActive ? " drag-active" : ""}`}
@@ -2558,6 +2766,7 @@ export default function App() {
       {view === "reader" && <Toolbar
         title={ready ? book!.metadata.title : (book?.metadata.title ?? "")}
         issueCount={logItems.length}
+        isPanelOpen={isReaderPanelOpen}
         onBackToShelf={view === "reader" ? handleBackToShelf : undefined}
         onHistoryBack={view === "reader" ? handleHistoryBack : undefined}
         canHistoryBack={readerHistory.back.length > 0 && readerDisplayReady && !navigationPendingRef.current}
@@ -2671,7 +2880,7 @@ export default function App() {
                   const result = crossBookPanelResults.find((candidate) => candidate.id === panelResult.id);
                   if (!result) return;
                   const entry = entryByContentHashRef.current.get(result.hit.contentHash);
-                  if (entry) void handleShelfOpen(entry.id, result.hit);
+                  if (entry) void handleShelfOpen(entry.id, result.hit, result.textHits);
                 },
               }}
             />
@@ -2711,6 +2920,41 @@ export default function App() {
                   forceHorizontal={settings.forceHorizontal === true}
                   preloadNextChapter={settings.preloadNextChapter === true}
                   preloadNextChapterDisabled={book?.fixedLayout === true}
+                  readingMode={settings.readingMode === "scroll" ? "scroll" : "paginated"}
+                  onReadingModeChange={(mode) =>
+                    setSettings((s2) => (s2.readingMode === mode ? s2 : { ...s2, readingMode: mode }))
+                  }
+                  pageOptions={{
+                    readingMode: settings.readingMode === "scroll" ? "scroll" : "paginated",
+                    pageMarginsPx: settings.pageMarginsPx,
+                    columnsPerView: settings.columnsPerView === 2 ? 2 : 1,
+                    gapPx: settings.gapPx,
+                  }}
+                  pageEffectiveColumns={chapterState.status === "ready" ? chapterState.effectiveColumns ?? 1 : 1}
+                  pageFixedLayout={book?.fixedLayout === true}
+                  onPageOptionsChange={(value) =>
+                    setSettings((s2) => {
+                      const raw = normalizePageOptions(value);
+                      const readingMode = raw.readingMode === "scroll" ? "scroll" : "paginated";
+                      const columnsPerView = raw.columnsPerView === 2 ? 2 : 1;
+                      if (
+                        s2.readingMode === readingMode &&
+                        s2.columnsPerView === columnsPerView &&
+                        s2.gapPx === raw.gapPx &&
+                        samePageMarginsPx(s2.pageMarginsPx, raw.pageMarginsPx)
+                      ) {
+                        return s2;
+                      }
+                      // 只覆盖页面选项字段，字体/主题等无关设置保持原值。
+                      return {
+                        ...s2,
+                        readingMode,
+                        columnsPerView,
+                        gapPx: raw.gapPx,
+                        pageMarginsPx: raw.pageMarginsPx,
+                      };
+                    })
+                  }
                   userFonts={userFonts}
                   fontBusy={fontBusy}
                   onImportFont={(file) => void handleImportFont(file)}
@@ -2778,6 +3022,8 @@ export default function App() {
                   onThemeChange={changeTheme}
                   onResetDefaults={resetDefaults}
                   onClose={closeForeground}
+                  issueCount={logItems.length}
+                  onToggleLog={handleToggleLog}
                 />}
               </>
             )}
@@ -2795,105 +3041,122 @@ export default function App() {
                   </>
                 )}
                 {searchOpen && (
-                  <SearchPanel
-                    query={searchScope === "all" ? librarySearchSnapshot.query : searchQuery}
-                    onQueryChange={searchScope === "all" ? librarySearchRuntime.setQuery.bind(librarySearchRuntime) : setSearchQuery}
-                    scope={searchScope}
-                    onScopeChange={(scope) => {
-                      searchAbortRef.current?.abort();
-                      searchAbortRef.current = null;
-                      searchGenerationRef.current++;
-                      setSearchScope(scope);
-                      setSearchResults([]);
-                      setSearchStatus("idle");
-                      setSearchError(undefined);
-                      if (scope === "all") void librarySearchRuntime.checkIndex();
-                    }}
-                    results={searchPanelResults}
-                    status={searchScope === "all" ? librarySearchSnapshot.searchStatus : searchStatus}
-                    processed={searchScope === "all" ? librarySearchSnapshot.indexSummary.indexed : searchProgress.processed}
-                    total={searchScope === "all" ? librarySearchSnapshot.indexSummary.total : searchProgress.total}
-                    truncated={(searchScope === "all" ? librarySearchSnapshot.results.length : searchResults.length) > 100}
-                    errorMessage={searchScope === "all" ? librarySearchSnapshot.searchError : searchError}
-                    navigationBusy={searchNavigationBusy}
-                    indexStatus={searchScope === "all" ? librarySearchSnapshot.indexState : undefined}
-                    indexProgress={searchScope === "all" ? {
-                      total: librarySearchSnapshot.indexState === "indexing" || librarySearchSnapshot.indexState === "cancelling"
-                        ? librarySearchSnapshot.indexProgress.total
-                        : librarySearchSnapshot.indexSummary.total,
-                      completed: librarySearchSnapshot.indexState === "indexing" || librarySearchSnapshot.indexState === "cancelling"
-                        ? librarySearchSnapshot.indexProgress.completed
-                        : librarySearchSnapshot.indexSummary.indexed,
-                      pending: librarySearchSnapshot.indexSummary.pending,
-                      currentBookTitle: librarySearchSnapshot.indexProgress.titles.join("、") || undefined,
-                    } : undefined}
-                    indexErrorMessage={librarySearchSnapshot.rebuildRequested
-                        ? "重新建立会清除现有全文索引，并重新处理全部可用书籍。"
-                        : librarySearchSnapshot.indexError}
-                    onStartIndex={searchScope === "all" ? handleStartLibraryIndex : undefined}
-                    onDeferIndex={searchScope === "all" ? handleDeferLibraryIndex : undefined}
-                    onCancelIndex={searchScope === "all" ? handleCancelLibraryIndex : undefined}
-                    onRebuildIndex={searchScope === "all" ? handleRebuildTextIndex : undefined}
-                    onClearIndex={searchScope === "all" ? handleClearTextIndex : undefined}
-                    concurrencyMode={searchScope === "all" ? corpusConcurrencyPreference.mode : undefined}
-                    concurrency={searchScope === "all" ? corpusConcurrencyPreference.maxConcurrency : undefined}
-                    detectedCores={searchScope === "all" ? logicalCores : undefined}
-                    recommendedConcurrency={searchScope === "all" ? recommendedCorpusConcurrency : undefined}
-                    onConcurrencyChange={searchScope === "all" ? (mode, value) => {
-                      setCorpusConcurrencyPreference(normalizeCorpusConcurrencyPreference({
-                        mode,
-                        maxConcurrency: value ?? corpusConcurrencyPreference.maxConcurrency,
-                      }, logicalCores));
-                    } : undefined}
-                    onSelect={(panelResult) => {
-                      if (searchScope === "all") {
-                        const crossResult = crossBookPanelResults.find((candidate) => candidate.id === panelResult.id);
-                        if (!crossResult) return;
-                        const entry = entryByContentHashRef.current.get(crossResult.hit.contentHash);
-                        if (entry) void handleShelfOpen(entry.id, crossResult.hit);
-                        return;
-                      }
-                      const result = searchResults.find((candidate) =>
-                        `${candidate.spineIndex}:${candidate.originalRange.start}:${candidate.originalRange.end}:${candidate.matchType}` === panelResult.id
-                      );
-                      if (result) handleSearchNavigate(result);
-                    }}
-                    onCancel={searchScope === "current" ? () => {
-                      searchAbortRef.current?.abort();
-                      searchAbortRef.current = null;
-                      searchGenerationRef.current++;
-                      setSearchResults([]);
-                      setSearchStatus("idle");
-                      setSearchProgress({ processed: 0, total: 0 });
-                    } : undefined}
-                    onClose={() => closePanel("search")}
-                  />
+                  <>
+                    <div className="search-backdrop" onClick={() => closePanel("search")} />
+                    <SearchPanel
+                      query={searchScope === "all" ? librarySearchSnapshot.query : searchQuery}
+                      onQueryChange={searchScope === "all" ? librarySearchRuntime.setQuery.bind(librarySearchRuntime) : setSearchQuery}
+                      scope={searchScope}
+                      onScopeChange={(scope) => {
+                        searchAbortRef.current?.abort();
+                        searchAbortRef.current = null;
+                        searchGenerationRef.current++;
+                        setSearchScope(scope);
+                        setSearchResults([]);
+                        setSearchStatus("idle");
+                        setSearchError(undefined);
+                        if (scope === "all") void librarySearchRuntime.checkIndex();
+                      }}
+                      results={searchPanelResults}
+                      status={searchScope === "all" ? librarySearchSnapshot.searchStatus : searchStatus}
+                      processed={searchScope === "all" ? librarySearchSnapshot.indexSummary.indexed : searchProgress.processed}
+                      total={searchScope === "all" ? librarySearchSnapshot.indexSummary.total : searchProgress.total}
+                      truncated={(searchScope === "all" ? librarySearchSnapshot.results.length : searchResults.length) > 100}
+                      errorMessage={searchScope === "all" ? librarySearchSnapshot.searchError : searchError}
+                      navigationBusy={searchNavigationBusy}
+                      indexStatus={searchScope === "all" ? librarySearchSnapshot.indexState : undefined}
+                      indexProgress={searchScope === "all" ? {
+                        total: librarySearchSnapshot.indexState === "indexing" || librarySearchSnapshot.indexState === "cancelling"
+                          ? librarySearchSnapshot.indexProgress.total
+                          : librarySearchSnapshot.indexSummary.total,
+                        completed: librarySearchSnapshot.indexState === "indexing" || librarySearchSnapshot.indexState === "cancelling"
+                          ? librarySearchSnapshot.indexProgress.completed
+                          : librarySearchSnapshot.indexSummary.indexed,
+                        pending: librarySearchSnapshot.indexSummary.pending,
+                        currentBookTitle: librarySearchSnapshot.indexProgress.titles.join("、") || undefined,
+                      } : undefined}
+                      indexErrorMessage={librarySearchSnapshot.rebuildRequested
+                          ? "重新建立会清除现有全文索引，并重新处理全部可用书籍。"
+                          : librarySearchSnapshot.indexError}
+                      onStartIndex={searchScope === "all" ? handleStartLibraryIndex : undefined}
+                      onDeferIndex={searchScope === "all" ? handleDeferLibraryIndex : undefined}
+                      onCancelIndex={searchScope === "all" ? handleCancelLibraryIndex : undefined}
+                      onRebuildIndex={searchScope === "all" ? handleRebuildTextIndex : undefined}
+                      onClearIndex={searchScope === "all" ? handleClearTextIndex : undefined}
+                      concurrencyMode={searchScope === "all" ? corpusConcurrencyPreference.mode : undefined}
+                      concurrency={searchScope === "all" ? corpusConcurrencyPreference.maxConcurrency : undefined}
+                      detectedCores={searchScope === "all" ? logicalCores : undefined}
+                      recommendedConcurrency={searchScope === "all" ? recommendedCorpusConcurrency : undefined}
+                      onConcurrencyChange={searchScope === "all" ? (mode, value) => {
+                        setCorpusConcurrencyPreference(normalizeCorpusConcurrencyPreference({
+                          mode,
+                          maxConcurrency: value ?? corpusConcurrencyPreference.maxConcurrency,
+                        }, logicalCores));
+                      } : undefined}
+                      onSelect={(panelResult) => {
+                        if (searchScope === "all") {
+                          const crossResult = crossBookPanelResults.find((candidate) => candidate.id === panelResult.id);
+                          if (!crossResult) return;
+                          const entry = entryByContentHashRef.current.get(crossResult.hit.contentHash);
+                          if (entry) void handleShelfOpen(entry.id, crossResult.hit, crossResult.textHits);
+                          return;
+                        }
+                        const result = searchResults.find((candidate) =>
+                          `${candidate.spineIndex}:${candidate.originalRange.start}:${candidate.originalRange.end}:${candidate.matchType}` === panelResult.id
+                        );
+                        if (result) handleSearchNavigate(result);
+                      }}
+                      onCancel={searchScope === "current" ? () => {
+                        searchAbortRef.current?.abort();
+                        searchAbortRef.current = null;
+                        searchGenerationRef.current++;
+                        setSearchResults([]);
+                        setSearchStatus("idle");
+                        setSearchProgress({ processed: 0, total: 0 });
+                      } : undefined}
+                      onClose={() => closePanel("search")}
+                    />
+                  </>
                 )}
                 {notesOpen && (
-                  <NotesPanel
-                    notes={noteViewModels}
-                    onClose={() => closePanel("notes")}
-                    onNavigate={(viewNote) => {
-                      const note = currentNotes.find((candidate) => candidate.id === viewNote.id);
-                      if (note) handleNoteNavigate(note);
-                    }}
-                    onEdit={(viewNote) => {
-                      const note = currentNotes.find((candidate) => candidate.id === viewNote.id);
-                      if (!note) return;
-                       openComposer({ mode: "edit", note });
-                    }}
-                    onDelete={(viewNote) => void handleDeleteNote(viewNote.id)}
-                  />
+                  <>
+                    <div className="notes-backdrop" onClick={() => closePanel("notes")} />
+                    <NotesPanel
+                      notes={noteViewModels}
+                      onClose={() => closePanel("notes")}
+                      onNavigate={(viewNote) => {
+                        const note = currentNotes.find((candidate) => candidate.id === viewNote.id);
+                        if (note) handleNoteNavigate(note);
+                      }}
+                      onEdit={(viewNote) => {
+                        const note = currentNotes.find((candidate) => candidate.id === viewNote.id);
+                        if (!note) return;
+                         openComposer({ mode: "edit", note });
+                      }}
+                      onDelete={(viewNote) => void handleDeleteNote(viewNote.id)}
+                    />
+                  </>
                 )}
                 {assistantOpen && LazyAiFoundationPanel && (
-                  <Suspense fallback={<aside className="ai-foundation-panel" role="status">正在加载 AI 开发面板…</aside>}>
-                    <LazyAiFoundationPanel
-                      snapshot={aiRuntimeSnapshot}
-                      onEnable={enableAi}
-                      onDisable={disableAi}
-                      onClose={() => closePanel("assistant")}
-                    />
-                  </Suspense>
+                  <>
+                    <div className="ai-backdrop" onClick={() => closePanel("assistant")} aria-hidden="true" />
+                    <Suspense fallback={<aside className="ai-foundation-panel" role="status">正在加载 AI 开发面板…</aside>}>
+                      <LazyAiFoundationPanel
+                        snapshot={aiRuntimeSnapshot}
+                        preparation={book && currentShelfId ? {
+                          book, fingerprint: contentHashByIdRef.current.get(currentShelfId) ?? currentShelfId,
+                          readingBusy: readerPriorityBusyRef.current, onNavigate: handleSearchNavigate,
+                        } : undefined}
+                        semantic={book && currentShelfId ? {
+                          book, fingerprint: contentHashByIdRef.current.get(currentShelfId) ?? currentShelfId,
+                          readingBusy: readerPriorityBusyRef.current, onNavigate: handleSearchNavigate,
+                        } : undefined}
+                        onEnable={enableAi}
+                        onDisable={disableAi}
+                        onClose={() => closePanel("assistant")}
+                      />
+                    </Suspense>
+                  </>
                 )}
                 <ReaderView
                   key={bookKey}
@@ -2927,9 +3190,23 @@ export default function App() {
                   onExternalLink={handleExternalLink}
                    onFootnote={(payload) => openTransient("footnote", payload)}
                   onFootnoteClose={handleFootnoteClose}
+                  onImageActivation={handleImageActivation}
+                  inputPaused={imageRequest !== null}
                   initialAnchor={initialAnchor}
                   initialPage={initialPage}
                   startAtEnd={startAtEnd}
+                  preciseTarget={preciseTarget}
+                  onPreciseNavigationStatus={handlePreciseNavigationStatus}
+                />
+                <ImageViewer
+                  image={imageRequest}
+                  onClose={closeImageOverlay}
+                  onFollowLink={(image) => {
+                    // 带链接的图片：交回既有链接路由，不直接 window.open。
+                    const href = image.linkHref;
+                    closeImageOverlay();
+                    if (href) handleInternalNavigate(href);
+                  }}
                 />
                 {selectionContext && (
                   <ReaderContextMenu
@@ -3002,29 +3279,43 @@ export default function App() {
           <span className="sb-title" title={currentChapterLabel}>
             {currentChapterLabel || book!.metadata.title}
           </span>
-          <span className="sb-progress">
-            {reading
-              ? `第 ${chapterState.currentPage + 1}/${chapterState.pageCount} 页 · 章 ${linearPos + 1}/${linearCount} · ${progressLabel}`
+          <div className="sb-trailing">
+            <span className="sb-progress">
+              {reading
+                ? settings.readingMode === "scroll"
+                  ? `本章 ${Math.round((chapterState.scrollProgress ?? 0) * 100)}% · 章 ${linearPos + 1}/${linearCount} · ${progressLabel}`
+                : `第 ${chapterState.currentPage + 1}/${chapterState.pageCount} 页 · 章 ${linearPos + 1}/${linearCount} · ${progressLabel}`
               : "加载中…"}
-          </span>
+            </span>
+
+          </div>
         </div>
       )}
       {logOpen && (
-        <LogPanel
-          items={logItems}
-          diagText={diagText}
-          onClose={() => {
-            closePanel("log");
-            setDiagText(null);
-          }}
-        />
+        <>
+          <div
+            className="log-backdrop"
+            onClick={() => {
+              closePanel("log");
+              setDiagText(null);
+            }}
+          />
+          <LogPanel
+            items={logItems}
+            diagText={diagText}
+            onClose={() => {
+              closePanel("log");
+              setDiagText(null);
+            }}
+          />
+        </>
       )}
-      {shelfNotice && (
+      {(shelfNotice || readerNotice) && (
         <div
-          className={`shelf-toast ${shelfNotice.kind}${shelfNoticeFading ? " fading" : ""}`}
+          className={`shelf-toast ${(shelfNotice ?? readerNotice)!.kind}${(shelfNotice ? shelfNoticeFading : readerNoticeFading) ? " fading" : ""}`}
           role="status"
         >
-          {shelfNotice.text}
+          {(shelfNotice ?? readerNotice)!.text}
         </div>
       )}
       {shelfBusy && (

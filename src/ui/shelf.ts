@@ -1,8 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
+import { IS_AI_EDITION } from "../config/edition";
 import { sanitizePersistedTextAnchor } from "../render/textAnchor";
 import type { LibraryRecord } from "./libraryArchive";
 import type { ThumbnailAsset, ThumbnailProvider } from "./thumbnail";
 import { hasDuplicateReaderNoteIds, normalizeReaderNotes, type ReaderNote } from "./notes";
+
+// Keep the optional module out of the Core import graph, including dynamic chunks.
+const cleanupBrowserPreparation = IS_AI_EDITION
+  ? async (book: string) => (await import("../features/ai/preparation/browserStore")).deleteBrowserPreparationForBook(book)
+  : null;
 
 /** 书签：记录跳转回阅读进度用。 */
 export interface Bookmark {
@@ -853,6 +859,10 @@ class IndexedDbShelfStore implements ShelfStore {
   async deleteBook(id: string): Promise<void> {
     const db = await openDb();
     try {
+      if (cleanupBrowserPreparation) {
+        const entry = await reqAsPromise<ShelfEntry | undefined>(db.transaction("meta").objectStore("meta").get(id));
+        await cleanupBrowserPreparation(entry?.contentHash ?? id);
+      }
       const tx = db.transaction(["meta", "books", "covers"], "readwrite");
       tx.objectStore("meta").delete(id);
       tx.objectStore("books").delete(id);

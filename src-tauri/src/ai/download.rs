@@ -437,6 +437,11 @@ impl DownloadManager {
         store: &AiStore,
         task_id: &str,
     ) -> Result<ModelDownloadTaskRecord, String> {
+        if let Ok(queue) = self.state.lock() {
+            if let Some(control) = queue.controls.get(task_id) {
+                control.cancel.store(true, Ordering::Release);
+            }
+        }
         let task = store
             .get_model_download_task(task_id)?
             .ok_or_else(|| "模型下载任务不存在".to_string())?;
@@ -450,12 +455,24 @@ impl DownloadManager {
             // cleanup happens after the worker observes the signal.
             return Ok(task);
         }
+        if matches!(task.state.as_str(), "completed" | "cancelled") {
+            return Ok(task);
+        }
+        let root = store
+            .model_library_path()?
+            .map(PathBuf::from)
+            .ok_or_else(|| "尚未设置模型库目录".to_string())?;
+        let package = store
+            .get_model_package(&task.package_id)?
+            .ok_or_else(|| "模型包不存在".to_string())?;
+        let _guard = super::model_locks::ModelLock::assets(
+            &root,
+            &package.package_dir,
+            &package.package_id,
+        )?;
         if let Ok(mut queue) = self.state.lock() {
             queue.queue.retain(|id| id != task_id);
             queue.controls.remove(task_id);
-        }
-        if matches!(task.state.as_str(), "completed" | "cancelled") {
-            return Ok(task);
         }
         let result = store.update_model_download_task(
             task_id,
@@ -468,10 +485,6 @@ impl DownloadManager {
             Some("用户取消下载"),
         )?;
         store.set_model_package_state(&task.package_id, "uninstalled")?;
-        let root = store
-            .model_library_path()?
-            .map(PathBuf::from)
-            .ok_or_else(|| "尚未设置模型库目录".to_string())?;
         if let Err(error) = remove_staging_for_task(&root, &task.package_id, task_id) {
             let _ = store.update_model_download_task(
                 task_id,
@@ -529,6 +542,70 @@ fn run_task_with_client(
         .map(PathBuf::from)
         .ok_or_else(|| "尚未设置模型库目录".to_string())?;
     let manifest = manifest_from_record(&package)?;
+    // Only this worker waits, outside every DB/queue mutex. No filesystem
+    // recovery, HTTP or staging access starts before the complete guard exists.
+    let _guard = match super::model_locks::ModelLock::wait_package(
+        &root,
+        &package.package_dir,
+        &package.package_id,
+        std::time::Duration::from_secs(5),
+        || control.requested().is_some(),
+    ) {
+        Ok(guard) => guard,
+        Err(error) => {
+            let (state, message) = match control.requested() {
+                Some(DownloadSignal::Pause) => ("paused", "已暂停模型锁等待".to_string()),
+                Some(DownloadSignal::Cancel) => (
+                    "failed",
+                    "已停止模型锁等待；临时文件保留，请释放占用后再次取消以清理".to_string(),
+                ),
+                None => ("failed", error),
+            };
+            if store
+                .get_model_download_task(task_id)?
+                .is_some_and(|t| t.state == "downloading")
+            {
+                store.update_model_download_task(
+                    task_id,
+                    state,
+                    task.bytes_downloaded,
+                    task.current_file_path.as_deref(),
+                    task.current_file_index,
+                    task.current_source_url.as_deref(),
+                    task.source_index,
+                    Some(&message),
+                )?;
+                store.set_model_package_state(&package.package_id, state)?;
+            }
+            return if state == "paused" {
+                Ok(())
+            } else {
+                Err(message)
+            };
+        }
+    };
+    if store
+        .get_model_download_task(task_id)?
+        .is_none_or(|t| t.state != "downloading")
+    {
+        return Ok(());
+    }
+    if let Some(signal) = control.requested() {
+        let result = handle_signal(
+            store,
+            &package,
+            &root,
+            task_id,
+            task.bytes_downloaded,
+            task.current_file_path.as_deref(),
+            task.current_file_index,
+            signal,
+        );
+        return match result {
+            Err(e) if e == "__paused__" || e == "__cancelled__" => Ok(()),
+            result => result,
+        };
+    }
     if let Some(recovered) = recover_committed_package(store, &root, &package, &manifest, task_id)?
     {
         return recovered;
@@ -1639,6 +1716,153 @@ mod tests {
 
     fn no_progress(_: u64) -> Result<(), String> {
         Ok(())
+    }
+
+    #[test]
+    fn worker_holds_ownership_through_install_and_second_store_reuses_package() {
+        struct LockedClient {
+            root: PathBuf,
+            other: Arc<AiStore>,
+        }
+        impl HttpClient for LockedClient {
+            fn get(&self, _: &str, _: Option<u64>) -> Result<HttpResponse, String> {
+                assert!(
+                    super::super::model_locks::ModelLock::package(&self.root, "shared", false)
+                        .is_err()
+                );
+                assert_eq!(
+                    self.other.remove_model_package("shared", true).unwrap_err(),
+                    super::super::model_locks::BUSY
+                );
+                Ok(response(200, None, b"weights"))
+            }
+        }
+        let root = std::env::temp_dir().join(format!(
+            "epub-download-shared-install-{}",
+            std::process::id()
+        ));
+        let model_root = root.join("models");
+        fs::create_dir_all(&model_root).unwrap();
+        let first = AiStore::open(&root.join("first-app")).unwrap();
+        let second = Arc::new(AiStore::open(&root.join("second-app")).unwrap());
+        for store in [&first, second.as_ref()] {
+            store
+                .set_model_library_path(model_root.to_str().unwrap())
+                .unwrap();
+            store
+                .register_catalog_model_manifest(&catalog_manifest("shared", b"weights"), "shared")
+                .unwrap();
+        }
+        let task = first.create_or_get_model_download_task("shared").unwrap();
+        run_task_with_client(
+            &first,
+            &task.id,
+            Arc::default(),
+            &FsDiskSpace,
+            &LockedClient {
+                root: model_root.clone(),
+                other: Arc::clone(&second),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            first
+                .get_model_download_task(&task.id)
+                .unwrap()
+                .unwrap()
+                .state,
+            "completed"
+        );
+        let task = second.create_or_get_model_download_task("shared").unwrap();
+        let client = CountingClient {
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        };
+        run_task_with_client(&second, &task.id, Arc::default(), &FsDiskSpace, &client).unwrap();
+        assert_eq!(client.calls.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            second
+                .get_model_download_task(&task.id)
+                .unwrap()
+                .unwrap()
+                .state,
+            "completed"
+        );
+        assert_eq!(
+            fs::read(model_root.join("shared/weights.gguf")).unwrap(),
+            b"weights"
+        );
+        second.remove_model_package("shared", true).unwrap();
+        drop(first);
+        drop(second);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn blocked_worker_pause_cancel_preserve_staging_and_never_contact_network() {
+        for cancel in [false, true] {
+            let root = std::env::temp_dir().join(format!(
+                "epub-download-lock-{}-{cancel}",
+                std::process::id()
+            ));
+            let store = Arc::new(AiStore::open(&root).unwrap());
+            let model_root = root.join("models");
+            fs::create_dir_all(&model_root).unwrap();
+            store
+                .set_model_library_path(model_root.to_str().unwrap())
+                .unwrap();
+            store
+                .register_catalog_model_manifest(&catalog_manifest("held", b"weights"), "held")
+                .unwrap();
+            let task = store.create_or_get_model_download_task("held").unwrap();
+            let staging = ensure_staging_for_task(&model_root, "held", &task.id).unwrap();
+            fs::write(staging.join("weights.gguf.part"), b"wei").unwrap();
+            let holder =
+                super::super::model_locks::ModelLock::package(&model_root, "held", false).unwrap();
+            let control = Arc::new(DownloadControl::default());
+            let worker_control = Arc::clone(&control);
+            let worker_store = Arc::clone(&store);
+            let task_id = task.id.clone();
+            let worker = thread::spawn(move || {
+                let client = CountingClient {
+                    calls: std::sync::atomic::AtomicUsize::new(0),
+                };
+                let result = run_task_with_client(
+                    &worker_store,
+                    &task_id,
+                    worker_control,
+                    &FsDiskSpace,
+                    &client,
+                );
+                assert_eq!(client.calls.load(Ordering::Relaxed), 0);
+                result
+            });
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+            while store
+                .get_model_download_task(&task.id)
+                .unwrap()
+                .unwrap()
+                .state
+                == "queued"
+                && std::time::Instant::now() < deadline
+            {
+                thread::sleep(std::time::Duration::from_millis(5));
+            }
+            if cancel {
+                control.cancel.store(true, Ordering::Release);
+            } else {
+                control.pause.store(true, Ordering::Release);
+            }
+            let result = worker.join().unwrap();
+            let latest = store.get_model_download_task(&task.id).unwrap().unwrap();
+            assert_eq!(latest.state, if cancel { "failed" } else { "paused" });
+            assert_eq!(fs::read(staging.join("weights.gguf.part")).unwrap(), b"wei");
+            assert_eq!(result.is_err(), cancel);
+            drop(holder);
+            DownloadManager::default().cancel(&store, &task.id).unwrap();
+            assert!(!staging.exists());
+            drop(store);
+            fs::remove_dir_all(root).unwrap();
+        }
     }
 
     #[test]

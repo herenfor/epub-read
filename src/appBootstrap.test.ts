@@ -5,7 +5,7 @@ import { bootstrapApp, type AppBootstrapDependencies } from "./appBootstrap";
 
 const root = {} as HTMLElement;
 const buildInfo = {
-  version: "0.1.9-beta.2",
+  version: "0.2.0",
   edition: APP_EDITION,
   protocolVersion: 1 as const,
   target: "test-target",

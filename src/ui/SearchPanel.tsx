@@ -1,5 +1,6 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
+import { CloseIcon } from "./readerIcons";
 
 export type SearchStatus = "idle" | "searching" | "complete" | "error";
 export type SearchScope = "current" | "all";
@@ -154,12 +155,134 @@ function resultSegments(result: SearchPanelResult): SearchTextSegment[] {
   return result.highlightedSnippet ?? highlightSearchSnippet(result.snippet, result.matchRanges);
 }
 
+function CheckIcon() {
+  return (
+    <svg className="shelf-svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  );
+}
+
+interface ConcurrencyOption {
+  value: "automatic" | "manual";
+  label: string;
+}
+
+function ConcurrencySelect(props: {
+  value: "automatic" | "manual";
+  options: ConcurrencyOption[];
+  onChange(value: "automatic" | "manual"): void;
+  title?: string;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const timerRef = useRef<number | null>(null);
+
+  const closeDropdown = useCallback(() => {
+    if (!open || closing) return;
+    setClosing(true);
+    timerRef.current = window.setTimeout(() => {
+      setOpen(false);
+      setClosing(false);
+      timerRef.current = null;
+    }, 150);
+  }, [open, closing]);
+
+  const toggleDropdown = useCallback(() => {
+    if (closing || props.disabled) return;
+    if (open) {
+      closeDropdown();
+    } else {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      setClosing(false);
+      setOpen(true);
+    }
+  }, [open, closing, closeDropdown, props.disabled]);
+
+  useEffect(() => {
+    if (!open || closing) return;
+    const onDown = (e: PointerEvent): void => {
+      if (!ref.current?.contains(e.target as Node)) closeDropdown();
+    };
+    const onKey = (e: globalThis.KeyboardEvent): void => {
+      if (e.key === "Escape") closeDropdown();
+    };
+    window.addEventListener("pointerdown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open, closing, closeDropdown]);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  const current = props.options.find((o) => o.value === props.value) ?? props.options[0];
+
+  return (
+    <div className="shelf-select-wrap search-concurrency-select-wrap" ref={ref}>
+      <button
+        type="button"
+        className={`shelf-select-btn${open && !closing ? " open" : ""}`}
+        title={props.title}
+        disabled={props.disabled}
+        aria-expanded={open && !closing}
+        onClick={toggleDropdown}
+      >
+        <span>{current.label}</span>
+        <span className="shelf-select-arrow" aria-hidden="true" />
+      </button>
+      {(open || closing) && (
+        <div className={`shelf-select-pop${closing ? " closing" : ""}`} role="listbox">
+          {props.options.map((o) => (
+            <button
+              key={o.value}
+              type="button"
+              className={`shelf-select-option${o.value === props.value ? " selected" : ""}`}
+              role="option"
+              aria-selected={o.value === props.value}
+              onClick={() => {
+                props.onChange(o.value);
+                closeDropdown();
+              }}
+            >
+              <span>{o.label}</span>
+              {o.value === props.value && (
+                <span className="shelf-select-check">
+                  <CheckIcon />
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function SearchIndexCard({ props }: { props: SearchPanelProps }) {
   const state = props.indexStatus ?? "idle";
   const progress = indexProgressValues(props.indexProgress);
   const pending = getSearchIndexPending(props.indexProgress);
   const canStart = Boolean(props.onStartIndex);
   const showStats = state === "confirmation" || state === "partial" || state === "cancelled" || state === "error";
+
+  const [startDebounce, setStartDebounce] = useState(false);
+  const handleStart = () => {
+    if (startDebounce || !props.onStartIndex) return;
+    setStartDebounce(true);
+    props.onStartIndex();
+    setTimeout(() => setStartDebounce(false), 500);
+  };
 
   if (state === "idle" || state === "ready") return null;
 
@@ -211,6 +334,17 @@ export function SearchIndexCard({ props }: { props: SearchPanelProps }) {
   const detectedLogicalProcessors = Math.max(1, Math.floor(props.detectedCores ?? 1));
   const maximumConcurrency = Math.min(16, Math.max(1, detectedLogicalProcessors - 1));
 
+  const concurrencyOptions: ConcurrencyOption[] = [
+    {
+      value: "automatic",
+      label: `自动${props.recommendedConcurrency ? `（推荐 ${props.recommendedConcurrency}）` : ""}`,
+    },
+    {
+      value: "manual",
+      label: "手动",
+    },
+  ];
+
   return <section className={`search-index-card search-index-card-${state}`} role={state === "error" ? "alert" : "status"} aria-live="polite">
     <div className="search-index-card-title">{heading}</div>
     <div className="search-index-card-description">{description}</div>
@@ -223,23 +357,37 @@ export function SearchIndexCard({ props }: { props: SearchPanelProps }) {
       <span>待处理 <strong>{pending}</strong></span>
     </div>}
     {props.onConcurrencyChange && <div className="search-index-concurrency" aria-label="索引并发设置">
-      <span>索引并发</span>
-      <select
+      <span className="search-index-concurrency-label">索引并发</span>
+      <ConcurrencySelect
         value={props.concurrencyMode ?? "automatic"}
-        onChange={(event) => props.onConcurrencyChange?.(event.target.value as "automatic" | "manual", props.concurrency)}
-      >
-        <option value="automatic">自动{props.recommendedConcurrency ? `（推荐 ${props.recommendedConcurrency}）` : ""}</option>
-        <option value="manual">手动</option>
-      </select>
-      {props.concurrencyMode === "manual" && <input
-        aria-label="索引并发数"
-        type="number"
-        min={1}
-        max={maximumConcurrency}
-        value={props.concurrency ?? 1}
-        onChange={(event) => props.onConcurrencyChange?.("manual", Number(event.target.value))}
-      />}
-      {props.detectedCores && <small>检测到 {props.detectedCores} 个逻辑处理器</small>}
+        options={concurrencyOptions}
+        onChange={(mode) => props.onConcurrencyChange?.(mode, props.concurrency)}
+      />
+      {props.concurrencyMode === "manual" && <div className="search-index-stepper">
+        <button
+          type="button"
+          className="search-index-stepper-btn"
+          disabled={(props.concurrency ?? 1) <= 1}
+          onClick={() => props.onConcurrencyChange?.("manual", Math.max(1, (props.concurrency ?? 1) - 1))}
+          aria-label="减少并发数"
+        >−</button>
+        <input
+          aria-label="索引并发数"
+          type="number"
+          min={1}
+          max={maximumConcurrency}
+          value={props.concurrency ?? 1}
+          onChange={(event) => props.onConcurrencyChange?.("manual", Number(event.target.value))}
+        />
+        <button
+          type="button"
+          className="search-index-stepper-btn"
+          disabled={(props.concurrency ?? 1) >= maximumConcurrency}
+          onClick={() => props.onConcurrencyChange?.("manual", Math.min(maximumConcurrency, (props.concurrency ?? 1) + 1))}
+          aria-label="增加并发数"
+        >+</button>
+      </div>}
+      {props.detectedCores && <small className="search-index-cores-chip">检测到 {props.detectedCores} 个逻辑处理器</small>}
     </div>}
     {props.onConcurrencyChange && props.detectedCores && <div className="search-index-concurrency-help">
       自动推荐 {props.recommendedConcurrency ?? 1}；手动最大 {maximumConcurrency}。在可用时为系统至少保留 1 个逻辑处理器，且应用硬上限为 16；并发越高，占用的内存也越多。
@@ -247,7 +395,7 @@ export function SearchIndexCard({ props }: { props: SearchPanelProps }) {
     <div className="search-index-card-actions">
       {(isConfirmation || isPartial) && props.onDeferIndex && <button type="button" className="search-index-secondary" onClick={props.onDeferIndex}>暂不建立</button>}
       {isCancelled && props.onDeferIndex && <button type="button" className="search-index-secondary" onClick={props.onDeferIndex}>暂不处理</button>}
-      {canStart && (isConfirmation || isPartial || isCancelled || state === "error") && <button type="button" className="search-index-primary" onClick={props.onStartIndex} disabled={pending === 0 && !isConfirmation}>{isConfirmation ? "开始建立索引" : "继续建立索引"}</button>}
+      {canStart && (isConfirmation || isPartial || isCancelled || state === "error") && <button type="button" className="search-index-primary" onClick={handleStart} disabled={(pending === 0 && !isConfirmation) || startDebounce}>{isConfirmation ? "开始建立索引" : "继续建立索引"}</button>}
     </div>
   </section>;
 }
@@ -326,9 +474,19 @@ export function SearchPanel(props: SearchPanelProps) {
         aria-label="正文搜索"
         onKeyDown={handleKeyDown}
       >
+        <div className="drawer-drag-handle" aria-hidden="true" />
         <div className="menu-head search-head">
-          <span>正文搜索</span>
-          <button className="tb-btn" type="button" onClick={props.onClose} aria-label="关闭搜索">✕</button>
+          <div className="drawer-title-wrap">
+            <span className="search-title">正文搜索</span>
+            {props.status === "complete" && hasQuery && (
+              <span className="search-count-badge">
+                {props.results.length > 0 ? `${props.results.length} 条` : "无结果"}
+              </span>
+            )}
+          </div>
+          <button className="tb-btn tb-close" type="button" onClick={props.onClose} aria-label="关闭搜索" title="关闭搜索">
+            <CloseIcon size={14} />
+          </button>
         </div>
         {props.onScopeChange && (
           <div className="search-scope" role="group" aria-label="搜索范围">

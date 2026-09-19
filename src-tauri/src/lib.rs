@@ -53,6 +53,8 @@ macro_rules! configure_invoke_handler {
             ai::ai_model_library_path_get,
             ai::ai_model_library_path_set,
             ai::ai_model_scan,
+            ai::ai_model_lock_probe,
+            ai::hardware::ai_hardware_probe,
             ai::ai_model_packages,
             ai::ai_model_package_register,
             ai::ai_model_package_verify,
@@ -65,7 +67,17 @@ macro_rules! configure_invoke_handler {
             ai::ai_model_download_pause,
             ai::ai_model_download_resume,
             ai::ai_model_download_cancel,
-            ai::ai_model_license_accept
+            ai::ai_model_license_accept,
+            ai::preparation::ai_preparation,
+            ai::ai_semantic,
+            ai::embedding_gateway::ai_semantic_setup,
+            ai::embedding_gateway::ai_semantic_open,
+            ai::embedding_gateway::ai_semantic_embed,
+            ai::embedding_gateway::ai_semantic_count,
+            ai::embedding_gateway::ai_semantic_cancel,
+            ai::embedding_gateway::ai_semantic_close,
+            ai::embedding_gateway::ai_semantic_status,
+            ai::embedding_gateway::ai_semantic_probe
         ])
     };
 }
@@ -145,6 +157,10 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init());
+    // The embedding gateway only exists in the AI edition; Core must not link
+    // or load the ONNX Runtime at all.
+    #[cfg(feature = "ai")]
+    let builder = builder.manage(ai::embedding_gateway::SemanticEmbedding::default());
 
     configure_invoke_handler!(builder)
         .run(tauri::generate_context!())

@@ -19,7 +19,7 @@ describe("application build session and AI development policy", () => {
 
   it("stores an immutable desktop build projection", () => {
     const buildInfo = {
-      version: "0.1.9-beta.2",
+      version: "0.2.0",
       edition: "ai" as const,
       protocolVersion: 1 as const,
       target: "test",

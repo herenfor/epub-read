@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createCorpusChapter, type CorpusBlock } from "./corpus";
-import { CORPUS_CHUNKER_VERSION, chunkCorpus } from "./chunking";
+import { CORPUS_CHUNKER_VERSION, EMBEDDING_CHUNKER_VERSION, chunkCorpus, embeddingChunkProfile } from "./chunking";
 
 function block(contentType: CorpusBlock["contentType"], text: string): CorpusBlock {
   return {
@@ -54,5 +54,34 @@ describe("deterministic corpus chunking", () => {
     expect(chunks[0].textAnchor.start).toBe(0);
     expect(chunks.at(-1)?.textAnchor.end).toBe(Array.from(text).length);
     expect(chunks.every((chunk) => chunk.originalText.length <= 62)).toBe(true);
+  });
+});
+
+describe("embedding-bound chunk profile", () => {
+  it("keeps every passage inside the model token budget for Chinese text", () => {
+    // A long Chinese paragraph like a converted novel chapter: one code point is
+    // roughly one token, so the lexical 1200-code-point default would be refused
+    // by a 512-token model and fail the whole book.
+    const paragraph = "这是一段用于测量分块长度的中文正文内容，句子长度接近真实网文段落。".repeat(40);
+    const chapter = createCorpusChapter(
+      { bookFingerprint: "fp-zh", chapterPath: "zh.xhtml", chapterTitle: "第一章", spineIndex: 0 },
+      [block("paragraph", paragraph), block("paragraph", paragraph)],
+    );
+    const profile = embeddingChunkProfile(512);
+    const chunks = chunkCorpus(chapter, { bookFingerprint: "fp-zh", ...profile });
+    const longest = Math.max(...chunks.map((chunk) => Array.from(chunk.normalizedText).length));
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(longest).toBeLessThanOrEqual(profile.maxCodePoints);
+    expect(longest).toBeLessThanOrEqual(512);
+    expect(chunks.every((chunk) => chunk.chunkerVersion === EMBEDDING_CHUNKER_VERSION)).toBe(true);
+    expect(EMBEDDING_CHUNKER_VERSION).not.toBe(CORPUS_CHUNKER_VERSION);
+  });
+
+  it("stays inside a small budget and never asks for an empty overlap", () => {
+    expect(embeddingChunkProfile(512)).toMatchObject({ maxCodePoints: 400, overlapCodePoints: 64 });
+    const tiny = embeddingChunkProfile(64);
+    expect(tiny.maxCodePoints).toBe(64);
+    expect(tiny.overlapCodePoints).toBeGreaterThanOrEqual(1);
+    expect(tiny.overlapCodePoints).toBeLessThan(tiny.maxCodePoints);
   });
 });

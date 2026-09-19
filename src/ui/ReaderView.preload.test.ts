@@ -45,6 +45,9 @@ class MockPaginator {
   getStateSnapshot() { return this.state; }
   setNotes() {}
   setPage(page: number) { this.currentPage = page; }
+  navigateToSearchTarget() { return "unresolved" as const; }
+  closeForNavigation() {}
+  clearSearchHighlight() {}
   dispose() { this.disposed = true; this.complete?.(); }
 }
 vi.mock("../render/paginator", () => ({

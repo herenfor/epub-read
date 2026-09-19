@@ -24,7 +24,7 @@ describe("model assets action view model", () => {
     expect(getModelAssetActionState(packageRecord(), task("queued"), false)).toMatchObject({ canPause: true, canCancel: true, canEnqueue: false });
     expect(getModelAssetActionState(packageRecord(), task("paused"), false)).toMatchObject({ canResume: true, canCancel: true });
     expect(getModelAssetActionState(packageRecord(), task("downloading"), false)).toMatchObject({ canVerify: false, canRelocate: false, canRemove: false });
-    expect(getModelAssetActionState(packageRecord(), task("failed"), false)).toMatchObject({ canVerify: true, canRemove: true });
+    expect(getModelAssetActionState(packageRecord(), task("failed"), false)).toMatchObject({ canVerify: true, canRemove: true, canCancel: true });
     expect(getModelAssetActionState(packageRecord({ storageKind: "linked", linkedExternalPath: "/tmp/probe" }), undefined, false)).toMatchObject({ canEnqueue: false, canRelocate: true });
   });
 

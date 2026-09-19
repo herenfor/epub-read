@@ -22,7 +22,9 @@ export function getModelAssetActionState(
   const taskState = task?.state;
   const canPause = taskState === "queued" || taskState === "downloading" || taskState === "verifying";
   const canResume = taskState === "paused";
-  const canCancel = canPause || canResume;
+  // A cancelled lock wait can leave a failed task with protected staging.
+  // Keep explicit cleanup reachable after the other owner releases its lock.
+  const canCancel = canPause || canResume || taskState === "failed";
   const taskIsActiveOrRecoverable = ["queued", "downloading", "verifying", "paused"].includes(taskState ?? "");
   const canEnqueue = managed
     && packageRecord.state !== "installed"

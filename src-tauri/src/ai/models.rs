@@ -7,6 +7,7 @@
 //! reads files from that configured root and never accepts an arbitrary path
 //! from the frontend.
 
+use super::model_locks::ModelLock;
 use super::AiState;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -302,6 +303,11 @@ pub(crate) fn scan_model_library(root: &Path) -> ModelPackageScanResult {
     let mut packages = Vec::new();
     for entry in entries {
         let name = entry.file_name().to_string_lossy().into_owned();
+        if name.eq_ignore_ascii_case(super::model_locks::LOCK_DIRECTORY)
+            || name.eq_ignore_ascii_case(".staging")
+        {
+            continue;
+        }
         let metadata = fs::symlink_metadata(entry.path());
         let is_directory = metadata.as_ref().is_ok_and(|value| value.is_dir());
         let is_symlink = metadata
@@ -919,6 +925,8 @@ pub(crate) fn ai_model_scan_impl(
             scan_error: Some("尚未设置模型库目录".into()),
         });
     };
+    let _guard = ModelLock::root(&path)?;
+    ensure_current_root(&store, &path)?;
     store.mark_missing_managed_packages(&path)?;
     let result = scan_model_library(&path);
     let stale_results = result
@@ -965,6 +973,34 @@ pub(crate) fn ai_model_packages_impl(
     state.ensure(&app)?.list_model_packages()
 }
 
+/// Shared by the debug setup command: validates one package directory under
+/// `root`, confirms its manifest, and registers it as a verified managed
+/// package.  It performs no download and no model load.
+#[cfg(feature = "ai")]
+pub(crate) fn register_package_from_dir(
+    store: &super::AiStore,
+    root: &Path,
+    package_dir: &str,
+) -> Result<ModelPackageRecord, String> {
+    let _guard = ModelLock::package(root, package_dir, true)?;
+    ensure_current_root(store, root)?;
+    let status = scan_single_package(root, package_dir)?;
+    if status.state != "ready" {
+        return Err(status
+            .issues
+            .first()
+            .map(|issue| issue.message.clone())
+            .unwrap_or_else(|| "模型包无效".into()));
+    }
+    let manifest = status
+        .manifest
+        .ok_or_else(|| "模型包缺少 manifest".to_string())?;
+    store.register_verified_model_manifest(&manifest, &status.package_dir)?;
+    store
+        .get_model_package(&manifest.package_id)?
+        .ok_or_else(|| "模型包注册后无法读取".into())
+}
+
 pub(crate) fn ai_model_package_register_impl(
     app: AppHandle,
     state: State<'_, AiState>,
@@ -974,6 +1010,8 @@ pub(crate) fn ai_model_package_register_impl(
     let path = store
         .model_library_path()?
         .ok_or_else(|| "尚未设置模型库目录".to_string())?;
+    let _guard = ModelLock::package(Path::new(&path), &package_dir, true)?;
+    ensure_current_root(&store, Path::new(&path))?;
     let status = scan_single_package(Path::new(&path), &package_dir)?;
     if status.state != "ready" {
         return Err(status
@@ -1003,16 +1041,45 @@ pub(crate) fn ai_model_package_verify_impl(
     if package.storage_kind == "linked" {
         return verify_linked_package(&store, &package);
     }
-    let status = {
-        let root = store
-            .model_library_path()?
-            .ok_or_else(|| "尚未设置模型库目录".to_string())?;
-        scan_single_package(Path::new(&root), &package.package_dir)?
-    };
+    let root = store
+        .model_library_path()?
+        .ok_or_else(|| "尚未设置模型库目录".to_string())?;
+    let _guard = ModelLock::package(Path::new(&root), &package.package_dir, true)?;
+    ensure_current_root(&store, Path::new(&root))?;
+    let status = scan_single_package(Path::new(&root), &package.package_dir)?;
     store.update_model_package_verification(&package_id, &status)?;
     store
         .get_model_package(&package_id)?
         .ok_or_else(|| "模型包校验后无法读取".into())
+}
+
+fn ensure_current_root(store: &super::AiStore, expected: &Path) -> Result<(), String> {
+    if store.model_library_path()?.as_deref().map(Path::new) != Some(expected) {
+        return Err("模型库目录已变更，请刷新后重试".into());
+    }
+    Ok(())
+}
+
+fn guard_linked_managed_root(
+    store: &super::AiStore,
+    external: &str,
+) -> Result<Option<ModelLock>, String> {
+    let Some(root) = store.model_library_path()?.map(PathBuf::from) else {
+        return Ok(None);
+    };
+    let (Ok(canonical_root), Ok(canonical_external)) =
+        (root.canonicalize(), Path::new(external).canonicalize())
+    else {
+        return Ok(None);
+    };
+    // Linked packages elsewhere are never mutated by this asset manager. If
+    // linked into our managed root, coordinate with its installers/deleters.
+    if !canonical_external.starts_with(&canonical_root) {
+        return Ok(None);
+    }
+    let guard = ModelLock::root(&root)?;
+    ensure_current_root(store, &root)?;
+    Ok(Some(guard))
 }
 
 pub(crate) fn verify_linked_package(
@@ -1023,6 +1090,7 @@ pub(crate) fn verify_linked_package(
         .linked_external_path
         .as_deref()
         .ok_or_else(|| "linked 模型缺少外部路径".to_string())?;
+    let _guard = guard_linked_managed_root(store, external)?;
     let status = match scan_linked_external_package(external) {
         Ok((status, _)) => status,
         Err(error) => {
@@ -1049,6 +1117,7 @@ pub(crate) fn ai_model_package_register_linked_impl(
     external_path: String,
 ) -> Result<ModelPackageRecord, String> {
     let store = state.ensure(&app)?;
+    let _guard = guard_linked_managed_root(&store, &external_path)?;
     let (status, canonical) = scan_linked_external_package(&external_path)?;
     if status.state != "ready" {
         return Err(status
@@ -1079,6 +1148,7 @@ pub(crate) fn ai_model_package_relocate_impl(
     if package.storage_kind != "linked" {
         return Err("只有 linked 模型支持重新定位".into());
     }
+    let _guard = guard_linked_managed_root(&store, &external_path)?;
     let (status, canonical) = scan_linked_external_package(&external_path)?;
     let manifest = status
         .manifest

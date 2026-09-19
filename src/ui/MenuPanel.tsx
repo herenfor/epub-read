@@ -1,5 +1,16 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { Theme } from "../render/settings";
+import type { PageOptionsValue, ReadingMode } from "../render/pageLayout";
+import { PageOptionsPanel } from "./PageOptionsPanel";
+import {
+  ChevronDownIcon,
+  ChevronRightIcon,
+  CloseIcon,
+  MinusIcon,
+  PlusIcon,
+  RotateCcwIcon,
+  WrenchIcon,
+} from "./readerIcons";
 
 export interface MenuPanelProps {
   fontSize: number;
@@ -19,6 +30,16 @@ export interface MenuPanelProps {
   preloadNextChapter?: boolean;
   /** 固定版式等场景由上层决定是否禁用此开关 */
   preloadNextChapterDisabled?: boolean;
+  /** 阅读方式：翻页 / 当前章纵向滚动（App 持有状态） */
+  readingMode: ReadingMode;
+  onReadingModeChange(mode: ReadingMode): void;
+  /** 页面选项（B 的受控面板；C 负责合并到设置并持久化） */
+  pageOptions: PageOptionsValue;
+  /** 当前窗口实际可用栏数；窄窗回退只提示，不回写保存值 */
+  pageEffectiveColumns: 1 | 2;
+  /** 固定版式：页面重排控件显示“不适用” */
+  pageFixedLayout: boolean;
+  onPageOptionsChange(value: PageOptionsValue): void;
   userFonts: Array<{ id: string; fileName: string; family: string }>;
   fontBusy: boolean;
   onImportFont(file: File): void;
@@ -48,6 +69,8 @@ export interface MenuPanelProps {
   onThemeChange(theme: Theme): void;
   onResetDefaults(): void;
   onClose(): void;
+  issueCount?: number;
+  onToggleLog?(): void;
 }
 
 /** 只有草稿与已保存值不同才允许触发一次整章重载。 */
@@ -77,6 +100,11 @@ const THEME_OPTIONS: Array<{ value: Theme; label: string }> = [
   { value: "light", label: "浅色" },
   { value: "dark", label: "深色" },
   { value: "sepia", label: "纸色" },
+];
+
+const READING_MODE_OPTIONS: Array<{ value: ReadingMode; label: string; title: string }> = [
+  { value: "paginated", label: "翻页", title: "按页翻页阅读" },
+  { value: "scroll", label: "滚动", title: "当前章节纵向滚动" },
 ];
 
 function fmtLineHeight(v?: number): string {
@@ -146,8 +174,8 @@ function SliderRow(props: SliderRowProps) {
       <div className="slider-main">
         <span className="slider-value">{props.formatValue(draft)}</span>
         <div className="slider-line">
-          <button className="step-btn" onClick={props.onDec} title="上一档">
-            −
+          <button className="step-btn" onClick={props.onDec} title="上一档" aria-label="上一档">
+            <MinusIcon size={12} />
           </button>
           <input
             ref={inputRef}
@@ -163,8 +191,8 @@ function SliderRow(props: SliderRowProps) {
             }
             onChange={(e) => setDraft(Number(e.target.value))}
           />
-          <button className="step-btn" onClick={props.onInc} title="下一档">
-            +
+          <button className="step-btn" onClick={props.onInc} title="下一档" aria-label="下一档">
+            <PlusIcon size={12} />
           </button>
         </div>
       </div>
@@ -185,11 +213,14 @@ export function MenuPanel(props: MenuPanelProps) {
   const savedCustomCss = props.customCss ?? "";
   const customCssDirty = isCustomCssDraftDirty(customCssDraft, savedCustomCss);
   return (
-    <div className="menu-panel">
+    <div className="menu-panel" role="dialog" aria-modal="true" aria-label="设置与外观">
+      <div className="drawer-drag-handle" aria-hidden="true" />
       <div className="menu-head">
-        <span>菜单</span>
-        <button className="tb-btn" onClick={props.onClose} title="关闭">
-          ✕
+        <div className="drawer-title-wrap">
+          <span>设置与外观</span>
+        </div>
+        <button className="tb-btn tb-close" onClick={props.onClose} title="关闭设置" aria-label="关闭设置">
+          <CloseIcon size={14} />
         </button>
       </div>
 
@@ -214,8 +245,12 @@ export function MenuPanel(props: MenuPanelProps) {
         className={`menu-item detail-toggle${detailOpen ? " open" : ""}`}
         onClick={() => setDetailOpen((v) => !v)}
         title="展开/收起详细排版设置"
+        aria-expanded={detailOpen}
       >
-        详细设置 <span className="detail-arrow">{detailOpen ? "▾" : "▸"}</span>
+        <span>详细设置</span>
+        <span className="detail-arrow">
+          {detailOpen ? <ChevronDownIcon size={13} /> : <ChevronRightIcon size={13} />}
+        </span>
       </button>
       {detailOpen && (
       <div className="detail-body">
@@ -328,6 +363,27 @@ export function MenuPanel(props: MenuPanelProps) {
       </div>
       )}
 
+      <div className="menu-section">阅读方式</div>
+      <div className="theme-row">
+        {READING_MODE_OPTIONS.map((opt) => (
+          <button
+            key={opt.value}
+            className={`theme-btn${props.readingMode === opt.value ? " active" : ""}`}
+            onClick={() => props.onReadingModeChange(opt.value)}
+            title={opt.title}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+      <PageOptionsPanel
+        value={props.pageOptions}
+        effectiveColumns={props.pageEffectiveColumns}
+        fixedLayout={props.pageFixedLayout}
+        fontSizePx={props.fontSize}
+        onChange={props.onPageOptionsChange}
+      />
+
       <div className="menu-section">界面</div>
       <div className="theme-row">
         {UI_SCALES.map((opt) => (
@@ -357,8 +413,23 @@ export function MenuPanel(props: MenuPanelProps) {
       </div>
 
       <div className="menu-section">其他</div>
-      <button className="menu-item reset-btn" onClick={props.onResetDefaults} title="恢复所有设置为默认值">
-        ↺ 恢复默认设置
+      {props.onToggleLog && (
+        <button
+          className="menu-item log-btn"
+          onClick={props.onToggleLog}
+          title="打开日志与诊断面板"
+          aria-label="日志与诊断"
+        >
+          <WrenchIcon size={14} />
+          <span>日志与诊断</span>
+          {props.issueCount !== undefined && props.issueCount > 0 ? (
+            <span className="issue-badge">{props.issueCount}</span>
+          ) : null}
+        </button>
+      )}
+      <button className="menu-item reset-btn" onClick={props.onResetDefaults} title="恢复所有设置为默认值" aria-label="恢复默认设置">
+        <RotateCcwIcon size={14} />
+        <span>恢复默认设置</span>
       </button>
     </div>
   );

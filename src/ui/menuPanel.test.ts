@@ -74,4 +74,14 @@ describe("详细设置视觉契约", () => {
     expect(styles).toMatch(/\.detail-body \.slider-row \.menu-label\s*\{[^}]*padding-top:\s*15px;/s);
     expect(styles).not.toMatch(/\.detail-body \.menu-control-card \.menu-label\s*\{/s);
   });
+
+  it("滑块两端步进按钮（+ / -）内部图标弹性居中对齐", async () => {
+    const styles = await readStyles();
+    expect(styles).toMatch(/\.step-btn\s*\{[^}]*display:\s*inline-flex;[^}]*align-items:\s*center;[^}]*justify-content:\s*center;/s);
+  });
+
+  it("二级菜单包含日志与诊断按钮契约", async () => {
+    const styles = await readStyles();
+    expect(styles).toMatch(/\.log-btn\s*\{[^}]*justify-content:\s*center;/s);
+  });
 });

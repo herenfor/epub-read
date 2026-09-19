@@ -92,6 +92,13 @@ function buildOverrideCss(s: ReaderSettings, bodyBgColor?: string): string {
     s.theme === "dark" ? "#1e1e1e" : s.theme === "sepia" ? "#f4ecd8" : "#ffffff";
   const fg = s.theme === "dark" ? "#d4d4d4" : s.theme === "sepia" ? "#3b2f1e" : "#1a1a1a";
   const noteUnderline = s.theme === "dark" ? "#6cb2ff" : s.theme === "sepia" ? "#9b6a00" : "#b06a00";
+  const searchBackground =
+    s.theme === "dark"
+      ? "rgba(255, 213, 79, 0.45)"
+      : s.theme === "sepia"
+        ? "rgba(211, 151, 0, 0.42)"
+        : "rgba(255, 196, 0, 0.42)";
+  const searchForeground = "#111111";
   const family =
     s.fontFamily ??
     `"Segoe UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Source Han Sans SC", sans-serif`;
@@ -229,6 +236,12 @@ body { color: ${fg}; background-color: ${bodyBgColor ?? bg}; ${bodyFontCss} }
   text-decoration-thickness: 2px;
   text-underline-offset: 0.15em;
   text-decoration-color: ${noteUnderline};
+}
+/* [L2] 搜索正文命中：只使用 CSS Custom Highlight 支持的绘制属性；
+   背景色保证作者白字/彩字可读，笔记下划线仍可与搜索背景共存。 */
+::highlight(reader-search-hit) {
+  background-color: ${searchBackground};
+  color: ${searchForeground};
 }
 /* [L2] ruby 注音 rt 随主题换色（书常固定 ruby>rt{color:#333}）。 */
 #${VIEWER_ID} rt { color: ${fg}; }
@@ -509,8 +522,9 @@ export async function sanitizeChapter(
   // 支持普通 img，以及多看常见的单个 `svg > image` 页面包装。后者的
   // width/height=100% 是流体视口而非固定限宽，必须把高度从 viewer 逐层传递，
   // 否则 SVG 按 viewBox 固有比例算出超页高度却仍被分页器当作单页裁切。
-  // 普通 img 仍只在没有自带尺寸约束时整页填充；多图页、限宽 title 图按书
-  // 自身排版，否则会把一页拆成两页 / 把限宽图放大到全屏。
+  // 普通 img 仍只在没有自带固定尺寸约束时整页填充（`width:100%` 属于流体
+  // 声明，不算限宽）；多图页、限宽 title 图按书自身排版，否则会把一页拆成
+  // 两页 / 把限宽图放大到全屏。
   const bodyText = (bodyEl.textContent ?? "").trim();
   const images = findElements(viewer, "img");
   const svgs = findElements(viewer, "svg");
@@ -527,6 +541,25 @@ export async function sanitizeChapter(
     // xmldom 对不存在的属性返回 ""（不是 null），要按空值判断
     return Boolean(el.getAttribute("width")) || Boolean(el.getAttribute("height"));
   };
+  // C-54 `width:100%` 是“跟随容器”的流体声明，不是固定限宽：纯图片页的整页
+  // contain 保留同一个 100% 语义（样本 学习路线：width:100% 的路线图按版心
+  // 640px 缩放成 995px 高，超过一栏后被 Chromium 拆成 3 列，多出两张空
+  // 页）。只有这条唯一的流体宽度声明才放行；固定 px/em 宽度、显式高度和
+  // max/min 约束仍按书自身排版，限宽 title 图不会被放大到全屏。
+  const hasFluidInlineFullWidthOnly = (el: XmlElementLike): boolean => {
+    const st = el.getAttribute("style") ?? "";
+    const fluidWidth = /(?:^|;)\s*width\s*:\s*100(?:\.0+)?%\s*(?:!\s*important)?\s*(?:;|$)/iu;
+    if (!fluidWidth.test(st)) return false;
+    if (
+      ["height", "max-width", "max-height", "min-width", "min-height"].some((property) =>
+        hasAuthoredCssProperty(st, property)
+      )
+    ) {
+      return false;
+    }
+    if (el.getAttribute("width") || el.getAttribute("height")) return false;
+    return !hasAuthoredCssProperty(st.replace(fluidWidth, ";"), "width");
+  };
   const svgDirectChildren =
     svgs.length === 1
       ? Array.from((svgs[0] as unknown as Element).childNodes).filter(
@@ -537,7 +570,7 @@ export async function sanitizeChapter(
     images.length === 1 &&
     svgs.length === 0 &&
     bodyText.length === 0 &&
-    !hasOwnSize(images[0]);
+    (!hasOwnSize(images[0]) || hasFluidInlineFullWidthOnly(images[0]));
   const isInlineSvgImagePage =
     images.length === 0 &&
     svgs.length === 1 &&
@@ -546,7 +579,9 @@ export async function sanitizeChapter(
     svgDirectChildren[0] === (svgImages[0] as unknown as Element) &&
     Boolean(svgs[0].getAttribute("viewBox")) &&
     bodyText.length === 0;
-  if (isPlainImagePage || isInlineSvgImagePage) {
+  // 整页填充只属于分页：它把图片钉在一个页高内。滚动模式要让图片按自身比例
+  // 自然流动（长图可滚动），注入整屏高度会把图压扁到一屏。
+  if ((isPlainImagePage || isInlineSvgImagePage) && opts.settings.readingMode !== "scroll") {
     viewer.setAttribute("class", "fullpage-image");
     const imgStyle = doc.createElement("style");
     imgStyle.setAttribute("data-reader", "fullpage-image");
@@ -577,6 +612,103 @@ export async function sanitizeChapter(
     "default-src 'none'; style-src 'unsafe-inline' blob:; img-src blob: data: https: http:; font-src blob: data:; script-src 'none'; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'"
   );
   head.appendChild(csp);
+
+  // 滚动模式：viewer 是唯一纵向滚动容器；分页的固定页高/整页图 100% 高度
+  // 只属于分页图页。放在所有书样式之后，只在本次加载生效。
+  if (opts.settings.readingMode === "scroll") {
+    const scrollStyle = doc.createElement("style");
+    scrollStyle.setAttribute("data-reader", "scroll-mode");
+    scrollStyle.textContent = `
+/* [L3 滚动] viewer 保留确定高度并自行提供纵向滚动范围：html/body 已被 L1 锁死
+   不滚动，正文容器自然增高后由 viewer 提供纵向滚动，隐藏原生滚动条保持界面整洁。若这里放成 height:auto /
+   overflow:visible，viewer 不再是滚动容器，scrollTop 赋值会静默失效。 */
+${VIEWER_TAG}#${VIEWER_ID} {
+  height: 100% !important;
+  max-height: 100% !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+${VIEWER_TAG}#${VIEWER_ID}::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+/* [L3 滚动] 长图可向下自然滚动，普通图片不超过版心宽度。 */
+#${VIEWER_ID} img { max-width: 100% !important; max-height: none !important; height: auto !important; }
+#${VIEWER_ID}.fullpage-image, #${VIEWER_ID}.fullpage-image * {
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+}
+/* [L3 滚动] 章末自然过渡卡片与进入下一章提示 */
+.reader-chapter-end {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 48px 16px 80px 16px !important;
+  margin-top: 40px !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  box-sizing: border-box !important;
+}
+.reader-chapter-end .chapter-end-divider {
+  display: flex !important;
+  align-items: center !important;
+  width: 100% !important;
+  max-width: 320px !important;
+  margin-bottom: 24px !important;
+  color: inherit !important;
+  opacity: 0.45 !important;
+  font-size: 13px !important;
+  letter-spacing: 2px !important;
+}
+.reader-chapter-end .chapter-end-divider::before,
+.reader-chapter-end .chapter-end-divider::after {
+  content: "" !important;
+  flex: 1 !important;
+  border-bottom: 1px dashed currentColor !important;
+  opacity: 0.6 !important;
+}
+.reader-chapter-end .chapter-end-divider span {
+  padding: 0 12px !important;
+  white-space: nowrap !important;
+}
+.reader-chapter-end .chapter-end-next-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 8px 24px !important;
+  font-size: 14px !important;
+  font-weight: 500 !important;
+  color: inherit !important;
+  background: rgba(128, 128, 128, 0.12) !important;
+  border: 1px solid rgba(128, 128, 128, 0.25) !important;
+  border-radius: 20px !important;
+  cursor: pointer !important;
+  transition: all 0.2s ease !important;
+  outline: none !important;
+}
+.reader-chapter-end .chapter-end-next-btn:hover {
+  background: rgba(128, 128, 128, 0.22) !important;
+  border-color: rgba(128, 128, 128, 0.45) !important;
+  transform: translateY(-1px) !important;
+}
+.reader-chapter-end .chapter-end-next-btn:active {
+  transform: translateY(0) !important;
+  opacity: 0.8 !important;
+}
+.reader-chapter-end .chapter-end-hint {
+  margin-top: 12px !important;
+  font-size: 12px !important;
+  color: inherit !important;
+  opacity: 0.4 !important;
+  letter-spacing: 0.5px !important;
+}`;
+    head.appendChild(scrollStyle);
+  }
 
   const styleEl = doc.createElement("style");
   styleEl.setAttribute("data-reader", "overrides");

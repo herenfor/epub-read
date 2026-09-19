@@ -8,8 +8,45 @@ import {
 
 /** Chunk version is intentionally separate from parser and normalizer versions. */
 export const CORPUS_CHUNKER_VERSION = "structural-sentence-v1";
+/**
+ * Version of the embedding-bound chunk profile below. Bump it whenever the
+ * derived size changes: a stored semantic index chunked differently is not the
+ * same index, and the indexer must force a rebuild instead of mixing sizes.
+ */
+export const EMBEDDING_CHUNKER_VERSION = "embedding-token-budget-v1";
 const DEFAULT_MAX_CODE_POINTS = 1200;
 const DEFAULT_OVERLAP_CODE_POINTS = 120;
+
+/** Ceiling of one passage inside the model's token budget, in code points. */
+const EMBEDDING_MAX_CODE_POINTS = 400;
+const EMBEDDING_OVERLAP_CODE_POINTS = 64;
+
+export interface EmbeddingChunkProfile {
+  maxCodePoints: number;
+  overlapCodePoints: number;
+  chunkerVersion: string;
+}
+
+/**
+ * Derives the chunk profile for semantic indexing from the model identity.
+ *
+ * The lexical chunker is sized for search and defaults to 1200 code points.
+ * An embedding model instead refuses any passage longer than its token limit,
+ * and for Chinese text one code point is roughly one token, so a 1200-code-point
+ * chunk is refused outright and the whole book fails to build. The budget here
+ * is deliberately conservative: under one token per code point the model still
+ * accepts the passage, and only pathological scripts (where a single code point
+ * expands to several tokens) can reach the refusal path.
+ */
+export function embeddingChunkProfile(maxTokens: number): EmbeddingChunkProfile {
+  const budget = Math.max(1, Math.floor(maxTokens) - Math.floor(maxTokens / 8) - 4);
+  const maxCodePoints = Math.max(64, Math.min(EMBEDDING_MAX_CODE_POINTS, budget));
+  return {
+    maxCodePoints,
+    overlapCodePoints: Math.min(EMBEDDING_OVERLAP_CODE_POINTS, Math.floor(maxCodePoints / 4)),
+    chunkerVersion: EMBEDDING_CHUNKER_VERSION,
+  };
+}
 
 export interface DocumentChunk {
   bookFingerprint: string;

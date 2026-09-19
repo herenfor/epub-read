@@ -8,6 +8,14 @@ import { TEXT_MEASURE, type ReaderSettings } from "./settings";
 import { VisibilityGate } from "./displayGate";
 import { hasAuthoredCssProperty } from "./cssRewrite";
 import { clearDocumentSelection, isSelectAllShortcut } from "./selectionGuard";
+import { applySearchHighlight, clearSearchHighlight } from "./searchHighlight";
+import { applyBackdropCompatibility } from "./backdropCompatibility";
+import type { ExactTextHit, RawTextRange } from "../core/exactTextHits";
+import { resolveExactTextHits } from "../core/exactTextHits";
+import {
+  adaptNavigationAnchor,
+  type PersistedNavigationAnchor,
+} from "./navigationAnchor";
 import { applyDarkThemeContrast } from "./darkThemeContrast";
 import { FootnoteHoverGate } from "./footnoteHoverGate";
 import { waitForDoubleRaf, waitForFontsReady } from "./asyncWait";
@@ -16,12 +24,22 @@ import {
   captureTextSelection,
   resolveTextAnchorOffset,
   resolveTextRangeOffsets,
-  sanitizePersistedTextAnchor,
   type TextAnchorData,
   type TextRangeAnchorData,
   type TextSelectionPayload,
   type VisibleTextIndex,
 } from "./textAnchor";
+import {
+  scrollByViewportCommand,
+  scrollMaxTop,
+  scrollRatio,
+  scrollTopForRange,
+  scrollViewerStyles,
+  type ReadingMode,
+  type ScrollMetrics,
+} from "./scrollLayout";
+import { computePagedGeometry } from "./pageLayout";
+import { imageRequestFromTarget } from "./imageActivation";
 
 /** 常规布局应远早于此完成；极端字体/引擎停滞时只解除隐藏，不伪造 ready。 */
 const INITIAL_RENDER_GATE_TIMEOUT_MS = 20_000;
@@ -29,7 +47,18 @@ const INITIAL_RENDER_GATE_TIMEOUT_MS = 20_000;
 export type ChapterState =
   | { status: "loading" }
   | { status: "measuring" }
-  | { status: "ready"; pageCount: number; currentPage: number; empty: boolean }
+  | {
+      status: "ready";
+      pageCount: number;
+      currentPage: number;
+      empty: boolean;
+      /** 当前布局的阅读方式；旧调用方不读该字段。 */
+      mode?: ReadingMode;
+      /** 滚动模式：本章 0..1 位置。 */
+      scrollProgress?: number;
+      /** 窄窗回落后的有效列数。 */
+      effectiveColumns?: 1 | 2;
+    }
   | { status: "error"; message: string };
 
 export interface ChapterMeasurementToken {
@@ -58,8 +87,7 @@ export function hasAuthoredInlineWidth(styleText: string): boolean {
 }
 
 /** 脚注弹层数据（由分页器发往 UI 层）。 */
-export interface FootnotePayload {
-  text: string;
+export interface FootnotePayload {  text: string;
   /** 图片注释/富文本注释的 HTML；无则为 undefined */
   html?: string;
   /** 标记在 iframe 内视口的矩形 */
@@ -77,9 +105,25 @@ export interface SelectionContextPayload extends TextSelectionPayload {
   chapterPath: string;
 }
 
+/**
+ * 正文图片激活请求；由现有 click 路由交给活动章节的 UI。
+ */
+export interface ImageActivationPayload {
+  src: string;
+  alt: string;
+  naturalWidth: number;
+  naturalHeight: number;
+  chapterPath: string;
+  linkHref?: string;
+}
+
 export interface LoadOptions {
   /** Apply current settings atomically when navigation supersedes a queued settings reload. */
   settings?: ReaderSettings;
+  /** 是否有下一章（滚动模式章末卡片展示“进入下一章”或“全书完”） */
+  hasNextChapter?: boolean;
+  /** 是否有上一章（滚动模式章首向上越界判断） */
+  hasPrevChapter?: boolean;
   /** 跳转到页内锚点（目录跳转用） */
   anchor?: string;
   /**
@@ -94,9 +138,17 @@ export interface LoadOptions {
    */
   startAtEnd?: boolean;
   /** Persisted content position. It is applied before layout, never by DOM offset. */
-  readingAnchor?: ReadingAnchor | null;
+  readingAnchor?: PersistedNavigationAnchor | ReadingAnchor | null;
   /** Saved page for records that have no valid content anchor. */
   fallbackPage?: number | null;
+  /** Exact search/note target for cross-chapter jumps; resolved before reveal. */
+  preciseNavigation?: PreciseNavigationRequest | null;
+  /**
+   * Internal settings-reload carry-over.  It preserves the already committed
+   * search hit identity across a same-chapter document rebuild without
+   * treating it as a new navigation.
+   */
+  preserveSearchHighlight?: SearchHighlightTarget | null;
 }
 
 /** Synchronous navigation that reuses the currently completed chapter layout. */
@@ -124,6 +176,169 @@ export interface ReadingAnchor extends TextAnchorData {
   mediaUnits?: number;
 }
 
+export interface PreciseNavigationRequest {
+  requestId: number;
+  kind: "search" | "note";
+  /** Exact body ranges; omitted for note anchors that use persisted text only. */
+  textHits?: ExactTextHit[];
+}
+
+export interface SearchHighlightTarget {
+  requestId: number;
+  textHits: ExactTextHit[];
+}
+
+interface PendingPreciseNavigation {
+  request: PreciseNavigationRequest;
+  /** Immutable copy of the original request anchor; never a page-center sample. */
+  anchor: ReadingAnchor | null;
+}
+
+type CaretDocument = Document & {
+  caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+  caretRangeFromPoint?: (x: number, y: number) => Range | null;
+};
+
+/** 采样点：x/y 均为 viewer 内容框内的像素（不含 viewer 的 border/padding）。 */
+interface VisibleSamplePoint {
+  x: number;
+  y: number;
+}
+
+interface AnchorSampleOptions {
+  viewer: HTMLElement;
+  doc: Document;
+  index: VisibleTextIndex;
+  /** paginated 用可见列中心；scroll 用可用屏高比例 */
+  mode: ReadingMode;
+  /** scroll：可见区域高度比例；paginated：可见列宽度比例 */
+  visibleRatio: number;
+  /** paginated 分栏换算；scroll 忽略 */
+  geometry?: { columnWidth: number; columnStep: number; viewStep: number; leadingColumns: number };
+}
+
+/** scroll：可见屏内固定高度；paginated：第一可见列（不是含 gap 的整屏中心）。 */
+function visibleSamplePoints(options: AnchorSampleOptions): VisibleSamplePoint[] {
+  const { viewer, mode, visibleRatio } = options;
+  const height = viewer.clientHeight;
+  const ys = mode === "scroll"
+    ? [Math.round(height * visibleRatio)]
+    : [Math.round(height * 0.5), Math.round(height * 0.5) - 40, Math.round(height * 0.5) + 40, Math.round(height * 0.5) - 80, Math.round(height * 0.5) + 80];
+  const clampedYs = ys
+    .map((y) => Math.max(2, Math.min(height - 2, y)))
+    .filter((y, i, all) => y >= 2 && y <= height - 2 && all.indexOf(y) === i);
+  if (mode === "scroll") {
+    const x = Math.max(2, Math.round(viewer.clientWidth * 0.5));
+    return clampedYs.map((y) => ({ x, y }));
+  }
+  const geometry = options.geometry;
+  if (!geometry) return [];
+  const columnWidth = Math.max(1, Math.min(geometry.columnWidth, viewer.clientWidth));
+  const colInset = Math.max(2, Math.min(columnWidth * visibleRatio, columnWidth - 2));
+  // caretPositionFromPoint / elementFromPoint 用 iframe 视口坐标：横向滚动已经
+  // 被命中测试消化，不能再自己加 scrollLeft，否则点落在视口外、锚点永远采不到
+  // （首屏 scrollLeft=0 时看起来正常，一翻页就静默失效）。
+  // 版心左原点 = viewer 的 border + padding；第一可见列就在这里。
+  const left = viewer.getBoundingClientRect().left + (viewer.clientLeft || 0) + viewerPaddingLeft(viewer);
+  const x = left + colInset;
+  return clampedYs.map((y) => ({ x, y }));
+}
+
+/** viewer 内容左原点所需的 padding-left（取不到时为 0）。 */
+function viewerPaddingLeft(viewer: HTMLElement): number {
+  try {
+    const computed = viewer.ownerDocument.defaultView?.getComputedStyle(viewer);
+    return parseFloat(computed?.paddingLeft ?? "") || 0;
+  } catch {
+    return 0;
+  }
+}
+
+function visibleElementAt(
+  doc: Document,
+  viewer: HTMLElement,
+  point: VisibleSamplePoint
+): Element | null {
+  const caretDoc = doc as CaretDocument;
+  const fromCaret = caretDoc.caretPositionFromPoint?.(point.x, point.y)?.offsetNode ?? null;
+  if (fromCaret && fromCaret.nodeType === 3) return (fromCaret as Text).parentElement;
+  const fromRange = caretDoc.caretRangeFromPoint?.(point.x, point.y)?.startContainer ?? null;
+  if (fromRange && fromRange.nodeType === 3) return (fromRange as Text).parentElement;
+  const hit = doc.elementFromPoint(point.x, point.y);
+  if (hit && hit !== viewer && hit !== doc.body && hit !== doc.documentElement) return hit;
+  return null;
+}
+
+/** 在给定采样点上建立文本/legacy 锚点；返回是否真的采到了内容。 */
+function captureAnchorAtPoint(
+  options: AnchorSampleOptions,
+  point: VisibleSamplePoint
+): ReadingAnchor | null {
+  const { viewer, doc, index } = options;
+  const caretDoc = doc as CaretDocument;
+  let textNode: Text | null = null;
+  let rawOffset = 0;
+  const modern = caretDoc.caretPositionFromPoint?.(point.x, point.y);
+  if (modern && modern.offsetNode.nodeType === 3) {
+    textNode = modern.offsetNode as Text;
+    rawOffset = modern.offset;
+  } else {
+    const range = caretDoc.caretRangeFromPoint?.(point.x, point.y);
+    if (range && range.startContainer.nodeType === 3) {
+      textNode = range.startContainer as Text;
+      rawOffset = range.startOffset;
+    }
+  }
+  const textOffset = textNode ? index.offsetForNode(textNode, rawOffset) : null;
+  const el = textNode?.parentElement ?? visibleElementAt(doc, viewer, point);
+  const all = Array.from(viewer.querySelectorAll("*"));
+  const idx = el ? all.indexOf(el as HTMLElement) : -1;
+  const rect = el ? (el as HTMLElement).getBoundingClientRect() : null;
+  if (textOffset === null && idx < 0) return null;
+  const ratio = rect && rect.width > 0
+    ? Math.min(1, Math.max(0, (point.x - rect.left) / rect.width))
+    : 0;
+  return {
+    index: idx,
+    ratio,
+    charsRead: textOffset ?? 0,
+    totalChars: index.totalChars,
+    mediaUnits: index.mediaUnits,
+    textOffset,
+    textSnippet: textOffset === null ? null : index.snippetAt(textOffset),
+  };
+}
+
+/** 依次尝试采样点；caret API 缺失时回退到可见元素，避免整章进度归零。 */
+function captureVisibleAnchor(options: AnchorSampleOptions): ReadingAnchor | null {
+  for (const point of visibleSamplePoints(options)) {
+    const anchor = captureAnchorAtPoint(options, point);
+    if (anchor) return anchor;
+  }
+  const geometry = options.geometry;
+  const fallbackPoint = options.mode === "scroll"
+    ? visibleSamplePoints(options)[0]
+    : geometry
+      ? {
+          // 同 visibleSamplePoints：这里也必须是视口坐标。
+          x:
+            options.viewer.getBoundingClientRect().left +
+            (options.viewer.clientLeft || 0) +
+            viewerPaddingLeft(options.viewer) +
+            2,
+          y: Math.max(2, Math.round(options.viewer.clientHeight * 0.5)),
+        }
+      : undefined;
+  return fallbackPoint ? captureAnchorAtPoint(options, fallbackPoint) : null;
+}
+
+export type PreciseNavigationStatus =
+  | "located"
+  | "located-reference"
+  | "unresolved"
+  | "unsupported-highlight"
+  | "cancelled";
+
 /** Pure restore precedence shared by initial layout and tests. */
 export function resolveRestoredPage({
   pageCount,
@@ -150,6 +365,15 @@ export function resolveRestoredPage({
 }
 
 type ResolvedAnchorColumn = { col: number; source: "text" | "legacy" };
+
+/** 屏号换算：列号减前置空列后除以有效列数（总约定 2）。 */
+export function columnToView(
+  physicalColumn: number,
+  leadingColumns: number,
+  columns: 1 | 2
+): number {
+  return Math.floor((physicalColumn - leadingColumns) / columns);
+}
 
 /**
  * 单章分页控制器：把一章 XHTML 渲染进 iframe，用 CSS 多栏布局分页。
@@ -1351,6 +1575,55 @@ export function getReaderTopFloatContainmentMargins(
   return float === "right" ? { left: 0, right: inset } : { left: inset, right: 0 };
 }
 
+export interface ReaderTopAutoMarginRestoreInput {
+  /** 只允许 viewer 的直接子页面级元素进入。 */
+  readerTop: boolean;
+  /** float 是独立布局单元，由 C-31/C-39 处理。 */
+  float: string;
+  /** 只处理常规块级盒；inline/inline-block 等保持书的行内布局。 */
+  display: string;
+  position: string;
+  writingMode: string;
+  /** `.illus` 等整页布局不能被版心补偿改变。 */
+  fullpage: boolean;
+  percentageMargin: boolean | undefined;
+  /** 当前测量出的 border-box 宽度。 */
+  borderBoxWidth: number;
+  /** 阅读器默认版心的 border-box 上限（通常为 40rem）。 */
+  contentWidth: number;
+}
+
+/**
+ * L3-C53 纯决策门：恢复被书 `!important` 零 margin 压掉的页面级居中。
+ *
+ * L3 用零特异性 `:where(#epub-viewer) .reader-top{margin:auto!important}`
+ * 居中页面级块；书里带标签的 `!important` 重置（如
+ * `div.toolbar{margin:.5em 0!important}`）特异性更高，两边都 important 时
+ * 书获胜，普通顶层块因此贴在栏左缘而不是版心。computed 零值只可能来自
+ * 真正赢下级联的声明，所以这里只为“已经落在版心宽度内的常规横排块”
+ * 写回 auto；float、百分比、全页图、竖排、绝对定位和超过版心的盒保持
+ * 书布局。纯函数不触碰 DOM，供 applyBookMargins 与回归测试共用。
+ */
+export function shouldRestoreReaderTopAutoMargin(
+  input: ReaderTopAutoMarginRestoreInput
+): boolean {
+  const epsilon = 0.5;
+  return (
+    input.readerTop &&
+    !input.fullpage &&
+    input.percentageMargin !== true &&
+    input.float.trim().toLowerCase() === "none" &&
+    /^(?:block|flow-root|flex|grid)$/u.test(input.display.trim().toLowerCase()) &&
+    /^(?:static|relative)$/u.test(input.position.trim().toLowerCase()) &&
+    input.writingMode.trim().toLowerCase() === "horizontal-tb" &&
+    Number.isFinite(input.borderBoxWidth) &&
+    Number.isFinite(input.contentWidth) &&
+    input.borderBoxWidth > 0 &&
+    input.contentWidth > 0 &&
+    input.borderBoxWidth <= input.contentWidth + epsilon
+  );
+}
+
 /**
  * 只把明确的全宽/突破表达式视为作者意图；`max-width` 本身是上限，不能
  * 证明作者要求突破版心。`min()/max()/clamp()` 混合表达式也不作猜测，
@@ -1709,6 +1982,8 @@ export class ChapterPaginator {
   private contentDoc: Document | null = null;
   private step = 0;
   private pageWidth = 0;
+  /** 本次布局的分栏几何（B 的 computePagedGeometry 结果）。 */
+  private geometry: { columns: 1 | 2; columnWidth: number; columnStep: number; viewStep: number } | null = null;
   /** 最近一次完整 measure 使用的 iframe 视口；过滤 ResizeObserver 空转。 */
   private measuredViewport = { width: -1, height: -1 };
   private metrics = { pageCount: 1, currentPage: 0 };
@@ -1721,11 +1996,22 @@ export class ChapterPaginator {
   private linkHandler = (e: Event): void => this.handleLinkClick(e);
   private wheelHandler = (e: WheelEvent): void => this.handleWheel(e);
   private wheelAcc = 0;
+  private scrollWheelAcc = 0;
+  private scrollWheelResetTimer: number | undefined;
+  private hasNextChapter = true;
+  private hasPrevChapter = true;
+  private lockedReverseDir: 1 | -1 | 0 = 0;
+  private reverseLockUntil = 0;
+  private sameDirThrottleUntil = 0;
   private keyHandler = (e: KeyboardEvent): void => this.handleKey(e);
   private footnoteHoverInHandler = (e: Event): void => this.handleFootnoteHoverIn(e);
   private footnoteHoverOutHandler = (e: MouseEvent): void => this.handleFootnoteHoverOut(e);
+  private scrollHandler = (): void => this.handleScroll();
+  private pointerDownHandler = (): void => this.handleScrollPointerDown();
   private pendingAnchor: string | undefined;
   private pendingFallbackPage: number | null = null;
+  private pendingPrecise: PendingPreciseNavigation | null = null;
+  private searchHighlightTarget: SearchHighlightTarget | null = null;
   /** Built once after current chapter layout is stable; never spans documents. */
   private textIndex: VisibleTextIndex | null = null;
   private notes: ReaderNoteForPaginator[] = [];
@@ -1785,10 +2071,28 @@ export class ChapterPaginator {
   }> = [];
   /** 首次布局显示门；token 与 loadSeq 一致，旧章不能揭示新章。 */
   private displayGate: VisibilityGate;
+  /** L5 backdrop-filter 分片补偿的完整恢复函数；下一轮测量前必须恢复。 */
+  private backdropCompatibilityRestore: (() => void) | null = null;
+
+  /** 滚动模式：viewer 是唯一正文 scroller；分页专用补偿在滚动下不执行。 */
+  private scrollStyleRestore: (() => void) | null = null;
+  /** 最近一次 scroll 事件的 rAF 合并句柄。 */
+  private scrollFrame: number | undefined;
+  private scrollFrameKind: "raf" | "timer" = "raf";
+  /** 滚动进度只在真实变化时发布，同值事件不关闭弹注。 */
+  private lastScrollTop = 0;
 
   /** 阅读位置锚点：中心只是采样坐标，不参与任何分页样式或结构。 */
   private anchor: ReadingAnchor | null = null;
   private anchorPath: string | undefined;
+  /** 本次加载入口携带的不可变锚点副本（滚动入口定位用）。 */
+  private pendingRestoreAnchor: ReadingAnchor | null = null;
+  /** 最近一次布局的有效列数（1/2）；窄窗回落结果。 */
+  private effectiveColumns: 1 | 2 = 1;
+  /** 前置空列数（page-break-before:always 等）；列→屏换算用。 */
+  private leadingColumns = 0;
+  /** 滚动模式下的虚拟屏数（进度口径，不用于定位）。 */
+  private scrollPageCount = 1;
 
   constructor(
     private iframe: HTMLIFrameElement,
@@ -1818,13 +2122,23 @@ export class ChapterPaginator {
     /** 首次测量、分页与最终入口定位全部完成，iframe 已可安全交互。 */
     private onDisplayReady?: () => void,
     /** 有效正文选区的现代右键菜单数据；通过 setter 可保持最新 UI 回调。 */
-    onSelectionContextMenu?: (payload: SelectionContextPayload | null) => void
+    onSelectionContextMenu?: (payload: SelectionContextPayload | null) => void,
+    /** 精确搜索/笔记目标定位结果；未定位不伪装成功。 */
+    private onPreciseNavigationStatus?: (status: {
+      requestId: number;
+      status: PreciseNavigationStatus;
+      exact: boolean;
+    }) => void,
+    /** 正文图片激活（活动章节专用；由 UI 打开独立浮层）。 */
+    private onImageActivation?: (image: ImageActivationPayload) => void
   ) {
     this.selectionContextMenuHandler = onSelectionContextMenu;
     this.displayGate = new VisibilityGate(this.iframe, {
       timeoutMs: INITIAL_RENDER_GATE_TIMEOUT_MS,
     });
-    this.footnoteHoverGate = new FootnoteHoverGate(() => this.onFootnoteClose?.());
+    this.footnoteHoverGate = new FootnoteHoverGate(() =>
+      this.resetFootnote({ notify: true, forceNotify: true })
+    );
   }
 
   setSelectionContextMenuHandler(handler?: (payload: SelectionContextPayload | null) => void): void {
@@ -1838,16 +2152,59 @@ export class ChapterPaginator {
     this.selectionContextMenuHandler?.(null);
   }
 
-  /** 更新当前书籍笔记；只刷新当前章节的 Highlight，不触发重排或重新测量。 */
+  /** 当前设置是否为滚动模式（fixedLayout 由调用方归一化为 paginated）。 */
+  private get scrollMode(): boolean {
+    return this.settings?.readingMode === "scroll";
+  }
+
+  /**
+   * 引擎实际渲染出的每屏列数（窄窗回落后的有效值）。
+   * 不信任设置里的期望值：CSS column-count 可能把双栏降回单栏。
+   */
+  private computeEffectiveColumns(): 1 | 2 {
+    const viewer = this.viewer;
+    if (!viewer) return 1;
+    const win = this.contentDoc?.defaultView;
+    const count = win ? parseFloat(win.getComputedStyle(viewer).columnCount) : NaN;
+    return Number.isFinite(count) && count >= 2 ? 2 : 1;
+  }
+
+  /**
+   * 物理列宽：双栏时是单列宽，不是整屏宽；由 B 的几何唯一决定。
+   */
+  private get effectiveColumnWidth(): number {
+    return this.geometry?.columnWidth ?? this.pageWidth;
+  }
+
+  private get effectiveColumnStep(): number {
+    return this.geometry?.columnStep ?? this.step ?? this.pageWidth + this.settings.gapPx;
+  }
+
+  private get effectiveViewStep(): number {
+    return this.geometry?.viewStep ?? this.effectiveColumnStep;
+  }
+
+  private scrollMetrics(): ScrollMetrics {
+    const viewer = this.viewer;
+    if (!viewer) return { contentHeight: 0, viewportHeight: 0 };
+    return { contentHeight: viewer.scrollHeight, viewportHeight: viewer.clientHeight };
+  }
+
   setNotes(notes: ReaderNoteForPaginator[]): "applied" | "unsupported" | "deferred" {
     this.notes = notes.slice();
     if (!this.contentDoc || !this.viewer || !this.textIndex) return "deferred";
     return this.applyNoteHighlights();
   }
 
-  /** 加载一章。path 为规范化内部路径。 */
   async load(path: string, opts: LoadOptions = {}): Promise<void> {
     if (opts.settings) this.settings = opts.settings;
+    if (opts.hasNextChapter !== undefined) {
+      this.hasNextChapter = opts.hasNextChapter;
+    }
+    if (opts.hasPrevChapter !== undefined) {
+      this.hasPrevChapter = opts.hasPrevChapter;
+    }
+    this.scrollWheelAcc = 0;
     this.abortMeasureWaits();
     const seq = ++this.loadSeq;
     this.displayReadySeq = -1;
@@ -1866,8 +2223,9 @@ export class ChapterPaginator {
       this.anchorPath = undefined;
       this.metrics.currentPage = 0;
     }
+    let preciseAnchor: ReadingAnchor | null = null;
     if (opts.readingAnchor) {
-      this.setReadingAnchor({ path, ...opts.readingAnchor });
+      preciseAnchor = this.setReadingAnchor(path, opts.readingAnchor);
     }
     this._currentPath = path;
     this.pendingAnchor = opts.anchor;
@@ -1878,10 +2236,22 @@ export class ChapterPaginator {
     this.emit({ status: "loading" });
     this.iframe.removeEventListener("load", this.onIframeLoad);
     this.cleanupDoc();
+    this.searchHighlightTarget = opts.preserveSearchHighlight
+      ? {
+          requestId: opts.preserveSearchHighlight.requestId,
+          textHits: opts.preserveSearchHighlight.textHits.map((hit) => ({ ...hit })),
+        }
+      : null;
+    this.pendingPrecise = opts.preciseNavigation
+      ? { request: opts.preciseNavigation, anchor: preciseAnchor ? { ...preciseAnchor } : null }
+      : null;
     this.pendingFallbackPage =
       typeof opts.fallbackPage === "number" && Number.isSafeInteger(opts.fallbackPage) && opts.fallbackPage >= 0
         ? opts.fallbackPage
         : null;
+    // 恢复锚点与页码兜底一样，必须在 cleanupDoc() 之后写入：cleanupDoc 会清空
+    // 上一份阅读态，写到它前面会被自己刚做的清理抹掉（滚动模式曾因此永远走页码兜底）。
+    this.pendingRestoreAnchor = preciseAnchor ? { ...preciseAnchor } : null;
     this.iframe.src = "about:blank";
 
     const htmlText = this.server.textFor(path);
@@ -1954,7 +2324,7 @@ export class ChapterPaginator {
 
   private onIframeLoad = (): void => {
     const seq = this.loadSeq;
-    if (!this.blobUrl || !this.iframe.src.startsWith("blob:")) return; // 忽略 about:blank 的 load
+    if (this.disposed || !this.blobUrl || this.iframe.src !== this.blobUrl) return; // 忽略 about:blank 或已被取代的过期 load
     const doc = this.iframe.contentDocument;
     if (!doc) {
       this.emit({ status: "error", message: "无法访问章节内容" });
@@ -1995,6 +2365,9 @@ export class ChapterPaginator {
     doc.addEventListener("wheel", this.wheelHandler, { passive: false });
     // 键盘翻页：焦点在书页内时，方向键事件不会冒泡到主窗口，需在此监听
     doc.addEventListener("keydown", this.keyHandler);
+    // 滚动模式：viewer 自身滚动，一帧一次更新位置；真实 pointerdown 关闭弹注。
+    doc.addEventListener("scroll", this.scrollHandler, true);
+    doc.addEventListener("pointerdown", this.pointerDownHandler, true);
     // 阅读器内始终屏蔽浏览器原生右键菜单；只有有效正文选区才回调 UI。
     doc.addEventListener("contextmenu", this.contextMenuHandler);
     doc.addEventListener("selectionchange", this.selectionChangeHandler);
@@ -2033,12 +2406,16 @@ export class ChapterPaginator {
     const ready = await this.recompute(true, seq);
     if (!ready || seq !== this.loadSeq || this.disposed) return false;
 
+    // Exact search/note targets must be resolved before the display gate is
+    // released.  A failed exact match may remain at its reference anchor, but
+    // it is never reported as a located highlight.
+    const preciseStatus = this.applyPendingPreciseNavigation();
     // 目录跳转：最终页数稳定后定位到锚点所在页。
-    if (this.pendingAnchor) {
+    if (preciseStatus === null && this.pendingAnchor) {
       this.jumpToAnchor(this.pendingAnchor);
       this.pendingAnchor = undefined;
     }
-    if (atEnd) {
+    if (atEnd && !this.scrollMode) {
       this.pendingStartAtEnd = false;
       this.setPage(Math.max(0, this.metrics.pageCount - 1));
     }
@@ -2074,7 +2451,7 @@ export class ChapterPaginator {
     resolve?.(ready);
   }
 
-  /** 设置分栏并等待字体就绪后测量（带超时保护：任何一步挂起都不能阻塞 ready）。 */
+
   private async measure(expectedLoadSeq: number = this.loadSeq): Promise<boolean> {
     const doc = this.contentDoc;
     const viewer = this.viewer;
@@ -2116,28 +2493,57 @@ export class ChapterPaginator {
         (parseFloat(parentCs?.paddingLeft ?? "") || 0) -
         (parseFloat(parentCs?.paddingRight ?? "") || 0)
     );
+    const baseH = parent?.clientHeight || this.iframe.clientHeight || viewer.clientHeight;
+    const pageH = Math.max(
+      0,
+      baseH -
+        (parseFloat(parentCs?.paddingTop ?? "") || 0) -
+        (parseFloat(parentCs?.paddingBottom ?? "") || 0)
+    );
     const em = this.settings.fontSizePx;
-    // 容器全宽：正文版心由注入 CSS 的 em 上限居中控制，
-    // 全页图块（.illus 等）豁免限制、占满整页
-    const w = pageW;
+    // [页面选项] 四边距只在这里扣一次：left/right 缩小可用宽度，而不是额外
+    // 给 viewer 再叠加一层水平留白；top/bottom 有显式值时取代旧 em 默认。
+    const margins = this.settings.pageMarginsPx ?? {};
+    const gap = this.settings.gapPx;
+    const h = pageH;
+    const marginLeft = Math.max(0, margins.left ?? 0);
+    const marginRight = Math.max(0, margins.right ?? 0);
+    const w = Math.max(0, pageW - marginLeft - marginRight);
+    // 极窄/矮窗口只缩小有效留白以留出正文，不修改保存值。
+    const requestedTop = margins.top !== undefined
+      ? Math.max(0, margins.top)
+      : this.fixedLayout ? 0 : TEXT_MEASURE.vTopEm * em;
+    const requestedBottom = margins.bottom !== undefined
+      ? Math.max(0, margins.bottom)
+      : this.fixedLayout ? 0 : TEXT_MEASURE.vBottomEm * em;
+    const verticalBudget = Math.max(0, pageH - 2 * em);
+    const verticalScale = requestedTop + requestedBottom > verticalBudget && requestedTop + requestedBottom > 0
+      ? verticalBudget / (requestedTop + requestedBottom)
+      : 1;
     // 纯图片页（封面/插图，无文字）：不加上下留白，整页显示
     const hasText = (viewer.textContent ?? "").trim().length > 0;
     const hasImg = viewer.querySelector("img") !== null;
-    const gap = this.settings.gapPx;
-    this.pageWidth = w;
-    this.step = w + gap;
+    const pureImagePage = !this.fixedLayout && !hasText && hasImg;
+    const padTop = pureImagePage ? 0 : Math.round(requestedTop * verticalScale);
+    const padBottom = pureImagePage ? 0 : Math.round(requestedBottom * verticalScale);
+    const requestedColumns = this.fixedLayout ? 1 : this.settings.columnsPerView === 2 ? 2 : 1;
+    // 统一列/屏换算的唯一来源：列宽、列步长、翻屏步长都来自 B 的几何。
+    const geometry = computePagedGeometry(w, gap, requestedColumns);
+    this.geometry = geometry;
+    this.step = geometry.columnStep;
+    this.pageWidth = geometry.columnWidth;
     viewer.style.width = `${w}px`;
-    if (this.fixedLayout || (!hasText && hasImg)) {
-      viewer.style.paddingTop = "0px";
-      viewer.style.paddingBottom = "0px";
-    } else {
-      viewer.style.paddingTop = `${TEXT_MEASURE.vTopEm * em}px`;
-      viewer.style.paddingBottom = `${TEXT_MEASURE.vBottomEm * em}px`;
-    }
-    viewer.style.columnWidth = `${w}px`;
+    viewer.style.paddingTop = `${padTop}px`;
+    viewer.style.paddingBottom = `${padBottom}px`;
+    viewer.style.columnWidth = `${geometry.columnWidth}px`;
     viewer.style.columnGap = `${gap}px`;
     viewer.style.columnFill = "auto";
-    viewer.style.height = "100%";
+    // 明确写入内容高；不设 100%（父级高在 body padding>0 时会比内容区大）。
+    if (h > 0) {
+      viewer.style.height = `${h}px`;
+    } else {
+      viewer.style.height = "100%";
+    }
     // 同步回流一次，确保 scrollWidth 反映新布局
     void viewer.scrollWidth;
     const waitController = new AbortController();
@@ -2185,11 +2591,45 @@ export class ChapterPaginator {
       }
       // [L5-C18] fit-content 会改变最终 border-box 宽度，必须先稳定宽度再计算
       // 页面级 margin；反过来会把多栏中的异常旧宽度固化成错误横向位置。
+      if (this.scrollMode) {
+        // 滚动模式：分页专用的分片/尾部占位/backdrop 避免补偿都不执行。
+        // viewer 是唯一纵向滚动容器，html/body 仍不承担正文滚动。
+        const viewportHeight = Math.max(
+          0,
+          (parent?.clientHeight || this.iframe.clientHeight || viewer.clientHeight) -
+            (parseFloat(parentCs?.paddingTop ?? "") || 0) -
+            (parseFloat(parentCs?.paddingBottom ?? "") || 0)
+        );
+        this.applyScrollViewerStyles(viewportHeight);
+        void viewer.scrollHeight;
+        this.pageWidth = Math.max(0, viewer.clientWidth);
+        this.step = 0;
+        this.restoreBackdropCompatibility();
+        this.measuredViewport = { width: measuredWidth, height: measuredHeight };
+        return isChapterMeasurementCurrent({
+          disposed: this.disposed,
+          loadSeq: this.loadSeq,
+          expectedLoadSeq,
+          contentDoc: this.contentDoc,
+          expectedDoc: doc,
+          viewer: this.viewer,
+          expectedViewer: viewer,
+        });
+      }
+      // [L5-C18] fit-content 会改变最终 border-box 宽度，必须先稳定宽度再计算
+      // 页面级 margin；反过来会把多栏中的异常旧宽度固化成错误横向位置。
       this.applyFitContentFix();
       this.applyBookMargins();
       this.applyFloatShrinkFix();
       this.applyTrailingFloatMarginFix();
       this.applyInlineBoxOverflowFix();
+      if (!this.fixedLayout) {
+        this.backdropCompatibilityRestore = applyBackdropCompatibility(doc, viewer, {
+          // 双栏时传单列宽与列步长，不能传整屏宽。
+          pageWidth: this.geometry?.columnWidth ?? this.pageWidth,
+          step: this.geometry?.columnStep ?? this.step,
+        });
+      }
       // 只在整轮测量与二阶段补偿完成后提交尺寸；若测量期间窗口又变化，
       // ResizeObserver 仍会发现新尺寸并发起下一轮。
       this.measuredViewport = { width: measuredWidth, height: measuredHeight };
@@ -2208,7 +2648,248 @@ export class ChapterPaginator {
     }
   }
 
-  /** 恢复上一轮 margin 后处理写回的 inline 值。 */
+  private restoreScrollView(): void {
+    this.scrollStyleRestore?.();
+    this.scrollStyleRestore = null;
+  }
+
+  private applyScrollViewerStyles(viewportHeight: number): void {
+    const viewer = this.viewer;
+    if (!viewer) return;
+    const styles = scrollViewerStyles(viewportHeight);
+    if (!this.scrollStyleRestore) {
+      const snapshot = styles.map(([property]) => ({
+        property,
+        value: viewer.style.getPropertyValue(property),
+        priority: viewer.style.getPropertyPriority(property),
+      }));
+      this.scrollStyleRestore = () => {
+        for (const item of snapshot) {
+          if (item.value) viewer.style.setProperty(item.property, item.value, item.priority);
+          else viewer.style.removeProperty(item.property);
+        }
+      };
+    }
+    for (const [property, value] of styles) {
+      viewer.style.setProperty(property, value);
+    }
+  }
+
+  /** ready 状态的唯一构造入口，避免滚动字段散落在各调用点。 */
+  private readyState(empty: boolean): ChapterState {
+    if (this.scrollMode) {
+      const metrics = this.scrollMetrics();
+      return {
+        status: "ready",
+        pageCount: this.metrics.pageCount,
+        currentPage: this.metrics.currentPage,
+        empty,
+        mode: "scroll",
+        scrollProgress: scrollRatio(metrics, this.viewer?.scrollTop ?? 0),
+        effectiveColumns: 1,
+      };
+    }
+    return {
+      status: "ready",
+      pageCount: this.metrics.pageCount,
+      currentPage: this.metrics.currentPage,
+      empty,
+      mode: "paginated",
+      effectiveColumns: this.effectiveColumns,
+    };
+  }
+
+  private scrollToElement(el: Element, desiredInset: number): void {
+    const viewer = this.viewer;
+    const doc = this.contentDoc;
+    if (!viewer || !doc || this.scrollMode === false) return;
+    const range = doc.createRange();
+    try {
+      range.selectNodeContents(el);
+      const resolved = this.resolveScrollTopForRange(range, desiredInset);
+      if (resolved !== null) viewer.scrollTop = resolved;
+    } catch {
+      const rect = (el as HTMLElement).getBoundingClientRect();
+      const resolved = scrollTopForRange({
+        rangeTop: rect.top,
+        viewportTop: viewer.getBoundingClientRect().top,
+        currentScrollTop: viewer.scrollTop,
+        desiredInset,
+        metrics: this.scrollMetrics(),
+      }).scrollTop;
+      viewer.scrollTop = resolved;
+    }
+  }
+
+  /** 滚动位置与整章比例的唯一采样点：可见区域上方固定一点。 */
+  private captureScrollAnchor(): void {
+    const doc = this.contentDoc;
+    const viewer = this.viewer;
+    if (!doc || !viewer || !this.scrollMode) return;
+    const index = this.textIndex ?? buildVisibleTextIndex(doc, viewer);
+    this.textIndex = index;
+    const anchor = captureVisibleAnchor({ viewer, doc, index, mode: "scroll", visibleRatio: 0.12 });
+    if (!anchor) return;
+    this.anchor = anchor;
+    this.anchorPath = this._currentPath;
+  }
+
+  private syncScrollMetrics(capture: boolean): void {
+    const viewer = this.viewer;
+    if (!viewer) return;
+    const metrics = this.scrollMetrics();
+    const pageCount = this.scrollPageCount;
+    const currentPage = Math.max(
+      0,
+      Math.min(pageCount - 1, Math.floor(scrollRatio(metrics, viewer.scrollTop) * pageCount))
+    );
+    this.lastScrollTop = viewer.scrollTop;
+    this.metrics = { pageCount, currentPage };
+    // 进度采样只在滚动中读取可见区域文字，不写回任何布局。
+    if (capture) this.captureScrollAnchor();
+    this.emit(this.readyState(false));
+  }
+
+  /** 滚动事件：一帧一次更新位置；真实 scrollTop 变化才关闭弹注。 */
+  private handleScroll(): void {
+    if (!this.scrollMode || this.disposed) return;
+    const viewer = this.viewer;
+    if (!viewer) return;
+    if (this.scrollFrame !== undefined) return;
+    const win = this.contentDoc?.defaultView;
+    const raf = win?.requestAnimationFrame?.bind(win);
+    const run = (): void => {
+      this.scrollFrame = undefined;
+      this.syncScrollMetrics(true);
+    };
+    if (raf) {
+      this.scrollFrameKind = "raf";
+      this.scrollFrame = raf(run);
+    } else {
+      this.scrollFrameKind = "timer";
+      this.scrollFrame = globalThis.setTimeout(run, 16) as unknown as number;
+    }
+    // 真实滚动改变即关闭当前弹注；同值事件不关闭。
+    if (Math.abs(viewer.scrollTop - this.lastScrollTop) > 0.5) {
+      this.resetFootnoteForContentChange();
+    }
+  }
+
+  private cancelScrollFrame(): void {
+    if (this.scrollFrame === undefined) return;
+    const win = this.contentDoc?.defaultView;
+    if (this.scrollFrameKind === "raf") {
+      win?.cancelAnimationFrame?.(this.scrollFrame);
+    } else {
+      globalThis.clearTimeout(this.scrollFrame);
+    }
+    this.scrollFrame = undefined;
+  }
+
+  /** 触摸/拖动开始不应沿用固定弹注（与滚动位置变化同一规则）。 */
+  private handleScrollPointerDown(): void {
+    if (!this.scrollMode || this.disposed) return;
+    this.resetFootnoteForContentChange();
+  }
+
+  /** 位置变化时关闭弹注并丢弃选区菜单，但保留搜索高亮。 */
+  private resetFootnoteForContentChange(): void {
+    this.closeFootnoteForNavigation();
+    if (this.selectionContextMenuOpen) {
+      this.selectionContextMenuOpen = false;
+      this.selectionContextMenuHandler?.(null);
+    }
+  }
+
+  /** 滚动模式下的入口定位：文字锚点 → 内容 y；legacy 元素锚点 → 元素顶边。 */
+  private applyScrollRestore(
+    fallbackPage: number | null,
+    preciseAnchor: ReadingAnchor | null
+  ): void {
+    const viewer = this.viewer;
+    if (!viewer) return;
+    const index = this.textIndex;
+    const metrics = this.scrollMetrics();
+    const inset = Math.round(Math.min(24, Math.max(0, metrics.viewportHeight * 0.04)));
+    let rangeTop: number | null = null;
+    if (preciseAnchor && this.anchorPath === this._currentPath) {
+      if (index && preciseAnchor.textOffset !== null) {
+        const offset = resolveTextAnchorOffset(index, preciseAnchor);
+        if (offset !== null) {
+          const position = index.positionForOffset(offset);
+          if (position) {
+            const range = this.contentDoc?.createRange();
+            if (range) {
+              try {
+                range.setStart(position.node, position.rawOffset);
+                range.setEnd(position.node, position.rawOffset);
+                const rect = range.getBoundingClientRect();
+                if (Number.isFinite(rect.top)) {
+                  rangeTop = rect.top;
+                  this.anchor = {
+                    ...preciseAnchor,
+                    textOffset: offset,
+                    textSnippet: index.snippetAt(offset),
+                    charsRead: offset,
+                    totalChars: index.totalChars,
+                    mediaUnits: index.mediaUnits,
+                  };
+                  this.anchorPath = this._currentPath;
+                }
+              } catch {
+                rangeTop = null;
+              }
+            }
+          }
+        }
+      }
+      if (rangeTop === null && Number.isSafeInteger(preciseAnchor.index) && preciseAnchor.index >= 0) {
+        const all = Array.from(viewer.querySelectorAll("*"));
+        const el = all[preciseAnchor.index] as HTMLElement | undefined;
+        const rect = el?.getBoundingClientRect();
+        if (rect && Number.isFinite(rect.top)) rangeTop = rect.top + preciseAnchor.ratio * rect.height;
+      }
+    }
+    if (rangeTop === null && fallbackPage !== null && fallbackPage > 0) {
+      // 页码兜底只在同章内使用：按“可用屏高”近似旧位置。
+      const max = scrollMaxTop(metrics);
+      const ratio = Math.min(1, fallbackPage / Math.max(1, this.metrics.pageCount - 1));
+      viewer.scrollTop = Math.round(max * ratio);
+    } else if (rangeTop !== null) {
+      const resolved = scrollTopForRange({
+        rangeTop,
+        viewportTop: viewer.getBoundingClientRect().top,
+        currentScrollTop: viewer.scrollTop,
+        desiredInset: inset,
+        metrics,
+      });
+      viewer.scrollTop = resolved.scrollTop;
+    } else if (this.pendingStartAtEnd) {
+      viewer.scrollTop = scrollMaxTop(metrics);
+    } else {
+      viewer.scrollTop = 0;
+    }
+    this.lastScrollTop = viewer.scrollTop;
+  }
+
+  /** 滚动模式：一帧内的滚动范围换算与进度采样。 */
+  private resolveScrollTopForRange(range: Range, desiredInset: number): number | null {
+    const viewer = this.viewer;
+    if (!viewer) return null;
+    const rect = Array.from(range.getClientRects?.() ?? []).find(
+      (candidate) => candidate.width > 0 || candidate.height > 0
+    );
+    const top = rect?.top ?? range.getBoundingClientRect?.().top;
+    if (top === undefined || !Number.isFinite(top)) return null;
+    return scrollTopForRange({
+      rangeTop: top,
+      viewportTop: viewer.getBoundingClientRect().top,
+      currentScrollTop: viewer.scrollTop,
+      desiredInset,
+      metrics: this.scrollMetrics(),
+    }).scrollTop;
+  }
+
   private restoreBookMargins(): void {
     for (const fix of this.marginFixes) {
       fix.el.removeAttribute("data-reader-margin-fixed");
@@ -2221,13 +2902,6 @@ export class ChapterPaginator {
     this.marginFixes = [];
   }
 
-  /**
-   * 第二遍 margin 处理（C-04）：
-   * 先让阅读器默认居中规则渲染（第一遍已发生），再检查页面直接子元素
-   * 在“纯书 CSS”下是否有非零左右 margin；有则写回书的真实 margin，
-   * 否则保持阅读器默认居中。书的通用 reset（div{margin:0}）得到的是 0，
-   * 不会进入写回，因此不会被误判为具体布局。
-   */
   private applyBookMargins(): void {
     const doc = this.contentDoc;
     const viewer = this.viewer;
@@ -2793,12 +3467,6 @@ export class ChapterPaginator {
     }
   }
 
-  /**
-   * 临时移除阅读器注入的 `.reader-top` margin auto 规则（C-04 纯书 margin 测量）。
-   * 只动这两条 margin 规则，不禁用整个阅读器样式表：
-   * 否则 L2 的 html{font-size} 也一起失效，em 宽度会在两次测量间跳变
-   * （如目录容器 width:10.6em，18px 字号下被误判成不对称 margin）。
-   */
   private disableReaderTopMarginRules(sheet: CSSStyleSheet): () => void {
     const saved: Array<{
       style: CSSStyleDeclaration;
@@ -2831,7 +3499,6 @@ export class ChapterPaginator {
     };
   }
 
-  /** 恢复上一轮 fit-content 补偿写回的 inline max-width。 */
   private restoreFitContentFix(): void {
     for (const fix of this.fitContentFixes) {
       fix.el.style.setProperty("max-width", fix.maxWidth);
@@ -2839,11 +3506,6 @@ export class ChapterPaginator {
     this.fitContentFixes = [];
   }
 
-  /**
-   * L5-C09：CSS 多栏里 max-width:fit-content 计算异常（简介等会塌成
-   * 逐字窄条或拉成整页宽）。统一把这类元素的上限改为版心 40rem，
-   * 宽容器时得到正常版心宽度，窄容器时仍受父容器约束。
-   */
   private applyFitContentFix(): void {
     const doc = this.contentDoc;
     const viewer = this.viewer;
@@ -2860,7 +3522,6 @@ export class ChapterPaginator {
     }
   }
 
-  /** 清除上一轮 float 收缩补偿写回的 width。 */
   private restoreFloatWidths(): void {
     for (const el of this.floatFixes) el.style.removeProperty("width");
     this.floatFixes = [];
@@ -2884,7 +3545,6 @@ export class ChapterPaginator {
     this.trailingFloatFixes = [];
   }
 
-  /** 恢复上一轮行尾行内盒原子化写回的 inline 值及优先级。 */
   private restoreInlineBoxFixes(): void {
     for (const fix of this.inlineClipFixes ?? []) {
       restoreInlineStyleProperty(fix.el.style, "overflow-x", fix.overflowX);
@@ -2900,12 +3560,6 @@ export class ChapterPaginator {
     this.inlineBoxFixes = [];
   }
 
-  /**
-   * L5-C25：Chromium computed right 对齐行中的尾随全角空白会挂在可见 inline
-   * 盒外，导致目录色块越过其段落 inline-end，窄视口时还会制造残余列。
-   * 仅在可见盒、手工补齐空白、实际几何越界且原子化后确实消除越界时写回；
-   * 普通文字、无外观 span、链接/ruby/脚注语义节点都保持原样。
-   */
   private applyInlineBoxOverflowFix(): void {
     const doc = this.contentDoc;
     const viewer = this.viewer;
@@ -3019,12 +3673,6 @@ export class ChapterPaginator {
     }
   }
 
-  /**
-   * L5-C08：CSS 多栏里浮动元素的 shrink-to-fit 异常（气泡塌成逐字宽）。
-   * 用 Canvas 逐文本节点测量 max-content，按父容器可用宽度收缩并写回 px，
-   * 恢复“短内容包住文字、长内容到边换行”。只处理纯 inline 内容的浮动
-   * 元素；测量不到字体宽度（无可用字体）时跳过。
-   */
   private applyFloatShrinkFix(): void {
     const doc = this.contentDoc;
     const viewer = this.viewer;
@@ -3131,11 +3779,6 @@ export class ChapterPaginator {
     }
   }
 
-  /**
-   * L5-C30：Chromium 可把章节末尾的纯图片 float 拆到下一列，制造只有装饰
-   * 内容的错误第 2 页。只试探最后一个直接子元素，并用事务式负 margin-top
-   * 把它收回上一列；任何单列、边界或兄弟重叠条件失败都立即恢复原值。
-   */
   private applyTrailingFloatMarginFix(): void {
     const doc = this.contentDoc;
     const viewer = this.viewer;
@@ -3227,10 +3870,6 @@ export class ChapterPaginator {
     this.trailingFloatFixes.push({ el: candidate, marginTop: originalMarginTop });
   }
 
-  /**
-   * 重算分页；首次显示需要 await 到内部自愈重试真正结束。
-   * 返回 false 表示章节已过期/销毁或当前 DOM 不可计算。
-   */
   private async recompute(
     useAnchor: boolean,
     loadSeq: number = this.loadSeq
@@ -3239,7 +3878,8 @@ export class ChapterPaginator {
     // 否则旧 DOM 的锚点/页数会污染新章（表现：卡死在上一章末页）
     if (this.disposed || loadSeq !== this.loadSeq) return false;
     const viewer = this.viewer;
-    if (!viewer || this.step <= 0) return false;
+    // 分页需要列步长；滚动模式由 viewer 自身滚动，不依赖列步长。
+    if (!viewer || (!this.scrollMode && this.step <= 0)) return false;
     // 自愈：viewer 为空但 body 里还有内容（内容落在容器外）时，重新包裹
     if (viewer.children.length === 0) {
       const doc = this.contentDoc;
@@ -3260,6 +3900,10 @@ export class ChapterPaginator {
         this.rebuildTextIndexForCurrentDoc();
         return this.recompute(useAnchor, loadSeq);
       }
+    }
+    if (this.scrollMode) {
+      this.recomputeScroll();
+      return !this.disposed && loadSeq === this.loadSeq;
     }
     const sw = viewer.scrollWidth;
     const hasContent =
@@ -3284,6 +3928,82 @@ export class ChapterPaginator {
     return !this.disposed && loadSeq === this.loadSeq;
   }
 
+  /**
+   * 滚动模式的最终定位：入口锚点、章末标记与文本高亮都在显示门内完成。
+   * 页数只是“把当前章按可用屏高切成几屏”的进度口径，不用于定位。
+   */
+  private recomputeScroll(): void {
+    const viewer = this.viewer;
+    if (!viewer) return;
+    this.renderScrollChapterEnd();
+    const metrics = this.scrollMetrics();
+    const pageCount = Math.max(1, Math.ceil(metrics.contentHeight / Math.max(1, metrics.viewportHeight)));
+    // 索引、笔记与搜索高亮必须在入口定位前重建（F4 保持）。
+    this.rebuildTextIndexForCurrentDoc();
+    this.applyScrollRestore(this.pendingFallbackPage, this.pendingRestoreAnchor);
+    this.pendingFallbackPage = null;
+    this.pendingAnchor = undefined;
+    this.pendingStartAtEnd = false;
+    this.scrollPageCount = pageCount;
+    this.pendingRestoreAnchor = null;
+    this.syncScrollMetrics(false);
+  }
+
+  /** 滚动模式章末自然过渡卡片：本章完 / 进入下一章 / 全书完提示 */
+  private renderScrollChapterEnd(): void {
+    if (
+      !this.scrollMode ||
+      !this.contentDoc ||
+      !this.viewer ||
+      typeof this.viewer.querySelector !== "function" ||
+      typeof this.contentDoc.createElement !== "function"
+    ) {
+      return;
+    }
+    const existing = this.viewer.querySelector('[data-reader="chapter-end"]');
+    if (existing) {
+      existing.remove();
+    }
+    const endEl = this.contentDoc.createElement("div");
+    endEl.className = "reader-chapter-end";
+    endEl.setAttribute("data-reader", "chapter-end");
+
+    const divider = this.contentDoc.createElement("div");
+    divider.className = "chapter-end-divider";
+    const span = this.contentDoc.createElement("span");
+    span.textContent = this.hasNextChapter ? "本章完" : "全书完";
+    divider.appendChild(span);
+    endEl.appendChild(divider);
+
+    if (this.hasNextChapter) {
+      const btn = this.contentDoc.createElement("button");
+      btn.type = "button";
+      btn.className = "chapter-end-next-btn";
+      btn.setAttribute("aria-label", "进入下一章");
+      btn.textContent = "进入下一章 →";
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.scrollToEnd();
+        this.onWheelNavigate?.(1);
+      });
+      endEl.appendChild(btn);
+
+      const hint = this.contentDoc.createElement("div");
+      hint.className = "chapter-end-hint";
+      hint.textContent = "继续向下滚动亦可进入下一章";
+      endEl.appendChild(hint);
+    } else {
+      const hint = this.contentDoc.createElement("div");
+      hint.className = "chapter-end-hint";
+      hint.textContent = "已读完全部章节";
+      endEl.appendChild(hint);
+    }
+
+    this.viewer.appendChild(endEl);
+  }
+
+
   private recomputeInner(useAnchor: boolean, loadSeq: number): void {
     if (loadSeq !== this.loadSeq) return; // 过期章节：丢弃
     const viewer = this.viewer;
@@ -3296,13 +4016,15 @@ export class ChapterPaginator {
       this.emit({ status: "ready", pageCount: 1, currentPage: 0, empty: true });
       return;
     }
+    // 引擎实际列数（双栏在窄窗回落到单栏时不写回设置）。
+    this.effectiveColumns = this.computeEffectiveColumns();
+    const columns = this.effectiveColumns;
     const contentCols = Math.max(1, Math.ceil(extent.maxX / this.step));
-    let pageCount = contentCols;
     // 前置空列：page-break-before:always 的首元素会把内容推到第 2 列
     const leadShift = Math.floor(extent.minX / this.step);
-    if (leadShift > 0) {
-      pageCount = Math.max(1, contentCols - leadShift);
-    }
+    this.leadingColumns = leadShift;
+    // 屏号 = floor((物理列 - 前置空列)/列数)；末屏不足列数仍算一屏。
+    const pageCount = Math.max(1, columnToView(contentCols - 1, leadShift, columns) + 1);
     // 阅读位置保留：窗口缩放/设置变化用内容锚点定位；
     // 图片加载等内容变化保留当前页号（否则内容下移会把人拉到后几页）
     const resolvedAnchor = useAnchor ? this.resolveAnchorCol() : null;
@@ -3316,12 +4038,13 @@ export class ChapterPaginator {
     const current = restored.page;
     this.metrics = { pageCount, currentPage: current };
     // 关键：重排（图片加载/窗口缩放）后对齐页边界，否则显示半页偏移错位
-    viewer.scrollLeft = (leadShift + current) * this.step;
+    // 一次翻屏移动 columns 个列步长；列起点为 leadShift + 屏号*列数。
+    viewer.scrollLeft = (leadShift + current * columns) * this.step;
     // A legacy element anchor only chooses the column. Once there, observe
     // the current page centre to upgrade it to the text anchor used by new
     // progress writes; no layout rule is changed.
     if (resolvedAnchor?.source === "legacy") this.captureAnchor();
-    this.emit({ status: "ready", pageCount, currentPage: current, empty: false });
+    this.emit(this.readyState(false));
     // 粘性锚点：使用锚点恢复时不重新取样（否则恢复后页心可能是下一段，
     // 反复缩放会逐段漂移）；仅当无锚点（首次加载）时建立
     if (anchorCol === null) this.captureAnchor();
@@ -3331,7 +4054,6 @@ export class ChapterPaginator {
     if (restored.consumeFallback) this.pendingFallbackPage = null;
   }
 
-  /** 内容在列方向上的实际占用范围（内容坐标，视口无关）。 */
   private contentExtent(): { minX: number; maxX: number } {
     const viewer = this.viewer;
     let minX = Infinity;
@@ -3358,13 +4080,15 @@ export class ChapterPaginator {
     return { minX, maxX };
   }
 
-  /** Rebuild only after a successful measure of the currently owned document. */
   private rebuildTextIndexForCurrentDoc(): void {
     if (!this.contentDoc || !this.viewer || this.disposed) {
       this.textIndex = null;
       return;
     }
     this.textIndex = buildVisibleTextIndex(this.contentDoc, this.viewer);
+    // F4：设置重载后重建笔记/搜索高亮；重建不是一次新的用户跳转。
+    this.applyNoteHighlights();
+    this.reapplySearchHighlight();
     this.applyNoteHighlights();
   }
 
@@ -3400,6 +4124,184 @@ export class ChapterPaginator {
       return;
     }
     this.selectionContextMenuHandler?.({ ...payload, chapterPath: this._currentPath });
+  }
+
+  /**
+   * Observe the current visible position only. This method never inserts spacers or
+   * changes styles: pagination has already happened and remains natural from the
+   * chapter's first page. Paginated mode samples the first visible column (not the
+   * screen centre, which can be the inter-column gap); scroll mode samples the top
+   * of the visible area.
+   */
+  private captureAnchor(): void {
+    const doc = this.contentDoc;
+    const viewer = this.viewer;
+    if (!doc || !viewer || viewer.clientWidth <= 0) return;
+    const index = this.textIndex ?? buildVisibleTextIndex(doc, viewer);
+    this.textIndex = index;
+    const anchor = captureVisibleAnchor({
+      viewer,
+      doc,
+      index,
+      mode: this.scrollMode ? "scroll" : "paginated",
+      visibleRatio: this.scrollMode ? 0.12 : 0.5,
+      geometry: this.scrollMode
+        ? undefined
+        : {
+            columnWidth: this.effectiveColumnWidth,
+            columnStep: this.effectiveColumnStep,
+            viewStep: this.effectiveViewStep,
+            leadingColumns: this.leadingColumns,
+          },
+    });
+    if (!anchor) return;
+    this.anchor = anchor;
+    this.anchorPath = this._currentPath;
+  }
+
+  /** 内容坐标：先减 viewer 实际内容左原点（border/padding），再加 scrollLeft。 */
+  private contentX(clientLeft: number): number {
+    const viewer = this.viewer;
+    if (!viewer) return clientLeft;
+    let paddingLeft = 0;
+    try {
+      const computed = this.contentDoc?.defaultView?.getComputedStyle(viewer);
+      paddingLeft = parseFloat(computed?.paddingLeft ?? "") || 0;
+    } catch {
+      paddingLeft = 0;
+    }
+    return clientLeft - (viewer.clientLeft || 0) - paddingLeft + (viewer.scrollLeft || 0);
+  }
+
+  private resolveTextAnchorCol(index: VisibleTextIndex, textOffset: number): number | null {
+    const doc = this.contentDoc;
+    const viewer = this.viewer;
+    if (!doc || !viewer || this.step <= 0) return null;
+    const start = index.positionForOffset(textOffset);
+    const end = index.positionForOffset(Math.min(index.totalChars, textOffset + 1));
+    if (!start || !end) return null;
+    try {
+      const range = doc.createRange();
+      range.setStart(start.node, start.rawOffset);
+      range.setEnd(end.node, end.rawOffset);
+      const rect = Array.from(range.getClientRects()).find((candidate) => candidate.width > 0 || candidate.height > 0);
+      if (!rect) return null;
+      // 分栏时同一屏内第二栏命中留在包含它的那一屏：物理列 → 屏号。
+      const physical = Math.max(0, Math.floor(this.contentX(rect.left) / this.step));
+      return Math.max(0, columnToView(physical, this.leadingColumns, this.effectiveColumns));
+    } catch {
+      return null;
+    }
+  }
+
+  private resolveAnchorCol(): ResolvedAnchorColumn | null {
+    const viewer = this.viewer;
+    if (!viewer || !this.anchor || this.step <= 0 || this.anchorPath !== this._currentPath) return null;
+    const index = this.textIndex;
+    if (this.anchor.textOffset !== null) {
+      if (index) {
+        const offset = resolveTextAnchorOffset(index, this.anchor);
+        if (offset !== null) {
+          const col = this.resolveTextAnchorCol(index, offset);
+          if (col !== null) {
+            this.anchor.textOffset = offset;
+            this.anchor.textSnippet = index.snippetAt(offset);
+            this.anchor.charsRead = offset;
+            this.anchor.totalChars = index.totalChars;
+            this.anchor.mediaUnits = index.mediaUnits;
+            return { col, source: "text" };
+          }
+        }
+      }
+      // A stale/ambiguous text anchor must not remain sticky after legacy
+      // fallback succeeds. It would otherwise keep preventing the upgrade.
+      this.anchor.textOffset = null;
+      this.anchor.textSnippet = null;
+      this.anchor.charsRead = 0;
+    }
+    const all = Array.from(viewer.querySelectorAll("*"));
+    if (!Number.isSafeInteger(this.anchor.index) || this.anchor.index < 0 || this.anchor.index >= all.length) return null;
+    const el = all[this.anchor.index] as HTMLElement;
+    const rect = el.getBoundingClientRect();
+    const absX = this.contentX(rect.left) + this.anchor.ratio * rect.width;
+    const physical = Math.max(0, Math.floor(absX / this.step));
+    return {
+      col: Math.max(0, columnToView(physical, this.leadingColumns, this.effectiveColumns)),
+      source: "legacy",
+    };
+  }
+
+  /** 提交一个已解析位置：分页对齐到屏边界，滚动由调用方先写入 scrollTop。 */
+  private applyResolvedPosition(page: number, candidate: ReadingAnchor | null): void {
+    const viewer = this.viewer;
+    if (!viewer) return;
+    if (!this.scrollMode) viewer.scrollLeft = page * this.viewStepPx;
+    if (candidate) {
+      this.anchor = candidate;
+      this.anchorPath = this._currentPath;
+    } else {
+      this.anchor = null;
+      this.anchorPath = undefined;
+    }
+    // Commit the page before the read-only observation. If caret is
+    // unavailable, preserve the successful text/legacy candidate.
+    const preserved = candidate ? { ...candidate } : null;
+    if (this.scrollMode) this.captureScrollAnchor();
+    else this.captureAnchor();
+    if (preserved && (!this.anchor || this.anchor.textOffset === null)) {
+      this.anchor = preserved;
+      this.anchorPath = this._currentPath;
+    }
+    if (this.scrollMode) this.syncScrollMetrics(false);
+    else this.emit(this.readyState(false));
+  }
+
+  /** 分页一次翻屏的像素步长（双栏 = 两列 + 中缝）。 */
+  private get viewStepPx(): number {
+    const columns = (this.geometry?.columns ?? this.effectiveColumns) as 1 | 2;
+    return columns * (this.step || 0);
+  }
+
+  /** Commit a page without treating the center sample as a layout input. */
+  private commitWithinChapterPage(
+    page: number,
+    candidate: ReadingAnchor | null
+  ): void {
+    const viewer = this.viewer;
+    if (!viewer) return;
+    this.closeFootnoteForNavigation();
+    this.clearSearchHighlightForDocument();
+    if (this.scrollMode) {
+      // 滚动下命令语义是视口移动；真实边界由 UI 的上一章/下一章按钮负责。
+      const direction: 1 | -1 = page > this.metrics.currentPage ? 1 : -1;
+      const moved = scrollByViewportCommand(direction, this.scrollMetrics(), viewer.scrollTop);
+      this.metrics.currentPage = page;
+      viewer.scrollTop = moved.scrollTop;
+      this.applyResolvedPosition(page, candidate);
+      return;
+    }
+    this.metrics.currentPage = page;
+    this.applyResolvedPosition(page, candidate);
+  }
+
+  private restoreBackdropCompatibility(): void {
+    this.backdropCompatibilityRestore?.();
+    this.backdropCompatibilityRestore = null;
+  }
+
+  /** Any real navigation/structure change closes the transient footnote. */
+  private closeFootnoteForNavigation(): void {
+    this.resetFootnote({ notify: true });
+  }
+
+  private resetFootnote(options: { notify: boolean; forceNotify?: boolean }): void {
+    const wasOpen = this.footnotePinned || this.footnoteHoverGate.isVisible();
+    if (this.footnoteHoverGate) {
+      this.footnotePinned = false;
+      this.lastFootnoteEl = null;
+      this.footnoteHoverGate.reset();
+    }
+    if (options.notify && (wasOpen || options.forceNotify)) this.onFootnoteClose?.();
   }
 
   private clearNoteHighlights(): void {
@@ -3441,167 +4343,307 @@ export class ChapterPaginator {
     return "applied";
   }
 
-  /**
-   * Observe the current page centre only. This method never inserts spacers or
-   * changes styles: pagination has already happened and remains natural from
-   * the chapter's first page.
-   */
-  private captureAnchor(): void {
-    const doc = this.contentDoc;
-    const viewer = this.viewer;
-    if (!doc || !viewer || this.step <= 0 || viewer.clientWidth <= 0) return;
-    const index = this.textIndex ?? buildVisibleTextIndex(doc, viewer);
-    this.textIndex = index;
-    const x = Math.min(viewer.clientWidth * 0.5, viewer.clientWidth - 2);
-    const mid = Math.max(2, Math.min(viewer.clientHeight - 2, viewer.clientHeight * 0.5));
-    const samples = [mid, mid - 40, mid + 40, mid - 80, mid + 80]
-      .filter((y) => y >= 2 && y <= viewer.clientHeight - 2);
-    let textNode: Text | null = null;
-    let rawOffset = 0;
-    for (const y of samples) {
-      const modern = (doc as Document & {
-        caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
-        caretRangeFromPoint?: (x: number, y: number) => Range | null;
-      }).caretPositionFromPoint?.(x, y);
-      if (modern?.offsetNode.nodeType === 3) {
-        textNode = modern.offsetNode as Text;
-        rawOffset = modern.offset;
-        break;
-      }
-      const range = (doc as Document & { caretRangeFromPoint?: (x: number, y: number) => Range | null })
-        .caretRangeFromPoint?.(x, y);
-      if (range?.startContainer.nodeType === 3) {
-        textNode = range.startContainer as Text;
-        rawOffset = range.startOffset;
-        break;
-      }
-    }
-    const textOffset = textNode ? index.offsetForNode(textNode, rawOffset) : null;
-    // Keep legacy data only as a compatibility fallback for images and old
-    // engines without a caret API. It is never used to count text.
-    let el: Element | null = null;
-    for (const y of samples) {
-      const hit = doc.elementFromPoint(x, y);
-      if (hit && hit !== viewer && hit !== doc.body && hit !== doc.documentElement) {
-        el = hit;
-        break;
-      }
-    }
-    const all = Array.from(viewer.querySelectorAll("*"));
-    const idx = el ? all.indexOf(el as HTMLElement) : -1;
-    const rect = el ? (el as HTMLElement).getBoundingClientRect() : null;
-    const ratio = rect && rect.width > 0 ? Math.min(1, Math.max(0, (x - rect.left) / rect.width)) : 0;
-    this.anchor = {
-      index: idx,
-      ratio,
-      charsRead: textOffset ?? 0,
-      totalChars: index.totalChars,
-      mediaUnits: index.mediaUnits,
-      textOffset,
-      textSnippet: textOffset === null ? null : index.snippetAt(textOffset),
-    };
-    this.anchorPath = this._currentPath;
+  /** Remove only the search highlight owned by this paginator. */
+  clearSearchHighlight(): void {
+    this.searchHighlightTarget = null;
+    clearSearchHighlight(this.contentDoc);
   }
 
-  /** Resolve a text Range to its current column after the chapter is laid out. */
-  private resolveTextAnchorCol(index: VisibleTextIndex, textOffset: number): number | null {
+  private clearSearchHighlightForDocument(): void {
+    this.searchHighlightTarget = null;
+    clearSearchHighlight(this.contentDoc);
+  }
+
+  private resolveTextRangeCol(index: VisibleTextIndex, start: number, end: number): number | null {
     const doc = this.contentDoc;
     const viewer = this.viewer;
     if (!doc || !viewer || this.step <= 0) return null;
-    const start = index.positionForOffset(textOffset);
-    const end = index.positionForOffset(Math.min(index.totalChars, textOffset + 1));
-    if (!start || !end) return null;
+    const range = index.rangeForOffsets(doc, start, end);
+    if (!range) return null;
     try {
-      const range = doc.createRange();
-      range.setStart(start.node, start.rawOffset);
-      range.setEnd(end.node, end.rawOffset);
-      const rect = Array.from(range.getClientRects()).find((candidate) => candidate.width > 0 || candidate.height > 0);
+      const rects = Array.from(range.getClientRects())
+        .filter((candidate) => candidate.width > 0 || candidate.height > 0);
+      const rect = rects[0];
       if (!rect) return null;
-      return Math.max(0, Math.floor((rect.left + viewer.scrollLeft) / this.step));
+      const physical = Math.max(0, Math.floor(this.contentX(rect.left) / this.step));
+      const col = columnToView(physical, this.leadingColumns, this.effectiveColumns);
+      return Number.isFinite(col) ? Math.max(0, col) : null;
     } catch {
       return null;
     }
   }
 
-  /** Text anchor wins; an invalid legacy index is invalid rather than clamped. */
-  private resolveAnchorCol(): ResolvedAnchorColumn | null {
-    const viewer = this.viewer;
-    if (!viewer || !this.anchor || this.step <= 0 || this.anchorPath !== this._currentPath) return null;
-    const index = this.textIndex;
-    if (this.anchor.textOffset !== null) {
-      if (index) {
-        const offset = resolveTextAnchorOffset(index, this.anchor);
-        if (offset !== null) {
-          const col = this.resolveTextAnchorCol(index, offset);
-          if (col !== null) {
-            this.anchor.textOffset = offset;
-            this.anchor.textSnippet = index.snippetAt(offset);
-            this.anchor.charsRead = offset;
-            this.anchor.totalChars = index.totalChars;
-            this.anchor.mediaUnits = index.mediaUnits;
-            return { col, source: "text" };
-          }
-        }
-      }
-      // A stale/ambiguous text anchor must not remain sticky after legacy
-      // fallback succeeds. It would otherwise keep preventing the upgrade.
-      this.anchor.textOffset = null;
-      this.anchor.textSnippet = null;
-      this.anchor.charsRead = 0;
-    }
-    const all = Array.from(viewer.querySelectorAll("*"));
-    if (!Number.isSafeInteger(this.anchor.index) || this.anchor.index < 0 || this.anchor.index >= all.length) return null;
-    const el = all[this.anchor.index] as HTMLElement;
-    const rect = el.getBoundingClientRect();
-    const absX = rect.left + viewer.scrollLeft + this.anchor.ratio * rect.width;
-    return { col: Math.max(0, Math.floor(absX / this.step)), source: "legacy" };
-  }
-
-  /** Commit a page without treating the center sample as a layout input. */
-  private commitWithinChapterPage(
-    page: number,
-    candidate: ReadingAnchor | null
+  private reportPreciseStatus(
+    request: PreciseNavigationRequest,
+    status: PreciseNavigationStatus,
+    exact: boolean
   ): void {
-    const viewer = this.viewer;
-    if (!viewer) return;
-    this.metrics.currentPage = page;
-    viewer.scrollLeft = page * this.step;
-    if (candidate) {
-      this.anchor = candidate;
-      this.anchorPath = this._currentPath;
-    } else {
-      this.anchor = null;
-      this.anchorPath = undefined;
-    }
-    // Commit the page before the read-only center observation. If caret is
-    // unavailable, preserve the successful text/legacy candidate.
-    const preserved = candidate ? { ...candidate } : null;
-    this.captureAnchor();
-    if (preserved && (!this.anchor || this.anchor.textOffset === null)) {
-      this.anchor = preserved;
-      this.anchorPath = this._currentPath;
-    }
-    this.emit({
-      status: "ready",
-      pageCount: this.metrics.pageCount,
-      currentPage: page,
-      empty: false,
-    });
+    this.onPreciseNavigationStatus?.({ requestId: request.requestId, status, exact });
   }
 
-  /** Read-only fragment preflight shared by the iframe click path and commit. */
+  /** Rebuild the same target ranges after a real reflow; never reuse old Ranges. */
+  private reapplySearchHighlight(): void {
+    const doc = this.contentDoc;
+    const index = this.textIndex;
+    if (!this.searchHighlightTarget) return;
+    if (!doc || !index) {
+      clearSearchHighlight(doc);
+      this.searchHighlightTarget = null;
+      return;
+    }
+    const resolved = resolveExactTextHits(index.codePoints, this.searchHighlightTarget.textHits);
+    if (!resolved) {
+      clearSearchHighlight(doc);
+      this.searchHighlightTarget = null;
+      return;
+    }
+    const ranges = this.dedupeHighlightRanges(resolved)
+      .map((range) => index.rangeForOffsets(doc, range.start, range.end))
+      .filter((range): range is Range => range !== null);
+    if (ranges.length === 0) {
+      clearSearchHighlight(doc);
+      this.searchHighlightTarget = null;
+      return;
+    }
+    const result = applySearchHighlight(doc, ranges);
+    if (result === "unsupported") {
+      clearSearchHighlight(doc);
+      this.searchHighlightTarget = null;
+    }
+  }
+
+  private dedupeHighlightRanges(ranges: readonly RawTextRange[]): RawTextRange[] {
+    const seen = new Set<string>();
+    const result: RawTextRange[] = [];
+    for (const range of ranges) {
+      if (range.end <= range.start) continue;
+      const key = `${range.start}:${range.end}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      result.push(range);
+    }
+    return result;
+  }
+
+  private buildHighlightRanges(
+    doc: Document,
+    index: VisibleTextIndex,
+    resolved: readonly RawTextRange[]
+  ): Range[] | null {
+    const ranges: Range[] = [];
+    for (const range of this.dedupeHighlightRanges(resolved)) {
+      const domRange = index.rangeForOffsets(doc, range.start, range.end);
+      if (!domRange) return null;
+      ranges.push(domRange);
+    }
+    return ranges.length > 0 ? ranges : null;
+  }
+
+  /** Resolve an immutable request anchor without borrowing the live page sample. */
+  private resolveReferenceAnchor(anchor: ReadingAnchor | null): ResolvedAnchorColumn | null {
+    if (!anchor || !this.contentDoc || !this.viewer || this.step <= 0) return null;
+    const previousAnchor = this.anchor;
+    const previousPath = this.anchorPath;
+    try {
+      this.anchor = { ...anchor };
+      this.anchorPath = this._currentPath;
+      const resolved = this.resolveAnchorCol();
+      if (!resolved || resolved.col < 0 || resolved.col >= this.metrics.pageCount) return null;
+      return resolved;
+    } catch {
+      return null;
+    } finally {
+      this.anchor = previousAnchor;
+      this.anchorPath = previousPath;
+    }
+  }
+
+  private candidateForRange(index: VisibleTextIndex, range: RawTextRange): ReadingAnchor {
+    return {
+      index: -1,
+      ratio: 0,
+      charsRead: range.start,
+      totalChars: index.totalChars,
+      mediaUnits: index.mediaUnits,
+      textOffset: range.start,
+      textSnippet: index.snippetAt(range.start),
+    };
+  }
+
+  /**
+   * Resolve and commit a same-chapter exact search target.  Ranges are built
+   * before any page/hash commit, so a partial Range failure cannot fake a
+   * successful navigation.
+   */
+  navigateToSearchTarget(request: PreciseNavigationRequest): PreciseNavigationStatus {
+    const viewer = this.viewer;
+    const index = this.textIndex;
+    const doc = this.contentDoc;
+    if (
+      this.disposed ||
+      !viewer ||
+      !doc ||
+      !index ||
+      !this._currentPath ||
+      (!this.scrollMode && this.step <= 0) ||
+      this.metrics.pageCount <= 0 ||
+      this.lastState.status !== "ready"
+    ) {
+      return "unresolved";
+    }
+    if (!request.textHits || request.textHits.length === 0) return "unresolved";
+    const resolved = resolveExactTextHits(index.codePoints, request.textHits);
+    if (!resolved) return "unresolved";
+    const first = resolved[0];
+    const ranges = this.buildHighlightRanges(doc, index, resolved);
+    if (!ranges) return "unresolved";
+    if (this.scrollMode) {
+      // 滚动模式没有屏号：命中位置直接由 Range 换算 scrollTop（与入口锚点同一口径）。
+      const target = index.rangeForOffsets(doc, first.start, first.end);
+      const inset = Math.round(Math.min(24, Math.max(0, viewer.clientHeight * 0.04)));
+      const resolvedTop = target ? this.resolveScrollTopForRange(target, inset) : null;
+      if (resolvedTop === null) return "unresolved";
+      this.closeFootnoteForNavigation();
+      this.clearSearchHighlightForDocument();
+      syncFragmentHash(this.iframe.contentWindow, "");
+      viewer.scrollTop = resolvedTop;
+      this.syncScrollMetrics(true);
+      const appliedInScroll = applySearchHighlight(doc, ranges);
+      if (appliedInScroll === "unsupported") {
+        this.clearSearchHighlightForDocument();
+        return "unsupported-highlight";
+      }
+      this.searchHighlightTarget = {
+        requestId: request.requestId,
+        textHits: request.textHits.map((hit) => ({ ...hit })),
+      };
+      return "located";
+    }
+    const page = this.resolveTextRangeCol(index, first.start, first.end);
+    if (page === null || !Number.isSafeInteger(page) || page < 0 || page >= this.metrics.pageCount) {
+      return "unresolved";
+    }
+    const candidate = this.candidateForRange(index, first);
+    syncFragmentHash(this.iframe.contentWindow, "");
+    this.commitWithinChapterPage(page, candidate);
+    const applied = applySearchHighlight(doc, ranges);
+    if (applied === "unsupported") {
+      this.clearSearchHighlightForDocument();
+      return "unsupported-highlight";
+    }
+    this.searchHighlightTarget = {
+      requestId: request.requestId,
+      textHits: request.textHits.map((hit) => ({ ...hit })),
+    };
+    return "located";
+  }
+
+  /** Resolve a cross-chapter exact target after measure/index, before reveal. */
+  private applyPendingPreciseNavigation(): PreciseNavigationStatus | null {
+    const pending = this.pendingPrecise;
+    if (!pending) return null;
+    this.pendingPrecise = null;
+    const { request, anchor } = pending;
+    const doc = this.contentDoc;
+    const index = this.textIndex;
+    if (!doc || !index || !this.viewer || (!this.scrollMode && this.step <= 0)) {
+      this.reportPreciseStatus(request, "unresolved", false);
+      return "unresolved";
+    }
+
+    let resolved: RawTextRange[] | null = null;
+    if (request.textHits && request.textHits.length > 0) {
+      resolved = resolveExactTextHits(index.codePoints, request.textHits);
+    }
+    // Resolve the original request anchor in a temporary slot.  The live
+    // this.anchor may already have been replaced by captureAnchor after a
+    // failed restore; that page-center sample must never prove success.
+    const reference = this.resolveReferenceAnchor(anchor);
+    const hasReference = reference !== null;
+
+    if (!resolved) {
+      if (request.kind === "note") {
+        const status: PreciseNavigationStatus = hasReference ? "located" : "unresolved";
+        this.reportPreciseStatus(request, status, false);
+        return status;
+      }
+      const status: PreciseNavigationStatus = hasReference ? "located-reference" : "unresolved";
+      this.reportPreciseStatus(request, status, false);
+      return status;
+    }
+
+    const first = resolved[0];
+    const ranges = this.buildHighlightRanges(doc, index, resolved);
+    if (this.scrollMode) {
+      const target = ranges ? index.rangeForOffsets(doc, first.start, first.end) : null;
+      const viewer = this.viewer;
+      const inset = viewer ? Math.round(Math.min(24, Math.max(0, viewer.clientHeight * 0.04))) : 0;
+      const resolvedTop = target && viewer ? this.resolveScrollTopForRange(target, inset) : null;
+      if (!ranges || resolvedTop === null || !viewer) {
+        const status: PreciseNavigationStatus = hasReference ? "located-reference" : "unresolved";
+        this.reportPreciseStatus(request, status, false);
+        return status;
+      }
+      this.closeFootnoteForNavigation();
+      this.clearSearchHighlightForDocument();
+      syncFragmentHash(this.iframe.contentWindow, "");
+      viewer.scrollTop = resolvedTop;
+      this.syncScrollMetrics(true);
+      const appliedInScroll = applySearchHighlight(doc, ranges);
+      if (appliedInScroll === "unsupported") {
+        this.clearSearchHighlightForDocument();
+        this.reportPreciseStatus(request, "unsupported-highlight", true);
+        return "unsupported-highlight";
+      }
+      this.searchHighlightTarget = {
+        requestId: request.requestId,
+        textHits: request.textHits?.map((hit) => ({ ...hit })) ?? [],
+      };
+      this.reportPreciseStatus(request, "located", true);
+      return "located";
+    }
+    const page = ranges ? this.resolveTextRangeCol(index, first.start, first.end) : null;
+    if (!ranges || page === null || !Number.isSafeInteger(page) || page < 0 || page >= this.metrics.pageCount) {
+      const status: PreciseNavigationStatus = hasReference ? "located-reference" : "unresolved";
+      this.reportPreciseStatus(request, status, false);
+      return status;
+    }
+
+    const candidate = this.candidateForRange(index, first);
+    syncFragmentHash(this.iframe.contentWindow, "");
+    this.commitWithinChapterPage(page, candidate);
+    const applied = applySearchHighlight(doc, ranges);
+    if (applied === "unsupported") {
+      this.clearSearchHighlightForDocument();
+      this.reportPreciseStatus(request, "unsupported-highlight", true);
+      return "unsupported-highlight";
+    }
+    this.searchHighlightTarget = {
+      requestId: request.requestId,
+      textHits: request.textHits?.map((hit) => ({ ...hit })) ?? [],
+    };
+    this.reportPreciseStatus(request, "located", true);
+    return "located";
+  }
+
   private getWithinChapterFragmentPage(fragmentValue: string): { hash: string; page: number } | null {
     const viewer = this.viewer;
     const doc = this.contentDoc;
-    if (!viewer || !doc || this.step <= 0 || this.lastState.status !== "ready") return null;
+    if (!viewer || !doc || this.lastState.status !== "ready") return null;
+    if (!this.scrollMode && this.step <= 0) return null;
     const encoded = fragmentValue.startsWith("#") ? fragmentValue.slice(1) : fragmentValue;
     if (encoded.length === 0) return { hash: "", page: 0 };
     const fragment = getFragmentNavigation(`#${encoded}`);
     if (!fragment) return null;
     const target = doc.getElementById(fragment.anchor);
     if (!target) return null;
+    if (this.scrollMode) {
+      // 滚动模式不产生屏号；命中存在即视为可导航，实际位置在提交时计算。
+      return { hash: fragment.hash, page: this.metrics.currentPage };
+    }
     const rect = (target as HTMLElement).getBoundingClientRect();
-    const page = Math.floor((rect.left + viewer.scrollLeft) / this.step);
+    const physical = Math.max(0, Math.floor(this.contentX(rect.left) / this.step));
+    const page = columnToView(physical, this.leadingColumns, this.effectiveColumns);
     if (!Number.isFinite(page) || page < 0 || page >= this.metrics.pageCount) return null;
     return { hash: fragment.hash, page };
   }
@@ -3640,31 +4682,79 @@ export class ChapterPaginator {
       return true;
     }
 
+    if (this.scrollMode) {
+      // 滚动模式：目录 fragment 与阅读锚点都走纵向 y，不经过列步长换算。
+      const inset = Math.round(Math.min(24, Math.max(0, viewer.clientHeight * 0.04)));
+      if (options.fragment !== undefined) {
+        const raw = String(options.fragment);
+        const encoded = raw.startsWith("#") ? raw.slice(1) : raw;
+        if (encoded.length === 0) {
+          syncFragmentHash(this.iframe.contentWindow, "");
+          viewer.scrollTop = 0;
+          this.syncScrollMetrics(false);
+          return true;
+        }
+        const fragment = getFragmentNavigation(`#${encoded}`);
+        const target = fragment ? doc.getElementById(fragment.anchor) : null;
+        if (!fragment || !target) return false;
+        syncFragmentHash(this.iframe.contentWindow, fragment.hash);
+        this.closeFootnoteForNavigation();
+        this.clearSearchHighlightForDocument();
+        this.scrollToElement(target, inset);
+        this.syncScrollMetrics(false);
+        return true;
+      }
+      if (options.toStart) {
+        syncFragmentHash(this.iframe.contentWindow, "");
+        this.closeFootnoteForNavigation();
+        this.clearSearchHighlightForDocument();
+        viewer.scrollTop = 0;
+        this.syncScrollMetrics(false);
+        return true;
+      }
+      const adapted = options.readingAnchor ? adaptNavigationAnchor(options.readingAnchor) : null;
+      if (!adapted) return false;
+      const index = this.textIndex ?? buildVisibleTextIndex(doc, viewer);
+      this.textIndex = index;
+      const offset = resolveTextAnchorOffset(index, adapted);
+      if (offset === null) return false;
+      const position = index.positionForOffset(offset);
+      if (!position) return false;
+      const range = doc.createRange();
+      try {
+        range.setStart(position.node, position.rawOffset);
+        range.setEnd(position.node, position.rawOffset);
+      } catch {
+        return false;
+      }
+      const scrollTop = this.resolveScrollTopForRange(range, inset);
+      if (scrollTop === null) return false;
+      syncFragmentHash(this.iframe.contentWindow, "");
+      this.closeFootnoteForNavigation();
+      this.clearSearchHighlightForDocument();
+      viewer.scrollTop = scrollTop;
+      this.anchor = {
+        ...adapted,
+        textOffset: offset,
+        textSnippet: index.snippetAt(offset),
+        charsRead: offset,
+        totalChars: index.totalChars,
+        mediaUnits: index.mediaUnits,
+      };
+      this.anchorPath = this._currentPath;
+      this.syncScrollMetrics(false);
+      return true;
+    }
+
     let fallback: number | null = null;
     if (options.fallbackPage !== undefined && options.fallbackPage !== null) {
       if (!Number.isSafeInteger(options.fallbackPage) || options.fallbackPage < 0) return false;
       fallback = Math.min(options.fallbackPage, this.metrics.pageCount - 1);
     }
 
-    let candidate: ReadingAnchor | null = null;
-    if (options.readingAnchor) {
-      const text = sanitizePersistedTextAnchor(options.readingAnchor);
-      candidate = {
-        index:
-          Number.isSafeInteger(options.readingAnchor.index) && options.readingAnchor.index >= 0
-            ? options.readingAnchor.index
-            : -1,
-        ratio:
-          Number.isFinite(options.readingAnchor.ratio) &&
-          options.readingAnchor.ratio >= 0 &&
-          options.readingAnchor.ratio <= 1
-            ? options.readingAnchor.ratio
-            : 0,
-        charsRead: text.textOffset ?? 0,
-        totalChars: 0,
-        textOffset: text.textOffset,
-        textSnippet: text.textSnippet,
-      };
+    const adapted = options.readingAnchor ? adaptNavigationAnchor(options.readingAnchor) : null;
+    if (adapted) {
+      const candidate: ReadingAnchor = { ...adapted };
       // Resolve on a temporary candidate. resolveAnchorCol may clear a stale
       // text anchor while attempting legacy fallback; the live anchor is not
       // touched until the result is known to be usable.
@@ -3674,7 +4764,7 @@ export class ChapterPaginator {
       let resolvedCandidate: ReadingAnchor | null = null;
       let resolveFailed = false;
       try {
-        this.anchor = { ...candidate };
+        this.anchor = candidate;
         this.anchorPath = this._currentPath;
         resolved = this.resolveAnchorCol();
         resolvedCandidate = this.anchor ? { ...this.anchor } : null;
@@ -3690,7 +4780,6 @@ export class ChapterPaginator {
         this.commitWithinChapterPage(resolved.col, resolvedCandidate);
         return true;
       }
-      candidate = null;
     }
     if (fallback === null) return false;
     syncFragmentHash(this.iframe.contentWindow, "");
@@ -3698,28 +4787,100 @@ export class ChapterPaginator {
     return true;
   }
 
-  /** 翻到第 i 页（自动夹紧）。 */
+  /**
+   * 滚动模式下的视口命令：向上/下移动约 0.9 个可用屏高。
+   * 返回是否发生真实移动（未移动说明已在章内边界）。
+   */
+  scrollByViewport(direction: 1 | -1): boolean {
+    if (!this.scrollMode || !this.viewer) return false;
+    const moved = scrollByViewportCommand(direction, this.scrollMetrics(), this.viewer.scrollTop);
+    if (moved.scrollTop === this.viewer.scrollTop) return false;
+    this.closeFootnoteForNavigation();
+    this.clearSearchHighlightForDocument();
+    this.viewer.scrollTop = moved.scrollTop;
+    this.syncScrollMetrics(true);
+    return true;
+  }
+
+  /** 滚动到本章顶部；UI 的“上一章（从底部进入）”入口用它准备位置。 */
+  scrollToStart(): void {
+    if (!this.scrollMode || !this.viewer) return;
+    this.closeFootnoteForNavigation();
+    this.clearSearchHighlightForDocument();
+    this.viewer.scrollTop = 0;
+    this.syncScrollMetrics(true);
+  }
+
+  /** 滚动到本章末尾；UI 的“下一章（从顶部进入）”入口用它准备位置。 */
+  scrollToEnd(): void {
+    if (!this.scrollMode || !this.viewer) return;
+    this.closeFootnoteForNavigation();
+    this.clearSearchHighlightForDocument();
+    this.viewer.scrollTop = scrollMaxTop(this.scrollMetrics());
+    this.syncScrollMetrics(true);
+  }
+
+  /** 滚动模式：按像素位移滚动正文（用于外层事件转发）。 */
+  scrollByDelta(deltaY: number): void {
+    if (!this.scrollMode || !this.viewer || deltaY === 0) return;
+    const metrics = this.scrollMetrics();
+    const maxTop = scrollMaxTop(metrics);
+    const newTop = Math.max(0, Math.min(maxTop, this.viewer.scrollTop + deltaY));
+    if (newTop !== this.viewer.scrollTop) {
+      this.viewer.scrollTop = newTop;
+      this.syncScrollMetrics(true);
+    }
+  }
+
+  /** 当前位置是否已在章内真实边界（不是虚拟屏号边界）。 */
+  atScrollBoundary(direction: 1 | -1): boolean {
+    if (!this.scrollMode || !this.viewer) return false;
+    return scrollByViewportCommand(direction, this.scrollMetrics(), this.viewer.scrollTop).atBoundary;
+  }
+
+  /** 翻到第 i 页（分页）；滚动模式的命令语义由 scrollByViewport 提供。 */
   setPage(i: number): void {
     if (!this.viewer) return;
     const { pageCount } = this.metrics;
     const target = Math.max(0, Math.min(pageCount - 1, Math.floor(i)));
-    this.viewer.scrollLeft = target * this.step;
+    if (this.scrollMode) {
+      this.scrollByViewport(target > this.metrics.currentPage ? 1 : -1);
+      return;
+    }
+    const targetScrollLeft = target * this.viewStepPx;
+    const actuallyMoved =
+      target !== this.metrics.currentPage ||
+      Math.abs(this.viewer.scrollLeft - targetScrollLeft) > 0.5;
+    if (!actuallyMoved) return;
+    this.closeFootnoteForNavigation();
+    this.clearSearchHighlightForDocument();
+    this.viewer.scrollLeft = targetScrollLeft;
     this.metrics.currentPage = target;
     // 空章判定只由 recompute 负责（此处标记 false，避免误触发自动跳章）
-    this.emit({ status: "ready", pageCount, currentPage: target, empty: false });
+    this.emit(this.readyState(false));
     this.captureAnchor();
   }
 
-  /** 跳到页内锚点（元素所在列）。 */
+  /** 跳到页内锚点（分页：元素所在屏；滚动：元素顶边）。 */
   jumpToAnchor(anchor: string): void {
     const doc = this.contentDoc;
     const viewer = this.viewer;
     if (!doc || !viewer) return;
     const el = doc.getElementById(anchor);
-    if (!el || this.step <= 0) return;
+    if (!el) return;
+    if (this.scrollMode) {
+      this.closeFootnoteForNavigation();
+      this.clearSearchHighlightForDocument();
+      this.scrollToElement(el, Math.round(Math.min(24, Math.max(0, viewer.clientHeight * 0.04))));
+      this.syncScrollMetrics(false);
+      return;
+    }
+    if (this.step <= 0) return;
+    this.closeFootnoteForNavigation();
+    this.clearSearchHighlightForDocument();
     const rect = el.getBoundingClientRect();
-    const x = rect.left + viewer.scrollLeft;
-    this.setPage(Math.floor(x / this.step));
+    const physical = Math.max(0, Math.floor(this.contentX(rect.left) / this.step));
+    this.setPage(columnToView(physical, this.leadingColumns, this.effectiveColumns));
   }
 
   /** 当前阅读锚点（供阅读记录持久化与内容进度推算）。 */
@@ -3764,30 +4925,34 @@ export class ChapterPaginator {
 
   /** 恢复阅读锚点（打开书时定位到上次阅读处）。 */
   setReadingAnchor(
-    a:
-      | ({ path: string; index: number; ratio: number; charsRead?: number; totalChars?: number } & Partial<TextAnchorData>)
-      | null
-      | undefined
-  ): void {
-    if (a && a.path) {
-      const text = sanitizePersistedTextAnchor(a);
-      this.anchor = {
-        index: Number.isSafeInteger(a.index) && a.index >= 0 ? a.index : -1,
-        ratio: Number.isFinite(a.ratio) && a.ratio >= 0 && a.ratio <= 1 ? a.ratio : 0,
-        charsRead: text.textOffset ?? 0,
-        totalChars:
-          typeof a.totalChars === "number" && Number.isSafeInteger(a.totalChars) && a.totalChars >= 0
-            ? a.totalChars
-            : 0,
-        mediaUnits: 0,
-        textOffset: text.textOffset,
-        textSnippet: text.textSnippet,
-      };
-      this.anchorPath = a.path;
-    } else {
+    path: string,
+    a: PersistedNavigationAnchor | ReadingAnchor | null | undefined
+  ): ReadingAnchor | null {
+    const persisted: PersistedNavigationAnchor | null = a
+      ? "anchorTextOffset" in a
+        ? a
+        : {
+            index: a.index,
+            ratio: a.ratio,
+            anchorTextOffset: a.textOffset,
+            anchorTextSnippet: a.textSnippet,
+          }
+      : null;
+    const adapted = adaptNavigationAnchor(persisted);
+    if (!adapted) {
       this.anchor = null;
       this.anchorPath = undefined;
+      return null;
     }
+    this.anchor = {
+      ...adapted,
+      totalChars:
+        a && "totalChars" in a && typeof a.totalChars === "number" && Number.isSafeInteger(a.totalChars) && a.totalChars >= 0
+          ? a.totalChars
+          : adapted.totalChars,
+    };
+    this.anchorPath = path;
+    return { ...this.anchor };
   }
 
   get pageCount(): number {
@@ -3808,18 +4973,29 @@ export class ChapterPaginator {
     return this._currentPath;
   }
 
-  /** 设置变更（字号/主题）后整体重载（保留阅读位置）。 */
+  /** 设置变更（字号/主题/阅读方式）后整体重载（保留阅读位置）。 */
   async reloadWithSettings(settings: ReaderSettings, anchor?: string): Promise<void> {
-    this.settings = settings;
     const path = this.currentPath;
-    if (!path) return;
-    // Capture once, synchronously, before any load/cleanup can detach the old
-    // document.  Pass a value copy so the new load never observes the mutable
-    // anchor object while an older reload is being torn down.
-    this.captureAnchor();
+    if (!path) {
+      this.settings = settings;
+      return;
+    }
+    // 切换阅读方式前必须按旧模式采样：分页采样列中心，滚动采样可见区域
+    // 上方固定点。先更新 settings 会让采样读到新模式坐标。
+    if (this.scrollMode) this.captureScrollAnchor();
+    else this.captureAnchor();
     const readingAnchor = this.anchor && this.anchorPath === path ? { ...this.anchor } : null;
     const fallbackPage = this.metrics.currentPage;
-    await this.load(path, { anchor, readingAnchor, fallbackPage });
+    this.settings = settings;
+    // Preserve the committed search-hit identity across the same-chapter
+    // settings rebuild.  Only values are copied; old DOM Ranges are never kept.
+    const preserveSearchHighlight = this.searchHighlightTarget
+      ? {
+          requestId: this.searchHighlightTarget.requestId,
+          textHits: this.searchHighlightTarget.textHits.map((hit) => ({ ...hit })),
+        }
+      : null;
+    await this.load(path, { anchor, readingAnchor, fallbackPage, preserveSearchHighlight });
   }
 
   private get currentPath(): string {
@@ -3849,6 +5025,10 @@ export class ChapterPaginator {
     ) {
       return;
     }
+    // A real resize can move the marker to another column/page.  Pinned
+    // footnotes are position-scoped; same-size ResizeObserver no-ops above
+    // must not close anything.
+    this.closeFootnoteForNavigation();
     const seq = ++this.reflowSeq;
     const loadSeq = this.loadSeq;
     void this.measure(loadSeq).then((measured) => {
@@ -3867,6 +5047,18 @@ export class ChapterPaginator {
       clearDocumentSelection(this.contentDoc);
       return;
     }
+    if (this.scrollMode) {
+      // 滚动模式：PageUp/PageDown/Space 走视口命令，方向键保留原生滚动。
+      const k = e.key;
+      if (k === "PageDown" || k === " ") {
+        e.preventDefault();
+        this.onKeyNavigate?.(1);
+      } else if (k === "PageUp") {
+        e.preventDefault();
+        this.onKeyNavigate?.(-1);
+      }
+      return;
+    }
     const k = e.key;
     if (k === "ArrowRight" || k === "PageDown" || k === " ") {
       e.preventDefault();
@@ -3877,8 +5069,95 @@ export class ChapterPaginator {
     }
   }
 
-  /** 滚轮翻页：累积 deltaY，超过阈值翻一页（触控板连续小增量也能工作）。 */
+  /** 滚轮翻页：分页模式累积翻页；滚动模式到章首/章末边界时累积切换上一章/下一章。 */
   private handleWheel(e: WheelEvent): void {
+    if (this.scrollMode) {
+      if (!this.viewer || e.deltaY === 0) return;
+      if (this.lastState.status === "loading" || this.lastState.status === "measuring") return;
+
+      const metrics = this.scrollMetrics();
+      const maxTop = scrollMaxTop(metrics);
+      const currentTop = this.viewer.scrollTop;
+
+      if (e.deltaY > 0) {
+        // 向下滚动：若尚未到底部（容差 2px），主动滚动正文并阻止默认行为。
+        // （必须由分页器主动滚动，避免跨章重建文档时 Chromium compositor 在途手势失效导致连续滚动停滞）
+        if (currentTop < maxTop - 2) {
+          this.scrollWheelAcc = 0;
+          this.scrollByDelta(e.deltaY);
+          e.preventDefault();
+          return;
+        }
+        if (!this.hasNextChapter) {
+          this.scrollWheelAcc = 0;
+          return;
+        }
+        // 已经在章末底部：检查是否处于反向保护期（刚从下一章回退到上一章时，向下回弹锁 800ms）
+        if (this.lockedReverseDir === 1 && Date.now() < this.reverseLockUntil) {
+          this.scrollWheelAcc = 0;
+          return;
+        }
+        // 同向连续换章微防抖（150ms）
+        if (Date.now() < this.sameDirThrottleUntil) {
+          this.scrollWheelAcc = 0;
+          return;
+        }
+        // 已经在章末底部：累积滚轮越界位移（阈值 400px 吸收连续手势与误触）
+        this.armScrollWheelReset();
+        this.scrollWheelAcc += e.deltaY;
+        if (this.scrollWheelAcc >= 400) {
+          this.scrollWheelAcc = 0;
+          this.lockedReverseDir = -1; // 进入下一章后，向上反向回弹锁 800ms
+          this.reverseLockUntil = Date.now() + 800;
+          this.sameDirThrottleUntil = Date.now() + 150;
+          if (this.scrollWheelResetTimer !== undefined) {
+            globalThis.clearTimeout(this.scrollWheelResetTimer);
+            this.scrollWheelResetTimer = undefined;
+          }
+          e.preventDefault();
+          this.onWheelNavigate?.(1);
+        }
+      } else {
+        // 向上滚动：若尚未到顶部（容差 2px），主动滚动正文并阻止默认行为。
+        if (currentTop > 2) {
+          this.scrollWheelAcc = 0;
+          this.scrollByDelta(e.deltaY);
+          e.preventDefault();
+          return;
+        }
+        if (!this.hasPrevChapter) {
+          this.scrollWheelAcc = 0;
+          return;
+        }
+        // 已经在章首顶部：检查是否处于反向保护期（刚从上一章前进到下一章时，向上回弹锁 800ms）
+        if (this.lockedReverseDir === -1 && Date.now() < this.reverseLockUntil) {
+          this.scrollWheelAcc = 0;
+          return;
+        }
+        // 同向连续换章微防抖（150ms）
+        if (Date.now() < this.sameDirThrottleUntil) {
+          this.scrollWheelAcc = 0;
+          return;
+        }
+        // 已经在章首顶部：累积滚轮越界位移（阈值 -400px 吸收连续手势与误触）
+        this.armScrollWheelReset();
+        this.scrollWheelAcc += e.deltaY;
+        if (this.scrollWheelAcc <= -400) {
+          this.scrollWheelAcc = 0;
+          this.lockedReverseDir = 1; // 进入上一章后，向下反向回弹锁 800ms
+          this.reverseLockUntil = Date.now() + 800;
+          this.sameDirThrottleUntil = Date.now() + 150;
+          if (this.scrollWheelResetTimer !== undefined) {
+            globalThis.clearTimeout(this.scrollWheelResetTimer);
+            this.scrollWheelResetTimer = undefined;
+          }
+          e.preventDefault();
+          this.onWheelNavigate?.(-1);
+        }
+      }
+      return;
+    }
+
     if (e.deltaY === 0) return;
     this.wheelAcc += e.deltaY;
     const threshold = 80;
@@ -3891,6 +5170,16 @@ export class ChapterPaginator {
       e.preventDefault();
       this.onWheelNavigate?.(-1);
     }
+  }
+
+  private armScrollWheelReset(): void {
+    if (this.scrollWheelResetTimer !== undefined) {
+      globalThis.clearTimeout(this.scrollWheelResetTimer);
+    }
+    this.scrollWheelResetTimer = globalThis.setTimeout(() => {
+      this.scrollWheelAcc = 0;
+      this.scrollWheelResetTimer = undefined;
+    }, 500) as unknown as number;
   }
 
   /** 书内链接点击处理：阻止 iframe 导航，路由到阅读器跳转。 */
@@ -3916,15 +5205,15 @@ export class ChapterPaginator {
       if (info) {
         // 点击 = 固定弹窗；再次点击同一标记 = 取消固定并关闭
         if (this.footnotePinned && this.lastFootnoteEl === a) {
-          this.footnotePinned = false;
-          this.footnoteHoverGate.reset();
-          this.onFootnoteClose?.();
+          this.resetFootnote({ notify: true });
           return;
         }
         this.showFootnote(a, info, true);
         return;
       }
     }
+    // 带链接的普通正文图片：优先打开图片浮层；“打开链接”沿用原书链接路由。
+    if (this.activateImage(a)) return;
     if (isFragmentOnly(href)) {
       // 脚注已在上方提前返回；这里只处理普通同章锚点。先通过原生 hash
       // 激活 :target，再由分页器将目标元素定位到对应分页列。
@@ -4005,20 +5294,61 @@ export class ChapterPaginator {
     this.footnoteHoverGate.markerLeave();
   }
 
-  /** 固定脚注后点击正文空白处关闭。 */
+  /** 固定脚注后点击正文空白处关闭；无链接正文图片在这里激活浮层。 */
   private handleDocClick = (e: Event): void => {
-    if (!this.footnotePinned) return;
-    const a = (e.target as Element | null)?.closest<HTMLAnchorElement>("a");
+    const target = e.target as Element | null;
+    const a = target?.closest<HTMLAnchorElement>("a");
     if (a && isFootnoteLink(a)) return; // 标记点击由 linkHandler 处理并 stopPropagation
-    this.footnotePinned = false;
-    this.footnoteHoverGate.reset();
-    this.onFootnoteClose?.();
+    // 带普通链接的图片已由 linkHandler 消费；这里只处理无链接的正文图片。
+    if (!a && this.activateImage(target)) return;
+    if (!this.footnotePinned) return;
+    this.resetFootnote({ notify: true });
   };
+
+  /**
+   * 正文图片激活：脚注语义优先（调用前已返回），带普通链接的图片也可放大。
+   * 识别交给 AI-A 的 imageActivation；这里只做活动章节路由与链接原值转发。
+   */
+  private activateImage(target: Element | null): boolean {
+    if (!this.contentDoc || !this.onImageActivation || this.disposed || !target) return false;
+    // 点击点可能落在包裹图片的链接/容器上；识别仍交给 A 的 img/image 判定。
+    const candidate = this.imageCandidate(target);
+    if (!candidate) return false;
+    const request = imageRequestFromTarget(candidate, this._currentPath);
+    if (!request) return false;
+    const linkHref = request.linkHref ?? "";
+    this.onImageActivation({
+      src: request.src,
+      alt: request.alt,
+      naturalWidth: request.naturalWidth,
+      naturalHeight: request.naturalHeight,
+      chapterPath: this._currentPath,
+      linkHref: linkHref || undefined,
+    });
+    return true;
+  }
+
+  /** 找到点击目标内可被 A 识别的图片节点，不向下遍历无关子树以免空白/段落误触发。 */
+  private imageCandidate(target: Element): Element | null {
+    const tag = (target.tagName ?? "").toLowerCase();
+    if (tag === "img" || tag === "image") return target;
+    if (tag === "svg") {
+      const imageChild = target.querySelector(":scope > image");
+      if (imageChild) return imageChild;
+    }
+    const innerImg = target.closest?.("img, image");
+    if (innerImg) return innerImg;
+    return null;
+  }
 
   /** UI 层主动关闭固定脚注后，同步分页器状态（避免 hover 被锁住）。 */
   dismissFootnote(): void {
-    this.footnotePinned = false;
-    this.footnoteHoverGate.reset();
+    this.resetFootnote({ notify: false });
+  }
+
+  /** 宿主导航/预载提升前关闭旧活动槽弹注；与用户主动关闭区分。 */
+  closeForNavigation(): void {
+    this.closeFootnoteForNavigation();
   }
 
   /** 宿主脚注卡片 hover 进入/离开时，同步 iframe 内 marker 的关闭 gate。 */
@@ -4029,8 +5359,10 @@ export class ChapterPaginator {
 
   /** 当前脚注标记在 iframe 内的视口矩形（弹层随重排重定位用）；无则 null。 */
   getFootnoteMarkerRect(): { left: number; top: number; right: number; bottom: number } | null {
-    if (!this.lastFootnoteEl || !this.lastFootnoteEl.isConnected) return null;
+    if (!(this.footnotePinned || this.footnoteHoverGate.isVisible())) return null;
+    if (!this.lastFootnoteEl || !this.contentDoc?.contains(this.lastFootnoteEl)) return null;
     const r = this.lastFootnoteEl.getBoundingClientRect();
+    if (![r.left, r.top, r.right, r.bottom].every(Number.isFinite)) return null;
     return { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
   }
 
@@ -4117,9 +5449,14 @@ export class ChapterPaginator {
 
   private cleanupDoc(): void {
     this.abortMeasureWaits();
-    this.lastFootnoteEl = null;
-    this.footnotePinned = false;
-    this.footnoteHoverGate.reset();
+    this.restoreBackdropCompatibility();
+    this.resetFootnote({ notify: true });
+    this.wheelAcc = 0;
+    this.scrollWheelAcc = 0;
+    if (this.scrollWheelResetTimer !== undefined) {
+      globalThis.clearTimeout(this.scrollWheelResetTimer);
+      this.scrollWheelResetTimer = undefined;
+    }
     this.selectionContextMenuOpen = false;
     this.selectionContextMenuHandler?.(null);
     this.restoreInlineBoxFixes();
@@ -4136,11 +5473,27 @@ export class ChapterPaginator {
     this.contentDoc?.removeEventListener("mouseout", this.footnoteHoverOutHandler, true);
     this.contentDoc?.removeEventListener("contextmenu", this.contextMenuHandler);
     this.contentDoc?.removeEventListener("selectionchange", this.selectionChangeHandler);
+    this.contentDoc?.removeEventListener("scroll", this.scrollHandler, true);
+    this.contentDoc?.removeEventListener("pointerdown", this.pointerDownHandler, true);
+    this.cancelScrollFrame();
+    this.restoreScrollView();
     this.clearNoteHighlights();
+    this.clearSearchHighlightForDocument();
+    this.pendingPrecise = null;
+    this.pendingRestoreAnchor = null;
     this.contentDoc = null;
     this.viewer = null;
     this.textIndex = null;
     this.pendingFallbackPage = null;
+    this.leadingColumns = 0;
+    this.effectiveColumns = 1;
+    this.scrollPageCount = 1;
+    this.lastScrollTop = 0;
+    this.scrollWheelAcc = 0;
+    if (this.scrollWheelResetTimer !== undefined) {
+      globalThis.clearTimeout(this.scrollWheelResetTimer);
+      this.scrollWheelResetTimer = undefined;
+    }
     this.chapterCssUrls.revokeAll();
     for (const owned of this.pendingCssUrls) owned.revokeAll();
     this.pendingCssUrls.clear();
@@ -4152,6 +5505,10 @@ export class ChapterPaginator {
 
   dispose(): void {
     this.disposed = true;
+    if (this.pendingPrecise) {
+      this.reportPreciseStatus(this.pendingPrecise.request, "cancelled", false);
+      this.pendingPrecise = null;
+    }
     this.loadSeq++;
     this.resolveDisplayReady?.(false);
     this.resolveDisplayReady = null;

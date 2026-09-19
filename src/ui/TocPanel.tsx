@@ -1,5 +1,7 @@
+import { useEffect, useRef } from "react";
 import type { TocNode } from "../core/types";
 import { splitHref } from "../core/paths";
+import { CloseIcon, WarningCircleIcon } from "./readerIcons";
 
 export interface TocPanelProps {
   toc: TocNode[];
@@ -45,42 +47,42 @@ function TocList({
   nodes,
   level,
   activeNode,
+  activeItemRef,
   onNavigate,
 }: {
   nodes: TocNode[];
   level: number;
   activeNode?: TocNode;
+  activeItemRef?: React.RefObject<HTMLDivElement | null>;
   onNavigate(href: string): void;
 }) {
   return (
-    <div>
+    <div className="toc-list-branch">
       {nodes.map((node, i) => {
         const active = node === activeNode;
         const disabled = node.disabled === true;
         return (
           <div key={`${level}-${i}-${node.label}`}>
             <div
-              className={`toc-item level-${Math.min(level, 2)}${disabled ? " disabled" : ""}`}
+              ref={active ? (activeItemRef as React.Ref<HTMLDivElement>) : undefined}
+              className={`toc-item level-${Math.min(level, 3)}${active ? " active" : ""}${disabled ? " disabled" : ""}`}
               style={{
-                paddingLeft: `${8 + level * 14}px`,
-                background: active ? "var(--accent)" : undefined,
-                color: active ? "#fff" : disabled ? "var(--muted)" : undefined,
-                opacity: disabled ? 0.6 : undefined,
-                cursor: disabled ? "not-allowed" : undefined,
+                paddingLeft: `${12 + level * 16}px`,
               }}
               title={disabled ? `无法使用：${node.href || "无有效链接"}` : node.label}
               onClick={() => {
                 if (!disabled) onNavigate(node.href);
               }}
             >
-              {node.label || "(无标题)"}
-              {disabled ? " ⚠" : ""}
+              <span className="toc-item-text">{node.label || "(无标题)"}</span>
+              {disabled ? <WarningCircleIcon size={13} className="toc-disabled-icon" /> : null}
             </div>
             {node.children.length > 0 ? (
               <TocList
                 nodes={node.children}
                 level={level + 1}
                 activeNode={activeNode}
+                activeItemRef={activeItemRef}
                 onNavigate={onNavigate}
               />
             ) : null}
@@ -94,27 +96,41 @@ function TocList({
 export function TocPanel(props: TocPanelProps) {
   const activeNode = findActiveTocNode(props.toc, props.activeHref);
   const count = countTocNodes(props.toc);
+  const activeItemRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (activeItemRef.current) {
+      activeItemRef.current.scrollIntoView({ block: "center", behavior: "auto" });
+    }
+  }, [activeNode]);
+
   return (
-    <div className="toc-panel">
+    <aside className="toc-panel" role="dialog" aria-modal="true" aria-label="目录">
+      <div className="drawer-drag-handle" aria-hidden="true" />
       <div className="toc-head">
-        <span className="toc-title">目录</span>
-        <span className="toc-count">
-          {count > 0 ? `${count} 项` : "无"}
-        </span>
-        <button className="tb-btn" onClick={props.onClose} title="关闭目录">
-          ✕
+        <div className="drawer-title-wrap">
+          <span className="toc-title">目录</span>
+          <span className="toc-count">
+            {count > 0 ? `${count} 项` : "无"}
+          </span>
+        </div>
+        <button className="tb-btn tb-close" onClick={props.onClose} title="关闭目录" aria-label="关闭目录">
+          <CloseIcon size={14} />
         </button>
       </div>
       {props.toc.length === 0 ? (
         <div className="toc-empty">（本书无目录）</div>
       ) : (
-        <TocList
-          nodes={props.toc}
-          level={0}
-          activeNode={activeNode}
-          onNavigate={props.onNavigate}
-        />
+        <div className="toc-content">
+          <TocList
+            nodes={props.toc}
+            level={0}
+            activeNode={activeNode}
+            activeItemRef={activeItemRef}
+            onNavigate={props.onNavigate}
+          />
+        </div>
       )}
-    </div>
+    </aside>
   );
 }

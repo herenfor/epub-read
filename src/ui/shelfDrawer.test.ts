@@ -34,4 +34,37 @@ describe("书架抽屉布局契约", () => {
     );
     expect(styles).toMatch(/\.shelf-drawer-search-icon svg\s*\{[^}]*display:\s*block;[^}]*width:\s*18px;[^}]*height:\s*18px;[^}]*stroke:\s*currentColor;/s);
   });
+
+  it("抽屉搜索支持自闭环即时结果直达与无障碍触控尺寸契约", async () => {
+    // @ts-expect-error The production project intentionally omits @types/node.
+    const source = await (await import("node:fs/promises")).readFile(new URL("./ShelfView.tsx", import.meta.url), "utf8");
+    expect(source).toContain("shelf-drawer-live-results");
+    expect(source).toContain("shelf-drawer-result-item");
+    expect(source).toContain("onOpenBook");
+    expect(source).toContain("onSearchKeyDown");
+
+    const styles = await readStyles();
+    expect(styles).toMatch(/\.shelf-drawer-result-item\s*\{[^}]*min-height:\s*48px;/s);
+    expect(styles).toMatch(/\.shelf-drawer-live-results\s*\{[^}]*animation:\s*shelf-fade-in/s);
+  });
+
+  it("正文索引管理卡片采用书架统一微光规范与并发微调选择器契约", async () => {
+    const styles = await readStyles();
+    expect(styles).toMatch(/\.search-concurrency-select-wrap\s*\{/s);
+    expect(styles).toMatch(/\.search-index-stepper\s*\{[^}]*height:\s*32px;/s);
+    expect(styles).toMatch(/\.search-index-card\s*\{[^}]*border-radius:\s*12px;/s);
+    expect(styles).toMatch(/\.search-index-card-actions button\s*\{[^}]*height:\s*32px;/s);
+  });
+
+  it("冒烟测试：验证防连击锁与防重入守卫代码契约存在", async () => {
+    // @ts-expect-error The production project intentionally omits @types/node.
+    const shelfSource = await (await import("node:fs/promises")).readFile(new URL("./ShelfView.tsx", import.meta.url), "utf8");
+    expect(shelfSource).toContain("openingBookRef");
+    expect(shelfSource).toContain("indexActionBusy");
+
+    // @ts-expect-error The production project intentionally omits @types/node.
+    const searchSource = await (await import("node:fs/promises")).readFile(new URL("./SearchPanel.tsx", import.meta.url), "utf8");
+    expect(searchSource).toContain("startDebounce");
+    expect(searchSource).toContain("search-concurrency-select-wrap");
+  });
 });

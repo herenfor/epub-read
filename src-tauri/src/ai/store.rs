@@ -26,7 +26,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub(crate) const SCHEMA_VERSION: u32 = 6;
 #[cfg(not(feature = "ai"))]
 pub(crate) const SCHEMA_VERSION: u32 = 3;
-const MAX_SUPPORTED_SCHEMA_VERSION: u32 = 6;
+pub(crate) const MAX_SUPPORTED_SCHEMA_VERSION: u32 = 6;
 const ROOT_NAME: &str = "ai";
 const DATABASE_NAME: &str = "ai.sqlite3";
 const CHUNK_FTS_SCHEMA: &str = "CREATE VIRTUAL TABLE chunk_fts USING fts5(
@@ -73,6 +73,9 @@ impl AiStore {
         connection
             .pragma_update(None, "foreign_keys", true)
             .map_err(|error| format!("启用 AI SQLite 外键约束失败：{error}"))?;
+        connection
+            .busy_timeout(std::time::Duration::from_millis(5000))
+            .map_err(|error| format!("设置 SQLite 等待上限失败：{error}"))?;
         migrate(&connection)?;
         let store = Self {
             root,
@@ -152,6 +155,20 @@ impl AiStore {
             let changed = previous
                 .as_deref()
                 .is_none_or(|old| normalize_model_root(old) != normalize_model_root(path));
+            // Nonblocking inside the transaction: a worker holding a file
+            // guard may need this DB mutex to finish. Never wait here.
+            let active: bool = transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM model_download_tasks WHERE state IN ('queued','downloading','verifying'))",
+                [], |row| row.get(0),
+            ).map_err(|e| format!("读取模型活动任务失败：{e}"))?;
+            if changed && active { return Err("模型下载任务进行中，暂时不能更改模型库目录".into()); }
+            let new_root = Path::new(path);
+            let _new_guard = if new_root.is_dir() { Some(super::model_locks::ModelLock::root(new_root)?) } else { None };
+            let old_root = previous.as_deref().map(Path::new).filter(|p| p.is_dir());
+            let _old_guard = match old_root {
+                Some(old) if old.canonicalize().ok() != new_root.canonicalize().ok() => Some(super::model_locks::ModelLock::root(old)?),
+                _ => None,
+            };
             transaction
                 .execute(
                     "INSERT INTO model_library_config (id, root_path, updated_at_ms)
@@ -577,6 +594,18 @@ impl AiStore {
                 .optional()
                 .map_err(|error| format!("读取模型库目录失败：{error}"))?
                 .map(PathBuf::from);
+            let _asset_guard = match root.as_deref() {
+                Some(root)
+                    if root.is_dir() && (storage_kind == "managed" || !task_ids.is_empty()) =>
+                {
+                    Some(super::model_locks::ModelLock::assets(
+                        root,
+                        &package_dir,
+                        package_id,
+                    )?)
+                }
+                _ => None,
+            };
             if !task_ids.is_empty() {
                 let root = root
                     .as_deref()
@@ -712,7 +741,7 @@ impl AiStore {
             let id = if let Some(id) = active {
                 id
             } else {
-                let id = format!("model_{:x}_{}", now_ms(), JOB_SEQUENCE.fetch_add(1, Ordering::Relaxed));
+                let id = format!("model_{:x}_{}_{}", now_ms(), std::process::id(), JOB_SEQUENCE.fetch_add(1, Ordering::Relaxed));
                 let now = now_ms() as i64;
                 transaction
                     .execute(
@@ -1200,6 +1229,10 @@ impl AiStore {
                     &format!("DELETE FROM {table} WHERE content_hash IN (SELECT content_hash FROM reader_delete_books)"), [],
                 ).map_err(|error| format!("删除书籍派生数据 {table} 失败：{error}"))?;
             }
+            for table in ["rag_prep_staging", "rag_prep_jobs", "rag_prep_chunks", "rag_prep_indexes"] {
+                let exists: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)", [table], |r| r.get(0)).map_err(|e| e.to_string())?;
+                if exists { transaction.execute(&format!("DELETE FROM {table} WHERE book IN (SELECT content_hash FROM reader_delete_books)"), []).map_err(|e| e.to_string())?; }
+            }
             transaction.execute_batch("DROP TABLE reader_delete_books;")
                 .map_err(|error| format!("清理书籍临时集合失败：{error}"))?;
             transaction.commit().map_err(|error| format!("提交书籍清理事务失败：{error}"))
@@ -1235,6 +1268,25 @@ impl AiStore {
                 transaction
                     .execute(&format!("DELETE FROM {table}"), [])
                     .map_err(|error| format!("清理 AI {table} 失败：{error}"))?;
+            }
+            for table in [
+                "rag_prep_staging",
+                "rag_prep_jobs",
+                "rag_prep_chunks",
+                "rag_prep_indexes",
+            ] {
+                let exists: bool = transaction
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
+                        [table],
+                        |r| r.get(0),
+                    )
+                    .map_err(|e| e.to_string())?;
+                if exists {
+                    transaction
+                        .execute(&format!("DELETE FROM {table}"), [])
+                        .map_err(|e| e.to_string())?;
+                }
             }
             transaction
                 .commit()
@@ -1894,7 +1946,7 @@ impl AiStore {
         })
     }
 
-    fn with_connection<T>(
+    pub(super) fn with_connection<T>(
         &self,
         operation: impl FnOnce(&mut Connection) -> Result<T, String>,
     ) -> Result<T, String> {
@@ -3665,6 +3717,37 @@ mod tests {
         assert_eq!(linked.storage_kind, "linked");
         drop(store);
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn core_compatible_cleanup_handles_optional_mock_tables_without_initializing_them() {
+        let (store, root) = test_store();
+        store.with_connection(|c| {
+            c.execute_batch("CREATE TABLE rag_prep_staging(book TEXT); CREATE TABLE rag_prep_jobs(book TEXT);
+                CREATE TABLE rag_prep_chunks(book TEXT); CREATE TABLE rag_prep_indexes(book TEXT);").map_err(|e|e.to_string())?;
+            for table in ["rag_prep_staging","rag_prep_jobs","rag_prep_chunks","rag_prep_indexes"] {
+                c.execute(&format!("INSERT INTO {table} VALUES (?1)"), ["a".repeat(64)]).map_err(|e|e.to_string())?;
+                c.execute(&format!("INSERT INTO {table} VALUES (?1)"), ["b".repeat(64)]).map_err(|e|e.to_string())?;
+            }
+            Ok(())
+        }).unwrap();
+        store.delete_book_derived_data(&"a".repeat(64)).unwrap();
+        store
+            .with_connection(|c| {
+                for table in [
+                    "rag_prep_staging",
+                    "rag_prep_jobs",
+                    "rag_prep_chunks",
+                    "rag_prep_indexes",
+                ] {
+                    assert_eq!(count(c, table)?, 1);
+                }
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(store.status().unwrap().schema_version, SCHEMA_VERSION);
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

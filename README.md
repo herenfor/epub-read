@@ -6,6 +6,14 @@ EPUB Reader opens EPUB 2.0.1 and EPUB 3.x books as their authors designed them: 
 
 **Languages:** English | [中文](README.zh.md)
 
+## Highlights
+
+- **Read the way you prefer** — turn pages or scroll continuously through the current chapter, and switch between the two at any time without losing your place
+- **Page layout you control** — four-sided margins, one or two columns per screen and the column gap, adjustable without leaving the page
+- **Illustrations at full size** — click an image in the text to open it in an overlay, then zoom, pan or view it at its original size; closing returns you exactly where you were
+- **Faithful to the book** — percentages, asymmetric margins, floats, full-page illustrations and inline footnote markers keep their intended proportions
+- **Local by design** — no account and no upload; books are read from where they already are
+
 ## Features
 
 ### Library
@@ -21,10 +29,13 @@ EPUB Reader opens EPUB 2.0.1 and EPUB 3.x books as their authors designed them: 
 ### Reading
 
 - EPUB 2 and EPUB 3 support with table-of-contents navigation
-- Paginated reading with a remembered position, restored by content anchor after font or window changes
+- Page turning or per-chapter scrolling, chosen per book and remembered
+- Page options: four-sided margins, one or two columns per screen, and the column gap
+- Illustrations open in an overlay with zoom, pan, fit-to-window and original-size views
 - Footnotes in an overlay: hover to preview, click to pin and scroll
 - Themes — light, dark and parchment — shared between the library and the reader
 - Typography controls: font size, font weight, line height, letter and word spacing
+- Reading position is remembered by content anchor, so font, window and layout changes return you to the same passage
 - Search inside the current book, or across the whole library
 - Select text to copy it or attach a note; notes can be edited, deleted and jumped back from
 - Fixed-layout (pre-paginated) books render as full pages

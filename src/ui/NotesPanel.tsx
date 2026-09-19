@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { CloseIcon } from "./readerIcons";
 
 export interface NoteViewModel {
   id: string;
@@ -50,7 +51,16 @@ export function NotesPanel(props: NotesPanelProps) {
     <>
       <div className="notes-backdrop" aria-hidden="true" onClick={props.onClose} />
       <aside className="notes-panel" role="dialog" aria-modal="true" aria-label="笔记">
-        <div className="notes-head"><span>笔记</span><span className="notes-count">{props.notes.length}</span><button type="button" className="tb-btn" onClick={props.onClose} aria-label="关闭笔记">✕</button></div>
+        <div className="drawer-drag-handle" aria-hidden="true" />
+        <div className="notes-head">
+          <div className="drawer-title-wrap">
+            <span>笔记</span>
+            <span className="notes-count">{props.notes.length} 条</span>
+          </div>
+          <button type="button" className="tb-btn tb-close" onClick={props.onClose} aria-label="关闭笔记" title="关闭笔记">
+            <CloseIcon size={14} />
+          </button>
+        </div>
         {rendered.items.length === 0 ? <div className="notes-empty">本书还没有笔记</div> : (
           <div className="notes-list" role="list" aria-label="笔记列表">
             {rendered.items.map((note) => (

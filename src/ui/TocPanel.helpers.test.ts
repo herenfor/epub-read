@@ -33,4 +33,25 @@ describe("TocPanel helpers", () => {
     expect(findActiveTocNode([root], "OEBPS/ch.xhtml#unknown")).toBe(root);
     expect(findActiveTocNode([root], "OEBPS/ch.xhtml")).toBe(root);
   });
+
+  it("支持在同章节多个子小节锚点之间连续切换高亮选中项", () => {
+    // 模拟《ePub指南》第2.1节的真实结构：主章节与多个同文件不同 fragment 的子节
+    const sec21_9 = item("2.1.9 代码排版", "OEBPS/Text/Chapter2-1.xhtml#html_block_code");
+    const sec21_10 = item("2.1.10 预格式文本", "OEBPS/Text/Chapter2-1.xhtml#html_block_pre");
+    const sec21_11 = item("2.1.11 引用内容", "OEBPS/Text/Chapter2-1.xhtml#html_block_next");
+    const chap21 = item("2.1 基本排版元素", "OEBPS/Text/Chapter2-1.xhtml", [
+      sec21_9,
+      sec21_10,
+      sec21_11,
+    ]);
+
+    // 1. 点击 2.1.10
+    expect(findActiveTocNode([chap21], "OEBPS/Text/Chapter2-1.xhtml#html_block_pre")?.label).toBe("2.1.10 预格式文本");
+
+    // 2. 连续点击 2.1.11：高亮必须精确跟随移动到 2.1.11，不能停留在 2.1.10
+    expect(findActiveTocNode([chap21], "OEBPS/Text/Chapter2-1.xhtml#html_block_next")?.label).toBe("2.1.11 引用内容");
+
+    // 3. 点击回主章 2.1：高亮移回主章节
+    expect(findActiveTocNode([chap21], "OEBPS/Text/Chapter2-1.xhtml")?.label).toBe("2.1 基本排版元素");
+  });
 });

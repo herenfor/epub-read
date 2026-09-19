@@ -1,5 +1,9 @@
 /** 阅读器设置（渲染相关）。 */
 
+import type { PageMarginsPx, ReadingMode } from "./pageLayout";
+
+export type { PageMarginsPx, ReadingMode };
+
 export type Theme = "light" | "dark" | "sepia";
 
 export interface ReaderSettings {
@@ -17,8 +21,14 @@ export interface ReaderSettings {
   customFonts?: Array<{ family: string; url: string }>;
   /** 用户自定义 CSS（高级设置内输入，注入在阅读器覆盖样式之后，允许覆盖） */
   customCss?: string;
-  /** 分栏间距 px */
+  /** 列间距 px（页面选项里的“额外边距”） */
   gapPx: number;
+  /** 阅读方式；undefined = 分页 */
+  readingMode?: ReadingMode;
+  /** 阅读器视口四边留白；未设置的边沿用旧默认 */
+  pageMarginsPx?: PageMarginsPx;
+  /** 一屏显示的列数；undefined = 1 */
+  columnsPerView?: 1 | 2;
   /** 行高倍率；undefined = 跟随书 */
   lineHeight?: number;
   /** 字重 400/500/700；undefined = 跟随书 */
@@ -38,6 +48,8 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
   theme: "light",
   fontFamily: undefined,
   gapPx: 24,
+  readingMode: "paginated",
+  columnsPerView: 1,
   forceHorizontal: false,
   preloadNextChapter: false,
 };
