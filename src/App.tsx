@@ -2850,6 +2850,10 @@ export default function App() {
       <TitleBar
         view={view}
         title={view === "reader" ? (ready ? book!.metadata.title : (book?.metadata.title ?? "")) : "EPUB 阅读器"}
+        onBackToShelf={view === "reader" ? handleBackToShelf : undefined}
+        isBookmarked={view === "reader" && isCurrentPageBookmarked}
+        onToggleBookmark={view === "reader" ? handleToggleBookmark : undefined}
+        onOpenBookmarks={view === "reader" ? () => openPanel("bookmarks") : undefined}
       />
       {view === "reader" && <Toolbar
         title={ready ? book!.metadata.title : (book?.metadata.title ?? "")}

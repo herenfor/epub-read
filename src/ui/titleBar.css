@@ -9,27 +9,20 @@
   -webkit-user-select: none;
   box-sizing: border-box;
   flex-shrink: 0;
-}
-
-/* 书架视图：顶栏作为流式顶部导航行，背景透明融入书架 */
-.titlebar-shelf {
   position: relative;
-  background: transparent;
-  padding: 0 0 0 16px;
+  background: var(--bg);
   color: var(--fg);
-  border-bottom: 1px solid transparent;
+  border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 40%, transparent);
 }
 
-/* 阅读器视图：顶栏绝对定位通顶悬浮，不挤占正文高度 */
+/* 书架视图：流式顶部导航行，与主题背景色一致 */
+.titlebar-shelf {
+  padding: 0 0 0 16px;
+}
+
+/* 阅读器视图：实心主题背景一体化顶栏（参考书架界面），全域拖拽 */
 .titlebar-reader {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 44;
-  background: transparent;
-  pointer-events: none;
-  color: var(--fg);
+  padding: 0 0 0 10px;
 }
 
 /* 拖拽区域 */
@@ -42,17 +35,79 @@
   pointer-events: auto;
 }
 
-.titlebar-reader .titlebar-drag-area {
-  height: 28px;
-  pointer-events: none;
-}
-
 .titlebar-app-title {
   font-size: 12px;
   font-weight: 500;
   color: var(--muted);
   letter-spacing: 0.3px;
   opacity: 0.85;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.titlebar-book-title {
+  max-width: min(420px, calc(100vw - 320px));
+}
+
+/* 阅读器返回书架按键 */
+.titlebar-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px 0 6px;
+  margin-right: 10px;
+  border-radius: 12px;
+  border: none;
+  background: color-mix(in srgb, var(--btn-tint) 70%, transparent);
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  pointer-events: auto;
+  flex-shrink: 0;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.titlebar-back-btn:hover {
+  background: var(--btn-tint-hover);
+}
+
+/* 动作操作区（书签等） */
+.titlebar-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-right: 6px;
+  pointer-events: auto;
+  flex-shrink: 0;
+}
+
+.titlebar-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 14px;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  pointer-events: auto;
+  opacity: 0.75;
+  transition: background-color 140ms ease, opacity 140ms ease;
+}
+
+.titlebar-action-btn:hover {
+  opacity: 1;
+  background: var(--btn-tint-hover);
+}
+
+.titlebar-bookmark-btn.active {
+  opacity: 1;
+  color: #f43f5e;
 }
 
 /* 窗口三联按键容器 */
@@ -62,6 +117,7 @@
   height: 100%;
   pointer-events: auto;
   margin-left: auto;
+  flex-shrink: 0;
 }
 
 /* 独立控制按键 */
@@ -85,11 +141,13 @@
   pointer-events: none;
 }
 
-.titlebar-reader .titlebar-btn {
-  opacity: 0.6;
+.titlebar-reader .titlebar-btn,
+.titlebar-shelf .titlebar-btn {
+  opacity: 0.75;
 }
 
-.titlebar-reader .titlebar-btn:hover {
+.titlebar-reader .titlebar-btn:hover,
+.titlebar-shelf .titlebar-btn:hover {
   opacity: 1;
 }
 

@@ -2175,9 +2175,6 @@ describe("measure viewport height locking", () => {
 describe("applyBookMargins C-53 toolbar centering", () => {
   it("原书顶层 toolbar 的左右 0 在补偿后回到当前栏版心，嵌套 toolbar 不重复缩进", () => {
     const toolbarStyle = {
-      marginLeft: "",
-      marginRight: "",
-      margin: "",
       _styles: {} as Record<string, { value: string; priority: string }>,
       setProperty(prop: string, val: string, pri = "") {
         this._styles[prop] = { value: val, priority: pri };

@@ -31,28 +31,32 @@ describe("CSD TitleBar 组件与样式契约", () => {
       expect(htmlShelf).toContain("titlebar-close");
       expect(htmlShelf).toContain("data-tauri-drag-region");
 
-      const htmlReader = renderToStaticMarkup(createElement(TitleBar, { view: "reader", title: "Moby-Dick" }));
+      const htmlReader = renderToStaticMarkup(createElement(TitleBar, {
+        view: "reader",
+        title: "Moby-Dick",
+        onBackToShelf: () => {},
+        onToggleBookmark: () => {},
+      }));
       expect(htmlReader).toContain("titlebar-reader");
       expect(htmlReader).toContain("titlebar-controls");
       expect(htmlReader).toContain("titlebar-close");
-      // 阅读器视图不渲染 data-tauri-drag-region，防止 Tauri/WebView2 在系统层面拦截鼠标悬停与顶部感应
-      expect(htmlReader).not.toContain("data-tauri-drag-region");
+      expect(htmlReader).toContain("Moby-Dick");
+      expect(htmlReader).toContain("titlebar-back-btn");
+      expect(htmlReader).toContain("titlebar-bookmark-btn");
+      expect(htmlReader).toContain("data-tauri-drag-region");
     } finally {
       vi.unstubAllGlobals();
     }
   });
 
-  it("CSS 样式满足无边框沉浸契约与 Windows 关闭按钮规范", async () => {
+  it("CSS 样式满足实心主题色与 Windows 关闭按钮规范", async () => {
     const css = await readTitleBarStyles();
     // 基础高度 36px
     expect(css).toMatch(/\.titlebar\s*\{[^}]*height:\s*36px;/s);
-    // 书架视图透明融入
-    expect(css).toMatch(/\.titlebar-shelf\s*\{[^}]*background:\s*transparent;/s);
-    // 阅读器视图通顶浮层与事件穿透
-    expect(css).toMatch(/\.titlebar-reader\s*\{[^}]*position:\s*fixed;[^}]*pointer-events:\s*none;/s);
-    // 阅读器视图拖拽区必须完全穿透，避免遮挡顶部工具栏感应区
-    expect(css).toMatch(/\.titlebar-reader \.titlebar-drag-area\s*\{[^}]*pointer-events:\s*none;/s);
-    // 控制键恢复交互
+    // 主题色背景融入（非透明浮层）
+    expect(css).toMatch(/\.titlebar\s*\{[^}]*background:\s*var\(--bg\);/s);
+    // 拖拽区与控制键恢复交互
+    expect(css).toMatch(/\.titlebar-drag-area\s*\{[^}]*pointer-events:\s*auto;/s);
     expect(css).toMatch(/\.titlebar-controls\s*\{[^}]*pointer-events:\s*auto;/s);
     // 关闭按钮 hover 规范暗红与纯白文字
     expect(css).toMatch(/\.titlebar-close:hover\s*\{[^}]*background:\s*#c42b1c/s);

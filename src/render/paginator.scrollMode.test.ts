@@ -327,42 +327,128 @@ describe("scroll mode commands", () => {
     expect(viewer.scrollTop).toBe(0); // 夹紧在 0
   });
 
-  it("delegates to native smooth scrollTo when available", () => {
+  it("scrolls viewer scrollTop crisply and immediately on delta", () => {
     const { context, viewer } = scrollContext({ height: 600, content: 5000 });
-    const scrollTo = vi.fn();
-    (viewer as Record<string, unknown>).scrollTo = scrollTo;
-
     viewer.scrollTop = 200;
     internals.scrollByDelta.call(context, 120);
-    expect(scrollTo).toHaveBeenCalledWith({ top: 320, behavior: "smooth" });
+    expect(viewer.scrollTop).toBe(320);
 
     internals.scrollByViewport.call(context, 1);
-    expect(scrollTo).toHaveBeenCalledWith({ top: 860, behavior: "smooth" });
+    expect(viewer.scrollTop).toBe(860);
   });
 
-  it("accumulates wheel target across rapid successive inputs without losing displacement", () => {
+  it("handles successive wheel inputs crisply without floating delay", () => {
     const { context, viewer } = scrollContext({ height: 600, content: 5000 });
     viewer.scrollTop = 100;
-    // 第一次输入：从 100 加 120 -> 目标 220
+    // 第一次输入：从 100 加 120 -> 立即干脆到位 220
     internals.scrollByDelta.call(context, 120);
-    expect(context.pendingWheelTarget).toBe(220);
+    expect(viewer.scrollTop).toBe(220);
 
-    // 第二次输入：浏览器尚在平滑动画中途（视口仅到达 130）
-    viewer.scrollTop = 130;
+    // 第二次连续输入：立即干脆到位 340
     internals.scrollByDelta.call(context, 120);
-    // 关键断言：目标必须基于 pendingWheelTarget(220) 累加至 340，绝不以 130 重启丢失位移！
-    expect(context.pendingWheelTarget).toBe(340);
+    expect(viewer.scrollTop).toBe(340);
 
-    // 第三次输入：视口仅到达 150
-    viewer.scrollTop = 150;
+    // 第三次连续输入：立即干脆到位 460
     internals.scrollByDelta.call(context, 120);
-    expect(context.pendingWheelTarget).toBe(460);
+    expect(viewer.scrollTop).toBe(460);
 
-    // 第四次输入：动画中途（视口仅到 200），用户紧急反向向上拨动 -100
-    viewer.scrollTop = 200;
+    // 第四次紧急反向向上拨动 -100：立即折返至 360，绝无拖尾滑动
     internals.scrollByDelta.call(context, -100);
-    // 关键断言：反向时立即以当前实际可视位置 200 向上折返（200 - 100 = 100），决不从 460 冲刷！
-    expect(context.pendingWheelTarget).toBe(100);
+    expect(viewer.scrollTop).toBe(360);
+  });
+
+  it("animates wheel scrolling smoothly with standard browser physics (immediate impulse, no slow start/stop)", () => {
+    const { context, viewer } = scrollContext({ height: 600, content: 5000 });
+    viewer.scrollTop = 0;
+
+    const rafQueue: Array<(now: number) => void> = [];
+    let currentTime = 1000;
+    const fakeRaf = (cb: (now: number) => void) => {
+      rafQueue.push(cb);
+      return rafQueue.length;
+    };
+
+    context.contentDoc = {
+      defaultView: {
+        requestAnimationFrame: fakeRaf,
+        cancelAnimationFrame: vi.fn(),
+      },
+    };
+
+    // User rolls 1 notch (Windows standard 3 lines = 84px)
+    internals.scrollByDelta.call(context, 84);
+    expect(rafQueue.length).toBe(1);
+    expect(context.pendingWheelTarget).toBe(84);
+
+    // Frame 1 (16.7ms later): should cover ~45-50% immediately, showing zero startup delay
+    currentTime += 16.7;
+    const step1 = rafQueue.shift()!;
+    step1(currentTime);
+    expect(viewer.scrollTop).toBeGreaterThan(30);
+    expect(viewer.scrollTop).toBeLessThan(50);
+    expect(rafQueue.length).toBe(1);
+
+    // Frame 2 (33.4ms): covers ~70%
+    currentTime += 16.7;
+    const step2 = rafQueue.shift()!;
+    step2(currentTime);
+    expect(viewer.scrollTop).toBeGreaterThan(55);
+    expect(viewer.scrollTop).toBeLessThan(70);
+
+    // Step remaining frames until completion (less than 100ms total)
+    let frames = 2;
+    while (rafQueue.length > 0 && frames < 15) {
+      currentTime += 16.7;
+      const nextStep = rafQueue.shift()!;
+      nextStep(currentTime);
+      frames++;
+    }
+
+    // Snaps accurately to 84px within 6-7 frames (< 120ms), and animation loop cleans up
+    expect(viewer.scrollTop).toBe(84);
+    expect(context.pendingWheelTarget).toBeNull();
+    expect(rafQueue.length).toBe(0);
+    expect(frames).toBeLessThanOrEqual(8);
+  });
+
+  it("smoothly redirects animation when wheel is turned in reverse direction", () => {
+    const { context, viewer } = scrollContext({ height: 600, content: 5000 });
+    viewer.scrollTop = 100;
+
+    const rafQueue: Array<(now: number) => void> = [];
+    let currentTime = 1000;
+    const fakeRaf = (cb: (now: number) => void) => {
+      rafQueue.push(cb);
+      return rafQueue.length;
+    };
+
+    context.contentDoc = {
+      defaultView: {
+        requestAnimationFrame: fakeRaf,
+        cancelAnimationFrame: vi.fn(),
+      },
+    };
+
+    // User scrolls down by 84px (target = 184)
+    internals.scrollByDelta.call(context, 84);
+    expect(context.pendingWheelTarget).toBe(184);
+
+    // Advance 1 frame (scrollTop moves towards ~140)
+    currentTime += 16.7;
+    rafQueue.shift()!(currentTime);
+    const midScrollTop = viewer.scrollTop;
+    expect(midScrollTop).toBeGreaterThan(130);
+    expect(midScrollTop).toBeLessThan(150);
+
+    // User suddenly flicks wheel UP by -84px during animation
+    internals.scrollByDelta.call(context, -84);
+    // Target should immediately reverse from current position (midScrollTop - 84), NOT from old target!
+    expect(context.pendingWheelTarget).toBeCloseTo(midScrollTop - 84, 1);
+
+    // Advance next frame: scrollTop moves immediately UPWARDS
+    currentTime += 16.7;
+    rafQueue.shift()!(currentTime);
+    expect(viewer.scrollTop).toBeLessThan(midScrollTop);
   });
 
   it("imageCandidate does not misfire on non-image elements or containers with images in subtree", () => {

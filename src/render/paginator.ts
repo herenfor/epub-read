@@ -452,8 +452,10 @@ type MarginStyle = Pick<CSSStyleDeclaration, "margin" | "marginLeft" | "marginRi
 
 /** 作者 inline style 是否明确使用了水平百分比 margin。 */
 export function hasPercentageHorizontalMargin(style: MarginStyle): boolean {
-  if (style.marginLeft.includes("%") || style.marginRight.includes("%")) return true;
-  const values = style.margin.trim().split(/\s+/).filter(Boolean);
+  if (style?.marginLeft?.includes("%") || style?.marginRight?.includes("%")) return true;
+  const margin = typeof style?.margin === "string" ? style.margin.trim() : "";
+  if (!margin) return false;
+  const values = margin.split(/\s+/).filter(Boolean);
   if (values.length === 0) return false;
   const horizontal =
     values.length === 1
@@ -465,8 +467,10 @@ export function hasPercentageHorizontalMargin(style: MarginStyle): boolean {
 }
 
 function styleHasPercentageHorizontalMargin(style: CSSStyleDeclaration): boolean {
-  if (style.marginLeft.includes("%") || style.marginRight.includes("%")) return true;
-  const values = style.margin.trim().split(/\s+/).filter(Boolean);
+  if (style?.marginLeft?.includes("%") || style?.marginRight?.includes("%")) return true;
+  const margin = typeof style?.margin === "string" ? style.margin.trim() : "";
+  if (!margin) return false;
+  const values = margin.split(/\s+/).filter(Boolean);
   if (values.length === 0) return false;
   const horizontal =
     values.length === 1
@@ -1972,18 +1976,6 @@ export function shouldApplyInlineBoxOverflowFix({
   );
 }
 
-function isTestRunner(): boolean {
-  try {
-    const proc = (globalThis as unknown as { process?: { env?: Record<string, string | undefined> } }).process;
-    if (proc?.env?.NODE_ENV === "test" || proc?.env?.VITEST === "true") {
-      return true;
-    }
-  } catch {
-    // Ignore any environment restrictions
-  }
-  return false;
-}
-
 export class ChapterPaginator {
   private blobUrl?: string;
   /** sanitize 本章外链 CSS 产生的局部 Blob URL；不包含 ResourceServer 共享资源。 */
@@ -2021,11 +2013,12 @@ export class ChapterPaginator {
   private scrollHandler = (): void => this.handleScroll();
   private scrollEndHandler = (): void => {
     if (this.pendingWheelTarget !== null && Math.abs((this.viewer?.scrollTop ?? 0) - this.pendingWheelTarget) < 2) {
-      this.pendingWheelTarget = null;
+      this.cancelScrollAnimation();
     }
   };
   private pointerDownHandler = (): void => this.handleScrollPointerDown();
   private pendingWheelTarget: number | null = null;
+  private scrollAnimFrame: number | null = null;
   private noteHighlightsApplied = false;
   private pendingAnchor: string | undefined;
   private pendingFallbackPage: number | null = null;
@@ -2797,7 +2790,7 @@ export class ChapterPaginator {
     const viewer = this.viewer;
     if (!viewer) return;
     if (this.pendingWheelTarget !== null && Math.abs(viewer.scrollTop - this.pendingWheelTarget) < 2) {
-      this.pendingWheelTarget = null;
+      this.cancelScrollAnimation();
     }
     if (this.scrollFrame !== undefined) return;
     const win = this.contentDoc?.defaultView;
@@ -2830,10 +2823,19 @@ export class ChapterPaginator {
     this.scrollFrame = undefined;
   }
 
+  private cancelScrollAnimation(): void {
+    if (typeof this.scrollAnimFrame === "number") {
+      const win = this.contentDoc?.defaultView ?? (typeof window !== "undefined" ? window : null);
+      win?.cancelAnimationFrame?.(this.scrollAnimFrame);
+      this.scrollAnimFrame = null;
+    }
+    this.pendingWheelTarget = null;
+  }
+
   /** 触摸/拖动开始不应沿用固定弹注（与滚动位置变化同一规则）。 */
   private handleScrollPointerDown(): void {
     if (!this.scrollMode || this.disposed) return;
-    this.pendingWheelTarget = null;
+    this.cancelScrollAnimation();
     this.resetFootnoteForContentChange();
   }
 
@@ -4868,24 +4870,11 @@ export class ChapterPaginator {
    */
   scrollByViewport(direction: 1 | -1): boolean {
     if (!this.scrollMode || !this.viewer) return false;
-    this.pendingWheelTarget = null;
+    this.cancelScrollAnimation();
     const moved = scrollByViewportCommand(direction, this.scrollMetrics(), this.viewer.scrollTop);
     if (moved.scrollTop === this.viewer.scrollTop) return false;
     this.closeFootnoteForNavigation();
     this.clearSearchHighlightForDocument();
-    if (typeof this.viewer.scrollTo === "function") {
-      try {
-        const prevTop = this.viewer.scrollTop;
-        this.viewer.scrollTo({ top: moved.scrollTop, behavior: "smooth" });
-        if (isTestRunner() && this.viewer.scrollTop === prevTop) {
-          this.viewer.scrollTop = moved.scrollTop;
-          this.syncScrollMetrics(true);
-        }
-        return true;
-      } catch {
-        // Fallback to direct assignment
-      }
-    }
     this.viewer.scrollTop = moved.scrollTop;
     this.syncScrollMetrics(true);
     return true;
@@ -4894,7 +4883,7 @@ export class ChapterPaginator {
   /** 滚动到本章顶部；UI 的“上一章（从底部进入）”入口用它准备位置。 */
   scrollToStart(): void {
     if (!this.scrollMode || !this.viewer) return;
-    this.pendingWheelTarget = null;
+    this.cancelScrollAnimation();
     this.closeFootnoteForNavigation();
     this.clearSearchHighlightForDocument();
     this.viewer.scrollTop = 0;
@@ -4904,14 +4893,14 @@ export class ChapterPaginator {
   /** 滚动到本章末尾；UI 的“下一章（从顶部进入）”入口用它准备位置。 */
   scrollToEnd(): void {
     if (!this.scrollMode || !this.viewer) return;
-    this.pendingWheelTarget = null;
+    this.cancelScrollAnimation();
     this.closeFootnoteForNavigation();
     this.clearSearchHighlightForDocument();
     this.viewer.scrollTop = scrollMaxTop(this.scrollMetrics());
     this.syncScrollMetrics(true);
   }
 
-  /** 滚动模式：按像素位移滚动正文（用于外层事件转发）。 */
+  /** 滚动模式：按像素位移平滑滚动正文（模拟标准浏览器原生滚轮阻尼动量）。 */
   scrollByDelta(deltaY: number): void {
     if (!this.scrollMode || !this.viewer || deltaY === 0) return;
     const metrics = this.scrollMetrics();
@@ -4919,22 +4908,58 @@ export class ChapterPaginator {
     const target = nextWheelTarget(this.viewer.scrollTop, this.pendingWheelTarget, deltaY, maxTop);
     if (target === this.viewer.scrollTop && this.pendingWheelTarget === null) return;
 
-    this.pendingWheelTarget = target;
-    if (typeof this.viewer.scrollTo === "function") {
-      try {
-        const prevTop = this.viewer.scrollTop;
-        this.viewer.scrollTo({ top: target, behavior: "smooth" });
-        if (isTestRunner() && this.viewer.scrollTop === prevTop) {
-          this.viewer.scrollTop = target;
-          this.syncScrollMetrics(true);
-        }
-        return;
-      } catch {
-        // Fallback to direct assignment
-      }
+    const win = this.contentDoc?.defaultView;
+    const raf = win?.requestAnimationFrame?.bind(win);
+    if (!raf) {
+      this.cancelScrollAnimation();
+      this.viewer.scrollTop = target;
+      this.syncScrollMetrics(true);
+      return;
     }
-    this.viewer.scrollTop = target;
-    this.syncScrollMetrics(true);
+
+    this.pendingWheelTarget = target;
+    if (typeof this.scrollAnimFrame === "number") return;
+
+    let lastTime: number | null = null;
+    const step = (now: number): void => {
+      if (!this.viewer || this.pendingWheelTarget === null) {
+        this.scrollAnimFrame = null;
+        this.pendingWheelTarget = null;
+        return;
+      }
+      const dt = lastTime === null ? 16.7 : Math.min(32, Math.max(1, now - lastTime));
+      lastTime = now;
+      const current = this.viewer.scrollTop;
+      const diff = this.pendingWheelTarget - current;
+      if (Math.abs(diff) < 1) {
+        this.viewer.scrollTop = this.pendingWheelTarget;
+        this.scrollAnimFrame = null;
+        this.pendingWheelTarget = null;
+        this.syncScrollMetrics(true);
+        return;
+      }
+
+      // 快速衰减常数（~25ms）：
+      // 在 60Hz（dt ≈ 16.7ms）下单帧完成 48.7% 步长，零启动迟滞（无慢速启动）；
+      // 4~6 帧（80~100ms）内位移覆盖超 96%，残余 <1.5px 时直接吸附停定（无慢速漂移）。
+      // 完美贴合普通桌面网页滚轮的干脆与顺滑手感。
+      const decay = 1 - Math.exp(-dt / 25);
+      const stepDelta = diff * decay;
+      const minStep = 1.2;
+      const applied = Math.abs(stepDelta) < minStep ? Math.sign(diff) * minStep : stepDelta;
+
+      if (Math.abs(applied) >= Math.abs(diff)) {
+        this.viewer.scrollTop = this.pendingWheelTarget;
+        this.scrollAnimFrame = null;
+        this.pendingWheelTarget = null;
+      } else {
+        this.viewer.scrollTop = current + applied;
+        this.scrollAnimFrame = raf(step);
+      }
+      this.syncScrollMetrics(true);
+    };
+
+    this.scrollAnimFrame = raf(step);
   }
 
   /** 当前位置是否已在章内真实边界（不是虚拟屏号边界）。 */
@@ -5198,7 +5223,7 @@ export class ChapterPaginator {
           e.preventDefault();
           return;
         }
-        this.pendingWheelTarget = null;
+        this.cancelScrollAnimation();
         if (!this.hasNextChapter) {
           this.scrollWheelAcc = 0;
           return;
@@ -5236,7 +5261,7 @@ export class ChapterPaginator {
           e.preventDefault();
           return;
         }
-        this.pendingWheelTarget = null;
+        this.cancelScrollAnimation();
         if (!this.hasPrevChapter) {
           this.scrollWheelAcc = 0;
           return;
@@ -5603,7 +5628,7 @@ export class ChapterPaginator {
     this.contentDoc?.removeEventListener("scrollend", this.scrollEndHandler, true);
     this.contentDoc?.removeEventListener("pointerdown", this.pointerDownHandler, true);
     this.cancelScrollFrame();
-    this.pendingWheelTarget = null;
+    this.cancelScrollAnimation();
     this.restoreScrollView();
     this.clearNoteHighlights();
     this.clearSearchHighlightForDocument();

@@ -204,9 +204,30 @@ textarea {
 
 .toolbar-sensor.top-sensor {
   top: 0;
-  left: 0;
-  right: 140px;
   height: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(600px, calc(100vw - 280px));
+}
+
+@media (max-width: 640px) {
+  .toolbar-sensor.top-sensor {
+    left: 0;
+    right: 0;
+    transform: none;
+    width: 100%;
+  }
+}
+
+/* 当桌面端存在常驻实体顶栏时，抑制重复的悬浮感应区与悬浮岛 */
+.app:has(.titlebar-reader) .toolbar-sensor.top-sensor {
+  display: none !important;
+  pointer-events: none !important;
+}
+
+.app:has(.titlebar-reader) .toolbar-top-island {
+  display: none !important;
+  pointer-events: none !important;
 }
 
 .toolbar-sensor.bottom-sensor {
@@ -237,14 +258,14 @@ textarea {
   top: 12px;
   left: 50%;
   transform: translateX(-50%) translateY(0);
-  z-index: 43;
+  z-index: 46;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   width: fit-content;
   min-width: 280px;
-  max-width: min(640px, calc(100vw - 32px));
+  max-width: min(600px, calc(100vw - 280px));
   height: 42px;
   padding: 0 10px;
   border-radius: 21px;

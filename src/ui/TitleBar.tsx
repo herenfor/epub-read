@@ -9,9 +9,20 @@ function isTauriEnv(): boolean {
 export interface TitleBarProps {
   view: "shelf" | "reader";
   title?: string;
+  onBackToShelf?: () => void;
+  isBookmarked?: boolean;
+  onToggleBookmark?: () => void;
+  onOpenBookmarks?: () => void;
 }
 
-export const TitleBar: React.FC<TitleBarProps> = ({ view, title }) => {
+export const TitleBar: React.FC<TitleBarProps> = ({
+  view,
+  title,
+  onBackToShelf,
+  isBookmarked,
+  onToggleBookmark,
+  onOpenBookmarks,
+}) => {
   const [isMaximized, setIsMaximized] = useState(false);
 
   useEffect(() => {
@@ -65,18 +76,59 @@ export const TitleBar: React.FC<TitleBarProps> = ({ view, title }) => {
   return (
     <header
       className={`titlebar titlebar-${view}`}
-      data-tauri-drag-region={view === "shelf" ? "" : undefined}
+      data-tauri-drag-region=""
     >
-      <div
-        className="titlebar-drag-area"
-        data-tauri-drag-region={view === "shelf" ? "" : undefined}
-      >
-        {view === "shelf" && (
-          <span className="titlebar-app-title" data-tauri-drag-region="">
-            {title || "EPUB 阅读器"}
-          </span>
+      <div className="titlebar-drag-area" data-tauri-drag-region="">
+        {view === "reader" && onBackToShelf && (
+          <button
+            type="button"
+            className="titlebar-back-btn"
+            onClick={onBackToShelf}
+            title="返回书架"
+            aria-label="返回书架"
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M10 12L6 8l4-4" />
+            </svg>
+            <span>书架</span>
+          </button>
         )}
+        <span
+          className={`titlebar-app-title${view === "reader" ? " titlebar-book-title" : ""}`}
+          data-tauri-drag-region=""
+          title={title}
+        >
+          {title || "EPUB 阅读器"}
+        </span>
       </div>
+      {view === "reader" && onToggleBookmark && (
+        <div className="titlebar-actions">
+          <button
+            type="button"
+            className={`titlebar-action-btn titlebar-bookmark-btn${isBookmarked ? " active" : ""}`}
+            onClick={onToggleBookmark}
+            title={isBookmarked ? "移除当前页书签" : "添加当前页书签"}
+            aria-label={isBookmarked ? "移除当前页书签" : "添加当前页书签"}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill={isBookmarked ? "#f43f5e" : "none"} stroke={isBookmarked ? "#f43f5e" : "currentColor"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+            </svg>
+          </button>
+          {onOpenBookmarks && (
+            <button
+              type="button"
+              className="titlebar-action-btn titlebar-bookmark-list-btn"
+              onClick={onOpenBookmarks}
+              title="查看所有书签"
+              aria-label="查看所有书签"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M6 9l6 6 6-6" />
+              </svg>
+            </button>
+          )}
+        </div>
+      )}
       <nav className="titlebar-controls" aria-label="窗口控制">
         <button
           type="button"
