@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  nextWheelTarget,
   scrollByViewportCommand,
   scrollMaxTop,
   scrollProgressLabel,
@@ -174,5 +175,33 @@ describe("scroll viewer styles", () => {
   it("falls back to 100% height when no usable viewport height is known", () => {
     const map = new Map(scrollViewerStyles(0));
     expect(map.get("height")).toBe("100%");
+  });
+});
+
+describe("nextWheelTarget", () => {
+  it("starts from current position when pending is null or undefined", () => {
+    expect(nextWheelTarget(100, null, 120, 2000)).toBe(220);
+    expect(nextWheelTarget(100, undefined, 120, 2000)).toBe(220);
+    expect(nextWheelTarget(100, null, -50, 2000)).toBe(50);
+  });
+
+  it("accumulates on pending target when inputs are in the same direction", () => {
+    // Current is at 130, pending target was 220, incoming delta is 120
+    expect(nextWheelTarget(130, 220, 120, 2000)).toBe(340);
+    // Again: current at 150, pending was 340, delta 120 -> 460
+    expect(nextWheelTarget(150, 340, 120, 2000)).toBe(460);
+  });
+
+  it("immediately reverses from current visible position when input direction reverses", () => {
+    // Current is at 150, pending was 460 (moving down), incoming delta is -100 (moving up)
+    expect(nextWheelTarget(150, 460, -100, 2000)).toBe(50);
+    // Conversely: current at 400, pending was 200 (moving up), incoming delta is +100 (moving down)
+    expect(nextWheelTarget(400, 200, 100, 2000)).toBe(500);
+  });
+
+  it("clamps target within [0, maxTop]", () => {
+    expect(nextWheelTarget(10, null, -50, 1000)).toBe(0);
+    expect(nextWheelTarget(950, null, 100, 1000)).toBe(1000);
+    expect(nextWheelTarget(900, 980, 50, 1000)).toBe(1000);
   });
 });

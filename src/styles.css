@@ -128,7 +128,7 @@ textarea {
 
 /* ---- 拖拽悬停遮罩 ---- */
 .app.drag-active::after {
-  content: "松开以打开 EPUB";
+  content: "松开以导入图书或字体";
   position: fixed;
   inset: 0;
   z-index: 200;
@@ -205,7 +205,7 @@ textarea {
 .toolbar-sensor.top-sensor {
   top: 0;
   left: 0;
-  right: 0;
+  right: 140px;
   height: 20px;
 }
 
@@ -237,7 +237,7 @@ textarea {
   top: 12px;
   left: 50%;
   transform: translateX(-50%) translateY(0);
-  z-index: 38;
+  z-index: 43;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
@@ -393,18 +393,21 @@ textarea {
 }
 
 /* 常驻图钉圆形微盘 */
-.toolbar-top-island .tb-pin {
-  width: 30px;
-  height: 30px;
+.toolbar-top-island .tb-pin,
+.toolbar-bottom-dock .tb-pin {
+  width: 32px;
+  height: 32px;
   padding: 0;
   border-radius: 50% !important;
 }
 
-.toolbar-top-island .tb-pin:hover:not(:disabled) {
+.toolbar-top-island .tb-pin:hover:not(:disabled),
+.toolbar-bottom-dock .tb-pin:hover:not(:disabled) {
   background: color-mix(in srgb, #8b5cf6 14%, transparent) !important;
 }
 
-.toolbar-top-island .tb-pin.active {
+.toolbar-top-island .tb-pin.active,
+.toolbar-bottom-dock .tb-pin.active {
   background: color-mix(in srgb, #8b5cf6 20%, transparent) !important;
   box-shadow: 0 0 12px color-mix(in srgb, #8b5cf6 25%, transparent);
 }
@@ -528,7 +531,30 @@ textarea {
   border-radius: 1px;
 }
 
-/* Dock 操作按钮：无界通透幽灵圆形（Zero-Box Ghost Disc）与微动效 */
+/* ---- 底部操作坞无界通透幽灵按钮（Zero-Box Ghost Disc）与微动效 ---- */
+.toolbar-bottom-dock .tb-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  box-shadow: none;
+  border-radius: 50%;
+  color: var(--fg);
+  transition: background-color 160ms ease, border-color 160ms ease, transform 160ms cubic-bezier(0.16, 1, 0.3, 1), color 160ms ease;
+}
+
+.toolbar-bottom-dock .tb-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  border-color: transparent;
+}
+
+.toolbar-bottom-dock .tb-btn:active:not(:disabled) {
+  transform: scale(0.94);
+  background: color-mix(in srgb, var(--fg) 14%, transparent);
+}
+
+.toolbar-bottom-dock .tb-btn.tb-menu {
+  border-radius: 50%;
+}
+
 .tb-dock-btn {
   width: 32px;
   height: 32px;
@@ -576,7 +602,16 @@ textarea {
   background: color-mix(in srgb, #a855f7 12%, transparent);
 }
 
-.tb-dock-btn.tb-assistant {
+.tb-dock-btn.tb-pin:hover:not(:disabled) {
+  background: color-mix(in srgb, #8b5cf6 14%, transparent);
+}
+
+.tb-dock-btn.tb-pin.active {
+  background: color-mix(in srgb, #8b5cf6 20%, transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, #8b5cf6 25%, transparent);
+}
+
+.toolbar-bottom-dock .tb-dock-btn.tb-assistant {
   width: auto;
   min-width: 44px;
   height: 32px;
@@ -585,7 +620,7 @@ textarea {
   gap: 3px;
 }
 
-.tb-dock-btn.tb-assistant .tb-btn-text {
+.toolbar-bottom-dock .tb-dock-btn.tb-assistant .tb-btn-text {
   font-family: var(--font-ui);
   font-size: 11.5px;
   font-weight: 500;
@@ -837,8 +872,7 @@ textarea {
   color: #fff;
 }
 
-.tb-btn.icon,
-.tb-btn.tb-menu {
+.tb-btn.icon {
   width: 32px;
   height: 32px;
   padding: 0;

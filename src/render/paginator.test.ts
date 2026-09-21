@@ -2171,3 +2171,127 @@ describe("measure viewport height locking", () => {
     await promise;
   });
 });
+
+describe("applyBookMargins C-53 toolbar centering", () => {
+  it("原书顶层 toolbar 的左右 0 在补偿后回到当前栏版心，嵌套 toolbar 不重复缩进", () => {
+    const toolbarStyle = {
+      marginLeft: "",
+      marginRight: "",
+      margin: "",
+      _styles: {} as Record<string, { value: string; priority: string }>,
+      setProperty(prop: string, val: string, pri = "") {
+        this._styles[prop] = { value: val, priority: pri };
+      },
+      getPropertyValue(prop: string) {
+        return this._styles[prop]?.value ?? "";
+      },
+      getPropertyPriority(prop: string) {
+        return this._styles[prop]?.priority ?? "";
+      },
+      removeProperty(prop: string) {
+        delete this._styles[prop];
+      },
+    };
+    const toolbar = {
+      nodeType: 1,
+      localName: "div",
+      classList: {
+        contains: (cls: string) => cls === "toolbar" || cls === "reader-top",
+      },
+      hasAttribute: () => false,
+      setAttribute: vi.fn(),
+      removeAttribute: vi.fn(),
+      children: [],
+      parentElement: null as any,
+      style: toolbarStyle,
+      getBoundingClientRect: () => ({ width: 500, height: 40, left: 0, right: 500, top: 0, bottom: 40 }),
+    };
+    const viewer = {
+      clientWidth: 800,
+      classList: {
+        contains: () => false,
+      },
+      children: [toolbar],
+    };
+    toolbar.parentElement = viewer;
+
+    const nonTopStyle = {
+      marginLeft: "",
+      marginRight: "",
+      margin: "",
+      _styles: {} as Record<string, { value: string; priority: string }>,
+      setProperty: vi.fn(),
+      getPropertyValue: () => "",
+      getPropertyPriority: () => "",
+      removeProperty: vi.fn(),
+    };
+    const nonTopToolbar = {
+      nodeType: 1,
+      localName: "div",
+      classList: {
+        contains: (cls: string) => cls === "toolbar",
+      },
+      hasAttribute: () => false,
+      setAttribute: vi.fn(),
+      removeAttribute: vi.fn(),
+      children: [],
+      parentElement: viewer,
+      style: nonTopStyle,
+      getBoundingClientRect: () => ({ width: 500, height: 40, left: 0, right: 500, top: 50, bottom: 90 }),
+    };
+    viewer.children.push(nonTopToolbar);
+
+    const doc = {
+      styleSheets: [],
+      defaultView: {
+        getComputedStyle: (el: any) => {
+          if (el === toolbar || el === nonTopToolbar) {
+            return {
+              marginLeft: "0px",
+              marginRight: "0px",
+              float: "none",
+              clear: "none",
+              display: "block",
+              position: "static",
+              writingMode: "horizontal-tb",
+              width: "500px",
+              maxWidth: "none",
+              boxSizing: "border-box",
+              textAlign: "start",
+              direction: "ltr",
+            };
+          }
+          return {
+            paddingLeft: "0px",
+            paddingRight: "0px",
+            writingMode: "horizontal-tb",
+            clear: "none",
+            float: "none",
+          };
+        },
+      },
+    };
+
+    const context = {
+      contentDoc: doc,
+      viewer,
+      settings: { fontSizePx: 16, gapPx: 40, readingMode: "paginated" },
+      fitContentFixes: [],
+      marginFixes: [] as any[],
+      floatLayoutFixes: [] as any[],
+      step: 800,
+      disableReaderTopMarginRules: () => () => {},
+    };
+
+    (ChapterPaginator.prototype as any).applyBookMargins.call(context);
+
+    expect(toolbar.setAttribute).toHaveBeenCalledWith("data-reader-margin-fixed", "1");
+    expect(toolbar.style.getPropertyValue("margin-left")).toBe("auto");
+    expect(toolbar.style.getPropertyPriority("margin-left")).toBe("important");
+    expect(toolbar.style.getPropertyValue("margin-right")).toBe("auto");
+    expect(toolbar.style.getPropertyPriority("margin-right")).toBe("important");
+    expect(nonTopToolbar.setAttribute).not.toHaveBeenCalled();
+    expect(nonTopStyle.setProperty).not.toHaveBeenCalled();
+    expect(context.marginFixes.length).toBe(1);
+  });
+});

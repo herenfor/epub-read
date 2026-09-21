@@ -133,4 +133,17 @@ describe("visible text anchor index", () => {
       })
     ).toEqual({ textOffset: null, textSnippet: null });
   });
+
+  it("indexes elements pre-order and retrieves them in O(1) via elementIndex", () => {
+    const { document, viewer } = chapter("<p><span>一</span><span>二</span></p><div>三</div>");
+    const index = buildVisibleTextIndex(document, viewer);
+    const p = document.querySelector("p")!;
+    const spans = document.querySelectorAll("span");
+    const div = document.querySelector("div")!;
+    expect(index.elementIndex(p)).toBe(0);
+    expect(index.elementIndex(spans[0])).toBe(1);
+    expect(index.elementIndex(spans[1])).toBe(2);
+    expect(index.elementIndex(div)).toBe(3);
+    expect(index.elementIndex(document.createElement("div"))).toBe(-1);
+  });
 });

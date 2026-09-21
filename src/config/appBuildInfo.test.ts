@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { APP_BUILD_INFO_PROTOCOL_VERSION, validateAppBuildInfo } from "./appBuildInfo";
 
 const valid = {
-  version: "0.2.0",
+  version: "0.2.1",
   edition: "core" as const,
   protocolVersion: APP_BUILD_INFO_PROTOCOL_VERSION,
   target: "x86_64-pc-windows-msvc",

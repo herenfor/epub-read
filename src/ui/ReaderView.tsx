@@ -224,6 +224,60 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
   const lockedReverseDirRef = useRef<1 | -1 | 0>(0);
   const reverseLockUntilRef = useRef(0);
   const sameDirThrottleUntilRef = useRef(0);
+  const chapterTransitionLockedRef = useRef(false);
+  const chapterTransitionCooldownUntilRef = useRef(0);
+  const chapterTransitionQuietUntilRef = useRef(0);
+  const preloadDebounceTimerRef = useRef<number | null>(null);
+
+  const clearPreloadTimer = (): void => {
+    if (preloadDebounceTimerRef.current !== null) {
+      window.clearTimeout(preloadDebounceTimerRef.current);
+      preloadDebounceTimerRef.current = null;
+    }
+  };
+
+  /**
+   * 换章滚轮手势保护（静默门禁）：
+   * 必须同时满足：
+   * 1. 换章已完成并展示在前台（显示门解除）；
+   * 2. 距离显示就绪时刻已达到基础冷静期（350ms）；
+   * 3. 距离上一次检测到的物理滚轮脉冲已静默至少 180ms（手势已完全停歇）；
+   * 处于换章锁定或冷静期时，所有残余滚轮脉冲一律丢弃并清空累加器，杜绝跨章惯性串流翻页。
+   */
+  const isWheelGestureSuppressed = (): boolean => {
+    if (!chapterTransitionLockedRef.current) return false;
+    const now = Date.now();
+    if (now < chapterTransitionCooldownUntilRef.current || now < chapterTransitionQuietUntilRef.current) {
+      chapterTransitionQuietUntilRef.current = now + 180;
+      outerWheelRef.current.reset();
+      paginatorRef.current?.resetWheelAccumulator?.();
+      return true;
+    }
+    // 基础冷却与静默期均已满足，解锁新章节滚轮交互
+    chapterTransitionLockedRef.current = false;
+    outerWheelRef.current.reset();
+    paginatorRef.current?.resetWheelAccumulator?.();
+    return false;
+  };
+
+  const triggerChapterTransitionWheelLock = (): void => {
+    const now = Date.now();
+    chapterTransitionLockedRef.current = true;
+    // 在新章节真正 display-ready 前，锁定持续有效（先设一个兜底时间戳）
+    chapterTransitionCooldownUntilRef.current = now + 400;
+    chapterTransitionQuietUntilRef.current = now + 200;
+    outerWheelRef.current.reset();
+    paginatorRef.current?.resetWheelAccumulator?.();
+  };
+
+  const armChapterTransitionDisplaySettled = (): void => {
+    const now = Date.now();
+    // 新章节已完成排版并正式呈现给用户，从此时起算 350ms 冷却与 180ms 静默
+    chapterTransitionCooldownUntilRef.current = now + 350;
+    chapterTransitionQuietUntilRef.current = now + 180;
+    outerWheelRef.current.reset();
+    paginatorRef.current?.resetWheelAccumulator?.();
+  };
   const lastHandledStartAtEndNonceRef = useRef(props.startAtEnd.nonce);
   const lastStateRef = useRef<string>("loading");
   const lastReadyEmptyRef = useRef(false);
@@ -298,20 +352,15 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
     lastStateRef.current = state.status;
     if (state.status !== "ready" || state.empty) return;
     lastReadyEmptyRef.current = false;
+    armChapterTransitionDisplaySettled();
     onDisplayReadyRef.current();
-    const firstDisplay = !turnIntentRef.current.hasDisplayedOnce;
-    const pending = turnIntentRef.current.markReady();
-    if (firstDisplay) {
-      outerWheelRef.current.reset();
-      outerScrollWheelRef.current.reset();
-    }
-    if (pending !== null && latestRenderSettingsRef.current.readingMode !== "scroll") {
-      turnPageRef.current(pending);
-    }
-    // Only schedule after the active chapter has crossed the final display
-    // gate.  A pending turn may immediately invalidate this slot; that path
-    // is guarded by the slot generation in scheduleAdjacentPreloads.
-    scheduleAdjacentPreloads();
+    turnIntentRef.current.markReady();
+    outerWheelRef.current.reset();
+    outerScrollWheelRef.current.reset();
+    paginator.resetWheelAccumulator?.();
+    // 切章与定位就绪后，绝不立刻同步抢占主线程执行相邻章节重排，
+    // 而是延后到用户稳定阅读的空闲期（500ms 后）再悄悄准备。
+    scheduleAdjacentPreloadsDebounced(500);
   };
 
   const buildPaginator = (slot: PaginatorSlot): ChapterPaginator => {
@@ -359,10 +408,13 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
         if (isActiveSlot(slot)) onInternalNavigationSettledRef.current();
       },
       (dir) => {
-        if (isActiveSlot(slot)) turnPageRef.current(dir);
+        if (!isActiveSlot(slot)) return;
+        if (isWheelGestureSuppressed()) return;
+        if (dir === lockedReverseDirRef.current && Date.now() < reverseLockUntilRef.current) return;
+        turnPageRef.current(dir, "wheel");
       },
       (dir) => {
-        if (isActiveSlot(slot) && !inputPausedRef.current) turnPageRef.current(dir);
+        if (isActiveSlot(slot) && !inputPausedRef.current) turnPageRef.current(dir, "key");
       },
       (payload) => {
         if (!isActiveSlot(slot)) return;
@@ -440,6 +492,7 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
   };
 
   const disposeSpareSlots = (): void => {
+    clearPreloadTimer();
     for (const slot of [...spareSlotsRef.current]) disposeSpareSlot(slot);
   };
 
@@ -524,12 +577,24 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
         slot.state = paginator.getStateSnapshot();
         slot.ready = ready && paginator.isDisplayReady;
         if (!slot.ready) disposeSpareSlot(slot);
-        else scheduleAdjacentPreloads();
+        else scheduleAdjacentPreloadsDebounced(150);
       });
       // 一次只启动一个后台完整排版任务；完成后再由上面的回调准备另一侧。
       return;
     }
   };
+
+  function scheduleAdjacentPreloadsDebounced(delayMs = 500): void {
+    clearPreloadTimer();
+    if (!preloadAllowedRef.current || latestRenderSettingsRef.current.readingMode === "scroll") {
+      disposeSpareSlots();
+      return;
+    }
+    preloadDebounceTimerRef.current = window.setTimeout(() => {
+      preloadDebounceTimerRef.current = null;
+      scheduleAdjacentPreloads();
+    }, delayMs);
+  }
 
   const promotePreparedChapter = (path: string, targetIndex: number, atEnd: boolean): boolean => {
     const current = activeSlotRef.current;
@@ -565,6 +630,10 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
     setActiveFrameVisual(next.frame);
     next.paginator.setNotes(props.notes);
     autoAdvanceRef.current = false;
+    triggerChapterTransitionWheelLock();
+    lockedReverseDirRef.current = atEnd ? 1 : -1;
+    reverseLockUntilRef.current = Date.now() + 600;
+    turnIntentRef.current.reset();
     if (atEnd) {
       if (latestRenderSettingsRef.current.readingMode === "scroll") {
         next.paginator.scrollToEnd();
@@ -620,6 +689,7 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
     paginatorRef.current = p;
     setActiveFrameVisual("primary");
     return () => {
+      clearPreloadTimer();
       settingsReloadDebouncerRef.current?.cancel();
       turnIntentRef.current.reset();
       outerWheelRef.current.reset();
@@ -635,9 +705,8 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
       paginatorRef.current = null;
       activeSlotRef.current = null;
       activeIframeRef.current = null;
-      // ResourceServer 的所有权终点必须在 paginator dispose 之后；章节 iframe
-      // 不再读取共享图片/字体 URL 后，才撤销整本书资源。
-      server.revokeAll();
+      // ResourceServer 与 Book 的生命周期由 App 会话管理；ReaderView 仅负责分页器 dispose
+      // 不在组件内部 cleanup 中销毁共享 server/book，避免 StrictMode 双重挂载或重绘时资源被提前释放。
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [book, server]);
@@ -650,6 +719,7 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
   useEffect(() => {
     // A chapter/anchor transition owns the next load.  A settings timer from
     // the previous chapter must not start a second load after this effect.
+    clearPreloadTimer();
     settingsReloadDebouncerRef.current?.cancel();
     settingsIdentityRef.current = { settings, userFonts: props.userFonts };
     const p = paginatorRef.current;
@@ -674,6 +744,9 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
         lockedReverseDirRef.current = 0;
         reverseLockUntilRef.current = 0;
       }
+      triggerChapterTransitionWheelLock();
+      outerWheelRef.current.reset();
+      turnIntentRef.current.reset();
       const preciseTarget = props.preciseTarget && props.preciseTarget.chapterPath === path
         ? props.preciseTarget
         : null;
@@ -694,7 +767,8 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
       // Adjacent-but-not-ready and non-adjacent jumps both use the original
       // P0 load path; same-chapter anchor reloads may retain valid edge caches.
       if (oldIndex !== spineIndex || settingsChanged) disposeSpareSlots();
-      turnIntentRef.current.markLoading();
+      turnIntentRef.current.reset();
+      p.resetWheelAccumulator?.();
       await p.load(path, {
         settings: latestRenderSettingsRef.current,
         hasNextChapter: nextLinearIndex(book, spineIndex, 1) >= 0,
@@ -776,7 +850,7 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
       disposeSpareSlots();
       timer = window.setTimeout(() => {
         paginatorRef.current?.reflow();
-        if (preloadAllowedRef.current) scheduleAdjacentPreloads();
+        if (preloadAllowedRef.current) scheduleAdjacentPreloadsDebounced(250);
       }, 250);
     });
     ro.observe(el);
@@ -787,10 +861,14 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
   }, [book.fixedLayout, settings.preloadNextChapter]);
 
   // 翻页逻辑（滚轮与按钮/键盘共用）
-  const turnPageRef = useRef<(dir: 1 | -1) => void>(() => {});
-  turnPageRef.current = (dir) => {
+  const turnPageRef = useRef<(dir: 1 | -1, source?: "wheel" | "key" | "ui") => void>(() => {});
+  turnPageRef.current = (dir, source) => {
     const p = paginatorRef.current;
     if (!p) return;
+    if (source === "wheel") {
+      if (isWheelGestureSuppressed()) return;
+      if (dir === lockedReverseDirRef.current && Date.now() < reverseLockUntilRef.current) return;
+    }
     // 页数未知时不执行，但保留最后一个方向；display-ready 后最多消费一次。
     const immediate = turnIntentRef.current.request(dir);
     if (immediate === null) return;
@@ -830,7 +908,10 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
       } else {
         const next = nextLinearIndex(book, spineIndexRef.current, 1);
         if (next >= 0) {
-          turnIntentRef.current.markLoading();
+          triggerChapterTransitionWheelLock();
+          lockedReverseDirRef.current = -1;
+          reverseLockUntilRef.current = Date.now() + 600;
+          turnIntentRef.current.reset();
           props.onRequestChapter(next);
         }
       }
@@ -840,7 +921,10 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
       } else {
         const prev = nextLinearIndex(book, spineIndexRef.current, -1);
         if (prev >= 0) {
-          turnIntentRef.current.markLoading();
+          triggerChapterTransitionWheelLock();
+          lockedReverseDirRef.current = 1;
+          reverseLockUntilRef.current = Date.now() + 600;
+          turnIntentRef.current.reset();
           props.onRequestChapter(prev, { atEnd: true });
         }
       }
@@ -948,10 +1032,15 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
             const p = paginatorRef.current;
             if (!p) return;
             if (lastStateRef.current === "loading" || lastStateRef.current === "measuring") return;
-            const dir = event.deltaY > 0 ? 1 : -1;
+            const deltaY = event.deltaMode === 1
+              ? event.deltaY * 28
+              : event.deltaMode === 2
+                ? event.deltaY * (readerContainerRef.current?.clientHeight ?? 600)
+                : event.deltaY;
+            const dir = deltaY > 0 ? 1 : -1;
             if (!p.atScrollBoundary(dir)) {
               outerScrollWheelRef.current.reset();
-              p.scrollByDelta(event.deltaY);
+              p.scrollByDelta(deltaY);
               return;
             }
             // 已经在边界：检查反向回弹保护（单向锁 800ms）
@@ -964,7 +1053,7 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
               outerScrollWheelRef.current.reset();
               return;
             }
-            const direction = outerScrollWheelRef.current.push(event.deltaY);
+            const direction = outerScrollWheelRef.current.push(deltaY);
             if (direction === null) return;
             lockedReverseDirRef.current = -direction as 1 | -1;
             reverseLockUntilRef.current = Date.now() + 800;
@@ -975,11 +1064,15 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
           }
           // visibility:hidden 时滚轮会命中外层；浏览器还可能把同一连续手势
           // 锁定在这个目标上，所以 iframe 显示后也必须继续消费外层事件。
-          // 先按与分页器一致的 80px 阈值累积，避免触控板微量事件一事件一页。
+          if (isWheelGestureSuppressed()) return;
           const direction = outerWheelRef.current.push(event.deltaY);
           if (direction === null) return;
+          if (direction === lockedReverseDirRef.current && Date.now() < reverseLockUntilRef.current) {
+            outerWheelRef.current.reset();
+            return;
+          }
           event.preventDefault();
-          turnPageRef.current(direction);
+          turnPageRef.current(direction, "wheel");
         }}
       style={
         book.fixedLayout && vp

@@ -165,14 +165,31 @@ export class VisibleTextIndex {
   readonly mediaUnits: number;
   private readonly nodes: IndexedTextNode[];
   private readonly nodeMap: Map<Text, IndexedTextNode>;
+  private readonly elementIndexMap: Map<Element, number>;
 
-  constructor(nodes: IndexedTextNode[], text: string, mediaUnits = 0) {
+  constructor(
+    nodes: IndexedTextNode[],
+    text: string,
+    mediaUnits = 0,
+    elementIndexMap: Map<Element, number> = new Map()
+  ) {
     this.nodes = nodes;
     this.nodeMap = new Map(nodes.map((item) => [item.node, item]));
     this.text = text;
     this.codePoints = Array.from(text);
     this.totalChars = this.codePoints.length;
     this.mediaUnits = mediaUnits;
+    this.elementIndexMap = elementIndexMap;
+  }
+
+  elementIndex(el: Element, fallbackViewer?: HTMLElement): number {
+    const cached = this.elementIndexMap.get(el);
+    if (cached !== undefined) return cached;
+    if (fallbackViewer && typeof fallbackViewer.querySelectorAll === "function") {
+      const all = Array.from(fallbackViewer.querySelectorAll("*"));
+      return all.indexOf(el as HTMLElement);
+    }
+    return -1;
   }
 
   offsetForNode(node: Node, rawOffset: number): number | null {
@@ -411,7 +428,11 @@ export function buildVisibleTextIndex(doc: Document, viewer: HTMLElement): Visib
   }
   const mediaTags = new Set(["img", "video", "audio", "canvas", "svg", "object", "embed"]);
   let mediaUnits = 0;
-  for (const element of Array.from(viewer.querySelectorAll("*"))) {
+  const allElements = Array.from(viewer.querySelectorAll("*"));
+  const elementIndexMap = new Map<Element, number>();
+  for (let i = 0; i < allElements.length; i++) {
+    const element = allElements[i];
+    elementIndexMap.set(element, i);
     const tag = element.tagName.toLowerCase();
     if (!mediaTags.has(tag) || isStructurallyHiddenElement(element) || hasStructurallyExcludedAncestor(element)) continue;
     if (tag !== "svg" && element.closest("svg")) continue;
@@ -424,7 +445,7 @@ export function buildVisibleTextIndex(doc: Document, viewer: HTMLElement): Visib
     }
     if (!hidden) mediaUnits++;
   }
-  return new VisibleTextIndex(nodes, pieces.join(""), mediaUnits);
+  return new VisibleTextIndex(nodes, pieces.join(""), mediaUnits, elementIndexMap);
 }
 
 function matchesAt(haystack: readonly string[], needle: readonly string[], start: number): boolean {

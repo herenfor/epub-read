@@ -25,6 +25,7 @@ export interface FontStore {
   }): Promise<UserFont>;
   readFont(id: string): Promise<Uint8Array>;
   deleteFont(id: string): Promise<void>;
+  importFontPaths?(paths: string[]): Promise<UserFont[]>;
 }
 
 /** Enumerate fonts exposed by the host. Non-Tauri/browser builds deliberately
@@ -101,6 +102,10 @@ class IndexedDbFontStore implements FontStore {
     } finally {
       db.close();
     }
+  }
+
+  async importFontPaths(paths: string[]): Promise<UserFont[]> {
+    return invoke<UserFont[]>("fonts_import_paths", { paths });
   }
 
   async importFont(input: {

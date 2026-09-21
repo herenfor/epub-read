@@ -12,6 +12,7 @@ EPUB Reader opens EPUB 2.0.1 and EPUB 3.x books as their authors designed them: 
 - **Page layout you control** — four-sided margins, one or two columns per screen and the column gap, adjustable without leaving the page
 - **Illustrations at full size** — click an image in the text to open it in an overlay, then zoom, pan or view it at its original size; closing returns you exactly where you were
 - **Faithful to the book** — percentages, asymmetric margins, floats, full-page illustrations and inline footnote markers keep their intended proportions
+- **One clean window** — the system title bar is replaced by a frame that follows the app theme, keeps the book title and the window controls in the same bar, and lets you drag the window from it
 - **Local by design** — no account and no upload; books are read from where they already are
 
 ## Features

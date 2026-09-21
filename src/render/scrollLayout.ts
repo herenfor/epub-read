@@ -178,3 +178,24 @@ export function scrollViewerStyles(viewportHeight: number, pageMarginPx = 0): Ar
     ["padding-right", `${margin}px`],
   ];
 }
+
+/**
+ * 滚轮平滑滚动目标累加纯函数。
+ *
+ * 输入必须已统一为像素，maxTop 来自本次真实内容范围。
+ * 同向滚轮从尚未到达的目标累加；反向输入从当前画面立即回转。
+ * 调用者保存返回值，交给 viewer.scrollTo({ top, behavior: "smooth" })。
+ */
+export function nextWheelTarget(
+  current: number,
+  pending: number | null | undefined,
+  delta: number,
+  maxTop: number,
+): number {
+  const p = typeof pending === "number" && Number.isFinite(pending) ? pending : null;
+  const c = typeof current === "number" && Number.isFinite(current) ? current : 0;
+  const remaining = p === null ? 0 : p - c;
+  const reversing = remaining * delta < 0;
+  const base = p === null || reversing ? c : p;
+  return Math.max(0, Math.min(maxTop, base + delta));
+}

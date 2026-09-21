@@ -22,6 +22,7 @@ macro_rules! configure_invoke_handler {
             linked_library::linked_library_thumbnail_write_raw,
             linked_library::linked_library_thumbnail_delete,
             fonts_import_raw,
+            fonts_import_paths,
             fonts_list,
             fonts_read,
             fonts_delete,
@@ -102,6 +103,7 @@ macro_rules! configure_invoke_handler {
             linked_library::linked_library_thumbnail_write_raw,
             linked_library::linked_library_thumbnail_delete,
             fonts_import_raw,
+            fonts_import_paths,
             fonts_list,
             fonts_read,
             fonts_delete,
@@ -186,7 +188,8 @@ fn second_instance_activation_steps() -> [ExistingWindowActivation; 3] {
 
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use sha2::{Digest, Sha256};
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager, State};
 
@@ -321,6 +324,60 @@ fn fonts_import_raw(
     entries.push(entry.clone());
     save_fonts(&app, &entries)?;
     Ok(entry)
+}
+
+#[tauri::command]
+fn fonts_import_paths(
+    app: AppHandle,
+    state: State<'_, FontWriteState>,
+    paths: Vec<String>,
+) -> Result<Vec<FontEntry>, String> {
+    let dir = fonts_root(&app)?;
+    fs::create_dir_all(&dir).map_err(|e| format!("无法创建字体目录：{e}"))?;
+    let _guard = state.0.lock().map_err(|_| "字体写入锁已损坏".to_string())?;
+    let mut entries = load_fonts(&app)?;
+    let mut imported = Vec::new();
+
+    for path_str in paths {
+        let p = Path::new(&path_str);
+        let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+        if !["ttf", "otf", "woff", "woff2"].contains(&ext.as_str()) {
+            continue;
+        }
+        let bytes = match fs::read(p) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("无法读取字体文件 {}: {e}", p.display());
+                continue;
+            }
+        };
+        if bytes.is_empty() {
+            continue;
+        }
+        let hash = format!("{:x}", Sha256::digest(&bytes));
+        let file_name = p.file_name().and_then(|s| s.to_str()).unwrap_or("font.ttf").to_string();
+        let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("CustomFont");
+        let family = stem.split_whitespace().collect::<Vec<_>>().join(" ");
+        let file_path = dir.join(&hash);
+        fs::write(&file_path, &bytes).map_err(|e| format!("无法保存字体文件：{e}"))?;
+
+        entries.retain(|e| e.id != hash);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let entry = FontEntry {
+            id: hash,
+            file_name,
+            family,
+            size: bytes.len() as u64,
+            added_at_ms: now,
+        };
+        entries.push(entry.clone());
+        imported.push(entry);
+    }
+    save_fonts(&app, &entries)?;
+    Ok(imported)
 }
 
 #[tauri::command]

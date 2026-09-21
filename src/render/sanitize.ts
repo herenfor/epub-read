@@ -256,7 +256,9 @@ ${
 #${VIEWER_ID} { text-shadow: 1px 1px 1px #1e1e1e; }
 /* [L2] 深色主题目录链接换色：书常写 .toc a{color:#000}。
    与 Sigil 深色预览一致的浅蓝。 */
-#${VIEWER_ID} .toc a { color: #6cb2ff; }`
+#${VIEWER_ID} .toc a { color: #6cb2ff; }
+/* [L2] 深色主题下清除图片投影，避免在深色背景上形成白色光晕 */
+#${VIEWER_ID} img { box-shadow: none !important; }`
     : ""
 }`;
 
@@ -588,7 +590,14 @@ export async function sanitizeChapter(
     // 这里有意使用后代选择器：全页图可能被书籍自己的多层容器包裹，
     // 这些非 img 祖先都需要参与整页高度传递。
     imgStyle.textContent = `
-#${VIEWER_ID}.fullpage-image :not(img):not(svg):not(image) { height: 100% !important; margin: 0 !important; padding: 0 !important; max-width: none !important; }
+#${VIEWER_ID}.fullpage-image :not(img):not(svg):not(image) {
+  width: 100% !important;
+  box-sizing: border-box !important;
+  height: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  max-width: none !important;
+}
 #${VIEWER_ID}.fullpage-image img,
 #${VIEWER_ID}.fullpage-image svg {
   width: 100% !important;
@@ -596,9 +605,37 @@ export async function sanitizeChapter(
   max-width: none !important;
   max-height: none !important;
   border: none !important;
+  box-shadow: none !important;
   object-fit: contain;
 }
 #${VIEWER_ID}.fullpage-image svg { display: block; }`;
+    const headForImg = doc.head ?? doc.documentElement;
+    headForImg.appendChild(imgStyle);
+  } else if ((isPlainImagePage || isInlineSvgImagePage) && opts.settings.readingMode === "scroll") {
+    viewer.setAttribute("class", "pure-image-page");
+    const imgStyle = doc.createElement("style");
+    imgStyle.setAttribute("data-reader", "pure-image-page");
+    imgStyle.textContent = `
+#${VIEWER_ID}.pure-image-page :not(img):not(svg):not(image) {
+  width: 100% !important;
+  box-sizing: border-box !important;
+  height: auto !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  max-width: none !important;
+}
+#${VIEWER_ID}.pure-image-page img,
+#${VIEWER_ID}.pure-image-page svg {
+  width: 100% !important;
+  height: auto !important;
+  max-width: 100% !important;
+  max-height: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  display: block;
+  margin: 0 auto !important;
+}
+#${VIEWER_ID}.pure-image-page svg { display: block; }`;
     const headForImg = doc.head ?? doc.documentElement;
     headForImg.appendChild(imgStyle);
   }

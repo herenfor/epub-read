@@ -1,4 +1,5 @@
 import type { Book } from "../core/types";
+import { disposeBook } from "../core/book";
 
 /**
  * 把书内资源映射为 blob URL（同源，iframe 内可自由引用字体/图片/CSS）。
@@ -12,7 +13,7 @@ export class ResourceServer {
   private textCacheMisses = 0;
 
   constructor(
-    private book: Book,
+    private book: Book | null,
     private textOptions: {
       textCacheMaxBytes?: number;
       textCacheMaxEntries?: number;
@@ -24,7 +25,7 @@ export class ResourceServer {
   urlFor(path: string): string | undefined {
     const cached = this.urls.get(path);
     if (cached) return cached;
-    const res = this.book.resources.get(path);
+    const res = this.book?.resources.get(path);
     if (!res) return undefined;
     const url = URL.createObjectURL(
       new Blob([res.data as BlobPart], { type: res.mediaType || "application/octet-stream" })
@@ -35,7 +36,7 @@ export class ResourceServer {
 
   /** 读取资源文本（按 UTF-8；带 BOM 时尊重 BOM 编码）。 */
   textFor(path: string): string | undefined {
-    const res = this.book.resources.get(path);
+    const res = this.book?.resources.get(path);
     if (!res) return undefined;
     const cached = this.textCache.get(path);
     if (cached) {
@@ -80,6 +81,10 @@ export class ResourceServer {
     this.urls.clear();
     this.textCache.clear();
     this.textCacheBytes = 0;
+    if (this.book) {
+      disposeBook(this.book);
+      this.book = null;
+    }
     // Hit/miss counters are diagnostic lifetime totals; only entries/bytes reset.
   }
 }

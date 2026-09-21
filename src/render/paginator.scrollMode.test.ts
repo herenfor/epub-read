@@ -327,6 +327,44 @@ describe("scroll mode commands", () => {
     expect(viewer.scrollTop).toBe(0); // 夹紧在 0
   });
 
+  it("delegates to native smooth scrollTo when available", () => {
+    const { context, viewer } = scrollContext({ height: 600, content: 5000 });
+    const scrollTo = vi.fn();
+    (viewer as Record<string, unknown>).scrollTo = scrollTo;
+
+    viewer.scrollTop = 200;
+    internals.scrollByDelta.call(context, 120);
+    expect(scrollTo).toHaveBeenCalledWith({ top: 320, behavior: "smooth" });
+
+    internals.scrollByViewport.call(context, 1);
+    expect(scrollTo).toHaveBeenCalledWith({ top: 860, behavior: "smooth" });
+  });
+
+  it("accumulates wheel target across rapid successive inputs without losing displacement", () => {
+    const { context, viewer } = scrollContext({ height: 600, content: 5000 });
+    viewer.scrollTop = 100;
+    // 第一次输入：从 100 加 120 -> 目标 220
+    internals.scrollByDelta.call(context, 120);
+    expect(context.pendingWheelTarget).toBe(220);
+
+    // 第二次输入：浏览器尚在平滑动画中途（视口仅到达 130）
+    viewer.scrollTop = 130;
+    internals.scrollByDelta.call(context, 120);
+    // 关键断言：目标必须基于 pendingWheelTarget(220) 累加至 340，绝不以 130 重启丢失位移！
+    expect(context.pendingWheelTarget).toBe(340);
+
+    // 第三次输入：视口仅到达 150
+    viewer.scrollTop = 150;
+    internals.scrollByDelta.call(context, 120);
+    expect(context.pendingWheelTarget).toBe(460);
+
+    // 第四次输入：动画中途（视口仅到 200），用户紧急反向向上拨动 -100
+    viewer.scrollTop = 200;
+    internals.scrollByDelta.call(context, -100);
+    // 关键断言：反向时立即以当前实际可视位置 200 向上折返（200 - 100 = 100），决不从 460 冲刷！
+    expect(context.pendingWheelTarget).toBe(100);
+  });
+
   it("imageCandidate does not misfire on non-image elements or containers with images in subtree", () => {
     const context = Object.create(ChapterPaginator.prototype) as Record<string, unknown>;
     const { document: doc } = parseHTML("<!doctype html><html><body></body></html>");
@@ -404,5 +442,100 @@ describe("scroll mode commands", () => {
     expect(dividerLast?.textContent).toBe("全书完");
     expect(endElLast?.querySelector(".chapter-end-next-btn")).toBeNull();
     expect(endElLast?.querySelector(".chapter-end-hint")?.textContent).toBe("已读完全部章节");
+  });
+});
+describe("scroll mode C-53 toolbar centering", () => {
+  it("滚动模式下顶层 toolbar 同样触发 C-53 零边距修复并写回居中", () => {
+    const toolbarStyle = {
+      marginLeft: "",
+      marginRight: "",
+      margin: "",
+      _styles: {} as Record<string, { value: string; priority: string }>,
+      setProperty(prop: string, val: string, pri = "") {
+        this._styles[prop] = { value: val, priority: pri };
+      },
+      getPropertyValue(prop: string) {
+        return this._styles[prop]?.value ?? "";
+      },
+      getPropertyPriority(prop: string) {
+        return this._styles[prop]?.priority ?? "";
+      },
+      removeProperty(prop: string) {
+        delete this._styles[prop];
+      },
+    };
+    const toolbar = {
+      nodeType: 1,
+      localName: "div",
+      classList: {
+        contains: (cls: string) => cls === "toolbar" || cls === "reader-top",
+      },
+      hasAttribute: () => false,
+      setAttribute: vi.fn(),
+      removeAttribute: vi.fn(),
+      children: [],
+      parentElement: null as any,
+      style: toolbarStyle,
+      getBoundingClientRect: () => ({ width: 500, height: 40, left: 0, right: 500, top: 0, bottom: 40 }),
+    };
+    const viewer = {
+      clientWidth: 1200,
+      classList: {
+        contains: () => false,
+      },
+      children: [toolbar],
+    };
+    toolbar.parentElement = viewer;
+
+    const doc = {
+      styleSheets: [],
+      defaultView: {
+        getComputedStyle: (el: any) => {
+          if (el === toolbar) {
+            return {
+              marginLeft: "0px",
+              marginRight: "0px",
+              float: "none",
+              clear: "none",
+              display: "block",
+              position: "static",
+              writingMode: "horizontal-tb",
+              width: "500px",
+              maxWidth: "none",
+              boxSizing: "border-box",
+              textAlign: "start",
+              direction: "ltr",
+            };
+          }
+          return {
+            paddingLeft: "0px",
+            paddingRight: "0px",
+            writingMode: "horizontal-tb",
+            clear: "none",
+            float: "none",
+          };
+        },
+      },
+    };
+
+    const context = {
+      contentDoc: doc,
+      viewer,
+      settings: { fontSizePx: 16, gapPx: 40, readingMode: "scroll" },
+      scrollMode: true,
+      fitContentFixes: [],
+      marginFixes: [] as any[],
+      floatLayoutFixes: [] as any[],
+      step: 0,
+      disableReaderTopMarginRules: () => () => {},
+    };
+
+    (ChapterPaginator.prototype as any).applyBookMargins.call(context);
+
+    expect(toolbar.setAttribute).toHaveBeenCalledWith("data-reader-margin-fixed", "1");
+    expect(toolbar.style.getPropertyValue("margin-left")).toBe("auto");
+    expect(toolbar.style.getPropertyPriority("margin-left")).toBe("important");
+    expect(toolbar.style.getPropertyValue("margin-right")).toBe("auto");
+    expect(toolbar.style.getPropertyPriority("margin-right")).toBe("important");
   });
 });

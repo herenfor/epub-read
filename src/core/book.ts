@@ -435,3 +435,19 @@ export function nextLinearIndex(book: Book, from: number, dir: 1 | -1): number {
   }
   return -1;
 }
+
+/**
+ * 释放整本书籍的解析资源（主要为解压的原始字节资源），
+ * 彻底切断 Uint8Array / ArrayBuffer 引用，避免关书后在长期运行中被意外闭包持有。
+ */
+export function disposeBook(book: Book | null | undefined): void {
+  if (!book) return;
+  for (const res of book.resources.values()) {
+    res.data = new Uint8Array(0);
+  }
+  book.resources.clear();
+  book.manifest.clear();
+  book.spine = [];
+  book.guide = [];
+  book.toc = [];
+}

@@ -393,6 +393,8 @@ describe("sanitizeChapter", () => {
     const { html: out } = await sanitizeChapter(html, opts("OEBPS/Text/cover.xhtml"));
     expect(out).toContain('class="fullpage-image"');
     expect(out).toContain("object-fit: contain");
+    expect(out).toContain("width: 100% !important");
+    expect(out).toContain("box-sizing: border-box !important");
     expect(out).toContain("height: 100% !important");
   });
 
@@ -837,5 +839,18 @@ background-position:center center;background-size:cover;background-color:#f9ebdf
     });
     expect(out).not.toContain('class="fullpage-image"');
     expect(out).toContain('data-reader="scroll-mode"');
+    expect(out).toContain('class="pure-image-page"');
+    expect(out).toContain('data-reader="pure-image-page"');
+    expect(out).toContain('width: 100% !important');
+    expect(out).toContain('box-shadow: none !important');
+  });
+
+  it("深色模式下清除图片投影避免浅色光晕", async () => {
+    const html = `<html xmlns="http://www.w3.org/1999/xhtml"><body><p>正文</p><img alt="fig" src="fig.png"/></body></html>`;
+    const { html: out } = await sanitizeChapter(html, {
+      ...opts(),
+      settings: { ...DEFAULT_SETTINGS, theme: "dark" },
+    });
+    expect(out).toContain('img { box-shadow: none !important; }');
   });
 });

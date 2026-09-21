@@ -1,0 +1,116 @@
+/* ---- CSD 客户端一体化顶栏 ---- */
+.titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 36px;
+  width: 100%;
+  user-select: none;
+  -webkit-user-select: none;
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+
+/* 书架视图：顶栏作为流式顶部导航行，背景透明融入书架 */
+.titlebar-shelf {
+  position: relative;
+  background: transparent;
+  padding: 0 0 0 16px;
+  color: var(--fg);
+  border-bottom: 1px solid transparent;
+}
+
+/* 阅读器视图：顶栏绝对定位通顶悬浮，不挤占正文高度 */
+.titlebar-reader {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 44;
+  background: transparent;
+  pointer-events: none;
+  color: var(--fg);
+}
+
+/* 拖拽区域 */
+.titlebar-drag-area {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  pointer-events: auto;
+}
+
+.titlebar-reader .titlebar-drag-area {
+  height: 28px;
+  pointer-events: none;
+}
+
+.titlebar-app-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+  letter-spacing: 0.3px;
+  opacity: 0.85;
+}
+
+/* 窗口三联按键容器 */
+.titlebar-controls {
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+  pointer-events: auto;
+  margin-left: auto;
+}
+
+/* 独立控制按键 */
+.titlebar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 100%;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: default;
+  padding: 0;
+  margin: 0;
+  outline: none;
+  transition: background-color 120ms ease, color 120ms ease, opacity 150ms ease;
+}
+
+.titlebar-btn svg {
+  pointer-events: none;
+}
+
+.titlebar-reader .titlebar-btn {
+  opacity: 0.6;
+}
+
+.titlebar-reader .titlebar-btn:hover {
+  opacity: 1;
+}
+
+/* 最小化 / 最大化 hover */
+.titlebar-minimize:hover,
+.titlebar-maximize:hover {
+  background: var(--btn-tint-hover, rgba(128, 128, 128, 0.16));
+}
+
+.titlebar-minimize:active,
+.titlebar-maximize:active {
+  background: var(--btn-tint, rgba(128, 128, 128, 0.26));
+}
+
+/* 关闭按钮 hover：经典 Windows Fluent 柔和暗红 */
+.titlebar-close:hover {
+  background: #c42b1c !important;
+  color: #ffffff !important;
+}
+
+.titlebar-close:active {
+  background: #b22518 !important;
+  color: #ffffff !important;
+}

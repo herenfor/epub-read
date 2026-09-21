@@ -147,7 +147,7 @@ export function Toolbar(props: ToolbarProps) {
       } catch {}
       if (next) {
         clearHideTimer();
-        setActiveDir("top");
+        setActiveDir("bottom");
       } else {
         scheduleHide(1000);
       }
@@ -157,7 +157,7 @@ export function Toolbar(props: ToolbarProps) {
 
   useEffect(() => {
     if (isPinned) {
-      setActiveDir("top");
+      setActiveDir("bottom");
     } else {
       // 首次开启闪现 1.6 秒提示入口位置，随后从容自动收起
       setActiveDir("top");
@@ -193,15 +193,17 @@ export function Toolbar(props: ToolbarProps) {
   // 单胶囊互斥生效逻辑：
   // 1. 若当前二级面板或模态框打开，强制为 "none"（完全静音隐退）；
   // 2. 若当前有用户主动触发的活动方向（activeDir !== "none"），以当前方向为唯一展示胶囊；
-  // 3. 若当前空闲（activeDir === "none"），若开启了 Pin 或书签面板展开中，则恢复顶部状态岛常驻；否则全隐。
+  // 3. 若当前空闲（activeDir === "none"），若开启了 Pin 则恢复底部操作坞常驻；若书签面板展开中则保留顶部状态岛；否则全隐。
   const effectiveDir: CapsuleDirection =
     props.isPanelOpen
       ? "none"
       : activeDir !== "none"
         ? activeDir
-        : isPinned || props.bookmarkMenuOpen
-          ? "top"
-          : "none";
+        : isPinned
+          ? "bottom"
+          : props.bookmarkMenuOpen
+            ? "top"
+            : "none";
 
   const isTopOpen = effectiveDir === "top";
   const isBottomOpen = effectiveDir === "bottom";
@@ -323,8 +325,8 @@ export function Toolbar(props: ToolbarProps) {
           )}
         </div>
 
-        <div className="top-island-center">
-          <span className="tb-title" title={props.title}>
+        <div className="top-island-center" data-tauri-drag-region="">
+          <span className="tb-title" title={props.title} data-tauri-drag-region="">
             {props.title}
           </span>
         </div>
@@ -396,18 +398,10 @@ export function Toolbar(props: ToolbarProps) {
               )}
             </div>
           )}
-          <button
-            className={`tb-btn tb-pin${isPinned ? " active" : ""}`}
-            onClick={togglePin}
-            title={isPinned ? "取消常驻（自动隐藏，不遮挡正文）" : "常驻顶端显示"}
-            aria-label={isPinned ? "取消常驻" : "常驻顶端显示"}
-          >
-            <PinIcon size={15} pinned={isPinned} />
-          </button>
         </div>
       </header>
 
-      {/* ---- 底部操作坞：核心操作工具（历史前进后退、目录、搜索、笔记、设置/菜单、AI、诊断） ---- */}
+      {/* ---- 底部操作坞：核心操作工具（历史前进后退、目录、搜索、笔记、设置/菜单、AI、常驻） ---- */}
       <nav
         className={`toolbar-bottom-dock ${isBottomOpen ? "is-visible" : "is-hidden"} ${isPinned ? "is-pinned" : ""}`}
         onMouseEnter={() => showDirection("bottom")}
@@ -474,6 +468,15 @@ export function Toolbar(props: ToolbarProps) {
             <span className="tb-btn-text">AI</span>
           </button>
         )}
+
+        <button
+          className={`tb-btn tb-dock-btn tb-pin${isPinned ? " active" : ""}`}
+          onClick={togglePin}
+          title={isPinned ? "取消常驻（自动隐藏，不遮挡正文）" : "常驻底端显示"}
+          aria-label={isPinned ? "取消常驻" : "常驻底端显示"}
+        >
+          <PinIcon size={18} pinned={isPinned} />
+        </button>
       </nav>
     </div>
   );

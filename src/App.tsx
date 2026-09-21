@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
-import { loadBook, spineIndexForPath, spineItemPath, DrmError } from "./core/book";
+import { loadBook, spineIndexForPath, spineItemPath, DrmError, disposeBook } from "./core/book";
 import type { Book } from "./core/types";
 import { isFragmentOnly, splitHref } from "./core/paths";
 import {
@@ -20,6 +20,7 @@ import type { ChapterState, PreciseNavigationStatus } from "./render/paginator";
 import { normalizePageOptions } from "./render/pageLayout";
 import type { ImageViewRequest } from "./render/imageActivation";
 import { ImageViewer } from "./ui/ImageViewer";
+import { TitleBar } from "./ui/TitleBar";
 import { Toolbar } from "./ui/Toolbar";
 import { MenuPanel } from "./ui/MenuPanel";
 import { FontSettingsPanel } from "./ui/FontSettingsPanel";
@@ -43,6 +44,7 @@ import { FootnotePop } from "./ui/FootnotePop";
 import { TocPanel } from "./ui/TocPanel";
 import { LogPanel, type LogItem } from "./ui/LogPanel";
 import { ReaderView, type ReaderHandle } from "./ui/ReaderView";
+import type { ReaderNoteForPaginator } from "./render/paginator";
 import { ShelfView } from "./ui/ShelfView";
 import {
   applyShelfProgressPatch,
@@ -113,7 +115,7 @@ import {
   type SavedProgress,
 } from "./ui/storage";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { isPhysicalPointInsideRect, partitionFontItems, runFontImportBatch } from "./ui/fontDrop";
+import { isPhysicalPointInsideRect, isSupportedFontFileName, partitionFontItems, runFontImportBatch } from "./ui/fontDrop";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open as openFileDialog, save as saveFileDialog } from "@tauri-apps/plugin-dialog";
 import { readFile, readTextFile, stat as statFile, writeTextFile } from "@tauri-apps/plugin-fs";
@@ -139,6 +141,9 @@ import { shouldShowAiFoundationEntry } from "./ui/aiEntry";
 const LazyAiFoundationPanel = IS_AI_EDITION
   ? lazy(() => import("./features/ai/ui/AiFoundationPanel").then(({ AiFoundationPanel }) => ({ default: AiFoundationPanel })))
   : null;
+
+const EMPTY_NOTES: ReaderNote[] = [];
+const EMPTY_CHAPTER_NOTES: ReaderNoteForPaginator[] = [];
 
 function isTauriEnv(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -226,6 +231,14 @@ function chapterLabelForIndex(b: Book, index: number): string {
     return "";
   };
   return walk(b.toc);
+}
+
+/**
+ * 模块级阅读器闭包工厂：严禁在 App 组件体内内联创建带词法作用域的闭包，
+ * 避免 long-lived 的 LibrarySearchRuntime.books 隐式持有 App 内部的 Book / ResourceServer。
+ */
+function createShelfBookReader(id: string): () => Promise<Uint8Array> {
+  return () => getShelfStore().readBook(id);
 }
 
 export default function App() {
@@ -538,6 +551,8 @@ export default function App() {
   chapterStateRef.current = chapterState;
   const bookRef = useRef<Book | null>(book);
   bookRef.current = book;
+  const serverRef = useRef<ResourceServer | null>(server);
+  serverRef.current = server;
   const spineIndexRef = useRef(spineIndex);
   spineIndexRef.current = spineIndex;
   const navigationPendingRef = useRef(false);
@@ -591,7 +606,7 @@ export default function App() {
         language: entry.language,
         available: entry.available !== false,
         fileSize: entry.fileSize,
-        read: () => getShelfStore().readBook(entry.id),
+        read: createShelfBookReader(entry.id),
       })));
   }, [librarySearchRuntime, shelfEntries]);
 
@@ -710,6 +725,10 @@ export default function App() {
       countCacheKey: string | null,
       baselineProgressPct: number
     ) => {
+      if (activeSessionRef.current && activeSessionRef.current.server !== srv) {
+        activeSessionRef.current.server.revokeAll();
+        disposeBook(activeSessionRef.current.book);
+      }
       const key = bookKeyOf(b, fileName, fileSize);
       const saved = savedOverride ?? readProgress(key);
       const generation = ++sessionGenerationRef.current;
@@ -1174,15 +1193,54 @@ export default function App() {
 
   const handleImportFonts = useCallback((files: File[]) => handleImportFontBatch(files, (file) => file.name, async (file) => file), [handleImportFontBatch]);
   const handleImportFont = useCallback((file: File) => handleImportFonts([file]), [handleImportFonts]);
-  const handleImportFontPaths = useCallback((paths: string[]) => handleImportFontBatch(
-    paths,
-    (path) => path.split(/[\\/]/).pop() || path,
-    async (path) => {
-      const name = path.split(/[\\/]/).pop() || "font";
-      const bytes = await readFile(path);
-      return new File([bytes.slice().buffer as ArrayBuffer], name);
+    const handleImportFontPaths = useCallback(async (paths: string[]) => {
+    if (fontImportBusyRef.current || paths.length === 0) return;
+    fontImportBusyRef.current = true;
+    setFontBusy(true);
+    try {
+      const store = getFontStore();
+      if (store.importFontPaths) {
+        const entries = await store.importFontPaths(paths);
+        if (entries.length > 0) {
+          setUserFonts((prev) => {
+            const newIds = new Set(entries.map((e) => e.id));
+            return [...entries, ...prev.filter((f) => !newIds.has(f.id))];
+          });
+          const last = entries[0];
+          setSettings((previous) => ({
+            ...previous,
+            fontSource: "imported",
+            customFontId: last.id,
+            customFontName: last.family,
+          }));
+          setShelfNotice({
+            kind: "ok",
+            text: entries.length === 1 ? `已导入字体：${last.family}` : `已导入 ${entries.length} 个字体`,
+          });
+        } else {
+          setShelfNotice({
+            kind: "error",
+            text: "未发现支持的字体文件，仅支持 TTF/OTF/WOFF/WOFF2",
+          });
+        }
+      } else {
+        await handleImportFontBatch(
+          paths,
+          (path) => path.split(/[\\/]/).pop() || path,
+          async (path) => {
+            const name = path.split(/[\\/]/).pop() || "font";
+            const bytes = await readFile(path);
+            return new File([bytes.slice().buffer as ArrayBuffer], name);
+          }
+        );
+      }
+    } catch (e) {
+      setShelfNotice({ kind: "error", text: `字体导入失败：${String(e)}` });
+    } finally {
+      fontImportBusyRef.current = false;
+      setFontBusy(false);
     }
-  ), [handleImportFontBatch]);
+  }, [handleImportFontBatch]);
 
   useEffect(() => {
     if (!fontSettingsOpen) setFontNativeDragActive(false);
@@ -1443,7 +1501,7 @@ export default function App() {
     try {
       await getShelfStore().deleteBook(id);
       setShelfEntries((prev) => prev.filter((e) => e.id !== id));
-      if (currentShelfId === id) setCurrentShelfId(null);
+      setCurrentShelfId((curr) => (curr === id ? null : curr));
       setShelfError(null);
     } catch (e) {
       setShelfError(`删除失败：${String(e)}`);
@@ -1451,7 +1509,7 @@ export default function App() {
       shelfBusyRef.current = false;
       setShelfBusy(false);
     }
-  }, [currentShelfId]);
+  }, []);
 
   const handleShelfDeleteMany = useCallback(async (ids: string[]) => {
     if (shelfBusyRef.current || ids.length === 0) return;
@@ -1461,7 +1519,7 @@ export default function App() {
       const { deleted, failed } = await deleteShelfBooks(getShelfStore(), ids);
       const deletedIds = new Set(deleted);
       setShelfEntries((prev) => prev.filter((entry) => !deletedIds.has(entry.id)));
-      if (currentShelfId && deletedIds.has(currentShelfId)) setCurrentShelfId(null);
+      setCurrentShelfId((curr) => (curr && deletedIds.has(curr) ? null : curr));
       if (failed.length === 0) {
         setShelfError(null);
         setShelfNotice({ kind: "ok", text: `已删除 ${deleted.length} 本` });
@@ -1472,7 +1530,7 @@ export default function App() {
       shelfBusyRef.current = false;
       setShelfBusy(false);
     }
-  }, [currentShelfId]);
+  }, []);
 
   // ---- 章节状态回调 ----
   const onPageState = useCallback((s: ChapterState) => {
@@ -1894,21 +1952,24 @@ export default function App() {
 
   // ---- 正文笔记 ----
   const currentNotes: ReaderNote[] = currentShelfId
-    ? (shelfEntries.find((entry) => entry.id === currentShelfId)?.notes ?? [])
-    : [];
+    ? (shelfEntries.find((entry) => entry.id === currentShelfId)?.notes ?? EMPTY_NOTES)
+    : EMPTY_NOTES;
   const currentChapterPath = book ? spineItemPath(book, spineIndex) : undefined;
-  const currentChapterNotes = currentChapterPath
-    ? currentNotes
-        .filter((note) => note.spineIndex === spineIndex && note.chapterPath === currentChapterPath)
-        .map((note) => ({
-          id: note.id,
-          startTextOffset: note.startTextOffset,
-          endTextOffset: note.endTextOffset,
-          startTextSnippet: note.startTextSnippet,
-          endTextSnippet: note.endTextSnippet,
-          selectedText: note.selectedText,
-        }))
-    : [];
+  const currentChapterNotes = useMemo(() => {
+    if (!currentChapterPath || currentNotes.length === 0) return EMPTY_CHAPTER_NOTES;
+    const filtered = currentNotes.filter(
+      (note) => note.spineIndex === spineIndex && note.chapterPath === currentChapterPath
+    );
+    if (filtered.length === 0) return EMPTY_CHAPTER_NOTES;
+    return filtered.map((note) => ({
+      id: note.id,
+      startTextOffset: note.startTextOffset,
+      endTextOffset: note.endTextOffset,
+      startTextSnippet: note.startTextSnippet,
+      endTextSnippet: note.endTextSnippet,
+      selectedText: note.selectedText,
+    }));
+  }, [currentNotes, spineIndex, currentChapterPath]);
   const noteViewModels: NoteViewModel[] = book
     ? currentNotes.map((note) => ({
         id: note.id,
@@ -2380,11 +2441,14 @@ export default function App() {
       const prevent = (e: DragEvent): void => e.preventDefault();
       const drop = (e: DragEvent): void => {
         e.preventDefault();
-        const files = Array.from(e.dataTransfer?.files ?? []).filter((f) =>
-          f.name.toLowerCase().endsWith(".epub")
-        );
-        if (files.length > 0) {
-          void handleImportSources(files.map((file) => ({ kind: "file" as const, file })));
+        const files = Array.from(e.dataTransfer?.files ?? []);
+        const epubFiles = files.filter((f) => f.name.toLowerCase().endsWith(".epub"));
+        const fontFiles = files.filter((f) => isSupportedFontFileName(f.name));
+        if (epubFiles.length > 0) {
+          void handleImportSources(epubFiles.map((file) => ({ kind: "file" as const, file })));
+        }
+        if (fontFiles.length > 0) {
+          void handleImportFonts(fontFiles);
         }
       };
       window.addEventListener("dragover", prevent);
@@ -2397,6 +2461,7 @@ export default function App() {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
     let nativeDragHasEpub = false;
+    let nativeDragHasFont = false;
     const isOverFontPanel = (position: { x: number; y: number }): boolean => {
       if (!fontSettingsOpen) return false;
       const panel = document.querySelector<HTMLElement>(".font-settings-panel");
@@ -2405,37 +2470,41 @@ export default function App() {
     };
     const updateNativeDragVisual = (overFontPanel: boolean): void => {
       setFontNativeDragActive(overFontPanel);
-      setDragActive(!overFontPanel && nativeDragHasEpub);
+      setDragActive(!overFontPanel && (nativeDragHasEpub || nativeDragHasFont));
     };
     getCurrentWebview()
       .onDragDropEvent((event) => {
         const p = event.payload;
         if (p.type === "enter") {
           nativeDragHasEpub = p.paths.some((path) => path.toLowerCase().endsWith(".epub"));
+          nativeDragHasFont = p.paths.some((path) => isSupportedFontFileName(path));
           updateNativeDragVisual(isOverFontPanel(p.position));
         } else if (p.type === "over") {
           updateNativeDragVisual(isOverFontPanel(p.position));
         } else if (p.type === "leave") {
           nativeDragHasEpub = false;
+          nativeDragHasFont = false;
           setDragActive(false);
           setFontNativeDragActive(false);
         } else if (p.type === "drop") {
           nativeDragHasEpub = false;
+          nativeDragHasFont = false;
           setDragActive(false);
           setFontNativeDragActive(false);
-          if (isOverFontPanel(p.position)) {
-            void handleImportFontPaths(p.paths);
-            return;
+          const fontPaths = p.paths.filter((path) => isSupportedFontFileName(path));
+          const epubPaths = p.paths.filter((path) => path.toLowerCase().endsWith(".epub"));
+          if (fontPaths.length > 0) {
+            void handleImportFontPaths(fontPaths);
           }
-          const paths = p.paths.filter((x) => x.toLowerCase().endsWith(".epub"));
-          if (paths.length === 0) return;
-          void handleImportSources(
-            paths.map((path) => ({
-              kind: "path" as const,
-              path,
-              name: path.split(/[\\/]/).pop() || "book.epub",
-            }))
-          );
+          if (epubPaths.length > 0) {
+            void handleImportSources(
+              epubPaths.map((path) => ({
+                kind: "path" as const,
+                path,
+                name: path.split(/[\\/]/).pop() || "book.epub",
+              }))
+            );
+          }
         }
       })
       .then((u) => {
@@ -2587,6 +2656,11 @@ export default function App() {
     chapterCountJobRef.current = null;
     sessionGenerationRef.current++;
     activeSessionRef.current = null;
+    if (bookRef.current) {
+      disposeBook(bookRef.current);
+      bookRef.current = null;
+    }
+    setCurrentShelfId(null);
     // 只先切换视图。下一次 React 提交会卸载 ReaderView；ReaderView cleanup
     // 先 dispose paginator、再 revoke ResourceServer，随后会话清理 effect
     // 才清空 book/server 等状态，避免 iframe 仍在读资源时提前撤销。
@@ -2595,16 +2669,26 @@ export default function App() {
     setShelfBusy(false);
   }, [persistShelfProgress, persistChapterCountCache, closeForeground, closeImageOverlay]);
 
-  // 视图提交后清空整本书会话状态。ResourceServer 的实际 revoke 由
-  // ReaderView 的 server 依赖 cleanup 执行，并且发生在 paginator dispose 之后。
+  // 视图提交后清空整本书会话状态。ResourceServer 的实际 revoke 与 Book 释放由
+  // 会话退出执行，并且发生在 ReaderView 卸载与 paginator dispose 之后。
   useEffect(() => {
     if (view === "reader") return;
     chapterCountJobRef.current?.cancel();
     chapterCountJobRef.current = null;
     sessionGenerationRef.current++;
     activeSessionRef.current = null;
+    serverRef.current?.revokeAll();
+    serverRef.current = null;
+    if (bookRef.current) {
+      disposeBook(bookRef.current);
+      bookRef.current = null;
+    }
+    if (book) {
+      disposeBook(book);
+    }
     setBook(null);
     setServer(null);
+    setCurrentShelfId(null);
     setBookKey("");
     setSpineIndex(0);
     setAnchor(undefined);
@@ -2763,6 +2847,10 @@ export default function App() {
       data-theme={settings.theme === "dark" ? "dark" : settings.theme === "sepia" ? "sepia" : undefined}
       style={{ "--ui-scale": uiScale } as CSSProperties}
     >
+      <TitleBar
+        view={view}
+        title={view === "reader" ? (ready ? book!.metadata.title : (book?.metadata.title ?? "")) : "EPUB 阅读器"}
+      />
       {view === "reader" && <Toolbar
         title={ready ? book!.metadata.title : (book?.metadata.title ?? "")}
         issueCount={logItems.length}
