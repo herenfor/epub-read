@@ -52,7 +52,7 @@ EPUB 文件的实现差异很大，阅读器为此做了容错：
 
 ## 下载
 
-Windows 安装包与免安装版发布在 [Releases](https://github.com/herenfor/eupb-read/releases) 页面。
+Windows 安装包与免安装版发布在 [Releases](https://github.com/herenfor/epub-read/releases) 页面。
 
 Windows 10/11 已自带所需的 WebView2 运行时；较旧或精简版系统可能需要先安装常青版 WebView2 运行时。
 

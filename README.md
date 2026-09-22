@@ -52,7 +52,7 @@ EPUB files vary a great deal, and the reader is built to tolerate that:
 
 ## Download
 
-Windows installers and portable builds are published on the [Releases](https://github.com/herenfor/eupb-read/releases) page.
+Windows installers and portable builds are published on the [Releases](https://github.com/herenfor/epub-read/releases) page.
 
 Windows 10 and 11 already include the required WebView2 runtime; older or trimmed-down systems may need to install the evergreen WebView2 runtime first.
 
