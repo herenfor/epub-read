@@ -110,6 +110,11 @@
   color: #f43f5e;
 }
 
+.titlebar-bookmark-list-btn.active {
+  opacity: 1;
+  background: var(--btn-tint-hover);
+}
+
 /* 窗口三联按键容器 */
 .titlebar-controls {
   display: flex;

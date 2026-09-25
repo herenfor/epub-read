@@ -34,19 +34,12 @@ export interface ToolbarProps {
   onOpenAssistant?: () => void;
   /** 书签：添加/移除当前页书签 */
   onToggleBookmark?: () => void;
+  /** 当前页是否已有书签（仅决定“添加/移除”按钮外观）。 */
   isBookmarked?: boolean;
-  onOpenBookmarks?: () => void;
-  onCloseBookmarks?: () => void;
-  bookmarkMenuOpen?: boolean;
-  bookmarks?: Array<{
-    id: string;
-    text: string;
-    spineIndex: number;
-    page: number;
-    createdAtMs: number;
-    chapterLabel?: string;
-  }>;
-  onSelectBookmark?: (id: string) => void;
+  /** 书签浮层的唯一入口。列表已移出工具栏，由 App 渲染；本组件只负责按钮。 */
+  onOpenBookmarks?: (button: HTMLButtonElement) => void;
+  /** 书签浮层是否已展开（唯一开关仍为 ReaderForeground 的 bookmarks 面板）。 */
+  bookmarksOpen?: boolean;
   onToggleMenu?: () => void;
   onToggleLog?: () => void;
   /** 当阅读器二级面板或模态框打开时为 true，彻底抑制所有边缘感应与悬浮胶囊 */
@@ -56,9 +49,6 @@ export interface ToolbarProps {
 type CapsuleDirection = "none" | "top" | "bottom" | "left" | "right";
 
 export function Toolbar(props: ToolbarProps) {
-  // Bookmark popover smooth exit transition
-  const [closingBookmarks, setClosingBookmarks] = useState(false);
-  const closeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shelfBackLockRef = useRef(false);
 
   // Pin state & 500ms debounce cooldown
@@ -92,7 +82,7 @@ export function Toolbar(props: ToolbarProps) {
 
   const scheduleHide = (delay = 1000) => {
     clearHideTimer();
-    if (props.isPanelOpen || props.bookmarkMenuOpen) return;
+    if (props.isPanelOpen || props.bookmarksOpen) return;
     hideTimerRef.current = setTimeout(() => {
       setActiveDir("none");
     }, delay);
@@ -100,7 +90,7 @@ export function Toolbar(props: ToolbarProps) {
 
   const showDirection = (dir: CapsuleDirection) => {
     if (props.isPanelOpen) return;
-    if (props.bookmarkMenuOpen && dir !== "top") return;
+    if (props.bookmarksOpen && dir !== "top") return;
     clearHideTimer();
     // 切换到新方向，其它方向立即收起
     setActiveDir(dir);
@@ -166,21 +156,6 @@ export function Toolbar(props: ToolbarProps) {
     return () => clearHideTimer();
   }, [isPinned]);
 
-  const requestCloseBookmarks = () => {
-    if (closingBookmarks || !props.bookmarkMenuOpen) return;
-    setClosingBookmarks(true);
-    closeTimeoutRef.current = setTimeout(() => {
-      setClosingBookmarks(false);
-      props.onCloseBookmarks?.();
-    }, 150);
-  };
-
-  useEffect(() => {
-    return () => {
-      if (closeTimeoutRef.current) clearTimeout(closeTimeoutRef.current);
-    };
-  }, []);
-
   const handleBackToShelf = () => {
     if (shelfBackLockRef.current) return;
     shelfBackLockRef.current = true;
@@ -192,18 +167,17 @@ export function Toolbar(props: ToolbarProps) {
 
   // 单胶囊互斥生效逻辑：
   // 1. 若当前二级面板或模态框打开，强制为 "none"（完全静音隐退）；
-  // 2. 若当前有用户主动触发的活动方向（activeDir !== "none"），以当前方向为唯一展示胶囊；
-  // 3. 若当前空闲（activeDir === "none"），若开启了 Pin 则恢复底部操作坞常驻；若书签面板展开中则保留顶部状态岛；否则全隐。
+  // 2. 书签展开必须优先于 Pin 与旧 activeDir：书签浮层的入口按钮就在顶部状态岛里，
+  //    若被 Pin/旧方向压掉，打开后入口会自己消失；
+  // 3. 若当前空闲（activeDir === "none"），若开启了 Pin 则恢复底部操作坞常驻，否则全隐。
   const effectiveDir: CapsuleDirection =
     props.isPanelOpen
       ? "none"
-      : activeDir !== "none"
-        ? activeDir
-        : isPinned
-          ? "bottom"
-          : props.bookmarkMenuOpen
-            ? "top"
-            : "none";
+      : props.bookmarksOpen
+        ? "top"
+        : activeDir !== "none"
+          ? activeDir
+          : isPinned ? "bottom" : "none";
 
   const isTopOpen = effectiveDir === "top";
   const isBottomOpen = effectiveDir === "bottom";
@@ -335,6 +309,7 @@ export function Toolbar(props: ToolbarProps) {
           {props.onToggleBookmark && (
             <div className="toolbar-bookmark">
               <button
+                type="button"
                 className={`tb-btn bookmark-toggle${props.isBookmarked ? " active" : ""}`}
                 onClick={props.onToggleBookmark}
                 title={props.isBookmarked ? "移除当前页书签" : "添加当前页书签"}
@@ -343,59 +318,15 @@ export function Toolbar(props: ToolbarProps) {
                 <BookmarkIcon size={16} active={props.isBookmarked} />
               </button>
               <button
-                className={`tb-btn bookmark-dropdown${props.bookmarkMenuOpen ? " active" : ""}`}
-                onClick={() => {
-                  if (props.bookmarkMenuOpen) requestCloseBookmarks();
-                  else props.onOpenBookmarks?.();
-                }}
+                type="button"
+                className={`tb-btn bookmark-dropdown${props.bookmarksOpen ? " active" : ""}`}
+                onClick={(event) => props.onOpenBookmarks?.(event.currentTarget)}
                 title="书签列表"
                 aria-label="书签列表"
+                aria-expanded={props.bookmarksOpen === true}
               >
-                <ChevronDownIcon size={12} className={props.bookmarkMenuOpen ? "chevron-open" : ""} />
+                <ChevronDownIcon size={12} className={props.bookmarksOpen ? "chevron-open" : ""} />
               </button>
-              {(props.bookmarkMenuOpen || closingBookmarks) && (
-                <>
-                  <div
-                    className={`bookmark-backdrop${closingBookmarks ? " closing" : ""}`}
-                    onClick={requestCloseBookmarks}
-                  />
-                  <div className={`bookmark-pop${closingBookmarks ? " closing" : ""}`}>
-                    <div className="bookmark-pop-title">
-                      <span>书签</span>
-                      {props.bookmarks && props.bookmarks.length > 0 ? (
-                        <span className="bookmark-pop-count">{props.bookmarks.length}</span>
-                      ) : null}
-                    </div>
-                    {!props.bookmarks || props.bookmarks.length === 0 ? (
-                      <div className="bookmark-empty">暂无书签</div>
-                    ) : (
-                      props.bookmarks.map((bookmark) => (
-                        <button
-                          key={bookmark.id}
-                          className="bookmark-item"
-                          onClick={() => {
-                            requestCloseBookmarks();
-                            props.onSelectBookmark?.(bookmark.id);
-                          }}
-                          title={bookmark.text}
-                        >
-                          <span className="bookmark-icon">
-                            <BookmarkIcon size={14} active={true} />
-                          </span>
-                          <span className="bookmark-main">
-                            <span className="bookmark-text">
-                              {bookmark.text || "（无文字）"}
-                            </span>
-                            <span className="bookmark-chapter">
-                              {bookmark.chapterLabel || ""}
-                            </span>
-                          </span>
-                        </button>
-                      ))
-                    )}
-                  </div>
-                </>
-              )}
             </div>
           )}
         </div>

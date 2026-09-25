@@ -19,31 +19,26 @@ describe("Toolbar 书签与面板互斥渲染", () => {
     expect(activeHtml).toContain('fill="currentColor"');
   });
 
-  it("展开书签菜单时显示摘录和章节", () => {
-    const popHtml = renderToStaticMarkup(
+  it("书签列表不再渲染在工具栏内，只保留触发按钮", () => {
+    const html = renderToStaticMarkup(
       createElement(Toolbar, {
         title: "测试书籍标题",
         issueCount: 0,
         onToggleBookmark: () => {},
-        bookmarkMenuOpen: true,
-        bookmarks: [
-          {
-            id: "b1",
-            text: "重要段落摘录",
-            spineIndex: 0,
-            page: 1,
-            createdAtMs: Date.now(),
-            chapterLabel: "第一章",
-          },
-        ],
+        onOpenBookmarks: () => {},
+        bookmarksOpen: true,
+        isBookmarked: true,
       })
     );
 
-    expect(popHtml).toContain("bookmark-pop");
-    expect(popHtml).toContain("bookmark-item");
-    expect(popHtml).toContain("重要段落摘录");
-    expect(popHtml).toContain("第一章");
-    expect(popHtml).toContain("reader-svg-icon");
+    // 浮层已提升为 App 的前景层：工具栏内不得再出现列表、空态与遮罩。
+    expect(html).not.toContain("bookmark-pop");
+    expect(html).not.toContain("bookmark-backdrop");
+    expect(html).not.toContain("bookmark-item");
+    expect(html).toContain("bookmark-dropdown active");
+    expect(html).toContain('aria-expanded="true"');
+    // 打开时顶部状态岛必须保持可见：否则 Pin/旧方向会把入口自己压掉。
+    expect(html).toContain("toolbar-top-island is-visible");
   });
 
   it("打开其他面板时隐藏工具栏及感应区", () => {

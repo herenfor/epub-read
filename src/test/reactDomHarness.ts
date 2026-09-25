@@ -10,6 +10,7 @@ export function createReactDomHarness() {
   window.innerHeight = 768;
   vi.stubGlobal("window", window);
   vi.stubGlobal("document", window.document);
+  vi.stubGlobal("Element", window.Element);
   vi.stubGlobal("HTMLElement", window.HTMLElement);
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const container = window.document.getElementById("root") as unknown as HTMLElement;

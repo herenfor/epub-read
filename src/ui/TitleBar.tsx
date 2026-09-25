@@ -12,7 +12,10 @@ export interface TitleBarProps {
   onBackToShelf?: () => void;
   isBookmarked?: boolean;
   onToggleBookmark?: () => void;
-  onOpenBookmarks?: () => void;
+  /** 书签浮层是否已展开；只影响按钮外观，浮层本体由 App 渲染。 */
+  bookmarksOpen?: boolean;
+  /** 收到实际点击的按钮，供 App 决定浮层定位与焦点归属。 */
+  onOpenBookmarks?: (button: HTMLButtonElement) => void;
 }
 
 export const TitleBar: React.FC<TitleBarProps> = ({
@@ -21,6 +24,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   onBackToShelf,
   isBookmarked,
   onToggleBookmark,
+  bookmarksOpen,
   onOpenBookmarks,
 }) => {
   const [isMaximized, setIsMaximized] = useState(false);
@@ -117,10 +121,11 @@ export const TitleBar: React.FC<TitleBarProps> = ({
           {onOpenBookmarks && (
             <button
               type="button"
-              className="titlebar-action-btn titlebar-bookmark-list-btn"
-              onClick={onOpenBookmarks}
+              className={`titlebar-action-btn titlebar-bookmark-list-btn${bookmarksOpen ? " active" : ""}`}
+              onClick={(event) => onOpenBookmarks(event.currentTarget)}
               title="查看所有书签"
               aria-label="查看所有书签"
+              aria-expanded={bookmarksOpen === true}
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M6 9l6 6 6-6" />

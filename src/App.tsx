@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { loadBook, spineIndexForPath, spineItemPath, DrmError, disposeBook } from "./core/book";
 import type { Book } from "./core/types";
 import { isFragmentOnly, splitHref } from "./core/paths";
@@ -22,6 +22,7 @@ import type { ImageViewRequest } from "./render/imageActivation";
 import { ImageViewer } from "./ui/ImageViewer";
 import { TitleBar } from "./ui/TitleBar";
 import { Toolbar } from "./ui/Toolbar";
+import { BookmarksPopover } from "./ui/BookmarksPopover";
 import { MenuPanel } from "./ui/MenuPanel";
 import { FontSettingsPanel } from "./ui/FontSettingsPanel";
 import { SearchPanel, type SearchPanelResult, type SearchScope, type SearchStatus } from "./ui/SearchPanel";
@@ -2291,6 +2292,38 @@ export default function App() {
         }))
     : [];
 
+  // 标题栏与工具栏共用同一个书签浮层开关：ReaderForeground 的 bookmarks 面板
+  // 仍是唯一状态来源，这里只额外记住“这次是哪个按钮打开的”，用于定位与焦点归还。
+  const bookmarkAnchorRef = useRef<HTMLButtonElement | null>(null);
+  const bookmarkClosedRef = useRef(false);
+  const [bookmarkAnchorRect, setBookmarkAnchorRect] = useState<DOMRect | null>(null);
+  const handleToggleBookmarks = useCallback(
+    (button: HTMLButtonElement): void => {
+      if (foregroundRef.current.kind === "panel" && foregroundRef.current.panel === "bookmarks") {
+        closePanel("bookmarks");
+        return;
+      }
+      bookmarkAnchorRef.current = button;
+      setBookmarkAnchorRect(button.getBoundingClientRect());
+      openPanel("bookmarks");
+    },
+    [openPanel, closePanel]
+  );
+
+  // Esc/外部点击关闭后，把焦点还给仍可见的触发按钮；它已被隐藏时不动焦点，
+  // 避免抢回阅读器焦点。
+  useLayoutEffect(() => {
+    if (bookmarkMenuOpen) {
+      bookmarkClosedRef.current = false;
+      return;
+    }
+    if (bookmarkClosedRef.current) return;
+    bookmarkClosedRef.current = true;
+    const button = bookmarkAnchorRef.current;
+    if (!button || !button.isConnected || button.getClientRects().length === 0) return;
+    button.focus({ preventScroll: true });
+  }, [bookmarkMenuOpen]);
+
   const handleToggleBookmark = useCallback(() => {
     if (!currentShelfId || chapterState.status !== "ready") return;
     const existing = currentBookmarks.find(
@@ -3019,7 +3052,8 @@ export default function App() {
         onBackToShelf={view === "reader" ? handleBackToShelf : undefined}
         isBookmarked={view === "reader" && isCurrentPageBookmarked}
         onToggleBookmark={view === "reader" ? handleToggleBookmark : undefined}
-        onOpenBookmarks={view === "reader" ? () => openPanel("bookmarks") : undefined}
+        bookmarksOpen={view === "reader" && bookmarkMenuOpen}
+        onOpenBookmarks={view === "reader" ? handleToggleBookmarks : undefined}
       />
       {view === "reader" && <Toolbar
         title={ready ? book!.metadata.title : (book?.metadata.title ?? "")}
@@ -3032,11 +3066,8 @@ export default function App() {
         canHistoryForward={readerHistory.forward.length > 0 && readerDisplayReady && !navigationPendingRef.current}
         onToggleBookmark={view === "reader" ? handleToggleBookmark : undefined}
         isBookmarked={view === "reader" && isCurrentPageBookmarked}
-        onOpenBookmarks={view === "reader" ? () => openPanel("bookmarks") : undefined}
-        onCloseBookmarks={() => closePanel("bookmarks")}
-        bookmarkMenuOpen={view === "reader" && bookmarkMenuOpen}
-        bookmarks={view === "reader" ? sortedBookmarks : []}
-        onSelectBookmark={handleSelectBookmark}
+        onOpenBookmarks={view === "reader" ? handleToggleBookmarks : undefined}
+        bookmarksOpen={view === "reader" && bookmarkMenuOpen}
         onOpenToc={
           view === "reader"
             ? () => openPanel("toc")
@@ -3070,6 +3101,17 @@ export default function App() {
         }
         onToggleLog={view === "reader" ? handleToggleLog : undefined}
       />}
+      {/* 唯一书签浮层：作为顶栏/工具栏的兄弟节点挂在 App 前景层，
+          既保留 .app 主题继承，又不会被隐藏重复顶部岛的规则一起隐藏。 */}
+      {view === "reader" && ready && bookmarkMenuOpen && (
+        <BookmarksPopover
+          anchor={bookmarkAnchorRef.current}
+          fallbackRect={bookmarkAnchorRect}
+          bookmarks={sortedBookmarks}
+          onSelect={handleSelectBookmark}
+          onClose={() => closePanel("bookmarks")}
+        />
+      )}
       <div className="main">
         {view === "shelf" ? (
           <div className="shelf-stack">

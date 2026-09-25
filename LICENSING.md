@@ -145,6 +145,8 @@ release published **after `v0.2.2`** is published under it.
 `v0.2.2` itself is **not** part of this group: it was published under the
 Apache License 2.0 and stays there.
 
+The first release published under the PolyForm Strict License is `v0.2.3`.
+
 ---
 
 ## 中文说明（仅供参考）
@@ -178,6 +180,7 @@ Apache License 2.0 and stays there.
   GitHub 提供的功能查看和 Fork 公共仓库。除平台条款与法律赋予的权利之外，
   PolyForm Strict 不额外授予修改、制作衍生作品或再分发的权利。本项目文档
   无意覆盖 GitHub 服务条款。
+- **首个 PolyForm Strict 版本**：`v0.2.3`。
 - **历史版本**：截至 **`v0.2.2`（含）** 依据 Apache License 2.0 发布，仍按当时
   授予的 Apache-2.0 条款使用；本次变更不具有追溯力，不撤销已合法授予的历史
   许可，也不改写 Git 历史。`v0.2.2` 标签仍指向当初发布的提交，该提交的

@@ -29,6 +29,7 @@ import {
   type ThumbnailProvider,
 } from "./thumbnail";
 import { hasReadPosition } from "./readEvidence";
+import { isShelfCardActionTarget } from "./shelfCardEventScope";
 import {
   getSearchStatusLabel,
   SearchIndexCard,
@@ -326,11 +327,14 @@ interface ShelfCardProps {
   isFavorite?: boolean;
   isDragging?: boolean;
   isDropTargetBook?: boolean;
+  /** 全局忙（导入/打开/删除中）：禁用卡片内会写数据的操作 */
+  busy?: boolean;
   draggedEntry?: ShelfEntry | null;
   onOpen(id: string): void;
   onToggleSelected(id: string): void;
   onDeleteRequest(entry: ShelfEntry): void;
   onMoveToFolder?(entry: ShelfEntry): void;
+  onRemoveFromFolder?(entry: ShelfEntry): Promise<void>;
   onToggleFavorite?(entry: ShelfEntry): void;
   onDragStart?(entry: ShelfEntry, point: { x: number; y: number }): void;
 }
@@ -338,6 +342,8 @@ interface ShelfCardProps {
 const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
   const { entry } = props;
   const [menuOpen, setMenuOpen] = useState(false);
+  const [removePending, setRemovePending] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const last = entry.lastReadAtMs > 0 ? entry.lastReadAtMs : entry.addedAtMs;
   const recent = Date.now() - last < 1000 * 60 * 60 * 24 * 7;
@@ -441,14 +447,7 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
   }, [menuOpen]);
 
   const handleClickCapture = (e: React.MouseEvent): void => {
-    const target = e.target as HTMLElement | null;
-    if (
-      target?.closest?.(
-        ".shelf-card-actions-wrap, .shelf-card-pop-menu, .shelf-card-star-btn, .shelf-confirm-backdrop, .shelf-confirm, dialog, [role='dialog']"
-      )
-    ) {
-      return;
-    }
+    if (isShelfCardActionTarget(e.target, e.currentTarget)) return;
     if (didLongPressRef.current || Date.now() < suppressClickUntilRef.current) {
       e.preventDefault();
       e.stopPropagation();
@@ -456,14 +455,7 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
   };
 
   const handleCardClick = (e?: React.MouseEvent): void => {
-    const target = e?.target as HTMLElement | null;
-    if (
-      target?.closest?.(
-        ".shelf-card-actions-wrap, .shelf-card-pop-menu, .shelf-card-star-btn, .shelf-confirm-backdrop, .shelf-confirm, dialog, [role='dialog']"
-      )
-    ) {
-      return;
-    }
+    if (e && isShelfCardActionTarget(e.target, e.currentTarget)) return;
     if (didLongPressRef.current || Date.now() < suppressClickUntilRef.current) {
       didLongPressRef.current = false;
       if (e) {
@@ -485,6 +477,20 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
     setMenuOpen(true);
   };
 
+  const handleRemoveFromFolder = async (): Promise<void> => {
+    if (!props.onRemoveFromFolder || removePending) return;
+    setRemovePending(true);
+    setRemoveError(null);
+    try {
+      await props.onRemoveFromFolder(entry);
+      setMenuOpen(false);
+    } catch (err) {
+      setRemoveError(String(err));
+    } finally {
+      setRemovePending(false);
+    }
+  };
+
   return (
     <div
       className={`shelf-card${props.selected ? " selected" : ""}${entry.available === false ? " unavailable" : ""}${props.isDragging ? " is-dragging" : ""}${props.isDropTargetBook ? " drag-over-book" : ""}`}
@@ -501,6 +507,7 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
       onDragStart={(e) => e.preventDefault()}
       onContextMenu={handleContextMenu}
       onKeyDown={(e) => {
+        if (isShelfCardActionTarget(e.target, e.currentTarget)) return;
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           handleCardClick();
@@ -637,6 +644,25 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
                     <FolderIcon />
                     <span>移至文件夹</span>
                   </button>
+                )}
+                {props.onRemoveFromFolder && (
+                  <button
+                    className="shelf-card-pop-item"
+                    type="button"
+                    role="menuitem"
+                    disabled={removePending || props.busy}
+                    onClick={() => {
+                      void handleRemoveFromFolder();
+                    }}
+                  >
+                    <FolderIcon />
+                    <span>{removePending ? "正在移出…" : "从文件夹移除"}</span>
+                  </button>
+                )}
+                {removeError && (
+                  <div className="shelf-dialog-error" role="alert" style={{ padding: "4px 8px 2px" }}>
+                    {removeError}
+                  </div>
                 )}
                 <button
                   className="shelf-card-pop-item danger"
@@ -1232,6 +1258,7 @@ interface ShelfFolderModalProps {
   provider: ThumbnailProvider;
   originRect?: DOMRect;
   closing: boolean;
+  busy: boolean;
   draggedEntry: ShelfEntry | null;
   organization: LibraryOrganization;
   onClose(): void;
@@ -1240,6 +1267,7 @@ interface ShelfFolderModalProps {
   onDissolve(folderId: string, folderName: string): void;
   onDeleteRequest(entry: ShelfEntry): void;
   onMoveToFolder(entry: ShelfEntry): void;
+  onRemoveFromFolder(entry: ShelfEntry): Promise<void>;
   onToggleFavorite(entry: ShelfEntry): void;
   onDragStart(entry: ShelfEntry, pt: { x: number; y: number }): void;
   modalRef: React.RefObject<HTMLDivElement>;
@@ -1317,6 +1345,7 @@ const ShelfFolderModal = memo(function ShelfFolderModal(props: ShelfFolderModalP
             <div className="shelf-folder-modal-grid">
               {books.map((entry) => {
                 const hash = entry.contentHash ?? entry.id;
+                const inFolder = effectiveFolderId(props.organization, hash) !== null;
                 return (
                   <ShelfCard
                     key={entry.id}
@@ -1324,6 +1353,7 @@ const ShelfFolderModal = memo(function ShelfFolderModal(props: ShelfFolderModalP
                     selected={false}
                     selectionMode={false}
                     provider={props.provider}
+                    busy={props.busy}
                     isFavorite={isFavorite(props.organization, hash)}
                     isDragging={props.draggedEntry?.id === entry.id}
                     isDropTargetBook={false}
@@ -1332,6 +1362,7 @@ const ShelfFolderModal = memo(function ShelfFolderModal(props: ShelfFolderModalP
                     onToggleSelected={() => {}}
                     onDeleteRequest={props.onDeleteRequest}
                     onMoveToFolder={props.onMoveToFolder}
+                    onRemoveFromFolder={inFolder ? props.onRemoveFromFolder : undefined}
                     onToggleFavorite={props.onToggleFavorite}
                     onDragStart={props.onDragStart}
                   />
@@ -2429,6 +2460,18 @@ export function ShelfView(props: ShelfViewProps) {
     setMoveDialogTargets([entry]);
   }, []);
 
+  const handleRemoveFromFolder = useCallback(
+    async (entry: ShelfEntry): Promise<void> => {
+      if (props.busy) return;
+      await props.onApplyOrganization?.({
+        type: "moveBooks",
+        contentHashes: [entry.contentHash ?? entry.id],
+        folderId: null,
+      });
+    },
+    [props.busy, props.onApplyOrganization]
+  );
+
   const handleMoveConfirm = useCallback(
     async (targetFolderId: string | null): Promise<void> => {
       if (!moveDialogTargets || moveDialogTargets.length === 0) return;
@@ -2829,6 +2872,7 @@ export function ShelfView(props: ShelfViewProps) {
             ))}
           {visible.map((entry) => {
             const hash = entry.contentHash ?? entry.id;
+            const inFolder = effectiveFolderId(organization, hash) !== null;
             return (
               <ShelfCard
                 key={entry.id}
@@ -2836,6 +2880,7 @@ export function ShelfView(props: ShelfViewProps) {
                 selected={selectedIds.has(entry.id)}
                 selectionMode={selectionMode}
                 provider={thumbnailProvider}
+                busy={props.busy}
                 isFavorite={isFavorite(organization, hash)}
                 isDragging={draggedEntry?.id === entry.id}
                 isDropTargetBook={dropTarget?.type === "book" && dropTarget.id === entry.id}
@@ -2844,6 +2889,7 @@ export function ShelfView(props: ShelfViewProps) {
                 onToggleSelected={toggleSelected}
                 onDeleteRequest={onDeleteRequest}
                 onMoveToFolder={handleSingleMoveToFolder}
+                onRemoveFromFolder={inFolder ? handleRemoveFromFolder : undefined}
                 onToggleFavorite={handleToggleFavorite}
                 onDragStart={handleDragStart}
               />
@@ -2932,6 +2978,7 @@ export function ShelfView(props: ShelfViewProps) {
             folder={folder}
             books={books}
             provider={thumbnailProvider}
+            busy={props.busy}
             originRect={activeFolderModal.originRect}
             closing={folderModalClosing}
             draggedEntry={draggedEntry}
@@ -2943,6 +2990,7 @@ export function ShelfView(props: ShelfViewProps) {
             onDissolve={(fId, fName) => setDissolveFolderTarget({ id: fId, name: fName })}
             onDeleteRequest={onDeleteRequest}
             onMoveToFolder={handleSingleMoveToFolder}
+            onRemoveFromFolder={handleRemoveFromFolder}
             onToggleFavorite={handleToggleFavorite}
             onDragStart={handleFolderBookDragStart}
           />

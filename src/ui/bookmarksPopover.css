@@ -1,0 +1,67 @@
+/* =========================================================================
+ * 书签浮层（App 前景层）
+ *
+ * 唯一书签列表不再渲染在 .toolbar-top-island 内，而是由 App 以 fixed
+ * 视口坐标挂在工具栏/标题栏之外；因此隐藏重复顶部岛的规则不会隐藏它。
+ * 列表项复用 styles.css 的 .bookmark-item 系列既有样式。
+ *
+ * 层级：浮层本体(47) > 点击遮罩(45) > 正文感应区(36) > 阅读正文。
+ * 遮罩必须高于工具栏感应区(36)，否则点在边缘感应区上会被当成唤出胶囊、
+ * 而不是“点击浮层外部”；同时低于浮层本体，面板自身交互不受影响。
+ * 打开书签不经过 is-suppressed（isReaderPanelOpen 不含 bookmarks），
+ * 所以顶部状态岛仍在本遮罩之上，触发按钮可以再次点击关闭。
+ * ========================================================================= */
+
+.reader-bookmarks-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  background: transparent;
+}
+
+/* Windows 原生顶栏：遮罩从标题栏底部开始，避免盖住窗口三联按钮。
+   触发按钮自身层级高于本遮罩，所以“再点一次关闭”仍由按钮负责。 */
+.app:has(.titlebar-reader) .reader-bookmarks-backdrop {
+  top: 36px;
+}
+
+.reader-bookmarks-popover {
+  position: fixed;
+  box-sizing: border-box;
+  z-index: 47;
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  background: var(--panel-bg);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22);
+  transform-origin: top right;
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  animation: bookmark-pop-in 160ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-thumb) transparent;
+}
+
+.reader-bookmarks-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  border-bottom: 1px solid var(--panel-border);
+  margin-bottom: 6px;
+}
+
+.reader-bookmarks-count {
+  font-size: 11px;
+  font-weight: 500;
+  background: var(--btn-tint);
+  padding: 1px 6px;
+  border-radius: 8px;
+}
