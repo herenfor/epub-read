@@ -11,7 +11,8 @@ Project: <https://github.com/herenfor/epub-read>
 
 Except for third-party components, which are identified as such, the original
 code in this repository that is copyright HeRenFor is made available — from the
-license migration release (2026-09-25) onward — under the:
+license migration commit (2026-09-25) onward, that is, for releases published
+after `v0.2.2` — under the:
 
 **PolyForm Strict License 1.0.0**
 
@@ -122,23 +123,27 @@ itself grants you a license to modify the code.
 
 ## Historical releases
 
-Releases published **before** the license migration were made available under
-the **Apache License 2.0**.
+Releases **up to and including `v0.2.2`** were made available under the
+**Apache License 2.0**.
 
 - Those grants remain valid for the versions that were published under them.
 - The license change is **not retroactive**. It is not intended to revoke, and
   does not revoke, any license already validly granted.
 - Git history has not been rewritten, and no historical commit has been
-  removed.
+  removed. The `v0.2.2` tag still points at the commit it was published with,
+  and that commit still carries the Apache License 2.0 text.
 - If you obtained a copy of an older version while it was published under
   Apache-2.0, that version continues to be usable under the terms that applied
   when it was published.
 
 ## Current and future releases
 
-Original HeRenFor code added to this repository and released from the license
-migration release (2026-09-25) onward is provided under the PolyForm Strict
-License 1.0.0.
+Original HeRenFor code is provided under the PolyForm Strict License 1.0.0
+from the license migration commit (`85500d8`, 2026-09-25) onward, and every
+release published **after `v0.2.2`** is published under it.
+
+`v0.2.2` itself is **not** part of this group: it was published under the
+Apache License 2.0 and stays there.
 
 ---
 
@@ -148,8 +153,9 @@ License 1.0.0.
 > [`LICENSE`](LICENSE) 的正式许可证正文为准。
 
 - **当前许可证**：除明确标注的第三方组件外，本仓库中由 HeRenFor 拥有版权的
-  原创代码，自 2026-09-25 许可证迁移起，以 **PolyForm Strict License 1.0.0**
-  提供。完整、未修改的许可证正文见 [`LICENSE`](LICENSE)。
+  原创代码，自 2026-09-25 许可证迁移提交起（即 **`v0.2.2` 之后**发布的版本），
+  以 **PolyForm Strict License 1.0.0** 提供。完整、未修改的许可证正文见
+  [`LICENSE`](LICENSE)。
 - **性质**：这是**源码公开（source-available）**许可证，**不是** OSI 定义下的
   开源许可证。源码保持公开可见，但默认授权范围刻意收窄。
 - **默认允许**：任何非商业用途；个人研究、实验、公共知识测试、个人学习、
@@ -172,9 +178,10 @@ License 1.0.0.
   GitHub 提供的功能查看和 Fork 公共仓库。除平台条款与法律赋予的权利之外，
   PolyForm Strict 不额外授予修改、制作衍生作品或再分发的权利。本项目文档
   无意覆盖 GitHub 服务条款。
-- **历史版本**：迁移之前依据 Apache License 2.0 发布的版本，仍按当时授予的
-  Apache-2.0 条款使用；本次变更不具有追溯力，不撤销已合法授予的历史许可，
-  也不改写 Git 历史。
+- **历史版本**：截至 **`v0.2.2`（含）** 依据 Apache License 2.0 发布，仍按当时
+  授予的 Apache-2.0 条款使用；本次变更不具有追溯力，不撤销已合法授予的历史
+  许可，也不改写 Git 历史。`v0.2.2` 标签仍指向当初发布的提交，该提交的
+  `LICENSE` 仍是 Apache-2.0 原文。
 - **贡献**：默认许可证不允许他人修改代码。希望贡献代码的第三方应先通过
   Issue / GitHub 与维护者联系；贡献行为可能需要另行授予贡献所需的修改权限
   以及签署贡献许可。
