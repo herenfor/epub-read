@@ -66,8 +66,18 @@ Windows 10/11 已自带所需的 WebView2 运行时；较旧或精简版系统�
 
 ## 许可
 
-本项目原创代码采用 [Apache License 2.0](LICENSE)。
+Copyright © 2026 HeRenFor。
 
-项目包含分别采用 MIT、Apache-2.0、MPL-2.0、BSD、ISC、Zlib、Unicode-3.0 等许可证的第三方组件。完整清单、版权声明、许可证文本和源码位置见 [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)。
+本项目原创代码采用 [PolyForm Strict License 1.0.0](LICENSE) 提供——这是源码公开（source-available）许可证，不属于 OSI 定义的开源许可证。
 
-本项目许可证不改变第三方组件各自的许可证。
+默认许可允许特定的非商业用途，但**不**授予修改软件、制作衍生作品或分发软件副本的权利。
+
+商业使用以及其他超出 PolyForm Strict 许可范围的使用，需要另行获得版权所有者单独书面授权。
+
+许可咨询请联系仓库所有者（通过 GitHub）。
+
+本仓库保持公开，GitHub 服务条款本身允许用户查看和 Fork 公共仓库。除该平台条款与法律赋予的权利之外，PolyForm Strict 不额外授予修改、制作衍生作品或再分发的权利。
+
+第三方组件继续遵守各自原有的许可证。项目包含分别采用 MIT、Apache-2.0、MPL-2.0、BSD、ISC、Zlib、Unicode-3.0 等许可证的第三方组件；完整清单、版权声明、许可证文本和源码位置见 [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)，本项目许可证不改变它们。
+
+更多授权说明见 [LICENSING.md](LICENSING.md)。贡献代码另有流程，请先联系维护者。

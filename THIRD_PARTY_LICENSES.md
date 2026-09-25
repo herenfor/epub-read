@@ -3,8 +3,10 @@
 EPUB Reader includes third-party open-source software.
 Each component remains subject to its respective license.
 
-本项目的原创代码采用 [Apache License 2.0](third-party-licenses/Apache-2.0.txt)。
-本文件不改变任何第三方组件自身的许可证与版权归属。
+本项目的原创代码采用 [PolyForm Strict License 1.0.0](LICENSE) 提供，授权说明见
+[LICENSING.md](LICENSING.md)。本文件不改变任何第三方组件自身的许可证与版权归属；
+下表与 `third-party-licenses/` 中的 Apache-2.0、MIT、MPL-2.0 等许可证文本均属于
+第三方组件，仍按其原始条款适用。
 
 ## Runtime dependencies
 
@@ -42,7 +44,7 @@ implemented in this release; only the frontend interface space is reserved.
 The optional AI/RAG derived-data store uses `rusqlite` with its bundled SQLite
 feature. `rusqlite` and `libsqlite3-sys` are MIT licensed; the bundled SQLite
 amalgamation is dedicated to the public domain. This does not add a GPL
-dependency or change the project's Apache-2.0 license.
+dependency or change the license of the project's original code.
 
 RAG C-57 directly uses `reqwest` 0.13.4 (`MIT OR Apache-2.0`) for the isolated
 blocking/rustls download worker and `fs2` 0.4.3 (`MIT/Apache-2.0`, recorded here

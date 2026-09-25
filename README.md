@@ -66,8 +66,18 @@ Windows 10 and 11 already include the required WebView2 runtime; older or trimme
 
 ## License
 
-Original code in this project is licensed under the [Apache License 2.0](LICENSE).
+Copyright © 2026 HeRenFor.
 
-The project includes third-party components under MIT, Apache-2.0, MPL-2.0, BSD, ISC, Zlib, Unicode-3.0 and other licenses. Full lists, copyright notices, license texts and source locations are in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
+Original code in EPUB Reader is made available under the [PolyForm Strict License 1.0.0](LICENSE) — a source-available license, not an OSI-approved open-source license.
 
-The project license does not change the licenses of third-party components.
+The default license permits certain non-commercial use, but does not grant permission to modify, create derivative works from, or distribute the software.
+
+Commercial use and other uses outside the scope of the PolyForm Strict License require a separate written license from the copyright holder.
+
+For licensing inquiries, contact the repository owner through GitHub.
+
+This repository is public, and GitHub's own Terms of Service allow public repositories to be viewed and forked. Beyond those platform terms and your rights under applicable law, the PolyForm Strict License grants no additional right to modify, create derivative works from, or redistribute the software.
+
+Third-party components remain subject to their respective licenses. The project includes third-party components under MIT, Apache-2.0, MPL-2.0, BSD, ISC, Zlib, Unicode-3.0 and other licenses. Full lists, copyright notices, license texts and source locations are in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md), and the project license does not change them.
+
+For additional licensing information, see [LICENSING.md](LICENSING.md). Contributions are handled separately — please get in touch first.

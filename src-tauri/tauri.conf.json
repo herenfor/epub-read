@@ -28,9 +28,10 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
-    "license": "Apache-2.0",
+    "license": "PolyForm Strict License 1.0.0",
     "resources": [
       "../LICENSE",
+      "../LICENSING.md",
       "../NOTICE",
       "../THIRD_PARTY_LICENSES.md",
       "../third-party-licenses/"
