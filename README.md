@@ -8,7 +8,7 @@ EPUB Reader opens EPUB 2.0.1 and EPUB 3.x books as their authors designed them: 
 
 ## Highlights
 
-- **Read the way you prefer** — turn pages or scroll continuously through the current chapter, and switch between the two at any time without losing your place
+- **Read the way you prefer** — turn pages, or scroll continuously from one chapter straight into the next, and switch between the two at any time without losing your place
 - **Page layout you control** — four-sided margins, one or two columns per screen and the column gap, adjustable without leaving the page
 - **Illustrations at full size** — click an image in the text to open it in an overlay, then zoom, pan or view it at its original size; closing returns you exactly where you were
 - **Faithful to the book** — percentages, asymmetric margins, floats, full-page illustrations and inline footnote markers keep their intended proportions
@@ -22,6 +22,7 @@ EPUB Reader opens EPUB 2.0.1 and EPUB 3.x books as their authors designed them: 
 - Import books by file dialog or drag & drop, including batch import
 - Automatic duplicate detection — the same book is never added twice
 - Cover grid with generated placeholder covers and a "new" badge
+- Folders and favourites to organise the shelf — grouping a book never moves or copies the file
 - Search, sort, layout density and theme managed from a single menu
 - Reading progress and recently-read tracking; open a book right where you left it
 - Portable reading archives to carry progress, bookmarks and safe settings between devices
@@ -30,7 +31,7 @@ EPUB Reader opens EPUB 2.0.1 and EPUB 3.x books as their authors designed them: 
 ### Reading
 
 - EPUB 2 and EPUB 3 support with table-of-contents navigation
-- Page turning or per-chapter scrolling, chosen per book and remembered
+- Page turning, or continuous scrolling that carries on from one chapter into the next, chosen per book and remembered
 - Page options: four-sided margins, one or two columns per screen, and the column gap
 - Illustrations open in an overlay with zoom, pan, fit-to-window and original-size views
 - Footnotes in an overlay: hover to preview, click to pin and scroll

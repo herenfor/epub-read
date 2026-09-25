@@ -2,6 +2,7 @@ import { parseXmlText, hasParserError, getSerializer } from "../core/parseXml";
 import { resolvePath, isExternalUrl, isFragmentOnly } from "../core/paths";
 import { findElements, type XmlElementLike } from "../core/xml";
 import { hasAuthoredCssProperty, rewriteCssInlineWidths, rewriteCssUrls } from "./cssRewrite";
+import { imageLayoutPolicy, scrollMediaDefaultsCss } from "./imageLayoutPolicy";
 import { TEXT_MEASURE, type ReaderSettings } from "./settings";
 
 export interface SanitizeOptions {
@@ -159,7 +160,13 @@ function buildOverrideCss(s: ReaderSettings, bodyBgColor?: string): string {
   const compatCss = `/* [L5-C09] fit-content 多栏异常：由分页器运行时统一补偿。 */`;
 
   // ---- L1 安全/L3 版式约束：图片防溢出 + 脚注图标 ----
-  const imageCss = `
+  // 分页保留原有媒体默认值（整页填充依赖它）；滚动改用 imageLayoutPolicy 的
+  // 零特异性默认值，不再给 .cover/.illus/.kuchie 等容器写满屏 !important。
+  const imageDefaultsCss = imageLayoutPolicy({
+    readingMode: s.readingMode,
+    paginatedFillEligible: false,
+  }).usePaginatedMediaDefaults
+    ? `
 /* [L3/L1] 正文普通图片：只限制溢出，不覆盖书定义的高度；
    object-fit:contain 保证被列宽压缩时按比例缩放不拉伸。
    用零特异性，书的 img 规则（包括 class）可覆盖。 */
@@ -184,7 +191,9 @@ function buildOverrideCss(s: ReaderSettings, bodyBgColor?: string): string {
   max-height: none !important;
   border: none !important;
   object-fit: contain;
-}
+}`
+    : scrollMediaDefaultsCss(VIEWER_ID);
+  const imageCss = `${imageDefaultsCss}
 /* [L3] 脚注标记小图标：随字号缩放，middle 对齐（书常用 top 顶到上一行）。 */
 #${VIEWER_ID} sup img,
 #${VIEWER_ID} .duokan-footnote img,
@@ -582,9 +591,18 @@ export async function sanitizeChapter(
     Boolean(svgs[0].getAttribute("viewBox")) &&
     bodyText.length === 0;
   // 整页填充只属于分页：它把图片钉在一个页高内。滚动模式要让图片按自身比例
-  // 自然流动（长图可滚动），注入整屏高度会把图压扁到一屏。
-  if ((isPlainImagePage || isInlineSvgImagePage) && opts.settings.readingMode !== "scroll") {
-    viewer.setAttribute("class", "fullpage-image");
+  // 自然流动（长图可滚动），并且不得拆掉作者的高度约束；注入整屏高度会把图
+  // 压扁到一屏，注入 `width:100% + height:auto` 则会把限高的整页插图放大。
+  // 策略由 imageLayoutPolicy 决定：滚动只保留类名（paginator 用它跳过 margin
+  // 补偿），不再附带任何强制图片尺寸。
+  const imagePolicy = imageLayoutPolicy({
+    readingMode: opts.settings.readingMode,
+    paginatedFillEligible: isPlainImagePage || isInlineSvgImagePage,
+  });
+  if (imagePolicy.viewerClass) {
+    viewer.setAttribute("class", imagePolicy.viewerClass);
+  }
+  if (imagePolicy.fillPage) {
     const imgStyle = doc.createElement("style");
     imgStyle.setAttribute("data-reader", "fullpage-image");
     // 这里有意使用后代选择器：全页图可能被书籍自己的多层容器包裹，
@@ -609,33 +627,6 @@ export async function sanitizeChapter(
   object-fit: contain;
 }
 #${VIEWER_ID}.fullpage-image svg { display: block; }`;
-    const headForImg = doc.head ?? doc.documentElement;
-    headForImg.appendChild(imgStyle);
-  } else if ((isPlainImagePage || isInlineSvgImagePage) && opts.settings.readingMode === "scroll") {
-    viewer.setAttribute("class", "pure-image-page");
-    const imgStyle = doc.createElement("style");
-    imgStyle.setAttribute("data-reader", "pure-image-page");
-    imgStyle.textContent = `
-#${VIEWER_ID}.pure-image-page :not(img):not(svg):not(image) {
-  width: 100% !important;
-  box-sizing: border-box !important;
-  height: auto !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  max-width: none !important;
-}
-#${VIEWER_ID}.pure-image-page img,
-#${VIEWER_ID}.pure-image-page svg {
-  width: 100% !important;
-  height: auto !important;
-  max-width: 100% !important;
-  max-height: none !important;
-  border: none !important;
-  box-shadow: none !important;
-  display: block;
-  margin: 0 auto !important;
-}
-#${VIEWER_ID}.pure-image-page svg { display: block; }`;
     const headForImg = doc.head ?? doc.documentElement;
     headForImg.appendChild(imgStyle);
   }
@@ -672,13 +663,9 @@ ${VIEWER_TAG}#${VIEWER_ID}::-webkit-scrollbar {
   width: 0 !important;
   height: 0 !important;
 }
-/* [L3 滚动] 长图可向下自然滚动，普通图片不超过版心宽度。 */
-#${VIEWER_ID} img { max-width: 100% !important; max-height: none !important; height: auto !important; }
-#${VIEWER_ID}.fullpage-image, #${VIEWER_ID}.fullpage-image * {
-  height: auto !important;
-  min-height: 0 !important;
-  max-height: none !important;
-}
+/* [L3 滚动] 滚动图片尺寸只由 buildOverrideCss 里的零特异性默认值决定，
+   这里不再写 img 的 max-width/height/height:auto 覆盖或整页图祖先重置：
+   那会拆掉作者的高度约束（封面/彩页被放大到约 2 屏）。 */
 /* [L3 滚动] 章末自然过渡卡片与进入下一章提示 */
 .reader-chapter-end {
   display: flex !important;

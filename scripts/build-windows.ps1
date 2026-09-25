@@ -61,9 +61,7 @@ if ($tauriConfig) {
 & pnpm @tauriArgs
 if ($LASTEXITCODE -ne 0) { throw "Tauri build failed (common causes: missing WebView2 / network issues; see README)" }
 
-Write-Host "== Edition artifact gate ==" -ForegroundColor Cyan
-& pnpm exec node scripts/verify-edition-artifacts.mjs $editionLower
-if ($LASTEXITCODE -ne 0) { throw "edition artifact gate failed" }
+# beforeBuildCommand already builds and verifies the selected frontend edition.
 
 Write-Host ""
 Write-Host "== Done ==" -ForegroundColor Green

@@ -1,16 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "default capability for the main window",
+  "description": "shared capability for the main window (web, Windows desktop and Android)",
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "core:window:allow-destroy",
-    "core:window:allow-minimize",
-    "core:window:allow-toggle-maximize",
-    "core:window:allow-close",
-    "core:window:allow-is-maximized",
-    "core:window:allow-start-dragging",
     "dialog:allow-open",
     "dialog:allow-save",
     "fs:allow-read-file",

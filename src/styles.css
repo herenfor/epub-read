@@ -1677,6 +1677,81 @@ textarea {
   border: none;
 }
 
+/* ---- 连续滚动阅读视图 ---- */
+.reader-continuous {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  overflow-y: scroll;
+  overflow-x: hidden;
+  overflow-anchor: none;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  background: var(--bg);
+}
+
+.reader-continuous::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.continuous-canvas {
+  position: relative;
+  width: 100%;
+}
+
+.chapter-wrapper {
+  position: absolute;
+  left: 0;
+  right: 0;
+  width: 100%;
+  overflow: clip;
+}
+
+.chapter-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 120px;
+  color: var(--muted);
+  gap: 8px;
+  font-size: 14px;
+}
+
+.chapter-placeholder-title {
+  font-size: 16px;
+  font-weight: 550;
+  color: var(--fg);
+}
+
+.chapter-placeholder-hint {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.chapter-placeholder-error {
+  color: var(--error, #e53935);
+  font-size: 13px;
+}
+
+.chapter-retry-btn {
+  margin-top: 8px;
+  padding: 4px 14px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.chapter-retry-btn:hover {
+  background: var(--btn-tint-hover);
+}
+
 /* ---- 空态 / 错误态 ---- */
 .placeholder {
   flex: 1;
@@ -2283,6 +2358,7 @@ textarea {
 /* 顶部与管理操作按钮统一设计语言：32px 高度、8px 现代微圆角、统一字体与内边距 */
 .shelf-manage-btn,
 .shelf-import-btn,
+.shelf-confirm-primary,
 .shelf-selection-toggle-all,
 .shelf-selection-cancel,
 .shelf-action-folder,
@@ -2310,6 +2386,7 @@ textarea {
 
 .shelf-manage-btn > span,
 .shelf-import-btn > span,
+.shelf-confirm-primary > span,
 .shelf-action-folder > span,
 .shelf-selection-delete > span,
 .shelf-selection-toggle-all > span,
@@ -2321,6 +2398,7 @@ textarea {
 
 .shelf-manage-btn .shelf-svg-icon,
 .shelf-import-btn .shelf-svg-icon,
+.shelf-confirm-primary .shelf-svg-icon,
 .shelf-action-folder .shelf-svg-icon,
 .shelf-selection-delete .shelf-svg-icon {
   display: block;
@@ -2362,23 +2440,36 @@ textarea {
   transition: transform 0.15s ease;
 }
 
-/* 主要行动按钮（导入书籍）：主题色实心强调 */
-.shelf-import-btn {
+/* 主要行动与确认按钮（导入书籍、创建/重命名/移动确认）：主题色实心强调，与全局设计语言保持统一 */
+.shelf-import-btn,
+.shelf-confirm-primary {
   border: 1px solid var(--accent);
   background: var(--accent);
   color: var(--accent-foreground, #ffffff);
   font-weight: 550;
 }
 
-.shelf-import-btn:hover:not(:disabled) {
+.shelf-import-btn:hover:not(:disabled),
+.shelf-confirm-primary:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent) 88%, #000);
   border-color: color-mix(in srgb, var(--accent) 88%, #000);
   transform: translateY(-1px);
   box-shadow: 0 3px 12px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
-.shelf-import-btn:active:not(:disabled) {
+.shelf-import-btn:active:not(:disabled),
+.shelf-confirm-primary:active:not(:disabled) {
   transform: translateY(0.5px) scale(0.98);
+  box-shadow: none;
+}
+
+.shelf-confirm-primary:disabled {
+  background: color-mix(in srgb, var(--accent) 15%, var(--panel-bg, #ffffff));
+  border-color: color-mix(in srgb, var(--accent) 25%, transparent);
+  color: var(--accent);
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
   box-shadow: none;
 }
 
@@ -3657,6 +3748,10 @@ textarea {
   /* 显式声明 overflow: visible，且不使用 content-visibility: auto，
    * 避免 contain: paint 导致卡片子元素（整个封面悬浮上浮、外扩多层柔和阴影）在卡片顶部边界被生硬遮盖截断 */
   overflow: visible;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: none;
+  touch-action: pan-y;
 }
 
 .shelf-card:hover,
@@ -3696,6 +3791,10 @@ textarea {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: none;
+  pointer-events: none;
 }
 
 /* 无封面/封面加载中 fallback：温和莫兰迪低饱和底色 + 极简排印 */
@@ -4161,7 +4260,7 @@ textarea {
 .shelf-confirm-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 220;
+  z-index: 1200;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -5249,4 +5348,825 @@ textarea {
   white-space: nowrap;
   font-size: 10px;
   color: var(--muted);
+}
+
+/* =========================================================================
+ * 收藏与文件夹模块样式（双端一致、触控安全）
+ * ========================================================================= */
+
+.shelf-scope-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px 12px;
+  margin-bottom: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.shelf-scope-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.shelf-scope-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 500;
+  border: 1px solid var(--panel-border);
+  background: var(--btn-tint);
+  color: var(--fg);
+  cursor: pointer;
+  white-space: nowrap;
+  min-height: 36px;
+  transition: all 0.15s ease;
+}
+
+.shelf-scope-item:hover {
+  background: var(--btn-hover);
+  border-color: var(--accent);
+}
+
+.shelf-scope-item.active {
+  background: var(--accent);
+  color: #ffffff;
+  border-color: var(--accent);
+}
+
+.shelf-scope-badge {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.shelf-scope-item.active .shelf-scope-badge {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.shelf-scope-spacer {
+  flex: 1;
+}
+
+.shelf-new-folder-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 12.5px;
+  font-weight: 500;
+  border: 1px solid var(--panel-border);
+  background: var(--btn-tint);
+  color: var(--fg);
+  cursor: pointer;
+  white-space: nowrap;
+  min-height: 36px;
+  transition: all 0.15s ease;
+}
+
+.shelf-new-folder-btn:hover:not(:disabled) {
+  background: var(--btn-hover);
+  border-color: var(--accent);
+}
+
+/* 文件夹卡片与拼图 */
+.shelf-folder-card {
+  cursor: pointer;
+}
+
+.shelf-folder-cover-box {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 128 / 188;
+  background: color-mix(in srgb, var(--shelf-card-bg) 88%, var(--accent) 6%);
+  border: 1.5px solid var(--shelf-card-border);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: var(--shelf-card-shadow);
+  padding: 8px 6px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1),
+              box-shadow 0.25s cubic-bezier(0.34, 1.56, 0.64, 1),
+              border-color 0.2s ease,
+              background 0.2s ease;
+  will-change: transform, box-shadow;
+}
+
+.shelf-folder-empty-cover {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  opacity: 0.6;
+}
+
+.shelf-folder-empty-cover .shelf-svg-icon {
+  width: 48px;
+  height: 48px;
+}
+
+.shelf-folder-mosaic {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  gap: 5px 4px;
+  align-items: stretch;
+  justify-items: stretch;
+  background: transparent;
+}
+
+.shelf-folder-mosaic-cell {
+  position: relative;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--shelf-card-bg);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  width: 100%;
+  aspect-ratio: 128 / 188;
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.shelf-folder-mosaic-cell .shelf-cover {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* 单卡片星标按钮 */
+.shelf-card-star-btn {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(8px);
+  color: #ffffff;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s ease, transform 0.15s ease, color 0.15s ease, background 0.15s ease;
+  z-index: 2;
+  padding: 0;
+}
+
+.shelf-card:hover .shelf-card-star-btn,
+.shelf-card:focus-within .shelf-card-star-btn,
+.shelf-card-star-btn.active {
+  opacity: 1;
+}
+
+.shelf-card-star-btn.active {
+  color: #ffb800;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.shelf-card-star-btn:hover {
+  transform: scale(1.1);
+  background: rgba(0, 0, 0, 0.7);
+}
+
+.shelf-action-fav {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--panel-border);
+  background: var(--btn-tint);
+  color: var(--fg);
+  font-size: 13px;
+  cursor: pointer;
+  min-height: 36px;
+  transition: all 0.15s ease;
+}
+
+.shelf-action-fav:hover:not(:disabled) {
+  background: var(--btn-hover);
+  border-color: var(--accent);
+}
+
+/* 文件夹面包屑与动作栏 */
+.shelf-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 4px 14px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.shelf-breadcrumb-item {
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-weight: 500;
+}
+
+.shelf-breadcrumb-item:hover {
+  background: var(--btn-hover);
+}
+
+.shelf-breadcrumb-sep {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.shelf-breadcrumb-current {
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.shelf-breadcrumb-count {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.shelf-folder-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
+.shelf-folder-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  border: 1px solid var(--panel-border);
+  background: var(--btn-tint);
+  color: var(--fg);
+  cursor: pointer;
+  min-height: 32px;
+}
+
+.shelf-folder-action-btn:hover {
+  background: var(--btn-hover);
+}
+
+.shelf-folder-action-btn.danger {
+  color: var(--error, #e53e3e);
+}
+
+.shelf-folder-action-btn.danger:hover {
+  background: color-mix(in srgb, var(--error, #e53e3e) 15%, transparent);
+}
+
+/* 移动选择器弹层 */
+.shelf-move-dialog {
+  max-width: 420px;
+}
+
+.shelf-move-list {
+  max-height: 240px;
+  overflow-y: auto;
+  margin: 14px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.shelf-move-list::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.shelf-move-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 0.12s ease;
+  min-height: 44px;
+}
+
+.shelf-move-item:hover {
+  background: var(--btn-hover);
+}
+
+.shelf-move-item.selected {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: var(--accent);
+}
+
+.shelf-move-item.disabled,
+.shelf-move-item:has(input:disabled) {
+  opacity: 0.48;
+  cursor: not-allowed;
+  pointer-events: none;
+  background: transparent !important;
+}
+
+.shelf-move-current-badge {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--panel-border) 60%, transparent);
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-left: 6px;
+}
+
+.shelf-move-item input[type="radio"] {
+  accent-color: var(--accent);
+}
+
+.shelf-move-item-icon {
+  display: flex;
+  color: var(--accent);
+}
+
+.shelf-move-item-name {
+  flex: 1;
+  font-size: 13.5px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shelf-move-item-count {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.shelf-move-new-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  margin: 6px 0 12px;
+  border: 1px dashed var(--panel-border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 13px;
+  width: 100%;
+  justify-content: center;
+  min-height: 42px;
+}
+
+.shelf-move-new-btn:hover {
+  background: var(--btn-hover);
+  border-color: var(--accent);
+}
+
+.shelf-move-create-box {
+  margin: 8px 0 12px;
+  padding: 12px;
+  background: var(--btn-tint);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.shelf-move-create-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.shelf-dialog-input {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--panel-border);
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.shelf-dialog-input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.shelf-dialog-error {
+  color: var(--error, #e53e3e);
+  font-size: 12px;
+}
+
+.shelf-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  margin: 20px 0 12px;
+}
+
+.shelf-body-search-scope-note {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 4px 8px;
+  margin-bottom: 8px;
+  border-radius: 4px;
+  background: var(--btn-tint);
+  display: inline-block;
+}
+
+/* =========================================================================
+ * 移动端/桌面长按拖拽交互样式（手机风格合并为文件夹与放入文件夹）
+ * ========================================================================= */
+
+.shelf-drag-ghost {
+  position: fixed;
+  z-index: 10000;
+  pointer-events: none;
+  width: 86px;
+  height: 124px;
+  transform: translate(-50%, -50%) rotate(4deg) scale(1.05);
+  border-radius: 8px;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.35), 0 4px 12px rgba(0, 0, 0, 0.2);
+  border: 2px solid var(--accent);
+  background: var(--shelf-card-bg, #fff);
+  overflow: hidden;
+  transition: transform 0.05s ease-out;
+  display: flex;
+  flex-direction: column;
+}
+
+.shelf-drag-ghost-cover {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+.shelf-drag-ghost-badge {
+  padding: 3px 6px;
+  background: rgba(0, 0, 0, 0.78);
+  color: #fff;
+  font-size: 10px;
+  line-height: 1.3;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.shelf-card.is-dragging {
+  opacity: 0.32;
+  transform: scale(0.96);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.shelf-card.drag-over-book {
+  outline: 2px dashed var(--accent);
+  outline-offset: 4px;
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.25), 0 12px 28px rgba(0, 0, 0, 0.18);
+  transform: scale(1.03);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.shelf-card-folder-sim-overlay {
+  position: absolute;
+  inset: 0;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.75);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 6;
+  color: #fff;
+  padding: 8px;
+  text-align: center;
+  pointer-events: none;
+  animation: shelf-fade-in 0.2s ease;
+}
+
+.shelf-folder-sim-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  white-space: nowrap;
+}
+
+.shelf-folder-sim-mosaic {
+  display: flex;
+  margin-top: 10px;
+  position: relative;
+  width: 60px;
+  height: 44px;
+  justify-content: center;
+  align-items: center;
+}
+
+.shelf-folder-sim-thumb {
+  width: 30px;
+  height: 42px;
+  border-radius: 4px;
+  border: 1.5px solid #fff;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+  background: #222;
+  position: absolute;
+}
+
+.shelf-folder-sim-thumb.primary {
+  transform: translateX(-10px) rotate(-6deg);
+  z-index: 1;
+}
+
+.shelf-folder-sim-thumb.incoming {
+  transform: translateX(10px) rotate(6deg);
+  z-index: 2;
+}
+
+/* 目标文件夹响应态：提升至高斯模糊层之上，保持整体卡片透明无方框，仅封套微打开放大与圆润发光 */
+.shelf-folder-card.is-drop-target {
+  position: relative;
+  z-index: 50 !important;
+}
+
+.shelf-folder-card.is-drop-target .shelf-folder-cover-box {
+  transform: scale(1.09);
+  border-radius: 18px;
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 3.5px var(--accent),
+    0 16px 36px rgba(59, 130, 246, 0.38),
+    0 0 24px rgba(59, 130, 246, 0.22);
+  background: color-mix(in srgb, var(--shelf-card-bg) 80%, var(--accent) 15%);
+}
+
+.shelf-folder-card.is-drop-target .shelf-folder-mosaic-cell {
+  transform: scale(1.04);
+}
+
+.shelf-folder-drop-overlay {
+  position: absolute;
+  inset: 0;
+  border-radius: 18px;
+  background: radial-gradient(circle at center, rgba(59, 130, 246, 0.28) 0%, rgba(59, 130, 246, 0.12) 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 6;
+  pointer-events: none;
+  animation: shelf-fade-in 0.2s ease;
+}
+
+.shelf-folder-drop-badge {
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+  animation: shelf-bounce 0.7s infinite alternate cubic-bezier(0.45, 0, 0.55, 1);
+}
+
+/* 拖拽移至文件夹时的全景高斯模糊背景层（手机文件夹拟物交互） */
+.shelf-folder-drop-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  background: rgba(15, 23, 42, 0.38);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  pointer-events: none;
+  opacity: 0;
+  animation: shelf-fade-in 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes shelf-bounce {
+  from { transform: translateY(0); }
+  to { transform: translateY(-4px); }
+}
+
+@keyframes shelf-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* =========================================================================
+ * 手机拟物居中文件夹弹窗（Folder Modal）与开合动效
+ * ========================================================================= */
+
+.shelf-folder-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  animation: shelf-folder-backdrop-fade-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.shelf-folder-modal-backdrop.closing {
+  animation: shelf-folder-backdrop-fade-out 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  pointer-events: none;
+}
+
+.shelf-folder-modal {
+  position: relative;
+  width: 100%;
+  max-width: 680px;
+  max-height: 82vh;
+  background: var(--panel-bg, #ffffff);
+  border: 1px solid var(--panel-border, rgba(0, 0, 0, 0.1));
+  border-radius: 22px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.28);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  animation: shelf-folder-modal-expand 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  transform-origin: center center;
+}
+
+.shelf-folder-modal::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.shelf-folder-modal-backdrop.closing .shelf-folder-modal {
+  animation: shelf-folder-modal-shrink 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.shelf-folder-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--panel-border, rgba(0, 0, 0, 0.08));
+  gap: 12px;
+  user-select: none;
+}
+
+.shelf-folder-modal-title-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.shelf-folder-modal-title-box .shelf-svg-icon {
+  width: 18px;
+  height: 18px;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.shelf-folder-modal-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shelf-folder-modal-count {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--muted);
+  background: var(--btn-hover, rgba(128, 128, 128, 0.12));
+  padding: 2px 8px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.shelf-folder-modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.shelf-folder-modal-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.shelf-folder-modal-action-btn:hover {
+  background: var(--btn-hover, rgba(128, 128, 128, 0.14));
+}
+
+.shelf-folder-modal-action-btn.danger {
+  color: var(--error, #ef4444);
+}
+
+.shelf-folder-modal-action-btn.danger:hover {
+  background: color-mix(in srgb, var(--error, #ef4444) 15%, transparent);
+}
+
+.shelf-folder-modal-body {
+  padding: 20px;
+  overflow-y: auto;
+  min-height: 180px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.shelf-folder-modal-body::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.shelf-folder-modal-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
+  gap: 16px;
+}
+
+.shelf-folder-modal-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 160px;
+  color: var(--muted);
+  font-size: 13.5px;
+  text-align: center;
+}
+
+@keyframes shelf-folder-backdrop-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes shelf-folder-backdrop-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes shelf-folder-modal-expand {
+  from {
+    opacity: 0;
+    transform: scale(0.72) translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes shelf-folder-modal-shrink {
+  from {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.72) translateY(14px);
+  }
 }

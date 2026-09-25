@@ -4,6 +4,16 @@ import { sanitizePersistedTextAnchor } from "../render/textAnchor";
 import type { LibraryRecord } from "./libraryArchive";
 import type { ThumbnailAsset, ThumbnailProvider } from "./thumbnail";
 import { hasDuplicateReaderNoteIds, normalizeReaderNotes, type ReaderNote } from "./notes";
+import {
+  applyCommand,
+  emptyOrganization,
+  mergeIntoEnvelope,
+  validateEnvelope,
+  validateOrganization,
+  type LibraryOrganization,
+  type OrganizationCommand,
+  type OrganizationEnvelope,
+} from "./libraryOrganization";
 
 // Keep the optional module out of the Core import graph, including dynamic chunks.
 const cleanupBrowserPreparation = IS_AI_EDITION
@@ -132,6 +142,9 @@ export interface ShelfStore {
   deleteBook(id: string): Promise<void>;
   /** Native batch cleanup shares one index transaction and one metadata write. */
   deleteBooks?(ids: string[]): Promise<void>;
+  getOrganization(): Promise<LibraryOrganization>;
+  applyOrganization(command: OrganizationCommand): Promise<LibraryOrganization>;
+  mergeOrganization(incoming: LibraryOrganization): Promise<LibraryOrganization>;
 }
 
 /** Keep failed rows visible; a native batch failure must not trigger expensive retries per book. */
@@ -572,7 +585,7 @@ export function formatShelfTime(ms: number): string {
 // ---- IndexedDB（浏览器 dev / 非 Tauri 环境回退） ----
 
 const DB_NAME = "epub-reader-shelf";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -587,6 +600,9 @@ function openDb(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains("covers")) {
         db.createObjectStore("covers", { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains("organization")) {
+        db.createObjectStore("organization");
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -668,7 +684,9 @@ class IndexedDbShelfStore implements ShelfStore {
         anchorRatio: existing?.anchorRatio ?? input.entry.anchorRatio ?? null,
         anchorTextOffset: existing?.anchorTextOffset ?? input.entry.anchorTextOffset ?? null,
         anchorTextSnippet: existing?.anchorTextSnippet ?? input.entry.anchorTextSnippet ?? null,
-        contentHash,
+        contentHash:
+          contentHash ??
+          (/^[a-f0-9]{64}$/i.test(input.entry.id) ? input.entry.id : undefined),
         isNew: existing?.isNew ?? input.entry.isNew ?? true,
         bookmarks: (existing?.bookmarks ?? input.entry.bookmarks ?? []).map(normalizeBookmarkTextAnchor),
         notes: normalizeReaderNotes(existing?.notes ?? input.entry.notes),
@@ -872,6 +890,121 @@ class IndexedDbShelfStore implements ShelfStore {
       db.close();
     }
   }
+
+  async getOrganization(): Promise<LibraryOrganization> {
+    const db = await openDb();
+    try {
+      const tx = db.transaction("organization", "readonly");
+      const existing = await reqAsPromise<OrganizationEnvelope | undefined>(
+        tx.objectStore("organization").get("current"),
+      );
+      if (existing) {
+        return validateEnvelope(existing).state;
+      }
+    } finally {
+      db.close();
+    }
+    // 首次读取无数据：在写事务中初始化并落盘本机身份
+    const dbWrite = await openDb();
+    try {
+      const tx = dbWrite.transaction("organization", "readwrite");
+      const store = tx.objectStore("organization");
+      const existing = await reqAsPromise<OrganizationEnvelope | undefined>(
+        store.get("current"),
+      );
+      if (existing) {
+        return validateEnvelope(existing).state;
+      }
+      const initial: OrganizationEnvelope = {
+        deviceId: typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : "00000000-0000-4000-8000-000000000000",
+        counter: 0,
+        state: emptyOrganization(),
+      };
+      store.put(initial, "current");
+      await txDone(tx);
+      return initial.state;
+    } finally {
+      dbWrite.close();
+    }
+  }
+
+  async applyOrganization(command: OrganizationCommand): Promise<LibraryOrganization> {
+    const db = await openDb();
+    try {
+      const tx = db.transaction(["meta", "organization"], "readwrite");
+      const metaStore = tx.objectStore("meta");
+      const orgStore = tx.objectStore("organization");
+
+      let envelope = await reqAsPromise<OrganizationEnvelope | undefined>(
+        orgStore.get("current"),
+      );
+      if (!envelope) {
+        envelope = {
+          deviceId: typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+            ? crypto.randomUUID()
+            : "00000000-0000-4000-8000-000000000000",
+          counter: 0,
+          state: emptyOrganization(),
+        };
+      } else {
+        envelope = validateEnvelope(envelope);
+      }
+
+      const allEntries = (await reqAsPromise(metaStore.getAll())) as ShelfEntry[];
+      const knownHashes = new Set<string>();
+      for (const entry of allEntries) {
+        const hash =
+          typeof entry.contentHash === "string" && entry.contentHash.length > 0
+            ? entry.contentHash
+            : typeof entry.id === "string" && /^[a-f0-9]{64}$/i.test(entry.id)
+            ? entry.id
+            : undefined;
+        if (hash) {
+          knownHashes.add(hash.toLowerCase());
+        }
+      }
+
+      const nextEnvelope = applyCommand(envelope, command, knownHashes);
+      orgStore.put(nextEnvelope, "current");
+      await txDone(tx);
+      return nextEnvelope.state;
+    } finally {
+      db.close();
+    }
+  }
+
+  async mergeOrganization(incoming: LibraryOrganization): Promise<LibraryOrganization> {
+    const validatedIncoming = validateOrganization(incoming);
+    const db = await openDb();
+    try {
+      const tx = db.transaction("organization", "readwrite");
+      const orgStore = tx.objectStore("organization");
+
+      let envelope = await reqAsPromise<OrganizationEnvelope | undefined>(
+        orgStore.get("current"),
+      );
+      if (!envelope) {
+        envelope = {
+          deviceId: typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+            ? crypto.randomUUID()
+            : "00000000-0000-4000-8000-000000000000",
+          counter: 0,
+          state: emptyOrganization(),
+        };
+      } else {
+        envelope = validateEnvelope(envelope);
+      }
+
+      const nextEnvelope = mergeIntoEnvelope(envelope, validatedIncoming);
+      orgStore.put(nextEnvelope, "current");
+      await txDone(tx);
+      return nextEnvelope.state;
+    } finally {
+      db.close();
+    }
+  }
 }
 
 // ---- Tauri 链接式实现（仅保存源路径绑定，不复制 EPUB 正文） ----
@@ -981,6 +1114,18 @@ class TauriShelfStore implements ShelfStore {
 
   async deleteBooks(ids: string[]): Promise<void> {
     await invoke("linked_library_delete_records", { contentHashes: ids });
+  }
+
+  async getOrganization(): Promise<LibraryOrganization> {
+    return invoke<LibraryOrganization>("linked_library_get_organization");
+  }
+
+  async applyOrganization(command: OrganizationCommand): Promise<LibraryOrganization> {
+    return invoke<LibraryOrganization>("linked_library_apply_organization", { command });
+  }
+
+  async mergeOrganization(incoming: LibraryOrganization): Promise<LibraryOrganization> {
+    return invoke<LibraryOrganization>("linked_library_merge_organization", { incoming });
   }
 }
 

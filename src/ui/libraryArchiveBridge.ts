@@ -19,6 +19,7 @@ import {
   type LibraryRecord,
   type ReaderSettingsArchive,
 } from "./libraryArchive";
+import { validateOrganization, type LibraryOrganization } from "./libraryOrganization";
 
 const HASH = /^[0-9a-f]{64}$/;
 const SETTINGS_KEYS = [
@@ -139,8 +140,10 @@ function recordForArchive(entry: ShelfEntry, contentHash: string): LibraryRecord
 /** Build a portable archive and report entries that have no usable content hash. */
 export function buildLibraryArchiveWithIssues(
   entries: readonly ShelfEntry[],
+  organization: LibraryOrganization,
   settings?: PortableSettingsInput,
 ): ArchiveBuildResult {
+  const cleanOrg = validateOrganization(organization);
   const records: Record<string, LibraryRecord> = {};
   const skipped: ArchiveBuildIssue[] = [];
   entries.forEach((entry, entryIndex) => {
@@ -156,14 +159,19 @@ export function buildLibraryArchiveWithIssues(
       version: LIBRARY_ARCHIVE_VERSION,
       records,
       ...(settingsForArchive(settings) ? { settings: settingsForArchive(settings) } : {}),
+      organization: cleanOrg,
     },
     skipped,
   };
 }
 
 /** Construct an archive; invalid legacy rows are omitted (see the *WithIssues variant). */
-export function buildLibraryArchive(entries: readonly ShelfEntry[], settings?: PortableSettingsInput): LibraryArchive {
-  return buildLibraryArchiveWithIssues(entries, settings).archive;
+export function buildLibraryArchive(
+  entries: readonly ShelfEntry[],
+  organization: LibraryOrganization,
+  settings?: PortableSettingsInput,
+): LibraryArchive {
+  return buildLibraryArchiveWithIssues(entries, organization, settings).archive;
 }
 
 export const libraryArchiveFromShelfEntries = buildLibraryArchive;

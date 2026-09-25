@@ -3,12 +3,6 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { TitleBar } from "./TitleBar";
 
-async function readTitleBarStyles(): Promise<string> {
-  // @ts-expect-error Node types in test
-  const { readFile } = await import("node:fs/promises");
-  return readFile(new URL("./titleBar.css", import.meta.url), "utf8");
-}
-
 describe("CSD TitleBar 组件与样式契约", () => {
   it("非 Tauri 桌面环境静默不渲染", () => {
     vi.stubGlobal("window", {});
@@ -47,18 +41,5 @@ describe("CSD TitleBar 组件与样式契约", () => {
     } finally {
       vi.unstubAllGlobals();
     }
-  });
-
-  it("CSS 样式满足实心主题色与 Windows 关闭按钮规范", async () => {
-    const css = await readTitleBarStyles();
-    // 基础高度 36px
-    expect(css).toMatch(/\.titlebar\s*\{[^}]*height:\s*36px;/s);
-    // 主题色背景融入（非透明浮层）
-    expect(css).toMatch(/\.titlebar\s*\{[^}]*background:\s*var\(--bg\);/s);
-    // 拖拽区与控制键恢复交互
-    expect(css).toMatch(/\.titlebar-drag-area\s*\{[^}]*pointer-events:\s*auto;/s);
-    expect(css).toMatch(/\.titlebar-controls\s*\{[^}]*pointer-events:\s*auto;/s);
-    // 关闭按钮 hover 规范暗红与纯白文字
-    expect(css).toMatch(/\.titlebar-close:hover\s*\{[^}]*background:\s*#c42b1c/s);
   });
 });

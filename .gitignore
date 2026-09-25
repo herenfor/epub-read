@@ -4,7 +4,18 @@ src-tauri/target/
 src-tauri/target-core/
 src-tauri/target-ai/
 targettmp/
-src-tauri/gen/
+src-tauri/gen/*
+!src-tauri/gen/android/
+!src-tauri/gen/android/**
+src-tauri/gen/android/.gradle/
+src-tauri/gen/android/.idea/
+src-tauri/gen/android/local.properties
+src-tauri/gen/android/keystore.properties
+src-tauri/gen/android/app/.cxx/
+src-tauri/gen/android/app/src/main/assets/
+src-tauri/gen/android/**/build/
+*.jks
+*.keystore
 .pnpm-store/
 *.log
 .DS_Store
@@ -16,3 +27,5 @@ src-tauri/gen/
 .cache/
 .img-repro.png
 src-tauri/target2/
+src-tauri/target-android-core/
+src-tauri/target-android-ai/

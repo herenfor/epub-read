@@ -13,6 +13,12 @@ function opts(basePath = "OEBPS/Text/ch1.xhtml") {
   };
 }
 
+/** 读取注入样式节点的 CSS 文本，避免整份 HTML 断言误伤其他合法规则。 */
+function readStyleText(out: string, marker: string): string {
+  const { document } = parseHTML(out);
+  return document.querySelector(`style[data-reader="${marker}"]`)?.textContent ?? "";
+}
+
 describe("font family CSS escaping", () => {
   it("escapes quote, slash and CSS control characters", () => {
     const escaped = escapeCssString('A\\B"C\r\n\f');
@@ -830,7 +836,7 @@ background-position:center center;background-size:cover;background-color:#f9ebdf
     expect(out).not.toMatch(new RegExp(`#${VIEWER_ID}\\s*\\{[^}]*overflow:\\s*visible`, "s"));
   });
 
-  it("滚动模式不给纯图片页注入整屏填充（长图按自身比例自然流动）", async () => {
+  it("滚动模式纯图片页只保留类名，不再注入任何强制图片尺寸", async () => {
     const html = `<html xmlns="http://www.w3.org/1999/xhtml"><head><title>封面</title></head>
 <body><div class="cover"><img alt="cover" src="cover.jpg"/></div></body></html>`;
     const { html: out } = await sanitizeChapter(html, {
@@ -839,10 +845,77 @@ background-position:center center;background-size:cover;background-color:#f9ebdf
     });
     expect(out).not.toContain('class="fullpage-image"');
     expect(out).toContain('data-reader="scroll-mode"');
+    // 类名保留：paginator 依赖它跳过 margin 补偿
     expect(out).toContain('class="pure-image-page"');
-    expect(out).toContain('data-reader="pure-image-page"');
-    expect(out).toContain('width: 100% !important');
-    expect(out).toContain('box-shadow: none !important');
+    expect(out).not.toContain('data-reader="pure-image-page"');
+    // 三处强制尺寸都不得出现（纯图分支 + scroll-mode 全局 + 基础 imageCss）。
+    // 按具体样式节点断言，避免误伤章末卡片的合法 width:100% / 脚注 max-height。
+    const overrides = readStyleText(out, "overrides");
+    const scrollMode = readStyleText(out, "scroll-mode");
+    expect(overrides).not.toContain("#epub-viewer .cover");
+    expect(overrides).not.toContain("#epub-viewer .illus");
+    expect(overrides).not.toContain("#epub-viewer .kuchie");
+    expect(overrides).not.toContain("max-height: 100%");
+    expect(overrides).not.toContain("height: auto");
+    expect(scrollMode).not.toMatch(/#epub-viewer\s+img/);
+    expect(scrollMode).not.toContain("height: auto");
+    expect(scrollMode).not.toContain("max-height: none");
+    // 作者容器/图片约束的注入式移除已取消，脚注专用规则和滚动默认值保留
+    expect(overrides).toContain(":where(#epub-viewer img, #epub-viewer svg, #epub-viewer video)");
+    expect(overrides).toContain("#epub-viewer sup img,");
+    expect(overrides).toContain("height: 1.2em !important;");
+    // 作者自己的结构保留在文档里
+    expect(out).toContain('class="cover reader-top"');
+  });
+
+  it("滚动模式不给普通图片注入 height:auto 或 max-height 覆盖", async () => {
+    const html = `<html xmlns="http://www.w3.org/1999/xhtml"><body>
+<p>正文文字</p><img alt="fig" src="fig.png" style="max-height:60vh"/>
+</body></html>`;
+    const { html: out } = await sanitizeChapter(html, {
+      ...opts("OEBPS/Text/ch1.xhtml"),
+      settings: { ...DEFAULT_SETTINGS, readingMode: "scroll" },
+    });
+    expect(out).toContain('style="max-height:60vh"');
+    const overrides = readStyleText(out, "overrides");
+    expect(overrides).not.toMatch(/:where\(#epub-viewer\)\s+img\s*\{[^}]*max-height/s);
+    expect(overrides).not.toContain("height: auto");
+    expect(readStyleText(out, "scroll-mode")).not.toMatch(/#epub-viewer\s+(img|\.cover|\.illus)/);
+  });
+
+  it("滚动模式限宽标题图不被放大，也不命中纯图片页类名", async () => {
+    const html = `<html xmlns="http://www.w3.org/1999/xhtml"><head><title>标题</title></head>
+<body><div class="title-block"><img alt="title" src="title.jpg" style="width:75%;max-width:20em"/></div>
+<p>作者：某某</p></body></html>`;
+    const { html: out } = await sanitizeChapter(html, {
+      ...opts("OEBPS/Text/title.xhtml"),
+      settings: { ...DEFAULT_SETTINGS, readingMode: "scroll" },
+    });
+    expect(out).not.toContain('class="pure-image-page"');
+    expect(out).not.toContain('class="fullpage-image"');
+    expect(out).toContain('style="width:75%;max-width:20em"');
+    const overrides = readStyleText(out, "overrides");
+    expect(overrides).not.toMatch(/:where\(#epub-viewer\)\s+img\s*\{[^}]*width:\s*100%/s);
+    expect(overrides).not.toContain("#epub-viewer .cover");
+  });
+
+  it("分页模式保留原有整页填充与媒体默认值（滚动改动不影响分页）", async () => {
+    const html = `<html xmlns="http://www.w3.org/1999/xhtml"><head><title>封面</title></head>
+<body><div class="cover"><img alt="cover" src="cover.jpg"/></div></body></html>`;
+    const { html: out } = await sanitizeChapter(html, opts("OEBPS/Text/cover.xhtml"));
+    expect(out).toContain('class="fullpage-image"');
+    expect(out).toContain('data-reader="fullpage-image"');
+    expect(out).not.toContain("data-reader=\"scroll-mode\"");
+    const overrides = readStyleText(out, "overrides");
+    expect(overrides).toMatch(
+      /#epub-viewer\s+\.illus,\s*#epub-viewer\s+\.kuchie,\s*#epub-viewer\s+\.cover,/s
+    );
+    expect(overrides).toMatch(
+      /#epub-viewer\s+\.illus\s+img,\s*#epub-viewer\s+\.kuchie\s+img,\s*#epub-viewer\s+\.cover\s+img,/s
+    );
+    expect(overrides).toContain(":where(#epub-viewer) img { max-width: 100%; object-fit: contain; }");
+    expect(overrides).toContain(":where(#epub-viewer) img, :where(#epub-viewer) video, :where(#epub-viewer) svg { max-height: 100%; }");
+    expect(out).toContain('data-reader="fullpage-image"');
   });
 
   it("深色模式下清除图片投影避免浅色光晕", async () => {

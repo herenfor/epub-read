@@ -10,6 +10,9 @@
 //! user-owned source file.
 
 use crate::ai::AiState;
+use crate::library_organization::{
+    self, LibraryOrganization, OrganizationCommand, OrganizationEnvelope,
+};
 use quick_xml::events::Event;
 use quick_xml::{Reader, XmlVersion};
 use serde::{Deserialize, Serialize};
@@ -222,7 +225,7 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-fn valid_content_hash(hash: &str) -> bool {
+pub(crate) fn valid_content_hash(hash: &str) -> bool {
     hash.len() == 64
         && hash
             .bytes()
@@ -307,6 +310,13 @@ fn bindings_path(app: &AppHandle) -> Result<PathBuf, String> {
 
 fn thumbnails_root(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(library_root(app)?.join("thumbnails"))
+}
+
+/// Favorites and folders live in their own file next to the records.  It is
+/// intentionally separate from `device-bindings.json` and from the reading
+/// timestamps: the organization state is portable, the binding is not.
+fn organization_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(library_root(app)?.join("library-organization.json"))
 }
 
 fn thumbnails_index_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -1813,6 +1823,191 @@ pub fn linked_library_thumbnail_delete(
     save_thumbnail_index(&app, &index)
 }
 
+// ---- 收藏与文件夹 ----
+// 组织数据是独立 JSON（`library-organization.json`）：字段级逻辑时钟、文件夹
+// 永久删除标记和原始归属都在同一个 envelope 里，读写沿用书库写互斥与原子替换。
+
+/// `None` 表示还没有文件（新用户）；JSON 损坏或数据无效都是错误，绝不用空对象
+/// 覆盖已有内容。
+fn load_organization_file(path: &Path) -> Result<Option<OrganizationEnvelope>, String> {
+    match fs::read_to_string(path) {
+        Ok(text) => {
+            let envelope: OrganizationEnvelope = serde_json::from_str(&text)
+                .map_err(|error| format!("收藏与文件夹数据损坏：{error}"))?;
+            library_organization::validate_envelope(&envelope)?;
+            Ok(Some(envelope))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!("无法读取收藏与文件夹数据：{error}")),
+    }
+}
+
+fn save_organization_file(path: &Path, envelope: &OrganizationEnvelope) -> Result<(), String> {
+    atomic_write_json(path, envelope)
+}
+
+/// 调用方必须持有书库写锁；新用户在同一把锁内只生成一次本机身份。
+fn load_or_init_organization(app: &AppHandle) -> Result<OrganizationEnvelope, String> {
+    load_or_init_organization_at(&organization_path(app)?)
+}
+
+fn load_or_init_organization_at(path: &Path) -> Result<OrganizationEnvelope, String> {
+    match load_organization_file(path)? {
+        Some(envelope) => Ok(envelope),
+        None => {
+            let envelope = OrganizationEnvelope {
+                device_id: random_uuid_v4()?,
+                counter: 0,
+                state: library_organization::empty_organization(),
+            };
+            save_organization_file(path, &envelope)?;
+            Ok(envelope)
+        }
+    }
+}
+
+/// 16 字节系统随机数的 UUID v4 小写规范形式；本机身份只在这里产生。
+fn random_uuid_v4() -> Result<String, String> {
+    let mut bytes = [0_u8; 16];
+    fill_random_bytes(&mut bytes)?;
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    let mut value = String::with_capacity(36);
+    for (index, byte) in bytes.iter().enumerate() {
+        if matches!(index, 4 | 6 | 8 | 10) {
+            value.push('-');
+        }
+        value.push_str(&format!("{byte:02x}"));
+    }
+    Ok(value)
+}
+
+#[cfg(unix)]
+fn fill_random_bytes(buffer: &mut [u8]) -> Result<(), String> {
+    let mut source =
+        File::open("/dev/urandom").map_err(|error| format!("无法读取系统随机数：{error}"))?;
+    source
+        .read_exact(buffer)
+        .map_err(|error| format!("无法读取系统随机数：{error}"))
+}
+
+#[cfg(windows)]
+fn fill_random_bytes(buffer: &mut [u8]) -> Result<(), String> {
+    #[link(name = "bcrypt")]
+    extern "system" {
+        fn BCryptGenRandom(
+            algorithm: *mut core::ffi::c_void,
+            buffer: *mut u8,
+            length: u32,
+            flags: u32,
+        ) -> i32;
+    }
+    const BCRYPT_USE_SYSTEM_PREFERRED_RNG: u32 = 0x0000_0002;
+    // SAFETY: the buffer is a valid writable slice for `length` bytes.
+    let status = unsafe {
+        BCryptGenRandom(
+            std::ptr::null_mut(),
+            buffer.as_mut_ptr(),
+            buffer.len() as u32,
+            BCRYPT_USE_SYSTEM_PREFERRED_RNG,
+        )
+    };
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(format!("无法取得系统随机数：NTSTATUS {status:#x}"))
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn fill_random_bytes(_buffer: &mut [u8]) -> Result<(), String> {
+    Err("当前平台没有可用的系统随机数来源".into())
+}
+
+/// 返回最新完整 portable state：不含 envelope 顶层的 `deviceId`/`counter`（事件
+/// stamp 里仍带这些字段）。首次调用会在写锁内初始化本机身份，因此和相邻命令一
+/// 样放到阻塞池，避免等待书库写锁或磁盘时卡住调用线程。
+#[tauri::command]
+pub async fn linked_library_get_organization(
+    app: AppHandle,
+) -> Result<LibraryOrganization, String> {
+    tauri::async_runtime::spawn_blocking(move || get_organization_state(&app))
+        .await
+        .map_err(|error| format!("读取收藏与文件夹任务失败：{error}"))?
+}
+
+fn get_organization_state(app: &AppHandle) -> Result<LibraryOrganization, String> {
+    let write_state = app.state::<LinkedLibraryWriteState>();
+    let _guard = write_state
+        .0
+        .lock()
+        .map_err(|_| "链接书库写入锁已损坏".to_string())?;
+    Ok(load_or_init_organization(app)?.state)
+}
+
+#[tauri::command]
+pub async fn linked_library_apply_organization(
+    app: AppHandle,
+    command: OrganizationCommand,
+) -> Result<LibraryOrganization, String> {
+    // File reads/writes stay off the UI thread, matching the delete commands.
+    tauri::async_runtime::spawn_blocking(move || apply_organization_command(&app, command))
+        .await
+        .map_err(|error| format!("保存收藏与文件夹任务失败：{error}"))?
+}
+
+fn apply_organization_command(
+    app: &AppHandle,
+    command: OrganizationCommand,
+) -> Result<LibraryOrganization, String> {
+    let write_state = app.state::<LinkedLibraryWriteState>();
+    let _guard = write_state
+        .0
+        .lock()
+        .map_err(|_| "链接书库写入锁已损坏".to_string())?;
+    let envelope = load_or_init_organization(app)?;
+    // One batch reads the book records once and commits all hashes or none.
+    let known_hashes: HashSet<String> = load_records(app)?
+        .into_iter()
+        .map(|record| record.content_hash)
+        .collect();
+    let updated = library_organization::apply_command(&envelope, &command, &known_hashes)?;
+    if updated != envelope {
+        save_organization_file(&organization_path(app)?, &updated)?;
+    }
+    Ok(updated.state)
+}
+
+#[tauri::command]
+pub async fn linked_library_merge_organization(
+    app: AppHandle,
+    incoming: LibraryOrganization,
+) -> Result<LibraryOrganization, String> {
+    tauri::async_runtime::spawn_blocking(move || merge_organization_command(&app, incoming))
+        .await
+        .map_err(|error| format!("合并收藏与文件夹任务失败：{error}"))?
+}
+
+fn merge_organization_command(
+    app: &AppHandle,
+    incoming: LibraryOrganization,
+) -> Result<LibraryOrganization, String> {
+    library_organization::validate_organization(&incoming)?;
+    let write_state = app.state::<LinkedLibraryWriteState>();
+    let _guard = write_state
+        .0
+        .lock()
+        .map_err(|_| "链接书库写入锁已损坏".to_string())?;
+    // Re-read the latest state under the lock: records may have been imported
+    // before this second step and the local clock must not go backwards.
+    let local = load_or_init_organization(app)?;
+    let merged = library_organization::merge_into_envelope(&local, &incoming)?;
+    if merged != local {
+        save_organization_file(&organization_path(app)?, &merged)?;
+    }
+    Ok(merged.state)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2086,5 +2281,249 @@ mod tests {
         assert_eq!(thumbnail_hash_from_file_name(&format!("{hash}.tmp")), None);
         assert_eq!(thumbnail_hash_from_file_name("index.json"), None);
         assert_eq!(thumbnail_hash_from_file_name("AA.thumb"), None);
+    }
+
+    const TEST_DEVICE_ID: &str = "0a0a0a0a-0000-4000-8000-00000000000a";
+
+    /// 每个用例自己的临时目录，避免和真实书库文件或并发用例互相影响。
+    fn organization_temp_dir(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "epub-reader-organization-{label}-{}-{}",
+            std::process::id(),
+            TEMP_FILE_NONCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn sample_organization(counter: u64, content_hash: &str, value: bool) -> OrganizationEnvelope {
+        let mut state = library_organization::empty_organization();
+        state.books.insert(
+            content_hash.to_string(),
+            library_organization::BookOrganization {
+                favorite: Some(library_organization::Register {
+                    value,
+                    stamp: library_organization::Stamp {
+                        counter: 1,
+                        device_id: TEST_DEVICE_ID.into(),
+                    },
+                }),
+                folder_id: None,
+            },
+        );
+        OrganizationEnvelope {
+            device_id: TEST_DEVICE_ID.into(),
+            counter,
+            state,
+        }
+    }
+
+    #[test]
+    fn organization_file_missing_reads_none_and_round_trips() {
+        let dir = organization_temp_dir("round-trip");
+        let path = dir.join("library-organization.json");
+        assert!(load_organization_file(&path).unwrap().is_none());
+        let envelope = sample_organization(4, &"a".repeat(64), true);
+        save_organization_file(&path, &envelope).unwrap();
+        assert_eq!(load_organization_file(&path).unwrap(), Some(envelope));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn corrupt_or_invalid_organization_file_is_an_error_and_is_not_replaced() {
+        let dir = organization_temp_dir("corrupt");
+        let path = dir.join("library-organization.json");
+        fs::write(&path, "{ not json").unwrap();
+        assert!(load_organization_file(&path).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "{ not json");
+        // An unknown schema version is corrupt data, not an empty organization.
+        let wrong_version = format!(
+            r#"{{"deviceId":"{TEST_DEVICE_ID}","counter":0,"state":{{"schemaVersion":2,"folders":{{}},"books":{{}}}}}}"#
+        );
+        fs::write(&path, &wrong_version).unwrap();
+        assert!(load_organization_file(&path).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), wrong_version);
+        // A zero clock in a register is rejected at the storage boundary.
+        let bad_stamp = format!(
+            r#"{{"deviceId":"{TEST_DEVICE_ID}","counter":0,"state":{{"schemaVersion":1,"folders":{{}},"books":{{"{}":{{"favorite":{{"value":true,"stamp":{{"counter":0,"deviceId":"{TEST_DEVICE_ID}"}}}}}}}}}}}}"#,
+            "a".repeat(64)
+        );
+        fs::write(&path, &bad_stamp).unwrap();
+        assert!(load_organization_file(&path).is_err());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// 缺失的字段和显式 `null` 不是同一种数据：坏文件必须报错并保持逐字节不变，
+    /// 只有内层 `folderId.value:null`（明确移出到未归类）和字段省略才合法。
+    #[test]
+    fn organization_file_rejects_json_null_optional_objects_byte_for_byte() {
+        const FOLDER_ID: &str = "00000000-0000-4000-8000-0000000000f0";
+        let dir = organization_temp_dir("null-optional");
+        let path = dir.join("library-organization.json");
+        let hash = "a".repeat(64);
+        let empty_state = serde_json::json!({
+            "schemaVersion": 1,
+            "folders": {},
+            "books": {},
+        });
+        let book_slot = |book: serde_json::Value| {
+            let mut envelope = serde_json::json!({
+                "deviceId": TEST_DEVICE_ID,
+                "counter": 9,
+                "state": empty_state.clone(),
+            });
+            envelope["state"]["books"][hash.as_str()] = book;
+            envelope
+        };
+        // A newer register with no value must not update the stored ownership.
+        let missing_value = book_slot(
+            serde_json::json!({"folderId": {"stamp": {"counter": 1, "deviceId": TEST_DEVICE_ID}}}),
+        );
+        let favorite_null = book_slot(serde_json::json!({"favorite": null}));
+        let folder_id_null = book_slot(serde_json::json!({"folderId": null}));
+        let deleted_null = serde_json::json!({
+            "deviceId": TEST_DEVICE_ID,
+            "counter": 1,
+            "state": {
+                "schemaVersion": 1,
+                "folders": {
+                    "00000000-0000-4000-8000-0000000000f0": {
+                        "name": {"value": "科幻", "stamp": {"counter": 1, "deviceId": TEST_DEVICE_ID}},
+                        "deleted": null,
+                    }
+                },
+                "books": {},
+            },
+        });
+        let cases = [
+            missing_value.to_string(),
+            favorite_null.to_string(),
+            folder_id_null.to_string(),
+            deleted_null.to_string(),
+        ];
+        for case in cases {
+            fs::write(&path, &case).unwrap();
+            assert!(load_organization_file(&path).is_err(), "应当拒绝：{case}");
+            assert_eq!(fs::read_to_string(&path).unwrap(), case);
+        }
+        // Omitted optional objects and an explicit inner null stay valid.
+        let mut valid = serde_json::json!({
+            "deviceId": TEST_DEVICE_ID,
+            "counter": 9,
+            "state": empty_state.clone(),
+        });
+        valid["state"]["folders"][FOLDER_ID] = serde_json::json!({
+            "name": {"value": "科幻", "stamp": {"counter": 1, "deviceId": TEST_DEVICE_ID}}
+        });
+        valid["state"]["books"][hash.as_str()] = serde_json::json!({
+            "folderId": {"value": null, "stamp": {"counter": 1, "deviceId": TEST_DEVICE_ID}}
+        });
+        let valid = valid.to_string();
+        fs::write(&path, &valid).unwrap();
+        let loaded = load_organization_file(&path).unwrap().unwrap();
+        assert_eq!(loaded.state.folders[FOLDER_ID].deleted, None);
+        assert_eq!(loaded.state.books[&hash].favorite, None);
+        assert_eq!(
+            loaded.state.books[&hash].folder_id.as_ref().unwrap().value,
+            None
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// 首次调用创建身份并落盘，之后每次调用都复用同一个身份，不重新生成也不改写文件。
+    #[test]
+    fn organization_is_initialized_once_and_never_regenerated() {
+        let dir = organization_temp_dir("init-once");
+        let path = dir.join("library-organization.json");
+        let first = load_or_init_organization_at(&path).unwrap();
+        assert!(library_organization::valid_canonical_uuid(&first.device_id));
+        assert_eq!(first.counter, 0);
+        assert_eq!(first.state, library_organization::empty_organization());
+        let written = fs::read_to_string(&path).unwrap();
+        let second = load_or_init_organization_at(&path).unwrap();
+        assert_eq!(second, first);
+        assert_eq!(fs::read_to_string(&path).unwrap(), written);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_organization_write_keeps_the_previous_file() {
+        use std::os::unix::fs::PermissionsExt;
+
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if fs::metadata("/proc/self")
+                .map(|meta| meta.uid())
+                .unwrap_or(1)
+                == 0
+            {
+                // Root ignores the read-only directory, so the failure cannot be provoked.
+                return;
+            }
+        }
+        let dir = organization_temp_dir("write-failure");
+        let path = dir.join("library-organization.json");
+        let hash = "a".repeat(64);
+        let original = sample_organization(2, &hash, true);
+        save_organization_file(&path, &original).unwrap();
+        let mut permissions = fs::metadata(&dir).unwrap().permissions();
+        let original_mode = permissions.mode();
+        permissions.set_mode(0o555);
+        fs::set_permissions(&dir, permissions.clone()).unwrap();
+        let failed = save_organization_file(&path, &sample_organization(9, &hash, false));
+        permissions.set_mode(original_mode);
+        fs::set_permissions(&dir, permissions).unwrap();
+        assert!(failed.is_err());
+        assert_eq!(load_organization_file(&path).unwrap(), Some(original));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn organization_counter_continues_after_reload() {
+        let dir = organization_temp_dir("reload");
+        let path = dir.join("library-organization.json");
+        let hash = "a".repeat(64);
+        save_organization_file(&path, &sample_organization(0, &hash, true)).unwrap();
+        let first = {
+            let loaded = load_organization_file(&path).unwrap().unwrap();
+            let updated = library_organization::apply_command(
+                &loaded,
+                &OrganizationCommand::SetFavorite {
+                    content_hashes: vec![hash.clone()],
+                    value: false,
+                },
+                &HashSet::from([hash.clone()]),
+            )
+            .unwrap();
+            save_organization_file(&path, &updated).unwrap();
+            updated
+        };
+        // A restart reloads the file and must continue the clock, not reset it.
+        let second = {
+            let reloaded = load_organization_file(&path).unwrap().unwrap();
+            library_organization::apply_command(
+                &reloaded,
+                &OrganizationCommand::SetFavorite {
+                    content_hashes: vec![hash.clone()],
+                    value: true,
+                },
+                &HashSet::from([hash.clone()]),
+            )
+            .unwrap()
+        };
+        assert_eq!(second.counter, first.counter + 1);
+        assert_eq!(second.device_id, TEST_DEVICE_ID);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn device_identity_is_a_fresh_canonical_uuid_v4() {
+        let first = random_uuid_v4().unwrap();
+        let second = random_uuid_v4().unwrap();
+        assert!(library_organization::valid_canonical_uuid(&first));
+        assert_eq!(first.as_bytes()[14], b'4');
+        assert_ne!(first, second);
     }
 }

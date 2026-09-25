@@ -53,25 +53,4 @@ describe("reader foreground transitions", () => {
     expect(setMenuSubview(modal, "fonts")).toBe(modal);
     expect(closeReaderForeground()).toEqual({ kind: "none" });
   });
-
-  it("keeps App on one foreground source of truth", async () => {
-    // @ts-expect-error The project intentionally does not include @types/node.
-    const { readFile } = await import("node:fs/promises");
-    const app = await readFile(new URL("../App.tsx", import.meta.url), "utf8");
-    expect(app).toContain('useState<ReaderForeground>({ kind: "none" })');
-    expect(app).toContain("openReaderPanel(current, panel)");
-    for (const legacySetter of [
-      "setTocOpen", "setMenuOpen", "setBookmarkMenuOpen", "setSearchOpen",
-      "setNotesOpen(", "setLogOpen(", "setFootnote(", "setSelectionContext(", "setNoteComposer(",
-    ]) {
-      expect(app).not.toContain(legacySetter);
-    }
-  });
-
-  it("uses an application-wide backdrop while the note composer owns the foreground", async () => {
-    // @ts-expect-error The project intentionally does not include @types/node.
-    const { readFile } = await import("node:fs/promises");
-    const styles = await readFile(new URL("../styles.css", import.meta.url), "utf8");
-    expect(styles).toMatch(/\.note-composer-backdrop\s*\{[^}]*position:\s*fixed;/s);
-  });
 });

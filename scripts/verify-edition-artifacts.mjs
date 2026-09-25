@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, isAbsolute, relative, resolve, sep } from "node:path";
 
 const edition = (process.argv[2] ?? process.env.VITE_EDITION ?? "core").toLowerCase();
 if (!new Set(["core", "ai"]).has(edition)) throw new Error("edition must be core or ai");
@@ -27,6 +27,19 @@ if (edition === "core") {
   for (const needle of ["AiFoundationPanel", "ai-foundation-panel", ".ai-foundation-", ".model-assets-", "ai_model_", "ai_semantic_open", "semantic-section"]) if (!has(needle) && !fileNames.includes(needle)) throw new Error(`AI artifact is missing marker: ${needle}`);
   if (!has("corpusWorker")) throw new Error("AI artifact is missing corpusWorker");
 }
-const artifactManifest = { schemaVersion: 1, profile: edition, identifier: expected.identifier, expectedBackendFeature: expected.expectedBackendFeature, tauriConfig: `src-tauri/tauri.${edition}.conf.json`, targetDir: `src-tauri/target-${edition}` };
+// Record the Cargo target directory that was actually used. An explicit
+// CARGO_TARGET_DIR (e.g. the Android entry point's src-tauri/target-android-core)
+// must not be reported as the desktop default: downstream checks would look for
+// the native artifacts in the wrong place. Directories inside the project become
+// a project-relative path; directories outside it are kept verbatim, because a
+// shortened "relative" path would silently point somewhere else.
+const configuredTargetDir = (process.env.CARGO_TARGET_DIR ?? "").trim();
+let targetDir = `src-tauri/target-${edition}`;
+if (configuredTargetDir !== "") {
+  const projectRelative = relative(process.cwd(), resolve(configuredTargetDir));
+  const outsideProject = projectRelative === "" || projectRelative === ".." || projectRelative.startsWith(`..${sep}`) || isAbsolute(projectRelative);
+  targetDir = outsideProject ? configuredTargetDir : projectRelative.split(sep).join("/");
+}
+const artifactManifest = { schemaVersion: 1, profile: edition, identifier: expected.identifier, expectedBackendFeature: expected.expectedBackendFeature, tauriConfig: `src-tauri/tauri.${edition}.conf.json`, targetDir };
 writeFileSync(join(outDir, "artifact-manifest.json"), JSON.stringify(artifactManifest, null, 2) + "\n", "utf8");
 console.log(`PASS: ${edition} frontend artifact (${outDir})`);

@@ -49,6 +49,10 @@ export interface ResolvedScrollTop {
   clamped: boolean;
 }
 
+export function continuousWheelPixels(deltaY: number, deltaMode: number, lineHeight: number, viewportHeight: number): number {
+  return deltaY * (deltaMode === 1 ? lineHeight : deltaMode === 2 ? viewportHeight : 1);
+}
+
 export function scrollMaxTop(metrics: ScrollMetrics): number {
   return Math.max(0, Math.ceil(metrics.contentHeight - metrics.viewportHeight));
 }

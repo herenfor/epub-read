@@ -104,10 +104,6 @@ class IndexedDbFontStore implements FontStore {
     }
   }
 
-  async importFontPaths(paths: string[]): Promise<UserFont[]> {
-    return invoke<UserFont[]>("fonts_import_paths", { paths });
-  }
-
   async importFont(input: {
     id: string;
     fileName: string;
@@ -166,6 +162,11 @@ class IndexedDbFontStore implements FontStore {
 class TauriFontStore implements FontStore {
   async list(): Promise<UserFont[]> {
     return invoke<UserFont[]>("fonts_list");
+  }
+
+  /** 原生路径导入只属于 Tauri：浏览器只处理 File/bytes，不暴露伪原生 path API。 */
+  async importFontPaths(paths: string[]): Promise<UserFont[]> {
+    return invoke<UserFont[]>("fonts_import_paths", { paths });
   }
 
   async importFont(input: {

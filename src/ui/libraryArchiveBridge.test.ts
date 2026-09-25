@@ -5,6 +5,7 @@ import {
   buildLibraryArchive,
   projectArchiveToBrowserShelf,
 } from "./libraryArchiveBridge";
+import { emptyOrganization } from "./libraryOrganization";
 
 const hashA = "a".repeat(64);
 const hashB = "b".repeat(64);
@@ -39,7 +40,7 @@ describe("library archive bridge", () => {
       available: true,
       bytes: new Uint8Array([1, 2, 3]),
     } as ShelfEntry & { available: boolean; bytes: Uint8Array; sourcePath: string };
-    const archive = buildLibraryArchive([source], {
+    const archive = buildLibraryArchive([source], emptyOrganization(), {
       fontSizePx: 18,
       theme: "dark",
       uiScale: 1.1,
@@ -54,17 +55,19 @@ describe("library archive bridge", () => {
     expect(json).not.toContain("fileSize");
     expect(json).not.toContain("coverMime");
     expect(json).not.toContain("customFonts");
+    expect(archive.version).toBe(2);
     expect(archive.records[hashA].fileName).toBe("book.epub");
     expect(archive.records[hashA].language).toBe("ja-JP");
     expect(archive.records[hashA].anchorTextOffset).toBeNull();
     expect(archive.records[hashA].anchorTextSnippet).toBeNull();
     expect(archive.settings).toEqual({ fontSizePx: 18, theme: "dark", forceHorizontal: true, preloadNextChapter: true, uiScale: 1.1 });
+    expect(archive.organization).toEqual(emptyOrganization());
   });
 
   it("round-trips text anchors through the portable bridge", () => {
     const archive = buildLibraryArchive([
       entry(hashA, { anchorTextOffset: 7, anchorTextSnippet: "😀正文" }),
-    ]);
+    ], emptyOrganization());
     const projected = projectArchiveToBrowserShelf([], archive);
     expect(projected[0]).toMatchObject({
       anchorTextOffset: 7,
@@ -87,7 +90,7 @@ describe("library archive bridge", () => {
           createdAtMs: 1,
         }],
       }),
-    ]);
+    ], emptyOrganization());
     const bookmark = archive.records[hashA].bookmarks[0];
     expect(bookmark).toMatchObject({
       anchorIndex: null,
@@ -99,7 +102,7 @@ describe("library archive bridge", () => {
   });
 
   it("returns a backend array without the keyed records wrapper", () => {
-    const archive = buildLibraryArchive([entry(hashA)]);
+    const archive = buildLibraryArchive([entry(hashA)], emptyOrganization());
     const records = archiveRecordsForBackend(archive);
     expect(records).toHaveLength(1);
     expect(records[0].contentHash).toBe(hashA);
@@ -115,7 +118,7 @@ describe("library archive bridge", () => {
     const archive = buildLibraryArchive([
       entry(hashA, { title: "new", progressPct: 80 }),
       entry(hashB, { title: "remote" }),
-    ]);
+    ], emptyOrganization());
     const projected = projectArchiveToBrowserShelf([local], archive);
     expect(projected).toHaveLength(2);
     expect(projected[0].id).toBe(local.id);
@@ -129,5 +132,28 @@ describe("library archive bridge", () => {
     expect(projected[1].fileSize).toBe(0);
     expect(JSON.stringify(projected)).not.toContain("sourcePath");
     expect(JSON.stringify(projected)).not.toContain("Users");
+  });
+
+  it("embeds and validates organization in v2 archive", () => {
+    const folderId = "3f2a6c1e-9b4d-4f0a-8c2e-5d6b7a8c9d0e";
+    const customOrg = {
+      schemaVersion: 1 as const,
+      folders: {
+        [folderId]: {
+          name: { value: "科幻", stamp: { counter: 1, deviceId: "00000000-0000-4000-8000-00000000000a" } },
+        },
+      },
+      books: {
+        [hashA]: {
+          favorite: { value: true, stamp: { counter: 2, deviceId: "00000000-0000-4000-8000-00000000000a" } },
+          folderId: { value: folderId, stamp: { counter: 3, deviceId: "00000000-0000-4000-8000-00000000000a" } },
+        },
+      },
+    };
+    const archive = buildLibraryArchive([entry(hashA)], customOrg);
+    expect(archive.version).toBe(2);
+    expect(archive.organization.folders[folderId].name.value).toBe("科幻");
+    expect(archive.organization.books[hashA].favorite?.value).toBe(true);
+    expect(archive.organization.books[hashA].folderId?.value).toBe(folderId);
   });
 });

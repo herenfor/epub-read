@@ -16,7 +16,7 @@ import {
   type ReaderSettings,
   type Theme,
 } from "./render/settings";
-import type { ChapterState, PreciseNavigationStatus } from "./render/paginator";
+import type { ChapterState, PreciseNavigationStatus, ReadingAnchor } from "./render/paginator";
 import { normalizePageOptions } from "./render/pageLayout";
 import type { ImageViewRequest } from "./render/imageActivation";
 import { ImageViewer } from "./ui/ImageViewer";
@@ -87,6 +87,12 @@ import {
   parseLibraryArchive,
 } from "./ui/libraryArchive";
 import {
+  emptyOrganization,
+  type LibraryOrganization,
+  type OrganizationCommand,
+  type ShelfScope,
+} from "./ui/libraryOrganization";
+import {
   emptyReaderNavigationHistory,
   readerHistoryBack,
   readerHistoryForward,
@@ -115,10 +121,11 @@ import {
   type SavedProgress,
 } from "./ui/storage";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { isPhysicalPointInsideRect, isSupportedFontFileName, partitionFontItems, runFontImportBatch } from "./ui/fontDrop";
+import { isPhysicalPointInsideRect, isSupportedFontFileName } from "./ui/fontDrop";
+import { createFontImportController } from "./ui/fontImport";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open as openFileDialog, save as saveFileDialog } from "@tauri-apps/plugin-dialog";
-import { readFile, readTextFile, stat as statFile, writeTextFile } from "@tauri-apps/plugin-fs";
+import { readTextFile, stat as statFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { stepSettingValue } from "./ui/settingsStepper";
 import {
@@ -349,6 +356,13 @@ export default function App() {
   const shelfBusyRef = useRef(false);
   const shelfEntriesRef = useRef<ShelfEntry[]>([]);
   shelfEntriesRef.current = shelfEntries;
+  // ---- 收藏与文件夹 ----
+  const [organization, setOrganization] = useState<LibraryOrganization>(emptyOrganization);
+  const [organizationError, setOrganizationError] = useState<string | null>(null);
+  const [shelfScope, setShelfScope] = useState<ShelfScope>({ type: "root" });
+  const organizationRef = useRef<LibraryOrganization>(organization);
+  organizationRef.current = organization;
+  const organizationBusyRef = useRef(false);
   // ---- 阅读跳转历史（后退/前进各最多 3 步） ----
   const [readerHistory, setReaderHistory] = useState<ReaderNavigationHistory>(
     emptyReaderNavigationHistory
@@ -934,12 +948,80 @@ export default function App() {
     }
   }, [handleImportSources]);
 
-  const handleExportArchive = useCallback(async () => {
+  const resolveContentHashForEntry = useCallback(async (entry: ShelfEntry): Promise<string> => {
+    if (entry.contentHash && /^[a-f0-9]{64}$/.test(entry.contentHash)) {
+      return entry.contentHash;
+    }
+    if (/^[a-f0-9]{64}$/.test(entry.id)) {
+      return entry.id;
+    }
+    if (entry.available === false) {
+      throw new Error(`《${entry.title}》文件失联且无指纹，请重新关联文件后再加入分类或收藏`);
+    }
     try {
-      const built = buildLibraryArchiveWithIssues(shelfEntriesRef.current, {
-        ...settings,
-        uiScale,
-      });
+      const buf = await getShelfStore().readBook(entry.id);
+      const hash = await sha256Hex(buf);
+      const updated = await getShelfStore().setContentHash(entry.id, hash);
+      setShelfEntries((prev) => prev.map((item) => (item.id === entry.id ? updated : item)));
+      return hash;
+    } catch (err) {
+      throw new Error(`无法读取《${entry.title}》计算内容指纹：${String(err)}`);
+    }
+  }, []);
+
+  const handleApplyOrganization = useCallback(
+    async (command: OrganizationCommand): Promise<void> => {
+      if (organizationBusyRef.current || shelfBusyRef.current) {
+        return;
+      }
+      if (organizationError) {
+        setShelfNotice({
+          kind: "error",
+          text: "收藏与文件夹读取失败，已禁用修改以防止覆盖现有数据",
+        });
+        throw new Error("收藏与文件夹处于错误状态，已禁用修改");
+      }
+      organizationBusyRef.current = true;
+      try {
+        let finalCommand = command;
+        if ("contentHashes" in command) {
+          const resolvedHashes: string[] = [];
+          for (const idOrHash of command.contentHashes) {
+            const entry = shelfEntriesRef.current.find(
+              (e) => e.id === idOrHash || e.contentHash === idOrHash
+            );
+            if (!entry) throw new Error("所选书籍在书架中不存在");
+            const hash = await resolveContentHashForEntry(entry);
+            resolvedHashes.push(hash);
+          }
+          finalCommand = { ...command, contentHashes: resolvedHashes } as OrganizationCommand;
+        }
+        const nextOrg = await getShelfStore().applyOrganization(finalCommand);
+        setOrganization(nextOrg);
+      } catch (error) {
+        setShelfNotice({ kind: "error", text: `操作失败：${String(error)}` });
+        throw error;
+      } finally {
+        organizationBusyRef.current = false;
+      }
+    },
+    [organizationError, resolveContentHashForEntry]
+  );
+
+  const handleExportArchive = useCallback(async () => {
+    if (organizationBusyRef.current) {
+      setShelfNotice({ kind: "warn", text: "正在保存分类修改，请稍后再试" });
+      return;
+    }
+    try {
+      const built = buildLibraryArchiveWithIssues(
+        shelfEntriesRef.current,
+        organizationRef.current,
+        {
+          ...settings,
+          uiScale,
+        }
+      );
       if (built.skipped.length > 0) {
         throw new Error(`有 ${built.skipped.length} 条书架记录缺少有效内容指纹`);
       }
@@ -960,15 +1042,19 @@ export default function App() {
         link.click();
         window.setTimeout(() => URL.revokeObjectURL(url), 0);
       }
-      setShelfNotice({ kind: "ok", text: `已导出 ${Object.keys(built.archive.records).length} 本书的存档` });
+      setShelfNotice({
+        kind: "ok",
+        text: `已导出 ${Object.keys(built.archive.records).length} 本书及分类组织存档`,
+      });
     } catch (error) {
       setShelfNotice({ kind: "error", text: `存档导出失败：${String(error)}` });
     }
   }, [settings, uiScale]);
 
   const handleImportArchive = useCallback(async () => {
-    if (shelfBusyRef.current) return;
+    if (shelfBusyRef.current || organizationBusyRef.current) return;
     shelfBusyRef.current = true;
+    organizationBusyRef.current = true;
     setShelfBusy(true);
     try {
       let text: string | null = null;
@@ -996,8 +1082,7 @@ export default function App() {
             else if (file.size > 16 * 1024 * 1024) {
               setShelfNotice({ kind: "error", text: "存档文件超过 16 MiB，已拒绝读取" });
               resolve(null);
-            }
-            else void file.text().then(resolve, () => resolve(null));
+            } else void file.text().then(resolve, () => resolve(null));
           };
           input.addEventListener("cancel", () => resolve(null), { once: true });
           input.click();
@@ -1007,75 +1092,118 @@ export default function App() {
       const incoming = parseLibraryArchive(text);
       if (incoming.errors.length > 0) {
         const first = incoming.errors[0];
-        throw new Error(`${first.path}：${first.message}（共 ${incoming.errors.length} 项）`);
+        throw new Error(`存档解析失败（${first.path}：${first.message}，共 ${incoming.errors.length} 项错误）`);
       }
-      const current = buildLibraryArchiveWithIssues(shelfEntriesRef.current, {
-        ...settings,
-        uiScale,
-      });
+
+      const current = buildLibraryArchiveWithIssues(
+        shelfEntriesRef.current,
+        organizationRef.current,
+        {
+          ...settings,
+          uiScale,
+        }
+      );
       if (current.skipped.length > 0) {
         throw new Error(`当前书架有 ${current.skipped.length} 条记录缺少有效内容指纹`);
       }
-      const merged = mergeLibraryArchives(current.archive, incoming.archive);
-      const nextEntries = await getShelfStore().replacePortableRecords(
-        archiveRecordsForBackend(merged)
-      );
-      setShelfEntries(nextEntries);
 
-      const importedSettings = merged.settings ?? {};
-      setSettings((previous) => ({
-        ...previous,
-        ...(typeof importedSettings.fontSizePx === "number" && importedSettings.fontSizePx >= 12 && importedSettings.fontSizePx <= 32
-          ? { fontSizePx: importedSettings.fontSizePx }
-          : {}),
-        ...(importedSettings.theme === "light" || importedSettings.theme === "dark" || importedSettings.theme === "sepia"
-          ? { theme: importedSettings.theme }
-          : {}),
-        ...(typeof importedSettings.gapPx === "number" && importedSettings.gapPx >= 0 && importedSettings.gapPx <= 96
-          ? { gapPx: importedSettings.gapPx }
-          : {}),
-        ...(typeof importedSettings.fontFamily === "string" ? { fontFamily: importedSettings.fontFamily } : {}),
-        ...(typeof importedSettings.lineHeight === "number" && importedSettings.lineHeight >= 1 && importedSettings.lineHeight <= 3 ? { lineHeight: importedSettings.lineHeight } : {}),
-        ...(typeof importedSettings.fontWeight === "number" && importedSettings.fontWeight >= 100 && importedSettings.fontWeight <= 900 ? { fontWeight: importedSettings.fontWeight } : {}),
-        ...(typeof importedSettings.letterSpacingPx === "number" && importedSettings.letterSpacingPx >= 0 && importedSettings.letterSpacingPx <= 32 ? { letterSpacingPx: importedSettings.letterSpacingPx } : {}),
-        ...(typeof importedSettings.wordSpacingPx === "number" && importedSettings.wordSpacingPx >= 0 && importedSettings.wordSpacingPx <= 64 ? { wordSpacingPx: importedSettings.wordSpacingPx } : {}),
-        ...(typeof importedSettings.customFontName === "string" ? { customFontName: importedSettings.customFontName } : {}),
-        ...(importedSettings.fontSource === "system" || importedSettings.fontSource === "imported" ? { fontSource: importedSettings.fontSource } : {}),
-        ...(typeof importedSettings.customFontId === "string" ? { customFontId: importedSettings.customFontId } : {}),
-        ...(typeof importedSettings.customCss === "string" ? { customCss: importedSettings.customCss } : {}),
-        ...(typeof importedSettings.forceHorizontal === "boolean" ? { forceHorizontal: importedSettings.forceHorizontal } : {}),
-        ...(typeof importedSettings.preloadNextChapter === "boolean" ? { preloadNextChapter: importedSettings.preloadNextChapter } : {}),
-        // 导入的页面选项与本地读取走同一处归一化。
-        ...normalizePageOptions({
-          readingMode: importedSettings.readingMode,
-          pageMarginsPx: importedSettings.pageMarginsPx,
-          columnsPerView: importedSettings.columnsPerView,
-          gapPx:
-            typeof importedSettings.gapPx === "number"
-              ? importedSettings.gapPx
-              : previous.gapPx,
-        }),
-      }));
-      if (typeof importedSettings.uiScale === "number" && importedSettings.uiScale >= 0.75 && importedSettings.uiScale <= 1.5) {
-        setUiScale(importedSettings.uiScale);
+      // 预检查组织数据合并
+      mergeLibraryArchives(current.archive, incoming.archive);
+
+      // 第一步：写入阅读记录
+      let nextEntries: ShelfEntry[];
+      try {
+        nextEntries = await getShelfStore().replacePortableRecords(
+          archiveRecordsForBackend(incoming.archive)
+        );
+        setShelfEntries(nextEntries);
+      } catch (err) {
+        throw new Error(`书籍记录导入失败：${String(err)}`);
       }
+
+      // 第二步：合并组织数据
+      try {
+        const nextOrg = await getShelfStore().mergeOrganization(incoming.archive.organization);
+        setOrganization(nextOrg);
+      } catch (err) {
+        // 第二步失败：重新加载实际已落盘的组织状态，明示部分完成
+        try {
+          const persistedOrg = await getShelfStore().getOrganization();
+          setOrganization(persistedOrg);
+        } catch {}
+        const unavailableCount = nextEntries.filter((entry) => entry.available === false).length;
+        setShelfNotice({
+          kind: "warn",
+          text: `书籍记录已导入${unavailableCount > 0 ? `（${unavailableCount} 本需重新定位源文件）` : ""}，但收藏与文件夹合并未完成，请重试导入：${String(err)}`,
+        });
+        return;
+      }
+
+      // 第三步：应用外观与阅读设置
+      try {
+        const importedSettings = incoming.archive.settings ?? {};
+        setSettings((previous) => ({
+          ...previous,
+          ...(typeof importedSettings.fontSizePx === "number" && importedSettings.fontSizePx >= 12 && importedSettings.fontSizePx <= 32
+            ? { fontSizePx: importedSettings.fontSizePx }
+            : {}),
+          ...(importedSettings.theme === "light" || importedSettings.theme === "dark" || importedSettings.theme === "sepia"
+            ? { theme: importedSettings.theme }
+            : {}),
+          ...(typeof importedSettings.gapPx === "number" && importedSettings.gapPx >= 0 && importedSettings.gapPx <= 96
+            ? { gapPx: importedSettings.gapPx }
+            : {}),
+          ...(typeof importedSettings.fontFamily === "string" ? { fontFamily: importedSettings.fontFamily } : {}),
+          ...(typeof importedSettings.lineHeight === "number" && importedSettings.lineHeight >= 1 && importedSettings.lineHeight <= 3 ? { lineHeight: importedSettings.lineHeight } : {}),
+          ...(typeof importedSettings.fontWeight === "number" && importedSettings.fontWeight >= 100 && importedSettings.fontWeight <= 900 ? { fontWeight: importedSettings.fontWeight } : {}),
+          ...(typeof importedSettings.letterSpacingPx === "number" && importedSettings.letterSpacingPx >= 0 && importedSettings.letterSpacingPx <= 32 ? { letterSpacingPx: importedSettings.letterSpacingPx } : {}),
+          ...(typeof importedSettings.wordSpacingPx === "number" && importedSettings.wordSpacingPx >= 0 && importedSettings.wordSpacingPx <= 64 ? { wordSpacingPx: importedSettings.wordSpacingPx } : {}),
+          ...(typeof importedSettings.customFontName === "string" ? { customFontName: importedSettings.customFontName } : {}),
+          ...(importedSettings.fontSource === "system" || importedSettings.fontSource === "imported" ? { fontSource: importedSettings.fontSource } : {}),
+          ...(typeof importedSettings.customFontId === "string" ? { customFontId: importedSettings.customFontId } : {}),
+          ...(typeof importedSettings.customCss === "string" ? { customCss: importedSettings.customCss } : {}),
+          ...(typeof importedSettings.forceHorizontal === "boolean" ? { forceHorizontal: importedSettings.forceHorizontal } : {}),
+          ...(typeof importedSettings.preloadNextChapter === "boolean" ? { preloadNextChapter: importedSettings.preloadNextChapter } : {}),
+          ...normalizePageOptions({
+            readingMode: importedSettings.readingMode,
+            pageMarginsPx: importedSettings.pageMarginsPx,
+            columnsPerView: importedSettings.columnsPerView,
+            gapPx:
+              typeof importedSettings.gapPx === "number"
+                ? importedSettings.gapPx
+                : previous.gapPx,
+          }),
+        }));
+        if (typeof importedSettings.uiScale === "number" && importedSettings.uiScale >= 0.75 && importedSettings.uiScale <= 1.5) {
+          setUiScale(importedSettings.uiScale);
+        }
+      } catch (err) {
+        setShelfNotice({
+          kind: "warn",
+          text: `书籍记录与分类已导入，但阅读设置应用失败：${String(err)}`,
+        });
+        return;
+      }
+
       const unavailableCount = nextEntries.filter((entry) => entry.available === false).length;
       setShelfNotice({
         kind: unavailableCount > 0 ? "warn" : "ok",
-        text: `已合并 ${Object.keys(incoming.archive.records).length} 本书的存档${unavailableCount > 0 ? `；${unavailableCount} 本需重新定位源文件` : ""}`,
+        text: `已导入 ${Object.keys(incoming.archive.records).length} 本书的记录与分类${unavailableCount > 0 ? `；${unavailableCount} 本需重新定位源文件` : ""}`,
       });
     } catch (error) {
       setShelfNotice({ kind: "error", text: `存档导入失败：${String(error)}` });
     } finally {
       shelfBusyRef.current = false;
+      organizationBusyRef.current = false;
       setShelfBusy(false);
     }
   }, [settings, uiScale]);
 
-  // ---- 书架启动加载 ----
+  // ---- 书架与组织启动加载 ----
   useEffect(() => {
     let cancelled = false;
-    getShelfStore()
+    const store = getShelfStore();
+    store
       .list()
       .then((entries) => {
         if (!cancelled) setShelfEntries(entries);
@@ -1083,6 +1211,25 @@ export default function App() {
       .catch((e) => {
         if (!cancelled) setShelfError(`无法读取书架：${String(e)}`);
       });
+
+    store
+      .getOrganization()
+      .then((org) => {
+        if (!cancelled) {
+          setOrganization(org);
+          setOrganizationError(null);
+        }
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setOrganizationError(`无法读取收藏与文件夹：${String(e)}`);
+          setShelfNotice({
+            kind: "error",
+            text: `无法读取收藏与文件夹：${String(e)}；已禁用分类写入以保护现有数据`,
+          });
+        }
+      });
+
     return () => {
       cancelled = true;
     };
@@ -1145,7 +1292,6 @@ export default function App() {
 
   useEffect(() => () => { fontRuntimeRef.current?.dispose(); }, []);
 
-  const fontImportBusyRef = useRef(false);
   const importFontFile = useCallback(async (file: File) => {
     const bytes = new Uint8Array(await file.arrayBuffer());
     const hash = await sha256Hex(bytes);
@@ -1161,86 +1307,70 @@ export default function App() {
     }));
   }, []);
 
-  const handleImportFontBatch = useCallback(async <T,>(items: T[], nameOf: (item: T) => string, toFile: (item: T) => Promise<File>) => {
-    if (fontImportBusyRef.current || items.length === 0) return;
-    fontImportBusyRef.current = true;
-    setFontBusy(true);
-    const { supported, unsupported } = partitionFontItems(items, nameOf);
-    let imported = 0;
-    try {
-      await runFontImportBatch(supported, async (item) => {
-        const file = await toFile(item);
-        await importFontFile(file);
-        imported += 1;
-      });
-      if (unsupported.length > 0) {
-        setShelfNotice({
-          kind: "error",
-          text: imported > 0
-            ? `已导入 ${imported} 个字体；忽略 ${unsupported.length} 个非字体文件`
-            : `已忽略 ${unsupported.length} 个非字体文件，仅支持 TTF/OTF/WOFF/WOFF2`,
-        });
-      } else if (imported > 0) {
-        setShelfNotice({ kind: "ok", text: imported === 1 ? `已导入字体：${fontFamilyFromFileName(nameOf(supported[0]))}` : `已导入 ${imported} 个字体` });
-      }
-    } catch (e) {
-      setShelfNotice({ kind: "error", text: `字体导入失败：${String(e)}` });
-    } finally {
-      fontImportBusyRef.current = false;
-      setFontBusy(false);
-    }
-  }, [importFontFile]);
+  // 本地文件与原生路径共用同一控制器：同一时刻只有一个在途批次，路径入口不再重入 busy。
+  const fontImportRef = useRef<ReturnType<typeof createFontImportController> | null>(null);
+  if (!fontImportRef.current) {
+    fontImportRef.current = createFontImportController({
+      store: getFontStore,
+      importFile: importFontFile,
+      onBusyChange: setFontBusy,
+    });
+  }
 
-  const handleImportFonts = useCallback((files: File[]) => handleImportFontBatch(files, (file) => file.name, async (file) => file), [handleImportFontBatch]);
-  const handleImportFont = useCallback((file: File) => handleImportFonts([file]), [handleImportFonts]);
-    const handleImportFontPaths = useCallback(async (paths: string[]) => {
-    if (fontImportBusyRef.current || paths.length === 0) return;
-    fontImportBusyRef.current = true;
-    setFontBusy(true);
-    try {
-      const store = getFontStore();
-      if (store.importFontPaths) {
-        const entries = await store.importFontPaths(paths);
-        if (entries.length > 0) {
-          setUserFonts((prev) => {
-            const newIds = new Set(entries.map((e) => e.id));
-            return [...entries, ...prev.filter((f) => !newIds.has(f.id))];
-          });
-          const last = entries[0];
-          setSettings((previous) => ({
-            ...previous,
-            fontSource: "imported",
-            customFontId: last.id,
-            customFontName: last.family,
-          }));
-          setShelfNotice({
-            kind: "ok",
-            text: entries.length === 1 ? `已导入字体：${last.family}` : `已导入 ${entries.length} 个字体`,
-          });
-        } else {
-          setShelfNotice({
-            kind: "error",
-            text: "未发现支持的字体文件，仅支持 TTF/OTF/WOFF/WOFF2",
-          });
-        }
-      } else {
-        await handleImportFontBatch(
-          paths,
-          (path) => path.split(/[\\/]/).pop() || path,
-          async (path) => {
-            const name = path.split(/[\\/]/).pop() || "font";
-            const bytes = await readFile(path);
-            return new File([bytes.slice().buffer as ArrayBuffer], name);
-          }
-        );
-      }
-    } catch (e) {
-      setShelfNotice({ kind: "error", text: `字体导入失败：${String(e)}` });
-    } finally {
-      fontImportBusyRef.current = false;
-      setFontBusy(false);
+  const handleImportFonts = useCallback(async (files: File[]) => {
+    const result = await fontImportRef.current!.importFiles(files);
+    if (result.kind === "busy") {
+      setShelfNotice({ kind: "error", text: "正在导入字体，请稍候" });
+      return;
     }
-  }, [handleImportFontBatch]);
+    if (result.kind === "error") {
+      setShelfNotice({ kind: "error", text: result.message });
+      return;
+    }
+    if (result.unsupported > 0) {
+      setShelfNotice({
+        kind: "error",
+        text: result.imported > 0
+          ? `已导入 ${result.imported} 个字体；忽略 ${result.unsupported} 个非字体文件`
+          : `已忽略 ${result.unsupported} 个非字体文件，仅支持 TTF/OTF/WOFF/WOFF2`,
+      });
+      return;
+    }
+    if (result.message) setShelfNotice({ kind: "ok", text: result.message });
+  }, []);
+  const handleImportFont = useCallback((file: File) => handleImportFonts([file]), [handleImportFonts]);
+
+  const handleImportFontPaths = useCallback(async (paths: string[]) => {
+    const result = await fontImportRef.current!.importPaths(paths);
+    if (result.kind === "busy") {
+      setShelfNotice({ kind: "error", text: "正在导入字体，请稍候" });
+      return;
+    }
+    if (result.kind === "error") {
+      setShelfNotice({ kind: "error", text: result.message });
+      return;
+    }
+    const entry = result.entry;
+    if (entry) {
+      setUserFonts((prev) => [entry, ...prev.filter((f) => f.id !== entry.id)]);
+      setSettings((previous) => ({
+        ...previous,
+        fontSource: "imported",
+        customFontId: entry.id,
+        customFontName: entry.family,
+      }));
+    }
+    if (result.unsupported > 0) {
+      setShelfNotice({
+        kind: "error",
+        text: result.imported > 0
+          ? `已导入 ${result.imported} 个字体；忽略 ${result.unsupported} 个非字体文件`
+          : `已忽略 ${result.unsupported} 个非字体文件，仅支持 TTF/OTF/WOFF/WOFF2`,
+      });
+      return;
+    }
+    if (result.message) setShelfNotice({ kind: "ok", text: result.message });
+  }, []);
 
   useEffect(() => {
     if (!fontSettingsOpen) setFontNativeDragActive(false);
@@ -1585,6 +1715,28 @@ export default function App() {
     // Display-ready flips a state gate; the following render runs the normal
     // progress effect with the newest derived percentage and anchor.
   }, [applyCount]);
+
+  const handleVisibleChapterChange = useCallback(
+    (index: number, anchor: ReadingAnchor | null) => {
+      // 连续滚动模式观察到的章节变化：只更新目录高亮、阅读线归属及持久化锚点，
+      // 绝不调用 handleRequestChapter、不清前台、不设置 readerDisplayReady(false)。
+      spineIndexRef.current = index;
+      setSpineIndex(index);
+      if (anchor) {
+        lastStablePositionRef.current = {
+          spineIndex: index,
+          page: 0,
+          anchor: toPersistedReaderAnchor({
+            index: anchor.index,
+            ratio: anchor.ratio,
+            anchorTextOffset: anchor.textOffset,
+            anchorTextSnippet: anchor.textSnippet,
+          }),
+        };
+      }
+    },
+    []
+  );
 
   const handleRequestChapter = useCallback(
     (index: number, opts?: { atEnd?: boolean }) => {
@@ -2441,14 +2593,16 @@ export default function App() {
       const prevent = (e: DragEvent): void => e.preventDefault();
       const drop = (e: DragEvent): void => {
         e.preventDefault();
+        // 字体面板内部拖放由面板自己处理（onDrop 已 stopPropagation），
+        // 这里只覆盖面板外的窗口拖放，行为与原生入口一致。
         const files = Array.from(e.dataTransfer?.files ?? []);
         const epubFiles = files.filter((f) => f.name.toLowerCase().endsWith(".epub"));
         const fontFiles = files.filter((f) => isSupportedFontFileName(f.name));
+        if (fontFiles.length > 0 && !fontSettingsOpen) {
+          setShelfNotice({ kind: "error", text: "请打开字体设置后拖入字体" });
+        }
         if (epubFiles.length > 0) {
           void handleImportSources(epubFiles.map((file) => ({ kind: "file" as const, file })));
-        }
-        if (fontFiles.length > 0) {
-          void handleImportFonts(fontFiles);
         }
       };
       window.addEventListener("dragover", prevent);
@@ -2491,10 +2645,19 @@ export default function App() {
           nativeDragHasFont = false;
           setDragActive(false);
           setFontNativeDragActive(false);
-          const fontPaths = p.paths.filter((path) => isSupportedFontFileName(path));
+          // 字体面板优先：面板内的落点只走字体链路，残留的 EPUB 不抢读书会话。
+          const overFontPanel = isOverFontPanel(p.position);
           const epubPaths = p.paths.filter((path) => path.toLowerCase().endsWith(".epub"));
-          if (fontPaths.length > 0) {
-            void handleImportFontPaths(fontPaths);
+          const hasNonFont = p.paths.length > epubPaths.length;
+          if (overFontPanel) {
+            void handleImportFontPaths(p.paths);
+            if (epubPaths.length > 0) {
+              setShelfNotice({ kind: "error", text: "字体面板仅支持 TTF/OTF/WOFF/WOFF2 字体文件" });
+            }
+            return;
+          }
+          if (hasNonFont) {
+            setShelfNotice({ kind: "error", text: "请打开字体设置后拖入字体" });
           }
           if (epubPaths.length > 0) {
             void handleImportSources(
@@ -2508,10 +2671,13 @@ export default function App() {
         }
       })
       .then((u) => {
-        if (!cancelled) unlisten = u;
+        // 注册期间 effect 已清理时立即退订，避免字体面板开关留下重复监听。
+        if (cancelled) u();
+        else unlisten = u;
       })
-      .catch(() => {
-        /* 非 Tauri 运行时忽略 */
+      .catch((error) => {
+        console.error("原生拖放监听注册失败，字体面板仍可用导入按钮", error);
+        setShelfNotice({ kind: "error", text: "拖放不可用，可用导入按钮重试" });
       });
     return () => {
       cancelled = true;
@@ -2914,6 +3080,10 @@ export default function App() {
             )}
             <ShelfView
               entries={shelfEntries}
+              organization={organization}
+              scope={shelfScope}
+              onScopeChange={setShelfScope}
+              onApplyOrganization={handleApplyOrganization}
               busy={shelfBusy}
               theme={settings.theme}
               onThemeChange={changeTheme}
@@ -3273,6 +3443,7 @@ export default function App() {
                      openTransient("selection", payload);
                   }}
                   onPageState={onPageState}
+                  onVisibleChapterChange={handleVisibleChapterChange}
                   onDisplayReady={handleReaderDisplayReady}
                   onRequestChapter={handleRequestChapter}
                   onIssues={handleIssues}

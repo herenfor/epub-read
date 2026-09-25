@@ -30,6 +30,7 @@ import {
   type VisibleTextIndex,
 } from "./textAnchor";
 import {
+  continuousWheelPixels,
   nextWheelTarget,
   scrollByViewportCommand,
   scrollMaxTop,
@@ -175,6 +176,35 @@ export interface ReadingAnchor extends TextAnchorData {
   charsRead: number;
   totalChars: number;
   mediaUnits?: number;
+}
+
+export interface ExternalScrollAdapter {
+  onWheelPixels(delta: number): void;
+  onViewportStep(direction: 1 | -1): void;
+}
+
+export interface ReadingAnchorAndContentY {
+  anchor: ReadingAnchor;
+  contentY: number;
+}
+
+/**
+ * 纯图片页的图内锚点（R3）。没有可解析文字时，只保存章内像素位置在窗口
+ * 宽度变化后会落到图案之外；保存媒体身份与图内纵向比例才能重建同一图案。
+ */
+export interface MediaReadingAnchor {
+  /** 媒体元素在本文档媒体列表中的顺序身份；同章重排/换设置后保持不变。 */
+  index: number;
+  tag: string;
+  /** 源签名（id/class/viewBox/src 尾部）；顺序身份失效时用于回退匹配。 */
+  signature: string;
+  /** (锚点内容 y - 媒体顶) / 媒体高，图内纵向比例。 */
+  ratio: number;
+}
+
+export interface MediaAnchorAndContentY {
+  anchor: MediaReadingAnchor;
+  contentY: number;
 }
 
 export interface PreciseNavigationRequest {
@@ -2038,6 +2068,8 @@ export class ChapterPaginator {
   private displayReadySeq = -1;
   private displayReadyResult = false;
   private displayReadyPromise: Promise<boolean> = Promise.resolve(false);
+  /** 连续滚动的重排完成通知；见 setLayoutSettledHandler。 */
+  private onLayoutSettled?: () => void;
   private resolveDisplayReady: ((ready: boolean) => void) | null = null;
   private recomputeRetries = 0;
   /** reflow 序号：丢弃过期测量结果，防快速缩放时旧布局覆盖新布局 */
@@ -2105,6 +2137,8 @@ export class ChapterPaginator {
   private leadingColumns = 0;
   /** 滚动模式下的虚拟屏数（进度口径，不用于定位）。 */
   private scrollPageCount = 1;
+  /** 宿主连续滚动投影状态门，防止投影滚动事件反向触发章内导航或重置。 */
+  private isProjectingScroll = false;
 
   constructor(
     private iframe: HTMLIFrameElement,
@@ -2142,7 +2176,9 @@ export class ChapterPaginator {
       exact: boolean;
     }) => void,
     /** 正文图片激活（活动章节专用；由 UI 打开独立浮层）。 */
-    private onImageActivation?: (image: ImageActivationPayload) => void
+    private onImageActivation?: (image: ImageActivationPayload) => void,
+    /** 连续滚动模式外部适配器；提供时滚轮与按键转交宿主，不再触发章末保护链。 */
+    private externalScroll?: ExternalScrollAdapter
   ) {
     this.selectionContextMenuHandler = onSelectionContextMenu;
     this.displayGate = new VisibilityGate(this.iframe, {
@@ -2150,6 +2186,31 @@ export class ChapterPaginator {
     });
     this.footnoteHoverGate = new FootnoteHoverGate(() =>
       this.resetFootnote({ notify: true, forceNotify: true })
+    );
+  }
+
+  setExternalScroll(adapter?: ExternalScrollAdapter): void {
+    this.externalScroll = adapter;
+  }
+
+  /**
+   * 连续滚动订阅：滚动模式下每次重排（窗口尺寸变化、图片晚加载触发的
+   * scheduleReflow）完成最终测量后回调，宿主据此重测章节真实高度。
+   * 只表示“本章布局已稳定”，不重复报告首次 display-ready。
+   */
+  setLayoutSettledHandler(handler?: () => void): void {
+    this.onLayoutSettled = handler;
+  }
+
+  /**
+   * 当前 iframe 视口是否已经完成过一次分页器测量。
+   * 连续视图在宿主尺寸变化后必须先等本方法为真再提交章节高度：否则会把
+   * iframe 刚改高度、内容尚未重排完的中间值当成真实内容高写进布局表。
+   */
+  isMeasuredForViewport(): boolean {
+    return (
+      this.iframe.clientWidth === this.measuredViewport.width &&
+      this.iframe.clientHeight === this.measuredViewport.height
     );
   }
 
@@ -2787,6 +2848,7 @@ export class ChapterPaginator {
   /** 滚动事件：一帧一次更新位置；真实 scrollTop 变化才关闭弹注。 */
   private handleScroll(): void {
     if (!this.scrollMode || this.disposed) return;
+    if (this.isProjectingScroll) return;
     const viewer = this.viewer;
     if (!viewer) return;
     if (this.pendingWheelTarget !== null && Math.abs(viewer.scrollTop - this.pendingWheelTarget) < 2) {
@@ -3980,7 +4042,10 @@ export class ChapterPaginator {
     }
     if (this.scrollMode) {
       this.recomputeScroll();
-      return !this.disposed && loadSeq === this.loadSeq;
+      const settled = !this.disposed && loadSeq === this.loadSeq;
+      // 只有已稳定且仍属当前代次时才通知，过期结果不得触发宿主重测
+      if (settled) this.onLayoutSettled?.();
+      return settled;
     }
     const sw = viewer.scrollWidth;
     const hasContent =
@@ -4041,6 +4106,12 @@ export class ChapterPaginator {
     if (existing) {
       existing.remove();
     }
+
+    // 连续滚动模式下章节自然连续衔接，不插入切章卡片或切章按钮；仅全书末尾保留结束提示。
+    if (this.hasNextChapter) {
+      return;
+    }
+
     const endEl = this.contentDoc.createElement("div");
     endEl.className = "reader-chapter-end";
     endEl.setAttribute("data-reader", "chapter-end");
@@ -4048,34 +4119,14 @@ export class ChapterPaginator {
     const divider = this.contentDoc.createElement("div");
     divider.className = "chapter-end-divider";
     const span = this.contentDoc.createElement("span");
-    span.textContent = this.hasNextChapter ? "本章完" : "全书完";
+    span.textContent = "全书完";
     divider.appendChild(span);
     endEl.appendChild(divider);
 
-    if (this.hasNextChapter) {
-      const btn = this.contentDoc.createElement("button");
-      btn.type = "button";
-      btn.className = "chapter-end-next-btn";
-      btn.setAttribute("aria-label", "进入下一章");
-      btn.textContent = "进入下一章 →";
-      btn.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        this.scrollToEnd();
-        this.onWheelNavigate?.(1);
-      });
-      endEl.appendChild(btn);
-
-      const hint = this.contentDoc.createElement("div");
-      hint.className = "chapter-end-hint";
-      hint.textContent = "继续向下滚动亦可进入下一章";
-      endEl.appendChild(hint);
-    } else {
-      const hint = this.contentDoc.createElement("div");
-      hint.className = "chapter-end-hint";
-      hint.textContent = "已读完全部章节";
-      endEl.appendChild(hint);
-    }
+    const hint = this.contentDoc.createElement("div");
+    hint.className = "chapter-end-hint";
+    hint.textContent = "已读完全部章节";
+    endEl.appendChild(hint);
 
     this.viewer.appendChild(endEl);
   }
@@ -4968,6 +5019,219 @@ export class ChapterPaginator {
     return scrollByViewportCommand(direction, this.scrollMetrics(), this.viewer.scrollTop).atBoundary;
   }
 
+  /**
+   * 连续滚动投影：直接设置 viewer.scrollTop 为 innerTop。
+   * 取消旧微动画，不平滑二次位移，不反向触发宿主滚动。
+   */
+  projectContinuousScroll(innerTop: number): void {
+    if (!this.viewer) return;
+    this.cancelScrollAnimation();
+    this.isProjectingScroll = true;
+    this.viewer.scrollTop = innerTop;
+    this.lastScrollTop = innerTop;
+    this.isProjectingScroll = false;
+  }
+
+  /**
+   * 测量真实连续内容高度。
+   * 排除 clientHeight 强制下限：基于真实文本、图片、SVG、浮动和正外边距测量。
+   * 短章返回真实内容高，纯图片保留尺寸，空章返回 0，长章结合 scrollHeight。
+   */
+  getContinuousContentHeight(): number {
+    if (!this.viewer || !this.contentDoc) return 0;
+    const viewerRect = this.viewer.getBoundingClientRect();
+    if (viewerRect.height <= 0 && this.viewer.clientHeight <= 0) return 0;
+
+    let maxBottom = 0;
+    let hasValidContent = false;
+
+    const children = Array.from(this.viewer.children);
+    for (const child of children) {
+      if (child instanceof HTMLElement && child.getAttribute("data-reader") === "chapter-end") {
+        continue;
+      }
+      if (child instanceof HTMLElement) {
+        const rect = child.getBoundingClientRect();
+        const hasText = Boolean(child.textContent && child.textContent.trim().length > 0);
+        const hasMedia = child.querySelector("img, svg, video, audio") !== null || child.tagName === "IMG" || child.tagName === "SVG";
+        if (!hasText && !hasMedia && rect.height <= 0 && rect.width <= 0) {
+          continue;
+        }
+        hasValidContent = true;
+        const style = this.contentDoc.defaultView?.getComputedStyle(child);
+        const mb = style ? parseFloat(style.marginBottom) || 0 : 0;
+        const bottom = (rect.bottom - viewerRect.top) + this.viewer.scrollTop + Math.max(0, mb);
+        if (bottom > maxBottom) {
+          maxBottom = bottom;
+        }
+      }
+    }
+
+    try {
+      const range = this.contentDoc.createRange();
+      range.selectNodeContents(this.viewer);
+      const rangeRect = range.getBoundingClientRect();
+      if (rangeRect.height > 0) {
+        hasValidContent = true;
+        const bottom = (rangeRect.bottom - viewerRect.top) + this.viewer.scrollTop;
+        if (bottom > maxBottom) {
+          maxBottom = bottom;
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    if (!hasValidContent) {
+      if (this.viewer.querySelector("img, svg") || (this.viewer.textContent && this.viewer.textContent.trim().length > 0)) {
+        hasValidContent = true;
+      }
+    }
+
+    if (!hasValidContent) {
+      return 0;
+    }
+
+    const scrollH = this.viewer.scrollHeight;
+    const clientH = this.viewer.clientHeight;
+
+    if (scrollH > clientH + 1) {
+      const endEl = this.viewer.querySelector('[data-reader="chapter-end"]') as HTMLElement | null;
+      const endH = endEl ? endEl.offsetHeight : 0;
+      return Math.max(maxBottom, scrollH - endH);
+    }
+
+    return Math.ceil(maxBottom);
+  }
+
+  /**
+   * 给定 iframe 局部阅读线（视口坐标 viewportY），采样可持久化文本锚点及真实内容 y。
+   */
+  getReadingAnchorAt(viewportY: number): ReadingAnchorAndContentY | null {
+    if (!this.viewer || !this.contentDoc) return null;
+    const doc = this.contentDoc;
+    const viewer = this.viewer;
+    const index = this.textIndex ?? buildVisibleTextIndex(doc, viewer);
+    this.textIndex = index;
+    const viewerRect = viewer.getBoundingClientRect();
+    const x = viewerRect.left + Math.round(viewer.clientWidth * 0.5);
+    const y = viewerRect.top + viewportY;
+    const anchor = captureAnchorAtPoint({ viewer, doc, index, mode: "scroll", visibleRatio: 0.12 }, { x, y });
+    if (!anchor) {
+      const fallback = captureVisibleAnchor({ viewer, doc, index, mode: "scroll", visibleRatio: 0.12 });
+      if (!fallback) return null;
+      return {
+        anchor: fallback,
+        contentY: viewer.scrollTop + viewportY,
+      };
+    }
+    return {
+      anchor,
+      contentY: viewer.scrollTop + viewportY,
+    };
+  }
+
+  /**
+   * 重排补偿：把已保存的文本锚点解析回同一文本处的内容纵坐标。
+   * 只读当前存活文档，不写任何持久化状态；解析失败返回 null，由调用方回退
+   * 到像素锚点。纯图片页没有文字锚点时同样返回 null。
+   */
+  resolveAnchorContentY(anchor: ReadingAnchor): number | null {
+    const doc = this.contentDoc;
+    const viewer = this.viewer;
+    if (!doc || !viewer) return null;
+    const index = this.textIndex ?? buildVisibleTextIndex(doc, viewer);
+    this.textIndex = index;
+    const offset = resolveTextAnchorOffset(index, anchor);
+    if (offset === null) return null;
+    const pos = index.positionForOffset(offset);
+    if (!pos) return null;
+    const length = pos.node.nodeType === 3 ? (pos.node as Text).data.length : pos.node.childNodes.length;
+    const raw = Math.max(0, Math.min(pos.rawOffset, length));
+    try {
+      const range = doc.createRange();
+      range.setStart(pos.node, raw);
+      range.collapse(true);
+      const rect = range.getBoundingClientRect();
+      if (rect.height === 0 && rect.width === 0 && rect.top === 0) return null;
+      const viewerRect = viewer.getBoundingClientRect();
+      return rect.top - viewerRect.top + viewer.scrollTop;
+    } catch {
+      return null;
+    }
+  }
+
+  /** 本文档中参与纵向定位的媒体元素；顺序即身份，重排后不改变。 */
+  private collectMediaElements(): Element[] {
+    const viewer = this.viewer;
+    if (!viewer) return [];
+    return Array.from(viewer.querySelectorAll("img, svg, video"));
+  }
+
+  private mediaSignature(el: Element): string {
+    const src =
+      el.getAttribute("src") ?? el.getAttribute("href") ?? el.getAttribute("xlink:href") ?? "";
+    return [
+      el.tagName.toLowerCase(),
+      el.getAttribute("id") ?? "",
+      el.getAttribute("class") ?? "",
+      el.getAttribute("viewBox") ?? "",
+      src.slice(-96),
+    ].join("|");
+  }
+
+  private mediaContentTop(viewer: HTMLElement, rect: DOMRect): number {
+    const viewerRect = viewer.getBoundingClientRect();
+    return rect.top - viewerRect.top + viewer.scrollTop;
+  }
+
+  /**
+   * 纯图片页的图内锚点：给定 iframe 局部阅读线，返回包含它的媒体身份与
+   * 图内纵向比例。阅读线不落在任何媒体内（图文混排、媒体尚未就绪）返回 null，
+   * 由调用方回退到文本锚点或像素锚点。
+   */
+  getMediaAnchorAt(viewportY: number): MediaAnchorAndContentY | null {
+    const viewer = this.viewer;
+    if (!viewer) return null;
+    const contentY = viewer.scrollTop + viewportY;
+    const media = this.collectMediaElements();
+    for (let index = 0; index < media.length; index += 1) {
+      const el = media[index];
+      const rect = el.getBoundingClientRect();
+      if (rect.height <= 0) continue;
+      const top = this.mediaContentTop(viewer, rect);
+      if (contentY < top || contentY > top + rect.height) continue;
+      return {
+        anchor: {
+          index,
+          tag: el.tagName.toLowerCase(),
+          signature: this.mediaSignature(el),
+          ratio: Math.max(0, Math.min(1, (contentY - top) / rect.height)),
+        },
+        contentY,
+      };
+    }
+    return null;
+  }
+
+  /**
+   * 重排补偿：把已保存的媒体锚点解析回同一图内比例的内容纵坐标。
+   * 顺序身份与签名都失效（换文档、换图）时返回 null，不猜替代媒体。
+   */
+  resolveMediaAnchorContentY(anchor: MediaReadingAnchor): number | null {
+    const viewer = this.viewer;
+    if (!viewer) return null;
+    const media = this.collectMediaElements();
+    let el: Element | undefined = media[anchor.index];
+    if (!el || el.tagName.toLowerCase() !== anchor.tag || this.mediaSignature(el) !== anchor.signature) {
+      el = media.find((candidate) => this.mediaSignature(candidate) === anchor.signature);
+    }
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    if (rect.height <= 0) return null;
+    return this.mediaContentTop(viewer, rect) + anchor.ratio * rect.height;
+  }
+
   /** 翻到第 i 页（分页）；滚动模式的命令语义由 scrollByViewport 提供。 */
   setPage(i: number): void {
     if (!this.viewer) return;
@@ -5177,6 +5441,23 @@ export class ChapterPaginator {
       clearDocumentSelection(this.contentDoc);
       return;
     }
+    if (this.externalScroll) {
+      const k = e.key;
+      if (k === "PageDown" || k === " ") {
+        e.preventDefault();
+        this.externalScroll.onViewportStep(1);
+      } else if (k === "PageUp") {
+        e.preventDefault();
+        this.externalScroll.onViewportStep(-1);
+      } else if (k === "ArrowDown") {
+        e.preventDefault();
+        this.externalScroll.onWheelPixels(40);
+      } else if (k === "ArrowUp") {
+        e.preventDefault();
+        this.externalScroll.onWheelPixels(-40);
+      }
+      return;
+    }
     if (this.scrollMode) {
       // 滚动模式：PageUp/PageDown/Space 走视口命令，方向键保留原生滚动。
       const k = e.key;
@@ -5201,6 +5482,18 @@ export class ChapterPaginator {
 
   /** 滚轮翻页：分页模式累积翻页；滚动模式到章首/章末边界时累积切换上一章/下一章。 */
   private handleWheel(e: WheelEvent): void {
+    if (this.externalScroll) {
+      if (!this.viewer || e.deltaY === 0) return;
+      const deltaY = continuousWheelPixels(
+        e.deltaY,
+        e.deltaMode,
+        28,
+        this.viewer?.clientHeight ?? 600
+      );
+      e.preventDefault();
+      this.externalScroll.onWheelPixels(deltaY);
+      return;
+    }
     if (this.scrollMode) {
       if (!this.viewer || e.deltaY === 0) return;
       if (this.lastState.status === "loading" || this.lastState.status === "measuring") return;

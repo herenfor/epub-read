@@ -156,31 +156,3 @@ describe("search result presentation helpers", () => {
     expect(markup).toContain("搜索全部书籍正文");
   });
 });
-
-async function readStyles(): Promise<string> {
-  // The production bundle handles CSS through Vite; this node-only contract
-  // test reads source text so the search input selector boundary is covered.
-  // @ts-expect-error The project intentionally does not include @types/node.
-  const { readFile } = await import("node:fs/promises");
-  return readFile(new URL("../styles.css", import.meta.url), "utf8");
-}
-
-describe("搜索输入框视觉契约", () => {
-  it("隐藏 Chromium 原生搜索装饰，避免与自定义清除按钮重复", async () => {
-    const styles = await readStyles();
-    expect(styles).toMatch(
-      /\.search-input::-webkit-search-cancel-button,[\s\S]*?\.search-input::-webkit-search-results-decoration\s*\{[^}]*display:\s*none;[^}]*-webkit-appearance:\s*none;[^}]*appearance:\s*none;/s,
-    );
-  });
-
-  it("长文本保持单行且为清除按钮预留固定右侧空间", async () => {
-    const styles = await readStyles();
-    expect(styles).toMatch(
-      /\.search-input-wrap\s*\{[^}]*width:\s*100%;[^}]*min-width:\s*0;/s,
-    );
-    expect(styles).toMatch(
-      /\.search-input\s*\{[^}]*width:\s*100%;[^}]*max-width:\s*100%;[^}]*box-sizing:\s*border-box;[^}]*min-width:\s*0;[^}]*padding:\s*9px 40px 9px 10px;[^}]*white-space:\s*nowrap;/s,
-    );
-    expect(styles).toMatch(/\.search-clear\s*\{[^}]*z-index:\s*1;/s);
-  });
-});

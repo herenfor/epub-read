@@ -11,11 +11,13 @@ import {
   type WithinChapterNavigationOptions,
   type PreciseNavigationRequest,
   type PreciseNavigationStatus,
+  type ReadingAnchor,
 } from "../render/paginator";
 import type { ResourceServer } from "../render/resources";
 import type { ReaderSettings } from "../render/settings";
 import { createSettingsReloadDebouncer } from "./settingsReload";
 import { TurnIntentBuffer, WheelTurnAccumulator } from "./turnIntent";
+import { ContinuousReaderView } from "./ContinuousReaderView";
 
 export interface ReaderHandle {
   nextPage(): void;
@@ -123,6 +125,8 @@ interface ReaderViewProps {
   } | null;
   /** Legacy page fallback; paginator consumes it only after both anchors fail. */
   initialPage?: number | null;
+  /** 连续滚动模式：视口上方约 20% 阅读线观察到的可见章节变化 */
+  onVisibleChapterChange?(index: number, anchor: ReadingAnchor | null): void;
 }
 
 type ReaderFrame = "primary" | "secondary" | "tertiary";
@@ -192,7 +196,7 @@ function samePageMargins(
   return true;
 }
 
-export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function ReaderView(
+const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function PagedReaderView(
   props,
   ref
 ) {
@@ -1129,4 +1133,11 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
       </div>
     </>
   );
+});
+
+export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function ReaderView(props, ref) {
+  if (props.settings.readingMode === "scroll" && !props.book.fixedLayout) {
+    return <ContinuousReaderView {...props} ref={ref} />;
+  }
+  return <PagedReaderView {...props} ref={ref} />;
 });

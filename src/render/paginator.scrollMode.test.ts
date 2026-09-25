@@ -506,24 +506,16 @@ describe("scroll mode commands", () => {
       },
     });
 
+    // 连续滚动模式：有下一章时不渲染切章按钮或切章卡片，保证章节无缝衔接
     internals.renderScrollChapterEnd.call(context);
     const endEl = viewer.querySelector('[data-reader="chapter-end"]');
-    expect(endEl).not.toBeNull();
-    const divider = endEl?.querySelector(".chapter-end-divider");
-    expect(divider?.textContent).toBe("本章完");
+    expect(endEl).toBeNull();
 
-    const btn = endEl?.querySelector(".chapter-end-next-btn") as HTMLButtonElement | null;
-    expect(btn).not.toBeNull();
-    expect(btn?.textContent).toBe("进入下一章 →");
-
-    btn?.click();
-    expect(navigate).toHaveBeenCalledWith(1);
-    expect(viewer.scrollTop).toBe(400);
-
-    // 最后一章：没有下一章
+    // 最后一章：没有下一章时，渲染低调的“全书完”说明，且无切章按钮
     context.hasNextChapter = false;
     internals.renderScrollChapterEnd.call(context);
     const endElLast = viewer.querySelector('[data-reader="chapter-end"]');
+    expect(endElLast).not.toBeNull();
     const dividerLast = endElLast?.querySelector(".chapter-end-divider");
     expect(dividerLast?.textContent).toBe("全书完");
     expect(endElLast?.querySelector(".chapter-end-next-btn")).toBeNull();

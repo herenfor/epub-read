@@ -9,8 +9,15 @@
 import { sanitizePersistedTextAnchor } from "../render/textAnchor";
 import { hasReadEvidence } from "./readEvidence";
 import { hasDuplicateReaderNoteIds, normalizeReaderNote, type ReaderNote, validateReaderNote } from "./notes";
+import {
+  emptyOrganization,
+  mergeOrganization,
+  validateOrganization,
+  type LibraryOrganization,
+} from "./libraryOrganization";
 
-export const LIBRARY_ARCHIVE_VERSION = 1 as const;
+export const LIBRARY_ARCHIVE_VERSION = 2 as const;
+export type SupportedArchiveVersion = 1 | 2;
 
 export type JsonValue =
   | null
@@ -66,6 +73,7 @@ export interface LibraryArchive {
   version: typeof LIBRARY_ARCHIVE_VERSION;
   records: Record<string, LibraryRecord>;
   settings?: ReaderSettingsArchive;
+  organization: LibraryOrganization;
 }
 
 /** Local-only association. This type is intentionally not part of LibraryArchive. */
@@ -94,6 +102,7 @@ export interface ArchiveParseResult {
 const EMPTY_ARCHIVE = (): LibraryArchive => ({
   version: LIBRARY_ARCHIVE_VERSION,
   records: {},
+  organization: emptyOrganization(),
 });
 
 const HASH = /^[0-9a-f]{64}$/;
@@ -363,11 +372,25 @@ export function parseLibraryArchive(input: unknown): ArchiveParseResult {
     return { archive: EMPTY_ARCHIVE(), errors };
   }
   reportForbiddenFields(value, "$", errors);
-  if (value.version !== LIBRARY_ARCHIVE_VERSION) {
-    issue(errors, "version", "unsupported-version", "only archive version 1 is supported");
+  if (value.version !== 1 && value.version !== 2) {
+    issue(errors, "version", "unsupported-version", "only archive version 1 and 2 are supported");
     return { archive: EMPTY_ARCHIVE(), errors };
   }
   const archive = EMPTY_ARCHIVE();
+  if (value.version === 1) {
+    // v1 不含组织数据，解释为空合并输入（不清空本机分类）
+    archive.organization = emptyOrganization();
+  } else {
+    if (!("organization" in value) || value.organization === undefined) {
+      issue(errors, "organization", "missing-organization", "v2 archive must include organization");
+    } else {
+      try {
+        archive.organization = validateOrganization(value.organization);
+      } catch (e) {
+        issue(errors, "organization", "invalid-organization", e instanceof Error ? e.message : String(e));
+      }
+    }
+  }
   if (!objectLike(value.records)) {
     issue(errors, "records", "invalid-records", "expected an object keyed by content hash");
   } else {
@@ -458,6 +481,7 @@ export function mergeLibraryArchives(base: LibraryArchive, incoming: LibraryArch
     };
   }
   if (left.archive.settings || right.archive.settings) out.settings = { ...left.archive.settings, ...right.archive.settings };
+  out.organization = mergeOrganization(left.archive.organization, right.archive.organization);
   return out;
 }
 

@@ -8,11 +8,17 @@ if (!new Set(["core", "ai"]).has(edition)) throw new Error("edition must be core
 if (!new Set(["dev", "build", "tauri-dev"]).has(command)) throw new Error("command must be dev, build, or tauri-dev");
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+// Keep an explicit CARGO_TARGET_DIR from the caller (e.g. the Android build
+// entry point in scripts/build-android.sh) and only fall back to the per-edition
+// desktop default. Desktop build behaviour is unchanged.
 const env = {
   ...process.env,
   VITE_EDITION: edition,
   EPUB_READER_EXPECTED_EDITION: edition,
-  CARGO_TARGET_DIR: resolve(projectRoot, "src-tauri", `target-${edition}`),
+  CARGO_TARGET_DIR:
+    process.env.CARGO_TARGET_DIR && process.env.CARGO_TARGET_DIR.trim() !== ""
+      ? process.env.CARGO_TARGET_DIR
+      : resolve(projectRoot, "src-tauri", `target-${edition}`),
 };
 const node = process.execPath;
 const runNode = (entry, args = []) => {

@@ -21,6 +21,9 @@ macro_rules! configure_invoke_handler {
             linked_library::linked_library_thumbnail_read,
             linked_library::linked_library_thumbnail_write_raw,
             linked_library::linked_library_thumbnail_delete,
+            linked_library::linked_library_get_organization,
+            linked_library::linked_library_apply_organization,
+            linked_library::linked_library_merge_organization,
             fonts_import_raw,
             fonts_import_paths,
             fonts_list,
@@ -102,6 +105,9 @@ macro_rules! configure_invoke_handler {
             linked_library::linked_library_thumbnail_read,
             linked_library::linked_library_thumbnail_write_raw,
             linked_library::linked_library_thumbnail_delete,
+            linked_library::linked_library_get_organization,
+            linked_library::linked_library_apply_organization,
+            linked_library::linked_library_merge_organization,
             fonts_import_raw,
             fonts_import_paths,
             fonts_list,
@@ -445,6 +451,7 @@ mod tests {
     }
 }
 mod ai;
+mod library_organization;
 mod linked_library;
 mod system_fonts;
 
