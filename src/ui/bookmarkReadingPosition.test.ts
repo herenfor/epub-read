@@ -268,4 +268,3 @@ describe("bookmarkReadingPosition core invariants", () => {
     expect(currentReadingPosition.value.textOffset).toBe(5200);
   });
 });
-
