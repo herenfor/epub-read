@@ -21,6 +21,9 @@ function mediaElement(media: FakeMedia, scrollTop: number) {
       right: 640,
       width: 640,
     }),
+    /** 这些假媒体互为兄弟，谁也不包含谁；真实 DOM 的 Element.contains 在
+     *  兄弟之间同样恒为 false，`collectMediaElements` 的去重因此不会误删。 */
+    contains: () => false,
   };
 }
 
