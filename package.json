@@ -1,7 +1,7 @@
 {
   "name": "epub-reader",
   "private": true,
-  "version": "0.2.4-beta.1",
+  "version": "0.2.5",
   "license": "SEE LICENSE IN LICENSE",
   "type": "module",
   "scripts": {
@@ -19,7 +19,8 @@
     "verify:edition:core": "node scripts/verify-edition-artifacts.mjs core",
     "verify:edition:ai": "node scripts/verify-edition-artifacts.mjs ai",
     "preview": "vite preview",
-    "test": "vitest run",
+    "test": "node scripts/test-scoped.mjs",
+    "test:all": "node scripts/test-scoped.mjs --all",
     "icons": "node scripts/gen-icons.mjs",
     "pack": "node scripts/pack-epub.mjs",
     "check": "tsx scripts/check-book.ts",
