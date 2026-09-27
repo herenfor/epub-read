@@ -9,10 +9,11 @@ EPUB Reader opens EPUB 2.0.1 and EPUB 3.x books as their authors designed them: 
 ## Highlights
 
 - **Read the way you prefer** — turn pages, or scroll continuously from one chapter straight into the next, and switch between the two at any time without losing your place
-- **Page layout you control** — four-sided margins, one or two columns per screen and the column gap, adjustable without leaving the page
+- **A quiet reading surface** — contents, bookmarks and notes share one drawer, which can float over the page or sit pinned beside it, and the footer stays out of the way until you reach for it
+- **Typography you can see while you change it** — page colour, font, size, line height, margins and columns live in one small panel over the page instead of a settings window
 - **Illustrations at full size** — click an image in the text to open it in an overlay, then zoom, pan or view it at its original size; closing returns you exactly where you were
 - **Faithful to the book** — percentages, asymmetric margins, floats, full-page illustrations and inline footnote markers keep their intended proportions
-- **One clean window** — the system title bar is replaced by a frame that follows the app theme, keeps the book title and the window controls in the same bar, and lets you drag the window from it
+- **One clean window** — the system title bar is replaced by a slim frame that follows the app theme, keeps the book title and the window controls in the same bar, and lets you drag the window from it
 - **Local by design** — no account and no upload; books are read from where they already are
 
 ## Features
@@ -30,16 +31,17 @@ EPUB Reader opens EPUB 2.0.1 and EPUB 3.x books as their authors designed them: 
 
 ### Reading
 
-- EPUB 2 and EPUB 3 support with table-of-contents navigation
+- EPUB 2 and EPUB 3 support, with contents, bookmarks and notes in one drawer you can pin beside the page or let float over it
 - Page turning, or continuous scrolling that carries on from one chapter into the next, chosen per book and remembered
-- Page options: four-sided margins, one or two columns per screen, and the column gap
+- One typography panel: four page colours — white, parchment, gray and night — with font size, font family, line height, margins and columns, and letter and word spacing under the advanced options
+- Optional instant page turns, with no transition to wait for
+- A whisper footer showing the page, the time left in the chapter and the whole book's progress; reach for it and it opens into a chapter scrubber with tick marks you can drag
 - Illustrations open in an overlay with zoom, pan, fit-to-window and original-size views
 - Footnotes in an overlay: hover to preview, click to pin and scroll
-- Themes — light, dark and parchment — shared between the library and the reader
-- Typography controls: font size, font weight, line height, letter and word spacing
-- Reading position is remembered by content anchor, so font, window and layout changes return you to the same passage
+- Bookmarks remember the reading line they were taken on, so jumping back lands the same passage in the same place, and each one shows when it was added
 - Search inside the current book, or across the whole library
-- Select text to copy it or attach a note; notes can be edited, deleted and jumped back from
+- Select text to copy it or attach a note; notes can be edited, deleted and jumped back from in the same drawer
+- Reading position is remembered by content anchor, so font, window and layout changes return you to the same passage
 - Fixed-layout (pre-paginated) books render as full pages
 - A clear notice when a book is protected by DRM
 
