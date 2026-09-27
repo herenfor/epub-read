@@ -62,6 +62,24 @@ describe("dark theme contrast repair", () => {
     expect(paragraph.getAttribute("data-reader-dark-contrast")).toBe("1");
     expect(styles.get(box)?.color).toBe(DARK_THEME_CANDIDATE);
     expect(applyDarkThemeContrast(document as unknown as Document, { theme: "light", adapter: adapter(styles) })).toBe(0);
+    expect(applyDarkThemeContrast(document as unknown as Document, { theme: "sepia", adapter: adapter(styles) })).toBe(0);
+  });
+
+  it("repairs the gray theme when light background reduces contrast of gray foreground", () => {
+    const { document } = parseHTML("<html><body><div id='box'><p>text</p></div></body></html>");
+    const body = document.body;
+    const box = document.querySelector("#box")!;
+    const paragraph = document.querySelector("p")!;
+    const styles = new Map<Element, DarkThemeComputedStyle>([
+      [body, style({ backgroundColor: "rgb(45, 45, 48)" })],
+      [box, style({ backgroundColor: "rgba(255, 255, 255, 0.85)" })],
+      [paragraph, style({ color: "rgb(212, 212, 216)" })],
+    ]);
+    const count = applyDarkThemeContrast(document as unknown as Document, { theme: "gray", adapter: adapter(styles) });
+    expect(count).toBe(2);
+    expect(box.getAttribute("data-reader-dark-contrast")).toBe("1");
+    expect(paragraph.getAttribute("data-reader-dark-contrast")).toBe("1");
+    expect(styles.get(paragraph)?.color).toBe(DARK_THEME_CANDIDATE);
   });
 
   it("reads each element style once during a top-down traversal", () => {

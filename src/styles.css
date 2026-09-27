@@ -220,19 +220,32 @@ textarea {
 .tb-pin .reader-svg-icon { color: #8b5cf6; }
 .tb-diagnostics .reader-svg-icon { color: #64748b; }
 
-[data-theme="dark"] .tb-back .reader-svg-icon { color: #f87171; }
+[data-theme="dark"] .tb-back .reader-svg-icon,
+[data-theme="gray"] .tb-back .reader-svg-icon { color: #f87171; }
 [data-theme="dark"] .tb-history-back .reader-svg-icon,
-[data-theme="dark"] .tb-history-forward .reader-svg-icon { color: #94a3b8; }
-[data-theme="dark"] .tb-menu .reader-svg-icon { color: #818cf8; }
-[data-theme="dark"] .bookmark-toggle .reader-svg-icon { color: #fb7185; }
-[data-theme="dark"] .bookmark-toggle.active .reader-svg-icon { color: #fff; }
-[data-theme="dark"] .bookmark-dropdown .reader-svg-icon { color: #94a3b8; }
-[data-theme="dark"] .tb-toc .reader-svg-icon { color: #34d399; }
-[data-theme="dark"] .tb-search .reader-svg-icon { color: #38bdf8; }
-[data-theme="dark"] .tb-notes .reader-svg-icon { color: #fbbf24; }
-[data-theme="dark"] .tb-assistant .reader-svg-icon { color: #c084fc; }
-[data-theme="dark"] .tb-pin .reader-svg-icon { color: #a78bfa; }
-[data-theme="dark"] .tb-diagnostics .reader-svg-icon { color: #94a3b8; }
+[data-theme="dark"] .tb-history-forward .reader-svg-icon,
+[data-theme="gray"] .tb-history-back .reader-svg-icon,
+[data-theme="gray"] .tb-history-forward .reader-svg-icon { color: #94a3b8; }
+[data-theme="dark"] .tb-menu .reader-svg-icon,
+[data-theme="gray"] .tb-menu .reader-svg-icon { color: #818cf8; }
+[data-theme="dark"] .bookmark-toggle .reader-svg-icon,
+[data-theme="gray"] .bookmark-toggle .reader-svg-icon { color: #fb7185; }
+[data-theme="dark"] .bookmark-toggle.active .reader-svg-icon,
+[data-theme="gray"] .bookmark-toggle.active .reader-svg-icon { color: #fff; }
+[data-theme="dark"] .bookmark-dropdown .reader-svg-icon,
+[data-theme="gray"] .bookmark-dropdown .reader-svg-icon { color: #94a3b8; }
+[data-theme="dark"] .tb-toc .reader-svg-icon,
+[data-theme="gray"] .tb-toc .reader-svg-icon { color: #34d399; }
+[data-theme="dark"] .tb-search .reader-svg-icon,
+[data-theme="gray"] .tb-search .reader-svg-icon { color: #38bdf8; }
+[data-theme="dark"] .tb-notes .reader-svg-icon,
+[data-theme="gray"] .tb-notes .reader-svg-icon { color: #fbbf24; }
+[data-theme="dark"] .tb-assistant .reader-svg-icon,
+[data-theme="gray"] .tb-assistant .reader-svg-icon { color: #c084fc; }
+[data-theme="dark"] .tb-pin .reader-svg-icon,
+[data-theme="gray"] .tb-pin .reader-svg-icon { color: #a78bfa; }
+[data-theme="dark"] .tb-diagnostics .reader-svg-icon,
+[data-theme="gray"] .tb-diagnostics .reader-svg-icon { color: #94a3b8; }
 
 /* 悬停与激活对应柔和微光底色 */
 .tb-back:hover:not(:disabled) {
@@ -270,7 +283,8 @@ textarea {
 .tb-pin.active .reader-svg-icon {
   color: #8b5cf6;
 }
-[data-theme="dark"] .tb-pin.active .reader-svg-icon {
+[data-theme="dark"] .tb-pin.active .reader-svg-icon,
+[data-theme="gray"] .tb-pin.active .reader-svg-icon {
   color: #c084fc;
 }
 

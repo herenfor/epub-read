@@ -100,6 +100,7 @@ const THEME_OPTIONS: Array<{ value: Theme; label: string }> = [
   { value: "light", label: "浅色" },
   { value: "dark", label: "深色" },
   { value: "sepia", label: "纸色" },
+  { value: "gray", label: "深灰" },
 ];
 
 const READING_MODE_OPTIONS: Array<{ value: ReadingMode; label: string; title: string }> = [

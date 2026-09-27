@@ -1314,7 +1314,7 @@ export default function App() {
           ...(typeof importedSettings.fontSizePx === "number" && importedSettings.fontSizePx >= 12 && importedSettings.fontSizePx <= 32
             ? { fontSizePx: importedSettings.fontSizePx }
             : {}),
-          ...(importedSettings.theme === "light" || importedSettings.theme === "dark" || importedSettings.theme === "sepia"
+          ...(importedSettings.theme === "light" || importedSettings.theme === "dark" || importedSettings.theme === "sepia" || importedSettings.theme === "gray"
             ? { theme: importedSettings.theme }
             : {}),
           ...(typeof importedSettings.gapPx === "number" && importedSettings.gapPx >= 0 && importedSettings.gapPx <= 96

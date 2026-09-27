@@ -14,7 +14,7 @@ export interface DarkThemeStyleAdapter {
 }
 
 export interface DarkThemeContrastOptions {
-  theme: "dark" | "light" | "sepia";
+  theme: "dark" | "light" | "sepia" | "gray";
   adapter?: DarkThemeStyleAdapter;
 }
 
@@ -113,11 +113,14 @@ function defaultAdapter(doc: Document): DarkThemeStyleAdapter | null {
   };
 }
 
-function nearThemeForeground(color: Rgba): boolean {
+export const GRAY_THEME_FOREGROUND = { r: 212, g: 212, b: 216, a: 1 } as const;
+
+function nearThemeForeground(color: Rgba, theme: "dark" | "gray" = "dark"): boolean {
+  const target = theme === "gray" ? GRAY_THEME_FOREGROUND : DARK_THEME_FOREGROUND;
   return Math.max(
-    Math.abs(color.r - DARK_THEME_FOREGROUND.r),
-    Math.abs(color.g - DARK_THEME_FOREGROUND.g),
-    Math.abs(color.b - DARK_THEME_FOREGROUND.b),
+    Math.abs(color.r - target.r),
+    Math.abs(color.g - target.g),
+    Math.abs(color.b - target.b),
   ) <= 8;
 }
 
@@ -145,7 +148,8 @@ function extendBackground(parent: BackgroundState, style: DarkThemeComputedStyle
 
 /** Apply conservative dark-theme contrast fixes once to one loaded chapter. */
 export function applyDarkThemeContrast(doc: Document, options: DarkThemeContrastOptions): number {
-  if (options.theme !== "dark") return 0;
+  if (options.theme !== "dark" && options.theme !== "gray") return 0;
+  const theme = options.theme;
   const adapter = options.adapter ?? defaultAdapter(doc);
   if (!adapter || !doc.body) return 0;
   let fixed = 0;
@@ -169,7 +173,7 @@ export function applyDarkThemeContrast(doc: Document, options: DarkThemeContrast
     if (style.display === "none" || style.visibility === "hidden") return;
     const background = extendBackground(inheritedBackground, style);
     const foreground = parseRgba(style.color);
-    if (!background.unsafe && (element.textContent ?? "").trim() !== "" && foreground && nearThemeForeground(foreground)) {
+    if (!background.unsafe && (element.textContent ?? "").trim() !== "" && foreground && nearThemeForeground(foreground, theme)) {
       const currentContrast = contrastRatio(foreground, background.color);
       const candidate = parseRgba(DARK_THEME_CANDIDATE)!;
       const candidateContrast = contrastRatio(candidate, background.color);

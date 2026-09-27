@@ -560,6 +560,12 @@ describe("sanitizeChapter", () => {
     });
     expect(sepia.html).toContain("body { color: #3b2f1e; background-color: #f4ecd8;");
     expect(sepia.html).not.toContain("background-color: #f5f0e6");
+    const gray = await sanitizeChapter(html, {
+      ...opts(),
+      settings: { ...DEFAULT_SETTINGS, theme: "gray" as const },
+    });
+    expect(gray.html).toContain("body { color: #d4d4d8; background-color: #2d2d30;");
+    expect(gray.html).not.toContain("background-color: #f5f0e6");
   });
 
   it("bgcolor 非法值不注入（防 CSS 注入）", async () => {
@@ -653,18 +659,24 @@ describe("sanitizeChapter", () => {
     expect(out).toContain("fit-content 多栏异常");
   });
 
-  it("深色主题下目录链接换为深色模式浅蓝（Sigil 风格）", async () => {
+  it("深色与深灰主题下目录链接换为合适链接色", async () => {
     const html = `<html xmlns="http://www.w3.org/1999/xhtml"><body><div class="toc"><a href="x.xhtml"><p>条目</p></a></div></body></html>`;
     const dark = await sanitizeChapter(html, {
       ...opts(),
       settings: { ...DEFAULT_SETTINGS, theme: "dark" },
     });
     expect(dark.html).toContain(`#${VIEWER_ID} .toc a { color: #6cb2ff; }`);
+    const gray = await sanitizeChapter(html, {
+      ...opts(),
+      settings: { ...DEFAULT_SETTINGS, theme: "gray" },
+    });
+    expect(gray.html).toContain(`#${VIEWER_ID} .toc a { color: #818cf8; }`);
     const light = await sanitizeChapter(html, opts());
     expect(light.html).not.toContain("#6cb2ff");
+    expect(light.html).not.toContain("#818cf8");
   });
 
-  it("深色主题注入继承式文字阴影兜底，浅色/纸色不注入", async () => {
+  it("深色与深灰主题注入继承式文字阴影兜底，浅色/纸色不注入", async () => {
     const html = `<html xmlns="http://www.w3.org/1999/xhtml"><head><style>.none{text-shadow:none}.effect{text-shadow:0 0 2px red}</style></head><body><p>正文</p><p class="none">无阴影</p><p class="effect">作者特效</p></body></html>`;
     const dark = await sanitizeChapter(html, {
       ...opts(),
@@ -679,6 +691,13 @@ describe("sanitizeChapter", () => {
     expect(dark.html).not.toContain(
       `#${VIEWER_ID} * { text-shadow: 1px 1px 1px #1e1e1e; }`
     );
+    const gray = await sanitizeChapter(html, {
+      ...opts(),
+      settings: { ...DEFAULT_SETTINGS, theme: "gray" },
+    });
+    expect(gray.html).toContain(
+      `#${VIEWER_ID} { text-shadow: 1px 1px 1px #2d2d30; }`
+    );
     expect(dark.html).toMatch(/\.none\s*\{\s*text-shadow\s*:\s*none\s*\}/);
     expect(dark.html).toMatch(/\.effect\s*\{\s*text-shadow\s*:\s*0 0 2px red\s*\}/);
 
@@ -691,7 +710,7 @@ describe("sanitizeChapter", () => {
     expect(sepia.html).not.toContain("text-shadow: 1px 1px 1px #1e1e1e");
   });
 
-  it("深色主题下着重号 text-emphasis 随前景色换色", async () => {
+  it("深色与深灰主题下着重号 text-emphasis 随前景色换色", async () => {
     const html = `<html xmlns="http://www.w3.org/1999/xhtml"><head>
 <style>.dot{text-emphasis:circle #000}</style>
 </head><body><p><span class="dot">着重</span></p></body></html>`;
@@ -700,6 +719,11 @@ describe("sanitizeChapter", () => {
       settings: { ...DEFAULT_SETTINGS, theme: "dark" },
     });
     expect(dark.html).toContain("text-emphasis-color: #d4d4d4");
+    const gray = await sanitizeChapter(html, {
+      ...opts(),
+      settings: { ...DEFAULT_SETTINGS, theme: "gray" },
+    });
+    expect(gray.html).toContain("text-emphasis-color: #d4d4d8");
     const light = await sanitizeChapter(html, opts());
     expect(light.html).not.toContain("text-emphasis-color");
   });
@@ -720,7 +744,7 @@ describe("sanitizeChapter", () => {
     expect(forced.html).toContain('style="writing-mode:vertical-rl"');
     expect(forced.html).not.toContain("direction:");
 
-    for (const theme of ["light", "dark", "sepia"] as const) {
+    for (const theme of ["light", "dark", "sepia", "gray"] as const) {
       const themed = await sanitizeChapter(html, {
         ...opts(),
         settings: { ...DEFAULT_SETTINGS, theme, forceHorizontal: true },

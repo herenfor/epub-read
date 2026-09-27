@@ -90,11 +90,13 @@ function isSafeColor(v: string): boolean {
 
 function buildOverrideCss(s: ReaderSettings, bodyBgColor?: string): string {
   const bg =
-    s.theme === "dark" ? "#1e1e1e" : s.theme === "sepia" ? "#f4ecd8" : "#ffffff";
-  const fg = s.theme === "dark" ? "#d4d4d4" : s.theme === "sepia" ? "#3b2f1e" : "#1a1a1a";
-  const noteUnderline = s.theme === "dark" ? "#6cb2ff" : s.theme === "sepia" ? "#9b6a00" : "#b06a00";
+    s.theme === "dark" ? "#1e1e1e" : s.theme === "gray" ? "#2d2d30" : s.theme === "sepia" ? "#f4ecd8" : "#ffffff";
+  const fg =
+    s.theme === "dark" ? "#d4d4d4" : s.theme === "gray" ? "#d4d4d8" : s.theme === "sepia" ? "#3b2f1e" : "#1a1a1a";
+  const noteUnderline =
+    s.theme === "dark" || s.theme === "gray" ? "#6cb2ff" : s.theme === "sepia" ? "#9b6a00" : "#b06a00";
   const searchBackground =
-    s.theme === "dark"
+    s.theme === "dark" || s.theme === "gray"
       ? "rgba(255, 213, 79, 0.45)"
       : s.theme === "sepia"
         ? "rgba(211, 151, 0, 0.42)"
@@ -256,16 +258,16 @@ body { color: ${fg}; background-color: ${bodyBgColor ?? bg}; ${bodyFontCss} }
 #${VIEWER_ID} rt { color: ${fg}; }
 ${writingModeCss}
 ${
-  s.theme === "dark"
+  s.theme === "dark" || s.theme === "gray"
     ? `/* [L2] 深色主题下着重号（text-emphasis）随前景色换色；
    书常写 text-emphasis:circle #000，深色背景上看不见。 */
 #${VIEWER_ID} * { -webkit-text-emphasis-color: ${fg}; text-emphasis-color: ${fg}; }
 /* [L2/C-45] 深色主题可读性兜底：让未自行声明 text-shadow 的文字
    继承与阅读器背景一致的阴影；作者后代的明确声明（包括 none）可覆盖。 */
-#${VIEWER_ID} { text-shadow: 1px 1px 1px #1e1e1e; }
+#${VIEWER_ID} { text-shadow: 1px 1px 1px ${bg}; }
 /* [L2] 深色主题目录链接换色：书常写 .toc a{color:#000}。
    与 Sigil 深色预览一致的浅蓝。 */
-#${VIEWER_ID} .toc a { color: #6cb2ff; }
+#${VIEWER_ID} .toc a { color: ${s.theme === "gray" ? "#818cf8" : "#6cb2ff"}; }
 /* [L2] 深色主题下清除图片投影，避免在深色背景上形成白色光晕 */
 #${VIEWER_ID} img { box-shadow: none !important; }`
     : ""

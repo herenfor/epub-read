@@ -256,7 +256,8 @@
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
-[data-theme="dark"] .aa-segmented-btn.active {
+[data-theme="dark"] .aa-segmented-btn.active,
+[data-theme="gray"] .aa-segmented-btn.active {
   background: color-mix(in srgb, var(--panel-bg) 140%, #fff 8%);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
 }

@@ -1969,6 +1969,7 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
                 { value: "light", label: "浅色" },
                 { value: "dark", label: "深色" },
                 { value: "sepia", label: "羊皮纸" },
+                { value: "gray", label: "深灰" },
               ]}
               onChange={(value) => props.onThemeChange(value as Theme)}
             />

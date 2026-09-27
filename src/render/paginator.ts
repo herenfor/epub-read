@@ -2478,7 +2478,7 @@ export class ChapterPaginator {
     // 可保证 blob 文档的第一帧也不会漏出，同时 visibility:hidden 仍可测量。
     this.displayGate.hold(seq);
     this.emit({ status: "measuring" });
-    if (this.settings.theme === "dark") {
+    if (this.settings.theme === "dark" || this.settings.theme === "gray") {
       try {
         applyDarkThemeContrast(doc, { theme: this.settings.theme });
       } catch {
