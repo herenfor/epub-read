@@ -8,7 +8,7 @@ EPUB Reader opens EPUB 2.0.1 and EPUB 3.x books as their authors designed them: 
 
 ## Highlights
 
-- **Read the way you prefer** — turn pages, or scroll continuously from one chapter straight into the next, and switch between the two at any time without losing your place
+- **Read the way you prefer** — turn one page or a two-page spread, or scroll continuously from one chapter straight into the next, and switch between them at any time without losing your place
 - **A quiet reading interface** — contents, bookmarks and notes share one drawer, and the rest of the reader stays out of the way
 - **Layout you adjust as you read** — page colour, font, size, line height, spacing, margins and columns, changed from a small panel over the page
 - **Illustrations at full size** — click an image in the text to open it in an overlay, then zoom, pan or view it at its original size; closing returns you exactly where you were
@@ -32,8 +32,9 @@ EPUB Reader opens EPUB 2.0.1 and EPUB 3.x books as their authors designed them: 
 ### Reading
 
 - EPUB 2 and EPUB 3 support, with contents, bookmarks and notes in a single drawer
-- Page turning, or continuous scrolling that carries on from one chapter into the next, chosen per book and remembered
-- Layout controls: four page colours, font, size, line height, spacing, margins and columns
+- Page turning one page or two at a time, or continuous scrolling that carries on from one chapter into the next, chosen per book and remembered
+- Layout controls: single or two-page spread, four page colours, font, size, line height, spacing, margins and columns
+- Long chapters are prepared in the background, so opening a book or reaching a heavy chapter does not hold up what you are reading
 - Page turns with or without a transition
 - A progress bar for the whole book, with chapter marks you can drag
 - Illustrations open in an overlay with zoom, pan, fit-to-window and original-size views
