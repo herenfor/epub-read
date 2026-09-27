@@ -107,6 +107,26 @@ export class DampedScrollAnimator {
     this.start(read, apply);
   }
 
+  /** 当前是否有阻尼动画帧在循环中。 */
+  isAnimating(): boolean {
+    return this.frame !== null;
+  }
+
+  /** 当前阻尼目标位置（主要供单测和外部状态观测）。 */
+  getTarget(): number | null {
+    return this.target;
+  }
+
+  /**
+   * 当排版补偿/几何提交改变了宿主滚动位置时，平移进行中的阻尼目标。
+   * 保证残余位移不变，不被拉回旧位置，也不会向反方向漂移。
+   */
+  shiftTarget(delta: number, maxScrollTop: number): void {
+    if (this.target === null || !Number.isFinite(delta) || delta === 0) return;
+    const max = Number.isFinite(maxScrollTop) ? Math.max(0, maxScrollTop) : 0;
+    this.target = Math.max(0, Math.min(max, this.target + delta));
+  }
+
   /** 立即停止动画并清空目标（例如跳转到指定位置前的兜底）。 */
   stop(): void {
     if (this.frame !== null) {

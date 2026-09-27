@@ -156,6 +156,7 @@ describe("scroll viewer styles", () => {
     expect(map.get("overflow-x")).toBe("hidden");
     expect(map.get("scrollbar-width")).toBe("none");
     expect(map.get("-ms-overflow-style")).toBe("none");
+    expect(map.get("column-count")).toBe("auto");
     expect(map.get("column-width")).toBe("auto");
     expect(map.get("column-gap")).toBe("0px");
     // 固定可见高度是滚动的先决条件：注入 CSS 里 html/body 已固定。

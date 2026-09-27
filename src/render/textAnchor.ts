@@ -269,6 +269,24 @@ export class VisibleTextIndex {
       .slice(Math.max(0, offset - MAX_ANCHOR_SNIPPET_CODE_POINTS), offset)
       .join("") || null;
   }
+
+  get textNodes(): ReadonlyArray<Text> {
+    return this.nodes.map((item) => item.node);
+  }
+
+  collectTextRanges(doc: Document): Range[] {
+    const ranges: Range[] = [];
+    for (const item of this.nodes) {
+      try {
+        const range = doc.createRange();
+        range.selectNodeContents(item.node);
+        ranges.push(range);
+      } catch {
+        // ignore
+      }
+    }
+    return ranges;
+  }
 }
 
 function matchesEnding(haystack: readonly string[], needle: readonly string[], end: number): boolean {

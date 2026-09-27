@@ -30,14 +30,13 @@ export interface PageOptionsValue extends PageLayoutPreferences {
   gapPx: number;
 }
 
+export * from "./pagedSpread";
+import { createSpreadGeometry } from "./pagedSpread";
+
 export interface PagedGeometry {
-  /** 本屏实际列数；requested=2 但宽度不足时回退为 1 */
   columns: 1 | 2;
-  /** 单物理列宽；不逐列取整 */
   columnWidth: number;
-  /** 相邻物理列的步长（列宽 + 列间距） */
   columnStep: number;
-  /** 一次翻页（一屏）的步长；columns * columnStep */
   viewStep: number;
 }
 
@@ -116,11 +115,11 @@ export function computePagedGeometry(
   gapPx: number,
   requestedColumns: 1 | 2,
 ): PagedGeometry {
-  const columns: 1 | 2 = requestedColumns === 2
-    && (availableWidth - gapPx) / 2 >= MIN_COLUMN_WIDTH_PX
-    ? 2
-    : 1;
-  const columnWidth = (availableWidth - (columns - 1) * gapPx) / columns;
-  const columnStep = columnWidth + gapPx;
-  return { columns, columnWidth, columnStep, viewStep: columns * columnStep };
+  const g = createSpreadGeometry(availableWidth, gapPx, requestedColumns, MIN_COLUMN_WIDTH_PX);
+  return {
+    columns: g.columns,
+    columnWidth: g.columnWidth,
+    columnStep: g.columnStep,
+    viewStep: g.spreadStep,
+  };
 }

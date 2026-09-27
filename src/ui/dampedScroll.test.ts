@@ -184,4 +184,25 @@ describe("DampedScrollAnimator", () => {
     while (scheduler.tick(16.7) && frames < 40) frames += 1;
     expect(position).toBe(800);
   });
+
+  it("shiftTarget() 平移进行中的动画目标，不改变残余位移且不反向漂移", () => {
+    const scheduler = new ManualScheduler();
+    const animator = new DampedScrollAnimator(scheduler);
+    let position = 1000;
+    const read = () => ({ current: position, maxScrollTop: 20000 });
+    const apply = (next: number) => {
+      position = next;
+    };
+
+    animator.addDelta(200, read, apply);
+    expect(animator.getTarget()).toBe(1200);
+    // 假设排版补偿使宿主滚动位置平移 +2400 (position 变为 3400)
+    position = 3400;
+    animator.shiftTarget(2400, 20000);
+    expect(animator.getTarget()).toBe(3600);
+    // 接下来动画继续向前 (从 3400 走向 3600)，而不是反向走向 1200
+    scheduler.tick(16.7);
+    expect(position).toBeGreaterThan(3400);
+    expect(position).toBeLessThan(3600);
+  });
 });

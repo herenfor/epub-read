@@ -18,7 +18,7 @@ import type { ResourceServer } from "../render/resources";
 import type { ReaderSettings } from "../render/settings";
 import { createSettingsReloadDebouncer } from "./settingsReload";
 import { TurnIntentBuffer, WheelTurnAccumulator } from "./turnIntent";
-import { ReadingWarmupPlan, type WarmupTicket } from "./readerWarmup";
+import { ReadingWarmupPlan, backgroundPreparation, type WarmupTicket } from "./readerWarmup";
 import { ContinuousReaderView } from "./ContinuousReaderView";
 import type { ScrubToken } from "./readerProgressAxis";
 
@@ -48,6 +48,14 @@ export interface ReaderHandle {
     /** B-155：纯图片页跨模式复用图内身份/比例；旧调用方可忽略。 */
     mediaAnchor?: MediaReadingAnchor | null;
   } | null;
+  /** 解析书签在当前章布局下的屏号（0基屏号）；无法解析时返回 null */
+  resolveBookmarkPage?(bookmark: {
+    id?: string;
+    anchorTextOffset?: number | null;
+    anchorTextSnippet?: string | null;
+    mediaAnchor?: MediaReadingAnchor | null;
+    page?: number;
+  }): number | null;
   /** 当前锚点元素的一行文本（书签列表展示用） */
   getAnchorText(): string | null;
   /** 跳到页内锚点（注释返回链接等） */
@@ -303,13 +311,12 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   const handledAnchorNonceRef = useRef(props.anchorNonce);
   const spineIndexRef = useRef(spineIndex);
   const autoAdvanceRef = useRef(false);
-  const outerScrollWheelRef = useRef(new WheelTurnAccumulator(400));
+  const outerScrollWheelRef = useRef(new WheelTurnAccumulator(160));
   const lockedReverseDirRef = useRef<1 | -1 | 0>(0);
   const reverseLockUntilRef = useRef(0);
   const sameDirThrottleUntilRef = useRef(0);
   const chapterTransitionLockedRef = useRef(false);
   const chapterTransitionCooldownUntilRef = useRef(0);
-  const chapterTransitionQuietUntilRef = useRef(0);
   const preloadDebounceTimerRef = useRef<number | null>(null);
   /** 当前正在完整排版的活缓存槽；输入到达时优先取消未发布的后台工作。 */
   const preloadInFlightSlotRef = useRef<PaginatorSlot | null>(null);
@@ -333,25 +340,23 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   };
 
   /**
-   * 换章滚轮手势保护（静默门禁）：
-   * 必须同时满足：
-   * 1. 换章已完成并展示在前台（显示门解除）；
-   * 2. 距离显示就绪时刻已达到基础冷静期（350ms）；
-   * 3. 距离上一次检测到的物理滚轮脉冲已静默至少 180ms（手势已完全停歇）；
-   * 处于换章锁定或冷静期时，所有残余滚轮脉冲一律丢弃并清空累加器，杜绝跨章惯性串流翻页。
+   * 换章滚轮手势保护：
+   * 换章中丢弃残余滚轮脉冲；新章节显示就绪后给予 120ms 微冷却以避免惯性连跳，
+   * 到期立即放行，不再采用无限后推的滑动静默窗口。
    */
   const isWheelGestureSuppressed = (): boolean => {
     if (!chapterTransitionLockedRef.current) return false;
     const now = Date.now();
-    if (now < chapterTransitionCooldownUntilRef.current || now < chapterTransitionQuietUntilRef.current) {
-      chapterTransitionQuietUntilRef.current = now + 180;
+    if (now < chapterTransitionCooldownUntilRef.current) {
       outerWheelRef.current.reset();
+      outerScrollWheelRef.current.reset();
       paginatorRef.current?.resetWheelAccumulator?.();
       return true;
     }
-    // 基础冷却与静默期均已满足，解锁新章节滚轮交互
+    // 换章冷却已过，解除锁定并允许滚轮交互
     chapterTransitionLockedRef.current = false;
     outerWheelRef.current.reset();
+    outerScrollWheelRef.current.reset();
     paginatorRef.current?.resetWheelAccumulator?.();
     return false;
   };
@@ -359,19 +364,19 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   const triggerChapterTransitionWheelLock = (): void => {
     const now = Date.now();
     chapterTransitionLockedRef.current = true;
-    // 在新章节真正 display-ready 前，锁定持续有效（先设一个兜底时间戳）
-    chapterTransitionCooldownUntilRef.current = now + 400;
-    chapterTransitionQuietUntilRef.current = now + 200;
+    // 在新章节真正 display-ready 前锁定持续有效（兜底时间戳）
+    chapterTransitionCooldownUntilRef.current = now + 300;
     outerWheelRef.current.reset();
+    outerScrollWheelRef.current.reset();
     paginatorRef.current?.resetWheelAccumulator?.();
   };
 
   const armChapterTransitionDisplaySettled = (): void => {
     const now = Date.now();
-    // 新章节已完成排版并正式呈现给用户，从此时起算 350ms 冷却与 180ms 静默
-    chapterTransitionCooldownUntilRef.current = now + 350;
-    chapterTransitionQuietUntilRef.current = now + 180;
+    // 新章节已完成排版并正式呈现给用户，固定给予 120ms 的微冷却，杜绝无限滑动延期
+    chapterTransitionCooldownUntilRef.current = now + 120;
     outerWheelRef.current.reset();
+    outerScrollWheelRef.current.reset();
     paginatorRef.current?.resetWheelAccumulator?.();
   };
   const lastHandledStartAtEndNonceRef = useRef(props.startAtEnd.nonce);
@@ -698,6 +703,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         disposeSpareSlot(existing);
         usedFrames.delete(existing.frame as LiveReaderFrame);
       }
+
       if (spareSlotsRef.current.length >= LIVE_READER_FRAMES.length - 1) break;
       const frame = LIVE_READER_FRAMES.find((candidate) => !usedFrames.has(candidate));
       if (!frame) break;
@@ -863,6 +869,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       if (index === active.spineIndex) continue;
       const path = spineItemPath(book, index);
       if (!path) continue;
+
       const slot = spareSlotsRef.current.find(
         (candidate) => candidate.spineIndex === index && candidate.path === path,
       );
@@ -895,6 +902,19 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     add(activeSlotRef.current);
     for (const slot of spareSlotsRef.current) add(slot);
     return resident;
+  };
+
+  const resourceOnlyAdjacentChapters = (activeSpineIndex: number): Set<number> => {
+    const set = new Set<number>();
+    for (const index of liveWindowIndices(activeSpineIndex)) {
+      if (index === activeSpineIndex) continue;
+      const path = spineItemPath(book, index);
+      if (!path) continue;
+      if (backgroundPreparation(server.textFor(path)) === "resource-only") {
+        set.add(index);
+      }
+    }
+    return set;
   };
 
   const scheduleFullBookWarmupDebounced = (delayMs = 500): void => {
@@ -942,7 +962,14 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     const plan = ensureWarmupPlan();
     const userBusy = isUserBusy();
     const foregroundPending = isForegroundPending();
-    const ticket = plan.take(active.spineIndex, residentChapters(), userBusy, foregroundPending);
+    const resourceOnly = resourceOnlyAdjacentChapters(active.spineIndex);
+    const ticket = plan.take(
+      active.spineIndex,
+      residentChapters(),
+      userBusy,
+      foregroundPending,
+      resourceOnly,
+    );
     if (!ticket) {
       if (userBusy || foregroundPending) {
         // 输入/前台未稳定时让出空档；稳定后从这里继续，而不是永久停住。
@@ -977,13 +1004,9 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     }
   };
 
-  /** 输入/显式导航优先：先停掉尚未发布的临时测量，再让前台继续。 */
+  /** 输入/显式导航优先：先停掉尚未发布的临时测量，再让前台继续。普通输入不销毁在途预载目标。 */
   const pauseBackgroundWarmupForInput = (): void => {
     clearPreloadTimer();
-    const inFlight = preloadInFlightSlotRef.current;
-    if (inFlight && spareSlotsRef.current.includes(inFlight) && !inFlight.ready) {
-      disposeSpareSlot(inFlight);
-    }
     warmupGenerationRef.current += 1;
     clearWarmupTimer();
     cancelWarmupIdle();
@@ -1033,13 +1056,19 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     autoAdvanceRef.current = false;
     triggerChapterTransitionWheelLock();
     lockedReverseDirRef.current = atEnd ? 1 : -1;
-    reverseLockUntilRef.current = Date.now() + 600;
+    reverseLockUntilRef.current = Date.now() + 250;
     turnIntentRef.current.reset();
     if (atEnd) {
       if (latestRenderSettingsRef.current.readingMode === "scroll") {
         next.paginator.scrollToEnd();
       } else {
         next.paginator.setPage(Math.max(0, next.paginator.pageCount - 1));
+      }
+    } else {
+      if (latestRenderSettingsRef.current.readingMode === "scroll") {
+        next.paginator.scrollToStart();
+      } else {
+        next.paginator.setPage(0);
       }
     }
     const promotedState = next.paginator.getStateSnapshot();
@@ -1170,7 +1199,22 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       // progress writer on the promoted chapter before ready is published.
       // Exact targets use the normal load path so resolution/highlight occur
       // inside the display gate instead of being applied to a visible cache.
-      if (!preciseTarget && !explicitNavigation && promotePreparedChapter(path, spineIndex, startAtEnd)) return;
+      if (!preciseTarget && !explicitNavigation) {
+        if (promotePreparedChapter(path, spineIndex, startAtEnd)) return;
+        const inFlight = spareSlotsRef.current.find(
+          (slot) => slot.path === path && slot.spineIndex === spineIndex && slot.paginator
+        );
+        if (
+          inFlight &&
+          inFlight.paginator &&
+          sameRenderingSettings(inFlight.renderSettings, latestRenderSettingsRef.current)
+        ) {
+          const ready = await inFlight.paginator.waitForDisplayReady();
+          if (ready && activeSlotRef.current?.spineIndex !== spineIndex) {
+            if (promotePreparedChapter(path, spineIndex, startAtEnd)) return;
+          }
+        }
+      }
       const activeSlot = activeSlotRef.current;
       const oldIndex = activeSlot?.spineIndex ?? null;
       const settingsChanged = activeSlot && !sameRenderingSettings(activeSlot.renderSettings, latestRenderSettingsRef.current);
@@ -1179,9 +1223,21 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         activeSlot.spineIndex = spineIndex;
         activeSlot.renderSettings = latestRenderSettingsRef.current;
       }
-      // Adjacent-but-not-ready and non-adjacent jumps both use the original
-      // P0 load path; same-chapter anchor reloads may retain valid edge caches.
-      if (oldIndex !== spineIndex || settingsChanged) disposeSpareSlots();
+      // Retain valid cached slots in the new live window; only evict distant or stale slots.
+      if (settingsChanged) {
+        disposeSpareSlots();
+      } else if (oldIndex !== spineIndex) {
+        const nextLiveWindow = liveWindowIndices(spineIndex);
+        for (const slot of [...spareSlotsRef.current]) {
+          if (
+            slot.spineIndex === null ||
+            !nextLiveWindow.includes(slot.spineIndex) ||
+            !sameRenderingSettings(slot.renderSettings, latestRenderSettingsRef.current)
+          ) {
+            disposeSpareSlot(slot);
+          }
+        }
+      }
       turnIntentRef.current.reset();
       p.resetWheelAccumulator?.();
       await p.load(path, {
@@ -1303,15 +1359,16 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       // 不用虚拟 currentPage 判断章尾，也不把惯性滚动变成连续切章。
       if (p.scrollByViewport(immediate)) return;
       if (lastStateRef.current === "loading" || lastStateRef.current === "measuring") return;
-      // 反向回弹保护（单向锁 800ms）
+      // 反向回弹保护（单向锁 250ms）
       if (immediate === lockedReverseDirRef.current && Date.now() < reverseLockUntilRef.current) return;
       // 同向连续换章微防抖（150ms）
       if (Date.now() < sameDirThrottleUntilRef.current) return;
       if (immediate === 1) {
         const next = nextLinearIndex(book, spineIndexRef.current, 1);
         if (next >= 0) {
+          triggerChapterTransitionWheelLock();
           lockedReverseDirRef.current = -1;
-          reverseLockUntilRef.current = Date.now() + 800;
+          reverseLockUntilRef.current = Date.now() + 250;
           sameDirThrottleUntilRef.current = Date.now() + 150;
           turnIntentRef.current.markLoading();
           props.onRequestChapter(next);
@@ -1319,8 +1376,9 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       } else {
         const prev = nextLinearIndex(book, spineIndexRef.current, -1);
         if (prev >= 0) {
+          triggerChapterTransitionWheelLock();
           lockedReverseDirRef.current = 1;
-          reverseLockUntilRef.current = Date.now() + 800;
+          reverseLockUntilRef.current = Date.now() + 250;
           sameDirThrottleUntilRef.current = Date.now() + 150;
           turnIntentRef.current.markLoading();
           props.onRequestChapter(prev, { atEnd: true });
@@ -1329,29 +1387,31 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       return;
     }
     if (immediate === 1) {
-      triggerTurnAnimation(1);
       if (p.currentPage < p.pageCount - 1) {
+        triggerTurnAnimation(1);
         p.setPage(p.currentPage + 1);
       } else {
         const next = nextLinearIndex(book, spineIndexRef.current, 1);
         if (next >= 0) {
+          triggerTurnAnimation(1);
           triggerChapterTransitionWheelLock();
           lockedReverseDirRef.current = -1;
-          reverseLockUntilRef.current = Date.now() + 600;
+          reverseLockUntilRef.current = Date.now() + 250;
           turnIntentRef.current.reset();
           props.onRequestChapter(next);
         }
       }
     } else {
-      triggerTurnAnimation(-1);
       if (p.currentPage > 0) {
+        triggerTurnAnimation(-1);
         p.setPage(p.currentPage - 1);
       } else {
         const prev = nextLinearIndex(book, spineIndexRef.current, -1);
         if (prev >= 0) {
+          triggerTurnAnimation(-1);
           triggerChapterTransitionWheelLock();
           lockedReverseDirRef.current = 1;
-          reverseLockUntilRef.current = Date.now() + 600;
+          reverseLockUntilRef.current = Date.now() + 250;
           turnIntentRef.current.reset();
           props.onRequestChapter(prev, { atEnd: true });
         }
@@ -1400,6 +1460,9 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       },
       getReadingAnchor() {
         return paginatorRef.current?.getReadingAnchor() ?? null;
+      },
+      resolveBookmarkPage(bookmark) {
+        return paginatorRef.current?.resolveBookmarkPage?.(bookmark) ?? bookmark.page ?? null;
       },
       getAnchorText() {
         return paginatorRef.current?.getAnchorText() ?? null;
@@ -1516,10 +1579,10 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
             const direction = outerScrollWheelRef.current.push(deltaY);
             if (direction === null) return;
             lockedReverseDirRef.current = -direction as 1 | -1;
-            reverseLockUntilRef.current = Date.now() + 800;
+            reverseLockUntilRef.current = Date.now() + 250;
             sameDirThrottleUntilRef.current = Date.now() + 150;
             event.preventDefault();
-            turnPageRef.current(direction);
+            turnPageRef.current(direction, "wheel");
             return;
           }
           // visibility:hidden 时滚轮会命中外层；浏览器还可能把同一连续手势

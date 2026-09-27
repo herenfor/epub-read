@@ -1,5 +1,6 @@
 import type { Book } from "../core/types";
 import { disposeBook } from "../core/book";
+import { collectChapterDependencies } from "./chapterDependencies";
 
 /**
  * 把书内资源映射为 blob URL（同源，iframe 内可自由引用字体/图片/CSS）。
@@ -21,12 +22,12 @@ export class ResourceServer {
     } = {}
   ) {}
 
-  /** 返回内部路径对应的 blob URL；资源缺失返回 undefined。 */
+  /** 返回内部路径对应的 blob URL；资源缺失或尚未解压就绪返回 undefined。 */
   urlFor(path: string): string | undefined {
     const cached = this.urls.get(path);
     if (cached) return cached;
     const res = this.book?.resources.get(path);
-    if (!res) return undefined;
+    if (!res || res.loaded === false) return undefined;
     const url = URL.createObjectURL(
       new Blob([res.data as BlobPart], { type: res.mediaType || "application/octet-stream" })
     );
@@ -34,10 +35,10 @@ export class ResourceServer {
     return url;
   }
 
-  /** 读取资源文本（按 UTF-8；带 BOM 时尊重 BOM 编码）。 */
+  /** 读取资源文本（按 UTF-8；带 BOM 时尊重 BOM 编码）。未解压就绪返回 undefined。 */
   textFor(path: string): string | undefined {
     const res = this.book?.resources.get(path);
-    if (!res) return undefined;
+    if (!res || res.loaded === false) return undefined;
     const cached = this.textCache.get(path);
     if (cached) {
       this.textCacheHits++;
@@ -65,6 +66,21 @@ export class ResourceServer {
       this.textCacheBytes += bytes;
     }
     return text;
+  }
+
+  /** 按需确保指定资源已解压加载 */
+  async ensureResources(paths: Iterable<string>): Promise<void> {
+    if (this.book?.ensureResources) {
+      await this.book.ensureResources(paths);
+    }
+  }
+
+  /** 按需确保某章节及其引用的样式、图片、字体等所有直接依赖已解压就绪 */
+  async ensureChapterResources(chapterPath: string): Promise<void> {
+    if (!this.book) return;
+    await this.ensureResources([chapterPath]);
+    const deps = collectChapterDependencies(this.book, chapterPath, (p) => this.textFor(p));
+    await this.ensureResources(deps);
   }
 
   get textCacheStats(): Readonly<{ hits: number; misses: number; entries: number; bytes: number }> {

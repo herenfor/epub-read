@@ -93,4 +93,26 @@ describe("Zen UI WhisperFooter 微提示状态栏与跳页器契约（Packet B�
     expect(html).toContain('style="width:68%"');
     expect(html).toContain("全书 68%");
   });
+
+  it("双页模式下按 leafRange 渲染物理页区间与总页数", () => {
+    const spreadHtml = renderToStaticMarkup(
+      createElement(WhisperFooter, {
+        ...baseProps,
+        currentPage: 1,
+        pageCount: 3,
+        leafRange: { first: 3, last: 4, total: 5 },
+      })
+    );
+    expect(spreadHtml).toContain("本章 3–4 / 5 页");
+
+    const lastSpreadHtml = renderToStaticMarkup(
+      createElement(WhisperFooter, {
+        ...baseProps,
+        currentPage: 2,
+        pageCount: 3,
+        leafRange: { first: 5, last: 5, total: 5 },
+      })
+    );
+    expect(lastSpreadHtml).toContain("本章 5 / 5 页");
+  });
 });

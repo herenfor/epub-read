@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
-import { loadBook, spineIndexForPath, spineItemPath, DrmError, disposeBook } from "./core/book";
+import { loadBook, spineIndexForPath, spineItemPath, DrmError, disposeBook, nextLinearIndex } from "./core/book";
 import type { Book } from "./core/types";
 import { isExternalUrl, isFragmentOnly, resolvePath, splitHref } from "./core/paths";
 import {
@@ -251,15 +251,31 @@ function sameMediaReadingAnchor(
   );
 }
 
+function isExactBookmarkMatch(
+  bookmark: Bookmark,
+  anchor: Pick<ReadingAnchor, "textOffset" | "mediaAnchor"> | null,
+): boolean {
+  if (!anchor) return false;
+  const savedText = bookmark.anchorTextOffset;
+  const currentText = anchor.textOffset ?? null;
+  if (savedText !== undefined && savedText !== null && currentText !== null) {
+    return savedText === currentText;
+  }
+  return sameMediaReadingAnchor(bookmark.mediaAnchor, anchor.mediaAnchor ?? null);
+}
+
 function bookmarkMatchesPosition(
   bookmark: Bookmark,
   spineIndex: number,
   chapterState: ChapterState,
   anchor: Pick<ReadingAnchor, "textOffset" | "mediaAnchor"> | null,
+  resolveBookmarkPage?: (bookmark: Bookmark) => number | null,
 ): boolean {
   if (bookmark.spineIndex !== spineIndex) return false;
   if (chapterState.status !== "ready" || chapterState.mode !== "scroll") {
-    return chapterState.status === "ready" && bookmark.page === chapterState.currentPage;
+    if (chapterState.status !== "ready") return false;
+    const resolved = resolveBookmarkPage ? resolveBookmarkPage(bookmark) : bookmark.page;
+    return resolved === chapterState.currentPage;
   }
   const savedText = bookmark.anchorTextOffset;
   const currentText = anchor?.textOffset ?? null;
@@ -1033,7 +1049,7 @@ export default function App() {
               continue;
             }
 
-            const b = await loadBook(buf);
+            const b = await loadBook(buf, { selective: true });
             if (b.spine.length === 0) {
               throw new Error("书中没有可阅读的内容（spine 为空）");
             }
@@ -1687,7 +1703,8 @@ export default function App() {
           entry = await getShelfStore().setContentHash(id, await sha256Hex(buf));
           setShelfEntries((prev) => prev.map((item) => item.id === id ? entry : item));
         }
-        const b = await loadBook(buf);
+        const initialSpineIndex = searchTarget ? searchTarget.spineIndex : (entry.spineIndex ?? 0);
+        const b = await loadBook(buf, { selective: true, initialSpineIndex });
         if (b.spine.length === 0) {
           setShelfError("这本书没有可阅读的内容");
           shelfBusyRef.current = false;
@@ -1894,21 +1911,35 @@ export default function App() {
     if (s.status === "ready" && s.mode !== "scroll" && !navigationPendingRef.current) {
       const axis = contentAxisRef.current;
       const currentBook = bookRef.current;
-      if (axis && currentBook) {
-        const seg = axis.segments.find((item) => item.spineIndex === spineIndexRef.current);
-        if (seg) {
-          const intra = s.pageCount > 1 ? s.currentPage / (s.pageCount - 1) : 0;
-          const ratio = axis.ratioAt({ key: seg.key, fraction: intra });
-          const linearIndices = currentBook.spine.map((item, i) => (item.linear ? i : -1)).filter((i) => i >= 0);
-          const isLastLinear = linearIndices.at(-1) === spineIndexRef.current;
-          const atEnd = isLastLinear && s.currentPage >= s.pageCount - 1;
-          if (ratio !== null) {
+      if (currentBook) {
+        const linearIndices = currentBook.spine.map((item, i) => (item.linear ? i : -1)).filter((i) => i >= 0);
+        const isLastLinear = nextLinearIndex(currentBook, spineIndexRef.current, 1) === -1 || linearIndices.at(-1) === spineIndexRef.current;
+        const atEnd = s.atEnd === true || (isLastLinear && s.currentPage >= s.pageCount - 1);
+        if (axis) {
+          const seg = axis.segments.find((item) => item.spineIndex === spineIndexRef.current);
+          if (seg) {
+            const intra = s.pageCount > 1 ? s.currentPage / (s.pageCount - 1) : 1;
+            const ratio = atEnd ? 1 : axis.ratioAt({ key: seg.key, fraction: intra });
+            if (ratio !== null) {
+              dispatchScrub({
+                type: "sample",
+                session: scrubSessionRef.current,
+                actual: { ratio, atEnd },
+              });
+            }
+          } else if (atEnd) {
             dispatchScrub({
               type: "sample",
               session: scrubSessionRef.current,
-              actual: { ratio, atEnd },
+              actual: { ratio: 1, atEnd: true },
             });
           }
+        } else if (atEnd) {
+          dispatchScrub({
+            type: "sample",
+            session: scrubSessionRef.current,
+            actual: { ratio: 1, atEnd: true },
+          });
         }
       }
     }
@@ -1926,6 +1957,38 @@ export default function App() {
     const readingAnchor = readerRef.current?.getReadingAnchor();
     const currentBook = bookRef.current;
     const currentIndex = spineIndexRef.current;
+    if (state.status === "ready" && state.mode !== "scroll" && currentBook) {
+      const linearIndices = currentBook.spine.map((item, i) => (item.linear ? i : -1)).filter((i) => i >= 0);
+      const isLastLinear = nextLinearIndex(currentBook, currentIndex, 1) === -1 || linearIndices.at(-1) === currentIndex;
+      const atEnd = state.atEnd === true || (isLastLinear && state.currentPage >= state.pageCount - 1);
+      const axis = contentAxisRef.current;
+      if (axis) {
+        const seg = axis.segments.find((item) => item.spineIndex === currentIndex);
+        if (seg) {
+          const intra = state.pageCount > 1 ? state.currentPage / (state.pageCount - 1) : 1;
+          const ratio = atEnd ? 1 : axis.ratioAt({ key: seg.key, fraction: intra });
+          if (ratio !== null) {
+            dispatchScrub({
+              type: "sample",
+              session: scrubSessionRef.current,
+              actual: { ratio, atEnd },
+            });
+          }
+        } else if (atEnd) {
+          dispatchScrub({
+            type: "sample",
+            session: scrubSessionRef.current,
+            actual: { ratio: 1, atEnd: true },
+          });
+        }
+      } else if (atEnd) {
+        dispatchScrub({
+          type: "sample",
+          session: scrubSessionRef.current,
+          actual: { ratio: 1, atEnd: true },
+        });
+      }
+    }
     const active = activeSessionRef.current;
     const expectedPath = currentBook ? spineItemPath(currentBook, currentIndex) : undefined;
     if (
@@ -2049,8 +2112,16 @@ export default function App() {
   const currentReaderPosition = useCallback((): ReaderHistoryPosition => {
     const state = chapterStateRef.current;
     const readingAnchor = readerRef.current?.getReadingAnchor();
+    const currentBook = bookRef.current;
+    let targetSpineIndex = spineIndex;
+    if (readingAnchor?.path && currentBook) {
+      const resolved = spineIndexForPath(currentBook, readingAnchor.path);
+      if (resolved >= 0) {
+        targetSpineIndex = resolved;
+      }
+    }
     return {
-      spineIndex,
+      spineIndex: targetSpineIndex,
       page: state.status === "ready" ? state.currentPage : lastStablePositionRef.current.page,
       anchor: toPersistedReaderAnchor(
         readingAnchor
@@ -2065,6 +2136,30 @@ export default function App() {
       ) ?? lastStablePositionRef.current.anchor,
     };
   }, [spineIndex]);
+
+  const handlePresentationChange = useCallback(
+    (patch: { readingMode?: "paginated" | "scroll"; columnsPerView?: 1 | 2 }) => {
+      const isModeChange = patch.readingMode !== undefined && patch.readingMode !== settings.readingMode;
+      const isColChange = patch.columnsPerView !== undefined && patch.columnsPerView !== settings.columnsPerView;
+      if (!isModeChange && !isColChange) return;
+
+      const pos = currentReaderPosition();
+      if (pos) {
+        lastStablePositionRef.current = pos;
+        if (isModeChange) {
+          if (pos.anchor) setInitialAnchor(toPersistedReaderAnchor(pos.anchor));
+          if (typeof pos.page === "number") setInitialPage(pos.page);
+          if (typeof pos.spineIndex === "number") {
+            spineIndexRef.current = pos.spineIndex;
+            setSpineIndex(pos.spineIndex);
+          }
+          setAnchorNonce((n) => n + 1);
+        }
+      }
+      setSettings((s2) => ({ ...s2, ...patch }));
+    },
+    [currentReaderPosition, settings.columnsPerView, settings.readingMode]
+  );
 
   /** 捕获当前位置供一次普通书内跳转撤销；调用方负责保证一次点击只调用一次。 */
   const captureReaderHistory = useCallback((href: string): void => {
@@ -2653,7 +2748,13 @@ export default function App() {
   const isCurrentPageBookmarked =
     chapterState.status === "ready" &&
     currentBookmarks.some((bookmark) =>
-      bookmarkMatchesPosition(bookmark, spineIndex, chapterState, currentBookmarkAnchor)
+      bookmarkMatchesPosition(
+        bookmark,
+        spineIndex,
+        chapterState,
+        currentBookmarkAnchor,
+        (bm) => readerRef.current?.resolveBookmarkPage?.(bm) ?? bm.page,
+      )
     );
   // 书签按书中实际顺序排列，并补上章节标题供右下角展示
   const sortedBookmarks = book
@@ -2682,29 +2783,66 @@ export default function App() {
   const handleToggleBookmark = useCallback(() => {
     if (!currentShelfId || chapterState.status !== "ready") return;
     const anchor = readerRef.current?.getReadingAnchor() ?? null;
-    const existing = currentBookmarks.find((bookmark) =>
-      bookmarkMatchesPosition(bookmark, spineIndex, chapterState, anchor)
-    );
     let next: Bookmark[];
-    if (existing) {
-      next = currentBookmarks.filter((bookmark) => bookmark.id !== existing.id);
+    if (chapterState.mode === "scroll") {
+      const existing = currentBookmarks.find((bookmark) =>
+        bookmarkMatchesPosition(bookmark, spineIndex, chapterState, anchor)
+      );
+      if (existing) {
+        next = currentBookmarks.filter((bookmark) => bookmark.id !== existing.id);
+      } else {
+        const text = readerRef.current?.getAnchorText() ?? "";
+        next = [
+          ...currentBookmarks,
+          {
+            id: `bm_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            spineIndex,
+            page: chapterState.currentPage,
+            anchorIndex: anchor && anchor.index >= 0 ? anchor.index : null,
+            anchorRatio: anchor && anchor.index >= 0 ? anchor.ratio : null,
+            anchorTextOffset: anchor?.textOffset ?? null,
+            anchorTextSnippet: anchor?.textSnippet ?? null,
+            mediaAnchor: anchor?.mediaAnchor ?? null,
+            text: text.slice(0, 80),
+            createdAtMs: Date.now(),
+          },
+        ];
+      }
     } else {
-      const text = readerRef.current?.getAnchorText() ?? "";
-      next = [
-        ...currentBookmarks,
-        {
-          id: `bm_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-          spineIndex,
-          page: chapterState.currentPage,
-          anchorIndex: anchor && anchor.index >= 0 ? anchor.index : null,
-          anchorRatio: anchor && anchor.index >= 0 ? anchor.ratio : null,
-          anchorTextOffset: anchor?.textOffset ?? null,
-          anchorTextSnippet: anchor?.textSnippet ?? null,
-          mediaAnchor: anchor?.mediaAnchor ?? null,
-          text: text.slice(0, 80),
-          createdAtMs: Date.now(),
-        },
-      ];
+      const resolvePage = (bm: Bookmark) =>
+        readerRef.current?.resolveBookmarkPage?.(bm) ?? bm.page;
+      const pageBookmarks = currentBookmarks.filter(
+        (bm) => bm.spineIndex === spineIndex && resolvePage(bm) === chapterState.currentPage
+      );
+      if (pageBookmarks.length > 0) {
+        const exactMatch = pageBookmarks.find((bm) => isExactBookmarkMatch(bm, anchor));
+        const targetToDelete =
+          exactMatch ??
+          [...pageBookmarks].sort((a, b) => {
+            const aPos = a.anchorTextOffset ?? a.anchorIndex ?? 0;
+            const bPos = b.anchorTextOffset ?? b.anchorIndex ?? 0;
+            if (aPos !== bPos) return aPos - bPos;
+            return a.createdAtMs - b.createdAtMs;
+          })[0];
+        next = currentBookmarks.filter((bm) => bm.id !== targetToDelete.id);
+      } else {
+        const text = readerRef.current?.getAnchorText() ?? "";
+        next = [
+          ...currentBookmarks,
+          {
+            id: `bm_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            spineIndex,
+            page: chapterState.currentPage,
+            anchorIndex: anchor && anchor.index >= 0 ? anchor.index : null,
+            anchorRatio: anchor && anchor.index >= 0 ? anchor.ratio : null,
+            anchorTextOffset: anchor?.textOffset ?? null,
+            anchorTextSnippet: anchor?.textSnippet ?? null,
+            mediaAnchor: anchor?.mediaAnchor ?? null,
+            text: text.slice(0, 80),
+            createdAtMs: Date.now(),
+          },
+        ];
+      }
     }
     // 乐观更新 UI，再落盘
     setShelfEntries((prev) =>
@@ -3044,11 +3182,11 @@ export default function App() {
     reading && book
       ? (() => {
           const lastLinear = linearIndices.at(-1);
-          const isLastLinear = lastLinear === spineIndex;
+          const isLastLinear = lastLinear === spineIndex || nextLinearIndex(book, spineIndex, 1) === -1;
           const atBookEnd =
             settings.readingMode === "scroll"
               ? chapterState.status === "ready" && chapterState.atEnd === true
-              : countSummary.complete && isLastLinear && chapterState.currentPage >= chapterState.pageCount - 1;
+              : chapterState.status === "ready" && (chapterState.atEnd === true || (isLastLinear && chapterState.currentPage >= chapterState.pageCount - 1));
           if (atBookEnd) return 100;
           const pct = computeProgressPct(countSummary, anchorChars);
           return pct === null ? null : Math.min(99, pct);
@@ -3113,11 +3251,11 @@ export default function App() {
       chapterChars: currentSummary.current ?? 0,
     });
     const lastLinear = linearIndices.at(-1);
-    const isLastLinear = lastLinear === spineIndex;
+    const isLastLinear = lastLinear === spineIndex || (book ? nextLinearIndex(book, spineIndex, 1) === -1 : false);
     const atBookEnd =
       settings.readingMode === "scroll"
         ? state.status === "ready" && state.atEnd === true
-        : currentSummary.complete && isLastLinear && state.currentPage >= state.pageCount - 1;
+        : state.status === "ready" && (state.atEnd === true || (isLastLinear && state.currentPage >= state.pageCount - 1));
     const exactProgressPct = atBookEnd
       ? 100
       : (() => {
@@ -3729,13 +3867,11 @@ export default function App() {
                     setSettings((s2) => ({ ...s2, pageMarginsPx: margins }))
                   }
                   columnsPerView={settings.columnsPerView === 2 ? 2 : 1}
-                  onColumnsChange={(cols) =>
-                    setSettings((s2) => ({ ...s2, columnsPerView: cols }))
-                  }
+                  onColumnsChange={(cols) => handlePresentationChange({ columnsPerView: cols })}
                   readingMode={settings.readingMode === "scroll" ? "scroll" : "paginated"}
-                  onReadingModeChange={(mode) =>
-                    setSettings((s2) => (s2.readingMode === mode ? s2 : { ...s2, readingMode: mode }))
-                  }
+                  onReadingModeChange={(mode) => handlePresentationChange({ readingMode: mode })}
+                  effectiveColumns={chapterState.status === "ready" ? chapterState.effectiveColumns : undefined}
+                  onPresentationChange={handlePresentationChange}
                   instantTurn={settings.instantTurn === true}
                   onInstantTurnChange={(enabled) =>
                     setSettings((s2) => ({ ...s2, instantTurn: enabled }))
@@ -4008,6 +4144,7 @@ export default function App() {
         <WhisperFooter
           currentPage={chapterState.status === "ready" ? chapterState.currentPage : 0}
           pageCount={chapterState.status === "ready" ? chapterState.pageCount : 1}
+          leafRange={chapterState.status === "ready" ? chapterState.leafRange : null}
           readingMode={settings.readingMode === "scroll" ? "scroll" : "paginated"}
           scrollProgress={chapterState.status === "ready" ? chapterState.scrollProgress ?? 0 : 0}
           totalScrollProgress={chapterState.status === "ready" ? chapterState.totalScrollProgress : undefined}

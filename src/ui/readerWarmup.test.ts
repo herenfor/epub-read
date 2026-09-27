@@ -40,4 +40,17 @@ describe("ReadingWarmupPlan", () => {
     expect(plan.take(0, new Set([0]), true, false)).toBeNull();
     expect(plan.take(0, new Set([0]), false, true)).toBeNull();
   });
+
+  it("resource-only 近邻在完成一次资源准备后不因无 DOM 反复派发", () => {
+    const plan = new ReadingWarmupPlan();
+    plan.reset([0, 1, 2, 3, 4, 5]);
+    const resourceOnly = new Set([3]); // 3 是超大章节，只做资源准备
+    const first = plan.take(2, new Set([2]), false, false, resourceOnly);
+    expect(first?.chapter).toBe(3);
+    plan.finish(first!, true); // 资源准备成功进入 done，但不会在 resident 中
+
+    // 下一次调度，3 虽不在 resident 中，但因为是 resource-only 且已在 done 中，不应再次派发 3
+    const next = plan.take(2, new Set([2]), false, false, resourceOnly);
+    expect(next?.chapter).toBe(1); // 转向其他邻章
+  });
 });

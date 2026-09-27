@@ -60,18 +60,31 @@ describe("Zen UI AaPopover 组件与交互契约（Packet B）", () => {
     expect(html).toContain("aa-font-trigger");
   });
 
-  it("行高、边距、栏数、阅读模式分段控制器正确选中当前状态", () => {
+  it("行高、边距、排版（单页/双页/滚动）分段控制器正确选中当前状态", () => {
     const html = renderToStaticMarkup(createElement(AaPopover, baseProps));
-    // 双栏选中
-    expect(html).toContain("双栏");
-    // 分页选中
-    expect(html).toContain("分页");
+    // 唯一排版选项：单页 | 双页 | 滚动
+    expect(html).toContain("单页");
+    expect(html).toContain("双页");
+    expect(html).toContain("滚动");
+    // 双页选中 (baseProps: columnsPerView=2, readingMode=paginated)
+    expect(html).toMatch(/aa-segmented-btn active[^>]*>双页</);
     // 行高标准选中
     expect(html).toContain("标准");
     // 边距适中选中
     expect(html).toContain("适中");
     // 极速瞬翻
     expect(html).toContain("极速瞬翻 (0ms)");
+  });
+
+  it("当选中双页且窗口较窄回退单页时显示提示文案", () => {
+    const html = renderToStaticMarkup(
+      createElement(AaPopover, {
+        ...baseProps,
+        columnsPerView: 2,
+        effectiveColumns: 1,
+      })
+    );
+    expect(html).toContain("窗口较窄，暂以单页显示");
   });
 
   it("包含更多高级设置折叠开关", () => {

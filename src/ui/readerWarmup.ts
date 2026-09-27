@@ -11,6 +11,45 @@ export interface WarmupTicket {
   readonly chapter: number;
 }
 
+/**
+ * 仅后台 DOM 预排版准入预算，非书籍合法性/显示限制。
+ * 使用 JS 字符串长度（UTF-16 units）作低成本工作量估计，绝不是文本锚点 offset。
+ * 首版 64 Ki units；集中命名，后续按证据调整，不按书名放行。
+ */
+export const BACKGROUND_LAYOUT_SOURCE_UNITS = 64 * 1024;
+
+export function backgroundPreparation(source: string | undefined): "live-layout" | "resource-only" {
+  return source !== undefined && source.length <= BACKGROUND_LAYOUT_SOURCE_UNITS
+    ? "live-layout"
+    : "resource-only";
+}
+
+/**
+ * 全书资源预备的纯选择：近邻优先，但 resource-only 的近邻成功后不因没 DOM 重复派发。
+ * 仅替换原 ReadingWarmupPlan.take 的候选选择；票据/epoch/finish 仍用原类。
+ */
+export function selectWarmupChapter(input: {
+  chapters: readonly number[];
+  active: number;
+  resident: ReadonlySet<number>;
+  done: ReadonlySet<number>;
+  failed: ReadonlySet<number>;
+  resourceOnly: ReadonlySet<number>;
+}): number | null {
+  const at = input.chapters.indexOf(input.active);
+  if (at < 0) return null;
+  const eligible = (chapter: number) => !input.resident.has(chapter) && !input.failed.has(chapter);
+  for (const i of [at + 1, at - 1, at + 2, at - 2]) {
+    if (i < 0 || i >= input.chapters.length) continue;
+    const chapter = input.chapters[i];
+    if (eligible(chapter) && (!input.resourceOnly.has(chapter) || !input.done.has(chapter))) return chapter;
+  }
+  for (const chapter of [...input.chapters.slice(at + 1), ...input.chapters.slice(0, at)]) {
+    if (eligible(chapter) && !input.done.has(chapter)) return chapter;
+  }
+  return null;
+}
+
 export class ReadingWarmupPlan {
   private epoch = 0;
   private serial = 0;
@@ -37,21 +76,19 @@ export class ReadingWarmupPlan {
     resident: ReadonlySet<number>,
     userBusy: boolean,
     foregroundPending: boolean,
+    resourceOnly: ReadonlySet<number> = new Set(),
   ): WarmupTicket | null {
     if (userBusy || foregroundPending || this.running) return null;
     this.done.add(active);
-    const at = this.chapters.indexOf(active);
-    if (at < 0) return null;
-
-    const preferred = [at + 1, at - 1, at + 2, at - 2]
-      .filter((i) => i >= 0 && i < this.chapters.length)
-      .map((i) => this.chapters[i]);
-    const chapter =
-      preferred.find((i) => !resident.has(i) && !this.failed.has(i)) ??
-      [...this.chapters.slice(at + 1), ...this.chapters.slice(0, at)].find(
-        (i) => !resident.has(i) && !this.done.has(i) && !this.failed.has(i),
-      );
-    if (chapter === undefined) return null;
+    const chapter = selectWarmupChapter({
+      chapters: this.chapters,
+      active,
+      resident,
+      done: this.done,
+      failed: this.failed,
+      resourceOnly,
+    });
+    if (chapter === null) return null;
 
     const ticket: WarmupTicket = {
       epoch: this.epoch,

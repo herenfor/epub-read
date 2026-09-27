@@ -39,6 +39,7 @@ import {
   isChapterMeasurementCurrent,
   resolveRestoredPage,
   shouldRestoreReaderTopAutoMargin,
+  createAutoMarginBatch,
 } from "./paginator";
 
 const textNode = (text: string): Node =>
@@ -2230,7 +2231,8 @@ describe("measure viewport height locking", () => {
 
     // Height should be 600 - 25 - 35 = 540px
     expect(viewer.style.height).toBe("540px");
-    expect(viewer.style.columnWidth).toBe("780px");
+    expect(viewer.style.columnWidth).toBe("auto");
+    expect(viewer.style.columnCount).toBe("1");
 
     // Abort so promise resolves without waiting
     for (const c of measureControllers) {
@@ -2500,5 +2502,86 @@ describe("B-153 paged anchor sampling", () => {
     // 进度写入/书签/历史读取时必须补齐最新页。
     ChapterPaginator.prototype.getReadingAnchor.call(context);
     expect(captureAnchor).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("createAutoMarginBatch", () => {
+  function createMockElement(initialStyles: Record<string, { value: string; priority: string }> = {}) {
+    const styles: Record<string, { value: string; priority: string }> = { ...initialStyles };
+    const attrs: Record<string, string> = {};
+    const style = {
+      getPropertyValue: (prop: string) => styles[prop]?.value ?? "",
+      getPropertyPriority: (prop: string) => styles[prop]?.priority ?? "",
+      setProperty: (prop: string, val: string, pri = "") => {
+        styles[prop] = { value: val, priority: pri };
+      },
+      removeProperty: (prop: string) => {
+        delete styles[prop];
+      },
+    } as unknown as CSSStyleDeclaration;
+    return {
+      style,
+      getAttribute: (name: string) => attrs[name] ?? null,
+      setAttribute: (name: string, val: string) => {
+        attrs[name] = val;
+      },
+      removeAttribute: (name: string) => {
+        delete attrs[name];
+      },
+    } as unknown as HTMLElement;
+  }
+
+  it("add 时只记录原始值而不立刻写入 DOM，flush 时集中写入并登记恢复项", () => {
+    const el1 = createMockElement({
+      "margin-left": { value: "10px", priority: "" },
+      "margin-right": { value: "20px", priority: "" },
+    });
+    const el2 = createMockElement({
+      "margin-left": { value: "5px", priority: "important" },
+    });
+
+    const batch = createAutoMarginBatch();
+    batch.add(el1);
+    batch.add(el2);
+
+    expect(batch.size).toBe(2);
+    // add 期间不得提前修改元素样式或属性
+    expect(el1.getAttribute("data-reader-margin-fixed")).toBeNull();
+    expect(el1.style.getPropertyValue("margin-left")).toBe("10px");
+    expect(el2.getAttribute("data-reader-margin-fixed")).toBeNull();
+    expect(el2.style.getPropertyValue("margin-left")).toBe("5px");
+
+    const registered: any[] = [];
+    batch.flush((fix) => registered.push(fix));
+
+    expect(batch.size).toBe(0);
+    expect(registered.length).toBe(2);
+
+    // flush 集中提交
+    expect(el1.getAttribute("data-reader-margin-fixed")).toBe("1");
+    expect(el1.style.getPropertyValue("margin-left")).toBe("auto");
+    expect(el1.style.getPropertyPriority("margin-left")).toBe("important");
+    expect(el1.style.getPropertyValue("margin-right")).toBe("auto");
+    expect(el1.style.getPropertyPriority("margin-right")).toBe("important");
+
+    expect(el2.getAttribute("data-reader-margin-fixed")).toBe("1");
+    expect(el2.style.getPropertyValue("margin-left")).toBe("auto");
+    expect(el2.style.getPropertyPriority("margin-left")).toBe("important");
+
+    // 登记的恢复值保留原始 priority 与 value
+    expect(registered[0].left).toEqual({ value: "10px", priority: "" });
+    expect(registered[0].right).toEqual({ value: "20px", priority: "" });
+    expect(registered[1].left).toEqual({ value: "5px", priority: "important" });
+    expect(registered[1].right).toEqual({ value: "", priority: "" });
+
+    // 验证复用 restoreInlineStyleProperty 可完整复原
+    restoreInlineStyleProperty(el1.style, "margin-left", registered[0].left);
+    restoreInlineStyleProperty(el1.style, "margin-right", registered[0].right);
+    expect(el1.style.getPropertyValue("margin-left")).toBe("10px");
+    expect(el1.style.getPropertyValue("margin-right")).toBe("20px");
+
+    restoreInlineStyleProperty(el2.style, "margin-left", registered[1].left);
+    expect(el2.style.getPropertyValue("margin-left")).toBe("5px");
+    expect(el2.style.getPropertyPriority("margin-left")).toBe("important");
   });
 });

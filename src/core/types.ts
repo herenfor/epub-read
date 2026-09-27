@@ -62,6 +62,8 @@ export interface Resource {
   path: string;
   data: Uint8Array;
   mediaType: string;
+  /** 资源字节是否已从归档解压加载就绪 */
+  loaded?: boolean;
 }
 
 export interface Book {
@@ -85,9 +87,19 @@ export interface Book {
   issues: BookIssue[];
   /** 是否受 DRM 保护（ADEPT 等），受保护则不应渲染 */
   drmProtected: boolean;
+  /** 按需解压指定路径的资源字节 */
+  ensureResources?: (paths: Iterable<string>) => Promise<void>;
+  /** 读取指定路径的资源字节（若未加载则按需解压） */
+  readResource?: (path: string) => Promise<Uint8Array | undefined>;
+  /** 选择性归档句柄，关书时释放 */
+  archive?: { close: () => void };
 }
 
 export interface BookOptions {
   /** 是否解析目录（默认 true） */
   parseToc?: boolean;
+  /** 是否使用选择性按需解压（默认 false 保持向后兼容，App 开书时启用） */
+  selective?: boolean;
+  /** 打开书籍时的初始 spine 下标（用于优先预载初始章节） */
+  initialSpineIndex?: number;
 }

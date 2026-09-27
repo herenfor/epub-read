@@ -254,10 +254,10 @@ describe("scroll mode commands", () => {
 
     // 1. 到达章末底部 (maxTop = 4400)
     viewer.scrollTop = 4400;
-    internals.handleWheel.call(context, { deltaY: 250, preventDefault } as unknown as WheelEvent);
+    internals.handleWheel.call(context, { deltaY: 100, preventDefault } as unknown as WheelEvent);
     expect(navigate).not.toHaveBeenCalled();
-    // 再次累积越过 400 阈值
-    internals.handleWheel.call(context, { deltaY: 200, preventDefault } as unknown as WheelEvent);
+    // 再次累积越过 160 阈值
+    internals.handleWheel.call(context, { deltaY: 100, preventDefault } as unknown as WheelEvent);
     expect(navigate).toHaveBeenCalledWith(1);
     expect(preventDefault).toHaveBeenCalled();
 
@@ -268,9 +268,9 @@ describe("scroll mode commands", () => {
     context.reverseLockUntil = 0;
     context.sameDirThrottleUntil = 0;
     viewer.scrollTop = 0;
-    internals.handleWheel.call(context, { deltaY: -250, preventDefault } as unknown as WheelEvent);
+    internals.handleWheel.call(context, { deltaY: -100, preventDefault } as unknown as WheelEvent);
     expect(navigate).not.toHaveBeenCalled();
-    internals.handleWheel.call(context, { deltaY: -200, preventDefault } as unknown as WheelEvent);
+    internals.handleWheel.call(context, { deltaY: -100, preventDefault } as unknown as WheelEvent);
     expect(navigate).toHaveBeenCalledWith(-1);
     expect(preventDefault).toHaveBeenCalled();
   });
@@ -654,4 +654,37 @@ describe("scroll mode C-53 toolbar centering", () => {
     ).toBe(212);
   });
 
+  it("reports atEnd=true in readyState when on the last page of the last chapter", () => {
+    const context = Object.create(ChapterPaginator.prototype) as Record<string, unknown>;
+    Object.assign(context, {
+      settings: { readingMode: "paginated" },
+      hasNextChapter: false,
+      metrics: { pageCount: 3, currentPage: 2 },
+      spreadLayout: null,
+      spreadGeometry: { columns: 2 },
+      effectiveColumns: 2,
+    });
+    const state = (ChapterPaginator.prototype as any).readyState.call(context, false);
+    expect(state.status).toBe("ready");
+    expect(state.atEnd).toBe(true);
+    expect(state.currentPage).toBe(2);
+  });
+
+  it("reports atEnd=false in readyState when not on the last page or more chapters exist", () => {
+    const context = Object.create(ChapterPaginator.prototype) as Record<string, unknown>;
+    Object.assign(context, {
+      settings: { readingMode: "paginated" },
+      hasNextChapter: true,
+      metrics: { pageCount: 3, currentPage: 2 },
+      spreadLayout: null,
+      spreadGeometry: { columns: 2 },
+      effectiveColumns: 2,
+    });
+    const stateWithNext = (ChapterPaginator.prototype as any).readyState.call(context, false);
+    expect(stateWithNext.atEnd).toBe(false);
+
+    Object.assign(context, { hasNextChapter: false, metrics: { pageCount: 3, currentPage: 1 } });
+    const stateNotLastPage = (ChapterPaginator.prototype as any).readyState.call(context, false);
+    expect(stateNotLastPage.atEnd).toBe(false);
+  });
 });

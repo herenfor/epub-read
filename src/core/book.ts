@@ -7,6 +7,7 @@ import { parseXmlText, hasParserError } from "./parseXml";
 import { normalizePath, resolvePath, isExternalUrl, isFragmentOnly, splitHref } from "./paths";
 import { isFontMediaType, guessMediaType } from "./mime";
 import { deobfuscateFont } from "./fonts";
+import { createArchiveClient } from "./selectiveArchive";
 import type {
   Book,
   BookIssue,
@@ -292,8 +293,203 @@ async function buildToc(
 /**
  * 加载 EPUB：解压 → 容器 → OPF → 资源清单 → 目录 → 字体混淆还原。
  * 抛错：文件损坏/非 EPUB → Error；DRM → DrmError。
+/**
+ * 按需解压加载 EPUB：仅提取包结构、目录与正文文本清单，图像/多媒体等大二进制资源按需解压。
+ */
+export async function loadBookSelective(
+  bytes: Uint8Array,
+  options: BookOptions = {}
+): Promise<Book> {
+  const issues: BookIssue[] = [];
+  const archiveClient = await createArchiveClient(bytes);
+
+  try {
+    const initFiles = await archiveClient.extract(["mimetype", "META-INF/container.xml"]);
+    const containerData = initFiles.get("META-INF/container.xml");
+    if (!containerData) throw new Error("缺少 META-INF/container.xml");
+    const containerXml = bytesToText(containerData);
+    const opfPath = normalizePath(parseContainerXmlRef(containerXml));
+    if (!opfPath) throw new Error("container.xml 中未指定 OPF 路径");
+
+    const opfFiles = await archiveClient.extract([opfPath]);
+    const opfData = opfFiles.get(opfPath);
+    if (!opfData) throw new Error(`OPF 文件不存在：${opfPath}`);
+    const opfDoc = await parseXmlText(bytesToText(opfData), "application/xml");
+    if (hasParserError(opfDoc)) {
+      throw new Error(`OPF 解析失败：${opfPath}（XML 不合法）`);
+    }
+    const parsed = parseOpf(opfDoc.documentElement);
+    issues.push(...parsed.issues);
+
+    // ---- 加密 / 字体混淆 / DRM ----
+    let obfuscated: string[] = [];
+    if (archiveClient.directory.has("META-INF/encryption.xml")) {
+      const encFiles = await archiveClient.extract(["META-INF/encryption.xml"]);
+      const encData = encFiles.get("META-INF/encryption.xml");
+      if (encData) {
+        const encMap = new Map([
+          ["META-INF/encryption.xml", { name: "META-INF/encryption.xml", data: encData }],
+        ]);
+        const encResult = await parseEncryption(encMap, issues);
+        if (encResult.drm) {
+          throw new DrmError("此书受 DRM 保护，无法打开");
+        }
+        obfuscated = encResult.obfuscated;
+      }
+    }
+    const obfuscatedFonts = new Set(obfuscated);
+
+    // 筛选所有 manifest 文本条目（HTML/XHTML/CSS/XML/NCX）进行首轮快速解压
+    const textPathsToExtract = new Set<string>();
+    for (const item of parsed.manifest.values()) {
+      const path = manifestResourcePath(opfPath, item.href);
+      if (!path || !archiveClient.directory.has(path)) continue;
+      const mt = (item.mediaType || guessMediaType(path)).toLowerCase();
+      if (
+        mt.includes("html") ||
+        mt.includes("xml") ||
+        mt.includes("css") ||
+        mt.includes("text") ||
+        path.endsWith(".xhtml") ||
+        path.endsWith(".html") ||
+        path.endsWith(".css") ||
+        path.endsWith(".xml") ||
+        path.endsWith(".ncx")
+      ) {
+        textPathsToExtract.add(path);
+      }
+    }
+
+    const extractedTextMap = await archiveClient.extract(Array.from(textPathsToExtract));
+    const allExtractedFiles = new Map<string, { name: string; data: Uint8Array }>();
+    for (const [p, d] of initFiles) allExtractedFiles.set(p, { name: p, data: d });
+    for (const [p, d] of opfFiles) allExtractedFiles.set(p, { name: p, data: d });
+    for (const [p, d] of extractedTextMap) allExtractedFiles.set(p, { name: p, data: d });
+
+    // ---- 目录 ----
+    const toc =
+      options.parseToc === false
+        ? []
+        : await buildToc(allExtractedFiles, parsed, opfPath, issues);
+
+    // ---- 资源清单 ----
+    const resources = new Map<string, Resource>();
+    for (const item of parsed.manifest.values()) {
+      const path = manifestResourcePath(opfPath, item.href);
+      if (!path) {
+        issues.push({
+          kind: "book_error",
+          source: "opf:manifest",
+          message: `item "${item.id}" 的 href 无效`,
+        });
+        continue;
+      }
+      const isArchived = archiveClient.directory.has(path);
+      if (!isArchived) {
+        const remote = item.properties.includes("remote-resources") || isExternalUrl(item.href);
+        if (remote) continue;
+        issues.push({
+          kind: "book_error",
+          source: "opf:manifest",
+          message: `manifest 声明的资源缺失：${path}`,
+        });
+        continue;
+      }
+      const mediaType = item.mediaType || guessMediaType(path);
+      const preloadedData = extractedTextMap.get(path);
+      if (preloadedData) {
+        resources.set(path, { path, data: preloadedData, mediaType, loaded: true });
+      } else {
+        resources.set(path, { path, data: new Uint8Array(0), mediaType, loaded: false });
+      }
+    }
+
+    // ---- 封面与初始章节识别 ----
+    const coverHref = selectCoverHref(parsed.manifest, parsed.metaPairs, opfPath, resources);
+
+    const uniqueId = parsed.metadata.identifier;
+
+    const ensureResources = async (paths: Iterable<string>): Promise<void> => {
+      const toFetch: string[] = [];
+      for (const p of paths) {
+        const res = resources.get(p);
+        if (res && res.loaded === false) {
+          toFetch.push(p);
+        }
+      }
+      if (toFetch.length === 0) return;
+      const validPaths = toFetch.filter((p) => archiveClient.directory.has(p));
+      if (validPaths.length === 0) return;
+      const batchResult = await archiveClient.extract(validPaths);
+      for (const [p, data] of batchResult) {
+        const res = resources.get(p);
+        if (res) {
+          if (obfuscatedFonts.has(p) && isFontMediaType(res.mediaType)) {
+            try {
+              res.data = await deobfuscateFont(data, uniqueId);
+            } catch (e) {
+              res.data = data;
+              issues.push({
+                kind: "reader_error",
+                source: "fonts",
+                message: `字体混淆还原失败：${p}（${(e as Error).message}）`,
+              });
+            }
+          } else {
+            res.data = data;
+          }
+          res.loaded = true;
+        }
+      }
+    };
+
+    const readResource = async (path: string): Promise<Uint8Array | undefined> => {
+      let res = resources.get(path);
+      if (res && res.loaded !== false) return res.data;
+      await ensureResources([path]);
+      res = resources.get(path);
+      return res && res.loaded !== false ? res.data : undefined;
+    };
+
+    // 若封面存在且属于图片候选，提前按需解压封面
+    if (coverHref && resources.has(coverHref) && !resources.get(coverHref)!.loaded) {
+      await ensureResources([coverHref]);
+    }
+
+    const { fixedLayout, viewport } = renditionInfo(parsed.metaPairs, parsed.manifest);
+
+    return {
+      version: parsed.version,
+      opfPath,
+      metadata: parsed.metadata,
+      manifest: parsed.manifest,
+      spine: parsed.spine,
+      guide: parsed.guide,
+      toc,
+      resources,
+      coverHref,
+      fixedLayout,
+      viewport,
+      issues,
+      drmProtected: false,
+      ensureResources,
+      readResource,
+      archive: { close: () => archiveClient.close() },
+    };
+  } catch (err) {
+    archiveClient.close();
+    throw err;
+  }
+}
+
+/**
+ * 加载 EPUB：解压 → 容器 → OPF → 资源清单 → 目录 → 字体混淆还原。
+ * 抛错：文件损坏/非 EPUB → Error；DRM → DrmError。
  */
 export async function loadBook(bytes: Uint8Array, options: BookOptions = {}): Promise<Book> {
+  if (options.selective === true) {
+    return loadBookSelective(bytes, options);
+  }
   const issues: BookIssue[] = [];
   const files = unzipEpub(bytes);
 
@@ -339,7 +535,7 @@ export async function loadBook(bytes: Uint8Array, options: BookOptions = {}): Pr
       continue;
     }
     const mediaType = item.mediaType || guessMediaType(path);
-    resources.set(path, { path, data: f.data, mediaType });
+    resources.set(path, { path, data: f.data, mediaType, loaded: true });
   }
 
   // ---- 封面 ----
@@ -394,6 +590,8 @@ export async function loadBook(bytes: Uint8Array, options: BookOptions = {}): Pr
     viewport,
     issues,
     drmProtected: false,
+    ensureResources: async () => {},
+    readResource: async (path: string) => resources.get(path)?.data,
   };
 }
 
@@ -442,8 +640,10 @@ export function nextLinearIndex(book: Book, from: number, dir: 1 | -1): number {
  */
 export function disposeBook(book: Book | null | undefined): void {
   if (!book) return;
+  book.archive?.close();
   for (const res of book.resources.values()) {
     res.data = new Uint8Array(0);
+    res.loaded = false;
   }
   book.resources.clear();
   book.manifest.clear();

@@ -41,7 +41,20 @@ import {
   type ReadingMode,
   type ScrollMetrics,
 } from "./scrollLayout";
-import { computePagedGeometry } from "./pageLayout";
+import { MIN_COLUMN_WIDTH_PX } from "./pageLayout";
+import {
+  clientXToColumnX,
+  columnForContentPoint,
+  commitSpreadPosition,
+  createSpreadGeometry,
+  createSpreadLayout,
+  occupiedColumns,
+  type PagedViewportPort,
+  type SpreadGeometry,
+  type SpreadLayout,
+  spreadForColumn,
+  visibleLeafRange,
+} from "./pagedSpread";
 import { imageRequestFromTarget } from "./imageActivation";
 
 /** 常规布局应远早于此完成；极端字体/引擎停滞时只解除隐藏，不伪造 ready。 */
@@ -65,6 +78,8 @@ export type ChapterState =
       effectiveColumns?: 1 | 2;
       /** 是否已确认达到全书内容终点 */
       atEnd?: boolean;
+      /** 叶页（物理列）编号区间，如 { first: 3, last: 4, total: 5 } */
+      leafRange?: { first: number; last: number; total: number } | null;
     }
   | { status: "error"; message: string };
 
@@ -1690,6 +1705,43 @@ export function shouldRestoreReaderTopAutoMargin(
   );
 }
 
+export interface AutoMarginFix {
+  el: HTMLElement;
+  left: InlineStyleValue;
+  right: InlineStyleValue;
+}
+
+/**
+ * 只用于 C-53 已有纯门判定通过的零 margin 常规块。
+ * read/decide 循环内 add，循环完全结束后统一 flush。不要包住 float 试验等相依阶段。
+ * 每个候选每测量轮只 add 一次；保持现有候选唯一性，不额外维护全局缓存。
+ */
+export function createAutoMarginBatch() {
+  const queued: AutoMarginFix[] = [];
+  return {
+    add(el: HTMLElement): void {
+      queued.push({
+        el,
+        left: snapshotInlineStyleProperty(el.style, "margin-left"),
+        right: snapshotInlineStyleProperty(el.style, "margin-right"),
+      });
+    },
+    flush(registerRestore: (fix: AutoMarginFix) => void): void {
+      for (const fix of queued) {
+        // 先登记原值，继续复用 paginator.restoreBookMargins 的恢复职责。
+        registerRestore(fix);
+        fix.el.setAttribute("data-reader-margin-fixed", "1");
+        fix.el.style.setProperty("margin-left", "auto", "important");
+        fix.el.style.setProperty("margin-right", "auto", "important");
+      }
+      queued.length = 0;
+    },
+    get size(): number {
+      return queued.length;
+    },
+  };
+}
+
 /**
  * 只把明确的全宽/突破表达式视为作者意图；`max-width` 本身是上限，不能
  * 证明作者要求突破版心。`min()/max()/clamp()` 混合表达式也不作猜测，
@@ -2049,7 +2101,44 @@ export class ChapterPaginator {
   private step = 0;
   private pageWidth = 0;
   /** 本次布局的分栏几何（B 的 computePagedGeometry 结果）。 */
-  private geometry: { columns: 1 | 2; columnWidth: number; columnStep: number; viewStep: number } | null = null;
+  private spreadGeometry: SpreadGeometry | null = null;
+  private spreadLayout: SpreadLayout | null = null;
+  private tailSpacer: HTMLElement | null = null;
+  private bookmarkSpreadCache = new Map<string, number>();
+
+  get spreadLayoutSnapshot(): SpreadLayout | null {
+    return this.spreadLayout;
+  }
+
+  private get geometry(): { columns: 1 | 2; columnWidth: number; columnStep: number; viewStep: number } | null {
+    if (!this.spreadGeometry) return null;
+    return {
+      columns: this.spreadGeometry.columns,
+      columnWidth: this.spreadGeometry.columnWidth,
+      columnStep: this.spreadGeometry.columnStep,
+      viewStep: this.spreadGeometry.spreadStep,
+    };
+  }
+
+  private set geometry(
+    g: { columns?: 1 | 2; columnWidth?: number; columnStep?: number; viewStep?: number } | null,
+  ) {
+    if (g) {
+      const cols = g.columns ?? 1;
+      const width = g.columnWidth ?? 0;
+      const step = g.columnStep ?? width;
+      this.spreadGeometry = {
+        viewportWidth: width,
+        columns: cols,
+        gap: 0,
+        columnWidth: width,
+        columnStep: step,
+        spreadStep: g.viewStep ?? cols * step,
+      };
+    } else {
+      this.spreadGeometry = null;
+    }
+  }
   /** 最近一次完整 measure 使用的 iframe 视口；过滤 ResizeObserver 空转。 */
   private measuredViewport = { width: -1, height: -1 };
   private metrics = { pageCount: 1, currentPage: 0 };
@@ -2270,31 +2359,20 @@ export class ChapterPaginator {
     return this.settings?.readingMode === "scroll";
   }
 
-  /**
-   * 引擎实际渲染出的每屏列数（窄窗回落后的有效值）。
-   * 不信任设置里的期望值：CSS column-count 可能把双栏降回单栏。
-   */
-  private computeEffectiveColumns(): 1 | 2 {
-    const viewer = this.viewer;
-    if (!viewer) return 1;
-    const win = this.contentDoc?.defaultView;
-    const count = win ? parseFloat(win.getComputedStyle(viewer).columnCount) : NaN;
-    return Number.isFinite(count) && count >= 2 ? 2 : 1;
-  }
 
   /**
    * 物理列宽：双栏时是单列宽，不是整屏宽；由 B 的几何唯一决定。
    */
   private get effectiveColumnWidth(): number {
-    return this.geometry?.columnWidth ?? this.pageWidth;
+    return this.spreadGeometry?.columnWidth ?? this.pageWidth;
   }
 
   private get effectiveColumnStep(): number {
-    return this.geometry?.columnStep ?? this.step ?? this.pageWidth + this.settings.gapPx;
+    return this.spreadGeometry?.columnStep ?? this.step ?? this.pageWidth + this.settings.gapPx;
   }
 
   private get effectiveViewStep(): number {
-    return this.geometry?.viewStep ?? this.effectiveColumnStep;
+    return this.spreadGeometry?.spreadStep ?? this.effectiveColumnStep;
   }
 
   private scrollMetrics(): ScrollMetrics {
@@ -2385,6 +2463,11 @@ export class ChapterPaginator {
     // 上一份阅读态，写到它前面会被自己刚做的清理抹掉（滚动模式曾因此永远走页码兜底）。
     this.pendingRestoreAnchor = preciseAnchor ? { ...preciseAnchor } : null;
     this.iframe.src = "about:blank";
+
+    if (this.server.ensureChapterResources) {
+      await this.server.ensureChapterResources(path);
+      if (seq !== this.loadSeq || this.disposed) return;
+    }
 
     const htmlText = this.server.textFor(path);
     if (htmlText === undefined) {
@@ -2665,18 +2748,29 @@ export class ChapterPaginator {
     const pureImagePage = !this.fixedLayout && !hasText && hasImg;
     const padTop = pureImagePage ? 0 : Math.round(requestedTop * verticalScale);
     const padBottom = pureImagePage ? 0 : Math.round(requestedBottom * verticalScale);
-    const requestedColumns = this.fixedLayout ? 1 : this.settings.columnsPerView === 2 ? 2 : 1;
+    const requestedColumns = this.fixedLayout || scrollMode ? 1 : this.settings.columnsPerView === 2 ? 2 : 1;
     // 统一列/屏换算的唯一来源：列宽、列步长、翻屏步长都来自 B 的几何。
-    const geometry = computePagedGeometry(w, gap, requestedColumns);
-    this.geometry = geometry;
+    const geometry = createSpreadGeometry(w, gap, requestedColumns, MIN_COLUMN_WIDTH_PX);
+    this.spreadGeometry = geometry;
+    this.effectiveColumns = geometry.columns;
     this.step = geometry.columnStep;
     this.pageWidth = geometry.columnWidth;
+    this.bookmarkSpreadCache?.clear();
+    viewer.style.position = "relative";
     viewer.style.width = `${w}px`;
     viewer.style.paddingTop = `${padTop}px`;
     viewer.style.paddingBottom = `${padBottom}px`;
-    viewer.style.columnWidth = `${geometry.columnWidth}px`;
-    viewer.style.columnGap = `${gap}px`;
-    viewer.style.columnFill = "auto";
+    if (scrollMode) {
+      viewer.style.columnCount = "auto";
+      viewer.style.columnWidth = "auto";
+      viewer.style.columnGap = "0px";
+      viewer.style.columnFill = "auto";
+    } else {
+      viewer.style.columnCount = String(geometry.columns);
+      viewer.style.columnWidth = "auto";
+      viewer.style.columnGap = `${gap}px`;
+      viewer.style.columnFill = "auto";
+    }
     // 明确写入内容高；不设 100%（父级高在 body padding>0 时会比内容区大）。
     if (h > 0) {
       viewer.style.height = `${h}px`;
@@ -2830,13 +2924,19 @@ export class ChapterPaginator {
         effectiveColumns: 1,
       };
     }
+    const leafRange = this.spreadLayout
+      ? visibleLeafRange(this.spreadLayout, this.metrics.currentPage)
+      : null;
+    const atEnd = !this.hasNextChapter && this.metrics.currentPage >= this.metrics.pageCount - 1;
     return {
       status: "ready",
       pageCount: this.metrics.pageCount,
       currentPage: this.metrics.currentPage,
       empty,
       mode: "paginated",
-      effectiveColumns: this.effectiveColumns,
+      effectiveColumns: (this.spreadGeometry?.columns ?? this.effectiveColumns) as 1 | 2,
+      atEnd,
+      leafRange,
     };
   }
 
@@ -3202,13 +3302,14 @@ export class ChapterPaginator {
           el.classList.contains("cover") ||
           el.classList.contains("duokan-image-fullscreen");
         const eligible = candidateSet.has(el) && !fullpage;
+        const isFloat = /^(?:left|right)$/u.test(cs.float.trim().toLowerCase());
         return {
           eligible,
           readerTop: el.classList.contains("reader-top"),
           float: cs.float,
           clear: cs.clear,
           percentageWidth:
-            eligible && /^(?:left|right)$/u.test(cs.float.trim().toLowerCase())
+            eligible && isFloat
               ? getAuthoredPercentageWidth(el, doc)
               : null,
           marginLeft: cs.marginLeft,
@@ -3216,7 +3317,7 @@ export class ChapterPaginator {
           position: cs.position,
           writingMode: cs.writingMode,
           direction: cs.direction,
-          authorFullWidthIntent: eligible ? hasAuthorFullWidthIntent(doc, el) : false,
+          authorFullWidthIntent: eligible && isFloat ? hasAuthorFullWidthIntent(doc, el) : false,
           percentageMargin: percentageMargins.get(el)?.percentage,
         };
       });
@@ -3333,6 +3434,7 @@ export class ChapterPaginator {
         }
       }
 
+      const autoMarginBatch = createAutoMarginBatch();
       for (const el of candidates) {
         // 同一测量周期内已修正过则跳过，避免把上次写回的 margin
         // 再当成书 margin 叠加一次（导致 namebox 732/-32 这类错误）。
@@ -3381,7 +3483,9 @@ export class ChapterPaginator {
                 contentWidth: TEXT_MEASURE.maxEm * this.settings.fontSizePx,
                 marginLeft: left,
                 marginRight: right,
-                authorFullWidthIntent: hasAuthorFullWidthIntent(doc, el),
+                authorFullWidthIntent:
+                  groupEntriesByElement.get(el)?.authorFullWidthIntent ??
+                  hasAuthorFullWidthIntent(doc, el),
                 authoredHorizontalMargin: authoredHorizontalMargins.get(el),
                 percentageMargin: percentage?.percentage,
                 position: cs.position,
@@ -3533,14 +3637,7 @@ export class ChapterPaginator {
               contentWidth: Math.min(parentW, TEXT_MEASURE.maxEm * this.settings.fontSizePx),
             })
           ) {
-            this.marginFixes.push({
-              el,
-              left: snapshotInlineStyleProperty(el.style, "margin-left"),
-              right: snapshotInlineStyleProperty(el.style, "margin-right"),
-            });
-            el.setAttribute("data-reader-margin-fixed", "1");
-            el.style.setProperty("margin-left", "auto", "important");
-            el.style.setProperty("margin-right", "auto", "important");
+            autoMarginBatch.add(el);
           }
           continue;
         }
@@ -3647,6 +3744,7 @@ export class ChapterPaginator {
         el.style.setProperty("margin-left", `${desiredLeft}px`, "important");
         el.style.setProperty("margin-right", `${desiredRight}px`, "important");
       }
+      autoMarginBatch.flush((fix) => this.marginFixes.push(fix));
     } finally {
       restoreReaderMargins();
     }
@@ -4195,23 +4293,43 @@ export class ChapterPaginator {
     if (loadSeq !== this.loadSeq) return; // 过期章节：丢弃
     const viewer = this.viewer;
     if (!viewer || this.step <= 0) return;
-    // 用内容实际占用的列范围计算页数（不依赖视口，elementFromPoint 对
-    // 视口外列返回 null 会导致整列被误判为空）
-    const extent = this.contentExtent();
-    if (!Number.isFinite(extent.maxX) || extent.maxX <= 0) {
+    if (!this.textIndex) {
+      this.rebuildTextIndexForCurrentDoc();
+    }
+    this.bookmarkSpreadCache.clear();
+
+    const geometry = this.spreadGeometry ?? createSpreadGeometry(
+      this.pageWidth,
+      this.settings.gapPx,
+      this.fixedLayout ? 1 : this.settings.columnsPerView === 2 ? 2 : 1,
+      MIN_COLUMN_WIDTH_PX,
+    );
+    this.spreadGeometry = geometry;
+    this.effectiveColumns = geometry.columns;
+
+    const fragments = this.collectContentFragments();
+    const occupied = occupiedColumns(fragments, geometry);
+    const layout = createSpreadLayout(geometry, occupied);
+    this.spreadLayout = layout;
+
+    if (layout.empty) {
+      this.removeTailSpacer();
       this.metrics = { pageCount: 1, currentPage: 0 };
-      this.emit({ status: "ready", pageCount: 1, currentPage: 0, empty: true });
+      this.emit({
+        status: "ready",
+        pageCount: 1,
+        currentPage: 0,
+        empty: true,
+        mode: "paginated",
+        effectiveColumns: geometry.columns,
+        leafRange: null,
+      });
       return;
     }
-    // 引擎实际列数（双栏在窄窗回落到单栏时不写回设置）。
-    this.effectiveColumns = this.computeEffectiveColumns();
-    const columns = this.effectiveColumns;
-    const contentCols = Math.max(1, Math.ceil(extent.maxX / this.step));
-    // 前置空列：page-break-before:always 的首元素会把内容推到第 2 列
-    const leadShift = Math.floor(extent.minX / this.step);
-    this.leadingColumns = leadShift;
-    // 屏号 = floor((物理列 - 前置空列)/列数)；末屏不足列数仍算一屏。
-    const pageCount = Math.max(1, columnToView(contentCols - 1, leadShift, columns) + 1);
+
+    const pageCount = layout.pageCount;
+    this.leadingColumns = layout.firstColumn;
+
     // 阅读位置保留：窗口缩放/设置变化用内容锚点定位；
     // 图片加载等内容变化保留当前页号（否则内容下移会把人拉到后几页）
     const resolvedAnchor = useAnchor ? this.resolveAnchorCol() : null;
@@ -4223,10 +4341,12 @@ export class ChapterPaginator {
       currentPage: this.metrics.currentPage,
     });
     const current = restored.page;
-    this.metrics = { pageCount, currentPage: current };
-    // 关键：重排（图片加载/窗口缩放）后对齐页边界，否则显示半页偏移错位
-    // 一次翻屏移动 columns 个列步长；列起点为 leadShift + 屏号*列数。
-    viewer.scrollLeft = (leadShift + current * columns) * this.step;
+
+    // 关键：唯一分页位置提交入口，并同步调整尾垫
+    const commitResult = commitSpreadPosition(this.viewportPort, layout, current);
+    const finalPage = commitResult.ok ? commitResult.page : current;
+    this.metrics = { pageCount, currentPage: finalPage };
+
     // A legacy element anchor only chooses the column. Once there, observe
     // the current page centre to upgrade it to the text anchor used by new
     // progress writes; no layout rule is changed.
@@ -4241,30 +4361,190 @@ export class ChapterPaginator {
     if (restored.consumeFallback) this.pendingFallbackPage = null;
   }
 
-  private contentExtent(): { minX: number; maxX: number } {
-    const viewer = this.viewer;
+  /** @internal 供测试与历史布局边界校验复用 */
+  contentExtent(): { minX: number; maxX: number } {
+    const viewer = this.viewer as any;
+    if (!viewer) return { minX: 0, maxX: 0 };
+    const fixes = new Set<any>((this.inlineClipFixes ?? []).map((f) => f.el));
+    const all = Array.from(viewer.querySelectorAll?.("*") ?? []) as any[];
     let minX = Infinity;
     let maxX = -Infinity;
-    if (!viewer) return { minX: 0, maxX: 0 };
-    const scrollLeft = viewer.scrollLeft;
-    // C-25 clips only trailing painted whitespace. DOM rects still include
-    // that invisible tail; counting it would invent a final blank column.
+    for (const el of all) {
+      if (fixes.has(el)) {
+        const r = el.getBoundingClientRect();
+        if (r.width > 0 || r.height > 0) {
+          const l = r.left + (viewer.scrollLeft || 0);
+          const right = (r.right ?? r.left + r.width) + (viewer.scrollLeft || 0);
+          if (l < minX) minX = l;
+          if (right > maxX) maxX = right;
+        }
+        continue;
+      }
+      let skip = false;
+      for (const fixEl of fixes) {
+        const children = fixEl.querySelectorAll?.("*") ? Array.from(fixEl.querySelectorAll("*")) : [];
+        if (children.includes(el)) {
+          skip = true;
+          break;
+        }
+      }
+      if (skip) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width > 0 || r.height > 0) {
+        const l = r.left + (viewer.scrollLeft || 0);
+        const right = (r.right ?? r.left + r.width) + (viewer.scrollLeft || 0);
+        if (l < minX) minX = l;
+        if (right > maxX) maxX = right;
+      }
+    }
+    return minX === Infinity ? { minX: 0, maxX: 0 } : { minX, maxX };
+  }
+
+  private collectContentFragments(): Array<{ left: number; right: number }> {
+    const viewer = this.viewer;
+    const doc = this.contentDoc;
+    if (!viewer || !doc) return [];
+    const fragments: Array<{ left: number; right: number }> = [];
+    const scrollLeft = viewer.scrollLeft || 0;
+    const viewerRect = viewer.getBoundingClientRect();
+    let paddingLeft = 0;
+    try {
+      const cs = doc.defaultView?.getComputedStyle(viewer);
+      paddingLeft = parseFloat(cs?.paddingLeft ?? "") || 0;
+    } catch {
+      paddingLeft = 0;
+    }
+    const originClientX = viewerRect.left + (viewer.clientLeft || 0) + paddingLeft;
+
     const clipBounds = new Map<Element, DOMRect>();
     for (const fix of this.inlineClipFixes) {
       const bounds = fix.el.getBoundingClientRect();
-      for (const child of Array.from(fix.el.querySelectorAll("*"))) clipBounds.set(child, bounds);
+      clipBounds.set(fix.el, bounds);
+      for (const child of Array.from(fix.el.querySelectorAll("*"))) {
+        clipBounds.set(child, bounds);
+      }
     }
-    for (const el of Array.from(viewer.querySelectorAll("*"))) {
-      const r = (el as HTMLElement).getBoundingClientRect();
-      if (r.width === 0 && r.height === 0) continue; // display:none 等零尺寸元素
-      const clip = clipBounds.get(el);
-      const x0 = Math.max(r.left, clip?.left ?? -Infinity) + scrollLeft;
-      const x1 = Math.min(r.right, clip?.right ?? Infinity) + scrollLeft;
-      if (x1 <= x0) continue;
-      if (x0 < minX) minX = x0;
-      if (x1 > maxX) maxX = x1;
+
+    if (this.textIndex) {
+      for (const range of this.textIndex.collectTextRanges(doc)) {
+        try {
+          const parent = range.startContainer.parentElement;
+          if (parent?.closest?.('[data-reader="tail-spacer"]')) continue;
+          const rects = range.getClientRects();
+          const clip = parent ? clipBounds.get(parent) : undefined;
+          for (let i = 0; i < rects.length; i++) {
+            const r = rects[i];
+            if (r.width <= 0 && r.height <= 0) continue;
+            const rLeft = Math.max(r.left, clip?.left ?? -Infinity);
+            const rRight = Math.min(r.right, clip?.right ?? Infinity);
+            if (rRight <= rLeft) continue;
+            fragments.push({
+              left: clientXToColumnX(rLeft, originClientX, scrollLeft),
+              right: clientXToColumnX(rRight, originClientX, scrollLeft),
+            });
+          }
+        } catch {
+          // ignore
+        }
+      }
     }
-    return { minX, maxX };
+
+    for (const el of this.collectMediaElements()) {
+      try {
+        if (el.closest?.('[data-reader="tail-spacer"]')) continue;
+        const r = el.getBoundingClientRect();
+        if (r.width <= 0 && r.height <= 0) continue;
+        const clip = clipBounds.get(el);
+        const rLeft = Math.max(r.left, clip?.left ?? -Infinity);
+        const rRight = Math.min(r.right, clip?.right ?? Infinity);
+        if (rRight <= rLeft) continue;
+        fragments.push({
+          left: clientXToColumnX(rLeft, originClientX, scrollLeft),
+          right: clientXToColumnX(rRight, originClientX, scrollLeft),
+        });
+      } catch {
+        // ignore
+      }
+    }
+
+    if (fragments.length === 0) {
+      for (const el of Array.from(viewer.querySelectorAll("*"))) {
+        if (el.getAttribute("data-reader") === "tail-spacer") continue;
+        if (el.classList.contains("reader-chapter-end")) continue;
+        const r = (el as HTMLElement).getBoundingClientRect();
+        if (r.width <= 0 || r.height <= 0) continue;
+        fragments.push({
+          left: clientXToColumnX(r.left, originClientX, scrollLeft),
+          right: clientXToColumnX(r.right, originClientX, scrollLeft),
+        });
+      }
+    }
+
+    return fragments;
+  }
+
+  private ensureTailSpacer(requiredScrollWidth: number): void {
+    const viewer = this.viewer;
+    const doc = this.contentDoc;
+    if (!viewer || !doc || this.scrollMode) {
+      this.removeTailSpacer();
+      return;
+    }
+    let spacer = this.tailSpacer;
+    if (!spacer || spacer.ownerDocument !== doc || !viewer.contains(spacer)) {
+      spacer = viewer.querySelector<HTMLElement>(':scope > [data-reader="tail-spacer"]');
+      if (!spacer) {
+        spacer = doc.createElement("div");
+        spacer.setAttribute("data-reader", "tail-spacer");
+        spacer.setAttribute("aria-hidden", "true");
+        spacer.style.position = "absolute";
+        spacer.style.top = "0";
+        spacer.style.width = "1px";
+        spacer.style.height = "1px";
+        spacer.style.pointerEvents = "none";
+        spacer.style.opacity = "0";
+        spacer.style.margin = "0";
+        spacer.style.padding = "0";
+        spacer.style.border = "none";
+        viewer.appendChild(spacer);
+      }
+      this.tailSpacer = spacer;
+    }
+    if (requiredScrollWidth > viewer.clientWidth) {
+      spacer.style.left = `${Math.ceil(requiredScrollWidth - 1)}px`;
+      spacer.style.display = "block";
+    } else {
+      spacer.style.display = "none";
+    }
+  }
+
+  private removeTailSpacer(): void {
+    if (this.tailSpacer) {
+      try {
+        this.tailSpacer.remove();
+      } catch {
+        // ignore
+      }
+      this.tailSpacer = null;
+    }
+    const existing = this.viewer?.querySelector(':scope > [data-reader="tail-spacer"]');
+    existing?.remove();
+  }
+
+  private get viewportPort(): PagedViewportPort {
+    return {
+      ensureScrollWidth: (width: number) => {
+        this.ensureTailSpacer(width);
+      },
+      readScrollWidth: () => this.viewer?.scrollWidth ?? 0,
+      readClientWidth: () => this.viewer?.clientWidth ?? 0,
+      readScrollLeft: () => this.viewer?.scrollLeft ?? 0,
+      writeScrollLeft: (value: number) => {
+        if (this.viewer) {
+          this.viewer.scrollLeft = value;
+        }
+      },
+    };
   }
 
   private rebuildTextIndexForCurrentDoc(): void {
@@ -4431,7 +4711,7 @@ export class ChapterPaginator {
     this.anchorPath = this._currentPath;
   }
 
-  /** 内容坐标：先减 viewer 实际内容左原点（border/padding），再加 scrollLeft。 */
+  /** 内容坐标：先减 viewer 实际内容左原点（viewerRect.left + border + padding），再加 scrollLeft。 */
   private contentX(clientLeft: number): number {
     const viewer = this.viewer;
     if (!viewer) return clientLeft;
@@ -4442,7 +4722,12 @@ export class ChapterPaginator {
     } catch {
       paddingLeft = 0;
     }
-    return clientLeft - (viewer.clientLeft || 0) - paddingLeft + (viewer.scrollLeft || 0);
+    const viewerRect =
+      typeof viewer.getBoundingClientRect === "function"
+        ? viewer.getBoundingClientRect()
+        : { left: 0, top: 0, width: (viewer as HTMLElement).clientWidth || 0, height: (viewer as HTMLElement).clientHeight || 0 };
+    const originClientX = viewerRect.left + (viewer.clientLeft || 0) + paddingLeft;
+    return clientXToColumnX(clientLeft, originClientX, viewer.scrollLeft || 0);
   }
 
   private resolveTextAnchorCol(index: VisibleTextIndex, textOffset: number): number | null {
@@ -4458,6 +4743,11 @@ export class ChapterPaginator {
       range.setEnd(end.node, end.rawOffset);
       const rect = Array.from(range.getClientRects()).find((candidate) => candidate.width > 0 || candidate.height > 0);
       if (!rect) return null;
+      if (this.spreadLayout) {
+        const colX = this.contentX(rect.left);
+        const physical = columnForContentPoint(colX, this.spreadLayout.geometry);
+        return spreadForColumn(this.spreadLayout, physical);
+      }
       // 分栏时同一屏内第二栏命中留在包含它的那一屏：物理列 → 屏号。
       const physical = Math.max(0, Math.floor(this.contentX(rect.left) / this.step));
       return Math.max(0, columnToView(physical, this.leadingColumns, this.effectiveColumns));
@@ -4495,6 +4785,14 @@ export class ChapterPaginator {
     if (!Number.isSafeInteger(this.anchor.index) || this.anchor.index < 0 || this.anchor.index >= all.length) return null;
     const el = all[this.anchor.index] as HTMLElement;
     const rect = el.getBoundingClientRect();
+    if (this.spreadLayout) {
+      const absX = this.contentX(rect.left) + this.anchor.ratio * rect.width;
+      const physical = columnForContentPoint(absX, this.spreadLayout.geometry);
+      return {
+        col: spreadForColumn(this.spreadLayout, physical),
+        source: "legacy",
+      };
+    }
     const absX = this.contentX(rect.left) + this.anchor.ratio * rect.width;
     const physical = Math.max(0, Math.floor(absX / this.step));
     return {
@@ -4514,7 +4812,14 @@ export class ChapterPaginator {
     // R5：任何显式位置提交都必须撤销此前 setPage 留下的下一帧普通采样，
     // 否则旧 RAF 会用页内采样值覆盖精确搜索/笔记候选。
     this.cancelPendingAnchorSample?.();
-    if (!this.scrollMode) viewer.scrollLeft = page * this.viewStepPx;
+    if (!this.scrollMode && this.spreadLayout) {
+      const commitRes = commitSpreadPosition(this.viewportPort, this.spreadLayout, page);
+      if (commitRes.ok) {
+        page = commitRes.page;
+      }
+    } else if (!this.scrollMode) {
+      viewer.scrollLeft = page * this.viewStepPx;
+    }
     if (candidate) {
       this.anchor = candidate;
       this.anchorPath = this._currentPath;
@@ -4647,6 +4952,11 @@ export class ChapterPaginator {
         .filter((candidate) => candidate.width > 0 || candidate.height > 0);
       const rect = rects[0];
       if (!rect) return null;
+      if (this.spreadLayout) {
+        const colX = this.contentX(rect.left);
+        const physical = columnForContentPoint(colX, this.spreadLayout.geometry);
+        return spreadForColumn(this.spreadLayout, physical);
+      }
       const physical = Math.max(0, Math.floor(this.contentX(rect.left) / this.step));
       const col = columnToView(physical, this.leadingColumns, this.effectiveColumns);
       return Number.isFinite(col) ? Math.max(0, col) : null;
@@ -4944,8 +5254,15 @@ export class ChapterPaginator {
       return { hash: fragment.hash, page: this.metrics.currentPage };
     }
     const rect = (target as HTMLElement).getBoundingClientRect();
-    const physical = Math.max(0, Math.floor(this.contentX(rect.left) / this.step));
-    const page = columnToView(physical, this.leadingColumns, this.effectiveColumns);
+    let page: number;
+    if (this.spreadLayout) {
+      const colX = this.contentX(rect.left);
+      const physical = columnForContentPoint(colX, this.spreadLayout.geometry);
+      page = spreadForColumn(this.spreadLayout, physical);
+    } else {
+      const physical = Math.max(0, Math.floor(this.contentX(rect.left) / this.step));
+      page = columnToView(physical, this.leadingColumns, this.effectiveColumns);
+    }
     if (!Number.isFinite(page) || page < 0 || page >= this.metrics.pageCount) return null;
     return { hash: fragment.hash, page };
   }
@@ -5613,6 +5930,16 @@ export class ChapterPaginator {
       this.scrollByViewport(target > this.metrics.currentPage ? 1 : -1);
       return;
     }
+    if (this.spreadLayout) {
+      this.closeFootnoteForNavigation();
+      this.clearSearchHighlightForDocument();
+      const res = commitSpreadPosition(this.viewportPort, this.spreadLayout, target);
+      if (!res.ok) return;
+      this.metrics.currentPage = res.page;
+      this.emit(this.readyState(false));
+      this.scheduleAnchorSample();
+      return;
+    }
     const targetScrollLeft = target * this.viewStepPx;
     const actuallyMoved =
       target !== this.metrics.currentPage ||
@@ -5647,8 +5974,61 @@ export class ChapterPaginator {
     this.closeFootnoteForNavigation();
     this.clearSearchHighlightForDocument();
     const rect = el.getBoundingClientRect();
+    if (this.spreadLayout) {
+      const colX = this.contentX(rect.left);
+      const physical = columnForContentPoint(colX, this.spreadLayout.geometry);
+      this.setPage(spreadForColumn(this.spreadLayout, physical));
+      return;
+    }
     const physical = Math.max(0, Math.floor(this.contentX(rect.left) / this.step));
     this.setPage(columnToView(physical, this.leadingColumns, this.effectiveColumns));
+  }
+
+  /**
+   * 解析书签属于当前布局的哪一屏；缓存解析结果，布局变化时清空。
+   * 支持文本 Range、媒体元素与旧页码兜底。
+   */
+  resolveBookmarkPage(bookmark: {
+    id?: string;
+    anchorTextOffset?: number | null;
+    anchorTextSnippet?: string | null;
+    mediaAnchor?: MediaReadingAnchor | null;
+    page?: number;
+  }): number | null {
+    if (!this.spreadLayout) {
+      return bookmark.page ?? null;
+    }
+    const cacheKey = bookmark.id ?? `${bookmark.anchorTextOffset}:${bookmark.mediaAnchor?.index}:${bookmark.page}`;
+    if (this.bookmarkSpreadCache.has(cacheKey)) {
+      return this.bookmarkSpreadCache.get(cacheKey)!;
+    }
+    let targetPage: number | null = null;
+    if (this.textIndex && bookmark.anchorTextOffset !== undefined && bookmark.anchorTextOffset !== null) {
+      const offset = resolveTextAnchorOffset(this.textIndex, {
+        textOffset: bookmark.anchorTextOffset,
+        textSnippet: bookmark.anchorTextSnippet ?? null,
+      });
+      if (offset !== null) {
+        targetPage = this.resolveTextAnchorCol(this.textIndex, offset);
+      }
+    }
+    if (targetPage === null && bookmark.mediaAnchor) {
+      const media = this.collectMediaElements();
+      const el = media[bookmark.mediaAnchor.index];
+      if (el) {
+        const r = el.getBoundingClientRect();
+        const colX = this.contentX(r.left);
+        const physical = columnForContentPoint(colX, this.spreadLayout.geometry);
+        targetPage = spreadForColumn(this.spreadLayout, physical);
+      }
+    }
+    if (targetPage === null && typeof bookmark.page === "number") {
+      targetPage = Math.max(0, Math.min(this.spreadLayout.pageCount - 1, bookmark.page));
+    }
+    if (targetPage !== null) {
+      this.bookmarkSpreadCache.set(cacheKey, targetPage);
+    }
+    return targetPage;
   }
 
   /** 当前阅读锚点（供阅读记录持久化与内容进度推算）。 */
@@ -5918,13 +6298,13 @@ export class ChapterPaginator {
           this.scrollWheelAcc = 0;
           return;
         }
-        // 已经在章末底部：累积滚轮越界位移（阈值 400px 吸收连续手势与误触）
+        // 已经在章末底部：累积滚轮越界位移（阈值 160px 吸收连续手势与误触）
         this.armScrollWheelReset();
         this.scrollWheelAcc += deltaY;
-        if (this.scrollWheelAcc >= 400) {
+        if (this.scrollWheelAcc >= 160) {
           this.scrollWheelAcc = 0;
-          this.lockedReverseDir = -1; // 进入下一章后，向上反向回弹锁 800ms
-          this.reverseLockUntil = Date.now() + 800;
+          this.lockedReverseDir = -1; // 进入下一章后，向上反向回弹锁 250ms
+          this.reverseLockUntil = Date.now() + 250;
           this.sameDirThrottleUntil = Date.now() + 150;
           if (this.scrollWheelResetTimer !== undefined) {
             globalThis.clearTimeout(this.scrollWheelResetTimer);
@@ -5946,7 +6326,7 @@ export class ChapterPaginator {
           this.scrollWheelAcc = 0;
           return;
         }
-        // 已经在章首顶部：检查是否处于反向保护期（刚从上一章前进到下一章时，向上回弹锁 800ms）
+        // 已经在章首顶部：检查是否处于反向保护期（刚从上一章前进到下一章时，向上回弹锁 250ms）
         if (this.lockedReverseDir === -1 && Date.now() < this.reverseLockUntil) {
           this.scrollWheelAcc = 0;
           return;
@@ -5956,13 +6336,13 @@ export class ChapterPaginator {
           this.scrollWheelAcc = 0;
           return;
         }
-        // 已经在章首顶部：累积滚轮越界位移（阈值 -400px 吸收连续手势与误触）
+        // 已经在章首顶部：累积滚轮越界位移（阈值 -160px 吸收连续手势与误触）
         this.armScrollWheelReset();
         this.scrollWheelAcc += deltaY;
-        if (this.scrollWheelAcc <= -400) {
+        if (this.scrollWheelAcc <= -160) {
           this.scrollWheelAcc = 0;
-          this.lockedReverseDir = 1; // 进入上一章后，向下反向回弹锁 800ms
-          this.reverseLockUntil = Date.now() + 800;
+          this.lockedReverseDir = 1; // 进入上一章后，向下反向回弹锁 250ms
+          this.reverseLockUntil = Date.now() + 250;
           this.sameDirThrottleUntil = Date.now() + 150;
           if (this.scrollWheelResetTimer !== undefined) {
             globalThis.clearTimeout(this.scrollWheelResetTimer);
@@ -6315,6 +6695,10 @@ export class ChapterPaginator {
     this.clearSearchHighlightForDocument();
     this.pendingPrecise = null;
     this.pendingRestoreAnchor = null;
+    this.removeTailSpacer();
+    this.bookmarkSpreadCache.clear();
+    this.spreadLayout = null;
+    this.spreadGeometry = null;
     this.contentDoc = null;
     this.viewer = null;
     this.textIndex = null;

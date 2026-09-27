@@ -176,6 +176,7 @@ export function scrollViewerStyles(
     ["overflow-x", "hidden"],
     ["scrollbar-width", "none"],
     ["-ms-overflow-style", "none"],
+    ["column-count", "auto"],
     ["column-width", "auto"],
     ["column-gap", "0px"],
     ["column-fill", "balance"],

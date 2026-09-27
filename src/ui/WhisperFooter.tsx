@@ -20,6 +20,8 @@ export interface WhisperFooterProps {
   pageCount: number;
   readingMode: "paginated" | "scroll";
   scrollProgress?: number; // 0 到 1
+  /** 叶页范围，如 { first: 3, last: 4, total: 5 } */
+  leafRange?: { first: number; last: number; total: number } | null;
 
   chapterTitle?: string;
   chapterIndex: number;
@@ -50,6 +52,7 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
   pageCount,
   readingMode,
   scrollProgress = 0,
+  leafRange,
   totalScrollProgress,
   chapterTitle,
   chapterIndex,
@@ -375,6 +378,12 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
     const parts: string[] = [];
     if (readingMode === "scroll") {
       parts.push(`本章 ${currentChapterProgressPct}%`);
+    } else if (leafRange) {
+      if (leafRange.first === leafRange.last) {
+        parts.push(`本章 ${leafRange.first} / ${leafRange.total} 页`);
+      } else {
+        parts.push(`本章 ${leafRange.first}–${leafRange.last} / ${leafRange.total} 页`);
+      }
     } else {
       parts.push(`第 ${currentPage + 1} / ${pageCount || 1} 页`);
     }
@@ -391,7 +400,8 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
       if (scrubState.actual) {
         parts.push(`全书 ${labelProgressPct(scrubState.actual)}%`);
       } else if (activeRatio !== null) {
-        parts.push(`全书 ${Math.min(99, Math.round(activeRatio * 100))}%`);
+        const atEnd = typeof bookProgressPct === "number" && bookProgressPct >= 100;
+        parts.push(`全书 ${atEnd ? 100 : Math.min(99, Math.round(activeRatio * 100))}%`);
       } else {
         parts.push("准备进度…");
       }

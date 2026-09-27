@@ -214,4 +214,24 @@ describe("Zen UI Packet C: 硬件加速平滑翻页与边缘翻页交互契约",
     expect(readerEl?.classList.contains("has-turn-anim")).toBe(true);
     expect(readerEl?.classList.contains("turn-prev")).toBe(true);
   });
+
+  it("在最后一章最后一页继续向下翻页时不触发翻页动画", async () => {
+    props = {
+      ...props,
+      spineIndex: 2,
+    };
+    await render();
+    const active = await finishActive();
+    active.currentPage = 4;
+    active.pageCount = 5;
+
+    const nextZone = dom.container.querySelector(".edge-turn-zone.edge-turn-next") as HTMLElement;
+    expect(nextZone).not.toBeNull();
+
+    await dom.click(nextZone);
+
+    const readerEl = dom.container.querySelector(".reader");
+    expect(readerEl?.classList.contains("has-turn-anim")).toBe(false);
+    expect(props.onRequestChapter).not.toHaveBeenCalled();
+  });
 });

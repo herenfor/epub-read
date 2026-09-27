@@ -2,6 +2,11 @@ import React, { useState } from "react";
 import type { Theme } from "../render/settings";
 import type { PageMarginsPx, ReadingMode } from "../render/pageLayout";
 import {
+  presentationPatch,
+  readingPresentation,
+  type ReadingPresentation,
+} from "../render/pagedSpread";
+import {
   ChevronDownIcon,
   ChevronRightIcon,
   CloseIcon,
@@ -31,11 +36,15 @@ export interface AaPopoverProps {
   pageMargins?: PageMarginsPx;
   onPageMarginsChange?: (margins: PageMarginsPx) => void;
 
-  // 栏数与模式
-  columnsPerView: 1 | 2;
-  onColumnsChange: (columns: 1 | 2) => void;
-  readingMode: ReadingMode;
-  onReadingModeChange: (mode: ReadingMode) => void;
+  // 唯一阅读方式选项：单页 | 双页 | 滚动
+  columnsPerView?: 1 | 2;
+  onColumnsChange?: (columns: 1 | 2) => void;
+  readingMode?: ReadingMode;
+  onReadingModeChange?: (mode: ReadingMode) => void;
+  /** 窄窗回退提示：当 presentation === "spread" 且 effectiveColumns === 1 时提示 */
+  effectiveColumns?: 1 | 2;
+  /** 一次原子更新阅读方式 */
+  onPresentationChange?: (patch: { readingMode: "paginated" | "scroll"; columnsPerView?: 1 | 2 }) => void;
 
   // 极速无动画模式（0ms瞬翻）
   instantTurn?: boolean;
@@ -99,6 +108,8 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
   onColumnsChange,
   readingMode,
   onReadingModeChange,
+  effectiveColumns,
+  onPresentationChange,
   instantTurn = false,
   onInstantTurnChange,
   forceHorizontal = false,
@@ -116,6 +127,25 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
 }) => {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [cssDraft, setCssDraft] = useState(customCss);
+
+  const presentation = readingPresentation({
+    readingMode: readingMode ?? "paginated",
+    columnsPerView: columnsPerView ?? 1,
+  });
+
+  const handlePresentationClick = (choice: ReadingPresentation) => {
+    const patch = presentationPatch(choice);
+    if (onPresentationChange) {
+      onPresentationChange(patch);
+    } else {
+      if (patch.columnsPerView && onColumnsChange) {
+        onColumnsChange(patch.columnsPerView);
+      }
+      if (onReadingModeChange) {
+        onReadingModeChange(patch.readingMode);
+      }
+    }
+  };
 
   // 判断当前边距属于哪档
   const currentMarginLevel = (() => {
@@ -260,46 +290,55 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
             </div>
           )}
 
-          {/* Row 5: 栏数与翻页模式 */}
+          {/* Row 5: 唯一阅读方式选项 单页 | 双页 | 滚动 */}
           <div className="aa-section aa-control-row">
-            <span className="aa-section-label">栏数</span>
-            <div className="aa-segmented-capsule" role="group" aria-label="正文栏数">
+            <span className="aa-section-label">排版</span>
+            <div className="aa-segmented-capsule" role="radiogroup" aria-label="排版方式">
               <button
                 type="button"
-                className={`aa-segmented-btn${columnsPerView === 1 ? " active" : ""}`}
-                onClick={() => onColumnsChange(1)}
+                role="radio"
+                aria-checked={presentation === "single"}
+                className={`aa-segmented-btn${presentation === "single" ? " active" : ""}`}
+                onClick={() => handlePresentationClick("single")}
               >
-                单栏
+                单页
               </button>
               <button
                 type="button"
-                className={`aa-segmented-btn${columnsPerView === 2 ? " active" : ""}`}
-                onClick={() => onColumnsChange(2)}
+                role="radio"
+                aria-checked={presentation === "spread"}
+                className={`aa-segmented-btn${presentation === "spread" ? " active" : ""}`}
+                onClick={() => handlePresentationClick("spread")}
               >
-                双栏
-              </button>
-            </div>
-          </div>
-
-          <div className="aa-section aa-control-row">
-            <span className="aa-section-label">模式</span>
-            <div className="aa-segmented-capsule" role="group" aria-label="阅读模式">
-              <button
-                type="button"
-                className={`aa-segmented-btn${readingMode === "paginated" ? " active" : ""}`}
-                onClick={() => onReadingModeChange("paginated")}
-              >
-                分页
+                双页
               </button>
               <button
                 type="button"
-                className={`aa-segmented-btn${readingMode === "scroll" ? " active" : ""}`}
-                onClick={() => onReadingModeChange("scroll")}
+                role="radio"
+                aria-checked={presentation === "scroll"}
+                className={`aa-segmented-btn${presentation === "scroll" ? " active" : ""}`}
+                onClick={() => handlePresentationClick("scroll")}
               >
                 滚动
               </button>
             </div>
           </div>
+          {presentation === "spread" && effectiveColumns === 1 && (
+            <div
+              className="aa-section-note"
+              role="status"
+              style={{
+                fontSize: "11px",
+                color: "var(--text-secondary, #888)",
+                marginTop: "-6px",
+                marginBottom: "4px",
+                textAlign: "right",
+                paddingRight: "4px",
+              }}
+            >
+              窗口较窄，暂以单页显示
+            </div>
+          )}
 
           {/* 联动 Packet C: 极速瞬翻模式 */}
           {onInstantTurnChange && (
@@ -348,7 +387,12 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
 
                 {onPreloadNextChapterChange && (
                   <div className="aa-advanced-row">
-                    <span>预载相邻章节</span>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                      <span>高性能</span>
+                      <span style={{ fontSize: 11, color: "var(--color-error, #e53935)", lineHeight: 1.2 }}>
+                        对硬件要求较高
+                      </span>
+                    </div>
                     <label className="aa-switch-label">
                       <input
                         type="checkbox"

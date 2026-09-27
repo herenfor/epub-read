@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -32,6 +33,7 @@ import {
   ContinuousChapterLayout,
   ChapterLoadGate,
   PendingScrollNavigation,
+  continuousWheelPixels,
   type ChapterExtent,
   type ChapterProjection,
   type ChapterLoadTicket,
@@ -319,11 +321,6 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
     const pendingNavigationFailureRef = useRef(false);
     /** 打开书/书签/历史返回的语义锚点每次会话只应用一次。 */
     const initialNavigationHandledRef = useRef(false);
-    /** 当前因空章 ready 显示的宿主说明；不写入章节索引或占位几何。 */
-    const [emptyChapterNotice, setEmptyChapterNotice] = useState<{
-      key: string;
-      title: string;
-    } | null>(null);
 
     // 监听换书/线性 spine 变化重新初始化 layout（尺寸变化走重排事务）
     useEffect(() => {
@@ -353,7 +350,6 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
         props.onContentFractionCancelled?.(ticket.target.token);
       }
       initialNavigationHandledRef.current = false;
-      setEmptyChapterNotice(null);
       return () => {
         const t = pendingNavigationRef.current?.current();
         pendingNavigationRef.current?.cancel();
@@ -367,7 +363,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
     const gateRef = useRef(new ChapterLoadGate());
     const slotsRef = useRef(new Map<string, ActiveSlot>());
     const retryCountersRef = useRef(new Map<string, number>());
-    const [, setSlotUpdateNonce] = useState(0);
+    const [slotUpdateNonce, setSlotUpdateNonce] = useState(0);
 
     // 章节高度测量重试：容器可见后重测，避免把 0 高度提交进布局
     const measureFrameRef = useRef(new Map<string, number>());
@@ -449,8 +445,21 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
     // 有界窗口投影计算
     const V = viewportHeight > 0 ? viewportHeight : 600;
     const overscan = settings.preloadNextChapter === true ? 1.5 * V : 0.5 * V;
-    const [currentScrollTop, setCurrentScrollTop] = useState(0);
-    const scrollTopRef = useRef(0);
+    const initialTargetScrollTop = useMemo(() => {
+      if (spineIndex <= 0) return 0;
+      const path = spineItemPath(book, spineIndex);
+      if (!path) return 0;
+      const box = layout.boxFor(`${spineIndex}:${path}`);
+      return box ? layout.clampScrollTop(box.top, V) : 0;
+    }, [book, layout, spineIndex, V]);
+    const [currentScrollTop, setCurrentScrollTop] = useState(initialTargetScrollTop);
+    const scrollTopRef = useRef(initialTargetScrollTop);
+
+    useLayoutEffect(() => {
+      if (initialTargetScrollTop > 0 && containerRef.current && containerRef.current.scrollTop === 0) {
+        containerRef.current.scrollTop = initialTargetScrollTop;
+      }
+    }, [initialTargetScrollTop]);
 
     const projections = useMemo(() => {
       return layout.project(scrollTopRef.current, V, overscan);
@@ -509,11 +518,12 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
         const { fine, media } = sample;
         if (fine) {
           const glyphY = fine.anchor ? slot.paginator.resolveAnchorContentY(fine.anchor) : null;
-          if (glyphY !== null) {
+          const offset = glyphY !== null ? glyphY : fine.contentY;
+          if (fine.anchor) {
             return {
               key,
-              offset: glyphY,
-              screenY: projection.box.top + glyphY - clampTop,
+              offset,
+              screenY: projection.box.top + offset - clampTop,
               scrollTop: S,
               text: fine.anchor,
               media: null,
@@ -620,51 +630,49 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
           }
         }
 
-        if (sample.fine || sample.media) {
-          // 可见正文/媒体出现即结束空章说明；说明只属于显式进入的空章，
-          // 不进入章节索引，也不制造占位高度。
-          setEmptyChapterNotice(null);
-          if (lastVisibleKeyRef.current !== activeKey) {
-            lastVisibleKeyRef.current = activeKey;
-            onVisibleChapterChange?.(slot.spineIndex, sample.fine ? sample.fine.anchor : null);
-          }
-          const maxS = layoutRef.current.maxScrollTop(V);
-          const totalProgress = maxS > 0 ? Math.min(1, Math.max(0, S / maxS)) : 0;
-          const isAtScrollEnd = maxS > 0 ? S >= maxS - 2 : false;
-          const isLastLinear = linearItems.length > 0 && linearItems[linearItems.length - 1].key === slot.key;
-          const atEnd = isLastLinear && isAtScrollEnd;
+        // 章节已就绪与能否采到文本/媒体锚点是两回事：作者留白也要结束 loading。
+        const state = slot.paginator.getStateSnapshot();
+        if (state.status !== "ready") return;
+        if (lastVisibleKeyRef.current !== activeKey) {
+          lastVisibleKeyRef.current = activeKey;
+          onVisibleChapterChange?.(slot.spineIndex, sample.fine ? sample.fine.anchor : null);
+        }
+        const maxS = layoutRef.current.maxScrollTop(V);
+        const totalProgress = maxS > 0 ? Math.min(1, Math.max(0, S / maxS)) : 0;
+        const isAtScrollEnd = maxS > 0 ? S >= maxS - 2 : false;
+        const isLastLinear = linearItems.length > 0 && linearItems[linearItems.length - 1].key === slot.key;
+        const atEnd = isLastLinear && isAtScrollEnd;
 
-          let chapterFraction: number | null = null;
-          if (sample.fine && sample.fine.anchor && sample.fine.anchor.textOffset !== null) {
-            const totalChars = slot.paginator.totalChars;
-            chapterFraction = totalChars > 0 ? sample.fine.anchor.textOffset / totalChars : 0;
-          } else if (sample.media && sample.media.anchor) {
-            const M = slot.paginator.mediaUnits > 0 ? slot.paginator.mediaUnits : 1;
-            chapterFraction = (sample.media.anchor.index + sample.media.anchor.ratio) / M;
-          }
+        let chapterFraction: number | null = null;
+        if (sample.fine && sample.fine.anchor && sample.fine.anchor.textOffset !== null) {
+          const totalChars = slot.paginator.totalChars;
+          chapterFraction = totalChars > 0 ? sample.fine.anchor.textOffset / totalChars : 0;
+        } else if (sample.media && sample.media.anchor) {
+          const M = slot.paginator.mediaUnits > 0 ? slot.paginator.mediaUnits : 1;
+          chapterFraction = (sample.media.anchor.index + sample.media.anchor.ratio) / M;
+        }
 
-          onPageState?.({
-            status: "ready",
-            pageCount: 1,
-            currentPage: 0,
-            empty: false,
-            mode: "scroll",
-            // 阅读线在本章中的纵向比例；anchor.ratio 是文字盒内的横向位置。
-            scrollProgress: p && p.box.height > 0
-              ? Math.min(1, Math.max(0, activeOffset / p.box.height))
-              : 0,
-            totalScrollProgress: totalProgress,
+        onPageState?.({
+          status: "ready",
+          pageCount: 1,
+          currentPage: 0,
+          empty: state.empty,
+          mode: "scroll",
+          // 阅读线在本章中的纵向比例；anchor.ratio 是文字盒内的横向位置。
+          scrollProgress: p && p.box.height > 0
+            ? Math.min(1, Math.max(0, activeOffset / p.box.height))
+            : 0,
+          totalScrollProgress: totalProgress,
+          atEnd,
+        });
+
+        if (chapterFraction !== null) {
+          props.onUserProgressSample?.({
+            key: slot.key,
+            spineIndex: slot.spineIndex,
+            fraction: chapterFraction,
             atEnd,
           });
-
-          if (chapterFraction !== null) {
-            props.onUserProgressSample?.({
-              key: slot.key,
-              spineIndex: slot.spineIndex,
-              fraction: chapterFraction,
-              atEnd,
-            });
-          }
         }
       }
     }, [V, buildReadingSpot, linearItems, onPageState, onVisibleChapterChange, overscan, props, sampleReadingLine]);
@@ -697,16 +705,14 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
         }
         // 用户在等待重排时仍可滚动：移动保存点的屏幕位置，不用尚未提交的
         // 新 DOM 重新命中另一段文字。程序化补偿不再次累计这段位移。
-        if (userScroll && movedByUser) {
-          const saved = pendingSpotRef.current ? pendingSpotRef : lastStableSpotRef;
-          const spot = saved.current;
-          if (spot) {
-            saved.current = {
-              ...spot,
-              screenY: spot.screenY - (S - spot.scrollTop),
-              scrollTop: S,
-            };
-          }
+        // 未排入重测事务时不得篡改稳定锚点 screenY，避免滚轮累积成巨大负坐标。
+        if (userScroll && movedByUser && pendingSpotRef.current) {
+          const spot = pendingSpotRef.current;
+          pendingSpotRef.current = {
+            ...spot,
+            screenY: spot.screenY - (S - spot.scrollTop),
+            scrollTop: S,
+          };
         }
         scrollTopRef.current = S;
         const currentProjections = layoutRef.current.project(S, V, overscan);
@@ -818,6 +824,10 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
           layout: newLayout,
           scrollTop: newS,
         });
+        const scrollDelta = accepted - currentS;
+        if (scrollDelta !== 0) {
+          dampedScrollRef.current.shiftTarget(scrollDelta, newLayout.maxScrollTop(V));
+        }
         const box = effective ? newLayout.boxFor(effective.key) : null;
         const newScreenY = box && effective && anchor ? box.top + anchor.offset - accepted : effective?.screenY ?? 0;
         if (effective && anchor) {
@@ -898,7 +908,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
           : 0;
         return ratio * box.height;
       }
-      return null;
+      return 0;
     };
 
     /** 显式导航在目标图内/文本处需要提交的位置；失败明确报告，不冒充成功。 */
@@ -963,18 +973,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
       if (!box || !slot || slot.unmounted || slot.status !== "ready" || !slot.paginator.isDisplayReady) {
         return false;
       }
-      // 空章 ready 是成功终态但不是定位成功：搜索/笔记保留 unresolved，
-      // 锚点导航显示宿主空章说明并结算，不能把 index:-1 当章首。
-      const state = slot.paginator.getStateSnapshot();
-      if (state.status === "ready" && state.empty) {
-        setEmptyChapterNotice({
-          key: slot.key,
-          title: findChapterTitle(book.toc, slot.path) ?? `第 ${slot.spineIndex + 1} 章`,
-        });
-        settlePendingNavigationFailure(ticket);
-        return true;
-      }
-
+      // 空白章节仍能定位章首；搜索/笔记/失效语义锚点继续由只读解析返回 null。
       let contentFractionResult: ResolvedContentFraction | null = null;
       if (ticket.target.kind === "content-fraction") {
         contentFractionResult = slot.paginator.resolveContentFraction(ticket.target.fraction);
@@ -1140,7 +1139,8 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
               pending = true;
               continue;
             }
-            updates.push({ key, height: measurement.height, measured: true });
+            const extent = measurement.kind === "empty" ? viewportHeightRef.current : measurement.height;
+            updates.push({ key, height: extent, measured: true });
           }
           if (pending) {
             if (layoutRemeasureRetriesRef.current < MEASURE_RETRY_LIMIT) {
@@ -1173,9 +1173,8 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
       const current = slotsRef.current.get(key);
       if (!current || current.unmounted) return;
       if (current.status !== "ready") return;
-      // 旧阻尼目标基于旧几何，补偿后会把位置拉回
-      dampedScrollRef.current.stop();
-      scheduleLayoutRemeasure(lastStableSpotRef.current ?? captureReadingSpot());
+      // 布局变动平移阻尼目标，不再野蛮掐断滚轮动量；优先采样当前视口真实阅读点
+      scheduleLayoutRemeasure(captureReadingSpot() ?? lastStableSpotRef.current);
     };
 
     /**
@@ -1436,11 +1435,8 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
     /**
      * 提交一次章节高度测量。
      *
-     * 只有测量到正高度、且承载 iframe 的容器确实参与布局时才提交：包裹层在
-     * 章节就绪前是 display:none，此间 iframe 不布局，测量必然是 0；把 0 当作
-     * “已测量”写进布局会让整本书总高塌成 0，投影窗口随即清空，iframe 再也
-     * 挂载不上，阅读器永久停在加载态。测不准就保留估算高度，交给
-     * scheduleChapterMeasurement 在下一帧重测。
+     * 容器已参与布局且 display-ready 后才提交；未就绪的 0 高度继续等待。
+     * 真正空章保留一屏留白，已有作者留白则保留实测高度；短正文不撑成整屏。
      *
      * `sameChapterReload` 表示这是“同章换设置”重建后的完成回调：沿用同一 paginator，
      * gate 里已无本次票据，因此不做 finish/置 ready/重放 onDisplayReady，只重测布局。
@@ -1474,22 +1470,16 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
         if (!sameChapterReload) {
           if (!gateRef.current.finish(ticket)) return true;
           slot.status = "ready";
-        }
-        if (measurement.kind === "empty") {
-          const item = linearItems[slot.spineIndex] ?? linearItems.find((entry) => entry.index === slot.spineIndex);
-          setEmptyChapterNotice({
-            key,
-            title: findChapterTitle(book.toc, slot.path) ?? item?.idref ?? `第 ${slot.spineIndex + 1} 章`,
-          });
-          // 宿主说明之外，状态也要结束 loading；空章是 ready 的一种终态。
-          onPageState?.(slot.paginator.getStateSnapshot());
+          setSlotUpdateNonce((n) => n + 1);
         }
         // 统一的批量提交入口：新高度、宿主位置与 iframe 投影同帧生效。
         // 必须走最新实现，不能用创建时的闭包旧 V / 旧几何（R4）。
         if (pendingSpotRef.current || reloadingRef.current.size > 0) {
           scheduleLayoutRemeasure(pendingSpotRef.current);
         } else {
-          commitLayoutBatchRef.current([{ key, height: measurement.height, measured: true }], null);
+          // 真正零内容的章节保留一屏空白；作者已有的留白高度按实测保留。
+          const extent = measurement.kind === "empty" ? V : measurement.height;
+          commitLayoutBatchRef.current([{ key, height: extent, measured: true }], null);
         }
         void reloadSlotSettingsRef.current(slot);
         if (!sameChapterReload) {
@@ -1505,7 +1495,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
         checkVisibleChapterRef.current?.();
         return true;
       },
-      [book.toc, linearItems, onDisplayReady, onPageState, scheduleLayoutRemeasure]
+      [V, onDisplayReady, scheduleLayoutRemeasure]
     );
     commitChapterMeasurementRef.current = commitChapterMeasurement;
 
@@ -1564,8 +1554,10 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
 
       // 可见未知章节优先调度，并发限制为 1
       if (!inFlightLoadRef.current) {
-        // 先找真正处于可视区（visible=true）且未加载的章节
-        const needed = projections.find((p) => !slotsRef.current.has(p.box.key));
+        // 显式/可见章绝对优先：先找真正处于可视区（visible=true）且未加载的章节，再找预读 overscan 章节
+        const needed =
+          projections.find((p) => p.visible && !slotsRef.current.has(p.box.key)) ??
+          projections.find((p) => !slotsRef.current.has(p.box.key));
         if (needed) {
           const item = linearItems[needed.box.index];
           if (item) {
@@ -1577,7 +1569,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
           }
         }
       }
-    }, [linearItems, loadChapterSlot, projections]);
+    }, [linearItems, loadChapterSlot, projections, slotUpdateNonce]);
 
     // 卸载时停止阻尼动画与待执行的设置重载，避免帧循环/定时器泄漏
     useEffect(() => {
@@ -1753,9 +1745,8 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
       if (!el) return;
       // 显式导航开始释放旧权属，保留旧稳定 spot 供既有失败保护使用
       readingPositionRef.current = releaseExplicitPosition(readingPositionRef.current);
-      // 显式导航必须立刻停止旧阻尼，且清除上一轮空章说明。
+      // 显式导航必须立刻停止旧阻尼。
       dampedScrollRef.current.stop();
-      setEmptyChapterNotice(null);
       const manager = pendingNavigationRef.current;
       if (!manager) return;
       const ticket = manager.begin(bookSessionRef.current, targetKey, target);
@@ -1817,7 +1808,6 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
         ) {
           dampedScrollRef.current.stop();
           for (const slot of slotsRef.current.values()) slot.paginator.closeForNavigation();
-          setEmptyChapterNotice(null);
           pendingSpotRef.current = null;
           readingPositionRef.current = releaseExplicitPosition(readingPositionRef.current);
 
@@ -1879,32 +1869,70 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
               ? readingPositionRef.current.value
               : null;
           const spot = activeExplicit ?? captureReadingSpot() ?? lastStableSpotRef.current;
-          if (!spot) return null;
-          if (spot.text) {
-            return {
-              path: spot.key.split(":").slice(1).join(":"),
-              index: spot.text.index,
-              ratio: spot.text.ratio,
-              charsRead: spot.text.charsRead,
-              totalChars: spot.text.totalChars,
-              mediaUnits: spot.text.mediaUnits ?? 0,
-              textOffset: spot.text.textOffset,
-              textSnippet: spot.text.textSnippet,
-              mediaAnchor: null,
-            };
+          if (spot) {
+            if (spot.text) {
+              return {
+                path: spot.key.split(":").slice(1).join(":"),
+                index: spot.text.index,
+                ratio: spot.text.ratio,
+                charsRead: spot.text.charsRead,
+                totalChars: spot.text.totalChars,
+                mediaUnits: spot.text.mediaUnits ?? 0,
+                textOffset: spot.text.textOffset,
+                textSnippet: spot.text.textSnippet,
+                mediaAnchor: null,
+              };
+            }
+            if (spot.media) {
+              return {
+                path: spot.key.split(":").slice(1).join(":"),
+                index: -1,
+                ratio: spot.media.ratio,
+                charsRead: 0,
+                totalChars: 0,
+                mediaUnits: 1,
+                textOffset: null,
+                textSnippet: null,
+                mediaAnchor: spot.media,
+              };
+            }
           }
-          if (spot.media) {
-            return {
-              path: spot.key.split(":").slice(1).join(":"),
-              index: -1,
-              ratio: spot.media.ratio,
-              charsRead: 0,
-              totalChars: 0,
-              mediaUnits: 1,
-              textOffset: null,
-              textSnippet: null,
-              mediaAnchor: spot.media,
-            };
+          const el = containerRef.current;
+          const S = el?.scrollTop ?? 0;
+          const continuousAnchor = layoutRef.current.anchorAt(S, V, READING_LINE_RATIO * V);
+          const slot = continuousAnchor ? slotsRef.current.get(continuousAnchor.key) : null;
+          if (slot && slot.status === "ready") {
+            const projection = layoutRef.current.project(S, V, overscan).find((p) => p.box.key === continuousAnchor!.key);
+            if (projection) {
+              const sample = sampleReadingLine(slot, READING_LINE_RATIO * V - projection.frameScreenTop);
+              if (sample.fine?.anchor) {
+                return {
+                  path: slot.path,
+                  index: sample.fine.anchor.index,
+                  ratio: sample.fine.anchor.ratio,
+                  charsRead: sample.fine.anchor.charsRead,
+                  totalChars: sample.fine.anchor.totalChars,
+                  mediaUnits: sample.fine.anchor.mediaUnits ?? 0,
+                  textOffset: sample.fine.anchor.textOffset,
+                  textSnippet: sample.fine.anchor.textSnippet,
+                  mediaAnchor: null,
+                };
+              }
+              if (sample.media?.anchor) {
+                return {
+                  path: slot.path,
+                  index: -1,
+                  ratio: sample.media.anchor.ratio,
+                  charsRead: 0,
+                  totalChars: 0,
+                  mediaUnits: 1,
+                  textOffset: null,
+                  textSnippet: null,
+                  mediaAnchor: sample.media.anchor,
+                };
+              }
+            }
+            return slot.paginator.getReadingAnchor() ?? null;
           }
           return null;
         },
@@ -2177,6 +2205,12 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
         onWheel={(e) => {
           if (inputPaused) {
             e.preventDefault();
+            return;
+          }
+          if (e.deltaY !== 0) {
+            e.preventDefault();
+            const deltaY = continuousWheelPixels(e.deltaY, e.deltaMode, 28, V);
+            handleExternalWheelPixels(deltaY);
           }
         }}
         style={{
@@ -2259,33 +2293,6 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
             );
           })}
         </div>
-        {emptyChapterNotice && (
-          <div
-            role="status"
-            style={{
-              position: "absolute",
-              inset: 0,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              pointerEvents: "none",
-              zIndex: 2,
-            }}
-          >
-            <div
-              style={{
-                maxWidth: 360,
-                padding: "18px 22px",
-                borderRadius: 10,
-                background: "rgba(0, 0, 0, 0.06)",
-                textAlign: "center",
-              }}
-            >
-              <div style={{ fontWeight: 600, marginBottom: 6 }}>{emptyChapterNotice.title}</div>
-              <div style={{ color: "var(--muted)", fontSize: 13 }}>本章无可显示内容</div>
-            </div>
-          </div>
-        )}
       </div>
     );
   }
