@@ -1,13 +1,14 @@
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { loadBook, spineIndexForPath, spineItemPath, DrmError, disposeBook } from "./core/book";
 import type { Book } from "./core/types";
-import { isFragmentOnly, splitHref } from "./core/paths";
+import { isExternalUrl, isFragmentOnly, resolvePath, splitHref } from "./core/paths";
 import {
   createSearchSession,
   type SearchResult,
   type SearchSession,
 } from "./core/search";
 import type { ExactTextHit } from "./core/exactTextHits";
+import type { SearchOccurrence } from "./core/searchOccurrence";
 import { ResourceServer } from "./render/resources";
 import { sanitizePersistedTextAnchor } from "./render/textAnchor";
 import { clearDocumentSelection, isSelectAllShortcut } from "./render/selectionGuard";
@@ -16,14 +17,24 @@ import {
   type ReaderSettings,
   type Theme,
 } from "./render/settings";
-import type { ChapterState, PreciseNavigationStatus, ReadingAnchor } from "./render/paginator";
+import type { ChapterState, MediaReadingAnchor, PreciseNavigationStatus, ReadingAnchor } from "./render/paginator";
 import { normalizePageOptions } from "./render/pageLayout";
 import type { ImageViewRequest } from "./render/imageActivation";
 import { ImageViewer } from "./ui/ImageViewer";
 import { TitleBar } from "./ui/TitleBar";
-import { Toolbar } from "./ui/Toolbar";
-import { BookmarksPopover } from "./ui/BookmarksPopover";
-import { MenuPanel } from "./ui/MenuPanel";
+import { SidebarDrawer, type SidebarMode, type SidebarTab } from "./ui/SidebarDrawer";
+import { AaPopover } from "./ui/AaPopover";
+import { WhisperFooter, type WhisperFooterChapterTick } from "./ui/WhisperFooter";
+import {
+  createContentAxis,
+  reduceScrubUi,
+  initialScrubUi,
+  type ContentAxis,
+  type ScrubUiState,
+  type ScrubUiEvent,
+  type ScrubToken,
+  type AxisInput,
+} from "./ui/readerProgressAxis";
 import { FontSettingsPanel } from "./ui/FontSettingsPanel";
 import { SearchPanel, type SearchPanelResult, type SearchScope, type SearchStatus } from "./ui/SearchPanel";
 import { presentCrossBookHit, type CrossBookPanelResult } from "./ui/crossBookSearch";
@@ -38,11 +49,10 @@ import {
 } from "./features/ai/indexing/corpusConcurrencyPreference";
 import { ReaderContextMenu } from "./ui/ReaderContextMenu";
 import { NoteComposer } from "./ui/NoteComposer";
-import { NotesPanel, type NoteViewModel } from "./ui/NotesPanel";
+import type { NoteViewModel } from "./ui/NotesPanel";
 import type { ReaderNote } from "./ui/notes";
 import { createLazyFontController } from "./ui/fontRuntime";
 import { FootnotePop } from "./ui/FootnotePop";
-import { TocPanel } from "./ui/TocPanel";
 import { LogPanel, type LogItem } from "./ui/LogPanel";
 import { ReaderView, type ReaderHandle } from "./ui/ReaderView";
 import type { ReaderNoteForPaginator } from "./render/paginator";
@@ -128,7 +138,6 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open as openFileDialog, save as saveFileDialog } from "@tauri-apps/plugin-dialog";
 import { readTextFile, stat as statFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { stepSettingValue } from "./ui/settingsStepper";
 import {
   closeReaderForeground,
   openNoteComposer,
@@ -140,8 +149,7 @@ import {
   type NoteComposerDraft,
 } from "./ui/readerForeground";
 import { createEditionAiRuntime } from "./features/ai/lifecycle/editionRuntime";
-import { APP_EDITION, IS_AI_EDITION } from "./config/edition";
-import { shouldShowAiFoundationEntry } from "./ui/aiEntry";
+import { IS_AI_EDITION } from "./config/edition";
 
 // This is intentionally a compile-time edition branch. The core build has no
 // static dependency on the AI panel or its model-asset subtree; AI builds keep
@@ -170,19 +178,48 @@ type PersistedReaderAnchor = {
   ratio: number;
   anchorTextOffset: number | null;
   anchorTextSnippet: string | null;
+  /** B-155：纯图片页的可选媒体身份/比例；旧记录可读，缺省即低精度。 */
+  mediaAnchor?: MediaReadingAnchor | null;
 };
+
+function sanitizeMediaAnchor(value: unknown): MediaReadingAnchor | null {
+  if (!value || typeof value !== "object") return null;
+  const media = value as Partial<MediaReadingAnchor>;
+  if (
+    !Number.isSafeInteger(media.index) ||
+    (media.index as number) < 0 ||
+    typeof media.tag !== "string" ||
+    media.tag.length === 0 ||
+    typeof media.signature !== "string" ||
+    media.signature.length === 0 ||
+    typeof media.ratio !== "number" ||
+    !Number.isFinite(media.ratio) ||
+    media.ratio < 0 ||
+    media.ratio > 1
+  ) {
+    return null;
+  }
+  return {
+    index: media.index as number,
+    tag: media.tag,
+    signature: media.signature,
+    ratio: media.ratio,
+  };
+}
 
 function toPersistedReaderAnchor(value: {
   index?: number | null;
   ratio?: number | null;
   anchorTextOffset?: number | null;
   anchorTextSnippet?: string | null;
+  mediaAnchor?: MediaReadingAnchor | null;
 } | null | undefined): PersistedReaderAnchor | null {
   if (!value) return null;
   const text = sanitizePersistedTextAnchor({
     textOffset: value.anchorTextOffset,
     textSnippet: value.anchorTextSnippet,
   });
+  const mediaAnchor = sanitizeMediaAnchor(value.mediaAnchor);
   const legacy =
     typeof value.index === "number" &&
     Number.isSafeInteger(value.index) &&
@@ -191,13 +228,45 @@ function toPersistedReaderAnchor(value: {
     Number.isFinite(value.ratio) &&
     value.ratio >= 0 &&
     value.ratio <= 1;
-  if (!legacy && text.textOffset === null) return null;
+  if (!legacy && text.textOffset === null && !mediaAnchor) return null;
   return {
     index: legacy ? value.index! : -1,
-    ratio: legacy ? value.ratio! : 0,
+    ratio: legacy ? value.ratio! : (mediaAnchor?.ratio ?? 0),
     anchorTextOffset: text.textOffset,
     anchorTextSnippet: text.textSnippet,
+    mediaAnchor,
   };
+}
+
+function sameMediaReadingAnchor(
+  a: MediaReadingAnchor | null | undefined,
+  b: MediaReadingAnchor | null | undefined,
+): boolean {
+  if (!a || !b) return false;
+  return (
+    a.index === b.index &&
+    a.tag === b.tag &&
+    a.signature === b.signature &&
+    Math.abs(a.ratio - b.ratio) <= 0.001
+  );
+}
+
+function bookmarkMatchesPosition(
+  bookmark: Bookmark,
+  spineIndex: number,
+  chapterState: ChapterState,
+  anchor: Pick<ReadingAnchor, "textOffset" | "mediaAnchor"> | null,
+): boolean {
+  if (bookmark.spineIndex !== spineIndex) return false;
+  if (chapterState.status !== "ready" || chapterState.mode !== "scroll") {
+    return chapterState.status === "ready" && bookmark.page === chapterState.currentPage;
+  }
+  const savedText = bookmark.anchorTextOffset;
+  const currentText = anchor?.textOffset ?? null;
+  if (savedText !== undefined && savedText !== null && currentText !== null) {
+    return savedText === currentText;
+  }
+  return sameMediaReadingAnchor(bookmark.mediaAnchor, anchor?.mediaAnchor ?? null);
 }
 
 type ImportSource =
@@ -208,12 +277,6 @@ function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
 }
 
-/** 页面四边距按值比较；用于避免同值对象触发章节重载。 */
-function samePageMarginsPx(a: ReaderSettings["pageMarginsPx"], b: ReaderSettings["pageMarginsPx"]): boolean {
-  if (a === b) return true;
-  const sides = ["top", "bottom", "left", "right"] as const;
-  return sides.every((side) => (a?.[side] ?? null) === (b?.[side] ?? null));
-}
 
 function firstLinear(b: Book): number {
   const i = b.spine.findIndex((s) => s.linear);
@@ -308,6 +371,7 @@ export default function App() {
   const [diagText, setDiagText] = useState<string | null>(null);
   const [initialAnchor, setInitialAnchor] = useState<PersistedReaderAnchor | null>(null);
   const [initialPage, setInitialPage] = useState<number | null>(0);
+  const [initialAlignment, setInitialAlignment] = useState<"reading-line" | "context">("context");
   /** 正文图片浮层请求；null = 未打开。 */
   const [imageRequest, setImageRequest] = useState<ImageViewRequest | null>(null);
   const imageRequestRef = useRef<ImageViewRequest | null>(null);
@@ -316,6 +380,7 @@ export default function App() {
     kind: "search" | "note";
     chapterPath: string;
     textHits?: ExactTextHit[];
+    occurrence?: SearchOccurrence;
   } | null>(null);
   const [readerNotice, setReaderNotice] = useState<{
     kind: "ok" | "warn" | "error";
@@ -340,7 +405,23 @@ export default function App() {
   const baselineProgressPctRef = useRef(0);
   const chapterCountJobRef = useRef<{ cancel(): void } | null>(null);
   const lastCountProgressSignatureRef = useRef<string | null>(null);
-  const [clock, setClock] = useState(() => new Date());
+  /** 统一固定内容轴：全书结构统计完成后冻结，跨模式、跨字号保持映射稳定 */
+  const [contentAxis, setContentAxis] = useState<ContentAxis | null>(null);
+  const contentAxisRef = useRef<ContentAxis | null>(null);
+  const scrubSessionRef = useRef(0);
+  const scrubRequestIdRef = useRef(0);
+  const [scrubUiState, setScrubUiState] = useState<ScrubUiState>(() => initialScrubUi(0));
+  const scrubUiStateRef = useRef(scrubUiState);
+  scrubUiStateRef.current = scrubUiState;
+
+  const dispatchScrub = useCallback((event: ScrubUiEvent) => {
+    setScrubUiState((prev) => {
+      const next = reduceScrubUi(prev, event);
+      scrubUiStateRef.current = next;
+      return next;
+    });
+  }, []);
+
   const [dragActive, setDragActive] = useState(false);
   const [fontNativeDragActive, setFontNativeDragActive] = useState(false);
   // ---- 书架 ----
@@ -521,6 +602,85 @@ export default function App() {
     readerRef.current?.dismissFootnote();
   }, []);
 
+  // ---- 统一抽屉（Zen UI Packet B） ----
+  const [sidebarTab, setSidebarTab] = useState<SidebarTab>("toc");
+  const [sidebarSide, setSidebarSide] = useState<"left" | "right">("left");
+  const [sidebarMode, setSidebarMode] = useState<SidebarMode>("overlay");
+  const [sidebarPinned, setSidebarPinned] = useState(false);
+
+  const isSidebarOpen =
+    view === "reader" &&
+    ((sidebarMode === "docked" && sidebarPinned) ||
+      (foreground.kind === "panel" &&
+        (foreground.panel === "toc" || foreground.panel === "bookmarks" || foreground.panel === "notes")));
+
+  const activeSidebarTab: SidebarTab = (() => {
+    if (foreground.kind === "panel") {
+      if (foreground.panel === "toc") return "toc";
+      if (foreground.panel === "bookmarks") return "bookmarks";
+      if (foreground.panel === "notes") return "notes";
+    }
+    return sidebarTab;
+  })();
+
+  const isDockedSidebar = view === "reader" && sidebarMode === "docked" && sidebarPinned;
+
+  const handleSidebarTabChange = useCallback((tab: SidebarTab) => {
+    setSidebarTab(tab);
+    if (sidebarMode === "overlay") {
+      openPanel(tab);
+    }
+  }, [sidebarMode, openPanel]);
+
+  const handleSidebarModeChange = useCallback((mode: SidebarMode) => {
+    setSidebarMode(mode);
+    if (mode === "docked") {
+      setSidebarPinned(true);
+      if (
+        foregroundRef.current.kind === "panel" &&
+        (foregroundRef.current.panel === "toc" ||
+          foregroundRef.current.panel === "bookmarks" ||
+          foregroundRef.current.panel === "notes")
+      ) {
+        closeForeground();
+      }
+    } else {
+      setSidebarPinned(false);
+      openPanel(sidebarTab);
+    }
+  }, [sidebarTab, openPanel, closeForeground]);
+
+  const handleSidebarClose = useCallback(() => {
+    if (sidebarMode === "docked") {
+      setSidebarPinned(false);
+    }
+    closeForeground();
+  }, [sidebarMode, closeForeground]);
+
+  const handleToggleSidebar = useCallback((side?: "left" | "right") => {
+    const targetSide = side || "left";
+    if (isSidebarOpen && sidebarSide === targetSide) {
+      handleSidebarClose();
+    } else {
+      setSidebarSide(targetSide);
+      if (sidebarMode === "docked") {
+        setSidebarPinned(true);
+      } else {
+        openPanel(sidebarTab);
+      }
+    }
+  }, [isSidebarOpen, sidebarSide, handleSidebarClose, sidebarMode, sidebarTab, openPanel]);
+
+  const handleOpenBookmarks = useCallback(() => {
+    setSidebarSide("right");
+    setSidebarTab("bookmarks");
+    if (sidebarMode === "docked") {
+      setSidebarPinned(true);
+    } else {
+      openPanel("bookmarks");
+    }
+  }, [sidebarMode, openPanel]);
+
   /** 关闭正文图片浮层；不改变页码/滚动位置，也不记入阅读历史。 */
   const closeImageOverlay = useCallback((): void => {
     imageRequestRef.current = null;
@@ -572,6 +732,8 @@ export default function App() {
   spineIndexRef.current = spineIndex;
   const navigationPendingRef = useRef(false);
   const readerDisplayReadyRef = useRef(false);
+  /** 语义锚点失败后先结束 loading，但禁止把失败落点当作成功进度写盘。 */
+  const suppressShelfProgressRef = useRef(false);
   // 每个稳定位置只能被一次显式跳转捕获；新书初始加载时
   // 仍允许以已保存的基线位置记录“第一次跳转”。
   const historyCaptureAllowedRef = useRef(true);
@@ -770,6 +932,10 @@ export default function App() {
           ? Math.min(100, baselineProgressPct)
           : 0;
       lastCountProgressSignatureRef.current = null;
+      contentAxisRef.current = null;
+      setContentAxis(null);
+      scrubSessionRef.current += 1;
+      dispatchScrub({ type: "reset", session: scrubSessionRef.current });
       const start = clamp(saved?.spineIndex ?? firstLinear(b), 0, b.spine.length - 1);
       setBook(b);
       setServer(srv);
@@ -1339,7 +1505,6 @@ export default function App() {
     }
     if (result.message) setShelfNotice({ kind: "ok", text: result.message });
   }, []);
-  const handleImportFont = useCallback((file: File) => handleImportFonts([file]), [handleImportFonts]);
 
   const handleImportFontPaths = useCallback(async (paths: string[]) => {
     const result = await fontImportRef.current!.importPaths(paths);
@@ -1434,6 +1599,20 @@ export default function App() {
     setReaderNotice({ kind, text });
   }, []);
 
+  /** 语义锚点失败：解除显示门，但守住进度，直到读者真实移动后再写。 */
+  const handleReaderNavigationUnresolved = useCallback((reported: boolean): void => {
+    navigationPendingRef.current = false;
+    historyCaptureAllowedRef.current = true;
+    readerDisplayReadyRef.current = true;
+    setReaderDisplayReady(true);
+    setSearchNavigationBusy(false);
+    setInitialAnchor(null);
+    setInitialPage(0);
+    setInitialAlignment("context");
+    suppressShelfProgressRef.current = true;
+    if (!reported) showReaderNotice("未能定位保存位置，已停留在章节开头", "warn");
+  }, [showReaderNotice]);
+
   const handlePreciseNavigationStatus = useCallback((status: {
     requestId: number;
     status: PreciseNavigationStatus;
@@ -1453,7 +1632,12 @@ export default function App() {
 
   // ---- 从书架打开 ----
   const handleShelfOpen = useCallback(
-    async (id: string, searchTarget?: ResolvedCrossBookSearchHit, searchTextHits?: ExactTextHit[]) => {
+    async (
+      id: string,
+      searchTarget?: ResolvedCrossBookSearchHit,
+      searchTextHits?: ExactTextHit[],
+      searchOccurrence?: SearchOccurrence,
+    ) => {
       if (shelfBusyRef.current) return;
       const originalEntry = shelfEntriesRef.current.find((e) => e.id === id);
       if (!originalEntry) return;
@@ -1567,6 +1751,7 @@ export default function App() {
             kind: "search",
             chapterPath: searchTarget.chapterPath,
             textHits: searchTextHits,
+            occurrence: searchOccurrence,
           });
         }
         shelfBusyRef.current = false;
@@ -1625,6 +1810,40 @@ export default function App() {
     };
   }, [view, book, server, bookKey, applyCount, applyCountBatch, applyCountError]);
 
+  // 统一固定内容轴：在本次书籍会话第一次得到完整有效 linear 章节权重时冻结一份轴
+  useEffect(() => {
+    if (view !== "reader" || !book || contentAxisRef.current) return;
+    const linearSpine = book.spine
+      .map((item, idx) => ({ item, idx, path: spineItemPath(book, idx) }))
+      .filter((entry): entry is { item: typeof book.spine[0]; idx: number; path: string } =>
+        entry.item.linear !== false && Boolean(entry.path)
+      );
+    if (linearSpine.length === 0) return;
+    const counts = chapterCountsState.counts;
+    const allAvailable = linearSpine.every(({ idx }) => {
+      const c = counts[idx];
+      return c && c.value !== null && Number.isFinite(c.value);
+    });
+    if (!allAvailable) return;
+
+    const inputs: AxisInput[] = linearSpine.map(({ idx, path }) => ({
+      key: `${idx}:${path}`,
+      spineIndex: idx,
+      weight: counts[idx]?.value ?? 0,
+    }));
+    const axis = createContentAxis(inputs);
+    contentAxisRef.current = axis;
+    setContentAxis(axis);
+    if (!scrubUiStateRef.current.actual) {
+      const baseRatio = Math.max(0, Math.min(1, baselineProgressPctRef.current / 100));
+      dispatchScrub({
+        type: "sample",
+        session: scrubSessionRef.current,
+        actual: { ratio: baseRatio, atEnd: false },
+      });
+    }
+  }, [view, book, chapterCountsState, dispatchScrub]);
+
   const handleShelfDelete = useCallback(async (id: string) => {
     if (shelfBusyRef.current) return;
     shelfBusyRef.current = true;
@@ -1664,17 +1883,45 @@ export default function App() {
   }, []);
 
   // ---- 章节状态回调 ----
+  const handleUserReadingPositionChange = useCallback(() => {
+    // 只有宿主实际用户位移才解除失败保护，重排和采样变化不能代替用户输入。
+    suppressShelfProgressRef.current = false;
+  }, []);
+
   const onPageState = useCallback((s: ChapterState) => {
     chapterStateRef.current = s;
     setChapterState(s);
-  }, []);
+    if (s.status === "ready" && s.mode !== "scroll" && !navigationPendingRef.current) {
+      const axis = contentAxisRef.current;
+      const currentBook = bookRef.current;
+      if (axis && currentBook) {
+        const seg = axis.segments.find((item) => item.spineIndex === spineIndexRef.current);
+        if (seg) {
+          const intra = s.pageCount > 1 ? s.currentPage / (s.pageCount - 1) : 0;
+          const ratio = axis.ratioAt({ key: seg.key, fraction: intra });
+          const linearIndices = currentBook.spine.map((item, i) => (item.linear ? i : -1)).filter((i) => i >= 0);
+          const isLastLinear = linearIndices.at(-1) === spineIndexRef.current;
+          const atEnd = isLastLinear && s.currentPage >= s.pageCount - 1;
+          if (ratio !== null) {
+            dispatchScrub({
+              type: "sample",
+              session: scrubSessionRef.current,
+              actual: { ratio, atEnd },
+            });
+          }
+        }
+      }
+    }
+  }, [dispatchScrub]);
 
   const handleReaderDisplayReady = useCallback(() => {
     navigationPendingRef.current = false;
     historyCaptureAllowedRef.current = true;
     readerDisplayReadyRef.current = true;
+    suppressShelfProgressRef.current = false;
     setReaderDisplayReady(true);
     setSearchNavigationBusy(false);
+    setInitialAlignment("context");
     const state = chapterStateRef.current;
     const readingAnchor = readerRef.current?.getReadingAnchor();
     const currentBook = bookRef.current;
@@ -1705,6 +1952,7 @@ export default function App() {
             ratio: readingAnchor.ratio,
             anchorTextOffset: readingAnchor.textOffset,
             anchorTextSnippet: readingAnchor.textSnippet,
+            mediaAnchor: readingAnchor.mediaAnchor ?? null,
           }
         ),
       };
@@ -1732,6 +1980,7 @@ export default function App() {
             ratio: anchor.ratio,
             anchorTextOffset: anchor.textOffset,
             anchorTextSnippet: anchor.textSnippet,
+            mediaAnchor: anchor.mediaAnchor ?? null,
           }),
         };
       }
@@ -1810,6 +2059,7 @@ export default function App() {
               ratio: readingAnchor.ratio,
               anchorTextOffset: readingAnchor.textOffset,
               anchorTextSnippet: readingAnchor.textSnippet,
+              mediaAnchor: readingAnchor.mediaAnchor ?? null,
             }
           : null
       ) ?? lastStablePositionRef.current.anchor,
@@ -1916,6 +2166,117 @@ export default function App() {
     navigateReaderHref(href);
   }, [book, captureReaderHistory, navigateReaderHref, spineIndex, currentReaderPosition, commitReaderHistorySnapshot]);
 
+  const handleCommitSeek = useCallback((ratio: number) => {
+    const r = Math.max(0, Math.min(1, ratio));
+    const axis = contentAxisRef.current;
+    scrubRequestIdRef.current += 1;
+    const token: ScrubToken = {
+      session: scrubSessionRef.current,
+      request: scrubRequestIdRef.current,
+    };
+    navigationPendingRef.current = true;
+    historyCaptureAllowedRef.current = false;
+    dispatchScrub({ type: "begin", token, ratio: r });
+
+    if (settings.readingMode === "scroll") {
+      if (axis) {
+        const target = axis.locate(r);
+        if (target) {
+          readerRef.current?.seekContentFraction?.(
+            { key: target.key, spineIndex: target.spineIndex, fraction: target.fraction },
+            token
+          );
+          return;
+        }
+      }
+      readerRef.current?.scrollToRatio?.(r);
+    } else {
+      if (axis) {
+        const target = axis.locate(r);
+        if (target) {
+          if (target.spineIndex === spineIndexRef.current) {
+            readerRef.current?.seekContentFraction?.(
+              { key: target.key, spineIndex: target.spineIndex, fraction: target.fraction },
+              token
+            );
+          } else {
+            const currentBook = bookRef.current;
+            const path = currentBook ? spineItemPath(currentBook, target.spineIndex) : undefined;
+            if (path) handleTocNavigate(path);
+          }
+          dispatchScrub({
+            type: "settled",
+            token,
+            actual: { ratio: r, atEnd: r >= 1 },
+          });
+          navigationPendingRef.current = false;
+          historyCaptureAllowedRef.current = true;
+          return;
+        }
+      }
+      readerRef.current?.scrollToRatio?.(r);
+      dispatchScrub({
+        type: "settled",
+        token,
+        actual: { ratio: r, atEnd: r >= 1 },
+      });
+      navigationPendingRef.current = false;
+      historyCaptureAllowedRef.current = true;
+    }
+  }, [settings.readingMode, handleTocNavigate, dispatchScrub]);
+
+  const handleScrubPreviewChange = useCallback((ratio: number | null) => {
+    dispatchScrub({
+      type: "preview",
+      session: scrubSessionRef.current,
+      ratio,
+    });
+  }, [dispatchScrub]);
+
+  const handleContentFractionSettled = useCallback((
+    token: ScrubToken,
+    location: { key: string; spineIndex: number; fraction: number; atEnd: boolean }
+  ) => {
+    navigationPendingRef.current = false;
+    historyCaptureAllowedRef.current = true;
+    readerDisplayReadyRef.current = true;
+    setReaderDisplayReady(true);
+    const axis = contentAxisRef.current;
+    const ratio = axis ? axis.ratioAt({ key: location.key, fraction: location.fraction }) : null;
+    const actualRatio = ratio !== null ? ratio : (scrubUiStateRef.current.pending?.ratio ?? 0);
+    dispatchScrub({
+      type: "settled",
+      token,
+      actual: { ratio: actualRatio, atEnd: location.atEnd },
+    });
+  }, [dispatchScrub]);
+
+  const handleContentFractionCancelled = useCallback((token: ScrubToken) => {
+    navigationPendingRef.current = false;
+    dispatchScrub({ type: "cancelled", token });
+  }, [dispatchScrub]);
+
+  const handleContentFractionFailed = useCallback((token: ScrubToken) => {
+    navigationPendingRef.current = false;
+    dispatchScrub({ type: "failed", token });
+    setReaderNotice({ kind: "warn", text: "未能定位到指定进度" });
+  }, [dispatchScrub]);
+
+  const handleUserProgressSample = useCallback((
+    location: { key: string; spineIndex: number; fraction: number; atEnd: boolean }
+  ) => {
+    const axis = contentAxisRef.current;
+    if (!axis) return;
+    const ratio = axis.ratioAt({ key: location.key, fraction: location.fraction });
+    if (ratio !== null) {
+      dispatchScrub({
+        type: "sample",
+        session: scrubSessionRef.current,
+        actual: { ratio, atEnd: location.atEnd },
+      });
+    }
+  }, [dispatchScrub]);
+
   /** 搜索结果使用文本锚点定位；预览不写进度，只有用户点击才进入历史。 */
   const handleSearchNavigate = useCallback((result: SearchResult): void => {
     if (!book || searchNavigationBusy || result.spineIndex < 0 || result.spineIndex >= book.spine.length) return;
@@ -1927,6 +2288,7 @@ export default function App() {
     };
     const requestId = ++preciseRequestRef.current;
     const textHits = result.textHits ?? [];
+    const occurrence = result.occurrence;
     if (
       sameChapterRoute({
         currentSpineIndex: spineIndex,
@@ -1936,8 +2298,14 @@ export default function App() {
       }) === "direct"
     ) {
       const snapshot = currentReaderPosition();
-      if (textHits.length > 0) {
-        const status = readerRef.current?.navigateToSearchTarget({ requestId, kind: "search", textHits });
+      if (textHits.length > 0 || occurrence) {
+        const status = readerRef.current?.navigateToSearchTarget({
+          requestId,
+          kind: "search",
+          textHits,
+          occurrence,
+          chapterPath: result.chapterPath,
+        });
         if (status === "located" || status === "unsupported-highlight") {
           setAnchor(undefined);
           commitReaderHistorySnapshot(snapshot);
@@ -1976,12 +2344,14 @@ export default function App() {
     setSearchNavigationBusy(true);
     setInitialPage(null);
     setInitialAnchor(targetAnchor);
+    setInitialAlignment("context");
     latestPreciseRequestRef.current = requestId;
     setPreciseTarget({
       requestId,
       kind: "search",
       chapterPath: result.chapterPath,
       textHits: textHits.length > 0 ? textHits : undefined,
+      occurrence,
     });
     setSpineIndex(result.spineIndex);
     setAnchor(undefined);
@@ -2028,6 +2398,7 @@ export default function App() {
               anchorTextSnippet: pos.anchor.anchorTextSnippet ?? null,
             }
           : null,
+        mediaAnchor: pos.anchor?.mediaAnchor ?? null,
         fallbackPage: pos.page,
       });
       if (direct) {
@@ -2050,6 +2421,7 @@ export default function App() {
     setAnchorNonce((n) => n + 1);
     setInitialPage(pos.page ?? 0);
     setInitialAnchor(toPersistedReaderAnchor(pos.anchor));
+    setInitialAlignment("context");
     handleFootnoteClose();
     closeForeground();
   }, [readerHistory, currentReaderPosition, spineIndex, handleFootnoteClose]);
@@ -2078,6 +2450,7 @@ export default function App() {
               anchorTextSnippet: pos.anchor.anchorTextSnippet ?? null,
             }
           : null,
+        mediaAnchor: pos.anchor?.mediaAnchor ?? null,
         fallbackPage: pos.page,
       });
       if (direct) {
@@ -2099,6 +2472,7 @@ export default function App() {
     setAnchorNonce((n) => n + 1);
     setInitialPage(pos.page);
     setInitialAnchor(toPersistedReaderAnchor(pos.anchor));
+    setInitialAlignment("context");
     handleFootnoteClose();
     closeForeground();
   }, [readerHistory, currentReaderPosition, spineIndex, handleFootnoteClose]);
@@ -2244,6 +2618,7 @@ export default function App() {
     setReaderDisplayReady(false);
     setInitialPage(null);
     setInitialAnchor(targetAnchor);
+    setInitialAlignment("context");
     latestPreciseRequestRef.current = requestId;
     setPreciseTarget({
       requestId,
@@ -2271,11 +2646,14 @@ export default function App() {
   const currentBookmarks = currentShelfId
     ? (shelfEntries.find((entry) => entry.id === currentShelfId)?.bookmarks ?? [])
     : [];
+  const currentBookmarkAnchor =
+    chapterState.status === "ready" && chapterState.mode === "scroll"
+      ? readerRef.current?.getReadingAnchor() ?? null
+      : null;
   const isCurrentPageBookmarked =
     chapterState.status === "ready" &&
-    currentBookmarks.some(
-      (bookmark) =>
-        bookmark.spineIndex === spineIndex && bookmark.page === chapterState.currentPage
+    currentBookmarks.some((bookmark) =>
+      bookmarkMatchesPosition(bookmark, spineIndex, chapterState, currentBookmarkAnchor)
     );
   // 书签按书中实际顺序排列，并补上章节标题供右下角展示
   const sortedBookmarks = book
@@ -2292,49 +2670,25 @@ export default function App() {
         }))
     : [];
 
-  // 标题栏与工具栏共用同一个书签浮层开关：ReaderForeground 的 bookmarks 面板
-  // 仍是唯一状态来源，这里只额外记住“这次是哪个按钮打开的”，用于定位与焦点归还。
-  const bookmarkAnchorRef = useRef<HTMLButtonElement | null>(null);
-  const bookmarkClosedRef = useRef(false);
-  const [bookmarkAnchorRect, setBookmarkAnchorRect] = useState<DOMRect | null>(null);
-  const handleToggleBookmarks = useCallback(
-    (button: HTMLButtonElement): void => {
-      if (foregroundRef.current.kind === "panel" && foregroundRef.current.panel === "bookmarks") {
-        closePanel("bookmarks");
-        return;
-      }
-      bookmarkAnchorRef.current = button;
-      setBookmarkAnchorRect(button.getBoundingClientRect());
-      openPanel("bookmarks");
-    },
-    [openPanel, closePanel]
-  );
-
-  // Esc/外部点击关闭后，把焦点还给仍可见的触发按钮；它已被隐藏时不动焦点，
-  // 避免抢回阅读器焦点。
-  useLayoutEffect(() => {
-    if (bookmarkMenuOpen) {
-      bookmarkClosedRef.current = false;
+  // 标题栏书签列表入口：直接从右侧展开抽屉至书签 Tab
+  const handleToggleBookmarks = useCallback((): void => {
+    if (isSidebarOpen && sidebarSide === "right" && activeSidebarTab === "bookmarks") {
+      handleSidebarClose();
       return;
     }
-    if (bookmarkClosedRef.current) return;
-    bookmarkClosedRef.current = true;
-    const button = bookmarkAnchorRef.current;
-    if (!button || !button.isConnected || button.getClientRects().length === 0) return;
-    button.focus({ preventScroll: true });
-  }, [bookmarkMenuOpen]);
+    handleOpenBookmarks();
+  }, [isSidebarOpen, sidebarSide, activeSidebarTab, handleSidebarClose, handleOpenBookmarks]);
 
   const handleToggleBookmark = useCallback(() => {
     if (!currentShelfId || chapterState.status !== "ready") return;
-    const existing = currentBookmarks.find(
-      (bookmark) =>
-        bookmark.spineIndex === spineIndex && bookmark.page === chapterState.currentPage
+    const anchor = readerRef.current?.getReadingAnchor() ?? null;
+    const existing = currentBookmarks.find((bookmark) =>
+      bookmarkMatchesPosition(bookmark, spineIndex, chapterState, anchor)
     );
     let next: Bookmark[];
     if (existing) {
       next = currentBookmarks.filter((bookmark) => bookmark.id !== existing.id);
     } else {
-      const anchor = readerRef.current?.getReadingAnchor();
       const text = readerRef.current?.getAnchorText() ?? "";
       next = [
         ...currentBookmarks,
@@ -2346,6 +2700,7 @@ export default function App() {
           anchorRatio: anchor && anchor.index >= 0 ? anchor.ratio : null,
           anchorTextOffset: anchor?.textOffset ?? null,
           anchorTextSnippet: anchor?.textSnippet ?? null,
+          mediaAnchor: anchor?.mediaAnchor ?? null,
           text: text.slice(0, 80),
           createdAtMs: Date.now(),
         },
@@ -2380,6 +2735,7 @@ export default function App() {
         ratio: bookmark.anchorRatio,
         anchorTextOffset: bookmark.anchorTextOffset,
         anchorTextSnippet: bookmark.anchorTextSnippet,
+        mediaAnchor: bookmark.mediaAnchor ?? null,
       });
       if (
         sameChapterRoute({
@@ -2399,7 +2755,9 @@ export default function App() {
                 anchorTextSnippet: bookmarkAnchor.anchorTextSnippet,
               }
             : null,
+          mediaAnchor: bookmarkAnchor?.mediaAnchor ?? null,
           fallbackPage: bookmark.page,
+          alignment: "reading-line",
         });
         if (direct) {
           setAnchor(undefined);
@@ -2413,6 +2771,7 @@ export default function App() {
       historyCaptureAllowedRef.current = false;
       readerDisplayReadyRef.current = false;
       setReaderDisplayReady(false);
+      setInitialAlignment("reading-line");
       setSpineIndex(bookmark.spineIndex);
       setAnchor(undefined);
       setAnchorNonce((n) => n + 1);
@@ -2449,6 +2808,7 @@ export default function App() {
     if (phase.phase !== "ready" || !book) return;
     if (
       readerDisplayReady &&
+      !suppressShelfProgressRef.current &&
       !navigationPendingRef.current &&
       chapterState.status === "ready" &&
       !chapterState.empty
@@ -2465,6 +2825,7 @@ export default function App() {
                   ratio: a.ratio,
                   anchorTextOffset: a.textOffset,
                   anchorTextSnippet: a.textSnippet,
+                  mediaAnchor: a.mediaAnchor ?? null,
                 }
               : null;
           })()
@@ -2530,32 +2891,6 @@ export default function App() {
     });
   };
 
-  // 排版属性步进（undefined=自动跟随书；按界面可见默认值步进，数值边界不循环）
-  const LINE_HEIGHTS = [1.4, 1.6, 1.8, 2.0, 2.2];
-  const FONT_WEIGHTS = [300, 400, 500, 600, 700];
-  const SPACINGS = [0, 2, 4, 6, 8];
-  const WORD_SPACINGS = [0, 4, 8, 12, 16];
-  const adjustLineHeight = (dir: 1 | -1): void =>
-    setSettings((s2) => {
-      const lineHeight = stepSettingValue(LINE_HEIGHTS, s2.lineHeight, dir, 1.6);
-      return lineHeight === s2.lineHeight ? s2 : { ...s2, lineHeight };
-    });
-  const adjustWeight = (dir: 1 | -1): void =>
-    setSettings((s2) => {
-      const fontWeight = stepSettingValue(FONT_WEIGHTS, s2.fontWeight, dir, 400);
-      return fontWeight === s2.fontWeight ? s2 : { ...s2, fontWeight };
-    });
-  const adjustLetterSpacing = (dir: 1 | -1): void =>
-    setSettings((s2) => {
-      const letterSpacingPx = stepSettingValue(SPACINGS, s2.letterSpacingPx, dir, 0);
-      return letterSpacingPx === s2.letterSpacingPx ? s2 : { ...s2, letterSpacingPx };
-    });
-  const adjustWordSpacing = (dir: 1 | -1): void =>
-    setSettings((s2) => {
-      const wordSpacingPx = stepSettingValue(WORD_SPACINGS, s2.wordSpacingPx, dir, 0);
-      return wordSpacingPx === s2.wordSpacingPx ? s2 : { ...s2, wordSpacingPx };
-    });
-
   // ---- 脚注弹层随重排重定位 ----
   useEffect(() => {
     if (!footnote) return;
@@ -2572,50 +2907,11 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chapterState, uiScale, handleFootnoteClose]);
 
-  // ---- 状态栏时钟（时:分） ----
-  // 书架不显示时钟；在这里继续每秒 setState 会让 100+ 书籍卡片无意义地
-  // 参与整棵 App 的 React 重渲染。进入阅读界面时再启动并立即校时。
   useEffect(() => {
     if (view !== "reader") return;
     clearDocumentSelection(document);
-    setClock(new Date());
-    const t = window.setInterval(() => setClock(new Date()), 1000);
-    return () => window.clearInterval(t);
   }, [view, bookKey]);
 
-  const clockText = `${String(clock.getHours()).padStart(2, "0")}:${String(
-    clock.getMinutes()
-  ).padStart(2, "0")}`;
-
-  // ---- 键盘翻页 ----
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (isSelectAllShortcut(e)) {
-        e.preventDefault();
-        clearDocumentSelection(document);
-        return;
-      }
-      const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) {
-        return;
-      }
-      if (e.key === "Escape") {
-        closeForeground();
-        return;
-      }
-      // 指针位于交互式浮层（脚注弹窗等）上时不翻页，滚轮/按钮交给浮层自身处理
-      if (overlayHoverRef.current) return;
-      if (e.key === "ArrowRight" || e.key === "PageDown" || e.key === " ") {
-        e.preventDefault();
-        readerRef.current?.nextPage();
-      } else if (e.key === "ArrowLeft" || e.key === "PageUp") {
-        e.preventDefault();
-        readerRef.current?.prevPage();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [closeForeground]);
 
   // ---- 拖拽打开 ----
   // Tauri 环境：打包后 WebView2 会拦截原生拖放，HTML5 drop 事件不会触发，
@@ -2730,8 +3026,6 @@ export default function App() {
   const linearIndices = book
     ? book.spine.map((item, i) => (item.linear ? i : -1)).filter((i) => i >= 0)
     : [];
-  const linearPos = linearIndices.indexOf(spineIndex);
-  const linearCount = linearIndices.length;
   const countSummary = book
     ? summarizeLinearCounts(chapterCountsState, spineIndex)
     : { total: 0, before: 0, current: null, complete: false, approximate: false };
@@ -2750,24 +3044,60 @@ export default function App() {
     reading && book
       ? (() => {
           const lastLinear = linearIndices.at(-1);
+          const isLastLinear = lastLinear === spineIndex;
           const atBookEnd =
-            countSummary.complete &&
-            lastLinear === spineIndex &&
-            chapterState.currentPage >= chapterState.pageCount - 1;
-          return atBookEnd ? 100 : computeProgressPct(countSummary, anchorChars);
+            settings.readingMode === "scroll"
+              ? chapterState.status === "ready" && chapterState.atEnd === true
+              : countSummary.complete && isLastLinear && chapterState.currentPage >= chapterState.pageCount - 1;
+          if (atBookEnd) return 100;
+          const pct = computeProgressPct(countSummary, anchorChars);
+          return pct === null ? null : Math.min(99, pct);
         })()
       : null;
   const progressPct = resolveProgressPct(exactProgressPct, baselineProgressPctRef.current);
-  const progressLabel = !countSummary.complete
-    ? "计算中"
-    : countSummary.approximate
-      ? `约 ${progressPct}%`
-      : `${progressPct}%`;
+
+  const estimatedMinutesLeft = useMemo(() => {
+    if (chapterState.status !== "ready") return undefined;
+    const currentChars = countSummary.current;
+    if (typeof currentChars === "number" && currentChars > 0) {
+      const charsRemaining = Math.max(0, currentChars - anchorChars);
+      return Math.max(1, Math.round(charsRemaining / 400));
+    }
+    if (chapterState.pageCount > 0) {
+      const pagesRemaining = Math.max(0, chapterState.pageCount - 1 - chapterState.currentPage);
+      return Math.max(1, Math.ceil(pagesRemaining * 0.8));
+    }
+    return undefined;
+  }, [chapterState, countSummary.current, anchorChars]);
+
+  const chapterTicks: WhisperFooterChapterTick[] = useMemo(() => {
+    if (!book) return [];
+    if (contentAxis && contentAxis.segments.length > 0) {
+      return contentAxis.segments.map((seg) => ({
+        spineIndex: seg.spineIndex,
+        title: chapterLabelForIndex(book, seg.spineIndex),
+        positionPct: Math.round(seg.start * 100),
+        startRatio: seg.start,
+        endRatio: seg.end,
+      }));
+    }
+    const linearSpine = book.spine
+      .map((item, idx) => ({ item, idx }))
+      .filter(({ item }) => item.linear !== false);
+    const count = linearSpine.length;
+    if (count <= 1) return [];
+    return linearSpine.map(({ idx }, i) => ({
+      spineIndex: idx,
+      title: chapterLabelForIndex(book, idx),
+      positionPct: Math.round((i / (count - 1)) * 100),
+    }));
+  }, [book, contentAxis]);
 
   // ---- 书架进度回写（阅读器状态→书架索引，不修改阅读器本体） ----
   const persistShelfProgress = useCallback(() => {
     const state = chapterStateRef.current;
     if (
+      suppressShelfProgressRef.current ||
       navigationPendingRef.current ||
       !readerDisplayReady ||
       view !== "reader" ||
@@ -2782,10 +3112,18 @@ export default function App() {
       pageCount: state.pageCount,
       chapterChars: currentSummary.current ?? 0,
     });
-    const exactProgressPct =
-      linearIndices.at(-1) === spineIndex && state.currentPage >= state.pageCount - 1 && currentSummary.complete
-        ? 100
-        : computeProgressPct(currentSummary, exactChars);
+    const lastLinear = linearIndices.at(-1);
+    const isLastLinear = lastLinear === spineIndex;
+    const atBookEnd =
+      settings.readingMode === "scroll"
+        ? state.status === "ready" && state.atEnd === true
+        : currentSummary.complete && isLastLinear && state.currentPage >= state.pageCount - 1;
+    const exactProgressPct = atBookEnd
+      ? 100
+      : (() => {
+          const pct = computeProgressPct(currentSummary, exactChars);
+          return pct === null ? null : Math.min(99, pct);
+        })();
     if (exactProgressPct !== null) {
       baselineProgressPctRef.current = resolveProgressPct(
         exactProgressPct,
@@ -2802,6 +3140,7 @@ export default function App() {
       anchorRatio: a && a.index >= 0 ? a.ratio : null,
       anchorTextOffset: a?.textOffset ?? null,
       anchorTextSnippet: a?.textSnippet ?? null,
+      mediaAnchor: a?.mediaAnchor ?? null,
     };
     // 先更新内存态：即使用户立刻返回并重新打开，也不会读到旧位置。
     setShelfEntries((prev) =>
@@ -2900,6 +3239,10 @@ export default function App() {
     );
     setChapterCountsState(chapterCountsRef.current);
     setCurrentShelfId(null);
+    contentAxisRef.current = null;
+    setContentAxis(null);
+    scrubSessionRef.current += 1;
+    dispatchScrub({ type: "reset", session: scrubSessionRef.current });
     setChapterState({ status: "loading" });
     setReaderDisplayReady(false);
     setReaderHistory(emptyReaderNavigationHistory());
@@ -3030,7 +3373,36 @@ export default function App() {
     ...runtimeIssues.map((m) => ({ kind: "reader_error", source: "render", message: m })),
   ];
 
-  const isReaderPanelOpen =
+  // ---- 全屏 / 沉浸禅模式（Zen Mode） ----
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  const toggleFullscreen = useCallback(() => {
+    if (isTauriEnv()) {
+      try {
+        const win = getCurrentWindow();
+        void win.isFullscreen().then((f) => {
+          void win.setFullscreen(!f);
+          setIsFullscreen(!f);
+        });
+      } catch {}
+      return;
+    }
+    if (!document.fullscreenElement) {
+      void document.documentElement.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {});
+    } else {
+      void document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {});
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(Boolean(document.fullscreenElement));
+    };
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
+
+  const isReaderPanelOpen = Boolean(
     menuOpen ||
     fontSettingsOpen ||
     tocOpen ||
@@ -3038,60 +3410,150 @@ export default function App() {
     notesOpen ||
     logOpen ||
     assistantOpen ||
-    noteComposer !== null;
+    noteComposer !== null
+  );
+
+  // 保存快捷键所需最新状态 ref，避免闭包捕获旧状态或频繁解绑事件
+  const latestShortcutStateRef = useRef({
+    view,
+    ready,
+    book,
+    searchOpen,
+    tocOpen,
+    menuOpen,
+    bookmarkMenuOpen,
+    noteComposer,
+    isFullscreen,
+    readerHistory,
+    readerDisplayReady,
+    isReaderPanelOpen,
+    navigationPending: navigationPendingRef.current,
+  });
+
+  latestShortcutStateRef.current = {
+    view,
+    ready,
+    book,
+    searchOpen,
+    tocOpen,
+    menuOpen,
+    bookmarkMenuOpen,
+    noteComposer,
+    isFullscreen,
+    readerHistory,
+    readerDisplayReady,
+    isReaderPanelOpen,
+    navigationPending: navigationPendingRef.current,
+  };
+
+  // ---- 桌面全局快捷键集中分发与键盘翻页（Zen UI Packet A） ----
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (isSelectAllShortcut(e)) {
+        e.preventDefault();
+        clearDocumentSelection(document);
+        return;
+      }
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) {
+        return;
+      }
+
+      const st = latestShortcutStateRef.current;
+
+      // 1. Ctrl + F / Cmd + F：打开/切换正文搜索
+      if ((e.ctrlKey || e.metaKey) && (e.key === "f" || e.key === "F")) {
+        e.preventDefault();
+        if (st.view === "reader" && st.ready && !st.book?.fixedLayout) {
+          if (st.searchOpen) closePanel("search");
+          else openPanel("search");
+        }
+        return;
+      }
+
+      // 2. Ctrl + T：切换展开/关闭侧边栏（目录/书签/笔记）
+      if ((e.ctrlKey || e.metaKey) && (e.key === "t" || e.key === "T")) {
+        e.preventDefault();
+        if (st.view === "reader") {
+          handleToggleSidebar();
+        }
+        return;
+      }
+
+      // 3. Ctrl + B：添加/移除当前页书签
+      if ((e.ctrlKey || e.metaKey) && (e.key === "b" || e.key === "B")) {
+        e.preventDefault();
+        if (st.view === "reader") {
+          handleToggleBookmark();
+        }
+        return;
+      }
+
+      // 4. F11：进入/退出全屏（纯净阅读模式）
+      if (e.key === "F11") {
+        e.preventDefault();
+        toggleFullscreen();
+        return;
+      }
+
+      // 5. Alt + Left / Alt + Right：历史阅读位置后退 / 前进
+      if (e.altKey && e.key === "ArrowLeft") {
+        e.preventDefault();
+        if (st.view === "reader" && st.readerHistory.back.length > 0 && st.readerDisplayReady && !st.navigationPending) {
+          handleHistoryBack();
+        }
+        return;
+      }
+      if (e.altKey && e.key === "ArrowRight") {
+        e.preventDefault();
+        if (st.view === "reader" && st.readerHistory.forward.length > 0 && st.readerDisplayReady && !st.navigationPending) {
+          handleHistoryForward();
+        }
+        return;
+      }
+
+      // 6. Esc：优先关闭任意处于激活状态的前景/弹窗/抽屉；若无浮层且全屏中，退回窗口模式
+      if (e.key === "Escape") {
+        if (st.isReaderPanelOpen || isSidebarOpen || st.bookmarkMenuOpen || st.noteComposer !== null) {
+          handleSidebarClose();
+          closeForeground();
+          return;
+        }
+        if (st.isFullscreen) {
+          toggleFullscreen();
+          return;
+        }
+        return;
+      }
+
+      // 指针位于交互式浮层（脚注弹窗等）上时不翻页，滚轮/按钮交给浮层自身处理
+      if (overlayHoverRef.current) return;
+      if (e.key === "ArrowRight" || e.key === "PageDown" || e.key === " ") {
+        e.preventDefault();
+        readerRef.current?.nextPage();
+      } else if (e.key === "ArrowLeft" || e.key === "PageUp") {
+        e.preventDefault();
+        readerRef.current?.prevPage();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [closeForeground, handleHistoryBack, handleHistoryForward, handleToggleBookmark, handleToggleSidebar, handleSidebarClose, isSidebarOpen, toggleFullscreen, openPanel, closePanel]);
 
   return (
     <div
-      className={`app${dragActive ? " drag-active" : ""}`}
-      data-theme={settings.theme === "dark" ? "dark" : settings.theme === "sepia" ? "sepia" : undefined}
+      className={`app${dragActive ? " drag-active" : ""}${isFullscreen ? " is-fullscreen" : ""}${isDockedSidebar ? ` has-docked-sidebar docked-side-${sidebarSide}` : ""}`}
+      data-theme={settings.theme === "dark" ? "dark" : settings.theme === "sepia" ? "sepia" : settings.theme === "gray" ? "gray" : undefined}
       style={{ "--ui-scale": uiScale } as CSSProperties}
     >
       <TitleBar
         view={view}
         title={view === "reader" ? (ready ? book!.metadata.title : (book?.metadata.title ?? "")) : "EPUB 阅读器"}
+        chapterTitle={view === "reader" && ready ? currentChapterLabel : undefined}
         onBackToShelf={view === "reader" ? handleBackToShelf : undefined}
-        isBookmarked={view === "reader" && isCurrentPageBookmarked}
-        onToggleBookmark={view === "reader" ? handleToggleBookmark : undefined}
-        bookmarksOpen={view === "reader" && bookmarkMenuOpen}
-        onOpenBookmarks={view === "reader" ? handleToggleBookmarks : undefined}
-      />
-      {view === "reader" && <Toolbar
-        title={ready ? book!.metadata.title : (book?.metadata.title ?? "")}
-        issueCount={logItems.length}
-        isPanelOpen={isReaderPanelOpen}
-        onBackToShelf={view === "reader" ? handleBackToShelf : undefined}
-        onHistoryBack={view === "reader" ? handleHistoryBack : undefined}
-        canHistoryBack={readerHistory.back.length > 0 && readerDisplayReady && !navigationPendingRef.current}
-        onHistoryForward={view === "reader" ? handleHistoryForward : undefined}
-        canHistoryForward={readerHistory.forward.length > 0 && readerDisplayReady && !navigationPendingRef.current}
-        onToggleBookmark={view === "reader" ? handleToggleBookmark : undefined}
-        isBookmarked={view === "reader" && isCurrentPageBookmarked}
-        onOpenBookmarks={view === "reader" ? handleToggleBookmarks : undefined}
-        bookmarksOpen={view === "reader" && bookmarkMenuOpen}
-        onOpenToc={
-          view === "reader"
-            ? () => openPanel("toc")
-            : undefined
-        }
-        onOpenSearch={
-          view === "reader" && ready && !book!.fixedLayout
-            ? () => openPanel("search")
-            : undefined
-        }
-        onOpenNotes={
-          view === "reader" && ready
-            ? () => {
-                openPanel("notes");
-                readerRef.current?.clearTextSelection();
-              }
-            : undefined
-        }
-        onOpenAssistant={
-          shouldShowAiFoundationEntry(APP_EDITION, view)
-            ? () => openPanel("assistant")
-            : undefined
-        }
-        onToggleMenu={
+        onToggleSidebar={view === "reader" ? handleToggleSidebar : undefined}
+        sidebarOpen={view === "reader" && isSidebarOpen}
+        onToggleAppearance={
           view === "reader"
             ? () => {
                 if (menuOpen) closePanel("menu");
@@ -3099,17 +3561,47 @@ export default function App() {
               }
             : undefined
         }
-        onToggleLog={view === "reader" ? handleToggleLog : undefined}
-      />}
-      {/* 唯一书签浮层：作为顶栏/工具栏的兄弟节点挂在 App 前景层，
-          既保留 .app 主题继承，又不会被隐藏重复顶部岛的规则一起隐藏。 */}
-      {view === "reader" && ready && bookmarkMenuOpen && (
-        <BookmarksPopover
-          anchor={bookmarkAnchorRef.current}
-          fallbackRect={bookmarkAnchorRect}
+        appearanceOpen={view === "reader" && menuOpen}
+        onOpenSearch={
+          view === "reader" && ready && !book!.fixedLayout
+            ? () => {
+                if (searchOpen) closePanel("search");
+                else openPanel("search");
+              }
+            : undefined
+        }
+        searchOpen={view === "reader" && searchOpen}
+        isBookmarked={view === "reader" && isCurrentPageBookmarked}
+        onToggleBookmark={view === "reader" ? handleToggleBookmark : undefined}
+        bookmarksOpen={view === "reader" && isSidebarOpen && activeSidebarTab === "bookmarks"}
+        onOpenBookmarks={view === "reader" ? handleToggleBookmarks : undefined}
+        zenMode={isFullscreen}
+      />
+      {view === "reader" && ready && (
+        <SidebarDrawer
+          open={isSidebarOpen}
+          side={sidebarSide}
+          activeTab={activeSidebarTab}
+          onTabChange={handleSidebarTabChange}
+          mode={sidebarMode}
+          onModeChange={handleSidebarModeChange}
+          onClose={handleSidebarClose}
+          toc={book!.toc}
+          activeHref={activeHref}
+          onNavigateToc={handleTocNavigate}
           bookmarks={sortedBookmarks}
-          onSelect={handleSelectBookmark}
-          onClose={() => closePanel("bookmarks")}
+          onSelectBookmark={handleSelectBookmark}
+          notes={noteViewModels}
+          onNavigateNote={(viewNote) => {
+            const note = currentNotes.find((candidate) => candidate.id === viewNote.id);
+            if (note) handleNoteNavigate(note);
+          }}
+          onEditNote={(viewNote) => {
+            const note = currentNotes.find((candidate) => candidate.id === viewNote.id);
+            if (!note) return;
+            openComposer({ mode: "edit", note });
+          }}
+          onDeleteNote={(viewNote) => void handleDeleteNote(viewNote.id)}
         />
       )}
       <div className="main">
@@ -3184,7 +3676,7 @@ export default function App() {
                   const result = crossBookPanelResults.find((candidate) => candidate.id === panelResult.id);
                   if (!result) return;
                   const entry = entryByContentHashRef.current.get(result.hit.contentHash);
-                  if (entry) void handleShelfOpen(entry.id, result.hit, result.textHits);
+                  if (entry) void handleShelfOpen(entry.id, result.hit, result.textHits, result.occurrence);
                 },
               }}
             />
@@ -3211,139 +3703,69 @@ export default function App() {
                   onImport={handleImportFonts}
                   nativeDragActive={fontNativeDragActive}
                   onClose={() => setForeground((current) => setMenuSubview(current, "main"))}
-                /> : <MenuPanel
+                /> : <AaPopover
                   fontSize={settings.fontSizePx}
-                  uiScale={uiScale}
-                  theme={settings.theme}
-                  lineHeight={settings.lineHeight}
-                  fontWeight={settings.fontWeight}
-                  letterSpacingPx={settings.letterSpacingPx}
-                  wordSpacingPx={settings.wordSpacingPx}
-                  customFontName={settings.customFontName}
-                  customCss={settings.customCss}
-                  forceHorizontal={settings.forceHorizontal === true}
-                  preloadNextChapter={settings.preloadNextChapter === true}
-                  preloadNextChapterDisabled={book?.fixedLayout === true}
-                  readingMode={settings.readingMode === "scroll" ? "scroll" : "paginated"}
-                  onReadingModeChange={(mode) =>
-                    setSettings((s2) => (s2.readingMode === mode ? s2 : { ...s2, readingMode: mode }))
-                  }
-                  pageOptions={{
-                    readingMode: settings.readingMode === "scroll" ? "scroll" : "paginated",
-                    pageMarginsPx: settings.pageMarginsPx,
-                    columnsPerView: settings.columnsPerView === 2 ? 2 : 1,
-                    gapPx: settings.gapPx,
-                  }}
-                  pageEffectiveColumns={chapterState.status === "ready" ? chapterState.effectiveColumns ?? 1 : 1}
-                  pageFixedLayout={book?.fixedLayout === true}
-                  onPageOptionsChange={(value) =>
-                    setSettings((s2) => {
-                      const raw = normalizePageOptions(value);
-                      const readingMode = raw.readingMode === "scroll" ? "scroll" : "paginated";
-                      const columnsPerView = raw.columnsPerView === 2 ? 2 : 1;
-                      if (
-                        s2.readingMode === readingMode &&
-                        s2.columnsPerView === columnsPerView &&
-                        s2.gapPx === raw.gapPx &&
-                        samePageMarginsPx(s2.pageMarginsPx, raw.pageMarginsPx)
-                      ) {
-                        return s2;
-                      }
-                      // 只覆盖页面选项字段，字体/主题等无关设置保持原值。
-                      return {
-                        ...s2,
-                        readingMode,
-                        columnsPerView,
-                        gapPx: raw.gapPx,
-                        pageMarginsPx: raw.pageMarginsPx,
-                      };
-                    })
-                  }
-                  userFonts={userFonts}
-                  fontBusy={fontBusy}
-                  onImportFont={(file) => void handleImportFont(file)}
-                  onDeleteFont={(id) => void handleDeleteFont(id)}
-                  onCustomFontNameChange={(name) =>
-                    setSettings((s2) => ({ ...s2, customFontName: name }))
-                  }
-                  onCustomCssChange={(css) =>
-                    setSettings((s2) => ({ ...s2, customCss: css }))
-                  }
-                  onOpenFontSettings={() => setForeground((current) => setMenuSubview(current, "fonts"))}
-                  onForceHorizontalChange={(enabled) =>
-                    setSettings((s2) => ({ ...s2, forceHorizontal: enabled }))
-                  }
-                  onPreloadNextChapterChange={(enabled) =>
-                    setSettings((s2) => ({ ...s2, preloadNextChapter: enabled }))
-                  }
-                  onOpenFile={() => {
-                    void handleChooseBooks();
-                    closeForeground();
-                  }}
-                  onFontDec={() => adjustFont(-2)}
-                  onFontInc={() => adjustFont(2)}
                   onFontSizeChange={(v) =>
                     setSettings((s2) => {
                       const fontSizePx = clamp(v, 12, 32);
                       return fontSizePx === s2.fontSizePx ? s2 : { ...s2, fontSizePx };
                     })
                   }
-                  onLineHeightDec={() => adjustLineHeight(-1)}
-                  onLineHeightInc={() => adjustLineHeight(1)}
+                  onFontDec={() => adjustFont(-2)}
+                  onFontInc={() => adjustFont(2)}
+                  theme={settings.theme}
+                  onThemeChange={changeTheme}
+                  customFontName={settings.customFontName}
+                  onOpenFontSettings={() => setForeground((current) => setMenuSubview(current, "fonts"))}
+                  lineHeight={settings.lineHeight}
                   onLineHeightChange={(v) =>
                     setSettings((s2) => {
                       const lineHeight = clamp(v, 1.4, 2.2);
                       return lineHeight === s2.lineHeight ? s2 : { ...s2, lineHeight };
                     })
                   }
-                  onWeightDec={() => adjustWeight(-1)}
-                  onWeightInc={() => adjustWeight(1)}
-                  onWeightChange={(v) =>
-                    setSettings((s2) => {
-                      const fontWeight = clamp(v, 300, 700);
-                      return fontWeight === s2.fontWeight ? s2 : { ...s2, fontWeight };
-                    })
+                  pageMargins={settings.pageMarginsPx}
+                  onPageMarginsChange={(margins) =>
+                    setSettings((s2) => ({ ...s2, pageMarginsPx: margins }))
                   }
-                  onLetterSpacingDec={() => adjustLetterSpacing(-1)}
-                  onLetterSpacingInc={() => adjustLetterSpacing(1)}
-                  onLetterSpacingChange={(v) =>
-                    setSettings((s2) => {
-                      const letterSpacingPx = clamp(v, 0, 8);
-                      return letterSpacingPx === s2.letterSpacingPx
-                        ? s2
-                        : { ...s2, letterSpacingPx };
-                    })
+                  columnsPerView={settings.columnsPerView === 2 ? 2 : 1}
+                  onColumnsChange={(cols) =>
+                    setSettings((s2) => ({ ...s2, columnsPerView: cols }))
                   }
-                  onWordSpacingDec={() => adjustWordSpacing(-1)}
-                  onWordSpacingInc={() => adjustWordSpacing(1)}
-                  onWordSpacingChange={(v) =>
-                    setSettings((s2) => {
-                      const wordSpacingPx = clamp(v, 0, 16);
-                      return wordSpacingPx === s2.wordSpacingPx ? s2 : { ...s2, wordSpacingPx };
-                    })
+                  readingMode={settings.readingMode === "scroll" ? "scroll" : "paginated"}
+                  onReadingModeChange={(mode) =>
+                    setSettings((s2) => (s2.readingMode === mode ? s2 : { ...s2, readingMode: mode }))
                   }
-                  onUiScaleChange={(v) => setUiScale(clamp(v, 0.75, 1.5))}
-                  onThemeChange={changeTheme}
+                  instantTurn={settings.instantTurn === true}
+                  onInstantTurnChange={(enabled) =>
+                    setSettings((s2) => ({ ...s2, instantTurn: enabled }))
+                  }
+                  forceHorizontal={settings.forceHorizontal === true}
+                  onForceHorizontalChange={(enabled) =>
+                    setSettings((s2) => ({ ...s2, forceHorizontal: enabled }))
+                  }
+                  preloadNextChapter={settings.preloadNextChapter === true}
+                  preloadNextChapterDisabled={book?.fixedLayout === true}
+                  onPreloadNextChapterChange={(enabled) =>
+                    setSettings((s2) => ({ ...s2, preloadNextChapter: enabled }))
+                  }
+                  customCss={settings.customCss}
+                  onCustomCssChange={(css) =>
+                    setSettings((s2) => ({ ...s2, customCss: css }))
+                  }
                   onResetDefaults={resetDefaults}
-                  onClose={closeForeground}
-                  issueCount={logItems.length}
                   onToggleLog={handleToggleLog}
+                  issueCount={logItems.length}
+                  onOpenFile={() => {
+                    void handleChooseBooks();
+                    closeForeground();
+                  }}
+                  onClose={closeForeground}
                 />}
               </>
             )}
             {ready ? (
               <>
-                {tocOpen && (
-                  <>
-                    <div className="toc-backdrop" onClick={() => closePanel("toc")} />
-                    <TocPanel
-                      toc={book!.toc}
-                      activeHref={activeHref}
-                      onNavigate={handleTocNavigate}
-                      onClose={() => closePanel("toc")}
-                    />
-                  </>
-                )}
                 {searchOpen && (
                   <>
                     <div className="search-backdrop" onClick={() => closePanel("search")} />
@@ -3402,7 +3824,7 @@ export default function App() {
                           const crossResult = crossBookPanelResults.find((candidate) => candidate.id === panelResult.id);
                           if (!crossResult) return;
                           const entry = entryByContentHashRef.current.get(crossResult.hit.contentHash);
-                          if (entry) void handleShelfOpen(entry.id, crossResult.hit, crossResult.textHits);
+                          if (entry) void handleShelfOpen(entry.id, crossResult.hit, crossResult.textHits, crossResult.occurrence);
                           return;
                         }
                         const result = searchResults.find((candidate) =>
@@ -3419,25 +3841,6 @@ export default function App() {
                         setSearchProgress({ processed: 0, total: 0 });
                       } : undefined}
                       onClose={() => closePanel("search")}
-                    />
-                  </>
-                )}
-                {notesOpen && (
-                  <>
-                    <div className="notes-backdrop" onClick={() => closePanel("notes")} />
-                    <NotesPanel
-                      notes={noteViewModels}
-                      onClose={() => closePanel("notes")}
-                      onNavigate={(viewNote) => {
-                        const note = currentNotes.find((candidate) => candidate.id === viewNote.id);
-                        if (note) handleNoteNavigate(note);
-                      }}
-                      onEdit={(viewNote) => {
-                        const note = currentNotes.find((candidate) => candidate.id === viewNote.id);
-                        if (!note) return;
-                         openComposer({ mode: "edit", note });
-                      }}
-                      onDelete={(viewNote) => void handleDeleteNote(viewNote.id)}
                     />
                   </>
                 )}
@@ -3492,6 +3895,8 @@ export default function App() {
                   onInternalLink={handleInternalNavigate}
                   onBeforeInternalNavigate={captureReaderHistory}
                   onInternalNavigationSettled={handleReaderDisplayReady}
+                  onNavigationUnresolved={handleReaderNavigationUnresolved}
+                  onUserReadingPositionChange={handleUserReadingPositionChange}
                   onExternalLink={handleExternalLink}
                    onFootnote={(payload) => openTransient("footnote", payload)}
                   onFootnoteClose={handleFootnoteClose}
@@ -3499,18 +3904,39 @@ export default function App() {
                   inputPaused={imageRequest !== null}
                   initialAnchor={initialAnchor}
                   initialPage={initialPage}
+                  initialAlignment={initialAlignment}
                   startAtEnd={startAtEnd}
                   preciseTarget={preciseTarget}
                   onPreciseNavigationStatus={handlePreciseNavigationStatus}
+                  onContentFractionSettled={handleContentFractionSettled}
+                  onContentFractionCancelled={handleContentFractionCancelled}
+                  onContentFractionFailed={handleContentFractionFailed}
+                  onUserProgressSample={handleUserProgressSample}
                 />
                 <ImageViewer
                   image={imageRequest}
                   onClose={closeImageOverlay}
                   onFollowLink={(image) => {
-                    // 带链接的图片：交回既有链接路由，不直接 window.open。
+                    // 带链接的图片：交回既有安全路由与历史路径，不直接 window.location。
                     const href = image.linkHref;
                     closeImageOverlay();
-                    if (href) handleInternalNavigate(href);
+                    if (!href) return;
+                    if (isExternalUrl(href) || href.startsWith("//")) {
+                      handleExternalLink(href);
+                      return;
+                    }
+                    if (isFragmentOnly(href)) {
+                      const snapshot = currentReaderPosition();
+                      if (readerRef.current?.navigateWithinCurrentChapter({ fragment: href.slice(1) })) {
+                        commitReaderHistorySnapshot(snapshot);
+                      }
+                      return;
+                    }
+                    // ImageViewRequest keeps the original anchor href, which is
+                    // relative to its chapter. Resolve it before App routing.
+                    const { path, anchor } = splitHref(href);
+                    const resolved = resolvePath(image.chapterPath, path);
+                    handleTocNavigate(anchor ? `${resolved}#${anchor}` : resolved);
                   }}
                 />
                 {selectionContext && (
@@ -3579,22 +4005,36 @@ export default function App() {
         )}
       </div>
       {view === "reader" && ready && (
-        <div className="status-bar">
-          <span className="sb-clock">{clockText}</span>
-          <span className="sb-title" title={currentChapterLabel}>
-            {currentChapterLabel || book!.metadata.title}
-          </span>
-          <div className="sb-trailing">
-            <span className="sb-progress">
-              {reading
-                ? settings.readingMode === "scroll"
-                  ? `本章 ${Math.round((chapterState.scrollProgress ?? 0) * 100)}% · 章 ${linearPos + 1}/${linearCount} · ${progressLabel}`
-                : `第 ${chapterState.currentPage + 1}/${chapterState.pageCount} 页 · 章 ${linearPos + 1}/${linearCount} · ${progressLabel}`
-              : "加载中…"}
-            </span>
-
-          </div>
-        </div>
+        <WhisperFooter
+          currentPage={chapterState.status === "ready" ? chapterState.currentPage : 0}
+          pageCount={chapterState.status === "ready" ? chapterState.pageCount : 1}
+          readingMode={settings.readingMode === "scroll" ? "scroll" : "paginated"}
+          scrollProgress={chapterState.status === "ready" ? chapterState.scrollProgress ?? 0 : 0}
+          totalScrollProgress={chapterState.status === "ready" ? chapterState.totalScrollProgress : undefined}
+          chapterTitle={currentChapterLabel || book!.metadata.title}
+          chapterIndex={spineIndex}
+          totalChapters={book!.spine.length}
+          estimatedMinutesLeft={estimatedMinutesLeft}
+          bookProgressPct={progressPct}
+          onSeekPage={(targetPage) => {
+            readerRef.current?.setPage(targetPage);
+          }}
+          onSeekChapter={(targetSpineIndex) => {
+            if (targetSpineIndex >= 0 && targetSpineIndex < book!.spine.length) {
+              const path = spineItemPath(book!, targetSpineIndex);
+              if (path) handleTocNavigate(path);
+            }
+          }}
+          onSeekRatio={(targetRatio) => {
+            handleCommitSeek(targetRatio);
+          }}
+          chapterTicks={chapterTicks}
+          zenMode={isFullscreen}
+          scrubState={scrubUiState}
+          contentAxis={contentAxis}
+          onCommitSeek={handleCommitSeek}
+          onPreviewChange={handleScrubPreviewChange}
+        />
       )}
       {logOpen && (
         <>

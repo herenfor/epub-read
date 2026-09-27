@@ -1,3 +1,5 @@
+import type { MediaReadingAnchor } from "../render/paginator";
+
 /** Pure bounded back/forward state for explicit reader navigation. */
 export const READER_HISTORY_LIMIT = 3;
 
@@ -9,6 +11,8 @@ export interface ReaderNavigationPosition {
     ratio: number;
     anchorTextOffset?: number | null;
     anchorTextSnippet?: string | null;
+    /** B-155：纯图片页的媒体身份/比例；旧历史缺省可读。 */
+    mediaAnchor?: MediaReadingAnchor | null;
   } | null;
 }
 

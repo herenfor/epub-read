@@ -4,7 +4,7 @@ import type { PageMarginsPx, ReadingMode } from "./pageLayout";
 
 export type { PageMarginsPx, ReadingMode };
 
-export type Theme = "light" | "dark" | "sepia";
+export type Theme = "light" | "dark" | "sepia" | "gray";
 
 export interface ReaderSettings {
   fontSizePx: number;
@@ -41,6 +41,8 @@ export interface ReaderSettings {
   forceHorizontal?: boolean;
   /** 预先准备下一章以加快顺序切换；undefined/false = 按需加载 */
   preloadNextChapter?: boolean;
+  /** 极速无动画模式（0ms 瞬翻）；undefined/false = 180ms 动画 */
+  instantTurn?: boolean;
 }
 
 export const DEFAULT_SETTINGS: ReaderSettings = {
@@ -52,6 +54,7 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
   columnsPerView: 1,
   forceHorizontal: false,
   preloadNextChapter: false,
+  instantTurn: false,
 };
 
 /**

@@ -64,6 +64,33 @@ describe("library archive bridge", () => {
     expect(archive.organization).toEqual(emptyOrganization());
   });
 
+  it("round-trips media anchors through the portable bridge", () => {
+    const mediaAnchor = { index: 1, tag: "img", signature: "img|cover", ratio: 0.25 };
+    const archive = buildLibraryArchive([
+      entry(hashA, {
+        anchorIndex: null,
+        anchorRatio: null,
+        mediaAnchor,
+        bookmarks: [{
+          id: "bm-media",
+          spineIndex: 1,
+          page: 0,
+          anchorIndex: null,
+          anchorRatio: null,
+          anchorTextOffset: null,
+          anchorTextSnippet: null,
+          mediaAnchor,
+          text: "",
+          createdAtMs: 1,
+        }],
+      }),
+    ], emptyOrganization());
+    const projected = projectArchiveToBrowserShelf([], archive);
+    expect(projected[0].mediaAnchor).toEqual(mediaAnchor);
+    expect(projected[0].bookmarks?.[0].mediaAnchor).toEqual(mediaAnchor);
+    expect(JSON.stringify(archive)).toContain("mediaAnchor");
+  });
+
   it("round-trips text anchors through the portable bridge", () => {
     const archive = buildLibraryArchive([
       entry(hashA, { anchorTextOffset: 7, anchorTextSnippet: "😀正文" }),

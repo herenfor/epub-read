@@ -161,8 +161,13 @@ export function scrollViewForColumn(input: ColumnViewInput): ColumnView {
  * 注入 CSS 里 html/body 高度固定且 overflow:hidden，viewer 若不固定高度
  * 会被 L3 的 height:auto 撑成整章高度，导致没有可滚动区间。
  */
-export function scrollViewerStyles(viewportHeight: number, pageMarginPx = 0): Array<[string, string]> {
+export function scrollViewerStyles(
+  viewportHeight: number,
+  pageMarginPx = 0,
+  pageMarginRightPx = pageMarginPx,
+): Array<[string, string]> {
   const margin = Math.max(0, pageMarginPx);
+  const marginRight = Math.max(0, pageMarginRightPx);
   const height = Number.isFinite(viewportHeight) && viewportHeight > 0 ? `${Math.round(viewportHeight)}px` : "100%";
   // 必须使用 CSS 属性名（kebab-case）：CSSStyleDeclaration.setProperty 不接受
   // JS 驼峰名，传错会静默失败（这正是滚动模式最初卡在分页高度的原因）。
@@ -179,7 +184,7 @@ export function scrollViewerStyles(viewportHeight: number, pageMarginPx = 0): Ar
     // 不写 width：viewer 占满可用宽，正文版心仍由 L3 的 max-width 居中控制。
     // 一旦写成 0/列宽，正文容器会塌缩到不可见。
     ["padding-left", `${margin}px`],
-    ["padding-right", `${margin}px`],
+    ["padding-right", `${marginRight}px`],
   ];
 }
 

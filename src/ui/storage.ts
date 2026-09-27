@@ -1,4 +1,5 @@
 import { sanitizePersistedTextAnchor } from "../render/textAnchor";
+import type { MediaReadingAnchor } from "../render/paginator";
 import type { PageMarginsPx, ReadingMode } from "../render/settings";
 
 const PREFIX = "epub-reader:";
@@ -12,6 +13,8 @@ export interface SavedProgress {
     ratio: number;
     anchorTextOffset?: number | null;
     anchorTextSnippet?: string | null;
+    /** B-155：纯图片页的媒体身份/比例；旧记录缺省可读。 */
+    mediaAnchor?: MediaReadingAnchor | null;
   } | null;
 }
 
@@ -50,7 +53,7 @@ export function writeProgress(key: string, p: SavedProgress): void {
 
 export interface SavedSettings {
   fontSizePx?: number;
-  theme?: "light" | "dark" | "sepia";
+  theme?: "light" | "dark" | "sepia" | "gray";
   /** UI 界面缩放（0.75–1.5），与正文字号相互独立 */
   uiScale?: number;
   lineHeight?: number;
@@ -67,6 +70,8 @@ export interface SavedSettings {
   forceHorizontal?: boolean;
   /** 是否预先准备下一章以加快顺序切换；旧设置缺省为 false */
   preloadNextChapter?: boolean;
+  /** 极速瞬翻模式 */
+  instantTurn?: boolean;
   /** 阅读方式；旧设置缺省为分页 */
   readingMode?: ReadingMode;
   /** 阅读器视口四边留白；未设置的边沿用旧默认 */

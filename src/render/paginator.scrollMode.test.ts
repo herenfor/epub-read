@@ -14,6 +14,8 @@ const internals = ChapterPaginator.prototype as unknown as {
   scrollByViewport(this: unknown, direction: 1 | -1): boolean;
   captureAnchor(this: unknown): void;
   navigateToSearchTarget(this: unknown, request: unknown): string;
+  resolveFragmentContentY(this: unknown, fragment: string): number | null;
+  resolveSearchTargetContentY(this: unknown, request: unknown): number | null;
   imageCandidate(this: unknown, target: Element): Element | null;
   renderScrollChapterEnd(this: unknown): void;
 };
@@ -616,4 +618,40 @@ describe("scroll mode C-53 toolbar centering", () => {
     expect(toolbar.style.getPropertyValue("margin-right")).toBe("auto");
     expect(toolbar.style.getPropertyPriority("margin-right")).toBe("important");
   });
+
+  it("resolves a same-chapter fragment to unclipped contentY without scrolling", () => {
+    const { context } = scrollContext();
+    (context.contentDoc as {
+      getElementById(id: string): { getBoundingClientRect(): { top: number; left: number; right: number; bottom: number; width: number; height: number } } | null;
+    }).getElementById = (id: string) =>
+      id === "note-1"
+        ? { getBoundingClientRect: () => ({ top: 260, left: 0, right: 10, bottom: 280, width: 10, height: 20 }) }
+        : null;
+    context.iframe = { contentWindow: { location: { hash: "" } } };
+    const before = (context.viewer as { scrollTop: number }).scrollTop;
+    expect(internals.resolveFragmentContentY.call(context, "note-1")).toBe(160);
+    expect((context.viewer as { scrollTop: number }).scrollTop).toBe(before);
+  });
+
+  it("resolves an exact search hit to unclipped contentY without navigating", () => {
+    const { context } = scrollContext();
+    context.textIndex = {
+      codePoints: ["甲", "乙"],
+      totalChars: 2,
+      mediaUnits: 0,
+      snippetAt: () => "甲乙",
+      rangeForOffsets: () => ({
+        getClientRects: () => [{ top: 312, left: 0, right: 10, bottom: 330, width: 10, height: 18 }],
+        getBoundingClientRect: () => ({ top: 312, left: 0, right: 10, bottom: 330, width: 10, height: 18 }),
+      }),
+    };
+    expect(
+      internals.resolveSearchTargetContentY.call(context, {
+        requestId: 2,
+        kind: "search",
+        textHits: [{ start: 0, end: 2, exactText: "甲乙" }],
+      }),
+    ).toBe(212);
+  });
+
 });

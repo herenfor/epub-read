@@ -60,7 +60,12 @@ const paginatedCommitInternals = {
   viewStepPx: 100,
   applyResolvedPosition: (
     ChapterPaginator.prototype as unknown as {
-      applyResolvedPosition: (this: unknown, page: number, candidate: unknown) => void;
+      applyResolvedPosition: (
+        this: unknown,
+        page: number,
+        candidate: unknown,
+        options?: { preserveCandidate?: boolean },
+      ) => void;
     }
   ).applyResolvedPosition,
   contentX: (
@@ -83,10 +88,44 @@ describe("content-anchor restore precedence", () => {
     ).toEqual({ page: 3, consumeFallback: false });
   });
 
-  it("uses saved page only when both text and legacy anchors are invalid", () => {
-    expect(
-      resolveRestoredPage({ pageCount: 4, anchorCol: null, fallbackPage: 9, currentPage: 0 })
-    ).toEqual({ page: 3, consumeFallback: true });
+  it("keeps an explicit search candidate instead of overwriting it with the page-center sample", () => {
+    const sampled = {
+      index: 2,
+      ratio: 0.4,
+      charsRead: 40,
+      totalChars: 100,
+      mediaUnits: 0,
+      textOffset: 40,
+      textSnippet: "采样",
+    };
+    const candidate = {
+      index: -1,
+      ratio: 0,
+      charsRead: 2,
+      totalChars: 100,
+      mediaUnits: 0,
+      textOffset: 2,
+      textSnippet: "星君",
+    };
+    const context: Record<string, unknown> = {
+      viewer: { scrollLeft: 0 },
+      effectiveColumns: 1,
+      leadingColumns: 0,
+      viewStepPx: 100,
+      scrollMode: false,
+      _currentPath: "Text/chapter.xhtml",
+      anchor: null,
+      anchorPath: undefined,
+      captureAnchor() {
+        context.anchor = sampled;
+        context.anchorPath = "Text/chapter.xhtml";
+      },
+      readyState: () => ({ status: "ready", pageCount: 5, currentPage: 1, empty: false }),
+      emit() {},
+    };
+    paginatedCommitInternals.applyResolvedPosition.call(context, 1, candidate, { preserveCandidate: true });
+    expect(context.anchor).toEqual(candidate);
+    expect(context.anchorPath).toBe("Text/chapter.xhtml");
   });
 });
 
@@ -828,11 +867,19 @@ describe("internal link history notification", () => {
     }
   ).handleLinkClick;
 
-  function invoke(href: string, targetExists = true) {
+  function invoke(
+    href: string,
+    targetExists = true,
+    targetOverride: Element | null = null,
+    activateImageImpl: (target: Element) => boolean = () => false,
+    footnoteAside: Element | null = null,
+  ) {
     const before: string[] = [];
     const navigated: string[] = [];
     const external: string[] = [];
     const jumped: string[] = [];
+    const seenImageTargets: Element[] = [];
+    const shownFootnotes: Array<{ anchor: Element; info: unknown; pinned: boolean }> = [];
     let settled = 0;
     const link = {
       getAttribute: (name: string) => (name === "href" ? href : null),
@@ -841,7 +888,7 @@ describe("internal link history notification", () => {
       closest: (selector: string) => (selector === "a" ? link : null),
     } as unknown as HTMLAnchorElement;
     const event = {
-      target: link,
+      target: targetOverride ?? link,
       preventDefault() {},
       stopPropagation() {},
     } as unknown as Event;
@@ -849,6 +896,7 @@ describe("internal link history notification", () => {
       iframe: { contentWindow: { location: { hash: "" } } },
       contentDoc: {
         getElementById: () => (targetExists ? { getBoundingClientRect: () => ({ left: 0 }) } : null),
+        querySelectorAll: () => (footnoteAside ? [footnoteAside] : []),
       },
       viewer: { scrollLeft: 0 },
       step: 1,
@@ -871,14 +919,20 @@ describe("internal link history notification", () => {
       onNavigate: (value: string) => navigated.push(value),
       onExternalLink: (value: string) => external.push(value),
       jumpToAnchor: (value: string) => jumped.push(value),
-      // 图片激活只由活动章节的 UI 回调处理；这里用空实现隔离链接路由断言。
-      activateImage: () => false,
+      // 图片激活/脚注显示由 UI 回调处理；这里记录参数并隔离链接路由断言。
+      activateImage: (target: Element) => {
+        seenImageTargets.push(target);
+        return activateImageImpl(target);
+      },
+      showFootnote: (anchor: Element, info: unknown, pinned: boolean) => {
+        shownFootnotes.push({ anchor, info, pinned });
+      },
       onInternalNavigationSettled: () => {
         settled += 1;
       },
     };
     handleLinkClick.call(context, event);
-    return { before, navigated, external, jumped, settled };
+    return { before, navigated, external, jumped, settled, seenImageTargets, shownFootnotes };
   }
 
   it("跨章与同章 fragment 各通知一次，外部链接不通知", () => {
@@ -926,6 +980,59 @@ describe("internal link history notification", () => {
       jumped: [],
       external: ["https://example.com"],
     });
+  });
+
+  it("带链接图片用实际 target 打开，图下文字链接继续跳转", () => {
+    const link = {
+      getAttribute: (name: string) => (name === "href" ? "chapter.xhtml" : null),
+      classList: { contains: () => false },
+      querySelector: () => null,
+      closest: (selector: string) => (selector === "a" ? link : null),
+    } as unknown as HTMLAnchorElement;
+    const img = {
+      nodeType: 1,
+      tagName: "IMG",
+      closest: (selector: string) => (selector === "a" ? link : null),
+    } as unknown as Element;
+    const span = {
+      nodeType: 1,
+      tagName: "SPAN",
+      closest: (selector: string) => (selector === "a" ? link : null),
+    } as unknown as Element;
+
+    const image = invoke("chapter.xhtml", true, img, () => true);
+    expect(image.seenImageTargets).toEqual([img]);
+    expect(image.navigated).toEqual([]);
+
+    const text = invoke("chapter.xhtml", true, span, () => false);
+    expect(text.seenImageTargets).toEqual([span]);
+    expect(text.before).toEqual(["Text/chapter.xhtml"]);
+    expect(text.settled).toBe(1);
+  });
+
+  it("脚注链接优先于图片浮层，即使实际点击目标是脚注图片", () => {
+    const aside = {
+      getAttribute: (name: string) => (name === "id" ? "note-1" : null),
+      textContent: "注释正文",
+      querySelector: () => null,
+    };
+    const link = {
+      getAttribute: (name: string) => (name === "href" ? "#note-1" : null),
+      classList: { contains: (name: string) => name === "duokan-footnote" },
+      querySelector: () => null,
+      closest: (selector: string) => (selector === "a" ? link : null),
+    } as unknown as HTMLAnchorElement;
+    const img = {
+      nodeType: 1,
+      tagName: "IMG",
+      closest: (selector: string) => (selector === "a" ? link : null),
+    } as unknown as Element;
+
+    const result = invoke("#note-1", true, img, () => true, aside as unknown as Element);
+    expect(result.seenImageTargets).toEqual([]);
+    expect(result.shownFootnotes).toHaveLength(1);
+    expect(result.shownFootnotes[0]).toMatchObject({ anchor: link, pinned: true });
+    expect(result.navigated).toEqual([]);
   });
 });
 
@@ -2290,5 +2397,108 @@ describe("applyBookMargins C-53 toolbar centering", () => {
     expect(nonTopToolbar.setAttribute).not.toHaveBeenCalled();
     expect(nonTopStyle.setProperty).not.toHaveBeenCalled();
     expect(context.marginFixes.length).toBe(1);
+  });
+});
+
+describe("R5 explicit anchor commit vs pending sample", () => {
+  it("cancels the queued page-turn sample and rejects a stale epoch callback", () => {
+    const captureAnchor = vi.fn();
+    const cancelAnchorFrame = vi.fn();
+    let queuedFrame: (() => void) | null = null;
+    const context = Object.create(ChapterPaginator.prototype) as any;
+    Object.assign(context, {
+      viewer: { scrollLeft: 0, clientWidth: 800, clientHeight: 600 },
+      step: 100,
+      effectiveColumns: 1,
+      leadingColumns: 0,
+      geometry: null,
+      metrics: { pageCount: 5, currentPage: 0 },
+      loadSeq: 1,
+      disposed: false,
+      settings: { readingMode: "paginated" },
+      closeFootnoteForNavigation: vi.fn(),
+      clearSearchHighlightForDocument: vi.fn(),
+      emit: vi.fn(),
+      captureAnchor,
+      cancelAnchorFrame,
+      requestAnchorFrame: (callback: () => void) => {
+        queuedFrame = callback;
+        return 7;
+      },
+      pendingAnchorFrame: null,
+      pendingAnchorFrameKind: "timer",
+      pendingAnchorLoadSeq: -1,
+      pendingAnchorPage: -1,
+      anchorSampleEpoch: 0,
+      pendingAnchorEpoch: -1,
+      anchor: null,
+      anchorPath: undefined,
+    });
+
+    ChapterPaginator.prototype.setPage.call(context, 1);
+    expect(queuedFrame).toBeTypeOf("function");
+
+    const commitWithinChapterPage = (
+      ChapterPaginator.prototype as unknown as {
+        commitWithinChapterPage: (
+          page: number,
+          candidate: unknown,
+          options?: { preserveCandidate?: boolean },
+        ) => void;
+      }
+    ).commitWithinChapterPage;
+    commitWithinChapterPage.call(
+      context,
+      1,
+      {
+        index: -1,
+        ratio: 0,
+        charsRead: 4,
+        totalChars: 100,
+        mediaUnits: 0,
+        textOffset: 4,
+        textSnippet: "精确",
+      },
+      { preserveCandidate: true },
+    );
+    expect(context.anchor?.textOffset).toBe(4);
+    expect(captureAnchor).not.toHaveBeenCalled();
+    expect(cancelAnchorFrame).toHaveBeenCalledWith(7);
+
+    // 即便旧 RAF 回调已被出队后才执行，导航代次也必须判旧。
+    (queuedFrame as (() => void) | null)?.();
+    expect(captureAnchor).not.toHaveBeenCalled();
+    expect(context.anchor?.textOffset).toBe(4);
+  });
+});
+
+describe("B-153 paged anchor sampling", () => {
+  it("defers the normal page-turn sample to the next frame and flushes it on demand", () => {
+    const captureAnchor = vi.fn();
+    const context = Object.create(ChapterPaginator.prototype) as any;
+    Object.assign(context, {
+      viewer: { scrollLeft: 0, clientWidth: 800, clientHeight: 600 },
+      step: 100,
+      effectiveColumns: 1,
+      leadingColumns: 0,
+      geometry: null,
+      metrics: { pageCount: 5, currentPage: 0 },
+      loadSeq: 1,
+      disposed: false,
+      settings: { readingMode: "paginated" },
+      closeFootnoteForNavigation: vi.fn(),
+      clearSearchHighlightForDocument: vi.fn(),
+      emit: vi.fn(),
+      captureAnchor,
+    });
+
+    ChapterPaginator.prototype.setPage.call(context, 1);
+    expect(context.viewer.scrollLeft).toBe(100);
+    // 普通翻页调用栈里不再做同步锚点采样。
+    expect(captureAnchor).not.toHaveBeenCalled();
+
+    // 进度写入/书签/历史读取时必须补齐最新页。
+    ChapterPaginator.prototype.getReadingAnchor.call(context);
+    expect(captureAnchor).toHaveBeenCalledTimes(1);
   });
 });

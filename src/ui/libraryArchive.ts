@@ -7,6 +7,7 @@
  */
 
 import { sanitizePersistedTextAnchor } from "../render/textAnchor";
+import type { MediaReadingAnchor } from "../render/paginator";
 import { hasReadEvidence } from "./readEvidence";
 import { hasDuplicateReaderNoteIds, normalizeReaderNote, type ReaderNote, validateReaderNote } from "./notes";
 import {
@@ -40,6 +41,8 @@ export interface ArchiveBookmark {
   anchorRatio: number | null;
   anchorTextOffset: number | null;
   anchorTextSnippet: string | null;
+  /** B-155：纯图片页媒体身份/比例；旧存档缺省可读。 */
+  mediaAnchor?: MediaReadingAnchor | null;
   text: string;
   createdAtMs: number;
 }
@@ -61,6 +64,8 @@ export interface LibraryRecord {
   anchorRatio: number | null;
   anchorTextOffset: number | null;
   anchorTextSnippet: string | null;
+  /** B-155：纯图片页媒体身份/比例；旧存档缺省可读。 */
+  mediaAnchor?: MediaReadingAnchor | null;
   isNew: boolean;
   bookmarks: ArchiveBookmark[];
   /** Added in the note feature; omitted in old v1 archives and normalized to []. */
@@ -164,6 +169,29 @@ function reportForbiddenFields(value: Record<string, unknown>, path: string, err
   }
 }
 
+function mediaAnchorValue(
+  value: unknown,
+  path: string,
+  errors: ArchiveIssue[],
+): MediaReadingAnchor | null {
+  if (value === undefined || value === null) return null;
+  if (!objectLike(value)) {
+    issue(errors, path, "invalid-media-anchor", "expected a media anchor object");
+    return null;
+  }
+  const index = nonNegative(value.index, `${path}.index`, errors, true);
+  const tag = stringValue(value.tag, `${path}.tag`, errors);
+  const signature = stringValue(value.signature, `${path}.signature`, errors);
+  const ratio = finiteNumber(value.ratio, `${path}.ratio`, errors);
+  if (ratio !== null && (ratio < 0 || ratio > 1)) {
+    issue(errors, `${path}.ratio`, "invalid-range", "must be between 0 and 1");
+  }
+  if (index === null || tag === null || signature === null || ratio === null || ratio < 0 || ratio > 1) {
+    return null;
+  }
+  return { index, tag, signature, ratio };
+}
+
 function bookmarkValue(value: unknown, path: string, errors: ArchiveIssue[]): ArchiveBookmark | null {
   if (!objectLike(value)) {
     issue(errors, path, "invalid-record", "expected a bookmark object");
@@ -184,10 +212,24 @@ function bookmarkValue(value: unknown, path: string, errors: ArchiveIssue[]): Ar
     (value.anchorTextOffset !== undefined && value.anchorTextOffset !== null && textAnchor.textOffset === null) ||
     (value.anchorTextSnippet !== undefined && value.anchorTextSnippet !== null && textAnchor.textSnippet === null);
   if (invalidTextAnchor) issue(errors, `${path}.anchorTextOffset`, "invalid-anchor-text", "text anchor must be a bounded non-whitespace code-point snippet");
+  const rawMediaAnchor = value.mediaAnchor;
+  const mediaAnchor = mediaAnchorValue(rawMediaAnchor, `${path}.mediaAnchor`, errors);
+  const invalidMediaAnchor = rawMediaAnchor !== undefined && rawMediaAnchor !== null && mediaAnchor === null;
   const text = stringValue(value.text, `${path}.text`, errors);
   const createdAtMs = nonNegative(value.createdAtMs, `${path}.createdAtMs`, errors);
-  if (id === null || spineIndex === null || page === null || (anchorIndex === null && value.anchorIndex !== null) || (anchorRatio === null && value.anchorRatio !== null) || invalidTextAnchor || text === null || createdAtMs === null) return null;
-  return { id, spineIndex, page, anchorIndex, anchorRatio, anchorTextOffset: textAnchor.textOffset, anchorTextSnippet: textAnchor.textSnippet, text, createdAtMs };
+  if (id === null || spineIndex === null || page === null || (anchorIndex === null && value.anchorIndex !== null) || (anchorRatio === null && value.anchorRatio !== null) || invalidTextAnchor || invalidMediaAnchor || text === null || createdAtMs === null) return null;
+  return {
+    id,
+    spineIndex,
+    page,
+    anchorIndex,
+    anchorRatio,
+    anchorTextOffset: textAnchor.textOffset,
+    anchorTextSnippet: textAnchor.textSnippet,
+    ...(mediaAnchor ? { mediaAnchor } : {}),
+    text,
+    createdAtMs,
+  };
 }
 
 function noteValue(value: unknown, path: string, errors: ArchiveIssue[]): ReaderNote | null {
@@ -233,6 +275,9 @@ function recordValue(value: unknown, hash: string, path: string, errors: Archive
     (value.anchorTextOffset !== undefined && value.anchorTextOffset !== null && textAnchor.textOffset === null) ||
     (value.anchorTextSnippet !== undefined && value.anchorTextSnippet !== null && textAnchor.textSnippet === null);
   if (invalidTextAnchor) issue(errors, `${path}.anchorTextOffset`, "invalid-anchor-text", "text anchor must be a bounded non-whitespace code-point snippet");
+  const rawMediaAnchor = value.mediaAnchor;
+  const mediaAnchor = mediaAnchorValue(rawMediaAnchor, `${path}.mediaAnchor`, errors);
+  const invalidMediaAnchor = rawMediaAnchor !== undefined && rawMediaAnchor !== null && mediaAnchor === null;
   if (typeof value.isNew !== "boolean") issue(errors, `${path}.isNew`, "invalid-boolean", "expected a boolean");
   const bookmarks: ArchiveBookmark[] = [];
   if (!Array.isArray(value.bookmarks)) {
@@ -257,8 +302,27 @@ function recordValue(value: unknown, hash: string, path: string, errors: Archive
       issue(errors, `${path}.notes`, "duplicate-note-id", "note IDs must be unique within a book");
     }
   }
-  if (title === null || creator === null || language === null || fileName === null || addedAtMs === null || lastReadAtMs === null || spineIndex === null || page === null || progressPct === null || progressPct < 0 || progressPct > 100 || (anchorIndex === null && value.anchorIndex !== null) || (anchorRatio === null && value.anchorRatio !== null) || invalidTextAnchor || typeof value.isNew !== "boolean") return null;
-  return { contentHash: hash, title, creator, ...(language ? { language } : {}), fileName, addedAtMs, lastReadAtMs, spineIndex, page, progressPct, anchorIndex, anchorRatio, anchorTextOffset: textAnchor.textOffset, anchorTextSnippet: textAnchor.textSnippet, isNew: value.isNew, bookmarks, notes };
+  if (title === null || creator === null || language === null || fileName === null || addedAtMs === null || lastReadAtMs === null || spineIndex === null || page === null || progressPct === null || progressPct < 0 || progressPct > 100 || (anchorIndex === null && value.anchorIndex !== null) || (anchorRatio === null && value.anchorRatio !== null) || invalidTextAnchor || invalidMediaAnchor || typeof value.isNew !== "boolean") return null;
+  return {
+    contentHash: hash,
+    title,
+    creator,
+    ...(language ? { language } : {}),
+    fileName,
+    addedAtMs,
+    lastReadAtMs,
+    spineIndex,
+    page,
+    progressPct,
+    anchorIndex,
+    anchorRatio,
+    anchorTextOffset: textAnchor.textOffset,
+    anchorTextSnippet: textAnchor.textSnippet,
+    ...(mediaAnchor ? { mediaAnchor } : {}),
+    isNew: value.isNew,
+    bookmarks,
+    notes,
+  };
 }
 
 const SETTING_KEYS = new Set([

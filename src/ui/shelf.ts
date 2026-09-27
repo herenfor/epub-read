@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { IS_AI_EDITION } from "../config/edition";
 import { sanitizePersistedTextAnchor } from "../render/textAnchor";
+import type { MediaReadingAnchor } from "../render/paginator";
 import type { LibraryRecord } from "./libraryArchive";
 import type { ThumbnailAsset, ThumbnailProvider } from "./thumbnail";
 import { hasDuplicateReaderNoteIds, normalizeReaderNotes, type ReaderNote } from "./notes";
@@ -30,6 +31,8 @@ export interface Bookmark {
   /** Optional on old records; all new writes use null when unavailable. */
   anchorTextOffset?: number | null;
   anchorTextSnippet?: string | null;
+  /** B-155：纯图片页的媒体身份/比例；旧记录缺省可读。 */
+  mediaAnchor?: MediaReadingAnchor | null;
   /** 创建时锚点所在行文字，用于列表展示 */
   text: string;
   createdAtMs: number;
@@ -54,6 +57,8 @@ export interface ShelfEntry {
   anchorRatio: number | null;
   anchorTextOffset?: number | null;
   anchorTextSnippet?: string | null;
+  /** B-155：纯图片页的媒体身份/比例；旧记录缺省可读。 */
+  mediaAnchor?: MediaReadingAnchor | null;
   /** EPUB 原始字节的 SHA-256；0.1.5 旧条目允许缺失并在判重时懒补。 */
   contentHash?: string;
   /** 新导入且尚未打开过：书架显示“新”标记，第一次打开后清除 */
@@ -89,12 +94,14 @@ export interface ShelfProgressPatch {
   anchorRatio: number | null;
   anchorTextOffset: number | null;
   anchorTextSnippet: string | null;
+  /** B-155 可选媒体锚点；旧记录缺省可读，写入时可为 null。 */
+  mediaAnchor?: MediaReadingAnchor | null;
 }
 
 export interface ShelfSaveInput {
   entry: Omit<
     ShelfEntry,
-    "progressPct" | "lastReadAtMs" | "spineIndex" | "page" | "anchorIndex" | "anchorRatio" | "anchorTextOffset" | "anchorTextSnippet" | "isNew"
+    "progressPct" | "lastReadAtMs" | "spineIndex" | "page" | "anchorIndex" | "anchorRatio" | "anchorTextOffset" | "anchorTextSnippet" | "mediaAnchor" | "isNew"
   > & {
     progressPct?: number;
     lastReadAtMs?: number;
@@ -104,6 +111,7 @@ export interface ShelfSaveInput {
     anchorRatio?: number | null;
     anchorTextOffset?: number | null;
     anchorTextSnippet?: string | null;
+    mediaAnchor?: MediaReadingAnchor | null;
     isNew?: boolean;
   };
   bytes: Uint8Array;
@@ -512,13 +520,44 @@ export function applyShelfProgressPatch(
   return entries.map((entry) => (entry.id === id ? { ...entry, ...patch, isNew: false } : entry));
 }
 
+/** Validate a persisted media anchor. Invalid/legacy-missing values degrade to null. */
+export function normalizeMediaReadingAnchor(value: unknown): MediaReadingAnchor | null {
+  if (!value || typeof value !== "object") return null;
+  const media = value as Partial<MediaReadingAnchor>;
+  if (
+    !Number.isSafeInteger(media.index) ||
+    (media.index as number) < 0 ||
+    typeof media.tag !== "string" ||
+    media.tag.length === 0 ||
+    typeof media.signature !== "string" ||
+    media.signature.length === 0 ||
+    typeof media.ratio !== "number" ||
+    !Number.isFinite(media.ratio) ||
+    media.ratio < 0 ||
+    media.ratio > 1
+  ) {
+    return null;
+  }
+  return {
+    index: media.index as number,
+    tag: media.tag,
+    signature: media.signature,
+    ratio: media.ratio,
+  };
+}
+
 /** Normalize legacy IndexedDB rows at the storage boundary; new writes use null. */
 function normalizeBookmarkTextAnchor(bookmark: Bookmark): Bookmark {
   const text = sanitizePersistedTextAnchor({
     textOffset: bookmark.anchorTextOffset,
     textSnippet: bookmark.anchorTextSnippet,
   });
-  return { ...bookmark, anchorTextOffset: text.textOffset, anchorTextSnippet: text.textSnippet };
+  return {
+    ...bookmark,
+    anchorTextOffset: text.textOffset,
+    anchorTextSnippet: text.textSnippet,
+    mediaAnchor: normalizeMediaReadingAnchor(bookmark.mediaAnchor),
+  };
 }
 
 export function normalizeShelfEntryTextAnchors(entry: ShelfEntry): ShelfEntry {
@@ -530,6 +569,7 @@ export function normalizeShelfEntryTextAnchors(entry: ShelfEntry): ShelfEntry {
     ...entry,
     anchorTextOffset: text.textOffset,
     anchorTextSnippet: text.textSnippet,
+    mediaAnchor: normalizeMediaReadingAnchor(entry.mediaAnchor),
     bookmarks: entry.bookmarks?.map(normalizeBookmarkTextAnchor),
     notes: normalizeReaderNotes(entry.notes),
   };
@@ -538,17 +578,19 @@ export function normalizeShelfEntryTextAnchors(entry: ShelfEntry): ShelfEntry {
 /** Convert persisted shelf fields to a renderer restore anchor. Never persist -1. */
 export function readingAnchorFromShelfEntry(entry: Pick<
   ShelfEntry,
-  "anchorIndex" | "anchorRatio" | "anchorTextOffset" | "anchorTextSnippet"
+  "anchorIndex" | "anchorRatio" | "anchorTextOffset" | "anchorTextSnippet" | "mediaAnchor"
 >): {
   index: number;
   ratio: number;
   anchorTextOffset: number | null;
   anchorTextSnippet: string | null;
+  mediaAnchor?: MediaReadingAnchor | null;
 } | null {
   const text = sanitizePersistedTextAnchor({
     textOffset: entry.anchorTextOffset,
     textSnippet: entry.anchorTextSnippet,
   });
+  const mediaAnchor = normalizeMediaReadingAnchor(entry.mediaAnchor);
   const legacy =
     typeof entry.anchorIndex === "number" &&
     Number.isSafeInteger(entry.anchorIndex) &&
@@ -557,13 +599,14 @@ export function readingAnchorFromShelfEntry(entry: Pick<
     Number.isFinite(entry.anchorRatio) &&
     entry.anchorRatio >= 0 &&
     entry.anchorRatio <= 1;
-  if (!legacy && text.textOffset === null) return null;
-  return {
+  if (!legacy && text.textOffset === null && !mediaAnchor) return null;
+  const restored = {
     index: legacy ? entry.anchorIndex! : -1,
-    ratio: legacy ? entry.anchorRatio! : 0,
+    ratio: legacy ? entry.anchorRatio! : (mediaAnchor?.ratio ?? 0),
     anchorTextOffset: text.textOffset,
     anchorTextSnippet: text.textSnippet,
   };
+  return mediaAnchor ? { ...restored, mediaAnchor } : restored;
 }
 
 /** 只清除新书标记；异步 markOpened 的旧返回值不能覆盖更新后的进度。 */
@@ -684,6 +727,7 @@ class IndexedDbShelfStore implements ShelfStore {
         anchorRatio: existing?.anchorRatio ?? input.entry.anchorRatio ?? null,
         anchorTextOffset: existing?.anchorTextOffset ?? input.entry.anchorTextOffset ?? null,
         anchorTextSnippet: existing?.anchorTextSnippet ?? input.entry.anchorTextSnippet ?? null,
+        mediaAnchor: existing?.mediaAnchor ?? input.entry.mediaAnchor ?? null,
         contentHash:
           contentHash ??
           (/^[a-f0-9]{64}$/i.test(input.entry.id) ? input.entry.id : undefined),
@@ -1055,6 +1099,7 @@ class TauriShelfStore implements ShelfStore {
       anchorRatio: patch.anchorRatio,
       anchorTextOffset: patch.anchorTextOffset,
       anchorTextSnippet: patch.anchorTextSnippet,
+      mediaAnchor: patch.mediaAnchor ?? null,
     });
   }
 

@@ -1,6 +1,9 @@
+mod android_uri_bridge;
 mod build_info;
 #[cfg(test)]
 mod build_info_contract;
+mod import_gate;
+mod ipc_bytes;
 
 #[cfg(feature = "ai")]
 macro_rules! configure_invoke_handler {
@@ -8,6 +11,10 @@ macro_rules! configure_invoke_handler {
         $builder.invoke_handler(tauri::generate_handler![
             linked_library::linked_library_import_paths,
             linked_library::linked_library_list_records,
+            linked_library::linked_library_import_documents,
+            linked_library::linked_library_cancel_document_import,
+            android_uri_bridge::android_read_content_uri,
+            android_uri_bridge::android_write_text_content_uri,
             linked_library::linked_library_read_source_raw,
             linked_library::linked_library_read_cover_raw,
             linked_library::linked_library_relink,
@@ -92,6 +99,10 @@ macro_rules! configure_invoke_handler {
         $builder.invoke_handler(tauri::generate_handler![
             linked_library::linked_library_import_paths,
             linked_library::linked_library_list_records,
+            linked_library::linked_library_import_documents,
+            linked_library::linked_library_cancel_document_import,
+            android_uri_bridge::android_read_content_uri,
+            android_uri_bridge::android_write_text_content_uri,
             linked_library::linked_library_read_source_raw,
             linked_library::linked_library_read_cover_raw,
             linked_library::linked_library_relink,
@@ -161,10 +172,13 @@ pub fn run() {
     let builder = builder
         .manage(FontWriteState::default())
         .manage(LinkedLibraryWriteState::default())
+        .manage(linked_library::ManagedImportState::default())
         .manage(ai::AiState::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init());
+    #[cfg(target_os = "android")]
+    let builder = builder.plugin(android_uri_bridge::plugin());
     // The embedding gateway only exists in the AI edition; Core must not link
     // or load the ONNX Runtime at all.
     #[cfg(feature = "ai")]
@@ -193,9 +207,9 @@ fn second_instance_activation_steps() -> [ExistingWindowActivation; 3] {
 }
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
-use sha2::{Digest, Sha256};
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager, State};
 
@@ -290,9 +304,8 @@ fn fonts_import_raw(
     if !valid_content_hash(&id) {
         return Err("无效的字体指纹".into());
     }
-    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
-        return Err("字体保存请求必须使用原始二进制".into());
-    };
+    let bytes =
+        ipc_bytes::decode_request_bytes(request.body(), None, "字体保存请求必须使用原始二进制")?;
     if bytes.is_empty() {
         return Err("字体内容为空".into());
     }
@@ -311,7 +324,7 @@ fn fonts_import_raw(
     let dir = fonts_root(&app)?;
     fs::create_dir_all(&dir).map_err(|e| format!("无法创建字体目录：{e}"))?;
     let file_path = dir.join(&id);
-    fs::write(&file_path, &bytes).map_err(|e| format!("无法保存字体文件：{e}"))?;
+    fs::write(&file_path, bytes.as_ref()).map_err(|e| format!("无法保存字体文件：{e}"))?;
 
     let _guard = state.0.lock().map_err(|_| "字体写入锁已损坏".to_string())?;
     let mut entries = load_fonts(&app)?;
@@ -346,7 +359,11 @@ fn fonts_import_paths(
 
     for path_str in paths {
         let p = Path::new(&path_str);
-        let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+        let ext = p
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_lowercase();
         if !["ttf", "otf", "woff", "woff2"].contains(&ext.as_str()) {
             continue;
         }
@@ -361,11 +378,18 @@ fn fonts_import_paths(
             continue;
         }
         let hash = format!("{:x}", Sha256::digest(&bytes));
-        let file_name = p.file_name().and_then(|s| s.to_str()).unwrap_or("font.ttf").to_string();
-        let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("CustomFont");
+        let file_name = p
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("font.ttf")
+            .to_string();
+        let stem = p
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("CustomFont");
         let family = stem.split_whitespace().collect::<Vec<_>>().join(" ");
         let file_path = dir.join(&hash);
-        fs::write(&file_path, &bytes).map_err(|e| format!("无法保存字体文件：{e}"))?;
+        fs::write(&file_path, bytes.as_slice()).map_err(|e| format!("无法保存字体文件：{e}"))?;
 
         entries.retain(|e| e.id != hash);
         let now = std::time::SystemTime::now()

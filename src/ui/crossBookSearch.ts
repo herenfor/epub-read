@@ -1,5 +1,6 @@
 import { buildDocument, MAX_ANCHOR_SNIPPET_CODE_POINTS, normalizeQueryPart } from "../core/corpus";
-import { buildExactTextHits, type ExactTextHit } from "../core/exactTextHits";
+import { buildExactTextHitsAndPoints, type ExactTextHit } from "../core/exactTextHits";
+import { captureSearchOccurrence, type SearchOccurrence } from "../core/searchOccurrence";
 import type { ResolvedCrossBookSearchHit } from "../features/ai/indexing/indexStore";
 import type { SearchPanelResult } from "./SearchPanel";
 
@@ -7,6 +8,8 @@ export interface CrossBookPanelResult extends SearchPanelResult {
   hit: ResolvedCrossBookSearchHit;
   /** Exact body ranges when the indexed block proves a contiguous match. */
   textHits?: ExactTextHit[];
+  /** Runtime-only exact identity context for a new cross-book search. */
+  occurrence?: SearchOccurrence;
 }
 
 function anchorSnippet(value: string): string {
@@ -45,14 +48,14 @@ export function presentCrossBookHit(
   const matchEnd = Math.max(matchStart, rawEnd - contextStart - leadingTrim);
   const textOffset = hit.textAnchor.start + localAnchorOffset;
   const exactRanges = rawEnd > rawStart ? [{ start: rawStart, end: rawEnd }] : [];
-  const localHits = exactRanges.length > 0
-    ? buildExactTextHits(hit.originalText, exactRanges)
+  const localExact = exactRanges.length > 0
+    ? buildExactTextHitsAndPoints(hit.originalText, exactRanges)
     : null;
-  // buildExactTextHits returns block-local code-point ranges.  Convert them
-  // exactly once to chapter coordinates by adding the raw block start; never
-  // add the already-offset exactHit.textAnchor.start a second time.
-  const textHits = localHits
-    ?.map((range) => ({
+  // buildExactTextHitsAndPoints returns block-local code-point ranges. Convert
+  // them exactly once to chapter coordinates by adding the raw block start;
+  // never add the already-offset exactHit.textAnchor.start a second time.
+  const textHits = localExact?.hits
+    .map((range) => ({
       ...range,
       start: hit.textAnchor.start + range.start,
       end: hit.textAnchor.start + range.end,
@@ -63,6 +66,12 @@ export function presentCrossBookHit(
       range.start >= 0 &&
       range.end > range.start
     );
+  // Cross-book context is only available inside the indexed block. Keep the
+  // capture block-local, then use the already-mapped chapter hits once.
+  const localOccurrence = localExact ? captureSearchOccurrence(localExact.points, localExact.hits) : null;
+  const occurrence = localOccurrence && textHits && textHits.length === localOccurrence.hits.length
+    ? { ...localOccurrence, hits: textHits }
+    : undefined;
   const exactHit = {
     ...hit,
     textAnchor: textHits && textHits.length > 0
@@ -84,5 +93,6 @@ export function presentCrossBookHit(
     disabledReason,
     hit: exactHit,
     textHits,
+    occurrence,
   };
 }

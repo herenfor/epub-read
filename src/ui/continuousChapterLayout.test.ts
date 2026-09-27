@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   ContinuousChapterLayout,
   ChapterLoadGate,
+  PendingScrollNavigation,
+  buildSpacedChapterBoxes,
   continuousWheelPixels,
   type ChapterExtent,
 } from "./continuousChapterLayout";
@@ -187,5 +189,74 @@ describe("ChapterLoadGate", () => {
     // Reset clears everything
     gate.reset();
     expect(gate.isCurrent(t2!)).toBe(false);
+  });
+});
+
+describe("ContinuousChapterLayout gap (B-154)", () => {
+  it("只在两个正高度章节之间插入 gap，空章不制造额外空隙", () => {
+    const extents: ChapterExtent[] = [
+      { key: "empty-first", height: 0, measured: true },
+      { key: "a", height: 100, measured: true },
+      { key: "empty-middle", height: 0, measured: true },
+      { key: "b", height: 80, measured: true },
+      { key: "empty-last", height: 0, measured: true },
+    ];
+    const { boxes, totalHeight } = buildSpacedChapterBoxes(extents, 24);
+    expect(boxes.map((box) => box.top)).toEqual([0, 0, 100, 124, 204]);
+    // 书首空章、空章和书尾空章都不增加总高；正章节之间计算 24px gap。
+    expect(totalHeight).toBe(204);
+  });
+
+  it("gap 内的点归到下个章节 offset 0，screenY 按实际章节 top 重算", () => {
+    const layout = new ContinuousChapterLayout([
+      { key: "a", height: 100, measured: true },
+      { key: "b", height: 100, measured: true },
+    ], 24);
+    // documentY=110 落在 [100,124) 的 gap 内。
+    expect(layout.pointAt(110)).toEqual({ key: "b", offset: 0 });
+    const anchor = layout.anchorAt(100, 100, 10); // documentY=110
+    expect(anchor).toEqual({ key: "b", offset: 0, screenY: 24 });
+    expect(layout.boxes[1].top).toBe(124);
+    expect(layout.totalHeight).toBe(224);
+  });
+
+  it("withMeasurements 保留 gap，重排后仍用同一布局表", () => {
+    const before = new ContinuousChapterLayout([
+      { key: "a", height: 100, measured: true },
+      { key: "b", height: 100, measured: true },
+    ], 24);
+    const { layout: after, scrollTop } = before.withMeasurements(
+      [{ key: "a", height: 200, measured: true }],
+      { key: "b", offset: 0, screenY: 0 },
+      600,
+      0,
+    );
+    expect(after.gap).toBe(24);
+    expect(after.boxes[1].top).toBe(224);
+    // V=600 时旧/新总高都小于视口，位置按合法范围回到 0。
+    expect(scrollTop).toBe(0);
+  });
+});
+
+describe("PendingScrollNavigation (B-155)", () => {
+  it("同书同布局代次才允许提交，旧票据/旧书不提交", () => {
+    const pending = new PendingScrollNavigation<{ kind: string }>();
+    const ticket = pending.begin(1, "0:a.xhtml", { kind: "anchor" });
+    expect(pending.current()).toBe(ticket);
+    expect(pending.canCommit(ticket, 1, 7, 7)).toBe(true);
+    expect(pending.canCommit(ticket, 2, 7, 7)).toBe(false);
+    expect(pending.canCommit(ticket, 1, 7, 8)).toBe(false);
+    expect(pending.settle(ticket)).toBe(true);
+    expect(pending.current()).toBeNull();
+    expect(pending.settle(ticket)).toBe(false);
+  });
+
+  it("新票据取代旧票据，旧票据不能结算", () => {
+    const pending = new PendingScrollNavigation<string>();
+    const oldTicket = pending.begin(1, "0:a.xhtml", "old");
+    const newTicket = pending.begin(1, "1:b.xhtml", "new");
+    expect(pending.canCommit(oldTicket, 1, 0, 0)).toBe(false);
+    expect(pending.settle(oldTicket)).toBe(false);
+    expect(pending.settle(newTicket)).toBe(true);
   });
 });

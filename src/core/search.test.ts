@@ -76,6 +76,11 @@ describe("current-book search core", () => {
     });
     expect(results[0].originalRange.end).toBeGreaterThan(results[0].originalRange.start);
     expect(results[0].textHits).toEqual([{ start: 0, end: 3, exactText: "Ａbc" }]);
+    expect(results[0].occurrence).toEqual({
+      hits: [{ start: 0, end: 3, exactText: "Ａbc" }],
+      before: "",
+      after: "",
+    });
   });
 
   it("maps surrogate pairs and NFKC expansions without per-character objects", async () => {

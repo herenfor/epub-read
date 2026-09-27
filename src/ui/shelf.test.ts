@@ -187,4 +187,16 @@ describe("progress entry merge", () => {
       readingAnchorFromShelfEntry(entry({ anchorIndex: null, anchorRatio: null, anchorTextOffset: 9, anchorTextSnippet: "正文" }))
     ).toMatchObject({ index: -1, anchorTextOffset: 9, anchorTextSnippet: "正文" });
   });
+
+  it("keeps a media-only shelf anchor for image progress restore", () => {
+    const mediaAnchor = { index: 2, tag: "img", signature: "img|mid", ratio: 0.6 };
+    expect(
+      readingAnchorFromShelfEntry(entry({ anchorIndex: null, anchorRatio: null, mediaAnchor }))
+    ).toMatchObject({
+      index: -1,
+      anchorTextOffset: null,
+      anchorTextSnippet: null,
+      mediaAnchor,
+    });
+  });
 });

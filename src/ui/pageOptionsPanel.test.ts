@@ -145,6 +145,16 @@ describe("PageOptionsPanel", () => {
     }
   });
 
+  it("scroll mode shows its own 12/16 auto margin defaults", async () => {
+    const panel = await renderPanel({ gapPx: 24, readingMode: "scroll" });
+    try {
+      expect(panel.text()).toContain("自动（12px）");
+      expect(panel.text()).toContain("自动（16px）");
+    } finally {
+      await panel.dom.dispose();
+    }
+  });
+
   it("disables all six rows for fixed layout and explains it is not applicable", async () => {
     const panel = await renderPanel({ gapPx: 24, pageMarginsPx: { top: 20 }, columnsPerView: 2 }, { fixedLayout: true });
     try {

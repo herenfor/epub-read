@@ -6,6 +6,7 @@ import {
   type ChapterState,
   type FootnotePayload,
   type ImageActivationPayload,
+  type MediaReadingAnchor,
   type ReaderNoteForPaginator,
   type SelectionContextPayload,
   type WithinChapterNavigationOptions,
@@ -17,12 +18,21 @@ import type { ResourceServer } from "../render/resources";
 import type { ReaderSettings } from "../render/settings";
 import { createSettingsReloadDebouncer } from "./settingsReload";
 import { TurnIntentBuffer, WheelTurnAccumulator } from "./turnIntent";
+import { ReadingWarmupPlan, type WarmupTicket } from "./readerWarmup";
 import { ContinuousReaderView } from "./ContinuousReaderView";
+import type { ScrubToken } from "./readerProgressAxis";
 
 export interface ReaderHandle {
   nextPage(): void;
   prevPage(): void;
   setPage(i: number): void;
+  /** 按比例 (0..1) 滚动或跳转 */
+  scrollToRatio?(ratio: number): void;
+  /** 统一内容轴章内比例跳转与会话票据 */
+  seekContentFraction?(
+    target: { key: string; spineIndex: number; fraction: number },
+    token: ScrubToken,
+  ): void;
   /** 渲染诊断文本（浏览器内调试） */
   diagnose(): string;
   /** 当前阅读锚点（进度持久化与内容进度） */
@@ -35,6 +45,8 @@ export interface ReaderHandle {
     mediaUnits: number;
     textOffset: number | null;
     textSnippet: string | null;
+    /** B-155：纯图片页跨模式复用图内身份/比例；旧调用方可忽略。 */
+    mediaAnchor?: MediaReadingAnchor | null;
   } | null;
   /** 当前锚点元素的一行文本（书签列表展示用） */
   getAnchorText(): string | null;
@@ -42,8 +54,10 @@ export interface ReaderHandle {
   jumpToAnchor(anchor: string): void;
   /** 在已完成布局的当前章节内同步导航；失败不改变位置。 */
   navigateWithinCurrentChapter(options: WithinChapterNavigationOptions): boolean;
-  /** 同章精确搜索命中；失败/不支持高亮时保留当前位置并返回明确状态。 */
-  navigateToSearchTarget(request: PreciseNavigationRequest): PreciseNavigationStatus;
+  /** 同章精确搜索命中；B-155 可选携带 canonical chapterPath 防止串章。 */
+  navigateToSearchTarget(
+    request: PreciseNavigationRequest & { chapterPath?: string },
+  ): PreciseNavigationStatus;
   /** 脚注标记当前矩形（阅读区坐标系），弹层随重排重定位用。 */
   getFootnoteMarkerRect(): {
     left: number;
@@ -96,6 +110,10 @@ interface ReaderViewProps {
   onBeforeInternalNavigate(href: string): void;
   /** 同章 fragment 已同步完成定位，可再次捕获下一次跳转。 */
   onInternalNavigationSettled(): void;
+  /** 连续模式语义锚点失败时结束 loading，但不冒充定位成功。 */
+  onNavigationUnresolved?(reported: boolean): void;
+  /** 连续宿主发生真实用户位移；程序化定位/重排不触发。 */
+  onUserReadingPositionChange?(): void;
   /** 外部链接（http/https/mailto/tel）交给系统默认浏览器/应用打开 */
   onExternalLink(url: string): void;
   /** 脚注弹层（文本/HTML/固定状态 + 标记在阅读区坐标系的矩形） */
@@ -122,14 +140,48 @@ interface ReaderViewProps {
     ratio: number;
     anchorTextOffset: number | null;
     anchorTextSnippet: string | null;
+    /** B-155：纯图片页可选的媒体身份/比例；文本锚点优先。 */
+    mediaAnchor?: MediaReadingAnchor | null;
   } | null;
   /** Legacy page fallback; paginator consumes it only after both anchors fail. */
   initialPage?: number | null;
+  /** 连续模式恢复初始对齐：reading-line 对齐到 20% 阅读线（书签恢复专用），context 对齐到顶部微小 inset（默认） */
+  initialAlignment?: "reading-line" | "context";
   /** 连续滚动模式：视口上方约 20% 阅读线观察到的可见章节变化 */
   onVisibleChapterChange?(index: number, anchor: ReadingAnchor | null): void;
+  onContentFractionSettled?(
+    token: ScrubToken,
+    location: { key: string; spineIndex: number; fraction: number; atEnd: boolean },
+  ): void;
+  onContentFractionCancelled?(token: ScrubToken): void;
+  onContentFractionFailed?(token: ScrubToken): void;
+  onUserProgressSample?(location: {
+    key: string;
+    spineIndex: number;
+    fraction: number;
+    atEnd: boolean;
+  }): void;
 }
 
-type ReaderFrame = "primary" | "secondary" | "tertiary";
+type ReaderFrame = "primary" | "secondary" | "tertiary" | "quaternary" | "quinary" | "warmup";
+type LiveReaderFrame = Exclude<ReaderFrame, "warmup">;
+
+const LIVE_READER_FRAMES: readonly LiveReaderFrame[] = [
+  "primary",
+  "secondary",
+  "tertiary",
+  "quaternary",
+  "quinary",
+];
+
+/** 按阅读顺序列出 linear spine 下标；高性能预备队列只调度正文章。 */
+function linearSpineIndices(book: Book): number[] {
+  const indices: number[] = [];
+  for (let i = 0; i < book.spine.length; i += 1) {
+    if (book.spine[i].linear) indices.push(i);
+  }
+  return indices;
+}
 
 interface PaginatorSlot {
   frame: ReaderFrame;
@@ -204,16 +256,43 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   const primaryIframeRef = useRef<HTMLIFrameElement>(null);
   const secondaryIframeRef = useRef<HTMLIFrameElement>(null);
   const tertiaryIframeRef = useRef<HTMLIFrameElement>(null);
+  const quaternaryIframeRef = useRef<HTMLIFrameElement>(null);
+  const quinaryIframeRef = useRef<HTMLIFrameElement>(null);
+  const warmupIframeRef = useRef<HTMLIFrameElement>(null);
   const readerContainerRef = useRef<HTMLDivElement>(null);
   const activeIframeRef = useRef<HTMLIFrameElement | null>(null);
   const paginatorRef = useRef<ChapterPaginator | null>(null);
   const activeSlotRef = useRef<PaginatorSlot | null>(null);
-  // The active slot plus at most two spare slots form a tiny three-chapter
-  // window: previous/current/next.  Spare slots are never allowed to emit
-  // UI callbacks; their state is only used by the cache scheduler.
+  // 高性能模式下活动章加最多四个邻章组成当前章 ±2 五章活缓存。
+  // Spare slots are never allowed to emit UI callbacks; their state is only
+  // used by the cache scheduler.
   const spareSlotsRef = useRef<PaginatorSlot[]>([]);
   const [activeFrame, setActiveFrame] = useState<ReaderFrame>("primary");
   const activeFrameRef = useRef<ReaderFrame>("primary");
+
+  // ---- 硬件加速 2D 翻页过渡动画（Zen UI Packet C） ----
+  const [turnAnim, setTurnAnim] = useState<{ direction: 1 | -1 } | null>(null);
+  const turnAnimTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (turnAnimTimerRef.current) {
+        clearTimeout(turnAnimTimerRef.current);
+      }
+    };
+  }, []);
+
+  const triggerTurnAnimation = (dir: 1 | -1) => {
+    if (settings.instantTurn === true) {
+      setTurnAnim(null);
+      return;
+    }
+    if (turnAnimTimerRef.current) clearTimeout(turnAnimTimerRef.current);
+    setTurnAnim({ direction: dir });
+    turnAnimTimerRef.current = setTimeout(() => {
+      setTurnAnim(null);
+    }, 180);
+  };
   const preloadGenerationRef = useRef(0);
   // Keep the scheduler independent from the closure used when the active
   // paginator was created.  Toggling the experimental mode must neither
@@ -232,6 +311,19 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   const chapterTransitionCooldownUntilRef = useRef(0);
   const chapterTransitionQuietUntilRef = useRef(0);
   const preloadDebounceTimerRef = useRef<number | null>(null);
+  /** 当前正在完整排版的活缓存槽；输入到达时优先取消未发布的后台工作。 */
+  const preloadInFlightSlotRef = useRef<PaginatorSlot | null>(null);
+  /** 当前 book/布局代次下近邻完整排版失败的章，避免失败后立即重试同一章。 */
+  const failedPreloadsRef = useRef(new Set<string>());
+  /** B-153 串行全书预备：一个临时测量槽 + 纯调度 plan。 */
+  const warmupPlanRef = useRef<ReadingWarmupPlan | null>(null);
+  const warmupGenerationRef = useRef(0);
+  const warmupTimerRef = useRef<number | null>(null);
+  const warmupIdleRef = useRef<number | null>(null);
+  const warmupIdleKindRef = useRef<"idle" | "timer" | null>(null);
+  const warmupRunningRef = useRef(false);
+  const warmupTicketRef = useRef<WarmupTicket | null>(null);
+  const warmupSlotRef = useRef<PaginatorSlot | null>(null);
 
   const clearPreloadTimer = (): void => {
     if (preloadDebounceTimerRef.current !== null) {
@@ -321,20 +413,29 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   onPreciseNavigationStatusRef.current = props.onPreciseNavigationStatus;
   onImageActivationRef.current = props.onImageActivation;
   inputPausedRef.current = props.inputPaused === true;
-  preloadAllowedRef.current = settings.preloadNextChapter === true && !book.fixedLayout;
+  preloadAllowedRef.current =
+    settings.preloadNextChapter === true &&
+    !book.fixedLayout &&
+    settings.readingMode !== "scroll";
 
   const isActiveSlot = (slot: PaginatorSlot): boolean =>
     activeSlotRef.current === slot && paginatorRef.current === slot.paginator && slot.paginator !== null;
 
-  const setActiveFrameVisual = (frame: ReaderFrame): void => {
+  const setActiveFrameVisual = (frame: LiveReaderFrame): void => {
     activeFrameRef.current = frame;
     const primary = primaryIframeRef.current;
     const secondary = secondaryIframeRef.current;
     const tertiary = tertiaryIframeRef.current;
+    const quaternary = quaternaryIframeRef.current;
+    const quinary = quinaryIframeRef.current;
+    const warmup = warmupIframeRef.current;
     for (const [candidate, candidateFrame] of [
       [primary, "primary" as const],
       [secondary, "secondary" as const],
       [tertiary, "tertiary" as const],
+      [quaternary, "quaternary" as const],
+      [quinary, "quinary" as const],
+      [warmup, "warmup" as const],
     ] as const) {
       if (!candidate) continue;
       if (candidateFrame === frame) {
@@ -354,8 +455,12 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     if (!slot || !paginator || !isActiveSlot(slot)) return;
     const state = paginator.getStateSnapshot();
     lastStateRef.current = state.status;
-    if (state.status !== "ready" || state.empty) return;
-    lastReadyEmptyRef.current = false;
+    if (state.status !== "ready") return;
+    // B-151：空章是成功加载的一种终态。只有明确还有下一章且已经发起自动
+    // 跳转时，旧空章不发布 active ready；末章空章必须解除 loading/turn intent。
+    const hasNext = slot.spineIndex !== null && nextLinearIndex(book, slot.spineIndex, 1) >= 0;
+    if (state.empty && (hasNext || autoAdvanceRef.current)) return;
+    lastReadyEmptyRef.current = state.empty;
     armChapterTransitionDisplaySettled();
     onDisplayReadyRef.current();
     turnIntentRef.current.markReady();
@@ -391,9 +496,9 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         }
         onPageStateRef.current(state);
         if (state.status !== "ready" || !state.empty || autoAdvanceRef.current) return;
-        autoAdvanceRef.current = true;
         const next = nextLinearIndex(book, spineIndexRef.current, 1);
         if (next >= 0) {
+          autoAdvanceRef.current = true;
           turnIntentRef.current.markLoading();
           onRequestChapterRef.current(next);
         }
@@ -413,6 +518,8 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       },
       (dir) => {
         if (!isActiveSlot(slot)) return;
+        // 输入到达先于切换判断：即使处于换章静默期，也暂停未发布的后台测量。
+        pauseBackgroundWarmupForInput();
         if (isWheelGestureSuppressed()) return;
         if (dir === lockedReverseDirRef.current && Date.now() < reverseLockUntilRef.current) return;
         turnPageRef.current(dir, "wheel");
@@ -484,6 +591,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   const disposeSpareSlot = (slot: PaginatorSlot): void => {
     const index = spareSlotsRef.current.indexOf(slot);
     if (index < 0) return;
+    if (preloadInFlightSlotRef.current === slot) preloadInFlightSlotRef.current = null;
     spareSlotsRef.current.splice(index, 1);
     preloadGenerationRef.current++;
     slot.generation++;
@@ -503,61 +611,95 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   const iframeForFrame = (frame: ReaderFrame): HTMLIFrameElement | null => {
     if (frame === "primary") return primaryIframeRef.current;
     if (frame === "secondary") return secondaryIframeRef.current;
-    return tertiaryIframeRef.current;
+    if (frame === "tertiary") return tertiaryIframeRef.current;
+    if (frame === "quaternary") return quaternaryIframeRef.current;
+    if (frame === "quinary") return quinaryIframeRef.current;
+    return warmupIframeRef.current;
+  };
+
+  const liveWindowIndices = (activeIndex: number): number[] => {
+    const result: number[] = [activeIndex];
+    const add = (index: number): void => {
+      if (index >= 0 && !result.includes(index)) result.push(index);
+    };
+    // 邻章优先级固定为 next、prev、next2、prev2；活缓存上限五章。
+    const next1 = nextLinearIndex(book, activeIndex, 1);
+    const prev1 = nextLinearIndex(book, activeIndex, -1);
+    add(next1);
+    add(prev1);
+    if (next1 >= 0) add(nextLinearIndex(book, next1, 1));
+    if (prev1 >= 0) add(nextLinearIndex(book, prev1, -1));
+    return result;
   };
 
   const scheduleAdjacentPreloads = (): void => {
-    // 滚动模式首版暂停备用槽调度（保留用户开关），只保持活动章一个文档。
+    // 滚动模式继续使用 ContinuousReaderView，不套五章固定缓存。
     if (latestRenderSettingsRef.current.readingMode === "scroll") {
       disposeSpareSlots();
+      resetFullBookWarmup();
       return;
     }
-    if (!preloadAllowedRef.current || !secondaryIframeRef.current || !tertiaryIframeRef.current) {
+    if (
+      !preloadAllowedRef.current ||
+      !secondaryIframeRef.current ||
+      !tertiaryIframeRef.current ||
+      !quaternaryIframeRef.current ||
+      !quinaryIframeRef.current
+    ) {
       disposeSpareSlots();
+      resetFullBookWarmup();
       return;
     }
     const active = activeSlotRef.current;
-    if (!active?.paginator || active.spineIndex === null || !active.ready || active.state.status !== "ready" ||
-      !sameRenderingSettings(active.renderSettings, latestRenderSettingsRef.current)) {
+    if (
+      !active?.paginator ||
+      active.spineIndex === null ||
+      !active.ready ||
+      active.state.status !== "ready" ||
+      !sameRenderingSettings(active.renderSettings, latestRenderSettingsRef.current)
+    ) {
       return;
     }
-    const wanted = [
-      nextLinearIndex(book, active.spineIndex, 1),
-      nextLinearIndex(book, active.spineIndex, -1),
-    ].filter((index, position, values) => index >= 0 && values.indexOf(index) === position);
+
+    const wantedIndices = liveWindowIndices(active.spineIndex);
     const wantedPaths = new Map<number, string>();
-    for (const index of wanted) {
+    for (const index of wantedIndices) {
       const path = spineItemPath(book, index);
       if (path) wantedPaths.set(index, path);
     }
 
-    // Keep only the two adjacent chapters.  This also evicts the chapter two
-    // steps away immediately after a promotion.
+    // 只保留当前章 ±2；远处旧槽立即淘汰，不把全文摘要当可显示缓存。
     for (const slot of [...spareSlotsRef.current]) {
-      if (slot.spineIndex === null || !wantedPaths.has(slot.spineIndex) || slot.path !== wantedPaths.get(slot.spineIndex) ||
-        !sameRenderingSettings(slot.renderSettings, latestRenderSettingsRef.current)) {
+      if (
+        slot.spineIndex === null ||
+        !wantedPaths.has(slot.spineIndex) ||
+        slot.path !== wantedPaths.get(slot.spineIndex) ||
+        !sameRenderingSettings(slot.renderSettings, latestRenderSettingsRef.current)
+      ) {
         disposeSpareSlot(slot);
       }
     }
 
-    const usedFrames = new Set<ReaderFrame>([
-      active.frame,
-      ...spareSlotsRef.current.map((slot) => slot.frame),
+    const usedFrames = new Set<LiveReaderFrame>([
+      active.frame as LiveReaderFrame,
+      ...spareSlotsRef.current.map((slot) => slot.frame as LiveReaderFrame),
     ]);
-    for (const [index, path] of wantedPaths) {
+    // 一次只启动一个后台完整排版任务；优先补齐近邻。
+    for (const index of wantedIndices) {
+      if (index === active.spineIndex) continue;
+      const path = wantedPaths.get(index);
+      if (!path) continue;
+      if (failedPreloadsRef.current.has(`${index}:${path}`)) continue;
       const existing = spareSlotsRef.current.find((slot) => slot.spineIndex === index && slot.path === path);
       if (existing?.paginator) {
-        // display-ready is the cache-hit boundary.  Do not restart a chapter
-        // merely because another ready callback caused the scheduler to run.
+        // display-ready 才是可提升边界；同一签名下不因回调再次触发而重启。
         if (existing.ready && existing.paginator.isDisplayReady) continue;
-        // wanted 顺序为 next→previous；高优先级仍在准备时不启动低优先级，
-        // 避免两个完整分页测量同时争抢主线程。
         if (existing.state.status === "loading" || existing.state.status === "measuring") return;
         disposeSpareSlot(existing);
-        usedFrames.delete(existing.frame);
+        usedFrames.delete(existing.frame as LiveReaderFrame);
       }
-      if (spareSlotsRef.current.length >= 2) break;
-      const frame = (["primary", "secondary", "tertiary"] as const).find((candidate) => !usedFrames.has(candidate));
+      if (spareSlotsRef.current.length >= LIVE_READER_FRAMES.length - 1) break;
+      const frame = LIVE_READER_FRAMES.find((candidate) => !usedFrames.has(candidate));
       if (!frame) break;
       const iframe = iframeForFrame(frame);
       if (!iframe) break;
@@ -574,18 +716,40 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       };
       spareSlotsRef.current.push(slot);
       usedFrames.add(frame);
+      preloadInFlightSlotRef.current = slot;
       const paginator = buildPaginator(slot);
       const generation = slot.generation;
-      void paginator.loadAndWaitForDisplay(path, { resetPage: true }).then((ready) => {
-        if (!spareSlotsRef.current.includes(slot) || slot.generation !== generation || slot.paginator !== paginator) return;
-        slot.state = paginator.getStateSnapshot();
-        slot.ready = ready && paginator.isDisplayReady;
-        if (!slot.ready) disposeSpareSlot(slot);
-        else scheduleAdjacentPreloadsDebounced(150);
-      });
-      // 一次只启动一个后台完整排版任务；完成后再由上面的回调准备另一侧。
+      void paginator
+        .loadAndWaitForDisplay(path, { resetPage: true })
+        .then((ready) => {
+          if (preloadInFlightSlotRef.current === slot) preloadInFlightSlotRef.current = null;
+          if (
+            !spareSlotsRef.current.includes(slot) ||
+            slot.generation !== generation ||
+            slot.paginator !== paginator
+          ) {
+            return;
+          }
+          slot.state = paginator.getStateSnapshot();
+          slot.ready = ready && paginator.isDisplayReady;
+          if (!slot.ready) {
+            failedPreloadsRef.current.add(`${index}:${path}`);
+            disposeSpareSlot(slot);
+          }
+          scheduleAdjacentPreloadsDebounced(150);
+        })
+        .catch(() => {
+          if (preloadInFlightSlotRef.current === slot) preloadInFlightSlotRef.current = null;
+          if (!spareSlotsRef.current.includes(slot)) return;
+          failedPreloadsRef.current.add(`${index}:${path}`);
+          disposeSpareSlot(slot);
+          scheduleAdjacentPreloadsDebounced(150);
+        });
       return;
     }
+
+    // 五章活缓存已齐；其余章节按空闲串行预备。
+    scheduleFullBookWarmupDebounced(500);
   };
 
   function scheduleAdjacentPreloadsDebounced(delayMs = 500): void {
@@ -600,6 +764,238 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     }, delayMs);
   }
 
+  const clearWarmupTimer = (): void => {
+    if (warmupTimerRef.current !== null) {
+      window.clearTimeout(warmupTimerRef.current);
+      warmupTimerRef.current = null;
+    }
+  };
+
+  const cancelWarmupIdle = (): void => {
+    if (warmupIdleRef.current === null) return;
+    if (warmupIdleKindRef.current === "idle") {
+      (window as Window & { cancelIdleCallback?: (id: number) => void }).cancelIdleCallback?.(warmupIdleRef.current);
+    } else {
+      window.clearTimeout(warmupIdleRef.current);
+    }
+    warmupIdleRef.current = null;
+    warmupIdleKindRef.current = null;
+  };
+
+  const requestWarmupIdle = (callback: () => void): void => {
+    const win = window as Window & {
+      requestIdleCallback?: (cb: IdleRequestCallback, opts?: { timeout: number }) => number;
+    };
+    if (typeof win.requestIdleCallback === "function") {
+      warmupIdleKindRef.current = "idle";
+      warmupIdleRef.current = win.requestIdleCallback(() => {
+        warmupIdleRef.current = null;
+        warmupIdleKindRef.current = null;
+        callback();
+      }, { timeout: 1000 });
+      return;
+    }
+    // 不可用时退化为帧后 0ms 小任务，不用 500ms 假装空闲。
+    warmupIdleKindRef.current = "timer";
+    warmupIdleRef.current = window.setTimeout(() => {
+      warmupIdleRef.current = null;
+      warmupIdleKindRef.current = null;
+      if (typeof requestAnimationFrame === "function") requestAnimationFrame(callback);
+      else callback();
+    }, 0);
+  };
+
+  const disposeWarmupSlot = (): void => {
+    const slot = warmupSlotRef.current;
+    warmupSlotRef.current = null;
+    if (!slot) return;
+    slot.paginator?.dispose();
+    slot.paginator = null;
+    slot.path = null;
+    slot.spineIndex = null;
+    slot.ready = false;
+  };
+
+  const resetFullBookWarmup = (): void => {
+    warmupGenerationRef.current += 1;
+    failedPreloadsRef.current.clear();
+    clearWarmupTimer();
+    cancelWarmupIdle();
+    warmupPlanRef.current?.interrupt();
+    warmupTicketRef.current = null;
+    warmupRunningRef.current = false;
+    disposeWarmupSlot();
+    if (preloadAllowedRef.current && latestRenderSettingsRef.current.readingMode !== "scroll") {
+      const plan = new ReadingWarmupPlan();
+      plan.reset(linearSpineIndices(book));
+      warmupPlanRef.current = plan;
+    } else {
+      warmupPlanRef.current = null;
+    }
+  };
+
+  const ensureWarmupPlan = (): ReadingWarmupPlan => {
+    if (!warmupPlanRef.current) {
+      const plan = new ReadingWarmupPlan();
+      plan.reset(linearSpineIndices(book));
+      warmupPlanRef.current = plan;
+    }
+    return warmupPlanRef.current;
+  };
+
+  const isForegroundPending = (): boolean => {
+    const active = activeSlotRef.current;
+    return (
+      lastStateRef.current !== "ready" ||
+      !active?.ready ||
+      active.state.status !== "ready"
+    );
+  };
+
+  // 滚轮换章静默锁可能因没有后续滚轮事件而长期为 true，不能当成“用户正在输入”；
+  // 真正的输入到达会由 pauseBackgroundWarmupForInput 立即取消后台任务并重置空闲窗。
+  const isUserBusy = (): boolean => inputPausedRef.current;
+
+  const missingLiveWarmup = (): boolean => {
+    const active = activeSlotRef.current;
+    if (!active?.paginator || active.spineIndex === null) return false;
+    for (const index of liveWindowIndices(active.spineIndex)) {
+      if (index === active.spineIndex) continue;
+      const path = spineItemPath(book, index);
+      if (!path) continue;
+      const slot = spareSlotsRef.current.find(
+        (candidate) => candidate.spineIndex === index && candidate.path === path,
+      );
+      if (
+        !slot?.ready ||
+        !slot.paginator?.isDisplayReady ||
+        slot.state.status !== "ready"
+      ) {
+        // 同一 layout 代次内已失败的章不再反复重试；由全书记录/跳过。
+        return !failedPreloadsRef.current.has(`${index}:${path}`);
+      }
+    }
+    return false;
+  };
+
+  const residentChapters = (): Set<number> => {
+    const resident = new Set<number>();
+    const add = (slot: PaginatorSlot | null): void => {
+      if (
+        slot &&
+        slot.spineIndex !== null &&
+        slot.ready &&
+        slot.paginator?.isDisplayReady &&
+        slot.state.status === "ready" &&
+        sameRenderingSettings(slot.renderSettings, latestRenderSettingsRef.current)
+      ) {
+        resident.add(slot.spineIndex);
+      }
+    };
+    add(activeSlotRef.current);
+    for (const slot of spareSlotsRef.current) add(slot);
+    return resident;
+  };
+
+  const scheduleFullBookWarmupDebounced = (delayMs = 500): void => {
+    clearWarmupTimer();
+    if (!preloadAllowedRef.current || latestRenderSettingsRef.current.readingMode === "scroll") {
+      resetFullBookWarmup();
+      return;
+    }
+    warmupTimerRef.current = window.setTimeout(() => {
+      warmupTimerRef.current = null;
+      scheduleFullBookWarmupIdle();
+    }, delayMs);
+  };
+
+  const scheduleFullBookWarmupIdle = (): void => {
+    if (!preloadAllowedRef.current || latestRenderSettingsRef.current.readingMode === "scroll") {
+      resetFullBookWarmup();
+      return;
+    }
+    if (warmupRunningRef.current || warmupIdleRef.current !== null) return;
+    requestWarmupIdle(() => runNextFullBookWarmup());
+  };
+
+  const runNextFullBookWarmup = (): void => {
+    if (!preloadAllowedRef.current || latestRenderSettingsRef.current.readingMode === "scroll") {
+      resetFullBookWarmup();
+      return;
+    }
+    if (warmupRunningRef.current) return;
+    const active = activeSlotRef.current;
+    if (
+      !active?.paginator ||
+      active.spineIndex === null ||
+      !active.ready ||
+      active.state.status !== "ready" ||
+      !sameRenderingSettings(active.renderSettings, latestRenderSettingsRef.current)
+    ) {
+      return;
+    }
+    // 五章近邻活缓存优先；没有齐之前不把临时测量 DOM 当远章准备。
+    if (missingLiveWarmup()) {
+      scheduleAdjacentPreloads();
+      return;
+    }
+    const plan = ensureWarmupPlan();
+    const userBusy = isUserBusy();
+    const foregroundPending = isForegroundPending();
+    const ticket = plan.take(active.spineIndex, residentChapters(), userBusy, foregroundPending);
+    if (!ticket) {
+      if (userBusy || foregroundPending) {
+        // 输入/前台未稳定时让出空档；稳定后从这里继续，而不是永久停住。
+        scheduleFullBookWarmupDebounced(500);
+      } else {
+        // 没有可派发任务（近邻都是活缓存或剩余章已处理/失败）时释放临时测量槽。
+        disposeWarmupSlot();
+      }
+      return;
+    }
+    const path = spineItemPath(book, ticket.chapter);
+    if (!path) {
+      plan.finish(ticket, false);
+      scheduleFullBookWarmupDebounced(150);
+      return;
+    }
+    if (failedPreloadsRef.current.has(`${ticket.chapter}:${path}`)) {
+      // 近邻完整排版已失败：同一 epoch 不把同一章再送进临时槽。
+      plan.finish(ticket, false);
+      scheduleFullBookWarmupDebounced(150);
+      return;
+    }
+    // 远章没有页数摘要消费者，不再为了写 Map 启动完整排版；只复用既有
+    // ResourceServer 文本缓存做轻量资源准备。用户真正打开时仍走真实
+    // display gate 和完整测量，摘要 Map/iframe 数量不再作为 ready 证据。
+    const prepared = server.textFor(path) !== undefined;
+    plan.finish(ticket, prepared);
+    if (preloadAllowedRef.current) {
+      scheduleFullBookWarmupDebounced(prepared ? 150 : 500);
+    } else {
+      resetFullBookWarmup();
+    }
+  };
+
+  /** 输入/显式导航优先：先停掉尚未发布的临时测量，再让前台继续。 */
+  const pauseBackgroundWarmupForInput = (): void => {
+    clearPreloadTimer();
+    const inFlight = preloadInFlightSlotRef.current;
+    if (inFlight && spareSlotsRef.current.includes(inFlight) && !inFlight.ready) {
+      disposeSpareSlot(inFlight);
+    }
+    warmupGenerationRef.current += 1;
+    clearWarmupTimer();
+    cancelWarmupIdle();
+    warmupPlanRef.current?.interrupt();
+    warmupTicketRef.current = null;
+    warmupRunningRef.current = false;
+    disposeWarmupSlot();
+    if (preloadAllowedRef.current && latestRenderSettingsRef.current.readingMode !== "scroll") {
+      scheduleAdjacentPreloadsDebounced(500);
+    }
+  };
+
   const promotePreparedChapter = (path: string, targetIndex: number, atEnd: boolean): boolean => {
     const current = activeSlotRef.current;
     const next = spareSlotsRef.current.find((slot) => slot.path === path && slot.spineIndex === targetIndex);
@@ -612,6 +1008,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       !next ||
       !sameRenderingSettings(next.renderSettings, latestRenderSettingsRef.current) ||
       !next.paginator ||
+      next.paginator.getCurrentPath() !== path ||
       !next.ready ||
       !next.paginator.isDisplayReady ||
       next.state.status !== "ready"
@@ -631,7 +1028,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     activeSlotRef.current = next;
     paginatorRef.current = next.paginator;
     activeIframeRef.current = next.iframe;
-    setActiveFrameVisual(next.frame);
+    setActiveFrameVisual(next.frame as LiveReaderFrame);
     next.paginator.setNotes(props.notes);
     autoAdvanceRef.current = false;
     triggerChapterTransitionWheelLock();
@@ -651,7 +1048,17 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     lastStateRef.current = promotedState.status;
     lastReadyEmptyRef.current = promotedState.empty;
     onPageStateRef.current(promotedState);
-    if (!promotedState.empty) publishActiveDisplayReady();
+    // B-151：空章缓存被提升时也要走同一自动前进规则；末章空章才发布 ready。
+    if (promotedState.empty && next.spineIndex !== null) {
+      const nextIndex = nextLinearIndex(book, next.spineIndex, 1);
+      if (nextIndex >= 0) {
+        autoAdvanceRef.current = true;
+        turnIntentRef.current.markLoading();
+        onRequestChapterRef.current(nextIndex);
+        return true;
+      }
+    }
+    publishActiveDisplayReady();
     return true;
   };
 
@@ -674,6 +1081,8 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
 
   // 创建分页器（book/server 就绪后；App 端用 key 保证 book 变化时整体重建）
   useEffect(() => {
+    // 同一 ReaderView 实例复用到新 book/server 时，旧 plan 必须换成新书 spine。
+    resetFullBookWarmup();
     const iframe = primaryIframeRef.current;
     if (!iframe) return;
     const slot: PaginatorSlot = {
@@ -693,6 +1102,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     paginatorRef.current = p;
     setActiveFrameVisual("primary");
     return () => {
+      resetFullBookWarmup();
       clearPreloadTimer();
       settingsReloadDebouncerRef.current?.cancel();
       turnIntentRef.current.reset();
@@ -723,6 +1133,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   useEffect(() => {
     // A chapter/anchor transition owns the next load.  A settings timer from
     // the previous chapter must not start a second load after this effect.
+    pauseBackgroundWarmupForInput();
     clearPreloadTimer();
     settingsReloadDebouncerRef.current?.cancel();
     settingsIdentityRef.current = { settings, userFonts: props.userFonts };
@@ -787,6 +1198,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
               requestId: preciseTarget.requestId,
               kind: preciseTarget.kind,
               textHits: preciseTarget.textHits,
+              occurrence: preciseTarget.occurrence,
             }
           : null,
       });
@@ -810,10 +1222,15 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       ) && previous.userFonts === props.userFonts;
     if (renderingUnchanged) {
       if (preloadAllowedRef.current) scheduleAdjacentPreloads();
-      else disposeSpareSlots();
+      else {
+        resetFullBookWarmup();
+        disposeSpareSlots();
+      }
       settingsIdentityRef.current = { settings, userFonts: props.userFonts };
       return;
     }
+    // 布局代次变化：取消旧 epoch 的临时测量队列和近邻缓存。
+    resetFullBookWarmup();
     disposeSpareSlots();
     settingsIdentityRef.current = { settings, userFonts: props.userFonts };
     const p = paginatorRef.current;
@@ -832,9 +1249,12 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   // lazy secondary paginator once the second iframe is committed.
   useEffect(() => {
     if (preloadAllowedRef.current) scheduleAdjacentPreloads();
-    else disposeSpareSlots();
+    else {
+      resetFullBookWarmup();
+      disposeSpareSlots();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings.preloadNextChapter, book.fixedLayout, activeFrame]);
+  }, [settings.preloadNextChapter, book.fixedLayout, settings.readingMode, activeFrame]);
 
   // 尺寸变化 → 重排（左右拉伸窗口等场景）。
   // 用 debounce：拉伸过程中 ResizeObserver 持续触发，只重置定时器、不做重排；
@@ -851,6 +1271,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     let timer = 0;
     const ro = new ResizeObserver(() => {
       window.clearTimeout(timer);
+      resetFullBookWarmup();
       disposeSpareSlots();
       timer = window.setTimeout(() => {
         paginatorRef.current?.reflow();
@@ -867,6 +1288,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   // 翻页逻辑（滚轮与按钮/键盘共用）
   const turnPageRef = useRef<(dir: 1 | -1, source?: "wheel" | "key" | "ui") => void>(() => {});
   turnPageRef.current = (dir, source) => {
+    pauseBackgroundWarmupForInput();
     const p = paginatorRef.current;
     if (!p) return;
     if (source === "wheel") {
@@ -907,6 +1329,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       return;
     }
     if (immediate === 1) {
+      triggerTurnAnimation(1);
       if (p.currentPage < p.pageCount - 1) {
         p.setPage(p.currentPage + 1);
       } else {
@@ -920,6 +1343,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         }
       }
     } else {
+      triggerTurnAnimation(-1);
       if (p.currentPage > 0) {
         p.setPage(p.currentPage - 1);
       } else {
@@ -945,7 +1369,31 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         turnPageRef.current(-1);
       },
       setPage(i: number) {
+        pauseBackgroundWarmupForInput();
+        const p = paginatorRef.current;
+        if (p && i !== p.currentPage) {
+          triggerTurnAnimation(i > p.currentPage ? 1 : -1);
+        }
         paginatorRef.current?.setPage(i);
+      },
+      scrollToRatio(ratio: number) {
+        pauseBackgroundWarmupForInput();
+        const p = paginatorRef.current;
+        if (!p || p.pageCount <= 1) return;
+        const targetPage = Math.min(p.pageCount - 1, Math.max(0, Math.round(ratio * (p.pageCount - 1))));
+        this.setPage(targetPage);
+      },
+      seekContentFraction(target, _token) {
+        pauseBackgroundWarmupForInput();
+        const p = paginatorRef.current;
+        if (!p) return;
+        const pageCount = p.pageCount;
+        if (pageCount <= 1) {
+          this.setPage(0);
+          return;
+        }
+        const targetPage = Math.min(pageCount - 1, Math.max(0, Math.round(target.fraction * (pageCount - 1))));
+        this.setPage(targetPage);
       },
       diagnose() {
         return paginatorRef.current?.diagnose() ?? "（阅读器未初始化）";
@@ -957,9 +1405,11 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         return paginatorRef.current?.getAnchorText() ?? null;
       },
       jumpToAnchor(anchor) {
+        pauseBackgroundWarmupForInput();
         paginatorRef.current?.jumpToAnchor(anchor);
       },
       navigateWithinCurrentChapter(options) {
+        pauseBackgroundWarmupForInput();
         const paginator = paginatorRef.current;
         if (!paginator) return false;
         const navigated = paginator.navigateWithinCurrentChapter(options);
@@ -967,6 +1417,10 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         return navigated;
       },
       navigateToSearchTarget(request) {
+        pauseBackgroundWarmupForInput();
+        const chapterPath = request.chapterPath;
+        const activePath = activeSlotRef.current?.path;
+        if (chapterPath && activePath && chapterPath !== activePath) return "unresolved";
         return paginatorRef.current?.navigateToSearchTarget(request) ?? "unresolved";
       },
       getFootnoteMarkerRect() {
@@ -1028,10 +1482,12 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       )}
       <div
         ref={readerContainerRef}
-        className="reader"
+        className={`reader${turnAnim ? ` has-turn-anim ${turnAnim.direction === 1 ? "turn-next" : "turn-prev"}` : ""}`}
         data-overlay-input={overlayInputActive ? "true" : undefined}
         onWheel={(event) => {
           if (overlayInputActive) return;
+          // 输入到达优先：先取消未发布的后台任务；具体翻页仍由后面路径决定。
+          pauseBackgroundWarmupForInput();
           if (latestRenderSettingsRef.current.readingMode === "scroll") {
             const p = paginatorRef.current;
             if (!p) return;
@@ -1130,6 +1586,72 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
           style={activeFrame === "tertiary" ? undefined : { visibility: "hidden", zIndex: 0 }}
         />
       )}
+      {!book.fixedLayout && (settings.preloadNextChapter === true || activeFrame === "quaternary") && (
+        <iframe
+          ref={quaternaryIframeRef}
+          title={activeFrame === "quaternary" ? "chapter" : "preloaded chapter"}
+          aria-hidden={activeFrame !== "quaternary"}
+          style={activeFrame === "quaternary" ? undefined : { visibility: "hidden", zIndex: 0 }}
+        />
+      )}
+      {!book.fixedLayout && (settings.preloadNextChapter === true || activeFrame === "quinary") && (
+        <iframe
+          ref={quinaryIframeRef}
+          title={activeFrame === "quinary" ? "chapter" : "preloaded chapter"}
+          aria-hidden={activeFrame !== "quinary"}
+          style={activeFrame === "quinary" ? undefined : { visibility: "hidden", zIndex: 0 }}
+        />
+      )}
+      {!book.fixedLayout && settings.preloadNextChapter === true && (
+        <iframe
+          ref={warmupIframeRef}
+          title="preloaded chapter"
+          aria-hidden="true"
+          style={{ visibility: "hidden", zIndex: 0 }}
+        />
+      )}
+      {/* 左右边缘 5% 悬停感应区与翻页指示 (Zen UI Packet C) */}
+      <div
+        className="edge-turn-zone edge-turn-prev"
+        onClick={(e) => {
+          e.stopPropagation();
+          turnPageRef.current(-1);
+        }}
+        title="上一页"
+        aria-label="上一页"
+      >
+        <button
+          type="button"
+          className="edge-turn-arrow"
+          tabIndex={-1}
+          aria-hidden="true"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+        </button>
+      </div>
+
+      <div
+        className="edge-turn-zone edge-turn-next"
+        onClick={(e) => {
+          e.stopPropagation();
+          turnPageRef.current(1);
+        }}
+        title="下一页"
+        aria-label="下一页"
+      >
+        <button
+          type="button"
+          className="edge-turn-arrow"
+          tabIndex={-1}
+          aria-hidden="true"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
+        </button>
+      </div>
       </div>
     </>
   );

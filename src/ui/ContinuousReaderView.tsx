@@ -24,22 +24,39 @@ import {
   type PreciseNavigationStatus,
   type ReadingAnchor,
   type ReadingAnchorAndContentY,
+  type ResolvedContentFraction,
 } from "../render/paginator";
 import type { ResourceServer } from "../render/resources";
 import type { ReaderSettings } from "../render/settings";
 import {
   ContinuousChapterLayout,
   ChapterLoadGate,
+  PendingScrollNavigation,
   type ChapterExtent,
   type ChapterProjection,
   type ChapterLoadTicket,
   type ContinuousAnchor,
+  type ScrollNavigationTicket,
 } from "./continuousChapterLayout";
 import { CHAPTER_KEY_ATTRIBUTE, commitContinuousGeometry } from "./continuousGeometryCommit";
-import { canCommitContinuousChapterHeight } from "./continuousChapterGeometry";
+import { classifyChapterMeasurement } from "./continuousChapterGeometry";
+import type { PersistedNavigationAnchor } from "../render/navigationAnchor";
 import { DampedScrollAnimator } from "./dampedScroll";
 import { createSettingsReloadDebouncer } from "./settingsReload";
-import { effectiveReaderSettings, sameRenderingSettings, type ReaderHandle } from "./ReaderView";
+import type { ScrubToken } from "./readerProgressAxis";
+import {
+  continuousReadingLine,
+  commitExplicitPosition,
+  acceptPositionSample,
+  releaseExplicitPosition,
+  rebasePosition,
+  type ReadingPositionSnapshot,
+} from "./bookmarkReadingPosition";
+import {
+  effectiveReaderSettings,
+  sameRenderingSettings,
+  type ReaderHandle,
+} from "./ReaderView";
 
 export interface ContinuousReaderViewProps {
   book: Book;
@@ -70,15 +87,35 @@ export interface ContinuousReaderViewProps {
     status: PreciseNavigationStatus;
     exact: boolean;
   }): void;
+  /** 语义锚点解析失败时结束 busy 且不冒充成功；reported 表示已发精确状态。 */
+  onNavigationUnresolved?(reported: boolean): void;
+  /** 通知宿主恢复失败定位后的进度保存，不通过采样比例推断用户输入。 */
+  onUserReadingPositionChange?(): void;
   initialAnchor?: {
     index: number;
     ratio: number;
     anchorTextOffset: number | null;
     anchorTextSnippet: string | null;
+    /** B-155：纯图片页可选的媒体身份锚点，与文本锚点二选一优先文本。 */
+    mediaAnchor?: MediaReadingAnchor | null;
   } | null;
   initialPage?: number | null;
+  /** 连续模式恢复初始对齐：reading-line 对齐到 20% 阅读线（书签恢复专用），context 对齐到顶部微小 inset（默认） */
+  initialAlignment?: "reading-line" | "context";
   /** 视口上方约 20% 阅读线采样观察到的章节变化；只更新状态，不触发重载 */
   onVisibleChapterChange?(index: number, anchor: ReadingAnchor | null): void;
+  onContentFractionSettled?(
+    token: ScrubToken,
+    location: { key: string; spineIndex: number; fraction: number; atEnd: boolean },
+  ): void;
+  onContentFractionCancelled?(token: ScrubToken): void;
+  onContentFractionFailed?(token: ScrubToken): void;
+  onUserProgressSample?(location: {
+    key: string;
+    spineIndex: number;
+    fraction: number;
+    atEnd: boolean;
+  }): void;
 }
 
 interface ActiveSlot {
@@ -98,6 +135,7 @@ interface LinearSpineItem {
   linear: boolean;
   index: number;
   path: string;
+  key: string;
 }
 
 /** 测量未就绪（容器尚未布局）时的按帧重测上限，避免极端情况下无限重试。 */
@@ -105,6 +143,51 @@ const MEASURE_RETRY_LIMIT = 180;
 
 /** 视口上方 20% 是连续阅读的“阅读线”，锚点采样与状态展示共用同一位置。 */
 const READING_LINE_RATIO = 0.2;
+
+/** 连续阅读的宿主层章间 gap；默认布局常量，不新增设置项。 */
+const CONTINUOUS_CHAPTER_GAP_PX = 24;
+
+/** 显式导航在屏幕上希望目标出现的位置；搜索/笔记沿用 paginator 的小 inset。 */
+function desiredScreenInset(viewportHeight: number): number {
+  return Math.round(Math.min(24, Math.max(0, viewportHeight * 0.04)));
+}
+
+/**
+ * B-155：显式滚动导航的不可变目标。章节装载、重排期间票据保留；宿主
+ * 只在目标 display-ready 后解析内容坐标并一次提交外层 scrollTop。
+ */
+type ContinuousNavigationTarget =
+  | { kind: "start" }
+  | { kind: "fragment"; fragment: string }
+  | {
+      kind: "anchor";
+      anchor: PersistedNavigationAnchor | null;
+      mediaAnchor?: MediaReadingAnchor | null;
+      fallbackPage?: number | null;
+      alignment?: "reading-line" | "context";
+    }
+  | {
+      kind: "note";
+      requestId: number;
+      anchor: PersistedNavigationAnchor | null;
+      mediaAnchor?: MediaReadingAnchor | null;
+      fallbackPage?: number | null;
+    }
+  | {
+      kind: "search";
+      request: PreciseNavigationRequest & { chapterPath?: string };
+    }
+  | {
+      kind: "content-fraction";
+      fraction: number;
+      token: ScrubToken;
+    };
+
+interface PendingContinuousNavigation {
+  readonly ticket: ScrollNavigationTicket<ContinuousNavigationTarget>;
+  /** 最近一次解析使用的布局代次；布局变化后同一票据重解析。 */
+  measuredRevision: number;
+}
 
 /**
  * 一次稳定的阅读位置。
@@ -178,6 +261,12 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
     const containerRef = useRef<HTMLDivElement>(null);
     /** 显式总高的 canvas：几何提交必须先于宿主 scrollTop，见 commitContinuousGeometry。 */
     const canvasRef = useRef<HTMLDivElement>(null);
+    const onInternalNavigationSettledRef = useRef(props.onInternalNavigationSettled);
+    onInternalNavigationSettledRef.current = props.onInternalNavigationSettled;
+    const onNavigationUnresolvedRef = useRef(props.onNavigationUnresolved);
+    onNavigationUnresolvedRef.current = props.onNavigationUnresolved;
+    const onUserReadingPositionChangeRef = useRef(props.onUserReadingPositionChange);
+    onUserReadingPositionChangeRef.current = props.onUserReadingPositionChange;
     const [viewportHeight, setViewportHeight] = useState(600);
     // 宿主宽度只用于识别“需要重排的尺寸变化”，iframe 宽度仍是容器的 100%
     const [viewportWidth, setViewportWidth] = useState(0);
@@ -189,7 +278,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
       return book.spine
         .map((item, originalIndex) => {
           const path = spineItemPath(book, originalIndex);
-          return path ? { ...item, index: originalIndex, path } : null;
+          return path ? { ...item, index: originalIndex, path, key: `${originalIndex}:${path}` } : null;
         })
         .filter((item): item is LinearSpineItem => item !== null && item.linear !== false);
     }, [book]);
@@ -210,9 +299,31 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
       }));
     }, [linearItems]);
 
-    const [layout, setLayout] = useState(() => new ContinuousChapterLayout(initialExtents));
+    const [layout, setLayout] = useState(
+      () => new ContinuousChapterLayout(initialExtents, CONTINUOUS_CHAPTER_GAP_PX)
+    );
     const layoutRef = useRef(layout);
     layoutRef.current = layout;
+    /** 布局代次：显式导航票据提交前用它证明“当前解析基于最新几何”。 */
+    const layoutRevisionRef = useRef(0);
+    /** 每本书一个递增会话号；不能只靠书 ID 防止旧书票据提交。 */
+    const bookSessionRef = useRef(0);
+    const pendingNavigationRef = useRef<
+      PendingScrollNavigation<ContinuousNavigationTarget> | null
+    >(null);
+    if (!pendingNavigationRef.current) {
+      pendingNavigationRef.current = new PendingScrollNavigation<ContinuousNavigationTarget>();
+    }
+    const pendingNavigationMetaRef = useRef<PendingContinuousNavigation | null>(null);
+    /** 票据已在 commit 批次内失败结算时，防止调用方再补一次成功 onDisplayReady。 */
+    const pendingNavigationFailureRef = useRef(false);
+    /** 打开书/书签/历史返回的语义锚点每次会话只应用一次。 */
+    const initialNavigationHandledRef = useRef(false);
+    /** 当前因空章 ready 显示的宿主说明；不写入章节索引或占位几何。 */
+    const [emptyChapterNotice, setEmptyChapterNotice] = useState<{
+      key: string;
+      title: string;
+    } | null>(null);
 
     // 监听换书/线性 spine 变化重新初始化 layout（尺寸变化走重排事务）
     useEffect(() => {
@@ -222,12 +333,36 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
         height: estimate,
         measured: false,
       }));
-      const next = new ContinuousChapterLayout(extents);
+      const next = new ContinuousChapterLayout(extents, CONTINUOUS_CHAPTER_GAP_PX);
       layoutRef.current = next;
       setLayout(next);
+      layoutRevisionRef.current += 1;
       pendingSpotRef.current = null;
       lastStableSpotRef.current = null;
+      readingPositionRef.current = null;
     }, [book, linearItems]);
+
+    // 换书/离开阅读器取消未提交的显式导航，避免旧 session 在 async 后提交。
+    useEffect(() => {
+      bookSessionRef.current += 1;
+      readingPositionRef.current = null;
+      const ticket = pendingNavigationRef.current?.current();
+      pendingNavigationRef.current?.cancel();
+      pendingNavigationMetaRef.current = null;
+      if (ticket?.target.kind === "content-fraction") {
+        props.onContentFractionCancelled?.(ticket.target.token);
+      }
+      initialNavigationHandledRef.current = false;
+      setEmptyChapterNotice(null);
+      return () => {
+        const t = pendingNavigationRef.current?.current();
+        pendingNavigationRef.current?.cancel();
+        pendingNavigationMetaRef.current = null;
+        if (t?.target.kind === "content-fraction") {
+          props.onContentFractionCancelled?.(t.target.token);
+        }
+      };
+    }, [book]);
 
     const gateRef = useRef(new ChapterLoadGate());
     const slotsRef = useRef(new Map<string, ActiveSlot>());
@@ -263,6 +398,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
 
     // 重排补偿：上次稳定阅读位置、待用锚点与合并重测的帧调度
     const lastStableSpotRef = useRef<ReadingSpot | null>(null);
+    const readingPositionRef = useRef<ReadingPositionSnapshot<ReadingSpot> | null>(null);
     const pendingSpotRef = useRef<ReadingSpot | null>(null);
     const layoutRemeasureFrameRef = useRef<number | null>(null);
     const layoutRemeasureRetriesRef = useRef(0);
@@ -279,6 +415,8 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
     const commitLayoutBatchRef = useRef<(updates: ChapterExtent[], spot: ReadingSpot | null) => void>(
       () => {}
     );
+    /** 每次布局提交后尝试一次性结清等待装载/重排的显式导航票据。 */
+    const resolvePendingNavigationRef = useRef<(changedKey?: string) => boolean>(() => false);
     const commitChapterMeasurementRef = useRef<
       (key: string, paginator: ChapterPaginator, ticket: ChapterLoadTicket, sameChapterReload?: boolean) => boolean
     >(() => true);
@@ -399,59 +537,167 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
     );
 
     const checkVisibleChapter = useCallback(() => {
+      // 恢复目标未提交前，可见的只是估算落点/邻章，不能覆盖 App 的目标章节与进度。
+      if (pendingNavigationRef.current?.current()) return;
       const el = containerRef.current;
       if (!el) return;
       const S = el.scrollTop;
       const readingLineY = READING_LINE_RATIO * V;
-      const anchor = layoutRef.current.anchorAt(S, V, readingLineY);
-      if (!anchor) return;
-      const slot = slotsRef.current.get(anchor.key);
+
+      const explicitSnapshot = readingPositionRef.current;
+      const isExplicitActive =
+        explicitSnapshot !== null &&
+        explicitSnapshot.session === bookSessionRef.current &&
+        explicitSnapshot.source === "explicit";
+
+      let activeKey: string;
+      let activeOffset: number;
+      let activeScreenY: number;
+      let sampleFine: ReadingAnchorAndContentY | null = null;
+      let sampleMedia: MediaAnchorAndContentY | null = null;
+
+      if (isExplicitActive) {
+        activeKey = explicitSnapshot.chapterKey;
+        activeOffset = explicitSnapshot.value.offset;
+        activeScreenY = explicitSnapshot.value.screenY;
+        if (explicitSnapshot.value.text) {
+          sampleFine = {
+            anchor: explicitSnapshot.value.text,
+            contentY: explicitSnapshot.value.offset,
+          };
+        }
+        if (explicitSnapshot.value.media) {
+          sampleMedia = {
+            anchor: explicitSnapshot.value.media,
+            contentY: explicitSnapshot.value.offset,
+          };
+        }
+      } else {
+        const anchor = layoutRef.current.anchorAt(S, V, readingLineY);
+        if (!anchor) return;
+        activeKey = anchor.key;
+        activeOffset = anchor.offset;
+        activeScreenY = anchor.screenY;
+      }
+
+      const slot = slotsRef.current.get(activeKey);
       if (slot && slot.status === "ready") {
         // 用当前布局表现算投影：React state 里的 projections 可能落后一帧，
         // 会让“上次稳定锚点”的章内坐标失真。
         const p = layoutRef.current
           .project(S, V, overscan)
-          .find((item) => item.box.key === anchor.key);
+          .find((item) => item.box.key === activeKey);
         const frameScreenTop = p ? p.frameScreenTop : 0;
-        const sample = sampleReadingLine(slot, readingLineY - frameScreenTop);
-        // 保存“上次稳定”的阅读位置：重排与图片晚加载补偿都只能用这个
-        // 稳定锚点，不能在已变化的几何里重新挑一个“当前内容”。
-        // 事务进行中的采样同样属于“已变化、未提交”，必须丢弃而不是覆盖保存点。
-        if (!pendingSpotRef.current && reloadingRef.current.size === 0 && slot.paginator.isMeasuredForViewport()) {
-          lastStableSpotRef.current = buildReadingSpot(
-            anchor.key,
-            slot,
-            p,
-            S,
-            sample,
-            { offset: anchor.offset, screenY: anchor.screenY }
-          );
 
-        }
-        if (sample.fine) {
-          if (lastVisibleKeyRef.current !== anchor.key) {
-            lastVisibleKeyRef.current = anchor.key;
-            onVisibleChapterChange?.(slot.spineIndex, sample.fine.anchor);
+        let sample: ReadingSample;
+        if (isExplicitActive) {
+          sample = { fine: sampleFine, media: sampleMedia };
+          lastStableSpotRef.current = explicitSnapshot.value;
+        } else {
+          sample = sampleReadingLine(slot, readingLineY - frameScreenTop);
+          // 保存“上次稳定”的阅读位置：重排与图片晚加载补偿都只能用这个
+          // 稳定锚点，不能在已变化的几何里重新挑一个“当前内容”。
+          // 事务进行中的采样同样属于“已变化、未提交”，必须丢弃而不是覆盖保存点。
+          if (!pendingSpotRef.current && reloadingRef.current.size === 0 && slot.paginator.isMeasuredForViewport()) {
+            const spot = buildReadingSpot(
+              activeKey,
+              slot,
+              p,
+              S,
+              sample,
+              { offset: activeOffset, screenY: activeScreenY }
+            );
+            lastStableSpotRef.current = spot;
+            readingPositionRef.current = acceptPositionSample(
+              readingPositionRef.current,
+              {
+                session: bookSessionRef.current,
+                chapterKey: activeKey,
+                source: "sampled",
+                value: spot,
+              }
+            );
           }
+        }
+
+        if (sample.fine || sample.media) {
+          // 可见正文/媒体出现即结束空章说明；说明只属于显式进入的空章，
+          // 不进入章节索引，也不制造占位高度。
+          setEmptyChapterNotice(null);
+          if (lastVisibleKeyRef.current !== activeKey) {
+            lastVisibleKeyRef.current = activeKey;
+            onVisibleChapterChange?.(slot.spineIndex, sample.fine ? sample.fine.anchor : null);
+          }
+          const maxS = layoutRef.current.maxScrollTop(V);
+          const totalProgress = maxS > 0 ? Math.min(1, Math.max(0, S / maxS)) : 0;
+          const isAtScrollEnd = maxS > 0 ? S >= maxS - 2 : false;
+          const isLastLinear = linearItems.length > 0 && linearItems[linearItems.length - 1].key === slot.key;
+          const atEnd = isLastLinear && isAtScrollEnd;
+
+          let chapterFraction: number | null = null;
+          if (sample.fine && sample.fine.anchor && sample.fine.anchor.textOffset !== null) {
+            const totalChars = slot.paginator.totalChars;
+            chapterFraction = totalChars > 0 ? sample.fine.anchor.textOffset / totalChars : 0;
+          } else if (sample.media && sample.media.anchor) {
+            const M = slot.paginator.mediaUnits > 0 ? slot.paginator.mediaUnits : 1;
+            chapterFraction = (sample.media.anchor.index + sample.media.anchor.ratio) / M;
+          }
+
           onPageState?.({
             status: "ready",
             pageCount: 1,
             currentPage: 0,
             empty: false,
             mode: "scroll",
-            scrollProgress: sample.fine.anchor.ratio,
+            // 阅读线在本章中的纵向比例；anchor.ratio 是文字盒内的横向位置。
+            scrollProgress: p && p.box.height > 0
+              ? Math.min(1, Math.max(0, activeOffset / p.box.height))
+              : 0,
+            totalScrollProgress: totalProgress,
+            atEnd,
           });
+
+          if (chapterFraction !== null) {
+            props.onUserProgressSample?.({
+              key: slot.key,
+              spineIndex: slot.spineIndex,
+              fraction: chapterFraction,
+              atEnd,
+            });
+          }
         }
       }
-    }, [V, buildReadingSpot, onPageState, onVisibleChapterChange, overscan, sampleReadingLine]);
+    }, [V, buildReadingSpot, linearItems, onPageState, onVisibleChapterChange, overscan, props, sampleReadingLine]);
     checkVisibleChapterRef.current = checkVisibleChapter;
 
     /** 把宿主已确定的最新滚动位置同步到投影与章节状态。 */
     const syncToScrollTop = useCallback(
       (S: number, userScroll = false) => {
+        const previousS = scrollTopRef.current;
+        // B-157：在外层实际用户位移发生时关闭所有活动槽的固定弹注；必须在
+        // 更新 ref 之前判断，后续同值原生 scroll 事件不会重复关闭。
+        // 程序化几何补偿和投影同步传 userScroll=false，不当作用户滚动。
+        const movedByUser = userScroll && Math.abs(S - previousS) > 0.5;
+        if (movedByUser) {
+          readingPositionRef.current = releaseExplicitPosition(readingPositionRef.current);
+          onUserReadingPositionChangeRef.current?.();
+          for (const slot of slotsRef.current.values()) {
+            slot.paginator.closeForNavigation();
+          }
+          // 用户真实滚动优先于未提交的显式导航，取消票据并结束 busy。
+          if (pendingNavigationMetaRef.current) {
+            const cancelledTicket = pendingNavigationRef.current?.current();
+            pendingNavigationRef.current?.cancel();
+            pendingNavigationMetaRef.current = null;
+            if (cancelledTicket?.target.kind === "content-fraction") {
+              props.onContentFractionCancelled?.(cancelledTicket.target.token);
+            }
+            onInternalNavigationSettledRef.current?.();
+          }
+        }
         // 用户在等待重排时仍可滚动：移动保存点的屏幕位置，不用尚未提交的
         // 新 DOM 重新命中另一段文字。程序化补偿不再次累计这段位移。
-        if (userScroll) {
+        if (userScroll && movedByUser) {
           const saved = pendingSpotRef.current ? pendingSpotRef : lastStableSpotRef;
           const spot = saved.current;
           if (spot) {
@@ -530,6 +776,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
           anchor = layoutRef.current.anchorAt(currentS, V, READING_LINE_RATIO * V);
         } else {
           let offset = effective.offset;
+          let resolveFailed = false;
           const measuredHere = updates.some((update) => update.key === effective!.key);
           const slot = measuredHere ? slotsRef.current.get(effective.key) : undefined;
           if (slot && effective.text) {
@@ -537,12 +784,23 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
             // 旧像素位置不足以保持同一行文字（R2）。
             const resolved = slot.paginator.resolveAnchorContentY(effective.text);
             if (resolved !== null) offset = resolved;
+            else if (measuredHere) resolveFailed = true;
           } else if (slot && effective.media) {
             // 纯图片页：用图内比例在缩放后的实际图高上重建（R3）。
             const resolved = slot.paginator.resolveMediaAnchorContentY(effective.media);
             if (resolved !== null) offset = resolved;
+            else if (measuredHere) resolveFailed = true;
           }
           anchor = { key: effective.key, offset, screenY: effective.screenY };
+          if (resolveFailed && readingPositionRef.current?.session === bookSessionRef.current) {
+            readingPositionRef.current = releaseExplicitPosition(readingPositionRef.current);
+          }
+        }
+        const pendingTarget = pendingNavigationRef.current?.current();
+        if (pendingTarget) {
+          // 前置章节测出真实高度时继续让待恢复章处于装载窗口，避免估算 S
+          // 留在前章而使目标被回收。精确内容位置在目标 ready 后另行提交。
+          anchor = { key: pendingTarget.chapterKey, offset: 0, screenY: 0 };
         }
         const { layout: newLayout, scrollTop: newS } = layoutRef.current.withMeasurements(
           updates,
@@ -552,6 +810,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
         );
         layoutRef.current = newLayout;
         setLayout(newLayout);
+        layoutRevisionRef.current += 1;
         // 先几何、后位置：同步写 DOM，不依赖 React 已渲染。
         const accepted = commitContinuousGeometry({
           canvas: canvasRef.current,
@@ -559,16 +818,293 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
           layout: newLayout,
           scrollTop: newS,
         });
+        const box = effective ? newLayout.boxFor(effective.key) : null;
+        const newScreenY = box && effective && anchor ? box.top + anchor.offset - accepted : effective?.screenY ?? 0;
+        if (effective && anchor) {
+          effective.offset = anchor.offset;
+          effective.screenY = newScreenY;
+          effective.scrollTop = accepted;
+        }
+        if (
+          readingPositionRef.current &&
+          readingPositionRef.current.session === bookSessionRef.current &&
+          readingPositionRef.current.source === "explicit" &&
+          effective &&
+          readingPositionRef.current.chapterKey === effective.key &&
+          anchor
+        ) {
+          readingPositionRef.current = rebasePosition(readingPositionRef.current, {
+            ...readingPositionRef.current.value,
+            offset: anchor.offset,
+            screenY: newScreenY,
+            scrollTop: accepted,
+          });
+        }
         if (el) {
           // 只改原生 scrollTop 不够：React 状态/ref 与 iframe 投影必须同步，
           // 否则下一次渲染会用旧位置覆盖补偿结果。
           syncToScrollTop(accepted);
         }
         setSlotUpdateNonce((n) => n + 1);
+        // 目标高度变化后，若显式导航仍有效则用同一票据在新几何里重解析。
+        resolvePendingNavigationRef.current?.(effective?.key);
       },
       [V, syncToScrollTop]
     );
     commitLayoutBatchRef.current = commitLayoutBatch;
+
+    /**
+     * B-155：只用当前目标的只读解析结果换算内容坐标；媒体身份优先于像素
+     * fallback，文本锚点优先于媒体。函数不写历史、不消费票据、不滚动 DOM。
+     */
+    const resolvePendingTargetContentY = (
+      slot: ActiveSlot,
+      target: ContinuousNavigationTarget,
+    ): number | null => {
+      const box = layoutRef.current.boxFor(slot.key);
+      if (!box) return null;
+      if (target.kind === "start") return 0;
+      if (target.kind === "fragment") {
+        return slot.paginator.resolveFragmentContentY(target.fragment);
+      }
+      if (target.kind === "search") {
+        return slot.paginator.resolveSearchTargetContentY(target.request);
+      }
+      if (target.kind === "content-fraction") {
+        if (target.fraction <= 0) return 0;
+        const resolved = slot.paginator.resolveContentFraction(target.fraction);
+        return resolved ? resolved.contentY : null;
+      }
+      if (target.kind !== "anchor" && target.kind !== "note") return null;
+      // anchor/note：同一文本/媒体锚点跨模式复用。R4：请求提供了文本或
+      // 媒体身份却解析失败时必须 unresolved，不能让旧页码兜底冒充成功。
+      const hasTextIdentity = Boolean(
+        target.anchor && target.anchor.anchorTextOffset !== null,
+      );
+      const hasMediaIdentity = Boolean(target.mediaAnchor);
+      if (hasTextIdentity && target.anchor) {
+        const resolved = slot.paginator.resolvePersistedAnchorContentY(target.anchor);
+        if (resolved !== null) return resolved;
+      }
+      if (hasMediaIdentity && target.mediaAnchor) {
+        const resolved = slot.paginator.resolveMediaAnchorContentY(target.mediaAnchor);
+        if (resolved !== null) return resolved;
+      }
+      if (hasTextIdentity || hasMediaIdentity) return null;
+      if (target.fallbackPage !== null && target.fallbackPage !== undefined) {
+        const pageCount = slot.paginator.pageCount;
+        const ratio = pageCount > 1
+          ? Math.max(0, Math.min(1, target.fallbackPage / (pageCount - 1)))
+          : 0;
+        return ratio * box.height;
+      }
+      return null;
+    };
+
+    /** 显式导航在目标图内/文本处需要提交的位置；失败明确报告，不冒充成功。 */
+    const settlePendingNavigationFailure = (
+      ticket: ScrollNavigationTicket<ContinuousNavigationTarget>,
+    ): void => {
+      const manager = pendingNavigationRef.current;
+      if (!manager) return;
+      manager.settle(ticket);
+      pendingNavigationMetaRef.current = null;
+      pendingNavigationFailureRef.current = true;
+      let reported = false;
+      if (ticket.target.kind === "search") {
+        onPreciseNavigationStatus?.({
+          requestId: ticket.target.request.requestId,
+          status: "unresolved",
+          exact: false,
+        });
+        reported = true;
+      } else if (ticket.target.kind === "note") {
+        onPreciseNavigationStatus?.({
+          requestId: ticket.target.requestId,
+          status: "unresolved",
+          exact: false,
+        });
+        reported = true;
+      } else if (ticket.target.kind === "content-fraction") {
+        props.onContentFractionFailed?.(ticket.target.token);
+      }
+      onNavigationUnresolvedRef.current?.(reported);
+    };
+
+    /**
+     * 目标章 ready/几何变化后，用一个票据一次性提交外层 scrollTop、投影与
+     * 高亮。未 ready、无目标或布局代次变化时返回 false 并保留票据。
+     */
+    const resolvePendingNavigation = (changedKey?: string): boolean => {
+      const manager = pendingNavigationRef.current;
+      const meta = pendingNavigationMetaRef.current;
+      if (!manager || !meta) return false;
+      const ticket = manager.current();
+      if (!ticket || ticket !== meta.ticket) {
+        pendingNavigationMetaRef.current = null;
+        return false;
+      }
+      if (ticket.bookSession !== bookSessionRef.current) {
+        manager.cancel();
+        pendingNavigationMetaRef.current = null;
+        return false;
+      }
+      if (changedKey !== undefined && ticket.chapterKey !== changedKey) return false;
+      if (!manager.canCommit(
+        ticket,
+        bookSessionRef.current,
+        layoutRevisionRef.current,
+        layoutRevisionRef.current,
+      )) {
+        return false;
+      }
+      const box = layoutRef.current.boxFor(ticket.chapterKey);
+      const slot = slotsRef.current.get(ticket.chapterKey);
+      if (!box || !slot || slot.unmounted || slot.status !== "ready" || !slot.paginator.isDisplayReady) {
+        return false;
+      }
+      // 空章 ready 是成功终态但不是定位成功：搜索/笔记保留 unresolved，
+      // 锚点导航显示宿主空章说明并结算，不能把 index:-1 当章首。
+      const state = slot.paginator.getStateSnapshot();
+      if (state.status === "ready" && state.empty) {
+        setEmptyChapterNotice({
+          key: slot.key,
+          title: findChapterTitle(book.toc, slot.path) ?? `第 ${slot.spineIndex + 1} 章`,
+        });
+        settlePendingNavigationFailure(ticket);
+        return true;
+      }
+
+      let contentFractionResult: ResolvedContentFraction | null = null;
+      if (ticket.target.kind === "content-fraction") {
+        contentFractionResult = slot.paginator.resolveContentFraction(ticket.target.fraction);
+        if (ticket.target.fraction > 0 && !contentFractionResult) {
+          settlePendingNavigationFailure(ticket);
+          return true;
+        }
+      }
+
+      const contentY = resolvePendingTargetContentY(slot, ticket.target);
+      if (contentY === null) {
+        settlePendingNavigationFailure(ticket);
+        return true;
+      }
+
+      const el = containerRef.current;
+      if (!el) return false;
+      pendingNavigationFailureRef.current = false;
+      const isReadingLine = ticket.target.kind === "anchor" && ticket.target.alignment === "reading-line";
+      const desiredInset =
+        ticket.target.kind === "start" || (ticket.target.kind === "content-fraction" && ticket.target.fraction <= 0)
+          ? 0
+          : isReadingLine
+            ? continuousReadingLine(V)
+            : desiredScreenInset(V);
+      const hostS = layoutRef.current.clampScrollTop(box.top + contentY - desiredInset, V);
+
+      // 先只读应用章内状态（fragment/hash、搜索高亮、文本锚点字段），再写
+      // 宿主几何；R2：搜索不再调用会改内部 scrollTop/采样/提前通知的完整
+      // navigateToSearchTarget，只应用同一份 ranges。
+      let preciseStatus: PreciseNavigationStatus | null = null;
+      if (ticket.target.kind === "search") {
+        preciseStatus = slot.paginator.applySearchTargetHighlight(ticket.target.request);
+        if (preciseStatus !== "located" && preciseStatus !== "unsupported-highlight") {
+          settlePendingNavigationFailure(ticket);
+          return true;
+        }
+      } else if (ticket.target.kind === "fragment") {
+        slot.paginator.navigateWithinCurrentChapter({ fragment: ticket.target.fragment });
+      } else if (
+        (ticket.target.kind === "anchor" || ticket.target.kind === "note") &&
+        ticket.target.anchor
+      ) {
+        slot.paginator.setReadingAnchor(slot.path, ticket.target.anchor);
+      } else if (ticket.target.kind === "content-fraction" && contentFractionResult) {
+        slot.paginator.setReadingAnchor(slot.path, contentFractionResult.anchor);
+      }
+
+      const accepted = commitContinuousGeometry({
+        canvas: canvasRef.current,
+        host: el,
+        layout: layoutRef.current,
+        scrollTop: hostS,
+      });
+      pendingSpotRef.current = null;
+      const screenY = box.top + contentY - accepted;
+      const targetAnchor =
+        (ticket.target.kind === "anchor" || ticket.target.kind === "note")
+          ? ticket.target.anchor
+          : ticket.target.kind === "content-fraction" && contentFractionResult
+            ? contentFractionResult.anchor
+            : null;
+      const text = targetAnchor && targetAnchor.anchorTextOffset !== null
+        ? {
+            index: targetAnchor.index,
+            ratio: targetAnchor.ratio,
+            charsRead: targetAnchor.anchorTextOffset,
+            totalChars: slot.paginator.totalChars,
+            mediaUnits: 0,
+            textOffset: targetAnchor.anchorTextOffset,
+            textSnippet: targetAnchor.anchorTextSnippet,
+          }
+        : null;
+      const media =
+        (ticket.target.kind === "anchor" || ticket.target.kind === "note")
+          ? (ticket.target.mediaAnchor ?? null)
+          : ticket.target.kind === "content-fraction" && contentFractionResult
+            ? (contentFractionResult.mediaAnchor ?? null)
+            : null;
+      const committedSpot: ReadingSpot = {
+        key: slot.key,
+        offset: contentY,
+        screenY,
+        scrollTop: accepted,
+        text,
+        media,
+      };
+      lastStableSpotRef.current = committedSpot;
+      readingPositionRef.current = commitExplicitPosition(
+        bookSessionRef.current,
+        slot.key,
+        committedSpot,
+      );
+      syncToScrollTop(accepted, false);
+      if (ticket.target.kind === "search" && preciseStatus) {
+        onPreciseNavigationStatus?.({
+          requestId: ticket.target.request.requestId,
+          status: preciseStatus,
+          exact: true,
+        });
+      } else if (ticket.target.kind === "note") {
+        onPreciseNavigationStatus?.({
+          requestId: ticket.target.requestId,
+          status: "located",
+          exact: false,
+        });
+      }
+      const maxS = layoutRef.current.maxScrollTop(V);
+      const isAtScrollEnd = maxS > 0 ? accepted >= maxS - 2 : true;
+      const isLastLinear = linearItems.length > 0 && linearItems[linearItems.length - 1].key === slot.key;
+      const atEnd = isLastLinear && isAtScrollEnd;
+
+      if (ticket.target.kind === "content-fraction") {
+        const token = ticket.target.token;
+        const actualFraction = contentFractionResult ? contentFractionResult.fraction : ticket.target.fraction;
+        props.onContentFractionSettled?.(token, {
+          key: slot.key,
+          spineIndex: slot.spineIndex,
+          fraction: actualFraction,
+          atEnd,
+        });
+      }
+      if (manager.settle(ticket)) {
+        pendingNavigationMetaRef.current = null;
+        onInternalNavigationSettledRef.current?.();
+      }
+      checkVisibleChapterRef.current?.();
+      return true;
+    };
+    resolvePendingNavigationRef.current = resolvePendingNavigation;
 
     /**
      * 合并一次“存活 iframe 高度重测”。同一帧内的多个触发只提交一批；
@@ -595,11 +1131,16 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
             const height = slot.paginator.getContinuousContentHeight();
             const container = slot.iframe.parentElement;
             const laidOut = container !== null && container.offsetParent !== null;
-            if (!canCommitContinuousChapterHeight({ height, laidOut })) {
+            const measurement = classifyChapterMeasurement({
+              displayReady: slot.paginator.isDisplayReady,
+              viewportLaidOut: laidOut,
+              contentHeight: height,
+            });
+            if (measurement.kind === "pending") {
               pending = true;
               continue;
             }
-            updates.push({ key, height, measured: true });
+            updates.push({ key, height: measurement.height, measured: true });
           }
           if (pending) {
             if (layoutRemeasureRetriesRef.current < MEASURE_RETRY_LIMIT) {
@@ -843,20 +1384,21 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
         slotsRef.current.set(key, slot);
         setSlotUpdateNonce((n) => n + 1);
 
+        // 打开书/书签/历史返回的语义锚点只交给目标章，不让邻章预载误用。
+        const targetReadingAnchor =
+          props.initialAnchor && spineIdx === props.spineIndex
+            ? props.initialAnchor
+            : null;
+        const targetFallbackPage =
+          spineIdx === props.spineIndex ? (props.initialPage ?? null) : null;
         try {
           await paginator.load(path, {
             settings: effectiveSettings,
             hasNextChapter: nextLinearIndex(book, spineIdx, 1) >= 0,
             hasPrevChapter: nextLinearIndex(book, spineIdx, -1) >= 0,
             resetPage: true,
-            preciseNavigation:
-              preciseTarget && preciseTarget.chapterPath === path
-                ? {
-                    requestId: preciseTarget.requestId,
-                    kind: preciseTarget.kind,
-                    textHits: preciseTarget.textHits,
-                  }
-                : null,
+            readingAnchor: targetReadingAnchor,
+            fallbackPage: targetFallbackPage,
           });
         } catch {
           if (gateRef.current.isCurrent(ticket)) {
@@ -883,6 +1425,9 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
         onPreciseNavigationStatus,
         onSelectionContextMenu,
         preciseTarget,
+        props.initialAnchor,
+        props.initialPage,
+        props.spineIndex,
         server,
         settings,
       ]
@@ -917,29 +1462,50 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
         const height = paginator.getContinuousContentHeight();
         const container = slot.iframe.parentElement;
         const laidOut = container !== null && container.offsetParent !== null;
-        if (!canCommitContinuousChapterHeight({ height, laidOut })) return false;
+        // B-151：只有在 display-ready 且容器确实参与布局后，零高度才是 empty；
+        // 否则继续按帧重测，不把未布局/未完成的测量写成 0 高度。
+        const measurement = classifyChapterMeasurement({
+          displayReady: paginator.isDisplayReady,
+          viewportLaidOut: laidOut,
+          contentHeight: height,
+        });
+        if (measurement.kind === "pending") return false;
 
         if (!sameChapterReload) {
           if (!gateRef.current.finish(ticket)) return true;
           slot.status = "ready";
+        }
+        if (measurement.kind === "empty") {
+          const item = linearItems[slot.spineIndex] ?? linearItems.find((entry) => entry.index === slot.spineIndex);
+          setEmptyChapterNotice({
+            key,
+            title: findChapterTitle(book.toc, slot.path) ?? item?.idref ?? `第 ${slot.spineIndex + 1} 章`,
+          });
+          // 宿主说明之外，状态也要结束 loading；空章是 ready 的一种终态。
+          onPageState?.(slot.paginator.getStateSnapshot());
         }
         // 统一的批量提交入口：新高度、宿主位置与 iframe 投影同帧生效。
         // 必须走最新实现，不能用创建时的闭包旧 V / 旧几何（R4）。
         if (pendingSpotRef.current || reloadingRef.current.size > 0) {
           scheduleLayoutRemeasure(pendingSpotRef.current);
         } else {
-          commitLayoutBatchRef.current([{ key, height, measured: true }], null);
+          commitLayoutBatchRef.current([{ key, height: measurement.height, measured: true }], null);
         }
         void reloadSlotSettingsRef.current(slot);
         if (!sameChapterReload) {
-          onDisplayReady?.();
+          // 显式导航票据优先：目标章 ready 后先由宿主统一提交 scrollTop/高亮，
+          // 再报告 settled；没有待处理导航才走普通 ready 发布。
+          const settled = resolvePendingNavigationRef.current?.(key) === true;
+          if (!settled && !pendingNavigationFailureRef.current &&
+              !pendingNavigationRef.current?.current()) onDisplayReady?.();
+          pendingNavigationFailureRef.current = false;
         }
         // 首章就绪后同步一次可见章节状态，否则状态栏会一直停在“加载中…”
         // （滚动模式的状态由 checkVisibleChapter 驱动，而打开书并不会触发滚动）。
         checkVisibleChapterRef.current?.();
         return true;
       },
-      [onDisplayReady, scheduleLayoutRemeasure]
+      [book.toc, linearItems, onDisplayReady, onPageState, scheduleLayoutRemeasure]
     );
     commitChapterMeasurementRef.current = commitChapterMeasurement;
 
@@ -1127,39 +1693,101 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
     // 显式导航响应（TOC / 搜索 / 笔记 / 书签 / 历史返回 / 打开书）
     const lastNavigatedNonceRef = useRef<number>(-1);
     useEffect(() => {
-      const currentNonce = props.anchorNonce;
-      if (currentNonce === lastNavigatedNonceRef.current) return;
-      lastNavigatedNonceRef.current = currentNonce;
-
       const path = spineItemPath(book, spineIndex);
       if (!path) return;
       const targetKey = `${spineIndex}:${path}`;
-      const targetBox = layoutRef.current.boxes.find((b) => b.key === targetKey);
+      const targetBox = layoutRef.current.boxFor(targetKey);
       if (!targetBox) return;
+
+      const nonceChanged = props.anchorNonce !== lastNavigatedNonceRef.current;
+      const needsInitialRestore =
+        !initialNavigationHandledRef.current &&
+        Boolean(props.initialAnchor || (props.initialPage ?? 0) > 0);
+      if (!nonceChanged && !needsInitialRestore) return;
+      lastNavigatedNonceRef.current = props.anchorNonce;
+      if (needsInitialRestore) initialNavigationHandledRef.current = true;
+
+      const precise =
+        props.preciseTarget && props.preciseTarget.chapterPath === path
+          ? props.preciseTarget
+          : null;
+      let target: ContinuousNavigationTarget;
+      if (precise) {
+        if (precise.kind === "note") {
+          // R2：笔记保留 note 身份，只使用 App 给的原始 initialAnchor 只读解析，
+          // 不伪装成搜索，也不把失配落到 fallbackPage。
+          target = {
+            kind: "note",
+            requestId: precise.requestId,
+            anchor: props.initialAnchor ?? null,
+            mediaAnchor: props.initialAnchor?.mediaAnchor ?? null,
+            fallbackPage: null,
+          };
+        } else {
+          target = { kind: "search", request: precise };
+        }
+      } else if (props.anchor) {
+        target = { kind: "fragment", fragment: props.anchor };
+      } else if (props.initialAnchor) {
+        const hasSemanticInitial =
+          props.initialAnchor.anchorTextOffset !== null ||
+          Boolean(props.initialAnchor.mediaAnchor);
+        target = {
+          kind: "anchor",
+          anchor: props.initialAnchor,
+          mediaAnchor: props.initialAnchor.mediaAnchor ?? null,
+          fallbackPage: hasSemanticInitial ? null : (props.initialPage ?? null),
+          alignment: props.initialAlignment ?? "context",
+        };
+      } else {
+        target = {
+          kind: "anchor",
+          anchor: null,
+          mediaAnchor: null,
+          fallbackPage: props.initialPage ?? null,
+          alignment: props.initialAlignment ?? "context",
+        };
+      }
 
       const el = containerRef.current;
       if (!el) return;
-      // 显式导航（目录/搜索/笔记/书签/历史）必须即刻到位，不允许残余阻尼动画抢位置
+      // 显式导航开始释放旧权属，保留旧稳定 spot 供既有失败保护使用
+      readingPositionRef.current = releaseExplicitPosition(readingPositionRef.current);
+      // 显式导航必须立刻停止旧阻尼，且清除上一轮空章说明。
       dampedScrollRef.current.stop();
+      setEmptyChapterNotice(null);
+      const manager = pendingNavigationRef.current;
+      if (!manager) return;
+      const ticket = manager.begin(bookSessionRef.current, targetKey, target);
+      pendingNavigationFailureRef.current = false;
+      pendingNavigationMetaRef.current = {
+        ticket,
+        measuredRevision: layoutRevisionRef.current,
+      };
 
-      // 如果目标章节已测量就绪且带有 anchor
-      if (props.anchor) {
-        const slot = slotsRef.current.get(targetKey);
-        const doc = slot?.iframe?.contentDocument;
-        const anchorEl = doc?.getElementById(props.anchor);
-        if (anchorEl) {
-          const targetTop = anchorEl.getBoundingClientRect().top - (slot?.iframe?.getBoundingClientRect().top ?? 0);
-          const desiredS = layoutRef.current.clampScrollTop(targetBox.top + targetTop - 0.1 * V, V);
-          el.scrollTop = desiredS;
-          props.onInternalNavigationSettled();
-          return;
+      // 目标尚未装载时，只把宿主移到估算章节位置以触发投影加载；这不是
+      // 最终提交，不写进度、不发 settled。目标 ready 后再按票据真实解析。
+      const slot = slotsRef.current.get(targetKey);
+      if (!slot || slot.status !== "ready") {
+        const estimateS = layoutRef.current.clampScrollTop(targetBox.top, V);
+        if (Math.abs(el.scrollTop - estimateS) > 0.5) {
+          el.scrollTop = estimateS;
         }
+        syncToScrollTop(el.scrollTop, false);
+        return;
       }
-
-      // 默认按章节起点对齐
-      const desiredS = layoutRef.current.clampScrollTop(targetBox.top, V);
-      el.scrollTop = desiredS;
-    }, [book, props, spineIndex, V]);
+      resolvePendingNavigationRef.current?.(targetKey);
+    }, [
+      book,
+      props.anchor,
+      props.anchorNonce,
+      props.initialAlignment,
+      props.initialAnchor,
+      props.initialPage,
+      props.preciseTarget,
+      spineIndex,
+      V,
+    ]);
 
     // 挂载各 slot 的 iframe 到对应的 chapter wrapper
     const attachIframe = useCallback((key: string, container: HTMLDivElement | null) => {
@@ -1183,59 +1811,248 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
           handleExternalViewportStep(-1);
         },
         setPage() {},
+        seekContentFraction(
+          target: { key: string; spineIndex: number; fraction: number },
+          token: ScrubToken,
+        ) {
+          dampedScrollRef.current.stop();
+          for (const slot of slotsRef.current.values()) slot.paginator.closeForNavigation();
+          setEmptyChapterNotice(null);
+          pendingSpotRef.current = null;
+          readingPositionRef.current = releaseExplicitPosition(readingPositionRef.current);
+
+          const manager = pendingNavigationRef.current;
+          if (!manager) return;
+
+          const navTarget: ContinuousNavigationTarget = {
+            kind: "content-fraction",
+            fraction: target.fraction,
+            token,
+          };
+          const ticket = manager.begin(bookSessionRef.current, target.key, navTarget);
+          pendingNavigationFailureRef.current = false;
+          pendingNavigationMetaRef.current = {
+            ticket,
+            measuredRevision: layoutRevisionRef.current,
+          };
+
+          const slot = slotsRef.current.get(target.key);
+          if (slot && slot.status === "ready" && slot.paginator.isDisplayReady) {
+            resolvePendingNavigation();
+            return;
+          }
+
+          const box = layoutRef.current.boxFor(target.key);
+          const el = containerRef.current;
+          if (box && el) {
+            const estimatedTop = layoutRef.current.clampScrollTop(
+              target.fraction <= 0
+                ? box.top
+                : box.top + Math.min(box.height, target.fraction * box.height),
+              V,
+            );
+            const accepted = commitContinuousGeometry({
+              canvas: canvasRef.current,
+              host: el,
+              layout: layoutRef.current,
+              scrollTop: estimatedTop,
+            });
+            syncToScrollTop(accepted, false);
+          }
+        },
+        scrollToRatio(ratio: number) {
+          const clamped = Math.max(0, Math.min(1, ratio));
+          this.seekContentFraction?.(
+            { key: linearItems[0]?.key ?? "0:", spineIndex: 0, fraction: clamped },
+            { session: bookSessionRef.current, request: -1 },
+          );
+        },
         diagnose() {
           const loadedKeys = Array.from(slotsRef.current.keys()).join(", ");
           return `ContinuousReaderView: totalHeight=${layoutRef.current.totalHeight} V=${V} scrollTop=${containerRef.current?.scrollTop ?? 0} loaded=[${loadedKeys}]`;
         },
         getReadingAnchor() {
-          const el = containerRef.current;
-          const S = el?.scrollTop ?? 0;
-          const continuousAnchor = layoutRef.current.anchorAt(S, V, READING_LINE_RATIO * V);
-          if (!continuousAnchor) return null;
-          const slot = slotsRef.current.get(continuousAnchor.key);
-          return slot?.paginator.getReadingAnchor() ?? null;
+          const activeExplicit =
+            readingPositionRef.current &&
+            readingPositionRef.current.session === bookSessionRef.current &&
+            readingPositionRef.current.source === "explicit"
+              ? readingPositionRef.current.value
+              : null;
+          const spot = activeExplicit ?? captureReadingSpot() ?? lastStableSpotRef.current;
+          if (!spot) return null;
+          if (spot.text) {
+            return {
+              path: spot.key.split(":").slice(1).join(":"),
+              index: spot.text.index,
+              ratio: spot.text.ratio,
+              charsRead: spot.text.charsRead,
+              totalChars: spot.text.totalChars,
+              mediaUnits: spot.text.mediaUnits ?? 0,
+              textOffset: spot.text.textOffset,
+              textSnippet: spot.text.textSnippet,
+              mediaAnchor: null,
+            };
+          }
+          if (spot.media) {
+            return {
+              path: spot.key.split(":").slice(1).join(":"),
+              index: -1,
+              ratio: spot.media.ratio,
+              charsRead: 0,
+              totalChars: 0,
+              mediaUnits: 1,
+              textOffset: null,
+              textSnippet: null,
+              mediaAnchor: spot.media,
+            };
+          }
+          return null;
         },
         getAnchorText() {
+          const activeExplicit =
+            readingPositionRef.current &&
+            readingPositionRef.current.session === bookSessionRef.current &&
+            readingPositionRef.current.source === "explicit"
+              ? readingPositionRef.current.value
+              : null;
+          const spot = activeExplicit ?? captureReadingSpot() ?? lastStableSpotRef.current;
+          if (spot?.text?.textSnippet) return spot.text.textSnippet;
           const el = containerRef.current;
           const S = el?.scrollTop ?? 0;
           const continuousAnchor = layoutRef.current.anchorAt(S, V, READING_LINE_RATIO * V);
-          if (!continuousAnchor) return null;
-          const slot = slotsRef.current.get(continuousAnchor.key);
+          const slot = continuousAnchor ? slotsRef.current.get(continuousAnchor.key) : null;
           return slot?.paginator.getAnchorText() ?? null;
         },
         jumpToAnchor(anchorStr) {
-          const el = containerRef.current;
-          if (!el) return;
-          for (const slot of slotsRef.current.values()) {
-            const doc = slot.iframe?.contentDocument;
-            const target = doc?.getElementById(anchorStr);
-            if (target) {
-              const box = layoutRef.current.boxes.find((b) => b.key === slot.key);
-              if (box) {
-                const targetTop = target.getBoundingClientRect().top - slot.iframe.getBoundingClientRect().top;
-                el.scrollTop = layoutRef.current.clampScrollTop(box.top + targetTop - 0.1 * V, V);
-                return;
-              }
-            }
-          }
+          this.navigateWithinCurrentChapter({ fragment: anchorStr });
         },
         navigateWithinCurrentChapter(options: WithinChapterNavigationOptions) {
           const el = containerRef.current;
-          const S = el?.scrollTop ?? 0;
-          const continuousAnchor = layoutRef.current.anchorAt(S, V, READING_LINE_RATIO * V);
-          if (!continuousAnchor) return false;
-          const slot = slotsRef.current.get(continuousAnchor.key);
-          if (!slot) return false;
-          const navigated = slot.paginator.navigateWithinCurrentChapter(options);
-          if (navigated) props.onInternalNavigationSettled();
-          return navigated;
+          if (!el) return false;
+          const currentAnchor = layoutRef.current.anchorAt(el.scrollTop, V, READING_LINE_RATIO * V);
+          if (!currentAnchor) return false;
+          const slot = slotsRef.current.get(currentAnchor.key);
+          if (!slot || slot.status !== "ready" || !slot.paginator.isDisplayReady) return false;
+          const box = layoutRef.current.boxFor(slot.key);
+          if (!box) return false;
+
+          const hasSemanticTextAnchor = Boolean(
+            options.readingAnchor &&
+              (options.readingAnchor.anchorTextOffset !== null ||
+                options.readingAnchor.anchorTextSnippet !== null),
+          );
+          const semanticTarget = hasSemanticTextAnchor || Boolean(options.mediaAnchor);
+          let contentY: number | null = null;
+          if (options.toStart) contentY = 0;
+          else if (options.fragment !== undefined) {
+            contentY = slot.paginator.resolveFragmentContentY(options.fragment);
+          } else if (options.readingAnchor) {
+            contentY = slot.paginator.resolvePersistedAnchorContentY(options.readingAnchor);
+          }
+          if (contentY === null && options.mediaAnchor) {
+            contentY = slot.paginator.resolveMediaAnchorContentY(options.mediaAnchor);
+          }
+          if (
+            contentY === null &&
+            !semanticTarget &&
+            options.fallbackPage !== null &&
+            options.fallbackPage !== undefined
+          ) {
+            const pageCount = slot.paginator.pageCount;
+            const ratio = pageCount > 1
+              ? Math.max(0, Math.min(1, options.fallbackPage / (pageCount - 1)))
+              : 0;
+            contentY = ratio * box.height;
+          }
+          if (contentY === null) return false;
+
+          const isReadingLine = options.alignment === "reading-line";
+          const desiredInset = options.toStart
+            ? 0
+            : isReadingLine
+              ? continuousReadingLine(V)
+              : desiredScreenInset(V);
+          const hostS = layoutRef.current.clampScrollTop(box.top + contentY - desiredInset, V);
+          const accepted = commitContinuousGeometry({
+            canvas: canvasRef.current,
+            host: el,
+            layout: layoutRef.current,
+            scrollTop: hostS,
+          });
+          // 应用章内状态（fragment hash / 文本锚点字段）；分页器内部的
+          // viewer.scrollTop 随后会被 syncToScrollTop 的投影覆盖。
+          if (options.toStart) {
+            slot.paginator.navigateWithinCurrentChapter({ toStart: true });
+          } else if (options.fragment !== undefined) {
+            slot.paginator.navigateWithinCurrentChapter({ fragment: options.fragment });
+          } else if (options.readingAnchor) {
+            slot.paginator.setReadingAnchor(slot.path, options.readingAnchor);
+          }
+          const screenY = box.top + contentY - accepted;
+          const text = options.readingAnchor && options.readingAnchor.anchorTextOffset !== null
+            ? {
+                index: options.readingAnchor.index,
+                ratio: options.readingAnchor.ratio,
+                charsRead: options.readingAnchor.anchorTextOffset,
+                totalChars: slot.paginator.totalChars,
+                mediaUnits: 0,
+                textOffset: options.readingAnchor.anchorTextOffset,
+                textSnippet: options.readingAnchor.anchorTextSnippet,
+              }
+            : null;
+          const media = options.mediaAnchor ?? null;
+          const committedSpot: ReadingSpot = {
+            key: slot.key,
+            offset: contentY,
+            screenY,
+            scrollTop: accepted,
+            text,
+            media,
+          };
+          lastStableSpotRef.current = committedSpot;
+          readingPositionRef.current = commitExplicitPosition(
+            bookSessionRef.current,
+            slot.key,
+            committedSpot,
+          );
+          syncToScrollTop(accepted, false);
+          props.onInternalNavigationSettled();
+          checkVisibleChapterRef.current?.();
+          return true;
         },
         navigateToSearchTarget(request) {
-          for (const slot of slotsRef.current.values()) {
-            const status = slot.paginator.navigateToSearchTarget(request);
-            if (status === "located") return status;
+          const chapterPath = (request as { chapterPath?: string }).chapterPath;
+          const el = containerRef.current;
+          if (!el) return "unresolved";
+          let slot: ActiveSlot | null = null;
+          if (chapterPath) {
+            slot = Array.from(slotsRef.current.values()).find((candidate) => candidate.path === chapterPath) ?? null;
+          } else {
+            const currentAnchor = layoutRef.current.anchorAt(el.scrollTop, V, READING_LINE_RATIO * V);
+            slot = currentAnchor ? slotsRef.current.get(currentAnchor.key) ?? null : null;
           }
-          return "unresolved";
+          if (!slot || slot.status !== "ready" || !slot.paginator.isDisplayReady) {
+            return "unresolved";
+          }
+          const box = layoutRef.current.boxFor(slot.key);
+          if (!box) return "unresolved";
+          const contentY = slot.paginator.resolveSearchTargetContentY(request);
+          if (contentY === null) return "unresolved";
+          const status = slot.paginator.applySearchTargetHighlight(request);
+          if (status !== "located" && status !== "unsupported-highlight") return status;
+          const hostS = layoutRef.current.clampScrollTop(
+            box.top + contentY - desiredScreenInset(V),
+            V,
+          );
+          const accepted = commitContinuousGeometry({
+            canvas: canvasRef.current,
+            host: el,
+            layout: layoutRef.current,
+            scrollTop: hostS,
+          });
+          syncToScrollTop(accepted, false);
+          onInternalNavigationSettledRef.current?.();
+          return status;
         },
         getFootnoteMarkerRect() {
           const el = containerRef.current;
@@ -1274,13 +2091,20 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
         },
         scrollToStart() {
           dampedScrollRef.current.stop();
-          if (containerRef.current) containerRef.current.scrollTop = 0;
+          for (const slot of slotsRef.current.values()) slot.paginator.closeForNavigation();
+          const el = containerRef.current;
+          if (!el) return;
+          el.scrollTop = 0;
+          syncToScrollTop(0, false);
         },
         scrollToEnd() {
           dampedScrollRef.current.stop();
-          if (containerRef.current) {
-            containerRef.current.scrollTop = layoutRef.current.maxScrollTop(V);
-          }
+          for (const slot of slotsRef.current.values()) slot.paginator.closeForNavigation();
+          const el = containerRef.current;
+          if (!el) return;
+          const target = layoutRef.current.maxScrollTop(V);
+          el.scrollTop = target;
+          syncToScrollTop(target, false);
         },
         atScrollBoundary(direction) {
           const el = containerRef.current;
@@ -1359,6 +2183,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
           // 重排补偿由阅读器自己写入 scrollTop；浏览器 scroll anchoring 若同时
           // 生效会与补偿互相抵消，这里关闭它，也不为每张图加补偿监听。
           overflowAnchor: "none",
+          position: "relative",
         }}
       >
         <div
@@ -1434,6 +2259,33 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
             );
           })}
         </div>
+        {emptyChapterNotice && (
+          <div
+            role="status"
+            style={{
+              position: "absolute",
+              inset: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              pointerEvents: "none",
+              zIndex: 2,
+            }}
+          >
+            <div
+              style={{
+                maxWidth: 360,
+                padding: "18px 22px",
+                borderRadius: 10,
+                background: "rgba(0, 0, 0, 0.06)",
+                textAlign: "center",
+              }}
+            >
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>{emptyChapterNotice.title}</div>
+              <div style={{ color: "var(--muted)", fontSize: 13 }}>本章无可显示内容</div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }

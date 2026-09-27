@@ -132,8 +132,12 @@ export function PageOptionsPanel(props: PageOptionsPanelProps) {
   };
 
   const marginValue = (side: MarginSide): number | undefined => value.pageMarginsPx?.[side];
-  const marginAutoValue = (side: MarginSide): number =>
-    side === "top" ? auto.top : side === "bottom" ? auto.bottom : 0;
+  // B-154：滚动模式默认上下 12px、左右 16px；分页模式继续沿用 2.2em/1.6em
+  // 与左右 0。此处只负责显示/步进基准，真正扣除仍在 paginator 的测量入口。
+  const marginAutoValue = (side: MarginSide): number => {
+    if (scrollMode) return side === "left" || side === "right" ? 16 : 12;
+    return side === "top" ? auto.top : side === "bottom" ? auto.bottom : 0;
+  };
 
   const setMargin = (side: MarginSide, next: number | undefined): void => {
     const margins: PageMarginsPx = { ...(value.pageMarginsPx ?? {}) };

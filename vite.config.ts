@@ -35,8 +35,8 @@ export default defineConfig(({ mode }) => {
     clearScreen: false,
     server: {
       // 注意：1420 曾被 Hyper-V 保留段占用；后改 5517，但 2025-08 电脑重启后
-      // 5470-5569 也落入 Windows 保留段（EADDRINUSE），现改用 5173
-      port: 5173,
+      // Track B (Zen UI 实验树) 锁定固定使用 5175，保持与浏览器 IndexedDB 存储源一致
+      port: 5175,
       strictPort: true,
     },
     build: {

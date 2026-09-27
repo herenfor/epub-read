@@ -20,15 +20,22 @@ export interface RawTextRange {
   end: number;
 }
 
+export interface ExactTextHitsAndPoints {
+  hits: ExactTextHit[];
+  /** Non-whitespace, block-boundary-free code points used by the hits. */
+  points: string[];
+}
+
 /**
  * Convert core/search raw UTF-16 chapter ranges to non-whitespace Unicode
- * code-point ranges.  A single scan builds the boundary map; soft hyphens and
- * corpus block boundaries are omitted in the same order as visible text.
+ * code-point ranges while exposing the exact point sequence used for mapping.
+ * A single scan builds the boundary map; soft hyphens and corpus block
+ * boundaries are omitted in the same order as visible text.
  */
-export function buildExactTextHits(
+export function buildExactTextHitsAndPoints(
   source: string,
   rawRanges: readonly RawTextRange[],
-): ExactTextHit[] | null {
+): ExactTextHitsAndPoints | null {
   if (rawRanges.length === 0) return null;
   const needed = new Set<number>();
   for (const range of rawRanges) {
@@ -62,7 +69,15 @@ export function buildExactTextHits(
     if (start === undefined || end === undefined || end <= start) return null;
     hits.push({ start, end, exactText: points.slice(start, end).join("") });
   }
-  return hits;
+  return { hits, points };
+}
+
+/** Compatibility wrapper for callers that only need the mapped ranges. */
+export function buildExactTextHits(
+  source: string,
+  rawRanges: readonly RawTextRange[],
+): ExactTextHit[] | null {
+  return buildExactTextHitsAndPoints(source, rawRanges)?.hits ?? null;
 }
 
 /**

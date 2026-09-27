@@ -1,4 +1,4 @@
-import { act, createElement, type ComponentProps } from "react";
+import { act, createElement, createRef, type ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_SETTINGS, type ReaderSettings } from "../render/settings";
 import type { Book } from "../core/types";
@@ -8,7 +8,7 @@ const instances = vi.hoisted(() => [] as MockPaginator[]);
 class MockPaginator {
   disposed = false;
   isDisplayReady = false;
-  state: { status: string; empty?: boolean } = { status: "loading" };
+  state: { status: string; empty?: boolean; pageCount?: number; currentPage?: number } = { status: "loading" };
   currentPage = 0;
   pageCount = 2;
   path = "";
@@ -37,12 +37,20 @@ class MockPaginator {
   });
   finish() {
     this.isDisplayReady = true;
-    this.state = { status: "ready", empty: false };
+    this.state = { status: "ready", empty: false, pageCount: this.pageCount, currentPage: this.currentPage };
+    (this.callbacks[4] as Function)(this.state);
+    (this.callbacks[15] as Function)();
+    this.complete?.();
+  }
+  finishEmpty() {
+    this.isDisplayReady = true;
+    this.state = { status: "ready", empty: true, pageCount: 1, currentPage: 0 };
     (this.callbacks[4] as Function)(this.state);
     (this.callbacks[15] as Function)();
     this.complete?.();
   }
   getStateSnapshot() { return this.state; }
+  getCurrentPath() { return this.path; }
   setNotes() {}
   setPage(page: number) { this.currentPage = page; }
   navigateToSearchTarget() { return "unresolved" as const; }
@@ -54,7 +62,7 @@ class MockPaginator {
 vi.mock("../render/paginator", () => ({
   ChapterPaginator: class { constructor(...args: unknown[]) { return new MockPaginator(...args); } },
 }));
-import { ReaderView } from "./ReaderView";
+import { ReaderView, type ReaderHandle } from "./ReaderView";
 
 describe("ReaderView preload settings lifecycle", () => {
   let dom: ReturnType<typeof createReactDomHarness>;
@@ -69,7 +77,10 @@ describe("ReaderView preload settings lifecycle", () => {
       manifest: new Map([0, 1, 2, 3].map((i) => [String(i), { href: `${i}.xhtml` }])),
     } as Book;
     props = {
-      book, server: { revokeAll: vi.fn() } as unknown as ComponentProps<typeof ReaderView>["server"],
+      book, server: {
+        revokeAll: vi.fn(),
+        textFor: vi.fn(() => "<html></html>"),
+      } as unknown as ComponentProps<typeof ReaderView>["server"],
       settings: { ...DEFAULT_SETTINGS, preloadNextChapter: true }, userFonts: [], notes: [],
       spineIndex: 0, anchorNonce: 0, startAtEnd: { nonce: 0, atEnd: false },
       onPageState: vi.fn(), onDisplayReady: vi.fn(), onRequestChapter: vi.fn(), onIssues: vi.fn(),
@@ -191,4 +202,101 @@ describe("ReaderView preload settings lifecycle", () => {
     const paths = instances.map((p) => p.path);
     expect(paths).not.toContain("1.xhtml");
   });
+
+
+  it("切书释放旧活缓存，旧后台 ready 不再发布", async () => {
+    await render();
+    const active = instances[0];
+    await finish(active);
+    const oldSpare = instances[1];
+    const onDisplayReady = props.onDisplayReady as ReturnType<typeof vi.fn>;
+    const readyCalls = onDisplayReady.mock.calls.length;
+
+    const nextBook = {
+      ...props.book,
+      opfPath: "book2.opf",
+      spine: [0, 1, 2].map((i) => ({ idref: String(i), linear: true })),
+      manifest: new Map([0, 1, 2].map((i) => [String(i), { href: `b2/${i}.xhtml` }])),
+    } as Book;
+    props = { ...props, book: nextBook };
+    await render();
+
+    expect(active.disposed).toBe(true);
+    expect(oldSpare.disposed).toBe(true);
+    await act(async () => { oldSpare.finish(); });
+    // 旧任务的 display-ready 回调即使晚到也不能发布新书活动章 ready。
+    expect(onDisplayReady.mock.calls.length).toBe(readyCalls);
+  });
+
+  it("五章活缓存补齐后才串行使用临时测量槽，临时 ready 不发布为活动章", async () => {
+    const longBook = {
+      ...props.book,
+      spine: Array.from({ length: 7 }, (_, i) => ({ idref: String(i), linear: true })),
+      manifest: new Map(Array.from({ length: 7 }, (_, i) => [String(i), { href: `${i}.xhtml` }])),
+    } as Book;
+    const onDisplayReady = vi.fn();
+    // 统一验证无 requestIdleCallback 时的帧后小任务退避；有原生 rIC 的开发环境不走此测试路径。
+    const idleWindow = window as unknown as { requestIdleCallback?: unknown };
+    delete idleWindow.requestIdleCallback;
+    props = { ...props, book: longBook, spineIndex: 3, onDisplayReady };
+    await render();
+    const active = instances[0];
+
+    await act(async () => { active.finish(); });
+    // 活动章 ready 后先等空闲 500ms，再按 next、prev、next2、prev2 补齐四个近邻。
+    expect(instances).toHaveLength(1);
+    await act(async () => { vi.advanceTimersByTime(500); });
+    const spareOrder = [instances[1].path];
+    for (let i = 0; i < 3; i += 1) {
+      const current = instances.at(-1)!;
+      await act(async () => { current.finish(); });
+      await act(async () => { vi.advanceTimersByTime(150); });
+      spareOrder.push(instances.at(-1)!.path);
+    }
+    expect(spareOrder).toEqual(["4.xhtml", "2.xhtml", "5.xhtml", "1.xhtml"]);
+    expect(instances).toHaveLength(5);
+    const readyCalls = onDisplayReady.mock.calls.length;
+
+    // 最后一个近邻 finish 后，空闲调度只进入远章轻量资源准备；
+    // 不再创建第六个完整排版 iframe，也不写无人消费的页数摘要。
+    await act(async () => { instances.at(-1)!.finish(); });
+    await act(async () => { vi.advanceTimersByTime(150); });
+    await act(async () => { vi.advanceTimersByTime(500); });
+    await act(async () => { vi.advanceTimersByTime(1); });
+    expect(instances).toHaveLength(5);
+    expect(props.server.textFor).toHaveBeenCalledWith("6.xhtml");
+    expect(onDisplayReady.mock.calls.length).toBe(readyCalls);
+  });
+
+  it("快速输入会取消尚未发布的当前后台任务，空闲后再从优先级重新开始", async () => {
+    const ref = createRef<ReaderHandle>();
+    await dom.render(createElement(ReaderView, { ...props, ref }));
+    const active = instances[0];
+    await finish(active);
+    // 第一个近邻已进入后台完整排版，但尚未 finish/发布。
+    expect(instances).toHaveLength(2);
+    const inFlight = instances[1];
+    expect(inFlight.path).toBe("1.xhtml");
+
+    await act(async () => { ref.current?.nextPage(); });
+    // 普通翻页先取消未发布的后台槽；旧槽晚到的 ready 不能被提升。
+    expect(inFlight.disposed).toBe(true);
+    expect(instances[0].disposed).toBe(false);
+
+    await act(async () => { vi.advanceTimersByTime(500); });
+    expect(instances.at(-1)?.path).toBe("1.xhtml");
+    expect(instances.at(-1)).not.toBe(inFlight);
+  });
+
+  it("末章空内容也发布 display-ready，不把 loading 留到永远", async () => {
+    props = { ...props, settings: { ...props.settings, preloadNextChapter: false } };
+    await render();
+    const active = instances[0];
+    props = { ...props, spineIndex: 3 };
+    await render();
+    await act(async () => { active.finishEmpty(); });
+    expect(props.onDisplayReady).toHaveBeenCalled();
+    expect(props.onRequestChapter).not.toHaveBeenCalled();
+  });
+
 });

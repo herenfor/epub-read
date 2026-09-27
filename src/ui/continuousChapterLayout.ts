@@ -1,7 +1,6 @@
 /**
  * Continuous reading geometry. No DOM, timers, wheel thresholds or chapter turns.
  * The host owns the sole user scroll position; bounded chapter iframes project it.
- * Not wired into ReaderView yet. See the continuous-scroll handoff for integration.
  */
 export interface ChapterExtent {
   /** Stable book-local spine identity, not a reusable iframe slot ID. */
@@ -46,20 +45,73 @@ function clamp(value: number, minimum: number, maximum: number): number {
 
 export { continuousWheelPixels } from "../render/scrollLayout";
 
+export interface ChapterExtentDraft {
+  key: string;
+  height: number;
+  measured: boolean;
+}
+export interface ChapterBoxDraft extends ChapterExtentDraft {
+  index: number;
+  top: number;
+  bottom: number;
+}
+
+/**
+ * 章间 gap 只出现在两个正高度章节之间；书首/书尾和空章不制造额外空隙。
+ * 返回值被 {@link ContinuousChapterLayout} 和测试共用，保证所有调用方共享
+ * 同一套 top/bottom/totalHeight 口径。
+ */
+export function buildSpacedChapterBoxes(
+  extents: readonly ChapterExtentDraft[],
+  gap: number,
+): { boxes: ChapterBoxDraft[]; totalHeight: number } {
+  const safeGap = Number.isFinite(gap) && gap > 0 ? gap : 0;
+  let bottom = 0;
+  let hasPreviousContent = false;
+  const boxes = extents.map((extent, index) => {
+    const top = bottom + (extent.height > 0 && hasPreviousContent ? safeGap : 0);
+    const box = { ...extent, index, top, bottom: top + extent.height };
+    if (extent.height > 0) {
+      bottom = box.bottom;
+      hasPreviousContent = true;
+    }
+    return box;
+  });
+  return { boxes, totalHeight: bottom };
+}
+
+/** 缝隙归到下一章起点；screenY 必须用实际点坐标重算，不能继续用 probeY。 */
+export function anchorAtSpacedPoint(
+  boxes: readonly ChapterBoxDraft[],
+  documentY: number,
+  hostScrollTop: number,
+): { key: string; offset: number; screenY: number } | null {
+  let last: ChapterBoxDraft | undefined;
+  for (const box of boxes) {
+    if (box.height === 0) continue;
+    last = box;
+    if (documentY < box.bottom) {
+      const offset = Math.max(0, documentY - box.top);
+      return { key: box.key, offset, screenY: box.top + offset - hostScrollTop };
+    }
+  }
+  return last
+    ? { key: last.key, offset: last.height, screenY: last.bottom - hostScrollTop }
+    : null;
+}
+
 /** Inputs are validated by the measurement adapter: unique keys, finite heights >= 0. */
 export class ContinuousChapterLayout {
   readonly boxes: readonly ChapterBox[];
   readonly totalHeight: number;
+  readonly gap: number;
   private readonly byKey: ReadonlyMap<string, ChapterBox>;
 
-  constructor(extents: readonly ChapterExtent[]) {
-    let top = 0;
-    this.boxes = extents.map((extent, index) => {
-      const box = { ...extent, index, top, bottom: top + extent.height };
-      top = box.bottom;
-      return box;
-    });
-    this.totalHeight = top;
+  constructor(extents: readonly ChapterExtent[], gap = 0) {
+    this.gap = Number.isFinite(gap) && gap > 0 ? gap : 0;
+    const { boxes, totalHeight } = buildSpacedChapterBoxes(extents, this.gap);
+    this.boxes = boxes;
+    this.totalHeight = totalHeight;
     this.byKey = new Map(this.boxes.map((box) => [box.key, box]));
   }
 
@@ -76,15 +128,19 @@ export class ContinuousChapterLayout {
     return clamp(scrollTop, 0, this.maxScrollTop(viewportHeight));
   }
 
-  /** Half-open chapter intervals; exact seams belong to the following nonempty chapter. */
+  /**
+   * Half-open chapter intervals; exact seams belong to the following nonempty
+   * chapter. A gap between two chapters belongs to the following chapter at
+   * offset 0 so sampling on the reading line does not jump to the previous
+   * chapter end or pull the host by the gap height.
+   */
   pointAt(documentY: number): ChapterPoint | null {
     const y = clamp(documentY, 0, this.totalHeight);
     for (const box of this.boxes) {
-      if (box.height > 0 && y >= box.top && y < box.bottom) {
-        return { key: box.key, offset: y - box.top };
-      }
+      if (box.height === 0) continue;
+      if (y < box.top) return { key: box.key, offset: 0 };
+      if (y < box.bottom) return { key: box.key, offset: y - box.top };
     }
-    // The end of the whole book belongs to the last nonempty chapter.
     for (let index = this.boxes.length - 1; index >= 0; index -= 1) {
       const box = this.boxes[index];
       if (box.height > 0) return { key: box.key, offset: box.height };
@@ -96,7 +152,12 @@ export class ContinuousChapterLayout {
     const top = this.clampScrollTop(scrollTop, viewportHeight);
     const probe = clamp(screenY, 0, Math.min(viewportHeight, this.totalHeight - top));
     const point = this.pointAt(top + probe);
-    return point ? { ...point, screenY: probe } : null;
+    if (!point) return null;
+    const box = this.byKey.get(point.key);
+    if (!box) return null;
+    // gap 内采样归到下个章节 offset 0，screenY 必须按该章实际 top 重算；
+    // 继续使用 probe 会在 gap 位于阅读线时把重测拉动一个 gap 的距离。
+    return { ...point, screenY: box.top + point.offset - top };
   }
 
   /** After height changes, restore a content point without replaying a wheel event. */
@@ -145,7 +206,12 @@ export class ContinuousChapterLayout {
     currentScrollTop: number,
   ): { layout: ContinuousChapterLayout; scrollTop: number } {
     const replacements = new Map(updates.map((extent) => [extent.key, extent]));
-    const layout = new ContinuousChapterLayout(this.boxes.map((box) => replacements.get(box.key) ?? box));
+    const extents = this.boxes.map((box) => ({
+      key: box.key,
+      height: replacements.get(box.key)?.height ?? box.height,
+      measured: replacements.get(box.key)?.measured ?? box.measured,
+    }));
+    const layout = new ContinuousChapterLayout(extents, this.gap);
     return {
       layout,
       scrollTop: (anchor && layout.scrollTopFor(anchor, viewportHeight))
@@ -192,5 +258,53 @@ export class ChapterLoadGate {
 
   reset(): void {
     this.pending.clear();
+  }
+}
+
+export interface ScrollNavigationTicket<T> {
+  readonly serial: number;
+  readonly bookSession: number;
+  readonly chapterKey: string;
+  readonly target: T;
+}
+
+/**
+ * 显式滚动导航票据。替换“effect 入口立即消费 nonce”：等待目标章节装载/
+ * 重排时票据保持有效，提交前还要校验 bookSession 与当前布局代次。
+ */
+export class PendingScrollNavigation<T> {
+  private serial = 0;
+  private pending: ScrollNavigationTicket<T> | null = null;
+
+  begin(bookSession: number, chapterKey: string, target: T): ScrollNavigationTicket<T> {
+    const ticket = { serial: ++this.serial, bookSession, chapterKey, target };
+    this.pending = ticket;
+    return ticket;
+  }
+
+  current(): ScrollNavigationTicket<T> | null {
+    return this.pending;
+  }
+
+  canCommit(
+    ticket: ScrollNavigationTicket<T>,
+    bookSession: number,
+    measuredRevision: number,
+    currentRevision: number,
+  ): boolean {
+    return this.pending === ticket &&
+      ticket.bookSession === bookSession &&
+      measuredRevision === currentRevision;
+  }
+
+  /** 仅在外层几何 + scrollTop + 投影已提交，或已明确报告失败后调用。 */
+  settle(ticket: ScrollNavigationTicket<T>): boolean {
+    if (this.pending !== ticket) return false;
+    this.pending = null;
+    return true;
+  }
+
+  cancel(): void {
+    this.pending = null;
   }
 }

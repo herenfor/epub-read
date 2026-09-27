@@ -20,6 +20,9 @@ describe("cross-book search presentation", () => {
     expect(result.hit.textAnchor.start).toBe(102);
     expect(result.hit.textAnchor.snippet).toBe("ＡＢＣ测试后文");
     expect(result.textHits).toEqual([{ start: 102, end: 107, exactText: "ＡＢＣ测试" }]);
+    expect(result.occurrence?.hits).toEqual(result.textHits);
+    expect(result.occurrence?.before).toBe("前文");
+    expect(result.occurrence?.after).toBe("后文");
   });
 
   it("adds the block start exactly once even beyond the KMP radius", () => {
