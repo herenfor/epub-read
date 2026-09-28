@@ -40,6 +40,10 @@ import {
   resolveRestoredPage,
   shouldRestoreReaderTopAutoMargin,
   createAutoMarginBatch,
+  resolvedMarginKind,
+  planAutoBlockBox,
+  planContainedMediaMaxWidth,
+  readComputedHorizontalMarginSpecifiedValues,
 } from "./paginator";
 
 const textNode = (text: string): Node =>
@@ -2502,6 +2506,181 @@ describe("B-153 paged anchor sampling", () => {
     // 进度写入/书签/历史读取时必须补齐最新页。
     ChapterPaginator.prototype.getReadingAnchor.call(context);
     expect(captureAnchor).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("reader local width core", () => {
+  it("只把 Typed OM 的 px 最终值判为 length，auto 不被几何误判", () => {
+    expect(resolvedMarginKind("24px")).toBe("length");
+    expect(resolvedMarginKind("-1.5px")).toBe("length");
+    expect(resolvedMarginKind("auto")).toBe("auto");
+    expect(resolvedMarginKind("70%")).toBe("unknown");
+    expect(resolvedMarginKind("calc(70% - 1em)")).toBe("unknown");
+    expect(resolvedMarginKind(undefined)).toBe("unknown");
+  });
+
+  it("窄屏固定 24/24 不再伪装 auto，按单栏预算保留作者缩进", () => {
+    // .ctt 在 390px iframe / body 左右 5px 后可用 380px：旧几何
+    // (380-332)/2 正好等于 24，正是误导 auto 的例子。
+    expect(planAutoBlockBox({
+      containerWidth: 380,
+      measureWidth: 640,
+      marginLeft: 24,
+      marginRight: 24,
+      boxSizing: "content-box",
+      paddingBorderWidth: 0,
+    })).toEqual({ marginLeft: 24, marginRight: 24, maxWidth: 332 });
+  });
+
+  it("双栏用单列宽做预算，而不是 viewer 整屏宽", () => {
+    // 1200px 双栏、列隙 24px：单列 583px，不能拿 1190px 居中。
+    expect(planAutoBlockBox({
+      containerWidth: 583,
+      measureWidth: 640,
+      marginLeft: 24,
+      marginRight: 24,
+      boxSizing: "content-box",
+      paddingBorderWidth: 0,
+    })).toEqual({ marginLeft: 24, marginRight: 24, maxWidth: 535 });
+  });
+
+  it("content-box 的 padding/border 只扣一次，border-box 不重复扣", () => {
+    const input = {
+      containerWidth: 640,
+      measureWidth: 640,
+      marginLeft: 0,
+      marginRight: 0,
+      paddingBorderWidth: 25.3,
+    } as const;
+    expect(planAutoBlockBox({ ...input, boxSizing: "content-box" })).toEqual({
+      marginLeft: 0,
+      marginRight: 0,
+      maxWidth: 614.7,
+    });
+    expect(planAutoBlockBox({ ...input, boxSizing: "border-box" })).toEqual({
+      marginLeft: 0,
+      marginRight: 0,
+      maxWidth: 640,
+    });
+  });
+
+  it("图片局部上限保留作者更小的 max-width，未知值不伪装为 0", () => {
+    expect(planContainedMediaMaxWidth({
+      containingContentWidth: 640,
+      marginLeft: 0,
+      marginRight: 0,
+      boxSizing: "content-box",
+      paddingBorderWidth: 0,
+      authoredMaxWidth: Infinity,
+    })).toBe(640);
+    expect(planContainedMediaMaxWidth({
+      containingContentWidth: 640,
+      marginLeft: 0,
+      marginRight: 0,
+      boxSizing: "content-box",
+      paddingBorderWidth: 0,
+      authoredMaxWidth: 32,
+    })).toBe(32);
+  });
+
+  it("Typed OM 同时取 margin-left/right 最终 token，旧引擎返回 undefined", () => {
+    const typed = {
+      computedStyleMap: () =>
+        new Map<string, { toString(): string }>([
+          ["margin-left", { toString: () => "24px" }],
+          ["margin-right", { toString: () => "24px" }],
+        ]),
+    } as unknown as Element;
+    expect(readComputedHorizontalMarginSpecifiedValues(typed)).toEqual({
+      left: "24px",
+      right: "24px",
+    });
+    expect(readComputedHorizontalMarginSpecifiedValues({} as Element)).toBeUndefined();
+  });
+
+  it("滚动模式也用实际块级包含盒收紧溢出图片，不改 width/height", () => {
+    const values = new Map<string, string>();
+    const priorities = new Map<string, string>();
+    const imgStyle = {
+      getPropertyValue: (property: string) => values.get(property) ?? "",
+      getPropertyPriority: (property: string) => priorities.get(property) ?? "",
+      setProperty: (property: string, value: string, priority = "") => {
+        values.set(property, value);
+        if (priority) priorities.set(property, priority);
+        else priorities.delete(property);
+      },
+      removeProperty: (property: string) => {
+        values.delete(property);
+        priorities.delete(property);
+        return "";
+      },
+    } as unknown as CSSStyleDeclaration;
+    const img = {
+      nodeType: 1,
+      tagName: "IMG",
+      localName: "img",
+      isConnected: true,
+      parentElement: null as unknown as HTMLElement,
+      style: imgStyle,
+      closest: () => null,
+      naturalWidth: 1500,
+      naturalHeight: 899,
+    } as unknown as HTMLImageElement;
+    const viewer = {
+      clientWidth: 1200,
+      classList: { contains: () => false },
+      querySelectorAll: () => [img],
+    } as unknown as HTMLElement;
+    (img as unknown as { parentElement: HTMLElement }).parentElement = viewer;
+    const imgCs = {
+      display: "inline",
+      visibility: "visible",
+      float: "none",
+      position: "static",
+      transform: "none",
+      boxSizing: "content-box",
+      width: "1200px",
+      maxWidth: "1200px",
+      paddingLeft: "0px",
+      paddingRight: "0px",
+      borderLeftWidth: "0px",
+      borderRightWidth: "0px",
+      marginLeft: "0px",
+      marginRight: "0px",
+    } as unknown as CSSStyleDeclaration;
+    const viewerCs = {
+      paddingLeft: "16px",
+      paddingRight: "16px",
+    } as unknown as CSSStyleDeclaration;
+    const doc = {
+      styleSheets: [],
+      defaultView: {
+        getComputedStyle: (el: Element) => (el === img ? imgCs : viewerCs),
+      },
+    } as unknown as Document;
+    const context = Object.create(ChapterPaginator.prototype) as {
+      contentDoc: Document;
+      viewer: HTMLElement;
+      fixedLayout: boolean;
+      containedMediaFixes: unknown[];
+    } & { scrollMode: boolean };
+    Object.defineProperty(context, "scrollMode", { value: true, writable: true, configurable: true });
+    Object.assign(context, {
+      contentDoc: doc,
+      viewer,
+      fixedLayout: false,
+      containedMediaFixes: [],
+    });
+
+    (ChapterPaginator.prototype as unknown as {
+      applyContainedMediaMaxWidth: (this: unknown) => void;
+    }).applyContainedMediaMaxWidth.call(context);
+
+    // 1200 viewport - 2 * 16px viewer padding = 1168px 单列内容宽。
+    expect(values.get("max-width")).toBe("1168px");
+    expect(priorities.get("max-width")).toBe("important");
+    expect(values.has("height")).toBe(false);
+    expect(values.has("width")).toBe(false);
   });
 });
 

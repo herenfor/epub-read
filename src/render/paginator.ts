@@ -1,4 +1,4 @@
-import { applyReaderPercentageSpacing } from "./percentageSpacing";
+import { applyReaderBodyPercentageSpacing, applyReaderRootPercentageSpacing } from "./percentageSpacing";
 import { sanitizeChapter, VIEWER_ID } from "./sanitize";
 import { resolvePath, isExternalUrl, isFragmentOnly, splitHref } from "../core/paths";
 import { getFootnoteHoverAnchor, isFootnoteLink, resolveFootnote, type FootnoteInfo } from "./footnotes";
@@ -56,6 +56,7 @@ import {
   visibleLeafRange,
 } from "./pagedSpread";
 import { imageRequestFromTarget } from "./imageActivation";
+import { columnAtPoint, containingFragmentAtPoint, type FragmentSpace } from "./fragmentGeometry";
 
 /** 常规布局应远早于此完成；极端字体/引擎停滞时只解除隐藏，不伪造 ready。 */
 const INITIAL_RENDER_GATE_TIMEOUT_MS = 20_000;
@@ -787,6 +788,102 @@ export function hasComputedPercentageHorizontalMargin(el: Element): boolean | un
     return ["margin-left", "margin-right"].some((property) =>
       styleMap.get(property)?.toString().includes("%")
     );
+  } catch {
+    return undefined;
+  }
+}
+
+export type BoxSizing = "content-box" | "border-box";
+
+/** 只解析解除 reader auto margin 后的 Typed OM 最终值，不从几何猜 auto。 */
+export function resolvedMarginKind(value: string | undefined): "auto" | "length" | "unknown" {
+  if (value === "auto") return "auto";
+  return value !== undefined && /^-?(?:\d+(?:\.\d*)?|\.\d+)px$/u.test(value)
+    ? "length"
+    : "unknown";
+}
+
+/**
+ * 普通 auto-width 块的 margin / border / padding 均计入版心预算。
+ * 调用者已确认非 float/intrinsic/fullpage/固定版式，无作者 sizing，非负长度边距。
+ * 窄屏标题在旧 isAutoLikeHorizontalMargin 判定之前调用；宽屏标题原路径保留。
+ * 有 padding/border 的无作者 sizing 顶层块用 marginLeft/Right=0 修正 L3 默认限宽。
+ */
+export function planAutoBlockBox(input: {
+  containerWidth: number;
+  measureWidth: number;
+  marginLeft: number;
+  marginRight: number;
+  boxSizing: BoxSizing;
+  paddingBorderWidth: number;
+}): { marginLeft: number; marginRight: number; maxWidth: number } {
+  const measure = Math.min(input.containerWidth, input.measureWidth);
+  const inset = (input.containerWidth - measure) / 2;
+  const extra = input.boxSizing === "content-box" ? input.paddingBorderWidth : 0;
+  return {
+    marginLeft: inset + input.marginLeft,
+    marginRight: inset + input.marginRight,
+    maxWidth: Math.max(0, measure - input.marginLeft - input.marginRight - extra),
+  };
+}
+
+/**
+ * 只对已确认溢出的普通正文图片收紧 max-width，保留更小的作者上限。
+ * containingContentWidth 是图片实际块级包含盒的 content-box 宽（inline 链接需上溯）。
+ * authoredMaxWidth 为 computed px，none 由调用者传 Infinity；未知值不进此函数。
+ * 不修改 width/height/max-height，不以 object-fit 代替元素自身限宽。
+ */
+export function planContainedMediaMaxWidth(input: {
+  containingContentWidth: number;
+  marginLeft: number;
+  marginRight: number;
+  boxSizing: BoxSizing;
+  paddingBorderWidth: number;
+  authoredMaxWidth: number;
+}): number {
+  const extra = input.boxSizing === "content-box" ? input.paddingBorderWidth : 0;
+  const available = input.containingContentWidth - input.marginLeft - input.marginRight - extra;
+  return Math.min(input.authoredMaxWidth, Math.max(0, available));
+}
+
+function resolveBlockContainingContentWidth(
+  viewer: HTMLElement | null,
+  scrollMode: boolean | undefined,
+  effectiveColumnWidth: number | undefined,
+  contentDoc: Document | null,
+  parent: HTMLElement | null,
+  parentStyle: CSSStyleDeclaration | null
+): number {
+  if (!viewer) return 0;
+  if (parent && parent !== viewer) {
+    const paddingLeft = parseFloat(parentStyle?.paddingLeft ?? "") || 0;
+    const paddingRight = parseFloat(parentStyle?.paddingRight ?? "") || 0;
+    return Math.max(0, (parent.clientWidth || 0) - paddingLeft - paddingRight);
+  }
+  const style =
+    parentStyle ?? contentDoc?.defaultView?.getComputedStyle(viewer) ?? null;
+  const paddingLeft = parseFloat(style?.paddingLeft ?? "") || 0;
+  const paddingRight = parseFloat(style?.paddingRight ?? "") || 0;
+  if (scrollMode) {
+    return Math.max(0, (viewer.clientWidth || 0) - paddingLeft - paddingRight);
+  }
+  if (typeof effectiveColumnWidth === "number" && Number.isFinite(effectiveColumnWidth) && effectiveColumnWidth > 0) {
+    return effectiveColumnWidth;
+  }
+  return Math.max(0, (viewer.clientWidth || 0) - paddingLeft - paddingRight);
+}
+
+/** 旧引擎读不到 Typed OM 时返回 undefined；true length 值由调用方用 resolvedMarginKind 判定。 */
+export function readComputedHorizontalMarginSpecifiedValues(
+  el: Element
+): { left?: string; right?: string } | undefined {
+  try {
+    const styleMap = (el as Element & TypedStyleMapHost).computedStyleMap?.();
+    if (!styleMap) return undefined;
+    return {
+      left: styleMap.get("margin-left")?.toString(),
+      right: styleMap.get("margin-right")?.toString(),
+    };
   } catch {
     return undefined;
   }
@@ -1762,12 +1859,29 @@ export function isAuthorFullWidthValue(
   return /(?:dvw|svw|lvw|vw|vi|vmin|vmax)(?:$|[^a-z])/u.test(compact);
 }
 
+/**
+ * 图片出血意图只认真正的 viewport 相对宽度或 >100% 百分比；
+ * 普通 width:100% 是随包含盒流式宽度，不能当作出血。
+ */
+function isMediaBreakoutValue(
+  value: string,
+  property: "width" | "max-width" | "min-width"
+): boolean {
+  const compact = value.trim().toLowerCase().replace(/\s+/g, "");
+  if (!compact || compact === "auto" || compact === "none") return false;
+  if (/^100(?:\.0+)?%$/u.test(compact)) return false;
+  const percent = compact.match(/^([+-]?(?:\d+(?:\.\d*)?|\.\d+))%$/u);
+  if (percent && Number(percent[1]) > 100) return true;
+  return isAuthorFullWidthValue(value, property);
+}
+
 type FullWidthRuleResult = boolean | undefined;
 
 /** 只在当前生效的 author CSSOM 条件分支中寻找明确全宽意图。 */
 export function hasAuthoredFullWidthIntentInRules(
   doc: Document,
-  el: HTMLElement
+  el: HTMLElement,
+  isIntentValue: (value: string, property: "width" | "max-width" | "min-width") => boolean = isAuthorFullWidthValue
 ): FullWidthRuleResult {
   const win = doc.defaultView;
   const conditionState = (rule: CSSRule): FullWidthRuleResult => {
@@ -1812,7 +1926,7 @@ export function hasAuthoredFullWidthIntentInRules(
           if (
             el.matches(styleRule.selectorText) &&
             (["width", "max-width", "min-width"] as const).some((property) =>
-              isAuthorFullWidthValue(styleRule.style.getPropertyValue(property), property)
+              isIntentValue(styleRule.style.getPropertyValue(property), property)
             )
           ) {
             return true;
@@ -1869,6 +1983,20 @@ function hasAuthorFullWidthIntent(doc: Document, el: HTMLElement): boolean {
   // layout fix must not overwrite a rule whose full-width meaning we cannot
   // reliably determine in the current engine.
   return hasAuthoredFullWidthIntentInRules(doc, el) !== false;
+}
+
+function hasAuthorMediaBreakoutIntent(doc: Document, el: HTMLElement): boolean {
+  const inline = el.style;
+  if (
+    (["width", "min-width"] as const).some((property) =>
+      isMediaBreakoutValue(inline.getPropertyValue(property), property)
+    )
+  ) {
+    return true;
+  }
+  // Unknown author CSS conditions are treated as intent: do not overwrite a
+  // media breakout whose cascade we cannot fully inspect.
+  return hasAuthoredFullWidthIntentInRules(doc, el, isMediaBreakoutValue) !== false;
 }
 
 interface InlineStyleValue {
@@ -2208,6 +2336,15 @@ export class ChapterPaginator {
     right: InlineStyleValue;
     maxWidth?: InlineStyleValue;
   }> = [];
+  /**
+   * 分页正文图片局部限宽快照。保存原 inline max-width/priority 与首次读到的
+   * 作者 computed 上限（px/Infinity），使重测时不把上轮补丁当作者约束。
+   */
+  private containedMediaFixes: Array<{
+    el: HTMLImageElement;
+    maxWidth: InlineStyleValue;
+    authoredMaxWidth: number;
+  }> = [];
   /** 页面级百分比间距在重排/换章前完整恢复。 */
   private restorePercentageSpacing: () => void = () => {};
   private inlineClipFixes: Array<{ el: HTMLElement; overflowX: InlineStyleValue }> = [];
@@ -2365,6 +2502,32 @@ export class ChapterPaginator {
    */
   private get effectiveColumnWidth(): number {
     return this.spreadGeometry?.columnWidth ?? this.pageWidth;
+  }
+
+
+  /** 图片的最近非 inline 块级包含盒；inline 链接必须上溯，不能用 clientWidth=0。 */
+  private getMediaContainingBlock(img: HTMLImageElement, win: Window): HTMLElement {
+    const viewer = this.viewer as HTMLElement;
+    let node = img.parentElement;
+    while (node && node !== viewer) {
+      const display = win.getComputedStyle(node).display.trim().toLowerCase();
+      // inline-block/inline-flex 等本身建立包含块，不能当纯 inline 链接跳过；
+      // 只有无自身宽度的 inline/ruby/contents 需要继续上溯。
+      if (display !== "inline" && display !== "ruby" && display !== "ruby-text" && display !== "contents") {
+        return node;
+      }
+      node = node.parentElement;
+    }
+    return viewer;
+  }
+
+  /** computed max-width 只在明确为 px 或 none 时进入计算；未知表达式保守跳过。 */
+  private parseAuthoredMediaMaxWidth(value: string): number | undefined {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "none") return Infinity;
+    if (!/^-?(?:\d+(?:\.\d*)?|\.\d+)px$/u.test(normalized)) return undefined;
+    const parsed = Number.parseFloat(normalized);
+    return Number.isFinite(parsed) ? Math.max(0, parsed) : undefined;
   }
 
   private get effectiveColumnStep(): number {
@@ -2688,6 +2851,7 @@ export class ChapterPaginator {
     ) {
       return false;
     }
+    const win = doc.defaultView;
     const measuredWidth = this.iframe.clientWidth;
     const measuredHeight = this.iframe.clientHeight;
     // 第二遍 margin / fit-content 处理写回的 inline 值要先恢复，
@@ -2695,11 +2859,16 @@ export class ChapterPaginator {
     this.restoreInlineBoxFixes();
     this.restoreFloatLayoutFixes();
     this.restoreBookMargins();
+    this.restoreContainedMediaFixes();
     this.restoreFitContentFix();
     this.restoreFloatWidths();
     this.restoreTrailingFloatFixes();
     this.restorePercentageSpacing();
-    this.restorePercentageSpacing = applyReaderPercentageSpacing(doc, viewer, TEXT_MEASURE.maxEm * this.settings.fontSizePx);
+    this.restorePercentageSpacing = applyReaderRootPercentageSpacing(
+      doc,
+      viewer,
+      TEXT_MEASURE.maxEm * this.settings.fontSizePx,
+    );
     const parent = viewer.parentElement;
     const parentCs = parent && doc.defaultView ? doc.defaultView.getComputedStyle(parent) : null;
     const baseW = parent?.clientWidth || this.iframe.clientWidth || viewer.clientWidth;
@@ -2834,8 +3003,19 @@ export class ChapterPaginator {
             (parseFloat(parentCs?.paddingBottom ?? "") || 0)
         );
         this.applyScrollViewerStyles(viewportHeight, marginLeft, marginRight);
+        this.applyReaderBodyPercentageSpacingForMeasure(
+          doc,
+          viewer,
+          Math.max(
+            0,
+            viewer.clientWidth -
+              (parseFloat(win?.getComputedStyle(viewer).paddingLeft ?? "") || 0) -
+              (parseFloat(win?.getComputedStyle(viewer).paddingRight ?? "") || 0),
+          ),
+        );
         this.applyFitContentFix();
         this.applyBookMargins();
+        this.applyContainedMediaMaxWidth();
         void viewer.scrollHeight;
         this.pageWidth = Math.max(0, viewer.clientWidth);
         this.step = 0;
@@ -2853,11 +3033,13 @@ export class ChapterPaginator {
       }
       // [L5-C18] fit-content 会改变最终 border-box 宽度，必须先稳定宽度再计算
       // 页面级 margin；反过来会把多栏中的异常旧宽度固化成错误横向位置。
+      this.applyReaderBodyPercentageSpacingForMeasure(doc, viewer, this.effectiveColumnWidth);
       this.applyFitContentFix();
       this.applyBookMargins();
       this.applyFloatShrinkFix();
       this.applyTrailingFloatMarginFix();
       this.applyInlineBoxOverflowFix();
+      this.applyContainedMediaMaxWidth();
       if (!this.fixedLayout) {
         this.backdropCompatibilityRestore = applyBackdropCompatibility(doc, viewer, {
           // 双栏时传单列宽与列步长，不能传整屏宽。
@@ -2886,6 +3068,29 @@ export class ChapterPaginator {
   private restoreScrollView(): void {
     this.scrollStyleRestore?.();
     this.scrollStyleRestore = null;
+  }
+
+  /**
+   * 正文直接子的百分比 spacing 在本轮单栏/局部内容宽确定后处理。
+   * 调用时 restorePercentageSpacing 仍是根盒 padding 的恢复函数，事务式合并，
+   * 重测/换章/清理一次恢复两阶段。
+   */
+  private applyReaderBodyPercentageSpacingForMeasure(
+    doc: Document,
+    viewer: HTMLElement,
+    containingWidth: number,
+  ): void {
+    const resolveBody = applyReaderBodyPercentageSpacing(
+      doc,
+      viewer,
+      containingWidth,
+      TEXT_MEASURE.maxEm * this.settings.fontSizePx,
+    );
+    const restoreRoot = this.restorePercentageSpacing;
+    this.restorePercentageSpacing = () => {
+      resolveBody();
+      restoreRoot();
+    };
   }
 
   private applyScrollViewerStyles(viewportHeight: number, marginLeft = 0, marginRight = marginLeft): void {
@@ -3145,6 +3350,119 @@ export class ChapterPaginator {
     }).scrollTop;
   }
 
+  private restoreContainedMediaFixes(): void {
+    for (const fix of this.containedMediaFixes ?? []) {
+      restoreInlineStyleProperty(fix.el.style, "max-width", fix.maxWidth);
+    }
+    this.containedMediaFixes = [];
+  }
+
+  /**
+   * 分页与滚动正文普通图片的局部 max-width 收紧。先恢复/复用原快照，再收集读数，
+   * 最后批量写回；只处理实际越过块级包含盒的 img，整页/固定版式/浮层/绝对定位
+   * 与明确出血意图继续走原布局。固定版式不进入；不改 width/height/max-height。
+   */
+  private applyContainedMediaMaxWidth(): void {
+    const doc = this.contentDoc;
+    const viewer = this.viewer;
+    const win = doc?.defaultView;
+    if (!doc || !viewer || !win || this.fixedLayout) return;
+    if (
+      viewer.classList.contains("fullpage-image") ||
+      viewer.classList.contains("pure-image-page")
+    ) {
+      return;
+    }
+
+    const priorFixes = this.containedMediaFixes ?? [];
+    const existing = new Map<HTMLImageElement, (typeof priorFixes)[number]>();
+    for (const fix of priorFixes) existing.set(fix.el, fix);
+    const next: Array<{
+      el: HTMLImageElement;
+      maxWidth: InlineStyleValue;
+      authoredMaxWidth: number;
+    }> = [];
+    const writes: Array<{ el: HTMLImageElement; value: number }> = [];
+    const epsilon = 0.5;
+    const images = Array.from(viewer.querySelectorAll("img")) as HTMLImageElement[];
+
+    for (const img of images) {
+      if (!img.isConnected || !img.parentElement) continue;
+      if (img.closest(".illus, .kuchie, .cover, .duokan-image-fullscreen")) continue;
+
+      const cs = win.getComputedStyle(img);
+      if (cs.display === "none" || cs.visibility === "hidden") continue;
+      if (cs.float.trim().toLowerCase() !== "none") continue;
+      const position = cs.position.trim().toLowerCase();
+      if (position === "absolute" || position === "fixed") continue;
+      if (cs.transform.trim().toLowerCase() !== "none") continue;
+      if (hasAuthorMediaBreakoutIntent(doc, img)) continue;
+
+      const existingFix = existing.get(img);
+      const authoredMaxWidth =
+        existingFix?.authoredMaxWidth ?? this.parseAuthoredMediaMaxWidth(cs.maxWidth);
+      if (authoredMaxWidth === undefined) continue;
+
+      const boxSizing: BoxSizing =
+        cs.boxSizing === "border-box" ? "border-box" : "content-box";
+      const paddingBorderWidth =
+        (parseFloat(cs.paddingLeft) || 0) +
+        (parseFloat(cs.paddingRight) || 0) +
+        (parseFloat(cs.borderLeftWidth) || 0) +
+        (parseFloat(cs.borderRightWidth) || 0);
+      const marginLeft = parseFloat(cs.marginLeft) || 0;
+      const marginRight = parseFloat(cs.marginRight) || 0;
+      const containing = this.getMediaContainingBlock(img, win);
+      const containingStyle = win.getComputedStyle(containing);
+      const containingContentWidth = resolveBlockContainingContentWidth(
+        this.viewer,
+        this.scrollMode,
+        this.effectiveColumnWidth,
+        this.contentDoc,
+        containing,
+        containingStyle
+      );
+      const available =
+        containingContentWidth -
+        marginLeft -
+        marginRight -
+        (boxSizing === "content-box" ? paddingBorderWidth : 0);
+      if (!(available > 0)) continue;
+
+      if (!existingFix) {
+        const currentBorderBox = getBorderBoxWidth(cs);
+        if (!(currentBorderBox > available + epsilon)) continue;
+      }
+
+      const planned = planContainedMediaMaxWidth({
+        containingContentWidth,
+        marginLeft,
+        marginRight,
+        boxSizing,
+        paddingBorderWidth,
+        authoredMaxWidth,
+      });
+      if (!Number.isFinite(planned) || planned < 0) continue;
+      // 作者明确更小的上限（如 32px 图标）保持不动。
+      if (!(planned < authoredMaxWidth - epsilon)) continue;
+
+      const snapshot =
+        existingFix?.maxWidth ?? snapshotInlineStyleProperty(img.style, "max-width");
+      next.push({ el: img, maxWidth: snapshot, authoredMaxWidth });
+      writes.push({ el: img, value: planned });
+    }
+
+    for (const fix of priorFixes) {
+      if (!next.some((candidate) => candidate.el === fix.el)) {
+        restoreInlineStyleProperty(fix.el.style, "max-width", fix.maxWidth);
+      }
+    }
+    for (const write of writes) {
+      write.el.style.setProperty("max-width", `${write.value}px`, "important");
+    }
+    this.containedMediaFixes = next;
+  }
+
   private restoreBookMargins(): void {
     for (const fix of this.marginFixes) {
       fix.el.removeAttribute("data-reader-margin-fixed");
@@ -3202,6 +3520,14 @@ export class ChapterPaginator {
     const authoredHorizontalMargins = new Map<HTMLElement, AuthoredHorizontalMarginResult>();
     const authoredSizingIntents = new Map<HTMLElement, AuthoredSizingIntentResult>();
     const symmetricPercentageInsets = new Map<HTMLElement, { left: number; right: number; maxWidth: number }>();
+    const contentBoxBudgetFixes: Array<{
+      el: HTMLElement;
+      containerWidth: number;
+      marginLeft: number;
+      marginRight: number;
+      boxSizing: BoxSizing;
+      paddingBorderWidth: number;
+    }> = [];
     const restoreReaderMargins = readerSheet
       ? this.disableReaderTopMarginRules(readerSheet)
       : () => {};
@@ -3225,8 +3551,16 @@ export class ChapterPaginator {
         // 水平百分比 margin 是相对包含块的页面布局。若作者没有自己的 inline
         // max-width，暂时解除 L3 的 40rem 默认值，才能读到作者原本的剩余宽度。
         if (percentage === true) {
-          const parentStyle = win.getComputedStyle(viewer);
-          const parentWidth = viewer.clientWidth - (parseFloat(parentStyle.paddingLeft) || 0) - (parseFloat(parentStyle.paddingRight) || 0);
+          const parent = el.parentElement;
+          const parentStyle = parent ? win.getComputedStyle(parent) : win.getComputedStyle(viewer);
+          const parentWidth = resolveBlockContainingContentWidth(
+            this.viewer,
+            this.scrollMode,
+            this.effectiveColumnWidth,
+            this.contentDoc,
+            parent,
+            parentStyle
+          );
           const symmetric = isSymmetricHorizontalMargin(cs.marginLeft, cs.marginRight);
           const insets = symmetric ? getReaderAutoBlockInsets({
             heading: /^h[1-6]$/iu.test(el.localName),
@@ -3270,6 +3604,96 @@ export class ChapterPaginator {
 
         const borderBoxW = getBorderBoxWidth(cs);
         widths.set(el, borderBoxW > 0 ? borderBoxW : el.getBoundingClientRect().width);
+
+        // [L3 默认版心预算] 仅先筛几何：普通顶层 auto-width 块若因自身
+        // padding/border 让 content-box 边框盒超过默认版心，再查作者 sizing。
+        // 这样不给每个普通段落增加 CSSOM 扫描，也避免改动作者显式 width。
+        const parent = el.parentElement;
+        const parentCs = parent ? win.getComputedStyle(parent) : null;
+        const containerWidth = resolveBlockContainingContentWidth(
+          this.viewer,
+          this.scrollMode,
+          this.effectiveColumnWidth,
+          this.contentDoc,
+          parent,
+          parentCs
+        );
+        const measureWidth = TEXT_MEASURE.maxEm * this.settings.fontSizePx;
+        const measure = Math.min(containerWidth, measureWidth);
+        const contentWidthPx = Number.parseFloat(cs.width);
+        const paddingBorderWidth =
+          (parseFloat(cs.paddingLeft) || 0) +
+          (parseFloat(cs.paddingRight) || 0) +
+          (parseFloat(cs.borderLeftWidth) || 0) +
+          (parseFloat(cs.borderRightWidth) || 0);
+        const fullpage =
+          el.classList.contains("illus") ||
+          el.classList.contains("kuchie") ||
+          el.classList.contains("cover") ||
+          el.classList.contains("duokan-image-fullscreen");
+        const tag = el.localName.toLowerCase();
+        const horizontalMarginFree =
+          !isMeaningfulHorizontalMargin(cs.marginLeft) &&
+          !isMeaningfulHorizontalMargin(cs.marginRight);
+        if (
+          !this.fixedLayout &&
+          el.classList.contains("reader-top") &&
+          !fullpage &&
+          horizontalMarginFree &&
+          tag !== "img" &&
+          tag !== "image" &&
+          tag !== "svg" &&
+          tag !== "video" &&
+          tag !== "audio" &&
+          tag !== "canvas" &&
+          cs.float.trim().toLowerCase() === "none" &&
+          /^(?:static|relative)$/u.test(cs.position.trim().toLowerCase()) &&
+          cs.writingMode.trim().toLowerCase() === "horizontal-tb" &&
+          /^(?:block|flow-root)$/u.test(cs.display.trim().toLowerCase()) &&
+          percentage !== true &&
+          cs.boxSizing === "content-box" &&
+          paddingBorderWidth > 0.5 &&
+          Number.isFinite(contentWidthPx) &&
+          contentWidthPx <= measure + 0.5 &&
+          borderBoxW > measure + 0.5 &&
+          !/(?:fit-content|max-content)/u.test(cs.maxWidth)
+        ) {
+          if (hasAuthoredSizingIntent(doc, el) === false) {
+            contentBoxBudgetFixes.push({
+              el,
+              containerWidth,
+              marginLeft: parseFloat(cs.marginLeft) || 0,
+              marginRight: parseFloat(cs.marginRight) || 0,
+              boxSizing: "content-box",
+              paddingBorderWidth,
+            });
+          }
+        }
+      }
+
+      // 一次集中写回上述默认版心预算修正；随后继续现有边距判定。
+      if (contentBoxBudgetFixes.length > 0) {
+        for (const fix of contentBoxBudgetFixes) {
+          const plan = planAutoBlockBox({
+            containerWidth: fix.containerWidth,
+            measureWidth: TEXT_MEASURE.maxEm * this.settings.fontSizePx,
+            marginLeft: fix.marginLeft,
+            marginRight: fix.marginRight,
+            boxSizing: fix.boxSizing,
+            paddingBorderWidth: fix.paddingBorderWidth,
+          });
+          this.marginFixes.push({
+            el: fix.el,
+            left: snapshotInlineStyleProperty(fix.el.style, "margin-left"),
+            right: snapshotInlineStyleProperty(fix.el.style, "margin-right"),
+            maxWidth: snapshotInlineStyleProperty(fix.el.style, "max-width"),
+          });
+          fix.el.setAttribute("data-reader-margin-fixed", "1");
+          fix.el.style.setProperty("max-width", `${plan.maxWidth}px`);
+          fix.el.style.setProperty("margin-left", `${plan.marginLeft}px`, "important");
+          fix.el.style.setProperty("margin-right", `${plan.marginRight}px`, "important");
+        }
+        void viewer.offsetWidth;
       }
 
       const preserveFloatLayout = (el: HTMLElement, leftValue: string, rightValue: string): void => {
@@ -3358,10 +3782,14 @@ export class ChapterPaginator {
         if (!firstEntry) continue;
         const parent = members[0].parentElement;
         const parentCs = parent && doc.defaultView ? doc.defaultView.getComputedStyle(parent) : null;
-        const parentW =
-          (parent?.clientWidth ?? viewer.clientWidth) -
-          (parseFloat(parentCs?.paddingLeft ?? "") || 0) -
-          (parseFloat(parentCs?.paddingRight ?? "") || 0);
+        const parentW = resolveBlockContainingContentWidth(
+          this.viewer,
+          this.scrollMode,
+          this.effectiveColumnWidth,
+          this.contentDoc,
+          parent,
+          parentCs
+        );
         const contentWidth = TEXT_MEASURE.maxEm * this.settings.fontSizePx;
         const targetWidths = getPercentageFloatGroupTargetWidths(
           members.map((member) => groupEntriesByElement.get(member)?.percentageWidth ?? NaN),
@@ -3448,10 +3876,14 @@ export class ChapterPaginator {
         const right = cs.marginRight;
         const parent = el.parentElement;
         const parentCs = parent && doc.defaultView ? doc.defaultView.getComputedStyle(parent) : null;
-        const parentW =
-          (parent?.clientWidth ?? viewer.clientWidth) -
-          (parseFloat(parentCs?.paddingLeft ?? "") || 0) -
-          (parseFloat(parentCs?.paddingRight ?? "") || 0);
+        const parentW = resolveBlockContainingContentWidth(
+          this.viewer,
+          this.scrollMode,
+          this.effectiveColumnWidth,
+          this.contentDoc,
+          parent,
+          parentCs
+        );
         const width = widths.get(el) ?? el.getBoundingClientRect().width;
         const meaningful = isMeaningfulHorizontalMargin;
         const originalMaxWidth = maxWidths.get(el) ?? "";
@@ -3678,6 +4110,76 @@ export class ChapterPaginator {
 
         const ml = parseFloat(left) || 0;
         const mr = parseFloat(right) || 0;
+
+        // [L3/L4 窄屏固定长度缩进] 先看 Typed OM 的最终 margin token：
+        // 长度 24/24 在窄屏也会恰好等于居中余量，不得再被 isAutoLike 当成 auto。
+        // 只对单栏宽不超过默认版心的普通横排顶层标题生效；宽屏仍走原 C-24/C-04
+        // 路径，因此宽屏目录位置保持不变。
+        const heading = /^h[1-6]$/iu.test(el.localName);
+        if (
+          !this.fixedLayout &&
+          heading &&
+          el.classList.contains("reader-top") &&
+          !fullpage &&
+          cs.textAlign.trim().toLowerCase() !== "center" &&
+          cs.float.trim().toLowerCase() === "none" &&
+          /^(?:static|relative)$/u.test(cs.position.trim().toLowerCase()) &&
+          cs.writingMode.trim().toLowerCase() === "horizontal-tb" &&
+          /^(?:block|flow-root)$/u.test(cs.display.trim().toLowerCase()) &&
+          percentage?.percentage === false &&
+          !hadFitContent &&
+          authoredSizingIntents.get(el) === false
+        ) {
+          const measureWidth = TEXT_MEASURE.maxEm * this.settings.fontSizePx;
+          if (parentW <= measureWidth + 0.5) {
+            const typedMargins = readComputedHorizontalMarginSpecifiedValues(el);
+            const typedLeft = typedMargins?.left;
+            const typedRight = typedMargins?.right;
+            if (
+              resolvedMarginKind(typedLeft) === "length" &&
+              resolvedMarginKind(typedRight) === "length"
+            ) {
+              const typedMl = Number.parseFloat(typedLeft as string);
+              const typedMr = Number.parseFloat(typedRight as string);
+              if (
+                Number.isFinite(typedMl) &&
+                Number.isFinite(typedMr) &&
+                typedMl >= 0 &&
+                typedMr >= 0 &&
+                typedMl + typedMr > 0 &&
+                typedMl + typedMr < measureWidth
+              ) {
+                const paddingBorderWidth =
+                  (parseFloat(cs.paddingLeft) || 0) +
+                  (parseFloat(cs.paddingRight) || 0) +
+                  (parseFloat(cs.borderLeftWidth) || 0) +
+                  (parseFloat(cs.borderRightWidth) || 0);
+                const plan = planAutoBlockBox({
+                  containerWidth: parentW,
+                  measureWidth,
+                  marginLeft: typedMl,
+                  marginRight: typedMr,
+                  boxSizing: cs.boxSizing === "border-box" ? "border-box" : "content-box",
+                  paddingBorderWidth,
+                });
+                if (plan.maxWidth > 0) {
+                  this.marginFixes.push({
+                    el,
+                    left: snapshotInlineStyleProperty(el.style, "margin-left"),
+                    right: snapshotInlineStyleProperty(el.style, "margin-right"),
+                    maxWidth: snapshotInlineStyleProperty(el.style, "max-width"),
+                  });
+                  el.setAttribute("data-reader-margin-fixed", "1");
+                  el.style.setProperty("max-width", `${plan.maxWidth}px`);
+                  el.style.setProperty("margin-left", `${plan.marginLeft}px`, "important");
+                  el.style.setProperty("margin-right", `${plan.marginRight}px`, "important");
+                  continue;
+                }
+              }
+            }
+          }
+        }
+
         // 作者/阅读器真正的 auto margin 即使在 computed style 中已变成 px，
         // 仍应保持居中；显式相等 margin 不会恰好等于全部剩余空间。
         if (
@@ -3858,18 +4360,104 @@ export class ChapterPaginator {
       return Boolean(el.closest("ruby, rt, rp, sup, .duokan-footnote, .zhangyue-footnote"));
     };
 
+    type InlineFixRect = {
+      left: number;
+      right: number;
+      top: number;
+      bottom: number;
+      width: number;
+      height: number;
+    };
+    const toInlineFixRect = (r: DOMRect): InlineFixRect => ({
+      left: r.left,
+      right: r.right,
+      top: r.top,
+      bottom: r.bottom,
+      width: r.width,
+      height: r.height,
+    });
+    const validInlineFixRect = (r: InlineFixRect): boolean =>
+      Number.isFinite(r.left) &&
+      Number.isFinite(r.right) &&
+      Number.isFinite(r.top) &&
+      Number.isFinite(r.bottom) &&
+      Number.isFinite(r.width) &&
+      Number.isFinite(r.height) &&
+      r.width > 0 &&
+      r.height > 0;
+
+    const geometry = this.spreadGeometry;
+    let space: FragmentSpace | null = null;
+    if (geometry && geometry.columnWidth > 0 && geometry.columnStep > 0) {
+      try {
+        const viewerRect = viewer.getBoundingClientRect();
+        const viewerStyle = win.getComputedStyle(viewer);
+        const paddingLeft = parseFloat(viewerStyle.paddingLeft) || 0;
+        space = {
+          geometry,
+          originClientX: viewerRect.left + (viewer.clientLeft || 0) + paddingLeft,
+          scrollLeft: viewer.scrollLeft || 0,
+        };
+      } catch {
+        space = null;
+      }
+    }
+    // 分页正文片段必须按当前物理栏匹配；没有几何时不猜测整屏 union。
+    if (!space) return;
+
+    /** 目标 inline 必须只有一个可见 fragment；跨栏/多段目标留给原独立语义。 */
+    const targetFragment = (el: HTMLElement): InlineFixRect | null => {
+      const rects = Array.from(el.getClientRects()).map(toInlineFixRect).filter(validInlineFixRect);
+      return rects.length === 1 ? rects[0] : null;
+    };
+
     const lineContainer = (
       el: HTMLElement,
-      rect: DOMRect
-    ): { el: HTMLElement; rect: DOMRect; textAlign: string } | null => {
+      target: InlineFixRect
+    ): { el: HTMLElement; rect: InlineFixRect; textAlign: string } | null => {
+      // 取目标片段左缘附近的内部点：右对齐盒可能向右越界，居中点会落到
+      // 父片段/物理栏之外，反而让新匹配器拒绝正确目标。
+      const point = {
+        x: target.left + Math.min(1, target.width / 2),
+        y: target.top + target.height / 2,
+      };
+      if (columnAtPoint(point, space) === null) return null;
       for (let parent = el.parentElement; parent; parent = parent.parentElement) {
         const cs = win.getComputedStyle(parent);
         if (/^(?:inline|ruby)$/u.test(cs.display)) continue;
-        const rects = Array.from(parent.getClientRects());
-        const matching =
-          rects.find((r) => r.bottom > rect.top + epsilon && r.top < rect.bottom - epsilon) ??
-          parent.getBoundingClientRect();
-        return { el: parent, rect: matching, textAlign: cs.textAlign };
+        // 明确范围：横排 LTR、无 transform 的普通流父块。复杂坐标不套本匹配，
+        // 保持原布局，不以整屏 union 兜底。
+        if (
+          cs.writingMode.trim().toLowerCase() !== "horizontal-tb" ||
+          cs.direction.trim().toLowerCase() !== "ltr" ||
+          cs.transform.trim().toLowerCase() !== "none" ||
+          !/^(static|relative)$/u.test(cs.position.trim().toLowerCase()) ||
+          cs.float.trim().toLowerCase() !== "none"
+        ) {
+          return null;
+        }
+        // 分页根自身 rect 跨整屏，不是可筛选的内容片段；直接取目标物理栏边界。
+        if (parent === viewer) {
+          const column = columnAtPoint(point, space);
+          if (column === null) return null;
+          const left = space.originClientX - space.scrollLeft + column * space.geometry.columnStep;
+          return {
+            el: parent,
+            rect: {
+              left,
+              right: left + space.geometry.columnWidth,
+              top: target.top,
+              bottom: target.bottom,
+              width: space.geometry.columnWidth,
+              height: target.height,
+            },
+            textAlign: cs.textAlign,
+          };
+        }
+        const rects = Array.from(parent.getClientRects()).map(toInlineFixRect).filter(validInlineFixRect);
+        const matching = containingFragmentAtPoint(rects, point, space, epsilon);
+        if (matching === null) return null;
+        return { el: parent, rect: rects[matching], textAlign: cs.textAlign };
       }
       return null;
     };
@@ -3887,7 +4475,8 @@ export class ChapterPaginator {
       const originalDisplay = cs.display;
       if (!hasVisibleInlineBox(cs)) continue;
 
-      const before = el.getBoundingClientRect();
+      const before = targetFragment(el);
+      if (!before) continue;
       const container = lineContainer(el, before);
       if (!container || container.textAlign.trim().toLowerCase() !== "right") {
         continue;
@@ -3933,7 +4522,12 @@ export class ChapterPaginator {
       el.style.setProperty("display", "inline-block", "important");
       el.style.setProperty("text-indent", "0", "important");
       void el.offsetWidth;
-      const after = el.getBoundingClientRect();
+      const after = targetFragment(el);
+      if (!after) {
+        restoreInlineStyleProperty(el.style, "display", original.display);
+        restoreInlineStyleProperty(el.style, "text-indent", original.textIndent);
+        continue;
+      }
       const afterContainer = lineContainer(el, after) ?? container;
       const effective = shouldApplyInlineBoxOverflowFix({
         display: originalDisplay,
@@ -4185,12 +4779,16 @@ export class ChapterPaginator {
       }
     }
     if (this.scrollMode) {
+      if (!this.fixedLayout) this.applyContainedMediaMaxWidth();
       this.recomputeScroll();
       const settled = !this.disposed && loadSeq === this.loadSeq;
       // 只有已稳定且仍属当前代次时才通知，过期结果不得触发宿主重测
       if (settled) this.onLayoutSettled?.();
       return settled;
     }
+    // 图片晚加载后的既有 recompute 链也要套用同一局部限宽；已有快照时
+    // 复用原作者上限，不把上一轮补丁当成新的作者约束。
+    if (!this.fixedLayout) this.applyContainedMediaMaxWidth();
     const sw = viewer.scrollWidth;
     const hasContent =
       viewer.children.length > 0 || (viewer.textContent ?? "").trim().length > 0;
@@ -6673,6 +7271,7 @@ export class ChapterPaginator {
     this.selectionContextMenuHandler?.(null);
     this.restoreInlineBoxFixes();
     this.restoreFloatLayoutFixes();
+    this.restoreContainedMediaFixes();
     this.restoreTrailingFloatFixes();
     this.restorePercentageSpacing();
     this.restorePercentageSpacing = () => {};
