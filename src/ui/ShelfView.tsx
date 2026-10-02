@@ -2721,6 +2721,16 @@ function useShelfVirtualizer(
 
   return useMemo(() => {
     const geometry = gridGeometry;
+    if (totalCount < threshold) {
+      return {
+        startIndex: 0,
+        endIndex: totalCount,
+        topPadding: 0,
+        bottomPadding: 0,
+        isVirtual: false,
+        gridGeometry: viewMode === "grid" ? geometry : null,
+      };
+    }
     if (viewMode === "list") {
       const { scrollTop, viewportHeight } = scrollState;
       const rowHeight = 52;
@@ -2746,17 +2756,6 @@ function useShelfVirtualizer(
         bottomPadding: 0,
         isVirtual: totalCount >= threshold,
         gridGeometry: null,
-      };
-    }
-
-    if (totalCount < threshold) {
-      return {
-        startIndex: 0,
-        endIndex: totalCount,
-        topPadding: 0,
-        bottomPadding: 0,
-        isVirtual: false,
-        gridGeometry: geometry,
       };
     }
 

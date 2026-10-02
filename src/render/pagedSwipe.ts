@@ -102,6 +102,13 @@ export function installPagedSwipe(doc: Document, handlers: PagedSwipeHandlers): 
     reset();
   };
 
+  // Android WebView 会在真实单指横滑仍继续发送 touch 事件时先发 touch 型 pointercancel；
+  // 此时 touchcancel 才是触摸取消的权威信号，误用 pointercancel 会取消有效横滑。
+  const onPointerCancel = (event: Event): void => {
+    if ((event as PointerEvent).pointerType === "touch") return;
+    reset();
+  };
+
   const onClickCapture = (event: Event): void => {
     if (Date.now() >= suppressClickUntil) return;
     suppressClickUntil = 0;
@@ -113,7 +120,7 @@ export function installPagedSwipe(doc: Document, handlers: PagedSwipeHandlers): 
   doc.addEventListener("touchmove", onTouchMove, { capture: true, passive: false });
   doc.addEventListener("touchend", onTouchEnd, { capture: true, passive: true });
   doc.addEventListener("touchcancel", onTouchCancel, { capture: true, passive: true });
-  doc.addEventListener("pointercancel", onTouchCancel, true);
+  doc.addEventListener("pointercancel", onPointerCancel, true);
   doc.addEventListener("click", onClickCapture, true);
 
   return () => {
@@ -121,7 +128,7 @@ export function installPagedSwipe(doc: Document, handlers: PagedSwipeHandlers): 
     doc.removeEventListener("touchmove", onTouchMove, true);
     doc.removeEventListener("touchend", onTouchEnd, true);
     doc.removeEventListener("touchcancel", onTouchCancel, true);
-    doc.removeEventListener("pointercancel", onTouchCancel, true);
+    doc.removeEventListener("pointercancel", onPointerCancel, true);
     doc.removeEventListener("click", onClickCapture, true);
   };
 }

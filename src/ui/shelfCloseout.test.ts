@@ -163,4 +163,25 @@ describe("书架最后收口：前缀所有权与缩放后字母定位", () => {
       await dom.dispose();
     }
   });
+
+  it("32 本切列表不被虚拟化截断，全部书籍行实际呈现", async () => {
+    const dom = createReactDomHarness();
+    const entries = Array.from({ length: 32 }, (_, index) =>
+      makeEntry(`b${index}`, `书${String(index + 1).padStart(2, "0")}`)
+    );
+    try {
+      await dom.render(createElement(ShelfView, makeProps(entries)));
+      const toggles = dom.container.querySelectorAll(".shelf-view-toggle-btn");
+      expect(toggles.length).toBe(2);
+      await dom.click(toggles[1]);
+      await dom.run(() => new Promise<void>((resolve) => setTimeout(resolve, 30)));
+      const rows = dom.container.querySelectorAll(".shelf-table-row[data-book-id]");
+      expect(rows.length).toBe(32);
+      const hiddenVirtualRow = Array.from(dom.container.querySelectorAll(".shelf-table tbody tr[aria-hidden='true']"))
+        .find((row) => Number.parseFloat((row as HTMLElement).style.height || "0") > 0);
+      expect(hiddenVirtualRow).toBeUndefined();
+    } finally {
+      await dom.dispose();
+    }
+  });
 });

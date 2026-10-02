@@ -94,6 +94,18 @@ describe("paged swipe input", () => {
     expect(onNext).not.toHaveBeenCalled();
   });
 
+  it("keeps a single-finger swipe when Android WebView sends touch pointercancel before touch events end", () => {
+    const { document, text, onNext, onPrev, touchEvent } = setup();
+    touchEvent("touchstart", 300, 200);
+    touchEvent("touchmove", 200, 200);
+    const cancel = new (document.defaultView as any).Event("pointercancel", { bubbles: true, cancelable: true });
+    Object.defineProperty(cancel, "pointerType", { value: "touch" });
+    text.dispatchEvent(cancel);
+    touchEvent("touchend", 180, 202);
+    expect(onNext).toHaveBeenCalledTimes(1);
+    expect(onPrev).not.toHaveBeenCalled();
+  });
+
   it("suppresses only the click immediately following a committed swipe", () => {
     const { document, onNext, touchEvent, text } = setup();
     touchEvent("touchstart", 300, 200);
