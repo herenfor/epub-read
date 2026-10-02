@@ -90,6 +90,13 @@ describe("CSD TitleBar 组件与样式契约（Zen UI Packet A）", () => {
       expect(zenHtml).not.toContain("zen-hidden");
       expect(zenHtml).not.toContain("is-floating");
       expect(zenHtml).not.toContain("titlebar-pin-btn");
+      // Browser fullscreen/Zen tools remain available without native window chrome.
+      setAppBuildSession({ source: "browser", edition: "core", debug: true });
+      vi.stubGlobal("window", {});
+      const webHtml = renderToStaticMarkup(createElement(TitleBar, { view: "reader", onToggleFullscreen: () => {}, onToggleZenMode: () => {} }));
+      expect(webHtml).toContain("titlebar-fullscreen-btn");
+      expect(webHtml).toContain("titlebar-pin-btn");
+      expect(webHtml).not.toContain("titlebar-controls");
     } finally {
       clearAppBuildSession();
       vi.unstubAllGlobals();

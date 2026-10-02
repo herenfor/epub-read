@@ -81,7 +81,9 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   const [isZenRevealed, setIsZenRevealed] = useState(false);
   const zenHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const desktopChrome = getRuntimeCapabilities().hasDesktopWindowChrome;
+  const runtime = getRuntimeCapabilities();
+  const desktopChrome = runtime.hasDesktopWindowChrome;
+  const desktopTools = runtime.shell !== "mobile";
   const dragRegion = isFullscreen || fullscreenBusy ? "false" : "";
 
   const dragProps = desktopChrome ? { "data-tauri-drag-region": dragRegion } : {};
@@ -117,7 +119,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
 
   // 沉浸模式快捷键（Alt 键呼出/收起）与鼠标顶部感应监听 + 翻页/滚动自动滑隐
   useEffect(() => {
-    if (!desktopChrome || view !== "reader" || !zenMode) {
+    if (!desktopTools || view !== "reader" || !zenMode) {
       clearZenTimer();
       setIsZenRevealed(false);
       return;
@@ -176,16 +178,16 @@ export const TitleBar: React.FC<TitleBarProps> = ({
       window.removeEventListener("wheel", handleWheel);
       clearZenTimer();
     };
-  }, [desktopChrome, view, zenMode, isZenRevealed, isAnyMenuOpen]);
+  }, [desktopTools, view, zenMode, isZenRevealed, isAnyMenuOpen]);
 
   const handleMouseEnter = () => {
-    if (!desktopChrome || !zenMode) return;
+    if (!desktopTools || !zenMode) return;
     clearZenTimer();
     setIsZenRevealed(true);
   };
 
   const handleMouseLeave = () => {
-    if (!desktopChrome || !zenMode || isAnyMenuOpen) return;
+    if (!desktopTools || !zenMode || isAnyMenuOpen) return;
     clearZenTimer();
     zenHideTimerRef.current = setTimeout(() => {
       setIsZenRevealed(false);
@@ -226,7 +228,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   }
 
   // 沉浸隐藏判定：处于阅读模式且开启 zenMode，且无子菜单打开，且未主动唤出时隐藏
-  const isZenHidden = desktopChrome && view === "reader" && zenMode && !isAnyMenuOpen && !isZenRevealed;
+  const isZenHidden = desktopTools && view === "reader" && zenMode && !isAnyMenuOpen && !isZenRevealed;
 
   return (
     <>
@@ -242,7 +244,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
         />
       )}
       <header
-        className={`titlebar titlebar-${view}${isZenHidden ? " zen-hidden" : ""}${desktopChrome && zenMode ? " is-floating" : ""}`}
+        className={`titlebar titlebar-${view}${isZenHidden ? " zen-hidden" : ""}${desktopTools && zenMode ? " is-floating" : ""}`}
         {...dragProps}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
@@ -425,7 +427,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
               )}
 
               {/* 全屏沉浸模式切换 */}
-              {desktopChrome && onToggleFullscreen && (
+              {desktopTools && onToggleFullscreen && (
                 <button
                   type="button"
                   className={`titlebar-action-btn titlebar-fullscreen-btn${isFullscreen ? " active" : ""}`}
@@ -447,7 +449,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
               )}
 
               {/* 沉浸/锁定常驻切换 */}
-              {desktopChrome && onToggleZenMode && (
+              {desktopTools && onToggleZenMode && (
                 <button
                   type="button"
                   className={`titlebar-action-btn titlebar-pin-btn${!zenMode ? " active" : ""}`}
