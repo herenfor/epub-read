@@ -156,6 +156,22 @@ function buildOverrideCss(s: ReaderSettings, bodyBgColor?: string): string {
   break-inside: avoid;
 }`;
 
+  // ---- L3 默认代码换行：为代码/预格式化文本中的超长行提供零特异性软换行。
+  // 不删除或替换原文（含 NBSP），pre 仍保留原始空白与硬换行，作者显式规则可覆盖。
+  const codeWrapCss = `
+/* [L3] 标准代码标记与带行号的代码列表：溢出时允许软断行。 */
+:where(
+  #${VIEWER_ID} pre,
+  #${VIEWER_ID} code,
+  #${VIEWER_ID} div.code > ol.code-content > li
+) {
+  overflow-wrap: anywhere;
+}
+/* [L3] pre 的 UA white-space:pre 会禁止折行；保留空白但允许软换行。 */
+:where(#${VIEWER_ID} pre) {
+  white-space: pre-wrap;
+}`;
+
   // ---- L5 引擎兼容补偿：Chromium 多栏布局 bug 的最小兜底 ----
   // fit-content 的补偿改为运行时统一处理（ChapterPaginator.applyFitContentFix），
   // 这里不再为 .summary 写特判。
@@ -289,6 +305,7 @@ ${VIEWER_TAG}#${VIEWER_ID} { display: block; height: 100%; overflow: hidden; mar
   ${typeCss}
 }`,
     measureCss,
+    codeWrapCss,
     compatCss,
     imageCss,
     themeCss,

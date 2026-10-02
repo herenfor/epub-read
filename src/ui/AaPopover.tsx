@@ -1017,7 +1017,9 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
                   >
                     <MinusIcon size={12} />
                   </button>
-                  <span className="aa-stepper-val">{leftExplicit !== undefined ? `${leftExplicit}px` : leftValueText}</span>
+                  <span className="aa-stepper-val" title={leftValueText}>
+                    {leftExplicit !== undefined ? `${leftExplicit}px` : "自动"}
+                  </span>
                   <button
                     type="button"
                     className="aa-step-btn"
@@ -1055,7 +1057,9 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
                   >
                     <MinusIcon size={12} />
                   </button>
-                  <span className="aa-stepper-val">{rightExplicit !== undefined ? `${rightExplicit}px` : rightValueText}</span>
+                  <span className="aa-stepper-val" title={rightValueText}>
+                    {rightExplicit !== undefined ? `${rightExplicit}px` : "自动"}
+                  </span>
                   <button
                     type="button"
                     className="aa-step-btn"
@@ -1099,7 +1103,9 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
                   >
                     <MinusIcon size={12} />
                   </button>
-                  <span className="aa-stepper-val">{gapValueText}</span>
+                  <span className="aa-stepper-val" title={gapValueText}>
+                    {gapMode === "manual" ? `${gapPx}px` : "自动"}
+                  </span>
                   <button
                     type="button"
                     className="aa-step-btn"

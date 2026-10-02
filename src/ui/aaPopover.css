@@ -574,6 +574,11 @@
   animation: aaPopoverFadeIn 140ms ease-out;
 }
 
+/* 详细视图中，中央步进值使用短文案后保持单行，避免状态切换时胶囊高度变化。 */
+.aa-detailed-view .aa-stepper-val {
+  white-space: nowrap;
+}
+
 .aa-group-title,
 .aa-detail-group-title {
   font-size: 11px;
