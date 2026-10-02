@@ -5006,9 +5006,13 @@ export class ChapterPaginator {
       this.emit({ status: "ready", pageCount: 1, currentPage: 0, empty: true });
       return true;
     }
-    // 纵向裁剪检测：分栏未生效时内容会被 overflow:hidden 裁掉（scrollHeight > 高），
-    // 重新应用分栏一次（最多重试 2 次，防死循环）
-    if (viewer.scrollHeight > viewer.clientHeight + 1) {
+    // 纵向裁剪检测：只有横向分栏尚未生效时才可能靠重测修复。若内容已横向
+    // 溢出（scrollWidth > clientWidth），多栏已成立；此处的纵向差异重测不会
+    // 改变几何，重复 measure/double-rAF 只是空转。仍保留最多 2 次自愈重试。
+    if (
+      viewer.scrollHeight > viewer.clientHeight + 1 &&
+      sw <= viewer.clientWidth + 1
+    ) {
       if (this.recomputeRetries < 2) {
         this.recomputeRetries++;
         if (!(await this.measure(loadSeq))) return false;
