@@ -6068,3 +6068,33 @@ select option {
 .note-composer {
   z-index: 361;
 }
+
+/* ---- C1：文件夹前缀与书籍虚拟占位所有权分离 ---- */
+.shelf-folder-prefix {
+  margin-bottom: 22px;
+}
+
+.shelf-view.density-comfortable .shelf-folder-prefix {
+  margin-bottom: 28px;
+}
+
+.shelf-view.density-compact .shelf-folder-prefix {
+  margin-bottom: 14px;
+}
+
+.shelf-book-prefix {
+  position: relative;
+}
+
+/* ---- C2：移动阅读选区菜单高于工具层、低于笔记模态；固定外框不随 uiScale 缩放 ---- */
+.app[data-mobile-reader="true"] .reader-context-menu {
+  z-index: 200;
+  zoom: 1;
+  max-width: calc(100vw - 16px);
+}
+
+.app[data-touch-ui="true"] .reader-context-menu button {
+  min-width: 48px;
+  min-height: 48px;
+  padding: 10px 14px;
+}

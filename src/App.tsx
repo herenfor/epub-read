@@ -4407,6 +4407,7 @@ export default function App() {
         sidebarOpen={view === "reader" && isSidebarOpen}
         mobileCompact={mobileChrome && view === "reader"}
         toolsVisible={readerToolsVisible}
+        onToggleTools={view === "reader" ? () => setReaderToolsVisible((visible) => !visible) : undefined}
         onToggleAppearance={view === "reader" ? toggleAppearancePanel : undefined}
         appearanceOpen={view === "reader" && menuOpen}
         onOpenSearch={

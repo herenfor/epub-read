@@ -36,6 +36,8 @@ export interface TitleBarProps {
   mobileCompact?: boolean;
   /** 手机/平板上下工具栏共享的显隐状态。 */
   toolsVisible?: boolean;
+  /** 手机/平板触摸顶栏的显隐切换；复用 App 的 toolsVisible 唯一状态。 */
+  onToggleTools?: () => void;
   /** 阅读进度百分比 (0~100) */
   progressPct?: number;
   /** 当前章节序号与总数 */
@@ -72,6 +74,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   onToggleZenMode,
   mobileCompact = false,
   toolsVisible = true,
+  onToggleTools,
   progressPct,
   chapterIndex,
   totalChapters,
@@ -258,6 +261,20 @@ export const TitleBar: React.FC<TitleBarProps> = ({
       >
         {/* 左侧：返回书架 + 书名与章节名 */}
         <div className="titlebar-left" {...dragProps}>
+          {mobileCompact && onToggleTools && (
+            <button
+              type="button"
+              className="titlebar-tools-toggle"
+              onClick={onToggleTools}
+              title={toolsVisible ? "隐藏阅读工具" : "显示阅读工具"}
+              aria-label={toolsVisible ? "隐藏阅读工具" : "显示阅读工具"}
+              aria-pressed={toolsVisible}
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                {toolsVisible ? <path d="M4 10l4-4 4 4" /> : <path d="M4 6l4 4 4-4" />}
+              </svg>
+            </button>
+          )}
           {view === "reader" && onBackToShelf && (
             <button
               type="button"

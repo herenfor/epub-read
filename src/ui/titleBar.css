@@ -503,14 +503,19 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 44px;
+  width: 48px;
+  height: 48px;
   border: none;
   border-radius: 10px;
   background: transparent;
   color: var(--muted);
   font-size: 16px;
   cursor: pointer;
+  flex-shrink: 0;
+}
+
+.titlebar.is-mobile-compact .titlebar-tools-toggle:active {
+  background: color-mix(in srgb, var(--btn-tint-hover) 80%, transparent);
 }
 
 /* mobile shell 的原有规则只服务书架/桌面工具；阅读器手机覆盖顶栏必须显式覆盖高度。 */

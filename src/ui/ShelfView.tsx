@@ -2564,40 +2564,59 @@ const ShelfAZRail = memo(function ShelfAZRail({ letterIndexMap, onSelectLetter }
 
 interface ShelfGridGeometry {
   columns: number;
-  rowHeight: number;
+  /** 书籍行步长，已还原到书架布局 CSS px。 */
+  rowStep: number;
+  /** 书籍占位容器在滚动内容中的稳定起点，不含自身虚拟 topPadding。 */
   contentTop: number;
 }
 
 function sameShelfGridGeometry(a: ShelfGridGeometry, b: ShelfGridGeometry): boolean {
   return a.columns === b.columns &&
-    Math.abs(a.rowHeight - b.rowHeight) < 1 &&
+    Math.abs(a.rowStep - b.rowStep) < 1 &&
     Math.abs(a.contentTop - b.contentTop) < 1;
 }
 
-/** 读取已渲染网格的真实列数、行步长与内容起点；不依赖设备/UA/密度常量。 */
-function measureShelfGridGeometry(container: HTMLElement): ShelfGridGeometry | null {
-  const grid = container.querySelector<HTMLElement>(".shelf-grid");
+function readShelfComputedStyle(container: HTMLElement, element: Element): CSSStyleDeclaration | null {
+  const view = container.ownerDocument?.defaultView;
+  if (view && typeof view.getComputedStyle === "function") return view.getComputedStyle(element);
+  if (typeof getComputedStyle === "function") return getComputedStyle(element);
+  return null;
+}
+
+/** 只使用书架自身已有的有效 zoom；rect 屏幕差值除以它后参与布局坐标计算。 */
+function readShelfLayoutZoom(container: HTMLElement): number {
+  const style = readShelfComputedStyle(container, container);
+  const value = style ? Number.parseFloat(style.zoom) : 1;
+  return Number.isFinite(value) && value > 0 ? value : 1;
+}
+
+/** 读取书籍 grid 的真实列数/行步长，以及书籍占位容器的稳定内容起点。 */
+export function measureShelfGridGeometry(container: HTMLElement): ShelfGridGeometry | null {
+  const anchor = container.querySelector<HTMLElement>(".shelf-book-prefix");
+  if (!anchor) return null;
+  const grid = anchor.querySelector<HTMLElement>(".shelf-book-grid");
   if (!grid) return null;
-  const cards = grid.querySelectorAll<HTMLElement>(".shelf-card, .shelf-folder-card");
+  const cards = grid.querySelectorAll<HTMLElement>(".shelf-card");
   const first = cards[0];
   if (!first) return null;
-  const firstHeight = first.getBoundingClientRect().height;
+  const zoom = readShelfLayoutZoom(container);
+  const firstRect = first.getBoundingClientRect();
+  const firstHeight = firstRect.height / zoom;
   if (!Number.isFinite(firstHeight) || firstHeight <= 0) return null;
-  const computed = getComputedStyle(grid);
-  const tracks = computed.gridTemplateColumns.split(/\s+/).filter(Boolean);
+  const computed = readShelfComputedStyle(container, grid);
+  const tracks = (computed?.gridTemplateColumns ?? "").split(/\s+/).filter(Boolean);
   const columns = Math.max(1, tracks.length || 1);
-  const rowGap = Number.parseFloat(computed.rowGap || computed.gap) || 0;
   const nextRow = cards[columns];
-  const rowHeight = nextRow
-    ? nextRow.getBoundingClientRect().top - first.getBoundingClientRect().top
-    : firstHeight + rowGap;
-  const anchor = grid.parentElement ?? grid;
+  const rowStep = nextRow
+    ? (nextRow.getBoundingClientRect().top - firstRect.top) / zoom
+    : firstHeight + (Number.parseFloat(computed?.rowGap || computed?.gap || "") || 0);
   const containerRect = container.getBoundingClientRect();
   const anchorRect = anchor.getBoundingClientRect();
+  const contentTop = container.scrollTop + (anchorRect.top - containerRect.top) / zoom;
   return {
     columns,
-    rowHeight: Math.max(1, Math.round(rowHeight)),
-    contentTop: Math.max(0, Math.round(container.scrollTop + anchorRect.top - containerRect.top)),
+    rowStep: Math.max(1, Math.round(rowStep)),
+    contentTop: Math.max(0, Math.round(contentTop)),
   };
 }
 
@@ -2621,12 +2640,12 @@ function useShelfVirtualizer(
   folderCount = 0,
   threshold = 40
 ): VirtualizerResult & { gridGeometry: ShelfGridGeometry | null } {
-  const [scrollState, setScrollState] = useState({ scrollTop: 0, viewportHeight: 800, containerWidth: 1000 });
+  const [scrollState, setScrollState] = useState({ scrollTop: 0, viewportHeight: 800 });
   const [gridGeometry, setGridGeometry] = useState<ShelfGridGeometry | null>(null);
 
   useEffect(() => {
     const container = containerRef.current;
-    if (!container || totalCount < threshold || viewMode !== "grid") {
+    if (!container || viewMode !== "grid") {
       setGridGeometry(null);
       return;
     }
@@ -2647,8 +2666,15 @@ function useShelfVirtualizer(
     measure();
     const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
     observer?.observe(container);
-    const grid = container.querySelector<HTMLElement>(".shelf-grid");
+    const anchor = container.querySelector<HTMLElement>(".shelf-book-prefix");
+    if (anchor) observer?.observe(anchor);
+    const grid = container.querySelector<HTMLElement>(".shelf-book-grid");
     if (grid) observer?.observe(grid);
+    const scaleOwner = container.closest(".app");
+    const styleObserver = typeof MutationObserver !== "undefined" && scaleOwner
+      ? new MutationObserver(measure)
+      : null;
+    styleObserver?.observe(scaleOwner as Element, { attributes: true, attributeFilter: ["style"] });
     window.addEventListener("resize", measure, { passive: true });
     return () => {
       if (frame !== null) {
@@ -2656,9 +2682,10 @@ function useShelfVirtualizer(
         else window.clearTimeout(frame);
       }
       observer?.disconnect();
+      styleObserver?.disconnect();
       window.removeEventListener("resize", measure);
     };
-  }, [containerRef, totalCount, threshold, viewMode, density]);
+  }, [containerRef, density, folderCount, viewMode, totalCount]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -2669,7 +2696,6 @@ function useShelfVirtualizer(
       setScrollState({
         scrollTop: container.scrollTop,
         viewportHeight: container.clientHeight || 800,
-        containerWidth: container.clientWidth || 1000,
       });
     };
 
@@ -2694,20 +2720,9 @@ function useShelfVirtualizer(
   }, [containerRef, totalCount, threshold]);
 
   return useMemo(() => {
-    if (totalCount < threshold) {
-      return {
-        startIndex: 0,
-        endIndex: totalCount,
-        topPadding: 0,
-        bottomPadding: 0,
-        isVirtual: false,
-        gridGeometry: null,
-      };
-    }
-
-    const { scrollTop, viewportHeight, containerWidth } = scrollState;
-
+    const geometry = gridGeometry;
     if (viewMode === "list") {
+      const { scrollTop, viewportHeight } = scrollState;
       const rowHeight = 52;
       const overscan = 5;
       const startRow = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan);
@@ -2722,34 +2737,47 @@ function useShelfVirtualizer(
       };
     }
 
-    const fallbackMinColWidth = density === "compact" ? 120 : density === "comfortable" ? 180 : 150;
-    const fallbackGap = density === "compact" ? 12 : density === "comfortable" ? 20 : 16;
-    const fallbackRowHeight = density === "compact" ? 240 : density === "comfortable" ? 320 : 280;
-    const fallbackAvailableWidth = Math.max(200, containerWidth - 40);
-    const columns = gridGeometry?.columns
-      ?? Math.max(1, Math.floor((fallbackAvailableWidth + fallbackGap) / (fallbackMinColWidth + fallbackGap)));
-    const rowHeight = gridGeometry?.rowHeight ?? fallbackRowHeight;
-    const folderRows = folderCount > 0 ? Math.ceil(folderCount / columns) : 0;
-    const booksTop = gridGeometry
-      ? gridGeometry.contentTop + folderRows * rowHeight
-      : 0;
-    const relativeScrollTop = Math.max(0, scrollTop - booksTop);
-    const totalRows = Math.ceil(totalCount / columns);
+    // 几何未测量前保留一个测量窗口；不退回旧密度/列宽估算。
+    if (!geometry) {
+      return {
+        startIndex: 0,
+        endIndex: Math.min(totalCount, Math.max(threshold, 1)),
+        topPadding: 0,
+        bottomPadding: 0,
+        isVirtual: totalCount >= threshold,
+        gridGeometry: null,
+      };
+    }
+
+    if (totalCount < threshold) {
+      return {
+        startIndex: 0,
+        endIndex: totalCount,
+        topPadding: 0,
+        bottomPadding: 0,
+        isVirtual: false,
+        gridGeometry: geometry,
+      };
+    }
+
+    const { scrollTop, viewportHeight } = scrollState;
+    const relativeTop = Math.max(0, scrollTop - geometry.contentTop);
     const overscan = 2;
-    const startRow = Math.max(0, Math.floor(relativeScrollTop / rowHeight) - overscan);
-    const endRow = Math.min(totalRows, Math.ceil((relativeScrollTop + viewportHeight) / rowHeight) + overscan);
-    const startIndex = startRow * columns;
-    const endIndex = Math.min(totalCount, endRow * columns);
+    const totalRows = Math.ceil(totalCount / geometry.columns);
+    const firstRow = Math.max(0, Math.floor(relativeTop / geometry.rowStep) - overscan);
+    const endRow = Math.min(totalRows, Math.ceil((relativeTop + viewportHeight) / geometry.rowStep) + overscan);
+    const startIndex = firstRow * geometry.columns;
+    const endIndex = Math.min(totalCount, endRow * geometry.columns);
 
     return {
       startIndex,
       endIndex,
-      topPadding: startRow * rowHeight,
-      bottomPadding: Math.max(0, (totalRows - endRow) * rowHeight),
+      topPadding: firstRow * geometry.rowStep,
+      bottomPadding: Math.max(0, (totalRows - endRow) * geometry.rowStep),
       isVirtual: true,
-      gridGeometry,
+      gridGeometry: geometry,
     };
-  }, [totalCount, threshold, scrollState, viewMode, density, folderCount, gridGeometry]);
+  }, [totalCount, threshold, scrollState, viewMode, gridGeometry]);
 }
 
 /* =========================================================================
@@ -3140,6 +3168,7 @@ export function ShelfView(props: ShelfViewProps) {
   const [deleteTargetsClosing, setDeleteTargetsClosing] = useState(false);
   const [toastLetter, setToastLetter] = useState<string | null>(null);
   const toastTimerRef = useRef<number | null>(null);
+  const pendingLetterTargetRef = useRef<{ targetIndex: number; targetId: string | null } | null>(null);
   const shelfViewRef = useRef<HTMLDivElement | null>(null);
   const [submenuBackActive, setSubmenuBackActive] = useState(false);
   const submenuBackHandlerRef = useRef<(() => boolean) | null>(null);
@@ -3388,6 +3417,16 @@ export function ShelfView(props: ShelfViewProps) {
     return map;
   }, [visible, sort]);
 
+  const scrollShelfToOffset = useCallback((top: number): void => {
+    const container = shelfViewRef.current;
+    if (!container) return;
+    if (typeof container.scrollTo === "function") {
+      container.scrollTo({ top, behavior: "smooth" });
+    } else {
+      container.scrollTop = top;
+    }
+  }, []);
+
   const handleSelectLetter = useCallback(
     (letter: string, targetIndex: number) => {
       setToastLetter(letter);
@@ -3399,39 +3438,40 @@ export function ShelfView(props: ShelfViewProps) {
         toastTimerRef.current = null;
       }, 350);
 
-      const container = shelfViewRef.current;
-      if (!container) return;
-
-      const scrollToOffset = (top: number) => {
-        if (typeof container.scrollTo === "function") {
-          container.scrollTo({ top, behavior: "smooth" });
-        } else {
-          container.scrollTop = top;
-        }
-      };
-
       if (viewMode === "list") {
-        const targetScrollTop = targetIndex * 52;
-        scrollToOffset(targetScrollTop);
-      } else {
-        const geometry = virtualizer.gridGeometry;
-        if (geometry) {
-          const folderRows = Math.ceil(visibleFolders.length / geometry.columns);
-          const targetRow = Math.floor(targetIndex / geometry.columns);
-          scrollToOffset(geometry.contentTop + (folderRows + targetRow) * geometry.rowHeight);
-        } else {
-          const minColWidth = density === "compact" ? 120 : density === "comfortable" ? 180 : 150;
-          const gap = density === "compact" ? 12 : density === "comfortable" ? 20 : 16;
-          const rowHeight = density === "compact" ? 240 : density === "comfortable" ? 320 : 280;
-          const availableWidth = Math.max(200, (container.clientWidth || 1000) - 40);
-          const cols = Math.max(1, Math.floor((availableWidth + gap) / (minColWidth + gap)));
-          const targetRow = Math.floor(targetIndex / cols);
-          scrollToOffset(targetRow * rowHeight);
-        }
+        scrollShelfToOffset(targetIndex * 52);
+        return;
       }
+
+      const geometry = virtualizer.gridGeometry;
+      if (!geometry) {
+        // 几何未测量时延后到测量完成，不退回另一套列宽估算。
+        pendingLetterTargetRef.current = {
+          targetIndex,
+          targetId: visible[targetIndex]?.id ?? null,
+        };
+        return;
+      }
+      scrollShelfToOffset(
+        geometry.contentTop + Math.floor(targetIndex / geometry.columns) * geometry.rowStep
+      );
     },
-    [viewMode, density, virtualizer.gridGeometry, visibleFolders.length]
+    [scrollShelfToOffset, viewMode, virtualizer.gridGeometry, visible]
   );
+
+  useEffect(() => {
+    const pending = pendingLetterTargetRef.current;
+    if (!pending || viewMode !== "grid" || !virtualizer.gridGeometry) return;
+    const targetIndex = pending.targetId
+      ? visible.findIndex((entry) => entry.id === pending.targetId)
+      : pending.targetIndex;
+    pendingLetterTargetRef.current = null;
+    if (targetIndex < 0) return;
+    const geometry = virtualizer.gridGeometry;
+    scrollShelfToOffset(
+      geometry.contentTop + Math.floor(targetIndex / geometry.columns) * geometry.rowStep
+    );
+  }, [scrollShelfToOffset, viewMode, virtualizer.gridGeometry, visible]);
 
   const thumbnailProvider = props.thumbnailProvider ?? legacyThumbnailProvider;
 
@@ -4538,61 +4578,69 @@ export function ShelfView(props: ShelfViewProps) {
           </table>
         </div>
       ) : (
-        <div
-          style={{
-            paddingTop: virtualizer.topPadding > 0 ? `${virtualizer.topPadding}px` : undefined,
-            paddingBottom: virtualizer.bottomPadding > 0 ? `${virtualizer.bottomPadding}px` : undefined,
-          }}
-        >
-          <div className="shelf-grid">
-            {scope.type === "root" &&
-              visibleFolders.map((folder) => (
-                <ShelfFolderCard
-                  key={folder.id}
-                  id={folder.id}
-                  name={folder.name}
-                  books={folderBooksMap.get(folder.id) ?? []}
-                  provider={thumbnailProvider}
-                  selectionMode={selectionMode}
-                  isDropTarget={dropTarget?.type === "folder" && dropTarget.id === folder.id}
-                  onOpen={(fId, el) => handleOpenFolderModal(fId, el)}
-                  onRename={(fId, fName) => setRenameFolderTarget({ id: fId, name: fName })}
-                  onDissolve={(fId, fName) => setDissolveFolderTarget({ id: fId, name: fName })}
-                  registerSubmenuBackHandler={registerSubmenuBackHandler}
-                  onSubmenuBackActiveChange={reportSubmenuBackActive}
-                />
-              ))}
-            {renderedBooks.map((entry) => {
-              const hash = entry.contentHash ?? entry.id;
-              const inFolder = effectiveFolderId(organization, hash) !== null;
-              return (
-                <ShelfCard
-                  key={entry.id}
-                  entry={entry}
-                  selected={selectedIds.has(entry.id)}
-                  selectionMode={selectionMode}
-                  provider={thumbnailProvider}
-                  busy={props.busy}
-                  deleteDisabled={props.importActive}
-                  isFavorite={isFavorite(organization, hash)}
-                  isDragging={draggedEntry?.id === entry.id}
-                  isDropTargetBook={dropTarget?.type === "book" && dropTarget.id === entry.id}
-                  draggedEntry={draggedEntry}
-                  onOpen={props.onOpen}
-                  onToggleSelected={toggleSelected}
-                  onDeleteRequest={onDeleteRequest}
-                  onMoveToFolder={handleSingleMoveToFolder}
-                  onRemoveFromFolder={inFolder ? handleRemoveFromFolder : undefined}
-                  onToggleFavorite={handleToggleFavorite}
-                  onDragStart={handleDragStart}
-                  onLongPressSelect={handleTouchLongPressSelect}
-                  registerSubmenuBackHandler={registerSubmenuBackHandler}
-                  onSubmenuBackActiveChange={reportSubmenuBackActive}
-                />
-              );
-            })}
+        <>
+          {scope.type === "root" && visibleFolders.length > 0 && (
+            <div className="shelf-folder-prefix">
+              <div className="shelf-grid shelf-folder-grid">
+                {visibleFolders.map((folder) => (
+                  <ShelfFolderCard
+                    key={folder.id}
+                    id={folder.id}
+                    name={folder.name}
+                    books={folderBooksMap.get(folder.id) ?? []}
+                    provider={thumbnailProvider}
+                    selectionMode={selectionMode}
+                    isDropTarget={dropTarget?.type === "folder" && dropTarget.id === folder.id}
+                    onOpen={(fId, el) => handleOpenFolderModal(fId, el)}
+                    onRename={(fId, fName) => setRenameFolderTarget({ id: fId, name: fName })}
+                    onDissolve={(fId, fName) => setDissolveFolderTarget({ id: fId, name: fName })}
+                    registerSubmenuBackHandler={registerSubmenuBackHandler}
+                    onSubmenuBackActiveChange={reportSubmenuBackActive}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+          <div
+            className="shelf-book-prefix"
+            style={{
+              paddingTop: virtualizer.topPadding > 0 ? `${virtualizer.topPadding}px` : undefined,
+              paddingBottom: virtualizer.bottomPadding > 0 ? `${virtualizer.bottomPadding}px` : undefined,
+            }}
+          >
+            <div className="shelf-grid shelf-book-grid">
+              {renderedBooks.map((entry) => {
+                const hash = entry.contentHash ?? entry.id;
+                const inFolder = effectiveFolderId(organization, hash) !== null;
+                return (
+                  <ShelfCard
+                    key={entry.id}
+                    entry={entry}
+                    selected={selectedIds.has(entry.id)}
+                    selectionMode={selectionMode}
+                    provider={thumbnailProvider}
+                    busy={props.busy}
+                    deleteDisabled={props.importActive}
+                    isFavorite={isFavorite(organization, hash)}
+                    isDragging={draggedEntry?.id === entry.id}
+                    isDropTargetBook={dropTarget?.type === "book" && dropTarget.id === entry.id}
+                    draggedEntry={draggedEntry}
+                    onOpen={props.onOpen}
+                    onToggleSelected={toggleSelected}
+                    onDeleteRequest={onDeleteRequest}
+                    onMoveToFolder={handleSingleMoveToFolder}
+                    onRemoveFromFolder={inFolder ? handleRemoveFromFolder : undefined}
+                    onToggleFavorite={handleToggleFavorite}
+                    onDragStart={handleDragStart}
+                    onLongPressSelect={handleTouchLongPressSelect}
+                    registerSubmenuBackHandler={registerSubmenuBackHandler}
+                    onSubmenuBackActiveChange={reportSubmenuBackActive}
+                  />
+                );
+              })}
+            </div>
           </div>
-        </div>
+        </>
       )}
 
       {/* 新建文件夹弹层 */}
