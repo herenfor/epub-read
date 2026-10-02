@@ -338,32 +338,13 @@ export const TitleBar: React.FC<TitleBarProps> = ({
         {/* 中央：拖拽区域 + 沉浸进度指示胶囊 */}
         <div className="titlebar-drag-area titlebar-middle" {...dragProps}>
           {view === "reader" && !mobileCompact && (progressPct !== undefined || (chapterIndex !== undefined && totalChapters !== undefined && totalChapters > 0)) && (
-            <div
-              className={`titlebar-progress-pill${onToggleSidebar ? " is-clickable" : ""}`}
-              {...dragProps}
-              onClick={() => onToggleSidebar?.("left")}
-              role={onToggleSidebar ? "button" : undefined}
-              title={`阅读进度：${Math.round(progressPct ?? 0)}% (点击切换章节目录)`}
-            >
-              {chapterIndex !== undefined && totalChapters !== undefined && totalChapters > 0 && (
-                <span className="titlebar-chapter-badge" {...dragProps}>
-                  第 {chapterIndex + 1}/{totalChapters} 章
-                </span>
-              )}
-              {progressPct !== undefined && (
-                <>
-                  <div className="titlebar-progress-track" {...dragProps}>
-                    <div
-                      className="titlebar-progress-fill"
-                      style={{ width: `${Math.min(100, Math.max(0, progressPct))}%` }}
-                    />
-                  </div>
-                  <span className="titlebar-progress-text" {...dragProps}>
-                    {Math.round(progressPct)}%
-                  </span>
-                </>
-              )}
-            </div>
+            <ReaderProgressCapsule
+              progressPct={progressPct}
+              chapterIndex={chapterIndex}
+              totalChapters={totalChapters}
+              sidebarOpen={sidebarOpen}
+              onToggleSidebar={onToggleSidebar}
+            />
           )}
         </div>
 
@@ -573,6 +554,51 @@ export const TitleBar: React.FC<TitleBarProps> = ({
     </>
   );
 };
+
+interface ReaderProgressCapsuleProps {
+  progressPct?: number;
+  chapterIndex?: number;
+  totalChapters?: number;
+  sidebarOpen?: boolean;
+  onToggleSidebar?: (side?: "left" | "right") => void;
+}
+
+function ReaderProgressCapsule({
+  progressPct,
+  chapterIndex,
+  totalChapters,
+  sidebarOpen = false,
+  onToggleSidebar,
+}: ReaderProgressCapsuleProps) {
+  return (
+    <button
+      type="button"
+      className={`titlebar-progress-pill${onToggleSidebar ? " is-clickable" : ""}`}
+      disabled={!onToggleSidebar}
+      onClick={() => onToggleSidebar?.("left")}
+      aria-label="切换章节目录"
+      aria-expanded={sidebarOpen}
+      title={`阅读进度：${Math.round(progressPct ?? 0)}% (点击切换章节目录)`}
+    >
+      {chapterIndex !== undefined && totalChapters !== undefined && totalChapters > 0 && (
+        <span className="titlebar-chapter-badge">
+          第 {chapterIndex + 1}/{totalChapters} 章
+        </span>
+      )}
+      {progressPct !== undefined && (
+        <>
+          <span className="titlebar-progress-track">
+            <span
+              className="titlebar-progress-fill"
+              style={{ width: `${Math.min(100, Math.max(0, progressPct))}%` }}
+            />
+          </span>
+          <span className="titlebar-progress-text">{Math.round(progressPct)}%</span>
+        </>
+      )}
+    </button>
+  );
+}
 
 /** PC 桌面端 Zen UI 别名导出，确保现代阅读器组件契约一致 */
 export const ReaderHeaderBar = TitleBar;

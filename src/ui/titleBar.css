@@ -18,8 +18,8 @@
 }
 
 /* 全屏沉浸模式与悬浮顶栏（Zen Mode）：浮动于正文上方，彻底避免重排与视口跳动 */
-.app.is-fullscreen .titlebar,
-.titlebar.is-floating {
+.app.is-fullscreen .titlebar-reader,
+.titlebar-reader.is-floating {
   position: fixed;
   top: 0;
   left: 0;
@@ -162,7 +162,10 @@
 
 /* 沉浸式阅读进度指示胶囊 */
 .titlebar-progress-pill {
+  appearance: none;
   display: inline-flex;
+  font: inherit;
+  color: inherit;
   align-items: center;
   gap: 8px;
   height: 22px;
@@ -195,6 +198,7 @@
 }
 
 .titlebar-progress-track {
+  display: block;
   width: 52px;
   height: 4px;
   background: color-mix(in srgb, var(--panel-border) 60%, transparent);
@@ -204,6 +208,7 @@
 }
 
 .titlebar-progress-fill {
+  display: block;
   height: 100%;
   background: var(--accent);
   border-radius: 2px;

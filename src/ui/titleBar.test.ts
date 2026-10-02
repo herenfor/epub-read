@@ -151,4 +151,25 @@ describe("CSD TitleBar 组件与样式契约（Zen UI Packet A）", () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it("阅读进度胶囊是真实按钮且不传播窗口拖拽属性", () => {
+    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+    try {
+      const html = renderToStaticMarkup(createElement(TitleBar, {
+        view: "reader",
+        title: "Progress Capsule",
+        onBackToShelf: () => {},
+        onToggleSidebar: () => {},
+        progressPct: 42,
+        chapterIndex: 0,
+        totalChapters: 10,
+      }));
+      const pill = html.match(/<button[^>]*titlebar-progress-pill[\s\S]*?<\/button>/);
+      expect(pill).not.toBeNull();
+      expect(pill![0]).not.toContain("data-tauri-drag-region");
+      expect(html).toContain('titlebar-drag-area titlebar-middle" data-tauri-drag-region');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });

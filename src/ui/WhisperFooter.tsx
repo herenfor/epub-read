@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { BookOpenIcon, MenuHamburgerIcon, SearchIcon } from "./readerIcons";
 import "./whisperFooter.css";
 import {
@@ -60,6 +60,107 @@ export interface WhisperFooterProps {
   moreOpen?: boolean;
 }
 
+const HIDE_DELAY_MS = 1800;
+const READING_KEYS = new Set([
+  "ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight",
+  "PageDown", "PageUp", " ", "[", "]",
+]);
+
+function useDesktopFooterReveal(enabled: boolean) {
+  const [revealed, setRevealed] = useState(false);
+  const heldRef = useRef({ hovered: false, dragging: false });
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearHideTimer = useCallback(() => {
+    if (timerRef.current !== null) clearTimeout(timerRef.current);
+    timerRef.current = null;
+  }, []);
+
+  const scheduleHide = useCallback(() => {
+    clearHideTimer();
+    if (!enabled || heldRef.current.hovered || heldRef.current.dragging) return;
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null;
+      if (!heldRef.current.hovered && !heldRef.current.dragging) {
+        setRevealed(false);
+      }
+    }, HIDE_DELAY_MS);
+  }, [enabled, clearHideTimer]);
+
+  const reveal = useCallback(() => {
+    if (!enabled) return;
+    setRevealed(true);
+    scheduleHide();
+  }, [enabled, scheduleHide]);
+
+  const hide = useCallback(() => {
+    clearHideTimer();
+    if (!heldRef.current.hovered && !heldRef.current.dragging) {
+      setRevealed(false);
+    }
+  }, [clearHideTimer]);
+
+  const setHovered = useCallback((hovered: boolean) => {
+    heldRef.current.hovered = hovered;
+    if (hovered) {
+      clearHideTimer();
+      if (enabled) setRevealed(true);
+    } else {
+      scheduleHide();
+    }
+  }, [enabled, clearHideTimer, scheduleHide]);
+
+  const setDragging = useCallback((dragging: boolean, hovered = heldRef.current.hovered) => {
+    heldRef.current.dragging = dragging;
+    heldRef.current.hovered = hovered;
+    if (dragging) {
+      clearHideTimer();
+      if (enabled) setRevealed(true);
+    } else {
+      scheduleHide();
+    }
+  }, [enabled, clearHideTimer, scheduleHide]);
+
+  const reset = useCallback(() => {
+    clearHideTimer();
+    heldRef.current.hovered = false;
+    heldRef.current.dragging = false;
+    setRevealed(false);
+  }, [clearHideTimer]);
+
+  useEffect(() => {
+    clearHideTimer();
+    setRevealed(false);
+    if (!enabled) return;
+
+    const onMouseMove = (event: MouseEvent) => {
+      if (window.innerHeight - event.clientY < 40) {
+        reveal();
+      } else if (timerRef.current === null) {
+        scheduleHide();
+      }
+    };
+    const onWheel = (event: WheelEvent) => {
+      if (event.deltaY > 10) hide();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (READING_KEYS.has(event.key)) hide();
+    };
+
+    window.addEventListener("mousemove", onMouseMove, { passive: true });
+    window.addEventListener("wheel", onWheel, { passive: true });
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("wheel", onWheel);
+      window.removeEventListener("keydown", onKeyDown);
+      clearHideTimer();
+    };
+  }, [enabled, clearHideTimer, reveal, scheduleHide, hide]);
+
+  return { revealed, reveal, setHovered, setDragging, reset };
+}
+
 export const WhisperFooter: React.FC<WhisperFooterProps> = ({
   currentPage,
   pageCount,
@@ -94,7 +195,6 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
 }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
-  const [isZenRevealed, setIsZenRevealed] = useState(false);
 
   // 独立的 hover 与 drag 预览
   const [hoverTooltip, setHoverTooltip] = useState<{
@@ -106,73 +206,20 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
     text: string;
   } | null>(null);
 
-  const zenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const footerRef = useRef<HTMLElement>(null);
+  const footerReveal = useDesktopFooterReveal(!mobile && zenMode);
   const trackRef = useRef<HTMLDivElement>(null);
   const pointerIdRef = useRef<number | null>(null);
 
-  // 禅模式（全屏）下无鼠标移动自动隐匿，悬停或拖拽时保持唤醒
-  useEffect(() => {
-    if (!zenMode) {
-      setIsZenRevealed(true);
-      return;
-    }
-    const handleMouseMove = (e: MouseEvent) => {
-      if (window.innerHeight - e.clientY < 40) {
-        setIsZenRevealed(true);
-        if (zenTimerRef.current) clearTimeout(zenTimerRef.current);
-      } else if (!isHovered && !isDragging) {
-        if (!zenTimerRef.current) {
-          zenTimerRef.current = setTimeout(() => {
-            setIsZenRevealed(false);
-            zenTimerRef.current = null;
-          }, 1800);
-        }
-      }
-    };
-
-    const handleWheel = (e: WheelEvent) => {
-      if (e.deltaY > 10 && !isHovered && !isDragging) {
-        if (zenTimerRef.current) clearTimeout(zenTimerRef.current);
-        setIsZenRevealed(false);
-      }
-    };
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "PageDown", "PageUp", " ", "[", "]"].includes(e.key)) {
-        if (!isHovered && !isDragging) {
-          if (zenTimerRef.current) clearTimeout(zenTimerRef.current);
-          setIsZenRevealed(false);
-        }
-      }
-    };
-
-    window.addEventListener("mousemove", handleMouseMove, { passive: true });
-    window.addEventListener("wheel", handleWheel, { passive: true });
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("wheel", handleWheel);
-      window.removeEventListener("keydown", handleKeyDown);
-      if (zenTimerRef.current) clearTimeout(zenTimerRef.current);
-    };
-  }, [zenMode, isHovered, isDragging]);
-
   const handleMouseEnter = () => {
     setIsHovered(true);
-    setIsZenRevealed(true);
-    if (zenTimerRef.current) clearTimeout(zenTimerRef.current);
+    footerReveal.setHovered(true);
   };
 
   const handleMouseLeave = () => {
-    if (pointerIdRef.current !== null) return;
     setIsHovered(false);
     setHoverTooltip(null);
-    if (zenMode) {
-      if (zenTimerRef.current) clearTimeout(zenTimerRef.current);
-      zenTimerRef.current = setTimeout(() => {
-        setIsZenRevealed(false);
-      }, 1800);
-    }
+    footerReveal.setHovered(false);
   };
 
   // 全局失去焦点时清理拖拽状态与拦截罩
@@ -184,12 +231,15 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
         setDragTooltip(null);
         onPreviewChange?.(null);
       }
+      setIsHovered(false);
+      setHoverTooltip(null);
+      footerReveal.reset();
     };
     window.addEventListener("blur", handleBlur);
     return () => {
       window.removeEventListener("blur", handleBlur);
     };
-  }, [onPreviewChange]);
+  }, [onPreviewChange, footerReveal.reset]);
 
   // ---- 准确宏观与微观进度计算 ----
   const intraProgress =
@@ -315,6 +365,7 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
     e.stopPropagation();
 
     pointerIdRef.current = e.pointerId;
+    footerReveal.setDragging(true);
     try {
       track.setPointerCapture(e.pointerId);
     } catch {
@@ -353,6 +404,18 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
     e.stopPropagation();
 
     const track = trackRef.current;
+    const footerRect = footerRef.current!.getBoundingClientRect();
+    const overFooter =
+      e.clientX >= footerRect.left &&
+      e.clientX <= footerRect.right &&
+      e.clientY >= footerRect.top &&
+      e.clientY <= footerRect.bottom;
+
+    pointerIdRef.current = null;
+    setIsDragging(false);
+    setIsHovered(overFooter);
+    footerReveal.setDragging(false, overFooter);
+
     if (track) {
       try {
         track.releasePointerCapture(e.pointerId);
@@ -360,8 +423,6 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
         // 容错
       }
     }
-    pointerIdRef.current = null;
-    setIsDragging(false);
     setDragTooltip(null);
 
     const rect = track?.getBoundingClientRect();
@@ -373,26 +434,30 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
   };
 
   const handlePointerCancel = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (pointerIdRef.current === e.pointerId) {
-      const track = trackRef.current;
-      if (track) {
-        try {
-          track.releasePointerCapture(e.pointerId);
-        } catch {
-          // 容错
-        }
-      }
-      pointerIdRef.current = null;
-      setIsDragging(false);
-      setDragTooltip(null);
-      onPreviewChange?.(null);
-    }
-  };
-
-  const handleLostPointerCapture = () => {
+    if (pointerIdRef.current !== e.pointerId) return;
+    const track = trackRef.current;
     pointerIdRef.current = null;
     setIsDragging(false);
+    setIsHovered(false);
     setDragTooltip(null);
+    footerReveal.setDragging(false, false);
+    if (track) {
+      try {
+        track.releasePointerCapture(e.pointerId);
+      } catch {
+        // 容错
+      }
+    }
+    onPreviewChange?.(null);
+  };
+
+  const handleLostPointerCapture = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (pointerIdRef.current !== e.pointerId) return;
+    pointerIdRef.current = null;
+    setIsDragging(false);
+    setIsHovered(false);
+    setDragTooltip(null);
+    footerReveal.setDragging(false, false);
     onPreviewChange?.(null);
   };
 
@@ -464,7 +529,7 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
 
   const isVisible = mobile
     ? toolsVisible
-    : (!zenMode || isZenRevealed || isHovered || isDragging);
+    : (!zenMode || footerReveal.revealed || isHovered || isDragging);
   const activeTooltip = isDragging ? dragTooltip : isHovered ? hoverTooltip : null;
 
   return (
@@ -477,7 +542,16 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
         />
       )}
 
+      {!mobile && zenMode && !isVisible && (
+        <div
+          className="whisper-footer-reveal-sensor"
+          aria-hidden="true"
+          onMouseEnter={footerReveal.reveal}
+        />
+      )}
+
       <footer
+        ref={footerRef}
         className={`whisper-footer${mobile ? " is-mobile" : ""}${isVisible ? " is-visible" : " is-hidden"}${isHovered || isDragging ? " is-hovered" : ""}`}
         onMouseEnter={mobile ? undefined : handleMouseEnter}
         onMouseLeave={mobile ? undefined : handleMouseLeave}

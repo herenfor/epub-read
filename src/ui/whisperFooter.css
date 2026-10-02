@@ -29,6 +29,17 @@
   transform: translateY(0);
 }
 
+/* 底栏隐藏时的 8px 底边感应区：与底栏同级、同为 35，不铺满正文。 */
+.whisper-footer-reveal-sensor {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 8px;
+  z-index: 35;
+  pointer-events: auto;
+}
+
 .whisper-footer.is-hovered {
   height: 38px;
   background: color-mix(in srgb, var(--bg, #ffffff) 92%, transparent);
