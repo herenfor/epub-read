@@ -584,3 +584,30 @@
   margin-left: 0;
   transition: margin 200ms cubic-bezier(0.16, 1, 0.3, 1);
 }
+
+/* ---- 手机紧凑抽屉：覆盖层不占正文，安全区与 IME 由外层统一处理 ---- */
+.sidebar-drawer.is-compact.is-overlay {
+  top: env(safe-area-inset-top, 0px);
+  bottom: env(safe-area-inset-bottom, 0px);
+  left: 0;
+  right: 0;
+  width: 100%;
+  max-width: none;
+  border-radius: 0;
+  border-left: none;
+  border-right: none;
+}
+
+.sidebar-drawer.is-compact .sidebar-header {
+  height: 52px;
+  padding: 0 10px 0 14px;
+}
+
+.sidebar-drawer.is-compact .sidebar-tab {
+  min-height: 40px;
+}
+
+.sidebar-drawer.is-compact .sidebar-icon-btn {
+  width: 44px;
+  height: 44px;
+}

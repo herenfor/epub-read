@@ -84,6 +84,8 @@ export interface ContinuousReaderViewProps {
   preciseTarget?: (PreciseNavigationRequest & { chapterPath: string }) | null;
   onImageActivation?(image: ImageActivationPayload): void;
   inputPaused?: boolean;
+  /** 手机普通轻点：显隐阅读工具；连续模式不在 iframe 内阻止默认行为。 */
+  onPlainTap?: () => void;
   onPreciseNavigationStatus?(status: {
     requestId: number;
     status: PreciseNavigationStatus;
@@ -260,6 +262,10 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
       onPreciseNavigationStatus,
     } = props;
 
+    const inputPausedRef = useRef(inputPaused === true);
+    inputPausedRef.current = inputPaused === true;
+    const onPlainTapRef = useRef(props.onPlainTap);
+    onPlainTapRef.current = props.onPlainTap;
     const containerRef = useRef<HTMLDivElement>(null);
     /** 显式总高的 canvas：几何提交必须先于宿主 scrollTop，见 commitContinuousGeometry。 */
     const canvasRef = useRef<HTMLDivElement>(null);
@@ -1361,7 +1367,12 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
             onWheelPixels: (delta) => externalScrollHandlersRef.current.onWheelPixels(delta),
             onViewportStep: (direction) =>
               externalScrollHandlersRef.current.onViewportStep(direction),
-          }
+          },
+          undefined,
+          () => {
+            if (!inputPausedRef.current) onPlainTapRef.current?.();
+          },
+          () => inputPausedRef.current
         );
 
         slot = {

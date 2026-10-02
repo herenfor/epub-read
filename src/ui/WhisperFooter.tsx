@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { BookOpenIcon, MenuHamburgerIcon, SearchIcon } from "./readerIcons";
 import "./whisperFooter.css";
 import {
   displayedScrubRatio,
@@ -45,6 +46,18 @@ export interface WhisperFooterProps {
   contentAxis?: ContentAxis | null;
   onCommitSeek?: (ratio: number) => void;
   onPreviewChange?: (ratio: number | null) => void;
+
+  /** 触摸优先布局：底部条与顶栏共享 toolsVisible，进度轴直接可拖。 */
+  mobile?: boolean;
+  toolsVisible?: boolean;
+  onToggleSidebar?: () => void;
+  sidebarOpen?: boolean;
+  onOpenSearch?: () => void;
+  searchOpen?: boolean;
+  onToggleAppearance?: () => void;
+  appearanceOpen?: boolean;
+  onOpenMore?: () => void;
+  moreOpen?: boolean;
 }
 
 export const WhisperFooter: React.FC<WhisperFooterProps> = ({
@@ -68,6 +81,16 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
   contentAxis,
   onCommitSeek,
   onPreviewChange,
+  mobile = false,
+  toolsVisible = true,
+  onToggleSidebar,
+  sidebarOpen = false,
+  onOpenSearch,
+  searchOpen = false,
+  onToggleAppearance,
+  appearanceOpen = false,
+  onOpenMore,
+  moreOpen = false,
 }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -439,7 +462,9 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
     return parts.join(" · ");
   })();
 
-  const isVisible = !zenMode || isZenRevealed || isHovered || isDragging;
+  const isVisible = mobile
+    ? toolsVisible
+    : (!zenMode || isZenRevealed || isHovered || isDragging);
   const activeTooltip = isDragging ? dragTooltip : isHovered ? hoverTooltip : null;
 
   return (
@@ -453,11 +478,11 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
       )}
 
       <footer
-        className={`whisper-footer${isVisible ? " is-visible" : " is-hidden"}${isHovered || isDragging ? " is-hovered" : ""}`}
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
+        className={`whisper-footer${mobile ? " is-mobile" : ""}${isVisible ? " is-visible" : " is-hidden"}${isHovered || isDragging ? " is-hovered" : ""}`}
+        onMouseEnter={mobile ? undefined : handleMouseEnter}
+        onMouseLeave={mobile ? undefined : handleMouseLeave}
         role="contentinfo"
-        aria-label="阅读进度与导览"
+        aria-label={mobile ? "阅读工具与进度" : "阅读进度与导览"}
       >
         {/* 悬停展开的 Scrubber 互动条（24px 宽幅热区） */}
         <div className="whisper-scrubber-wrap">
@@ -513,12 +538,62 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
           )}
         </div>
 
-        {/* 底部克制平静文本 */}
+        {/* 底部克制平静文本：手机也保留精简阅读位置。 */}
         <div className="whisper-meta-line">
           <span className="whisper-calm-text" title={chapterTitle || "阅读进度"}>
             {textContent}
           </span>
         </div>
+
+        {/* 手机/平板触摸底部动作行；由 App 与顶栏共用 toolsVisible。 */}
+        {mobile && (
+          <nav className="mobile-reader-actions" aria-label="阅读工具">
+            <button
+              type="button"
+              className={`mobile-reader-action${sidebarOpen ? " active" : ""}`}
+              onClick={onToggleSidebar}
+              aria-label="目录、书签与笔记"
+              aria-expanded={sidebarOpen}
+              disabled={!onToggleSidebar}
+            >
+              <BookOpenIcon size={19} />
+              <span>目录</span>
+            </button>
+            <button
+              type="button"
+              className={`mobile-reader-action${searchOpen ? " active" : ""}`}
+              onClick={onOpenSearch}
+              aria-label="搜索正文"
+              aria-expanded={searchOpen}
+              disabled={!onOpenSearch}
+            >
+              <SearchIcon size={19} />
+              <span>搜索</span>
+            </button>
+            <button
+              type="button"
+              className={`mobile-reader-action${appearanceOpen ? " active" : ""}`}
+              onClick={onToggleAppearance}
+              aria-label="外观与排版设置"
+              aria-expanded={appearanceOpen}
+              disabled={!onToggleAppearance}
+            >
+              <span className="mobile-reader-aa" aria-hidden="true">Aa</span>
+              <span>Aa</span>
+            </button>
+            <button
+              type="button"
+              className={`mobile-reader-action${moreOpen ? " active" : ""}`}
+              onClick={onOpenMore}
+              aria-label="更多阅读操作"
+              aria-expanded={moreOpen}
+              disabled={!onOpenMore}
+            >
+              <MenuHamburgerIcon size={19} />
+              <span>更多</span>
+            </button>
+          </nav>
+        )}
       </footer>
     </>
   );

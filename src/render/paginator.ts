@@ -43,6 +43,7 @@ import {
 } from "./scrollLayout";
 import { MIN_COLUMN_WIDTH_PX } from "./pageLayout";
 import { installPagedSwipe, type PagedSwipeHandlers } from "./pagedSwipe";
+import { installPlainTap } from "./plainTap";
 import {
   clientXToColumnX,
   columnForContentPoint,
@@ -2413,6 +2414,8 @@ export class ChapterPaginator {
   private externalScrollOwnershipRestore: (() => void) | null = null;
   /** 当前 iframe 文档上的横滑清理函数；换章/销毁时必须解除。 */
   private pagedSwipeCleanup: (() => void) | null = null;
+  /** 普通轻点检测清理函数；用于手机工具栏显隐。 */
+  private plainTapCleanup: (() => void) | null = null;
   /** 最近一次 scroll 事件的 rAF 合并句柄。 */
   private scrollFrame: number | undefined;
   private scrollFrameKind: "raf" | "timer" = "raf";
@@ -2481,7 +2484,11 @@ export class ChapterPaginator {
     /** 连续滚动模式外部适配器；提供时滚轮与按键转交宿主，不再触发章末保护链。 */
     private externalScroll?: ExternalScrollAdapter,
     /** 翻页模式单指横滑；连续模式/缓存非活动章由调用方忽略。 */
-    private pagedSwipe?: PagedSwipeHandlers
+    private pagedSwipe?: PagedSwipeHandlers,
+    /** 手机普通轻点；只表达非交互正文短触，不阻止默认行为。 */
+    private onPlainTap?: () => void,
+    /** 普通轻点是否当前应忽略；由调用方检查活动章/输入暂停/ready 状态。 */
+    private shouldIgnorePlainTap?: () => boolean
   ) {
     this.selectionContextMenuHandler = onSelectionContextMenu;
     this.displayGate = new VisibilityGate(this.iframe, {
@@ -2792,6 +2799,13 @@ export class ChapterPaginator {
         onNext: () => this.pagedSwipe?.onNext(),
         onPrev: () => this.pagedSwipe?.onPrev(),
         shouldIgnore: (event) => this.pagedSwipe?.shouldIgnore(event) ?? true,
+      });
+    }
+    if (this.onPlainTap) {
+      this.plainTapCleanup?.();
+      this.plainTapCleanup = installPlainTap(doc, {
+        onTap: () => this.onPlainTap?.(),
+        shouldIgnore: () => this.shouldIgnorePlainTap?.() ?? false,
       });
     }
     const atEnd = this.pendingStartAtEnd;
@@ -7498,6 +7512,8 @@ export class ChapterPaginator {
     this.restoreExternalScrollOwnership();
     this.pagedSwipeCleanup?.();
     this.pagedSwipeCleanup = null;
+    this.plainTapCleanup?.();
+    this.plainTapCleanup = null;
     this.restoreSpreadReadingAreaStyles();
     this.clearNoteHighlights();
     this.clearSearchHighlightForDocument();

@@ -136,6 +136,8 @@ interface ReaderViewProps {
   onImageActivation?(image: ImageActivationPayload): void;
   /** 图片浮层打开时暂停正文按键/滚轮/触摸翻页输入。 */
   inputPaused?: boolean;
+  /** 手机触摸普通轻点：用于显隐阅读工具；由 App 根协调者决定动作。 */
+  onPlainTap?: () => void;
   /** paginator 对跨章精确目标的最终定位状态。 */
   onPreciseNavigationStatus?(status: {
     requestId: number;
@@ -308,6 +310,8 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   // reload the active chapter nor let an old display-ready callback restart
   // a cancelled preload.
   const preloadAllowedRef = useRef(false);
+  /** 后台时暂停非必要的全文/邻章预备；前台恢复仍沿用现有 scheduler。 */
+  const backgroundPausedRef = useRef(typeof document !== "undefined" && document.visibilityState === "hidden");
   /** 显式目录/搜索/书签/历史跳转必须使用自身入口锚点，不得误命中相邻缓存。 */
   const handledAnchorNonceRef = useRef(props.anchorNonce);
   const spineIndexRef = useRef(spineIndex);
@@ -598,7 +602,15 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
           inputPausedRef.current ||
           latestRenderSettingsRef.current.readingMode === "scroll" ||
           slot.state.status !== "ready",
-      }
+      },
+      props.onPlainTap
+        ? () => {
+            if (isActiveSlot(slot) && !inputPausedRef.current && slot.state.status === "ready") {
+              props.onPlainTap?.();
+            }
+          }
+        : undefined,
+      () => !isActiveSlot(slot) || inputPausedRef.current || slot.state.status !== "ready"
     );
     slot.paginator = paginator;
     return paginator;
@@ -649,6 +661,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   };
 
   const scheduleAdjacentPreloads = (): void => {
+    if (backgroundPausedRef.current) return;
     // 滚动模式继续使用 ContinuousReaderView，不套五章固定缓存。
     if (latestRenderSettingsRef.current.readingMode === "scroll") {
       disposeSpareSlots();
@@ -771,6 +784,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
 
   function scheduleAdjacentPreloadsDebounced(delayMs = 500): void {
     clearPreloadTimer();
+    if (backgroundPausedRef.current) return;
     if (!preloadAllowedRef.current || latestRenderSettingsRef.current.readingMode === "scroll") {
       disposeSpareSlots();
       return;
@@ -930,6 +944,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
 
   const scheduleFullBookWarmupDebounced = (delayMs = 500): void => {
     clearWarmupTimer();
+    if (backgroundPausedRef.current) return;
     if (!preloadAllowedRef.current || latestRenderSettingsRef.current.readingMode === "scroll") {
       resetFullBookWarmup();
       return;
@@ -941,6 +956,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   };
 
   const scheduleFullBookWarmupIdle = (): void => {
+    if (backgroundPausedRef.current) return;
     if (!preloadAllowedRef.current || latestRenderSettingsRef.current.readingMode === "scroll") {
       resetFullBookWarmup();
       return;
@@ -950,6 +966,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   };
 
   const runNextFullBookWarmup = (): void => {
+    if (backgroundPausedRef.current) return;
     if (!preloadAllowedRef.current || latestRenderSettingsRef.current.readingMode === "scroll") {
       resetFullBookWarmup();
       return;
@@ -1029,6 +1046,31 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       scheduleAdjacentPreloadsDebounced(500);
     }
   };
+
+  useEffect(() => {
+    const syncBackgroundPreparation = (): void => {
+      if (document.visibilityState === "hidden") {
+        backgroundPausedRef.current = true;
+        clearPreloadTimer();
+        warmupGenerationRef.current += 1;
+        clearWarmupTimer();
+        cancelWarmupIdle();
+        warmupPlanRef.current?.interrupt();
+        warmupTicketRef.current = null;
+        warmupRunningRef.current = false;
+        disposeWarmupSlot();
+        return;
+      }
+      if (!backgroundPausedRef.current) return;
+      backgroundPausedRef.current = false;
+      if (preloadAllowedRef.current) scheduleAdjacentPreloadsDebounced(250);
+    };
+    document.addEventListener("visibilitychange", syncBackgroundPreparation);
+    syncBackgroundPreparation();
+    return () => document.removeEventListener("visibilitychange", syncBackgroundPreparation);
+    // scheduler 是稳定函数声明；preloadAllowedRef 在每次 render 同步。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const promotePreparedChapter = (path: string, targetIndex: number, atEnd: boolean): boolean => {
     const current = activeSlotRef.current;

@@ -623,3 +623,52 @@
   color: var(--accent, #6366f1);
   background: color-mix(in srgb, var(--accent, #6366f1) 12%, transparent);
 }
+
+/* ---- 手机 Aa 底部面板：只调整浮层，不改正文高度；IME 只影响该面板可用区 ---- */
+.app[data-mobile-chrome="true"] .aa-popover-backdrop {
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .aa-popover {
+  top: auto;
+  right: 0;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + var(--ime-bottom, 0px));
+  left: 0;
+  width: auto;
+  max-width: none;
+  max-height: min(85vh, calc(var(--visual-viewport-height, 100vh) * 0.85));
+  border-radius: 16px 16px 0 0;
+  animation: aaMobileSheetIn 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .aa-popover.is-closing {
+  animation: aaMobileSheetOut 150ms ease forwards;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .aa-popover-header {
+  padding-top: 10px;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .aa-popover-body {
+  padding-bottom: 12px;
+}
+
+@media (max-height: 480px) {
+  .app[data-mobile-chrome="true"][data-layout="compact"] .aa-popover {
+    top: env(safe-area-inset-top, 0px);
+    bottom: var(--ime-bottom, 0px);
+    max-height: none;
+    height: auto;
+    border-radius: 0;
+  }
+}
+
+@keyframes aaMobileSheetIn {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes aaMobileSheetOut {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(18px); }
+}

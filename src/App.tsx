@@ -32,6 +32,7 @@ import { useAndroidBack } from "./platform/useAndroidBack";
 import { SidebarDrawer, type SidebarMode, type SidebarTab } from "./ui/SidebarDrawer";
 import { AaPopover } from "./ui/AaPopover";
 import { WhisperFooter, type WhisperFooterChapterTick } from "./ui/WhisperFooter";
+import { useResponsiveEnvironment } from "./ui/responsiveEnvironment";
 import {
   createContentAxis,
   reduceScrubUi,
@@ -364,6 +365,9 @@ function createShelfBookReader(id: string): () => Promise<Uint8Array> {
 
 export default function App() {
   const runtime = getRuntimeCapabilities();
+  const responsive = useResponsiveEnvironment();
+  const mobileChrome = responsive.touchUi;
+  const phoneChrome = mobileChrome && responsive.layout === "compact";
   const [phase, setPhase] = useState<AppPhase>({ phase: "idle" });
   const [book, setBook] = useState<Book | null>(null);
   const [server, setServer] = useState<ResourceServer | null>(null);
@@ -478,6 +482,11 @@ export default function App() {
   const [fontNativeDragActive, setFontNativeDragActive] = useState(false);
   // ---- 书架 ----
   const [view, setView] = useState<"shelf" | "reader">("shelf");
+  const [readerToolsVisible, setReaderToolsVisible] = useState(true);
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
+  const [shelfBackActive, setShelfBackActive] = useState(false);
+  const shelfBackHandlerRef = useRef<(() => boolean) | null>(null);
+  const noteComposerDirtyRef = useRef(false);
   const [shelfEntries, setShelfEntries] = useState<ShelfEntry[]>([]);
   const [shelfError, setShelfError] = useState<string | null>(null);
   const [shelfNotice, setShelfNotice] = useState<{
@@ -3689,29 +3698,134 @@ export default function App() {
     setShelfBusy(false);
   }, [persistShelfProgress, persistChapterCountCache, closeForeground, closeImageOverlay]);
 
+  const toggleAppearancePanel = useCallback((): void => {
+    if (menuOpen) closePanel("menu");
+    else openPanel("menu");
+  }, [closePanel, menuOpen, openPanel]);
+
+  const toggleSearchPanel = useCallback((): void => {
+    if (searchOpen) closePanel("search");
+    else openPanel("search");
+  }, [closePanel, openPanel, searchOpen]);
+
+  const handleReaderPlainTap = useCallback((): void => {
+    if (
+      !mobileChrome ||
+      view !== "reader" ||
+      imageRequestRef.current !== null ||
+      foregroundRef.current.kind !== "none"
+    ) return;
+    setMobileMoreOpen(false);
+    setReaderToolsVisible((visible) => !visible);
+  }, [mobileChrome, view]);
+
+  const revealReaderTools = useCallback((): void => {
+    setReaderToolsVisible(true);
+  }, []);
+
+  const handleOpenMobileMore = useCallback((): void => {
+    setMobileMoreOpen((open) => !open);
+  }, []);
+
+  const registerShelfBackHandler = useCallback((handler: (() => boolean) | null): void => {
+    shelfBackHandlerRef.current = handler;
+  }, []);
+
+  const reportShelfBackActive = useCallback((active: boolean): void => {
+    setShelfBackActive(active);
+  }, []);
+
   const handleAndroidBack = useCallback((): void => {
+    const activeElement = typeof document !== "undefined"
+      ? document.activeElement as HTMLElement | null
+      : null;
+    const editingField = activeElement && (
+      activeElement.tagName === "INPUT" ||
+      activeElement.tagName === "TEXTAREA" ||
+      activeElement.isContentEditable
+    );
+    if (responsive.imeBottom > 80 && editingField) {
+      activeElement.blur();
+      return;
+    }
     if (imageRequestRef.current) {
       closeImageOverlay();
       return;
     }
+    if (mobileMoreOpen) {
+      setMobileMoreOpen(false);
+      return;
+    }
     const current = foregroundRef.current;
+    if (current.kind === "modal" && current.modal === "note-composer") {
+      if (noteComposerDirtyRef.current && !window.confirm("放弃未保存的笔记？")) return;
+      closeForeground();
+      return;
+    }
     if (current.kind !== "none") {
-      if (isSidebarOpen) {
-        handleSidebarClose();
-        return;
-      }
       closeForeground();
       return;
     }
     if (view === "reader") {
+      if (isSidebarOpen) {
+        handleSidebarClose();
+        return;
+      }
       void handleBackToShelf();
+      return;
     }
-  }, [closeForeground, closeImageOverlay, handleBackToShelf, handleSidebarClose, isSidebarOpen, view]);
+    if (view === "shelf") {
+      shelfBackHandlerRef.current?.();
+    }
+  }, [
+    closeForeground,
+    closeImageOverlay,
+    handleBackToShelf,
+    handleSidebarClose,
+    isSidebarOpen,
+    mobileMoreOpen,
+    responsive.imeBottom,
+    view,
+  ]);
 
   useAndroidBack(
-    runtime.usesAndroidBack && (view === "reader" || foreground.kind !== "none" || imageRequest !== null),
+    runtime.usesAndroidBack && (
+      view === "reader" ||
+      foreground.kind !== "none" ||
+      imageRequest !== null ||
+      shelfBackActive ||
+      mobileMoreOpen
+    ),
     handleAndroidBack
   );
+
+  // 进入一本新书时恢复工具栏；手机/平板只切换覆盖层，不参与阅读几何。
+  useEffect(() => {
+    if (view !== "reader") {
+      setMobileMoreOpen(false);
+      return;
+    }
+    setReaderToolsVisible(true);
+    setMobileMoreOpen(false);
+  }, [currentShelfId, view]);
+
+  useEffect(() => {
+    if (!readerToolsVisible) setMobileMoreOpen(false);
+  }, [readerToolsVisible]);
+
+  useEffect(() => {
+    if (foreground.kind !== "none" || imageRequest !== null) setMobileMoreOpen(false);
+  }, [foreground.kind, imageRequest]);
+
+  useEffect(() => {
+    if (!noteComposer) noteComposerDirtyRef.current = false;
+  }, [noteComposer]);
+
+  useEffect(() => {
+    if (!phoneChrome || sidebarMode !== "docked") return;
+    setSidebarMode("overlay");
+    setSidebarPinned(false);
+  }, [phoneChrome, sidebarMode]);
 
   // 视图提交后清空整本书会话状态。ResourceServer 的实际 revoke 与 Book 释放由
   // 会话退出执行，并且发生在 ReaderView 卸载与 paginator dispose 之后。
@@ -4254,8 +4368,17 @@ export default function App() {
       className={`app${dragActive ? " drag-active" : ""}${isFullscreen ? " is-fullscreen" : ""}${isDockedSidebar ? ` has-docked-sidebar docked-side-${sidebarSide}` : ""}`}
       data-platform={runtime.platform}
       data-shell={runtime.shell}
+      data-layout={responsive.layout}
+      data-touch-ui={responsive.touchUi ? "true" : undefined}
+      data-mobile-chrome={mobileChrome ? "true" : undefined}
+      data-mobile-reader={mobileChrome && view === "reader" ? "true" : undefined}
+      data-tools-visible={mobileChrome && view === "reader" ? String(readerToolsVisible) : undefined}
       data-theme={settings.theme === "dark" ? "dark" : settings.theme === "sepia" ? "sepia" : settings.theme === "gray" ? "gray" : undefined}
-      style={{ "--ui-scale": uiScale } as CSSProperties}
+      style={{
+        "--ui-scale": uiScale,
+        "--visual-viewport-height": `${responsive.visualViewportHeight}px`,
+        "--ime-bottom": `${responsive.imeBottom}px`,
+      } as CSSProperties}
     >
       <TitleBar
         view={view}
@@ -4264,21 +4387,13 @@ export default function App() {
         onBackToShelf={view === "reader" ? handleBackToShelf : undefined}
         onToggleSidebar={view === "reader" ? handleToggleSidebar : undefined}
         sidebarOpen={view === "reader" && isSidebarOpen}
-        onToggleAppearance={
-          view === "reader"
-            ? () => {
-                if (menuOpen) closePanel("menu");
-                else openPanel("menu");
-              }
-            : undefined
-        }
+        mobileCompact={mobileChrome && view === "reader"}
+        toolsVisible={readerToolsVisible}
+        onToggleAppearance={view === "reader" ? toggleAppearancePanel : undefined}
         appearanceOpen={view === "reader" && menuOpen}
         onOpenSearch={
           view === "reader" && ready && !book!.fixedLayout
-            ? () => {
-                if (searchOpen) closePanel("search");
-                else openPanel("search");
-              }
+            ? toggleSearchPanel
             : undefined
         }
         searchOpen={view === "reader" && searchOpen}
@@ -4286,7 +4401,7 @@ export default function App() {
         onToggleBookmark={view === "reader" ? handleToggleBookmark : undefined}
         bookmarksOpen={view === "reader" && isSidebarOpen && activeSidebarTab === "bookmarks"}
         onOpenBookmarks={view === "reader" ? handleToggleBookmarks : undefined}
-        zenMode={view === "reader" && (readerZenMode || isFullscreen)}
+        zenMode={view === "reader" && !mobileChrome && (readerZenMode || isFullscreen)}
         onToggleZenMode={view === "reader" ? toggleZenMode : undefined}
         progressPct={view === "reader" && ready ? progressPct : undefined}
         chapterIndex={view === "reader" && ready ? spineIndex : undefined}
@@ -4304,6 +4419,16 @@ export default function App() {
         }
         assistantOpen={view === "reader" && assistantOpen}
       />
+      {mobileChrome && view === "reader" && !readerToolsVisible && (
+        <button
+          type="button"
+          className="reader-tools-reveal"
+          onClick={revealReaderTools}
+          aria-label="显示阅读工具"
+        >
+          显示阅读工具
+        </button>
+      )}
       {view === "reader" && ready && (
         <SidebarDrawer
           open={isSidebarOpen}
@@ -4313,6 +4438,7 @@ export default function App() {
           mode={sidebarMode}
           onModeChange={handleSidebarModeChange}
           onClose={handleSidebarClose}
+          compact={phoneChrome}
           toc={book!.toc}
           activeHref={activeHref}
           onNavigateToc={handleTocNavigate}
@@ -4354,6 +4480,8 @@ export default function App() {
               onImport={() => void handleChooseBooks()}
               onDelete={handleShelfDelete}
               onDeleteMany={handleShelfDeleteMany}
+              registerBackHandler={registerShelfBackHandler}
+              onBackAvailabilityChange={reportShelfBackActive}
               onExportArchive={() => void handleExportArchive()}
               onImportArchive={() => void handleImportArchive()}
               thumbnailProvider={shelfThumbnailProvider}
@@ -4655,6 +4783,7 @@ export default function App() {
                   onFootnoteClose={handleFootnoteClose}
                   onImageActivation={handleImageActivation}
                   inputPaused={imageRequest !== null}
+                  onPlainTap={mobileChrome ? handleReaderPlainTap : undefined}
                   initialAnchor={initialAnchor}
                   initialPage={initialPage}
                   initialAlignment={initialAlignment}
@@ -4722,6 +4851,7 @@ export default function App() {
                       initialContent={noteComposer.mode === "edit" ? noteComposer.note.content : undefined}
                       onSave={(content) => void handleSaveNote(content)}
                       onCancel={closeForeground}
+                      onDirtyChange={(dirty) => { noteComposerDirtyRef.current = dirty; }}
                     />
                   </>
                 )}
@@ -4783,12 +4913,81 @@ export default function App() {
             handleCommitSeek(targetRatio);
           }}
           chapterTicks={chapterTicks}
-          zenMode={view === "reader" && (readerZenMode || isFullscreen)}
+          zenMode={view === "reader" && !mobileChrome && (readerZenMode || isFullscreen)}
           scrubState={scrubUiState}
           contentAxis={contentAxis}
           onCommitSeek={handleCommitSeek}
           onPreviewChange={handleScrubPreviewChange}
+          mobile={mobileChrome}
+          toolsVisible={readerToolsVisible}
+          onToggleSidebar={() => handleToggleSidebar("left")}
+          sidebarOpen={isSidebarOpen}
+          onOpenSearch={!book!.fixedLayout ? toggleSearchPanel : undefined}
+          searchOpen={searchOpen}
+          onToggleAppearance={toggleAppearancePanel}
+          appearanceOpen={menuOpen}
+          onOpenMore={handleOpenMobileMore}
+          moreOpen={mobileMoreOpen}
         />
+      )}
+      {mobileChrome && view === "reader" && ready && mobileMoreOpen && (
+        <>
+          <div
+            className="mobile-more-backdrop"
+            onClick={() => setMobileMoreOpen(false)}
+            aria-hidden="true"
+          />
+          <div className="mobile-more-sheet" role="dialog" aria-modal="true" aria-label="更多阅读操作">
+            <div className="mobile-more-title">更多</div>
+            <button
+              type="button"
+              onClick={() => {
+                handleOpenBookmarks();
+                setMobileMoreOpen(false);
+              }}
+            >
+              书签列表
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                openPanel("notes");
+                setMobileMoreOpen(false);
+              }}
+            >
+              笔记
+            </button>
+            {IS_AI_EDITION && (
+              <button
+                type="button"
+                onClick={() => {
+                  openPanel("assistant");
+                  setMobileMoreOpen(false);
+                }}
+              >
+                AI 助手
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                openPanel("log");
+                setMobileMoreOpen(false);
+              }}
+            >
+              诊断日志
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setMobileMoreOpen(false);
+                void handleChooseBooks();
+              }}
+            >
+              打开本地文件
+            </button>
+          </div>
+        </>
       )}
       {logOpen && (
         <>

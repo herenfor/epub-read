@@ -19,6 +19,8 @@ export interface SidebarDrawerProps {
   mode: SidebarMode;
   onModeChange: (mode: SidebarMode) => void;
   onClose: () => void;
+  /** 手机窄窗强制浮层，隐藏 pin/dock 入口，避免抽走正文真实宽度。 */
+  compact?: boolean;
 
   // 目录数据
   toc: TocNode[];
@@ -115,6 +117,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
   mode,
   onModeChange,
   onClose,
+  compact = false,
   toc,
   activeHref,
   onNavigateToc,
@@ -167,7 +170,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
       )}
 
       <aside
-        className={`sidebar-drawer ${mode === "docked" ? "is-docked" : "is-overlay"} side-${side}${open ? " is-open" : " is-closed"}${isClosing ? " is-closing" : ""}`}
+        className={`sidebar-drawer ${mode === "docked" ? "is-docked" : "is-overlay"} side-${side}${compact ? " is-compact" : ""}${open ? " is-open" : " is-closed"}${isClosing ? " is-closing" : ""}`}
         role="region"
         aria-label="阅读导航与笔记抽屉"
       >
@@ -204,6 +207,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
           </div>
 
           <div className="sidebar-header-actions">
+            {!compact && (
             <button
               type="button"
               className={`sidebar-icon-btn sidebar-pin-btn${mode === "docked" ? " active" : ""}`}
@@ -213,6 +217,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
             >
               <PinIcon size={14} pinned={mode === "docked"} />
             </button>
+            )}
             <button
               type="button"
               className="sidebar-icon-btn sidebar-close-btn"

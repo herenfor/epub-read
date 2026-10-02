@@ -122,6 +122,10 @@ export interface ShelfViewProps {
   onOpenFolder?(folderId: string): void;
   /** 预留接口：批量移动书籍至目标文件夹 */
   onMoveToFolder?(entryIds: string[], targetFolderId: string | null): void;
+  /** Android Back 根协调：书架注册当前前台层退出器；返回 false 表示无层可退。 */
+  registerBackHandler?(handler: (() => boolean) | null): void;
+  /** 书架是否存在可被 Back 消费的前景层，供 App 决定是否接管系统 Back。 */
+  onBackAvailabilityChange?(active: boolean): void;
 }
 
 /* =========================================================================
@@ -3292,6 +3296,91 @@ export function ShelfView(props: ShelfViewProps) {
       setFolderModalClosing(false);
     }, 180);
   }, []);
+
+  const handleRootBack = useCallback((): boolean => {
+    if (deleteTargets) {
+      handleCancelDelete();
+      return true;
+    }
+    if (createFolderOpen) {
+      setCreateFolderOpen(false);
+      setPendingMergeBooks(null);
+      return true;
+    }
+    if (pendingMergeBooks) {
+      setPendingMergeBooks(null);
+      return true;
+    }
+    if (moveDialogTargets) {
+      setMoveDialogTargets(null);
+      return true;
+    }
+    if (renameFolderTarget) {
+      setRenameFolderTarget(null);
+      return true;
+    }
+    if (dissolveFolderTarget) {
+      setDissolveFolderTarget(null);
+      return true;
+    }
+    if (activeFolderModal) {
+      handleCloseFolderModal();
+      return true;
+    }
+    if (drawerOpen) {
+      closeDrawer();
+      return true;
+    }
+    if (folderMenuOpen) {
+      setFolderMenuOpen(false);
+      return true;
+    }
+    if (selectionMode) {
+      exitSelection();
+      return true;
+    }
+    return false;
+  }, [
+    activeFolderModal,
+    closeDrawer,
+    createFolderOpen,
+    deleteTargets,
+    dissolveFolderTarget,
+    drawerOpen,
+    exitSelection,
+    folderMenuOpen,
+    handleCancelDelete,
+    handleCloseFolderModal,
+    moveDialogTargets,
+    pendingMergeBooks,
+    renameFolderTarget,
+    selectionMode,
+  ]);
+
+  const shelfBackHandlerRef = useRef(handleRootBack);
+  shelfBackHandlerRef.current = handleRootBack;
+  const shelfBackActive = Boolean(
+    deleteTargets ||
+    pendingMergeBooks ||
+    moveDialogTargets ||
+    createFolderOpen ||
+    renameFolderTarget ||
+    dissolveFolderTarget ||
+    activeFolderModal ||
+    drawerOpen ||
+    folderMenuOpen ||
+    selectionMode
+  );
+
+  useEffect(() => {
+    props.registerBackHandler?.(() => shelfBackHandlerRef.current());
+    return () => props.registerBackHandler?.(null);
+  }, [props.registerBackHandler]);
+
+  useEffect(() => {
+    props.onBackAvailabilityChange?.(shelfBackActive);
+    return () => props.onBackAvailabilityChange?.(false);
+  }, [props.onBackAvailabilityChange, shelfBackActive]);
 
   const handleDragStart = useCallback(
     (entry: ShelfEntry, point: { x: number; y: number }): void => {

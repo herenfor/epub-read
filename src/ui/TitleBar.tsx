@@ -32,6 +32,10 @@ export interface TitleBarProps {
   /** 沉浸模式 / 自动隐藏开关 */
   zenMode?: boolean;
   onToggleZenMode?: () => void;
+  /** 手机/平板触摸顶部条：只保留返回、标题、书签，其余放到共享 toolsVisible 底部栏。 */
+  mobileCompact?: boolean;
+  /** 手机/平板上下工具栏共享的显隐状态。 */
+  toolsVisible?: boolean;
   /** 阅读进度百分比 (0~100) */
   progressPct?: number;
   /** 当前章节序号与总数 */
@@ -66,6 +70,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   onOpenBookmarks,
   zenMode = false,
   onToggleZenMode,
+  mobileCompact = false,
+  toolsVisible = true,
   progressPct,
   chapterIndex,
   totalChapters,
@@ -229,6 +235,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
 
   // 沉浸隐藏判定：处于阅读模式且开启 zenMode，且无子菜单打开，且未主动唤出时隐藏
   const isZenHidden = desktopTools && view === "reader" && zenMode && !isAnyMenuOpen && !isZenRevealed;
+  const isMobileToolsHidden = mobileCompact && !toolsVisible;
 
   return (
     <>
@@ -244,7 +251,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
         />
       )}
       <header
-        className={`titlebar titlebar-${view}${isZenHidden ? " zen-hidden" : ""}${desktopTools && zenMode ? " is-floating" : ""}`}
+        className={`titlebar titlebar-${view}${isZenHidden ? " zen-hidden" : ""}${isMobileToolsHidden ? " tools-hidden" : ""}${mobileCompact ? " is-mobile-compact" : ""}${desktopTools && zenMode ? " is-floating" : ""}`}
         {...dragProps}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
@@ -266,8 +273,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({
             </button>
           )}
 
-          {/* 目录与侧边栏核心入口 */}
-          {view === "reader" && onToggleSidebar && (
+          {/* 目录与侧边栏核心入口：手机放到共享底部栏。 */}
+          {view === "reader" && !mobileCompact && onToggleSidebar && (
             <button
               type="button"
               className={`titlebar-btn-pill titlebar-toc-btn${sidebarOpen ? " active" : ""}`}
@@ -313,7 +320,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
 
         {/* 中央：拖拽区域 + 沉浸进度指示胶囊 */}
         <div className="titlebar-drag-area titlebar-middle" {...dragProps}>
-          {view === "reader" && (progressPct !== undefined || (chapterIndex !== undefined && totalChapters !== undefined && totalChapters > 0)) && (
+          {view === "reader" && !mobileCompact && (progressPct !== undefined || (chapterIndex !== undefined && totalChapters !== undefined && totalChapters > 0)) && (
             <div
               className={`titlebar-progress-pill${onToggleSidebar ? " is-clickable" : ""}`}
               {...dragProps}
@@ -348,7 +355,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
           {view === "reader" && (
             <div className="titlebar-actions">
               {/* 侧边栏开关（综合目录/书签/笔记抽屉） */}
-              {onToggleSidebar && (
+              {!mobileCompact && onToggleSidebar && (
                 <button
                   type="button"
                   className={`titlebar-action-btn titlebar-sidebar-btn${sidebarOpen ? " active" : ""}`}
@@ -364,8 +371,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({
                 </button>
               )}
 
-              {/* Aa 外观设置 */}
-              {onToggleAppearance && (
+              {/* Aa 外观设置：手机放在共享底部栏。 */}
+              {!mobileCompact && onToggleAppearance && (
                 <button
                   type="button"
                   className={`titlebar-action-btn titlebar-appearance-btn${appearanceOpen ? " active" : ""}`}
@@ -378,8 +385,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({
                 </button>
               )}
 
-              {/* 正文搜索 */}
-              {onOpenSearch && (
+              {/* 正文搜索：手机放在共享底部栏。 */}
+              {!mobileCompact && onOpenSearch && (
                 <button
                   type="button"
                   className={`titlebar-action-btn titlebar-search-btn${searchOpen ? " active" : ""}`}
@@ -410,8 +417,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({
                 </button>
               )}
 
-              {/* 书签列表下拉浮层 */}
-              {onOpenBookmarks && (
+              {/* 书签列表下拉浮层：手机从更多层进入。 */}
+              {!mobileCompact && onOpenBookmarks && (
                 <button
                   type="button"
                   className={`titlebar-action-btn titlebar-bookmark-list-btn${bookmarksOpen ? " active" : ""}`}
@@ -462,8 +469,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({
                 </button>
               )}
 
-              {/* AI 助手 / 设置 */}
-              {onToggleAssistant && (
+              {/* AI 助手 / 设置：手机从更多层进入。 */}
+              {!mobileCompact && onToggleAssistant && (
                 <button
                   type="button"
                   className={`titlebar-action-btn titlebar-assistant-btn${assistantOpen ? " active" : ""}`}
@@ -478,8 +485,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({
                 </button>
               )}
 
-              {/* 日志与问题诊断 */}
-              {onToggleLog && (
+              {/* 日志与问题诊断：手机从更多层进入。 */}
+              {!mobileCompact && onToggleLog && (
                 <button
                   type="button"
                   className={`titlebar-action-btn titlebar-log-btn${logOpen ? " active" : ""}`}

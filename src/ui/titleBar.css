@@ -438,3 +438,83 @@
   height: calc(36px + env(safe-area-inset-top));
   padding-top: env(safe-area-inset-top);
 }
+
+/* ---- 手机/平板触摸顶栏：覆盖层显隐，不占正文布局，不触发 EPUB 重排 ---- */
+.titlebar.is-mobile-compact {
+  position: fixed;
+  top: env(safe-area-inset-top, 0px);
+  left: 0;
+  right: 0;
+  height: var(--mobile-reader-topbar, 56px);
+  padding: 0 6px 0 8px;
+  z-index: 100;
+  background: color-mix(in srgb, var(--bg) 94%, transparent);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 45%, transparent);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+}
+
+.titlebar.is-mobile-compact .titlebar-left {
+  max-width: calc(100% - 64px);
+  gap: 2px;
+}
+
+.titlebar.is-mobile-compact .titlebar-back-btn {
+  height: 44px;
+  padding: 0 10px 0 8px;
+  border-radius: 10px;
+}
+
+.titlebar.is-mobile-compact .titlebar-book-meta {
+  gap: 5px;
+}
+
+.titlebar.is-mobile-compact .titlebar-book-title {
+  font-size: 14px;
+  max-width: min(62vw, 360px);
+}
+
+.titlebar.is-mobile-compact .titlebar-chapter-title {
+  font-size: 12px;
+  max-width: min(40vw, 220px);
+}
+
+.titlebar.is-mobile-compact .titlebar-actions {
+  margin-right: 0;
+  gap: 0;
+}
+
+.titlebar.is-mobile-compact .titlebar-action-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+}
+
+.titlebar.is-mobile-compact.tools-hidden {
+  transform: translateY(calc(-100% - env(safe-area-inset-top, 0px)));
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+/* 手机顶栏的显隐切换入口在 TitleBar 内保持大触控面。 */
+.titlebar.is-mobile-compact .titlebar-tools-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 44px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 16px;
+  cursor: pointer;
+}
+
+/* mobile shell 的原有规则只服务书架/桌面工具；阅读器手机覆盖顶栏必须显式覆盖高度。 */
+.app[data-shell="mobile"] .titlebar.is-mobile-compact {
+  height: var(--mobile-reader-topbar, 56px);
+  padding: 0 6px 0 8px;
+}

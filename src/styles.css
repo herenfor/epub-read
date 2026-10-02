@@ -5804,3 +5804,206 @@ select option {
     transform: scale(0.72) translateY(14px);
   }
 }
+
+/* ---- 第三步：手机/平板外壳安全区只扣一次；覆盖工具栏不进入 EPUB 几何 ---- */
+.app[data-mobile-reader="true"] {
+  --mobile-reader-topbar: 56px;
+  --mobile-reader-bottombar: 124px;
+  box-sizing: border-box;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* 工具层高度由外壳一次预留；覆盖条显隐不改变阅读画布，也不永久遮住末行。 */
+.app[data-mobile-reader="true"] .main {
+  padding-top: var(--mobile-reader-topbar);
+  padding-bottom: var(--mobile-reader-bottombar);
+}
+
+/* 手机/平板新书架按实际可用宽度重排，不强制固定列数。 */
+.app[data-mobile-chrome="true"] .shelf-view {
+  padding: 0 12px 24px;
+}
+
+.app[data-mobile-chrome="true"] .shelf-head {
+  margin: 0 -12px 14px;
+  padding: 10px 12px;
+}
+
+.app[data-mobile-chrome="true"] .shelf-grid,
+.app[data-mobile-chrome="true"] .shelf-view.density-standard .shelf-grid,
+.app[data-mobile-chrome="true"] .shelf-view.density-comfortable .shelf-grid {
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 16px 12px;
+}
+
+.app[data-mobile-chrome="true"] .shelf-view.density-compact .shelf-grid {
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 12px 9px;
+}
+
+@media (max-width: 380px) {
+  .app[data-mobile-chrome="true"] .shelf-grid,
+  .app[data-mobile-chrome="true"] .shelf-view.density-standard .shelf-grid,
+  .app[data-mobile-chrome="true"] .shelf-view.density-comfortable .shelf-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* 触摸入口始终可见，长按/菜单都可进入；桌面 hover/右键规则不删。 */
+.app[data-touch-ui="true"] .shelf-card-more-btn {
+  opacity: 1;
+  width: 44px;
+  height: 44px;
+}
+
+.app[data-touch-ui="true"] .shelf-card-star-btn,
+.app[data-touch-ui="true"] .shelf-card-checkbox {
+  width: 40px;
+  height: 40px;
+}
+
+/* 窄屏列表只保留开书、进度和操作，次要列不挤占主入口。 */
+.app[data-mobile-chrome="true"] .shelf-table th:nth-child(4),
+.app[data-mobile-chrome="true"] .shelf-table td:nth-child(4),
+.app[data-mobile-chrome="true"] .shelf-table th:nth-child(6),
+.app[data-mobile-chrome="true"] .shelf-table td:nth-child(6),
+.app[data-mobile-chrome="true"] .shelf-table th:nth-child(7),
+.app[data-mobile-chrome="true"] .shelf-table td:nth-child(7) {
+  display: none;
+}
+
+.app[data-mobile-chrome="true"] .shelf-table-view {
+  margin: 0 -12px;
+  overflow-x: auto;
+}
+
+.app[data-mobile-chrome="true"] .shelf-table {
+  min-width: 0;
+}
+
+/* 触摸书架顶部按钮至少 44px，紧凑密度也不缩回小命中区。 */
+.app[data-touch-ui="true"] .shelf-btn-primary,
+.app[data-touch-ui="true"] .shelf-manage-toggle-btn,
+.app[data-touch-ui="true"] .shelf-view-toggle-btn,
+.app[data-touch-ui="true"] .shelf-icon-btn-zen,
+.app[data-touch-ui="true"] .shelf-selection-cancel,
+.app[data-touch-ui="true"] .shelf-selection-delete,
+.app[data-touch-ui="true"] .shelf-selection-toggle-all {
+  min-height: 44px;
+}
+
+/* 手机“更多”底部弹层：复用同一组已有业务动作，不新增平行状态。 */
+.mobile-more-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.mobile-more-sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + var(--ime-bottom, 0px));
+  z-index: 301;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 12px 12px;
+  background: color-mix(in srgb, var(--panel-bg) 96%, transparent);
+  color: var(--fg);
+  border-top: 1px solid color-mix(in srgb, var(--panel-border) 60%, transparent);
+  border-radius: 16px 16px 0 0;
+  box-shadow: 0 -16px 40px rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  animation: aaMobileSheetIn 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.mobile-more-title {
+  padding: 2px 6px 8px;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--muted);
+}
+
+.mobile-more-sheet button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mobile-more-sheet button:hover,
+.mobile-more-sheet button:focus-visible {
+  background: var(--btn-tint-hover);
+}
+
+/* 工具栏隐藏时保留一个有语义、可键盘/TalkBack 触达的唤出入口；不覆盖正文交互层。 */
+.reader-tools-reveal {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 6px);
+  right: 8px;
+  z-index: 120;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 55%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  color: var(--fg);
+  font-size: 11px;
+  opacity: 0.28;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  cursor: pointer;
+}
+
+.reader-tools-reveal:hover,
+.reader-tools-reveal:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* 输入法只顶起必要输入面板；正文与分词几何不随 IME 每帧重排。 */
+.app[data-mobile-chrome="true"] .note-composer {
+  position: fixed;
+  top: auto;
+  right: 0;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + var(--ime-bottom, 0px));
+  left: 0;
+  width: auto;
+  max-width: none;
+  max-height: min(82vh, calc(var(--visual-viewport-height, 100vh) * 0.84));
+  border-radius: 16px 16px 0 0;
+  transform: none;
+}
+
+.app[data-mobile-chrome="true"] .note-composer-input {
+  min-height: 120px;
+  max-height: min(42vh, 280px);
+}
+
+.app[data-mobile-chrome="true"] .search-panel {
+  top: calc(env(safe-area-inset-top, 0px) + (var(--visual-viewport-height, 100vh) / 2));
+  height: min(560px, calc(var(--visual-viewport-height, 100vh) - 24px));
+  max-height: calc(var(--visual-viewport-height, 100vh) - 24px);
+}
+
+/* 触摸面板内关键动作至少 44px 命中区。 */
+.app[data-touch-ui="true"] .search-panel button,
+.app[data-touch-ui="true"] .sidebar-drawer button,
+.app[data-touch-ui="true"] .aa-popover button,
+.app[data-touch-ui="true"] .note-composer button {
+  min-height: 44px;
+}
