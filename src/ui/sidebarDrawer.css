@@ -2,7 +2,7 @@
 .sidebar-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 45;
+  z-index: 190;
   background: rgba(0, 0, 0, 0.38);
   backdrop-filter: blur(2px);
   -webkit-backdrop-filter: blur(2px);
@@ -38,6 +38,46 @@
   }
 }
 
+/* 150ms 优雅退场动画 */
+@keyframes panel-float-out-left {
+  from {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-16px) scale(0.97);
+  }
+}
+
+@keyframes panel-float-out-right {
+  from {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(16px) scale(0.97);
+  }
+}
+
+@keyframes reader-panel-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+.sidebar-backdrop.is-closing {
+  animation: reader-panel-fade-out 0.15s ease forwards;
+}
+
+.sidebar-drawer.side-left.is-closing {
+  animation: panel-float-out-left 0.15s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.sidebar-drawer.side-right.is-closing {
+  animation: panel-float-out-right 0.15s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
 .sidebar-drawer {
   width: min(360px, calc(100vw - 28px));
   max-width: 100%;
@@ -58,9 +98,9 @@
 /* 浮动微浮岛模式（Overlay - 用户原版设计弹窗模式） */
 .sidebar-drawer.is-overlay {
   position: fixed;
-  top: 14px;
-  bottom: 14px;
-  z-index: 50;
+  top: 48px;
+  bottom: 18px;
+  z-index: 200;
   border: 1px solid var(--panel-border);
   border-radius: 18px;
   box-shadow: 0 20px 48px rgba(0, 0, 0, 0.3), 0 4px 14px rgba(0, 0, 0, 0.12);
@@ -86,7 +126,7 @@
 /* 固定驻留模式（Docked Pin） */
 .sidebar-drawer.is-docked {
   position: fixed;
-  top: 36px;
+  top: 38px;
   bottom: 0;
   z-index: 40;
   width: 320px;
@@ -249,6 +289,48 @@
   opacity: 0.7;
 }
 
+/* 目录快速过滤 */
+.sidebar-toc-filter-wrap {
+  position: relative;
+  padding: 8px 12px 6px;
+  border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 35%, transparent);
+  flex-shrink: 0;
+}
+
+.sidebar-toc-filter-input {
+  width: 100%;
+  height: 28px;
+  box-sizing: border-box;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 60%, transparent);
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+  color: var(--fg);
+  font-size: 12px;
+  padding: 0 24px 0 8px;
+  outline: none;
+  transition: border-color 140ms ease, background-color 140ms ease;
+}
+
+.sidebar-toc-filter-input:focus {
+  border-color: var(--accent, #6366f1);
+  background: var(--panel-bg);
+}
+
+.sidebar-toc-filter-clear {
+  position: absolute;
+  right: 18px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+}
+
 /* 目录项样式 */
 .sidebar-toc-branch {
   display: flex;
@@ -310,17 +392,25 @@
   padding: 0 8px;
 }
 
+.sidebar-bookmark-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
 .sidebar-bookmark-card {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  padding: 8px 10px;
+  padding: 8px 30px 8px 10px;
   border-radius: 8px;
   border: 1px solid transparent;
   background: color-mix(in srgb, var(--fg) 3%, transparent);
   color: var(--fg);
   text-align: left;
   cursor: pointer;
+  width: 100%;
+  box-sizing: border-box;
   transition: background-color 140ms ease, border-color 140ms ease, transform 120ms ease;
 }
 
@@ -328,6 +418,35 @@
   background: color-mix(in srgb, var(--btn-tint-hover) 70%, transparent);
   border-color: color-mix(in srgb, var(--panel-border) 50%, transparent);
   transform: translateX(2px);
+}
+
+.sidebar-bookmark-del-btn {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 120ms ease, background-color 120ms ease, color 120ms ease;
+}
+
+.sidebar-bookmark-row:hover .sidebar-bookmark-del-btn {
+  opacity: 0.8;
+}
+
+.sidebar-bookmark-del-btn:hover {
+  opacity: 1 !important;
+  background: color-mix(in srgb, #f43f5e 15%, transparent);
+  color: #f43f5e;
 }
 
 .sidebar-bookmark-icon {

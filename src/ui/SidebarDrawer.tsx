@@ -28,6 +28,7 @@ export interface SidebarDrawerProps {
   // 书签数据
   bookmarks: Array<Bookmark & { chapterLabel?: string }>;
   onSelectBookmark: (id: string) => void;
+  onDeleteBookmark?: (id: string) => void;
 
   // 笔记数据
   notes: readonly NoteViewModel[];
@@ -39,6 +40,23 @@ export interface SidebarDrawerProps {
 function formatDate(timestamp: number): string {
   if (!Number.isFinite(timestamp)) return "未知时间";
   return new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "short" }).format(new Date(timestamp));
+}
+
+function filterTocNodes(nodes: TocNode[], query: string): TocNode[] {
+  if (!query) return nodes;
+  const q = query.toLowerCase();
+  const res: TocNode[] = [];
+  for (const node of nodes) {
+    const selfMatch = (node.label || "").toLowerCase().includes(q);
+    const filteredChildren = node.children.length > 0 ? filterTocNodes(node.children, query) : [];
+    if (selfMatch || filteredChildren.length > 0) {
+      res.push({
+        ...node,
+        children: filteredChildren,
+      });
+    }
+  }
+  return res;
 }
 
 function TocBranch({
@@ -102,6 +120,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
   onNavigateToc,
   bookmarks,
   onSelectBookmark,
+  onDeleteBookmark,
   notes,
   onNavigateNote,
   onEditNote,
@@ -110,30 +129,45 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
   const activeTocNode = findActiveTocNode(toc, activeHref);
   const activeItemRef = useRef<HTMLDivElement>(null);
   const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
+  const [tocFilter, setTocFilter] = useState("");
+  const [isClosing, setIsClosing] = useState(false);
+
+  const requestClose = React.useCallback(() => {
+    setIsClosing(true);
+    setTimeout(() => {
+      setIsClosing(false);
+      onClose();
+    }, 150);
+  }, [onClose]);
 
   // 滚动活动目录到视图中央
   useEffect(() => {
-    if (open && activeTab === "toc" && activeItemRef.current) {
+    if (open && activeTab === "toc" && activeItemRef.current && !tocFilter) {
       activeItemRef.current.scrollIntoView({ block: "center", behavior: "auto" });
     }
-  }, [open, activeTab, activeTocNode]);
+  }, [open, activeTab, activeTocNode, tocFilter]);
 
-  if (!open && mode === "overlay") {
+  if (!open && mode === "overlay" && !isClosing) {
     return null;
   }
 
   const tocCount = countTocNodes(toc);
+  const displayedToc = tocFilter.trim() ? filterTocNodes(toc, tocFilter.trim()) : toc;
   const sortedNotes = limitNotes(notes, 200).items;
 
   return (
     <>
       {/* 浮动微浮岛遮罩模式下渲染背景半透明蒙层 */}
       {open && mode === "overlay" && (
-        <div className="sidebar-backdrop" onClick={onClose} aria-hidden="true" />
+        <div
+          className={`sidebar-backdrop${isClosing ? " is-closing" : ""}`}
+          onClick={requestClose}
+          aria-hidden="true"
+        />
       )}
 
       <aside
-        className={`sidebar-drawer ${mode === "docked" ? "is-docked" : "is-overlay"} side-${side}${open ? " is-open" : " is-closed"}`}
+        className={`sidebar-drawer ${mode === "docked" ? "is-docked" : "is-overlay"} side-${side}${open ? " is-open" : " is-closed"}${isClosing ? " is-closing" : ""}`}
         role="region"
         aria-label="阅读导航与笔记抽屉"
       >
@@ -182,7 +216,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
             <button
               type="button"
               className="sidebar-icon-btn sidebar-close-btn"
-              onClick={onClose}
+              onClick={requestClose}
               title="关闭侧边栏 (Esc)"
               aria-label="关闭侧边栏"
             >
@@ -196,17 +230,42 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
           {/* TAB 1: 目录 */}
           {activeTab === "toc" && (
             <div className="sidebar-pane sidebar-toc-pane">
+              {tocCount > 8 && (
+                <div className="sidebar-toc-filter-wrap">
+                  <input
+                    type="search"
+                    className="sidebar-toc-filter-input"
+                    placeholder="过滤章节..."
+                    value={tocFilter}
+                    onChange={(e) => setTocFilter(e.target.value)}
+                    aria-label="过滤目录章节"
+                  />
+                  {tocFilter && (
+                    <button
+                      type="button"
+                      className="sidebar-toc-filter-clear"
+                      onClick={() => setTocFilter("")}
+                      title="清除过滤"
+                      aria-label="清除过滤"
+                    >
+                      <CloseIcon size={11} />
+                    </button>
+                  )}
+                </div>
+              )}
               {tocCount === 0 ? (
                 <div className="sidebar-empty">本书暂无目录</div>
+              ) : displayedToc.length === 0 ? (
+                <div className="sidebar-empty">无匹配章节</div>
               ) : (
                 <TocBranch
-                  nodes={toc}
+                  nodes={displayedToc}
                   level={0}
                   activeNode={activeTocNode}
                   activeItemRef={activeItemRef}
                   onNavigate={(href) => {
                     onNavigateToc(href);
-                    if (mode === "overlay") onClose();
+                    if (mode === "overlay") requestClose();
                   }}
                 />
               )}
@@ -224,27 +283,42 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
               ) : (
                 <div className="sidebar-bookmark-list">
                   {bookmarks.map((b) => (
-                    <button
-                      key={b.id}
-                      type="button"
-                      className="sidebar-bookmark-card"
-                      onClick={() => {
-                        onSelectBookmark(b.id);
-                        if (mode === "overlay") onClose();
-                      }}
-                      title={b.text}
-                    >
-                      <span className="sidebar-bookmark-icon">
-                        <BookmarkIcon size={14} active={true} />
-                      </span>
-                      <span className="sidebar-bookmark-meta">
-                        <span className="sidebar-bookmark-text">{b.text || "（无书签文字）"}</span>
-                        <span className="sidebar-bookmark-chapter">
-                          {b.chapterLabel ? `${b.chapterLabel} · ` : ""}
-                          添加于 {formatDate(b.createdAtMs)}
+                    <div key={b.id} className="sidebar-bookmark-row">
+                      <button
+                        type="button"
+                        className="sidebar-bookmark-card"
+                        onClick={() => {
+                          onSelectBookmark(b.id);
+                          if (mode === "overlay") requestClose();
+                        }}
+                        title={b.text}
+                      >
+                        <span className="sidebar-bookmark-icon">
+                          <BookmarkIcon size={14} active={true} />
                         </span>
-                      </span>
-                    </button>
+                        <span className="sidebar-bookmark-meta">
+                          <span className="sidebar-bookmark-text">{b.text || "（无书签文字）"}</span>
+                          <span className="sidebar-bookmark-chapter">
+                            {b.chapterLabel ? `${b.chapterLabel} · ` : ""}
+                            添加于 {formatDate(b.createdAtMs)}
+                          </span>
+                        </span>
+                      </button>
+                      {onDeleteBookmark && (
+                        <button
+                          type="button"
+                          className="sidebar-bookmark-del-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDeleteBookmark(b.id);
+                          }}
+                          title="删除此书签"
+                          aria-label="删除书签"
+                        >
+                          <CloseIcon size={12} />
+                        </button>
+                      )}
+                    </div>
                   ))}
                 </div>
               )}
@@ -268,7 +342,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
                         className="sidebar-note-main"
                         onClick={() => {
                           onNavigateNote(note);
-                          if (mode === "overlay") onClose();
+                          if (mode === "overlay") requestClose();
                         }}
                       >
                         <span className="sidebar-note-content">{note.content}</span>

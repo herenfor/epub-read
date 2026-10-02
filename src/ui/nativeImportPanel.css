@@ -1,0 +1,125 @@
+.native-import-panel,
+.native-import-pill {
+  position: fixed;
+  left: 50%;
+  bottom: calc(18px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 1200;
+  box-sizing: border-box;
+  color: var(--fg);
+  background: color-mix(in srgb, var(--panel, var(--bg)) 94%, transparent);
+  border: 1px solid color-mix(in srgb, var(--panel-border) 70%, transparent);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(8px);
+}
+
+.native-import-panel {
+  width: min(92vw, 360px);
+  border-radius: 14px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.native-import-head,
+.native-import-title,
+.native-import-body,
+.native-import-actions {
+  display: flex;
+  align-items: center;
+}
+
+.native-import-head {
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 24px;
+}
+
+.native-import-title {
+  min-width: 0;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.native-import-file {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.native-import-collapse {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.native-import-body {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.native-import-cancel-state {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.native-import-actions {
+  justify-content: flex-end;
+}
+
+.native-import-cancel {
+  min-height: 40px;
+  padding: 0 16px;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 80%, transparent);
+  border-radius: 10px;
+  background: var(--btn-tint);
+  color: var(--fg);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.native-import-cancel:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.native-import-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  max-width: min(92vw, 320px);
+  padding: 0 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.native-import-pill-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent, #2f80ed);
+  flex: 0 0 auto;
+  animation: native-import-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes native-import-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}

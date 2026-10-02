@@ -127,6 +127,9 @@ body,
 #root {
   height: 100%;
   margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--fg);
 }
 
 body {
@@ -141,18 +144,79 @@ body {
 
 button,
 input,
-select,
 textarea {
   font-family: inherit;
+}
+
+/* ---- 全局统一现代化极简细滚动条（适配 Windows WebView2） ---- */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--fg, #000) 18%, transparent) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--fg, #000) 18%, transparent);
+  border-radius: 999px;
+  transition: background-color 0.15s ease;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--fg, #000) 36%, transparent);
+}
+
+select {
+  font-family: inherit;
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: var(--shelf-input-bg, rgba(128, 128, 128, 0.08));
+  color: var(--fg);
+  border: 1px solid var(--panel-border, rgba(128, 128, 128, 0.2));
+  border-radius: 8px;
+  padding: 6px 28px 6px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+select:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+select:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+select option {
+  background-color: var(--panel-bg, #ffffff);
+  color: var(--fg);
 }
 
 .app {
   display: flex;
   flex-direction: column;
   height: 100%;
-  /* 主题背景在 .app 作用域解析（body 在作用域外，深色模式会残留白色） */
   background: var(--bg);
   color: var(--fg);
+}
+
+.app.is-fullscreen {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
 }
 
 /* ---- 拖拽悬停遮罩 ---- */
@@ -387,7 +451,7 @@ textarea {
 .ai-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 45;
+  z-index: 190;
   background: rgba(0, 0, 0, 0.38);
   backdrop-filter: blur(2px);
   -webkit-backdrop-filter: blur(2px);
@@ -3781,6 +3845,75 @@ textarea {
   border: 1px solid color-mix(in srgb, var(--error) 55%, transparent);
 }
 
+/* ---- 书签状态轻量反馈弹窗（底部居中微光毛玻璃胶囊浮层） ---- */
+.reader-bookmark-toast {
+  position: fixed;
+  bottom: 56px;
+  left: 50%;
+  transform: translate(-50%, 0);
+  z-index: 320;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 18px;
+  border-radius: 999px;
+  border: 1px solid var(--panel-border);
+  background: color-mix(in srgb, var(--panel-bg, #ffffff) 92%, transparent);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  color: var(--fg);
+  font-size: 13.5px;
+  font-weight: 550;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.22), 0 3px 10px rgba(0, 0, 0, 0.08);
+  pointer-events: none;
+  user-select: none;
+  animation: bookmark-toast-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: transform, opacity;
+}
+
+.reader-bookmark-toast.is-closing {
+  animation: bookmark-toast-out 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.reader-bookmark-toast .bookmark-toast-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.reader-bookmark-toast.add .bookmark-toast-icon {
+  color: var(--accent);
+}
+
+.reader-bookmark-toast.remove .bookmark-toast-icon {
+  color: var(--muted);
+}
+
+@keyframes bookmark-toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 14px) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+}
+
+@keyframes bookmark-toast-out {
+  from {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, 8px) scale(0.96);
+  }
+}
+
 .shelf-confirm-backdrop {
   position: fixed;
   inset: 0;
@@ -3989,28 +4122,28 @@ textarea {
 .font-settings-row:hover, .font-settings-row.active { background: var(--btn-tint-hover); }
 .font-settings-row.active { color: var(--accent); font-weight: 600; }
 
-/* ---- 正文搜索面板 ---- */
+/* ---- 正文搜索面板（macOS Spotlight 风格沉浸悬浮居中与可拖拽窗体） ---- */
 .search-panel {
   position: fixed;
-  bottom: 20px;
+  top: 50%;
   left: 50%;
-  transform: translate(-50%, 0) scale(1);
-  z-index: 50;
+  transform: translate(-50%, -50%);
+  z-index: 260;
   width: min(680px, calc(100vw - 32px));
-  height: min(560px, calc(100vh - 40px));
+  height: min(560px, calc(100vh - 80px));
   display: flex;
   flex-direction: column;
   padding: 0 0 16px;
   gap: 10px;
   border: 1px solid var(--panel-border);
   border-radius: 20px;
-  background: var(--panel-bg);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
+  background: color-mix(in srgb, var(--panel-bg) 95%, transparent);
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
   color: var(--fg);
-  box-shadow: 0 24px 54px rgba(0, 0, 0, 0.35), 0 6px 18px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 28px 72px rgba(0, 0, 0, 0.38), 0 8px 24px rgba(0, 0, 0, 0.16);
   opacity: 1;
-  animation: panel-float-from-bottom 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: spotlight-zoom-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
   pointer-events: auto;
   overflow: hidden;
   box-sizing: border-box;
@@ -4018,6 +4151,17 @@ textarea {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   zoom: var(--ui-scale, 1);
+}
+
+@keyframes spotlight-zoom-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(-50% - 16px)) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
 }
 
 .search-head {
@@ -4031,6 +4175,30 @@ textarea {
   background: var(--panel-bg);
   font-weight: 600;
   font-size: 15px;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.search-head:active {
+  cursor: grabbing;
+}
+
+.search-drag-handle {
+  display: block;
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--panel-border);
+  margin: 8px auto -2px;
+  flex-shrink: 0;
+  opacity: 0.8;
+  cursor: grab;
+  touch-action: none;
+}
+
+.search-drag-handle:active {
+  cursor: grabbing;
 }
 .search-title {
   font-size: 15.5px;
@@ -4401,11 +4569,14 @@ textarea {
   display: flex;
   gap: 4px;
   padding: 5px;
-  border: 1px solid var(--panel-border);
-  border-radius: 10px;
-  background: var(--panel-bg);
-  box-shadow: 0 8px 26px rgba(0, 0, 0, .24);
+  border: 1px solid color-mix(in srgb, var(--panel-border) 60%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--panel-bg, #ffffff) 92%, transparent);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22), 0 2px 6px rgba(0, 0, 0, 0.08);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
   zoom: var(--ui-scale, 1);
+  animation: aaPopoverFadeIn 140ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 .reader-context-menu button {
   border: 0;

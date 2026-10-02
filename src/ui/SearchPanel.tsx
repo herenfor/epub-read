@@ -457,6 +457,44 @@ export function SearchPanel(props: SearchPanelProps) {
     inputRef.current?.focus();
   }, []);
 
+  const [dragOffset, setDragOffset] = useState<{ x: number; y: number } | null>(null);
+  const isDraggingRef = useRef(false);
+  const dragStartRef = useRef<{ startX: number; startY: number; initX: number; initY: number } | null>(null);
+
+  const handleHeaderPointerDown = (e: React.PointerEvent) => {
+    const target = e.target as HTMLElement;
+    if (target.closest("button, input, select, textarea")) return;
+    isDraggingRef.current = true;
+    e.preventDefault();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    dragStartRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      initX: dragOffset?.x ?? 0,
+      initY: dragOffset?.y ?? 0,
+    };
+  };
+
+  const handleHeaderPointerMove = (e: React.PointerEvent) => {
+    if (!isDraggingRef.current || !dragStartRef.current) return;
+    const dx = e.clientX - dragStartRef.current.startX;
+    const dy = e.clientY - dragStartRef.current.startY;
+    setDragOffset({
+      x: dragStartRef.current.initX + dx,
+      y: dragStartRef.current.initY + dy,
+    });
+  };
+
+  const handleHeaderPointerUp = (e: React.PointerEvent) => {
+    if (isDraggingRef.current) {
+      isDraggingRef.current = false;
+      dragStartRef.current = null;
+      try {
+        (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+      } catch {}
+    }
+  };
+
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -473,9 +511,27 @@ export function SearchPanel(props: SearchPanelProps) {
         aria-modal="true"
         aria-label="正文搜索"
         onKeyDown={handleKeyDown}
+        style={dragOffset ? {
+          transform: `translate(calc(-50% + ${dragOffset.x}px), calc(-50% + ${dragOffset.y}px))`,
+          animation: "none",
+        } : undefined}
       >
-        <div className="drawer-drag-handle" aria-hidden="true" />
-        <div className="menu-head search-head">
+        <div
+          className="drawer-drag-handle search-drag-handle"
+          aria-hidden="true"
+          onPointerDown={handleHeaderPointerDown}
+          onPointerMove={handleHeaderPointerMove}
+          onPointerUp={handleHeaderPointerUp}
+          onPointerCancel={handleHeaderPointerUp}
+        />
+        <div
+          className="menu-head search-head"
+          onPointerDown={handleHeaderPointerDown}
+          onPointerMove={handleHeaderPointerMove}
+          onPointerUp={handleHeaderPointerUp}
+          onPointerCancel={handleHeaderPointerUp}
+          title="按住标题栏可自由拖动搜索窗口"
+        >
           <div className="drawer-title-wrap">
             <span className="search-title">正文搜索</span>
             {props.status === "complete" && hasQuery && (

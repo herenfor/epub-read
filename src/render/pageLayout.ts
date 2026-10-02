@@ -17,6 +17,8 @@ export interface PageMarginsPx {
   right?: number;
 }
 
+export type SpreadGapMode = "auto" | "manual";
+
 export interface PageLayoutPreferences {
   /** undefined = 分页模式 */
   readingMode?: ReadingMode;
@@ -24,10 +26,16 @@ export interface PageLayoutPreferences {
   pageMarginsPx?: PageMarginsPx;
   /** undefined = 单栏 */
   columnsPerView?: 1 | 2;
+  /** 双页中缝模式；auto 使用舒适阅读区自动值，manual 使用 gapPx */
+  spreadGapMode?: SpreadGapMode;
 }
 
 export interface PageOptionsValue extends PageLayoutPreferences {
   gapPx: number;
+}
+
+export interface NormalizedPageOptions extends PageOptionsValue {
+  spreadGapMode: SpreadGapMode;
 }
 
 export * from "./pagedSpread";
@@ -64,13 +72,16 @@ function finiteInRange(value: unknown, min: number, max: number): number | undef
  * 非法边距回到“未设置”，非法列间距回到 {@link DEFAULT_PAGE_GAP_PX}，非法的
  * 模式/栏数回到 undefined；合法的 0 保留。未设置的可选字段不会以 undefined
  * 形式写回对象，便于直接持久化。
+ *
+ * spreadGapMode 只在这一处迁移：显式合法 mode 优先；缺 mode 时，旧默认 24
+ * 与“未存储”统一为 auto，非默认旧值保留为 manual。布局与 React render 不再猜。
  */
-export function normalizePageOptions(input: unknown): PageOptionsValue {
+export function normalizePageOptions(input: unknown): NormalizedPageOptions {
   const source = input && typeof input === "object"
     ? (input as Record<string, unknown>)
     : {};
 
-  const result: PageOptionsValue = { gapPx: DEFAULT_PAGE_GAP_PX };
+  const result: NormalizedPageOptions = { gapPx: DEFAULT_PAGE_GAP_PX, spreadGapMode: "auto" };
   const gapPx = finiteInRange(source.gapPx, 0, PAGE_GAP_MAX_PX);
   if (gapPx !== undefined) result.gapPx = gapPx;
 
@@ -79,6 +90,11 @@ export function normalizePageOptions(input: unknown): PageOptionsValue {
   }
   if (source.columnsPerView === 1 || source.columnsPerView === 2) {
     result.columnsPerView = source.columnsPerView;
+  }
+  if (source.spreadGapMode === "auto" || source.spreadGapMode === "manual") {
+    result.spreadGapMode = source.spreadGapMode;
+  } else if (gapPx !== undefined && gapPx !== DEFAULT_PAGE_GAP_PX) {
+    result.spreadGapMode = "manual";
   }
 
   const rawMargins = source.pageMarginsPx && typeof source.pageMarginsPx === "object"

@@ -29,3 +29,21 @@ src-tauri/gen/android/**/build/
 src-tauri/target2/
 src-tauri/target-android-core/
 src-tauri/target-android-ai/
+
+# Private development records and local reproduction tools
+/docs/
+/AGENTS.md
+/CONTRIBUTING.md
+/scripts/archive/
+/scripts/repro-*.mjs
+/scripts/check-*.mjs
+/scripts/*-repro.ts
+/scripts/setup-pw-fonts.mjs
+
+# Android generated integration files (keep hand-maintained project files)
+src-tauri/gen/android/tauri.properties
+src-tauri/gen/android/tauri.settings.gradle
+src-tauri/gen/android/app/tauri.build.gradle.kts
+src-tauri/gen/android/app/proguard-tauri.pro
+src-tauri/gen/android/app/src/main/jniLibs/
+src-tauri/gen/android/app/src/main/java/**/generated/

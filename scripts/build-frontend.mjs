@@ -1,11 +1,16 @@
 import { spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { normalizeAppEdition } from "../src/config/editionValue.ts";
+import { normalizeAppPlatform } from "../src/config/platformValue.ts";
 
 const [, , command = "build", rawEdition = "core"] = process.argv;
-const edition = rawEdition.trim().toLowerCase();
-if (!new Set(["core", "ai"]).has(edition)) throw new Error("edition must be core or ai");
+const edition = normalizeAppEdition(rawEdition);
 if (!new Set(["dev", "build", "tauri-dev"]).has(command)) throw new Error("command must be dev, build, or tauri-dev");
+// Browser development defaults to web. Production and Tauri dev default to
+// the current Windows shell so existing package scripts keep their meaning.
+const defaultPlatform = command === "dev" ? "web" : "windows";
+const platform = normalizeAppPlatform(process.env.VITE_APP_PLATFORM ?? defaultPlatform);
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // Keep an explicit CARGO_TARGET_DIR from the caller (e.g. the Android build
@@ -14,6 +19,7 @@ const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const env = {
   ...process.env,
   VITE_EDITION: edition,
+  VITE_APP_PLATFORM: platform,
   EPUB_READER_EXPECTED_EDITION: edition,
   CARGO_TARGET_DIR:
     process.env.CARGO_TARGET_DIR && process.env.CARGO_TARGET_DIR.trim() !== ""

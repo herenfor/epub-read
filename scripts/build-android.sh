@@ -91,6 +91,7 @@ fi
 mkdir -p "$ANDROID_USER_HOME" "$GRADLE_USER_HOME" "$XDG_CACHE_HOME" "$HOME"
 
 export VITE_EDITION=core
+export VITE_APP_PLATFORM=android
 export EPUB_READER_EXPECTED_EDITION=core
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$PROJECT_ROOT/src-tauri/target-android-core}"
 
@@ -164,6 +165,10 @@ do_build() {
   done
   do_init
   local args=(android build --features core "$bundle" --target "$target" "${TAURI_ARGS[@]}")
+  # Core overlay (and the platform overlay) may both carry frontendDist.
+  # This final JSON override is merged last so Android reads its own frontend
+  # directory and can never empty the desktop dist/core output.
+  args+=(--config '{"build":{"frontendDist":"../dist/core-android"}}')
   [ "$mode" = "debug" ] && args+=(--debug)
   echo "tauri CLI (outer): $TAURI_CLI v$(outer_cli_version) via $TAURI_CLI_NODE"
   ( cd "$PROJECT_ROOT" && tauri "${args[@]}" )

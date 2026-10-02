@@ -9,15 +9,23 @@ import {
 describe("normalizePageOptions", () => {
   it("returns the gap default for empty input and leaves optional fields unset", () => {
     const value = normalizePageOptions(undefined);
-    expect(value).toEqual({ gapPx: DEFAULT_PAGE_GAP_PX });
+    expect(value).toEqual({ gapPx: DEFAULT_PAGE_GAP_PX, spreadGapMode: "auto" });
     expect("pageMarginsPx" in value).toBe(false);
     expect("columnsPerView" in value).toBe(false);
     expect("readingMode" in value).toBe(false);
   });
 
+  it("migrates only legacy gap values: 24/absent -> auto, non-default -> manual", () => {
+    expect(normalizePageOptions({ gapPx: 24 }).spreadGapMode).toBe("auto");
+    expect(normalizePageOptions({ gapPx: 40 }).spreadGapMode).toBe("manual");
+    expect(normalizePageOptions({ gapPx: 40, spreadGapMode: "auto" }).spreadGapMode).toBe("auto");
+    expect(normalizePageOptions({ gapPx: 24, spreadGapMode: "manual" }).spreadGapMode).toBe("manual");
+    expect(normalizePageOptions({ gapPx: 200 }).spreadGapMode).toBe("auto");
+  });
+
   it("keeps legal zero margins, gap zero and both column preferences", () => {
     expect(normalizePageOptions({ gapPx: 0, pageMarginsPx: { top: 0, left: 0 }, columnsPerView: 2 }))
-      .toEqual({ gapPx: 0, pageMarginsPx: { top: 0, left: 0 }, columnsPerView: 2 });
+      .toEqual({ gapPx: 0, pageMarginsPx: { top: 0, left: 0 }, columnsPerView: 2, spreadGapMode: "manual" });
   });
 
   it("drops out-of-range and non-finite values instead of clamping", () => {
@@ -28,6 +36,7 @@ describe("normalizePageOptions", () => {
       columnsPerView: 3,
     });
     expect(value.gapPx).toBe(DEFAULT_PAGE_GAP_PX);
+    expect(value.spreadGapMode).toBe("auto");
     expect(value.pageMarginsPx).toEqual({ left: 160 });
     expect(value.readingMode).toBe("scroll");
     expect(value.columnsPerView).toBeUndefined();
@@ -35,17 +44,17 @@ describe("normalizePageOptions", () => {
 
   it("keeps inclusive upper bounds and finite decimals", () => {
     expect(normalizePageOptions({ gapPx: 96, pageMarginsPx: { top: 160, right: 12.5 } }))
-      .toEqual({ gapPx: 96, pageMarginsPx: { top: 160, right: 12.5 } });
+      .toEqual({ gapPx: 96, pageMarginsPx: { top: 160, right: 12.5 }, spreadGapMode: "manual" });
   });
 
   it("ignores non-object input and non-number fields", () => {
-    expect(normalizePageOptions("2")).toEqual({ gapPx: DEFAULT_PAGE_GAP_PX });
+    expect(normalizePageOptions("2")).toEqual({ gapPx: DEFAULT_PAGE_GAP_PX, spreadGapMode: "auto" });
     expect(normalizePageOptions({
       gapPx: "24",
       pageMarginsPx: { top: "44" },
       columnsPerView: "2",
       readingMode: "paged",
-    })).toEqual({ gapPx: DEFAULT_PAGE_GAP_PX });
+    })).toEqual({ gapPx: DEFAULT_PAGE_GAP_PX, spreadGapMode: "auto" });
   });
 
   it("reports the legacy em auto margins used by the panel display", () => {

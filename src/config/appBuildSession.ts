@@ -1,27 +1,46 @@
 import type { AppBuildInfo } from "./appBuildInfo";
 import type { AppEdition } from "./edition";
+import { platformFromTarget, shellForPlatform, type AppPlatform, type AppShell } from "./platformValue";
 
 export type AppBuildSession = Readonly<{
+  /** "desktop" means a native Tauri host; "browser" means no native backend. */
   source: "desktop" | "browser";
   edition: AppEdition;
   debug: boolean;
+  platform: AppPlatform;
+  shell: AppShell;
   buildInfo: Readonly<AppBuildInfo> | null;
 }>;
 
 type AppBuildSessionInput =
-  | { source: "desktop"; buildInfo: AppBuildInfo }
+  | { source: "desktop"; buildInfo: AppBuildInfo; platform?: AppPlatform }
   | { source: "browser"; edition: AppEdition; debug: boolean };
 
 let currentSession: AppBuildSession | null = null;
 
 /** Save immutable build metadata only after the startup checks have passed. */
 export function setAppBuildSession(input: AppBuildSessionInput): AppBuildSession {
-  const buildInfo = input.source === "desktop" ? Object.freeze({ ...input.buildInfo }) : null;
+  if (input.source === "desktop") {
+    const platform = input.platform ?? platformFromTarget(input.buildInfo.target) ?? "windows";
+    const buildInfo = Object.freeze({ ...input.buildInfo });
+    currentSession = Object.freeze({
+      source: "desktop",
+      edition: buildInfo.edition,
+      debug: buildInfo.debug,
+      platform,
+      shell: shellForPlatform(platform),
+      buildInfo,
+    });
+    return currentSession;
+  }
+
   currentSession = Object.freeze({
-    source: input.source,
-    edition: input.source === "desktop" ? input.buildInfo.edition : input.edition,
-    debug: input.source === "desktop" ? input.buildInfo.debug : input.debug,
-    buildInfo,
+    source: "browser",
+    edition: input.edition,
+    debug: input.debug,
+    platform: "web",
+    shell: "browser",
+    buildInfo: null,
   });
   return currentSession;
 }

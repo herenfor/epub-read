@@ -234,6 +234,7 @@ export function sameRenderingSettings(a: ReaderSettings, b: ReaderSettings): boo
     a.gapPx === b.gapPx &&
     a.readingMode === b.readingMode &&
     a.columnsPerView === b.columnsPerView &&
+    a.spreadGapMode === b.spreadGapMode &&
     // 值比较：新建同值对象不应触发重载。
     samePageMargins(a.pageMarginsPx, b.pageMarginsPx) &&
     a.lineHeight === b.lineHeight &&

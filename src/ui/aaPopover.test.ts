@@ -92,4 +92,30 @@ describe("Zen UI AaPopover 组件与交互契约（Packet B）", () => {
     expect(html).toContain("更多高级设置");
     expect(html).toContain("aa-advanced-toggle");
   });
+
+  it("包含常用外观与详细排版双模 Tab 切换器以及直达按钮", () => {
+    const html = renderToStaticMarkup(createElement(AaPopover, baseProps));
+    expect(html).toContain("常用外观");
+    expect(html).toContain("详细排版");
+    expect(html).toContain("详细排版微调（字重/间距/四向边距）");
+  });
+
+  it("当使用自定义微调行高与非模板边距时，呈现自定义徽标指示", () => {
+    const customProps: AaPopoverProps = {
+      ...baseProps,
+      lineHeight: 1.6, // 中间自定义行高
+      pageMargins: { left: 52, right: 30, top: 12, bottom: 20 }, // 独立四向边距
+      fontWeight: 500,
+      letterSpacingPx: 2,
+      wordSpacingPx: 4,
+      gapPx: 32,
+      uiScale: 1.15,
+    };
+    const html = renderToStaticMarkup(createElement(AaPopover, customProps));
+    // 行高显示自定义微调胶囊
+    expect(html).toContain("1.6");
+    expect(html).toContain("aa-custom-pill");
+    // 边距显示微调胶囊
+    expect(html).toContain("微调");
+  });
 });

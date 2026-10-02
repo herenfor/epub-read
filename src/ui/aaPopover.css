@@ -2,16 +2,21 @@
 .aa-popover-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 50;
+  z-index: 240;
   background: transparent;
+}
+
+.aa-popover-backdrop.is-closing {
+  pointer-events: none;
 }
 
 .aa-popover {
   position: fixed;
-  top: 46px;
-  right: 64px;
-  width: 310px;
-  z-index: 51;
+  top: 44px;
+  right: 20px;
+  width: 324px;
+  max-height: calc(100vh - 60px);
+  z-index: 250;
   box-sizing: border-box;
   background: color-mix(in srgb, var(--panel-bg, #ffffff) 96%, transparent);
   color: var(--fg);
@@ -24,6 +29,13 @@
   -webkit-user-select: none;
   animation: aaPopoverFadeIn 160ms cubic-bezier(0.16, 1, 0.3, 1);
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.aa-popover.is-closing {
+  animation: aaPopoverFadeOut 140ms ease forwards;
+  pointer-events: none;
 }
 
 @keyframes aaPopoverFadeIn {
@@ -37,12 +49,55 @@
   }
 }
 
+@keyframes aaPopoverFadeOut {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
+  }
+}
+
 .aa-popover-header {
+  flex: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 14px 8px;
+  padding: 8px 10px 8px 12px;
   border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 35%, transparent);
+}
+
+/* ---- 双模分段 Tab 切换 ---- */
+.aa-popover-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 35%, transparent);
+}
+
+.aa-tab-btn {
+  border: none;
+  background: transparent;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 140ms ease;
+  user-select: none;
+}
+
+.aa-tab-btn.active {
+  background: var(--panel-bg, #ffffff);
+  color: var(--accent, #6366f1);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  font-weight: 600;
 }
 
 .aa-popover-title {
@@ -55,9 +110,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 5px;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
   border: none;
   background: transparent;
   color: var(--muted);
@@ -71,10 +126,43 @@
 }
 
 .aa-popover-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  transition: scrollbar-color 0.2s ease;
   padding: 12px 14px;
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.aa-popover-body:hover {
+  scrollbar-color: color-mix(in srgb, var(--fg) 22%, transparent) transparent;
+}
+
+.aa-popover-body::-webkit-scrollbar {
+  width: 4px;
+}
+
+.aa-popover-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.aa-popover-body::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 999px;
+  transition: background-color 0.2s ease;
+}
+
+.aa-popover-body:hover::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--fg) 22%, transparent);
+}
+
+.aa-popover-body::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--fg) 40%, transparent);
 }
 
 /* Row 1: 主题色块 */
@@ -143,6 +231,8 @@
   align-items: center;
   background: color-mix(in srgb, var(--fg) 6%, transparent);
   border-radius: 8px;
+  height: 28px;
+  box-sizing: border-box;
   padding: 2px;
   flex: 1;
   justify-content: space-between;
@@ -152,8 +242,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 26px;
-  padding: 0 12px;
+  height: 24px;
+  padding: 0 10px;
   border-radius: 6px;
   border: none;
   background: transparent;
@@ -185,8 +275,9 @@
   font-size: 12px;
   font-weight: 600;
   color: var(--fg);
-  min-width: 44px;
+  min-width: 48px;
   text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Row 3: 字体选择按钮 */
@@ -196,6 +287,7 @@
   justify-content: space-between;
   flex: 1;
   height: 28px;
+  box-sizing: border-box;
   padding: 0 10px;
   background: color-mix(in srgb, var(--fg) 6%, transparent);
   border-radius: 8px;
@@ -227,6 +319,8 @@
   align-items: center;
   background: color-mix(in srgb, var(--fg) 6%, transparent);
   border-radius: 8px;
+  height: 28px;
+  box-sizing: border-box;
   padding: 2px;
   flex: 1;
   gap: 2px;
@@ -323,16 +417,20 @@
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  padding: 6px 2px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
   border: none;
-  background: transparent;
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
   color: var(--muted);
   font-size: 11.5px;
+  font-weight: 500;
   cursor: pointer;
-  transition: color 120ms ease;
+  transition: all 120ms ease;
 }
 
 .aa-advanced-toggle:hover {
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
   color: var(--fg);
 }
 
@@ -410,18 +508,118 @@
 .aa-mini-action-btn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  border: none;
-  background: transparent;
-  color: var(--muted);
-  font-size: 11px;
+  justify-content: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 40%, transparent);
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+  color: var(--fg);
+  font-size: 11.5px;
   cursor: pointer;
-  padding: 4px;
-  border-radius: 4px;
-  transition: background-color 120ms ease, color 120ms ease;
+  transition: all 120ms ease;
 }
 
 .aa-mini-action-btn:hover {
   background: var(--btn-tint-hover);
-  color: var(--fg);
+  border-color: color-mix(in srgb, var(--accent, #6366f1) 40%, transparent);
+  color: var(--accent, #6366f1);
+}
+
+/* ---- 常用外观中自定义徽标与跳转按钮 ---- */
+.aa-custom-pill {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent, #6366f1);
+  background: color-mix(in srgb, var(--accent, #6366f1) 12%, transparent);
+  padding: 1px 5px;
+  border-radius: 999px;
+  margin-left: 5px;
+  line-height: 1.2;
+}
+
+.aa-switch-to-detail-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  box-sizing: border-box;
+  height: 32px;
+  padding: 0 12px;
+  margin-top: 4px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent, #6366f1) 28%, transparent);
+  background: color-mix(in srgb, var(--accent, #6366f1) 7%, transparent);
+  color: var(--accent, #6366f1);
+  font-size: 12px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: all 140ms ease;
+}
+
+.aa-switch-to-detail-btn:hover {
+  background: color-mix(in srgb, var(--accent, #6366f1) 14%, transparent);
+  border-color: var(--accent, #6366f1);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--accent, #6366f1) 18%, transparent);
+}
+
+/* ---- 详细排版视图 (Detailed View) ---- */
+.aa-detailed-view {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  animation: aaPopoverFadeIn 140ms ease-out;
+}
+
+.aa-group-title,
+.aa-detail-group-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  text-transform: uppercase;
+  margin: 8px 0 2px 2px;
+  padding-bottom: 3px;
+  border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 35%, transparent);
+}
+
+.aa-detail-label-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+
+.aa-detail-sub {
+  font-size: 10.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 步进器重置按钮 */
+.aa-step-reset-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 120ms ease, background-color 120ms ease;
+  margin-right: 2px;
+  flex-shrink: 0;
+}
+
+.aa-step-reset-btn:hover {
+  color: var(--accent, #6366f1);
+  background: color-mix(in srgb, var(--accent, #6366f1) 12%, transparent);
 }

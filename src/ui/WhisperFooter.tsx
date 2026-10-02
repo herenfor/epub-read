@@ -97,15 +97,42 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
       if (window.innerHeight - e.clientY < 40) {
         setIsZenRevealed(true);
         if (zenTimerRef.current) clearTimeout(zenTimerRef.current);
+      } else if (!isHovered && !isDragging) {
+        if (!zenTimerRef.current) {
+          zenTimerRef.current = setTimeout(() => {
+            setIsZenRevealed(false);
+            zenTimerRef.current = null;
+          }, 1800);
+        }
+      }
+    };
+
+    const handleWheel = (e: WheelEvent) => {
+      if (e.deltaY > 10 && !isHovered && !isDragging) {
+        if (zenTimerRef.current) clearTimeout(zenTimerRef.current);
+        setIsZenRevealed(false);
+      }
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "PageDown", "PageUp", " ", "[", "]"].includes(e.key)) {
+        if (!isHovered && !isDragging) {
+          if (zenTimerRef.current) clearTimeout(zenTimerRef.current);
+          setIsZenRevealed(false);
+        }
       }
     };
 
     window.addEventListener("mousemove", handleMouseMove, { passive: true });
+    window.addEventListener("wheel", handleWheel, { passive: true });
+    window.addEventListener("keydown", handleKeyDown);
     return () => {
       window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("wheel", handleWheel);
+      window.removeEventListener("keydown", handleKeyDown);
       if (zenTimerRef.current) clearTimeout(zenTimerRef.current);
     };
-  }, [zenMode]);
+  }, [zenMode, isHovered, isDragging]);
 
   const handleMouseEnter = () => {
     setIsHovered(true);

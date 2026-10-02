@@ -194,7 +194,7 @@ export function shelfIdFor(identifier: string, fileName: string, fileSize: numbe
   return (h >>> 0).toString(16).padStart(8, "0");
 }
 
-export type ShelfSort = "recent" | "added" | "title";
+export type ShelfSort = "recent" | "added" | "title" | "progress";
 
 export function sortShelfEntries(entries: ShelfEntry[], sort: ShelfSort): ShelfEntry[] {
   const list = [...entries];
@@ -205,6 +205,8 @@ export function sortShelfEntries(entries: ShelfEntry[], sort: ShelfSort): ShelfE
       return list.sort((a, b) =>
         a.title.localeCompare(b.title, "zh-Hans-CN", { numeric: true })
       );
+    case "progress":
+      return list.sort((a, b) => (b.progressPct ?? 0) - (a.progressPct ?? 0));
     case "recent":
       return list.sort((a, b) => {
         const aRecent = a.lastReadAtMs > 0 ? a.lastReadAtMs : a.addedAtMs;

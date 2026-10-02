@@ -1,16 +1,19 @@
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join, isAbsolute, relative, resolve, sep } from "node:path";
+import { frontendOutDir, normalizeAppPlatform, shellForPlatform } from "../src/config/platformValue.ts";
 
 const edition = (process.argv[2] ?? process.env.VITE_EDITION ?? "core").toLowerCase();
 if (!new Set(["core", "ai"]).has(edition)) throw new Error("edition must be core or ai");
-const outDir = join(process.cwd(), "dist", edition === "ai" ? "ai" : "core");
+const platform = normalizeAppPlatform(process.env.VITE_APP_PLATFORM ?? "windows");
+const shell = shellForPlatform(platform);
+const outDir = join(process.cwd(), frontendOutDir(edition, platform));
 const files = [];
 const walk = (dir) => { for (const name of readdirSync(dir)) { const p = join(dir, name); const s = statSync(p); if (s.isDirectory()) walk(p); else files.push(p); } };
 if (!existsSync(outDir)) throw new Error(`missing ${outDir}`);
 walk(outDir);
 if (!existsSync(join(outDir, "edition-manifest.json"))) throw new Error("missing edition-manifest.json");
 const manifest = JSON.parse(readFileSync(join(outDir, "edition-manifest.json"), "utf8"));
-const expected = { schemaVersion: 1, edition, version: JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")).version, expectedBackendFeature: edition, identifier: edition === "ai" ? "dev.epubreader.ai" : "dev.epubreader.app" };
+const expected = { schemaVersion: 1, edition, platform, shell, version: JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")).version, expectedBackendFeature: edition, identifier: edition === "ai" ? "dev.epubreader.ai" : "dev.epubreader.app" };
 for (const [key, value] of Object.entries(expected)) if (manifest[key] !== value) throw new Error(`edition manifest mismatch: ${key}`);
 const fileNames = files.map((p) => p.slice(outDir.length + 1)).join("\n");
 const text = files.filter((p) => /\.(js|css|html|json)$/.test(p)).map((p) => readFileSync(p, "utf8")).join("\n");
@@ -40,6 +43,6 @@ if (configuredTargetDir !== "") {
   const outsideProject = projectRelative === "" || projectRelative === ".." || projectRelative.startsWith(`..${sep}`) || isAbsolute(projectRelative);
   targetDir = outsideProject ? configuredTargetDir : projectRelative.split(sep).join("/");
 }
-const artifactManifest = { schemaVersion: 1, profile: edition, identifier: expected.identifier, expectedBackendFeature: expected.expectedBackendFeature, tauriConfig: `src-tauri/tauri.${edition}.conf.json`, targetDir };
+const artifactManifest = { schemaVersion: 1, edition, platform, shell, profile: edition, identifier: expected.identifier, expectedBackendFeature: expected.expectedBackendFeature, tauriConfig: `src-tauri/tauri.${edition}.conf.json`, targetDir };
 writeFileSync(join(outDir, "artifact-manifest.json"), JSON.stringify(artifactManifest, null, 2) + "\n", "utf8");
-console.log(`PASS: ${edition} frontend artifact (${outDir})`);
+console.log(`PASS: ${edition}/${platform} frontend artifact (${outDir})`);

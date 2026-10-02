@@ -43,7 +43,30 @@
   -moz-osx-font-smoothing: grayscale;
   animation: bookmark-pop-in 160ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
   scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  transition: scrollbar-color 0.2s ease;
+}
+
+.reader-bookmarks-popover:hover {
   scrollbar-color: var(--scroll-thumb) transparent;
+}
+
+.reader-bookmarks-popover::-webkit-scrollbar {
+  width: 4px;
+}
+
+.reader-bookmarks-popover::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.reader-bookmarks-popover::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 999px;
+  transition: background-color 0.2s ease;
+}
+
+.reader-bookmarks-popover:hover::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
 }
 
 .reader-bookmarks-title {

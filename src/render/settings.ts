@@ -1,8 +1,8 @@
 /** 阅读器设置（渲染相关）。 */
 
-import type { PageMarginsPx, ReadingMode } from "./pageLayout";
+import type { PageMarginsPx, ReadingMode, SpreadGapMode } from "./pageLayout";
 
-export type { PageMarginsPx, ReadingMode };
+export type { PageMarginsPx, ReadingMode, SpreadGapMode };
 
 export type Theme = "light" | "dark" | "sepia" | "gray";
 
@@ -29,6 +29,8 @@ export interface ReaderSettings {
   pageMarginsPx?: PageMarginsPx;
   /** 一屏显示的列数；undefined = 1 */
   columnsPerView?: 1 | 2;
+  /** 双页中缝模式；undefined = 旧设置，读取边界会迁移为 auto/manual。 */
+  spreadGapMode?: SpreadGapMode;
   /** 行高倍率；undefined = 跟随书 */
   lineHeight?: number;
   /** 字重 400/500/700；undefined = 跟随书 */
@@ -52,6 +54,7 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
   gapPx: 24,
   readingMode: "paginated",
   columnsPerView: 1,
+  spreadGapMode: "auto",
   forceHorizontal: false,
   preloadNextChapter: false,
   instantTurn: false,

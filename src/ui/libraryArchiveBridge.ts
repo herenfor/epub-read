@@ -31,6 +31,7 @@ const SETTINGS_KEYS = [
   "customFontId",
   "customCss",
   "gapPx",
+  "spreadGapMode",
   "lineHeight",
   "fontWeight",
   "letterSpacingPx",

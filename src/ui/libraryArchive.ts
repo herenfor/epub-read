@@ -326,7 +326,7 @@ function recordValue(value: unknown, hash: string, path: string, errors: Archive
 }
 
 const SETTING_KEYS = new Set([
-  "fontSizePx", "theme", "fontFamily", "customFontName", "fontSource", "customFontId", "customCss", "gapPx",
+  "fontSizePx", "theme", "fontFamily", "customFontName", "fontSource", "customFontId", "customCss", "gapPx", "spreadGapMode",
   "lineHeight", "fontWeight", "letterSpacingPx", "wordSpacingPx", "uiScale",
   "forceHorizontal",
   "preloadNextChapter",

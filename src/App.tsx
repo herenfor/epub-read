@@ -18,10 +18,17 @@ import {
   type Theme,
 } from "./render/settings";
 import type { ChapterState, MediaReadingAnchor, PreciseNavigationStatus, ReadingAnchor } from "./render/paginator";
-import { normalizePageOptions } from "./render/pageLayout";
+import { DEFAULT_PAGE_GAP_PX, normalizePageOptions } from "./render/pageLayout";
 import type { ImageViewRequest } from "./render/imageActivation";
 import { ImageViewer } from "./ui/ImageViewer";
 import { TitleBar } from "./ui/TitleBar";
+import {
+  createNativeFullscreenController,
+  type NativeFullscreenController,
+  type NativeFullscreenPort,
+} from "./ui/windowFullscreen";
+import { getRuntimeCapabilities } from "./platform/runtimeCapabilities";
+import { useAndroidBack } from "./platform/useAndroidBack";
 import { SidebarDrawer, type SidebarMode, type SidebarTab } from "./ui/SidebarDrawer";
 import { AaPopover } from "./ui/AaPopover";
 import { WhisperFooter, type WhisperFooterChapterTick } from "./ui/WhisperFooter";
@@ -57,6 +64,16 @@ import { LogPanel, type LogItem } from "./ui/LogPanel";
 import { ReaderView, type ReaderHandle } from "./ui/ReaderView";
 import type { ReaderNoteForPaginator } from "./render/paginator";
 import { ShelfView } from "./ui/ShelfView";
+import { NativeImportPanel, type NativeImportCancelState } from "./ui/NativeImportPanel";
+import {
+  cancelDocumentImport,
+  importDocuments,
+  readContentUriText,
+  writeTextContentUri,
+  type AndroidDocumentSelection,
+  type AndroidImportBatchResult,
+  type AndroidNativeImportError,
+} from "./platform/androidNativeBridge";
 import {
   applyShelfProgressPatch,
   getShelfStore,
@@ -163,6 +180,23 @@ const EMPTY_CHAPTER_NOTES: ReaderNoteForPaginator[] = [];
 
 function isTauriEnv(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
+function displayNameFromContentUri(uri: string): string {
+  try {
+    const last = decodeURIComponent(uri.split("/").filter(Boolean).pop() ?? "");
+    const base = last.split(/[\\/]/).pop() ?? "";
+    return base || "选中文件";
+  } catch {
+    return "选中文件";
+  }
+}
+
+function createNativeImportRequestId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `android-import-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 type AppPhase =
@@ -329,6 +363,7 @@ function createShelfBookReader(id: string): () => Promise<Uint8Array> {
 }
 
 export default function App() {
+  const runtime = getRuntimeCapabilities();
   const [phase, setPhase] = useState<AppPhase>({ phase: "idle" });
   const [book, setBook] = useState<Book | null>(null);
   const [server, setServer] = useState<ResourceServer | null>(null);
@@ -371,6 +406,7 @@ export default function App() {
         pageMarginsPx: saved.pageMarginsPx,
         columnsPerView: saved.columnsPerView,
         gapPx: saved.gapPx,
+        spreadGapMode: saved.spreadGapMode,
       }),
     };
   });
@@ -450,6 +486,16 @@ export default function App() {
   } | null>(null);
   const [shelfNoticeFading, setShelfNoticeFading] = useState(false);
   const [shelfBusy, setShelfBusy] = useState(false);
+  const [nativeImport, setNativeImport] = useState<{
+    requestId: string;
+    phase: "starting" | "preparing" | "committing";
+    completed: number;
+    total: number;
+    cancelState: NativeImportCancelState;
+    collapsed: boolean;
+    fileNameSummary: string;
+  } | null>(null);
+  const nativeImportRef = useRef<string | null>(null);
   const [currentShelfId, setCurrentShelfId] = useState<string | null>(null);
   const shelfBusyRef = useRef(false);
   const shelfEntriesRef = useRef<ShelfEntry[]>([]);
@@ -465,6 +511,28 @@ export default function App() {
   const [readerHistory, setReaderHistory] = useState<ReaderNavigationHistory>(
     emptyReaderNavigationHistory
   );
+  // ---- 书签反馈轻量弹窗 ----
+  const [bookmarkToast, setBookmarkToast] = useState<{
+    text: string;
+    action: "add" | "remove";
+    closing: boolean;
+  } | null>(null);
+  const bookmarkToastTimerRef = useRef<number | null>(null);
+
+  const showBookmarkToast = useCallback((text: string, action: "add" | "remove") => {
+    if (bookmarkToastTimerRef.current) {
+      window.clearTimeout(bookmarkToastTimerRef.current);
+      bookmarkToastTimerRef.current = null;
+    }
+    setBookmarkToast({ text, action, closing: false });
+    bookmarkToastTimerRef.current = window.setTimeout(() => {
+      setBookmarkToast((prev) => (prev ? { ...prev, closing: true } : null));
+      bookmarkToastTimerRef.current = window.setTimeout(() => {
+        setBookmarkToast(null);
+        bookmarkToastTimerRef.current = null;
+      }, 180);
+    }, 1400);
+  }, []);
   // ---- 用户自定义字体 ----
   const [userFonts, setUserFonts] = useState<UserFont[]>([]);
   const [fontUrls, setFontUrls] = useState<Record<string, string>>({});
@@ -1105,9 +1173,195 @@ export default function App() {
     }
   }, []);
 
+  const runNativeDocumentImport = useCallback(async (
+    documents: AndroidDocumentSelection[],
+    options: { silentError?: boolean } = {}
+  ): Promise<AndroidImportBatchResult | null> => {
+    if (nativeImportRef.current) {
+      setShelfNotice({ kind: "warn", text: "已有导入任务正在进行，请等待当前任务结束" });
+      return null;
+    }
+    const requestId = createNativeImportRequestId();
+    nativeImportRef.current = requestId;
+    setNativeImport({
+      requestId,
+      phase: "starting",
+      completed: 0,
+      total: documents.length,
+      cancelState: "idle",
+      collapsed: false,
+      fileNameSummary: documents.length === 1 ? "1 本 EPUB" : `${documents.length} 个文件`,
+    });
+    try {
+      return await importDocuments(requestId, documents, (progress) => {
+        setNativeImport((previous) => (
+          previous && previous.requestId === progress.requestId
+            ? { ...previous, phase: progress.phase, completed: progress.completed, total: progress.total }
+            : previous
+        ));
+      });
+    } catch (error) {
+      const nativeError = error as AndroidNativeImportError;
+      if (nativeError.requiresReload) {
+        try {
+          const entries = await getShelfStore().list();
+          setShelfEntries(entries);
+        } catch {
+          // Keep the error visible even if the refresh fails.
+        }
+      }
+      if (!options.silentError) {
+        setShelfNotice({ kind: "error", text: `导入失败：${nativeError.message}` });
+      }
+      return null;
+    } finally {
+      nativeImportRef.current = null;
+      setNativeImport(null);
+    }
+  }, []);
+
+  const applyNativeImportBatch = useCallback((batch: AndroidImportBatchResult, documents: AndroidDocumentSelection[]): void => {
+    const imported: ShelfEntry[] = [];
+    const duplicateTitles: string[] = [];
+    const failed: string[] = [];
+    const cancelled: string[] = [];
+    for (const item of batch.results) {
+      const document = documents[item.inputIndex];
+      const label = document ? displayNameFromContentUri(document.uri) : `第 ${item.inputIndex + 1} 本`;
+      if (item.status === "failed") {
+        failed.push(`${label}：${item.error || "导入失败"}`);
+        continue;
+      }
+      if (item.status === "cancelled") {
+        cancelled.push(label);
+        continue;
+      }
+      if (!item.record) {
+        failed.push(`${label}：后端未返回书架记录`);
+        continue;
+      }
+      contentHashByIdRef.current.set(item.record.id, item.record.contentHash ?? item.record.id);
+      entryByContentHashRef.current.set(item.record.contentHash ?? item.record.id, item.record);
+      if (item.status === "duplicate") {
+        duplicateTitles.push(item.record.title || label);
+      } else {
+        imported.push(item.record);
+      }
+    }
+    if (imported.length > 0) {
+      setShelfEntries((previous) => mergeShelfEntries(previous, imported));
+    }
+    const notice = formatImportNotice({
+      sourceCount: documents.length,
+      importedCount: imported.length,
+      duplicateTitles,
+      failed,
+    });
+    if (cancelled.length > 0) {
+      notice.text += `；已取消 ${cancelled.length} 本`;
+      if (notice.kind === "ok") notice.kind = "warn";
+    }
+    setShelfNotice(notice);
+  }, []);
+
+  const handleCancelNativeImport = useCallback(async (): Promise<void> => {
+    const current = nativeImport;
+    if (!current || current.phase !== "preparing" || current.cancelState !== "idle") return;
+    setNativeImport((previous) => (
+      previous && previous.requestId === current.requestId
+        ? { ...previous, cancelState: "requesting" }
+        : previous
+    ));
+    try {
+      const status = await cancelDocumentImport(current.requestId);
+      setNativeImport((previous) => (
+        previous && previous.requestId === current.requestId
+          ? { ...previous, cancelState: status === "too_late" ? "too_late" : previous.cancelState }
+          : previous
+      ));
+    } catch (error) {
+      setShelfNotice({ kind: "error", text: `取消导入失败：${String(error)}` });
+      setNativeImport((previous) => (
+        previous && previous.requestId === current.requestId
+          ? { ...previous, cancelState: "idle" }
+          : previous
+      ));
+    }
+  }, [nativeImport]);
+
+  const handleToggleNativeImportCollapsed = useCallback((): void => {
+    setNativeImport((previous) => (
+      previous ? { ...previous, collapsed: !previous.collapsed } : previous
+    ));
+  }, []);
+
+  const reimportAndroidMissing = useCallback(async (entry: ShelfEntry): Promise<ShelfEntry | null> => {
+    if (nativeImportRef.current) {
+      setShelfNotice({ kind: "warn", text: "已有导入任务正在进行，请等待当前任务结束" });
+      return null;
+    }
+    const selected = await openFileDialog({
+      multiple: false,
+      directory: false,
+      title: `重新导入《${entry.title}》`,
+    });
+    const uri = Array.isArray(selected) ? selected[0] : selected;
+    if (!uri) return null;
+    const documents: AndroidDocumentSelection[] = [{ uri }];
+    const batch = await runNativeDocumentImport(documents);
+    if (!batch) return null;
+    const wanted = entry.contentHash && /^[a-f0-9]{64}$/.test(entry.contentHash)
+      ? entry.contentHash
+      : /^[a-f0-9]{64}$/.test(entry.id)
+        ? entry.id
+        : null;
+    const match = batch.results.find((item) =>
+      (item.status === "saved" || item.status === "duplicate") &&
+      item.record &&
+      (wanted ? item.record.contentHash === wanted : true)
+    );
+    if (!match?.record) {
+      const cancelled = batch.results.some((item) => item.status === "cancelled");
+      setShelfNotice({
+        kind: cancelled ? "warn" : "error",
+        text: cancelled
+          ? `《${entry.title}》重新导入已取消`
+          : `选择的文件与《${entry.title}》内容不一致，无法恢复`,
+      });
+      return null;
+    }
+    contentHashByIdRef.current.set(match.record.id, match.record.contentHash ?? match.record.id);
+    entryByContentHashRef.current.set(match.record.contentHash ?? match.record.id, match.record);
+    setShelfEntries((previous) => mergeShelfEntries(previous, [match.record!]));
+    return match.record;
+  }, [runNativeDocumentImport]);
+
   const handleChooseBooks = useCallback(async () => {
     if (!isTauriEnv()) {
       fileInputRef.current?.click();
+      return;
+    }
+    if (runtime.platform === "android") {
+      if (nativeImportRef.current) {
+        setShelfNotice({ kind: "warn", text: "已有导入任务正在进行，请等待当前任务结束" });
+        return;
+      }
+      try {
+        const selected = await openFileDialog({
+          multiple: true,
+          directory: false,
+          title: "选择 EPUB 书籍",
+        });
+        const uris = (Array.isArray(selected) ? selected : selected ? [selected] : []).filter(
+          (value): value is string => typeof value === "string" && value.length > 0
+        );
+        if (uris.length === 0) return;
+        const documents: AndroidDocumentSelection[] = uris.map((uri) => ({ uri }));
+        const batch = await runNativeDocumentImport(documents);
+        if (batch) applyNativeImportBatch(batch, documents);
+      } catch (error) {
+        setShelfNotice({ kind: "error", text: `无法打开文件选择器：${String(error)}` });
+      }
       return;
     }
     try {
@@ -1129,7 +1383,7 @@ export default function App() {
     } catch (error) {
       setShelfNotice({ kind: "error", text: `无法打开文件选择器：${String(error)}` });
     }
-  }, [handleImportSources]);
+  }, [applyNativeImportBatch, handleImportSources, runNativeDocumentImport]);
 
   const resolveContentHashForEntry = useCallback(async (entry: ShelfEntry): Promise<string> => {
     if (entry.contentHash && /^[a-f0-9]{64}$/.test(entry.contentHash)) {
@@ -1139,7 +1393,7 @@ export default function App() {
       return entry.id;
     }
     if (entry.available === false) {
-      throw new Error(`《${entry.title}》文件失联且无指纹，请重新关联文件后再加入分类或收藏`);
+      throw new Error(`《${entry.title}》文件失联且无指纹，${runtime.platform === "android" ? "请重新导入文件" : "请重新关联文件"}后再加入分类或收藏`);
     }
     try {
       const buf = await getShelfStore().readBook(entry.id);
@@ -1209,7 +1463,15 @@ export default function App() {
         throw new Error(`有 ${built.skipped.length} 条书架记录缺少有效内容指纹`);
       }
       const text = exportLibraryArchive(built.archive);
-      if (isTauriEnv()) {
+      if (runtime.platform === "android") {
+        const uri = await saveFileDialog({
+          title: "导出阅读存档",
+          defaultPath: `epub-reader-${new Date().toISOString().slice(0, 10)}.json`,
+          filters: [{ name: "EPUB Reader 存档", extensions: ["application/json", "json"] }],
+        });
+        if (!uri || Array.isArray(uri)) return;
+        await writeTextContentUri(uri, text);
+      } else if (isTauriEnv()) {
         const path = await saveFileDialog({
           title: "导出阅读存档",
           defaultPath: `epub-reader-${new Date().toISOString().slice(0, 10)}.json`,
@@ -1236,12 +1498,26 @@ export default function App() {
 
   const handleImportArchive = useCallback(async () => {
     if (shelfBusyRef.current || organizationBusyRef.current) return;
+    if (nativeImportRef.current) {
+      setShelfNotice({ kind: "warn", text: "正在导入书籍，暂不能替换书库记录" });
+      return;
+    }
     shelfBusyRef.current = true;
     organizationBusyRef.current = true;
     setShelfBusy(true);
     try {
       let text: string | null = null;
-      if (isTauriEnv()) {
+      if (runtime.platform === "android") {
+        const selected = await openFileDialog({
+          multiple: false,
+          directory: false,
+          title: "导入阅读存档",
+        });
+        const uri = Array.isArray(selected) ? selected[0] : selected;
+        if (uri) {
+          text = await readContentUriText(uri, 16 * 1024 * 1024);
+        }
+      } else if (isTauriEnv()) {
         const path = await openFileDialog({
           multiple: false,
           directory: false,
@@ -1325,38 +1601,48 @@ export default function App() {
       // 第三步：应用外观与阅读设置
       try {
         const importedSettings = incoming.archive.settings ?? {};
-        setSettings((previous) => ({
-          ...previous,
-          ...(typeof importedSettings.fontSizePx === "number" && importedSettings.fontSizePx >= 12 && importedSettings.fontSizePx <= 32
-            ? { fontSizePx: importedSettings.fontSizePx }
-            : {}),
-          ...(importedSettings.theme === "light" || importedSettings.theme === "dark" || importedSettings.theme === "sepia" || importedSettings.theme === "gray"
-            ? { theme: importedSettings.theme }
-            : {}),
-          ...(typeof importedSettings.gapPx === "number" && importedSettings.gapPx >= 0 && importedSettings.gapPx <= 96
-            ? { gapPx: importedSettings.gapPx }
-            : {}),
-          ...(typeof importedSettings.fontFamily === "string" ? { fontFamily: importedSettings.fontFamily } : {}),
-          ...(typeof importedSettings.lineHeight === "number" && importedSettings.lineHeight >= 1 && importedSettings.lineHeight <= 3 ? { lineHeight: importedSettings.lineHeight } : {}),
-          ...(typeof importedSettings.fontWeight === "number" && importedSettings.fontWeight >= 100 && importedSettings.fontWeight <= 900 ? { fontWeight: importedSettings.fontWeight } : {}),
-          ...(typeof importedSettings.letterSpacingPx === "number" && importedSettings.letterSpacingPx >= 0 && importedSettings.letterSpacingPx <= 32 ? { letterSpacingPx: importedSettings.letterSpacingPx } : {}),
-          ...(typeof importedSettings.wordSpacingPx === "number" && importedSettings.wordSpacingPx >= 0 && importedSettings.wordSpacingPx <= 64 ? { wordSpacingPx: importedSettings.wordSpacingPx } : {}),
-          ...(typeof importedSettings.customFontName === "string" ? { customFontName: importedSettings.customFontName } : {}),
-          ...(importedSettings.fontSource === "system" || importedSettings.fontSource === "imported" ? { fontSource: importedSettings.fontSource } : {}),
-          ...(typeof importedSettings.customFontId === "string" ? { customFontId: importedSettings.customFontId } : {}),
-          ...(typeof importedSettings.customCss === "string" ? { customCss: importedSettings.customCss } : {}),
-          ...(typeof importedSettings.forceHorizontal === "boolean" ? { forceHorizontal: importedSettings.forceHorizontal } : {}),
-          ...(typeof importedSettings.preloadNextChapter === "boolean" ? { preloadNextChapter: importedSettings.preloadNextChapter } : {}),
-          ...normalizePageOptions({
-            readingMode: importedSettings.readingMode,
-            pageMarginsPx: importedSettings.pageMarginsPx,
-            columnsPerView: importedSettings.columnsPerView,
-            gapPx:
-              typeof importedSettings.gapPx === "number"
-                ? importedSettings.gapPx
-                : previous.gapPx,
-          }),
-        }));
+        setSettings((previous) => {
+          // 存档可能来自旧版本：带非默认 gap 但缺 mode 时按 manual；
+          // 两者都缺时不覆盖本机 mode/gap。显式新 mode 始终优先。
+          const importedGapValid =
+            typeof importedSettings.gapPx === "number" &&
+            Number.isFinite(importedSettings.gapPx) &&
+            importedSettings.gapPx >= 0 &&
+            importedSettings.gapPx <= 96;
+          const importedGapMode =
+            importedSettings.spreadGapMode === "auto" || importedSettings.spreadGapMode === "manual"
+              ? importedSettings.spreadGapMode
+              : importedGapValid
+                ? (importedSettings.gapPx === DEFAULT_PAGE_GAP_PX ? "auto" : "manual")
+                : previous.spreadGapMode ?? "auto";
+          return {
+            ...previous,
+            ...(typeof importedSettings.fontSizePx === "number" && importedSettings.fontSizePx >= 12 && importedSettings.fontSizePx <= 32
+              ? { fontSizePx: importedSettings.fontSizePx }
+              : {}),
+            ...(importedSettings.theme === "light" || importedSettings.theme === "dark" || importedSettings.theme === "sepia" || importedSettings.theme === "gray"
+              ? { theme: importedSettings.theme }
+              : {}),
+            ...(typeof importedSettings.fontFamily === "string" ? { fontFamily: importedSettings.fontFamily } : {}),
+            ...(typeof importedSettings.lineHeight === "number" && importedSettings.lineHeight >= 1 && importedSettings.lineHeight <= 3 ? { lineHeight: importedSettings.lineHeight } : {}),
+            ...(typeof importedSettings.fontWeight === "number" && importedSettings.fontWeight >= 100 && importedSettings.fontWeight <= 900 ? { fontWeight: importedSettings.fontWeight } : {}),
+            ...(typeof importedSettings.letterSpacingPx === "number" && importedSettings.letterSpacingPx >= 0 && importedSettings.letterSpacingPx <= 32 ? { letterSpacingPx: importedSettings.letterSpacingPx } : {}),
+            ...(typeof importedSettings.wordSpacingPx === "number" && importedSettings.wordSpacingPx >= 0 && importedSettings.wordSpacingPx <= 64 ? { wordSpacingPx: importedSettings.wordSpacingPx } : {}),
+            ...(typeof importedSettings.customFontName === "string" ? { customFontName: importedSettings.customFontName } : {}),
+            ...(importedSettings.fontSource === "system" || importedSettings.fontSource === "imported" ? { fontSource: importedSettings.fontSource } : {}),
+            ...(typeof importedSettings.customFontId === "string" ? { customFontId: importedSettings.customFontId } : {}),
+            ...(typeof importedSettings.customCss === "string" ? { customCss: importedSettings.customCss } : {}),
+            ...(typeof importedSettings.forceHorizontal === "boolean" ? { forceHorizontal: importedSettings.forceHorizontal } : {}),
+            ...(typeof importedSettings.preloadNextChapter === "boolean" ? { preloadNextChapter: importedSettings.preloadNextChapter } : {}),
+            ...normalizePageOptions({
+              readingMode: importedSettings.readingMode,
+              pageMarginsPx: importedSettings.pageMarginsPx,
+              columnsPerView: importedSettings.columnsPerView,
+              gapPx: importedGapValid ? (importedSettings.gapPx as number) : previous.gapPx,
+              spreadGapMode: importedGapMode,
+            }),
+          };
+        });
         if (typeof importedSettings.uiScale === "number" && importedSettings.uiScale >= 0.75 && importedSettings.uiScale <= 1.5) {
           setUiScale(importedSettings.uiScale);
         }
@@ -1611,6 +1897,14 @@ export default function App() {
     };
   }, [readerNotice]);
 
+  useEffect(() => {
+    return () => {
+      if (bookmarkToastTimerRef.current) {
+        window.clearTimeout(bookmarkToastTimerRef.current);
+      }
+    };
+  }, []);
+
   const showReaderNotice = useCallback((text: string, kind: "ok" | "warn" | "error" = "warn"): void => {
     setReaderNotice({ kind, text });
   }, []);
@@ -1670,24 +1964,36 @@ export default function App() {
         await progressWriterRef.current?.flush();
         progressWriterRef.current?.beginSession(id);
         let entry = originalEntry;
-        if (isTauriEnv() && entry.available === false) {
-          const selected = await openFileDialog({
-            multiple: false,
-            directory: false,
-            title: `重新定位《${entry.title}》`,
-            filters: [{ name: "EPUB 电子书", extensions: ["epub"] }],
-          });
-          if (!selected || Array.isArray(selected)) {
-            shelfBusyRef.current = false;
-            setShelfBusy(false);
-            setPhase({ phase: "idle" });
-            setSearchNavigationBusy(false);
-            return;
+        if (entry.available === false) {
+          if (runtime.platform === "android") {
+            const restored = await reimportAndroidMissing(entry);
+            if (!restored) {
+              shelfBusyRef.current = false;
+              setShelfBusy(false);
+              setPhase({ phase: "idle" });
+              setSearchNavigationBusy(false);
+              return;
+            }
+            entry = restored;
+          } else if (isTauriEnv()) {
+            const selected = await openFileDialog({
+              multiple: false,
+              directory: false,
+              title: `重新定位《${entry.title}》`,
+              filters: [{ name: "EPUB 电子书", extensions: ["epub"] }],
+            });
+            if (!selected || Array.isArray(selected)) {
+              shelfBusyRef.current = false;
+              setShelfBusy(false);
+              setPhase({ phase: "idle" });
+              setSearchNavigationBusy(false);
+              return;
+            }
+            entry = await getShelfStore().relink(id, selected);
+            setShelfEntries((prev) =>
+              prev.map((item) => (item.id === id ? entry : item))
+            );
           }
-          entry = await getShelfStore().relink(id, selected);
-          setShelfEntries((prev) =>
-            prev.map((item) => (item.id === id ? entry : item))
-          );
         }
         let buf: Uint8Array;
         try {
@@ -1780,7 +2086,7 @@ export default function App() {
         setSearchNavigationBusy(false);
       }
     },
-    [openParsedBook]
+    [openParsedBook, reimportAndroidMissing]
   );
 
   // 打开书后渐进统计章节字数；同一本书切章不重建该任务。
@@ -1862,7 +2168,10 @@ export default function App() {
   }, [view, book, chapterCountsState, dispatchScrub]);
 
   const handleShelfDelete = useCallback(async (id: string) => {
-    if (shelfBusyRef.current) return;
+    if (shelfBusyRef.current || nativeImportRef.current) {
+      if (nativeImportRef.current) setShelfNotice({ kind: "warn", text: "正在导入书籍，暂不能删除" });
+      return;
+    }
     shelfBusyRef.current = true;
     setShelfBusy(true);
     try {
@@ -1880,6 +2189,10 @@ export default function App() {
 
   const handleShelfDeleteMany = useCallback(async (ids: string[]) => {
     if (shelfBusyRef.current || ids.length === 0) return;
+    if (nativeImportRef.current) {
+      setShelfNotice({ kind: "warn", text: "正在导入书籍，暂不能删除" });
+      return;
+    }
     shelfBusyRef.current = true;
     setShelfBusy(true);
     try {
@@ -2845,6 +3158,8 @@ export default function App() {
       }
     }
     // 乐观更新 UI，再落盘
+    const isAdded = next.length > currentBookmarks.length;
+    showBookmarkToast(isAdded ? "已加入书签" : "已移除书签", isAdded ? "add" : "remove");
     setShelfEntries((prev) =>
       prev.map((entry) => (entry.id === currentShelfId ? { ...entry, bookmarks: next } : entry))
     );
@@ -2860,7 +3175,22 @@ export default function App() {
         )
       )
       .catch((error) => setShelfError(`书签保存失败：${String(error)}`));
-  }, [currentShelfId, currentBookmarks, spineIndex, chapterState]);
+  }, [currentShelfId, currentBookmarks, spineIndex, chapterState, showBookmarkToast]);
+
+  const handleDeleteBookmark = useCallback(
+    (bookmarkId: string) => {
+      if (!currentShelfId) return;
+      const next = currentBookmarks.filter((bookmark) => bookmark.id !== bookmarkId);
+      showBookmarkToast("已移除书签", "remove");
+      setShelfEntries((prev) =>
+        prev.map((entry) => (entry.id === currentShelfId ? { ...entry, bookmarks: next } : entry))
+      );
+      void getShelfStore()
+        .setBookmarks(currentShelfId, next)
+        .catch((error) => setShelfError(`书签删除失败：${String(error)}`));
+    },
+    [currentShelfId, currentBookmarks, showBookmarkToast]
+  );
 
   const handleSelectBookmark = useCallback(
     (bookmarkId: string) => {
@@ -2992,6 +3322,7 @@ export default function App() {
       pageMarginsPx: settings.pageMarginsPx,
       columnsPerView: settings.columnsPerView === 2 ? 2 : 1,
       gapPx: settings.gapPx,
+      spreadGapMode: settings.spreadGapMode ?? "auto",
     });
   }, [
     settings.fontSizePx,
@@ -3010,12 +3341,25 @@ export default function App() {
     settings.pageMarginsPx,
     settings.columnsPerView,
     settings.gapPx,
+    settings.spreadGapMode,
     uiScale,
   ]);
 
   const changeTheme = (theme: Theme): void => {
     setSettings((s) => ({ ...s, theme }));
   };
+
+  // 同步主题至 html 与 body，保证全屏与全端窗口背景无死角对齐
+  useEffect(() => {
+    const themeVal = settings.theme && settings.theme !== "light" ? settings.theme : null;
+    if (themeVal) {
+      document.documentElement.setAttribute("data-theme", themeVal);
+      document.body.setAttribute("data-theme", themeVal);
+    } else {
+      document.documentElement.removeAttribute("data-theme");
+      document.body.removeAttribute("data-theme");
+    }
+  }, [settings.theme]);
 
   const resetDefaults = (): void => {
     setSettings({ ...DEFAULT_SETTINGS });
@@ -3345,6 +3689,30 @@ export default function App() {
     setShelfBusy(false);
   }, [persistShelfProgress, persistChapterCountCache, closeForeground, closeImageOverlay]);
 
+  const handleAndroidBack = useCallback((): void => {
+    if (imageRequestRef.current) {
+      closeImageOverlay();
+      return;
+    }
+    const current = foregroundRef.current;
+    if (current.kind !== "none") {
+      if (isSidebarOpen) {
+        handleSidebarClose();
+        return;
+      }
+      closeForeground();
+      return;
+    }
+    if (view === "reader") {
+      void handleBackToShelf();
+    }
+  }, [closeForeground, closeImageOverlay, handleBackToShelf, handleSidebarClose, isSidebarOpen, view]);
+
+  useAndroidBack(
+    runtime.usesAndroidBack && (view === "reader" || foreground.kind !== "none" || imageRequest !== null),
+    handleAndroidBack
+  );
+
   // 视图提交后清空整本书会话状态。ResourceServer 的实际 revoke 与 Book 释放由
   // 会话退出执行，并且发生在 ReaderView 卸载与 paginator dispose 之后。
   useEffect(() => {
@@ -3411,7 +3779,7 @@ export default function App() {
       });
     };
     document.addEventListener("visibilitychange", flushWhenHidden);
-    if (!isTauriEnv()) {
+    if (!runtime.hasDesktopWindowChrome) {
       return () => document.removeEventListener("visibilitychange", flushWhenHidden);
     }
 
@@ -3513,31 +3881,171 @@ export default function App() {
 
   // ---- 全屏 / 沉浸禅模式（Zen Mode） ----
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [fullscreenBusy, setFullscreenBusy] = useState(false);
+  const [readerZenMode, setReaderZenMode] = useState(true);
 
-  const toggleFullscreen = useCallback(() => {
-    if (isTauriEnv()) {
-      try {
-        const win = getCurrentWindow();
-        void win.isFullscreen().then((f) => {
-          void win.setFullscreen(!f);
-          setIsFullscreen(!f);
-        });
-      } catch {}
-      return;
-    }
-    if (!document.fullscreenElement) {
-      void document.documentElement.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {});
-    } else {
-      void document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {});
+  const fullscreenControllerRef = useRef<NativeFullscreenController | null>(null);
+  if (!fullscreenControllerRef.current && runtime.hasDesktopWindowChrome) {
+    try {
+      const win = getCurrentWindow();
+      const port: NativeFullscreenPort = {
+        isFullscreen: () => win.isFullscreen(),
+        isMaximized: () => win.isMaximized(),
+        unmaximize: () => win.unmaximize(),
+        maximize: () => win.maximize(),
+        setFullscreen: (v) => win.setFullscreen(v),
+      };
+      const isWindows = runtime.platform === "windows";
+      fullscreenControllerRef.current = createNativeFullscreenController(
+        port,
+        isWindows,
+        (fs) => setIsFullscreen(fs),
+        (busy) => setFullscreenBusy(busy)
+      );
+    } catch {}
+  }
+
+  const toggleWebFullscreen = useCallback(async () => {
+    if (typeof document === "undefined") return;
+    try {
+      if (!document.fullscreenElement) {
+        if (document.documentElement.requestFullscreen) {
+          await document.documentElement.requestFullscreen();
+        } else {
+          throw new Error("当前环境不支持全屏 API");
+        }
+      } else {
+        if (document.exitFullscreen) {
+          await document.exitFullscreen();
+        }
+      }
+    } catch (err) {
+      setRuntimeIssues((issues) => [...issues, `全屏切换失败：${String(err)}`]);
     }
   }, []);
 
+  const toggleFullscreen = useCallback(async () => {
+    if (isTauriEnv()) {
+      const controller = fullscreenControllerRef.current;
+      if (controller) {
+        try {
+          await controller.toggle();
+        } catch (err) {
+          console.warn("Tauri setFullscreen failed", err);
+          setRuntimeIssues((issues) => [...issues, `窗口全屏切换失败：${String(err)}`]);
+        }
+      }
+      return;
+    }
+    await toggleWebFullscreen();
+  }, [toggleWebFullscreen]);
+
+  const toggleZenMode = useCallback(() => {
+    setReaderZenMode((prev) => !prev);
+  }, []);
+
   useEffect(() => {
-    const handleFullscreenChange = () => {
-      setIsFullscreen(Boolean(document.fullscreenElement));
+    if (!isTauriEnv()) {
+      const handleFullscreenChange = () => {
+        setIsFullscreen(Boolean(document.fullscreenElement));
+      };
+      document.addEventListener("fullscreenchange", handleFullscreenChange);
+      return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    }
+    if (!runtime.hasDesktopWindowChrome) return;
+    try {
+      const controller = fullscreenControllerRef.current;
+      if (controller) {
+        void controller.refresh();
+        const win = getCurrentWindow();
+        const unlistenPromise = win.onResized(() => {
+          void controller.refresh();
+        });
+        return () => {
+          void unlistenPromise.then((unlisten) => unlisten()).catch(() => {});
+        };
+      }
+    } catch {}
+  }, []);
+
+  // 跨 iframe 键盘事件穿透代理：解决阅读器焦点落入正文 iframe 时桌面全局快捷键失效的问题
+  useEffect(() => {
+    const attachedDocs = new WeakSet<Document>();
+
+    const attachIframeKeyboardForwarder = (iframe: HTMLIFrameElement) => {
+      try {
+        const doc = iframe.contentDocument || iframe.contentWindow?.document;
+        if (!doc || attachedDocs.has(doc)) return;
+        attachedDocs.add(doc);
+
+        const handleIframeKey = (e: KeyboardEvent) => {
+          const t = e.target as HTMLElement | null;
+          if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) {
+            if (e.key !== "Escape") return;
+          }
+
+          const isModifier = e.ctrlKey || e.metaKey || e.altKey;
+          const isSpecial =
+            e.key === "F11" ||
+            e.key === "Escape" ||
+            e.key === "[" ||
+            e.key === "]";
+
+          if (isModifier || isSpecial) {
+            // 拦截浏览器/WebView 内置默认行为（如 Ctrl+T 新建标签页、Ctrl+F 默认查找等）
+            if (
+              (e.ctrlKey || e.metaKey) &&
+              (e.key === "f" || e.key === "F" || e.key === "t" || e.key === "T" || e.key === "b" || e.key === "B")
+            ) {
+              e.preventDefault();
+            }
+            if (e.key === "F11") {
+              e.preventDefault();
+            }
+
+            // 构造合成事件分发至宿主主窗口
+            const synthetic = new KeyboardEvent(e.type, {
+              key: e.key,
+              code: e.code,
+              keyCode: e.keyCode,
+              which: e.which,
+              ctrlKey: e.ctrlKey,
+              shiftKey: e.shiftKey,
+              altKey: e.altKey,
+              metaKey: e.metaKey,
+              repeat: e.repeat,
+              bubbles: true,
+              cancelable: true,
+            });
+            window.dispatchEvent(synthetic);
+          }
+        };
+
+        doc.addEventListener("keydown", handleIframeKey, true);
+      } catch {}
     };
-    document.addEventListener("fullscreenchange", handleFullscreenChange);
-    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+
+    const scanAndAttach = () => {
+      const iframes = document.querySelectorAll<HTMLIFrameElement>("iframe");
+      iframes.forEach(attachIframeKeyboardForwarder);
+    };
+
+    scanAndAttach();
+
+    const observer = new MutationObserver(() => {
+      scanAndAttach();
+    });
+
+    if (document.body) {
+      observer.observe(document.body, { childList: true, subtree: true });
+    }
+
+    const timer = setInterval(scanAndAttach, 400);
+
+    return () => {
+      observer.disconnect();
+      clearInterval(timer);
+    };
   }, []);
 
   const isReaderPanelOpen = Boolean(
@@ -3556,6 +4064,7 @@ export default function App() {
     view,
     ready,
     book,
+    spineIndex,
     searchOpen,
     tocOpen,
     menuOpen,
@@ -3572,6 +4081,7 @@ export default function App() {
     view,
     ready,
     book,
+    spineIndex,
     searchOpen,
     tocOpen,
     menuOpen,
@@ -3584,7 +4094,7 @@ export default function App() {
     navigationPending: navigationPendingRef.current,
   };
 
-  // ---- 桌面全局快捷键集中分发与键盘翻页（Zen UI Packet A） ----
+  // ---- 桌面全局快捷键集中分发与键盘翻页（Zen UI Packet 3 键盘流） ----
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (isSelectAllShortcut(e)) {
@@ -3593,11 +4103,19 @@ export default function App() {
         return;
       }
       const t = e.target as HTMLElement | null;
+      const st = latestShortcutStateRef.current;
+
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) {
+        // 在文本输入框/搜索框按下 Escape 时失焦并收起当前活动弹窗
+        if (e.key === "Escape") {
+          t.blur();
+          if (st.isReaderPanelOpen || isSidebarOpen || st.bookmarkMenuOpen || st.noteComposer !== null) {
+            handleSidebarClose();
+            closeForeground();
+          }
+        }
         return;
       }
-
-      const st = latestShortcutStateRef.current;
 
       // 1. Ctrl + F / Cmd + F：打开/切换正文搜索
       if ((e.ctrlKey || e.metaKey) && (e.key === "f" || e.key === "F")) {
@@ -3609,7 +4127,16 @@ export default function App() {
         return;
       }
 
-      // 2. Ctrl + T：切换展开/关闭侧边栏（目录/书签/笔记）
+      // 2. Ctrl + Shift + B：呼出/切换书签抽屉
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === "b" || e.key === "B")) {
+        e.preventDefault();
+        if (st.view === "reader") {
+          handleToggleBookmarks();
+        }
+        return;
+      }
+
+      // 3. Ctrl + T：切换展开/关闭侧边栏（目录/书签/笔记）
       if ((e.ctrlKey || e.metaKey) && (e.key === "t" || e.key === "T")) {
         e.preventDefault();
         if (st.view === "reader") {
@@ -3618,8 +4145,8 @@ export default function App() {
         return;
       }
 
-      // 3. Ctrl + B：添加/移除当前页书签
-      if ((e.ctrlKey || e.metaKey) && (e.key === "b" || e.key === "B")) {
+      // 4. Ctrl + B：添加/移除当前页书签
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === "b" || e.key === "B")) {
         e.preventDefault();
         if (st.view === "reader") {
           handleToggleBookmark();
@@ -3627,30 +4154,59 @@ export default function App() {
         return;
       }
 
-      // 4. F11：进入/退出全屏（纯净阅读模式）
+      // 5. F11：进入/退出全屏（纯净沉浸模式）
       if (e.key === "F11") {
         e.preventDefault();
-        toggleFullscreen();
+        if (e.repeat) return;
+        void toggleFullscreen();
         return;
       }
 
-      // 5. Alt + Left / Alt + Right：历史阅读位置后退 / 前进
+      // 6. Alt + Left / Alt + Right：历史阅读位置后退 / 前进，若无跳转历史则切上一章/下一章
       if (e.altKey && e.key === "ArrowLeft") {
         e.preventDefault();
-        if (st.view === "reader" && st.readerHistory.back.length > 0 && st.readerDisplayReady && !st.navigationPending) {
-          handleHistoryBack();
+        if (st.view === "reader" && st.readerDisplayReady && !st.navigationPending) {
+          if (st.readerHistory.back.length > 0) {
+            handleHistoryBack();
+          } else if (st.spineIndex > 0 && st.book) {
+            const path = spineItemPath(st.book, st.spineIndex - 1);
+            if (path) handleTocNavigate(path);
+          }
         }
         return;
       }
       if (e.altKey && e.key === "ArrowRight") {
         e.preventDefault();
-        if (st.view === "reader" && st.readerHistory.forward.length > 0 && st.readerDisplayReady && !st.navigationPending) {
-          handleHistoryForward();
+        if (st.view === "reader" && st.readerDisplayReady && !st.navigationPending) {
+          if (st.readerHistory.forward.length > 0) {
+            handleHistoryForward();
+          } else if (st.book && st.spineIndex < st.book.spine.length - 1) {
+            const path = spineItemPath(st.book, st.spineIndex + 1);
+            if (path) handleTocNavigate(path);
+          }
         }
         return;
       }
 
-      // 6. Esc：优先关闭任意处于激活状态的前景/弹窗/抽屉；若无浮层且全屏中，退回窗口模式
+      // 7. [ 与 ] 键：快速跳转上一章 / 下一章
+      if (e.key === "[" && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        e.preventDefault();
+        if (st.view === "reader" && st.readerDisplayReady && !st.navigationPending && st.spineIndex > 0 && st.book) {
+          const path = spineItemPath(st.book, st.spineIndex - 1);
+          if (path) handleTocNavigate(path);
+        }
+        return;
+      }
+      if (e.key === "]" && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        e.preventDefault();
+        if (st.view === "reader" && st.readerDisplayReady && !st.navigationPending && st.book && st.spineIndex < st.book.spine.length - 1) {
+          const path = spineItemPath(st.book, st.spineIndex + 1);
+          if (path) handleTocNavigate(path);
+        }
+        return;
+      }
+
+      // 8. Esc：优先关闭任意处于激活状态的前景/弹窗/抽屉；若无浮层且全屏中，退回窗口模式
       if (e.key === "Escape") {
         if (st.isReaderPanelOpen || isSidebarOpen || st.bookmarkMenuOpen || st.noteComposer !== null) {
           handleSidebarClose();
@@ -3658,7 +4214,8 @@ export default function App() {
           return;
         }
         if (st.isFullscreen) {
-          toggleFullscreen();
+          if (fullscreenBusy) return;
+          void toggleFullscreen();
           return;
         }
         return;
@@ -3676,11 +4233,27 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [closeForeground, handleHistoryBack, handleHistoryForward, handleToggleBookmark, handleToggleSidebar, handleSidebarClose, isSidebarOpen, toggleFullscreen, openPanel, closePanel]);
+  }, [
+    closeForeground,
+    fullscreenBusy,
+    handleHistoryBack,
+    handleHistoryForward,
+    handleToggleBookmark,
+    handleToggleBookmarks,
+    handleToggleSidebar,
+    handleSidebarClose,
+    isSidebarOpen,
+    toggleFullscreen,
+    openPanel,
+    closePanel,
+    handleTocNavigate,
+  ]);
 
   return (
     <div
       className={`app${dragActive ? " drag-active" : ""}${isFullscreen ? " is-fullscreen" : ""}${isDockedSidebar ? ` has-docked-sidebar docked-side-${sidebarSide}` : ""}`}
+      data-platform={runtime.platform}
+      data-shell={runtime.shell}
       data-theme={settings.theme === "dark" ? "dark" : settings.theme === "sepia" ? "sepia" : settings.theme === "gray" ? "gray" : undefined}
       style={{ "--ui-scale": uiScale } as CSSProperties}
     >
@@ -3713,7 +4286,23 @@ export default function App() {
         onToggleBookmark={view === "reader" ? handleToggleBookmark : undefined}
         bookmarksOpen={view === "reader" && isSidebarOpen && activeSidebarTab === "bookmarks"}
         onOpenBookmarks={view === "reader" ? handleToggleBookmarks : undefined}
-        zenMode={isFullscreen}
+        zenMode={view === "reader" && (readerZenMode || isFullscreen)}
+        onToggleZenMode={view === "reader" ? toggleZenMode : undefined}
+        progressPct={view === "reader" && ready ? progressPct : undefined}
+        chapterIndex={view === "reader" && ready ? spineIndex : undefined}
+        totalChapters={view === "reader" && ready && book ? book.spine.length : undefined}
+        isFullscreen={isFullscreen}
+        fullscreenBusy={fullscreenBusy}
+        onToggleFullscreen={view === "reader" ? toggleFullscreen : undefined}
+        onToggleAssistant={
+          view === "reader" && IS_AI_EDITION
+            ? () => {
+                if (assistantOpen) closePanel("assistant");
+                else openPanel("assistant");
+              }
+            : undefined
+        }
+        assistantOpen={view === "reader" && assistantOpen}
       />
       {view === "reader" && ready && (
         <SidebarDrawer
@@ -3729,6 +4318,7 @@ export default function App() {
           onNavigateToc={handleTocNavigate}
           bookmarks={sortedBookmarks}
           onSelectBookmark={handleSelectBookmark}
+          onDeleteBookmark={handleDeleteBookmark}
           notes={noteViewModels}
           onNavigateNote={(viewNote) => {
             const note = currentNotes.find((candidate) => candidate.id === viewNote.id);
@@ -3757,6 +4347,7 @@ export default function App() {
               onScopeChange={setShelfScope}
               onApplyOrganization={handleApplyOrganization}
               busy={shelfBusy}
+              importActive={nativeImport !== null}
               theme={settings.theme}
               onThemeChange={changeTheme}
               onOpen={handleShelfOpen}
@@ -3858,10 +4449,36 @@ export default function App() {
                   lineHeight={settings.lineHeight}
                   onLineHeightChange={(v) =>
                     setSettings((s2) => {
-                      const lineHeight = clamp(v, 1.4, 2.2);
+                      const lineHeight = clamp(v, 1.2, 2.4);
                       return lineHeight === s2.lineHeight ? s2 : { ...s2, lineHeight };
                     })
                   }
+                  onResetLineHeight={() =>
+                    setSettings((s2) => ({ ...s2, lineHeight: undefined }))
+                  }
+                  fontWeight={settings.fontWeight}
+                  onFontWeightChange={(v) =>
+                    setSettings((s2) => ({ ...s2, fontWeight: v }))
+                  }
+                  letterSpacingPx={settings.letterSpacingPx}
+                  onLetterSpacingChange={(v) =>
+                    setSettings((s2) => ({ ...s2, letterSpacingPx: v }))
+                  }
+                  wordSpacingPx={settings.wordSpacingPx}
+                  onWordSpacingChange={(v) =>
+                    setSettings((s2) => ({ ...s2, wordSpacingPx: v }))
+                  }
+                  gapPx={settings.gapPx}
+                  spreadGapMode={settings.spreadGapMode ?? "auto"}
+                  onGapPxChange={(gap) =>
+                    setSettings((s2) => ({ ...s2, gapPx: gap, spreadGapMode: "manual" }))
+                  }
+                  onSpreadGapModeChange={(mode) =>
+                    setSettings((s2) => ({ ...s2, spreadGapMode: mode }))
+                  }
+                  spreadArea={chapterState.status === "ready" ? chapterState.spreadArea : undefined}
+                  uiScale={uiScale}
+                  onUiScaleChange={(scale) => setUiScale(scale)}
                   pageMargins={settings.pageMarginsPx}
                   onPageMarginsChange={(margins) =>
                     setSettings((s2) => ({ ...s2, pageMarginsPx: margins }))
@@ -4166,7 +4783,7 @@ export default function App() {
             handleCommitSeek(targetRatio);
           }}
           chapterTicks={chapterTicks}
-          zenMode={isFullscreen}
+          zenMode={view === "reader" && (readerZenMode || isFullscreen)}
           scrubState={scrubUiState}
           contentAxis={contentAxis}
           onCommitSeek={handleCommitSeek}
@@ -4199,6 +4816,39 @@ export default function App() {
         >
           {(shelfNotice ?? readerNotice)!.text}
         </div>
+      )}
+      {bookmarkToast && (
+        <div
+          className={`reader-bookmark-toast ${bookmarkToast.action}${bookmarkToast.closing ? " is-closing" : ""}`}
+          role="status"
+          aria-live="polite"
+        >
+          <span className="bookmark-toast-icon" aria-hidden="true">
+            {bookmarkToast.action === "add" ? (
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+                <line x1="3" y1="3" x2="21" y2="21" />
+              </svg>
+            )}
+          </span>
+          <span className="bookmark-toast-text">{bookmarkToast.text}</span>
+        </div>
+      )}
+      {nativeImport && (
+        <NativeImportPanel
+          phase={nativeImport.phase}
+          completed={nativeImport.completed}
+          total={nativeImport.total}
+          fileNameSummary={nativeImport.fileNameSummary}
+          cancelState={nativeImport.cancelState}
+          collapsed={nativeImport.collapsed}
+          onToggleCollapsed={handleToggleNativeImportCollapsed}
+          onCancel={() => void handleCancelNativeImport()}
+        />
       )}
       {shelfBusy && (
         <div className="app-busy" aria-busy="true">

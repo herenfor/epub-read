@@ -5,17 +5,17 @@ import { bootstrapApp, type AppBootstrapDependencies } from "./appBootstrap";
 
 const root = {} as HTMLElement;
 const buildInfo = {
-  version: "0.2.6",
+  version: "0.2.7",
   edition: APP_EDITION,
   protocolVersion: 1 as const,
-  target: "test-target",
+  target: "x86_64-pc-windows-msvc",
   profile: "test",
   debug: true,
 };
 
 function dependencies(overrides: Partial<AppBootstrapDependencies> = {}): AppBootstrapDependencies {
   return {
-    isDesktop: () => false,
+    isNativeHost: () => false,
     readBuildInfo: async () => buildInfo,
     loadApp: async () => ({ default: () => null }),
     mountApp: () => undefined,
@@ -52,7 +52,7 @@ describe("application bootstrap", () => {
     let loads = 0;
     let failures = 0;
     const result = await bootstrapApp(root, dependencies({
-      isDesktop: () => true,
+      isNativeHost: () => true,
       readBuildInfo: async () => ({ ...buildInfo, edition: APP_EDITION === "core" ? "ai" : "core" }),
       loadApp: async () => { loads++; return { default: () => null }; },
       mountFailure: () => { failures++; },
@@ -67,7 +67,7 @@ describe("application bootstrap", () => {
     let loads = 0;
     let failures = 0;
     const result = await bootstrapApp(root, dependencies({
-      isDesktop: () => true,
+      isNativeHost: () => true,
       readBuildInfo: async () => { throw new Error("IPC unavailable"); },
       loadApp: async () => { loads++; return { default: () => null }; },
       mountFailure: () => { failures++; },

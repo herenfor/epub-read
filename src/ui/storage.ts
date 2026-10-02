@@ -1,6 +1,6 @@
 import { sanitizePersistedTextAnchor } from "../render/textAnchor";
 import type { MediaReadingAnchor } from "../render/paginator";
-import type { PageMarginsPx, ReadingMode } from "../render/settings";
+import type { PageMarginsPx, ReadingMode, SpreadGapMode } from "../render/settings";
 
 const PREFIX = "epub-reader:";
 
@@ -80,6 +80,8 @@ export interface SavedSettings {
   columnsPerView?: 1 | 2;
   /** 列间距 px（页面选项“额外边距”），与渲染设置同源 */
   gapPx?: number;
+  /** 双页中缝模式；旧设置缺省，读取边界按 gap 迁移 */
+  spreadGapMode?: SpreadGapMode;
 }
 
 export function readSavedSettings(): SavedSettings {

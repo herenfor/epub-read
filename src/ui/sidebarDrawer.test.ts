@@ -123,4 +123,29 @@ describe("Zen UI SidebarDrawer 组件与交互契约（Packet B）", () => {
     );
     expect(rightHtml).toContain("side-right");
   });
+
+  it("当目录章节数超过 8 个时渲染章节过滤输入框", () => {
+    const largeToc: TocNode[] = Array.from({ length: 12 }, (_, i) => ({
+      label: `第 ${i + 1} 章 标题`,
+      href: `ch${i + 1}.xhtml`,
+      children: [],
+    }));
+    const html = renderToStaticMarkup(
+      createElement(SidebarDrawer, { ...baseProps, toc: largeToc, activeTab: "toc" })
+    );
+    expect(html).toContain("sidebar-toc-filter-input");
+    expect(html).toContain("过滤章节...");
+  });
+
+  it("书签 Tab 当提供 onDeleteBookmark 时渲染单个书签删除按键", () => {
+    const html = renderToStaticMarkup(
+      createElement(SidebarDrawer, {
+        ...baseProps,
+        activeTab: "bookmarks",
+        onDeleteBookmark: vi.fn(),
+      })
+    );
+    expect(html).toContain("sidebar-bookmark-del-btn");
+    expect(html).toContain("删除此书签");
+  });
 });

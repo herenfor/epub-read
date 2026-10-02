@@ -19,15 +19,15 @@ describe("application build session and AI development policy", () => {
 
   it("stores an immutable desktop build projection", () => {
     const buildInfo = {
-      version: "0.2.6",
+      version: "0.2.7",
       edition: "ai" as const,
       protocolVersion: 1 as const,
-      target: "test",
+      target: "x86_64-pc-windows-msvc",
       profile: "debug",
       debug: true,
     };
     const session = setAppBuildSession({ source: "desktop", buildInfo });
-    expect(session).toEqual({ source: "desktop", edition: "ai", debug: true, buildInfo });
+    expect(session).toEqual({ source: "desktop", edition: "ai", debug: true, platform: "windows", shell: "desktop", buildInfo });
     expect(Object.isFrozen(session)).toBe(true);
     expect(Object.isFrozen(session.buildInfo)).toBe(true);
     expect(getAppBuildSession()).toBe(session);

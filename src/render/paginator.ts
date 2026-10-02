@@ -57,9 +57,33 @@ import {
 } from "./pagedSpread";
 import { imageRequestFromTarget } from "./imageActivation";
 import { columnAtPoint, containingFragmentAtPoint, type FragmentSpace } from "./fragmentGeometry";
+import {
+  resolveSpreadReadingArea,
+  type SpreadReadingArea,
+} from "./spreadReadingArea";
 
 /** 常规布局应远早于此完成；极端字体/引擎停滞时只解除隐藏，不伪造 ready。 */
 const INITIAL_RENDER_GATE_TIMEOUT_MS = 20_000;
+
+/** 舒适双页写入 viewer 的 reader-owned 根内联属性；restore 只碰这些。 */
+const SPREAD_AREA_ROOT_STYLE_PROPERTIES = [
+  "box-sizing",
+  "width",
+  "margin-left",
+  "margin-right",
+  "column-count",
+  "column-width",
+  "column-gap",
+  "column-fill",
+] as const;
+
+export interface SpreadAreaSnapshot {
+  readonly baseLeftPx: number;
+  readonly baseRightPx: number;
+  readonly marginLeftPx: number;
+  readonly marginRightPx: number;
+  readonly gapPx: number;
+}
 
 export type ChapterState =
   | { status: "loading" }
@@ -81,6 +105,8 @@ export type ChapterState =
       atEnd?: boolean;
       /** 叶页（物理列）编号区间，如 { first: 3, last: 4, total: 5 } */
       leafRange?: { first: number; last: number; total: number } | null;
+      /** 实际舒适双页阅读区；非双页/回退时不提供，UI 不自行猜屏宽。 */
+      spreadArea?: SpreadAreaSnapshot;
     }
   | { status: "error"; message: string };
 
@@ -2231,6 +2257,10 @@ export class ChapterPaginator {
   /** 本次布局的分栏几何（B 的 computePagedGeometry 结果）。 */
   private spreadGeometry: SpreadGeometry | null = null;
   private spreadLayout: SpreadLayout | null = null;
+  /** 本轮实际应用的舒适双页阅读区；回退/单页/滚动为 null。 */
+  private spreadArea: SpreadReadingArea | null = null;
+  /** 舒适双页根内联样式快照；restore 精确、仅限 reader-owned 属性。 */
+  private spreadAreaStyleRestore: (() => void) | null = null;
   private tailSpacer: HTMLElement | null = null;
   private bookmarkSpreadCache = new Map<string, number>();
 
@@ -2854,6 +2884,8 @@ export class ChapterPaginator {
     const win = doc.defaultView;
     const measuredWidth = this.iframe.clientWidth;
     const measuredHeight = this.iframe.clientHeight;
+    // 舒适双页的根内联样式先精确恢复，再恢复其余二阶段补偿。
+    this.restoreSpreadReadingAreaStyles();
     // 第二遍 margin / fit-content 处理写回的 inline 值要先恢复，
     // 避免字号/窗口变化后按旧值布局
     this.restoreInlineBoxFixes();
@@ -2894,12 +2926,10 @@ export class ChapterPaginator {
     const gap = this.settings.gapPx;
     const h = pageH;
     const scrollMode = this.scrollMode;
-    // B-154：滚动模式的左右默认留白 16px、上下默认 12px；显式值（含 0）优先。
-    // 水平留白只在 scrollViewerStyles 的 padding 中扣一次，viewer 宽度保持
-    // pageW，避免“缩宽 + padding”重复扣除正文宽度。
+    // 旧单页/滚动语义保留：滚动左右默认 16px；分页左右无显式值时为 0。
     const marginLeft = Math.max(0, margins.left ?? (scrollMode ? 16 : 0));
     const marginRight = Math.max(0, margins.right ?? (scrollMode ? 16 : 0));
-    const w = scrollMode ? pageW : Math.max(0, pageW - marginLeft - marginRight);
+    const legacyW = scrollMode ? pageW : Math.max(0, pageW - marginLeft - marginRight);
     // 极窄/矮窗口只缩小有效留白以留出正文，不修改保存值。
     const requestedTop = margins.top !== undefined
       ? Math.max(0, margins.top)
@@ -2915,18 +2945,81 @@ export class ChapterPaginator {
     const hasText = (viewer.textContent ?? "").trim().length > 0;
     const hasImg = viewer.querySelector("img") !== null;
     const pureImagePage = !this.fixedLayout && !hasText && hasImg;
+    const viewerClasses = viewer.classList;
+    const fullpageVisual =
+      viewerClasses?.contains?.("fullpage-image") === true ||
+      viewerClasses?.contains?.("pure-image-page") === true;
+    const onlyChildClass =
+      viewer.children.length === 1
+        ? (viewer.firstElementChild as HTMLElement | null)?.className ?? ""
+        : "";
+    const fullpageChild =
+      typeof onlyChildClass === "string" &&
+      /(?:^|\s)(?:illus|kuchie|cover|duokan-image-fullscreen)(?:\s|$)/u.test(onlyChildClass);
     const padTop = pureImagePage ? 0 : Math.round(requestedTop * verticalScale);
     const padBottom = pureImagePage ? 0 : Math.round(requestedBottom * verticalScale);
     const requestedColumns = this.fixedLayout || scrollMode ? 1 : this.settings.columnsPerView === 2 ? 2 : 1;
-    // 统一列/屏换算的唯一来源：列宽、列步长、翻屏步长都来自 B 的几何。
-    const geometry = createSpreadGeometry(w, gap, requestedColumns, MIN_COLUMN_WIDTH_PX);
+
+    // 舒适双页仅用于普通横排 LTR 可重排正文；eligible 与预算是否足够分开：
+    // 非横排/RTL/纯图 eligible=false，仍走原 requestedColumns 路径；
+    // eligible=true 但核心返回 null 才是窄窗/大字号单页回退。
+    const comfortSpreadRequested =
+      requestedColumns === 2 && hasText && !pureImagePage && !fullpageVisual && !fullpageChild;
+    let comfortEligible = false;
+    if (comfortSpreadRequested) {
+      try {
+        const viewerCs = win?.getComputedStyle(viewer);
+        comfortEligible =
+          viewerCs?.writingMode.trim().toLowerCase() === "horizontal-tb" &&
+          viewerCs?.direction.trim().toLowerCase() === "ltr";
+      } catch {
+        comfortEligible = false;
+      }
+    }
+    let comfortArea: SpreadReadingArea | null = null;
+    if (comfortEligible) {
+      const viewerInsets = this.readViewerHorizontalInsets(viewer, win);
+      comfortArea = resolveSpreadReadingArea({
+        availableWidth: pageW,
+        fontSizePx: em,
+        viewerInsetLeft: viewerInsets.left,
+        viewerInsetRight: viewerInsets.right,
+        leftPx: margins.left,
+        rightPx: margins.right,
+        // auto 时忽略 gapPx；manual（含显式 0）才把数值交给核心。
+        gapPx: this.settings.spreadGapMode === "manual" ? gap : undefined,
+      });
+    }
+
+    // 统一列/屏换算的唯一来源：列宽、列步长、翻屏步长都来自本轮 geometry。
+    let w = legacyW;
+    let geometry: SpreadGeometry;
+    if (comfortArea) {
+      geometry = comfortArea.geometry;
+      w = comfortArea.viewerBorderBoxWidth;
+      this.spreadArea = comfortArea;
+    } else if (comfortEligible) {
+      // 普通横排但预算不足：走既有单页回退，不改保存的双页偏好。
+      geometry = createSpreadGeometry(legacyW, gap, 1, MIN_COLUMN_WIDTH_PX);
+      this.spreadArea = null;
+    } else {
+      geometry = createSpreadGeometry(legacyW, gap, requestedColumns, MIN_COLUMN_WIDTH_PX);
+      this.spreadArea = null;
+    }
     this.spreadGeometry = geometry;
     this.effectiveColumns = geometry.columns;
     this.step = geometry.columnStep;
     this.pageWidth = geometry.columnWidth;
     this.bookmarkSpreadCache?.clear();
+    // 分页模式先快照 reader-owned 根属性；scroll 由自己的 restore 管理。
+    if (!scrollMode) this.snapshotSpreadReadingAreaStyles(viewer);
     viewer.style.position = "relative";
     viewer.style.width = `${w}px`;
+    if (comfortArea) {
+      viewer.style.boxSizing = "border-box";
+      viewer.style.marginLeft = `${comfortArea.marginLeftPx}px`;
+      viewer.style.marginRight = `${comfortArea.marginRightPx}px`;
+    }
     viewer.style.paddingTop = `${padTop}px`;
     viewer.style.paddingBottom = `${padBottom}px`;
     if (scrollMode) {
@@ -2937,7 +3030,7 @@ export class ChapterPaginator {
     } else {
       viewer.style.columnCount = String(geometry.columns);
       viewer.style.columnWidth = "auto";
-      viewer.style.columnGap = `${gap}px`;
+      viewer.style.columnGap = `${geometry.gap}px`;
       viewer.style.columnFill = "auto";
     }
     // 明确写入内容高；不设 100%（父级高在 body padding>0 时会比内容区大）。
@@ -3065,6 +3158,49 @@ export class ChapterPaginator {
     }
   }
 
+  /** measure/cleanup 入口先恢复上一轮舒适双页的根内联样式。 */
+  private restoreSpreadReadingAreaStyles(): void {
+    const restore = this.spreadAreaStyleRestore;
+    this.spreadAreaStyleRestore = null;
+    restore?.();
+  }
+
+  /** 只快照 reader-owned 根属性；不覆盖作者/用户对 viewer 的其他内联样式。 */
+  private snapshotSpreadReadingAreaStyles(viewer: HTMLElement): void {
+    if (this.spreadAreaStyleRestore) return;
+    const style = viewer.style as CSSStyleDeclaration | undefined;
+    if (!style || typeof style.getPropertyValue !== "function") return;
+    const snapshot = SPREAD_AREA_ROOT_STYLE_PROPERTIES.map((property) => ({
+      property,
+      value: style.getPropertyValue(property),
+      priority: style.getPropertyPriority(property),
+    }));
+    this.spreadAreaStyleRestore = () => {
+      for (const item of snapshot) {
+        if (item.value) style.setProperty(item.property, item.value, item.priority);
+        else style.removeProperty(item.property);
+      }
+    };
+  }
+
+  /** viewer 自身 border+padding；作者 root padding 已在 pageW 前扣除，不能重复。 */
+  private readViewerHorizontalInsets(
+    viewer: HTMLElement,
+    win: Window | null,
+  ): { left: number; right: number } {
+    try {
+      const cs = win?.getComputedStyle(viewer);
+      if (!cs) return { left: 0, right: 0 };
+      const left =
+        (parseFloat(cs.borderLeftWidth) || 0) + (parseFloat(cs.paddingLeft) || 0);
+      const right =
+        (parseFloat(cs.borderRightWidth) || 0) + (parseFloat(cs.paddingRight) || 0);
+      return { left, right };
+    } catch {
+      return { left: 0, right: 0 };
+    }
+  }
+
   private restoreScrollView(): void {
     this.scrollStyleRestore?.();
     this.scrollStyleRestore = null;
@@ -3142,6 +3278,17 @@ export class ChapterPaginator {
       effectiveColumns: (this.spreadGeometry?.columns ?? this.effectiveColumns) as 1 | 2,
       atEnd,
       leafRange,
+      ...(this.spreadArea
+        ? {
+            spreadArea: {
+              baseLeftPx: this.spreadArea.baseLeftPx,
+              baseRightPx: this.spreadArea.baseRightPx,
+              marginLeftPx: this.spreadArea.marginLeftPx,
+              marginRightPx: this.spreadArea.marginRightPx,
+              gapPx: this.spreadArea.geometry.gap,
+            },
+          }
+        : {}),
     };
   }
 
@@ -5108,8 +5255,20 @@ export class ChapterPaginator {
       }
       this.tailSpacer = spacer;
     }
-    if (requiredScrollWidth > viewer.clientWidth) {
-      spacer.style.left = `${Math.ceil(requiredScrollWidth - 1)}px`;
+    // requiredScrollWidth 是 viewer 内容盒口径；绝对尾垫定位在 padding box，
+    // 水平 padding 需补一次物理宽度（border 不参与 scrollable overflow）。
+    let horizontalPadding = 0;
+    try {
+      const cs = doc.defaultView?.getComputedStyle(viewer);
+      horizontalPadding =
+        (parseFloat(cs?.paddingLeft ?? "") || 0) +
+        (parseFloat(cs?.paddingRight ?? "") || 0);
+    } catch {
+      horizontalPadding = 0;
+    }
+    const physicalScrollWidth = requiredScrollWidth + horizontalPadding;
+    if (physicalScrollWidth > viewer.clientWidth) {
+      spacer.style.left = `${Math.ceil(physicalScrollWidth - 1)}px`;
       spacer.style.display = "block";
     } else {
       spacer.style.display = "none";
@@ -7290,6 +7449,7 @@ export class ChapterPaginator {
     this.cancelScrollFrame();
     this.cancelScrollAnimation();
     this.restoreScrollView();
+    this.restoreSpreadReadingAreaStyles();
     this.clearNoteHighlights();
     this.clearSearchHighlightForDocument();
     this.pendingPrecise = null;
@@ -7298,6 +7458,7 @@ export class ChapterPaginator {
     this.bookmarkSpreadCache.clear();
     this.spreadLayout = null;
     this.spreadGeometry = null;
+    this.spreadArea = null;
     this.contentDoc = null;
     this.viewer = null;
     this.textIndex = null;

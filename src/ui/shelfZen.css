@@ -1,0 +1,1417 @@
+/* =========================================================================
+ * ShelfZen.css - 现代化书架 UI (Packet 1: 信息架构、续读控制台与胶囊导航)
+ * 采用硬件加速合成、流畅微交互与细腻人机工效
+ * ========================================================================= */
+
+/* Level 1: 顶栏极净化与快速检索 */
+.shelf-head-zen {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 24px;
+  margin: 0 -20px 16px;
+  background: color-mix(in srgb, var(--bg, #ffffff) 88%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.08));
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.shelf-brand-zone-zen {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.shelf-logo-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent, #3b82f6) 12%, transparent);
+  color: var(--accent, #3b82f6);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.shelf-brand-title {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--fg, #1f2937);
+}
+
+.shelf-total-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg, #1f2937) 6%, transparent);
+  color: var(--muted, #6b7280);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+/* 顶栏中间：极速书名快速过滤框 */
+.shelf-quick-filter-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 320px;
+  max-width: 40vw;
+  height: 34px;
+  border-radius: 999px;
+  background: var(--shelf-input-bg, rgba(0, 0, 0, 0.04));
+  border: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.08));
+  padding: 0 10px 0 32px;
+  transition: width 0.2s ease, border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.shelf-quick-filter-box:focus-within {
+  width: 380px;
+  border-color: var(--accent, #3b82f6);
+  background: var(--bg, #ffffff);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, #3b82f6) 15%, transparent);
+}
+
+.shelf-quick-filter-icon {
+  position: absolute;
+  left: 10px;
+  display: flex;
+  align-items: center;
+  color: var(--muted, #9ca3af);
+  pointer-events: none;
+}
+
+.shelf-quick-filter-input {
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: transparent;
+  color: var(--fg, #111827);
+  font-size: 13px;
+  outline: none;
+}
+
+.shelf-quick-filter-input::placeholder {
+  color: var(--muted, #9ca3af);
+  font-size: 12px;
+}
+
+.shelf-quick-filter-clear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--fg, #000) 12%, transparent);
+  color: var(--muted, #4b5563);
+  cursor: pointer;
+  padding: 0;
+  margin-left: 4px;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.shelf-quick-filter-clear:hover {
+  background: color-mix(in srgb, var(--fg, #000) 22%, transparent);
+  color: var(--fg, #111827);
+}
+
+/* 顶栏右侧工具 */
+.shelf-actions-zone-zen {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.shelf-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 8px;
+  background: var(--accent, #2563eb);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: transform 0.12s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--accent, #2563eb) 30%, transparent);
+}
+
+.shelf-btn-primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+  box-shadow: 0 3px 8px color-mix(in srgb, var(--accent, #2563eb) 35%, transparent);
+}
+
+.shelf-btn-primary:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.shelf-btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.shelf-view-toggle-group {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--shelf-input-bg, rgba(0, 0, 0, 0.05));
+  border: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.08));
+}
+
+.shelf-view-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 26px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted, #6b7280);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.shelf-view-toggle-btn.active {
+  background: var(--bg, #ffffff);
+  color: var(--accent, #2563eb);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  font-weight: 600;
+}
+
+.shelf-icon-btn-zen {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.08));
+  background: var(--shelf-card-bg, #ffffff);
+  color: var(--fg, #374151);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.shelf-icon-btn-zen:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--fg, #000) 5%, var(--shelf-card-bg, #fff));
+  border-color: color-mix(in srgb, var(--accent, #2563eb) 30%, var(--shelf-card-border));
+  color: var(--accent, #2563eb);
+}
+
+.shelf-manage-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.08));
+  background: var(--shelf-card-bg, #ffffff);
+  color: var(--fg, #374151);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.shelf-manage-toggle-btn:hover:not(:disabled) {
+  border-color: var(--accent, #2563eb);
+  color: var(--accent, #2563eb);
+}
+
+.shelf-manage-toggle-btn.active {
+  background: var(--accent, #2563eb);
+  border-color: var(--accent, #2563eb);
+  color: #ffffff;
+}
+
+/* =========================================================================
+ * Level 2: 紧凑型“正在阅读”续读控制台 (Continue Reading Stage)
+ * ========================================================================= */
+.shelf-resume-stage {
+  margin-bottom: 20px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--shelf-card-bg, #ffffff) 92%, var(--accent, #3b82f6) 8%);
+  border: 1px solid color-mix(in srgb, var(--shelf-card-border, rgba(0, 0, 0, 0.08)) 80%, var(--accent, #3b82f6) 20%);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.03);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: visible;
+  position: relative;
+  z-index: 10;
+}
+
+/* 折叠后的极简单行条 */
+.shelf-resume-collapsed {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  font-size: 13px;
+  min-height: 40px;
+}
+
+.shelf-resume-collapsed-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.shelf-resume-collapsed-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent, #2563eb) 15%, transparent);
+  color: var(--accent, #2563eb);
+  font-size: 11px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.shelf-resume-collapsed-title {
+  font-weight: 600;
+  color: var(--fg, #111827);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.shelf-resume-collapsed-title:hover {
+  color: var(--accent, #2563eb);
+}
+
+.shelf-resume-collapsed-progress {
+  color: var(--muted, #6b7280);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.shelf-resume-collapsed-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* 展开后的横向紧凑控制台 */
+.shelf-resume-expanded {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  gap: 20px;
+}
+
+.shelf-resume-main {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  min-width: 0;
+  flex: 1;
+}
+
+/* 3D 精装微书脊阴影封面容器 */
+.shelf-resume-cover-box {
+  position: relative;
+  width: 58px;
+  height: 80px;
+  border-radius: 5px;
+  flex-shrink: 0;
+  cursor: pointer;
+  overflow: hidden;
+  box-shadow: 2px 4px 12px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.08);
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.18s ease;
+}
+
+.shelf-resume-cover-box:hover {
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 3px 6px 16px rgba(0, 0, 0, 0.18), 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.shelf-resume-cover-box img,
+.shelf-resume-cover-box .shelf-cover {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* 纯 CSS 3D 书脊微阴影 */
+.shelf-resume-cover-box::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 6px;
+  background: linear-gradient(90deg, rgba(0, 0, 0, 0.22) 0%, rgba(255, 255, 255, 0.18) 40%, transparent 100%);
+  pointer-events: none;
+}
+
+/* 续读信息列 */
+.shelf-resume-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.shelf-resume-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.shelf-resume-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent, #2563eb) 14%, transparent);
+  color: var(--accent, #2563eb);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.shelf-resume-time {
+  color: var(--muted, #6b7280);
+}
+
+.shelf-resume-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--fg, #111827);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  line-height: 1.3;
+}
+
+.shelf-resume-title:hover {
+  color: var(--accent, #2563eb);
+}
+
+.shelf-resume-author {
+  font-size: 12px;
+  color: var(--muted, #6b7280);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.shelf-resume-anchor-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 2px;
+}
+
+.shelf-resume-anchor-text {
+  font-size: 12px;
+  font-weight: 500;
+  color: color-mix(in srgb, var(--fg, #111827) 85%, transparent);
+}
+
+.shelf-resume-progress-track {
+  width: 140px;
+  max-width: 30%;
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg, #000) 8%, transparent);
+  overflow: hidden;
+}
+
+.shelf-resume-progress-bar {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent, #3b82f6), color-mix(in srgb, var(--accent, #3b82f6) 80%, #60a5fa));
+  transition: width 0.3s ease;
+}
+
+/* 续读右侧操作区 */
+.shelf-resume-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.shelf-btn-resume {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 8px;
+  background: var(--accent, #2563eb);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--accent, #2563eb) 35%, transparent);
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.shelf-btn-resume:hover {
+  transform: translateY(-1px) scale(1.02);
+  filter: brightness(1.08);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--accent, #2563eb) 45%, transparent);
+}
+
+.shelf-btn-resume:active {
+  transform: translateY(0) scale(0.99);
+}
+
+.shelf-resume-key-hint {
+  font-size: 11px;
+  font-weight: 400;
+  opacity: 0.8;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.2);
+  margin-left: 2px;
+}
+
+/* 多本在读切换下拉 */
+.shelf-more-reading-dropdown {
+  position: relative;
+}
+
+.shelf-more-reading-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent, #2563eb) 25%, var(--shelf-card-border));
+  background: var(--shelf-card-bg, #ffffff);
+  color: var(--accent, #2563eb);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.shelf-more-reading-btn:hover {
+  background: color-mix(in srgb, var(--accent, #2563eb) 8%, var(--shelf-card-bg, #fff));
+  border-color: var(--accent, #2563eb);
+}
+
+.shelf-more-reading-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 320px;
+  max-height: 280px;
+  overflow-y: auto;
+  border-radius: 12px;
+  background: var(--shelf-card-bg, #ffffff);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.12));
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18), 0 2px 6px rgba(0, 0, 0, 0.08);
+  padding: 6px;
+  z-index: 100;
+  animation: shelf-pop-in 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-thumb, rgba(128, 128, 128, 0.3)) transparent;
+}
+
+.shelf-more-reading-popover::-webkit-scrollbar {
+  width: 6px;
+}
+
+.shelf-more-reading-popover::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb, rgba(128, 128, 128, 0.3));
+  border-radius: 999px;
+}
+
+.shelf-more-reading-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.shelf-more-reading-item:hover {
+  background: color-mix(in srgb, var(--fg, #000) 5%, transparent);
+}
+
+.shelf-more-reading-item.active {
+  background: color-mix(in srgb, var(--accent, #2563eb) 10%, transparent);
+}
+
+.shelf-more-reading-item-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg, #111827);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.shelf-more-reading-item-meta {
+  font-size: 11px;
+  color: var(--muted, #6b7280);
+}
+
+.shelf-resume-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.08));
+  background: var(--shelf-card-bg, #ffffff);
+  color: var(--muted, #6b7280);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.shelf-resume-toggle-btn:hover {
+  background: color-mix(in srgb, var(--accent, #2563eb) 8%, var(--shelf-card-bg, #fff));
+  border-color: color-mix(in srgb, var(--accent, #2563eb) 35%, transparent);
+  color: var(--accent, #2563eb);
+}
+
+/* =========================================================================
+ * Level 3: 状态与分类胶囊轨 (Capsule Rail)
+ * ========================================================================= */
+.shelf-nav-rail {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.shelf-nav-rail-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* 状态分流胶囊组 */
+.shelf-capsule-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--shelf-input-bg, rgba(0, 0, 0, 0.04));
+  border: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.06));
+}
+
+.shelf-capsule-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted, #6b7280);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.shelf-capsule-tab:hover:not(.active) {
+  color: var(--fg, #111827);
+  background: color-mix(in srgb, var(--fg, #000) 4%, transparent);
+}
+
+.shelf-capsule-tab.active {
+  background: var(--bg, #ffffff);
+  color: var(--accent, #2563eb);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.shelf-capsule-count {
+  font-size: 11px;
+  opacity: 0.8;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg, #000) 6%, transparent);
+}
+
+.shelf-capsule-tab.active .shelf-capsule-count {
+  background: color-mix(in srgb, var(--accent, #2563eb) 12%, transparent);
+  color: var(--accent, #2563eb);
+}
+
+/* 集中式文件夹选择下拉 */
+.shelf-folder-dropdown-wrap {
+  position: relative;
+}
+
+.shelf-folder-dropdown-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.1));
+  background: var(--shelf-card-bg, #ffffff);
+  color: var(--fg, #374151);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.shelf-folder-dropdown-btn:hover {
+  border-color: var(--accent, #2563eb);
+  color: var(--accent, #2563eb);
+}
+
+.shelf-folder-dropdown-btn.active {
+  background: color-mix(in srgb, var(--accent, #2563eb) 8%, var(--shelf-card-bg, #fff));
+  border-color: var(--accent, #2563eb);
+  color: var(--accent, #2563eb);
+}
+
+.shelf-folder-popover-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 240px;
+  max-height: 360px;
+  overflow-y: auto;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--shelf-card-bg, #ffffff) 94%, transparent);
+  border: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.12));
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.06);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  padding: 6px;
+  z-index: 50;
+  scrollbar-width: thin;
+  animation: shelf-pop-in 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.shelf-folder-popover-menu::-webkit-scrollbar {
+  width: 6px;
+}
+
+.shelf-folder-popover-menu::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--fg, #000) 20%, transparent);
+  border-radius: 3px;
+}
+
+.shelf-folder-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg, #1f2937);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.shelf-folder-menu-item:hover {
+  background: color-mix(in srgb, var(--fg, #000) 5%, transparent);
+}
+
+.shelf-folder-menu-item.selected {
+  background: color-mix(in srgb, var(--accent, #2563eb) 10%, transparent);
+  color: var(--accent, #2563eb);
+  font-weight: 600;
+}
+
+.shelf-folder-menu-divider {
+  height: 1px;
+  background: var(--shelf-card-border, rgba(0, 0, 0, 0.08));
+  margin: 4px 0;
+}
+
+.shelf-folder-menu-new-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent, #2563eb);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.shelf-folder-menu-new-btn:hover {
+  background: color-mix(in srgb, var(--accent, #2563eb) 10%, transparent);
+}
+
+/* 处于特定文件夹时的面包屑条 */
+.shelf-folder-active-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent, #2563eb) 8%, var(--shelf-card-bg, #fff));
+  border: 1px solid color-mix(in srgb, var(--accent, #2563eb) 20%, var(--shelf-card-border));
+}
+
+.shelf-folder-active-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent, #2563eb);
+}
+
+.shelf-folder-active-count {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted, #6b7280);
+}
+
+.shelf-folder-active-exit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: var(--muted, #6b7280);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.shelf-folder-active-exit:hover {
+  background: color-mix(in srgb, var(--accent, #2563eb) 15%, transparent);
+  color: var(--accent, #2563eb);
+}
+
+/* 右侧排序与密度轨 */
+.shelf-nav-rail-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.shelf-sort-select-zen {
+  height: 32px;
+  padding: 0 28px 0 10px;
+  border-radius: 8px;
+  border: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.1));
+  background: var(--shelf-card-bg, #ffffff);
+  color: var(--fg, #374151);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  transition: border-color 0.15s ease;
+}
+
+.shelf-sort-select-zen:hover {
+  border-color: var(--accent, #2563eb);
+}
+
+@keyframes shelf-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes shelf-pop-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
+  }
+}
+
+/* =========================================================================
+ * Packet 2: 高雅莫兰迪算法封套与 3D 书脊装帧
+ * ========================================================================= */
+
+.morandi-cover {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: 5px;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  display: flex !important;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 10px;
+  text-align: center;
+  user-select: none;
+}
+
+.morandi-spine-shadow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 6px;
+  background: linear-gradient(90deg, rgba(0, 0, 0, 0.3) 0%, rgba(255, 255, 255, 0.15) 50%, transparent 100%);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.morandi-inner-frame {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border: 1px solid;
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 6px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.morandi-watermark {
+  position: absolute;
+  font-size: 54px;
+  font-weight: 800;
+  opacity: 0.12;
+  line-height: 1;
+  pointer-events: none;
+  user-select: none;
+}
+
+.morandi-title {
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  line-height: 1.35 !important;
+  margin-bottom: 4px;
+  z-index: 1;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-all;
+}
+
+.morandi-creator {
+  font-size: 10px;
+  opacity: 0.75;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 90%;
+  z-index: 1;
+}
+
+/* 3D 书脊微阴影与切口微厚度 */
+.shelf-cover-box {
+  position: relative;
+}
+
+.shelf-cover-box::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 5px;
+  background: linear-gradient(90deg, rgba(0, 0, 0, 0.22) 0%, rgba(255, 255, 255, 0.12) 40%, transparent 100%);
+  z-index: 2;
+  pointer-events: none;
+}
+
+.shelf-cover-box::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 2px;
+  background: linear-gradient(90deg, transparent 0%, rgba(0, 0, 0, 0.15) 100%);
+  z-index: 2;
+  pointer-events: none;
+}
+
+/* 文件夹卡片不需要 3D 书脊与切口厚度（保持纯净文件夹容器形态） */
+.shelf-folder-card .shelf-cover-box::before,
+.shelf-folder-card .shelf-cover-box::after,
+.shelf-folder-cover-box::before,
+.shelf-folder-cover-box::after {
+  display: none !important;
+  content: none !important;
+}
+
+/* =========================================================================
+ * Packet 2: 列表模式 (Table List View)
+ * ========================================================================= */
+
+.shelf-table-view {
+  width: 100%;
+  background: var(--shelf-card-bg, #ffffff);
+  border: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.08));
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
+}
+
+.shelf-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 13px;
+}
+
+.shelf-table th {
+  padding: 10px 14px;
+  background: color-mix(in srgb, var(--fg, #000) 3%, var(--shelf-card-bg, #fff));
+  border-bottom: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.08));
+  color: var(--muted, #6b7280);
+  font-size: 12px;
+  font-weight: 600;
+  user-select: none;
+}
+
+.shelf-table th.sortable {
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.shelf-table th.sortable:hover {
+  color: var(--accent, #2563eb);
+}
+
+.shelf-table th.sortable.active {
+  color: var(--accent, #2563eb);
+}
+
+.shelf-table td {
+  padding: 8px 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--shelf-card-border, rgba(0, 0, 0, 0.06)) 60%, transparent);
+  color: var(--fg, #111827);
+  vertical-align: middle;
+}
+
+.shelf-table-row {
+  transition: background-color 0.12s ease;
+  cursor: pointer;
+}
+
+.shelf-table-row:hover {
+  background: color-mix(in srgb, var(--fg, #000) 3%, var(--shelf-card-bg, #fff));
+}
+
+.shelf-table-row.selected {
+  background: color-mix(in srgb, var(--accent, #2563eb) 8%, var(--shelf-card-bg, #fff));
+}
+
+.shelf-table-row:last-child td {
+  border-bottom: none;
+}
+
+.shelf-table-thumb-box {
+  width: 32px;
+  height: 44px;
+  border-radius: 4px;
+  overflow: hidden;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+  flex-shrink: 0;
+}
+
+.shelf-table-thumb-box img,
+.shelf-table-thumb-box .shelf-cover {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.shelf-table-title-cell {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.shelf-table-title {
+  font-weight: 600;
+  color: var(--fg, #111827);
+  transition: color 0.12s ease;
+}
+
+.shelf-table-row:hover .shelf-table-title {
+  color: var(--accent, #2563eb);
+}
+
+.shelf-table-progress-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 120px;
+}
+
+.shelf-table-progress-track {
+  flex: 1;
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg, #000) 8%, transparent);
+  overflow: hidden;
+}
+
+.shelf-table-progress-bar {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent, #2563eb);
+}
+
+.shelf-table-progress-text {
+  font-size: 11px;
+  color: var(--muted, #6b7280);
+  min-width: 30px;
+  text-align: right;
+}
+
+/* =========================================================================
+ * Packet 2: 首字母 A-Z 快速定位轨 (A-Z Fast Index Rail)
+ * ========================================================================= */
+
+.shelf-az-rail {
+  position: fixed;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 6px 3px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg, #fff) 85%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.08));
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
+  z-index: 30;
+  user-select: none;
+}
+
+.shelf-az-letter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: var(--muted, #6b7280);
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.12s ease;
+}
+
+.shelf-az-letter:hover:not(.disabled) {
+  background: color-mix(in srgb, var(--accent, #2563eb) 15%, transparent);
+  color: var(--accent, #2563eb);
+  transform: scale(1.2);
+}
+
+.shelf-az-letter.active {
+  background: var(--accent, #2563eb);
+  color: #ffffff;
+}
+
+.shelf-az-letter.disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+
+.shelf-az-toast {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+  background: rgba(0, 0, 0, 0.75);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  font-weight: 800;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  z-index: 100;
+  pointer-events: none;
+  animation: shelf-toast-pop 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes shelf-toast-pop {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.6);
+  }
+  40% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.05);
+  }
+  80% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.9);
+  }
+}
+
+/* =========================================================================
+ * Packet 2: 底部悬浮批量操作底坞 (Floating Batch Bar)
+ * ========================================================================= */
+
+.shelf-floating-batch-dock {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 18px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--shelf-card-bg, #ffffff) 92%, transparent);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.12));
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.08);
+  z-index: 100;
+  animation: shelf-batch-slide-up 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.shelf-floating-batch-dock.is-closing {
+  animation: shelf-batch-slide-down 0.15s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.shelf-floating-batch-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg, #111827);
+  white-space: nowrap;
+}
+
+.shelf-floating-batch-badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent, #2563eb);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.shelf-floating-batch-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.shelf-batch-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.1));
+  background: var(--shelf-card-bg, #ffffff);
+  color: var(--fg, #374151);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  white-space: nowrap;
+}
+
+.shelf-batch-action-btn:hover:not(:disabled) {
+  border-color: var(--accent, #2563eb);
+  color: var(--accent, #2563eb);
+  background: color-mix(in srgb, var(--accent, #2563eb) 8%, var(--shelf-card-bg, #fff));
+}
+
+.shelf-batch-action-btn.danger {
+  color: #ef4444;
+}
+
+.shelf-batch-action-btn.danger:hover:not(:disabled) {
+  border-color: #ef4444;
+  color: #ef4444;
+  background: color-mix(in srgb, #ef4444 10%, var(--shelf-card-bg, #fff));
+}
+
+.shelf-batch-action-btn.cancel {
+  border: none;
+  background: color-mix(in srgb, var(--fg, #000) 6%, transparent);
+  color: var(--muted, #6b7280);
+}
+
+.shelf-batch-action-btn.cancel:hover {
+  background: color-mix(in srgb, var(--fg, #000) 12%, transparent);
+  color: var(--fg, #111827);
+}
+
+@keyframes shelf-batch-slide-up {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 20px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+}
+
+@keyframes shelf-batch-slide-down {
+  from {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, 20px) scale(0.96);
+  }
+}
+
+/* =========================================================================
+ * Packet 2: 150ms 进出场动效与改良弹窗
+ * ========================================================================= */
+
+.shelf-confirm-backdrop {
+  animation: shelf-modal-backdrop-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.shelf-confirm-backdrop.is-closing {
+  animation: shelf-modal-backdrop-out 0.15s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.shelf-confirm {
+  animation: shelf-modal-dialog-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.shelf-confirm-backdrop.is-closing .shelf-confirm {
+  animation: shelf-modal-dialog-out 0.15s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.shelf-card-pop-menu {
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel-bg, #ffffff) 94%, transparent);
+  border: 1px solid color-mix(in srgb, var(--panel-border) 60%, transparent);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18), 0 2px 6px rgba(0, 0, 0, 0.08);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  z-index: 50;
+  animation: shelf-pop-in 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  transform-origin: top right;
+}
+
+.shelf-card-pop-menu.is-closing {
+  animation: shelf-pop-out 0.15s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes shelf-modal-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes shelf-modal-backdrop-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes shelf-modal-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes shelf-modal-dialog-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+}
+

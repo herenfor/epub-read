@@ -72,6 +72,12 @@ describe("sortShelfEntries", () => {
     expect(sorted.map((e) => e.title)).toEqual(["丙", "甲", "乙"]);
     expect(all.map((e) => e.id)).toEqual(["a", "b", "c"]);
   });
+  it("progress 按阅读进度降序排序", () => {
+    const p1 = entry({ id: "p1", progressPct: 15 });
+    const p2 = entry({ id: "p2", progressPct: 90 });
+    const p3 = entry({ id: "p3", progressPct: 0 });
+    expect(sortShelfEntries([p1, p2, p3], "progress").map((e) => e.id)).toEqual(["p2", "p1", "p3"]);
+  });
 });
 
 describe("filterShelfEntries", () => {

@@ -31,10 +31,10 @@
 
 .whisper-footer.is-hovered {
   height: 38px;
-  background: color-mix(in srgb, var(--panel-bg, #ffffff) 80%, transparent);
+  background: color-mix(in srgb, var(--bg, #ffffff) 92%, transparent);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border-top: 1px solid color-mix(in srgb, var(--panel-border) 40%, transparent);
+  border-top: 1px solid color-mix(in srgb, var(--panel-border) 25%, transparent);
   box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.04);
 }
 

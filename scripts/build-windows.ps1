@@ -25,6 +25,7 @@ if ($Edition -eq "AI") {
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $targetDir = Join-Path $repoRoot ("src-tauri\target-" + $editionLower)
 $env:VITE_EDITION = $editionLower
+$env:VITE_APP_PLATFORM = "windows"
 $env:EPUB_READER_EXPECTED_EDITION = $editionLower
 $env:CARGO_TARGET_DIR = $targetDir
 

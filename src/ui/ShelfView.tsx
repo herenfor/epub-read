@@ -30,6 +30,7 @@ import {
 } from "./thumbnail";
 import { hasReadPosition } from "./readEvidence";
 import { isShelfCardActionTarget } from "./shelfCardEventScope";
+import { getRuntimeCapabilities } from "../platform/runtimeCapabilities";
 import {
   getSearchStatusLabel,
   SearchIndexCard,
@@ -39,6 +40,7 @@ import {
   type SearchPanelResult,
   type SearchStatus,
 } from "./SearchPanel";
+import "./shelfZen.css";
 
 export type { ShelfScope };
 export type ShelfDensity = "comfortable" | "standard" | "compact";
@@ -93,8 +95,10 @@ export interface ShelfViewProps {
   scope?: ShelfScope;
   onScopeChange?(scope: ShelfScope): void;
   onApplyOrganization?(command: OrganizationCommand): Promise<void>;
-  /** 全局忙（导入/打开/删除中），书架禁用交互防止重复操作 */
+  /** 全局忙（打开/删除等短操作），书架禁用交互防止重复操作 */
   busy: boolean;
+  /** 原生书籍导入活动期间：只禁用冲突入口，不禁用阅读与收藏/文件夹操作。 */
+  importActive?: boolean;
   theme: Theme;
   onThemeChange(theme: Theme): void;
   onOpen(id: string): void;
@@ -129,16 +133,6 @@ function BookLogoIcon() {
     <svg className="shelf-svg-icon shelf-logo-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
       <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-    </svg>
-  );
-}
-
-function MenuIcon() {
-  return (
-    <svg className="shelf-svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <line x1="3" y1="12" x2="21" y2="12" />
-      <line x1="3" y1="6" x2="21" y2="6" />
-      <line x1="3" y1="18" x2="21" y2="18" />
     </svg>
   );
 }
@@ -233,9 +227,107 @@ function EditIcon() {
   );
 }
 
+function GridIcon() {
+  return (
+    <svg className="shelf-svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="3" width="7" height="7" rx="1" />
+      <rect x="14" y="3" width="7" height="7" rx="1" />
+      <rect x="14" y="14" width="7" height="7" rx="1" />
+      <rect x="3" y="14" width="7" height="7" rx="1" />
+    </svg>
+  );
+}
+
+function ListIcon() {
+  return (
+    <svg className="shelf-svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <line x1="8" y1="6" x2="21" y2="6" />
+      <line x1="8" y1="12" x2="21" y2="12" />
+      <line x1="8" y1="18" x2="21" y2="18" />
+      <line x1="3" y1="6" x2="3.01" y2="6" />
+      <line x1="3" y1="12" x2="3.01" y2="12" />
+      <line x1="3" y1="18" x2="3.01" y2="18" />
+    </svg>
+  );
+}
+
+function SettingsIcon() {
+  return (
+    <svg className="shelf-svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  );
+}
+
+function ChevronDownIcon() {
+  return (
+    <svg className="shelf-svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ width: 14, height: 14 }}>
+      <polyline points="6 9 12 15 18 9" />
+    </svg>
+  );
+}
+
+function ChevronUpIcon() {
+  return (
+    <svg className="shelf-svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ width: 14, height: 14 }}>
+      <polyline points="18 15 12 9 6 15" />
+    </svg>
+  );
+}
+
+function ArrowRightIcon() {
+  return (
+    <svg className="shelf-svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ width: 14, height: 14 }}>
+      <line x1="5" y1="12" x2="19" y2="12" />
+      <polyline points="12 5 19 12 12 19" />
+    </svg>
+  );
+}
+
+
+function BookOpenIcon() {
+  return (
+    <svg className="shelf-svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ width: 14, height: 14 }}>
+      <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+      <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+    </svg>
+  );
+}
+
 /* =========================================================================
- * 封面组件（高性能按需加载）
+ * 莫兰迪算法调色板与封面组件（高性能按需加载 + 高雅莫兰迪算法装帧）
  * ========================================================================= */
+
+const MORANDI_PALETTES = [
+  { bg: "#4A5568", fg: "#F7FAFC", border: "rgba(247, 250, 252, 0.25)", accent: "rgba(247, 250, 252, 0.18)" }, // 灰青
+  { bg: "#2D3748", fg: "#EDF2F7", border: "rgba(237, 242, 247, 0.25)", accent: "rgba(237, 242, 247, 0.18)" }, // 墨黛
+  { bg: "#5C5248", fg: "#FDF6E2", border: "rgba(253, 246, 226, 0.25)", accent: "rgba(253, 246, 226, 0.18)" }, // 枯茶
+  { bg: "#3D4F53", fg: "#E6F1F2", border: "rgba(230, 241, 242, 0.25)", accent: "rgba(230, 241, 242, 0.18)" }, // 苍绿
+  { bg: "#5A4E5C", fg: "#F5EDF7", border: "rgba(245, 237, 247, 0.25)", accent: "rgba(245, 237, 247, 0.18)" }, // 暮紫
+  { bg: "#4B5358", fg: "#EDF3F7", border: "rgba(237, 243, 247, 0.25)", accent: "rgba(237, 243, 247, 0.18)" }, // 暮蓝
+  { bg: "#5A4944", fg: "#F9ECE8", border: "rgba(249, 236, 232, 0.25)", accent: "rgba(249, 236, 232, 0.18)" }, // 焦赭
+  { bg: "#48524B", fg: "#EDF5EF", border: "rgba(237, 245, 239, 0.25)", accent: "rgba(237, 245, 239, 0.18)" }, // 艾绿
+];
+
+function getMorandiPalette(title: string, id: string) {
+  let hash = 0;
+  const str = id + title;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash << 5) - hash + str.charCodeAt(i);
+    hash |= 0;
+  }
+  const idx = Math.abs(hash) % MORANDI_PALETTES.length;
+  const initial = title.trim().charAt(0) || "书";
+  return { ...MORANDI_PALETTES[idx], initial };
+}
+
+function formatFileSize(bytes: number): string {
+  if (!bytes || bytes <= 0) return "--";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 const Cover = memo(function Cover({
   entry,
@@ -305,14 +397,307 @@ const Cover = memo(function Cover({
   }, [entry.id, entry.contentHash, entry.coverMime, entry.thumbnailMime, entry.available, nearViewport, provider]);
 
   if (!url || loadedFor.current !== entry.id) {
+    const palette = getMorandiPalette(entry.title, entry.id);
     return (
-      <div ref={nodeRef} className="shelf-cover fallback" aria-hidden="true">
-        <span className="fallback-mark">{entry.title.trim().charAt(0) || "书"}</span>
-        <span className="fallback-title">{entry.title}</span>
+      <div
+        ref={nodeRef}
+        className="shelf-cover fallback morandi-cover"
+        style={{ backgroundColor: palette.bg, color: palette.fg }}
+        aria-hidden="true"
+      >
+        <div className="morandi-spine-shadow" />
+        <div className="morandi-inner-frame" style={{ borderColor: palette.border }}>
+          <span className="morandi-watermark fallback-mark" style={{ color: palette.accent }}>
+            {palette.initial}
+          </span>
+          <span className="morandi-title fallback-title">{entry.title}</span>
+          {entry.creator && <span className="morandi-creator">{entry.creator}</span>}
+        </div>
       </div>
     );
   }
   return <img className="shelf-cover" src={url} alt={entry.title} loading="lazy" draggable={false} />;
+});
+
+function formatRelativeTime(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return "";
+  const diff = Date.now() - ms;
+  if (diff < 60 * 1000) return "刚刚";
+  if (diff < 60 * 60 * 1000) return `${Math.floor(diff / (60 * 1000))} 分钟前`;
+  if (diff < 24 * 60 * 60 * 1000) return `${Math.floor(diff / (60 * 60 * 1000))} 小时前`;
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const target = new Date(ms);
+  if (
+    target.getDate() === yesterday.getDate() &&
+    target.getMonth() === yesterday.getMonth() &&
+    target.getFullYear() === yesterday.getFullYear()
+  ) {
+    return "昨天";
+  }
+  return formatShelfTime(ms);
+}
+
+/* =========================================================================
+ * 续读控制台组件（横向紧凑控制台、3D 书脊阴影、精确锚点与一键开书）
+ * ========================================================================= */
+
+interface ShelfResumeStageProps {
+  entries: ShelfEntry[];
+  provider: ThumbnailProvider;
+  busy?: boolean;
+  onOpen(id: string): void;
+}
+
+const ShelfResumeStage = memo(function ShelfResumeStage({
+  entries,
+  provider,
+  busy,
+  onOpen,
+}: ShelfResumeStageProps) {
+  const readingBooks = useMemo(() => {
+    return entries
+      .filter(
+        (e) =>
+          hasReadPosition(e) &&
+          (e.progressPct ?? 0) < 100 &&
+          e.lastReadAtMs > 0
+      )
+      .sort((a, b) => b.lastReadAtMs - a.lastReadAtMs);
+  }, [entries]);
+
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!moreOpen) return;
+    const onDown = (e: PointerEvent) => {
+      if (!moreDropdownRef.current?.contains(e.target as Node)) {
+        setMoreOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setMoreOpen(false);
+      }
+    };
+    window.addEventListener("pointerdown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [moreOpen]);
+
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem("epub_shelf_resume_collapsed") === "true";
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleCollapse = useCallback(() => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("epub_shelf_resume_collapsed", String(next));
+      } catch {}
+      return next;
+    });
+  }, []);
+
+  const activeBook = useMemo(() => {
+    if (readingBooks.length === 0) return null;
+    if (selectedId) {
+      const found = readingBooks.find((b) => b.id === selectedId);
+      if (found) return found;
+    }
+    return readingBooks[0];
+  }, [readingBooks, selectedId]);
+
+  useEffect(() => {
+    if (!activeBook) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select" || target?.isContentEditable) {
+        return;
+      }
+      if ((e.key === "Enter" || e.key === " ") && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+        if (!target || target === document.body || target.classList.contains("shelf-view")) {
+          e.preventDefault();
+          onOpen(activeBook.id);
+        }
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [activeBook, onOpen]);
+
+  if (!activeBook) return null;
+
+  if (collapsed) {
+    return (
+      <div className="shelf-resume-stage">
+        <div className="shelf-resume-collapsed">
+          <div className="shelf-resume-collapsed-left">
+            <span className="shelf-resume-collapsed-tag">
+              <BookOpenIcon />
+              <span>继续阅读</span>
+            </span>
+            <span
+              className="shelf-resume-collapsed-title"
+              onClick={() => onOpen(activeBook.id)}
+              title={`打开《${activeBook.title}》`}
+            >
+              《{activeBook.title}》
+            </span>
+            <span className="shelf-resume-collapsed-progress">
+              {Math.round(activeBook.progressPct ?? 0)}%
+            </span>
+          </div>
+          <div className="shelf-resume-collapsed-right">
+            <button
+              className="shelf-btn-primary"
+              style={{ height: 28, padding: "0 10px", fontSize: 12 }}
+              type="button"
+              onClick={() => onOpen(activeBook.id)}
+              disabled={busy}
+            >
+              <span>继续</span>
+              <ArrowRightIcon />
+            </button>
+            <button
+              className="shelf-resume-toggle-btn"
+              type="button"
+              onClick={toggleCollapse}
+              title="展开展台 (显示封面与详细进度)"
+              aria-label="展开展台"
+            >
+              <ChevronDownIcon />
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="shelf-resume-stage">
+      <div className="shelf-resume-expanded">
+        <div className="shelf-resume-main">
+          <div
+            className="shelf-resume-cover-box"
+            onClick={() => onOpen(activeBook.id)}
+            title={`打开《${activeBook.title}》`}
+          >
+            <Cover entry={activeBook} provider={provider} />
+          </div>
+          <div className="shelf-resume-info">
+            <div className="shelf-resume-meta-row">
+              <span className="shelf-resume-tag">
+                <BookOpenIcon />
+                <span>正在阅读</span>
+              </span>
+              <span className="shelf-resume-time">
+                {formatRelativeTime(activeBook.lastReadAtMs)}
+              </span>
+            </div>
+            <div
+              className="shelf-resume-title"
+              onClick={() => onOpen(activeBook.id)}
+              title={activeBook.title}
+            >
+              {activeBook.title}
+            </div>
+            <div className="shelf-resume-author">{activeBook.creator || "未知作者"}</div>
+            <div className="shelf-resume-anchor-row">
+              <div className="shelf-resume-anchor-text">
+                上次读到：第 {(activeBook.spineIndex ?? 0) + 1} 章 · {Math.round(activeBook.progressPct ?? 0)}%
+              </div>
+              <div className="shelf-resume-progress-track">
+                <div
+                  className="shelf-resume-progress-bar"
+                  style={{ width: `${Math.max(2, Math.min(100, activeBook.progressPct ?? 0))}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="shelf-resume-actions">
+          {readingBooks.length > 1 && (
+            <div className="shelf-more-reading-dropdown" ref={moreDropdownRef}>
+              <button
+                className="shelf-more-reading-btn"
+                type="button"
+                onClick={() => setMoreOpen(!moreOpen)}
+                aria-expanded={moreOpen}
+                title="查看更多在读书籍"
+              >
+                <span>更多在读 ({readingBooks.length})</span>
+                <ChevronDownIcon />
+              </button>
+              {moreOpen && (
+                <div className="shelf-more-reading-popover">
+                  {readingBooks.map((b) => (
+                    <div
+                      key={b.id}
+                      className={`shelf-more-reading-item${b.id === activeBook.id ? " active" : ""}`}
+                      onClick={() => {
+                        setSelectedId(b.id);
+                        setMoreOpen(false);
+                      }}
+                    >
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div className="shelf-more-reading-item-title">{b.title}</div>
+                        <div className="shelf-more-reading-item-meta">
+                          {Math.round(b.progressPct ?? 0)}% · {formatRelativeTime(b.lastReadAtMs)}
+                        </div>
+                      </div>
+                      <button
+                        className="shelf-btn-primary"
+                        style={{ height: 28, padding: "0 10px", fontSize: 12 }}
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onOpen(b.id);
+                          setMoreOpen(false);
+                        }}
+                      >
+                        开书
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          <button
+            className="shelf-btn-resume"
+            type="button"
+            onClick={() => onOpen(activeBook.id)}
+            disabled={busy}
+            title="继续阅读当前书籍 (按 Space 或 Enter 一键开书)"
+          >
+            <span>继续阅读</span>
+            <ArrowRightIcon />
+            <span className="shelf-resume-key-hint">Enter</span>
+          </button>
+          <button
+            className="shelf-resume-toggle-btn"
+            type="button"
+            onClick={toggleCollapse}
+            title="收起展台 (折叠为单行条)"
+            aria-label="收起展台"
+          >
+            <ChevronUpIcon />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 });
 
 /* =========================================================================
@@ -327,8 +712,10 @@ interface ShelfCardProps {
   isFavorite?: boolean;
   isDragging?: boolean;
   isDropTargetBook?: boolean;
-  /** 全局忙（导入/打开/删除中）：禁用卡片内会写数据的操作 */
+  /** 全局忙（打开/删除中）：禁用卡片内会写数据的操作 */
   busy?: boolean;
+  /** 原生导入活动期间：仅禁用删除等冲突入口，不影响打开阅读/收藏/文件夹。 */
+  deleteDisabled?: boolean;
   draggedEntry?: ShelfEntry | null;
   onOpen(id: string): void;
   onToggleSelected(id: string): void;
@@ -342,9 +729,19 @@ interface ShelfCardProps {
 const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
   const { entry } = props;
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuClosing, setMenuClosing] = useState(false);
   const [removePending, setRemovePending] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  const closeMenu = useCallback(() => {
+    setMenuClosing(true);
+    window.setTimeout(() => {
+      setMenuOpen(false);
+      setMenuClosing(false);
+    }, 150);
+  }, []);
+
   const last = entry.lastReadAtMs > 0 ? entry.lastReadAtMs : entry.addedAtMs;
   const recent = Date.now() - last < 1000 * 60 * 60 * 24 * 7;
   const read = hasReadPosition(entry);
@@ -432,11 +829,11 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
     if (!menuOpen) return;
     const onDown = (e: PointerEvent): void => {
       if (!menuRef.current?.contains(e.target as Node)) {
-        setMenuOpen(false);
+        closeMenu();
       }
     };
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") setMenuOpen(false);
+      if (e.key === "Escape") closeMenu();
     };
     window.addEventListener("pointerdown", onDown);
     window.addEventListener("keydown", onKey);
@@ -444,7 +841,7 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
       window.removeEventListener("pointerdown", onDown);
       window.removeEventListener("keydown", onKey);
     };
-  }, [menuOpen]);
+  }, [menuOpen, closeMenu]);
 
   const handleClickCapture = (e: React.MouseEvent): void => {
     if (isShelfCardActionTarget(e.target, e.currentTarget)) return;
@@ -565,7 +962,7 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
         {/* 状态徽标（极简胶囊，不破坏封面比例） */}
         <div className="shelf-card-badges" aria-hidden="true">
           {entry.available === false ? (
-            <span className="shelf-badge missing">源文件缺失</span>
+            <span className="shelf-badge missing">{getRuntimeCapabilities().platform === "android" ? "需重新导入" : "源文件缺失"}</span>
           ) : (
             <>
               {entry.isNew && !props.selectionMode && <span className="shelf-badge new">新</span>}
@@ -604,7 +1001,7 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
             </button>
 
             {menuOpen && (
-              <div className="shelf-card-pop-menu" role="menu" onClick={(e) => e.stopPropagation()}>
+              <div className={`shelf-card-pop-menu${menuClosing ? " is-closing" : ""}`} role="menu" onClick={(e) => e.stopPropagation()}>
                 <button
                   className="shelf-card-pop-item"
                   type="button"
@@ -668,6 +1065,7 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
                   className="shelf-card-pop-item danger"
                   type="button"
                   role="menuitem"
+                  disabled={props.deleteDisabled}
                   onClick={() => {
                     setMenuOpen(false);
                     props.onDeleteRequest(entry);
@@ -722,18 +1120,27 @@ interface ShelfFolderCardProps {
 
 const ShelfFolderCard = memo(function ShelfFolderCard(props: ShelfFolderCardProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuClosing, setMenuClosing] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
+
+  const closeMenu = useCallback(() => {
+    setMenuClosing(true);
+    window.setTimeout(() => {
+      setMenuOpen(false);
+      setMenuClosing(false);
+    }, 150);
+  }, []);
 
   useEffect(() => {
     if (!menuOpen) return;
     const onDown = (e: PointerEvent): void => {
       if (!menuRef.current?.contains(e.target as Node)) {
-        setMenuOpen(false);
+        closeMenu();
       }
     };
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") setMenuOpen(false);
+      if (e.key === "Escape") closeMenu();
     };
     window.addEventListener("pointerdown", onDown);
     window.addEventListener("keydown", onKey);
@@ -741,7 +1148,7 @@ const ShelfFolderCard = memo(function ShelfFolderCard(props: ShelfFolderCardProp
       window.removeEventListener("pointerdown", onDown);
       window.removeEventListener("keydown", onKey);
     };
-  }, [menuOpen]);
+  }, [menuOpen, closeMenu]);
 
   const handleCardClick = (e?: React.MouseEvent): void => {
     const target = e?.target as HTMLElement | null;
@@ -818,7 +1225,7 @@ const ShelfFolderCard = memo(function ShelfFolderCard(props: ShelfFolderCardProp
             </button>
 
             {menuOpen && (
-              <div className="shelf-card-pop-menu" role="menu" onClick={(e) => e.stopPropagation()}>
+              <div className={`shelf-card-pop-menu${menuClosing ? " is-closing" : ""}`} role="menu" onClick={(e) => e.stopPropagation()}>
                 <button
                   className="shelf-card-pop-item"
                   type="button"
@@ -886,7 +1293,13 @@ interface ShelfCreateFolderDialogProps {
 function ShelfCreateFolderDialog(props: ShelfCreateFolderDialogProps) {
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [isClosing, setIsClosing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const handleCancel = () => {
+    setIsClosing(true);
+    window.setTimeout(props.onCancel, 150);
+  };
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -916,7 +1329,7 @@ function ShelfCreateFolderDialog(props: ShelfCreateFolderDialogProps) {
   };
 
   return (
-    <div className="shelf-confirm-backdrop" onClick={props.onCancel}>
+    <div className={`shelf-confirm-backdrop${isClosing ? " is-closing" : ""}`} onClick={handleCancel}>
       <div className="shelf-confirm" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <form onSubmit={handleSubmit}>
           <div className="shelf-confirm-title">新建文件夹</div>
@@ -942,7 +1355,7 @@ function ShelfCreateFolderDialog(props: ShelfCreateFolderDialogProps) {
             {error && <div className="shelf-dialog-error" style={{ marginTop: 6 }}>{error}</div>}
           </div>
           <div className="shelf-confirm-actions">
-            <button className="shelf-selection-cancel" type="button" onClick={props.onCancel} disabled={props.busy}>
+            <button className="shelf-selection-cancel" type="button" onClick={handleCancel} disabled={props.busy}>
               取消
             </button>
             <button className="shelf-confirm-primary" type="submit" disabled={props.busy || !name.trim()}>
@@ -967,7 +1380,13 @@ interface ShelfRenameDialogProps {
 function ShelfRenameDialog(props: ShelfRenameDialogProps) {
   const [name, setName] = useState(props.currentName);
   const [error, setError] = useState<string | null>(null);
+  const [isClosing, setIsClosing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const handleCancel = () => {
+    setIsClosing(true);
+    window.setTimeout(props.onCancel, 150);
+  };
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -991,7 +1410,7 @@ function ShelfRenameDialog(props: ShelfRenameDialogProps) {
       return;
     }
     if (normalized === props.currentName) {
-      props.onCancel();
+      handleCancel();
       return;
     }
     try {
@@ -1002,7 +1421,7 @@ function ShelfRenameDialog(props: ShelfRenameDialogProps) {
   };
 
   return (
-    <div className="shelf-confirm-backdrop" onClick={props.onCancel}>
+    <div className={`shelf-confirm-backdrop${isClosing ? " is-closing" : ""}`} onClick={handleCancel}>
       <div className="shelf-confirm" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <form onSubmit={handleSubmit}>
           <div className="shelf-confirm-title">重命名文件夹</div>
@@ -1022,7 +1441,7 @@ function ShelfRenameDialog(props: ShelfRenameDialogProps) {
             {error && <div className="shelf-dialog-error" style={{ marginTop: 6 }}>{error}</div>}
           </div>
           <div className="shelf-confirm-actions">
-            <button className="shelf-selection-cancel" type="button" onClick={props.onCancel} disabled={props.busy}>
+            <button className="shelf-selection-cancel" type="button" onClick={handleCancel} disabled={props.busy}>
               取消
             </button>
             <button className="shelf-confirm-primary" type="submit" disabled={props.busy || !name.trim()}>
@@ -1044,13 +1463,20 @@ interface ShelfDissolveDialogProps {
 }
 
 function ShelfDissolveDialog(props: ShelfDissolveDialogProps) {
+  const [isClosing, setIsClosing] = useState(false);
+
+  const handleCancel = () => {
+    setIsClosing(true);
+    window.setTimeout(props.onCancel, 150);
+  };
+
   return (
-    <div className="shelf-confirm-backdrop" onClick={props.onCancel}>
+    <div className={`shelf-confirm-backdrop${isClosing ? " is-closing" : ""}`} onClick={handleCancel}>
       <div className="shelf-confirm" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <div className="shelf-confirm-title">解散文件夹“{props.folderName}”？</div>
         <div className="shelf-confirm-hint">书籍将回到未归类，收藏、进度和笔记保留。</div>
         <div className="shelf-confirm-actions">
-          <button className="shelf-selection-cancel" type="button" onClick={props.onCancel} disabled={props.busy}>
+          <button className="shelf-selection-cancel" type="button" onClick={handleCancel} disabled={props.busy}>
             取消
           </button>
           <button
@@ -1078,6 +1504,13 @@ interface ShelfMoveDialogProps {
 }
 
 function ShelfMoveDialog(props: ShelfMoveDialogProps) {
+  const [isClosing, setIsClosing] = useState(false);
+
+  const handleCancel = () => {
+    setIsClosing(true);
+    window.setTimeout(props.onCancel, 150);
+  };
+
   const initialFolderId = useMemo(() => {
     if (props.currentFolderId === null) {
       return props.folders.length > 0 ? props.folders[0].id : null;
@@ -1134,7 +1567,7 @@ function ShelfMoveDialog(props: ShelfMoveDialogProps) {
   const isSelectedSame = selectedFolderId === props.currentFolderId;
 
   return (
-    <div className="shelf-confirm-backdrop" onClick={props.onCancel}>
+    <div className={`shelf-confirm-backdrop${isClosing ? " is-closing" : ""}`} onClick={handleCancel}>
       <div className="shelf-confirm shelf-move-dialog" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <div className="shelf-confirm-title">移动 {targetTitle} 至</div>
         <div className="shelf-move-list" role="radiogroup">
@@ -1231,7 +1664,7 @@ function ShelfMoveDialog(props: ShelfMoveDialogProps) {
         {error && <div className="shelf-dialog-error" style={{ marginBottom: 10 }}>{error}</div>}
 
         <div className="shelf-confirm-actions">
-          <button className="shelf-selection-cancel" type="button" onClick={props.onCancel} disabled={props.busy}>
+          <button className="shelf-selection-cancel" type="button" onClick={handleCancel} disabled={props.busy}>
             取消
           </button>
           <button
@@ -1259,6 +1692,7 @@ interface ShelfFolderModalProps {
   originRect?: DOMRect;
   closing: boolean;
   busy: boolean;
+  deleteDisabled?: boolean;
   draggedEntry: ShelfEntry | null;
   organization: LibraryOrganization;
   onClose(): void;
@@ -1354,6 +1788,7 @@ const ShelfFolderModal = memo(function ShelfFolderModal(props: ShelfFolderModalP
                     selectionMode={false}
                     provider={props.provider}
                     busy={props.busy}
+                    deleteDisabled={props.deleteDisabled}
                     isFavorite={isFavorite(props.organization, hash)}
                     isDragging={props.draggedEntry?.id === entry.id}
                     isDropTargetBook={false}
@@ -1581,6 +2016,7 @@ interface ShelfSettingsDrawerProps {
   entries: ShelfEntry[];
   matchingEntries?: ShelfEntry[];
   busy: boolean;
+  importArchiveDisabled?: boolean;
   query: string;
   onQueryChange(value: string): void;
   sort: ShelfSort;
@@ -1977,7 +2413,7 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
 
           <div className="shelf-drawer-group-label">数据管理</div>
           <div className="shelf-drawer-actions">
-            <button className="tb-btn" type="button" onClick={props.onImportArchive} disabled={props.busy}>
+            <button className="tb-btn" type="button" onClick={props.onImportArchive} disabled={props.busy || props.importArchiveDisabled}>
               导入存档
             </button>
             <button className="tb-btn" type="button" onClick={props.onExportArchive} disabled={props.busy || props.entries.length === 0}>
@@ -1989,6 +2425,440 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
     </div>
   );
 }
+
+/* =========================================================================
+ * 首字母快速索引轨与拼音边界算法 (A-Z Fast Index Rail)
+ * ========================================================================= */
+
+const AZ_LETTERS = [
+  "A", "B", "C", "D", "E", "F", "G", "H", "I", "J",
+  "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T",
+  "U", "V", "W", "X", "Y", "Z", "#"
+];
+
+const PINYIN_BOUNDS = [
+  { letter: "A", char: "阿" },
+  { letter: "B", char: "八" },
+  { letter: "C", char: "嚓" },
+  { letter: "D", char: "哒" },
+  { letter: "E", char: "妸" },
+  { letter: "F", char: "发" },
+  { letter: "G", char: "旮" },
+  { letter: "H", char: "哈" },
+  { letter: "J", char: "击" },
+  { letter: "K", char: "咔" },
+  { letter: "L", char: "垃" },
+  { letter: "M", char: "妈" },
+  { letter: "N", char: "拿" },
+  { letter: "O", char: "噢" },
+  { letter: "P", char: "妑" },
+  { letter: "Q", char: "七" },
+  { letter: "R", char: "呥" },
+  { letter: "S", char: "仨" },
+  { letter: "T", char: "他" },
+  { letter: "W", char: "穵" },
+  { letter: "X", char: "夕" },
+  { letter: "Y", char: "丫" },
+  { letter: "Z", char: "帀" },
+];
+
+function getInitialLetter(str: string): string {
+  if (!str) return "#";
+  const ch = str.trim().charAt(0);
+  if (/[a-zA-Z]/.test(ch)) return ch.toUpperCase();
+  if (/[\u4e00-\u9fa5]/.test(ch)) {
+    for (let i = PINYIN_BOUNDS.length - 1; i >= 0; i--) {
+      if (ch.localeCompare(PINYIN_BOUNDS[i].char, "zh-Hans-CN") >= 0) {
+        return PINYIN_BOUNDS[i].letter;
+      }
+    }
+  }
+  return "#";
+}
+
+interface ShelfAZRailProps {
+  letterIndexMap: Map<string, number>;
+  onSelectLetter(letter: string, targetIndex: number): void;
+}
+
+const ShelfAZRail = memo(function ShelfAZRail({ letterIndexMap, onSelectLetter }: ShelfAZRailProps) {
+  return (
+    <div className="shelf-az-rail" aria-label="首字母快速索引">
+      {AZ_LETTERS.map((letter) => {
+        const hasBooks = letterIndexMap.has(letter);
+        return (
+          <button
+            key={letter}
+            className={`shelf-az-letter${!hasBooks ? " disabled" : ""}`}
+            type="button"
+            disabled={!hasBooks}
+            onClick={() => {
+              const idx = letterIndexMap.get(letter);
+              if (idx !== undefined) {
+                onSelectLetter(letter, idx);
+              }
+            }}
+            title={hasBooks ? `跳转到首字母 ${letter}` : undefined}
+          >
+            {letter}
+          </button>
+        );
+      })}
+    </div>
+  );
+});
+
+/* =========================================================================
+ * 60fps 轻量虚拟滚动 Hook (支持网格与列表双模式，智能阈值按需激活)
+ * ========================================================================= */
+
+interface VirtualizerResult {
+  startIndex: number;
+  endIndex: number;
+  topPadding: number;
+  bottomPadding: number;
+  isVirtual: boolean;
+}
+
+function useShelfVirtualizer(
+  containerRef: React.RefObject<HTMLDivElement | null>,
+  totalCount: number,
+  viewMode: "grid" | "list",
+  density: ShelfDensity,
+  threshold = 40
+): VirtualizerResult {
+  const [scrollState, setScrollState] = useState({ scrollTop: 0, viewportHeight: 800, containerWidth: 1000 });
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || totalCount < threshold) return;
+
+    let rafId: number | null = null;
+    const updateMetrics = () => {
+      setScrollState({
+        scrollTop: container.scrollTop,
+        viewportHeight: container.clientHeight || 800,
+        containerWidth: container.clientWidth || 1000,
+      });
+    };
+
+    updateMetrics();
+
+    const onScroll = () => {
+      if (rafId !== null) return;
+      rafId = window.requestAnimationFrame(() => {
+        rafId = null;
+        updateMetrics();
+      });
+    };
+
+    container.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll, { passive: true });
+
+    return () => {
+      if (rafId !== null) window.cancelAnimationFrame(rafId);
+      container.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+    };
+  }, [containerRef, totalCount, threshold]);
+
+  return useMemo(() => {
+    if (totalCount < threshold) {
+      return {
+        startIndex: 0,
+        endIndex: totalCount,
+        topPadding: 0,
+        bottomPadding: 0,
+        isVirtual: false,
+      };
+    }
+
+    const { scrollTop, viewportHeight, containerWidth } = scrollState;
+
+    if (viewMode === "list") {
+      const rowHeight = 52;
+      const overscan = 5;
+      const startRow = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan);
+      const endRow = Math.min(totalCount, Math.ceil((scrollTop + viewportHeight) / rowHeight) + overscan);
+      return {
+        startIndex: startRow,
+        endIndex: endRow,
+        topPadding: startRow * rowHeight,
+        bottomPadding: Math.max(0, (totalCount - endRow) * rowHeight),
+        isVirtual: true,
+      };
+    } else {
+      // Grid mode
+      const minColWidth = density === "compact" ? 120 : density === "comfortable" ? 180 : 150;
+      const gap = density === "compact" ? 12 : density === "comfortable" ? 20 : 16;
+      const rowHeight = density === "compact" ? 240 : density === "comfortable" ? 320 : 280;
+      const availableWidth = Math.max(200, containerWidth - 40);
+      const cols = Math.max(1, Math.floor((availableWidth + gap) / (minColWidth + gap)));
+      const totalRows = Math.ceil(totalCount / cols);
+      const overscan = 2;
+      const startRow = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan);
+      const endRow = Math.min(totalRows, Math.ceil((scrollTop + viewportHeight) / rowHeight) + overscan);
+      const startIndex = startRow * cols;
+      const endIndex = Math.min(totalCount, endRow * cols);
+
+      return {
+        startIndex,
+        endIndex,
+        topPadding: startRow * rowHeight,
+        bottomPadding: Math.max(0, (totalRows - endRow) * rowHeight),
+        isVirtual: true,
+      };
+    }
+  }, [totalCount, threshold, scrollState, viewMode, density]);
+}
+
+/* =========================================================================
+ * 列表模式单行组件 (ShelfTableRow)
+ * ========================================================================= */
+
+interface ShelfTableRowProps {
+  entry: ShelfEntry;
+  index: number;
+  provider: ThumbnailProvider;
+  selected: boolean;
+  selectionMode: boolean;
+  isFavorite: boolean;
+  inFolder: boolean;
+  busy?: boolean;
+  deleteDisabled?: boolean;
+  onOpen(id: string): void;
+  onToggleSelected(id: string): void;
+  onToggleFavorite(entry: ShelfEntry): void;
+  onDeleteRequest(entry: ShelfEntry): void;
+  onMoveToFolder(entry: ShelfEntry): void;
+  onRemoveFromFolder?(entry: ShelfEntry): Promise<void>;
+}
+
+const ShelfTableRow = memo(function ShelfTableRow({
+  entry,
+  index,
+  provider,
+  selected,
+  selectionMode,
+  isFavorite,
+  inFolder,
+  busy,
+  deleteDisabled,
+  onOpen,
+  onToggleSelected,
+  onToggleFavorite,
+  onDeleteRequest,
+  onMoveToFolder,
+  onRemoveFromFolder,
+}: ShelfTableRowProps) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuClosing, setMenuClosing] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const closeMenu = useCallback(() => {
+    setMenuClosing(true);
+    window.setTimeout(() => {
+      setMenuOpen(false);
+      setMenuClosing(false);
+    }, 150);
+  }, []);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (e: PointerEvent): void => {
+      if (!menuRef.current?.contains(e.target as Node)) {
+        closeMenu();
+      }
+    };
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") closeMenu();
+    };
+    window.addEventListener("pointerdown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [menuOpen, closeMenu]);
+
+  const handleRowClick = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement | null;
+    if (
+      target?.closest(
+        "button, input, select, .shelf-card-pop-menu, .shelf-card-actions-wrap, .shelf-card-star-btn"
+      )
+    ) {
+      return;
+    }
+    if (selectionMode) {
+      onToggleSelected(entry.id);
+    } else {
+      onOpen(entry.id);
+    }
+  };
+
+  return (
+    <tr
+      className={`shelf-table-row${selected ? " selected" : ""}`}
+      data-shelf-target="book"
+      data-book-id={entry.id}
+      onClick={handleRowClick}
+    >
+      <td style={{ textAlign: "center", width: 44 }}>
+        {selectionMode ? (
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={() => onToggleSelected(entry.id)}
+            aria-label={`选择 ${entry.title}`}
+          />
+        ) : (
+          <span style={{ fontSize: 11, color: "var(--muted)" }}>{index + 1}</span>
+        )}
+      </td>
+      <td style={{ width: 48 }}>
+        <div className="shelf-table-thumb-box">
+          <Cover entry={entry} provider={provider} />
+        </div>
+      </td>
+      <td>
+        <div className="shelf-table-title-cell">
+          <span className="shelf-table-title">{entry.title}</span>
+          {entry.isNew && !selectionMode && (
+            <span className="shelf-badge new" style={{ position: "static", marginLeft: 6 }}>
+              新
+            </span>
+          )}
+        </div>
+      </td>
+      <td style={{ color: "var(--muted)", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {entry.creator || "未知作者"}
+      </td>
+      <td>
+        <div className="shelf-table-progress-wrap">
+          <div className="shelf-table-progress-track">
+            <div
+              className="shelf-table-progress-bar"
+              style={{ width: `${Math.min(100, entry.progressPct ?? 0)}%` }}
+            />
+          </div>
+          <span className="shelf-table-progress-text">{Math.round(entry.progressPct ?? 0)}%</span>
+        </div>
+      </td>
+      <td style={{ color: "var(--muted)", fontSize: 12, whiteSpace: "nowrap" }}>
+        {formatFileSize(entry.fileSize)}
+      </td>
+      <td style={{ color: "var(--muted)", fontSize: 12, whiteSpace: "nowrap" }}>
+        {formatRelativeTime(entry.lastReadAtMs) || formatShelfTime(entry.addedAtMs) || "刚刚"}
+      </td>
+      <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+        <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <button
+            className={`shelf-card-star-btn${isFavorite ? " active" : ""}`}
+            style={{ position: "static", opacity: 1, display: "inline-flex" }}
+            type="button"
+            title={isFavorite ? "取消收藏" : "加入收藏"}
+            aria-label={isFavorite ? `取消收藏：${entry.title}` : `加入收藏：${entry.title}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleFavorite(entry);
+            }}
+          >
+            <StarIcon filled={isFavorite} />
+          </button>
+          <div className="shelf-card-actions-wrap" ref={menuRef} style={{ position: "relative", opacity: 1 }}>
+            <button
+              className={`shelf-card-more-btn${menuOpen ? " active" : ""}`}
+              style={{ position: "static", opacity: 1 }}
+              type="button"
+              title="更多选项"
+              aria-label={`更多选项：${entry.title}`}
+              aria-expanded={menuOpen}
+              onClick={(e) => {
+                e.stopPropagation();
+                setMenuOpen((v) => !v);
+              }}
+            >
+              <DotsVerticalIcon />
+            </button>
+            {menuOpen && (
+              <div
+                className={`shelf-card-pop-menu${menuClosing ? " is-closing" : ""}`}
+                role="menu"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <button
+                  className="shelf-card-pop-item"
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onOpen(entry.id);
+                  }}
+                >
+                  <BookLogoIcon />
+                  <span>打开阅读</span>
+                </button>
+                <button
+                  className="shelf-card-pop-item"
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onToggleFavorite(entry);
+                  }}
+                >
+                  <StarIcon filled={isFavorite} />
+                  <span>{isFavorite ? "取消收藏" : "加入收藏"}</span>
+                </button>
+                <button
+                  className="shelf-card-pop-item"
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onMoveToFolder(entry);
+                  }}
+                >
+                  <FolderIcon />
+                  <span>移至文件夹</span>
+                </button>
+                {inFolder && onRemoveFromFolder && (
+                  <button
+                    className="shelf-card-pop-item"
+                    type="button"
+                    role="menuitem"
+                    disabled={busy}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      void onRemoveFromFolder(entry);
+                    }}
+                  >
+                    <FolderIcon />
+                    <span>从文件夹移除</span>
+                  </button>
+                )}
+                <button
+                  className="shelf-card-pop-item danger"
+                  type="button"
+                  role="menuitem"
+                  disabled={busy || deleteDisabled}
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onDeleteRequest(entry);
+                  }}
+                >
+                  <TrashIcon />
+                  <span>从书架删除</span>
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </td>
+    </tr>
+  );
+});
 
 /* =========================================================================
  * 主书架视图
@@ -2010,15 +2880,86 @@ export function ShelfView(props: ShelfViewProps) {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<ShelfSort>("recent");
   const [density, setDensity] = useState<ShelfDensity>("standard");
+  const [viewMode, setViewMode] = useState<"grid" | "list">(() => {
+    try {
+      return (localStorage.getItem("epub_shelf_view_mode") as "grid" | "list") || "grid";
+    } catch {
+      return "grid";
+    }
+  });
+  const [statusTab, setStatusTab] = useState<"all" | "reading" | "unread" | "finished" | "favorites">("all");
+  const [folderMenuOpen, setFolderMenuOpen] = useState(false);
+  const folderDropdownRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!folderMenuOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (!folderDropdownRef.current?.contains(e.target as Node)) {
+        setFolderMenuOpen(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFolderMenuOpen(false);
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [folderMenuOpen]);
+
+  const quickInputRef = useRef<HTMLInputElement | null>(null);
+
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [filters, setFilters] = useState<ShelfFilters>(EMPTY_SHELF_FILTERS);
   const [selectionMode, setSelectionMode] = useState(false);
+  const [dockClosing, setDockClosing] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleteTargets, setDeleteTargets] = useState<ShelfEntry[] | null>(null);
   const [createFolderOpen, setCreateFolderOpen] = useState(false);
   const [renameFolderTarget, setRenameFolderTarget] = useState<{ id: string; name: string } | null>(null);
   const [dissolveFolderTarget, setDissolveFolderTarget] = useState<{ id: string; name: string } | null>(null);
   const [moveDialogTargets, setMoveDialogTargets] = useState<ShelfEntry[] | null>(null);
+  const [deleteTargetsClosing, setDeleteTargetsClosing] = useState(false);
+  const [toastLetter, setToastLetter] = useState<string | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
+  const shelfViewRef = useRef<HTMLDivElement | null>(null);
+
+  const handleCancelDelete = useCallback(() => {
+    setDeleteTargetsClosing(true);
+    window.setTimeout(() => {
+      setDeleteTargets(null);
+      setDeleteTargetsClosing(false);
+    }, 150);
+  }, []);
+
+  // 全局快捷键：按 / 键聚焦快速书名过滤框，按 Esc 退出批量选择模式
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "/" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const target = e.target as HTMLElement | null;
+        const tag = target?.tagName?.toLowerCase();
+        if (tag !== "input" && tag !== "textarea" && tag !== "select" && !target?.isContentEditable) {
+          e.preventDefault();
+          quickInputRef.current?.focus();
+          quickInputRef.current?.select();
+        }
+      }
+      if (e.key === "Escape" && selectionMode) {
+        exitSelection();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [selectionMode]);
+
+  const handleViewModeChange = useCallback((mode: "grid" | "list") => {
+    setViewMode(mode);
+    try {
+      localStorage.setItem("epub_shelf_view_mode", mode);
+    } catch {}
+  }, []);
 
   // 文件夹弹窗状态（手机拟物居中展开弹窗）
   const [activeFolderModal, setActiveFolderModal] = useState<{
@@ -2100,6 +3041,35 @@ export function ShelfView(props: ShelfViewProps) {
     return { folderBooksMap: folderMap, unclassifiedBooks: unclassified, favoriteBooks: favorites };
   }, [organization, props.entries, activeFolders]);
 
+  // Level 3 状态分流计数
+  const { allCount, readingCount, unreadCount, finishedCount, favoriteCount } = useMemo(() => {
+    const source = scope.type === "folder" ? (folderBooksMap.get(scope.folderId) ?? []) : props.entries;
+    let read = 0;
+    let unread = 0;
+    let finished = 0;
+    let fav = 0;
+    for (const entry of source) {
+      const hash = entry.contentHash ?? entry.id;
+      if (isFavorite(organization, hash)) fav++;
+      const hasRead = hasReadPosition(entry);
+      const pct = entry.progressPct ?? 0;
+      if (pct >= 100) {
+        finished++;
+      } else if (hasRead && pct > 0) {
+        read++;
+      } else {
+        unread++;
+      }
+    }
+    return {
+      allCount: source.length,
+      readingCount: read,
+      unreadCount: unread,
+      finishedCount: finished,
+      favoriteCount: fav,
+    };
+  }, [scope, folderBooksMap, props.entries, organization]);
+
   const scopedCandidateBooks = useMemo(() => {
     switch (scope.type) {
       case "root":
@@ -2113,16 +3083,38 @@ export function ShelfView(props: ShelfViewProps) {
     }
   }, [scope, unclassifiedBooks, props.entries, favoriteBooks, folderBooksMap]);
 
+  // 结合 Level 3 状态胶囊的分流筛选
+  const statusFilteredBooks = useMemo(() => {
+    const base = scope.type === "folder" ? (folderBooksMap.get(scope.folderId) ?? []) : props.entries;
+    switch (statusTab) {
+      case "reading":
+        return base.filter(
+          (e) => hasReadPosition(e) && (e.progressPct ?? 0) < 100 && (e.progressPct ?? 0) > 0
+        );
+      case "unread":
+        return base.filter((e) => !hasReadPosition(e) || (e.progressPct ?? 0) === 0);
+      case "finished":
+        return base.filter((e) => (e.progressPct ?? 0) >= 100);
+      case "favorites":
+        return scope.type === "folder"
+          ? base.filter((e) => isFavorite(organization, e.contentHash ?? e.id))
+          : favoriteBooks;
+      case "all":
+      default:
+        return scopedCandidateBooks;
+    }
+  }, [statusTab, scope.type, folderBooksMap, scopedCandidateBooks, props.entries, organization, favoriteBooks]);
+
   const filterModel = useMemo(
     () =>
-      createShelfFilterModel(scopedCandidateBooks, {
+      createShelfFilterModel(statusFilteredBooks, {
         authors: [...filters.authors],
         titles: [...filters.titles],
         timeSegments: [...filters.saved],
         languages: [...filters.languages],
         query,
       }),
-    [scopedCandidateBooks, query, filters]
+    [statusFilteredBooks, query, filters]
   );
 
   const visible = useMemo(
@@ -2130,12 +3122,77 @@ export function ShelfView(props: ShelfViewProps) {
     [filterModel.entries, sort]
   );
 
+  const virtualizer = useShelfVirtualizer(
+    shelfViewRef,
+    visible.length,
+    viewMode,
+    density,
+    40
+  );
+
+  const renderedBooks = useMemo(() => {
+    if (!virtualizer.isVirtual) return visible;
+    return visible.slice(virtualizer.startIndex, virtualizer.endIndex);
+  }, [visible, virtualizer]);
+
+  const letterFirstIndexMap = useMemo(() => {
+    if (sort !== "title") return new Map<string, number>();
+    const map = new Map<string, number>();
+    for (let i = 0; i < visible.length; i++) {
+      const letter = getInitialLetter(visible[i].title);
+      if (!map.has(letter)) {
+        map.set(letter, i);
+      }
+    }
+    return map;
+  }, [visible, sort]);
+
+  const handleSelectLetter = useCallback(
+    (letter: string, targetIndex: number) => {
+      setToastLetter(letter);
+      if (toastTimerRef.current !== null) {
+        window.clearTimeout(toastTimerRef.current);
+      }
+      toastTimerRef.current = window.setTimeout(() => {
+        setToastLetter(null);
+        toastTimerRef.current = null;
+      }, 350);
+
+      const container = shelfViewRef.current;
+      if (!container) return;
+
+      const scrollToOffset = (top: number) => {
+        if (typeof container.scrollTo === "function") {
+          container.scrollTo({ top, behavior: "smooth" });
+        } else {
+          container.scrollTop = top;
+        }
+      };
+
+      if (viewMode === "list") {
+        const targetScrollTop = targetIndex * 52;
+        scrollToOffset(targetScrollTop);
+      } else {
+        const minColWidth = density === "compact" ? 120 : density === "comfortable" ? 180 : 150;
+        const gap = density === "compact" ? 12 : density === "comfortable" ? 20 : 16;
+        const rowHeight = density === "compact" ? 240 : density === "comfortable" ? 320 : 280;
+        const availableWidth = Math.max(200, (container.clientWidth || 1000) - 40);
+        const cols = Math.max(1, Math.floor((availableWidth + gap) / (minColWidth + gap)));
+        const targetRow = Math.floor(targetIndex / cols);
+        const targetScrollTop = targetRow * rowHeight;
+        scrollToOffset(targetScrollTop);
+      }
+    },
+    [viewMode, density]
+  );
+
   const visibleFolders = useMemo(() => {
     if (scope.type !== "root") return [];
+    if (statusTab !== "all") return [];
     if (!query.trim()) return activeFolders;
     const q = query.trim().toLowerCase();
     return activeFolders.filter((f) => f.name.toLowerCase().includes(q));
-  }, [scope, activeFolders, query]);
+  }, [scope, statusTab, activeFolders, query]);
 
   const thumbnailProvider = props.thumbnailProvider ?? legacyThumbnailProvider;
 
@@ -2165,13 +3222,18 @@ export function ShelfView(props: ShelfViewProps) {
 
   const enterSelection = (): void => {
     setSelectedIds(new Set());
+    setDockClosing(false);
     setSelectionMode(true);
   };
 
-  const exitSelection = (): void => {
-    setSelectionMode(false);
-    setSelectedIds(new Set());
-  };
+  const exitSelection = useCallback((): void => {
+    setDockClosing(true);
+    window.setTimeout(() => {
+      setSelectionMode(false);
+      setDockClosing(false);
+      setSelectedIds(new Set());
+    }, 150);
+  }, []);
 
   const onDeleteRequest = useCallback((entry: ShelfEntry): void => {
     setDeleteTargets([entry]);
@@ -2496,20 +3558,14 @@ export function ShelfView(props: ShelfViewProps) {
     }));
   }, [activeFolders, folderBooksMap]);
 
-  const searchPlaceholder = useMemo(() => {
-    if (scope.type === "root") return "搜索未归类书籍…";
-    if (scope.type === "favorites") return "搜索收藏书籍…";
-    if (scope.type === "folder") return `搜索《${currentFolder?.name ?? "文件夹"}》内部…`;
-    return "搜索书名或作者…";
-  }, [scope.type, currentFolder?.name]);
-
   return (
     <div
-      className={`shelf-view density-${density}${selectionMode ? " selection-mode" : ""}${props.busy ? " busy" : ""}`}
-      aria-busy={props.busy}
+      ref={shelfViewRef}
+      className={`shelf-view density-${density}${selectionMode ? " selection-mode" : ""} view-${viewMode}${props.busy ? " busy" : ""}${props.importActive ? " import-active" : ""}`}
+      aria-busy={props.busy || props.importActive}
     >
-      {/* 现代极简顶部操作栏 */}
-      <header className="shelf-head">
+      {/* 现代极简顶部操作栏 (Level 1) */}
+      <header className="shelf-head shelf-head-zen">
         {selectionMode ? (
           /* 多选管理模式状态栏 */
           <div className="shelf-selection-bar">
@@ -2567,7 +3623,7 @@ export function ShelfView(props: ShelfViewProps) {
               <button
                 className="shelf-selection-delete"
                 type="button"
-                disabled={selectedIds.size === 0 || props.busy}
+                disabled={selectedIds.size === 0 || props.busy || props.importActive}
                 onClick={() => {
                   const targets = props.entries.filter((e) => selectedIds.has(e.id));
                   if (targets.length > 0) setDeleteTargets(targets);
@@ -2579,93 +3635,108 @@ export function ShelfView(props: ShelfViewProps) {
             </div>
           </div>
         ) : (
-          /* 常态操作栏：品牌占位、前置快捷检索、排序与主要操作 */
-          <div className="shelf-normal-bar">
-            <div className="shelf-brand-zone">
+          /* 常态操作栏：Level 1 全局顶栏极净化 */
+          <div className="shelf-normal-bar shelf-normal-bar-zen">
+            {/* Level 1 左侧：应用 LOGO + 藏书总计微标签 */}
+            <div className="shelf-brand-zone-zen">
+              <div className="shelf-logo-badge" aria-hidden="true">
+                <BookLogoIcon />
+              </div>
+              <span className="shelf-brand-title">书架</span>
+              <span className="shelf-total-badge">藏书 {props.entries.length} 本</span>
+            </div>
+
+            {/* Level 1 中间：极速书名快速过滤框 [ 🔍 快速搜书名... (按 / 键聚焦) ] */}
+            <div className="shelf-quick-filter-box">
+              <span className="shelf-quick-filter-icon" aria-hidden="true">
+                <SearchIcon />
+              </span>
+              <input
+                ref={quickInputRef}
+                className="shelf-quick-filter-input"
+                type="search"
+                placeholder="快速搜书名... (按 / 键聚焦)"
+                value={query}
+                disabled={props.busy}
+                onChange={(e) => setQuery(e.target.value)}
+                aria-label="快速搜书名"
+              />
+              {query && (
+                <button
+                  className="shelf-quick-filter-clear"
+                  type="button"
+                  onClick={() => setQuery("")}
+                  aria-label="清除搜索"
+                  title="清除搜索内容"
+                >
+                  <CloseIcon />
+                </button>
+              )}
+            </div>
+
+            {/* Level 1 右侧：导入图书主按钮、视图切换 [⊞/☰]、设置 */}
+            <div className="shelf-actions-zone-zen">
               <button
-                className={`shelf-menu-btn${drawerOpen ? " open" : ""}`}
+                className="shelf-btn-primary"
+                type="button"
+                onClick={props.onImport}
+                disabled={props.busy || props.importActive}
+                title="导入 EPUB 图书到书架"
+              >
+                <PlusIcon />
+                <span>导入图书</span>
+              </button>
+
+              {/* 视图切换 [⊞/☰] */}
+              <div className="shelf-view-toggle-group" role="group" aria-label="视图模式切换">
+                <button
+                  className={`shelf-view-toggle-btn${viewMode === "grid" ? " active" : ""}`}
+                  type="button"
+                  onClick={() => handleViewModeChange("grid")}
+                  title="网格视图"
+                  aria-label="网格视图"
+                  aria-pressed={viewMode === "grid"}
+                >
+                  <GridIcon />
+                </button>
+                <button
+                  className={`shelf-view-toggle-btn${viewMode === "list" ? " active" : ""}`}
+                  type="button"
+                  onClick={() => handleViewModeChange("list")}
+                  title="列表视图"
+                  aria-label="列表视图"
+                  aria-pressed={viewMode === "list"}
+                >
+                  <ListIcon />
+                </button>
+              </div>
+
+              {/* 批量管理切换 */}
+              <button
+                className="shelf-manage-toggle-btn"
+                type="button"
+                onClick={enterSelection}
+                disabled={props.busy || props.entries.length === 0}
+                title="开启批量选择 (多选删除/移动/收藏)"
+                data-testid="shelf-batch-select-btn"
+              >
+                <CheckListIcon />
+                <span>批量选择</span>
+              </button>
+
+              {/* 设置按钮 */}
+              <button
+                className="shelf-icon-btn-zen"
                 ref={menuButtonRef}
                 type="button"
-                aria-label="打开书架菜单"
+                aria-label="书架设置与高级工具"
                 aria-expanded={drawerOpen}
                 aria-controls="shelf-settings-drawer"
                 onClick={() => setDrawerOpen(true)}
                 disabled={props.busy}
-                title="书架菜单与高级筛选"
+                title="书架设置与高级工具"
               >
-                <MenuIcon />
-              </button>
-              <div className="shelf-brand-identity">
-                <div className="shelf-brand-icon-wrap" aria-hidden="true">
-                  <BookLogoIcon />
-                </div>
-                <span className="shelf-title">书架</span>
-                <span className="shelf-count-chip">{props.entries.length} 本</span>
-              </div>
-            </div>
-
-            <div className="shelf-tools-zone">
-              {/* 前置即时搜索胶囊 */}
-              <div className="shelf-quick-search">
-                <span className="shelf-quick-search-icon" aria-hidden="true">
-                  <SearchIcon />
-                </span>
-                <input
-                  className="shelf-quick-search-input"
-                  type="search"
-                  placeholder={searchPlaceholder}
-                  value={query}
-                  disabled={props.busy}
-                  onChange={(e) => setQuery(e.target.value)}
-                  aria-label="在书架中即时搜索"
-                />
-                {query && (
-                  <button
-                    className="shelf-quick-search-clear"
-                    type="button"
-                    onClick={() => setQuery("")}
-                    aria-label="清除搜索"
-                  >
-                    <CloseIcon />
-                  </button>
-                )}
-              </div>
-
-              {/* 外露快捷排序 */}
-              <ShelfSelect
-                value={sort}
-                busy={props.busy}
-                title="快速排序"
-                options={[
-                  { value: "recent", label: "最近阅读" },
-                  { value: "added", label: "最近添加" },
-                  { value: "title", label: "书名排序" },
-                ]}
-                onChange={(value) => setSort(value as ShelfSort)}
-              />
-
-              {/* 批量管理模式切换 */}
-              <button
-                className="shelf-manage-btn"
-                type="button"
-                onClick={enterSelection}
-                disabled={props.busy || props.entries.length === 0}
-                title="多选管理书籍"
-              >
-                <CheckListIcon />
-                <span>管理</span>
-              </button>
-
-              {/* 导入书籍 */}
-              <button
-                className="shelf-import-btn"
-                type="button"
-                onClick={props.onImport}
-                disabled={props.busy}
-                title="导入 EPUB 到书架"
-              >
-                <PlusIcon />
-                <span>导入</span>
+                <SettingsIcon />
               </button>
             </div>
           </div>
@@ -2695,6 +3766,7 @@ export function ShelfView(props: ShelfViewProps) {
           props.onOpen(id);
           closeDrawer();
         }}
+        importArchiveDisabled={props.importActive}
         onImportArchive={props.onImportArchive}
         onExportArchive={props.onExportArchive}
         searchMode={props.searchMode ?? "metadata"}
@@ -2702,91 +3774,235 @@ export function ShelfView(props: ShelfViewProps) {
         bodySearch={props.bodySearch}
       />
 
-      {/* Scope 导航栏或文件夹面包屑 */}
-      {scope.type === "folder" ? (
-        <nav className="shelf-breadcrumb" aria-label="文件夹路径导航">
-          <button
-            className="shelf-breadcrumb-item"
-            type="button"
-            onClick={() => setScope({ type: "root" })}
-          >
-            书架
-          </button>
-          <span className="shelf-breadcrumb-sep">/</span>
-          <span className="shelf-breadcrumb-current">{currentFolder?.name ?? "文件夹"}</span>
-          <span className="shelf-breadcrumb-count">
-            {(folderBooksMap.get(scope.folderId) ?? []).length} 本书
-          </span>
-          <div className="shelf-folder-actions">
-            {currentFolder && (
-              <>
+      {/* Level 2: 紧凑型“正在阅读”续读控制台 */}
+      <ShelfResumeStage
+        entries={props.entries}
+        provider={thumbnailProvider}
+        busy={props.busy}
+        onOpen={props.onOpen}
+      />
+
+      {/* Level 3: 状态与分类胶囊轨 */}
+      <nav className="shelf-nav-rail" aria-label="书架分类导航与排序">
+        <div className="shelf-nav-rail-left">
+          {/* 状态分流胶囊组 */}
+          <div className="shelf-capsule-tabs" role="tablist" aria-label="阅读状态分流">
+            <button
+              className={`shelf-capsule-tab${statusTab === "all" ? " active" : ""}`}
+              type="button"
+              role="tab"
+              aria-selected={statusTab === "all"}
+              onClick={() => setStatusTab("all")}
+            >
+              <span>全部</span>
+              <span className="shelf-capsule-count">{allCount}</span>
+            </button>
+            <button
+              className={`shelf-capsule-tab${statusTab === "reading" ? " active" : ""}`}
+              type="button"
+              role="tab"
+              aria-selected={statusTab === "reading"}
+              onClick={() => setStatusTab("reading")}
+            >
+              <span>正在读</span>
+              <span className="shelf-capsule-count">{readingCount}</span>
+            </button>
+            <button
+              className={`shelf-capsule-tab${statusTab === "unread" ? " active" : ""}`}
+              type="button"
+              role="tab"
+              aria-selected={statusTab === "unread"}
+              onClick={() => setStatusTab("unread")}
+            >
+              <span>未读</span>
+              <span className="shelf-capsule-count">{unreadCount}</span>
+            </button>
+            <button
+              className={`shelf-capsule-tab${statusTab === "finished" ? " active" : ""}`}
+              type="button"
+              role="tab"
+              aria-selected={statusTab === "finished"}
+              onClick={() => setStatusTab("finished")}
+            >
+              <span>已读完</span>
+              <span className="shelf-capsule-count">{finishedCount}</span>
+            </button>
+            <button
+              className={`shelf-capsule-tab${statusTab === "favorites" ? " active" : ""}`}
+              type="button"
+              role="tab"
+              aria-selected={statusTab === "favorites"}
+              onClick={() => setStatusTab("favorites")}
+            >
+              <StarIcon filled={statusTab === "favorites"} />
+              <span>收藏</span>
+              <span className="shelf-capsule-count">{favoriteCount}</span>
+            </button>
+          </div>
+
+          {/* 集中式文件夹选择下拉 */}
+          <div className="shelf-folder-dropdown-wrap" ref={folderDropdownRef}>
+            <button
+              className={`shelf-folder-dropdown-btn${scope.type === "folder" ? " active" : ""}`}
+              type="button"
+              onClick={() => setFolderMenuOpen(!folderMenuOpen)}
+              aria-expanded={folderMenuOpen}
+              title="选择或管理文件夹"
+            >
+              <FolderIcon />
+              <span>
+                {scope.type === "folder"
+                  ? currentFolder?.name ?? "文件夹"
+                  : `文件夹 (${activeFolders.length})`}
+              </span>
+              <ChevronDownIcon />
+            </button>
+            {folderMenuOpen && (
+              <div className="shelf-folder-popover-menu">
                 <button
-                  className="shelf-folder-action-btn"
+                  className={`shelf-folder-menu-item${scope.type === "all" ? " selected" : ""}`}
                   type="button"
-                  onClick={() => setRenameFolderTarget(currentFolder)}
-                  title="重命名文件夹"
+                  onClick={() => {
+                    setScope({ type: "all" });
+                    setFolderMenuOpen(false);
+                  }}
                 >
-                  <EditIcon />
-                  <span>重命名</span>
+                  <span>全部藏书</span>
+                  <span className="shelf-capsule-count">{props.entries.length}</span>
                 </button>
                 <button
-                  className="shelf-folder-action-btn danger"
+                  className={`shelf-folder-menu-item${scope.type === "root" ? " selected" : ""}`}
                   type="button"
-                  onClick={() => setDissolveFolderTarget(currentFolder)}
-                  title="解散文件夹"
+                  onClick={() => {
+                    setScope({ type: "root" });
+                    setFolderMenuOpen(false);
+                  }}
                 >
-                  <TrashIcon />
-                  <span>解散文件夹</span>
+                  <span>未归类书籍</span>
+                  <span className="shelf-capsule-count">{unclassifiedBooks.length}</span>
                 </button>
-              </>
+                <div className="shelf-folder-menu-divider" />
+                {activeFolders.map((f) => {
+                  const count = (folderBooksMap.get(f.id) ?? []).length;
+                  const isCurrent = scope.type === "folder" && scope.folderId === f.id;
+                  return (
+                    <button
+                      key={f.id}
+                      className={`shelf-folder-menu-item${isCurrent ? " selected" : ""}`}
+                      type="button"
+                      onClick={() => {
+                        setScope({ type: "folder", folderId: f.id });
+                        setFolderMenuOpen(false);
+                      }}
+                    >
+                      <span>{f.name}</span>
+                      <span className="shelf-capsule-count">{count}</span>
+                    </button>
+                  );
+                })}
+                <div className="shelf-folder-menu-divider" />
+                <button
+                  className="shelf-folder-menu-new-btn"
+                  type="button"
+                  onClick={() => {
+                    setFolderMenuOpen(false);
+                    setCreateFolderOpen(true);
+                  }}
+                >
+                  <PlusIcon />
+                  <span>新建文件夹</span>
+                </button>
+              </div>
             )}
           </div>
-        </nav>
-      ) : (
-        <div className="shelf-scope-bar" role="tablist" aria-label="书架范围切换">
+
+          {/* 当处于特定文件夹时，显示专属状态与退出/管理操作 */}
+          {scope.type === "folder" && (
+            <div className="shelf-folder-active-bar">
+              <div className="shelf-folder-active-info">
+                <span>《{currentFolder?.name ?? "文件夹"}》</span>
+                <span className="shelf-folder-active-count">
+                  {(folderBooksMap.get(scope.folderId) ?? []).length} 本书
+                </span>
+              </div>
+              {currentFolder && (
+                <>
+                  <button
+                    className="shelf-folder-action-btn"
+                    type="button"
+                    onClick={() => setRenameFolderTarget(currentFolder)}
+                    title="重命名文件夹"
+                  >
+                    <EditIcon />
+                    <span>重命名</span>
+                  </button>
+                  <button
+                    className="shelf-folder-action-btn danger"
+                    type="button"
+                    onClick={() => setDissolveFolderTarget(currentFolder)}
+                    title="解散文件夹"
+                  >
+                    <TrashIcon />
+                    <span>解散</span>
+                  </button>
+                </>
+              )}
+              <button
+                className="shelf-folder-active-exit"
+                type="button"
+                onClick={() => setScope({ type: "root" })}
+                title="退出当前文件夹"
+                aria-label="退出当前文件夹"
+              >
+                <CloseIcon />
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* 右侧排序与密度轨 */}
+        <div className="shelf-nav-rail-right">
+          <div className="shelf-sort-select-container" style={{ position: "relative" }}>
+            <ShelfSelect
+              value={sort}
+              busy={props.busy}
+              title="书籍排序方式"
+              options={[
+                { value: "recent", label: "排序：最近阅读" },
+                { value: "added", label: "排序：最近添加" },
+                { value: "title", label: "排序：书名排序" },
+                { value: "progress", label: "排序：阅读进度" },
+              ]}
+              onChange={(val) => setSort(val as ShelfSort)}
+            />
+            <select
+              className="shelf-sort-select-zen"
+              value={sort}
+              disabled={props.busy}
+              onChange={(e) => setSort(e.target.value as ShelfSort)}
+              aria-label="书籍排序方式"
+              style={{ position: "absolute", opacity: 0, pointerEvents: "none", width: 0, height: 0 }}
+              tabIndex={-1}
+              aria-hidden="true"
+            >
+              <option value="recent">排序：最近阅读</option>
+              <option value="added">排序：最近添加</option>
+              <option value="title">排序：书名排序</option>
+              <option value="progress">排序：阅读进度</option>
+            </select>
+          </div>
+
           <button
-            className={`shelf-scope-item${scope.type === "root" ? " active" : ""}`}
+            className="shelf-icon-btn-zen"
             type="button"
-            role="tab"
-            aria-selected={scope.type === "root"}
-            onClick={() => setScope({ type: "root" })}
+            onClick={() => setDensity(density === "compact" ? "standard" : "compact")}
+            title={density === "compact" ? "切换为舒适密度" : "切换为紧凑密度"}
+            style={{ width: "auto", height: 32, padding: "0 12px", fontSize: "13px" }}
           >
-            书架
-          </button>
-          <button
-            className={`shelf-scope-item${scope.type === "all" ? " active" : ""}`}
-            type="button"
-            role="tab"
-            aria-selected={scope.type === "all"}
-            onClick={() => setScope({ type: "all" })}
-          >
-            <span>全部书籍</span>
-            <span className="shelf-scope-badge">{props.entries.length}</span>
-          </button>
-          <button
-            className={`shelf-scope-item${scope.type === "favorites" ? " active" : ""}`}
-            type="button"
-            role="tab"
-            aria-selected={scope.type === "favorites"}
-            onClick={() => setScope({ type: "favorites" })}
-          >
-            <StarIcon filled={scope.type === "favorites"} />
-            <span>收藏</span>
-            <span className="shelf-scope-badge">{favoriteBooks.length}</span>
-          </button>
-          <div className="shelf-scope-spacer" />
-          <button
-            className="shelf-new-folder-btn"
-            type="button"
-            disabled={props.busy}
-            onClick={() => setCreateFolderOpen(true)}
-            title="新建文件夹"
-          >
-            <PlusIcon />
-            <span>新建文件夹</span>
+            {density === "compact" ? "紧凑" : "舒适"}
           </button>
         </div>
-      )}
+      </nav>
 
       {/* 书架内容区 */}
       {props.entries.length === 0 && activeFolders.length === 0 ? (
@@ -2798,7 +4014,7 @@ export function ShelfView(props: ShelfViewProps) {
           <div className="shelf-empty-hint">
             导入 EPUB 后会出现在这里，点击上方“导入”或直接将文件拖拽到窗口
           </div>
-          <button className="shelf-empty-btn" onClick={props.onImport} disabled={props.busy}>
+          <button className="shelf-empty-btn" onClick={props.onImport} disabled={props.busy || props.importActive}>
             <PlusIcon />
             <span>导入第一本书</span>
           </button>
@@ -2812,7 +4028,7 @@ export function ShelfView(props: ShelfViewProps) {
           <div className="shelf-empty-hint">
             导入 EPUB 后会出现在这里，点击上方“导入”或直接将文件拖拽到窗口
           </div>
-          <button className="shelf-empty-btn" onClick={props.onImport} disabled={props.busy}>
+          <button className="shelf-empty-btn" onClick={props.onImport} disabled={props.busy || props.importActive}>
             <PlusIcon />
             <span>导入第一本书</span>
           </button>
@@ -2854,48 +4070,192 @@ export function ShelfView(props: ShelfViewProps) {
             </button>
           )}
         </div>
+      ) : viewMode === "list" ? (
+        <div className="shelf-table-view">
+          <table className="shelf-table">
+            <thead>
+              <tr>
+                <th style={{ width: 44, textAlign: "center" }}>
+                  {selectionMode ? "选择" : "#"}
+                </th>
+                <th style={{ width: 48 }}>封面</th>
+                <th
+                  className={`sortable${sort === "title" ? " active" : ""}`}
+                  onClick={() => setSort("title")}
+                  title="点击按书名排序"
+                >
+                  书名 {sort === "title" ? "▾" : ""}
+                </th>
+                <th style={{ width: "16%" }}>作者</th>
+                <th
+                  className={`sortable${sort === "progress" ? " active" : ""}`}
+                  style={{ width: 140 }}
+                  onClick={() => setSort("progress")}
+                  title="点击按进度排序"
+                >
+                  进度 {sort === "progress" ? "▾" : ""}
+                </th>
+                <th style={{ width: 90 }}>大小</th>
+                <th
+                  className={`sortable${sort === "recent" ? " active" : ""}`}
+                  style={{ width: 120 }}
+                  onClick={() => setSort("recent")}
+                  title="点击按阅读时间排序"
+                >
+                  阅读时间 {sort === "recent" ? "▾" : ""}
+                </th>
+                <th style={{ width: 100, textAlign: "right" }}>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {scope.type === "root" &&
+                visibleFolders.map((folder) => {
+                  const fBooks = folderBooksMap.get(folder.id) ?? [];
+                  return (
+                    <tr
+                      key={folder.id}
+                      className="shelf-table-row folder-row"
+                      data-shelf-target="folder"
+                      data-folder-id={folder.id}
+                      onClick={() => handleOpenFolderModal(folder.id)}
+                    >
+                      <td style={{ textAlign: "center" }}>
+                        <FolderIcon />
+                      </td>
+                      <td>
+                        <div
+                          className="shelf-table-thumb-box"
+                          style={{
+                            background:
+                              "color-mix(in srgb, var(--accent, #2563eb) 12%, transparent)",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            color: "var(--accent)",
+                          }}
+                        >
+                          <FolderIcon />
+                        </div>
+                      </td>
+                      <td>
+                        <div className="shelf-table-title-cell">
+                          <span className="shelf-table-title" style={{ fontWeight: 700 }}>
+                            {folder.name}
+                          </span>
+                          <span className="shelf-capsule-count" style={{ marginLeft: 6 }}>
+                            {fBooks.length} 本
+                          </span>
+                        </div>
+                      </td>
+                      <td style={{ color: "var(--muted)" }}>文件夹</td>
+                      <td style={{ color: "var(--muted)" }}>--</td>
+                      <td style={{ color: "var(--muted)" }}>--</td>
+                      <td style={{ color: "var(--muted)" }}>--</td>
+                      <td style={{ textAlign: "right" }}>
+                        <button
+                          className="shelf-card-more-btn"
+                          style={{ position: "static", opacity: 1 }}
+                          type="button"
+                          title="打开文件夹"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenFolderModal(folder.id);
+                          }}
+                        >
+                          <ArrowRightIcon />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              {virtualizer.topPadding > 0 && (
+                <tr style={{ height: `${virtualizer.topPadding}px` }} aria-hidden="true">
+                  <td colSpan={8} style={{ padding: 0, border: "none" }} />
+                </tr>
+              )}
+              {renderedBooks.map((entry, idx) => {
+                const actualIndex = virtualizer.isVirtual ? virtualizer.startIndex + idx : idx;
+                const hash = entry.contentHash ?? entry.id;
+                const inFolder = effectiveFolderId(organization, hash) !== null;
+                return (
+                  <ShelfTableRow
+                    key={entry.id}
+                    entry={entry}
+                    index={actualIndex}
+                    provider={thumbnailProvider}
+                    selected={selectedIds.has(entry.id)}
+                    selectionMode={selectionMode}
+                    isFavorite={isFavorite(organization, hash)}
+                    inFolder={inFolder}
+                    busy={props.busy}
+                    deleteDisabled={props.importActive}
+                    onOpen={props.onOpen}
+                    onToggleSelected={toggleSelected}
+                    onToggleFavorite={handleToggleFavorite}
+                    onDeleteRequest={onDeleteRequest}
+                    onMoveToFolder={handleSingleMoveToFolder}
+                    onRemoveFromFolder={inFolder ? handleRemoveFromFolder : undefined}
+                  />
+                );
+              })}
+              {virtualizer.bottomPadding > 0 && (
+                <tr style={{ height: `${virtualizer.bottomPadding}px` }} aria-hidden="true">
+                  <td colSpan={8} style={{ padding: 0, border: "none" }} />
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       ) : (
-        <div className="shelf-grid">
-          {scope.type === "root" &&
-            visibleFolders.map((folder) => (
-              <ShelfFolderCard
-                key={folder.id}
-                id={folder.id}
-                name={folder.name}
-                books={folderBooksMap.get(folder.id) ?? []}
-                provider={thumbnailProvider}
-                selectionMode={selectionMode}
-                isDropTarget={dropTarget?.type === "folder" && dropTarget.id === folder.id}
-                onOpen={(fId, el) => handleOpenFolderModal(fId, el)}
-                onRename={(fId, fName) => setRenameFolderTarget({ id: fId, name: fName })}
-                onDissolve={(fId, fName) => setDissolveFolderTarget({ id: fId, name: fName })}
-              />
-            ))}
-          {visible.map((entry) => {
-            const hash = entry.contentHash ?? entry.id;
-            const inFolder = effectiveFolderId(organization, hash) !== null;
-            return (
-              <ShelfCard
-                key={entry.id}
-                entry={entry}
-                selected={selectedIds.has(entry.id)}
-                selectionMode={selectionMode}
-                provider={thumbnailProvider}
-                busy={props.busy}
-                isFavorite={isFavorite(organization, hash)}
-                isDragging={draggedEntry?.id === entry.id}
-                isDropTargetBook={dropTarget?.type === "book" && dropTarget.id === entry.id}
-                draggedEntry={draggedEntry}
-                onOpen={props.onOpen}
-                onToggleSelected={toggleSelected}
-                onDeleteRequest={onDeleteRequest}
-                onMoveToFolder={handleSingleMoveToFolder}
-                onRemoveFromFolder={inFolder ? handleRemoveFromFolder : undefined}
-                onToggleFavorite={handleToggleFavorite}
-                onDragStart={handleDragStart}
-              />
-            );
-          })}
+        <div
+          style={{
+            paddingTop: virtualizer.topPadding > 0 ? `${virtualizer.topPadding}px` : undefined,
+            paddingBottom: virtualizer.bottomPadding > 0 ? `${virtualizer.bottomPadding}px` : undefined,
+          }}
+        >
+          <div className="shelf-grid">
+            {scope.type === "root" &&
+              visibleFolders.map((folder) => (
+                <ShelfFolderCard
+                  key={folder.id}
+                  id={folder.id}
+                  name={folder.name}
+                  books={folderBooksMap.get(folder.id) ?? []}
+                  provider={thumbnailProvider}
+                  selectionMode={selectionMode}
+                  isDropTarget={dropTarget?.type === "folder" && dropTarget.id === folder.id}
+                  onOpen={(fId, el) => handleOpenFolderModal(fId, el)}
+                  onRename={(fId, fName) => setRenameFolderTarget({ id: fId, name: fName })}
+                  onDissolve={(fId, fName) => setDissolveFolderTarget({ id: fId, name: fName })}
+                />
+              ))}
+            {renderedBooks.map((entry) => {
+              const hash = entry.contentHash ?? entry.id;
+              const inFolder = effectiveFolderId(organization, hash) !== null;
+              return (
+                <ShelfCard
+                  key={entry.id}
+                  entry={entry}
+                  selected={selectedIds.has(entry.id)}
+                  selectionMode={selectionMode}
+                  provider={thumbnailProvider}
+                  busy={props.busy}
+                  deleteDisabled={props.importActive}
+                  isFavorite={isFavorite(organization, hash)}
+                  isDragging={draggedEntry?.id === entry.id}
+                  isDropTargetBook={dropTarget?.type === "book" && dropTarget.id === entry.id}
+                  draggedEntry={draggedEntry}
+                  onOpen={props.onOpen}
+                  onToggleSelected={toggleSelected}
+                  onDeleteRequest={onDeleteRequest}
+                  onMoveToFolder={handleSingleMoveToFolder}
+                  onRemoveFromFolder={inFolder ? handleRemoveFromFolder : undefined}
+                  onToggleFavorite={handleToggleFavorite}
+                  onDragStart={handleDragStart}
+                />
+              );
+            })}
+          </div>
         </div>
       )}
 
@@ -2980,6 +4340,7 @@ export function ShelfView(props: ShelfViewProps) {
             books={books}
             provider={thumbnailProvider}
             busy={props.busy}
+            deleteDisabled={props.importActive}
             originRect={activeFolderModal.originRect}
             closing={folderModalClosing}
             draggedEntry={draggedEntry}
@@ -3000,7 +4361,10 @@ export function ShelfView(props: ShelfViewProps) {
 
       {/* 删除确认弹层 */}
       {deleteTargets && (
-        <div className="shelf-confirm-backdrop" onClick={() => setDeleteTargets(null)}>
+        <div
+          className={`shelf-confirm-backdrop${deleteTargetsClosing ? " is-closing" : ""}`}
+          onClick={handleCancelDelete}
+        >
           <div
             className="shelf-confirm"
             role="dialog"
@@ -3025,12 +4389,13 @@ export function ShelfView(props: ShelfViewProps) {
               源文件不会被删除，但书签与本地进度将被移除。再次导入同一本书会恢复收藏和分类。
             </div>
             <div className="shelf-confirm-actions">
-              <button className="shelf-selection-cancel" type="button" onClick={() => setDeleteTargets(null)}>
+              <button className="shelf-selection-cancel" type="button" onClick={handleCancelDelete}>
                 取消
               </button>
               <button
                 className="shelf-selection-delete"
                 type="button"
+                disabled={props.busy || props.importActive}
                 onClick={() => {
                   const ids = deleteTargets.map((t) => t.id);
                   setDeleteTargets(null);
@@ -3071,6 +4436,89 @@ export function ShelfView(props: ShelfViewProps) {
           <div className="shelf-drag-ghost-badge">
             {draggedEntry.title}
           </div>
+        </div>
+      )}
+
+      {/* 底部悬浮批量操作底坞 (Floating Batch Bar) */}
+      {(selectionMode || dockClosing) && (
+        <div className={`shelf-floating-batch-dock${dockClosing ? " is-closing" : ""}`} role="toolbar" aria-label="批量操作栏">
+          <div className="shelf-floating-batch-info">
+            <span className="shelf-floating-batch-badge">{selectedIds.size}</span>
+            <span>{selectedIds.size > 0 ? `已选 ${selectedIds.size} 本` : "请点击图书卡片进行选择"}</span>
+          </div>
+          <div className="shelf-floating-batch-actions">
+            {selectedIds.size > 0 && (
+              <>
+                <button
+                  className="shelf-batch-action-btn"
+                  type="button"
+                  disabled={props.busy}
+                  onClick={() => void handleBatchFavorite(true)}
+                  title="加入收藏"
+                >
+                  <StarIcon filled />
+                  <span>收藏</span>
+                </button>
+                <button
+                  className="shelf-batch-action-btn"
+                  type="button"
+                  disabled={props.busy}
+                  onClick={() => void handleBatchFavorite(false)}
+                  title="取消收藏"
+                >
+                  <StarIcon />
+                  <span>取消收藏</span>
+                </button>
+                <button
+                  className="shelf-batch-action-btn"
+                  type="button"
+                  disabled={props.busy}
+                  onClick={() => {
+                    const targets = props.entries.filter((e) => selectedIds.has(e.id));
+                    if (targets.length > 0) setMoveDialogTargets(targets);
+                  }}
+                  title="移至文件夹"
+                >
+                  <FolderIcon />
+                  <span>移至文件夹</span>
+                </button>
+                <button
+                  className="shelf-batch-action-btn danger"
+                  type="button"
+                  disabled={props.busy || props.importActive}
+                  onClick={() => {
+                    const targets = props.entries.filter((e) => selectedIds.has(e.id));
+                    if (targets.length > 0) setDeleteTargets(targets);
+                  }}
+                  title="从书架删除选中的书籍"
+                >
+                  <TrashIcon />
+                  <span>删除</span>
+                </button>
+              </>
+            )}
+            <button
+              className="shelf-batch-action-btn cancel"
+              type="button"
+              onClick={exitSelection}
+              title="退出多选"
+            >
+              <span>✕ 退出选择</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 首字母快速索引轨与吐司 (A-Z Fast Index Rail) */}
+      {sort === "title" && visible.length > 5 && (
+        <ShelfAZRail
+          letterIndexMap={letterFirstIndexMap}
+          onSelectLetter={handleSelectLetter}
+        />
+      )}
+      {toastLetter && (
+        <div className="shelf-az-toast" aria-live="polite">
+          {toastLetter}
         </div>
       )}
     </div>

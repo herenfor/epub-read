@@ -2283,6 +2283,157 @@ describe("measure viewport height locking", () => {
     }
     await promise;
   });
+
+  it("wires comfortable spread geometry into viewer width, margins and real column gap", async () => {
+    const parent = makeFakeElement({ clientWidth: 1024, clientHeight: 768 });
+    const viewer = makeFakeElement({ parentElement: parent });
+    const defaultView = {
+      getComputedStyle: (el: unknown) => {
+        if (el === parent) {
+          return {
+            paddingTop: "0px",
+            paddingBottom: "0px",
+            paddingLeft: "0px",
+            paddingRight: "0px",
+          };
+        }
+        return {
+          paddingTop: "0px",
+          paddingBottom: "0px",
+          paddingLeft: "0px",
+          paddingRight: "0px",
+          borderLeftWidth: "0px",
+          borderRightWidth: "0px",
+          writingMode: "horizontal-tb",
+          direction: "ltr",
+        };
+      },
+    };
+    const doc = {
+      defaultView,
+      documentElement: { clientWidth: 1024 },
+      body: { clientWidth: 1024 },
+      fonts: { ready: Promise.resolve() },
+    };
+    const measureControllers = new Set<AbortController>();
+    const context = Object.create(ChapterPaginator.prototype) as any;
+    Object.assign(context, {
+      contentDoc: doc,
+      viewer,
+      disposed: false,
+      loadSeq: 1,
+      iframe: { clientWidth: 1024, clientHeight: 768 },
+      settings: {
+        fontSizePx: 16,
+        gapPx: 40,
+        readingMode: "paginated",
+        columnsPerView: 2,
+        spreadGapMode: "auto",
+      },
+      restoreBackdropCompatibility: vi.fn(),
+      restoreInlineBoxFixes: vi.fn(),
+      restoreFloatLayoutFixes: vi.fn(),
+      restoreBookMargins: vi.fn(),
+      restoreContainedMediaFixes: vi.fn(),
+      restoreFitContentFix: vi.fn(),
+      restoreFloatWidths: vi.fn(),
+      restoreTrailingFloatFixes: vi.fn(),
+      restorePercentageSpacing: vi.fn(),
+      measureControllers,
+      fixedLayout: false,
+    });
+
+    const promise = (ChapterPaginator.prototype as any).measure.call(context, 1);
+
+    expect(viewer.style.columnCount).toBe("2");
+    expect(parseFloat(viewer.style.width)).toBeCloseTo(921.6, 5);
+    expect(parseFloat(viewer.style.marginLeft)).toBeCloseTo(51.2, 5);
+    expect(parseFloat(viewer.style.marginRight)).toBeCloseTo(51.2, 5);
+    expect(parseFloat(viewer.style.columnGap)).toBeCloseTo(61.44, 5);
+    expect(context.spreadArea).not.toBeNull();
+    expect(context.spreadGeometry.columnWidth).toBeCloseTo(430.08, 5);
+    expect(context.step).toBeCloseTo(491.52, 5);
+
+    for (const c of measureControllers) c.abort();
+    await promise;
+  });
+
+  it("keeps legacy requestedColumns=2 for RTL text and reports no comfort area", async () => {
+    const parent = makeFakeElement({ clientWidth: 1024, clientHeight: 768 });
+    const viewer = makeFakeElement({ parentElement: parent });
+    const defaultView = {
+      getComputedStyle: (el: unknown) => {
+        if (el === parent) {
+          return {
+            paddingTop: "0px",
+            paddingBottom: "0px",
+            paddingLeft: "0px",
+            paddingRight: "0px",
+          };
+        }
+        return {
+          paddingTop: "0px",
+          paddingBottom: "0px",
+          paddingLeft: "0px",
+          paddingRight: "0px",
+          borderLeftWidth: "0px",
+          borderRightWidth: "0px",
+          writingMode: "horizontal-tb",
+          direction: "rtl",
+        };
+      },
+    };
+    const doc = {
+      defaultView,
+      documentElement: { clientWidth: 1024 },
+      body: { clientWidth: 1024 },
+      fonts: { ready: Promise.resolve() },
+    };
+    const measureControllers = new Set<AbortController>();
+    const context = Object.create(ChapterPaginator.prototype) as any;
+    Object.assign(context, {
+      contentDoc: doc,
+      viewer,
+      disposed: false,
+      loadSeq: 1,
+      iframe: { clientWidth: 1024, clientHeight: 768 },
+      settings: {
+        fontSizePx: 16,
+        gapPx: 40,
+        readingMode: "paginated",
+        columnsPerView: 2,
+        spreadGapMode: "auto",
+      },
+      restoreBackdropCompatibility: vi.fn(),
+      restoreInlineBoxFixes: vi.fn(),
+      restoreFloatLayoutFixes: vi.fn(),
+      restoreBookMargins: vi.fn(),
+      restoreContainedMediaFixes: vi.fn(),
+      restoreFitContentFix: vi.fn(),
+      restoreFloatWidths: vi.fn(),
+      restoreTrailingFloatFixes: vi.fn(),
+      restorePercentageSpacing: vi.fn(),
+      measureControllers,
+      fixedLayout: false,
+    });
+
+    const promise = (ChapterPaginator.prototype as any).measure.call(context, 1);
+
+    // RTL 不是舒适区 eligible，但 requestedColumns=2 仍走旧双页，且不得套舒适区单页回退。
+    expect(context.spreadArea).toBeNull();
+    expect(context.effectiveColumns).toBe(2);
+    expect(viewer.style.columnCount).toBe("2");
+    expect(parseFloat(viewer.style.width)).toBeCloseTo(1024, 5);
+    expect(viewer.style.marginLeft ?? "").toBe("");
+    expect(viewer.style.marginRight ?? "").toBe("");
+    expect(parseFloat(viewer.style.columnGap)).toBeCloseTo(40, 5);
+    expect(context.spreadGeometry.columnWidth).toBeCloseTo(492, 5);
+    expect(context.step).toBeCloseTo(532, 5);
+    expect(context.spreadGeometry.spreadStep).toBeCloseTo(1064, 5);
+
+    for (const c of measureControllers) c.abort();
+    await promise;
+  });
 });
 
 describe("applyBookMargins C-53 toolbar centering", () => {
