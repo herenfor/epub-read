@@ -51,6 +51,64 @@ function pointerEvent(win: Window, type: string, init: PointerEventInit): Event 
 }
 
 describe("第三步补修：书架触摸长按与子菜单 Back", () => {
+  it("文件夹范围先回到书架根层，菜单和选择模式仍先消费 Back", async () => {
+    const dom = createReactDomHarness();
+    let back: (() => boolean) | null = null;
+    const availability: boolean[] = [];
+    const organization = {
+      ...emptyOrganization(),
+      folders: { f1: { name: { value: "测试文件夹", stamp: { counter: 1, deviceId: "test" } } } },
+    };
+    try {
+      await dom.render(createElement(ShelfView, {
+        ...makeProps([makeEntry("b1", "第一本")]),
+        organization,
+        registerBackHandler: (handler: (() => boolean) | null) => { back = handler; },
+        onBackAvailabilityChange: (active: boolean) => { availability.push(active); },
+      }));
+      await dom.click(dom.container.querySelector(".shelf-folder-dropdown-btn") as HTMLElement);
+      const folder = [...dom.container.querySelectorAll(".shelf-folder-menu-item")]
+        .find((item) => item.textContent?.includes("测试文件夹")) as HTMLElement;
+      await dom.click(folder);
+      expect(dom.container.querySelector(".shelf-folder-active-bar")).not.toBeNull();
+      expect(availability.at(-1)).toBe(true);
+      await dom.click(dom.container.querySelector(".shelf-manage-toggle-btn") as HTMLElement);
+      await dom.run(() => { expect(back?.()).toBe(true); });
+      await dom.run(() => new Promise<void>((resolve) => setTimeout(resolve, 170)));
+      expect(dom.container.querySelector(".shelf-view.selection-mode")).toBeNull();
+      expect(dom.container.querySelector(".shelf-folder-active-bar")).not.toBeNull();
+      await dom.run(() => { expect(back?.()).toBe(true); });
+      expect(dom.container.querySelector(".shelf-folder-active-bar")).toBeNull();
+      expect(availability.at(-1)).toBe(false);
+      await dom.run(() => { expect(back?.()).toBe(false); });
+    } finally {
+      await dom.dispose();
+    }
+  });
+
+  it("设置里的排序下拉先关闭，再次 Back 才关闭书架设置", async () => {
+    const dom = createReactDomHarness();
+    let back: (() => boolean) | null = null;
+    try {
+      await dom.render(createElement(ShelfView, {
+        ...makeProps([makeEntry("b1", "第一本")]),
+        registerBackHandler: (handler: (() => boolean) | null) => { back = handler; },
+      }));
+      await dom.click(dom.container.querySelector('[aria-label="书架设置与高级工具"]') as HTMLElement);
+      await dom.click(dom.container.querySelector(".shelf-drawer .shelf-select-btn") as HTMLElement);
+      expect(dom.container.querySelector(".shelf-drawer .shelf-select-pop")).not.toBeNull();
+      await dom.run(() => { expect(back?.()).toBe(true); });
+      expect(dom.container.querySelector(".shelf-select-pop")?.className).toContain("closing");
+      expect(dom.container.querySelector(".shelf-drawer")?.className).not.toContain("closing");
+      await dom.run(() => new Promise<void>((resolve) => setTimeout(resolve, 170)));
+      expect(dom.container.querySelector(".shelf-select-pop")).toBeNull();
+      await dom.run(() => { expect(back?.()).toBe(true); });
+      expect(dom.container.querySelector(".shelf-drawer")?.className).toContain("closing");
+    } finally {
+      await dom.dispose();
+    }
+  });
+
   it("列表操作菜单在底部空间不足时向上翻转", () => {
     expect(chooseShelfMenuPlacement({ top: 700, bottom: 750 }, 832, 127)).toBe("up");
     expect(chooseShelfMenuPlacement({ top: 300, bottom: 350 }, 832, 127)).toBe("down");

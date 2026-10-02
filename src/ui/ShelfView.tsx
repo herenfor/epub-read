@@ -1962,7 +1962,7 @@ function ShelfFilterSection(props: {
   );
 }
 
-function ShelfSelect(props: {
+function ShelfSelect(props: ShelfSubmenuBackProps & {
   value: string;
   options: ShelfSelectOption[];
   onChange(value: string): void;
@@ -1983,6 +1983,8 @@ function ShelfSelect(props: {
       timerRef.current = null;
     }, 150);
   }, [open, closing]);
+
+  useShelfSubmenuBack(open, closeDropdown, props);
 
   const toggleDropdown = useCallback(() => {
     if (closing) return;
@@ -2065,7 +2067,7 @@ function ShelfSelect(props: {
  * 书架侧边抽屉组件
  * ========================================================================= */
 
-interface ShelfSettingsDrawerProps {
+interface ShelfSettingsDrawerProps extends ShelfSubmenuBackProps {
   open: boolean;
   entries: ShelfEntry[];
   matchingEntries?: ShelfEntry[];
@@ -2424,6 +2426,8 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
           <div className="shelf-drawer-setting">
             <span>排列方式</span>
             <ShelfSelect
+              registerSubmenuBackHandler={props.registerSubmenuBackHandler}
+              onSubmenuBackActiveChange={props.onSubmenuBackActiveChange}
               value={props.sort}
               busy={props.busy}
               title="排列方式"
@@ -2438,6 +2442,8 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
           <div className="shelf-drawer-setting">
             <span>排布密度</span>
             <ShelfSelect
+              registerSubmenuBackHandler={props.registerSubmenuBackHandler}
+              onSubmenuBackActiveChange={props.onSubmenuBackActiveChange}
               value={props.density}
               busy={props.busy}
               title="排布密度"
@@ -2452,6 +2458,8 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
           <div className="shelf-drawer-setting">
             <span>主题</span>
             <ShelfSelect
+              registerSubmenuBackHandler={props.registerSubmenuBackHandler}
+              onSubmenuBackActiveChange={props.onSubmenuBackActiveChange}
               value={props.theme}
               busy={props.busy}
               title="书架主题"
@@ -3641,6 +3649,10 @@ export function ShelfView(props: ShelfViewProps) {
       exitSelection();
       return true;
     }
+    if (scope.type === "folder") {
+      setScope({ type: "root" });
+      return true;
+    }
     return false;
   }, [
     activeFolderModal,
@@ -3656,7 +3668,9 @@ export function ShelfView(props: ShelfViewProps) {
     moveDialogTargets,
     pendingMergeBooks,
     renameFolderTarget,
+    scope.type,
     selectionMode,
+    setScope,
   ]);
 
   const shelfBackHandlerRef = useRef(handleRootBack);
@@ -3672,7 +3686,8 @@ export function ShelfView(props: ShelfViewProps) {
     drawerOpen ||
     folderMenuOpen ||
     selectionMode ||
-    submenuBackActive
+    submenuBackActive ||
+    scope.type === "folder"
   );
 
   useEffect(() => {
@@ -4137,6 +4152,8 @@ export function ShelfView(props: ShelfViewProps) {
 
       {/* 书架高级设置与分面抽屉 */}
       <ShelfSettingsDrawer
+        registerSubmenuBackHandler={registerSubmenuBackHandler}
+        onSubmenuBackActiveChange={reportSubmenuBackActive}
         open={drawerOpen}
         entries={props.entries}
         matchingEntries={visible}
@@ -4358,6 +4375,8 @@ export function ShelfView(props: ShelfViewProps) {
         <div className="shelf-nav-rail-right">
           <div className="shelf-sort-select-container" style={{ position: "relative" }}>
             <ShelfSelect
+              registerSubmenuBackHandler={registerSubmenuBackHandler}
+              onSubmenuBackActiveChange={reportSubmenuBackActive}
               value={sort}
               busy={props.busy}
               title="书籍排序方式"
