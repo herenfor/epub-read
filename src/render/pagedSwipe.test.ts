@@ -90,6 +90,8 @@ describe("paged swipe input", () => {
   it.each(["image", "svg-image", "link"])("accepts a swipe on %s and suppresses its activation click", (id) => {
     const { document, onNext, onPrev, touchEvent } = setup();
     const image = document.getElementById(id)!;
+    const activate = vi.fn();
+    document.addEventListener("click", activate, true);
     touchEvent("touchstart", 300, 200, image);
     touchEvent("touchmove", 200, 200, image);
     touchEvent("touchend", 180, 202, image);
@@ -98,16 +100,20 @@ describe("paged swipe input", () => {
     const click = new (document.defaultView as any).Event("click", { bubbles: true, cancelable: true });
     image.dispatchEvent(click);
     expect(click.defaultPrevented).toBe(true);
+    expect(activate).not.toHaveBeenCalled();
   });
 
   it("keeps image taps available to open the image viewer", () => {
     const { document, onNext, onPrev, touchEvent } = setup();
     const image = document.getElementById("image")!;
+    const activate = vi.fn();
+    document.addEventListener("click", activate, true);
     touchEvent("touchstart", 300, 200, image);
     touchEvent("touchend", 300, 200, image);
     const click = new (document.defaultView as any).Event("click", { bubbles: true, cancelable: true });
     image.dispatchEvent(click);
     expect(click.defaultPrevented).toBe(false);
+    expect(activate).toHaveBeenCalledTimes(1);
     expect(onNext).not.toHaveBeenCalled();
     expect(onPrev).not.toHaveBeenCalled();
   });

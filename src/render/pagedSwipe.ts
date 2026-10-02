@@ -129,7 +129,8 @@ export function installPagedSwipe(target: Document | HTMLElement, handlers: Page
     if (Date.now() >= suppressClickUntil) return;
     suppressClickUntil = 0;
     event.preventDefault();
-    event.stopPropagation();
+    // Image/link activation also listens on this same document in capture phase.
+    event.stopImmediatePropagation();
   };
 
   target.addEventListener("touchstart", onTouchStart as EventListener, { capture: true, passive: true });
