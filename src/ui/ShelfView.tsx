@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Theme } from "../render/settings";
 import {
   createShelfFilterModel,
@@ -2802,6 +2802,17 @@ interface ShelfTableRowProps extends ShelfSubmenuBackProps {
   onLongPressSelect?(id: string): void;
 }
 
+export function chooseShelfMenuPlacement(
+  anchor: { top: number; bottom: number },
+  viewportHeight: number,
+  menuHeight: number
+): "up" | "down" {
+  const margin = 8;
+  const fitsDown = anchor.bottom + 4 + menuHeight <= viewportHeight - margin;
+  const fitsUp = anchor.top - 4 - menuHeight >= margin;
+  return !fitsDown && fitsUp ? "up" : "down";
+}
+
 const ShelfTableRow = memo(function ShelfTableRow({
   entry,
   index,
@@ -2824,7 +2835,9 @@ const ShelfTableRow = memo(function ShelfTableRow({
 }: ShelfTableRowProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuClosing, setMenuClosing] = useState(false);
+  const [menuPlacement, setMenuPlacement] = useState<"down" | "up">("down");
   const menuRef = useRef<HTMLDivElement>(null);
+  const menuPanelRef = useRef<HTMLDivElement>(null);
 
   const closeMenu = useCallback(() => {
     setMenuClosing(true);
@@ -2851,6 +2864,19 @@ const ShelfTableRow = memo(function ShelfTableRow({
       window.removeEventListener("keydown", onKey);
     };
   }, [menuOpen, closeMenu]);
+
+  useLayoutEffect(() => {
+    if (!menuOpen || menuClosing) return;
+    const anchor = menuRef.current;
+    const panel = menuPanelRef.current;
+    if (!anchor || !panel) return;
+    const anchorRect = anchor.getBoundingClientRect();
+    const panelRect = panel.getBoundingClientRect();
+    const viewportHeight = typeof window !== "undefined"
+      ? window.innerHeight || document.documentElement.clientHeight || 0
+      : 0;
+    setMenuPlacement(chooseShelfMenuPlacement(anchorRect, viewportHeight, panelRect.height));
+  }, [menuOpen, menuClosing]);
 
   useShelfSubmenuBack(menuOpen, closeMenu, {
     registerSubmenuBackHandler,
@@ -2966,7 +2992,7 @@ const ShelfTableRow = memo(function ShelfTableRow({
       </td>
       <td>
         <div className="shelf-table-title-cell">
-          <span className="shelf-table-title">{entry.title}</span>
+          <span className="shelf-table-title" title={entry.title}>{entry.title}</span>
           {entry.isNew && !selectionMode && (
             <span className="shelf-badge new" style={{ position: "static", marginLeft: 6 }}>
               新
@@ -3026,7 +3052,8 @@ const ShelfTableRow = memo(function ShelfTableRow({
             </button>
             {menuOpen && (
               <div
-                className={`shelf-card-pop-menu${menuClosing ? " is-closing" : ""}`}
+                ref={menuPanelRef}
+                className={`shelf-card-pop-menu${menuPlacement === "up" ? " placement-up" : ""}${menuClosing ? " is-closing" : ""}`}
                 role="menu"
                 onClick={(e) => e.stopPropagation()}
               >
@@ -4506,7 +4533,7 @@ export function ShelfView(props: ShelfViewProps) {
                       </td>
                       <td>
                         <div className="shelf-table-title-cell">
-                          <span className="shelf-table-title" style={{ fontWeight: 700 }}>
+                          <span className="shelf-table-title" style={{ fontWeight: 700 }} title={folder.name}>
                             {folder.name}
                           </span>
                           <span className="shelf-capsule-count" style={{ marginLeft: 6 }}>

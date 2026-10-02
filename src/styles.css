@@ -5924,6 +5924,105 @@ select option {
   min-width: 0;
 }
 
+/* 手机竖屏列表：在固定宽度内保留书名、进度和操作；装饰封面与次要列收起。 */
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table th,
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table td {
+  padding: 4px;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table th {
+  white-space: nowrap;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table th:nth-child(2),
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table td:nth-child(2) {
+  display: none;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table th:nth-child(5),
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table td:nth-child(5) {
+  width: 78px !important;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table th:last-child,
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table td:last-child {
+  width: 104px !important;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table-title-cell {
+  min-width: 0;
+  width: 100%;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table-title {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table-progress-wrap {
+  width: 100%;
+  gap: 4px;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table-progress-text {
+  min-width: 24px;
+  font-size: 10px;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table td:last-child > div {
+  gap: 0 !important;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table-view {
+  overflow: visible;
+}
+
+/* 列表行靠近视口底部时，菜单翻到按钮上方；默认仍向下，不裁切也不遮住原按钮。 */
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table .shelf-card-pop-menu.placement-up {
+  top: auto;
+  bottom: calc(100% + 4px);
+}
+
+/* 手机多选栏分两排：左侧状态与全选独占一行，动作三列换行，短标签保持单行。 */
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-selection-bar {
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-selection-left {
+  flex: 1 1 100%;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-selection-title {
+  white-space: nowrap;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-selection-actions {
+  flex: 1 1 100%;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-selection-actions > button {
+  min-width: 0;
+  min-height: calc(48px * var(--ui-touch-comp, 1));
+  padding: 0 6px;
+  white-space: nowrap;
+}
+
 /* 触摸书架顶部按钮至少 44px，紧凑密度也不缩回小命中区。 */
 .app[data-touch-ui="true"] .shelf-btn-primary,
 .app[data-touch-ui="true"] .shelf-manage-toggle-btn,

@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { emptyOrganization } from "./libraryOrganization";
-import { ShelfView, type ShelfViewProps } from "./ShelfView";
+import { chooseShelfMenuPlacement, ShelfView, type ShelfViewProps } from "./ShelfView";
 import type { ShelfEntry } from "./shelf";
 import { createReactDomHarness } from "../test/reactDomHarness";
 
@@ -51,6 +51,11 @@ function pointerEvent(win: Window, type: string, init: PointerEventInit): Event 
 }
 
 describe("第三步补修：书架触摸长按与子菜单 Back", () => {
+  it("列表操作菜单在底部空间不足时向上翻转", () => {
+    expect(chooseShelfMenuPlacement({ top: 700, bottom: 750 }, 832, 127)).toBe("up");
+    expect(chooseShelfMenuPlacement({ top: 300, bottom: 350 }, 832, 127)).toBe("down");
+  });
+
   it("触摸长按进入现有选择模式，不启动拖拽或开书", async () => {
     const dom = createReactDomHarness();
     const opened = vi.fn();
