@@ -1179,6 +1179,48 @@ select option {
 }
 
 /* ---- Zen UI Packet C: 硬件加速平滑翻页与边缘触控增强 ---- */
+.reader[data-swipe-input="true"] { overflow: clip; }
+
+.reader[data-swipe-input="true"] iframe:not([aria-hidden="true"]) {
+  translate: var(--reader-swipe-offset, 0px) 0;
+  transition: translate 120ms ease-out;
+}
+
+.reader.reader-swipe-dragging iframe:not([aria-hidden="true"]) {
+  transition: none;
+  will-change: translate;
+}
+
+.reader-swipe-hint {
+  position: absolute;
+  top: 50%;
+  z-index: 5;
+  padding: 9px 12px;
+  border: 1px solid var(--menu-surface-border);
+  border-radius: 18px;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 13px;
+  opacity: 0;
+  pointer-events: none;
+  translate: 0 -50%;
+}
+
+.reader.reader-swipe-dragging .reader-swipe-hint {
+  opacity: var(--reader-swipe-opacity, 0);
+}
+
+.reader[data-swipe-direction="next"] .reader-swipe-hint { right: 16px; }
+.reader[data-swipe-direction="prev"] .reader-swipe-hint { left: 16px; }
+.reader[data-swipe-ready="true"] .reader-swipe-hint { color: var(--accent); }
+
+@media (prefers-reduced-motion: reduce) {
+  .reader[data-swipe-input="true"] iframe:not([aria-hidden="true"]) {
+    translate: none;
+    transition: none;
+  }
+}
+
 .reader.has-turn-anim.turn-next iframe:not([aria-hidden="true"]) {
   animation: pageTurnNextAnim 180ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
   will-change: transform, opacity;

@@ -8,19 +8,25 @@ export interface PagedSwipeHandlers {
   onNext(): void;
   onPrev(): void;
   shouldIgnore(event: Event): boolean;
+  /** Drag feedback only; never changes the current page. null clears it. */
+  onPreview?(dx: number | null): void;
+  gestureSurface?: HTMLElement;
   /** CSS pixels. Kept local to this input path; no settings/config system. */
   thresholdPx?: number;
 }
 
-const HORIZONTAL_RATIO = 1.5;
-const DEFAULT_THRESHOLD_PX = 32;
+const HORIZONTAL_RATIO = 1.2;
+const INTENT_THRESHOLD_PX = 8;
+export const PAGED_SWIPE_THRESHOLD_PX = 24;
 const SUPPRESS_CLICK_MS = 700;
 
 function isInteractiveTarget(target: EventTarget | null): boolean {
   const element = target as (Element & { closest?: (selector: string) => Element | null }) | null;
   if (!element || typeof element.closest !== "function") return false;
+  // Links/images still accept swipes. Their ordinary click is suppressed only
+  // after a page turn; a tap keeps its original action.
   return Boolean(element.closest(
-    "a, button, input, textarea, select, option, [role='button'], [contenteditable='true'], img, svg, video, audio"
+    "button, input, textarea, select, option, [role='button'], [contenteditable='true'], video, audio"
   ));
 }
 
@@ -32,20 +38,30 @@ function hasActiveSelection(doc: Document): boolean {
   }
 }
 
-export function installPagedSwipe(doc: Document, handlers: PagedSwipeHandlers): () => void {
-  const threshold = handlers.thresholdPx ?? DEFAULT_THRESHOLD_PX;
+export function installPagedSwipe(target: Document | HTMLElement, handlers: PagedSwipeHandlers): () => void {
+  const doc = target.nodeType === 9 ? target as Document : target.ownerDocument!;
+  const surface = handlers.gestureSurface ?? (target.nodeType === 9 ? doc.documentElement : target as HTMLElement);
+  const oldTouchAction = surface.style.getPropertyValue("touch-action");
+  const oldTouchPriority = surface.style.getPropertyPriority("touch-action");
+  // Reserve horizontal motion before WebView takes over at its touch slop.
+  // Native vertical pan and multi-touch gestures remain available.
+  surface.style.setProperty("touch-action", "pan-y pinch-zoom", "important");
+  const threshold = handlers.thresholdPx ?? PAGED_SWIPE_THRESHOLD_PX;
   let tracking = false;
-  let horizontal = false;
   let startX = 0;
   let startY = 0;
   let suppressClickUntil = 0;
 
   const reset = (): void => {
     tracking = false;
-    horizontal = false;
     startX = 0;
     startY = 0;
+    handlers.onPreview?.(null);
   };
+
+  // The preview moves the iframe. Screen coordinates stay stable as it moves.
+  const x = (touch: Touch): number => touch.screenX ?? touch.clientX;
+  const y = (touch: Touch): number => touch.screenY ?? touch.clientY;
 
   const onTouchStart = (event: TouchEvent): void => {
     // A new real touch starts a new gesture; do not let the previous swipe
@@ -61,38 +77,38 @@ export function installPagedSwipe(doc: Document, handlers: PagedSwipeHandlers): 
     }
     const touch = event.touches[0];
     tracking = true;
-    horizontal = false;
-    startX = touch.clientX;
-    startY = touch.clientY;
+    startX = x(touch);
+    startY = y(touch);
   };
 
   const onTouchMove = (event: TouchEvent): void => {
     if (!tracking) return;
-    if (event.touches.length !== 1 || hasActiveSelection(doc)) {
+    if (event.touches.length !== 1 || hasActiveSelection(doc) || handlers.shouldIgnore(event)) {
       reset();
       return;
     }
     const touch = event.touches[0];
-    const dx = touch.clientX - startX;
-    const dy = touch.clientY - startY;
-    if (Math.abs(dy) > Math.abs(dx) * HORIZONTAL_RATIO && Math.abs(dy) > 12) {
+    const dx = x(touch) - startX;
+    const dy = y(touch) - startY;
+    if (Math.abs(dy) > Math.abs(dx) * HORIZONTAL_RATIO && Math.abs(dy) > INTENT_THRESHOLD_PX) {
       reset();
       return;
     }
-    if (Math.abs(dx) >= threshold && Math.abs(dx) > Math.abs(dy) * HORIZONTAL_RATIO) {
-      horizontal = true;
+    if (Math.abs(dx) >= INTENT_THRESHOLD_PX && Math.abs(dx) > Math.abs(dy) * HORIZONTAL_RATIO) {
       if (event.cancelable) event.preventDefault();
+      handlers.onPreview?.(dx);
     }
   };
 
   const onTouchEnd = (event: TouchEvent): void => {
     if (!tracking) return;
-    const wasHorizontal = horizontal;
     const touch = event.changedTouches[0];
-    const dx = touch ? touch.clientX - startX : 0;
-    const dy = touch ? touch.clientY - startY : 0;
+    const dx = touch ? x(touch) - startX : 0;
+    const dy = touch ? y(touch) - startY : 0;
     reset();
-    if (!wasHorizontal || Math.abs(dx) < threshold || Math.abs(dx) <= Math.abs(dy) * HORIZONTAL_RATIO) return;
+    // A slow/low-frame-rate gesture can cross the threshold at touchend.
+    if (event.touches.length || hasActiveSelection(doc) || handlers.shouldIgnore(event) ||
+        Math.abs(dx) < threshold || Math.abs(dx) <= Math.abs(dy) * HORIZONTAL_RATIO) return;
     suppressClickUntil = Date.now() + SUPPRESS_CLICK_MS;
     if (dx < 0) handlers.onNext();
     else handlers.onPrev();
@@ -116,19 +132,22 @@ export function installPagedSwipe(doc: Document, handlers: PagedSwipeHandlers): 
     event.stopPropagation();
   };
 
-  doc.addEventListener("touchstart", onTouchStart, { capture: true, passive: true });
-  doc.addEventListener("touchmove", onTouchMove, { capture: true, passive: false });
-  doc.addEventListener("touchend", onTouchEnd, { capture: true, passive: true });
-  doc.addEventListener("touchcancel", onTouchCancel, { capture: true, passive: true });
-  doc.addEventListener("pointercancel", onPointerCancel, true);
-  doc.addEventListener("click", onClickCapture, true);
+  target.addEventListener("touchstart", onTouchStart as EventListener, { capture: true, passive: true });
+  target.addEventListener("touchmove", onTouchMove as EventListener, { capture: true, passive: false });
+  target.addEventListener("touchend", onTouchEnd as EventListener, { capture: true, passive: true });
+  target.addEventListener("touchcancel", onTouchCancel, { capture: true, passive: true });
+  target.addEventListener("pointercancel", onPointerCancel, true);
+  target.addEventListener("click", onClickCapture, true);
 
   return () => {
-    doc.removeEventListener("touchstart", onTouchStart, true);
-    doc.removeEventListener("touchmove", onTouchMove, true);
-    doc.removeEventListener("touchend", onTouchEnd, true);
-    doc.removeEventListener("touchcancel", onTouchCancel, true);
-    doc.removeEventListener("pointercancel", onPointerCancel, true);
-    doc.removeEventListener("click", onClickCapture, true);
+    reset();
+    if (oldTouchAction) surface.style.setProperty("touch-action", oldTouchAction, oldTouchPriority);
+    else surface.style.removeProperty("touch-action");
+    target.removeEventListener("touchstart", onTouchStart as EventListener, true);
+    target.removeEventListener("touchmove", onTouchMove as EventListener, true);
+    target.removeEventListener("touchend", onTouchEnd as EventListener, true);
+    target.removeEventListener("touchcancel", onTouchCancel, true);
+    target.removeEventListener("pointercancel", onPointerCancel, true);
+    target.removeEventListener("click", onClickCapture, true);
   };
 }

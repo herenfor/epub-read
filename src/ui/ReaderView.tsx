@@ -21,6 +21,7 @@ import { TurnIntentBuffer, WheelTurnAccumulator } from "./turnIntent";
 import { ReadingWarmupPlan, backgroundPreparation, type WarmupTicket } from "./readerWarmup";
 import { ContinuousReaderView } from "./ContinuousReaderView";
 import type { ScrubToken } from "./readerProgressAxis";
+import { installPagedSwipe, PAGED_SWIPE_THRESHOLD_PX } from "../render/pagedSwipe";
 
 export interface ReaderHandle {
   nextPage(): void;
@@ -271,6 +272,9 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   const quinaryIframeRef = useRef<HTMLIFrameElement>(null);
   const warmupIframeRef = useRef<HTMLIFrameElement>(null);
   const readerContainerRef = useRef<HTMLDivElement>(null);
+  const swipeHintRef = useRef<HTMLDivElement>(null);
+  const swipePreviewRef = useRef<{ frame: number; dx: number | null }>({ frame: 0, dx: null });
+  const updateSwipePreviewRef = useRef<(dx: number | null) => void>(() => {});
   const activeIframeRef = useRef<HTMLIFrameElement | null>(null);
   const paginatorRef = useRef<ChapterPaginator | null>(null);
   const activeSlotRef = useRef<PaginatorSlot | null>(null);
@@ -602,6 +606,9 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
           inputPausedRef.current ||
           latestRenderSettingsRef.current.readingMode === "scroll" ||
           slot.state.status !== "ready",
+        onPreview: (dx) => {
+          if (isActiveSlot(slot)) updateSwipePreviewRef.current(dx);
+        },
       },
       props.onPlainTap
         ? () => {
@@ -1474,6 +1481,75 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     }
   };
 
+  const applySwipePreview = (dx: number | null): void => {
+    const main = readerContainerRef.current;
+    if (!main) return;
+    if (dx === null) {
+      main.classList.remove("reader-swipe-dragging");
+      main.style.removeProperty("--reader-swipe-offset");
+      main.style.removeProperty("--reader-swipe-opacity");
+      delete main.dataset.swipeDirection;
+      delete main.dataset.swipeReady;
+      return;
+    }
+    const direction = dx < 0 ? 1 : -1;
+    const p = paginatorRef.current;
+    const canTurn = Boolean(p && (direction === 1
+      ? p.currentPage < p.pageCount - 1 || nextLinearIndex(book, spineIndexRef.current, 1) >= 0
+      : p.currentPage > 0 || nextLinearIndex(book, spineIndexRef.current, -1) >= 0));
+    const ready = canTurn && Math.abs(dx) >= PAGED_SWIPE_THRESHOLD_PX;
+    const offset = settings.instantTurn === true ? 0
+      : Math.max(-72, Math.min(72, dx * (canTurn ? 0.4 : 0.12)));
+    main.classList.add("reader-swipe-dragging");
+    main.dataset.swipeDirection = direction === 1 ? "next" : "prev";
+    main.dataset.swipeReady = String(ready);
+    main.style.setProperty("--reader-swipe-offset", `${offset}px`);
+    main.style.setProperty("--reader-swipe-opacity", String(Math.min(1, Math.abs(dx) / PAGED_SWIPE_THRESHOLD_PX)));
+    if (swipeHintRef.current) {
+      swipeHintRef.current.textContent = !canTurn
+        ? direction === 1 ? "已到末尾" : "已到开头"
+        : `${direction === 1 ? "下一页 ›" : "‹ 上一页"}${ready ? " · 松手翻页" : ""}`;
+    }
+  };
+  updateSwipePreviewRef.current = (dx) => {
+    const preview = swipePreviewRef.current;
+    preview.dx = dx;
+    if (dx === null) {
+      if (preview.frame) window.cancelAnimationFrame(preview.frame);
+      preview.frame = 0;
+      applySwipePreview(null);
+    } else if (!preview.frame) {
+      preview.frame = window.requestAnimationFrame(() => {
+        preview.frame = 0;
+        applySwipePreview(preview.dx);
+      });
+    }
+  };
+
+  // iframe events do not bubble to the host: attach the same controller to
+  // the surrounding reading surface so its margins also accept a swipe.
+  useEffect(() => {
+    const main = readerContainerRef.current;
+    if (!main || settings.readingMode === "scroll") return;
+    main.dataset.swipeInput = "true";
+    const cleanup = installPagedSwipe(main, {
+      onNext: () => turnPageRef.current(1, "ui"),
+      onPrev: () => turnPageRef.current(-1, "ui"),
+      onPreview: (dx) => updateSwipePreviewRef.current(dx),
+      shouldIgnore: () => inputPausedRef.current || activeSlotRef.current?.state.status !== "ready" ||
+        Boolean(activeIframeRef.current?.contentWindow?.getSelection()?.toString()),
+    });
+    return () => {
+      cleanup();
+      updateSwipePreviewRef.current(null);
+      delete main.dataset.swipeInput;
+    };
+  }, [book, settings.readingMode]);
+
+  useEffect(() => {
+    if (props.inputPaused) updateSwipePreviewRef.current(null);
+  }, [props.inputPaused]);
+
   useImperativeHandle(
     ref,
     () => ({
@@ -1728,6 +1804,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
           style={{ visibility: "hidden", zIndex: 0 }}
         />
       )}
+      <div ref={swipeHintRef} className="reader-swipe-hint" aria-hidden="true" />
       {/* 左右边缘 5% 悬停感应区与翻页指示 (Zen UI Packet C) */}
       <div
         className="edge-turn-zone edge-turn-prev"

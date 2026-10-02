@@ -2799,6 +2799,8 @@ export class ChapterPaginator {
         onNext: () => this.pagedSwipe?.onNext(),
         onPrev: () => this.pagedSwipe?.onPrev(),
         shouldIgnore: (event) => this.pagedSwipe?.shouldIgnore(event) ?? true,
+        onPreview: (dx) => this.pagedSwipe?.onPreview?.(dx),
+        gestureSurface: viewer,
       });
     }
     if (this.onPlainTap) {
