@@ -31,7 +31,7 @@ src-tauri/target-android-core/
 src-tauri/target-android-ai/
 
 # Private development records and local reproduction tools
-/docs/
+/docs
 /AGENTS.md
 /CONTRIBUTING.md
 /scripts/archive/
