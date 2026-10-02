@@ -33,6 +33,7 @@ import { SidebarDrawer, type SidebarMode, type SidebarTab } from "./ui/SidebarDr
 import { AaPopover } from "./ui/AaPopover";
 import { WhisperFooter, type WhisperFooterChapterTick } from "./ui/WhisperFooter";
 import { useResponsiveEnvironment } from "./ui/responsiveEnvironment";
+import { shouldConfirmNoteDiscard } from "./ui/readerCloseGuards";
 import {
   createContentAxis,
   reduceScrubUi,
@@ -695,15 +696,27 @@ export default function App() {
     readerRef.current?.dismissFootnote();
   }, []);
 
+  /** 统一前景关闭入口：笔记未保存时确认放弃，其他层直接关闭。 */
+  const requestCloseForeground = useCallback((): void => {
+    const current = foregroundRef.current;
+    if (shouldConfirmNoteDiscard(current, noteComposerDirtyRef.current)) {
+      if (typeof window !== "undefined" && !window.confirm("放弃未保存的笔记？")) return;
+    }
+    closeForeground();
+  }, [closeForeground]);
+
   // ---- 统一抽屉（Zen UI Packet B） ----
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>("toc");
   const [sidebarSide, setSidebarSide] = useState<"left" | "right">("left");
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>("overlay");
   const [sidebarPinned, setSidebarPinned] = useState(false);
 
+  // 手机窄窗只派生 overlay 呈现，保留用户的 dock/pinned 偏好，放宽后恢复。
+  const effectiveSidebarMode: SidebarMode = phoneChrome ? "overlay" : sidebarMode;
+
   const isSidebarOpen =
     view === "reader" &&
-    ((sidebarMode === "docked" && sidebarPinned) ||
+    ((effectiveSidebarMode === "docked" && sidebarPinned) ||
       (foreground.kind === "panel" &&
         (foreground.panel === "toc" || foreground.panel === "bookmarks" || foreground.panel === "notes")));
 
@@ -716,14 +729,14 @@ export default function App() {
     return sidebarTab;
   })();
 
-  const isDockedSidebar = view === "reader" && sidebarMode === "docked" && sidebarPinned;
+  const isDockedSidebar = view === "reader" && effectiveSidebarMode === "docked" && sidebarPinned;
 
   const handleSidebarTabChange = useCallback((tab: SidebarTab) => {
     setSidebarTab(tab);
-    if (sidebarMode === "overlay") {
+    if (effectiveSidebarMode === "overlay") {
       openPanel(tab);
     }
-  }, [sidebarMode, openPanel]);
+  }, [effectiveSidebarMode, openPanel]);
 
   const handleSidebarModeChange = useCallback((mode: SidebarMode) => {
     setSidebarMode(mode);
@@ -744,11 +757,25 @@ export default function App() {
   }, [sidebarTab, openPanel, closeForeground]);
 
   const handleSidebarClose = useCallback(() => {
-    if (sidebarMode === "docked") {
+    if (!phoneChrome && sidebarMode === "docked") {
       setSidebarPinned(false);
     }
     closeForeground();
-  }, [sidebarMode, closeForeground]);
+  }, [closeForeground, phoneChrome, sidebarMode]);
+
+  /** 键盘/返回键关闭当前可见层；笔记模态先走统一 dirty 确认。 */
+  const requestCloseCurrentSurface = useCallback((): void => {
+    const current = foregroundRef.current;
+    if (current.kind === "modal" && current.modal === "note-composer") {
+      requestCloseForeground();
+      return;
+    }
+    if (isSidebarOpen) {
+      handleSidebarClose();
+      return;
+    }
+    requestCloseForeground();
+  }, [handleSidebarClose, isSidebarOpen, requestCloseForeground]);
 
   const handleToggleSidebar = useCallback((side?: "left" | "right") => {
     const targetSide = side || "left";
@@ -756,23 +783,23 @@ export default function App() {
       handleSidebarClose();
     } else {
       setSidebarSide(targetSide);
-      if (sidebarMode === "docked") {
+      if (effectiveSidebarMode === "docked") {
         setSidebarPinned(true);
       } else {
         openPanel(sidebarTab);
       }
     }
-  }, [isSidebarOpen, sidebarSide, handleSidebarClose, sidebarMode, sidebarTab, openPanel]);
+  }, [isSidebarOpen, sidebarSide, handleSidebarClose, effectiveSidebarMode, sidebarTab, openPanel]);
 
   const handleOpenBookmarks = useCallback(() => {
     setSidebarSide("right");
     setSidebarTab("bookmarks");
-    if (sidebarMode === "docked") {
+    if (effectiveSidebarMode === "docked") {
       setSidebarPinned(true);
     } else {
       openPanel("bookmarks");
     }
-  }, [sidebarMode, openPanel]);
+  }, [effectiveSidebarMode, openPanel]);
 
   /** 关闭正文图片浮层；不改变页码/滚动位置，也不记入阅读历史。 */
   const closeImageOverlay = useCallback((): void => {
@@ -3676,7 +3703,12 @@ export default function App() {
       await progressWriterRef.current?.flush();
       persistChapterCountCache();
     } catch (error) {
-      setShelfError(`阅读进度保存失败：${String(error)}`);
+      const message = `阅读进度保存失败：${String(error)}`;
+      setShelfError(message);
+      showReaderNotice(message, "error");
+      shelfBusyRef.current = false;
+      setShelfBusy(false);
+      return;
     }
     closeForeground();
     setSearchQuery("");
@@ -3696,7 +3728,7 @@ export default function App() {
     setView("shelf");
     shelfBusyRef.current = false;
     setShelfBusy(false);
-  }, [persistShelfProgress, persistChapterCountCache, closeForeground, closeImageOverlay]);
+  }, [persistShelfProgress, persistChapterCountCache, closeForeground, closeImageOverlay, showReaderNotice]);
 
   const toggleAppearancePanel = useCallback((): void => {
     if (menuOpen) closePanel("menu");
@@ -3757,20 +3789,11 @@ export default function App() {
       return;
     }
     const current = foregroundRef.current;
-    if (current.kind === "modal" && current.modal === "note-composer") {
-      if (noteComposerDirtyRef.current && !window.confirm("放弃未保存的笔记？")) return;
-      closeForeground();
-      return;
-    }
-    if (current.kind !== "none") {
-      closeForeground();
+    if (current.kind !== "none" || isSidebarOpen) {
+      requestCloseCurrentSurface();
       return;
     }
     if (view === "reader") {
-      if (isSidebarOpen) {
-        handleSidebarClose();
-        return;
-      }
       void handleBackToShelf();
       return;
     }
@@ -3778,12 +3801,11 @@ export default function App() {
       shelfBackHandlerRef.current?.();
     }
   }, [
-    closeForeground,
     closeImageOverlay,
     handleBackToShelf,
-    handleSidebarClose,
     isSidebarOpen,
     mobileMoreOpen,
+    requestCloseCurrentSurface,
     responsive.imeBottom,
     view,
   ]);
@@ -3820,12 +3842,6 @@ export default function App() {
   useEffect(() => {
     if (!noteComposer) noteComposerDirtyRef.current = false;
   }, [noteComposer]);
-
-  useEffect(() => {
-    if (!phoneChrome || sidebarMode !== "docked") return;
-    setSidebarMode("overlay");
-    setSidebarPinned(false);
-  }, [phoneChrome, sidebarMode]);
 
   // 视图提交后清空整本书会话状态。ResourceServer 的实际 revoke 与 Book 释放由
   // 会话退出执行，并且发生在 ReaderView 卸载与 paginator dispose 之后。
@@ -4211,6 +4227,7 @@ export default function App() {
   // ---- 桌面全局快捷键集中分发与键盘翻页（Zen UI Packet 3 键盘流） ----
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
+      if (e.defaultPrevented) return;
       if (isSelectAllShortcut(e)) {
         e.preventDefault();
         clearDocumentSelection(document);
@@ -4224,8 +4241,7 @@ export default function App() {
         if (e.key === "Escape") {
           t.blur();
           if (st.isReaderPanelOpen || isSidebarOpen || st.bookmarkMenuOpen || st.noteComposer !== null) {
-            handleSidebarClose();
-            closeForeground();
+            requestCloseCurrentSurface();
           }
         }
         return;
@@ -4323,8 +4339,7 @@ export default function App() {
       // 8. Esc：优先关闭任意处于激活状态的前景/弹窗/抽屉；若无浮层且全屏中，退回窗口模式
       if (e.key === "Escape") {
         if (st.isReaderPanelOpen || isSidebarOpen || st.bookmarkMenuOpen || st.noteComposer !== null) {
-          handleSidebarClose();
-          closeForeground();
+          requestCloseCurrentSurface();
           return;
         }
         if (st.isFullscreen) {
@@ -4356,6 +4371,7 @@ export default function App() {
     handleToggleBookmarks,
     handleToggleSidebar,
     handleSidebarClose,
+    requestCloseCurrentSurface,
     isSidebarOpen,
     toggleFullscreen,
     openPanel,
@@ -4376,6 +4392,8 @@ export default function App() {
       data-theme={settings.theme === "dark" ? "dark" : settings.theme === "sepia" ? "sepia" : settings.theme === "gray" ? "gray" : undefined}
       style={{
         "--ui-scale": uiScale,
+        // UI 缩放下的触摸命中区补偿；只用于触摸入口，不改用户存储的 uiScale。
+        "--ui-touch-comp": `${1 / uiScale}`,
         "--visual-viewport-height": `${responsive.visualViewportHeight}px`,
         "--ime-bottom": `${responsive.imeBottom}px`,
       } as CSSProperties}
@@ -4435,7 +4453,7 @@ export default function App() {
           side={sidebarSide}
           activeTab={activeSidebarTab}
           onTabChange={handleSidebarTabChange}
-          mode={sidebarMode}
+          mode={effectiveSidebarMode}
           onModeChange={handleSidebarModeChange}
           onClose={handleSidebarClose}
           compact={phoneChrome}
@@ -4850,7 +4868,7 @@ export default function App() {
                       selectedText={noteComposer.mode === "create" ? noteComposer.selection.selectedText : noteComposer.note.selectedText}
                       initialContent={noteComposer.mode === "edit" ? noteComposer.note.content : undefined}
                       onSave={(content) => void handleSaveNote(content)}
-                      onCancel={closeForeground}
+                      onCancel={requestCloseForeground}
                       onDirtyChange={(dirty) => { noteComposerDirtyRef.current = dirty; }}
                     />
                   </>

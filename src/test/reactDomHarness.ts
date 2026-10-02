@@ -21,6 +21,12 @@ export function createReactDomHarness() {
     async click(element: Element) {
       await act(async () => { element.dispatchEvent(new window.Event("click", { bubbles: true })); });
     },
+    async dispatch(element: Element, event: Event) {
+      await act(async () => { element.dispatchEvent(event); });
+    },
+    async run(fn: () => void | Promise<void>) {
+      await act(async () => { await fn(); });
+    },
     async dispose() {
       await act(async () => root.unmount());
       vi.unstubAllGlobals();

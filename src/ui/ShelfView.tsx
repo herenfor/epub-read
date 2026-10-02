@@ -128,6 +128,33 @@ export interface ShelfViewProps {
   onBackAvailabilityChange?(active: boolean): void;
 }
 
+interface ShelfSubmenuBackProps {
+  registerSubmenuBackHandler?: (handler: (() => boolean) | null) => void;
+  onSubmenuBackActiveChange?: (active: boolean) => void;
+}
+
+function useShelfSubmenuBack(
+  open: boolean,
+  close: () => void,
+  props: ShelfSubmenuBackProps,
+): void {
+  const closeRef = useRef(close);
+  closeRef.current = close;
+  const handler = useCallback((): boolean => {
+    closeRef.current();
+    return true;
+  }, []);
+  useEffect(() => {
+    if (!open) return;
+    props.registerSubmenuBackHandler?.(handler);
+    props.onSubmenuBackActiveChange?.(true);
+    return () => {
+      props.registerSubmenuBackHandler?.(null);
+      props.onSubmenuBackActiveChange?.(false);
+    };
+  }, [handler, open, props.onSubmenuBackActiveChange, props.registerSubmenuBackHandler]);
+}
+
 /* =========================================================================
  * 现代轻量矢量 SVG 图标集（统一 20x20 视口，1.75px 线宽，双端一致设计语言）
  * ========================================================================= */
@@ -446,7 +473,7 @@ function formatRelativeTime(ms: number): string {
  * 续读控制台组件（横向紧凑控制台、3D 书脊阴影、精确锚点与一键开书）
  * ========================================================================= */
 
-interface ShelfResumeStageProps {
+interface ShelfResumeStageProps extends ShelfSubmenuBackProps {
   entries: ShelfEntry[];
   provider: ThumbnailProvider;
   busy?: boolean;
@@ -458,6 +485,8 @@ const ShelfResumeStage = memo(function ShelfResumeStage({
   provider,
   busy,
   onOpen,
+  registerSubmenuBackHandler,
+  onSubmenuBackActiveChange,
 }: ShelfResumeStageProps) {
   const readingBooks = useMemo(() => {
     return entries
@@ -473,6 +502,11 @@ const ShelfResumeStage = memo(function ShelfResumeStage({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
   const moreDropdownRef = useRef<HTMLDivElement>(null);
+
+  useShelfSubmenuBack(moreOpen, () => setMoreOpen(false), {
+    registerSubmenuBackHandler,
+    onSubmenuBackActiveChange,
+  });
 
   useEffect(() => {
     if (!moreOpen) return;
@@ -708,7 +742,7 @@ const ShelfResumeStage = memo(function ShelfResumeStage({
  * 书籍卡片组件（现代极简排版、内嵌进度条、触控安全区）
  * ========================================================================= */
 
-interface ShelfCardProps {
+interface ShelfCardProps extends ShelfSubmenuBackProps {
   entry: ShelfEntry;
   selected: boolean;
   selectionMode: boolean;
@@ -728,6 +762,7 @@ interface ShelfCardProps {
   onRemoveFromFolder?(entry: ShelfEntry): Promise<void>;
   onToggleFavorite?(entry: ShelfEntry): void;
   onDragStart?(entry: ShelfEntry, point: { x: number; y: number }): void;
+  onLongPressSelect?(id: string): void;
 }
 
 const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
@@ -745,6 +780,8 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
       setMenuClosing(false);
     }, 150);
   }, []);
+
+  useShelfSubmenuBack(menuOpen, closeMenu, props);
 
   const last = entry.lastReadAtMs > 0 ? entry.lastReadAtMs : entry.addedAtMs;
   const recent = Date.now() - last < 1000 * 60 * 60 * 24 * 7;
@@ -779,6 +816,9 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
       return;
     }
 
+    const touchLongPressSelect = e.pointerType === "touch" && Boolean(props.onLongPressSelect);
+    if (!touchLongPressSelect && !props.onDragStart) return;
+
     startPosRef.current = { x: e.clientX, y: e.clientY };
     isDraggingRef.current = false;
     didLongPressRef.current = false;
@@ -789,7 +829,6 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
 
     longPressTimerRef.current = window.setTimeout(() => {
       didLongPressRef.current = true;
-      isDraggingRef.current = true;
       suppressClickUntilRef.current = Date.now() + 2000;
       if (typeof navigator !== "undefined" && navigator.vibrate) {
         try {
@@ -798,6 +837,11 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
           // ignore
         }
       }
+      if (touchLongPressSelect) {
+        props.onLongPressSelect?.(entry.id);
+        return;
+      }
+      isDraggingRef.current = true;
       props.onDragStart?.(entry, { x: e.clientX, y: e.clientY });
     }, 500);
   };
@@ -828,6 +872,8 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
   const handlePointerCancel = (): void => {
     cancelLongPress();
   };
+
+  useEffect(() => () => cancelLongPress(), [cancelLongPress]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -1110,7 +1156,7 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
  * 文件夹卡片组件（4图马赛克拼图、弹层菜单、触控安全区）
  * ========================================================================= */
 
-interface ShelfFolderCardProps {
+interface ShelfFolderCardProps extends ShelfSubmenuBackProps {
   id: string;
   name: string;
   books: ShelfEntry[];
@@ -1153,6 +1199,8 @@ const ShelfFolderCard = memo(function ShelfFolderCard(props: ShelfFolderCardProp
       window.removeEventListener("keydown", onKey);
     };
   }, [menuOpen, closeMenu]);
+
+  useShelfSubmenuBack(menuOpen, closeMenu, props);
 
   const handleCardClick = (e?: React.MouseEvent): void => {
     const target = e?.target as HTMLElement | null;
@@ -1689,7 +1737,7 @@ function ShelfMoveDialog(props: ShelfMoveDialogProps) {
  * 手机拟物居中文件夹弹窗组件（Folder Modal）
  * ========================================================================= */
 
-interface ShelfFolderModalProps {
+interface ShelfFolderModalProps extends ShelfSubmenuBackProps {
   folder: { id: string; name: string };
   books: ShelfEntry[];
   provider: ThumbnailProvider;
@@ -1804,6 +1852,8 @@ const ShelfFolderModal = memo(function ShelfFolderModal(props: ShelfFolderModalP
                     onRemoveFromFolder={inFolder ? props.onRemoveFromFolder : undefined}
                     onToggleFavorite={props.onToggleFavorite}
                     onDragStart={props.onDragStart}
+                    registerSubmenuBackHandler={props.registerSubmenuBackHandler}
+                    onSubmenuBackActiveChange={props.onSubmenuBackActiveChange}
                   />
                 );
               })}
@@ -2512,6 +2562,45 @@ const ShelfAZRail = memo(function ShelfAZRail({ letterIndexMap, onSelectLetter }
   );
 });
 
+interface ShelfGridGeometry {
+  columns: number;
+  rowHeight: number;
+  contentTop: number;
+}
+
+function sameShelfGridGeometry(a: ShelfGridGeometry, b: ShelfGridGeometry): boolean {
+  return a.columns === b.columns &&
+    Math.abs(a.rowHeight - b.rowHeight) < 1 &&
+    Math.abs(a.contentTop - b.contentTop) < 1;
+}
+
+/** 读取已渲染网格的真实列数、行步长与内容起点；不依赖设备/UA/密度常量。 */
+function measureShelfGridGeometry(container: HTMLElement): ShelfGridGeometry | null {
+  const grid = container.querySelector<HTMLElement>(".shelf-grid");
+  if (!grid) return null;
+  const cards = grid.querySelectorAll<HTMLElement>(".shelf-card, .shelf-folder-card");
+  const first = cards[0];
+  if (!first) return null;
+  const firstHeight = first.getBoundingClientRect().height;
+  if (!Number.isFinite(firstHeight) || firstHeight <= 0) return null;
+  const computed = getComputedStyle(grid);
+  const tracks = computed.gridTemplateColumns.split(/\s+/).filter(Boolean);
+  const columns = Math.max(1, tracks.length || 1);
+  const rowGap = Number.parseFloat(computed.rowGap || computed.gap) || 0;
+  const nextRow = cards[columns];
+  const rowHeight = nextRow
+    ? nextRow.getBoundingClientRect().top - first.getBoundingClientRect().top
+    : firstHeight + rowGap;
+  const anchor = grid.parentElement ?? grid;
+  const containerRect = container.getBoundingClientRect();
+  const anchorRect = anchor.getBoundingClientRect();
+  return {
+    columns,
+    rowHeight: Math.max(1, Math.round(rowHeight)),
+    contentTop: Math.max(0, Math.round(container.scrollTop + anchorRect.top - containerRect.top)),
+  };
+}
+
 /* =========================================================================
  * 60fps 轻量虚拟滚动 Hook (支持网格与列表双模式，智能阈值按需激活)
  * ========================================================================= */
@@ -2529,9 +2618,47 @@ function useShelfVirtualizer(
   totalCount: number,
   viewMode: "grid" | "list",
   density: ShelfDensity,
+  folderCount = 0,
   threshold = 40
-): VirtualizerResult {
+): VirtualizerResult & { gridGeometry: ShelfGridGeometry | null } {
   const [scrollState, setScrollState] = useState({ scrollTop: 0, viewportHeight: 800, containerWidth: 1000 });
+  const [gridGeometry, setGridGeometry] = useState<ShelfGridGeometry | null>(null);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || totalCount < threshold || viewMode !== "grid") {
+      setGridGeometry(null);
+      return;
+    }
+    let frame: number | null = null;
+    const measure = () => {
+      if (frame !== null) return;
+      const schedule = typeof window.requestAnimationFrame === "function"
+        ? window.requestAnimationFrame
+        : ((callback: FrameRequestCallback) => window.setTimeout(() => callback(Date.now()), 0));
+      frame = schedule(() => {
+        frame = null;
+        const next = measureShelfGridGeometry(container);
+        setGridGeometry((previous) => (
+          next && previous && sameShelfGridGeometry(previous, next) ? previous : next
+        ));
+      });
+    };
+    measure();
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    observer?.observe(container);
+    const grid = container.querySelector<HTMLElement>(".shelf-grid");
+    if (grid) observer?.observe(grid);
+    window.addEventListener("resize", measure, { passive: true });
+    return () => {
+      if (frame !== null) {
+        if (typeof window.cancelAnimationFrame === "function") window.cancelAnimationFrame(frame);
+        else window.clearTimeout(frame);
+      }
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [containerRef, totalCount, threshold, viewMode, density]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -2557,12 +2684,12 @@ function useShelfVirtualizer(
     };
 
     container.addEventListener("scroll", onScroll, { passive: true });
-    window.addEventListener("resize", onScroll, { passive: true });
+    window.addEventListener("resize", updateMetrics, { passive: true });
 
     return () => {
       if (rafId !== null) window.cancelAnimationFrame(rafId);
       container.removeEventListener("scroll", onScroll);
-      window.removeEventListener("resize", onScroll);
+      window.removeEventListener("resize", updateMetrics);
     };
   }, [containerRef, totalCount, threshold]);
 
@@ -2574,6 +2701,7 @@ function useShelfVirtualizer(
         topPadding: 0,
         bottomPadding: 0,
         isVirtual: false,
+        gridGeometry: null,
       };
     }
 
@@ -2590,37 +2718,45 @@ function useShelfVirtualizer(
         topPadding: startRow * rowHeight,
         bottomPadding: Math.max(0, (totalCount - endRow) * rowHeight),
         isVirtual: true,
-      };
-    } else {
-      // Grid mode
-      const minColWidth = density === "compact" ? 120 : density === "comfortable" ? 180 : 150;
-      const gap = density === "compact" ? 12 : density === "comfortable" ? 20 : 16;
-      const rowHeight = density === "compact" ? 240 : density === "comfortable" ? 320 : 280;
-      const availableWidth = Math.max(200, containerWidth - 40);
-      const cols = Math.max(1, Math.floor((availableWidth + gap) / (minColWidth + gap)));
-      const totalRows = Math.ceil(totalCount / cols);
-      const overscan = 2;
-      const startRow = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan);
-      const endRow = Math.min(totalRows, Math.ceil((scrollTop + viewportHeight) / rowHeight) + overscan);
-      const startIndex = startRow * cols;
-      const endIndex = Math.min(totalCount, endRow * cols);
-
-      return {
-        startIndex,
-        endIndex,
-        topPadding: startRow * rowHeight,
-        bottomPadding: Math.max(0, (totalRows - endRow) * rowHeight),
-        isVirtual: true,
+        gridGeometry: null,
       };
     }
-  }, [totalCount, threshold, scrollState, viewMode, density]);
+
+    const fallbackMinColWidth = density === "compact" ? 120 : density === "comfortable" ? 180 : 150;
+    const fallbackGap = density === "compact" ? 12 : density === "comfortable" ? 20 : 16;
+    const fallbackRowHeight = density === "compact" ? 240 : density === "comfortable" ? 320 : 280;
+    const fallbackAvailableWidth = Math.max(200, containerWidth - 40);
+    const columns = gridGeometry?.columns
+      ?? Math.max(1, Math.floor((fallbackAvailableWidth + fallbackGap) / (fallbackMinColWidth + fallbackGap)));
+    const rowHeight = gridGeometry?.rowHeight ?? fallbackRowHeight;
+    const folderRows = folderCount > 0 ? Math.ceil(folderCount / columns) : 0;
+    const booksTop = gridGeometry
+      ? gridGeometry.contentTop + folderRows * rowHeight
+      : 0;
+    const relativeScrollTop = Math.max(0, scrollTop - booksTop);
+    const totalRows = Math.ceil(totalCount / columns);
+    const overscan = 2;
+    const startRow = Math.max(0, Math.floor(relativeScrollTop / rowHeight) - overscan);
+    const endRow = Math.min(totalRows, Math.ceil((relativeScrollTop + viewportHeight) / rowHeight) + overscan);
+    const startIndex = startRow * columns;
+    const endIndex = Math.min(totalCount, endRow * columns);
+
+    return {
+      startIndex,
+      endIndex,
+      topPadding: startRow * rowHeight,
+      bottomPadding: Math.max(0, (totalRows - endRow) * rowHeight),
+      isVirtual: true,
+      gridGeometry,
+    };
+  }, [totalCount, threshold, scrollState, viewMode, density, folderCount, gridGeometry]);
 }
 
 /* =========================================================================
  * 列表模式单行组件 (ShelfTableRow)
  * ========================================================================= */
 
-interface ShelfTableRowProps {
+interface ShelfTableRowProps extends ShelfSubmenuBackProps {
   entry: ShelfEntry;
   index: number;
   provider: ThumbnailProvider;
@@ -2636,6 +2772,7 @@ interface ShelfTableRowProps {
   onDeleteRequest(entry: ShelfEntry): void;
   onMoveToFolder(entry: ShelfEntry): void;
   onRemoveFromFolder?(entry: ShelfEntry): Promise<void>;
+  onLongPressSelect?(id: string): void;
 }
 
 const ShelfTableRow = memo(function ShelfTableRow({
@@ -2654,6 +2791,9 @@ const ShelfTableRow = memo(function ShelfTableRow({
   onDeleteRequest,
   onMoveToFolder,
   onRemoveFromFolder,
+  onLongPressSelect,
+  registerSubmenuBackHandler,
+  onSubmenuBackActiveChange,
 }: ShelfTableRowProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuClosing, setMenuClosing] = useState(false);
@@ -2685,7 +2825,75 @@ const ShelfTableRow = memo(function ShelfTableRow({
     };
   }, [menuOpen, closeMenu]);
 
+  useShelfSubmenuBack(menuOpen, closeMenu, {
+    registerSubmenuBackHandler,
+    onSubmenuBackActiveChange,
+  });
+
+  const longPressTimerRef = useRef<number | null>(null);
+  const pointerStartRef = useRef<{ x: number; y: number } | null>(null);
+  const longPressDidFireRef = useRef(false);
+  const suppressClickUntilRef = useRef(0);
+
+  const cancelLongPress = useCallback(() => {
+    if (longPressTimerRef.current !== null) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+    pointerStartRef.current = null;
+  }, []);
+
+  const handleRowPointerDown = (e: React.PointerEvent<HTMLTableRowElement>): void => {
+    if (selectionMode || e.button !== 0 || e.pointerType !== "touch" || !onLongPressSelect) return;
+    const target = e.target as HTMLElement;
+    if (target.closest("button, input, select, .shelf-card-pop-menu, .shelf-card-actions-wrap, .shelf-card-star-btn")) return;
+    pointerStartRef.current = { x: e.clientX, y: e.clientY };
+    longPressDidFireRef.current = false;
+    if (longPressTimerRef.current !== null) window.clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = window.setTimeout(() => {
+      longPressDidFireRef.current = true;
+      suppressClickUntilRef.current = Date.now() + 2000;
+      if (typeof navigator !== "undefined" && navigator.vibrate) {
+        try {
+          navigator.vibrate(40);
+        } catch {
+          // ignore
+        }
+      }
+      onLongPressSelect(entry.id);
+    }, 500);
+  };
+
+  const handleRowPointerMove = (e: React.PointerEvent<HTMLTableRowElement>): void => {
+    if (!pointerStartRef.current || longPressDidFireRef.current) return;
+    const dx = e.clientX - pointerStartRef.current.x;
+    const dy = e.clientY - pointerStartRef.current.y;
+    if (Math.hypot(dx, dy) > 10) cancelLongPress();
+  };
+
+  const handleRowPointerUp = (): void => {
+    if (longPressTimerRef.current !== null) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+    if (longPressDidFireRef.current) {
+      suppressClickUntilRef.current = Math.max(suppressClickUntilRef.current, Date.now() + 600);
+      window.setTimeout(() => {
+        longPressDidFireRef.current = false;
+      }, 350);
+    }
+    pointerStartRef.current = null;
+  };
+
+  useEffect(() => () => cancelLongPress(), [cancelLongPress]);
+
   const handleRowClick = (e: React.MouseEvent) => {
+    if (longPressDidFireRef.current || Date.now() < suppressClickUntilRef.current) {
+      e.preventDefault();
+      e.stopPropagation();
+      longPressDidFireRef.current = false;
+      return;
+    }
     const target = e.target as HTMLElement | null;
     if (
       target?.closest(
@@ -2707,6 +2915,10 @@ const ShelfTableRow = memo(function ShelfTableRow({
       data-shelf-target="book"
       data-book-id={entry.id}
       onClick={handleRowClick}
+      onPointerDown={handleRowPointerDown}
+      onPointerMove={handleRowPointerMove}
+      onPointerUp={handleRowPointerUp}
+      onPointerCancel={cancelLongPress}
     >
       <td style={{ textAlign: "center", width: 44 }}>
         {selectionMode ? (
@@ -2929,6 +3141,22 @@ export function ShelfView(props: ShelfViewProps) {
   const [toastLetter, setToastLetter] = useState<string | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   const shelfViewRef = useRef<HTMLDivElement | null>(null);
+  const [submenuBackActive, setSubmenuBackActive] = useState(false);
+  const submenuBackHandlerRef = useRef<(() => boolean) | null>(null);
+
+  const registerSubmenuBackHandler = useCallback((handler: (() => boolean) | null): void => {
+    submenuBackHandlerRef.current = handler;
+  }, []);
+
+  const reportSubmenuBackActive = useCallback((active: boolean): void => {
+    setSubmenuBackActive(active);
+  }, []);
+
+  const handleTouchLongPressSelect = useCallback((id: string): void => {
+    setSelectedIds(new Set([id]));
+    setDockClosing(false);
+    setSelectionMode(true);
+  }, []);
 
   const handleCancelDelete = useCallback(() => {
     setDeleteTargetsClosing(true);
@@ -3126,11 +3354,20 @@ export function ShelfView(props: ShelfViewProps) {
     [filterModel.entries, sort]
   );
 
+  const visibleFolders = useMemo(() => {
+    if (scope.type !== "root") return [];
+    if (statusTab !== "all") return [];
+    if (!query.trim()) return activeFolders;
+    const q = query.trim().toLowerCase();
+    return activeFolders.filter((f) => f.name.toLowerCase().includes(q));
+  }, [scope, statusTab, activeFolders, query]);
+
   const virtualizer = useShelfVirtualizer(
     shelfViewRef,
     visible.length,
     viewMode,
     density,
+    visibleFolders.length,
     40
   );
 
@@ -3177,26 +3414,24 @@ export function ShelfView(props: ShelfViewProps) {
         const targetScrollTop = targetIndex * 52;
         scrollToOffset(targetScrollTop);
       } else {
-        const minColWidth = density === "compact" ? 120 : density === "comfortable" ? 180 : 150;
-        const gap = density === "compact" ? 12 : density === "comfortable" ? 20 : 16;
-        const rowHeight = density === "compact" ? 240 : density === "comfortable" ? 320 : 280;
-        const availableWidth = Math.max(200, (container.clientWidth || 1000) - 40);
-        const cols = Math.max(1, Math.floor((availableWidth + gap) / (minColWidth + gap)));
-        const targetRow = Math.floor(targetIndex / cols);
-        const targetScrollTop = targetRow * rowHeight;
-        scrollToOffset(targetScrollTop);
+        const geometry = virtualizer.gridGeometry;
+        if (geometry) {
+          const folderRows = Math.ceil(visibleFolders.length / geometry.columns);
+          const targetRow = Math.floor(targetIndex / geometry.columns);
+          scrollToOffset(geometry.contentTop + (folderRows + targetRow) * geometry.rowHeight);
+        } else {
+          const minColWidth = density === "compact" ? 120 : density === "comfortable" ? 180 : 150;
+          const gap = density === "compact" ? 12 : density === "comfortable" ? 20 : 16;
+          const rowHeight = density === "compact" ? 240 : density === "comfortable" ? 320 : 280;
+          const availableWidth = Math.max(200, (container.clientWidth || 1000) - 40);
+          const cols = Math.max(1, Math.floor((availableWidth + gap) / (minColWidth + gap)));
+          const targetRow = Math.floor(targetIndex / cols);
+          scrollToOffset(targetRow * rowHeight);
+        }
       }
     },
-    [viewMode, density]
+    [viewMode, density, virtualizer.gridGeometry, visibleFolders.length]
   );
-
-  const visibleFolders = useMemo(() => {
-    if (scope.type !== "root") return [];
-    if (statusTab !== "all") return [];
-    if (!query.trim()) return activeFolders;
-    const q = query.trim().toLowerCase();
-    return activeFolders.filter((f) => f.name.toLowerCase().includes(q));
-  }, [scope, statusTab, activeFolders, query]);
 
   const thumbnailProvider = props.thumbnailProvider ?? legacyThumbnailProvider;
 
@@ -3298,6 +3533,7 @@ export function ShelfView(props: ShelfViewProps) {
   }, []);
 
   const handleRootBack = useCallback((): boolean => {
+    if (submenuBackHandlerRef.current?.()) return true;
     if (deleteTargets) {
       handleCancelDelete();
       return true;
@@ -3369,7 +3605,8 @@ export function ShelfView(props: ShelfViewProps) {
     activeFolderModal ||
     drawerOpen ||
     folderMenuOpen ||
-    selectionMode
+    selectionMode ||
+    submenuBackActive
   );
 
   useEffect(() => {
@@ -3869,6 +4106,8 @@ export function ShelfView(props: ShelfViewProps) {
         provider={thumbnailProvider}
         busy={props.busy}
         onOpen={props.onOpen}
+        registerSubmenuBackHandler={registerSubmenuBackHandler}
+        onSubmenuBackActiveChange={reportSubmenuBackActive}
       />
 
       {/* Level 3: 状态与分类胶囊轨 */}
@@ -4284,6 +4523,9 @@ export function ShelfView(props: ShelfViewProps) {
                     onDeleteRequest={onDeleteRequest}
                     onMoveToFolder={handleSingleMoveToFolder}
                     onRemoveFromFolder={inFolder ? handleRemoveFromFolder : undefined}
+                    onLongPressSelect={handleTouchLongPressSelect}
+                    registerSubmenuBackHandler={registerSubmenuBackHandler}
+                    onSubmenuBackActiveChange={reportSubmenuBackActive}
                   />
                 );
               })}
@@ -4316,6 +4558,8 @@ export function ShelfView(props: ShelfViewProps) {
                   onOpen={(fId, el) => handleOpenFolderModal(fId, el)}
                   onRename={(fId, fName) => setRenameFolderTarget({ id: fId, name: fName })}
                   onDissolve={(fId, fName) => setDissolveFolderTarget({ id: fId, name: fName })}
+                  registerSubmenuBackHandler={registerSubmenuBackHandler}
+                  onSubmenuBackActiveChange={reportSubmenuBackActive}
                 />
               ))}
             {renderedBooks.map((entry) => {
@@ -4341,6 +4585,9 @@ export function ShelfView(props: ShelfViewProps) {
                   onRemoveFromFolder={inFolder ? handleRemoveFromFolder : undefined}
                   onToggleFavorite={handleToggleFavorite}
                   onDragStart={handleDragStart}
+                  onLongPressSelect={handleTouchLongPressSelect}
+                  registerSubmenuBackHandler={registerSubmenuBackHandler}
+                  onSubmenuBackActiveChange={reportSubmenuBackActive}
                 />
               );
             })}
@@ -4444,6 +4691,8 @@ export function ShelfView(props: ShelfViewProps) {
             onRemoveFromFolder={handleRemoveFromFolder}
             onToggleFavorite={handleToggleFavorite}
             onDragStart={handleFolderBookDragStart}
+            registerSubmenuBackHandler={registerSubmenuBackHandler}
+            onSubmenuBackActiveChange={reportSubmenuBackActive}
           />
         );
       })()}

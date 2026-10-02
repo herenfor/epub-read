@@ -1052,6 +1052,8 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       if (document.visibilityState === "hidden") {
         backgroundPausedRef.current = true;
         clearPreloadTimer();
+        const pendingPreload = preloadInFlightSlotRef.current;
+        if (pendingPreload) disposeSpareSlot(pendingPreload);
         warmupGenerationRef.current += 1;
         clearWarmupTimer();
         cancelWarmupIdle();

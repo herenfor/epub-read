@@ -46,11 +46,6 @@ export function NoteComposer(props: NoteComposerProps) {
     props.onDirtyChange?.(dirty);
   }, [dirty, props.onDirtyChange]);
 
-  const requestCancel = (): void => {
-    if (dirty && typeof window !== "undefined" && !window.confirm("放弃未保存的笔记？")) return;
-    props.onCancel();
-  };
-
   const handleChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
     const next = event.target.value;
     if (countCodePoints(next) <= NOTE_CONTENT_MAX_CODE_POINTS) setContent(next);
@@ -61,7 +56,8 @@ export function NoteComposer(props: NoteComposerProps) {
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Escape") {
       event.preventDefault();
-      requestCancel();
+      event.stopPropagation();
+      props.onCancel();
     } else if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
       event.preventDefault();
       save();
@@ -70,7 +66,7 @@ export function NoteComposer(props: NoteComposerProps) {
 
   return (
     <div className="note-composer" role="dialog" aria-modal="true" aria-label={title}>
-      <div className="note-composer-head"><span>{title}</span><button type="button" className="tb-btn" onClick={requestCancel} aria-label={`关闭${title}`}>✕</button></div>
+      <div className="note-composer-head"><span>{title}</span><button type="button" className="tb-btn" onClick={props.onCancel} aria-label={`关闭${title}`}>✕</button></div>
       <div className="note-selected-text" title={props.selectedText}>{props.selectedText}</div>
       <textarea
         ref={textareaRef}
@@ -87,7 +83,7 @@ export function NoteComposer(props: NoteComposerProps) {
       {contentError === "empty" && content.length > 0 && <div className="note-composer-error">笔记内容不能为空</div>}
       {contentError === "too-long" && <div className="note-composer-error">笔记内容不能超过 {NOTE_CONTENT_MAX_CODE_POINTS} 个字符</div>}
       <div className="note-composer-actions">
-        <button type="button" className="tb-btn" onClick={requestCancel}>取消</button>
+        <button type="button" className="tb-btn" onClick={props.onCancel}>取消</button>
         <button type="button" className="tb-btn active" disabled={!valid} onClick={save}>保存</button>
       </div>
     </div>

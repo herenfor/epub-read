@@ -6007,3 +6007,64 @@ select option {
 .app[data-touch-ui="true"] .note-composer button {
   min-height: 44px;
 }
+
+/* ---- R7：触摸固定操作层/输入面板不随桌面 zoom 缩放，命中区保持真实 48px ---- */
+.app[data-mobile-reader="true"] .titlebar.is-mobile-compact,
+.app[data-mobile-reader="true"] .whisper-footer.is-mobile,
+.app[data-mobile-chrome="true"] .note-composer,
+.app[data-mobile-chrome="true"] .search-panel,
+.app[data-mobile-chrome="true"] .aa-popover,
+.app[data-mobile-chrome="true"] .sidebar-drawer {
+  zoom: 1;
+}
+
+.app[data-touch-ui="true"] .shelf-card-more-btn {
+  width: calc(48px * var(--ui-touch-comp, 1));
+  height: calc(48px * var(--ui-touch-comp, 1));
+}
+
+.app[data-touch-ui="true"] .shelf-card-star-btn,
+.app[data-touch-ui="true"] .shelf-card-checkbox {
+  width: calc(48px * var(--ui-touch-comp, 1));
+  height: calc(48px * var(--ui-touch-comp, 1));
+}
+
+.app[data-touch-ui="true"] .shelf-btn-primary,
+.app[data-touch-ui="true"] .shelf-manage-toggle-btn,
+.app[data-touch-ui="true"] .shelf-view-toggle-btn,
+.app[data-touch-ui="true"] .shelf-icon-btn-zen,
+.app[data-touch-ui="true"] .shelf-selection-cancel,
+.app[data-touch-ui="true"] .shelf-selection-delete,
+.app[data-touch-ui="true"] .shelf-selection-toggle-all {
+  min-height: calc(48px * var(--ui-touch-comp, 1));
+}
+
+.reader-tools-reveal {
+  min-width: 48px;
+  min-height: 48px;
+}
+
+.app[data-touch-ui="true"] .search-panel button,
+.app[data-touch-ui="true"] .sidebar-drawer button,
+.app[data-touch-ui="true"] .aa-popover button,
+.app[data-touch-ui="true"] .note-composer button {
+  min-height: 48px;
+}
+
+.app[data-mobile-reader="true"] .titlebar.is-mobile-compact .titlebar-back-btn {
+  height: 48px;
+}
+
+.app[data-mobile-reader="true"] .titlebar.is-mobile-compact .titlebar-action-btn {
+  width: 48px;
+  height: 48px;
+}
+
+/* 模态笔记必须高于手机工具层，遮罩低于面板但高于所有工具/抽屉。 */
+.note-composer-backdrop {
+  z-index: 360;
+}
+
+.note-composer {
+  z-index: 361;
+}
