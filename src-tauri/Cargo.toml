@@ -57,3 +57,7 @@ codegen-units = 1
 lto = true
 opt-level = "s"
 strip = true
+
+# Keep book identity checks fast while the application itself remains debuggable.
+[profile.dev.package.sha2]
+opt-level = 3
