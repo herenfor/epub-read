@@ -24,6 +24,14 @@ export default defineConfig(({ mode }) => {
     },
     plugins: [react(), {
       name: "edition-manifest",
+      transformIndexHtml(html) {
+        if (platform !== "android") return html;
+        // App settings own text/UI sizing; ImageViewer owns image pinch.
+        return html.replace(
+          "width=device-width, initial-scale=1.0",
+          "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no",
+        );
+      },
       generateBundle() {
         this.emitFile({
           type: "asset",
