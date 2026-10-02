@@ -4395,6 +4395,7 @@ export default function App() {
         // UI 缩放下的触摸命中区补偿；只用于触摸入口，不改用户存储的 uiScale。
         "--ui-touch-comp": `${1 / uiScale}`,
         "--visual-viewport-height": `${responsive.visualViewportHeight}px`,
+        "--visual-viewport-top": `${responsive.visualViewportOffsetTop}px`,
         "--ime-bottom": `${responsive.imeBottom}px`,
       } as CSSProperties}
     >

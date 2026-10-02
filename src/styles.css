@@ -4790,7 +4790,7 @@ select option {
 
   .toc-panel,
   .notes-panel,
-  .search-panel,
+  .app:not([data-mobile-chrome="true"]) .search-panel,
   .menu-panel,
   .font-settings-panel,
   .log-panel {
@@ -6037,9 +6037,9 @@ select option {
 }
 
 .app[data-mobile-chrome="true"] .search-panel {
-  top: calc(env(safe-area-inset-top, 0px) + (var(--visual-viewport-height, 100vh) / 2));
-  height: min(560px, calc(var(--visual-viewport-height, 100vh) - 24px));
-  max-height: calc(var(--visual-viewport-height, 100vh) - 24px);
+  top: calc(var(--visual-viewport-top, 0px) + (var(--visual-viewport-height, 100vh) + env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)) / 2);
+  height: min(560px, calc(var(--visual-viewport-height, 100vh) - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 24px));
+  max-height: calc(var(--visual-viewport-height, 100vh) - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 24px);
 }
 
 /* 触摸面板内关键动作至少 44px 命中区。 */

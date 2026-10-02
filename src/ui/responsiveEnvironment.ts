@@ -27,6 +27,8 @@ export interface ResponsiveEnvironment extends ViewportClassification {
   touchUi: boolean;
   /** 实际 visual viewport 高度，用于 IME/短横屏弹层避免被键盘遮住。 */
   visualViewportHeight: number;
+  /** 浏览器为避让输入法平移视口时，可见区在布局视口中的起点。 */
+  visualViewportOffsetTop: number;
   /** IME 占用的底部空间（layout viewport 与 visual viewport 的差值）。 */
   imeBottom: number;
 }
@@ -55,6 +57,7 @@ function readEnvironment(shell: string): ResponsiveEnvironment {
     ...classification,
     touchUi,
     visualViewportHeight,
+    visualViewportOffsetTop,
     imeBottom: Math.max(0, height - visualViewportHeight - visualViewportOffsetTop),
   };
 }
@@ -64,6 +67,7 @@ function sameEnvironment(a: ResponsiveEnvironment, b: ResponsiveEnvironment): bo
     a.shortViewport === b.shortViewport &&
     a.touchUi === b.touchUi &&
     Math.abs(a.visualViewportHeight - b.visualViewportHeight) < 1 &&
+    Math.abs(a.visualViewportOffsetTop - b.visualViewportOffsetTop) < 1 &&
     Math.abs(a.imeBottom - b.imeBottom) < 1;
 }
 
