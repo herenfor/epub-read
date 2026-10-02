@@ -588,6 +588,16 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       (image) => {
         // 非活动槽（预加载）不得打开浮层；同时避免借用已撤销的 blob URL。
         if (isActiveSlot(slot)) onImageActivationRef.current?.(image);
+      },
+      undefined,
+      {
+        onNext: () => turnPageRef.current(1, "ui"),
+        onPrev: () => turnPageRef.current(-1, "ui"),
+        shouldIgnore: () =>
+          !isActiveSlot(slot) ||
+          inputPausedRef.current ||
+          latestRenderSettingsRef.current.readingMode === "scroll" ||
+          slot.state.status !== "ready",
       }
     );
     slot.paginator = paginator;

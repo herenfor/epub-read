@@ -42,6 +42,7 @@ import {
   type ScrollMetrics,
 } from "./scrollLayout";
 import { MIN_COLUMN_WIDTH_PX } from "./pageLayout";
+import { installPagedSwipe, type PagedSwipeHandlers } from "./pagedSwipe";
 import {
   clientXToColumnX,
   columnForContentPoint,
@@ -2408,6 +2409,10 @@ export class ChapterPaginator {
 
   /** 滚动模式：viewer 是唯一正文 scroller；分页专用补偿在滚动下不执行。 */
   private scrollStyleRestore: (() => void) | null = null;
+  /** 连续宿主接管纵向 pan 时，临时覆盖 viewer 用户滚动；保留原内联值和 priority。 */
+  private externalScrollOwnershipRestore: (() => void) | null = null;
+  /** 当前 iframe 文档上的横滑清理函数；换章/销毁时必须解除。 */
+  private pagedSwipeCleanup: (() => void) | null = null;
   /** 最近一次 scroll 事件的 rAF 合并句柄。 */
   private scrollFrame: number | undefined;
   private scrollFrameKind: "raf" | "timer" = "raf";
@@ -2474,7 +2479,9 @@ export class ChapterPaginator {
     /** 正文图片激活（活动章节专用；由 UI 打开独立浮层）。 */
     private onImageActivation?: (image: ImageActivationPayload) => void,
     /** 连续滚动模式外部适配器；提供时滚轮与按键转交宿主，不再触发章末保护链。 */
-    private externalScroll?: ExternalScrollAdapter
+    private externalScroll?: ExternalScrollAdapter,
+    /** 翻页模式单指横滑；连续模式/缓存非活动章由调用方忽略。 */
+    private pagedSwipe?: PagedSwipeHandlers
   ) {
     this.selectionContextMenuHandler = onSelectionContextMenu;
     this.displayGate = new VisibilityGate(this.iframe, {
@@ -2487,6 +2494,35 @@ export class ChapterPaginator {
 
   setExternalScroll(adapter?: ExternalScrollAdapter): void {
     this.externalScroll = adapter;
+    this.applyExternalScrollOwnership();
+  }
+
+  /**
+   * 连续宿主是唯一用户纵向滚动者时，禁止 iframe viewer 自己消费手指 pan。
+   * overflow-y:hidden 仍允许脚本设置 scrollTop，因此投影路径保持可用。
+   * 仅在外部适配器存在时生效；原内联值和 !important priority 在退出时恢复。
+   */
+  private applyExternalScrollOwnership(): void {
+    const viewer = this.viewer;
+    if (!viewer) return;
+    if (!this.externalScroll) {
+      this.restoreExternalScrollOwnership();
+      return;
+    }
+    if (!this.externalScrollOwnershipRestore) {
+      const value = viewer.style.getPropertyValue("overflow-y");
+      const priority = viewer.style.getPropertyPriority("overflow-y");
+      this.externalScrollOwnershipRestore = () => {
+        if (value) viewer.style.setProperty("overflow-y", value, priority);
+        else viewer.style.removeProperty("overflow-y");
+      };
+    }
+    viewer.style.setProperty("overflow-y", "hidden", "important");
+  }
+
+  private restoreExternalScrollOwnership(): void {
+    this.externalScrollOwnershipRestore?.();
+    this.externalScrollOwnershipRestore = null;
   }
 
   /**
@@ -2749,6 +2785,15 @@ export class ChapterPaginator {
       return;
     }
     this.viewer = viewer;
+    this.applyExternalScrollOwnership();
+    if (this.pagedSwipe && !this.scrollMode) {
+      this.pagedSwipeCleanup?.();
+      this.pagedSwipeCleanup = installPagedSwipe(doc, {
+        onNext: () => this.pagedSwipe?.onNext(),
+        onPrev: () => this.pagedSwipe?.onPrev(),
+        shouldIgnore: (event) => this.pagedSwipe?.shouldIgnore(event) ?? true,
+      });
+    }
     const atEnd = this.pendingStartAtEnd;
     // 从真实 iframe load 重新开始兜底计时。显示门挂在 iframe 而非 viewer，
     // 可保证 blob 文档的第一帧也不会漏出，同时 visibility:hidden 仍可测量。
@@ -3249,6 +3294,7 @@ export class ChapterPaginator {
     for (const [property, value] of styles) {
       viewer.style.setProperty(property, value);
     }
+    this.applyExternalScrollOwnership();
   }
 
   /** ready 状态的唯一构造入口，避免滚动字段散落在各调用点。 */
@@ -7449,6 +7495,9 @@ export class ChapterPaginator {
     this.cancelScrollFrame();
     this.cancelScrollAnimation();
     this.restoreScrollView();
+    this.restoreExternalScrollOwnership();
+    this.pagedSwipeCleanup?.();
+    this.pagedSwipeCleanup = null;
     this.restoreSpreadReadingAreaStyles();
     this.clearNoteHighlights();
     this.clearSearchHighlightForDocument();
