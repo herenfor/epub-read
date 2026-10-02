@@ -1,6 +1,10 @@
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join, isAbsolute, relative, resolve, sep } from "node:path";
-import { frontendOutDir, normalizeAppPlatform, shellForPlatform } from "../src/config/platformValue.ts";
+import { tsImport } from "tsx/esm/api";
+
+// This script also runs as a plain Node child of build-frontend.mjs.
+const { frontendOutDir, normalizeAppPlatform, shellForPlatform } =
+  await tsImport("../src/config/platformValue.ts", import.meta.url);
 
 const edition = (process.argv[2] ?? process.env.VITE_EDITION ?? "core").toLowerCase();
 if (!new Set(["core", "ai"]).has(edition)) throw new Error("edition must be core or ai");

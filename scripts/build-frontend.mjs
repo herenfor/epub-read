@@ -1,8 +1,12 @@
 import { spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { normalizeAppEdition } from "../src/config/editionValue.ts";
-import { normalizeAppPlatform } from "../src/config/platformValue.ts";
+import { tsImport } from "tsx/esm/api";
+
+// Node 20/early 22 do not load .ts natively by default. Keep the shared
+// policies and use the existing build dependency instead of requiring flags.
+const { normalizeAppEdition } = await tsImport("../src/config/editionValue.ts", import.meta.url);
+const { normalizeAppPlatform } = await tsImport("../src/config/platformValue.ts", import.meta.url);
 
 const [, , command = "build", rawEdition = "core"] = process.argv;
 const edition = normalizeAppEdition(rawEdition);
