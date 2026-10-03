@@ -33,6 +33,7 @@ import {
 import { hasReadPosition } from "./readEvidence";
 import { isShelfCardActionTarget } from "./shelfCardEventScope";
 import { getRuntimeCapabilities } from "../platform/runtimeCapabilities";
+import { AboutInfo } from "./AboutInfo";
 import {
   getSearchStatusLabel,
   SearchIndexCard,
@@ -2551,6 +2552,9 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
               导出存档
             </button>
           </div>
+
+          <div className="shelf-drawer-group-label">关于</div>
+          <AboutInfo />
         </div>
       </aside>
     </div>

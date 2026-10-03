@@ -4,9 +4,35 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>EPUB 阅读器</title>
+    <style>
+      html, body, #root { height: 100%; margin: 0; }
+      .app-startup-placeholder {
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 9px;
+        color: #6b7280;
+        font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+        background: #ffffff;
+      }
+      .app-startup-placeholder::before {
+        content: "";
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: currentColor;
+        opacity: 0.68;
+      }
+      @media (prefers-color-scheme: dark) {
+        .app-startup-placeholder { color: #a1a1aa; background: #1e1e1e; }
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div class="app-startup-placeholder" role="status" aria-live="polite">正在启动…</div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

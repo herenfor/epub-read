@@ -31,6 +31,8 @@ import { getRuntimeCapabilities } from "./platform/runtimeCapabilities";
 import { useAndroidBack } from "./platform/useAndroidBack";
 import { SidebarDrawer, type SidebarMode, type SidebarTab } from "./ui/SidebarDrawer";
 import { AaPopover } from "./ui/AaPopover";
+import { AboutInfo } from "./ui/AboutInfo";
+import { resolveReaderLoadFeedback } from "./ui/loadingFeedback";
 import { WhisperFooter, type WhisperFooterChapterTick } from "./ui/WhisperFooter";
 import { useResponsiveEnvironment } from "./ui/responsiveEnvironment";
 import { shouldConfirmNoteDiscard } from "./ui/readerCloseGuards";
@@ -496,6 +498,7 @@ export default function App() {
   } | null>(null);
   const [shelfNoticeFading, setShelfNoticeFading] = useState(false);
   const [shelfBusy, setShelfBusy] = useState(false);
+  const [shelfBusyMessage, setShelfBusyMessage] = useState("正在处理…");
   const [nativeImport, setNativeImport] = useState<{
     requestId: string;
     phase: "starting" | "preparing" | "committing";
@@ -852,6 +855,7 @@ export default function App() {
   spineIndexRef.current = spineIndex;
   const navigationPendingRef = useRef(false);
   const readerDisplayReadyRef = useRef(false);
+  const hasReaderDisplayedRef = useRef(false);
   /** 语义锚点失败后先结束 loading，但禁止把失败落点当作成功进度写盘。 */
   const suppressShelfProgressRef = useRef(false);
   // 每个稳定位置只能被一次显式跳转捕获；新书初始加载时
@@ -1062,6 +1066,7 @@ export default function App() {
       setBookKey(key);
       setRuntimeIssues([]);
       setChapterState({ status: "loading" });
+      hasReaderDisplayedRef.current = false;
       setReaderDisplayReady(false);
       setSpineIndex(start);
       setAnchor(undefined);
@@ -1094,6 +1099,7 @@ export default function App() {
     });
     if (list.length === 0 || shelfBusyRef.current) return;
     shelfBusyRef.current = true;
+    setShelfBusyMessage("正在导入书籍…");
     setShelfBusy(true);
     setShelfNotice(null);
     const imported: ShelfEntry[] = [];
@@ -1540,6 +1546,7 @@ export default function App() {
     }
     shelfBusyRef.current = true;
     organizationBusyRef.current = true;
+    setShelfBusyMessage("正在导入存档…");
     setShelfBusy(true);
     try {
       let text: string | null = null;
@@ -1988,6 +1995,7 @@ export default function App() {
       const originalEntry = shelfEntriesRef.current.find((e) => e.id === id);
       if (!originalEntry) return;
       shelfBusyRef.current = true;
+      setShelfBusyMessage("正在打开书籍…");
       setShelfBusy(true);
       setShelfError(null);
       if (searchTarget) setSearchNavigationBusy(true);
@@ -2119,6 +2127,7 @@ export default function App() {
         shelfBusyRef.current = false;
         setShelfBusy(false);
         setShelfError(`打开失败：${(e as Error).message}`);
+        setPhase({ phase: "error", message: (e as Error).message });
         setSearchNavigationBusy(false);
       }
     },
@@ -2209,6 +2218,7 @@ export default function App() {
       return;
     }
     shelfBusyRef.current = true;
+    setShelfBusyMessage("正在移除书籍…");
     setShelfBusy(true);
     try {
       await getShelfStore().deleteBook(id);
@@ -2230,6 +2240,7 @@ export default function App() {
       return;
     }
     shelfBusyRef.current = true;
+    setShelfBusyMessage("正在移除书籍…");
     setShelfBusy(true);
     try {
       const { deleted, failed } = await deleteShelfBooks(getShelfStore(), ids);
@@ -2298,6 +2309,7 @@ export default function App() {
     navigationPendingRef.current = false;
     historyCaptureAllowedRef.current = true;
     readerDisplayReadyRef.current = true;
+    hasReaderDisplayedRef.current = true;
     suppressShelfProgressRef.current = false;
     setReaderDisplayReady(true);
     setSearchNavigationBusy(false);
@@ -3534,6 +3546,12 @@ export default function App() {
 
   // ---- 派生 ----
   const ready = phase.phase === "ready" && book !== null && server !== null;
+  const readerLoadFeedback = resolveReaderLoadFeedback({
+    visible: view === "reader" && ready,
+    displayReady: readerDisplayReady,
+    displayedOnce: hasReaderDisplayedRef.current,
+    chapter: chapterState,
+  });
   const reading = chapterState.status === "ready" && !chapterState.empty;
   const currentPath = ready ? spineItemPath(book!, spineIndex) : undefined;
   const activeHref = currentPath
@@ -3698,6 +3716,7 @@ export default function App() {
     closeImageOverlay();
     persistShelfProgress();
     shelfBusyRef.current = true;
+    setShelfBusyMessage("正在保存进度…");
     setShelfBusy(true);
     try {
       await progressWriterRef.current?.flush();
@@ -3880,6 +3899,7 @@ export default function App() {
     scrubSessionRef.current += 1;
     dispatchScrub({ type: "reset", session: scrubSessionRef.current });
     setChapterState({ status: "loading" });
+    hasReaderDisplayedRef.current = false;
     setReaderDisplayReady(false);
     setReaderHistory(emptyReaderNavigationHistory());
     overlayHoverRef.current = false;
@@ -4816,6 +4836,18 @@ export default function App() {
                   onContentFractionFailed={handleContentFractionFailed}
                   onUserProgressSample={handleUserProgressSample}
                 />
+                {readerLoadFeedback && (
+                  <div
+                    className={`reader-load-feedback ${readerLoadFeedback.kind}`}
+                    role={readerLoadFeedback.kind === "error" ? "alert" : "status"}
+                    aria-live={readerLoadFeedback.kind === "error" ? "assertive" : "polite"}
+                  >
+                    {readerLoadFeedback.kind === "loading" && (
+                      <span className="reader-load-feedback-spinner" aria-hidden="true" />
+                    )}
+                    <span className="reader-load-feedback-text">{readerLoadFeedback.text}</span>
+                  </div>
+                )}
                 <ImageViewer
                   image={imageRequest}
                   onClose={closeImageOverlay}
@@ -5007,6 +5039,9 @@ export default function App() {
             >
               打开本地文件
             </button>
+            <div className="mobile-more-about">
+              <AboutInfo />
+            </div>
           </div>
         </>
       )}
@@ -5061,10 +5096,15 @@ export default function App() {
           onCancel={() => void handleCancelNativeImport()}
         />
       )}
-      {shelfBusy && (
-        <div className="app-busy" aria-busy="true">
+      {(shelfBusy || phase.phase === "loading") && nativeImport === null && (
+        <div className="app-busy" role="status" aria-live="polite" aria-busy="true">
           <div className="app-busy-spinner" />
-          <div className="app-busy-text">正在处理…</div>
+          <div
+            className="app-busy-text"
+            title={phase.phase === "loading" ? `正在打开《${phase.fileName}》…` : shelfBusyMessage}
+          >
+            {phase.phase === "loading" ? `正在打开《${phase.fileName}》…` : shelfBusyMessage}
+          </div>
         </div>
       )}
       <input
