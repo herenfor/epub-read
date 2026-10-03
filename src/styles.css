@@ -3932,6 +3932,12 @@ select option {
   border: 1px solid color-mix(in srgb, var(--error) 55%, transparent);
 }
 
+/* 触摸阅读页：提示统一浮在底部工具栏之上，不盖住进度/状态行。 */
+.app[data-mobile-reader="true"] .shelf-toast,
+.app[data-mobile-reader="true"] .reader-bookmark-toast {
+  bottom: calc(var(--mobile-reader-bottombar, 124px) + env(safe-area-inset-bottom, 0px) + 12px);
+}
+
 /* ---- 书签状态轻量反馈弹窗（底部居中微光毛玻璃胶囊浮层） ---- */
 .reader-bookmark-toast {
   position: fixed;
@@ -6358,7 +6364,13 @@ select option {
   box-shadow: 0 -16px 40px rgba(0, 0, 0, 0.2);
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
-  animation: aaMobileSheetIn 180ms cubic-bezier(0.16, 1, 0.3, 1);
+  animation: aaMobileSheetIn var(--motion-base) var(--ease-emphasized);
+}
+
+/* 平板等宽屏：底部弹层不横贯整屏，居中限宽。 */
+.app:not([data-layout="compact"]) .mobile-more-sheet {
+  max-width: 560px;
+  margin: 0 auto;
 }
 
 .mobile-more-title {
