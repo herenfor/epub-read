@@ -208,7 +208,9 @@ describe("isShelfCardActionTarget", () => {
           .firstElementChild as Element;
       const card = create('<div class="shelf-card"><button>菜单</button><span>标题</span></div>');
       const outsideButton = create("<button>外部</button>");
-      document.body.appendChild(card);
+      const dialog = create('<div class="shelf-folder-modal" role="dialog"></div>');
+      dialog.appendChild(card);
+      document.body.appendChild(dialog);
       document.body.appendChild(outsideButton);
       const inner = card.querySelector("button")!;
       expect(isShelfCardActionTarget(inner, card)).toBe(true);
@@ -216,6 +218,24 @@ describe("isShelfCardActionTarget", () => {
       expect(isShelfCardActionTarget(card, card)).toBe(false);
       expect(isShelfCardActionTarget(outsideButton, card)).toBe(false);
       expect(isShelfCardActionTarget(null, card)).toBe(false);
+    } finally {
+      await dom.dispose();
+    }
+  });
+
+  it("portal 菜单控件阻止书卡动作，普通外部控件不阻止", async () => {
+    const dom = createReactDomHarness();
+    try {
+      const document = dom.container.ownerDocument;
+      const card = document.createElement("div");
+      card.className = "shelf-card";
+      const host = document.createElement("div");
+      host.className = "shelf-menu-portal-host";
+      host.innerHTML = '<div class="shelf-card-pop-menu"><button>移至文件夹</button></div>';
+      const outsideButton = document.createElement("button");
+      document.body.append(card, host, outsideButton);
+      expect(isShelfCardActionTarget(host.querySelector("button"), card)).toBe(true);
+      expect(isShelfCardActionTarget(outsideButton, card)).toBe(false);
     } finally {
       await dom.dispose();
     }
