@@ -129,6 +129,17 @@ describe("paged swipe input", () => {
     expect(onNext).not.toHaveBeenCalled();
   });
 
+  it("does not commit when the finger drags out and then back toward the start", () => {
+    const { onNext, onPreview, touchEvent } = setup();
+    touchEvent("touchstart", 300, 200);
+    touchEvent("touchmove", 200, 202);
+    touchEvent("touchmove", 120, 203);
+    touchEvent("touchmove", 260, 203);
+    touchEvent("touchend", 260, 203);
+    expect(onNext).not.toHaveBeenCalled();
+    expect(onPreview).toHaveBeenLastCalledWith(null);
+  });
+
   it("accepts a qualifying final displacement even when moves were coalesced", () => {
     const { onNext, touchEvent } = setup();
     touchEvent("touchstart", 300, 200);

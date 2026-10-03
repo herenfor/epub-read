@@ -43,8 +43,15 @@ export interface ReaderSettings {
   forceHorizontal?: boolean;
   /** 预先准备下一章以加快顺序切换；undefined/false = 按需加载 */
   preloadNextChapter?: boolean;
-  /** 极速无动画模式（0ms 瞬翻）；undefined/false = 180ms 动画 */
-  instantTurn?: boolean;
+  /** 分页翻页动画；undefined = 滑动。只影响绘制，不参与重排比较。 */
+  turnAnimation?: TurnAnimation;
+}
+
+/** slide：内容跟手平移；fade：落位轻推淡入；none：瞬翻。 */
+export type TurnAnimation = "slide" | "fade" | "none";
+
+export function normalizeTurnAnimation(value: unknown): TurnAnimation {
+  return value === "fade" || value === "none" ? value : "slide";
 }
 
 export const DEFAULT_SETTINGS: ReaderSettings = {
@@ -57,7 +64,7 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
   spreadGapMode: "auto",
   forceHorizontal: false,
   preloadNextChapter: false,
-  instantTurn: false,
+  turnAnimation: "slide",
 };
 
 /**

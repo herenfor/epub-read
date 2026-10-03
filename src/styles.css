@@ -9,6 +9,13 @@
   --muted: #777777;
   /* 现代高精度无衬线界面字体栈（全端抗锯齿与极简现代排版） */
   --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", system-ui, Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  /* 动效语言：三档时长 + 三条曲线，Windows/Android/未来 Apple 共用；新动效只引用这些变量。 */
+  --motion-fast: 140ms;
+  --motion-base: 220ms;
+  --motion-slow: 320ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasized: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
   /* 菜单控件统一使用由主题色调出的浅色表面，避免纸色卡片过暗。 */
   --menu-surface: color-mix(in srgb, var(--accent) 7%, var(--panel-bg));
   --menu-surface-hover: color-mix(in srgb, var(--accent) 12%, var(--panel-bg));
@@ -1219,6 +1226,44 @@ select option {
     translate: none;
     transition: none;
   }
+}
+
+/* 滑动翻页：同章内容由 scrollLeft 跟手，不再平移 iframe 或显示文字提示。 */
+.reader[data-swipe-follow="true"] .reader-swipe-hint {
+  opacity: 0;
+}
+
+/* 跨章滑动：旧章朝翻页方向滑出，新章 display-ready 后从另一侧滑入（dataset 同步切换）。 */
+.reader[data-turn-exit="next"] iframe:not([aria-hidden="true"]) {
+  animation: readerChapterExitNext var(--motion-fast) var(--ease-exit) forwards;
+}
+
+.reader[data-turn-exit="prev"] iframe:not([aria-hidden="true"]) {
+  animation: readerChapterExitPrev var(--motion-fast) var(--ease-exit) forwards;
+}
+
+.reader[data-turn-enter="next"] iframe:not([aria-hidden="true"]) {
+  animation: readerChapterEnterNext var(--motion-base) var(--ease-emphasized) both;
+}
+
+.reader[data-turn-enter="prev"] iframe:not([aria-hidden="true"]) {
+  animation: readerChapterEnterPrev var(--motion-base) var(--ease-emphasized) both;
+}
+
+@keyframes readerChapterExitNext {
+  to { transform: translate3d(-16%, 0, 0); opacity: 0; }
+}
+
+@keyframes readerChapterExitPrev {
+  to { transform: translate3d(16%, 0, 0); opacity: 0; }
+}
+
+@keyframes readerChapterEnterNext {
+  from { transform: translate3d(16%, 0, 0); opacity: 0; }
+}
+
+@keyframes readerChapterEnterPrev {
+  from { transform: translate3d(-16%, 0, 0); opacity: 0; }
 }
 
 .reader.has-turn-anim.turn-next iframe:not([aria-hidden="true"]) {
@@ -6349,6 +6394,13 @@ select option {
   outline-offset: 1px;
 }
 
+/* 沉浸阅读以轻点正文呼出工具；该入口只为键盘/TalkBack 保留，未聚焦时不占画面。 */
+.reader-tools-reveal:not(:focus-visible) {
+  clip-path: inset(50%);
+  opacity: 0;
+  pointer-events: none;
+}
+
 /* 输入法只顶起必要输入面板；正文与分词几何不随 IME 每帧重排。 */
 .app[data-mobile-chrome="true"] .note-composer {
   position: fixed;
@@ -6759,4 +6811,13 @@ select option {
   min-width: 48px;
   min-height: 48px;
   padding: 10px 14px;
+}
+
+/* 系统要求减少动态效果时，所有引用动效变量的过渡与动画直接落位。 */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 0ms;
+    --motion-base: 0ms;
+    --motion-slow: 0ms;
+  }
 }

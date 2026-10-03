@@ -1419,6 +1419,11 @@
  * UI-2: 移动端紧凑模式书架控制 (mobileChrome && compact)
  * ========================================================================= */
 
+/* 平板等非紧凑移动外壳：书架上方不再有桌面标题栏，书架头自行让出状态栏。 */
+.app[data-shell="mobile"][data-mobile-chrome="true"]:not([data-layout="compact"]) .shelf-head-zen {
+  padding-top: calc(12px + env(safe-area-inset-top, 0px));
+}
+
 .app[data-mobile-chrome="true"][data-layout="compact"] .shelf-head-zen {
   padding-top: calc(8px + env(safe-area-inset-top, 0px));
   padding-bottom: 6px;

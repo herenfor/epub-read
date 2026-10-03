@@ -70,8 +70,8 @@ export interface SavedSettings {
   forceHorizontal?: boolean;
   /** 是否预先准备下一章以加快顺序切换；旧设置缺省为 false */
   preloadNextChapter?: boolean;
-  /** 极速瞬翻模式 */
-  instantTurn?: boolean;
+  /** 翻页动画；旧设置缺省为滑动 */
+  turnAnimation?: "slide" | "fade" | "none";
   /** 阅读方式；旧设置缺省为分页 */
   readingMode?: ReadingMode;
   /** 阅读器视口四边留白；未设置的边沿用旧默认 */

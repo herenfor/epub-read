@@ -18,6 +18,7 @@ import { sanitizePersistedTextAnchor } from "./render/textAnchor";
 import { clearDocumentSelection, isSelectAllShortcut } from "./render/selectionGuard";
 import {
   DEFAULT_SETTINGS,
+  normalizeTurnAnimation,
   type ReaderSettings,
   type Theme,
 } from "./render/settings";
@@ -579,6 +580,7 @@ export default function App() {
       customCss: saved.customCss,
       forceHorizontal: saved.forceHorizontal === true,
       preloadNextChapter: saved.preloadNextChapter === true,
+      turnAnimation: normalizeTurnAnimation(saved.turnAnimation),
       // 页面选项只在读取边界规范化一次；后续布局函数不再重复校验。
       ...normalizePageOptions({
         readingMode: saved.readingMode,
@@ -3943,6 +3945,7 @@ export default function App() {
       customCss: settings.customCss,
       forceHorizontal: settings.forceHorizontal === true,
       preloadNextChapter: settings.preloadNextChapter === true,
+      turnAnimation: normalizeTurnAnimation(settings.turnAnimation),
       readingMode: settings.readingMode === "scroll" ? "scroll" : "paginated",
       pageMarginsPx: settings.pageMarginsPx,
       columnsPerView: settings.columnsPerView === 2 ? 2 : 1,
@@ -3962,6 +3965,7 @@ export default function App() {
     settings.customCss,
     settings.forceHorizontal,
     settings.preloadNextChapter,
+    settings.turnAnimation,
     settings.readingMode,
     settings.pageMarginsPx,
     settings.columnsPerView,
@@ -4438,7 +4442,8 @@ export default function App() {
       setMobileMoreOpen(false);
       return;
     }
-    setReaderToolsVisible(true);
+    // 触摸阅读默认沉浸：开书只显示正文，轻点正文中部呼出工具。
+    setReaderToolsVisible(!mobileChrome);
     setMobileMoreOpen(false);
   }, [currentShelfId, view]);
 
@@ -5033,9 +5038,10 @@ export default function App() {
         onBackToShelf={view === "reader" ? handleBackToShelf : undefined}
         onToggleSidebar={view === "reader" ? handleToggleSidebar : undefined}
         sidebarOpen={view === "reader" && isSidebarOpen}
-        mobileCompact={phoneChrome}
+        // 触摸设备（手机与平板）共用同一阅读顶栏，随 toolsVisible 一起显隐；
+        // 平板不再叠加桌面工具栏。自带窗口外壳的桌面触屏仍保留窗口按键。
+        mobileCompact={phoneChrome || (mobileChrome && !runtime.hasDesktopWindowChrome)}
         toolsVisible={readerToolsVisible}
-        onToggleTools={view === "reader" ? () => setReaderToolsVisible((visible) => !visible) : undefined}
         onToggleAppearance={view === "reader" ? toggleAppearancePanel : undefined}
         appearanceOpen={view === "reader" && menuOpen}
         onOpenSearch={
@@ -5269,9 +5275,9 @@ export default function App() {
                   onReadingModeChange={(mode) => handlePresentationChange({ readingMode: mode })}
                   effectiveColumns={chapterState.status === "ready" ? chapterState.effectiveColumns : undefined}
                   onPresentationChange={handlePresentationChange}
-                  instantTurn={settings.instantTurn === true}
-                  onInstantTurnChange={(enabled) =>
-                    setSettings((s2) => ({ ...s2, instantTurn: enabled }))
+                  turnAnimation={normalizeTurnAnimation(settings.turnAnimation)}
+                  onTurnAnimationChange={(turnAnimation) =>
+                    setSettings((s2) => ({ ...s2, turnAnimation }))
                   }
                   forceHorizontal={settings.forceHorizontal === true}
                   onForceHorizontalChange={(enabled) =>

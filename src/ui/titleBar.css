@@ -465,10 +465,18 @@
   gap: 2px;
 }
 
+/* 返回与其他顶栏按钮同一视觉权重：无底色，按下才着色，不再是突兀的色块。 */
 .titlebar.is-mobile-compact .titlebar-back-btn {
   height: 44px;
-  padding: 0 10px 0 8px;
-  border-radius: 10px;
+  padding: 0 12px 0 6px;
+  border-radius: 12px;
+  background: transparent;
+  font-size: 14px;
+}
+
+.titlebar.is-mobile-compact .titlebar-back-btn:active {
+  background: color-mix(in srgb, var(--btn-tint-hover) 80%, transparent);
+  transform: none;
 }
 
 .titlebar.is-mobile-compact .titlebar-book-meta {
@@ -494,6 +502,20 @@
   width: 44px;
   height: 44px;
   border-radius: 10px;
+}
+
+.titlebar.is-mobile-compact {
+  transition:
+    transform var(--motion-base) var(--ease-emphasized),
+    opacity var(--motion-fast) var(--ease-standard),
+    visibility 0s linear 0s;
+}
+
+.titlebar.is-mobile-compact.tools-hidden {
+  transition:
+    transform var(--motion-fast) var(--ease-exit),
+    opacity var(--motion-fast) var(--ease-exit),
+    visibility 0s linear var(--motion-fast);
 }
 
 .titlebar.is-mobile-compact.tools-hidden {

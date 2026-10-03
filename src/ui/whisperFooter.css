@@ -243,6 +243,20 @@
   box-shadow: 0 -5px 18px rgba(0, 0, 0, 0.07);
 }
 
+.whisper-footer.is-mobile {
+  transition:
+    transform var(--motion-base) var(--ease-emphasized),
+    opacity var(--motion-fast) var(--ease-standard),
+    visibility 0s linear 0s;
+}
+
+.whisper-footer.is-mobile.is-hidden {
+  transition:
+    transform var(--motion-fast) var(--ease-exit),
+    opacity var(--motion-fast) var(--ease-exit),
+    visibility 0s linear var(--motion-fast);
+}
+
 .whisper-footer.is-mobile.is-hidden {
   transform: translateY(calc(100% + env(safe-area-inset-bottom, 0px)));
   opacity: 0;
