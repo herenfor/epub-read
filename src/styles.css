@@ -5922,10 +5922,19 @@ select option {
   height: 44px;
 }
 
-.app[data-touch-ui="true"] .shelf-card-star-btn,
-.app[data-touch-ui="true"] .shelf-card-checkbox {
+.app[data-touch-ui="true"] .shelf-card-star-btn {
   width: 40px;
   height: 40px;
+}
+
+.shelf-table th:last-child,
+.shelf-table td:last-child {
+  text-align: right;
+}
+
+.folder-row .shelf-capsule-count {
+  margin-left: 6px;
+  white-space: nowrap;
 }
 
 /* 窄屏列表只保留开书、进度和操作，次要列不挤占主入口。 */
@@ -5967,16 +5976,6 @@ select option {
   display: none;
 }
 
-.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table th:nth-child(5),
-.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table td:nth-child(5) {
-  width: 78px !important;
-}
-
-.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table th:last-child,
-.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table td:last-child {
-  width: 104px !important;
-}
-
 .app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table-title-cell {
   min-width: 0;
   width: 100%;
@@ -5991,22 +5990,77 @@ select option {
   white-space: nowrap;
 }
 
-.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table-progress-wrap {
-  width: 100%;
-  gap: 4px;
-}
-
-.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table-progress-text {
-  min-width: 24px;
-  font-size: 10px;
-}
-
 .app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table td:last-child > div {
   gap: 0 !important;
 }
 
 .app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table-view {
   overflow: visible;
+}
+
+/* 手机表格：# 约 28px，进度约 56px 居中且收起条形，操作 104px 居中，余宽留给书名 */
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table th:first-child,
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table td:first-child {
+  width: 28px;
+  min-width: 28px;
+  max-width: 28px;
+  text-align: center;
+  padding-left: 2px;
+  padding-right: 2px;
+  box-sizing: border-box;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table th:nth-child(5),
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table td:nth-child(5) {
+  width: 56px;
+  min-width: 56px;
+  max-width: 56px;
+  text-align: center;
+  padding-left: 4px;
+  padding-right: 4px;
+  box-sizing: border-box;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table th:last-child,
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table td:last-child {
+  width: 104px;
+  min-width: 104px;
+  max-width: 104px;
+  text-align: center;
+  padding-left: 4px;
+  padding-right: 4px;
+  box-sizing: border-box;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table-progress-track {
+  display: none;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table-progress-wrap {
+  justify-content: center;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table-progress-text {
+  font-size: 12px;
+}
+
+/* 目录行：首列图标居中，标题列换行放计数，操作箭头 inline-flex 居中与双动作同中心 */
+.app[data-mobile-chrome="true"][data-layout="compact"] .folder-row td:first-child > svg {
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .folder-row .shelf-table-title-cell {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .folder-row .shelf-capsule-count {
+  margin-left: 0;
+  padding: 0;
+  background: transparent;
+  font-size: 11px;
 }
 
 /* 列表行靠近视口底部时，菜单翻到按钮上方；默认仍向下，不裁切也不遮住原按钮。 */
@@ -6033,6 +6087,52 @@ select option {
   flex: 0 0 48px;
   width: 48px;
   height: 48px;
+}
+
+/* 移动端表格动作按钮：透明背景，弱化外框，保持 48px 命中与 18px 图标 */
+.app[data-mobile-chrome="true"] .shelf-table .shelf-card-more-btn,
+.app[data-mobile-chrome="true"] .shelf-table .shelf-card-star-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+  box-shadow: none;
+}
+
+.app[data-mobile-chrome="true"] .shelf-table .shelf-card-star-btn.active {
+  color: var(--accent);
+}
+
+.app[data-mobile-chrome="true"] .shelf-table .shelf-card-more-btn svg,
+.app[data-mobile-chrome="true"] .shelf-table .shelf-card-star-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* 移动紧凑顶栏及分类/目录下拉按钮：弱化背景外框，统一 18px 图标与 10px 圆角 */
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-mobile-more-btn {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-mobile-more-btn svg,
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-mobile-import-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-mobile-import-btn {
+  box-shadow: none;
+  border-radius: 10px;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-category-dropdown-btn,
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-folder-dropdown-btn {
+  border-radius: 10px;
+  background: transparent;
 }
 
 /* 触摸端网格删除透明仍可点的star入口，收藏沿既有更多菜单，列表按钮/桌面hover保留 */
@@ -6213,18 +6313,77 @@ select option {
   height: calc(48px * var(--ui-touch-comp, 1));
 }
 
-.app[data-touch-ui="true"] .shelf-card-star-btn,
-.app[data-touch-ui="true"] .shelf-card-checkbox {
+/* 网格三点按钮：48px 真实命中，32px 居中弱化半透明背景圆底，18px 图标 */
+.app[data-touch-ui="true"] .shelf-grid .shelf-card-more-btn {
+  position: relative;
+  background: transparent;
+  border-radius: 50%;
+  border: none;
+  opacity: 1;
+}
+
+.app[data-touch-ui="true"] .shelf-grid .shelf-card-more-btn::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.42);
+  pointer-events: none;
+  z-index: 0;
+  transition: background-color 0.14s ease;
+}
+
+.app[data-touch-ui="true"] .shelf-grid .shelf-card-more-btn:active::before,
+.app[data-touch-ui="true"] .shelf-grid .shelf-card-more-btn.active::before {
+  background: rgba(0, 0, 0, 0.65);
+}
+
+.app[data-touch-ui="true"] .shelf-grid .shelf-card-more-btn svg,
+.app[data-touch-ui="true"] .shelf-grid .shelf-card-more-btn .shelf-svg-icon {
+  position: relative;
+  z-index: 1;
+  width: 18px;
+  height: 18px;
+}
+
+.app[data-touch-ui="true"] .shelf-card-star-btn {
   width: calc(48px * var(--ui-touch-comp, 1));
   height: calc(48px * var(--ui-touch-comp, 1));
+}
+
+/* 长按勾选是装饰 div：24px 外圆 / 15px 对号，pointer-events: none，整卡仍可选 */
+.app[data-touch-ui="true"] .shelf-card-checkbox {
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  min-height: 24px;
+  pointer-events: none;
+}
+
+.app[data-touch-ui="true"] .shelf-card-checkbox .shelf-svg-icon,
+.app[data-touch-ui="true"] .shelf-card-checkbox svg {
+  width: 15px;
+  height: 15px;
 }
 
 .app[data-touch-ui="true"] .shelf-btn-primary,
 .app[data-touch-ui="true"] .shelf-manage-toggle-btn,
 .app[data-touch-ui="true"] .shelf-selection-cancel,
 .app[data-touch-ui="true"] .shelf-selection-delete,
-.app[data-touch-ui="true"] .shelf-selection-toggle-all {
+.app[data-touch-ui="true"] .shelf-selection-toggle-all,
+.app[data-touch-ui="true"] .shelf-action-fav,
+.app[data-touch-ui="true"] .shelf-action-folder {
   min-height: calc(48px * var(--ui-touch-comp, 1));
+}
+
+.app[data-touch-ui="true"] .shelf-action-fav,
+.app[data-touch-ui="true"] .shelf-action-folder {
+  height: calc(48px * var(--ui-touch-comp, 1));
+  box-sizing: border-box;
 }
 
 .app[data-touch-ui="true"] .shelf-view-toggle-group {
@@ -6290,7 +6449,8 @@ select option {
   min-height: calc(48px * var(--ui-touch-comp, 1));
 }
 
-.app[data-touch-ui="true"] .shelf-folder-menu-item {
+.app[data-touch-ui="true"] .shelf-folder-menu-item,
+.app[data-touch-ui="true"] .shelf-folder-menu-new-btn {
   min-height: calc(48px * var(--ui-touch-comp, 1));
   box-sizing: border-box;
   padding: 10px 14px;
@@ -6350,6 +6510,34 @@ select option {
   overflow-y: auto;
   overscroll-behavior: contain;
   box-sizing: border-box;
+}
+
+/* 共享书架菜单宿主：放在 .app 内，继承主题与移动选择器，zoom 1 */
+.shelf-menu-portal-host {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  z-index: 1100;
+  zoom: 1;
+  pointer-events: none;
+}
+
+.shelf-menu-portal-host .shelf-card-pop-menu {
+  position: fixed;
+  right: auto !important;
+  bottom: auto !important;
+  margin: 0;
+  pointer-events: auto;
+}
+
+.shelf-menu-portal-host .shelf-card-pop-menu.placement-up {
+  transform-origin: bottom right;
+}
+
+.shelf-menu-portal-host .shelf-card-pop-menu.placement-down {
+  transform-origin: top right;
 }
 
 .app[data-mobile-chrome="true"] .shelf-card-pop-item {

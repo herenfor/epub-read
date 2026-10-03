@@ -1,4 +1,6 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { getShelfMenuPortalHost, useShelfMenuPopover } from "./shelfMenuPlacement";
 import type { Theme } from "../render/settings";
 import {
   createShelfFilterModel,
@@ -781,33 +783,16 @@ interface ShelfCardProps extends ShelfSubmenuBackProps {
 const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
   const { entry } = props;
   const [menuOpen, setMenuOpen] = useState(false);
-  const [menuClosing, setMenuClosing] = useState(false);
-  const [menuPlacement, setMenuPlacement] = useState<"down" | "up">("down");
   const [removePending, setRemovePending] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const menuPanelRef = useRef<HTMLDivElement>(null);
 
-  const closeMenu = useCallback(() => {
-    setMenuClosing(true);
-    window.setTimeout(() => {
-      setMenuOpen(false);
-      setMenuClosing(false);
-    }, 150);
-  }, []);
-
-  useLayoutEffect(() => {
-    if (!menuOpen || menuClosing) return;
-    const anchor = menuRef.current;
-    const panel = menuPanelRef.current;
-    if (!anchor || !panel) return;
-    const anchorRect = anchor.getBoundingClientRect();
-    const panelRect = panel.getBoundingClientRect();
-    const viewportHeight = typeof window !== "undefined"
-      ? window.innerHeight || document.documentElement.clientHeight || 0
-      : 0;
-    setMenuPlacement(chooseShelfMenuPlacement(anchorRect, viewportHeight, panelRect.height));
-  }, [menuOpen, menuClosing]);
+  const {
+    menuClosing,
+    menuCoords,
+    triggerRef,
+    menuPanelRef,
+    closeMenu,
+  } = useShelfMenuPopover(menuOpen, setMenuOpen);
 
   useShelfSubmenuBack(menuOpen, closeMenu, props);
 
@@ -903,23 +888,6 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
 
   useEffect(() => () => cancelLongPress(), [cancelLongPress]);
 
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onDown = (e: PointerEvent): void => {
-      if (!menuRef.current?.contains(e.target as Node)) {
-        closeMenu();
-      }
-    };
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") closeMenu();
-    };
-    window.addEventListener("pointerdown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("pointerdown", onDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [menuOpen, closeMenu]);
 
   const handleClickCapture = (e: React.MouseEvent): void => {
     if (isShelfCardActionTarget(e.target, e.currentTarget)) return;
@@ -1063,8 +1031,9 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
 
         {/* 卡片独立操作菜单按钮（悬浮/聚焦可见，替代生硬的直接删除按钮） */}
         {!props.selectionMode && (
-          <div className="shelf-card-actions-wrap" ref={menuRef}>
+          <div className="shelf-card-actions-wrap">
             <button
+              ref={triggerRef}
               className={`shelf-card-more-btn${menuOpen ? " active" : ""}`}
               type="button"
               title="更多选项"
@@ -1078,90 +1047,110 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
               <DotsVerticalIcon />
             </button>
 
-            {menuOpen && (
-              <div
-                ref={menuPanelRef}
-                className={`shelf-card-pop-menu${menuPlacement === "up" ? " placement-up" : ""}${menuClosing ? " is-closing" : ""}`}
-                role="menu"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="shelf-card-pop-title" aria-label={`完整书名：${entry.title}`}>
-                  {entry.title}
-                </div>
-                <button
-                  className="shelf-card-pop-item"
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    props.onOpen(entry.id);
-                  }}
+            {typeof document !== "undefined" && (menuOpen || menuClosing) &&
+              createPortal(
+                <div
+                  ref={menuPanelRef}
+                  className={`shelf-card-pop-menu${menuCoords?.placement === "up" ? " placement-up" : " placement-down"}${menuClosing ? " is-closing" : ""}`}
+                  role="menu"
+                  style={
+                    menuCoords
+                      ? {
+                          position: "fixed",
+                          left: `${menuCoords.left}px`,
+                          top: `${menuCoords.top}px`,
+                          maxWidth: `${menuCoords.width}px`,
+                          maxHeight: `${menuCoords.maxHeight}px`,
+                          visibility: "visible",
+                        }
+                      : {
+                          position: "fixed",
+                          left: "-9999px",
+                          top: "-9999px",
+                          visibility: "hidden",
+                        }
+                  }
+                  onClick={(e) => e.stopPropagation()}
+                  onPointerDown={(e) => e.stopPropagation()}
                 >
-                  <BookLogoIcon />
-                  <span>打开阅读</span>
-                </button>
-                {props.onToggleFavorite && (
-                  <button
-                    className="shelf-card-pop-item"
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      props.onToggleFavorite?.(entry);
-                    }}
-                  >
-                    <StarIcon filled={props.isFavorite} />
-                    <span>{props.isFavorite ? "取消收藏" : "加入收藏"}</span>
-                  </button>
-                )}
-                {props.onMoveToFolder && (
-                  <button
-                    className="shelf-card-pop-item"
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      props.onMoveToFolder?.(entry);
-                    }}
-                  >
-                    <FolderIcon />
-                    <span>移至文件夹</span>
-                  </button>
-                )}
-                {props.onRemoveFromFolder && (
-                  <button
-                    className="shelf-card-pop-item"
-                    type="button"
-                    role="menuitem"
-                    disabled={removePending || props.busy}
-                    onClick={() => {
-                      void handleRemoveFromFolder();
-                    }}
-                  >
-                    <FolderIcon />
-                    <span>{removePending ? "正在移出…" : "从文件夹移除"}</span>
-                  </button>
-                )}
-                {removeError && (
-                  <div className="shelf-dialog-error" role="alert" style={{ padding: "4px 8px 2px" }}>
-                    {removeError}
+                  <div className="shelf-card-pop-title" aria-label={`完整书名：${entry.title}`}>
+                    {entry.title}
                   </div>
-                )}
-                <button
-                  className="shelf-card-pop-item danger"
-                  type="button"
-                  role="menuitem"
-                  disabled={props.deleteDisabled}
-                  onClick={() => {
-                    setMenuOpen(false);
-                    props.onDeleteRequest(entry);
-                  }}
-                >
-                  <TrashIcon />
-                  <span>从书架删除</span>
-                </button>
-              </div>
-            )}
+                  <button
+                    className="shelf-card-pop-item"
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      props.onOpen(entry.id);
+                    }}
+                  >
+                    <BookLogoIcon />
+                    <span>打开阅读</span>
+                  </button>
+                  {props.onToggleFavorite && (
+                    <button
+                      className="shelf-card-pop-item"
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        props.onToggleFavorite?.(entry);
+                      }}
+                    >
+                      <StarIcon filled={props.isFavorite} />
+                      <span>{props.isFavorite ? "取消收藏" : "加入收藏"}</span>
+                    </button>
+                  )}
+                  {props.onMoveToFolder && (
+                    <button
+                      className="shelf-card-pop-item"
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        props.onMoveToFolder?.(entry);
+                      }}
+                    >
+                      <FolderIcon />
+                      <span>移至文件夹</span>
+                    </button>
+                  )}
+                  {props.onRemoveFromFolder && (
+                    <button
+                      className="shelf-card-pop-item"
+                      type="button"
+                      role="menuitem"
+                      disabled={removePending || props.busy}
+                      onClick={() => {
+                        void handleRemoveFromFolder();
+                      }}
+                    >
+                      <FolderIcon />
+                      <span>{removePending ? "正在移出…" : "从文件夹移除"}</span>
+                    </button>
+                  )}
+                  {removeError && (
+                    <div className="shelf-dialog-error" role="alert" style={{ padding: "4px 8px 2px" }}>
+                      {removeError}
+                    </div>
+                  )}
+                  <button
+                    className="shelf-card-pop-item danger"
+                    type="button"
+                    role="menuitem"
+                    disabled={props.deleteDisabled}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      props.onDeleteRequest(entry);
+                    }}
+                  >
+                    <TrashIcon />
+                    <span>从书架删除</span>
+                  </button>
+                </div>,
+                getShelfMenuPortalHost(triggerRef.current),
+              )}
           </div>
         )}
       </div>
@@ -1206,35 +1195,14 @@ interface ShelfFolderCardProps extends ShelfSubmenuBackProps {
 
 const ShelfFolderCard = memo(function ShelfFolderCard(props: ShelfFolderCardProps) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const [menuClosing, setMenuClosing] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
-
-  const closeMenu = useCallback(() => {
-    setMenuClosing(true);
-    window.setTimeout(() => {
-      setMenuOpen(false);
-      setMenuClosing(false);
-    }, 150);
-  }, []);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onDown = (e: PointerEvent): void => {
-      if (!menuRef.current?.contains(e.target as Node)) {
-        closeMenu();
-      }
-    };
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") closeMenu();
-    };
-    window.addEventListener("pointerdown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("pointerdown", onDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [menuOpen, closeMenu]);
+  const {
+    menuClosing,
+    menuCoords,
+    triggerRef,
+    menuPanelRef,
+    closeMenu,
+  } = useShelfMenuPopover(menuOpen, setMenuOpen);
 
   useShelfSubmenuBack(menuOpen, closeMenu, props);
 
@@ -1297,8 +1265,9 @@ const ShelfFolderCard = memo(function ShelfFolderCard(props: ShelfFolderCardProp
         )}
 
         {!props.selectionMode && (
-          <div className="shelf-card-actions-wrap" ref={menuRef}>
+          <div className="shelf-card-actions-wrap">
             <button
+              ref={triggerRef}
               className={`shelf-card-more-btn${menuOpen ? " active" : ""}`}
               type="button"
               title="文件夹选项"
@@ -1312,46 +1281,71 @@ const ShelfFolderCard = memo(function ShelfFolderCard(props: ShelfFolderCardProp
               <DotsVerticalIcon />
             </button>
 
-            {menuOpen && (
-              <div className={`shelf-card-pop-menu${menuClosing ? " is-closing" : ""}`} role="menu" onClick={(e) => e.stopPropagation()}>
-                <button
-                  className="shelf-card-pop-item"
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    props.onOpen(props.id, cardRef.current);
-                  }}
+            {typeof document !== "undefined" && (menuOpen || menuClosing) &&
+              createPortal(
+                <div
+                  ref={menuPanelRef}
+                  className={`shelf-card-pop-menu${menuCoords?.placement === "up" ? " placement-up" : " placement-down"}${menuClosing ? " is-closing" : ""}`}
+                  role="menu"
+                  style={
+                    menuCoords
+                      ? {
+                          position: "fixed",
+                          left: `${menuCoords.left}px`,
+                          top: `${menuCoords.top}px`,
+                          maxWidth: `${menuCoords.width}px`,
+                          maxHeight: `${menuCoords.maxHeight}px`,
+                          visibility: "visible",
+                        }
+                      : {
+                          position: "fixed",
+                          left: "-9999px",
+                          top: "-9999px",
+                          visibility: "hidden",
+                        }
+                  }
+                  onClick={(e) => e.stopPropagation()}
+                  onPointerDown={(e) => e.stopPropagation()}
                 >
-                  <FolderIcon />
-                  <span>打开文件夹</span>
-                </button>
-                <button
-                  className="shelf-card-pop-item"
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    props.onRename(props.id, props.name);
-                  }}
-                >
-                  <EditIcon />
-                  <span>重命名</span>
-                </button>
-                <button
-                  className="shelf-card-pop-item danger"
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    props.onDissolve(props.id, props.name);
-                  }}
-                >
-                  <TrashIcon />
-                  <span>解散文件夹</span>
-                </button>
-              </div>
-            )}
+                  <button
+                    className="shelf-card-pop-item"
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      props.onOpen(props.id, cardRef.current);
+                    }}
+                  >
+                    <FolderIcon />
+                    <span>打开文件夹</span>
+                  </button>
+                  <button
+                    className="shelf-card-pop-item"
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      props.onRename(props.id, props.name);
+                    }}
+                  >
+                    <EditIcon />
+                    <span>重命名</span>
+                  </button>
+                  <button
+                    className="shelf-card-pop-item danger"
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      props.onDissolve(props.id, props.name);
+                    }}
+                  >
+                    <TrashIcon />
+                    <span>解散文件夹</span>
+                  </button>
+                </div>,
+                getShelfMenuPortalHost(triggerRef.current),
+              )}
           </div>
         )}
       </div>
@@ -2923,49 +2917,13 @@ const ShelfTableRow = memo(function ShelfTableRow({
   onSubmenuBackActiveChange,
 }: ShelfTableRowProps) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const [menuClosing, setMenuClosing] = useState(false);
-  const [menuPlacement, setMenuPlacement] = useState<"down" | "up">("down");
-  const menuRef = useRef<HTMLDivElement>(null);
-  const menuPanelRef = useRef<HTMLDivElement>(null);
-
-  const closeMenu = useCallback(() => {
-    setMenuClosing(true);
-    window.setTimeout(() => {
-      setMenuOpen(false);
-      setMenuClosing(false);
-    }, 150);
-  }, []);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onDown = (e: PointerEvent): void => {
-      if (!menuRef.current?.contains(e.target as Node)) {
-        closeMenu();
-      }
-    };
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") closeMenu();
-    };
-    window.addEventListener("pointerdown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("pointerdown", onDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [menuOpen, closeMenu]);
-
-  useLayoutEffect(() => {
-    if (!menuOpen || menuClosing) return;
-    const anchor = menuRef.current;
-    const panel = menuPanelRef.current;
-    if (!anchor || !panel) return;
-    const anchorRect = anchor.getBoundingClientRect();
-    const panelRect = panel.getBoundingClientRect();
-    const viewportHeight = typeof window !== "undefined"
-      ? window.innerHeight || document.documentElement.clientHeight || 0
-      : 0;
-    setMenuPlacement(chooseShelfMenuPlacement(anchorRect, viewportHeight, panelRect.height));
-  }, [menuOpen, menuClosing]);
+  const {
+    menuClosing,
+    menuCoords,
+    triggerRef,
+    menuPanelRef,
+    closeMenu,
+  } = useShelfMenuPopover(menuOpen, setMenuOpen);
 
   useShelfSubmenuBack(menuOpen, closeMenu, {
     registerSubmenuBackHandler,
@@ -3109,7 +3067,7 @@ const ShelfTableRow = memo(function ShelfTableRow({
       <td style={{ color: "var(--muted)", fontSize: 12, whiteSpace: "nowrap" }}>
         {formatRelativeTime(entry.lastReadAtMs) || formatShelfTime(entry.addedAtMs) || "刚刚"}
       </td>
-      <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+      <td className="shelf-table-action-cell" style={{ whiteSpace: "nowrap" }}>
         <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
           <button
             className={`shelf-card-star-btn${isFavorite ? " active" : ""}`}
@@ -3124,8 +3082,9 @@ const ShelfTableRow = memo(function ShelfTableRow({
           >
             <StarIcon filled={isFavorite} />
           </button>
-          <div className="shelf-card-actions-wrap" ref={menuRef} style={{ position: "relative", opacity: 1 }}>
+          <div className="shelf-card-actions-wrap" style={{ position: "relative", opacity: 1 }}>
             <button
+              ref={triggerRef}
               className={`shelf-card-more-btn${menuOpen ? " active" : ""}`}
               style={{ position: "static", opacity: 1 }}
               type="button"
@@ -3139,82 +3098,102 @@ const ShelfTableRow = memo(function ShelfTableRow({
             >
               <DotsVerticalIcon />
             </button>
-            {menuOpen && (
-              <div
-                ref={menuPanelRef}
-                className={`shelf-card-pop-menu${menuPlacement === "up" ? " placement-up" : ""}${menuClosing ? " is-closing" : ""}`}
-                role="menu"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="shelf-card-pop-title" aria-label={`完整书名：${entry.title}`}>
-                  {entry.title}
-                </div>
-                <button
-                  className="shelf-card-pop-item"
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onOpen(entry.id);
-                  }}
+            {typeof document !== "undefined" && (menuOpen || menuClosing) &&
+              createPortal(
+                <div
+                  ref={menuPanelRef}
+                  className={`shelf-card-pop-menu${menuCoords?.placement === "up" ? " placement-up" : " placement-down"}${menuClosing ? " is-closing" : ""}`}
+                  role="menu"
+                  style={
+                    menuCoords
+                      ? {
+                          position: "fixed",
+                          left: `${menuCoords.left}px`,
+                          top: `${menuCoords.top}px`,
+                          maxWidth: `${menuCoords.width}px`,
+                          maxHeight: `${menuCoords.maxHeight}px`,
+                          visibility: "visible",
+                        }
+                      : {
+                          position: "fixed",
+                          left: "-9999px",
+                          top: "-9999px",
+                          visibility: "hidden",
+                        }
+                  }
+                  onClick={(e) => e.stopPropagation()}
+                  onPointerDown={(e) => e.stopPropagation()}
                 >
-                  <BookLogoIcon />
-                  <span>打开阅读</span>
-                </button>
-                <button
-                  className="shelf-card-pop-item"
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onToggleFavorite(entry);
-                  }}
-                >
-                  <StarIcon filled={isFavorite} />
-                  <span>{isFavorite ? "取消收藏" : "加入收藏"}</span>
-                </button>
-                <button
-                  className="shelf-card-pop-item"
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onMoveToFolder(entry);
-                  }}
-                >
-                  <FolderIcon />
-                  <span>移至文件夹</span>
-                </button>
-                {inFolder && onRemoveFromFolder && (
+                  <div className="shelf-card-pop-title" aria-label={`完整书名：${entry.title}`}>
+                    {entry.title}
+                  </div>
                   <button
                     className="shelf-card-pop-item"
                     type="button"
                     role="menuitem"
-                    disabled={busy}
                     onClick={() => {
                       setMenuOpen(false);
-                      void onRemoveFromFolder(entry);
+                      onOpen(entry.id);
+                    }}
+                  >
+                    <BookLogoIcon />
+                    <span>打开阅读</span>
+                  </button>
+                  <button
+                    className="shelf-card-pop-item"
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onToggleFavorite(entry);
+                    }}
+                  >
+                    <StarIcon filled={isFavorite} />
+                    <span>{isFavorite ? "取消收藏" : "加入收藏"}</span>
+                  </button>
+                  <button
+                    className="shelf-card-pop-item"
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onMoveToFolder(entry);
                     }}
                   >
                     <FolderIcon />
-                    <span>从文件夹移除</span>
+                    <span>移至文件夹</span>
                   </button>
-                )}
-                <button
-                  className="shelf-card-pop-item danger"
-                  type="button"
-                  role="menuitem"
-                  disabled={busy || deleteDisabled}
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onDeleteRequest(entry);
-                  }}
-                >
-                  <TrashIcon />
-                  <span>从书架删除</span>
-                </button>
-              </div>
-            )}
+                  {inFolder && onRemoveFromFolder && (
+                    <button
+                      className="shelf-card-pop-item"
+                      type="button"
+                      role="menuitem"
+                      disabled={busy}
+                      onClick={() => {
+                        setMenuOpen(false);
+                        void onRemoveFromFolder(entry);
+                      }}
+                    >
+                      <FolderIcon />
+                      <span>从文件夹移除</span>
+                    </button>
+                  )}
+                  <button
+                    className="shelf-card-pop-item danger"
+                    type="button"
+                    role="menuitem"
+                    disabled={busy || deleteDisabled}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onDeleteRequest(entry);
+                    }}
+                  >
+                    <TrashIcon />
+                    <span>从书架删除</span>
+                  </button>
+                </div>,
+                getShelfMenuPortalHost(triggerRef.current),
+              )}
           </div>
         </div>
       </td>
@@ -3322,10 +3301,6 @@ export function ShelfView(props: ShelfViewProps) {
     onSubmenuBackActiveChange: reportSubmenuBackActive,
   });
 
-  useShelfSubmenuBack(isCompactMobile && folderPrefixExpanded, () => setFolderPrefixExpanded(false), {
-    registerSubmenuBackHandler,
-    onSubmenuBackActiveChange: reportSubmenuBackActive,
-  });
 
   useEffect(() => {
     if (!categoryMenuOpen) return;
@@ -3588,6 +3563,15 @@ export function ShelfView(props: ShelfViewProps) {
     const q = query.trim().toLowerCase();
     return activeFolders.filter((f) => f.name.toLowerCase().includes(q));
   }, [scope, statusTab, activeFolders, query]);
+
+  useShelfSubmenuBack(
+    isCompactMobile && viewMode === "grid" && scope.type === "root" && visibleFolders.length > 0 && folderPrefixExpanded,
+    () => setFolderPrefixExpanded(false),
+    {
+      registerSubmenuBackHandler,
+      onSubmenuBackActiveChange: reportSubmenuBackActive,
+    },
+  );
 
   const virtualizer = useShelfVirtualizer(
     shelfViewRef,
@@ -4585,7 +4569,7 @@ export function ShelfView(props: ShelfViewProps) {
                     </button>
                   );
                 })}
-                {isCompactMobile && visibleFolders.length > 0 && (
+                {isCompactMobile && viewMode === "grid" && scope.type === "root" && visibleFolders.length > 0 && (
                   <>
                     <div className="shelf-folder-menu-divider" />
                     <button
@@ -4849,7 +4833,7 @@ export function ShelfView(props: ShelfViewProps) {
                 >
                   阅读时间 {sort === "recent" ? "▾" : ""}
                 </th>
-                <th style={{ width: 100, textAlign: "right" }}>操作</th>
+                <th className="shelf-table-action-th" style={{ width: 104 }}>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -4887,7 +4871,7 @@ export function ShelfView(props: ShelfViewProps) {
                           <span className="shelf-table-title" style={{ fontWeight: 700 }} title={folder.name}>
                             {folder.name}
                           </span>
-                          <span className="shelf-capsule-count" style={{ marginLeft: 6, whiteSpace: "nowrap" }}>
+                          <span className="shelf-capsule-count">
                             {fBooks.length} 本
                           </span>
                         </div>
@@ -4896,7 +4880,7 @@ export function ShelfView(props: ShelfViewProps) {
                       <td style={{ color: "var(--muted)" }}>--</td>
                       <td style={{ color: "var(--muted)" }}>--</td>
                       <td style={{ color: "var(--muted)" }}>--</td>
-                      <td style={{ textAlign: "right" }}>
+                      <td className="shelf-table-action-cell">
                         <button
                           className="shelf-card-more-btn"
                           style={{ position: "static", opacity: 1 }}

@@ -5081,6 +5081,7 @@ export default function App() {
           e.target.value = "";
         }}
       />
+      <div id="shelf-menu-portal-host" className="shelf-menu-portal-host" />
     </div>
   );
 }

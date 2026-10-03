@@ -11,6 +11,9 @@ export function isShelfCardActionTarget(
 ): boolean {
   const ElementCtor = typeof Element === "undefined" ? null : Element;
   if (!ElementCtor || !(target instanceof ElementCtor)) return false;
+  if (target.closest(".shelf-card-pop-menu, .shelf-menu-portal-host, .shelf-confirm-backdrop, .shelf-confirm, dialog, [role='dialog']")) {
+    return true;
+  }
   const action = target.closest(CARD_ACTION_SELECTOR);
   // A folder dialog contains the card, but is not an action inside the card.
   return action !== null && action !== card && card.contains(action);
