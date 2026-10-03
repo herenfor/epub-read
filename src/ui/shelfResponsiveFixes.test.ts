@@ -141,6 +141,45 @@ describe("第三步补修：书架触摸长按与子菜单 Back", () => {
     }
   });
 
+  it("多选状态再次触摸长按启动拖书，并在拖动中阻止页面滚动", async () => {
+    const dom = createReactDomHarness();
+    const props = makeProps([makeEntry("b1", "第一本"), makeEntry("b2", "第二本")]);
+    try {
+      await dom.render(createElement(ShelfView, props));
+      const card = () => dom.container.querySelector('[data-book-id="b1"]') as HTMLElement;
+      const win = card().ownerDocument.defaultView as Window;
+      const longPress = async () => {
+        await dom.run(() => {
+          card().dispatchEvent(pointerEvent(win, "pointerdown", {
+            button: 0, clientX: 100, clientY: 100, pointerType: "touch",
+          }));
+        });
+        await dom.run(() => new Promise<void>((resolve) => setTimeout(resolve, 550)));
+      };
+      await longPress();
+      await dom.run(() => { win.dispatchEvent(pointerEvent(win, "pointerup", { clientX: 100, clientY: 100 })); });
+      expect(dom.container.querySelector(".shelf-view")?.classList.contains("selection-mode")).toBe(true);
+      expect(dom.container.querySelector(".shelf-drag-ghost")).toBeNull();
+
+      await longPress();
+      expect(card().classList.contains("is-dragging")).toBe(true);
+      expect(dom.container.querySelector(".shelf-drag-ghost")).not.toBeNull();
+      const WindowEvent = (win as unknown as { Event: typeof Event }).Event;
+      const move = new WindowEvent("touchmove", { bubbles: true, cancelable: true });
+      win.dispatchEvent(move);
+      expect(move.defaultPrevented).toBe(true);
+
+      await dom.run(() => { win.dispatchEvent(pointerEvent(win, "pointerup", { clientX: 100, clientY: 100 })); });
+      expect(dom.container.querySelector(".shelf-drag-ghost")).toBeNull();
+      expect(dom.container.querySelector(".shelf-view")?.classList.contains("selection-mode")).toBe(true);
+      const idle = new WindowEvent("touchmove", { bubbles: true, cancelable: true });
+      win.dispatchEvent(idle);
+      expect(idle.defaultPrevented).toBe(false);
+    } finally {
+      await dom.dispose();
+    }
+  });
+
   it("最高层书卡菜单先被同一个书架 Back 协调者关闭", async () => {
     const dom = createReactDomHarness();
     const backHandlers: Array<(() => boolean) | null> = [];

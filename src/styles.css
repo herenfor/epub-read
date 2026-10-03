@@ -2207,12 +2207,6 @@ select option {
   color: var(--accent);
 }
 
-.shelf-selection-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
 .shelf-menu-btn {
   display: inline-flex;
   align-items: center;
@@ -6348,45 +6342,55 @@ select option {
   display: none;
 }
 
-/* 手机多选栏分两排：左侧状态与全选独占一行，动作三列换行，短标签保持单行。 */
-.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-selection-bar {
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: stretch;
+/* 多选顶栏只放“取消 · 已选 N 本 · 全选”；批量动作在所有布局都只走底部操作栏。 */
+.shelf-selection-exit {
+  display: none;
 }
 
 .app[data-mobile-chrome="true"][data-layout="compact"] .shelf-selection-left {
   flex: 1 1 100%;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
 }
 
-.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-selection-title {
-  white-space: nowrap;
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-selection-exit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 15px;
+  cursor: pointer;
 }
 
-/* 非手机布局的批量操作统一在底部浮动栏；顶部只保留“已选 N 本 / 全选”，不重复一组按钮。 */
-.app:not([data-layout="compact"]) .shelf-selection-actions {
-  display: none;
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-selection-exit:active {
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-selection-title {
+  justify-self: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+/* 底部操作栏留出位置，最后一排书不被盖住。 */
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-view.selection-mode {
+  padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
 }
 
 /* 触摸设备没有键盘回车提示的意义。 */
 .app[data-touch-ui="true"] .shelf-resume-key-hint {
   display: none;
-}
-
-.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-selection-actions {
-  flex: 1 1 100%;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
-}
-
-.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-selection-actions > button {
-  min-width: 0;
-  min-height: calc(48px * var(--ui-touch-comp, 1));
-  padding: 0 6px;
-  white-space: nowrap;
 }
 
 /* 触摸书架顶部按钮至少 44px，紧凑密度也不缩回小命中区。 */
