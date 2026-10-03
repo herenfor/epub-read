@@ -1453,6 +1453,7 @@ export default function App() {
 
   const applyNativeImportBatch = useCallback(async (batch: AndroidImportBatchResult, documents: AndroidDocumentSelection[]): Promise<void> => {
     const imported: ShelfEntry[] = [];
+    const accepted: ShelfEntry[] = [];
     const duplicateTitles: string[] = [];
     const failed: string[] = [];
     const cancelled: string[] = [];
@@ -1471,17 +1472,21 @@ export default function App() {
         failed.push(`${label}：后端未返回书架记录`);
         continue;
       }
-      contentHashByIdRef.current.set(item.record.id, item.record.contentHash ?? item.record.id);
-      entryByContentHashRef.current.set(item.record.contentHash ?? item.record.id, item.record);
+      accepted.push(item.record);
       if (item.status === "duplicate") {
         duplicateTitles.push(item.record.title || label);
       } else {
         imported.push(item.record);
       }
     }
-    if (imported.length > 0) {
-      await getShelfStore().importRecords?.(imported);
-      setShelfEntries((previous) => mergeShelfEntries(previous, imported));
+    if (accepted.length > 0) {
+      const store = getShelfStore();
+      const entries = store.importRecords ? await store.importRecords(accepted) : accepted;
+      for (const entry of entries) {
+        contentHashByIdRef.current.set(entry.id, entry.contentHash ?? entry.id);
+        entryByContentHashRef.current.set(entry.contentHash ?? entry.id, entry);
+      }
+      setShelfEntries((previous) => mergeShelfEntries(previous, entries));
     }
     const notice = formatImportNotice({
       sourceCount: documents.length,
@@ -1562,11 +1567,12 @@ export default function App() {
       });
       return null;
     }
-    contentHashByIdRef.current.set(match.record.id, match.record.contentHash ?? match.record.id);
-    entryByContentHashRef.current.set(match.record.contentHash ?? match.record.id, match.record);
-    await getShelfStore().importRecords?.([match.record]);
-    setShelfEntries((previous) => mergeShelfEntries(previous, [match.record!]));
-    return match.record;
+    const store = getShelfStore();
+    const [restored] = store.importRecords ? await store.importRecords([match.record]) : [match.record];
+    contentHashByIdRef.current.set(restored.id, restored.contentHash ?? restored.id);
+    entryByContentHashRef.current.set(restored.contentHash ?? restored.id, restored);
+    setShelfEntries((previous) => mergeShelfEntries(previous, [restored]));
+    return restored;
   }, [runNativeDocumentImport]);
 
   const handleChooseBooks = useCallback(async () => {

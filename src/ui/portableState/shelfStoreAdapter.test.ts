@@ -10,6 +10,7 @@ import { PortableShelfStore, activatePortableShelfStore } from "./shelfStoreAdap
 import { latestVersion } from "../../core/portableState/projection";
 import type { NoteValue } from "../../core/portableState/portable-state-types";
 import { ShelfProgressWriter } from "../progressWriter";
+import type { PortableShelfEntry } from "./projection";
 
 const HASH = "a".repeat(64);
 const LOCAL_ID = "local-bytes-1";
@@ -206,6 +207,34 @@ async function beginLatestProgress(
 }
 
 describe("CP-I portable ShelfStore facade", () => {
+  test("native import returns the reset progress basis and current annotations", async () => {
+    const legacy = new FakeLegacyStore([entry()]);
+    const service = new PortableStateService(new MemoryPortableStateStorage());
+    await activatePortableShelfStore(legacy, service);
+    const store = new PortableShelfStore(legacy, service);
+    const noteId = generateFolderId();
+    await store.createNote(LOCAL_ID, readerNote(noteId, "keep this note"));
+    const read = await service.read({ bookHash: HASH });
+    const { basisId } = await service.adopt({
+      readId: read.readId,
+      entity: { bookHash: HASH, kind: "progress" },
+      selection: { kind: "shown-all" },
+    });
+    await service.write({ basisId, intent: "reset", value: null, updatedAtMs: 100 });
+    const [imported] = await store.importRecords([entry({ available: true, lastReadAtMs: 0 })]);
+    expect(imported.available).toBe(true);
+    const projected = imported as PortableShelfEntry;
+    expect(projected.portableProgressVersions).toHaveLength(1);
+    expect(projected.portableProgressVersions[0].value).toBeNull();
+    expect(imported.notes?.some((note) => note.id === noteId && note.content === "keep this note"))
+      .toBe(true);
+    await expect(store.beginProgressSession(LOCAL_ID, {
+      kind: "chosen", stamp: projected.portableProgressVersions[0].stamp,
+    })).resolves.toBeUndefined();
+    await store.closeProgressSession(LOCAL_ID);
+    await service.release({ readId: read.readId });
+  });
+
   test("first activation migrates old rows and keeps local ids and annotations", async () => {
     const legacy = new FakeLegacyStore([entry({
       bookmarks: [{

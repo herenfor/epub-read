@@ -374,8 +374,14 @@ export class PortableShelfStore implements ShelfStore {
     };
   }
 
-  async importRecords(records: ShelfEntry[]): Promise<void> {
-    if (records.length > 0) await this.mergeEntries(records);
+  async importRecords(records: ShelfEntry[]): Promise<ShelfEntry[]> {
+    if (records.length === 0) return [];
+    await this.mergeEntries(records);
+    const state = await this.data.snapshot();
+    return records.map((record) => {
+      const hash = hashForLocalEntry(record);
+      return hash ? projectShelfEntry(hash, state.books[hash], record) : record;
+    });
   }
 
   async readBook(id: string): Promise<Uint8Array> {

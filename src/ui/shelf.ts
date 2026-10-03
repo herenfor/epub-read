@@ -149,8 +149,8 @@ export interface ShelfStore {
   save(input: ShelfSaveInput): Promise<ShelfSaveResult>;
   /** Tauri 链接式批量导入；浏览器后端不支持本地持久路径。 */
   importPaths(paths: string[]): Promise<LinkedImportBatchResult>;
-  /** CP-I: 原生文档 URI/批量导入结果先进入可移植仓储，再更新 UI。 */
-  importRecords?(records: ShelfEntry[]): Promise<void>;
+  /** 原生导入结果进入仓储后，返回含进度版本和注释的完整书架投影。 */
+  importRecords?(records: ShelfEntry[]): Promise<ShelfEntry[]>;
   readBook(id: string): Promise<Uint8Array>;
   readCover(id: string): Promise<Uint8Array | null>;
   /** 只为旧条目补录内容指纹，不得改动阅读进度或其他元数据。 */
