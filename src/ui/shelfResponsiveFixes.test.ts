@@ -180,6 +180,46 @@ describe("第三步补修：书架触摸长按与子菜单 Back", () => {
     }
   });
 
+  it("触摸拖书时顶部浮出全部文件夹落点，松手后收起", async () => {
+    const dom = createReactDomHarness();
+    const organization = {
+      ...emptyOrganization(),
+      folders: { f1: { name: { value: "轻小说", stamp: { counter: 1, deviceId: "test" } } } },
+    };
+    try {
+      (window as unknown as { matchMedia: (q: string) => { matches: boolean } }).matchMedia =
+        (q: string) => ({ matches: q.includes("coarse") });
+      await dom.render(createElement(ShelfView, {
+        ...makeProps([makeEntry("b1", "第一本"), makeEntry("b2", "第二本")]),
+        organization,
+        compact: true,
+      }));
+      const card = () => dom.container.querySelector('[data-book-id="b1"]') as HTMLElement;
+      const win = card().ownerDocument.defaultView as Window;
+      const longPress = async () => {
+        await dom.run(() => {
+          card().dispatchEvent(pointerEvent(win, "pointerdown", {
+            button: 0, clientX: 100, clientY: 100, pointerType: "touch",
+          }));
+        });
+        await dom.run(() => new Promise<void>((resolve) => setTimeout(resolve, 550)));
+      };
+      await longPress();
+      await dom.run(() => { win.dispatchEvent(pointerEvent(win, "pointerup", { clientX: 100, clientY: 100 })); });
+      expect(dom.container.querySelector(".shelf-drag-folder-strip")).toBeNull();
+
+      await longPress();
+      const chip = dom.container.querySelector('.shelf-drag-folder-strip [data-shelf-target="folder"]');
+      expect(chip?.getAttribute("data-folder-id")).toBe("f1");
+      expect(chip?.textContent).toContain("轻小说");
+
+      await dom.run(() => { win.dispatchEvent(pointerEvent(win, "pointerup", { clientX: 100, clientY: 100 })); });
+      expect(dom.container.querySelector(".shelf-drag-folder-strip")).toBeNull();
+    } finally {
+      await dom.dispose();
+    }
+  });
+
   it("最高层书卡菜单先被同一个书架 Back 协调者关闭", async () => {
     const dom = createReactDomHarness();
     const backHandlers: Array<(() => boolean) | null> = [];

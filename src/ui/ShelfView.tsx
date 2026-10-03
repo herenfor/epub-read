@@ -3270,6 +3270,10 @@ const ShelfTableRow = memo(function ShelfTableRow({
  * ========================================================================= */
 
 
+/** 拖书时距可视区上下边缘多少 CSS px 开始自动滚动，及每帧最大滚动量。 */
+const SHELF_DRAG_AUTOSCROLL_ZONE_PX = 72;
+const SHELF_DRAG_AUTOSCROLL_MAX_PX = 14;
+
 /** 书架三档密度的显示名与快捷按钮循环顺序（舒适 → 标准 → 紧凑 → 舒适）。 */
 const SHELF_DENSITY_LABEL: Record<ShelfDensity, string> = {
   comfortable: "舒适",
@@ -3364,6 +3368,13 @@ export function ShelfView(props: ShelfViewProps) {
   }, []);
 
   const isCompactMobile = !!props.compact;
+  const [coarsePointer] = useState(() => {
+    try {
+      return window.matchMedia?.("(pointer: coarse)").matches === true;
+    } catch {
+      return false;
+    }
+  });
   const emptyShelfHint = getRuntimeCapabilities().platform === "android"
     ? "导入 EPUB 后会出现在这里，点击上方“导入”从设备文件中选择"
     : "导入 EPUB 后会出现在这里，点击上方“导入”或直接将文件拖拽到窗口";
@@ -4003,7 +4014,13 @@ export function ShelfView(props: ShelfViewProps) {
         }
       }
 
-      const elem = document.elementFromPoint(e.clientX, e.clientY);
+      lastDragPoint = { x: e.clientX, y: e.clientY };
+      resolveDropTargetAt(e.clientX, e.clientY);
+    };
+
+    // 指针不动但列表自动滚动时也要重新命中，所以落点判定独立成函数。
+    function resolveDropTargetAt(x: number, y: number): void {
+      const elem = document.elementFromPoint(x, y);
       const targetCard = elem?.closest<HTMLElement>("[data-shelf-target]");
       if (!targetCard) {
         setDropTarget(null);
@@ -4032,7 +4049,38 @@ export function ShelfView(props: ShelfViewProps) {
       } else {
         setDropTarget(null);
       }
+    }
+
+    // 拖到书架可视区上下边缘时自动滚动（底部让出多选操作栏、顶部让出文件夹落点条）。
+    let lastDragPoint: { x: number; y: number } | null = null;
+    let autoScrollFrame = 0;
+    const autoScrollStep = (): void => {
+      autoScrollFrame = window.requestAnimationFrame(autoScrollStep);
+      const scroller = shelfViewRef.current;
+      const point = lastDragPoint;
+      if (!scroller || !point) return;
+      if (document.elementFromPoint(point.x, point.y)?.closest(".shelf-drag-folder-strip")) return;
+      const rect = scroller.getBoundingClientRect();
+      const strip = document.querySelector(".shelf-drag-folder-strip")?.getBoundingClientRect();
+      // 吸顶的书架顶栏会盖住滚动区顶部，上边缘从顶栏/落点条下沿算起。
+      const head = scroller.querySelector(".shelf-head")?.getBoundingClientRect();
+      const top = Math.max(rect.top, head ? head.bottom : rect.top, strip ? strip.bottom : rect.top);
+      const dock = document.querySelector(".shelf-floating-batch-dock")?.getBoundingClientRect();
+      const bottom = Math.min(rect.bottom, dock ? dock.top : rect.bottom);
+      const zone = SHELF_DRAG_AUTOSCROLL_ZONE_PX;
+      let delta = 0;
+      if (point.y < top + zone) delta = -((top + zone - point.y) / zone);
+      else if (point.y > bottom - zone) delta = (point.y - (bottom - zone)) / zone;
+      if (delta === 0) return;
+      const before = scroller.scrollTop;
+      // 越靠边越快；每帧至少 2px，避免刚进入边缘区时亚像素步长被取整吞掉。
+      const speed = Math.max(2, Math.min(1, Math.abs(delta)) * SHELF_DRAG_AUTOSCROLL_MAX_PX);
+      scroller.scrollTop = before + Math.sign(delta) * speed;
+      if (scroller.scrollTop !== before) resolveDropTargetAt(point.x, point.y);
     };
+    // 无 rAF 的环境（测试 DOM）不做自动滚动，拖放本身不受影响。
+    const canAutoScroll = typeof window.requestAnimationFrame === "function";
+    if (canAutoScroll) autoScrollFrame = window.requestAnimationFrame(autoScrollStep);
 
     const handleWindowPointerUp = async (): Promise<void> => {
       const currentDragged = draggedEntryRef.current;
@@ -4106,6 +4154,7 @@ export function ShelfView(props: ShelfViewProps) {
       window.removeEventListener("pointerup", handleWindowPointerUp);
       window.removeEventListener("mouseup", handleWindowPointerUp);
       window.removeEventListener("pointercancel", handleWindowPointerCancel);
+      if (canAutoScroll) window.cancelAnimationFrame(autoScrollFrame);
     };
   }, [draggedEntry, handleCloseFolderModal, props.onApplyOrganization]);
 
@@ -5253,9 +5302,31 @@ export function ShelfView(props: ShelfViewProps) {
       )}
 
       {/* 拖拽跟随时显示的半透明微缩封面浮层 */}
+      {/* 触摸拖书时顶部浮出文件夹落点条：手机网格不铺文件夹卡、平板滚动后文件夹也可能不在屏内，
+          两端都能直接拖进已有文件夹；不改变下方布局。 */}
+      {draggedEntry && coarsePointer && scope.type === "root" && !draggedFromFolderIdRef.current && activeFolders.length > 0 && (
+        <div className="shelf-drag-folder-strip" role="list" aria-label="拖到这里移入文件夹">
+          <span className="shelf-drag-folder-strip-label">移入文件夹</span>
+          <div className="shelf-drag-folder-strip-items">
+            {activeFolders.map((folder) => (
+              <div
+                key={folder.id}
+                role="listitem"
+                className={`shelf-drag-folder-chip${dropTarget?.type === "folder" && dropTarget.id === folder.id ? " is-over" : ""}`}
+                data-shelf-target="folder"
+                data-folder-id={folder.id}
+              >
+                <FolderIcon />
+                <span>{folder.name}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {draggedEntry && dragCoord && (
         <div
-          className="shelf-drag-ghost"
+          className={`shelf-drag-ghost${dropTarget?.type === "folder" ? " is-over-folder" : ""}`}
           style={{
             left: `${dragCoord.x}px`,
             top: `${dragCoord.y}px`,
