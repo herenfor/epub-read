@@ -1,9 +1,17 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { APP_EDITION } from "../config/edition";
 import type { AppEdition } from "../config/editionValue";
 import { APP_VERSION } from "../config/appVersion";
 import { getAppBuildSession, type AppBuildSession } from "../config/appBuildSession";
 import type { AppPlatform } from "../config/platformValue";
+import {
+  findReleaseNote,
+  listPreviousReleaseNotes,
+  RELEASE_CATEGORY_LABELS,
+  RELEASE_STATUS_LABELS,
+  type ReleaseNote,
+  type ReleaseNoteCategory,
+} from "../config/releaseNotes";
 import "./aboutInfo.css";
 
 export interface AboutProjection {
@@ -24,6 +32,8 @@ const PLATFORM_LABELS: Record<AppPlatform, string> = {
   ios: "iOS",
   web: "Web",
 };
+
+const RELEASE_CATEGORIES: readonly ReleaseNoteCategory[] = ["new", "improved", "fixed"];
 
 function editionLabel(edition: AppEdition): "Core" | "AI" {
   return edition === "ai" ? "AI" : "Core";
@@ -95,8 +105,35 @@ async function copyVersionInfo(text: string): Promise<void> {
   if (!copied) throw new Error("复制失败");
 }
 
+function ReleaseNoteItems({ note }: { note: ReleaseNote }) {
+  if (note.items.length === 0) {
+    return <p className="about-release-empty">暂无此版本的说明</p>;
+  }
+
+  return (
+    <div className="about-release-items">
+      {RELEASE_CATEGORIES.map((category) => {
+        const items = note.items.filter((item) => item.category === category);
+        if (items.length === 0) return null;
+        return (
+          <div className="about-release-group" key={category}>
+            <div className="about-release-group-title">{RELEASE_CATEGORY_LABELS[category]}</div>
+            <ul className="about-release-list">
+              {items.map((item, index) => (
+                <li key={`${category}-${index}`}>{item.text}</li>
+              ))}
+            </ul>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function AboutInfo() {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+  const [releaseNotesOpen, setReleaseNotesOpen] = useState(false);
+  const releaseNotesPanelId = useId();
   const projection = projectAboutInfo(getAppBuildSession(), {
     version: APP_VERSION,
     edition: APP_EDITION,
@@ -109,6 +146,9 @@ export function AboutInfo() {
       </section>
     );
   }
+
+  const currentRelease = findReleaseNote(projection.version);
+  const previousReleases = listPreviousReleaseNotes(projection.version);
 
   const handleCopy = async (): Promise<void> => {
     try {
@@ -141,6 +181,64 @@ export function AboutInfo() {
           </span>
         )}
       </div>
+
+      <button
+        type="button"
+        className="about-release-toggle"
+        aria-expanded={releaseNotesOpen}
+        aria-controls={releaseNotesPanelId}
+        onClick={() => setReleaseNotesOpen((open) => !open)}
+      >
+        <span>版本说明</span>
+        <span className="about-release-toggle-state">{releaseNotesOpen ? "收起" : "展开"}</span>
+      </button>
+
+      {releaseNotesOpen && (
+        <div className="about-release-panel" id={releaseNotesPanelId}>
+          <div className="about-release-section-title">当前版本</div>
+          {currentRelease ? (
+            <>
+              <div className="about-release-meta">
+                <span>版本 {currentRelease.version}</span>
+                <span className={`about-release-status about-release-status-${currentRelease.status}`}>
+                  {RELEASE_STATUS_LABELS[currentRelease.status]}
+                </span>
+                {currentRelease.releasedOn && (
+                  <time dateTime={currentRelease.releasedOn}>发布于 {currentRelease.releasedOn}</time>
+                )}
+              </div>
+              {currentRelease.status === "development" && (
+                <p className="about-release-hint">
+                  开发中状态仅表示尚未正式发布；以下条目只记录已合入的功能，不保证本安装包包含所有正在开发的功能，原生端实机验证可能尚未完成。
+                </p>
+              )}
+              <ReleaseNoteItems note={currentRelease} />
+            </>
+          ) : (
+            <p className="about-release-empty">暂无此版本的说明</p>
+          )}
+
+          {previousReleases.length > 0 && (
+            <details className="about-release-history">
+              <summary>历史版本说明（{previousReleases.length}）</summary>
+              <div className="about-release-history-list">
+                {previousReleases.map((release) => (
+                  <details className="about-release-history-entry" key={release.version}>
+                    <summary>
+                      <span>版本 {release.version}</span>
+                      <span className={`about-release-status about-release-status-${release.status}`}>
+                        {RELEASE_STATUS_LABELS[release.status]}
+                      </span>
+                      {release.releasedOn && <span className="about-release-date">{release.releasedOn}</span>}
+                    </summary>
+                    <ReleaseNoteItems note={release} />
+                  </details>
+                ))}
+              </div>
+            </details>
+          )}
+        </div>
+      )}
     </section>
   );
 }
