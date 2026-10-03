@@ -6371,21 +6371,44 @@ select option {
   min-width: 0;
 }
 
-.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-selection-exit {
+/* 取消与全选同为无框文字按钮、左右对称；可见只有文字，命中区仍保持 44px 高。 */
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-selection-exit,
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-selection-toggle-all {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  height: 44px;
   min-height: 44px;
-  padding: 0 12px;
+  min-width: 56px;
+  padding: 0 10px;
   border: none;
-  border-radius: 12px;
+  border-radius: 10px;
   background: transparent;
   color: var(--fg);
   font-size: 15px;
+  font-weight: 500;
   cursor: pointer;
+  transition: background-color var(--motion-fast, 140ms) ease;
 }
 
-.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-selection-exit:active {
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-selection-toggle-all {
+  justify-self: end;
+  color: var(--accent);
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-selection-toggle-all:disabled {
+  opacity: 0.4;
+}
+
+/* 触摸后 hover 会粘住，不能把桌面的底色/上浮/阴影带回来。 */
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-selection-toggle-all:hover:not(:disabled) {
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-selection-exit:active,
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-selection-toggle-all:active:not(:disabled) {
   background: color-mix(in srgb, var(--fg) 8%, transparent);
 }
 
