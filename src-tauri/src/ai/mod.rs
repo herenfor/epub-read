@@ -13,6 +13,7 @@ pub(crate) mod embedding_gateway;
 mod embedding_platform;
 #[cfg(feature = "ai")]
 pub(crate) mod hardware;
+mod metadata_store;
 #[cfg(feature = "ai")]
 mod model_locks;
 #[cfg(feature = "ai")]
