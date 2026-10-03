@@ -111,6 +111,9 @@ export interface ShelfViewProps {
   saveFileActive?: boolean;
   theme: Theme;
   onThemeChange(theme: Theme): void;
+  /** Android 阅读栏电量显示（本机偏好）；未提供时不显示该设置。 */
+  batteryIndicatorEnabled?: boolean;
+  onBatteryIndicatorChange?(enabled: boolean): void;
   onOpen(id: string): void;
   onImport(): void;
   onImportArchive(): void;
@@ -2123,6 +2126,8 @@ interface ShelfSettingsDrawerProps extends ShelfSubmenuBackProps {
   onDensityChange(value: ShelfDensity): void;
   theme: Theme;
   onThemeChange(theme: Theme): void;
+  batteryIndicatorEnabled?: boolean;
+  onBatteryIndicatorChange?(enabled: boolean): void;
   filters: ShelfFilters;
   facets: ShelfFilterFacets;
   matchingCount: number;
@@ -2535,6 +2540,23 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
               onChange={(value) => props.onThemeChange(value as Theme)}
             />
           </div>
+          {props.batteryIndicatorEnabled !== undefined && props.onBatteryIndicatorChange && (
+            <div className="shelf-drawer-setting">
+              <span>阅读电量</span>
+              <ShelfSelect
+                registerSubmenuBackHandler={props.registerSubmenuBackHandler}
+                onSubmenuBackActiveChange={props.onSubmenuBackActiveChange}
+                value={props.batteryIndicatorEnabled ? "on" : "off"}
+                busy={props.busy}
+                title="阅读栏显示电量"
+                options={[
+                  { value: "on", label: "显示" },
+                  { value: "off", label: "隐藏" },
+                ]}
+                onChange={(value) => props.onBatteryIndicatorChange!(value === "on")}
+              />
+            </div>
+          )}
 
           <div className="shelf-drawer-group-label">数据与管理</div>
           <div className="shelf-drawer-actions">
@@ -4427,6 +4449,8 @@ export function ShelfView(props: ShelfViewProps) {
         onEnterSelection={enterSelection}
         theme={props.theme}
         onThemeChange={props.onThemeChange}
+        batteryIndicatorEnabled={props.batteryIndicatorEnabled}
+        onBatteryIndicatorChange={props.onBatteryIndicatorChange}
         filters={filters}
         facets={filterModel.facets}
         matchingCount={filterModel.entries.length}

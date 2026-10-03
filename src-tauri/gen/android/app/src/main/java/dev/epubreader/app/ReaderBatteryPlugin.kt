@@ -7,6 +7,8 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.BatteryManager
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.TauriPlugin
@@ -38,6 +40,31 @@ class ReaderBatteryPlugin(private val activity: Activity) : Plugin(activity) {
     private var hasEmitted = false
     private var lastStatus: BatterySnapshot? = null
 
+    // The generated TauriActivity defines a plugin lifecycle observer but never
+    // registers it, so Plugin.onPause/onResume are not delivered. Follow the
+    // activity lifecycle directly: release the receiver while backgrounded and
+    // re-register (publishing a fresh first value) when the reader returns.
+    private val lifecycleObserver = object : DefaultLifecycleObserver {
+        override fun onResume(owner: LifecycleOwner) {
+            if (!desired) return
+            try {
+                registerReceiver()
+            } catch (_: Throwable) {
+                unregisterReceiver()
+            }
+        }
+
+        override fun onPause(owner: LifecycleOwner) {
+            unregisterReceiver()
+        }
+    }
+
+    init {
+        activity.runOnUiThread {
+            (activity as? LifecycleOwner)?.lifecycle?.addObserver(lifecycleObserver)
+        }
+    }
+
     @Command
     fun start(invoke: Invoke) {
         val args = invoke.parseArgs(StartBatteryArgs::class.java)
@@ -64,20 +91,8 @@ class ReaderBatteryPlugin(private val activity: Activity) : Plugin(activity) {
         invoke.resolve(JSObject())
     }
 
-    override fun onResume() {
-        if (!desired) return
-        try {
-            registerReceiver()
-        } catch (_: Throwable) {
-            unregisterReceiver()
-        }
-    }
-
-    override fun onPause() {
-        unregisterReceiver()
-    }
-
     override fun onDestroy(activity: AppCompatActivity) {
+        activity.lifecycle.removeObserver(lifecycleObserver)
         desired = false
         unregisterReceiver()
         subscriptionId = 0

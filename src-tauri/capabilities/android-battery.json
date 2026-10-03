@@ -1,0 +1,7 @@
+{
+  "identifier": "android-battery",
+  "description": "Android-only battery plugin event listener used by the reading toolbar",
+  "platforms": ["android"],
+  "windows": ["main"],
+  "permissions": ["androidBattery:default"]
+}

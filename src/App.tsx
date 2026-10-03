@@ -38,6 +38,8 @@ import { AaPopover } from "./ui/AaPopover";
 import { AboutInfo } from "./ui/AboutInfo";
 import { resolveReaderLoadFeedback } from "./ui/loadingFeedback";
 import { WhisperFooter, type WhisperFooterChapterTick } from "./ui/WhisperFooter";
+import { BatteryIndicator } from "./ui/BatteryIndicator";
+import { readBatteryIndicatorEnabled, writeBatteryIndicatorEnabled } from "./ui/batteryPreferences";
 import { useResponsiveEnvironment } from "./ui/responsiveEnvironment";
 import { shouldConfirmNoteDiscard } from "./ui/readerCloseGuards";
 import {
@@ -661,6 +663,11 @@ export default function App() {
   // ---- 书架 ----
   const [view, setView] = useState<"shelf" | "reader">("shelf");
   const [readerToolsVisible, setReaderToolsVisible] = useState(true);
+  const [batteryIndicatorEnabled, setBatteryIndicatorEnabled] = useState(readBatteryIndicatorEnabled);
+  const changeBatteryIndicatorEnabled = useCallback((enabled: boolean) => {
+    setBatteryIndicatorEnabled(enabled);
+    writeBatteryIndicatorEnabled(enabled);
+  }, []);
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const [shelfBackActive, setShelfBackActive] = useState(false);
   const shelfBackHandlerRef = useRef<(() => boolean) | null>(null);
@@ -5114,6 +5121,8 @@ export default function App() {
               saveFileActive={saveFileActive}
               theme={settings.theme}
               onThemeChange={changeTheme}
+              batteryIndicatorEnabled={runtime.platform === "android" ? batteryIndicatorEnabled : undefined}
+              onBatteryIndicatorChange={runtime.platform === "android" ? changeBatteryIndicatorEnabled : undefined}
               onOpen={handleShelfOpen}
               onImport={() => void handleChooseBooks()}
               onDelete={handleShelfDelete}
@@ -5583,6 +5592,10 @@ export default function App() {
           appearanceOpen={menuOpen}
           onOpenMore={handleOpenMobileMore}
           moreOpen={mobileMoreOpen}
+          statusAccessory={
+            // 唯一电量订阅：工具栏仅用 CSS 隐藏仍挂载，必须传实际可见态以释放 receiver。
+            <BatteryIndicator enabled={batteryIndicatorEnabled && (!mobileChrome || readerToolsVisible)} />
+          }
         />
       )}
       {mobileChrome && view === "reader" && ready && mobileMoreOpen && (
