@@ -1226,6 +1226,14 @@ export default function App() {
       return name.toLowerCase().endsWith(".epub");
     });
     if (list.length === 0 || shelfBusyRef.current) return;
+    // Do not let a fast first import land in the legacy store before the
+    // portable activation effect has committed its one-time switch.
+    try {
+      await activatePortableShelfState();
+    } catch {
+      // Activation failure keeps the complete legacy mode; its effect reports
+      // the visible error and getShelfStore() falls back to the old backend.
+    }
     shelfBusyRef.current = true;
     setShelfBusyMessage("正在导入书籍…");
     setShelfBusy(true);
