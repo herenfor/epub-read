@@ -6997,3 +6997,77 @@ select option {
     --motion-slow: 0ms;
   }
 }
+
+/* ---- 触摸端阅读面板：去掉整屏毛玻璃，字体面板置于遮罩之上并按设备成形 ---- */
+/* 整屏 backdrop-filter 在高分屏手机上每帧重算模糊，是打开排版面板掉帧的主因；
+ * 触摸端只保留半透明遮罩。 */
+.app[data-touch-ui="true"] .menu-backdrop,
+.app[data-touch-ui="true"] .search-backdrop,
+.app[data-touch-ui="true"] .notes-backdrop,
+.app[data-touch-ui="true"] .log-backdrop,
+.app[data-touch-ui="true"] .ai-backdrop {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* 字体设置原 z-index 52 低于遮罩(190)与阅读工具栏(100)，被模糊盖住且无法点选。 */
+.app[data-mobile-chrome="true"] .font-settings-panel {
+  z-index: 260 !important;
+  zoom: 1;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  bottom: calc(20px + var(--ime-bottom, 0px));
+  height: min(580px, calc(var(--visual-viewport-height, 100vh) - 40px));
+}
+
+/* 手机：与排版面板同一种贴底整宽面板，固定高度让字体列表可滚动，不再被窄屏规则缩成浮条。 */
+.app[data-mobile-chrome="true"][data-layout="compact"] .font-settings-panel {
+  top: auto !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + var(--ime-bottom, 0px)) !important;
+  width: auto !important;
+  height: min(78vh, calc(var(--visual-viewport-height, 100vh) * 0.82)) !important;
+  max-height: none !important;
+  border-radius: 16px 16px 0 0 !important;
+  transform: none !important;
+  animation: aaMobileSheetIn 200ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+  padding-bottom: 12px;
+}
+
+.app[data-touch-ui="true"] .font-settings-panel .menu-head {
+  font-size: 16px;
+}
+
+.app[data-touch-ui="true"] .font-settings-current {
+  font-size: 13px;
+}
+
+.app[data-touch-ui="true"] .font-search {
+  min-height: 44px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 15px;
+}
+
+.app[data-touch-ui="true"] .font-settings-tabs button {
+  min-height: 44px;
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+.app[data-touch-ui="true"] .font-settings-section {
+  font-size: 12.5px;
+}
+
+.app[data-touch-ui="true"] .font-settings-row-wrap {
+  min-height: 48px;
+}
+
+.app[data-touch-ui="true"] .font-settings-row {
+  height: 48px;
+  padding: 0 12px;
+  border-radius: 10px;
+  font-size: 15px;
+  line-height: 48px;
+}
