@@ -5784,6 +5784,29 @@ select option {
   background: color-mix(in srgb, var(--error, #ef4444) 15%, transparent);
 }
 
+.app[data-mobile-chrome="true"] .shelf-folder-modal-action-btn {
+  min-width: 48px;
+  min-height: 48px;
+}
+
+/* 手机端文件夹弹窗标题与三个动作分行，宽屏保持原单行结构 */
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-folder-modal-head {
+  flex-wrap: wrap;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-folder-modal-title-box {
+  flex: 1 0 100%;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-folder-modal-title {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-folder-modal-actions {
+  margin-left: auto;
+}
+
 .shelf-folder-modal-body {
   padding: 20px;
   overflow-y: auto;
@@ -5916,7 +5939,7 @@ select option {
 }
 
 .app[data-mobile-chrome="true"] .shelf-table-view {
-  margin: 0 -12px;
+  margin-inline: 0;
   overflow-x: auto;
 }
 
@@ -5994,9 +6017,13 @@ select option {
   transform-origin: bottom right;
 }
 
-.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table .shelf-card-actions-wrap {
+/* 列表复用封面覆层容器；清除封面 6px 偏移，适用于手机与平板所有移动宿主。 */
+.app[data-mobile-chrome="true"] .shelf-table .shelf-card-actions-wrap {
   top: auto;
   right: auto;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table .shelf-card-actions-wrap {
   width: 48px;
   height: 48px;
   flex: 0 0 48px;
@@ -6006,6 +6033,11 @@ select option {
   flex: 0 0 48px;
   width: 48px;
   height: 48px;
+}
+
+/* 触摸端网格删除透明仍可点的star入口，收藏沿既有更多菜单，列表按钮/桌面hover保留 */
+.app[data-mobile-chrome="true"] .shelf-grid .shelf-card-star-btn {
+  display: none;
 }
 
 /* 手机多选栏分两排：左侧状态与全选独占一行，动作三列换行，短标签保持单行。 */
@@ -6288,6 +6320,20 @@ select option {
   right: 12px;
   width: auto;
   max-height: min(84vh, calc(var(--visual-viewport-height, 100vh) - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 24px));
+}
+
+/* 平板宽屏模式限制 drawer 宽度，避免在宽屏下拉伸铺满整个屏幕 */
+.app[data-mobile-chrome="true"][data-layout="wide"] .shelf-drawer {
+  left: auto;
+  right: 12px;
+  width: min(560px, calc(100vw - 24px));
+}
+
+/* 抽屉搜索模式、数据与管理动作及全选折叠按钮补齐 48px 触摸尺寸 */
+.app[data-mobile-chrome="true"] .shelf-drawer .shelf-search-mode button,
+.app[data-mobile-chrome="true"] .shelf-drawer .shelf-drawer-actions > .tb-btn,
+.app[data-mobile-chrome="true"] .shelf-drawer .shelf-all-books {
+  min-height: 48px;
 }
 
 .app[data-touch-ui="true"] .shelf-drawer-close {

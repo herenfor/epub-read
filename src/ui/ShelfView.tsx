@@ -1792,6 +1792,7 @@ interface ShelfFolderModalProps extends ShelfSubmenuBackProps {
   onRemoveFromFolder(entry: ShelfEntry): Promise<void>;
   onToggleFavorite(entry: ShelfEntry): void;
   onDragStart(entry: ShelfEntry, pt: { x: number; y: number }): void;
+  compact?: boolean;
   modalRef: React.RefObject<HTMLDivElement>;
 }
 
@@ -1862,7 +1863,11 @@ const ShelfFolderModal = memo(function ShelfFolderModal(props: ShelfFolderModalP
         </div>
         <div className="shelf-folder-modal-body">
           {books.length === 0 ? (
-            <div className="shelf-folder-modal-empty">文件夹暂无书籍，从书架将书拖入此处或移出</div>
+            <div className="shelf-folder-modal-empty">
+              {props.compact
+                ? "文件夹暂无书籍，可在书籍“更多”菜单中选择“移动到文件夹”"
+                : "文件夹暂无书籍，从书架将书拖入此处或移出"}
+            </div>
           ) : (
             <div className="shelf-folder-modal-grid">
               {books.map((entry) => {
@@ -4580,6 +4585,22 @@ export function ShelfView(props: ShelfViewProps) {
                     </button>
                   );
                 })}
+                {isCompactMobile && visibleFolders.length > 0 && (
+                  <>
+                    <div className="shelf-folder-menu-divider" />
+                    <button
+                      className="shelf-folder-menu-item"
+                      type="button"
+                      onClick={() => {
+                        setFolderPrefixExpanded((prev) => !prev);
+                        setFolderMenuOpen(false);
+                      }}
+                    >
+                      <FolderIcon />
+                      <span>{folderPrefixExpanded ? "收起书架文件夹卡片" : "在书架展开文件夹卡片"}</span>
+                    </button>
+                  </>
+                )}
                 <div className="shelf-folder-menu-divider" />
                 <button
                   className="shelf-folder-menu-new-btn"
@@ -4935,10 +4956,10 @@ export function ShelfView(props: ShelfViewProps) {
         </div>
       ) : (
         <>
-          {scope.type === "root" && visibleFolders.length > 0 && (
+          {scope.type === "root" && visibleFolders.length > 0 && (!isCompactMobile || folderPrefixExpanded) && (
             <div className="shelf-folder-prefix">
-              {isCompactMobile && !folderPrefixExpanded ? (
-                <div className="shelf-folder-summary-rail">
+              {isCompactMobile && folderPrefixExpanded && (
+                <div className="shelf-folder-summary-rail expanded">
                   <div className="shelf-folder-summary-info">
                     <FolderIcon />
                     <span>文件夹 ({visibleFolders.length})</span>
@@ -4946,54 +4967,33 @@ export function ShelfView(props: ShelfViewProps) {
                   <button
                     className="shelf-folder-summary-toggle-btn"
                     type="button"
-                    onClick={() => setFolderPrefixExpanded(true)}
-                    title="展开文件夹目录"
-                    aria-label="展开文件夹目录"
+                    onClick={() => setFolderPrefixExpanded(false)}
+                    title="收起文件夹目录"
+                    aria-label="收起文件夹目录"
                   >
-                    <span>展开</span>
-                    <ChevronDownIcon />
+                    <span>收起</span>
+                    <ChevronUpIcon />
                   </button>
                 </div>
-              ) : (
-                <>
-                  {isCompactMobile && folderPrefixExpanded && (
-                    <div className="shelf-folder-summary-rail expanded">
-                      <div className="shelf-folder-summary-info">
-                        <FolderIcon />
-                        <span>文件夹 ({visibleFolders.length})</span>
-                      </div>
-                      <button
-                        className="shelf-folder-summary-toggle-btn"
-                        type="button"
-                        onClick={() => setFolderPrefixExpanded(false)}
-                        title="收起文件夹目录"
-                        aria-label="收起文件夹目录"
-                      >
-                        <span>收起</span>
-                        <ChevronUpIcon />
-                      </button>
-                    </div>
-                  )}
-                  <div className="shelf-grid shelf-folder-grid">
-                    {visibleFolders.map((folder) => (
-                      <ShelfFolderCard
-                        key={folder.id}
-                        id={folder.id}
-                        name={folder.name}
-                        books={folderBooksMap.get(folder.id) ?? []}
-                        provider={thumbnailProvider}
-                        selectionMode={selectionMode}
-                        isDropTarget={dropTarget?.type === "folder" && dropTarget.id === folder.id}
-                        onOpen={(fId, el) => handleOpenFolderModal(fId, el)}
-                        onRename={(fId, fName) => setRenameFolderTarget({ id: fId, name: fName })}
-                        onDissolve={(fId, fName) => setDissolveFolderTarget({ id: fId, name: fName })}
-                        registerSubmenuBackHandler={registerSubmenuBackHandler}
-                        onSubmenuBackActiveChange={reportSubmenuBackActive}
-                      />
-                    ))}
-                  </div>
-                </>
               )}
+              <div className="shelf-grid shelf-folder-grid">
+                {visibleFolders.map((folder) => (
+                  <ShelfFolderCard
+                    key={folder.id}
+                    id={folder.id}
+                    name={folder.name}
+                    books={folderBooksMap.get(folder.id) ?? []}
+                    provider={thumbnailProvider}
+                    selectionMode={selectionMode}
+                    isDropTarget={dropTarget?.type === "folder" && dropTarget.id === folder.id}
+                    onOpen={(fId, el) => handleOpenFolderModal(fId, el)}
+                    onRename={(fId, fName) => setRenameFolderTarget({ id: fId, name: fName })}
+                    onDissolve={(fId, fName) => setDissolveFolderTarget({ id: fId, name: fName })}
+                    registerSubmenuBackHandler={registerSubmenuBackHandler}
+                    onSubmenuBackActiveChange={reportSubmenuBackActive}
+                  />
+                ))}
+              </div>
             </div>
           )}
           <div
@@ -5115,6 +5115,7 @@ export function ShelfView(props: ShelfViewProps) {
         const books = folderBooksMap.get(folder.id) ?? [];
         return (
           <ShelfFolderModal
+            compact={isCompactMobile}
             folder={folder}
             books={books}
             provider={thumbnailProvider}

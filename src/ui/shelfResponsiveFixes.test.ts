@@ -203,10 +203,19 @@ describe("第三步补修：书架触摸长按与子菜单 Back", () => {
       const catItems = dom.container.querySelectorAll(".shelf-category-menu-item");
       expect(catItems.length).toBe(5);
 
-      // 3. 目录摘要栏默认收起，不独占大面积
-      const folderSummary = dom.container.querySelector(".shelf-folder-summary-rail");
-      expect(folderSummary).not.toBeNull();
-      expect(folderSummary?.textContent).toContain("文件夹 (1)");
+      // 3. 集中式文件夹单下拉作为常驻入口；消除重复常驻摘要栏，支持从菜单展开卡片
+      const folderBtn = dom.container.querySelector(".shelf-folder-dropdown-btn") as HTMLButtonElement;
+      expect(folderBtn).not.toBeNull();
+      expect(folderBtn.textContent).toContain("文件夹 (1)");
+      expect(dom.container.querySelector(".shelf-folder-summary-rail")).toBeNull();
+
+      await dom.click(folderBtn);
+      const expandItem = [...dom.container.querySelectorAll(".shelf-folder-menu-item")]
+        .find((item) => item.textContent?.includes("在书架展开文件夹卡片")) as HTMLElement;
+      expect(expandItem).not.toBeNull();
+      await dom.click(expandItem);
+      expect(dom.container.querySelector(".shelf-folder-summary-rail.expanded")).not.toBeNull();
+      expect(dom.container.querySelector(".shelf-folder-card")).not.toBeNull();
 
       // 4. 外部右轨移除
       expect(dom.container.querySelector(".shelf-nav-rail-right")).toBeNull();
