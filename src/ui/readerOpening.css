@@ -1,0 +1,115 @@
+/* 开书过渡：主题色全屏画面，正文首次可见前覆盖书架/空白阅读区。 */
+.reader-opening {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--bg);
+  color: var(--fg);
+  animation: readerOpeningIn var(--motion-base) var(--ease-standard) both;
+  pointer-events: auto;
+  user-select: none;
+}
+
+.reader-opening.is-leaving {
+  animation: readerOpeningOut var(--motion-base) var(--ease-exit) forwards;
+  pointer-events: none;
+}
+
+.reader-opening-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: min(360px, 100%);
+  text-align: center;
+  animation: readerOpeningCardIn var(--motion-slow) var(--ease-emphasized) both;
+}
+
+.reader-opening-mark {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  margin-bottom: 6px;
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel-bg));
+  color: var(--accent);
+}
+
+.reader-opening-title {
+  max-width: 100%;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.reader-opening-creator {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 不定进度：一段主题色在细轨道上往返，不伪造百分比。 */
+.reader-opening-progress {
+  position: relative;
+  width: 160px;
+  height: 3px;
+  margin-top: 14px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.reader-opening-progress::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 40%;
+  border-radius: inherit;
+  background: var(--accent);
+  animation: readerOpeningSweep 1.1s var(--ease-standard) infinite;
+}
+
+.reader-opening-stage {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+@keyframes readerOpeningIn {
+  from { opacity: 0; }
+}
+
+@keyframes readerOpeningOut {
+  to { opacity: 0; }
+}
+
+@keyframes readerOpeningCardIn {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+}
+
+@keyframes readerOpeningSweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(250%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reader-opening-progress::after {
+    animation: none;
+    width: 100%;
+    opacity: 0.6;
+  }
+}

@@ -4091,6 +4091,7 @@ select option {
 }
 
 /* ---- 全局忙遮罩（导入/打开/删除，防重复操作） ---- */
+/* 书架短操作的忙碌层：主题色毛玻璃，延迟出现以免瞬时操作闪一下。 */
 .app-busy {
   position: fixed;
   inset: 0;
@@ -4100,18 +4101,25 @@ select option {
   align-items: center;
   justify-content: center;
   gap: 12px;
-  background: rgba(0, 0, 0, 0.28);
+  background: color-mix(in srgb, var(--bg) 62%, transparent);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   pointer-events: auto;
   user-select: none;
+  animation: app-busy-in var(--motion-base) var(--ease-standard) 150ms both;
 }
 
 .app-busy-spinner {
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
-  border: 3px solid rgba(255, 255, 255, 0.35);
-  border-top-color: #fff;
+  border: 3px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  border-top-color: var(--accent);
   animation: app-busy-spin 0.9s linear infinite;
+}
+
+@keyframes app-busy-in {
+  from { opacity: 0; }
 }
 
 .app-busy-text {
@@ -4120,11 +4128,10 @@ select option {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
-  color: #fff;
+  color: var(--fg);
   font-size: 14px;
-  letter-spacing: 1px;
+  letter-spacing: 0.5px;
   text-align: center;
-  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
   overflow-wrap: anywhere;
 }
 
@@ -4132,6 +4139,40 @@ select option {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* 阅读中换章：顶部细进度线，延迟出现，快速换章不闪；文字仅供读屏。 */
+.reader-load-line {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 150;
+  height: 3px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  pointer-events: none;
+  animation: app-busy-in var(--motion-base) var(--ease-standard) 250ms both;
+}
+
+.reader-load-line::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 30%;
+  background: var(--accent);
+  animation: readerOpeningSweep 1.1s var(--ease-standard) infinite;
+}
+
+.reader-load-line-text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 /* 阅读中的小状态反馈：只读已有章节状态，不接管正文输入。 */
