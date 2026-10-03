@@ -658,6 +658,60 @@
   padding-bottom: 12px;
 }
 
+.app[data-mobile-chrome="true"] .aa-popover .aa-stepper-capsule,
+.app[data-mobile-chrome="true"] .aa-popover .aa-segmented-capsule {
+  height: auto;
+  min-height: 52px; /* 内部 48px 命中 + 上下各 2px padding */
+}
+
+.app[data-mobile-chrome="true"] .aa-popover .aa-step-btn,
+.app[data-mobile-chrome="true"] .aa-popover .aa-step-reset-btn {
+  min-width: 48px;
+  min-height: 48px;
+  flex-shrink: 0;
+}
+
+.app[data-mobile-chrome="true"] .aa-popover .aa-popover-close-btn {
+  width: 48px;
+  height: 48px;
+  min-width: 48px;
+  min-height: 48px;
+  flex-shrink: 0;
+}
+
+.app[data-mobile-chrome="true"] .aa-popover .aa-switch-label {
+  display: inline-flex;
+  align-items: center;
+  min-width: 48px;
+  min-height: 48px;
+  justify-content: flex-end;
+}
+
+.app[data-mobile-chrome="true"] .aa-popover .aa-font-trigger {
+  height: auto;
+  min-height: 48px;
+}
+
+/* 详细排版工作台：避免子项挤出面板，数值说明保持单行不竖排，胶囊在空间不足时平滑换行 */
+.app[data-mobile-chrome="true"] .aa-detailed-view .aa-control-row {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
+.app[data-mobile-chrome="true"] .aa-detailed-view .aa-detail-label-wrap {
+  flex: 1 1 110px;
+  min-width: 100px;
+}
+
+.app[data-mobile-chrome="true"] .aa-detailed-view .aa-detail-sub {
+  white-space: nowrap;
+}
+
+.app[data-mobile-chrome="true"] .aa-detailed-view .aa-stepper-capsule {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
 @media (max-height: 480px) {
   .app[data-mobile-chrome="true"][data-layout="compact"] .aa-popover {
     top: env(safe-area-inset-top, 0px);

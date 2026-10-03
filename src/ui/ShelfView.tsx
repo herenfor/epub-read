@@ -769,9 +769,11 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
   const { entry } = props;
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuClosing, setMenuClosing] = useState(false);
+  const [menuPlacement, setMenuPlacement] = useState<"down" | "up">("down");
   const [removePending, setRemovePending] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const menuPanelRef = useRef<HTMLDivElement>(null);
 
   const closeMenu = useCallback(() => {
     setMenuClosing(true);
@@ -780,6 +782,19 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
       setMenuClosing(false);
     }, 150);
   }, []);
+
+  useLayoutEffect(() => {
+    if (!menuOpen || menuClosing) return;
+    const anchor = menuRef.current;
+    const panel = menuPanelRef.current;
+    if (!anchor || !panel) return;
+    const anchorRect = anchor.getBoundingClientRect();
+    const panelRect = panel.getBoundingClientRect();
+    const viewportHeight = typeof window !== "undefined"
+      ? window.innerHeight || document.documentElement.clientHeight || 0
+      : 0;
+    setMenuPlacement(chooseShelfMenuPlacement(anchorRect, viewportHeight, panelRect.height));
+  }, [menuOpen, menuClosing]);
 
   useShelfSubmenuBack(menuOpen, closeMenu, props);
 
@@ -1051,7 +1066,15 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
             </button>
 
             {menuOpen && (
-              <div className={`shelf-card-pop-menu${menuClosing ? " is-closing" : ""}`} role="menu" onClick={(e) => e.stopPropagation()}>
+              <div
+                ref={menuPanelRef}
+                className={`shelf-card-pop-menu${menuPlacement === "up" ? " placement-up" : ""}${menuClosing ? " is-closing" : ""}`}
+                role="menu"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="shelf-card-pop-title" aria-label={`完整书名：${entry.title}`}>
+                  {entry.title}
+                </div>
                 <button
                   className="shelf-card-pop-item"
                   type="button"
@@ -2818,7 +2841,13 @@ export function chooseShelfMenuPlacement(
   const margin = 8;
   const fitsDown = anchor.bottom + 4 + menuHeight <= viewportHeight - margin;
   const fitsUp = anchor.top - 4 - menuHeight >= margin;
-  return !fitsDown && fitsUp ? "up" : "down";
+  if (!fitsDown && fitsUp) return "up";
+  if (!fitsDown && !fitsUp) {
+    const spaceDown = viewportHeight - margin - (anchor.bottom + 4);
+    const spaceUp = anchor.top - 4 - margin;
+    return spaceUp > spaceDown ? "up" : "down";
+  }
+  return "down";
 }
 
 const ShelfTableRow = memo(function ShelfTableRow({
@@ -3065,6 +3094,9 @@ const ShelfTableRow = memo(function ShelfTableRow({
                 role="menu"
                 onClick={(e) => e.stopPropagation()}
               >
+                <div className="shelf-card-pop-title" aria-label={`完整书名：${entry.title}`}>
+                  {entry.title}
+                </div>
                 <button
                   className="shelf-card-pop-item"
                   type="button"
@@ -4555,7 +4587,7 @@ export function ShelfView(props: ShelfViewProps) {
                           <span className="shelf-table-title" style={{ fontWeight: 700 }} title={folder.name}>
                             {folder.name}
                           </span>
-                          <span className="shelf-capsule-count" style={{ marginLeft: 6 }}>
+                          <span className="shelf-capsule-count" style={{ marginLeft: 6, whiteSpace: "nowrap" }}>
                             {fBooks.length} 本
                           </span>
                         </div>

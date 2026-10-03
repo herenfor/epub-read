@@ -112,6 +112,8 @@ describe("第三步补修：书架触摸长按与子菜单 Back", () => {
   it("列表操作菜单在底部空间不足时向上翻转", () => {
     expect(chooseShelfMenuPlacement({ top: 700, bottom: 750 }, 832, 127)).toBe("up");
     expect(chooseShelfMenuPlacement({ top: 300, bottom: 350 }, 832, 127)).toBe("down");
+    expect(chooseShelfMenuPlacement({ top: 500, bottom: 550 }, 832, 600)).toBe("up");
+    expect(chooseShelfMenuPlacement({ top: 200, bottom: 250 }, 832, 600)).toBe("down");
   });
 
   it("触摸长按进入现有选择模式，不启动拖拽或开书", async () => {

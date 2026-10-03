@@ -5010,23 +5010,14 @@ export default function App() {
         </>
       )}
       {logOpen && (
-        <>
-          <div
-            className="log-backdrop"
-            onClick={() => {
-              closePanel("log");
-              setDiagText(null);
-            }}
-          />
-          <LogPanel
-            items={logItems}
-            diagText={diagText}
-            onClose={() => {
-              closePanel("log");
-              setDiagText(null);
-            }}
-          />
-        </>
+        <LogPanel
+          items={logItems}
+          diagText={diagText}
+          onClose={() => {
+            closePanel("log");
+            setDiagText(null);
+          }}
+        />
       )}
       {(shelfNotice || readerNotice) && (
         <div

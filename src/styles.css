@@ -1632,7 +1632,7 @@ select option {
   position: fixed;
   bottom: 20px;
   left: 50%;
-  z-index: 50;
+  z-index: 191;
   width: min(640px, calc(100vw - 32px));
   height: min(520px, calc(100vh - 40px));
   display: flex;
@@ -4793,7 +4793,7 @@ select option {
   .app:not([data-mobile-chrome="true"]) .search-panel,
   .menu-panel,
   .font-settings-panel,
-  .log-panel {
+  .app:not([data-mobile-chrome="true"]) .log-panel {
     top: auto !important;
     bottom: 12px !important;
     left: 12px !important;
@@ -5987,9 +5987,25 @@ select option {
 }
 
 /* 列表行靠近视口底部时，菜单翻到按钮上方；默认仍向下，不裁切也不遮住原按钮。 */
+.shelf-card-pop-menu.placement-up,
 .app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table .shelf-card-pop-menu.placement-up {
   top: auto;
   bottom: calc(100% + 4px);
+  transform-origin: bottom right;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table .shelf-card-actions-wrap {
+  top: auto;
+  right: auto;
+  width: 48px;
+  height: 48px;
+  flex: 0 0 48px;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table .shelf-card-star-btn {
+  flex: 0 0 48px;
+  width: 48px;
+  height: 48px;
 }
 
 /* 手机多选栏分两排：左侧状态与全选独占一行，动作三列换行，短标签保持单行。 */
@@ -6155,7 +6171,8 @@ select option {
 .app[data-mobile-chrome="true"] .note-composer,
 .app[data-mobile-chrome="true"] .search-panel,
 .app[data-mobile-chrome="true"] .aa-popover,
-.app[data-mobile-chrome="true"] .sidebar-drawer {
+.app[data-mobile-chrome="true"] .sidebar-drawer,
+.app[data-mobile-chrome="true"] .log-panel {
   zoom: 1;
 }
 
@@ -6172,12 +6189,197 @@ select option {
 
 .app[data-touch-ui="true"] .shelf-btn-primary,
 .app[data-touch-ui="true"] .shelf-manage-toggle-btn,
-.app[data-touch-ui="true"] .shelf-view-toggle-btn,
-.app[data-touch-ui="true"] .shelf-icon-btn-zen,
 .app[data-touch-ui="true"] .shelf-selection-cancel,
 .app[data-touch-ui="true"] .shelf-selection-delete,
 .app[data-touch-ui="true"] .shelf-selection-toggle-all {
   min-height: calc(48px * var(--ui-touch-comp, 1));
+}
+
+.app[data-touch-ui="true"] .shelf-view-toggle-group {
+  height: auto;
+  min-height: calc(48px * var(--ui-touch-comp, 1));
+  padding: 2px;
+}
+
+.app[data-touch-ui="true"] .shelf-view-toggle-btn {
+  width: calc(48px * var(--ui-touch-comp, 1));
+  height: calc(48px * var(--ui-touch-comp, 1));
+  min-width: calc(48px * var(--ui-touch-comp, 1));
+  min-height: calc(48px * var(--ui-touch-comp, 1));
+}
+
+.app[data-touch-ui="true"] .shelf-icon-btn-zen {
+  width: calc(48px * var(--ui-touch-comp, 1));
+  height: calc(48px * var(--ui-touch-comp, 1));
+  min-width: calc(48px * var(--ui-touch-comp, 1));
+  min-height: calc(48px * var(--ui-touch-comp, 1));
+}
+
+.app[data-touch-ui="true"] .shelf-capsule-tabs {
+  height: auto;
+  min-height: calc(48px * var(--ui-touch-comp, 1));
+}
+
+.app[data-touch-ui="true"] .shelf-capsule-tab {
+  height: auto;
+  min-height: calc(48px * var(--ui-touch-comp, 1));
+  padding: 0 14px;
+}
+
+.shelf-capsule-count {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.app[data-touch-ui="true"] .shelf-select-wrap {
+  min-height: calc(48px * var(--ui-touch-comp, 1));
+}
+
+.app[data-touch-ui="true"] .shelf-select-btn {
+  height: auto;
+  min-height: calc(48px * var(--ui-touch-comp, 1));
+}
+
+.app[data-touch-ui="true"] .shelf-select-item {
+  min-height: calc(48px * var(--ui-touch-comp, 1));
+  box-sizing: border-box;
+  padding: 10px 14px;
+}
+
+.app[data-touch-ui="true"] .shelf-resume-toggle-btn {
+  width: calc(48px * var(--ui-touch-comp, 1));
+  height: calc(48px * var(--ui-touch-comp, 1));
+  min-width: calc(48px * var(--ui-touch-comp, 1));
+  min-height: calc(48px * var(--ui-touch-comp, 1));
+}
+
+.app[data-touch-ui="true"] .shelf-folder-dropdown-btn {
+  height: auto;
+  min-height: calc(48px * var(--ui-touch-comp, 1));
+}
+
+.app[data-touch-ui="true"] .shelf-folder-menu-item {
+  min-height: calc(48px * var(--ui-touch-comp, 1));
+  box-sizing: border-box;
+  padding: 10px 14px;
+}
+
+.app[data-touch-ui="true"] .shelf-sort-select-zen {
+  height: auto;
+  min-height: calc(48px * var(--ui-touch-comp, 1));
+}
+
+.app[data-touch-ui="true"] .shelf-folder-action-btn {
+  min-height: calc(48px * var(--ui-touch-comp, 1));
+  height: auto;
+}
+
+.app[data-touch-ui="true"] .shelf-folder-active-exit {
+  width: calc(48px * var(--ui-touch-comp, 1));
+  height: calc(48px * var(--ui-touch-comp, 1));
+  min-width: calc(48px * var(--ui-touch-comp, 1));
+  min-height: calc(48px * var(--ui-touch-comp, 1));
+}
+
+.app[data-mobile-chrome="true"] .shelf-drawer {
+  top: auto;
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px) + var(--ime-bottom, 0px));
+  left: 12px;
+  right: 12px;
+  width: auto;
+  max-height: min(84vh, calc(var(--visual-viewport-height, 100vh) - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 24px));
+}
+
+.app[data-touch-ui="true"] .shelf-drawer-close {
+  width: calc(48px * var(--ui-touch-comp, 1));
+  height: calc(48px * var(--ui-touch-comp, 1));
+  min-width: calc(48px * var(--ui-touch-comp, 1));
+  min-height: calc(48px * var(--ui-touch-comp, 1));
+}
+
+.app[data-mobile-chrome="true"] .shelf-card-pop-menu {
+  min-width: 200px;
+  max-width: min(320px, calc(100vw - 24px));
+  max-height: min(420px, calc(var(--visual-viewport-height, 100vh) - 24px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  box-sizing: border-box;
+}
+
+.app[data-mobile-chrome="true"] .shelf-card-pop-item {
+  min-height: 48px;
+  box-sizing: border-box;
+  padding: 10px 14px;
+  font-size: 13.5px;
+}
+
+.shelf-card-pop-title {
+  padding: 8px 12px 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+  line-height: 1.4;
+  word-break: break-word;
+  white-space: normal;
+  border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 60%, transparent);
+  margin-bottom: 4px;
+}
+
+.app[data-mobile-chrome="true"] .log-panel {
+  top: auto;
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  left: 12px;
+  right: 12px;
+  width: auto;
+  max-height: min(82vh, calc(var(--visual-viewport-height, 100vh) - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 24px));
+  height: auto;
+  border-radius: 20px;
+  transform: none;
+  animation: mobile-log-sheet-up 0.24s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes mobile-log-sheet-up {
+  from {
+    opacity: 0;
+    transform: translateY(24px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.app[data-mobile-chrome="true"] .log-panel .tb-close {
+  width: 48px;
+  height: 48px;
+  min-width: 48px;
+  min-height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.app[data-touch-ui="true"] .sidebar-close-btn,
+.app[data-touch-ui="true"] .sidebar-icon-btn {
+  width: 48px;
+  height: 48px;
+  min-width: 48px;
+  min-height: 48px;
+}
+
+.app[data-touch-ui="true"] .sidebar-toc-filter-input {
+  height: auto;
+  min-height: 44px;
+  padding: 10px 32px 10px 12px;
+  font-size: 14px;
+}
+
+.app[data-touch-ui="true"] .sidebar-toc-filter-clear {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
 }
 
 .reader-tools-reveal {
