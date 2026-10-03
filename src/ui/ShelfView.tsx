@@ -34,6 +34,7 @@ import { hasReadPosition } from "./readEvidence";
 import { isShelfCardActionTarget } from "./shelfCardEventScope";
 import { getRuntimeCapabilities } from "../platform/runtimeCapabilities";
 import { AboutInfo } from "./AboutInfo";
+import { CacheStoragePanel } from "./CacheStoragePanel";
 import {
   getSearchStatusLabel,
   SearchIndexCard,
@@ -2163,6 +2164,11 @@ interface ShelfSettingsDrawerProps extends ShelfSubmenuBackProps {
 function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
   const [mounted, setMounted] = useState(props.open);
   const [closing, setClosing] = useState(false);
+  const [cachePanelOpen, setCachePanelOpen] = useState(false);
+
+  useEffect(() => {
+    if (!props.open) setCachePanelOpen(false);
+  }, [props.open]);
 
   useEffect(() => {
     if (props.open) {
@@ -2183,6 +2189,9 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
   const [allBooksExpanded, setAllBooksExpanded] = useState(false);
   const [expandedSections, setExpandedSections] = useState<Set<ShelfFilterKey>>(new Set());
   const [activeSearchIndex, setActiveSearchIndex] = useState(-1);
+  const capabilities = getRuntimeCapabilities();
+
+  useShelfSubmenuBack(cachePanelOpen, () => setCachePanelOpen(false), props);
 
   const isSearchActive = Boolean(props.query.trim());
   const matchingList = props.matchingEntries ?? props.entries;
@@ -2575,6 +2584,17 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
 
           <div className="shelf-drawer-group-label">数据与管理</div>
           <div className="shelf-drawer-actions">
+            {capabilities.supportsCacheStorage && (
+              <button
+                className="tb-btn"
+                type="button"
+                onClick={() => setCachePanelOpen(true)}
+                disabled={props.busy}
+                title="查看缓存目录、索引占用并清除全文索引"
+              >
+                缓存与存储
+              </button>
+            )}
             {props.onEnterSelection && (
               <button
                 className="tb-btn"
@@ -2616,6 +2636,7 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
           <div className="shelf-drawer-group-label">关于</div>
           <AboutInfo />
         </div>
+        <CacheStoragePanel open={cachePanelOpen} onClose={() => setCachePanelOpen(false)} />
       </aside>
     </div>
   );

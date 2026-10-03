@@ -57,8 +57,16 @@ pub(crate) struct AiStore {
 }
 
 impl AiStore {
+    pub(crate) fn default_cache_directory(app_data_dir: impl AsRef<Path>) -> PathBuf {
+        app_data_dir.as_ref().join(ROOT_NAME)
+    }
+
+    pub(crate) fn database_path_in(cache_directory: impl AsRef<Path>) -> PathBuf {
+        cache_directory.as_ref().join(DATABASE_NAME)
+    }
+
     pub(crate) fn database_path(app_data_dir: impl AsRef<Path>) -> PathBuf {
-        app_data_dir.as_ref().join(ROOT_NAME).join(DATABASE_NAME)
+        Self::database_path_in(Self::default_cache_directory(app_data_dir))
     }
 
     pub(crate) fn metadata_path(app_data_dir: impl AsRef<Path>) -> PathBuf {
@@ -66,6 +74,25 @@ impl AiStore {
     }
 
     pub(crate) fn open(app_data_dir: impl AsRef<Path>) -> Result<Self, String> {
+        Self::open_default(app_data_dir)
+    }
+
+    /// Open the rebuildable cache from an explicit runtime directory.  Durable
+    /// metadata still belongs under `app_data_dir`; selecting a custom cache
+    /// directory must never move `metadata.sqlite3` with it.
+    pub(crate) fn open_with_cache_directory(
+        app_data_dir: impl AsRef<Path>,
+        cache_directory: impl AsRef<Path>,
+    ) -> Result<Self, String> {
+        let app_data_dir = app_data_dir.as_ref();
+        let cache_directory = cache_directory.as_ref();
+        if cache_directory == Self::default_cache_directory(app_data_dir) {
+            return Self::open_default(app_data_dir);
+        }
+        Self::open_custom(app_data_dir, cache_directory)
+    }
+
+    fn open_default(app_data_dir: impl AsRef<Path>) -> Result<Self, String> {
         let root = app_data_dir.as_ref().join(ROOT_NAME);
         std::fs::create_dir_all(&root).map_err(|error| format!("无法创建 AI 数据目录：{error}"))?;
         let database_path = Self::database_path(app_data_dir.as_ref());
@@ -124,6 +151,166 @@ impl AiStore {
         store.pause_all_model_downloads();
         store.reclaim_staging();
         Ok(store)
+    }
+
+    /// Open a selected runtime cache directory.  Metadata is bootstrapped from
+    /// the old default cache first when needed, so an empty custom cache can
+    /// never become the only migration source.
+    fn open_custom(app_data_dir: &Path, cache_directory: &Path) -> Result<Self, String> {
+        Self::ensure_metadata_ready_for_custom_cache(app_data_dir, cache_directory)?;
+        std::fs::create_dir_all(cache_directory)
+            .map_err(|error| format!("无法创建自定义缓存目录：{error}"))?;
+        let database_path = Self::database_path_in(cache_directory);
+        let metadata_path = Self::metadata_path(app_data_dir);
+        let mut connection = Connection::open(&database_path)
+            .map_err(|error| format!("无法打开 AI SQLite 数据库：{error}"))?;
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .map_err(|error| format!("启用 AI SQLite 外键约束失败：{error}"))?;
+        connection
+            .busy_timeout(std::time::Duration::from_millis(5000))
+            .map_err(|error| format!("设置 SQLite 等待上限失败：{error}"))?;
+
+        let pre_migration_version = user_version(&connection)?;
+        if pre_migration_version > MAX_SUPPORTED_SCHEMA_VERSION {
+            return Err(format!(
+                "AI 数据库版本 {pre_migration_version} 高于当前支持的版本 {MAX_SUPPORTED_SCHEMA_VERSION}"
+            ));
+        }
+        let fresh_cache = pre_migration_version == 0;
+        let metadata_connection;
+        if fresh_cache {
+            metadata_connection = super::metadata_store::open(
+                &metadata_path,
+                &mut connection,
+                false,
+            )?;
+            create_cache_schema_v7(&connection)?;
+        } else {
+            migrate_legacy_cache(&connection)?;
+            let cache_version = user_version(&connection)?;
+            metadata_connection = super::metadata_store::open(
+                &metadata_path,
+                &mut connection,
+                false,
+            )?;
+            if cache_version < SCHEMA_VERSION {
+                finalize_cache_after_metadata_import(&connection)?;
+            }
+        }
+
+        let store = Self {
+            root: cache_directory.to_path_buf(),
+            connection: Mutex::new(connection),
+            metadata_connection: Mutex::new(metadata_connection),
+        };
+        store.reclaim_active_jobs();
+        #[cfg(feature = "ai")]
+        store.pause_all_model_downloads();
+        store.reclaim_staging();
+        Ok(store)
+    }
+
+    fn ensure_metadata_ready_for_custom_cache(
+        app_data_dir: &Path,
+        custom_cache_directory: &Path,
+    ) -> Result<(), String> {
+        let metadata_path = super::metadata_store::database_path(app_data_dir);
+        if super::metadata_store::is_ready(&metadata_path)? {
+            return Ok(());
+        }
+        if let Some(parent) = metadata_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|error| format!("无法创建 AI metadata 目录：{error}"))?;
+        }
+
+        // Prefer the old default cache as the durable source.  Only if it is
+        // absent may an existing old custom cache be used; a brand-new empty
+        // custom cache must never create the metadata completion marker.
+        let default_cache_path = Self::database_path(app_data_dir);
+        if default_cache_path.exists() {
+            return Self::import_metadata_from_cache(&metadata_path, &default_cache_path);
+        }
+        let custom_cache_path = Self::database_path_in(custom_cache_directory);
+        if custom_cache_path.exists() {
+            return Self::import_metadata_from_cache(&metadata_path, &custom_cache_path);
+        }
+
+        // No old cache source at all: this is a fresh install.  Create the
+        // empty durable metadata database and marker, then open the selected
+        // fresh cache separately.
+        let mut empty_legacy = Connection::open_in_memory()
+            .map_err(|error| format!("无法建立新安装迁移连接：{error}"))?;
+        let _ = super::metadata_store::open(&metadata_path, &mut empty_legacy, true)?;
+        Ok(())
+    }
+
+    fn import_metadata_from_cache(metadata_path: &Path, cache_path: &Path) -> Result<(), String> {
+        let mut legacy = Connection::open(cache_path)
+            .map_err(|error| format!("无法打开旧 AI 缓存数据库：{error}"))?;
+        legacy
+            .pragma_update(None, "foreign_keys", true)
+            .map_err(|error| format!("启用旧 AI 缓存外键约束失败：{error}"))?;
+        legacy
+            .busy_timeout(std::time::Duration::from_millis(5000))
+            .map_err(|error| format!("设置旧 AI 缓存等待上限失败：{error}"))?;
+        let version = user_version(&legacy)?;
+        if version > MAX_SUPPORTED_SCHEMA_VERSION {
+            return Err(format!(
+                "AI 数据库版本 {version} 高于当前支持的版本 {MAX_SUPPORTED_SCHEMA_VERSION}"
+            ));
+        }
+        if version == SCHEMA_VERSION {
+            // A v7 cache is not a valid legacy source.  If metadata is missing
+            // this returns the existing "refuse to rebuild empty" error.
+            let _ = super::metadata_store::open(metadata_path, &mut legacy, false)?;
+            return Ok(());
+        }
+        if version > 0 {
+            migrate_legacy_cache(&legacy)?;
+        }
+        let _ = super::metadata_store::open(metadata_path, &mut legacy, true)?;
+        if version > 0 {
+            finalize_cache_after_metadata_import(&legacy)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn cache_database_size(&self) -> Result<u64, String> {
+        let database_path = Self::database_path_in(&self.root);
+        let candidates = [
+            database_path.clone(),
+            database_path.with_file_name(format!("{DATABASE_NAME}-wal")),
+            database_path.with_file_name(format!("{DATABASE_NAME}-shm")),
+            database_path.with_file_name(format!("{DATABASE_NAME}-journal")),
+        ];
+        let mut total = 0_u64;
+        for candidate in candidates {
+            match std::fs::metadata(&candidate) {
+                Ok(metadata) => {
+                    total = total.saturating_add(metadata.len());
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(format!(
+                        "读取缓存数据库大小失败（{}）：{error}",
+                        candidate.display()
+                    ));
+                }
+            }
+        }
+        Ok(total)
+    }
+
+    pub(crate) fn empty_full_text_cache_status() -> AiCacheStatus {
+        AiCacheStatus {
+            kind: FULL_TEXT_INDEX_CACHE_KIND.into(),
+            display_name: "全文索引".into(),
+            item_count: 0,
+            size_bytes: None,
+            updated_at: 0,
+            state: "empty".into(),
+        }
     }
 
     pub(crate) fn status(&self) -> Result<AiStorageStatus, String> {
@@ -1212,7 +1399,10 @@ impl AiStore {
                 )
                 .map_err(|error| format!("读取 AI 全文索引更新时间失败：{error}"))?
                 .map(|value| value.max(0) as u64);
-            let state = if active_stages > 0 {
+            let active_task = latest_task
+                .as_ref()
+                .is_some_and(|(state, _)| matches!(state.as_str(), "queued" | "running"));
+            let state = if active_stages > 0 || active_task {
                 "building"
             } else if matches!(latest_task.as_ref().map(|(state, _)| state.as_str()), Some("failed")) {
                 "error"
@@ -1225,9 +1415,9 @@ impl AiStore {
             };
             Ok((item_count, updated_at, state.to_string()))
         })?;
-        // This database also contains mock-prep and semantic indexes.  Until
-        // C1-U can account for each cache category, do not present the whole
-        // file as the full-text index's exclusive size.
+        // This database also contains mock-prep and semantic indexes.  The
+        // full-text category therefore has no exclusive size; the panel shows
+        // the whole file as the separate total-cache metric.
         let size_bytes = None;
         Ok(AiCacheStatus {
             kind: FULL_TEXT_INDEX_CACHE_KIND.into(),
@@ -1350,6 +1540,26 @@ impl AiStore {
             let transaction = connection
                 .unchecked_transaction()
                 .map_err(|error| format!("开始 AI 全文索引清理事务失败：{error}"))?;
+
+            // Keep the guard in the same transaction as the deletes.  A
+            // status check outside the transaction would leave a time-of-check
+            // window where a worker continues writing into indexes we just
+            // cleared.
+            let active_jobs: i64 = transaction
+                .query_row(
+                    "SELECT COUNT(*) FROM jobs
+                     WHERE kind = 'library-text-index' AND state IN ('queued','running')",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(|error| format!("读取在途 AI 全文任务失败：{error}"))?;
+            let staged_rows: i64 = transaction
+                .query_row("SELECT COUNT(*) FROM index_staging", [], |row| row.get(0))
+                .map_err(|error| format!("读取在途 AI 全文 staging 失败：{error}"))?;
+            if active_jobs > 0 || staged_rows > 0 {
+                return Err("正在建立全文索引，请完成或取消后再清理".into());
+            }
+
             for table in [
                 "index_staging_chunks",
                 "index_staging",
@@ -1981,8 +2191,8 @@ impl AiStore {
         self.with_connection(|connection| {
             connection
                 .execute(
-                    "INSERT INTO books (content_hash, parser_version, normalizer_version, chunker_version, created_at_ms, updated_at_ms)
-                     VALUES (?1, 'test-parser', 'test-normalizer', 'test-chunker', ?2, ?2)",
+                    "INSERT INTO books (content_hash, title, creator, language, parser_version, normalizer_version, chunker_version, created_at_ms, updated_at_ms)
+                     VALUES (?1, 'Test Book', 'Test Author', NULL, 'test-parser', 'test-normalizer', 'test-chunker', ?2, ?2)",
                     params![hash, now_ms() as i64],
                 )
                 .map_err(|error| format!("insert test book: {error}"))?;
@@ -3929,8 +4139,14 @@ mod tests {
     fn full_text_cache_reports_metadata_and_clear_preserves_other_jobs() {
         let (store, root) = test_store();
         store.insert_book_for_test(&"e".repeat(64)).unwrap();
-        store
+        let text_job = store
             .enqueue_task("library-text-index".into(), None)
+            .unwrap();
+        store
+            .transition_task(&text_job.id, TaskTransition::Start)
+            .unwrap();
+        store
+            .transition_task(&text_job.id, TaskTransition::Complete)
             .unwrap();
         store.enqueue_task("embedding".into(), None).unwrap();
 
@@ -3950,6 +4166,28 @@ mod tests {
         assert_eq!(status.jobs, 1);
         assert_eq!(store.list_cache_statuses().unwrap()[0].state, "empty");
         assert!(store.clear_cache("vector-index").is_err());
+        drop(store);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn clearing_full_text_index_rejects_in_flight_job_without_deleting_rows() {
+        let (store, root) = test_store();
+        store.insert_book_for_test(&"d".repeat(64)).unwrap();
+        store
+            .enqueue_task(LIBRARY_TEXT_INDEX_TASK_KIND.into(), None)
+            .unwrap();
+
+        let error = store
+            .clear_all_indexes()
+            .expect_err("queued full-text work must block cleanup");
+        assert!(error.contains("正在建立全文索引"), "{error}");
+        let status = store.status().unwrap();
+        assert_eq!(status.books, 1);
+        assert_eq!(status.chunks, 1);
+        assert_eq!(status.jobs, 1);
+        assert_eq!(store.list_cache_statuses().unwrap()[0].state, "building");
+
         drop(store);
         fs::remove_dir_all(root).unwrap();
     }
