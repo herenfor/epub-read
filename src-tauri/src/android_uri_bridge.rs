@@ -406,6 +406,20 @@ mod android {
         text: &'a str,
     }
 
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct WriteStagedFileRequest<'a> {
+        uri: &'a str,
+        source_path: &'a str,
+        job_id: &'a str,
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct CancelWriteRequest<'a> {
+        job_id: &'a str,
+    }
+
     #[derive(Deserialize)]
     struct EmptyPluginResponse {}
 
@@ -464,12 +478,53 @@ mod android {
             .map(|_| ())
             .map_err(|error| super::command_error("write_failed", error.to_string()))
     }
+
+    pub(crate) fn write_staged_file_blocking<R: Runtime>(
+        app: &AppHandle<R>,
+        uri: &str,
+        source_path: &std::path::Path,
+        job_id: &str,
+    ) -> Result<(), String> {
+        if !uri.starts_with("content://") {
+            return Err(super::command_error(
+                "invalid_request",
+                "only content:// URIs are accepted",
+            ));
+        }
+        let source = source_path.to_string_lossy();
+        let bridge = app.state::<AndroidUriBridge<R>>();
+        bridge
+            .0
+            .run_mobile_plugin::<EmptyPluginResponse>(
+                "writeStagedFile",
+                WriteStagedFileRequest {
+                    uri,
+                    source_path: &source,
+                    job_id,
+                },
+            )
+            .map(|_| ())
+            .map_err(|error| super::command_error("write_failed", error.to_string()))
+    }
+
+    pub(crate) fn cancel_write_blocking<R: Runtime>(
+        app: &AppHandle<R>,
+        job_id: &str,
+    ) -> Result<(), String> {
+        let bridge = app.state::<AndroidUriBridge<R>>();
+        bridge
+            .0
+            .run_mobile_plugin::<EmptyPluginResponse>("cancelWrite", CancelWriteRequest { job_id })
+            .map(|_| ())
+            .map_err(|error| super::command_error("cancel_failed", error.to_string()))
+    }
 }
 
 #[cfg(target_os = "android")]
 #[allow(unused_imports)]
 pub(crate) use android::{
-    open_content_uri, plugin, read_content_uri_blocking, write_text_content_uri_blocking,
+    cancel_write_blocking, open_content_uri, plugin, read_content_uri_blocking,
+    write_staged_file_blocking, write_text_content_uri_blocking,
 };
 
 #[tauri::command]

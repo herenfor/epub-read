@@ -5,6 +5,7 @@ mod build_info_contract;
 mod import_gate;
 mod ipc_bytes;
 mod portable_state_commands;
+mod save_file;
 
 #[cfg(feature = "ai")]
 macro_rules! configure_invoke_handler {
@@ -48,6 +49,10 @@ macro_rules! configure_invoke_handler {
             portable_state_commands::portable_state_apply_organization,
             portable_state_commands::portable_state_merge_organization,
             portable_state_commands::portable_state_reserve_stamps,
+            save_file::commands::save_file_export,
+            save_file::commands::save_file_prepare_import,
+            save_file::commands::save_file_commit_import,
+            save_file::commands::save_file_cancel,
             fonts_import_raw,
             fonts_import_paths,
             fonts_list,
@@ -152,6 +157,10 @@ macro_rules! configure_invoke_handler {
             portable_state_commands::portable_state_apply_organization,
             portable_state_commands::portable_state_merge_organization,
             portable_state_commands::portable_state_reserve_stamps,
+            save_file::commands::save_file_export,
+            save_file::commands::save_file_prepare_import,
+            save_file::commands::save_file_commit_import,
+            save_file::commands::save_file_cancel,
             fonts_import_raw,
             fonts_import_paths,
             fonts_list,
@@ -203,10 +212,15 @@ pub fn run() {
     }));
 
     let builder = builder
+        .setup(|app| {
+            let _ = save_file::cleanup_stale_staging(app.handle());
+            Ok(())
+        })
         .manage(FontWriteState::default())
         .manage(LinkedLibraryWriteState::default())
         .manage(linked_library::ManagedImportState::default())
         .manage(portable_state_commands::PortableStateManager::default())
+        .manage(save_file::SaveFileManager::default())
         .manage(ai::AiState::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())

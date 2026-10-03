@@ -848,6 +848,103 @@ impl PortableStore {
         Ok(merged)
     }
 
+    /// Merge one validated `.epubsave` incoming state and persist the
+    /// verified managed bindings in the same SQLite transaction.
+    ///
+    /// This is the F-N file-import entry point. It intentionally mirrors
+    /// `merge_validated_state` but also writes only the binding rows for
+    /// managed copies published by the file job; it never touches existing
+    /// valid local bindings. Visible hashes are extended with every incoming
+    /// book, and `isNew` is only added for hashes that were not visible before
+    /// this transaction.
+    pub fn merge_validated_import(
+        &mut self,
+        incoming: PortableStateV3,
+        bindings: Vec<(String, String)>,
+        apply_preferences: bool,
+    ) -> PortableResult<PortableStateV3> {
+        dto::validate_portable_state(&incoming)?;
+        for (content_hash, raw) in &bindings {
+            if !dto::valid_content_hash(content_hash) {
+                return Err(PortableError::invalid_entity(
+                    "invalid-entity：binding contentHash 必须是 64 位小写内容指纹",
+                ));
+            }
+            if !incoming.books.contains_key(content_hash) {
+                return Err(PortableError::invalid_entity(
+                    "invalid-entity：managed binding 必须对应本次导入的书籍",
+                ));
+            }
+            serde_json::from_str::<serde_json::Value>(raw).map_err(|error| {
+                PortableError::invalid_data(format!("invalid-data：设备绑定不是合法 JSON：{error}"))
+            })?;
+        }
+
+        let incoming_max = super::merge::maximum_received_counter_from_state(&incoming)?;
+        let transaction = self.connection.unchecked_transaction()?;
+        let local = load_state_at_connection(&transaction)?;
+        let local_preferences = local.preferences.clone();
+        let visible_before = load_local_visible_hashes(&transaction)?;
+        let mut visible = visible_before.clone();
+        let mut is_new = load_local_is_new_hashes(&transaction)?;
+        let local_max = super::merge::maximum_received_counter_from_state(&local)?;
+        let mut merged = merge_portable_states(&local, &incoming)?;
+        // Preferences are never applied implicitly: the file commit must opt
+        // in explicitly, and an absent incoming preference set keeps the local
+        // choice rather than erasing it.
+        merged.preferences = if apply_preferences {
+            incoming
+                .preferences
+                .clone()
+                .or_else(|| local_preferences.clone())
+        } else {
+            local_preferences
+        };
+        dto::validate_portable_state(&merged)?;
+        let merged_max = super::merge::maximum_received_counter_from_state(&merged)?;
+        let next_counter = load_counter(&transaction)?
+            .max(local_max)
+            .max(incoming_max)
+            .max(merged_max);
+        let _installation_id = ensure_installation_id(&transaction)?;
+        let local_revisions = read_local_revisions(&transaction)?;
+        for (book_hash, book) in &merged.books {
+            let scoped: BTreeMap<String, u64> = local_revisions
+                .iter()
+                .filter_map(|(key, revision)| {
+                    key.strip_prefix(&format!("{book_hash}:"))
+                        .map(|suffix| (suffix.to_string(), *revision))
+                })
+                .collect();
+            store_book_shape(&transaction, book_hash, book, &scoped)?;
+        }
+        store_organization(&transaction, &merged.organization)?;
+        match &merged.preferences {
+            Some(preferences) => put_meta_json(&transaction, KEY_PREFERENCES, preferences)?,
+            None => remove_meta(&transaction, KEY_PREFERENCES)?,
+        }
+
+        for (hash, raw) in &bindings {
+            transaction.execute(
+                "INSERT INTO device_bindings(hash, json) VALUES(?1, ?2)
+                 ON CONFLICT(hash) DO UPDATE SET json = excluded.json",
+                params![hash, raw],
+            )?;
+        }
+
+        for hash in incoming.books.keys() {
+            visible.insert(hash.clone());
+            if !visible_before.contains(hash) {
+                is_new.insert(hash.clone());
+            }
+        }
+        save_local_visible_hashes(&transaction, &visible)?;
+        save_local_is_new_hashes(&transaction, &is_new)?;
+        store_counter(&transaction, next_counter)?;
+        transaction.commit()?;
+        Ok(merged)
+    }
+
     /// R3: merge old archive records into the current v3 state in one SQLite
     /// transaction. Existing v3 progress and annotation IDs (including
     /// tombstones) stay local; only missing entities are initialized.
@@ -1939,5 +2036,109 @@ impl PortableStore {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod file_import_tests {
+    use super::*;
+
+    const HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const A: &str = "00000000-0000-4000-8000-000000000001";
+
+    fn state_at(counter: u64) -> PortableStateV3 {
+        serde_json::from_value(serde_json::json!({
+            "schemaVersion": 3,
+            "books": {
+                HASH: {
+                    "metadata": {
+                        "value": {
+                            "title": "书",
+                            "creator": "作者",
+                            "fileName": "book.epub",
+                            "addedAtMs": 1000
+                        },
+                        "stamp": { "deviceId": A, "counter": 1 }
+                    },
+                    "progress": {
+                        "versions": [{
+                            "stamp": { "deviceId": A, "counter": counter },
+                            "clock": { A: counter },
+                            "value": {
+                                "locator": {
+                                    "locatorVersion": 1,
+                                    "chapterPath": "Text/chapter.xhtml",
+                                    "spineIndexHint": 0,
+                                    "target": { "kind": "chapter-start" }
+                                },
+                                "progressPctHint": 10
+                            },
+                            "updatedAtMs": 1000 + counter
+                        }]
+                    },
+                    "bookmarks": {},
+                    "notes": {}
+                }
+            },
+            "organization": { "schemaVersion": 1, "folders": {}, "books": {} }
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn file_import_uses_current_state_and_binding_failure_rolls_back_all_markers() {
+        let mut store = PortableStore::open_in_memory().unwrap();
+        store
+            .merge_validated_import(state_at(1), Vec::new(), false)
+            .unwrap();
+        store
+            .merge_validated_import(state_at(2), Vec::new(), false)
+            .unwrap();
+        let before = store.snapshot().unwrap();
+        let visible_before = store.local_visible_hashes().unwrap();
+        let is_new_before = store.local_is_new_hashes().unwrap();
+        let counter_before = store.counter().unwrap();
+
+        // Re-importing the older package must not move progress backwards.
+        store
+            .merge_validated_import(state_at(1), Vec::new(), false)
+            .unwrap();
+        let preserved = store.snapshot().unwrap();
+        let versions = &preserved.books[HASH].progress.versions;
+        assert_eq!(versions.len(), 1);
+        assert_eq!(versions[0].stamp.device_id, A);
+        assert_eq!(versions[0].stamp.counter, 2);
+
+        store
+            .connection
+            .execute_batch(
+                "CREATE TRIGGER fail_binding
+                 BEFORE INSERT ON device_bindings
+                 BEGIN
+                     SELECT RAISE(ABORT, 'forced binding failure');
+                 END;",
+            )
+            .unwrap();
+        let incoming = state_at(3);
+        let binding = serde_json::json!({
+            "contentHash": HASH,
+            "storageKind": "managed",
+            "fileSize": 10,
+            "sourceMtimeNs": 1,
+            "coverMime": "image/jpeg",
+            "lastVerifiedAtMs": 1
+        })
+        .to_string();
+        let error = store
+            .merge_validated_import(incoming, vec![(HASH.to_string(), binding)], false)
+            .unwrap_err();
+        assert_eq!(error.code, "storage-error");
+
+        let after = store.snapshot().unwrap();
+        assert_eq!(after, before);
+        assert_eq!(store.local_visible_hashes().unwrap(), visible_before);
+        assert_eq!(store.local_is_new_hashes().unwrap(), is_new_before);
+        assert_eq!(store.counter().unwrap(), counter_before);
+        assert!(store.binding_raw(HASH).unwrap().is_none());
     }
 }

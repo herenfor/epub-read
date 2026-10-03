@@ -28,6 +28,7 @@ pub use dto::{
     MAX_NOTE_SELECTED_CODE_POINTS, MAX_SAFE_COUNTER, TEXT_PROFILE,
 };
 pub use error::{PortableError, PortableResult};
+pub(crate) use legacy::random_uuid_v4;
 pub use merge::{
     capture_read_basis, compare_stamps, dominates, join_clocks, maximum_received_counter,
     maximum_received_counter_from_state, merge_annotation, merge_books, merge_portable_states,

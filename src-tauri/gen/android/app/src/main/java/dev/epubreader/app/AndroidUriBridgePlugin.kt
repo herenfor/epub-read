@@ -9,7 +9,10 @@ import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
+import java.io.File
+import java.io.FileInputStream
 import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -22,6 +25,18 @@ class OpenReadOnlyArgs {
 class WriteTextArgs {
     lateinit var uri: String
     lateinit var text: String
+}
+
+@InvokeArg
+class WriteStagedFileArgs {
+    lateinit var uri: String
+    lateinit var sourcePath: String
+    lateinit var jobId: String
+}
+
+@InvokeArg
+class CancelWriteArgs {
+    lateinit var jobId: String
 }
 
 /**
@@ -37,6 +52,7 @@ class AndroidUriBridgePlugin(private val activity: Activity) : Plugin(activity) 
     private val ioExecutor: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "android-uri-bridge").apply { isDaemon = true }
     }
+    private val cancelledWrites = ConcurrentHashMap<String, Boolean>()
 
     @Command
     fun openReadOnly(invoke: Invoke) {
@@ -108,6 +124,64 @@ class AndroidUriBridgePlugin(private val activity: Activity) : Plugin(activity) 
         } catch (error: Throwable) {
             val message = error.message?.takeIf { it.isNotBlank() } ?: error.toString()
             postResponse { invoke.reject(message) }
+        }
+    }
+
+    @Command
+    fun writeStagedFile(invoke: Invoke) {
+        val args = invoke.parseArgs(WriteStagedFileArgs::class.java)
+        ioExecutor.execute {
+            writeStagedFileOnWorker(invoke, args.uri, args.sourcePath, args.jobId)
+        }
+    }
+
+    @Command
+    fun cancelWrite(invoke: Invoke) {
+        val args = invoke.parseArgs(CancelWriteArgs::class.java)
+        cancelledWrites[args.jobId] = true
+        postResponse { invoke.resolve(JSObject()) }
+    }
+
+    private fun writeStagedFileOnWorker(
+        invoke: Invoke,
+        uri: String,
+        sourcePath: String,
+        jobId: String
+    ) {
+        try {
+            val source = File(sourcePath).canonicalFile
+            val cacheRoot = activity.cacheDir.canonicalFile
+            if (source != cacheRoot && !source.path.startsWith(cacheRoot.path + File.separator)) {
+                throw IOException("staged source is outside the app cache")
+            }
+            if (!source.isFile) {
+                throw IOException("staged source is not a regular file")
+            }
+            val pfd = activity.contentResolver.openFileDescriptor(Uri.parse(uri), "wt")
+                ?: throw IOException("content provider returned no write descriptor")
+            FileInputStream(source).use { input ->
+                // AutoCloseOutputStream owns the fd; close failures must reject
+                // before Rust can treat the destination as complete.
+                ParcelFileDescriptor.AutoCloseOutputStream(pfd).use { output ->
+                    val buffer = ByteArray(64 * 1024)
+                    while (true) {
+                        if (cancelledWrites[jobId] == true) {
+                            throw IOException("cancelled")
+                        }
+                        val read = input.read(buffer)
+                        if (read < 0) {
+                            break
+                        }
+                        output.write(buffer, 0, read)
+                    }
+                }
+            }
+            postResponse { invoke.resolve(JSObject()) }
+        } catch (error: Throwable) {
+            val message = error.message?.takeIf { it.isNotBlank() } ?: error.toString()
+            postResponse { invoke.reject(message) }
+        } finally {
+            cancelledWrites.remove(jobId)
         }
     }
 
