@@ -40,6 +40,7 @@ import { AboutInfo } from "./ui/AboutInfo";
 import { resolveReaderLoadFeedback } from "./ui/loadingFeedback";
 import { WhisperFooter, type WhisperFooterChapterTick } from "./ui/WhisperFooter";
 import { BatteryIndicator } from "./ui/BatteryIndicator";
+import { ReaderOpening } from "./ui/ReaderOpening";
 import { readBatteryIndicatorEnabled, writeBatteryIndicatorEnabled } from "./ui/batteryPreferences";
 import { useResponsiveEnvironment } from "./ui/responsiveEnvironment";
 import { shouldConfirmNoteDiscard } from "./ui/readerCloseGuards";
@@ -225,7 +226,7 @@ function createNativeImportRequestId(): string {
 
 type AppPhase =
   | { phase: "idle" }
-  | { phase: "loading"; fileName: string }
+  | { phase: "loading"; fileName: string; title?: string; creator?: string }
   | { phase: "error"; message: string }
   | { phase: "ready" };
 
@@ -2488,7 +2489,12 @@ export default function App() {
       setShelfBusy(true);
       setShelfError(null);
       if (searchTarget) setSearchNavigationBusy(true);
-      setPhase({ phase: "loading", fileName: originalEntry.fileName });
+      setPhase({
+        phase: "loading",
+        fileName: originalEntry.fileName,
+        title: originalEntry.title,
+        creator: originalEntry.creator,
+      });
       let preciseRequestId: number | null = null;
       try {
         // A new open is a new session even when the same book is reopened.
@@ -4133,6 +4139,14 @@ export default function App() {
     displayedOnce: hasReaderDisplayedRef.current,
     chapter: chapterState,
   });
+  // 开书过渡覆盖“解析书籍”与首次“准备阅读位置”；之后的换章只用顶部细进度线。
+  const readerOpeningVisible =
+    phase.phase === "loading" ||
+    (readerLoadFeedback?.kind === "loading" && !hasReaderDisplayedRef.current);
+  const readerOpeningTitle = phase.phase === "loading"
+    ? phase.title || phase.fileName
+    : book?.metadata.title ?? "";
+  const readerOpeningCreator = phase.phase === "loading" ? phase.creator : book?.metadata.creator;
   const reading = chapterState.status === "ready" && !chapterState.empty;
   const currentPath = ready ? spineItemPath(book!, spineIndex) : undefined;
   const activeHref = currentPath
@@ -5453,15 +5467,17 @@ export default function App() {
                   onContentFractionFailed={handleContentFractionFailed}
                   onUserProgressSample={handleUserProgressSample}
                 />
-                {readerLoadFeedback && (
+                {readerLoadFeedback?.kind === "loading" && hasReaderDisplayedRef.current && (
+                  <div className="reader-load-line" role="status" aria-live="polite">
+                    <span className="reader-load-line-text">{readerLoadFeedback.text}</span>
+                  </div>
+                )}
+                {readerLoadFeedback && readerLoadFeedback.kind !== "loading" && (
                   <div
                     className={`reader-load-feedback ${readerLoadFeedback.kind}`}
                     role={readerLoadFeedback.kind === "error" ? "alert" : "status"}
                     aria-live={readerLoadFeedback.kind === "error" ? "assertive" : "polite"}
                   >
-                    {readerLoadFeedback.kind === "loading" && (
-                      <span className="reader-load-feedback-spinner" aria-hidden="true" />
-                    )}
                     <span className="reader-load-feedback-text">{readerLoadFeedback.text}</span>
                   </div>
                 )}
@@ -5734,14 +5750,20 @@ export default function App() {
           onCancel={() => void handleCancelNativeImport()}
         />
       )}
-      {(shelfBusy || phase.phase === "loading") && nativeImport === null && (
+      <ReaderOpening
+        visible={readerOpeningVisible}
+        title={readerOpeningTitle}
+        creator={readerOpeningCreator}
+        stage={phase.phase === "loading" ? "正在打开书籍…" : readerLoadFeedback?.text ?? "准备阅读位置…"}
+      />
+      {(shelfBusy || phase.phase === "loading") && nativeImport === null && !readerOpeningVisible && (
         <div className="app-busy" role="status" aria-live="polite" aria-busy="true">
           <div className="app-busy-spinner" />
           <div
             className="app-busy-text"
-            title={phase.phase === "loading" ? `正在打开《${phase.fileName}》…` : shelfBusyMessage}
+            title={shelfBusyMessage}
           >
-            {phase.phase === "loading" ? `正在打开《${phase.fileName}》…` : shelfBusyMessage}
+            {shelfBusyMessage}
           </div>
         </div>
       )}
