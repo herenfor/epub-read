@@ -55,6 +55,7 @@ import {
   type SpreadGeometry,
   type SpreadLayout,
   spreadForColumn,
+  spreadStart,
   visibleLeafRange,
 } from "./pagedSpread";
 import { imageRequestFromTarget } from "./imageActivation";
@@ -6776,6 +6777,33 @@ export class ChapterPaginator {
     this.emit(this.readyState(false));
     // B-153：普通翻页热路径只登记一次下一帧采样；连续翻页合并为最后一页。
     this.scheduleAnchorSample();
+  }
+
+  /**
+   * 翻页动画的视口端点：当前页与同章相邻页的 scrollLeft。只读几何，不提交
+   * 页码；滚动模式、无相邻页或尚未布局时返回 null（调用方回退到跨章过渡）。
+   */
+  pagedSlideFrame(direction: 1 | -1): { from: number; to: number } | null {
+    if (!this.viewer || this.scrollMode) return null;
+    const current = this.metrics.currentPage;
+    const target = current + direction;
+    if (target < 0 || target >= this.metrics.pageCount) return null;
+    if (this.spreadLayout) {
+      this.viewportPort.ensureScrollWidth(this.spreadLayout.requiredScrollWidth);
+      return { from: spreadStart(this.spreadLayout, current), to: spreadStart(this.spreadLayout, target) };
+    }
+    const step = this.viewStepPx;
+    if (step <= 0) return null;
+    return { from: current * step, to: target * step };
+  }
+
+  /**
+   * 拖动/动画中间帧：只写视觉 scrollLeft。不改页码、不关弹注、不采样锚点；
+   * 结束时由调用方 setPage(目标) 提交，或写回 from 取消。
+   */
+  previewPagedScroll(scrollLeft: number): void {
+    if (!this.viewer || this.scrollMode) return;
+    this.viewer.scrollLeft = scrollLeft;
   }
 
   /** 跳到页内锚点（分页：元素所在屏；滚动：元素顶边）。 */

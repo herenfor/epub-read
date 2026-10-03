@@ -21,8 +21,8 @@ describe("Zen UI AaPopover 组件与交互契约（Packet B）", () => {
     onColumnsChange: vi.fn(),
     readingMode: "paginated",
     onReadingModeChange: vi.fn(),
-    instantTurn: true,
-    onInstantTurnChange: vi.fn(),
+    turnAnimation: "none",
+    onTurnAnimationChange: vi.fn(),
     forceHorizontal: false,
     onForceHorizontalChange: vi.fn(),
     preloadNextChapter: true,
@@ -72,8 +72,9 @@ describe("Zen UI AaPopover 组件与交互契约（Packet B）", () => {
     expect(html).toContain("标准");
     // 边距适中选中
     expect(html).toContain("适中");
-    // 极速瞬翻
-    expect(html).toContain("极速瞬翻 (0ms)");
+    // 翻页动画三档，当前为“无”
+    expect(html).toContain("翻页动画");
+    expect(html).toMatch(/aria-checked="true"[^>]*>无</);
   });
 
   it("当选中双页且窗口较窄回退单页时显示提示文案", () => {

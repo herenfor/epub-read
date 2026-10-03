@@ -19,6 +19,8 @@ const HORIZONTAL_RATIO = 1.2;
 const INTENT_THRESHOLD_PX = 8;
 export const PAGED_SWIPE_THRESHOLD_PX = 24;
 const SUPPRESS_CLICK_MS = 700;
+/** 拖出后又往回收超过该距离，视为用户反悔，不翻页。 */
+export const PAGED_SWIPE_REVERSAL_PX = 48;
 
 function isInteractiveTarget(target: EventTarget | null): boolean {
   const element = target as (Element & { closest?: (selector: string) => Element | null }) | null;
@@ -50,12 +52,14 @@ export function installPagedSwipe(target: Document | HTMLElement, handlers: Page
   let tracking = false;
   let startX = 0;
   let startY = 0;
+  let peakAbsDx = 0;
   let suppressClickUntil = 0;
 
   const reset = (): void => {
     tracking = false;
     startX = 0;
     startY = 0;
+    peakAbsDx = 0;
     handlers.onPreview?.(null);
   };
 
@@ -96,6 +100,7 @@ export function installPagedSwipe(target: Document | HTMLElement, handlers: Page
     }
     if (Math.abs(dx) >= INTENT_THRESHOLD_PX && Math.abs(dx) > Math.abs(dy) * HORIZONTAL_RATIO) {
       if (event.cancelable) event.preventDefault();
+      peakAbsDx = Math.max(peakAbsDx, Math.abs(dx));
       handlers.onPreview?.(dx);
     }
   };
@@ -105,10 +110,11 @@ export function installPagedSwipe(target: Document | HTMLElement, handlers: Page
     const touch = event.changedTouches[0];
     const dx = touch ? x(touch) - startX : 0;
     const dy = touch ? y(touch) - startY : 0;
+    const reversed = peakAbsDx - Math.abs(dx) > PAGED_SWIPE_REVERSAL_PX;
     reset();
     // A slow/low-frame-rate gesture can cross the threshold at touchend.
     if (event.touches.length || hasActiveSelection(doc) || handlers.shouldIgnore(event) ||
-        Math.abs(dx) < threshold || Math.abs(dx) <= Math.abs(dy) * HORIZONTAL_RATIO) return;
+        Math.abs(dx) < threshold || Math.abs(dx) <= Math.abs(dy) * HORIZONTAL_RATIO || reversed) return;
     suppressClickUntil = Date.now() + SUPPRESS_CLICK_MS;
     if (dx < 0) handlers.onNext();
     else handlers.onPrev();

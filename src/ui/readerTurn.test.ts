@@ -39,6 +39,12 @@ class MockPaginator {
   getStateSnapshot() { return this.state; }
   getCurrentPath() { return this.path; }
   setNotes() {}
+  pagedSlideFrame = vi.fn((direction: 1 | -1) => {
+    const target = this.currentPage + direction;
+    if (target < 0 || target >= this.pageCount) return null;
+    return { from: this.currentPage * 100, to: target * 100 };
+  });
+  previewPagedScroll = vi.fn();
   setPage = vi.fn((page: number) => {
     this.currentPage = page;
     this.state = { ...this.state, currentPage: page };
@@ -66,6 +72,11 @@ describe("Zen UI Packet C: 硬件加速平滑翻页与边缘翻页交互契约",
     vi.useFakeTimers();
     instances.length = 0;
     dom = createReactDomHarness();
+    // linkedom omits this standard CSSOM method; the paged swipe surface needs it.
+    const styleProto = Object.getPrototypeOf(dom.container.style);
+    if (typeof styleProto.getPropertyPriority !== "function") {
+      Object.defineProperty(styleProto, "getPropertyPriority", { value: () => "", configurable: true });
+    }
     ref = createRef<ReaderHandle>();
     const book = {
       version: 3,
@@ -81,7 +92,7 @@ describe("Zen UI Packet C: 硬件加速平滑翻页与边缘翻页交互契约",
         revokeAll: vi.fn(),
         textFor: vi.fn(() => "<html></html>"),
       } as unknown as ComponentProps<typeof ReaderView>["server"],
-      settings: { ...DEFAULT_SETTINGS, instantTurn: false },
+      settings: { ...DEFAULT_SETTINGS, turnAnimation: "fade" },
       userFonts: [],
       notes: [],
       spineIndex: 0,
@@ -171,10 +182,10 @@ describe("Zen UI Packet C: 硬件加速平滑翻页与边缘翻页交互契约",
     expect(readerEl?.classList.contains("has-turn-anim")).toBe(false);
   });
 
-  it("当开启 instantTurn (0ms 立即翻页) 时，翻页不添加动画类", async () => {
+  it("翻页动画为“无”时，翻页不添加动画类", async () => {
     props = {
       ...props,
-      settings: { ...props.settings, instantTurn: true },
+      settings: { ...props.settings, turnAnimation: "none" },
     };
     await render();
     const active = await finishActive();
@@ -213,6 +224,50 @@ describe("Zen UI Packet C: 硬件加速平滑翻页与边缘翻页交互契约",
     expect(active.setPage).toHaveBeenCalledWith(0);
     expect(readerEl?.classList.contains("has-turn-anim")).toBe(true);
     expect(readerEl?.classList.contains("turn-prev")).toBe(true);
+  });
+
+  it("滑动模式下同章翻页逐帧移动视口，动画结束后才提交页码", async () => {
+    props = {
+      ...props,
+      settings: { ...props.settings, turnAnimation: "slide" },
+    };
+    await render();
+    const active = await finishActive();
+
+    const nextZone = dom.container.querySelector(".edge-turn-zone.edge-turn-next") as HTMLElement;
+    await dom.click(nextZone);
+
+    expect(active.pagedSlideFrame).toHaveBeenCalledWith(1);
+    expect(active.setPage).not.toHaveBeenCalled();
+    const readerEl = dom.container.querySelector(".reader");
+    expect(readerEl?.classList.contains("has-turn-anim")).toBe(false);
+
+    await act(async () => {
+      vi.advanceTimersByTime(400);
+    });
+    expect(active.previewPagedScroll).toHaveBeenLastCalledWith(100);
+    expect(active.setPage).toHaveBeenCalledTimes(1);
+    expect(active.setPage).toHaveBeenCalledWith(1);
+  });
+
+  it("滑动模式下连续翻页先落位上一次动画再开始下一次", async () => {
+    props = {
+      ...props,
+      settings: { ...props.settings, turnAnimation: "slide" },
+    };
+    await render();
+    const active = await finishActive();
+
+    const nextZone = dom.container.querySelector(".edge-turn-zone.edge-turn-next") as HTMLElement;
+    await dom.click(nextZone);
+    await dom.click(nextZone);
+    expect(active.setPage).toHaveBeenCalledWith(1);
+
+    await act(async () => {
+      vi.advanceTimersByTime(400);
+    });
+    expect(active.setPage).toHaveBeenLastCalledWith(2);
+    expect(active.setPage).toHaveBeenCalledTimes(2);
   });
 
   it("在最后一章最后一页继续向下翻页时不触发翻页动画", async () => {

@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import type { Theme } from "../render/settings";
+import type { Theme, TurnAnimation } from "../render/settings";
 import { PAGE_GAP_MAX_PX, type PageMarginsPx, type ReadingMode, type SpreadGapMode } from "../render/pageLayout";
 import {
   presentationPatch,
@@ -16,6 +16,12 @@ import {
   WrenchIcon,
 } from "./readerIcons";
 import "./aaPopover.css";
+
+const TURN_ANIMATION_OPTIONS: ReadonlyArray<{ value: TurnAnimation; label: string }> = [
+  { value: "slide", label: "滑动" },
+  { value: "fade", label: "淡入" },
+  { value: "none", label: "无" },
+];
 
 export interface AaPopoverProps {
   fontSize: number;
@@ -79,9 +85,9 @@ export interface AaPopoverProps {
   /** 一次原子更新阅读方式 */
   onPresentationChange?: (patch: { readingMode: "paginated" | "scroll"; columnsPerView?: 1 | 2 }) => void;
 
-  // 极速无动画模式（0ms瞬翻）
-  instantTurn?: boolean;
-  onInstantTurnChange?: (enabled: boolean) => void;
+  // 分页翻页动画：滑动 / 淡入 / 无
+  turnAnimation?: TurnAnimation;
+  onTurnAnimationChange?: (value: TurnAnimation) => void;
 
   // 更多高级选项（折叠）
   forceHorizontal?: boolean;
@@ -164,8 +170,8 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
   onReadingModeChange,
   effectiveColumns,
   onPresentationChange,
-  instantTurn = false,
-  onInstantTurnChange,
+  turnAnimation = "slide",
+  onTurnAnimationChange,
   forceHorizontal = false,
   onForceHorizontalChange,
   preloadNextChapter = false,
@@ -578,20 +584,24 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
               {/* Group 3: 翻页与高级选项 */}
               <div className="aa-group-title">翻页与进阶</div>
 
-              {/* 联动 Packet C: 极速瞬翻模式 */}
-              {onInstantTurnChange && (
-                <div className="aa-section aa-control-row aa-toggle-row">
-                  <span className="aa-section-label" title="开启后翻页耗时0ms，无需等待过渡动画">
-                    极速瞬翻 (0ms)
-                  </span>
-                  <label className="aa-switch-label">
-                    <input
-                      type="checkbox"
-                      checked={instantTurn}
-                      onChange={(e) => onInstantTurnChange(e.target.checked)}
-                    />
-                    <span className="aa-switch-track" />
-                  </label>
+              {/* 分页翻页动画；滚动模式没有翻页，不显示 */}
+              {onTurnAnimationChange && presentation !== "scroll" && (
+                <div className="aa-section aa-control-row">
+                  <span className="aa-section-label">翻页动画</span>
+                  <div className="aa-segmented-capsule" role="radiogroup" aria-label="翻页动画">
+                    {TURN_ANIMATION_OPTIONS.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        role="radio"
+                        aria-checked={turnAnimation === option.value}
+                        className={`aa-segmented-btn${turnAnimation === option.value ? " active" : ""}`}
+                        onClick={() => onTurnAnimationChange(option.value)}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
 
