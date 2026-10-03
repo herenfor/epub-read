@@ -6314,6 +6314,16 @@ select option {
   white-space: nowrap;
 }
 
+/* 非手机布局的批量操作统一在底部浮动栏；顶部只保留“已选 N 本 / 全选”，不重复一组按钮。 */
+.app:not([data-layout="compact"]) .shelf-selection-actions {
+  display: none;
+}
+
+/* 触摸设备没有键盘回车提示的意义。 */
+.app[data-touch-ui="true"] .shelf-resume-key-hint {
+  display: none;
+}
+
 .app[data-mobile-chrome="true"][data-layout="compact"] .shelf-selection-actions {
   flex: 1 1 100%;
   display: grid;
