@@ -1827,7 +1827,7 @@ export default function App() {
       rangeLabel = `选中的 ${bookHashes.length} 本资料`;
     } else {
       scope = { kind: "all" };
-      rangeLabel = `全库 ${shelfEntriesRef.current.length} 本资料`;
+      rangeLabel = "全库资料";
     }
 
     try {
@@ -1938,7 +1938,7 @@ export default function App() {
           : "";
       setShelfNotice({
         kind: result.missingBooks.length > 0 || refreshFailed || (applyPreferences && !result.appliedPreferences) ? "warn" : "ok",
-        text: `已导入 ${result.importedBooks.length} 本资料，书架共 ${result.mergedBooks} 本；${result.missingBooks.length} 本待补书籍${conflictNote}${preferenceNote}${refreshFailed ? "；书架刷新失败" : ""}`,
+        text: `已导入 ${result.importedBooks.length} 本资料；${result.missingBooks.length} 本待补书籍${conflictNote}${preferenceNote}${refreshFailed ? "；书架刷新失败" : ""}`,
       });
     } catch (error) {
       setShelfNotice({ kind: "error", text: `存档导入失败：${saveFileErrorMessage(error)}` });

@@ -156,6 +156,69 @@ describe("useSaveFileJob", () => {
     expect(latest?.state.kind).toBe("idle");
   });
 
+  it("review_prepared_cancel_failure keeps the preview retryable and blocks commit while cancelling", async () => {
+    const pendingCancel = deferred<"cancelled">();
+    bridge.prepareSaveFileImport.mockResolvedValue(preview("preview"));
+    bridge.cancelSaveFile.mockReturnValueOnce(pendingCancel.promise);
+    await dom.render(createElement(Probe));
+    const job = latest!;
+    await dom.run(async () => {
+      await job.beginPrepare({
+        source: { kind: "path", path: "/tmp/preview.epubsave" },
+        sourceLabel: "preview.epubsave",
+      });
+    });
+
+    let cancelError: unknown;
+    let cancelPromise!: Promise<unknown>;
+    await dom.run(() => {
+      cancelPromise = job.cancelCurrent().catch((error) => { cancelError = error; });
+    });
+    await dom.run(async () => {
+      await expect(job.commit(false)).rejects.toThrow("当前没有待确认的存档导入");
+    });
+    expect(bridge.commitSaveFileImport).not.toHaveBeenCalled();
+
+    await dom.run(async () => {
+      pendingCancel.reject(new Error("native cancel failed"));
+      await cancelPromise;
+    });
+    expect((cancelError as Error).message).toBe("native cancel failed");
+    expect(latest?.state).toMatchObject({ kind: "prepared", canceling: false });
+
+    bridge.cancelSaveFile.mockResolvedValueOnce("cancelled");
+    await dom.run(async () => { await job.cancelCurrent(); });
+    expect(latest?.state.kind).toBe("idle");
+    expect(bridge.cancelSaveFile).toHaveBeenCalledTimes(2);
+  });
+
+  it("review_preparing_cancel_failure keeps a late native preview available for release", async () => {
+    const pendingPrepare = deferred<SaveFilePrepareResult>();
+    bridge.prepareSaveFileImport.mockReturnValue(pendingPrepare.promise);
+    bridge.cancelSaveFile.mockRejectedValue(new Error("native cancel failed"));
+    await dom.render(createElement(Probe));
+    const job = latest!;
+    let prepareError: unknown;
+    let preparePromise!: Promise<unknown>;
+    await dom.run(() => {
+      preparePromise = job.beginPrepare({
+        source: { kind: "path", path: "/tmp/late.epubsave" },
+        sourceLabel: "late.epubsave",
+      }).catch((error) => { prepareError = error; });
+    });
+    await dom.run(async () => {
+      await expect(job.cancelCurrent()).rejects.toThrow("native cancel failed");
+      pendingPrepare.resolve(preview("late-preview"));
+      await preparePromise;
+    });
+    expect((prepareError as Error).message).toBe("native cancel failed");
+    expect(latest?.state).toMatchObject({ kind: "prepared", canceling: false });
+
+    bridge.cancelSaveFile.mockResolvedValueOnce("cancelled");
+    await dom.run(async () => { await job.cancelCurrent(); });
+    expect(latest?.state.kind).toBe("idle");
+  });
+
   it("新 job 的进度不被旧 Channel 回包污染", async () => {
     const firstProgress = { callback: null as ((progress: SaveFileProgress) => void) | null };
     const secondPending = deferred<SaveFilePrepareResult>();

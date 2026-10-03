@@ -167,24 +167,32 @@ export function useSaveFileJob(): UseSaveFileJobResult {
         },
       });
       if (isCurrent(generation)) {
-        if (activeRef.current?.cancelRequested) {
-          await cancelSaveFile(jobId).catch(() => undefined);
-          finish(generation);
-          const cancelled = new Error("已取消存档导入") as Error & { code: string };
-          cancelled.code = "cancelled";
-          throw cancelled;
-        }
-        replaceState({
+        const prepared: SaveFileJobState = {
           kind: "prepared",
           jobId,
           preview,
           sourceLabel: input.sourceLabel,
           canceling: false,
-        });
+        };
+        if (activeRef.current?.cancelRequested) {
+          replaceState({ ...prepared, canceling: true });
+          try {
+            await cancelSaveFile(jobId);
+          } catch (error) {
+            replaceState(prepared);
+            throw error;
+          }
+          finish(generation);
+          const cancelled = new Error("已取消存档导入") as Error & { code: string };
+          cancelled.code = "cancelled";
+          throw cancelled;
+        }
+        replaceState(prepared);
       }
       return preview;
     } catch (error) {
-      finish(generation);
+      // A failed cancel still owns native prepared resources and can be retried.
+      if (stateRef.current.kind !== "prepared") finish(generation);
       throw error;
     }
   }, [finish, isCurrent, replaceState]);
@@ -196,6 +204,7 @@ export function useSaveFileJob(): UseSaveFileJobResult {
       !active ||
       active.operation !== "import" ||
       current.kind !== "prepared" ||
+      current.canceling ||
       current.jobId !== active.jobId
     ) {
       throw new Error("当前没有待确认的存档导入");
@@ -228,11 +237,15 @@ export function useSaveFileJob(): UseSaveFileJobResult {
     if (!active) return "noop";
     const current = stateRef.current;
     if (current.kind === "prepared") {
+      if (current.canceling) return "noop";
       replaceState({ ...current, canceling: true });
       try {
-        return await cancelSaveFile(active.jobId);
-      } finally {
+        const status = await cancelSaveFile(active.jobId);
         finish(active.generation);
+        return status;
+      } catch (error) {
+        if (isCurrent(active.generation)) replaceState({ ...current, canceling: false });
+        throw error;
       }
     }
     if (current.kind === "exporting" || current.kind === "preparing") {
@@ -260,7 +273,7 @@ export function useSaveFileJob(): UseSaveFileJobResult {
       return cancelSaveFile(active.jobId);
     }
     return "noop";
-  }, [finish, replaceState]);
+  }, [finish, isCurrent, replaceState]);
 
   return {
     state,
