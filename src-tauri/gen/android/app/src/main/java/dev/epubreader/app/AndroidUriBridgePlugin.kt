@@ -37,6 +37,7 @@ class WriteStagedFileArgs {
 @InvokeArg
 class CancelWriteArgs {
     lateinit var jobId: String
+    var cancelled: Boolean = true
 }
 
 /**
@@ -138,7 +139,8 @@ class AndroidUriBridgePlugin(private val activity: Activity) : Plugin(activity) 
     @Command
     fun cancelWrite(invoke: Invoke) {
         val args = invoke.parseArgs(CancelWriteArgs::class.java)
-        cancelledWrites[args.jobId] = true
+        if (args.cancelled) cancelledWrites[args.jobId] = true
+        else cancelledWrites.remove(args.jobId)
         postResponse { invoke.resolve(JSObject()) }
     }
 
@@ -150,16 +152,16 @@ class AndroidUriBridgePlugin(private val activity: Activity) : Plugin(activity) 
     ) {
         try {
             val source = File(sourcePath).canonicalFile
-            val cacheRoot = activity.cacheDir.canonicalFile
-            if (source != cacheRoot && !source.path.startsWith(cacheRoot.path + File.separator)) {
-                throw IOException("staged source is outside the app cache")
+            val stagingRoot = File(activity.cacheDir, "save-file-staging").canonicalFile
+            if (source.parentFile != stagingRoot) {
+                throw IOException("staged source is outside save-file-staging")
             }
             if (!source.isFile) {
                 throw IOException("staged source is not a regular file")
             }
-            val pfd = activity.contentResolver.openFileDescriptor(Uri.parse(uri), "wt")
-                ?: throw IOException("content provider returned no write descriptor")
             FileInputStream(source).use { input ->
+                val pfd = activity.contentResolver.openFileDescriptor(Uri.parse(uri), "wt")
+                    ?: throw IOException("content provider returned no write descriptor")
                 // AutoCloseOutputStream owns the fd; close failures must reject
                 // before Rust can treat the destination as complete.
                 ParcelFileDescriptor.AutoCloseOutputStream(pfd).use { output ->

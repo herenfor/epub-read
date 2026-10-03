@@ -3,8 +3,8 @@ use super::{
     SaveFileError, SkippedBook, COPY_BUFFER_BYTES, JSON_LIMIT_BYTES,
 };
 use crate::portable_state::{
-    merge_portable_states, merge_versions, parse_portable_state_json, validate_portable_state,
-    PortableStateV3, MAX_SAFE_COUNTER,
+    merge_portable_states, parse_portable_state_json, validate_portable_state, PortableStateV3,
+    MAX_SAFE_COUNTER,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -226,6 +226,9 @@ pub(crate) fn write_export_archive(
     cancelled: &AtomicBool,
 ) -> Result<ExportStats, SaveFileError> {
     let state_bytes = serialize_json(state)?;
+    if state_bytes.len() as u64 > JSON_LIMIT_BYTES {
+        return Err(SaveFileError::invalid_data("state.json 超过大小上限"));
+    }
     let mut entries = Vec::with_capacity(plans.len() + 1);
     entries.push(SaveManifestEntry {
         path: "state.json".to_string(),
@@ -256,6 +259,9 @@ pub(crate) fn write_export_archive(
         entries,
     };
     let manifest_bytes = serialize_json(&manifest)?;
+    if manifest_bytes.len() as u64 > JSON_LIMIT_BYTES {
+        return Err(SaveFileError::invalid_data("manifest.json 超过大小上限"));
+    }
     let mut total_bytes = manifest_bytes.len() as u64 + state_bytes.len() as u64;
     for plan in plans {
         total_bytes = total_bytes.saturating_add(plan.bytes);
@@ -571,6 +577,14 @@ pub(crate) fn validate_and_extract(
     }
 
     let state_bytes = read_entry_bytes(&mut archive, state_index, "state.json", JSON_LIMIT_BYTES)?;
+    let declared_state = manifest
+        .entries
+        .iter()
+        .find(|entry| entry.path == "state.json")
+        .expect("single state entry checked above");
+    if hex_digest(&state_bytes) != declared_state.sha256 {
+        return Err(SaveFileError::invalid_data("state.json 内容校验失败"));
+    }
     let incoming = parse_portable_state_json(
         std::str::from_utf8(&state_bytes)
             .map_err(|_| SaveFileError::invalid_data("state.json 不是 UTF-8"))?,
@@ -585,6 +599,34 @@ pub(crate) fn validate_and_extract(
                 return Err(SaveFileError::invalid_data(
                     "manifest 范围与 state.books 不一致",
                 ));
+            }
+            if incoming
+                .organization
+                .books
+                .keys()
+                .any(|hash| !scope_set.contains(hash))
+            {
+                return Err(SaveFileError::invalid_data(
+                    "选书存档包含范围外的书籍组织资料",
+                ));
+            }
+            let referenced_folders: BTreeSet<&String> = incoming
+                .organization
+                .books
+                .values()
+                .filter_map(|book| {
+                    book.folder_id
+                        .as_ref()
+                        .and_then(|register| register.value.as_ref())
+                })
+                .collect();
+            if incoming
+                .organization
+                .folders
+                .keys()
+                .any(|id| !referenced_folders.contains(id))
+            {
+                return Err(SaveFileError::invalid_data("选书存档包含范围外的文件夹"));
             }
         }
         "all" => {}
@@ -645,6 +687,9 @@ pub(crate) fn validate_and_extract(
             let read = source.read(&mut buffer)?;
             if read == 0 {
                 break;
+            }
+            if (read as u64) > entry.bytes.saturating_sub(copied) {
+                return Err(SaveFileError::invalid_data("附带书籍超过声明长度"));
             }
             target.write_all(&buffer[..read])?;
             hasher.update(&buffer[..read]);
@@ -711,14 +756,7 @@ pub(crate) fn count_progress_conflicts(
     local: &PortableStateV3,
     incoming: &PortableStateV3,
 ) -> Result<usize, SaveFileError> {
-    let merged = merge_portable_states(local, incoming)?;
-    let mut count = 0;
-    for book in merged.books.values() {
-        if merge_versions(&[&book.progress.versions])?.len() > 1 {
-            count += 1;
-        }
-    }
-    Ok(count)
+    Ok(progress_conflict_hashes(local, incoming)?.len())
 }
 
 pub(crate) fn progress_conflict_hashes(
@@ -726,14 +764,25 @@ pub(crate) fn progress_conflict_hashes(
     incoming: &PortableStateV3,
 ) -> Result<Vec<String>, SaveFileError> {
     let merged = merge_portable_states(local, incoming)?;
+    Ok(imported_progress_conflicts(&merged, incoming))
+}
+
+pub(crate) fn imported_progress_conflicts(
+    merged: &PortableStateV3,
+    incoming: &PortableStateV3,
+) -> Vec<String> {
     let mut conflicts = Vec::new();
-    for (hash, book) in &merged.books {
-        if merge_versions(&[&book.progress.versions])?.len() > 1 {
+    for hash in incoming.books.keys() {
+        if merged
+            .books
+            .get(hash)
+            .is_some_and(|book| book.progress.versions.len() > 1)
+        {
             conflicts.push(hash.clone());
         }
     }
     conflicts.sort();
-    Ok(conflicts)
+    conflicts
 }
 
 #[cfg(test)]
@@ -968,5 +1017,88 @@ mod tests {
         let error =
             validate_and_extract(&archive_path, &staging, &mut reporter, &cancelled).unwrap_err();
         assert_eq!(error.code, "invalid-data");
+    }
+
+    #[test]
+    fn file_review_rejects_tampered_state_and_out_of_scope_organization() {
+        let dir = TempDir::new("file-review-validation");
+        let mut outside = test_state();
+        let foreign_hash = "b".repeat(64);
+        outside.organization.books.insert(
+            foreign_hash.clone(),
+            serde_json::from_value(json!({
+                "favorite": { "value": true, "stamp": { "deviceId": A, "counter": 1 } }
+            }))
+            .unwrap(),
+        );
+        for (label, state, scope, tampered) in [
+            ("bad-state-hash", test_state(), "all", true),
+            ("foreign-organization", outside, "selected", false),
+        ] {
+            let bytes = serde_json::to_vec(&state).unwrap();
+            let manifest = SaveManifest {
+                format: SAVE_FORMAT.into(),
+                container_version: 1,
+                state_schema_version: 3,
+                package_id: A.into(),
+                created_at_ms: 1,
+                scope: SaveManifestScope {
+                    kind: scope.into(),
+                    book_hashes: if scope == "selected" {
+                        vec![HASH.into()]
+                    } else {
+                        vec![]
+                    },
+                },
+                entries: vec![SaveManifestEntry {
+                    path: "state.json".into(),
+                    bytes: bytes.len() as u64,
+                    sha256: if tampered {
+                        foreign_hash.clone()
+                    } else {
+                        hex_digest(&bytes)
+                    },
+                }],
+            };
+            let path = dir.path().join(format!("{label}.epubsave"));
+            let mut zip = ZipWriter::new(File::create(&path).unwrap());
+            zip.start_file("manifest.json", SimpleFileOptions::default())
+                .unwrap();
+            zip.write_all(&serde_json::to_vec(&manifest).unwrap())
+                .unwrap();
+            zip.start_file("state.json", SimpleFileOptions::default())
+                .unwrap();
+            zip.write_all(&bytes).unwrap();
+            zip.finish().unwrap();
+            let mut reporter = ProgressReporter::new(channel(), "test", None);
+            let error = validate_and_extract(
+                &path,
+                &dir.path().join(label),
+                &mut reporter,
+                &AtomicBool::new(false),
+            )
+            .unwrap_err();
+            assert_eq!(error.code, "invalid-data", "{label}");
+            assert!(
+                error.message.contains(if tampered {
+                    "校验失败"
+                } else {
+                    "范围外"
+                }),
+                "{label}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn file_review_conflicts_only_describe_the_imported_books() {
+        let local = test_state();
+        let mut incoming = test_state();
+        let mut book = incoming.books.remove(HASH).unwrap();
+        book.progress.versions.truncate(1);
+        incoming.books.insert("b".repeat(64), book);
+        assert!(progress_conflict_hashes(&local, &incoming)
+            .unwrap()
+            .is_empty());
     }
 }

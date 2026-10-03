@@ -14,7 +14,7 @@ use crate::portable_state::{PortableError, MAX_SAFE_COUNTER};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -68,10 +68,6 @@ impl SaveFileError {
 
     pub(crate) fn cancelled() -> Self {
         Self::new("cancelled", "任务已取消")
-    }
-
-    pub(crate) fn too_late() -> Self {
-        Self::new("too-late", "资料提交已经开始，不能再取消")
     }
 
     pub(crate) fn unsupported_platform(message: impl Into<String>) -> Self {
@@ -270,13 +266,10 @@ pub(crate) struct PreparedAttachment {
 
 #[derive(Debug)]
 pub(crate) struct PreparedImport {
-    pub package_id: String,
     pub staging_dir: PathBuf,
     pub incoming: crate::portable_state::PortableStateV3,
     pub attachments: Vec<PreparedAttachment>,
-    pub source_bytes: u64,
     pub total_uncompressed_bytes: u64,
-    pub preview: SaveFilePrepareResult,
 }
 
 impl Drop for PreparedImport {
@@ -547,23 +540,4 @@ pub(crate) fn cleanup_stale_staging(app: &tauri::AppHandle) -> Result<(), SaveFi
         let _ = fs::remove_dir_all(entry.path());
     }
     Ok(())
-}
-
-pub(crate) fn temp_file_path(parent: &Path, label: &str, extension: &str) -> PathBuf {
-    let nonce = std::time::SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or(0);
-    parent.join(format!(
-        ".{label}.{}.{nonce}.{extension}.part",
-        std::process::id()
-    ))
-}
-
-pub(crate) fn open_temp_file(path: &Path) -> Result<File, SaveFileError> {
-    OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-        .map_err(Into::into)
 }

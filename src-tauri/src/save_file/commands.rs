@@ -1,5 +1,5 @@
 use super::archive::{
-    plan_export_books, preview_missing_books, progress_conflict_hashes, scope_kind,
+    imported_progress_conflicts, plan_export_books, preview_missing_books, scope_kind,
     select_export_state, validate_and_extract, write_export_archive,
 };
 use super::{
@@ -9,7 +9,7 @@ use super::{
     SaveFileLocation, SaveFilePrepareResult, SaveFileProgress,
 };
 use crate::linked_library::LinkedLibraryWriteState;
-use crate::portable_state::{PortableStateV3, MAX_SAFE_COUNTER};
+use crate::portable_state::PortableStateV3;
 use crate::portable_state_commands::with_existing_store;
 use std::collections::BTreeSet;
 use std::fs::{self, File};
@@ -37,6 +37,7 @@ enum TaskPhase {
 struct FileTask {
     job_id: String,
     cancelled: AtomicBool,
+    published: AtomicBool,
     phase: Mutex<TaskPhase>,
     ready: Condvar,
     prepared: Mutex<Option<PreparedImport>>,
@@ -47,6 +48,7 @@ impl FileTask {
         Self {
             job_id: job_id.to_string(),
             cancelled: AtomicBool::new(false),
+            published: AtomicBool::new(false),
             phase: Mutex::new(TaskPhase::Running),
             ready: Condvar::new(),
             prepared: Mutex::new(None),
@@ -169,14 +171,23 @@ fn take_prepared_for_commit(task: &Arc<FileTask>) -> Result<PreparedImport, Save
     }
 }
 
-fn signal_android_cancel(app: &AppHandle, job_id: &str) {
+fn begin_publication(task: &FileTask) -> Result<(), SaveFileError> {
+    let mut phase = task.phase.lock().map_err(|_| lock_error())?;
+    if task.cancelled.load(Ordering::Acquire) {
+        return Err(SaveFileError::cancelled());
+    }
+    *phase = TaskPhase::Committing;
+    Ok(())
+}
+
+fn signal_android_cancel(app: &AppHandle, job_id: &str, cancelled: bool) {
     #[cfg(target_os = "android")]
     {
-        let _ = crate::android_uri_bridge::cancel_write_blocking(app, job_id);
+        let _ = crate::android_uri_bridge::cancel_write_blocking(app, job_id, cancelled);
     }
     #[cfg(not(target_os = "android"))]
     {
-        let _ = (app, job_id);
+        let _ = (app, job_id, cancelled);
     }
 }
 
@@ -210,13 +221,20 @@ fn cancel_task(
         TaskPhase::Running => {
             task.cancelled.store(true, Ordering::Release);
             drop(phase);
-            signal_android_cancel(app, &task.job_id);
+            signal_android_cancel(app, &task.job_id, true);
             let mut phase = task.phase.lock().map_err(|_| lock_error())?;
             while *phase != TaskPhase::Finished {
                 phase = task.ready.wait(phase).map_err(|_| lock_error())?;
             }
+            drop(phase);
+            signal_android_cancel(app, &task.job_id, false);
             return Ok(SaveFileCancelResult {
-                status: "cancelled".to_string(),
+                status: if task.published.load(Ordering::Acquire) {
+                    "too-late"
+                } else {
+                    "cancelled"
+                }
+                .to_string(),
             });
         }
     }
@@ -357,11 +375,13 @@ fn run_export(
         SaveFileLocation::Path { path } => {
             let target = PathBuf::from(path);
             reporter.set_phase("finalizing", Some(stats.archive_bytes));
+            if let Err(error) = begin_publication(&task) {
+                return Err(error);
+            }
             crate::save_file::atomic_replace(&temp_path, &target).map_err(|error| {
                 SaveFileError::storage_error(format!("无法替换导出目标：{error}"))
             })?;
             // Temp path no longer exists after the rename.
-            std::mem::forget(_temp_guard);
         }
         SaveFileLocation::Uri { uri } => {
             #[cfg(target_os = "android")]
@@ -396,6 +416,7 @@ fn run_export(
             }
         }
     }
+    task.published.store(true, Ordering::Release);
     reporter.force();
 
     Ok(SaveFileExportResult {
@@ -542,26 +563,16 @@ fn prepare_into_staging(
     };
 
     let prepared = PreparedImport {
-        package_id: validated.package_id,
         staging_dir: staging_dir.to_path_buf(),
         incoming: validated.incoming,
         attachments: validated.attachments,
-        source_bytes: validated.source_bytes,
         total_uncompressed_bytes: validated.total_uncompressed_bytes,
-        preview,
     };
 
     if !mark_prepared(task, prepared) {
         return Err(SaveFileError::cancelled());
     }
-    Ok(task
-        .prepared
-        .lock()
-        .map_err(|_| lock_error())?
-        .as_ref()
-        .expect("just stored")
-        .preview
-        .clone())
+    Ok(preview)
 }
 
 #[allow(dead_code)]
@@ -612,29 +623,42 @@ fn compute_missing_books(
         .collect()
 }
 
-fn cleanup_published_targets(targets: &[(PathBuf, bool)]) -> Result<(), SaveFileError> {
-    let mut failures = Vec::new();
-    let mut residual = Vec::new();
-    for (path, existed_before) in targets {
-        if *existed_before {
-            residual.push(path.display().to_string());
-            continue;
+fn publish_attachment(
+    attachment: &super::PreparedAttachment,
+    target: &Path,
+) -> Result<bool, SaveFileError> {
+    // Staging lives beside managed books: a hard link publishes without replacing an existing file.
+    match fs::hard_link(&attachment.staging_path, target) {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            if super::sha256_file(target)? == attachment.content_hash {
+                Ok(false)
+            } else {
+                Err(SaveFileError::new(
+                    "conflict",
+                    "已有书籍副本内容不同，未覆盖；请先处理该文件",
+                ))
+            }
         }
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn cleanup_published_targets(targets: &[PathBuf]) -> Result<(), SaveFileError> {
+    let mut failures = Vec::new();
+    for path in targets {
         match fs::remove_file(path) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => failures.push(format!("{}：{error}", path.display())),
         }
     }
-    if failures.is_empty() && residual.is_empty() {
+    if failures.is_empty() {
         Ok(())
     } else {
         let mut parts = Vec::new();
         if !failures.is_empty() {
             parts.push(format!("无法回收本任务新建副本：{}", failures.join("；")));
-        }
-        if !residual.is_empty() {
-            parts.push(format!("已覆盖的既有文件无法恢复：{}", residual.join("；")));
         }
         Err(SaveFileError::storage_error(parts.join("；")))
     }
@@ -659,13 +683,12 @@ fn run_commit(
         "committing",
         Some(prepared.total_uncompressed_bytes),
     );
-    let (local_snapshot, raw_bindings) = store_parts(&app)?;
-    let local_bindings = parse_bindings(raw_bindings)?;
-    let visible_before = with_existing_store(&app, |store| store.local_visible_hashes())
+    let raw_bindings = with_existing_store(&app, |store| store.bindings_raw())
         .map_err(SaveFileError::from)?
         .ok_or_else(|| SaveFileError::storage_error("可移植资料仓储尚未激活"))?;
+    let local_bindings = parse_bindings(raw_bindings)?;
 
-    let mut published_targets: Vec<(PathBuf, bool)> = Vec::new();
+    let mut published_targets: Vec<PathBuf> = Vec::new();
     let result: Result<SaveFileCommitResult, SaveFileError> = (|| {
         let mut binding_rows: Vec<(String, String)> = Vec::new();
         let mut published_hashes = BTreeSet::new();
@@ -684,16 +707,9 @@ fn run_commit(
             if let Some(parent) = target.parent() {
                 fs::create_dir_all(parent)?;
             }
-            let existed_before = target.exists();
-            crate::save_file::atomic_replace(&attachment.staging_path, &target).map_err(
-                |error| {
-                    SaveFileError::storage_error(format!(
-                        "无法发布本机 managed 副本（{}）：{error}",
-                        attachment.content_hash
-                    ))
-                },
-            )?;
-            published_targets.push((target.clone(), existed_before));
+            if publish_attachment(attachment, &target)? {
+                published_targets.push(target.clone());
+            }
             published_hashes.insert(attachment.content_hash.clone());
             let metadata = fs::metadata(&target)?;
             let binding = LocalBinding::new_managed(
@@ -714,28 +730,27 @@ fn run_commit(
             &root,
             &published_hashes,
         );
-        let progress_conflict_books =
-            progress_conflict_hashes(&local_snapshot, &prepared.incoming)?;
-        let new_visible: Vec<String> = prepared
-            .incoming
-            .books
-            .keys()
-            .filter(|hash| !visible_before.contains(hash))
-            .cloned()
-            .collect();
         let incoming_hashes: Vec<String> = prepared.incoming.books.keys().cloned().collect();
 
-        let merged = with_existing_store(&app, |store| {
-            store.merge_validated_import(
+        let (merged, visible_before) = with_existing_store(&app, |store| {
+            let visible_before = store.local_visible_hashes()?;
+            let merged = store.merge_validated_import(
                 prepared.incoming.clone(),
-                binding_rows.clone(),
+                binding_rows,
                 apply_preferences,
-            )
+            )?;
+            Ok((merged, visible_before))
         })
         .map_err(SaveFileError::from)
         .and_then(|result| {
             result.ok_or_else(|| SaveFileError::storage_error("可移植资料仓储尚未激活"))
         })?;
+        let progress_conflict_books = imported_progress_conflicts(&merged, &prepared.incoming);
+        let new_visible = incoming_hashes
+            .iter()
+            .filter(|hash| !visible_before.contains(*hash))
+            .cloned()
+            .collect();
         reporter.force();
         let applied_preferences = apply_preferences && prepared.incoming.preferences.is_some();
         Ok(SaveFileCommitResult {
@@ -771,7 +786,7 @@ fn metadata_mtime_ns(metadata: &fs::Metadata) -> u64 {
         .modified()
         .ok()
         .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|duration| duration.as_nanos().min(MAX_SAFE_COUNTER as u128) as u64)
+        .map(|duration| duration.as_nanos().min(u64::MAX as u128) as u64)
         .unwrap_or(0)
 }
 
@@ -876,7 +891,7 @@ pub async fn save_file_commit_import(
 }
 
 #[tauri::command]
-pub fn save_file_cancel(
+pub async fn save_file_cancel(
     app: AppHandle,
     job_id: String,
 ) -> Result<SaveFileCancelResult, SaveFileError> {
@@ -889,5 +904,54 @@ pub fn save_file_cancel(
         }
         Err(error) => return Err(error),
     };
-    cancel_task(&app, &task)
+    tauri::async_runtime::spawn_blocking(move || cancel_task(&app, &task))
+        .await
+        .map_err(|error| SaveFileError::storage_error(format!("取消工作线程失败：{error}")))?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn file_review_publication_preserves_existing_files_and_cleans_only_own() {
+        let dir = std::env::temp_dir().join(format!("epub-save-publish-{}", new_uuid().unwrap()));
+        fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("source.epub");
+        let target = dir.join("target.epub");
+        let bytes = b"validated incoming epub";
+        fs::write(&source, bytes).unwrap();
+        let attachment = super::super::PreparedAttachment {
+            content_hash: super::super::hex_digest(bytes),
+            staging_path: source.clone(),
+            bytes: bytes.len() as u64,
+            sha256: super::super::hex_digest(bytes),
+        };
+        fs::write(&target, b"existing user bytes").unwrap();
+        assert_eq!(
+            publish_attachment(&attachment, &target).unwrap_err().code,
+            "conflict"
+        );
+        assert_eq!(fs::read(&target).unwrap(), b"existing user bytes");
+        fs::remove_file(&target).unwrap();
+        assert!(publish_attachment(&attachment, &target).unwrap());
+        cleanup_published_targets(&[target.clone()]).unwrap();
+        assert!(!target.exists());
+        fs::write(&target, bytes).unwrap();
+        assert!(!publish_attachment(&attachment, &target).unwrap());
+        cleanup_published_targets(&[]).unwrap();
+        assert_eq!(fs::read(&target).unwrap(), bytes);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn file_review_publication_rejects_cancelled_tasks_before_replacement() {
+        let task = FileTask::new("00000000-0000-4000-8000-000000000001");
+        task.cancelled.store(true, Ordering::Release);
+        assert_eq!(begin_publication(&task).unwrap_err().code, "cancelled");
+        assert_eq!(*task.phase.lock().unwrap(), TaskPhase::Running);
+        task.cancelled.store(false, Ordering::Release);
+        begin_publication(&task).unwrap();
+        assert_eq!(*task.phase.lock().unwrap(), TaskPhase::Committing);
+    }
 }

@@ -418,6 +418,7 @@ mod android {
     #[serde(rename_all = "camelCase")]
     struct CancelWriteRequest<'a> {
         job_id: &'a str,
+        cancelled: bool,
     }
 
     #[derive(Deserialize)]
@@ -510,11 +511,15 @@ mod android {
     pub(crate) fn cancel_write_blocking<R: Runtime>(
         app: &AppHandle<R>,
         job_id: &str,
+        cancelled: bool,
     ) -> Result<(), String> {
         let bridge = app.state::<AndroidUriBridge<R>>();
         bridge
             .0
-            .run_mobile_plugin::<EmptyPluginResponse>("cancelWrite", CancelWriteRequest { job_id })
+            .run_mobile_plugin::<EmptyPluginResponse>(
+                "cancelWrite",
+                CancelWriteRequest { job_id, cancelled },
+            )
             .map(|_| ())
             .map_err(|error| super::command_error("cancel_failed", error.to_string()))
     }
