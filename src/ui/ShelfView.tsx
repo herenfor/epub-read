@@ -3328,6 +3328,9 @@ export function ShelfView(props: ShelfViewProps) {
   }, []);
 
   const isCompactMobile = !!props.compact;
+  const emptyShelfHint = getRuntimeCapabilities().platform === "android"
+    ? "导入 EPUB 后会出现在这里，点击上方“导入”从设备文件中选择"
+    : "导入 EPUB 后会出现在这里，点击上方“导入”或直接将文件拖拽到窗口";
   const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
   const categoryDropdownRef = useRef<HTMLDivElement | null>(null);
   const [folderPrefixExpanded, setFolderPrefixExpanded] = useState(false);
@@ -4253,13 +4256,12 @@ export function ShelfView(props: ShelfViewProps) {
         ) : isCompactMobile ? (
           <div className="shelf-normal-bar-mobile-wrap">
             <div className="shelf-normal-bar-mobile">
-              {/* Level 1 左侧：应用 LOGO + 藏书总计微标签 */}
+              {/* Level 1 左侧：应用 LOGO；总数已在“全部 N”筛选上显示，不再重复 */}
               <div className="shelf-brand-zone-zen">
                 <div className="shelf-logo-badge" aria-hidden="true">
                   <BookLogoIcon />
                 </div>
                 <span className="shelf-brand-title">书架</span>
-                <span className="shelf-total-badge">藏书 {props.entries.length} 本</span>
               </div>
 
               {/* Level 1 右侧：导入图书主按钮、设置/更多 */}
@@ -4324,13 +4326,12 @@ export function ShelfView(props: ShelfViewProps) {
         ) : (
           /* 常态操作栏：Level 1 全局顶栏极净化 */
           <div className="shelf-normal-bar shelf-normal-bar-zen">
-            {/* Level 1 左侧：应用 LOGO + 藏书总计微标签 */}
+            {/* Level 1 左侧：应用 LOGO；总数已在“全部 N”筛选上显示，不再重复 */}
             <div className="shelf-brand-zone-zen">
               <div className="shelf-logo-badge" aria-hidden="true">
                 <BookLogoIcon />
               </div>
               <span className="shelf-brand-title">书架</span>
-              <span className="shelf-total-badge">藏书 {props.entries.length} 本</span>
             </div>
 
             {/* Level 1 中间：极速书名快速过滤框 [ 🔍 快速搜书名... (按 / 键聚焦) ] */}
@@ -4806,7 +4807,7 @@ export function ShelfView(props: ShelfViewProps) {
           </div>
           <div className="shelf-empty-title">书架还是空的</div>
           <div className="shelf-empty-hint">
-            导入 EPUB 后会出现在这里，点击上方“导入”或直接将文件拖拽到窗口
+            {emptyShelfHint}
           </div>
           <button className="shelf-empty-btn" onClick={props.onImport} disabled={props.busy || props.importActive}>
             <PlusIcon />
@@ -4820,7 +4821,7 @@ export function ShelfView(props: ShelfViewProps) {
           </div>
           <div className="shelf-empty-title">书架还是空的</div>
           <div className="shelf-empty-hint">
-            导入 EPUB 后会出现在这里，点击上方“导入”或直接将文件拖拽到窗口
+            {emptyShelfHint}
           </div>
           <button className="shelf-empty-btn" onClick={props.onImport} disabled={props.busy || props.importActive}>
             <PlusIcon />

@@ -48,9 +48,8 @@ describe("ShelfZen Packet 1 现代书架体验", () => {
     try {
       await dom.render(createElement(ShelfView, props));
 
-      // 验证总数徽标
-      const badge = dom.container.querySelector(".shelf-total-badge");
-      expect(badge?.textContent).toContain("藏书 2 本");
+      // 总数只在“全部 N”筛选上显示，品牌区不再重复“藏书 N 本”
+      expect(dom.container.querySelector(".shelf-total-badge")).toBeNull();
 
       // 验证极速快速过滤框
       const quickFilter = dom.container.querySelector(".shelf-quick-filter-input") as HTMLInputElement;
