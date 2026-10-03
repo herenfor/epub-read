@@ -1,0 +1,78 @@
+.about-info {
+  padding: 10px 12px;
+  border: 1px solid var(--panel-border, rgba(128, 128, 128, 0.22));
+  border-radius: 10px;
+  background: var(--menu-surface, var(--panel-bg, rgba(128, 128, 128, 0.06)));
+  color: var(--fg, #1a1a1a);
+}
+
+.about-product {
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.about-version-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 3px;
+}
+
+.about-version {
+  font-size: 12px;
+  color: var(--muted, #777);
+}
+
+.about-edition {
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--accent, #2b5b9e);
+}
+
+.about-channel {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--muted, #777);
+}
+
+.about-info-unavailable {
+  font-size: 12px;
+  color: var(--muted, #777);
+}
+
+.about-copy-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 9px;
+}
+
+.about-copy-btn {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--menu-surface-border, var(--panel-border, rgba(128, 128, 128, 0.3)));
+  border-radius: 8px;
+  background: var(--bg, #fff);
+  color: var(--fg, #1a1a1a);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.about-copy-btn:hover,
+.about-copy-btn:focus-visible {
+  border-color: var(--accent, #2b5b9e);
+  color: var(--accent, #2b5b9e);
+}
+
+.about-copy-status {
+  font-size: 12px;
+}
+
+.about-copy-status-copied {
+  color: var(--accent, #2b5b9e);
+}
+
+.about-copy-status-failed {
+  color: var(--error, #b3261e);
+}

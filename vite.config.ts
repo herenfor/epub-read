@@ -21,6 +21,7 @@ export default defineConfig(({ mode }) => {
     define: {
       __APP_EDITION__: JSON.stringify(edition),
       __APP_PLATFORM__: JSON.stringify(platform),
+      __APP_VERSION__: JSON.stringify(version),
     },
     plugins: [react(), {
       name: "edition-manifest",
