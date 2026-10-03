@@ -5,10 +5,11 @@ import type { LibraryOrganization, OrganizationCommand } from "../libraryOrganiz
 import { emptyOrganization } from "../libraryOrganization";
 import { generateFolderId } from "../libraryOrganization";
 import { MemoryPortableStateStorage } from "./memoryStorage";
-import { PortableStateService } from "./service";
+import { PortableStateError, PortableStateService } from "./service";
 import { PortableShelfStore, activatePortableShelfStore } from "./shelfStoreAdapter";
 import { latestVersion } from "../../core/portableState/projection";
 import type { NoteValue } from "../../core/portableState/portable-state-types";
+import { ShelfProgressWriter } from "../progressWriter";
 
 const HASH = "a".repeat(64);
 const LOCAL_ID = "local-bytes-1";
@@ -399,7 +400,7 @@ describe("CP-I portable ShelfStore facade", () => {
     expect(after.books[HASH].progress.versions[0].value?.progressPctHint).toBe(40);
     expect(after.organization.folders[folderId].name.value).toBe("箱");
   });
-  test("stale progress session sample is dropped instead of overwriting a newer position", async () => {
+  test("review_stale progress samples preserve the newer position and allow exit", async () => {
     const legacy = new FakeLegacyStore([entry()]);
     const service = new PortableStateService(new MemoryPortableStateStorage());
     await activatePortableShelfStore(legacy, service);
@@ -414,6 +415,11 @@ describe("CP-I portable ShelfStore facade", () => {
 
     // The old session submits its already-superseded sample. It must be
     // dropped, not retried against the new basis.
+    const read = service.read.bind(service);
+    service.read = async () => { throw new PortableStateError("storage-error", "read failed"); };
+    await expect(oldSession.updateProgress(LOCAL_ID, { ...progressPatch(), page: 9, anchorTextOffset: 9 }))
+      .rejects.toMatchObject({ code: "storage-error" });
+    service.read = read;
     await oldSession.updateProgress(LOCAL_ID, { ...progressPatch(), page: 9, anchorTextOffset: 9 });
 
     const state = await service.snapshot();
@@ -431,6 +437,63 @@ describe("CP-I portable ShelfStore facade", () => {
     ).rejects.toThrow("进度基线已过期");
     const preserved = (await service.snapshot()).books[HASH].progress.versions;
     expect(latestVersion(preserved)?.value?.locator).toMatchObject({ pageHint: 20 });
+
+    const writer = new ShelfProgressWriter(async (id, patch) => {
+      await oldSession.updateProgress(id, patch);
+    });
+    try {
+      writer.enqueue(LOCAL_ID, { ...progressPatch(), page: 10, anchorTextOffset: 10 });
+      await expect(writer.flush()).resolves.toBeUndefined();
+      await oldSession.closeProgressSession(LOCAL_ID);
+      expect(latestVersion((await service.snapshot()).books[HASH].progress.versions)?.value?.locator)
+        .toMatchObject({ pageHint: 20 });
+    } finally {
+      writer.dispose();
+    }
+  });
+
+  test("review_progress session never adopts a remote version received during projection", async () => {
+    const legacy = new FakeLegacyStore([entry()]);
+    const service = new PortableStateService(new MemoryPortableStateStorage());
+    await activatePortableShelfStore(legacy, service);
+    const oldSession = new PortableShelfStore(legacy, service);
+    const otherSession = new PortableShelfStore(legacy, service);
+    const initial = latestVersion((await service.snapshot()).books[HASH].progress.versions)!;
+    await oldSession.beginProgressSession(LOCAL_ID, { kind: "chosen", stamp: initial.stamp });
+
+    // Inject a concurrent device version after the transactional write and
+    // before its returned shelf projection. It has never been displayed.
+    const snapshot = service.snapshot.bind(service);
+    const remoteId = "00000000-0000-4000-8000-000000000099";
+    let injectRemote = true;
+    service.snapshot = async () => {
+      if (injectRemote) {
+        injectRemote = false;
+        const incoming = JSON.parse(JSON.stringify(await snapshot()));
+        incoming.books[HASH].progress.versions = [{
+          stamp: { deviceId: remoteId, counter: 999 },
+          clock: { [remoteId]: 999 },
+          value: { ...initial.value, locator: { ...initial.value!.locator, pageHint: 99 } },
+          updatedAtMs: 999,
+        }];
+        await service.mergeValidatedState(incoming);
+      }
+      return snapshot();
+    };
+    await oldSession.updateProgress(LOCAL_ID, { ...progressPatch(), page: 8, anchorTextOffset: 8 });
+    const ownVersion = (await snapshot()).books[HASH].progress.versions
+      .find((version) => version.stamp.deviceId === initial.stamp.deviceId)!;
+    await otherSession.beginProgressSession(LOCAL_ID, { kind: "chosen", stamp: ownVersion.stamp });
+    await otherSession.updateProgress(LOCAL_ID, { ...progressPatch(), page: 20, anchorTextOffset: 20 });
+    await oldSession.updateProgress(LOCAL_ID, { ...progressPatch(), page: 9, anchorTextOffset: 9 });
+    await expect(oldSession.updateProgress(LOCAL_ID, { ...progressPatch(), page: 10, anchorTextOffset: 10 }))
+      .rejects.toMatchObject({ code: "stale-basis" });
+
+    const versions = (await snapshot()).books[HASH].progress.versions;
+    expect(versions).toHaveLength(2);
+    expect(versions.some((version) => version.stamp.deviceId === remoteId && version.stamp.counter === 999))
+      .toBe(true);
+    expect(latestVersion(versions)?.value?.locator).toMatchObject({ pageHint: 20 });
   });
 
   test("B3 single displayed progress is bound before parse and never silently replaced", async () => {

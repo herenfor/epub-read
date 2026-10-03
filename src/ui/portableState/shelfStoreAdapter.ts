@@ -465,31 +465,32 @@ export class PortableShelfStore implements ShelfStore {
     session: ProgressReadingSession,
   ): Promise<void> {
     await this.data.release({ readId: session.readId }).catch(() => undefined);
+    const read = await this.data.read({ bookHash: hash });
+    if (!read.book) {
+      await this.data.release({ readId: read.readId }).catch(() => undefined);
+      session.invalid = true;
+      return;
+    }
+    const selection: PortableProgressSelection = session.chosenStamp
+      ? { kind: "chosen", stamp: session.chosenStamp }
+      : { kind: "empty" };
     try {
-      const read = await this.data.read({ bookHash: hash });
-      if (!read.book) {
-        await this.data.release({ readId: read.readId }).catch(() => undefined);
+      const adopted = await this.data.adopt({
+        readId: read.readId,
+        entity: { bookHash: hash, kind: "progress" },
+        selection,
+      });
+      session.readId = read.readId;
+      session.basisId = adopted.basisId;
+      session.invalid = false;
+    } catch (error) {
+      await this.data.release({ readId: read.readId }).catch(() => undefined);
+      if (error instanceof PortableStateError &&
+          (error.code === "stale-basis" || error.code === "stale-choice" || error.code === "invalid-choice")) {
         session.invalid = true;
         return;
       }
-      const selection: PortableProgressSelection = session.chosenStamp
-        ? { kind: "chosen", stamp: session.chosenStamp }
-        : { kind: "empty" };
-      try {
-        const adopted = await this.data.adopt({
-          readId: read.readId,
-          entity: { bookHash: hash, kind: "progress" },
-          selection,
-        });
-        session.readId = read.readId;
-        session.basisId = adopted.basisId;
-        session.invalid = false;
-      } catch {
-        await this.data.release({ readId: read.readId }).catch(() => undefined);
-        session.invalid = true;
-      }
-    } catch {
-      session.invalid = true;
+      throw error;
     }
   }
 
@@ -504,7 +505,9 @@ export class PortableShelfStore implements ShelfStore {
     }
     const session = this.progressSessions.get(hash);
     if (!session) throw new Error("阅读进度会话未开始");
-    if (session.invalid) throw new Error("进度基线已过期，请关闭并重新打开书籍");
+    if (session.invalid) {
+      throw new PortableStateError("stale-basis", "进度基线已过期，请关闭并重新打开书籍");
+    }
 
     const value = progressValueFromPatch(patch);
     const updatedAtMs = Math.max(patch.lastReadAtMs, Date.now());
@@ -517,14 +520,13 @@ export class PortableShelfStore implements ShelfStore {
         updatedAtMs,
       });
       session.basisId = result.nextBasisId;
-      const projected = await this.currentProjectedEntry(hash);
-      const latest = latestVersion(
-        (projected as unknown as {
-          readonly portableProgressVersions?: readonly Version<ProgressValue>[];
-        }).portableProgressVersions ?? [],
-      );
-      if (latest) session.chosenStamp = latest.stamp;
-      return projected;
+      if (result.status === "written") {
+        // The projection can include a background merge after this write.
+        // Keep the version we actually wrote as the displayed session basis.
+        const written = latestVersion(result.state.versions as readonly Version<ProgressValue>[]);
+        if (written) session.chosenStamp = written.stamp;
+      }
+      return this.currentProjectedEntry(hash);
     } catch (error) {
       if (
         error instanceof PortableStateError &&

@@ -718,6 +718,133 @@ mod tests {
     }
 
     #[test]
+    fn review_linked_import_rolls_back_book_binding_flags_and_counter() {
+        let root = TempDir::new("linked-import-rollback");
+        legacy_repository_fixture(root.path());
+        let database = root.path().join("library.sqlite3");
+        let mut store = PortableStore::open(&database).unwrap();
+        store.migrate_legacy(root.path()).unwrap();
+        let before = store.snapshot().unwrap();
+        let counter = store.counter().unwrap();
+        let visible = store.local_visible_hashes().unwrap();
+        let is_new = store.local_is_new_hashes().unwrap();
+        let bindings = store.bindings_raw().unwrap();
+        let mut record = legacy_record_json();
+        record["contentHash"] = json!(HASH_2);
+        let binding = json!({ "contentHash": HASH_2, "storageKind": "managed" }).to_string();
+        {
+            let installer = rusqlite::Connection::open(&database).unwrap();
+            installer
+                .execute_batch(
+                    "CREATE TRIGGER fail_import_binding BEFORE INSERT ON device_bindings
+                 BEGIN SELECT RAISE(FAIL, 'intentional binding failure'); END;",
+                )
+                .unwrap();
+        }
+        let error = store
+            .publish_linked_imports(
+                vec![record.clone()],
+                vec![(HASH_2.to_string(), binding.clone())],
+                vec![HASH_2.to_string()],
+                vec![HASH_2.to_string()],
+            )
+            .unwrap_err();
+        assert_eq!(error.code, "storage-error");
+        assert_eq!(store.snapshot().unwrap(), before);
+        assert_eq!(store.counter().unwrap(), counter);
+        assert_eq!(store.local_visible_hashes().unwrap(), visible);
+        assert_eq!(store.local_is_new_hashes().unwrap(), is_new);
+        assert_eq!(store.bindings_raw().unwrap(), bindings);
+        {
+            let installer = rusqlite::Connection::open(&database).unwrap();
+            installer
+                .execute_batch("DROP TRIGGER fail_import_binding;")
+                .unwrap();
+        }
+        store
+            .publish_linked_imports(
+                vec![record],
+                vec![(HASH_2.to_string(), binding)],
+                vec![HASH_2.to_string()],
+                vec![HASH_2.to_string()],
+            )
+            .unwrap();
+        drop(store);
+        let store = PortableStore::open(&database).unwrap();
+        assert!(store.snapshot().unwrap().books.contains_key(HASH_2));
+        assert!(store.binding_raw(HASH_2).unwrap().is_some());
+        assert!(store
+            .local_visible_hashes()
+            .unwrap()
+            .contains(&HASH_2.to_string()));
+        assert!(store
+            .local_is_new_hashes()
+            .unwrap()
+            .contains(&HASH_2.to_string()));
+    }
+
+    #[test]
+    fn review_linked_batch_removal_is_atomic_and_preserves_unrelated_books() {
+        let root = TempDir::new("linked-removal");
+        let database = root.path().join("library.sqlite3");
+        let mut store = PortableStore::open(&database).unwrap();
+        let mut other = legacy_record_json();
+        other["contentHash"] = json!(HASH_2);
+        let hashes = vec![HASH.to_string(), HASH_2.to_string()];
+        store
+            .publish_linked_imports(
+                vec![legacy_record_json(), other],
+                hashes
+                    .iter()
+                    .map(|hash| (hash.clone(), json!({"contentHash": hash}).to_string()))
+                    .collect(),
+                hashes.clone(),
+                hashes.clone(),
+            )
+            .unwrap();
+        store.set_local_is_new(HASH, false).unwrap();
+        assert_eq!(
+            store.local_is_new_hashes().unwrap(),
+            vec![HASH_2.to_string()]
+        );
+        {
+            let installer = rusqlite::Connection::open(&database).unwrap();
+            installer
+                .execute_batch(&format!(
+                    "CREATE TRIGGER fail_second_delete BEFORE DELETE ON device_bindings
+                 WHEN OLD.hash = '{HASH_2}'
+                 BEGIN SELECT RAISE(FAIL, 'intentional removal failure'); END;"
+                ))
+                .unwrap();
+        }
+        assert!(store.hide_linked_records(&hashes).is_err());
+        assert_eq!(store.local_visible_hashes().unwrap(), hashes);
+        assert!(store.binding_raw(HASH).unwrap().is_some());
+        assert!(store.binding_raw(HASH_2).unwrap().is_some());
+        {
+            let installer = rusqlite::Connection::open(&database).unwrap();
+            installer
+                .execute_batch("DROP TRIGGER fail_second_delete;")
+                .unwrap();
+        }
+        store.hide_linked_records(&[HASH.to_string()]).unwrap();
+        assert_eq!(
+            store.local_visible_hashes().unwrap(),
+            vec![HASH_2.to_string()]
+        );
+        assert_eq!(
+            store.local_is_new_hashes().unwrap(),
+            vec![HASH_2.to_string()]
+        );
+        assert!(store.binding_raw(HASH).unwrap().is_none());
+        assert!(store.binding_raw(HASH_2).unwrap().is_some());
+        let state = store.snapshot().unwrap();
+        assert_eq!(state.books.len(), 2);
+        assert!(state.books[HASH].notes.contains_key(OLD_NOTE_ID));
+        assert_eq!(state.books[HASH].progress.versions.len(), 1);
+    }
+
+    #[test]
     fn repository_linked_snapshot_binding_visibility_and_is_new_work() {
         let mut store = PortableStore::open_in_memory().unwrap();
         store
@@ -798,5 +925,4 @@ mod tests {
             .unwrap()
             .contains(&HASH.to_string()));
     }
-
 }

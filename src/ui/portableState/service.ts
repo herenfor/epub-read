@@ -641,6 +641,7 @@ export class PortableStateService implements PortableStateCommandService {
     }));
 
     if (outcome.nextBasis) {
+      this.bases.delete(input.basisId);
       const nextBasisId = newOpaqueId();
       this.bases.set(nextBasisId, { bookHash: outcome.entity.bookHash, basis: outcome.nextBasis as AnyReadBasis });
       return { status: outcome.status, entity: outcome.entity, state: outcome.state, nextBasisId };

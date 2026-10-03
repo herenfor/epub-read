@@ -818,7 +818,10 @@ fn delete_records_portable(app: &AppHandle, content_hashes: &[String]) -> Result
     let root = library_root(app)?;
     let mut managed_paths = Vec::new();
     for hash in &target_hashes {
-        for binding in bindings.iter().filter(|binding| &binding.content_hash == hash) {
+        for binding in bindings
+            .iter()
+            .filter(|binding| &binding.content_hash == hash)
+        {
             if let BindingSource::Managed(path) = binding.resolve_source(&root)? {
                 managed_paths.push(path);
             }
@@ -836,23 +839,16 @@ fn delete_records_portable(app: &AppHandle, content_hashes: &[String]) -> Result
         }
     }
 
-    let target_set: HashSet<&str> = target_hashes.iter().map(String::as_str).collect();
-    let remaining_records: Vec<LinkedLibraryRecord> = records
-        .into_iter()
-        .filter(|record| !target_set.contains(record.content_hash.as_str()))
-        .collect();
-    let remaining_bindings: Vec<DeviceBinding> = bindings
-        .into_iter()
-        .filter(|binding| !target_set.contains(binding.content_hash.as_str()))
-        .collect();
-
     let mut thumbnails = load_thumbnail_index(app)?;
     for hash in &target_hashes {
         remove_thumbnail(app, &mut thumbnails, hash)?;
     }
     save_thumbnail_index(app, &thumbnails)?;
-    save_bindings(app, &remaining_bindings)?;
-    save_records(app, &remaining_records)
+    crate::portable_state_commands::with_existing_store(app, |store| {
+        store.hide_linked_records(&target_hashes)
+    })
+    .map_err(|error| error.to_string())?
+    .ok_or_else(|| "可移植资料仓储未激活".to_string())
 }
 
 fn load_portable_records(app: &AppHandle) -> Result<Option<Vec<LinkedLibraryRecord>>, String> {
@@ -930,6 +926,42 @@ fn save_portable_records(app: &AppHandle, records: &[LinkedLibraryRecord]) -> Re
             .map(|_| ())
     })
     .map(|result| result.map(|_| ()))
+    .map_err(|error| error.to_string())
+}
+
+/// Import adds bindings and visibility without replacing concurrently imported
+/// local rows. SQLite owns the entire metadata/binding publication transaction.
+fn save_portable_import(
+    app: &AppHandle,
+    records: &[LinkedLibraryRecord],
+    bindings: &[DeviceBinding],
+) -> Result<Option<()>, String> {
+    let values = records
+        .iter()
+        .map(serde_json::to_value)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("无法序列化书库记录：{error}"))?;
+    let rows = bindings
+        .iter()
+        .map(|binding| {
+            serde_json::to_string(binding).map(|raw| (binding.content_hash.clone(), raw))
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("无法序列化设备绑定：{error}"))?;
+    let visible = records
+        .iter()
+        .map(|record| record.content_hash.clone())
+        .collect();
+    let is_new = records
+        .iter()
+        .filter(|record| record.is_new)
+        .map(|record| record.content_hash.clone())
+        .collect();
+    crate::portable_state_commands::with_existing_store(app, |store| {
+        store
+            .publish_linked_imports(values, rows, visible, is_new)
+            .map(|_| ())
+    })
     .map_err(|error| error.to_string())
 }
 
@@ -2219,7 +2251,7 @@ enum PreparedItem {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct PublishOutcome {
     statuses: HashMap<String, String>,
     failures: HashMap<String, String>,
@@ -2505,7 +2537,30 @@ fn publish_prepared_documents(
     Ok(outcome)
 }
 
-/// Persists the two import indexes in the same order as the import contract:
+fn persist_import_indexes_for_app(
+    app: &AppHandle,
+    root: &Path,
+    outcome: &PublishOutcome,
+    records: &[LinkedLibraryRecord],
+    bindings: &[DeviceBinding],
+) -> Result<(), NativeImportError> {
+    if !outcome.bindings_changed && !outcome.records_changed {
+        return Ok(());
+    }
+    if save_portable_import(app, records, bindings)
+        .map_err(|message| {
+            NativeImportError::commit_failed(format!(
+                "正式副本可能已写入，但书库资料和绑定未能提交：{message}；请刷新后重试"
+            ))
+        })?
+        .is_some()
+    {
+        return Ok(());
+    }
+    persist_import_indexes(root, outcome, records, bindings)
+}
+
+/// Legacy fallback persists the two JSON indexes in the same order:
 /// bindings first, records second. The command owns the commit permit and
 /// keeps it alive across this call. This small shared boundary is also what
 /// the partial-commit unit test drives; it intentionally does not claim any
@@ -2759,7 +2814,7 @@ fn run_import_documents_blocking(
     send_import_progress(&on_progress, &request_id, "committing", total, total);
     let outcome = publish_prepared_documents(&root, &mut records, &mut bindings, &prepared)?;
 
-    persist_import_indexes(&root, &outcome, &records, &bindings)?;
+    persist_import_indexes_for_app(&app, &root, &outcome, &records, &bindings)?;
 
     let results =
         build_committed_results(prepared, outcome, &records, &bindings, &thumbnails, &root);
@@ -2998,14 +3053,18 @@ pub fn linked_library_import_paths(
             }),
         }
     }
-    // Safe order: a binding without a record is ignored; a visible record never
-    // points at an accidentally different path after an interrupted import.
-    if bindings_changed {
-        save_bindings(&app, &bindings)?;
-    }
-    if records_changed {
-        save_records(&app, &records)?;
-    }
+    persist_import_indexes_for_app(
+        &app,
+        &root,
+        &PublishOutcome {
+            bindings_changed,
+            records_changed,
+            ..Default::default()
+        },
+        &records,
+        &bindings,
+    )
+    .map_err(|error| error.message)?;
     Ok(ImportBatchResult { results })
 }
 
@@ -3307,7 +3366,14 @@ pub fn linked_library_mark_opened(
         .find(|record| record.content_hash == content_hash)
         .ok_or_else(|| "书库中没有这本书".to_string())?;
     record.is_new = false;
-    save_records(&app, &records)?;
+    if crate::portable_state_commands::with_existing_store(&app, |store| {
+        store.set_local_is_new(&content_hash, false)
+    })
+    .map_err(|error| error.to_string())?
+    .is_none()
+    {
+        save_records_at(&root, &records)?;
+    }
     let bindings = load_bindings(&app)?;
     let thumbnails = load_thumbnail_index(&app)?;
     view_by_hash(&records, &bindings, &thumbnails, &content_hash, &root)

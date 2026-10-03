@@ -1159,21 +1159,26 @@ impl PortableStore {
     /// Local removal of a linked/managed row: drop binding and visibility while
     /// preserving the portable book and its tombstones for future sync.
     pub fn hide_linked_record(&mut self, content_hash: &str) -> PortableResult<()> {
-        if !dto::valid_content_hash(content_hash) {
-            return Err(PortableError::invalid_entity(
-                "invalid-entity：contentHash 必须是 64 位小写内容指纹",
-            ));
+        self.hide_linked_records(&[content_hash.to_string()])
+    }
+
+    pub fn hide_linked_records(&mut self, content_hashes: &[String]) -> PortableResult<()> {
+        for hash in content_hashes {
+            if !dto::valid_content_hash(hash) {
+                return Err(PortableError::invalid_entity(
+                    "invalid-entity：contentHash 必须是 64 位小写内容指纹",
+                ));
+            }
         }
         let transaction = self.connection.unchecked_transaction()?;
-        transaction.execute(
-            "DELETE FROM device_bindings WHERE hash = ?1",
-            params![content_hash],
-        )?;
         let mut visible = load_local_visible_hashes(&transaction)?;
-        visible.remove(content_hash);
-        save_local_visible_hashes(&transaction, &visible)?;
         let mut is_new = load_local_is_new_hashes(&transaction)?;
-        is_new.remove(content_hash);
+        for hash in content_hashes {
+            transaction.execute("DELETE FROM device_bindings WHERE hash = ?1", params![hash])?;
+            visible.remove(hash);
+            is_new.remove(hash);
+        }
+        save_local_visible_hashes(&transaction, &visible)?;
         save_local_is_new_hashes(&transaction, &is_new)?;
         transaction.commit()?;
         Ok(())
