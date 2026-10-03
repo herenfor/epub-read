@@ -116,4 +116,27 @@ describe("batteryStatus", () => {
     );
     expect(mocks.invoke).toHaveBeenCalledTimes(2);
   });
+
+  it("review_ignores released channel messages after subscribing again", async () => {
+    mocks.invoke.mockResolvedValue(undefined);
+    const { subscribeBattery } = await import("./batteryStatus");
+    const stopFirst = subscribeBattery(vi.fn());
+    await vi.waitFor(() => expect(mocks.invoke).toHaveBeenCalledTimes(1));
+    const oldChannel = mocks.invoke.mock.calls[0]![1]!.onStatus as StatusChannel;
+    oldChannel.onmessage({ levelPct: 20, charging: false });
+    stopFirst();
+    await vi.waitFor(() => expect(mocks.invoke).toHaveBeenCalledTimes(2));
+    oldChannel.onmessage({ levelPct: 19, charging: false });
+
+    const received = vi.fn();
+    const stopSecond = subscribeBattery(received);
+    expect(received).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(mocks.invoke).toHaveBeenCalledTimes(3));
+    const newChannel = mocks.invoke.mock.calls[2]![1]!.onStatus as StatusChannel;
+    newChannel.onmessage({ levelPct: 80, charging: true });
+    oldChannel.onmessage({ levelPct: 18, charging: false });
+    expect(received.mock.calls).toEqual([[{ levelPct: 80, charging: true }]]);
+    stopSecond();
+    await vi.waitFor(() => expect(mocks.invoke).toHaveBeenCalledTimes(4));
+  });
 });

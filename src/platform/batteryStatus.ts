@@ -13,6 +13,7 @@ const ANDROID_BATTERY_UNSUBSCRIBE_COMMAND = "android_battery_unsubscribe";
 const listeners = new Set<BatteryStatusListener>();
 let lastStatus: BatteryStatus | null = null;
 let nativeSubscribed = false;
+let activeChannel: Channel<unknown> | null = null;
 let lifecycle: Promise<void> = Promise.resolve();
 
 function normalizeStatus(payload: unknown): BatteryStatus {
@@ -45,16 +46,22 @@ function notify(status: BatteryStatus): void {
 async function synchronize(): Promise<void> {
   if (listeners.size > 0 && !nativeSubscribed) {
     const channel = new Channel<unknown>((payload) => {
+      if (activeChannel !== channel || listeners.size === 0) return;
       notify(normalizeStatus(payload));
     });
+    activeChannel = channel;
     try {
       await invoke(ANDROID_BATTERY_SUBSCRIBE_COMMAND, { onStatus: channel });
       if (listeners.size === 0) {
+        activeChannel = null;
+        lastStatus = null;
         await invoke(ANDROID_BATTERY_UNSUBSCRIBE_COMMAND).catch(() => {});
         return;
       }
       nativeSubscribed = true;
     } catch (error) {
+      activeChannel = null;
+      lastStatus = null;
       await invoke(ANDROID_BATTERY_UNSUBSCRIBE_COMMAND).catch(() => {});
       throw error;
     }
@@ -63,6 +70,7 @@ async function synchronize(): Promise<void> {
 
   if (listeners.size === 0 && nativeSubscribed) {
     nativeSubscribed = false;
+    activeChannel = null;
     lastStatus = null;
     await invoke(ANDROID_BATTERY_UNSUBSCRIBE_COMMAND);
   }
