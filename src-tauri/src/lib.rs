@@ -477,6 +477,7 @@ mod tests {
 mod ai;
 mod library_organization;
 mod linked_library;
+mod portable_state;
 mod system_fonts;
 
 use linked_library::LinkedLibraryWriteState;
