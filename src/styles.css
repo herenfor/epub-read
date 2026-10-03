@@ -4001,6 +4001,8 @@ select option {
   }
 }
 
+/* 弹窗在输入法以上的可见区内居中：触摸端输入法覆盖页面而不缩小布局视口，
+ * 由 App 提供的 --ime-bottom 扣掉键盘高度，确认/取消不被挡住。 */
 .shelf-confirm-backdrop {
   position: fixed;
   inset: 0;
@@ -4008,11 +4010,17 @@ select option {
   display: flex;
   align-items: center;
   justify-content: center;
+  box-sizing: border-box;
+  padding-bottom: var(--ime-bottom, 0px);
   background: rgba(0, 0, 0, 0.35);
+  transition: padding-bottom var(--motion-base, 220ms) var(--ease-emphasized, ease);
 }
 
 .shelf-confirm {
   width: min(360px, calc(100vw - 40px));
+  max-height: calc(var(--visual-viewport-height, 100vh) - 24px);
+  overflow-y: auto;
+  box-sizing: border-box;
   padding: 20px;
   border-radius: 14px;
   background: var(--bg);
@@ -5638,6 +5646,13 @@ select option {
   transition: transform 0.05s ease-out;
   display: flex;
   flex-direction: column;
+}
+
+/* 悬停文件夹时缩成小卡并让到指尖右下，手指下的文件夹名不被拖动卡遮住。 */
+.shelf-drag-ghost.is-over-folder {
+  transform: translate(16px, 32px) rotate(4deg) scale(0.5);
+  transform-origin: top left;
+  transition: transform var(--motion-fast, 140ms) var(--ease-standard, ease);
 }
 
 .shelf-drag-ghost-cover {
