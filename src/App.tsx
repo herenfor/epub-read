@@ -666,6 +666,11 @@ export default function App() {
   // ---- 书架 ----
   const [view, setView] = useState<"shelf" | "reader">("shelf");
   const [readerToolsVisible, setReaderToolsVisible] = useState(true);
+  // 图片激活等稳定回调需要读到当前沉浸状态。
+  const readerToolsVisibleRef = useRef(readerToolsVisible);
+  readerToolsVisibleRef.current = readerToolsVisible;
+  const mobileChromeRef = useRef(mobileChrome);
+  mobileChromeRef.current = mobileChrome;
   const [batteryIndicatorEnabled, setBatteryIndicatorEnabled] = useState(readBatteryIndicatorEnabled);
   const changeBatteryIndicatorEnabled = useCallback((enabled: boolean) => {
     setBatteryIndicatorEnabled(enabled);
@@ -1026,6 +1031,12 @@ export default function App() {
    */
   const handleImageActivation = useCallback(
     (image: ImageViewRequest): void => {
+      // 沉浸阅读时第一次轻点（含全页插图）先呼出工具栏，工具可见时再点才打开大图；
+      // 否则整页插图上无法呼出工具。
+      if (mobileChromeRef.current && !readerToolsVisibleRef.current) {
+        setReaderToolsVisible(true);
+        return;
+      }
       readerRef.current?.dismissFootnote();
       readerRef.current?.clearTextSelection();
       overlayHoverRef.current = false;
@@ -5629,24 +5640,7 @@ export default function App() {
           />
           <div className="mobile-more-sheet" role="dialog" aria-modal="true" aria-label="更多阅读操作">
             <div className="mobile-more-title">更多</div>
-            <button
-              type="button"
-              onClick={() => {
-                handleOpenBookmarks();
-                setMobileMoreOpen(false);
-              }}
-            >
-              书签列表
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                openPanel("notes");
-                setMobileMoreOpen(false);
-              }}
-            >
-              笔记
-            </button>
+            {/* 书签/笔记已在“目录”面板的标签页，导入在书架；此处不再重复入口。 */}
             {IS_AI_EDITION && (
               <button
                 type="button"
@@ -5666,15 +5660,6 @@ export default function App() {
               }}
             >
               诊断日志
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setMobileMoreOpen(false);
-                void handleChooseBooks();
-              }}
-            >
-              打开本地文件
             </button>
             <div className="mobile-more-about">
               <AboutInfo />

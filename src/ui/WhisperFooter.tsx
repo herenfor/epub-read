@@ -491,8 +491,30 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
     }
   };
 
-  // 极简微弱文案
+  const wholeBookLabel = (): string => {
+    if (!scrubState) return `${Math.round(fallbackWholeBookPct)}%`;
+    if (scrubState.actual) return `${labelProgressPct(scrubState.actual)}%`;
+    if (activeRatio === null) return "…";
+    const atEnd = typeof bookProgressPct === "number" && bookProgressPct >= 100;
+    return `${atEnd ? 100 : Math.min(99, Math.round(activeRatio * 100))}%`;
+  };
+
+  // 极简微弱文案；触摸底栏空间有限，只留本章位置、剩余时间与全书百分比。
   const textContent = (() => {
+    if (mobile) {
+      const parts: string[] = [];
+      if (readingMode === "scroll") parts.push(`本章 ${currentChapterProgressPct}%`);
+      else if (leafRange) {
+        parts.push(leafRange.first === leafRange.last
+          ? `${leafRange.first}/${leafRange.total} 页`
+          : `${leafRange.first}–${leafRange.last}/${leafRange.total} 页`);
+      } else parts.push(`${currentPage + 1}/${pageCount || 1} 页`);
+      if (typeof estimatedMinutesLeft === "number" && estimatedMinutesLeft > 0) {
+        parts.push(`剩 ${estimatedMinutesLeft} 分钟`);
+      }
+      parts.push(`全书 ${wholeBookLabel()}`);
+      return parts.join(" · ");
+    }
     const parts: string[] = [];
     if (readingMode === "scroll") {
       parts.push(`本章 ${currentChapterProgressPct}%`);
@@ -586,7 +608,8 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
             />
 
             {/* 章节刻度点（仅展示，点击穿透至 track 由单一 commit 入口提交） */}
-            {chapterTicks.map((tick) => (
+            {/* 触摸底栏章节过多时刻度挤成一条虚线，只保留填色与滑块。 */}
+            {!(mobile && chapterTicks.length > 30) && chapterTicks.map((tick) => (
               <div
                 key={tick.spineIndex}
                 className={`whisper-chapter-tick${tick.spineIndex === chapterIndex ? " current" : ""}`}
@@ -657,7 +680,7 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
               disabled={!onToggleAppearance}
             >
               <span className="mobile-reader-aa" aria-hidden="true">Aa</span>
-              <span>Aa</span>
+              <span>排版</span>
             </button>
             <button
               type="button"
