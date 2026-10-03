@@ -3254,6 +3254,20 @@ const ShelfTableRow = memo(function ShelfTableRow({
  * 主书架视图
  * ========================================================================= */
 
+
+/** 书架三档密度的显示名与快捷按钮循环顺序（舒适 → 标准 → 紧凑 → 舒适）。 */
+const SHELF_DENSITY_LABEL: Record<ShelfDensity, string> = {
+  comfortable: "舒适",
+  standard: "标准",
+  compact: "紧凑",
+};
+
+const NEXT_SHELF_DENSITY: Record<ShelfDensity, ShelfDensity> = {
+  comfortable: "standard",
+  standard: "compact",
+  compact: "comfortable",
+};
+
 export function ShelfView(props: ShelfViewProps) {
   const organization = props.organization ?? emptyOrganization();
   const [internalScope, setInternalScope] = useState<ShelfScope>(props.scope ?? { type: "root" });
@@ -3269,7 +3283,14 @@ export function ShelfView(props: ShelfViewProps) {
 
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<ShelfSort>("recent");
-  const [density, setDensity] = useState<ShelfDensity>("standard");
+  const [density, setDensityState] = useState<ShelfDensity>(() => {
+    try {
+      const stored = localStorage.getItem("epub_shelf_density");
+      return stored === "comfortable" || stored === "compact" ? stored : "standard";
+    } catch {
+      return "standard";
+    }
+  });
   const [viewMode, setViewMode] = useState<"grid" | "list">(() => {
     try {
       return (localStorage.getItem("epub_shelf_view_mode") as "grid" | "list") || "grid";
@@ -3423,6 +3444,13 @@ export function ShelfView(props: ShelfViewProps) {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [selectionMode]);
+
+  const setDensity = useCallback((next: ShelfDensity) => {
+    setDensityState(next);
+    try {
+      localStorage.setItem("epub_shelf_density", next);
+    } catch {}
+  }, []);
 
   const handleViewModeChange = useCallback((mode: "grid" | "list") => {
     setViewMode(mode);
@@ -4789,11 +4817,11 @@ export function ShelfView(props: ShelfViewProps) {
             <button
               className="shelf-icon-btn-zen"
               type="button"
-              onClick={() => setDensity(density === "compact" ? "standard" : "compact")}
-              title={density === "compact" ? "切换为舒适密度" : "切换为紧凑密度"}
+              onClick={() => setDensity(NEXT_SHELF_DENSITY[density])}
+              title={`排布密度：${SHELF_DENSITY_LABEL[density]}，点按切换为${SHELF_DENSITY_LABEL[NEXT_SHELF_DENSITY[density]]}`}
               style={{ width: "auto", height: 32, padding: "0 12px", fontSize: "13px" }}
             >
-              {density === "compact" ? "紧凑" : "舒适"}
+              {SHELF_DENSITY_LABEL[density]}
             </button>
           </div>
         )}

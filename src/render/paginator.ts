@@ -2415,6 +2415,9 @@ export class ChapterPaginator {
   private externalScrollOwnershipRestore: (() => void) | null = null;
   /** 当前 iframe 文档上的横滑清理函数；换章/销毁时必须解除。 */
   private pagedSwipeCleanup: (() => void) | null = null;
+  /** 触摸分页时 viewer 改为合成滚动的原内联值快照；null 表示未接管。 */
+  private compositedPagedScrollRestore: (() => void) | null = null;
+  private compositedPagedScrollViewer: HTMLElement | null = null;
   /** 普通轻点检测清理函数；用于手机工具栏显隐。 */
   private plainTapCleanup: (() => void) | null = null;
   /** 最近一次 scroll 事件的 rAF 合并句柄。 */
@@ -2531,6 +2534,56 @@ export class ChapterPaginator {
   private restoreExternalScrollOwnership(): void {
     this.externalScrollOwnershipRestore?.();
     this.externalScrollOwnershipRestore = null;
+  }
+
+  /**
+   * 触摸分页的滑动翻页逐帧写 viewer.scrollLeft。overflow:hidden 的容器不走合成
+   * 滚动，每帧都要重新栅格化整屏文字，平板上掉到 30–60fps。主指针为触摸时改为
+   * overflow-x:scroll（隐藏滚动条、禁止原生横向 pan），滚动偏移交给合成器，
+   * 版面与分页几何不变；鼠标/触控板为主的桌面不接管，避免原生横向滚动绕过分页。
+   */
+  private applyCompositedPagedScroll(): void {
+    const viewer = this.viewer;
+    const win = this.contentDoc?.defaultView;
+    let coarse = false;
+    try {
+      coarse = win?.matchMedia?.("(pointer: coarse)").matches === true;
+    } catch {
+      coarse = false;
+    }
+    if (!viewer || !this.pagedSwipe || this.scrollMode || !coarse) {
+      this.restoreCompositedPagedScroll();
+      return;
+    }
+    if (this.compositedPagedScrollViewer === viewer) return;
+    // 换章后旧 viewer 随旧文档丢弃，快照不再回写。
+    this.compositedPagedScrollRestore = null;
+    const properties = ["overflow-x", "scrollbar-width", "touch-action"] as const;
+    const snapshot = properties.map((property) => ({
+      property,
+      value: viewer.style.getPropertyValue(property),
+      priority: viewer.style.getPropertyPriority(property),
+    }));
+    const scrollLeft = viewer.scrollLeft;
+    viewer.style.setProperty("overflow-x", "scroll", "important");
+    viewer.style.setProperty("scrollbar-width", "none");
+    viewer.style.setProperty("touch-action", "pan-y pinch-zoom");
+    viewer.scrollLeft = scrollLeft;
+    this.compositedPagedScrollRestore = () => {
+      const left = viewer.scrollLeft;
+      for (const item of snapshot) {
+        if (item.value) viewer.style.setProperty(item.property, item.value, item.priority);
+        else viewer.style.removeProperty(item.property);
+      }
+      viewer.scrollLeft = left;
+    };
+    this.compositedPagedScrollViewer = viewer;
+  }
+
+  private restoreCompositedPagedScroll(): void {
+    if (this.compositedPagedScrollViewer === this.viewer) this.compositedPagedScrollRestore?.();
+    this.compositedPagedScrollRestore = null;
+    this.compositedPagedScrollViewer = null;
   }
 
   /**
@@ -2804,6 +2857,7 @@ export class ChapterPaginator {
         gestureSurface: viewer,
       });
     }
+    this.applyCompositedPagedScroll();
     if (this.onPlainTap) {
       this.plainTapCleanup?.();
       this.plainTapCleanup = installPlainTap(doc, {
@@ -3084,6 +3138,7 @@ export class ChapterPaginator {
     }
     viewer.style.paddingTop = `${padTop}px`;
     viewer.style.paddingBottom = `${padBottom}px`;
+    this.applyCompositedPagedScroll();
     if (scrollMode) {
       viewer.style.columnCount = "auto";
       viewer.style.columnWidth = "auto";
@@ -3312,6 +3367,7 @@ export class ChapterPaginator {
       viewer.style.setProperty(property, value);
     }
     this.applyExternalScrollOwnership();
+    this.applyCompositedPagedScroll();
   }
 
   /** ready 状态的唯一构造入口，避免滚动字段散落在各调用点。 */
@@ -7544,6 +7600,7 @@ export class ChapterPaginator {
     this.cancelScrollAnimation();
     this.restoreScrollView();
     this.restoreExternalScrollOwnership();
+    this.restoreCompositedPagedScroll();
     this.pagedSwipeCleanup?.();
     this.pagedSwipeCleanup = null;
     this.plainTapCleanup?.();

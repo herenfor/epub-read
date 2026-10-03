@@ -6051,23 +6051,74 @@ select option {
   padding: 10px 12px;
 }
 
+/* 三档密度在触摸端必须拉开差距：平板按最小卡宽自动排（横屏约 6/8/10 列，竖屏约 4/5/6 列），
+ * 手机竖屏固定 舒适 2 / 标准 3 / 紧凑 4 本并排。 */
 .app[data-mobile-chrome="true"] .shelf-grid,
-.app[data-mobile-chrome="true"] .shelf-view.density-standard .shelf-grid,
-.app[data-mobile-chrome="true"] .shelf-view.density-comfortable .shelf-grid {
-  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+.app[data-mobile-chrome="true"] .shelf-view.density-standard .shelf-grid {
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
   gap: 16px 12px;
 }
 
+.app[data-mobile-chrome="true"] .shelf-view.density-comfortable .shelf-grid {
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 20px 16px;
+}
+
 .app[data-mobile-chrome="true"] .shelf-view.density-compact .shelf-grid {
-  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
   gap: 12px 9px;
 }
 
-@media (max-width: 380px) {
-  .app[data-mobile-chrome="true"] .shelf-grid,
-  .app[data-mobile-chrome="true"] .shelf-view.density-standard .shelf-grid,
-  .app[data-mobile-chrome="true"] .shelf-view.density-comfortable .shelf-grid {
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-grid,
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-view.density-standard .shelf-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px 10px;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-view.density-comfortable .shelf-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px 14px;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-view.density-compact .shelf-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px 7px;
+}
+
+/* 卡片窄时状态行不折行：进度与时间同一行，放不下先省略；手机紧凑四列只留进度。 */
+.shelf-card-subline {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.shelf-card-subline .shelf-time {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-view.density-compact .shelf-card-subline .shelf-dot,
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-view.density-compact .shelf-card-subline .shelf-time {
+  display: none;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-view.density-compact .shelf-card-title {
+  font-size: 12.5px;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-view.density-compact .shelf-card-meta {
+  font-size: 11px;
+}
+
+@media (max-width: 340px) {
+  .app[data-mobile-chrome="true"][data-layout="compact"] .shelf-grid,
+  .app[data-mobile-chrome="true"][data-layout="compact"] .shelf-view.density-standard .shelf-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .app[data-mobile-chrome="true"][data-layout="compact"] .shelf-view.density-compact .shelf-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
@@ -6513,11 +6564,21 @@ select option {
   height: calc(48px * var(--ui-touch-comp, 1));
 }
 
-/* 网格三点按钮：48px 真实命中，32px 居中弱化半透明背景圆底，18px 图标 */
+/* 网格三点按钮：贴封面右上角，44px 命中区不变，可见圆点 26px、图标 16px 落在命中区右上。 */
+.app[data-touch-ui="true"] .shelf-grid .shelf-card-actions-wrap {
+  top: 0;
+  right: 0;
+}
+
 .app[data-touch-ui="true"] .shelf-grid .shelf-card-more-btn {
   position: relative;
+  width: calc(44px * var(--ui-touch-comp, 1));
+  height: calc(44px * var(--ui-touch-comp, 1));
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding: 5px;
   background: transparent;
-  border-radius: 50%;
+  border-radius: 0 8px 0 12px;
   border: none;
   opacity: 1;
 }
@@ -6525,29 +6586,39 @@ select option {
 .app[data-touch-ui="true"] .shelf-grid .shelf-card-more-btn::before {
   content: "";
   position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 32px;
-  height: 32px;
+  top: 5px;
+  right: 5px;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.42);
+  background: rgba(0, 0, 0, 0.38);
   pointer-events: none;
   z-index: 0;
-  transition: background-color 0.14s ease;
+  transition: background-color 0.14s ease, transform 0.12s ease;
 }
 
 .app[data-touch-ui="true"] .shelf-grid .shelf-card-more-btn:active::before,
 .app[data-touch-ui="true"] .shelf-grid .shelf-card-more-btn.active::before {
-  background: rgba(0, 0, 0, 0.65);
+  background: rgba(0, 0, 0, 0.62);
+  transform: scale(0.92);
 }
 
 .app[data-touch-ui="true"] .shelf-grid .shelf-card-more-btn svg,
 .app[data-touch-ui="true"] .shelf-grid .shelf-card-more-btn .shelf-svg-icon {
   position: relative;
   z-index: 1;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
+  margin: 5px;
+}
+
+/* 安卓 WebView 默认点按高亮会把整张书卡刷成蓝块；触摸端统一关掉，按压反馈由各控件 :active 承担。 */
+.app[data-touch-ui="true"] {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.app[data-touch-ui="true"] .shelf-card:active:not(:has(.shelf-card-actions-wrap:active)) .shelf-cover-box {
+  transform: scale(0.98);
 }
 
 .app[data-touch-ui="true"] .shelf-card-star-btn {
