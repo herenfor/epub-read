@@ -4298,7 +4298,7 @@ export function ShelfView(props: ShelfViewProps) {
                   else setSelectedIds(new Set(visible.map((e) => e.id)));
                 }}
               >
-                {selectedIds.size === visible.length ? "取消全选" : "全选全部"}
+                {selectedIds.size === visible.length && visible.length > 0 ? "取消全选" : "全选"}
               </button>
             </div>
           </div>
