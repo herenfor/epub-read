@@ -810,23 +810,31 @@ impl PortableStore {
             let progress_conflict = progress_versions.len() > 1;
             let mut bookmarks = Vec::new();
             for (id, annotation) in &book.bookmarks {
-                if let Some(display) = annotation_display(annotation)? {
+                if annotation.deleted.is_some() {
+                    continue;
+                }
+                let versions = super::merge::merge_versions(&[&annotation.versions])?;
+                if let Some(display) = versions.last().cloned() {
                     bookmarks.push(AnnotationProjection {
                         id: id.clone(),
-                        versions: annotation.versions.clone(),
+                        conflict: versions.len() > 1,
+                        versions,
                         display,
-                        conflict: annotation_conflict(annotation)?,
                     });
                 }
             }
             let mut notes = Vec::new();
             for (id, annotation) in &book.notes {
-                if let Some(display) = annotation_display(annotation)? {
+                if annotation.deleted.is_some() {
+                    continue;
+                }
+                let versions = super::merge::merge_versions(&[&annotation.versions])?;
+                if let Some(display) = versions.last().cloned() {
                     notes.push(AnnotationProjection {
                         id: id.clone(),
-                        versions: annotation.versions.clone(),
+                        conflict: versions.len() > 1,
+                        versions,
                         display,
-                        conflict: annotation_conflict(annotation)?,
                     });
                 }
             }
@@ -899,20 +907,6 @@ impl PortableStore {
             annotations: plan.migrated_annotations,
         })
     }
-}
-
-fn annotation_display<T: Clone + PartialEq>(
-    annotation: &Annotation<T>,
-) -> PortableResult<Option<Version<T>>> {
-    if annotation.deleted.is_some() {
-        return Ok(None);
-    }
-    let versions = super::merge::merge_versions(&[&annotation.versions])?;
-    Ok(versions.last().cloned())
-}
-
-fn annotation_conflict<T: Clone + PartialEq>(annotation: &Annotation<T>) -> PortableResult<bool> {
-    Ok(super::merge::merge_versions(&[&annotation.versions])?.len() > 1)
 }
 
 fn basis_revision_key(entity: &EntityRef) -> String {
