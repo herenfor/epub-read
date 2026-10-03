@@ -231,8 +231,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({
     }
   }, [desktopChrome]);
 
-  // 非 Tauri 桌面环境：书架视图在 Web 端有 ShelfView 自身操作栏，静默不渲染
-  if (!isTauriEnv() && view === "shelf") {
+  // 非 Tauri 桌面环境或手机端书架视图：由 ShelfView 渲染单行顶栏并承担安全区，移除重复的 "EPUB 阅读器" 标题栏
+  if ((!isTauriEnv() || mobileCompact) && view === "shelf") {
     return null;
   }
 

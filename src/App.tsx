@@ -4406,7 +4406,7 @@ export default function App() {
         onBackToShelf={view === "reader" ? handleBackToShelf : undefined}
         onToggleSidebar={view === "reader" ? handleToggleSidebar : undefined}
         sidebarOpen={view === "reader" && isSidebarOpen}
-        mobileCompact={mobileChrome && view === "reader"}
+        mobileCompact={phoneChrome}
         toolsVisible={readerToolsVisible}
         onToggleTools={view === "reader" ? () => setReaderToolsVisible((visible) => !visible) : undefined}
         onToggleAppearance={view === "reader" ? toggleAppearancePanel : undefined}
@@ -4487,6 +4487,7 @@ export default function App() {
               </div>
             )}
             <ShelfView
+              compact={phoneChrome}
               entries={shelfEntries}
               organization={organization}
               scope={shelfScope}

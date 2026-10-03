@@ -169,4 +169,57 @@ describe("第三步补修：书架触摸长按与子菜单 Back", () => {
       await dom.dispose();
     }
   });
+
+  it("UI-2: 移动端紧凑模式简化重复入口、提供独立搜索行、分类单下拉与目录摘要", async () => {
+    const dom = createReactDomHarness();
+    const organization = {
+      ...emptyOrganization(),
+      folders: { f1: { name: { value: "名著", stamp: { counter: 1, deviceId: "test" } } } },
+    };
+    try {
+      await dom.render(createElement(ShelfView, {
+        ...makeProps([makeEntry("b1", "爱丽丝漫游仙境")]),
+        compact: true,
+        organization,
+      }));
+
+      // 1. 移动端顶栏与搜索行
+      expect(dom.container.querySelector(".shelf-normal-bar-mobile")).not.toBeNull();
+      expect(dom.container.querySelector(".shelf-view-toggle-group")).toBeNull();
+      const searchInput = dom.container.querySelector(".shelf-search-row input") as HTMLInputElement;
+      expect(searchInput).not.toBeNull();
+      expect(searchInput.placeholder).toBe("搜书名或作者");
+
+      // 2. 分类单下拉替代平铺胶囊
+      expect(dom.container.querySelector(".shelf-capsule-tabs")).toBeNull();
+      const catBtn = dom.container.querySelector(".shelf-category-dropdown-btn") as HTMLButtonElement;
+      expect(catBtn).not.toBeNull();
+      expect(catBtn.textContent).toContain("全部");
+
+      // 点击展开分类菜单
+      await dom.click(catBtn);
+      const catMenu = dom.container.querySelector(".shelf-category-popover-menu");
+      expect(catMenu).not.toBeNull();
+      const catItems = dom.container.querySelectorAll(".shelf-category-menu-item");
+      expect(catItems.length).toBe(5);
+
+      // 3. 目录摘要栏默认收起，不独占大面积
+      const folderSummary = dom.container.querySelector(".shelf-folder-summary-rail");
+      expect(folderSummary).not.toBeNull();
+      expect(folderSummary?.textContent).toContain("文件夹 (1)");
+
+      // 4. 外部右轨移除
+      expect(dom.container.querySelector(".shelf-nav-rail-right")).toBeNull();
+
+      // 5. 设置抽屉内具备视图切换与批量管理
+      const moreBtn = dom.container.querySelector(".shelf-mobile-more-btn") as HTMLButtonElement;
+      await dom.click(moreBtn);
+      const drawer = dom.container.querySelector(".shelf-drawer");
+      expect(drawer).not.toBeNull();
+      expect(drawer?.textContent).toContain("视图模式");
+      expect(drawer?.textContent).toContain("批量选择");
+    } finally {
+      await dom.dispose();
+    }
+  });
 });

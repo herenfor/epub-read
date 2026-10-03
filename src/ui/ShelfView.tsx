@@ -89,7 +89,12 @@ export interface ShelfBodySearchProps {
   onConcurrencyChange?(mode: "automatic" | "manual", value?: number): void;
 }
 
+export type ShelfViewMode = "grid" | "list";
+export type ShelfStatusTab = "all" | "reading" | "unread" | "finished" | "favorites";
+
 export interface ShelfViewProps {
+  /** 移动端紧凑模式（由 App 根据 mobileChrome && compact 传入） */
+  compact?: boolean;
   entries: ShelfEntry[];
   organization?: LibraryOrganization;
   scope?: ShelfScope;
@@ -477,6 +482,7 @@ interface ShelfResumeStageProps extends ShelfSubmenuBackProps {
   entries: ShelfEntry[];
   provider: ThumbnailProvider;
   busy?: boolean;
+  compact?: boolean;
   onOpen(id: string): void;
 }
 
@@ -484,6 +490,7 @@ const ShelfResumeStage = memo(function ShelfResumeStage({
   entries,
   provider,
   busy,
+  compact,
   onOpen,
   registerSubmenuBackHandler,
   onSubmenuBackActiveChange,
@@ -530,9 +537,13 @@ const ShelfResumeStage = memo(function ShelfResumeStage({
 
   const [collapsed, setCollapsed] = useState(() => {
     try {
-      return localStorage.getItem("epub_shelf_resume_collapsed") === "true";
+      const stored = localStorage.getItem("epub_shelf_resume_collapsed");
+      if (stored !== null) {
+        return stored === "true";
+      }
+      return !!compact;
     } catch {
-      return false;
+      return !!compact;
     }
   });
 
@@ -581,10 +592,12 @@ const ShelfResumeStage = memo(function ShelfResumeStage({
       <div className="shelf-resume-stage">
         <div className="shelf-resume-collapsed">
           <div className="shelf-resume-collapsed-left">
-            <span className="shelf-resume-collapsed-tag">
-              <BookOpenIcon />
-              <span>继续阅读</span>
-            </span>
+            {!compact && (
+              <span className="shelf-resume-collapsed-tag">
+                <BookOpenIcon />
+                <span>继续阅读</span>
+              </span>
+            )}
             <span
               className="shelf-resume-collapsed-title"
               onClick={() => onOpen(activeBook.id)}
@@ -721,7 +734,7 @@ const ShelfResumeStage = memo(function ShelfResumeStage({
           >
             <span>继续阅读</span>
             <ArrowRightIcon />
-            <span className="shelf-resume-key-hint">Enter</span>
+            {!compact && <span className="shelf-resume-key-hint">Enter</span>}
           </button>
           <button
             className="shelf-resume-toggle-btn"
@@ -2115,6 +2128,9 @@ interface ShelfSettingsDrawerProps extends ShelfSubmenuBackProps {
   searchMode: ShelfSearchMode;
   onSearchModeChange?: (mode: ShelfSearchMode) => void;
   bodySearch?: ShelfBodySearchProps;
+  viewMode?: ShelfViewMode;
+  onViewModeChange?: (mode: ShelfViewMode) => void;
+  onEnterSelection?: () => void;
 }
 
 function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
@@ -2446,6 +2462,23 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
           }
 
           <div className="shelf-drawer-group-label">显示设置</div>
+          {props.viewMode && props.onViewModeChange && (
+            <div className="shelf-drawer-setting">
+              <span>视图模式</span>
+              <ShelfSelect
+                registerSubmenuBackHandler={props.registerSubmenuBackHandler}
+                onSubmenuBackActiveChange={props.onSubmenuBackActiveChange}
+                value={props.viewMode}
+                busy={props.busy}
+                title="视图模式"
+                options={[
+                  { value: "grid", label: "网格视图" },
+                  { value: "list", label: "列表视图" },
+                ]}
+                onChange={(value) => props.onViewModeChange!(value as ShelfViewMode)}
+              />
+            </div>
+          )}
           <div className="shelf-drawer-setting">
             <span>排列方式</span>
             <ShelfSelect
@@ -2496,8 +2529,22 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
             />
           </div>
 
-          <div className="shelf-drawer-group-label">数据管理</div>
+          <div className="shelf-drawer-group-label">数据与管理</div>
           <div className="shelf-drawer-actions">
+            {props.onEnterSelection && (
+              <button
+                className="tb-btn"
+                type="button"
+                onClick={() => {
+                  props.onClose();
+                  props.onEnterSelection!();
+                }}
+                disabled={props.busy || props.entries.length === 0}
+                title="开启批量管理 (多选删除/移动/收藏)"
+              >
+                批量选择
+              </button>
+            )}
             <button className="tb-btn" type="button" onClick={props.onImportArchive} disabled={props.busy || props.importArchiveDisabled}>
               导入存档
             </button>
@@ -3247,6 +3294,70 @@ export function ShelfView(props: ShelfViewProps) {
     setSubmenuBackActive(active);
   }, []);
 
+  const isCompactMobile = !!props.compact;
+  const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
+  const categoryDropdownRef = useRef<HTMLDivElement | null>(null);
+  const [folderPrefixExpanded, setFolderPrefixExpanded] = useState(false);
+
+  const [folderActiveMoreOpen, setFolderActiveMoreOpen] = useState(false);
+  const folderActiveMoreRef = useRef<HTMLDivElement | null>(null);
+
+  useShelfSubmenuBack(categoryMenuOpen, () => setCategoryMenuOpen(false), {
+    registerSubmenuBackHandler,
+    onSubmenuBackActiveChange: reportSubmenuBackActive,
+  });
+
+  useShelfSubmenuBack(folderMenuOpen, () => setFolderMenuOpen(false), {
+    registerSubmenuBackHandler,
+    onSubmenuBackActiveChange: reportSubmenuBackActive,
+  });
+
+  useShelfSubmenuBack(folderActiveMoreOpen, () => setFolderActiveMoreOpen(false), {
+    registerSubmenuBackHandler,
+    onSubmenuBackActiveChange: reportSubmenuBackActive,
+  });
+
+  useShelfSubmenuBack(isCompactMobile && folderPrefixExpanded, () => setFolderPrefixExpanded(false), {
+    registerSubmenuBackHandler,
+    onSubmenuBackActiveChange: reportSubmenuBackActive,
+  });
+
+  useEffect(() => {
+    if (!categoryMenuOpen) return;
+    const onDown = (e: MouseEvent | PointerEvent) => {
+      if (!categoryDropdownRef.current?.contains(e.target as Node)) {
+        setCategoryMenuOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setCategoryMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [categoryMenuOpen]);
+
+  useEffect(() => {
+    if (!folderActiveMoreOpen) return;
+    const onDown = (e: MouseEvent | PointerEvent) => {
+      if (!folderActiveMoreRef.current?.contains(e.target as Node)) {
+        setFolderActiveMoreOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFolderActiveMoreOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [folderActiveMoreOpen]);
+
   const handleTouchLongPressSelect = useCallback((id: string): void => {
     setSelectedIds(new Set([id]));
     setDockClosing(false);
@@ -3396,6 +3507,22 @@ export function ShelfView(props: ShelfViewProps) {
       favoriteCount: fav,
     };
   }, [scope, folderBooksMap, props.entries, organization]);
+
+  const categoryLabels = useMemo<Record<ShelfStatusTab, string>>(() => ({
+    all: "全部",
+    reading: "正在读",
+    unread: "未读",
+    finished: "已读完",
+    favorites: "收藏",
+  }), []);
+
+  const categoryCounts = useMemo<Record<ShelfStatusTab, number>>(() => ({
+    all: allCount,
+    reading: readingCount,
+    unread: unreadCount,
+    finished: finishedCount,
+    favorites: favoriteCount,
+  }), [allCount, readingCount, unreadCount, finishedCount, favoriteCount]);
 
   const scopedCandidateBooks = useMemo(() => {
     switch (scope.type) {
@@ -4073,6 +4200,77 @@ export function ShelfView(props: ShelfViewProps) {
               </button>
             </div>
           </div>
+        ) : isCompactMobile ? (
+          <div className="shelf-normal-bar-mobile-wrap">
+            <div className="shelf-normal-bar-mobile">
+              {/* Level 1 左侧：应用 LOGO + 藏书总计微标签 */}
+              <div className="shelf-brand-zone-zen">
+                <div className="shelf-logo-badge" aria-hidden="true">
+                  <BookLogoIcon />
+                </div>
+                <span className="shelf-brand-title">书架</span>
+                <span className="shelf-total-badge">藏书 {props.entries.length} 本</span>
+              </div>
+
+              {/* Level 1 右侧：导入图书主按钮、设置/更多 */}
+              <div className="shelf-actions-zone-zen shelf-actions-zone-mobile">
+                <button
+                  className="shelf-btn-primary shelf-mobile-import-btn"
+                  type="button"
+                  onClick={props.onImport}
+                  disabled={props.busy || props.importActive}
+                  title="导入图书"
+                >
+                  <PlusIcon />
+                  <span>导入</span>
+                </button>
+
+                <button
+                  className="shelf-icon-btn-zen shelf-mobile-more-btn"
+                  ref={menuButtonRef}
+                  type="button"
+                  aria-label="书架设置与更多"
+                  aria-expanded={drawerOpen}
+                  aria-controls="shelf-settings-drawer"
+                  onClick={() => setDrawerOpen(true)}
+                  disabled={props.busy}
+                  title="书架设置与更多"
+                >
+                  <SettingsIcon />
+                </button>
+              </div>
+            </div>
+
+            {/* Level 1 独立搜索行：完整输入框，无快捷键提示，48px清除按钮 */}
+            <div className="shelf-search-row">
+              <div className="shelf-quick-filter-box shelf-quick-filter-box-mobile">
+                <span className="shelf-quick-filter-icon" aria-hidden="true">
+                  <SearchIcon />
+                </span>
+                <input
+                  ref={quickInputRef}
+                  className="shelf-quick-filter-input"
+                  type="search"
+                  placeholder="搜书名或作者"
+                  value={query}
+                  disabled={props.busy}
+                  onChange={(e) => setQuery(e.target.value)}
+                  aria-label="搜书名或作者"
+                />
+                {query && (
+                  <button
+                    className="shelf-quick-filter-clear shelf-mobile-search-clear"
+                    type="button"
+                    onClick={() => setQuery("")}
+                    aria-label="清除搜索"
+                    title="清除搜索内容"
+                  >
+                    <CloseIcon />
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
         ) : (
           /* 常态操作栏：Level 1 全局顶栏极净化 */
           <div className="shelf-normal-bar shelf-normal-bar-zen">
@@ -4196,6 +4394,9 @@ export function ShelfView(props: ShelfViewProps) {
         onSortChange={setSort}
         density={density}
         onDensityChange={setDensity}
+        viewMode={viewMode}
+        onViewModeChange={handleViewModeChange}
+        onEnterSelection={enterSelection}
         theme={props.theme}
         onThemeChange={props.onThemeChange}
         filters={filters}
@@ -4217,6 +4418,7 @@ export function ShelfView(props: ShelfViewProps) {
 
       {/* Level 2: 紧凑型“正在阅读”续读控制台 */}
       <ShelfResumeStage
+        compact={isCompactMobile}
         entries={props.entries}
         provider={thumbnailProvider}
         busy={props.busy}
@@ -4228,60 +4430,95 @@ export function ShelfView(props: ShelfViewProps) {
       {/* Level 3: 状态与分类胶囊轨 */}
       <nav className="shelf-nav-rail" aria-label="书架分类导航与排序">
         <div className="shelf-nav-rail-left">
-          {/* 状态分流胶囊组 */}
-          <div className="shelf-capsule-tabs" role="tablist" aria-label="阅读状态分流">
-            <button
-              className={`shelf-capsule-tab${statusTab === "all" ? " active" : ""}`}
-              type="button"
-              role="tab"
-              aria-selected={statusTab === "all"}
-              onClick={() => setStatusTab("all")}
-            >
-              <span>全部</span>
-              <span className="shelf-capsule-count">{allCount}</span>
-            </button>
-            <button
-              className={`shelf-capsule-tab${statusTab === "reading" ? " active" : ""}`}
-              type="button"
-              role="tab"
-              aria-selected={statusTab === "reading"}
-              onClick={() => setStatusTab("reading")}
-            >
-              <span>正在读</span>
-              <span className="shelf-capsule-count">{readingCount}</span>
-            </button>
-            <button
-              className={`shelf-capsule-tab${statusTab === "unread" ? " active" : ""}`}
-              type="button"
-              role="tab"
-              aria-selected={statusTab === "unread"}
-              onClick={() => setStatusTab("unread")}
-            >
-              <span>未读</span>
-              <span className="shelf-capsule-count">{unreadCount}</span>
-            </button>
-            <button
-              className={`shelf-capsule-tab${statusTab === "finished" ? " active" : ""}`}
-              type="button"
-              role="tab"
-              aria-selected={statusTab === "finished"}
-              onClick={() => setStatusTab("finished")}
-            >
-              <span>已读完</span>
-              <span className="shelf-capsule-count">{finishedCount}</span>
-            </button>
-            <button
-              className={`shelf-capsule-tab${statusTab === "favorites" ? " active" : ""}`}
-              type="button"
-              role="tab"
-              aria-selected={statusTab === "favorites"}
-              onClick={() => setStatusTab("favorites")}
-            >
-              <StarIcon filled={statusTab === "favorites"} />
-              <span>收藏</span>
-              <span className="shelf-capsule-count">{favoriteCount}</span>
-            </button>
-          </div>
+          {/* 状态分流胶囊组（手机端合并为单个分类选择下拉，桌面保留平铺胶囊） */}
+          {isCompactMobile ? (
+            <div className="shelf-category-select-wrap" ref={categoryDropdownRef}>
+              <button
+                className="shelf-category-dropdown-btn"
+                type="button"
+                onClick={() => setCategoryMenuOpen(!categoryMenuOpen)}
+                aria-expanded={categoryMenuOpen}
+                title="选择分类与状态"
+              >
+                <span>{categoryLabels[statusTab]} ({categoryCounts[statusTab]})</span>
+                <ChevronDownIcon />
+              </button>
+              {categoryMenuOpen && (
+                <div className="shelf-category-popover-menu" role="menu">
+                  {(["all", "reading", "unread", "finished", "favorites"] as ShelfStatusTab[]).map((tab) => (
+                    <button
+                      key={tab}
+                      className={`shelf-category-menu-item${statusTab === tab ? " selected" : ""}`}
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setStatusTab(tab);
+                        setCategoryMenuOpen(false);
+                      }}
+                    >
+                      {tab === "favorites" ? <StarIcon filled={statusTab === "favorites"} /> : null}
+                      <span>{categoryLabels[tab]}</span>
+                      <span className="shelf-capsule-count">{categoryCounts[tab]}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="shelf-capsule-tabs" role="tablist" aria-label="阅读状态分流">
+              <button
+                className={`shelf-capsule-tab${statusTab === "all" ? " active" : ""}`}
+                type="button"
+                role="tab"
+                aria-selected={statusTab === "all"}
+                onClick={() => setStatusTab("all")}
+              >
+                <span>全部</span>
+                <span className="shelf-capsule-count">{allCount}</span>
+              </button>
+              <button
+                className={`shelf-capsule-tab${statusTab === "reading" ? " active" : ""}`}
+                type="button"
+                role="tab"
+                aria-selected={statusTab === "reading"}
+                onClick={() => setStatusTab("reading")}
+              >
+                <span>正在读</span>
+                <span className="shelf-capsule-count">{readingCount}</span>
+              </button>
+              <button
+                className={`shelf-capsule-tab${statusTab === "unread" ? " active" : ""}`}
+                type="button"
+                role="tab"
+                aria-selected={statusTab === "unread"}
+                onClick={() => setStatusTab("unread")}
+              >
+                <span>未读</span>
+                <span className="shelf-capsule-count">{unreadCount}</span>
+              </button>
+              <button
+                className={`shelf-capsule-tab${statusTab === "finished" ? " active" : ""}`}
+                type="button"
+                role="tab"
+                aria-selected={statusTab === "finished"}
+                onClick={() => setStatusTab("finished")}
+              >
+                <span>已读完</span>
+                <span className="shelf-capsule-count">{finishedCount}</span>
+              </button>
+              <button
+                className={`shelf-capsule-tab${statusTab === "favorites" ? " active" : ""}`}
+                type="button"
+                role="tab"
+                aria-selected={statusTab === "favorites"}
+                onClick={() => setStatusTab("favorites")}
+              >
+                <StarIcon filled={statusTab === "favorites"} />
+                <span>收藏</span>
+                <span className="shelf-capsule-count">{favoriteCount}</span>
+              </button>
+            </div>
+          )}
 
           {/* 集中式文件夹选择下拉 */}
           <div className="shelf-folder-dropdown-wrap" ref={folderDropdownRef}>
@@ -4293,7 +4530,7 @@ export function ShelfView(props: ShelfViewProps) {
               title="选择或管理文件夹"
             >
               <FolderIcon />
-              <span>
+              <span className="shelf-folder-dropdown-label">
                 {scope.type === "folder"
                   ? currentFolder?.name ?? "文件夹"
                   : `文件夹 (${activeFolders.length})`}
@@ -4362,34 +4599,6 @@ export function ShelfView(props: ShelfViewProps) {
           {/* 当处于特定文件夹时，显示专属状态与退出/管理操作 */}
           {scope.type === "folder" && (
             <div className="shelf-folder-active-bar">
-              <div className="shelf-folder-active-info">
-                <span>《{currentFolder?.name ?? "文件夹"}》</span>
-                <span className="shelf-folder-active-count">
-                  {(folderBooksMap.get(scope.folderId) ?? []).length} 本书
-                </span>
-              </div>
-              {currentFolder && (
-                <>
-                  <button
-                    className="shelf-folder-action-btn"
-                    type="button"
-                    onClick={() => setRenameFolderTarget(currentFolder)}
-                    title="重命名文件夹"
-                  >
-                    <EditIcon />
-                    <span>重命名</span>
-                  </button>
-                  <button
-                    className="shelf-folder-action-btn danger"
-                    type="button"
-                    onClick={() => setDissolveFolderTarget(currentFolder)}
-                    title="解散文件夹"
-                  >
-                    <TrashIcon />
-                    <span>解散</span>
-                  </button>
-                </>
-              )}
               <button
                 className="shelf-folder-active-exit"
                 type="button"
@@ -4399,54 +4608,124 @@ export function ShelfView(props: ShelfViewProps) {
               >
                 <CloseIcon />
               </button>
+              <div className="shelf-folder-active-info">
+                <span>《{currentFolder?.name ?? "文件夹"}》</span>
+                <span className="shelf-folder-active-count">
+                  {(folderBooksMap.get(scope.folderId) ?? []).length} 本书
+                </span>
+              </div>
+              {currentFolder && (
+                isCompactMobile ? (
+                  <div className="shelf-folder-active-more-wrap" ref={folderActiveMoreRef}>
+                    <button
+                      className="shelf-folder-action-btn shelf-folder-more-btn"
+                      type="button"
+                      onClick={() => setFolderActiveMoreOpen(!folderActiveMoreOpen)}
+                      aria-expanded={folderActiveMoreOpen}
+                      title="文件夹操作"
+                    >
+                      <DotsVerticalIcon />
+                    </button>
+                    {folderActiveMoreOpen && (
+                      <div className="shelf-folder-active-menu">
+                        <button
+                          className="shelf-folder-menu-item"
+                          type="button"
+                          onClick={() => {
+                            setFolderActiveMoreOpen(false);
+                            setRenameFolderTarget(currentFolder);
+                          }}
+                        >
+                          <EditIcon />
+                          <span>重命名</span>
+                        </button>
+                        <button
+                          className="shelf-folder-menu-item danger"
+                          type="button"
+                          onClick={() => {
+                            setFolderActiveMoreOpen(false);
+                            setDissolveFolderTarget(currentFolder);
+                          }}
+                        >
+                          <TrashIcon />
+                          <span>解散</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <>
+                    <button
+                      className="shelf-folder-action-btn"
+                      type="button"
+                      onClick={() => setRenameFolderTarget(currentFolder)}
+                      title="重命名文件夹"
+                    >
+                      <EditIcon />
+                      <span>重命名</span>
+                    </button>
+                    <button
+                      className="shelf-folder-action-btn danger"
+                      type="button"
+                      onClick={() => setDissolveFolderTarget(currentFolder)}
+                      title="解散文件夹"
+                    >
+                      <TrashIcon />
+                      <span>解散</span>
+                    </button>
+                  </>
+                )
+              )}
             </div>
           )}
         </div>
 
-        {/* 右侧排序与密度轨 */}
-        <div className="shelf-nav-rail-right">
-          <div className="shelf-sort-select-container" style={{ position: "relative" }}>
-            <ShelfSelect
-              registerSubmenuBackHandler={registerSubmenuBackHandler}
-              onSubmenuBackActiveChange={reportSubmenuBackActive}
-              value={sort}
-              busy={props.busy}
-              title="书籍排序方式"
-              options={[
-                { value: "recent", label: "排序：最近阅读" },
-                { value: "added", label: "排序：最近添加" },
-                { value: "title", label: "排序：书名排序" },
-                { value: "progress", label: "排序：阅读进度" },
-              ]}
-              onChange={(val) => setSort(val as ShelfSort)}
-            />
-            <select
-              className="shelf-sort-select-zen"
-              value={sort}
-              disabled={props.busy}
-              onChange={(e) => setSort(e.target.value as ShelfSort)}
-              aria-label="书籍排序方式"
-              style={{ position: "absolute", opacity: 0, pointerEvents: "none", width: 0, height: 0 }}
-              tabIndex={-1}
-              aria-hidden="true"
-            >
-              <option value="recent">排序：最近阅读</option>
-              <option value="added">排序：最近添加</option>
-              <option value="title">排序：书名排序</option>
-              <option value="progress">排序：阅读进度</option>
-            </select>
-          </div>
+        {/* 右侧排序与密度轨（移动端紧凑模式由设置抽屉统一承接，外部不重复显示） */}
+        {!isCompactMobile && (
+          <div className="shelf-nav-rail-right">
+            <div className="shelf-sort-select-container" style={{ position: "relative" }}>
+              <ShelfSelect
+                registerSubmenuBackHandler={registerSubmenuBackHandler}
+                onSubmenuBackActiveChange={reportSubmenuBackActive}
+                value={sort}
+                busy={props.busy}
+                title="书籍排序方式"
+                options={[
+                  { value: "recent", label: "排序：最近阅读" },
+                  { value: "added", label: "排序：最近添加" },
+                  { value: "title", label: "排序：书名排序" },
+                  { value: "progress", label: "排序：阅读进度" },
+                ]}
+                onChange={(val) => setSort(val as ShelfSort)}
+              />
+              <select
+                className="shelf-sort-select-zen"
+                value={sort}
+                disabled={props.busy}
+                onChange={(e) => setSort(e.target.value as ShelfSort)}
+                aria-label="书籍排序方式"
+                style={{ position: "absolute", opacity: 0, pointerEvents: "none", width: 0, height: 0 }}
+                tabIndex={-1}
+                aria-hidden="true"
+              >
+                <option value="recent">排序：最近阅读</option>
+                <option value="added">排序：最近添加</option>
+                <option value="title">排序：书名排序</option>
+                <option value="progress">排序：阅读进度</option>
+              </select>
+            </div>
 
-          <button
-            className="shelf-icon-btn-zen"
-            type="button"
-            onClick={() => setDensity(density === "compact" ? "standard" : "compact")}
-            title={density === "compact" ? "切换为舒适密度" : "切换为紧凑密度"}
-            style={{ width: "auto", height: 32, padding: "0 12px", fontSize: "13px" }}
-          >
-            {density === "compact" ? "紧凑" : "舒适"}
-          </button>
-        </div>
+            <button
+              className="shelf-icon-btn-zen"
+              type="button"
+              onClick={() => setDensity(density === "compact" ? "standard" : "compact")}
+              title={density === "compact" ? "切换为舒适密度" : "切换为紧凑密度"}
+              style={{ width: "auto", height: 32, padding: "0 12px", fontSize: "13px" }}
+            >
+              {density === "compact" ? "紧凑" : "舒适"}
+            </button>
+          </div>
+        )}
       </nav>
 
       {/* 书架内容区 */}
@@ -4658,24 +4937,63 @@ export function ShelfView(props: ShelfViewProps) {
         <>
           {scope.type === "root" && visibleFolders.length > 0 && (
             <div className="shelf-folder-prefix">
-              <div className="shelf-grid shelf-folder-grid">
-                {visibleFolders.map((folder) => (
-                  <ShelfFolderCard
-                    key={folder.id}
-                    id={folder.id}
-                    name={folder.name}
-                    books={folderBooksMap.get(folder.id) ?? []}
-                    provider={thumbnailProvider}
-                    selectionMode={selectionMode}
-                    isDropTarget={dropTarget?.type === "folder" && dropTarget.id === folder.id}
-                    onOpen={(fId, el) => handleOpenFolderModal(fId, el)}
-                    onRename={(fId, fName) => setRenameFolderTarget({ id: fId, name: fName })}
-                    onDissolve={(fId, fName) => setDissolveFolderTarget({ id: fId, name: fName })}
-                    registerSubmenuBackHandler={registerSubmenuBackHandler}
-                    onSubmenuBackActiveChange={reportSubmenuBackActive}
-                  />
-                ))}
-              </div>
+              {isCompactMobile && !folderPrefixExpanded ? (
+                <div className="shelf-folder-summary-rail">
+                  <div className="shelf-folder-summary-info">
+                    <FolderIcon />
+                    <span>文件夹 ({visibleFolders.length})</span>
+                  </div>
+                  <button
+                    className="shelf-folder-summary-toggle-btn"
+                    type="button"
+                    onClick={() => setFolderPrefixExpanded(true)}
+                    title="展开文件夹目录"
+                    aria-label="展开文件夹目录"
+                  >
+                    <span>展开</span>
+                    <ChevronDownIcon />
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {isCompactMobile && folderPrefixExpanded && (
+                    <div className="shelf-folder-summary-rail expanded">
+                      <div className="shelf-folder-summary-info">
+                        <FolderIcon />
+                        <span>文件夹 ({visibleFolders.length})</span>
+                      </div>
+                      <button
+                        className="shelf-folder-summary-toggle-btn"
+                        type="button"
+                        onClick={() => setFolderPrefixExpanded(false)}
+                        title="收起文件夹目录"
+                        aria-label="收起文件夹目录"
+                      >
+                        <span>收起</span>
+                        <ChevronUpIcon />
+                      </button>
+                    </div>
+                  )}
+                  <div className="shelf-grid shelf-folder-grid">
+                    {visibleFolders.map((folder) => (
+                      <ShelfFolderCard
+                        key={folder.id}
+                        id={folder.id}
+                        name={folder.name}
+                        books={folderBooksMap.get(folder.id) ?? []}
+                        provider={thumbnailProvider}
+                        selectionMode={selectionMode}
+                        isDropTarget={dropTarget?.type === "folder" && dropTarget.id === folder.id}
+                        onOpen={(fId, el) => handleOpenFolderModal(fId, el)}
+                        onRename={(fId, fName) => setRenameFolderTarget({ id: fId, name: fName })}
+                        onDissolve={(fId, fName) => setDissolveFolderTarget({ id: fId, name: fName })}
+                        registerSubmenuBackHandler={registerSubmenuBackHandler}
+                        onSubmenuBackActiveChange={reportSubmenuBackActive}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           )}
           <div
