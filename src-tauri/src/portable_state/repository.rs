@@ -16,7 +16,8 @@ use super::merge::{
     WriteIntent,
 };
 use crate::library_organization::{
-    effective_folder_id, empty_organization, is_favorite, LibraryOrganization,
+    apply_command, effective_folder_id, empty_organization, is_favorite, merge_into_envelope,
+    LibraryOrganization, OrganizationCommand, OrganizationEnvelope,
 };
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::de::DeserializeOwned;
@@ -799,6 +800,97 @@ impl PortableStore {
         store_counter(&transaction, next_counter)?;
         transaction.commit()?;
         Ok(merged)
+    }
+
+    /// Atomically reserve a contiguous execution counter range for migration
+    /// adapters. The returned stamp is the first reserved counter.
+    pub fn reserve_stamps(&mut self, count: u64) -> PortableResult<Stamp> {
+        if count == 0 {
+            return Err(PortableError::invalid_data(
+                "invalid-data：reserve_stamps count 必须为正",
+            ));
+        }
+        let transaction = self.connection.unchecked_transaction()?;
+        let installation_id = ensure_installation_id(&transaction)?;
+        let state = load_state_at_connection(&transaction)?;
+        let counter = load_counter(&transaction)?;
+        let base = counter.max(super::merge::maximum_received_counter_from_state(&state)?);
+        let start = base
+            .checked_add(1)
+            .ok_or_else(|| PortableError::clock_exhausted("clock-exhausted：本机计数器已耗尽"))?;
+        let end = start
+            .checked_add(count - 1)
+            .ok_or_else(|| PortableError::clock_exhausted("clock-exhausted：本机计数器已耗尽"))?;
+        if end > dto::MAX_SAFE_COUNTER {
+            return Err(PortableError::clock_exhausted(
+                "clock-exhausted：本机计数器超出安全范围",
+            ));
+        }
+        store_counter(&transaction, end)?;
+        transaction.commit()?;
+        Ok(Stamp {
+            device_id: installation_id,
+            counter: start,
+        })
+    }
+
+    pub fn basis_entity(&self, basis_id: &str) -> PortableResult<EntityRef> {
+        match self.bases.get(basis_id) {
+            Some(StoredBasis::Progress(basis)) => Ok(basis.entity.clone()),
+            Some(StoredBasis::Bookmark(basis)) => Ok(basis.entity.clone()),
+            Some(StoredBasis::Note(basis)) => Ok(basis.entity.clone()),
+            None => Err(PortableError::stale_basis("stale-basis")),
+        }
+    }
+
+    pub fn apply_organization_command(
+        &mut self,
+        command: &OrganizationCommand,
+    ) -> PortableResult<LibraryOrganization> {
+        let transaction = self.connection.unchecked_transaction()?;
+        let installation_id = ensure_installation_id(&transaction)?;
+        let counter = load_counter(&transaction)?;
+        let state = load_organization(&transaction)?;
+        let mut known_hashes = std::collections::HashSet::new();
+        {
+            let mut statement = transaction.prepare("SELECT hash FROM book_meta")?;
+            let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+            for row in rows {
+                known_hashes.insert(row?);
+            }
+        }
+        let envelope = OrganizationEnvelope {
+            device_id: installation_id,
+            counter,
+            state,
+        };
+        let next = apply_command(&envelope, command, &known_hashes)
+            .map_err(PortableError::invalid_data)?;
+        store_organization(&transaction, &next.state)?;
+        store_counter(&transaction, next.counter)?;
+        transaction.commit()?;
+        Ok(next.state)
+    }
+
+    pub fn merge_organization_state(
+        &mut self,
+        incoming: &LibraryOrganization,
+    ) -> PortableResult<LibraryOrganization> {
+        let transaction = self.connection.unchecked_transaction()?;
+        let installation_id = ensure_installation_id(&transaction)?;
+        let counter = load_counter(&transaction)?;
+        let state = load_organization(&transaction)?;
+        let envelope = OrganizationEnvelope {
+            device_id: installation_id,
+            counter,
+            state,
+        };
+        let next = merge_into_envelope(&envelope, incoming)
+            .map_err(PortableError::invalid_data)?;
+        store_organization(&transaction, &next.state)?;
+        store_counter(&transaction, next.counter)?;
+        transaction.commit()?;
+        Ok(next.state)
     }
 
     pub fn project_shelf(&self) -> PortableResult<ShelfProjection> {

@@ -5,3 +5,5 @@ export * from "./indexedDbStorage";
 export * from "./tauriService";
 export * from "./projection";
 export * from "./legacyShelf";
+export * from "./dataService";
+export * from "./shelfStoreAdapter";

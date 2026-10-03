@@ -108,9 +108,8 @@ export function validateReaderNote(value: unknown): ReaderNoteValidation {
   if (!validTime(note.updatedAtMs)) {
     return { valid: false, field: "updatedAtMs", reason: "must be a non-negative safe integer" };
   }
-  if ((note.updatedAtMs as number) < (note.createdAtMs as number)) {
-    return { valid: false, field: "updatedAtMs", reason: "must not precede createdAtMs" };
-  }
+  // CP-I: v3 stores modification time in Version.updatedAtMs and explicitly
+  // allows device wall-clock rollback relative to the preserved creation time.
   return { valid: true };
 }
 

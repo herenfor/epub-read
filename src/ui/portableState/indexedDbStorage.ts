@@ -187,7 +187,8 @@ export class IndexedDbPortableStateStorage implements PortableStateStorage {
       try { await done; } catch { /* preserve the original error */ }
       throw error;
     } finally {
-      db.close();
+      // Keep the shared connection open. Closing it here would leave the
+      // cached promise pointing at a closed IDBDatabase for the next call.
     }
   }
 }

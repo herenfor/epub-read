@@ -41,12 +41,17 @@ import type {
   ProgressValue,
 } from "../../core/portableState/portable-state-types";
 import {
+  applyCommand,
   emptyOrganization,
   generateFolderId,
+  mergeIntoEnvelope,
   validCanonicalUuid,
   validContentHash,
   validStamp,
   validateEnvelope,
+  validateOrganization,
+  type LibraryOrganization,
+  type OrganizationCommand,
   type OrganizationEnvelope,
 } from "../libraryOrganization";
 import type { ShelfEntry } from "../shelf";
@@ -883,6 +888,58 @@ export class PortableStateService implements PortableStateCommandService {
       if (record.bookHash === bookHash) this.bases.delete(id);
     }
     return null;
+  }
+
+  /** Current organization state from the same envelope used by portable data. */
+  async getOrganization(): Promise<LibraryOrganization> {
+    return this.withStorage(async () => this.storage.transaction(async (tx) => {
+      const envelope = await this.requireEnvelope(tx);
+      return envelope.state;
+    }));
+  }
+
+  /** Apply one explicit organization command inside the portable transaction boundary. */
+  async applyOrganization(command: OrganizationCommand): Promise<LibraryOrganization> {
+    return this.withStorage(async () => this.storage.transaction(async (tx) => {
+      const envelope = await this.requireEnvelope(tx);
+      const knownHashes = new Set((await tx.listMetadata()).map((row) => row.hash));
+      const next = applyCommand(envelope, command, knownHashes);
+      await tx.putEnvelope(next);
+      return next.state;
+    }));
+  }
+
+  /** Merge an incoming organization state without replacing the local device identity. */
+  async mergeOrganization(incoming: LibraryOrganization): Promise<LibraryOrganization> {
+    const validated = validateOrganization(incoming);
+    return this.withStorage(async () => this.storage.transaction(async (tx) => {
+      const envelope = await this.requireEnvelope(tx);
+      const next = mergeIntoEnvelope(envelope, validated);
+      await tx.putEnvelope(next);
+      return next.state;
+    }));
+  }
+
+  /**
+   * Atomically reserve a contiguous counter range for one migration batch.
+   * The returned stamp is the first reserved counter; the envelope is moved to
+   * the end of the range so later local writes cannot collide with it.
+   */
+  async reserveStamps(count: number): Promise<Stamp> {
+    if (!Number.isSafeInteger(count) || count < 1) {
+      throw new PortableStateError("invalid-data", "count must be a positive safe integer");
+    }
+    return this.withStorage(async () => this.storage.transaction(async (tx) => {
+      const envelope = await this.requireEnvelope(tx);
+      const local = await this.loadLocalState(tx, envelope);
+      const start = nextLocalCounter(envelope.counter, maximumPortableStateReceivedCounter(local.state));
+      const end = start + count - 1;
+      if (!Number.isSafeInteger(end) || end < start) {
+        throw new PortableStateError("clock-exhausted", "installation counter is exhausted");
+      }
+      await tx.putEnvelope({ deviceId: envelope.deviceId, counter: end, state: envelope.state });
+      return { deviceId: envelope.deviceId, counter: start };
+    }));
   }
 
   /** Full validated state snapshot, used by shelf projection and integration. */

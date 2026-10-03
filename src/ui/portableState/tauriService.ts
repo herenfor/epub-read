@@ -10,13 +10,16 @@ import {
   PortableStateError,
   type PortableDeleteResult,
   type PortableReadResult,
-  type PortableStateCommandService,
   type PortableStateErrorCode,
   type PortableWriteResult,
   type PortableAdoptSelection,
   type PortableWriteIntent,
 } from "./service";
 import type { EntityRef } from "../../core/portableState/portable-write-core";
+import type { Stamp } from "../../core/portableState/portable-register-core";
+import type { PortableStateV3 } from "../../core/portableState/portable-state-types";
+import type { LibraryOrganization, OrganizationCommand } from "../libraryOrganization";
+import type { PortableActivationResult, PortableMergeOptions, PortableStateDataService } from "./dataService";
 
 const ERROR_CODES = new Set<PortableStateErrorCode>([
   "invalid-data",
@@ -42,7 +45,7 @@ function nativeError(error: unknown): never {
   throw error;
 }
 
-export class TauriPortableStateService implements PortableStateCommandService {
+export class TauriPortableStateService implements PortableStateDataService {
   async read(input: { readonly bookHash: string }): Promise<PortableReadResult> {
     try {
       return await invoke<PortableReadResult>("portable_state_read", input);
@@ -109,4 +112,61 @@ export class TauriPortableStateService implements PortableStateCommandService {
       return nativeError(error);
     }
   }
+
+  async activate(): Promise<PortableActivationResult> {
+    try {
+      return await invoke<PortableActivationResult>("portable_state_activate");
+    } catch (error) {
+      return nativeError(error);
+    }
+  }
+
+  async snapshot(): Promise<PortableStateV3> {
+    try {
+      return await invoke<PortableStateV3>("portable_state_snapshot");
+    } catch (error) {
+      return nativeError(error);
+    }
+  }
+
+  async mergeValidatedState(input: unknown, options: PortableMergeOptions = {}): Promise<PortableStateV3> {
+    try {
+      return await invoke<PortableStateV3>("portable_state_merge_state", { state: input, ...options });
+    } catch (error) {
+      return nativeError(error);
+    }
+  }
+
+  async getOrganization(): Promise<LibraryOrganization> {
+    try {
+      return await invoke<LibraryOrganization>("portable_state_get_organization");
+    } catch (error) {
+      return nativeError(error);
+    }
+  }
+
+  async applyOrganization(command: OrganizationCommand): Promise<LibraryOrganization> {
+    try {
+      return await invoke<LibraryOrganization>("portable_state_apply_organization", { command });
+    } catch (error) {
+      return nativeError(error);
+    }
+  }
+
+  async mergeOrganization(incoming: LibraryOrganization): Promise<LibraryOrganization> {
+    try {
+      return await invoke<LibraryOrganization>("portable_state_merge_organization", { incoming });
+    } catch (error) {
+      return nativeError(error);
+    }
+  }
+
+  async reserveStamps(count: number): Promise<Stamp> {
+    try {
+      return await invoke<Stamp>("portable_state_reserve_stamps", { count });
+    } catch (error) {
+      return nativeError(error);
+    }
+  }
+
 }

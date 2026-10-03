@@ -1,5 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { IS_AI_EDITION } from "../config/edition";
+import { PortableShelfStore, activatePortableShelfStore } from "./portableState/shelfStoreAdapter";
+import { PortableStateService } from "./portableState/service";
+import { IndexedDbPortableStateStorage } from "./portableState/indexedDbStorage";
+import { TauriPortableStateService } from "./portableState/tauriService";
+import type { PortableActivationResult, PortableStateDataService } from "./portableState/dataService";
 import { sanitizePersistedTextAnchor } from "../render/textAnchor";
 import type { MediaReadingAnchor } from "../render/paginator";
 import type { LibraryRecord } from "./libraryArchive";
@@ -33,6 +38,8 @@ export interface Bookmark {
   anchorTextSnippet?: string | null;
   /** B-155：纯图片页的媒体身份/比例；旧记录缺省可读。 */
   mediaAnchor?: MediaReadingAnchor | null;
+  /** v3 现代定位使用的 EPUB 内部章节路径；旧记录可缺省。 */
+  chapterPath?: string | null;
   /** 创建时锚点所在行文字，用于列表展示 */
   text: string;
   createdAtMs: number;
@@ -129,6 +136,8 @@ export interface ShelfStore {
   save(input: ShelfSaveInput): Promise<ShelfSaveResult>;
   /** Tauri 链接式批量导入；浏览器后端不支持本地持久路径。 */
   importPaths(paths: string[]): Promise<LinkedImportBatchResult>;
+  /** CP-I: 原生文档 URI/批量导入结果先进入可移植仓储，再更新 UI。 */
+  importRecords?(records: ShelfEntry[]): Promise<void>;
   readBook(id: string): Promise<Uint8Array>;
   readCover(id: string): Promise<Uint8Array | null>;
   /** 只为旧条目补录内容指纹，不得改动阅读进度或其他元数据。 */
@@ -142,8 +151,8 @@ export interface ShelfStore {
   setNotes(id: string, notes: ReaderNote[]): Promise<ShelfEntry>;
   /** 重新绑定同一内容指纹的源 EPUB；哈希不一致必须拒绝。 */
   relink(id: string, sourcePath: string): Promise<ShelfEntry>;
-  /** 用已经校验并合并的可移植记录替换状态；设备绑定不变。 */
-  replacePortableRecords(records: LibraryRecord[]): Promise<ShelfEntry[]>;
+  /** 旧 v1/v2 JSON 导入：记录与 organization 必须一并合并；设备绑定不变。 */
+  replacePortableRecords(records: LibraryRecord[], organization?: LibraryOrganization): Promise<ShelfEntry[]>;
   readThumbnail(contentHash: string, mime?: string): Promise<ThumbnailAsset | null>;
   writeThumbnail(contentHash: string, asset: ThumbnailAsset): Promise<void>;
   deleteThumbnail(contentHash: string): Promise<void>;
@@ -630,7 +639,7 @@ export function formatShelfTime(ms: number): string {
 // ---- IndexedDB（浏览器 dev / 非 Tauri 环境回退） ----
 
 const DB_NAME = "epub-reader-shelf";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -648,6 +657,21 @@ function openDb(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains("organization")) {
         db.createObjectStore("organization");
+      }
+      // CP-I: both legacy and portable state share this database/version. The
+      // portable opener must not rely on a later version bump to create them.
+      if (!db.objectStoreNames.contains("portable_books")) {
+        db.createObjectStore("portable_books", { keyPath: "hash" });
+      }
+      if (!db.objectStoreNames.contains("portable_progress")) {
+        db.createObjectStore("portable_progress", { keyPath: "hash" });
+      }
+      if (!db.objectStoreNames.contains("portable_annotations")) {
+        const store = db.createObjectStore("portable_annotations", { keyPath: ["hash", "kind", "id"] });
+        store.createIndex("byBook", "hash");
+      }
+      if (!db.objectStoreNames.contains("portable_meta")) {
+        db.createObjectStore("portable_meta", { keyPath: "key" });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -877,10 +901,10 @@ class IndexedDbShelfStore implements ShelfStore {
     throw new Error("浏览器预览不支持重新定位本地源文件");
   }
 
-  async replacePortableRecords(records: LibraryRecord[]): Promise<ShelfEntry[]> {
+  async replacePortableRecords(records: LibraryRecord[], organization?: LibraryOrganization): Promise<ShelfEntry[]> {
     const db = await openDb();
     try {
-      const tx = db.transaction("meta", "readwrite");
+      const tx = db.transaction(["meta", "organization"], "readwrite");
       const store = tx.objectStore("meta");
       const current = (await reqAsPromise(store.getAll())) as ShelfEntry[];
       const byHash = new Map(
@@ -901,6 +925,18 @@ class IndexedDbShelfStore implements ShelfStore {
         };
       });
       for (const entry of next) store.put(entry);
+      if (organization) {
+        const orgStore = tx.objectStore("organization");
+        const existing = await reqAsPromise<OrganizationEnvelope | undefined>(orgStore.get("current"));
+        const envelope = existing ?? {
+          deviceId: typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+            ? crypto.randomUUID()
+            : "00000000-0000-4000-8000-000000000000",
+          counter: 0,
+          state: emptyOrganization(),
+        };
+        orgStore.put(mergeIntoEnvelope(validateEnvelope(envelope), organization), "current");
+      }
       await txDone(tx);
       return next;
     } finally {
@@ -1132,8 +1168,10 @@ class TauriShelfStore implements ShelfStore {
     });
   }
 
-  async replacePortableRecords(records: LibraryRecord[]): Promise<ShelfEntry[]> {
-    return invoke<ShelfEntry[]>("linked_library_replace_records", { records });
+  async replacePortableRecords(records: LibraryRecord[], organization?: LibraryOrganization): Promise<ShelfEntry[]> {
+    const entries = await invoke<ShelfEntry[]>("linked_library_replace_records", { records });
+    if (organization) await this.mergeOrganization(organization);
+    return entries;
   }
 
   async readThumbnail(contentHash: string, mime?: string): Promise<ThumbnailAsset | null> {
@@ -1177,12 +1215,49 @@ class TauriShelfStore implements ShelfStore {
 }
 
 let cachedStore: ShelfStore | null = null;
+let cachedPortableStore: PortableShelfStore | null = null;
+let portableDataService: PortableStateDataService | null = null;
+let portableActivation: Promise<PortableActivationResult> | null = null;
+
+function createLegacyShelfStore(): ShelfStore {
+  return isTauriEnv() ? new TauriShelfStore() : new IndexedDbShelfStore();
+}
 
 export function getShelfStore(): ShelfStore {
-  if (!cachedStore) {
-    cachedStore = isTauriEnv() ? new TauriShelfStore() : new IndexedDbShelfStore();
-  }
+  if (!cachedStore) cachedStore = createLegacyShelfStore();
   return cachedStore;
+}
+
+/**
+ * One-time CP-I activation. The legacy store stays in place until migration
+ * and repository open both succeed; on failure the caller keeps the complete
+ * old mode and receives a clear error.
+ */
+export async function activatePortableShelfState(): Promise<PortableActivationResult> {
+  if (portableActivation) return portableActivation;
+  const legacy = cachedStore ?? createLegacyShelfStore();
+  const data = portableDataService ?? (isTauriEnv()
+    ? new TauriPortableStateService()
+    : new PortableStateService(new IndexedDbPortableStateStorage()));
+  portableDataService = data;
+  portableActivation = (async () => {
+    try {
+      const result = await activatePortableShelfStore(legacy, data);
+      cachedPortableStore = new PortableShelfStore(legacy, data);
+      cachedStore = cachedPortableStore;
+      return result;
+    } catch (error) {
+      portableActivation = null;
+      cachedStore = legacy;
+      throw error;
+    }
+  })();
+  return portableActivation;
+}
+
+/** Test/UI query: whether the portable facade is currently active. */
+export function portableShelfStateActive(): boolean {
+  return cachedPortableStore !== null;
 }
 
 const thumbnailMimeByHash = new Map<string, string>();
@@ -1212,4 +1287,7 @@ export const shelfThumbnailProvider: ThumbnailProvider = {
 /** 测试用：重置缓存的 store。 */
 export function resetShelfStoreForTest(): void {
   cachedStore = null;
+  cachedPortableStore = null;
+  portableDataService = null;
+  portableActivation = null;
 }

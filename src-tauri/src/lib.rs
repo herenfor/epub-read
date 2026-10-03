@@ -4,6 +4,7 @@ mod build_info;
 mod build_info_contract;
 mod import_gate;
 mod ipc_bytes;
+mod portable_state_commands;
 
 #[cfg(feature = "ai")]
 macro_rules! configure_invoke_handler {
@@ -31,6 +32,19 @@ macro_rules! configure_invoke_handler {
             linked_library::linked_library_get_organization,
             linked_library::linked_library_apply_organization,
             linked_library::linked_library_merge_organization,
+            portable_state_commands::portable_state_activate,
+            portable_state_commands::portable_state_read,
+            portable_state_commands::portable_state_adopt,
+            portable_state_commands::portable_state_write,
+            portable_state_commands::portable_state_create_annotation,
+            portable_state_commands::portable_state_delete_annotation,
+            portable_state_commands::portable_state_release,
+            portable_state_commands::portable_state_snapshot,
+            portable_state_commands::portable_state_merge_state,
+            portable_state_commands::portable_state_get_organization,
+            portable_state_commands::portable_state_apply_organization,
+            portable_state_commands::portable_state_merge_organization,
+            portable_state_commands::portable_state_reserve_stamps,
             fonts_import_raw,
             fonts_import_paths,
             fonts_list,
@@ -119,6 +133,19 @@ macro_rules! configure_invoke_handler {
             linked_library::linked_library_get_organization,
             linked_library::linked_library_apply_organization,
             linked_library::linked_library_merge_organization,
+            portable_state_commands::portable_state_activate,
+            portable_state_commands::portable_state_read,
+            portable_state_commands::portable_state_adopt,
+            portable_state_commands::portable_state_write,
+            portable_state_commands::portable_state_create_annotation,
+            portable_state_commands::portable_state_delete_annotation,
+            portable_state_commands::portable_state_release,
+            portable_state_commands::portable_state_snapshot,
+            portable_state_commands::portable_state_merge_state,
+            portable_state_commands::portable_state_get_organization,
+            portable_state_commands::portable_state_apply_organization,
+            portable_state_commands::portable_state_merge_organization,
+            portable_state_commands::portable_state_reserve_stamps,
             fonts_import_raw,
             fonts_import_paths,
             fonts_list,
@@ -173,6 +200,7 @@ pub fn run() {
         .manage(FontWriteState::default())
         .manage(LinkedLibraryWriteState::default())
         .manage(linked_library::ManagedImportState::default())
+        .manage(portable_state_commands::PortableStateManager::default())
         .manage(ai::AiState::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())

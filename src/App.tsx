@@ -79,6 +79,7 @@ import {
   type AndroidNativeImportError,
 } from "./platform/androidNativeBridge";
 import {
+  activatePortableShelfState,
   applyShelfProgressPatch,
   getShelfStore,
   deleteShelfBooks,
@@ -120,6 +121,7 @@ import {
 } from "./ui/libraryArchive";
 import {
   emptyOrganization,
+  generateFolderId,
   type LibraryOrganization,
   type OrganizationCommand,
   type ShelfScope,
@@ -1262,7 +1264,7 @@ export default function App() {
     }
   }, []);
 
-  const applyNativeImportBatch = useCallback((batch: AndroidImportBatchResult, documents: AndroidDocumentSelection[]): void => {
+  const applyNativeImportBatch = useCallback(async (batch: AndroidImportBatchResult, documents: AndroidDocumentSelection[]): Promise<void> => {
     const imported: ShelfEntry[] = [];
     const duplicateTitles: string[] = [];
     const failed: string[] = [];
@@ -1291,6 +1293,7 @@ export default function App() {
       }
     }
     if (imported.length > 0) {
+      await getShelfStore().importRecords?.(imported);
       setShelfEntries((previous) => mergeShelfEntries(previous, imported));
     }
     const notice = formatImportNotice({
@@ -1374,6 +1377,7 @@ export default function App() {
     }
     contentHashByIdRef.current.set(match.record.id, match.record.contentHash ?? match.record.id);
     entryByContentHashRef.current.set(match.record.contentHash ?? match.record.id, match.record);
+    await getShelfStore().importRecords?.([match.record]);
     setShelfEntries((previous) => mergeShelfEntries(previous, [match.record!]));
     return match.record;
   }, [runNativeDocumentImport]);
@@ -1400,7 +1404,7 @@ export default function App() {
         if (uris.length === 0) return;
         const documents: AndroidDocumentSelection[] = uris.map((uri) => ({ uri }));
         const batch = await runNativeDocumentImport(documents);
-        if (batch) applyNativeImportBatch(batch, documents);
+        if (batch) await applyNativeImportBatch(batch, documents);
       } catch (error) {
         setShelfNotice({ kind: "error", text: `无法打开文件选择器：${String(error)}` });
       }
@@ -1612,33 +1616,19 @@ export default function App() {
       // 预检查组织数据合并
       mergeLibraryArchives(current.archive, incoming.archive);
 
-      // 第一步：写入阅读记录
-      let nextEntries: ShelfEntry[];
+      // 记录与 organization 必须在本机仓储边界内一并合并；旧 v3 进度不被旧包导入时间覆盖。
+      let unavailableCount = 0;
       try {
-        nextEntries = await getShelfStore().replacePortableRecords(
-          archiveRecordsForBackend(incoming.archive)
+        const store = getShelfStore();
+        const nextEntries = await store.replacePortableRecords(
+          archiveRecordsForBackend(incoming.archive),
+          incoming.archive.organization,
         );
+        unavailableCount = nextEntries.filter((entry) => entry.available === false).length;
         setShelfEntries(nextEntries);
+        setOrganization(await store.getOrganization());
       } catch (err) {
-        throw new Error(`书籍记录导入失败：${String(err)}`);
-      }
-
-      // 第二步：合并组织数据
-      try {
-        const nextOrg = await getShelfStore().mergeOrganization(incoming.archive.organization);
-        setOrganization(nextOrg);
-      } catch (err) {
-        // 第二步失败：重新加载实际已落盘的组织状态，明示部分完成
-        try {
-          const persistedOrg = await getShelfStore().getOrganization();
-          setOrganization(persistedOrg);
-        } catch {}
-        const unavailableCount = nextEntries.filter((entry) => entry.available === false).length;
-        setShelfNotice({
-          kind: "warn",
-          text: `书籍记录已导入${unavailableCount > 0 ? `（${unavailableCount} 本需重新定位源文件）` : ""}，但收藏与文件夹合并未完成，请重试导入：${String(err)}`,
-        });
-        return;
+        throw new Error(`书籍记录与组织导入失败：${String(err)}`);
       }
 
       // 第三步：应用外观与阅读设置
@@ -1697,7 +1687,6 @@ export default function App() {
         return;
       }
 
-      const unavailableCount = nextEntries.filter((entry) => entry.available === false).length;
       setShelfNotice({
         kind: unavailableCount > 0 ? "warn" : "ok",
         text: `已导入 ${Object.keys(incoming.archive.records).length} 本书的记录与分类${unavailableCount > 0 ? `；${unavailableCount} 本需重新定位源文件` : ""}`,
@@ -1711,36 +1700,49 @@ export default function App() {
     }
   }, [settings, uiScale]);
 
-  // ---- 书架与组织启动加载 ----
+  // ---- 书架与组织启动加载（先完成一次 CP-I 激活，失败保持旧模式） ----
   useEffect(() => {
     let cancelled = false;
-    const store = getShelfStore();
-    store
-      .list()
-      .then((entries) => {
-        if (!cancelled) setShelfEntries(entries);
-      })
-      .catch((e) => {
-        if (!cancelled) setShelfError(`无法读取书架：${String(e)}`);
-      });
-
-    store
-      .getOrganization()
-      .then((org) => {
+    void (async () => {
+      try {
+        await activatePortableShelfState();
+      } catch (error) {
         if (!cancelled) {
-          setOrganization(org);
-          setOrganizationError(null);
-        }
-      })
-      .catch((e) => {
-        if (!cancelled) {
-          setOrganizationError(`无法读取收藏与文件夹：${String(e)}`);
           setShelfNotice({
             kind: "error",
-            text: `无法读取收藏与文件夹：${String(e)}；已禁用分类写入以保护现有数据`,
+            text: `跨平台资料未激活，继续使用旧模式：${String(error)}`,
           });
         }
-      });
+      }
+      if (cancelled) return;
+      const store = getShelfStore();
+      store
+        .list()
+        .then((entries) => {
+          if (!cancelled) setShelfEntries(entries);
+        })
+        .catch((e) => {
+          if (!cancelled) setShelfError(`无法读取书架：${String(e)}`);
+        });
+
+      store
+        .getOrganization()
+        .then((org) => {
+          if (!cancelled) {
+            setOrganization(org);
+            setOrganizationError(null);
+          }
+        })
+        .catch((e) => {
+          if (!cancelled) {
+            setOrganizationError(`无法读取收藏与文件夹：${String(e)}`);
+            setShelfNotice({
+              kind: "error",
+              text: `无法读取收藏与文件夹：${String(e)}；已禁用分类写入以保护现有数据`,
+            });
+          }
+        });
+    })();
 
     return () => {
       cancelled = true;
@@ -3005,7 +3007,7 @@ export default function App() {
         return;
       }
       next = [...currentNotes, {
-        id: `note_${now}_${Math.random().toString(36).slice(2, 9)}`,
+        id: generateFolderId(),
         spineIndex: draft.spineIndex,
         chapterPath: expectedPath,
         startTextOffset: draft.selection.startTextOffset,
@@ -3156,7 +3158,7 @@ export default function App() {
         next = [
           ...currentBookmarks,
           {
-            id: `bm_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            id: generateFolderId(),
             spineIndex,
             page: chapterState.currentPage,
             anchorIndex: anchor && anchor.index >= 0 ? anchor.index : null,
@@ -3164,6 +3166,7 @@ export default function App() {
             anchorTextOffset: anchor?.textOffset ?? null,
             anchorTextSnippet: anchor?.textSnippet ?? null,
             mediaAnchor: anchor?.mediaAnchor ?? null,
+            chapterPath: book ? spineItemPath(book, spineIndex) ?? null : null,
             text: text.slice(0, 80),
             createdAtMs: Date.now(),
           },
@@ -3191,7 +3194,7 @@ export default function App() {
         next = [
           ...currentBookmarks,
           {
-            id: `bm_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            id: generateFolderId(),
             spineIndex,
             page: chapterState.currentPage,
             anchorIndex: anchor && anchor.index >= 0 ? anchor.index : null,
@@ -3199,6 +3202,7 @@ export default function App() {
             anchorTextOffset: anchor?.textOffset ?? null,
             anchorTextSnippet: anchor?.textSnippet ?? null,
             mediaAnchor: anchor?.mediaAnchor ?? null,
+            chapterPath: book ? spineItemPath(book, spineIndex) ?? null : null,
             text: text.slice(0, 80),
             createdAtMs: Date.now(),
           },
