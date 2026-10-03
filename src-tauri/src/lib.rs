@@ -1,3 +1,4 @@
+mod android_battery;
 mod android_uri_bridge;
 mod build_info;
 #[cfg(test)]
@@ -17,6 +18,8 @@ macro_rules! configure_invoke_handler {
             linked_library::linked_library_cancel_document_import,
             android_uri_bridge::android_read_content_uri,
             android_uri_bridge::android_write_text_content_uri,
+            android_battery::android_battery_subscribe,
+            android_battery::android_battery_unsubscribe,
             linked_library::linked_library_read_source_raw,
             linked_library::linked_library_read_cover_raw,
             linked_library::linked_library_relink,
@@ -125,6 +128,8 @@ macro_rules! configure_invoke_handler {
             linked_library::linked_library_cancel_document_import,
             android_uri_bridge::android_read_content_uri,
             android_uri_bridge::android_write_text_content_uri,
+            android_battery::android_battery_subscribe,
+            android_battery::android_battery_unsubscribe,
             linked_library::linked_library_read_source_raw,
             linked_library::linked_library_read_cover_raw,
             linked_library::linked_library_relink,
@@ -226,7 +231,9 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init());
     #[cfg(target_os = "android")]
-    let builder = builder.plugin(android_uri_bridge::plugin());
+    let builder = builder
+        .plugin(android_uri_bridge::plugin())
+        .plugin(android_battery::plugin());
     // The embedding gateway only exists in the AI edition; Core must not link
     // or load the ONNX Runtime at all.
     #[cfg(feature = "ai")]

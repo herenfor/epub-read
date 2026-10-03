@@ -1,38 +1,40 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
+const mocks = vi.hoisted(() => ({ invoke: vi.fn(), addPluginListener: vi.fn() }));
 
-vi.mock("@tauri-apps/api/core", () => {
-  class Channel<T> {
-    onmessage: (message: T) => void;
-
-    constructor(onmessage?: (message: T) => void) {
-      this.onmessage = onmessage ?? (() => {});
-    }
-  }
-
-  return { Channel, invoke: mocks.invoke };
-});
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: mocks.invoke,
+  addPluginListener: mocks.addPluginListener,
+}));
 
 type BatteryStatus = { levelPct: number | null; charging: boolean | null };
-type StatusChannel = { onmessage: (payload: unknown) => void };
+function senderFor(args: Record<string, unknown>) {
+  const handler = mocks.addPluginListener.mock.calls[0]![2] as (payload: unknown) => void;
+  return {
+    onmessage(payload: Record<string, unknown>) {
+      handler({ ...payload, subscriptionId: args.subscriptionId });
+    },
+  };
+}
 
 describe("batteryStatus", () => {
   beforeEach(() => {
     vi.resetModules();
     mocks.invoke.mockReset();
+    mocks.addPluginListener.mockReset();
+    mocks.addPluginListener.mockResolvedValue({ unregister: vi.fn() });
   });
 
-  it("creates the callback before starting the native subscription", async () => {
+  it("registers the event callback before starting the native subscription", async () => {
     const received: BatteryStatus[] = [];
     mocks.invoke.mockImplementation(
       async (command: string, args?: Record<string, unknown>) => {
         if (command === "android_battery_subscribe") {
-          const channel = args?.onStatus as StatusChannel | undefined;
-          // The service must have installed its callback before `invoke` runs,
+          const handler = mocks.addPluginListener.mock.calls[0]?.[2];
+          // The service must have registered its callback before `invoke` runs,
           // otherwise the first sticky native value can be lost.
-          expect(typeof channel?.onmessage).toBe("function");
-          channel?.onmessage({ levelPct: 72.6, charging: true });
+          expect(typeof handler).toBe("function");
+          senderFor(args!).onmessage({ levelPct: 72.6, charging: true });
         }
       },
     );
@@ -42,11 +44,11 @@ describe("batteryStatus", () => {
 
     await vi.waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith(
       "android_battery_subscribe",
-      expect.objectContaining({ onStatus: expect.anything() }),
+      { subscriptionId: 1 },
     ));
     expect(received).toEqual([{ levelPct: 73, charging: true }]);
 
-    const channel = mocks.invoke.mock.calls[0]![1]!.onStatus as StatusChannel;
+    const channel = senderFor(mocks.invoke.mock.calls[0]![1]!);
     channel.onmessage({ levelPct: -1, charging: "not-a-boolean" });
     channel.onmessage({ levelPct: 0, charging: false });
     expect(received).toEqual([
@@ -77,7 +79,7 @@ describe("batteryStatus", () => {
     );
     expect(mocks.invoke).toHaveBeenCalledTimes(1);
 
-    const channel = mocks.invoke.mock.calls[0]![1]!.onStatus as StatusChannel;
+    const channel = senderFor(mocks.invoke.mock.calls[0]![1]!);
     channel.onmessage({ levelPct: 40, charging: false });
     expect(first).toHaveBeenCalledWith({ levelPct: 40, charging: false });
     expect(second).toHaveBeenCalledWith({ levelPct: 40, charging: false });
@@ -117,12 +119,12 @@ describe("batteryStatus", () => {
     expect(mocks.invoke).toHaveBeenCalledTimes(2);
   });
 
-  it("review_ignores released channel messages after subscribing again", async () => {
+  it("review_reuses one event registration and ignores old sessions after subscribing again", async () => {
     mocks.invoke.mockResolvedValue(undefined);
     const { subscribeBattery } = await import("./batteryStatus");
     const stopFirst = subscribeBattery(vi.fn());
     await vi.waitFor(() => expect(mocks.invoke).toHaveBeenCalledTimes(1));
-    const oldChannel = mocks.invoke.mock.calls[0]![1]!.onStatus as StatusChannel;
+    const oldChannel = senderFor(mocks.invoke.mock.calls[0]![1]!);
     oldChannel.onmessage({ levelPct: 20, charging: false });
     stopFirst();
     await vi.waitFor(() => expect(mocks.invoke).toHaveBeenCalledTimes(2));
@@ -132,10 +134,11 @@ describe("batteryStatus", () => {
     const stopSecond = subscribeBattery(received);
     expect(received).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(mocks.invoke).toHaveBeenCalledTimes(3));
-    const newChannel = mocks.invoke.mock.calls[2]![1]!.onStatus as StatusChannel;
+    const newChannel = senderFor(mocks.invoke.mock.calls[2]![1]!);
     newChannel.onmessage({ levelPct: 80, charging: true });
     oldChannel.onmessage({ levelPct: 18, charging: false });
     expect(received.mock.calls).toEqual([[{ levelPct: 80, charging: true }]]);
+    expect(mocks.addPluginListener).toHaveBeenCalledTimes(1);
     stopSecond();
     await vi.waitFor(() => expect(mocks.invoke).toHaveBeenCalledTimes(4));
   });

@@ -10,7 +10,6 @@ import androidx.appcompat.app.AppCompatActivity
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.TauriPlugin
-import app.tauri.plugin.Channel
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
@@ -18,7 +17,7 @@ import org.json.JSONObject
 
 @InvokeArg
 class StartBatteryArgs {
-    lateinit var onStatus: Channel
+    var subscriptionId: Long = 0
 }
 
 /**
@@ -27,14 +26,14 @@ class StartBatteryArgs {
  * A single `ACTION_BATTERY_CHANGED` receiver is registered only while the
  * front-end subscription is active. `start` resolves without carrying a
  * value; the sticky first reading and later updates all travel through the
- * command channel so the JS caller has already installed its callback.
+ * app-level event listener registered by JS before starting the receiver.
  */
 @TauriPlugin
 class ReaderBatteryPlugin(private val activity: Activity) : Plugin(activity) {
     private data class BatterySnapshot(val levelPct: Int?, val charging: Boolean?)
 
     private var receiver: BroadcastReceiver? = null
-    private var statusChannel: Channel? = null
+    private var subscriptionId: Long = 0
     private var desired = false
     private var hasEmitted = false
     private var lastStatus: BatterySnapshot? = null
@@ -42,13 +41,14 @@ class ReaderBatteryPlugin(private val activity: Activity) : Plugin(activity) {
     @Command
     fun start(invoke: Invoke) {
         val args = invoke.parseArgs(StartBatteryArgs::class.java)
-        statusChannel = args.onStatus
+        unregisterReceiver()
+        subscriptionId = args.subscriptionId
         desired = true
         try {
             registerReceiver()
         } catch (error: Throwable) {
             desired = false
-            statusChannel = null
+            subscriptionId = 0
             unregisterReceiver()
             invoke.reject(error.message ?: error.toString())
             return
@@ -60,7 +60,7 @@ class ReaderBatteryPlugin(private val activity: Activity) : Plugin(activity) {
     fun stop(invoke: Invoke) {
         desired = false
         unregisterReceiver()
-        statusChannel = null
+        subscriptionId = 0
         invoke.resolve(JSObject())
     }
 
@@ -80,7 +80,7 @@ class ReaderBatteryPlugin(private val activity: Activity) : Plugin(activity) {
     override fun onDestroy(activity: AppCompatActivity) {
         desired = false
         unregisterReceiver()
-        statusChannel = null
+        subscriptionId = 0
     }
 
     private fun registerReceiver() {
@@ -91,10 +91,11 @@ class ReaderBatteryPlugin(private val activity: Activity) : Plugin(activity) {
         hasEmitted = false
         lastStatus = null
 
+        val ownerSubscriptionId = subscriptionId
         val next = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
-                if (intent?.action == Intent.ACTION_BATTERY_CHANGED) {
-                    emit(intent)
+                if (receiver === this && intent?.action == Intent.ACTION_BATTERY_CHANGED) {
+                    emit(intent, ownerSubscriptionId)
                 }
             }
         }
@@ -111,7 +112,7 @@ class ReaderBatteryPlugin(private val activity: Activity) : Plugin(activity) {
         // registration. Only publish the returned value when that did not
         // happen, so a newer event cannot be overwritten by the old first read.
         if (sticky != null && !hasEmitted) {
-            emit(sticky)
+            emit(sticky, ownerSubscriptionId)
         }
     }
 
@@ -125,7 +126,7 @@ class ReaderBatteryPlugin(private val activity: Activity) : Plugin(activity) {
         }
     }
 
-    private fun emit(intent: Intent) {
+    private fun emit(intent: Intent, ownerSubscriptionId: Long) {
         val status = readStatus(intent)
         if (hasEmitted && status == lastStatus) return
 
@@ -133,6 +134,7 @@ class ReaderBatteryPlugin(private val activity: Activity) : Plugin(activity) {
         lastStatus = status
 
         val payload = JSObject()
+        payload.put("subscriptionId", ownerSubscriptionId)
         val levelPct = status.levelPct
         if (levelPct == null) {
             payload.put("levelPct", JSONObject.NULL)
@@ -148,10 +150,9 @@ class ReaderBatteryPlugin(private val activity: Activity) : Plugin(activity) {
         }
 
         try {
-            statusChannel?.send(payload)
+            trigger("battery-status", payload)
         } catch (_: Throwable) {
-            // The JS subscription may already be gone; the next start/stop
-            // cycle owns a fresh channel.
+            // No front-end listener remains after a destroyed WebView.
         }
     }
 

@@ -1,24 +1,22 @@
-//! Android battery plugin preparation.
+//! Android battery native bridge.
 //!
 //! The Kotlin `ReaderBatteryPlugin` owns the `ACTION_BATTERY_CHANGED` receiver
-//! and sends every reading through the command channel created by the JS
-//! service. These Rust commands only start and stop that subscription; they
-//! never return a first value directly, which keeps the JS contract free of
+//! and sends every reading through one app-level plugin event. These Rust
+//! commands only start and stop that subscription. They never return a first
+//! value directly, which keeps the JS contract free of
 //! the old first-read-overwrites-newer-event race.
 //!
-//! Registration is intentionally left to the integration owner: add this
-//! module to `lib.rs`, register [`plugin`] under `target_os = "android"`, and
-//! add the two commands below to both edition invoke handlers.
-#![allow(dead_code)]
+//! `lib.rs` registers the plugin on Android and exposes both commands for each
+//! edition. The UI owns enabling and releasing the native receiver.
 
 #[tauri::command]
 pub async fn android_battery_subscribe(
     app: tauri::AppHandle,
-    on_status: tauri::ipc::Channel<serde_json::Value>,
+    subscription_id: u64,
 ) -> Result<(), String> {
     #[cfg(target_os = "android")]
     {
-        tauri::async_runtime::spawn_blocking(move || android::subscribe(&app, &on_status))
+        tauri::async_runtime::spawn_blocking(move || android::subscribe(&app, subscription_id))
             .await
             .map_err(|error| format!("android_battery_subscribe worker join failed: {error}"))??;
         Ok(())
@@ -26,7 +24,7 @@ pub async fn android_battery_subscribe(
 
     #[cfg(not(target_os = "android"))]
     {
-        let _ = (app, on_status);
+        let _ = (app, subscription_id);
         Err("android_battery_subscribe: unsupported platform".to_string())
     }
 }
@@ -65,8 +63,8 @@ mod android {
 
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
-    struct StartBatteryRequest<'a> {
-        on_status: &'a tauri::ipc::Channel<serde_json::Value>,
+    struct StartBatteryRequest {
+        subscription_id: u64,
     }
 
     pub(crate) struct AndroidBattery<R: Runtime>(PluginHandle<R>);
@@ -96,9 +94,9 @@ mod android {
 
     pub(crate) fn subscribe<R: Runtime>(
         app: &AppHandle<R>,
-        on_status: &tauri::ipc::Channel<serde_json::Value>,
+        subscription_id: u64,
     ) -> Result<(), String> {
-        run_plugin_command(app, "start", StartBatteryRequest { on_status })
+        run_plugin_command(app, "start", StartBatteryRequest { subscription_id })
     }
 
     pub(crate) fn unsubscribe<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
@@ -107,5 +105,4 @@ mod android {
 }
 
 #[cfg(target_os = "android")]
-#[allow(unused_imports)]
 pub(crate) use android::plugin;
