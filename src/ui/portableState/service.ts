@@ -1102,14 +1102,23 @@ export class PortableStateService implements PortableStateCommandService {
     await this.withStorage(async () => this.storage.transaction(async (tx) => {
       const envelope = await this.requireEnvelope(tx);
       const local = await this.loadLocalState(tx, envelope);
+      // B5: validate and scan the raw incoming organization before merging so
+      // its event clocks are absorbed into the installation counter.
+      const incomingOrganization = validateOrganization(input.organization ?? envelope.state);
+      const incomingMaximum = maximumPortableStateReceivedCounter({
+        schemaVersion: 3,
+        books: {},
+        organization: incomingOrganization,
+      });
       const receivedMaximum = Math.max(
         envelope.counter,
         maximumPortableStateReceivedCounter(local.state),
+        incomingMaximum,
       );
       const built = buildLegacyImportState(
         local.state,
         records,
-        input.organization ?? envelope.state,
+        incomingOrganization,
         envelope.deviceId,
         receivedMaximum,
         receivedMaximum,

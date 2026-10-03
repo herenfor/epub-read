@@ -192,6 +192,18 @@ function readerNote(id: string, content: string): ReaderNote {
   return { ...noteValue(content), id, spineIndex: 0, updatedAtMs: 10 };
 }
 
+async function beginLatestProgress(
+  store: PortableShelfStore,
+  service: PortableStateService,
+): Promise<void> {
+  const versions = (await service.snapshot()).books[HASH].progress.versions;
+  const latest = latestVersion(versions);
+  await store.beginProgressSession(
+    LOCAL_ID,
+    latest ? { kind: "chosen", stamp: latest.stamp } : { kind: "empty" },
+  );
+}
+
 describe("CP-I portable ShelfStore facade", () => {
   test("first activation migrates old rows and keeps local ids and annotations", async () => {
     const legacy = new FakeLegacyStore([entry({
@@ -236,6 +248,7 @@ describe("CP-I portable ShelfStore facade", () => {
     const service = new PortableStateService(new MemoryPortableStateStorage());
     await activatePortableShelfStore(legacy, service);
     const store = new PortableShelfStore(legacy, service);
+    await beginLatestProgress(store, service);
     await store.updateProgress(LOCAL_ID, progressPatch());
     const state = await service.snapshot();
     expect(state.books[HASH].progress.versions).toHaveLength(1);
@@ -313,6 +326,29 @@ describe("CP-I portable ShelfStore facade", () => {
     expect(state.organization.folders[folderId].name.value).toBe("箱");
   });
 
+  test("B5 legacy import absorbs incoming organization counter", async () => {
+    const legacy = new FakeLegacyStore([]);
+    const service = new PortableStateService(new MemoryPortableStateStorage());
+    await activatePortableShelfStore(legacy, service);
+    const store = new PortableShelfStore(legacy, service);
+    const folderId = generateFolderId();
+    const remote = "00000000-0000-4000-8000-0000000000dd";
+    await store.replacePortableRecords([], {
+      schemaVersion: 1,
+      folders: {
+        [folderId]: {
+          name: {
+            value: "箱",
+            stamp: { deviceId: remote, counter: 999 },
+          },
+        },
+      },
+      books: {},
+    });
+    const next = await service.reserveStamps(1);
+    expect(next.counter).toBeGreaterThan(999);
+  });
+
   test("organization commands use the same portable envelope as book data", async () => {
     const legacy = new FakeLegacyStore([]);
     const service = new PortableStateService(new MemoryPortableStateStorage());
@@ -330,6 +366,7 @@ describe("CP-I portable ShelfStore facade", () => {
     const service = new PortableStateService(new MemoryPortableStateStorage());
     await activatePortableShelfStore(legacy, service);
     const store = new PortableShelfStore(legacy, service);
+    await beginLatestProgress(store, service);
     await store.updateProgress(LOCAL_ID, progressPatch());
     const before = await service.snapshot();
     const beforeVersions = before.books[HASH].progress.versions.length;
@@ -369,10 +406,10 @@ describe("CP-I portable ShelfStore facade", () => {
     const oldSession = new PortableShelfStore(legacy, service);
     const otherSession = new PortableShelfStore(legacy, service);
 
-    await oldSession.beginProgressSession(LOCAL_ID);
+    await beginLatestProgress(oldSession, service);
     await oldSession.updateProgress(LOCAL_ID, { ...progressPatch(), page: 8, anchorTextOffset: 8 });
 
-    await otherSession.beginProgressSession(LOCAL_ID);
+    await beginLatestProgress(otherSession, service);
     await otherSession.updateProgress(LOCAL_ID, { ...progressPatch(), page: 20, anchorTextOffset: 20 });
 
     // The old session submits its already-superseded sample. It must be
@@ -387,11 +424,41 @@ describe("CP-I portable ShelfStore facade", () => {
       version.value?.locator.locatorVersion === 0 && version.value.locator.pageHint === 9,
     )).toBe(false);
 
-    // The next real movement creates a fresh sample on the refreshed session
-    // instead of locking the book to the expired token forever.
-    await oldSession.updateProgress(LOCAL_ID, { ...progressPatch(), page: 10, anchorTextOffset: 10 });
-    const resumed = (await service.snapshot()).books[HASH].progress.versions;
-    expect(resumed[resumed.length - 1].value?.locator).toMatchObject({ pageHint: 10 });
+    // The expired session must not silently adopt the merged winner. A later
+    // sample is rejected explicitly until the book is reopened/reselected.
+    await expect(
+      oldSession.updateProgress(LOCAL_ID, { ...progressPatch(), page: 10, anchorTextOffset: 10 }),
+    ).rejects.toThrow("进度基线已过期");
+    const preserved = (await service.snapshot()).books[HASH].progress.versions;
+    expect(latestVersion(preserved)?.value?.locator).toMatchObject({ pageHint: 20 });
+  });
+
+  test("B3 single displayed progress is bound before parse and never silently replaced", async () => {
+    const legacy = new FakeLegacyStore([entry()]);
+    const service = new PortableStateService(new MemoryPortableStateStorage());
+    await activatePortableShelfStore(legacy, service);
+    const store = new PortableShelfStore(legacy, service);
+
+    const displayed = latestVersion((await service.snapshot()).books[HASH].progress.versions);
+    expect(displayed).not.toBeNull();
+    const incoming = JSON.parse(JSON.stringify(await service.snapshot())) as any;
+    const deviceId = displayed!.stamp.deviceId;
+    const counter = displayed!.stamp.counter + 10;
+    incoming.books[HASH].progress.versions = [{
+      stamp: { deviceId, counter },
+      clock: { [deviceId]: counter },
+      value: { ...displayed!.value, progressPctHint: 50 },
+      updatedAtMs: displayed!.updatedAtMs + 1,
+    }];
+    await service.mergeValidatedState(incoming);
+
+    // The displayed version is dominated by the merge. The pre-parse binding
+    // must fail explicitly instead of adopting the newer unshown branch.
+    await expect(
+      store.beginProgressSession(LOCAL_ID, { kind: "chosen", stamp: displayed!.stamp }),
+    ).rejects.toThrow();
+    const state = await service.snapshot();
+    expect(latestVersion(state.books[HASH].progress.versions)?.value?.progressPctHint).toBe(50);
   });
 
   test("closing a reading session releases its handles and a later update starts fresh", async () => {
@@ -400,9 +467,10 @@ describe("CP-I portable ShelfStore facade", () => {
     await activatePortableShelfStore(legacy, service);
     const store = new PortableShelfStore(legacy, service);
 
-    await store.beginProgressSession(LOCAL_ID);
+    await beginLatestProgress(store, service);
     await store.closeProgressSession(LOCAL_ID);
     // No stale readId/basis may leak into the next real sample.
+    await beginLatestProgress(store, service);
     await store.updateProgress(LOCAL_ID, progressPatch());
 
     const state = await service.snapshot();
@@ -438,7 +506,10 @@ describe("CP-I portable ShelfStore facade", () => {
     await service.mergeValidatedState(incoming);
 
     const editedB = readerNote(noteBId, "edited-B");
-    await store.updateNote(LOCAL_ID, { ...editedB, updatedAtMs: 1000 }, displayedB!.stamp);
+    const editContext = await store.beginNoteEdit(LOCAL_ID, noteBId, displayedB!.stamp);
+    expect(editContext).not.toBeNull();
+    await store.writeNoteEdit(LOCAL_ID, { ...editedB, updatedAtMs: 1000 }, editContext!);
+    await store.endNoteEdit(editContext!);
 
     const after = await service.snapshot();
     const storedA = after.books[HASH].notes[noteAId];
@@ -446,6 +517,42 @@ describe("CP-I portable ShelfStore facade", () => {
     expect(storedA.versions.some((version) => version.value.content === "remote-A")).toBe(true);
     expect(latestVersion(storedA.versions)?.value.content).toBe("remote-A");
     expect(latestVersion(storedB.versions)?.value.content).toBe("edited-B");
+  });
+
+  test("B2 editor context keeps a concurrent background version of the same note", async () => {
+    const legacy = new FakeLegacyStore([entry()]);
+    const service = new PortableStateService(new MemoryPortableStateStorage());
+    await activatePortableShelfStore(legacy, service);
+    const store = new PortableShelfStore(legacy, service);
+
+    const noteId = generateFolderId();
+    await store.createNote(LOCAL_ID, readerNote(noteId, "old-A"));
+    const before = await service.snapshot();
+    const displayed = latestVersion(before.books[HASH].notes[noteId].versions);
+    expect(displayed).not.toBeNull();
+
+    const incoming = JSON.parse(JSON.stringify(before)) as any;
+    const remoteDevice = "00000000-0000-4000-8000-0000000000cd";
+    incoming.books[HASH].notes[noteId].versions.push({
+      stamp: { deviceId: remoteDevice, counter: 999 },
+      clock: { [remoteDevice]: 999 },
+      value: { ...noteValue("remote-A"), createdAtMs: 1 },
+      updatedAtMs: 999,
+    });
+    await service.mergeValidatedState(incoming);
+
+    const context = await store.beginNoteEdit(LOCAL_ID, noteId, displayed!.stamp);
+    expect(context).not.toBeNull();
+    const edited = readerNote(noteId, "edited-A");
+    await store.writeNoteEdit(LOCAL_ID, { ...edited, updatedAtMs: 1000 }, context!);
+    await store.endNoteEdit(context!);
+
+    const after = await service.snapshot();
+    const contents = after.books[HASH].notes[noteId].versions.map(
+      (version) => version.value.content,
+    );
+    expect(contents).toContain("remote-A");
+    expect(contents).toContain("edited-A");
   });
 
   test("legacy archive import adds missing note/book and preserves existing v3 progress", async () => {
@@ -525,7 +632,7 @@ describe("CP-I portable ShelfStore facade", () => {
     const service = new PortableStateService(new MemoryPortableStateStorage());
     await activatePortableShelfStore(legacy, service);
     const store = new PortableShelfStore(legacy, service);
-
+    await beginLatestProgress(store, service);
     await store.updateProgress(LOCAL_ID, {
       ...progressPatch(),
       chapterPath: "OEBPS/ch.xhtml",

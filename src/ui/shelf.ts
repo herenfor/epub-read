@@ -93,6 +93,16 @@ export interface LinkedImportBatchResult {
   results: LinkedImportItemResult[];
 }
 
+export type PortableProgressSelection =
+  | { readonly kind: "chosen"; readonly stamp: Stamp }
+  | { readonly kind: "empty" };
+
+/** Opaque note editor basis: readId + current write basis. */
+export interface NoteEditContext {
+  readId: string;
+  basisId: string;
+}
+
 export interface ShelfProgressPatch {
   lastReadAtMs: number;
   spineIndex: number;
@@ -173,10 +183,13 @@ export interface ShelfStore {
   createBookmark?(id: string, bookmark: Bookmark): Promise<ShelfEntry>;
   deleteBookmark?(id: string, bookmarkId: string): Promise<ShelfEntry>;
   createNote?(id: string, note: ReaderNote): Promise<ShelfEntry>;
-  updateNote?(id: string, note: ReaderNote, chosenStamp: Stamp): Promise<ShelfEntry>;
   deleteNote?(id: string, noteId: string): Promise<ShelfEntry>;
-  /** CP-I-R progress session pinned to the version actually selected/displayed. */
-  beginProgressSession?(id: string, chosenStamp?: Stamp): Promise<void>;
+  /** B2: open a note edit context against the displayed version. */
+  beginNoteEdit?(id: string, noteId: string, chosenStamp: Stamp): Promise<NoteEditContext | null>;
+  writeNoteEdit?(id: string, note: ReaderNote, context: NoteEditContext): Promise<ShelfEntry>;
+  endNoteEdit?(context: NoteEditContext): Promise<void>;
+  /** B3: progress session pinned to the version selected from the open read. */
+  beginProgressSession?(id: string, selection: PortableProgressSelection): Promise<void>;
   closeProgressSession?(id: string): Promise<void>;
 }
 

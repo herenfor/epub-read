@@ -4,7 +4,7 @@ import type { Book } from "./core/types";
 import type { Annotation, Stamp, Version } from "./core/portableState/portable-register-core";
 import { compareStamp } from "./core/portableState/portable-register-core";
 import { latestVersion, projectProgressVersion, versionForStamp } from "./core/portableState/projection";
-import type { Locator, NoteValue, ProgressValue } from "./core/portableState/portable-state-types";
+import type { BookmarkValue, Locator, NoteValue, ProgressValue } from "./core/portableState/portable-state-types";
 import { isExternalUrl, isFragmentOnly, resolvePath, splitHref } from "./core/paths";
 import {
   createSearchSession,
@@ -91,6 +91,8 @@ import {
   readingAnchorFromShelfEntry,
   shelfThumbnailProvider,
   type Bookmark,
+  type NoteEditContext,
+  type PortableProgressSelection,
   type ShelfEntry,
   type ShelfProgressPatch,
 } from "./ui/shelf";
@@ -304,6 +306,65 @@ function portableNoteAnnotations(entry: ShelfEntry): Readonly<Record<string, Ann
   return (entry as unknown as {
     readonly portableNoteAnnotations?: Readonly<Record<string, Annotation<NoteValue>>>;
   }).portableNoteAnnotations ?? {};
+}
+
+function hasOwnField(value: object, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function mergeProgressProjection(entry: ShelfEntry, written: ShelfEntry): ShelfEntry {
+  const source = written as unknown as {
+    readonly chapterPath?: string | null;
+    readonly portableLocator?: Locator | null;
+    readonly portableProgressVersions?: readonly Version<ProgressValue>[];
+    readonly portableProgressConflict?: boolean;
+  };
+  return {
+    ...entry,
+    lastReadAtMs: written.lastReadAtMs,
+    spineIndex: written.spineIndex,
+    page: written.page,
+    progressPct: written.progressPct,
+    anchorIndex: written.anchorIndex,
+    anchorRatio: written.anchorRatio,
+    anchorTextOffset: written.anchorTextOffset,
+    anchorTextSnippet: written.anchorTextSnippet,
+    mediaAnchor: written.mediaAnchor,
+    ...(hasOwnField(source, "portableProgressVersions")
+      ? {
+          chapterPath: source.chapterPath ?? null,
+          portableLocator: source.portableLocator ?? null,
+          portableProgressVersions: source.portableProgressVersions ?? [],
+          portableProgressConflict: source.portableProgressConflict ?? false,
+        }
+      : {}),
+  } as ShelfEntry;
+}
+
+function mergeNoteProjection(entry: ShelfEntry, written: ShelfEntry, fallback: ReaderNote[]): ShelfEntry {
+  const source = written as unknown as {
+    readonly portableNoteAnnotations?: Readonly<Record<string, Annotation<NoteValue>>>;
+  };
+  return {
+    ...entry,
+    notes: written.notes ?? fallback,
+    ...(hasOwnField(source, "portableNoteAnnotations")
+      ? { portableNoteAnnotations: source.portableNoteAnnotations ?? {} }
+      : {}),
+  } as ShelfEntry;
+}
+
+function mergeBookmarkProjection(entry: ShelfEntry, written: ShelfEntry, fallback: Bookmark[]): ShelfEntry {
+  const source = written as unknown as {
+    readonly portableBookmarkAnnotations?: Readonly<Record<string, Annotation<BookmarkValue>>>;
+  };
+  return {
+    ...entry,
+    bookmarks: written.bookmarks ?? fallback,
+    ...(hasOwnField(source, "portableBookmarkAnnotations")
+      ? { portableBookmarkAnnotations: source.portableBookmarkAnnotations ?? {} }
+      : {}),
+  } as ShelfEntry;
 }
 
 function legacySavedProgress(entry: ShelfEntry): SavedProgress {
@@ -595,6 +656,7 @@ export default function App() {
   const [shelfBackActive, setShelfBackActive] = useState(false);
   const shelfBackHandlerRef = useRef<(() => boolean) | null>(null);
   const noteComposerDirtyRef = useRef(false);
+  const activeNoteEditContextRef = useRef<NoteEditContext | null>(null);
   const [shelfEntries, setShelfEntries] = useState<ShelfEntry[]>([]);
   const [shelfError, setShelfError] = useState<string | null>(null);
   const [shelfNotice, setShelfNotice] = useState<{
@@ -740,22 +802,7 @@ export default function App() {
       // projection; mirror that backend truth into the shelf UI so a discarded
       // optimistic patch cannot become the next open's default position.
       setShelfEntries((prev) =>
-        prev.map((entry) =>
-          entry.id === id
-            ? {
-                ...entry,
-                lastReadAtMs: written.lastReadAtMs,
-                spineIndex: written.spineIndex,
-                page: written.page,
-                progressPct: written.progressPct,
-                anchorIndex: written.anchorIndex,
-                anchorRatio: written.anchorRatio,
-                anchorTextOffset: written.anchorTextOffset,
-                anchorTextSnippet: written.anchorTextSnippet,
-                mediaAnchor: written.mediaAnchor,
-              }
-            : entry
-        )
+        prev.map((entry) => entry.id === id ? mergeProgressProjection(entry, written) : entry)
       );
     });
   }
@@ -807,6 +854,12 @@ export default function App() {
     },
   []);
   const openComposer = useCallback((draft: NoteComposerDraft): void => {
+    const previousContext = activeNoteEditContextRef.current;
+    const nextContext = draft.mode === "edit" ? draft.editContext ?? null : null;
+    activeNoteEditContextRef.current = nextContext;
+    if (previousContext && previousContext !== nextContext) {
+      void getShelfStore().endNoteEdit?.(previousContext).catch(() => undefined);
+    }
     const current = foregroundRef.current;
     if (current.kind === "transient" && current.transient === "footnote") {
       overlayHoverRef.current = false;
@@ -2130,10 +2183,11 @@ export default function App() {
       if (shelfBusyRef.current) return;
       const originalEntry = shelfEntriesRef.current.find((e) => e.id === id);
       if (!originalEntry) return;
-      // R1: when a book has divergent progress candidates, the user chooses
-      // which version is restored. Stamp ordering only keeps the list stable.
-      let chosenProgressStamp: Stamp | undefined;
+      // B3: bind a specific progress version even when there is only one
+      // candidate. The same selection is adopted against the repository read
+      // before the EPUB is parsed.
       let chosenProgressVersion: Version<ProgressValue> | null = null;
+      let progressSelection: PortableProgressSelection;
       const progressVersions = portableProgressVersions(originalEntry);
       if (progressVersions.length > 1) {
         const candidates = [...progressVersions]
@@ -2156,12 +2210,17 @@ export default function App() {
         progressChoiceResolverRef.current = null;
         setProgressChoice(null);
         if (!selectedStamp) return;
-        chosenProgressStamp = selectedStamp;
         chosenProgressVersion = versionForStamp(progressVersions, selectedStamp);
         if (!chosenProgressVersion) {
           setShelfNotice({ kind: "error", text: "所选进度版本已失效，请重新打开" });
           return;
         }
+        progressSelection = { kind: "chosen", stamp: selectedStamp };
+      } else if (progressVersions.length === 1) {
+        chosenProgressVersion = progressVersions[0];
+        progressSelection = { kind: "chosen", stamp: progressVersions[0].stamp };
+      } else {
+        progressSelection = { kind: "empty" };
       }
       shelfBusyRef.current = true;
       setShelfBusyMessage("正在打开书籍…");
@@ -2226,6 +2285,11 @@ export default function App() {
           entry = await getShelfStore().setContentHash(id, await sha256Hex(buf));
           setShelfEntries((prev) => prev.map((item) => item.id === id ? entry : item));
         }
+        // B3: read/adopt the selected progress version before parsing/navigation.
+        const store = getShelfStore();
+        if (store.beginProgressSession) {
+          await store.beginProgressSession(id, progressSelection);
+        }
         const chosenProjection = chosenProgressVersion
           ? projectProgressVersion(chosenProgressVersion)
           : null;
@@ -2266,11 +2330,6 @@ export default function App() {
         } else {
           saved = savedProgressFromShelfEntry(b, entry);
         }
-        // R1: the session is pinned to the version that is actually about to be
-        // rendered; a failed/cancelled open never writes a default position.
-        if (getShelfStore().beginProgressSession) {
-          await getShelfStore().beginProgressSession!(id, chosenProgressStamp);
-        }
         // 第一次打开：立即清除“新”标记（后端落盘异步完成，不阻塞阅读）
         if (entry.isNew) {
           setShelfEntries((prev) => markShelfEntryOpened(prev, id));
@@ -2307,6 +2366,7 @@ export default function App() {
         shelfBusyRef.current = false;
         setShelfBusy(false);
       } catch (e) {
+        await getShelfStore().closeProgressSession?.(id).catch(() => undefined);
         shelfBusyRef.current = false;
         setShelfBusy(false);
         setShelfError(`打开失败：${(e as Error).message}`);
@@ -3150,7 +3210,7 @@ export default function App() {
 
   const saveNoteChange = useCallback(async (
     next: ReaderNote[],
-    commit: () => Promise<unknown>,
+    commit: () => Promise<ShelfEntry>,
   ): Promise<boolean> => {
     if (!currentShelfId || noteBusyRef.current) return false;
     const previous = currentNotes;
@@ -3160,7 +3220,10 @@ export default function App() {
       entry.id === currentShelfId ? { ...entry, notes: next } : entry
     ));
     try {
-      await commit();
+      const written = await commit();
+      setShelfEntries((entries) => entries.map((entry) =>
+        entry.id === currentShelfId ? mergeNoteProjection(entry, written, next) : entry
+      ));
       return true;
     } catch (error) {
       setShelfEntries((entries) => entries.map((entry) =>
@@ -3179,7 +3242,7 @@ export default function App() {
     if (!draft || !book || !currentShelfId || noteBusy) return;
     const now = Date.now();
     let next: ReaderNote[];
-    let commit: () => Promise<unknown>;
+    let commit: () => Promise<ShelfEntry>;
     if (draft.mode === "create") {
       const expectedPath = spineItemPath(book, draft.spineIndex);
       if (
@@ -3218,19 +3281,10 @@ export default function App() {
         updatedAtMs: Math.max(now, draft.note.updatedAtMs + 1),
       };
       next = currentNotes.map((note) => note.id === updated.id ? updated : note);
-      const entry = shelfEntriesRef.current.find((item) => item.id === currentShelfId);
-      const annotation = entry ? portableNoteAnnotations(entry)[updated.id] : undefined;
-      const displayedVersion = annotation && !annotation.deleted
-        ? latestVersion(annotation.versions)
-        : null;
       const store = getShelfStore();
-      if (store.updateNote) {
-        if (!displayedVersion) {
-          setRuntimeIssues((issues) => [...issues, "笔记版本信息缺失，已取消保存以避免覆盖后台更新"]);
-          return;
-        }
-        const chosenStamp = displayedVersion.stamp;
-        commit = () => store.updateNote!(currentShelfId, updated, chosenStamp);
+      if (draft.editContext && store.writeNoteEdit) {
+        const context = draft.editContext;
+        commit = () => store.writeNoteEdit!(currentShelfId, updated, context);
       } else {
         commit = () => store.setNotes(currentShelfId, next);
       }
@@ -3249,6 +3303,31 @@ export default function App() {
     };
     await saveNoteChange(next, commit);
   }, [noteBusy, currentShelfId, currentNotes, saveNoteChange]);
+
+  const handleEditNote = useCallback(async (noteId: string): Promise<void> => {
+    const note = currentNotes.find((item) => item.id === noteId);
+    if (!note || !currentShelfId) return;
+    const store = getShelfStore();
+    if (!store.beginNoteEdit) {
+      openComposer({ mode: "edit", note });
+      return;
+    }
+    const entry = shelfEntriesRef.current.find((item) => item.id === currentShelfId);
+    const annotation = entry ? portableNoteAnnotations(entry)[noteId] : undefined;
+    const displayedVersion = annotation && !annotation.deleted
+      ? latestVersion(annotation.versions)
+      : null;
+    if (!displayedVersion) {
+      setRuntimeIssues((issues) => [...issues, "笔记展示版本信息缺失，已取消编辑以避免覆盖后台更新"]);
+      return;
+    }
+    try {
+      const context = await store.beginNoteEdit(currentShelfId, noteId, displayedVersion.stamp);
+      openComposer({ mode: "edit", note, ...(context ? { editContext: context } : {}) });
+    } catch (error) {
+      setRuntimeIssues((issues) => [...issues, `无法打开笔记编辑：${String(error)}`]);
+    }
+  }, [currentNotes, currentShelfId, openComposer]);
 
   const handleNoteNavigate = useCallback((note: ReaderNote): void => {
     if (!book || noteBusy) return;
@@ -3431,12 +3510,12 @@ export default function App() {
         ? store.deleteBookmark(currentShelfId, removedBookmarkId)
         : store.setBookmarks(currentShelfId, next);
     void commit
-      .then(() =>
+      .then((written) =>
         setShelfEntries((prev) =>
           // 后端返回的是写入时刻的完整记录；期间用户可能已经翻页，
-          // 因此这里只确认书签字段，不能用旧快照覆盖乐观进度。
+          // 因此这里只确认书签字段及其可移植注解，不用旧快照覆盖进度。
           prev.map((entry) =>
-            entry.id === currentShelfId ? { ...entry, bookmarks: next } : entry
+            entry.id === currentShelfId ? mergeBookmarkProjection(entry, written, next) : entry
           )
         )
       )
@@ -3462,7 +3541,13 @@ export default function App() {
         ? store.deleteBookmark(currentShelfId, bookmarkId)
         : store.setBookmarks(currentShelfId, next);
       void commit
-        .then(() => undefined)
+        .then((written) =>
+          setShelfEntries((prev) =>
+            prev.map((entry) =>
+              entry.id === currentShelfId ? mergeBookmarkProjection(entry, written, next) : entry
+            )
+          )
+        )
         .catch((error) => {
           setShelfEntries((prev) =>
             prev.map((entry) => (entry.id === currentShelfId ? { ...entry, bookmarks: previous } : entry))
@@ -4099,7 +4184,15 @@ export default function App() {
   }, [foreground.kind, imageRequest]);
 
   useEffect(() => {
-    if (!noteComposer) noteComposerDirtyRef.current = false;
+    if (noteComposer) return;
+    noteComposerDirtyRef.current = false;
+    const context = activeNoteEditContextRef.current;
+    activeNoteEditContextRef.current = null;
+    if (context) {
+      void getShelfStore().endNoteEdit?.(context).catch(() => {
+        /* Closing the editor must not block on a release error. */
+      });
+    }
   }, [noteComposer]);
 
   // 视图提交后清空整本书会话状态。ResourceServer 的实际 revoke 与 Book 释放由
@@ -4737,11 +4830,7 @@ export default function App() {
             const note = currentNotes.find((candidate) => candidate.id === viewNote.id);
             if (note) handleNoteNavigate(note);
           }}
-          onEditNote={(viewNote) => {
-            const note = currentNotes.find((candidate) => candidate.id === viewNote.id);
-            if (!note) return;
-            openComposer({ mode: "edit", note });
-          }}
+          onEditNote={(viewNote) => void handleEditNote(viewNote.id)}
           onDeleteNote={(viewNote) => void handleDeleteNote(viewNote.id)}
         />
       )}

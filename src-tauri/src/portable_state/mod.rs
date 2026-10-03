@@ -453,6 +453,10 @@ mod tests {
 
         let binding = store.binding_raw(HASH).unwrap().unwrap();
         assert!(binding.contains("/tmp/old-source/book.epub"));
+        assert!(store
+            .local_visible_hashes()
+            .unwrap()
+            .contains(&HASH.to_string()));
 
         let state = store.snapshot().unwrap();
         let book = state.books.get(HASH).unwrap();
@@ -711,6 +715,58 @@ mod tests {
         explicit_null["books"][HASH]["progress"]["versions"][0]["value"] = json!(null);
         let state: PortableStateV3 = serde_json::from_value(explicit_null).unwrap();
         validate_portable_state(&state).unwrap();
+    }
+
+    #[test]
+    fn repository_linked_snapshot_binding_visibility_and_is_new_work() {
+        let mut store = PortableStore::open_in_memory().unwrap();
+        store
+            .publish_linked_records_snapshot(
+                vec![legacy_record_json()],
+                vec![HASH.to_string()],
+                vec![HASH.to_string()],
+            )
+            .unwrap();
+        let snapshot = store.snapshot().unwrap();
+        assert!(snapshot.books.contains_key(HASH));
+        assert!(snapshot.books[HASH].notes.contains_key(OLD_NOTE_ID));
+        assert!(store
+            .local_visible_hashes()
+            .unwrap()
+            .contains(&HASH.to_string()));
+        assert!(store
+            .local_is_new_hashes()
+            .unwrap()
+            .contains(&HASH.to_string()));
+
+        let binding_raw = serde_json::to_string(&json!({
+            "contentHash": HASH,
+            "storageKind": "linked",
+            "canonicalSourcePath": "/tmp/linked/book.epub",
+            "fileSize": 1,
+            "sourceMtimeNs": 2,
+            "coverZipPath": null,
+            "coverMime": "",
+            "lastVerifiedAtMs": 3
+        }))
+        .unwrap();
+        store
+            .replace_bindings_snapshot(vec![(HASH.to_string(), binding_raw)])
+            .unwrap();
+        assert!(store.binding_raw(HASH).unwrap().is_some());
+
+        store.hide_linked_record(HASH).unwrap();
+        assert!(store.binding_raw(HASH).unwrap().is_none());
+        assert!(!store
+            .local_visible_hashes()
+            .unwrap()
+            .contains(&HASH.to_string()));
+        assert!(!store
+            .local_is_new_hashes()
+            .unwrap()
+            .contains(&HASH.to_string()));
+        // Local removal keeps the portable metadata for future sync.
+        assert!(store.snapshot().unwrap().books.contains_key(HASH));
     }
 
     #[test]

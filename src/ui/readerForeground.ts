@@ -1,5 +1,6 @@
 import type { FootnotePayload, SelectionContextPayload } from "../render/paginator";
 import type { ReaderNote } from "./notes";
+import type { NoteEditContext } from "./shelf";
 
 /** Ordinary reader surfaces. Add a new member here and its renderer only. */
 export type ReaderPanelId = "menu" | "toc" | "bookmarks" | "search" | "notes" | "log" | "assistant";
@@ -7,7 +8,7 @@ export type MenuSubview = "main" | "fonts";
 
 export type NoteComposerDraft =
   | { mode: "create"; selection: SelectionContextPayload; spineIndex: number }
-  | { mode: "edit"; note: ReaderNote };
+  | { mode: "edit"; note: ReaderNote; editContext?: NoteEditContext };
 
 export type ReaderForeground =
   | { kind: "none" }

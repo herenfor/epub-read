@@ -31,6 +31,7 @@ const KEY_MIGRATION: &str = "migration";
 const KEY_PREFERENCES: &str = "preferences";
 const KEY_ORGANIZATION: &str = "state";
 const KEY_LOCAL_VISIBLE: &str = "visibleHashes";
+const KEY_LOCAL_IS_NEW: &str = "isNewHashes";
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -668,6 +669,28 @@ fn save_local_visible_hashes(
     put_meta_json(connection, KEY_LOCAL_VISIBLE, &values)
 }
 
+fn load_local_is_new_hashes(connection: &Connection) -> PortableResult<BTreeSet<String>> {
+    let values: Vec<String> = load_meta_json(connection, KEY_LOCAL_IS_NEW)?.unwrap_or_default();
+    let mut result = BTreeSet::new();
+    for value in values {
+        if !dto::valid_content_hash(&value) {
+            return Err(PortableError::storage_error(
+                "本机新书标记含有不规范 contentHash",
+            ));
+        }
+        result.insert(value);
+    }
+    Ok(result)
+}
+
+fn save_local_is_new_hashes(
+    connection: &Connection,
+    hashes: &BTreeSet<String>,
+) -> PortableResult<()> {
+    let values: Vec<&str> = hashes.iter().map(String::as_str).collect();
+    put_meta_json(connection, KEY_LOCAL_IS_NEW, &values)
+}
+
 impl PortableStore {
     pub fn open(path: &Path) -> PortableResult<Self> {
         if let Some(parent) = path.parent() {
@@ -916,6 +939,246 @@ impl PortableStore {
         Ok(())
     }
 
+    pub fn local_is_new_hashes(&self) -> PortableResult<Vec<String>> {
+        Ok(load_local_is_new_hashes(&self.connection)?
+            .into_iter()
+            .collect())
+    }
+
+    pub fn set_local_is_new(
+        &mut self,
+        content_hash: &str,
+        is_new: bool,
+    ) -> PortableResult<()> {
+        if !dto::valid_content_hash(content_hash) {
+            return Err(PortableError::invalid_entity(
+                "invalid-entity：contentHash 必须是 64 位小写内容指纹",
+            ));
+        }
+        let transaction = self.connection.unchecked_transaction()?;
+        let mut hashes = load_local_is_new_hashes(&transaction)?;
+        if is_new {
+            hashes.insert(content_hash.to_string());
+        } else {
+            hashes.remove(content_hash);
+        }
+        save_local_is_new_hashes(&transaction, &hashes)?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Persist one device binding as an opaque local row.
+    pub fn save_binding_raw(&mut self, content_hash: &str, raw: &str) -> PortableResult<()> {
+        if !dto::valid_content_hash(content_hash) {
+            return Err(PortableError::invalid_entity(
+                "invalid-entity：contentHash 必须是 64 位小写内容指纹",
+            ));
+        }
+        serde_json::from_str::<serde_json::Value>(raw)
+            .map_err(|error| PortableError::invalid_data(format!("invalid-data：设备绑定不是合法 JSON：{error}")))?;
+        let transaction = self.connection.unchecked_transaction()?;
+        transaction.execute(
+            "INSERT INTO device_bindings(hash, json) VALUES(?1, ?2)
+             ON CONFLICT(hash) DO UPDATE SET json = excluded.json",
+            params![content_hash, raw],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn remove_binding(&mut self, content_hash: &str) -> PortableResult<()> {
+        if !dto::valid_content_hash(content_hash) {
+            return Err(PortableError::invalid_entity(
+                "invalid-entity：contentHash 必须是 64 位小写内容指纹",
+            ));
+        }
+        let transaction = self.connection.unchecked_transaction()?;
+        transaction.execute(
+            "DELETE FROM device_bindings WHERE hash = ?1",
+            params![content_hash],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Persist the complete device-binding set in one transaction.
+    pub fn replace_bindings_snapshot(
+        &mut self,
+        bindings: Vec<(String, String)>,
+    ) -> PortableResult<()> {
+        for (hash, raw) in &bindings {
+            if !dto::valid_content_hash(hash) {
+                return Err(PortableError::invalid_entity(
+                    "invalid-entity：binding contentHash 必须是 64 位小写内容指纹",
+                ));
+            }
+            serde_json::from_str::<serde_json::Value>(raw).map_err(|error| {
+                PortableError::invalid_data(format!("invalid-data：设备绑定不是合法 JSON：{error}"))
+            })?;
+        }
+        let transaction = self.connection.unchecked_transaction()?;
+        transaction.execute("DELETE FROM device_bindings", [])?;
+        for (hash, raw) in &bindings {
+            transaction.execute(
+                "INSERT INTO device_bindings(hash, json) VALUES(?1, ?2)",
+                params![hash, raw],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Persist a full linked records snapshot: initialize missing portable
+    /// books, set exact local visibility, and update the local isNew set while
+    /// preserving existing v3 metadata/progress/annotations.
+    pub fn publish_linked_records_snapshot(
+        &mut self,
+        records: Vec<serde_json::Value>,
+        visible_hashes: Vec<String>,
+        is_new_hashes: Vec<String>,
+    ) -> PortableResult<PortableStateV3> {
+        let parsed = legacy::parse_legacy_records(records)?;
+        for hash in visible_hashes.iter().chain(is_new_hashes.iter()) {
+            if !dto::valid_content_hash(hash) {
+                return Err(PortableError::invalid_entity(
+                    "invalid-entity：本机标记 contentHash 必须是 64 位小写内容指纹",
+                ));
+            }
+        }
+        let transaction = self.connection.unchecked_transaction()?;
+        let local = load_state_at_connection(&transaction)?;
+        let installation_id = ensure_installation_id(&transaction)?;
+        let mut counter = load_counter(&transaction)?
+            .max(super::merge::maximum_received_counter_from_state(&local)?);
+        let incoming = legacy::build_import_state(
+            &local,
+            &parsed,
+            &local.organization,
+            &mut counter,
+            &installation_id,
+        )?;
+        let merged = merge_portable_states(&local, &incoming)?;
+        dto::validate_portable_state(&merged)?;
+        counter = counter.max(super::merge::maximum_received_counter_from_state(&merged)?);
+        let local_revisions = read_local_revisions(&transaction)?;
+        for (book_hash, book) in &merged.books {
+            let scoped: BTreeMap<String, u64> = local_revisions
+                .iter()
+                .filter_map(|(key, revision)| {
+                    key.strip_prefix(&format!("{book_hash}:"))
+                        .map(|suffix| (suffix.to_string(), *revision))
+                })
+                .collect();
+            store_book_shape(&transaction, book_hash, book, &scoped)?;
+        }
+        let visible: BTreeSet<String> = visible_hashes.into_iter().collect();
+        let is_new: BTreeSet<String> = is_new_hashes.into_iter().collect();
+        save_local_visible_hashes(&transaction, &visible)?;
+        save_local_is_new_hashes(&transaction, &is_new)?;
+        store_counter(&transaction, counter)?;
+        transaction.commit()?;
+        Ok(merged)
+    }
+
+    /// One transaction for a linked/managed import batch: initialize missing
+    /// portable books, upsert bindings, and publish visibility/isNew flags.
+    pub fn publish_linked_imports(
+        &mut self,
+        records: Vec<serde_json::Value>,
+        bindings: Vec<(String, String)>,
+        visible_hashes: Vec<String>,
+        is_new_hashes: Vec<String>,
+    ) -> PortableResult<PortableStateV3> {
+        let parsed = legacy::parse_legacy_records(records)?;
+        for (hash, raw) in &bindings {
+            if !dto::valid_content_hash(hash) {
+                return Err(PortableError::invalid_entity(
+                    "invalid-entity：binding contentHash 必须是 64 位小写内容指纹",
+                ));
+            }
+            serde_json::from_str::<serde_json::Value>(raw).map_err(|error| {
+                PortableError::invalid_data(format!("invalid-data：设备绑定不是合法 JSON：{error}"))
+            })?;
+        }
+        for hash in visible_hashes.iter().chain(is_new_hashes.iter()) {
+            if !dto::valid_content_hash(hash) {
+                return Err(PortableError::invalid_entity(
+                    "invalid-entity：本机标记 contentHash 必须是 64 位小写内容指纹",
+                ));
+            }
+        }
+
+        let transaction = self.connection.unchecked_transaction()?;
+        let local = load_state_at_connection(&transaction)?;
+        let installation_id = ensure_installation_id(&transaction)?;
+        let mut counter = load_counter(&transaction)?
+            .max(super::merge::maximum_received_counter_from_state(&local)?);
+        let incoming = legacy::build_import_state(
+            &local,
+            &parsed,
+            &local.organization,
+            &mut counter,
+            &installation_id,
+        )?;
+        let merged = merge_portable_states(&local, &incoming)?;
+        dto::validate_portable_state(&merged)?;
+        counter = counter.max(super::merge::maximum_received_counter_from_state(&merged)?);
+        let local_revisions = read_local_revisions(&transaction)?;
+        for (book_hash, book) in &merged.books {
+            let scoped: BTreeMap<String, u64> = local_revisions
+                .iter()
+                .filter_map(|(key, revision)| {
+                    key.strip_prefix(&format!("{book_hash}:"))
+                        .map(|suffix| (suffix.to_string(), *revision))
+                })
+                .collect();
+            store_book_shape(&transaction, book_hash, book, &scoped)?;
+        }
+        for (hash, raw) in &bindings {
+            transaction.execute(
+                "INSERT INTO device_bindings(hash, json) VALUES(?1, ?2)
+                 ON CONFLICT(hash) DO UPDATE SET json = excluded.json",
+                params![hash, raw],
+            )?;
+        }
+        if !visible_hashes.is_empty() {
+            let mut visible = load_local_visible_hashes(&transaction)?;
+            visible.extend(visible_hashes);
+            save_local_visible_hashes(&transaction, &visible)?;
+        }
+        if !is_new_hashes.is_empty() {
+            let mut is_new = load_local_is_new_hashes(&transaction)?;
+            is_new.extend(is_new_hashes);
+            save_local_is_new_hashes(&transaction, &is_new)?;
+        }
+        store_counter(&transaction, counter)?;
+        transaction.commit()?;
+        Ok(merged)
+    }
+
+    /// Local removal of a linked/managed row: drop binding and visibility while
+    /// preserving the portable book and its tombstones for future sync.
+    pub fn hide_linked_record(&mut self, content_hash: &str) -> PortableResult<()> {
+        if !dto::valid_content_hash(content_hash) {
+            return Err(PortableError::invalid_entity(
+                "invalid-entity：contentHash 必须是 64 位小写内容指纹",
+            ));
+        }
+        let transaction = self.connection.unchecked_transaction()?;
+        transaction.execute(
+            "DELETE FROM device_bindings WHERE hash = ?1",
+            params![content_hash],
+        )?;
+        let mut visible = load_local_visible_hashes(&transaction)?;
+        visible.remove(content_hash);
+        save_local_visible_hashes(&transaction, &visible)?;
+        let mut is_new = load_local_is_new_hashes(&transaction)?;
+        is_new.remove(content_hash);
+        save_local_is_new_hashes(&transaction, &is_new)?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     /// Atomically reserve a contiguous execution counter range for migration
     /// adapters. The returned stamp is the first reserved counter.
     pub fn reserve_stamps(&mut self, count: u64) -> PortableResult<Stamp> {
@@ -1103,6 +1366,8 @@ impl PortableStore {
             )?;
         }
         store_organization(&transaction, &plan.state.organization)?;
+        let migrated_visible: BTreeSet<String> = plan.state.books.keys().cloned().collect();
+        save_local_visible_hashes(&transaction, &migrated_visible)?;
         put_meta_json(&transaction, KEY_INSTALLATION_ID, &plan.installation_id)?;
         store_counter(&transaction, plan.counter)?;
         put_meta_json(&transaction, KEY_MIGRATION, &legacy::completed_marker())?;

@@ -95,6 +95,24 @@ fn open_and_activate(app: &AppHandle) -> PortableResult<(PortableStore, Portable
     }
 }
 
+/// Run `work` only when the one-time portable activation has already happened.
+/// Linked-library commands use this to keep the complete old JSON mode when the
+/// activation never succeeded.
+pub(crate) fn with_existing_store<T>(
+    app: &AppHandle,
+    work: impl FnOnce(&mut PortableStore) -> PortableResult<T>,
+) -> PortableResult<Option<T>> {
+    let manager = app.state::<PortableStateManager>();
+    let mut guard = manager
+        .store
+        .lock()
+        .map_err(|_| storage_error("可移植资料仓储锁已损坏"))?;
+    match guard.as_mut() {
+        Some(store) => work(store).map(Some),
+        None => Ok(None),
+    }
+}
+
 fn with_store<T>(
     app: &AppHandle,
     manager: &State<'_, PortableStateManager>,

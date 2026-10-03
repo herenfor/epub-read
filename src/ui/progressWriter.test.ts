@@ -111,6 +111,25 @@ describe("ShelfProgressWriter", () => {
     expect(writes).toEqual([2]);
   });
 
+  it("beginSession 丢弃上一会话的失败和待写样本", async () => {
+    let fail = true;
+    const writes: number[] = [];
+    const writer = new ShelfProgressWriter(async (_id, value) => {
+      if (fail) throw new Error("disk failed");
+      writes.push(value.page);
+    });
+    writer.enqueue("book", patch(1));
+    await expect(writer.flush()).rejects.toThrow("disk failed");
+    writer.beginSession("book");
+    fail = false;
+    await writer.flush();
+    expect(writes).toEqual([]);
+    writer.enqueue("book", patch(2));
+    await writer.flush();
+    expect(writes).toEqual([2]);
+    writer.dispose();
+  });
+
   it("stale-basis/stale-choice 样本直接丢弃，不进入 flush 重试", async () => {
     const writes: number[] = [];
     const writer = new ShelfProgressWriter(async (_id, value) => {

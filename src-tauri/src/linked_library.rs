@@ -15,6 +15,9 @@ use crate::import_gate::{CancelReply as ImportCancelReply, ImportGate};
 use crate::library_organization::{
     self, LibraryOrganization, OrganizationCommand, OrganizationEnvelope,
 };
+use crate::portable_state::{
+    Locator, LocatorTarget, MediaTag, PortableError, ShelfBookProjection, ShelfProjection,
+};
 use quick_xml::events::Event;
 use quick_xml::{Reader, XmlVersion};
 use serde::{Deserialize, Serialize};
@@ -622,11 +625,322 @@ fn load_json_or_default<T: for<'de> Deserialize<'de> + Default>(
     }
 }
 
+fn portable_u64_to_usize(value: u64) -> usize {
+    usize::try_from(value).unwrap_or(0)
+}
+
+fn portable_media_tag(tag: &MediaTag) -> String {
+    match tag {
+        MediaTag::Img => "img",
+        MediaTag::Svg => "svg",
+        MediaTag::Video => "video",
+    }
+    .to_string()
+}
+
+type LinkedReadingFields = (
+    usize,
+    usize,
+    Option<usize>,
+    Option<f64>,
+    Option<u64>,
+    Option<String>,
+    Option<LinkedLibraryMediaAnchor>,
+);
+
+fn locator_reading_fields(locator: &Locator) -> LinkedReadingFields {
+    match locator {
+        Locator::Legacy(legacy) => (
+            portable_u64_to_usize(legacy.spine_index),
+            portable_u64_to_usize(legacy.page_hint),
+            legacy.anchor_index.map(portable_u64_to_usize),
+            legacy.anchor_ratio,
+            legacy.anchor_text_offset,
+            legacy.anchor_text_snippet.clone(),
+            legacy.media_anchor.as_ref().map(|media| LinkedLibraryMediaAnchor {
+                index: portable_u64_to_usize(media.index),
+                tag: media.tag.clone(),
+                signature: media.signature.clone(),
+                ratio: media.ratio,
+            }),
+        ),
+        Locator::Modern(modern) => {
+            let spine = portable_u64_to_usize(modern.spine_index_hint);
+            match &modern.target {
+                LocatorTarget::ChapterStart => (spine, 0, None, None, None, None, None),
+                LocatorTarget::Text { offset, snippet, .. } => (
+                    spine,
+                    0,
+                    None,
+                    None,
+                    Some(*offset),
+                    Some(snippet.clone()),
+                    None,
+                ),
+                LocatorTarget::Media {
+                    signature,
+                    index_hint,
+                    tag,
+                    ratio,
+                } => (
+                    spine,
+                    0,
+                    None,
+                    None,
+                    None,
+                    None,
+                    Some(LinkedLibraryMediaAnchor {
+                        index: portable_u64_to_usize(*index_hint),
+                        tag: portable_media_tag(tag),
+                        signature: signature.clone(),
+                        ratio: *ratio,
+                    }),
+                ),
+            }
+        }
+    }
+}
+
+fn linked_record_from_projection(book: &ShelfBookProjection, is_new: bool) -> LinkedLibraryRecord {
+    let (last_read_at_ms, progress_pct, fields) = match &book.progress.display {
+        Some(version) => {
+            let (progress_pct, fields) = match &version.value {
+                Some(progress) => (
+                    u32::try_from(progress.progress_pct_hint).unwrap_or(u32::MAX),
+                    locator_reading_fields(&progress.locator),
+                ),
+                None => (0, (0, 0, None, None, None, None, None)),
+            };
+            (version.updated_at_ms, progress_pct, fields)
+        }
+        None => (0, 0, (0, 0, None, None, None, None, None)),
+    };
+    let (spine_index, page, anchor_index, anchor_ratio, anchor_text_offset, anchor_text_snippet, media_anchor) = fields;
+    LinkedLibraryRecord {
+        content_hash: book.book_hash.clone(),
+        title: book.metadata.title.clone(),
+        creator: book.metadata.creator.clone(),
+        language: book.metadata.language.clone().unwrap_or_default(),
+        file_name: book.metadata.file_name.clone(),
+        added_at_ms: book.metadata.added_at_ms,
+        last_read_at_ms,
+        spine_index,
+        page,
+        progress_pct,
+        anchor_index,
+        anchor_ratio,
+        anchor_text_offset,
+        anchor_text_snippet,
+        media_anchor,
+        bookmarks: book
+            .bookmarks
+            .iter()
+            .map(|annotation| {
+                let value = &annotation.display.value;
+                let (spine_index, page, anchor_index, anchor_ratio, anchor_text_offset, anchor_text_snippet, media_anchor) =
+                    locator_reading_fields(&value.locator);
+                LinkedLibraryBookmark {
+                    id: annotation.id.clone(),
+                    spine_index,
+                    page,
+                    anchor_index,
+                    anchor_ratio,
+                    anchor_text_offset,
+                    anchor_text_snippet,
+                    media_anchor,
+                    text: value.text.clone(),
+                    created_at_ms: value.created_at_ms,
+                }
+            })
+            .collect(),
+        notes: book
+            .notes
+            .iter()
+            .map(|annotation| {
+                let value = &annotation.display.value;
+                LinkedLibraryNote {
+                    id: annotation.id.clone(),
+                    spine_index: portable_u64_to_usize(value.spine_index_hint),
+                    chapter_path: value.chapter_path.clone(),
+                    start_text_offset: value.start_text_offset,
+                    end_text_offset: value.end_text_offset,
+                    start_text_snippet: value.start_text_snippet.clone(),
+                    end_text_snippet: value.end_text_snippet.clone(),
+                    selected_text: value.selected_text.clone(),
+                    content: value.content.clone(),
+                    created_at_ms: value.created_at_ms,
+                    updated_at_ms: annotation.display.updated_at_ms,
+                }
+            })
+            .collect(),
+        is_new,
+    }
+}
+
+fn linked_records_from_projection(
+    projection: &ShelfProjection,
+    visible: &HashSet<String>,
+    binding_hashes: &HashSet<String>,
+    is_new: &HashSet<String>,
+) -> Vec<LinkedLibraryRecord> {
+    projection
+        .books
+        .iter()
+        .filter(|book| {
+            visible.contains(&book.book_hash) || binding_hashes.contains(&book.book_hash)
+        })
+        .map(|book| {
+            linked_record_from_projection(book, is_new.contains(&book.book_hash))
+        })
+        .collect()
+}
+
+fn portable_store_active(app: &AppHandle) -> Result<bool, String> {
+    crate::portable_state_commands::with_existing_store(app, |_store| Ok(()))
+        .map(|result| result.is_some())
+        .map_err(|error| error.to_string())
+}
+
+fn delete_records_portable(app: &AppHandle, content_hashes: &[String]) -> Result<(), String> {
+    let records = load_records(app)?;
+    let mut target_hashes = Vec::new();
+    let mut seen = HashSet::new();
+    for hash in content_hashes {
+        if records.iter().any(|record| &record.content_hash == hash) && seen.insert(hash.clone()) {
+            target_hashes.push(hash.clone());
+        }
+    }
+    if target_hashes.is_empty() {
+        return Ok(());
+    }
+
+    let bindings = load_bindings(app)?;
+    let root = library_root(app)?;
+    let mut managed_paths = Vec::new();
+    for hash in &target_hashes {
+        for binding in bindings.iter().filter(|binding| &binding.content_hash == hash) {
+            if let BindingSource::Managed(path) = binding.resolve_source(&root)? {
+                managed_paths.push(path);
+            }
+        }
+    }
+
+    app.state::<AiState>()
+        .cleanup_books_if_present(app, &target_hashes)?;
+
+    for path in managed_paths {
+        match fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("无法删除托管书籍源文件：{error}")),
+        }
+    }
+
+    let target_set: HashSet<&str> = target_hashes.iter().map(String::as_str).collect();
+    let remaining_records: Vec<LinkedLibraryRecord> = records
+        .into_iter()
+        .filter(|record| !target_set.contains(record.content_hash.as_str()))
+        .collect();
+    let remaining_bindings: Vec<DeviceBinding> = bindings
+        .into_iter()
+        .filter(|binding| !target_set.contains(binding.content_hash.as_str()))
+        .collect();
+
+    let mut thumbnails = load_thumbnail_index(app)?;
+    for hash in &target_hashes {
+        remove_thumbnail(app, &mut thumbnails, hash)?;
+    }
+    save_thumbnail_index(app, &thumbnails)?;
+    save_bindings(app, &remaining_bindings)?;
+    save_records(app, &remaining_records)
+}
+
+fn load_portable_records(app: &AppHandle) -> Result<Option<Vec<LinkedLibraryRecord>>, String> {
+    crate::portable_state_commands::with_existing_store(app, |store| {
+        let projection = store.project_shelf()?;
+        let visible: HashSet<String> = store.local_visible_hashes()?.into_iter().collect();
+        let binding_hashes: HashSet<String> = store.bindings_raw()?.into_keys().collect();
+        let is_new: HashSet<String> = store.local_is_new_hashes()?.into_iter().collect();
+        Ok(linked_records_from_projection(
+            &projection,
+            &visible,
+            &binding_hashes,
+            &is_new,
+        ))
+    })
+    .map_err(|error| error.to_string())
+}
+
+fn load_portable_bindings(app: &AppHandle) -> Result<Option<Vec<DeviceBinding>>, String> {
+    crate::portable_state_commands::with_existing_store(app, |store| {
+        let root = library_root(app).map_err(PortableError::storage_error)?;
+        let raw_bindings = store.bindings_raw()?;
+        let mut bindings = Vec::with_capacity(raw_bindings.len());
+        for (hash, raw) in raw_bindings {
+            let binding: DeviceBinding = serde_json::from_str(&raw).map_err(|error| {
+                PortableError::storage_error(format!("设备绑定损坏：{error}"))
+            })?;
+            if binding.content_hash != hash {
+                return Err(PortableError::storage_error(
+                    "device_bindings 行内容指纹与键不一致",
+                ));
+            }
+            bindings.push(binding);
+        }
+        validate_binding_sources(&bindings, &root).map_err(PortableError::storage_error)?;
+        Ok(bindings)
+    })
+    .map_err(|error| error.to_string())
+}
+
+fn save_portable_bindings(app: &AppHandle, bindings: &[DeviceBinding]) -> Result<Option<()>, String> {
+    let rows: Vec<(String, String)> = bindings
+        .iter()
+        .map(|binding| {
+            serde_json::to_string(binding)
+                .map(|raw| (binding.content_hash.clone(), raw))
+                .map_err(|error| format!("无法序列化设备绑定：{error}"))
+        })
+        .collect::<Result<_, _>>()?;
+    crate::portable_state_commands::with_existing_store(app, |store| {
+        store.replace_bindings_snapshot(rows)
+    })
+    .map(|result| result.map(|_| ()))
+    .map_err(|error| error.to_string())
+}
+
+fn save_portable_records(app: &AppHandle, records: &[LinkedLibraryRecord]) -> Result<Option<()>, String> {
+    let values: Vec<serde_json::Value> = records
+        .iter()
+        .map(|record| serde_json::to_value(record))
+        .collect::<Result<_, _>>()
+        .map_err(|error| format!("无法序列化书库记录：{error}"))?;
+    let visible_hashes: Vec<String> = records
+        .iter()
+        .map(|record| record.content_hash.clone())
+        .collect();
+    let is_new_hashes: Vec<String> = records
+        .iter()
+        .filter(|record| record.is_new)
+        .map(|record| record.content_hash.clone())
+        .collect();
+    crate::portable_state_commands::with_existing_store(app, |store| {
+        store
+            .publish_linked_records_snapshot(values, visible_hashes, is_new_hashes)
+            .map(|_| ())
+    })
+    .map(|result| result.map(|_| ()))
+    .map_err(|error| error.to_string())
+}
+
 fn load_records_at(root: &Path) -> Result<Vec<LinkedLibraryRecord>, String> {
     load_json_or_default(&records_path_at(root), "书库记录")
 }
 
 fn load_records(app: &AppHandle) -> Result<Vec<LinkedLibraryRecord>, String> {
+    if let Some(records) = load_portable_records(app)? {
+        return Ok(records);
+    }
     load_json_or_default(&records_path(app)?, "书库记录")
 }
 
@@ -637,6 +951,9 @@ fn load_bindings_at(root: &Path) -> Result<Vec<DeviceBinding>, String> {
 }
 
 fn load_bindings(app: &AppHandle) -> Result<Vec<DeviceBinding>, String> {
+    if let Some(bindings) = load_portable_bindings(app)? {
+        return Ok(bindings);
+    }
     let root = library_root(app)?;
     let bindings = load_json_or_default::<Vec<DeviceBinding>>(&bindings_path(app)?, "设备绑定")?;
     validate_binding_sources(&bindings, &root)?;
@@ -740,10 +1057,16 @@ fn atomic_write_json<T: Serialize + ?Sized>(path: &Path, value: &T) -> Result<()
 }
 
 fn save_records(app: &AppHandle, records: &[LinkedLibraryRecord]) -> Result<(), String> {
+    if save_portable_records(app, records)?.is_some() {
+        return Ok(());
+    }
     save_records_at(&library_root(app)?, records)
 }
 
 fn save_bindings(app: &AppHandle, bindings: &[DeviceBinding]) -> Result<(), String> {
+    if save_portable_bindings(app, bindings)?.is_some() {
+        return Ok(());
+    }
     save_bindings_at(&library_root(app)?, bindings)
 }
 
@@ -3260,6 +3583,9 @@ fn delete_records(app: &AppHandle, content_hashes: Vec<String>) -> Result<(), St
         .lock()
         .map_err(|_| "链接书库写入锁已损坏".to_string())?;
     ensure_import_idle(app)?;
+    if portable_store_active(app)? {
+        return delete_records_portable(app, &content_hashes);
+    }
     let root = library_root(app)?;
     delete_records_at(&root, &content_hashes, |target_hashes| {
         app.state::<AiState>()

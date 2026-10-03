@@ -10,6 +10,8 @@
 import type {
   Bookmark,
   LinkedImportBatchResult,
+  NoteEditContext,
+  PortableProgressSelection,
   ShelfEntry,
   ShelfProgressPatch,
   ShelfSaveInput,
@@ -27,8 +29,7 @@ import {
   modernTextLocator,
   portableBookFromLegacySource,
 } from "../../core/portableState/legacy";
-import { latestVersion, versionForStamp } from "../../core/portableState/projection";
-import { mergeVersions } from "../../core/portableState/portable-register-core";
+import { latestVersion } from "../../core/portableState/projection";
 import type {
   BookmarkValue,
   Locator,
@@ -236,9 +237,10 @@ interface ObservedAnnotationIds {
 }
 
 interface ProgressReadingSession {
-  readonly readId: string;
-  readonly chosenStamp: Stamp | null;
-  basisId: string | null;
+  readId: string;
+  basisId: string;
+  chosenStamp: Stamp | null;
+  invalid: boolean;
 }
 
 export class PortableShelfStore implements ShelfStore {
@@ -347,11 +349,7 @@ export class PortableShelfStore implements ShelfStore {
     await this.mergeEntries([result.entry]);
     const hash = hashForLocalEntry(result.entry);
     if (!hash) return result;
-    try {
-      return { ...result, entry: await this.currentProjectedEntry(hash) };
-    } catch {
-      return result;
-    }
+    return { ...result, entry: await this.currentProjectedEntry(hash) };
   }
 
   async importPaths(paths: string[]): Promise<LinkedImportBatchResult> {
@@ -364,11 +362,7 @@ export class PortableShelfStore implements ShelfStore {
     for (const record of records) {
       const hash = hashForLocalEntry(record);
       if (!hash || projected.has(hash)) continue;
-      try {
-        projected.set(hash, await this.currentProjectedEntry(hash));
-      } catch {
-        // Keep the local record if v3 has not been initialized yet.
-      }
+      projected.set(hash, await this.currentProjectedEntry(hash));
     }
     return {
       results: batch.results.map((item) => {
@@ -414,19 +408,15 @@ export class PortableShelfStore implements ShelfStore {
     await this.mergeEntries([entry]);
     const hash = hashForLocalEntry(entry);
     if (!hash) return entry;
-    try {
-      return await this.currentProjectedEntry(hash);
-    } catch {
-      return entry;
-    }
+    return this.currentProjectedEntry(hash);
   }
 
   /**
-   * R1: pin a reading session to the progress version the App actually chose
-   * and is about to display. The session readId stays alive across serial
-   * writes; each successful write advances the session's nextBasis handle.
+   * B3: adopt the user-selected progress version (or explicit empty snapshot)
+   * against the same repository read that the App is using for restore. The
+   * readId/basisId stay paired until close or a stale invalidation.
    */
-  async beginProgressSession(id: string, chosenStamp?: Stamp): Promise<void> {
+  async beginProgressSession(id: string, selection: PortableProgressSelection): Promise<void> {
     const entry = await this.localEntryFor(id);
     if (!entry) throw new Error("书架中没有这本书");
     const hash = hashForLocalEntry(entry);
@@ -437,22 +427,22 @@ export class PortableShelfStore implements ShelfStore {
       await this.data.release({ readId: read.readId }).catch(() => undefined);
       throw new Error("可移植资料库中没有这本书");
     }
-    const versions = read.book.progress.versions;
-    let resolvedStamp: Stamp | null = null;
-    if (versions.length === 1) {
-      resolvedStamp = chosenStamp
-        ? (versionForStamp(versions, chosenStamp)?.stamp ?? null)
-        : versions[0].stamp;
-    } else if (versions.length > 1) {
-      resolvedStamp = chosenStamp
-        ? (versionForStamp(versions, chosenStamp)?.stamp ?? null)
-        : null;
-      if (!resolvedStamp) {
-        await this.data.release({ readId: read.readId }).catch(() => undefined);
-        throw new Error("这本书有多个进度版本，需要用户选择后再打开");
-      }
+    try {
+      const adopted = await this.data.adopt({
+        readId: read.readId,
+        entity: { bookHash: hash, kind: "progress" },
+        selection,
+      });
+      this.progressSessions.set(hash, {
+        readId: read.readId,
+        basisId: adopted.basisId,
+        chosenStamp: selection.kind === "chosen" ? selection.stamp : null,
+        invalid: false,
+      });
+    } catch (error) {
+      await this.data.release({ readId: read.readId }).catch(() => undefined);
+      throw error;
     }
-    this.progressSessions.set(hash, { readId: read.readId, chosenStamp: resolvedStamp, basisId: null });
   }
 
   async closeProgressSession(id: string): Promise<void> {
@@ -465,49 +455,42 @@ export class PortableShelfStore implements ShelfStore {
   }
 
   /**
-   * After a stale sample is dropped, discard the expired read snapshot. A new
-   * read lets the next real sample resume from the merged frontier; we never
-   * pick one among multiple candidates without the user's earlier choice.
+   * A stale sample cannot silently adopt the merged latest version. Re-adopt
+   * only the last version this session actually displayed/wrote; if that event
+   * is no longer a trustworthy frontier, mark the session invalid and require
+   * a real reopen/selection instead of confirming a background branch.
    */
-  private async refreshProgressSessionAfterStale(
+  private async rebindProgressSessionAfterStale(
     hash: string,
     session: ProgressReadingSession,
   ): Promise<void> {
     await this.data.release({ readId: session.readId }).catch(() => undefined);
-    const read = await this.data.read({ bookHash: hash });
-    if (!read.book) {
-      await this.data.release({ readId: read.readId }).catch(() => undefined);
-      this.progressSessions.delete(hash);
-      return;
+    try {
+      const read = await this.data.read({ bookHash: hash });
+      if (!read.book) {
+        await this.data.release({ readId: read.readId }).catch(() => undefined);
+        session.invalid = true;
+        return;
+      }
+      const selection: PortableProgressSelection = session.chosenStamp
+        ? { kind: "chosen", stamp: session.chosenStamp }
+        : { kind: "empty" };
+      try {
+        const adopted = await this.data.adopt({
+          readId: read.readId,
+          entity: { bookHash: hash, kind: "progress" },
+          selection,
+        });
+        session.readId = read.readId;
+        session.basisId = adopted.basisId;
+        session.invalid = false;
+      } catch {
+        await this.data.release({ readId: read.readId }).catch(() => undefined);
+        session.invalid = true;
+      }
+    } catch {
+      session.invalid = true;
     }
-    const frontier = mergeVersions(read.book.progress.versions);
-    let chosenStamp = session.chosenStamp
-      ? (versionForStamp(frontier, session.chosenStamp)?.stamp ?? null)
-      : null;
-    if (!chosenStamp && frontier.length === 1) chosenStamp = frontier[0].stamp;
-    this.progressSessions.set(hash, { readId: read.readId, chosenStamp, basisId: null });
-  }
-
-  private async ensureProgressSession(hash: string): Promise<ProgressReadingSession> {
-    const existing = this.progressSessions.get(hash);
-    if (existing) return existing;
-    const read = await this.data.read({ bookHash: hash });
-    if (!read.book) {
-      await this.data.release({ readId: read.readId }).catch(() => undefined);
-      throw new Error("可移植资料库中没有这本书");
-    }
-    const versions = read.book.progress.versions;
-    if (versions.length > 1) {
-      await this.data.release({ readId: read.readId }).catch(() => undefined);
-      throw new Error("这本书有多个进度版本，需要用户选择后再保存");
-    }
-    const session: ProgressReadingSession = {
-      readId: read.readId,
-      chosenStamp: versions.length === 1 ? versions[0].stamp : null,
-      basisId: null,
-    };
-    this.progressSessions.set(hash, session);
-    return session;
   }
 
   async updateProgress(id: string, patch: ShelfProgressPatch): Promise<ShelfEntry> {
@@ -519,21 +502,13 @@ export class PortableShelfStore implements ShelfStore {
       // progress path until lazy hashing supplies identity.
       return this.legacy.updateProgress(id, patch);
     }
-    const session = await this.ensureProgressSession(hash);
+    const session = this.progressSessions.get(hash);
+    if (!session) throw new Error("阅读进度会话未开始");
+    if (session.invalid) throw new Error("进度基线已过期，请关闭并重新打开书籍");
+
     const value = progressValueFromPatch(patch);
     const updatedAtMs = Math.max(patch.lastReadAtMs, Date.now());
     try {
-      if (!session.basisId) {
-        const selection: PortableAdoptSelection = session.chosenStamp
-          ? { kind: "chosen", stamp: session.chosenStamp }
-          : { kind: "empty" };
-        const adopted = await this.data.adopt({
-          readId: session.readId,
-          entity: { bookHash: hash, kind: "progress" },
-          selection,
-        });
-        session.basisId = adopted.basisId;
-      }
       const basisId = session.basisId;
       const result = await this.data.write({
         basisId,
@@ -542,19 +517,21 @@ export class PortableShelfStore implements ShelfStore {
         updatedAtMs,
       });
       session.basisId = result.nextBasisId;
-      return await this.currentProjectedEntry(hash);
+      const projected = await this.currentProjectedEntry(hash);
+      const latest = latestVersion(
+        (projected as unknown as {
+          readonly portableProgressVersions?: readonly Version<ProgressValue>[];
+        }).portableProgressVersions ?? [],
+      );
+      if (latest) session.chosenStamp = latest.stamp;
+      return projected;
     } catch (error) {
       if (
         error instanceof PortableStateError &&
         (error.code === "stale-basis" || error.code === "stale-choice")
       ) {
-        // R1.4: the sample is already superseded. Drop it and let the next
-        // real position change create a new sample; never retry the old value.
-        if (session.basisId) {
-          await this.data.release({ basisId: session.basisId }).catch(() => undefined);
-        }
-        session.basisId = null;
-        await this.refreshProgressSessionAfterStale(hash, session);
+        await this.data.release({ basisId: session.basisId }).catch(() => undefined);
+        await this.rebindProgressSessionAfterStale(hash, session);
         return this.currentProjectedEntry(hash);
       }
       throw error;
@@ -565,11 +542,7 @@ export class PortableShelfStore implements ShelfStore {
     const entry = await this.legacy.markOpened(id);
     const hash = hashForLocalEntry(entry);
     if (!hash) return entry;
-    try {
-      return await this.currentProjectedEntry(hash);
-    } catch {
-      return entry;
-    }
+    return this.currentProjectedEntry(hash);
   }
 
   private async writeAnnotation<T extends "bookmark" | "note">(
@@ -608,42 +581,6 @@ export class PortableShelfStore implements ShelfStore {
       return (book.bookmarks[entity.id]?.versions ?? []) as readonly Version<BookmarkValue>[];
     }
     return (book.notes[entity.id]?.versions ?? []) as readonly Version<NoteValue>[];
-  }
-
-  private async writeAnnotationChosen(
-    hash: string,
-    entity: { bookHash: string; kind: "bookmark" | "note"; id: string },
-    value: BookmarkValue | NoteValue,
-    updatedAtMs: number,
-    chosenStamp: Stamp,
-  ): Promise<void> {
-    const read = await this.data.read({ bookHash: hash });
-    try {
-      const book = read.book;
-      if (!book) throw new Error("可移植资料库中没有这本书");
-      const chosen = entity.kind === "bookmark"
-        ? versionForStamp(book.bookmarks[entity.id]?.versions ?? [], chosenStamp)
-        : versionForStamp(book.notes[entity.id]?.versions ?? [], chosenStamp);
-      if (!chosen) throw new Error("展示时的注解版本已失效，请重新打开编辑");
-      const adopted = await this.data.adopt({
-        readId: read.readId,
-        entity,
-        selection: { kind: "chosen", stamp: chosen.stamp },
-      });
-      try {
-        const result = await this.data.write({
-          basisId: adopted.basisId,
-          intent: "edit",
-          value,
-          updatedAtMs,
-        });
-        await this.data.release({ basisId: result.nextBasisId }).catch(() => undefined);
-      } finally {
-        await this.data.release({ basisId: adopted.basisId }).catch(() => undefined);
-      }
-    } finally {
-      await this.data.release({ readId: read.readId }).catch(() => undefined);
-    }
   }
 
   async createBookmark(id: string, bookmark: Bookmark): Promise<ShelfEntry> {
@@ -690,20 +627,50 @@ export class PortableShelfStore implements ShelfStore {
     return this.currentProjectedEntry(hash);
   }
 
-  async updateNote(id: string, note: ReaderNote, chosenStamp: Stamp): Promise<ShelfEntry> {
+  /** B2: read/adopt the displayed note version once and keep the context. */
+  async beginNoteEdit(
+    id: string,
+    noteId: string,
+    chosenStamp: Stamp,
+  ): Promise<NoteEditContext | null> {
     const hash = await this.hashForId(id);
-    if (!hash) {
-      const current = await this.localEntryFor(id);
-      return this.legacy.setNotes(id, (current?.notes ?? []).map((item) => item.id === note.id ? note : item));
+    if (!hash) return null;
+    const read = await this.data.read({ bookHash: hash });
+    if (!read.book) {
+      await this.data.release({ readId: read.readId }).catch(() => undefined);
+      throw new Error("可移植资料库中没有这本书");
     }
-    await this.writeAnnotationChosen(
-      hash,
-      { bookHash: hash, kind: "note", id: note.id },
-      noteValueFromNote(note),
-      Math.max(note.createdAtMs, note.updatedAtMs ?? note.createdAtMs),
-      chosenStamp,
-    );
+    const entity = { bookHash: hash, kind: "note" as const, id: noteId };
+    try {
+      const adopted = await this.data.adopt({
+        readId: read.readId,
+        entity,
+        selection: { kind: "chosen", stamp: chosenStamp },
+      });
+      return { readId: read.readId, basisId: adopted.basisId };
+    } catch (error) {
+      await this.data.release({ readId: read.readId }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  /** B2: write through the editor's adopted basis only. */
+  async writeNoteEdit(id: string, note: ReaderNote, context: NoteEditContext): Promise<ShelfEntry> {
+    const hash = await this.hashForId(id);
+    if (!hash) throw new Error("笔记编辑上下文缺少内容指纹");
+    const result = await this.data.write({
+      basisId: context.basisId,
+      intent: "edit",
+      value: noteValueFromNote(note),
+      updatedAtMs: Math.max(note.createdAtMs, note.updatedAtMs ?? note.createdAtMs),
+    });
+    if (result.nextBasisId !== context.basisId) context.basisId = result.nextBasisId;
     return this.currentProjectedEntry(hash);
+  }
+
+  async endNoteEdit(context: NoteEditContext): Promise<void> {
+    await this.data.release({ basisId: context.basisId }).catch(() => undefined);
+    await this.data.release({ readId: context.readId }).catch(() => undefined);
   }
 
   async deleteNote(id: string, noteId: string): Promise<ShelfEntry> {
@@ -810,11 +777,7 @@ export class PortableShelfStore implements ShelfStore {
     // rebound book never opens with the legacy JSON's stale position.
     const hash = hashForLocalEntry(entry);
     if (!hash) return entry;
-    try {
-      return await this.currentProjectedEntry(hash);
-    } catch {
-      return entry;
-    }
+    return this.currentProjectedEntry(hash);
   }
 
   async replacePortableRecords(records: LibraryRecord[], organization?: LibraryOrganization): Promise<ShelfEntry[]> {

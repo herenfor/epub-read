@@ -31,6 +31,10 @@ export class ShelfProgressWriter {
   /** Start a new reading session for a book without disturbing other books. */
   beginSession(id: string): void {
     if (this.disposed) throw new Error("阅读进度写入器已销毁");
+    // A new reading/adoption session supersedes queued or failed samples for
+    // this book. The caller flushes the old session before calling this.
+    this.pending.delete(id);
+    this.failed.delete(id);
     this.startedIds.delete(id);
   }
 
