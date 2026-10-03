@@ -1,0 +1,51 @@
+.battery-indicator {
+  --battery-indicator-icon-background: var(--bg, #fff);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 44px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.battery-indicator__icon {
+  display: block;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 14px;
+}
+
+.battery-indicator__shell {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+}
+
+.battery-indicator__terminal {
+  fill: currentColor;
+  stroke: none;
+}
+
+.battery-indicator__fill {
+  fill: currentColor;
+  opacity: 0.72;
+}
+
+.battery-indicator__bolt {
+  fill: var(--battery-indicator-icon-background);
+  stroke: currentColor;
+  stroke-width: 1;
+  stroke-linejoin: round;
+}
+
+.battery-indicator__level {
+  min-width: 2.6em;
+  text-align: center;
+}
