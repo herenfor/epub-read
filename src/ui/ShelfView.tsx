@@ -228,6 +228,16 @@ function TrashIcon() {
   );
 }
 
+function ExportIcon() {
+  return (
+    <svg className="shelf-svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 3v12" />
+      <polyline points="7 8 12 3 17 8" />
+      <path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6" />
+    </svg>
+  );
+}
+
 function CheckListIcon() {
   return (
     <svg className="shelf-svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -825,7 +835,11 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
   }, []);
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>): void => {
-    if (props.selectionMode || e.button !== 0) return;
+    if (e.button !== 0) return;
+    // 触摸：普通状态长按进入多选；多选状态再长按才拖动书本（移入文件夹/合并新文件夹），
+    // 手指先移动则仍是上下滚动。鼠标沿用长按即拖动，多选状态不拖。
+    const touch = e.pointerType === "touch";
+    if (props.selectionMode && !(touch && props.onDragStart)) return;
     const target = e.target as HTMLElement;
     if (
       target.closest("button") ||
@@ -838,7 +852,7 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
       return;
     }
 
-    const touchLongPressSelect = e.pointerType === "touch" && Boolean(props.onLongPressSelect);
+    const touchLongPressSelect = touch && !props.selectionMode && Boolean(props.onLongPressSelect);
     if (!touchLongPressSelect && !props.onDragStart) return;
 
     startPosRef.current = { x: e.clientX, y: e.clientY };
@@ -924,8 +938,9 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
   };
 
   const handleContextMenu = (e: React.MouseEvent): void => {
-    if (props.selectionMode) return;
     e.preventDefault();
+    // 多选状态的长按留给拖动，不弹系统/卡片菜单。
+    if (props.selectionMode) return;
     setMenuOpen(true);
   };
 
@@ -3767,6 +3782,7 @@ export function ShelfView(props: ShelfViewProps) {
     setSelectionMode(true);
   };
 
+  const noneSelected = selectedIds.size === 0;
   const exitSelection = useCallback((): void => {
     setDockClosing(true);
     window.setTimeout(() => {
@@ -3928,8 +3944,22 @@ export function ShelfView(props: ShelfViewProps) {
     return () => props.onBackAvailabilityChange?.(false);
   }, [props.onBackAvailabilityChange, shelfBackActive]);
 
+  // 触摸拖书只在多选状态由长按发起：此时挂一个非被动 touchmove，拖动中阻止页面滚动，
+  // 否则浏览器接管为平移并发 pointercancel 中断拖动。必须在 touchstart 前就已注册，
+  // 合成器才会等主线程决定；未拖动时不拦截，上下滚动照常。
+  useEffect(() => {
+    if (!selectionMode) return;
+    const blockScrollWhileDragging = (e: TouchEvent): void => {
+      if (draggedEntryRef.current && e.cancelable) e.preventDefault();
+    };
+    window.addEventListener("touchmove", blockScrollWhileDragging, { passive: false });
+    return () => window.removeEventListener("touchmove", blockScrollWhileDragging);
+  }, [selectionMode]);
+
   const handleDragStart = useCallback(
     (entry: ShelfEntry, point: { x: number; y: number }): void => {
+      // 先同步 ref：长按触发后的第一帧 touchmove 可能早于重渲染。
+      draggedEntryRef.current = entry;
       setDraggedEntry(entry);
       setDragCoord(point);
       setDropTarget(null);
@@ -4205,6 +4235,10 @@ export function ShelfView(props: ShelfViewProps) {
           /* 多选管理模式状态栏 */
           <div className="shelf-selection-bar">
             <div className="shelf-selection-left">
+              {/* 手机：取消在左上，批量动作统一放底部操作栏（与平板/桌面同一底坞）。 */}
+              <button className="shelf-selection-exit" type="button" onClick={exitSelection}>
+                取消
+              </button>
               <span className="shelf-selection-title">已选 {selectedIds.size} 本</span>
               <button
                 className="shelf-selection-toggle-all"
@@ -4216,68 +4250,6 @@ export function ShelfView(props: ShelfViewProps) {
                 }}
               >
                 {selectedIds.size === visible.length ? "取消全选" : "全选全部"}
-              </button>
-            </div>
-            <div className="shelf-selection-actions">
-              <button
-                className="shelf-action-fav"
-                type="button"
-                disabled={selectedIds.size === 0 || props.busy}
-                onClick={() => void handleBatchFavorite(true)}
-                title="加入收藏"
-              >
-                <StarIcon filled />
-                <span>加入收藏</span>
-              </button>
-              <button
-                className="shelf-action-fav"
-                type="button"
-                disabled={selectedIds.size === 0 || props.busy}
-                onClick={() => void handleBatchFavorite(false)}
-                title="取消收藏"
-              >
-                <StarIcon />
-                <span>取消收藏</span>
-              </button>
-              <button
-                className="shelf-action-folder"
-                type="button"
-                disabled={selectedIds.size === 0 || props.busy}
-                onClick={() => {
-                  const targets = props.entries.filter((e) => selectedIds.has(e.id));
-                  if (targets.length > 0) setMoveDialogTargets(targets);
-                }}
-                title="移至文件夹"
-              >
-                <FolderIcon />
-                <span>移至文件夹</span>
-              </button>
-              <button
-                className="shelf-action-folder"
-                type="button"
-                disabled={selectedIds.size === 0 || props.busy || props.saveFileActive}
-                onClick={() => {
-                  const targets = props.entries.filter((e) => selectedIds.has(e.id));
-                  if (targets.length > 0) props.onExportArchive(targets);
-                }}
-                title="导出选中书籍为新存档"
-              >
-                <span>导出存档</span>
-              </button>
-              <button className="shelf-selection-cancel" type="button" onClick={exitSelection}>
-                取消
-              </button>
-              <button
-                className="shelf-selection-delete"
-                type="button"
-                disabled={selectedIds.size === 0 || props.busy || props.importActive}
-                onClick={() => {
-                  const targets = props.entries.filter((e) => selectedIds.has(e.id));
-                  if (targets.length > 0) setDeleteTargets(targets);
-                }}
-              >
-                <TrashIcon />
-                <span>删除{selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}</span>
               </button>
             </div>
           </div>
@@ -5307,68 +5279,66 @@ export function ShelfView(props: ShelfViewProps) {
             <span>{selectedIds.size > 0 ? `已选 ${selectedIds.size} 本` : "请点击图书卡片进行选择"}</span>
           </div>
           <div className="shelf-floating-batch-actions">
-            {selectedIds.size > 0 && (
-              <>
-                <button
-                  className="shelf-batch-action-btn"
-                  type="button"
-                  disabled={props.busy}
-                  onClick={() => void handleBatchFavorite(true)}
-                  title="加入收藏"
-                >
-                  <StarIcon filled />
-                  <span>收藏</span>
-                </button>
-                <button
-                  className="shelf-batch-action-btn"
-                  type="button"
-                  disabled={props.busy}
-                  onClick={() => void handleBatchFavorite(false)}
-                  title="取消收藏"
-                >
-                  <StarIcon />
-                  <span>取消收藏</span>
-                </button>
-                <button
-                  className="shelf-batch-action-btn"
-                  type="button"
-                  disabled={props.busy}
-                  onClick={() => {
-                    const targets = props.entries.filter((e) => selectedIds.has(e.id));
-                    if (targets.length > 0) setMoveDialogTargets(targets);
-                  }}
-                  title="移至文件夹"
-                >
-                  <FolderIcon />
-                  <span>移至文件夹</span>
-                </button>
-                <button
-                  className="shelf-batch-action-btn"
-                  type="button"
-                  disabled={props.busy || props.saveFileActive}
-                  onClick={() => {
-                    const targets = props.entries.filter((e) => selectedIds.has(e.id));
-                    if (targets.length > 0) props.onExportArchive(targets);
-                  }}
-                  title="导出选中书籍为新存档"
-                >
-                  <span>导出</span>
-                </button>
-                <button
-                  className="shelf-batch-action-btn danger"
-                  type="button"
-                  disabled={props.busy || props.importActive}
-                  onClick={() => {
-                    const targets = props.entries.filter((e) => selectedIds.has(e.id));
-                    if (targets.length > 0) setDeleteTargets(targets);
-                  }}
-                  title="从书架删除选中的书籍"
-                >
-                  <TrashIcon />
-                  <span>删除</span>
-                </button>
-              </>
-            )}
+            {/* 动作常驻、未选时置灰：首次勾选时底栏不跳动。 */}
+            <button
+              className="shelf-batch-action-btn"
+              type="button"
+              disabled={noneSelected || props.busy}
+              onClick={() => void handleBatchFavorite(true)}
+              title="加入收藏"
+            >
+              <StarIcon filled />
+              <span>收藏</span>
+            </button>
+            <button
+              className="shelf-batch-action-btn"
+              type="button"
+              disabled={noneSelected || props.busy}
+              onClick={() => void handleBatchFavorite(false)}
+              title="取消收藏"
+            >
+              <StarIcon />
+              <span>取消收藏</span>
+            </button>
+            <button
+              className="shelf-batch-action-btn"
+              type="button"
+              disabled={noneSelected || props.busy}
+              onClick={() => {
+                const targets = props.entries.filter((e) => selectedIds.has(e.id));
+                if (targets.length > 0) setMoveDialogTargets(targets);
+              }}
+              title="移至文件夹"
+            >
+              <FolderIcon />
+              <span>移至文件夹</span>
+            </button>
+            <button
+              className="shelf-batch-action-btn"
+              type="button"
+              disabled={noneSelected || props.busy || props.saveFileActive}
+              onClick={() => {
+                const targets = props.entries.filter((e) => selectedIds.has(e.id));
+                if (targets.length > 0) props.onExportArchive(targets);
+              }}
+              title="导出选中书籍为新存档"
+            >
+              <ExportIcon />
+              <span>导出</span>
+            </button>
+            <button
+              className="shelf-batch-action-btn danger"
+              type="button"
+              disabled={noneSelected || props.busy || props.importActive}
+              onClick={() => {
+                const targets = props.entries.filter((e) => selectedIds.has(e.id));
+                if (targets.length > 0) setDeleteTargets(targets);
+              }}
+              title="从书架删除选中的书籍"
+            >
+              <TrashIcon />
+              <span>删除</span>
+            </button>
             <button
               className="shelf-batch-action-btn cancel"
               type="button"

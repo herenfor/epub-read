@@ -1304,6 +1304,11 @@
   background: color-mix(in srgb, var(--accent, #2563eb) 8%, var(--shelf-card-bg, #fff));
 }
 
+.shelf-batch-action-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 .shelf-batch-action-btn.danger {
   color: #ef4444;
 }
@@ -1750,8 +1755,88 @@
   display: none !important;
 }
 
+/* 手机：同一底坞展开为贴底整宽操作栏，五个动作等宽、图标在上文字居中；
+ * 数量与取消已在顶栏，底栏不重复。 */
 .app[data-mobile-chrome="true"][data-layout="compact"] .shelf-floating-batch-dock {
-  display: none !important;
+  left: 12px;
+  right: 12px;
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  transform: none;
+  padding: 6px;
+  gap: 0;
+  border-radius: 20px;
+  animation-name: shelf-batch-rise;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-floating-batch-dock.is-closing {
+  animation-name: shelf-batch-sink;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-floating-batch-info,
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-batch-action-btn.cancel {
+  display: none;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-floating-batch-actions {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 2px;
+  width: 100%;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-batch-action-btn {
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  height: auto;
+  min-height: 58px;
+  padding: 6px 2px;
+  border: none;
+  border-radius: 14px;
+  background: transparent;
+  font-size: 11.5px;
+  line-height: 1.2;
+  text-align: center;
+  transition: background-color var(--motion-fast, 140ms) ease, opacity var(--motion-fast, 140ms) ease, transform 0.12s ease;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-batch-action-btn .shelf-svg-icon {
+  width: 21px;
+  height: 21px;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-batch-action-btn > span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-batch-action-btn:active:not(:disabled) {
+  background: color-mix(in srgb, var(--accent, #2563eb) 12%, transparent);
+  transform: scale(0.96);
+}
+
+@keyframes shelf-batch-rise {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes shelf-batch-sink {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(24px);
+  }
 }
 
 
