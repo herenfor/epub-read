@@ -735,7 +735,28 @@ export default function App() {
   const progressWriterRef = useRef<ShelfProgressWriter | null>(null);
   if (!progressWriterRef.current) {
     progressWriterRef.current = new ShelfProgressWriter(async (id, patch) => {
-      await getShelfStore().updateProgress(id, patch);
+      const written = await getShelfStore().updateProgress(id, patch);
+      // A stale sample is dropped by the facade and resolves with the current
+      // projection; mirror that backend truth into the shelf UI so a discarded
+      // optimistic patch cannot become the next open's default position.
+      setShelfEntries((prev) =>
+        prev.map((entry) =>
+          entry.id === id
+            ? {
+                ...entry,
+                lastReadAtMs: written.lastReadAtMs,
+                spineIndex: written.spineIndex,
+                page: written.page,
+                progressPct: written.progressPct,
+                anchorIndex: written.anchorIndex,
+                anchorRatio: written.anchorRatio,
+                anchorTextOffset: written.anchorTextOffset,
+                anchorTextSnippet: written.anchorTextSnippet,
+                mediaAnchor: written.mediaAnchor,
+              }
+            : entry
+        )
+      );
     });
   }
   /** 指针是否悬停在交互式浮层（脚注弹窗等）上：此时不响应翻页键/后续可扩展书签等 */
