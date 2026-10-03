@@ -18,15 +18,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Core owns the FTS/task schema through v3. AI extends the same database to
-/// v6 when model assets are enabled. Keep accepting v6 in Core so a stable
-/// build can open a database previously touched by an AI build without
-/// attempting to migrate or use model tables.
-#[cfg(feature = "ai")]
-pub(crate) const SCHEMA_VERSION: u32 = 6;
-#[cfg(not(feature = "ai"))]
-pub(crate) const SCHEMA_VERSION: u32 = 3;
-pub(crate) const MAX_SUPPORTED_SCHEMA_VERSION: u32 = 6;
+/// Rebuildable cache schema.  Core and AI builds both use v7 after the
+/// persistent metadata split; Core still does not compile model inference or
+/// download code, but it can safely preserve a database written by AI.
+pub(crate) const SCHEMA_VERSION: u32 = 7;
+pub(crate) const MAX_SUPPORTED_SCHEMA_VERSION: u32 = 7;
 const ROOT_NAME: &str = "ai";
 const DATABASE_NAME: &str = "ai.sqlite3";
 const CHUNK_FTS_SCHEMA: &str = "CREATE VIRTUAL TABLE chunk_fts USING fts5(
@@ -57,6 +53,7 @@ fn is_reparse_point(_metadata: &std::fs::Metadata) -> bool {
 pub(crate) struct AiStore {
     root: PathBuf,
     connection: Mutex<Connection>,
+    metadata_connection: Mutex<Connection>,
 }
 
 impl AiStore {
@@ -64,11 +61,16 @@ impl AiStore {
         app_data_dir.as_ref().join(ROOT_NAME).join(DATABASE_NAME)
     }
 
+    pub(crate) fn metadata_path(app_data_dir: impl AsRef<Path>) -> PathBuf {
+        super::metadata_store::database_path(app_data_dir.as_ref())
+    }
+
     pub(crate) fn open(app_data_dir: impl AsRef<Path>) -> Result<Self, String> {
         let root = app_data_dir.as_ref().join(ROOT_NAME);
         std::fs::create_dir_all(&root).map_err(|error| format!("无法创建 AI 数据目录：{error}"))?;
-        let database_path = Self::database_path(app_data_dir);
-        let connection = Connection::open(&database_path)
+        let database_path = Self::database_path(app_data_dir.as_ref());
+        let metadata_path = Self::metadata_path(app_data_dir.as_ref());
+        let mut connection = Connection::open(&database_path)
             .map_err(|error| format!("无法打开 AI SQLite 数据库：{error}"))?;
         connection
             .pragma_update(None, "foreign_keys", true)
@@ -76,10 +78,46 @@ impl AiStore {
         connection
             .busy_timeout(std::time::Duration::from_millis(5000))
             .map_err(|error| format!("设置 SQLite 等待上限失败：{error}"))?;
-        migrate(&connection)?;
+
+        let pre_migration_version = user_version(&connection)?;
+        if pre_migration_version > MAX_SUPPORTED_SCHEMA_VERSION {
+            return Err(format!(
+                "AI 数据库版本 {pre_migration_version} 高于当前支持的版本 {MAX_SUPPORTED_SCHEMA_VERSION}"
+            ));
+        }
+        let fresh_cache = pre_migration_version == 0;
+        let metadata_connection;
+        if fresh_cache {
+            // Initialize durable storage first.  If creating the empty cache
+            // schema then fails, the next start sees user_version 0 plus a
+            // completed metadata marker and can retry cleanly instead of
+            // entering the "cache v7 but metadata missing" error state.
+            metadata_connection = super::metadata_store::open(
+                &metadata_path,
+                &mut connection,
+                true,
+            )?;
+            create_cache_schema_v7(&connection)?;
+        } else {
+            // Old cache versions must be normalized before the target import
+            // and only pruned after the metadata transaction has committed.
+            migrate_legacy_cache(&connection)?;
+            let cache_version = user_version(&connection)?;
+            let source_available = cache_version < SCHEMA_VERSION;
+            metadata_connection = super::metadata_store::open(
+                &metadata_path,
+                &mut connection,
+                source_available,
+            )?;
+            if cache_version < SCHEMA_VERSION {
+                finalize_cache_after_metadata_import(&connection)?;
+            }
+        }
+
         let store = Self {
             root,
             connection: Mutex::new(connection),
+            metadata_connection: Mutex::new(metadata_connection),
         };
         store.reclaim_active_jobs();
         #[cfg(feature = "ai")]
@@ -89,29 +127,50 @@ impl AiStore {
     }
 
     pub(crate) fn status(&self) -> Result<AiStorageStatus, String> {
-        self.with_connection(|connection| {
-            Ok(AiStorageStatus {
-                root_name: ROOT_NAME.into(),
-                database_name: DATABASE_NAME.into(),
-                schema_version: SCHEMA_VERSION,
-                books: count(connection, "books")?,
-                chunks: count(connection, "chunks")?,
-                jobs: count(connection, "jobs")?,
-                #[cfg(feature = "ai")]
-                provider_models: count(connection, "provider_models")?,
-                #[cfg(not(feature = "ai"))]
-                provider_models: 0,
-                #[cfg(feature = "ai")]
-                model_packages: count(connection, "model_packages")?,
-                #[cfg(not(feature = "ai"))]
-                model_packages: 0,
-            })
+        // Count the two stores in separate lock scopes.  Never hold the cache
+        // connection while acquiring the metadata connection.
+        let (books, chunks, jobs) = self.with_connection(|connection| {
+            Ok((
+                count(connection, "books")?,
+                count(connection, "chunks")?,
+                count(connection, "jobs")?,
+            ))
+        })?;
+        #[cfg(feature = "ai")]
+        let (provider_models, model_packages) = self.with_metadata_connection(|connection| {
+            Ok((
+                count(connection, "provider_models")?,
+                count(connection, "model_packages")?,
+            ))
+        })?;
+        #[cfg(not(feature = "ai"))]
+        let (provider_models, model_packages) = {
+            // Core does not expose model entries, but the durable tables are
+            // still initialized/preserved by AiStore::open.
+            let _ = &self.metadata_connection;
+            (0, 0)
+        };
+        let root_name = self
+            .root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(ROOT_NAME)
+            .to_string();
+        Ok(AiStorageStatus {
+            root_name,
+            database_name: DATABASE_NAME.into(),
+            schema_version: SCHEMA_VERSION,
+            books,
+            chunks,
+            jobs,
+            provider_models,
+            model_packages,
         })
     }
 
     #[cfg(feature = "ai")]
     pub(crate) fn model_library_path(&self) -> Result<Option<String>, String> {
-        self.with_connection(|connection| {
+        self.with_metadata_connection(|connection| {
             connection
                 .query_row(
                     "SELECT root_path FROM model_library_config WHERE id = 1",
@@ -125,7 +184,7 @@ impl AiStore {
 
     #[cfg(feature = "ai")]
     pub(crate) fn has_active_model_downloads(&self) -> Result<bool, String> {
-        self.with_connection(|connection| {
+        self.with_metadata_connection(|connection| {
             connection
                 .query_row(
                     "SELECT EXISTS(SELECT 1 FROM model_download_tasks
@@ -140,7 +199,7 @@ impl AiStore {
 
     #[cfg(feature = "ai")]
     pub(crate) fn set_model_library_path(&self, path: &str) -> Result<(), String> {
-        self.with_connection(|connection| {
+        self.with_metadata_connection(|connection| {
             let transaction = connection
                 .transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(|error| format!("开始更新模型库目录事务失败：{error}"))?;
@@ -273,7 +332,7 @@ impl AiStore {
         let max_input = manifest.max_input.map(to_i64).transpose()?;
         let min_memory = manifest.min_memory_bytes.map(to_i64).transpose()?;
         let recommended_memory = manifest.recommended_memory_bytes.map(to_i64).transpose()?;
-        self.with_connection(|connection| {
+        self.with_metadata_connection(|connection| {
             let transaction = connection
                 .unchecked_transaction()
                 .map_err(|error| format!("开始注册模型包事务失败：{error}"))?;
@@ -412,7 +471,7 @@ impl AiStore {
 
     #[cfg(feature = "ai")]
     pub(crate) fn list_model_packages(&self) -> Result<Vec<ModelPackageRecord>, String> {
-        self.with_connection(|connection| {
+        self.with_metadata_connection(|connection| {
             let mut statement = connection
                 .prepare("SELECT package_id FROM model_packages ORDER BY package_id")
                 .map_err(|error| format!("读取模型包列表失败：{error}"))?;
@@ -429,7 +488,7 @@ impl AiStore {
 
     #[cfg(feature = "ai")]
     pub(crate) fn mark_missing_managed_packages(&self, root: &Path) -> Result<(), String> {
-        self.with_connection(|connection| {
+        self.with_metadata_connection(|connection| {
             let mut statement = connection
                 .prepare(
                     "SELECT package_id, package_dir FROM model_packages
@@ -468,7 +527,7 @@ impl AiStore {
         &self,
         scan_results: &[(String, Option<String>, String)],
     ) -> Result<(), String> {
-        self.with_connection(|connection| {
+        self.with_metadata_connection(|connection| {
             let transaction = connection
                 .unchecked_transaction()
                 .map_err(|error| format!("开始更新陈旧模型包状态失败：{error}"))?;
@@ -507,7 +566,7 @@ impl AiStore {
         &self,
         package_id: &str,
     ) -> Result<Option<ModelPackageRecord>, String> {
-        self.with_connection(|connection| {
+        self.with_metadata_connection(|connection| {
             let exists = connection
                 .query_row(
                     "SELECT 1 FROM model_packages WHERE package_id = ?1",
@@ -528,7 +587,7 @@ impl AiStore {
         package_id: &str,
         external_path: &str,
     ) -> Result<(), String> {
-        self.with_connection(|connection| {
+        self.with_metadata_connection(|connection| {
             let changed = connection
                 .execute(
                     "UPDATE model_packages SET linked_external_path = ?1,
@@ -550,7 +609,7 @@ impl AiStore {
         package_id: &str,
         delete_managed_files: bool,
     ) -> Result<(), String> {
-        self.with_connection(|connection| {
+        self.with_metadata_connection(|connection| {
             // Keep the write transaction open while staging is removed. This
             // makes the active-state recheck and task-ID snapshot atomic with
             // respect to enqueue/resume operations on the same store.
@@ -675,7 +734,7 @@ impl AiStore {
         if package.license.trim().is_empty() {
             return Err("模型包缺少许可证信息".into());
         }
-        self.with_connection(|connection| {
+        self.with_metadata_connection(|connection| {
             connection
                 .execute(
                     "INSERT INTO model_license_acceptance (package_id, license, accepted_at_ms)
@@ -691,7 +750,7 @@ impl AiStore {
 
     #[cfg(feature = "ai")]
     pub(crate) fn is_model_license_accepted(&self, package_id: &str) -> Result<bool, String> {
-        self.with_connection(|connection| {
+        self.with_metadata_connection(|connection| {
             connection
                 .query_row(
                     "SELECT EXISTS(SELECT 1 FROM model_license_acceptance a
@@ -724,7 +783,7 @@ impl AiStore {
         if total > i64::MAX as u64 {
             return Err("模型包大小超过 SQLite 可表示范围".into());
         }
-        let id = self.with_connection(|connection| {
+        let id = self.with_metadata_connection(|connection| {
             let transaction = connection
                 .transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(|error| format!("开始模型下载任务事务失败：{error}"))?;
@@ -770,7 +829,7 @@ impl AiStore {
         &self,
         id: &str,
     ) -> Result<Option<ModelDownloadTaskRecord>, String> {
-        self.with_connection(|connection| {
+        self.with_metadata_connection(|connection| {
             let changed = connection
                 .execute(
                     "UPDATE model_download_tasks SET state = 'downloading',
@@ -793,7 +852,7 @@ impl AiStore {
         &self,
         id: &str,
     ) -> Result<Option<ModelDownloadTaskRecord>, String> {
-        self.with_connection(|connection| {
+        self.with_metadata_connection(|connection| {
             let changed = connection
                 .execute(
                     "UPDATE model_download_tasks SET state = 'queued', error = NULL,
@@ -813,7 +872,7 @@ impl AiStore {
         &self,
         id: &str,
     ) -> Result<Option<ModelDownloadTaskRecord>, String> {
-        self.with_connection(|connection| {
+        self.with_metadata_connection(|connection| {
             connection
                 .query_row(
                     "SELECT id, package_id, state, bytes_downloaded, total_bytes,
@@ -831,7 +890,7 @@ impl AiStore {
 
     #[cfg(feature = "ai")]
     pub(crate) fn list_model_download_tasks(&self) -> Result<Vec<ModelDownloadTaskRecord>, String> {
-        self.with_connection(|connection| {
+        self.with_metadata_connection(|connection| {
             let mut statement = connection
                 .prepare(
                     "SELECT id, package_id, state, bytes_downloaded, total_bytes,
@@ -874,7 +933,7 @@ impl AiStore {
             return Err("无效的模型下载任务状态".into());
         }
         let now = now_ms() as i64;
-        self.with_connection(|connection| {
+        self.with_metadata_connection(|connection| {
             connection
                 .execute(
                     "UPDATE model_download_tasks SET state = ?1, bytes_downloaded = ?2,
@@ -921,7 +980,7 @@ impl AiStore {
         {
             return Err("无效的模型包状态".into());
         }
-        self.with_connection(|connection| {
+        self.with_metadata_connection(|connection| {
             connection
                 .execute(
                     "UPDATE model_packages SET state = ?1, updated_at_ms = ?2 WHERE package_id = ?3",
@@ -934,19 +993,23 @@ impl AiStore {
 
     #[cfg(feature = "ai")]
     pub(crate) fn pause_all_model_downloads(&self) {
-        let Ok(connection) = self.connection.lock() else {
-            return;
-        };
-        let _ = connection.execute(
-            "UPDATE model_download_tasks SET state = 'paused', updated_at_ms = ?1
-             WHERE state IN ('queued','downloading','verifying')",
-            [now_ms() as i64],
-        );
-        let _ = connection.execute(
-            "UPDATE model_packages SET state = 'paused', updated_at_ms = ?1
-             WHERE state IN ('queued','downloading','verifying')",
-            [now_ms() as i64],
-        );
+        let _ = self.with_metadata_connection(|connection| {
+            connection
+                .execute(
+                    "UPDATE model_download_tasks SET state = 'paused', updated_at_ms = ?1
+                     WHERE state IN ('queued','downloading','verifying')",
+                    [now_ms() as i64],
+                )
+                .map_err(|error| format!("暂停模型下载任务失败：{error}"))?;
+            connection
+                .execute(
+                    "UPDATE model_packages SET state = 'paused', updated_at_ms = ?1
+                     WHERE state IN ('queued','downloading','verifying')",
+                    [now_ms() as i64],
+                )
+                .map_err(|error| format!("暂停模型包状态失败：{error}"))?;
+            Ok(())
+        });
     }
 
     #[cfg(feature = "ai")]
@@ -957,7 +1020,7 @@ impl AiStore {
         downloaded_bytes: u64,
         verification_state: &str,
     ) -> Result<(), String> {
-        self.with_connection(|connection| {
+        self.with_metadata_connection(|connection| {
             let expected: Option<i64> = connection
                 .query_row(
                     "SELECT size_bytes FROM model_package_files
@@ -991,7 +1054,7 @@ impl AiStore {
         &self,
         package_id: &str,
     ) -> Result<(), String> {
-        self.with_connection(|connection| {
+        self.with_metadata_connection(|connection| {
             connection
                 .execute(
                     "UPDATE model_package_files
@@ -1022,7 +1085,7 @@ impl AiStore {
         } else {
             "corrupt"
         };
-        self.with_connection(|connection| {
+        self.with_metadata_connection(|connection| {
             let transaction = connection
                 .unchecked_transaction()
                 .map_err(|error| format!("开始更新模型校验状态失败：{error}"))?;
@@ -1162,9 +1225,10 @@ impl AiStore {
             };
             Ok((item_count, updated_at, state.to_string()))
         })?;
-        let size_bytes = std::fs::metadata(self.root.join(DATABASE_NAME))
-            .ok()
-            .map(|metadata| metadata.len());
+        // This database also contains mock-prep and semantic indexes.  Until
+        // C1-U can account for each cache category, do not present the whole
+        // file as the full-text index's exclusive size.
+        let size_bytes = None;
         Ok(AiCacheStatus {
             kind: FULL_TEXT_INDEX_CACHE_KIND.into(),
             display_name: "全文索引".into(),
@@ -1244,27 +1308,14 @@ impl AiStore {
             let transaction = connection
                 .unchecked_transaction()
                 .map_err(|error| format!("开始 AI 全量清理事务失败：{error}"))?;
-            #[cfg(feature = "ai")]
-            let mut tables = vec![
+            for table in [
                 "chunk_fts",
                 "index_staging_chunks",
                 "index_staging",
                 "chunks",
                 "jobs",
                 "books",
-            ];
-            #[cfg(not(feature = "ai"))]
-            let tables = vec![
-                "chunk_fts",
-                "index_staging_chunks",
-                "index_staging",
-                "chunks",
-                "jobs",
-                "books",
-            ];
-            #[cfg(feature = "ai")]
-            tables.push("provider_models");
-            for table in tables {
+            ] {
                 transaction
                     .execute(&format!("DELETE FROM {table}"), [])
                     .map_err(|error| format!("清理 AI {table} 失败：{error}"))?;
@@ -1956,11 +2007,136 @@ impl AiStore {
             .map_err(|_| "AI 数据库锁已损坏".to_string())?;
         operation(&mut connection)
     }
+
+    pub(super) fn with_metadata_connection<T>(
+        &self,
+        operation: impl FnOnce(&mut Connection) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let mut connection = self
+            .metadata_connection
+            .lock()
+            .map_err(|_| "AI metadata 数据库锁已损坏".to_string())?;
+        operation(&mut connection)
+    }
 }
 
 pub(crate) const FULL_TEXT_INDEX_CACHE_KIND: &str = "full-text-index";
 
-fn migrate(connection: &Connection) -> Result<(), String> {
+fn user_version(connection: &Connection) -> Result<u32, String> {
+    connection
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .map_err(|error| format!("读取 AI schema 版本失败：{error}"))
+}
+
+/// After the metadata target has committed, remove the old durable tables from
+/// the cache database and mark it as the new v7 cache schema.  Child tables are
+/// dropped before their parent so foreign-key enforcement in the cache
+/// connection does not make the cleanup order-sensitive.
+fn finalize_cache_after_metadata_import(connection: &Connection) -> Result<(), String> {
+    let transaction = connection
+        .unchecked_transaction()
+        .map_err(|error| format!("开始清理旧 AI 持久表事务失败：{error}"))?;
+    for table in [
+        "model_license_acceptance",
+        "model_download_tasks",
+        "model_sources",
+        "model_package_files",
+        "model_package_capabilities",
+        "model_packages",
+        "model_library_config",
+        "provider_models",
+    ] {
+        transaction
+            .execute(&format!("DROP TABLE IF EXISTS {table}"), [])
+            .map_err(|error| format!("清理旧 AI 持久表 {table} 失败：{error}"))?;
+    }
+    transaction
+        .execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))
+        .map_err(|error| format!("写入 AI cache v7 schema 版本失败：{error}"))?;
+    transaction
+        .commit()
+        .map_err(|error| format!("提交旧 AI 持久表清理事务失败：{error}"))
+}
+
+fn create_cache_schema_v7(connection: &Connection) -> Result<(), String> {
+    connection
+        .execute_batch(&format!(
+            "BEGIN;
+             CREATE TABLE IF NOT EXISTS books (
+               content_hash TEXT PRIMARY KEY CHECK(length(content_hash) = 64 AND content_hash NOT GLOB '*[^0-9A-Fa-f]*'),
+               title TEXT NOT NULL,
+               creator TEXT NOT NULL,
+               language TEXT,
+               parser_version TEXT NOT NULL,
+               normalizer_version TEXT NOT NULL,
+               chunker_version TEXT NOT NULL,
+               created_at_ms INTEGER NOT NULL,
+               updated_at_ms INTEGER NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS chunks (
+               content_hash TEXT NOT NULL REFERENCES books(content_hash) ON DELETE CASCADE,
+               chunk_id TEXT NOT NULL,
+               spine_index INTEGER NOT NULL,
+               chapter_path TEXT NOT NULL,
+               chapter_title TEXT,
+               content_type TEXT NOT NULL,
+               original_text TEXT NOT NULL,
+               normalized_text TEXT NOT NULL,
+               anchor_json TEXT NOT NULL,
+               PRIMARY KEY(content_hash, chunk_id)
+             );
+             CREATE INDEX IF NOT EXISTS chunks_by_book_spine ON chunks(content_hash, spine_index);
+             CREATE TABLE IF NOT EXISTS jobs (
+               id TEXT PRIMARY KEY,
+               kind TEXT NOT NULL,
+               content_hash TEXT CHECK(content_hash IS NULL OR (length(content_hash) = 64 AND content_hash NOT GLOB '*[^0-9A-Fa-f]*')),
+               state TEXT NOT NULL CHECK(state IN ('queued','running','paused','completed','failed','cancelled')),
+               progress REAL NOT NULL DEFAULT 0.0 CHECK(progress >= 0.0 AND progress <= 1.0),
+               error TEXT,
+               cancel_requested INTEGER NOT NULL DEFAULT 0 CHECK(cancel_requested IN (0,1)),
+               created_at_ms INTEGER NOT NULL,
+               updated_at_ms INTEGER NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS jobs_by_book ON jobs(content_hash);
+             CREATE INDEX IF NOT EXISTS jobs_by_state ON jobs(state);
+             {CHUNK_FTS_SCHEMA}
+             CREATE TABLE IF NOT EXISTS index_staging (
+               staging_id TEXT PRIMARY KEY,
+               content_hash TEXT NOT NULL CHECK(length(content_hash) = 64 AND content_hash NOT GLOB '*[^0-9A-Fa-f]*'),
+               title TEXT NOT NULL,
+               creator TEXT NOT NULL,
+               language TEXT,
+               parser_version TEXT NOT NULL,
+               normalizer_version TEXT NOT NULL,
+               chunker_version TEXT NOT NULL,
+               expected_chunks INTEGER CHECK(expected_chunks IS NULL OR (expected_chunks >= 0 AND expected_chunks <= 1000000)),
+               chunk_count INTEGER NOT NULL DEFAULT 0 CHECK(chunk_count >= 0 AND chunk_count <= 1000000),
+               total_bytes INTEGER NOT NULL DEFAULT 0 CHECK(total_bytes >= 0 AND total_bytes <= 536870912),
+               created_at_ms INTEGER NOT NULL,
+               updated_at_ms INTEGER NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS index_staging_by_book ON index_staging(content_hash);
+             CREATE TABLE IF NOT EXISTS index_staging_chunks (
+               staging_id TEXT NOT NULL REFERENCES index_staging(staging_id) ON DELETE CASCADE,
+               chunk_id TEXT NOT NULL,
+               spine_index INTEGER NOT NULL,
+               chapter_path TEXT NOT NULL,
+               chapter_title TEXT,
+               content_type TEXT NOT NULL,
+               original_text TEXT NOT NULL,
+               normalized_text TEXT NOT NULL,
+               anchor_json TEXT NOT NULL,
+               PRIMARY KEY(staging_id, chunk_id)
+             );
+             CREATE INDEX IF NOT EXISTS index_staging_chunks_by_session
+               ON index_staging_chunks(staging_id, spine_index);
+             PRAGMA user_version = {SCHEMA_VERSION};
+             COMMIT;"
+        ))
+        .map_err(|error| format!("创建 AI cache v7 schema 失败：{error}"))
+}
+
+fn migrate_legacy_cache(connection: &Connection) -> Result<(), String> {
     let mut version: u32 = connection
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .map_err(|error| format!("读取 AI schema 版本失败：{error}"))?;
@@ -1969,55 +2145,15 @@ fn migrate(connection: &Connection) -> Result<(), String> {
             "AI 数据库版本 {version} 高于当前支持的版本 {MAX_SUPPORTED_SCHEMA_VERSION}"
         ));
     }
+    if version == SCHEMA_VERSION {
+        return Ok(());
+    }
     if version == 0 {
-        connection
-            .execute_batch(
-                "PRAGMA foreign_keys = ON;
-                 BEGIN;
-                 CREATE TABLE IF NOT EXISTS books (
-                   content_hash TEXT PRIMARY KEY CHECK(length(content_hash) = 64 AND content_hash NOT GLOB '*[^0-9A-Fa-f]*'),
-                   parser_version TEXT NOT NULL,
-                   normalizer_version TEXT NOT NULL,
-                   chunker_version TEXT NOT NULL,
-                   created_at_ms INTEGER NOT NULL,
-                   updated_at_ms INTEGER NOT NULL
-                 );
-                 CREATE TABLE IF NOT EXISTS chunks (
-                   content_hash TEXT NOT NULL REFERENCES books(content_hash) ON DELETE CASCADE,
-                   chunk_id TEXT NOT NULL,
-                   spine_index INTEGER NOT NULL,
-                   chapter_path TEXT NOT NULL,
-                   chapter_title TEXT,
-                   content_type TEXT NOT NULL,
-                   original_text TEXT NOT NULL,
-                   normalized_text TEXT NOT NULL,
-                   anchor_json TEXT NOT NULL,
-                   PRIMARY KEY(content_hash, chunk_id)
-                 );
-                 CREATE INDEX IF NOT EXISTS chunks_by_book_spine ON chunks(content_hash, spine_index);
-                 CREATE TABLE IF NOT EXISTS jobs (
-                   id TEXT PRIMARY KEY,
-                   kind TEXT NOT NULL,
-                   content_hash TEXT CHECK(content_hash IS NULL OR (length(content_hash) = 64 AND content_hash NOT GLOB '*[^0-9A-Fa-f]*')),
-                   state TEXT NOT NULL CHECK(state IN ('queued','running','paused','completed','failed','cancelled')),
-                   progress REAL NOT NULL DEFAULT 0.0 CHECK(progress >= 0.0 AND progress <= 1.0),
-                   error TEXT,
-                   cancel_requested INTEGER NOT NULL DEFAULT 0 CHECK(cancel_requested IN (0,1)),
-                   created_at_ms INTEGER NOT NULL,
-                   updated_at_ms INTEGER NOT NULL
-                 );
-                 CREATE INDEX IF NOT EXISTS jobs_by_book ON jobs(content_hash);
-                 CREATE INDEX IF NOT EXISTS jobs_by_state ON jobs(state);
-                 PRAGMA user_version = 1;
-                 COMMIT;",
-            )
-            .map_err(|error| format!("创建 AI schema 失败：{error}"))?;
-        version = 1;
+        return Err("内部错误：新空缓存必须直接初始化为 v7；旧库迁移不处理版本 0".into());
     }
     // Core-created v3 databases intentionally omit provider/model tables.
-    // Ensure the shared provider registry exists for every AI opening path,
-    // including an upgrade from Core v3 and reopening an existing v6 DB.
-    #[cfg(feature = "ai")]
+    // During a split, legacy durable tables are normalized here before the
+    // metadata import, then removed from the cache after the target commits.
     connection
         .execute_batch(
             "CREATE TABLE IF NOT EXISTS provider_models (
@@ -2090,12 +2226,8 @@ fn migrate(connection: &Connection) -> Result<(), String> {
                  COMMIT;",
             )
             .map_err(|error| format!("升级 AI schema v3 失败：{error}"))?;
-        #[cfg(feature = "ai")]
-        {
-            version = 3;
-        }
+        version = 3;
     }
-    #[cfg(feature = "ai")]
     if version == 3 {
         connection
             .execute_batch(
@@ -2172,7 +2304,6 @@ fn migrate(connection: &Connection) -> Result<(), String> {
             .map_err(|error| format!("升级 AI schema v4 失败：{error}"))?;
         version = 4;
     }
-    #[cfg(feature = "ai")]
     if version == 4 {
         connection
             .execute_batch(
@@ -2224,7 +2355,6 @@ fn migrate(connection: &Connection) -> Result<(), String> {
             .map_err(|error| format!("升级 AI schema v5 失败：{error}"))?;
         version = 5;
     }
-    #[cfg(feature = "ai")]
     if version == 5 {
         connection
             .execute_batch(
@@ -2784,7 +2914,7 @@ mod tests {
         assert!(fts_columns.contains(&"normalized_text".to_string()));
         #[cfg(feature = "ai")]
         let model_columns = store
-            .with_connection(|connection| table_columns(connection, "provider_models"))
+            .with_metadata_connection(|connection| table_columns(connection, "provider_models"))
             .unwrap();
         #[cfg(feature = "ai")]
         for required in [
@@ -2808,20 +2938,20 @@ mod tests {
         ] {
             assert!(
                 store
-                    .with_connection(|connection| table_columns(connection, table))
+                    .with_metadata_connection(|connection| table_columns(connection, table))
                     .is_ok(),
                 "missing model table {table}"
             );
         }
         #[cfg(feature = "ai")]
         let package_columns = store
-            .with_connection(|connection| table_columns(connection, "model_packages"))
+            .with_metadata_connection(|connection| table_columns(connection, "model_packages"))
             .unwrap();
         #[cfg(feature = "ai")]
         assert!(package_columns.contains(&"storage_kind".to_string()));
         #[cfg(feature = "ai")]
         let file_columns = store
-            .with_connection(|connection| table_columns(connection, "model_package_files"))
+            .with_metadata_connection(|connection| table_columns(connection, "model_package_files"))
             .unwrap();
         #[cfg(feature = "ai")]
         assert!(file_columns.contains(&"downloaded_bytes".to_string()));
@@ -2829,7 +2959,9 @@ mod tests {
         assert!(file_columns.contains(&"installed_at_ms".to_string()));
         #[cfg(feature = "ai")]
         let task_columns = store
-            .with_connection(|connection| table_columns(connection, "model_download_tasks"))
+            .with_metadata_connection(|connection| {
+                table_columns(connection, "model_download_tasks")
+            })
             .unwrap();
         #[cfg(feature = "ai")]
         for required in [
@@ -2909,12 +3041,12 @@ mod tests {
         drop(connection);
 
         let store = AiStore::open(&root).unwrap();
-        assert_eq!(store.status().unwrap().schema_version, 6);
+        assert_eq!(store.status().unwrap().schema_version, SCHEMA_VERSION);
         assert!(store
-            .with_connection(|connection| table_columns(connection, "provider_models"))
+            .with_metadata_connection(|connection| table_columns(connection, "provider_models"))
             .is_ok());
         assert!(store
-            .with_connection(|connection| table_columns(connection, "model_packages"))
+            .with_metadata_connection(|connection| table_columns(connection, "model_packages"))
             .is_ok());
         drop(store);
         fs::remove_dir_all(root).unwrap();
@@ -3571,7 +3703,7 @@ mod tests {
         assert!(store.queue_model_download_task(&task.id).unwrap().is_some());
         assert!(store.queue_model_download_task(&task.id).unwrap().is_none());
         store
-            .with_connection(|connection| {
+            .with_metadata_connection(|connection| {
                 connection
                     .execute(
                         "UPDATE model_packages SET license = 'MIT' WHERE package_id = 'license-change'",
@@ -3690,7 +3822,7 @@ mod tests {
             .register_verified_model_manifest(&linked_manifest, "linked")
             .unwrap();
         store
-            .with_connection(|connection| {
+            .with_metadata_connection(|connection| {
                 connection
                     .execute(
                         "UPDATE model_packages SET storage_kind = 'linked' WHERE package_id = 'linked'",
@@ -3773,7 +3905,7 @@ mod tests {
         let (store, root) = test_store();
         store.insert_book_for_test(&"f".repeat(64)).unwrap();
         store
-            .with_connection(|connection| {
+            .with_metadata_connection(|connection| {
                 connection.execute(
                     "INSERT INTO provider_models
                      (provider_id, model_id, provider_version, model_digest, model_format,
@@ -3808,7 +3940,7 @@ mod tests {
         assert_eq!(cache[0].display_name, "全文索引");
         assert_eq!(cache[0].item_count, 1);
         assert_eq!(cache[0].state, "ready");
-        assert!(cache[0].size_bytes.unwrap_or_default() > 0);
+        assert_eq!(cache[0].size_bytes, None);
         assert!(cache[0].updated_at > 0);
 
         store.clear_cache(FULL_TEXT_INDEX_CACHE_KIND).unwrap();

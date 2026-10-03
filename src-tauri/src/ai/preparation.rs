@@ -773,7 +773,7 @@ mod tests {
             .unwrap();
         assert!(begin(&store, "owner-two", 40_000, false).is_err());
         assert_eq!(count(&store, "rag_prep_jobs"), 1);
-        assert_eq!(store.status().unwrap().schema_version, 6);
+        assert_eq!(store.status().unwrap().schema_version, 7);
         drop(store);
         std::fs::remove_dir_all(dir).unwrap();
     }
