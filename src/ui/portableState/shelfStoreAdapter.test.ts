@@ -394,6 +394,21 @@ describe("CP-I portable ShelfStore facade", () => {
     expect(resumed[resumed.length - 1].value?.locator).toMatchObject({ pageHint: 10 });
   });
 
+  test("closing a reading session releases its handles and a later update starts fresh", async () => {
+    const legacy = new FakeLegacyStore([entry()]);
+    const service = new PortableStateService(new MemoryPortableStateStorage());
+    await activatePortableShelfStore(legacy, service);
+    const store = new PortableShelfStore(legacy, service);
+
+    await store.beginProgressSession(LOCAL_ID);
+    await store.closeProgressSession(LOCAL_ID);
+    // No stale readId/basis may leak into the next real sample.
+    await store.updateProgress(LOCAL_ID, progressPatch());
+
+    const state = await service.snapshot();
+    expect(latestVersion(state.books[HASH].progress.versions)?.value?.progressPctHint).toBe(40);
+  });
+
   test("a newer background annotation is not overwritten when the user edits another note", async () => {
     const legacy = new FakeLegacyStore([entry()]);
     const service = new PortableStateService(new MemoryPortableStateStorage());
