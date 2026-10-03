@@ -731,3 +731,36 @@
   from { opacity: 1; transform: translateY(0); }
   to { opacity: 0; transform: translateY(18px); }
 }
+
+/* ---- 触摸端：面板去毛玻璃（逐帧模糊重算导致开合掉帧），文字整体放大一档 ---- */
+.app[data-touch-ui="true"] .aa-popover {
+  background: var(--panel-bg, #ffffff);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  will-change: transform, opacity;
+}
+
+.app[data-touch-ui="true"]:not([data-layout="compact"]) .aa-popover {
+  width: 380px;
+}
+
+.app[data-touch-ui="true"] .aa-tab-btn { font-size: 14px; }
+.app[data-touch-ui="true"] .aa-popover-title { font-size: 16px; }
+.app[data-touch-ui="true"] .aa-theme-letter { font-size: 16px; }
+.app[data-touch-ui="true"] .aa-theme-label { font-size: 12px; }
+.app[data-touch-ui="true"] .aa-section-label { font-size: 14px; }
+.app[data-touch-ui="true"] .aa-stepper-text-small { font-size: 13px; }
+.app[data-touch-ui="true"] .aa-stepper-text-large { font-size: 16px; }
+.app[data-touch-ui="true"] .aa-stepper-val { font-size: 15px; }
+.app[data-touch-ui="true"] .aa-font-trigger { font-size: 15px; }
+.app[data-touch-ui="true"] .aa-segmented-btn { font-size: 14px; }
+.app[data-touch-ui="true"] .aa-advanced-toggle,
+.app[data-touch-ui="true"] .aa-advanced-row { font-size: 14px; }
+.app[data-touch-ui="true"] .aa-css-label,
+.app[data-touch-ui="true"] .aa-css-textarea,
+.app[data-touch-ui="true"] .aa-btn-save-css { font-size: 13px; }
+.app[data-touch-ui="true"] .aa-mini-action-btn { font-size: 13.5px; }
+.app[data-touch-ui="true"] .aa-custom-pill { font-size: 11.5px; }
+.app[data-touch-ui="true"] .aa-switch-to-detail-btn { font-size: 14px; }
+.app[data-touch-ui="true"] .aa-detail-group-title { font-size: 13px; }
+.app[data-touch-ui="true"] .aa-detail-sub { font-size: 12px; }
