@@ -27,7 +27,8 @@ import {
   modernTextLocator,
   portableBookFromLegacySource,
 } from "../../core/portableState/legacy";
-import { latestVersion } from "../../core/portableState/projection";
+import { latestVersion, versionForStamp } from "../../core/portableState/projection";
+import { mergeVersions } from "../../core/portableState/portable-register-core";
 import type {
   BookmarkValue,
   Locator,
@@ -152,34 +153,8 @@ function progressValueFromPatch(patch: ShelfProgressPatch): ProgressValue {
       anchorTextOffset: patch.anchorTextOffset,
       anchorTextSnippet: patch.anchorTextSnippet,
       mediaAnchor: patch.mediaAnchor ?? null,
-    }, null),
+    }, patch.chapterPath ?? null),
     progressPctHint: patch.progressPct,
-  };
-}
-
-function recordToLegacyEntry(record: LibraryRecord): ShelfEntry {
-  return {
-    id: record.contentHash,
-    title: record.title,
-    creator: record.creator,
-    ...(record.language ? { language: record.language } : {}),
-    fileName: record.fileName,
-    fileSize: 0,
-    coverMime: "",
-    addedAtMs: record.addedAtMs,
-    lastReadAtMs: record.lastReadAtMs,
-    spineIndex: record.spineIndex,
-    page: record.page,
-    progressPct: record.progressPct,
-    anchorIndex: record.anchorIndex,
-    anchorRatio: record.anchorRatio,
-    anchorTextOffset: record.anchorTextOffset,
-    anchorTextSnippet: record.anchorTextSnippet,
-    ...(record.mediaAnchor ? { mediaAnchor: record.mediaAnchor } : {}),
-    contentHash: record.contentHash,
-    isNew: record.isNew,
-    bookmarks: record.bookmarks.map((bookmark) => ({ ...bookmark })),
-    notes: (record.notes ?? []).map((note) => ({ ...note })),
   };
 }
 
@@ -260,8 +235,14 @@ interface ObservedAnnotationIds {
   notes: Set<string>;
 }
 
+interface ProgressReadingSession {
+  readonly readId: string;
+  readonly chosenStamp: Stamp | null;
+  basisId: string | null;
+}
+
 export class PortableShelfStore implements ShelfStore {
-  private readonly progressBasisByHash = new Map<string, string>();
+  private readonly progressSessions = new Map<string, ProgressReadingSession>();
   private readonly observedAnnotationIds = new Map<string, ObservedAnnotationIds>();
 
   constructor(
@@ -320,36 +301,57 @@ export class PortableShelfStore implements ShelfStore {
       if (!local) throw new Error("资料库与本地绑定中都不存在这本书");
       return local;
     }
+    if (!local) {
+      // An archive-imported "waiting for source" row has no byte binding yet.
+      return { ...projectShelfEntry(hash, book, undefined), id: hash, available: false };
+    }
     return projectShelfEntry(hash, book, local);
   }
 
   async list(): Promise<ShelfEntry[]> {
-    const [localEntries, state] = await Promise.all([this.localEntries(), this.data.snapshot()]);
+    const [localEntries, state, visibleHashes] = await Promise.all([
+      this.localEntries(),
+      this.data.snapshot(),
+      this.data.listLocalVisibleHashes().catch(() => [] as readonly string[]),
+    ]);
+    const visible = new Set(visibleHashes);
     const localHashes = new Set<string>();
     for (const entry of localEntries) {
       const hash = hashForLocalEntry(entry);
       if (hash) localHashes.add(hash);
     }
     const projected = projectShelfEntriesFromState(state, localEntries)
-      .filter((entry) => localHashes.has(entry.contentHash ?? entry.id));
+      .filter((entry) => {
+        const hash = entry.contentHash ?? entry.id;
+        return localHashes.has(hash) || visible.has(hash);
+      })
+      .map((entry) => {
+        const hash = entry.contentHash ?? entry.id;
+        if (!localHashes.has(hash) && visible.has(hash)) {
+          return { ...entry, id: hash, fileSize: 0, coverMime: "", available: false } as ShelfEntry;
+        }
+        return entry;
+      });
     const localOnly = localEntries.filter((entry) => {
       const hash = hashForLocalEntry(entry);
       return hash === null || !hasBook(state, hash);
     });
     // Local-only rows include pending-hash records and they remain visible in
-    // the legacy path until hashing can upgrade them.
+    // the legacy path until hashing can supply identity.
     return [...projected, ...localOnly];
   }
 
   async save(input: ShelfSaveInput): Promise<ShelfSaveResult> {
     const result = await this.legacy.save(input);
-    if (result.status === "saved") {
-      await this.mergeEntries([result.entry]);
-    } else {
-      // Duplicate imports may be legacy rows that never entered v3.
-      await this.mergeEntries([result.entry]);
+    // Duplicate imports may be legacy rows that never entered v3.
+    await this.mergeEntries([result.entry]);
+    const hash = hashForLocalEntry(result.entry);
+    if (!hash) return result;
+    try {
+      return { ...result, entry: await this.currentProjectedEntry(hash) };
+    } catch {
+      return result;
     }
-    return result;
   }
 
   async importPaths(paths: string[]): Promise<LinkedImportBatchResult> {
@@ -358,7 +360,24 @@ export class PortableShelfStore implements ShelfStore {
       .filter((item) => item.record && (item.status === "saved" || item.status === "duplicate"))
       .map((item) => item.record!);
     if (records.length > 0) await this.mergeEntries(records);
-    return batch;
+    const projected = new Map<string, ShelfEntry>();
+    for (const record of records) {
+      const hash = hashForLocalEntry(record);
+      if (!hash || projected.has(hash)) continue;
+      try {
+        projected.set(hash, await this.currentProjectedEntry(hash));
+      } catch {
+        // Keep the local record if v3 has not been initialized yet.
+      }
+    }
+    return {
+      results: batch.results.map((item) => {
+        if (!item.record) return item;
+        const hash = hashForLocalEntry(item.record);
+        const entry = hash ? projected.get(hash) : undefined;
+        return entry ? { ...item, record: entry } : item;
+      }),
+    };
   }
 
   async importRecords(records: ShelfEntry[]): Promise<void> {
@@ -393,7 +412,102 @@ export class PortableShelfStore implements ShelfStore {
   async setContentHash(id: string, contentHash: string): Promise<ShelfEntry> {
     const entry = await this.legacy.setContentHash(id, contentHash);
     await this.mergeEntries([entry]);
-    return entry;
+    const hash = hashForLocalEntry(entry);
+    if (!hash) return entry;
+    try {
+      return await this.currentProjectedEntry(hash);
+    } catch {
+      return entry;
+    }
+  }
+
+  /**
+   * R1: pin a reading session to the progress version the App actually chose
+   * and is about to display. The session readId stays alive across serial
+   * writes; each successful write advances the session's nextBasis handle.
+   */
+  async beginProgressSession(id: string, chosenStamp?: Stamp): Promise<void> {
+    const entry = await this.localEntryFor(id);
+    if (!entry) throw new Error("书架中没有这本书");
+    const hash = hashForLocalEntry(entry);
+    if (!hash) return;
+    await this.closeProgressSession(id).catch(() => undefined);
+    const read = await this.data.read({ bookHash: hash });
+    if (!read.book) {
+      await this.data.release({ readId: read.readId }).catch(() => undefined);
+      throw new Error("可移植资料库中没有这本书");
+    }
+    const versions = read.book.progress.versions;
+    let resolvedStamp: Stamp | null = null;
+    if (versions.length === 1) {
+      resolvedStamp = chosenStamp
+        ? (versionForStamp(versions, chosenStamp)?.stamp ?? null)
+        : versions[0].stamp;
+    } else if (versions.length > 1) {
+      resolvedStamp = chosenStamp
+        ? (versionForStamp(versions, chosenStamp)?.stamp ?? null)
+        : null;
+      if (!resolvedStamp) {
+        await this.data.release({ readId: read.readId }).catch(() => undefined);
+        throw new Error("这本书有多个进度版本，需要用户选择后再打开");
+      }
+    }
+    this.progressSessions.set(hash, { readId: read.readId, chosenStamp: resolvedStamp, basisId: null });
+  }
+
+  async closeProgressSession(id: string): Promise<void> {
+    const entry = await this.localEntryFor(id);
+    const hash = hashForLocalEntry(entry ?? { id, contentHash: undefined });
+    if (!hash) return;
+    this.progressSessions.delete(hash);
+    this.observedAnnotationIds.delete(hash);
+    await this.data.release({ bookHash: hash }).catch(() => undefined);
+  }
+
+  /**
+   * After a stale sample is dropped, discard the expired read snapshot. A new
+   * read lets the next real sample resume from the merged frontier; we never
+   * pick one among multiple candidates without the user's earlier choice.
+   */
+  private async refreshProgressSessionAfterStale(
+    hash: string,
+    session: ProgressReadingSession,
+  ): Promise<void> {
+    await this.data.release({ readId: session.readId }).catch(() => undefined);
+    const read = await this.data.read({ bookHash: hash });
+    if (!read.book) {
+      await this.data.release({ readId: read.readId }).catch(() => undefined);
+      this.progressSessions.delete(hash);
+      return;
+    }
+    const frontier = mergeVersions(read.book.progress.versions);
+    let chosenStamp = session.chosenStamp
+      ? (versionForStamp(frontier, session.chosenStamp)?.stamp ?? null)
+      : null;
+    if (!chosenStamp && frontier.length === 1) chosenStamp = frontier[0].stamp;
+    this.progressSessions.set(hash, { readId: read.readId, chosenStamp, basisId: null });
+  }
+
+  private async ensureProgressSession(hash: string): Promise<ProgressReadingSession> {
+    const existing = this.progressSessions.get(hash);
+    if (existing) return existing;
+    const read = await this.data.read({ bookHash: hash });
+    if (!read.book) {
+      await this.data.release({ readId: read.readId }).catch(() => undefined);
+      throw new Error("可移植资料库中没有这本书");
+    }
+    const versions = read.book.progress.versions;
+    if (versions.length > 1) {
+      await this.data.release({ readId: read.readId }).catch(() => undefined);
+      throw new Error("这本书有多个进度版本，需要用户选择后再保存");
+    }
+    const session: ProgressReadingSession = {
+      readId: read.readId,
+      chosenStamp: versions.length === 1 ? versions[0].stamp : null,
+      basisId: null,
+    };
+    this.progressSessions.set(hash, session);
+    return session;
   }
 
   async updateProgress(id: string, patch: ShelfProgressPatch): Promise<ShelfEntry> {
@@ -405,61 +519,57 @@ export class PortableShelfStore implements ShelfStore {
       // progress path until lazy hashing supplies identity.
       return this.legacy.updateProgress(id, patch);
     }
+    const session = await this.ensureProgressSession(hash);
     const value = progressValueFromPatch(patch);
     const updatedAtMs = Math.max(patch.lastReadAtMs, Date.now());
     try {
-      const basisId = await this.progressBasis(hash);
+      if (!session.basisId) {
+        const selection: PortableAdoptSelection = session.chosenStamp
+          ? { kind: "chosen", stamp: session.chosenStamp }
+          : { kind: "empty" };
+        const adopted = await this.data.adopt({
+          readId: session.readId,
+          entity: { bookHash: hash, kind: "progress" },
+          selection,
+        });
+        session.basisId = adopted.basisId;
+      }
+      const basisId = session.basisId;
       const result = await this.data.write({
         basisId,
         intent: "auto",
         value,
         updatedAtMs,
       });
-      if (result.nextBasisId !== basisId) this.progressBasisByHash.set(hash, result.nextBasisId);
+      session.basisId = result.nextBasisId;
+      return await this.currentProjectedEntry(hash);
     } catch (error) {
-      if (error instanceof PortableStateError && error.code === "stale-basis") {
-        this.progressBasisByHash.delete(hash);
-        const retry = await this.progressBasis(hash);
-        const result = await this.data.write({
-          basisId: retry,
-          intent: "auto",
-          value,
-          updatedAtMs,
-        });
-        if (result.nextBasisId !== retry) this.progressBasisByHash.set(hash, result.nextBasisId);
-      } else {
-        throw error;
+      if (
+        error instanceof PortableStateError &&
+        (error.code === "stale-basis" || error.code === "stale-choice")
+      ) {
+        // R1.4: the sample is already superseded. Drop it and let the next
+        // real position change create a new sample; never retry the old value.
+        if (session.basisId) {
+          await this.data.release({ basisId: session.basisId }).catch(() => undefined);
+        }
+        session.basisId = null;
+        await this.refreshProgressSessionAfterStale(hash, session);
+        return this.currentProjectedEntry(hash);
       }
+      throw error;
     }
-    return this.currentProjectedEntry(hash);
-  }
-
-  private async progressBasis(hash: string): Promise<string> {
-    const cached = this.progressBasisByHash.get(hash);
-    if (cached) return cached;
-    const read = await this.data.read({ bookHash: hash });
-    const versions = read.book?.progress.versions ?? [];
-    let selection: PortableAdoptSelection;
-    if (versions.length === 0) {
-      selection = { kind: "empty" };
-    } else {
-      // The shelf projection displays the latest candidate; after a successful
-      // real navigation this session adopts that displayed version.
-      const latest = latestVersion(versions);
-      selection = latest ? { kind: "chosen", stamp: latest.stamp } : { kind: "empty" };
-    }
-    const adopted = await this.data.adopt({
-      readId: read.readId,
-      entity: { bookHash: hash, kind: "progress" },
-      selection,
-    });
-    await this.data.release({ readId: read.readId }).catch(() => undefined);
-    this.progressBasisByHash.set(hash, adopted.basisId);
-    return adopted.basisId;
   }
 
   async markOpened(id: string): Promise<ShelfEntry> {
-    return this.legacy.markOpened(id);
+    const entry = await this.legacy.markOpened(id);
+    const hash = hashForLocalEntry(entry);
+    if (!hash) return entry;
+    try {
+      return await this.currentProjectedEntry(hash);
+    } catch {
+      return entry;
+    }
   }
 
   private async writeAnnotation<T extends "bookmark" | "note">(
@@ -498,6 +608,112 @@ export class PortableShelfStore implements ShelfStore {
       return (book.bookmarks[entity.id]?.versions ?? []) as readonly Version<BookmarkValue>[];
     }
     return (book.notes[entity.id]?.versions ?? []) as readonly Version<NoteValue>[];
+  }
+
+  private async writeAnnotationChosen(
+    hash: string,
+    entity: { bookHash: string; kind: "bookmark" | "note"; id: string },
+    value: BookmarkValue | NoteValue,
+    updatedAtMs: number,
+    chosenStamp: Stamp,
+  ): Promise<void> {
+    const read = await this.data.read({ bookHash: hash });
+    try {
+      const book = read.book;
+      if (!book) throw new Error("可移植资料库中没有这本书");
+      const chosen = entity.kind === "bookmark"
+        ? versionForStamp(book.bookmarks[entity.id]?.versions ?? [], chosenStamp)
+        : versionForStamp(book.notes[entity.id]?.versions ?? [], chosenStamp);
+      if (!chosen) throw new Error("展示时的注解版本已失效，请重新打开编辑");
+      const adopted = await this.data.adopt({
+        readId: read.readId,
+        entity,
+        selection: { kind: "chosen", stamp: chosen.stamp },
+      });
+      try {
+        const result = await this.data.write({
+          basisId: adopted.basisId,
+          intent: "edit",
+          value,
+          updatedAtMs,
+        });
+        await this.data.release({ basisId: result.nextBasisId }).catch(() => undefined);
+      } finally {
+        await this.data.release({ basisId: adopted.basisId }).catch(() => undefined);
+      }
+    } finally {
+      await this.data.release({ readId: read.readId }).catch(() => undefined);
+    }
+  }
+
+  async createBookmark(id: string, bookmark: Bookmark): Promise<ShelfEntry> {
+    const hash = await this.hashForId(id);
+    if (!hash) {
+      const current = await this.localEntryFor(id);
+      return this.legacy.setBookmarks(id, [...(current?.bookmarks ?? []), bookmark]);
+    }
+    const created = await this.data.createAnnotation({
+      bookHash: hash,
+      kind: "bookmark",
+      id: bookmark.id,
+      value: bookmarkValueFromBookmark(bookmark),
+      updatedAtMs: Math.max(bookmark.createdAtMs, Date.now()),
+    });
+    await this.data.release({ basisId: created.nextBasisId }).catch(() => undefined);
+    return this.currentProjectedEntry(hash);
+  }
+
+  async deleteBookmark(id: string, bookmarkId: string): Promise<ShelfEntry> {
+    const hash = await this.hashForId(id);
+    if (!hash) {
+      const current = await this.localEntryFor(id);
+      return this.legacy.setBookmarks(id, (current?.bookmarks ?? []).filter((bookmark) => bookmark.id !== bookmarkId));
+    }
+    await this.data.deleteAnnotation({ entity: { bookHash: hash, kind: "bookmark", id: bookmarkId } });
+    return this.currentProjectedEntry(hash);
+  }
+
+  async createNote(id: string, note: ReaderNote): Promise<ShelfEntry> {
+    const hash = await this.hashForId(id);
+    if (!hash) {
+      const current = await this.localEntryFor(id);
+      return this.legacy.setNotes(id, [...(current?.notes ?? []), note]);
+    }
+    const created = await this.data.createAnnotation({
+      bookHash: hash,
+      kind: "note",
+      id: note.id,
+      value: noteValueFromNote(note),
+      updatedAtMs: Math.max(note.createdAtMs, note.updatedAtMs ?? note.createdAtMs),
+    });
+    await this.data.release({ basisId: created.nextBasisId }).catch(() => undefined);
+    return this.currentProjectedEntry(hash);
+  }
+
+  async updateNote(id: string, note: ReaderNote, chosenStamp: Stamp): Promise<ShelfEntry> {
+    const hash = await this.hashForId(id);
+    if (!hash) {
+      const current = await this.localEntryFor(id);
+      return this.legacy.setNotes(id, (current?.notes ?? []).map((item) => item.id === note.id ? note : item));
+    }
+    await this.writeAnnotationChosen(
+      hash,
+      { bookHash: hash, kind: "note", id: note.id },
+      noteValueFromNote(note),
+      Math.max(note.createdAtMs, note.updatedAtMs ?? note.createdAtMs),
+      chosenStamp,
+    );
+    return this.currentProjectedEntry(hash);
+  }
+
+  async deleteNote(id: string, noteId: string): Promise<ShelfEntry> {
+    const hash = await this.hashForId(id);
+    if (!hash) {
+      const current = await this.localEntryFor(id);
+      return this.legacy.setNotes(id, (current?.notes ?? []).filter((note) => note.id !== noteId));
+    }
+    await this.data.deleteAnnotation({ entity: { bookHash: hash, kind: "note", id: noteId } });
+    return this.currentProjectedEntry(hash);
   }
 
   async setBookmarks(id: string, bookmarks: Bookmark[]): Promise<ShelfEntry> {
@@ -590,26 +806,22 @@ export class PortableShelfStore implements ShelfStore {
   async relink(id: string, sourcePath: string): Promise<ShelfEntry> {
     const entry = await this.legacy.relink(id, sourcePath);
     await this.mergeEntries([entry]);
-    return entry;
+    // R4 short fix: relinking returns the v3 projection for this hash, so a
+    // rebound book never opens with the legacy JSON's stale position.
+    const hash = hashForLocalEntry(entry);
+    if (!hash) return entry;
+    try {
+      return await this.currentProjectedEntry(hash);
+    } catch {
+      return entry;
+    }
   }
 
   async replacePortableRecords(records: LibraryRecord[], organization?: LibraryOrganization): Promise<ShelfEntry[]> {
-    await this.legacy.replacePortableRecords(records);
-    const current = await this.data.snapshot();
-    const entries = records
-      .map(recordToLegacyEntry)
-      .filter((entry) => {
-        const hash = hashForLocalEntry(entry);
-        return hash !== null && !hasBook(current, hash);
-      });
-    const built = await buildMigrationBooks(entries, this.data);
-    // Always run through mergeValidatedState so an archive import never
-    // replaces or re-imports a progress entity that already exists in v3;
-    // metadata for new books and organization still commit in one transaction.
-    await this.data.mergeValidatedState(
-      stateWithBooks(built.books, organization ?? current.organization),
-      { migrationMark: "legacy-json-import-v1" },
-    );
+    // R3: the repository merges records, missing entities, organization and
+    // local waiting-for-source visibility in one transaction. Do not touch the
+    // legacy whole-record array first.
+    await this.data.mergeLegacyRecords({ records, ...(organization ? { organization } : {}) });
     return this.list();
   }
 
@@ -629,12 +841,21 @@ export class PortableShelfStore implements ShelfStore {
     // Local binding/visibility only. The portable record and any incoming
     // tombstones stay intact; if a future sync re-creates the binding the
     // book can reappear from the same record.
-    return this.legacy.deleteBook(id);
+    const hash = await this.hashForId(id);
+    await this.legacy.deleteBook(id);
+    if (hash) await this.data.setLocalVisible(hash, false).catch(() => undefined);
   }
 
   async deleteBooks(ids: string[]): Promise<void> {
-    if (this.legacy.deleteBooks) return this.legacy.deleteBooks(ids);
-    for (const id of ids) await this.legacy.deleteBook(id);
+    const hashes = (await Promise.all(ids.map((id) => this.hashForId(id)))).filter(
+      (hash): hash is string => hash !== null,
+    );
+    if (this.legacy.deleteBooks) {
+      await this.legacy.deleteBooks(ids);
+    } else {
+      for (const id of ids) await this.legacy.deleteBook(id);
+    }
+    for (const hash of hashes) await this.data.setLocalVisible(hash, false).catch(() => undefined);
   }
 
   async getOrganization(): Promise<LibraryOrganization> {

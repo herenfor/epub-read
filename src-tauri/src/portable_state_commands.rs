@@ -316,6 +316,40 @@ pub fn portable_state_merge_organization(
 }
 
 #[tauri::command]
+pub fn portable_state_merge_legacy_records(
+    app: AppHandle,
+    manager: State<'_, PortableStateManager>,
+    records: Vec<serde_json::Value>,
+    organization: Option<LibraryOrganization>,
+) -> PortableResult<PortableStateV3> {
+    with_store(&app, &manager, |store| {
+        let organization = match organization {
+            Some(organization) => organization,
+            None => store.snapshot()?.organization,
+        };
+        store.import_legacy_records_json(records, organization)
+    })
+}
+
+#[tauri::command]
+pub fn portable_state_list_local_visible(
+    app: AppHandle,
+    manager: State<'_, PortableStateManager>,
+) -> PortableResult<Vec<String>> {
+    with_store(&app, &manager, |store| store.local_visible_hashes())
+}
+
+#[tauri::command]
+pub fn portable_state_set_local_visible(
+    app: AppHandle,
+    manager: State<'_, PortableStateManager>,
+    hash: String,
+    visible: bool,
+) -> PortableResult<()> {
+    with_store(&app, &manager, |store| store.set_local_visible(&hash, visible))
+}
+
+#[tauri::command]
 pub fn portable_state_reserve_stamps(
     app: AppHandle,
     manager: State<'_, PortableStateManager>,

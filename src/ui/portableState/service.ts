@@ -24,6 +24,8 @@ import {
   maximumPortableStateReceivedCounter,
   mergePortableState,
 } from "../../core/portableState/merge";
+import { portableBookFromLegacySource } from "../../core/portableState/legacy";
+import { legacyShelfEntryToCandidate } from "./legacyShelf";
 import {
   PortableStateParseError,
   parseBookmarkValue,
@@ -55,7 +57,10 @@ import {
   type OrganizationEnvelope,
 } from "../libraryOrganization";
 import type { ShelfEntry } from "../shelf";
+import type { LibraryRecord } from "../libraryArchive";
+import type { PortableLegacyImportInput } from "./dataService";
 import {
+  META_LOCAL_VISIBLE,
   META_MIGRATION,
   META_PENDING_PREFERENCES,
   META_PREFERENCES,
@@ -266,6 +271,88 @@ export interface PortableStateCommandService {
     readonly readId?: string;
     readonly bookHash?: string;
   }): Promise<null>;
+}
+
+
+function validLocalVisibilityEntry(value: unknown): value is string {
+  return typeof value === "string" && validContentHash(value);
+}
+
+async function localVisibleHashesFromTx(
+  tx: Pick<PortableStateTransaction, "getMeta">,
+): Promise<Set<string>> {
+  const raw = await tx.getMeta(META_LOCAL_VISIBLE);
+  if (!Array.isArray(raw)) return new Set();
+  return new Set(raw.filter(validLocalVisibilityEntry));
+}
+
+function buildLegacyImportState(
+  local: PortableStateV3,
+  records: readonly LibraryRecord[],
+  organization: LibraryOrganization,
+  deviceId: string,
+  startCounter: number,
+  receivedMaximum: number,
+): { readonly state: PortableStateV3; readonly nextCounter: number; readonly importedHashes: readonly string[] } {
+  const books: Record<string, PortableBook> = {};
+  const importedHashes: string[] = [];
+  const seenHashes = new Set<string>();
+  let counter = startCounter;
+  for (const record of records) {
+    const hash = record.contentHash;
+    if (!validContentHash(hash)) {
+      throw new PortableStateError("invalid-data", "导入记录 contentHash 不是有效内容指纹");
+    }
+    if (seenHashes.has(hash)) {
+      throw new PortableStateError("invalid-data", "导入记录包含重复 contentHash");
+    }
+    seenHashes.add(hash);
+    const candidate = legacyShelfEntryToCandidate(
+      { ...record, id: hash } as Partial<ShelfEntry> & { readonly id: string },
+    );
+    if (candidate.kind !== "ready") {
+      throw new PortableStateError("invalid-data", "导入记录缺少可移植内容指纹");
+    }
+    const existing = local.books[hash];
+    const missingBookmarks = (candidate.source.bookmarks ?? []).filter(
+      (item) => !existing?.bookmarks[item.id],
+    );
+    const missingNotes = (candidate.source.notes ?? []).filter(
+      (item) => !existing?.notes[item.id],
+    );
+    const needsProgress = !existing || (existing.progress.versions.length === 0 && candidate.source.progress !== null);
+    const needsBook = !existing;
+    importedHashes.push(hash);
+    if (!needsBook && !needsProgress && missingBookmarks.length === 0 && missingNotes.length === 0) {
+      continue;
+    }
+    counter = nextLocalCounter(counter, receivedMaximum);
+    const stamp: Stamp = { deviceId, counter };
+    const generated = portableBookFromLegacySource(candidate.source, stamp).book;
+    if (!existing) {
+      books[hash] = generated;
+      continue;
+    }
+    const bookmarks: Record<string, Annotation<BookmarkValue>> = { ...existing.bookmarks };
+    const notes: Record<string, Annotation<NoteValue>> = { ...existing.notes };
+    for (const [id, annotation] of Object.entries(generated.bookmarks)) {
+      if (!(id in bookmarks)) bookmarks[id] = annotation;
+    }
+    for (const [id, annotation] of Object.entries(generated.notes)) {
+      if (!(id in notes)) notes[id] = annotation;
+    }
+    books[hash] = {
+      metadata: existing.metadata,
+      progress: existing.progress.versions.length === 0 ? generated.progress : { versions: [] },
+      bookmarks,
+      notes,
+    };
+  }
+  return {
+    state: { schemaVersion: 3, books, organization },
+    nextCounter: counter,
+    importedHashes,
+  };
 }
 
 export class PortableStateService implements PortableStateCommandService {
@@ -1003,6 +1090,61 @@ export class PortableStateService implements PortableStateCommandService {
       }
     }));
     return this.snapshot();
+  }
+
+  /**
+   * R3: merge old archive records into the existing v3 state in one storage
+   * transaction. Existing progress and annotation IDs (including tombstones)
+   * stay local; only truly missing books/entities are initialized.
+   */
+  async mergeLegacyRecords(input: PortableLegacyImportInput): Promise<PortableStateV3> {
+    const records = Array.isArray(input?.records) ? input.records : [];
+    await this.withStorage(async () => this.storage.transaction(async (tx) => {
+      const envelope = await this.requireEnvelope(tx);
+      const local = await this.loadLocalState(tx, envelope);
+      const receivedMaximum = Math.max(
+        envelope.counter,
+        maximumPortableStateReceivedCounter(local.state),
+      );
+      const built = buildLegacyImportState(
+        local.state,
+        records,
+        input.organization ?? envelope.state,
+        envelope.deviceId,
+        receivedMaximum,
+        receivedMaximum,
+      );
+      const merged = mergePortableState(local.state, built.state);
+      await this.writeStateRows(tx, merged, local.revisions);
+      const nextCounter = Math.max(receivedMaximum, built.nextCounter);
+      await tx.putEnvelope({
+        deviceId: envelope.deviceId,
+        counter: nextCounter,
+        state: merged.organization,
+      });
+      if (built.importedHashes.length > 0) {
+        const visible = await localVisibleHashesFromTx(tx);
+        for (const hash of built.importedHashes) visible.add(hash);
+        await tx.putMeta(META_LOCAL_VISIBLE, [...visible].sort());
+      }
+    }));
+    return this.snapshot();
+  }
+
+  async listLocalVisibleHashes(): Promise<readonly string[]> {
+    return this.withStorage(async () => this.storage.transaction(async (tx) => {
+      return [...(await localVisibleHashesFromTx(tx))].sort();
+    }));
+  }
+
+  async setLocalVisible(hash: string, visible: boolean): Promise<void> {
+    const bookHash = validateBookHash(hash);
+    await this.withStorage(async () => this.storage.transaction(async (tx) => {
+      const current = await localVisibleHashesFromTx(tx);
+      if (visible) current.add(bookHash);
+      else current.delete(bookHash);
+      await tx.putMeta(META_LOCAL_VISIBLE, [...current].sort());
+    }));
   }
 }
 

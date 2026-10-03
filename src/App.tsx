@@ -1,6 +1,10 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { loadBook, spineIndexForPath, spineItemPath, DrmError, disposeBook, nextLinearIndex } from "./core/book";
 import type { Book } from "./core/types";
+import type { Annotation, Stamp, Version } from "./core/portableState/portable-register-core";
+import { compareStamp } from "./core/portableState/portable-register-core";
+import { latestVersion, projectProgressVersion, versionForStamp } from "./core/portableState/projection";
+import type { Locator, NoteValue, ProgressValue } from "./core/portableState/portable-state-types";
 import { isExternalUrl, isFragmentOnly, resolvePath, splitHref } from "./core/paths";
 import {
   createSearchSession,
@@ -278,6 +282,100 @@ function toPersistedReaderAnchor(value: {
   };
 }
 
+type PortableProgressChoiceCandidate = {
+  readonly stamp: Stamp;
+  readonly version: Version<ProgressValue>;
+  readonly chapterPath: string | null;
+  readonly spineIndex: number;
+  readonly progressPct: number;
+  readonly updatedAtMs: number;
+};
+
+function portableProgressVersions(entry: ShelfEntry): readonly Version<ProgressValue>[] {
+  return (entry as unknown as { readonly portableProgressVersions?: readonly Version<ProgressValue>[] })
+    .portableProgressVersions ?? [];
+}
+
+function portableLocatorOf(entry: ShelfEntry): Locator | null {
+  return (entry as unknown as { readonly portableLocator?: Locator | null }).portableLocator ?? null;
+}
+
+function portableNoteAnnotations(entry: ShelfEntry): Readonly<Record<string, Annotation<NoteValue>>> {
+  return (entry as unknown as {
+    readonly portableNoteAnnotations?: Readonly<Record<string, Annotation<NoteValue>>>;
+  }).portableNoteAnnotations ?? {};
+}
+
+function legacySavedProgress(entry: ShelfEntry): SavedProgress {
+  return {
+    spineIndex: Number.isSafeInteger(entry.spineIndex) ? entry.spineIndex : 0,
+    page: Number.isSafeInteger(entry.page) ? entry.page : 0,
+    anchor: readingAnchorFromShelfEntry(entry),
+  };
+}
+
+function savedProgressFromPortableLocator(
+  book: Book,
+  locator: Locator,
+  fallback: SavedProgress,
+): SavedProgress {
+  if (locator.locatorVersion !== 1) return fallback;
+  const targetIndex = spineIndexForPath(book, locator.chapterPath);
+  if (targetIndex < 0) {
+    throw new Error("保存的阅读位置对应章节已失效，未按默认章节打开");
+  }
+  const target = locator.target;
+  if (target.kind === "chapter-start") {
+    return { spineIndex: targetIndex, page: 0, anchor: null };
+  }
+  if (target.kind === "text") {
+    const anchor = toPersistedReaderAnchor({
+      index: -1,
+      ratio: 0,
+      anchorTextOffset: target.offset,
+      anchorTextSnippet: target.snippet,
+    });
+    if (!anchor) throw new Error("保存的文本锚点无效，未按默认位置打开");
+    return { spineIndex: targetIndex, page: 0, anchor };
+  }
+  const anchor = toPersistedReaderAnchor({
+    index: -1,
+    ratio: target.ratio,
+    mediaAnchor: {
+      index: target.indexHint,
+      tag: target.tag,
+      signature: target.signature,
+      ratio: target.ratio,
+    },
+  });
+  if (!anchor) throw new Error("保存的媒体锚点无效，未按默认位置打开");
+  return { spineIndex: targetIndex, page: 0, anchor };
+}
+
+function savedProgressFromShelfEntry(book: Book, entry: ShelfEntry): SavedProgress {
+  const locator = portableLocatorOf(entry);
+  const fallback = legacySavedProgress(entry);
+  return locator ? savedProgressFromPortableLocator(book, locator, fallback) : fallback;
+}
+
+function savedProgressFromVersion(book: Book, version: Version<ProgressValue>): SavedProgress {
+  const projection = projectProgressVersion(version);
+  const fallback: SavedProgress = {
+    spineIndex: projection.spineIndex,
+    page: projection.page,
+    anchor: toPersistedReaderAnchor({
+      index: projection.anchorIndex,
+      ratio: projection.anchorRatio,
+      anchorTextOffset: projection.anchorTextOffset,
+      anchorTextSnippet: projection.anchorTextSnippet,
+      mediaAnchor: projection.mediaAnchor,
+    }),
+  };
+  const value = version.value;
+  if (!value) return fallback;
+  return savedProgressFromPortableLocator(book, value.locator, fallback);
+}
+
 function sameMediaReadingAnchor(
   a: MediaReadingAnchor | null | undefined,
   b: MediaReadingAnchor | null | undefined,
@@ -443,6 +541,11 @@ export default function App() {
     textHits?: ExactTextHit[];
     occurrence?: SearchOccurrence;
   } | null>(null);
+  const [progressChoice, setProgressChoice] = useState<{
+    title: string;
+    candidates: readonly PortableProgressChoiceCandidate[];
+  } | null>(null);
+  const progressChoiceResolverRef = useRef<((stamp: Stamp | null) => void) | null>(null);
   const [readerNotice, setReaderNotice] = useState<{
     kind: "ok" | "warn" | "error";
     text: string;
@@ -515,6 +618,8 @@ export default function App() {
   const shelfBusyRef = useRef(false);
   const shelfEntriesRef = useRef<ShelfEntry[]>([]);
   shelfEntriesRef.current = shelfEntries;
+  const currentShelfIdRef = useRef<string | null>(null);
+  currentShelfIdRef.current = currentShelfId;
   // ---- 收藏与文件夹 ----
   const [organization, setOrganization] = useState<LibraryOrganization>(emptyOrganization);
   const [organizationError, setOrganizationError] = useState<string | null>(null);
@@ -1996,6 +2101,39 @@ export default function App() {
       if (shelfBusyRef.current) return;
       const originalEntry = shelfEntriesRef.current.find((e) => e.id === id);
       if (!originalEntry) return;
+      // R1: when a book has divergent progress candidates, the user chooses
+      // which version is restored. Stamp ordering only keeps the list stable.
+      let chosenProgressStamp: Stamp | undefined;
+      let chosenProgressVersion: Version<ProgressValue> | null = null;
+      const progressVersions = portableProgressVersions(originalEntry);
+      if (progressVersions.length > 1) {
+        const candidates = [...progressVersions]
+          .sort((left, right) => compareStamp(left.stamp, right.stamp))
+          .map((version): PortableProgressChoiceCandidate => {
+            const projection = projectProgressVersion(version);
+            return {
+              stamp: version.stamp,
+              version,
+              chapterPath: projection.chapterPath,
+              spineIndex: projection.spineIndex,
+              progressPct: projection.value?.progressPctHint ?? 0,
+              updatedAtMs: version.updatedAtMs,
+            };
+          });
+        const selectedStamp = await new Promise<Stamp | null>((resolve) => {
+          progressChoiceResolverRef.current = resolve;
+          setProgressChoice({ title: originalEntry.title, candidates });
+        });
+        progressChoiceResolverRef.current = null;
+        setProgressChoice(null);
+        if (!selectedStamp) return;
+        chosenProgressStamp = selectedStamp;
+        chosenProgressVersion = versionForStamp(progressVersions, selectedStamp);
+        if (!chosenProgressVersion) {
+          setShelfNotice({ kind: "error", text: "所选进度版本已失效，请重新打开" });
+          return;
+        }
+      }
       shelfBusyRef.current = true;
       setShelfBusyMessage("正在打开书籍…");
       setShelfBusy(true);
@@ -2008,6 +2146,10 @@ export default function App() {
         // Flush any prior session before resetting the immediate-write gate.
         persistShelfProgressRef.current();
         await progressWriterRef.current?.flush();
+        const previousShelfId = currentShelfIdRef.current;
+        if (previousShelfId) {
+          await getShelfStore().closeProgressSession?.(previousShelfId).catch(() => undefined);
+        }
         progressWriterRef.current?.beginSession(id);
         let entry = originalEntry;
         if (entry.available === false) {
@@ -2055,7 +2197,12 @@ export default function App() {
           entry = await getShelfStore().setContentHash(id, await sha256Hex(buf));
           setShelfEntries((prev) => prev.map((item) => item.id === id ? entry : item));
         }
-        const initialSpineIndex = searchTarget ? searchTarget.spineIndex : (entry.spineIndex ?? 0);
+        const chosenProjection = chosenProgressVersion
+          ? projectProgressVersion(chosenProgressVersion)
+          : null;
+        const initialSpineIndex = searchTarget
+          ? searchTarget.spineIndex
+          : (chosenProjection?.spineIndex ?? entry.spineIndex ?? 0);
         const b = await loadBook(buf, { selective: true, initialSpineIndex });
         if (b.spine.length === 0) {
           setShelfError("这本书没有可阅读的内容");
@@ -2085,12 +2232,15 @@ export default function App() {
               anchorTextSnippet: searchTarget.textAnchor.snippet || null,
             },
           };
+        } else if (chosenProgressVersion) {
+          saved = savedProgressFromVersion(b, chosenProgressVersion);
         } else {
-          saved = {
-            spineIndex: entry.spineIndex,
-            page: entry.page,
-            anchor: readingAnchorFromShelfEntry(entry),
-          };
+          saved = savedProgressFromShelfEntry(b, entry);
+        }
+        // R1: the session is pinned to the version that is actually about to be
+        // rendered; a failed/cancelled open never writes a default position.
+        if (getShelfStore().beginProgressSession) {
+          await getShelfStore().beginProgressSession!(id, chosenProgressStamp);
         }
         // 第一次打开：立即清除“新”标记（后端落盘异步完成，不阻塞阅读）
         if (entry.isNew) {
@@ -2110,7 +2260,9 @@ export default function App() {
           saved,
           id,
           entry.contentHash ?? id,
-          entry.progressPct,
+          chosenProgressVersion
+            ? (projectProgressVersion(chosenProgressVersion).value?.progressPctHint ?? entry.progressPct)
+            : entry.progressPct,
         );
         if (preciseRequestId !== null && searchTarget) {
           latestPreciseRequestRef.current = preciseRequestId;
@@ -2967,7 +3119,10 @@ export default function App() {
       }))
     : [];
 
-  const saveNotes = useCallback(async (next: ReaderNote[]): Promise<boolean> => {
+  const saveNoteChange = useCallback(async (
+    next: ReaderNote[],
+    commit: () => Promise<unknown>,
+  ): Promise<boolean> => {
     if (!currentShelfId || noteBusyRef.current) return false;
     const previous = currentNotes;
     noteBusyRef.current = true;
@@ -2976,7 +3131,7 @@ export default function App() {
       entry.id === currentShelfId ? { ...entry, notes: next } : entry
     ));
     try {
-      await getShelfStore().setNotes(currentShelfId, next);
+      await commit();
       return true;
     } catch (error) {
       setShelfEntries((entries) => entries.map((entry) =>
@@ -2995,6 +3150,7 @@ export default function App() {
     if (!draft || !book || !currentShelfId || noteBusy) return;
     const now = Date.now();
     let next: ReaderNote[];
+    let commit: () => Promise<unknown>;
     if (draft.mode === "create") {
       const expectedPath = spineItemPath(book, draft.spineIndex);
       if (
@@ -3006,7 +3162,7 @@ export default function App() {
         setRuntimeIssues((issues) => [...issues, "选区已失效，无法保存笔记"]);
         return;
       }
-      next = [...currentNotes, {
+      const created: ReaderNote = {
         id: generateFolderId(),
         spineIndex: draft.spineIndex,
         chapterPath: expectedPath,
@@ -3018,20 +3174,52 @@ export default function App() {
         content: content.trim(),
         createdAtMs: now,
         updatedAtMs: now,
-      }];
+      };
+      next = [...currentNotes, created];
+      commit = () => {
+        const store = getShelfStore();
+        return store.createNote
+          ? store.createNote(currentShelfId, created)
+          : store.setNotes(currentShelfId, next);
+      };
     } else {
-      next = currentNotes.map((note) => note.id === draft.note.id
-        ? { ...note, content: content.trim(), updatedAtMs: Math.max(now, note.updatedAtMs + 1) }
-        : note
-      );
+      const updated: ReaderNote = {
+        ...draft.note,
+        content: content.trim(),
+        updatedAtMs: Math.max(now, draft.note.updatedAtMs + 1),
+      };
+      next = currentNotes.map((note) => note.id === updated.id ? updated : note);
+      const entry = shelfEntriesRef.current.find((item) => item.id === currentShelfId);
+      const annotation = entry ? portableNoteAnnotations(entry)[updated.id] : undefined;
+      const displayedVersion = annotation && !annotation.deleted
+        ? latestVersion(annotation.versions)
+        : null;
+      const store = getShelfStore();
+      if (store.updateNote) {
+        if (!displayedVersion) {
+          setRuntimeIssues((issues) => [...issues, "笔记版本信息缺失，已取消保存以避免覆盖后台更新"]);
+          return;
+        }
+        const chosenStamp = displayedVersion.stamp;
+        commit = () => store.updateNote!(currentShelfId, updated, chosenStamp);
+      } else {
+        commit = () => store.setNotes(currentShelfId, next);
+      }
     }
-    if (await saveNotes(next)) setForeground(closeReaderForeground());
-  }, [noteComposer, book, currentShelfId, noteBusy, currentNotes, saveNotes]);
+    if (await saveNoteChange(next, commit)) setForeground(closeReaderForeground());
+  }, [noteComposer, book, currentShelfId, noteBusy, currentNotes, saveNoteChange]);
 
   const handleDeleteNote = useCallback(async (noteId: string): Promise<void> => {
-    if (noteBusy) return;
-    await saveNotes(currentNotes.filter((note) => note.id !== noteId));
-  }, [noteBusy, currentNotes, saveNotes]);
+    if (noteBusy || !currentShelfId) return;
+    const next = currentNotes.filter((note) => note.id !== noteId);
+    const commit = () => {
+      const store = getShelfStore();
+      return store.deleteNote
+        ? store.deleteNote(currentShelfId, noteId)
+        : store.setNotes(currentShelfId, next);
+    };
+    await saveNoteChange(next, commit);
+  }, [noteBusy, currentShelfId, currentNotes, saveNoteChange]);
 
   const handleNoteNavigate = useCallback((note: ReaderNote): void => {
     if (!book || noteBusy) return;
@@ -3146,31 +3334,36 @@ export default function App() {
   const handleToggleBookmark = useCallback(() => {
     if (!currentShelfId || chapterState.status !== "ready") return;
     const anchor = readerRef.current?.getReadingAnchor() ?? null;
+    const previous = currentBookmarks;
     let next: Bookmark[];
+    let added: Bookmark | null = null;
+    let removedId: string | null = null;
+    const makeBookmark = (): Bookmark => {
+      const text = readerRef.current?.getAnchorText() ?? "";
+      return {
+        id: generateFolderId(),
+        spineIndex,
+        page: chapterState.currentPage,
+        anchorIndex: anchor && anchor.index >= 0 ? anchor.index : null,
+        anchorRatio: anchor && anchor.index >= 0 ? anchor.ratio : null,
+        anchorTextOffset: anchor?.textOffset ?? null,
+        anchorTextSnippet: anchor?.textSnippet ?? null,
+        mediaAnchor: anchor?.mediaAnchor ?? null,
+        chapterPath: book ? spineItemPath(book, spineIndex) ?? null : null,
+        text: text.slice(0, 80),
+        createdAtMs: Date.now(),
+      };
+    };
     if (chapterState.mode === "scroll") {
       const existing = currentBookmarks.find((bookmark) =>
         bookmarkMatchesPosition(bookmark, spineIndex, chapterState, anchor)
       );
       if (existing) {
+        removedId = existing.id;
         next = currentBookmarks.filter((bookmark) => bookmark.id !== existing.id);
       } else {
-        const text = readerRef.current?.getAnchorText() ?? "";
-        next = [
-          ...currentBookmarks,
-          {
-            id: generateFolderId(),
-            spineIndex,
-            page: chapterState.currentPage,
-            anchorIndex: anchor && anchor.index >= 0 ? anchor.index : null,
-            anchorRatio: anchor && anchor.index >= 0 ? anchor.ratio : null,
-            anchorTextOffset: anchor?.textOffset ?? null,
-            anchorTextSnippet: anchor?.textSnippet ?? null,
-            mediaAnchor: anchor?.mediaAnchor ?? null,
-            chapterPath: book ? spineItemPath(book, spineIndex) ?? null : null,
-            text: text.slice(0, 80),
-            createdAtMs: Date.now(),
-          },
-        ];
+        added = makeBookmark();
+        next = [...currentBookmarks, added];
       }
     } else {
       const resolvePage = (bm: Bookmark) =>
@@ -3188,35 +3381,27 @@ export default function App() {
             if (aPos !== bPos) return aPos - bPos;
             return a.createdAtMs - b.createdAtMs;
           })[0];
+        removedId = targetToDelete.id;
         next = currentBookmarks.filter((bm) => bm.id !== targetToDelete.id);
       } else {
-        const text = readerRef.current?.getAnchorText() ?? "";
-        next = [
-          ...currentBookmarks,
-          {
-            id: generateFolderId(),
-            spineIndex,
-            page: chapterState.currentPage,
-            anchorIndex: anchor && anchor.index >= 0 ? anchor.index : null,
-            anchorRatio: anchor && anchor.index >= 0 ? anchor.ratio : null,
-            anchorTextOffset: anchor?.textOffset ?? null,
-            anchorTextSnippet: anchor?.textSnippet ?? null,
-            mediaAnchor: anchor?.mediaAnchor ?? null,
-            chapterPath: book ? spineItemPath(book, spineIndex) ?? null : null,
-            text: text.slice(0, 80),
-            createdAtMs: Date.now(),
-          },
-        ];
+        added = makeBookmark();
+        next = [...currentBookmarks, added];
       }
     }
-    // 乐观更新 UI，再落盘
-    const isAdded = next.length > currentBookmarks.length;
+    const isAdded = added !== null;
+    const addedBookmark = added;
+    const removedBookmarkId = removedId;
     showBookmarkToast(isAdded ? "已加入书签" : "已移除书签", isAdded ? "add" : "remove");
     setShelfEntries((prev) =>
       prev.map((entry) => (entry.id === currentShelfId ? { ...entry, bookmarks: next } : entry))
     );
-    void getShelfStore()
-      .setBookmarks(currentShelfId, next)
+    const store = getShelfStore();
+    const commit: Promise<ShelfEntry> = addedBookmark && store.createBookmark
+      ? store.createBookmark(currentShelfId, addedBookmark)
+      : removedBookmarkId && store.deleteBookmark
+        ? store.deleteBookmark(currentShelfId, removedBookmarkId)
+        : store.setBookmarks(currentShelfId, next);
+    void commit
       .then(() =>
         setShelfEntries((prev) =>
           // 后端返回的是写入时刻的完整记录；期间用户可能已经翻页，
@@ -3226,20 +3411,35 @@ export default function App() {
           )
         )
       )
-      .catch((error) => setShelfError(`书签保存失败：${String(error)}`));
-  }, [currentShelfId, currentBookmarks, spineIndex, chapterState, showBookmarkToast]);
+      .catch((error) => {
+        setShelfEntries((prev) =>
+          prev.map((entry) => (entry.id === currentShelfId ? { ...entry, bookmarks: previous } : entry))
+        );
+        setShelfError(`书签保存失败：${String(error)}`);
+      });
+  }, [currentShelfId, currentBookmarks, spineIndex, chapterState, showBookmarkToast, book]);
 
   const handleDeleteBookmark = useCallback(
     (bookmarkId: string) => {
       if (!currentShelfId) return;
+      const previous = currentBookmarks;
       const next = currentBookmarks.filter((bookmark) => bookmark.id !== bookmarkId);
       showBookmarkToast("已移除书签", "remove");
       setShelfEntries((prev) =>
         prev.map((entry) => (entry.id === currentShelfId ? { ...entry, bookmarks: next } : entry))
       );
-      void getShelfStore()
-        .setBookmarks(currentShelfId, next)
-        .catch((error) => setShelfError(`书签删除失败：${String(error)}`));
+      const store = getShelfStore();
+      const commit = store.deleteBookmark
+        ? store.deleteBookmark(currentShelfId, bookmarkId)
+        : store.setBookmarks(currentShelfId, next);
+      void commit
+        .then(() => undefined)
+        .catch((error) => {
+          setShelfEntries((prev) =>
+            prev.map((entry) => (entry.id === currentShelfId ? { ...entry, bookmarks: previous } : entry))
+          );
+          setShelfError(`书签删除失败：${String(error)}`);
+        });
     },
     [currentShelfId, currentBookmarks, showBookmarkToast]
   );
@@ -3681,6 +3881,9 @@ export default function App() {
       anchorTextOffset: a?.textOffset ?? null,
       anchorTextSnippet: a?.textSnippet ?? null,
       mediaAnchor: a?.mediaAnchor ?? null,
+      // R5: this is an actually displayed chapter, so a modern locator can be
+      // built even for image-only/media and chapter-start positions.
+      chapterPath: book ? spineItemPath(book, spineIndex) ?? null : null,
     };
     // 先更新内存态：即使用户立刻返回并重新打开，也不会读到旧位置。
     setShelfEntries((prev) =>
@@ -3724,6 +3927,10 @@ export default function App() {
     setShelfBusy(true);
     try {
       await progressWriterRef.current?.flush();
+      const closingShelfId = currentShelfIdRef.current;
+      if (closingShelfId) {
+        await getShelfStore().closeProgressSession?.(closingShelfId);
+      }
       persistChapterCountCache();
     } catch (error) {
       const message = `阅读进度保存失败：${String(error)}`;
@@ -4402,6 +4609,13 @@ export default function App() {
     closePanel,
     handleTocNavigate,
   ]);
+
+  const resolveProgressChoice = useCallback((stamp: Stamp | null): void => {
+    const resolve = progressChoiceResolverRef.current;
+    progressChoiceResolverRef.current = null;
+    setProgressChoice(null);
+    resolve?.(stamp);
+  }, []);
 
   return (
     <div
@@ -5126,6 +5340,89 @@ export default function App() {
         }}
       />
       <div id="shelf-menu-portal-host" className="shelf-menu-portal-host" />
+      {progressChoice && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="选择恢复进度"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 10000,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+            background: "rgba(0, 0, 0, 0.45)",
+          }}
+        >
+          <div
+            style={{
+              width: "min(520px, 100%)",
+              maxHeight: "80vh",
+              overflow: "auto",
+              background: "var(--surface, #fff)",
+              color: "var(--text, #222)",
+              borderRadius: 12,
+              padding: 20,
+              boxShadow: "0 12px 40px rgba(0, 0, 0, 0.3)",
+            }}
+          >
+            <h3 style={{ margin: "0 0 8px", fontSize: 18 }}>选择恢复进度</h3>
+            <p style={{ margin: "0 0 14px", fontSize: 14, lineHeight: 1.5 }}>
+              《{progressChoice.title}》有 {progressChoice.candidates.length} 个阅读进度版本，请选择要恢复的一项。
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {progressChoice.candidates.map((candidate) => (
+                <button
+                  key={`${candidate.stamp.deviceId}:${candidate.stamp.counter}`}
+                  type="button"
+                  onClick={() => resolveProgressChoice(candidate.stamp)}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "flex-start",
+                    gap: 4,
+                    width: "100%",
+                    padding: "10px 12px",
+                    border: "1px solid var(--border, #d0d0d0)",
+                    borderRadius: 8,
+                    background: "var(--surface, #fff)",
+                    color: "inherit",
+                    textAlign: "left",
+                    cursor: "pointer",
+                  }}
+                >
+                  <strong style={{ fontSize: 14 }}>
+                    {candidate.chapterPath
+                      ? candidate.chapterPath.split("/").pop() || candidate.chapterPath
+                      : `第 ${candidate.spineIndex + 1} 章`}
+                  </strong>
+                  <span style={{ fontSize: 12, opacity: 0.75 }}>
+                    {candidate.progressPct}% · {new Date(candidate.updatedAtMs).toLocaleString()}
+                  </span>
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => resolveProgressChoice(null)}
+              style={{
+                marginTop: 14,
+                width: "100%",
+                padding: "9px 12px",
+                border: "1px solid var(--border, #d0d0d0)",
+                borderRadius: 8,
+                background: "transparent",
+                color: "inherit",
+                cursor: "pointer",
+              }}
+            >
+              取消
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

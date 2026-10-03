@@ -111,6 +111,23 @@ describe("ShelfProgressWriter", () => {
     expect(writes).toEqual([2]);
   });
 
+  it("stale-basis/stale-choice 样本直接丢弃，不进入 flush 重试", async () => {
+    const writes: number[] = [];
+    const writer = new ShelfProgressWriter(async (_id, value) => {
+      writes.push(value.page);
+      if (writes.length === 1) {
+        throw Object.assign(new Error("stale-basis"), { code: "stale-basis" });
+      }
+    });
+    writer.enqueue("book", patch(1));
+    await expect(writer.flush()).resolves.toBeUndefined();
+    expect(writes).toEqual([1]);
+
+    writer.enqueue("book", patch(2));
+    await writer.flush();
+    expect(writes).toEqual([1, 2]);
+  });
+
   it("活跃写入期间的新位置等待 debounce，且只写最新值", async () => {
     vi.useFakeTimers();
     try {

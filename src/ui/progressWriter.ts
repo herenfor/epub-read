@@ -2,6 +2,12 @@ import type { ShelfProgressPatch } from "./shelf";
 
 type WriteProgress = (id: string, patch: ShelfProgressPatch) => Promise<void>;
 
+/** Stale samples are already superseded; never retry them from failed/flush. */
+function isStaleProgressSample(error: unknown): boolean {
+  const code = (error as { readonly code?: unknown } | null)?.code;
+  return code === "stale-basis" || code === "stale-choice";
+}
+
 /**
  * 单通道、同书最新值优先的进度写入器。
  * 写入进行中时的连续翻页只保留最后一个待写位置，避免旧请求晚到覆盖新位置。
@@ -111,6 +117,10 @@ export class ShelfProgressWriter {
         await this.write(id, patch);
         this.failed.delete(id);
       } catch (error) {
+        if (isStaleProgressSample(error)) {
+          this.failed.delete(id);
+          continue;
+        }
         this.failed.set(id, { patch, error });
       }
     }

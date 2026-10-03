@@ -22,7 +22,7 @@ use crate::library_organization::{
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 const KEY_INSTALLATION_ID: &str = "installationId";
@@ -30,6 +30,7 @@ const KEY_COUNTER: &str = "counter";
 const KEY_MIGRATION: &str = "migration";
 const KEY_PREFERENCES: &str = "preferences";
 const KEY_ORGANIZATION: &str = "state";
+const KEY_LOCAL_VISIBLE: &str = "visibleHashes";
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -645,6 +646,28 @@ fn read_local_revisions(connection: &Connection) -> PortableResult<BTreeMap<Stri
     Ok(revisions)
 }
 
+fn load_local_visible_hashes(connection: &Connection) -> PortableResult<BTreeSet<String>> {
+    let values: Vec<String> = load_meta_json(connection, KEY_LOCAL_VISIBLE)?.unwrap_or_default();
+    let mut result = BTreeSet::new();
+    for value in values {
+        if !dto::valid_content_hash(&value) {
+            return Err(PortableError::storage_error(
+                "本机可见性数据含有不规范 contentHash",
+            ));
+        }
+        result.insert(value);
+    }
+    Ok(result)
+}
+
+fn save_local_visible_hashes(
+    connection: &Connection,
+    hashes: &BTreeSet<String>,
+) -> PortableResult<()> {
+    let values: Vec<&str> = hashes.iter().map(String::as_str).collect();
+    put_meta_json(connection, KEY_LOCAL_VISIBLE, &values)
+}
+
 impl PortableStore {
     pub fn open(path: &Path) -> PortableResult<Self> {
         if let Some(parent) = path.parent() {
@@ -800,6 +823,97 @@ impl PortableStore {
         store_counter(&transaction, next_counter)?;
         transaction.commit()?;
         Ok(merged)
+    }
+
+    /// R3: merge old archive records into the current v3 state in one SQLite
+    /// transaction. Existing v3 progress and annotation IDs (including
+    /// tombstones) stay local; only missing entities are initialized.
+    pub fn import_legacy_records(
+        &mut self,
+        records: Vec<legacy::LegacyRecord>,
+        organization: LibraryOrganization,
+    ) -> PortableResult<PortableStateV3> {
+        crate::library_organization::validate_organization(&organization)
+            .map_err(PortableError::invalid_data)?;
+        let imported_hashes: BTreeSet<String> = records
+            .iter()
+            .map(|record| record.content_hash().to_string())
+            .collect();
+        let transaction = self.connection.unchecked_transaction()?;
+        let local = load_state_at_connection(&transaction)?;
+        let installation_id = ensure_installation_id(&transaction)?;
+        let mut counter = load_counter(&transaction)?
+            .max(super::merge::maximum_received_counter_from_state(&local)?);
+        let incoming = legacy::build_import_state(
+            &local,
+            &records,
+            &organization,
+            &mut counter,
+            &installation_id,
+        )?;
+        let merged = merge_portable_states(&local, &incoming)?;
+        dto::validate_portable_state(&merged)?;
+        counter = counter.max(super::merge::maximum_received_counter_from_state(&merged)?);
+        let local_revisions = read_local_revisions(&transaction)?;
+        for (book_hash, book) in &merged.books {
+            let scoped: BTreeMap<String, u64> = local_revisions
+                .iter()
+                .filter_map(|(key, revision)| {
+                    key.strip_prefix(&format!("{book_hash}:"))
+                        .map(|suffix| (suffix.to_string(), *revision))
+                })
+                .collect();
+            store_book_shape(&transaction, book_hash, book, &scoped)?;
+        }
+        store_organization(&transaction, &merged.organization)?;
+        store_counter(&transaction, counter)?;
+        if !imported_hashes.is_empty() {
+            let mut visible = load_local_visible_hashes(&transaction)?;
+            visible.extend(imported_hashes);
+            save_local_visible_hashes(&transaction, &visible)?;
+        }
+        transaction.commit()?;
+        Ok(merged)
+    }
+
+    /// JSON boundary used by the Tauri command; validation/conversion stays in
+    /// the migration module and the actual merge stays in one transaction.
+    pub fn import_legacy_records_json(
+        &mut self,
+        records: Vec<serde_json::Value>,
+        organization: LibraryOrganization,
+    ) -> PortableResult<PortableStateV3> {
+        let parsed = legacy::parse_legacy_records(records)?;
+        self.import_legacy_records(parsed, organization)
+    }
+
+    /// Local visibility hashes created by an archive import without bytes.
+    pub fn local_visible_hashes(&self) -> PortableResult<Vec<String>> {
+        Ok(load_local_visible_hashes(&self.connection)?
+            .into_iter()
+            .collect())
+    }
+
+    pub fn set_local_visible(
+        &mut self,
+        content_hash: &str,
+        visible: bool,
+    ) -> PortableResult<()> {
+        if !dto::valid_content_hash(content_hash) {
+            return Err(PortableError::invalid_entity(
+                "invalid-entity：contentHash 必须是 64 位小写内容指纹",
+            ));
+        }
+        let transaction = self.connection.unchecked_transaction()?;
+        let mut hashes = load_local_visible_hashes(&transaction)?;
+        if visible {
+            hashes.insert(content_hash.to_string());
+        } else {
+            hashes.remove(content_hash);
+        }
+        save_local_visible_hashes(&transaction, &hashes)?;
+        transaction.commit()?;
+        Ok(())
     }
 
     /// Atomically reserve a contiguous execution counter range for migration
@@ -1063,6 +1177,11 @@ impl PortableStore {
                 "invalid-entity：readId 与实体书不同",
             ));
         }
+        if snapshot.book.is_none() {
+            return Err(PortableError::invalid_entity(
+                "invalid-entity：书籍不存在",
+            ));
+        }
         let revision_key = basis_revision_key(&entity);
         let local_revision = snapshot.revisions.get(&revision_key).copied().unwrap_or(0);
         let stored = match entity.clone() {
@@ -1119,6 +1238,9 @@ impl PortableStore {
         let book_hash = basis.entity.book_hash().to_string();
         let transaction = self.connection.unchecked_transaction()?;
         let _installation_id = ensure_installation_id(&transaction)?;
+        if load_book_meta_row(&transaction, &book_hash)?.is_none() {
+            return Err(PortableError::invalid_entity("invalid-entity：书籍不存在"));
+        }
         let (current, local_revision) = load_progress_row(&transaction, &book_hash)?.unwrap_or((
             ProgressState {
                 versions: Vec::new(),

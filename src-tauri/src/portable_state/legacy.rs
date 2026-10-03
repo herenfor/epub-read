@@ -12,7 +12,8 @@ use super::dto::{
 use super::error::{PortableError, PortableResult};
 use super::merge::next_local_counter;
 use crate::library_organization::{
-    empty_organization, max_observed_counter, validate_envelope, OrganizationEnvelope,
+    empty_organization, max_observed_counter, validate_envelope, LibraryOrganization,
+    OrganizationEnvelope,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -65,7 +66,7 @@ struct LegacyNote {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct LegacyRecord {
+pub(crate) struct LegacyRecord {
     content_hash: String,
     title: String,
     creator: String,
@@ -90,6 +91,12 @@ struct LegacyRecord {
     #[serde(default)]
     notes: Vec<LegacyNote>,
     is_new: bool,
+}
+
+impl LegacyRecord {
+    pub(crate) fn content_hash(&self) -> &str {
+        &self.content_hash
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -508,6 +515,68 @@ pub(crate) fn build_migration_plan(root: &Path) -> PortableResult<MigrationPlan>
         counter,
         migrated_books: records.len(),
         migrated_annotations,
+    })
+}
+
+/// Parse the portable record array produced by the shared archive bridge.
+pub(crate) fn parse_legacy_records(values: Vec<Value>) -> PortableResult<Vec<LegacyRecord>> {
+    values
+        .into_iter()
+        .map(|value| {
+            serde_json::from_value::<LegacyRecord>(value).map_err(|error| {
+                PortableError::invalid_data(format!("旧资料记录损坏：{error}"))
+            })
+        })
+        .collect()
+}
+
+/// Build a merge input from old archive records without replacing any existing
+/// v3 book/annotation. Existing register values and tombstones stay local;
+/// only missing books and entities receive fresh migration events.
+pub(crate) fn build_import_state(
+    current: &PortableStateV3,
+    records: &[LegacyRecord],
+    organization: &LibraryOrganization,
+    counter: &mut u64,
+    installation_id: &str,
+) -> PortableResult<PortableStateV3> {
+    let mut books = BTreeMap::new();
+    let mut seen_hashes = HashSet::new();
+    for record in records {
+        if !seen_hashes.insert(record.content_hash.clone()) {
+            return Err(PortableError::invalid_data(
+                "旧资料记录损坏：同一本书重复出现",
+            ));
+        }
+        let generated = convert_record(record, counter, installation_id)?;
+        match current.books.get(&record.content_hash) {
+            None => {
+                books.insert(record.content_hash.clone(), generated);
+            }
+            Some(existing) => {
+                let mut book = existing.clone();
+                if book.progress.versions.is_empty() {
+                    book.progress = generated.progress;
+                }
+                for (id, annotation) in generated.bookmarks {
+                    if !book.bookmarks.contains_key(&id) {
+                        book.bookmarks.insert(id, annotation);
+                    }
+                }
+                for (id, annotation) in generated.notes {
+                    if !book.notes.contains_key(&id) {
+                        book.notes.insert(id, annotation);
+                    }
+                }
+                books.insert(record.content_hash.clone(), book);
+            }
+        }
+    }
+    Ok(PortableStateV3 {
+        schema_version: 3,
+        books,
+        organization: organization.clone(),
+        preferences: None,
     })
 }
 

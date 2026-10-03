@@ -19,7 +19,7 @@ import type { EntityRef } from "../../core/portableState/portable-write-core";
 import type { Stamp } from "../../core/portableState/portable-register-core";
 import type { PortableStateV3 } from "../../core/portableState/portable-state-types";
 import type { LibraryOrganization, OrganizationCommand } from "../libraryOrganization";
-import type { PortableActivationResult, PortableMergeOptions, PortableStateDataService } from "./dataService";
+import type { PortableActivationResult, PortableLegacyImportInput, PortableMergeOptions, PortableStateDataService } from "./dataService";
 
 const ERROR_CODES = new Set<PortableStateErrorCode>([
   "invalid-data",
@@ -132,6 +132,33 @@ export class TauriPortableStateService implements PortableStateDataService {
   async mergeValidatedState(input: unknown, options: PortableMergeOptions = {}): Promise<PortableStateV3> {
     try {
       return await invoke<PortableStateV3>("portable_state_merge_state", { state: input, ...options });
+    } catch (error) {
+      return nativeError(error);
+    }
+  }
+
+  async mergeLegacyRecords(input: PortableLegacyImportInput): Promise<PortableStateV3> {
+    try {
+      return await invoke<PortableStateV3>("portable_state_merge_legacy_records", {
+        records: input.records,
+        organization: input.organization ?? null,
+      });
+    } catch (error) {
+      return nativeError(error);
+    }
+  }
+
+  async listLocalVisibleHashes(): Promise<readonly string[]> {
+    try {
+      return await invoke<string[]>("portable_state_list_local_visible");
+    } catch (error) {
+      return nativeError(error);
+    }
+  }
+
+  async setLocalVisible(hash: string, visible: boolean): Promise<void> {
+    try {
+      return await invoke<void>("portable_state_set_local_visible", { hash, visible });
     } catch (error) {
       return nativeError(error);
     }

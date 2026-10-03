@@ -82,3 +82,4 @@ export interface PortableStateStorage {
 export const META_PREFERENCES = "preferences";
 export const META_PENDING_PREFERENCES = "pendingPreferences";
 export const META_MIGRATION = "migration";
+export const META_LOCAL_VISIBLE = "localVisibleHashes";

@@ -7,6 +7,7 @@ import { TauriPortableStateService } from "./portableState/tauriService";
 import type { PortableActivationResult, PortableStateDataService } from "./portableState/dataService";
 import { sanitizePersistedTextAnchor } from "../render/textAnchor";
 import type { MediaReadingAnchor } from "../render/paginator";
+import type { Stamp } from "../core/portableState/portable-register-core";
 import type { LibraryRecord } from "./libraryArchive";
 import type { ThumbnailAsset, ThumbnailProvider } from "./thumbnail";
 import { hasDuplicateReaderNoteIds, normalizeReaderNotes, type ReaderNote } from "./notes";
@@ -103,6 +104,8 @@ export interface ShelfProgressPatch {
   anchorTextSnippet: string | null;
   /** B-155 可选媒体锚点；旧记录缺省可读，写入时可为 null。 */
   mediaAnchor?: MediaReadingAnchor | null;
+  /** R5：当前正文章节的 EPUB 内部路径；无书/旧样本可为 null。 */
+  chapterPath?: string | null;
 }
 
 export interface ShelfSaveInput {
@@ -162,6 +165,19 @@ export interface ShelfStore {
   getOrganization(): Promise<LibraryOrganization>;
   applyOrganization(command: OrganizationCommand): Promise<LibraryOrganization>;
   mergeOrganization(incoming: LibraryOrganization): Promise<LibraryOrganization>;
+  /**
+   * CP-I-R single-entity v3 operations. Legacy backends may omit these and the
+   * UI keeps its whole-array path for them; the portable facade never rewrites
+   * unrelated annotation IDs.
+   */
+  createBookmark?(id: string, bookmark: Bookmark): Promise<ShelfEntry>;
+  deleteBookmark?(id: string, bookmarkId: string): Promise<ShelfEntry>;
+  createNote?(id: string, note: ReaderNote): Promise<ShelfEntry>;
+  updateNote?(id: string, note: ReaderNote, chosenStamp: Stamp): Promise<ShelfEntry>;
+  deleteNote?(id: string, noteId: string): Promise<ShelfEntry>;
+  /** CP-I-R progress session pinned to the version actually selected/displayed. */
+  beginProgressSession?(id: string, chosenStamp?: Stamp): Promise<void>;
+  closeProgressSession?(id: string): Promise<void>;
 }
 
 /** Keep failed rows visible; a native batch failure must not trigger expensive retries per book. */

@@ -643,4 +643,104 @@ mod tests {
         assert!(store.snapshot().unwrap().books.is_empty());
         assert!(store.installation_id().unwrap().is_none());
     }
+    #[test]
+    fn repository_rejects_unknown_book_adopt_and_write_without_corrupting_snapshot() {
+        let root = TempDir::new("unknown-book");
+        let database = root.path().join("library.sqlite3");
+        let mut store = PortableStore::open(&database).unwrap();
+        let state: PortableStateV3 = serde_json::from_value(state_json_with_one_book()).unwrap();
+        store.merge_validated_state(state).unwrap();
+
+        let (read_id, book) = store.read(HASH).unwrap();
+        let book = book.expect("known book snapshot");
+        let stamp = book.progress.versions[0].stamp.clone();
+        let value = book.progress.versions[0].value.clone();
+        let basis_id = store
+            .adopt(
+                &read_id,
+                EntityRef::Progress {
+                    book_hash: HASH.to_string(),
+                },
+                AdoptSelection::Chosen { stamp },
+            )
+            .unwrap();
+
+        let (unknown_read_id, unknown_book) = store.read(HASH_2).unwrap();
+        assert!(unknown_book.is_none());
+        let error = store
+            .adopt(
+                &unknown_read_id,
+                EntityRef::Progress {
+                    book_hash: HASH_2.to_string(),
+                },
+                AdoptSelection::Empty,
+            )
+            .unwrap_err();
+        assert_eq!(error.code, "invalid-entity");
+        let after_unknown = store.snapshot().unwrap();
+        assert!(after_unknown.books.contains_key(HASH));
+        assert!(!after_unknown.books.contains_key(HASH_2));
+
+        // Simulate an interrupted legacy import that removed the book rows
+        // behind a still-live basis: the write path rechecks metadata and must
+        // not create orphan progress or advance the counter.
+        {
+            let racer = rusqlite::Connection::open(&database).unwrap();
+            racer.execute("DELETE FROM book_meta", []).unwrap();
+            racer.execute("DELETE FROM progress", []).unwrap();
+            racer.execute("DELETE FROM annotations", []).unwrap();
+            racer.execute("DELETE FROM organization", []).unwrap();
+        }
+        let error = store
+            .write_progress(&basis_id, WriteIntent::Auto, value, 3000)
+            .unwrap_err();
+        assert_eq!(error.code, "invalid-entity");
+        assert!(store.snapshot().unwrap().books.is_empty());
+    }
+
+    #[test]
+    fn dto_requires_version_value_but_accepts_explicit_null_progress_reset() {
+        let mut missing = state_json_with_one_book();
+        missing["books"][HASH]["progress"]["versions"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("value");
+        assert!(serde_json::from_value::<PortableStateV3>(missing).is_err());
+
+        let mut explicit_null = state_json_with_one_book();
+        explicit_null["books"][HASH]["progress"]["versions"][0]["value"] = json!(null);
+        let state: PortableStateV3 = serde_json::from_value(explicit_null).unwrap();
+        validate_portable_state(&state).unwrap();
+    }
+
+    #[test]
+    fn repository_legacy_import_merges_missing_annotations_without_replacing_v3_progress() {
+        let mut store = PortableStore::open_in_memory().unwrap();
+        let state: PortableStateV3 = serde_json::from_value(state_json_with_one_book()).unwrap();
+        let merged = store.merge_validated_state(state).unwrap();
+        let organization = merged.organization.clone();
+
+        let imported = store
+            .import_legacy_records_json(vec![legacy_record_json()], organization)
+            .unwrap();
+        let book = &imported.books[HASH];
+        assert_eq!(book.metadata.value.title, "书");
+        assert_eq!(book.progress.versions.len(), 1);
+        assert_eq!(
+            book.progress.versions[0]
+                .value
+                .as_ref()
+                .unwrap()
+                .progress_pct_hint,
+            10
+        );
+        assert_eq!(book.progress.versions[0].stamp.counter, 2);
+        assert!(book.bookmarks.contains_key(OLD_BOOKMARK_ID));
+        assert!(book.notes.contains_key(OLD_NOTE_ID));
+        assert!(store
+            .local_visible_hashes()
+            .unwrap()
+            .contains(&HASH.to_string()));
+    }
+
 }

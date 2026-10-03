@@ -33,11 +33,27 @@ pub struct Stamp {
     pub counter: u64,
 }
 
+/// Fields whose absence must remain distinguishable from an explicit `null`.
+/// This is the opposite of `deserialize_present`: explicit null is a value and
+/// a missing key is a deserialization error.
+pub(crate) fn deserialize_required<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer)
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(
+    rename_all = "camelCase",
+    deny_unknown_fields,
+    bound(deserialize = "T: Deserialize<'de>")
+)]
 pub struct Version<T> {
     pub stamp: Stamp,
     pub clock: BTreeMap<String, u64>,
+    #[serde(deserialize_with = "deserialize_required")]
     pub value: T,
     pub updated_at_ms: u64,
 }
