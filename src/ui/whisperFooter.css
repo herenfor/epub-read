@@ -231,9 +231,9 @@
 /* ---- 手机/平板触摸底部工具条：与顶栏共享 toolsVisible，覆盖层显隐不重排正文 ---- */
 .whisper-footer.is-mobile {
   bottom: env(safe-area-inset-bottom, 0px);
-  height: var(--mobile-reader-bottombar, 124px);
+  height: var(--mobile-reader-bottombar, 112px);
   min-height: 0;
-  padding: 6px 10px 5px;
+  padding: 4px 10px 4px;
   gap: 2px;
   z-index: 100;
   background: color-mix(in srgb, var(--bg) 94%, transparent);
@@ -274,7 +274,7 @@
 /* 展开工具时进度轴真实命中高至少 48 CSS px；拖动仍走 pointer capture。 */
 .whisper-footer.is-mobile .whisper-scrubber-track {
   height: 4px;
-  margin: 22px 4px 22px;
+  margin: 16px 4px;
   border-radius: 3px;
 }
 
@@ -315,7 +315,7 @@
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 2px;
   width: 100%;
-  margin-top: 2px;
+  margin-top: 0;
 }
 
 .mobile-reader-action {
@@ -364,4 +364,45 @@
   font-weight: 700;
   letter-spacing: -0.5px;
   line-height: 1;
+}
+
+/* 宽屏（平板/手机横屏）：进度轴与状态居中，四个动作分列两侧，单行约 68px。 */
+.app[data-layout="wide"] .whisper-footer.is-mobile {
+  display: grid;
+  grid-template-columns: repeat(2, 72px) minmax(0, 1fr) repeat(2, 72px);
+  grid-template-rows: auto auto;
+  align-content: center;
+  column-gap: 6px;
+  row-gap: 0;
+  padding: 4px 16px;
+}
+
+.app[data-layout="wide"] .whisper-footer.is-mobile .mobile-reader-actions {
+  display: contents;
+}
+
+.app[data-layout="wide"] .whisper-footer.is-mobile .mobile-reader-action {
+  grid-row: 1 / span 2;
+  align-self: center;
+  min-height: 56px;
+}
+
+.app[data-layout="wide"] .whisper-footer.is-mobile .mobile-reader-action:nth-child(1) { grid-column: 1; }
+.app[data-layout="wide"] .whisper-footer.is-mobile .mobile-reader-action:nth-child(2) { grid-column: 2; }
+.app[data-layout="wide"] .whisper-footer.is-mobile .mobile-reader-action:nth-child(3) { grid-column: 4; }
+.app[data-layout="wide"] .whisper-footer.is-mobile .mobile-reader-action:nth-child(4) { grid-column: 5; }
+
+.app[data-layout="wide"] .whisper-footer.is-mobile .whisper-scrubber-wrap {
+  grid-column: 3;
+  grid-row: 1;
+  padding: 0 12px;
+}
+
+.app[data-layout="wide"] .whisper-footer.is-mobile .whisper-scrubber-track {
+  margin: 14px 4px 10px;
+}
+
+.app[data-layout="wide"] .whisper-footer.is-mobile .whisper-meta-line {
+  grid-column: 3;
+  grid-row: 2;
 }

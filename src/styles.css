@@ -6029,16 +6029,16 @@ select option {
 /* ---- 第三步：手机/平板外壳安全区只扣一次；覆盖工具栏不进入 EPUB 几何 ---- */
 .app[data-mobile-reader="true"] {
   --mobile-reader-topbar: 56px;
-  --mobile-reader-bottombar: 124px;
+  --mobile-reader-bottombar: 112px;
   box-sizing: border-box;
   padding-top: env(safe-area-inset-top, 0px);
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
-/* 工具层高度由外壳一次预留；覆盖条显隐不改变阅读画布，也不永久遮住末行。 */
-.app[data-mobile-reader="true"] .main {
-  padding-top: var(--mobile-reader-topbar);
-  padding-bottom: var(--mobile-reader-bottombar);
+/* 工具层浮在正文之上，不再为它常驻预留上下空白：沉浸时版心用满屏高，
+ * 工具显隐不改变阅读画布（不重排），展开期间才临时盖住首末行。 */
+.app[data-mobile-reader="true"][data-layout="wide"] {
+  --mobile-reader-bottombar: 68px;
 }
 
 /* 手机/平板新书架按实际可用宽度重排，不强制固定列数。 */
