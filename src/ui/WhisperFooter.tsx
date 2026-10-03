@@ -58,6 +58,8 @@ export interface WhisperFooterProps {
   appearanceOpen?: boolean;
   onOpenMore?: () => void;
   moreOpen?: boolean;
+  /** 状态行尾部的平台附件（如 Android 电量），随底栏显隐。 */
+  statusAccessory?: React.ReactNode;
 }
 
 const HIDE_DELAY_MS = 1800;
@@ -192,6 +194,7 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
   appearanceOpen = false,
   onOpenMore,
   moreOpen = false,
+  statusAccessory,
 }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -617,6 +620,7 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
           <span className="whisper-calm-text" title={chapterTitle || "阅读进度"}>
             {textContent}
           </span>
+          {statusAccessory}
         </div>
 
         {/* 手机/平板触摸底部动作行；由 App 与顶栏共用 toolsVisible。 */}
