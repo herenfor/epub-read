@@ -107,12 +107,17 @@ export interface ShelfViewProps {
   busy: boolean;
   /** 原生书籍导入活动期间：只禁用冲突入口，不禁用阅读与收藏/文件夹操作。 */
   importActive?: boolean;
+  /** 存档文件任务活动期间：只禁用重复的文件入口，不阻塞阅读和其他书架操作。 */
+  saveFileActive?: boolean;
   theme: Theme;
   onThemeChange(theme: Theme): void;
   onOpen(id: string): void;
   onImport(): void;
   onImportArchive(): void;
-  onExportArchive(): void;
+  /** `selectedEntries` is handled by App and resolved to 64-bit content hashes before any native job is created. */
+  onExportArchive(selectedEntries?: ShelfEntry[]): void;
+  /** Legacy v1/v2 JSON import stays secondary on native; Web can leave this undefined and use its existing entry. */
+  onImportLegacyArchive?(): void;
   onDelete(id: string): void;
   /** 批量删除（选中多本时由确认弹窗调用） */
   onDeleteMany(ids: string[]): void;
@@ -2109,6 +2114,7 @@ interface ShelfSettingsDrawerProps extends ShelfSubmenuBackProps {
   matchingEntries?: ShelfEntry[];
   busy: boolean;
   importArchiveDisabled?: boolean;
+  saveFileActive?: boolean;
   query: string;
   onQueryChange(value: string): void;
   sort: ShelfSort;
@@ -2124,7 +2130,8 @@ interface ShelfSettingsDrawerProps extends ShelfSubmenuBackProps {
   onClose(): void;
   onOpenBook?(id: string): void;
   onImportArchive(): void;
-  onExportArchive(): void;
+  onExportArchive(selectedEntries?: ShelfEntry[]): void;
+  onImportLegacyArchive?(): void;
   searchMode: ShelfSearchMode;
   onSearchModeChange?: (mode: ShelfSearchMode) => void;
   bodySearch?: ShelfBodySearchProps;
@@ -2545,13 +2552,29 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
                 批量选择
               </button>
             )}
-            <button className="tb-btn" type="button" onClick={props.onImportArchive} disabled={props.busy || props.importArchiveDisabled}>
+            <button className="tb-btn" type="button" onClick={props.onImportArchive} disabled={props.busy || props.importArchiveDisabled || props.saveFileActive}>
               导入存档
             </button>
-            <button className="tb-btn" type="button" onClick={props.onExportArchive} disabled={props.busy || props.entries.length === 0}>
+            <button className="tb-btn" type="button" onClick={() => props.onExportArchive()} disabled={props.busy || props.saveFileActive || props.entries.length === 0}>
               导出存档
             </button>
           </div>
+
+          {props.onImportLegacyArchive && (
+            <>
+              <div className="shelf-drawer-group-label">兼容旧版 JSON 存档</div>
+              <div className="shelf-drawer-actions">
+                <button
+                  className="tb-btn"
+                  type="button"
+                  onClick={props.onImportLegacyArchive}
+                  disabled={props.busy || props.importArchiveDisabled || props.saveFileActive}
+                >
+                  导入旧版 JSON 存档
+                </button>
+              </div>
+            </>
+          )}
 
           <div className="shelf-drawer-group-label">关于</div>
           <AboutInfo />
@@ -4176,6 +4199,18 @@ export function ShelfView(props: ShelfViewProps) {
                 <FolderIcon />
                 <span>移至文件夹</span>
               </button>
+              <button
+                className="shelf-action-folder"
+                type="button"
+                disabled={selectedIds.size === 0 || props.busy || props.saveFileActive}
+                onClick={() => {
+                  const targets = props.entries.filter((e) => selectedIds.has(e.id));
+                  if (targets.length > 0) props.onExportArchive(targets);
+                }}
+                title="导出选中书籍为新存档"
+              >
+                <span>导出存档</span>
+              </button>
               <button className="shelf-selection-cancel" type="button" onClick={exitSelection}>
                 取消
               </button>
@@ -4402,8 +4437,10 @@ export function ShelfView(props: ShelfViewProps) {
           closeDrawer();
         }}
         importArchiveDisabled={props.importActive}
+        saveFileActive={props.saveFileActive}
         onImportArchive={props.onImportArchive}
         onExportArchive={props.onExportArchive}
+        onImportLegacyArchive={props.onImportLegacyArchive}
         searchMode={props.searchMode ?? "metadata"}
         onSearchModeChange={props.onSearchModeChange}
         bodySearch={props.bodySearch}
@@ -5251,6 +5288,18 @@ export function ShelfView(props: ShelfViewProps) {
                 >
                   <FolderIcon />
                   <span>移至文件夹</span>
+                </button>
+                <button
+                  className="shelf-batch-action-btn"
+                  type="button"
+                  disabled={props.busy || props.saveFileActive}
+                  onClick={() => {
+                    const targets = props.entries.filter((e) => selectedIds.has(e.id));
+                    if (targets.length > 0) props.onExportArchive(targets);
+                  }}
+                  title="导出选中书籍为新存档"
+                >
+                  <span>导出</span>
                 </button>
                 <button
                   className="shelf-batch-action-btn danger"

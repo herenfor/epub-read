@@ -4,7 +4,7 @@ import type { Book } from "./core/types";
 import type { Annotation, Stamp, Version } from "./core/portableState/portable-register-core";
 import { compareStamp } from "./core/portableState/portable-register-core";
 import { latestVersion, projectProgressVersion, versionForStamp } from "./core/portableState/projection";
-import type { BookmarkValue, Locator, NoteValue, ProgressValue } from "./core/portableState/portable-state-types";
+import type { BookmarkValue, Locator, NoteValue, PortablePreferences, ProgressValue } from "./core/portableState/portable-state-types";
 import { isExternalUrl, isFragmentOnly, resolvePath, splitHref } from "./core/paths";
 import {
   createSearchSession,
@@ -22,7 +22,7 @@ import {
   type Theme,
 } from "./render/settings";
 import type { ChapterState, MediaReadingAnchor, PreciseNavigationStatus, ReadingAnchor } from "./render/paginator";
-import { DEFAULT_PAGE_GAP_PX, normalizePageOptions } from "./render/pageLayout";
+import { normalizePageOptions } from "./render/pageLayout";
 import type { ImageViewRequest } from "./render/imageActivation";
 import { ImageViewer } from "./ui/ImageViewer";
 import { TitleBar } from "./ui/TitleBar";
@@ -73,6 +73,8 @@ import { ReaderView, type ReaderHandle } from "./ui/ReaderView";
 import type { ReaderNoteForPaginator } from "./render/paginator";
 import { ShelfView } from "./ui/ShelfView";
 import { NativeImportPanel, type NativeImportCancelState } from "./ui/NativeImportPanel";
+import { SaveFileExportDialog, SaveFileImportPreview, SaveFileProgressPanel } from "./ui/SaveFileDialogs";
+import { useSaveFileJob } from "./ui/useSaveFileJob";
 import {
   cancelDocumentImport,
   importDocuments,
@@ -83,11 +85,18 @@ import {
   type AndroidNativeImportError,
 } from "./platform/androidNativeBridge";
 import {
+  saveFileErrorCode,
+  saveFileErrorMessage,
+  type SaveFileLocation,
+  type SaveExportScope,
+} from "./platform/saveFileNativeBridge";
+import {
   activatePortableShelfState,
   applyShelfProgressPatch,
   getShelfStore,
   deleteShelfBooks,
   markShelfEntryOpened,
+  readPortablePreferencesSnapshot,
   readingAnchorFromShelfEntry,
   shelfThumbnailProvider,
   type Bookmark,
@@ -676,6 +685,16 @@ export default function App() {
     fileNameSummary: string;
   } | null>(null);
   const nativeImportRef = useRef<string | null>(null);
+  // One UI-owned file job; every picker/prepare/commit generation is tracked
+  // in the hook, never generated during render.
+  const saveFileJob = useSaveFileJob();
+  const saveFileJobStateRef = useRef(saveFileJob.state);
+  saveFileJobStateRef.current = saveFileJob.state;
+  const [saveFileExportSetup, setSaveFileExportSetup] = useState<{
+    selectedEntries: ShelfEntry[];
+  } | null>(null);
+  const saveFileActive = saveFileJob.active || saveFileExportSetup !== null;
+  const saveFileLaunchRef = useRef(false);
   const [currentShelfId, setCurrentShelfId] = useState<string | null>(null);
   const shelfBusyRef = useRef(false);
   const shelfEntriesRef = useRef<ShelfEntry[]>([]);
@@ -1684,7 +1703,270 @@ export default function App() {
     [organizationError, resolveContentHashForEntry]
   );
 
-  const handleExportArchive = useCallback(async () => {
+  const applyPortablePreferences = useCallback((preferences?: PortablePreferences): boolean => {
+    if (!preferences) return false;
+    setSettings((previous) => {
+      const next = { ...previous };
+      if (preferences.theme === "light" || preferences.theme === "dark" || preferences.theme === "sepia" || preferences.theme === "gray") {
+        next.theme = preferences.theme;
+      }
+      if (typeof preferences.fontSizePx === "number" && preferences.fontSizePx >= 12 && preferences.fontSizePx <= 32) {
+        next.fontSizePx = preferences.fontSizePx;
+      }
+      if (typeof preferences.lineHeight === "number" && preferences.lineHeight >= 1 && preferences.lineHeight <= 3) {
+        next.lineHeight = preferences.lineHeight;
+      }
+      if (typeof preferences.fontWeight === "number" && preferences.fontWeight >= 100 && preferences.fontWeight <= 900) {
+        next.fontWeight = preferences.fontWeight;
+      }
+      if (typeof preferences.letterSpacingPx === "number" && preferences.letterSpacingPx >= 0 && preferences.letterSpacingPx <= 32) {
+        next.letterSpacingPx = preferences.letterSpacingPx;
+      }
+      if (typeof preferences.wordSpacingPx === "number" && preferences.wordSpacingPx >= 0 && preferences.wordSpacingPx <= 64) {
+        next.wordSpacingPx = preferences.wordSpacingPx;
+      }
+      return next;
+    });
+    return true;
+  }, []);
+
+  const refreshShelfProjection = useCallback(async (): Promise<void> => {
+    const store = getShelfStore();
+    const [entries, org] = await Promise.all([store.list(), store.getOrganization()]);
+    setShelfEntries(entries);
+    setOrganization(org);
+    setOrganizationError(null);
+  }, []);
+
+  const chooseSaveFileDestination = useCallback(async (): Promise<SaveFileLocation | null> => {
+    const defaultName = `epub-reader-${new Date().toISOString().slice(0, 10)}.epubsave`;
+    if (runtime.platform === "android") {
+      const selected = await saveFileDialog({
+        title: "导出存档",
+        defaultPath: defaultName,
+      });
+      if (typeof selected !== "string" || selected.length === 0) return null;
+      return { kind: "uri", uri: selected };
+    }
+    if (!isTauriEnv()) return null;
+    const selected = await saveFileDialog({
+      title: "导出存档",
+      defaultPath: defaultName,
+      filters: [{ name: "EPUB Reader 存档", extensions: ["epubsave"] }],
+    });
+    if (typeof selected !== "string" || selected.length === 0) return null;
+    return { kind: "path", path: selected };
+  }, [runtime.platform]);
+
+  const chooseSaveFileSource = useCallback(async (): Promise<{
+    source: SaveFileLocation;
+    label: string;
+  } | null> => {
+    if (runtime.platform === "android") {
+      const selected = await openFileDialog({
+        multiple: false,
+        directory: false,
+        title: "导入存档",
+      });
+      const uri = Array.isArray(selected) ? selected[0] : selected;
+      if (typeof uri !== "string" || uri.length === 0) return null;
+      return { source: { kind: "uri", uri }, label: uri.split("/").pop() || "Android 文档" };
+    }
+    if (!isTauriEnv()) return null;
+    const selected = await openFileDialog({
+      multiple: false,
+      directory: false,
+      title: "导入存档",
+      filters: [{ name: "EPUB Reader 存档", extensions: ["epubsave"] }],
+    });
+    const path = Array.isArray(selected) ? selected[0] : selected;
+    if (typeof path !== "string" || path.length === 0) return null;
+    return { source: { kind: "path", path }, label: path.split(/[\\/]/).pop() || path };
+  }, [runtime.platform]);
+
+  const startNativeExport = useCallback(async (
+    selectedEntries: ShelfEntry[],
+    scopeChoice: "all" | "selected",
+    includeBooks: boolean,
+  ): Promise<void> => {
+    if (saveFileJob.active || saveFileLaunchRef.current) {
+      setShelfNotice({ kind: "warn", text: "已有存档文件任务正在进行，请等待当前任务结束" });
+      return;
+    }
+    saveFileLaunchRef.current = true;
+    try {
+    let destination: SaveFileLocation | null = null;
+    try {
+      destination = await chooseSaveFileDestination();
+    } catch (error) {
+      setShelfNotice({ kind: "error", text: `无法打开保存位置选择器：${saveFileErrorMessage(error)}` });
+      return;
+    }
+    if (!destination) return;
+
+    let scope: SaveExportScope;
+    let rangeLabel: string;
+    if (scopeChoice === "selected") {
+      if (selectedEntries.length === 0) {
+        setShelfNotice({ kind: "warn", text: "没有选中的书可导出" });
+        return;
+      }
+      const resolved: string[] = [];
+      try {
+        for (const entry of selectedEntries) resolved.push(await resolveContentHashForEntry(entry));
+      } catch (error) {
+        setShelfNotice({ kind: "error", text: `无法解析选中书籍的内容指纹：${saveFileErrorMessage(error)}` });
+        return;
+      }
+      const bookHashes = [...new Set(resolved)];
+      if (bookHashes.length === 0) {
+        setShelfNotice({ kind: "error", text: "选中书籍没有可用的内容指纹，未发起导出" });
+        return;
+      }
+      scope = { kind: "selected", bookHashes };
+      rangeLabel = `选中的 ${bookHashes.length} 本资料`;
+    } else {
+      scope = { kind: "all" };
+      rangeLabel = `全库 ${shelfEntriesRef.current.length} 本资料`;
+    }
+
+    try {
+      await activatePortableShelfState();
+      persistShelfProgressRef.current();
+      await progressWriterRef.current?.flush();
+    } catch (error) {
+      setShelfNotice({ kind: "error", text: `导出前保存阅读进度失败：${saveFileErrorMessage(error)}` });
+      return;
+    }
+
+    try {
+      const result = await saveFileJob.beginExport({ destination, scope, includeBooks });
+      if (result.status === "cancelled") {
+        setShelfNotice({ kind: "warn", text: "已取消导出存档" });
+        return;
+      }
+      if (result.skippedBooks.length > 0) {
+        const first = result.skippedBooks[0];
+        setShelfNotice({
+          kind: "warn",
+          text: `已导出${rangeLabel}；附带书籍 ${result.writtenBooks} 本，跳过 ${result.skippedBooks.length} 本（如《${first.title}》：${first.reason}）`,
+        });
+      } else {
+        setShelfNotice({
+          kind: "ok",
+          text: `已导出${rangeLabel}${includeBooks ? `，附带书籍 ${result.writtenBooks} 本` : "（未附带书籍文件）"}`,
+        });
+      }
+    } catch (error) {
+      if (saveFileErrorCode(error) === "cancelled") {
+        setShelfNotice({ kind: "warn", text: "已取消导出存档" });
+        return;
+      }
+      setShelfNotice({ kind: "error", text: `存档导出失败：${saveFileErrorMessage(error)}` });
+    }
+    } finally {
+      saveFileLaunchRef.current = false;
+    }
+  }, [chooseSaveFileDestination, resolveContentHashForEntry, saveFileJob]);
+
+  const startNativeImport = useCallback(async (): Promise<void> => {
+    if (saveFileJob.active || saveFileLaunchRef.current) {
+      setShelfNotice({ kind: "warn", text: "已有存档文件任务正在进行，请等待当前任务结束" });
+      return;
+    }
+    saveFileLaunchRef.current = true;
+    try {
+    let selected: { source: SaveFileLocation; label: string } | null = null;
+    try {
+      selected = await chooseSaveFileSource();
+    } catch (error) {
+      setShelfNotice({ kind: "error", text: `无法打开存档选择器：${saveFileErrorMessage(error)}` });
+      return;
+    }
+    if (!selected) return;
+    try {
+      await activatePortableShelfState();
+      await saveFileJob.beginPrepare({ source: selected.source, sourceLabel: selected.label });
+    } catch (error) {
+      const code = saveFileErrorCode(error);
+      if (code === "cancelled") {
+        setShelfNotice({ kind: "warn", text: "已取消导入存档" });
+        return;
+      }
+      setShelfNotice({ kind: "error", text: `存档导入准备失败：${saveFileErrorMessage(error)}` });
+    }
+    } finally {
+      saveFileLaunchRef.current = false;
+    }
+  }, [chooseSaveFileSource, saveFileJob]);
+
+  const handleSaveFileImportConfirm = useCallback(async (applyPreferences: boolean): Promise<void> => {
+    if (saveFileJobStateRef.current.kind !== "prepared") return;
+    try {
+      const result = await saveFileJob.commit(applyPreferences);
+      let refreshFailed = false;
+      try {
+        await refreshShelfProjection();
+      } catch (error) {
+        refreshFailed = true;
+        setShelfError(`存档已提交，但刷新书架失败：${saveFileErrorMessage(error)}`);
+      }
+
+      let preferencesFailed = false;
+      let preferencesApplied = false;
+      if (applyPreferences && result.appliedPreferences) {
+        try {
+          const preferences = await readPortablePreferencesSnapshot();
+          preferencesApplied = applyPortablePreferences(preferences);
+        } catch (error) {
+          preferencesFailed = true;
+          setShelfNotice({
+            kind: "warn",
+            text: `书籍资料已导入，但外观设置读取失败：${saveFileErrorMessage(error)}`,
+          });
+        }
+      }
+
+      if (preferencesFailed) return;
+      const conflictNote = result.progressConflictBooks.length > 0
+        ? `；${result.progressConflictBooks.length} 本有进度分歧，打开时可选择`
+        : "";
+      const preferenceNote = applyPreferences && !result.appliedPreferences
+        ? "；存档外观设置未应用，本机设置保持不变"
+        : preferencesApplied
+          ? "；已应用存档中的外观设置"
+          : "";
+      setShelfNotice({
+        kind: result.missingBooks.length > 0 || refreshFailed || (applyPreferences && !result.appliedPreferences) ? "warn" : "ok",
+        text: `已导入 ${result.importedBooks.length} 本资料，书架共 ${result.mergedBooks} 本；${result.missingBooks.length} 本待补书籍${conflictNote}${preferenceNote}${refreshFailed ? "；书架刷新失败" : ""}`,
+      });
+    } catch (error) {
+      setShelfNotice({ kind: "error", text: `存档导入失败：${saveFileErrorMessage(error)}` });
+    }
+  }, [applyPortablePreferences, refreshShelfProjection, saveFileJob]);
+
+  const closeSaveFileUi = useCallback(async (): Promise<void> => {
+    setSaveFileExportSetup(null);
+    const current = saveFileJobStateRef.current;
+    if (current.kind === "idle" || current.kind === "committing") return;
+    try {
+      await saveFileJob.cancelCurrent();
+    } catch (error) {
+      setShelfNotice({ kind: "warn", text: `取消存档任务失败：${saveFileErrorMessage(error)}` });
+    }
+  }, [saveFileJob]);
+
+  const handleSaveFileExportConfirm = useCallback(async (
+    scope: "all" | "selected",
+    includeBooks: boolean,
+  ): Promise<void> => {
+    const setup = saveFileExportSetup;
+    setSaveFileExportSetup(null);
+    if (!setup) return;
+    await startNativeExport(setup.selectedEntries, scope, includeBooks);
+  }, [saveFileExportSetup, startNativeExport]);
+
+  const handleLegacyExportArchive = useCallback(async () => {
     if (organizationBusyRef.current) {
       setShelfNotice({ kind: "warn", text: "正在保存分类修改，请稍后再试" });
       return;
@@ -1735,7 +2017,7 @@ export default function App() {
     }
   }, [settings, uiScale]);
 
-  const handleImportArchive = useCallback(async () => {
+  const handleLegacyImportArchive = useCallback(async () => {
     if (shelfBusyRef.current || organizationBusyRef.current) return;
     if (nativeImportRef.current) {
       setShelfNotice({ kind: "warn", text: "正在导入书籍，暂不能替换书库记录" });
@@ -1824,65 +2106,9 @@ export default function App() {
         throw new Error(`书籍记录与组织导入失败：${String(err)}`);
       }
 
-      // 第三步：应用外观与阅读设置
-      try {
-        const importedSettings = incoming.archive.settings ?? {};
-        setSettings((previous) => {
-          // 存档可能来自旧版本：带非默认 gap 但缺 mode 时按 manual；
-          // 两者都缺时不覆盖本机 mode/gap。显式新 mode 始终优先。
-          const importedGapValid =
-            typeof importedSettings.gapPx === "number" &&
-            Number.isFinite(importedSettings.gapPx) &&
-            importedSettings.gapPx >= 0 &&
-            importedSettings.gapPx <= 96;
-          const importedGapMode =
-            importedSettings.spreadGapMode === "auto" || importedSettings.spreadGapMode === "manual"
-              ? importedSettings.spreadGapMode
-              : importedGapValid
-                ? (importedSettings.gapPx === DEFAULT_PAGE_GAP_PX ? "auto" : "manual")
-                : previous.spreadGapMode ?? "auto";
-          return {
-            ...previous,
-            ...(typeof importedSettings.fontSizePx === "number" && importedSettings.fontSizePx >= 12 && importedSettings.fontSizePx <= 32
-              ? { fontSizePx: importedSettings.fontSizePx }
-              : {}),
-            ...(importedSettings.theme === "light" || importedSettings.theme === "dark" || importedSettings.theme === "sepia" || importedSettings.theme === "gray"
-              ? { theme: importedSettings.theme }
-              : {}),
-            ...(typeof importedSettings.fontFamily === "string" ? { fontFamily: importedSettings.fontFamily } : {}),
-            ...(typeof importedSettings.lineHeight === "number" && importedSettings.lineHeight >= 1 && importedSettings.lineHeight <= 3 ? { lineHeight: importedSettings.lineHeight } : {}),
-            ...(typeof importedSettings.fontWeight === "number" && importedSettings.fontWeight >= 100 && importedSettings.fontWeight <= 900 ? { fontWeight: importedSettings.fontWeight } : {}),
-            ...(typeof importedSettings.letterSpacingPx === "number" && importedSettings.letterSpacingPx >= 0 && importedSettings.letterSpacingPx <= 32 ? { letterSpacingPx: importedSettings.letterSpacingPx } : {}),
-            ...(typeof importedSettings.wordSpacingPx === "number" && importedSettings.wordSpacingPx >= 0 && importedSettings.wordSpacingPx <= 64 ? { wordSpacingPx: importedSettings.wordSpacingPx } : {}),
-            ...(typeof importedSettings.customFontName === "string" ? { customFontName: importedSettings.customFontName } : {}),
-            ...(importedSettings.fontSource === "system" || importedSettings.fontSource === "imported" ? { fontSource: importedSettings.fontSource } : {}),
-            ...(typeof importedSettings.customFontId === "string" ? { customFontId: importedSettings.customFontId } : {}),
-            ...(typeof importedSettings.customCss === "string" ? { customCss: importedSettings.customCss } : {}),
-            ...(typeof importedSettings.forceHorizontal === "boolean" ? { forceHorizontal: importedSettings.forceHorizontal } : {}),
-            ...(typeof importedSettings.preloadNextChapter === "boolean" ? { preloadNextChapter: importedSettings.preloadNextChapter } : {}),
-            ...normalizePageOptions({
-              readingMode: importedSettings.readingMode,
-              pageMarginsPx: importedSettings.pageMarginsPx,
-              columnsPerView: importedSettings.columnsPerView,
-              gapPx: importedGapValid ? (importedSettings.gapPx as number) : previous.gapPx,
-              spreadGapMode: importedGapMode,
-            }),
-          };
-        });
-        if (typeof importedSettings.uiScale === "number" && importedSettings.uiScale >= 0.75 && importedSettings.uiScale <= 1.5) {
-          setUiScale(importedSettings.uiScale);
-        }
-      } catch (err) {
-        setShelfNotice({
-          kind: "warn",
-          text: `书籍记录与分类已导入，但阅读设置应用失败：${String(err)}`,
-        });
-        return;
-      }
-
       setShelfNotice({
         kind: unavailableCount > 0 ? "warn" : "ok",
-        text: `已导入 ${Object.keys(incoming.archive.records).length} 本书的记录与分类${unavailableCount > 0 ? `；${unavailableCount} 本需重新定位源文件` : ""}`,
+        text: `已导入 ${Object.keys(incoming.archive.records).length} 本书的记录与分类${unavailableCount > 0 ? `；${unavailableCount} 本需重新定位源文件` : ""}；旧版 JSON 中的外观设置未自动应用`,
       });
     } catch (error) {
       setShelfNotice({ kind: "error", text: `存档导入失败：${String(error)}` });
@@ -1892,6 +2118,26 @@ export default function App() {
       setShelfBusy(false);
     }
   }, [settings, uiScale]);
+
+  const handleExportArchive = useCallback((selectedEntries?: ShelfEntry[]): void => {
+    if (runtime.platform === "web" || !isTauriEnv()) {
+      void handleLegacyExportArchive();
+      return;
+    }
+    if (saveFileJob.active) {
+      setShelfNotice({ kind: "warn", text: "已有存档文件任务正在进行，请等待当前任务结束" });
+      return;
+    }
+    setSaveFileExportSetup({ selectedEntries: selectedEntries ?? [] });
+  }, [handleLegacyExportArchive, runtime.platform, saveFileJob.active]);
+
+  const handleImportArchive = useCallback((): void => {
+    if (runtime.platform === "web" || !isTauriEnv()) {
+      void handleLegacyImportArchive();
+      return;
+    }
+    void startNativeImport();
+  }, [handleLegacyImportArchive, runtime.platform, startNativeImport]);
 
   // ---- 书架与组织启动加载（先完成一次 CP-I 激活，失败保持旧模式） ----
   useEffect(() => {
@@ -4130,6 +4376,10 @@ export default function App() {
       activeElement.blur();
       return;
     }
+    if (saveFileExportSetup || saveFileJob.active) {
+      void closeSaveFileUi();
+      return;
+    }
     if (imageRequestRef.current) {
       closeImageOverlay();
       return;
@@ -4152,11 +4402,14 @@ export default function App() {
     }
   }, [
     closeImageOverlay,
+    closeSaveFileUi,
     handleBackToShelf,
     isSidebarOpen,
     mobileMoreOpen,
     requestCloseCurrentSurface,
     responsive.imeBottom,
+    saveFileExportSetup,
+    saveFileJob.active,
     view,
   ]);
 
@@ -4166,6 +4419,7 @@ export default function App() {
       foreground.kind !== "none" ||
       imageRequest !== null ||
       shelfBackActive ||
+      saveFileActive ||
       mobileMoreOpen
     ),
     handleAndroidBack
@@ -4857,6 +5111,7 @@ export default function App() {
               onApplyOrganization={handleApplyOrganization}
               busy={shelfBusy}
               importActive={nativeImport !== null}
+              saveFileActive={saveFileActive}
               theme={settings.theme}
               onThemeChange={changeTheme}
               onOpen={handleShelfOpen}
@@ -4865,8 +5120,13 @@ export default function App() {
               onDeleteMany={handleShelfDeleteMany}
               registerBackHandler={registerShelfBackHandler}
               onBackAvailabilityChange={reportShelfBackActive}
-              onExportArchive={() => void handleExportArchive()}
-              onImportArchive={() => void handleImportArchive()}
+              onExportArchive={handleExportArchive}
+              onImportArchive={handleImportArchive}
+              onImportLegacyArchive={
+                runtime.platform === "web" || !isTauriEnv()
+                  ? undefined
+                  : () => void handleLegacyImportArchive()
+              }
               thumbnailProvider={shelfThumbnailProvider}
               searchMode={shelfSearchMode}
               onSearchModeChange={(mode) => {
@@ -5426,6 +5686,23 @@ export default function App() {
           <span className="bookmark-toast-text">{bookmarkToast.text}</span>
         </div>
       )}
+      {saveFileExportSetup && (
+        <SaveFileExportDialog
+          selectedCount={saveFileExportSetup.selectedEntries.length}
+          onCancel={() => setSaveFileExportSetup(null)}
+          onConfirm={(scope, includeBooks) => void handleSaveFileExportConfirm(scope, includeBooks)}
+        />
+      )}
+      {saveFileJob.state.kind === "prepared" && (
+        <SaveFileImportPreview
+          preview={saveFileJob.state.preview}
+          sourceLabel={saveFileJob.state.sourceLabel}
+          canceling={saveFileJob.state.canceling}
+          onCancel={() => void closeSaveFileUi()}
+          onConfirm={(applyPreferences) => void handleSaveFileImportConfirm(applyPreferences)}
+        />
+      )}
+      <SaveFileProgressPanel state={saveFileJob.state} onCancel={() => void closeSaveFileUi()} />
       {nativeImport && (
         <NativeImportPanel
           phase={nativeImport.phase}

@@ -12,7 +12,7 @@ use crate::linked_library::LinkedLibraryWriteState;
 use crate::portable_state::PortableStateV3;
 use crate::portable_state_commands::with_existing_store;
 use std::collections::BTreeSet;
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -623,6 +623,54 @@ fn compute_missing_books(
         .collect()
 }
 
+fn existing_attachment_matches(
+    target: &Path,
+    content_hash: &str,
+) -> Result<bool, SaveFileError> {
+    if super::sha256_file(target)? == content_hash {
+        Ok(false)
+    } else {
+        Err(SaveFileError::new(
+            "conflict",
+            "已有书籍副本内容不同，未覆盖；请先处理该文件",
+        ))
+    }
+}
+
+/// Android SELinux commonly denies `link(2)` from cache to local data. Fall
+/// back to an exclusive create+copy; `create_new` preserves the same
+/// no-overwrite contract as the hard-link path, and callers still clean up
+/// only files created by this job when the SQL transaction fails.
+fn copy_attachment_exclusive(
+    attachment: &super::PreparedAttachment,
+    target: &Path,
+) -> Result<bool, SaveFileError> {
+    let mut source = File::open(&attachment.staging_path)?;
+    let mut destination = match OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(target)
+    {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            return existing_attachment_matches(target, &attachment.content_hash);
+        }
+        Err(error) => return Err(error.into()),
+    };
+
+    let copied = (|| -> Result<(), std::io::Error> {
+        std::io::copy(&mut source, &mut destination)?;
+        destination.sync_all()?;
+        Ok(())
+    })();
+    if let Err(error) = copied {
+        drop(destination);
+        let _ = fs::remove_file(target);
+        return Err(error.into());
+    }
+    Ok(true)
+}
+
 fn publish_attachment(
     attachment: &super::PreparedAttachment,
     target: &Path,
@@ -631,14 +679,13 @@ fn publish_attachment(
     match fs::hard_link(&attachment.staging_path, target) {
         Ok(()) => Ok(true),
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-            if super::sha256_file(target)? == attachment.content_hash {
-                Ok(false)
-            } else {
-                Err(SaveFileError::new(
-                    "conflict",
-                    "已有书籍副本内容不同，未覆盖；请先处理该文件",
-                ))
-            }
+            existing_attachment_matches(target, &attachment.content_hash)
+        }
+        Err(error)
+            if error.kind() == std::io::ErrorKind::PermissionDenied
+                || error.kind() == std::io::ErrorKind::Unsupported =>
+        {
+            copy_attachment_exclusive(attachment, target)
         }
         Err(error) => Err(error.into()),
     }
@@ -912,6 +959,35 @@ pub async fn save_file_cancel(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn file_review_android_copy_fallback_is_exclusive_and_idempotent() {
+        let dir = std::env::temp_dir().join(format!("epub-save-copy-{}", new_uuid().unwrap()));
+        fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("source.epub");
+        let target = dir.join("target.epub");
+        let bytes = b"copy fallback bytes";
+        fs::write(&source, bytes).unwrap();
+        let attachment = super::super::PreparedAttachment {
+            content_hash: super::super::hex_digest(bytes),
+            staging_path: source.clone(),
+            bytes: bytes.len() as u64,
+            sha256: super::super::hex_digest(bytes),
+        };
+
+        assert!(copy_attachment_exclusive(&attachment, &target).unwrap());
+        assert_eq!(fs::read(&target).unwrap(), bytes);
+        assert!(!copy_attachment_exclusive(&attachment, &target).unwrap());
+        assert_eq!(fs::read(&target).unwrap(), bytes);
+
+        fs::write(&target, b"different existing bytes").unwrap();
+        assert_eq!(
+            copy_attachment_exclusive(&attachment, &target).unwrap_err().code,
+            "conflict"
+        );
+        assert_eq!(fs::read(&target).unwrap(), b"different existing bytes");
+        fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn file_review_publication_preserves_existing_files_and_cleans_only_own() {

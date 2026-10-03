@@ -8,6 +8,7 @@ import type { PortableActivationResult, PortableStateDataService } from "./porta
 import { sanitizePersistedTextAnchor } from "../render/textAnchor";
 import type { MediaReadingAnchor } from "../render/paginator";
 import type { Stamp } from "../core/portableState/portable-register-core";
+import type { PortablePreferences } from "../core/portableState/portable-state-types";
 import type { LibraryRecord } from "./libraryArchive";
 import type { ThumbnailAsset, ThumbnailProvider } from "./thumbnail";
 import { hasDuplicateReaderNoteIds, normalizeReaderNotes, type ReaderNote } from "./notes";
@@ -1287,6 +1288,14 @@ export async function activatePortableShelfState(): Promise<PortableActivationRe
 /** Test/UI query: whether the portable facade is currently active. */
 export function portableShelfStateActive(): boolean {
   return cachedPortableStore !== null;
+}
+
+/** Read the preferences stored in the active portable repository after a file import. */
+export async function readPortablePreferencesSnapshot(): Promise<PortablePreferences | undefined> {
+  await activatePortableShelfState();
+  if (!portableDataService) return undefined;
+  const state = await portableDataService.snapshot();
+  return state.preferences;
 }
 
 const thumbnailMimeByHash = new Map<string, string>();

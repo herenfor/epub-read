@@ -1,0 +1,179 @@
+.save-file-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(18, 22, 28, 0.52);
+}
+
+.save-file-dialog {
+  width: min(520px, 100%);
+  max-height: min(680px, calc(100vh - 32px));
+  overflow: auto;
+  border: 1px solid var(--border, #d5dae1);
+  border-radius: 14px;
+  background: var(--surface, #fff);
+  color: var(--text, #1d2129);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.28);
+}
+
+.save-file-dialog-head {
+  padding: 18px 20px 10px;
+}
+
+.save-file-dialog-head h2 {
+  margin: 0 0 6px;
+  font-size: 18px;
+}
+
+.save-file-dialog-head p,
+.save-file-muted {
+  margin: 0;
+  color: var(--text-muted, #68717d);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.save-file-dialog-body {
+  display: grid;
+  gap: 14px;
+  padding: 8px 20px 16px;
+}
+
+.save-file-fieldset {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border, #d5dae1);
+  border-radius: 10px;
+}
+
+.save-file-fieldset legend {
+  padding: 0 4px;
+  color: var(--text-muted, #68717d);
+  font-size: 12px;
+}
+
+.save-file-radio,
+.save-file-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 14px;
+  line-height: 1.45;
+  cursor: pointer;
+}
+
+.save-file-radio.disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.save-file-radio input,
+.save-file-check input {
+  margin-top: 3px;
+}
+
+.save-file-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.save-file-summary > div {
+  padding: 9px 10px;
+  border-radius: 9px;
+  background: rgba(127, 140, 158, 0.1);
+}
+
+.save-file-summary dt {
+  color: var(--text-muted, #68717d);
+  font-size: 12px;
+}
+
+.save-file-summary dd {
+  margin: 3px 0 0;
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.save-file-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 20px 18px;
+  border-top: 1px solid var(--border, #d5dae1);
+}
+
+.save-file-dialog-actions button,
+.save-file-progress button {
+  min-height: 38px;
+  padding: 7px 16px;
+  border: 1px solid var(--border, #d5dae1);
+  border-radius: 9px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.save-file-dialog-actions button.primary {
+  border-color: var(--accent, #3b6fd4);
+  background: var(--accent, #3b6fd4);
+  color: #fff;
+}
+
+.save-file-dialog-actions button:disabled,
+.save-file-progress button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.save-file-progress {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 82;
+  display: grid;
+  gap: 8px;
+  width: min(340px, calc(100vw - 32px));
+  padding: 14px 16px;
+  border: 1px solid var(--border, #d5dae1);
+  border-radius: 12px;
+  background: var(--surface, #fff);
+  color: var(--text, #1d2129);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.2);
+}
+
+.save-file-progress-title {
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.save-file-progress-text {
+  font-size: 13px;
+  color: var(--text-muted, #68717d);
+}
+
+.save-file-progress-note {
+  font-size: 12px;
+  color: #a66300;
+}
+
+.save-file-progress button {
+  justify-self: start;
+}
+
+@media (max-width: 560px) {
+  .save-file-summary {
+    grid-template-columns: 1fr;
+  }
+  .save-file-progress {
+    right: 12px;
+    bottom: 12px;
+  }
+}
