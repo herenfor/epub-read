@@ -78,6 +78,8 @@ import { ReaderView, type ReaderHandle } from "./ui/ReaderView";
 import type { ReaderNoteForPaginator } from "./render/paginator";
 import { ShelfView } from "./ui/ShelfView";
 import { NativeImportPanel, type NativeImportCancelState } from "./ui/NativeImportPanel";
+import { LanSavePanel } from "./ui/LanSavePanel";
+import { useLanSaveSession } from "./ui/useLanSaveSession";
 import { SaveFileExportDialog, SaveFileImportPreview, SaveFileProgressPanel } from "./ui/SaveFileDialogs";
 import { useSaveFileJob } from "./ui/useSaveFileJob";
 import {
@@ -92,8 +94,9 @@ import {
 import {
   saveFileErrorCode,
   saveFileErrorMessage,
-  type SaveFileLocation,
   type SaveExportScope,
+  type SaveFileCommitResult,
+  type SaveFileLocation,
 } from "./platform/saveFileNativeBridge";
 import {
   activatePortableShelfState,
@@ -711,6 +714,10 @@ export default function App() {
   } | null>(null);
   const saveFileActive = saveFileJob.active || saveFileExportSetup !== null;
   const saveFileLaunchRef = useRef(false);
+  const [lanSaveOpen, setLanSaveOpen] = useState(false);
+  const [lanSaveSelection, setLanSaveSelection] = useState<ShelfEntry[]>([]);
+  const lanSaveSelectionRef = useRef<ShelfEntry[]>([]);
+  const lanSaveActiveRef = useRef(false);
   const [currentShelfId, setCurrentShelfId] = useState<string | null>(null);
   const shelfBusyRef = useRef(false);
   const shelfEntriesRef = useRef<ShelfEntry[]>([]);
@@ -1806,13 +1813,52 @@ export default function App() {
     return { source: { kind: "path", path }, label: path.split(/[\\/]/).pop() || path };
   }, [runtime.platform]);
 
+  const resolveNativeExportScope = useCallback(async (
+    selectedEntries: ShelfEntry[],
+    scopeChoice: "all" | "selected",
+  ): Promise<{ scope: SaveExportScope; rangeLabel: string }> => {
+    let scope: SaveExportScope;
+    let rangeLabel: string;
+    if (scopeChoice === "selected") {
+      if (selectedEntries.length === 0) {
+        const error = new Error("没有选中的书可导出") as Error & { code: string };
+        error.code = "empty-selection";
+        throw error;
+      }
+      const resolved: string[] = [];
+      try {
+        for (const entry of selectedEntries) resolved.push(await resolveContentHashForEntry(entry));
+      } catch (error) {
+        throw new Error(`无法解析选中书籍的内容指纹：${saveFileErrorMessage(error)}`);
+      }
+      const bookHashes = [...new Set(resolved)];
+      if (bookHashes.length === 0) {
+        throw new Error("选中书籍没有可用的内容指纹，未发起导出");
+      }
+      scope = { kind: "selected", bookHashes };
+      rangeLabel = `选中的 ${bookHashes.length} 本资料`;
+    } else {
+      scope = { kind: "all" };
+      rangeLabel = "全库资料";
+    }
+
+    try {
+      await activatePortableShelfState();
+      persistShelfProgressRef.current();
+      await progressWriterRef.current?.flush();
+    } catch (error) {
+      throw new Error(`导出前保存阅读进度失败：${saveFileErrorMessage(error)}`);
+    }
+    return { scope, rangeLabel };
+  }, [resolveContentHashForEntry]);
+
   const startNativeExport = useCallback(async (
     selectedEntries: ShelfEntry[],
     scopeChoice: "all" | "selected",
     includeBooks: boolean,
   ): Promise<void> => {
-    if (saveFileJob.active || saveFileLaunchRef.current) {
-      setShelfNotice({ kind: "warn", text: "已有存档文件任务正在进行，请等待当前任务结束" });
+    if (saveFileJob.active || saveFileLaunchRef.current || lanSaveActiveRef.current) {
+      setShelfNotice({ kind: "warn", text: "已有存档或互传任务正在进行，请等待当前任务结束" });
       return;
     }
     saveFileLaunchRef.current = true;
@@ -1828,36 +1874,17 @@ export default function App() {
 
     let scope: SaveExportScope;
     let rangeLabel: string;
-    if (scopeChoice === "selected") {
-      if (selectedEntries.length === 0) {
-        setShelfNotice({ kind: "warn", text: "没有选中的书可导出" });
-        return;
-      }
-      const resolved: string[] = [];
-      try {
-        for (const entry of selectedEntries) resolved.push(await resolveContentHashForEntry(entry));
-      } catch (error) {
-        setShelfNotice({ kind: "error", text: `无法解析选中书籍的内容指纹：${saveFileErrorMessage(error)}` });
-        return;
-      }
-      const bookHashes = [...new Set(resolved)];
-      if (bookHashes.length === 0) {
-        setShelfNotice({ kind: "error", text: "选中书籍没有可用的内容指纹，未发起导出" });
-        return;
-      }
-      scope = { kind: "selected", bookHashes };
-      rangeLabel = `选中的 ${bookHashes.length} 本资料`;
-    } else {
-      scope = { kind: "all" };
-      rangeLabel = "全库资料";
-    }
-
     try {
-      await activatePortableShelfState();
-      persistShelfProgressRef.current();
-      await progressWriterRef.current?.flush();
+      const prepared = await resolveNativeExportScope(selectedEntries, scopeChoice);
+      scope = prepared.scope;
+      rangeLabel = prepared.rangeLabel;
     } catch (error) {
-      setShelfNotice({ kind: "error", text: `导出前保存阅读进度失败：${saveFileErrorMessage(error)}` });
+      const emptySelection = saveFileErrorCode(error) === "empty-selection"
+        || saveFileErrorMessage(error).includes("没有选中的书可导出");
+      setShelfNotice({
+        kind: emptySelection ? "warn" : "error",
+        text: saveFileErrorMessage(error),
+      });
       return;
     }
 
@@ -1889,11 +1916,11 @@ export default function App() {
     } finally {
       saveFileLaunchRef.current = false;
     }
-  }, [chooseSaveFileDestination, resolveContentHashForEntry, saveFileJob]);
+  }, [chooseSaveFileDestination, resolveNativeExportScope, saveFileJob]);
 
   const startNativeImport = useCallback(async (): Promise<void> => {
-    if (saveFileJob.active || saveFileLaunchRef.current) {
-      setShelfNotice({ kind: "warn", text: "已有存档文件任务正在进行，请等待当前任务结束" });
+    if (saveFileJob.active || saveFileLaunchRef.current || lanSaveActiveRef.current) {
+      setShelfNotice({ kind: "warn", text: "已有存档或互传任务正在进行，请等待当前任务结束" });
       return;
     }
     saveFileLaunchRef.current = true;
@@ -1922,50 +1949,91 @@ export default function App() {
     }
   }, [chooseSaveFileSource, saveFileJob]);
 
+  const prepareLanSaveSend = useCallback(async (
+    scopeChoice: "all" | "selected",
+    _includeBooks: boolean,
+  ): Promise<SaveExportScope> => {
+    if (saveFileJob.active || saveFileLaunchRef.current) {
+      throw new Error("已有存档文件任务正在进行，请等待当前任务结束");
+    }
+    if (nativeImportRef.current) {
+      throw new Error("正在导入书籍，暂不开始局域网互传");
+    }
+    const prepared = await resolveNativeExportScope(lanSaveSelectionRef.current, scopeChoice);
+    return prepared.scope;
+  }, [resolveNativeExportScope, saveFileJob.active]);
+
+  const applySaveFileCommitResult = useCallback(async (
+    result: SaveFileCommitResult,
+    applyPreferences: boolean,
+  ): Promise<void> => {
+    let refreshFailed = false;
+    try {
+      await refreshShelfProjection();
+    } catch (error) {
+      refreshFailed = true;
+      setShelfError(`存档已提交，但刷新书架失败：${saveFileErrorMessage(error)}`);
+    }
+
+    let preferencesFailed = false;
+    let preferencesApplied = false;
+    if (applyPreferences && result.appliedPreferences) {
+      try {
+        const preferences = await readPortablePreferencesSnapshot();
+        preferencesApplied = applyPortablePreferences(preferences);
+      } catch (error) {
+        preferencesFailed = true;
+        setShelfNotice({
+          kind: "warn",
+          text: `书籍资料已导入，但外观设置读取失败：${saveFileErrorMessage(error)}`,
+        });
+      }
+    }
+
+    if (preferencesFailed) return;
+    const conflictNote = result.progressConflictBooks.length > 0
+      ? `；${result.progressConflictBooks.length} 本有进度分歧，打开时可选择`
+      : "";
+    const preferenceNote = applyPreferences && !result.appliedPreferences
+      ? "；存档外观设置未应用，本机设置保持不变"
+      : preferencesApplied
+        ? "；已应用存档中的外观设置"
+        : "";
+    setShelfNotice({
+      kind: result.missingBooks.length > 0 || refreshFailed || (applyPreferences && !result.appliedPreferences) ? "warn" : "ok",
+      text: `已导入 ${result.importedBooks.length} 本资料；${result.missingBooks.length} 本待补书籍${conflictNote}${preferenceNote}${refreshFailed ? "；书架刷新失败" : ""}`,
+    });
+  }, [applyPortablePreferences, refreshShelfProjection]);
+
+  const lanSaveSession = useLanSaveSession({
+    prepareSend: prepareLanSaveSend,
+    onImportCommitted: applySaveFileCommitResult,
+  });
+  lanSaveActiveRef.current = lanSaveSession.active;
+
   const handleSaveFileImportConfirm = useCallback(async (applyPreferences: boolean): Promise<void> => {
     if (saveFileJobStateRef.current.kind !== "prepared") return;
     try {
       const result = await saveFileJob.commit(applyPreferences);
-      let refreshFailed = false;
-      try {
-        await refreshShelfProjection();
-      } catch (error) {
-        refreshFailed = true;
-        setShelfError(`存档已提交，但刷新书架失败：${saveFileErrorMessage(error)}`);
-      }
-
-      let preferencesFailed = false;
-      let preferencesApplied = false;
-      if (applyPreferences && result.appliedPreferences) {
-        try {
-          const preferences = await readPortablePreferencesSnapshot();
-          preferencesApplied = applyPortablePreferences(preferences);
-        } catch (error) {
-          preferencesFailed = true;
-          setShelfNotice({
-            kind: "warn",
-            text: `书籍资料已导入，但外观设置读取失败：${saveFileErrorMessage(error)}`,
-          });
-        }
-      }
-
-      if (preferencesFailed) return;
-      const conflictNote = result.progressConflictBooks.length > 0
-        ? `；${result.progressConflictBooks.length} 本有进度分歧，打开时可选择`
-        : "";
-      const preferenceNote = applyPreferences && !result.appliedPreferences
-        ? "；存档外观设置未应用，本机设置保持不变"
-        : preferencesApplied
-          ? "；已应用存档中的外观设置"
-          : "";
-      setShelfNotice({
-        kind: result.missingBooks.length > 0 || refreshFailed || (applyPreferences && !result.appliedPreferences) ? "warn" : "ok",
-        text: `已导入 ${result.importedBooks.length} 本资料；${result.missingBooks.length} 本待补书籍${conflictNote}${preferenceNote}${refreshFailed ? "；书架刷新失败" : ""}`,
-      });
+      await applySaveFileCommitResult(result, applyPreferences);
     } catch (error) {
       setShelfNotice({ kind: "error", text: `存档导入失败：${saveFileErrorMessage(error)}` });
     }
-  }, [applyPortablePreferences, refreshShelfProjection, saveFileJob]);
+  }, [applySaveFileCommitResult, saveFileJob]);
+
+  const handleOpenLanSave = useCallback((selectedEntries?: ShelfEntry[]): void => {
+    if (lanSaveActiveRef.current) { setLanSaveOpen(true); return; }
+    if (saveFileJobStateRef.current.kind !== "idle" || saveFileLaunchRef.current || nativeImportRef.current) return;
+    const selection = selectedEntries ?? [];
+    lanSaveSelectionRef.current = selection;
+    setLanSaveSelection(selection);
+    setLanSaveOpen(true);
+  }, []);
+
+  const closeLanSavePanel = useCallback((): void => {
+    setLanSaveOpen(false);
+    void lanSaveSession.close();
+  }, [lanSaveSession]);
 
   const closeSaveFileUi = useCallback(async (): Promise<void> => {
     setSaveFileExportSetup(null);
@@ -4416,6 +4484,16 @@ export default function App() {
       activeElement.blur();
       return;
     }
+    if (lanSaveOpen) {
+      closeLanSavePanel();
+      return;
+    }
+    if (lanSaveSession.active) {
+      // A committing session may be hidden on purpose; Back must not exit the
+      // app or fall through to the reader while its real result is pending.
+      setLanSaveOpen(true);
+      return;
+    }
     if (saveFileExportSetup || saveFileJob.active) {
       void closeSaveFileUi();
       return;
@@ -4442,9 +4520,12 @@ export default function App() {
     }
   }, [
     closeImageOverlay,
+    closeLanSavePanel,
     closeSaveFileUi,
     handleBackToShelf,
     isSidebarOpen,
+    lanSaveOpen,
+    lanSaveSession.active,
     mobileMoreOpen,
     requestCloseCurrentSurface,
     responsive.imeBottom,
@@ -4460,6 +4541,8 @@ export default function App() {
       imageRequest !== null ||
       shelfBackActive ||
       saveFileActive ||
+      lanSaveOpen ||
+      lanSaveSession.active ||
       mobileMoreOpen
     ),
     handleAndroidBack
@@ -5154,6 +5237,8 @@ export default function App() {
               busy={shelfBusy}
               importActive={nativeImport !== null}
               saveFileActive={saveFileActive}
+              lanTransferActive={lanSaveSession.active}
+              onOpenLanTransfer={runtime.supportsLanTransfer ? handleOpenLanSave : undefined}
               theme={settings.theme}
               onThemeChange={changeTheme}
               batteryIndicatorEnabled={runtime.platform === "android" ? batteryIndicatorEnabled : undefined}
@@ -5728,6 +5813,15 @@ export default function App() {
         />
       )}
       <SaveFileProgressPanel state={saveFileJob.state} onCancel={() => void closeSaveFileUi()} />
+      {lanSaveOpen && runtime.supportsLanTransfer && (
+        <LanSavePanel
+          open={lanSaveOpen}
+          session={lanSaveSession}
+          selectedEntries={lanSaveSelection}
+          isAndroid={runtime.platform === "android"}
+          onClose={closeLanSavePanel}
+        />
+      )}
       {nativeImport && (
         <NativeImportPanel
           phase={nativeImport.phase}

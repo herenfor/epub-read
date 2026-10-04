@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- CAMERA is declared for ZXing CaptureActivity but only requested when the user taps scan. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- Camera hardware is optional; scanner entry stays hidden/unavailable on devices without it. -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
