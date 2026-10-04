@@ -55,7 +55,7 @@ mod android {
     use tauri::{AppHandle, Manager, Runtime};
 
     const PLUGIN_NAME: &str = "androidBattery";
-    const PLUGIN_PACKAGE: &str = "dev.epubreader.app";
+    const PLUGIN_PACKAGE: &str = "dev.herenfor.epubreader";
     const PLUGIN_CLASS: &str = "ReaderBatteryPlugin";
 
     #[derive(Deserialize)]

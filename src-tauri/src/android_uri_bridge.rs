@@ -390,7 +390,7 @@ mod android {
     use tauri::{AppHandle, Manager, Runtime};
 
     const PLUGIN_NAME: &str = "androidUriBridge";
-    const PLUGIN_PACKAGE: &str = "dev.epubreader.app";
+    const PLUGIN_PACKAGE: &str = "dev.herenfor.epubreader";
     const PLUGIN_CLASS: &str = "AndroidUriBridgePlugin";
 
     pub(crate) struct AndroidUriBridge<R: Runtime>(PluginHandle<R>);

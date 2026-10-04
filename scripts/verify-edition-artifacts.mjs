@@ -17,7 +17,7 @@ if (!existsSync(outDir)) throw new Error(`missing ${outDir}`);
 walk(outDir);
 if (!existsSync(join(outDir, "edition-manifest.json"))) throw new Error("missing edition-manifest.json");
 const manifest = JSON.parse(readFileSync(join(outDir, "edition-manifest.json"), "utf8"));
-const expected = { schemaVersion: 1, edition, platform, shell, version: JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")).version, expectedBackendFeature: edition, identifier: edition === "ai" ? "dev.epubreader.ai" : "dev.epubreader.app" };
+const expected = { schemaVersion: 1, edition, platform, shell, version: JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")).version, expectedBackendFeature: edition, identifier: platform === "android" ? (edition === "ai" ? "dev.herenfor.epubreader.ai" : "dev.herenfor.epubreader") : (edition === "ai" ? "dev.epubreader.ai" : "dev.epubreader.app") };
 for (const [key, value] of Object.entries(expected)) if (manifest[key] !== value) throw new Error(`edition manifest mismatch: ${key}`);
 const fileNames = files.map((p) => p.slice(outDir.length + 1)).join("\n");
 const text = files.filter((p) => /\.(js|css|html|json)$/.test(p)).map((p) => readFileSync(p, "utf8")).join("\n");

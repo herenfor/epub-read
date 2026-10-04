@@ -21,10 +21,10 @@ val releaseSigning = System.getenv("EPUB_READER_SIGNING_PROPERTIES")
 
 android {
     compileSdk = 36
-    namespace = "dev.epubreader.app"
+    namespace = "dev.herenfor.epubreader"
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
-        applicationId = "dev.epubreader.app"
+        applicationId = "dev.herenfor.epubreader"
         minSdk = 24
         targetSdk = 36
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()

@@ -13,7 +13,11 @@ export default defineConfig(({ mode }) => {
   const platform = normalizeAppPlatform(env.VITE_APP_PLATFORM ?? "windows");
   const shell = shellForPlatform(platform);
   const version = packageJson.version;
-  const identifier = edition === "ai" ? "dev.epubreader.ai" : "dev.epubreader.app";
+  // Android ships under its own application ID; Windows keeps the original
+  // identifier because it names the existing app data directory.
+  const identifier = platform === "android"
+    ? (edition === "ai" ? "dev.herenfor.epubreader.ai" : "dev.herenfor.epubreader")
+    : (edition === "ai" ? "dev.epubreader.ai" : "dev.epubreader.app");
   return {
     // Keep edition and target decisions in the compiled module graph. This
     // lets a core desktop build remove AI/Android-only branches instead of
