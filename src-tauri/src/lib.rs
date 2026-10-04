@@ -75,6 +75,8 @@ macro_rules! configure_invoke_handler {
             ai::ai_index_status,
             ai::ai_cache_status,
             ai::ai_cache_clear,
+            ai::cache_storage_get_status,
+            ai::cache_storage_set_directory,
             ai::ai_search,
             ai::ai_task_enqueue,
             ai::ai_task_acquire_library_index,
@@ -185,6 +187,8 @@ macro_rules! configure_invoke_handler {
             ai::ai_index_status,
             ai::ai_cache_status,
             ai::ai_cache_clear,
+            ai::cache_storage_get_status,
+            ai::cache_storage_set_directory,
             ai::ai_search,
             ai::ai_task_enqueue,
             ai::ai_task_acquire_library_index,
@@ -217,16 +221,18 @@ pub fn run() {
     }));
 
     let builder = builder
-        .setup(|app| {
-            let _ = save_file::cleanup_stale_staging(app.handle());
-            Ok(())
-        })
         .manage(FontWriteState::default())
         .manage(LinkedLibraryWriteState::default())
         .manage(linked_library::ManagedImportState::default())
         .manage(portable_state_commands::PortableStateManager::default())
         .manage(save_file::SaveFileManager::default())
         .manage(ai::AiState::default())
+        .setup(|app| {
+            let _ = save_file::cleanup_stale_staging(app.handle());
+            app.state::<ai::AiState>()
+                .capture_startup_cache_choice(app.handle());
+            Ok(())
+        })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init());

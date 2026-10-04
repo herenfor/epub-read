@@ -8,6 +8,10 @@ export interface RuntimeCapabilities {
   hasDesktopWindowChrome: boolean;
   /** True when system Back should be coordinated by the app root. */
   usesAndroidBack: boolean;
+  /** Cache panel is available on Windows desktop and Android. */
+  supportsCacheStorage: boolean;
+  /** Native folder picking is only offered on Windows in this package. */
+  supportsCustomCacheDirectory: boolean;
 }
 
 export function getRuntimeCapabilities(): RuntimeCapabilities {
@@ -19,5 +23,7 @@ export function getRuntimeCapabilities(): RuntimeCapabilities {
     shell,
     hasDesktopWindowChrome: shell === "desktop",
     usesAndroidBack: platform === "android",
+    supportsCacheStorage: platform === "windows" || platform === "android",
+    supportsCustomCacheDirectory: platform === "windows",
   };
 }
