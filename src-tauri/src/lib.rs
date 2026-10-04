@@ -5,6 +5,7 @@ mod build_info;
 mod build_info_contract;
 mod import_gate;
 mod ipc_bytes;
+mod lan_save;
 mod portable_state_commands;
 mod save_file;
 
@@ -56,6 +57,12 @@ macro_rules! configure_invoke_handler {
             save_file::commands::save_file_prepare_import,
             save_file::commands::save_file_commit_import,
             save_file::commands::save_file_cancel,
+            lan_save::commands::lan_save_host,
+            lan_save::commands::lan_save_join,
+            lan_save::commands::lan_save_send,
+            lan_save::commands::lan_save_accept,
+            lan_save::commands::lan_save_commit,
+            lan_save::commands::lan_save_close,
             fonts_import_raw,
             fonts_import_paths,
             fonts_list,
@@ -168,6 +175,12 @@ macro_rules! configure_invoke_handler {
             save_file::commands::save_file_prepare_import,
             save_file::commands::save_file_commit_import,
             save_file::commands::save_file_cancel,
+            lan_save::commands::lan_save_host,
+            lan_save::commands::lan_save_join,
+            lan_save::commands::lan_save_send,
+            lan_save::commands::lan_save_accept,
+            lan_save::commands::lan_save_commit,
+            lan_save::commands::lan_save_close,
             fonts_import_raw,
             fonts_import_paths,
             fonts_list,
@@ -226,6 +239,7 @@ pub fn run() {
         .manage(linked_library::ManagedImportState::default())
         .manage(portable_state_commands::PortableStateManager::default())
         .manage(save_file::SaveFileManager::default())
+        .manage(lan_save::LanSaveManager::default())
         .manage(ai::AiState::default())
         .setup(|app| {
             let _ = save_file::cleanup_stale_staging(app.handle());
