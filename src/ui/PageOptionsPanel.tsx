@@ -5,6 +5,7 @@ import {
   PAGE_MARGIN_MAX_PX,
   PAGE_MARGIN_STEP_PX,
   autoPageMarginsPx,
+  COMPACT_PAGE_WIDTH_PX,
   type PageMarginsPx,
   type PageOptionsValue,
 } from "../render/pageLayout";
@@ -116,7 +117,10 @@ export function PageOptionsPanel(props: PageOptionsPanelProps) {
   const scrollMode = value.readingMode === "scroll";
   const reflowDisabled = props.fixedLayout;
   const columnControlsDisabled = reflowDisabled || scrollMode;
-  const auto = autoPageMarginsPx(props.fontSizePx);
+  const auto = autoPageMarginsPx(
+    props.fontSizePx,
+    typeof window !== "undefined" && window.innerWidth < COMPACT_PAGE_WIDTH_PX,
+  );
 
   const commit = (patch: PagePatch): void => {
     const next: PageOptionsValue = { gapPx: patch.gapPx ?? value.gapPx };
@@ -136,7 +140,7 @@ export function PageOptionsPanel(props: PageOptionsPanelProps) {
   // 与左右 0。此处只负责显示/步进基准，真正扣除仍在 paginator 的测量入口。
   const marginAutoValue = (side: MarginSide): number => {
     if (scrollMode) return side === "left" || side === "right" ? 16 : 12;
-    return side === "top" ? auto.top : side === "bottom" ? auto.bottom : 0;
+    return auto[side];
   };
 
   const setMargin = (side: MarginSide, next: number | undefined): void => {

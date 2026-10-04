@@ -41,7 +41,7 @@ import {
   type ReadingMode,
   type ScrollMetrics,
 } from "./scrollLayout";
-import { MIN_COLUMN_WIDTH_PX } from "./pageLayout";
+import { autoPageMarginsPx, COMPACT_PAGE_WIDTH_PX, MIN_COLUMN_WIDTH_PX } from "./pageLayout";
 import { installPagedSwipe, type PagedSwipeHandlers } from "./pagedSwipe";
 import { installPlainTap } from "./plainTap";
 import {
@@ -3198,17 +3198,20 @@ export class ChapterPaginator {
     const gap = this.settings.gapPx;
     const h = pageH;
     const scrollMode = this.scrollMode;
-    // 旧单页/滚动语义保留：滚动左右默认 16px；分页左右无显式值时为 0。
-    const marginLeft = Math.max(0, margins.left ?? (scrollMode ? 16 : 0));
-    const marginRight = Math.max(0, margins.right ?? (scrollMode ? 16 : 0));
+    // 旧单页/滚动语义保留：滚动左右默认 16px；分页左右无显式值时宽屏为 0，
+    // 窄屏（手机竖屏）用 autoPageMarginsPx 的紧凑口径，避免正文贴边。
+    const compactAuto = !scrollMode && !this.fixedLayout && pageW > 0 && pageW < COMPACT_PAGE_WIDTH_PX;
+    const autoMargins = autoPageMarginsPx(em, compactAuto);
+    const marginLeft = Math.max(0, margins.left ?? (scrollMode ? 16 : this.fixedLayout ? 0 : autoMargins.left));
+    const marginRight = Math.max(0, margins.right ?? (scrollMode ? 16 : this.fixedLayout ? 0 : autoMargins.right));
     const legacyW = scrollMode ? pageW : Math.max(0, pageW - marginLeft - marginRight);
     // 极窄/矮窗口只缩小有效留白以留出正文，不修改保存值。
     const requestedTop = margins.top !== undefined
       ? Math.max(0, margins.top)
-      : this.fixedLayout ? 0 : scrollMode ? 12 : TEXT_MEASURE.vTopEm * em;
+      : this.fixedLayout ? 0 : scrollMode ? 12 : compactAuto ? autoMargins.top : TEXT_MEASURE.vTopEm * em;
     const requestedBottom = margins.bottom !== undefined
       ? Math.max(0, margins.bottom)
-      : this.fixedLayout ? 0 : scrollMode ? 12 : TEXT_MEASURE.vBottomEm * em;
+      : this.fixedLayout ? 0 : scrollMode ? 12 : compactAuto ? autoMargins.bottom : TEXT_MEASURE.vBottomEm * em;
     const verticalBudget = Math.max(0, pageH - 2 * em);
     const verticalScale = requestedTop + requestedBottom > verticalBudget && requestedTop + requestedBottom > 0
       ? verticalBudget / (requestedTop + requestedBottom)

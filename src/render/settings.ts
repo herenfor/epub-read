@@ -80,4 +80,7 @@ export const TEXT_MEASURE = {
   maxEm: 40,
   vTopEm: 2.2,
   vBottomEm: 1.6,
+  /** 窄屏（手机竖屏）分页“自动”上下留白。 */
+  compactTopEm: 2.6,
+  compactBottomEm: 2.1,
 };
