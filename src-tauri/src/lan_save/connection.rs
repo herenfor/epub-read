@@ -210,7 +210,7 @@ impl LanConnection {
                 return Err(LanSaveError::cancelled());
             }
             let remaining = total - received;
-            let limit = buffer.len().min(remaining as usize);
+            let limit = remaining.min(buffer.len() as u64) as usize;
             let read = tokio::select! {
                 result = tokio::io::AsyncReadExt::read(reader, &mut buffer[..limit]) => {
                     result.map_err(|error| LanSaveError::network(format!("接收存档失败：{error}")))?

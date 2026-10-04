@@ -353,7 +353,9 @@ fn lan_gate_keeps_commit_slot_on_close() {
     gate.import_prepared().unwrap();
     gate.begin_commit().unwrap();
     assert_eq!(gate.close().unwrap(), GateClose::CommitInProgress);
-    assert!(gate.commit_finished().unwrap());
+    // The local commit finishes, but a closed link must not send an ACK.
+    assert!(!gate.commit_finished().unwrap());
+    assert_eq!(gate.close().unwrap(), GateClose::AlreadyFinished);
 }
 
 #[test]
