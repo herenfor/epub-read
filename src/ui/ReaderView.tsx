@@ -27,6 +27,8 @@ import {
   dragScrollLeft,
   prefersReducedMotion,
   slideDurationMs,
+  releaseSlidePlan,
+  releaseVelocity,
   type SlideFrame,
   type ValueAnimation,
 } from "./pagedSlide";
@@ -299,7 +301,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   /** 进行中的同章滑动动画；连续翻页/外部跳转前先 finish 落位提交。 */
   const slideAnimRef = useRef<ValueAnimation | null>(null);
   /** 同章拖动中的视觉位置；松手后由翻页接续或下一微任务回弹。 */
-  const slideDragRef = useRef<{ dir: 1 | -1; frame: SlideFrame; scrollLeft: number } | null>(null);
+  const slideDragRef = useRef<{ dir: 1 | -1; frame: SlideFrame; scrollLeft: number; samples: Array<{ t: number; x: number }> } | null>(null);
   /** 跨章滑动：旧章滑出后，新章 display-ready 时按此方向滑入。 */
   const chapterEnterRef = useRef<1 | -1 | null>(null);
   const chapterTurnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -376,31 +378,44 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     }
     const start = continuing ? drag.scrollLeft : frame.from;
     const target = p.currentPage + dir;
+    const done = (): void => {
+      slideAnimRef.current = null;
+      if (paginatorRef.current === p) p.setPage(target);
+    };
+    if (continuing) {
+      // 松手续接：起始速度取手指离手速度，避免第一帧跳出一大截。
+      const plan = releaseSlidePlan(frame.to - start, Math.abs(frame.to - frame.from),
+        releaseVelocity(drag.samples, performance.now()));
+      slideAnimRef.current = animateValue(start, frame.to, plan.durationMs,
+        (value) => p.previewPagedScroll(value), done, undefined, plan.ease);
+      return true;
+    }
     slideAnimRef.current = animateValue(
       start,
       frame.to,
       slideDurationMs(frame.to - start, Math.abs(frame.to - frame.from)),
       (value) => p.previewPagedScroll(value),
-      () => {
-        slideAnimRef.current = null;
-        if (paginatorRef.current === p) p.setPage(target);
-      },
+      done,
     );
     return true;
   };
 
   /** 拖动未达到翻页条件：从手指位置回弹到当前页。 */
-  const settleSlideDrag = (drag: { frame: SlideFrame; scrollLeft: number }): void => {
+  const settleSlideDrag = (drag: { frame: SlideFrame; scrollLeft: number; samples: Array<{ t: number; x: number }> }): void => {
     const p = paginatorRef.current;
     if (!p) return;
+    const plan = releaseSlidePlan(drag.frame.from - drag.scrollLeft, Math.abs(drag.frame.to - drag.frame.from),
+      releaseVelocity(drag.samples, performance.now()));
     slideAnimRef.current = animateValue(
       drag.scrollLeft,
       drag.frame.from,
-      slideDurationMs(drag.scrollLeft - drag.frame.from, Math.abs(drag.frame.to - drag.frame.from)),
+      plan.durationMs,
       (value) => p.previewPagedScroll(value),
       () => {
         slideAnimRef.current = null;
       },
+      undefined,
+      plan.ease,
     );
   };
   const preloadGenerationRef = useRef(0);
@@ -1615,13 +1630,15 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         slideAnimRef.current?.finish();
         if (drag) p.previewPagedScroll(drag.frame.from);
         const frame = p.pagedSlideFrame(direction);
-        drag = frame ? { dir: direction, frame, scrollLeft: frame.from } : null;
+        drag = frame ? { dir: direction, frame, scrollLeft: frame.from, samples: [] } : null;
         slideDragRef.current = drag;
       }
       if (drag) {
         // 同章相邻页已在同一多栏文档内：内容 1:1 跟手，不再平移 iframe 或显示文字提示。
         drag.scrollLeft = dragScrollLeft(drag.frame, dx);
         p.previewPagedScroll(drag.scrollLeft);
+        drag.samples.push({ t: performance.now(), x: drag.scrollLeft });
+        if (drag.samples.length > 8) drag.samples.shift();
         main.classList.add("reader-swipe-dragging");
         main.dataset.swipeFollow = "true";
         main.style.removeProperty("--reader-swipe-offset");
