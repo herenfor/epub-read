@@ -13,6 +13,7 @@ class MockPaginator {
   pageCount = 2;
   path = "";
   complete: (() => void) | undefined;
+  readyWaiters: Array<(ready: boolean) => void> = [];
   callbacks: unknown[];
   settings: ReaderSettings;
   constructor(...args: unknown[]) {
@@ -41,6 +42,7 @@ class MockPaginator {
     (this.callbacks[4] as Function)(this.state);
     (this.callbacks[15] as Function)();
     this.complete?.();
+    this.flushReadyWaiters(true);
   }
   finishEmpty() {
     this.isDisplayReady = true;
@@ -48,7 +50,18 @@ class MockPaginator {
     (this.callbacks[4] as Function)(this.state);
     (this.callbacks[15] as Function)();
     this.complete?.();
+    this.flushReadyWaiters(true);
   }
+  waitForDisplayReady() {
+    if (this.isDisplayReady) return Promise.resolve(true);
+    return new Promise<boolean>((resolve) => { this.readyWaiters.push(resolve); });
+  }
+  flushReadyWaiters(ready: boolean) {
+    const waiters = this.readyWaiters;
+    this.readyWaiters = [];
+    for (const resolve of waiters) resolve(ready);
+  }
+  pagedSlideFrame() { return null; }
   getStateSnapshot() { return this.state; }
   getCurrentPath() { return this.path; }
   setNotes() {}
@@ -57,7 +70,7 @@ class MockPaginator {
   closeForNavigation() {}
   clearSearchHighlight() {}
   resetWheelAccumulator() {}
-  dispose() { this.disposed = true; this.complete?.(); }
+  dispose() { this.disposed = true; this.complete?.(); this.flushReadyWaiters(false); }
 }
 vi.mock("../render/paginator", () => ({
   ChapterPaginator: class { constructor(...args: unknown[]) { return new MockPaginator(...args); } },
@@ -268,7 +281,7 @@ describe("ReaderView preload settings lifecycle", () => {
     expect(onDisplayReady.mock.calls.length).toBe(readyCalls);
   });
 
-  it("快速输入会取消尚未发布的当前后台任务，空闲后再从优先级重新开始", async () => {
+  it("普通翻页不销毁在途的近邻预载，空闲后也不重复创建同一章", async () => {
     const ref = createRef<ReaderHandle>();
     await dom.render(createElement(ReaderView, { ...props, ref }));
     const active = instances[0];
@@ -279,13 +292,12 @@ describe("ReaderView preload settings lifecycle", () => {
     expect(inFlight.path).toBe("1.xhtml");
 
     await act(async () => { ref.current?.nextPage(); });
-    // 普通翻页先取消未发布的后台槽；旧槽晚到的 ready 不能被提升。
-    expect(inFlight.disposed).toBe(true);
+    // 普通输入只打断远章准备；在途的近邻目标保留，避免翻到章末时重新排版。
+    expect(inFlight.disposed).toBe(false);
     expect(instances[0].disposed).toBe(false);
 
     await act(async () => { vi.advanceTimersByTime(500); });
-    expect(instances.at(-1)?.path).toBe("1.xhtml");
-    expect(instances.at(-1)).not.toBe(inFlight);
+    expect(instances.filter((p) => p.path === "1.xhtml" && !p.disposed)).toEqual([inFlight]);
   });
 
   it("末章空内容也发布 display-ready，不把 loading 留到永远", async () => {

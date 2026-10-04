@@ -6,6 +6,11 @@ import { vi } from "vitest";
 /** Real React event/effect ordering, without pretending to measure iframe layout. */
 export function createReactDomHarness() {
   const { window } = parseHTML('<html><body><div id="root"></div></body></html>');
+  // linkedom's CSSStyleDeclaration lacks priorities; real browsers always have them.
+  const styleProto = Object.getPrototypeOf(window.document.body.style) as {
+    getPropertyPriority?: (property: string) => string;
+  };
+  if (typeof styleProto.getPropertyPriority !== "function") styleProto.getPropertyPriority = () => "";
   window.innerWidth = 1024;
   window.innerHeight = 768;
   vi.stubGlobal("window", window);
