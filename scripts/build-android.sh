@@ -26,6 +26,8 @@
 #   ANDROID_USER_HOME GRADLE_USER_HOME
 #   TAURI_CLI_NODE          node executable handed to the Gradle BuildTask (default: node on PATH)
 #   TAURI_CLI_JS            project-local CLI script handed to Gradle (default: node_modules/@tauri-apps/cli/tauri.js)
+#   EPUB_READER_SIGNING_PROPERTIES  release signing properties (default: <workspace>/.android-signing/keystore.properties);
+#                           kept outside every repository, required for --release
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -163,6 +165,14 @@ do_build() {
     esac
     shift
   done
+  if [ "$mode" = "release" ]; then
+    # Release packages are only ever signed with the shared release key, which
+    # lives outside every repository; refuse to produce an unsigned build.
+    export EPUB_READER_SIGNING_PROPERTIES="${EPUB_READER_SIGNING_PROPERTIES:-$WORKSPACE_ROOT/.android-signing/keystore.properties}"
+    [ -r "$EPUB_READER_SIGNING_PROPERTIES" ] || fail "release signing properties not found: $EPUB_READER_SIGNING_PROPERTIES"
+  else
+    unset EPUB_READER_SIGNING_PROPERTIES
+  fi
   do_init
   local args=(android build --features core "$bundle" --target "$target" "${TAURI_ARGS[@]}")
   # Core overlay (and the platform overlay) may both carry frontendDist.
