@@ -4,11 +4,11 @@ use super::pairing::{
     choose_default_lan_ipv4, random_hex_32, LanPairingV1,
 };
 use super::protocol::{ControlMessage, WireOffer};
-use super::session::{LanEventSink, LanSession};
+use super::session::{LanEventSink, LanSession, Phase, ReceiverAction, WorkerLease};
 use super::tls::{client_config, server_name, TlsIdentity};
 use crate::save_file::commands::{
     active_task, finish_task, reserve_job, run_commit, run_lan_export, run_prepare,
-    take_prepared_for_commit,
+    take_prepared_for_commit, FileTask,
 };
 use crate::save_file::{
     new_uuid, valid_job_id, SaveExportScope, SaveFileCommitResult, SaveFileLocation,
@@ -32,6 +32,7 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 const ACCEPT_WAIT_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const RESULT_WAIT_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+const JS_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
 #[derive(Default)]
 pub struct LanSaveManager {
@@ -60,6 +61,7 @@ pub struct LanSendResult {
     pub package_id: String,
     pub written_books: usize,
     pub attached_book_count: usize,
+    pub skipped_books: Vec<crate::save_file::SkippedBook>,
     pub remote_commit: Option<serde_json::Value>,
     pub result_delivered: bool,
     pub code: Option<String>,
@@ -166,6 +168,47 @@ fn temp_session_dir<R: Runtime>(app: &AppHandle<R>, session_id: &str) -> Result<
     Ok(dir)
 }
 
+fn spawn_finalize<R: Runtime>(app: &AppHandle<R>, session: Arc<LanSession>) {
+    let app = app.clone();
+    tokio::spawn(async move {
+        finalize_session(&app, &session).await;
+    });
+}
+
+/// Single terminal cleanup path. All leases are acquired before spawning work;
+/// this finalizer never holds a lease itself and only cleans after drain.
+async fn finalize_session<R: Runtime>(app: &AppHandle<R>, session: &Arc<LanSession>) {
+    if !session.begin_finalize() {
+        session.wait_finalize().await;
+        return;
+    }
+    // Bar new registrations first so a racing command cannot attach a worker
+    // after the finalizer observes an idle owner.
+    session.request_workers_close();
+    session.request_close();
+    if let Ok(connection) = session.connection() {
+        connection.stop();
+    }
+    if let Some(task) = session.file_task().ok().flatten() {
+        crate::save_file::commands::request_cancel_task(&task);
+    }
+    // A timeout never grants cleanup permission; wait for every network and
+    // file lease to actually drop.
+    session.drain_workers().await;
+    if let Some(task) = session.file_task().ok().flatten() {
+        finish_task(app, &task);
+    }
+    if let Some(connection) = session.take_connection().await {
+        connection.close_halves().await;
+    }
+    if let Ok(dir) = temp_session_dir(app, &session.session_id) {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+    session.clear_event_sink();
+    remove_session(app, session);
+    session.finish_finalize();
+}
+
 pub(crate) async fn start_host<R: Runtime>(
     app: &AppHandle<R>,
     bind_ip: Ipv4Addr,
@@ -191,13 +234,15 @@ pub(crate) async fn start_host<R: Runtime>(
         transfer_id.clone(),
         sink,
     ));
+    let listener_lease = session.enter_worker()?;
     insert_session(app, session.clone())?;
     session.emit_event("pairing", Some(&transfer_id), None, None, None);
 
     let app_handle = app.clone();
     let worker_session = session.clone();
     tokio::spawn(async move {
-        match host_accept_loop(listener, identity, worker_session.clone()).await {
+        let _listener_lease = listener_lease;
+        match host_accept_loop(&app_handle, listener, identity, worker_session.clone()).await {
             Ok(()) => {}
             Err(error) => {
                 worker_session.emit_event(
@@ -218,7 +263,8 @@ pub(crate) async fn start_host<R: Runtime>(
     })
 }
 
-async fn host_accept_loop(
+async fn host_accept_loop<R: Runtime>(
+    app: &AppHandle<R>,
     listener: TcpListener,
     identity: TlsIdentity,
     session: Arc<LanSession>,
@@ -253,7 +299,7 @@ async fn host_accept_loop(
                 session.gate().paired()?;
                 let transfer_id = session.transfer_id()?;
                 session.emit_event("paired", Some(&transfer_id), None, None, None);
-                spawn_control_reader(session, connection);
+                spawn_control_reader(app, session, connection);
                 return Ok(());
             }
             Ok(Err(_error)) => {
@@ -326,27 +372,79 @@ pub(crate) async fn join<R: Runtime>(
     sink: LanEventSink,
 ) -> Result<LanJoinResult, LanSaveError> {
     let pairing = LanPairingV1::parse(pairing_info)?;
-    let (host, port) = pairing.endpoint_addr()?;
-    let tcp = tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect((host, port)))
-        .await
-        .map_err(|_| LanSaveError::unreachable("连接监听端超时"))?
-        .map_err(|error| LanSaveError::unreachable(format!("无法连接监听端：{error}")))?;
-    let connector = TlsConnector::from(Arc::new(client_config(&pairing.certificate_sha256)?));
-    let tls = tokio::time::timeout(
+    let session = Arc::new(LanSession::new_pending_join(
+        pairing.session_id.clone(),
+        sink,
+    ));
+    insert_session(app, session.clone())?;
+    session.emit_event("pairing", None, None, None, Some(json!({ "status": "connecting" })));
+    let command = match session.enter_worker() {
+        Ok(command) => command,
+        Err(error) => {
+            spawn_finalize(app, session.clone());
+            return Err(error);
+        }
+    };
+    let outcome = match tokio::time::timeout(
         HANDSHAKE_TIMEOUT,
-        connector.connect(server_name(host), tcp),
+        join_network(app, &pairing, command, session.clone()),
     )
     .await
-    .map_err(|_| LanSaveError::secure("TLS 握手超时"))?
-    .map_err(map_client_handshake_error)?;
+    {
+        Ok(outcome) => outcome,
+        Err(_) => Err(LanSaveError::secure("连接/握手/Paired 总时限 10 秒")),
+    };
+    if outcome.is_err() {
+        spawn_finalize(app, session.clone());
+    }
+    outcome
+}
+
+async fn join_network<R: Runtime>(
+    app: &AppHandle<R>,
+    pairing: &LanPairingV1,
+    command: WorkerLease,
+    session: Arc<LanSession>,
+) -> Result<LanJoinResult, LanSaveError> {
+    let (host, port) = pairing.endpoint_addr()?;
+    let tcp = match tokio::select! {
+        result = tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect((host, port))) => result,
+        _ = session.wait_until_closed() => return Err(LanSaveError::cancelled()),
+    } {
+        Ok(Ok(tcp)) => tcp,
+        Ok(Err(error)) => {
+            return Err(LanSaveError::unreachable(format!("无法连接监听端：{error}")))
+        }
+        Err(_) => return Err(LanSaveError::unreachable("连接监听端超时")),
+    };
+    let connector = TlsConnector::from(Arc::new(client_config(&pairing.certificate_sha256)?));
+    let tls = match tokio::select! {
+        result = tokio::time::timeout(
+            HANDSHAKE_TIMEOUT,
+            connector.connect(server_name(host), tcp),
+        ) => result,
+        _ = session.wait_until_closed() => return Err(LanSaveError::cancelled()),
+    } {
+        Ok(Ok(tls)) => tls,
+        Ok(Err(error)) => return Err(map_client_handshake_error(error)),
+        Err(_) => return Err(LanSaveError::secure("TLS 握手超时")),
+    };
     let connection = Arc::new(LanConnection::new(LanIo::Client(tls)));
-    connection
-        .write_control(&ControlMessage::Hello {
-            session_id: pairing.session_id.clone(),
-            token: pairing.token.clone(),
-        })
-        .await?;
-    let paired = connection.read_control().await?;
+    if let Err(error) = session.set_connection(connection.clone()) {
+        return Err(error);
+    }
+    let hello = ControlMessage::Hello {
+        session_id: pairing.session_id.clone(),
+        token: pairing.token.clone(),
+    };
+    tokio::select! {
+        result = connection.write_control(&hello) => result?,
+        _ = session.wait_until_closed() => return Err(LanSaveError::cancelled()),
+    }
+    let paired = tokio::select! {
+        result = connection.read_control() => result?,
+        _ = session.wait_until_closed() => return Err(LanSaveError::cancelled()),
+    };
     let transport_transfer_id = match paired {
         ControlMessage::Paired {
             session_id,
@@ -368,18 +466,18 @@ pub(crate) async fn join<R: Runtime>(
         }
         _ => return Err(LanSaveError::protocol("Hello 后未收到 Paired")),
     };
-    let session = Arc::new(LanSession::new_join(
-        pairing.session_id.clone(),
-        transport_transfer_id.clone(),
-        sink,
-    ));
-    session.set_connection(connection.clone())?;
-    session.gate().paired()?;
-    insert_session(app, session.clone())?;
+    let transfer_id = transport_transfer_id.clone();
+    command
+        .while_open(|| -> Result<(), LanSaveError> {
+            session.set_transfer_id(transfer_id)?;
+            session.gate().paired()?;
+            Ok(())
+        })
+        .map_err(|_| LanSaveError::cancelled())??;
     session.emit_event("paired", Some(&transport_transfer_id), None, None, None);
-    spawn_control_reader(session, connection);
+    spawn_control_reader(app, session, connection);
     Ok(LanJoinResult {
-        session_id: pairing.session_id,
+        session_id: pairing.session_id.clone(),
     })
 }
 
@@ -395,147 +493,333 @@ fn map_client_handshake_error(error: std::io::Error) -> LanSaveError {
     LanSaveError::secure(format!("TLS 客户端握手失败：{error}"))
 }
 
-fn spawn_control_reader(session: Arc<LanSession>, connection: Arc<LanConnection>) {
+fn spawn_control_reader<R: Runtime>(
+    app: &AppHandle<R>,
+    session: Arc<LanSession>,
+    connection: Arc<LanConnection>,
+) {
+    let lease = match session.enter_worker() {
+        Ok(lease) => lease,
+        Err(_) => return,
+    };
+    let app = app.clone();
     tokio::spawn(async move {
-        loop {
-            if session.is_close_requested() {
-                return;
+        let _lease = lease;
+        control_reader_loop(&app, &session, &connection).await;
+    });
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ReaderMode {
+    Unknown,
+    Sender,
+    Receiver,
+}
+
+async fn control_terminal<R: Runtime>(
+    app: &AppHandle<R>,
+    session: &Arc<LanSession>,
+    connection: &Arc<LanConnection>,
+    error: LanSaveError,
+) {
+    let _ = session.push_inbox(ControlMessage::Error {
+        session_id: session.session_id.clone(),
+        transfer_id: session.transfer_id().ok(),
+        code: error.code.clone(),
+        message: error.message.clone(),
+    });
+    session.request_close();
+    let _ = connection
+        .write_control(&ControlMessage::Error {
+            session_id: session.session_id.clone(),
+            transfer_id: session.transfer_id().ok(),
+            code: error.code.clone(),
+            message: error.message.clone(),
+        })
+        .await;
+    spawn_finalize(app, session.clone());
+}
+
+fn handle_offer(session: &Arc<LanSession>, message: ControlMessage) -> Result<(), LanSaveError> {
+    let ControlMessage::Offer {
+        transfer_id,
+        archive_bytes,
+        book_count,
+        attached_book_count,
+        include_books,
+        has_preferences,
+        ..
+    } = message
+    else {
+        return Err(LanSaveError::protocol("预期 Offer"));
+    };
+    if archive_bytes == 0 || archive_bytes > JS_SAFE_INTEGER {
+        return Err(LanSaveError::protocol("Offer archiveBytes 超出范围"));
+    }
+    if attached_book_count > book_count {
+        return Err(LanSaveError::protocol("Offer attachedBookCount 大于 bookCount"));
+    }
+    if !include_books && attached_book_count != 0 {
+        return Err(LanSaveError::protocol("Offer includeBooks 与附书计数不一致"));
+    }
+    if !session.claim_incoming() {
+        return Err(LanSaveError::invalid_state("双方同时发起或已有传输角色"));
+    }
+    let offer = WireOffer {
+        session_id: session.session_id.clone(),
+        transfer_id: transfer_id.clone(),
+        archive_bytes,
+        book_count,
+        attached_book_count,
+        include_books,
+        has_preferences,
+    };
+    session.set_offer(offer)?;
+    session.emit_event(
+        "offered",
+        Some(&transfer_id),
+        None,
+        None,
+        Some(json!({
+            "archiveBytes": archive_bytes,
+            "bookCount": book_count,
+            "attachedBookCount": attached_book_count,
+            "includeBooks": include_books,
+            "hasPreferences": has_preferences,
+            "skippedBookCount": book_count.saturating_sub(attached_book_count),
+        })),
+    );
+    Ok(())
+}
+
+fn handle_sender_control(
+    session: &Arc<LanSession>,
+    message: ControlMessage,
+) -> Result<bool, LanSaveError> {
+    if !session.is_outgoing() {
+        return Err(LanSaveError::invalid_state("发送端角色收到控制消息"));
+    }
+    match &message {
+        ControlMessage::Accept { .. } => {
+            let _ = session.push_inbox(message);
+            Ok(false)
+        }
+        ControlMessage::Received { archive_bytes, .. } => {
+            if *archive_bytes == 0 || *archive_bytes > JS_SAFE_INTEGER {
+                return Err(LanSaveError::protocol("Received 长度超出范围"));
             }
-            let message = match connection.read_control().await {
-                Ok(message) => message,
-                Err(error) => {
-                    let _ = session.push_inbox(ControlMessage::Error {
-                        session_id: session.session_id.clone(),
-                        transfer_id: session.transfer_id().ok(),
-                        code: error.code.clone(),
-                        message: error.message.clone(),
-                    });
-                    session.emit_event(
-                        "error",
-                        session.transfer_id().ok().as_deref(),
-                        Some(&error.code),
-                        Some(&error.message),
-                        None,
-                    );
-                    return;
-                }
-            };
-            if message.session_id() != session.session_id {
-                session.emit_event(
-                    "error",
-                    session.transfer_id().ok().as_deref(),
-                    Some("invalid-state"),
-                    Some("控制消息 sessionId 不匹配"),
-                    None,
-                );
-                return;
+            let _ = session.push_inbox(message);
+            Ok(false)
+        }
+        ControlMessage::Result { status, .. } => {
+            if !matches!(status.as_str(), "committed" | "cancelled" | "failed") {
+                return Err(LanSaveError::protocol("Result status 不在白名单"));
             }
-            let expected_transfer = session.transfer_id().ok();
-            if let Some(actual) = message.transfer_id() {
-                if expected_transfer.as_deref() != Some(actual) {
-                    session.emit_event(
-                        "error",
-                        expected_transfer.as_deref(),
-                        Some("invalid-state"),
-                        Some("控制消息 transferId 不匹配"),
-                        None,
-                    );
-                    return;
-                }
-            }
-            match message {
-                ControlMessage::Offer {
-                    transfer_id,
-                    archive_bytes,
-                    book_count,
-                    attached_book_count,
-                    include_books,
-                    has_preferences,
-                    ..
-                } => {
-                    if !session.claim_incoming() {
-                        let _ = connection
-                            .write_control(&ControlMessage::Error {
-                                session_id: session.session_id.clone(),
-                                transfer_id: Some(transfer_id.clone()),
-                                code: "invalid-state".to_string(),
-                                message: "双方同时发起或已有传输角色".to_string(),
-                            })
-                            .await;
-                        session.emit_event(
-                            "error",
-                            Some(&transfer_id),
-                            Some("invalid-state"),
-                            Some("双方同时发起或已有传输角色"),
-                            None,
-                        );
+            let _ = session.push_inbox(message);
+            Ok(true)
+        }
+        ControlMessage::Decline { .. }
+        | ControlMessage::Cancel { .. }
+        | ControlMessage::Error { .. } => {
+            let _ = session.push_inbox(message);
+            Ok(true)
+        }
+        _ => Err(LanSaveError::protocol("发送端收到意外控制消息")),
+    }
+}
+
+fn handle_receiver_control(message: &ControlMessage) -> Result<(), LanSaveError> {
+    match message {
+        ControlMessage::Cancel { .. } | ControlMessage::Error { .. } => {
+            Ok(())
+        }
+        _ => Err(LanSaveError::protocol("接收端收到意外控制消息")),
+    }
+}
+
+async fn handle_receiver_accept(
+    session: &Arc<LanSession>,
+    connection: &Arc<LanConnection>,
+    part_path: PathBuf,
+    archive_bytes: u64,
+    reply: tokio::sync::oneshot::Sender<Result<(), LanSaveError>>,
+) {
+    let accept = ControlMessage::Accept {
+        session_id: session.session_id.clone(),
+        transfer_id: session.transfer_id().unwrap_or_default(),
+    };
+    if let Err(error) = connection.write_control(&accept).await {
+        let _ = reply.send(Err(error));
+        return;
+    }
+    if let Err(error) = connection
+        .receive_archive_to_path(&part_path, archive_bytes, session)
+        .await
+    {
+        let _ = reply.send(Err(error));
+        return;
+    }
+    let received = ControlMessage::Received {
+        session_id: session.session_id.clone(),
+        transfer_id: session.transfer_id().unwrap_or_default(),
+        archive_bytes,
+    };
+    if let Err(error) = connection.write_control(&received).await {
+        let _ = reply.send(Err(error));
+        return;
+    }
+    let _ = reply.send(Ok(()));
+}
+
+async fn control_reader_loop<R: Runtime>(
+    app: &AppHandle<R>,
+    session: &Arc<LanSession>,
+    connection: &Arc<LanConnection>,
+) {
+    let mut frame_buffer: Vec<u8> = Vec::new();
+    let mut receiver_rx = session.take_receiver_action_receiver();
+    let mut mode = ReaderMode::Unknown;
+    loop {
+        if session.is_close_requested() {
+            return;
+        }
+        match mode {
+            ReaderMode::Unknown | ReaderMode::Sender => {
+                let message = match connection.read_control_buffered(&mut frame_buffer, ACCEPT_WAIT_TIMEOUT).await {
+                    Ok(message) => message,
+                    Err(error) => {
+                        control_terminal(app, session, connection, error).await;
                         return;
                     }
-                    let offer = WireOffer {
-                        session_id: session.session_id.clone(),
-                        transfer_id: transfer_id.clone(),
-                        archive_bytes,
-                        book_count,
-                        attached_book_count,
-                        include_books,
-                        has_preferences,
-                    };
-                    let _ = session.set_offer(offer.clone());
-                    session.emit_event(
-                        "offered",
-                        Some(&transfer_id),
-                        None,
-                        None,
-                        Some(json!({
-                            "archiveBytes": archive_bytes,
-                            "bookCount": book_count,
-                            "attachedBookCount": attached_book_count,
-                            "includeBooks": include_books,
-                            "hasPreferences": has_preferences,
-                        })),
-                    );
-                    // Leave the stream positioned exactly at the raw ZIP
-                    // bytes; `lan_save_accept` reads the declared length only.
+                };
+                if message.session_id() != session.session_id {
+                    control_terminal(
+                        app,
+                        session,
+                        connection,
+                        LanSaveError::invalid_state("控制消息 sessionId 不匹配"),
+                    )
+                    .await;
                     return;
                 }
-                ControlMessage::Accept { .. }
-                | ControlMessage::Received { .. }
-                | ControlMessage::Result { .. } => {
-                    if !session.is_outgoing() {
-                        session.emit_event(
-                            "error",
-                            expected_transfer.as_deref(),
-                            Some("invalid-state"),
-                            Some("接收端角色收到仅发送端可读的控制消息"),
-                            None,
-                        );
-                        return;
-                    }
-                    let stop = matches!(message, ControlMessage::Result { .. });
-                    let _ = session.push_inbox(message);
-                    if stop {
+                let expected_transfer = session.transfer_id().ok();
+                if let Some(actual) = message.transfer_id() {
+                    if expected_transfer.as_deref() != Some(actual) {
+                        control_terminal(
+                            app,
+                            session,
+                            connection,
+                            LanSaveError::invalid_state("控制消息 transferId 不匹配"),
+                        )
+                        .await;
                         return;
                     }
                 }
-                ControlMessage::Decline { .. }
-                | ControlMessage::Cancel { .. }
-                | ControlMessage::Error { .. } => {
-                    let _ = session.push_inbox(message);
-                    return;
+                if mode == ReaderMode::Unknown {
+                    match message {
+                        ControlMessage::Offer { .. } => {
+                            if let Err(error) = handle_offer(session, message) {
+                                control_terminal(app, session, connection, error).await;
+                                return;
+                            }
+                            mode = ReaderMode::Receiver;
+                        }
+                        other => match handle_sender_control(session, other) {
+                            Ok(stop) => {
+                                mode = ReaderMode::Sender;
+                                if stop {
+                                    return;
+                                }
+                            }
+                            Err(error) => {
+                                control_terminal(app, session, connection, error).await;
+                                return;
+                            }
+                        },
+                    }
+                } else {
+                    match handle_sender_control(session, message) {
+                        Ok(stop) => {
+                            if stop {
+                                return;
+                            }
+                        }
+                        Err(error) => {
+                            control_terminal(app, session, connection, error).await;
+                            return;
+                        }
+                    }
                 }
-                ControlMessage::Hello { .. } | ControlMessage::Paired { .. } => {
-                    session.emit_event(
-                        "error",
-                        expected_transfer.as_deref(),
-                        Some("invalid-state"),
-                        Some("已配对连接收到 Hello/Paired"),
-                        None,
-                    );
+            }
+            ReaderMode::Receiver => {
+                let Some(receiver) = receiver_rx.as_mut() else {
+                    control_terminal(
+                        app,
+                        session,
+                        connection,
+                        LanSaveError::invalid_state("接收动作通道缺失"),
+                    )
+                    .await;
                     return;
+                };
+                tokio::select! {
+                    biased;
+                    result = connection.read_control_buffered(&mut frame_buffer, ACCEPT_WAIT_TIMEOUT) => {
+                        let message = match result {
+                            Ok(message) => message,
+                            Err(error) => {
+                                control_terminal(app, session, connection, error).await;
+                                return;
+                            }
+                        };
+                        if let Err(error) = handle_receiver_control(&message) {
+                            control_terminal(app, session, connection, error).await;
+                            return;
+                        }
+                        // Peer Cancel/Error during Offer/preview: reclaim
+                        // local F-N/staging through the single finalizer.
+                        let _ = session.push_inbox(message);
+                        control_terminal(
+                            app,
+                            session,
+                            connection,
+                            LanSaveError::cancelled(),
+                        )
+                        .await;
+                        return;
+                    }
+                    action = receiver.recv() => {
+                        match action {
+                            Some(ReceiverAction::Accept {
+                                part_path,
+                                archive_bytes,
+                                reply,
+                            }) => {
+                                handle_receiver_accept(
+                                    session,
+                                    connection,
+                                    part_path,
+                                    archive_bytes,
+                                    reply,
+                                )
+                                .await;
+                            }
+                            None => {
+                                control_terminal(
+                                    app,
+                                    session,
+                                    connection,
+                                    LanSaveError::cancelled(),
+                                )
+                                .await;
+                                return;
+                            }
+                        }
+                    }
                 }
             }
         }
-    });
+    }
 }
 
 pub(crate) async fn send<R: Runtime>(
@@ -545,20 +829,57 @@ pub(crate) async fn send<R: Runtime>(
     include_books: bool,
 ) -> Result<LanSendResult, LanSaveError> {
     let session = get_session(app, session_id)?;
+    let result = send_inner(app, session.clone(), scope, include_books).await;
+    let retryable = result
+        .as_ref()
+        .err()
+        .map(|error| error.code == "busy")
+        .unwrap_or(false)
+        && session.is_role_idle()
+        && session.gate().phase().ok() == Some(Phase::Ready)
+        && session.file_task().ok().flatten().is_none();
+    if !retryable {
+        spawn_finalize(app, session);
+    }
+    result
+}
+
+async fn send_inner<R: Runtime>(
+    app: &AppHandle<R>,
+    session: Arc<LanSession>,
+    scope: SaveExportScope,
+    include_books: bool,
+) -> Result<LanSendResult, LanSaveError> {
     if session.is_close_requested() {
         return Err(LanSaveError::cancelled());
     }
-    if !session.claim_outgoing() {
-        return Err(LanSaveError::invalid_state("会话已经有传输角色"));
-    }
-    session.gate().begin_export()?;
+    // This command lease covers the whole send flow. The blocking export gets
+    // a separate child lease before spawn, so closing drains the actual thread.
+    let command = session.enter_worker()?;
     let transfer_id = session.transfer_id()?;
     let job_id = new_uuid()?;
-    let task = reserve_job(app, &job_id)?;
-    session.set_file_task(job_id.clone(), task.clone())?;
+    let task: Arc<FileTask> = command
+        .while_open(|| -> Result<Arc<FileTask>, LanSaveError> {
+            if !session.is_role_idle() {
+                return Err(LanSaveError::invalid_state("会话已经有传输角色"));
+            }
+            if session.gate().phase()? != Phase::Ready {
+                return Err(LanSaveError::invalid_state("会话阶段不允许发送"));
+            }
+            // Reserve first. A busy F-N slot must leave role/phase untouched
+            // so this session can retry the same Offer.
+            let task = reserve_job(app, &job_id)?;
+            session.set_file_task(job_id.clone(), task.clone())?;
+            if !session.claim_outgoing() {
+                return Err(LanSaveError::invalid_state("会话已经有传输角色"));
+            }
+            session.gate().begin_export()?;
+            Ok(task)
+        })
+        .map_err(|_| LanSaveError::cancelled())??;
     session.emit_event("exporting", Some(&transfer_id), None, None, None);
 
-    let target_dir = match temp_session_dir(app, session_id) {
+    let target_dir = match temp_session_dir(app, &session.session_id) {
         Ok(dir) => dir,
         Err(error) => {
             finish_task(app, &task);
@@ -570,12 +891,14 @@ pub(crate) async fn send<R: Runtime>(
     let worker_task = task.clone();
     let worker_target = target.clone();
     let progress = progress_channel(&session);
-    session.set_file_worker_active(true);
+    let export_lease = command
+        .child()
+        .map_err(|_| LanSaveError::cancelled())?;
     let export = tokio::task::spawn_blocking(move || {
+        let _lease = export_lease;
         run_lan_export(worker_app, worker_task, worker_target, scope, include_books, progress)
     })
     .await;
-    session.finish_file_worker();
     let export = export.map_err(|error| LanSaveError::storage(format!("导出工作线程失败：{error}")))?;
     let export = match export {
         Ok(export) => export,
@@ -653,6 +976,7 @@ pub(crate) async fn send<R: Runtime>(
                 package_id: export.package_id,
                 written_books: export.written_books,
                 attached_book_count: export.written_books,
+                skipped_books: export.skipped_books.clone(),
                 remote_commit: None,
                 result_delivered: true,
                 code: Some(code),
@@ -712,6 +1036,7 @@ pub(crate) async fn send<R: Runtime>(
                 package_id: export.package_id,
                 written_books: export.written_books,
                 attached_book_count: export.written_books,
+                skipped_books: export.skipped_books.clone(),
                 remote_commit: None,
                 result_delivered: false,
                 code: Some(error.code),
@@ -719,7 +1044,12 @@ pub(crate) async fn send<R: Runtime>(
             });
         }
     };
-    if let ControlMessage::Received { .. } = received {
+    if let ControlMessage::Received { archive_bytes, .. } = &received {
+        if *archive_bytes != export.archive_bytes {
+            finish_task(app, &task);
+            let _ = std::fs::remove_dir_all(&target_dir);
+            return Err(LanSaveError::protocol("Received 长度与 Offer 不一致"));
+        }
         // Wait for the receiver's F-N result next.
     } else if let ControlMessage::Result { status, result, code, message, .. } = received {
         finish_task(app, &task);
@@ -736,7 +1066,26 @@ pub(crate) async fn send<R: Runtime>(
     } else {
         finish_task(app, &task);
         let _ = std::fs::remove_dir_all(&target_dir);
-        return Err(LanSaveError::cancelled());
+        let (code, message) = match received {
+            ControlMessage::Error { code, message, .. } => (Some(code), Some(message)),
+            ControlMessage::Cancel { reason, .. } => {
+                (Some("cancelled".to_string()), Some(reason))
+            }
+            _ => (Some("protocol-error".to_string()), None),
+        };
+        return Ok(LanSendResult {
+            status: "unconfirmed".to_string(),
+            transfer_id,
+            archive_bytes: export.archive_bytes,
+            package_id: export.package_id,
+            written_books: export.written_books,
+            attached_book_count: export.written_books,
+            skipped_books: export.skipped_books.clone(),
+            remote_commit: None,
+            result_delivered: false,
+            code,
+            message,
+        });
     }
 
     let result = session
@@ -796,6 +1145,7 @@ pub(crate) async fn send<R: Runtime>(
             package_id: export.package_id,
             written_books: export.written_books,
             attached_book_count: export.written_books,
+            skipped_books: export.skipped_books.clone(),
             remote_commit: None,
             result_delivered: false,
             code: Some(code),
@@ -808,6 +1158,7 @@ pub(crate) async fn send<R: Runtime>(
             package_id: export.package_id,
             written_books: export.written_books,
             attached_book_count: export.written_books,
+            skipped_books: export.skipped_books.clone(),
             remote_commit: None,
             result_delivered: false,
             code: Some("cancelled".to_string()),
@@ -820,6 +1171,7 @@ pub(crate) async fn send<R: Runtime>(
             package_id: export.package_id,
             written_books: export.written_books,
             attached_book_count: export.written_books,
+            skipped_books: export.skipped_books.clone(),
             remote_commit: None,
             result_delivered: false,
             code: Some("protocol-error".to_string()),
@@ -832,6 +1184,7 @@ pub(crate) async fn send<R: Runtime>(
             package_id: export.package_id,
             written_books: export.written_books,
             attached_book_count: export.written_books,
+            skipped_books: export.skipped_books.clone(),
             remote_commit: None,
             result_delivered: false,
             code: Some(error.code),
@@ -857,6 +1210,7 @@ fn build_send_result(
         package_id: export.package_id.clone(),
         written_books: export.written_books,
         attached_book_count: export.written_books,
+        skipped_books: export.skipped_books.clone(),
         remote_commit,
         result_delivered,
         code,
@@ -870,24 +1224,58 @@ pub(crate) async fn accept<R: Runtime>(
     transfer_id: &str,
 ) -> Result<SaveFilePrepareResult, LanSaveError> {
     let session = get_session(app, session_id)?;
+    let result = accept_inner(app, session.clone(), transfer_id).await;
+    let retryable = result
+        .as_ref()
+        .err()
+        .map(|error| error.code == "busy")
+        .unwrap_or(false)
+        && session.gate().phase().ok() == Some(Phase::Ready)
+        && session.offer_snapshot().ok().flatten().is_some()
+        && session.file_task().ok().flatten().is_none();
+    if result.is_err() && !retryable {
+        spawn_finalize(app, session);
+    }
+    result
+}
+
+async fn accept_inner<R: Runtime>(
+    app: &AppHandle<R>,
+    session: Arc<LanSession>,
+    transfer_id: &str,
+) -> Result<SaveFilePrepareResult, LanSaveError> {
     if session.transfer_id()? != transfer_id {
         return Err(LanSaveError::invalid_state("transferId 不匹配"));
     }
+    let command = session.enter_worker()?;
     let offer = session
-        .take_offer()?
+        .offer_snapshot()?
         .ok_or_else(|| LanSaveError::invalid_state("Offer 尚未到达，不能接受下载"))?;
     if offer.transfer_id != transfer_id {
         return Err(LanSaveError::invalid_state("Offer transferId 不匹配"));
     }
-    session.gate().accept_download()?;
-    let connection = session.connection()?;
+    session.connection()?;
     let job_id = new_uuid()?;
-    let task = reserve_job(app, &job_id)?;
-    if let Err(error) = session.set_file_task(job_id.clone(), task.clone()) {
-        finish_task(app, &task);
-        return Err(error);
-    }
-    let part_dir = match temp_session_dir(app, session_id) {
+    let task: Arc<FileTask> = command
+        .while_open(|| -> Result<Arc<FileTask>, LanSaveError> {
+            if session.gate().phase()? != Phase::Ready {
+                return Err(LanSaveError::invalid_state("会话阶段不允许接接收"));
+            }
+            // Reserve first. Busy must keep the Offer so the same command can
+            // retry after the system file task releases its slot.
+            let task = reserve_job(app, &job_id)?;
+            session.set_file_task(job_id.clone(), task.clone())?;
+            let current = session
+                .take_offer()?
+                .ok_or_else(|| LanSaveError::invalid_state("Offer 已不存在"))?;
+            if current.transfer_id != transfer_id {
+                return Err(LanSaveError::invalid_state("Offer transferId 不匹配"));
+            }
+            session.gate().accept_download()?;
+            Ok(task)
+        })
+        .map_err(|_| LanSaveError::cancelled())??;
+    let part_dir = match temp_session_dir(app, &session.session_id) {
         Ok(dir) => dir,
         Err(error) => {
             finish_task(app, &task);
@@ -897,22 +1285,19 @@ pub(crate) async fn accept<R: Runtime>(
     let part_path = part_dir.join(format!("{transfer_id}.epubsave.part"));
 
     let setup = async {
-        connection
-            .write_control(&ControlMessage::Accept {
-                session_id: session.session_id.clone(),
-                transfer_id: transfer_id.to_string(),
-            })
-            .await?;
-        connection
-            .receive_archive_to_path(&part_path, offer.archive_bytes, &session)
-            .await?;
-        connection
-            .write_control(&ControlMessage::Received {
-                session_id: session.session_id.clone(),
-                transfer_id: transfer_id.to_string(),
+        let (reply, result) = tokio::sync::oneshot::channel();
+        session
+            .receiver_action_sender()
+            .send(ReceiverAction::Accept {
+                part_path: part_path.clone(),
                 archive_bytes: offer.archive_bytes,
+                reply,
             })
-            .await?;
+            .await
+            .map_err(|_| LanSaveError::cancelled())?;
+        result
+            .await
+            .map_err(|_| LanSaveError::cancelled())??;
         session.gate().received_exact_archive()?;
         session.emit_event("preparing", Some(transfer_id), None, None, None);
         Ok::<(), LanSaveError>(())
@@ -928,8 +1313,11 @@ pub(crate) async fn accept<R: Runtime>(
     let worker_task = task.clone();
     let worker_path = part_path.clone();
     let progress = progress_channel(&session);
-    session.set_file_worker_active(true);
+    let prepare_lease = command
+        .child()
+        .map_err(|_| LanSaveError::cancelled())?;
     let prepared = tokio::task::spawn_blocking(move || {
+        let _lease = prepare_lease;
         run_prepare(
             worker_app,
             worker_task,
@@ -940,7 +1328,6 @@ pub(crate) async fn accept<R: Runtime>(
         )
     })
     .await;
-    session.finish_file_worker();
     let prepared = match prepared {
         Ok(result) => result,
         Err(error) => {
@@ -980,25 +1367,54 @@ pub(crate) async fn commit<R: Runtime>(
     apply_preferences: bool,
 ) -> Result<SaveFileCommitResult, LanSaveError> {
     let session = get_session(app, session_id)?;
+    let result = commit_inner(app, session.clone(), transfer_id, apply_preferences).await;
+    if matches!(
+        session.gate().phase().ok(),
+        Some(Phase::Committing) | Some(Phase::Finished)
+    ) {
+        spawn_finalize(app, session);
+    }
+    result
+}
+
+async fn commit_inner<R: Runtime>(
+    app: &AppHandle<R>,
+    session: Arc<LanSession>,
+    transfer_id: &str,
+    apply_preferences: bool,
+) -> Result<SaveFileCommitResult, LanSaveError> {
     if session.transfer_id()? != transfer_id {
         return Err(LanSaveError::invalid_state("transferId 不匹配"));
     }
-    session.gate().begin_commit()?;
-    let job_id = session
-        .file_job_id()?
-        .ok_or_else(|| LanSaveError::invalid_state("没有关联的文件任务"))?;
-    let task = active_task(app, &job_id)?;
-    let prepared = take_prepared_for_commit(&task)?;
+    let command = session.enter_worker()?;
+    let (task, prepared) = command
+        .while_open(|| -> Result<_, LanSaveError> {
+            if session.gate().phase()? != Phase::Preview {
+                return Err(LanSaveError::invalid_state("会话尚未进入预览阶段"));
+            }
+            let job_id = session
+                .file_job_id()?
+                .ok_or_else(|| LanSaveError::invalid_state("没有关联的文件任务"))?;
+            let task = active_task(app, &job_id)?;
+            // F-N changes its own task to Committing here. The LAN phase is
+            // set in the same short lock, after all prechecks have passed.
+            let prepared = take_prepared_for_commit(&task)?;
+            session.gate().begin_commit()?;
+            Ok((task, prepared))
+        })
+        .map_err(|_| LanSaveError::cancelled())??;
     session.emit_event("committing", Some(transfer_id), None, None, None);
     let worker_app = app.clone();
     let worker_task = task.clone();
     let progress = progress_channel(&session);
-    session.set_file_worker_active(true);
+    let commit_lease = command
+        .child()
+        .map_err(|_| LanSaveError::cancelled())?;
     let result = tokio::task::spawn_blocking(move || {
+        let _lease = commit_lease;
         run_commit(worker_app, worker_task, prepared, apply_preferences, progress)
     })
     .await;
-    session.finish_file_worker();
     let result = match result {
         Ok(result) => result,
         Err(error) => {
@@ -1056,7 +1472,6 @@ pub(crate) async fn commit<R: Runtime>(
                     None,
                 );
             }
-            remove_session(app, &session);
             Ok(committed)
         }
         Err(error) => {
@@ -1067,14 +1482,27 @@ pub(crate) async fn commit<R: Runtime>(
                 Some(&error.message),
                 None,
             );
-            remove_session(app, &session);
             Err(error.into())
         }
     }
 }
 
-pub(crate) async fn close<R: Runtime>(app: &AppHandle<R>, session_id: &str) -> Result<LanCloseResult, LanSaveError> {
-    let session = get_session(app, session_id)?;
+pub(crate) async fn close<R: Runtime>(
+    app: &AppHandle<R>,
+    session_id: &str,
+) -> Result<LanCloseResult, LanSaveError> {
+    let session = match get_session(app, session_id) {
+        Ok(session) => session,
+        Err(error) if error.code == "not-found" && valid_job_id(session_id) => {
+            return Ok(LanCloseResult {
+                status: "already-finished".to_string(),
+            })
+        }
+        Err(error) => return Err(error),
+    };
+    // Closing the worker owner first bars new registrations; every in-flight
+    // command that already owns a lease can finish or observe the stop signal.
+    session.request_workers_close();
     let close = session.gate().close()?;
     session.request_close();
     if let Ok(connection) = session.connection() {
@@ -1083,7 +1511,7 @@ pub(crate) async fn close<R: Runtime>(app: &AppHandle<R>, session_id: &str) -> R
     match close {
         super::session::GateClose::AlreadyFinished => {
             session.emit_event("closed", None, None, None, None);
-            remove_session(app, &session);
+            finalize_session(app, &session).await;
             Ok(LanCloseResult {
                 status: "already-finished".to_string(),
             })
@@ -1096,27 +1524,15 @@ pub(crate) async fn close<R: Runtime>(app: &AppHandle<R>, session_id: &str) -> R
                 Some("提交已经开始，保留文件任务直至真实结果返回"),
                 None,
             );
-            // The commit worker remains the owner of the session slot and
-            // removes it after F-N returns its real result.
+            // The commit command owns the finalization after F-N returns the
+            // real local result; close only cancels the network side.
             Ok(LanCloseResult {
                 status: "too-late".to_string(),
             })
         }
         super::session::GateClose::Cancelled => {
-            if let Some(task) = session.file_task()? {
-                if session.is_file_worker_active() {
-                    crate::save_file::commands::request_cancel_task(&task);
-                    let _ = session
-                        .wait_file_worker_done(Duration::from_secs(30))
-                        .await;
-                }
-                // No worker is running after the wait; the slot is either
-                // idle-running (network phase) or prepared. Discard it without
-                // entering the `cancel_task` worker-observation loop.
-                finish_task(app, &task);
-            }
             session.emit_event("closed", None, None, None, None);
-            remove_session(app, &session);
+            finalize_session(app, &session).await;
             Ok(LanCloseResult {
                 status: "cancelled".to_string(),
             })
@@ -1129,5 +1545,36 @@ pub(crate) async fn host_with_default_ip<R: Runtime>(
     sink: LanEventSink,
 ) -> Result<LanHostResult, LanSaveError> {
     let bind_ip = choose_default_lan_ipv4()?;
+    start_host(app, bind_ip, sink).await
+}
+
+pub(crate) async fn host_with_bind_ip<R: Runtime>(
+    app: &AppHandle<R>,
+    sink: LanEventSink,
+    requested: Option<String>,
+) -> Result<LanHostResult, LanSaveError> {
+    let bind_ip = match requested {
+        Some(raw) => {
+            let ip = raw
+                .parse::<Ipv4Addr>()
+                .map_err(|_| LanSaveError::invalid_request("bindIp 必须是 IPv4 字面量"))?;
+            if ip.is_unspecified()
+                || ip.is_multicast()
+                || ip.is_broadcast()
+                || ip.is_loopback()
+            {
+                return Err(LanSaveError::invalid_request(
+                    "bindIp 不能是 loopback/unspecified/组播/广播地址",
+                ));
+            }
+            if !ip.is_private() && !ip.is_link_local() {
+                return Err(LanSaveError::invalid_request(
+                    "bindIp 只接受私网或 link-local 地址",
+                ));
+            }
+            ip
+        }
+        None => choose_default_lan_ipv4()?,
+    };
     start_host(app, bind_ip, sink).await
 }

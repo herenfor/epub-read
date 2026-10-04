@@ -3,10 +3,11 @@ use super::protocol::{ControlMessage, WireOffer};
 use crate::save_file::commands::FileTask;
 use serde::Serialize;
 use std::collections::VecDeque;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tokio::sync::Notify;
+use tokio::sync::{mpsc, oneshot, Notify};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -34,6 +35,101 @@ pub(crate) struct LanSaveEvent {
 }
 
 pub(crate) type LanEventSink = Arc<dyn Fn(LanSaveEvent) + Send + Sync + 'static>;
+
+pub(crate) enum ReceiverAction {
+    Accept {
+        part_path: PathBuf,
+        archive_bytes: u64,
+        reply: oneshot::Sender<Result<(), LanSaveError>>,
+    },
+}
+
+#[derive(Default)]
+struct WorkState {
+    closing: bool,
+    running: usize,
+}
+
+#[derive(Default)]
+pub(crate) struct WorkerOwner {
+    state: Mutex<WorkState>,
+    changed: Notify,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct WorkerClosed;
+
+pub(crate) struct WorkerLease {
+    owner: Arc<WorkerOwner>,
+}
+
+impl WorkerOwner {
+    pub(crate) fn enter(self: &Arc<Self>) -> Result<WorkerLease, WorkerClosed> {
+        let mut state = self.state.lock().expect("worker ownership lock");
+        if state.closing {
+            return Err(WorkerClosed);
+        }
+        state.running += 1;
+        Ok(WorkerLease {
+            owner: self.clone(),
+        })
+    }
+
+    pub(crate) fn request_close(&self) -> bool {
+        let mut state = self.state.lock().expect("worker ownership lock");
+        let first = !state.closing;
+        state.closing = true;
+        drop(state);
+        self.changed.notify_waiters();
+        first
+    }
+
+    pub(crate) async fn drain_closed(&self) {
+        loop {
+            let notified = self.changed.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            {
+                let state = self.state.lock().expect("worker ownership lock");
+                if state.closing && state.running == 0 {
+                    return;
+                }
+            }
+            notified.await;
+        }
+    }
+}
+
+impl WorkerLease {
+    pub(crate) fn while_open<T>(
+        &self,
+        operation: impl FnOnce() -> T,
+    ) -> Result<T, WorkerClosed> {
+        let state = self.owner.state.lock().expect("worker ownership lock");
+        if state.closing {
+            return Err(WorkerClosed);
+        }
+        let result = operation();
+        drop(state);
+        Ok(result)
+    }
+
+    pub(crate) fn child(&self) -> Result<Self, WorkerClosed> {
+        self.owner.enter()
+    }
+}
+
+impl Drop for WorkerLease {
+    fn drop(&mut self) {
+        let mut state = self.owner.state.lock().expect("worker ownership lock");
+        state.running -= 1;
+        let drained = state.closing && state.running == 0;
+        drop(state);
+        if drained {
+            self.owner.changed.notify_waiters();
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Phase {
@@ -80,6 +176,14 @@ impl Default for SessionGate {
 }
 
 impl SessionGate {
+    pub(crate) fn phase(&self) -> Result<Phase, LanSaveError> {
+        Ok(self
+            .state
+            .lock()
+            .map_err(|_| LanSaveError::invalid_state("会话状态锁已损坏"))?
+            .phase)
+    }
+
     fn step(&self, expected: Phase, next: Phase) -> Result<(), LanSaveError> {
         let mut state = self
             .state
@@ -182,7 +286,11 @@ pub(crate) struct LanSession {
     offer: Mutex<Option<WireOffer>>,
     file_task: Mutex<Option<Arc<FileTask>>>,
     file_job_id: Mutex<Option<String>>,
-    file_worker_active: AtomicBool,
+    receiver_action_tx: mpsc::Sender<ReceiverAction>,
+    receiver_action_rx: Mutex<Option<mpsc::Receiver<ReceiverAction>>>,
+    workers: Arc<WorkerOwner>,
+    finalize_started: AtomicBool,
+    finalize_finished: AtomicBool,
 }
 
 impl LanSession {
@@ -192,7 +300,7 @@ impl LanSession {
         transfer_id: String,
         event_sink: LanEventSink,
     ) -> Self {
-        Self::new_inner(session_id, Some(token), transfer_id, event_sink)
+        Self::new_inner(session_id, Some(token), Some(transfer_id), event_sink)
     }
 
     pub(crate) fn new_join(
@@ -200,19 +308,24 @@ impl LanSession {
         transfer_id: String,
         event_sink: LanEventSink,
     ) -> Self {
-        Self::new_inner(session_id, None, transfer_id, event_sink)
+        Self::new_inner(session_id, None, Some(transfer_id), event_sink)
+    }
+
+    pub(crate) fn new_pending_join(session_id: String, event_sink: LanEventSink) -> Self {
+        Self::new_inner(session_id, None, None, event_sink)
     }
 
     fn new_inner(
         session_id: String,
         host_token: Option<String>,
-        transfer_id: String,
+        transfer_id: Option<String>,
         event_sink: LanEventSink,
     ) -> Self {
+        let (receiver_action_tx, receiver_action_rx) = mpsc::channel(4);
         Self {
             session_id,
             host_token,
-            transfer_id: Mutex::new(Some(transfer_id)),
+            transfer_id: Mutex::new(transfer_id),
             gate: SessionGate::default(),
             event_sink: Mutex::new(Some(event_sink)),
             connection: Mutex::new(None),
@@ -224,12 +337,64 @@ impl LanSession {
             offer: Mutex::new(None),
             file_task: Mutex::new(None),
             file_job_id: Mutex::new(None),
-            file_worker_active: AtomicBool::new(false),
+            receiver_action_tx,
+            receiver_action_rx: Mutex::new(Some(receiver_action_rx)),
+            workers: Arc::new(WorkerOwner::default()),
+            finalize_started: AtomicBool::new(false),
+            finalize_finished: AtomicBool::new(false),
         }
     }
 
     pub(crate) fn gate(&self) -> &SessionGate {
         &self.gate
+    }
+
+    pub(crate) fn enter_worker(&self) -> Result<WorkerLease, LanSaveError> {
+        self.workers
+            .enter()
+            .map_err(|_| LanSaveError::cancelled())
+    }
+
+    pub(crate) fn request_workers_close(&self) -> bool {
+        self.workers.request_close()
+    }
+
+    pub(crate) async fn drain_workers(&self) {
+        self.workers.drain_closed().await
+    }
+
+    pub(crate) fn receiver_action_sender(&self) -> mpsc::Sender<ReceiverAction> {
+        self.receiver_action_tx.clone()
+    }
+
+    pub(crate) fn take_receiver_action_receiver(&self) -> Option<mpsc::Receiver<ReceiverAction>> {
+        self.receiver_action_rx
+            .lock()
+            .ok()
+            .and_then(|mut receiver| receiver.take())
+    }
+
+    pub(crate) fn begin_finalize(&self) -> bool {
+        self.finalize_started
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+    }
+
+    pub(crate) fn finish_finalize(&self) {
+        self.finalize_finished.store(true, Ordering::Release);
+        self.notify.notify_waiters();
+    }
+
+    pub(crate) async fn wait_finalize(&self) {
+        loop {
+            let notified = self.notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if self.finalize_finished.load(Ordering::Acquire) {
+                return;
+            }
+            notified.await;
+        }
     }
 
     pub(crate) fn host_token(&self) -> Option<&str> {
@@ -242,6 +407,14 @@ impl LanSession {
             .map_err(|_| LanSaveError::invalid_state("transferId 锁已损坏"))?
             .clone()
             .ok_or_else(|| LanSaveError::invalid_state("会话尚未分配 transferId"))
+    }
+
+    pub(crate) fn set_transfer_id(&self, transfer_id: String) -> Result<(), LanSaveError> {
+        *self
+            .transfer_id
+            .lock()
+            .map_err(|_| LanSaveError::invalid_state("transferId 锁已损坏"))? = Some(transfer_id);
+        Ok(())
     }
 
     pub(crate) fn set_connection(&self, connection: Arc<super::connection::LanConnection>) -> Result<(), LanSaveError> {
@@ -284,6 +457,14 @@ impl LanSession {
         Ok(())
     }
 
+    pub(crate) fn offer_snapshot(&self) -> Result<Option<WireOffer>, LanSaveError> {
+        Ok(self
+            .offer
+            .lock()
+            .map_err(|_| LanSaveError::invalid_state("Offer 锁已损坏"))?
+            .clone())
+    }
+
     pub(crate) fn take_offer(&self) -> Result<Option<WireOffer>, LanSaveError> {
         Ok(self
             .offer
@@ -293,10 +474,15 @@ impl LanSession {
     }
 
     pub(crate) fn push_inbox(&self, message: ControlMessage) -> Result<(), LanSaveError> {
-        self.inbox
+        let mut inbox = self
+            .inbox
             .lock()
-            .map_err(|_| LanSaveError::invalid_state("控制消息队列锁已损坏"))?
-            .push_back(message);
+            .map_err(|_| LanSaveError::invalid_state("控制消息队列锁已损坏"))?;
+        if inbox.len() >= 8 {
+            return Err(LanSaveError::invalid_state("控制消息队列已满"));
+        }
+        inbox.push_back(message);
+        drop(inbox);
         self.notify.notify_waiters();
         Ok(())
     }
@@ -383,44 +569,25 @@ impl LanSession {
             .clone())
     }
 
-    pub(crate) fn set_file_worker_active(&self, active: bool) {
-        self.file_worker_active.store(active, Ordering::Release);
+    pub(crate) fn is_role_idle(&self) -> bool {
+        self.role.load(Ordering::Acquire) == ROLE_IDLE
     }
 
-    pub(crate) fn is_file_worker_active(&self) -> bool {
-        self.file_worker_active.load(Ordering::Acquire)
-    }
-
-    pub(crate) fn finish_file_worker(&self) {
-        self.file_worker_active.store(false, Ordering::Release);
-        self.notify.notify_waiters();
-    }
-
-    pub(crate) async fn wait_file_worker_done(
-        &self,
-        timeout: Duration,
-    ) -> Result<(), LanSaveError> {
-        let started = Instant::now();
-        loop {
-            if !self.is_file_worker_active() {
-                return Ok(());
-            }
-            let remaining = timeout
-                .checked_sub(started.elapsed())
-                .ok_or_else(|| LanSaveError::expired("等待文件工作线程退出超时"))?;
-            let notified = self.notify.notified();
-            tokio::pin!(notified);
-            notified.as_mut().enable();
-            if !self.is_file_worker_active() {
-                return Ok(());
-            }
-            tokio::select! {
-                _ = notified => {}
-                _ = tokio::time::sleep(remaining) => {
-                    return Err(LanSaveError::expired("等待文件工作线程退出超时"));
-                }
-            }
+    pub(crate) fn clear_event_sink(&self) {
+        if let Ok(mut sink) = self.event_sink.lock() {
+            *sink = None;
         }
+    }
+
+    pub(crate) async fn take_connection(
+        &self,
+    ) -> Option<Arc<super::connection::LanConnection>> {
+        let connection = self
+            .connection
+            .lock()
+            .ok()
+            .and_then(|mut guard| guard.take());
+        connection
     }
 
     pub(crate) fn request_close(&self) {

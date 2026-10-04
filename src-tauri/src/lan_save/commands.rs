@@ -1,6 +1,6 @@
 use super::error::LanSaveError;
 use super::manager::{
-    accept, close, commit, event_sink, host_with_default_ip, join, send, LanCloseResult,
+    accept, close, commit, event_sink, host_with_bind_ip, join, send, LanCloseResult,
     LanHostResult, LanJoinResult, LanSendResult,
 };
 use super::session::LanSaveEvent;
@@ -12,8 +12,9 @@ use tauri::AppHandle;
 pub async fn lan_save_host(
     app: AppHandle,
     on_event: Channel<LanSaveEvent>,
+    bind_ip: Option<String>,
 ) -> Result<LanHostResult, LanSaveError> {
-    host_with_default_ip(&app, event_sink(on_event)).await
+    host_with_bind_ip(&app, event_sink(on_event), bind_ip).await
 }
 
 #[tauri::command]

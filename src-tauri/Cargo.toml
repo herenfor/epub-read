@@ -32,7 +32,7 @@ serde_json = "1"
 sha2 = "0.10"
 getrandom = "0.3"
 subtle = "2.6"
-tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "sync", "time"] }
+tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt", "sync", "time"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "ring"] }
 rustls = { version = "0.23", default-features = false, features = ["logging", "ring", "std"] }
 rcgen = { version = "0.14", default-features = false, features = ["ring"] }
@@ -44,7 +44,7 @@ reqwest = { version = "0.13.4", default-features = false, features = ["blocking"
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
-tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt", "rt-multi-thread", "sync", "time"] }
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-single-instance = "2.4.3"
