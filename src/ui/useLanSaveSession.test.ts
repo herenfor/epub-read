@@ -149,6 +149,9 @@ describe("useLanSaveSession", () => {
       onEvent({ event: "pairing", sessionId: "late-session", transferId: "t1" });
     });
     await vi.waitFor(() => expect(bridge.closeLanSave).toHaveBeenCalledWith("late-session"));
+    await dom.run(async () => { await latest!.startHost(); });
+    expect(bridge.hostLanSave).toHaveBeenCalledTimes(1);
+    expect(latest!.state.status).not.toBe("idle");
 
     await dom.run(async () => {
       host.resolve({ sessionId: "late-session", pairingInfo: "raw" });
@@ -159,7 +162,7 @@ describe("useLanSaveSession", () => {
     expect(latest!.state.status).toBe("idle");
   });
 
-  it("too-late 关闭后仍等待真实 commit，并只以最终结果刷新投影", async () => {
+  it.each(["too-late", "already-finished"] as const)("%s 关闭后仍等待真实 commit，并只以最终结果刷新投影", async (closeStatus) => {
     let onEvent: ((event: LanSaveEvent) => void) | null = null;
     bridge.joinLanSave.mockImplementation((input: { onEvent(event: LanSaveEvent): void }) => {
       onEvent = input.onEvent;
@@ -202,12 +205,12 @@ describe("useLanSaveSession", () => {
     });
     expect(latest!.state.status).toBe("committing");
 
-    bridge.closeLanSave.mockResolvedValue({ status: "too-late" });
+    bridge.closeLanSave.mockResolvedValue({ status: closeStatus });
     await dom.run(async () => {
       await latest!.close();
     });
     expect(latest!.state.status).toBe("committing");
-    expect(latest!.state.cancelTooLate).toBe(true);
+    expect(latest!.state.cancelTooLate).toBe(closeStatus === "too-late");
 
     await dom.run(async () => {
       pendingCommit.resolve(commitResult("preview-1"));
@@ -218,7 +221,11 @@ describe("useLanSaveSession", () => {
     expect(onImportCommitted.mock.calls[0]![0]).toMatchObject({ status: "committed" });
     expect(onImportCommitted.mock.calls[0]![1]).toBe(false);
     expect(latest!.state.status).toBe("commitComplete");
-    expect(latest!.state.status).not.toBe("idle");
+    expect(latest!.active).toBe(false);
+    await dom.run(() => {
+      onEvent!({ event: "error", sessionId: "session-1", transferId: "transfer-1", message: "late EOF" });
+    });
+    expect(latest!.state.status).toBe("commitComplete");
   });
 
   it("busy 后保留当前会话，第二次发送可重试成功", async () => {
@@ -252,4 +259,78 @@ describe("useLanSaveSession", () => {
     expect(bridge.sendLanSave).toHaveBeenCalledTimes(2);
     expect(latest!.state.status).toBe("sendComplete");
   });
+
+  it("join返回前的Offer不被启动结果覆盖", async () => {
+    const joining = deferred<{ sessionId: string }>();
+    bridge.joinLanSave.mockReturnValue(joining.promise);
+    await dom.render(createElement(Probe));
+    await dom.run(() => { void latest!.join("raw"); });
+    const emit = bridge.joinLanSave.mock.calls[0]![0]!.onEvent;
+    await dom.run(() => {
+      emit({ event: "paired", sessionId: "early", transferId: "t1" });
+      emit({ event: "offered", sessionId: "early", transferId: "t1", summary: {
+        archiveBytes: 10, bookCount: 1, attachedBookCount: 0,
+        includeBooks: false, hasPreferences: false, skippedBookCount: 0,
+      } });
+    });
+    await dom.run(async () => { joining.resolve({ sessionId: "early" }); await flushMicrotasks(); });
+    expect(latest!.state.status).toBe("receiving");
+    expect(latest!.state.offer?.bookCount).toBe(1);
+  });
+
+  it("保存进度期间关闭不会继续发送", async () => {
+    bridge.joinLanSave.mockImplementation((input) => {
+      input.onEvent({ event: "paired", sessionId: "preflight", transferId: "t1" });
+      return Promise.resolve({ sessionId: "preflight" });
+    });
+    await dom.render(createElement(Probe));
+    await dom.run(async () => { await latest!.join("raw"); });
+    const saved = deferred<{ kind: "all" }>();
+    prepareSend.mockReturnValueOnce(saved.promise);
+    let sending!: Promise<void>;
+    await dom.run(() => { sending = latest!.send("all", false); });
+    await dom.run(async () => { await latest!.close(); });
+    expect(latest!.state.status).not.toBe("idle");
+    await dom.run(async () => { saved.resolve({ kind: "all" }); await sending; });
+    expect(bridge.sendLanSave).not.toHaveBeenCalled();
+    expect(latest!.state.status).toBe("idle");
+  });
+
+  it("预览断线与接收失败均清除失效操作", async () => {
+    let emit!: (event: LanSaveEvent) => void;
+    bridge.joinLanSave.mockImplementation((input) => {
+      emit = input.onEvent;
+      emit({ event: "paired", sessionId: "receive", transferId: "t1" });
+      return Promise.resolve({ sessionId: "receive" });
+    });
+    const offer = () => emit({ event: "offered", sessionId: "receive", transferId: "t1", summary: {
+      archiveBytes: 10, bookCount: 1, attachedBookCount: 0,
+      includeBooks: false, hasPreferences: false, skippedBookCount: 0,
+    } });
+    await dom.render(createElement(Probe));
+    await dom.run(async () => { await latest!.join("raw"); offer(); });
+    bridge.acceptLanSave.mockResolvedValueOnce(preview("receive"));
+    await dom.run(async () => { await latest!.accept(); });
+    expect(latest!.state.preview).not.toBeNull();
+    await dom.run(() => { emit({ event: "closed", sessionId: "receive", code: "cancelled" }); });
+    expect(latest!.state.status).toBe("closed");
+    expect(latest!.state.preview).toBeNull();
+    expect(latest!.active).toBe(false);
+    await dom.run(async () => { await latest!.close(); await latest!.join("raw"); offer(); });
+    bridge.acceptLanSave.mockRejectedValueOnce(Object.assign(new Error("存档损坏"), { code: "invalid-data" }));
+    await dom.run(async () => { await latest!.accept(); });
+    expect(latest!.state.status).toBe("closed");
+    expect(latest!.state.offer).toBeNull();
+    expect(latest!.active).toBe(false);
+    await dom.run(async () => { await latest!.close(); await latest!.join("raw"); offer(); });
+    const receiving = deferred<SaveFilePrepareResult>();
+    bridge.acceptLanSave.mockReturnValueOnce(receiving.promise);
+    let accepted!: Promise<void>;
+    await dom.run(() => { accepted = latest!.accept(); });
+    await dom.run(() => { emit({ event: "closed", sessionId: "receive", code: "cancelled" }); });
+    await dom.run(async () => { receiving.resolve(preview("already-discarded")); await accepted; });
+    expect(latest!.state.status).toBe("closed");
+    expect(latest!.state.preview).toBeNull();
+  });
+
 });

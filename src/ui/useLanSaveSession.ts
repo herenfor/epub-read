@@ -136,16 +136,13 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
   const cancelWantedRef = useRef(false);
   const closeRef = useRef<{ sessionId: string; promise: Promise<LanCloseResult> } | null>(null);
   const busyRef = useRef(false);
+  const launchPendingRef = useRef(false);
+  const operationRef = useRef<"send" | "accept" | "commit" | null>(null);
+  const closeFinishedRef = useRef(false);
+  const peerEndedRef = useRef(false);
   const mountedRef = useRef(true);
   const optionsRef = useRef(options);
   optionsRef.current = options;
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
 
   const updateState = useCallback((
     patch: Partial<LanSaveSessionState> | ((previous: LanSaveSessionState) => Partial<LanSaveSessionState>),
@@ -160,12 +157,17 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
   }, []);
 
   const resetToIdle = useCallback((): void => {
+    // A close acknowledgement does not settle an outstanding IPC result. Keep
+    // this generation owned until startup/actions, especially commit, finish.
+    if (launchPendingRef.current || operationRef.current) return;
     generationRef.current += 1;
     sessionIdRef.current = null;
     transferIdRef.current = null;
     cancelWantedRef.current = false;
     closeRef.current = null;
     busyRef.current = false;
+    closeFinishedRef.current = false;
+    peerEndedRef.current = false;
     stateRef.current = INITIAL_STATE;
     if (mountedRef.current) setState(INITIAL_STATE);
   }, []);
@@ -175,11 +177,13 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
     const existing = closeRef.current;
     if (existing?.sessionId === sessionId) return existing.promise;
 
+    const generation = generationRef.current;
     updateState({ closing: true });
     const promise = closeLanSave(sessionId);
     closeRef.current = { sessionId, promise };
     try {
       const result = await promise;
+      if (generationRef.current !== generation) return result;
       if (result.status === "too-late") {
         updateState({
           closing: false,
@@ -187,13 +191,18 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
           notice: "提交已经开始，关闭窗口不会回滚。",
         });
       } else {
+        closeFinishedRef.current = true;
+        updateState({ closing: false });
         resetToIdle();
       }
       return result;
     } catch (error) {
+      if (generationRef.current !== generation) throw error;
       if (closeRef.current?.sessionId === sessionId) closeRef.current = null;
       const code = lanSaveErrorCode(error);
       if (code === "not-found") {
+        closeFinishedRef.current = true;
+        updateState({ closing: false });
         resetToIdle();
         return { status: "already-finished" };
       }
@@ -231,7 +240,9 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
         }
       }
 
+      if (cancelWantedRef.current && operationRef.current !== "commit") return;
       const current = stateRef.current;
+      if (["sendComplete", "sendUnconfirmed", "sendCancelled", "sendFailed", "commitComplete", "closed"].includes(current.status)) return;
       switch (event.event) {
         case "pairing":
           break;
@@ -293,24 +304,17 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
           // The send/commit promise owns the terminal result.
           break;
         case "closed":
-          if (current.busy || current.status === "committing" || current.status === "preparing" || current.status === "preview") {
-            updateState({ notice: event.message ?? "连接已结束；本机操作仍在继续。" });
-          } else if (!cancelWantedRef.current) {
-            updateState({
-              status: "closed",
-              busy: false,
-              notice: "连接已结束，请重新连接。",
-            });
-          }
-          break;
         case "error":
-          if (current.busy || current.status === "committing" || current.status === "preparing") {
-            updateState({ notice: event.message ?? "连接出现错误，正在等待本机结果。" });
-          } else if (!cancelWantedRef.current) {
+          peerEndedRef.current = true;
+          if (operationRef.current || launchPendingRef.current) {
+            updateState({ notice: event.message ?? "连接已结束，正在等待本机结果。" });
+          } else {
+            // A prepared import is gone after peer EOF/background cancellation.
+            // Never leave an actionable preview for a discarded native job.
             updateState({
-              status: "closed",
-              busy: false,
-              error: event.message ?? "局域网互传失败。",
+              status: "closed", busy: false, offer: null, preview: null,
+              notice: event.message ?? "连接已结束，请重新连接。",
+              error: event.event === "error" ? event.message ?? "局域网互传失败。" : null,
               errorCode: event.code ?? null,
             });
           }
@@ -324,6 +328,9 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
   const failToIdle = useCallback((error: unknown): void => {
     const code = lanSaveErrorCode(error);
     const message = lanSaveErrorMessage(error);
+    launchPendingRef.current = false;
+    closeFinishedRef.current = false;
+    peerEndedRef.current = false;
     generationRef.current += 1;
     sessionIdRef.current = null;
     transferIdRef.current = null;
@@ -342,6 +349,9 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
   const startHost = useCallback(async (bindIp?: string): Promise<void> => {
     if (busyRef.current || stateRef.current.status !== "idle") return;
     busyRef.current = true;
+    launchPendingRef.current = true;
+    closeFinishedRef.current = false;
+    peerEndedRef.current = false;
     cancelWantedRef.current = false;
     closeRef.current = null;
     sessionIdRef.current = null;
@@ -368,8 +378,9 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
         return;
       }
       sessionIdRef.current = result.sessionId;
-      updateState({
-        status: "hostReady",
+      if (peerEndedRef.current) { updateState({ status: "closed", busy: false }); return; }
+      updateState((current) => ({
+        status: current.status === "startingHost" ? "hostReady" : current.status,
         role: "host",
         sessionId: result.sessionId,
         pairingInfo: result.pairingInfo,
@@ -377,7 +388,7 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
         error: null,
         errorCode: null,
         notice: null,
-      });
+      }));
     } catch (error) {
       if (generationRef.current !== generation) return;
       if (cancelWantedRef.current) {
@@ -388,7 +399,11 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
       }
       failToIdle(error);
     } finally {
-      busyRef.current = false;
+      if (generationRef.current === generation) {
+        launchPendingRef.current = false;
+        busyRef.current = false;
+        if (cancelWantedRef.current && (closeFinishedRef.current || !sessionIdRef.current)) resetToIdle();
+      }
     }
   }, [failToIdle, makeEventHandler, requestCloseForSession, resetToIdle, updateState]);
 
@@ -401,6 +416,9 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
     }
 
     busyRef.current = true;
+    launchPendingRef.current = true;
+    closeFinishedRef.current = false;
+    peerEndedRef.current = false;
     cancelWantedRef.current = false;
     closeRef.current = null;
     sessionIdRef.current = null;
@@ -427,15 +445,16 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
         return;
       }
       if (!sessionIdRef.current) sessionIdRef.current = result.sessionId;
-      updateState({
-        status: "connected",
+      if (peerEndedRef.current) { updateState({ status: "closed", busy: false }); return; }
+      updateState((current) => ({
+        status: current.status === "joining" ? "connected" : current.status,
         role: "join",
         sessionId: result.sessionId,
         busy: false,
         error: null,
         errorCode: null,
         notice: "已连接：可以发送资料，也可以等待对端发送。",
-      });
+      }));
     } catch (error) {
       if (generationRef.current !== generation) return;
       if (cancelWantedRef.current) {
@@ -446,7 +465,11 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
       }
       failToIdle(error);
     } finally {
-      busyRef.current = false;
+      if (generationRef.current === generation) {
+        launchPendingRef.current = false;
+        busyRef.current = false;
+        if (cancelWantedRef.current && (closeFinishedRef.current || !sessionIdRef.current)) resetToIdle();
+      }
     }
   }, [failToIdle, makeEventHandler, requestCloseForSession, resetToIdle, updateState]);
 
@@ -454,13 +477,14 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
     scopeChoice: "all" | "selected",
     includeBooks: boolean,
   ): Promise<void> => {
-    if (busyRef.current) return;
+    if (busyRef.current || launchPendingRef.current || cancelWantedRef.current) return;
     const previous = stateRef.current;
     const sessionId = sessionIdRef.current;
     const transferId = transferIdRef.current;
     if (!sessionId || !transferId || previous.status !== "connected") return;
 
     busyRef.current = true;
+    operationRef.current = "send";
     const generation = generationRef.current;
     updateState({
       status: "sending",
@@ -473,9 +497,11 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
       sendResult: null,
     });
 
+    let invokedNative = false;
     try {
       const scope = await optionsRef.current.prepareSend(scopeChoice, includeBooks);
-      if (generationRef.current !== generation) return;
+      if (generationRef.current !== generation || cancelWantedRef.current || peerEndedRef.current) return;
+      invokedNative = true;
       const result = await sendLanSave(sessionId, scope, includeBooks);
       if (generationRef.current !== generation) return;
 
@@ -509,27 +535,37 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
     } catch (error) {
       if (generationRef.current !== generation) return;
       if (cancelWantedRef.current) return;
+      const retry = (!invokedNative || lanSaveErrorCode(error) === "busy") && !peerEndedRef.current;
       updateState({
-        status: previous.status,
+        status: retry ? previous.status : "closed",
         busy: false,
-        offer: previous.offer,
-        progress: previous.progress,
+        offer: retry ? previous.offer : null,
+        preview: null,
+        progress: retry ? previous.progress : null,
         error: lanSaveErrorMessage(error),
         errorCode: lanSaveErrorCode(error),
       });
     } finally {
-      busyRef.current = false;
+      if (generationRef.current === generation) {
+        operationRef.current = null;
+        busyRef.current = false;
+        if (peerEndedRef.current && ["sending", "receiving", "preparing"].includes(stateRef.current.status)) {
+          updateState({ status: "closed", busy: false, preview: null, offer: null });
+        }
+        if (cancelWantedRef.current && closeFinishedRef.current) resetToIdle();
+      }
     }
-  }, [updateState]);
+  }, [resetToIdle, updateState]);
 
   const accept = useCallback(async (): Promise<void> => {
-    if (busyRef.current) return;
+    if (busyRef.current || launchPendingRef.current || cancelWantedRef.current) return;
     const previous = stateRef.current;
     const sessionId = sessionIdRef.current;
     const transferId = transferIdRef.current;
     if (!sessionId || !transferId || !previous.offer) return;
 
     busyRef.current = true;
+    operationRef.current = "accept";
     const generation = generationRef.current;
     updateState({
       status: "preparing",
@@ -544,6 +580,10 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
     try {
       const preview = await acceptLanSave(sessionId, transferId);
       if (generationRef.current !== generation) return;
+      if (peerEndedRef.current) {
+        updateState({ status: "closed", busy: false, preview: null, offer: null });
+        return;
+      }
       updateState({
         status: "preview",
         preview,
@@ -555,18 +595,27 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
     } catch (error) {
       if (generationRef.current !== generation) return;
       if (cancelWantedRef.current) return;
+      const retry = (lanSaveErrorCode(error) === "busy") && !peerEndedRef.current;
       updateState({
-        status: previous.status,
+        status: retry ? previous.status : "closed",
         busy: false,
-        offer: previous.offer,
-        progress: previous.progress,
+        offer: retry ? previous.offer : null,
+        preview: null,
+        progress: retry ? previous.progress : null,
         error: lanSaveErrorMessage(error),
         errorCode: lanSaveErrorCode(error),
       });
     } finally {
-      busyRef.current = false;
+      if (generationRef.current === generation) {
+        operationRef.current = null;
+        busyRef.current = false;
+        if (peerEndedRef.current && ["sending", "receiving", "preparing"].includes(stateRef.current.status)) {
+          updateState({ status: "closed", busy: false, preview: null, offer: null });
+        }
+        if (cancelWantedRef.current && closeFinishedRef.current) resetToIdle();
+      }
     }
-  }, [updateState]);
+  }, [resetToIdle, updateState]);
 
   const decline = useCallback(async (): Promise<void> => {
     cancelWantedRef.current = true;
@@ -579,13 +628,14 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
   }, [requestCloseForSession, resetToIdle]);
 
   const commit = useCallback(async (applyPreferences: boolean): Promise<void> => {
-    if (busyRef.current) return;
+    if (busyRef.current || launchPendingRef.current || cancelWantedRef.current) return;
     const previous = stateRef.current;
     const sessionId = sessionIdRef.current;
     const transferId = transferIdRef.current;
     if (!sessionId || !transferId || !previous.preview) return;
 
     busyRef.current = true;
+    operationRef.current = "commit";
     const generation = generationRef.current;
     const preview = previous.preview;
     updateState({
@@ -600,7 +650,7 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
 
     try {
       const result = await commitLanSave(sessionId, transferId, applyPreferences);
-      if (generationRef.current !== generation) return;
+      // A real committed result must refresh the repository even after close.
       try {
         await optionsRef.current.onImportCommitted(result, applyPreferences);
       } catch {
@@ -613,6 +663,7 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
         // the resolved too-late promise.
         closeRef.current = null;
         cancelWantedRef.current = false;
+        closeFinishedRef.current = false;
       }
       updateState({
         status: "commitComplete",
@@ -625,17 +676,23 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
       });
     } catch (error) {
       if (generationRef.current !== generation) return;
+      const retry = lanSaveErrorCode(error) === "busy" && !peerEndedRef.current && !cancelWantedRef.current;
       updateState({
-        status: "preview",
-        preview,
+        status: retry ? "preview" : "closed",
+        preview: retry ? preview : null,
         busy: false,
         error: lanSaveErrorMessage(error),
         errorCode: lanSaveErrorCode(error),
       });
+      if (!retry) { closeRef.current = null; cancelWantedRef.current = false; }
     } finally {
-      busyRef.current = false;
+      if (generationRef.current === generation) {
+        operationRef.current = null;
+        busyRef.current = false;
+        if (cancelWantedRef.current && closeFinishedRef.current) resetToIdle();
+      }
     }
-  }, [updateState]);
+  }, [resetToIdle, updateState]);
 
   const close = useCallback(async (): Promise<void> => {
     if (stateRef.current.status === "idle") return;
@@ -648,9 +705,24 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
     await requestCloseForSession(sessionId).catch(() => undefined);
   }, [requestCloseForSession, updateState]);
 
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      // StrictMode's immediate setup cancels this deferred cleanup. A real
+      // unmount still closes its own run, including a pending host/join.
+      queueMicrotask(() => {
+        if (!mountedRef.current) void close();
+      });
+    };
+  }, [close]);
+
   return {
     state,
-    active: state.status !== "idle",
+    active: state.busy || state.closing || [
+      "startingHost", "hostReady", "joining", "connected", "sending",
+      "receiving", "preparing", "preview", "committing",
+    ].includes(state.status),
     startHost,
     join,
     send,

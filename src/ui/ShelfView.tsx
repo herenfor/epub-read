@@ -2627,17 +2627,17 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
                 批量选择
               </button>
             )}
-            <button className="tb-btn" type="button" onClick={props.onImportArchive} disabled={props.busy || props.importArchiveDisabled || props.saveFileActive}>
+            <button className="tb-btn" type="button" onClick={props.onImportArchive} disabled={props.busy || props.importArchiveDisabled || props.saveFileActive || props.lanTransferActive}>
               导入存档
             </button>
-            <button className="tb-btn" type="button" onClick={() => props.onExportArchive()} disabled={props.busy || props.saveFileActive || props.entries.length === 0}>
+            <button className="tb-btn" type="button" onClick={() => props.onExportArchive()} disabled={props.busy || props.saveFileActive || props.lanTransferActive || props.entries.length === 0}>
               导出存档
             </button>
             {capabilities.supportsLanTransfer && props.onOpenLanTransfer && (
               <button
                 className="tb-btn"
                 type="button"
-                disabled={props.busy || props.importActive || props.saveFileActive || props.lanTransferActive}
+                disabled={!props.lanTransferActive && (props.busy || props.importActive || props.saveFileActive)}
                 title="在同一局域网的两台设备间互传书架资料"
                 onClick={() => props.onOpenLanTransfer!()}
               >
@@ -2654,7 +2654,7 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
                   className="tb-btn"
                   type="button"
                   onClick={props.onImportLegacyArchive}
-                  disabled={props.busy || props.importArchiveDisabled || props.saveFileActive}
+                  disabled={props.busy || props.importArchiveDisabled || props.saveFileActive || props.lanTransferActive}
                 >
                   导入旧版 JSON 存档
                 </button>
@@ -5440,7 +5440,7 @@ export function ShelfView(props: ShelfViewProps) {
             <button
               className="shelf-batch-action-btn"
               type="button"
-              disabled={noneSelected || props.busy || props.saveFileActive}
+              disabled={noneSelected || props.busy || props.saveFileActive || props.lanTransferActive}
               onClick={() => {
                 const targets = props.entries.filter((e) => selectedIds.has(e.id));
                 if (targets.length > 0) props.onExportArchive(targets);
@@ -5454,10 +5454,10 @@ export function ShelfView(props: ShelfViewProps) {
               <button
                 className="shelf-batch-action-btn"
                 type="button"
-                disabled={noneSelected || props.busy || props.importActive || props.saveFileActive || props.lanTransferActive}
+                disabled={!props.lanTransferActive && (noneSelected || props.busy || props.importActive || props.saveFileActive)}
                 onClick={() => {
                   const targets = props.entries.filter((e) => selectedIds.has(e.id));
-                  if (targets.length > 0) props.onOpenLanTransfer!(targets);
+                  if (props.lanTransferActive || targets.length > 0) props.onOpenLanTransfer!(targets);
                 }}
                 title="将选中书籍资料加入局域网互传"
               >
