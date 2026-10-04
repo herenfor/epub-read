@@ -147,8 +147,8 @@ export function CacheStoragePanel(props: CacheStoragePanelProps) {
       await refresh();
       setNotice("全文索引已清除；全文搜索需要重新准备。");
     } catch (reason) {
-      setError(String(reason));
       await refresh();
+      setError(String(reason));
     } finally {
       setBusy(null);
     }
@@ -172,7 +172,7 @@ export function CacheStoragePanel(props: CacheStoragePanelProps) {
         <header className="cache-storage-head">
           <div>
             <h2>缓存与存储</h2>
-            <p>本机设置，不影响书架存档与云协议。</p>
+            <p>设置只用于当前设备。</p>
           </div>
           <button type="button" className="tb-btn" onClick={props.onClose} aria-label="关闭缓存与存储">
             关闭
@@ -250,7 +250,7 @@ export function CacheStoragePanel(props: CacheStoragePanelProps) {
                 <div className="cache-storage-loading">暂无全文索引分类。</div>
               )}
               <p className="cache-storage-hint">
-                清除后全文搜索需要重新准备；不会自动重新建立。清除不会承诺立即释放同等磁盘空间，也不会执行 VACUUM。
+                清除后全文搜索需要重新准备。显示的占用可能不会立即下降。
               </p>
             </div>
           </>

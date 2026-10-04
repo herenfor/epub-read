@@ -104,4 +104,22 @@ describe("CacheStoragePanel", () => {
       await harness.dispose();
     }
   });
+  it("keeps the cleanup error visible after refreshing status", async () => {
+    const harness = createReactDomHarness();
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "cache_storage_get_status") return baseStatus;
+      if (command === "ai_cache_clear") throw new Error("正在建立全文索引，请完成或取消后再清理");
+      return undefined;
+    });
+    try {
+      await harness.render(createElement(CacheStoragePanel, { open: true, onClose: vi.fn() }));
+      await harness.run(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+      await harness.click(buttonByText(harness.container, "清除全文索引"));
+      await harness.run(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+      expect(harness.container.querySelector('[role="alert"]')?.textContent).toContain("正在建立全文索引");
+    } finally {
+      await harness.dispose();
+    }
+  });
+
 });

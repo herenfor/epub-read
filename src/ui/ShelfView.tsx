@@ -2636,8 +2636,8 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
           <div className="shelf-drawer-group-label">关于</div>
           <AboutInfo />
         </div>
-        <CacheStoragePanel open={cachePanelOpen} onClose={() => setCachePanelOpen(false)} />
       </aside>
+      <CacheStoragePanel open={cachePanelOpen} onClose={() => setCachePanelOpen(false)} />
     </div>
   );
 }

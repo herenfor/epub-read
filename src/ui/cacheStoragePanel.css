@@ -2,6 +2,7 @@
   position: fixed;
   inset: 0;
   z-index: 1200;
+  pointer-events: auto;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -20,10 +21,10 @@
   max-height: min(760px, calc(100vh - 48px));
   overflow: auto;
   padding: 20px;
-  border: 1px solid var(--border-color, rgba(148, 163, 184, 0.35));
+  border: 1px solid var(--panel-border);
   border-radius: 16px;
-  background: var(--surface-color, #fff);
-  color: var(--text-color, #172033);
+  background: var(--panel-bg);
+  color: var(--fg);
   box-shadow: 0 24px 64px rgba(15, 23, 42, 0.28);
 }
 
@@ -42,7 +43,7 @@
 
 .cache-storage-head p {
   margin: 0;
-  color: var(--muted-color, #64748b);
+  color: var(--muted);
   font-size: 12px;
 }
 
@@ -71,7 +72,7 @@
 
 .cache-storage-loading {
   padding: 16px 0;
-  color: var(--muted-color, #64748b);
+  color: var(--muted);
   font-size: 13px;
 }
 
@@ -89,7 +90,7 @@
 }
 
 .cache-storage-paths dt {
-  color: var(--muted-color, #64748b);
+  color: var(--muted);
   font-size: 12px;
 }
 
@@ -132,7 +133,7 @@
 }
 
 .cache-storage-total span {
-  color: var(--muted-color, #64748b);
+  color: var(--muted);
   font-size: 13px;
 }
 
@@ -143,7 +144,7 @@
 .cache-storage-category {
   margin-top: 12px;
   padding: 12px;
-  border: 1px solid var(--border-color, rgba(148, 163, 184, 0.35));
+  border: 1px solid var(--panel-border);
   border-radius: 12px;
 }
 
@@ -175,12 +176,12 @@
 
 .cache-storage-hint {
   margin: 10px 0 0;
-  color: var(--muted-color, #64748b);
+  color: var(--muted);
   font-size: 12px;
   line-height: 1.6;
 }
 
-.tb-btn.is-danger {
+.cache-storage-panel .tb-btn.is-danger {
   color: #b91c1c;
 }
 

@@ -47,3 +47,6 @@ src-tauri/gen/android/app/tauri.build.gradle.kts
 src-tauri/gen/android/app/proguard-tauri.pro
 src-tauri/gen/android/app/src/main/jniLibs/
 src-tauri/gen/android/app/src/main/java/**/generated/
+
+# Internal task reports belong in ignored docs, never at the repository root.
+/*-result.md
