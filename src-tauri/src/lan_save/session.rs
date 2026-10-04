@@ -4,7 +4,7 @@ use crate::save_file::commands::FileTask;
 use serde::Serialize;
 use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, oneshot, Notify};
@@ -42,6 +42,7 @@ pub(crate) enum ReceiverAction {
         archive_bytes: u64,
         reply: oneshot::Sender<Result<(), LanSaveError>>,
     },
+    PhaseChanged,
 }
 
 #[derive(Default)]
@@ -101,10 +102,7 @@ impl WorkerOwner {
 }
 
 impl WorkerLease {
-    pub(crate) fn while_open<T>(
-        &self,
-        operation: impl FnOnce() -> T,
-    ) -> Result<T, WorkerClosed> {
+    pub(crate) fn while_open<T>(&self, operation: impl FnOnce() -> T) -> Result<T, WorkerClosed> {
         let state = self.owner.state.lock().expect("worker ownership lock");
         if state.closing {
             return Err(WorkerClosed);
@@ -291,6 +289,7 @@ pub(crate) struct LanSession {
     workers: Arc<WorkerOwner>,
     finalize_started: AtomicBool,
     finalize_finished: AtomicBool,
+    outgoing_bytes: AtomicU64,
 }
 
 impl LanSession {
@@ -342,6 +341,7 @@ impl LanSession {
             workers: Arc::new(WorkerOwner::default()),
             finalize_started: AtomicBool::new(false),
             finalize_finished: AtomicBool::new(false),
+            outgoing_bytes: AtomicU64::new(0),
         }
     }
 
@@ -349,10 +349,16 @@ impl LanSession {
         &self.gate
     }
 
+    pub(crate) fn set_outgoing_bytes(&self, bytes: u64) {
+        self.outgoing_bytes.store(bytes, Ordering::Release);
+    }
+
+    pub(crate) fn outgoing_bytes(&self) -> u64 {
+        self.outgoing_bytes.load(Ordering::Acquire)
+    }
+
     pub(crate) fn enter_worker(&self) -> Result<WorkerLease, LanSaveError> {
-        self.workers
-            .enter()
-            .map_err(|_| LanSaveError::cancelled())
+        self.workers.enter().map_err(|_| LanSaveError::cancelled())
     }
 
     pub(crate) fn request_workers_close(&self) -> bool {
@@ -417,7 +423,10 @@ impl LanSession {
         Ok(())
     }
 
-    pub(crate) fn set_connection(&self, connection: Arc<super::connection::LanConnection>) -> Result<(), LanSaveError> {
+    pub(crate) fn set_connection(
+        &self,
+        connection: Arc<super::connection::LanConnection>,
+    ) -> Result<(), LanSaveError> {
         *self
             .connection
             .lock()
@@ -435,13 +444,23 @@ impl LanSession {
 
     pub(crate) fn claim_outgoing(&self) -> bool {
         self.role
-            .compare_exchange(ROLE_IDLE, ROLE_OUTGOING, Ordering::AcqRel, Ordering::Acquire)
+            .compare_exchange(
+                ROLE_IDLE,
+                ROLE_OUTGOING,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
             .is_ok()
     }
 
     pub(crate) fn claim_incoming(&self) -> bool {
         self.role
-            .compare_exchange(ROLE_IDLE, ROLE_INCOMING, Ordering::AcqRel, Ordering::Acquire)
+            .compare_exchange(
+                ROLE_IDLE,
+                ROLE_INCOMING,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
             .is_ok()
     }
 
@@ -579,9 +598,7 @@ impl LanSession {
         }
     }
 
-    pub(crate) async fn take_connection(
-        &self,
-    ) -> Option<Arc<super::connection::LanConnection>> {
+    pub(crate) async fn take_connection(&self) -> Option<Arc<super::connection::LanConnection>> {
         let connection = self
             .connection
             .lock()
@@ -647,7 +664,12 @@ impl LanSession {
         });
     }
 
-    pub(crate) fn emit_progress(&self, phase: &str, processed_bytes: u64, total_bytes: Option<u64>) {
+    pub(crate) fn emit_progress(
+        &self,
+        phase: &str,
+        processed_bytes: u64,
+        total_bytes: Option<u64>,
+    ) {
         let event = match phase {
             "reading" | "extracting" => "preparing",
             "preparing" | "writing" | "finalizing" | "exporting" => "exporting",

@@ -1,7 +1,5 @@
 use super::connection::{LanConnection, LanIo};
-use super::manager::{
-    accept, close, commit, join, send, start_host, LanHostResult,
-};
+use super::manager::{accept, close, commit, join, send, start_host, LanHostResult};
 use super::pairing::LanPairingV1;
 use super::session::{GateClose, LanEventSink, LanSaveEvent, SessionGate};
 use super::tls::{client_config, server_name, TlsIdentity};
@@ -19,13 +17,13 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::test::{mock_builder, mock_context, noop_assets, MockRuntime};
 use tauri::{App, AppHandle, Manager};
+use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::{TlsAcceptor, TlsConnector};
 
 const A: &str = "00000000-0000-4000-8000-000000000001";
 
 static NONCE: AtomicU64 = AtomicU64::new(0);
-
 
 struct TestApp {
     app: Option<App<MockRuntime>>,
@@ -60,17 +58,18 @@ impl TestApp {
     }
 
     fn handle(&self) -> AppHandle<MockRuntime> {
-        self.app
-            .as_ref()
-            .expect("app is alive")
-            .handle()
-            .clone()
+        self.app.as_ref().expect("app is alive").handle().clone()
     }
 }
 
 impl Drop for TestApp {
     fn drop(&mut self) {
-        self.app.take();
+        if let Some(app) = self.app.take() {
+            if let Ok(cache) = app.path().app_cache_dir() {
+                let _ = std::fs::remove_dir_all(cache);
+            }
+            drop(app);
+        }
         let _ = std::fs::remove_dir_all(&self.root);
     }
 }
@@ -193,24 +192,26 @@ async fn lan_loopback_streams_archive_then_prepares_and_commits() {
     let receiver_handle = receiver.handle();
     let host_log = EventLog::default();
     let join_log = EventLog::default();
-    let host: LanHostResult =
-        start_host(&sender_handle, Ipv4Addr::LOCALHOST, host_log.sink())
-            .await
-            .expect("host should start");
+    let host: LanHostResult = start_host(&sender_handle, Ipv4Addr::LOCALHOST, host_log.sink())
+        .await
+        .expect("host should start");
     assert_eq!(host.session_id.len(), 36);
-    let join_result =
-        tokio::time::timeout(Duration::from_secs(15), join(&receiver_handle, &host.pairing_info, join_log.sink()))
-            .await
-            .expect("join should not time out")
-            .expect("join should pair");
+    let join_result = tokio::time::timeout(
+        Duration::from_secs(15),
+        join(&receiver_handle, &host.pairing_info, join_log.sink()),
+    )
+    .await
+    .expect("join should not time out")
+    .expect("join should pair");
     assert_eq!(join_result.session_id, host.session_id);
 
     let session_id = host.session_id.clone();
     let send_handle = sender_handle.clone();
     let send_session = session_id.clone();
-    let send_task = tokio::spawn(async move {
-        send(&send_handle, &send_session, SaveExportScope::All, true).await
-    });
+    let send_task =
+        tokio::spawn(
+            async move { send(&send_handle, &send_session, SaveExportScope::All, true).await },
+        );
 
     let offered = wait_event(&join_log, "offered", Duration::from_secs(15)).await;
     let transfer_id = offered.transfer_id.clone().expect("offer transferId");
@@ -264,7 +265,11 @@ async fn lan_rejects_wrong_pin_and_token_without_touching_store() {
     let pairing = LanPairingV1::parse(&started.pairing_info).expect("valid pairing");
 
     let mut wrong_pin = pairing.clone();
-    let last = if wrong_pin.certificate_sha256.ends_with('0') { '1' } else { '0' };
+    let last = if wrong_pin.certificate_sha256.ends_with('0') {
+        '1'
+    } else {
+        '0'
+    };
     wrong_pin.certificate_sha256.pop();
     wrong_pin.certificate_sha256.push(last);
     let pin_error = join(
@@ -436,9 +441,8 @@ async fn lan_pending_join_close_wakes_connection_attempt() {
     );
     let pairing_info = pairing.encode().unwrap();
     let join_handle = handle.clone();
-    let join_task = tokio::spawn(async move {
-        join(&join_handle, &pairing_info, Arc::new(|_| {})).await
-    });
+    let join_task =
+        tokio::spawn(async move { join(&join_handle, &pairing_info, Arc::new(|_| {})).await });
     let (tcp, _) = listener.accept().await.unwrap();
     let _keep_open = tcp;
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -451,15 +455,188 @@ async fn lan_pending_join_close_wakes_connection_attempt() {
     assert!(joined.is_err());
 }
 
-#[test]
-fn lan_busy_preserves_file_slot_for_retry() {
-    let app = TestApp::new("busy-retry");
-    let handle = app.handle();
-    let first_job = new_uuid().unwrap();
-    let first = reserve_job(&handle, &first_job).unwrap();
-    let error = reserve_job(&handle, &new_uuid().unwrap()).unwrap_err();
-    assert_eq!(error.code, "busy");
-    finish_task(&handle, &first);
-    let second = reserve_job(&handle, &new_uuid().unwrap()).unwrap();
-    finish_task(&handle, &second);
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn lan_busy_retries_same_offer_and_preview_disconnect_releases_slot() {
+    let sender = TestApp::new("busy-sender");
+    let receiver = TestApp::new("busy-receiver");
+    seed_book(&sender, &hex_digest(b"busy book"), b"busy book");
+    let sh = sender.handle();
+    let rh = receiver.handle();
+    let log = EventLog::default();
+    let host = start_host(&sh, Ipv4Addr::LOCALHOST, Arc::new(|_| {}))
+        .await
+        .unwrap();
+    join(&rh, &host.pairing_info, log.sink()).await.unwrap();
+    let blocked = reserve_job(&sh, &new_uuid().unwrap()).unwrap();
+    assert_eq!(
+        send(&sh, &host.session_id, SaveExportScope::All, false)
+            .await
+            .unwrap_err()
+            .code,
+        "busy"
+    );
+    finish_task(&sh, &blocked);
+    let sid = host.session_id.clone();
+    let send_app = sh.clone();
+    let sending =
+        tokio::spawn(async move { send(&send_app, &sid, SaveExportScope::All, false).await });
+    let offer = wait_event(&log, "offered", Duration::from_secs(5)).await;
+    assert_eq!(offer.summary.as_ref().unwrap()["skippedBookCount"], 0);
+    let tid = offer.transfer_id.unwrap();
+    let blocked = reserve_job(&rh, &new_uuid().unwrap()).unwrap();
+    assert_eq!(
+        accept(&rh, &host.session_id, &tid).await.unwrap_err().code,
+        "busy"
+    );
+    finish_task(&rh, &blocked);
+    let prepared = accept(&rh, &host.session_id, &tid).await.unwrap();
+    assert_eq!(prepared.book_count, 1);
+    // Failed preflight must not consume the Offer. Disconnect at preview must
+    // discard prepared data and release the exclusive F-N slot.
+    close(&sh, &host.session_id).await.unwrap();
+    close(&rh, &host.session_id).await.unwrap();
+    assert_eq!(sending.await.unwrap().unwrap().status, "unconfirmed");
+    assert!(snapshot_books(&receiver).is_empty());
+    let next = reserve_job(&rh, &new_uuid().unwrap()).unwrap();
+    finish_task(&rh, &next);
+    assert_eq!(
+        close(&rh, &host.session_id).await.unwrap().status,
+        "already-finished"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn lan_close_and_dropped_invoke_do_not_cancel_accepted_commit() {
+    let sender = TestApp::new("commit-sender");
+    let receiver = TestApp::new("commit-receiver");
+    let hash = hex_digest(b"commit book");
+    seed_book(&sender, &hash, b"commit book");
+    let sh = sender.handle();
+    let rh = receiver.handle();
+    let log = EventLog::default();
+    let host = start_host(&sh, Ipv4Addr::LOCALHOST, Arc::new(|_| {}))
+        .await
+        .unwrap();
+    join(&rh, &host.pairing_info, log.sink()).await.unwrap();
+    let sid = host.session_id.clone();
+    let send_app = sh.clone();
+    let sending =
+        tokio::spawn(async move { send(&send_app, &sid, SaveExportScope::All, true).await });
+    let offer = wait_event(&log, "offered", Duration::from_secs(5)).await;
+    let tid = offer.transfer_id.unwrap();
+    accept(&rh, &host.session_id, &tid).await.unwrap();
+    // Hold the real storage lock so the commit worker is demonstrably alive.
+    let write_state = rh.state::<LinkedLibraryWriteState>();
+    let blocked = write_state.0.lock().unwrap();
+    let commit_app = rh.clone();
+    let sid = host.session_id.clone();
+    let invoking = tokio::spawn(async move { commit(&commit_app, &sid, &tid, false).await });
+    wait_event(&log, "committing", Duration::from_secs(5)).await;
+    invoking.abort(); // The native owner must survive loss of the IPC waiter.
+    assert_eq!(
+        close(&rh, &host.session_id).await.unwrap().status,
+        "too-late"
+    );
+    assert_eq!(
+        close(&rh, &host.session_id).await.unwrap().status,
+        "too-late"
+    );
+    assert_eq!(
+        reserve_job(&rh, &new_uuid().unwrap()).unwrap_err().code,
+        "busy"
+    );
+    drop(blocked);
+    let sent = tokio::time::timeout(Duration::from_secs(5), sending)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(sent.status, "unconfirmed");
+    // The disconnected peer cannot confirm, but local commit must finish.
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match reserve_job(&rh, &new_uuid().unwrap()) {
+                Ok(task) => {
+                    finish_task(&rh, &task);
+                    break;
+                }
+                Err(error) => {
+                    assert_eq!(error.code, "busy");
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert!(snapshot_books(&receiver).contains_key(&hash));
+    assert_eq!(
+        close(&rh, &host.session_id).await.unwrap().status,
+        "already-finished"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn lan_partial_control_frame_survives_select_without_prefetch() {
+    let identity = TlsIdentity::generate(Ipv4Addr::LOCALHOST).unwrap();
+    let fingerprint = identity.fingerprint.clone();
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (continue_write, wait) = tokio::sync::oneshot::channel();
+    let (partial_written, ready) = tokio::sync::oneshot::channel();
+    let session_id = new_uuid().unwrap();
+    let message = super::protocol::ControlMessage::Error {
+        session_id: session_id.clone(),
+        transfer_id: None,
+        code: "test".into(),
+        message: "test".into(),
+    };
+    let payload = serde_json::to_vec(&message).unwrap();
+    let mut frame = (payload.len() as u32).to_be_bytes().to_vec();
+    frame.extend(payload);
+    let server = tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.unwrap();
+        let acceptor = TlsAcceptor::from(Arc::new(identity.server_config().unwrap()));
+        let mut tls = acceptor.accept(tcp).await.unwrap();
+        tls.write_all(&frame[..2]).await.unwrap();
+        tls.flush().await.unwrap();
+        partial_written.send(()).unwrap();
+        wait.await.unwrap();
+        // Next-phase bytes already available in the same TLS stream must not
+        // be swallowed by the first frame parser.
+        let rest = [&frame[2..], &frame[..]].concat();
+        tls.write_all(&rest).await.unwrap();
+        tls.flush().await.unwrap();
+        tls
+    });
+    let tcp = TcpStream::connect(addr).await.unwrap();
+    let connector = TlsConnector::from(Arc::new(client_config(&fingerprint).unwrap()));
+    let tls = connector
+        .connect(server_name(Ipv4Addr::LOCALHOST), tcp)
+        .await
+        .unwrap();
+    let client = LanConnection::new(LanIo::Client(tls));
+    ready.await.unwrap();
+    let mut buffer = Vec::new();
+    assert!(tokio::time::timeout(
+        Duration::from_millis(50),
+        client.read_control_buffered(&mut buffer, None)
+    )
+    .await
+    .is_err());
+    assert_eq!(buffer.len(), 2);
+    continue_write.send(()).unwrap();
+    let _keep_open = server.await.unwrap();
+    let first = client
+        .read_control_buffered(&mut buffer, Some(Duration::from_secs(1)))
+        .await
+        .unwrap();
+    assert_eq!(first.session_id(), session_id);
+    assert!(buffer.is_empty());
+    let second = client
+        .read_control_buffered(&mut buffer, Some(Duration::from_secs(1)))
+        .await
+        .unwrap();
+    assert_eq!(second.session_id(), session_id);
+    assert!(buffer.is_empty());
 }

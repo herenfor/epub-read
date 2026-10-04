@@ -47,12 +47,11 @@ impl LanPairingV1 {
 
     pub(crate) fn parse(raw: &str) -> Result<Self, LanSaveError> {
         if raw.len() > PAIRING_MAX_BYTES {
-            return Err(LanSaveError::invalid_request(
-                "连接信息超过 4KiB 上限",
-            ));
+            return Err(LanSaveError::invalid_request("连接信息超过 4KiB 上限"));
         }
-        let pairing: Self = serde_json::from_str(raw)
-            .map_err(|error| LanSaveError::invalid_request(format!("连接信息不是有效 JSON：{error}")))?;
+        let pairing: Self = serde_json::from_str(raw).map_err(|error| {
+            LanSaveError::invalid_request(format!("连接信息不是有效 JSON：{error}"))
+        })?;
         pairing.validate()?;
         Ok(pairing)
     }
@@ -61,9 +60,7 @@ impl LanPairingV1 {
         let raw = serde_json::to_string(self)
             .map_err(|error| LanSaveError::invalid_data(format!("连接信息无法编码：{error}")))?;
         if raw.len() > PAIRING_MAX_BYTES {
-            return Err(LanSaveError::invalid_request(
-                "连接信息超过 4KiB 上限",
-            ));
+            return Err(LanSaveError::invalid_request("连接信息超过 4KiB 上限"));
         }
         Ok(raw)
     }
@@ -79,7 +76,9 @@ impl LanPairingV1 {
 
     pub(crate) fn validate(&self) -> Result<(), LanSaveError> {
         if self.protocol != PAIRING_PROTOCOL {
-            return Err(LanSaveError::invalid_request("连接协议不是 epub-reader-lan"));
+            return Err(LanSaveError::invalid_request(
+                "连接协议不是 epub-reader-lan",
+            ));
         }
         if self.version != PAIRING_VERSION {
             return Err(LanSaveError::invalid_request("不支持的连接协议版本"));
@@ -88,13 +87,15 @@ impl LanPairingV1 {
             return Err(LanSaveError::invalid_request("sessionId 必须是规范 UUID"));
         }
         let (host, port) = self.endpoint_addr()?;
-        if host.is_unspecified() || host.is_multicast() || host.is_broadcast() {
+        if !valid_lan_ip(host) {
             return Err(LanSaveError::invalid_request(
-                "endpoint 不能是 0.0.0.0、组播或广播地址",
+                "endpoint 只接受私网或 link-local IPv4 地址",
             ));
         }
         if port == 0 {
-            return Err(LanSaveError::invalid_request("endpoint.port 必须在 1..=65535"));
+            return Err(LanSaveError::invalid_request(
+                "endpoint.port 必须在 1..=65535",
+            ));
         }
         if !valid_hex_32(&self.certificate_sha256) {
             return Err(LanSaveError::invalid_request(
@@ -102,12 +103,14 @@ impl LanPairingV1 {
             ));
         }
         if !valid_hex_32(&self.token) {
-            return Err(LanSaveError::invalid_request(
-                "token 必须是 64 位小写 hex",
-            ));
+            return Err(LanSaveError::invalid_request("token 必须是 64 位小写 hex"));
         }
         Ok(())
     }
+}
+
+pub(crate) fn valid_lan_ip(ip: Ipv4Addr) -> bool {
+    ip.is_private() || ip.is_link_local() || (cfg!(test) && ip.is_loopback())
 }
 
 pub(crate) fn valid_hex_32(value: &str) -> bool {
@@ -155,8 +158,6 @@ pub(crate) fn choose_default_lan_ipv4() -> Result<Ipv4Addr, LanSaveError> {
                 ))
             }
         }
-        Ok(_) | Err(_) => Err(LanSaveError::unreachable(
-            "无法选择本机 IPv4 局域网地址",
-        )),
+        Ok(_) | Err(_) => Err(LanSaveError::unreachable("无法选择本机 IPv4 局域网地址")),
     }
 }

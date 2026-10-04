@@ -16,6 +16,7 @@ mod tls;
 pub(crate) mod commands;
 
 pub use manager::LanSaveManager;
+pub(crate) use manager::{cleanup_stale_staging, shutdown};
 
 #[cfg(test)]
 mod tests;
