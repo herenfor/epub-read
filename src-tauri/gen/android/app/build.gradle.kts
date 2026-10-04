@@ -13,6 +13,12 @@ val tauriProperties = Properties().apply {
     }
 }
 
+// Release signing comes from a properties file outside every repository
+// (scripts/build-android.sh passes its path); release builds fail without it.
+val releaseSigning = System.getenv("EPUB_READER_SIGNING_PROPERTIES")
+    ?.takeIf { it.isNotBlank() && file(it).exists() }
+    ?.let { path -> Properties().apply { file(path).inputStream().use { load(it) } } }
+
 android {
     compileSdk = 36
     namespace = "dev.epubreader.app"
@@ -24,8 +30,22 @@ android {
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
     }
+    signingConfigs {
+        if (releaseSigning != null) {
+            create("release") {
+                storeFile = file(releaseSigning.getProperty("storeFile"))
+                storePassword = releaseSigning.getProperty("storePassword")
+                keyAlias = releaseSigning.getProperty("keyAlias")
+                keyPassword = releaseSigning.getProperty("keyPassword")
+            }
+        }
+    }
     buildTypes {
+        // The Tauri CLI writes applicationIdSuffix from
+        // bundle.android.debugApplicationIdSuffix in tauri.android.conf.json,
+        // so development builds install next to the release app.
         getByName("debug") {
+            applicationIdSuffix = ".debug"
             manifestPlaceholders["usesCleartextTraffic"] = "true"
             isDebuggable = true
             isJniDebuggable = true
@@ -37,6 +57,7 @@ android {
             }
         }
         getByName("release") {
+            signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = true
             proguardFiles(
                 *fileTree(".") { include("**/*.pro") }
@@ -67,6 +88,12 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.4")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.0")
+}
+
+gradle.taskGraph.whenReady {
+    if (releaseSigning == null && allTasks.any { it.project == project && it.name.matches(Regex("(package|bundle).*Release")) }) {
+        throw GradleException("Release builds need EPUB_READER_SIGNING_PROPERTIES; run scripts/build-android.sh build --release")
+    }
 }
 
 apply(from = "tauri.build.gradle.kts")
