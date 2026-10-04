@@ -3,6 +3,7 @@
 //! This module deliberately contains no model, embedding, network, or reader
 //! code. It owns only the derived-data boundary under `<app data>/ai`.
 
+mod cache_settings;
 #[cfg(feature = "ai")]
 mod download;
 #[cfg(feature = "ai")]
@@ -13,7 +14,6 @@ pub(crate) mod embedding_gateway;
 mod embedding_platform;
 #[cfg(feature = "ai")]
 pub(crate) mod hardware;
-mod cache_settings;
 mod metadata_store;
 #[cfg(feature = "ai")]
 mod model_locks;
@@ -72,7 +72,11 @@ impl CacheSettingsRuntime {
         self.config_error = loaded.config_error;
     }
 
-    fn resolve_once(&mut self, default_directory: &Path, native_identifier: &str) -> RuntimeCacheChoice {
+    fn resolve_once(
+        &mut self,
+        default_directory: &Path,
+        native_identifier: &str,
+    ) -> RuntimeCacheChoice {
         if let Some(active) = self.active.as_ref() {
             return active.clone();
         }
@@ -84,8 +88,7 @@ impl CacheSettingsRuntime {
         } else if let Some(base) = self.startup_base.as_ref() {
             let requested = cache_settings::custom_cache_directory(base, native_identifier)
                 .and_then(|directory| {
-                    cache_settings::prepare_custom_cache_directory(&directory)
-                        .map(|()| directory)
+                    cache_settings::prepare_custom_cache_directory(&directory).map(|()| directory)
                 });
             match requested {
                 Ok(directory) => RuntimeCacheChoice {
@@ -200,10 +203,15 @@ impl AiState {
         }
         let app_data_dir = Self::app_data_dir(app)?;
         let active = self.resolve_active_cache(app)?;
-        let store = Arc::new(AiStore::open_with_cache_directory(
-            &app_data_dir,
-            &active.directory,
-        )?);
+        self.ensure_store_in(&app_data_dir, &active.directory)
+    }
+
+    fn get_or_initialize_store(
+        &self,
+        open: impl FnOnce() -> Result<AiStore, String>,
+    ) -> Result<Arc<AiStore>, String> {
+        // Opening also migrates and reclaims interrupted tasks. Keep the gate
+        // until publication so a second opener cannot pause new live work.
         let mut slot = self
             .store
             .lock()
@@ -211,8 +219,46 @@ impl AiState {
         if let Some(existing) = slot.as_ref() {
             return Ok(Arc::clone(existing));
         }
+        let store = Arc::new(open()?);
         *slot = Some(Arc::clone(&store));
         Ok(store)
+    }
+
+    fn ensure_store_in(
+        &self,
+        app_data_dir: &Path,
+        cache_directory: &Path,
+    ) -> Result<Arc<AiStore>, String> {
+        self.get_or_initialize_store(|| {
+            match AiStore::open_with_cache_directory(app_data_dir, cache_directory) {
+                Ok(store) => Ok(store),
+                Err(open_error) => {
+                    let default_directory = AiStore::default_cache_directory(app_data_dir);
+                    if cache_directory == default_directory {
+                        return Err(open_error);
+                    }
+                    // A path can disappear after the first status read. Recheck
+                    // path access only; valid-path schema/metadata errors stay
+                    // errors and are never disguised as a directory fallback.
+                    let Err(path_error) =
+                        cache_settings::prepare_custom_cache_directory(cache_directory)
+                    else {
+                        return Err(open_error);
+                    };
+                    let store =
+                        AiStore::open_with_cache_directory(app_data_dir, &default_directory)?;
+                    let mut runtime = self
+                        .cache_settings
+                        .lock()
+                        .map_err(|_| "AI 缓存设置状态锁已损坏".to_string())?;
+                    runtime.active = Some(RuntimeCacheChoice {
+                        directory: default_directory,
+                        fallback_reason: Some(path_error),
+                    });
+                    Ok(store)
+                }
+            }
+        })
     }
 
     /// Remove book-scoped AI data only when AI storage already exists.
@@ -248,20 +294,7 @@ impl AiState {
             if !database_path.exists() {
                 return Ok(());
             }
-            let store = Arc::new(AiStore::open_with_cache_directory(
-                app_data_dir,
-                cache_directory,
-            )?);
-            let mut slot = self
-                .store
-                .lock()
-                .map_err(|_| "AI 存储状态锁已损坏".to_string())?;
-            if let Some(existing) = slot.as_ref() {
-                Arc::clone(existing)
-            } else {
-                *slot = Some(Arc::clone(&store));
-                store
-            }
+            self.ensure_store_in(app_data_dir, cache_directory)?
         };
         store.delete_books_derived_data(&hashes)
     }
@@ -294,6 +327,8 @@ impl AiState {
         } else {
             (0, vec![AiStore::empty_full_text_cache_status()])
         };
+        // The first open may have fallen back after a path went offline.
+        let active = self.resolve_active_cache(app)?;
         Ok(CacheStorageStatus {
             active_directory: active.directory.to_string_lossy().into_owned(),
             configured_base_directory: configured_base_directory
@@ -760,34 +795,41 @@ pub(crate) fn ai_cache_status(
 }
 
 #[tauri::command]
-pub(crate) async fn ai_cache_clear(
-    app: AppHandle,
-    state: State<'_, AiState>,
-    kind: String,
-) -> Result<(), String> {
-    let Some(store) = state.existing_cache_store(&app)? else {
-        return Ok(());
-    };
-    tauri::async_runtime::spawn_blocking(move || store.clear_cache(&kind))
-        .await
-        .map_err(|error| format!("AI 清理线程失败：{error}"))?
+pub(crate) async fn ai_cache_clear(app: AppHandle, kind: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if kind.trim() != store::FULL_TEXT_INDEX_CACHE_KIND {
+            return Err(format!("不支持清理 AI 缓存类型：{kind}"));
+        }
+        let state = app.state::<AiState>();
+        let Some(store) = state.existing_cache_store(&app)? else {
+            return Ok(());
+        };
+        store.clear_cache(&kind)
+    })
+    .await
+    .map_err(|error| format!("AI 清理线程失败：{error}"))?
 }
 
 #[tauri::command]
-pub(crate) fn cache_storage_get_status(
-    app: AppHandle,
-    state: State<'_, AiState>,
-) -> Result<CacheStorageStatus, String> {
-    state.cache_storage_status_impl(&app)
+pub(crate) async fn cache_storage_get_status(app: AppHandle) -> Result<CacheStorageStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<AiState>().cache_storage_status_impl(&app)
+    })
+    .await
+    .map_err(|error| format!("缓存状态读取线程失败：{error}"))?
 }
 
 #[tauri::command]
-pub(crate) fn cache_storage_set_directory(
+pub(crate) async fn cache_storage_set_directory(
     app: AppHandle,
-    state: State<'_, AiState>,
     base_directory: Option<String>,
 ) -> Result<CacheStorageStatus, String> {
-    state.cache_storage_set_directory_impl(&app, base_directory)
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<AiState>()
+            .cache_storage_set_directory_impl(&app, base_directory)
+    })
+    .await
+    .map_err(|error| format!("缓存设置保存线程失败：{error}"))?
 }
 
 #[tauri::command]
@@ -941,7 +983,7 @@ mod tests {
     }
 
     #[test]
-    fn cache_choice_is_frozen_until_restart_and_invalid_custom_falls_back() {
+    fn cache_settings_review_freezes_startup_and_keeps_unavailable_selection() {
         let root = test_root();
         let default_directory = root.join("default");
         let chosen_a = root.join("chosen-a");
@@ -985,16 +1027,81 @@ mod tests {
         let blocker = root.join("blocker-file");
         fs::write(&blocker, b"not a directory").unwrap();
         let mut invalid = CacheSettingsRuntime::default();
-        invalid.capture(super::cache_settings::StartupCacheSettings {
-            base_directory: Some(blocker.clone()),
-            config_error: None,
-        });
+        super::cache_settings::save_settings(&root, Some(&blocker)).unwrap();
+        let loaded = super::cache_settings::load_startup_settings(&root);
+        assert_eq!(loaded.base_directory.as_ref(), Some(&blocker));
+        assert!(loaded.config_error.is_none());
+        invalid.capture(loaded);
         let fallback = invalid.resolve_once(&default_directory, identifier);
         assert_eq!(fallback.directory, default_directory);
         assert!(fallback.fallback_reason.is_some());
         assert_eq!(invalid.configured_base.as_ref(), Some(&blocker));
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn cache_settings_review_concurrent_open_preserves_running_work() {
+        let root = test_root();
+        let state = Arc::new(AiState::default());
+        let starts = Arc::new(std::sync::Barrier::new(5));
+        let opens = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let handles: Vec<_> = (0..4)
+            .map(|_| {
+                let (root, state, starts, opens) = (
+                    root.clone(),
+                    Arc::clone(&state),
+                    Arc::clone(&starts),
+                    Arc::clone(&opens),
+                );
+                std::thread::spawn(move || {
+                    starts.wait();
+                    state
+                        .get_or_initialize_store(|| {
+                            opens.fetch_add(1, Ordering::SeqCst);
+                            let store = AiStore::open(&root)?;
+                            let job = store.enqueue_task("library-text-index".into(), None)?;
+                            store.transition_task(&job.id, TaskTransition::Start)?;
+                            Ok(store)
+                        })
+                        .unwrap()
+                })
+            })
+            .collect();
+        starts.wait();
+        let stores: Vec<_> = handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .collect();
+        assert_eq!(opens.load(Ordering::SeqCst), 1);
+        assert!(stores.iter().all(|store| Arc::ptr_eq(store, &stores[0])));
+        let jobs = stores[0].list_tasks().unwrap();
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].state, TaskState::Running);
+        drop(stores);
+        drop(state);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn cache_settings_review_cache_file_access_failure_falls_back() {
+        let root = test_root();
+        let custom = root.join("chosen-cache");
+        fs::create_dir_all(AiStore::database_path_in(&custom)).unwrap();
+        let state = AiState::default();
+        let store = state.ensure_store_in(&root, &custom).unwrap();
+        assert!(AiStore::database_path(&root).is_file());
+        assert!(AiStore::metadata_path(&root).is_file());
+        let runtime = state.cache_settings.lock().unwrap();
+        assert_eq!(
+            runtime.active.as_ref().unwrap().directory,
+            AiStore::default_cache_directory(&root)
+        );
+        assert!(runtime.active.as_ref().unwrap().fallback_reason.is_some());
+        drop(runtime);
+        drop(store);
+        drop(state);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

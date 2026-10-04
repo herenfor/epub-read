@@ -61,15 +61,12 @@ pub(crate) fn load_startup_settings(app_data_dir: &Path) -> StartupCacheSettings
     if parsed.schema_version != SETTINGS_SCHEMA_VERSION {
         return StartupCacheSettings {
             base_directory: None,
-            config_error: Some(format!(
-                "不支持的缓存设置版本：{}",
-                parsed.schema_version
-            )),
+            config_error: Some(format!("不支持的缓存设置版本：{}", parsed.schema_version)),
         };
     }
     match parsed.custom_base_directory {
         None => StartupCacheSettings::default(),
-        Some(raw) => match normalize_base_directory(&raw) {
+        Some(raw) => match parse_base_directory(&raw) {
             Ok(path) => StartupCacheSettings {
                 base_directory: Some(path),
                 config_error: None,
@@ -90,8 +87,8 @@ pub(crate) fn save_settings(app_data_dir: &Path, base: Option<&Path>) -> Result<
         schema_version: SETTINGS_SCHEMA_VERSION,
         custom_base_directory: base.map(|path| path.to_string_lossy().into_owned()),
     };
-    let bytes = serde_json::to_vec_pretty(&file)
-        .map_err(|error| format!("序列化缓存设置失败：{error}"))?;
+    let bytes =
+        serde_json::to_vec_pretty(&file).map_err(|error| format!("序列化缓存设置失败：{error}"))?;
     crate::linked_library::atomic_write_bytes(&settings_path(app_data_dir), &bytes)
 }
 
@@ -99,15 +96,11 @@ pub(crate) fn custom_directory_supported() -> bool {
     cfg!(windows)
 }
 
-/// Validate and normalize a user-selected absolute path.  Existing directories
-/// are canonicalized so restart comparison is stable across path spellings.
-pub(crate) fn normalize_base_directory(raw: &str) -> Result<PathBuf, String> {
+/// Validate path syntax without touching the selected drive at startup.
+fn parse_base_directory(raw: &str) -> Result<PathBuf, String> {
     let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return Err("请选择非空目录".into());
-    }
-    if trimmed.contains('\0') {
-        return Err("目录路径包含无效字符".into());
+    if trimmed.is_empty() || trimmed.contains('\0') {
+        return Err("请选择有效的非空目录".into());
     }
     let path = Path::new(trimmed);
     if !path.is_absolute() {
@@ -119,17 +112,22 @@ pub(crate) fn normalize_base_directory(raw: &str) -> Result<PathBuf, String> {
     {
         return Err("目录路径不能包含 ..".into());
     }
+    Ok(path.to_path_buf())
+}
+
+/// Normalize a newly selected directory; startup retains offline selections.
+pub(crate) fn normalize_base_directory(raw: &str) -> Result<PathBuf, String> {
+    let path = parse_base_directory(raw)?;
     if path.exists() {
-        let metadata = fs::metadata(path)
-            .map_err(|error| format!("无法访问所选目录：{error}"))?;
+        let metadata = fs::metadata(&path).map_err(|error| format!("无法访问所选目录：{error}"))?;
         if !metadata.is_dir() {
             return Err("所选路径不是目录".into());
         }
-        return fs::canonicalize(path)
+        return fs::canonicalize(&path)
             .map(simplify_windows_verbatim_path)
             .map_err(|error| format!("无法规范化所选目录：{error}"));
     }
-    Ok(path.to_path_buf())
+    Ok(path)
 }
 
 #[cfg(windows)]
@@ -151,7 +149,10 @@ fn simplify_windows_verbatim_path(path: PathBuf) -> PathBuf {
 
 /// The actual cache is always isolated below the selected root and the native
 /// host identifier, so two editions sharing a folder can never merge stores.
-pub(crate) fn custom_cache_directory(base: &Path, native_identifier: &str) -> Result<PathBuf, String> {
+pub(crate) fn custom_cache_directory(
+    base: &Path,
+    native_identifier: &str,
+) -> Result<PathBuf, String> {
     if native_identifier.is_empty()
         || native_identifier == "."
         || native_identifier == ".."
@@ -164,16 +165,24 @@ pub(crate) fn custom_cache_directory(base: &Path, native_identifier: &str) -> Re
 }
 
 /// Small write probe used before a selection is saved.  It intentionally only
-/// creates the app-owned child directory and a temporary file; it never scans
+/// creates the app-owned child directory, checks an existing database can be
+/// opened without truncation, and writes one temporary file; it never scans
 /// or removes the selected root.
 pub(crate) fn prepare_custom_cache_directory(requested: &Path) -> Result<(), String> {
     if requested.as_os_str().is_empty() {
         return Err("缓存目录为空".into());
     }
-    fs::create_dir_all(requested)
-        .map_err(|error| format!("无法创建缓存目录：{error}"))?;
+    fs::create_dir_all(requested).map_err(|error| format!("无法创建缓存目录：{error}"))?;
     if !requested.is_dir() {
         return Err("缓存目录不是文件夹".into());
+    }
+    let database = super::store::AiStore::database_path_in(requested);
+    if database.exists() {
+        fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&database)
+            .map_err(|error| format!("缓存数据库文件不可读写：{error}"))?;
     }
     let nonce = PROBE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let probe_path = requested.join(format!(
