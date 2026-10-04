@@ -111,6 +111,10 @@ export interface ShelfViewProps {
   importActive?: boolean;
   /** 存档文件任务活动期间：只禁用重复的文件入口，不阻塞阅读和其他书架操作。 */
   saveFileActive?: boolean;
+  /** LAN 会话活动期间禁用书架入口；一份会话结束并重新连接后再次开放。 */
+  lanTransferActive?: boolean;
+  /** 打开共享的局域网互传面板，可携带当前批量选择用于“选中书籍”范围。 */
+  onOpenLanTransfer?(selectedEntries?: ShelfEntry[]): void;
   theme: Theme;
   onThemeChange(theme: Theme): void;
   /** Android 阅读栏电量显示（本机偏好）；未提供时不显示该设置。 */
@@ -236,6 +240,16 @@ function ExportIcon() {
       <path d="M12 3v12" />
       <polyline points="7 8 12 3 17 8" />
       <path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6" />
+    </svg>
+  );
+}
+
+function LanTransferIcon() {
+  return (
+    <svg className="shelf-svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M5 12.5a7 7 0 0 1 14 0" />
+      <path d="M8.5 15.5a4.5 4.5 0 0 1 7 0" />
+      <circle cx="12" cy="19" r="1" fill="currentColor" stroke="none" />
     </svg>
   );
 }
@@ -2134,7 +2148,10 @@ interface ShelfSettingsDrawerProps extends ShelfSubmenuBackProps {
   matchingEntries?: ShelfEntry[];
   busy: boolean;
   importArchiveDisabled?: boolean;
+  importActive?: boolean;
   saveFileActive?: boolean;
+  lanTransferActive?: boolean;
+  onOpenLanTransfer?(selectedEntries?: ShelfEntry[]): void;
   query: string;
   onQueryChange(value: string): void;
   sort: ShelfSort;
@@ -2616,6 +2633,17 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
             <button className="tb-btn" type="button" onClick={() => props.onExportArchive()} disabled={props.busy || props.saveFileActive || props.entries.length === 0}>
               导出存档
             </button>
+            {capabilities.supportsLanTransfer && props.onOpenLanTransfer && (
+              <button
+                className="tb-btn"
+                type="button"
+                disabled={props.busy || props.importActive || props.saveFileActive || props.lanTransferActive}
+                title="在同一局域网的两台设备间互传书架资料"
+                onClick={() => props.onOpenLanTransfer!()}
+              >
+                局域网互传
+              </button>
+            )}
           </div>
 
           {props.onImportLegacyArchive && (
@@ -4533,7 +4561,10 @@ export function ShelfView(props: ShelfViewProps) {
           closeDrawer();
         }}
         importArchiveDisabled={props.importActive}
+        importActive={props.importActive}
         saveFileActive={props.saveFileActive}
+        lanTransferActive={props.lanTransferActive}
+        onOpenLanTransfer={props.onOpenLanTransfer}
         onImportArchive={props.onImportArchive}
         onExportArchive={props.onExportArchive}
         onImportLegacyArchive={props.onImportLegacyArchive}
@@ -5419,6 +5450,21 @@ export function ShelfView(props: ShelfViewProps) {
               <ExportIcon />
               <span>导出</span>
             </button>
+            {getRuntimeCapabilities().supportsLanTransfer && props.onOpenLanTransfer && (
+              <button
+                className="shelf-batch-action-btn"
+                type="button"
+                disabled={noneSelected || props.busy || props.importActive || props.saveFileActive || props.lanTransferActive}
+                onClick={() => {
+                  const targets = props.entries.filter((e) => selectedIds.has(e.id));
+                  if (targets.length > 0) props.onOpenLanTransfer!(targets);
+                }}
+                title="将选中书籍资料加入局域网互传"
+              >
+                <LanTransferIcon />
+                <span>互传</span>
+              </button>
+            )}
             <button
               className="shelf-batch-action-btn danger"
               type="button"

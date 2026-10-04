@@ -15,6 +15,7 @@ Each component remains subject to its respective license.
 | React | 18.3.1 | MIT | https://github.com/facebook/react |
 | React DOM | 18.3.1 | MIT | https://github.com/facebook/react |
 | fflate | 0.8.3 | MIT | https://github.com/101arrowz/fflate |
+| qrcode | 1.5.4 | MIT | https://github.com/soldair/node-qrcode |
 | @tauri-apps/api | 2.11.1 | MIT OR Apache-2.0 | https://github.com/tauri-apps/tauri |
 | @tauri-apps/plugin-dialog | 2.7.2 | MIT OR Apache-2.0 | https://github.com/tauri-apps/plugins-workspace |
 | @tauri-apps/plugin-fs | 2.5.1 | MIT OR Apache-2.0 | https://github.com/tauri-apps/plugins-workspace |
@@ -41,6 +42,12 @@ Each component remains subject to its respective license.
 | windows (Windows target) | 0.61.3 | MIT OR Apache-2.0 | https://crates.io/crates/windows |
 | reqwest (Rust, blocking + rustls) | 0.13.4 | MIT OR Apache-2.0 | https://github.com/seanmonstar/reqwest |
 | fs2 (Rust disk-space checks) | 0.4.3 | MIT OR Apache-2.0 | https://github.com/danburkert/fs2-rs |
+
+The Android target adds `com.journeyapps:zxing-android-embedded:4.3.0`
+(Apache-2.0) with its transitive `com.google.zxing:core:3.4.1` (Apache-2.0)
+only for the optional camera QR-scan entry. The scanner is offline and does
+not require Google Play services; the camera permission is requested only
+after the user taps the scan action.
 
 The Windows target dependency `windows` 0.61.3 is used for DirectWrite system
 font enumeration and is recorded under its MIT OR Apache-2.0 terms. This
@@ -141,6 +148,8 @@ from their respective LICENSE files:
 
 - **React / React DOM** — Copyright (c) Facebook, Inc. and its affiliates. (MIT)
 - **fflate** — Copyright (c) 2026 Arjun Barrett (MIT)
+- **qrcode** — Copyright (c) 2012 Ryan Day (MIT)
+- **ZXing Android Embedded / ZXing core** — Copyright (c) 2012-2024 ZXing authors (Apache-2.0)
 - **Tauri 及其官方插件** — Copyright (c) 2019-2025 Tauri Programme within The Commons Conservancy (MIT OR Apache-2.0)
 - **serde / serde_json** — Copyright (c) 2019 Serde Authors (MIT OR Apache-2.0)
 - **quick-xml** — Copyright (c) 2016 the quick-xml authors (MIT)
