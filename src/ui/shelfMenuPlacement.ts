@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { MENU_CLOSE_MS } from "./menuMotion";
 
 /**
  * Viewport placement calculation for shelf popover menus.
@@ -117,7 +118,7 @@ export function useShelfMenuPopover(
       setMenuOpen(false);
       setMenuClosing(false);
       setMenuCoords(null);
-    }, 140);
+    }, MENU_CLOSE_MS);
   }, [setMenuOpen]);
 
   useLayoutEffect(() => {

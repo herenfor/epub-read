@@ -13,6 +13,9 @@
   --motion-fast: 140ms;
   --motion-base: 220ms;
   --motion-slow: 320ms;
+  /* 菜单/面板/弹层统一：打开 440ms、关闭 200ms；JS 卸载定时见 src/ui/menuMotion.ts。 */
+  --menu-open: 440ms;
+  --menu-close: 200ms;
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);
   --ease-emphasized: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-exit: cubic-bezier(0.4, 0, 1, 1);
@@ -462,7 +465,7 @@ select option {
   background: rgba(0, 0, 0, 0.38);
   backdrop-filter: blur(2px);
   -webkit-backdrop-filter: blur(2px);
-  animation: reader-panel-fade-in 0.16s ease forwards;
+  animation: reader-panel-fade-in var(--menu-open) ease forwards;
   pointer-events: auto;
 }
 
@@ -542,7 +545,7 @@ select option {
   box-shadow: 0 20px 48px rgba(0, 0, 0, 0.3), 0 4px 14px rgba(0, 0, 0, 0.12);
   transform: translateX(0) scale(1);
   opacity: 1;
-  animation: panel-float-from-left 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: panel-float-from-left var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
   pointer-events: auto;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", system-ui, Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -683,7 +686,7 @@ select option {
   box-shadow: 0 24px 54px rgba(0, 0, 0, 0.35), 0 6px 18px rgba(0, 0, 0, 0.12);
   transform: translate(-50%, 0) scale(1);
   opacity: 1;
-  animation: panel-float-from-bottom 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: panel-float-from-bottom var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
   pointer-events: auto;
   padding: 0 16px 20px;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", system-ui, Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
@@ -1691,7 +1694,7 @@ select option {
   box-shadow: 0 24px 54px rgba(0, 0, 0, 0.35), 0 6px 18px rgba(0, 0, 0, 0.12);
   transform: translate(-50%, 0) scale(1);
   opacity: 1;
-  animation: panel-float-from-bottom 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: panel-float-from-bottom var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
   pointer-events: auto;
   overflow: hidden;
   box-sizing: border-box;
@@ -2275,7 +2278,7 @@ select option {
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
   opacity: 0;
-  animation: shelf-drawer-fade-in 0.18s ease forwards;
+  animation: shelf-drawer-fade-in var(--menu-open) ease forwards;
   pointer-events: auto;
 }
 
@@ -2297,7 +2300,7 @@ select option {
   box-shadow: 0 20px 48px rgba(0, 0, 0, 0.3), 0 4px 14px rgba(0, 0, 0, 0.12);
   transform: translateX(-16px) scale(0.97);
   opacity: 0;
-  animation: shelf-drawer-float-in 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: shelf-drawer-float-in var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1) forwards;
   pointer-events: auto;
   overflow: hidden;
 }
@@ -3035,7 +3038,7 @@ select option {
     max-height: 84vh;
     border-radius: 22px;
     transform: translateY(24px) scale(0.98);
-    animation: shelf-drawer-sheet-up 0.24s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    animation: shelf-drawer-sheet-up var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1) forwards;
   }
 }
 
@@ -3051,12 +3054,12 @@ select option {
 }
 
 .shelf-drawer-backdrop.closing {
-  animation: shelf-drawer-fade-out 0.18s ease forwards;
+  animation: shelf-drawer-fade-out var(--menu-close) ease forwards;
   pointer-events: none;
 }
 
 .shelf-drawer.closing {
-  animation: shelf-drawer-float-out 0.18s cubic-bezier(0.4, 0, 1, 1) forwards;
+  animation: shelf-drawer-float-out var(--menu-close) cubic-bezier(0.4, 0, 1, 1) forwards;
   pointer-events: none;
 }
 
@@ -3078,7 +3081,7 @@ select option {
 
 @media (max-width: 640px) {
   .shelf-drawer.closing {
-    animation: shelf-drawer-sheet-down 0.18s cubic-bezier(0.4, 0, 1, 1) forwards;
+    animation: shelf-drawer-sheet-down var(--menu-close) cubic-bezier(0.4, 0, 1, 1) forwards;
   }
 }
 
@@ -3259,12 +3262,12 @@ select option {
   -webkit-backdrop-filter: blur(20px);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22);
   transform-origin: top center;
-  animation: shelf-pop-in 0.16s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: shelf-pop-in var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1) forwards;
   will-change: transform, opacity;
 }
 
 .shelf-select-pop.closing {
-  animation: shelf-pop-out 0.14s cubic-bezier(0.4, 0, 1, 1) forwards;
+  animation: shelf-pop-out var(--menu-close) cubic-bezier(0.4, 0, 1, 1) forwards;
   pointer-events: none;
 }
 
@@ -3605,7 +3608,7 @@ select option {
   border: 1px solid var(--panel-border);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
   z-index: 20;
-  animation: shelf-drawer-fade-in 0.12s ease;
+  animation: shelf-drawer-fade-in var(--menu-open) ease;
 }
 
 .shelf-card-pop-item {
@@ -4276,7 +4279,7 @@ select option {
   color: var(--fg);
   box-shadow: 0 24px 54px rgba(0, 0, 0, 0.35), 0 6px 18px rgba(0, 0, 0, 0.12);
   opacity: 1;
-  animation: panel-float-from-bottom 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: panel-float-from-bottom var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
   pointer-events: auto;
   overflow: hidden;
   box-sizing: border-box;
@@ -4343,7 +4346,7 @@ select option {
   color: var(--fg);
   box-shadow: 0 28px 72px rgba(0, 0, 0, 0.38), 0 8px 24px rgba(0, 0, 0, 0.16);
   opacity: 1;
-  animation: spotlight-zoom-in 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: spotlight-zoom-in var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
   pointer-events: auto;
   overflow: hidden;
   box-sizing: border-box;
@@ -4776,7 +4779,7 @@ select option {
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   zoom: var(--ui-scale, 1);
-  animation: aaPopoverFadeIn 140ms cubic-bezier(0.16, 1, 0.3, 1);
+  animation: aaPopoverFadeIn var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
 }
 .reader-context-menu button {
   border: 0;
@@ -4873,7 +4876,7 @@ select option {
   box-shadow: 0 20px 48px rgba(0, 0, 0, 0.3), 0 4px 14px rgba(0, 0, 0, 0.12);
   transform: translateX(0) scale(1);
   opacity: 1;
-  animation: panel-float-from-right 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: panel-float-from-right var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
   pointer-events: auto;
   overflow: hidden;
   box-sizing: border-box;
@@ -4961,7 +4964,7 @@ select option {
     height: auto !important;
     border-radius: 20px !important;
     transform: translateY(24px) scale(0.96) !important;
-    animation: panel-sheet-up 0.24s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+    animation: panel-sheet-up var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
   }
   .note-composer { width: calc(100vw - 20px); }
 }
@@ -5837,11 +5840,11 @@ select option {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  animation: shelf-folder-backdrop-fade-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: shelf-folder-backdrop-fade-in var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .shelf-folder-modal-backdrop.closing {
-  animation: shelf-folder-backdrop-fade-out 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: shelf-folder-backdrop-fade-out var(--menu-close) cubic-bezier(0.16, 1, 0.3, 1) forwards;
   pointer-events: none;
 }
 
@@ -5859,7 +5862,7 @@ select option {
   overflow: hidden;
   scrollbar-width: none;
   -ms-overflow-style: none;
-  animation: shelf-folder-modal-expand 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: shelf-folder-modal-expand var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
   transform-origin: center center;
 }
 
@@ -5870,7 +5873,7 @@ select option {
 }
 
 .shelf-folder-modal-backdrop.closing .shelf-folder-modal {
-  animation: shelf-folder-modal-shrink 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: shelf-folder-modal-shrink var(--menu-close) cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 .shelf-folder-modal-head {
@@ -6467,7 +6470,7 @@ select option {
   box-shadow: 0 -16px 40px rgba(0, 0, 0, 0.2);
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
-  animation: aaMobileSheetIn var(--motion-base) var(--ease-emphasized);
+  animation: aaMobileSheetIn var(--menu-open) var(--ease-emphasized);
 }
 
 /* 平板等宽屏：底部弹层不横贯整屏，居中限宽。 */
@@ -6882,7 +6885,7 @@ select option {
   height: auto;
   border-radius: 20px;
   transform: none;
-  animation: mobile-log-sheet-up 0.24s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: mobile-log-sheet-up var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 @keyframes mobile-log-sheet-up {
@@ -6995,18 +6998,20 @@ select option {
     --motion-fast: 0ms;
     --motion-base: 0ms;
     --motion-slow: 0ms;
+    --menu-open: 0ms;
+    --menu-close: 0ms;
   }
 }
 
 /* ---- 触摸端阅读面板：去掉整屏毛玻璃，字体面板置于遮罩之上并按设备成形 ---- */
 /* 遮罩保留毛玻璃；排版面板关闭时遮罩与面板同步淡出，避免面板退场后整屏亮度骤变。 */
 .menu-backdrop {
-  animation-duration: 340ms;
+  animation-duration: var(--menu-open);
   animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .app:has(.aa-popover.is-closing) .menu-backdrop {
-  animation: reader-panel-fade-out 300ms ease forwards;
+  animation: reader-panel-fade-out var(--menu-close) ease forwards;
   pointer-events: none;
 }
 
@@ -7031,7 +7036,7 @@ select option {
   max-height: none !important;
   border-radius: 16px 16px 0 0 !important;
   transform: none !important;
-  animation: aaMobileSheetIn 300ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+  animation: aaMobileSheetIn var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1) !important;
   padding-bottom: 12px;
 }
 
@@ -7374,7 +7379,8 @@ select option {
   border-radius: 20px 20px 0 0;
   border-bottom: none;
   transform: none !important;
-  animation: aaMobileSheetIn 360ms cubic-bezier(0.16, 1, 0.3, 1);
+  /* transform 被 !important 锁住（屏蔽桌面拖动位移），进出场改用独立的 translate 属性。 */
+  animation: menuSheetIn var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .app[data-mobile-chrome="true"] .search-panel {
@@ -7383,4 +7389,44 @@ select option {
 
 .app[data-mobile-chrome="true"] .search-panel::-webkit-scrollbar {
   display: none;
+}
+
+/* ---- 搜索与“更多”退场：与其他菜单同为 --menu-close ---- */
+@keyframes menuSheetIn {
+  from { opacity: 0; translate: 0 24px; }
+  to { opacity: 1; translate: 0 0; }
+}
+
+@keyframes menuSheetOut {
+  from { opacity: 1; translate: 0 0; }
+  to { opacity: 0; translate: 0 18px; }
+}
+
+@keyframes spotlight-zoom-out {
+  from { opacity: 1; scale: 1; }
+  to { opacity: 0; scale: 0.96; }
+}
+
+.search-backdrop.is-closing,
+.mobile-more-backdrop.is-closing {
+  pointer-events: none;
+  animation: reader-panel-fade-out var(--menu-close) ease forwards;
+}
+
+.search-panel.is-closing {
+  pointer-events: none;
+  animation: spotlight-zoom-out var(--menu-close) var(--ease-exit) forwards !important;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .search-panel.is-closing {
+  animation: menuSheetOut var(--menu-close) ease forwards !important;
+}
+
+.mobile-more-sheet.is-closing {
+  pointer-events: none;
+  animation: aaMobileSheetOut var(--menu-close) ease forwards;
+}
+
+.mobile-more-backdrop {
+  animation: reader-panel-fade-in var(--menu-open) ease;
 }

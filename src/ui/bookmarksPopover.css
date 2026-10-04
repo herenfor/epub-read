@@ -41,7 +41,7 @@
   font-family: var(--font-ui);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  animation: bookmark-pop-in 160ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: bookmark-pop-in var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1) forwards;
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
   transition: scrollbar-color 0.2s ease;
