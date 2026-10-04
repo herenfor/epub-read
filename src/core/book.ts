@@ -409,38 +409,71 @@ export async function loadBookSelective(
 
     const uniqueId = parsed.metadata.identifier;
 
+    /**
+     * 同一路径的按需解压只保留一个 Promise。并发调用命中同一批资源时复用
+     * 正在进行的解压，而不是重复 inflate 同一 ZIP 项。
+     */
+    const pendingResourceLoads = new Map<string, Promise<void>>();
     const ensureResources = async (paths: Iterable<string>): Promise<void> => {
+      const awaited = new Set<Promise<void>>();
       const toFetch: string[] = [];
-      for (const p of paths) {
+      for (const p of new Set(paths)) {
         const res = resources.get(p);
-        if (res && res.loaded === false) {
-          toFetch.push(p);
+        if (!res || res.loaded !== false) continue;
+        const pending = pendingResourceLoads.get(p);
+        if (pending) {
+          awaited.add(pending);
+          continue;
         }
+        if (archiveClient.directory.has(p)) toFetch.push(p);
       }
-      if (toFetch.length === 0) return;
-      const validPaths = toFetch.filter((p) => archiveClient.directory.has(p));
-      if (validPaths.length === 0) return;
-      const batchResult = await archiveClient.extract(validPaths);
-      for (const [p, data] of batchResult) {
-        const res = resources.get(p);
-        if (res) {
-          if (obfuscatedFonts.has(p) && isFontMediaType(res.mediaType)) {
-            try {
-              res.data = await deobfuscateFont(data, uniqueId);
-            } catch (e) {
-              res.data = data;
-              issues.push({
-                kind: "reader_error",
-                source: "fonts",
-                message: `字体混淆还原失败：${p}（${(e as Error).message}）`,
-              });
+
+      if (toFetch.length > 0) {
+        let resolveBatch!: () => void;
+        let rejectBatch!: (error: unknown) => void;
+        const batchPromise = new Promise<void>((resolve, reject) => {
+          resolveBatch = resolve;
+          rejectBatch = reject;
+        });
+        for (const p of toFetch) pendingResourceLoads.set(p, batchPromise);
+        awaited.add(batchPromise);
+        void (async () => {
+          try {
+            const batchResult = await archiveClient.extract(toFetch);
+            for (const p of toFetch) {
+              const data = batchResult.get(p);
+              const res = resources.get(p);
+              if (!res || data === undefined) continue;
+              if (obfuscatedFonts.has(p) && isFontMediaType(res.mediaType)) {
+                try {
+                  res.data = await deobfuscateFont(data, uniqueId);
+                } catch (e) {
+                  res.data = data;
+                  issues.push({
+                    kind: "reader_error",
+                    source: "fonts",
+                    message: `字体混淆还原失败：${p}（${(e as Error).message}）`,
+                  });
+                }
+              } else {
+                res.data = data;
+              }
+              res.loaded = true;
             }
-          } else {
-            res.data = data;
+            resolveBatch();
+          } catch (error) {
+            rejectBatch(error);
+          } finally {
+            for (const p of toFetch) {
+              if (pendingResourceLoads.get(p) === batchPromise) {
+                pendingResourceLoads.delete(p);
+              }
+            }
           }
-          res.loaded = true;
-        }
+        })();
       }
+
+      if (awaited.size > 0) await Promise.all(awaited);
     };
 
     const readResource = async (path: string): Promise<Uint8Array | undefined> => {

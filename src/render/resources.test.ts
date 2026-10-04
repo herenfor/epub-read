@@ -102,3 +102,91 @@ describe("ResourceServer lifecycle", () => {
     expect(server.textCacheStats.misses).toBe(4);
   });
 });
+
+describe("ResourceServer media budget", () => {
+  it("evicts the least-recently-used unheld resource and revokes its blob URL", async () => {
+    let nextUrl = 0;
+    const create = vi.spyOn(URL, "createObjectURL").mockImplementation(() => `blob:test-${++nextUrl}`);
+    const revoke = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    try {
+      const b = book();
+      b.resources = new Map([
+        ["a", { path: "a", data: new Uint8Array(4), mediaType: "image/png" }],
+        ["b", { path: "b", data: new Uint8Array(4), mediaType: "image/png" }],
+      ]);
+      const server = new ResourceServer(b, { mediaCacheMaxBytes: 8 });
+      const urlA = server.urlFor("a");
+      const urlB = server.urlFor("b");
+      expect(urlA).toBe("blob:test-1");
+      expect(urlB).toBe("blob:test-2");
+      expect(server.mediaCacheStats.bytes).toBe(8);
+
+      // 加入第 3 个 4 字节资源后超预算；c 是本次保护路径，按 LRU 应淘汰 a。
+      b.resources.set("c", { path: "c", data: new Uint8Array(4), mediaType: "image/png" });
+      await server.ensureResources(["c"]);
+
+      expect(b.resources.get("a")!.loaded).toBe(false);
+      expect(revoke).toHaveBeenCalledWith("blob:test-1");
+      expect(server.mediaCacheStats.bytes).toBe(8);
+      expect(server.mediaCacheStats.evictions).toBe(1);
+    } finally {
+      create.mockRestore();
+      revoke.mockRestore();
+    }
+  });
+
+  it("counts shared resource holders across chapters before evicting", async () => {
+    const enc = new TextEncoder();
+    const b = book();
+    b.resources = new Map([
+      [
+        "OEBPS/ch1.xhtml",
+        {
+          path: "OEBPS/ch1.xhtml",
+          data: enc.encode('<link rel="stylesheet" href="style.css"/><img src="shared.png"/>'),
+          mediaType: "application/xhtml+xml",
+        },
+      ],
+      [
+        "OEBPS/ch2.xhtml",
+        {
+          path: "OEBPS/ch2.xhtml",
+          data: enc.encode('<img src="shared.png"/>'),
+          mediaType: "application/xhtml+xml",
+        },
+      ],
+      [
+        "OEBPS/style.css",
+        { path: "OEBPS/style.css", data: enc.encode('body{background:url("shared.png")}'), mediaType: "text/css" },
+      ],
+      ["OEBPS/shared.png", { path: "OEBPS/shared.png", data: new Uint8Array(200), mediaType: "image/png" }],
+    ]);
+    const totalBytes = [...b.resources.values()].reduce((sum, res) => sum + res.data.byteLength, 0);
+    const server = new ResourceServer(b, { mediaCacheMaxBytes: totalBytes });
+
+    const first = server.retainChapter("OEBPS/ch1.xhtml");
+    const second = server.retainChapter("OEBPS/ch2.xhtml");
+    expect(b.resources.get("OEBPS/shared.png")!.loaded).not.toBe(false);
+    // ch1、ch2、style.css、shared.png 都至少有一个持有者。
+    expect(server.mediaCacheStats.holders).toBe(4);
+
+    server.releaseHolder(first);
+    expect(b.resources.get("OEBPS/shared.png")!.loaded).not.toBe(false);
+    expect(server.mediaCacheStats.holders).toBe(2);
+
+    // 释放第一个持有者后制造额外预算压力：shared.png 仍被第二个章节持有，
+    // 所以只能先淘汰 ch1/style.css；最后释放第二个持有者时才轮到大图。
+    b.resources.set("OEBPS/extra.bin", {
+      path: "OEBPS/extra.bin",
+      data: new Uint8Array(300),
+      mediaType: "application/octet-stream",
+    });
+    await server.ensureResources(["OEBPS/extra.bin"]);
+    expect(b.resources.get("OEBPS/shared.png")!.loaded).not.toBe(false);
+    expect(server.mediaCacheStats.overBudget).toBe(true);
+
+    server.releaseHolder(second);
+    expect(b.resources.get("OEBPS/shared.png")!.loaded).toBe(false);
+    expect(server.mediaCacheStats.overBudget).toBe(false);
+  });
+});

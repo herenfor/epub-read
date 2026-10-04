@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { buildEpub } from "./fixtures";
 import { loadBook, resolveTocHrefs, spineIndexForPath, spineItemPath, DrmError } from "../core/book";
+import { SelectiveEpubArchive } from "../core/selectiveArchive";
 
 const CH1 = `<html xmlns="http://www.w3.org/1999/xhtml"><head><title>1</title></head><body><h1>第一章</h1><p>正文内容。</p></body></html>`;
 const CH2 = `<html xmlns="http://www.w3.org/1999/xhtml"><head><title>2</title></head><body><h1>第二章</h1><p>更多内容。</p></body></html>`;
@@ -197,5 +198,32 @@ describe("loadBook: 容错", () => {
     expect(book.resources.has("OEBPS/Text/ch1.xhtml")).toBe(true);
     expect(spineIndexForPath(book, "OEBPS/Text/ch1.xhtml")).toBe(0);
     expect(spineIndexForPath(book, "Text/ch1.xhtml")).toBe(0);
+  });
+});
+
+describe("loadBook selective: 按需解压并发收敛", () => {
+  it("同一路径并发 ensureResources 复用同一个解压 Promise", async () => {
+    const bytes = await buildEpub({
+      version: 3,
+      chapters: [{ id: "c1", href: "ch1.xhtml", content: CH1 }],
+      fonts: [{ path: "font.otf", data: new Uint8Array(1024) }],
+    });
+    const book = await loadBook(bytes, { selective: true });
+    const fontPath = "OEBPS/font.otf";
+    expect(book.resources.get(fontPath)?.loaded).toBe(false);
+
+    const extract = vi.spyOn(SelectiveEpubArchive.prototype, "extract");
+    try {
+      const first = book.ensureResources!([fontPath]);
+      const second = book.ensureResources!([fontPath]);
+      await Promise.all([first, second]);
+
+      expect(extract).toHaveBeenCalledTimes(1);
+      expect(book.resources.get(fontPath)?.loaded).not.toBe(false);
+      expect(await book.readResource!(fontPath)).toBeInstanceOf(Uint8Array);
+    } finally {
+      extract.mockRestore();
+      book.archive?.close();
+    }
   });
 });

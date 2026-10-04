@@ -2576,6 +2576,7 @@ export default function App() {
         creator: originalEntry.creator,
       });
       let preciseRequestId: number | null = null;
+      let unownedBook: Book | null = null;
       try {
         // A new open is a new session even when the same book is reopened.
         // Flush any prior session before resetting the immediate-write gate.
@@ -2644,6 +2645,9 @@ export default function App() {
           ? searchTarget.spineIndex
           : (chosenProjection?.spineIndex ?? entry.spineIndex ?? 0);
         const b = await loadBook(buf, { selective: true, initialSpineIndex });
+        // 在 openParsedBook 正式接管前，Book 仍由本函数负责释放；
+        // 后面的空 spine / 进度解析 / 目标校验等任何失败路径都不能漏掉。
+        unownedBook = b;
         if (b.spine.length === 0) {
           setShelfError("这本书没有可阅读的内容");
           shelfBusyRef.current = false;
@@ -2699,6 +2703,7 @@ export default function App() {
             ? (projectProgressVersion(chosenProgressVersion).value?.progressPctHint ?? entry.progressPct)
             : entry.progressPct,
         );
+        unownedBook = null;
         if (preciseRequestId !== null && searchTarget) {
           latestPreciseRequestRef.current = preciseRequestId;
           setInitialPage(null);
@@ -2719,6 +2724,12 @@ export default function App() {
         setShelfError(`打开失败：${(e as Error).message}`);
         setPhase({ phase: "error", message: (e as Error).message });
         setSearchNavigationBusy(false);
+      } finally {
+        // openParsedBook 返回后所有权已归 App 会话；若它在中途抛错但已写入
+        // activeSessionRef，则不再抢占销毁，避免把正在阅读的 Book 释放掉。
+        if (unownedBook && activeSessionRef.current?.book !== unownedBook) {
+          disposeBook(unownedBook);
+        }
       }
     },
     [openParsedBook, reimportAndroidMissing]
