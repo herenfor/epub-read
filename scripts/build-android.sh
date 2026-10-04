@@ -10,7 +10,7 @@
 #   scripts/build-android.sh init                # create src-tauri/gen/android once
 #   scripts/build-android.sh build [options]     # init when needed, then build (runs the Core gate)
 #   scripts/build-android.sh devices             # adb device list
-#   scripts/build-android.sh install <apk>       # adb install -r
+#   scripts/build-android.sh install <apk>       # adb install -r --user current
 #
 # build options:
 #   --release            release build (default: debug)
@@ -195,7 +195,9 @@ case "${1:-build}" in
   install)
     shift
     apk="${1:?usage: build-android.sh install <apk>}"
-    adb install -r "$apk"
+    # Install for the current user only: a plain install also lands in
+    # secondary users such as Samsung's Dual Messenger clone profile.
+    adb install -r --user current "$apk"
     ;;
   *) fail "usage: build-android.sh {env|init|build|devices|install <apk>}" ;;
 esac
