@@ -319,6 +319,9 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     const value = normalizeTurnAnimation(settings.turnAnimation);
     return value !== "none" && prefersReducedMotion() ? "none" : value;
   };
+  /** “滑动”翻页时同章拖动交给原生滚动 + 吸附（见 ChapterPaginator.setNativeSnapPaging）。 */
+  const nativeSnapWantedRef = useRef(false);
+  nativeSnapWantedRef.current = resolvedTurnAnimation() === "slide";
 
   /** 淡入模式的落位动画；滑动模式由 startSlideTurn / 跨章滑入自行绘制。 */
   const triggerTurnAnimation = (dir: 1 | -1) => {
@@ -724,6 +727,10 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         onPreview: (dx) => {
           if (isActiveSlot(slot)) updateSwipePreviewRef.current(dx);
         },
+        // 原生滚动接手前先落定进行中的 JS 翻页动画，吸附点按已提交页计算。
+        onGestureStart: () => {
+          if (isActiveSlot(slot)) slideAnimRef.current?.finish();
+        },
       },
       props.onPlainTap
         ? () => {
@@ -735,6 +742,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       () => !isActiveSlot(slot) || inputPausedRef.current || slot.state.status !== "ready"
     );
     slot.paginator = paginator;
+    paginator.setNativeSnapPaging?.(nativeSnapWantedRef.current);
     return paginator;
   };
 
@@ -1702,6 +1710,12 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   useEffect(() => {
     if (props.inputPaused) updateSwipePreviewRef.current(null);
   }, [props.inputPaused]);
+
+  useEffect(() => {
+    const wanted = nativeSnapWantedRef.current;
+    activeSlotRef.current?.paginator?.setNativeSnapPaging?.(wanted);
+    for (const slot of spareSlotsRef.current) slot.paginator?.setNativeSnapPaging?.(wanted);
+  }, [settings.turnAnimation]);
 
   useImperativeHandle(
     ref,

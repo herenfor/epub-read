@@ -2418,6 +2418,21 @@ export class ChapterPaginator {
   /** 触摸分页时 viewer 改为合成滚动的原内联值快照；null 表示未接管。 */
   private compositedPagedScrollRestore: (() => void) | null = null;
   private compositedPagedScrollViewer: HTMLElement | null = null;
+  /**
+   * 触摸“滑动”翻页交给原生横向滚动 + scroll-snap：拖动、惯性与落页都由合成线程
+   * 逐帧推进。JS 逐帧写 scrollLeft 在 WebView 同步合成下约三成帧重复或跳两步。
+   */
+  private nativeSnapEnabled = false;
+  /** 仅在一次触摸手势内开启吸附，避免重排或程序化滚动被就近吸附。 */
+  private nativeSnapArmed = false;
+  private nativeSnapScrolled = false;
+  private nativeSnapLayer: HTMLElement | null = null;
+  private nativeSnapKey = "";
+  private nativeSnapListenersViewer: HTMLElement | null = null;
+  private readonly nativeSnapScrollHandler = (): void => {
+    if (this.nativeSnapArmed) this.nativeSnapScrolled = true;
+  };
+  private readonly nativeSnapScrollEndHandler = (): void => this.commitNativeSnap();
   /** 普通轻点检测清理函数；用于手机工具栏显隐。 */
   private plainTapCleanup: (() => void) | null = null;
   /** 最近一次 scroll 事件的 rAF 合并句柄。 */
@@ -2555,7 +2570,10 @@ export class ChapterPaginator {
       this.restoreCompositedPagedScroll();
       return;
     }
-    if (this.compositedPagedScrollViewer === viewer) return;
+    if (this.compositedPagedScrollViewer === viewer) {
+      this.syncNativeSnapViewer();
+      return;
+    }
     // 换章后旧 viewer 随旧文档丢弃，快照不再回写。
     this.compositedPagedScrollRestore = null;
     const properties = ["overflow-x", "scrollbar-width", "touch-action"] as const;
@@ -2578,12 +2596,144 @@ export class ChapterPaginator {
       viewer.scrollLeft = left;
     };
     this.compositedPagedScrollViewer = viewer;
+    this.syncNativeSnapViewer();
   }
 
   private restoreCompositedPagedScroll(): void {
+    this.teardownNativeSnap();
     if (this.compositedPagedScrollViewer === this.viewer) this.compositedPagedScrollRestore?.();
     this.compositedPagedScrollRestore = null;
     this.compositedPagedScrollViewer = null;
+  }
+
+  /** 宿主按翻页动画设置开关（仅“滑动”）；关闭时恢复 JS 跟手。 */
+  setNativeSnapPaging(enabled: boolean): void {
+    this.nativeSnapEnabled = enabled;
+    this.syncNativeSnapViewer();
+  }
+
+  private nativeSnapAvailable(): boolean {
+    const viewer = this.viewer;
+    const win = this.contentDoc?.defaultView as (Window & { onscrollend?: unknown }) | null | undefined;
+    return Boolean(
+      this.nativeSnapEnabled && viewer && !this.scrollMode && !this.disposed &&
+      this.compositedPagedScrollViewer === viewer && win && "onscrollend" in win,
+    );
+  }
+
+  /** 横向 pan 与 scrollend 监听随 viewer 与开关同步。 */
+  private syncNativeSnapViewer(): void {
+    const viewer = this.viewer;
+    if (!this.nativeSnapAvailable() || !viewer) {
+      this.teardownNativeSnap();
+      if (viewer && this.compositedPagedScrollViewer === viewer && !this.scrollMode) {
+        viewer.style.setProperty("touch-action", "pan-y pinch-zoom", "important");
+      }
+      return;
+    }
+    viewer.style.setProperty("touch-action", "pan-x pan-y pinch-zoom", "important");
+    viewer.style.setProperty("overscroll-behavior-x", "contain");
+    if (this.nativeSnapListenersViewer !== viewer) {
+      this.removeNativeSnapListeners();
+      viewer.addEventListener("scroll", this.nativeSnapScrollHandler, { passive: true });
+      viewer.addEventListener("scrollend", this.nativeSnapScrollEndHandler);
+      this.nativeSnapListenersViewer = viewer;
+    }
+  }
+
+  private removeNativeSnapListeners(): void {
+    const viewer = this.nativeSnapListenersViewer;
+    if (!viewer) return;
+    viewer.removeEventListener("scroll", this.nativeSnapScrollHandler);
+    viewer.removeEventListener("scrollend", this.nativeSnapScrollEndHandler);
+    this.nativeSnapListenersViewer = null;
+  }
+
+  private teardownNativeSnap(): void {
+    this.disarmNativeSnap();
+    this.removeNativeSnapListeners();
+    this.nativeSnapLayer?.remove();
+    this.nativeSnapLayer = null;
+    this.nativeSnapKey = "";
+  }
+
+  /** 同章各屏的 scrollLeft 起点（双页跨页按 spread 起点）。 */
+  private nativeSnapOffsets(): number[] {
+    const count = this.metrics.pageCount;
+    const offsets: number[] = [];
+    if (this.spreadLayout) {
+      for (let i = 0; i < count; i++) offsets.push(spreadStart(this.spreadLayout, i));
+      return offsets;
+    }
+    const step = this.viewStepPx;
+    if (!(step > 0)) return offsets;
+    for (let i = 0; i < count; i++) offsets.push(i * step);
+    return offsets;
+  }
+
+  /** 原生滚动能否接手该方向：同章还有相邻屏才交给原生，章首/章尾仍走 JS 跨章。 */
+  canNativeScroll(direction: 1 | -1): boolean {
+    if (!this.nativeSnapAvailable() || !this.viewer) return false;
+    const offsets = this.nativeSnapOffsets();
+    if (offsets.length < 2) return false;
+    const left = this.viewer.scrollLeft;
+    return direction === 1 ? left < offsets[offsets.length - 1] - 1 : left > offsets[0] + 1;
+  }
+
+  /** 手指按下：按当前排版放置吸附点（零尺寸裁剪层，不撑大 scrollWidth）并开启吸附。 */
+  beginNativeSnapGesture(): void {
+    const viewer = this.viewer;
+    const doc = this.contentDoc;
+    if (!this.nativeSnapAvailable() || !viewer || !doc) return;
+    const offsets = this.nativeSnapOffsets();
+    if (offsets.length < 2) return;
+    const key = offsets.map((value) => value.toFixed(2)).join(",");
+    if (!this.nativeSnapLayer || this.nativeSnapLayer.parentNode !== viewer || this.nativeSnapKey !== key) {
+      this.nativeSnapLayer?.remove();
+      const layer = doc.createElement("epub-snap-points");
+      layer.setAttribute("aria-hidden", "true");
+      layer.style.cssText = "position:absolute;left:0;top:0;width:0;height:0;overflow:clip;pointer-events:none;";
+      for (const offset of offsets) {
+        const point = doc.createElement("span");
+        point.style.cssText = `position:absolute;top:0;left:${offset}px;width:1px;height:1px;scroll-snap-align:start;scroll-snap-stop:always;`;
+        layer.appendChild(point);
+      }
+      viewer.appendChild(layer);
+      this.nativeSnapLayer = layer;
+      this.nativeSnapKey = key;
+    }
+    this.nativeSnapScrolled = false;
+    if (!this.nativeSnapArmed) {
+      viewer.style.setProperty("scroll-snap-type", "x mandatory");
+      this.nativeSnapArmed = true;
+    }
+  }
+
+  /** 手指抬起：没有发生原生滚动（轻点/跨章）就立即撤掉吸附。 */
+  endNativeSnapGesture(): void {
+    if (this.nativeSnapArmed && !this.nativeSnapScrolled) this.disarmNativeSnap();
+  }
+
+  private disarmNativeSnap(): void {
+    if (!this.nativeSnapArmed) return;
+    this.nativeSnapArmed = false;
+    this.nativeSnapScrolled = false;
+    this.nativeSnapListenersViewer?.style.removeProperty("scroll-snap-type");
+    this.viewer?.style.removeProperty("scroll-snap-type");
+  }
+
+  /** 原生滚动与吸附动画结束：按落点提交页码（关闭弹注、发布进度、采样锚点）。 */
+  private commitNativeSnap(): void {
+    if (!this.nativeSnapArmed || !this.viewer) return;
+    const offsets = this.nativeSnapOffsets();
+    const left = this.viewer.scrollLeft;
+    let page = 0;
+    for (let i = 1; i < offsets.length; i++) {
+      if (Math.abs(offsets[i] - left) < Math.abs(offsets[page] - left)) page = i;
+    }
+    this.disarmNativeSnap();
+    if (offsets.length === 0) return;
+    if (page !== this.metrics.currentPage || Math.abs(offsets[page] - left) > 0.5) this.setPage(page);
   }
 
   /**
@@ -2854,6 +3004,12 @@ export class ChapterPaginator {
         onPrev: () => this.pagedSwipe?.onPrev(),
         shouldIgnore: (event) => this.pagedSwipe?.shouldIgnore(event) ?? true,
         onPreview: (dx) => this.pagedSwipe?.onPreview?.(dx),
+        onGestureStart: () => {
+          this.pagedSwipe?.onGestureStart?.();
+          this.beginNativeSnapGesture();
+        },
+        nativeScroll: (direction) => this.canNativeScroll(direction),
+        onGestureEnd: () => this.endNativeSnapGesture(),
         gestureSurface: viewer,
       });
     }
@@ -6859,6 +7015,8 @@ export class ChapterPaginator {
    */
   previewPagedScroll(scrollLeft: number): void {
     if (!this.viewer || this.scrollMode) return;
+    // JS 动画接手时吸附必须关闭，否则中间帧会被就近吸到整页。
+    this.disarmNativeSnap();
     this.viewer.scrollLeft = scrollLeft;
   }
 

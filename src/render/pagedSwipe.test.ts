@@ -217,3 +217,69 @@ describe("paged swipe input", () => {
     expect(nextClick.defaultPrevented).toBe(false);
   });
 });
+
+describe("paged swipe handing over to native scroll-snap", () => {
+  function nativeSetup(canScroll: (direction: 1 | -1) => boolean) {
+    const { document } = parseHTML(`<html><body><p id="text">正文</p></body></html>`);
+    const text = document.getElementById("text")!;
+    Object.defineProperty(Object.getPrototypeOf(document.documentElement.style), "getPropertyPriority", {
+      value: () => "", configurable: true,
+    });
+    const calls: string[] = [];
+    const onNext = vi.fn();
+    const onPrev = vi.fn();
+    const onPreview = vi.fn();
+    installPagedSwipe(document, {
+      onNext,
+      onPrev,
+      onPreview,
+      shouldIgnore: () => false,
+      onGestureStart: () => calls.push("start"),
+      onGestureEnd: () => calls.push("end"),
+      nativeScroll: (direction) => {
+        calls.push(`ask:${direction}`);
+        return canScroll(direction);
+      },
+    });
+    const touch = (type: "touchstart" | "touchmove" | "touchend", x: number, y = 200) => {
+      const event = new (document.defaultView as any).Event(type, { bubbles: true, cancelable: true });
+      const point = { clientX: x, clientY: y, screenX: x, screenY: y };
+      Object.defineProperty(event, "touches", { value: type === "touchend" ? [] : [point] });
+      Object.defineProperty(event, "changedTouches", { value: [point] });
+      text.dispatchEvent(event);
+      return event;
+    };
+    return { calls, onNext, onPrev, onPreview, touch };
+  }
+
+  it("leaves an in-chapter swipe to the browser: no preventDefault, preview or page turn", () => {
+    const { calls, onNext, onPreview, touch } = nativeSetup(() => true);
+    touch("touchstart", 300);
+    const move = touch("touchmove", 250);
+    touch("touchmove", 150);
+    touch("touchend", 150);
+    expect(move.defaultPrevented).toBe(false);
+    expect(onPreview).not.toHaveBeenCalledWith(expect.any(Number));
+    expect(onNext).not.toHaveBeenCalled();
+    expect(calls).toEqual(["start", "ask:1", "end"]);
+  });
+
+  it("keeps the JS chapter-edge swipe when the browser cannot scroll that way", () => {
+    const { onNext, onPreview, touch } = nativeSetup(() => false);
+    touch("touchstart", 300);
+    const move = touch("touchmove", 250);
+    touch("touchend", 180);
+    expect(move.defaultPrevented).toBe(true);
+    expect(onPreview).toHaveBeenCalledWith(-50);
+    expect(onNext).toHaveBeenCalledTimes(1);
+  });
+
+  it("decides once per gesture from the first horizontal intent", () => {
+    const { calls, touch } = nativeSetup((direction) => direction === -1);
+    touch("touchstart", 100);
+    touch("touchmove", 150);
+    touch("touchmove", 60);
+    touch("touchend", 60);
+    expect(calls.filter((call) => call.startsWith("ask"))).toEqual(["ask:-1"]);
+  });
+});
