@@ -283,3 +283,32 @@ describe("paged swipe handing over to native scroll-snap", () => {
     expect(calls.filter((call) => call.startsWith("ask"))).toEqual(["ask:-1"]);
   });
 });
+
+describe("paged swipe while the host ignores input", () => {
+  it("blocks the native pan when native scrolling is available but the host is not ready", () => {
+    const { document } = parseHTML(`<html><body><p id="text">正文</p></body></html>`);
+    const text = document.getElementById("text")!;
+    Object.defineProperty(Object.getPrototypeOf(document.documentElement.style), "getPropertyPriority", {
+      value: () => "", configurable: true,
+    });
+    const onNext = vi.fn();
+    installPagedSwipe(document, {
+      onNext,
+      onPrev: vi.fn(),
+      shouldIgnore: () => true,
+      nativeScroll: () => true,
+    });
+    const touch = (type: "touchstart" | "touchmove" | "touchend", x: number) => {
+      const event = new (document.defaultView as any).Event(type, { bubbles: true, cancelable: true });
+      const point = { clientX: x, clientY: 200, screenX: x, screenY: 200 };
+      Object.defineProperty(event, "touches", { value: type === "touchend" ? [] : [point] });
+      Object.defineProperty(event, "changedTouches", { value: [point] });
+      text.dispatchEvent(event);
+      return event;
+    };
+    touch("touchstart", 300);
+    expect(touch("touchmove", 200).defaultPrevented).toBe(true);
+    touch("touchend", 200);
+    expect(onNext).not.toHaveBeenCalled();
+  });
+});

@@ -65,6 +65,8 @@ export function installPagedSwipe(target: Document | HTMLElement, handlers: Page
   let suppressClickUntil = 0;
   /** 本手势的横向意图已交给原生滚动。 */
   let native = false;
+  /** 宿主要求忽略本手势（未就绪、浮层等）：原生横向滚动也必须拦下。 */
+  let blockNative = false;
 
   const reset = (): void => {
     tracking = false;
@@ -83,13 +85,19 @@ export function installPagedSwipe(target: Document | HTMLElement, handlers: Page
     // A new real touch starts a new gesture; do not let the previous swipe
     // suppression swallow this gesture's click.
     suppressClickUntil = 0;
+    blockNative = false;
     if (event.touches.length === 1) handlers.onGestureStart?.();
     if (event.touches.length !== 1 || hasActiveSelection(doc)) {
       reset();
       return;
     }
-    if (isInteractiveTarget(event.target) || handlers.shouldIgnore(event)) {
+    if (isInteractiveTarget(event.target)) {
       reset();
+      return;
+    }
+    if (handlers.shouldIgnore(event)) {
+      reset();
+      blockNative = Boolean(handlers.nativeScroll);
       return;
     }
     const touch = event.touches[0];
@@ -99,7 +107,10 @@ export function installPagedSwipe(target: Document | HTMLElement, handlers: Page
   };
 
   const onTouchMove = (event: TouchEvent): void => {
-    if (!tracking) return;
+    if (!tracking) {
+      if (blockNative && event.cancelable && event.touches.length === 1) event.preventDefault();
+      return;
+    }
     if (event.touches.length !== 1 || hasActiveSelection(doc) || handlers.shouldIgnore(event)) {
       reset();
       return;
