@@ -670,12 +670,14 @@ impl LanSession {
         processed_bytes: u64,
         total_bytes: Option<u64>,
     ) {
-        let event = match phase {
-            "reading" | "extracting" => "preparing",
-            "preparing" | "writing" | "finalizing" | "exporting" => "exporting",
-            "copying" | "receiving" => "receiving",
-            "committing" => "committing",
-            other => other,
+        // F-N reuses phase names in export, prepare and commit. Project the
+        // owning LAN operation, so receiver preparation never looks like send.
+        let event = match self.gate.phase().ok() {
+            Some(Phase::Exporting | Phase::OfferPending) => "exporting",
+            Some(Phase::Receiving) => "receiving",
+            Some(Phase::Preparing | Phase::Preview) => "preparing",
+            Some(Phase::Committing) => "committing",
+            _ => phase,
         };
         let sink = match self.event_sink.lock() {
             Ok(sink) => sink.clone(),

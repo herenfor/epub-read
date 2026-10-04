@@ -238,6 +238,15 @@ async fn lan_loopback_streams_archive_then_prepares_and_commits() {
     let remote = sent.remote_commit.expect("remote commit summary");
     assert_eq!(remote["status"], "committed");
 
+    assert!(
+        !join_log
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| event.event == "exporting"),
+        "receiver prepare progress must not be projected as export"
+    );
     let remote_books = snapshot_books(&receiver);
     assert!(remote_books.contains_key(&content_hash));
     let managed = receiver
