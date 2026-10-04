@@ -1,6 +1,4 @@
-use super::error::LanSaveError;
 use serde::{Deserialize, Serialize};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 pub(crate) const CONTROL_MAX_BYTES: usize = 64 * 1024;
 pub(crate) const COPY_BUFFER_BYTES: usize = 64 * 1024;
@@ -124,55 +122,4 @@ impl ControlMessage {
             ControlMessage::Error { transfer_id, .. } => transfer_id.as_deref(),
         }
     }
-}
-
-pub(crate) async fn read_control_message<R: AsyncRead + Unpin>(
-    reader: &mut R,
-) -> Result<ControlMessage, LanSaveError> {
-    let mut length_bytes = [0_u8; 4];
-    reader
-        .read_exact(&mut length_bytes)
-        .await
-        .map_err(|error| LanSaveError::network(format!("读取控制帧长度失败：{error}")))?;
-    let length = u32::from_be_bytes(length_bytes) as usize;
-    if length > CONTROL_MAX_BYTES {
-        return Err(LanSaveError::protocol(format!(
-            "控制帧长度 {length} 超过 64KiB"
-        )));
-    }
-    let mut payload = vec![0_u8; length];
-    reader
-        .read_exact(&mut payload)
-        .await
-        .map_err(|error| LanSaveError::network(format!("读取控制帧内容失败：{error}")))?;
-    let message: ControlMessage = serde_json::from_slice(&payload)
-        .map_err(|error| LanSaveError::protocol(format!("控制帧 JSON 无法解析：{error}")))?;
-    Ok(message)
-}
-
-pub(crate) async fn write_control_message<W: AsyncWrite + Unpin>(
-    writer: &mut W,
-    message: &ControlMessage,
-) -> Result<(), LanSaveError> {
-    let payload = serde_json::to_vec(message)
-        .map_err(|error| LanSaveError::invalid_data(format!("控制帧无法编码：{error}")))?;
-    if payload.len() > CONTROL_MAX_BYTES {
-        return Err(LanSaveError::protocol("控制帧超过 64KiB"));
-    }
-    let length = payload.len() as u32;
-    writer
-        .write_all(&length.to_be_bytes())
-        .await
-        .map_err(|error| LanSaveError::network(format!("写入控制帧长度失败：{error}")))?;
-    writer
-        .write_all(&payload)
-        .await
-        .map_err(|error| LanSaveError::network(format!("写入控制帧内容失败：{error}")))?;
-    // tokio-rustls buffers writes; flush is mandatory before waiting for a peer
-    // response or beginning the raw archive stream.
-    writer
-        .flush()
-        .await
-        .map_err(|error| LanSaveError::network(format!("刷新控制帧失败：{error}")))?;
-    Ok(())
 }

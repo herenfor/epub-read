@@ -243,6 +243,7 @@ pub fn run() {
         .manage(ai::AiState::default())
         .setup(|app| {
             let _ = save_file::cleanup_stale_staging(app.handle());
+            let _ = lan_save::cleanup_stale_staging(app.handle());
             app.state::<ai::AiState>()
                 .capture_startup_cache_choice(app.handle());
             Ok(())
@@ -260,8 +261,13 @@ pub fn run() {
     let builder = builder.manage(ai::embedding_gateway::SemanticEmbedding::default());
 
     configure_invoke_handler!(builder)
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                lan_save::shutdown(app);
+            }
+        });
 }
 
 #[cfg(desktop)]
