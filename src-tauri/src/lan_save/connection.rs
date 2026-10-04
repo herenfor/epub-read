@@ -3,8 +3,7 @@ use super::protocol::{
     read_control_message, write_control_message, ControlMessage, COPY_BUFFER_BYTES,
 };
 use super::session::LanSession;
-use std::fs::File;
-use std::io::{Read, Write};
+use tokio::fs::File;
 use std::path::Path;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -13,6 +12,8 @@ use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::net::TcpStream;
 use tokio::sync::Notify;
+
+const FLOW_IDLE: std::time::Duration = std::time::Duration::from_secs(30);
 
 pub(crate) enum LanIo {
     Client(tokio_rustls::client::TlsStream<TcpStream>),
@@ -86,6 +87,13 @@ impl LanConnection {
         self.stopped.load(Ordering::Acquire)
     }
 
+    /// Drop both TLS halves after all workers have drained. This is the only
+    /// place that releases the split halves; `stop` only wakes blocked I/O.
+    pub(crate) async fn close_halves(&self) {
+        self.reader.lock().await.take();
+        self.writer.lock().await.take();
+    }
+
     async fn wait_stopped(&self) {
         loop {
             if self.is_stopped() {
@@ -110,8 +118,64 @@ impl LanConnection {
             .as_mut()
             .ok_or_else(|| LanSaveError::network("TLS 读取端已关闭"))?;
         tokio::select! {
-            result = read_control_message(reader) => result,
+            result = tokio::time::timeout(FLOW_IDLE, read_control_message(reader)) => {
+                match result {
+                    Ok(result) => result,
+                    Err(_) => Err(LanSaveError::new("timeout", "控制帧读取空闲超过 30 秒")),
+                }
+            },
             _ = self.wait_stopped() => Err(LanSaveError::cancelled()),
+        }
+    }
+
+    /// Cancel-safe control read with a caller-owned frame buffer. A single
+    /// pending `read` future never consumes bytes when it is dropped, so a
+    /// select with local actions cannot eat half a frame.
+    pub(crate) async fn read_control_buffered(
+        &self,
+        buffer: &mut Vec<u8>,
+        idle_timeout: std::time::Duration,
+    ) -> Result<ControlMessage, LanSaveError> {
+        if self.is_stopped() {
+            return Err(LanSaveError::cancelled());
+        }
+        let mut guard = self.reader.lock().await;
+        let reader = guard
+            .as_mut()
+            .ok_or_else(|| LanSaveError::network("TLS 读取端已关闭"))?;
+        loop {
+            if buffer.len() >= 4 {
+                let length = u32::from_be_bytes([buffer[0], buffer[1], buffer[2], buffer[3]]) as usize;
+                if length > super::protocol::CONTROL_MAX_BYTES {
+                    return Err(LanSaveError::protocol("控制帧超过 64KiB"));
+                }
+                let total = 4 + length;
+                if buffer.len() >= total {
+                    let payload = buffer[4..total].to_vec();
+                    buffer.drain(..total);
+                    return serde_json::from_slice(&payload).map_err(|error| {
+                        LanSaveError::protocol(format!("控制帧 JSON 无法解析：{error}"))
+                    });
+                }
+            }
+            let mut chunk = [0_u8; 4096];
+            let read = tokio::select! {
+                result = tokio::time::timeout(
+                    idle_timeout,
+                    tokio::io::AsyncReadExt::read(reader, &mut chunk),
+                ) => {
+                    match result {
+                        Ok(Ok(read)) => read,
+                        Ok(Err(error)) => return Err(LanSaveError::network(format!("读取控制帧失败：{error}"))),
+                        Err(_) => return Err(LanSaveError::new("timeout", "控制帧读取空闲超时")),
+                    }
+                }
+                _ = self.wait_stopped() => return Err(LanSaveError::cancelled()),
+            };
+            if read == 0 {
+                return Err(LanSaveError::network("控制连接 EOF"));
+            }
+            buffer.extend_from_slice(&chunk[..read]);
         }
     }
 
@@ -124,7 +188,12 @@ impl LanConnection {
             .as_mut()
             .ok_or_else(|| LanSaveError::network("TLS 写入端已关闭"))?;
         tokio::select! {
-            result = write_control_message(writer, message) => result,
+            result = tokio::time::timeout(FLOW_IDLE, write_control_message(writer, message)) => {
+                match result {
+                    Ok(result) => result,
+                    Err(_) => Err(LanSaveError::new("timeout", "控制帧写入空闲超过 30 秒")),
+                }
+            },
             _ = self.wait_stopped() => Err(LanSaveError::cancelled()),
         }
     }
@@ -135,7 +204,7 @@ impl LanConnection {
         total: u64,
         session: &Arc<LanSession>,
     ) -> Result<(), LanSaveError> {
-        let mut source = File::open(path)?;
+        let mut source = File::open(path).await?;
         let mut guard = self.writer.lock().await;
         let writer = guard
             .as_mut()
@@ -149,9 +218,9 @@ impl LanConnection {
             if self.is_stopped() {
                 return Err(LanSaveError::cancelled());
             }
-            let read = source.read(&mut buffer).map_err(|error| {
-                LanSaveError::storage(format!("读取待发送存档失败：{error}"))
-            })?;
+            let read = tokio::io::AsyncReadExt::read(&mut source, &mut buffer)
+                .await
+                .map_err(|error| LanSaveError::storage(format!("读取待发送存档失败：{error}")))?;
             if read == 0 {
                 break;
             }
@@ -161,8 +230,12 @@ impl LanConnection {
                 ));
             }
             tokio::select! {
-                result = writer.write_all(&buffer[..read]) => {
-                    result.map_err(|error| LanSaveError::network(format!("发送存档失败：{error}")))?;
+                result = tokio::time::timeout(FLOW_IDLE, writer.write_all(&buffer[..read])) => {
+                    match result {
+                        Ok(Ok(())) => {}
+                        Ok(Err(error)) => return Err(LanSaveError::network(format!("发送存档失败：{error}"))),
+                        Err(_) => return Err(LanSaveError::new("timeout", "ZIP 写入空闲超过 30 秒")),
+                    }
                 }
                 _ = self.wait_stopped() => return Err(LanSaveError::cancelled()),
             }
@@ -180,8 +253,12 @@ impl LanConnection {
         // tokio-rustls keeps an internal buffer; a successful write loop alone
         // does not mean the peer has received the archive.
         tokio::select! {
-            result = writer.flush() => {
-                result.map_err(|error| LanSaveError::network(format!("刷新存档流失败：{error}")))?;
+            result = tokio::time::timeout(FLOW_IDLE, writer.flush()) => {
+                match result {
+                    Ok(Ok(())) => {}
+                    Ok(Err(error)) => return Err(LanSaveError::network(format!("刷新存档流失败：{error}"))),
+                    Err(_) => return Err(LanSaveError::new("timeout", "ZIP 刷新空闲超过 30 秒")),
+                }
             }
             _ = self.wait_stopped() => return Err(LanSaveError::cancelled()),
         }
@@ -195,7 +272,7 @@ impl LanConnection {
         total: u64,
         session: &Arc<LanSession>,
     ) -> Result<(), LanSaveError> {
-        let mut file = File::create(path)?;
+        let mut file = File::create(path).await?;
         let mut guard = self.reader.lock().await;
         let reader = guard
             .as_mut()
@@ -212,8 +289,15 @@ impl LanConnection {
             let remaining = total - received;
             let limit = remaining.min(buffer.len() as u64) as usize;
             let read = tokio::select! {
-                result = tokio::io::AsyncReadExt::read(reader, &mut buffer[..limit]) => {
-                    result.map_err(|error| LanSaveError::network(format!("接收存档失败：{error}")))?
+                result = tokio::time::timeout(
+                    FLOW_IDLE,
+                    tokio::io::AsyncReadExt::read(reader, &mut buffer[..limit]),
+                ) => {
+                    match result {
+                        Ok(Ok(read)) => read,
+                        Ok(Err(error)) => return Err(LanSaveError::network(format!("接收存档失败：{error}"))),
+                        Err(_) => return Err(LanSaveError::new("timeout", "ZIP 读取空闲超过 30 秒")),
+                    }
                 }
                 _ = self.wait_stopped() => return Err(LanSaveError::cancelled()),
             };
@@ -222,9 +306,9 @@ impl LanConnection {
                     "存档流提前 EOF：已收到 {received}/{total} 字节"
                 )));
             }
-            file.write_all(&buffer[..read]).map_err(|error| {
-                LanSaveError::storage(format!("写入接收临时文件失败：{error}"))
-            })?;
+            file.write_all(&buffer[..read])
+                .await
+                .map_err(|error| LanSaveError::storage(format!("写入接收临时文件失败：{error}")))?;
             received = received.saturating_add(read as u64);
             if last_report.elapsed() >= std::time::Duration::from_millis(100) {
                 session.emit_progress("receiving", received, Some(total));
@@ -232,6 +316,7 @@ impl LanConnection {
             }
         }
         file.sync_all()
+            .await
             .map_err(|error| LanSaveError::storage(format!("同步接收临时文件失败：{error}")))?;
         session.emit_progress("receiving", received, Some(total));
         Ok(())
