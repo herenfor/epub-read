@@ -192,11 +192,11 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
 
   const requestClose = React.useCallback(() => {
     setIsClosing(true);
-    // 与 aaPopover.css 退场动画（200ms）一致；遮罩随 .is-closing 同步淡出。
+    // 与 aaPopover.css 退场动画（300ms）一致；遮罩随 .is-closing 同步淡出。
     setTimeout(() => {
       setIsClosing(false);
       onClose();
-    }, 200);
+    }, 300);
   }, [onClose]);
 
   const presentation = readingPresentation({
