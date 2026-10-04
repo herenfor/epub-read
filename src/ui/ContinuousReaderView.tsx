@@ -450,7 +450,10 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
 
     // 有界窗口投影计算
     const V = viewportHeight > 0 ? viewportHeight : 600;
-    const overscan = settings.preloadNextChapter === true ? 1.5 * V : 0.5 * V;
+    // 资源预算已超时收缩后台预读窗口：只保留真正可见章，先让 LRU 有机会
+    // 淘汰已离开投影区的无主资源；当前可见章仍允许暂时超预算。
+    const mediaBudgetExceeded = server.mediaCacheBudgetExceeded;
+    const overscan = mediaBudgetExceeded ? 0 : settings.preloadNextChapter === true ? 1.5 * V : 0.5 * V;
     const initialTargetScrollTop = useMemo(() => {
       if (spineIndex <= 0) return 0;
       const path = spineItemPath(book, spineIndex);

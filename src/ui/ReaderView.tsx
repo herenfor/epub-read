@@ -777,6 +777,9 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
 
   const liveWindowIndices = (activeIndex: number): number[] => {
     const result: number[] = [activeIndex];
+    // 资源预算已超且当前活缓存仍无法回收时，先把后台预读窗口收缩到当前章；
+    // 当前可见章/单个超大资源可以暂时超预算，不能为了预算把正在显示的内容删掉。
+    if (server.mediaCacheBudgetExceeded) return result;
     const add = (index: number): void => {
       if (index >= 0 && !result.includes(index)) result.push(index);
     };

@@ -1,5 +1,12 @@
 import { unzipSync, strFromU8 } from "fflate";
 
+export class ArchiveClosedError extends Error {
+  constructor(message = "归档已关闭") {
+    super(message);
+    this.name = "ArchiveClosedError";
+  }
+}
+
 export interface ArchiveEntry {
   name: string; // ZIP 原始路径。调用方沿用项目现有路径规范化映射。
   compressedBytes: number;
@@ -97,7 +104,7 @@ export class SyncArchiveClient implements ArchiveClient {
   }
 
   async extract(paths: readonly string[]): Promise<Map<string, Uint8Array>> {
-    if (!this.archive) throw new Error("归档已关闭");
+    if (!this.archive) throw new ArchiveClosedError();
     return this.archive.extract(paths);
   }
 
@@ -138,7 +145,7 @@ export class WorkerArchiveClient implements ArchiveClient {
   }
 
   async extract(paths: readonly string[]): Promise<Map<string, Uint8Array>> {
-    if (!this.worker) throw new Error("归档已关闭");
+    if (!this.worker) throw new ArchiveClosedError();
     const id = this.nextId++;
     return new Promise<Map<string, Uint8Array>>((resolve, reject) => {
       this.pending.set(id, {
@@ -150,13 +157,15 @@ export class WorkerArchiveClient implements ArchiveClient {
   }
 
   close(): void {
+    const closed = new ArchiveClosedError();
+    for (const p of this.pending.values()) p.reject(closed);
+    this.pending.clear();
     if (this.worker) {
       this.worker.postMessage({ type: "close" });
       this.worker.terminate();
       this.worker = null;
     }
     this.directory.clear();
-    this.pending.clear();
   }
 }
 

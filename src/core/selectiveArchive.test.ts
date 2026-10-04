@@ -1,7 +1,9 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { zipSync, strToU8 } from "fflate";
 import {
+  ArchiveClosedError,
   SelectiveEpubArchive,
+  WorkerArchiveClient,
   takeArchiveBatch,
   outputTransferList,
 } from "./selectiveArchive";
@@ -157,5 +159,28 @@ describe("ChapterPreparationRegistry", () => {
     // 再次 reset 不会释放已被宿主接管的 value
     registry.reset();
     expect(released).not.toContain("val-ch3");
+  });
+});
+
+describe("ArchiveClient close convergence", () => {
+  it("rejects pending worker requests with a unified closed error", async () => {
+    const worker = {
+      postMessage: vi.fn(),
+      terminate: vi.fn(),
+      onmessage: null,
+      onerror: null,
+    } as unknown as Worker;
+    const client = new WorkerArchiveClient(worker, []);
+    const pending = client.extract(["OEBPS/late.xhtml"]);
+    expect(worker.postMessage).toHaveBeenCalledWith({
+      id: 1,
+      type: "extract",
+      paths: ["OEBPS/late.xhtml"],
+    });
+
+    client.close();
+    await expect(pending).rejects.toThrow(ArchiveClosedError);
+    await expect(pending).rejects.toThrow("归档已关闭");
+    expect(worker.terminate).toHaveBeenCalledTimes(1);
   });
 });

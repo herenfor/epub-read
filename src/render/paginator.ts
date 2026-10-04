@@ -2305,6 +2305,8 @@ export class ChapterPaginator {
   private metrics = { pageCount: 1, currentPage: 0 };
   private loadSeq = 0;
   private disposed = false;
+  /** 当前章节登记在 ResourceServer 的资源持有者；换章/销毁时释放。 */
+  private resourceHolderId: number | null = null;
   /** Each measure owns its controller; lifecycle aborts all without cross-killing. */
   private measureControllers = new Set<AbortController>();
   private reflowTimer: number | undefined;
@@ -2903,14 +2905,22 @@ export class ChapterPaginator {
     // 上一份阅读态，写到它前面会被自己刚做的清理抹掉（滚动模式曾因此永远走页码兜底）。
     this.pendingRestoreAnchor = preciseAnchor ? { ...preciseAnchor } : null;
     this.iframe.src = "about:blank";
+    // 旧 iframe 已开始卸载后才退还资源持有者：如果这是最后一个持有者，
+    // LRU 淘汰不会撤销仍在显示的图片/字体 URL。
+    this.releaseResourceHolder();
 
     if (this.server.ensureChapterResources) {
       await this.server.ensureChapterResources(path);
       if (seq !== this.loadSeq || this.disposed) return;
     }
 
+    // 资源依赖就绪后登记持有者；换章请求的旧持有者已在 about:blank 之后释放。
+    const holderId = this.server.retainChapter?.(path) ?? null;
+    this.resourceHolderId = holderId;
+
     const htmlText = this.server.textFor(path);
     if (htmlText === undefined) {
+      this.releaseResourceHolder(holderId);
       this.emit({ status: "error", message: `章节资源缺失：${path}` });
       this.finishDisplayReady(seq, false);
       this.displayGate.release(seq);
@@ -2933,6 +2943,7 @@ export class ChapterPaginator {
         settings: this.settings,
       });
     } catch (e) {
+      this.releaseResourceHolder(holderId);
       this.pendingCssUrls.delete(ownedCssUrls);
       ownedCssUrls.revokeAll();
       if (seq === this.loadSeq) {
@@ -2943,6 +2954,7 @@ export class ChapterPaginator {
       return;
     }
     if (seq !== this.loadSeq || this.disposed) {
+      this.releaseResourceHolder(holderId);
       this.pendingCssUrls.delete(ownedCssUrls);
       ownedCssUrls.revokeAll();
       return;
@@ -2960,6 +2972,7 @@ export class ChapterPaginator {
       this.iframe.src = nextBlobUrl;
       if (sanitized.issues.length > 0) this.onIssues?.(sanitized.issues);
     } catch (e) {
+      this.releaseResourceHolder(holderId);
       this.pendingCssUrls.delete(ownedCssUrls);
       ownedCssUrls.revokeAll();
       if (nextBlobUrl) URL.revokeObjectURL(nextBlobUrl);
@@ -7727,6 +7740,17 @@ export class ChapterPaginator {
     return lines.join("\n");
   }
 
+  /**
+   * 释放当前章节持有的资源。expected 用于异步 load 的过期路径：
+   * 如果字段已被新 load 改写，则不再重复释放新持有者。
+   */
+  private releaseResourceHolder(expected?: number): void {
+    if (this.resourceHolderId === null) return;
+    if (expected !== undefined && this.resourceHolderId !== expected) return;
+    this.server.releaseHolder?.(this.resourceHolderId);
+    this.resourceHolderId = null;
+  }
+
   private cleanupDoc(): void {
     this.abortMeasureWaits();
     this.restoreBackdropCompatibility();
@@ -7815,6 +7839,7 @@ export class ChapterPaginator {
     this.cleanupDoc();
     this.footnoteHoverGate.dispose();
     this.iframe.src = "about:blank";
+    this.releaseResourceHolder();
     this.server = null as any;
   }
 
