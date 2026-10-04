@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="18 18 72 72" width="1024" height="1024">
+  <!-- Legacy round launcher icon (Android 7.x only; Android 8+ uses the adaptive layers). -->
+  <circle cx="54" cy="54" r="36" fill="#111113"/>
+  <g fill="#fafafa"><path d="M33 40 L52 44 V72 L33 68 Z"/><path d="M56 44 L75 40 V68 L56 72 Z"/></g>
+</svg>
