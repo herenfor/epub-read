@@ -18,7 +18,7 @@
   color: var(--fg);
   box-shadow: 0 24px 54px rgba(0, 0, 0, 0.35), 0 6px 18px rgba(0, 0, 0, 0.12);
   opacity: 1;
-  animation: panel-float-from-bottom 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: panel-float-from-bottom var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @media (max-width: 640px) {
@@ -31,7 +31,7 @@
     height: auto !important;
     border-radius: 20px !important;
     transform: translateY(24px) scale(0.96) !important;
-    animation: panel-sheet-up 0.24s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+    animation: panel-sheet-up var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
   }
 }
 

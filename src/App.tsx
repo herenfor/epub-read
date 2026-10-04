@@ -34,6 +34,7 @@ import {
 } from "./ui/windowFullscreen";
 import { getRuntimeCapabilities } from "./platform/runtimeCapabilities";
 import { useAndroidBack } from "./platform/useAndroidBack";
+import { useExitPresence } from "./ui/menuMotion";
 import { SidebarDrawer, type SidebarMode, type SidebarTab } from "./ui/SidebarDrawer";
 import { AaPopover } from "./ui/AaPopover";
 import { AboutInfo } from "./ui/AboutInfo";
@@ -4144,6 +4145,9 @@ export default function App() {
 
   // ---- 派生 ----
   const ready = phase.phase === "ready" && book !== null && server !== null;
+  // 搜索与“更多”关闭后保留一个退场动画时长再卸载，与其他菜单同速。
+  const searchPresence = useExitPresence(searchOpen);
+  const moreSheetPresence = useExitPresence(mobileChrome && view === "reader" && ready && mobileMoreOpen);
   const readerLoadFeedback = resolveReaderLoadFeedback({
     visible: view === "reader" && ready,
     displayReady: readerDisplayReady,
@@ -5330,10 +5334,11 @@ export default function App() {
             )}
             {ready ? (
               <>
-                {searchOpen && (
+                {searchPresence.present && (
                   <>
-                    <div className="search-backdrop" onClick={() => closePanel("search")} />
+                    <div className={`search-backdrop${searchPresence.closing ? " is-closing" : ""}`} onClick={() => closePanel("search")} />
                     <SearchPanel
+                      closing={searchPresence.closing}
                       query={searchScope === "all" ? librarySearchSnapshot.query : searchQuery}
                       onQueryChange={searchScope === "all" ? librarySearchRuntime.setQuery.bind(librarySearchRuntime) : setSearchQuery}
                       scope={searchScope}
@@ -5631,14 +5636,14 @@ export default function App() {
           }
         />
       )}
-      {mobileChrome && view === "reader" && ready && mobileMoreOpen && (
+      {moreSheetPresence.present && (
         <>
           <div
-            className="mobile-more-backdrop"
+            className={`mobile-more-backdrop${moreSheetPresence.closing ? " is-closing" : ""}`}
             onClick={() => setMobileMoreOpen(false)}
             aria-hidden="true"
           />
-          <div className="mobile-more-sheet" role="dialog" aria-modal="true" aria-label="更多阅读操作">
+          <div className={`mobile-more-sheet${moreSheetPresence.closing ? " is-closing" : ""}`} role="dialog" aria-modal="true" aria-label="更多阅读操作">
             <div className="mobile-more-title">更多</div>
             {/* 书签/笔记已在“目录”面板的标签页，导入在书架；此处不再重复入口。 */}
             {IS_AI_EDITION && (

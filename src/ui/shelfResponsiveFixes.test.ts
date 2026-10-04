@@ -4,6 +4,7 @@ import { emptyOrganization } from "./libraryOrganization";
 import { chooseShelfMenuPlacement, ShelfView, type ShelfViewProps } from "./ShelfView";
 import type { ShelfEntry } from "./shelf";
 import { createReactDomHarness } from "../test/reactDomHarness";
+import { MENU_CLOSE_MS } from "./menuMotion";
 
 function makeEntry(id: string, title: string): ShelfEntry {
   return {
@@ -74,7 +75,7 @@ describe("第三步补修：书架触摸长按与子菜单 Back", () => {
       expect(availability.at(-1)).toBe(true);
       await dom.click(dom.container.querySelector(".shelf-manage-toggle-btn") as HTMLElement);
       await dom.run(() => { expect(back?.()).toBe(true); });
-      await dom.run(() => new Promise<void>((resolve) => setTimeout(resolve, 170)));
+      await dom.run(() => new Promise<void>((resolve) => setTimeout(resolve, MENU_CLOSE_MS + 20)));
       expect(dom.container.querySelector(".shelf-view.selection-mode")).toBeNull();
       expect(dom.container.querySelector(".shelf-folder-active-bar")).not.toBeNull();
       await dom.run(() => { expect(back?.()).toBe(true); });
@@ -100,7 +101,7 @@ describe("第三步补修：书架触摸长按与子菜单 Back", () => {
       await dom.run(() => { expect(back?.()).toBe(true); });
       expect(dom.container.querySelector(".shelf-select-pop")?.className).toContain("closing");
       expect(dom.container.querySelector(".shelf-drawer")?.className).not.toContain("closing");
-      await dom.run(() => new Promise<void>((resolve) => setTimeout(resolve, 170)));
+      await dom.run(() => new Promise<void>((resolve) => setTimeout(resolve, MENU_CLOSE_MS + 20)));
       expect(dom.container.querySelector(".shelf-select-pop")).toBeNull();
       await dom.run(() => { expect(back?.()).toBe(true); });
       expect(dom.container.querySelector(".shelf-drawer")?.className).toContain("closing");

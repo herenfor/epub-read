@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { MENU_CLOSE_MS } from "./menuMotion";
 import type { Theme, TurnAnimation } from "../render/settings";
 import { PAGE_GAP_MAX_PX, type PageMarginsPx, type ReadingMode, type SpreadGapMode } from "../render/pageLayout";
 import {
@@ -192,11 +193,11 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
 
   const requestClose = React.useCallback(() => {
     setIsClosing(true);
-    // 与 aaPopover.css 退场动画（300ms）一致；遮罩随 .is-closing 同步淡出。
+    // 与 aaPopover.css 退场动画（--menu-close）一致；遮罩随 .is-closing 同步淡出。
     setTimeout(() => {
       setIsClosing(false);
       onClose();
-    }, 300);
+    }, MENU_CLOSE_MS);
   }, [onClose]);
 
   const presentation = readingPresentation({

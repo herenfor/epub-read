@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { MENU_CLOSE_MS } from "./menuMotion";
 import type { TocNode } from "../core/types";
 import { countTocNodes, findActiveTocNode } from "./TocPanel";
 import type { NoteViewModel } from "./NotesPanel";
@@ -140,7 +141,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
     setTimeout(() => {
       setIsClosing(false);
       onClose();
-    }, 250);
+    }, MENU_CLOSE_MS);
   }, [onClose]);
 
   // 滚动活动目录到视图中央

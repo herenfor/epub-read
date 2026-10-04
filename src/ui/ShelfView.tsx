@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { MENU_CLOSE_MS } from "./menuMotion";
 import { createPortal } from "react-dom";
 import { getShelfMenuPortalHost, useShelfMenuPopover } from "./shelfMenuPlacement";
 import type { Theme } from "../render/settings";
@@ -1405,7 +1406,7 @@ function ShelfCreateFolderDialog(props: ShelfCreateFolderDialogProps) {
 
   const handleCancel = () => {
     setIsClosing(true);
-    window.setTimeout(props.onCancel, 150);
+    window.setTimeout(props.onCancel, MENU_CLOSE_MS);
   };
 
   useEffect(() => {
@@ -1492,7 +1493,7 @@ function ShelfRenameDialog(props: ShelfRenameDialogProps) {
 
   const handleCancel = () => {
     setIsClosing(true);
-    window.setTimeout(props.onCancel, 150);
+    window.setTimeout(props.onCancel, MENU_CLOSE_MS);
   };
 
   useEffect(() => {
@@ -1574,7 +1575,7 @@ function ShelfDissolveDialog(props: ShelfDissolveDialogProps) {
 
   const handleCancel = () => {
     setIsClosing(true);
-    window.setTimeout(props.onCancel, 150);
+    window.setTimeout(props.onCancel, MENU_CLOSE_MS);
   };
 
   return (
@@ -1615,7 +1616,7 @@ function ShelfMoveDialog(props: ShelfMoveDialogProps) {
 
   const handleCancel = () => {
     setIsClosing(true);
-    window.setTimeout(props.onCancel, 150);
+    window.setTimeout(props.onCancel, MENU_CLOSE_MS);
   };
 
   const initialFolderId = useMemo(() => {
@@ -2041,7 +2042,7 @@ function ShelfSelect(props: ShelfSubmenuBackProps & {
       setOpen(false);
       setClosing(false);
       timerRef.current = null;
-    }, 150);
+    }, MENU_CLOSE_MS);
   }, [open, closing]);
 
   useShelfSubmenuBack(open, closeDropdown, props);
@@ -2179,7 +2180,7 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
       const timer = setTimeout(() => {
         setMounted(false);
         setClosing(false);
-      }, 190);
+      }, MENU_CLOSE_MS);
       return () => clearTimeout(timer);
     }
   }, [props.open, mounted]);
@@ -3469,7 +3470,7 @@ export function ShelfView(props: ShelfViewProps) {
     window.setTimeout(() => {
       setDeleteTargets(null);
       setDeleteTargetsClosing(false);
-    }, 150);
+    }, MENU_CLOSE_MS);
   }, []);
 
   // 全局快捷键：按 / 键聚焦快速书名过滤框，按 Esc 退出批量选择模式
@@ -3879,7 +3880,7 @@ export function ShelfView(props: ShelfViewProps) {
       setActiveFolderModal(null);
       folderModalClosingRef.current = false;
       setFolderModalClosing(false);
-    }, 180);
+    }, MENU_CLOSE_MS);
   }, []);
 
   const handleRootBack = useCallback((): boolean => {

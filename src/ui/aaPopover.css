@@ -7,12 +7,12 @@
 }
 
 .aa-popover-backdrop {
-  animation: reader-panel-fade-in 340ms cubic-bezier(0.16, 1, 0.3, 1);
+  animation: reader-panel-fade-in var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .aa-popover-backdrop.is-closing {
   pointer-events: none;
-  animation: reader-panel-fade-out 300ms ease forwards;
+  animation: reader-panel-fade-out var(--menu-close) ease forwards;
 }
 
 .aa-popover {
@@ -32,14 +32,14 @@
   -webkit-backdrop-filter: blur(28px) saturate(180%);
   user-select: none;
   -webkit-user-select: none;
-  animation: aaPopoverFadeIn 340ms cubic-bezier(0.16, 1, 0.3, 1);
+  animation: aaPopoverFadeIn var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
   overflow: hidden;
   display: flex;
   flex-direction: column;
 }
 
 .aa-popover.is-closing {
-  animation: aaPopoverFadeOut 300ms ease forwards;
+  animation: aaPopoverFadeOut var(--menu-close) ease forwards;
   pointer-events: none;
 }
 
@@ -648,11 +648,11 @@
   max-width: none;
   max-height: min(85vh, calc(var(--visual-viewport-height, 100vh) * 0.85));
   border-radius: 16px 16px 0 0;
-  animation: aaMobileSheetIn 360ms cubic-bezier(0.16, 1, 0.3, 1);
+  animation: aaMobileSheetIn var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .app[data-mobile-chrome="true"][data-layout="compact"] .aa-popover.is-closing {
-  animation: aaMobileSheetOut 300ms ease forwards;
+  animation: aaMobileSheetOut var(--menu-close) ease forwards;
 }
 
 .app[data-mobile-chrome="true"][data-layout="compact"] .aa-popover-header {

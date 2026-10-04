@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { MENU_CLOSE_MS } from "./menuMotion";
 import type { KeyboardEvent } from "react";
 import { CloseIcon } from "./readerIcons";
 
@@ -51,6 +52,8 @@ export interface SearchPanelResult {
 }
 
 export interface SearchPanelProps {
+  /** 退场动画进行中：仍挂载但不再接受输入。 */
+  closing?: boolean;
   query: string;
   onQueryChange(query: string): void;
   results: SearchPanelResult[];
@@ -187,7 +190,7 @@ function ConcurrencySelect(props: {
       setOpen(false);
       setClosing(false);
       timerRef.current = null;
-    }, 150);
+    }, MENU_CLOSE_MS);
   }, [open, closing]);
 
   const toggleDropdown = useCallback(() => {
@@ -504,9 +507,9 @@ export function SearchPanel(props: SearchPanelProps) {
 
   return (
     <>
-      <div className="search-backdrop" aria-hidden="true" onClick={props.onClose} />
+      <div className={`search-backdrop${props.closing ? " is-closing" : ""}`} aria-hidden="true" onClick={props.onClose} />
       <div
-        className="search-panel"
+        className={`search-panel${props.closing ? " is-closing" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-label="正文搜索"
