@@ -19,6 +19,7 @@ vi.mock("../platform/runtimeCapabilities", () => ({
     usesAndroidBack: false,
     supportsCacheStorage: true,
     supportsCustomCacheDirectory: true,
+    supportsLanTransfer: true,
   }),
 }));
 
