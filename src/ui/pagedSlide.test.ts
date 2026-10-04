@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { animateValue, dragScrollLeft, slideDurationMs, SLIDE_FULL_MS, type AnimationClock } from "./pagedSlide";
+import { animateValue, dragScrollLeft, hermiteEase, releaseSlidePlan, releaseVelocity, slideDurationMs, SLIDE_FULL_MS, type AnimationClock } from "./pagedSlide";
 
 function manualClock() {
   let time = 0;
@@ -79,5 +79,37 @@ describe("animateValue", () => {
     cancelled.cancel();
     second.tick(500);
     expect(done).toBe(1);
+  });
+});
+
+describe("release continuation", () => {
+  it("starts at the finger's speed instead of jumping ahead on the first frame", () => {
+    // 平板：拖了 250px 后慢速松手，剩余 950px。
+    const slow = releaseSlidePlan(950, 1200, 1.2);
+    const firstFrame = 950 * slow.ease(8.3 / slow.durationMs);
+    expect(firstFrame).toBeLessThan(25);
+    // 旧曲线 easeOutCubic 在同一帧会跳出约 90px。
+    expect(950 * (1 - (1 - 8.3 / slideDurationMs(950, 1200)) ** 3)).toBeGreaterThan(80);
+  });
+
+  it("matches a fast fling and shortens the animation without overshooting", () => {
+    const plan = releaseSlidePlan(600, 1200, 12);
+    expect(plan.durationMs).toBeLessThan(slideDurationMs(600, 1200));
+    let prev = 0;
+    for (let i = 1; i <= 20; i++) {
+      const v = plan.ease(i / 20);
+      expect(v).toBeGreaterThanOrEqual(prev);
+      expect(v).toBeLessThanOrEqual(1);
+      prev = v;
+    }
+    expect(plan.ease(1)).toBeCloseTo(1);
+  });
+
+  it("ignores movement away from the target and a finger that stopped", () => {
+    expect(releaseSlidePlan(-500, 1200, 3).durationMs).toBe(slideDurationMs(-500, 1200));
+    expect(hermiteEase(0.5)(0)).toBe(0);
+    expect(releaseVelocity([{ t: 0, x: 0 }, { t: 16, x: 32 }], 20)).toBeCloseTo(2);
+    expect(releaseVelocity([{ t: 0, x: 0 }, { t: 16, x: 32 }], 200)).toBe(0);
+    expect(releaseVelocity([{ t: 0, x: 0 }], 5)).toBe(0);
   });
 });

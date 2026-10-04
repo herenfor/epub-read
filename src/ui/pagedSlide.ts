@@ -38,6 +38,67 @@ export function easeOutCubic(t: number): number {
   return 1 - x * x * x;
 }
 
+/** 松手续接时初速度的上限（归一化斜率）；三次 Hermite 在斜率 ≤3 时单调不过冲。 */
+const RELEASE_MAX_SLOPE = 2.5;
+/** 手指几乎停住时仍以平均速度的一半起步，避免松手后先“停一下”。 */
+const RELEASE_MIN_SLOPE = 0.5;
+
+/**
+ * 松手后的续接动画：以手指离手速度为起始速度、到达终点速度为 0 的三次 Hermite
+ * 曲线。easeOutCubic 的起始速度是平均速度的 3 倍，慢拖松手时第一帧会跳出几十
+ * 像素，看上去像掉帧；这里让速度从手指处连续衔接。
+ *
+ * velocityPxPerMs 为 scrollLeft 方向的离手速度（与 remainingPx 同号才算顺向）。
+ */
+export function releaseSlidePlan(
+  remainingPx: number,
+  spanPx: number,
+  velocityPxPerMs: number,
+): { durationMs: number; ease: (t: number) => number } {
+  const durationMs = slideDurationMs(remainingPx, spanPx);
+  const distance = Math.abs(remainingPx);
+  const along = Math.sign(remainingPx) * velocityPxPerMs;
+  if (!(durationMs > 0) || !(distance > 0) || !(along > 0)) {
+    return { durationMs, ease: hermiteEase(RELEASE_MIN_SLOPE) };
+  }
+  // 快速一划：缩短时长使起始斜率不超过上限，速度仍与手指一致。
+  let duration = durationMs;
+  if ((along * duration) / distance > RELEASE_MAX_SLOPE) {
+    duration = Math.max(SLIDE_MIN_MS, (RELEASE_MAX_SLOPE * distance) / along);
+  }
+  const slope = Math.max(RELEASE_MIN_SLOPE, Math.min(RELEASE_MAX_SLOPE, (along * duration) / distance));
+  return { durationMs: Math.round(duration), ease: hermiteEase(slope) };
+}
+
+/** 起点斜率 m、终点斜率 0 的归一化三次 Hermite：p(0)=0, p(1)=1。 */
+export function hermiteEase(m: number): (t: number) => number {
+  return (t: number): number => {
+    const s = Math.max(0, Math.min(1, t));
+    const s2 = s * s;
+    const s3 = s2 * s;
+    return m * (s3 - 2 * s2 + s) + (3 * s2 - 2 * s3);
+  };
+}
+
+/** 由最近的拖动采样估计离手速度（px/ms）；手指停住超过 idleMs 视为 0。 */
+export function releaseVelocity(
+  samples: ReadonlyArray<{ t: number; x: number }>,
+  now: number,
+  windowMs = 80,
+  idleMs = 60,
+): number {
+  if (samples.length < 2) return 0;
+  const last = samples[samples.length - 1];
+  if (now - last.t > idleMs) return 0;
+  let first = last;
+  for (let i = samples.length - 2; i >= 0; i--) {
+    if (last.t - samples[i].t > windowMs) break;
+    first = samples[i];
+  }
+  const dt = last.t - first.t;
+  return dt > 0 ? (last.x - first.x) / dt : 0;
+}
+
 export interface ValueAnimation {
   /** 立即跳到终点并执行完成回调（连续翻页/外部跳转前落位）。 */
   finish(): void;
@@ -73,6 +134,7 @@ export function animateValue(
   apply: (value: number) => void,
   done: () => void,
   clock: AnimationClock = defaultClock,
+  ease: (t: number) => number = easeOutCubic,
 ): ValueAnimation {
   let active = true;
   let handle: number | null = null;
@@ -109,7 +171,7 @@ export function animateValue(
       complete();
       return;
     }
-    apply(from + (to - from) * easeOutCubic(t));
+    apply(from + (to - from) * ease(t));
     handle = clock.request(step);
   };
   handle = clock.request(step);
