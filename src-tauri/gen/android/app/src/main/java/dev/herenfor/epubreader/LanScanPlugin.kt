@@ -1,6 +1,9 @@
 package dev.herenfor.epubreader
 
 import android.app.Activity
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import androidx.activity.result.ActivityResult
 import app.tauri.annotation.ActivityCallback
 import app.tauri.annotation.Command
@@ -8,18 +11,15 @@ import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
-import com.journeyapps.barcodescanner.ScanContract
-import com.journeyapps.barcodescanner.ScanOptions
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Android-only QR scanner for the LAN save join flow.
  *
- * The scanner intentionally launches only after the user taps "扫码加入"; it is
- * never started as a side effect of creating a LAN session. The ZXing
- * CaptureActivity owns the camera lifecycle and permission request, and this
- * plugin simply forwards its result or cancellation back through the existing
- * Tauri ActivityResult bridge.
+ * The scanner launches only after the user taps "扫码连接"; it is never started
+ * as a side effect of creating a LAN session. [LanScanActivity] owns the camera
+ * and its permission request and always reports a status, so the web layer can
+ * explain cancellations, denied permissions and missing cameras in plain words.
  */
 @TauriPlugin
 class LanScanPlugin(private val activity: Activity) : Plugin(activity) {
@@ -28,45 +28,44 @@ class LanScanPlugin(private val activity: Activity) : Plugin(activity) {
     @Command
     fun scan(invoke: Invoke) {
         if (!scanning.compareAndSet(false, true)) {
-            invoke.reject("正在扫码，请先结束当前扫码")
+            invoke.reject("scan-busy")
             return
         }
         try {
-            val options = ScanOptions().apply {
-                setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-                setPrompt("将连接码放入框内")
-                setBeepEnabled(false)
-                setOrientationLocked(false)
-                setBarcodeImageEnabled(false)
-            }
-            val intent = ScanContract().createIntent(activity, options)
-            startActivityForResult(invoke, intent, "scanResult")
+            startActivityForResult(invoke, Intent(activity, LanScanActivity::class.java), "scanResult")
         } catch (error: Throwable) {
             scanning.set(false)
-            val message = error.message?.takeIf { it.isNotBlank() } ?: error.toString()
-            invoke.reject(message)
+            invoke.reject(error.message?.takeIf { it.isNotBlank() } ?: error.toString())
         }
     }
 
     @ActivityCallback
     fun scanResult(invoke: Invoke, result: ActivityResult) {
         scanning.set(false)
+        val data = result.data
+        val status = data?.getStringExtra(LanScanActivity.EXTRA_STATUS) ?: LanScanActivity.STATUS_CANCELLED
+        val contents = data?.getStringExtra(LanScanActivity.EXTRA_CONTENTS)?.trim()
+        val response = JSObject()
+        if (status == LanScanActivity.STATUS_SCANNED && contents.isNullOrEmpty()) {
+            response.put("status", LanScanActivity.STATUS_CANCELLED)
+        } else {
+            response.put("status", status)
+            if (!contents.isNullOrEmpty()) response.put("contents", contents)
+        }
+        invoke.resolve(response)
+    }
+
+    /** Opens this app's system settings page so the user can grant the camera. */
+    @Command
+    fun openAppSettings(invoke: Invoke) {
         try {
-            val contents = ScanContract()
-                .parseResult(result.resultCode, result.data)
-                ?.contents
-                ?.trim()
-            val response = JSObject()
-            if (contents.isNullOrEmpty()) {
-                response.put("status", "cancelled")
-            } else {
-                response.put("status", "scanned")
-                response.put("contents", contents)
-            }
-            invoke.resolve(response)
+            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                .setData(Uri.fromParts("package", activity.packageName, null))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            activity.startActivity(intent)
+            invoke.resolve()
         } catch (error: Throwable) {
-            val message = error.message?.takeIf { it.isNotBlank() } ?: error.toString()
-            invoke.reject(message)
+            invoke.reject(error.message?.takeIf { it.isNotBlank() } ?: error.toString())
         }
     }
 }

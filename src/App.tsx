@@ -4227,6 +4227,7 @@ export default function App() {
   // 搜索与“更多”关闭后保留一个退场动画时长再卸载，与其他菜单同速。
   const searchPresence = useExitPresence(searchOpen);
   const moreSheetPresence = useExitPresence(mobileChrome && view === "reader" && ready && mobileMoreOpen);
+  const lanSavePresence = useExitPresence(lanSaveOpen && runtime.supportsLanTransfer);
   const readerLoadFeedback = resolveReaderLoadFeedback({
     visible: view === "reader" && ready,
     displayReady: readerDisplayReady,
@@ -5824,9 +5825,10 @@ export default function App() {
         />
       )}
       <SaveFileProgressPanel state={saveFileJob.state} onCancel={() => void closeSaveFileUi()} />
-      {lanSaveOpen && runtime.supportsLanTransfer && (
+      {lanSavePresence.present && (
         <LanSavePanel
-          open={lanSaveOpen}
+          open
+          closing={lanSavePresence.closing}
           session={lanSaveSession}
           selectedEntries={lanSaveSelection}
           isAndroid={runtime.platform === "android"}
