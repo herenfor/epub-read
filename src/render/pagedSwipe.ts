@@ -10,6 +10,15 @@ export interface PagedSwipeHandlers {
   shouldIgnore(event: Event): boolean;
   /** Drag feedback only; never changes the current page. null clears it. */
   onPreview?(dx: number | null): void;
+  /** 单指按下（含随后被忽略的手势）：宿主可在此落定进行中的翻页动画。 */
+  onGestureStart?(): void;
+  /**
+   * 该方向是否交给原生横向滚动（scroll-snap）：返回 true 时本手势不拦截
+   * touchmove、不预览、抬手不翻页，由原生滚动与吸附完成。
+   */
+  nativeScroll?(direction: 1 | -1): boolean;
+  /** 手指抬起或取消。 */
+  onGestureEnd?(): void;
   gestureSurface?: HTMLElement;
   /** CSS pixels. Kept local to this input path; no settings/config system. */
   thresholdPx?: number;
@@ -54,12 +63,15 @@ export function installPagedSwipe(target: Document | HTMLElement, handlers: Page
   let startY = 0;
   let peakAbsDx = 0;
   let suppressClickUntil = 0;
+  /** 本手势的横向意图已交给原生滚动。 */
+  let native = false;
 
   const reset = (): void => {
     tracking = false;
     startX = 0;
     startY = 0;
     peakAbsDx = 0;
+    native = false;
     handlers.onPreview?.(null);
   };
 
@@ -71,6 +83,7 @@ export function installPagedSwipe(target: Document | HTMLElement, handlers: Page
     // A new real touch starts a new gesture; do not let the previous swipe
     // suppression swallow this gesture's click.
     suppressClickUntil = 0;
+    if (event.touches.length === 1) handlers.onGestureStart?.();
     if (event.touches.length !== 1 || hasActiveSelection(doc)) {
       reset();
       return;
@@ -99,6 +112,12 @@ export function installPagedSwipe(target: Document | HTMLElement, handlers: Page
       return;
     }
     if (Math.abs(dx) >= INTENT_THRESHOLD_PX && Math.abs(dx) > Math.abs(dy) * HORIZONTAL_RATIO) {
+      if (peakAbsDx === 0 && handlers.nativeScroll?.(dx < 0 ? 1 : -1)) native = true;
+      if (native) {
+        // 原生滚动接手：不拦截、不预览；只记录以便抬手时不再重复翻页。
+        peakAbsDx = Math.max(peakAbsDx, Math.abs(dx));
+        return;
+      }
       if (event.cancelable) event.preventDefault();
       peakAbsDx = Math.max(peakAbsDx, Math.abs(dx));
       handlers.onPreview?.(dx);
@@ -106,7 +125,12 @@ export function installPagedSwipe(target: Document | HTMLElement, handlers: Page
   };
 
   const onTouchEnd = (event: TouchEvent): void => {
+    if (event.touches.length === 0) handlers.onGestureEnd?.();
     if (!tracking) return;
+    if (native) {
+      reset();
+      return;
+    }
     const touch = event.changedTouches[0];
     const dx = touch ? x(touch) - startX : 0;
     const dy = touch ? y(touch) - startY : 0;
@@ -121,6 +145,7 @@ export function installPagedSwipe(target: Document | HTMLElement, handlers: Page
   };
 
   const onTouchCancel = (): void => {
+    handlers.onGestureEnd?.();
     reset();
   };
 
