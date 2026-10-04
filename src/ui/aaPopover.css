@@ -6,8 +6,13 @@
   background: transparent;
 }
 
+.aa-popover-backdrop {
+  animation: reader-panel-fade-in 240ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
 .aa-popover-backdrop.is-closing {
   pointer-events: none;
+  animation: reader-panel-fade-out 200ms ease forwards;
 }
 
 .aa-popover {
@@ -27,14 +32,14 @@
   -webkit-backdrop-filter: blur(28px) saturate(180%);
   user-select: none;
   -webkit-user-select: none;
-  animation: aaPopoverFadeIn 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  animation: aaPopoverFadeIn 240ms cubic-bezier(0.16, 1, 0.3, 1);
   overflow: hidden;
   display: flex;
   flex-direction: column;
 }
 
 .aa-popover.is-closing {
-  animation: aaPopoverFadeOut 140ms ease forwards;
+  animation: aaPopoverFadeOut 200ms ease forwards;
   pointer-events: none;
 }
 
@@ -643,11 +648,11 @@
   max-width: none;
   max-height: min(85vh, calc(var(--visual-viewport-height, 100vh) * 0.85));
   border-radius: 16px 16px 0 0;
-  animation: aaMobileSheetIn 180ms cubic-bezier(0.16, 1, 0.3, 1);
+  animation: aaMobileSheetIn 260ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .app[data-mobile-chrome="true"][data-layout="compact"] .aa-popover.is-closing {
-  animation: aaMobileSheetOut 150ms ease forwards;
+  animation: aaMobileSheetOut 200ms ease forwards;
 }
 
 .app[data-mobile-chrome="true"][data-layout="compact"] .aa-popover-header {
@@ -732,7 +737,7 @@
   to { opacity: 0; transform: translateY(18px); }
 }
 
-/* ---- 触摸端：面板去毛玻璃（逐帧模糊重算导致开合掉帧），文字整体放大一档 ---- */
+/* ---- 触摸端：面板本体已近不透明，去掉其自身模糊（与遮罩毛玻璃叠算无可见差别）；文字放大一档 ---- */
 .app[data-touch-ui="true"] .aa-popover {
   background: var(--panel-bg, #ffffff);
   backdrop-filter: none;

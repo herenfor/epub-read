@@ -6999,15 +6999,15 @@ select option {
 }
 
 /* ---- 触摸端阅读面板：去掉整屏毛玻璃，字体面板置于遮罩之上并按设备成形 ---- */
-/* 整屏 backdrop-filter 在高分屏手机上每帧重算模糊，是打开排版面板掉帧的主因；
- * 触摸端只保留半透明遮罩。 */
-.app[data-touch-ui="true"] .menu-backdrop,
-.app[data-touch-ui="true"] .search-backdrop,
-.app[data-touch-ui="true"] .notes-backdrop,
-.app[data-touch-ui="true"] .log-backdrop,
-.app[data-touch-ui="true"] .ai-backdrop {
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
+/* 遮罩保留毛玻璃；排版面板关闭时遮罩与面板同步淡出，避免面板退场后整屏亮度骤变。 */
+.menu-backdrop {
+  animation-duration: 240ms;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.app:has(.aa-popover.is-closing) .menu-backdrop {
+  animation: reader-panel-fade-out 200ms ease forwards;
+  pointer-events: none;
 }
 
 /* 字体设置原 z-index 52 低于遮罩(190)与阅读工具栏(100)，被模糊盖住且无法点选。 */
