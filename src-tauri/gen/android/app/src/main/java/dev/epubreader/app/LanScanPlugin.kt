@@ -10,6 +10,7 @@ import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Android-only QR scanner for the LAN save join flow.
@@ -22,8 +23,14 @@ import com.journeyapps.barcodescanner.ScanOptions
  */
 @TauriPlugin
 class LanScanPlugin(private val activity: Activity) : Plugin(activity) {
+    private val scanning = AtomicBoolean(false)
+
     @Command
     fun scan(invoke: Invoke) {
+        if (!scanning.compareAndSet(false, true)) {
+            invoke.reject("正在扫码，请先结束当前扫码")
+            return
+        }
         try {
             val options = ScanOptions().apply {
                 setDesiredBarcodeFormats(ScanOptions.QR_CODE)
@@ -35,6 +42,7 @@ class LanScanPlugin(private val activity: Activity) : Plugin(activity) {
             val intent = ScanContract().createIntent(activity, options)
             startActivityForResult(invoke, intent, "scanResult")
         } catch (error: Throwable) {
+            scanning.set(false)
             val message = error.message?.takeIf { it.isNotBlank() } ?: error.toString()
             invoke.reject(message)
         }
@@ -42,6 +50,7 @@ class LanScanPlugin(private val activity: Activity) : Plugin(activity) {
 
     @ActivityCallback
     fun scanResult(invoke: Invoke, result: ActivityResult) {
+        scanning.set(false)
         try {
             val contents = ScanContract()
                 .parseResult(result.resultCode, result.data)

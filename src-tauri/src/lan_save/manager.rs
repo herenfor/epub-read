@@ -219,6 +219,17 @@ pub(crate) fn shutdown<R: Runtime>(app: &AppHandle<R>) {
         let committing =
             session.gate().close().ok() == Some(super::session::GateClose::CommitInProgress);
         session.request_close();
+        session.emit_event(
+            "closed",
+            None,
+            Some(if committing { "too-late" } else { "cancelled" }),
+            Some(if committing {
+                "应用已离开前台，连接关闭；本机提交仍在进行。"
+            } else {
+                "应用已离开前台，连接已结束，请重新连接。"
+            }),
+            None,
+        );
         if let Ok(connection) = session.connection() {
             connection.stop();
         }

@@ -717,6 +717,7 @@ export default function App() {
   const [lanSaveOpen, setLanSaveOpen] = useState(false);
   const [lanSaveSelection, setLanSaveSelection] = useState<ShelfEntry[]>([]);
   const lanSaveSelectionRef = useRef<ShelfEntry[]>([]);
+  const lanSaveActiveRef = useRef(false);
   const [currentShelfId, setCurrentShelfId] = useState<string | null>(null);
   const shelfBusyRef = useRef(false);
   const shelfEntriesRef = useRef<ShelfEntry[]>([]);
@@ -1856,8 +1857,8 @@ export default function App() {
     scopeChoice: "all" | "selected",
     includeBooks: boolean,
   ): Promise<void> => {
-    if (saveFileJob.active || saveFileLaunchRef.current) {
-      setShelfNotice({ kind: "warn", text: "已有存档文件任务正在进行，请等待当前任务结束" });
+    if (saveFileJob.active || saveFileLaunchRef.current || lanSaveActiveRef.current) {
+      setShelfNotice({ kind: "warn", text: "已有存档或互传任务正在进行，请等待当前任务结束" });
       return;
     }
     saveFileLaunchRef.current = true;
@@ -1918,8 +1919,8 @@ export default function App() {
   }, [chooseSaveFileDestination, resolveNativeExportScope, saveFileJob]);
 
   const startNativeImport = useCallback(async (): Promise<void> => {
-    if (saveFileJob.active || saveFileLaunchRef.current) {
-      setShelfNotice({ kind: "warn", text: "已有存档文件任务正在进行，请等待当前任务结束" });
+    if (saveFileJob.active || saveFileLaunchRef.current || lanSaveActiveRef.current) {
+      setShelfNotice({ kind: "warn", text: "已有存档或互传任务正在进行，请等待当前任务结束" });
       return;
     }
     saveFileLaunchRef.current = true;
@@ -2008,6 +2009,7 @@ export default function App() {
     prepareSend: prepareLanSaveSend,
     onImportCommitted: applySaveFileCommitResult,
   });
+  lanSaveActiveRef.current = lanSaveSession.active;
 
   const handleSaveFileImportConfirm = useCallback(async (applyPreferences: boolean): Promise<void> => {
     if (saveFileJobStateRef.current.kind !== "prepared") return;
@@ -2020,6 +2022,8 @@ export default function App() {
   }, [applySaveFileCommitResult, saveFileJob]);
 
   const handleOpenLanSave = useCallback((selectedEntries?: ShelfEntry[]): void => {
+    if (lanSaveActiveRef.current) { setLanSaveOpen(true); return; }
+    if (saveFileJobStateRef.current.kind !== "idle" || saveFileLaunchRef.current || nativeImportRef.current) return;
     const selection = selectedEntries ?? [];
     lanSaveSelectionRef.current = selection;
     setLanSaveSelection(selection);

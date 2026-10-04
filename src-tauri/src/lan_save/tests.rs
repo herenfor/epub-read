@@ -649,3 +649,30 @@ async fn lan_partial_control_frame_survives_select_without_prefetch() {
     assert_eq!(second.session_id(), session_id);
     assert!(buffer.is_empty());
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn lan_shutdown_notifies_quiet_session_and_drains_before_retry() {
+    let host = TestApp::new("suspend-host");
+    let guest = TestApp::new("suspend-guest");
+    let hh = host.handle();
+    let gh = guest.handle();
+    let log = EventLog::default();
+    let session = start_host(&hh, Ipv4Addr::LOCALHOST, log.sink())
+        .await
+        .unwrap();
+    join(&gh, &session.pairing_info, Arc::new(|_| {}))
+        .await
+        .unwrap();
+    super::manager::shutdown(&hh);
+    let event = wait_event(&log, "closed", Duration::from_secs(2)).await;
+    assert_eq!(event.code.as_deref(), Some("cancelled"));
+    tokio::time::timeout(Duration::from_secs(2), close(&hh, &session.session_id))
+        .await
+        .unwrap()
+        .unwrap();
+    close(&gh, &session.session_id).await.unwrap();
+    let next = start_host(&hh, Ipv4Addr::LOCALHOST, Arc::new(|_| {}))
+        .await
+        .unwrap();
+    close(&hh, &next.session_id).await.unwrap();
+}
