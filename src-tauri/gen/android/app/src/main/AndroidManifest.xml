@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- CAMERA is declared for ZXing CaptureActivity but only requested when the user taps scan. -->
+    <!-- CAMERA is only requested by LanScanActivity after the user taps scan. -->
     <uses-permission android:name="android.permission.CAMERA" />
 
     <!-- Camera hardware is optional; scanner entry stays hidden/unavailable on devices without it. -->
@@ -28,6 +28,13 @@
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- LAN join QR scanner: follows the device orientation and owns its camera permission. -->
+        <activity
+          android:name=".LanScanActivity"
+          android:exported="false"
+          android:theme="@style/Theme.epub_reader"
+          android:screenOrientation="unspecified" />
 
         <provider
           android:name="androidx.core.content.FileProvider"

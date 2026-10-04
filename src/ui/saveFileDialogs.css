@@ -12,11 +12,12 @@
   width: min(520px, 100%);
   max-height: min(680px, calc(100vh - 32px));
   overflow: auto;
-  border: 1px solid var(--border, #d5dae1);
-  border-radius: 14px;
-  background: var(--surface, #fff);
-  color: var(--text, #1d2129);
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.28);
+  border: 1px solid var(--panel-border);
+  border-radius: 22px;
+  background: var(--panel-bg);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.28);
 }
 
 .save-file-dialog-head {
@@ -31,7 +32,7 @@
 .save-file-dialog-head p,
 .save-file-muted {
   margin: 0;
-  color: var(--text-muted, #68717d);
+  color: var(--muted);
   font-size: 13px;
   line-height: 1.55;
 }
@@ -47,13 +48,13 @@
   gap: 8px;
   margin: 0;
   padding: 12px 14px;
-  border: 1px solid var(--border, #d5dae1);
+  border: 1px solid var(--panel-border);
   border-radius: 10px;
 }
 
 .save-file-fieldset legend {
   padding: 0 4px;
-  color: var(--text-muted, #68717d);
+  color: var(--muted);
   font-size: 12px;
 }
 
@@ -87,11 +88,11 @@
 .save-file-summary > div {
   padding: 9px 10px;
   border-radius: 9px;
-  background: rgba(127, 140, 158, 0.1);
+  background: var(--shelf-input-bg);
 }
 
 .save-file-summary dt {
-  color: var(--text-muted, #68717d);
+  color: var(--muted);
   font-size: 12px;
 }
 
@@ -106,25 +107,25 @@
   justify-content: flex-end;
   gap: 10px;
   padding: 12px 20px 18px;
-  border-top: 1px solid var(--border, #d5dae1);
+  border-top: 1px solid var(--panel-border);
 }
 
 .save-file-dialog-actions button,
 .save-file-progress button {
-  min-height: 38px;
-  padding: 7px 16px;
-  border: 1px solid var(--border, #d5dae1);
-  border-radius: 9px;
-  background: transparent;
+  min-height: 42px;
+  padding: 8px 18px;
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  background: var(--bg);
   color: inherit;
   font: inherit;
   cursor: pointer;
 }
 
 .save-file-dialog-actions button.primary {
-  border-color: var(--accent, #3b6fd4);
-  background: var(--accent, #3b6fd4);
-  color: #fff;
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-foreground);
 }
 
 .save-file-dialog-actions button:disabled,
@@ -142,10 +143,10 @@
   gap: 8px;
   width: min(340px, calc(100vw - 32px));
   padding: 14px 16px;
-  border: 1px solid var(--border, #d5dae1);
+  border: 1px solid var(--panel-border);
   border-radius: 12px;
-  background: var(--surface, #fff);
-  color: var(--text, #1d2129);
+  background: var(--panel-bg);
+  color: var(--fg);
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.2);
 }
 
@@ -156,7 +157,7 @@
 
 .save-file-progress-text {
   font-size: 13px;
-  color: var(--text-muted, #68717d);
+  color: var(--muted);
 }
 
 .save-file-progress-note {
