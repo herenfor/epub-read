@@ -60,6 +60,27 @@ This is a direct-dependency notice, not a complete Cargo.lock transitive
 license, copyright, NOTICE, SBOM, or target-platform audit; that audit remains
 explicitly deferred.
 
+### Android runtime (Android build only)
+
+The Android package additionally bundles the following Java/Kotlin libraries,
+resolved from the release runtime classpath. All of them are licensed under
+Apache-2.0, whose full text is in `third-party-licenses/Apache-2.0.txt`.
+
+| Component | Version | License | Source |
+|---|---:|---|---|
+| AndroidX (activity, annotation, appcompat, core, fragment, lifecycle, webkit and their transitive AndroidX modules) | webkit 1.14.0, appcompat 1.7.1, activity 1.10.1, lifecycle 2.10.0, core 1.13.1 | Apache-2.0 | https://developer.android.com/jetpack/androidx |
+| Material Components for Android | 1.13.0 | Apache-2.0 | https://github.com/material-components/material-components-android |
+| Kotlin standard library | 2.0.21 | Apache-2.0 | https://github.com/JetBrains/kotlin |
+| kotlinx.coroutines | 1.9.0 | Apache-2.0 | https://github.com/Kotlin/kotlinx.coroutines |
+| Jackson (core, annotations, databind) | 2.15.3 | Apache-2.0 | https://github.com/FasterXML/jackson |
+| JetBrains Java annotations | 23.0.0 | Apache-2.0 | https://github.com/JetBrains/java-annotations |
+| JSpecify | 1.0.0 | Apache-2.0 | https://github.com/jspecify/jspecify |
+| Guava ListenableFuture | 1.0 | Apache-2.0 | https://github.com/google/guava |
+| Error Prone annotations | 2.15.0 | Apache-2.0 | https://github.com/google/error-prone |
+
+The Tauri Android runtime (`tauri-android`) and the Android parts of the
+official dialog, fs and opener plugins are covered by the Tauri rows above.
+
 ### C-58B local embedding runtime (AI edition only)
 
 The AI edition adds a local ONNX embedding path. Core never enables the `ai`
@@ -149,6 +170,11 @@ from their respective LICENSE files:
 - **rustls / tokio-rustls / rcgen** — Copyright (c) 2016-2026 the rustls and rcgen contributors (Apache-2.0 OR ISC OR MIT / MIT OR Apache-2.0)
 - **ring** — Copyright (c) 2015-2026 Brian Smith and contributors (Apache-2.0 AND ISC)
 - **subtle** — Copyright (c) 2016-2026 Isis Lovecruft, Henry de Valence (BSD-3-Clause)
+- **AndroidX / Material Components for Android** — Copyright (c) The Android Open Source Project (Apache-2.0)
+- **Kotlin / kotlinx.coroutines / JetBrains Java annotations** — Copyright (c) JetBrains s.r.o. and Kotlin Programming Language contributors (Apache-2.0)
+- **Jackson** — Copyright (c) FasterXML, LLC (Apache-2.0)
+- **Guava / Error Prone** — Copyright (c) The Guava Authors / The Error Prone Authors (Apache-2.0)
+- **JSpecify** — Copyright (c) The JSpecify Authors (Apache-2.0)
 
 ## License texts
 
