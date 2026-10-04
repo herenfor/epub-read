@@ -13,7 +13,7 @@ use crate::portable_state::{
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Manager, Runtime, State};
 
 #[derive(Default)]
 pub struct PortableStateManager {
@@ -32,14 +32,16 @@ fn storage_error(message: impl Into<String>) -> PortableError {
     PortableError::storage_error(message)
 }
 
-fn data_root(app: &AppHandle) -> PortableResult<PathBuf> {
+fn data_root<R: Runtime>(app: &AppHandle<R>) -> PortableResult<PathBuf> {
     app.path()
         .app_local_data_dir()
         .map(|path| path.join("linked-library"))
         .map_err(|error| storage_error(format!("无法取得应用本地数据目录：{error}")))
 }
 
-fn open_and_activate(app: &AppHandle) -> PortableResult<(PortableStore, PortableActivationResult)> {
+fn open_and_activate<R: Runtime>(
+    app: &AppHandle<R>,
+) -> PortableResult<(PortableStore, PortableActivationResult)> {
     let root = data_root(app)?;
     let path = root.join("library.sqlite3");
     let mut store = PortableStore::open(&path)?;
@@ -95,11 +97,37 @@ fn open_and_activate(app: &AppHandle) -> PortableResult<(PortableStore, Portable
     }
 }
 
+pub(crate) fn activate_store<R: Runtime>(
+    app: &AppHandle<R>,
+) -> PortableResult<PortableActivationResult> {
+    let manager = app.state::<PortableStateManager>();
+    let mut guard = manager
+        .store
+        .lock()
+        .map_err(|_| storage_error("可移植资料仓储锁已损坏"))?;
+    if let Some(store) = guard.as_ref() {
+        let state = store.snapshot()?;
+        let annotations = state
+            .books
+            .values()
+            .map(|book| book.bookmarks.len() + book.notes.len())
+            .sum();
+        return Ok(PortableActivationResult {
+            status: "already-migrated".to_string(),
+            books: state.books.len(),
+            annotations,
+        });
+    }
+    let (store, result) = open_and_activate(app)?;
+    *guard = Some(store);
+    Ok(result)
+}
+
 /// Run `work` only when the one-time portable activation has already happened.
 /// Linked-library commands use this to keep the complete old JSON mode when the
 /// activation never succeeded.
-pub(crate) fn with_existing_store<T>(
-    app: &AppHandle,
+pub(crate) fn with_existing_store<R: Runtime, T>(
+    app: &AppHandle<R>,
     work: impl FnOnce(&mut PortableStore) -> PortableResult<T>,
 ) -> PortableResult<Option<T>> {
     let manager = app.state::<PortableStateManager>();
@@ -113,8 +141,8 @@ pub(crate) fn with_existing_store<T>(
     }
 }
 
-fn with_store<T>(
-    app: &AppHandle,
+fn with_store<R: Runtime, T>(
+    app: &AppHandle<R>,
     manager: &State<'_, PortableStateManager>,
     work: impl FnOnce(&mut PortableStore) -> PortableResult<T>,
 ) -> PortableResult<T> {
@@ -138,26 +166,8 @@ pub fn portable_state_activate(
     app: AppHandle,
     manager: State<'_, PortableStateManager>,
 ) -> PortableResult<PortableActivationResult> {
-    let mut guard = manager
-        .store
-        .lock()
-        .map_err(|_| storage_error("可移植资料仓储锁已损坏"))?;
-    if let Some(store) = guard.as_ref() {
-        let state = store.snapshot()?;
-        let annotations = state
-            .books
-            .values()
-            .map(|book| book.bookmarks.len() + book.notes.len())
-            .sum();
-        return Ok(PortableActivationResult {
-            status: "already-migrated".to_string(),
-            books: state.books.len(),
-            annotations,
-        });
-    }
-    let (store, result) = open_and_activate(&app)?;
-    *guard = Some(store);
-    Ok(result)
+    let _ = manager;
+    activate_store(&app)
 }
 
 #[tauri::command]
