@@ -12,6 +12,8 @@ export interface RuntimeCapabilities {
   supportsCacheStorage: boolean;
   /** Native folder picking is only offered on Windows in this package. */
   supportsCustomCacheDirectory: boolean;
+  /** Shared LAN save panel is delivered on Windows and Android only in this package. */
+  supportsLanTransfer: boolean;
 }
 
 export function getRuntimeCapabilities(): RuntimeCapabilities {
@@ -25,5 +27,6 @@ export function getRuntimeCapabilities(): RuntimeCapabilities {
     usesAndroidBack: platform === "android",
     supportsCacheStorage: platform === "windows" || platform === "android",
     supportsCustomCacheDirectory: platform === "windows",
+    supportsLanTransfer: platform === "windows" || platform === "android",
   };
 }
