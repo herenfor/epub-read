@@ -182,11 +182,30 @@ fn snapshot_books(app: &TestApp) -> BTreeMap<String, usize> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn lan_loopback_streams_archive_then_prepares_and_commits() {
+    for already_imported in [false, true] {
+        lan_cover_roundtrip(already_imported).await;
+    }
+}
+
+async fn lan_cover_roundtrip(already_imported: bool) {
     let sender = TestApp::new("sender");
     let receiver = TestApp::new("receiver");
-    let bytes = b"LAN integration epub bytes";
-    let content_hash = hex_digest(bytes);
-    seed_book(&sender, &content_hash, bytes);
+    let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    for (path, contents) in [
+    ("META-INF/container.xml", br#"<container><rootfiles><rootfile full-path="OPS/content.opf"/></rootfiles></container>"#.as_slice()),
+    ("OPS/content.opf", br#"<package><metadata><title>Cover test</title></metadata><manifest><item id="image" href="Images/cover.jpg" media-type="image/jpeg" properties="cover-image"/><item id="text" href="Text/chapter.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="text"/></spine></package>"#.as_slice()),
+    ("OPS/Images/cover.jpg", b"exact cover entry bytes".as_slice()),
+    ("OPS/Text/chapter.xhtml", b"<html><body>Test</body></html>".as_slice()),
+] {
+    zip.start_file(path, zip::write::SimpleFileOptions::default()).unwrap();
+    std::io::Write::write_all(&mut zip, contents).unwrap();
+}
+    let bytes = zip.finish().unwrap().into_inner();
+    let content_hash = hex_digest(&bytes);
+    seed_book(&sender, &content_hash, &bytes);
+    if already_imported {
+        seed_book(&receiver, &content_hash, &bytes);
+    }
 
     let sender_handle = sender.handle();
     let receiver_handle = receiver.handle();
@@ -208,10 +227,9 @@ async fn lan_loopback_streams_archive_then_prepares_and_commits() {
     let session_id = host.session_id.clone();
     let send_handle = sender_handle.clone();
     let send_session = session_id.clone();
-    let send_task =
-        tokio::spawn(
-            async move { send(&send_handle, &send_session, SaveExportScope::All, true).await },
-        );
+    let send_task = tokio::spawn(async move {
+        send(&send_handle, &send_session, SaveExportScope::All, true).await
+    });
 
     let offered = wait_event(&join_log, "offered", Duration::from_secs(15)).await;
     let transfer_id = offered.transfer_id.clone().expect("offer transferId");
@@ -255,6 +273,17 @@ async fn lan_loopback_streams_archive_then_prepares_and_commits() {
         .join("books")
         .join(format!("{content_hash}.epub"));
     assert_eq!(std::fs::read(managed).unwrap(), bytes);
+    let raw = with_existing_store(&receiver_handle, |store| store.binding_raw(&content_hash))
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let binding: LocalBinding = serde_json::from_str(&raw).unwrap();
+    assert_eq!(
+        binding.cover_zip_path.as_deref(),
+        Some("OPS/Images/cover.jpg")
+    );
+    assert_eq!(binding.cover_mime, "image/jpeg");
+    assert_eq!(snapshot_books(&receiver).len(), 1);
     let _ = close(&receiver_handle, &session_id).await;
     let _ = close(&sender_handle, &session_id).await;
 }

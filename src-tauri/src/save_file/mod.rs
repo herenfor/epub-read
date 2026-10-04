@@ -340,6 +340,15 @@ fn default_storage_kind() -> String {
 }
 
 impl LocalBinding {
+    pub(crate) fn fill_cover_from_epub(&mut self, path: &Path) {
+        // Cover discovery is derived metadata, not a new archive admission rule.
+        // Keep the existing import semantics for books the OPF reader cannot inspect.
+        if let Ok((cover_zip_path, cover_mime)) = crate::linked_library::inspect_epub_cover(path) {
+            self.cover_zip_path = cover_zip_path;
+            self.cover_mime = cover_mime;
+        }
+    }
+
     pub(crate) fn new_managed(content_hash: &str, file_size: u64, source_mtime_ns: u64) -> Self {
         Self {
             content_hash: content_hash.to_string(),
