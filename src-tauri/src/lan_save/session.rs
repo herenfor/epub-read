@@ -336,6 +336,9 @@ impl LanSession {
                 .ok_or_else(|| LanSaveError::expired("等待对端控制消息超时"))?;
             let mut notified = Box::pin(self.notify.notified());
             notified.as_mut().enable();
+            if self.is_close_requested() {
+                return Err(LanSaveError::cancelled());
+            }
             if let Some(message) = self.take_matching(&predicate)? {
                 return Ok(message);
             }
@@ -438,10 +441,13 @@ impl LanSession {
 
     pub(crate) async fn wait_until_closed(&self) {
         loop {
+            let notified = self.notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
             if self.close_requested.load(Ordering::Acquire) {
                 return;
             }
-            self.notify.notified().await;
+            notified.await;
         }
     }
 
