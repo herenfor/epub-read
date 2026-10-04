@@ -140,7 +140,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
     setTimeout(() => {
       setIsClosing(false);
       onClose();
-    }, 150);
+    }, 250);
   }, [onClose]);
 
   // 滚动活动目录到视图中央

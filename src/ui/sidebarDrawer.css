@@ -6,7 +6,7 @@
   background: rgba(0, 0, 0, 0.38);
   backdrop-filter: blur(2px);
   -webkit-backdrop-filter: blur(2px);
-  animation: reader-panel-fade-in 0.16s ease forwards;
+  animation: reader-panel-fade-in 0.26s ease forwards;
   pointer-events: auto;
 }
 
@@ -38,7 +38,7 @@
   }
 }
 
-/* 150ms 优雅退场动画 */
+/* 250ms 优雅退场动画 */
 @keyframes panel-float-out-left {
   from {
     opacity: 1;
@@ -67,15 +67,15 @@
 }
 
 .sidebar-backdrop.is-closing {
-  animation: reader-panel-fade-out 0.15s ease forwards;
+  animation: reader-panel-fade-out 0.25s ease forwards;
 }
 
 .sidebar-drawer.side-left.is-closing {
-  animation: panel-float-out-left 0.15s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  animation: panel-float-out-left 0.25s cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 
 .sidebar-drawer.side-right.is-closing {
-  animation: panel-float-out-right 0.15s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  animation: panel-float-out-right 0.25s cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 
 .sidebar-drawer {
@@ -110,13 +110,13 @@
 .sidebar-drawer.is-overlay.side-left {
   left: 14px;
   right: auto;
-  animation: panel-float-from-left 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: panel-float-from-left 0.32s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .sidebar-drawer.is-overlay.side-right {
   right: 14px;
   left: auto;
-  animation: panel-float-from-right 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: panel-float-from-right 0.32s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .sidebar-drawer.is-overlay.is-closed {
@@ -141,7 +141,7 @@
   border-top: none;
   border-bottom: none;
   border-radius: 0 16px 16px 0;
-  animation: panel-float-from-left 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: panel-float-from-left 0.32s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .sidebar-drawer.is-docked.side-right {
@@ -152,7 +152,7 @@
   border-top: none;
   border-bottom: none;
   border-radius: 16px 0 0 16px;
-  animation: panel-float-from-right 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: panel-float-from-right 0.32s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .sidebar-drawer.is-docked.is-closed {

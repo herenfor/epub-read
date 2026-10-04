@@ -4343,7 +4343,7 @@ select option {
   color: var(--fg);
   box-shadow: 0 28px 72px rgba(0, 0, 0, 0.38), 0 8px 24px rgba(0, 0, 0, 0.16);
   opacity: 1;
-  animation: spotlight-zoom-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: spotlight-zoom-in 0.32s cubic-bezier(0.16, 1, 0.3, 1);
   pointer-events: auto;
   overflow: hidden;
   box-sizing: border-box;
@@ -7001,12 +7001,12 @@ select option {
 /* ---- 触摸端阅读面板：去掉整屏毛玻璃，字体面板置于遮罩之上并按设备成形 ---- */
 /* 遮罩保留毛玻璃；排版面板关闭时遮罩与面板同步淡出，避免面板退场后整屏亮度骤变。 */
 .menu-backdrop {
-  animation-duration: 240ms;
+  animation-duration: 340ms;
   animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .app:has(.aa-popover.is-closing) .menu-backdrop {
-  animation: reader-panel-fade-out 200ms ease forwards;
+  animation: reader-panel-fade-out 300ms ease forwards;
   pointer-events: none;
 }
 
@@ -7031,7 +7031,7 @@ select option {
   max-height: none !important;
   border-radius: 16px 16px 0 0 !important;
   transform: none !important;
-  animation: aaMobileSheetIn 200ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+  animation: aaMobileSheetIn 300ms cubic-bezier(0.16, 1, 0.3, 1) !important;
   padding-bottom: 12px;
 }
 
@@ -7070,4 +7070,317 @@ select option {
   border-radius: 10px;
   font-size: 15px;
   line-height: 48px;
+}
+
+/* ---- 触摸端目录抽屉：分段标签不溢出头部，正文字号放大；手机改为左侧浮岛不占满全屏 ---- */
+/* 通用触摸按钮 48px 下限会把 24px 分段标签撑出 40/52px 固定头部，头部改为随内容增高。 */
+.app[data-touch-ui="true"] .sidebar-drawer .sidebar-header {
+  height: auto;
+  min-height: 56px;
+  padding: 6px 6px 6px 12px;
+}
+
+.app[data-touch-ui="true"] .sidebar-drawer .sidebar-tabs {
+  padding: 3px;
+  border-radius: 10px;
+}
+
+.app[data-touch-ui="true"] .sidebar-drawer .sidebar-tab {
+  height: 40px;
+  min-height: 40px;
+  border-radius: 8px;
+  font-size: 14.5px;
+}
+
+.app[data-touch-ui="true"] .sidebar-drawer .sidebar-toc-filter-wrap {
+  position: sticky;
+  top: -8px;
+  z-index: 2;
+  margin-top: -8px;
+  padding: 10px 12px 8px;
+  background: var(--panel-bg);
+}
+
+.app[data-touch-ui="true"] .sidebar-drawer .sidebar-toc-filter-input {
+  height: 42px;
+  border-radius: 10px;
+  padding: 0 44px 0 12px;
+  font-size: 15px;
+}
+
+.app[data-touch-ui="true"] .sidebar-drawer .sidebar-toc-filter-clear {
+  right: 12px;
+}
+
+.app[data-touch-ui="true"] .sidebar-drawer .sidebar-toc-item {
+  min-height: 46px;
+  box-sizing: border-box;
+  padding-top: 10px;
+  padding-bottom: 10px;
+  padding-right: 16px;
+  font-size: 15.5px;
+  line-height: 1.45;
+}
+
+.app[data-touch-ui="true"] .sidebar-drawer .sidebar-toc-item.level-1 {
+  font-size: 15px;
+}
+
+.app[data-touch-ui="true"] .sidebar-drawer .sidebar-toc-item.level-2,
+.app[data-touch-ui="true"] .sidebar-drawer .sidebar-toc-item.level-3 {
+  font-size: 14.5px;
+}
+
+.app[data-touch-ui="true"] .sidebar-drawer .sidebar-empty {
+  font-size: 15px;
+}
+
+.app[data-touch-ui="true"] .sidebar-drawer .sidebar-empty-tip {
+  font-size: 13px;
+}
+
+.app[data-touch-ui="true"] .sidebar-drawer .sidebar-bookmark-list,
+.app[data-touch-ui="true"] .sidebar-drawer .sidebar-notes-list {
+  padding: 0 10px;
+}
+
+.app[data-touch-ui="true"] .sidebar-drawer .sidebar-bookmark-card {
+  padding: 12px 52px 12px 12px;
+  border-radius: 10px;
+}
+
+.app[data-touch-ui="true"] .sidebar-drawer .sidebar-bookmark-text {
+  font-size: 15px;
+}
+
+.app[data-touch-ui="true"] .sidebar-drawer .sidebar-bookmark-chapter {
+  font-size: 13px;
+}
+
+/* 触摸无 hover，删除键常显。 */
+.app[data-touch-ui="true"] .sidebar-drawer .sidebar-bookmark-del-btn {
+  width: 44px;
+  height: 44px;
+  right: 4px;
+  opacity: 0.7;
+}
+
+.app[data-touch-ui="true"] .sidebar-drawer .sidebar-note-card {
+  padding: 12px;
+  border-radius: 10px;
+}
+
+.app[data-touch-ui="true"] .sidebar-drawer .sidebar-note-content {
+  font-size: 15px;
+}
+
+.app[data-touch-ui="true"] .sidebar-drawer .sidebar-note-meta {
+  font-size: 12.5px;
+}
+
+.app[data-touch-ui="true"] .sidebar-drawer .sidebar-note-selection {
+  font-size: 13.5px;
+}
+
+.app[data-touch-ui="true"] .sidebar-drawer .sidebar-note-act,
+.app[data-touch-ui="true"] .sidebar-drawer .sidebar-note-confirm {
+  font-size: 13.5px;
+}
+
+.app[data-touch-ui="true"] .sidebar-drawer .sidebar-note-act {
+  min-height: 40px;
+  padding: 0 12px;
+}
+
+/* 手机：与平板同一左侧浮岛语言，右侧留出遮罩可点关闭。 */
+.app[data-mobile-chrome="true"] .sidebar-drawer.is-compact.is-overlay {
+  top: calc(env(safe-area-inset-top, 0px) + 8px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
+  left: 8px;
+  right: auto;
+  width: min(340px, calc(100vw - 52px));
+  border: 1px solid var(--panel-border);
+  border-radius: 18px;
+  overflow: hidden;
+}
+
+/* ---- 触摸端正文搜索：内容整体滚动，索引卡片不再把输入框与下拉挤出面板 ---- */
+.app[data-mobile-chrome="true"] .search-panel {
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 16px 16px;
+  gap: 12px;
+}
+
+.app[data-mobile-chrome="true"] .search-panel > .search-head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  margin: 0 -16px;
+  padding: 6px 8px 6px 18px;
+}
+
+.app[data-mobile-chrome="true"] .search-panel .search-title {
+  font-size: 17px;
+}
+
+.app[data-mobile-chrome="true"] .search-panel .search-head .tb-close {
+  width: 44px;
+  height: 44px;
+}
+
+.app[data-mobile-chrome="true"] .search-panel .search-scope {
+  flex: none;
+  padding: 3px;
+  border-radius: 12px;
+}
+
+.app[data-mobile-chrome="true"] .search-panel .search-scope button {
+  min-height: 44px;
+  padding: 0 10px;
+  border-radius: 9px;
+  font-size: 15px;
+}
+
+.app[data-mobile-chrome="true"] .search-panel .search-index-actions {
+  flex: none;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 0;
+}
+
+.app[data-mobile-chrome="true"] .search-panel .search-index-actions button {
+  height: 44px;
+  min-height: 44px;
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+.app[data-mobile-chrome="true"] .search-panel .search-index-card {
+  padding: 14px;
+  border-radius: 14px;
+  font-size: 13.5px;
+  text-align: left;
+}
+
+.app[data-mobile-chrome="true"] .search-panel .search-index-card-title {
+  font-size: 15.5px;
+}
+
+.app[data-mobile-chrome="true"] .search-panel .search-index-card-notice {
+  font-size: 13.5px;
+}
+
+.app[data-mobile-chrome="true"] .search-panel .search-index-stats span {
+  font-size: 12.5px;
+}
+
+.app[data-mobile-chrome="true"] .search-panel .search-index-stats strong {
+  font-size: 18px;
+}
+
+/* 标签 + 下拉同一行且下拉占满余宽；处理器提示独占一行左对齐。 */
+.app[data-mobile-chrome="true"] .search-panel .search-index-concurrency {
+  gap: 8px 10px;
+  font-size: 13.5px;
+}
+
+.app[data-mobile-chrome="true"] .search-panel .search-concurrency-select-wrap {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+
+.app[data-mobile-chrome="true"] .search-panel .search-concurrency-select-wrap .shelf-select-btn {
+  width: 100%;
+  min-height: 44px;
+  font-size: 14.5px;
+}
+
+.app[data-mobile-chrome="true"] .search-panel .search-concurrency-select-wrap .shelf-select-option {
+  min-height: 44px;
+  font-size: 14.5px;
+}
+
+.app[data-mobile-chrome="true"] .search-panel .search-index-stepper {
+  height: 44px;
+}
+
+.app[data-mobile-chrome="true"] .search-panel .search-index-stepper-btn {
+  width: 44px;
+  min-height: 0;
+  font-size: 18px;
+}
+
+.app[data-mobile-chrome="true"] .search-panel .search-index-stepper input {
+  font-size: 15px;
+}
+
+.app[data-mobile-chrome="true"] .search-panel .search-index-cores-chip {
+  margin-left: 0;
+  font-size: 12.5px;
+}
+
+.app[data-mobile-chrome="true"] .search-panel .search-index-concurrency-help {
+  font-size: 12.5px;
+}
+
+.app[data-mobile-chrome="true"] .search-panel .search-index-card-actions button {
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 10px;
+  font-size: 14.5px;
+}
+
+.app[data-mobile-chrome="true"] .search-panel .search-input {
+  min-height: 46px;
+  border-radius: 10px;
+  font-size: 16px;
+}
+
+.app[data-mobile-chrome="true"] .search-panel .search-status {
+  font-size: 13px;
+}
+
+.app[data-mobile-chrome="true"] .search-panel .search-empty {
+  font-size: 14.5px;
+}
+
+/* 结果随面板一起滚动，避免小屏里出现两层滚动区。 */
+.app[data-mobile-chrome="true"] .search-panel .search-results {
+  flex: none;
+  overflow: visible;
+}
+
+.app[data-mobile-chrome="true"] .search-panel .search-result-book,
+.app[data-mobile-chrome="true"] .search-panel .search-result-chapter {
+  font-size: 12.5px;
+}
+
+.app[data-mobile-chrome="true"] .search-panel .search-result-snippet {
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+/* 手机：底部大面板，几乎占满可视高度；拖动居中位移不适用。 */
+.app[data-mobile-chrome="true"][data-layout="compact"] .search-panel {
+  top: auto;
+  left: 0;
+  right: 0;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + var(--ime-bottom, 0px));
+  width: auto;
+  height: min(92vh, calc(var(--visual-viewport-height, 100vh) - env(safe-area-inset-top, 0px) - 12px));
+  max-height: none;
+  border-radius: 20px 20px 0 0;
+  border-bottom: none;
+  transform: none !important;
+  animation: aaMobileSheetIn 360ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.app[data-mobile-chrome="true"] .search-panel {
+  scrollbar-width: none;
+}
+
+.app[data-mobile-chrome="true"] .search-panel::-webkit-scrollbar {
+  display: none;
 }
