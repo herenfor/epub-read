@@ -135,6 +135,40 @@ pub(crate) fn database_path(app_data_dir: impl AsRef<Path>) -> PathBuf {
 /// Open the metadata database and, when a pre-split cache database is present,
 /// import the legacy model tables once.  `legacy_available` is true only while
 /// the cache database is still at an old schema that can be used as a source.
+/// Inspect whether a metadata database is already initialized and carries the
+/// completion marker, without importing from a legacy cache.  A missing file or
+/// `user_version = 0` is simply not ready; a future/corrupt schema is an error
+/// so callers do not silently rebuild over it.
+pub(crate) fn is_ready(metadata_path: &Path) -> Result<bool, String> {
+    if !metadata_path.exists() {
+        return Ok(false);
+    }
+    let metadata = Connection::open(metadata_path)
+        .map_err(|error| format!("无法打开 AI 持久配置数据库：{error}"))?;
+    let version = user_version(&metadata)?;
+    if version > METADATA_SCHEMA_VERSION {
+        return Err(format!(
+            "AI metadata 数据库版本 {version} 高于当前支持的版本 {METADATA_SCHEMA_VERSION}"
+        ));
+    }
+    if version == 0 {
+        return Ok(false);
+    }
+    let marker: Option<u32> = metadata
+        .query_row(
+            "SELECT version FROM store_components WHERE id = ?1",
+            [LEGACY_METADATA_MARKER],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| format!("读取 AI metadata 完成标记失败：{error}"))?;
+    match marker {
+        Some(LEGACY_METADATA_MARKER_VERSION) => Ok(true),
+        Some(other) => Err(format!("不支持的 AI metadata 完成标记版本：{other}")),
+        None => Err("AI metadata 数据库缺少完成标记，拒绝从缓存库重新导入".into()),
+    }
+}
+
 pub(crate) fn open(
     metadata_path: &Path,
     legacy: &mut Connection,
@@ -506,6 +540,55 @@ mod tests {
             Some("new-models")
         );
         assert_eq!(store.status().unwrap().model_packages, 1);
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn custom_cache_open_bootstraps_old_default_metadata_before_new_cache() {
+        let root = temp_root("cache-settings-custom-open");
+        drop(legacy_ai_v6_fixture(&root));
+        let custom = root
+            .join("chosen-root")
+            .join("dev.epubreader.ai")
+            .join("reader-cache-v1");
+
+        let store = AiStore::open_with_cache_directory(&root, &custom).unwrap();
+        assert!(custom.join("ai.sqlite3").is_file());
+        assert!(database_path(&root).is_file());
+        assert_eq!(store.status().unwrap().provider_models, 1);
+        assert_eq!(store.status().unwrap().model_packages, 1);
+
+        let old_cache = Connection::open(AiStore::database_path(&root)).unwrap();
+        assert!(!table_exists(&old_cache, "provider_models"));
+        assert!(!table_exists(&old_cache, "model_packages"));
+        drop(old_cache);
+
+        store.insert_book_for_test(&"b".repeat(64)).unwrap();
+        store.clear_all_indexes().unwrap();
+        let status = store.status().unwrap();
+        assert_eq!(status.books, 0);
+        assert_eq!(status.provider_models, 1);
+        assert_eq!(status.model_packages, 1);
+
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn custom_cache_fresh_install_creates_both_databases() {
+        let root = temp_root("cache-settings-fresh-custom");
+        let custom = root
+            .join("chosen-root")
+            .join("dev.epubreader.ai")
+            .join("reader-cache-v1");
+
+        let store = AiStore::open_with_cache_directory(&root, &custom).unwrap();
+        assert!(custom.join("ai.sqlite3").is_file());
+        assert!(database_path(&root).is_file());
+        assert_eq!(store.status().unwrap().provider_models, 0);
+        assert_eq!(store.status().unwrap().model_packages, 0);
+
         drop(store);
         std::fs::remove_dir_all(root).unwrap();
     }

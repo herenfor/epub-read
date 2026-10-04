@@ -1013,7 +1013,7 @@ fn load_thumbnail_index(app: &AppHandle) -> Result<ThumbnailIndex, String> {
     load_json_or_default(&thumbnails_index_path(app)?, "缩略图索引")
 }
 
-fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> Result<(), String> {
+pub(crate) fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let parent = path
         .parent()
         .ok_or_else(|| "缓存路径没有父目录".to_string())?;
