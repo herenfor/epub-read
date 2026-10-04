@@ -58,8 +58,12 @@ describe("normalizePageOptions", () => {
   });
 
   it("reports the legacy em auto margins used by the panel display", () => {
-    expect(autoPageMarginsPx(20)).toEqual({ top: 44, bottom: 32 });
-    expect(autoPageMarginsPx(16)).toEqual({ top: 35, bottom: 26 });
+    expect(autoPageMarginsPx(20)).toEqual({ top: 44, bottom: 32, left: 0, right: 0 });
+    expect(autoPageMarginsPx(16)).toEqual({ top: 35, bottom: 26, left: 0, right: 0 });
+    // 窄屏：左右约 1.25em（16–28px），上下略增。
+    expect(autoPageMarginsPx(16, true)).toEqual({ top: 42, bottom: 34, left: 20, right: 20 });
+    expect(autoPageMarginsPx(12, true).left).toBe(16);
+    expect(autoPageMarginsPx(30, true).left).toBe(28);
   });
 });
 

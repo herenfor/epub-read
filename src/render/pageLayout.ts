@@ -111,11 +111,32 @@ export function normalizePageOptions(input: unknown): NormalizedPageOptions {
   return result;
 }
 
-/** 面板显示“自动”时使用的上下留白（旧口径），四舍五入到整数 CSS px。 */
-export function autoPageMarginsPx(fontSizePx: number): { top: number; bottom: number } {
+/** 分页正文可用宽度低于此值（手机竖屏）时，“自动”边距改用窄屏口径。 */
+export const COMPACT_PAGE_WIDTH_PX = 600;
+
+/**
+ * 分页“自动”边距，四舍五入到整数 CSS px。宽屏沿用旧口径（上 2.2em、下 1.6em、
+ * 左右 0）；窄屏左右 0 会让正文贴住屏幕边缘，改为左右约 1.25em（16–28px），
+ * 上下同步略增，四边比例协调。
+ */
+export function autoPageMarginsPx(
+  fontSizePx: number,
+  compact = false,
+): { top: number; bottom: number; left: number; right: number } {
+  if (!compact) {
+    return {
+      top: Math.round(TEXT_MEASURE.vTopEm * fontSizePx),
+      bottom: Math.round(TEXT_MEASURE.vBottomEm * fontSizePx),
+      left: 0,
+      right: 0,
+    };
+  }
+  const side = Math.round(Math.min(28, Math.max(16, 1.25 * fontSizePx)));
   return {
-    top: Math.round(TEXT_MEASURE.vTopEm * fontSizePx),
-    bottom: Math.round(TEXT_MEASURE.vBottomEm * fontSizePx),
+    top: Math.round(TEXT_MEASURE.compactTopEm * fontSizePx),
+    bottom: Math.round(TEXT_MEASURE.compactBottomEm * fontSizePx),
+    left: side,
+    right: side,
   };
 }
 
