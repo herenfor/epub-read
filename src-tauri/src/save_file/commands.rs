@@ -818,11 +818,22 @@ pub(crate) fn run_commit<R: Runtime>(
             if task.cancelled.load(Ordering::Acquire) {
                 return Err(SaveFileError::cancelled());
             }
-            if local_bindings
+            if let Some(existing) = local_bindings
                 .get(&attachment.content_hash)
-                .map(|binding| binding.is_valid(&root))
-                .unwrap_or(false)
+                .filter(|binding| binding.is_valid(&root))
             {
+                // Re-importing an attachment repairs older coverless bindings
+                // without replacing the EPUB or recreating progress/annotations.
+                if existing.cover_zip_path.is_none() {
+                    let mut binding = existing.clone();
+                    binding.fill_cover_from_epub(&binding.source_path(&root)?);
+                    if binding.cover_zip_path.is_some() {
+                        let raw = serde_json::to_string(&binding).map_err(|error| {
+                            SaveFileError::storage_error(format!("设备绑定无法序列化：{error}"))
+                        })?;
+                        binding_rows.push((attachment.content_hash.clone(), raw));
+                    }
+                }
                 continue;
             }
             let target = managed_book_path(&root, &attachment.content_hash);
@@ -834,11 +845,12 @@ pub(crate) fn run_commit<R: Runtime>(
             }
             published_hashes.insert(attachment.content_hash.clone());
             let metadata = fs::metadata(&target)?;
-            let binding = LocalBinding::new_managed(
+            let mut binding = LocalBinding::new_managed(
                 &attachment.content_hash,
                 metadata.len(),
                 metadata_mtime_ns(&metadata),
             );
+            binding.fill_cover_from_epub(&target);
             let raw = serde_json::to_string(&binding).map_err(|error| {
                 SaveFileError::storage_error(format!("设备绑定无法序列化：{error}"))
             })?;

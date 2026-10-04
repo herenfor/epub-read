@@ -1786,6 +1786,12 @@ fn inspect_epub(path: &Path) -> Result<ImportedMetadata, String> {
     })
 }
 
+/// Derived local cover metadata; never part of portable book identity/state.
+pub(crate) fn inspect_epub_cover(path: &Path) -> Result<(Option<String>, String), String> {
+    let metadata = inspect_epub(path)?;
+    Ok((metadata.cover_zip_path, metadata.cover_mime))
+}
+
 fn binding_view(
     record: LinkedLibraryRecord,
     binding: Option<&DeviceBinding>,
