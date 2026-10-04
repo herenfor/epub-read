@@ -30,11 +30,21 @@ tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+getrandom = "0.3"
+subtle = "2.6"
+tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt", "sync", "time"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "ring"] }
+rustls = { version = "0.23", default-features = false, features = ["logging", "ring", "std"] }
+rcgen = { version = "0.14", default-features = false, features = ["ring"] }
 quick-xml = "0.41"
 zip = { version = "2.4", default-features = false, features = ["deflate"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 fs2 = { version = "0.4.3", optional = true }
 reqwest = { version = "0.13.4", default-features = false, features = ["blocking", "rustls"], optional = true }
+
+[dev-dependencies]
+tauri = { version = "2", features = ["test"] }
+tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt", "rt-multi-thread", "sync", "time"] }
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-single-instance = "2.4.3"

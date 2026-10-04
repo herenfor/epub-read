@@ -6,11 +6,12 @@ use super::{
     copy_reader_with_progress, managed_book_path, new_staging_dir, new_uuid, parse_bindings,
     valid_job_id, LocalBinding, MissingBook, PreparedImport, ProgressReporter, SaveExportScope,
     SaveFileCancelResult, SaveFileCommitResult, SaveFileError, SaveFileExportResult,
-    SaveFileLocation, SaveFilePrepareResult, SaveFileProgress,
+    SaveFileLocation, SaveFilePrepareResult, SaveFileProgress, SkippedBook,
 };
 use crate::linked_library::LinkedLibraryWriteState;
 use crate::portable_state::PortableStateV3;
 use crate::portable_state_commands::with_existing_store;
+use serde::Serialize;
 use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
@@ -18,7 +19,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use tauri::ipc::Channel;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, Runtime};
 
 #[derive(Default)]
 pub struct SaveFileManager {
@@ -34,7 +35,7 @@ enum TaskPhase {
 }
 
 #[derive(Debug)]
-struct FileTask {
+pub(crate) struct FileTask {
     job_id: String,
     cancelled: AtomicBool,
     published: AtomicBool,
@@ -56,14 +57,14 @@ impl FileTask {
     }
 }
 
-fn library_root(app: &AppHandle) -> Result<PathBuf, SaveFileError> {
+fn library_root<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, SaveFileError> {
     app.path()
         .app_local_data_dir()
         .map(|path| path.join("linked-library"))
         .map_err(|error| SaveFileError::storage_error(format!("无法取得应用本地数据目录：{error}")))
 }
 
-fn cache_staging_dir(app: &AppHandle) -> Result<PathBuf, SaveFileError> {
+fn cache_staging_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, SaveFileError> {
     let dir = app
         .path()
         .app_cache_dir()
@@ -77,7 +78,7 @@ fn lock_error() -> SaveFileError {
     SaveFileError::storage_error("存档文件任务锁已损坏")
 }
 
-fn reserve_job(app: &AppHandle, job_id: &str) -> Result<Arc<FileTask>, SaveFileError> {
+pub(crate) fn reserve_job<R: Runtime>(app: &AppHandle<R>, job_id: &str) -> Result<Arc<FileTask>, SaveFileError> {
     if !valid_job_id(job_id) {
         return Err(SaveFileError::invalid_request("jobId 必须是规范 UUID"));
     }
@@ -97,7 +98,7 @@ fn reserve_job(app: &AppHandle, job_id: &str) -> Result<Arc<FileTask>, SaveFileE
     Ok(task)
 }
 
-fn active_task(app: &AppHandle, job_id: &str) -> Result<Arc<FileTask>, SaveFileError> {
+pub(crate) fn active_task<R: Runtime>(app: &AppHandle<R>, job_id: &str) -> Result<Arc<FileTask>, SaveFileError> {
     let manager = app.state::<SaveFileManager>();
     let slot = manager.active.lock().map_err(|_| lock_error())?;
     slot.as_ref()
@@ -106,7 +107,7 @@ fn active_task(app: &AppHandle, job_id: &str) -> Result<Arc<FileTask>, SaveFileE
         .ok_or_else(SaveFileError::not_found)
 }
 
-fn clear_active(app: &AppHandle, task: &Arc<FileTask>) {
+fn clear_active<R: Runtime>(app: &AppHandle<R>, task: &Arc<FileTask>) {
     if let Some(manager) = app.try_state::<SaveFileManager>() {
         if let Ok(mut slot) = manager.active.lock() {
             if slot
@@ -120,7 +121,7 @@ fn clear_active(app: &AppHandle, task: &Arc<FileTask>) {
     }
 }
 
-fn finish_task(app: &AppHandle, task: &Arc<FileTask>) {
+pub(crate) fn finish_task<R: Runtime>(app: &AppHandle<R>, task: &Arc<FileTask>) {
     if let Ok(mut prepared) = task.prepared.lock() {
         *prepared = None;
     }
@@ -150,7 +151,7 @@ fn mark_prepared(task: &Arc<FileTask>, prepared: PreparedImport) -> bool {
     true
 }
 
-fn take_prepared_for_commit(task: &Arc<FileTask>) -> Result<PreparedImport, SaveFileError> {
+pub(crate) fn take_prepared_for_commit(task: &Arc<FileTask>) -> Result<PreparedImport, SaveFileError> {
     let mut phase = task.phase.lock().map_err(|_| lock_error())?;
     match *phase {
         TaskPhase::Prepared => {
@@ -180,7 +181,7 @@ fn begin_publication(task: &FileTask) -> Result<(), SaveFileError> {
     Ok(())
 }
 
-fn signal_android_cancel(app: &AppHandle, job_id: &str, cancelled: bool) {
+fn signal_android_cancel<R: Runtime>(app: &AppHandle<R>, job_id: &str, cancelled: bool) {
     #[cfg(target_os = "android")]
     {
         let _ = crate::android_uri_bridge::cancel_write_blocking(app, job_id, cancelled);
@@ -191,8 +192,12 @@ fn signal_android_cancel(app: &AppHandle, job_id: &str, cancelled: bool) {
     }
 }
 
-fn cancel_task(
-    app: &AppHandle,
+pub(crate) fn request_cancel_task(task: &Arc<FileTask>) {
+    task.cancelled.store(true, Ordering::Release);
+}
+
+pub(crate) fn cancel_task<R: Runtime>(
+    app: &AppHandle<R>,
     task: &Arc<FileTask>,
 ) -> Result<SaveFileCancelResult, SaveFileError> {
     let mut phase = task.phase.lock().map_err(|_| lock_error())?;
@@ -240,8 +245,8 @@ fn cancel_task(
     }
 }
 
-fn store_parts(
-    app: &AppHandle,
+fn store_parts<R: Runtime>(
+    app: &AppHandle<R>,
 ) -> Result<(PortableStateV3, std::collections::BTreeMap<String, String>), SaveFileError> {
     let result = with_existing_store(app, |store| {
         let snapshot = store.snapshot()?;
@@ -252,8 +257,8 @@ fn store_parts(
     result.ok_or_else(|| SaveFileError::storage_error("可移植资料仓储尚未激活"))
 }
 
-fn export_temp_path(
-    app: &AppHandle,
+fn export_temp_path<R: Runtime>(
+    app: &AppHandle<R>,
     destination: &SaveFileLocation,
     package_id: &str,
 ) -> Result<PathBuf, SaveFileError> {
@@ -430,6 +435,76 @@ fn run_export(
     })
 }
 
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LanExportOutput {
+    pub job_id: String,
+    pub package_id: String,
+    pub path: PathBuf,
+    pub archive_bytes: u64,
+    pub book_bytes: u64,
+    pub written_books: usize,
+    pub skipped_books: Vec<SkippedBook>,
+    pub book_count: usize,
+    pub has_preferences: bool,
+}
+
+/// LAN export adapter: writes the existing v3 file format to a backend-owned
+/// temporary destination. It deliberately does not call `begin_publication`
+/// or replace a user-selected system path; the LAN transfer still owns and
+/// cleans this file, while the same `FileTask` slot remains held through the
+/// later network result.
+pub(crate) fn run_lan_export<R: Runtime>(
+    app: AppHandle<R>,
+    task: Arc<FileTask>,
+    target: PathBuf,
+    scope: SaveExportScope,
+    include_books: bool,
+    on_progress: Channel<SaveFileProgress>,
+) -> Result<LanExportOutput, SaveFileError> {
+    let root = library_root(&app)?;
+    let (snapshot, raw_bindings) = store_parts(&app)?;
+    let bindings = parse_bindings(raw_bindings)?;
+    let (state, selected_hashes) = select_export_state(&snapshot, &scope)?;
+    let scope_kind = scope_kind(&scope).to_string();
+    let book_count = state.books.len();
+    let has_preferences = state.preferences.is_some();
+    let (plans, skipped_books) = plan_export_books(&root, &state, &bindings, include_books);
+
+    if task.cancelled.load(Ordering::Acquire) {
+        return Err(SaveFileError::cancelled());
+    }
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let package_id = new_uuid()?;
+    let mut reporter = ProgressReporter::new(on_progress, "preparing", None);
+    let stats = write_export_archive(
+        &target,
+        &package_id,
+        &state,
+        &plans,
+        &scope_kind,
+        &selected_hashes,
+        &mut reporter,
+        &task.cancelled,
+    )?;
+
+    Ok(LanExportOutput {
+        job_id: task.job_id.clone(),
+        package_id,
+        path: target,
+        archive_bytes: stats.archive_bytes,
+        book_bytes: stats.book_bytes,
+        written_books: stats.written_books,
+        skipped_books,
+        book_count,
+        has_preferences,
+    })
+}
+
 struct TempPathGuard(PathBuf);
 
 impl Drop for TempPathGuard {
@@ -438,8 +513,8 @@ impl Drop for TempPathGuard {
     }
 }
 
-fn run_prepare(
-    app: AppHandle,
+pub(crate) fn run_prepare<R: Runtime>(
+    app: AppHandle<R>,
     task: Arc<FileTask>,
     source: SaveFileLocation,
     on_progress: Channel<SaveFileProgress>,
@@ -455,8 +530,8 @@ fn run_prepare(
     }
 }
 
-fn prepare_into_staging(
-    app: &AppHandle,
+fn prepare_into_staging<R: Runtime>(
+    app: &AppHandle<R>,
     task: &Arc<FileTask>,
     source: &SaveFileLocation,
     staging_dir: &Path,
@@ -711,8 +786,8 @@ fn cleanup_published_targets(targets: &[PathBuf]) -> Result<(), SaveFileError> {
     }
 }
 
-fn run_commit(
-    app: AppHandle,
+pub(crate) fn run_commit<R: Runtime>(
+    app: AppHandle<R>,
     task: Arc<FileTask>,
     prepared: PreparedImport,
     apply_preferences: bool,

@@ -27,6 +27,12 @@ Each component remains subject to its respective license.
 | serde | 1.0.229 | MIT OR Apache-2.0 | https://github.com/serde-rs/serde |
 | serde_json | 1.0.151 | MIT OR Apache-2.0 | https://github.com/serde-rs/json |
 | sha2 | 0.10.9 | MIT OR Apache-2.0 | https://github.com/RustCrypto/hashes |
+| rustls | 0.23.43 | Apache-2.0 OR ISC OR MIT | https://github.com/rustls/rustls |
+| tokio-rustls | 0.26.4 | MIT OR Apache-2.0 | https://github.com/rustls/tokio-rustls |
+| rcgen | 0.14.10 | MIT OR Apache-2.0 | https://github.com/rustls/rcgen |
+| ring | 0.17.14 | Apache-2.0 AND ISC | https://github.com/briansmith/ring |
+| subtle | 2.6.1 | BSD-3-Clause | https://github.com/dalek-cryptography/subtle |
+| getrandom | 0.3.4 | MIT OR Apache-2.0 | https://github.com/rust-random/getrandom |
 | quick-xml | 0.41.0 | MIT | https://github.com/tafia/quick-xml |
 | zip | 2.4.2 | MIT | https://github.com/zip-rs/zip2 |
 | rusqlite | 0.32.1 | MIT | https://github.com/rusqlite/rusqlite |
@@ -140,6 +146,9 @@ from their respective LICENSE files:
 - **quick-xml** — Copyright (c) 2016 the quick-xml authors (MIT)
 - **zip** — Copyright (c) 2023 zip-rs team (MIT)
 - **rusqlite / libsqlite3-sys** — Copyright (c) 2014 The rusqlite developers (MIT)
+- **rustls / tokio-rustls / rcgen** — Copyright (c) 2016-2026 the rustls and rcgen contributors (Apache-2.0 OR ISC OR MIT / MIT OR Apache-2.0)
+- **ring** — Copyright (c) 2015-2026 Brian Smith and contributors (Apache-2.0 AND ISC)
+- **subtle** — Copyright (c) 2016-2026 Isis Lovecruft, Henry de Valence (BSD-3-Clause)
 
 ## License texts
 
