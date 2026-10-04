@@ -1,4 +1,4 @@
-package dev.epubreader.app
+package dev.herenfor.epubreader
 
 import android.app.Activity
 import android.content.BroadcastReceiver
