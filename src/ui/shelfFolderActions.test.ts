@@ -91,8 +91,10 @@ async function pressEnter(dom: Harness, element: Element): Promise<void> {
   element.dispatchEvent(event);
 }
 
+/** 卡片菜单通过 portal 挂到 document.body，只会同时打开一个，按文档查找即可。 */
 function cardMenu(dom: Harness, bookId: string): Element {
-  const menu = cardFor(dom, bookId).querySelector(".shelf-card-pop-menu");
+  cardFor(dom, bookId);
+  const menu = dom.container.ownerDocument.querySelector(".shelf-card-pop-menu");
   if (!menu) throw new Error(`menu is not open for: ${bookId}`);
   return menu as unknown as Element;
 }
