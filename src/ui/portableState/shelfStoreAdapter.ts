@@ -44,6 +44,8 @@ import { projectShelfEntriesFromState, projectShelfEntry } from "./projection";
 import { PortableStateError, type PortableAdoptSelection } from "./service";
 import type { PortableActivationResult, PortableMergeOptions, PortableStateDataService } from "./dataService";
 import type { ArchiveClient } from "../../core/selectiveArchive";
+import { OwnedProgressSessions, type ProgressLease } from "./ownedProgressSessions";
+import type { ProgressRuntimeStatus } from "./progressRuntimeGate";
 
 const HASH_RE = /^[0-9a-f]{64}$/;
 const TEXT_PROFILE = "visible-codepoints-no-whitespace-v1" as const;
@@ -237,15 +239,18 @@ interface ObservedAnnotationIds {
   notes: Set<string>;
 }
 
-interface ProgressReadingSession {
+interface ProgressReadingSessionValue {
+  bookHash: string;
   readId: string;
   basisId: string;
   chosenStamp: Stamp | null;
   invalid: boolean;
+  repositoryGeneration: string;
 }
 
 export class PortableShelfStore implements ShelfStore {
-  private readonly progressSessions = new Map<string, ProgressReadingSession>();
+  private readonly progressSessions = new OwnedProgressSessions<ProgressReadingSessionValue>();
+  private readonly compatibilityProgressLeases = new Map<string, ProgressLease>();
   private readonly observedAnnotationIds = new Map<string, ObservedAnnotationIds>();
 
   constructor(
@@ -429,61 +434,87 @@ export class PortableShelfStore implements ShelfStore {
     return this.currentProjectedEntry(hash);
   }
 
+  private async releaseProgressValue(value: ProgressReadingSessionValue): Promise<void> {
+    let firstError: unknown;
+    try {
+      await this.data.release({ basisId: value.basisId });
+    } catch (error) {
+      firstError = error;
+    }
+    try {
+      await this.data.release({ readId: value.readId });
+    } catch (error) {
+      if (firstError === undefined) firstError = error;
+    }
+    if (firstError !== undefined) throw firstError;
+  }
+
   /**
-   * B3: adopt the user-selected progress version (or explicit empty snapshot)
-   * against the same repository read that the App is using for restore. The
-   * readId/basisId stay paired until close or a stale invalidation.
+   * Prepare a candidate against one repository read/adopt pair. The caller
+   * owns it until activation; a failed operation closes only its candidate.
    */
-  async beginProgressSession(id: string, selection: PortableProgressSelection): Promise<void> {
+  async prepareProgressSession(
+    id: string,
+    selection: PortableProgressSelection,
+  ): Promise<ProgressLease> {
     const entry = await this.localEntryFor(id);
     if (!entry) throw new Error("书架中没有这本书");
     const hash = hashForLocalEntry(entry);
-    if (!hash) return;
-    await this.closeProgressSession(id).catch(() => undefined);
-    const read = await this.data.read({ bookHash: hash });
-    if (!read.book) {
-      await this.data.release({ readId: read.readId }).catch(() => undefined);
-      throw new Error("可移植资料库中没有这本书");
+    if (!hash) throw new Error("这本书尚未取得内容指纹，无法建立可移植阅读进度会话");
+    const status = await this.data.runtimeStatus();
+    if (!status.repositoryReady) {
+      throw new Error("阅读资料服务尚未就绪，请重试；书籍没有因此被删除");
     }
-    try {
-      const adopted = await this.data.adopt({
-        readId: read.readId,
-        entity: { bookHash: hash, kind: "progress" },
-        selection,
-      });
-      this.progressSessions.set(hash, {
-        readId: read.readId,
-        basisId: adopted.basisId,
-        chosenStamp: selection.kind === "chosen" ? selection.stamp : null,
-        invalid: false,
-      });
-    } catch (error) {
-      await this.data.release({ readId: read.readId }).catch(() => undefined);
-      throw error;
-    }
+    return this.progressSessions.prepare(id, async () => {
+      const read = await this.data.read({ bookHash: hash });
+      if (!read.book) {
+        await this.data.release({ readId: read.readId }).catch(() => undefined);
+        throw new Error("可移植资料库中没有这本书");
+      }
+      try {
+        const adopted = await this.data.adopt({
+          readId: read.readId,
+          entity: { bookHash: hash, kind: "progress" },
+          selection,
+        });
+        return {
+          bookHash: hash,
+          readId: read.readId,
+          basisId: adopted.basisId,
+          chosenStamp: selection.kind === "chosen" ? selection.stamp : null,
+          invalid: false,
+          repositoryGeneration: status.repositoryGeneration,
+        };
+      } catch (error) {
+        await this.data.release({ readId: read.readId }).catch(() => undefined);
+        throw error;
+      }
+    }, (value) => this.releaseProgressValue(value));
   }
 
-  async closeProgressSession(id: string): Promise<void> {
-    const entry = await this.localEntryFor(id);
-    const hash = hashForLocalEntry(entry ?? { id, contentHash: undefined });
-    if (!hash) return;
-    this.progressSessions.delete(hash);
-    this.observedAnnotationIds.delete(hash);
-    await this.data.release({ bookHash: hash }).catch(() => undefined);
+  activateProgressSession(lease: ProgressLease): void {
+    this.progressSessions.activate(lease);
   }
 
-  /**
-   * A stale sample cannot silently adopt the merged latest version. Re-adopt
-   * only the last version this session actually displayed/wrote; if that event
-   * is no longer a trustworthy frontier, mark the session invalid and require
-   * a real reopen/selection instead of confirming a background branch.
-   */
-  private async rebindProgressSessionAfterStale(
-    hash: string,
-    session: ProgressReadingSession,
-  ): Promise<void> {
+  progressSessionBookHash(lease: ProgressLease): string | undefined {
+    return this.progressSessions.payload(lease)?.bookHash;
+  }
+
+  progressSessionRepositoryGeneration(lease: ProgressLease): string | undefined {
+    return this.progressSessions.payload(lease)?.repositoryGeneration;
+  }
+
+  hasProgressSession(lease: ProgressLease): boolean {
+    return this.progressSessions.has(lease);
+  }
+
+  async closeProgressLease(lease: ProgressLease): Promise<void> {
+    await this.progressSessions.close(lease);
+  }
+
+  private async rebindProgressSessionValue(session: ProgressReadingSessionValue): Promise<void> {
     await this.data.release({ readId: session.readId }).catch(() => undefined);
-    const read = await this.data.read({ bookHash: hash });
+    const read = await this.data.read({ bookHash: session.bookHash });
     if (!read.book) {
       await this.data.release({ readId: read.readId }).catch(() => undefined);
       session.invalid = true;
@@ -495,12 +526,14 @@ export class PortableShelfStore implements ShelfStore {
     try {
       const adopted = await this.data.adopt({
         readId: read.readId,
-        entity: { bookHash: hash, kind: "progress" },
+        entity: { bookHash: session.bookHash, kind: "progress" },
         selection,
       });
       session.readId = read.readId;
       session.basisId = adopted.basisId;
       session.invalid = false;
+      const status = await this.data.runtimeStatus();
+      if (status.repositoryReady) session.repositoryGeneration = status.repositoryGeneration;
     } catch (error) {
       await this.data.release({ readId: read.readId }).catch(() => undefined);
       if (error instanceof PortableStateError &&
@@ -512,50 +545,68 @@ export class PortableShelfStore implements ShelfStore {
     }
   }
 
+  async rebindProgressSession(lease: ProgressLease): Promise<void> {
+    await this.progressSessions.run(lease, (session) => this.rebindProgressSessionValue(session));
+  }
+
+  async updateProgressForSession(lease: ProgressLease, patch: ShelfProgressPatch): Promise<ShelfEntry> {
+    return this.progressSessions.run(lease, async (session) => {
+      if (session.invalid) {
+        throw new PortableStateError("stale-basis", "进度基线已过期，请关闭并重新打开书籍");
+      }
+      const value = progressValueFromPatch(patch);
+      const updatedAtMs = Math.max(patch.lastReadAtMs, Date.now());
+      try {
+        const basisId = session.basisId;
+        const result = await this.data.write({
+          basisId,
+          intent: "auto",
+          value,
+          updatedAtMs,
+        });
+        session.basisId = result.nextBasisId;
+        if (result.status === "written") {
+          // Keep the version we actually wrote as the displayed session basis.
+          const written = latestVersion(result.state.versions as readonly Version<ProgressValue>[]);
+          if (written) session.chosenStamp = written.stamp;
+        }
+        return this.currentProjectedEntry(session.bookHash);
+      } catch (error) {
+        if (
+          error instanceof PortableStateError &&
+          (error.code === "stale-basis" || error.code === "stale-choice")
+        ) {
+          await this.data.release({ basisId: session.basisId }).catch(() => undefined);
+          await this.rebindProgressSessionValue(session);
+          return this.currentProjectedEntry(session.bookHash);
+        }
+        throw error;
+      }
+    });
+  }
+
+  /** Compatibility wrapper for callers that still use book IDs internally. */
+  async beginProgressSession(id: string, selection: PortableProgressSelection): Promise<void> {
+    const lease = await this.prepareProgressSession(id, selection);
+    this.activateProgressSession(lease);
+    this.compatibilityProgressLeases.set(id, lease);
+  }
+
+  async closeProgressSession(id: string): Promise<void> {
+    const lease = this.compatibilityProgressLeases.get(id);
+    if (!lease) return;
+    this.compatibilityProgressLeases.delete(id);
+    await this.closeProgressLease(lease);
+  }
+
   async updateProgress(id: string, patch: ShelfProgressPatch): Promise<ShelfEntry> {
+    const lease = this.compatibilityProgressLeases.get(id);
+    if (lease) return this.updateProgressForSession(lease, patch);
     const entry = await this.localEntryFor(id);
     if (!entry) throw new Error("书架中没有这本书");
     const hash = hashForLocalEntry(entry);
-    if (!hash) {
-      // Pending-hash legacy rows cannot enter v3; keep the existing local
-      // progress path until lazy hashing supplies identity.
-      return this.legacy.updateProgress(id, patch);
-    }
-    const session = this.progressSessions.get(hash);
-    if (!session) throw new Error("阅读进度会话未开始");
-    if (session.invalid) {
-      throw new PortableStateError("stale-basis", "进度基线已过期，请关闭并重新打开书籍");
-    }
-
-    const value = progressValueFromPatch(patch);
-    const updatedAtMs = Math.max(patch.lastReadAtMs, Date.now());
-    try {
-      const basisId = session.basisId;
-      const result = await this.data.write({
-        basisId,
-        intent: "auto",
-        value,
-        updatedAtMs,
-      });
-      session.basisId = result.nextBasisId;
-      if (result.status === "written") {
-        // The projection can include a background merge after this write.
-        // Keep the version we actually wrote as the displayed session basis.
-        const written = latestVersion(result.state.versions as readonly Version<ProgressValue>[]);
-        if (written) session.chosenStamp = written.stamp;
-      }
-      return this.currentProjectedEntry(hash);
-    } catch (error) {
-      if (
-        error instanceof PortableStateError &&
-        (error.code === "stale-basis" || error.code === "stale-choice")
-      ) {
-        await this.data.release({ basisId: session.basisId }).catch(() => undefined);
-        await this.rebindProgressSessionAfterStale(hash, session);
-        return this.currentProjectedEntry(hash);
-      }
-      throw error;
-    }
+    if (!hash) return this.legacy.updateProgress(id, patch);
+    throw new Error("阅读进度会话未开始");
   }
 
   async markOpened(id: string): Promise<ShelfEntry> {
@@ -839,6 +890,10 @@ export class PortableShelfStore implements ShelfStore {
       for (const id of ids) await this.legacy.deleteBook(id);
     }
     for (const hash of hashes) await this.data.setLocalVisible(hash, false).catch(() => undefined);
+  }
+
+  async runtimeStatus(): Promise<ProgressRuntimeStatus> {
+    return this.data.runtimeStatus();
   }
 
   async getOrganization(): Promise<LibraryOrganization> {

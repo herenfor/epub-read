@@ -113,6 +113,14 @@ export class TauriPortableStateService implements PortableStateDataService {
     }
   }
 
+  async runtimeStatus(): Promise<{ readonly repositoryGeneration: string; readonly repositoryReady: boolean }> {
+    try {
+      return await invoke<{ repositoryGeneration: string; repositoryReady: boolean }>("portable_state_runtime_status");
+    } catch (error) {
+      return nativeError(error);
+    }
+  }
+
   async activate(): Promise<PortableActivationResult> {
     try {
       return await invoke<PortableActivationResult>("portable_state_activate");

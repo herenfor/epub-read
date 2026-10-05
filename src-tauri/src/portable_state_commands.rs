@@ -28,6 +28,13 @@ pub struct PortableActivationResult {
     pub annotations: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PortableRuntimeStatus {
+    pub repository_generation: String,
+    pub repository_ready: bool,
+}
+
 fn storage_error(message: impl Into<String>) -> PortableError {
     PortableError::storage_error(message)
 }
@@ -168,6 +175,36 @@ pub fn portable_state_activate(
 ) -> PortableResult<PortableActivationResult> {
     let _ = manager;
     activate_store(&app)
+}
+
+fn runtime_status_for_manager(
+    manager: &PortableStateManager,
+) -> PortableResult<PortableRuntimeStatus> {
+    let guard = manager
+        .store
+        .lock()
+        .map_err(|_| storage_error("可移植资料仓储锁已损坏"))?;
+    let (repository_generation, repository_ready) = match guard.as_ref() {
+        Some(store) => (store.runtime_generation().to_string(), true),
+        // Do not activate, snapshot or migrate from a health check.
+        None => ("runtime-uninitialized".to_string(), false),
+    };
+    Ok(PortableRuntimeStatus {
+        repository_generation,
+        repository_ready,
+    })
+}
+
+#[tauri::command]
+pub async fn portable_state_runtime_status(
+    app: AppHandle,
+) -> PortableResult<PortableRuntimeStatus> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let manager = app.state::<PortableStateManager>();
+        runtime_status_for_manager(&manager)
+    })
+    .await
+    .map_err(|error| storage_error(format!("运行时状态检查线程失败：{error}")))?
 }
 
 #[tauri::command]
@@ -385,4 +422,32 @@ pub fn portable_state_reserve_stamps(
 ) -> PortableResult<serde_json::Value> {
     let stamp = with_store(&app, &manager, |store| store.reserve_stamps(count))?;
     to_value(&stamp)
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::portable_state::PortableStore;
+
+    #[test]
+    fn runtime_status_is_read_only_and_reports_store_generation() {
+        let manager = PortableStateManager::default();
+        let before = runtime_status_for_manager(&manager).unwrap();
+        assert!(!before.repository_ready);
+        assert_eq!(before.repository_generation, "runtime-uninitialized");
+
+        // Populate the manager exactly as activation would; the status check
+        // must then see the live repository without snapshotting it.
+        {
+            let mut guard = manager.store.lock().unwrap();
+            *guard = Some(PortableStore::open_in_memory().unwrap());
+        }
+        let after = runtime_status_for_manager(&manager).unwrap();
+        assert!(after.repository_ready);
+        assert!(!after.repository_generation.is_empty());
+        assert_ne!(after.repository_generation, "runtime-uninitialized");
+        // The test-only store remains present; no hidden activation replaced it.
+        assert!(manager.store.lock().unwrap().is_some());
+    }
 }

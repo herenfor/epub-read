@@ -110,6 +110,7 @@ import {
   readPortablePreferencesSnapshot,
   readingAnchorFromShelfEntry,
   shelfThumbnailProvider,
+  portableShelfStateActive,
   type Bookmark,
   type NoteEditContext,
   type PortableProgressSelection,
@@ -122,7 +123,10 @@ import {
   mergeShelfEntries,
   sha256Hex,
 } from "./ui/importBooks";
-import { ShelfProgressWriter } from "./ui/progressWriter";
+import { ScopedProgressWriter } from "./ui/progressWriter";
+import { ProgressRuntimeGate } from "./ui/portableState/progressRuntimeGate";
+import { LocalProgressCheckpoints, type LocalProgressCheckpoint } from "./ui/localProgressCheckpoint";
+import type { ProgressLease } from "./ui/portableState/ownedProgressSessions";
 import { currentChapterCharsRead } from "./ui/readingProgress";
 import {
   applyChapterCount,
@@ -359,6 +363,85 @@ function mergeProgressProjection(entry: ShelfEntry, written: ShelfEntry): ShelfE
         }
       : {}),
   } as ShelfEntry;
+}
+
+function parseLocalProgressCheckpoint(value: unknown): LocalProgressCheckpoint<ShelfProgressPatch> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("本机进度恢复记录格式无效");
+  }
+  const candidate = value as Record<string, unknown>;
+  if (
+    candidate.schemaVersion !== 1 ||
+    typeof candidate.checkpointId !== "string" ||
+    candidate.checkpointId.length === 0 ||
+    typeof candidate.bookHash !== "string" ||
+    candidate.bookHash.length === 0 ||
+    !Object.prototype.hasOwnProperty.call(candidate, "shownStamp") ||
+    !Object.prototype.hasOwnProperty.call(candidate, "patch")
+  ) {
+    throw new Error("本机进度恢复记录字段不完整");
+  }
+  const shown = candidate.shownStamp;
+  let shownStamp: LocalProgressCheckpoint<ShelfProgressPatch>["shownStamp"] = null;
+  if (shown !== null) {
+    if (
+      typeof shown !== "object" ||
+      typeof (shown as { deviceId?: unknown }).deviceId !== "string" ||
+      typeof (shown as { counter?: unknown }).counter !== "number" ||
+      !Number.isSafeInteger((shown as { counter: number }).counter)
+    ) {
+      throw new Error("本机进度恢复记录的选择戳无效");
+    }
+    shownStamp = {
+      deviceId: (shown as { deviceId: string }).deviceId,
+      counter: (shown as { counter: number }).counter,
+    };
+  }
+  const rawPatch = candidate.patch;
+  if (typeof rawPatch !== "object" || rawPatch === null || Array.isArray(rawPatch)) {
+    throw new Error("本机进度恢复记录的阅读位置无效");
+  }
+  const patch = rawPatch as Partial<ShelfProgressPatch>;
+  if (
+    typeof patch.lastReadAtMs !== "number" ||
+    !Number.isSafeInteger(patch.lastReadAtMs) ||
+    patch.lastReadAtMs < 0 ||
+    typeof patch.spineIndex !== "number" ||
+    !Number.isSafeInteger(patch.spineIndex) ||
+    typeof patch.page !== "number" ||
+    !Number.isSafeInteger(patch.page) ||
+    typeof patch.progressPct !== "number" ||
+    !Number.isFinite(patch.progressPct) ||
+    (patch.anchorIndex !== null && typeof patch.anchorIndex !== "number") ||
+    (patch.anchorRatio !== null && typeof patch.anchorRatio !== "number") ||
+    (patch.anchorTextOffset !== null && typeof patch.anchorTextOffset !== "number") ||
+    (patch.anchorTextSnippet !== null && typeof patch.anchorTextSnippet !== "string")
+  ) {
+    throw new Error("本机进度恢复记录的位置字段无效");
+  }
+  return {
+    schemaVersion: 1,
+    checkpointId: candidate.checkpointId,
+    bookHash: candidate.bookHash,
+    shownStamp,
+    patch: patch as ShelfProgressPatch,
+  };
+}
+
+function checkpointMatchesVersion(
+  checkpoint: LocalProgressCheckpoint<ShelfProgressPatch>,
+  version: Version<ProgressValue>,
+): boolean {
+  const projection = projectProgressVersion(version);
+  const patch = checkpoint.patch;
+  return (
+    projection.spineIndex === patch.spineIndex &&
+    projection.page === patch.page &&
+    projection.anchorIndex === patch.anchorIndex &&
+    projection.anchorRatio === patch.anchorRatio &&
+    projection.anchorTextOffset === patch.anchorTextOffset &&
+    (projection.anchorTextSnippet ?? null) === (patch.anchorTextSnippet ?? null)
+  );
 }
 
 function mergeNoteProjection(entry: ShelfEntry, written: ShelfEntry, fallback: ReaderNote[]): ShelfEntry {
@@ -648,6 +731,11 @@ export default function App() {
     candidates: readonly PortableProgressChoiceCandidate[];
   } | null>(null);
   const progressChoiceResolverRef = useRef<((stamp: Stamp | null) => void) | null>(null);
+  const [localCheckpointConflict, setLocalCheckpointConflict] = useState<{
+    title: string;
+    hasSynced: boolean;
+  } | null>(null);
+  const localCheckpointResolverRef = useRef<((choice: "local" | "synced" | null) => void) | null>(null);
   const [readerNotice, setReaderNotice] = useState<{
     kind: "ok" | "warn" | "error";
     text: string;
@@ -859,18 +947,84 @@ export default function App() {
   const libraryIndexSignature = shelfEntries
     .map((entry) => `${entry.id}:${entry.contentHash ?? ""}:${entry.available === false ? 0 : 1}`)
     .join("|");
-  const progressWriterRef = useRef<ShelfProgressWriter | null>(null);
+  const progressWriterRef = useRef<ScopedProgressWriter<ShelfProgressPatch> | null>(null);
   if (!progressWriterRef.current) {
-    progressWriterRef.current = new ShelfProgressWriter(async (id, patch) => {
-      const written = await getShelfStore().updateProgress(id, patch);
-      // A stale sample is dropped by the facade and resolves with the current
-      // projection; mirror that backend truth into the shelf UI so a discarded
-      // optimistic patch cannot become the next open's default position.
-      setShelfEntries((prev) =>
-        prev.map((entry) => entry.id === id ? mergeProgressProjection(entry, written) : entry)
-      );
+    // Exact-session lanes are registered per open; no book ID alone may flush
+    // or retire another book's unsaved sample.
+    progressWriterRef.current = new ScopedProgressWriter<ShelfProgressPatch>();
+  }
+  const activeProgressLeaseRef = useRef<ProgressLease | null>(null);
+  const progressRuntimeGateRef = useRef<ProgressRuntimeGate | null>(null);
+  if (!progressRuntimeGateRef.current) {
+    progressRuntimeGateRef.current = new ProgressRuntimeGate(async () => {
+      let store = getShelfStore();
+      // A foreground operation may run activation once, then re-check the real
+      // repository. Background/visible checks never migrate on every tick.
+      if (!store.runtimeStatus) {
+        try {
+          await activatePortableShelfState();
+        } catch {
+          /* keep the complete legacy mode and report via the fallback below */
+        }
+        store = getShelfStore();
+      }
+      if (!store.runtimeStatus) {
+        return { repositoryGeneration: "legacy", repositoryReady: true };
+      }
+      const status = await store.runtimeStatus();
+      if (status.repositoryReady) return status;
+      try {
+        await activatePortableShelfState();
+      } catch {
+        return status;
+      }
+      return (await getShelfStore().runtimeStatus?.()) ?? status;
     });
   }
+  const localCheckpointsRef = useRef<LocalProgressCheckpoints<ShelfProgressPatch> | null>(null);
+  if (!localCheckpointsRef.current) {
+    localCheckpointsRef.current = new LocalProgressCheckpoints(
+      window.localStorage,
+      parseLocalProgressCheckpoint,
+      () => (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function")
+        ? crypto.randomUUID()
+        : `progress-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    );
+  }
+  const lifecycleDiagnosticsRef = useRef<string[]>([]);
+  const firstSampleFailureRecordedRef = useRef(false);
+  const recordLifecycleDiagnostic = useCallback((
+    event: string,
+    detail: {
+      readonly stage?: string;
+      readonly result?: string;
+      readonly candidate?: boolean;
+      readonly repositoryGeneration?: string;
+      readonly errorCode?: string;
+    } = {},
+  ): void => {
+    const lease = activeProgressLeaseRef.current;
+    const store = getShelfStore();
+    const repositoryGeneration = detail.repositoryGeneration
+      ?? (lease ? store.progressSessionRepositoryGeneration?.(lease) : undefined)
+      ?? "unknown";
+    const line = JSON.stringify({
+      at: new Date().toISOString(),
+      event,
+      stage: detail.stage ?? null,
+      result: detail.result ?? null,
+      candidate: detail.candidate ?? false,
+      errorCode: detail.errorCode ?? null,
+      repositoryGeneration,
+      portableFacade: portableShelfStateActive(),
+      jsSession: sessionGenerationRef.current,
+      activeLease: Boolean(activeProgressLeaseRef.current),
+      shelfCount: shelfEntriesRef.current.length,
+    });
+    const lines = lifecycleDiagnosticsRef.current;
+    lines.push(line);
+    if (lines.length > 20) lines.splice(0, lines.length - 20);
+  }, []);
   /** 指针是否悬停在交互式浮层（脚注弹窗等）上：此时不响应翻页键/后续可扩展书签等 */
   const overlayHoverRef = useRef(false);
   const foregroundRef = useRef<ReaderForeground>({ kind: "none" });
@@ -1872,7 +2026,12 @@ export default function App() {
     try {
       await activatePortableShelfState();
       persistShelfProgressRef.current();
-      await progressWriterRef.current?.flush();
+      const laneIds = scopeChoice === "selected"
+        ? selectedEntries.map((entry) => entry.id)
+        : undefined;
+      const results = await progressWriterRef.current?.flushBooks(laneIds) ?? [];
+      const failed = results.find((result) => result.status === "failed");
+      if (failed?.status === "failed") throw failed.error;
     } catch (error) {
       throw new Error(`导出前保存阅读进度失败：${saveFileErrorMessage(error)}`);
     }
@@ -2270,6 +2429,9 @@ export default function App() {
           });
         }
       }
+      // Activation may change the repository instance behind the facade, so
+      // the first real open must not reuse a pre-activation cached check.
+      progressRuntimeGateRef.current?.invalidate();
       if (cancelled) return;
       const store = getShelfStore();
       store
@@ -2552,44 +2714,98 @@ export default function App() {
       if (shelfBusyRef.current) return;
       const originalEntry = shelfEntriesRef.current.find((e) => e.id === id);
       if (!originalEntry) return;
+      // A real health response, not an event or cached promise, gates opening.
+      try {
+        await progressRuntimeGateRef.current?.check();
+      } catch (error) {
+        setShelfNotice({ kind: "error", text: (error as Error).message });
+        return;
+      }
       // B3: bind a specific progress version even when there is only one
       // candidate. The same selection is adopted against the repository read
       // before the EPUB is parsed.
       let chosenProgressVersion: Version<ProgressValue> | null = null;
-      let progressSelection: PortableProgressSelection;
+      let progressSelection: PortableProgressSelection | null = null;
+      let checkpointAckPending: LocalProgressCheckpoint<ShelfProgressPatch> | null = null;
+      let checkpointPatchToRestore: LocalProgressCheckpoint<ShelfProgressPatch> | null = null;
       const progressVersions = portableProgressVersions(originalEntry);
-      if (progressVersions.length > 1) {
-        const candidates = [...progressVersions]
-          .sort((left, right) => compareStamp(left.stamp, right.stamp))
-          .map((version): PortableProgressChoiceCandidate => {
-            const projection = projectProgressVersion(version);
-            return {
-              stamp: version.stamp,
-              version,
-              chapterPath: projection.chapterPath,
-              spineIndex: projection.spineIndex,
-              progressPct: projection.value?.progressPctHint ?? 0,
-              updatedAtMs: version.updatedAtMs,
-            };
+      const checkpointBookHash = originalEntry.contentHash ?? id;
+      let checkpointForOpen: LocalProgressCheckpoint<ShelfProgressPatch> | null = null;
+      try {
+        checkpointForOpen = localCheckpointsRef.current?.peek(checkpointBookHash) ?? null;
+      } catch (error) {
+        setShelfNotice({ kind: "warn", text: `本机未确认阅读位置读取失败：${String(error)}` });
+      }
+      if (checkpointForOpen) {
+        const latest = latestVersion(progressVersions);
+        const shownVersion = checkpointForOpen.shownStamp
+          ? versionForStamp(progressVersions, checkpointForOpen.shownStamp)
+          : null;
+        if (latest && checkpointMatchesVersion(checkpointForOpen, latest)) {
+          chosenProgressVersion = latest;
+          progressSelection = { kind: "chosen", stamp: latest.stamp };
+          checkpointAckPending = checkpointForOpen;
+        } else if (shownVersion) {
+          // The version this checkpoint was displayed against is still valid.
+          chosenProgressVersion = shownVersion;
+          progressSelection = { kind: "chosen", stamp: shownVersion.stamp };
+          checkpointAckPending = checkpointForOpen;
+        } else {
+          const choice = await new Promise<"local" | "synced" | null>((resolve) => {
+            localCheckpointResolverRef.current = resolve;
+            setLocalCheckpointConflict({ title: originalEntry.title, hasSynced: !!latest });
           });
-        const selectedStamp = await new Promise<Stamp | null>((resolve) => {
-          progressChoiceResolverRef.current = resolve;
-          setProgressChoice({ title: originalEntry.title, candidates });
-        });
-        progressChoiceResolverRef.current = null;
-        setProgressChoice(null);
-        if (!selectedStamp) return;
-        chosenProgressVersion = versionForStamp(progressVersions, selectedStamp);
-        if (!chosenProgressVersion) {
-          setShelfNotice({ kind: "error", text: "所选进度版本已失效，请重新打开" });
-          return;
+          localCheckpointResolverRef.current = null;
+          setLocalCheckpointConflict(null);
+          if (!choice) return;
+          if (choice === "local") {
+            checkpointPatchToRestore = checkpointForOpen;
+            chosenProgressVersion = latest;
+            progressSelection = latest
+              ? { kind: "chosen", stamp: latest.stamp }
+              : { kind: "empty" };
+          } else {
+            setShelfNotice({
+              kind: "warn",
+              text: "已按同步位置打开；本机未确认阅读位置仍保留，待实际写入成功后确认。",
+            });
+          }
         }
-        progressSelection = { kind: "chosen", stamp: selectedStamp };
-      } else if (progressVersions.length === 1) {
-        chosenProgressVersion = progressVersions[0];
-        progressSelection = { kind: "chosen", stamp: progressVersions[0].stamp };
-      } else {
-        progressSelection = { kind: "empty" };
+      }
+      if (!progressSelection) {
+        if (progressVersions.length > 1) {
+          const candidates = [...progressVersions]
+            .sort((left, right) => compareStamp(left.stamp, right.stamp))
+            .map((version): PortableProgressChoiceCandidate => {
+              const projection = projectProgressVersion(version);
+              return {
+                stamp: version.stamp,
+                version,
+                chapterPath: projection.chapterPath,
+                spineIndex: projection.spineIndex,
+                progressPct: projection.value?.progressPctHint ?? 0,
+                updatedAtMs: version.updatedAtMs,
+              };
+            });
+          const selectedStamp = await new Promise<Stamp | null>((resolve) => {
+            progressChoiceResolverRef.current = resolve;
+            setProgressChoice({ title: originalEntry.title, candidates });
+          });
+          progressChoiceResolverRef.current = null;
+          setProgressChoice(null);
+          if (!selectedStamp) return;
+          chosenProgressVersion = versionForStamp(progressVersions, selectedStamp);
+          if (!chosenProgressVersion) {
+            setShelfNotice({ kind: "error", text: "所选进度版本已失效，请重新打开" });
+            return;
+          }
+          progressSelection = { kind: "chosen", stamp: selectedStamp };
+        } else if (progressVersions.length === 1) {
+          chosenProgressVersion = progressVersions[0];
+          progressSelection = { kind: "chosen", stamp: progressVersions[0].stamp };
+        } else {
+          progressSelection = { kind: "empty" };
+        }
       }
       shelfBusyRef.current = true;
       setShelfBusyMessage("正在打开书籍…");
@@ -2605,16 +2821,44 @@ export default function App() {
       let preciseRequestId: number | null = null;
       let unownedBook: Book | null = null;
       let unownedArchive: ArchiveClient | null = null;
+      let candidateLease: ProgressLease | null = null;
+      let candidateActivated = false;
       try {
-        // A new open is a new session even when the same book is reopened.
-        // Flush any prior session before resetting the immediate-write gate.
+        const store = getShelfStore();
+        const writer = progressWriterRef.current;
         persistShelfProgressRef.current();
-        await progressWriterRef.current?.flush();
-        const previousShelfId = currentShelfIdRef.current;
-        if (previousShelfId) {
-          await getShelfStore().closeProgressSession?.(previousShelfId).catch(() => undefined);
+        const previousLease = activeProgressLeaseRef.current;
+        const targetLane = writer?.current(id);
+        // Only flush the same-book lane here. A failed target lane is retained
+        // and blocks this book, but never blocks a different book.
+        if (targetLane) {
+          const saved = await writer!.flush(targetLane);
+          if (saved.status === "failed") {
+            throw new Error("这本书上次进度尚未保存，请重试后再打开");
+          }
+          writer!.retire(targetLane);
+          await store.closeProgressLease?.(targetLane);
+          if (activeProgressLeaseRef.current === targetLane) {
+            activeProgressLeaseRef.current = null;
+          }
         }
-        progressWriterRef.current?.beginSession(id);
+        // A different paused book may be flushed opportunistically; failure
+        // keeps its lane/lease/checkpoint and does not abort this open.
+        if (previousLease && previousLease !== targetLane && previousLease.bookId !== id) {
+          const saved = await writer!.flush(previousLease);
+          if (saved.status === "saved") {
+            writer!.retire(previousLease);
+            await store.closeProgressLease?.(previousLease);
+            if (activeProgressLeaseRef.current === previousLease) {
+              activeProgressLeaseRef.current = null;
+            }
+          } else {
+            setShelfNotice({
+              kind: "warn",
+              text: "上一本书进度未保存，已保留到下次重试；本次继续打开当前书。",
+            });
+          }
+        }
         let entry = originalEntry;
         if (entry.available === false) {
           if (runtime.platform === "android") {
@@ -2647,7 +2891,6 @@ export default function App() {
             );
           }
         }
-        const store = getShelfStore();
         const openArchive = runtime.platform === "android"
           ? store.openArchive?.bind(store)
           : undefined;
@@ -2666,8 +2909,11 @@ export default function App() {
             throw error;
           });
           unownedArchive = archive;
-          // B3: read/adopt the selected progress version before parsing/navigation.
-          if (store.beginProgressSession) {
+          // B3: prepare, but do not publish, the selected progress candidate.
+          candidateLease = store.prepareProgressSession
+            ? await store.prepareProgressSession(id, progressSelection)
+            : null;
+          if (!candidateLease && store.beginProgressSession) {
             await store.beginProgressSession(id, progressSelection);
           }
           b = await loadBookFromArchive(archive, { initialSpineIndex });
@@ -2687,8 +2933,11 @@ export default function App() {
             entry = await store.setContentHash(id, await sha256Hex(buf));
             setShelfEntries((prev) => prev.map((item) => item.id === id ? entry : item));
           }
-          // B3: read/adopt the selected progress version before parsing/navigation.
-          if (store.beginProgressSession) {
+          // B3: prepare, but do not publish, the selected progress candidate.
+          candidateLease = store.prepareProgressSession
+            ? await store.prepareProgressSession(id, progressSelection)
+            : null;
+          if (!candidateLease && store.beginProgressSession) {
             await store.beginProgressSession(id, progressSelection);
           }
           b = await loadBook(buf, { selective: true, initialSpineIndex });
@@ -2724,10 +2973,73 @@ export default function App() {
               anchorTextSnippet: searchTarget.textAnchor.snippet || null,
             },
           };
+        } else if (checkpointPatchToRestore) {
+          const patch = checkpointPatchToRestore.patch;
+          saved = savedProgressFromShelfEntry(b, {
+            ...entry,
+            spineIndex: patch.spineIndex,
+            page: patch.page,
+            anchorIndex: patch.anchorIndex,
+            anchorRatio: patch.anchorRatio,
+            anchorTextOffset: patch.anchorTextOffset,
+            anchorTextSnippet: patch.anchorTextSnippet,
+            mediaAnchor: patch.mediaAnchor ?? null,
+          } as ShelfEntry);
         } else if (chosenProgressVersion) {
           saved = savedProgressFromVersion(b, chosenProgressVersion);
         } else {
           saved = savedProgressFromShelfEntry(b, entry);
+        }
+        // Takeover: the parsed candidate is now published and its exact lease
+        // owns the writer lane. Failures before this point close only the candidate.
+        if (candidateLease) {
+          store.activateProgressSession?.(candidateLease);
+          const sessionBookHash = store.progressSessionBookHash?.(candidateLease) ?? (entry.contentHash ?? id);
+          let checkpointShownStamp = progressSelection.kind === "chosen" ? progressSelection.stamp : null;
+          const leaseForWriter = candidateLease;
+          progressWriterRef.current?.register(leaseForWriter, async (patch) => {
+            try {
+              const checkpoints = localCheckpointsRef.current;
+              let checkpointId: string | null = null;
+              if (checkpoints) {
+                // Local checkpoint is written before the native enqueue; a storage
+                // failure becomes an explicit save failure, not a silent promise.
+                try {
+                  const checkpoint = checkpoints.put(sessionBookHash, checkpointShownStamp, patch);
+                  checkpointId = checkpoint.checkpointId;
+                } catch (error) {
+                  showReaderNotice("本机未保存位置无法写入，阅读进度可能无法在后台恢复", "warn");
+                  throw error;
+                }
+              }
+              const written = await store.updateProgressForSession?.(leaseForWriter, patch);
+              if (!written) throw new Error("当前后端不支持精确进度会话写入");
+              const writtenVersion = latestVersion(portableProgressVersions(written));
+              if (writtenVersion) checkpointShownStamp = writtenVersion.stamp;
+              setShelfEntries((prev) =>
+                prev.map((item) => item.id === id ? mergeProgressProjection(item, written) : item)
+              );
+              if (checkpoints && checkpointId) {
+                try {
+                  checkpoints.acknowledge(sessionBookHash, checkpointId);
+                } catch {
+                  /* A delayed/failed removal keeps the local record for recovery. */
+                }
+              }
+            } catch (error) {
+              if (!firstSampleFailureRecordedRef.current) {
+                firstSampleFailureRecordedRef.current = true;
+                recordLifecycleDiagnostic("sample_failed", {
+                  stage: "flush",
+                  result: "failed",
+                  candidate: true,
+                  repositoryGeneration: store.progressSessionRepositoryGeneration?.(leaseForWriter),
+                  errorCode: (error as { readonly code?: unknown } | null)?.code as string | undefined,
+                });
+              }
+              throw error;
+            }
+          });
         }
         // 第一次打开：立即清除“新”标记（后端落盘异步完成，不阻塞阅读）
         if (entry.isNew) {
@@ -2751,6 +3063,22 @@ export default function App() {
             ? (projectProgressVersion(chosenProgressVersion).value?.progressPctHint ?? entry.progressPct)
             : entry.progressPct,
         );
+        if (candidateLease) {
+          activeProgressLeaseRef.current = candidateLease;
+          candidateActivated = true;
+          if (checkpointPatchToRestore) {
+            // Explicit local conflict resolution: write the retained local
+            // position through the newly published exact session.
+            progressWriterRef.current?.enqueue(candidateLease, checkpointPatchToRestore.patch);
+          }
+        }
+        if (checkpointAckPending) {
+          try {
+            localCheckpointsRef.current?.acknowledge(checkpointAckPending.bookHash, checkpointAckPending.checkpointId);
+          } catch {
+            /* 保留记录，下一次打开继续核对。 */
+          }
+        }
         unownedBook = null;
         if (preciseRequestId !== null && searchTarget) {
           latestPreciseRequestRef.current = preciseRequestId;
@@ -2766,7 +3094,17 @@ export default function App() {
         shelfBusyRef.current = false;
         setShelfBusy(false);
       } catch (e) {
-        await getShelfStore().closeProgressSession?.(id).catch(() => undefined);
+        if (!candidateActivated && candidateLease) {
+          try {
+            progressWriterRef.current?.retire(candidateLease);
+          } catch {
+            /* Not registered yet, or registered but never published. */
+          }
+          await getShelfStore().closeProgressLease?.(candidateLease).catch(() => undefined);
+          if (activeProgressLeaseRef.current === candidateLease) {
+            activeProgressLeaseRef.current = null;
+          }
+        }
         shelfBusyRef.current = false;
         setShelfBusy(false);
         setShelfError(`打开失败：${(e as Error).message}`);
@@ -2782,7 +3120,7 @@ export default function App() {
         }
       }
     },
-    [openParsedBook, reimportAndroidMissing]
+    [openParsedBook, reimportAndroidMissing, recordLifecycleDiagnostic, showReaderNotice]
   );
 
   // 打开书后渐进统计章节字数；同一本书切章不重建该任务。
@@ -2871,8 +3209,12 @@ export default function App() {
     shelfBusyRef.current = true;
     setShelfBusyMessage("正在移除书籍…");
     setShelfBusy(true);
+    const checkpointEntry = shelfEntriesRef.current.find((entry) => entry.id === id);
     try {
       await getShelfStore().deleteBook(id);
+      if (checkpointEntry) {
+        localCheckpointsRef.current?.remove(checkpointEntry.contentHash ?? checkpointEntry.id);
+      }
       setShelfEntries((prev) => prev.filter((e) => e.id !== id));
       setCurrentShelfId((curr) => (curr === id ? null : curr));
       setShelfError(null);
@@ -2893,9 +3235,15 @@ export default function App() {
     shelfBusyRef.current = true;
     setShelfBusyMessage("正在移除书籍…");
     setShelfBusy(true);
+    const checkpointEntries = shelfEntriesRef.current.filter((entry) => ids.includes(entry.id));
     try {
       const { deleted, failed } = await deleteShelfBooks(getShelfStore(), ids);
       const deletedIds = new Set(deleted);
+      for (const entry of checkpointEntries) {
+        if (deletedIds.has(entry.id)) {
+          localCheckpointsRef.current?.remove(entry.contentHash ?? entry.id);
+        }
+      }
       setShelfEntries((prev) => prev.filter((entry) => !deletedIds.has(entry.id)));
       setCurrentShelfId((curr) => (curr && deletedIds.has(curr) ? null : curr));
       if (failed.length === 0) {
@@ -3099,7 +3447,11 @@ export default function App() {
       } else if (current.kind === "transient" && current.transient === "selection") {
         readerRef.current?.clearTextSelection();
       }
-      setDiagText(readerRef.current?.diagnose() ?? "（阅读器未初始化）");
+      const readerDiagnosis = readerRef.current?.diagnose() ?? "（阅读器未初始化）";
+      const lifecycleDiagnosis = lifecycleDiagnosticsRef.current.length > 0
+        ? ["", "--- 匿名生命周期诊断 ---", ...lifecycleDiagnosticsRef.current].join("\n")
+        : "\n--- 匿名生命周期诊断 ---\n（尚无记录）";
+      setDiagText(readerDiagnosis + lifecycleDiagnosis);
       return openReaderPanel(current, "log");
     });
   }, []);
@@ -4048,6 +4400,10 @@ export default function App() {
   // ---- 阅读进度保存 ----
   useEffect(() => {
     if (phase.phase !== "ready" || !book) return;
+    // Portable shelf books now use the per-book local checkpoint plus v3
+    // session path below; only temporary/non-shelf books keep this legacy
+    // localStorage recovery record.
+    if (activeProgressLeaseRef.current) return;
     if (
       readerDisplayReady &&
       !suppressShelfProgressRef.current &&
@@ -4412,7 +4768,8 @@ export default function App() {
     setShelfEntries((prev) =>
       applyShelfProgressPatch(prev, currentShelfId, patch)
     );
-    progressWriterRef.current?.enqueue(currentShelfId, patch);
+    const lease = activeProgressLeaseRef.current;
+    if (lease) progressWriterRef.current?.enqueue(lease, patch);
   // page/anchor 变化必须触发写入；不能只依赖取整后的 progressPct，
   // 否则长书连续数页保持同一百分比时会漏掉最新位置。
   }, [view, currentShelfId, spineIndex, readerDisplayReady, chapterState]);
@@ -4445,17 +4802,27 @@ export default function App() {
     // 返回书架前先关浮层，再释放整本书的 ResourceServer。
     closeImageOverlay();
     persistShelfProgress();
+    recordLifecycleDiagnostic("back_to_shelf", { stage: "save", result: "begin" });
     shelfBusyRef.current = true;
     setShelfBusyMessage("正在保存进度…");
     setShelfBusy(true);
     try {
-      await progressWriterRef.current?.flush();
-      const closingShelfId = currentShelfIdRef.current;
-      if (closingShelfId) {
-        await getShelfStore().closeProgressSession?.(closingShelfId);
+      const lease = activeProgressLeaseRef.current;
+      if (lease) {
+        const saved = await progressWriterRef.current?.flush(lease);
+        if (saved?.status === "failed") throw saved.error;
+        progressWriterRef.current?.retire(lease);
+        await getShelfStore().closeProgressLease?.(lease);
+        activeProgressLeaseRef.current = null;
       }
       persistChapterCountCache();
+      recordLifecycleDiagnostic("back_to_shelf", { stage: "save", result: "saved" });
     } catch (error) {
+      recordLifecycleDiagnostic("back_to_shelf", {
+        stage: "save",
+        result: "failed",
+        errorCode: (error as { readonly code?: unknown } | null)?.code as string | undefined,
+      });
       const message = `阅读进度保存失败：${String(error)}`;
       setShelfError(message);
       showReaderNotice(message, "error");
@@ -4686,17 +5053,42 @@ export default function App() {
 
   // 切到后台时尽快冲刷；Tauri 关闭窗口时等待最后位置落盘后再销毁窗口。
   useEffect(() => {
-    const flushWhenHidden = (): void => {
-      if (document.visibilityState !== "hidden") return;
-      persistShelfProgressRef.current();
-      persistChapterCountCache();
-      void progressWriterRef.current?.flush().catch(() => {
-        /* 后台切换不打断阅读；返回书架或关闭时会再次报告。 */
-      });
+    const onVisibilityChange = (): void => {
+      if (document.visibilityState === "hidden") {
+        persistShelfProgressRef.current();
+        persistChapterCountCache();
+        recordLifecycleDiagnostic("hidden", { stage: "visibility-hidden", result: "best-effort" });
+        const lease = activeProgressLeaseRef.current;
+        if (lease) {
+          // Best effort once; freezing may leave the task to finish later.
+          void progressWriterRef.current?.flush(lease).catch(() => {
+            /* 返回前台后再由真实写入/检查报告，而非无限重试。 */
+          });
+        }
+        return;
+      }
+      // visible: invalidate cached readiness, then perform one real read-only check.
+      void (async () => {
+        const gate = progressRuntimeGateRef.current;
+        if (!gate) return;
+        gate.invalidate();
+        try {
+          const status = await gate.check();
+          const lease = activeProgressLeaseRef.current;
+          if (!lease) return;
+          const store = getShelfStore();
+          const currentGeneration = store.progressSessionRepositoryGeneration?.(lease);
+          if (currentGeneration !== undefined && currentGeneration !== status.repositoryGeneration) {
+            await store.rebindProgressSession?.(lease);
+          }
+        } catch (error) {
+          setReaderNotice({ kind: "warn", text: `资料服务暂不可用：${String(error)}` });
+        }
+      })();
     };
-    document.addEventListener("visibilitychange", flushWhenHidden);
+    document.addEventListener("visibilitychange", onVisibilityChange);
     if (!runtime.hasDesktopWindowChrome) {
-      return () => document.removeEventListener("visibilitychange", flushWhenHidden);
+      return () => document.removeEventListener("visibilitychange", onVisibilityChange);
     }
 
     let unlisten: (() => void) | undefined;
@@ -4710,7 +5102,10 @@ export default function App() {
         persistShelfProgressRef.current();
         persistChapterCountCache();
         try {
-          await progressWriterRef.current?.flush();
+          // Deliberate full flush at real window exit; report failed lanes.
+          const results = await progressWriterRef.current?.flushBooks() ?? [];
+          const failure = results.find((result) => result.status === "failed");
+          if (failure?.status === "failed") throw failure.error;
           await appWindow.destroy();
         } catch (error) {
           closing = false;
@@ -4724,7 +5119,7 @@ export default function App() {
         /* 非桌面窗口或关闭监听不可用时，仍保留逐页写入与 visibility flush。 */
       });
     return () => {
-      document.removeEventListener("visibilitychange", flushWhenHidden);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
       unlisten?.();
     };
   }, []);
@@ -5170,6 +5565,13 @@ export default function App() {
     progressChoiceResolverRef.current = null;
     setProgressChoice(null);
     resolve?.(stamp);
+  }, []);
+
+  const resolveLocalCheckpointConflict = useCallback((choice: "local" | "synced" | null): void => {
+    const resolve = localCheckpointResolverRef.current;
+    localCheckpointResolverRef.current = null;
+    setLocalCheckpointConflict(null);
+    resolve?.(choice);
   }, []);
 
   return (
@@ -5915,6 +6317,90 @@ export default function App() {
         }}
       />
       <div id="shelf-menu-portal-host" className="shelf-menu-portal-host" />
+      {localCheckpointConflict && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="选择未确认阅读位置"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 10000,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+            background: "rgba(0, 0, 0, 0.45)",
+          }}
+        >
+          <div
+            style={{
+              width: "min(520px, 100%)",
+              background: "var(--surface, #fff)",
+              color: "var(--text, #222)",
+              borderRadius: 12,
+              padding: 20,
+              boxShadow: "0 12px 40px rgba(0, 0, 0, 0.3)",
+            }}
+          >
+            <h3 style={{ margin: "0 0 8px", fontSize: 18 }}>选择阅读位置</h3>
+            <p style={{ margin: "0 0 14px", fontSize: 14, lineHeight: 1.5 }}>
+              《{localCheckpointConflict.title}》有一处本机未确认位置，且原显示版本已失效
+              {localCheckpointConflict.hasSynced ? "；同步位置也可用" : ""}。请选择本次打开方式。
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => resolveLocalCheckpointConflict("local")}
+                style={{
+                  width: "100%",
+                  padding: "10px 12px",
+                  border: "1px solid var(--border, #d0d0d0)",
+                  borderRadius: 8,
+                  background: "var(--surface, #fff)",
+                  color: "inherit",
+                  cursor: "pointer",
+                }}
+              >
+                使用本机未确认位置
+              </button>
+              {localCheckpointConflict.hasSynced && (
+                <button
+                  type="button"
+                  onClick={() => resolveLocalCheckpointConflict("synced")}
+                  style={{
+                    width: "100%",
+                    padding: "10px 12px",
+                    border: "1px solid var(--border, #d0d0d0)",
+                    borderRadius: 8,
+                    background: "transparent",
+                    color: "inherit",
+                    cursor: "pointer",
+                  }}
+                >
+                  使用同步位置
+                </button>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => resolveLocalCheckpointConflict(null)}
+              style={{
+                marginTop: 14,
+                width: "100%",
+                padding: "9px 12px",
+                border: "1px solid var(--border, #d0d0d0)",
+                borderRadius: 8,
+                background: "transparent",
+                color: "inherit",
+                cursor: "pointer",
+              }}
+            >
+              取消
+            </button>
+          </div>
+        </div>
+      )}
       {progressChoice && (
         <div
           role="dialog"

@@ -10,6 +10,8 @@ import type { PortableActivationResult, PortableStateDataService } from "./porta
 import { sanitizePersistedTextAnchor } from "../render/textAnchor";
 import type { MediaReadingAnchor } from "../render/paginator";
 import type { Stamp } from "../core/portableState/portable-register-core";
+import type { ProgressLease } from "./portableState/ownedProgressSessions";
+import type { ProgressRuntimeStatus } from "./portableState/progressRuntimeGate";
 import type { PortablePreferences } from "../core/portableState/portable-state-types";
 import type { LibraryRecord } from "./libraryArchive";
 import type { ThumbnailAsset, ThumbnailProvider } from "./thumbnail";
@@ -196,9 +198,20 @@ export interface ShelfStore {
   beginNoteEdit?(id: string, noteId: string, chosenStamp: Stamp): Promise<NoteEditContext | null>;
   writeNoteEdit?(id: string, note: ReaderNote, context: NoteEditContext): Promise<ShelfEntry>;
   endNoteEdit?(context: NoteEditContext): Promise<void>;
-  /** B3: progress session pinned to the version selected from the open read. */
+  /** B3 compatibility wrapper around a book-ID-owned progress session. */
   beginProgressSession?(id: string, selection: PortableProgressSelection): Promise<void>;
   closeProgressSession?(id: string): Promise<void>;
+  /** Exact-lease progress lifecycle used by the App. */
+  prepareProgressSession?(id: string, selection: PortableProgressSelection): Promise<ProgressLease>;
+  activateProgressSession?(lease: ProgressLease): void;
+  closeProgressLease?(lease: ProgressLease): Promise<void>;
+  updateProgressForSession?(lease: ProgressLease, patch: ShelfProgressPatch): Promise<ShelfEntry>;
+  rebindProgressSession?(lease: ProgressLease): Promise<void>;
+  hasProgressSession?(lease: ProgressLease): boolean;
+  progressSessionBookHash?(lease: ProgressLease): string | undefined;
+  progressSessionRepositoryGeneration?(lease: ProgressLease): string | undefined;
+  /** Read-only repository readiness; must not activate or migrate. */
+  runtimeStatus?(): Promise<ProgressRuntimeStatus>;
 }
 
 /** Keep failed rows visible; a native batch failure must not trigger expensive retries per book. */
