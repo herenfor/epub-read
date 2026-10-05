@@ -43,6 +43,7 @@ import { planLegacyShelfMigration } from "./legacyShelf";
 import { projectShelfEntriesFromState, projectShelfEntry } from "./projection";
 import { PortableStateError, type PortableAdoptSelection } from "./service";
 import type { PortableActivationResult, PortableMergeOptions, PortableStateDataService } from "./dataService";
+import type { ArchiveClient } from "../../core/selectiveArchive";
 
 const HASH_RE = /^[0-9a-f]{64}$/;
 const TEXT_PROFILE = "visible-codepoints-no-whitespace-v1" as const;
@@ -384,7 +385,7 @@ export class PortableShelfStore implements ShelfStore {
     });
   }
 
-  async readBook(id: string): Promise<Uint8Array> {
+  private async observeBookAnnotations(id: string): Promise<void> {
     // Capture what this open session has actually seen. Later whole-array
     // bookmark/note calls may only tombstone ids from this observed set;
     // background-merged annotations never disappear as a stale-array side
@@ -402,7 +403,18 @@ export class PortableShelfStore implements ShelfStore {
       // Local binding/bytes remain readable; the repository may be between
       // migration attempts. Deletion safety falls back to the read snapshot.
     }
+  }
+
+  async readBook(id: string): Promise<Uint8Array> {
+    await this.observeBookAnnotations(id);
     return this.legacy.readBook(id);
+  }
+
+  async openArchive(id: string): Promise<ArchiveClient> {
+    await this.observeBookAnnotations(id);
+    const create = this.legacy.openArchive?.bind(this.legacy);
+    if (!create) throw new Error("当前书库后端不支持按需归档读取");
+    return create(id);
   }
 
   async readCover(id: string): Promise<Uint8Array | null> {

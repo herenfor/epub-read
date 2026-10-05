@@ -7,7 +7,8 @@ import { parseXmlText, hasParserError } from "./parseXml";
 import { normalizePath, resolvePath, isExternalUrl, isFragmentOnly, splitHref } from "./paths";
 import { isFontMediaType, guessMediaType } from "./mime";
 import { deobfuscateFont } from "./fonts";
-import { createArchiveClient } from "./selectiveArchive";
+import { createArchiveClient, type ArchiveClient } from "./selectiveArchive";
+import { archiveBootstrapPaths } from "./archiveBootstrapPaths";
 import type {
   Book,
   BookIssue,
@@ -300,8 +301,19 @@ export async function loadBookSelective(
   bytes: Uint8Array,
   options: BookOptions = {}
 ): Promise<Book> {
-  const issues: BookIssue[] = [];
   const archiveClient = await createArchiveClient(bytes);
+  return loadBookSelectiveWithArchive(archiveClient, options);
+}
+
+/**
+ * 按需解压加载 EPUB，归档客户端由调用方提供。返回的 Book 持有归档所有权；
+ * 本函数在加载失败时关闭归档。Android 原生路径用它避免整本 EPUB 跨 IPC。
+ */
+export async function loadBookSelectiveWithArchive(
+  archiveClient: ArchiveClient,
+  options: BookOptions = {}
+): Promise<Book> {
+  const issues: BookIssue[] = [];
 
   try {
     const initFiles = await archiveClient.extract(["mimetype", "META-INF/container.xml"]);
@@ -339,24 +351,36 @@ export async function loadBookSelective(
     }
     const obfuscatedFonts = new Set(obfuscated);
 
-    // 筛选所有 manifest 文本条目（HTML/XHTML/CSS/XML/NCX）进行首轮快速解压
+    // 原生 Android 只解 buildToc 实际使用的首个 nav/NCX；Web/Windows 保持
+    // 历史上所有 manifest 文本条目的首轮快速解压。
     const textPathsToExtract = new Set<string>();
-    for (const item of parsed.manifest.values()) {
-      const path = manifestResourcePath(opfPath, item.href);
-      if (!path || !archiveClient.directory.has(path)) continue;
-      const mt = (item.mediaType || guessMediaType(path)).toLowerCase();
-      if (
-        mt.includes("html") ||
-        mt.includes("xml") ||
-        mt.includes("css") ||
-        mt.includes("text") ||
-        path.endsWith(".xhtml") ||
-        path.endsWith(".html") ||
-        path.endsWith(".css") ||
-        path.endsWith(".xml") ||
-        path.endsWith(".ncx")
-      ) {
+    if (options.bootstrap === "native") {
+      for (const path of archiveBootstrapPaths(
+        opfPath,
+        parsed.manifest,
+        archiveClient.directory,
+        options.parseToc !== false,
+      )) {
         textPathsToExtract.add(path);
+      }
+    } else {
+      for (const item of parsed.manifest.values()) {
+        const path = manifestResourcePath(opfPath, item.href);
+        if (!path || !archiveClient.directory.has(path)) continue;
+        const mt = (item.mediaType || guessMediaType(path)).toLowerCase();
+        if (
+          mt.includes("html") ||
+          mt.includes("xml") ||
+          mt.includes("css") ||
+          mt.includes("text") ||
+          path.endsWith(".xhtml") ||
+          path.endsWith(".html") ||
+          path.endsWith(".css") ||
+          path.endsWith(".xml") ||
+          path.endsWith(".ncx")
+        ) {
+          textPathsToExtract.add(path);
+        }
       }
     }
 
@@ -484,8 +508,14 @@ export async function loadBookSelective(
       return res && res.loaded !== false ? res.data : undefined;
     };
 
-    // 若封面存在且属于图片候选，提前按需解压封面
-    if (coverHref && resources.has(coverHref) && !resources.get(coverHref)!.loaded) {
+    // 若封面存在且属于图片候选，按入口需要提前解压。原生 reader/index
+    // 不预解封面，避免把书架封面预算和首屏资源峰值混在一起。
+    if (
+      options.preloadCover !== false &&
+      coverHref &&
+      resources.has(coverHref) &&
+      !resources.get(coverHref)!.loaded
+    ) {
       await ensureResources([coverHref]);
     }
 
@@ -513,6 +543,18 @@ export async function loadBookSelective(
     archiveClient.close();
     throw err;
   }
+}
+
+/** 使用已建立的 ArchiveClient 加载 EPUB（供 Android 原生按需归档路径使用）。 */
+export async function loadBookFromArchive(
+  archiveClient: ArchiveClient,
+  options: BookOptions = {}
+): Promise<Book> {
+  return loadBookSelectiveWithArchive(archiveClient, {
+    bootstrap: "native",
+    preloadCover: false,
+    ...options,
+  });
 }
 
 /**

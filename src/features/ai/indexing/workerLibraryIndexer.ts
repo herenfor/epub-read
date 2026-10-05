@@ -63,7 +63,9 @@ export function createWorkerLibraryIndexer(
         jobId: book.contentHash,
         book: { contentHash: book.contentHash, title: book.title, creator: book.creator, language: book.language },
         sizeBytes: book.fileSize,
-        read: async () => book.read(),
+        ...(book.openArchiveInput
+          ? { createArchiveInput: () => book.openArchiveInput!() }
+          : { read: async () => book.read() }),
       }));
     let completedBooks = skippedBooks + unavailableBooks;
     const activeTitles = new Map<string, string>();

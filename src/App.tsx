@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
-import { loadBook, spineIndexForPath, spineItemPath, DrmError, disposeBook, nextLinearIndex } from "./core/book";
+import { loadBook, loadBookFromArchive, spineIndexForPath, spineItemPath, DrmError, disposeBook, nextLinearIndex } from "./core/book";
 import type { Book } from "./core/types";
 import type { Annotation, Stamp, Version } from "./core/portableState/portable-register-core";
 import { compareStamp } from "./core/portableState/portable-register-core";
@@ -82,6 +82,8 @@ import { LanSavePanel } from "./ui/LanSavePanel";
 import { useLanSaveSession } from "./ui/useLanSaveSession";
 import { SaveFileExportDialog, SaveFileImportPreview, SaveFileProgressPanel } from "./ui/SaveFileDialogs";
 import { useSaveFileJob } from "./ui/useSaveFileJob";
+import { invoke } from "@tauri-apps/api/core";
+import { serveArchivePort } from "./platform/archiveWorkerBridge";
 import {
   cancelDocumentImport,
   importDocuments,
@@ -542,6 +544,26 @@ function chapterLabelForIndex(b: Book, index: number): string {
  */
 function createShelfBookReader(id: string): () => Promise<Uint8Array> {
   return () => getShelfStore().readBook(id);
+}
+
+/**
+ * Native Android full-library indexing input: the window owns the fixed-book
+ * bridge and only transfers a bounded MessagePort to the Worker.
+ */
+function createShelfBookArchiveInput(id: string): { port: MessagePort; dispose(): void } {
+  const channel = new MessageChannel();
+  const owner = serveArchivePort(channel.port1, id, invoke);
+  return {
+    port: channel.port2,
+    dispose() {
+      try {
+        channel.port2.close();
+      } catch {
+        // Port may already be detached after transfer; owner still owns session cleanup.
+      }
+      owner.dispose();
+    },
+  };
 }
 
 export default function App() {
@@ -1126,6 +1148,7 @@ export default function App() {
   // 全库搜索属于应用级运行时：两个 UI 入口只订阅，不以面板生命周期
   // 启停任务。书架变化只更新候选，下次状态检查/续建会精确补齐。
   useEffect(() => {
+    const nativeArchive = runtime.platform === "android" && Boolean(getShelfStore().openArchive);
     librarySearchRuntime.setBooks(shelfEntries
       .filter((entry): entry is ShelfEntry & { contentHash: string } => Boolean(entry.contentHash))
       .map((entry) => ({
@@ -1137,6 +1160,9 @@ export default function App() {
         available: entry.available !== false,
         fileSize: entry.fileSize,
         read: createShelfBookReader(entry.id),
+        ...(nativeArchive
+          ? { openArchiveInput: () => createShelfBookArchiveInput(entry.contentHash!) }
+          : {}),
       })));
   }, [librarySearchRuntime, shelfEntries]);
 
@@ -2619,32 +2645,50 @@ export default function App() {
             );
           }
         }
-        let buf: Uint8Array;
-        try {
-          buf = await getShelfStore().readBook(id);
-        } catch (error) {
-          setShelfEntries((prev) =>
-            prev.map((item) => (item.id === id ? { ...item, available: false } : item))
-          );
-          throw error;
-        }
-        // Legacy browser shelf IDs may be UUIDs; index identity always comes from EPUB bytes.
-        if (IS_AI_EDITION && !isTauriEnv() && !/^[a-f0-9]{64}$/.test(entry.contentHash ?? "")) {
-          entry = await getShelfStore().setContentHash(id, await sha256Hex(buf));
-          setShelfEntries((prev) => prev.map((item) => item.id === id ? entry : item));
-        }
-        // B3: read/adopt the selected progress version before parsing/navigation.
         const store = getShelfStore();
-        if (store.beginProgressSession) {
-          await store.beginProgressSession(id, progressSelection);
-        }
+        const openArchive = runtime.platform === "android"
+          ? store.openArchive?.bind(store)
+          : undefined;
         const chosenProjection = chosenProgressVersion
           ? projectProgressVersion(chosenProgressVersion)
           : null;
         const initialSpineIndex = searchTarget
           ? searchTarget.spineIndex
           : (chosenProjection?.spineIndex ?? entry.spineIndex ?? 0);
-        const b = await loadBook(buf, { selective: true, initialSpineIndex });
+        let b: Book;
+        if (openArchive) {
+          const archive = await openArchive(id).catch((error) => {
+            setShelfEntries((prev) =>
+              prev.map((item) => (item.id === id ? { ...item, available: false } : item))
+            );
+            throw error;
+          });
+          // B3: read/adopt the selected progress version before parsing/navigation.
+          if (store.beginProgressSession) {
+            await store.beginProgressSession(id, progressSelection);
+          }
+          b = await loadBookFromArchive(archive, { initialSpineIndex });
+        } else {
+          let buf: Uint8Array;
+          try {
+            buf = await store.readBook(id);
+          } catch (error) {
+            setShelfEntries((prev) =>
+              prev.map((item) => (item.id === id ? { ...item, available: false } : item))
+            );
+            throw error;
+          }
+          // Legacy browser shelf IDs may be UUIDs; index identity always comes from EPUB bytes.
+          if (IS_AI_EDITION && !isTauriEnv() && !/^[a-f0-9]{64}$/.test(entry.contentHash ?? "")) {
+            entry = await store.setContentHash(id, await sha256Hex(buf));
+            setShelfEntries((prev) => prev.map((item) => item.id === id ? entry : item));
+          }
+          // B3: read/adopt the selected progress version before parsing/navigation.
+          if (store.beginProgressSession) {
+            await store.beginProgressSession(id, progressSelection);
+          }
+          b = await loadBook(buf, { selective: true, initialSpineIndex });
+        }
         // 在 openParsedBook 正式接管前，Book 仍由本函数负责释放；
         // 后面的空 spine / 进度解析 / 目标校验等任何失败路径都不能漏掉。
         unownedBook = b;

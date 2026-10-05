@@ -1,5 +1,11 @@
-import { iterateBookChunkBatches, textForBookResource } from "../../../core/bookCorpusIndex";
-import { loadBook } from "../../../core/book";
+import { disposeBook, loadBook, loadBookFromArchive } from "../../../core/book";
+import {
+  iterateBookChunkBatches,
+  readBookResourceText,
+  textForBookResource,
+} from "../../../core/bookCorpusIndex";
+import { createArchivePortInvoke } from "../../../platform/archiveWorkerBridge";
+import { createNativeArchiveClient } from "../../../platform/nativeArchiveClient";
 import { splitCorpusWorkerBatches } from "./corpusWorkerBatching";
 import type {
   CorpusWorkerBatchMessage,
@@ -41,14 +47,29 @@ function waitForAck(jobId: string, sequence: number): Promise<boolean> {
 }
 
 async function build(request: CorpusWorkerStartMessage): Promise<void> {
+  let book: Awaited<ReturnType<typeof loadBook>> | undefined;
+  let archiveTransport: ReturnType<typeof createArchivePortInvoke> | undefined;
   try {
-    const book = await loadBook(new Uint8Array(request.bytes));
-    if (book.fixedLayout) throw new Error("固定版式书籍不支持正文语料建库");
+    const nativeArchive = request.input.kind === "archive";
+    if (request.input.kind === "bytes") {
+      book = await loadBook(new Uint8Array(request.input.bytes));
+    } else {
+      archiveTransport = createArchivePortInvoke(request.input.port);
+      const archive = await createNativeArchiveClient(request.book.contentHash, archiveTransport.invoke);
+      book = await loadBookFromArchive(archive);
+    }
+
+    const currentBook = book;
+    if (!currentBook) throw new Error("正文语料建库缺少书籍");
+    if (currentBook.fixedLayout) throw new Error("固定版式书籍不支持正文语料建库");
+    const signal = { get aborted() { return cancelled.has(request.jobId); } } as AbortSignal;
     let sequence = 0;
-    for await (const batch of iterateBookChunkBatches(book, {
+    for await (const batch of iterateBookChunkBatches(currentBook, {
       bookFingerprint: request.book.contentHash,
-      signal: { get aborted() { return cancelled.has(request.jobId); } } as AbortSignal,
-      textFor: (path) => textForBookResource(book, path),
+      signal,
+      textFor: (path) => nativeArchive
+        ? readBookResourceText(currentBook, path, signal)
+        : textForBookResource(currentBook, path),
     })) {
       if (cancelled.has(request.jobId)) return;
       for (const chunks of splitCorpusWorkerBatches(batch.chunks, request.maxChunksPerBatch, request.maxCharactersPerBatch)) {
@@ -63,6 +84,15 @@ async function build(request: CorpusWorkerStartMessage): Promise<void> {
         sequence++;
         if (!(await waitForAck(request.jobId, sequence - 1)) || cancelled.has(request.jobId)) return;
       }
+      if (nativeArchive) {
+        // All chunks for this chapter were committed by the sink; this is the
+        // index-only Book, so release its chapter bytes immediately.
+        const resource = currentBook.resources.get(batch.chapterPath);
+        if (resource) {
+          resource.data = new Uint8Array(0);
+          resource.loaded = false;
+        }
+      }
     }
     if (!cancelled.has(request.jobId)) {
       scope.postMessage({ protocol: request.protocol, type: "done", jobId: request.jobId, batches: sequence });
@@ -76,6 +106,8 @@ async function build(request: CorpusWorkerStartMessage): Promise<void> {
     const pending = acknowledgements.get(request.jobId);
     pending?.forEach((resolve) => resolve(false));
     acknowledgements.delete(request.jobId);
+    if (book) disposeBook(book);
+    archiveTransport?.dispose();
   }
 }
 

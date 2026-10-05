@@ -1,4 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
+import { createNativeArchiveClient as createNativeLinkedArchiveClient } from "../platform/nativeArchiveClient";
+import type { ArchiveClient } from "../core/selectiveArchive";
 import { IS_AI_EDITION } from "../config/edition";
 import { PortableShelfStore, activatePortableShelfStore } from "./portableState/shelfStoreAdapter";
 import { PortableStateService } from "./portableState/service";
@@ -153,6 +155,11 @@ export interface ShelfStore {
   /** 原生导入结果进入仓储后，返回含进度版本和注释的完整书架投影。 */
   importRecords?(records: ShelfEntry[]): Promise<ShelfEntry[]>;
   readBook(id: string): Promise<Uint8Array>;
+  /**
+   * Android 链接式路径可选：按需访问原生 ZIP 目录与条目，避免整本 EPUB
+   * 经 Java/WebView IPC 堆内分配；未实现的后端继续用 readBook。
+   */
+  openArchive?(id: string): Promise<ArchiveClient>;
   readCover(id: string): Promise<Uint8Array | null>;
   /** 只为旧条目补录内容指纹，不得改动阅读进度或其他元数据。 */
   setContentHash(id: string, contentHash: string): Promise<ShelfEntry>;
@@ -1140,6 +1147,10 @@ class TauriShelfStore implements ShelfStore {
       contentHash: id,
     });
     return new Uint8Array(buf);
+  }
+
+  async openArchive(id: string): Promise<ArchiveClient> {
+    return createNativeLinkedArchiveClient(id, invoke);
   }
 
   async readCover(id: string): Promise<Uint8Array | null> {

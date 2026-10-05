@@ -102,4 +102,11 @@ export interface BookOptions {
   selective?: boolean;
   /** 打开书籍时的初始 spine 下标（用于优先预载初始章节） */
   initialSpineIndex?: number;
+  /**
+   * Loader bootstrap strategy. `full` keeps the historical all-manifest-text
+   * preload; `native` extracts only the first nav/NCX entry buildToc reads.
+   */
+  bootstrap?: "full" | "native";
+  /** Preload the cover candidate after parsing (default true). */
+  preloadCover?: boolean;
 }

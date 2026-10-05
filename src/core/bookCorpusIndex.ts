@@ -19,16 +19,39 @@ export interface BookCorpusIndexOptions {
   chunking?: Omit<ChunkingOptions, "bookFingerprint">;
 }
 
-/** Decode a manifest text resource without creating render-layer Blob URLs. */
-export function textForBookResource(book: Book, path: string): string | undefined {
-  const resource = book.resources.get(path);
-  if (!resource) return undefined;
-  const data = resource.data;
+function decodeBookText(data: Uint8Array): string {
   if (data.length >= 2) {
     if (data[0] === 0xff && data[1] === 0xfe) return new TextDecoder("utf-16le").decode(data.slice(2));
     if (data[0] === 0xfe && data[1] === 0xff) return new TextDecoder("utf-16be").decode(data.slice(2));
   }
   return new TextDecoder("utf-8").decode(data);
+}
+
+/** Decode a manifest text resource without creating render-layer Blob URLs. */
+export function textForBookResource(book: Book, path: string): string | undefined {
+  const resource = book.resources.get(path);
+  if (!resource) return undefined;
+  return decodeBookText(resource.data);
+}
+
+/**
+ * Async variant for native archive Books: loads only the requested chapter
+ * before decoding. It must not turn an unpacked resource into an empty string.
+ */
+export async function readBookResourceText(
+  book: Book,
+  path: string,
+  signal?: AbortSignal,
+): Promise<string | undefined> {
+  abortIfNeeded(signal);
+  const data = book.readResource
+    ? await book.readResource(path)
+    : await (async () => {
+        await book.ensureResources?.([path]);
+        return book.resources.get(path)?.data;
+      })();
+  abortIfNeeded(signal);
+  return data === undefined ? undefined : decodeBookText(data);
 }
 
 function abortIfNeeded(signal?: AbortSignal): void {
