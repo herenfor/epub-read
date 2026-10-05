@@ -123,15 +123,15 @@
   transition: width 100ms ease-out;
 }
 
-/* 章节刻度点 */
+/* 章节刻度点：以进度轴中线定位，悬停时轴变粗也保持上下居中。 */
 .whisper-chapter-tick {
   position: absolute;
-  top: -1px;
+  top: 50%;
   width: 3px;
   height: 6px;
   background: color-mix(in srgb, var(--fg) 35%, transparent);
   border-radius: 1px;
-  transform: translateX(-50%);
+  transform: translate(-50%, -50%);
   pointer-events: none;
   transition: transform 120ms ease, background-color 120ms ease;
 }
@@ -139,11 +139,6 @@
 .whisper-chapter-tick.current {
   background: var(--accent, #6366f1);
   height: 8px;
-  top: -2px;
-}
-
-.whisper-chapter-tick.current {
-  background: var(--accent, #6366f1);
 }
 
 /* 拖拽指示滑块 */
