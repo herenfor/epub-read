@@ -12,6 +12,8 @@ import type { MediaReadingAnchor } from "../render/paginator";
 import type { Stamp } from "../core/portableState/portable-register-core";
 import type { ProgressLease } from "./portableState/ownedProgressSessions";
 import type { ProgressRuntimeStatus } from "./portableState/progressRuntimeGate";
+import type { ConfirmedProgressWrite } from "./checkpointProgressRepair";
+import { createRepositoryReadinessRecovery } from "./portableState/repositoryReadinessRepair";
 import type { PortablePreferences } from "../core/portableState/portable-state-types";
 import type { LibraryRecord } from "./libraryArchive";
 import type { ThumbnailAsset, ThumbnailProvider } from "./thumbnail";
@@ -205,10 +207,11 @@ export interface ShelfStore {
   prepareProgressSession?(id: string, selection: PortableProgressSelection): Promise<ProgressLease>;
   activateProgressSession?(lease: ProgressLease): void;
   closeProgressLease?(lease: ProgressLease): Promise<void>;
-  updateProgressForSession?(lease: ProgressLease, patch: ShelfProgressPatch): Promise<ShelfEntry>;
+  updateProgressForSession?(lease: ProgressLease, patch: ShelfProgressPatch): Promise<ConfirmedProgressWrite<ShelfEntry>>;
   rebindProgressSession?(lease: ProgressLease): Promise<void>;
   hasProgressSession?(lease: ProgressLease): boolean;
   progressSessionBookHash?(lease: ProgressLease): string | undefined;
+  progressSessionChosenStamp?(lease: ProgressLease): Stamp | null | undefined;
   progressSessionRepositoryGeneration?(lease: ProgressLease): string | undefined;
   /** Read-only repository readiness; must not activate or migrate. */
   runtimeStatus?(): Promise<ProgressRuntimeStatus>;
@@ -1272,6 +1275,7 @@ let cachedStore: ShelfStore | null = null;
 let cachedPortableStore: PortableShelfStore | null = null;
 let portableDataService: PortableStateDataService | null = null;
 let portableActivation: Promise<PortableActivationResult> | null = null;
+let portableReadinessRecovery: ReturnType<typeof createRepositoryReadinessRecovery> | null = null;
 
 function createLegacyShelfStore(): ShelfStore {
   return isTauriEnv() ? new TauriShelfStore() : new IndexedDbShelfStore();
@@ -1314,6 +1318,34 @@ export function portableShelfStateActive(): boolean {
   return cachedPortableStore !== null;
 }
 
+/**
+ * Explicit foreground recovery. Once the facade is active, recovery calls the
+ * real data service activate instead of the already-fulfilled activation
+ * promise. The read-only health command stays outside this recovery.
+ */
+export async function ensurePortableRepositoryReady(): Promise<ProgressRuntimeStatus> {
+  if (!cachedPortableStore || !portableDataService) {
+    // First transition from legacy still uses the existing migration entry.
+    await activatePortableShelfState();
+  }
+  const data = portableDataService;
+  if (!data) {
+    return { repositoryGeneration: "legacy", repositoryReady: true };
+  }
+  if (!portableReadinessRecovery) {
+    portableReadinessRecovery = createRepositoryReadinessRecovery({
+      runtimeStatus: () => data.runtimeStatus(),
+      activate: async () => {
+        if (!data.activate) {
+          throw Object.assign(new Error("当前存储后端不支持运行时激活"), { code: "runtime-not-ready" });
+        }
+        return data.activate();
+      },
+    });
+  }
+  return portableReadinessRecovery();
+}
+
 /** Read the preferences stored in the active portable repository after a file import. */
 export async function readPortablePreferencesSnapshot(): Promise<PortablePreferences | undefined> {
   await activatePortableShelfState();
@@ -1352,4 +1384,5 @@ export function resetShelfStoreForTest(): void {
   cachedPortableStore = null;
   portableDataService = null;
   portableActivation = null;
+  portableReadinessRecovery = null;
 }

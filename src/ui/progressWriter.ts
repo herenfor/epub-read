@@ -232,6 +232,19 @@ export class ScopedProgressWriter<P> {
     return Promise.all(lanes.map((lane) => this.flush(lane.lease)));
   }
 
+  /**
+   * Explicit user choice only: retain the lane's latest stable sample locally,
+   * then remove the old lane without pretending the original write succeeded.
+   */
+  handoffToCheckpoint(lease: ProgressLease, retain: (sample: P) => void): void {
+    const lane = this.lane(lease);
+    if (lane.flight) throw new Error("旧进度请求仍在执行，请稍后重试");
+    const sample = lane.pending ?? lane.failed?.sample;
+    if (sample) retain(sample.patch); // retain must durably stage before lane removal
+    this.cancelTimer(lane);
+    this.lanes.delete(lease.bookId);
+  }
+
   /** Must precede closing the lease. A failed sample is never silently erased. */
   retire(lease: ProgressLease): void {
     const lane = this.lane(lease);

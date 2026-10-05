@@ -795,7 +795,9 @@ impl PortableStore {
 
     fn new_handle(&mut self, prefix: &str) -> String {
         self.next_handle = self.next_handle.saturating_add(1);
-        format!("{prefix}-{}", self.next_handle)
+        // Include the in-memory store generation so a handle from a replaced
+        // repository can never collide with a new store's same sequence number.
+        format!("{}:{prefix}:{}", self.runtime_generation, self.next_handle)
     }
 
     pub fn installation_id(&self) -> PortableResult<Option<String>> {
@@ -2222,5 +2224,34 @@ mod grouping_tests {
         assert_eq!(scoped.get("bookmark:id:with:colons"), Some(&8));
         assert_eq!(scoped.get("note:note-1"), Some(&9));
         assert!(!grouped.contains_key(&other_hash));
+    }
+}
+
+#[cfg(test)]
+mod runtime_handle_tests {
+    use super::*;
+
+    const HASH: &str = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+
+    #[test]
+    fn opaque_handles_are_generation_scoped() {
+        let mut first = PortableStore::open_in_memory().unwrap();
+        let mut replacement = PortableStore::open_in_memory().unwrap();
+        let (first_read, _) = first.read(HASH).unwrap();
+        let (replacement_read, _) = replacement.read(HASH).unwrap();
+
+        assert_ne!(first_read, replacement_read);
+        assert!(first_read.starts_with(first.runtime_generation()));
+        assert!(replacement_read.starts_with(replacement.runtime_generation()));
+
+        // A late handle from the replaced store cannot address the new store.
+        let error = replacement
+            .adopt(
+                &first_read,
+                EntityRef::Progress { book_hash: HASH.to_string() },
+                AdoptSelection::Empty,
+            )
+            .unwrap_err();
+        assert_eq!(error.code, "stale-basis");
     }
 }

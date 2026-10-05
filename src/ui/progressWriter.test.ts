@@ -1,6 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import { ScopedProgressWriter, ShelfProgressWriter } from "./progressWriter";
 import type { ProgressLease } from "./portableState/ownedProgressSessions";
+import { LocalProgressCheckpoints, type LocalProgressCheckpoint } from "./localProgressCheckpoint";
+import {
+  planCheckpointOpen,
+  stageCheckpointSample,
+  persistCheckpointSample,
+  ProgressWriteUnconfirmed,
+} from "./checkpointProgressRepair";
+import { createRepositoryReadinessRecovery } from "./portableState/repositoryReadinessRepair";
 import type { ShelfProgressPatch } from "./shelf";
 
 function patch(page: number): ShelfProgressPatch {
@@ -226,5 +234,106 @@ describe("ScopedProgressWriter", () => {
     await expect(writer.flush(book)).resolves.toMatchObject({ status: "saved" });
     expect(written).toEqual([5]);
     writer.disposeTimers();
+  });
+});
+
+
+type RepairPatch = {
+  page: number;
+  lastReadAtMs: number;
+  chapterPath?: string | null;
+};
+
+function memoryCheckpoints() {
+  const disk = new Map<string, string>();
+  let sequence = 0;
+  const checkpoints = new LocalProgressCheckpoints<RepairPatch>({
+    getItem: (key) => disk.get(key) ?? null,
+    setItem: (key, value) => { disk.set(key, value); },
+    removeItem: (key) => { disk.delete(key); },
+  }, (value) => value as LocalProgressCheckpoint<RepairPatch>, () => `cp-${++sequence}`);
+  return { checkpoints, disk };
+}
+
+describe("progress lifecycle repair", () => {
+  const stamp = { deviceId: "00000000-0000-4000-8000-000000000001", counter: 1 };
+  const version = { stamp, page: 9 };
+
+  it("plans checkpoint open without bypassing multi-version choice", () => {
+    const { checkpoints } = memoryCheckpoints();
+    const checkpoint = checkpoints.put("book", stamp, { page: 9, lastReadAtMs: 1, chapterPath: "a.xhtml" });
+    const sameLocation = (patch: RepairPatch, current: typeof version) => patch.page === current.page;
+
+    expect(planCheckpointOpen(checkpoint, [version], sameLocation).kind).toBe("use-saved");
+    expect(planCheckpointOpen(checkpoint, [{ stamp, page: 8 }], sameLocation).kind).toBe("restore-local");
+    expect(planCheckpointOpen(
+      checkpoint,
+      [version, { stamp: { deviceId: "other", counter: 2 }, page: 9 }],
+      sameLocation,
+    ).kind).toBe("choose");
+    expect(planCheckpointOpen(
+      checkpoint,
+      [{ stamp: { deviceId: "other", counter: 2 }, page: 8 }],
+      sameLocation,
+    ).kind).toBe("choose");
+  });
+
+  it("stages one record for the same stable location and keeps the late ack from deleting a newer ID", async () => {
+    const { checkpoints } = memoryCheckpoints();
+    const first = stageCheckpointSample(checkpoints, "book", stamp, { page: 9, lastReadAtMs: 1, chapterPath: "a.xhtml" });
+    const sameLocation = stageCheckpointSample(checkpoints, "book", stamp, { page: 9, lastReadAtMs: 99, chapterPath: "a.xhtml" });
+    expect(sameLocation.checkpointId).toBe(first.checkpointId);
+
+    await expect(persistCheckpointSample(
+      checkpoints,
+      "book",
+      sameLocation,
+      async () => ({ status: "unconfirmed", code: "progress-write-interrupted" }),
+    )).rejects.toBeInstanceOf(ProgressWriteUnconfirmed);
+    expect(checkpoints.peek("book")?.patch.page).toBe(9);
+
+    const newer = stageCheckpointSample(checkpoints, "book", stamp, { page: 10, lastReadAtMs: 100, chapterPath: "a.xhtml" });
+    await persistCheckpointSample(
+      checkpoints,
+      "book",
+      first,
+      async () => ({ status: "saved", entry: { ok: true }, shownStamp: stamp }),
+    );
+    expect(checkpoints.peek("book")?.checkpointId).toBe(newer.checkpointId);
+  });
+
+  it("retains the latest failed lane sample only for explicit handoff", async () => {
+    const writer = new ScopedProgressWriter<number>(0);
+    const oldLease = Object.freeze({ bookId: "book", generation: 1 });
+    writer.register(oldLease, async () => { throw new Error("synthetic storage failure"); });
+    writer.enqueue(oldLease, 9);
+    await expect(writer.flush(oldLease)).resolves.toMatchObject({ status: "failed" });
+
+    const retained: number[] = [];
+    writer.handoffToCheckpoint(oldLease, (sample) => { retained.push(sample); });
+    expect(retained).toEqual([9]);
+    writer.register(Object.freeze({ bookId: "book", generation: 2 }), async () => undefined);
+    writer.disposeTimers();
+  });
+
+  it("recovers readiness with a real single activation, not an old promise", async () => {
+    let ready = false;
+    let activations = 0;
+    const ensureReady = createRepositoryReadinessRecovery({
+      runtimeStatus: async () => ({
+        repositoryGeneration: "runtime-repaired",
+        repositoryReady: ready,
+      }),
+      activate: async () => {
+        activations++;
+        ready = true;
+      },
+    });
+    const [first, second] = await Promise.all([ensureReady(), ensureReady()]);
+    expect(first.repositoryReady).toBe(true);
+    expect(second.repositoryReady).toBe(true);
+    expect(activations).toBe(1);
+    await ensureReady();
+    expect(activations).toBe(1);
   });
 });
