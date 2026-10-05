@@ -144,6 +144,23 @@ describe("ChapterPaginator CSS Blob URL lifecycle", () => {
     paginator.dispose();
   });
 
+  it("过期 acquireChapter 取得的 holder 由原 server 释放", async () => {
+    const gate = deferred<number>();
+    const acquireChapter = vi.fn()
+      .mockImplementationOnce(() => gate.promise)
+      .mockImplementation(() => Promise.resolve(2));
+    const releaseHolder = vi.fn();
+    const { paginator } = makePaginator({ acquireChapter, releaseHolder });
+
+    const staleLoad = paginator.load("stale.xhtml");
+    expect(acquireChapter).toHaveBeenCalledWith("stale.xhtml");
+    await paginator.load("current.xhtml");
+    gate.resolve(1);
+    await staleLoad;
+    expect(releaseHolder).toHaveBeenCalledWith(1);
+    paginator.dispose();
+  });
+
   it("loadSeq 过期时撤销旧任务的局部 CSS URL，并保留新章 URL 到 dispose", async () => {
     const first = deferred<{ html: string; issues: string[]; downgraded: boolean }>();
     sanitizeMock.mockImplementationOnce(async (_html: string, opts: { makeUrl?: (text: string, mediaType: string) => string }) => {

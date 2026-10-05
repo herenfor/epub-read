@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Book } from "../core/types";
 import { decodeBytes, ResourceServer } from "./resources";
+import { ArchiveClosedError } from "../core/selectiveArchive";
 
 describe("decodeBytes（编码容错）", () => {
   it("UTF-8 正常解码", () => {
@@ -188,5 +189,102 @@ describe("ResourceServer media budget", () => {
     server.releaseHolder(second);
     expect(b.resources.get("OEBPS/shared.png")!.loaded).toBe(false);
     expect(server.mediaCacheStats.overBudget).toBe(false);
+  });
+});
+
+describe("ResourceServer recursive acquisition / close lifecycle", () => {
+  it("recovers two-layer CSS and background image before releasing the holder", async () => {
+    const enc = new TextEncoder();
+    const payloads = new Map<string, Uint8Array>([
+      ["OEBPS/ch.xhtml", enc.encode('<link rel="stylesheet" href="style.css"/>')],
+      ["OEBPS/style.css", enc.encode('@import "nested.css";')],
+      ["OEBPS/nested.css", enc.encode('body{background:url("background.png")}')],
+      ["OEBPS/background.png", new Uint8Array([9, 9, 9, 9])],
+    ]);
+    const mediaTypeFor = (path: string): string => {
+      if (path.endsWith(".png")) return "image/png";
+      if (path.endsWith(".css")) return "text/css";
+      return "application/xhtml+xml";
+    };
+    const b = book();
+    b.resources = new Map(
+      [...payloads].map(([path]) => [
+        path,
+        { path, data: new Uint8Array(0), mediaType: mediaTypeFor(path), loaded: false },
+      ])
+    );
+    b.resources.set("OEBPS/old.png", {
+      path: "OEBPS/old.png",
+      data: new Uint8Array(100),
+      mediaType: "image/png",
+      loaded: true,
+    });
+    b.ensureResources = async (paths) => {
+      for (const path of paths) {
+        const res = b.resources.get(path);
+        const data = payloads.get(path);
+        if (res && data) {
+          res.data = data;
+          res.loaded = true;
+        }
+      }
+    };
+
+    const server = new ResourceServer(b, { mediaCacheMaxBytes: 120 });
+    const holder = await server.acquireChapter("OEBPS/ch.xhtml");
+
+    // 旧无主大资源先被淘汰腾出预算；递归发现的 CSS/背景图由 holder 保护。
+    expect(b.resources.get("OEBPS/old.png")!.loaded).toBe(false);
+    for (const path of ["OEBPS/ch.xhtml", "OEBPS/style.css", "OEBPS/nested.css", "OEBPS/background.png"]) {
+      expect(b.resources.get(path)!.loaded).not.toBe(false);
+    }
+    expect(server.mediaCacheStats.holders).toBe(4);
+
+    server.releaseHolder(holder);
+    server.revokeAll();
+  });
+
+  it("rejects in-flight ensureResources after close without reviving bytes or urls", async () => {
+    let release!: () => void;
+    const blocker = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered!: () => void;
+    const enteredPromise = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+
+    const b = book();
+    b.resources = new Map([
+      [
+        "late.xhtml",
+        { path: "late.xhtml", data: new Uint8Array(0), mediaType: "application/xhtml+xml", loaded: false },
+      ],
+    ]);
+    b.ensureResources = async (paths) => {
+      entered();
+      await blocker;
+      for (const path of paths) {
+        const res = b.resources.get(path);
+        if (res) {
+          res.data = new Uint8Array([1, 2, 3]);
+          res.loaded = true;
+        }
+      }
+    };
+
+    const server = new ResourceServer(b, { mediaCacheMaxBytes: 8 });
+    const pending = server.ensureResources(["late.xhtml"]);
+    await enteredPromise;
+    server.revokeAll();
+    expect(server.mediaCacheStats.bytes).toBe(0);
+
+    release();
+    await expect(pending).rejects.toThrow(ArchiveClosedError);
+    await expect(pending).rejects.toThrow("归档已关闭");
+    expect(server.mediaCacheStats.bytes).toBe(0);
+    expect(server.mediaCacheStats.entries).toBe(0);
+    expect(server.mediaCacheStats.urls).toBe(0);
+    expect(server.mediaCacheStats.holders).toBe(0);
   });
 });
