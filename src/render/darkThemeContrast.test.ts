@@ -93,23 +93,67 @@ describe("dark theme contrast repair", () => {
     expect(reads).toBe(document.body.querySelectorAll("*").length + 2); // html + body and descendants
   });
 
-  it("conservatively skips explicit author colors, background images and opacity", () => {
+  it("repairs opaque neutral dark author text for dark and gray backgrounds", () => {
+    const darkDoc = parseHTML(
+      "<html><body><p id='text'>正文</p></body></html>"
+    ).document;
+    const darkParagraph = darkDoc.querySelector("#text")!;
+    const darkStyles = new Map<Element, DarkThemeComputedStyle>([
+      [darkDoc.body, style({ backgroundColor: "rgb(30, 30, 30)" })],
+      [darkParagraph, style({ color: "rgb(43, 43, 43)" })],
+    ]);
+    expect(
+      applyDarkThemeContrast(darkDoc as unknown as Document, {
+        theme: "dark",
+        adapter: adapter(darkStyles),
+      })
+    ).toBe(1);
+    expect(darkStyles.get(darkParagraph)?.color).toBe("#d4d4d4");
+    expect(darkParagraph.getAttribute("data-reader-dark-contrast")).toBe("1");
+
+    const grayDoc = parseHTML(
+      "<html><body><p id='text'>正文</p></body></html>"
+    ).document;
+    const grayParagraph = grayDoc.querySelector("#text")!;
+    const grayStyles = new Map<Element, DarkThemeComputedStyle>([
+      [grayDoc.body, style({ backgroundColor: "rgb(45, 45, 48)" })],
+      [grayParagraph, style({ color: "rgb(43, 43, 43)" })],
+    ]);
+    expect(
+      applyDarkThemeContrast(grayDoc as unknown as Document, {
+        theme: "gray",
+        adapter: adapter(grayStyles),
+      })
+    ).toBe(1);
+    expect(grayStyles.get(grayParagraph)?.color).toBe("#d4d4d8");
+    expect(grayParagraph.getAttribute("data-reader-dark-contrast")).toBe("1");
+  });
+
+  it("conservatively skips user colors, non-neutral/translucent text, background images and opacity", () => {
     const { document } = parseHTML(
-      "<html><body><p id='author'>author</p><p id='image'>image</p><p id='faded'>faded</p></body></html>"
+      "<html><body><p id='user'>user</p><p id='colored'>colored</p><p id='faded'>faded</p><p id='image'>image</p></body></html>"
     );
     const body = document.body;
-    const author = document.querySelector("#author")!;
-    const image = document.querySelector("#image")!;
+    const user = document.querySelector("#user")!;
+    const colored = document.querySelector("#colored")!;
     const faded = document.querySelector("#faded")!;
+    const image = document.querySelector("#image")!;
     const styles = new Map<Element, DarkThemeComputedStyle>([
       [body, style({ backgroundColor: "rgb(30, 30, 30)" })],
-      [author, style({ color: "rgb(100, 100, 100)" })],
+      [user, style({ color: "rgb(100, 100, 100)" })],
+      [colored, style({ color: "rgb(180, 40, 40)" })],
+      [faded, style({ color: "rgba(100, 100, 100, 0.8)" })],
       [image, style({ backgroundColor: "rgb(255, 255, 255)", backgroundImage: "url(cover.png)" })],
-      [faded, style({ backgroundColor: "rgb(255, 255, 255)", opacity: "0.8" })],
     ]);
-    expect(applyDarkThemeContrast(document as unknown as Document, { theme: "dark", adapter: adapter(styles) })).toBe(0);
-    expect(author.hasAttribute("data-reader-dark-contrast")).toBe(false);
-    expect(image.hasAttribute("data-reader-dark-contrast")).toBe(false);
+    const count = applyDarkThemeContrast(document as unknown as Document, {
+      theme: "dark",
+      adapter: adapter(styles),
+      userOwnsColor: (element) => element === user,
+    });
+    expect(count).toBe(0);
+    expect(user.hasAttribute("data-reader-dark-contrast")).toBe(false);
+    expect(colored.hasAttribute("data-reader-dark-contrast")).toBe(false);
     expect(faded.hasAttribute("data-reader-dark-contrast")).toBe(false);
+    expect(image.hasAttribute("data-reader-dark-contrast")).toBe(false);
   });
 });
