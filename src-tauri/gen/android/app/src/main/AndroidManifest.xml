@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- LAN address snapshot only; no location or Wi-Fi scan permission. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- CAMERA is only requested by LanScanActivity after the user taps scan. -->
     <uses-permission android:name="android.permission.CAMERA" />
 

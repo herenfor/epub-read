@@ -3,6 +3,7 @@ import * as QRCode from "qrcode";
 import type { ShelfEntry } from "./shelf";
 import { SaveFileImportPreview } from "./SaveFileDialogs";
 import { openAndroidAppSettings, scanAndroidQrCode } from "../platform/androidLanScanBridge";
+import { listLanSaveAddresses, type LanAddressOption } from "../platform/lanSaveNativeBridge";
 import type { UseLanSaveSessionResult } from "./useLanSaveSession";
 import {
   lanErrorText,
@@ -94,6 +95,8 @@ export function LanSavePanel(props: LanSavePanelProps) {
   const [joinText, setJoinText] = useState("");
   const [pasteOpen, setPasteOpen] = useState(false);
   const [bindIp, setBindIp] = useState("");
+  const [addresses, setAddresses] = useState<LanAddressOption[]>([]);
+  const [selectedAddress, setSelectedAddress] = useState("");
   const [scopeChoice, setScopeChoice] = useState<"all" | "selected">(
     props.selectedEntries.length > 0 ? "selected" : "all",
   );
@@ -118,6 +121,22 @@ export function LanSavePanel(props: LanSavePanelProps) {
     if (!props.open) return;
     setScopeChoice(props.selectedEntries.length > 0 ? "selected" : "all");
   }, [props.open, props.selectedEntries.length]);
+
+  // One fresh native snapshot per start page visit. A single listed network
+  // changes nothing; only >1 shows the optional network chooser below.
+  useEffect(() => {
+    if (!props.open || state.status !== "idle") return;
+    let cancelled = false;
+    setSelectedAddress("");
+    void listLanSaveAddresses()
+      .then((items) => {
+        if (!cancelled) setAddresses(items);
+      })
+      .catch(() => {
+        if (!cancelled) setAddresses([]);
+      });
+    return () => { cancelled = true; };
+  }, [props.open, state.status]);
 
   // Back on the start page after a session ends or fails. The pasted text is
   // kept so a mistyped connection string can be corrected instead of re-pasted.
@@ -177,8 +196,11 @@ export function LanSavePanel(props: LanSavePanelProps) {
   const handleHost = useCallback((): void => {
     clearLocalError();
     stepRef.current = "host";
-    void props.session.startHost(bindIp.trim() || undefined);
-  }, [bindIp, clearLocalError, props.session]);
+    // Manual advanced IP wins; otherwise the selected native candidate is
+    // passed. If the user never opened the chooser, undefined lets Rust use
+    // the first item from the same sorted snapshot.
+    void props.session.startHost(bindIp.trim() || selectedAddress.trim() || undefined);
+  }, [bindIp, clearLocalError, props.session, selectedAddress]);
 
   const handleJoin = useCallback((): void => {
     clearLocalError();
@@ -326,8 +348,23 @@ export function LanSavePanel(props: LanSavePanelProps) {
           <li>公司、学校、酒店的网络和路由器的“访客网络”常常禁止设备互连，可以改用手机热点。</li>
           <li>电脑上如果弹出防火墙提示，请选择允许。</li>
         </ul>
+        {addresses.length > 1 && (
+          <label className="lan-field">
+            <span>选择要使用的网络</span>
+            <select
+              value={selectedAddress || addresses[0]?.address || ""}
+              onChange={(event) => setSelectedAddress(event.target.value)}
+            >
+              {addresses.map((address) => (
+                <option key={`${address.interfaceId}:${address.address}`} value={address.address}>
+                  {address.label} · {address.address}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <label className="lan-field">
-          <span>指定本机网络地址（一般不需要填写）</span>
+          <span>高级：指定本机网络地址（一般不需要填写）</span>
           <input
             type="text"
             inputMode="decimal"
@@ -490,7 +527,7 @@ export function LanSavePanel(props: LanSavePanelProps) {
     const skipped = result?.skippedBooks.length ?? 0;
     const skippedNote = skipped > 0 ? `有 ${skipped} 本书的文件没有找到，只发送了它们的阅读进度。` : "";
     if (state.status === "sendComplete") {
-      const imported = state.remoteCommit?.importedBooks.length;
+      const imported = state.remoteCommit?.importedBookCount;
       return (
         <ResultView
           tone="success"
@@ -549,7 +586,7 @@ export function LanSavePanel(props: LanSavePanelProps) {
       return renderSendResult();
     }
     if (state.status === "commitComplete") {
-      const imported = state.remoteCommit?.importedBooks.length ?? 0;
+      const imported = state.localCommit?.importedBooks.length ?? 0;
       return (
         <ResultView
           tone="success"

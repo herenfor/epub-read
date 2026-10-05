@@ -1,5 +1,6 @@
+use super::bulk_policy::{RemotePhase, RemoteWait, HEARTBEAT_INTERVAL};
 use super::error::LanSaveError;
-use super::protocol::{ControlMessage, WireOffer};
+use super::protocol::{ControlMessage, ProcessingPhase, WireOffer};
 use crate::save_file::commands::FileTask;
 use serde::Serialize;
 use std::collections::VecDeque;
@@ -36,11 +37,23 @@ pub(crate) struct LanSaveEvent {
 
 pub(crate) type LanEventSink = Arc<dyn Fn(LanSaveEvent) + Send + Sync + 'static>;
 
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct InventoryOutcome {
+    pub queried: usize,
+    pub present: usize,
+    pub finished: bool,
+}
+
 pub(crate) enum ReceiverAction {
     Accept {
         part_path: PathBuf,
         archive_bytes: u64,
         reply: oneshot::Sender<Result<(), LanSaveError>>,
+    },
+    InventoryDone {
+        query_index: u64,
+        last: bool,
+        presence: Result<Vec<bool>, LanSaveError>,
     },
     PhaseChanged,
 }
@@ -133,6 +146,7 @@ impl Drop for WorkerLease {
 pub(crate) enum Phase {
     Pairing,
     Ready,
+    Checking,
     Exporting,
     OfferPending,
     Sending,
@@ -202,6 +216,14 @@ impl SessionGate {
 
     pub(crate) fn paired(&self) -> Result<(), LanSaveError> {
         self.step(Phase::Pairing, Phase::Ready)
+    }
+
+    pub(crate) fn begin_checking(&self) -> Result<(), LanSaveError> {
+        self.step(Phase::Ready, Phase::Checking)
+    }
+
+    pub(crate) fn checking_complete(&self) -> Result<(), LanSaveError> {
+        self.step(Phase::Checking, Phase::Ready)
     }
 
     pub(crate) fn begin_export(&self) -> Result<(), LanSaveError> {
@@ -290,6 +312,11 @@ pub(crate) struct LanSession {
     finalize_started: AtomicBool,
     finalize_finished: AtomicBool,
     outgoing_bytes: AtomicU64,
+    started: Instant,
+    remote_wait: Mutex<Option<RemoteWait>>,
+    processing_sequence: AtomicU64,
+    remote_processing_sequence: AtomicU64,
+    inventory: Mutex<Option<InventoryOutcome>>,
 }
 
 impl LanSession {
@@ -342,6 +369,11 @@ impl LanSession {
             finalize_started: AtomicBool::new(false),
             finalize_finished: AtomicBool::new(false),
             outgoing_bytes: AtomicU64::new(0),
+            started: Instant::now(),
+            remote_wait: Mutex::new(None),
+            processing_sequence: AtomicU64::new(0),
+            remote_processing_sequence: AtomicU64::new(0),
+            inventory: Mutex::new(None),
         }
     }
 
@@ -355,6 +387,210 @@ impl LanSession {
 
     pub(crate) fn outgoing_bytes(&self) -> u64 {
         self.outgoing_bytes.load(Ordering::Acquire)
+    }
+
+    fn elapsed(&self) -> Duration {
+        self.started.elapsed()
+    }
+
+    pub(crate) fn next_processing_sequence(&self) -> Result<u64, LanSaveError> {
+        let previous = self.processing_sequence.fetch_add(1, Ordering::AcqRel);
+        let sequence = previous
+            .checked_add(1)
+            .ok_or_else(|| LanSaveError::invalid_state("处理通知序号溢出"))?;
+        if sequence > 9_007_199_254_740_991 {
+            return Err(LanSaveError::invalid_state("处理通知序号超出安全整数"));
+        }
+        Ok(sequence)
+    }
+
+    pub(crate) fn arm_remote_wait(&self, phase: RemotePhase) -> Result<(), LanSaveError> {
+        let now = self.elapsed();
+        let mut wait = self
+            .remote_wait
+            .lock()
+            .map_err(|_| LanSaveError::invalid_state("远端等待状态锁已损坏"))?;
+        *wait = Some(
+            RemoteWait::new(phase, now)
+                .map_err(|_| LanSaveError::invalid_state("不能以该阶段启动远端工作钟"))?,
+        );
+        drop(wait);
+        self.notify.notify_waiters();
+        Ok(())
+    }
+
+    pub(crate) fn clear_remote_wait(&self) {
+        if let Ok(mut wait) = self.remote_wait.lock() {
+            *wait = None;
+        }
+        self.notify.notify_waiters();
+    }
+
+    pub(crate) fn has_remote_wait(&self) -> bool {
+        self.remote_wait
+            .lock()
+            .map(|wait| wait.is_some())
+            .unwrap_or(false)
+    }
+
+    pub(crate) fn record_inventory_chunk(
+        &self,
+        queried: usize,
+        present: usize,
+        last: bool,
+    ) -> Result<(), LanSaveError> {
+        let mut inventory = self
+            .inventory
+            .lock()
+            .map_err(|_| LanSaveError::invalid_state("Inventory 核对状态锁已损坏"))?;
+        let current = inventory.get_or_insert_with(InventoryOutcome::default);
+        current.queried = current
+            .queried
+            .checked_add(queried)
+            .ok_or_else(|| LanSaveError::invalid_state("Inventory 数量溢出"))?;
+        current.present = current
+            .present
+            .checked_add(present)
+            .ok_or_else(|| LanSaveError::invalid_state("Inventory 数量溢出"))?;
+        if last {
+            current.finished = true;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn inventory_outcome(&self) -> Result<Option<InventoryOutcome>, LanSaveError> {
+        Ok(*self
+            .inventory
+            .lock()
+            .map_err(|_| LanSaveError::invalid_state("Inventory 核对状态锁已损坏"))?)
+    }
+
+    pub(crate) fn observe_remote_processing(
+        &self,
+        sequence: u64,
+        phase: ProcessingPhase,
+    ) -> Result<(), LanSaveError> {
+        if sequence == 0
+            || sequence > 9_007_199_254_740_991
+            || sequence <= self.remote_processing_sequence.load(Ordering::Acquire)
+        {
+            return Err(LanSaveError::invalid_data("远端处理通知序号非法或重复"));
+        }
+        let phase = match phase {
+            ProcessingPhase::PreparingSend => RemotePhase::PreparingSend,
+            ProcessingPhase::Checking => RemotePhase::Checking,
+            ProcessingPhase::Receiving => RemotePhase::Receiving,
+            ProcessingPhase::Preparing => RemotePhase::Preparing,
+            ProcessingPhase::Preview => RemotePhase::Preview,
+            ProcessingPhase::Committing => RemotePhase::Committing,
+        };
+        let now = self.elapsed();
+        {
+            let mut wait = self
+                .remote_wait
+                .lock()
+                .map_err(|_| LanSaveError::invalid_state("远端等待状态锁已损坏"))?;
+            match wait.as_mut() {
+                Some(current) => current
+                    .observe(now, sequence, phase)
+                    .map_err(|_| LanSaveError::invalid_data("远端处理通知阶段/序号非法"))?,
+                None => {
+                    let mut current = RemoteWait::new(phase, now)
+                        .map_err(|_| LanSaveError::invalid_data("首条远端处理通知阶段非法"))?;
+                    current
+                        .observe(now, sequence, phase)
+                        .map_err(|_| LanSaveError::invalid_data("首条远端处理通知序号非法"))?;
+                    *wait = Some(current);
+                }
+            }
+        }
+        self.remote_processing_sequence
+            .store(sequence, Ordering::Release);
+        self.notify.notify_waiters();
+        Ok(())
+    }
+
+    pub(crate) async fn wait_for_remote_message<F>(
+        &self,
+        predicate: F,
+    ) -> Result<ControlMessage, LanSaveError>
+    where
+        F: Fn(&ControlMessage) -> bool,
+    {
+        loop {
+            if self.close_requested.load(Ordering::Acquire) {
+                return Err(LanSaveError::cancelled());
+            }
+            if let Some(message) = self.take_matching(&predicate)? {
+                return Ok(message);
+            }
+            let mut notified = Box::pin(self.notify.notified());
+            notified.as_mut().enable();
+            if self.close_requested.load(Ordering::Acquire) {
+                return Err(LanSaveError::cancelled());
+            }
+            if let Some(message) = self.take_matching(&predicate)? {
+                return Ok(message);
+            }
+            let remaining = {
+                let wait = self
+                    .remote_wait
+                    .lock()
+                    .map_err(|_| LanSaveError::invalid_state("远端等待状态锁已损坏"))?;
+                let current = wait
+                    .as_ref()
+                    .ok_or_else(|| LanSaveError::invalid_state("远端工作钟尚未启动"))?;
+                current.remaining(self.elapsed())
+            };
+            if remaining.is_zero() {
+                return Err(LanSaveError::expired("等待对端处理进展超时"));
+            }
+            tokio::select! {
+                _ = &mut notified => {}
+                // A heartbeat may have renewed the clock since this timer
+                // was armed. Re-read it before deciding that the peer expired.
+                _ = tokio::time::sleep(remaining) => {}
+            }
+        }
+    }
+
+    /// Resolves only when the currently armed remote clock has expired. The
+    /// caller must add its own close/cancel branch; no wait is treated as
+    /// pending forever so the unique control pump can keep servicing actions.
+    pub(crate) async fn wait_remote_expired(&self) {
+        loop {
+            let notified = self.notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            let remaining = {
+                let Ok(wait) = self.remote_wait.lock() else {
+                    return;
+                };
+                wait.as_ref()
+                    .map(|current| current.remaining(self.elapsed()))
+            };
+            let Some(remaining) = remaining else {
+                std::future::pending::<()>().await;
+                return;
+            };
+            if remaining.is_zero() {
+                return;
+            }
+            tokio::select! {
+                _ = &mut notified => {}
+                _ = tokio::time::sleep(remaining) => {
+                    let expired = self
+                        .remote_wait
+                        .lock()
+                        .ok()
+                        .and_then(|wait| wait.as_ref().map(|current| current.remaining(self.elapsed()).is_zero()))
+                        .unwrap_or(false);
+                    if expired {
+                        return;
+                    }
+                }
+            }
+        }
     }
 
     pub(crate) fn enter_worker(&self) -> Result<WorkerLease, LanSaveError> {
@@ -468,6 +704,10 @@ impl LanSession {
         self.role.load(Ordering::Acquire) == ROLE_OUTGOING
     }
 
+    pub(crate) fn is_incoming(&self) -> bool {
+        self.role.load(Ordering::Acquire) == ROLE_INCOMING
+    }
+
     pub(crate) fn set_offer(&self, offer: WireOffer) -> Result<(), LanSaveError> {
         *self
             .offer
@@ -569,6 +809,18 @@ impl LanSession {
             .file_task
             .lock()
             .map_err(|_| LanSaveError::invalid_state("文件任务锁已损坏"))? = Some(task);
+        Ok(())
+    }
+
+    pub(crate) fn clear_file_task(&self) -> Result<(), LanSaveError> {
+        *self
+            .file_job_id
+            .lock()
+            .map_err(|_| LanSaveError::invalid_state("文件任务锁已损坏"))? = None;
+        *self
+            .file_task
+            .lock()
+            .map_err(|_| LanSaveError::invalid_state("文件任务锁已损坏"))? = None;
         Ok(())
     }
 
@@ -697,5 +949,88 @@ impl LanSession {
             }),
             summary: None,
         });
+    }
+}
+
+pub(crate) struct PhaseHeartbeat {
+    stop: Arc<AtomicBool>,
+    notify: Arc<Notify>,
+    handle: tokio::task::JoinHandle<()>,
+}
+
+impl PhaseHeartbeat {
+    pub(crate) fn start(
+        session: Arc<LanSession>,
+        transfer_id: String,
+        phase: ProcessingPhase,
+    ) -> Result<Self, LanSaveError> {
+        let lease = session.enter_worker()?;
+        Ok(Self::start_owned(session, transfer_id, phase, lease))
+    }
+
+    /// Reserve this lease before accepting a commit: closing the link must
+    /// never prevent an already-accepted local transaction from starting.
+    pub(crate) fn start_owned(
+        session: Arc<LanSession>,
+        transfer_id: String,
+        phase: ProcessingPhase,
+        lease: WorkerLease,
+    ) -> Self {
+        let stop = Arc::new(AtomicBool::new(false));
+        let notify = Arc::new(Notify::new());
+        let task_stop = stop.clone();
+        let task_notify = notify.clone();
+        let task_session = session.clone();
+        let handle = tokio::spawn(async move {
+            let _lease = lease;
+            loop {
+                let sequence = match task_session.next_processing_sequence() {
+                    Ok(sequence) => sequence,
+                    Err(_) => break,
+                };
+                let message = ControlMessage::Processing {
+                    session_id: task_session.session_id.clone(),
+                    transfer_id: transfer_id.clone(),
+                    sequence,
+                    phase,
+                };
+                let connection = match task_session.connection() {
+                    Ok(connection) => connection,
+                    Err(_) => break,
+                };
+                if connection.write_control(&message).await.is_err() {
+                    break;
+                }
+                let notified = task_notify.notified();
+                tokio::pin!(notified);
+                notified.as_mut().enable();
+                if task_stop.load(Ordering::Acquire) || task_session.is_close_requested() {
+                    break;
+                }
+                tokio::select! {
+                    _ = &mut notified => break,
+                    _ = task_session.wait_until_closed() => break,
+                    _ = tokio::time::sleep(HEARTBEAT_INTERVAL) => {}
+                }
+            }
+        });
+        Self {
+            stop,
+            notify,
+            handle,
+        }
+    }
+
+    pub(crate) async fn stop(mut self) {
+        self.stop.store(true, Ordering::Release);
+        self.notify.notify_waiters();
+        let _ = (&mut self.handle).await;
+    }
+}
+
+impl Drop for PhaseHeartbeat {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        self.notify.notify_waiters();
     }
 }

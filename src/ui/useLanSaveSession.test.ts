@@ -83,7 +83,15 @@ function sendResult(status: LanSendResult["status"]): LanSendResult {
     writtenBooks: 1,
     attachedBookCount: 0,
     skippedBooks: [],
-    remoteCommit: status === "completed" ? commitResult("remote") : null,
+    remoteCommit: status === "completed"
+      ? {
+          importedBookCount: 1,
+          newVisibleBookCount: 1,
+          missingBookCount: 0,
+          progressConflictBookCount: 0,
+          appliedPreferences: false,
+        }
+      : null,
     resultDelivered: status === "completed",
     code: status === "failed" ? "network" : null,
     message: status === "failed" ? "网络中断" : null,
@@ -269,7 +277,7 @@ describe("useLanSaveSession", () => {
     await dom.run(() => {
       emit({ event: "paired", sessionId: "early", transferId: "t1" });
       emit({ event: "offered", sessionId: "early", transferId: "t1", summary: {
-        archiveBytes: 10, bookCount: 1, attachedBookCount: 0,
+        archiveBytes: 10, bookBytes: 0, reusedBookCount: 0, bookCount: 1, attachedBookCount: 0,
         includeBooks: false, hasPreferences: false, skippedBookCount: 0,
       } });
     });
@@ -304,7 +312,7 @@ describe("useLanSaveSession", () => {
       return Promise.resolve({ sessionId: "receive" });
     });
     const offer = () => emit({ event: "offered", sessionId: "receive", transferId: "t1", summary: {
-      archiveBytes: 10, bookCount: 1, attachedBookCount: 0,
+      archiveBytes: 10, bookBytes: 0, reusedBookCount: 0, bookCount: 1, attachedBookCount: 0,
       includeBooks: false, hasPreferences: false, skippedBookCount: 0,
     } });
     await dom.render(createElement(Probe));

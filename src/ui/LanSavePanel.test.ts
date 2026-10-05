@@ -18,7 +18,7 @@ it("扫码期间禁止另建连接，关闭或卸载后不消费迟到的扫码�
     state: {
       status: "idle", role: null, sessionId: null, transferId: null, pairingInfo: null,
       busy: false, closing: false, cancelTooLate: false, error: null, errorCode: null,
-      notice: null, offer: null, progress: null, preview: null, sendResult: null, remoteCommit: null,
+      notice: null, offer: null, progress: null, preview: null, sendResult: null, remoteCommit: null, localCommit: null,
     },
     active: false, startHost: vi.fn(), join: vi.fn(), send: vi.fn(), accept: vi.fn(),
     decline: vi.fn(), commit: vi.fn(), close: vi.fn(),
@@ -62,7 +62,7 @@ function sessionWith(overrides: Partial<UseLanSaveSessionResult["state"]>): UseL
     state: {
       status: "idle", role: null, sessionId: null, transferId: null, pairingInfo: null,
       busy: false, closing: false, cancelTooLate: false, error: null, errorCode: null,
-      notice: null, offer: null, progress: null, preview: null, sendResult: null, remoteCommit: null,
+      notice: null, offer: null, progress: null, preview: null, sendResult: null, remoteCommit: null, localCommit: null,
       ...overrides,
     },
     active: false, startHost: vi.fn(), join: vi.fn(), send: vi.fn(), accept: vi.fn(),

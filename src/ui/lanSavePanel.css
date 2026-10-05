@@ -319,7 +319,8 @@
 }
 
 .lan-paste textarea,
-.lan-field input {
+.lan-field input,
+.lan-field select {
   box-sizing: border-box;
   width: 100%;
   padding: 10px 12px;
@@ -338,7 +339,8 @@
 }
 
 .lan-paste textarea:focus,
-.lan-field input:focus {
+.lan-field input:focus,
+.lan-field select:focus {
   border-color: var(--accent);
 }
 

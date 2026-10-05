@@ -77,6 +77,15 @@ impl std::fmt::Display for LanSaveError {
 
 impl std::error::Error for LanSaveError {}
 
+impl From<crate::portable_state::PortableError> for LanSaveError {
+    fn from(error: crate::portable_state::PortableError) -> Self {
+        Self {
+            code: error.code,
+            message: error.message,
+        }
+    }
+}
+
 impl From<SaveFileError> for LanSaveError {
     fn from(error: SaveFileError) -> Self {
         Self {

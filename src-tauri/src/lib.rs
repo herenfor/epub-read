@@ -1,4 +1,5 @@
 mod android_battery;
+mod android_lan_network;
 mod android_lan_scan;
 mod android_uri_bridge;
 mod build_info;
@@ -7,6 +8,7 @@ mod build_info_contract;
 mod import_gate;
 mod ipc_bytes;
 mod lan_save;
+pub(crate) mod transfer_policy;
 mod portable_state_commands;
 mod save_file;
 
@@ -61,6 +63,7 @@ macro_rules! configure_invoke_handler {
             save_file::commands::save_file_commit_import,
             save_file::commands::save_file_cancel,
             lan_save::commands::lan_save_host,
+            lan_save::commands::lan_save_list_addresses,
             lan_save::commands::lan_save_join,
             lan_save::commands::lan_save_send,
             lan_save::commands::lan_save_accept,
@@ -181,6 +184,7 @@ macro_rules! configure_invoke_handler {
             save_file::commands::save_file_commit_import,
             save_file::commands::save_file_cancel,
             lan_save::commands::lan_save_host,
+            lan_save::commands::lan_save_list_addresses,
             lan_save::commands::lan_save_join,
             lan_save::commands::lan_save_send,
             lan_save::commands::lan_save_accept,
@@ -260,6 +264,7 @@ pub fn run() {
     let builder = builder
         .plugin(android_uri_bridge::plugin())
         .plugin(android_battery::plugin())
+        .plugin(android_lan_network::plugin())
         .plugin(android_lan_scan::plugin());
     // The embedding gateway only exists in the AI edition; Core must not link
     // or load the ONNX Runtime at all.
