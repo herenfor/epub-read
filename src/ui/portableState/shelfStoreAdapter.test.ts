@@ -287,6 +287,42 @@ describe("CP-I portable ShelfStore facade", () => {
     expect(written?.locator).toMatchObject({ locatorVersion: 0, spineIndex: 7, pageHint: 8, anchorTextOffset: 9 });
   });
 
+  test("exact progress lease close preserves a same-book note basis", async () => {
+    const legacy = new FakeLegacyStore([entry()]);
+    const service = new PortableStateService(new MemoryPortableStateStorage());
+    await activatePortableShelfStore(legacy, service);
+    const store = new PortableShelfStore(legacy, service);
+    const latest = latestVersion((await service.snapshot()).books[HASH].progress.versions);
+    const lease = await store.prepareProgressSession(
+      LOCAL_ID,
+      latest ? { kind: "chosen", stamp: latest.stamp } : { kind: "empty" },
+    );
+    store.activateProgressSession(lease);
+
+    const noteRead = await service.read({ bookHash: HASH });
+    const note = await service.adopt({
+      readId: noteRead.readId,
+      entity: { bookHash: HASH, kind: "note", id: "synthetic-note" },
+      selection: { kind: "empty" },
+    });
+
+    await store.updateProgressForSession(lease, { ...progressPatch(), page: 12, anchorTextOffset: 12 });
+    await store.closeProgressLease(lease);
+
+    // v3 progress release must not clear the same-book note basis/read.
+    await expect(service.write({
+      basisId: note.basisId,
+      intent: "auto",
+      value: null,
+      updatedAtMs: 2,
+    })).rejects.toMatchObject({ code: "invalid-intent" });
+    await service.release({ basisId: note.basisId });
+    await service.release({ readId: noteRead.readId });
+
+    const written = latestVersion((await service.snapshot()).books[HASH].progress.versions);
+    expect(written?.value?.locator).toMatchObject({ locatorVersion: 0, pageHint: 12, anchorTextOffset: 12 });
+  });
+
   test("new bookmark/note ids use explicit create and missing current ids tombstone", async () => {
     const legacy = new FakeLegacyStore([entry({
       bookmarks: [{

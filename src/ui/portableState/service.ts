@@ -59,6 +59,7 @@ import {
 import type { ShelfEntry } from "../shelf";
 import type { LibraryRecord } from "../libraryArchive";
 import type { PortableLegacyImportInput } from "./dataService";
+import type { ProgressRuntimeStatus } from "./progressRuntimeGate";
 import {
   META_LOCAL_VISIBLE,
   META_MIGRATION,
@@ -356,6 +357,7 @@ function buildLegacyImportState(
 }
 
 export class PortableStateService implements PortableStateCommandService {
+  private readonly repositoryGeneration = newOpaqueId();
   private readonly reads = new Map<string, ReadSnapshot>();
   private readonly bases = new Map<string, BasisRecord>();
 
@@ -979,6 +981,11 @@ export class PortableStateService implements PortableStateCommandService {
   }
 
   /** Current organization state from the same envelope used by portable data. */
+  async runtimeStatus(): Promise<ProgressRuntimeStatus> {
+    // Web health is the same in-memory service instance; no snapshot or migration.
+    return { repositoryGeneration: this.repositoryGeneration, repositoryReady: true };
+  }
+
   async getOrganization(): Promise<LibraryOrganization> {
     return this.withStorage(async () => this.storage.transaction(async (tx) => {
       const envelope = await this.requireEnvelope(tx);

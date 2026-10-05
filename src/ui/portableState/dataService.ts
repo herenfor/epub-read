@@ -3,6 +3,7 @@ import type { LibraryRecord } from "../libraryArchive";
 import type { PortableStateV3 } from "../../core/portableState/portable-state-types";
 import type { Stamp } from "../../core/portableState/portable-register-core";
 import type { PortableStateCommandService } from "./service";
+import type { ProgressRuntimeStatus } from "./progressRuntimeGate";
 
 export interface PortableActivationResult {
   readonly status: "fresh" | "migrated" | "already-migrated";
@@ -38,5 +39,7 @@ export interface PortableStateDataService extends PortableStateCommandService {
   applyOrganization(command: OrganizationCommand): Promise<LibraryOrganization>;
   mergeOrganization(incoming: LibraryOrganization): Promise<LibraryOrganization>;
   reserveStamps(count: number): Promise<Stamp>;
+  /** Read-only health probe; must not snapshot, migrate or activate a store. */
+  runtimeStatus(): Promise<ProgressRuntimeStatus>;
   activate?(): Promise<PortableActivationResult>;
 }

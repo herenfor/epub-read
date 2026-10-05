@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { ShelfProgressWriter } from "./progressWriter";
+import { ScopedProgressWriter, ShelfProgressWriter } from "./progressWriter";
+import type { ProgressLease } from "./portableState/ownedProgressSessions";
 import type { ShelfProgressPatch } from "./shelf";
 
 function patch(page: number): ShelfProgressPatch {
@@ -175,5 +176,55 @@ describe("ShelfProgressWriter", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+
+describe("ScopedProgressWriter", () => {
+  const lease = (bookId: string, generation = 1): ProgressLease => Object.freeze({ bookId, generation });
+
+  it("keeps one failed book lane without blocking another book", async () => {
+    const writer = new ScopedProgressWriter<number>(0);
+    const a = lease("a");
+    const b = lease("b");
+    writer.register(a, async () => { throw new Error("synthetic storage failure"); });
+    writer.register(b, async () => undefined);
+    writer.enqueue(a, 9);
+    await expect(writer.flush(a)).resolves.toMatchObject({ status: "failed" });
+    writer.enqueue(b, 3);
+    await expect(writer.flush(b)).resolves.toMatchObject({ status: "saved" });
+    expect(writer.hasUnsaved(a)).toBe(true);
+    expect(writer.hasUnsaved(b)).toBe(false);
+    writer.disposeTimers();
+  });
+
+  it("refuses a replacement lease until the old failed lane is retired", async () => {
+    const writer = new ScopedProgressWriter<number>(0);
+    const oldLease = lease("book", 1);
+    writer.register(oldLease, async () => { throw new Error("synthetic storage failure"); });
+    writer.enqueue(oldLease, 1);
+    await writer.flush(oldLease);
+    expect(() => writer.register(lease("book", 2), async () => undefined)).toThrow(/不能覆盖/);
+    writer.disposeTimers();
+  });
+
+  it("a late old rejection cannot replace a newer queued sample", async () => {
+    let first = true;
+    let rejectOld!: (error: unknown) => void;
+    const old = new Promise<void>((_, reject) => { rejectOld = reject; });
+    const written: number[] = [];
+    const writer = new ScopedProgressWriter<number>(0);
+    const book = lease("book");
+    writer.register(book, async (page) => {
+      if (first) { first = false; await old; }
+      written.push(page);
+    });
+    writer.enqueue(book, 4);
+    await Promise.resolve();
+    writer.enqueue(book, 5);
+    rejectOld(new Error("synthetic late failure"));
+    await expect(writer.flush(book)).resolves.toMatchObject({ status: "saved" });
+    expect(written).toEqual([5]);
+    writer.disposeTimers();
   });
 });

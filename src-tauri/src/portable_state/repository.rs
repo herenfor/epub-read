@@ -24,6 +24,9 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::OnceLock;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const KEY_INSTALLATION_ID: &str = "installationId";
 const KEY_COUNTER: &str = "counter";
@@ -142,6 +145,24 @@ pub struct PortableStore {
     next_handle: u64,
     reads: BTreeMap<String, ReadSnapshot>,
     bases: BTreeMap<String, StoredBasis>,
+    runtime_generation: String,
+}
+
+fn process_runtime_marker() -> &'static str {
+    static MARKER: OnceLock<String> = OnceLock::new();
+    MARKER.get_or_init(|| {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|value| value.as_nanos())
+            .unwrap_or(0);
+        format!("runtime-{nanos}")
+    })
+}
+
+fn next_store_generation() -> String {
+    static INSTANCE: AtomicU64 = AtomicU64::new(0);
+    let instance = INSTANCE.fetch_add(1, Ordering::Relaxed) + 1;
+    format!("{}-{}", process_runtime_marker(), instance)
 }
 
 fn parse_json<T: DeserializeOwned>(raw: &str, label: &str) -> PortableResult<T> {
@@ -764,7 +785,12 @@ impl PortableStore {
             next_handle: 0,
             reads: BTreeMap::new(),
             bases: BTreeMap::new(),
+            runtime_generation: next_store_generation(),
         })
+    }
+
+    pub fn runtime_generation(&self) -> &str {
+        &self.runtime_generation
     }
 
     fn new_handle(&mut self, prefix: &str) -> String {
