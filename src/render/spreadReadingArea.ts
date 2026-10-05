@@ -94,3 +94,62 @@ export function spreadReadingAreaStyles(area: SpreadReadingArea): Readonly<Recor
     "column-fill": "auto",
   };
 }
+
+export interface SpreadPageFold {
+  /** Viewer padding: each page's own outer side, which slides with the page. */
+  readonly paddingLeftPx: number;
+  readonly paddingRightPx: number;
+  /** Full viewer border-box width (the whole screen of the reading frame). */
+  readonly viewerBorderBoxWidth: number;
+  /** Gutter = paddingLeft + paddingRight, so one spread step equals the width. */
+  readonly geometry: SpreadGeometry;
+}
+
+/**
+ * Fold a comfortable spread's side space into its two pages so a turn slides
+ * the whole spread across the screen instead of inside a centred window.
+ *
+ * Every page is laid out as [left | column | right]; with CSS multi-column the
+ * gutter is therefore left + right and one spread advances exactly
+ * `fullWidth`. The column keeps the comfort measure cap: when the screen is
+ * wider than two capped columns plus the base margins, the surplus widens
+ * each page's margins proportionally (the gutter grows with them) rather than
+ * lengthening lines. Returns null when two columns no longer fit.
+ */
+export function foldSpreadIntoPages(
+  area: SpreadReadingArea,
+  input: {
+    /** Reading frame width including any folded author body padding. */
+    readonly fullWidth: number;
+    readonly fontSizePx: number;
+    /** Author body side padding moved into each page (0 when none). */
+    readonly authorInsetLeft?: number;
+    readonly authorInsetRight?: number;
+  },
+): SpreadPageFold | null {
+  const p = COMFORTABLE_SPREAD;
+  const half = input.fullWidth / 2;
+  let left = area.baseLeftPx + (input.authorInsetLeft ?? 0);
+  let right = area.baseRightPx + (input.authorInsetRight ?? 0);
+  const minimum = Math.max(p.minColumnPx, p.minColumnEm * input.fontSizePx);
+  let column = half - left - right;
+  if (!(column >= minimum)) return null;
+  if (column > area.maxColumnWidth && left + right > 0) {
+    const scale = (half - area.maxColumnWidth) / (left + right);
+    left *= scale;
+    right *= scale;
+    column = area.maxColumnWidth;
+  } else if (column > area.maxColumnWidth) {
+    left = right = (half - area.maxColumnWidth) / 2;
+    column = area.maxColumnWidth;
+  }
+  const gap = left + right;
+  const geometry = createSpreadGeometry(input.fullWidth - left - right, gap, 2, minimum);
+  if (geometry.columns !== 2) return null;
+  return {
+    paddingLeftPx: left,
+    paddingRightPx: right,
+    viewerBorderBoxWidth: input.fullWidth,
+    geometry,
+  };
+}
