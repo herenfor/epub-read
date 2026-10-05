@@ -46,6 +46,8 @@ import type { PortableActivationResult, PortableMergeOptions, PortableStateDataS
 import type { ArchiveClient } from "../../core/selectiveArchive";
 import { OwnedProgressSessions, type ProgressLease } from "./ownedProgressSessions";
 import type { ProgressRuntimeStatus } from "./progressRuntimeGate";
+import type { ConfirmedProgressWrite } from "../checkpointProgressRepair";
+import { ProgressWriteUnconfirmed } from "../checkpointProgressRepair";
 
 const HASH_RE = /^[0-9a-f]{64}$/;
 const TEXT_PROFILE = "visible-codepoints-no-whitespace-v1" as const;
@@ -147,7 +149,7 @@ function noteValueFromNote(input: ReaderNote): NoteValue {
   };
 }
 
-function progressValueFromPatch(patch: ShelfProgressPatch): ProgressValue {
+export function progressValueFromPatch(patch: ShelfProgressPatch): ProgressValue {
   return {
     locator: locatorFromReadingFields({
       spineIndex: patch.spineIndex,
@@ -500,6 +502,14 @@ export class PortableShelfStore implements ShelfStore {
     return this.progressSessions.payload(lease)?.bookHash;
   }
 
+  progressSessionChosenStamp(lease: ProgressLease): Stamp | null | undefined {
+    return this.progressSessions.payload(lease)?.chosenStamp;
+  }
+
+  private progressSessionInvalidForCompat(lease: ProgressLease): boolean {
+    return this.progressSessions.payload(lease)?.invalid === true;
+  }
+
   progressSessionRepositoryGeneration(lease: ProgressLease): string | undefined {
     return this.progressSessions.payload(lease)?.repositoryGeneration;
   }
@@ -513,6 +523,7 @@ export class PortableShelfStore implements ShelfStore {
   }
 
   private async rebindProgressSessionValue(session: ProgressReadingSessionValue): Promise<void> {
+    await this.data.release({ basisId: session.basisId }).catch(() => undefined);
     await this.data.release({ readId: session.readId }).catch(() => undefined);
     const read = await this.data.read({ bookHash: session.bookHash });
     if (!read.book) {
@@ -546,13 +557,19 @@ export class PortableShelfStore implements ShelfStore {
   }
 
   async rebindProgressSession(lease: ProgressLease): Promise<void> {
-    await this.progressSessions.run(lease, (session) => this.rebindProgressSessionValue(session));
+    await this.progressSessions.run(lease, async (session) => {
+      await this.rebindProgressSessionValue(session);
+      if (session.invalid) throw new ProgressWriteUnconfirmed("progress-needs-choice");
+    });
   }
 
-  async updateProgressForSession(lease: ProgressLease, patch: ShelfProgressPatch): Promise<ShelfEntry> {
+  async updateProgressForSession(
+    lease: ProgressLease,
+    patch: ShelfProgressPatch,
+  ): Promise<ConfirmedProgressWrite<ShelfEntry>> {
     return this.progressSessions.run(lease, async (session) => {
       if (session.invalid) {
-        throw new PortableStateError("stale-basis", "进度基线已过期，请关闭并重新打开书籍");
+        return { status: "unconfirmed", code: "progress-needs-choice" } as const;
       }
       const value = progressValueFromPatch(patch);
       const updatedAtMs = Math.max(patch.lastReadAtMs, Date.now());
@@ -566,19 +583,26 @@ export class PortableShelfStore implements ShelfStore {
         });
         session.basisId = result.nextBasisId;
         if (result.status === "written") {
-          // Keep the version we actually wrote as the displayed session basis.
-          const written = latestVersion(result.state.versions as readonly Version<ProgressValue>[]);
+          // Match this transaction's written version by value + write time.
+          // Never infer the displayed stamp from a UI projection that may have
+          // merged a different branch.
+          const encodedValue = JSON.stringify(value);
+          const written = (result.state.versions as readonly Version<ProgressValue>[])
+            .find((version) => version.updatedAtMs === updatedAtMs && JSON.stringify(version.value) === encodedValue);
           if (written) session.chosenStamp = written.stamp;
         }
-        return this.currentProjectedEntry(session.bookHash);
+        const entry = await this.currentProjectedEntry(session.bookHash);
+        return { status: "saved", entry, shownStamp: session.chosenStamp } as const;
       } catch (error) {
         if (
           error instanceof PortableStateError &&
           (error.code === "stale-basis" || error.code === "stale-choice")
         ) {
-          await this.data.release({ basisId: session.basisId }).catch(() => undefined);
           await this.rebindProgressSessionValue(session);
-          return this.currentProjectedEntry(session.bookHash);
+          return {
+            status: "unconfirmed",
+            code: session.invalid ? "progress-needs-choice" : "progress-write-interrupted",
+          } as const;
         }
         throw error;
       }
@@ -601,7 +625,22 @@ export class PortableShelfStore implements ShelfStore {
 
   async updateProgress(id: string, patch: ShelfProgressPatch): Promise<ShelfEntry> {
     const lease = this.compatibilityProgressLeases.get(id);
-    if (lease) return this.updateProgressForSession(lease, patch);
+    if (lease) {
+      const wasInvalid = this.progressSessionInvalidForCompat(lease);
+      const result = await this.updateProgressForSession(lease, patch);
+      if (result.status === "saved") return result.entry;
+      const isInvalid = this.progressSessionInvalidForCompat(lease);
+      if (isInvalid && wasInvalid) {
+        throw new PortableStateError("stale-basis", "进度基线已过期，请关闭并重新打开书籍");
+      }
+      // Compatibility path only: a first-rebind failure may return the current
+      // projection as before. Product writers must use updateProgressForSession
+      // and must not infer saved status from this wrapper.
+      const entry = await this.localEntryFor(id);
+      const hash = entry ? hashForLocalEntry(entry) : null;
+      if (!hash) return entry ?? (await this.legacy.updateProgress(id, patch));
+      return this.currentProjectedEntry(hash);
+    }
     const entry = await this.localEntryFor(id);
     if (!entry) throw new Error("书架中没有这本书");
     const hash = hashForLocalEntry(entry);

@@ -287,6 +287,37 @@ describe("CP-I portable ShelfStore facade", () => {
     expect(written?.locator).toMatchObject({ locatorVersion: 0, spineIndex: 7, pageHint: 8, anchorTextOffset: 9 });
   });
 
+  test("exact lease stale write is unconfirmed and does not silently adopt latest", async () => {
+    const legacy = new FakeLegacyStore([entry()]);
+    const service = new PortableStateService(new MemoryPortableStateStorage());
+    await activatePortableShelfStore(legacy, service);
+    const first = new PortableShelfStore(legacy, service);
+    const second = new PortableShelfStore(legacy, service);
+    const initial = latestVersion((await service.snapshot()).books[HASH].progress.versions)!;
+    const firstLease = await first.prepareProgressSession(LOCAL_ID, { kind: "chosen", stamp: initial.stamp });
+    first.activateProgressSession(firstLease);
+    await first.updateProgressForSession(firstLease, { ...progressPatch(), page: 8, anchorTextOffset: 8 });
+
+    const afterFirst = latestVersion((await service.snapshot()).books[HASH].progress.versions)!;
+    const secondLease = await second.prepareProgressSession(LOCAL_ID, { kind: "chosen", stamp: afterFirst.stamp });
+    second.activateProgressSession(secondLease);
+    await second.updateProgressForSession(secondLease, { ...progressPatch(), page: 20, anchorTextOffset: 20 });
+
+    const stale = await first.updateProgressForSession(firstLease, { ...progressPatch(), page: 9, anchorTextOffset: 9 });
+    expect(stale.status).toBe("unconfirmed");
+    if (stale.status === "unconfirmed") {
+      expect(["progress-needs-choice", "progress-write-interrupted"]).toContain(stale.code);
+    }
+    const versions = (await service.snapshot()).books[HASH].progress.versions;
+    expect(versions.some((version) =>
+      version.value?.locator.locatorVersion === 0 && version.value.locator.pageHint === 9,
+    )).toBe(false);
+    expect(latestVersion(versions)?.value?.locator).toMatchObject({ pageHint: 20 });
+
+    await first.closeProgressLease(firstLease);
+    await second.closeProgressLease(secondLease);
+  });
+
   test("exact progress lease close preserves a same-book note basis", async () => {
     const legacy = new FakeLegacyStore([entry()]);
     const service = new PortableStateService(new MemoryPortableStateStorage());
