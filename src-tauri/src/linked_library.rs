@@ -48,6 +48,41 @@ static TEMP_FILE_NONCE: AtomicU64 = AtomicU64::new(0);
 #[derive(Default)]
 pub struct LinkedLibraryWriteState(pub Mutex<()>);
 
+#[cfg(debug_assertions)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RecordsReadDiagnostic {
+    source: &'static str,
+    count: usize,
+    target_found: Option<bool>,
+}
+
+#[cfg(debug_assertions)]
+static LAST_RECORDS_READ: Mutex<Option<RecordsReadDiagnostic>> = Mutex::new(None);
+
+fn observe_records_read(source: &'static str, count: usize) {
+    #[cfg(debug_assertions)]
+    if let Ok(mut last) = LAST_RECORDS_READ.lock() {
+        *last = Some(RecordsReadDiagnostic { source, count, target_found: None });
+    }
+    #[cfg(not(debug_assertions))]
+    let _ = (source, count);
+}
+
+fn observe_record_target(found: bool) {
+    #[cfg(debug_assertions)]
+    if let Ok(mut last) = LAST_RECORDS_READ.lock() {
+        if let Some(read) = last.as_mut() { read.target_found = Some(found); }
+    }
+    #[cfg(not(debug_assertions))]
+    let _ = found;
+}
+
+#[cfg(debug_assertions)]
+pub(crate) fn records_read_diagnostic() -> Option<RecordsReadDiagnostic> {
+    LAST_RECORDS_READ.lock().ok().and_then(|last| last.clone())
+}
+
 /// Window-owned registry of native ZIP sessions. The registry lock is only
 /// held while looking up/inserting/removing; decoding and hashing happen on
 /// blocking threads without the library write lock.
@@ -993,9 +1028,12 @@ fn load_records_at(root: &Path) -> Result<Vec<LinkedLibraryRecord>, String> {
 
 fn load_records(app: &AppHandle) -> Result<Vec<LinkedLibraryRecord>, String> {
     if let Some(records) = load_portable_records(app)? {
+        observe_records_read("v3", records.len());
         return Ok(records);
     }
-    load_json_or_default(&records_path(app)?, "书库记录")
+    let records: Vec<LinkedLibraryRecord> = load_json_or_default(&records_path(app)?, "书库记录")?;
+    observe_records_read("legacy-json", records.len());
+    Ok(records)
 }
 
 fn load_bindings_at(root: &Path) -> Result<Vec<DeviceBinding>, String> {
@@ -1251,10 +1289,11 @@ fn prepare_source_read(
     bindings: &[DeviceBinding],
     content_hash: &str,
 ) -> Result<PendingSourceRead, String> {
-    if !records
+    let found = records
         .iter()
-        .any(|record| record.content_hash == content_hash)
-    {
+        .any(|record| record.content_hash == content_hash);
+    observe_record_target(found);
+    if !found {
         return Err("书库中没有这本书".into());
     }
     let binding = bindings

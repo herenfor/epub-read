@@ -34,6 +34,8 @@ import {
   type NativeFullscreenPort,
 } from "./ui/windowFullscreen";
 import { getRuntimeCapabilities } from "./platform/runtimeCapabilities";
+import { getAppBuildSession } from "./config/appBuildSession";
+import { checkThenRecoverProgressRuntime, planFreshProgressOpen } from "./ui/progressOpenOrder";
 import { useAndroidBack } from "./platform/useAndroidBack";
 import { useExitPresence } from "./ui/menuMotion";
 import { SidebarDrawer, type SidebarMode, type SidebarTab } from "./ui/SidebarDrawer";
@@ -125,7 +127,7 @@ import {
   sha256Hex,
 } from "./ui/importBooks";
 import { ScopedProgressWriter } from "./ui/progressWriter";
-import { ProgressRuntimeGate } from "./ui/portableState/progressRuntimeGate";
+import { ProgressRuntimeGate, type ProgressRuntimeStatus } from "./ui/portableState/progressRuntimeGate";
 import { LocalProgressCheckpoints, type LocalProgressCheckpoint } from "./ui/localProgressCheckpoint";
 import {
   planCheckpointOpen,
@@ -358,6 +360,7 @@ const DIAGNOSTIC_ERROR_CODES = new Set([
   "runtime-not-ready",
   "runtime-check-timeout",
   "runtime-check-interrupted",
+  "shelf-record-missing",
 ]);
 
 function diagnosticErrorCode(value: unknown): string | null {
@@ -1037,11 +1040,10 @@ export default function App() {
     });
   }
   const ensureProgressRuntimeReady = useCallback(async () => {
-    // Recovery/activation runs outside the gate timeout race; the read-only
-    // gate response is still required before an operation proceeds.
-    const recovered = await ensurePortableRepositoryReady();
-    const checked = await progressRuntimeGateRef.current?.check();
-    const status = checked ?? recovered;
+    const status = await checkThenRecoverProgressRuntime(
+      progressRuntimeGateRef.current!, ensurePortableRepositoryReady,
+    );
+    lastNativeRecordsReadRef.current = status.lastRecordsRead ?? null;
     if (status.repositoryGeneration) lastRepositoryGenerationRef.current = status.repositoryGeneration;
     return status;
   }, []);
@@ -1064,6 +1066,7 @@ export default function App() {
       : `js-boot-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   }
   const lastRepositoryGenerationRef = useRef<string>("unknown");
+  const lastNativeRecordsReadRef = useRef<ProgressRuntimeStatus["lastRecordsRead"] | null>(null);
   const recordLifecycleDiagnostic = useCallback((
     event: string,
     detail: {
@@ -1074,8 +1077,10 @@ export default function App() {
       readonly errorCode?: string;
       readonly backend?: string;
       readonly count?: number;
+      readonly targetFound?: boolean;
     } = {},
   ): void => {
+    if (!(getAppBuildSession()?.debug ?? import.meta.env.DEV)) return;
     const lease = activeProgressLeaseRef.current;
     const store = getShelfStore();
     const repositoryGeneration = detail.repositoryGeneration
@@ -1095,6 +1100,8 @@ export default function App() {
       jsBoot: jsBootIdRef.current,
       backend: detail.backend ?? null,
       count: detail.count ?? null,
+      targetFound: detail.targetFound ?? null,
+      lastNativeRecordsRead: lastNativeRecordsReadRef.current,
       portableFacade: portableShelfStateActive(),
       jsSession: sessionGenerationRef.current,
       activeLease: Boolean(activeProgressLeaseRef.current),
@@ -1103,6 +1110,17 @@ export default function App() {
     const lines = lifecycleDiagnosticsRef.current;
     lines.push(line);
     if (lines.length > 20) lines.splice(0, lines.length - 20);
+    if (event === "open_failed") {
+      // Read only the cached native diagnostic, through the bounded health
+      // gate. Do not delay the failed operation or read/migrate shelf data.
+      void progressRuntimeGateRef.current?.check().then((status) => {
+        lastNativeRecordsReadRef.current = status.lastRecordsRead ?? null;
+        recordLifecycleDiagnostic("native_after_failure", {
+          stage: detail.stage, result: "sampled",
+          repositoryGeneration: status.repositoryGeneration,
+        });
+      }).catch(() => undefined);
+    }
   }, []);
   /** 指针是否悬停在交互式浮层（脚注弹窗等）上：此时不响应翻页键/后续可扩展书签等 */
   const overlayHoverRef = useRef(false);
@@ -2522,6 +2540,7 @@ export default function App() {
           try {
             const status = await store.runtimeStatus?.();
             repositoryGeneration = status?.repositoryGeneration;
+            lastNativeRecordsReadRef.current = status?.lastRecordsRead ?? null;
             if (repositoryGeneration) lastRepositoryGenerationRef.current = repositoryGeneration;
           } catch {
             /* The list result stays authoritative; diagnostics may lack generation. */
@@ -2815,16 +2834,19 @@ export default function App() {
       searchOccurrence?: SearchOccurrence,
     ) => {
       if (shelfBusyRef.current) return;
-      const originalEntry = shelfEntriesRef.current.find((e) => e.id === id);
-      if (!originalEntry) return;
+      const cardEntry = shelfEntriesRef.current.find((e) => e.id === id);
+      if (!cardEntry) return;
       // Acquire the single-operation guard before the first await, including
       // readiness recovery and any user position-choice dialog.
       shelfBusyRef.current = true;
       setShelfBusyMessage("正在打开书籍…");
       setShelfBusy(true);
+      let preparationStage = "check";
+      const store = getShelfStore();
+      const writer = progressWriterRef.current!;
       try {
       // A real health response, not an event or cached promise, gates opening.
-      // Explicit recovery may run first, but the final gate check is read-only.
+      // Check the first read too; recover only after an explicit not-ready result.
       try {
         await ensureProgressRuntimeReady();
       } catch (error) {
@@ -2836,96 +2858,125 @@ export default function App() {
         setShelfNotice({ kind: "error", text: (error as Error).message });
         return;
       }
-      // B3: bind a specific progress version even when there is only one
-      // candidate. The same selection is adopted against the repository read
-      // before the EPUB is parsed.
-      let chosenProgressVersion: Version<ProgressValue> | null = null;
-      let progressSelection: PortableProgressSelection | null = null;
-      let checkpointAckPending: LocalProgressCheckpoint<ShelfProgressPatch> | null = null;
-      let checkpointPatchToRestore: LocalProgressCheckpoint<ShelfProgressPatch> | null = null;
-      let explicitPositionChoice = false;
-      const progressVersions = portableProgressVersions(originalEntry);
-      const checkpointBookHash = originalEntry.contentHash ?? id;
-      let checkpointForOpen: LocalProgressCheckpoint<ShelfProgressPatch> | null = null;
-      try {
-        checkpointForOpen = localCheckpointsRef.current?.peek(checkpointBookHash) ?? null;
-      } catch (error) {
-        setShelfNotice({ kind: "warn", text: `本机未确认阅读位置读取失败：${String(error)}` });
-      }
-      if (checkpointForOpen) {
-        const plan = planCheckpointOpen(checkpointForOpen, progressVersions, sameCheckpointLocation);
-        if (plan.kind === "use-saved") {
-          chosenProgressVersion = plan.version;
-          progressSelection = { kind: "chosen", stamp: plan.version.stamp };
-          checkpointAckPending = checkpointForOpen;
-        } else if (plan.kind === "restore-local") {
-          // The displayed basis remains valid, but the local sample still has
-          // to be written through that basis before the checkpoint can be acked.
-          checkpointPatchToRestore = plan.checkpoint;
-          chosenProgressVersion = plan.basis;
-          progressSelection = plan.basis
-            ? { kind: "chosen", stamp: plan.basis.stamp }
-            : { kind: "empty" };
-        } else {
-          const latest = latestVersion(progressVersions);
-          const choice = await new Promise<"local" | "synced" | null>((resolve) => {
-            localCheckpointResolverRef.current = resolve;
-            setLocalCheckpointConflict({ title: originalEntry.title, hasSynced: progressVersions.length > 0 });
+      persistShelfProgressRef.current();
+      const previousLease = activeProgressLeaseRef.current;
+      const targetLane = writer.current(id);
+      const openPlan = await planFreshProgressOpen({
+        flushTarget: async () => {
+          preparationStage = "flush";
+          return targetLane ? writer.flush(targetLane) : null;
+        },
+        readCurrent: async () => {
+          preparationStage = "read-current";
+          if (store.readProgressEntryForOpen) return store.readProgressEntryForOpen(id);
+          const entries = await store.list();
+          const entry = entries.find((item) => item.id === id);
+          if (!entry) throw Object.assign(new Error("书架中没有这本书"), {
+            code: "shelf-record-missing", recordsCount: entries.length, targetFound: false,
           });
-          localCheckpointResolverRef.current = null;
-          setLocalCheckpointConflict(null);
-          if (!choice) return;
-          explicitPositionChoice = true;
-          if (choice === "local") {
-            checkpointPatchToRestore = checkpointForOpen;
-            chosenProgressVersion = latest;
-            progressSelection = latest
-              ? { kind: "chosen", stamp: latest.stamp }
-              : { kind: "empty" };
-          } else {
-            setShelfNotice({
-              kind: "warn",
-              text: "已按同步位置打开；本机未确认阅读位置仍保留，待实际写入成功后确认。",
-            });
+          return entry;
+        },
+        choose: async (originalEntry) => {
+          preparationStage = "choose";
+          // B3: bind a specific progress version even when there is only one
+          // candidate. The same selection is adopted against the repository read
+          // before the EPUB is parsed.
+          let chosenProgressVersion: Version<ProgressValue> | null = null;
+          let progressSelection: PortableProgressSelection | null = null;
+          let checkpointAckPending: LocalProgressCheckpoint<ShelfProgressPatch> | null = null;
+          let checkpointPatchToRestore: LocalProgressCheckpoint<ShelfProgressPatch> | null = null;
+          let explicitPositionChoice = false;
+          const progressVersions = portableProgressVersions(originalEntry);
+          const checkpointBookHash = originalEntry.contentHash ?? id;
+          let checkpointForOpen: LocalProgressCheckpoint<ShelfProgressPatch> | null = null;
+          try {
+            checkpointForOpen = localCheckpointsRef.current?.peek(checkpointBookHash) ?? null;
+          } catch (error) {
+            setShelfNotice({ kind: "warn", text: `本机未确认阅读位置读取失败：${String(error)}` });
           }
-        }
-      }
-      if (!progressSelection) {
-        if (progressVersions.length > 1) {
-          const candidates = [...progressVersions]
-            .sort((left, right) => compareStamp(left.stamp, right.stamp))
-            .map((version): PortableProgressChoiceCandidate => {
-              const projection = projectProgressVersion(version);
-              return {
-                stamp: version.stamp,
-                version,
-                chapterPath: projection.chapterPath,
-                spineIndex: projection.spineIndex,
-                progressPct: projection.value?.progressPctHint ?? 0,
-                updatedAtMs: version.updatedAtMs,
-              };
-            });
-          const selectedStamp = await new Promise<Stamp | null>((resolve) => {
-            progressChoiceResolverRef.current = resolve;
-            setProgressChoice({ title: originalEntry.title, candidates });
-          });
-          progressChoiceResolverRef.current = null;
-          setProgressChoice(null);
-          if (!selectedStamp) return;
-          chosenProgressVersion = versionForStamp(progressVersions, selectedStamp);
-          if (!chosenProgressVersion) {
-            setShelfNotice({ kind: "error", text: "所选进度版本已失效，请重新打开" });
-            return;
+          if (checkpointForOpen) {
+            const plan = planCheckpointOpen(checkpointForOpen, progressVersions, sameCheckpointLocation);
+            if (plan.kind === "use-saved") {
+              chosenProgressVersion = plan.version;
+              progressSelection = { kind: "chosen", stamp: plan.version.stamp };
+              checkpointAckPending = checkpointForOpen;
+            } else if (plan.kind === "restore-local") {
+              // The displayed basis remains valid, but the local sample still has
+              // to be written through that basis before the checkpoint can be acked.
+              checkpointPatchToRestore = plan.checkpoint;
+              chosenProgressVersion = plan.basis;
+              progressSelection = plan.basis
+                ? { kind: "chosen", stamp: plan.basis.stamp }
+                : { kind: "empty" };
+            } else {
+              const latest = latestVersion(progressVersions);
+              const choice = await new Promise<"local" | "synced" | null>((resolve) => {
+                localCheckpointResolverRef.current = resolve;
+                setLocalCheckpointConflict({ title: originalEntry.title, hasSynced: progressVersions.length > 0 });
+              });
+              localCheckpointResolverRef.current = null;
+              setLocalCheckpointConflict(null);
+              if (!choice) return null;
+              explicitPositionChoice = true;
+              if (choice === "local") {
+                checkpointPatchToRestore = checkpointForOpen;
+                chosenProgressVersion = latest;
+                progressSelection = latest
+                  ? { kind: "chosen", stamp: latest.stamp }
+                  : { kind: "empty" };
+              } else {
+                setShelfNotice({
+                  kind: "warn",
+                  text: "已按同步位置打开；本机未确认阅读位置仍保留，待实际写入成功后确认。",
+                });
+              }
+            }
           }
-          explicitPositionChoice = true;
-          progressSelection = { kind: "chosen", stamp: selectedStamp };
-        } else if (progressVersions.length === 1) {
-          chosenProgressVersion = progressVersions[0];
-          progressSelection = { kind: "chosen", stamp: progressVersions[0].stamp };
-        } else {
-          progressSelection = { kind: "empty" };
-        }
-      }
+          if (!progressSelection) {
+            if (progressVersions.length > 1) {
+              const candidates = [...progressVersions]
+                .sort((left, right) => compareStamp(left.stamp, right.stamp))
+                .map((version): PortableProgressChoiceCandidate => {
+                  const projection = projectProgressVersion(version);
+                  return {
+                    stamp: version.stamp,
+                    version,
+                    chapterPath: projection.chapterPath,
+                    spineIndex: projection.spineIndex,
+                    progressPct: projection.value?.progressPctHint ?? 0,
+                    updatedAtMs: version.updatedAtMs,
+                  };
+                });
+              const selectedStamp = await new Promise<Stamp | null>((resolve) => {
+                progressChoiceResolverRef.current = resolve;
+                setProgressChoice({ title: originalEntry.title, candidates });
+              });
+              progressChoiceResolverRef.current = null;
+              setProgressChoice(null);
+              if (!selectedStamp) return null;
+              chosenProgressVersion = versionForStamp(progressVersions, selectedStamp);
+              if (!chosenProgressVersion) {
+                setShelfNotice({ kind: "error", text: "所选进度版本已失效，请重新打开" });
+                return null;
+              }
+              explicitPositionChoice = true;
+              progressSelection = { kind: "chosen", stamp: selectedStamp };
+            } else if (progressVersions.length === 1) {
+              chosenProgressVersion = progressVersions[0];
+              progressSelection = { kind: "chosen", stamp: progressVersions[0].stamp };
+            } else {
+              progressSelection = { kind: "empty" };
+            }
+          }
+          return { chosenProgressVersion, progressSelection, checkpointAckPending,
+            checkpointPatchToRestore, explicitPositionChoice };
+        },
+      });
+      if (!openPlan) return;
+      const originalEntry = openPlan.entry;
+      const { chosenProgressVersion, progressSelection, checkpointAckPending,
+        checkpointPatchToRestore } = openPlan.decision;
+      if (!progressSelection) return;
       shelfBusyRef.current = true;
       setShelfBusyMessage("正在打开书籍…");
       setShelfBusy(true);
@@ -2942,30 +2993,12 @@ export default function App() {
       let unownedArchive: ArchiveClient | null = null;
       let candidateLease: ProgressLease | null = null;
       let candidateActivated = false;
-      let targetSavedLease: ProgressLease | null = null;
-      let targetHandoffLease: ProgressLease | null = null;
+      const targetSavedLease = openPlan.targetSave?.status === "saved" ? targetLane : null;
+      const targetHandoffLease = openPlan.targetSave?.status === "failed" ? targetLane : null;
       let previousSavedLease: ProgressLease | null = null;
       let openStage: "check" | "flush" | "openArchive" | "begin" | "parse" | "publish" = "check";
-      const store = getShelfStore();
-      const writer = progressWriterRef.current;
       try {
         openStage = "flush";
-        persistShelfProgressRef.current();
-        const previousLease = activeProgressLeaseRef.current;
-        const targetLane = writer?.current(id);
-        // Flush but do not retire/close any old lease until the candidate has
-        // actually parsed and is ready to publish.
-        if (targetLane) {
-          const saved = await writer!.flush(targetLane);
-          if (saved.status === "failed") {
-            if (!explicitPositionChoice) {
-              throw new Error("这本书上次进度尚未保存，请重试后再打开");
-            }
-            targetHandoffLease = targetLane;
-          } else {
-            targetSavedLease = targetLane;
-          }
-        }
         // A different paused book may be flushed opportunistically; failure
         // keeps its lane/lease/checkpoint and does not abort this open.
         if (previousLease && previousLease !== targetLane && previousLease.bookId !== id) {
@@ -3071,11 +3104,7 @@ export default function App() {
         // 后面的空 spine / 进度解析 / 目标校验等任何失败路径都不能漏掉。
         unownedBook = b;
         if (b.spine.length === 0) {
-          setShelfError("这本书没有可阅读的内容");
-          shelfBusyRef.current = false;
-          setShelfBusy(false);
-          setSearchNavigationBusy(false);
-          return;
+          throw new Error("这本书没有可阅读的内容");
         }
         const srv = new ResourceServer(b);
         let saved: SavedProgress;
@@ -3293,12 +3322,19 @@ export default function App() {
           disposeBook(unownedBook);
         }
       }
+      } catch (error) {
+        const detail = error as { code?: string; recordsCount?: number; targetFound?: boolean };
+        recordLifecycleDiagnostic("open_failed", {
+          stage: preparationStage, result: "failed", errorCode: detail?.code,
+          count: detail?.recordsCount, targetFound: detail?.targetFound,
+        });
+        setShelfNotice({ kind: "error", text: `打开失败：${(error as Error).message}` });
       } finally {
         shelfBusyRef.current = false;
         setShelfBusy(false);
       }
     },
-    [openParsedBook, reimportAndroidMissing, recordLifecycleDiagnostic, showReaderNotice]
+    [openParsedBook, reimportAndroidMissing, recordLifecycleDiagnostic, showReaderNotice, ensureProgressRuntimeReady]
   );
 
   // 打开书后渐进统计章节字数；同一本书切章不重建该任务。

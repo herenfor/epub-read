@@ -33,6 +33,9 @@ pub struct PortableActivationResult {
 pub struct PortableRuntimeStatus {
     pub repository_generation: String,
     pub repository_ready: bool,
+    #[cfg(debug_assertions)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) last_records_read: Option<crate::linked_library::RecordsReadDiagnostic>,
 }
 
 fn storage_error(message: impl Into<String>) -> PortableError {
@@ -192,6 +195,8 @@ fn runtime_status_for_manager(
     Ok(PortableRuntimeStatus {
         repository_generation,
         repository_ready,
+        #[cfg(debug_assertions)]
+        last_records_read: crate::linked_library::records_read_diagnostic(),
     })
 }
 

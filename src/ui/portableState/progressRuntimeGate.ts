@@ -2,6 +2,12 @@
 export interface ProgressRuntimeStatus {
   readonly repositoryGeneration: string;
   readonly repositoryReady: boolean;
+  /** Debug-only, sampled at the existing native records read; no extra file read. */
+  readonly lastRecordsRead?: {
+    readonly source: "v3" | "legacy-json";
+    readonly count: number;
+    readonly targetFound: boolean | null;
+  };
 }
 
 export class ProgressRuntimeUnavailable extends Error {
@@ -30,6 +36,14 @@ export class ProgressRuntimeGate {
 
   /** Call on foreground/open, also after a real operation reports a stale runtime. */
   check(): Promise<ProgressRuntimeStatus> {
+    return this.inspectStatus().then((status) => {
+      if (!status.repositoryReady) throw new ProgressRuntimeUnavailable("runtime-not-ready");
+      return status;
+    });
+  }
+
+  /** Bounded read-only response, including a legitimate not-ready result. */
+  inspectStatus(): Promise<ProgressRuntimeStatus> {
     if (this.flight?.epoch === this.epoch) return this.flight.promise;
     const epoch = this.epoch;
     const deadline = Date.now() + this.timeoutMs;
@@ -42,7 +56,6 @@ export class ProgressRuntimeGate {
         if (epoch !== this.epoch) throw new ProgressRuntimeUnavailable("runtime-check-interrupted");
         // JS timers may have been frozen. Check wall time before accepting a late response.
         if (Date.now() >= deadline) throw new ProgressRuntimeUnavailable("runtime-check-timeout");
-        if (!status.repositoryReady) throw new ProgressRuntimeUnavailable("runtime-not-ready");
         return status;
       }).finally(() => {
         clearTimeout(timer);

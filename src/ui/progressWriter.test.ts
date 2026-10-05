@@ -9,6 +9,8 @@ import {
   ProgressWriteUnconfirmed,
 } from "./checkpointProgressRepair";
 import { createRepositoryReadinessRecovery } from "./portableState/repositoryReadinessRepair";
+import { ProgressRuntimeGate } from "./portableState/progressRuntimeGate";
+import { checkThenRecoverProgressRuntime, planFreshProgressOpen } from "./progressOpenOrder";
 import type { ShelfProgressPatch } from "./shelf";
 
 function patch(page: number): ShelfProgressPatch {
@@ -258,6 +260,41 @@ function memoryCheckpoints() {
 describe("progress lifecycle repair", () => {
   const stamp = { deviceId: "00000000-0000-4000-8000-000000000001", counter: 1 };
   const version = { stamp, page: 9 };
+
+  it("open_order bounds the first status query without activating on timeout", async () => {
+    const gate = new ProgressRuntimeGate(() => new Promise(() => undefined), 20);
+    const activate = vi.fn(async () => undefined);
+    await expect(checkThenRecoverProgressRuntime(gate, activate)).rejects.toMatchObject({ code: "runtime-check-timeout" });
+    expect(activate).not.toHaveBeenCalled();
+  });
+
+  it("open_order activates only an explicitly unready runtime and checks the real response", async () => {
+    let ready = false;
+    const gate = new ProgressRuntimeGate(async () => ({ repositoryReady: ready, repositoryGeneration: "synthetic" }));
+    const activate = vi.fn(async () => { ready = true; });
+    await expect(checkThenRecoverProgressRuntime(gate, activate)).resolves.toMatchObject({ repositoryReady: true });
+    await checkThenRecoverProgressRuntime(gate, activate);
+    expect(activate).toHaveBeenCalledTimes(1);
+  });
+
+  it("open_order cancellation and failed save do not retire the old lane", async () => {
+    const lease = Object.freeze({ bookId: "book", generation: 1 });
+    const writer = new ScopedProgressWriter<number>(0);
+    writer.register(lease, async () => { throw new Error("synthetic failure"); });
+    writer.enqueue(lease, 9);
+    const port = {
+      flushTarget: () => writer.flush(lease),
+      readCurrent: async () => ({ page: 9 }),
+      choose: async () => ({ explicitPositionChoice: false }),
+    };
+    await expect(planFreshProgressOpen(port)).rejects.toThrow("synthetic failure");
+    await expect(planFreshProgressOpen({ ...port, choose: async () => null })).resolves.toBeNull();
+    expect(writer.hasUnsaved(lease)).toBe(true);
+    const explicit = await planFreshProgressOpen({ ...port, choose: async () => ({ explicitPositionChoice: true }) });
+    expect(explicit?.targetSave?.status).toBe("failed");
+    expect(writer.current("book")).toBe(lease);
+    writer.disposeTimers();
+  });
 
   it("plans checkpoint open without bypassing multi-version choice", () => {
     const { checkpoints } = memoryCheckpoints();
