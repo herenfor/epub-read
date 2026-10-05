@@ -1,6 +1,6 @@
 use super::connection::{LanConnection, LanIo};
 use super::manager::{accept, close, commit, join, send, start_host, LanHostResult};
-use super::pairing::LanPairingV1;
+use super::pairing::LanPairing;
 use super::session::{GateClose, LanEventSink, LanSaveEvent, SessionGate};
 use super::tls::{client_config, server_name, TlsIdentity};
 use crate::linked_library::LinkedLibraryWriteState;
@@ -227,11 +227,21 @@ async fn lan_cover_roundtrip(already_imported: bool) {
     let session_id = host.session_id.clone();
     let send_handle = sender_handle.clone();
     let send_session = session_id.clone();
-    let send_task = tokio::spawn(async move {
-        send(&send_handle, &send_session, SaveExportScope::All, true).await
-    });
+    let send_task =
+        tokio::spawn(
+            async move { send(&send_handle, &send_session, SaveExportScope::All, true).await },
+        );
 
     let offered = wait_event(&join_log, "offered", Duration::from_secs(15)).await;
+    let offered_summary = offered.summary.as_ref().expect("offer summary");
+    assert_eq!(
+        offered_summary["attachedBookCount"],
+        if already_imported { 0 } else { 1 }
+    );
+    assert_eq!(
+        offered_summary["reusedBookCount"],
+        if already_imported { 1 } else { 0 }
+    );
     let transfer_id = offered.transfer_id.clone().expect("offer transferId");
     let preview = tokio::time::timeout(
         Duration::from_secs(30),
@@ -241,7 +251,11 @@ async fn lan_cover_roundtrip(already_imported: bool) {
     .expect("accept should not time out")
     .expect("accept should prepare");
     assert_eq!(preview.book_count, 1);
-    assert_eq!(preview.attached_books, vec![content_hash.clone()]);
+    if already_imported {
+        assert!(preview.attached_books.is_empty());
+    } else {
+        assert_eq!(preview.attached_books, vec![content_hash.clone()]);
+    }
     assert!(preview.missing_books.is_empty());
     let committed = commit(&receiver_handle, &session_id, &transfer_id, false)
         .await
@@ -254,7 +268,8 @@ async fn lan_cover_roundtrip(already_imported: bool) {
         .expect("send should return");
     assert_eq!(sent.status, "completed", "{sent:?}");
     let remote = sent.remote_commit.expect("remote commit summary");
-    assert_eq!(remote["status"], "committed");
+    assert_eq!(remote.imported_book_count, 1);
+    assert!(!remote.applied_preferences);
 
     assert!(
         !join_log
@@ -300,7 +315,7 @@ async fn lan_rejects_wrong_pin_and_token_without_touching_store() {
     let started = start_host(&host_handle, Ipv4Addr::LOCALHOST, host_log.sink())
         .await
         .expect("host should start");
-    let pairing = LanPairingV1::parse(&started.pairing_info).expect("valid pairing");
+    let pairing = LanPairing::parse(&started.pairing_info).expect("valid pairing");
 
     let mut wrong_pin = pairing.clone();
     let last = if wrong_pin.certificate_sha256.ends_with('0') {
@@ -470,7 +485,7 @@ async fn lan_pending_join_close_wakes_connection_attempt() {
     let identity = TlsIdentity::generate(Ipv4Addr::LOCALHOST).unwrap();
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let pairing = super::pairing::LanPairingV1::new(
+    let pairing = super::pairing::LanPairing::new(
         new_uuid().unwrap(),
         Ipv4Addr::LOCALHOST,
         addr.port(),
@@ -555,7 +570,28 @@ async fn lan_close_and_dropped_invoke_do_not_cancel_accepted_commit() {
     let host = start_host(&sh, Ipv4Addr::LOCALHOST, Arc::new(|_| {}))
         .await
         .unwrap();
-    join(&rh, &host.pairing_info, log.sink()).await.unwrap();
+    let log_sink = log.sink();
+    let commit_receiver = rh.clone();
+    join(
+        &rh,
+        &host.pairing_info,
+        Arc::new(move |event| {
+            if event.event == "committing" {
+                // Close after acceptance, before heartbeat/commit workers start.
+                let session = commit_receiver
+                    .state::<super::LanSaveManager>()
+                    .get(&event.session_id)
+                    .unwrap();
+                assert_eq!(session.gate().close().unwrap(), GateClose::CommitInProgress);
+                session.request_workers_close();
+                session.request_close();
+                session.connection().unwrap().stop();
+            }
+            log_sink(event);
+        }),
+    )
+    .await
+    .unwrap();
     let sid = host.session_id.clone();
     let send_app = sh.clone();
     let sending =
@@ -679,6 +715,95 @@ async fn lan_partial_control_frame_survives_select_without_prefetch() {
     assert!(buffer.is_empty());
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn lan_space_preflight_rejects_without_accept_or_store_change() {
+    let sender = TestApp::new("space-sender");
+    let receiver = TestApp::new("space-receiver");
+    let hash = hex_digest(b"space book");
+    seed_book(&sender, &hash, b"space book");
+    let sh = sender.handle();
+    let rh = receiver.handle();
+    let log = EventLog::default();
+    let host = start_host(&sh, Ipv4Addr::LOCALHOST, Arc::new(|_| {}))
+        .await
+        .unwrap();
+    join(&rh, &host.pairing_info, log.sink()).await.unwrap();
+    let sid = host.session_id.clone();
+    let send_app = sh.clone();
+    let sending =
+        tokio::spawn(async move { send(&send_app, &sid, SaveExportScope::All, true).await });
+    let offer = wait_event(&log, "offered", Duration::from_secs(5)).await;
+    let tid = offer.transfer_id.unwrap();
+
+    // Test-only override: the receiver's next real volume probe reports zero
+    // available bytes. No device storage is filled.
+    crate::save_file::set_available_space_override(Some(0));
+    let rejected = accept(&rh, &host.session_id, &tid).await;
+    crate::save_file::clear_available_space_override();
+    let error = rejected.expect_err("low-space accept must fail");
+    assert_eq!(error.code, "insufficient-space");
+
+    let sent = tokio::time::timeout(Duration::from_secs(5), sending)
+        .await
+        .expect("sender should observe decline")
+        .expect("send task join")
+        .expect("send returns a result");
+    assert_eq!(sent.status, "cancelled");
+    assert_eq!(sent.code.as_deref(), Some("insufficient-space"));
+    assert!(snapshot_books(&receiver).is_empty());
+    let managed = receiver
+        .root
+        .join("linked-library")
+        .join("books")
+        .join(format!("{hash}.epub"));
+    assert!(!managed.exists());
+    let staging = receiver
+        .root
+        .join("linked-library")
+        .join("books")
+        .join(".staging");
+    if staging.exists() {
+        assert_eq!(std::fs::read_dir(&staging).unwrap().count(), 0);
+    }
+    let _ = close(&rh, &host.session_id).await;
+    let _ = close(&sh, &host.session_id).await;
+}
+
+#[test]
+fn lan_v1_pairing_is_rejected_with_clear_protocol_mismatch() {
+    let mut pairing = LanPairing::new(
+        new_uuid().unwrap(),
+        Ipv4Addr::new(10, 0, 0, 1),
+        47777,
+        "b".repeat(64),
+        "a".repeat(64),
+    );
+    pairing.version = 1;
+    let error = LanPairing::parse(&pairing.encode().unwrap()).unwrap_err();
+    assert_eq!(error.code, "protocol-mismatch");
+    assert!(error.message.contains("更新到支持同一互传协议"));
+}
+
+#[test]
+fn lan_commit_summary_wire_stays_under_two_kib() {
+    let message = super::protocol::ControlMessage::Result {
+        session_id: new_uuid().unwrap(),
+        transfer_id: new_uuid().unwrap(),
+        status: "committed".to_string(),
+        result: Some(super::protocol::LanCommitSummary {
+            imported_book_count: 50_000,
+            new_visible_book_count: 123,
+            missing_book_count: 0,
+            progress_conflict_book_count: 2,
+            applied_preferences: true,
+        }),
+        code: None,
+        message: None,
+    };
+    let bytes = serde_json::to_vec(&message).unwrap();
+    assert!(bytes.len() < 2048, "wire result too large: {}", bytes.len());
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn lan_shutdown_notifies_quiet_session_and_drains_before_retry() {
     let host = TestApp::new("suspend-host");
@@ -704,4 +829,102 @@ async fn lan_shutdown_notifies_quiet_session_and_drains_before_retry() {
         .await
         .unwrap();
     close(&hh, &next.session_id).await.unwrap();
+}
+
+#[test]
+fn lan_merge_processing_sequence_survives_phase_clock_reset() {
+    use super::bulk_policy::RemotePhase;
+    use super::protocol::ProcessingPhase;
+    use super::session::LanSession;
+    let session = LanSession::new_join(new_uuid().unwrap(), new_uuid().unwrap(), Arc::new(|_| {}));
+    assert!(session
+        .observe_remote_processing(0, ProcessingPhase::Checking)
+        .is_err());
+    session
+        .observe_remote_processing(7, ProcessingPhase::Checking)
+        .unwrap();
+    assert!(session
+        .observe_remote_processing(7, ProcessingPhase::Checking)
+        .is_err());
+    session.clear_remote_wait();
+    session.arm_remote_wait(RemotePhase::Receiving).unwrap();
+    assert!(session
+        .observe_remote_processing(7, ProcessingPhase::Receiving)
+        .is_err());
+    session
+        .observe_remote_processing(8, ProcessingPhase::Receiving)
+        .unwrap();
+}
+
+#[test]
+fn lan_merge_binding_verification_cancels_between_buffers() {
+    let app = TestApp::new("hash-cancel");
+    let body = vec![42_u8; 3 * crate::save_file::COPY_BUFFER_BYTES];
+    let hash = hex_digest(&body);
+    seed_book(&app, &hash, &body);
+    let root = app.root.join("linked-library");
+    let binding = LocalBinding::new_managed(&hash, body.len() as u64, 0);
+    let calls = std::cell::Cell::new(0);
+    let result = binding.is_valid_cancellable(&root, || {
+        calls.set(calls.get() + 1);
+        calls.get() >= 3
+    });
+    assert_eq!(result.unwrap_err().code, "cancelled");
+    assert!(binding.is_valid(&root));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn lan_merge_cancel_reaches_pump_while_inventory_is_blocked() {
+    let sender = TestApp::new("blocked-inventory-sender");
+    let receiver = TestApp::new("blocked-inventory-receiver");
+    let hash = hex_digest(b"blocked inventory");
+    seed_book(&sender, &hash, b"blocked inventory");
+    let sh = sender.handle();
+    let rh = receiver.handle();
+    let host = start_host(&sh, Ipv4Addr::LOCALHOST, Arc::new(|_| {}))
+        .await
+        .unwrap();
+    join(&rh, &host.pairing_info, Arc::new(|_| {}))
+        .await
+        .unwrap();
+    let session = rh
+        .state::<super::LanSaveManager>()
+        .get(&host.session_id)
+        .unwrap();
+    let hold_app = rh.clone();
+    let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let hold = tokio::task::spawn_blocking(move || {
+        with_existing_store(&hold_app, |_| {
+            entered_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+            Ok(())
+        })
+        .unwrap();
+    });
+    entered_rx.await.unwrap();
+    let sid = host.session_id.clone();
+    let send_app = sh.clone();
+    let sending =
+        tokio::spawn(async move { send(&send_app, &sid, SaveExportScope::All, true).await });
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while session.gate().phase().unwrap() != super::session::Phase::Checking {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    // Let the query enter the real blocked repository lookup, then stop peer.
+    tokio::time::sleep(Duration::from_millis(80)).await;
+    close(&sh, &host.session_id).await.unwrap();
+    let cancelled = tokio::time::timeout(Duration::from_secs(2), session.wait_until_closed()).await;
+    // Always release the lock before asserting, even if the old pump deadlocks.
+    release_tx.send(()).unwrap();
+    hold.await.unwrap();
+    assert!(
+        cancelled.is_ok(),
+        "control pump stopped reading during inventory"
+    );
+    let _ = sending.await.unwrap();
+    close(&rh, &host.session_id).await.unwrap();
 }

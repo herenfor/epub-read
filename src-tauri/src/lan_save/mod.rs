@@ -5,6 +5,8 @@
 //! travel through JSON or a JS `Vec`. File/metadata work is delegated to the
 //! existing F-N `SaveFileManager` and `save_file` service functions.
 
+mod address_selection;
+pub(crate) use crate::transfer_policy as bulk_policy;
 mod connection;
 mod error;
 mod manager;

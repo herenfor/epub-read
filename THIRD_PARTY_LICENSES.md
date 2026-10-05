@@ -50,7 +50,7 @@ not require Google Play services; the camera permission is requested only
 after the user taps the scan action.
 
 The Windows target dependency `windows` 0.61.3 is used for DirectWrite system
-font enumeration and is recorded under its MIT OR Apache-2.0 terms. This
+font enumeration and native LAN adapter selection, and is recorded under its MIT OR Apache-2.0 terms. This
 feature adds no GPL dependency. Android system-font enumeration is not
 implemented in this release; only the frontend interface space is reserved.
 
@@ -63,6 +63,7 @@ RAG C-57 directly uses `reqwest` 0.13.4 (`MIT OR Apache-2.0`) for the isolated
 blocking/rustls download worker and `fs2` 0.4.3 (`MIT/Apache-2.0`, recorded here
 as the equivalent dual-license choice) for disk-space checks. The repository
 and license values above were checked against the local crate Cargo metadata.
+Core and AI also use `fs2` for archive and LAN-transfer disk-space checks.
 This is a direct-dependency notice, not a complete Cargo.lock transitive
 license, copyright, NOTICE, SBOM, or target-platform audit; that audit remains
 explicitly deferred.

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::net::{Ipv4Addr, UdpSocket};
 
 pub(crate) const PAIRING_PROTOCOL: &str = "epub-reader-lan";
-pub(crate) const PAIRING_VERSION: u32 = 1;
+pub(crate) const PAIRING_VERSION: u32 = 2;
 pub(crate) const PAIRING_MAX_BYTES: usize = 4 * 1024;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -15,7 +15,7 @@ pub(crate) struct LanEndpoint {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct LanPairingV1 {
+pub(crate) struct LanPairing {
     pub protocol: String,
     pub version: u32,
     pub session_id: String,
@@ -24,7 +24,7 @@ pub(crate) struct LanPairingV1 {
     pub token: String,
 }
 
-impl LanPairingV1 {
+impl LanPairing {
     pub(crate) fn new(
         session_id: String,
         host: Ipv4Addr,
@@ -81,7 +81,10 @@ impl LanPairingV1 {
             ));
         }
         if self.version != PAIRING_VERSION {
-            return Err(LanSaveError::invalid_request("不支持的连接协议版本"));
+            return Err(LanSaveError::new(
+                "protocol-mismatch",
+                "两台设备需要更新到支持同一互传协议的版本",
+            ));
         }
         if !valid_canonical_uuid(&self.session_id) {
             return Err(LanSaveError::invalid_request("sessionId 必须是规范 UUID"));
@@ -137,27 +140,22 @@ pub(crate) fn hex_encode(bytes: &[u8]) -> String {
     out
 }
 
-/// Pick the source address the OS would use for an off-link destination.
-/// It does not send a probe packet; if no IPv4 route is available the caller
-/// falls back to loopback for same-device testing.
-pub(crate) fn choose_default_lan_ipv4() -> Result<Ipv4Addr, LanSaveError> {
-    match UdpSocket::bind("0.0.0.0:0").and_then(|socket| {
-        socket.connect("192.0.2.1:9")?;
-        socket.local_addr()
-    }) {
-        Ok(addr) if addr.ip().is_ipv4() && !addr.ip().is_unspecified() => {
-            let ip = match addr.ip() {
-                std::net::IpAddr::V4(ip) => ip,
-                std::net::IpAddr::V6(_) => Ipv4Addr::LOCALHOST,
-            };
-            if !ip.is_loopback() && !ip.is_multicast() && !ip.is_broadcast() {
-                Ok(ip)
-            } else {
-                Err(LanSaveError::unreachable(
-                    "没有可用的非 loopback IPv4 局域网地址",
-                ))
-            }
-        }
-        Ok(_) | Err(_) => Err(LanSaveError::unreachable("无法选择本机 IPv4 局域网地址")),
+/// Route source hint for an off-link destination.
+///
+/// It does not send a probe packet. The returned address is never used as a
+/// bind address by itself: [`super::address_selection::ranked_addresses`] only
+/// applies it when the address is already a real, eligible LAN candidate. A
+/// VPN/TUN answer therefore cannot become the default host address.
+pub(crate) fn route_source_hint_ipv4() -> Option<Ipv4Addr> {
+    let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("192.0.2.1:9").ok()?;
+    let ip = match socket.local_addr().ok()?.ip() {
+        std::net::IpAddr::V4(ip) => ip,
+        std::net::IpAddr::V6(_) => return None,
+    };
+    if ip.is_unspecified() || ip.is_loopback() || ip.is_multicast() || ip.is_broadcast() {
+        None
+    } else {
+        Some(ip)
     }
 }

@@ -1,6 +1,7 @@
 use super::archive::{
-    imported_progress_conflicts, plan_export_books, preview_missing_books, scope_kind,
-    select_export_state, validate_and_extract, write_export_archive,
+    imported_progress_conflicts, plan_export_books, plan_export_books_for_missing,
+    preview_missing_books, scope_kind, select_export_state, validate_and_extract_with_expectation,
+    write_export_archive,
 };
 use super::{
     copy_reader_with_progress, managed_book_path, new_staging_dir, new_uuid, parse_bindings,
@@ -42,6 +43,7 @@ pub(crate) struct FileTask {
     phase: Mutex<TaskPhase>,
     ready: Condvar,
     prepared: Mutex<Option<PreparedImport>>,
+    owned_staging_dir: Mutex<Option<PathBuf>>,
 }
 
 impl FileTask {
@@ -53,7 +55,26 @@ impl FileTask {
             phase: Mutex::new(TaskPhase::Running),
             ready: Condvar::new(),
             prepared: Mutex::new(None),
+            owned_staging_dir: Mutex::new(None),
         }
+    }
+
+    pub(crate) fn set_owned_staging_dir(&self, dir: PathBuf) -> Result<(), SaveFileError> {
+        let mut slot = self.owned_staging_dir.lock().map_err(|_| lock_error())?;
+        if slot.is_some() {
+            return Err(SaveFileError::invalid_state(
+                "本任务已经登记过 owned staging 目录",
+            ));
+        }
+        *slot = Some(dir);
+        Ok(())
+    }
+
+    fn take_owned_staging_dir(&self) -> Option<PathBuf> {
+        self.owned_staging_dir
+            .lock()
+            .ok()
+            .and_then(|mut slot| slot.take())
     }
 }
 
@@ -78,7 +99,10 @@ fn lock_error() -> SaveFileError {
     SaveFileError::storage_error("存档文件任务锁已损坏")
 }
 
-pub(crate) fn reserve_job<R: Runtime>(app: &AppHandle<R>, job_id: &str) -> Result<Arc<FileTask>, SaveFileError> {
+pub(crate) fn reserve_job<R: Runtime>(
+    app: &AppHandle<R>,
+    job_id: &str,
+) -> Result<Arc<FileTask>, SaveFileError> {
     if !valid_job_id(job_id) {
         return Err(SaveFileError::invalid_request("jobId 必须是规范 UUID"));
     }
@@ -98,7 +122,10 @@ pub(crate) fn reserve_job<R: Runtime>(app: &AppHandle<R>, job_id: &str) -> Resul
     Ok(task)
 }
 
-pub(crate) fn active_task<R: Runtime>(app: &AppHandle<R>, job_id: &str) -> Result<Arc<FileTask>, SaveFileError> {
+pub(crate) fn active_task<R: Runtime>(
+    app: &AppHandle<R>,
+    job_id: &str,
+) -> Result<Arc<FileTask>, SaveFileError> {
     let manager = app.state::<SaveFileManager>();
     let slot = manager.active.lock().map_err(|_| lock_error())?;
     slot.as_ref()
@@ -124,6 +151,9 @@ fn clear_active<R: Runtime>(app: &AppHandle<R>, task: &Arc<FileTask>) {
 pub(crate) fn finish_task<R: Runtime>(app: &AppHandle<R>, task: &Arc<FileTask>) {
     if let Ok(mut prepared) = task.prepared.lock() {
         *prepared = None;
+    }
+    if let Some(dir) = task.take_owned_staging_dir() {
+        let _ = fs::remove_dir_all(dir);
     }
     if let Ok(mut phase) = task.phase.lock() {
         *phase = TaskPhase::Finished;
@@ -151,7 +181,9 @@ fn mark_prepared(task: &Arc<FileTask>, prepared: PreparedImport) -> bool {
     true
 }
 
-pub(crate) fn take_prepared_for_commit(task: &Arc<FileTask>) -> Result<PreparedImport, SaveFileError> {
+pub(crate) fn take_prepared_for_commit(
+    task: &Arc<FileTask>,
+) -> Result<PreparedImport, SaveFileError> {
     let mut phase = task.phase.lock().map_err(|_| lock_error())?;
     match *phase {
         TaskPhase::Prepared => {
@@ -215,6 +247,9 @@ pub(crate) fn cancel_task<R: Runtime>(
         TaskPhase::Prepared => {
             *phase = TaskPhase::Finished;
             let prepared = task.prepared.lock().map_err(|_| lock_error())?.take();
+            if let Some(dir) = task.take_owned_staging_dir() {
+                let _ = fs::remove_dir_all(dir);
+            }
             task.ready.notify_all();
             drop(phase);
             drop(prepared);
@@ -435,7 +470,6 @@ fn run_export(
     })
 }
 
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct LanExportOutput {
@@ -445,32 +479,62 @@ pub(crate) struct LanExportOutput {
     pub archive_bytes: u64,
     pub book_bytes: u64,
     pub written_books: usize,
+    pub reused_book_count: usize,
     pub skipped_books: Vec<SkippedBook>,
     pub book_count: usize,
     pub has_preferences: bool,
 }
 
-/// LAN export adapter: writes the existing v3 file format to a backend-owned
-/// temporary destination. It deliberately does not call `begin_publication`
-/// or replace a user-selected system path; the LAN transfer still owns and
-/// cleans this file, while the same `FileTask` slot remains held through the
-/// later network result.
+/// One immutable selection is shared by inventory and archive generation.
+pub(crate) struct FrozenLanExport {
+    pub selected_hashes: Vec<String>,
+    state: PortableStateV3,
+    bindings: std::collections::BTreeMap<String, LocalBinding>,
+    scope_kind: String,
+}
+
+pub(crate) fn freeze_lan_export<R: Runtime>(
+    app: &AppHandle<R>,
+    scope: &SaveExportScope,
+) -> Result<FrozenLanExport, SaveFileError> {
+    let (snapshot, raw_bindings) = store_parts(app)?;
+    let (state, selected_hashes) = select_export_state(&snapshot, scope)?;
+    Ok(FrozenLanExport {
+        selected_hashes,
+        state,
+        bindings: parse_bindings(raw_bindings)?,
+        scope_kind: scope_kind(scope).to_string(),
+    })
+}
+
+/// Writes the frozen v3 selection to a backend-owned temporary archive.
 pub(crate) fn run_lan_export<R: Runtime>(
     app: AppHandle<R>,
     task: Arc<FileTask>,
     target: PathBuf,
-    scope: SaveExportScope,
+    frozen: FrozenLanExport,
     include_books: bool,
+    receiver_missing: Option<std::collections::BTreeSet<String>>,
     on_progress: Channel<SaveFileProgress>,
 ) -> Result<LanExportOutput, SaveFileError> {
     let root = library_root(&app)?;
-    let (snapshot, raw_bindings) = store_parts(&app)?;
-    let bindings = parse_bindings(raw_bindings)?;
-    let (state, selected_hashes) = select_export_state(&snapshot, &scope)?;
-    let scope_kind = scope_kind(&scope).to_string();
+    let FrozenLanExport {
+        state,
+        selected_hashes,
+        bindings,
+        scope_kind,
+    } = frozen;
     let book_count = state.books.len();
     let has_preferences = state.preferences.is_some();
-    let (plans, skipped_books) = plan_export_books(&root, &state, &bindings, include_books);
+    let (plans, skipped_books, reused_book_count) = match receiver_missing {
+        Some(missing) if include_books => {
+            plan_export_books_for_missing(&root, &state, &bindings, true, &missing)
+        }
+        _ => {
+            let (plans, skipped) = plan_export_books(&root, &state, &bindings, include_books);
+            (plans, skipped, 0)
+        }
+    };
 
     if task.cancelled.load(Ordering::Acquire) {
         return Err(SaveFileError::cancelled());
@@ -499,6 +563,7 @@ pub(crate) fn run_lan_export<R: Runtime>(
         archive_bytes: stats.archive_bytes,
         book_bytes: stats.book_bytes,
         written_books: stats.written_books,
+        reused_book_count,
         skipped_books,
         book_count,
         has_preferences,
@@ -522,6 +587,33 @@ pub(crate) fn run_prepare<R: Runtime>(
     let root = library_root(&app)?;
     let staging_dir = new_staging_dir(&root, &task.job_id)?;
     match prepare_into_staging(&app, &task, &source, &staging_dir, &on_progress) {
+        Ok(preview) => Ok(preview),
+        Err(error) => {
+            let _ = fs::remove_dir_all(&staging_dir);
+            Err(error)
+        }
+    }
+}
+
+/// Owned LAN path: the archive was downloaded directly into this registered
+/// directory. Do not copy it, and do not recreate/remove the directory here.
+pub(crate) fn run_prepare_owned_lan<R: Runtime>(
+    app: AppHandle<R>,
+    task: Arc<FileTask>,
+    staging_dir: PathBuf,
+    expected: Option<(u64, usize)>,
+    on_progress: Channel<SaveFileProgress>,
+) -> Result<SaveFilePrepareResult, SaveFileError> {
+    let source_path = staging_dir.join("source.epubsave");
+    match prepare_from_staging(
+        &app,
+        &task,
+        &source_path,
+        &staging_dir,
+        expected,
+        true,
+        &on_progress,
+    ) {
         Ok(preview) => Ok(preview),
         Err(error) => {
             let _ = fs::remove_dir_all(&staging_dir);
@@ -589,12 +681,41 @@ fn prepare_into_staging<R: Runtime>(
         }
     }
 
+    prepare_from_staging(
+        app,
+        task,
+        &source_path,
+        staging_dir,
+        None,
+        false,
+        on_progress,
+    )
+}
+
+fn prepare_from_staging<R: Runtime>(
+    app: &AppHandle<R>,
+    task: &Arc<FileTask>,
+    source_path: &Path,
+    staging_dir: &Path,
+    expected: Option<(u64, usize)>,
+    remove_source_after_prepare: bool,
+    on_progress: &Channel<SaveFileProgress>,
+) -> Result<SaveFilePrepareResult, SaveFileError> {
+    if !source_path.is_file() {
+        return Err(SaveFileError::invalid_data("源存档临时文件不存在"));
+    }
+    let mut reporter = ProgressReporter::new(on_progress.clone(), "reading", None);
     if task.cancelled.load(Ordering::Acquire) {
         return Err(SaveFileError::cancelled());
     }
 
-    let validated =
-        validate_and_extract(&source_path, staging_dir, &mut reporter, &task.cancelled)?;
+    let validated = validate_and_extract_with_expectation(
+        source_path,
+        staging_dir,
+        &mut reporter,
+        &task.cancelled,
+        expected,
+    )?;
     if task.cancelled.load(Ordering::Acquire) {
         return Err(SaveFileError::cancelled());
     }
@@ -644,6 +765,9 @@ fn prepare_into_staging<R: Runtime>(
         total_uncompressed_bytes: validated.total_uncompressed_bytes,
     };
 
+    if remove_source_after_prepare {
+        fs::remove_file(source_path)?;
+    }
     if !mark_prepared(task, prepared) {
         return Err(SaveFileError::cancelled());
     }
@@ -698,10 +822,7 @@ fn compute_missing_books(
         .collect()
 }
 
-fn existing_attachment_matches(
-    target: &Path,
-    content_hash: &str,
-) -> Result<bool, SaveFileError> {
+fn existing_attachment_matches(target: &Path, content_hash: &str) -> Result<bool, SaveFileError> {
     if super::sha256_file(target)? == content_hash {
         Ok(false)
     } else {
@@ -721,11 +842,7 @@ fn copy_attachment_exclusive(
     target: &Path,
 ) -> Result<bool, SaveFileError> {
     let mut source = File::open(&attachment.staging_path)?;
-    let mut destination = match OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(target)
-    {
+    let mut destination = match OpenOptions::new().write(true).create_new(true).open(target) {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
             return existing_attachment_matches(target, &attachment.content_hash);
@@ -786,6 +903,23 @@ fn cleanup_published_targets(targets: &[PathBuf]) -> Result<(), SaveFileError> {
     }
 }
 
+fn cover_repair_row(
+    existing: &LocalBinding,
+    root: &Path,
+) -> Result<Option<(String, String)>, SaveFileError> {
+    if existing.cover_zip_path.is_some() {
+        return Ok(None);
+    }
+    let mut binding = existing.clone();
+    binding.fill_cover_from_epub(&binding.source_path(root)?);
+    if binding.cover_zip_path.is_none() {
+        return Ok(None);
+    }
+    let raw = serde_json::to_string(&binding)
+        .map_err(|error| SaveFileError::storage_error(format!("设备绑定无法序列化：{error}")))?;
+    Ok(Some((binding.content_hash.clone(), raw)))
+}
+
 pub(crate) fn run_commit<R: Runtime>(
     app: AppHandle<R>,
     task: Arc<FileTask>,
@@ -824,15 +958,8 @@ pub(crate) fn run_commit<R: Runtime>(
             {
                 // Re-importing an attachment repairs older coverless bindings
                 // without replacing the EPUB or recreating progress/annotations.
-                if existing.cover_zip_path.is_none() {
-                    let mut binding = existing.clone();
-                    binding.fill_cover_from_epub(&binding.source_path(&root)?);
-                    if binding.cover_zip_path.is_some() {
-                        let raw = serde_json::to_string(&binding).map_err(|error| {
-                            SaveFileError::storage_error(format!("设备绑定无法序列化：{error}"))
-                        })?;
-                        binding_rows.push((attachment.content_hash.clone(), raw));
-                    }
+                if let Some(row) = cover_repair_row(existing, &root)? {
+                    binding_rows.push(row);
                 }
                 continue;
             }
@@ -857,6 +984,28 @@ pub(crate) fn run_commit<R: Runtime>(
             binding_rows.push((attachment.content_hash.clone(), raw));
         }
 
+        // Books whose body was reused still need the existing cover-repair
+        // behavior. Only this incoming batch is touched; coverless valid
+        // bindings are repaired in the same merge transaction.
+        let attached_hashes: BTreeSet<&str> = prepared
+            .attachments
+            .iter()
+            .map(|attachment| attachment.content_hash.as_str())
+            .collect();
+        for hash in prepared.incoming.books.keys() {
+            if attached_hashes.contains(hash.as_str()) || published_hashes.contains(hash) {
+                continue;
+            }
+            if let Some(existing) = local_bindings
+                .get(hash)
+                .filter(|binding| binding.is_valid(&root))
+            {
+                if let Some(row) = cover_repair_row(existing, &root)? {
+                    binding_rows.push(row);
+                }
+            }
+        }
+
         let missing_books = compute_missing_books(
             &prepared.incoming,
             &prepared.attachments,
@@ -868,8 +1017,8 @@ pub(crate) fn run_commit<R: Runtime>(
 
         let (merged, visible_before) = with_existing_store(&app, |store| {
             let visible_before = store.local_visible_hashes()?;
-            let merged = store.merge_validated_import(
-                prepared.incoming.clone(),
+            let merged = store.merge_validated_import_ref(
+                &prepared.incoming,
                 binding_rows,
                 apply_preferences,
             )?;
@@ -1069,7 +1218,9 @@ mod tests {
 
         fs::write(&target, b"different existing bytes").unwrap();
         assert_eq!(
-            copy_attachment_exclusive(&attachment, &target).unwrap_err().code,
+            copy_attachment_exclusive(&attachment, &target)
+                .unwrap_err()
+                .code,
             "conflict"
         );
         assert_eq!(fs::read(&target).unwrap(), b"different existing bytes");

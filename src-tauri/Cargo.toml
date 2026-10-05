@@ -13,7 +13,7 @@ edition = "2021"
 # still pass an explicit edition feature so build.rs can reject mixed builds.
 default = []
 core = []
-ai = ["dep:fs2", "dep:reqwest", "windows/Win32_Graphics_Dxgi", "windows/Win32_Graphics_Dxgi_Common", "windows/Win32_Graphics_Direct3D", "windows/Win32_Graphics_Direct3D12"]
+ai = ["dep:reqwest", "windows/Win32_Graphics_Dxgi", "windows/Win32_Graphics_Dxgi_Common", "windows/Win32_Graphics_Direct3D", "windows/Win32_Graphics_Direct3D12"]
 
 [lib]
 name = "epub_reader_lib"
@@ -39,7 +39,7 @@ rcgen = { version = "0.14", default-features = false, features = ["ring"] }
 quick-xml = "0.41"
 zip = { version = "2.4", default-features = false, features = ["deflate"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
-fs2 = { version = "0.4.3", optional = true }
+fs2 = "0.4.3"
 reqwest = { version = "0.13.4", default-features = false, features = ["blocking", "rustls"], optional = true }
 
 [dev-dependencies]
@@ -50,9 +50,15 @@ tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt", "rt
 tauri-plugin-single-instance = "2.4.3"
 
 [target.'cfg(windows)'.dependencies]
-# Official windows-rs bindings (MIT OR Apache-2.0), used only to enumerate
-# DirectWrite font-family metadata. Font files are never opened or copied.
-windows = { version = "0.61.3", features = ["Win32_Graphics_DirectWrite"] }
+# Official windows-rs bindings (MIT OR Apache-2.0): DirectWrite font metadata
+# plus the Win32 IpHelper/Ndis network-adapter snapshot for LAN host selection.
+windows = { version = "0.61.3", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_DirectWrite",
+  "Win32_NetworkManagement_IpHelper",
+  "Win32_NetworkManagement_Ndis",
+  "Win32_Networking_WinSock",
+] }
 # Native embedding runtime for the AI edition only.  `ort` binds ONNX Runtime
 # (MIT) and `download-binaries` fetches a hash-pinned Microsoft build with the
 # DirectML EP at build time; `copy-dylibs` places DirectML.dll next to the

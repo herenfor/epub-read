@@ -1,11 +1,14 @@
 use super::{
-    hex_digest, now_ms, valid_hash, LocalBinding, MissingBook, ProgressReporter, SaveExportScope,
-    SaveFileError, SkippedBook, COPY_BUFFER_BYTES, JSON_LIMIT_BYTES,
+    available_space_for, hex_digest, now_ms, valid_hash, LocalBinding, MissingBook,
+    ProgressReporter, SaveExportScope, SaveFileError, SkippedBook, COPY_BUFFER_BYTES,
+    MANIFEST_JSON_LIMIT, STATE_JSON_LIMIT,
 };
+use crate::library_organization::LibraryOrganization;
 use crate::portable_state::{
     merge_portable_states, parse_portable_state_json, validate_portable_state, PortableStateV3,
     MAX_SAFE_COUNTER,
 };
+use crate::transfer_policy::{BoundedBytes, PolicyError, SpaceBudget};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -72,9 +75,44 @@ pub(crate) struct ValidatedPackage {
     pub total_uncompressed_bytes: u64,
 }
 
-fn serialize_json<T: Serialize>(value: &T) -> Result<Vec<u8>, SaveFileError> {
-    serde_json::to_vec(value)
-        .map_err(|error| SaveFileError::storage_error(format!("存档 JSON 无法序列化：{error}")))
+fn serialize_json_bounded<T: Serialize>(
+    value: &T,
+    limit: u64,
+    label: &str,
+) -> Result<Vec<u8>, SaveFileError> {
+    let mut writer = BoundedBytes::new(limit);
+    match serde_json::to_writer(&mut writer, value) {
+        Ok(()) => Ok(writer.into_bytes()),
+        Err(_) if writer.exceeded() => Err(SaveFileError::new(
+            "metadata-too-large",
+            format!("阅读资料过多，{label} 超过大小上限，请减少选书范围后分批发送/导出"),
+        )),
+        Err(error) => Err(SaveFileError::storage_error(format!(
+            "存档 JSON 无法序列化：{error}"
+        ))),
+    }
+}
+
+fn space_error(error: PolicyError) -> SaveFileError {
+    match error {
+        PolicyError::InsufficientSpace {
+            required,
+            available,
+        } => SaveFileError::new(
+            "insufficient-space",
+            format!(
+                "空间不足，需要约 {}，当前可用 {}",
+                human_bytes(required),
+                human_bytes(available)
+            ),
+        ),
+        other => SaveFileError::storage_error(format!("空间预检失败：{other:?}")),
+    }
+}
+
+fn human_bytes(bytes: u64) -> String {
+    const MIB: f64 = 1024.0 * 1024.0;
+    format!("{:.1} MiB", bytes as f64 / MIB)
 }
 
 pub(crate) fn scope_kind(scope: &SaveExportScope) -> &'static str {
@@ -88,9 +126,8 @@ pub(crate) fn select_export_state(
     snapshot: &PortableStateV3,
     scope: &SaveExportScope,
 ) -> Result<(PortableStateV3, Vec<String>), SaveFileError> {
-    let mut state = snapshot.clone();
     let selected: BTreeSet<String> = match scope {
-        SaveExportScope::All => state.books.keys().cloned().collect(),
+        SaveExportScope::All => snapshot.books.keys().cloned().collect(),
         SaveExportScope::Selected { book_hashes } => {
             if book_hashes.is_empty() {
                 return Err(SaveFileError::invalid_request(
@@ -118,33 +155,54 @@ pub(crate) fn select_export_state(
             seen
         }
     };
-    state.books.retain(|hash, _| selected.contains(hash));
-    state
-        .organization
+
+    // Clone only selected books instead of snapshot.clone() followed by retain.
+    let books: BTreeMap<String, _> = snapshot
         .books
-        .retain(|hash, _| selected.contains(hash));
-    match scope {
-        SaveExportScope::All => {}
-        SaveExportScope::Selected { .. } => {
-            let mut folder_ids = BTreeSet::new();
-            for book in state.organization.books.values() {
-                if let Some(folder_id) = book
-                    .folder_id
-                    .as_ref()
-                    .and_then(|register| register.value.as_ref())
-                {
-                    folder_ids.insert(folder_id.clone());
-                }
+        .iter()
+        .filter(|(hash, _)| selected.contains(hash.as_str()))
+        .map(|(hash, book)| (hash.clone(), book.clone()))
+        .collect();
+    let mut organization_books = BTreeMap::new();
+    let mut folder_ids = BTreeSet::new();
+    for hash in &selected {
+        if let Some(book) = snapshot.organization.books.get(hash) {
+            organization_books.insert(hash.clone(), book.clone());
+            if let Some(folder_id) = book
+                .folder_id
+                .as_ref()
+                .and_then(|register| register.value.as_ref())
+            {
+                folder_ids.insert(folder_id.clone());
             }
-            state
-                .organization
-                .folders
-                .retain(|folder_id, _| folder_ids.contains(folder_id));
         }
     }
-    let mut hashes: Vec<String> = state.books.keys().cloned().collect();
+    let organization = LibraryOrganization {
+        schema_version: snapshot.organization.schema_version,
+        folders: match scope {
+            SaveExportScope::All => snapshot.organization.folders.clone(),
+            SaveExportScope::Selected { .. } => snapshot
+                .organization
+                .folders
+                .iter()
+                .filter(|(folder_id, _)| folder_ids.contains(*folder_id))
+                .map(|(folder_id, folder)| (folder_id.clone(), folder.clone()))
+                .collect(),
+        },
+        books: organization_books,
+    };
+
+    let mut hashes: Vec<String> = books.keys().cloned().collect();
     hashes.sort();
-    Ok((state, hashes))
+    Ok((
+        PortableStateV3 {
+            schema_version: snapshot.schema_version,
+            books,
+            organization,
+            preferences: snapshot.preferences.clone(),
+        },
+        hashes,
+    ))
 }
 
 pub(crate) fn plan_export_books(
@@ -207,6 +265,82 @@ pub(crate) fn plan_export_books(
     (plans, skipped)
 }
 
+pub(crate) fn plan_export_books_for_missing(
+    root: &Path,
+    state: &PortableStateV3,
+    bindings: &BTreeMap<String, LocalBinding>,
+    include_books: bool,
+    receiver_missing: &BTreeSet<String>,
+) -> (Vec<ExportBookPlan>, Vec<SkippedBook>, usize) {
+    if !include_books {
+        return (Vec::new(), Vec::new(), 0);
+    }
+    let mut plans = Vec::new();
+    let mut skipped = Vec::new();
+    let mut reused = 0_usize;
+    for (content_hash, book) in &state.books {
+        if !receiver_missing.contains(content_hash) {
+            // The receiver already has a valid local file for this selected
+            // hash; no body transfer and no cover work needs the source bytes.
+            reused += 1;
+            continue;
+        }
+        let title = book.metadata.value.title.clone();
+        let Some(binding) = bindings.get(content_hash) else {
+            skipped.push(SkippedBook {
+                content_hash: content_hash.clone(),
+                title,
+                reason: "本机没有书籍文件绑定".to_string(),
+            });
+            continue;
+        };
+        if !binding.is_valid(root) {
+            skipped.push(SkippedBook {
+                content_hash: content_hash.clone(),
+                title,
+                reason: "本机书籍文件缺失或内容指纹不一致".to_string(),
+            });
+            continue;
+        }
+        let path = match binding.source_path(root) {
+            Ok(path) => path,
+            Err(error) => {
+                skipped.push(SkippedBook {
+                    content_hash: content_hash.clone(),
+                    title,
+                    reason: error.message,
+                });
+                continue;
+            }
+        };
+        let metadata = match fs::metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(_) => {
+                skipped.push(SkippedBook {
+                    content_hash: content_hash.clone(),
+                    title,
+                    reason: "本机书籍文件不存在或不可读".to_string(),
+                });
+                continue;
+            }
+        };
+        if !metadata.is_file() {
+            skipped.push(SkippedBook {
+                content_hash: content_hash.clone(),
+                title,
+                reason: "本机书籍源不是普通文件".to_string(),
+            });
+            continue;
+        }
+        plans.push(ExportBookPlan {
+            content_hash: content_hash.clone(),
+            source_path: path,
+            bytes: metadata.len(),
+        });
+    }
+    (plans, skipped, reused)
+}
+
 fn zip_file_options(compression: CompressionMethod, large_file: bool) -> SimpleFileOptions {
     let mut options = SimpleFileOptions::default().compression_method(compression);
     if large_file {
@@ -225,10 +359,7 @@ pub(crate) fn write_export_archive(
     reporter: &mut ProgressReporter,
     cancelled: &AtomicBool,
 ) -> Result<ExportStats, SaveFileError> {
-    let state_bytes = serialize_json(state)?;
-    if state_bytes.len() as u64 > JSON_LIMIT_BYTES {
-        return Err(SaveFileError::invalid_data("state.json 超过大小上限"));
-    }
+    let state_bytes = serialize_json_bounded(state, STATE_JSON_LIMIT, "state.json")?;
     let mut entries = Vec::with_capacity(plans.len() + 1);
     entries.push(SaveManifestEntry {
         path: "state.json".to_string(),
@@ -258,10 +389,21 @@ pub(crate) fn write_export_archive(
         },
         entries,
     };
-    let manifest_bytes = serialize_json(&manifest)?;
-    if manifest_bytes.len() as u64 > JSON_LIMIT_BYTES {
-        return Err(SaveFileError::invalid_data("manifest.json 超过大小上限"));
-    }
+    let manifest_bytes = serialize_json_bounded(&manifest, MANIFEST_JSON_LIMIT, "manifest.json")?;
+    let book_bytes = plans.iter().map(|plan| plan.bytes).sum::<u64>();
+    let budget = SpaceBudget::exporting(
+        book_bytes,
+        state_bytes.len() as u64,
+        manifest_bytes.len() as u64,
+        plans.len() as u64,
+    )
+    .map_err(space_error)?;
+    let parent = archive_path
+        .parent()
+        .ok_or_else(|| SaveFileError::storage_error("导出目标缺少父目录，无法做空间预检"))?;
+    let available = available_space_for(parent)?;
+    budget.check(available).map_err(space_error)?;
+
     let mut total_bytes = manifest_bytes.len() as u64 + state_bytes.len() as u64;
     for plan in plans {
         total_bytes = total_bytes.saturating_add(plan.bytes);
@@ -360,7 +502,10 @@ fn read_entry_bytes(
         .by_index(index)
         .map_err(|error| SaveFileError::invalid_data(format!("ZIP 条目无法读取：{error}")))?;
     if entry.size() > limit {
-        return Err(SaveFileError::invalid_data(format!("{label} 超过大小上限")));
+        return Err(SaveFileError::new(
+            "metadata-too-large",
+            format!("阅读资料过多，{label} 超过大小上限，请减少选书范围后分批发送/导出"),
+        ));
     }
     let mut output = Vec::with_capacity(entry.size().min(limit) as usize);
     entry
@@ -368,7 +513,10 @@ fn read_entry_bytes(
         .take(limit.saturating_add(1))
         .read_to_end(&mut output)?;
     if output.len() as u64 > limit {
-        return Err(SaveFileError::invalid_data(format!("{label} 超过大小上限")));
+        return Err(SaveFileError::new(
+            "metadata-too-large",
+            format!("阅读资料过多，{label} 超过大小上限，请减少选书范围后分批发送/导出"),
+        ));
     }
     if output.len() as u64 != entry.size() {
         return Err(SaveFileError::invalid_data(format!(
@@ -403,6 +551,16 @@ pub(crate) fn validate_and_extract(
     staging_dir: &Path,
     reporter: &mut ProgressReporter,
     cancelled: &AtomicBool,
+) -> Result<ValidatedPackage, SaveFileError> {
+    validate_and_extract_with_expectation(source_path, staging_dir, reporter, cancelled, None)
+}
+
+pub(crate) fn validate_and_extract_with_expectation(
+    source_path: &Path,
+    staging_dir: &Path,
+    reporter: &mut ProgressReporter,
+    cancelled: &AtomicBool,
+    expected: Option<(u64, usize)>,
 ) -> Result<ValidatedPackage, SaveFileError> {
     let source_bytes = fs::metadata(source_path)?.len();
     let file = File::open(source_path)?;
@@ -457,7 +615,7 @@ pub(crate) fn validate_and_extract(
         &mut archive,
         manifest_index,
         "manifest.json",
-        JSON_LIMIT_BYTES,
+        MANIFEST_JSON_LIMIT,
     )?;
     let manifest: SaveManifest = serde_json::from_slice(&manifest_bytes)
         .map_err(|error| SaveFileError::invalid_data(format!("manifest.json 无法解析：{error}")))?;
@@ -576,7 +734,7 @@ pub(crate) fn validate_and_extract(
         }
     }
 
-    let state_bytes = read_entry_bytes(&mut archive, state_index, "state.json", JSON_LIMIT_BYTES)?;
+    let state_bytes = read_entry_bytes(&mut archive, state_index, "state.json", STATE_JSON_LIMIT)?;
     let declared_state = manifest
         .entries
         .iter()
@@ -589,6 +747,7 @@ pub(crate) fn validate_and_extract(
         std::str::from_utf8(&state_bytes)
             .map_err(|_| SaveFileError::invalid_data("state.json 不是 UTF-8"))?,
     )?;
+    drop(state_bytes);
     validate_portable_state(&incoming)?;
 
     match manifest.scope.kind.as_str() {
@@ -639,6 +798,24 @@ pub(crate) fn validate_and_extract(
             )));
         }
     }
+
+    let book_bytes = manifest
+        .entries
+        .iter()
+        .filter(|entry| book_hash_from_path(&entry.path).is_some())
+        .map(|entry| entry.bytes)
+        .sum::<u64>();
+    let attached_count = attachment_hashes.len();
+    if let Some((expected_bytes, expected_count)) = expected {
+        if book_bytes != expected_bytes || attached_count != expected_count {
+            return Err(SaveFileError::invalid_data(format!(
+                "清单附书 {attached_count} 本/{book_bytes} 字节与 Offer {expected_count} 本/{expected_bytes} 字节不一致"
+            )));
+        }
+    }
+    let budget = SpaceBudget::extracting(book_bytes).map_err(space_error)?;
+    let available = available_space_for(staging_dir)?;
+    budget.check(available).map_err(space_error)?;
 
     let total_uncompressed_bytes = manifest
         .entries
@@ -1088,6 +1265,23 @@ mod tests {
                 "{label}: {error}"
             );
         }
+    }
+
+    #[test]
+    fn metadata_limits_are_64mib_for_state_and_16mib_for_manifest() {
+        let over_old_limit = "x".repeat(17 * 1024 * 1024);
+        let value = json!({ "payload": over_old_limit });
+        let state_bytes = serialize_json_bounded(&value, STATE_JSON_LIMIT, "state.json").unwrap();
+        assert!(state_bytes.len() as u64 > MANIFEST_JSON_LIMIT);
+
+        let manifest_error =
+            serialize_json_bounded(&value, MANIFEST_JSON_LIMIT, "manifest.json").unwrap_err();
+        assert_eq!(manifest_error.code, "metadata-too-large");
+
+        let over_state_limit = json!({ "payload": "x".repeat(65 * 1024 * 1024) });
+        let state_error =
+            serialize_json_bounded(&over_state_limit, STATE_JSON_LIMIT, "state.json").unwrap_err();
+        assert_eq!(state_error.code, "metadata-too-large");
     }
 
     #[test]

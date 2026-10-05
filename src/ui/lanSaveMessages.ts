@@ -45,6 +45,14 @@ export function lanErrorText(code: string | null, step: LanUserStep | null): str
       return step === "send"
         ? "读取要发送的书籍时出错。请确认书籍文件还在原来的位置。"
         : "保存时出错。请确认设备存储空间充足。";
+    case "insufficient-space":
+      return step === "send"
+        ? "空间不足，无法准备这次发送。请释放空间，或少选一些书。"
+        : "空间不足，无法接收这次传输。请释放空间后重新连接，或让对方少选一些书。";
+    case "metadata-too-large":
+      return "这次阅读资料太多。请少选一些书，分批发送。";
+    case "protocol-mismatch":
+      return "两台设备需要更新到支持同一互传协议的版本。";
     case "not-found":
     case "invalid-state":
       return "连接已经结束了。请重新连接。";
@@ -115,11 +123,13 @@ export function lanOfferTitle(offer: LanOfferSummary): string {
 }
 
 export function lanOfferDetail(offer: LanOfferSummary): string {
-  const size = formatLanBytes(offer.archiveBytes);
-  const body = offer.includeBooks && offer.attachedBookCount > 0
-    ? `包含 ${offer.attachedBookCount} 本书籍文件，共 ${size}。`
-    : `只包含阅读进度、书签和笔记，共 ${size}。`;
-  return offer.skippedBookCount > 0
-    ? `${body}另有 ${offer.skippedBookCount} 本书的文件对方没能找到，只会收到它们的阅读进度。`
-    : body;
+  if (!offer.includeBooks) {
+    return `只包含阅读进度、书签和笔记，共 ${formatLanBytes(offer.archiveBytes)}。`;
+  }
+  const attached = `新传 ${offer.attachedBookCount} 本书`;
+  const reused = offer.reusedBookCount > 0 ? `，你已有 ${offer.reusedBookCount} 本书` : "";
+  const skipped = offer.skippedBookCount > 0
+    ? `；另有 ${offer.skippedBookCount} 本书没有可用文件，只同步资料`
+    : "";
+  return `同步 ${offer.bookCount} 本资料，${attached}${reused}${skipped}。`;
 }

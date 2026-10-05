@@ -647,6 +647,25 @@ fn read_local_revisions(connection: &Connection) -> PortableResult<BTreeMap<Stri
     Ok(revisions)
 }
 
+pub(crate) fn group_import_revisions(
+    revisions: BTreeMap<String, u64>,
+    imported_hashes: &BTreeSet<String>,
+) -> PortableResult<BTreeMap<String, BTreeMap<String, u64>>> {
+    let mut grouped = BTreeMap::<String, BTreeMap<String, u64>>::new();
+    for (key, revision) in revisions {
+        let (hash, scoped_key) = key
+            .split_once(':')
+            .ok_or_else(|| PortableError::storage_error("本机 revision key 格式非法"))?;
+        if imported_hashes.contains(hash) {
+            grouped
+                .entry(hash.to_owned())
+                .or_default()
+                .insert(scoped_key.to_owned(), revision);
+        }
+    }
+    Ok(grouped)
+}
+
 fn load_local_visible_hashes(connection: &Connection) -> PortableResult<BTreeSet<String>> {
     let values: Vec<String> = load_meta_json(connection, KEY_LOCAL_VISIBLE)?.unwrap_or_default();
     let mut result = BTreeSet::new();
@@ -863,7 +882,18 @@ impl PortableStore {
         bindings: Vec<(String, String)>,
         apply_preferences: bool,
     ) -> PortableResult<PortableStateV3> {
-        dto::validate_portable_state(&incoming)?;
+        self.merge_validated_import_ref(&incoming, bindings, apply_preferences)
+    }
+
+    /// Reference-taking form used by the LAN commit path so the full incoming
+    /// DTO is not cloned just before merge.
+    pub fn merge_validated_import_ref(
+        &mut self,
+        incoming: &PortableStateV3,
+        bindings: Vec<(String, String)>,
+        apply_preferences: bool,
+    ) -> PortableResult<PortableStateV3> {
+        dto::validate_portable_state(incoming)?;
         for (content_hash, raw) in &bindings {
             if !dto::valid_content_hash(content_hash) {
                 return Err(PortableError::invalid_entity(
@@ -880,6 +910,7 @@ impl PortableStore {
             })?;
         }
 
+        let imported_hashes: BTreeSet<String> = incoming.books.keys().cloned().collect();
         let incoming_max = super::merge::maximum_received_counter_from_state(&incoming)?;
         let transaction = self.connection.unchecked_transaction()?;
         let local = load_state_at_connection(&transaction)?;
@@ -908,14 +939,15 @@ impl PortableStore {
             .max(merged_max);
         let _installation_id = ensure_installation_id(&transaction)?;
         let local_revisions = read_local_revisions(&transaction)?;
-        for (book_hash, book) in &merged.books {
-            let scoped: BTreeMap<String, u64> = local_revisions
-                .iter()
-                .filter_map(|(key, revision)| {
-                    key.strip_prefix(&format!("{book_hash}:"))
-                        .map(|suffix| (suffix.to_string(), *revision))
-                })
-                .collect();
+        let grouped_revisions = group_import_revisions(local_revisions, &imported_hashes)?;
+        for book_hash in &imported_hashes {
+            let Some(book) = merged.books.get(book_hash) else {
+                continue;
+            };
+            let scoped = grouped_revisions
+                .get(book_hash)
+                .cloned()
+                .unwrap_or_default();
             store_book_shape(&transaction, book_hash, book, &scoped)?;
         }
         store_organization(&transaction, &merged.organization)?;
@@ -2140,5 +2172,29 @@ mod file_import_tests {
         assert_eq!(store.local_is_new_hashes().unwrap(), is_new_before);
         assert_eq!(store.counter().unwrap(), counter_before);
         assert!(store.binding_raw(HASH).unwrap().is_none());
+    }
+}
+
+#[cfg(test)]
+mod grouping_tests {
+    use super::*;
+
+    #[test]
+    fn import_revision_grouping_keeps_full_scoped_annotation_ids() {
+        let imported_hash = "a".repeat(64);
+        let other_hash = "b".repeat(64);
+        let mut revisions = BTreeMap::new();
+        revisions.insert(format!("{imported_hash}:progress"), 7_u64);
+        revisions.insert(format!("{imported_hash}:bookmark:id:with:colons"), 8_u64);
+        revisions.insert(format!("{imported_hash}:note:note-1"), 9_u64);
+        revisions.insert(format!("{other_hash}:progress"), 10_u64);
+        let imported: BTreeSet<String> = std::iter::once(imported_hash.clone()).collect();
+
+        let grouped = group_import_revisions(revisions, &imported).unwrap();
+        let scoped = grouped.get(&imported_hash).unwrap();
+        assert_eq!(scoped.get("progress"), Some(&7));
+        assert_eq!(scoped.get("bookmark:id:with:colons"), Some(&8));
+        assert_eq!(scoped.get("note:note-1"), Some(&9));
+        assert!(!grouped.contains_key(&other_hash));
     }
 }

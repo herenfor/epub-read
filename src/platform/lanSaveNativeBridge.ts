@@ -28,6 +28,14 @@ export interface LanProgress {
 
 export type LanTransferStatus = "completed" | "cancelled" | "failed" | "unconfirmed";
 
+export interface LanCommitSummary {
+  importedBookCount: number;
+  newVisibleBookCount: number;
+  missingBookCount: number;
+  progressConflictBookCount: number;
+  appliedPreferences: boolean;
+}
+
 export interface LanSendResult {
   status: LanTransferStatus;
   transferId: string;
@@ -36,7 +44,7 @@ export interface LanSendResult {
   writtenBooks: number;
   attachedBookCount: number;
   skippedBooks: SkippedBook[];
-  remoteCommit: SaveFileCommitResult | null;
+  remoteCommit: LanCommitSummary | null;
   resultDelivered: boolean;
   code: string | null;
   message: string | null;
@@ -48,10 +56,19 @@ export interface LanCloseResult {
   status: LanCloseStatus;
 }
 
+export interface LanAddressOption {
+  address: string;
+  interfaceId: string;
+  label: string;
+  kind: string;
+}
+
 export interface LanOfferSummary {
   archiveBytes: number;
+  bookBytes: number;
   bookCount: number;
   attachedBookCount: number;
+  reusedBookCount: number;
   includeBooks: boolean;
   hasPreferences: boolean;
   skippedBookCount: number;
@@ -80,7 +97,28 @@ function normalizeLanSaveError(error: unknown): NativeError {
   return normalized;
 }
 
-async function invokeLan<T>(command: string, args: Record<string, unknown>): Promise<T> {
+function parseLanAddressOption(value: unknown): LanAddressOption | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const address = typeof record.address === "string" ? record.address.trim() : "";
+  if (!address) return null;
+  return {
+    address,
+    interfaceId: typeof record.interfaceId === "string" ? record.interfaceId : "",
+    label: typeof record.label === "string" && record.label.trim() ? record.label.trim() : address,
+    kind: typeof record.kind === "string" ? record.kind : "other",
+  };
+}
+
+export async function listLanSaveAddresses(): Promise<LanAddressOption[]> {
+  const raw = await invokeLan<unknown>("lan_save_list_addresses");
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map(parseLanAddressOption)
+    .filter((address): address is LanAddressOption => address !== null);
+}
+
+async function invokeLan<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   try {
     return await invoke<T>(command, args);
   } catch (error) {

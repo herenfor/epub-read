@@ -22,10 +22,26 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::ipc::Channel;
 use tauri::Manager;
 
-pub(crate) const JSON_LIMIT_BYTES: u64 = 16 * 1024 * 1024;
+pub(crate) const MANIFEST_JSON_LIMIT: u64 = crate::transfer_policy::MANIFEST_JSON_LIMIT;
+pub(crate) const STATE_JSON_LIMIT: u64 = crate::transfer_policy::STATE_JSON_LIMIT;
 pub(crate) const COPY_BUFFER_BYTES: usize = 64 * 1024;
 pub(crate) const PROGRESS_STEP_BYTES: u64 = 256 * 1024;
 pub(crate) const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
+
+#[cfg(test)]
+thread_local! {
+    static AVAILABLE_SPACE_OVERRIDE: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) fn set_available_space_override(value: Option<u64>) {
+    AVAILABLE_SPACE_OVERRIDE.with(|slot| slot.set(value));
+}
+
+#[cfg(test)]
+pub(crate) fn clear_available_space_override() {
+    AVAILABLE_SPACE_OVERRIDE.with(|slot| slot.set(None));
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -315,6 +331,45 @@ pub(crate) fn new_staging_dir(root: &Path, job_id: &str) -> Result<PathBuf, Save
     Ok(dir)
 }
 
+/// LAN owns this directory before the first download byte. It deliberately
+/// does not call `new_staging_dir` during/after download because that function
+/// removes the directory first.
+pub(crate) fn create_owned_staging_dir(
+    root: &Path,
+    job_id: &str,
+) -> Result<PathBuf, SaveFileError> {
+    if !valid_job_id(job_id) {
+        return Err(SaveFileError::invalid_request("jobId 必须是规范 UUID"));
+    }
+    let dir = staging_root(root).join(format!("save-file-{job_id}"));
+    if dir.exists() {
+        fs::remove_dir_all(&dir)?;
+    }
+    fs::create_dir_all(&dir)?;
+    Ok(dir)
+}
+
+/// Query the volume that will hold `path`. Walk to the nearest existing
+/// ancestor because a fresh staging subdirectory may not exist yet.
+pub(crate) fn available_space_for(path: &Path) -> Result<u64, SaveFileError> {
+    #[cfg(test)]
+    if let Some(value) = AVAILABLE_SPACE_OVERRIDE.with(|slot| slot.get()) {
+        return Ok(value);
+    }
+    let mut probe = path;
+    loop {
+        if probe.exists() {
+            return fs2::available_space(probe).map_err(|error| {
+                SaveFileError::storage_error(format!("无法读取目标卷可用空间：{error}"))
+            });
+        }
+        match probe.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => probe = parent,
+            _ => return Err(SaveFileError::storage_error("无法定位暂存目录所在卷")),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct LocalBinding {
@@ -388,21 +443,34 @@ impl LocalBinding {
     }
 
     pub(crate) fn is_valid(&self, root: &Path) -> bool {
+        self.is_valid_cancellable(root, || false).unwrap_or(false)
+    }
+
+    pub(crate) fn is_valid_cancellable(
+        &self,
+        root: &Path,
+        cancelled: impl Fn() -> bool,
+    ) -> Result<bool, SaveFileError> {
+        if cancelled() {
+            return Err(SaveFileError::cancelled());
+        }
         let Ok(path) = self.source_path(root) else {
-            return false;
+            return Ok(false);
         };
         let Ok(metadata) = fs::metadata(&path) else {
-            return false;
+            return Ok(false);
         };
         if !metadata.is_file() || metadata.len() == 0 {
-            return false;
+            return Ok(false);
         }
         if self.file_size != 0 && metadata.len() != self.file_size {
-            return false;
+            return Ok(false);
         }
-        sha256_file(&path)
-            .map(|hash| hash == self.content_hash)
-            .unwrap_or(false)
+        match sha256_file_cancellable(&path, cancelled) {
+            Ok(hash) => Ok(hash == self.content_hash),
+            Err(error) if error.code == "cancelled" => Err(error),
+            Err(_) => Ok(false),
+        }
     }
 }
 
@@ -435,10 +503,20 @@ pub(crate) fn parse_bindings(
 }
 
 pub(crate) fn sha256_file(path: &Path) -> Result<String, SaveFileError> {
+    sha256_file_cancellable(path, || false)
+}
+
+pub(crate) fn sha256_file_cancellable(
+    path: &Path,
+    cancelled: impl Fn() -> bool,
+) -> Result<String, SaveFileError> {
     let mut file = File::open(path)?;
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; COPY_BUFFER_BYTES];
     loop {
+        if cancelled() {
+            return Err(SaveFileError::cancelled());
+        }
         let read = file.read(&mut buffer)?;
         if read == 0 {
             break;

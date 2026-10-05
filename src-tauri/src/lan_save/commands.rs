@@ -1,7 +1,8 @@
+use super::address_selection::LanAddressInfo;
 use super::error::LanSaveError;
 use super::manager::{
-    accept, close, commit, event_sink, host_with_bind_ip, join, send, LanCloseResult,
-    LanHostResult, LanJoinResult, LanSendResult,
+    accept, close, commit, event_sink, host_with_bind_ip, join, list_local_addresses, send,
+    LanCloseResult, LanHostResult, LanJoinResult, LanSendResult,
 };
 use super::session::LanSaveEvent;
 use crate::save_file::{SaveExportScope, SaveFileCommitResult, SaveFilePrepareResult};
@@ -15,6 +16,11 @@ pub async fn lan_save_host(
     bind_ip: Option<String>,
 ) -> Result<LanHostResult, LanSaveError> {
     host_with_bind_ip(&app, event_sink(on_event), bind_ip).await
+}
+
+#[tauri::command]
+pub async fn lan_save_list_addresses(app: AppHandle) -> Result<Vec<LanAddressInfo>, LanSaveError> {
+    list_local_addresses(&app).await
 }
 
 #[tauri::command]

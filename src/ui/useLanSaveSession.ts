@@ -9,6 +9,7 @@ import {
   lanSaveErrorMessage,
   sendLanSave,
   type LanCloseResult,
+  type LanCommitSummary,
   type LanOfferSummary,
   type LanProgress,
   type LanSaveEvent,
@@ -53,7 +54,8 @@ export interface LanSaveSessionState {
   progress: LanProgress | null;
   preview: SaveFilePrepareResult | null;
   sendResult: LanSendResult | null;
-  remoteCommit: SaveFileCommitResult | null;
+  remoteCommit: LanCommitSummary | null;
+  localCommit: SaveFileCommitResult | null;
 }
 
 export interface UseLanSaveSessionOptions {
@@ -96,21 +98,26 @@ const INITIAL_STATE: LanSaveSessionState = {
   preview: null,
   sendResult: null,
   remoteCommit: null,
+  localCommit: null,
 };
 
 function parseOfferSummary(value: unknown): LanOfferSummary | null {
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
   const archiveBytes = record.archiveBytes;
+  const bookBytes = record.bookBytes;
   const bookCount = record.bookCount;
   const attachedBookCount = record.attachedBookCount;
+  const reusedBookCount = record.reusedBookCount;
   const includeBooks = record.includeBooks;
   const hasPreferences = record.hasPreferences;
   const skippedBookCount = record.skippedBookCount;
   if (
     typeof archiveBytes !== "number" || !Number.isFinite(archiveBytes) ||
+    typeof bookBytes !== "number" || !Number.isFinite(bookBytes) ||
     typeof bookCount !== "number" || !Number.isInteger(bookCount) ||
     typeof attachedBookCount !== "number" || !Number.isInteger(attachedBookCount) ||
+    typeof reusedBookCount !== "number" || !Number.isInteger(reusedBookCount) ||
     typeof includeBooks !== "boolean" ||
     typeof hasPreferences !== "boolean" ||
     typeof skippedBookCount !== "number" || !Number.isInteger(skippedBookCount)
@@ -119,8 +126,10 @@ function parseOfferSummary(value: unknown): LanOfferSummary | null {
   }
   return {
     archiveBytes,
+    bookBytes,
     bookCount,
     attachedBookCount,
+    reusedBookCount,
     includeBooks,
     hasPreferences,
     skippedBookCount,
@@ -669,7 +678,7 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
         status: "commitComplete",
         busy: false,
         preview: null,
-        remoteCommit: result,
+        localCommit: result,
         error: null,
         errorCode: null,
         notice: `已导入 ${result.importedBooks.length} 本资料。`,
