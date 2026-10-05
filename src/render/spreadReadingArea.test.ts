@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createSpreadLayout, spreadStart } from "./pagedSpread";
-import { resolveSpreadReadingArea, spreadReadingAreaStyles } from "./spreadReadingArea";
+import { foldSpreadIntoPages, resolveSpreadReadingArea, spreadReadingAreaStyles } from "./spreadReadingArea";
 
 const area = (availableWidth: number, extra: Record<string, number> = {}) =>
   resolveSpreadReadingArea({
@@ -72,5 +72,60 @@ describe("comfortable spread reading area", () => {
     expect(layout.pageCount).toBe(3);
     near(spreadStart(layout, 2), 4 * value.geometry.columnStep);
     near(layout.requiredScrollWidth, spreadStart(layout, 2) + value.geometry.viewportWidth);
+  });
+});
+
+describe("spread folded into pages (full-width turns)", () => {
+  const fold = (width: number, fontSizePx = 16, extra: { leftPx?: number; rightPx?: number; author?: number } = {}) => {
+    const author = extra.author ?? 0;
+    const area = resolveSpreadReadingArea({
+      availableWidth: width - 2 * author,
+      fontSizePx,
+      viewerInsetLeft: 0,
+      viewerInsetRight: 0,
+      leftPx: extra.leftPx,
+      rightPx: extra.rightPx,
+    });
+    if (!area) return { area, result: null };
+    return {
+      area,
+      result: foldSpreadIntoPages(area, { fullWidth: width, fontSizePx, authorInsetLeft: author, authorInsetRight: author }),
+    };
+  };
+
+  it.each([1205, 1280, 1536, 1920, 2560])("one spread advances exactly the full width at %ipx", (width) => {
+    const { area, result } = fold(width);
+    expect(result).not.toBeNull();
+    const g = result!.geometry;
+    expect(g.columns).toBe(2);
+    expect(g.spreadStep).toBeCloseTo(width, 6);
+    expect(g.gap).toBeCloseTo(result!.paddingLeftPx + result!.paddingRightPx, 6);
+    expect(g.columnWidth).toBeLessThanOrEqual(area!.maxColumnWidth + 1e-6);
+    // 每页 [左 | 正文 | 右] 恰好半屏。
+    expect(result!.paddingLeftPx + g.columnWidth + result!.paddingRightPx).toBeCloseTo(width / 2, 6);
+  });
+
+  it("keeps the auto margins on a tablet and folds the book body padding in", () => {
+    const { area, result } = fold(1205, 16, { author: 8 });
+    expect(result!.paddingLeftPx).toBeCloseTo(area!.baseLeftPx + 8, 6);
+    expect(result!.geometry.columnWidth).toBeLessThan(area!.maxColumnWidth);
+  });
+
+  it("widens page margins instead of lines on wide desktop windows", () => {
+    const { area, result } = fold(1920);
+    expect(result!.geometry.columnWidth).toBeCloseTo(area!.maxColumnWidth, 6);
+    expect(result!.paddingLeftPx).toBeCloseTo(224, 6);
+    expect(result!.geometry.gap).toBeCloseTo(448, 6);
+  });
+
+  it("keeps explicit asymmetric margins in proportion", () => {
+    const { result } = fold(1280, 16, { leftPx: 40, rightPx: 80 });
+    expect(result!.paddingRightPx / result!.paddingLeftPx).toBeCloseTo(2, 6);
+  });
+
+  it("does not fold when two pages no longer fit", () => {
+    const { area } = fold(800);
+    if (!area) return;
+    expect(foldSpreadIntoPages(area, { fullWidth: 640, fontSizePx: 16 })).toBeNull();
   });
 });

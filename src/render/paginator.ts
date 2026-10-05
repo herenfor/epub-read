@@ -61,7 +61,7 @@ import {
 import { imageRequestFromTarget } from "./imageActivation";
 import { columnAtPoint, containingFragmentAtPoint, type FragmentSpace } from "./fragmentGeometry";
 import {
-  COMFORTABLE_SPREAD,
+  foldSpreadIntoPages,
   resolveSpreadReadingArea,
   type SpreadReadingArea,
 } from "./spreadReadingArea";
@@ -70,9 +70,6 @@ import {
 const INITIAL_RENDER_GATE_TIMEOUT_MS = 20_000;
 
 /** 舒适双页写入 viewer 的 reader-owned 根内联属性；restore 只碰这些。 */
-/** 触屏双页把外边距折进跨页时，中缝（= 左右外边距之和）的上限。 */
-const SPREAD_FOLD_MAX_GAP_PX = 192;
-
 /** 无滚动抬手后等待续上的吸附/甩动动画的时长；期间出现滚动则改等 scrollend。 */
 const NATIVE_SNAP_SETTLE_MS = 160;
 
@@ -3393,26 +3390,27 @@ export class ChapterPaginator {
     // 统一列/屏换算的唯一来源：列宽、列步长、翻屏步长都来自本轮 geometry。
     let w = legacyW;
     let geometry: SpreadGeometry;
-    // 触屏双页同理：外边距写进 viewer padding、viewer 撑满整屏，中缝取左右外边距
-    // 之和（像实体书左页内白 + 右页内白），一屏双页的步长恰好等于整屏宽，翻页时
-    // 整个跨页连同外边距一起滑动。只在自动中缝、外边距不大（中缝不超过
-    // SPREAD_FOLD_MAX_GAP_PX）且双栏仍成立时启用；宽屏大留白与手动中缝保持原样。
+    // 双页同理：每页按 [左边距 | 正文 | 右边距] 排，中缝 = 左右边距之和（像实体书
+    // 摊开），viewer 撑满整屏，一屏跨页的步长恰好等于整屏宽，翻页时整个跨页连同
+    // 两侧空白一起滑动。正文仍受舒适栏宽上限约束，屏幕更宽时多出的空间按比例
+    // 分给每页两侧（中缝随之变宽），不拉长行。手动中缝保持原有居中阅读区。
     // 书自带的 body 左右 padding（如 0.5em）同样折进每页（单页与双页共用）。
     const authorInsetLeft = parent ? parseFloat(parentCs?.paddingLeft ?? "") || 0 : 0;
     const authorInsetRight = parent ? parseFloat(parentCs?.paddingRight ?? "") || 0 : 0;
     let spreadInsets: { left: number; right: number } | null = null;
-    if (comfortArea && this.settings.spreadGapMode !== "manual" && this.prefersTouchPaging()) {
+    if (comfortArea && this.settings.spreadGapMode !== "manual") {
       const viewerInsets = this.readViewerHorizontalInsets(viewer, win);
-      const outerLeft = comfortArea.marginLeftPx + authorInsetLeft;
-      const outerRight = comfortArea.marginRightPx + authorInsetRight;
-      const fullWidth = pageW + authorInsetLeft + authorInsetRight;
-      const foldedGap = outerLeft + outerRight;
-      const minimumColumn = Math.max(COMFORTABLE_SPREAD.minColumnPx, COMFORTABLE_SPREAD.minColumnEm * em);
-      const folded = createSpreadGeometry(fullWidth - foldedGap, foldedGap, 2, minimumColumn);
-      if (viewerInsets.left + viewerInsets.right === 0 && foldedGap > 0 && foldedGap <= SPREAD_FOLD_MAX_GAP_PX &&
-        folded.columns === 2 && folded.columnWidth <= comfortArea.maxColumnWidth + 0.5) {
-        comfortArea = { ...comfortArea, geometry: folded, viewerBorderBoxWidth: fullWidth };
-        spreadInsets = { left: outerLeft, right: outerRight };
+      const fold = viewerInsets.left + viewerInsets.right === 0
+        ? foldSpreadIntoPages(comfortArea, {
+          fullWidth: pageW + authorInsetLeft + authorInsetRight,
+          fontSizePx: em,
+          authorInsetLeft,
+          authorInsetRight,
+        })
+        : null;
+      if (fold) {
+        comfortArea = { ...comfortArea, geometry: fold.geometry, viewerBorderBoxWidth: fold.viewerBorderBoxWidth };
+        spreadInsets = { left: fold.paddingLeftPx, right: fold.paddingRightPx };
         if (parent && authorInsetLeft + authorInsetRight > 0) this.foldParentHorizontalPadding(parent);
       }
     }

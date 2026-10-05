@@ -2284,7 +2284,7 @@ describe("measure viewport height locking", () => {
     await promise;
   });
 
-  it("wires comfortable spread geometry into viewer width, margins and real column gap", async () => {
+  it("folds the comfortable spread into full-width pages (padding margins, gutter = left + right)", async () => {
     const parent = makeFakeElement({ clientWidth: 1024, clientHeight: 768 });
     const viewer = makeFakeElement({ parentElement: parent });
     const defaultView = {
@@ -2346,13 +2346,17 @@ describe("measure viewport height locking", () => {
     const promise = (ChapterPaginator.prototype as any).measure.call(context, 1);
 
     expect(viewer.style.columnCount).toBe("2");
-    expect(parseFloat(viewer.style.width)).toBeCloseTo(921.6, 5);
-    expect(parseFloat(viewer.style.marginLeft)).toBeCloseTo(51.2, 5);
-    expect(parseFloat(viewer.style.marginRight)).toBeCloseTo(51.2, 5);
-    expect(parseFloat(viewer.style.columnGap)).toBeCloseTo(61.44, 5);
+    // 每页 [51.2 | 409.6 | 51.2] 恰好半屏；跨页步长 = 整屏宽 1024，两侧不留固定长条。
+    expect(parseFloat(viewer.style.width)).toBeCloseTo(1024, 5);
+    expect(parseFloat(viewer.style.marginLeft)).toBeCloseTo(0, 5);
+    expect(parseFloat(viewer.style.marginRight)).toBeCloseTo(0, 5);
+    expect(parseFloat(viewer.style.paddingLeft)).toBeCloseTo(51.2, 5);
+    expect(parseFloat(viewer.style.paddingRight)).toBeCloseTo(51.2, 5);
+    expect(parseFloat(viewer.style.columnGap)).toBeCloseTo(102.4, 5);
     expect(context.spreadArea).not.toBeNull();
-    expect(context.spreadGeometry.columnWidth).toBeCloseTo(430.08, 5);
-    expect(context.step).toBeCloseTo(491.52, 5);
+    expect(context.spreadGeometry.columnWidth).toBeCloseTo(409.6, 5);
+    expect(context.step).toBeCloseTo(512, 5);
+    expect(context.spreadGeometry.spreadStep).toBeCloseTo(1024, 5);
 
     for (const c of measureControllers) c.abort();
     await promise;
