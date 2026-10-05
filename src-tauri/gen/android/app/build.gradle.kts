@@ -21,6 +21,9 @@ val releaseSigning = System.getenv("EPUB_READER_SIGNING_PROPERTIES")
 
 android {
     compileSdk = 36
+    // Use the same NDK as build-android.sh, including its native strip tool.
+    ndkVersion = System.getenv("ANDROID_NDK_VERSION") ?: "28.2.13676358"
+    ndkPath = System.getenv("NDK_HOME")
     namespace = "dev.herenfor.epubreader"
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
