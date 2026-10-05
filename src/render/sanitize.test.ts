@@ -826,6 +826,8 @@ background-position:center center;background-size:cover;background-color:#f9ebdf
     });
     expect(out).toContain("用户自定义 CSS");
     expect(out).toContain("#epub-viewer p { color: red !important; }");
+    expect(readStyleText(out, "user-css")).toContain("#epub-viewer p { color: red !important; }");
+    expect(readStyleText(out, "overrides")).not.toContain("#epub-viewer p { color: red !important; }");
   });
 
   it("用户上传字体注入 @font-face 并可在选择后强制 body 字体", async () => {

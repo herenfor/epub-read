@@ -289,8 +289,6 @@ ${
     : ""
 }`;
 
-  const userCss = s.customCss ? `/* [L2] 用户自定义 CSS（允许覆盖） */\n${s.customCss}` : "";
-
   return [
     `/* [L1/L3-C21] 正文只由 viewer 分页，不使用根页面原生滚动。
    border-box 让书籍 body padding 包含在 100% 高度内，避免短章节也撑出滚动条。 */
@@ -309,7 +307,6 @@ ${VIEWER_TAG}#${VIEWER_ID} { display: block; height: 100%; overflow: hidden; mar
     compatCss,
     imageCss,
     themeCss,
-    userCss,
   ].join("\n");
 }
 
@@ -757,6 +754,15 @@ ${VIEWER_TAG}#${VIEWER_ID}::-webkit-scrollbar {
   styleEl.setAttribute("data-reader", "overrides");
   styleEl.textContent = buildOverrideCss(opts.settings, bodyBgColor);
   head.appendChild(styleEl);
+
+  // 用户自定义 CSS 单独成表，顺序仍在阅读器覆盖样式之后；来源标记只用于
+  // 主题对比度修复识别用户明确的 color 意图，不改变 CSS 层叠顺序。
+  if (opts.settings.customCss) {
+    const userStyleEl = doc.createElement("style");
+    userStyleEl.setAttribute("data-reader", "user-css");
+    userStyleEl.textContent = `/* [L2] 用户自定义 CSS（允许覆盖） */\n${opts.settings.customCss}`;
+    head.appendChild(userStyleEl);
+  }
 
   const serialized = (await getSerializer()).serializeToString(doc);
   const html = restoreStyleRawTextCombinators(serialized);

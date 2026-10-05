@@ -16,6 +16,11 @@ export interface DarkThemeStyleAdapter {
 export interface DarkThemeContrastOptions {
   theme: "dark" | "light" | "sepia" | "gray";
   adapter?: DarkThemeStyleAdapter;
+  /**
+   * 本轮用户自定义 CSS 是否明确声明了该元素的 color。
+   * 由接线层识别规则来源，不从颜色值反推用户意图。
+   */
+  userOwnsColor?: (element: Element) => boolean;
 }
 
 export const DARK_THEME_FOREGROUND = { r: 212, g: 212, b: 212, a: 1 } as const;
@@ -124,6 +129,34 @@ function nearThemeForeground(color: Rgba, theme: "dark" | "gray" = "dark"): bool
   ) <= 8;
 }
 
+function chooseDarkThemeTextRepair(input: {
+  foreground: Rgba;
+  background: Rgba;
+  theme: "dark" | "gray";
+  userOwnsColor: boolean;
+}): string | null {
+  const { foreground, background, theme, userOwnsColor } = input;
+  if (userOwnsColor) return null;
+
+  const current = contrastRatio(compositeRgba(foreground, background), background);
+  if (current >= 4.5) return null;
+
+  let candidate: string;
+  if (nearThemeForeground(foreground, theme)) {
+    // 保留已有方向：主题浅字落在作者浅色底上。
+    candidate = DARK_THEME_CANDIDATE;
+  } else {
+    // 新方向仅处理不透明的黑/深灰正文，保留作者彩字/半透明装饰。
+    const channels = [foreground.r, foreground.g, foreground.b];
+    const neutral = Math.max(...channels) - Math.min(...channels) <= 12;
+    if (!neutral || foreground.a < 1 || Math.max(...channels) > 128) return null;
+    candidate = theme === "gray" ? "#d4d4d8" : "#d4d4d4";
+  }
+
+  const repaired = contrastRatio(parseRgba(candidate)!, background);
+  return repaired >= 4.5 && repaired >= current + 1.5 ? candidate : null;
+}
+
 interface BackgroundState {
   color: Rgba;
   unsafe: boolean;
@@ -173,12 +206,15 @@ export function applyDarkThemeContrast(doc: Document, options: DarkThemeContrast
     if (style.display === "none" || style.visibility === "hidden") return;
     const background = extendBackground(inheritedBackground, style);
     const foreground = parseRgba(style.color);
-    if (!background.unsafe && (element.textContent ?? "").trim() !== "" && foreground && nearThemeForeground(foreground, theme)) {
-      const currentContrast = contrastRatio(foreground, background.color);
-      const candidate = parseRgba(DARK_THEME_CANDIDATE)!;
-      const candidateContrast = contrastRatio(candidate, background.color);
-      if (currentContrast < 4.5 && candidateContrast >= 4.5 && candidateContrast >= currentContrast + 1.5) {
-        adapter.setColor(element, DARK_THEME_CANDIDATE);
+    if (!background.unsafe && (element.textContent ?? "").trim() !== "" && foreground) {
+      const repaired = chooseDarkThemeTextRepair({
+        foreground,
+        background: background.color,
+        theme,
+        userOwnsColor: options.userOwnsColor?.(element) ?? false,
+      });
+      if (repaired !== null) {
+        adapter.setColor(element, repaired);
         adapter.mark(element);
         fixed++;
       }

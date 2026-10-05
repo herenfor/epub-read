@@ -1,5 +1,6 @@
 import { applyReaderBodyPercentageSpacing, applyReaderRootPercentageSpacing } from "./percentageSpacing";
 import { sanitizeChapter, VIEWER_ID } from "./sanitize";
+import { planCenteredTitleBody } from "./titlePageLayout";
 import { resolvePath, isExternalUrl, isFragmentOnly, splitHref } from "../core/paths";
 import { getFootnoteHoverAnchor, isFootnoteLink, resolveFootnote, type FootnoteInfo } from "./footnotes";
 import type { ResourceServer } from "./resources";
@@ -2258,6 +2259,21 @@ export function shouldApplyInlineBoxOverflowFix({
   );
 }
 
+interface CenteredTitleCandidate {
+  heading: HTMLElement;
+  reflowableHorizontal: boolean;
+  bodyDisplay: string;
+  bodyFlexDirection: string;
+  bodyFlexWrap: string;
+  bodyJustifyContent: string;
+  bodyAlignItems: string;
+}
+
+interface CenteredTitleFix {
+  wrapper: HTMLElement;
+  heading: HTMLElement;
+}
+
 export class ChapterPaginator {
   private blobUrl?: string;
   /** sanitize 本章外链 CSS 产生的局部 Blob URL；不包含 ResourceServer 共享资源。 */
@@ -2265,6 +2281,10 @@ export class ChapterPaginator {
   /** 尚未提交给 iframe 的 sanitize 任务；换章时也必须取消其 URL 所有权。 */
   private pendingCssUrls = new Set<OwnedBlobUrls>();
   private viewer: HTMLElement | null = null;
+  /** 卷首页居中候选；只在当前 iframe 文档内有效。 */
+  private centeredTitleCandidate: CenteredTitleCandidate | null = null;
+  /** 已创建的 reader-owned 标题内层布局盒，用于重测和清理时精确恢复。 */
+  private centeredTitleFix: CenteredTitleFix | null = null;
   private contentDoc: Document | null = null;
   private step = 0;
   private pageWidth = 0;
@@ -3117,6 +3137,7 @@ export class ChapterPaginator {
       return;
     }
     this.viewer = viewer;
+    this.identifyCenteredTitleCandidate();
     this.applyExternalScrollOwnership();
     if (this.pagedSwipe && !this.scrollMode) {
       this.pagedSwipeCleanup?.();
@@ -3149,7 +3170,10 @@ export class ChapterPaginator {
     this.emit({ status: "measuring" });
     if (this.settings.theme === "dark" || this.settings.theme === "gray") {
       try {
-        applyDarkThemeContrast(doc, { theme: this.settings.theme });
+        applyDarkThemeContrast(doc, {
+          theme: this.settings.theme,
+          userOwnsColor: this.userOwnsColorForDocument(doc),
+        });
       } catch {
         // Contrast repair is conservative and must never block chapter display.
       }
@@ -3550,6 +3574,9 @@ export class ChapterPaginator {
             (parseFloat(parentCs?.paddingBottom ?? "") || 0)
         );
         this.applyScrollViewerStyles(viewportHeight, marginLeft, marginRight);
+        this.applyOrUpdateCenteredTitleLayout(
+          Math.max(0, viewer.clientHeight - padTop - padBottom)
+        );
         this.applyReaderBodyPercentageSpacingForMeasure(
           doc,
           viewer,
@@ -3580,6 +3607,16 @@ export class ChapterPaginator {
       }
       // [L5-C18] fit-content 会改变最终 border-box 宽度，必须先稳定宽度再计算
       // 页面级 margin；反过来会把多栏中的异常旧宽度固化成错误横向位置。
+      const titleViewerStyle = win?.getComputedStyle?.(viewer);
+      const titleContentHeight = titleViewerStyle
+        ? Math.max(
+            0,
+            viewer.clientHeight -
+              (parseFloat(titleViewerStyle.paddingTop) || 0) -
+              (parseFloat(titleViewerStyle.paddingBottom) || 0)
+          )
+        : Math.max(0, h - padTop - padBottom);
+      this.applyOrUpdateCenteredTitleLayout(titleContentHeight);
       this.applyReaderBodyPercentageSpacingForMeasure(doc, viewer, this.effectiveColumnWidth);
       this.applyFitContentFix();
       this.applyBookMargins();
@@ -3676,6 +3713,212 @@ export class ChapterPaginator {
     } catch {
       return { left: 0, right: 0 };
     }
+  }
+
+  /**
+   * 只识别“作者 body 为竖向 Flex 双向 center + 唯一标题”的短卷首页。
+   * 读的是当时书籍 CSS 已生效的 computed 值；作者结构在 sanitize 后位于
+   * viewer 内，但 body 自身类名和作者样式仍保留。
+   */
+  private identifyCenteredTitleCandidate(): void {
+    if (this.centeredTitleCandidate) return;
+    const doc = this.contentDoc;
+    const viewer = this.viewer;
+    const win = doc?.defaultView;
+    if (!doc || !viewer || !win || typeof win.getComputedStyle !== "function") return;
+
+    const elements: HTMLElement[] = [];
+    for (const node of Array.from(viewer.childNodes)) {
+      if (node.nodeType === 3) {
+        if ((node.textContent ?? "").trim() !== "") return;
+        continue;
+      }
+      if (node.nodeType === 1) elements.push(node as HTMLElement);
+    }
+    if (elements.length !== 1) return;
+    const heading = elements[0];
+    if (!/^h[1-6]$/iu.test(heading.localName)) return;
+    if (typeof heading.getBoundingClientRect !== "function") return;
+
+    let bodyStyle: CSSStyleDeclaration;
+    try {
+      bodyStyle = win.getComputedStyle(doc.body);
+    } catch {
+      return;
+    }
+    const writingMode = bodyStyle.writingMode.trim().toLowerCase();
+    this.centeredTitleCandidate = {
+      heading,
+      reflowableHorizontal:
+        !this.fixedLayout && (writingMode === "" || writingMode === "horizontal-tb"),
+      bodyDisplay: bodyStyle.display.trim().toLowerCase(),
+      bodyFlexDirection: bodyStyle.flexDirection.trim().toLowerCase(),
+      bodyFlexWrap: bodyStyle.flexWrap.trim().toLowerCase(),
+      bodyJustifyContent: bodyStyle.justifyContent.trim().toLowerCase(),
+      bodyAlignItems: bodyStyle.alignItems.trim().toLowerCase(),
+    };
+  }
+
+  /** 标题外高 = 自身 rect 高度 + 上下 margin，供受限布局门控使用。 */
+  private centeredTitleOuterHeight(heading: HTMLElement): number {
+    let rectHeight: number;
+    try {
+      rectHeight = heading.getBoundingClientRect().height;
+    } catch {
+      return Number.NaN;
+    }
+    if (!Number.isFinite(rectHeight)) return Number.NaN;
+    let marginTop = 0;
+    let marginBottom = 0;
+    try {
+      const style = this.contentDoc?.defaultView?.getComputedStyle(heading);
+      marginTop = parseFloat(style?.marginTop ?? "") || 0;
+      marginBottom = parseFloat(style?.marginBottom ?? "") || 0;
+    } catch {
+      // 读不到 margin 时仍按 rect 外高保守判断。
+    }
+    return rectHeight + marginTop + marginBottom;
+  }
+
+  private resolveCenteredTitleHeight(
+    candidate: CenteredTitleCandidate,
+    columnContentHeight: number
+  ): number | null {
+    const plan = planCenteredTitleBody({
+      reflowableHorizontal: candidate.reflowableHorizontal,
+      singleHeading: true,
+      bodyDisplay: candidate.bodyDisplay,
+      bodyFlexDirection: candidate.bodyFlexDirection,
+      bodyFlexWrap: candidate.bodyFlexWrap,
+      bodyJustifyContent: candidate.bodyJustifyContent,
+      bodyAlignItems: candidate.bodyAlignItems,
+      titleOuterHeight: this.centeredTitleOuterHeight(candidate.heading),
+      columnContentHeight,
+    });
+    return plan?.heightPx ?? null;
+  }
+
+  /**
+   * 创建/更新 reader-owned 内层标题布局盒。原标题节点只移动，不复制文字、
+   * 不改颜色；分页 viewer 仍是 block 多栏根。重测只更新盒高。
+   */
+  private applyOrUpdateCenteredTitleLayout(columnContentHeight: number): void {
+    const candidate = this.centeredTitleCandidate;
+    if (!candidate || !Number.isFinite(columnContentHeight) || columnContentHeight <= 0) return;
+
+    if (this.centeredTitleFix) {
+      const height = this.resolveCenteredTitleHeight(candidate, columnContentHeight);
+      if (height !== null) this.centeredTitleFix.wrapper.style.height = `${height}px`;
+      return;
+    }
+
+    const height = this.resolveCenteredTitleHeight(candidate, columnContentHeight);
+    const doc = this.contentDoc;
+    const parent = candidate.heading.parentNode;
+    if (height === null || !doc || !parent) return;
+
+    const wrapper = doc.createElement("reader-title-layout") as HTMLElement;
+    wrapper.setAttribute("data-reader", "centered-title-layout");
+    wrapper.setAttribute("data-reader-centered-title", "1");
+    wrapper.style.setProperty("display", "flex");
+    wrapper.style.setProperty("flex-direction", "column");
+    wrapper.style.setProperty("justify-content", "center");
+    wrapper.style.setProperty("align-items", "center");
+    wrapper.style.setProperty("width", "100%");
+    wrapper.style.setProperty("height", `${height}px`);
+    wrapper.style.setProperty("box-sizing", "border-box");
+    wrapper.style.setProperty("break-inside", "avoid");
+    wrapper.style.setProperty("page-break-inside", "avoid");
+    parent.insertBefore(wrapper, candidate.heading);
+    wrapper.appendChild(candidate.heading);
+    this.centeredTitleFix = { wrapper, heading: candidate.heading };
+  }
+
+  /** 精确恢复 reader-owned 结构：标题回到原位置，内层盒移除。 */
+  private restoreCenteredTitleLayout(): void {
+    const fix = this.centeredTitleFix;
+    this.centeredTitleFix = null;
+    if (!fix) return;
+    const parent = fix.wrapper.parentNode;
+    if (!parent) return;
+    try {
+      parent.insertBefore(fix.heading, fix.wrapper);
+      parent.removeChild(fix.wrapper);
+    } catch {
+      // 文档已卸载/结构被外部改动时，不回滚也不抛错。
+    }
+  }
+
+  /**
+   * 用户自定义 CSS 的单表来源识别：只扫描本轮 data-reader="user-css" 样式表，
+   * 不遍历作者样式表。任何匹配且声明 color 的用户规则都视为用户拥有该元素颜色。
+   */
+  private userOwnsColorForDocument(doc: Document): (element: Element) => boolean {
+    const styles = Array.from(doc.getElementsByTagName?.("style") ?? []);
+    const userStyle = styles.find(
+      (style) => style.getAttribute("data-reader") === "user-css"
+    ) as HTMLStyleElement | undefined;
+    const sheet = userStyle?.sheet;
+    if (!sheet) return () => false;
+
+    let rules: CSSRuleList;
+    try {
+      rules = sheet.cssRules;
+    } catch {
+      return () => true; // 读不到来源时保守保留用户规则。
+    }
+
+    const colorSelectors: string[] = [];
+    let unknownGrouping = false;
+    const walk = (list: CSSRuleList): void => {
+      for (const rule of Array.from(list)) {
+        const active = getActiveCssCondition(rule, doc.defaultView);
+        if (active === false) continue;
+        if (active === undefined) {
+          unknownGrouping = true;
+          continue;
+        }
+        if (rule.type === 1) {
+          const styleRule = rule as CSSStyleRule;
+          if (styleRule.style.getPropertyValue("color").trim() !== "") {
+            colorSelectors.push(styleRule.selectorText);
+          }
+        }
+        const nested = rule as CSSRule & { cssRules?: CSSRuleList };
+        try {
+          if (nested.cssRules) walk(nested.cssRules);
+        } catch {
+          unknownGrouping = true;
+        }
+      }
+    };
+    try {
+      walk(rules);
+    } catch {
+      return () => true;
+    }
+    if (unknownGrouping) return () => true;
+
+    const cache = new WeakMap<Element, boolean>();
+    return (element: Element): boolean => {
+      const cached = cache.get(element);
+      if (cached !== undefined) return cached;
+      let owns = false;
+      for (const selector of colorSelectors) {
+        if (!selector) continue;
+        try {
+          if (element.matches(selector)) {
+            owns = true;
+            break;
+          }
+        } catch {
+          owns = true;
+          break;
+        }
+      }
+      cache.set(element, owns);
+      return owns;
+    };
   }
 
   private restoreScrollView(): void {
@@ -4124,6 +4367,7 @@ export class ChapterPaginator {
     const candidates = Array.from(viewer.children).filter(
       (c): c is HTMLElement =>
         c.nodeType === 1 &&
+        (c as HTMLElement).getAttribute?.("data-reader-centered-title") !== "1" &&
         !c.classList.contains("illus") &&
         !c.classList.contains("kuchie") &&
         !c.classList.contains("cover") &&
@@ -7974,6 +8218,8 @@ export class ChapterPaginator {
     this.restoreTrailingFloatFixes();
     this.restorePercentageSpacing();
     this.restorePercentageSpacing = () => {};
+    this.restoreCenteredTitleLayout();
+    this.centeredTitleCandidate = null;
     this.contentDoc?.removeEventListener("load", this.imgHandler, true);
     this.contentDoc?.removeEventListener("click", this.linkHandler, true);
     this.contentDoc?.removeEventListener("click", this.handleDocClick, true);
