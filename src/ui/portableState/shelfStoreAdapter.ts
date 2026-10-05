@@ -48,6 +48,7 @@ import { OwnedProgressSessions, type ProgressLease } from "./ownedProgressSessio
 import type { ProgressRuntimeStatus } from "./progressRuntimeGate";
 import type { ConfirmedProgressWrite } from "../checkpointProgressRepair";
 import { ProgressWriteUnconfirmed } from "../checkpointProgressRepair";
+import { confirmedWrittenStamp } from "../progressOpenOrder";
 
 const HASH_RE = /^[0-9a-f]{64}$/;
 const TEXT_PROFILE = "visible-codepoints-no-whitespace-v1" as const;
@@ -275,6 +276,19 @@ export class PortableShelfStore implements ShelfStore {
   private async localEntryFor(id: string): Promise<ShelfEntry | undefined> {
     const entries = await this.localEntries();
     return entries.find((entry) => entry.id === id || entry.contentHash === id);
+  }
+
+  async readProgressEntryForOpen(id: string): Promise<ShelfEntry> {
+    const entries = await this.localEntries();
+    const local = entries.find((entry) => entry.id === id || entry.contentHash === id);
+    if (!local) {
+      throw Object.assign(new Error("书架中没有这本书"), {
+        code: "shelf-record-missing", recordsCount: entries.length, targetFound: false,
+      });
+    }
+    const hash = hashForLocalEntry(local);
+    if (!hash) return local;
+    return projectShelfEntry(hash, await this.readSnapshot(hash), local);
   }
 
   private async hashForId(id: string): Promise<string | null> {
@@ -586,10 +600,9 @@ export class PortableShelfStore implements ShelfStore {
           // Match this transaction's written version by value + write time.
           // Never infer the displayed stamp from a UI projection that may have
           // merged a different branch.
-          const encodedValue = JSON.stringify(value);
-          const written = (result.state.versions as readonly Version<ProgressValue>[])
-            .find((version) => version.updatedAtMs === updatedAtMs && JSON.stringify(version.value) === encodedValue);
-          if (written) session.chosenStamp = written.stamp;
+          session.chosenStamp = confirmedWrittenStamp(
+            result.state.versions as readonly Version<ProgressValue>[], value, updatedAtMs,
+          );
         }
         const entry = await this.currentProjectedEntry(session.bookHash);
         return { status: "saved", entry, shownStamp: session.chosenStamp } as const;

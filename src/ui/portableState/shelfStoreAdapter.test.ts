@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import type { Bookmark, LinkedImportBatchResult, ShelfEntry, ShelfProgressPatch, ShelfSaveInput, ShelfSaveResult, ShelfStore } from "../shelf";
 import type { ReaderNote } from "../notes";
 import type { LibraryOrganization, OrganizationCommand } from "../libraryOrganization";
@@ -9,7 +9,8 @@ import { PortableStateError, PortableStateService } from "./service";
 import { PortableShelfStore, activatePortableShelfStore } from "./shelfStoreAdapter";
 import { latestVersion } from "../../core/portableState/projection";
 import type { NoteValue } from "../../core/portableState/portable-state-types";
-import { ShelfProgressWriter } from "../progressWriter";
+import { ScopedProgressWriter, ShelfProgressWriter } from "../progressWriter";
+import { planFreshProgressOpen } from "../progressOpenOrder";
 import type { PortableShelfEntry } from "./projection";
 
 const HASH = "a".repeat(64);
@@ -316,6 +317,70 @@ describe("CP-I portable ShelfStore facade", () => {
 
     await first.closeProgressLease(firstLease);
     await second.closeProgressLease(secondLease);
+  });
+
+  test("open_order flushes before reading and choosing the current single-book progress", async () => {
+    const legacy = new FakeLegacyStore([entry()]);
+    const service = new PortableStateService(new MemoryPortableStateStorage());
+    await activatePortableShelfStore(legacy, service);
+    const store = new PortableShelfStore(legacy, service);
+    const oldEntry = await store.readProgressEntryForOpen(LOCAL_ID) as PortableShelfEntry;
+    const old = latestVersion(oldEntry.portableProgressVersions)!;
+    const lease = await store.prepareProgressSession(LOCAL_ID, { kind: "chosen", stamp: old.stamp });
+    store.activateProgressSession(lease);
+    const writer = new ScopedProgressWriter<ShelfProgressPatch>(0);
+    writer.register(lease, async (patch) => {
+      const result = await store.updateProgressForSession(lease, patch);
+      if (result.status !== "saved") throw new Error(result.code);
+    });
+    writer.enqueue(lease, progressPatch());
+    const plan = await planFreshProgressOpen({
+      flushTarget: () => writer.flush(lease),
+      readCurrent: async () => {
+        const spy = vi.spyOn(service, "snapshot");
+        try {
+          const current = await store.readProgressEntryForOpen(LOCAL_ID) as PortableShelfEntry;
+          expect(spy).not.toHaveBeenCalled();
+          return current;
+        } finally { spy.mockRestore(); }
+      },
+      choose: async (current) => ({
+        explicitPositionChoice: false,
+        stamp: latestVersion(current.portableProgressVersions)!.stamp,
+      }),
+    });
+    expect(plan!.decision.stamp).not.toEqual(old.stamp);
+    const candidate = await store.prepareProgressSession(LOCAL_ID, { kind: "chosen", stamp: plan!.decision.stamp });
+    expect(store.hasProgressSession(lease)).toBe(true);
+    await store.closeProgressLease(candidate);
+    writer.retire(lease);
+    await store.closeProgressLease(lease);
+    writer.disposeTimers();
+  });
+
+  test("open_order native key reordering retains the actual written stamp and permits rebind", async () => {
+    const legacy = new FakeLegacyStore([entry()]);
+    const service = new PortableStateService(new MemoryPortableStateStorage());
+    await activatePortableShelfStore(legacy, service);
+    const store = new PortableShelfStore(legacy, service);
+    const initial = latestVersion((await service.snapshot()).books[HASH].progress.versions)!;
+    const lease = await store.prepareProgressSession(LOCAL_ID, { kind: "chosen", stamp: initial.stamp });
+    store.activateProgressSession(lease);
+    const write = service.write.bind(service);
+    service.write = async (input) => {
+      const result = await write(input);
+      const state = result.state as { versions: typeof initial[] };
+      return { ...result, state: { versions: state.versions.map((version) => ({
+        ...version,
+        value: version.value ? { progressPctHint: version.value.progressPctHint, locator: version.value.locator } : null,
+      })) } };
+    };
+    const saved = await store.updateProgressForSession(lease, progressPatch());
+    expect(saved.status).toBe("saved");
+    const written = latestVersion((await service.snapshot()).books[HASH].progress.versions)!;
+    expect(store.progressSessionChosenStamp(lease)).toEqual(written.stamp);
+    await expect(store.rebindProgressSession(lease)).resolves.toBeUndefined();
+    await store.closeProgressLease(lease);
   });
 
   test("exact progress lease close preserves a same-book note basis", async () => {

@@ -20,6 +20,7 @@ import type { Stamp } from "../../core/portableState/portable-register-core";
 import type { PortableStateV3 } from "../../core/portableState/portable-state-types";
 import type { LibraryOrganization, OrganizationCommand } from "../libraryOrganization";
 import type { PortableActivationResult, PortableLegacyImportInput, PortableMergeOptions, PortableStateDataService } from "./dataService";
+import type { ProgressRuntimeStatus } from "./progressRuntimeGate";
 
 const ERROR_CODES = new Set<PortableStateErrorCode>([
   "invalid-data",
@@ -113,7 +114,7 @@ export class TauriPortableStateService implements PortableStateDataService {
     }
   }
 
-  async runtimeStatus(): Promise<{ readonly repositoryGeneration: string; readonly repositoryReady: boolean }> {
+  async runtimeStatus(): Promise<ProgressRuntimeStatus> {
     try {
       return await invoke<{ repositoryGeneration: string; repositoryReady: boolean }>("portable_state_runtime_status");
     } catch (error) {

@@ -1,4 +1,4 @@
-import type { ProgressRuntimeStatus } from "./progressRuntimeGate";
+import { ProgressRuntimeGate, type ProgressRuntimeStatus } from "./progressRuntimeGate";
 
 interface RepositoryPort {
   runtimeStatus(): Promise<ProgressRuntimeStatus>;
@@ -8,8 +8,9 @@ interface RepositoryPort {
 /** Explicit operation recovery; use the actual data service, never its old activation promise. */
 export function createRepositoryReadinessRecovery(port: RepositoryPort): () => Promise<ProgressRuntimeStatus> {
   let activation: Promise<void> | null = null;
+  const checks = new ProgressRuntimeGate(() => port.runtimeStatus());
   return async () => {
-    const initial = await port.runtimeStatus();
+    const initial = await checks.inspectStatus();
     if (initial.repositoryReady) return initial;
     if (!activation) {
       const pending = Promise.resolve().then(() => port.activate()).then(() => undefined);
@@ -20,7 +21,7 @@ export function createRepositoryReadinessRecovery(port: RepositoryPort): () => P
       }).catch(() => undefined);
     }
     await activation;
-    const actual = await port.runtimeStatus();
+    const actual = await checks.inspectStatus();
     if (!actual.repositoryReady) {
       throw Object.assign(new Error("阅读资料服务尚未就绪，请重试"), { code: "runtime-not-ready" });
     }

@@ -153,6 +153,8 @@ export interface ShelfSaveResult {
 
 export interface ShelfStore {
   list(): Promise<ShelfEntry[]>;
+  /** Fresh single-book progress projection, before choosing an open position. */
+  readProgressEntryForOpen?(id: string): Promise<ShelfEntry>;
   save(input: ShelfSaveInput): Promise<ShelfSaveResult>;
   /** Tauri 链接式批量导入；浏览器后端不支持本地持久路径。 */
   importPaths(paths: string[]): Promise<LinkedImportBatchResult>;
