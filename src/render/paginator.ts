@@ -2909,13 +2909,15 @@ export class ChapterPaginator {
     // LRU 淘汰不会撤销仍在显示的图片/字体 URL。
     this.releaseResourceHolder();
 
-    if (this.server.ensureChapterResources) {
-      await this.server.ensureChapterResources(path);
-      if (seq !== this.loadSeq || this.disposed) return;
+    // 资源准备与持有者登记必须是一次原子 acquire：递归发现 @import/url()
+    // 期间，已经加载的依赖不会被预算淘汰；过期/失败时由原 ResourceServer 释放。
+    const server = this.server;
+    const acquireChapter = server.acquireChapter?.bind(server);
+    const holderId: number | null = acquireChapter ? await acquireChapter(path) : null;
+    if (holderId !== null && (seq !== this.loadSeq || this.disposed)) {
+      server.releaseHolder?.(holderId);
+      return;
     }
-
-    // 资源依赖就绪后登记持有者；换章请求的旧持有者已在 about:blank 之后释放。
-    const holderId = this.server.retainChapter?.(path) ?? null;
     this.resourceHolderId = holderId;
 
     const htmlText = this.server.textFor(path);
@@ -7744,9 +7746,9 @@ export class ChapterPaginator {
    * 释放当前章节持有的资源。expected 用于异步 load 的过期路径：
    * 如果字段已被新 load 改写，则不再重复释放新持有者。
    */
-  private releaseResourceHolder(expected?: number): void {
+  private releaseResourceHolder(expected?: number | null): void {
     if (this.resourceHolderId === null) return;
-    if (expected !== undefined && this.resourceHolderId !== expected) return;
+    if (expected !== undefined && expected !== null && this.resourceHolderId !== expected) return;
     this.server.releaseHolder?.(this.resourceHolderId);
     this.resourceHolderId = null;
   }

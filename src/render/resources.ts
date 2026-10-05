@@ -1,6 +1,7 @@
 import type { Book, Resource } from "../core/types";
 import { disposeBook } from "../core/book";
 import { collectChapterDependencies } from "./chapterDependencies";
+import { ArchiveClosedError } from "../core/selectiveArchive";
 
 /** 解压后保留在内存中的资源字节默认预算；可被 ResourceServer 选项覆盖。 */
 export const DEFAULT_MEDIA_CACHE_MAX_BYTES = 32 * 1024 * 1024;
@@ -123,14 +124,16 @@ export class ResourceServer {
     return text;
   }
 
-  /** 按需确保指定资源已解压加载 */
+  /** 按需确保指定资源已解压加载。会话关闭后以统一关闭错误结束。 */
   async ensureResources(paths: Iterable<string>): Promise<void> {
-    if (!this.book) return;
+    const book = this.book;
+    if (!book) throw new ArchiveClosedError();
     const wanted = [...new Set(paths)];
     if (wanted.length === 0) return;
-    await this.book.ensureResources?.(wanted);
+    await book.ensureResources?.(wanted);
+    if (this.book !== book) throw new ArchiveClosedError();
     for (const path of wanted) {
-      const res = this.book.resources.get(path);
+      const res = book.resources.get(path);
       if (!res || !isLoadedResource(res)) continue;
       if (!this.countedMediaPaths.has(path)) {
         this.countedMediaPaths.add(path);
@@ -141,37 +144,53 @@ export class ResourceServer {
     this.enforceMediaBudget(new Set(wanted));
   }
 
-  /** 按需确保某章节及其引用的样式、图片、字体等所有直接依赖已解压就绪 */
-  async ensureChapterResources(chapterPath: string): Promise<void> {
-    if (!this.book) return;
-    await this.ensureResources([chapterPath]);
-    const deps = collectChapterDependencies(this.book, chapterPath, (p) => this.rawTextFor(p));
-    await this.ensureResources(deps);
+  /**
+   * 一次取得章节持有者：先登记本批路径，再按需解压；每批加载后重新发现
+   * 依赖，直到没有新的 @import/url()/样式/字体/图片路径。返回的 id
+   * 必须在换章、失败或过期时由调用方 releaseHolder 释放。
+   */
+  async acquireChapter(chapterPath: string): Promise<number> {
+    const book = this.book;
+    if (!book) throw new ArchiveClosedError();
+    const holderId = this.nextHolderId++;
+    this.heldDependencies.set(holderId, []);
+    const required = new Set<string>([chapterPath]);
+    const attempted = new Set<string>();
+    try {
+      while (true) {
+        this.pinPaths(holderId, required);
+        const batch = [...required].filter((path) => !attempted.has(path));
+        if (batch.length === 0) {
+          this.enforceMediaBudget();
+          return holderId;
+        }
+        for (const path of batch) attempted.add(path);
+        await this.ensureResources(batch);
+        if (this.book !== book) throw new ArchiveClosedError();
+        for (const dep of collectChapterDependencies(book, chapterPath, (p) => this.rawTextFor(p))) {
+          required.add(dep);
+        }
+      }
+    } catch (error) {
+      this.releaseHolder(holderId);
+      throw error;
+    }
   }
 
   /**
-   * 登记一个章节持有者及其资源依赖，返回可用于释放的 id。
-   * 共享 CSS/字体/图片会在多个章节之间累计持有者；不加锁的资源才可被 LRU 淘汰。
+   * 登记一个章节持有者及其当前已能发现的资源依赖，返回可用于释放的 id。
+   * 适用于依赖已就绪的同步场景；需要递归按需恢复时用 acquireChapter。
    */
   retainChapter(chapterPath: string): number {
     const holderId = this.nextHolderId++;
+    this.heldDependencies.set(holderId, []);
     const deps = new Set<string>([chapterPath]);
     if (this.book) {
       for (const dep of collectChapterDependencies(this.book, chapterPath, (p) => this.rawTextFor(p))) {
         deps.add(dep);
       }
     }
-    const paths = [...deps];
-    this.heldDependencies.set(holderId, paths);
-    for (const path of paths) {
-      let set = this.holders.get(path);
-      if (!set) {
-        set = new Set();
-        this.holders.set(path, set);
-      }
-      set.add(holderId);
-      this.touchMedia(path);
-    }
+    this.pinPaths(holderId, deps);
     this.enforceMediaBudget();
     return holderId;
   }
@@ -235,6 +254,23 @@ export class ResourceServer {
       this.book = null;
     }
     // Hit/miss/eviction counters are diagnostic lifetime totals; only live state resets.
+  }
+
+  /** 把一批路径登记到 holder 下；重复路径不会重复计数。 */
+  private pinPaths(holderId: number, paths: Iterable<string>): void {
+    const held = this.heldDependencies.get(holderId);
+    if (!held) return;
+    for (const path of paths) {
+      let owners = this.holders.get(path);
+      if (!owners) {
+        owners = new Set();
+        this.holders.set(path, owners);
+      }
+      if (owners.has(holderId)) continue;
+      owners.add(holderId);
+      held.push(path);
+      this.touchMedia(path);
+    }
   }
 
   /**
