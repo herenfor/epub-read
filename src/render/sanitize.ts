@@ -630,7 +630,7 @@ export async function sanitizeChapter(
 #${VIEWER_ID}.fullpage-image :not(img):not(svg):not(image) {
   width: 100% !important;
   box-sizing: border-box !important;
-  height: 100% !important;
+  height: var(--reader-fill-height, 100%) !important;
   margin: 0 !important;
   padding: 0 !important;
   max-width: none !important;
@@ -638,7 +638,7 @@ export async function sanitizeChapter(
 #${VIEWER_ID}.fullpage-image img,
 #${VIEWER_ID}.fullpage-image svg {
   width: 100% !important;
-  height: 100% !important;
+  height: var(--reader-fill-height, 100%) !important;
   max-width: none !important;
   max-height: none !important;
   border: none !important;

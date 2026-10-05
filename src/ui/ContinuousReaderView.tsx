@@ -33,6 +33,7 @@ import {
   ContinuousChapterLayout,
   ChapterLoadGate,
   PendingScrollNavigation,
+  continuousFrameBleed,
   continuousWheelPixels,
   type ChapterExtent,
   type ChapterProjection,
@@ -454,6 +455,9 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
     // 淘汰已离开投影区的无主资源；当前可见章仍允许暂时超预算。
     const mediaBudgetExceeded = server.mediaCacheBudgetExceeded;
     const overscan = mediaBudgetExceeded ? 0 : settings.preloadNextChapter === true ? 1.5 * V : 0.5 * V;
+    // iframe 上下缓冲：宿主滚动由合成线程先行，iframe 位置要等下一次 JS 同步，
+    // 没有缓冲时这一两帧会在顶部/底部露出背景，看起来像边距在伸缩。
+    const frameBleed = continuousFrameBleed(V);
     const initialTargetScrollTop = useMemo(() => {
       if (spineIndex <= 0) return 0;
       const path = spineItemPath(book, spineIndex);
@@ -471,8 +475,8 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
     }, [initialTargetScrollTop]);
 
     const projections = useMemo(() => {
-      return layout.project(scrollTopRef.current, V, overscan);
-    }, [layout, V, overscan, currentScrollTop]);
+      return layout.project(scrollTopRef.current, V, overscan, frameBleed);
+    }, [layout, V, overscan, frameBleed, currentScrollTop]);
     projectionsRef.current = projections;
 
     // 同步投影更新到活动 iframe DOM（不等待 React 渲染，确保 60fps 零延迟）
@@ -604,7 +608,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
         // 用当前布局表现算投影：React state 里的 projections 可能落后一帧，
         // 会让“上次稳定锚点”的章内坐标失真。
         const p = layoutRef.current
-          .project(S, V, overscan)
+          .project(S, V, overscan, frameBleed)
           .find((item) => item.box.key === activeKey);
         const frameScreenTop = p ? p.frameScreenTop : 0;
 
@@ -684,7 +688,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
           });
         }
       }
-    }, [V, buildReadingSpot, linearItems, onPageState, onVisibleChapterChange, overscan, props, sampleReadingLine]);
+    }, [V, buildReadingSpot, frameBleed, linearItems, onPageState, onVisibleChapterChange, overscan, props, sampleReadingLine]);
     checkVisibleChapterRef.current = checkVisibleChapter;
 
     /** 把宿主已确定的最新滚动位置同步到投影与章节状态。 */
@@ -724,7 +728,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
           };
         }
         scrollTopRef.current = S;
-        const currentProjections = layoutRef.current.project(S, V, overscan);
+        const currentProjections = layoutRef.current.project(S, V, overscan, frameBleed);
         syncProjectionDoms(currentProjections);
 
         if (scrollRafRef.current === null) {
@@ -737,7 +741,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
           });
         }
       },
-      [V, checkVisibleChapter, overscan, syncProjectionDoms]
+      [V, checkVisibleChapter, overscan, frameBleed, syncProjectionDoms]
     );
 
     const handleHostScroll = useCallback(() => {
@@ -761,7 +765,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
       if (!base) return null;
       const slot = slotsRef.current.get(base.key);
       const projection = layoutRef.current
-        .project(S, V, overscan)
+        .project(S, V, overscan, frameBleed)
         .find((p) => p.box.key === base.key);
       const fallback = { offset: base.offset, screenY: base.screenY };
       if (!slot || slot.status !== "ready" || !projection) {
@@ -769,7 +773,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
       }
       const sample = sampleReadingLine(slot, READING_LINE_RATIO * V - projection.frameScreenTop);
       return buildReadingSpot(base.key, slot, projection, S, sample, fallback);
-    }, [V, buildReadingSpot, overscan, sampleReadingLine]);
+    }, [V, buildReadingSpot, overscan, frameBleed, sampleReadingLine]);
 
     /**
      * 一次批量高度提交：新的占位高度、宿主 scrollTop 与 iframe 投影在同一帧
@@ -1213,7 +1217,8 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
       if (spot && !pendingSpotRef.current) pendingSpotRef.current = spot;
       for (const slot of slotsRef.current.values()) {
         if (slot.unmounted) continue;
-        slot.iframe.style.height = `${V}px`;
+        slot.iframe.style.height = `${V + 2 * frameBleed}px`;
+        slot.paginator.setContinuousBleed(frameBleed);
         if (slot.status === "ready" || slot.paginator.isDisplayReady) slot.paginator.reflow();
       }
       scheduleLayoutRemeasure(spot);
@@ -1276,7 +1281,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
         iframe.style.left = "0";
         iframe.style.right = "0";
         iframe.style.width = "100%";
-        iframe.style.height = `${currentV}px`;
+        iframe.style.height = `${currentV + 2 * continuousFrameBleed(currentV)}px`;
         iframe.style.border = "none";
 
         let slot: ActiveSlot;
@@ -1916,7 +1921,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
           const continuousAnchor = layoutRef.current.anchorAt(S, V, READING_LINE_RATIO * V);
           const slot = continuousAnchor ? slotsRef.current.get(continuousAnchor.key) : null;
           if (slot && slot.status === "ready") {
-            const projection = layoutRef.current.project(S, V, overscan).find((p) => p.box.key === continuousAnchor!.key);
+            const projection = layoutRef.current.project(S, V, overscan, frameBleed).find((p) => p.box.key === continuousAnchor!.key);
             if (projection) {
               const sample = sampleReadingLine(slot, READING_LINE_RATIO * V - projection.frameScreenTop);
               if (sample.fine?.anchor) {
