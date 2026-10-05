@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { loadBook, loadBookFromArchive, spineIndexForPath, spineItemPath, DrmError, disposeBook, nextLinearIndex } from "./core/book";
 import type { Book } from "./core/types";
+import type { ArchiveClient } from "./core/selectiveArchive";
 import type { Annotation, Stamp, Version } from "./core/portableState/portable-register-core";
 import { compareStamp } from "./core/portableState/portable-register-core";
 import { latestVersion, projectProgressVersion, versionForStamp } from "./core/portableState/projection";
@@ -2603,6 +2604,7 @@ export default function App() {
       });
       let preciseRequestId: number | null = null;
       let unownedBook: Book | null = null;
+      let unownedArchive: ArchiveClient | null = null;
       try {
         // A new open is a new session even when the same book is reopened.
         // Flush any prior session before resetting the immediate-write gate.
@@ -2663,11 +2665,13 @@ export default function App() {
             );
             throw error;
           });
+          unownedArchive = archive;
           // B3: read/adopt the selected progress version before parsing/navigation.
           if (store.beginProgressSession) {
             await store.beginProgressSession(id, progressSelection);
           }
           b = await loadBookFromArchive(archive, { initialSpineIndex });
+          unownedArchive = null;
         } else {
           let buf: Uint8Array;
           try {
@@ -2769,6 +2773,8 @@ export default function App() {
         setPhase({ phase: "error", message: (e as Error).message });
         setSearchNavigationBusy(false);
       } finally {
+        // 进度初始化可能在 loader 接管前失败，此时由开书入口关闭原生归档。
+        unownedArchive?.close();
         // openParsedBook 返回后所有权已归 App 会话；若它在中途抛错但已写入
         // activeSessionRef，则不再抢占销毁，避免把正在阅读的 Book 释放掉。
         if (unownedBook && activeSessionRef.current?.book !== unownedBook) {
