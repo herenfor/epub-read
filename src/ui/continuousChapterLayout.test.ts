@@ -4,6 +4,7 @@ import {
   ChapterLoadGate,
   PendingScrollNavigation,
   buildSpacedChapterBoxes,
+  continuousFrameBleed,
   continuousWheelPixels,
   type ChapterExtent,
 } from "./continuousChapterLayout";
@@ -154,6 +155,38 @@ describe("ContinuousChapterLayout", () => {
     const proj = layout.project(1200, 600, 300);
     const keys = proj.map((p) => p.box.key);
     expect(keys).toEqual(["c0", "c1", "c2"]);
+  });
+});
+
+describe("continuous frame bleed", () => {
+  it("keeps the iframe window covering the viewport while the host scroll runs ahead", () => {
+    const layout = new ContinuousChapterLayout([{ key: "0:long.xhtml", height: 10000, measured: true }]);
+    const V = 800;
+    const bleed = 200;
+    const [p] = layout.project(3000, V, 0, bleed);
+    // iframe 高 V + 2*bleed，顶边在视口上方 bleed 处；内容不跳（inner = frame）。
+    expect(p.frameOffset).toBe(2800);
+    expect(p.innerScrollTop).toBe(2800);
+    expect(p.frameScreenTop).toBe(-200);
+    // 合成线程领先 JS 不超过 bleed 时，iframe 仍盖满 [0, V]。
+    for (const lead of [-bleed, -120, 0, 120, bleed]) {
+      const top = p.frameScreenTop - lead;
+      expect(top).toBeLessThanOrEqual(0);
+      expect(top + V + 2 * bleed).toBeGreaterThanOrEqual(V);
+    }
+  });
+
+  it("clamps the window at chapter edges", () => {
+    const layout = new ContinuousChapterLayout([{ key: "0:long.xhtml", height: 10000, measured: true }]);
+    expect(layout.project(0, 800, 0, 200)[0].frameOffset).toBe(0);
+    expect(layout.project(9200, 800, 0, 200)[0].frameOffset).toBe(10000 - 1200);
+  });
+
+  it("scales with the viewport within fixed bounds", () => {
+    expect(continuousFrameBleed(0)).toBe(0);
+    expect(continuousFrameBleed(300)).toBe(160);
+    expect(continuousFrameBleed(800)).toBe(280);
+    expect(continuousFrameBleed(2000)).toBe(400);
   });
 });
 

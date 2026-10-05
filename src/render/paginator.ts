@@ -61,6 +61,7 @@ import {
 import { imageRequestFromTarget } from "./imageActivation";
 import { columnAtPoint, containingFragmentAtPoint, type FragmentSpace } from "./fragmentGeometry";
 import {
+  COMFORTABLE_SPREAD,
   resolveSpreadReadingArea,
   type SpreadReadingArea,
 } from "./spreadReadingArea";
@@ -69,11 +70,19 @@ import {
 const INITIAL_RENDER_GATE_TIMEOUT_MS = 20_000;
 
 /** 舒适双页写入 viewer 的 reader-owned 根内联属性；restore 只碰这些。 */
+/** 触屏双页把外边距折进跨页时，中缝（= 左右外边距之和）的上限。 */
+const SPREAD_FOLD_MAX_GAP_PX = 192;
+
+/** 无滚动抬手后等待续上的吸附/甩动动画的时长；期间出现滚动则改等 scrollend。 */
+const NATIVE_SNAP_SETTLE_MS = 160;
+
 const SPREAD_AREA_ROOT_STYLE_PROPERTIES = [
   "box-sizing",
   "width",
   "margin-left",
   "margin-right",
+  "padding-left",
+  "padding-right",
   "column-count",
   "column-width",
   "column-gap",
@@ -2415,6 +2424,10 @@ export class ChapterPaginator {
   private scrollStyleRestore: (() => void) | null = null;
   /** 连续宿主接管纵向 pan 时，临时覆盖 viewer 用户滚动；保留原内联值和 priority。 */
   private externalScrollOwnershipRestore: (() => void) | null = null;
+  /** 单页分页折叠 body 左右 padding 前的内联值快照。 */
+  private parentPaddingRestore: (() => void) | null = null;
+  /** 连续滚动 iframe 上下缓冲（见 setContinuousBleed）。 */
+  private continuousBleedPx = 0;
   /** 当前 iframe 文档上的横滑清理函数；换章/销毁时必须解除。 */
   private pagedSwipeCleanup: (() => void) | null = null;
   /** 触摸分页时 viewer 改为合成滚动的原内联值快照；null 表示未接管。 */
@@ -2428,6 +2441,10 @@ export class ChapterPaginator {
   /** 仅在一次触摸手势内开启吸附，避免重排或程序化滚动被就近吸附。 */
   private nativeSnapArmed = false;
   private nativeSnapScrolled = false;
+  /** 原生吸附手势的手指仍在屏幕上。 */
+  private nativeSnapTouching = false;
+  /** 取消无滚动抬手后的收尾计时器。 */
+  private nativeSnapSettleCancel: (() => void) | null = null;
   private nativeSnapLayer: HTMLElement | null = null;
   private nativeSnapKey = "";
   private nativeSnapListenersViewer: HTMLElement | null = null;
@@ -2526,6 +2543,14 @@ export class ChapterPaginator {
   }
 
   /**
+   * 连续滚动：宿主让 iframe 比可见视口上下各高出 bleed 像素作缓冲。版面仍按
+   * 可见视口排（整页图填满的是可见高度，不是含缓冲的 iframe 高度）；下次测量生效。
+   */
+  setContinuousBleed(px: number): void {
+    this.continuousBleedPx = Number.isFinite(px) && px > 0 ? Math.round(px) : 0;
+  }
+
+  /**
    * 连续宿主是唯一用户纵向滚动者时，禁止 iframe viewer 自己消费手指 pan。
    * overflow-y:hidden 仍允许脚本设置 scrollTop，因此投影路径保持可用。
    * 仅在外部适配器存在时生效；原内联值和 !important priority 在退出时恢复。
@@ -2559,15 +2584,18 @@ export class ChapterPaginator {
    * overflow-x:scroll（隐藏滚动条、禁止原生横向 pan），滚动偏移交给合成器，
    * 版面与分页几何不变；鼠标/触控板为主的桌面不接管，避免原生横向滚动绕过分页。
    */
+  /** 主指针为触摸（手机/平板）：滑动翻页的观感优先。 */
+  private prefersTouchPaging(): boolean {
+    try {
+      return this.contentDoc?.defaultView?.matchMedia?.("(pointer: coarse)").matches === true;
+    } catch {
+      return false;
+    }
+  }
+
   private applyCompositedPagedScroll(): void {
     const viewer = this.viewer;
-    const win = this.contentDoc?.defaultView;
-    let coarse = false;
-    try {
-      coarse = win?.matchMedia?.("(pointer: coarse)").matches === true;
-    } catch {
-      coarse = false;
-    }
+    const coarse = this.prefersTouchPaging();
     if (!viewer || !this.pagedSwipe || this.scrollMode || !coarse) {
       this.restoreCompositedPagedScroll();
       return;
@@ -2705,18 +2733,44 @@ export class ChapterPaginator {
       this.nativeSnapKey = key;
     }
     this.nativeSnapScrolled = false;
+    this.nativeSnapTouching = true;
+    this.clearNativeSnapSettle();
     if (!this.nativeSnapArmed) {
       viewer.style.setProperty("scroll-snap-type", "x mandatory");
       this.nativeSnapArmed = true;
     }
   }
 
-  /** 手指抬起：没有发生原生滚动（轻点/跨章）就立即撤掉吸附。 */
+  /**
+   * 手指抬起。本手势有原生滚动时等 scrollend 提交；没有时也不能立刻撤吸附：
+   * 上一次甩动/吸附动画可能仍在合成线程上进行（快速连翻时轻点会先打断再
+   * 续上），此刻撤掉 scroll-snap-type 会把动画截停在两页之间，或让屏幕停在
+   * 旧帧。短暂等待：期间出现滚动就交给 scrollend，否则按落点收尾。
+   */
   endNativeSnapGesture(): void {
-    if (this.nativeSnapArmed && !this.nativeSnapScrolled) this.disarmNativeSnap();
+    this.nativeSnapTouching = false;
+    if (!this.nativeSnapArmed || this.nativeSnapScrolled) return;
+    this.clearNativeSnapSettle();
+    const win = this.contentDoc?.defaultView;
+    if (!win || typeof win.setTimeout !== "function") {
+      this.commitNativeSnap();
+      return;
+    }
+    const handle = win.setTimeout(() => {
+      this.nativeSnapSettleCancel = null;
+      if (this.nativeSnapArmed && !this.nativeSnapScrolled && !this.nativeSnapTouching) this.commitNativeSnap();
+    }, NATIVE_SNAP_SETTLE_MS);
+    this.nativeSnapSettleCancel = () => win.clearTimeout(handle);
+  }
+
+  private clearNativeSnapSettle(): void {
+    const cancel = this.nativeSnapSettleCancel;
+    this.nativeSnapSettleCancel = null;
+    cancel?.();
   }
 
   private disarmNativeSnap(): void {
+    this.clearNativeSnapSettle();
     if (!this.nativeSnapArmed) return;
     this.nativeSnapArmed = false;
     this.nativeSnapScrolled = false;
@@ -2724,9 +2778,13 @@ export class ChapterPaginator {
     this.viewer?.style.removeProperty("scroll-snap-type");
   }
 
-  /** 原生滚动与吸附动画结束：按落点提交页码（关闭弹注、发布进度、采样锚点）。 */
+  /**
+   * 原生滚动与吸附动画结束：按落点提交页码（关闭弹注、发布进度、采样锚点）。
+   * 手指仍按着时（新手势打断了上一次甩动）不提交，等抬手后再收尾，否则本
+   * 手势剩余的原生滚动会在没有吸附的情况下停在任意位置。
+   */
   private commitNativeSnap(): void {
-    if (!this.nativeSnapArmed || !this.viewer) return;
+    if (!this.nativeSnapArmed || !this.viewer || this.nativeSnapTouching) return;
     const offsets = this.nativeSnapOffsets();
     const left = this.viewer.scrollLeft;
     let page = 0;
@@ -3284,6 +3342,29 @@ export class ChapterPaginator {
     // 统一列/屏换算的唯一来源：列宽、列步长、翻屏步长都来自本轮 geometry。
     let w = legacyW;
     let geometry: SpreadGeometry;
+    // 触屏双页同理：外边距写进 viewer padding、viewer 撑满整屏，中缝取左右外边距
+    // 之和（像实体书左页内白 + 右页内白），一屏双页的步长恰好等于整屏宽，翻页时
+    // 整个跨页连同外边距一起滑动。只在自动中缝、外边距不大（中缝不超过
+    // SPREAD_FOLD_MAX_GAP_PX）且双栏仍成立时启用；宽屏大留白与手动中缝保持原样。
+    // 书自带的 body 左右 padding（如 0.5em）同样折进每页（单页与双页共用）。
+    const authorInsetLeft = parent ? parseFloat(parentCs?.paddingLeft ?? "") || 0 : 0;
+    const authorInsetRight = parent ? parseFloat(parentCs?.paddingRight ?? "") || 0 : 0;
+    let spreadInsets: { left: number; right: number } | null = null;
+    if (comfortArea && this.settings.spreadGapMode !== "manual" && this.prefersTouchPaging()) {
+      const viewerInsets = this.readViewerHorizontalInsets(viewer, win);
+      const outerLeft = comfortArea.marginLeftPx + authorInsetLeft;
+      const outerRight = comfortArea.marginRightPx + authorInsetRight;
+      const fullWidth = pageW + authorInsetLeft + authorInsetRight;
+      const foldedGap = outerLeft + outerRight;
+      const minimumColumn = Math.max(COMFORTABLE_SPREAD.minColumnPx, COMFORTABLE_SPREAD.minColumnEm * em);
+      const folded = createSpreadGeometry(fullWidth - foldedGap, foldedGap, 2, minimumColumn);
+      if (viewerInsets.left + viewerInsets.right === 0 && foldedGap > 0 && foldedGap <= SPREAD_FOLD_MAX_GAP_PX &&
+        folded.columns === 2 && folded.columnWidth <= comfortArea.maxColumnWidth + 0.5) {
+        comfortArea = { ...comfortArea, geometry: folded, viewerBorderBoxWidth: fullWidth };
+        spreadInsets = { left: outerLeft, right: outerRight };
+        if (parent && authorInsetLeft + authorInsetRight > 0) this.foldParentHorizontalPadding(parent);
+      }
+    }
     if (comfortArea) {
       geometry = comfortArea.geometry;
       w = comfortArea.viewerBorderBoxWidth;
@@ -3296,6 +3377,20 @@ export class ChapterPaginator {
       geometry = createSpreadGeometry(legacyW, gap, requestedColumns, MIN_COLUMN_WIDTH_PX);
       this.spreadArea = null;
     }
+    // 单页分页的左右边距属于“每一页”：viewer 撑满整屏，边距写成 viewer 的
+    // 左右 padding，列间距 = 左边距 + 右边距，翻屏步长恰好等于整屏宽。
+    // 若把边距留在 viewer 外（居中缩窄），翻页只在中间窗口里滑动，两侧是不动的长条。
+    // 书自带的 body 左右 padding（如 0.5em）同理折进每页：body 横向 padding 清零、
+    // 同宽加到 viewer padding，正文位置不变，滑动时两侧不再留不动的窄条。
+    const insetLeft = marginLeft + authorInsetLeft;
+    const insetRight = marginRight + authorInsetRight;
+    const pageInsets = !scrollMode && !this.fixedLayout && !comfortArea && geometry.columns === 1 &&
+      insetLeft + insetRight > 0 && legacyW > 0;
+    if (pageInsets) {
+      geometry = createSpreadGeometry(legacyW, insetLeft + insetRight, 1, MIN_COLUMN_WIDTH_PX);
+      w = pageW + authorInsetLeft + authorInsetRight;
+      if (parent && authorInsetLeft + authorInsetRight > 0) this.foldParentHorizontalPadding(parent);
+    }
     this.spreadGeometry = geometry;
     this.effectiveColumns = geometry.columns;
     this.step = geometry.columnStep;
@@ -3305,10 +3400,21 @@ export class ChapterPaginator {
     if (!scrollMode) this.snapshotSpreadReadingAreaStyles(viewer);
     viewer.style.position = "relative";
     viewer.style.width = `${w}px`;
-    if (comfortArea) {
+    if (comfortArea && spreadInsets) {
+      viewer.style.boxSizing = "border-box";
+      viewer.style.marginLeft = "0px";
+      viewer.style.marginRight = "0px";
+      viewer.style.paddingLeft = `${spreadInsets.left}px`;
+      viewer.style.paddingRight = `${spreadInsets.right}px`;
+    } else if (comfortArea) {
       viewer.style.boxSizing = "border-box";
       viewer.style.marginLeft = `${comfortArea.marginLeftPx}px`;
       viewer.style.marginRight = `${comfortArea.marginRightPx}px`;
+    }
+    if (pageInsets) {
+      viewer.style.boxSizing = "border-box";
+      viewer.style.paddingLeft = `${insetLeft}px`;
+      viewer.style.paddingRight = `${insetRight}px`;
     }
     viewer.style.paddingTop = `${padTop}px`;
     viewer.style.paddingBottom = `${padBottom}px`;
@@ -3329,6 +3435,14 @@ export class ChapterPaginator {
       viewer.style.height = `${h}px`;
     } else {
       viewer.style.height = "100%";
+    }
+    // 连续滚动的 iframe 含上下缓冲：整页图按可见高度填满（sanitize 的
+    // fullpage-image 规则读取该变量，未设置时仍为 100%）。
+    const bleed = scrollMode ? this.continuousBleedPx : 0;
+    if (bleed > 0 && h > 0) {
+      viewer.style.setProperty?.("--reader-fill-height", `${Math.max(0, h - padTop - padBottom - 2 * bleed)}px`);
+    } else {
+      viewer.style.removeProperty?.("--reader-fill-height");
     }
     // 同步回流一次，确保 scrollWidth 反映新布局
     void viewer.scrollWidth;
@@ -3454,6 +3568,29 @@ export class ChapterPaginator {
     const restore = this.spreadAreaStyleRestore;
     this.spreadAreaStyleRestore = null;
     restore?.();
+    const restoreParent = this.parentPaddingRestore;
+    this.parentPaddingRestore = null;
+    restoreParent?.();
+  }
+
+  /** 单页分页把 viewer 父级（body）的左右 padding 折进页边距；下次测量前精确恢复。 */
+  private foldParentHorizontalPadding(parent: HTMLElement): void {
+    if (this.parentPaddingRestore) return;
+    const style = parent.style as CSSStyleDeclaration | undefined;
+    if (!style || typeof style.getPropertyValue !== "function") return;
+    const snapshot = (["padding-left", "padding-right"] as const).map((property) => ({
+      property,
+      value: style.getPropertyValue(property),
+      priority: style.getPropertyPriority(property),
+    }));
+    style.setProperty("padding-left", "0px", "important");
+    style.setProperty("padding-right", "0px", "important");
+    this.parentPaddingRestore = () => {
+      for (const item of snapshot) {
+        if (item.value) style.setProperty(item.property, item.value, item.priority);
+        else style.removeProperty(item.property);
+      }
+    };
   }
 
   /** 只快照 reader-owned 根属性；不覆盖作者/用户对 viewer 的其他内联样式。 */
@@ -4269,6 +4406,12 @@ export class ChapterPaginator {
         });
         void viewer.offsetWidth;
         const viewerRect = viewer.getBoundingClientRect();
+        let viewerPaddingLeft = 0;
+        try {
+          viewerPaddingLeft = parseFloat(doc.defaultView?.getComputedStyle(viewer).paddingLeft ?? "") || 0;
+        } catch {
+          viewerPaddingLeft = 0;
+        }
         const rects = members.map((member) =>
           Array.from(member.getClientRects()).map((rect) => ({
             left: rect.left,
@@ -4279,7 +4422,7 @@ export class ChapterPaginator {
         );
         const validGeometry = isPercentageFloatGroupGeometryValid({
           rects,
-          viewerLeft: viewerRect.left,
+          viewerLeft: viewerRect.left + (viewer.clientLeft || 0) + viewerPaddingLeft,
           scrollLeft: viewer.scrollLeft,
           step: this.step,
           parentWidth: parentW,
@@ -5109,8 +5252,11 @@ export class ChapterPaginator {
     if (!isMediaOnlyFloatSubtree(candidate.childNodes)) return;
 
     const viewerRect = viewer.getBoundingClientRect();
-    const paddingBottom = parseFloat(win.getComputedStyle(viewer).paddingBottom) || 0;
+    const viewerCs = win.getComputedStyle(viewer);
+    const paddingBottom = parseFloat(viewerCs.paddingBottom) || 0;
     const contentBottom = viewerRect.bottom - paddingBottom;
+    // 列坐标原点是 viewer 内容盒左缘（单页边距写在 viewer 的左右 padding 里）。
+    const viewerContentLeft = viewerRect.left + (viewer.clientLeft || 0) + (parseFloat(viewerCs.paddingLeft) || 0);
     const epsilon = 0.5;
     const toRect = (r: DOMRect): FloatFixRect => ({
       left: r.left,
@@ -5125,7 +5271,7 @@ export class ChapterPaginator {
     const beforeRects = rectsOf(candidate);
     if (!beforeRects.length) return;
     const columnFor = (x: number): number =>
-      Math.floor((x + viewer.scrollLeft - viewerRect.left + epsilon) / this.step);
+      Math.floor((x + viewer.scrollLeft - viewerContentLeft + epsilon) / this.step);
     const columnsFor = (rects: FloatFixRect[]): number[] =>
       Array.from(
         new Set(
@@ -5174,7 +5320,7 @@ export class ChapterPaginator {
       previousVisualRects,
       estimatedBeforeBottom,
       contentBottom,
-      viewerLeft: viewerRect.left,
+      viewerLeft: viewerContentLeft,
       scrollLeft: viewer.scrollLeft,
       step: this.step,
       pageWidth: this.pageWidth,
@@ -7338,7 +7484,7 @@ export class ChapterPaginator {
         e.deltaY,
         e.deltaMode,
         28,
-        this.viewer?.clientHeight ?? 600
+        Math.max(1, (this.viewer?.clientHeight ?? 600) - 2 * this.continuousBleedPx)
       );
       e.preventDefault();
       this.externalScroll.onWheelPixels(deltaY);
@@ -7354,7 +7500,7 @@ export class ChapterPaginator {
       const deltaY = e.deltaMode === 1
         ? e.deltaY * 28
         : e.deltaMode === 2
-          ? e.deltaY * this.viewer.clientHeight
+          ? e.deltaY * Math.max(1, this.viewer.clientHeight - 2 * this.continuousBleedPx)
           : e.deltaY;
 
       if (deltaY > 0) {

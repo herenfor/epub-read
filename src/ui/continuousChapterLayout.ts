@@ -39,6 +39,15 @@ export interface ChapterProjection {
   readonly visible: boolean;
 }
 
+/**
+ * 连续滚动 iframe 的上下缓冲高度：覆盖合成线程滚动领先 JS 同步的一两帧
+ * （快速甩动约 60–130px/帧），又不让 iframe 过高增加绘制面积。
+ */
+export function continuousFrameBleed(viewportHeight: number): number {
+  if (!(viewportHeight > 0)) return 0;
+  return Math.round(Math.min(400, Math.max(160, viewportHeight * 0.35)));
+}
+
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
 }
@@ -172,15 +181,18 @@ export class ContinuousChapterLayout {
    * Slots are selected by pixel coverage, not by a fixed previous/current/next count.
    * Many short chapters may share one viewport. Zero-height chapters need no frame.
    */
-  project(scrollTop: number, viewportHeight: number, overscan = 0): ChapterProjection[] {
+  project(scrollTop: number, viewportHeight: number, overscan = 0, bleed = 0): ChapterProjection[] {
     const top = this.clampScrollTop(scrollTop, viewportHeight);
     const bottom = top + viewportHeight;
     const start = Math.max(0, top - overscan);
     const end = Math.min(this.totalHeight, bottom + overscan);
+    // iframe 比视口上下各多出 bleed：宿主原生滚动在合成线程先走，JS 跟上之前
+    // 窗口随画布移动，多出的部分盖住边缘，不露出背景。
+    const frameHeight = viewportHeight + 2 * Math.max(0, bleed);
     const result: ChapterProjection[] = [];
     for (const box of this.boxes) {
       if (box.height === 0 || box.bottom <= start || box.top >= end) continue;
-      const frameOffset = clamp(top - box.top, 0, Math.max(0, box.height - viewportHeight));
+      const frameOffset = clamp(top - box.top - Math.max(0, bleed), 0, Math.max(0, box.height - frameHeight));
       const frameScreenTop = box.top + frameOffset - top;
       const visibleStart = Math.max(top, box.top);
       const visibleEnd = Math.min(bottom, box.bottom);
