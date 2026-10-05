@@ -2753,7 +2753,12 @@ describe("reader local width core", () => {
     expect(readComputedHorizontalMarginSpecifiedValues({} as Element)).toBeUndefined();
   });
 
-  it("滚动模式也用实际块级包含盒收紧溢出图片，不改 width/height", () => {
+  it.each([
+    { label: "滚动正文图片", tag: "img", scroll: true, container: 1200, column: 1168, width: 1200, border: 0, right: 0, expected: "1168px" },
+    { label: "手机分页背景图盒（auto 被解析为负 margin）", tag: "div", scroll: false, container: 384, column: 328, width: 380, border: 1.6, right: -53.6, expected: "326.4px" },
+    { label: "手机滚动背景图盒", tag: "div", scroll: true, container: 384, column: 328, width: 380, border: 1.6, right: -53.6, expected: "326.4px" },
+    { label: "平板列宽足够，保留原背景图盒", tag: "div", scroll: false, container: 1200, column: 583, width: 380, border: 1.6, right: 0, expected: undefined },
+  ])("局部媒体限宽：$label，不改 width/height", ({ tag, scroll, container, column, width, border, right, expected }) => {
     const values = new Map<string, string>();
     const priorities = new Map<string, string>();
     const imgStyle = {
@@ -2772,40 +2777,46 @@ describe("reader local width core", () => {
     } as unknown as CSSStyleDeclaration;
     const img = {
       nodeType: 1,
-      tagName: "IMG",
-      localName: "img",
+      tagName: tag.toUpperCase(),
+      localName: tag,
       isConnected: true,
       parentElement: null as unknown as HTMLElement,
       style: imgStyle,
       closest: () => null,
       naturalWidth: 1500,
       naturalHeight: 899,
+      computedStyleMap: () => new Map([
+        ["margin-left", { toString: () => "auto" }],
+        ["margin-right", { toString: () => "auto" }],
+      ]),
     } as unknown as HTMLImageElement;
     const viewer = {
-      clientWidth: 1200,
+      clientWidth: container,
       classList: { contains: () => false },
       querySelectorAll: () => [img],
     } as unknown as HTMLElement;
     (img as unknown as { parentElement: HTMLElement }).parentElement = viewer;
     const imgCs = {
-      display: "inline",
+      display: tag === "img" ? "inline" : "block",
+      backgroundImage: tag === "img" ? "none" : "url(waves.png)",
+      writingMode: "horizontal-tb",
       visibility: "visible",
       float: "none",
       position: "static",
       transform: "none",
       boxSizing: "content-box",
-      width: "1200px",
+      width: `${width}px`,
       maxWidth: "1200px",
       paddingLeft: "0px",
       paddingRight: "0px",
-      borderLeftWidth: "0px",
-      borderRightWidth: "0px",
+      borderLeftWidth: `${border / 2}px`,
+      borderRightWidth: `${border / 2}px`,
       marginLeft: "0px",
-      marginRight: "0px",
+      marginRight: `${right}px`,
     } as unknown as CSSStyleDeclaration;
     const viewerCs = {
-      paddingLeft: "16px",
-      paddingRight: "16px",
+      paddingLeft: scroll ? `${(container - column) / 2}px` : "28px",
+      paddingRight: scroll ? `${(container - column) / 2}px` : "28px",
     } as unknown as CSSStyleDeclaration;
     const doc = {
       styleSheets: [],
@@ -2819,23 +2830,31 @@ describe("reader local width core", () => {
       fixedLayout: boolean;
       containedMediaFixes: unknown[];
     } & { scrollMode: boolean };
-    Object.defineProperty(context, "scrollMode", { value: true, writable: true, configurable: true });
+    Object.defineProperty(context, "scrollMode", { value: scroll, writable: true, configurable: true });
     Object.assign(context, {
       contentDoc: doc,
       viewer,
       fixedLayout: false,
       containedMediaFixes: [],
+      pageWidth: column,
     });
 
     (ChapterPaginator.prototype as unknown as {
       applyContainedMediaMaxWidth: (this: unknown) => void;
     }).applyContainedMediaMaxWidth.call(context);
 
-    // 1200 viewport - 2 * 16px viewer padding = 1168px 单列内容宽。
-    expect(values.get("max-width")).toBe("1168px");
-    expect(priorities.get("max-width")).toBe("important");
+    expect(values.get("max-width")).toBe(expected);
+    expect(priorities.get("max-width")).toBe(expected ? "important" : undefined);
     expect(values.has("height")).toBe(false);
     expect(values.has("width")).toBe(false);
+    expect(values.has("background-size")).toBe(false);
+
+    // 扩宽重测前恢复作者的 inline 上限，不能把手机补丁固化到平板。
+    (ChapterPaginator.prototype as unknown as {
+      restoreContainedMediaFixes: (this: unknown) => void;
+    }).restoreContainedMediaFixes.call(context);
+    expect(values.has("max-width")).toBe(false);
+    expect(priorities.has("max-width")).toBe(false);
   });
 });
 

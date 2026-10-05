@@ -868,8 +868,8 @@ export function planAutoBlockBox(input: {
 }
 
 /**
- * 只对已确认溢出的普通正文图片收紧 max-width，保留更小的作者上限。
- * containingContentWidth 是图片实际块级包含盒的 content-box 宽（inline 链接需上溯）。
+ * 只对已确认溢出的普通正文图片/背景图盒收紧 max-width，保留更小的作者上限。
+ * containingContentWidth 是实际块级包含盒的 content-box 宽（inline 链接需上溯）；auto margin 按 0 预算。
  * authoredMaxWidth 为 computed px，none 由调用者传 Infinity；未知值不进此函数。
  * 不修改 width/height/max-height，不以 object-fit 代替元素自身限宽。
  */
@@ -2383,11 +2383,11 @@ export class ChapterPaginator {
     maxWidth?: InlineStyleValue;
   }> = [];
   /**
-   * 分页正文图片局部限宽快照。保存原 inline max-width/priority 与首次读到的
+   * 正文图片/顶层背景图盒局部限宽快照。保存原 inline max-width/priority 与首次读到的
    * 作者 computed 上限（px/Infinity），使重测时不把上轮补丁当作者约束。
    */
   private containedMediaFixes: Array<{
-    el: HTMLImageElement;
+    el: HTMLElement;
     maxWidth: InlineStyleValue;
     authoredMaxWidth: number;
   }> = [];
@@ -2891,7 +2891,7 @@ export class ChapterPaginator {
 
 
   /** 图片的最近非 inline 块级包含盒；inline 链接必须上溯，不能用 clientWidth=0。 */
-  private getMediaContainingBlock(img: HTMLImageElement, win: Window): HTMLElement {
+  private getMediaContainingBlock(img: HTMLElement, win: Window): HTMLElement {
     const viewer = this.viewer as HTMLElement;
     let node = img.parentElement;
     while (node && node !== viewer) {
@@ -3984,8 +3984,8 @@ export class ChapterPaginator {
   }
 
   /**
-   * 分页与滚动正文普通图片的局部 max-width 收紧。先恢复/复用原快照，再收集读数，
-   * 最后批量写回；只处理实际越过块级包含盒的 img，整页/固定版式/浮层/绝对定位
+   * 分页与滚动正文普通图片/顶层背景图盒的局部 max-width 收紧。先恢复/复用原快照，再收集读数，
+   * 最后批量写回；只处理实际越过块级包含盒的媒体，整页/固定版式/浮层/绝对定位
    * 与明确出血意图继续走原布局。固定版式不进入；不改 width/height/max-height。
    */
   private applyContainedMediaMaxWidth(): void {
@@ -4001,30 +4001,36 @@ export class ChapterPaginator {
     }
 
     const priorFixes = this.containedMediaFixes ?? [];
-    const existing = new Map<HTMLImageElement, (typeof priorFixes)[number]>();
+    const existing = new Map<HTMLElement, (typeof priorFixes)[number]>();
     for (const fix of priorFixes) existing.set(fix.el, fix);
     const next: Array<{
-      el: HTMLImageElement;
+      el: HTMLElement;
       maxWidth: InlineStyleValue;
       authoredMaxWidth: number;
     }> = [];
-    const writes: Array<{ el: HTMLImageElement; value: number }> = [];
+    const writes: Array<{ el: HTMLElement; value: number }> = [];
     const epsilon = 0.5;
-    const images = Array.from(viewer.querySelectorAll("img")) as HTMLImageElement[];
+    const media = Array.from(viewer.querySelectorAll("img, .reader-top")) as HTMLElement[];
 
-    for (const img of images) {
-      if (!img.isConnected || !img.parentElement) continue;
-      if (img.closest(".illus, .kuchie, .cover, .duokan-image-fullscreen")) continue;
+    for (const element of media) {
+      if (!element.isConnected || !element.parentElement) continue;
+      if (element.closest(".illus, .kuchie, .cover, .duokan-image-fullscreen")) continue;
 
-      const cs = win.getComputedStyle(img);
+      const cs = win.getComputedStyle(element);
       if (cs.display === "none" || cs.visibility === "hidden") continue;
+      // 背景图片没有 <img>：只补普通顶层块，不改内联装饰和嵌套背景布局。
+      if (element.localName !== "img" && (
+        element.parentElement !== viewer ||
+        cs.backgroundImage === "none" ||
+        !/^(?:block|flow-root)$/u.test(cs.display) ||
+        cs.writingMode !== "horizontal-tb"
+      )) continue;
       if (cs.float.trim().toLowerCase() !== "none") continue;
       const position = cs.position.trim().toLowerCase();
       if (position === "absolute" || position === "fixed") continue;
       if (cs.transform.trim().toLowerCase() !== "none") continue;
-      if (hasAuthorMediaBreakoutIntent(doc, img)) continue;
 
-      const existingFix = existing.get(img);
+      const existingFix = existing.get(element);
       const authoredMaxWidth =
         existingFix?.authoredMaxWidth ?? this.parseAuthoredMediaMaxWidth(cs.maxWidth);
       if (authoredMaxWidth === undefined) continue;
@@ -4036,9 +4042,12 @@ export class ChapterPaginator {
         (parseFloat(cs.paddingRight) || 0) +
         (parseFloat(cs.borderLeftWidth) || 0) +
         (parseFloat(cs.borderRightWidth) || 0);
-      const marginLeft = parseFloat(cs.marginLeft) || 0;
-      const marginRight = parseFloat(cs.marginRight) || 0;
-      const containing = this.getMediaContainingBlock(img, win);
+      // 窄屏溢出的 auto margin 会解析为负数；它不是作者负缩进，不能
+      // 把负值加回宽度预算，否则 380px 背景盒在 328px 列内仍被允许。
+      const marginTokens = readComputedHorizontalMarginSpecifiedValues(element);
+      const marginLeft = marginTokens?.left === "auto" ? 0 : parseFloat(cs.marginLeft) || 0;
+      const marginRight = marginTokens?.right === "auto" ? 0 : parseFloat(cs.marginRight) || 0;
+      const containing = this.getMediaContainingBlock(element, win);
       const containingStyle = win.getComputedStyle(containing);
       const containingContentWidth = resolveBlockContainingContentWidth(
         this.viewer,
@@ -4048,17 +4057,16 @@ export class ChapterPaginator {
         containing,
         containingStyle
       );
-      const available =
-        containingContentWidth -
-        marginLeft -
-        marginRight -
-        (boxSizing === "content-box" ? paddingBorderWidth : 0);
+      const available = containingContentWidth - marginLeft - marginRight;
       if (!(available > 0)) continue;
 
       if (!existingFix) {
         const currentBorderBox = getBorderBoxWidth(cs);
         if (!(currentBorderBox > available + epsilon)) continue;
       }
+
+      // 先筛实际溢出，再读取作者 CSSOM，普通背景段落不增加规则扫描。
+      if (hasAuthorMediaBreakoutIntent(doc, element)) continue;
 
       const planned = planContainedMediaMaxWidth({
         containingContentWidth,
@@ -4073,9 +4081,9 @@ export class ChapterPaginator {
       if (!(planned < authoredMaxWidth - epsilon)) continue;
 
       const snapshot =
-        existingFix?.maxWidth ?? snapshotInlineStyleProperty(img.style, "max-width");
-      next.push({ el: img, maxWidth: snapshot, authoredMaxWidth });
-      writes.push({ el: img, value: planned });
+        existingFix?.maxWidth ?? snapshotInlineStyleProperty(element.style, "max-width");
+      next.push({ el: element, maxWidth: snapshot, authoredMaxWidth });
+      writes.push({ el: element, value: planned });
     }
 
     for (const fix of priorFixes) {
