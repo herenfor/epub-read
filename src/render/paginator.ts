@@ -119,6 +119,11 @@ export type ChapterState =
       leafRange?: { first: number; last: number; total: number } | null;
       /** 实际舒适双页阅读区；非双页/回退时不提供，UI 不自行猜屏宽。 */
       spreadArea?: SpreadAreaSnapshot;
+      /**
+       * 原生滑动途中的页码预览：只供页码/进度条显示，阅读锚点尚未更新，
+       * 宿主不得据此保存进度；滑动停下后会再发一次正式状态。
+       */
+      transient?: true;
     }
   | { status: "error"; message: string };
 
@@ -2449,8 +2454,13 @@ export class ChapterPaginator {
   private nativeSnapKey = "";
   private nativeSnapListenersViewer: HTMLElement | null = null;
   private readonly nativeSnapScrollHandler = (): void => {
-    if (this.nativeSnapArmed) this.nativeSnapScrolled = true;
+    if (!this.nativeSnapArmed) return;
+    this.nativeSnapScrolled = true;
+    this.scheduleNativeSnapLivePage();
   };
+  /** 原生滚动途中已向宿主报告的页（只用于页码显示）；null 表示未报告。 */
+  private nativeSnapLivePage: number | null = null;
+  private nativeSnapLiveFrame: number | null = null;
   private readonly nativeSnapScrollEndHandler = (): void => this.commitNativeSnap();
   /** 普通轻点检测清理函数；用于手机工具栏显隐。 */
   private plainTapCleanup: (() => void) | null = null;
@@ -2769,8 +2779,49 @@ export class ChapterPaginator {
     cancel?.();
   }
 
+  /**
+   * 原生滚动途中按最近的屏实时报告页码：连续翻页时 scrollend 要等全部停下才来，
+   * 只在提交时更新会让底栏页码停在起点。每帧最多算一次、只在跨过半屏换页时
+   * 才发状态（一次翻页约一次，与 JS 翻页同频）；不改 metrics、不采样锚点，
+   * 正式提交仍由 commitNativeSnap 完成。
+   */
+  private scheduleNativeSnapLivePage(): void {
+    const win = this.contentDoc?.defaultView;
+    if (this.nativeSnapLiveFrame !== null || !win || typeof win.requestAnimationFrame !== "function") return;
+    this.nativeSnapLiveFrame = win.requestAnimationFrame(() => {
+      this.nativeSnapLiveFrame = null;
+      if (!this.nativeSnapArmed || !this.viewer || this.disposed) return;
+      const page = this.nearestNativeSnapPage();
+      if (page === null) return;
+      if (page === (this.nativeSnapLivePage ?? this.metrics.currentPage)) return;
+      this.nativeSnapLivePage = page;
+      this.emit({ ...this.readyState(false, page), transient: true } as ChapterState);
+    });
+  }
+
+  private nearestNativeSnapPage(): number | null {
+    if (!this.viewer) return null;
+    const offsets = this.nativeSnapOffsets();
+    if (offsets.length === 0) return null;
+    const left = this.viewer.scrollLeft;
+    let page = 0;
+    for (let i = 1; i < offsets.length; i++) {
+      if (Math.abs(offsets[i] - left) < Math.abs(offsets[page] - left)) page = i;
+    }
+    return page;
+  }
+
+  private clearNativeSnapLivePage(): void {
+    if (this.nativeSnapLiveFrame !== null) {
+      this.contentDoc?.defaultView?.cancelAnimationFrame?.(this.nativeSnapLiveFrame);
+      this.nativeSnapLiveFrame = null;
+    }
+    this.nativeSnapLivePage = null;
+  }
+
   private disarmNativeSnap(): void {
     this.clearNativeSnapSettle();
+    this.clearNativeSnapLivePage();
     if (!this.nativeSnapArmed) return;
     this.nativeSnapArmed = false;
     this.nativeSnapScrolled = false;
@@ -2787,13 +2838,13 @@ export class ChapterPaginator {
     if (!this.nativeSnapArmed || !this.viewer || this.nativeSnapTouching) return;
     const offsets = this.nativeSnapOffsets();
     const left = this.viewer.scrollLeft;
-    let page = 0;
-    for (let i = 1; i < offsets.length; i++) {
-      if (Math.abs(offsets[i] - left) < Math.abs(offsets[page] - left)) page = i;
-    }
+    const page = this.nearestNativeSnapPage() ?? 0;
+    const livePage = this.nativeSnapLivePage;
     this.disarmNativeSnap();
     if (offsets.length === 0) return;
     if (page !== this.metrics.currentPage || Math.abs(offsets[page] - left) > 0.5) this.setPage(page);
+    // 途中报告过别的页、最后又落回原页时 setPage 不会再发状态，这里补一次。
+    else if (livePage !== null && livePage !== page) this.emit(this.readyState(false));
   }
 
   /**
@@ -3682,7 +3733,7 @@ export class ChapterPaginator {
   }
 
   /** ready 状态的唯一构造入口，避免滚动字段散落在各调用点。 */
-  private readyState(empty: boolean): ChapterState {
+  private readyState(empty: boolean, page = this.metrics.currentPage): ChapterState {
     if (this.scrollMode) {
       const metrics = this.scrollMetrics();
       return {
@@ -3696,13 +3747,13 @@ export class ChapterPaginator {
       };
     }
     const leafRange = this.spreadLayout
-      ? visibleLeafRange(this.spreadLayout, this.metrics.currentPage)
+      ? visibleLeafRange(this.spreadLayout, page)
       : null;
-    const atEnd = !this.hasNextChapter && this.metrics.currentPage >= this.metrics.pageCount - 1;
+    const atEnd = !this.hasNextChapter && page >= this.metrics.pageCount - 1;
     return {
       status: "ready",
       pageCount: this.metrics.pageCount,
-      currentPage: this.metrics.currentPage,
+      currentPage: page,
       empty,
       mode: "paginated",
       effectiveColumns: (this.spreadGeometry?.columns ?? this.effectiveColumns) as 1 | 2,

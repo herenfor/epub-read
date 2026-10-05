@@ -28,7 +28,6 @@ export interface WhisperFooterProps {
   chapterIndex: number;
   totalChapters: number;
 
-  estimatedMinutesLeft?: number;
   bookProgressPct?: number;
   /** 连续滚动模式下整本书 0..1 的精确宏观几何位置 */
   totalScrollProgress?: number;
@@ -173,7 +172,6 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
   chapterTitle,
   chapterIndex,
   totalChapters,
-  estimatedMinutesLeft,
   bookProgressPct,
   onSeekPage,
   onSeekChapter,
@@ -499,7 +497,7 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
     return `${atEnd ? 100 : Math.min(99, Math.round(activeRatio * 100))}%`;
   };
 
-  // 极简微弱文案；触摸底栏空间有限，只留本章位置、剩余时间与全书百分比。
+  // 极简微弱文案；触摸底栏空间有限，只留本章位置与全书百分比。
   const textContent = (() => {
     if (mobile) {
       const parts: string[] = [];
@@ -509,9 +507,6 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
           ? `${leafRange.first}/${leafRange.total} 页`
           : `${leafRange.first}–${leafRange.last}/${leafRange.total} 页`);
       } else parts.push(`${currentPage + 1}/${pageCount || 1} 页`);
-      if (typeof estimatedMinutesLeft === "number" && estimatedMinutesLeft > 0) {
-        parts.push(`剩 ${estimatedMinutesLeft} 分钟`);
-      }
       parts.push(`全书 ${wholeBookLabel()}`);
       return parts.join(" · ");
     }
@@ -530,10 +525,6 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
 
     if (totalChapters > 1) {
       parts.push(`章 ${chapterIndex + 1}/${totalChapters}`);
-    }
-
-    if (typeof estimatedMinutesLeft === "number" && estimatedMinutesLeft > 0) {
-      parts.push(`本章剩余约 ${estimatedMinutesLeft} 分钟`);
     }
 
     if (scrubState) {
