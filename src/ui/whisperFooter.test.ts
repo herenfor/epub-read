@@ -11,7 +11,6 @@ describe("Zen UI WhisperFooter 微提示状态栏与跳页器契约（Packet B�
     chapterTitle: "第三章 白鲸",
     chapterIndex: 2,
     totalChapters: 30,
-    estimatedMinutesLeft: 4,
     bookProgressPct: 18,
     onSeekPage: vi.fn(),
     onSeekChapter: vi.fn(),
@@ -23,12 +22,12 @@ describe("Zen UI WhisperFooter 微提示状态栏与跳页器契约（Packet B�
     zenMode: false,
   };
 
-  it("正确渲染克制的阅读进度文本与章节预估剩余时间", () => {
+  it("正确渲染克制的阅读进度文本，不再显示预估剩余时间", () => {
     const html = renderToStaticMarkup(createElement(WhisperFooter, baseProps));
     expect(html).toContain("whisper-footer");
     expect(html).toContain("whisper-calm-text");
     expect(html).toContain("第 12 / 120 页");
-    expect(html).toContain("本章剩余约 4 分钟");
+    expect(html).not.toContain("分钟");
     expect(html).toContain("全书 18%");
   });
 

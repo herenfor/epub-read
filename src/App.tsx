@@ -4003,7 +4003,8 @@ export default function App() {
       !suppressShelfProgressRef.current &&
       !navigationPendingRef.current &&
       chapterState.status === "ready" &&
-      !chapterState.empty
+      !chapterState.empty &&
+      chapterState.transient !== true
     ) {
       writeProgress(bookKey, {
         spineIndex,
@@ -4281,20 +4282,6 @@ export default function App() {
         })()
       : null;
   const progressPct = resolveProgressPct(exactProgressPct, baselineProgressPctRef.current);
-
-  const estimatedMinutesLeft = useMemo(() => {
-    if (chapterState.status !== "ready") return undefined;
-    const currentChars = countSummary.current;
-    if (typeof currentChars === "number" && currentChars > 0) {
-      const charsRemaining = Math.max(0, currentChars - anchorChars);
-      return Math.max(1, Math.round(charsRemaining / 400));
-    }
-    if (chapterState.pageCount > 0) {
-      const pagesRemaining = Math.max(0, chapterState.pageCount - 1 - chapterState.currentPage);
-      return Math.max(1, Math.ceil(pagesRemaining * 0.8));
-    }
-    return undefined;
-  }, [chapterState, countSummary.current, anchorChars]);
 
   const chapterTicks: WhisperFooterChapterTick[] = useMemo(() => {
     if (!book) return [];
@@ -5697,7 +5684,6 @@ export default function App() {
           chapterTitle={currentChapterLabel || book!.metadata.title}
           chapterIndex={spineIndex}
           totalChapters={book!.spine.length}
-          estimatedMinutesLeft={estimatedMinutesLeft}
           bookProgressPct={progressPct}
           onSeekPage={(targetPage) => {
             readerRef.current?.setPage(targetPage);
