@@ -19,6 +19,8 @@ export interface CorpusWorkerJob {
   /** Eager bytes are useful for tests; production can read just before dispatch. */
   bytes?: ArrayBuffer;
   read?: () => Promise<Uint8Array | ArrayBuffer>;
+  /** Native Android: create a bounded port instead of transferring whole book bytes. */
+  createArchiveInput?: () => { port: MessagePort; dispose(): void };
   sizeBytes?: number;
 }
 
@@ -73,6 +75,7 @@ interface WorkerSlot {
 interface ActiveJob {
   job: CorpusWorkerJob;
   slot: WorkerSlot;
+  archiveInput?: { port: MessagePort; dispose(): void };
   transaction?: CorpusSinkTransaction;
   sequence: number;
   chain: Promise<void>;
@@ -110,7 +113,9 @@ export function createCorpusWorkerPool(options: CorpusWorkerPoolOptions): Corpus
   const maxCharacters = Math.max(1, Math.floor(options.maxCharactersPerBatch ?? DEFAULT_MAX_CHARACTERS_PER_BATCH));
   const byteLength = (job: CorpusWorkerJob): number => job.sizeBytes ?? job.bytes?.byteLength ?? 0;
   for (const job of options.jobs) {
-    if (!job.bytes && !job.read) throw new Error(`Worker 任务 ${job.jobId} 缺少 EPUB 字节读取器`);
+    if (!job.bytes && !job.read && !job.createArchiveInput) {
+      throw new Error(`Worker 任务 ${job.jobId} 缺少 EPUB 输入`);
+    }
   }
   const pending = [...options.jobs];
   const sink = createSerialCorpusSink(options.sink);
@@ -151,6 +156,8 @@ export function createCorpusWorkerPool(options: CorpusWorkerPoolOptions): Corpus
   const release = (active: ActiveJob, status: "completed" | "failed"): void => {
     if (active.settled) return;
     active.settled = true;
+    active.archiveInput?.dispose();
+    active.archiveInput = undefined;
     active.slot.active = undefined;
     active.slot.worker?.removeEventListener("message", active.onMessage);
     active.slot.worker?.removeEventListener("error", active.onError);
@@ -264,20 +271,38 @@ export function createCorpusWorkerPool(options: CorpusWorkerPoolOptions): Corpus
       };
       worker.addEventListener("message", active.onMessage);
       worker.addEventListener("error", active.onError);
-      const payload = job.bytes ?? (job.read
-        ? await job.read().then(toTransferableArrayBuffer)
-        : undefined);
-      if (!payload) throw new Error(`Worker 任务 ${job.jobId} 缺少 EPUB 字节读取器`);
-      const request: CorpusWorkerRequest = {
-        protocol: CORPUS_WORKER_PROTOCOL_VERSION,
-        type: "start",
-        jobId: job.jobId,
-        book: job.book,
-        bytes: payload,
-        maxChunksPerBatch: maxChunks,
-        maxCharactersPerBatch: maxCharacters,
-      };
-      worker.postMessage(request, [payload]);
+      const archiveInput = job.createArchiveInput?.();
+      active.archiveInput = archiveInput;
+      let request: CorpusWorkerRequest;
+      let transfer: Transferable[];
+      if (archiveInput) {
+        request = {
+          protocol: CORPUS_WORKER_PROTOCOL_VERSION,
+          type: "start",
+          jobId: job.jobId,
+          book: job.book,
+          input: { kind: "archive", port: archiveInput.port },
+          maxChunksPerBatch: maxChunks,
+          maxCharactersPerBatch: maxCharacters,
+        };
+        transfer = [archiveInput.port];
+      } else {
+        const payload = job.bytes ?? (job.read
+          ? await job.read().then(toTransferableArrayBuffer)
+          : undefined);
+        if (!payload) throw new Error(`Worker 任务 ${job.jobId} 缺少 EPUB 字节读取器`);
+        request = {
+          protocol: CORPUS_WORKER_PROTOCOL_VERSION,
+          type: "start",
+          jobId: job.jobId,
+          book: job.book,
+          input: { kind: "bytes", bytes: payload },
+          maxChunksPerBatch: maxChunks,
+          maxCharactersPerBatch: maxCharacters,
+        };
+        transfer = [payload];
+      }
+      worker.postMessage(request, transfer);
       options.onJobStarted?.(job.jobId);
     } catch (error) {
       await fail(active, error);

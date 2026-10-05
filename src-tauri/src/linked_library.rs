@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufReader, Read, Write};
+use std::io::{BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -32,6 +32,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
 use zip::ZipArchive;
+use crate::native_zip_session::{Fault, NativeZipSession, CHUNK_BYTES};
 
 const MAX_THUMBNAIL_CACHE_BYTES: u64 = 100 * 1024 * 1024;
 const MAX_THUMBNAIL_BYTES: usize = 5 * 1024 * 1024;
@@ -46,6 +47,27 @@ static TEMP_FILE_NONCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Default)]
 pub struct LinkedLibraryWriteState(pub Mutex<()>);
+
+/// Window-owned registry of native ZIP sessions. The registry lock is only
+/// held while looking up/inserting/removing; decoding and hashing happen on
+/// blocking threads without the library write lock.
+#[derive(Default)]
+pub struct NativeArchiveState(Mutex<HashMap<String, NativeArchiveSession>>);
+
+struct NativeArchiveSession {
+    owner: String,
+    session: Arc<NativeZipSession>,
+}
+
+/// Small open acknowledgement returned to the WebView; no book bytes.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArchiveOpenView {
+    protocol_version: u32,
+    session_id: String,
+    entry_count: usize,
+    chunk_bytes: usize,
+}
 
 /// One in-process managed import task. `request_id` is unique per frontend
 /// invocation; the gate arbitrates the preparation/commit race.
@@ -1347,6 +1369,54 @@ fn read_cover_from_opened_file(
         bytes,
         read_snapshot: after_zip,
     })
+}
+
+
+/// Opens one linked/managed source and captures the binding snapshot under the
+/// short library lock.  Archive reads then continue without holding that lock.
+fn prepare_library_source_read(
+    app: &AppHandle,
+    content_hash: &str,
+) -> Result<(PathBuf, PendingSourceRead), String> {
+    let state = app.state::<LinkedLibraryWriteState>();
+    let _guard = state
+        .0
+        .lock()
+        .map_err(|_| "链接书库写入锁已损坏".to_string())?;
+    let root = library_root(app)?;
+    let records = load_records(app)?;
+    let bindings = load_bindings(app)?;
+    let pending = prepare_source_read(&root, &records, &bindings, content_hash)?;
+    Ok((root, pending))
+}
+
+/// Applies the same conditional write-back rule as the whole-book path after a
+/// successful archive read.
+fn finalize_library_source_read(
+    app: &AppHandle,
+    root: &Path,
+    identity: &SourceIdentity,
+    old_snapshot: &FileSnapshot,
+    read_snapshot: &FileSnapshot,
+) -> Result<(), String> {
+    let state = app.state::<LinkedLibraryWriteState>();
+    let _guard = state
+        .0
+        .lock()
+        .map_err(|_| "链接书库写入锁已损坏".to_string())?;
+    let records = load_records(app)?;
+    let mut bindings = load_bindings(app)?;
+    if finalize_source_read(
+        root,
+        &records,
+        &mut bindings,
+        identity,
+        old_snapshot,
+        read_snapshot,
+    )? {
+        save_bindings(app, &bindings)?;
+    }
+    Ok(())
 }
 
 /// Applies the BK-3 read/write-back decision table against freshly loaded
@@ -3213,6 +3283,213 @@ fn read_cover_raw_blocking(
         }
     }
     Ok(tauri::ipc::Response::new(read.bytes))
+}
+
+
+
+fn archive_fault_message(fault: Fault) -> String {
+    match fault {
+        Fault::Closed => "原生归档会话已关闭".to_string(),
+        Fault::InvalidRequest => "原生归档请求无效".to_string(),
+        Fault::InvalidArchive => "EPUB 归档结构无效".to_string(),
+        Fault::CorruptEntry => "EPUB 资源校验失败".to_string(),
+        Fault::SourceChanged => "源 EPUB 在读取期间发生了变化；请重新导入或重新定位".to_string(),
+        Fault::DirectoryTooLarge => "EPUB 归档目录条目过大".to_string(),
+        Fault::Io => "读取源 EPUB 失败".to_string(),
+    }
+}
+
+fn native_archive_session(
+    app: &AppHandle,
+    owner: &str,
+    session_id: &str,
+) -> Result<Arc<NativeZipSession>, String> {
+    let state = app.state::<NativeArchiveState>();
+    let sessions = state
+        .0
+        .lock()
+        .map_err(|_| "原生归档会话表已损坏".to_string())?;
+    let entry = sessions
+        .get(session_id)
+        .ok_or_else(|| "原生归档会话不存在或已关闭".to_string())?;
+    if entry.owner != owner {
+        return Err("原生归档会话不属于当前窗口".to_string());
+    }
+    Ok(Arc::clone(&entry.session))
+}
+
+fn archive_open_blocking(
+    app: AppHandle,
+    owner: String,
+    content_hash: String,
+) -> Result<ArchiveOpenView, String> {
+    if !valid_content_hash(&content_hash) {
+        return Err("无效的书籍内容指纹".to_string());
+    }
+
+    let (root, pending) = prepare_library_source_read(&app, &content_hash)?;
+    let PendingSourceRead {
+        identity,
+        old_snapshot,
+        mut file,
+    } = pending;
+    let (actual_hash, verified_snapshot) = hash_opened_file(&file)?;
+    if !actual_hash.eq_ignore_ascii_case(&content_hash) {
+        return Err("源 EPUB 已变化或丢失；请重新导入或重新定位".to_string());
+    }
+    file.seek(SeekFrom::Start(0))
+        .map_err(|error| format!("无法重新定位源 EPUB：{error}"))?;
+    let stat_file = file
+        .try_clone()
+        .map_err(|error| format!("无法复制源 EPUB 句柄：{error}"))?;
+    let expected_snapshot = verified_snapshot.clone();
+    let guard = move || {
+        let current = snapshot_file(&stat_file).map_err(|_| Fault::Io)?;
+        if current == expected_snapshot {
+            Ok(())
+        } else {
+            Err(Fault::SourceChanged)
+        }
+    };
+
+    let session = NativeZipSession::from_verified_file(file, guard).map_err(archive_fault_message)?;
+    let entry_count = session.entry_count;
+    finalize_library_source_read(&app, &root, &identity, &old_snapshot, &verified_snapshot)?;
+
+    if app.get_webview_window(&owner).is_none() {
+        session.close();
+        return Err("打开原生归档的窗口已关闭".to_string());
+    }
+
+    let session_id = random_uuid_v4()?;
+    {
+        let state = app.state::<NativeArchiveState>();
+        let mut sessions = state
+            .0
+            .lock()
+            .map_err(|_| "原生归档会话表已损坏".to_string())?;
+        sessions.insert(
+            session_id.clone(),
+            NativeArchiveSession {
+                owner,
+                session: Arc::new(session),
+            },
+        );
+    }
+    Ok(ArchiveOpenView {
+        protocol_version: 1,
+        session_id,
+        entry_count,
+        chunk_bytes: CHUNK_BYTES,
+    })
+}
+
+#[tauri::command]
+pub async fn linked_library_archive_open(
+    app: AppHandle,
+    window: tauri::Window,
+    content_hash: String,
+) -> Result<ArchiveOpenView, String> {
+    let owner = window.label().to_string();
+    tauri::async_runtime::spawn_blocking(move || archive_open_blocking(app, owner, content_hash))
+        .await
+        .map_err(|error| format!("原生归档打开工作线程失败：{error}"))?
+}
+
+#[tauri::command]
+pub async fn linked_library_archive_directory(
+    app: AppHandle,
+    window: tauri::Window,
+    session_id: String,
+    start: usize,
+) -> Result<crate::native_zip_session::DirectoryPage, String> {
+    let owner = window.label().to_string();
+    let session = native_archive_session(&app, &owner, &session_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        session
+            .directory_page(start)
+            .map_err(archive_fault_message)
+    })
+    .await
+    .map_err(|error| format!("原生归档目录工作线程失败：{error}"))?
+}
+
+#[tauri::command]
+pub async fn linked_library_archive_read(
+    app: AppHandle,
+    window: tauri::Window,
+    session_id: String,
+    entry_index: usize,
+    offset: u64,
+) -> Result<tauri::ipc::Response, String> {
+    let owner = window.label().to_string();
+    let session = native_archive_session(&app, &owner, &session_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        session
+            .read_chunk(entry_index, offset)
+            .map(tauri::ipc::Response::new)
+            .map_err(archive_fault_message)
+    })
+    .await
+    .map_err(|error| format!("原生归档读取工作线程失败：{error}"))?
+}
+
+#[tauri::command]
+pub async fn linked_library_archive_close(
+    app: AppHandle,
+    window: tauri::Window,
+    session_id: String,
+) -> Result<(), String> {
+    let owner = window.label();
+    let removed = {
+        let state = app.state::<NativeArchiveState>();
+        let mut sessions = state
+            .0
+            .lock()
+            .map_err(|_| "原生归档会话表已损坏".to_string())?;
+        match sessions.get(&session_id) {
+            Some(entry) if entry.owner == owner => sessions.remove(&session_id),
+            Some(_) => return Err("原生归档会话不属于当前窗口".to_string()),
+            None => None,
+        }
+    };
+    if let Some(entry) = removed {
+        entry.session.close();
+    }
+    Ok(())
+}
+
+pub(crate) fn close_native_archive_window(app: &AppHandle, owner: &str) {
+    let removed = {
+        let state = app.state::<NativeArchiveState>();
+        let Ok(mut sessions) = state.0.lock() else {
+            return;
+        };
+        let ids: Vec<String> = sessions
+            .iter()
+            .filter(|(_, entry)| entry.owner == owner)
+            .map(|(id, _)| id.clone())
+            .collect();
+        ids.into_iter()
+            .filter_map(|id| sessions.remove(&id))
+            .collect::<Vec<_>>()
+    };
+    for entry in removed {
+        entry.session.close();
+    }
+}
+
+pub(crate) fn close_all_native_archives(app: &AppHandle) {
+    let removed = {
+        let state = app.state::<NativeArchiveState>();
+        let Ok(mut sessions) = state.0.lock() else {
+            return;
+        };
+        sessions.drain().map(|(_, entry)| entry).collect::<Vec<_>>()
+    };
+    for entry in removed {
+        entry.session.close();
+    }
 }
 
 #[tauri::command]

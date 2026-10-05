@@ -8,6 +8,7 @@ mod build_info_contract;
 mod import_gate;
 mod ipc_bytes;
 mod lan_save;
+pub(crate) mod native_zip_session;
 pub(crate) mod transfer_policy;
 mod portable_state_commands;
 mod save_file;
@@ -28,6 +29,10 @@ macro_rules! configure_invoke_handler {
             android_lan_scan::android_lan_open_app_settings,
             linked_library::linked_library_read_source_raw,
             linked_library::linked_library_read_cover_raw,
+            linked_library::linked_library_archive_open,
+            linked_library::linked_library_archive_directory,
+            linked_library::linked_library_archive_read,
+            linked_library::linked_library_archive_close,
             linked_library::linked_library_relink,
             linked_library::linked_library_delete_record,
             linked_library::linked_library_delete_records,
@@ -149,6 +154,10 @@ macro_rules! configure_invoke_handler {
             android_lan_scan::android_lan_open_app_settings,
             linked_library::linked_library_read_source_raw,
             linked_library::linked_library_read_cover_raw,
+            linked_library::linked_library_archive_open,
+            linked_library::linked_library_archive_directory,
+            linked_library::linked_library_archive_read,
+            linked_library::linked_library_archive_close,
             linked_library::linked_library_relink,
             linked_library::linked_library_delete_record,
             linked_library::linked_library_delete_records,
@@ -245,6 +254,7 @@ pub fn run() {
     let builder = builder
         .manage(FontWriteState::default())
         .manage(LinkedLibraryWriteState::default())
+        .manage(linked_library::NativeArchiveState::default())
         .manage(linked_library::ManagedImportState::default())
         .manage(portable_state_commands::PortableStateManager::default())
         .manage(save_file::SaveFileManager::default())
@@ -277,7 +287,16 @@ pub fn run() {
         .run(|app, event| {
             if matches!(&event, tauri::RunEvent::Exit) {
                 lan_save::shutdown(app);
+                linked_library::close_all_native_archives(app);
                 return;
+            }
+            if let tauri::RunEvent::WindowEvent {
+                event: tauri::WindowEvent::Destroyed,
+                label,
+                ..
+            } = &event
+            {
+                linked_library::close_native_archive_window(app, label);
             }
             #[cfg(mobile)]
             if let tauri::RunEvent::WindowEvent {

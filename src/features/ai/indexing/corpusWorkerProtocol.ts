@@ -3,12 +3,17 @@ import type { CorpusBookMetadata } from "./corpusSink";
 
 export const CORPUS_WORKER_PROTOCOL_VERSION = 1;
 
+export type CorpusWorkerInput =
+  | { kind: "bytes"; bytes: ArrayBuffer }
+  | { kind: "archive"; port: MessagePort };
+
 export interface CorpusWorkerStartMessage {
   protocol: typeof CORPUS_WORKER_PROTOCOL_VERSION;
   type: "start";
   jobId: string;
   book: CorpusBookMetadata;
-  bytes: ArrayBuffer;
+  /** Explicit input union so the Worker never expects whole-book bytes on native. */
+  input: CorpusWorkerInput;
   maxChunksPerBatch: number;
   maxCharactersPerBatch: number;
 }

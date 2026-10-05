@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { DocumentChunk } from "../../../core/chunking";
 import type { CorpusSink, CorpusSinkTransaction } from "./corpusSink";
 import { createCorpusWorkerPool } from "./corpusWorkerPool";
@@ -87,6 +87,30 @@ describe("corpus Worker pool", () => {
     expect(workers).toHaveLength(3);
     for (const [index, worker] of workers.slice(1).entries()) worker.emit({ protocol: 1, type: "done", jobId: index === 0 ? "small" : "small-2", batches: 0 });
     await run;
+  });
+
+  it("transfers a native archive port instead of whole bytes and disposes it when settled", async () => {
+    const workers: FakeWorker[] = [];
+    const dispose = vi.fn();
+    const port = {} as MessagePort;
+    const pool = createCorpusWorkerPool({
+      jobs: [{
+        jobId: "native",
+        book: book("native"),
+        createArchiveInput: () => ({ port, dispose }),
+      }],
+      concurrency: 1,
+      sink: sink(),
+      workerFactory: () => { const worker = new FakeWorker(); workers.push(worker); return worker; },
+    });
+    const run = pool.run();
+    await flush();
+    const start = workers[0].requests.find((request) => request.type === "start");
+    expect(start?.type).toBe("start");
+    if (start?.type === "start") expect(start.input).toEqual({ kind: "archive", port });
+    workers[0].emit({ protocol: 1, type: "done", jobId: "native", batches: 0 });
+    await run;
+    expect(dispose).toHaveBeenCalledTimes(1);
   });
 
   it("does not dispatch pending jobs after cancellation", async () => {

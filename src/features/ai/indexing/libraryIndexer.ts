@@ -6,6 +6,11 @@ import type { Book } from "../../../core/types";
 import { createIndexBuildController, type IndexBuildResult, type IndexProgress } from "./indexController";
 import type { IndexedBookStatus, IndexStagingStorePort } from "./indexStore";
 
+export interface LibraryIndexArchiveInput {
+  port: MessagePort;
+  dispose(): void;
+}
+
 export interface LibraryIndexBook {
   contentHash: string;
   title: string;
@@ -13,6 +18,8 @@ export interface LibraryIndexBook {
   language?: string;
   available: boolean;
   read(): Promise<Uint8Array>;
+  /** Native Android only: create a bounded archive port instead of whole bytes. */
+  openArchiveInput?(): LibraryIndexArchiveInput;
 }
 
 export interface LibraryIndexProgress {
