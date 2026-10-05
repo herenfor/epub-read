@@ -43,6 +43,8 @@ Download the installer or the portable build. Windows 10 and 11 already include 
 2. Open it. Android asks you to allow installing unknown apps — allow it for the browser or file manager you are using.
 3. Once installed, EPUB Reader appears on your home screen.
 
+The app is not distributed through Google Play, so Play Protect may warn about an unrecognised app the first time; choose *More details → Install anyway*.
+
 To update, download the newer `.apk` and install it over the existing app. Your library and reading progress are kept.
 
 ## Highlights
@@ -53,6 +55,7 @@ To update, download the newer `.apk` and install it over the existing app. Your 
 - **Made for touch too** — swipe to turn pages on phones and tablets, with a slide animation that follows your finger and a library and menus rearranged for small screens
 - **Illustrations at full size** — tap or click an image in the text to open it in an overlay, then zoom, pan or view it at its original size; closing returns you exactly where you were
 - **Faithful to the book** — percentages, asymmetric margins, floats, full-page illustrations and inline footnote markers keep their intended proportions
+- **Hand over to another device on your Wi‑Fi** — show a QR code on one device and scan it with the other to send books, progress, bookmarks and notes directly between them, without any cloud
 - **Local by design** — no account and no upload; your books stay on your device
 
 ## Features
@@ -66,6 +69,7 @@ To update, download the newer `.apk` and install it over the existing app. Your 
 - Search, sort, layout density and theme managed from a single menu
 - Reading progress and recently-read tracking; open a book right where you left it
 - Portable reading archives to carry progress, bookmarks and safe settings between devices
+- LAN transfer: on the same Wi‑Fi, pair two devices with a QR code (or by pasting the connection info) and send progress, bookmarks and notes, optionally with the book files — both devices need version 0.2.8 or later
 
 ### Reading
 
@@ -86,7 +90,7 @@ To update, download the newer `.apk` and install it over the existing app. Your 
 ### Per platform
 
 - **Windows** — the system title bar is replaced by a slim frame that follows the app theme, keeps the book title and the window controls in the same bar, and lets you drag the window from it; EPUB files stay where they are, and the library links to them instead of copying
-- **Android** — edge-to-edge immersive reading, swipe page turns, a battery indicator while reading, and the system back gesture steps back one layer at a time
+- **Android** — edge-to-edge immersive reading, swipe page turns, a battery indicator while reading, a built-in QR scanner for LAN transfer, and the system back gesture steps back one layer at a time
 
 ### Compatibility
 
@@ -99,6 +103,8 @@ EPUB files vary a great deal, and the reader is built to tolerate that:
 ## Privacy
 
 EPUB Reader needs no account, collects no usage data, and never uploads your books, notes or reading progress anywhere. Everything stays on your device.
+
+LAN transfer connects your two devices directly over your local network with an encrypted, one-time pairing; nothing passes through a server. On Android the camera is used only while you scan a pairing QR code, and is requested the first time you do so.
 
 ## Building from source
 
