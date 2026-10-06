@@ -5,9 +5,11 @@ import {
   MAX_ANCHOR_SNIPPET_CODE_POINTS,
   buildDocument,
   extractSearchText,
+  extractSearchTextSegments,
   extractVisibleText,
   normalizeQueryPart,
   type SearchDocument,
+  type SearchTextSegment,
 } from "./corpus";
 import type { Book, TocNode } from "./types";
 import { buildExactTextHitsAndPoints, type ExactTextHit } from "./exactTextHits";
@@ -39,34 +41,79 @@ export interface SearchBookOptions {
   onProgress?: (progress: SearchProgress) => void;
   /** Defaults to a macrotask yield after every processed chapter. */
   yieldToHost?: () => Promise<void>;
+  /** When present, searches projected display text while retaining canonical original hits. */
+  projection?: SearchProjection;
 }
 
 export type SearchQueryOptions = Pick<SearchBookOptions, "signal" | "maxResults" | "onProgress" | "yieldToHost">;
+
+/**
+ * Optional display-projection adapter. The core stays independent of render/UI
+ * modules: callers provide the compiled projection and the raw-range inverse.
+ */
+export interface SearchProjection {
+  /** Stable identity for display index caches. */
+  readonly version: string;
+  /** Project one chapter's extracted search text. Must be pure. */
+  projectText(sourceText: string): string;
+  /**
+   * Optional node-boundary-aware projection. When present, core extracts
+   * per-text-node segments and the adapter must project each segment
+   * independently so phrase rules do not merge across inline elements.
+   */
+  projectSegments?(sourceText: string, segments: readonly SearchTextSegment[]): string;
+  /**
+   * Map a raw UTF-16 range from projected text back to the original extracted
+   * text. Start/end use opposite fragment biases in the implementation.
+   */
+  toSourceRawRange(
+    sourceText: string,
+    displayText: string,
+    start: number,
+    end: number,
+  ): { start: number; end: number } | null;
+}
 
 export interface SearchSession {
   search(query: string, options?: SearchQueryOptions): Promise<SearchResult[]>;
   dispose(): void;
 }
 
+export interface SearchDisplayHit {
+  /** Raw UTF-16 range in projected extracted text. */
+  range: { start: number; end: number };
+  /** Display matched text with block separators rendered as newlines. */
+  matchedText: string;
+  /** Display-only exact identity; it is never used as a canonical locator. */
+  textHits?: ExactTextHit[];
+  occurrence?: SearchOccurrence;
+}
+
 export interface SearchResult {
   spineIndex: number;
   chapterPath: string;
   chapterTitle: string;
-  /** Original extracted visible text, with block boundaries represented as newlines. */
+  /** Original extracted visible text, or projected display text for display search. */
   snippet: string;
   /** UTF-16 ranges relative to snippet; one range for phrase, one per keyword. */
   snippetMatchRanges: Array<{ start: number; end: number }>;
-  /** The original extracted text range, measured in UTF-16 code units. */
+  /**
+   * Canonical range in the original extracted text, measured in UTF-16 code
+   * units. For display search this is the source range chosen by the fragment
+   * bias rules, not a reverse lookup of the query keyword.
+   */
   originalRange: { start: number; end: number };
-  /** Existing paginator text-anchor coordinate: code points with all whitespace removed. */
+  /** Existing paginator text-anchor coordinate: original code points, whitespace removed. */
   textOffset: number;
   textSnippet: string;
-  /** The matched original text, with internal block separators rendered as newlines. */
+  /** The matched text in the searched view; block separators rendered as newlines. */
   matchedText: string;
   /** Runtime-only exact body ranges; never persisted to the corpus database. */
   textHits?: ExactTextHit[];
   /** Runtime-only exact identity context for new search navigation. */
   occurrence?: SearchOccurrence;
+  /** Present only for display-projected search. */
+  display?: SearchDisplayHit;
   matchType: "phrase" | "keywords";
 }
 
@@ -200,6 +247,58 @@ function resultFor(
   };
 }
 
+interface MatchGroup {
+  matchType: SearchResult["matchType"];
+  /** Normalized code-point ranges in the scanned document. */
+  ranges: Array<{ start: number; end: number }>;
+}
+
+function matchGroupsForDocument(doc: SearchDocument, query: string): MatchGroup[] {
+  const phrase = normalizeQueryPart(query);
+  if (!phrase) return [];
+  const groups: MatchGroup[] = [];
+  for (const startUnit of findAll(doc.normalized, phrase)) {
+    const range = codePointRangeForUnits(doc, startUnit, startUnit + phrase.length);
+    groups.push({ matchType: "phrase", ranges: [range] });
+  }
+  const tokens = query.trim().split(/\s+/u).map(normalizeQueryPart).filter(Boolean);
+  if (tokens.length < 2) return groups;
+  let segmentStart = 0;
+  for (let i = 0; i <= doc.normalized.length; i++) {
+    if (i !== doc.normalized.length && doc.normalized[i] !== BLOCK_BOUNDARY) continue;
+    const segment = doc.normalized.slice(segmentStart, i);
+    const tokenStarts = tokens.map((token) => segment.indexOf(token));
+    if (tokenStarts.every((value) => value >= 0)) {
+      const ranges = tokenStarts.map((value, index) => codePointRangeForUnits(
+        doc,
+        segmentStart + value,
+        segmentStart + value + tokens[index].length,
+      ));
+      groups.push({ matchType: "keywords", ranges });
+    }
+    segmentStart = i + 1;
+  }
+  return groups;
+}
+
+function resultForGroup(
+  doc: SearchDocument,
+  group: MatchGroup,
+  spineIndex: number,
+  chapterPath: string,
+  chapterTitle: string,
+): SearchResult {
+  return resultFor(
+    doc,
+    Math.min(...group.ranges.map((range) => range.start)),
+    spineIndex,
+    chapterPath,
+    chapterTitle,
+    group.matchType,
+    group.ranges,
+  );
+}
+
 function matchesForDocument(
   doc: SearchDocument,
   query: string,
@@ -207,32 +306,8 @@ function matchesForDocument(
   chapterPath: string,
   chapterTitle: string,
 ): SearchResult[] {
-  const phrase = normalizeQueryPart(query);
-  if (!phrase) return [];
-  const results: SearchResult[] = [];
-  for (const startUnit of findAll(doc.normalized, phrase)) {
-    const range = codePointRangeForUnits(doc, startUnit, startUnit + phrase.length);
-    results.push(resultFor(doc, range.start, spineIndex, chapterPath, chapterTitle, "phrase", [range]));
-  }
-  const tokens = query.trim().split(/\s+/u).map(normalizeQueryPart).filter(Boolean);
-  if (tokens.length < 2) return results;
-  let segmentStart = 0;
-  for (let i = 0; i <= doc.normalized.length; i++) {
-    if (i !== doc.normalized.length && doc.normalized[i] !== BLOCK_BOUNDARY) continue;
-    const segment = doc.normalized.slice(segmentStart, i);
-    const tokenStarts = tokens.map((token) => {
-      return segment.indexOf(token);
-    });
-    if (tokenStarts.every((value) => value >= 0)) {
-      const ranges = tokenStarts.map((value, index) => codePointRangeForUnits(
-        doc,
-        segmentStart + value,
-        segmentStart + value + tokens[index].length,
-      ));
-      results.push(resultFor(doc, Math.min(...ranges.map((range) => range.start)), spineIndex, chapterPath, chapterTitle, "keywords", ranges));
-    }
-    segmentStart = i + 1;
-  }
+  const results = matchGroupsForDocument(doc, query)
+    .map((group) => resultForGroup(doc, group, spineIndex, chapterPath, chapterTitle));
   const unique = new Map<string, SearchResult>();
   for (const result of results) {
     const key = `${result.originalRange.start}:${result.originalRange.end}`;
@@ -240,6 +315,50 @@ function matchesForDocument(
     if (!previous || (previous.matchType === "keywords" && result.matchType === "phrase")) unique.set(key, result);
   }
   return [...unique.values()].sort((a, b) => a.originalRange.start - b.originalRange.start);
+}
+
+function displayResultForGroup(
+  sourceDoc: SearchDocument,
+  displayDoc: SearchDocument,
+  displayGroup: MatchGroup,
+  sourceRanges: ReadonlyArray<{ start: number; end: number }>,
+  spineIndex: number,
+  chapterPath: string,
+  chapterTitle: string,
+): SearchResult | null {
+  const displayRawRanges = displayGroup.ranges.map((range) =>
+    rawRangeFor(displayDoc, range.start, range.end),
+  );
+  if (displayRawRanges.some((range) => range.end <= range.start)) return null;
+  const sourceExact = buildExactTextHitsAndPoints(sourceDoc.text, [...sourceRanges]);
+  const displayExact = buildExactTextHitsAndPoints(displayDoc.text, displayRawRanges);
+  if (!sourceExact || !displayExact || sourceExact.hits.length === 0) return null;
+  const sourceRawStart = Math.min(...sourceRanges.map((range) => range.start));
+  const sourceRawEnd = Math.max(...sourceRanges.map((range) => range.end));
+  const displayRawStart = Math.min(...displayRawRanges.map((range) => range.start));
+  const displayRawEnd = Math.max(...displayRawRanges.map((range) => range.end));
+  const displaySnippet = snippetFor(displayDoc.text, displayRawRanges);
+  const displayHits = displayExact.hits;
+  return {
+    spineIndex,
+    chapterPath,
+    chapterTitle,
+    snippet: displaySnippet.snippet,
+    snippetMatchRanges: displaySnippet.matchRanges,
+    originalRange: { start: sourceRawStart, end: sourceRawEnd },
+    textOffset: Math.min(...sourceExact.hits.map((hit) => hit.start)),
+    textSnippet: anchorSnippetFromRaw(sourceDoc.text, sourceRawStart),
+    matchedText: publicText(displayDoc.text.slice(displayRawStart, displayRawEnd)),
+    textHits: sourceExact.hits,
+    occurrence: captureSearchOccurrence(sourceExact.points, sourceExact.hits) ?? undefined,
+    display: {
+      range: { start: displayRawStart, end: displayRawEnd },
+      matchedText: publicText(displayDoc.text.slice(displayRawStart, displayRawEnd)),
+      textHits: displayHits,
+      occurrence: captureSearchOccurrence(displayExact.points, displayHits) ?? undefined,
+    },
+    matchType: displayGroup.matchType,
+  };
 }
 
 /**
@@ -255,7 +374,14 @@ export function createSearchSession(book: Book, options: SearchBookOptions = {})
       return resource ? decodeBytes(resource.data) : undefined;
     });
   const linear = book.spine.map((item, index) => ({ item, index })).filter(({ item }) => item.linear);
-  const cache = new Map<number, SearchDocument | null>();
+  interface CachedChapter {
+    source: SearchDocument;
+    sourceText: string;
+    display: SearchDocument;
+    displayText: string;
+  }
+  const cache = new Map<number, CachedChapter | null>();
+  const projection = options.projection;
   let disposed = false;
   return {
     async search(query, queryOptions = {}): Promise<SearchResult[]> {
@@ -271,17 +397,84 @@ export function createSearchSession(book: Book, options: SearchBookOptions = {})
         const { index } = linear[completed];
         const path = spineItemPath(book, index);
         if (path) {
-          let doc = cache.get(index);
+          let chapter = cache.get(index);
           if (!cache.has(index)) {
             const source = await textFor(path);
             abortIfNeeded(signal);
-            doc = source === undefined
-              ? null
-              : buildDocument(await extractSearchText(source));
-            cache.set(index, doc);
+            if (source === undefined) {
+              chapter = null;
+            } else {
+              const segmented = projection?.projectSegments
+                ? await extractSearchTextSegments(source)
+                : null;
+              const sourceText = segmented?.text ?? await extractSearchText(source);
+              const sourceDoc = buildDocument(sourceText);
+              const displayText = projection
+                ? segmented && projection.projectSegments
+                  ? projection.projectSegments(sourceText, segmented.segments)
+                  : projection.projectText(sourceText)
+                : sourceText;
+              chapter = {
+                source: sourceDoc,
+                sourceText,
+                display: displayText === sourceText ? sourceDoc : buildDocument(displayText),
+                displayText,
+              };
+            }
+            cache.set(index, chapter);
           }
-          if (doc) {
-            results.push(...matchesForDocument(doc, query, index, path, titleFor(book, path)));
+          if (chapter) {
+            if (!projection) {
+              results.push(...matchesForDocument(chapter.source, query, index, path, titleFor(book, path)));
+            } else {
+              const groups = matchGroupsForDocument(chapter.display, query);
+              const chapterResults: SearchResult[] = [];
+              for (const group of groups) {
+                const sourceRanges: Array<{ start: number; end: number }> = [];
+                let mapped = true;
+                for (const range of group.ranges) {
+                  const displayRaw = rawRangeFor(chapter.display, range.start, range.end);
+                  const sourceRaw = projection.toSourceRawRange(
+                    chapter.sourceText,
+                    chapter.displayText,
+                    displayRaw.start,
+                    displayRaw.end,
+                  );
+                  if (!sourceRaw) {
+                    mapped = false;
+                    break;
+                  }
+                  sourceRanges.push(sourceRaw);
+                }
+                if (!mapped) continue;
+                const result = displayResultForGroup(
+                  chapter.source,
+                  chapter.display,
+                  group,
+                  sourceRanges,
+                  index,
+                  path,
+                  titleFor(book, path),
+                );
+                if (result) chapterResults.push(result);
+              }
+              // Phrase wins over keyword duplicates of the same visible
+              // occurrence. Different display occurrences are never removed
+              // merely because they map back to one non-invertible fragment.
+              const uniqueChapter = new Map<string, SearchResult>();
+              for (const result of chapterResults) {
+                const key = `${result.display?.range.start ?? -1}:${result.display?.range.end ?? -1}`;
+                const previous = uniqueChapter.get(key);
+                if (!previous || (previous.matchType === "keywords" && result.matchType === "phrase")) {
+                  uniqueChapter.set(key, result);
+                }
+              }
+              const uniqueResults = [...uniqueChapter.values()].sort((a, b) =>
+                a.originalRange.start - b.originalRange.start ||
+                (a.display?.range.start ?? 0) - (b.display?.range.start ?? 0),
+              );
+              results.push(...uniqueResults);
+            }
             if (results.length >= maxResults) {
               results.length = maxResults;
               onProgress?.({ completed: completed + 1, total: linear.length, spineIndex: index });

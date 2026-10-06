@@ -35,6 +35,7 @@ import { waitForDoubleRaf, waitForFontsReady } from "./asyncWait";
 import {
   buildVisibleTextIndex,
   captureTextSelection,
+  collectVisibleTextNodes,
   resolveTextAnchorOffset,
   resolveTextRangeOffsets,
   type TextAnchorData,
@@ -42,6 +43,13 @@ import {
   type TextSelectionPayload,
   type VisibleTextIndex,
 } from "./textAnchor";
+import { compileTextProjection } from "./textProjection/compile";
+import { isProjectionExcludedTextNode, TextProjectionSession } from "./textProjection/session";
+import { sanitizeTextProjectionPreferences } from "./textProjection/preferences";
+import {
+  DEFAULT_TEXT_PROJECTION_PREFERENCES,
+  type TextProjectionPreferences,
+} from "./textProjection/types";
 import {
   continuousWheelPixels,
   nextWheelTarget,
@@ -2390,6 +2398,15 @@ export class ChapterPaginator {
   private searchHighlightTarget: SearchHighlightTarget | null = null;
   /** Built once after current chapter layout is stable; never spans documents. */
   private textIndex: VisibleTextIndex | null = null;
+  /** Current local display preference for this chapter. Defaults to original. */
+  private textProjectionPreferences: TextProjectionPreferences = {
+    mode: DEFAULT_TEXT_PROJECTION_PREFERENCES.mode,
+    rules: [...DEFAULT_TEXT_PROJECTION_PREFERENCES.rules],
+  };
+  /** Per-document original snapshots and projection maps. Dropped with the document. */
+  private textProjectionSession: TextProjectionSession | null = null;
+  /** Incremented when preferences change so stale async compilation cannot apply. */
+  private textProjectionGeneration = 0;
   private notes: ReaderNoteForPaginator[] = [];
   private selectionContextMenuHandler?: (payload: SelectionContextPayload | null) => void;
   private contextMenuHandler = (e: MouseEvent): void => this.handleContextMenu(e);
@@ -2618,6 +2635,24 @@ export class ChapterPaginator {
   setExternalScroll(adapter?: ExternalScrollAdapter): void {
     this.externalScroll = adapter;
     this.applyExternalScrollOwnership();
+  }
+
+  /** Store a validated T-1 snapshot. Call reloadWithTextProjection to apply it to a live chapter. */
+  setTextProjectionPreferences(preferences: TextProjectionPreferences): void {
+    this.textProjectionPreferences = sanitizeTextProjectionPreferences(preferences);
+    this.textProjectionGeneration++;
+  }
+
+  getTextProjectionPreferences(): TextProjectionPreferences {
+    return {
+      mode: this.textProjectionPreferences.mode,
+      rules: this.textProjectionPreferences.rules.map((rule) => ({ ...rule })),
+    };
+  }
+
+  /** Display-projection version used by display search caches. */
+  getTextProjectionVersion(): string {
+    return this.textProjectionSession?.version ?? `${this.textProjectionPreferences.mode}:[]`;
   }
 
   /**
@@ -3563,10 +3598,51 @@ export class ChapterPaginator {
   };
 
   /**
+   * Apply the configured T-1 projection to the live document before the first
+   * measurement. The session keeps original snapshots so a later preference
+   * change can regenerate from source instead of converting already-displayed
+   * text.
+   */
+  private async prepareTextProjection(seq: number): Promise<boolean> {
+    const doc = this.contentDoc;
+    const viewer = this.viewer;
+    if (!doc || !viewer) return false;
+    const generation = this.textProjectionGeneration;
+    const compiled = await compileTextProjection(this.textProjectionPreferences);
+    if (
+      this.disposed ||
+      seq !== this.loadSeq ||
+      generation !== this.textProjectionGeneration ||
+      doc !== this.contentDoc ||
+      viewer !== this.viewer
+    ) {
+      return false;
+    }
+    const session = new TextProjectionSession();
+    const nodes = collectVisibleTextNodes(doc, viewer).filter((node) => !isProjectionExcludedTextNode(node));
+    await session.apply(nodes, compiled, {
+      isCurrent: () => !this.disposed && seq === this.loadSeq && doc === this.contentDoc && viewer === this.viewer,
+      yieldToHost: () => new Promise<void>((resolve) => setTimeout(resolve, 0)),
+    });
+    if (this.disposed || seq !== this.loadSeq || doc !== this.contentDoc || viewer !== this.viewer) {
+      return false;
+    }
+    this.textProjectionSession = session;
+    this.textIndex = null;
+    return true;
+  }
+
+  /** Build the anchor index from source text, using the live projection map when present. */
+  private buildTextIndex(doc: Document, viewer: HTMLElement): VisibleTextIndex {
+    return buildVisibleTextIndex(doc, viewer, this.textProjectionSession);
+  }
+
+  /**
    * 首次章节 ready 边界：后续预渲染可以复用同一顺序，但本轮仍只准备主 iframe。
    * 返回前已经完成自愈重试与最终入口定位，调用方随后才可揭示内容。
    */
   private async prepareChapterForDisplay(seq: number, atEnd: boolean): Promise<boolean> {
+    if (!(await this.prepareTextProjection(seq))) return false;
     if (!(await this.measure(seq))) return false;
     if (seq !== this.loadSeq || this.disposed) return false;
     if (!this.scrollMode) {
@@ -4382,7 +4458,7 @@ export class ChapterPaginator {
     const doc = this.contentDoc;
     const viewer = this.viewer;
     if (!doc || !viewer || !this.scrollMode) return;
-    const index = this.textIndex ?? buildVisibleTextIndex(doc, viewer);
+    const index = this.textIndex ?? this.buildTextIndex(doc, viewer);
     this.textIndex = index;
     const anchor = captureVisibleAnchor({ viewer, doc, index, mode: "scroll", visibleRatio: 0.12 });
     if (!anchor) return;
@@ -6396,7 +6472,7 @@ export class ChapterPaginator {
       this.textIndex = null;
       return;
     }
-    this.textIndex = buildVisibleTextIndex(this.contentDoc, this.viewer);
+    this.textIndex = this.buildTextIndex(this.contentDoc, this.viewer);
     // F4：设置重载后重建笔记/搜索高亮；重建不是一次新的用户跳转。
     this.applyNoteHighlights();
     this.reapplySearchHighlight();
@@ -6408,7 +6484,7 @@ export class ChapterPaginator {
     const viewer = this.viewer;
     if (!doc || !viewer || !viewer.contains(e.target as Node | null)) return;
     e.preventDefault();
-    const index = this.textIndex ?? buildVisibleTextIndex(doc, viewer);
+    const index = this.textIndex ?? this.buildTextIndex(doc, viewer);
     this.textIndex = index;
     const payload = captureTextSelection(doc, viewer, index);
     this.selectionContextMenuOpen = Boolean(payload);
@@ -6426,7 +6502,7 @@ export class ChapterPaginator {
       this.selectionContextMenuHandler?.(null);
       return;
     }
-    const index = this.textIndex ?? buildVisibleTextIndex(doc, viewer);
+    const index = this.textIndex ?? this.buildTextIndex(doc, viewer);
     this.textIndex = index;
     const payload = captureTextSelection(doc, viewer, index, selection);
     if (!payload) {
@@ -6543,7 +6619,7 @@ export class ChapterPaginator {
     const doc = this.contentDoc;
     const viewer = this.viewer;
     if (!doc || !viewer || viewer.clientWidth <= 0) return;
-    const index = this.textIndex ?? buildVisibleTextIndex(doc, viewer);
+    const index = this.textIndex ?? this.buildTextIndex(doc, viewer);
     this.textIndex = index;
     const anchor = captureVisibleAnchor({
       viewer,
@@ -6588,8 +6664,8 @@ export class ChapterPaginator {
     const doc = this.contentDoc;
     const viewer = this.viewer;
     if (!doc || !viewer || this.step <= 0) return null;
-    const start = index.positionForOffset(textOffset);
-    const end = index.positionForOffset(Math.min(index.totalChars, textOffset + 1));
+    const start = index.positionForOffset(textOffset, "start");
+    const end = index.positionForOffset(Math.min(index.totalChars, textOffset + 1), "end");
     if (!start || !end) return null;
     try {
       const range = doc.createRange();
@@ -7193,7 +7269,7 @@ export class ChapterPaginator {
       }
       const adapted = options.readingAnchor ? adaptNavigationAnchor(options.readingAnchor) : null;
       if (!adapted) return false;
-      const index = this.textIndex ?? buildVisibleTextIndex(doc, viewer);
+      const index = this.textIndex ?? this.buildTextIndex(doc, viewer);
       this.textIndex = index;
       const offset = resolveTextAnchorOffset(index, adapted);
       if (offset === null) return false;
@@ -7473,7 +7549,7 @@ export class ChapterPaginator {
     if (!this.viewer || !this.contentDoc) return null;
     const doc = this.contentDoc;
     const viewer = this.viewer;
-    const index = this.textIndex ?? buildVisibleTextIndex(doc, viewer);
+    const index = this.textIndex ?? this.buildTextIndex(doc, viewer);
     this.textIndex = index;
     const viewerRect = viewer.getBoundingClientRect();
     const x = viewerRect.left + Math.round(viewer.clientWidth * 0.5);
@@ -7502,7 +7578,7 @@ export class ChapterPaginator {
     const doc = this.contentDoc;
     const viewer = this.viewer;
     if (!doc || !viewer) return null;
-    const index = this.textIndex ?? buildVisibleTextIndex(doc, viewer);
+    const index = this.textIndex ?? this.buildTextIndex(doc, viewer);
     this.textIndex = index;
     const offset = resolveTextAnchorOffset(index, anchor);
     if (offset === null) return null;
@@ -7691,7 +7767,7 @@ export class ChapterPaginator {
     const doc = this.contentDoc;
     if (this.disposed || !viewer || !doc) return null;
     const f = Math.max(0, Math.min(1, Number.isFinite(fraction) ? fraction : 0));
-    const index = this.textIndex ?? buildVisibleTextIndex(doc, viewer);
+    const index = this.textIndex ?? this.buildTextIndex(doc, viewer);
     this.textIndex = index;
 
     // 1. 有文字（文字章或混排章）：以文字索引为主要内容进度
@@ -7953,6 +8029,18 @@ export class ChapterPaginator {
     };
   }
 
+  /**
+   * Canonical original text for a selection payload. The UI uses this for the
+   * explicit "copy original" action, avoiding any inverse conversion of the
+   * currently displayed string.
+   */
+  getOriginalTextForOffsets(start: number, end: number): string | null {
+    const index = this.textIndex ?? (this.contentDoc && this.viewer ? this.buildTextIndex(this.contentDoc, this.viewer) : null);
+    if (!index) return null;
+    this.textIndex = index;
+    return index.originalTextForOffsets(start, end);
+  }
+
   /** 当前锚点元素的行文本（书签列表展示用）。 */
   getAnchorText(): string | null {
     this.flushReadingAnchor();
@@ -8024,7 +8112,7 @@ export class ChapterPaginator {
     const doc = this.contentDoc;
     const viewer = this.viewer;
     if (!doc || !viewer || viewer.clientWidth <= 0) return null;
-    const index = this.textIndex ?? buildVisibleTextIndex(doc, viewer);
+    const index = this.textIndex ?? this.buildTextIndex(doc, viewer);
     this.textIndex = index;
     const rect = viewer.getBoundingClientRect();
     // 通用原点：viewer 矩形（含运动层 transform/窗口偏移）+ 内边距，再换算到视觉偏移；
@@ -8117,6 +8205,44 @@ export class ChapterPaginator {
   /** 当前已提交章节路径，用于槽位命中校验。 */
   getCurrentPath(): string {
     return this._currentPath;
+  }
+
+  /**
+   * T-1 preference change reuses the same sampled-anchor reload path as a
+   * layout setting change. The old display snapshot is sampled in canonical
+   * coordinates before the document is replaced and projected again.
+   */
+  async reloadWithTextProjection(preferences: TextProjectionPreferences, anchor?: string): Promise<void> {
+    const path = this.currentPath;
+    if (!path) {
+      this.setTextProjectionPreferences(preferences);
+      return;
+    }
+    if (this.scrollMode) this.captureScrollAnchor();
+    else {
+      const position = this.readVisualPosition();
+      const transient = position && (position.page !== this.metrics.currentPage || !position.aligned ||
+        (this.pageMotion && this.pageMotion.session.state.kind !== "idle"));
+      if (position && (transient || this.pageMotion?.driver.active)) {
+        const sampled = this.sampleAnchorAtVisualPosition(position);
+        this.takeOverNativePaging();
+        if (sampled) {
+          this.anchor = sampled;
+          this.anchorPath = path;
+        }
+      } else if (!this.flushReadingAnchor()) this.captureAnchor();
+    }
+    const readingAnchor = this.anchor && this.anchorPath === path ? { ...this.anchor } : null;
+    const fallbackPage = this.metrics.currentPage;
+    this.setTextProjectionPreferences(preferences);
+    const preserveSearchHighlight = this.searchHighlightTarget
+      ? {
+          requestId: this.searchHighlightTarget.requestId,
+          textHits: this.searchHighlightTarget.textHits.map((hit) => ({ ...hit })),
+          occurrence: cloneSearchOccurrence(this.searchHighlightTarget.occurrence),
+        }
+      : null;
+    await this.load(path, { anchor, readingAnchor, fallbackPage, preserveSearchHighlight });
   }
 
   /** 设置变更（字号/主题/阅读方式）后整体重载（保留阅读位置）。 */
@@ -8752,6 +8878,7 @@ export class ChapterPaginator {
     this.contentDoc = null;
     this.viewer = null;
     this.textIndex = null;
+    this.textProjectionSession = null;
     this.pendingFallbackPage = null;
     this.leadingColumns = 0;
     this.effectiveColumns = 1;

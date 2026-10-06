@@ -1,0 +1,16 @@
+OpenCC dictionary data attribution
+=================================
+
+The generated dictionary data files under ./data/ are derived from:
+  https://github.com/BYVoid/OpenCC
+  commit 3ac34aa439a9908dd49fa92b5174b46314787ac2
+
+Files included:
+  data/t2s.ts  <- data/dictionary/TSPhrases.txt + TSCharacters.txt
+  data/s2t.ts  <- data/dictionary/STPhrases.txt + STCharacters.txt
+
+OpenCC is licensed under the Apache License, Version 2.0. See the repository
+LICENSE and NOTICE files for the full project notices. The files retain the
+original dictionary entry order; only comments/blank lines were removed and
+the first value of each multi-value entry was kept, as required by the T-1
+longest-match implementation.
