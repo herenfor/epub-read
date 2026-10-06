@@ -139,4 +139,28 @@ describe("text projection core", () => {
     expect(await session.search("甲")).toHaveLength(0);
     session.dispose();
   });
+
+  it("projects display search per text node so phrase rules do not merge across inline spans", async () => {
+    const compiled = await compileTextProjection(original([{ from: "甲😀", to: "X" }]));
+    const book = fakeBook(["<html><body><p>甲<span>😀乙</span></p></body></html>"]);
+    const session = createDisplaySearchSession(book, compiled, { yieldToHost: async () => {} });
+    expect(await session.search("X")).toHaveLength(0);
+    const uncollapsed = await session.search("甲😀");
+    expect(uncollapsed).toHaveLength(1);
+    expect(uncollapsed[0].snippet).toBe("甲😀乙");
+    session.dispose();
+  });
+
+  it("keeps pre/code search text original while projecting normal body text", async () => {
+    const compiled = await compileTextProjection(original([{ from: "甲", to: "X" }]));
+    const book = fakeBook(["<html><body><p>甲</p><pre>甲</pre></body></html>"]);
+    const session = createDisplaySearchSession(book, compiled, { yieldToHost: async () => {} });
+    const projected = await session.search("X");
+    expect(projected).toHaveLength(1);
+    expect(projected[0].matchedText).toBe("X");
+    const untouched = await session.search("甲");
+    expect(untouched).toHaveLength(1);
+    expect(untouched[0].matchedText).toBe("甲");
+    session.dispose();
+  });
 });
