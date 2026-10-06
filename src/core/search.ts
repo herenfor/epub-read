@@ -5,9 +5,11 @@ import {
   MAX_ANCHOR_SNIPPET_CODE_POINTS,
   buildDocument,
   extractSearchText,
+  extractSearchTextSegments,
   extractVisibleText,
   normalizeQueryPart,
   type SearchDocument,
+  type SearchTextSegment,
 } from "./corpus";
 import type { Book, TocNode } from "./types";
 import { buildExactTextHitsAndPoints, type ExactTextHit } from "./exactTextHits";
@@ -54,6 +56,12 @@ export interface SearchProjection {
   readonly version: string;
   /** Project one chapter's extracted search text. Must be pure. */
   projectText(sourceText: string): string;
+  /**
+   * Optional node-boundary-aware projection. When present, core extracts
+   * per-text-node segments and the adapter must project each segment
+   * independently so phrase rules do not merge across inline elements.
+   */
+  projectSegments?(sourceText: string, segments: readonly SearchTextSegment[]): string;
   /**
    * Map a raw UTF-16 range from projected text back to the original extracted
    * text. Start/end use opposite fragment biases in the implementation.
@@ -396,9 +404,16 @@ export function createSearchSession(book: Book, options: SearchBookOptions = {})
             if (source === undefined) {
               chapter = null;
             } else {
-              const sourceText = await extractSearchText(source);
+              const segmented = projection?.projectSegments
+                ? await extractSearchTextSegments(source)
+                : null;
+              const sourceText = segmented?.text ?? await extractSearchText(source);
               const sourceDoc = buildDocument(sourceText);
-              const displayText = projection ? projection.projectText(sourceText) : sourceText;
+              const displayText = projection
+                ? segmented && projection.projectSegments
+                  ? projection.projectSegments(sourceText, segmented.segments)
+                  : projection.projectText(sourceText)
+                : sourceText;
               chapter = {
                 source: sourceDoc,
                 sourceText,
