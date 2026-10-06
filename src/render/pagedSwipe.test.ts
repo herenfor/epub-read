@@ -140,6 +140,21 @@ describe("paged swipe input", () => {
     expect(onPreview).toHaveBeenLastCalledWith(null);
   });
 
+  it("keeps an acquired horizontal drag across its origin until the finger lifts", () => {
+    const { onNext, onPrev, onPreview, touchEvent } = setup();
+    touchEvent("touchstart", 300, 200);
+    touchEvent("touchmove", 220, 202); // 横向手势已成立
+    touchEvent("touchmove", 299, 215); // dx≈0，少量纵移不能取消已成立的横拖
+    expect(onPreview).toHaveBeenLastCalledWith(-1);
+    touchEvent("touchmove", 340, 216); // 同一根手指仍能反向拖
+    expect(onPreview).toHaveBeenLastCalledWith(40);
+    expect(onPreview.mock.calls.some(([dx]) => dx === null)).toBe(false);
+    touchEvent("touchend", 340, 216);
+    expect(onPreview).toHaveBeenLastCalledWith(null);
+    expect(onNext).not.toHaveBeenCalled();
+    expect(onPrev).toHaveBeenCalledTimes(1); // 抬手后仍按最终方向决定，不能在中途取消
+  });
+
   it("accepts a qualifying final displacement even when moves were coalesced", () => {
     const { onNext, touchEvent } = setup();
     touchEvent("touchstart", 300, 200);
