@@ -2972,7 +2972,10 @@ export default function App() {
     setSearchNavigationBusy(false);
     setInitialAnchor(null);
     setInitialPage(0);
-    setInitialRestoreTicket(null);
+    // The gate may remain unresolved until a real user commit; keep the
+    // source ticket alive for that later callback. Explicit navigation
+    // clears it separately via releaseRestoreForExplicitNavigation.
+    if (!restoreGateRef.current) setInitialRestoreTicket(null);
     setInitialAlignment("context");
     suppressShelfProgressRef.current = true;
     if (!reported) showReaderNotice("未能定位保存位置，已停留在章节开头", "warn");
@@ -3671,7 +3674,12 @@ export default function App() {
   const handleUserReadingPositionChange = useCallback((ticket?: RestoreTicket | null) => {
     // 只有宿主实际用户位移才解除失败保护，重排和采样变化不能代替用户输入。
     suppressShelfProgressRef.current = false;
-    if (ticket) dispatchRestoreGate({ type: "user-position-committed", ticket });
+    if (ticket) {
+      dispatchRestoreGate({ type: "user-position-committed", ticket });
+      // A matching user commit normally clears the gate. If it did not match
+      // (stale callback), keep whatever ticket the live gate still owns.
+      if (!restoreGateRef.current) setInitialRestoreTicket(null);
+    }
   }, [dispatchRestoreGate]);
 
   const onPageState = useCallback((s: ChapterState) => {
@@ -3818,9 +3826,10 @@ export default function App() {
       };
     }
     // Future chapter changes are ordinary navigation, not another attempt to
-    // apply this opening/history restore.
+    // apply this opening/history restore. Keep the source ticket when the
+    // restore failed, so a later real user commit can still settle that gate.
     setInitialAnchor(null);
-    setInitialRestoreTicket(null);
+    if (!restoreGateRef.current) setInitialRestoreTicket(null);
     setInitialPage(0);
     // Display-ready flips a state gate; the following render runs the normal
     // progress effect with the newest derived percentage and anchor.
@@ -5564,6 +5573,8 @@ export default function App() {
     if (book) {
       disposeBook(book);
     }
+    restoreGateRef.current = null;
+    setInitialRestoreTicket(null);
     setBook(null);
     setServer(null);
     setCurrentShelfId(null);
