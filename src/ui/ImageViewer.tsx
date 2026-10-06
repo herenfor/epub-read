@@ -2,6 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import type { ImageViewRequest } from "../render/imageActivation";
 import { CloseIcon, MinusIcon, PlusIcon, RotateCcwIcon } from "./readerIcons";
+import type { ReaderVisualPreferences } from "../render/visual/readerVisualPreferences";
+import { DEFAULT_VISUAL_PREFERENCES } from "../render/visual/readerVisualPreferences";
+import { attachReaderPaint } from "../render/visual/readerVisualPaint";
+import type { ReaderPaintHandle } from "../render/visual/readerVisualPreferences";
 import {
   MIN_IMAGE_SCALE,
   clampImagePan,
@@ -25,6 +29,9 @@ export interface ImageViewerProps {
   image: ImageViewRequest | null;
   onClose(): void;
   onFollowLink?(image: ImageViewRequest): void;
+  visualPreferences?: ReaderVisualPreferences;
+  compareOriginal?: boolean;
+  onCompareOriginalChange?(next: boolean): void;
 }
 
 interface ViewportSize {
@@ -48,10 +55,24 @@ const FIT_STATE_EPSILON = 0.01;
  * 也不自行打开链接：有 linkHref 且父级提供 onFollowLink 时显示“打开链接”，交回原链接路由。
  * 打开/关闭只影响本浮层，不触碰书页图片尺寸与阅读位置。
  */
-export function ImageViewer({ image, onClose, onFollowLink }: ImageViewerProps) {
+export function ImageViewer({
+  image,
+  onClose,
+  onFollowLink,
+  visualPreferences = DEFAULT_VISUAL_PREFERENCES,
+  compareOriginal = false,
+  onCompareOriginalChange,
+}: ImageViewerProps) {
   const open = image !== null;
   const overlayRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
+  const paintSurfaceRef = useRef<HTMLDivElement>(null);
+  const visualOverlayRef = useRef<HTMLDivElement>(null);
+  const paintHandleRef = useRef<ReaderPaintHandle | null>(null);
+  const visualPreferencesRef = useRef(visualPreferences);
+  visualPreferencesRef.current = visualPreferences;
+  const compareOriginalRef = useRef(compareOriginal);
+  compareOriginalRef.current = compareOriginal;
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   const pointersRef = useRef<Map<number, Point>>(new Map());
@@ -67,6 +88,25 @@ export function ImageViewer({ image, onClose, onFollowLink }: ImageViewerProps) 
   onCloseRef.current = onClose;
   const onFollowLinkRef = useRef(onFollowLink);
   onFollowLinkRef.current = onFollowLink;
+
+  useEffect(() => {
+    if (!open) return;
+    const surface = paintSurfaceRef.current;
+    const host = visualOverlayRef.current;
+    if (!surface || !host) return;
+    const handle = attachReaderPaint(surface, host, visualPreferencesRef.current, null);
+    paintHandleRef.current = handle;
+    handle.update(visualPreferencesRef.current, compareOriginalRef.current);
+    return () => {
+      handle.dispose();
+      if (paintHandleRef.current === handle) paintHandleRef.current = null;
+      onCompareOriginalChange?.(false);
+    };
+  }, [open, image?.src]);
+
+  useEffect(() => {
+    paintHandleRef.current?.update(visualPreferences, compareOriginal);
+  }, [visualPreferences, compareOriginal]);
 
   const naturalWidth = image?.naturalWidth ?? 0;
   const naturalHeight = image?.naturalHeight ?? 0;
@@ -355,16 +395,23 @@ export function ImageViewer({ image, onClose, onFollowLink }: ImageViewerProps) 
         onLostPointerCapture={endPointer}
         onDoubleClick={handleDoubleClick}
       >
-        <img
-          className="image-viewer-image"
-          src={image.src}
-          alt={image.alt}
-          draggable={false}
-          style={{
-            width: baseWidth,
-            height: baseHeight,
-            transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
-          }}
+        <div ref={paintSurfaceRef} className="image-viewer-paint-surface">
+          <img
+            className="image-viewer-image"
+            src={image.src}
+            alt={image.alt}
+            draggable={false}
+            style={{
+              width: baseWidth,
+              height: baseHeight,
+              transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
+            }}
+          />
+        </div>
+        <div
+          ref={visualOverlayRef}
+          className="image-viewer-visual-overlay"
+          aria-hidden="true"
         />
       </div>
       <div className="image-viewer-controls" role="group" aria-label="图片查看控件">
@@ -418,6 +465,24 @@ export function ImageViewer({ image, onClose, onFollowLink }: ImageViewerProps) 
         >
           1:1
         </button>
+        {onCompareOriginalChange ? (
+          <button
+            type="button"
+            className={`image-viewer-btn${compareOriginal ? " is-active" : ""}`}
+            aria-pressed={compareOriginal}
+            title="按住临时查看原图，松开恢复滤镜"
+            onPointerDown={(event) => {
+              event.preventDefault();
+              onCompareOriginalChange(true);
+            }}
+            onPointerUp={() => onCompareOriginalChange(false)}
+            onPointerCancel={() => onCompareOriginalChange(false)}
+            onPointerLeave={() => onCompareOriginalChange(false)}
+            onBlur={() => onCompareOriginalChange(false)}
+          >
+            原图
+          </button>
+        ) : null}
         <button
           ref={closeButtonRef}
           type="button"

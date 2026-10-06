@@ -17,6 +17,17 @@ import {
 } from "../render/paginator";
 import type { ResourceServer } from "../render/resources";
 import { normalizeTurnAnimation, type ReaderSettings, type TurnAnimation } from "../render/settings";
+import { textProjectionVersion, type CompiledTextProjection } from "../render/textProjection/compile";
+import {
+  DEFAULT_TEXT_PROJECTION_PREFERENCES,
+  type TextProjectionPreferences,
+} from "../render/textProjection/types";
+import {
+  DEFAULT_VISUAL_PREFERENCES,
+  type ReaderVisualPreferences,
+} from "../render/visual/readerVisualPreferences";
+import { attachReaderPaint } from "../render/visual/readerVisualPaint";
+import type { ReaderPaintHandle } from "../render/visual/readerVisualPreferences";
 import { createSettingsReloadDebouncer } from "./settingsReload";
 import { TurnIntentBuffer, WheelTurnAccumulator } from "./turnIntent";
 import { ReadingWarmupPlan, backgroundPreparation, type WarmupTicket } from "./readerWarmup";
@@ -119,6 +130,12 @@ interface ReaderViewProps {
   /** 锚点变更序号：仅用于跨章或同章 direct 失败后的兼容重载 */
   anchorNonce: number;
   settings: ReaderSettings;
+  /** T-1 text projection snapshot for this chapter window. */
+  textProjectionPreferences?: TextProjectionPreferences;
+  textProjection?: CompiledTextProjection | null;
+  /** FX-1/FX-2 paint preferences; never enters ReaderSettings. */
+  visualPreferences?: ReaderVisualPreferences;
+  compareOriginal?: boolean;
   /** 用户上传字体的会话内资源（family + blob URL） */
   userFonts: Array<{ family: string; url: string }>;
   /** 当前章节笔记；更新仅重建 CSS Highlight，不触发章节重载。 */
@@ -231,6 +248,26 @@ function parseViewport(vp: string | undefined): { w: number; h: number } | null 
   return { w: Number(m[1]), h: Number(m[2]) };
 }
 
+/** Paper color behind a transparent body iframe, applied only while filters are active. */
+function readerSurfaceBackground(surface: HTMLElement): string | null {
+  const doc = surface.ownerDocument;
+  const candidates = [
+    surface.closest(".reader") as HTMLElement | null,
+    doc?.body,
+    doc?.documentElement,
+  ];
+  try {
+    for (const candidate of candidates) {
+      if (!candidate || !doc?.defaultView) continue;
+      const color = doc.defaultView.getComputedStyle(candidate).backgroundColor;
+      if (color && color !== "transparent" && color !== "rgba(0, 0, 0, 0)") return color;
+    }
+  } catch {
+    // Fall through to no synthesized background.
+  }
+  return null;
+}
+
 /** 固定版式页面保持原始版式；强制横排只作用于可重排正文。 */
 export function effectiveReaderSettings(settings: ReaderSettings, fixedLayout: boolean): ReaderSettings {
   if (!fixedLayout && settings.gapPx !== 0) return settings;
@@ -294,6 +331,8 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   const swipePreviewRef = useRef<{ frame: number; dx: number | null }>({ frame: 0, dx: null });
   const updateSwipePreviewRef = useRef<(dx: number | null) => void>(() => {});
   const activeIframeRef = useRef<HTMLIFrameElement | null>(null);
+  const visualOverlayRef = useRef<HTMLDivElement | null>(null);
+  const paintHandleRef = useRef<ReaderPaintHandle | null>(null);
   const paginatorRef = useRef<ChapterPaginator | null>(null);
   const activeSlotRef = useRef<PaginatorSlot | null>(null);
   // 高性能模式下活动章加最多四个邻章组成当前章 ±2 五章活缓存。
@@ -757,6 +796,10 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       () => !isActiveSlot(slot) || inputPausedRef.current || slot.state.status !== "ready"
     );
     slot.paginator = paginator;
+    paginator.setTextProjectionPreferences?.(
+      props.textProjectionPreferences ?? DEFAULT_TEXT_PROJECTION_PREFERENCES,
+      props.textProjection ?? null,
+    );
     paginator.setNativeSnapPaging?.(nativeSnapWantedRef.current);
     paginator.setPageMotionChapterHandler?.((direction) => {
       if (isActiveSlot(slot)) turnPageRef.current(direction, "ui");
@@ -1461,6 +1504,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
               kind: preciseTarget.kind,
               textHits: preciseTarget.textHits,
               occurrence: preciseTarget.occurrence,
+              displayTarget: preciseTarget.displayTarget,
             }
           : null,
       });
@@ -1505,6 +1549,59 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings, props.userFonts]);
+
+  // T-1 configuration change: dispose neighboring display snapshots and
+  // reload the active chapter through the same sampled-anchor transaction.
+  const textProjectionVersionRef = useRef<string | null>(null);
+  useEffect(() => {
+    const preferences = props.textProjectionPreferences ?? DEFAULT_TEXT_PROJECTION_PREFERENCES;
+    const version = textProjectionVersion(preferences);
+    if (textProjectionVersionRef.current === null) {
+      textProjectionVersionRef.current = version;
+      const p = paginatorRef.current;
+      p?.setTextProjectionPreferences?.(preferences, props.textProjection ?? null);
+      return;
+    }
+    if (textProjectionVersionRef.current === version) return;
+    textProjectionVersionRef.current = version;
+    resetFullBookWarmup();
+    disposeSpareSlots();
+    const p = paginatorRef.current;
+    if (!p) return;
+    p.setTextProjectionPreferences?.(preferences, props.textProjection ?? null);
+    void p.reloadWithTextProjection?.(preferences, undefined, props.textProjection ?? null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.textProjectionPreferences, props.textProjection]);
+
+  const visualPreferences = props.visualPreferences ?? DEFAULT_VISUAL_PREFERENCES;
+  const visualPreferencesRef = useRef(visualPreferences);
+  visualPreferencesRef.current = visualPreferences;
+  const compareOriginalRef = useRef(props.compareOriginal === true);
+  compareOriginalRef.current = props.compareOriginal === true;
+
+  useEffect(() => {
+    const surface = activeIframeRef.current;
+    const host = visualOverlayRef.current;
+    if (!surface || !host) return;
+    const handle = attachReaderPaint(
+      surface,
+      host,
+      visualPreferencesRef.current,
+      readerSurfaceBackground(surface),
+    );
+    paintHandleRef.current = handle;
+    handle.update(visualPreferencesRef.current, compareOriginalRef.current);
+    return () => {
+      handle.dispose();
+      if (paintHandleRef.current === handle) paintHandleRef.current = null;
+    };
+    // Reattach only when the visible active iframe changes; slider updates use the second effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeFrame, book, settings.readingMode, settings.theme]);
+
+  useEffect(() => {
+    paintHandleRef.current?.update(visualPreferences, props.compareOriginal === true);
+  }, [visualPreferences, props.compareOriginal]);
 
   // The setting is deliberately a scheduler toggle: it must not reload the
   // active chapter, but enabling it after a ready chapter should start one
@@ -2043,6 +2140,11 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
           style={{ visibility: "hidden", zIndex: 0 }}
         />
       )}
+      <div
+        ref={visualOverlayRef}
+        className="reader-visual-overlay-host"
+        aria-hidden="true"
+      />
       <div ref={swipeHintRef} className="reader-swipe-hint" aria-hidden="true" />
       {/* 左右边缘 5% 悬停感应区与翻页指示 (Zen UI Packet C) */}
       <div

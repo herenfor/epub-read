@@ -25,6 +25,7 @@ import { applyBackdropCompatibility } from "./backdropCompatibility";
 import type { ExactTextHit, RawTextRange } from "../core/exactTextHits";
 import { resolveExactTextHits } from "../core/exactTextHits";
 import { resolveSearchOccurrence, type SearchOccurrence } from "../core/searchOccurrence";
+import type { DisplaySearchTarget } from "../core/search";
 import {
   adaptNavigationAnchor,
   type PersistedNavigationAnchor,
@@ -43,7 +44,12 @@ import {
   type TextSelectionPayload,
   type VisibleTextIndex,
 } from "./textAnchor";
-import { compileTextProjection } from "./textProjection/compile";
+import {
+  compileTextProjection,
+  isIdentityTextProjection,
+  textProjectionVersion,
+  type CompiledTextProjection,
+} from "./textProjection/compile";
 import { isProjectionExcludedTextNode, TextProjectionSession } from "./textProjection/session";
 import { sanitizeTextProjectionPreferences } from "./textProjection/preferences";
 import {
@@ -312,17 +318,25 @@ export interface ResolvedContentFraction {
 export interface PreciseNavigationRequest {
   requestId: number;
   kind: "search" | "note";
-  /** Exact body ranges; omitted for note anchors that use persisted text only. */
+  /** Exact canonical body ranges; omitted for note anchors that use persisted text only. */
   textHits?: ExactTextHit[];
-  /** New-search identity context; absent for notes and legacy search requests. */
+  /** Canonical identity context; absent for notes and legacy search requests. */
   occurrence?: SearchOccurrence;
+  /**
+   * Display-only identity for the same search result. Canonical fields above
+   * remain the persisted/identity source; this target drives exact visible DOM
+   * geometry and highlight when present.
+   */
+  displayTarget?: DisplaySearchTarget;
 }
 
 export interface SearchHighlightTarget {
   requestId: number;
   textHits: ExactTextHit[];
-  /** New-search identity context; absent for notes and legacy search requests. */
+  /** Canonical identity context; absent for notes and legacy search requests. */
   occurrence?: SearchOccurrence;
+  /** Display-only target preserved across same-chapter reflow/rebuild. */
+  displayTarget?: DisplaySearchTarget;
 }
 
 function cloneSearchOccurrence(occurrence: SearchOccurrence | undefined): SearchOccurrence | undefined {
@@ -335,10 +349,30 @@ function cloneSearchOccurrence(occurrence: SearchOccurrence | undefined): Search
     : undefined;
 }
 
+function cloneExactTextHits(hits: readonly ExactTextHit[] | undefined): ExactTextHit[] {
+  return hits?.map((hit) => ({ ...hit })) ?? [];
+}
+
+function cloneDisplayTarget(target: DisplaySearchTarget | undefined): DisplaySearchTarget | undefined {
+  return target
+    ? {
+        projectionVersion: target.projectionVersion,
+        textHits: target.textHits.map((hit) => ({ ...hit })),
+        occurrence: cloneSearchOccurrence(target.occurrence)!,
+      }
+    : undefined;
+}
+
 interface PendingPreciseNavigation {
   request: PreciseNavigationRequest;
   /** Immutable copy of the original request anchor; never a page-center sample. */
   anchor: ReadingAnchor | null;
+}
+
+interface ResolvedSearchTarget {
+  canonicalHits: RawTextRange[];
+  paintIndex: VisibleTextIndex;
+  paintHits: RawTextRange[];
 }
 
 type CaretDocument = Document & {
@@ -2407,6 +2441,8 @@ export class ChapterPaginator {
   private textProjectionSession: TextProjectionSession | null = null;
   /** Incremented when preferences change so stale async compilation cannot apply. */
   private textProjectionGeneration = 0;
+  /** Shared compiled snapshot for the current stable version, supplied by App/ReaderView. */
+  private compiledTextProjection: CompiledTextProjection | null = null;
   private notes: ReaderNoteForPaginator[] = [];
   private selectionContextMenuHandler?: (payload: SelectionContextPayload | null) => void;
   private contextMenuHandler = (e: MouseEvent): void => this.handleContextMenu(e);
@@ -2638,8 +2674,15 @@ export class ChapterPaginator {
   }
 
   /** Store a validated T-1 snapshot. Call reloadWithTextProjection to apply it to a live chapter. */
-  setTextProjectionPreferences(preferences: TextProjectionPreferences): void {
+  setTextProjectionPreferences(
+    preferences: TextProjectionPreferences,
+    compiled: CompiledTextProjection | null = null,
+  ): void {
     this.textProjectionPreferences = sanitizeTextProjectionPreferences(preferences);
+    this.compiledTextProjection =
+      compiled && compiled.version === textProjectionVersion(this.textProjectionPreferences)
+        ? compiled
+        : null;
     this.textProjectionGeneration++;
   }
 
@@ -2652,7 +2695,7 @@ export class ChapterPaginator {
 
   /** Display-projection version used by display search caches. */
   getTextProjectionVersion(): string {
-    return this.textProjectionSession?.version ?? `${this.textProjectionPreferences.mode}:[]`;
+    return textProjectionVersion(this.textProjectionPreferences);
   }
 
   /**
@@ -3391,12 +3434,21 @@ export class ChapterPaginator {
     this.searchHighlightTarget = opts.preserveSearchHighlight
       ? {
           requestId: opts.preserveSearchHighlight.requestId,
-          textHits: opts.preserveSearchHighlight.textHits.map((hit) => ({ ...hit })),
+          textHits: cloneExactTextHits(opts.preserveSearchHighlight.textHits),
           occurrence: cloneSearchOccurrence(opts.preserveSearchHighlight.occurrence),
+          displayTarget: cloneDisplayTarget(opts.preserveSearchHighlight.displayTarget),
         }
       : null;
     this.pendingPrecise = opts.preciseNavigation
-      ? { request: opts.preciseNavigation, anchor: preciseAnchor ? { ...preciseAnchor } : null }
+      ? {
+          request: {
+            ...opts.preciseNavigation,
+            textHits: cloneExactTextHits(opts.preciseNavigation.textHits),
+            occurrence: cloneSearchOccurrence(opts.preciseNavigation.occurrence),
+            displayTarget: cloneDisplayTarget(opts.preciseNavigation.displayTarget),
+          },
+          anchor: preciseAnchor ? { ...preciseAnchor } : null,
+        }
       : null;
     this.pendingFallbackPage =
       typeof opts.fallbackPage === "number" && Number.isSafeInteger(opts.fallbackPage) && opts.fallbackPage >= 0
@@ -3608,25 +3660,35 @@ export class ChapterPaginator {
     const viewer = this.viewer;
     if (!doc || !viewer) return false;
     const generation = this.textProjectionGeneration;
-    const compiled = await compileTextProjection(this.textProjectionPreferences);
-    if (
-      this.disposed ||
-      seq !== this.loadSeq ||
-      generation !== this.textProjectionGeneration ||
-      doc !== this.contentDoc ||
-      viewer !== this.viewer
-    ) {
-      return false;
+    const isCurrent = (): boolean =>
+      !this.disposed &&
+      seq === this.loadSeq &&
+      generation === this.textProjectionGeneration &&
+      doc === this.contentDoc &&
+      viewer === this.viewer;
+    const previous = this.textProjectionSession;
+    if (isIdentityTextProjection(this.textProjectionPreferences)) {
+      if (previous) {
+        const nodes = collectVisibleTextNodes(doc, viewer).filter((node) => !isProjectionExcludedTextNode(node));
+        previous.restore(nodes);
+      }
+      this.textProjectionSession = null;
+      this.textIndex = null;
+      return true;
     }
-    const session = new TextProjectionSession();
+    const version = textProjectionVersion(this.textProjectionPreferences);
+    const compiled = this.compiledTextProjection?.version === version
+      ? this.compiledTextProjection
+      : await compileTextProjection(this.textProjectionPreferences);
+    if (!isCurrent()) return false;
     const nodes = collectVisibleTextNodes(doc, viewer).filter((node) => !isProjectionExcludedTextNode(node));
+    if (previous) previous.restore(nodes);
+    const session = new TextProjectionSession();
     await session.apply(nodes, compiled, {
-      isCurrent: () => !this.disposed && seq === this.loadSeq && doc === this.contentDoc && viewer === this.viewer,
+      isCurrent,
       yieldToHost: () => new Promise<void>((resolve) => setTimeout(resolve, 0)),
     });
-    if (this.disposed || seq !== this.loadSeq || doc !== this.contentDoc || viewer !== this.viewer) {
-      return false;
-    }
+    if (!isCurrent()) return false;
     this.textProjectionSession = session;
     this.textIndex = null;
     return true;
@@ -6915,14 +6977,14 @@ export class ChapterPaginator {
       this.searchHighlightTarget = null;
       return;
     }
-    const resolved = this.resolveRequestedTextRanges(index, this.searchHighlightTarget);
+    const resolved = this.resolveRequestedSearchTarget(index, this.searchHighlightTarget);
     if (!resolved) {
       clearSearchHighlight(doc);
       this.searchHighlightTarget = null;
       return;
     }
-    const ranges = this.dedupeHighlightRanges(resolved)
-      .map((range) => index.rangeForOffsets(doc, range.start, range.end))
+    const ranges = this.dedupeHighlightRanges(resolved.paintHits)
+      .map((range) => resolved.paintIndex.rangeForOffsets(doc, range.start, range.end))
       .filter((range): range is Range => range !== null);
     if (ranges.length === 0) {
       clearSearchHighlight(doc);
@@ -7000,6 +7062,31 @@ export class ChapterPaginator {
     return null;
   }
 
+  /**
+   * R2: canonical identity first, then optional display target. The returned
+   * paint index is either the canonical projected index (legacy/notes) or a
+   * real display-only index built from the live DOM.
+   */
+  private resolveRequestedSearchTarget(
+    index: VisibleTextIndex,
+    request: Pick<PreciseNavigationRequest, "textHits" | "occurrence" | "displayTarget">,
+  ): ResolvedSearchTarget | null {
+    const canonicalHits = this.resolveRequestedTextRanges(index, request);
+    if (!canonicalHits) return null;
+    const target = request.displayTarget;
+    if (!target) {
+      return { canonicalHits, paintIndex: index, paintHits: canonicalHits };
+    }
+    if (target.projectionVersion !== this.getTextProjectionVersion()) return null;
+    const doc = this.contentDoc;
+    const viewer = this.viewer;
+    if (!doc || !viewer) return null;
+    const paintIndex = buildVisibleTextIndex(doc, viewer);
+    const paintHits = resolveSearchOccurrence(paintIndex.codePoints, target.occurrence);
+    if (!paintHits || paintHits.length === 0) return null;
+    return { canonicalHits, paintIndex, paintHits };
+  }
+
   private candidateForRange(index: VisibleTextIndex, range: RawTextRange): ReadingAnchor {
     return {
       index: -1,
@@ -7035,14 +7122,14 @@ export class ChapterPaginator {
       return "unresolved";
     }
     if ((!request.textHits || request.textHits.length === 0) && !request.occurrence) return "unresolved";
-    const resolved = this.resolveRequestedTextRanges(index, request);
-    if (!resolved) return "unresolved";
-    const first = resolved[0];
-    const ranges = this.buildHighlightRanges(doc, index, resolved);
+    const resolvedTarget = this.resolveRequestedSearchTarget(index, request);
+    if (!resolvedTarget) return "unresolved";
+    const first = resolvedTarget.canonicalHits[0];
+    const firstPaint = resolvedTarget.paintHits[0];
+    const ranges = this.buildHighlightRanges(doc, resolvedTarget.paintIndex, resolvedTarget.paintHits);
     if (!ranges) return "unresolved";
     if (this.scrollMode) {
-      // 滚动模式没有屏号：命中位置直接由 Range 换算 scrollTop（与入口锚点同一口径）。
-      const target = index.rangeForOffsets(doc, first.start, first.end);
+      const target = resolvedTarget.paintIndex.rangeForOffsets(doc, firstPaint.start, firstPaint.end);
       const inset = Math.round(Math.min(24, Math.max(0, viewer.clientHeight * 0.04)));
       const resolvedTop = target ? this.resolveScrollTopForRange(target, inset) : null;
       if (resolvedTop === null) return "unresolved";
@@ -7059,12 +7146,13 @@ export class ChapterPaginator {
       }
       this.searchHighlightTarget = {
         requestId: request.requestId,
-        textHits: request.textHits?.map((hit) => ({ ...hit })) ?? [],
+        textHits: cloneExactTextHits(request.textHits),
         occurrence: cloneSearchOccurrence(request.occurrence),
+        displayTarget: cloneDisplayTarget(request.displayTarget),
       };
       return "located";
     }
-    const page = this.resolveTextRangeCol(index, first.start, first.end);
+    const page = this.resolveTextRangeCol(resolvedTarget.paintIndex, firstPaint.start, firstPaint.end);
     if (page === null || !Number.isSafeInteger(page) || page < 0 || page >= this.metrics.pageCount) {
       return "unresolved";
     }
@@ -7078,8 +7166,9 @@ export class ChapterPaginator {
     }
     this.searchHighlightTarget = {
       requestId: request.requestId,
-      textHits: request.textHits?.map((hit) => ({ ...hit })) ?? [],
+      textHits: cloneExactTextHits(request.textHits),
       occurrence: cloneSearchOccurrence(request.occurrence),
+      displayTarget: cloneDisplayTarget(request.displayTarget),
     };
     return "located";
   }
@@ -7097,14 +7186,14 @@ export class ChapterPaginator {
       return "unresolved";
     }
 
-    const resolved = this.resolveRequestedTextRanges(index, request);
+    const resolvedTarget = this.resolveRequestedSearchTarget(index, request);
     // Resolve the original request anchor in a temporary slot.  The live
     // this.anchor may already have been replaced by captureAnchor after a
     // failed restore; that page-center sample must never prove success.
     const reference = this.resolveReferenceAnchor(anchor);
     const hasReference = reference !== null;
 
-    if (!resolved) {
+    if (!resolvedTarget) {
       if (request.kind === "note") {
         const status: PreciseNavigationStatus = hasReference ? "located" : "unresolved";
         this.reportPreciseStatus(request, status, false);
@@ -7115,14 +7204,20 @@ export class ChapterPaginator {
       return status;
     }
 
-    const first = resolved[0];
-    const ranges = this.buildHighlightRanges(doc, index, resolved);
+    const first = resolvedTarget.canonicalHits[0];
+    const firstPaint = resolvedTarget.paintHits[0];
+    const ranges = this.buildHighlightRanges(doc, resolvedTarget.paintIndex, resolvedTarget.paintHits);
+    if (!ranges) {
+      const status: PreciseNavigationStatus = hasReference ? "located-reference" : "unresolved";
+      this.reportPreciseStatus(request, status, false);
+      return status;
+    }
     if (this.scrollMode) {
-      const target = ranges ? index.rangeForOffsets(doc, first.start, first.end) : null;
+      const target = resolvedTarget.paintIndex.rangeForOffsets(doc, firstPaint.start, firstPaint.end);
       const viewer = this.viewer;
       const inset = viewer ? Math.round(Math.min(24, Math.max(0, viewer.clientHeight * 0.04))) : 0;
       const resolvedTop = target && viewer ? this.resolveScrollTopForRange(target, inset) : null;
-      if (!ranges || resolvedTop === null || !viewer) {
+      if (resolvedTop === null || !viewer) {
         const status: PreciseNavigationStatus = hasReference ? "located-reference" : "unresolved";
         this.reportPreciseStatus(request, status, false);
         return status;
@@ -7140,14 +7235,15 @@ export class ChapterPaginator {
       }
       this.searchHighlightTarget = {
         requestId: request.requestId,
-        textHits: request.textHits?.map((hit) => ({ ...hit })) ?? [],
+        textHits: cloneExactTextHits(request.textHits),
         occurrence: cloneSearchOccurrence(request.occurrence),
+        displayTarget: cloneDisplayTarget(request.displayTarget),
       };
       this.reportPreciseStatus(request, "located", true);
       return "located";
     }
-    const page = ranges ? this.resolveTextRangeCol(index, first.start, first.end) : null;
-    if (!ranges || page === null || !Number.isSafeInteger(page) || page < 0 || page >= this.metrics.pageCount) {
+    const page = this.resolveTextRangeCol(resolvedTarget.paintIndex, firstPaint.start, firstPaint.end);
+    if (page === null || !Number.isSafeInteger(page) || page < 0 || page >= this.metrics.pageCount) {
       const status: PreciseNavigationStatus = hasReference ? "located-reference" : "unresolved";
       this.reportPreciseStatus(request, status, false);
       return status;
@@ -7164,8 +7260,9 @@ export class ChapterPaginator {
     }
     this.searchHighlightTarget = {
       requestId: request.requestId,
-      textHits: request.textHits?.map((hit) => ({ ...hit })) ?? [],
+      textHits: cloneExactTextHits(request.textHits),
       occurrence: cloneSearchOccurrence(request.occurrence),
+      displayTarget: cloneDisplayTarget(request.displayTarget),
     };
     this.reportPreciseStatus(request, "located", true);
     return "located";
@@ -7636,10 +7733,10 @@ export class ChapterPaginator {
     const doc = this.contentDoc;
     const index = this.textIndex;
     if (this.disposed || !viewer || !doc || !index) return null;
-    const resolved = this.resolveRequestedTextRanges(index, request);
+    const resolved = this.resolveRequestedSearchTarget(index, request);
     if (!resolved) return null;
-    const first = resolved[0];
-    const target = index.rangeForOffsets(doc, first.start, first.end);
+    const firstPaint = resolved.paintHits[0];
+    const target = resolved.paintIndex.rangeForOffsets(doc, firstPaint.start, firstPaint.end);
     if (!target) return null;
     let rect: { top: number } | null = null;
     try {
@@ -7664,9 +7761,9 @@ export class ChapterPaginator {
     const index = this.textIndex;
     if (this.disposed || !viewer || !doc || !index || !this._currentPath) return "unresolved";
     if ((!request.textHits || request.textHits.length === 0) && !request.occurrence) return "unresolved";
-    const resolved = this.resolveRequestedTextRanges(index, request);
+    const resolved = this.resolveRequestedSearchTarget(index, request);
     if (!resolved) return "unresolved";
-    const ranges = this.buildHighlightRanges(doc, index, resolved);
+    const ranges = this.buildHighlightRanges(doc, resolved.paintIndex, resolved.paintHits);
     if (!ranges) return "unresolved";
     this.cancelPendingAnchorSample?.();
     this.clearSearchHighlightForDocument();
@@ -7677,8 +7774,9 @@ export class ChapterPaginator {
     }
     this.searchHighlightTarget = {
       requestId: request.requestId,
-      textHits: request.textHits?.map((hit) => ({ ...hit })) ?? [],
+      textHits: cloneExactTextHits(request.textHits),
       occurrence: cloneSearchOccurrence(request.occurrence),
+      displayTarget: cloneDisplayTarget(request.displayTarget),
     };
     return "located";
   }
@@ -8212,10 +8310,14 @@ export class ChapterPaginator {
    * layout setting change. The old display snapshot is sampled in canonical
    * coordinates before the document is replaced and projected again.
    */
-  async reloadWithTextProjection(preferences: TextProjectionPreferences, anchor?: string): Promise<void> {
+  async reloadWithTextProjection(
+    preferences: TextProjectionPreferences,
+    anchor?: string,
+    compiled: CompiledTextProjection | null = null,
+  ): Promise<void> {
     const path = this.currentPath;
     if (!path) {
-      this.setTextProjectionPreferences(preferences);
+      this.setTextProjectionPreferences(preferences, compiled);
       return;
     }
     if (this.scrollMode) this.captureScrollAnchor();
@@ -8234,12 +8336,13 @@ export class ChapterPaginator {
     }
     const readingAnchor = this.anchor && this.anchorPath === path ? { ...this.anchor } : null;
     const fallbackPage = this.metrics.currentPage;
-    this.setTextProjectionPreferences(preferences);
+    this.setTextProjectionPreferences(preferences, compiled);
     const preserveSearchHighlight = this.searchHighlightTarget
       ? {
           requestId: this.searchHighlightTarget.requestId,
-          textHits: this.searchHighlightTarget.textHits.map((hit) => ({ ...hit })),
+          textHits: cloneExactTextHits(this.searchHighlightTarget.textHits),
           occurrence: cloneSearchOccurrence(this.searchHighlightTarget.occurrence),
+          displayTarget: cloneDisplayTarget(this.searchHighlightTarget.displayTarget),
         }
       : null;
     await this.load(path, { anchor, readingAnchor, fallbackPage, preserveSearchHighlight });
@@ -8277,8 +8380,9 @@ export class ChapterPaginator {
     const preserveSearchHighlight = this.searchHighlightTarget
       ? {
           requestId: this.searchHighlightTarget.requestId,
-          textHits: this.searchHighlightTarget.textHits.map((hit) => ({ ...hit })),
+          textHits: cloneExactTextHits(this.searchHighlightTarget.textHits),
           occurrence: cloneSearchOccurrence(this.searchHighlightTarget.occurrence),
+          displayTarget: cloneDisplayTarget(this.searchHighlightTarget.displayTarget),
         }
       : null;
     await this.load(path, { anchor, readingAnchor, fallbackPage, preserveSearchHighlight });

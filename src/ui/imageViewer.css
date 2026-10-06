@@ -112,3 +112,24 @@
     padding-right: 8px;
   }
 }
+
+.image-viewer-visual-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.image-viewer-btn.is-active {
+  border-color: var(--accent, #6ea8fe);
+  background: rgba(110, 168, 254, 0.18);
+}
+
+.image-viewer-paint-surface {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}

@@ -7,11 +7,7 @@ import { compareStamp } from "./core/portableState/portable-register-core";
 import { latestVersion, projectProgressVersion, versionForStamp } from "./core/portableState/projection";
 import type { BookmarkValue, Locator, NoteValue, PortablePreferences, ProgressValue } from "./core/portableState/portable-state-types";
 import { isExternalUrl, isFragmentOnly, resolvePath, splitHref } from "./core/paths";
-import {
-  createSearchSession,
-  type SearchResult,
-  type SearchSession,
-} from "./core/search";
+import type { SearchResult, SearchSession } from "./core/search";
 import type { ExactTextHit } from "./core/exactTextHits";
 import type { SearchOccurrence } from "./core/searchOccurrence";
 import { ResourceServer } from "./render/resources";
@@ -25,6 +21,7 @@ import {
 } from "./render/settings";
 import type { ChapterState, MediaReadingAnchor, PreciseNavigationStatus, ReadingAnchor } from "./render/paginator";
 import { normalizePageOptions } from "./render/pageLayout";
+import { sanitizeTextProjectionPreferences } from "./render/textProjection/preferences";
 import type { ImageViewRequest } from "./render/imageActivation";
 import { ImageViewer } from "./ui/ImageViewer";
 import { TitleBar } from "./ui/TitleBar";
@@ -61,6 +58,33 @@ import {
 } from "./ui/readerProgressAxis";
 import { FontSettingsPanel } from "./ui/FontSettingsPanel";
 import { SearchPanel, type SearchPanelResult, type SearchScope, type SearchStatus } from "./ui/SearchPanel";
+import { TextProjectionPanel } from "./ui/textProjection/TextProjectionPanel";
+import {
+  loadTextProjectionPreferences,
+  saveTextProjectionPreferences,
+} from "./ui/textProjection/preferencesStorage";
+import {
+  compileTextProjection,
+  isIdentityTextProjection,
+  textProjectionVersion,
+  type CompiledTextProjection,
+} from "./render/textProjection/compile";
+import type { TextProjectionPreferences } from "./render/textProjection/types";
+import {
+  createTextSearchSession,
+  type TextSearchView,
+} from "./render/textProjection/displaySearch";
+import { ColorAssistPanel } from "./ui/colorAssist/ColorAssistPanel";
+import { correctionMatrix, svgMatrixValues } from "./render/colorAssist/colorAssistCore";
+import { ReaderVisualSettingsPanel } from "./ui/visual/ReaderVisualSettingsPanel";
+import {
+  loadVisualPreferences,
+  normalizeVisualPreferences,
+  saveVisualPreferences,
+  type ReaderVisualPreferences,
+} from "./render/visual/readerVisualPreferences";
+import { setColorAssistMatrixProvider } from "./render/visual/readerVisualPaint";
+import "./ui/readerDisplaySettings.css";
 import { presentCrossBookHit, type CrossBookPanelResult } from "./ui/crossBookSearch";
 import type { ResolvedCrossBookSearchHit } from "./features/ai/indexing/indexStore";
 import { createDefaultLibrarySearchRuntime } from "./features/ai/indexing/librarySearchRuntime";
@@ -804,6 +828,7 @@ export default function App() {
     chapterPath: string;
     textHits?: ExactTextHit[];
     occurrence?: SearchOccurrence;
+    displayTarget?: import("./core/search").DisplaySearchTarget;
   } | null>(null);
   const [progressChoice, setProgressChoice] = useState<{
     title: string;
@@ -963,6 +988,24 @@ export default function App() {
   const [userFontsLoaded, setUserFontsLoaded] = useState(false);
   const [systemFontsStatus, setSystemFontsStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [systemFontsError, setSystemFontsError] = useState<string | null>(null);
+  // ---- T-1 字符替换/繁简显示（本机偏好，不进入 ReaderSettings） ----
+  const [textProjectionPreferences, setTextProjectionPreferences] = useState<TextProjectionPreferences>(
+    () => loadTextProjectionPreferences(),
+  );
+  const [compiledTextProjection, setCompiledTextProjection] = useState<CompiledTextProjection | null>(null);
+  const [readerTextProjectionPreferences, setReaderTextProjectionPreferences] = useState<TextProjectionPreferences>(
+    textProjectionPreferences,
+  );
+  const [searchView, setSearchView] = useState<TextSearchView>("display");
+
+  // ---- FX-1/FX-2 本机显示偏好（滑条只改绘制，不触发章节重载） ----
+  const [visualPreferences, setVisualPreferences] = useState<ReaderVisualPreferences>(
+    () => loadVisualPreferences(),
+  );
+  const [visualCompareOriginal, setVisualCompareOriginal] = useState(false);
+  const visualPreferencesRef = useRef(visualPreferences);
+  visualPreferencesRef.current = visualPreferences;
+
   // ---- 当前书正文搜索（索引仅在本次打开书籍期间存在） ----
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
@@ -970,6 +1013,50 @@ export default function App() {
   const [searchProgress, setSearchProgress] = useState({ processed: 0, total: 0 });
   const [searchError, setSearchError] = useState<string | undefined>(undefined);
   const [searchNavigationBusy, setSearchNavigationBusy] = useState(false);
+
+  const updateTextProjectionPreferences = useCallback((next: TextProjectionPreferences): void => {
+    const sanitized = sanitizeTextProjectionPreferences(next);
+    setTextProjectionPreferences(sanitized);
+    saveTextProjectionPreferences(sanitized);
+  }, []);
+
+  const updateVisualPreferences = useCallback((next: ReaderVisualPreferences): void => {
+    const normalized = normalizeVisualPreferences(next);
+    setVisualPreferences(normalized);
+    saveVisualPreferences(normalized);
+  }, []);
+
+  useEffect(() => {
+    setColorAssistMatrixProvider((kind, strength) => svgMatrixValues(correctionMatrix(kind, strength)));
+    return () => setColorAssistMatrixProvider(null);
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setReaderTextProjectionPreferences(textProjectionPreferences);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [textProjectionPreferences]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (isIdentityTextProjection(readerTextProjectionPreferences)) {
+      setCompiledTextProjection(null);
+      return;
+    }
+    const version = textProjectionVersion(readerTextProjectionPreferences);
+    setCompiledTextProjection((previous) => previous && previous.version === version ? previous : null);
+    void compileTextProjection(readerTextProjectionPreferences)
+      .then((compiled) => {
+        if (!cancelled) setCompiledTextProjection(compiled);
+      })
+      .catch(() => {
+        if (!cancelled) setCompiledTextProjection(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [readerTextProjectionPreferences]);
   const [searchScope, setSearchScope] = useState<SearchScope>("current");
   const [shelfSearchMode, setShelfSearchMode] = useState<"metadata" | "body">("metadata");
   const readerPriorityBusyRef = useRef(false);
@@ -1144,12 +1231,25 @@ export default function App() {
   // are deliberately derived, never independently writable booleans.
   const menuOpen = foreground.kind === "panel" && foreground.panel === "menu";
   const fontSettingsOpen = foreground.kind === "panel" && foreground.panel === "menu" && foreground.view === "fonts";
+  const displaySettingsOpen = foreground.kind === "panel" && foreground.panel === "menu" && foreground.view === "extras";
   const tocOpen = foreground.kind === "panel" && foreground.panel === "toc";
   const bookmarkMenuOpen = foreground.kind === "panel" && foreground.panel === "bookmarks";
   const searchOpen = foreground.kind === "panel" && foreground.panel === "search";
   const notesOpen = foreground.kind === "panel" && foreground.panel === "notes";
   const logOpen = foreground.kind === "panel" && foreground.panel === "log";
   const assistantOpen = foreground.kind === "panel" && foreground.panel === "assistant";
+
+  useEffect(() => {
+    if (!displaySettingsOpen) setVisualCompareOriginal(false);
+  }, [displaySettingsOpen]);
+
+  useEffect(() => {
+    setVisualCompareOriginal(false);
+  }, [book]);
+
+  useEffect(() => {
+    if (imageRequest === null) setVisualCompareOriginal(false);
+  }, [imageRequest]);
   const selectionContext = foreground.kind === "transient" && foreground.transient === "selection"
     ? foreground.payload
     : null;
@@ -1399,7 +1499,12 @@ export default function App() {
     setSearchError(undefined);
     setSearchNavigationBusy(false);
     if (view !== "reader" || !book || !server || book.fixedLayout) return;
-    const session = createSearchSession(book, { resourceServer: server });
+    const session = createTextSearchSession(
+      book,
+      searchView,
+      searchView === "display" ? compiledTextProjection : null,
+      { resourceServer: server },
+    );
     searchSessionRef.current = session;
     return () => {
       searchAbortRef.current?.abort();
@@ -1408,7 +1513,7 @@ export default function App() {
       session.dispose();
       searchGenerationRef.current++;
     };
-  }, [view, book, server]);
+  }, [view, book, server, searchView, compiledTextProjection]);
 
   // 全库搜索属于应用级运行时：两个 UI 入口只订阅，不以面板生命周期
   // 启停任务。书架变化只更新候选，下次状态检查/续建会精确补齐。
@@ -1491,7 +1596,7 @@ export default function App() {
       searchAbortRef.current?.abort();
       searchAbortRef.current = null;
     };
-  }, [searchOpen, searchQuery, searchScope, book]);
+  }, [searchOpen, searchQuery, searchScope, book, searchView, compiledTextProjection]);
 
   const applyCount = useCallback(
     (generation: number, index: number, value: number, source: "estimated" | "measured"): boolean => {
@@ -4008,6 +4113,13 @@ export default function App() {
     const requestId = ++preciseRequestRef.current;
     const textHits = result.textHits ?? [];
     const occurrence = result.occurrence;
+    const displayTarget = result.display
+      ? {
+          projectionVersion: result.display.projectionVersion,
+          textHits: result.display.textHits,
+          occurrence: result.display.occurrence,
+        }
+      : undefined;
     if (
       sameChapterRoute({
         currentSpineIndex: spineIndex,
@@ -4023,6 +4135,7 @@ export default function App() {
           kind: "search",
           textHits,
           occurrence,
+          displayTarget,
           chapterPath: result.chapterPath,
         });
         if (status === "located" || status === "unsupported-highlight") {
@@ -4071,6 +4184,7 @@ export default function App() {
       chapterPath: result.chapterPath,
       textHits: textHits.length > 0 ? textHits : undefined,
       occurrence,
+      displayTarget,
     });
     setSpineIndex(result.spineIndex);
     setAnchor(undefined);
@@ -4282,7 +4396,7 @@ export default function App() {
         endTextOffset: draft.selection.endTextOffset,
         startTextSnippet: draft.selection.startTextSnippet,
         endTextSnippet: draft.selection.endTextSnippet,
-        selectedText: draft.selection.selectedText,
+        selectedText: draft.selection.originalSelectedText ?? draft.selection.selectedText,
         content: content.trim(),
         createdAtMs: now,
         updatedAtMs: now,
@@ -5494,7 +5608,7 @@ export default function App() {
     searchScope === "all"
       ? crossBookPanelResults
       : searchResults.map((result) => ({
-          id: `${result.spineIndex}:${result.originalRange.start}:${result.originalRange.end}:${result.matchType}`,
+          id: `${result.spineIndex}:${result.originalRange.start}:${result.originalRange.end}:${result.display?.range.start ?? -1}:${result.display?.range.end ?? -1}:${result.matchType}`,
           chapterTitle: result.chapterTitle,
           chapterPath: result.chapterPath,
           snippet: result.snippet,
@@ -6104,7 +6218,39 @@ export default function App() {
             {menuOpen && (
               <>
                 <div className="menu-backdrop" onClick={closeForeground} />
-                {fontSettingsOpen ? <FontSettingsPanel
+                {displaySettingsOpen ? (
+                  <div className="reader-display-settings" role="dialog" aria-label="字符与画面设置">
+                    <div className="reader-display-settings__head">
+                      <button
+                        type="button"
+                        className="reader-display-settings__back"
+                        onClick={() => setForeground((current) => setMenuSubview(current, "main"))}
+                      >
+                        返回
+                      </button>
+                      <strong>字符与画面</strong>
+                      <button type="button" className="reader-display-settings__close" onClick={closeForeground} aria-label="关闭设置">×</button>
+                    </div>
+                    <div className="reader-display-settings__body">
+                      <TextProjectionPanel
+                        preferences={textProjectionPreferences}
+                        onChange={updateTextProjectionPreferences}
+                      />
+                      <ReaderVisualSettingsPanel
+                        value={visualPreferences}
+                        onChange={updateVisualPreferences}
+                        compareOriginal={visualCompareOriginal}
+                        onCompareOriginalChange={setVisualCompareOriginal}
+                        colorAssistSlot={
+                          <ColorAssistPanel
+                            value={visualPreferences.colorAssist}
+                            onChange={(colorAssist) => updateVisualPreferences({ ...visualPreferences, colorAssist })}
+                          />
+                        }
+                      />
+                    </div>
+                  </div>
+                ) : fontSettingsOpen ? <FontSettingsPanel
                   source={settings.fontSource}
                   customFontId={settings.customFontId}
                   customFontName={settings.customFontName}
@@ -6135,6 +6281,7 @@ export default function App() {
                   onThemeChange={changeTheme}
                   customFontName={settings.customFontName}
                   onOpenFontSettings={() => setForeground((current) => setMenuSubview(current, "fonts"))}
+                  onOpenDisplaySettings={() => setForeground((current) => setMenuSubview(current, "extras"))}
                   lineHeight={settings.lineHeight}
                   onLineHeightChange={(v) =>
                     setSettings((s2) => {
@@ -6226,6 +6373,16 @@ export default function App() {
                         setSearchError(undefined);
                         if (scope === "all") void librarySearchRuntime.checkIndex();
                       }}
+                      searchView={searchScope === "all" ? "original" : searchView}
+                      onSearchViewChange={searchScope === "current" ? (view) => {
+                        searchAbortRef.current?.abort();
+                        searchAbortRef.current = null;
+                        searchGenerationRef.current++;
+                        setSearchView(view);
+                        setSearchResults([]);
+                        setSearchStatus("idle");
+                        setSearchError(undefined);
+                      } : undefined}
                       results={searchPanelResults}
                       status={searchScope === "all" ? librarySearchSnapshot.searchStatus : searchStatus}
                       processed={searchScope === "all" ? librarySearchSnapshot.indexSummary.indexed : searchProgress.processed}
@@ -6271,7 +6428,7 @@ export default function App() {
                           return;
                         }
                         const result = searchResults.find((candidate) =>
-                          `${candidate.spineIndex}:${candidate.originalRange.start}:${candidate.originalRange.end}:${candidate.matchType}` === panelResult.id
+                          `${candidate.spineIndex}:${candidate.originalRange.start}:${candidate.originalRange.end}:${candidate.display?.range.start ?? -1}:${candidate.display?.range.end ?? -1}:${candidate.matchType}` === panelResult.id
                         );
                         if (result) handleSearchNavigate(result);
                       }}
@@ -6317,6 +6474,10 @@ export default function App() {
                   anchor={anchor}
                   anchorNonce={anchorNonce}
                   settings={settings}
+                  textProjectionPreferences={readerTextProjectionPreferences}
+                  textProjection={compiledTextProjection}
+                  visualPreferences={visualPreferences}
+                  compareOriginal={visualCompareOriginal}
                   userFonts={renderUserFonts}
                   notes={currentChapterNotes}
                   onSelectionContextMenu={(payload) => {
@@ -6374,6 +6535,9 @@ export default function App() {
                 <ImageViewer
                   image={imageRequest}
                   onClose={closeImageOverlay}
+                  visualPreferences={visualPreferences}
+                  compareOriginal={visualCompareOriginal}
+                  onCompareOriginalChange={setVisualCompareOriginal}
                   onFollowLink={(image) => {
                     // 带链接的图片：交回既有安全路由与历史路径，不直接 window.location。
                     const href = image.linkHref;
@@ -6399,11 +6563,22 @@ export default function App() {
                 />
                 {selectionContext && (
                   <ReaderContextMenu
-                    selection={{ ...selectionContext, text: selectionContext.selectedText }}
+                    selection={{
+                      ...selectionContext,
+                      text: selectionContext.selectedText,
+                      originalText: selectionContext.originalSelectedText,
+                    }}
                     position={{ x: selectionContext.rect.right + 6, y: selectionContext.rect.bottom + 6 }}
                     onCopy={(text) => {
                       void navigator.clipboard.writeText(text).catch((error) =>
                         setRuntimeIssues((issues) => [...issues, `复制失败：${String(error)}`])
+                      );
+                      closeForeground();
+                      readerRef.current?.clearTextSelection();
+                    }}
+                    onCopyOriginal={(text) => {
+                      void navigator.clipboard.writeText(text).catch((error) =>
+                        setRuntimeIssues((issues) => [...issues, `复制原文失败：${String(error)}`])
                       );
                       closeForeground();
                       readerRef.current?.clearTextSelection();
@@ -6423,7 +6598,9 @@ export default function App() {
                     <div className="note-composer-backdrop" aria-hidden="true" />
                     <NoteComposer
                       mode={noteComposer.mode}
-                      selectedText={noteComposer.mode === "create" ? noteComposer.selection.selectedText : noteComposer.note.selectedText}
+                      selectedText={noteComposer.mode === "create"
+                        ? (noteComposer.selection.originalSelectedText ?? noteComposer.selection.selectedText)
+                        : noteComposer.note.selectedText}
                       initialContent={noteComposer.mode === "edit" ? noteComposer.note.content : undefined}
                       onSave={(content) => void handleSaveNote(content)}
                       onCancel={requestCloseForeground}

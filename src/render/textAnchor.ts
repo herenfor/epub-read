@@ -23,7 +23,13 @@ export interface TextRangeAnchorData {
 }
 
 export interface TextSelectionPayload extends TextRangeAnchorData {
+  /** Immediate display text; default copy uses this. */
   selectedText: string;
+  /**
+   * Canonical original quote for notes. It is absent only for legacy/identity
+   * hosts that cannot produce it.
+   */
+  originalSelectedText?: string;
   rect: { left: number; top: number; right: number; bottom: number };
 }
 
@@ -167,6 +173,22 @@ function isVisibleTextNode(
   return true;
 }
 
+const COPY_BLOCK_TAGS = new Set([
+  "address", "article", "aside", "blockquote", "body", "caption", "dd", "div", "dl",
+  "dt", "figcaption", "figure", "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6",
+  "header", "hr", "li", "main", "nav", "ol", "p", "pre", "section", "table", "tbody",
+  "td", "tfoot", "th", "thead", "tr", "ul",
+]);
+
+function nearestCopyBlock(node: Node): Element | null {
+  let current = node.parentElement;
+  while (current) {
+    if (COPY_BLOCK_TAGS.has(current.tagName.toLowerCase())) return current;
+    current = current.parentElement;
+  }
+  return null;
+}
+
 export class VisibleTextIndex {
   readonly text: string;
   readonly codePoints: string[];
@@ -284,7 +306,11 @@ export class VisibleTextIndex {
     }
   }
 
-  /** Original text for a canonical range; useful for explicit "copy original". */
+  /**
+   * Original raw text for a canonical range. Canonical offsets stay
+   * whitespace-free; this method walks only intersecting source nodes and
+   * slices their original strings, preserving internal spaces/newlines.
+   */
   originalTextForOffsets(start: number, end: number): string | null {
     if (
       !validOffset(start) ||
@@ -294,7 +320,27 @@ export class VisibleTextIndex {
     ) {
       return null;
     }
-    return this.codePoints.slice(start, end).join("");
+    const pieces: string[] = [];
+    let previousBlock: Element | null = null;
+    let hasPiece = false;
+    for (const item of this.nodes) {
+      if (item.end <= start || item.start >= end) continue;
+      const localStart = Math.max(0, start - item.start);
+      const localEnd = Math.min(item.end - item.start, end - item.start);
+      if (localEnd <= localStart) continue;
+      const rawStart = item.rawStarts[localStart];
+      const rawEnd = item.rawEnds[localEnd - 1];
+      if (rawStart === undefined || rawEnd === undefined || rawEnd < rawStart) continue;
+      const source = item.projection?.original ?? item.node.data;
+      const text = source.slice(Math.max(0, rawStart), Math.min(source.length, rawEnd));
+      if (!text) continue;
+      const block = nearestCopyBlock(item.node);
+      if (hasPiece && block !== previousBlock) pieces.push("\n");
+      pieces.push(text);
+      previousBlock = block;
+      hasPiece = true;
+    }
+    return hasPiece ? pieces.join("") : null;
   }
 
   snippetAt(offset: number): string | null {
@@ -439,6 +485,7 @@ export function captureTextSelection(
   if (!rect) return null;
   return {
     selectedText,
+    originalSelectedText: index.originalTextForOffsets(start, end) ?? undefined,
     startTextOffset: start,
     endTextOffset: end,
     startTextSnippet: index.snippetAt(start),

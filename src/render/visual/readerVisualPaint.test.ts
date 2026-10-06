@@ -19,7 +19,7 @@ import {
   saveVisualPreferences,
   type ReaderVisualPreferences,
 } from "./readerVisualPreferences";
-import { ReaderVisualSettingsPanel } from "../../ui/visual/ReaderVisualSettingsPanel";
+import { isVisualCompareKey, ReaderVisualSettingsPanel } from "../../ui/visual/ReaderVisualSettingsPanel";
 
 function setup() {
   const { document } = parseHTML("<!doctype html><html><body><div id='host'><div id='surface'></div></div></body></html>");
@@ -161,6 +161,12 @@ describe("reader visual paint", () => {
     expect(html).toContain('id="fx2-preview"');
     expect(html).toContain("临时查看原画面");
     expect(html).toContain('aria-pressed="true"');
+  });
+  it("V1 only treats Space/Enter as temporary original keys", () => {
+    expect(isVisualCompareKey(" ")).toBe(true);
+    expect(isVisualCompareKey("Enter")).toBe(true);
+    expect(isVisualCompareKey("Tab")).toBe(false);
+    expect(isVisualCompareKey("Escape")).toBe(false);
   });
   it("shares one viewport filter id and black overlay across visible surfaces", () => {
     const { document, host, surface } = setup();

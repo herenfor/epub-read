@@ -14,7 +14,9 @@ const loaders: Record<Exclude<TextProjectionMode, "original">, DictionaryLoader>
   traditional: () => import("./data/s2t").then((module) => module.default),
 };
 
-const cachedStages = new Map<TextProjectionMode, Stage>();
+type StagePromise = Promise<Stage>;
+
+const stagePromises = new Map<Exclude<TextProjectionMode, "original">, StagePromise>();
 
 /** Parse generated OpenCC rows. Later duplicate keys are ignored, matching phrase-first data order. */
 export function parseOpenCCDictionary(data: string): Replacement[] {
@@ -38,16 +40,18 @@ export function parseOpenCCDictionary(data: string): Replacement[] {
  * actually enables a preset conversion.
  */
 export function loadOpenCCStage(mode: Exclude<TextProjectionMode, "original">): Promise<Stage> {
-  const cached = cachedStages.get(mode);
-  if (cached) return Promise.resolve(cached);
-  const promise = loaders[mode]().then((data) => {
-    const stage = compileReplacementStage(parseOpenCCDictionary(data));
-    cachedStages.set(mode, stage);
-    return stage;
+  const cached = stagePromises.get(mode);
+  if (cached) return cached;
+  const pending = loaders[mode]().then((data) =>
+    compileReplacementStage(parseOpenCCDictionary(data))
+  );
+  stagePromises.set(mode, pending);
+  void pending.catch(() => {
+    if (stagePromises.get(mode) === pending) stagePromises.delete(mode);
   });
-  return promise;
+  return pending;
 }
 
 export function clearOpenCCStageCacheForTests(): void {
-  cachedStages.clear();
+  stagePromises.clear();
 }

@@ -3,6 +3,8 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 
 export interface ReaderSelectionPayload {
   text: string;
+  /** Optional canonical original quote for the explicit "copy original" action. */
+  originalText?: string;
   /** Optional caller-owned anchor information; the menu does not interpret it. */
   start?: number;
   end?: number;
@@ -61,6 +63,7 @@ export interface ReaderContextMenuProps {
   position: ContextMenuPoint;
   /** Coordinates are viewport-relative; the component itself is position: fixed. */
   onCopy?(text: string): void;
+  onCopyOriginal?(text: string): void;
   onAddNote(selection: ReaderSelectionPayload): void;
   onClose(): void;
 }
@@ -125,6 +128,12 @@ export function ReaderContextMenu(props: ReaderContextMenuProps) {
       onPointerDown={handlePointerDown}
     >
       <button type="button" role="menuitem" onClick={copy}>复制</button>
+      {props.onCopyOriginal && (
+        <button type="button" role="menuitem" onClick={() => {
+          if (selection.originalText) props.onCopyOriginal?.(selection.originalText);
+          props.onClose();
+        }}>复制原文</button>
+      )}
       <button type="button" role="menuitem" onClick={() => { props.onClose(); props.onAddNote(selection); }}>添加笔记</button>
     </div>
   );

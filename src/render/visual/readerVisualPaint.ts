@@ -162,6 +162,9 @@ export function readerVisualFilterNodes(
 interface SurfaceRegistration {
   surface: HTMLElement;
   originalFilter: string;
+  originalBackground: string;
+  /** Same paper color as the visible reader background, applied only while filters are active. */
+  background: string | null;
 }
 
 interface PaintGroup {
@@ -194,6 +197,7 @@ function createPaintGroup(
   surface: HTMLElement,
   overlayHost: HTMLElement,
   initial: ReaderVisualPreferences,
+  background: string | null,
 ): PaintGroup {
   const document = overlayHost.ownerDocument ?? surface.ownerDocument;
   if (!document) throw new Error("reader visual paint surface is not in a document");
@@ -237,7 +241,12 @@ function createPaintGroup(
     filter,
     overlay,
     filterId,
-    surfaces: [{ surface, originalFilter: surface.style.filter }],
+    surfaces: [{
+      surface,
+      originalFilter: surface.style.filter,
+      originalBackground: surface.style.backgroundColor,
+      background,
+    }],
     preferences: initial,
     compareOriginal: false,
     scheduled: false,
@@ -251,16 +260,22 @@ function acquirePaintGroup(
   surface: HTMLElement,
   overlayHost: HTMLElement,
   initial: ReaderVisualPreferences,
+  background: string | null,
 ): PaintGroup {
   const existing = paintGroups.get(overlayHost);
-  if (!existing) return createPaintGroup(surface, overlayHost, initial);
+  if (!existing) return createPaintGroup(surface, overlayHost, initial, background);
   if (surface.ownerDocument && surface.ownerDocument !== existing.document) {
     throw new Error("reader visual paint surface and overlay host must share one document");
   }
   if (existing.surfaces.some((registration) => registration.surface === surface)) {
     throw new Error("reader visual paint surface is already attached to this viewport");
   }
-  existing.surfaces.push({ surface, originalFilter: surface.style.filter });
+  existing.surfaces.push({
+    surface,
+    originalFilter: surface.style.filter,
+    originalBackground: surface.style.backgroundColor,
+    background,
+  });
   return existing;
 }
 
@@ -297,6 +312,11 @@ function applyGroupPreferences(group: PaintGroup, preferences: ReaderVisualPrefe
   }
   for (const registration of group.surfaces) {
     registration.surface.style.filter = filterValue;
+    if (active && registration.background) {
+      registration.surface.style.backgroundColor = registration.background;
+    } else if (registration.surface.style.backgroundColor !== registration.originalBackground) {
+      registration.surface.style.backgroundColor = registration.originalBackground;
+    }
   }
 
   const dim = active ? preferences.dim : 0;
@@ -354,8 +374,9 @@ export function attachReaderPaint(
   surface: HTMLElement,
   overlayHost: HTMLElement,
   initial: ReaderVisualPreferences,
+  surfaceBackground: string | null = null,
 ): ReaderPaintHandle {
-  const group = acquirePaintGroup(surface, overlayHost, initial);
+  const group = acquirePaintGroup(surface, overlayHost, initial, surfaceBackground);
   applyGroupPreferences(group, group.preferences, group.compareOriginal);
   let disposed = false;
 
@@ -371,7 +392,10 @@ export function attachReaderPaint(
       disposed = true;
       const registration = group.surfaces.find((candidate) => candidate.surface === surface);
       group.surfaces = group.surfaces.filter((candidate) => candidate.surface !== surface);
-      if (registration) surface.style.filter = registration.originalFilter;
+      if (registration) {
+        surface.style.filter = registration.originalFilter;
+        surface.style.backgroundColor = registration.originalBackground;
+      }
       if (group.surfaces.length === 0) removePaintGroup(group);
     },
   };

@@ -1,10 +1,14 @@
-import { useState, type ChangeEvent, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import {
   resetVisualFilterPreferences,
   type ReaderVisualPreferences,
 } from "../../render/visual/readerVisualPreferences";
 import { RotateCcwIcon } from "../readerIcons";
 import "./readerVisualSettingsPanel.css";
+
+export function isVisualCompareKey(key: string): boolean {
+  return key === " " || key === "Enter";
+}
 
 export interface ReaderVisualSettingsPanelProps {
   /** Controlled, already-normalized device-local preferences. */
@@ -52,11 +56,21 @@ export function ReaderVisualSettingsPanel(props: ReaderVisualSettingsPanelProps)
     props.onCompareOriginalChange?.(next);
     if (props.compareOriginal === undefined) setInternalCompareOriginal(next);
   };
+  const setCompareOriginalRef = useRef(setCompareOriginal);
+  setCompareOriginalRef.current = setCompareOriginal;
+  useEffect(() => {
+    return () => {
+      setCompareOriginalRef.current(false);
+    };
+  }, []);
+  const isCompareKey = (event: KeyboardEvent<HTMLButtonElement>): boolean =>
+    isVisualCompareKey(event.key);
   const commit = (patch: Partial<ReaderVisualPreferences>): void => {
     props.onChange({ ...props.value, ...patch });
   };
   const beginCompare = (event: PointerEvent<HTMLButtonElement> | KeyboardEvent<HTMLButtonElement>): void => {
     if ("repeat" in event && event.repeat) return;
+    if (!("pointerType" in event) && !isCompareKey(event)) return;
     event.preventDefault();
     setCompareOriginal(true);
   };
@@ -146,6 +160,7 @@ export function ReaderVisualSettingsPanel(props: ReaderVisualSettingsPanelProps)
           onPointerLeave={endCompare}
           onKeyDown={beginCompare}
           onKeyUp={endCompare}
+          onBlur={endCompare}
         >
           临时查看原画面
         </button>
