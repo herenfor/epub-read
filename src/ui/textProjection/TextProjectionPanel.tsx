@@ -44,7 +44,11 @@ export function TextProjectionPanel(props: TextProjectionPanelProps) {
   const [previewSource, setPreviewSource] = useState("阅读器的里外：後面");
   const [previewDisplay, setPreviewDisplay] = useState(previewSource);
   const [previewBusy, setPreviewBusy] = useState(false);
-  const duplicates = useMemo(() => duplicateRuleIds(props.preferences.rules), [props.preferences.rules]);
+  // Unfinished drafts (empty from) are not real duplicates.
+  const duplicates = useMemo(
+    () => duplicateRuleIds(props.preferences.rules.filter((rule) => rule.from.trim().length > 0)),
+    [props.preferences.rules],
+  );
 
   useEffect(() => {
     let current = true;
