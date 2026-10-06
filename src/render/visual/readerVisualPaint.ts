@@ -278,7 +278,9 @@ function createPaintGroup(
 
 function applySurfaceState(group: PaintGroup, registration: SurfaceRegistration): void {
   const active = group.filterSignature !== null && group.filterSignature !== "";
-  registration.surface.style.filter = active ? `url("#${group.filterId}")` : "none";
+  registration.surface.style.filter = group.filter.firstChild
+    ? `url("#${group.filterId}")`
+    : "none";
   if (active && registration.background) {
     registration.surface.style.backgroundColor = registration.background;
   } else {

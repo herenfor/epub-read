@@ -106,6 +106,7 @@ describe("VisibleTextIndex with a T-1 display projection", () => {
     const em = chapter("<p>Hello <em>world</em></p>");
     const emIndex = buildVisibleTextIndex(em.document, em.viewer);
     expect(emIndex.originalTextForOffsets(0, emIndex.totalChars)).toBe("Hello world");
+    expect(emIndex.originalTextForOffsets(3, 6)).toBe("lo w");
 
     const spans = chapter("<p><span>Hello</span> <span>world</span></p>");
     const spanIndex = buildVisibleTextIndex(spans.document, spans.viewer);

@@ -188,6 +188,19 @@ describe("reader visual paint", () => {
     second.dispose();
     handle.dispose();
   });
+  it("I2 leaves new surfaces unfiltered when only dimming is enabled", () => {
+    const { document, host, surface } = setup();
+    const snapshot = preferences({ enabled: true, dim: 0.2 });
+    const first = attachReaderPaint(surface, host, snapshot, "white");
+    const newSurface = document.createElement("div");
+    const second = attachReaderPaint(newSurface, host, snapshot, "white");
+    expect(surface.style.filter).toBe("none");
+    expect(newSurface.style.filter).toBe("none");
+    expect(newSurface.style.backgroundColor).toBe(surface.style.backgroundColor);
+    second.dispose();
+    first.dispose();
+  });
+
   it("shares one viewport filter id and black overlay across visible surfaces", () => {
     const { document, host, surface } = setup();
     const secondSurface = document.createElement("div");
