@@ -124,6 +124,34 @@ export class ResourceServer {
     return text;
   }
 
+  /**
+   * 异步读取单个正文资源：按需解压该 XHTML 后解码。只持有这一个路径（不像
+   * acquireChapter 那样加载图片/字体/CSS）；空串是合法空章，不当成失败。
+   * 未就绪/读取失败抛错，调用方不能把它当作“没有正文”缓存。
+   */
+  async readTextFor(path: string, signal?: AbortSignal): Promise<string> {
+    const checkAbort = () => {
+      if (signal?.aborted) throw new DOMException("操作已取消", "AbortError");
+    };
+    checkAbort();
+    const book = this.book;
+    if (!book) throw new ArchiveClosedError();
+    if (!book.resources.has(path)) throw new Error("章节正文资源不存在");
+    const holderId = this.nextHolderId++;
+    this.heldDependencies.set(holderId, []);
+    this.pinPaths(holderId, [path]);
+    try {
+      await this.ensureResources([path]);
+      checkAbort();
+      // ensureResources 已验证会话；解码期间 holder 防止并发预算回收该资源。
+      const text = this.textFor(path);
+      if (text === undefined) throw new Error("章节正文读取失败");
+      return text;
+    } finally {
+      this.releaseHolder(holderId);
+    }
+  }
+
   /** 按需确保指定资源已解压加载。会话关闭后以统一关闭错误结束。 */
   async ensureResources(paths: Iterable<string>): Promise<void> {
     const book = this.book;

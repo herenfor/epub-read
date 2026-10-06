@@ -158,6 +158,11 @@ interface ReaderViewProps {
   onNavigationUnresolved?(reported: boolean): void;
   /** 连续宿主发生真实用户位移；程序化定位/重排不触发。 */
   onUserReadingPositionChange?(): void;
+  /**
+   * 首次恢复结果（活动槽、本次加载一次）：located=false 表示保存的正文目标
+   * 未能解析，页面可能停在章首，宿主不能把它当作新位置保存。
+   */
+  onRestoreResult?(result: { chapterPath: string; located: boolean }): void;
   /** 外部链接（http/https/mailto/tel）交给系统默认浏览器/应用打开 */
   onExternalLink(url: string): void;
   /** 脚注弹层（文本/HTML/固定状态 + 标记在阅读区坐标系的矩形） */
@@ -574,6 +579,17 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   const onExternalLinkRef = useRef(props.onExternalLink);
   const onPreciseNavigationStatusRef = useRef(props.onPreciseNavigationStatus);
   const onImageActivationRef = useRef(props.onImageActivation);
+  const onRestoreResultRef = useRef(props.onRestoreResult);
+  const onUserReadingPositionChangeRef = useRef(props.onUserReadingPositionChange);
+  /**
+   * 真实用户翻页输入（按键/滚轮/按钮/滑动手势）后的有效期；期间活动槽落到
+   * 新的已提交位置才算“用户提交了新位置”。重排、图片补偿等没有输入不算。
+   */
+  const userTurnArmedUntilRef = useRef(0);
+  const lastCommittedPositionRef = useRef<string | null>(null);
+  const armUserTurn = (): void => {
+    userTurnArmedUntilRef.current = performance.now() + 3000;
+  };
   // 图片浮层打开时，分页器对按键/滚轮的回调被短路，触摸翻页也由下面的
   // overlay-active 样式屏蔽；关闭后不需要重新接线。
   const inputPausedRef = useRef(props.inputPaused === true);
@@ -592,6 +608,8 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   onExternalLinkRef.current = props.onExternalLink;
   onPreciseNavigationStatusRef.current = props.onPreciseNavigationStatus;
   onImageActivationRef.current = props.onImageActivation;
+  onRestoreResultRef.current = props.onRestoreResult;
+  onUserReadingPositionChangeRef.current = props.onUserReadingPositionChange;
   inputPausedRef.current = props.inputPaused === true;
   preloadAllowedRef.current =
     settings.preloadNextChapter === true &&
@@ -678,6 +696,15 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
           lastReadyEmptyRef.current = false;
         } else {
           lastReadyEmptyRef.current = state.empty;
+        }
+        if (state.status === "ready" && state.transient !== true) {
+          const position = `${slot.path ?? ""}#${state.currentPage}`;
+          const previous = lastCommittedPositionRef.current;
+          lastCommittedPositionRef.current = position;
+          if (previous !== null && previous !== position && performance.now() < userTurnArmedUntilRef.current) {
+            userTurnArmedUntilRef.current = 0;
+            onUserReadingPositionChangeRef.current?.();
+          }
         }
         onPageStateRef.current(state);
         if (state.status !== "ready" || !state.empty || autoAdvanceRef.current) return;
@@ -783,7 +810,9 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         // 原生滚动接手前先落定进行中的 JS 翻页动画，吸附点按已提交页计算。
         // 运动层模式下按下不改任何东西：横向意图成立才接手，轻点不撤回旧命令。
         onGestureStart: () => {
-          if (isActiveSlot(slot) && !slot.paginator?.pageMotionAvailable) slideAnimRef.current?.finish();
+          if (!isActiveSlot(slot)) return;
+          armUserTurn();
+          if (!slot.paginator?.pageMotionAvailable) slideAnimRef.current?.finish();
         },
       },
       props.onPlainTap
@@ -803,6 +832,10 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     paginator.setNativeSnapPaging?.(nativeSnapWantedRef.current);
     paginator.setPageMotionChapterHandler?.((direction) => {
       if (isActiveSlot(slot)) turnPageRef.current(direction, "ui");
+    });
+    paginator.setRestoreResultHandler?.((located) => {
+      // 预加载槽不得向活动会话提交恢复结果。
+      if (isActiveSlot(slot) && slot.path) onRestoreResultRef.current?.({ chapterPath: slot.path, located });
     });
     return paginator;
   };
@@ -1498,6 +1531,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         startAtEnd,
         readingAnchor: props.initialAnchor,
         fallbackPage: preciseTarget ? null : (props.initialPage ?? null),
+        reportRestore: !book.fixedLayout && !preciseTarget,
         preciseNavigation: preciseTarget
           ? {
               requestId: preciseTarget.requestId,
@@ -1657,6 +1691,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     // 页数未知时不执行，但保留最后一个方向；display-ready 后最多消费一次。
     const immediate = turnIntentRef.current.request(dir);
     if (immediate === null) return;
+    armUserTurn();
     if (latestRenderSettingsRef.current.readingMode === "scroll") {
       // 滚动模式：命令含义是移动视口约 0.9 屏；只有真实边界才换章。
       // 不用虚拟 currentPage 判断章尾，也不把惯性滚动变成连续切章。
@@ -1857,7 +1892,10 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       onNext: () => turnPageRef.current(1, "ui"),
       onPrev: () => turnPageRef.current(-1, "ui"),
       onPreview: (dx) => updateSwipePreviewRef.current(dx),
-      onGestureStart: () => paginatorRef.current?.prepareMotion(true),
+      onGestureStart: () => {
+        armUserTurn();
+        paginatorRef.current?.prepareMotion(true);
+      },
       onGestureEnd: () => paginatorRef.current?.endMotionContact(),
       shouldIgnore: () => inputPausedRef.current || activeSlotRef.current?.state.status !== "ready" ||
         Boolean(activeIframeRef.current?.contentWindow?.getSelection()?.toString()),
