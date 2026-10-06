@@ -1016,10 +1016,12 @@ export default function App() {
   const [searchError, setSearchError] = useState<string | undefined>(undefined);
   const [searchNavigationBusy, setSearchNavigationBusy] = useState(false);
 
+  // The panel keeps draft rules (a new rule starts with empty from/to); only the
+  // stored copy and the reader snapshot are sanitized, so drafts are not dropped
+  // while the user is still typing.
   const updateTextProjectionPreferences = useCallback((next: TextProjectionPreferences): void => {
-    const sanitized = sanitizeTextProjectionPreferences(next);
-    setTextProjectionPreferences(sanitized);
-    saveTextProjectionPreferences(sanitized);
+    setTextProjectionPreferences(next);
+    saveTextProjectionPreferences(sanitizeTextProjectionPreferences(next));
   }, []);
 
   const updateVisualPreferences = useCallback((next: ReaderVisualPreferences): void => {
@@ -1035,7 +1037,11 @@ export default function App() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      setReaderTextProjectionPreferences(textProjectionPreferences);
+      const next = sanitizeTextProjectionPreferences(textProjectionPreferences);
+      // Draft-only edits leave the effective projection unchanged: keep the old
+      // snapshot so the reader does not re-project the chapter.
+      setReaderTextProjectionPreferences((previous) =>
+        textProjectionVersion(previous) === textProjectionVersion(next) ? previous : next);
     }, 300);
     return () => window.clearTimeout(timer);
   }, [textProjectionPreferences]);
