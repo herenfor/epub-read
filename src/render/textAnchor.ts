@@ -3,6 +3,8 @@
  * module only observes the chapter DOM and maps normalized text positions to
  * text nodes; it never writes DOM/style values or changes layout.
  */
+import type { NodeProjection } from "./textProjection/nodeProjection";
+
 
 export const MAX_ANCHOR_SNIPPET_CODE_POINTS = 32;
 export const MAX_ANCHOR_TEXT_OFFSET = Number.MAX_SAFE_INTEGER;
@@ -31,6 +33,11 @@ export interface TextNodePosition {
   rawOffset: number;
 }
 
+/** Read-only projection source supplied by the owning document session. */
+export interface TextNodeProjectionSource {
+  projectionForNode(node: Text): NodeProjection | undefined;
+}
+
 interface IndexedTextNode {
   node: Text;
   start: number;
@@ -39,6 +46,8 @@ interface IndexedTextNode {
   rawStarts: number[];
   rawEnds: number[];
   rawEnd: number;
+  /** Present only when the DOM node currently carries a projected display string. */
+  projection?: NodeProjection;
 }
 
 const WHITESPACE = /\p{White_Space}/u;
@@ -192,10 +201,7 @@ export class VisibleTextIndex {
     return -1;
   }
 
-  offsetForNode(node: Node, rawOffset: number): number | null {
-    if (node.nodeType !== 3) return null;
-    const item = this.nodeMap.get(node as Text);
-    if (!item || !Number.isFinite(rawOffset)) return null;
+  private offsetForOriginalRaw(item: IndexedTextNode, rawOffset: number): number {
     const raw = Math.max(0, Math.min(item.rawEnd, Math.floor(rawOffset)));
     for (let i = 0; i < item.rawStarts.length; i++) {
       // A defensive caller could hand us an offset in the middle of a
@@ -206,19 +212,38 @@ export class VisibleTextIndex {
     return item.end;
   }
 
-  positionForOffset(offset: number): TextNodePosition | null {
+  offsetForNode(node: Node, rawOffset: number, bias: "start" | "end" = "start"): number | null {
+    if (node.nodeType !== 3) return null;
+    const item = this.nodeMap.get(node as Text);
+    if (!item || !Number.isFinite(rawOffset)) return null;
+    const sourceRaw = item.projection
+      ? item.projection.toSource(rawOffset, bias)
+      : rawOffset;
+    return this.offsetForOriginalRaw(item, sourceRaw);
+  }
+
+  positionForOffset(offset: number, bias: "start" | "end" = "start"): TextNodePosition | null {
     if (!validOffset(offset) || offset > this.totalChars || this.nodes.length === 0) return null;
     const item = this.nodes.find((candidate) => offset >= candidate.start && offset < candidate.end)
       ?? (offset === this.totalChars ? this.nodes.at(-1) : undefined);
     if (!item) return null;
-    if (offset === item.end) return { node: item.node, rawOffset: item.rawEnd };
-    return { node: item.node, rawOffset: item.rawStarts[offset - item.start] ?? item.rawEnd };
+    const local = offset - item.start;
+    const sourceRaw = offset === item.end
+      ? item.rawEnd
+      : item.rawStarts[local] ?? item.rawEnd;
+    const rawOffset = item.projection ? item.projection.toDisplay(sourceRaw, bias) : sourceRaw;
+    return { node: item.node, rawOffset };
   }
 
   /** Convert any Range boundary (text node or element node) to our normalized offset. */
-  offsetForBoundary(doc: Document, node: Node, rawOffset: number): number | null {
+  offsetForBoundary(
+    doc: Document,
+    node: Node,
+    rawOffset: number,
+    bias: "start" | "end" = "start",
+  ): number | null {
     if (!validOffset(rawOffset) || !this.nodes.length) return null;
-    if (node.nodeType === 3) return this.offsetForNode(node, rawOffset);
+    if (node.nodeType === 3) return this.offsetForNode(node, rawOffset, bias);
     if (!Number.isSafeInteger(rawOffset) || rawOffset < 0) return null;
     try {
       const boundary = doc.createRange();
@@ -227,7 +252,8 @@ export class VisibleTextIndex {
       let normalizedOffset = 0;
       for (const item of this.nodes) {
         const itemEnd = doc.createRange();
-        itemEnd.setStart(item.node, item.rawEnd);
+        // The comparison is against the live DOM, which may be projected.
+        itemEnd.setStart(item.node, item.projection ? item.node.data.length : item.rawEnd);
         itemEnd.collapse(true);
         const startToStart = doc.defaultView?.Range.START_TO_START ?? 0;
         if (itemEnd.compareBoundaryPoints(startToStart, boundary) <= 0) {
@@ -245,8 +271,8 @@ export class VisibleTextIndex {
   /** Build a DOM Range from normalized offsets without inserting marker nodes. */
   rangeForOffsets(doc: Document, start: number, end: number): Range | null {
     if (!validOffset(start) || !validOffset(end) || end <= start || end > this.totalChars) return null;
-    const from = this.positionForOffset(start);
-    const to = this.positionForOffset(end);
+    const from = this.positionForOffset(start, "start");
+    const to = this.positionForOffset(end, "end");
     if (!from || !to) return null;
     try {
       const range = doc.createRange();
@@ -256,6 +282,19 @@ export class VisibleTextIndex {
     } catch {
       return null;
     }
+  }
+
+  /** Original text for a canonical range; useful for explicit "copy original". */
+  originalTextForOffsets(start: number, end: number): string | null {
+    if (
+      !validOffset(start) ||
+      !validOffset(end) ||
+      end <= start ||
+      end > this.totalChars
+    ) {
+      return null;
+    }
+    return this.codePoints.slice(start, end).join("");
   }
 
   snippetAt(offset: number): string | null {
@@ -387,8 +426,8 @@ export function captureTextSelection(
       return null;
     }
   }
-  const start = index.offsetForBoundary(doc, range.startContainer, range.startOffset);
-  const end = index.offsetForBoundary(doc, range.endContainer, range.endOffset);
+  const start = index.offsetForBoundary(doc, range.startContainer, range.startOffset, "start");
+  const end = index.offsetForBoundary(doc, range.endContainer, range.endOffset, "end");
   if (start === null || end === null || end <= start) return null;
   const selectedText = range.toString();
   if (
@@ -408,23 +447,42 @@ export function captureTextSelection(
   };
 }
 
-/** Build once per valid current chapter document; callers own invalidation. */
-export function buildVisibleTextIndex(doc: Document, viewer: HTMLElement): VisibleTextIndex {
+/** Visible text nodes in the same walker/exclusion order used by the anchor index. */
+export function collectVisibleTextNodes(doc: Document, viewer: HTMLElement): Text[] {
   // SHOW_TEXT is 4. Referencing the numeric DOM constant keeps this helper
   // usable in minimal DOM test implementations that do not expose NodeFilter.
   const walker = doc.createTreeWalker(viewer, 4);
-  const nodes: IndexedTextNode[] = [];
-  const pieces: string[] = [];
+  const nodes: Text[] = [];
   const hiddenCache = new WeakMap<Element, boolean>();
-  let normalizedOffset = 0;
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
     const text = node as Text;
     if (!isVisibleTextNode(text, doc, hiddenCache)) continue;
+    if (normalizeAnchorText(text.data) === "") continue;
+    nodes.push(text);
+  }
+  return nodes;
+}
+
+/** Build once per valid current chapter document; callers own invalidation. */
+export function buildVisibleTextIndex(
+  doc: Document,
+  viewer: HTMLElement,
+  projectionSource?: TextNodeProjectionSource | null,
+): VisibleTextIndex {
+  const textNodes = collectVisibleTextNodes(doc, viewer);
+  const nodes: IndexedTextNode[] = [];
+  const pieces: string[] = [];
+  let normalizedOffset = 0;
+  for (const text of textNodes) {
+    const projection = projectionSource?.projectionForNode(text);
+    // The live DOM may already be display text. `projection.original` is the
+    // immutable source snapshot for mapping; otherwise identity is the source.
+    const sourceText = projection?.original ?? text.data;
     const rawStarts: number[] = [];
     const rawEnds: number[] = [];
     let rawOffset = 0;
     let normalized = "";
-    for (const codePoint of Array.from(text.data)) {
+    for (const codePoint of Array.from(sourceText)) {
       if (!isWhitespace(codePoint)) {
         rawStarts.push(rawOffset);
         rawEnds.push(rawOffset + codePoint.length);
@@ -439,7 +497,8 @@ export function buildVisibleTextIndex(doc: Document, viewer: HTMLElement): Visib
       end: normalizedOffset + rawStarts.length,
       rawStarts,
       rawEnds,
-      rawEnd: text.data.length,
+      rawEnd: sourceText.length,
+      projection,
     });
     normalizedOffset += rawStarts.length;
     pieces.push(normalized);
