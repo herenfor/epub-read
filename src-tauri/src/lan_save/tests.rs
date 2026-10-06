@@ -781,7 +781,8 @@ fn lan_v1_pairing_is_rejected_with_clear_protocol_mismatch() {
     pairing.version = 1;
     let error = LanPairing::parse(&pairing.encode().unwrap()).unwrap_err();
     assert_eq!(error.code, "protocol-mismatch");
-    assert!(error.message.contains("更新到支持同一互传协议"));
+    assert!(error.message.contains("不支持该旧互传协议"));
+    assert!(error.message.contains("存档文件方式"));
 }
 
 #[test]

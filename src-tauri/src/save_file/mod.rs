@@ -7,6 +7,7 @@
 
 mod archive;
 pub(crate) mod commands;
+pub(crate) mod version_policy;
 
 pub use commands::SaveFileManager;
 

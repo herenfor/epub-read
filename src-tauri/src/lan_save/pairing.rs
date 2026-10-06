@@ -1,5 +1,6 @@
 use super::error::LanSaveError;
 use crate::portable_state::valid_canonical_uuid;
+use crate::save_file::version_policy::{select_lan_version, VersionError};
 use serde::{Deserialize, Serialize};
 use std::net::{Ipv4Addr, UdpSocket};
 
@@ -13,6 +14,13 @@ pub(crate) struct LanEndpoint {
     pub port: u16,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LanPairingVersionProbe {
+    protocol: String,
+    version: u32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct LanPairing {
@@ -22,6 +30,18 @@ pub(crate) struct LanPairing {
     pub endpoint: LanEndpoint,
     pub certificate_sha256: String,
     pub token: String,
+}
+
+fn map_lan_version_error(error: VersionError) -> LanSaveError {
+    match error {
+        VersionError::NeedsNewerApp => {
+            LanSaveError::new("protocol-mismatch", "此连接信息需要较新版本，请升级")
+        }
+        VersionError::UnsupportedFormat => LanSaveError::new(
+            "protocol-mismatch",
+            "本版本不支持该旧互传协议，可使用双方支持的存档文件方式",
+        ),
+    }
 }
 
 impl LanPairing {
@@ -49,6 +69,25 @@ impl LanPairing {
         if raw.len() > PAIRING_MAX_BYTES {
             return Err(LanSaveError::invalid_request("连接信息超过 4KiB 上限"));
         }
+
+        // The QR protocol header is intentionally decoded before the strict
+        // deny_unknown_fields DTO so a future field cannot hide the upgrade
+        // reason. This probe is not a validated payload.
+        let probe: LanPairingVersionProbe = serde_json::from_str(raw).map_err(|error| {
+            LanSaveError::invalid_request(format!("连接信息不是有效 JSON：{error}"))
+        })?;
+        if probe.protocol != PAIRING_PROTOCOL {
+            return Err(LanSaveError::invalid_request(
+                "连接协议不是 epub-reader-lan",
+            ));
+        }
+        match select_lan_version(probe.version) {
+            Ok(()) => {}
+            Err(error) => return Err(map_lan_version_error(error)),
+        }
+
+        // Only the selected v2 reader parses the complete payload strictly.
+        // Never feed v1/v0 into the v2 DTO just because fields happen to fit.
         let pairing: Self = serde_json::from_str(raw).map_err(|error| {
             LanSaveError::invalid_request(format!("连接信息不是有效 JSON：{error}"))
         })?;
@@ -157,5 +196,101 @@ pub(crate) fn route_source_hint_ipv4() -> Option<Ipv4Addr> {
         None
     } else {
         Some(ip)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    const UUID: &str = "00000000-0000-4000-8000-000000000001";
+    const HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    fn v2_json() -> String {
+        json!({
+            "protocol": PAIRING_PROTOCOL,
+            "version": 2,
+            "sessionId": UUID,
+            "endpoint": { "host": "10.0.0.1", "port": 47777 },
+            "certificateSha256": HASH,
+            "token": HASH
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn v2_pairing_still_parses_strictly() {
+        let pairing = LanPairing::parse(&v2_json()).expect("current pairing must parse");
+        assert_eq!(pairing.version, 2);
+        assert_eq!(pairing.session_id, UUID);
+
+        let with_unknown = json!({
+            "protocol": PAIRING_PROTOCOL,
+            "version": 2,
+            "sessionId": UUID,
+            "endpoint": { "host": "10.0.0.1", "port": 47777 },
+            "certificateSha256": HASH,
+            "token": HASH,
+            "futureField": true
+        })
+        .to_string();
+        let error = LanPairing::parse(&with_unknown).unwrap_err();
+        assert_eq!(error.code, "invalid-request");
+    }
+
+    #[test]
+    fn v1_and_v0_pairing_are_not_retried_as_v2() {
+        for version in [0, 1] {
+            let raw = json!({
+                "protocol": PAIRING_PROTOCOL,
+                "version": version,
+                "sessionId": UUID,
+                "endpoint": { "host": "10.0.0.1", "port": 47777 },
+                "certificateSha256": HASH,
+                "token": HASH
+            })
+            .to_string();
+            let error = LanPairing::parse(&raw).unwrap_err();
+            assert_eq!(error.code, "protocol-mismatch", "version {version}");
+            assert!(
+                error.message.contains("不支持该旧互传协议"),
+                "version {version}: {error}"
+            );
+            assert!(
+                error.message.contains("存档文件方式"),
+                "version {version}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn high_version_pairing_requests_upgrade_before_strict_payload() {
+        // No session fields: the probe must reject by version before the
+        // current DTO is asked to decode an incomplete future payload.
+        let raw = json!({
+            "protocol": PAIRING_PROTOCOL,
+            "version": 3,
+            "futureField": { "nested": true }
+        })
+        .to_string();
+        let error = LanPairing::parse(&raw).unwrap_err();
+        assert_eq!(error.code, "protocol-mismatch");
+        assert!(error.message.contains("需要较新版本"), "{error}");
+    }
+
+    #[test]
+    fn unknown_protocol_is_invalid_not_a_future_reader() {
+        let raw = json!({
+            "protocol": "other-reader-lan",
+            "version": 99
+        })
+        .to_string();
+        let error = LanPairing::parse(&raw).unwrap_err();
+        assert_eq!(error.code, "invalid-request");
+        assert!(
+            error.message.contains("连接协议不是 epub-reader-lan"),
+            "{error}"
+        );
     }
 }
