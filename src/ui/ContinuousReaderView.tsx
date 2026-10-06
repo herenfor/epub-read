@@ -142,10 +142,10 @@ export interface ContinuousReaderViewProps {
   }): void;
 }
 
-function continuousSurfaceBackground(iframe: HTMLIFrameElement): string | null {
-  const doc = iframe.ownerDocument;
+function continuousSurfaceBackground(surface: HTMLElement): string | null {
+  const doc = surface.ownerDocument;
   const candidates = [
-    iframe.closest(".reader-continuous") as HTMLElement | null,
+    surface.closest(".reader-continuous") as HTMLElement | null,
     doc?.body,
     doc?.documentElement,
   ];
@@ -410,6 +410,11 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
     const retryCountersRef = useRef(new Map<string, number>());
     const visualOverlayRef = useRef<HTMLDivElement | null>(null);
     const paintHandlesRef = useRef(new Map<HTMLIFrameElement, ReaderPaintHandle>());
+    // Viewport-sized page background under the chapter slots: the gaps between
+    // chapters show the scroller's own background, which must be filtered with
+    // the text or inverted/gray pages get bright unfiltered stripes.
+    const paintBackdropRef = useRef<HTMLDivElement | null>(null);
+    const backdropPaintRef = useRef<ReaderPaintHandle | null>(null);
     const syncVisualPaintRef = useRef<() => void>(() => {});
     const [slotUpdateNonce, setSlotUpdateNonce] = useState(0);
 
@@ -528,6 +533,22 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
       // The host is an absolute child of the scrolling root; translate it back
       // by the current scroll offset so the black overlay stays viewport-fixed.
       host.style.transform = `translateY(${scrollTop}px)`;
+      const backdrop = paintBackdropRef.current;
+      if (backdrop) {
+        backdrop.style.transform = `translateY(${scrollTop}px)`;
+        if (backdropPaintRef.current) {
+          backdropPaintRef.current.update(visualPreferencesRef.current, compareOriginalRef.current);
+        } else {
+          const handle = attachReaderPaint(
+            backdrop,
+            host,
+            visualPreferencesRef.current,
+            continuousSurfaceBackground(backdrop),
+          );
+          handle.update(visualPreferencesRef.current, compareOriginalRef.current);
+          backdropPaintRef.current = handle;
+        }
+      }
       const visible = new Set<HTMLIFrameElement>();
       for (const slot of slotsRef.current.values()) {
         if (slot.unmounted || slot.status !== "ready" || !slot.iframe.isConnected) continue;
@@ -1722,6 +1743,8 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
         projectionReloadOwnersRef.current.clear();
         for (const handle of paintHandlesRef.current.values()) handle.dispose();
         paintHandlesRef.current.clear();
+        backdropPaintRef.current?.dispose();
+        backdropPaintRef.current = null;
         gateRef.current.reset();
         reloadingRef.current.clear();
         auxPaginatorRef.current?.dispose();
@@ -1862,6 +1885,8 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
     useEffect(() => {
       for (const handle of paintHandlesRef.current.values()) handle.dispose();
       paintHandlesRef.current.clear();
+      backdropPaintRef.current?.dispose();
+      backdropPaintRef.current = null;
       syncVisualPaintRef.current();
     }, [settings.theme]);
 
@@ -2426,6 +2451,19 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
             width: "100%",
           }}
         >
+          {/* Before the absolutely positioned chapter slots, so it paints beneath them. */}
+          <div
+            ref={paintBackdropRef}
+            aria-hidden="true"
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              height: `${V}px`,
+              pointerEvents: "none",
+            }}
+          />
           {projections.map((p) => {
             const slot = slotsRef.current.get(p.box.key);
             const isReady = slot?.status === "ready";
