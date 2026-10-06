@@ -94,6 +94,22 @@ function activeColorAssistMatrix(preferences: ReaderVisualPreferences): string |
   }
 }
 
+function sameReaderVisualPreferences(
+  a: ReaderVisualPreferences,
+  b: ReaderVisualPreferences,
+): boolean {
+  return (
+    a.enabled === b.enabled &&
+    a.invert === b.invert &&
+    a.grayscale === b.grayscale &&
+    a.saturation === b.saturation &&
+    a.sharpen === b.sharpen &&
+    a.dim === b.dim &&
+    a.colorAssist.kind === b.colorAssist.kind &&
+    a.colorAssist.strength === b.colorAssist.strength
+  );
+}
+
 /**
  * Build the ordered SVG primitive list shared by every viewport.
  * Order is frozen: FX-2 linearRGB matrix -> saturation -> grayscale -> invert -> sharpen.
@@ -177,6 +193,8 @@ interface PaintGroup {
   surfaces: SurfaceRegistration[];
   preferences: ReaderVisualPreferences;
   compareOriginal: boolean;
+  filterSignature: string | null;
+  forceNextFlush: boolean;
   scheduled: boolean;
   pendingFrame: number | null;
 }
@@ -249,11 +267,23 @@ function createPaintGroup(
     }],
     preferences: initial,
     compareOriginal: false,
+    filterSignature: null,
+    forceNextFlush: false,
     scheduled: false,
     pendingFrame: null,
   };
   paintGroups.set(overlayHost, group);
   return group;
+}
+
+function applySurfaceState(group: PaintGroup, registration: SurfaceRegistration): void {
+  const active = group.filterSignature !== null && group.filterSignature !== "";
+  registration.surface.style.filter = active ? `url("#${group.filterId}")` : "none";
+  if (active && registration.background) {
+    registration.surface.style.backgroundColor = registration.background;
+  } else {
+    registration.surface.style.backgroundColor = registration.originalBackground;
+  }
 }
 
 function acquirePaintGroup(
@@ -270,12 +300,14 @@ function acquirePaintGroup(
   if (existing.surfaces.some((registration) => registration.surface === surface)) {
     throw new Error("reader visual paint surface is already attached to this viewport");
   }
-  existing.surfaces.push({
+  const registration = {
     surface,
     originalFilter: surface.style.filter,
     originalBackground: surface.style.backgroundColor,
     background,
-  });
+  };
+  existing.surfaces.push(registration);
+  applySurfaceState(existing, registration);
   return existing;
 }
 
@@ -299,16 +331,32 @@ function syncFilterNodes(group: PaintGroup, nodes: readonly ReaderVisualFilterNo
   });
 }
 
-function applyGroupPreferences(group: PaintGroup, preferences: ReaderVisualPreferences, compareOriginal: boolean): void {
+function applyGroupPreferences(
+  group: PaintGroup,
+  preferences: ReaderVisualPreferences,
+  compareOriginal: boolean,
+  force = false,
+): void {
+  const effectiveChanged =
+    force ||
+    group.filterSignature === null ||
+    group.compareOriginal !== compareOriginal ||
+    !sameReaderVisualPreferences(group.preferences, preferences);
+  if (!effectiveChanged) return;
+
   group.preferences = preferences;
   group.compareOriginal = compareOriginal;
   const active = preferences.enabled && !compareOriginal;
   const nodes = active ? readerVisualFilterNodes(preferences) : [];
   const filterValue = nodes.length > 0 ? `url("#${group.filterId}")` : "none";
-  if (nodes.length > 0) {
-    syncFilterNodes(group, nodes);
-  } else {
-    clearFilterNodes(group);
+  const signature = active ? JSON.stringify(nodes) : "";
+  if (signature !== group.filterSignature) {
+    if (nodes.length > 0) {
+      syncFilterNodes(group, nodes);
+    } else {
+      clearFilterNodes(group);
+    }
+    group.filterSignature = signature;
   }
   for (const registration of group.surfaces) {
     registration.surface.style.filter = filterValue;
@@ -344,14 +392,18 @@ function scheduleGroupFlush(group: PaintGroup): void {
     group.pendingFrame = requestAnimationFrame(() => {
       group.scheduled = false;
       group.pendingFrame = null;
+      const force = group.forceNextFlush;
+      group.forceNextFlush = false;
       if (paintGroups.get(group.overlayHost) === group && group.surfaces.length > 0) {
-        applyGroupPreferences(group, group.preferences, group.compareOriginal);
+        applyGroupPreferences(group, group.preferences, group.compareOriginal, force);
       }
     });
     return;
   }
   group.scheduled = false;
-  applyGroupPreferences(group, group.preferences, group.compareOriginal);
+  const force = group.forceNextFlush;
+  group.forceNextFlush = false;
+  applyGroupPreferences(group, group.preferences, group.compareOriginal, force);
 }
 
 function removePaintGroup(group: PaintGroup): void {
@@ -383,8 +435,15 @@ export function attachReaderPaint(
   return {
     update(preferences, compareOriginal) {
       if (disposed) return;
+      if (
+        group.compareOriginal === compareOriginal &&
+        sameReaderVisualPreferences(group.preferences, preferences)
+      ) {
+        return;
+      }
       group.preferences = preferences;
       group.compareOriginal = compareOriginal;
+      group.forceNextFlush = true;
       scheduleGroupFlush(group);
     },
     dispose() {

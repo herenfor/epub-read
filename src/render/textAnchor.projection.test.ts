@@ -102,6 +102,14 @@ describe("VisibleTextIndex with a T-1 display projection", () => {
     const blocks = chapter("<p>a</p><p>b</p>");
     const blockIndex = buildVisibleTextIndex(blocks.document, blocks.viewer);
     expect(blockIndex.originalTextForOffsets(0, blockIndex.totalChars)).toBe("a\nb");
+
+    const em = chapter("<p>Hello <em>world</em></p>");
+    const emIndex = buildVisibleTextIndex(em.document, em.viewer);
+    expect(emIndex.originalTextForOffsets(0, emIndex.totalChars)).toBe("Hello world");
+
+    const spans = chapter("<p><span>Hello</span> <span>world</span></p>");
+    const spanIndex = buildVisibleTextIndex(spans.document, spans.viewer);
+    expect(spanIndex.originalTextForOffsets(0, spanIndex.totalChars)).toBe("Hello world");
   });
 
   it("R7 stores the canonical original quote so notes do not jump to a later display word", async () => {

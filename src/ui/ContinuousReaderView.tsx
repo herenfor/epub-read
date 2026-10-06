@@ -41,6 +41,10 @@ import {
 import { attachReaderPaint } from "../render/visual/readerVisualPaint";
 import type { ReaderPaintHandle } from "../render/visual/readerVisualPreferences";
 import {
+  ProjectionReloadCoordinator,
+  type ProjectionReloadSnapshot,
+} from "./continuousProjectionReload";
+import {
   ContinuousChapterLayout,
   ChapterLoadGate,
   PendingScrollNavigation,
@@ -425,7 +429,11 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
 
     // 设置变更重载：已挂载章节必须用新主题/字号重新 sanitize，否则书页主题不跟随
     const settingsIdentityRef = useRef<ReaderSettings | null>(null);
-    const projectionVersionRef = useRef<string | null>(null);
+    const projectionReloadCoordinatorRef = useRef<ProjectionReloadCoordinator<string> | null>(null);
+    if (!projectionReloadCoordinatorRef.current) {
+      projectionReloadCoordinatorRef.current = new ProjectionReloadCoordinator<string>();
+    }
+    const projectionReloadOwnersRef = useRef(new Map<string, number>());
     const settingsReloadDebouncerRef = useRef<ReturnType<typeof createSettingsReloadDebouncer> | null>(null);
     if (!settingsReloadDebouncerRef.current) {
       settingsReloadDebouncerRef.current = createSettingsReloadDebouncer(150);
@@ -496,6 +504,17 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
     // iframe 上下缓冲：宿主滚动由合成线程先行，iframe 位置要等下一次 JS 同步，
     // 没有缓冲时这一两帧会在顶部/底部露出背景，看起来像边距在伸缩。
     const frameBleed = continuousFrameBleed(V);
+    const latestTextProjectionPreferences =
+      props.textProjectionPreferences ?? DEFAULT_TEXT_PROJECTION_PREFERENCES;
+    const latestTextProjectionVersion = textProjectionVersion(latestTextProjectionPreferences);
+    const projectionSnapshot: ProjectionReloadSnapshot = {
+      version: latestTextProjectionVersion,
+      preferences: latestTextProjectionPreferences,
+      compiled: props.textProjection && props.textProjection.version === latestTextProjectionVersion
+        ? props.textProjection
+        : null,
+    };
+    projectionReloadCoordinatorRef.current.updateLatest(projectionSnapshot);
     const visualPreferences = props.visualPreferences ?? DEFAULT_VISUAL_PREFERENCES;
     const visualPreferencesRef = useRef(visualPreferences);
     visualPreferencesRef.current = visualPreferences;
@@ -1479,9 +1498,10 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
         // 仍由 ChapterLoadGate 票据路径负责，这里不重复结束票据或重报就绪。
         // 只注册一次转发，避免旧槽位持有创建时的 V / 几何闭包。
         paginator.setLayoutSettledHandler(() => layoutSettledRef.current(key));
+        const latestProjection = projectionReloadCoordinatorRef.current?.current();
         paginator.setTextProjectionPreferences?.(
-          props.textProjectionPreferences ?? DEFAULT_TEXT_PROJECTION_PREFERENCES,
-          props.textProjection ?? null,
+          latestProjection?.preferences ?? DEFAULT_TEXT_PROJECTION_PREFERENCES,
+          latestProjection?.compiled ?? null,
         );
 
         slotsRef.current.set(key, slot);
@@ -1698,6 +1718,8 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
           slot.paginator.dispose();
         }
         slotsRef.current.clear();
+        projectionReloadCoordinatorRef.current?.invalidate();
+        projectionReloadOwnersRef.current.clear();
         for (const handle of paintHandlesRef.current.values()) handle.dispose();
         paintHandlesRef.current.clear();
         gateRef.current.reset();
@@ -1782,43 +1804,48 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
     }, [captureReadingSpot, scheduleLayoutRemeasure, settings]);
 
     // T-1 配置变化：所有存活槽位统一换版本，按同一阅读点重载并重测章节高度。
+    // 同一 version 只更新 latest ref；compiled 稍后抵达不会先取消再跳过。
+    const appliedProjectionVersionRef = useRef<string | null>(null);
     useEffect(() => {
-      const preferences = props.textProjectionPreferences ?? DEFAULT_TEXT_PROJECTION_PREFERENCES;
-      const version = textProjectionVersion(preferences);
-      if (projectionVersionRef.current === null) {
-        projectionVersionRef.current = version;
+      const coordinator = projectionReloadCoordinatorRef.current;
+      if (!coordinator) return;
+      const snapshot = coordinator.current();
+      if (!snapshot) return;
+      if (appliedProjectionVersionRef.current === null) {
+        appliedProjectionVersionRef.current = snapshot.version;
         return;
       }
-      if (projectionVersionRef.current === version) return;
-      projectionVersionRef.current = version;
+      if (appliedProjectionVersionRef.current === snapshot.version) return;
+      appliedProjectionVersionRef.current = snapshot.version;
       dampedScrollRef.current.stop();
       const stored = lastStableSpotRef.current;
       const spot = stored && layoutRef.current.boxFor(stored.key) ? stored : captureReadingSpot();
       if (spot && !pendingSpotRef.current) pendingSpotRef.current = spot;
-      for (const slot of slotsRef.current.values()) {
-        slot.paginator.setTextProjectionPreferences?.(preferences, props.textProjection ?? null);
-      }
-      void (async () => {
-        for (const [key, slot] of slotsRef.current.entries()) {
-          if (slot.unmounted) continue;
+      const entries = Array.from(slotsRef.current.entries()).map(([key, slot]) => [key, {
+        isAlive: () => !slot.unmounted && slotsRef.current.get(key) === slot,
+        setProjectionPreferences: (next: ProjectionReloadSnapshot) => {
+          slot.paginator.setTextProjectionPreferences?.(next.preferences, next.compiled);
+        },
+        reloadProjection: (next: ProjectionReloadSnapshot) =>
+          slot.paginator.reloadWithTextProjection?.(next.preferences, undefined, next.compiled) ?? Promise.resolve(),
+        waitProjectionReady: () => slot.paginator.waitForDisplayReady?.() ?? Promise.resolve(true),
+        markProjectionError: () => { slot.status = "error"; },
+      }] as const);
+      void coordinator.run(entries, snapshot, {
+        onOwnerStart: (key, generation) => {
+          projectionReloadOwnersRef.current.set(key, generation);
           reloadingRef.current.add(key);
-          try {
-            await slot.paginator.reloadWithTextProjection?.(
-              preferences,
-              undefined,
-              props.textProjection ?? null,
-            );
-            const ready = await slot.paginator.waitForDisplayReady();
-            if (!ready) slot.status = "error";
-          } catch {
-            if (!slot.unmounted) slot.status = "error";
-          } finally {
-            reloadingRef.current.delete(key);
-          }
-        }
-        scheduleLayoutRemeasure(pendingSpotRef.current);
-        setSlotUpdateNonce((n) => n + 1);
-      })();
+        },
+        onOwnerRelease: (key, generation) => {
+          if (projectionReloadOwnersRef.current.get(key) !== generation) return;
+          projectionReloadOwnersRef.current.delete(key);
+          reloadingRef.current.delete(key);
+        },
+        onFinished: () => {
+          scheduleLayoutRemeasure(pendingSpotRef.current);
+          setSlotUpdateNonce((n) => n + 1);
+        },
+      });
     }, [captureReadingSpot, props.textProjection, props.textProjectionPreferences, scheduleLayoutRemeasure]);
 
     // 响应笔记更新
@@ -2347,9 +2374,10 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
                 props.onDisplayReady
               );
               auxPaginatorRef.current = paginator;
+              const latestProjection = projectionReloadCoordinatorRef.current?.current();
               paginator.setTextProjectionPreferences?.(
-                props.textProjectionPreferences ?? DEFAULT_TEXT_PROJECTION_PREFERENCES,
-                props.textProjection ?? null,
+                latestProjection?.preferences ?? DEFAULT_TEXT_PROJECTION_PREFERENCES,
+                latestProjection?.compiled ?? null,
               );
               void paginator.load(path, {
                 settings: effectiveReaderSettings(settings, false),

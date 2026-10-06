@@ -168,6 +168,26 @@ describe("reader visual paint", () => {
     expect(isVisualCompareKey("Tab")).toBe(false);
     expect(isVisualCompareKey("Escape")).toBe(false);
   });
+
+  it("I2 does not rebuild the SVG pipeline for equal paint snapshots and still styles new surfaces", () => {
+    const { document, host, surface } = setup();
+    const handle = attachReaderPaint(surface, host, preferences({ enabled: true, invert: true, dim: 0.2 }));
+    const filter = host.querySelector("filter");
+    const firstNode = filter?.firstElementChild ?? null;
+    expect(firstNode).not.toBeNull();
+
+    handle.update(preferences({ enabled: true, invert: true, dim: 0.2 }), false);
+    handle.update(preferences({ enabled: true, invert: true, dim: 0.3 }), false);
+    expect(host.querySelector("filter")?.firstElementChild).toBe(firstNode);
+
+    const secondSurface = document.createElement("div");
+    const second = attachReaderPaint(secondSurface, host, preferences({ enabled: true, invert: true, dim: 0.3 }));
+    expect(secondSurface.style.filter).toContain("#");
+    expect(host.querySelectorAll("filter")).toHaveLength(1);
+    expect(host.querySelector("filter")?.firstElementChild).toBe(firstNode);
+    second.dispose();
+    handle.dispose();
+  });
   it("shares one viewport filter id and black overlay across visible surfaces", () => {
     const { document, host, surface } = setup();
     const secondSurface = document.createElement("div");
