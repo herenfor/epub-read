@@ -1,92 +1,17 @@
-.reader-visual-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 16px;
-  color: var(--text, #e8e8ea);
+/* 画面滤镜：外壳与通用控件来自 Aa 面板（aa-*）与 readerDisplaySettings.css（rd-*）。 */
+.reader-visual-compare {
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
-.reader-visual-panel__header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
+/* FX-2 插槽不另起盒子：色弱辅助区与画面滤镜区并列成为面板的同级分组。 */
+.reader-visual-color-assist-slot {
+  display: contents;
 }
 
-.reader-visual-panel__header h3 {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 600;
-}
-
-.reader-visual-panel__header p {
-  margin: 4px 0 0;
-  color: var(--muted, #9a9aa2);
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-.reader-visual-switch,
-.reader-visual-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 13px;
-  white-space: nowrap;
-}
-
-.reader-visual-controls {
-  display: flex;
-  flex-direction: column;
-  gap: 11px;
-}
-
-.reader-visual-controls.is-disabled {
-  opacity: 0.55;
-}
-
-.reader-visual-slider {
-  display: grid;
-  grid-template-columns: minmax(110px, 1fr) minmax(120px, 1.6fr) 48px;
-  align-items: center;
-  gap: 10px;
-  font-size: 13px;
-}
-
-.reader-visual-slider input {
-  width: 100%;
-}
-
-.reader-visual-slider output {
-  color: var(--muted, #9a9aa2);
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-
-.reader-visual-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.reader-visual-action {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 7px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.16));
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.reader-visual-action--compare.is-active {
-  border-color: var(--accent, #6ea8fe);
-  background: rgba(110, 168, 254, 0.16);
-}
-
-.reader-visual-color-assist-slot:empty {
-  display: none;
+/* 总开关关闭时色弱辅助同样不生效，外观与滤镜控件一起变淡。 */
+.reader-visual-color-assist-slot.is-disabled > * {
+  opacity: 0.45;
+  transition: opacity 160ms ease;
 }

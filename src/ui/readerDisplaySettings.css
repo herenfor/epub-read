@@ -5,64 +5,208 @@
   pointer-events: none;
 }
 
-.reader-display-settings {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: min(720px, calc(100vw - 24px));
-  max-height: min(820px, calc(100vh - 24px));
-  overflow: hidden;
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.14));
-  border-radius: 14px;
-  background: var(--surface, var(--panel, #1f2024));
-  color: var(--text, #e8e8ea);
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.38);
-  z-index: 40;
+/* ---- “字符与画面”：Aa 面板子页，外壳/遮罩/入退场全部沿用 .aa-popover ---- */
+.aa-popover.aa-display-popover {
+  width: 360px;
 }
 
-.reader-display-settings__head {
+.aa-display-header {
+  gap: 4px;
+  padding-left: 6px;
+}
+
+.aa-display-header .aa-popover-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.aa-display-body {
+  gap: 12px;
+}
+
+.app[data-touch-ui="true"]:not([data-layout="compact"]) .aa-popover.aa-display-popover {
+  width: 420px;
+}
+
+/* 调滤镜/繁简时要看清正文真实效果：两层遮罩都不压暗、不模糊，只负责点外关闭。 */
+.app:has(.aa-display-popover) .menu-backdrop.menu-backdrop,
+.app .aa-popover-backdrop.aa-popover-backdrop:has(+ .aa-display-popover) {
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* 手机底部面板矮一些，上方保留一段正文用于对照效果。 */
+.app[data-mobile-chrome="true"][data-layout="compact"] .aa-popover.aa-display-popover {
+  max-height: min(66vh, calc(var(--visual-viewport-height, 100vh) * 0.66));
+}
+
+/* ---- 三个子面板共用的小部件（只用应用主题变量） ---- */
+.rd-section {
   display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.rd-section .aa-group-title {
+  margin-top: 2px;
+}
+
+.rd-section + .rd-section .aa-group-title {
+  margin-top: 8px;
+}
+
+.rd-note {
+  margin: -2px 2px 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.rd-disabled {
+  opacity: 0.45;
+  transition: opacity 160ms ease;
+}
+
+.rd-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  transition: opacity 160ms ease;
+}
+
+.rd-input {
+  min-width: 0;
+  width: 100%;
+  height: 28px;
+  box-sizing: border-box;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 80%, transparent);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.rd-input::placeholder {
+  color: var(--muted);
+  opacity: 0.8;
+}
+
+.rd-input:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.rd-input:disabled {
+  opacity: 0.5;
+}
+
+.rd-range-row {
+  display: grid;
+  grid-template-columns: minmax(64px, auto) minmax(0, 1fr) 40px;
   align-items: center;
   gap: 10px;
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  min-height: 28px;
 }
 
-.reader-display-settings__head strong {
-  flex: 1;
-  font-size: 14px;
+.rd-range-row .aa-section-label {
+  white-space: nowrap;
 }
 
-.reader-display-settings__back,
-.reader-display-settings__close {
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.16));
-  border-radius: 7px;
-  background: transparent;
-  color: inherit;
-  padding: 5px 9px;
+.rd-range-value {
+  color: var(--muted);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.rd-range {
+  width: 100%;
+  min-width: 0;
+  height: 4px;
+  margin: 0;
+  -webkit-appearance: none;
+  appearance: none;
+  border-radius: 2px;
+  background: linear-gradient(
+    to right,
+    var(--accent) 0%,
+    var(--accent) var(--fill, 0%),
+    color-mix(in srgb, var(--fg) 16%, transparent) var(--fill, 0%),
+    color-mix(in srgb, var(--fg) 16%, transparent) 100%
+  );
   cursor: pointer;
 }
 
-.reader-display-settings__body {
-  max-height: calc(min(820px, 100vh - 24px) - 52px);
-  overflow: auto;
-  padding: 0 14px 16px;
+.rd-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--panel-bg);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  cursor: grab;
 }
 
-.reader-display-settings .text-projection-panel,
-.reader-display-settings .reader-visual-panel {
-  padding: 12px 0;
+.rd-range::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--panel-bg);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  cursor: grab;
 }
 
-@media (max-width: 560px) {
-  .reader-visual-slider {
-    grid-template-columns: minmax(88px, 1fr) minmax(80px, 1fr) 42px;
-    gap: 6px;
-  }
-
-  .reader-display-settings {
-    width: calc(100vw - 12px);
-    max-height: calc(100vh - 12px);
-  }
+.rd-range:disabled {
+  cursor: default;
+  opacity: 0.4;
 }
+
+.rd-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.rd-actions .aa-mini-action-btn {
+  flex: 1 1 auto;
+}
+
+.aa-mini-action-btn.is-active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+
+/* ---- 触摸端：与 Aa 面板同档放大，滑条与输入给足命中区 ---- */
+.app[data-touch-ui="true"] .rd-note { font-size: 12.5px; }
+.app[data-touch-ui="true"] .rd-range-value { font-size: 13.5px; }
+.app[data-touch-ui="true"] .rd-input {
+  height: 44px;
+  padding: 0 12px;
+  border-radius: 10px;
+  font-size: 15px;
+}
+.app[data-touch-ui="true"] .rd-range-row {
+  grid-template-columns: minmax(72px, auto) minmax(0, 1fr) 46px;
+  min-height: 48px;
+}
+.app[data-touch-ui="true"] .rd-range {
+  height: 6px;
+  border-radius: 3px;
+}
+.app[data-touch-ui="true"] .rd-range::-webkit-slider-thumb {
+  width: 24px;
+  height: 24px;
+}
+.app[data-touch-ui="true"] .rd-range::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+}
+.app[data-touch-ui="true"] .rd-section .aa-group-title { font-size: 13px; }

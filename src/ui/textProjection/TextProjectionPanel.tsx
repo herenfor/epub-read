@@ -7,6 +7,7 @@ import {
   type TextProjectionPreferences,
   type TextProjectionRule,
 } from "../../render/textProjection/types";
+import { ChevronDownIcon, CloseIcon, PlusIcon, RotateCcwIcon } from "../readerIcons";
 import "./textProjectionPanel.css";
 
 export interface TextProjectionPanelProps {
@@ -18,8 +19,8 @@ export interface TextProjectionPanelProps {
 
 const MODE_LABELS: Record<TextProjectionMode, string> = {
   original: "原文",
-  simplified: "简体显示",
-  traditional: "繁体显示",
+  simplified: "简体",
+  traditional: "繁体",
 };
 
 function createRuleId(): string {
@@ -96,90 +97,112 @@ export function TextProjectionPanel(props: TextProjectionPanelProps) {
   };
 
   return (
-    <section className="text-projection-panel" aria-label="字符替换与繁简显示">
-      <header className="text-projection-panel__header">
-        <div>
-          <h2>字符替换 / 繁简显示</h2>
-          <p>默认原文；预置转换后再应用你的规则。仅改变阅读显示，不修改原书。</p>
-        </div>
-        <button type="button" className="text-projection-panel__link" onClick={restoreOriginal} disabled={props.disabled}>
-          恢复原文
-        </button>
-      </header>
+    <section className="rd-section text-projection-panel" aria-label="字符替换与繁简显示">
+      <div className="aa-group-title">字符显示</div>
+      <p className="rd-note">只改变阅读显示，不修改原书；先繁简转换，再套用下方规则。</p>
 
-      <label className="text-projection-panel__field">
-        <span>显示模式</span>
-        <select
-          value={props.preferences.mode}
-          disabled={props.disabled}
-          onChange={(event) => updateMode(event.target.value as TextProjectionMode)}
-        >
-          {Object.entries(MODE_LABELS).map(([mode, label]) => (
-            <option key={mode} value={mode}>{label}</option>
+      <div className="aa-control-row">
+        <span className="aa-section-label">繁简</span>
+        <div className="aa-segmented-capsule" role="radiogroup" aria-label="显示模式">
+          {(Object.keys(MODE_LABELS) as TextProjectionMode[]).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              role="radio"
+              aria-checked={props.preferences.mode === mode}
+              className={`aa-segmented-btn${props.preferences.mode === mode ? " active" : ""}`}
+              disabled={props.disabled}
+              onClick={() => updateMode(mode)}
+            >
+              {MODE_LABELS[mode]}
+            </button>
           ))}
-        </select>
-      </label>
-
-      <div className="text-projection-panel__rules-head">
-        <div>
-          <strong>自定义规则</strong>
-          <span>最长 from 优先；同长度按列表顺序。重复 from 使用第一条。</span>
         </div>
-        <button type="button" onClick={addRule} disabled={props.disabled}>添加规则</button>
+      </div>
+
+      <div className="aa-control-row">
+        <div className="aa-detail-label-wrap">
+          <span className="aa-section-label">自定义规则</span>
+          <span className="aa-detail-sub">最长原文优先，同长按列表顺序</span>
+        </div>
+        <button type="button" className="aa-mini-action-btn" onClick={addRule} disabled={props.disabled}>
+          <PlusIcon size={12} />
+          添加
+        </button>
       </div>
 
       {props.preferences.rules.length === 0 ? (
-        <p className="text-projection-panel__empty">暂未添加规则。</p>
+        <p className="text-projection-empty">暂未添加规则</p>
       ) : (
-        <ol className="text-projection-panel__rules">
+        <ol className="text-projection-rules">
           {props.preferences.rules.map((rule, index) => (
-            <li key={rule.id} className={duplicates.has(rule.id) ? "is-duplicate" : ""}>
-              <label className="text-projection-panel__enabled">
+            <li key={rule.id} className={`text-projection-rule${duplicates.has(rule.id) ? " is-duplicate" : ""}${rule.enabled ? "" : " is-off"}`}>
+              <div className="text-projection-rule-main">
                 <input
-                  type="checkbox"
-                  checked={rule.enabled}
+                  className="rd-input"
+                  aria-label={`规则 ${index + 1} 原文`}
+                  value={rule.from}
+                  placeholder="原文"
                   disabled={props.disabled}
-                  onChange={(event) => updateRule(rule.id, { enabled: event.target.checked })}
+                  onChange={(event) => updateRule(rule.id, { from: event.target.value })}
                 />
-                <span>启用</span>
-              </label>
-              <input
-                aria-label={`规则 ${index + 1} 原文`}
-                value={rule.from}
-                placeholder="原文（from）"
-                disabled={props.disabled}
-                onChange={(event) => updateRule(rule.id, { from: event.target.value })}
-              />
-              <span className="text-projection-panel__arrow" aria-hidden="true">→</span>
-              <input
-                aria-label={`规则 ${index + 1} 显示`}
-                value={rule.to}
-                placeholder="显示（to）"
-                disabled={props.disabled}
-                onChange={(event) => updateRule(rule.id, { to: event.target.value })}
-              />
-              <div className="text-projection-panel__row-actions">
-                <button type="button" onClick={() => props.onChange({ ...props.preferences, rules: moveRule(props.preferences.rules, index, -1) })} disabled={props.disabled || index === 0} title="上移">↑</button>
-                <button type="button" onClick={() => props.onChange({ ...props.preferences, rules: moveRule(props.preferences.rules, index, 1) })} disabled={props.disabled || index === props.preferences.rules.length - 1} title="下移">↓</button>
-                <button type="button" onClick={() => removeRule(rule.id)} disabled={props.disabled} title="删除">×</button>
+                <span className="text-projection-arrow" aria-hidden="true">→</span>
+                <input
+                  className="rd-input"
+                  aria-label={`规则 ${index + 1} 显示`}
+                  value={rule.to}
+                  placeholder="显示为"
+                  disabled={props.disabled}
+                  onChange={(event) => updateRule(rule.id, { to: event.target.value })}
+                />
+              </div>
+              <div className="text-projection-rule-actions">
+                <label className="aa-switch-label" title={rule.enabled ? "停用此规则" : "启用此规则"}>
+                  <input
+                    type="checkbox"
+                    checked={rule.enabled}
+                    disabled={props.disabled}
+                    aria-label={`启用规则 ${index + 1}`}
+                    onChange={(event) => updateRule(rule.id, { enabled: event.target.checked })}
+                  />
+                  <span className="aa-switch-track" />
+                </label>
+                <span className="text-projection-rule-state">{rule.enabled ? "启用" : "停用"}</span>
+                <span className="text-projection-rule-spacer" />
+                <button type="button" className="aa-step-reset-btn" onClick={() => props.onChange({ ...props.preferences, rules: moveRule(props.preferences.rules, index, -1) })} disabled={props.disabled || index === 0} title="上移" aria-label="上移">
+                  <ChevronDownIcon size={13} className="text-projection-up" />
+                </button>
+                <button type="button" className="aa-step-reset-btn" onClick={() => props.onChange({ ...props.preferences, rules: moveRule(props.preferences.rules, index, 1) })} disabled={props.disabled || index === props.preferences.rules.length - 1} title="下移" aria-label="下移">
+                  <ChevronDownIcon size={13} />
+                </button>
+                <button type="button" className="aa-step-reset-btn text-projection-remove" onClick={() => removeRule(rule.id)} disabled={props.disabled} title="删除" aria-label="删除">
+                  <CloseIcon size={12} />
+                </button>
               </div>
               {duplicates.has(rule.id) ? (
-                <p className="text-projection-panel__warning">重复 from：将采用列表中第一条；此条不会生效。</p>
+                <p className="text-projection-warning">原文重复：采用列表中第一条，此条不会生效。</p>
               ) : null}
             </li>
           ))}
         </ol>
       )}
 
-      <div className="text-projection-panel__preview">
-        <label>
-          <span>小预览原文</span>
-          <input value={previewSource} disabled={props.disabled} onChange={(event) => setPreviewSource(event.target.value)} />
+      <div className="text-projection-preview">
+        <label className="aa-control-row">
+          <span className="aa-section-label">预览</span>
+          <input className="rd-input" value={previewSource} disabled={props.disabled} onChange={(event) => setPreviewSource(event.target.value)} />
         </label>
-        <div>
-          <span>显示结果</span>
-          <output>{previewBusy ? "转换中…" : previewDisplay}</output>
+        <div className="aa-control-row">
+          <span className="aa-section-label">显示</span>
+          <output className="text-projection-output">{previewBusy ? "转换中…" : previewDisplay}</output>
         </div>
+      </div>
+
+      <div className="rd-actions">
+        <button type="button" className="aa-mini-action-btn" onClick={restoreOriginal} disabled={props.disabled}>
+          <RotateCcwIcon size={12} />
+          恢复原文
+        </button>
       </div>
     </section>
   );

@@ -567,7 +567,7 @@ export function SearchPanel(props: SearchPanelProps) {
           </div>
         )}
         {scope === "current" && props.onSearchViewChange && (
-          <div className="search-scope" role="group" aria-label="当前书搜索文字">
+          <div className="search-scope search-view-toggle" role="group" aria-label="当前书搜索文字">
             <button
               type="button"
               className={(props.searchView ?? "display") === "display" ? "active" : ""}

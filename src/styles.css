@@ -2607,7 +2607,7 @@ select option {
   margin-bottom: 10px;
   padding: 3px;
   border-radius: 10px;
-  background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel-bg));
 }
 .shelf-search-mode button {
   min-width: 0;
@@ -4264,7 +4264,8 @@ select option {
   bottom: 20px;
   left: 50%;
   transform: translate(-50%, 0) scale(1);
-  z-index: 52;
+  /* 需高于阅读面板遮罩(190)与阅读工具栏(100)，否则桌面端同样被模糊遮罩盖住且无法点选。 */
+  z-index: 260;
   width: min(600px, calc(100vw - 32px));
   height: min(580px, calc(100vh - 40px));
   display: flex;
@@ -4421,7 +4422,7 @@ select option {
   gap: 4px;
   padding: 3px;
   border-radius: 10px;
-  background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel-bg));
 }
 .search-scope button {
   min-width: 0;
@@ -4436,6 +4437,22 @@ select option {
   color: #fff;
   background: var(--accent);
   box-shadow: 0 1px 4px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+/* 显示/原文是范围之下的次级切换：同一分段结构，选中态用面板底+强调色字，不与范围抢主色。 */
+.search-scope.search-view-toggle {
+  margin-top: 6px;
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+}
+.search-scope.search-view-toggle button {
+  padding: 5px 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.search-scope.search-view-toggle button.active {
+  color: var(--accent);
+  background: var(--panel-bg);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 .search-index-actions {
   display: flex;
@@ -7015,9 +7032,7 @@ select option {
   pointer-events: none;
 }
 
-/* 字体设置原 z-index 52 低于遮罩(190)与阅读工具栏(100)，被模糊盖住且无法点选。 */
 .app[data-mobile-chrome="true"] .font-settings-panel {
-  z-index: 260 !important;
   zoom: 1;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;

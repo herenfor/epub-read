@@ -1,33 +1,4 @@
-.color-assist-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-  padding: 10px;
-  border: 1px solid var(--menu-surface-border, var(--panel-border));
-  border-radius: 10px;
-  background: var(--menu-surface, var(--panel-bg));
-  color: var(--fg);
-}
-
-.color-assist-heading {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.color-assist-title {
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.color-assist-note,
-.color-assist-option-detail,
-.color-assist-hint {
-  color: var(--muted);
-  font-size: 10.5px;
-  line-height: 1.35;
-}
-
+/* 色弱辅助：外壳与通用控件来自 Aa 面板（aa-*）与 readerDisplaySettings.css（rd-*）。 */
 .color-assist-options {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -38,68 +9,60 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+  justify-content: center;
   gap: 1px;
   min-height: 42px;
-  padding: 6px 8px;
-  border: 1px solid var(--menu-surface-border, var(--panel-border));
-  border-radius: 8px;
-  background: transparent;
+  padding: 6px 9px;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 55%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
   color: var(--fg);
   font: inherit;
   text-align: left;
   cursor: pointer;
-  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+  transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
 }
 
 .color-assist-option:hover {
-  background: var(--menu-surface-hover, var(--btn-hover));
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
 }
 
 .color-assist-option.is-active {
   border-color: var(--accent);
-  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  box-shadow: 0 0 0 1px var(--accent) inset;
 }
 
 .color-assist-option-label {
   font-size: 12px;
+  font-weight: 500;
 }
 
-.color-assist-strength {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 28px;
+.color-assist-option.is-active .color-assist-option-label {
+  color: var(--accent);
+  font-weight: 600;
 }
 
-.color-assist-strength-label {
-  flex: none;
-  font-size: 12px;
-}
-
-.color-assist-strength input[type="range"] {
-  flex: 1;
-  min-width: 0;
-  accent-color: var(--accent);
-}
-
-.color-assist-strength-value {
-  flex: none;
-  width: 38px;
+.color-assist-option-detail {
   color: var(--muted);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  text-align: right;
+  font-size: 10.5px;
+  line-height: 1.3;
 }
 
 .color-assist-preview {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 5px 10px;
+  padding: 8px 9px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
 }
 
 .color-assist-preview-label {
   color: var(--muted);
-  font-size: 10.5px;
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .color-assist-swatch-row {
@@ -109,12 +72,15 @@
 
 .color-assist-swatch {
   flex: 1;
-  height: 22px;
+  height: 20px;
   min-width: 0;
-  border: 1px solid color-mix(in srgb, var(--fg) 14%, transparent);
-  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--fg) 12%, transparent);
+  border-radius: 5px;
+  transition: background-color 160ms ease;
 }
 
-.color-assist-hint {
-  margin: 0;
-}
+.app[data-touch-ui="true"] .color-assist-option { min-height: 56px; padding: 8px 12px; border-radius: 11px; }
+.app[data-touch-ui="true"] .color-assist-option-label { font-size: 14px; }
+.app[data-touch-ui="true"] .color-assist-option-detail { font-size: 12px; }
+.app[data-touch-ui="true"] .color-assist-preview-label { font-size: 12.5px; }
+.app[data-touch-ui="true"] .color-assist-swatch { height: 26px; }
