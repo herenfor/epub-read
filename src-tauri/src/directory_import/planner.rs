@@ -61,12 +61,12 @@ pub fn proposed_folder_name(root: &ImportRoot, segments: &[String]) -> String {
     };
     let leaf = names
         .last()
-        .map(|name| name.trim())
+        .map(|name| crate::library_organization::js_trim(name))
         .filter(|name| !name.is_empty())
         .unwrap_or("导入书籍");
     let mut result: String = leaf.chars().take(40).collect();
     for name in names.iter().rev().skip(1) {
-        let prefix = name.trim();
+        let prefix = crate::library_organization::js_trim(name);
         if prefix.is_empty() {
             continue;
         }
