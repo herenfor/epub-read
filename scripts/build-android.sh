@@ -14,6 +14,7 @@
 #
 # build options:
 #   --release            release build (default: debug)
+#   --optimized-dev      optimised, stripped and minified Dev APK; same Dev identity/signing
 #   --aab                build an AAB instead of an APK
 #   --target <abi>       aarch64 (default) | armv7 | i686 | x86_64
 #
@@ -28,6 +29,7 @@
 #   TAURI_CLI_JS            project-local CLI script handed to Gradle (default: node_modules/@tauri-apps/cli/tauri.js)
 #   EPUB_READER_SIGNING_PROPERTIES  release signing properties (default: <workspace>/.android-signing/keystore.properties);
 #                           kept outside every repository, required for --release
+#   EPUB_READER_OPTIMIZED_DEV       set by --optimized-dev for the Gradle shrinker
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -158,6 +160,7 @@ do_build() {
     case "$1" in
       --release) mode="release" ;;
       --debug) mode="debug" ;;
+      --optimized-dev) mode="optimized-dev" ;;
       --apk) bundle="--apk" ;;
       --aab) bundle="--aab" ;;
       --target) shift; target="${1:?--target needs a value}" ;;
@@ -173,13 +176,24 @@ do_build() {
   else
     unset EPUB_READER_SIGNING_PROPERTIES
   fi
+  if [ "$mode" = "optimized-dev" ]; then
+    # Only this build inherits the release-like Rust profile and Android shrinker.
+    # Keep the debug application id/key so testers can update without losing data.
+    export EPUB_READER_OPTIMIZED_DEV=1
+    export CARGO_PROFILE_DEV_OPT_LEVEL=3 CARGO_PROFILE_DEV_DEBUG=0
+    export CARGO_PROFILE_DEV_STRIP=symbols CARGO_PROFILE_DEV_LTO=thin
+    export CARGO_PROFILE_DEV_CODEGEN_UNITS=1 CARGO_PROFILE_DEV_DEBUG_ASSERTIONS=false
+    export CARGO_PROFILE_DEV_OVERFLOW_CHECKS=false
+  else
+    unset EPUB_READER_OPTIMIZED_DEV
+  fi
   do_init
   local args=(android build --features core "$bundle" --target "$target" "${TAURI_ARGS[@]}")
   # Core overlay (and the platform overlay) may both carry frontendDist.
   # This final JSON override is merged last so Android reads its own frontend
   # directory and can never empty the desktop dist/core output.
   args+=(--config '{"build":{"frontendDist":"../dist/core-android"}}')
-  [ "$mode" = "debug" ] && args+=(--debug)
+  [ "$mode" != "release" ] && args+=(--debug)
   echo "tauri CLI (outer): $TAURI_CLI v$(outer_cli_version) via $TAURI_CLI_NODE"
   ( cd "$PROJECT_ROOT" && tauri "${args[@]}" )
   echo "--- artifacts ---"
