@@ -120,9 +120,17 @@
   pointer-events: none;
 }
 
+/* “原图”是按住对比的文字按钮：与“打开链接”同样留出左右内边距，按住时用主题强调色。 */
+.image-viewer-compare {
+  padding: 0 16px;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 .image-viewer-btn.is-active {
-  border-color: var(--accent, #6ea8fe);
-  background: rgba(110, 168, 254, 0.18);
+  border-color: color-mix(in srgb, var(--accent, #6ea8dc) 70%, #fff);
+  background: color-mix(in srgb, var(--accent, #6ea8dc) 34%, transparent);
 }
 
 .image-viewer-paint-surface {

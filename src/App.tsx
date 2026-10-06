@@ -84,6 +84,7 @@ import {
   type ReaderVisualPreferences,
 } from "./render/visual/readerVisualPreferences";
 import { setColorAssistMatrixProvider } from "./render/visual/readerVisualPaint";
+import { ReaderDisplaySettingsPopover } from "./ui/ReaderDisplaySettingsPopover";
 import "./ui/readerDisplaySettings.css";
 import { presentCrossBookHit, type CrossBookPanelResult } from "./ui/crossBookSearch";
 import type { ResolvedCrossBookSearchHit } from "./features/ai/indexing/indexStore";
@@ -6253,37 +6254,27 @@ export default function App() {
               <>
                 <div className="menu-backdrop" onClick={closeForeground} />
                 {displaySettingsOpen ? (
-                  <div className="reader-display-settings" role="dialog" aria-label="字符与画面设置">
-                    <div className="reader-display-settings__head">
-                      <button
-                        type="button"
-                        className="reader-display-settings__back"
-                        onClick={() => setForeground((current) => setMenuSubview(current, "main"))}
-                      >
-                        返回
-                      </button>
-                      <strong>字符与画面</strong>
-                      <button type="button" className="reader-display-settings__close" onClick={closeForeground} aria-label="关闭设置">×</button>
-                    </div>
-                    <div className="reader-display-settings__body">
-                      <TextProjectionPanel
-                        preferences={textProjectionPreferences}
-                        onChange={updateTextProjectionPreferences}
-                      />
-                      <ReaderVisualSettingsPanel
-                        value={visualPreferences}
-                        onChange={updateVisualPreferences}
-                        compareOriginal={visualCompareOriginal}
-                        onCompareOriginalChange={setVisualCompareOriginal}
-                        colorAssistSlot={
-                          <ColorAssistPanel
-                            value={visualPreferences.colorAssist}
-                            onChange={(colorAssist) => updateVisualPreferences({ ...visualPreferences, colorAssist })}
-                          />
-                        }
-                      />
-                    </div>
-                  </div>
+                  <ReaderDisplaySettingsPopover
+                    onBack={() => setForeground((current) => setMenuSubview(current, "main"))}
+                    onClose={closeForeground}
+                  >
+                    <TextProjectionPanel
+                      preferences={textProjectionPreferences}
+                      onChange={updateTextProjectionPreferences}
+                    />
+                    <ReaderVisualSettingsPanel
+                      value={visualPreferences}
+                      onChange={updateVisualPreferences}
+                      compareOriginal={visualCompareOriginal}
+                      onCompareOriginalChange={setVisualCompareOriginal}
+                      colorAssistSlot={
+                        <ColorAssistPanel
+                          value={visualPreferences.colorAssist}
+                          onChange={(colorAssist) => updateVisualPreferences({ ...visualPreferences, colorAssist })}
+                        />
+                      }
+                    />
+                  </ReaderDisplaySettingsPopover>
                 ) : fontSettingsOpen ? <FontSettingsPanel
                   source={settings.fontSource}
                   customFontId={settings.customFontId}
@@ -6408,7 +6399,7 @@ export default function App() {
                         if (scope === "all") void librarySearchRuntime.checkIndex();
                       }}
                       searchView={searchScope === "all" ? "original" : searchView}
-                      onSearchViewChange={searchScope === "current" ? (view) => {
+                      onSearchViewChange={searchScope === "current" && !isIdentityTextProjection(readerTextProjectionPreferences) ? (view) => {
                         searchAbortRef.current?.abort();
                         searchAbortRef.current = null;
                         searchGenerationRef.current++;

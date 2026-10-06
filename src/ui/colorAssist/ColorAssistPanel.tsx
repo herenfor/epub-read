@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import { correctionMatrix, previewColor, type AssistKind } from "../../render/colorAssist/colorAssistCore";
 import "./colorAssistPanel.css";
 
@@ -24,9 +25,9 @@ export interface ColorAssistSwatch {
 
 export const COLOR_ASSIST_OPTIONS: readonly ColorAssistOption[] = [
   { kind: "off", label: "关闭", detail: "不改变画面" },
-  { kind: "protan", label: "红色弱／红色盲辅助", detail: "protan" },
-  { kind: "deutan", label: "绿色弱／绿色盲辅助", detail: "deutan" },
-  { kind: "tritan", label: "蓝色弱／蓝色盲辅助", detail: "tritan" },
+  { kind: "protan", label: "红色弱／红色盲辅助", detail: "Protan" },
+  { kind: "deutan", label: "绿色弱／绿色盲辅助", detail: "Deutan" },
+  { kind: "tritan", label: "蓝色弱／蓝色盲辅助", detail: "Tritan" },
 ];
 
 /** Small preview palette only; it never becomes a full-page CPU filter. */
@@ -71,11 +72,9 @@ export function ColorAssistPanel({ value, onChange }: ColorAssistPanelProps) {
   };
 
   return (
-    <section className="color-assist-panel" aria-label="色弱辅助">
-      <div className="color-assist-heading">
-        <div className="color-assist-title">色弱辅助</div>
-        <div className="color-assist-note">把易混色差重新分配到更可辨的颜色方向，只改变显示，不宣称修复视力。</div>
-      </div>
+    <section className="rd-section color-assist-panel" aria-label="色弱辅助">
+      <div className="aa-group-title">色弱辅助</div>
+      <p className="rd-note">把易混的色差移到更好分辨的颜色方向；只改变显示，不宣称修复视力。</p>
       <div className="color-assist-options" role="group" aria-label="辅助类型">
         {COLOR_ASSIST_OPTIONS.map((option) => {
           const selected = option.kind === activeKind;
@@ -93,19 +92,21 @@ export function ColorAssistPanel({ value, onChange }: ColorAssistPanelProps) {
           );
         })}
       </div>
-      <label className="color-assist-strength">
-        <span className="color-assist-strength-label">辅助强度</span>
+      <label className="rd-range-row">
+        <span className="aa-section-label">强度</span>
         <input
           type="range"
+          className="rd-range"
           min="0"
           max="100"
           step="1"
           value={strengthPercent}
           disabled={activeKind === "off"}
           aria-label="色弱辅助强度"
+          style={{ "--fill": `${activeKind === "off" ? 0 : strengthPercent}%` } as CSSProperties}
           onChange={(event) => onChange({ kind: activeKind, strength: normalizeColorAssistStrength(Number(event.target.value) / 100) })}
         />
-        <output className="color-assist-strength-value">{activeKind === "off" ? "—" : `${strengthPercent}%`}</output>
+        <output className="rd-range-value">{activeKind === "off" ? "—" : `${strengthPercent}%`}</output>
       </label>
       <div className="color-assist-preview" aria-label={`同屏预览：上排原色，下排${activeLabel}辅助后`}>
         <span className="color-assist-preview-label">原色</span>
@@ -134,7 +135,7 @@ export function ColorAssistPanel({ value, onChange }: ColorAssistPanelProps) {
           })}
         </div>
       </div>
-      <p className="color-assist-hint">若同时使用灰度，100% 灰度会抹去色差并削弱此辅助效果。</p>
+      <p className="rd-note">同时开启灰度时，色差会被抹去，辅助效果随之减弱。</p>
     </section>
   );
 }

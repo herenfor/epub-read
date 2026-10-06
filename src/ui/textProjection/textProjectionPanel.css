@@ -1,121 +1,136 @@
-.text-projection-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  color: var(--reader-text, #222);
-}
-
-.text-projection-panel__header,
-.text-projection-panel__rules-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.text-projection-panel__header h2 {
-  margin: 0 0 4px;
-  font-size: 16px;
-}
-
-.text-projection-panel__header p,
-.text-projection-panel__rules-head span,
-.text-projection-panel__empty,
-.text-projection-panel__warning {
+/* 字符显示：外壳与通用控件来自 Aa 面板（aa-*）与 readerDisplaySettings.css（rd-*）。 */
+.text-projection-empty {
   margin: 0;
-  color: var(--reader-text-muted, #666);
-  font-size: 12px;
-  line-height: 1.45;
+  padding: 10px;
+  border: 1px dashed color-mix(in srgb, var(--panel-border) 80%, transparent);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 11.5px;
+  text-align: center;
 }
 
-.text-projection-panel__link {
-  border: 0;
-  background: transparent;
-  color: var(--reader-accent, #1b6dc1);
-  cursor: pointer;
-  padding: 2px 0;
-}
-
-.text-projection-panel__field,
-.text-projection-panel__preview label,
-.text-projection-panel__preview div {
+.text-projection-rules {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  font-size: 12px;
-}
-
-.text-projection-panel select,
-.text-projection-panel input {
-  min-width: 0;
-  border: 1px solid var(--reader-border, #bbb);
-  border-radius: 6px;
-  background: var(--reader-surface, #fff);
-  color: inherit;
-  padding: 5px 7px;
-}
-
-.text-projection-panel__rules {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.text-projection-panel__rules li {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr) auto;
+.text-projection-rule {
+  display: flex;
+  flex-direction: column;
   gap: 6px;
+  padding: 7px;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 55%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--fg) 3%, transparent);
+  transition: border-color 140ms ease, background-color 140ms ease;
+}
+
+.text-projection-rule.is-duplicate {
+  border-color: color-mix(in srgb, #d18a12 60%, transparent);
+  background: color-mix(in srgb, #d18a12 8%, transparent);
+}
+
+.text-projection-rule-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  border: 1px solid var(--reader-border, #ddd);
-  border-radius: 8px;
-  padding: 8px;
+  gap: 6px;
 }
 
-.text-projection-panel__rules li.is-duplicate {
-  border-color: #d99a2b;
-  background: rgba(217, 154, 43, 0.08);
+.text-projection-rule.is-off .text-projection-rule-main {
+  opacity: 0.55;
 }
 
-.text-projection-panel__warning {
-  grid-column: 1 / -1;
-  color: #a06400;
-}
-
-.text-projection-panel__enabled {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
+.text-projection-arrow {
+  color: var(--muted);
   font-size: 12px;
-  white-space: nowrap;
 }
 
-.text-projection-panel__arrow {
-  color: var(--reader-text-muted, #888);
-}
-
-.text-projection-panel__row-actions {
-  display: inline-flex;
+.text-projection-rule-actions {
+  display: flex;
+  align-items: center;
   gap: 2px;
 }
 
-.text-projection-panel__row-actions button {
-  border: 1px solid var(--reader-border, #ccc);
-  border-radius: 5px;
-  background: var(--reader-surface, #fff);
-  color: inherit;
-  width: 24px;
-  height: 24px;
-  cursor: pointer;
+.text-projection-rule-state {
+  margin-left: 6px;
+  color: var(--muted);
+  font-size: 11px;
 }
 
-.text-projection-panel__preview output {
-  min-height: 1.4em;
-  border: 1px dashed var(--reader-border, #bbb);
-  border-radius: 6px;
-  padding: 5px 7px;
-  background: var(--reader-surface, #fff);
-  white-space: pre-wrap;
+.text-projection-rule-spacer {
+  flex: 1;
 }
+
+.text-projection-rule-actions .aa-step-reset-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+  background: transparent;
+  color: var(--muted);
+}
+
+.text-projection-up {
+  transform: rotate(180deg);
+}
+
+.text-projection-remove:hover:not(:disabled) {
+  color: #d9534f;
+  background: color-mix(in srgb, #d9534f 12%, transparent);
+}
+
+.text-projection-warning {
+  margin: 0 2px;
+  color: color-mix(in srgb, #d18a12 80%, var(--fg));
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.text-projection-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.text-projection-preview .aa-section-label {
+  min-width: 36px;
+}
+
+.text-projection-output {
+  flex: 1;
+  min-width: 0;
+  min-height: 28px;
+  box-sizing: border-box;
+  padding: 5px 9px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  color: var(--fg);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.app[data-touch-ui="true"] .text-projection-empty,
+.app[data-touch-ui="true"] .text-projection-warning { font-size: 13px; }
+.app[data-touch-ui="true"] .text-projection-rule-state { font-size: 13px; }
+.app[data-touch-ui="true"] .text-projection-rule { padding: 8px; gap: 4px; }
+.app[data-touch-ui="true"] .text-projection-rule-actions .aa-step-reset-btn {
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+}
+.app[data-touch-ui="true"] .text-projection-rule-actions .aa-switch-label {
+  min-height: 44px;
+}
+.app[data-touch-ui="true"] .text-projection-output {
+  min-height: 44px;
+  padding: 11px 12px;
+  border-radius: 10px;
+  font-size: 15px;
+  line-height: 22px;
+}
+.app[data-touch-ui="true"] .text-projection-preview .aa-section-label { min-width: 44px; }

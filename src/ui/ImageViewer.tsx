@@ -468,7 +468,7 @@ export function ImageViewer({
         {onCompareOriginalChange ? (
           <button
             type="button"
-            className={`image-viewer-btn${compareOriginal ? " is-active" : ""}`}
+            className={`image-viewer-btn image-viewer-compare${compareOriginal ? " is-active" : ""}`}
             aria-pressed={compareOriginal}
             title="按住临时查看原图，松开恢复滤镜"
             onPointerDown={(event) => {
@@ -479,6 +479,7 @@ export function ImageViewer({
             onPointerCancel={() => onCompareOriginalChange(false)}
             onPointerLeave={() => onCompareOriginalChange(false)}
             onBlur={() => onCompareOriginalChange(false)}
+            onContextMenu={(event) => event.preventDefault()}
           >
             原图
           </button>
