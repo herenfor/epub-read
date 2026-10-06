@@ -239,6 +239,13 @@ export interface LoadOptions {
   readingAnchor?: PersistedNavigationAnchor | ReadingAnchor | null;
   /** Saved page for records that have no valid content anchor. */
   fallbackPage?: number | null;
+  /**
+   * Report this load's first restore outcome once through the restore-result
+   * handler: located only when a semantic (text/element/media) target really
+   * resolved. A failed target may still show the chapter start, but reports
+   * unresolved so the host does not save that start over the original.
+   */
+  reportRestore?: boolean;
   /** Exact search/note target for cross-chapter jumps; resolved before reveal. */
   preciseNavigation?: PreciseNavigationRequest | null;
   /**
@@ -519,6 +526,15 @@ export type PreciseNavigationStatus =
   | "unresolved"
   | "unsupported-highlight"
   | "cancelled";
+
+/** A restore target that names content (text, element or media), not just a page. */
+export function hasSemanticRestoreTarget(anchor: ReadingAnchor | null): boolean {
+  if (!anchor) return false;
+  return anchor.textOffset !== null
+    || anchor.textSnippet !== null
+    || (Number.isSafeInteger(anchor.index) && anchor.index >= 0)
+    || Boolean(anchor.mediaAnchor);
+}
 
 /** Pure restore precedence shared by initial layout and tests. */
 export function resolveRestoredPage({
@@ -2607,6 +2623,9 @@ export class ChapterPaginator {
   private anchorPath: string | undefined;
   /** 本次加载入口携带的不可变锚点副本（滚动入口定位用）。 */
   private pendingRestoreAnchor: ReadingAnchor | null = null;
+  /** First-restore report for the current load; null when none is owed. */
+  private restoreReport: { readonly semantic: boolean } | null = null;
+  private restoreResultHandler: ((located: boolean) => void) | null = null;
   /** 最近一次布局的有效列数（1/2）；窄窗回落结果。 */
   private effectiveColumns: 1 | 2 = 1;
   /** 前置空列数（page-break-before:always 等）；列→屏换算用。 */
@@ -2807,6 +2826,23 @@ export class ChapterPaginator {
   }
 
   /** 宿主接收“落定后跨章”的预约结果（同向第二次命令在去末屏途中到达）。 */
+  /** Receives each load's one-shot first-restore outcome (see LoadOptions.reportRestore). */
+  setRestoreResultHandler(handler: ((located: boolean) => void) | null): void {
+    this.restoreResultHandler = handler;
+  }
+
+  /**
+   * Settle the owed first-restore report once. A load without a semantic
+   * target (chapter start / legacy page) counts as located; a semantic target
+   * counts only when it really resolved.
+   */
+  private settleRestoreReport(semanticResolved: boolean): void {
+    const report = this.restoreReport;
+    if (!report) return;
+    this.restoreReport = null;
+    this.restoreResultHandler?.(!report.semantic || semanticResolved);
+  }
+
   setPageMotionChapterHandler(handler: ((direction: MotionDirection) => void) | null): void {
     this.pageMotionChapterHandler = handler;
   }
@@ -3425,6 +3461,9 @@ export class ChapterPaginator {
     if (opts.readingAnchor) {
       preciseAnchor = this.setReadingAnchor(path, opts.readingAnchor);
     }
+    this.restoreReport = opts.reportRestore && !opts.preciseNavigation
+      ? { semantic: hasSemanticRestoreTarget(preciseAnchor) }
+      : null;
     this._currentPath = path;
     this.pendingAnchor = opts.anchor;
     this.pendingStartAtEnd = opts.startAtEnd === true;
@@ -4615,12 +4654,13 @@ export class ChapterPaginator {
   }
 
   /** 滚动模式下的入口定位：文字锚点 → 内容 y；legacy 元素锚点 → 元素顶边。 */
+  /** Returns whether a semantic target (text/element) was located. */
   private applyScrollRestore(
     fallbackPage: number | null,
     preciseAnchor: ReadingAnchor | null
-  ): void {
+  ): boolean {
     const viewer = this.viewer;
-    if (!viewer) return;
+    if (!viewer) return false;
     const index = this.textIndex;
     const metrics = this.scrollMetrics();
     const inset = Math.round(Math.min(24, Math.max(0, metrics.viewportHeight * 0.04)));
@@ -4683,6 +4723,7 @@ export class ChapterPaginator {
       viewer.scrollTop = 0;
     }
     this.lastScrollTop = viewer.scrollTop;
+    return rangeTop !== null;
   }
 
   /** 滚动模式：一帧内的滚动范围换算与进度采样。 */
@@ -6205,6 +6246,7 @@ export class ChapterPaginator {
       this.pendingAnchor = undefined;
       this.pendingStartAtEnd = false;
       this.pendingRestoreAnchor = null;
+      this.settleRestoreReport(true);
       this.lastScrollTop = viewer.scrollTop;
       this.emit(this.readyState(true));
       return;
@@ -6214,7 +6256,8 @@ export class ChapterPaginator {
     const pageCount = Math.max(1, Math.ceil(metrics.contentHeight / Math.max(1, metrics.viewportHeight)));
     // 索引、笔记与搜索高亮必须在入口定位前重建（F4 保持）。
     this.rebuildTextIndexForCurrentDoc();
-    this.applyScrollRestore(this.pendingFallbackPage, this.pendingRestoreAnchor);
+    const scrollLocated = this.applyScrollRestore(this.pendingFallbackPage, this.pendingRestoreAnchor);
+    this.settleRestoreReport(scrollLocated);
     this.pendingFallbackPage = null;
     this.pendingAnchor = undefined;
     this.pendingStartAtEnd = false;
@@ -6290,6 +6333,8 @@ export class ChapterPaginator {
     if (layout.empty) {
       this.removeTailSpacer();
       this.metrics = { pageCount: 1, currentPage: 0 };
+      // Nothing to locate in an empty chapter; its start is the position.
+      this.settleRestoreReport(true);
       this.emit({
         status: "ready",
         pageCount: 1,
@@ -6326,6 +6371,8 @@ export class ChapterPaginator {
     // the current page centre to upgrade it to the text anchor used by new
     // progress writes; no layout rule is changed.
     if (resolvedAnchor?.source === "legacy") this.captureAnchor();
+    // Only the anchored (load) pass settles the first restore; image reflow passes do not.
+    if (useAnchor) this.settleRestoreReport(resolvedAnchor !== null);
     this.emit(this.readyState(false));
     // 粘性锚点：使用锚点恢复时不重新取样（否则恢复后页心可能是下一段，
     // 反复缩放会逐段漂移）；仅当无锚点（首次加载）时建立
@@ -8982,6 +9029,7 @@ export class ChapterPaginator {
     this.clearSearchHighlightForDocument();
     this.pendingPrecise = null;
     this.pendingRestoreAnchor = null;
+    this.restoreReport = null;
     this.removeTailSpacer();
     this.bookmarkSpreadCache.clear();
     this.spreadLayout = null;

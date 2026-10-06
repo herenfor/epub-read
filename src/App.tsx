@@ -165,6 +165,13 @@ import {
   type CheckpointedSample,
 } from "./ui/checkpointProgressRepair";
 import { progressValueFromPatch } from "./ui/portableState/shelfStoreAdapter";
+import {
+  beginRestoreCommit,
+  mayCommitRestoredProgress,
+  reduceRestoreCommit,
+  type RestoreCommitEvent,
+  type RestoreCommitState,
+} from "./ui/restoreCommitGate";
 import type { ProgressLease } from "./ui/portableState/ownedProgressSessions";
 import { currentChapterCharsRead } from "./ui/readingProgress";
 import {
@@ -346,6 +353,11 @@ function toPersistedReaderAnchor(value: {
     mediaAnchor,
   };
 }
+
+/** Gate events without the ticket: App binds them to the current restore request. */
+type RestoreGateEvent = RestoreCommitEvent extends infer E
+  ? E extends RestoreCommitEvent ? Omit<E, "ticket"> : never
+  : never;
 
 type PortableProgressChoiceCandidate = {
   readonly stamp: Stamp;
@@ -1434,6 +1446,36 @@ export default function App() {
   const hasReaderDisplayedRef = useRef(false);
   /** 语义锚点失败后先结束 loading，但禁止把失败落点当作成功进度写盘。 */
   const suppressShelfProgressRef = useRef(false);
+  /**
+   * 开书恢复的进度回写门。null = 没有待结算的恢复（显式导航已接管或已结算）。
+   * 恢复目标解析失败时页面可显示章首，但在用户真实提交新位置前不得写进度。
+   */
+  const readingModeRef = useRef(settings.readingMode);
+  readingModeRef.current = settings.readingMode;
+  const restoreGateRef = useRef<RestoreCommitState | null>(null);
+  const restoreRequestRef = useRef(0);
+  /** 首次恢复已结算（统计任务在此之后启动，前台开章优先）。 */
+  const [restoreSettled, setRestoreSettled] = useState(true);
+  const dispatchRestoreGate = useCallback((event: RestoreGateEvent) => {
+    const gate = restoreGateRef.current;
+    if (!gate) return;
+    const next = reduceRestoreCommit(gate, { ...event, ticket: gate.ticket } as RestoreCommitEvent);
+    restoreGateRef.current = mayCommitRestoredProgress(next) ? null : next;
+    if (next.phase !== "resolving") setRestoreSettled(true);
+  }, []);
+  /** 只有当前会话、当前恢复请求、同一章节的结果才能结算。 */
+  const restoreResultMatches = useCallback((chapterPath: string): boolean => {
+    const gate = restoreGateRef.current;
+    return gate !== null
+      && gate.ticket.session === activeSessionRef.current?.generation
+      && gate.ticket.chapterPath === chapterPath;
+  }, []);
+  /** 显式导航（目录/搜索/书签/历史/笔记）由用户选定目标：作废未结算的旧恢复。 */
+  const releaseRestoreForExplicitNavigation = useCallback(() => {
+    if (!restoreGateRef.current) return;
+    restoreGateRef.current = null;
+    setRestoreSettled(true);
+  }, []);
   // 每个稳定位置只能被一次显式跳转捕获；新书初始加载时
   // 仍允许以已保存的基线位置记录“第一次跳转”。
   const historyCaptureAllowedRef = useRef(true);
@@ -1657,6 +1699,20 @@ export default function App() {
       setAnchor(undefined);
       setInitialPage(saved?.page ?? 0);
       setInitialAnchor(toPersistedReaderAnchor(saved?.anchor));
+      {
+        const ticket = {
+          session: generation,
+          request: ++restoreRequestRef.current,
+          chapterPath: spineItemPath(b, start) ?? "",
+        };
+        let gate = beginRestoreCommit(ticket);
+        // 没有正文/元素/媒体目标（新书、章首、旧页码、固定版式）：按正常开章结算。
+        if (b.fixedLayout || !toPersistedReaderAnchor(saved?.anchor)) {
+          gate = reduceRestoreCommit(gate, { type: "resolved", ticket, located: true });
+        }
+        restoreGateRef.current = gate;
+        setRestoreSettled(gate.phase !== "resolving");
+      }
       lastStablePositionRef.current = {
         spineIndex: start,
         page: saved?.page ?? 0,
@@ -2901,6 +2957,8 @@ export default function App() {
 
   /** 语义锚点失败：解除显示门，但守住进度，直到读者真实移动后再写。 */
   const handleReaderNavigationUnresolved = useCallback((reported: boolean): void => {
+    dispatchRestoreGate({ type: "resolved", located: false });
+    dispatchRestoreGate({ type: "display-ready" });
     navigationPendingRef.current = false;
     historyCaptureAllowedRef.current = true;
     readerDisplayReadyRef.current = true;
@@ -2911,7 +2969,17 @@ export default function App() {
     setInitialAlignment("context");
     suppressShelfProgressRef.current = true;
     if (!reported) showReaderNotice("未能定位保存位置，已停留在章节开头", "warn");
-  }, [showReaderNotice]);
+  }, [showReaderNotice, dispatchRestoreGate]);
+
+  /** 分页视图的首次恢复结果；预加载与过期章节已在视图内/此处过滤。 */
+  const handleReaderRestoreResult = useCallback((result: { chapterPath: string; located: boolean }): void => {
+    if (!restoreResultMatches(result.chapterPath)) return;
+    const resolving = restoreGateRef.current?.phase === "resolving";
+    dispatchRestoreGate({ type: "resolved", located: result.located });
+    if (resolving && !result.located) {
+      showReaderNotice("未能定位保存位置，已停留在章节开头；原阅读进度已保留", "warn");
+    }
+  }, [dispatchRestoreGate, restoreResultMatches, showReaderNotice]);
 
   const handlePreciseNavigationStatus = useCallback((status: {
     requestId: number;
@@ -3456,7 +3524,8 @@ export default function App() {
     chapterCountJobRef.current?.cancel();
     chapterCountJobRef.current = null;
     const active = activeSessionRef.current;
-    if (view !== "reader" || !book || !server || !active) return;
+    // 前台开章与首次恢复优先：恢复结算后再开始后台按需读取统计。
+    if (view !== "reader" || !book || !server || !active || !restoreSettled) return;
     const cachedIndices = new Set<number>();
     for (const [index, count] of chapterCountsRef.current.counts.entries()) {
       if (count.source === "estimated") cachedIndices.add(index);
@@ -3493,7 +3562,7 @@ export default function App() {
       job.cancel();
       if (chapterCountJobRef.current === job) chapterCountJobRef.current = null;
     };
-  }, [view, book, server, bookKey, applyCount, applyCountBatch, applyCountError]);
+  }, [view, book, server, bookKey, restoreSettled, applyCount, applyCountBatch, applyCountError]);
 
   // 统一固定内容轴：在本次书籍会话第一次得到完整有效 linear 章节权重时冻结一份轴
   useEffect(() => {
@@ -3590,7 +3659,8 @@ export default function App() {
   const handleUserReadingPositionChange = useCallback(() => {
     // 只有宿主实际用户位移才解除失败保护，重排和采样变化不能代替用户输入。
     suppressShelfProgressRef.current = false;
-  }, []);
+    dispatchRestoreGate({ type: "user-position-committed" });
+  }, [dispatchRestoreGate]);
 
   const onPageState = useCallback((s: ChapterState) => {
     chapterStateRef.current = s;
@@ -3633,6 +3703,12 @@ export default function App() {
   }, [dispatchScrub]);
 
   const handleReaderDisplayReady = useCallback(() => {
+    // 连续视图失败走 onNavigationUnresolved；能走到 display-ready 即目标已提交。
+    // 分页视图由 onRestoreResult 结算，display-ready 不能解除失败保护。
+    if (readingModeRef.current === "scroll" && !bookRef.current?.fixedLayout) {
+      dispatchRestoreGate({ type: "resolved", located: true });
+    }
+    dispatchRestoreGate({ type: "display-ready" });
     navigationPendingRef.current = false;
     historyCaptureAllowedRef.current = true;
     readerDisplayReadyRef.current = true;
@@ -3700,6 +3776,19 @@ export default function App() {
         state.pageCount,
       );
       applyCount(active.generation, currentIndex, measuredChars, "measured");
+    }
+    // 恢复未放行（未结算/定位失败）时保留开书写入的原位置，历史返回不指向章首。
+    const restoreBlocked = restoreGateRef.current !== null && !mayCommitRestoredProgress(restoreGateRef.current);
+    if (
+      !restoreBlocked &&
+      active &&
+      expectedPath &&
+      state.status === "ready" &&
+      !state.empty &&
+      readingAnchor?.path === expectedPath &&
+      Number.isSafeInteger(readingAnchor.totalChars) &&
+      readingAnchor.totalChars >= 0
+    ) {
       lastStablePositionRef.current = {
         spineIndex: currentIndex,
         page: state.currentPage,
@@ -3752,6 +3841,7 @@ export default function App() {
       setPreciseTarget(null);
       latestPreciseRequestRef.current = null;
       navigationPendingRef.current = true;
+      releaseRestoreForExplicitNavigation();
       historyCaptureAllowedRef.current = false;
       readerDisplayReadyRef.current = false;
       setReaderDisplayReady(false);
@@ -3946,6 +4036,7 @@ export default function App() {
     }
     if (idx >= 0) {
       navigationPendingRef.current = true;
+      releaseRestoreForExplicitNavigation();
       historyCaptureAllowedRef.current = false;
       readerDisplayReadyRef.current = false;
       setReaderDisplayReady(false);
@@ -3989,6 +4080,7 @@ export default function App() {
       request: scrubRequestIdRef.current,
     };
     navigationPendingRef.current = true;
+    releaseRestoreForExplicitNavigation();
     historyCaptureAllowedRef.current = false;
     dispatchScrub({ type: "begin", token, ratio: r });
 
@@ -4166,6 +4258,7 @@ export default function App() {
     // 跨章先进入目标章节；精确范围/高亮在显示门内解析，失败不冒充命中。
     captureReaderHistory(result.chapterPath);
     navigationPendingRef.current = true;
+    releaseRestoreForExplicitNavigation();
     historyCaptureAllowedRef.current = false;
     readerDisplayReadyRef.current = false;
     setReaderDisplayReady(false);
@@ -4240,6 +4333,7 @@ export default function App() {
     }
     lastStablePositionRef.current = transition.target;
     navigationPendingRef.current = true;
+    releaseRestoreForExplicitNavigation();
     historyCaptureAllowedRef.current = false;
     readerDisplayReadyRef.current = false;
     setReaderDisplayReady(false);
@@ -4292,6 +4386,7 @@ export default function App() {
     }
     lastStablePositionRef.current = transition.target;
     navigationPendingRef.current = true;
+    releaseRestoreForExplicitNavigation();
     historyCaptureAllowedRef.current = false;
     readerDisplayReadyRef.current = false;
     setReaderDisplayReady(false);
@@ -4497,6 +4592,7 @@ export default function App() {
     }
     captureReaderHistory(note.chapterPath);
     navigationPendingRef.current = true;
+    releaseRestoreForExplicitNavigation();
     historyCaptureAllowedRef.current = false;
     readerDisplayReadyRef.current = false;
     setReaderDisplayReady(false);
@@ -4736,6 +4832,7 @@ export default function App() {
       }
       captureReaderHistory(spineItemPath(book, spineIndex) ?? "");
       navigationPendingRef.current = true;
+      releaseRestoreForExplicitNavigation();
       historyCaptureAllowedRef.current = false;
       readerDisplayReadyRef.current = false;
       setReaderDisplayReady(false);
@@ -4781,6 +4878,7 @@ export default function App() {
     if (
       readerDisplayReady &&
       !suppressShelfProgressRef.current &&
+      !(restoreGateRef.current && !mayCommitRestoredProgress(restoreGateRef.current)) &&
       !navigationPendingRef.current &&
       chapterState.status === "ready" &&
       !chapterState.empty &&
@@ -5092,6 +5190,9 @@ export default function App() {
    * 返回书架/切后台/关窗/导出/换书是显式保存：用同一次读数的视觉屏与锚点。
    */
   const persistShelfProgress = useCallback((explicit = false) => {
+    // 自动与显式（返回书架/后台/关窗）入口同样受恢复门约束：未结算或失败的
+    // 恢复不能用当前（可能是章首）位置覆盖原进度与本机检查点。
+    if (restoreGateRef.current && !mayCommitRestoredProgress(restoreGateRef.current)) return;
     if (
       suppressShelfProgressRef.current ||
       navigationPendingRef.current ||
@@ -6487,6 +6588,7 @@ export default function App() {
                   onInternalNavigationSettled={handleReaderDisplayReady}
                   onNavigationUnresolved={handleReaderNavigationUnresolved}
                   onUserReadingPositionChange={handleUserReadingPositionChange}
+                  onRestoreResult={handleReaderRestoreResult}
                   onExternalLink={handleExternalLink}
                    onFootnote={(payload) => openTransient("footnote", payload)}
                   onFootnoteClose={handleFootnoteClose}

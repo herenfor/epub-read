@@ -41,6 +41,8 @@ export function createDefaultIdleScheduler(): IdleScheduler {
 
 export interface ChapterCountJobServer {
   textFor(path: string): string | undefined;
+  /** On-demand read for lazily decompressed archives; preferred when present. */
+  readTextFor?(path: string, signal?: AbortSignal): Promise<string>;
 }
 
 export interface ChapterCountJobOptions {
@@ -105,50 +107,79 @@ export function createChapterCountJob(options: ChapterCountJobOptions): { cancel
     .filter((index) => index >= 0 && !options.skipIndices?.has(index));
   let cursor = 0;
   let scheduled: number | null = null;
-  const maxPerSlice = Math.max(1, Math.min(4, Math.floor(options.maxPerSlice ?? 4)));
+  // Async reads go one chapter per idle slice so foreground chapter loads keep priority.
+  const asyncRead = typeof options.server.readTextFor === "function";
+  const maxPerSlice = Math.max(1, Math.min(4, Math.floor(options.maxPerSlice ?? (asyncRead ? 1 : 4))));
+  /** Exactly one slice runs at a time; a new idle callback is requested only after it settles. */
+  let running = false;
 
   const current = (): boolean =>
     !controller.signal.aborted &&
     (options.isCurrent?.(options.generation, options.book, options.server) ?? true);
 
+  const readText = (path: string): string | undefined | Promise<string> =>
+    asyncRead ? options.server.readTextFor!(path, controller.signal) : options.server.textFor(path);
+
+  /** Runs synchronously for a sync server; only a real async read yields. */
+  const runSlice = async (): Promise<void> => {
+    const counts: Array<[number, number]> = [];
+    for (let processed = 0; processed < maxPerSlice && cursor < indices.length; processed++) {
+      const index = indices[cursor++];
+      let value: number | null = null;
+      let issue: string | undefined;
+      try {
+        const item = options.book.spine[index];
+        const manifest = options.book.manifest.get(item.idref);
+        if (!manifest) {
+          issue = `chapter ${index}: manifest item missing`;
+        } else {
+          const path = resolvePath(options.book.opfPath, manifest.href);
+          const raw = readText(path);
+          const text = typeof raw === "string" || raw === undefined ? raw : await raw;
+          if (!current()) return;
+          if (text === undefined) {
+            issue = `chapter ${index}: text resource missing (${path})`;
+          } else {
+            value = countStructuralChapter((options.parse ?? defaultParse)(text));
+          }
+        }
+      } catch (error) {
+        if (!current()) return;
+        issue = `chapter ${index}: ${error instanceof Error ? error.message : String(error)}`;
+      }
+      if (!current()) return;
+      if (value === null) {
+        // A failed read stays an error (incomplete weights), never a counted 0.
+        options.onError?.(index);
+        if (issue) options.onIssue?.(issue);
+      } else {
+        counts.push([index, value]);
+        if (!options.onCounts) options.onCount(index, value);
+      }
+    }
+    if (!current()) return;
+    if (counts.length > 0 && options.onCounts) options.onCounts(counts);
+  };
+
   const schedule = (): void => {
-    if (!current() || cursor >= indices.length || scheduled !== null) return;
+    if (!current() || cursor >= indices.length || scheduled !== null || running) return;
     scheduled = scheduler.request(() => {
       scheduled = null;
-      if (!current()) return;
-      const counts: Array<[number, number]> = [];
-      for (let processed = 0; processed < maxPerSlice && cursor < indices.length; processed++) {
-        const index = indices[cursor++];
-        let value: number | null = null;
-        let issue: string | undefined;
-        try {
-          const item = options.book.spine[index];
-          const manifest = options.book.manifest.get(item.idref);
-          if (!manifest) {
-            issue = `chapter ${index}: manifest item missing`;
-          } else {
-            const path = resolvePath(options.book.opfPath, manifest.href);
-            const text = options.server.textFor(path);
-            if (text === undefined) {
-              issue = `chapter ${index}: text resource missing (${path})`;
-            } else {
-              value = countStructuralChapter((options.parse ?? defaultParse)(text));
-            }
-          }
-        } catch (error) {
-          issue = `chapter ${index}: ${error instanceof Error ? error.message : String(error)}`;
-        }
-        if (!current()) return;
-        if (value === null) {
-          options.onError?.(index);
-          if (issue) options.onIssue?.(issue);
-        } else {
-          counts.push([index, value]);
-          if (!options.onCounts) options.onCount(index, value);
-        }
+      if (!current() || running) return;
+      running = true;
+      const settle = (): void => {
+        running = false;
+        schedule();
+      };
+      if (!asyncRead) {
+        // Sync source: the whole slice already ran inside runSlice's first tick.
+        void runSlice().catch(() => undefined);
+        settle();
+        return;
       }
-      if (counts.length > 0 && options.onCounts) options.onCounts(counts);
-      schedule();
+      void runSlice()
+        .catch(() => { /* per-chapter errors are reported above; cancellation is silent */ })
+        .finally(settle);
     }, { timeout: 100 });
   };
 

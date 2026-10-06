@@ -33,9 +33,17 @@ export interface SearchProgress {
 
 export interface SearchBookOptions {
   /** Overrides ResourceServer/book resource decoding, useful for tests and streaming hosts. */
-  textFor?: (path: string) => string | undefined | Promise<string | undefined>;
+  /**
+   * Chapter source. `undefined` means "not available right now" and is never
+   * cached; a thrown error means the read failed and fails the query.
+   */
+  textFor?: (path: string, signal?: AbortSignal) => string | undefined | Promise<string | undefined>;
   /** Alternative injected source; textFor takes precedence. */
-  resourceServer?: { textFor(path: string): string | undefined };
+  resourceServer?: {
+    textFor(path: string): string | undefined;
+    /** On-demand read for archives that decompress chapters lazily. */
+    readTextFor?(path: string, signal?: AbortSignal): Promise<string>;
+  };
   signal?: AbortSignal;
   maxResults?: number;
   onProgress?: (progress: SearchProgress) => void;
@@ -368,8 +376,13 @@ function displayResultForGroup(
  * normalized arrays. dispose() releases all extracted text and mappings.
  */
 export function createSearchSession(book: Book, options: SearchBookOptions = {}): SearchSession {
+  const server = options.resourceServer;
   const textFor = options.textFor
-    ?? (options.resourceServer ? (path: string) => options.resourceServer!.textFor(path) : undefined)
+    ?? (server
+      ? (server.readTextFor
+        ? (path: string, signal?: AbortSignal) => server.readTextFor!(path, signal)
+        : (path: string) => server.textFor(path))
+      : undefined)
     ?? ((path: string) => {
       const resource = book.resources.get(path);
       return resource ? decodeBytes(resource.data) : undefined;
@@ -401,9 +414,13 @@ export function createSearchSession(book: Book, options: SearchBookOptions = {})
         if (path) {
           let chapter = cache.get(index);
           if (!cache.has(index)) {
-            const source = await textFor(path);
+            const source = await textFor(path, signal);
             abortIfNeeded(signal);
+            // A stale query must not rebuild the cache of a disposed session.
+            if (disposed) throw new Error("搜索会话已释放");
             if (source === undefined) {
+              // Not loaded yet: skip it for this query but do not remember it
+              // as an empty chapter, so a later query reads it again.
               chapter = null;
             } else {
               const segmented = projection ? await extractSearchTextSegments(source) : null;
@@ -421,7 +438,8 @@ export function createSearchSession(book: Book, options: SearchBookOptions = {})
                 projected,
               };
             }
-            cache.set(index, chapter);
+            if (disposed) throw new Error("搜索会话已释放");
+            if (chapter) cache.set(index, chapter);
           }
           if (chapter) {
             if (!projection) {
