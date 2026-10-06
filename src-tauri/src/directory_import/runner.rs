@@ -17,8 +17,8 @@ use super::types::{
 use crate::linked_library::{
     canonical_epub_path, hash_file, inspect_epub, library_root, make_binding,
     make_managed_binding, make_managed_record, managed_source_path, replace_file_atomically,
-    save_portable_import, snapshot, verify_binding_for_list_refresh, DeviceBinding,
-    FileSnapshot, ImportedMetadata, LinkedLibraryRecord,
+    snapshot, verify_binding_for_list_refresh, DeviceBinding, FileSnapshot,
+    ImportedMetadata, LinkedLibraryRecord,
 };
 #[cfg(target_os = "android")]
 use crate::linked_library::{
@@ -28,8 +28,8 @@ use crate::portable_state::{
     DirectoryBindingWrite, DirectoryFolderCreate, DirectoryImportBatchOutcome,
     DirectoryPlacementDecision, DirectoryPlacementRequest, DirectoryPlacementSnapshot,
 };
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::collections::{BTreeMap, HashMap};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::ipc::Channel;
 use tauri::AppHandle;
@@ -57,7 +57,36 @@ struct PreparedSuccess {
 
 enum PreparedPayload {
     Linked { path: PathBuf, snapshot: FileSnapshot },
-    Managed { staging_path: PathBuf },
+    Managed { staging: OwnedStaging },
+}
+
+/// Owns exactly one staging path until the bytes have been atomically moved to
+/// their managed target.  `published` is the only way to revoke cleanup; after
+/// that the guard never touches the published target.
+struct OwnedStaging(Option<PathBuf>);
+
+impl OwnedStaging {
+    fn new(path: PathBuf) -> Self {
+        Self(Some(path))
+    }
+
+    fn path(&self) -> &Path {
+        self.0
+            .as_deref()
+            .expect("owned staging has not been published")
+    }
+
+    fn published(&mut self) {
+        self.0 = None;
+    }
+}
+
+impl Drop for OwnedStaging {
+    fn drop(&mut self) {
+        if let Some(path) = self.0.take() {
+            let _ = std::fs::remove_file(path);
+        }
+    }
 }
 
 enum PrepareOutcome {
@@ -94,18 +123,59 @@ impl RunnerState {
         });
     }
 
-    fn observe(&self, content_hash: &str) -> Result<DirectoryPlacementSnapshot, String> {
+    fn observe_many(
+        &self,
+        content_hashes: &[String],
+    ) -> Result<BTreeMap<String, DirectoryPlacementSnapshot>, String> {
+        if content_hashes.is_empty() {
+            return Ok(BTreeMap::new());
+        }
         let values = crate::portable_state_commands::with_existing_store(&self.app, |store| {
-            store.directory_placement_snapshots(&[content_hash.to_string()])
+            store.directory_placement_snapshots(content_hashes)
         })
         .map_err(|error| error.to_string())?;
         let Some(values) = values else {
             return Err("可移植资料仓储未激活，无法开始目录导入".to_string());
         };
-        values
-            .get(content_hash)
-            .cloned()
-            .ok_or_else(|| "无法读取书籍归属观察值".to_string())
+        Ok(values)
+    }
+
+    fn persist_metadata(
+        &self,
+        records: &[LinkedLibraryRecord],
+        bindings: &[DeviceBinding],
+    ) -> Result<(), String> {
+        let values = records
+            .iter()
+            .map(|record| serde_json::to_value(record).map_err(|error| error.to_string()))
+            .collect::<Result<Vec<_>, _>>()?;
+        let rows = bindings
+            .iter()
+            .map(|binding| {
+                serde_json::to_string(binding)
+                    .map(|raw| (binding.content_hash.clone(), raw))
+                    .map_err(|error| error.to_string())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let visible_hashes = records
+            .iter()
+            .map(|record| record.content_hash.clone())
+            .collect::<Vec<_>>();
+        let is_new_hashes = records
+            .iter()
+            .filter(|record| record.is_new)
+            .map(|record| record.content_hash.clone())
+            .collect::<Vec<_>>();
+        let result = crate::portable_state_commands::with_existing_store(&self.app, |store| {
+            store.publish_directory_import_batch(
+                values,
+                rows,
+                visible_hashes,
+                is_new_hashes,
+            )
+        })
+        .map_err(|error| error.to_string())?;
+        result.ok_or_else(|| "可移植资料仓储未激活".to_string())
     }
 
     fn existing_binding_available(&self, content_hash: &str) -> Result<bool, String> {
@@ -130,18 +200,16 @@ impl RunnerState {
         let PreparedSuccess {
             payload, reservation, ..
         } = item;
-        if let PreparedPayload::Managed { staging_path } = payload {
-            let _ = std::fs::remove_file(staging_path);
-        }
+        drop(payload);
         budget.release(reservation);
     }
 
-    fn publish(&self, item: &PreparedSuccess) -> Result<(LinkedLibraryRecord, DeviceBinding), String> {
-        match &item.payload {
+    fn publish(&self, item: &mut PreparedSuccess) -> Result<(LinkedLibraryRecord, DeviceBinding), String> {
+        match &mut item.payload {
             PreparedPayload::Linked { path, snapshot } => {
                 let binding = make_binding(
                     item.content_hash.clone(),
-                    path,
+                    &*path,
                     snapshot.clone(),
                     &item.metadata,
                 );
@@ -152,10 +220,12 @@ impl RunnerState {
                 );
                 Ok((record, binding))
             }
-            PreparedPayload::Managed { staging_path } => {
+            PreparedPayload::Managed { staging } => {
                 let target = managed_source_path(&self.root, &item.content_hash)?;
-                replace_file_atomically(staging_path, &target)
+                let staging_path = staging.path().to_path_buf();
+                replace_file_atomically(&staging_path, &target)
                     .map_err(|error| format!("无法发布托管副本：{error}"))?;
+                staging.published();
                 let snapshot = snapshot(&target)?;
                 let binding = make_managed_binding(
                     item.content_hash.clone(),
@@ -195,7 +265,7 @@ impl RunnerState {
         let mut group_targets: Vec<(String, String)> = Vec::new();
         let mut create_specs: HashMap<String, String> = HashMap::new();
 
-        for item in batch {
+        for mut item in batch {
             if self.seen.winner(&item.content_hash).is_some() {
                 self.counts.duplicates += 1;
                 self.cleanup_item(budget, item);
@@ -212,7 +282,7 @@ impl RunnerState {
                 if existing_available {
                     Ok(None)
                 } else {
-                    self.publish(&item).map(Some)
+                    self.publish(&mut item).map(Some)
                 };
             match published {
                 Ok(published) => {
@@ -271,26 +341,14 @@ impl RunnerState {
         }
 
         if !records.is_empty() || !bindings.is_empty() {
-            match save_portable_import(&self.app, &records, &bindings) {
-                Ok(Some(())) => {}
-                Ok(None) => {
-                    self.gate.end_batch();
-                    for item in published_items {
-                        self.cleanup_item(budget, item);
-                    }
-                    return Err(
-                        "可移植资料仓储未激活，书籍已发布但未写入本机资料".to_string()
-                    );
+            if let Err(message) = self.persist_metadata(&records, &bindings) {
+                self.gate.end_batch();
+                for item in published_items {
+                    self.cleanup_item(budget, item);
                 }
-                Err(message) => {
-                    self.gate.end_batch();
-                    for item in published_items {
-                        self.cleanup_item(budget, item);
-                    }
-                    return Err(format!(
-                        "书籍正文已发布，但本机资料写入失败：{message}；请刷新后重试"
-                    ));
-                }
+                return Err(format!(
+                    "书籍正文已发布，但本机资料写入失败：{message}；请刷新后重试"
+                ));
             }
         }
 
@@ -579,33 +637,20 @@ fn prepare_managed(
     reservation: Reservation,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<PreparedSuccess, (bool, String)> {
-    let staging_path = new_staging_path(root).map_err(|error| (false, error))?;
-    let cleanup = |message: String| {
-        let _ = std::fs::remove_file(&staging_path);
-        message
-    };
+    let staging = OwnedStaging::new(new_staging_path(root).map_err(|error| (false, error))?);
     let mut reader = crate::android_uri_bridge::open_content_uri(app, uri)
-        .map_err(|error| (false, cleanup(format!("无法打开 Android content URI：{error}"))))?;
-    let staged = match stream_restricted_reader_to_staging(&mut reader, &staging_path, cancelled) {
+        .map_err(|error| (false, format!("无法打开 Android content URI：{error}")))?;
+    let staged = match stream_restricted_reader_to_staging(&mut reader, staging.path(), cancelled) {
         Ok(staged) => staged,
-        Err(PrepareError::Cancelled { .. }) => {
-            let _ = std::fs::remove_file(&staging_path);
-            return Err((true, String::new()));
-        }
-        Err(PrepareError::Failed { message, .. }) => {
-            return Err((false, cleanup(message)));
-        }
+        Err(PrepareError::Cancelled { .. }) => return Err((true, String::new())),
+        Err(PrepareError::Failed { message, .. }) => return Err((false, message)),
     };
     let content_hash = staged.content_hash;
-    let metadata = inspect_epub(&staging_path).map_err(|error| (false, cleanup(error)))?;
+    let metadata = inspect_epub(staging.path()).map_err(|error| (false, error))?;
     if metadata.spine.is_empty() {
-        return Err((
-            false,
-            cleanup("EPUB OPF 没有可阅读的 spine 条目".to_string()),
-        ));
+        return Err((false, "EPUB OPF 没有可阅读的 spine 条目".to_string()));
     }
     if cancelled() {
-        let _ = std::fs::remove_file(&staging_path);
         return Err((true, String::new()));
     }
     Ok(PreparedSuccess {
@@ -615,7 +660,7 @@ fn prepare_managed(
         content_hash,
         file_name: entry.epub.file_name.clone(),
         metadata,
-        payload: PreparedPayload::Managed { staging_path },
+        payload: PreparedPayload::Managed { staging },
         reservation,
         observed: empty_observation(),
     })
@@ -754,23 +799,16 @@ pub fn run_import(
         });
 
         let mut cancelled_in_wave = false;
+        let mut wave_successes: Vec<PreparedSuccess> = Vec::new();
         for (offset, outcome) in outcomes.into_iter().enumerate() {
             match outcome {
-                PrepareOutcome::Success(mut item) => match state.observe(&item.content_hash) {
-                    Ok(observed) => {
-                        item.observed = observed;
-                        pending.push(item);
-                    }
-                    Err(message) => {
-                        state.counts.failed += 1;
-                        state.push_issue(
-                            ordered[wave_start + offset].1.epub.input_id.clone(),
-                            ImportIssueKind::SourceFailed,
-                            message,
-                        );
+                PrepareOutcome::Success(item) => {
+                    if state.gate.cancelled() {
                         state.cleanup_item(&mut budget, item);
+                    } else {
+                        wave_successes.push(item);
                     }
-                },
+                }
                 PrepareOutcome::Failed {
                     input_id,
                     message,
@@ -795,12 +833,51 @@ pub fn run_import(
                 total_inputs: Some(total),
                 counts: state.counts.clone(),
             });
-            if cancelled_in_wave {
-                break;
+        }
+
+        if !cancelled_in_wave && !state.gate.cancelled() && !wave_successes.is_empty() {
+            let hashes: Vec<String> = wave_successes
+                .iter()
+                .map(|item| item.content_hash.clone())
+                .collect();
+            match state.observe_many(&hashes) {
+                Ok(snapshots) => {
+                    for mut item in wave_successes {
+                        match snapshots.get(&item.content_hash).cloned() {
+                            Some(observed) => {
+                                item.observed = observed;
+                                pending.push(item);
+                            }
+                            None => {
+                                let input_id = item.input_id.clone();
+                                state.counts.failed += 1;
+                                state.push_issue(
+                                    input_id,
+                                    ImportIssueKind::SourceFailed,
+                                    "无法读取书籍归属观察值".to_string(),
+                                );
+                                state.cleanup_item(&mut budget, item);
+                            }
+                        }
+                    }
+                }
+                Err(message) => {
+                    for item in wave_successes {
+                        let input_id = item.input_id.clone();
+                        state.counts.failed += 1;
+                        state.push_issue(input_id, ImportIssueKind::SourceFailed, message.clone());
+                        state.cleanup_item(&mut budget, item);
+                    }
+                }
             }
-            if pending.len() >= MAX_BATCH_BOOKS {
-                state.flush_pending(&mut budget, &mut pending)?;
+        } else {
+            for item in wave_successes {
+                state.cleanup_item(&mut budget, item);
             }
+        }
+
+        if pending.len() >= MAX_BATCH_BOOKS {
+            state.flush_pending(&mut budget, &mut pending)?;
         }
 
         if cancelled_in_wave || state.gate.cancelled() {
@@ -831,4 +908,48 @@ pub fn run_import(
     };
     job.set_result(result.clone());
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn temp_file(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "fi-native-staging-{label}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ))
+    }
+
+    #[test]
+    fn owned_staging_removes_an_unpublished_file_on_drop() {
+        let path = temp_file("unpublished");
+        std::fs::File::create(&path)
+            .unwrap()
+            .write_all(b"staged")
+            .unwrap();
+        let guard = OwnedStaging::new(path.clone());
+        assert_eq!(guard.path(), path.as_path());
+        drop(guard);
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn owned_staging_keeps_a_published_target_after_drop() {
+        let path = temp_file("published");
+        std::fs::File::create(&path)
+            .unwrap()
+            .write_all(b"published")
+            .unwrap();
+        let mut guard = OwnedStaging::new(path.clone());
+        guard.published();
+        drop(guard);
+        assert!(path.exists());
+        let _ = std::fs::remove_file(path);
+    }
 }

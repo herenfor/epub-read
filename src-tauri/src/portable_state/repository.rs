@@ -793,6 +793,7 @@ fn save_local_is_new_hashes(
 fn observe_directory_placement(
     state: &LibraryOrganization,
     content_hash: &str,
+    is_existing_book: bool,
 ) -> DirectoryPlacementSnapshot {
     let register = state
         .books
@@ -802,8 +803,19 @@ fn observe_directory_placement(
         raw_folder_id: register.and_then(|register| register.value.clone()),
         stamp: register.map(|register| register.stamp.clone()),
         effective_folder_id: effective_folder_id(state, content_hash).map(str::to_string),
-        is_existing_book: state.books.contains_key(content_hash),
+        is_existing_book,
     }
+}
+
+fn book_meta_exists(connection: &Connection, content_hash: &str) -> PortableResult<bool> {
+    let found: Option<i64> = connection
+        .query_row(
+            "SELECT 1 FROM book_meta WHERE hash = ?1",
+            params![content_hash],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(found.is_some())
 }
 
 impl PortableStore {
@@ -899,12 +911,13 @@ impl PortableStore {
                 ));
             }
         }
-        let state = self.snapshot()?.organization;
+        let state = load_organization(&self.connection)?;
         let mut snapshots = BTreeMap::new();
         for content_hash in content_hashes {
+            let is_existing_book = book_meta_exists(&self.connection, content_hash)?;
             snapshots.insert(
                 content_hash.clone(),
-                observe_directory_placement(&state, content_hash),
+                observe_directory_placement(&state, content_hash, is_existing_book),
             );
         }
         Ok(snapshots)
@@ -964,10 +977,17 @@ impl PortableStore {
 
         let mut known_hashes = std::collections::HashSet::new();
         {
-            let mut statement = transaction.prepare("SELECT hash FROM book_meta")?;
-            let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
-            for row in rows {
-                known_hashes.insert(row?);
+            let mut required_hashes = std::collections::BTreeSet::new();
+            for placement in placements {
+                required_hashes.insert(placement.content_hash.clone());
+            }
+            for content_hash in required_hashes {
+                if !book_meta_exists(&transaction, &content_hash)? {
+                    return Err(PortableError::invalid_entity(
+                        "invalid-entity：目录导入提交的书籍尚未写入本机资料",
+                    ));
+                }
+                known_hashes.insert(content_hash);
             }
         }
 
@@ -1001,7 +1021,11 @@ impl PortableStore {
                     "invalid-entity：目录导入提交的书籍尚未写入本机资料",
                 ));
             }
-            let current = observe_directory_placement(&state, &placement.content_hash);
+            let current = observe_directory_placement(
+                &state,
+                &placement.content_hash,
+                known_hashes.contains(&placement.content_hash),
+            );
             let target_alive = match placement.target_folder_id.as_deref() {
                 None => false,
                 Some(folder_id) => {
@@ -1636,6 +1660,90 @@ impl PortableStore {
         store_counter(&transaction, counter)?;
         transaction.commit()?;
         Ok(merged)
+    }
+
+    /// Bounded directory-import metadata publication.
+    ///
+    /// Unlike the legacy whole-library merge, this method only creates missing
+    /// books present in the current short batch and only rewrites those rows.
+    /// Existing metadata/progress/annotations are never touched, so a large
+    /// library is not re-serialized for every batch.
+    pub fn publish_directory_import_batch(
+        &mut self,
+        records: Vec<serde_json::Value>,
+        bindings: Vec<(String, String)>,
+        visible_hashes: Vec<String>,
+        is_new_hashes: Vec<String>,
+    ) -> PortableResult<()> {
+        let parsed = legacy::parse_legacy_records(records)?;
+        for (hash, raw) in &bindings {
+            if !dto::valid_content_hash(hash) {
+                return Err(PortableError::invalid_entity(
+                    "invalid-entity：binding contentHash 必须是 64 位小写内容指纹",
+                ));
+            }
+            serde_json::from_str::<serde_json::Value>(raw).map_err(|error| {
+                PortableError::invalid_data(format!("invalid-data：设备绑定不是合法 JSON：{error}"))
+            })?;
+        }
+        for hash in visible_hashes.iter().chain(is_new_hashes.iter()) {
+            if !dto::valid_content_hash(hash) {
+                return Err(PortableError::invalid_entity(
+                    "invalid-entity：本机标记 contentHash 必须是 64 位小写内容指纹",
+                ));
+            }
+        }
+
+        let transaction = self.connection.unchecked_transaction()?;
+        let installation_id = ensure_installation_id(&transaction)?;
+        let mut counter = load_counter(&transaction)?;
+
+        let mut new_records = Vec::new();
+        for record in parsed {
+            if !book_meta_exists(&transaction, record.content_hash())? {
+                new_records.push(record);
+            }
+        }
+
+        if !new_records.is_empty() {
+            let empty_state = PortableStateV3 {
+                schema_version: 3,
+                books: BTreeMap::new(),
+                organization: empty_organization(),
+                preferences: None,
+            };
+            let incoming = legacy::build_import_state(
+                &empty_state,
+                &new_records,
+                &empty_organization(),
+                &mut counter,
+                &installation_id,
+            )?;
+            for (book_hash, book) in &incoming.books {
+                store_book_shape(&transaction, book_hash, book, &BTreeMap::new())?;
+            }
+        }
+
+        for (hash, raw) in &bindings {
+            transaction.execute(
+                "INSERT INTO device_bindings(hash, json) VALUES(?1, ?2)
+                 ON CONFLICT(hash) DO UPDATE SET json = excluded.json",
+                params![hash, raw],
+            )?;
+        }
+        if !visible_hashes.is_empty() {
+            let mut visible = load_local_visible_hashes(&transaction)?;
+            visible.extend(visible_hashes);
+            save_local_visible_hashes(&transaction, &visible)?;
+        }
+        if !is_new_hashes.is_empty() {
+            let mut is_new = load_local_is_new_hashes(&transaction)?;
+            is_new.extend(is_new_hashes);
+            save_local_is_new_hashes(&transaction, &is_new)?;
+        }
+        store_counter(&transaction, counter)?;
+        transaction.commit()?;
+        Ok(())
     }
 
     /// Local removal of a linked/managed row: drop binding and visibility while
@@ -2603,7 +2711,8 @@ mod directory_import_batch_tests {
 
     fn observe(store: &PortableStore, hash: &str) -> DirectoryPlacementSnapshot {
         let state = load_organization(&store.connection).unwrap();
-        observe_directory_placement(&state, hash)
+        let is_existing_book = book_meta_exists(&store.connection, hash).unwrap();
+        observe_directory_placement(&state, hash, is_existing_book)
     }
 
     fn request(
@@ -2779,4 +2888,102 @@ mod directory_import_batch_tests {
         let state = load_organization(&store.connection).unwrap();
         assert!(state.folders.is_empty());
     }
+    #[test]
+    fn f1_snapshot_uses_book_meta_not_sparse_organization() {
+        let store = PortableStore::open_in_memory().unwrap();
+        known_book(&store, HASH_A);
+        // No favorite/folder register exists for HASH_A, so organization.books
+        // would be empty.  Existence must still come from book_meta.
+        let snapshots = store
+            .directory_placement_snapshots(&[HASH_A.to_string(), HASH_B.to_string()])
+            .unwrap();
+        assert!(snapshots.get(HASH_A).unwrap().is_existing_book);
+        assert!(!snapshots.get(HASH_B).unwrap().is_existing_book);
+        assert_eq!(snapshots.get(HASH_A).unwrap().effective_folder_id, None);
+    }
+
+    #[test]
+    fn f3_bounded_publish_does_not_rewrite_existing_book_meta() {
+        let mut store = PortableStore::open_in_memory().unwrap();
+        let existing_meta = "{\"marker\":\"keep-me\"}".to_string();
+        store
+            .connection
+            .execute(
+                "INSERT INTO book_meta(hash, json) VALUES(?1, ?2)",
+                params![HASH_A, existing_meta],
+            )
+            .unwrap();
+        let record = serde_json::json!({
+            "contentHash": HASH_A,
+            "title": "A",
+            "creator": "",
+            "fileName": "a.epub",
+            "addedAtMs": 1,
+            "lastReadAtMs": 0,
+            "spineIndex": 0,
+            "page": 0,
+            "progressPct": 0,
+            "isNew": false,
+            "bookmarks": [],
+            "notes": []
+        });
+        store
+            .publish_directory_import_batch(
+                vec![record],
+                Vec::new(),
+                vec![HASH_A.to_string()],
+                Vec::new(),
+            )
+            .unwrap();
+        let raw: String = store
+            .connection
+            .query_row(
+                "SELECT json FROM book_meta WHERE hash = ?1",
+                params![HASH_A],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(raw, existing_meta);
+        let visible = store.local_visible_hashes().unwrap();
+        assert!(visible.contains(&HASH_A.to_string()));
+    }
+
+    #[test]
+    fn f3_bounded_publish_creates_missing_batch_book() {
+        let mut store = PortableStore::open_in_memory().unwrap();
+        let record = serde_json::json!({
+            "contentHash": HASH_A,
+            "title": "A",
+            "creator": "",
+            "fileName": "a.epub",
+            "addedAtMs": 1,
+            "lastReadAtMs": 0,
+            "spineIndex": 0,
+            "page": 0,
+            "progressPct": 0,
+            "isNew": true,
+            "bookmarks": [],
+            "notes": []
+        });
+        store
+            .publish_directory_import_batch(
+                vec![record],
+                Vec::new(),
+                vec![HASH_A.to_string()],
+                vec![HASH_A.to_string()],
+            )
+            .unwrap();
+        let exists: i64 = store
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM book_meta WHERE hash = ?1",
+                params![HASH_A],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(exists, 1);
+        assert!(store.local_visible_hashes().unwrap().contains(&HASH_A.to_string()));
+        assert!(store.local_is_new_hashes().unwrap().contains(&HASH_A.to_string()));
+    }
+
 }
