@@ -114,9 +114,18 @@ function buildOverrideCss(s: ReaderSettings, bodyBgColor?: string): string {
 #${VIEWER_ID} aside[epub\\:type="footnote"],
 #${VIEWER_ID} note aside { display: none !important; }`;
 
-  // ---- L2 用户设置：行高/字重/字距/词距，书不能覆盖 ----
+  // ---- L2 用户设置：段落行高/字重/字距/词距 ----
+  // 行高属于行文容器，不能在每个内嵌元素上重写：作者可能用固定行高
+  // 将数字居中于圆形徽标，或安排上下标。普通内嵌文字继承段落的倍率。
+  const lineHeightCss = s.lineHeight !== undefined
+    ? `/* [L2] 用户行高作用于正文容器，保留内嵌装饰自己的行高。 */
+#${VIEWER_ID},
+:where(#${VIEWER_ID}) :is(p, h1, h2, h3, h4, h5, h6, li, dt, dd,
+  blockquote, figcaption, address, pre, td, th) {
+  line-height: ${s.lineHeight} !important;
+}`
+    : "";
   const typeCss = [
-    s.lineHeight !== undefined ? `line-height: ${s.lineHeight} !important;` : "",
     s.fontWeight !== undefined ? `font-weight: ${s.fontWeight} !important;` : "",
     s.letterSpacingPx !== undefined
       ? `letter-spacing: ${s.letterSpacingPx}px !important;`
@@ -298,6 +307,7 @@ html, body { position: relative; height: 100%; margin: 0 !important; box-sizing:
     `/* [L3-C14] 分页容器使用专用标签，不能以 inline 默认值参与多栏测量。 */
 ${VIEWER_TAG}#${VIEWER_ID} { display: block; height: 100%; overflow: hidden; margin: 0 auto; box-sizing: border-box; }`,
     securityCss,
+    lineHeightCss,
     `/* [L2] 用户排版属性（未设置 = 跟随书）。 */
 :where(#${VIEWER_ID}) :not(img) {
   ${typeCss}
