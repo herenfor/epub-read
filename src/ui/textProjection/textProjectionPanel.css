@@ -1,0 +1,121 @@
+.text-projection-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  color: var(--reader-text, #222);
+}
+
+.text-projection-panel__header,
+.text-projection-panel__rules-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.text-projection-panel__header h2 {
+  margin: 0 0 4px;
+  font-size: 16px;
+}
+
+.text-projection-panel__header p,
+.text-projection-panel__rules-head span,
+.text-projection-panel__empty,
+.text-projection-panel__warning {
+  margin: 0;
+  color: var(--reader-text-muted, #666);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.text-projection-panel__link {
+  border: 0;
+  background: transparent;
+  color: var(--reader-accent, #1b6dc1);
+  cursor: pointer;
+  padding: 2px 0;
+}
+
+.text-projection-panel__field,
+.text-projection-panel__preview label,
+.text-projection-panel__preview div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.text-projection-panel select,
+.text-projection-panel input {
+  min-width: 0;
+  border: 1px solid var(--reader-border, #bbb);
+  border-radius: 6px;
+  background: var(--reader-surface, #fff);
+  color: inherit;
+  padding: 5px 7px;
+}
+
+.text-projection-panel__rules {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.text-projection-panel__rules li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+  border: 1px solid var(--reader-border, #ddd);
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.text-projection-panel__rules li.is-duplicate {
+  border-color: #d99a2b;
+  background: rgba(217, 154, 43, 0.08);
+}
+
+.text-projection-panel__warning {
+  grid-column: 1 / -1;
+  color: #a06400;
+}
+
+.text-projection-panel__enabled {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.text-projection-panel__arrow {
+  color: var(--reader-text-muted, #888);
+}
+
+.text-projection-panel__row-actions {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.text-projection-panel__row-actions button {
+  border: 1px solid var(--reader-border, #ccc);
+  border-radius: 5px;
+  background: var(--reader-surface, #fff);
+  color: inherit;
+  width: 24px;
+  height: 24px;
+  cursor: pointer;
+}
+
+.text-projection-panel__preview output {
+  min-height: 1.4em;
+  border: 1px dashed var(--reader-border, #bbb);
+  border-radius: 6px;
+  padding: 5px 7px;
+  background: var(--reader-surface, #fff);
+  white-space: pre-wrap;
+}
