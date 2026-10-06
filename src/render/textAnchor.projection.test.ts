@@ -9,6 +9,8 @@ import {
 import { compileTextProjection } from "./textProjection/compile";
 import { isProjectionExcludedTextNode, TextProjectionSession } from "./textProjection/session";
 import type { TextProjectionPreferences } from "./textProjection/types";
+import { resolveFootnote } from "./footnotes";
+import { projectFootnoteDisplay } from "./textProjection/footnoteProjection";
 
 function chapter(markup: string): { document: Document; viewer: HTMLElement } {
   const { document } = parseHTML(`<html><body><epub-viewer id="epub-viewer">${markup}</epub-viewer></body></html>`);
@@ -20,6 +22,21 @@ function selectionFor(range: Range): Selection {
 }
 
 describe("VisibleTextIndex with a T-1 display projection", () => {
+  it("I5 keeps inline code original in a plain footnote display copy", async () => {
+    const { document } = chapter('<note><sup><a href="#n">1</a></sup><aside id="n">AB <code>AB</code></aside></note>');
+    const source = resolveFootnote(document, document.querySelector("a")!);
+    expect(source).not.toBeNull();
+    const compiled = await compileTextProjection({
+      mode: "original",
+      rules: [{ id: "r", from: "AB", to: "ZZ", enabled: true }],
+    });
+    const projected = projectFootnoteDisplay(source!, compiled, document);
+    expect(projected.text).toBe("ZZ AB");
+    expect(projected.html).toBeUndefined();
+    expect(source!.text).toBe("AB AB");
+    expect(source!.target.textContent).toBe("AB AB");
+  });
+
   it("keeps original code points while mapping an unequal replacement back to a canonical selection", async () => {
     const preferences: TextProjectionPreferences = {
       mode: "original",

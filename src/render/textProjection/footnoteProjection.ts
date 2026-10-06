@@ -5,13 +5,14 @@ import { isProjectionExcludedTextNode } from "./session";
 export interface FootnoteDisplaySource {
   text: string;
   html?: string;
+  target?: HTMLElement;
 }
 
 function projectFootnoteHtml(
   html: string,
   compiled: CompiledTextProjection,
   doc: Document,
-): string {
+): FootnoteDisplaySource {
   const container = doc.createElement("div");
   container.innerHTML = html;
   const walker = doc.createTreeWalker(container, 4);
@@ -24,7 +25,10 @@ function projectFootnoteHtml(
     const projection = createNodeProjection(node.data, compiled);
     if (node.data !== projection.display) node.data = projection.display;
   }
-  return container.innerHTML;
+  return {
+    text: (container.textContent ?? "").replace(/\s+/g, " ").trim(),
+    html: container.innerHTML,
+  };
 }
 
 /**
@@ -36,9 +40,15 @@ export function projectFootnoteDisplay(
   compiled: CompiledTextProjection,
   doc: Document,
 ): FootnoteDisplaySource {
-  const text = projectText(source.text, compiled);
-  const html = source.html === undefined
-    ? undefined
-    : projectFootnoteHtml(source.html, compiled, doc);
-  return { text, html };
+  if (source.html !== undefined) {
+    return projectFootnoteHtml(source.html, compiled, doc);
+  }
+  // Plain popovers still have source markup: retain code exclusions without
+  // changing their presentation. Attribute-based fallback text has no such markup.
+  const targetText = (source.target?.textContent ?? "").replace(/\s+/g, " ").trim();
+  if (source.target && targetText === source.text) {
+    const projected = projectFootnoteHtml(source.target.innerHTML, compiled, doc);
+    return { text: projected.text };
+  }
+  return { text: projectText(source.text, compiled) };
 }
