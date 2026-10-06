@@ -126,4 +126,24 @@ describe("page motion session", () => {
     expect(settlePlan(0.2, null).durationMs).toBe(0);
     expect(settlePlan(5000, null).durationMs).toBe(700);
   });
+
+  it("手势尾段接续原速度、单调落定且终速为零；点按保持指数曲线", () => {
+    const plan = settlePlan(-166.5, -166.5 / 135);
+    expect(plan).toMatchObject({ curve: "finite-drift", durationMs: 540, tauMs: 135 });
+    const epsilon = 0.00001;
+    const slope = (t: number) => (settleProgress(plan, t + epsilon) - settleProgress(plan, t)) / epsilon;
+    expect(166.5 * slope(0) / plan.durationMs).toBeCloseTo(166.5 / 135, 3);
+    expect(slope(0.5 - epsilon)).toBeCloseTo(slope(0.5), 3);
+    expect(slope(1 - epsilon)).toBeLessThan(0.0001);
+    expect(settleProgress(plan, 1)).toBe(1);
+    let previous = 0;
+    for (let i = 1; i <= 100; i++) {
+      const progress = settleProgress(plan, i / 100);
+      expect(progress).toBeGreaterThanOrEqual(previous);
+      expect(progress).toBeLessThanOrEqual(1);
+      previous = progress;
+    }
+    expect(settlePlan(166.5, null).curve).toBeUndefined();
+    expect(settlePlan(166.5, -1).curve).toBeUndefined();
+  });
 });
