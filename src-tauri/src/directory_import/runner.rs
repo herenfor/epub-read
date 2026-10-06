@@ -184,7 +184,13 @@ impl RunnerState {
                 continue;
             }
             match self.publish(&item) {
-                Ok((record, binding)) => {
+                Ok((mut record, binding)) => {
+                    // Existing hashes must stay visible without being relabeled
+                    // as newly imported; canonical progress/annotations are
+                    // preserved by the portable merge.
+                    if item.observed.is_existing_book {
+                        record.is_new = false;
+                    }
                     self.seen.record_published(&item.content_hash, item.ordinal);
                     if item.observed.is_existing_book {
                         self.counts.duplicates += 1;
