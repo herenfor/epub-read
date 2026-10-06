@@ -19,6 +19,8 @@ val releaseSigning = System.getenv("EPUB_READER_SIGNING_PROPERTIES")
     ?.takeIf { it.isNotBlank() && file(it).exists() }
     ?.let { path -> Properties().apply { file(path).inputStream().use { load(it) } } }
 
+val optimizedDev = System.getenv("EPUB_READER_OPTIMIZED_DEV") == "1"
+
 android {
     compileSdk = 36
     // Use the same NDK as build-android.sh, including its native strip tool.
@@ -51,10 +53,17 @@ android {
             applicationIdSuffix = ".debug"
             manifestPlaceholders["usesCleartextTraffic"] = "true"
             isDebuggable = true
-            // Keep Dev diagnostics and local Rust symbols; strip native debug
-            // symbols from the APK sent to testers.
+            // Keep Dev inspection; --optimized-dev also removes local Rust symbols
+            // and enables the release shrinker without changing this app's identity.
             isJniDebuggable = false
-            isMinifyEnabled = false
+            isMinifyEnabled = optimizedDev
+            if (optimizedDev) {
+                proguardFiles(
+                    *fileTree(".") { include("**/*.pro") }
+                        .plus(getDefaultProguardFile("proguard-android-optimize.txt"))
+                        .toList().toTypedArray()
+                )
+            }
         }
         getByName("release") {
             signingConfig = signingConfigs.findByName("release")
