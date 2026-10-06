@@ -151,6 +151,7 @@ import {
   mergeShelfEntries,
   sha256Hex,
 } from "./ui/importBooks";
+import { bookOpenErrorMessage, describeBookOpenFailure } from "./ui/bookOpenFailure";
 import { ScopedProgressWriter } from "./ui/progressWriter";
 import { ProgressRuntimeGate, type ProgressRuntimeStatus } from "./ui/portableState/progressRuntimeGate";
 import { LocalProgressCheckpoints, type LocalProgressCheckpoint } from "./ui/localProgressCheckpoint";
@@ -1736,6 +1737,7 @@ export default function App() {
     setShelfBusy(true);
     setShelfNotice(null);
     const imported: ShelfEntry[] = [];
+    const accepted: ShelfEntry[] = [];
     const duplicateTitles: string[] = [];
     const failed: string[] = [];
     const store = getShelfStore();
@@ -1760,6 +1762,7 @@ export default function App() {
           }
           contentHashByIdRef.current.set(item.record.id, item.record.contentHash ?? item.record.id);
           entryByContentHashRef.current.set(item.record.contentHash ?? item.record.id, item.record);
+          accepted.push(item.record);
           if (item.status === "duplicate") {
             duplicateTitles.push(item.record.title || fileName.replace(/\.epub$/i, ""));
           } else {
@@ -1829,17 +1832,41 @@ export default function App() {
         }
       }
 
-      if (imported.length > 0) {
+      let refreshWarning = "";
+      if (isTauriEnv() && accepted.length > 0) {
+        // Publish both new and rebound rows immediately. A later list failure
+        // must not turn an already committed import into an import failure.
+        setShelfEntries((previous) => mergeShelfEntries(previous, accepted));
+        try {
+          const entries = await store.list();
+          const existingIds = new Set(shelfEntriesRef.current.map((entry) => entry.id));
+          const unavailable = entries.filter((entry) => existingIds.has(entry.id) && entry.available === false);
+          setShelfEntries(entries);
+          for (const entry of entries) {
+            contentHashByIdRef.current.set(entry.id, entry.contentHash ?? entry.id);
+            entryByContentHashRef.current.set(entry.contentHash ?? entry.id, entry);
+          }
+          if (imported.length > 0 && unavailable.length > 0) {
+            refreshWarning = "书架仍有源文件不可用的旧书，原进度和笔记已保留；内容不同的文件作为另一版本导入";
+          }
+        } catch (error) {
+          refreshWarning = `导入已完成，但书架刷新失败：${bookOpenErrorMessage(error)}`;
+        }
+      } else if (imported.length > 0) {
         setShelfEntries((previous) => mergeShelfEntries(previous, imported));
       }
-      setShelfNotice(
-        formatImportNotice({
-          sourceCount: list.length,
-          importedCount: imported.length,
-          duplicateTitles,
-          failed,
-        })
-      );
+      const notice = formatImportNotice({
+        sourceCount: list.length,
+        importedCount: imported.length,
+        duplicateTitles,
+        failed,
+        refreshedCount: isTauriEnv() ? duplicateTitles.length : 0,
+      });
+      if (refreshWarning) {
+        notice.text += `；${refreshWarning}`;
+        if (notice.kind === "ok") notice.kind = "warn";
+      }
+      setShelfNotice(notice);
     } catch (error) {
       setShelfNotice({ kind: "error", text: `导入失败：${String(error)}` });
     } finally {
@@ -1937,6 +1964,7 @@ export default function App() {
       importedCount: imported.length,
       duplicateTitles,
       failed,
+      refreshedCount: duplicateTitles.length,
     });
     if (cancelled.length > 0) {
       notice.text += `；已取消 ${cancelled.length} 本`;
@@ -2973,7 +3001,7 @@ export default function App() {
           result: "failed",
           errorCode: (error as { readonly code?: unknown } | null)?.code as string | undefined,
         });
-        setShelfNotice({ kind: "error", text: (error as Error).message });
+        setShelfNotice({ kind: "error", text: bookOpenErrorMessage(error) });
         return;
       }
       persistShelfProgressRef.current(true);
@@ -3114,7 +3142,7 @@ export default function App() {
       const targetSavedLease = openPlan.targetSave?.status === "saved" ? targetLane : null;
       const targetHandoffLease = openPlan.targetSave?.status === "failed" ? targetLane : null;
       let previousSavedLease: ProgressLease | null = null;
-      let openStage: "check" | "flush" | "openArchive" | "begin" | "parse" | "publish" = "check";
+      let openStage: "check" | "flush" | "readSource" | "openArchive" | "begin" | "parse" | "publish" = "check";
       try {
         openStage = "flush";
         // A different paused book may be flushed opportunistically; failure
@@ -3175,9 +3203,11 @@ export default function App() {
         if (openArchive) {
           openStage = "openArchive";
           const archive = await openArchive(id).catch((error) => {
-            setShelfEntries((prev) =>
-              prev.map((item) => (item.id === id ? { ...item, available: false } : item))
-            );
+            if (describeBookOpenFailure(error).sourceUnavailable) {
+              setShelfEntries((prev) =>
+                prev.map((item) => (item.id === id ? { ...item, available: false } : item))
+              );
+            }
             throw error;
           });
           unownedArchive = archive;
@@ -3193,13 +3223,16 @@ export default function App() {
           unownedArchive = null;
           openStage = "parse";
         } else {
+          openStage = "readSource";
           let buf: Uint8Array;
           try {
             buf = await store.readBook(id);
           } catch (error) {
-            setShelfEntries((prev) =>
-              prev.map((item) => (item.id === id ? { ...item, available: false } : item))
-            );
+            if (describeBookOpenFailure(error).sourceUnavailable) {
+              setShelfEntries((prev) =>
+                prev.map((item) => (item.id === id ? { ...item, available: false } : item))
+              );
+            }
             throw error;
           }
           // Legacy browser shelf IDs may be UUIDs; index identity always comes from EPUB bytes.
@@ -3399,6 +3432,7 @@ export default function App() {
         shelfBusyRef.current = false;
         setShelfBusy(false);
       } catch (e) {
+        const failure = describeBookOpenFailure(e);
         recordLifecycleDiagnostic("open_failed", {
           stage: openStage,
           result: "failed",
@@ -3412,10 +3446,10 @@ export default function App() {
           // A failed second-open must not replace the still-valid old reader
           // with the loading/error body.
           setPhase({ phase: "ready" });
-          showReaderNotice(`打开失败：${(e as Error).message}`, "error");
+          showReaderNotice(`打开失败：${failure.message}`, "error");
         } else {
-          setShelfError(`打开失败：${(e as Error).message}`);
-          setPhase({ phase: "error", message: (e as Error).message });
+          setShelfError(`打开失败：${failure.message}`);
+          setPhase({ phase: "error", message: failure.message });
         }
         setSearchNavigationBusy(false);
       } finally {
@@ -3446,7 +3480,7 @@ export default function App() {
           stage: preparationStage, result: "failed", errorCode: detail?.code,
           count: detail?.recordsCount, targetFound: detail?.targetFound,
         });
-        setShelfNotice({ kind: "error", text: `打开失败：${(error as Error).message}` });
+        setShelfNotice({ kind: "error", text: `打开失败：${describeBookOpenFailure(error).message}` });
       } finally {
         shelfBusyRef.current = false;
         setShelfBusy(false);

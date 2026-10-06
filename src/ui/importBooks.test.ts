@@ -78,6 +78,10 @@ describe("findDuplicateEntry", () => {
 });
 
 describe("formatImportNotice", () => {
+  it("开书保护原生重复导入提示绑定已刷新而非失败", () => {
+    expect(formatImportNotice({ sourceCount: 1, importedCount: 0, duplicateTitles: ["旧书"], failed: [], refreshedCount: 1 }))
+      .toEqual({ kind: "ok", text: "此书已在书架，已更新本机源文件绑定；原有进度和笔记已保留" });
+  });
   it("单本重复使用指定红色文案", () => {
     expect(
       formatImportNotice({
