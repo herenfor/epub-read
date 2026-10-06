@@ -18,6 +18,7 @@ import {
   type ScannedEpub,
 } from "../../core/folderImport/planner";
 import { effectiveFolderId, type LibraryOrganization } from "../libraryOrganization";
+import { FolderImportJobOwner } from "./jobOwner";
 import "../saveFileDialogs.css";
 import "./folderImportPanel.css";
 
@@ -28,8 +29,15 @@ export interface FolderImportPanelProps {
   readonly organization: LibraryOrganization;
   /** False when neither a native picker nor webkitdirectory is available. */
   readonly directorySelectionSupported?: boolean;
-  /** Called once with the real result; the caller refreshes the active data source. */
-  onImported(result: DirectoryImportResult): void;
+  /**
+   * Exactly once after an import that was started settles — completed,
+   * cancelled or failed, even after the panel is gone. Books may have landed
+   * before a failure, so the caller refreshes the active data source (list +
+   * organization) once here. Scan/preview cancel writes nothing and never calls it.
+   */
+  onSettled(): void;
+  /** The real result, for callers that want it; failures carry none. */
+  onImported?(result: DirectoryImportResult): void;
   onClose(): void;
   /** Fallback entry for environments without directory selection. */
   onUseFileImport?(): void;
@@ -118,28 +126,23 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
   const [choices, setChoices] = useState<Record<string, GroupChoice | undefined>>({});
   const [visibleRows, setVisibleRows] = useState(INITIAL_GROUP_ROWS);
   const [issues, setIssues] = useState<{ items: ImportIssue[]; next: string | null; loading: boolean } | null>(null);
-  const jobRef = useRef<string | null>(null);
-  /** True while start() owns the job: unmounting must not drop it. */
-  const importingRef = useRef(false);
+  /** One owner per mount; created in the effect so a remount gets a fresh one. */
+  const ownerRef = useRef<FolderImportJobOwner | null>(null);
+  const [importing, setImporting] = useState(false);
   const mountedRef = useRef(true);
-  const onImportedRef = useRef(props.onImported);
-  onImportedRef.current = props.onImported;
-
-  const disposeJob = () => {
-    const jobId = jobRef.current;
-    jobRef.current = null;
-    if (jobId) void port.dispose(jobId).catch(() => undefined);
-  };
+  const callbacksRef = useRef(props);
+  callbacksRef.current = props;
 
   useEffect(() => {
     mountedRef.current = true;
+    const owner = new FolderImportJobOwner(port);
+    ownerRef.current = owner;
     return () => {
       mountedRef.current = false;
-      // A running import keeps ownership; start()'s settle path disposes it.
-      if (!importingRef.current) disposeJob();
+      // Scan/preview: cancel + dispose now. Import: request cancel, release after it settles.
+      owner.close();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [port]);
 
   const set = (next: Phase) => {
     if (mountedRef.current) setPhase(next);
@@ -191,7 +194,9 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
   }, [plan, resolutions]);
 
   const pickAndScan = async () => {
-    disposeJob();
+    const owner = ownerRef.current;
+    if (!owner || owner.isImporting) return;
+    const token = owner.beginScan();
     setItems([]);
     setBindings([]);
     setChoices({});
@@ -199,16 +204,16 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
     setIssues(null);
     set({ kind: "scanning", found: 0 });
     try {
-      const result = await port.scan((event) => set({ kind: "scanning", found: event.scannedInputs }));
+      const result = await port.scan((event) => {
+        // The first event already names the job, so closing mid-scan can cancel it.
+        if (owner.adopt(token, event.jobId)) set({ kind: "scanning", found: event.scannedInputs });
+      });
       if (!result) {
-        set({ kind: "intro" });
+        if (owner.isLive(token)) set({ kind: "intro" });
         return;
       }
-      jobRef.current = result.jobId;
-      if (!mountedRef.current) {
-        disposeJob();
-        return;
-      }
+      // A superseded or closed scan's job is only cleaned up.
+      if (!owner.adopt(token, result.jobId)) return;
       if (result.inputCount === 0) {
         set({ kind: "empty", scan: result });
         return;
@@ -223,48 +228,49 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
         for (const binding of page.bindings) bound.set(binding.groupKey, binding);
         cursor = page.nextCursor ?? undefined;
         set({ kind: "listing", scan: result, loaded: collected.length });
-      } while (cursor !== undefined && mountedRef.current && jobRef.current === result.jobId);
-      if (!mountedRef.current || jobRef.current !== result.jobId) return;
+      } while (cursor !== undefined && owner.isLive(token, result.jobId));
+      if (!owner.isLive(token, result.jobId)) return;
       setItems(collected);
       setBindings([...bound.values()]);
       set(collected.length === 0 ? { kind: "empty", scan: result } : { kind: "preview", scan: result });
     } catch (error) {
-      disposeJob();
+      if (!owner.isLive(token)) return;
+      void owner.releaseCurrent();
       set({ kind: "error", message: `扫描失败：${errorText(error)}` });
     }
   };
 
   const startImport = () => {
-    const jobId = jobRef.current;
-    if (!jobId || !plan) return;
+    const owner = ownerRef.current;
+    if (!owner || !plan) return;
     const targets = buildFolderTargets(plan.groups, resolutions, choices);
     if (!targets) return;
-    importingRef.current = true;
-    set({ kind: "importing", progress: null, cancel: "none" });
-    port.start({
-      jobId,
-      options,
-      targets,
+    const started = owner.run({ options, targets }, {
       onProgress: (event) => {
         if (!mountedRef.current) return;
         setPhase((current) => (current.kind === "importing" ? { ...current, progress: event } : current));
       },
-    }).then((result) => {
-      onImportedRef.current(result);
-      set({ kind: "done", result });
-    }, (error) => {
-      set({ kind: "error", message: `导入失败：${errorText(error)}。已完成的书仍保留在书架。` });
-    }).finally(() => {
-      importingRef.current = false;
-      // The panel may already be gone; the job's issues stay readable until close.
-      if (!mountedRef.current) disposeJob();
+      onResult: (result) => {
+        callbacksRef.current.onImported?.(result);
+        set({ kind: "done", result });
+      },
+      onError: (error) => {
+        set({ kind: "error", message: `导入失败：${errorText(error)}。已完成的书仍保留在书架。` });
+      },
+      onSettled: () => {
+        if (mountedRef.current) setImporting(false);
+        callbacksRef.current.onSettled();
+      },
     });
+    if (!started) return;
+    setImporting(true);
+    set({ kind: "importing", progress: null, cancel: "none" });
   };
 
   const cancelImport = async () => {
-    const jobId = jobRef.current;
-    if (!jobId) return;
-    const status = await port.cancel(jobId).catch(() => "already-finished" as const);
+    const owner = ownerRef.current;
+    if (!owner) return;
+    const status = await owner.cancel();
     if (!mountedRef.current) return;
     setPhase((current) => current.kind === "importing"
       ? { ...current, cancel: status === "settling" ? "settling" : status === "requested" ? "requested" : current.cancel }
@@ -272,7 +278,7 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
   };
 
   const loadIssues = async () => {
-    const jobId = jobRef.current;
+    const jobId = ownerRef.current?.currentJobId;
     if (!jobId) return;
     const cursor = issues?.next ?? undefined;
     setIssues((current) => ({ items: current?.items ?? [], next: current?.next ?? null, loading: true }));
@@ -286,8 +292,8 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
   };
 
   const close = () => {
-    if (importingRef.current) return;
-    disposeJob();
+    if (importing) return;
+    ownerRef.current?.close();
     props.onClose();
   };
 

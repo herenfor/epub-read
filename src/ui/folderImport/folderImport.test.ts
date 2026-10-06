@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { buildEpub } from "../../test/fixtures";
 import {
   decidePlacement,
@@ -8,7 +8,9 @@ import {
   SuccessfulSources,
   type ImportOptions,
 } from "../../core/folderImport/planner";
-import type { DirectoryProgress, FolderTarget } from "../../core/folderImport/contract";
+import type { DirectoryImportPort, DirectoryProgress, FolderTarget } from "../../core/folderImport/contract";
+import { applyDirectoryPlacementBatch, placementSnapshotOf } from "./placementBatch";
+import { FolderImportJobOwner } from "./jobOwner";
 import { buildFolderTargets, DEFAULT_FOLDER_IMPORT_OPTIONS } from "./FolderImportPanel";
 import { createWebDirectoryImportPort, scanWebDirectoryFiles, type WebDirectoryImportStore } from "./webDirectoryImport";
 import {
@@ -91,9 +93,9 @@ function memoryStore(initial: { entries?: ShelfEntry[]; envelope?: OrganizationE
   const bytes = new Map<string, Uint8Array>();
   let envelope: OrganizationEnvelope = initial.envelope ?? { deviceId: "00000000-0000-4000-8000-000000000001", counter: 0, state: emptyOrganization() };
   const saves: string[] = [];
-  const commands: OrganizationCommand[] = [];
-  const hooks: { beforeOrganizationRead?: (call: number) => void } = {};
-  let reads = 0;
+  const commits: number[] = [];
+  /** Runs before the atomic commit begins: the last point another writer can interleave. */
+  const hooks: { beforeCommit?: (call: number) => void } = {};
   const known = () => new Set([...entries.values()].map((e) => e.contentHash!).filter(Boolean));
   const store: WebDirectoryImportStore = {
     async list() { return [...entries.values()]; },
@@ -109,18 +111,18 @@ function memoryStore(initial: { entries?: ShelfEntry[]; envelope?: OrganizationE
     },
     async readBook(id) { return bytes.get(id)!; },
     async setContentHash(id) { return entries.get(id)!; },
-    async getOrganization() {
-      hooks.beforeOrganizationRead?.(++reads);
-      return envelope.state;
-    },
-    async applyOrganization(command) {
-      commands.push(command);
-      envelope = applyCommand(envelope, command, known());
-      return envelope.state;
+    async getOrganization() { return envelope.state; },
+    // Same semantics FI-I gives IndexedDB: read, decide, create+move, write in one step.
+    async commitDirectoryPlacementBatch(batch) {
+      commits.push(batch.items.length);
+      hooks.beforeCommit?.(commits.length);
+      const applied = applyDirectoryPlacementBatch(envelope, batch, known());
+      envelope = applied.envelope;
+      return applied.result;
     },
   };
   const userCommand = (command: OrganizationCommand) => { envelope = applyCommand(envelope, command, known()); };
-  return { store, saves, commands, hooks, userCommand, state: () => envelope.state };
+  return { store, saves, commits, hooks, userCommand, state: () => envelope.state };
 }
 
 function existingEntry(hash: string, title: string): ShelfEntry {
@@ -224,14 +226,133 @@ describe("Web directory import port", () => {
 
   it("does not overwrite a placement the user changed during the import", async () => {
     const { memory, port, hashes } = await scenario();
-    // Second organization read is the commit-time re-check: the user moved D meanwhile.
-    memory.hooks.beforeOrganizationRead = (call) => {
-      if (call === 2) memory.userCommand({ type: "moveBooks", contentHashes: [hashes.hashD], folderId: OTHER_FOLDER });
+    // The user moves D after it was observed, right before the batch commits.
+    memory.hooks.beforeCommit = () => {
+      memory.userCommand({ type: "moveBooks", contentHashes: [hashes.hashD], folderId: OTHER_FOLDER });
     };
     const { result } = await importAll(port, memory.state);
     expect(result.counts.placementSkipped).toBe(1);
     expect(effectiveFolderId(memory.state(), hashes.hashD)).toBe(OTHER_FOLDER);
     const issues = await port.issues(result.jobId);
     expect(issues.items.map((i) => i.kind)).toContain("placement-changed");
+  });
+
+  it("commits a placement batch atomically: a failing move leaves no folder behind", async () => {
+    const [a] = await Promise.all([epub("A")]);
+    const hashA = await sha256Hex(a);
+    const unknown = "f".repeat(64);
+    const envelope: OrganizationEnvelope = { deviceId: "00000000-0000-4000-8000-000000000001", counter: 0, state: emptyOrganization() };
+    const target: FolderTarget = { groupKey: "g", kind: "create", folderId: OTHER_FOLDER, name: "新夹" };
+    const item = (contentHash: string, inputId: string) => ({
+      inputId, contentHash, isExisting: false, target, observed: placementSnapshotOf(envelope.state, contentHash),
+    });
+    // The unknown hash makes the move throw after the folder create was planned:
+    // the caller's transaction aborts and the envelope it holds is untouched.
+    expect(() => applyDirectoryPlacementBatch(envelope, { policy: "fillUnclassified", items: [item(hashA, "a"), item(unknown, "x")] }, new Set([hashA])))
+      .toThrow();
+    expect(envelope.state.folders).toEqual({});
+    const ok = applyDirectoryPlacementBatch(envelope, { policy: "fillUnclassified", items: [item(hashA, "a")] }, new Set([hashA]));
+    expect(ok.result.createdFolderIds).toEqual([OTHER_FOLDER]);
+    expect(effectiveFolderId(ok.envelope.state, hashA)).toBe(OTHER_FOLDER);
+  });
+
+  it("a cancel during a read accepts nothing more and opens no new placement batch", async () => {
+    const [x, y] = await Promise.all([epub("X"), epub("Y")]);
+    const memory = memoryStore();
+    let releaseRead!: () => void;
+    const reading = new Promise<void>((resolve) => { releaseRead = resolve; });
+    let readStarted!: () => void;
+    const started = new Promise<void>((resolve) => { readStarted = resolve; });
+    const slow = fakeFile("根/小说/y.epub", y);
+    (slow as unknown as { arrayBuffer: () => Promise<ArrayBuffer> }).arrayBuffer = async () => {
+      readStarted();
+      await reading;
+      return y.slice().buffer;
+    };
+    const port = createWebDirectoryImportPort({
+      store: memory.store,
+      pickDirectory: async () => [fakeFile("根/小说/x.epub", x), slow],
+      progressIntervalMs: 0,
+    });
+    const scan = (await port.scan(() => undefined))!;
+    const page = await port.page(scan.jobId);
+    const plan = planDirectoryImport(scan.root, page.items, auto);
+    const targets = buildFolderTargets(plan.groups, resolveGroups(plan.groups, [], []), {}, () => OTHER_FOLDER)!;
+    const running = port.start({ jobId: scan.jobId, options: auto, targets, onProgress: () => undefined });
+    await started;
+    expect(await port.cancel(scan.jobId)).toBe("requested");
+    releaseRead();
+    const result = await running;
+    expect(result.status).toBe("cancelled");
+    expect(memory.saves).toEqual([await sha256Hex(x)]); // y was mid-read: never saved
+    expect(memory.commits).toEqual([]); // no batch opened after the cancel
+    expect(result.counts).toMatchObject({ completed: 1, imported: 1, placementSkipped: 1 });
+    expect(memory.state().folders).toEqual({});
+  });
+});
+
+function fakePort(overrides: Partial<DirectoryImportPort> = {}) {
+  const calls: string[] = [];
+  const port: DirectoryImportPort = {
+    scan: async () => null,
+    page: async () => ({ items: [], bindings: [], nextCursor: null }),
+    start: async () => { throw new Error("unused"); },
+    issues: async () => ({ items: [], nextCursor: null }),
+    cancel: async (jobId) => { calls.push(`cancel:${jobId}`); return "requested"; },
+    dispose: async (jobId) => { calls.push(`dispose:${jobId}`); },
+    ...overrides,
+  };
+  return { port, calls };
+}
+
+const zeroCounts = { completed: 0, imported: 0, duplicates: 0, failed: 0, placementSkipped: 0, createdFolders: 0 };
+const flushAsync = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+describe("folder import job ownership", () => {
+  it("closing mid-scan cancels the job from its first event; the late result only cleans up", async () => {
+    let finish!: (value: { jobId: string; root: { sourceRootKey: string; name: string }; inputCount: number; skippedDirectoryCount: number; unreadableDirectoryCount: number }) => void;
+    const { port, calls } = fakePort({
+      scan: (onProgress) => {
+        onProgress({ jobId: "j1", phase: "scanning", scannedInputs: 0, totalInputs: null, counts: zeroCounts });
+        return new Promise((resolve) => { finish = resolve; });
+      },
+    });
+    const owner = new FolderImportJobOwner(port);
+    const token = owner.beginScan();
+    const scanning = port.scan((event) => owner.adopt(token, event.jobId));
+    expect(owner.currentJobId).toBe("j1");
+    owner.close();
+    await flushAsync();
+    expect(calls).toEqual(["cancel:j1", "dispose:j1"]);
+    finish({ jobId: "j1", root: { sourceRootKey: "k", name: "根" }, inputCount: 3, skippedDirectoryCount: 0, unreadableDirectoryCount: 0 });
+    const result = (await scanning)!;
+    expect(owner.adopt(token, result.jobId)).toBe(false);
+    await flushAsync();
+    expect(calls).toEqual(["cancel:j1", "dispose:j1"]); // released once, no UI update
+  });
+
+  it("a failed start after partial imports still settles once; unmount cancels and releases after it", async () => {
+    let fail!: (error: Error) => void;
+    const { port, calls } = fakePort({
+      scan: async (onProgress) => {
+        onProgress({ jobId: "j2", phase: "scanning", scannedInputs: 1, totalInputs: 1, counts: zeroCounts });
+        return { jobId: "j2", root: { sourceRootKey: "k", name: "根" }, inputCount: 1, skippedDirectoryCount: 0, unreadableDirectoryCount: 0 };
+      },
+      start: () => new Promise((_, reject) => { fail = reject; }),
+    });
+    const owner = new FolderImportJobOwner(port);
+    const token = owner.beginScan();
+    await port.scan((event) => owner.adopt(token, event.jobId));
+    const handlers = { onProgress: vi.fn(), onResult: vi.fn(), onError: vi.fn(), onSettled: vi.fn() };
+    expect(owner.run({ options: auto, targets: [] }, handlers)).toBe(true);
+    owner.close(); // panel unmounted mid-import
+    await flushAsync();
+    expect(calls).toEqual(["cancel:j2"]); // ownership kept until the run settles
+    fail(new Error("second batch failed"));
+    await flushAsync();
+    expect(handlers.onResult).not.toHaveBeenCalled();
+    expect(handlers.onError).toHaveBeenCalledTimes(1);
+    expect(handlers.onSettled).toHaveBeenCalledTimes(1);
+    expect(calls).toEqual(["cancel:j2", "cancel:j2", "dispose:j2"]);
   });
 });
