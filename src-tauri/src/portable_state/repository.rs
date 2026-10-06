@@ -19,6 +19,7 @@ use crate::library_organization::{
     apply_command, effective_folder_id, empty_organization, is_favorite, merge_into_envelope,
     LibraryOrganization, OrganizationCommand, OrganizationEnvelope,
 };
+use crate::library_organization::Stamp as OrganizationStamp;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -71,6 +72,63 @@ pub struct ShelfBookProjection {
 pub struct ShelfProjection {
     pub books: Vec<ShelfBookProjection>,
     pub organization: LibraryOrganization,
+}
+
+/// SQLite-side raw placement observation used to re-check the planner rule
+/// inside the directory import organization transaction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DirectoryPlacementSnapshot {
+    pub raw_folder_id: Option<String>,
+    /// Missing register and explicit-null register differ.
+    pub stamp: Option<OrganizationStamp>,
+    pub effective_folder_id: Option<String>,
+    /// Whether the portable repository already had this book before the
+    /// directory import batch.  New books must still be classified as new even
+    /// though publishing their metadata makes the later organization snapshot
+    /// see a book row.
+    pub is_existing_book: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DirectoryFolderCreate {
+    pub folder_id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DirectoryBindingWrite {
+    /// planner JSON `[sourceRootKey, segments]`; never a shortened label.
+    pub directory_key: String,
+    pub folder_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DirectoryPlacementRequest {
+    pub content_hash: String,
+    pub target_folder_id: Option<String>,
+    pub is_existing_book: bool,
+    pub observed: DirectoryPlacementSnapshot,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DirectoryPlacementDecision {
+    Keep,
+    Move,
+    PlacementChanged,
+    TargetDeleted,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DirectoryPlacementOutcome {
+    pub content_hash: String,
+    pub decision: DirectoryPlacementDecision,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DirectoryImportBatchOutcome {
+    pub placements: Vec<DirectoryPlacementOutcome>,
+    pub created_folders: usize,
+    pub bindings_written: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -731,6 +789,23 @@ fn save_local_is_new_hashes(
     put_meta_json(connection, KEY_LOCAL_IS_NEW, &values)
 }
 
+
+fn observe_directory_placement(
+    state: &LibraryOrganization,
+    content_hash: &str,
+) -> DirectoryPlacementSnapshot {
+    let register = state
+        .books
+        .get(content_hash)
+        .and_then(|book| book.folder_id.as_ref());
+    DirectoryPlacementSnapshot {
+        raw_folder_id: register.and_then(|register| register.value.clone()),
+        stamp: register.map(|register| register.stamp.clone()),
+        effective_folder_id: effective_folder_id(state, content_hash).map(str::to_string),
+        is_existing_book: state.books.contains_key(content_hash),
+    }
+}
+
 impl PortableStore {
     pub fn open(path: &Path) -> PortableResult<Self> {
         if let Some(parent) = path.parent() {
@@ -778,6 +853,10 @@ impl PortableStore {
              CREATE TABLE IF NOT EXISTS local_meta (
                  key TEXT PRIMARY KEY NOT NULL,
                  json TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS directory_bindings (
+                 directory_key TEXT PRIMARY KEY NOT NULL,
+                 folder_id TEXT NOT NULL
              );",
         )?;
         Ok(Self {
@@ -789,8 +868,247 @@ impl PortableStore {
         })
     }
 
+
     pub fn runtime_generation(&self) -> &str {
         &self.runtime_generation
+    }
+
+    pub fn directory_bindings(&self) -> PortableResult<BTreeMap<String, String>> {
+        let mut bindings = BTreeMap::new();
+        let mut statement = self
+            .connection
+            .prepare("SELECT directory_key, folder_id FROM directory_bindings")?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            let (directory_key, folder_id) = row?;
+            bindings.insert(directory_key, folder_id);
+        }
+        Ok(bindings)
+    }
+
+    pub fn directory_placement_snapshots(
+        &self,
+        content_hashes: &[String],
+    ) -> PortableResult<BTreeMap<String, DirectoryPlacementSnapshot>> {
+        for content_hash in content_hashes {
+            if !dto::valid_content_hash(content_hash) {
+                return Err(PortableError::invalid_entity(
+                    "invalid-entity：目录导入内容指纹无效",
+                ));
+            }
+        }
+        let state = self.snapshot()?.organization;
+        let mut snapshots = BTreeMap::new();
+        for content_hash in content_hashes {
+            snapshots.insert(
+                content_hash.clone(),
+                observe_directory_placement(&state, content_hash),
+            );
+        }
+        Ok(snapshots)
+    }
+
+    /// Applies one bounded directory-import organization batch in a single
+    /// local SQLite transaction.  `decide` is called with the live placement
+    /// snapshot read inside this transaction, so a user classification change
+    /// between preview and commit can never be overwritten by a stale plan.
+    pub fn apply_directory_import_batch<F>(
+        &mut self,
+        creates: &[DirectoryFolderCreate],
+        placements: &[DirectoryPlacementRequest],
+        bindings: &[DirectoryBindingWrite],
+        mut decide: F,
+    ) -> PortableResult<DirectoryImportBatchOutcome>
+    where
+        F: FnMut(
+            &DirectoryPlacementRequest,
+            &DirectoryPlacementSnapshot,
+            bool,
+        ) -> DirectoryPlacementDecision,
+    {
+        for create in creates {
+            if !crate::library_organization::valid_canonical_uuid(&create.folder_id) {
+                return Err(PortableError::invalid_entity(
+                    "invalid-entity：目录导入创建了无效文件夹 ID",
+                ));
+            }
+            crate::library_organization::normalize_folder_name(&create.name)
+                .map_err(PortableError::invalid_entity)?;
+        }
+        for placement in placements {
+            if !dto::valid_content_hash(&placement.content_hash) {
+                return Err(PortableError::invalid_entity(
+                    "invalid-entity：目录导入书籍内容指纹无效",
+                ));
+            }
+        }
+        for binding in bindings {
+            if !crate::library_organization::valid_canonical_uuid(&binding.folder_id) {
+                return Err(PortableError::invalid_entity(
+                    "invalid-entity：目录导入目录绑定文件夹 ID 无效",
+                ));
+            }
+            if binding.directory_key.is_empty() {
+                return Err(PortableError::invalid_entity(
+                    "invalid-entity：目录绑定键不能为空",
+                ));
+            }
+        }
+
+        let transaction = self.connection.unchecked_transaction()?;
+        let installation_id = ensure_installation_id(&transaction)?;
+        let counter = load_counter(&transaction)?;
+        let state = load_organization(&transaction)?;
+
+        let mut known_hashes = std::collections::HashSet::new();
+        {
+            let mut statement = transaction.prepare("SELECT hash FROM book_meta")?;
+            let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+            for row in rows {
+                known_hashes.insert(row?);
+            }
+        }
+
+        let active_folders: std::collections::HashSet<String> = state
+            .folders
+            .iter()
+            .filter(|(_, folder)| folder.deleted.is_none())
+            .map(|(folder_id, _)| folder_id.clone())
+            .collect();
+        let tombstoned_folders: std::collections::HashSet<String> = state
+            .folders
+            .iter()
+            .filter(|(_, folder)| folder.deleted.is_some())
+            .map(|(folder_id, _)| folder_id.clone())
+            .collect();
+        let create_ids: std::collections::HashSet<String> = creates
+            .iter()
+            .map(|create| create.folder_id.clone())
+            .collect();
+        if create_ids.len() != creates.len() {
+            return Err(PortableError::invalid_entity(
+                "invalid-entity：目录导入重复创建文件夹 ID",
+            ));
+        }
+
+        let mut placement_outcomes = Vec::with_capacity(placements.len());
+        let mut moves_by_folder: Vec<(String, Vec<String>)> = Vec::new();
+        for placement in placements {
+            if !known_hashes.contains(&placement.content_hash) {
+                return Err(PortableError::invalid_entity(
+                    "invalid-entity：目录导入提交的书籍尚未写入本机资料",
+                ));
+            }
+            let current = observe_directory_placement(&state, &placement.content_hash);
+            let target_alive = match placement.target_folder_id.as_deref() {
+                None => false,
+                Some(folder_id) => {
+                    if active_folders.contains(folder_id) {
+                        true
+                    } else if tombstoned_folders.contains(folder_id) {
+                        false
+                    } else {
+                        create_ids.contains(folder_id)
+                    }
+                }
+            };
+            let decision = decide(placement, &current, target_alive);
+            if let DirectoryPlacementDecision::Move = decision {
+                let folder_id = placement
+                    .target_folder_id
+                    .clone()
+                    .ok_or_else(|| {
+                        PortableError::invalid_entity(
+                            "invalid-entity：未分类目标不应产生移动决定",
+                        )
+                    })?;
+                match moves_by_folder
+                    .iter_mut()
+                    .find(|(existing, _)| existing == &folder_id)
+                {
+                    Some((_, hashes)) => {
+                        if !hashes.contains(&placement.content_hash) {
+                            hashes.push(placement.content_hash.clone());
+                        }
+                    }
+                    None => moves_by_folder
+                        .push((folder_id, vec![placement.content_hash.clone()])),
+                }
+            }
+            placement_outcomes.push(DirectoryPlacementOutcome {
+                content_hash: placement.content_hash.clone(),
+                decision,
+            });
+        }
+
+        let mut envelope = OrganizationEnvelope {
+            device_id: installation_id,
+            counter,
+            state,
+        };
+        let mut created_folders = 0usize;
+        for create in creates {
+            let needed = moves_by_folder
+                .iter()
+                .any(|(folder_id, _)| folder_id == &create.folder_id);
+            if !needed {
+                continue;
+            }
+            envelope = apply_command(
+                &envelope,
+                &OrganizationCommand::CreateFolder {
+                    folder_id: create.folder_id.clone(),
+                    name: create.name.clone(),
+                },
+                &known_hashes,
+            )
+            .map_err(PortableError::invalid_data)?;
+            created_folders += 1;
+        }
+
+        for (folder_id, content_hashes) in moves_by_folder {
+            envelope = apply_command(
+                &envelope,
+                &OrganizationCommand::MoveBooks {
+                    content_hashes,
+                    folder_id: Some(folder_id),
+                },
+                &known_hashes,
+            )
+            .map_err(PortableError::invalid_data)?;
+        }
+
+        let final_active: std::collections::HashSet<&str> = envelope
+            .state
+            .folders
+            .iter()
+            .filter(|(_, folder)| folder.deleted.is_none())
+            .map(|(folder_id, _)| folder_id.as_str())
+            .collect();
+        let mut bindings_written = 0usize;
+        for binding in bindings {
+            if !final_active.contains(binding.folder_id.as_str()) {
+                continue;
+            }
+            transaction.execute(
+                "INSERT INTO directory_bindings(directory_key, folder_id) VALUES(?1, ?2)
+                 ON CONFLICT(directory_key) DO UPDATE SET folder_id = excluded.folder_id",
+                params![binding.directory_key, binding.folder_id],
+            )?;
+            bindings_written += 1;
+        }
+
+        store_organization(&transaction, &envelope.state)?;
+        store_counter(&transaction, envelope.counter)?;
+        transaction.commit()?;
+
+        Ok(DirectoryImportBatchOutcome {
+            placements: placement_outcomes,
+            created_folders,
+            bindings_written,
+        })
     }
 
     fn new_handle(&mut self, prefix: &str) -> String {
@@ -2253,5 +2571,205 @@ mod runtime_handle_tests {
             )
             .unwrap_err();
         assert_eq!(error.code, "stale-basis");
+    }
+}
+
+#[cfg(test)]
+mod directory_import_batch_tests {
+    use super::*;
+
+    const HASH_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const HASH_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const FOLDER_F: &str = "00000000-0000-4000-8000-0000000000f0";
+    const FOLDER_G: &str = "00000000-0000-4000-8000-0000000000f1";
+    const DEVICE: &str = "0a0a0a0a-0000-4000-8000-00000000000a";
+
+    fn known_book(store: &PortableStore, hash: &str) {
+        store
+            .connection
+            .execute(
+                "INSERT INTO book_meta(hash, json) VALUES(?1, '{}')",
+                params![hash],
+            )
+            .unwrap();
+    }
+
+    fn observe(store: &PortableStore, hash: &str) -> DirectoryPlacementSnapshot {
+        let state = load_organization(&store.connection).unwrap();
+        observe_directory_placement(&state, hash)
+    }
+
+    fn request(
+        hash: &str,
+        target: Option<&str>,
+        observed: DirectoryPlacementSnapshot,
+        existing: bool,
+    ) -> DirectoryPlacementRequest {
+        DirectoryPlacementRequest {
+            content_hash: hash.to_string(),
+            target_folder_id: target.map(str::to_string),
+            is_existing_book: existing,
+            observed,
+        }
+    }
+
+    #[test]
+    fn creates_folder_only_for_first_real_move_then_reuses_binding() {
+        let mut store = PortableStore::open_in_memory().unwrap();
+        known_book(&store, HASH_A);
+        store
+            .connection
+            .execute(
+                "INSERT INTO local_meta(key, json) VALUES('installationId', ?1)",
+                params![format!("\"{DEVICE}\"")],
+            )
+            .unwrap();
+
+        let observed = observe(&store, HASH_A);
+        let outcome = store
+            .apply_directory_import_batch(
+                &[DirectoryFolderCreate {
+                    folder_id: FOLDER_F.to_string(),
+                    name: "科幻".to_string(),
+                }],
+                &[request(HASH_A, Some(FOLDER_F), observed, false)],
+                &[DirectoryBindingWrite {
+                    directory_key: "[\"root\",[\"科幻\"]]".to_string(),
+                    folder_id: FOLDER_F.to_string(),
+                }],
+                |_request, current, target_alive| {
+                    if !target_alive {
+                        DirectoryPlacementDecision::TargetDeleted
+                    } else if current.effective_folder_id.as_deref() == Some(FOLDER_F) {
+                        DirectoryPlacementDecision::Keep
+                    } else {
+                        DirectoryPlacementDecision::Move
+                    }
+                },
+            )
+            .unwrap();
+        assert_eq!(outcome.created_folders, 1);
+        assert_eq!(outcome.bindings_written, 1);
+        assert_eq!(
+            outcome.placements[0].decision,
+            DirectoryPlacementDecision::Move
+        );
+        assert_eq!(
+            store.directory_bindings().unwrap().get("[\"root\",[\"科幻\"]]"),
+            Some(&FOLDER_F.to_string())
+        );
+        let state = load_organization(&store.connection).unwrap();
+        assert_eq!(effective_folder_id(&state, HASH_A), Some(FOLDER_F));
+
+        // A second observation sees the newly written placement; re-applying the
+        // same mapping is a no-op and does not create a duplicate folder.
+        let observed = observe(&store, HASH_A);
+        let outcome = store
+            .apply_directory_import_batch(
+                &[],
+                &[request(HASH_A, Some(FOLDER_F), observed, true)],
+                &[],
+                |_request, current, target_alive| {
+                    if !target_alive {
+                        DirectoryPlacementDecision::TargetDeleted
+                    } else if current.effective_folder_id.as_deref() == Some(FOLDER_F) {
+                        DirectoryPlacementDecision::Keep
+                    } else {
+                        DirectoryPlacementDecision::Move
+                    }
+                },
+            )
+            .unwrap();
+        assert_eq!(outcome.created_folders, 0);
+        assert_eq!(
+            outcome.placements[0].decision,
+            DirectoryPlacementDecision::Keep
+        );
+    }
+
+    #[test]
+    fn stale_observed_stamp_is_rejected_without_overwriting_user_change() {
+        let mut store = PortableStore::open_in_memory().unwrap();
+        known_book(&store, HASH_A);
+        known_book(&store, HASH_B);
+        store
+            .connection
+            .execute(
+                "INSERT INTO local_meta(key, json) VALUES('installationId', ?1)",
+                params![format!("\"{DEVICE}\"")],
+            )
+            .unwrap();
+
+        let old = request(HASH_A, Some(FOLDER_F), observe(&store, HASH_A), false);
+        store
+            .apply_directory_import_batch(
+                &[DirectoryFolderCreate {
+                    folder_id: FOLDER_F.to_string(),
+                    name: "科幻".to_string(),
+                }],
+                &[old],
+                &[],
+                |_request, _current, _alive| DirectoryPlacementDecision::Move,
+            )
+            .unwrap();
+
+        // User moves the book elsewhere between observation and the second batch.
+        let observed = observe(&store, HASH_A);
+        store
+            .apply_directory_import_batch(
+                &[DirectoryFolderCreate {
+                    folder_id: FOLDER_G.to_string(),
+                    name: "历史".to_string(),
+                }],
+                &[request(HASH_A, Some(FOLDER_G), observed.clone(), true)],
+                &[],
+                |_request, _current, _alive| DirectoryPlacementDecision::Move,
+            )
+            .unwrap();
+
+        // The second batch still carries the pre-move snapshot.  The transaction
+        // must not replay the old move.
+        let stale = request(HASH_A, Some(FOLDER_F), observed, true);
+        let outcome = store
+            .apply_directory_import_batch(
+                &[],
+                &[stale],
+                &[],
+                |request, current, _alive| {
+                    if request.observed == *current {
+                        DirectoryPlacementDecision::Move
+                    } else {
+                        DirectoryPlacementDecision::PlacementChanged
+                    }
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            outcome.placements[0].decision,
+            DirectoryPlacementDecision::PlacementChanged
+        );
+        let state = load_organization(&store.connection).unwrap();
+        assert_eq!(effective_folder_id(&state, HASH_A), Some(FOLDER_G));
+    }
+
+    #[test]
+    fn empty_moves_do_not_create_requested_folder() {
+        let mut store = PortableStore::open_in_memory().unwrap();
+        known_book(&store, HASH_A);
+        let observed = observe(&store, HASH_A);
+        let outcome = store
+            .apply_directory_import_batch(
+                &[DirectoryFolderCreate {
+                    folder_id: FOLDER_F.to_string(),
+                    name: "空目录".to_string(),
+                }],
+                &[request(HASH_A, None, observed, false)],
+                &[],
+                |_request, _current, _alive| DirectoryPlacementDecision::Keep,
+            )
+            .unwrap();
+        assert_eq!(outcome.created_folders, 0);
+        let state = load_organization(&store.connection).unwrap();
+        assert!(state.folders.is_empty());
     }
 }

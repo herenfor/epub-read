@@ -3,6 +3,9 @@ package dev.herenfor.epubreader
 import android.app.Activity
 import android.net.Uri
 import android.os.ParcelFileDescriptor
+import android.provider.DocumentsContract
+import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.TauriPlugin
@@ -15,6 +18,7 @@ import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import org.json.JSONArray
 
 @InvokeArg
 class OpenReadOnlyArgs {
@@ -40,6 +44,12 @@ class CancelWriteArgs {
     var cancelled: Boolean = true
 }
 
+@InvokeArg
+class QueryTreeDirectoryArgs {
+    lateinit var treeUri: String
+    var parentDocumentId: String? = null
+}
+
 /**
  * App-local Android content-URI bridge.
  *
@@ -54,6 +64,43 @@ class AndroidUriBridgePlugin(private val activity: Activity) : Plugin(activity) 
         Thread(runnable, "android-uri-bridge").apply { isDaemon = true }
     }
     private val cancelledWrites = ConcurrentHashMap<String, Boolean>()
+    private var pendingTreePick: Invoke? = null
+    private val hostActivity = activity as ComponentActivity
+    private val treePicker = hostActivity.registerForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        val invoke = pendingTreePick
+        pendingTreePick = null
+        if (invoke != null) {
+            postResponse {
+                val response = JSObject()
+                if (uri != null) {
+                    response.put("uri", uri.toString())
+                }
+                invoke.resolve(response)
+            }
+        }
+    }
+
+    @Command
+    fun pickDirectoryTree(invoke: Invoke) {
+        if (pendingTreePick != null) {
+            invoke.reject("directory picker is already active")
+            return
+        }
+        pendingTreePick = invoke
+        activity.runOnUiThread {
+            treePicker.launch(null)
+        }
+    }
+
+    @Command
+    fun queryTreeDirectory(invoke: Invoke) {
+        val args = invoke.parseArgs(QueryTreeDirectoryArgs::class.java)
+        ioExecutor.execute {
+            queryTreeDirectoryOnWorker(invoke, args.treeUri, args.parentDocumentId)
+        }
+    }
 
     @Command
     fun openReadOnly(invoke: Invoke) {
@@ -184,6 +231,101 @@ class AndroidUriBridgePlugin(private val activity: Activity) : Plugin(activity) 
             postResponse { invoke.reject(message) }
         } finally {
             cancelledWrites.remove(jobId)
+        }
+    }
+
+    private fun queryTreeDirectoryOnWorker(
+        invoke: Invoke,
+        treeUri: String,
+        requestedParentDocumentId: String?
+    ) {
+        try {
+            val tree = Uri.parse(treeUri)
+            val parentDocumentId = requestedParentDocumentId
+                ?.takeIf { it.isNotBlank() }
+                ?: DocumentsContract.getTreeDocumentId(tree)
+            val parentDocumentUri = DocumentsContract.buildDocumentUriUsingTree(
+                tree,
+                parentDocumentId
+            )
+            val parentDisplayName = queryDocumentDisplayName(parentDocumentUri) ?: ""
+            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
+                tree,
+                parentDocumentId
+            )
+            val projection = arrayOf(
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                DocumentsContract.Document.COLUMN_MIME_TYPE,
+                DocumentsContract.Document.COLUMN_SIZE
+            )
+            val entries = JSONArray()
+            val cursor = activity.contentResolver.query(
+                childrenUri,
+                projection,
+                null,
+                null,
+                null
+            ) ?: throw IOException("content provider returned no cursor")
+            cursor.use {
+                val idIndex = it.getColumnIndexOrThrow(
+                    DocumentsContract.Document.COLUMN_DOCUMENT_ID
+                )
+                val nameIndex = it.getColumnIndexOrThrow(
+                    DocumentsContract.Document.COLUMN_DISPLAY_NAME
+                )
+                val mimeIndex = it.getColumnIndexOrThrow(
+                    DocumentsContract.Document.COLUMN_MIME_TYPE
+                )
+                val sizeIndex = it.getColumnIndex(DocumentsContract.Document.COLUMN_SIZE)
+                while (it.moveToNext()) {
+                    val documentId = it.getString(idIndex) ?: continue
+                    val mimeType = it.getString(mimeIndex) ?: ""
+                    val displayName = it.getString(nameIndex) ?: documentId
+                    val documentUri = DocumentsContract.buildDocumentUriUsingTree(
+                        tree,
+                        documentId
+                    )
+                    val entry = JSObject().apply {
+                        put("documentId", documentId)
+                        put("uri", documentUri.toString())
+                        put("displayName", displayName)
+                        put("mimeType", mimeType)
+                        put(
+                            "isDirectory",
+                            mimeType == DocumentsContract.Document.MIME_TYPE_DIR
+                        )
+                        if (sizeIndex >= 0 && !it.isNull(sizeIndex)) {
+                            val size = it.getLong(sizeIndex)
+                            if (size >= 0) put("size", size)
+                        }
+                    }
+                    entries.put(entry)
+                }
+            }
+            val response = JSObject().apply {
+                put("parentDisplayName", parentDisplayName)
+                put("entries", entries)
+            }
+            postResponse { invoke.resolve(response) }
+        } catch (error: Throwable) {
+            val message = error.message?.takeIf { it.isNotBlank() } ?: error.toString()
+            postResponse { invoke.reject(message) }
+        }
+    }
+
+    private fun queryDocumentDisplayName(uri: Uri): String? {
+        val projection = arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+        return try {
+            activity.contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    cursor.getString(0)
+                } else {
+                    null
+                }
+            }
+        } catch (_: Throwable) {
+            null
         }
     }
 

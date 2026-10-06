@@ -34,6 +34,12 @@ use tauri::{AppHandle, Manager, State};
 use zip::ZipArchive;
 use crate::native_zip_session::{Fault, NativeZipSession, CHUNK_BYTES};
 
+// Temporary FI-N bridge: FI-I moves this declaration to `lib.rs` when it
+// registers the native commands.  Keeping it here lets this parallel package
+// compile and run its repository/runner tests without touching `lib.rs`.
+#[path = "directory_import/mod.rs"]
+pub(crate) mod directory_import;
+
 const MAX_THUMBNAIL_CACHE_BYTES: u64 = 100 * 1024 * 1024;
 const MAX_THUMBNAIL_BYTES: usize = 5 * 1024 * 1024;
 const MAX_XML_BYTES: u64 = 4 * 1024 * 1024;
