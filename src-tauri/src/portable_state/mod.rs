@@ -37,9 +37,11 @@ pub use merge::{
     EntityRef, PreparedWrite, ReadBasis, WriteIntent,
 };
 pub use repository::{
-    AnnotationProjection, AnnotationWriteOutcome, DeleteOutcome, DeleteStatus, MigrationOutcome,
-    PortableStore, ProgressProjection, ReleaseTarget, ShelfBookProjection, ShelfProjection,
-    WriteOutcome, WriteStatus,
+    AnnotationProjection, AnnotationWriteOutcome, DeleteOutcome, DeleteStatus,
+    DirectoryBindingWrite, DirectoryFolderCreate, DirectoryImportBatchOutcome,
+    DirectoryPlacementDecision, DirectoryPlacementOutcome, DirectoryPlacementRequest,
+    DirectoryPlacementSnapshot, MigrationOutcome, PortableStore, ProgressProjection, ReleaseTarget,
+    ShelfBookProjection, ShelfProjection, WriteOutcome, WriteStatus,
 };
 
 #[cfg(test)]
