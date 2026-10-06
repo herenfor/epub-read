@@ -218,6 +218,140 @@ export async function extractSearchText(source: string): Promise<string> {
   return extractVisibleText(document);
 }
 
+export interface SearchTextSegment {
+  /** Original text-node content. */
+  text: string;
+  /** UTF-16 range in the extracted search text. */
+  start: number;
+  end: number;
+  /** False for pre/code/kbd/samp/SVG text, which T-1 leaves untouched. */
+  projectable: boolean;
+}
+
+const PROJECTION_EXCLUDED_TAGS = new Set(["pre", "code", "kbd", "samp", "svg"]);
+
+function extractVisibleTextSegments(root: XmlNodeLike): {
+  text: string;
+  segments: SearchTextSegment[];
+} {
+  const parts: string[] = [];
+  let current = "";
+  let currentDrafts: Array<{
+    text: string;
+    partIndex: number;
+    localStart: number;
+    localEnd: number;
+    projectable: boolean;
+  }> = [];
+  let drafts: Array<Omit<SearchTextSegment, "start" | "end"> & {
+    partIndex: number;
+    localStart: number;
+    localEnd: number;
+  }> = [];
+  const flush = (): void => {
+    if (!current) return;
+    const partIndex = parts.length;
+    parts.push(current);
+    for (const draft of currentDrafts) {
+      if (draft.localEnd > draft.localStart) drafts.push({ ...draft, partIndex });
+    }
+    current = "";
+    currentDrafts = [];
+  };
+  const append = (value: string, projectable: boolean): void => {
+    if (!value) return;
+    currentDrafts.push({
+      text: value,
+      partIndex: -1,
+      localStart: current.length,
+      localEnd: current.length + value.length,
+      projectable,
+    });
+    current += value;
+  };
+  const boundary = (): void => {
+    flush();
+    parts.push(BLOCK_BOUNDARY);
+  };
+  const walk = (node: XmlNodeLike, projectable: boolean): void => {
+    if (node.nodeType === 3) {
+      append(node.textContent ?? "", projectable);
+      return;
+    }
+    if (!isElement(node) || isExcluded(node, false)) return;
+    const tag = localNameOf(node).toLowerCase();
+    if (tag === "br" || tag === "hr") {
+      boundary();
+      return;
+    }
+    const block = BLOCK_TAGS.has(tag);
+    if (block) flush();
+    const nextProjectable = projectable && !PROJECTION_EXCLUDED_TAGS.has(tag);
+    for (let i = 0; i < node.childNodes.length; i++) walk(node.childNodes[i], nextProjectable);
+    if (block) flush();
+  };
+  const documentElement = (root as unknown as { documentElement?: XmlNodeLike }).documentElement;
+  walk(documentElement ?? root, true);
+  flush();
+
+  const raw = parts.join(BLOCK_BOUNDARY);
+  const partStarts: number[] = [];
+  let rawOffset = 0;
+  for (let i = 0; i < parts.length; i++) {
+    partStarts[i] = rawOffset;
+    rawOffset += parts[i].length;
+    if (i < parts.length - 1) rawOffset += BLOCK_BOUNDARY.length;
+  }
+
+  const mapping = new Uint32Array(raw.length + 1);
+  let text = "";
+  let out = 0;
+  let i = 0;
+  while (i < raw.length) {
+    mapping[i] = out;
+    if (raw[i] === BLOCK_BOUNDARY) {
+      while (i < raw.length && raw[i] === BLOCK_BOUNDARY) {
+        i++;
+        mapping[i] = out;
+      }
+      text += BLOCK_BOUNDARY;
+      out++;
+      mapping[i] = out;
+    } else {
+      text += raw[i];
+      out++;
+      i++;
+      mapping[i] = out;
+    }
+  }
+
+  return {
+    text,
+    segments: drafts
+      .map((draft) => {
+        const rawStart = partStarts[draft.partIndex] + draft.localStart;
+        const rawEnd = partStarts[draft.partIndex] + draft.localEnd;
+        return {
+          text: draft.text,
+          start: mapping[rawStart] ?? 0,
+          end: mapping[rawEnd] ?? 0,
+          projectable: draft.projectable,
+        };
+      })
+      .filter((segment) => segment.end > segment.start),
+  };
+}
+
+/** Extract search text plus per-Text-node segments for display projection. */
+export async function extractSearchTextSegments(source: string): Promise<{
+  text: string;
+  segments: SearchTextSegment[];
+}> {
+  let document = await parseXmlText(source, "application/xml");
+  if (hasParserError(document)) document = await parseXmlText(source, "text/html");
+  return extractVisibleTextSegments(document);
+}
+
 /** NFKC/lower-case normalization; Unicode whitespace becomes one ASCII space. */
 export function normalizeCorpusText(value: string): string {
   return Array.from(value.normalize("NFKC").toLowerCase())
