@@ -235,37 +235,45 @@ pub fn portable_state_adopt(
 }
 
 #[tauri::command]
-pub fn portable_state_write(
+pub async fn portable_state_write(
     app: AppHandle,
-    manager: State<'_, PortableStateManager>,
     basis_id: String,
     intent: WriteIntent,
     value: serde_json::Value,
     updated_at_ms: u64,
 ) -> PortableResult<serde_json::Value> {
-    with_store(&app, &manager, |store| {
-        let entity = store.basis_entity(&basis_id)?;
-        match entity {
-            EntityRef::Progress { .. } => {
-                let value: ProgressValue = serde_json::from_value(value)
-                    .map_err(|error| PortableError::invalid_data(format!("invalid-data：{error}")))?;
-                let outcome = store.write_progress(&basis_id, intent, value, updated_at_ms)?;
-                to_value(&outcome)
+    // Android IPC 的同步命令会占用调用线程；磁盘事务和锁只在阻塞工作内持有。
+    tauri::async_runtime::spawn_blocking(move || {
+        let manager = app.state::<PortableStateManager>();
+        with_store(&app, &manager, |store| {
+            let entity = store.basis_entity(&basis_id)?;
+            match entity {
+                EntityRef::Progress { .. } => {
+                    let value: ProgressValue = serde_json::from_value(value).map_err(|error| {
+                        PortableError::invalid_data(format!("invalid-data：{error}"))
+                    })?;
+                    let outcome = store.write_progress(&basis_id, intent, value, updated_at_ms)?;
+                    to_value(&outcome)
+                }
+                EntityRef::Bookmark { .. } => {
+                    let value: BookmarkValue = serde_json::from_value(value).map_err(|error| {
+                        PortableError::invalid_data(format!("invalid-data：{error}"))
+                    })?;
+                    let outcome = store.write_bookmark(&basis_id, intent, value, updated_at_ms)?;
+                    to_value(&outcome)
+                }
+                EntityRef::Note { .. } => {
+                    let value: NoteValue = serde_json::from_value(value).map_err(|error| {
+                        PortableError::invalid_data(format!("invalid-data：{error}"))
+                    })?;
+                    let outcome = store.write_note(&basis_id, intent, value, updated_at_ms)?;
+                    to_value(&outcome)
+                }
             }
-            EntityRef::Bookmark { .. } => {
-                let value: BookmarkValue = serde_json::from_value(value)
-                    .map_err(|error| PortableError::invalid_data(format!("invalid-data：{error}")))?;
-                let outcome = store.write_bookmark(&basis_id, intent, value, updated_at_ms)?;
-                to_value(&outcome)
-            }
-            EntityRef::Note { .. } => {
-                let value: NoteValue = serde_json::from_value(value)
-                    .map_err(|error| PortableError::invalid_data(format!("invalid-data：{error}")))?;
-                let outcome = store.write_note(&basis_id, intent, value, updated_at_ms)?;
-                to_value(&outcome)
-            }
-        }
+        })
     })
+    .await
+    .map_err(|error| storage_error(format!("资料写入工作线程失败：{error}")))?
 }
 
 #[tauri::command]
@@ -338,11 +346,13 @@ pub fn portable_state_release(
 }
 
 #[tauri::command]
-pub fn portable_state_snapshot(
-    app: AppHandle,
-    manager: State<'_, PortableStateManager>,
-) -> PortableResult<PortableStateV3> {
-    with_store(&app, &manager, |store| store.snapshot())
+pub async fn portable_state_snapshot(app: AppHandle) -> PortableResult<PortableStateV3> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let manager = app.state::<PortableStateManager>();
+        with_store(&app, &manager, |store| store.snapshot())
+    })
+    .await
+    .map_err(|error| storage_error(format!("资料快照工作线程失败：{error}")))?
 }
 
 #[tauri::command]

@@ -1,11 +1,11 @@
 /**
- * 可中断的合成层翻页驱动（WAAPI transform），只在一次运动期间接管 viewer。
+ * 可中断的合成层翻页驱动（WAAPI transform），在一段连续运动期间接管 viewer。
  *
  * 整章设为可见溢出再整体平移，在手机上每写一次 transform 都要约 50ms 主线程。
  * 这里改用“K 屏窗口”（K=5）：viewer 仍是自身裁剪的滚动容器，宽度扩为 K 屏、左移
  * MID 屏，栏数按比例放大（栏宽/栏距不变，各栏绝对位置不变），body 只露出中间
- * 一屏；运动只写窗口内的 transform。静止时（settleTo/dispose 后）恢复原内联
- * 几何，其他读 scrollLeft/rect 的路径看不到窗口。
+ * 一屏；运动只写窗口内的 transform。短暂静止时保留窗口供下一次翻页复用；
+ * 锚点/快照使用视觉坐标。空闲退出或导航（settleTo/dispose）恢复原内联几何。
  *
  * 视觉阅读偏移 = 窗口 scrollLeft + MID 屏宽 − translateX。
  */
@@ -44,7 +44,7 @@ export class TransformPageMotion implements PageMotionDriver {
     this.held = initialPosition;
   }
 
-  /** 是否处于窗口模式（运动中或拖动中）。 */
+  /** 是否处于窗口模式（运动中、拖动中或短暂空闲）。 */
   get active(): boolean {
     return this.windowStart !== null;
   }
@@ -119,6 +119,17 @@ export class TransformPageMotion implements PageMotionDriver {
       this.animation = null;
       this.onFault(error);
     });
+  }
+
+  /** 落定只更新视觉位置；窗口由分页器的空闲租约或显式导航撤除。 */
+  holdSettledAt(position: number): void {
+    ++this.generation;
+    const previous = this.animation;
+    this.animation = null;
+    this.held = position;
+    if (this.windowStart !== null) this.applyTransform();
+    else this.viewer.scrollLeft = position;
+    previous?.cancel();
   }
 
   /**

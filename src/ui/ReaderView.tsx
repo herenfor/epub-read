@@ -1681,15 +1681,17 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         const ticket = p.motionBeginDrag(direction);
         motionDrag = ticket === null ? null : { ticket, samples: [] };
         motionDragRef.current = motionDrag;
+        if (motionDrag) {
+          main.classList.add("reader-swipe-dragging");
+          main.dataset.swipeFollow = "true";
+          main.style.removeProperty("--reader-swipe-offset");
+        }
       }
       if (motionDrag) {
         // 运动层 1:1 跟手（只写合成层 transform）；静止于章边向外拖则走下方跨章预览。
         p.motionDrag(motionDrag.ticket, dx);
         motionDrag.samples.push({ t: performance.now(), x: -dx });
         if (motionDrag.samples.length > 8) motionDrag.samples.shift();
-        main.classList.add("reader-swipe-dragging");
-        main.dataset.swipeFollow = "true";
-        main.style.removeProperty("--reader-swipe-offset");
         return;
       }
       delete main.dataset.swipeFollow;
@@ -1758,7 +1760,8 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       onNext: () => turnPageRef.current(1, "ui"),
       onPrev: () => turnPageRef.current(-1, "ui"),
       onPreview: (dx) => updateSwipePreviewRef.current(dx),
-      onGestureStart: () => paginatorRef.current?.prepareMotion?.(),
+      onGestureStart: () => paginatorRef.current?.prepareMotion(true),
+      onGestureEnd: () => paginatorRef.current?.endMotionContact(),
       shouldIgnore: () => inputPausedRef.current || activeSlotRef.current?.state.status !== "ready" ||
         Boolean(activeIframeRef.current?.contentWindow?.getSelection()?.toString()),
     });

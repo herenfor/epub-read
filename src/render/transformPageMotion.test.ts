@@ -96,6 +96,26 @@ describe("transform page motion driver", () => {
     expect(viewer.scrollLeft).toBe(300);
   });
 
+  it("落定保留窗口：下一次翻页不重写栏几何，显式退出仍恢复实际页", async () => {
+    const viewer = fakeViewer();
+    const driver = new TransformPageMotion(viewer as unknown as HTMLElement, layout, 300, () => {});
+    driver.animateTo(400, { durationMs: 300, tauMs: 90 }, () => driver.holdSettledAt(400));
+    viewer.animations[0].resolve();
+    await Promise.resolve();
+    expect(driver.read().position).toBe(400);
+    expect(driver.active).toBe(true);
+    viewer.events.length = 0;
+    driver.animateTo(500, { durationMs: 300, tauMs: 90 }, () => driver.holdSettledAt(500));
+    viewer.animations[1].resolve();
+    await Promise.resolve();
+    expect(viewer.events.filter(e => /(?:width|column-count|margin-left)=/.test(e))).toEqual([]);
+    expect(driver.read().position).toBe(500);
+    driver.settleTo(driver.read().position);
+    expect(viewer.scrollLeft).toBe(500);
+    expect(viewer.style.getPropertyValue("width")).toBe("100px");
+    expect(driver.active).toBe(false);
+  });
+
   it("进入窗口改变了整章宽度（栏位被动）：恢复原几何、报故障并直接落到目标", () => {
     let width = 1000;
     const viewer = fakeViewer({ scrollWidth: () => width });
