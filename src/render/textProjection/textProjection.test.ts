@@ -10,6 +10,7 @@ import { compileTextProjection, projectText } from "./compile";
 import { createNodeProjection, sourceRangeForDisplayRange } from "./nodeProjection";
 import { parseOpenCCDictionary } from "./opencc";
 import { createDisplaySearchSession } from "./displaySearch";
+import { extractSearchText, extractSearchTextSegments } from "../../core/corpus";
 import type { Book } from "../../core/types";
 import type { TextProjectionPreferences } from "./types";
 
@@ -162,5 +163,15 @@ describe("text projection core", () => {
     expect(untouched).toHaveLength(1);
     expect(untouched[0].matchedText).toBe("甲");
     session.dispose();
+  });
+
+  it("keeps segment extraction byte-compatible with the original search text", async () => {
+    const source = "<html><body><p>甲<br>乙</p><p>丙</p><pre>丁</pre><hr><p>戊</p></body></html>";
+    const extracted = await extractSearchText(source);
+    const segmented = await extractSearchTextSegments(source);
+    expect(segmented.text).toBe(extracted);
+    for (const segment of segmented.segments) {
+      expect(extracted.slice(segment.start, segment.end)).toBe(segment.text);
+    }
   });
 });
