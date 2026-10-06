@@ -10,29 +10,31 @@ import type {
   ScanResult,
 } from "../../core/folderImport/contract";
 import {
-  decidePlacement,
   planDirectoryImport,
   SuccessfulSources,
   type ImportOptions,
   type ImportRoot,
-  type PlacementSnapshot,
   type ScannedEpub,
 } from "../../core/folderImport/planner";
 import { disposeBook, DrmError, loadBook } from "../../core/book";
-import { effectiveFolderId, type LibraryOrganization } from "../libraryOrganization";
 import { findDuplicateEntry, sha256Hex } from "../importBooks";
 import type { ShelfEntry, ShelfStore } from "../shelf";
+import {
+  placementSnapshotOf,
+  type DirectoryPlacementCommitter,
+  type DirectoryPlacementItem,
+} from "./placementBatch";
 
 /**
- * Existing public ShelfStore methods the Web port composes. FI-I passes the
- * active store (portable IndexedDB facade); no new service method is required
- * for correctness. A single-transaction organization batch can replace the
- * per-command applyOrganization calls later without changing this port.
+ * Public ShelfStore reads/saves plus the REQUIRED atomic placement batch. FI-I
+ * implements `commitDirectoryPlacementBatch` inside one IndexedDB transaction
+ * (see placementBatch.ts); the port never writes placement through separate
+ * applyOrganization calls.
  */
 export type WebDirectoryImportStore = Pick<
   ShelfStore,
-  "list" | "save" | "readBook" | "setContentHash" | "getOrganization" | "applyOrganization"
->;
+  "list" | "save" | "readBook" | "setContentHash" | "getOrganization"
+> & DirectoryPlacementCommitter;
 
 /** A picked directory: the File objects with their webkitRelativePath. */
 export type WebDirectoryPicker = () => Promise<readonly File[] | null>;
@@ -126,37 +128,18 @@ interface WebJob {
   committing: boolean;
 }
 
-function placementSnapshot(state: LibraryOrganization, hash: string): PlacementSnapshot {
-  const register = state.books[hash]?.folderId;
-  return {
-    rawFolderId: register ? register.value : null,
-    stamp: register ? { deviceId: register.stamp.deviceId, counter: register.stamp.counter } : null,
-    effectiveFolderId: effectiveFolderId(state, hash),
-  };
-}
-
-function folderAlive(state: LibraryOrganization, folderId: string): boolean {
-  const folder = state.folders[folderId];
-  return folder !== undefined && !folder.deleted;
-}
-
 function errorText(error: unknown): string {
   if (error instanceof DrmError) return error.message;
   return error instanceof Error ? error.message : String(error);
 }
 
-interface PendingPlacement {
-  readonly inputId: string;
-  readonly hash: string;
-  readonly isExisting: boolean;
-  readonly target: FolderTarget;
-  readonly observed: PlacementSnapshot;
-}
+/** Thrown between IO steps once cancel was requested; the item is not accepted. */
+class ImportCancelled extends Error {}
 
 /**
  * Browser implementation of DirectoryImportPort: one directory dialog, then
- * one book at a time in planner ordinal order, short placement batches with
- * the conditional-placement rule checked against a fresh organization read.
+ * one book at a time in planner ordinal order, short placement batches that
+ * the store commits atomically with the conditional-placement rule.
  */
 export function createWebDirectoryImportPort(options: WebDirectoryImportOptions): DirectoryImportPort {
   const store = options.store;
@@ -208,11 +191,16 @@ export function createWebDirectoryImportPort(options: WebDirectoryImportOptions)
       contentHashById.set(entry.id, entry.contentHash);
       entryByContentHash.set(entry.contentHash, entry);
     }
+    // Only for the observed snapshot of newly seen hashes; never authorizes a move.
     let organization = await store.getOrganization();
     const successful = new SuccessfulSources();
     const winnerGroup = new Map<string, string | null>();
     const createdTargets = new Set<string>();
-    let pending: PendingPlacement[] = [];
+    let pending: DirectoryPlacementItem[] = [];
+    /** Throw at an IO boundary once cancel was requested: the item is not accepted. */
+    const checkCancel = () => {
+      if (job.cancelRequested) throw new ImportCancelled();
+    };
 
     const flush = async () => {
       if (pending.length === 0) return;
@@ -222,50 +210,27 @@ export function createWebDirectoryImportPort(options: WebDirectoryImportOptions)
       job.committing = true;
       emit(true);
       try {
-        // Re-read the active data source right before writing: the scan-time
-        // snapshot never authorizes a move.
-        const current = await store.getOrganization();
-        const moves = new Map<string, string[]>();
-        const creates = new Map<string, Extract<FolderTarget, { kind: "create" }>>();
-        for (const item of batch) {
-          const target = item.target;
-          const alive = target.kind === "create"
-            ? !current.folders[target.folderId]?.deleted
-            : folderAlive(current, target.folderId);
-          const decision = decidePlacement(
-            item.observed,
-            placementSnapshot(current, item.hash),
-            item.isExisting,
-            target.folderId,
-            alive,
-            importOptions.existingPlacement,
-          );
-          if (decision.kind === "skipped") {
-            counts.placementSkipped++;
-            issue(item.inputId, decision.reason, decision.reason === "target-deleted"
-              ? "目标文件夹已被删除，书已导入但未归档"
-              : "导入期间这本书的分类发生变化，已保留新的分类");
-            continue;
-          }
-          if (decision.kind !== "move") continue;
-          if (target.kind === "create" && !current.folders[target.folderId]) creates.set(target.folderId, target);
-          const list = moves.get(decision.folderId) ?? [];
-          list.push(item.hash);
-          moves.set(decision.folderId, list);
+        // One store transaction re-checks every item and commits creates+moves together.
+        const committed = await store.commitDirectoryPlacementBatch({
+          policy: importOptions.existingPlacement,
+          items: batch,
+        });
+        for (const outcome of committed.outcomes) {
+          const decision = outcome.decision;
+          if (decision.kind !== "skipped") continue;
+          counts.placementSkipped++;
+          issue(outcome.inputId, decision.reason, decision.reason === "target-deleted"
+            ? "目标文件夹已被删除，书已导入但未归档"
+            : "导入期间这本书的分类发生变化，已保留新的分类");
         }
-        // Folders are created only now, when a successful book really goes in.
-        for (const target of creates.values()) {
-          await store.applyOrganization({ type: "createFolder", folderId: target.folderId, name: target.name });
-          if (!createdTargets.has(target.folderId)) {
-            createdTargets.add(target.folderId);
-            counts.createdFolders++;
-          }
+        for (const folderId of committed.createdFolderIds) {
+          if (createdTargets.has(folderId)) continue;
+          createdTargets.add(folderId);
+          counts.createdFolders++;
         }
-        for (const [folderId, hashes] of moves) {
-          organization = await store.applyOrganization({ type: "moveBooks", contentHashes: hashes, folderId });
-        }
+        organization = committed.organization;
       } catch (error) {
-        // Books stay imported; only the placement is reported as pending.
+        // The transaction committed nothing; books stay imported but unplaced.
         for (const item of batch) issue(item.inputId, "placement-changed", `书已导入，归档失败：${errorText(error)}`);
         counts.placementSkipped += batch.length;
       } finally {
@@ -278,8 +243,8 @@ export function createWebDirectoryImportPort(options: WebDirectoryImportOptions)
       if (job.cancelRequested) break;
       const file = job.files?.get(input.inputId);
       const target = input.groupKey === null ? null : targetByGroup.get(input.groupKey)!;
-      counts.completed++;
       if (!file) {
+        counts.completed++;
         counts.failed++;
         issue(input.inputId, "source-failed", "源文件已不可用");
         emit();
@@ -287,9 +252,12 @@ export function createWebDirectoryImportPort(options: WebDirectoryImportOptions)
       }
       try {
         const bytes = new Uint8Array(await file.arrayBuffer());
+        checkCancel();
         const hash = await sha256Hex(bytes);
+        checkCancel();
         const winner = successful.winner(hash);
         if (winner !== undefined) {
+          counts.completed++;
           counts.duplicates++;
           if (winnerGroup.get(hash) !== input.groupKey) {
             issue(input.inputId, "multiple-sources", `同一本书在多个目录出现，已采用排在前面的来源（${file.name}）`);
@@ -306,6 +274,7 @@ export function createWebDirectoryImportPort(options: WebDirectoryImportOptions)
           readBook: (id) => store.readBook(id),
           setContentHash: (id, contentHash) => store.setContentHash(id, contentHash),
         });
+        checkCancel();
         let isExisting = duplicate !== null;
         if (duplicate && duplicate.available !== false) {
           // Existing canonical data is never re-saved: no fabricated 0% record.
@@ -313,6 +282,8 @@ export function createWebDirectoryImportPort(options: WebDirectoryImportOptions)
         } else {
           const book = await loadBook(bytes, { selective: true });
           try {
+            // Last check before the store write: past this point the book is accepted.
+            checkCancel();
             if (book.spine.length === 0) throw new Error("书中没有可阅读的内容（spine 为空）");
             const cover = book.coverHref ? book.resources.get(book.coverHref) : undefined;
             const result = await store.save({
@@ -343,30 +314,38 @@ export function createWebDirectoryImportPort(options: WebDirectoryImportOptions)
             disposeBook(book);
           }
         }
+        counts.completed++;
         successful.recordPublished(hash, input.ordinal);
         winnerGroup.set(hash, input.groupKey);
         if (target) {
           pending.push({
             inputId: input.inputId,
-            hash,
+            contentHash: hash,
             isExisting,
             target,
             // First time this hash is known: observe its current placement.
-            observed: placementSnapshot(organization, hash),
+            observed: placementSnapshotOf(organization, hash),
           });
-          if (pending.length >= PLACEMENT_BATCH) {
-            await flush();
-            organization = await store.getOrganization();
-          }
+          // A cancel stops new batches; only a batch already committing finishes.
+          if (pending.length >= PLACEMENT_BATCH && !job.cancelRequested) await flush();
         }
       } catch (error) {
+        // Cancelled mid-item: nothing was written for it; bytes/Book are released.
+        if (error instanceof ImportCancelled) break;
+        counts.completed++;
         counts.failed++;
         issue(input.inputId, "source-failed", `${file.name}：${errorText(error)}`);
       }
       emit();
     }
-    // Books already imported are still placed after a cancel; nothing is rolled back.
-    await flush();
+    if (job.cancelRequested) {
+      // No new batch after a cancel; imported books stay on the shelf, unplaced.
+      for (const item of pending) issue(item.inputId, "placement-changed", "已停止导入，书已导入但未归档");
+      counts.placementSkipped += pending.length;
+      pending = [];
+    } else {
+      await flush();
+    }
     phase = "cleaning";
     emit(true);
     return {

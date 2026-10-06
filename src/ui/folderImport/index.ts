@@ -9,4 +9,13 @@ export {
   supportsWebDirectoryPicker,
   type WebDirectoryImportStore,
 } from "./webDirectoryImport";
+export {
+  applyDirectoryPlacementBatch,
+  placementSnapshotOf,
+  type DirectoryPlacementBatch,
+  type DirectoryPlacementBatchResult,
+  type DirectoryPlacementCommitter,
+  type DirectoryPlacementItem,
+  type DirectoryPlacementOutcome,
+} from "./placementBatch";
 export { createNativeDirectoryImportPort } from "../../platform/directoryImportBridge";

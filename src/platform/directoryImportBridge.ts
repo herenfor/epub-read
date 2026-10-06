@@ -42,6 +42,15 @@ export function createNativeDirectoryImportPort(): DirectoryImportPort {
       const source = await invoke<NativeDirectorySource | null>("directory_import_pick");
       if (!source) return null;
       const jobId = newJobId();
+      // Hand the job to its owner before the walk starts, so a close during the
+      // scan can cancel/dispose it instead of waiting for the whole tree.
+      onProgress({
+        jobId,
+        phase: "scanning",
+        scannedInputs: 0,
+        totalInputs: null,
+        counts: { completed: 0, imported: 0, duplicates: 0, failed: 0, placementSkipped: 0, createdFolders: 0 },
+      });
       return invoke<ScanResult>("directory_import_scan", {
         jobId,
         source,
