@@ -2,12 +2,15 @@ import {
   sanitizePersistedTextAnchor,
   type TextAnchorData,
 } from "./textAnchor";
+import type { MediaReadingAnchor } from "./paginator";
 
 export interface PersistedNavigationAnchor {
   index: number;
   ratio: number;
   anchorTextOffset: number | null;
   anchorTextSnippet: string | null;
+  /** B-155/R4：纯图片/媒体身份；仅文本/legacy 均不可用时作为语义目标。 */
+  mediaAnchor?: MediaReadingAnchor | null;
 }
 
 export interface RuntimeNavigationAnchor extends TextAnchorData {
@@ -15,6 +18,7 @@ export interface RuntimeNavigationAnchor extends TextAnchorData {
   ratio: number;
   charsRead: number;
   totalChars: number;
+  mediaAnchor?: MediaReadingAnchor | null;
 }
 
 /**
@@ -37,12 +41,14 @@ export function adaptNavigationAnchor(
     Number.isFinite(source.ratio) &&
     source.ratio >= 0 &&
     source.ratio <= 1;
-  if (text.textOffset === null && !legacyValid) return null;
+  const mediaAnchor = source.mediaAnchor ?? null;
+  if (text.textOffset === null && !legacyValid && !mediaAnchor) return null;
   return {
     ...text,
     index: legacyValid ? source.index : -1,
-    ratio: legacyValid ? source.ratio : 0,
+    ratio: legacyValid ? source.ratio : (mediaAnchor?.ratio ?? 0),
     charsRead: text.textOffset ?? 0,
     totalChars: 0,
+    ...(mediaAnchor ? { mediaAnchor: { ...mediaAnchor } } : {}),
   };
 }
