@@ -1970,6 +1970,10 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
           const slot = continuousAnchor ? slotsRef.current.get(continuousAnchor.key) : null;
           return slot?.paginator.getAnchorText() ?? null;
         },
+        // 连续滚动没有原生吸附：宿主沿用已发布状态 + 上面的滚动锚点组装位置。
+        readPositionSnapshot() {
+          return null;
+        },
         jumpToAnchor(anchorStr) {
           this.navigateWithinCurrentChapter({ fragment: anchorStr });
         },

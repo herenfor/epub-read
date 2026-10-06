@@ -2946,3 +2946,97 @@ describe("createAutoMarginBatch", () => {
     expect(el2.style.getPropertyPriority("margin-left")).toBe("important");
   });
 });
+
+describe("native snap paging handoff", () => {
+  type Pager = Record<string, any> & { emitted: any[]; writes: number[] };
+  function makePager(scrollLeft: number, currentPage: number, pageCount = 3): Pager {
+    const styles = new Map<string, string>();
+    const writes: number[] = [];
+    let left = scrollLeft;
+    const viewer = {
+      get scrollLeft() { return left; },
+      set scrollLeft(value: number) { writes.push(value); left = value; },
+      style: {
+        setProperty: (name: string, value: string) => styles.set(name, value),
+        removeProperty: (name: string) => styles.delete(name),
+        getPropertyValue: (name: string) => styles.get(name) ?? "",
+      },
+    };
+    const win = { onscrollend: null, setTimeout, clearTimeout, requestAnimationFrame: () => 1, cancelAnimationFrame() {} };
+    const p = Object.create(ChapterPaginator.prototype) as Pager;
+    Object.assign(p, {
+      viewer,
+      contentDoc: { defaultView: win },
+      settings: { readingMode: "paginated" },
+      geometry: { columns: 1 },
+      step: 100,
+      spreadLayout: null,
+      metrics: { pageCount, currentPage },
+      lastState: { status: "ready", pageCount, currentPage, empty: false },
+      _currentPath: "Text/c.xhtml",
+      nativeSnapEnabled: true,
+      compositedPagedScrollViewer: viewer,
+      nativeSnapListenersViewer: viewer,
+      disposed: false,
+      nativeSnapArmed: true,
+      nativeSnapLivePage: null,
+      nativeSnapLiveFrame: null,
+      nativeSnapSettleCancel: null,
+      nativeGestureOrigin: null,
+      snapOffsetsCache: null,
+      adoptedPageUncommitted: false,
+      emitted: [],
+      writes,
+      styles,
+    });
+    styles.set("scroll-snap-type", "x mandatory");
+    p.emit = (state: unknown) => p.emitted.push(state);
+    p.scheduleAnchorSample = () => {};
+    p.cancelPendingAnchorSample = () => {};
+    p.closeFootnoteForNavigation = () => {};
+    p.clearSearchHighlightForDocument = () => {};
+    p.readyState = (empty: boolean, page = p.metrics.currentPage) => ({ status: "ready", pageCount, currentPage: page, empty });
+    return p;
+  }
+
+  it("旧正式页 0、视觉已在章尾且按下时在章尾：交给 JS，跨章一次且不写回 0/100", () => {
+    const p = makePager(200, 0);
+    p.nativeGestureOrigin = { page: 2, left: 200, snapLeft: 200, aligned: true, atStart: false, atEnd: true };
+    expect(p.canNativeScroll(1)).toBe(false);
+    expect(p.planPagedTurn(1, true)).toEqual({ kind: "chapter", direction: 1, fromPage: 2 });
+    expect(p.metrics.currentPage).toBe(2);
+    expect(p.styles.has("scroll-snap-type")).toBe(false);
+    // 跨章前提交物理边界屏：不移动也要补发一次正式状态。
+    p.setPage(2);
+    expect(p.writes).toEqual([]);
+    expect(p.emitted).toEqual([{ status: "ready", pageCount: 3, currentPage: 2, empty: false }]);
+  });
+
+  it("本手势途中才滑到章尾：仍归原生，不跨章", () => {
+    const p = makePager(200, 0);
+    p.nativeGestureOrigin = { page: 1, left: 100, snapLeft: 100, aligned: true, atStart: false, atEnd: false };
+    expect(p.canNativeScroll(1)).toBe(true);
+  });
+
+  it("末屏但未到物理章尾的独立命令：从真实位置补完末屏", () => {
+    const p = makePager(151, 0);
+    expect(p.planPagedTurn(1, true)).toEqual({ kind: "page", page: 2, from: 151, to: 200 });
+    expect(p.writes).toEqual([]);
+    expect(p.emitted).toEqual([]);
+  });
+
+  it("滑动途中读快照：页号取视觉屏并标 transient，不写视口、不改正式页", () => {
+    const p = makePager(150, 0);
+    const sampled = { index: 3, ratio: 0, charsRead: 40, totalChars: 900, mediaUnits: 0, textOffset: 40, textSnippet: "abc" };
+    p.sampleAnchorAtVisualPosition = () => sampled;
+    p.anchorTextFor = () => "第一行";
+    const snapshot = p.readPositionSnapshot({ withText: true });
+    expect(snapshot.state).toMatchObject({ currentPage: 1, transient: true });
+    expect(snapshot.readingAnchor).toMatchObject({ path: "Text/c.xhtml", textOffset: 40 });
+    expect(snapshot.anchorText).toBe("第一行");
+    expect(p.metrics.currentPage).toBe(0);
+    expect(p.writes).toEqual([]);
+    expect(p.styles.get("scroll-snap-type")).toBe("x mandatory");
+    expect(p.emitted).toEqual([]);
+  });
+});

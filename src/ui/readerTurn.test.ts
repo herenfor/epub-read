@@ -42,7 +42,16 @@ class MockPaginator {
   pagedSlideFrame = vi.fn((direction: 1 | -1) => {
     const target = this.currentPage + direction;
     if (target < 0 || target >= this.pageCount) return null;
-    return { from: this.currentPage * 100, to: target * 100 };
+    return { from: this.currentPage * 100, to: target * 100, page: target };
+  });
+  planPagedTurn = vi.fn((direction: 1 | -1, hasAdjacentChapter: boolean) => {
+    const target = this.currentPage + direction;
+    if (target >= 0 && target < this.pageCount) {
+      return { kind: "page", page: target, from: this.currentPage * 100, to: target * 100 };
+    }
+    return hasAdjacentChapter
+      ? { kind: "chapter", direction, fromPage: this.currentPage }
+      : { kind: "book-edge", page: this.currentPage };
   });
   previewPagedScroll = vi.fn();
   setPage = vi.fn((page: number) => {
@@ -237,7 +246,7 @@ describe("Zen UI Packet C: 硬件加速平滑翻页与边缘翻页交互契约",
     const nextZone = dom.container.querySelector(".edge-turn-zone.edge-turn-next") as HTMLElement;
     await dom.click(nextZone);
 
-    expect(active.pagedSlideFrame).toHaveBeenCalledWith(1);
+    expect(active.planPagedTurn).toHaveBeenCalledWith(1, true);
     expect(active.setPage).not.toHaveBeenCalled();
     const readerEl = dom.container.querySelector(".reader");
     expect(readerEl?.classList.contains("has-turn-anim")).toBe(false);

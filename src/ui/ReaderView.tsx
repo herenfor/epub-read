@@ -13,6 +13,7 @@ import {
   type PreciseNavigationRequest,
   type PreciseNavigationStatus,
   type ReadingAnchor,
+  type ReaderPositionSnapshot,
 } from "../render/paginator";
 import type { ResourceServer } from "../render/resources";
 import { normalizeTurnAnimation, type ReaderSettings, type TurnAnimation } from "../render/settings";
@@ -69,6 +70,11 @@ export interface ReaderHandle {
   }): number | null;
   /** 当前锚点元素的一行文本（书签列表展示用） */
   getAnchorText(): string | null;
+  /**
+   * 页号与锚点的同一次读数（原生滑动途中取视觉屏）。进度/书签/历史用它，不再
+   * 分别取 chapterState 与 getReadingAnchor。null：宿主回退到已发布状态 + 锚点。
+   */
+  readPositionSnapshot(options?: { withText?: boolean }): ReaderPositionSnapshot | null;
   /** 跳到页内锚点（注释返回链接等） */
   jumpToAnchor(anchor: string): void;
   /** 在已完成布局的当前章节内同步导航；失败不改变位置。 */
@@ -302,8 +308,8 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   const turnAnimTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** 进行中的同章滑动动画；连续翻页/外部跳转前先 finish 落位提交。 */
   const slideAnimRef = useRef<ValueAnimation | null>(null);
-  /** 同章拖动中的视觉位置；松手后由翻页接续或下一微任务回弹。 */
-  const slideDragRef = useRef<{ dir: 1 | -1; frame: SlideFrame; scrollLeft: number; samples: Array<{ t: number; x: number }> } | null>(null);
+  /** 同章拖动中的视觉位置；松手后由翻页接续或下一微任务回弹。frame.page 是拖动目标屏。 */
+  const slideDragRef = useRef<{ dir: 1 | -1; frame: SlideFrame & { page: number }; scrollLeft: number; samples: Array<{ t: number; x: number }> } | null>(null);
   /** 跨章滑动：旧章滑出后，新章 display-ready 时按此方向滑入。 */
   const chapterEnterRef = useRef<1 | -1 | null>(null);
   const chapterTurnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -321,8 +327,15 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     const value = normalizeTurnAnimation(settings.turnAnimation);
     return value !== "none" && prefersReducedMotion() ? "none" : value;
   };
-  /** “滑动”翻页时同章拖动交给原生滚动 + 吸附（见 ChapterPaginator.setNativeSnapPaging）。 */
+  /**
+   * “滑动”翻页时同章触摸翻页交给分页器：可中断的合成层运动（不支持时退回原生
+   * 滚动 + 吸附），见 ChapterPaginator.setNativeSnapPaging。
+   */
   const nativeSnapWantedRef = useRef(false);
+  /** 运动层接手的本次拖动；松手由翻页接续或下一微任务回到起点屏。 */
+  const motionDragRef = useRef<{ ticket: number; samples: Array<{ t: number; x: number }> } | null>(null);
+  /** 每个独立翻页操作一个单调 ID（同一操作派生的回调共用）。 */
+  const motionInputIdRef = useRef(0);
   nativeSnapWantedRef.current = resolvedTurnAnimation() === "slide";
 
   /** 淡入模式的落位动画；滑动模式由 startSlideTurn / 跨章滑入自行绘制。 */
@@ -367,38 +380,37 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   };
 
   /**
-   * 同章滑动翻页：从当前视觉位置（拖动中则接续手指位置）动画到相邻页，结束
-   * 时 setPage 提交。无同章相邻页或非滑动模式返回 false，调用方走原路径。
+   * 同章滑动翻页：按计划从真实视觉位置（拖动中则接续手指位置）动画到目标屏，
+   * 结束时 setPage(计划目标) 提交。非滑动模式返回 false，调用方直接 setPage。
    */
-  const startSlideTurn = (p: ChapterPaginator, dir: 1 | -1): boolean => {
+  const startSlideTurn = (
+    p: ChapterPaginator,
+    plan: { page: number; from: number; to: number },
+    drag: { frame: SlideFrame; scrollLeft: number; samples: Array<{ t: number; x: number }> } | null = null,
+  ): boolean => {
     if (resolvedTurnAnimation() !== "slide") return false;
-    slideAnimRef.current?.finish();
-    const drag = slideDragRef.current;
-    slideDragRef.current = null;
-    const continuing = drag !== null && drag.dir === dir;
-    const frame = continuing ? drag.frame : p.pagedSlideFrame(dir);
-    if (!frame) {
-      if (drag) p.previewPagedScroll(drag.frame.from);
-      return false;
-    }
-    const start = continuing ? drag.scrollLeft : frame.from;
-    const target = p.currentPage + dir;
+    const continuing = drag !== null;
+    const frame = continuing ? drag.frame : { from: plan.from, to: plan.to };
+    const start = continuing ? drag.scrollLeft : plan.from;
+    const target = plan.page;
     const done = (): void => {
       slideAnimRef.current = null;
       if (paginatorRef.current === p) p.setPage(target);
     };
     if (continuing) {
       // 松手续接：起始速度取手指离手速度，避免第一帧跳出一大截。
-      const plan = releaseSlidePlan(frame.to - start, Math.abs(frame.to - frame.from),
+      const release = releaseSlidePlan(frame.to - start, Math.abs(frame.to - frame.from),
         releaseVelocity(drag.samples, performance.now()));
-      slideAnimRef.current = animateValue(start, frame.to, plan.durationMs,
-        (value) => p.previewPagedScroll(value), done, undefined, plan.ease);
+      slideAnimRef.current = animateValue(start, frame.to, release.durationMs,
+        (value) => p.previewPagedScroll(value), done, undefined, release.ease);
       return true;
     }
+    // 原生滑动途中接手时 from 是半途位置：时长仍按一整屏的比例计算。
+    const span = Math.max(Math.abs(frame.to - frame.from), activeSlotRef.current?.iframe.clientWidth ?? 0);
     slideAnimRef.current = animateValue(
       start,
       frame.to,
-      slideDurationMs(frame.to - start, Math.abs(frame.to - frame.from)),
+      slideDurationMs(frame.to - start, span),
       (value) => p.previewPagedScroll(value),
       done,
     );
@@ -730,8 +742,9 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
           if (isActiveSlot(slot)) updateSwipePreviewRef.current(dx);
         },
         // 原生滚动接手前先落定进行中的 JS 翻页动画，吸附点按已提交页计算。
+        // 运动层模式下按下不改任何东西：横向意图成立才接手，轻点不撤回旧命令。
         onGestureStart: () => {
-          if (isActiveSlot(slot)) slideAnimRef.current?.finish();
+          if (isActiveSlot(slot) && !slot.paginator?.pageMotionAvailable) slideAnimRef.current?.finish();
         },
       },
       props.onPlainTap
@@ -745,6 +758,9 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     );
     slot.paginator = paginator;
     paginator.setNativeSnapPaging?.(nativeSnapWantedRef.current);
+    paginator.setPageMotionChapterHandler?.((direction) => {
+      if (isActiveSlot(slot)) turnPageRef.current(direction, "ui");
+    });
     return paginator;
   };
 
@@ -1576,41 +1592,53 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       }
       return;
     }
-    if (immediate === 1) {
-      if (p.currentPage < p.pageCount - 1) {
-        if (!startSlideTurn(p, 1)) {
-          triggerTurnAnimation(1);
-          p.setPage(p.currentPage + 1);
-        }
-      } else {
-        const next = nextLinearIndex(book, spineIndexRef.current, 1);
-        if (next >= 0) {
-          beginChapterTurn(1);
-          triggerChapterTransitionWheelLock();
-          lockedReverseDirRef.current = -1;
-          reverseLockUntilRef.current = Date.now() + 250;
-          turnIntentRef.current.reset();
-          props.onRequestChapter(next);
-        }
-      }
-    } else {
-      if (p.currentPage > 0) {
-        if (!startSlideTurn(p, -1)) {
-          triggerTurnAnimation(-1);
-          p.setPage(p.currentPage - 1);
-        }
-      } else {
-        const prev = nextLinearIndex(book, spineIndexRef.current, -1);
-        if (prev >= 0) {
-          beginChapterTurn(-1);
-          triggerChapterTransitionWheelLock();
-          lockedReverseDirRef.current = 1;
-          reverseLockUntilRef.current = Date.now() + 250;
-          turnIntentRef.current.reset();
-          props.onRequestChapter(prev, { atEnd: true });
-        }
-      }
+    const requestChapterTurn = (adjacent: number): void => {
+      beginChapterTurn(immediate);
+      triggerChapterTransitionWheelLock();
+      lockedReverseDirRef.current = immediate === 1 ? -1 : 1;
+      reverseLockUntilRef.current = Date.now() + 250;
+      turnIntentRef.current.reset();
+      if (immediate === 1) props.onRequestChapter(adjacent);
+      else props.onRequestChapter(adjacent, { atEnd: true });
+    };
+    if (p.pageMotionAvailable && resolvedTurnAnimation() === "slide") {
+      // 运动层：拖动松手属于同一手势，接续拖动；其他都是新的独立输入。
+      const motionDrag = motionDragRef.current;
+      motionDragRef.current = null;
+      if (motionDrag && p.motionRelease(motionDrag.ticket, immediate,
+        releaseVelocity(motionDrag.samples, performance.now()))) return;
+      const adjacent = nextLinearIndex(book, spineIndexRef.current, immediate);
+      const outcome = p.motionTurn(immediate, ++motionInputIdRef.current, adjacent >= 0);
+      if (outcome === "chapter") requestChapterTurn(adjacent);
+      if (outcome !== "unavailable") return;
     }
+    // 先落定进行中的 JS 动画；拖动松手续接同一手势已固定的 frame/目标屏。
+    slideAnimRef.current?.finish();
+    const drag = slideDragRef.current;
+    slideDragRef.current = null;
+    if (drag && drag.dir === immediate && resolvedTurnAnimation() === "slide") {
+      startSlideTurn(p, { page: drag.frame.page, from: drag.scrollLeft, to: drag.frame.to }, drag);
+      return;
+    }
+    if (drag) p.previewPagedScroll(drag.frame.from);
+    // 计划按真实视觉位置生成（原生吸附途中正式页号可能落后）。
+    const adjacent = nextLinearIndex(book, spineIndexRef.current, immediate);
+    const plan = p.planPagedTurn(immediate, adjacent >= 0);
+    if (!plan) return;
+    if (plan.kind === "page") {
+      if (plan.page === p.currentPage && Math.abs(plan.to - plan.from) <= 0.5) {
+        p.setPage(plan.page);
+        return;
+      }
+      if (!startSlideTurn(p, plan)) {
+        triggerTurnAnimation(immediate);
+        p.setPage(plan.page);
+      }
+      return;
+    }
+    // 章边/书边：先正式提交该物理边界屏（接管后未发正式状态时补发）。
+    p.setPage(plan.kind === "chapter" ? plan.fromPage : plan.page);
+    if (plan.kind === "chapter") requestChapterTurn(adjacent);
   };
 
   const applySwipePreview = (dx: number | null): void => {
@@ -1623,6 +1651,16 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       delete main.dataset.swipeDirection;
       delete main.dataset.swipeReady;
       delete main.dataset.swipeFollow;
+      const motionDrag = motionDragRef.current;
+      if (motionDrag) {
+        // 与下方 drag 同理：没有被翻页接手（距离不足/反悔/被拦截）就回到起点屏。
+        queueMicrotask(() => {
+          if (motionDragRef.current !== motionDrag) return;
+          motionDragRef.current = null;
+          paginatorRef.current?.motionRelease(motionDrag.ticket, 0,
+            releaseVelocity(motionDrag.samples, performance.now()));
+        });
+      }
       const drag = slideDragRef.current;
       if (drag) {
         // touchend 先清预览再同步调用 onNext/onPrev；翻页会接手 drag，
@@ -1637,7 +1675,25 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     }
     const direction = dx < 0 ? 1 : -1;
     const p = paginatorRef.current;
-    if (p && resolvedTurnAnimation() === "slide") {
+    if (p && resolvedTurnAnimation() === "slide" && p.pageMotionAvailable) {
+      let motionDrag = motionDragRef.current;
+      if (!motionDrag) {
+        const ticket = p.motionBeginDrag(direction);
+        motionDrag = ticket === null ? null : { ticket, samples: [] };
+        motionDragRef.current = motionDrag;
+      }
+      if (motionDrag) {
+        // 运动层 1:1 跟手（只写合成层 transform）；静止于章边向外拖则走下方跨章预览。
+        p.motionDrag(motionDrag.ticket, dx);
+        motionDrag.samples.push({ t: performance.now(), x: -dx });
+        if (motionDrag.samples.length > 8) motionDrag.samples.shift();
+        main.classList.add("reader-swipe-dragging");
+        main.dataset.swipeFollow = "true";
+        main.style.removeProperty("--reader-swipe-offset");
+        return;
+      }
+      delete main.dataset.swipeFollow;
+    } else if (p && resolvedTurnAnimation() === "slide") {
       let drag = slideDragRef.current;
       if (!drag || drag.dir !== direction) {
         slideAnimRef.current?.finish();
@@ -1702,6 +1758,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       onNext: () => turnPageRef.current(1, "ui"),
       onPrev: () => turnPageRef.current(-1, "ui"),
       onPreview: (dx) => updateSwipePreviewRef.current(dx),
+      onGestureStart: () => paginatorRef.current?.prepareMotion?.(),
       shouldIgnore: () => inputPausedRef.current || activeSlotRef.current?.state.status !== "ready" ||
         Boolean(activeIframeRef.current?.contentWindow?.getSelection()?.toString()),
     });
@@ -1770,6 +1827,9 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       },
       getAnchorText() {
         return paginatorRef.current?.getAnchorText() ?? null;
+      },
+      readPositionSnapshot(options) {
+        return paginatorRef.current?.readPositionSnapshot(options) ?? null;
       },
       jumpToAnchor(anchor) {
         pauseBackgroundWarmupForInput();
@@ -1984,6 +2044,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       {/* 左右边缘 5% 悬停感应区与翻页指示 (Zen UI Packet C) */}
       <div
         className="edge-turn-zone edge-turn-prev"
+        onPointerDown={() => paginatorRef.current?.prepareMotion?.()}
         onClick={(e) => {
           e.stopPropagation();
           turnPageRef.current(-1);
@@ -2005,6 +2066,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
 
       <div
         className="edge-turn-zone edge-turn-next"
+        onPointerDown={() => paginatorRef.current?.prepareMotion?.()}
         onClick={(e) => {
           e.stopPropagation();
           turnPageRef.current(1);
