@@ -51,6 +51,7 @@ import {
   type CompiledTextProjection,
 } from "./textProjection/compile";
 import { isProjectionExcludedTextNode, TextProjectionSession } from "./textProjection/session";
+import { projectFootnoteDisplay } from "./textProjection/footnoteProjection";
 import { sanitizeTextProjectionPreferences } from "./textProjection/preferences";
 import {
   DEFAULT_TEXT_PROJECTION_PREFERENCES,
@@ -2443,6 +2444,8 @@ export class ChapterPaginator {
   private textProjectionGeneration = 0;
   /** Shared compiled snapshot for the current stable version, supplied by App/ReaderView. */
   private compiledTextProjection: CompiledTextProjection | null = null;
+  /** Compiled snapshot actually applied to the current document (null = identity). */
+  private activeCompiledTextProjection: CompiledTextProjection | null = null;
   private notes: ReaderNoteForPaginator[] = [];
   private selectionContextMenuHandler?: (payload: SelectionContextPayload | null) => void;
   private contextMenuHandler = (e: MouseEvent): void => this.handleContextMenu(e);
@@ -3673,6 +3676,7 @@ export class ChapterPaginator {
         previous.restore(nodes);
       }
       this.textProjectionSession = null;
+      this.activeCompiledTextProjection = null;
       this.textIndex = null;
       return true;
     }
@@ -3690,6 +3694,7 @@ export class ChapterPaginator {
     });
     if (!isCurrent()) return false;
     this.textProjectionSession = session;
+    this.activeCompiledTextProjection = compiled;
     this.textIndex = null;
     return true;
   }
@@ -8704,10 +8709,13 @@ export class ChapterPaginator {
     this.lastFootnoteInfo = info;
     this.footnotePinned = pinned;
     this.footnoteHoverGate.show(pinned);
+    const projected = this.activeCompiledTextProjection && this.contentDoc
+      ? projectFootnoteDisplay(info, this.activeCompiledTextProjection, this.contentDoc)
+      : null;
     const r = a.getBoundingClientRect();
     this.onFootnote?.({
-      text: info.text,
-      html: info.html,
+      text: projected?.text ?? info.text,
+      html: projected?.html ?? info.html,
       pinned,
       rect: { left: r.left, top: r.top, right: r.right, bottom: r.bottom },
     });
@@ -8983,6 +8991,7 @@ export class ChapterPaginator {
     this.viewer = null;
     this.textIndex = null;
     this.textProjectionSession = null;
+    this.activeCompiledTextProjection = null;
     this.pendingFallbackPage = null;
     this.leadingColumns = 0;
     this.effectiveColumns = 1;

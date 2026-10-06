@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { ContinuousChapterLayout } from "./continuousChapterLayout";
+import {
+  ProjectionReloadCoordinator,
+  type ProjectionReloadSnapshot,
+  type ProjectionReloadTarget,
+} from "./continuousProjectionReload";
 
 describe("ContinuousReaderView layout and projection integration", () => {
   it("projects single host scroll position across multiple linear chapters without chapter reload", () => {
@@ -152,5 +157,56 @@ describe("ContinuousReaderView layout and projection integration", () => {
     expect(S).toBe(2100);
     expect(after.maxScrollTop(V)).toBe(2200);
     expect(after.boxes[1].top + anchor.offset - S).toBe(300);
+  });
+
+  it("I1 latest projection pass cancels the old async sequence and keeps the newest snapshot", async () => {
+    const coordinator = new ProjectionReloadCoordinator<string>();
+    const calls: string[] = [];
+    let resolveA0: (() => void) | null = null;
+    const a0Pending = new Promise<void>((resolve) => { resolveA0 = resolve; });
+    const makeTarget = (key: string): ProjectionReloadTarget & { resolveA0: () => void } => ({
+      isAlive: () => true,
+      setProjectionPreferences: (snapshot) => calls.push(`set:${key}:${snapshot.version}`),
+      reloadProjection: (snapshot) => {
+        calls.push(`reload:${key}:${snapshot.version}`);
+        if (key === "0" && snapshot.version === "A") return a0Pending;
+        return Promise.resolve();
+      },
+      waitProjectionReady: () => Promise.resolve(true),
+      markProjectionError: () => calls.push(`error:${key}`),
+      resolveA0: () => resolveA0?.(),
+    });
+    const target0 = makeTarget("0");
+    const target1 = makeTarget("1");
+    const snapshot = (version: string): ProjectionReloadSnapshot => ({
+      version,
+      preferences: { mode: "original", rules: [] },
+      compiled: null,
+    });
+
+    coordinator.updateLatest(snapshot("A"));
+    const firstPass = coordinator.run([["0", target0], ["1", target1]], snapshot("A"), {
+      onOwnerStart: () => {},
+      onOwnerRelease: () => {},
+      onFinished: () => calls.push("finished:A"),
+    });
+    await Promise.resolve();
+    expect(calls).toContain("reload:0:A");
+
+    coordinator.updateLatest(snapshot("B"));
+    const secondPass = coordinator.run([["0", target0], ["1", target1]], snapshot("B"), {
+      onOwnerStart: () => {},
+      onOwnerRelease: () => {},
+      onFinished: () => calls.push("finished:B"),
+    });
+    target0.resolveA0();
+    await Promise.all([firstPass, secondPass]);
+
+    expect(calls).not.toContain("reload:1:A");
+    expect(calls).not.toContain("finished:A");
+    expect(calls).toContain("reload:0:B");
+    expect(calls).toContain("reload:1:B");
+    expect(calls).toContain("finished:B");
+    expect(coordinator.current()?.version).toBe("B");
   });
 });

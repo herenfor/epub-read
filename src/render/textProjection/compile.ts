@@ -28,6 +28,7 @@ export function isIdentityTextProjection(value: TextProjectionPreferences): bool
   return preferences.mode === "original" && enabledReplacementRules(preferences.rules).length === 0;
 }
 
+const MAX_COMPILED_CACHE_ENTRIES = 4;
 const compiledCache = new Map<string, Promise<CompiledTextProjection>>();
 
 /**
@@ -41,7 +42,12 @@ export function compileTextProjection(
   const preferences = sanitizeTextProjectionPreferences(value);
   const version = textProjectionVersion(preferences);
   const cached = compiledCache.get(version);
-  if (cached) return cached;
+  if (cached) {
+    // Map insertion order is the tiny LRU: a hit moves to the newest end.
+    compiledCache.delete(version);
+    compiledCache.set(version, cached);
+    return cached;
+  }
   const pending = (async () => {
     const stages: Array<(source: string) => Projection> = [];
     if (preferences.mode !== "original") {
@@ -52,6 +58,11 @@ export function compileTextProjection(
     return { version, stages, preferences };
   })();
   compiledCache.set(version, pending);
+  while (compiledCache.size > MAX_COMPILED_CACHE_ENTRIES) {
+    const oldest = compiledCache.keys().next().value as string | undefined;
+    if (oldest === undefined) break;
+    compiledCache.delete(oldest);
+  }
   void pending.catch(() => {
     if (compiledCache.get(version) === pending) compiledCache.delete(version);
   });

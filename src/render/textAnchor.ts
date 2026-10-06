@@ -146,8 +146,10 @@ function isVisibleTextNode(
   node: Text,
   doc: Document,
   hiddenCache: WeakMap<Element, boolean>,
+  includeWhitespaceOnly = false,
 ): boolean {
-  if (!node.data || normalizeAnchorText(node.data) === "") return false;
+  if (!node.data) return false;
+  if (!includeWhitespaceOnly && normalizeAnchorText(node.data) === "") return false;
   let current = node.parentElement;
   while (current) {
     const cached = hiddenCache.get(current);
@@ -195,6 +197,7 @@ export class VisibleTextIndex {
   readonly totalChars: number;
   readonly mediaUnits: number;
   private readonly nodes: IndexedTextNode[];
+  private readonly sourceTextNodes: readonly Text[];
   private readonly nodeMap: Map<Text, IndexedTextNode>;
   private readonly elementIndexMap: Map<Element, number>;
 
@@ -202,9 +205,11 @@ export class VisibleTextIndex {
     nodes: IndexedTextNode[],
     text: string,
     mediaUnits = 0,
-    elementIndexMap: Map<Element, number> = new Map()
+    elementIndexMap: Map<Element, number> = new Map(),
+    sourceTextNodes: readonly Text[] = nodes.map((item) => item.node),
   ) {
     this.nodes = nodes;
+    this.sourceTextNodes = sourceTextNodes;
     this.nodeMap = new Map(nodes.map((item) => [item.node, item]));
     this.text = text;
     this.codePoints = Array.from(text);
@@ -320,21 +325,34 @@ export class VisibleTextIndex {
     ) {
       return null;
     }
+    const startItem = this.nodes.find((item) => start >= item.start && start < item.end);
+    const endProbe = end - 1;
+    const endItem = this.nodes.find((item) => endProbe >= item.start && endProbe < item.end);
+    if (!startItem || !endItem) return null;
+    const startNodeIndex = this.sourceTextNodes.indexOf(startItem.node);
+    const endNodeIndex = this.sourceTextNodes.indexOf(endItem.node);
+    if (startNodeIndex < 0 || endNodeIndex < startNodeIndex) return null;
+    const startRaw = startItem.rawStarts[start - startItem.start];
+    const endRaw = endItem.rawEnds[endProbe - endItem.start];
+    if (startRaw === undefined || endRaw === undefined || endRaw < startRaw) return null;
+
     const pieces: string[] = [];
     let previousBlock: Element | null = null;
     let hasPiece = false;
-    for (const item of this.nodes) {
-      if (item.end <= start || item.start >= end) continue;
-      const localStart = Math.max(0, start - item.start);
-      const localEnd = Math.min(item.end - item.start, end - item.start);
-      if (localEnd <= localStart) continue;
-      const rawStart = item.rawStarts[localStart];
-      const rawEnd = item.rawEnds[localEnd - 1];
-      if (rawStart === undefined || rawEnd === undefined || rawEnd < rawStart) continue;
-      const source = item.projection?.original ?? item.node.data;
-      const text = source.slice(Math.max(0, rawStart), Math.min(source.length, rawEnd));
+    for (let index = startNodeIndex; index <= endNodeIndex; index++) {
+      const node = this.sourceTextNodes[index];
+      if (!node) continue;
+      const item = this.nodeMap.get(node);
+      const source = item?.projection?.original ?? node.data;
+      let from = index === startNodeIndex ? startRaw : 0;
+      let to = index === endNodeIndex ? endRaw : source.length;
+      if (to <= from) continue;
+      from = Math.max(0, Math.min(from, source.length));
+      to = Math.max(0, Math.min(to, source.length));
+      if (to <= from) continue;
+      const text = source.slice(from, to);
       if (!text) continue;
-      const block = nearestCopyBlock(item.node);
+      const block = nearestCopyBlock(node);
       if (hasPiece && block !== previousBlock) pieces.push("\n");
       pieces.push(text);
       previousBlock = block;
@@ -494,8 +512,17 @@ export function captureTextSelection(
   };
 }
 
+export interface CollectVisibleTextNodesOptions {
+  /** Copy paths need pure-whitespace nodes for inter-node spacing; anchor paths do not. */
+  includeWhitespaceOnly?: boolean;
+}
+
 /** Visible text nodes in the same walker/exclusion order used by the anchor index. */
-export function collectVisibleTextNodes(doc: Document, viewer: HTMLElement): Text[] {
+export function collectVisibleTextNodes(
+  doc: Document,
+  viewer: HTMLElement,
+  options: CollectVisibleTextNodesOptions = {},
+): Text[] {
   // SHOW_TEXT is 4. Referencing the numeric DOM constant keeps this helper
   // usable in minimal DOM test implementations that do not expose NodeFilter.
   const walker = doc.createTreeWalker(viewer, 4);
@@ -503,8 +530,7 @@ export function collectVisibleTextNodes(doc: Document, viewer: HTMLElement): Tex
   const hiddenCache = new WeakMap<Element, boolean>();
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
     const text = node as Text;
-    if (!isVisibleTextNode(text, doc, hiddenCache)) continue;
-    if (normalizeAnchorText(text.data) === "") continue;
+    if (!isVisibleTextNode(text, doc, hiddenCache, options.includeWhitespaceOnly === true)) continue;
     nodes.push(text);
   }
   return nodes;
@@ -516,7 +542,7 @@ export function buildVisibleTextIndex(
   viewer: HTMLElement,
   projectionSource?: TextNodeProjectionSource | null,
 ): VisibleTextIndex {
-  const textNodes = collectVisibleTextNodes(doc, viewer);
+  const textNodes = collectVisibleTextNodes(doc, viewer, { includeWhitespaceOnly: true });
   const nodes: IndexedTextNode[] = [];
   const pieces: string[] = [];
   let normalizedOffset = 0;
@@ -569,7 +595,7 @@ export function buildVisibleTextIndex(
     }
     if (!hidden) mediaUnits++;
   }
-  return new VisibleTextIndex(nodes, pieces.join(""), mediaUnits, elementIndexMap);
+  return new VisibleTextIndex(nodes, pieces.join(""), mediaUnits, elementIndexMap, textNodes);
 }
 
 function matchesAt(haystack: readonly string[], needle: readonly string[], start: number): boolean {
