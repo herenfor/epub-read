@@ -8029,6 +8029,18 @@ export class ChapterPaginator {
     };
   }
 
+  /**
+   * Canonical original text for a selection payload. The UI uses this for the
+   * explicit "copy original" action, avoiding any inverse conversion of the
+   * currently displayed string.
+   */
+  getOriginalTextForOffsets(start: number, end: number): string | null {
+    const index = this.textIndex ?? (this.contentDoc && this.viewer ? this.buildTextIndex(this.contentDoc, this.viewer) : null);
+    if (!index) return null;
+    this.textIndex = index;
+    return index.originalTextForOffsets(start, end);
+  }
+
   /** 当前锚点元素的行文本（书签列表展示用）。 */
   getAnchorText(): string | null {
     this.flushReadingAnchor();
