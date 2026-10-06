@@ -5,11 +5,8 @@
   pointer-events: none;
 }
 
-/* ---- “字符与画面”：Aa 面板子页，外壳/遮罩/入退场全部沿用 .aa-popover ---- */
-.aa-popover.aa-display-popover {
-  width: 360px;
-}
-
+/* ---- “字符与画面”：Aa 面板子页，外壳/宽度/遮罩/入退场全部沿用 .aa-popover，
+ * 前后切换时面板不跳宽度 ---- */
 .aa-display-header {
   gap: 4px;
   padding-left: 6px;
@@ -22,10 +19,6 @@
 
 .aa-display-body {
   gap: 12px;
-}
-
-.app[data-touch-ui="true"]:not([data-layout="compact"]) .aa-popover.aa-display-popover {
-  width: 420px;
 }
 
 /* 调滤镜/繁简时要看清正文真实效果：两层遮罩都不压暗、不模糊，只负责点外关闭。 */
