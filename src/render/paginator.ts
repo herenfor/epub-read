@@ -3,6 +3,7 @@ import { sanitizeChapter, VIEWER_ID } from "./sanitize";
 import { planCenteredTitleBody } from "./titlePageLayout";
 import { PageMotionSession, type Direction as MotionDirection } from "./pageMotion";
 import { TransformPageMotion } from "./transformPageMotion";
+import { MotionWindowIdleLease } from "./motionWindowIdleLease";
 import {
   chooseNativeSwipeOwner,
   planPagedStep,
@@ -2514,6 +2515,7 @@ export class ChapterPaginator {
   private pageMotion: {
     session: PageMotionSession;
     driver: TransformPageMotion;
+    lease: MotionWindowIdleLease;
     key: string;
     viewer: HTMLElement;
   } | null = null;
@@ -2525,8 +2527,6 @@ export class ChapterPaginator {
   /** 去末屏途中又收到同向独立命令：落定后最多执行一次跨章。 */
   private pageMotionPendingChapter: MotionDirection | null = null;
   private pageMotionChapterHandler: ((direction: MotionDirection) => void) | null = null;
-  /** 预先进入的运动窗口在无运动时的退出计时。 */
-  private pageMotionIdleTimer: ReturnType<typeof setTimeout> | null = null;
 
   private nativeSnapLiveFrame: number | null = null;
   private readonly nativeSnapScrollEndHandler = (): void => this.commitNativeSnap();
@@ -2867,6 +2867,7 @@ export class ChapterPaginator {
    * 旧帧。短暂等待：期间出现滚动就交给 scrollend，否则按落点收尾。
    */
   endNativeSnapGesture(): void {
+    this.endMotionContact();
     this.nativeSnapTouching = false;
     if (!this.nativeSnapArmed || this.nativeSnapScrolled) return;
     this.clearNativeSnapSettle();
@@ -3049,24 +3050,22 @@ export class ChapterPaginator {
    * 手指或翻页按钮按下：画面仍静止时提前进入运动窗口，把窗口重排（长章约
    * 20ms）放在动画开始之前；一段时间内没有运动就退回正常几何。
    */
-  prepareMotion(): void {
+  prepareMotion(touchContact = false): void {
     const motion = this.ensurePageMotion();
     if (!motion) return;
+    if (touchContact) motion.lease.beginContact();
     if (motion.session.state.kind === "idle" && !motion.driver.active) {
       motion.driver.write(motion.driver.read().position);
     }
-    this.armPageMotionIdleExit();
+    if (!touchContact) motion.lease.settled();
   }
 
-  private armPageMotionIdleExit(): void {
-    if (this.pageMotionIdleTimer !== null) clearTimeout(this.pageMotionIdleTimer);
-    this.pageMotionIdleTimer = setTimeout(() => {
-      this.pageMotionIdleTimer = null;
-      this.exitIdlePageMotionWindow();
-    }, 700);
+  /** iframe 和宿主留白的手势都必须配对结束（含 touchcancel）。 */
+  endMotionContact(): void {
+    this.pageMotion?.lease.endContact();
   }
 
-  /** 静止却仍在窗口里（预先进入后没有运动）：退回正常几何，位置不变。 */
+  /** 空闲租约到期或显式导航：退回正常几何，位置不变。 */
   private exitIdlePageMotionWindow(): void {
     const motion = this.pageMotion;
     if (!motion || !motion.driver.active || motion.session.state.kind !== "idle") return;
@@ -3101,12 +3100,22 @@ export class ChapterPaginator {
       (page) => this.commitPageMotion(page),
       (sample) => this.commitPageMotion(readSnapPosition(offsets, sample.position)?.page ?? 0),
     );
-    this.pageMotion = { session, driver, key, viewer };
+    const lease = new MotionWindowIdleLease({
+      after: (delay, callback) => setTimeout(callback, delay),
+      cancel: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+    }, {
+      canExitIdleWindow: () => !this.disposed && this.viewer === viewer &&
+        this.pageMotion?.session === session && driver.active && session.state.kind === "idle",
+      exitIdleWindow: () => this.exitIdlePageMotionWindow(),
+    });
+    this.pageMotion = { session, driver, lease, key, viewer };
     return this.pageMotion;
   }
 
   /** 运动真正开始：关弹注/清高亮/作废待采样；目标页先以 transient 报给底栏。 */
   private pageMotionStarted(targetPage: number | null): void {
+    // animateTo 可同步落定（剩余距离为零）；不能撤掉刚在 commit 中安排的回收。
+    if (this.pageMotion?.session.state.kind !== "idle") this.pageMotion?.lease.moving();
     this.closeFootnoteForNavigation();
     this.clearSearchHighlightForDocument();
     this.cancelPendingAnchorSample?.();
@@ -3119,11 +3128,12 @@ export class ChapterPaginator {
     this.emit({ ...this.readyState(false, page), transient: true } as ChapterState);
   }
 
-  /** 运动落定：撤窗口回到正常几何并停在该屏，正式提交页码/锚点采样。 */
+  /** 运动落定：立即提交页码/锚点，短暂保留窗口以复用连续翻页。 */
   private commitPageMotion(page: number): void {
     const motion = this.pageMotion;
     if (!motion || !this.viewer) return;
-    motion.driver.settleTo(motion.session.offsetOf(page));
+    motion.driver.holdSettledAt(motion.session.offsetOf(page));
+    motion.lease.settled();
     this.pageMotionLivePage = null;
     this.adoptedPageUncommitted = false;
     this.metrics.currentPage = page;
@@ -3153,6 +3163,8 @@ export class ChapterPaginator {
   private haltPageMotion(): void {
     const motion = this.pageMotion;
     if (!motion || !motion.driver.active) return;
+    motion.lease.endContact();
+    motion.lease.moving();
     if (motion.session.state.kind === "idle") {
       this.exitIdlePageMotionWindow();
       return;
@@ -3167,10 +3179,7 @@ export class ChapterPaginator {
   }
 
   private disposePageMotion(): void {
-    if (this.pageMotionIdleTimer !== null) {
-      clearTimeout(this.pageMotionIdleTimer);
-      this.pageMotionIdleTimer = null;
-    }
+    this.pageMotion?.lease.dispose();
     this.haltPageMotion();
     this.pageMotion?.session.dispose();
     this.pageMotion = null;
@@ -3479,7 +3488,7 @@ export class ChapterPaginator {
         onPreview: (dx) => this.pagedSwipe?.onPreview?.(dx),
         onGestureStart: () => {
           this.pagedSwipe?.onGestureStart?.();
-          this.prepareMotion();
+          this.prepareMotion(true);
           this.beginNativeSnapGesture();
         },
         nativeScroll: (direction) => this.canNativeScroll(direction),
@@ -6521,8 +6530,16 @@ export class ChapterPaginator {
    * of the visible area.
    */
   private captureAnchor(): void {
-    // 采样点按正常几何计算：预先进入的空闲运动窗口先退回（位置不变）。
-    this.exitIdlePageMotionWindow();
+    // 活窗口仍保持原栏宽；用视觉坐标采样，不为一次进度读取触发重排。
+    if (this.pageMotion?.driver.active) {
+      const position = this.readVisualPosition();
+      const anchor = position ? this.sampleAnchorAtVisualPosition(position) : null;
+      if (anchor) {
+        this.anchor = anchor;
+        this.anchorPath = this._currentPath;
+      }
+      return;
+    }
     const doc = this.contentDoc;
     const viewer = this.viewer;
     if (!doc || !viewer || viewer.clientWidth <= 0) return;
@@ -7968,7 +7985,9 @@ export class ChapterPaginator {
     const empty = this.lastState.empty;
     if (!this.scrollMode) {
       const position = this.readVisualPosition();
-      if (position && (position.page !== this.metrics.currentPage || !position.aligned)) {
+      const transient = position && (position.page !== this.metrics.currentPage || !position.aligned ||
+        (this.pageMotion && this.pageMotion.session.state.kind !== "idle"));
+      if (position && transient) {
         const anchor = this.sampleAnchorAtVisualPosition(position);
         return {
           chapterPath,
@@ -8112,7 +8131,9 @@ export class ChapterPaginator {
     if (this.scrollMode) this.captureScrollAnchor();
     else {
       const position = this.readVisualPosition();
-      if (position && (position.page !== this.metrics.currentPage || !position.aligned)) {
+      const transient = position && (position.page !== this.metrics.currentPage || !position.aligned ||
+        (this.pageMotion && this.pageMotion.session.state.kind !== "idle"));
+      if (position && (transient || this.pageMotion?.driver.active)) {
         // 原生滑动途中：按视觉屏采样，并把正式页号采纳为该屏后再重排。
         const sampled = this.sampleAnchorAtVisualPosition(position);
         this.takeOverNativePaging();

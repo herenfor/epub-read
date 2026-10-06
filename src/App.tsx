@@ -4989,6 +4989,9 @@ export default function App() {
       view !== "reader" ||
       !currentShelfId
     ) return;
+    // 自动保存不会消费运动预览；先跳过，避免为了丢弃它而强制同步采样正文。
+    // 显式退出/后台/书签仍读取同一次真实视觉位置。
+    if (!explicit && chapterStateRef.current.status === "ready" && chapterStateRef.current.transient === true) return;
     const position = readReaderPosition();
     const state = position.state;
     if (state.status !== "ready") return;
