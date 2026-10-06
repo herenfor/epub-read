@@ -1737,8 +1737,20 @@
 }
 
 .app[data-mobile-chrome="true"][data-layout="compact"] .shelf-resume-actions {
+  position: relative;
   justify-content: flex-end;
   gap: 8px;
+}
+
+/* 竖屏下按钮不在行尾，按按钮右缘展开 320px 会伸出屏幕左侧；改为与整行同宽。 */
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-more-reading-dropdown {
+  position: static;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-more-reading-popover {
+  left: 0;
+  right: 0;
+  width: auto;
 }
 
 .app[data-mobile-chrome="true"][data-layout="compact"] .shelf-resume-key-hint {

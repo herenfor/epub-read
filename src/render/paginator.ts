@@ -2391,6 +2391,8 @@ export class ChapterPaginator {
   private reflowSeq = 0;
   /** 最近点击的脚注标记元素（供弹层随重排重新定位） */
   private lastFootnoteEl: HTMLElement | null = null;
+  /** 最近显示的脚注内容；宿主点按卡片固定时原样重发。 */
+  private lastFootnoteInfo: FootnoteInfo | null = null;
   /** 当前脚注是否被点击固定（固定时不随 hover 移出关闭） */
   private footnotePinned = false;
   /** iframe 标记与宿主弹层共享的短暂 hover 交接窗口。 */
@@ -2473,6 +2475,8 @@ export class ChapterPaginator {
   private readonly nativeSnapScrollHandler = (): void => {
     if (!this.nativeSnapArmed) return;
     this.nativeSnapScrolled = true;
+    // 页面一动就关弹注；正式提交要等滑动全部停下，不能等到那时。
+    if (this.footnoteOpen()) this.closeFootnoteForNavigation();
     this.scheduleNativeSnapLivePage();
   };
   /** 原生滚动途中已向宿主报告的页（只用于页码显示）；null 表示未报告。 */
@@ -6387,6 +6391,7 @@ export class ChapterPaginator {
     if (this.footnoteHoverGate) {
       this.footnotePinned = false;
       this.lastFootnoteEl = null;
+      this.lastFootnoteInfo = null;
       this.footnoteHoverGate.reset();
     }
     if (options.notify && (wasOpen || options.forceNotify)) this.onFootnoteClose?.();
@@ -7480,6 +7485,7 @@ export class ChapterPaginator {
    */
   previewPagedScroll(scrollLeft: number): void {
     if (!this.viewer || this.scrollMode) return;
+    if (this.footnoteOpen()) this.closeFootnoteForNavigation();
     // JS 动画接手时吸附必须关闭，否则中间帧会被就近吸到整页。
     this.disarmNativeSnap();
     this.viewer.scrollLeft = scrollLeft;
@@ -7934,6 +7940,15 @@ export class ChapterPaginator {
     if (isFootnoteLink(a) && this.contentDoc) {
       const info = resolveFootnote(this.contentDoc, a);
       if (info) {
+        if (this.prefersTouchPaging()) {
+          // 触摸：点标记只打开预览（不固定），点卡片才固定；再点同一标记关闭。
+          if (this.footnoteOpen() && this.lastFootnoteEl === a) {
+            this.resetFootnote({ notify: true });
+            return;
+          }
+          this.showFootnote(a, info, false);
+          return;
+        }
         // 点击 = 固定弹窗；再次点击同一标记 = 取消固定并关闭
         if (this.footnotePinned && this.lastFootnoteEl === a) {
           this.resetFootnote({ notify: true });
@@ -7993,6 +8008,7 @@ export class ChapterPaginator {
   /** 显示脚注弹层：记录标记（供重排重定位）并通知阅读器。 */
   private showFootnote(a: HTMLAnchorElement, info: FootnoteInfo, pinned: boolean): void {
     this.lastFootnoteEl = a;
+    this.lastFootnoteInfo = info;
     this.footnotePinned = pinned;
     this.footnoteHoverGate.show(pinned);
     const r = a.getBoundingClientRect();
@@ -8006,7 +8022,8 @@ export class ChapterPaginator {
 
   /** 桌面 hover 弹注（script.js 的 mouseover 行为）；已固定时不切换。 */
   private handleFootnoteHoverIn(e: Event): void {
-    if (this.footnotePinned) return;
+    // 触摸点按会模拟 mouseover/mouseout；触摸的开关只由点按决定。
+    if (this.footnotePinned || this.prefersTouchPaging()) return;
     const doc = this.contentDoc;
     const a = getFootnoteHoverAnchor(e.target, doc);
     if (!a || !doc) return;
@@ -8018,7 +8035,7 @@ export class ChapterPaginator {
 
   /** hover 移出标记时关闭弹层；在标记内部移动不关闭；固定状态不关闭。 */
   private handleFootnoteHoverOut(e: MouseEvent): void {
-    if (this.footnotePinned) return;
+    if (this.footnotePinned || this.prefersTouchPaging()) return;
     const a = (e.target as Element | null)?.closest<HTMLAnchorElement>("a");
     if (!a || !isFootnoteLink(a)) return;
     const rel = e.relatedTarget as Node | null;
@@ -8033,6 +8050,11 @@ export class ChapterPaginator {
     if (a && isFootnoteLink(a)) return; // 标记点击由 linkHandler 处理并 stopPropagation
     // 带普通链接的图片已由 linkHandler 消费；这里只处理无链接的正文图片。
     if (!a && this.activateImage(target)) return;
+    if (this.prefersTouchPaging()) {
+      // 触摸：未固定的预览点外面即关；已固定只由关闭按钮或翻页关闭。
+      if (this.footnoteOpen() && !this.footnotePinned) this.resetFootnote({ notify: true });
+      return;
+    }
     if (!this.footnotePinned) return;
     this.resetFootnote({ notify: true });
   };
@@ -8071,6 +8093,19 @@ export class ChapterPaginator {
     const innerImg = target.closest?.("img, image");
     if (innerImg) return innerImg;
     return null;
+  }
+
+  private footnoteOpen(): boolean {
+    return this.footnotePinned || this.footnoteHoverGate.isVisible();
+  }
+
+  /** 宿主点按弹注卡片：把当前预览固定下来，并重新通知宿主（pinned=true）。 */
+  pinFootnote(): void {
+    const a = this.lastFootnoteEl;
+    const info = this.lastFootnoteInfo;
+    if (this.footnotePinned || !this.footnoteOpen() || !a || !info) return;
+    if (!this.contentDoc?.contains(a)) return;
+    this.showFootnote(a as HTMLAnchorElement, info, true);
   }
 
   /** UI 层主动关闭固定脚注后，同步分页器状态（避免 hover 被锁住）。 */
