@@ -17,8 +17,8 @@ use super::types::{
 use crate::linked_library::{
     canonical_epub_path, hash_file, inspect_epub, library_root, make_binding,
     make_managed_binding, make_managed_record, managed_source_path, replace_file_atomically,
-    save_portable_import, snapshot, DeviceBinding, FileSnapshot, ImportedMetadata,
-    LinkedLibraryRecord,
+    save_portable_import, snapshot, verify_binding_for_list_refresh, DeviceBinding,
+    FileSnapshot, ImportedMetadata, LinkedLibraryRecord,
 };
 #[cfg(target_os = "android")]
 use crate::linked_library::{
@@ -108,6 +108,24 @@ impl RunnerState {
             .ok_or_else(|| "无法读取书籍归属观察值".to_string())
     }
 
+    fn existing_binding_available(&self, content_hash: &str) -> Result<bool, String> {
+        let raw = match crate::portable_state_commands::with_existing_store(
+            &self.app,
+            |store| store.binding_raw(content_hash),
+        ) {
+            Ok(Some(value)) => value,
+            Ok(None) => return Ok(false),
+            Err(error) => return Err(error.to_string()),
+        };
+        let Some(raw) = raw else {
+            return Ok(false);
+        };
+        let mut binding: DeviceBinding = serde_json::from_str(&raw)
+            .map_err(|error| format!("设备绑定损坏：{error}"))?;
+        let verification = verify_binding_for_list_refresh(&mut binding, &self.root)?;
+        Ok(verification.available)
+    }
+
     fn cleanup_item(&self, budget: &mut StageBudget, item: PreparedSuccess) {
         let PreparedSuccess {
             payload, reservation, ..
@@ -183,13 +201,38 @@ impl RunnerState {
                 self.cleanup_item(budget, item);
                 continue;
             }
-            match self.publish(&item) {
-                Ok((mut record, binding)) => {
-                    // Existing hashes must stay visible without being relabeled
-                    // as newly imported; canonical progress/annotations are
-                    // preserved by the portable merge.
-                    if item.observed.is_existing_book {
+
+            let existing_available = if item.observed.is_existing_book {
+                self.existing_binding_available(&item.content_hash)
+                    .unwrap_or(false)
+            } else {
+                false
+            };
+            let published: Result<Option<(LinkedLibraryRecord, DeviceBinding)>, String> =
+                if existing_available {
+                    Ok(None)
+                } else {
+                    self.publish(&item).map(Some)
+                };
+            match published {
+                Ok(published) => {
+                    if let Some((mut record, binding)) = published {
+                        if item.observed.is_existing_book {
+                            record.is_new = false;
+                        }
+                        records.push(record);
+                        bindings.push(binding);
+                    } else {
+                        // Existing healthy source: do not republish bytes or
+                        // overwrite the binding.  Keep the book visible and
+                        // let the portable merge preserve canonical data.
+                        let mut record = linked_record(
+                            item.content_hash.clone(),
+                            item.file_name.clone(),
+                            &item.metadata,
+                        );
                         record.is_new = false;
+                        records.push(record);
                     }
                     self.seen.record_published(&item.content_hash, item.ordinal);
                     if item.observed.is_existing_book {
@@ -216,8 +259,6 @@ impl RunnerState {
                             });
                         }
                     }
-                    records.push(record);
-                    bindings.push(binding);
                     published_items.push(item);
                 }
                 Err(message) => {
