@@ -62,6 +62,14 @@ class MockPaginator {
     for (const resolve of waiters) resolve(ready);
   }
   pagedSlideFrame() { return null; }
+  previewPagedScroll() {}
+  planPagedTurn(direction: 1 | -1, hasAdjacentChapter: boolean) {
+    const target = this.currentPage + direction;
+    if (target >= 0 && target < this.pageCount) return { kind: "page", page: target, from: 0, to: 0 };
+    return hasAdjacentChapter
+      ? { kind: "chapter", direction, fromPage: this.currentPage }
+      : { kind: "book-edge", page: this.currentPage };
+  }
   getStateSnapshot() { return this.state; }
   getCurrentPath() { return this.path; }
   setNotes() {}

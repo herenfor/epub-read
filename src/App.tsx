@@ -1382,7 +1382,7 @@ export default function App() {
     page: 0,
     anchor: null,
   });
-  const persistShelfProgressRef = useRef<() => void>(() => {});
+  const persistShelfProgressRef = useRef<(explicit?: boolean) => void>(() => {});
   readerDisplayReadyRef.current = readerDisplayReady;
 
   // 搜索索引按“打开一本书”的会话持有；创建本身不读取章节，首次查询才
@@ -2135,7 +2135,7 @@ export default function App() {
 
     try {
       await activatePortableShelfState();
-      persistShelfProgressRef.current();
+      persistShelfProgressRef.current(true);
       const laneIds = scopeChoice === "selected"
         ? selectedEntries.map((entry) => entry.id)
         : undefined;
@@ -2871,7 +2871,7 @@ export default function App() {
         setShelfNotice({ kind: "error", text: (error as Error).message });
         return;
       }
-      persistShelfProgressRef.current();
+      persistShelfProgressRef.current(true);
       const previousLease = activeProgressLeaseRef.current;
       const targetLane = writer.current(id);
       const openPlan = await planFreshProgressOpen({
@@ -3704,11 +3704,32 @@ export default function App() {
     handleFootnoteClose();
   }, [handleFootnoteClose]);
 
+  /**
+   * 页号与锚点的同一次读数：分页模式由分页器给出（原生滑动途中取视觉屏，
+   * 状态带 transient）；连续滚动回退到已发布状态 + 滚动锚点。chapterPath 为
+   * null 表示读数未携带章节身份。
+   */
+  const readReaderPosition = useCallback((withText = false): {
+    chapterPath: string | null;
+    state: ChapterState;
+    readingAnchor: ReturnType<ReaderHandle["getReadingAnchor"]>;
+    anchorText: string | null;
+  } => {
+    const reader = readerRef.current;
+    const snapshot = reader?.readPositionSnapshot({ withText }) ?? null;
+    if (snapshot) return snapshot;
+    return {
+      chapterPath: null,
+      state: chapterStateRef.current,
+      readingAnchor: reader?.getReadingAnchor() ?? null,
+      anchorText: withText ? reader?.getAnchorText() ?? null : null,
+    };
+  }, []);
+
   // ---- 目录/书内链接跳转 ----
   /** 当前稳定阅读位置；同步 ref 避免 ready 更新尚未完成 React render 的竞态。 */
   const currentReaderPosition = useCallback((): ReaderHistoryPosition => {
-    const state = chapterStateRef.current;
-    const readingAnchor = readerRef.current?.getReadingAnchor();
+    const { state, readingAnchor } = readReaderPosition();
     const currentBook = bookRef.current;
     let targetSpineIndex = spineIndex;
     if (readingAnchor?.path && currentBook) {
@@ -3732,7 +3753,7 @@ export default function App() {
           : null
       ) ?? lastStablePositionRef.current.anchor,
     };
-  }, [spineIndex]);
+  }, [spineIndex, readReaderPosition]);
 
   const handlePresentationChange = useCallback(
     (patch: { readingMode?: "paginated" | "scroll"; columnsPerView?: 1 | 2 }) => {
@@ -4439,14 +4460,18 @@ export default function App() {
   }, [isSidebarOpen, sidebarSide, activeSidebarTab, handleSidebarClose, handleOpenBookmarks]);
 
   const handleToggleBookmark = useCallback(() => {
-    if (!currentShelfId || chapterState.status !== "ready") return;
-    const anchor = readerRef.current?.getReadingAnchor() ?? null;
+    if (!currentShelfId) return;
+    // 页号、锚点与书签文字取同一次读数；原生滑动途中按视觉屏记录。
+    const position = readReaderPosition(true);
+    const chapterState = position.state;
+    if (chapterState.status !== "ready") return;
+    const anchor = position.readingAnchor;
     const previous = currentBookmarks;
     let next: Bookmark[];
     let added: Bookmark | null = null;
     let removedId: string | null = null;
     const makeBookmark = (): Bookmark => {
-      const text = readerRef.current?.getAnchorText() ?? "";
+      const text = position.anchorText ?? "";
       return {
         id: generateFolderId(),
         spineIndex,
@@ -4524,7 +4549,7 @@ export default function App() {
         );
         setShelfError(`书签保存失败：${String(error)}`);
       });
-  }, [currentShelfId, currentBookmarks, spineIndex, chapterState, showBookmarkToast, book]);
+  }, [currentShelfId, currentBookmarks, spineIndex, readReaderPosition, showBookmarkToast, book]);
 
   const handleDeleteBookmark = useCallback(
     (bookmarkId: string) => {
@@ -4952,17 +4977,24 @@ export default function App() {
   }, [book, contentAxis]);
 
   // ---- 书架进度回写（阅读器状态→书架索引，不修改阅读器本体） ----
-  const persistShelfProgress = useCallback(() => {
-    const state = chapterStateRef.current;
+  /**
+   * explicit=false 是随页态变化的自动保存：跳过原生滑动途中的 transient 预览。
+   * 返回书架/切后台/关窗/导出/换书是显式保存：用同一次读数的视觉屏与锚点。
+   */
+  const persistShelfProgress = useCallback((explicit = false) => {
     if (
       suppressShelfProgressRef.current ||
       navigationPendingRef.current ||
       !readerDisplayReady ||
       view !== "reader" ||
-      !currentShelfId ||
-      state.status !== "ready"
+      !currentShelfId
     ) return;
-    const a = readerRef.current?.getReadingAnchor();
+    const position = readReaderPosition();
+    const state = position.state;
+    if (state.status !== "ready") return;
+    if (state.transient === true && !explicit) return;
+    if (position.chapterPath !== null && book && position.chapterPath !== spineItemPath(book, spineIndex)) return;
+    const a = position.readingAnchor;
     const currentSummary = summarizeLinearCounts(chapterCountsRef.current, spineIndex);
     const exactChars = currentChapterCharsRead({
       textOffset: a?.textOffset,
@@ -5025,11 +5057,11 @@ export default function App() {
     }
   // page/anchor 变化必须触发写入；不能只依赖取整后的 progressPct，
   // 否则长书连续数页保持同一百分比时会漏掉最新位置。
-  }, [view, currentShelfId, spineIndex, readerDisplayReady, chapterState, showReaderNotice]);
+  }, [view, currentShelfId, spineIndex, readerDisplayReady, chapterState, showReaderNotice, readReaderPosition]);
   persistShelfProgressRef.current = persistShelfProgress;
 
   useEffect(() => {
-    persistShelfProgress();
+    persistShelfProgress(false);
   }, [persistShelfProgress]);
 
   // 未完成的扫描始终保持同一个 pending 状态；只有完成/可计算摘要变化时
@@ -5047,14 +5079,14 @@ export default function App() {
   useEffect(() => {
     if (lastCountProgressSignatureRef.current === countProgressSignature) return;
     lastCountProgressSignatureRef.current = countProgressSignature;
-    persistShelfProgressRef.current();
+    persistShelfProgressRef.current(false);
     if (countSummary.complete) persistChapterCountCache();
   }, [countProgressSignature, countSummary.complete, persistChapterCountCache]);
 
   const handleBackToShelf = useCallback(async () => {
     // 返回书架前先关浮层，再释放整本书的 ResourceServer。
     closeImageOverlay();
-    persistShelfProgress();
+    persistShelfProgress(true);
     recordLifecycleDiagnostic("back_to_shelf", { stage: "save", result: "begin" });
     shelfBusyRef.current = true;
     setShelfBusyMessage("正在保存进度…");
@@ -5346,7 +5378,7 @@ export default function App() {
   useEffect(() => {
     const onVisibilityChange = (): void => {
       if (document.visibilityState === "hidden") {
-        persistShelfProgressRef.current();
+        persistShelfProgressRef.current(true);
         persistChapterCountCache();
         recordLifecycleDiagnostic("hidden", { stage: "visibility-hidden", result: "best-effort" });
         const lease = activeProgressLeaseRef.current;
@@ -5402,7 +5434,7 @@ export default function App() {
         if (closing) return;
         event.preventDefault();
         closing = true;
-        persistShelfProgressRef.current();
+        persistShelfProgressRef.current(true);
         persistChapterCountCache();
         try {
           // Deliberate full flush at real window exit; report failed lanes.
