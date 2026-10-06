@@ -144,16 +144,20 @@ impl DirectoryImportJob {
                 .collect();
             let bindings = page_bindings(&root, &items, &bindings_map, start == 0);
             let next_cursor = (end < entries.len()).then(|| end.to_string());
-            let page = InputPage {
+            let mut page = InputPage {
                 items,
                 bindings,
                 next_cursor,
             };
-            if serde_json::to_vec(&page)
+            let fits = serde_json::to_vec(&page)
                 .map(|raw| raw.len() <= PAGE_MAX_JSON_BYTES)
-                .unwrap_or(false)
-                || count == 0
-            {
+                .unwrap_or(false);
+            if fits || count == 1 {
+                if !fits {
+                    // A single item is never larger than the page budget, so
+                    // only the page-local binding list can be the overflow.
+                    page.bindings.clear();
+                }
                 return Ok(page);
             }
             count -= 1;
