@@ -121,6 +121,18 @@ with the application; `scripts/prepare-semantic-model.ps1` downloads them into
 the user's model library and records real SHA-256 digests in the package
 manifest.
 
+### Bundled dictionary data
+
+| Component | Version | License | Source |
+|---|---:|---|---|
+| OpenCC dictionary subset (`TSPhrases` + `TSCharacters`, `STPhrases` + `STCharacters`) | commit `3ac34aa439a9908dd49fa92b5174b46314787ac2` | Apache-2.0 | https://github.com/BYVoid/OpenCC |
+
+The OpenCC data is bundled for offline simplified/traditional display and is
+not a runtime dependency. Its full license text is the shared
+`third-party-licenses/Apache-2.0.txt`; module-level attribution is recorded in
+`src/render/textProjection/OPENCC_DATA_LICENSE.txt`. The pinned OpenCC revision
+has no standalone NOTICE file, so no additional upstream NOTICE is attached.
+
 ## Development dependencies
 
 | Component | Version | License | Source |

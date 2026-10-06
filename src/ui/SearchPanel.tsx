@@ -68,6 +68,9 @@ export interface SearchPanelProps {
   navigationBusy?: boolean;
   scope?: SearchScope;
   onScopeChange?(scope: SearchScope): void;
+  /** Independent from scope: display text vs canonical original text. */
+  searchView?: "display" | "original";
+  onSearchViewChange?(view: "display" | "original"): void;
   statusMessage?: string;
   onRebuildIndex?(): void;
   onClearIndex?(): void;
@@ -561,6 +564,22 @@ export function SearchPanel(props: SearchPanelProps) {
               aria-pressed={scope === "all"}
               onClick={() => props.onScopeChange?.("all")}
             >全部书籍</button>
+          </div>
+        )}
+        {scope === "current" && props.onSearchViewChange && (
+          <div className="search-scope" role="group" aria-label="当前书搜索文字">
+            <button
+              type="button"
+              className={(props.searchView ?? "display") === "display" ? "active" : ""}
+              aria-pressed={(props.searchView ?? "display") === "display"}
+              onClick={() => props.onSearchViewChange?.("display")}
+            >当前显示</button>
+            <button
+              type="button"
+              className={props.searchView === "original" ? "active" : ""}
+              aria-pressed={props.searchView === "original"}
+              onClick={() => props.onSearchViewChange?.("original")}
+            >原文</button>
           </div>
         )}
         {scope === "all" && (props.onRebuildIndex || props.onClearIndex) && (

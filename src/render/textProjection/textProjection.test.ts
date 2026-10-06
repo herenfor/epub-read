@@ -6,11 +6,18 @@ import {
   projectPipeline,
   utf16Boundaries,
 } from "./core";
-import { compileTextProjection, projectText } from "./compile";
+import {
+  clearTextProjectionCacheForTests,
+  compileTextProjection,
+  isIdentityTextProjection,
+  projectText,
+  textProjectionVersion,
+} from "./compile";
 import { createNodeProjection, sourceRangeForDisplayRange } from "./nodeProjection";
-import { parseOpenCCDictionary } from "./opencc";
+import { clearOpenCCStageCacheForTests, loadOpenCCStage, parseOpenCCDictionary } from "./opencc";
 import { createDisplaySearchSession } from "./displaySearch";
 import { extractSearchText, extractSearchTextSegments } from "../../core/corpus";
+import { resolveSearchOccurrence } from "../../core/searchOccurrence";
 import type { Book } from "../../core/types";
 import type { TextProjectionPreferences } from "./types";
 
@@ -162,6 +169,9 @@ describe("text projection core", () => {
     const untouched = await session.search("甲");
     expect(untouched).toHaveLength(1);
     expect(untouched[0].matchedText).toBe("甲");
+    const untouchedAgain = await session.search("甲");
+    expect(untouchedAgain).toHaveLength(1);
+    expect(untouchedAgain[0].matchedText).toBe("甲");
     session.dispose();
   });
 
@@ -173,5 +183,62 @@ describe("text projection core", () => {
     for (const segment of segmented.segments) {
       expect(extracted.slice(segment.start, segment.end)).toBe(segment.text);
     }
+  });
+
+  it("R1 keeps per-chapter layout in the cached chapter across repeated searches", async () => {
+    const compiled = await compileTextProjection(original([{ from: "AB", to: "X" }]));
+    const book = fakeBook([
+      "<html><body><p><span>A</span><span>B</span></p></body></html>",
+      "<html><body><p>CD</p></body></html>",
+    ]);
+    const session = createDisplaySearchSession(book, compiled, { yieldToHost: async () => {} });
+    const first = await session.search("B");
+    const second = await session.search("B");
+    expect(first).toHaveLength(1);
+    expect(first[0].textHits).toEqual([{ start: 1, end: 2, exactText: "B" }]);
+    expect(second).toHaveLength(1);
+    expect(second[0].textHits).toEqual(first[0].textHits);
+    expect(second[0].display?.range).toEqual(first[0].display?.range);
+    session.dispose();
+  });
+
+  it("R3/R5 shares in-flight dictionary and compiled snapshots, and bypasses identity", async () => {
+    clearOpenCCStageCacheForTests();
+    clearTextProjectionCacheForTests();
+    const firstStage = loadOpenCCStage("simplified");
+    const secondStage = loadOpenCCStage("simplified");
+    expect(firstStage).toBe(secondStage);
+    await firstStage;
+
+    const prefs = original([{ from: "A", to: "B" }]);
+    expect(compileTextProjection(prefs)).toBe(compileTextProjection(prefs));
+    expect(isIdentityTextProjection({ mode: "original", rules: [] })).toBe(true);
+    expect(isIdentityTextProjection({ mode: "original", rules: [{ id: "r", from: "A", to: "B", enabled: true }] })).toBe(false);
+    expect(textProjectionVersion(prefs)).toBe(textProjectionVersion(prefs));
+    clearOpenCCStageCacheForTests();
+    clearTextProjectionCacheForTests();
+  });
+
+  it("R2 keeps two distinct display hits for a non-invertible replacement", async () => {
+    const compiled = await compileTextProjection(original([{ from: "AB", to: "ZZ" }]));
+    const book = fakeBook(["<html><body><p>AB</p></body></html>"]);
+    const session = createDisplaySearchSession(book, compiled, { yieldToHost: async () => {} });
+    const results = await session.search("Z");
+    expect(results).toHaveLength(2);
+    expect(results.map((result) => result.display?.range)).toEqual([
+      { start: 0, end: 1 },
+      { start: 1, end: 2 },
+    ]);
+    expect(results.map((result) => result.textHits)).toEqual([
+      [{ start: 0, end: 2, exactText: "AB" }],
+      [{ start: 0, end: 2, exactText: "AB" }],
+    ]);
+    expect(resolveSearchOccurrence(["Z", "Z"], results[0].display!.occurrence)).toEqual([
+      { start: 0, end: 1 },
+    ]);
+    expect(resolveSearchOccurrence(["Z", "Z"], results[1].display!.occurrence)).toEqual([
+      { start: 1, end: 2 },
+    ]);
+    session.dispose();
   });
 });

@@ -1,0 +1,68 @@
+.reader-visual-overlay-host {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.reader-display-settings {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(720px, calc(100vw - 24px));
+  max-height: min(820px, calc(100vh - 24px));
+  overflow: hidden;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.14));
+  border-radius: 14px;
+  background: var(--surface, var(--panel, #1f2024));
+  color: var(--text, #e8e8ea);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.38);
+  z-index: 40;
+}
+
+.reader-display-settings__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+}
+
+.reader-display-settings__head strong {
+  flex: 1;
+  font-size: 14px;
+}
+
+.reader-display-settings__back,
+.reader-display-settings__close {
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.16));
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  padding: 5px 9px;
+  cursor: pointer;
+}
+
+.reader-display-settings__body {
+  max-height: calc(min(820px, 100vh - 24px) - 52px);
+  overflow: auto;
+  padding: 0 14px 16px;
+}
+
+.reader-display-settings .text-projection-panel,
+.reader-display-settings .reader-visual-panel {
+  padding: 12px 0;
+}
+
+@media (max-width: 560px) {
+  .reader-visual-slider {
+    grid-template-columns: minmax(88px, 1fr) minmax(80px, 1fr) 42px;
+    gap: 6px;
+  }
+
+  .reader-display-settings {
+    width: calc(100vw - 12px);
+    max-height: calc(100vh - 12px);
+  }
+}

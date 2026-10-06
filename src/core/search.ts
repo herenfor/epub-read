@@ -51,27 +51,18 @@ export type SearchQueryOptions = Pick<SearchBookOptions, "signal" | "maxResults"
  * Optional display-projection adapter. The core stays independent of render/UI
  * modules: callers provide the compiled projection and the raw-range inverse.
  */
+export interface ProjectedSearchChapter {
+  /** Projected visible text for one chapter. */
+  readonly text: string;
+  /** Map a raw UTF-16 range in `text` back to the chapter's source text. */
+  toSourceRawRange(start: number, end: number): { start: number; end: number } | null;
+}
+
 export interface SearchProjection {
   /** Stable identity for display index caches. */
   readonly version: string;
-  /** Project one chapter's extracted search text. Must be pure. */
-  projectText(sourceText: string): string;
-  /**
-   * Optional node-boundary-aware projection. When present, core extracts
-   * per-text-node segments and the adapter must project each segment
-   * independently so phrase rules do not merge across inline elements.
-   */
-  projectSegments?(sourceText: string, segments: readonly SearchTextSegment[]): string;
-  /**
-   * Map a raw UTF-16 range from projected text back to the original extracted
-   * text. Start/end use opposite fragment biases in the implementation.
-   */
-  toSourceRawRange(
-    sourceText: string,
-    displayText: string,
-    start: number,
-    end: number,
-  ): { start: number; end: number } | null;
+  /** Build one immutable chapter snapshot. All hits in that chapter share it. */
+  projectChapter(sourceText: string, segments: readonly SearchTextSegment[]): ProjectedSearchChapter;
 }
 
 export interface SearchSession {
@@ -79,14 +70,20 @@ export interface SearchSession {
   dispose(): void;
 }
 
-export interface SearchDisplayHit {
+export interface DisplaySearchTarget {
+  /** Projection snapshot identity that produced `textHits`/`occurrence`. */
+  projectionVersion: string;
+  /** Display-only exact hits in projected text; never used as a canonical locator. */
+  textHits: ExactTextHit[];
+  /** Display-only context identity for robust re-resolution in the live DOM. */
+  occurrence: SearchOccurrence;
+}
+
+export interface SearchDisplayHit extends DisplaySearchTarget {
   /** Raw UTF-16 range in projected extracted text. */
   range: { start: number; end: number };
   /** Display matched text with block separators rendered as newlines. */
   matchedText: string;
-  /** Display-only exact identity; it is never used as a canonical locator. */
-  textHits?: ExactTextHit[];
-  occurrence?: SearchOccurrence;
 }
 
 export interface SearchResult {
@@ -322,6 +319,7 @@ function displayResultForGroup(
   displayDoc: SearchDocument,
   displayGroup: MatchGroup,
   sourceRanges: ReadonlyArray<{ start: number; end: number }>,
+  projectionVersion: string,
   spineIndex: number,
   chapterPath: string,
   chapterTitle: string,
@@ -339,6 +337,8 @@ function displayResultForGroup(
   const displayRawEnd = Math.max(...displayRawRanges.map((range) => range.end));
   const displaySnippet = snippetFor(displayDoc.text, displayRawRanges);
   const displayHits = displayExact.hits;
+  const displayOccurrence = captureSearchOccurrence(displayExact.points, displayHits);
+  if (!displayOccurrence) return null;
   return {
     spineIndex,
     chapterPath,
@@ -352,10 +352,11 @@ function displayResultForGroup(
     textHits: sourceExact.hits,
     occurrence: captureSearchOccurrence(sourceExact.points, sourceExact.hits) ?? undefined,
     display: {
+      projectionVersion,
       range: { start: displayRawStart, end: displayRawEnd },
       matchedText: publicText(displayDoc.text.slice(displayRawStart, displayRawEnd)),
       textHits: displayHits,
-      occurrence: captureSearchOccurrence(displayExact.points, displayHits) ?? undefined,
+      occurrence: displayOccurrence,
     },
     matchType: displayGroup.matchType,
   };
@@ -379,6 +380,7 @@ export function createSearchSession(book: Book, options: SearchBookOptions = {})
     sourceText: string;
     display: SearchDocument;
     displayText: string;
+    projected: ProjectedSearchChapter | null;
   }
   const cache = new Map<number, CachedChapter | null>();
   const projection = options.projection;
@@ -404,21 +406,19 @@ export function createSearchSession(book: Book, options: SearchBookOptions = {})
             if (source === undefined) {
               chapter = null;
             } else {
-              const segmented = projection?.projectSegments
-                ? await extractSearchTextSegments(source)
-                : null;
+              const segmented = projection ? await extractSearchTextSegments(source) : null;
               const sourceText = segmented?.text ?? await extractSearchText(source);
               const sourceDoc = buildDocument(sourceText);
-              const displayText = projection
-                ? segmented && projection.projectSegments
-                  ? projection.projectSegments(sourceText, segmented.segments)
-                  : projection.projectText(sourceText)
-                : sourceText;
+              const projected = projection
+                ? projection.projectChapter(sourceText, segmented?.segments ?? [])
+                : null;
+              const displayText = projected?.text ?? sourceText;
               chapter = {
                 source: sourceDoc,
                 sourceText,
                 display: displayText === sourceText ? sourceDoc : buildDocument(displayText),
                 displayText,
+                projected,
               };
             }
             cache.set(index, chapter);
@@ -429,17 +429,14 @@ export function createSearchSession(book: Book, options: SearchBookOptions = {})
             } else {
               const groups = matchGroupsForDocument(chapter.display, query);
               const chapterResults: SearchResult[] = [];
+              const projected = chapter.projected;
+              if (!projected) continue;
               for (const group of groups) {
                 const sourceRanges: Array<{ start: number; end: number }> = [];
                 let mapped = true;
                 for (const range of group.ranges) {
                   const displayRaw = rawRangeFor(chapter.display, range.start, range.end);
-                  const sourceRaw = projection.toSourceRawRange(
-                    chapter.sourceText,
-                    chapter.displayText,
-                    displayRaw.start,
-                    displayRaw.end,
-                  );
+                  const sourceRaw = projected.toSourceRawRange(displayRaw.start, displayRaw.end);
                   if (!sourceRaw) {
                     mapped = false;
                     break;
@@ -452,6 +449,7 @@ export function createSearchSession(book: Book, options: SearchBookOptions = {})
                   chapter.display,
                   group,
                   sourceRanges,
+                  projection.version,
                   index,
                   path,
                   titleFor(book, path),

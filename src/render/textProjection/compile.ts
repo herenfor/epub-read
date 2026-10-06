@@ -16,28 +16,53 @@ function stableRules(preferences: TextProjectionPreferences): string {
   );
 }
 
+/** Sync identity used by paginator prepare keys, display search cache and getters. */
+export function textProjectionVersion(value: TextProjectionPreferences): string {
+  const preferences = sanitizeTextProjectionPreferences(value);
+  return `${preferences.mode}:${stableRules(preferences)}`;
+}
+
+/** True when no conversion stage is active and the original document path can be reused. */
+export function isIdentityTextProjection(value: TextProjectionPreferences): boolean {
+  const preferences = sanitizeTextProjectionPreferences(value);
+  return preferences.mode === "original" && enabledReplacementRules(preferences.rules).length === 0;
+}
+
+const compiledCache = new Map<string, Promise<CompiledTextProjection>>();
+
 /**
- * Compile presets first, then enabled custom rules. The result is immutable;
- * callers reuse it for every text node in one document snapshot.
+ * Compile presets first, then enabled custom rules. The result is immutable
+ * and shared by every page/preload paginator and display search using the same
+ * stable version. Disabled rules do not create a second trie.
  */
-export async function compileTextProjection(
+export function compileTextProjection(
   value: TextProjectionPreferences,
 ): Promise<CompiledTextProjection> {
   const preferences = sanitizeTextProjectionPreferences(value);
-  const stages: Array<(source: string) => Projection> = [];
-  if (preferences.mode !== "original") {
-    stages.push(await loadOpenCCStage(preferences.mode));
-  }
-  const custom = enabledReplacementRules(preferences.rules);
-  if (custom.length > 0) stages.push(compileReplacementStage(custom));
-  return {
-    version: `${preferences.mode}:${stableRules(preferences)}`,
-    stages,
-    preferences,
-  };
+  const version = textProjectionVersion(preferences);
+  const cached = compiledCache.get(version);
+  if (cached) return cached;
+  const pending = (async () => {
+    const stages: Array<(source: string) => Projection> = [];
+    if (preferences.mode !== "original") {
+      stages.push(await loadOpenCCStage(preferences.mode));
+    }
+    const custom = enabledReplacementRules(preferences.rules);
+    if (custom.length > 0) stages.push(compileReplacementStage(custom));
+    return { version, stages, preferences };
+  })();
+  compiledCache.set(version, pending);
+  void pending.catch(() => {
+    if (compiledCache.get(version) === pending) compiledCache.delete(version);
+  });
+  return pending;
 }
 
 /** Project raw text with an already-compiled snapshot. */
 export function projectText(source: string, compiled: CompiledTextProjection): string {
   return projectPipeline(source, compiled.stages).display;
+}
+
+export function clearTextProjectionCacheForTests(): void {
+  compiledCache.clear();
 }

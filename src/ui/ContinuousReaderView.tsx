@@ -29,6 +29,17 @@ import {
 } from "../render/paginator";
 import type { ResourceServer } from "../render/resources";
 import type { ReaderSettings } from "../render/settings";
+import { textProjectionVersion, type CompiledTextProjection } from "../render/textProjection/compile";
+import {
+  DEFAULT_TEXT_PROJECTION_PREFERENCES,
+  type TextProjectionPreferences,
+} from "../render/textProjection/types";
+import {
+  DEFAULT_VISUAL_PREFERENCES,
+  type ReaderVisualPreferences,
+} from "../render/visual/readerVisualPreferences";
+import { attachReaderPaint } from "../render/visual/readerVisualPaint";
+import type { ReaderPaintHandle } from "../render/visual/readerVisualPreferences";
 import {
   ContinuousChapterLayout,
   ChapterLoadGate,
@@ -68,6 +79,10 @@ export interface ContinuousReaderViewProps {
   anchor?: string;
   anchorNonce: number;
   settings: ReaderSettings;
+  textProjectionPreferences?: TextProjectionPreferences;
+  textProjection?: CompiledTextProjection | null;
+  visualPreferences?: ReaderVisualPreferences;
+  compareOriginal?: boolean;
   userFonts: Array<{ family: string; url: string }>;
   notes: ReaderNoteForPaginator[];
   onPageState(s: ChapterState): void;
@@ -121,6 +136,25 @@ export interface ContinuousReaderViewProps {
     fraction: number;
     atEnd: boolean;
   }): void;
+}
+
+function continuousSurfaceBackground(iframe: HTMLIFrameElement): string | null {
+  const doc = iframe.ownerDocument;
+  const candidates = [
+    iframe.closest(".reader-continuous") as HTMLElement | null,
+    doc?.body,
+    doc?.documentElement,
+  ];
+  try {
+    for (const candidate of candidates) {
+      if (!candidate || !doc?.defaultView) continue;
+      const color = doc.defaultView.getComputedStyle(candidate).backgroundColor;
+      if (color && color !== "transparent" && color !== "rgba(0, 0, 0, 0)") return color;
+    }
+  } catch {
+    // Fall through to no synthesized background.
+  }
+  return null;
 }
 
 interface ActiveSlot {
@@ -370,6 +404,9 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
     const gateRef = useRef(new ChapterLoadGate());
     const slotsRef = useRef(new Map<string, ActiveSlot>());
     const retryCountersRef = useRef(new Map<string, number>());
+    const visualOverlayRef = useRef<HTMLDivElement | null>(null);
+    const paintHandlesRef = useRef(new Map<HTMLIFrameElement, ReaderPaintHandle>());
+    const syncVisualPaintRef = useRef<() => void>(() => {});
     const [slotUpdateNonce, setSlotUpdateNonce] = useState(0);
 
     // 章节高度测量重试：容器可见后重测，避免把 0 高度提交进布局
@@ -388,6 +425,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
 
     // 设置变更重载：已挂载章节必须用新主题/字号重新 sanitize，否则书页主题不跟随
     const settingsIdentityRef = useRef<ReaderSettings | null>(null);
+    const projectionVersionRef = useRef<string | null>(null);
     const settingsReloadDebouncerRef = useRef<ReturnType<typeof createSettingsReloadDebouncer> | null>(null);
     if (!settingsReloadDebouncerRef.current) {
       settingsReloadDebouncerRef.current = createSettingsReloadDebouncer(150);
@@ -458,6 +496,48 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
     // iframe 上下缓冲：宿主滚动由合成线程先行，iframe 位置要等下一次 JS 同步，
     // 没有缓冲时这一两帧会在顶部/底部露出背景，看起来像边距在伸缩。
     const frameBleed = continuousFrameBleed(V);
+    const visualPreferences = props.visualPreferences ?? DEFAULT_VISUAL_PREFERENCES;
+    const visualPreferencesRef = useRef(visualPreferences);
+    visualPreferencesRef.current = visualPreferences;
+    const compareOriginalRef = useRef(props.compareOriginal === true);
+    compareOriginalRef.current = props.compareOriginal === true;
+    syncVisualPaintRef.current = () => {
+      const host = visualOverlayRef.current;
+      const container = containerRef.current;
+      if (!host || !container) return;
+      const scrollTop = container.scrollTop;
+      // The host is an absolute child of the scrolling root; translate it back
+      // by the current scroll offset so the black overlay stays viewport-fixed.
+      host.style.transform = `translateY(${scrollTop}px)`;
+      const visible = new Set<HTMLIFrameElement>();
+      for (const slot of slotsRef.current.values()) {
+        if (slot.unmounted || slot.status !== "ready" || !slot.iframe.isConnected) continue;
+        const box = layoutRef.current.boxFor(slot.key);
+        if (!box) continue;
+        if (box.bottom <= scrollTop - frameBleed || box.top >= scrollTop + V + frameBleed) continue;
+        visible.add(slot.iframe);
+        const preferences = visualPreferencesRef.current;
+        const compare = compareOriginalRef.current;
+        const existing = paintHandlesRef.current.get(slot.iframe);
+        if (existing) {
+          existing.update(preferences, compare);
+        } else {
+          const handle = attachReaderPaint(
+            slot.iframe,
+            host,
+            preferences,
+            continuousSurfaceBackground(slot.iframe),
+          );
+          handle.update(preferences, compare);
+          paintHandlesRef.current.set(slot.iframe, handle);
+        }
+      }
+      for (const [iframe, handle] of paintHandlesRef.current) {
+        if (visible.has(iframe) && iframe.isConnected) continue;
+        handle.dispose();
+        paintHandlesRef.current.delete(iframe);
+      }
+    };
     const initialTargetScrollTop = useMemo(() => {
       if (spineIndex <= 0) return 0;
       const path = spineItemPath(book, spineIndex);
@@ -730,6 +810,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
         scrollTopRef.current = S;
         const currentProjections = layoutRef.current.project(S, V, overscan, frameBleed);
         syncProjectionDoms(currentProjections);
+        syncVisualPaintRef.current();
 
         if (scrollRafRef.current === null) {
           scrollRafRef.current = requestAnimationFrame(() => {
@@ -1398,6 +1479,10 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
         // 仍由 ChapterLoadGate 票据路径负责，这里不重复结束票据或重报就绪。
         // 只注册一次转发，避免旧槽位持有创建时的 V / 几何闭包。
         paginator.setLayoutSettledHandler(() => layoutSettledRef.current(key));
+        paginator.setTextProjectionPreferences?.(
+          props.textProjectionPreferences ?? DEFAULT_TEXT_PROJECTION_PREFERENCES,
+          props.textProjection ?? null,
+        );
 
         slotsRef.current.set(key, slot);
         setSlotUpdateNonce((n) => n + 1);
@@ -1613,6 +1698,8 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
           slot.paginator.dispose();
         }
         slotsRef.current.clear();
+        for (const handle of paintHandlesRef.current.values()) handle.dispose();
+        paintHandlesRef.current.clear();
         gateRef.current.reset();
         reloadingRef.current.clear();
         auxPaginatorRef.current?.dispose();
@@ -1694,12 +1781,62 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
       });
     }, [captureReadingSpot, scheduleLayoutRemeasure, settings]);
 
+    // T-1 配置变化：所有存活槽位统一换版本，按同一阅读点重载并重测章节高度。
+    useEffect(() => {
+      const preferences = props.textProjectionPreferences ?? DEFAULT_TEXT_PROJECTION_PREFERENCES;
+      const version = textProjectionVersion(preferences);
+      if (projectionVersionRef.current === null) {
+        projectionVersionRef.current = version;
+        return;
+      }
+      if (projectionVersionRef.current === version) return;
+      projectionVersionRef.current = version;
+      dampedScrollRef.current.stop();
+      const stored = lastStableSpotRef.current;
+      const spot = stored && layoutRef.current.boxFor(stored.key) ? stored : captureReadingSpot();
+      if (spot && !pendingSpotRef.current) pendingSpotRef.current = spot;
+      for (const slot of slotsRef.current.values()) {
+        slot.paginator.setTextProjectionPreferences?.(preferences, props.textProjection ?? null);
+      }
+      void (async () => {
+        for (const [key, slot] of slotsRef.current.entries()) {
+          if (slot.unmounted) continue;
+          reloadingRef.current.add(key);
+          try {
+            await slot.paginator.reloadWithTextProjection?.(
+              preferences,
+              undefined,
+              props.textProjection ?? null,
+            );
+            const ready = await slot.paginator.waitForDisplayReady();
+            if (!ready) slot.status = "error";
+          } catch {
+            if (!slot.unmounted) slot.status = "error";
+          } finally {
+            reloadingRef.current.delete(key);
+          }
+        }
+        scheduleLayoutRemeasure(pendingSpotRef.current);
+        setSlotUpdateNonce((n) => n + 1);
+      })();
+    }, [captureReadingSpot, props.textProjection, props.textProjectionPreferences, scheduleLayoutRemeasure]);
+
     // 响应笔记更新
     useEffect(() => {
       for (const slot of slotsRef.current.values()) {
         slot.paginator.setNotes(notes);
       }
     }, [notes]);
+
+    useEffect(() => {
+      syncVisualPaintRef.current();
+    }, [layout, slotUpdateNonce, V, props.compareOriginal, props.visualPreferences]);
+
+    useEffect(() => {
+      for (const handle of paintHandlesRef.current.values()) handle.dispose();
+      paintHandlesRef.current.clear();
+      syncVisualPaintRef.current();
+    }, [settings.theme]);
 
     // 显式导航响应（TOC / 搜索 / 笔记 / 书签 / 历史返回 / 打开书）
     const lastNavigatedNonceRef = useRef<number>(-1);
@@ -2210,6 +2347,10 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
                 props.onDisplayReady
               );
               auxPaginatorRef.current = paginator;
+              paginator.setTextProjectionPreferences?.(
+                props.textProjectionPreferences ?? DEFAULT_TEXT_PROJECTION_PREFERENCES,
+                props.textProjection ?? null,
+              );
               void paginator.load(path, {
                 settings: effectiveReaderSettings(settings, false),
                 hasNextChapter: false,
@@ -2321,6 +2462,11 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
             );
           })}
         </div>
+        <div
+          ref={visualOverlayRef}
+          className="reader-visual-overlay-host"
+          aria-hidden="true"
+        />
       </div>
     );
   }

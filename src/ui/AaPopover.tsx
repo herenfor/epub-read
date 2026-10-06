@@ -36,6 +36,7 @@ export interface AaPopoverProps {
   // 字体设置
   customFontName?: string;
   onOpenFontSettings: () => void;
+  onOpenDisplaySettings?: () => void;
 
   // 排版：行高预设 + 详细连续微调 (1.2 ~ 2.4, 步进 0.1)
   lineHeight?: number;
@@ -147,6 +148,7 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
   onThemeChange,
   customFontName,
   onOpenFontSettings,
+  onOpenDisplaySettings,
   lineHeight = 1.7,
   onLineHeightChange,
   onResetLineHeight,
@@ -473,6 +475,21 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
                   <ChevronRightIcon size={13} className="aa-chevron" />
                 </button>
               </div>
+
+              {onOpenDisplaySettings && (
+                <div className="aa-section aa-control-row">
+                  <span className="aa-section-label">显示</span>
+                  <button
+                    type="button"
+                    className="aa-font-trigger"
+                    onClick={onOpenDisplaySettings}
+                    title="字符替换、繁简显示、画面滤镜与色弱辅助"
+                  >
+                    <span className="aa-font-name">字符与画面</span>
+                    <ChevronRightIcon size={13} className="aa-chevron" />
+                  </button>
+                </div>
+              )}
 
               {/* Group 2: 排版与版式 */}
               <div className="aa-group-title">排版与版式</div>
