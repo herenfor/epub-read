@@ -13,6 +13,7 @@ pub struct ScanOutput {
     pub entries: Vec<ScannedEntry>,
     pub skipped_directory_count: usize,
     pub unreadable_directory_count: usize,
+    pub cancelled: bool,
 }
 
 impl ScanOutput {
@@ -22,6 +23,7 @@ impl ScanOutput {
             entries: Vec::new(),
             skipped_directory_count: 0,
             unreadable_directory_count: 0,
+            cancelled: false,
         }
     }
 }
@@ -55,16 +57,25 @@ fn scan_directory(
     directory: &Path,
     relative_segments: &[String],
     output: &mut ScanOutput,
-) {
+    cancelled: &dyn Fn() -> bool,
+) -> bool {
+    if cancelled() {
+        output.cancelled = true;
+        return true;
+    }
     let entries = match std::fs::read_dir(directory) {
         Ok(entries) => entries,
         Err(_) => {
             output.unreadable_directory_count += 1;
-            return;
+            return false;
         }
     };
 
     for entry in entries {
+        if cancelled() {
+            output.cancelled = true;
+            return true;
+        }
         let entry = match entry {
             Ok(entry) => entry,
             Err(_) => {
@@ -90,7 +101,9 @@ fn scan_directory(
         if metadata.is_dir() {
             let mut next_segments = relative_segments.to_vec();
             next_segments.push(file_name);
-            scan_directory(&path, &next_segments, output);
+            if scan_directory(&path, &next_segments, output, cancelled) {
+                return true;
+            }
             continue;
         }
         if !metadata.is_file() || !is_candidate_epub(&file_name) {
@@ -114,11 +127,20 @@ fn scan_directory(
             source: EntrySource::Path(canonical),
         });
     }
+    false
 }
 
 /// Scans a canonical Windows/Unix directory.  The caller has already resolved
 /// the user-selected root and produced `root_name`.
 pub fn scan_path_root(canonical_root: &Path, root_name: String) -> Result<ScanOutput, String> {
+    scan_path_root_cancellable(canonical_root, root_name, &|| false)
+}
+
+pub fn scan_path_root_cancellable(
+    canonical_root: &Path,
+    root_name: String,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<ScanOutput, String> {
     let canonical_root = std::fs::canonicalize(canonical_root)
         .map_err(|error| format!("无法解析所选目录：{error}"))?;
     let metadata = std::fs::metadata(&canonical_root)
@@ -130,7 +152,7 @@ pub fn scan_path_root(canonical_root: &Path, root_name: String) -> Result<ScanOu
         source_root_key: path_source_root_key(&canonical_root),
         name: root_name,
     });
-    scan_directory(&canonical_root, &[], &mut output);
+    output.cancelled = scan_directory(&canonical_root, &[], &mut output, cancelled);
     Ok(output)
 }
 
@@ -158,20 +180,38 @@ pub fn scan_android_tree(
     bridge: &dyn AndroidTreeBridge,
     tree_uri: &str,
 ) -> Result<ScanOutput, String> {
+    scan_android_tree_cancellable(bridge, tree_uri, &|| false)
+}
+
+pub fn scan_android_tree_cancellable(
+    bridge: &dyn AndroidTreeBridge,
+    tree_uri: &str,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<ScanOutput, String> {
     if !tree_uri.starts_with("content://") {
         return Err("Android 目录来源必须是 content:// 树 URI".to_string());
     }
-    let (root_name, root_children) = bridge.query_directory(tree_uri, None)?;
     let mut output = ScanOutput::new(ImportRoot {
         source_root_key: format!("tree:{tree_uri}"),
-        name: root_name,
+        name: String::new(),
     });
-    scan_android_children(
+    if cancelled() {
+        output.cancelled = true;
+        return Ok(output);
+    }
+    let (root_name, root_children) = bridge.query_directory(tree_uri, None)?;
+    if cancelled() {
+        output.cancelled = true;
+        return Ok(output);
+    }
+    output.root.name = root_name;
+    output.cancelled = scan_android_children(
         bridge,
         tree_uri,
         &root_children,
         &[],
         &mut output,
+        cancelled,
     )?;
     Ok(output)
 }
@@ -182,20 +222,33 @@ fn scan_android_children(
     children: &[AndroidEntry],
     relative_segments: &[String],
     output: &mut ScanOutput,
-) -> Result<(), String> {
+    cancelled: &dyn Fn() -> bool,
+) -> Result<bool, String> {
     for child in children {
+        if cancelled() {
+            output.cancelled = true;
+            return Ok(true);
+        }
         if child.is_directory {
             let mut next_segments = relative_segments.to_vec();
             next_segments.push(child.display_name.clone());
-            match bridge.query_directory(tree_uri, Some(&child.document_id)) {
+            let result = bridge.query_directory(tree_uri, Some(&child.document_id));
+            if cancelled() {
+                output.cancelled = true;
+                return Ok(true);
+            }
+            match result {
                 Ok((_name, grandchildren)) => {
-                    scan_android_children(
+                    if scan_android_children(
                         bridge,
                         tree_uri,
                         &grandchildren,
                         &next_segments,
                         output,
-                    )?;
+                        cancelled,
+                    )? {
+                        return Ok(true);
+                    }
                 }
                 Err(_) => {
                     output.unreadable_directory_count += 1;
@@ -219,7 +272,7 @@ fn scan_android_children(
             source: EntrySource::TreeUri(child.uri.clone()),
         });
     }
-    Ok(())
+    Ok(false)
 }
 
 #[cfg(test)]
@@ -284,4 +337,25 @@ mod tests {
 
         std::fs::remove_dir_all(root).unwrap();
     }
+    #[test]
+    fn cancelled_path_scan_stops_before_enumerating_candidates() {
+        let root = std::env::temp_dir().join(format!(
+            "fi-native-scan-cancel-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("deep")).unwrap();
+        std::fs::write(root.join("a.epub"), b"a").unwrap();
+        std::fs::write(root.join("deep").join("b.epub"), b"b").unwrap();
+
+        let output = scan_path_root_cancellable(&root, "root".to_string(), &|| true).unwrap();
+        assert!(output.cancelled);
+        assert!(output.entries.is_empty());
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
 }

@@ -59,6 +59,10 @@ pub async fn directory_import_scan(
     on_progress: Channel<DirectoryProgress>,
 ) -> Result<ScanResult, String> {
     let job = state.register(&job_id, source)?;
+    if !job.begin_scan() {
+        let _ = state.remove(&job_id);
+        return Err("该目录导入作业当前不可扫描".to_string());
+    }
     job.begin_worker();
     let worker_job = Arc::clone(&job);
     let result = tauri::async_runtime::spawn_blocking(move || {
@@ -66,6 +70,7 @@ pub async fn directory_import_scan(
     })
     .await;
     job.end_worker();
+    job.end_scan();
     match result {
         Ok(Ok(scan)) => Ok(scan),
         Ok(Err(message)) => {
@@ -127,8 +132,8 @@ pub async fn directory_import_start(
     let job = state
         .get(&job_id)?
         .ok_or_else(|| "目录导入作业不存在或已释放".to_string())?;
-    if !job.start_once() {
-        return Err("该目录导入作业只能启动一次".to_string());
+    if !job.begin_import() {
+        return Err("该目录导入作业当前不可启动或只能启动一次".to_string());
     }
     if job.scan_result().is_none() {
         return Err("目录扫描尚未完成，无法开始导入".to_string());
@@ -140,6 +145,7 @@ pub async fn directory_import_start(
     })
     .await;
     job.end_worker();
+    job.end_import();
     match result {
         Ok(Ok(result)) => {
             job.set_result(result.clone());
@@ -166,6 +172,8 @@ pub async fn directory_import_dispose(
     let Some(job) = state.get(&job_id)? else {
         return Ok(());
     };
+    job.request_dispose();
+    let _ = job.gate().cancel();
     tauri::async_runtime::spawn_blocking(move || {
         job.wait_for_workers();
         job.gate().finish();

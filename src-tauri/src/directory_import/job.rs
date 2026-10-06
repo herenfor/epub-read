@@ -5,7 +5,7 @@
 //! and is removed before `dispose` can release the slot.
 
 use super::planner::directory_group_key;
-use super::scanner::{scan_path_root, ScanOutput};
+use super::scanner::{scan_path_root_cancellable, ScanOutput};
 use super::types::{
     CancelStatus, DirectoryBinding, DirectoryCancelReply, DirectorySource, ImportIssue,
     InputPage, IssuePage, ScanResult, ScannedEntry, ScannedEpub,
@@ -13,7 +13,7 @@ use super::types::{
 };
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use tauri::AppHandle;
 
@@ -27,9 +27,15 @@ pub struct DirectoryImportJob {
     issues: Mutex<Vec<ImportIssue>>,
     active_workers: Mutex<usize>,
     worker_done: Condvar,
-    started: AtomicBool,
+    active_phase: AtomicU8,
+    disposing: AtomicBool,
+    import_started: AtomicBool,
     result: Mutex<Option<super::types::DirectoryImportResult>>,
 }
+
+const PHASE_NONE: u8 = 0;
+const PHASE_SCANNING: u8 = 1;
+const PHASE_IMPORTING: u8 = 2;
 
 impl DirectoryImportJob {
     fn new(id: String, source: DirectorySource) -> Self {
@@ -43,7 +49,9 @@ impl DirectoryImportJob {
             issues: Mutex::new(Vec::new()),
             active_workers: Mutex::new(0),
             worker_done: Condvar::new(),
-            started: AtomicBool::new(false),
+            active_phase: AtomicU8::new(PHASE_NONE),
+            disposing: AtomicBool::new(false),
+            import_started: AtomicBool::new(false),
             result: Mutex::new(None),
         }
     }
@@ -104,8 +112,53 @@ impl DirectoryImportJob {
         self.entries.lock().unwrap().clone()
     }
 
-    pub fn start_once(&self) -> bool {
-        !self.started.swap(true, Ordering::AcqRel)
+    pub fn begin_scan(&self) -> bool {
+        if self.disposing.load(Ordering::Acquire) || self.import_started.load(Ordering::Acquire) {
+            return false;
+        }
+        self.active_phase
+            .compare_exchange(PHASE_NONE, PHASE_SCANNING, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+    }
+
+    pub fn end_scan(&self) {
+        let _ = self.active_phase.compare_exchange(
+            PHASE_SCANNING,
+            PHASE_NONE,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
+    }
+
+    pub fn begin_import(&self) -> bool {
+        if self.disposing.load(Ordering::Acquire) {
+            return false;
+        }
+        if self.import_started.swap(true, Ordering::AcqRel) {
+            return false;
+        }
+        if self
+            .active_phase
+            .compare_exchange(PHASE_NONE, PHASE_IMPORTING, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            self.import_started.store(false, Ordering::Release);
+            return false;
+        }
+        true
+    }
+
+    pub fn end_import(&self) {
+        let _ = self.active_phase.compare_exchange(
+            PHASE_IMPORTING,
+            PHASE_NONE,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
+    }
+
+    pub fn request_dispose(&self) {
+        self.disposing.store(true, Ordering::Release);
     }
 
     pub fn set_result(&self, result: super::types::DirectoryImportResult) {
@@ -270,7 +323,7 @@ pub fn cancel_reply(gate: &super::policy::DirectoryJobGate) -> DirectoryCancelRe
 }
 
 #[cfg(target_os = "android")]
-use super::scanner::{scan_android_tree, AndroidTreeBridge};
+use super::scanner::{scan_android_tree_cancellable, AndroidTreeBridge};
 
 #[cfg(target_os = "android")]
 struct AppAndroidTreeBridge<'a> {
@@ -323,6 +376,7 @@ pub fn scan_job(
         });
     };
     progress(0);
+    let cancelled = || job.gate().cancelled();
     let output = match job.source() {
         DirectorySource::Path { path } => {
             let path = PathBuf::from(path);
@@ -332,13 +386,13 @@ pub fn scan_job(
                 .filter(|name| !name.trim().is_empty())
                 .unwrap_or("所选文件夹")
                 .to_string();
-            scan_path_root(&path, name)?
+            scan_path_root_cancellable(&path, name, &cancelled)?
         }
         DirectorySource::TreeUri { uri } => {
             #[cfg(target_os = "android")]
             {
                 let bridge = AppAndroidTreeBridge { app };
-                scan_android_tree(&bridge, uri)?
+                scan_android_tree_cancellable(&bridge, uri, &cancelled)?
             }
             #[cfg(not(target_os = "android"))]
             {
@@ -347,6 +401,9 @@ pub fn scan_job(
             }
         }
     };
+    if output.cancelled {
+        return Err("目录扫描已取消".to_string());
+    }
     let result = job.set_scan(output);
     progress(result.input_count);
     Ok(result)
@@ -395,4 +452,28 @@ mod tests {
         assert_eq!(parse_cursor(Some("12")).unwrap(), 12);
         assert_eq!(parse_cursor(None).unwrap(), 0);
     }
+    #[test]
+    fn scan_import_and_dispose_have_mutually_exclusive_admission() {
+        let state = DirectoryImportState::default();
+        let job = state
+            .register(
+                "job-1",
+                DirectorySource::Path {
+                    path: "/tmp/books".to_string(),
+                },
+            )
+            .unwrap();
+        assert!(job.begin_scan());
+        assert!(!job.begin_scan());
+        assert!(!job.begin_import());
+        job.end_scan();
+        assert!(job.begin_import());
+        assert!(!job.begin_import());
+        assert!(!job.begin_scan());
+        job.end_import();
+        job.request_dispose();
+        assert!(!job.begin_scan());
+        assert!(!job.begin_import());
+    }
+
 }
