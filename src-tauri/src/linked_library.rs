@@ -1283,6 +1283,14 @@ struct SourceReadResult {
     read_snapshot: FileSnapshot,
 }
 
+fn source_open_error(error: std::io::Error) -> String {
+    if error.kind() == std::io::ErrorKind::NotFound {
+        "源 EPUB 已变化或丢失；请重新导入或重新定位".into()
+    } else {
+        format!("无法打开源 EPUB：{error}")
+    }
+}
+
 fn prepare_source_read(
     library_root: &Path,
     records: &[LinkedLibraryRecord],
@@ -1300,10 +1308,8 @@ fn prepare_source_read(
         .iter()
         .find(|binding| binding.content_hash == content_hash)
         .ok_or_else(|| "本机没有这本书的源文件绑定".to_string())?;
-    let identity = SourceIdentity::from_binding(binding, library_root)
-        .map_err(|_| "源 EPUB 已变化或丢失；请重新导入或重新定位".to_string())?;
-    let file = File::open(&identity.path)
-        .map_err(|_| "源 EPUB 已变化或丢失；请重新导入或重新定位".to_string())?;
+    let identity = SourceIdentity::from_binding(binding, library_root)?;
+    let file = File::open(&identity.path).map_err(source_open_error)?;
     Ok(PendingSourceRead {
         identity,
         old_snapshot: FileSnapshot {
@@ -3374,7 +3380,7 @@ fn archive_open_blocking(
     } = pending;
     let (actual_hash, verified_snapshot) = hash_opened_file(&file)?;
     if !actual_hash.eq_ignore_ascii_case(&content_hash) {
-        return Err("源 EPUB 已变化或丢失；请重新导入或重新定位".to_string());
+        return Err("源 EPUB 在打开期间发生了变化；未将旧进度应用到新内容".to_string());
     }
     file.seek(SeekFrom::Start(0))
         .map_err(|error| format!("无法重新定位源 EPUB：{error}"))?;
@@ -4298,6 +4304,33 @@ fn merge_organization_command(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn source_protection_open_distinguishes_missing_and_permission_failures() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = organization_temp_dir("source-protection-open");
+        let path = root.join("book.epub");
+        fs::write(&path, b"source-protection").unwrap();
+        let hash = hash_bytes(b"source-protection");
+        let records = vec![bk2_record(&hash, 77)];
+        let bindings = vec![sample_linked_binding(&hash, &path, snapshot(&path).unwrap())];
+        assert!(prepare_source_read(&root, &records, &bindings, &hash).is_ok());
+
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+        let denied = prepare_source_read(&root, &records, &bindings, &hash).err();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        let denied = denied.expect("unreadable source must fail");
+        assert!(denied.starts_with("无法打开源 EPUB："));
+        assert!(!denied.contains("变化或丢失"));
+
+        fs::remove_file(&path).unwrap();
+        let missing = prepare_source_read(&root, &records, &bindings, &hash).err().unwrap();
+        assert_eq!(missing, "源 EPUB 已变化或丢失；请重新导入或重新定位");
+        assert_eq!(records[0].progress_pct, 77);
+        fs::remove_dir_all(root).unwrap();
+    }
 
     fn binding_json_value() -> serde_json::Value {
         let source = std::env::temp_dir().join("legacy-linked.epub");
