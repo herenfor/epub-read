@@ -14,10 +14,11 @@ export type InterruptResult =
   | { readonly kind: "held"; readonly sample: MotionSample }
   | { readonly kind: "unsupported"; readonly sample: MotionSample };
 
-/** 收尾曲线：从起点按指数趋近目标，在 durationMs 处恰好落定。 */
+/** 收尾曲线；手势漂移先指数减速，再以同速度接入有限尾段。 */
 export interface SettlePlan {
   readonly durationMs: number;
   readonly tauMs: number;
+  readonly curve?: "finite-drift";
 }
 
 /**
@@ -62,16 +63,20 @@ const SETTLE_MAX_MS = 700;
 const SETTLE_REST_PX = 0.5;
 
 /**
- * 松手/点按的收尾：与原生吸附一样先沿松手速度前进再指数减速、长尾漂移就位。
+ * 松手/点按的收尾：沿松手速度先指数减速，再平滑停到目标。
  * velocity 为位置单位的 px/ms；方向与剩余距离一致时让初速度接上手指，否则用点按常数。
  */
 export function settlePlan(distance: number, velocity: number | null): SettlePlan {
   const remaining = Math.abs(distance);
   let tauMs = SETTLE_TAP_TAU_MS;
-  if (velocity !== null && Math.abs(velocity) > 0.05 && Math.sign(velocity) === Math.sign(distance)) {
+  const drifting = velocity !== null && Math.abs(velocity) > 0.05 && Math.sign(velocity) === Math.sign(distance);
+  if (drifting) {
     tauMs = Math.max(SETTLE_TAU_MIN_MS, Math.min(SETTLE_TAU_MAX_MS, remaining / Math.abs(velocity)));
   }
   if (remaining <= SETTLE_REST_PX) return { durationMs: 0, tauMs };
+  // 两个 tau 的指数前段保留松手速度；两个 tau 的尾段从该速度减到零。
+  // 总长 240–640ms，不截短后跳到目标，也不把已近乎静止的微移拖到 700ms。
+  if (drifting) return { durationMs: 4 * tauMs, tauMs, curve: "finite-drift" };
   const durationMs = Math.round(Math.min(SETTLE_MAX_MS,
     Math.max(SETTLE_MIN_MS, tauMs * Math.log(remaining / SETTLE_REST_PX))));
   return { durationMs, tauMs };
@@ -81,6 +86,11 @@ export function settlePlan(distance: number, velocity: number | null): SettlePla
 export function settleProgress(plan: SettlePlan, t: number): number {
   if (plan.durationMs <= 0) return 1;
   const clamped = Math.max(0, Math.min(1, t));
+  if (plan.curve === "finite-drift") {
+    if (clamped <= 0.5) return 1 - Math.exp(-4 * clamped);
+    // p 与 dp/dt 在中点连续；终点速度为零。平方剩余量始终非负，绝不越界。
+    return 1 - Math.exp(-2) * (2 * (1 - clamped)) ** 2;
+  }
   const norm = 1 - Math.exp(-plan.durationMs / plan.tauMs);
   return (1 - Math.exp(-clamped * plan.durationMs / plan.tauMs)) / norm;
 }
