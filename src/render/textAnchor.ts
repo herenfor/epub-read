@@ -334,7 +334,8 @@ export class VisibleTextIndex {
     if (startNodeIndex < 0 || endNodeIndex < startNodeIndex) return null;
     const startRaw = startItem.rawStarts[start - startItem.start];
     const endRaw = endItem.rawEnds[endProbe - endItem.start];
-    if (startRaw === undefined || endRaw === undefined || endRaw < startRaw) return null;
+    // These offsets belong to different Text nodes when the selection crosses markup.
+    if (startRaw === undefined || endRaw === undefined) return null;
 
     const pieces: string[] = [];
     let previousBlock: Element | null = null;
