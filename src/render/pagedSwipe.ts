@@ -118,11 +118,13 @@ export function installPagedSwipe(target: Document | HTMLElement, handlers: Page
     const touch = event.touches[0];
     const dx = x(touch) - startX;
     const dy = y(touch) - startY;
-    if (Math.abs(dy) > Math.abs(dx) * HORIZONTAL_RATIO && Math.abs(dy) > INTENT_THRESHOLD_PX) {
+    // 只在尚未取得横向意图时判纵向。已横拖的手指往回越过起点时 dx 会接近零，
+    // 不能因此把少量 dy 误判成新纵向手势，提前回弹并丢弃余下的 touchmove。
+    if (peakAbsDx === 0 && Math.abs(dy) > Math.abs(dx) * HORIZONTAL_RATIO && Math.abs(dy) > INTENT_THRESHOLD_PX) {
       reset();
       return;
     }
-    if (Math.abs(dx) >= INTENT_THRESHOLD_PX && Math.abs(dx) > Math.abs(dy) * HORIZONTAL_RATIO) {
+    if (peakAbsDx > 0 || (Math.abs(dx) >= INTENT_THRESHOLD_PX && Math.abs(dx) > Math.abs(dy) * HORIZONTAL_RATIO)) {
       if (peakAbsDx === 0 && handlers.nativeScroll?.(dx < 0 ? 1 : -1)) native = true;
       if (native) {
         // 原生滚动接手：不拦截、不预览；只记录以便抬手时不再重复翻页。
