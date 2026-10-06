@@ -10,6 +10,8 @@ export interface FootnotePopProps {
   /** 标记在阅读区（.main）坐标系的矩形 */
   rect: { left: number; top: number; right: number; bottom: number };
   onClose(): void;
+  /** 点按卡片固定（触摸预览 → 固定）；已固定时不再调用。 */
+  onPin?(): void;
   /** 注释内外部链接：交给阅读器用系统默认浏览器打开 */
   onExternalLink?(url: string): void;
   /** 注释内返回链接（#锚点）：滚动到正文对应标记并关闭弹层 */
@@ -80,7 +82,10 @@ export function FootnotePop(props: FootnotePopProps) {
         onClick={(e) => {
           e.stopPropagation();
           const a = (e.target as HTMLElement | null)?.closest("a");
-          if (!a) return;
+          if (!a) {
+            if (!props.pinned && !(e.target as HTMLElement | null)?.closest("button")) props.onPin?.();
+            return;
+          }
           e.preventDefault();
           const href = (a.getAttribute("href") ?? "").trim();
           if (/^(https?|mailto|tel):/i.test(href) || href.startsWith("//")) {
@@ -100,7 +105,7 @@ export function FootnotePop(props: FootnotePopProps) {
         }}
       >
         <div className="footnote-head">
-          <span>{props.pinned ? "注释 · 已固定" : "注释"}</span>
+          <span>{props.pinned ? "注释 · 已固定" : props.onPin ? "注释 · 点按固定" : "注释"}</span>
           <button className="tb-btn" onClick={props.onClose} title="关闭">
             ✕
           </button>

@@ -878,6 +878,7 @@ describe("internal link history notification", () => {
     targetOverride: Element | null = null,
     activateImageImpl: (target: Element) => boolean = () => false,
     footnoteAside: Element | null = null,
+    touch = false,
   ) {
     const before: string[] = [];
     const navigated: string[] = [];
@@ -916,6 +917,8 @@ describe("internal link history notification", () => {
       closeFootnoteForNavigation() {},
       clearSearchHighlightForDocument() {},
       emit() {},
+      prefersTouchPaging: () => touch,
+      footnoteOpen: () => false,
       onBeforeInternalNavigate: (value: string) => {
         // App 的真实回调会以 Book/spine 校验跨章目标；保留这个边界
         // harness 以确保 paginator 传递的是解析后的 href，而不是裸点击值。
@@ -1038,6 +1041,11 @@ describe("internal link history notification", () => {
     expect(result.shownFootnotes).toHaveLength(1);
     expect(result.shownFootnotes[0]).toMatchObject({ anchor: link, pinned: true });
     expect(result.navigated).toEqual([]);
+
+    // 触摸：点标记只打开未固定的预览，点按弹注卡片才固定。
+    const touchResult = invoke("#note-1", true, img, () => true, aside as unknown as Element, true);
+    expect(touchResult.shownFootnotes).toHaveLength(1);
+    expect(touchResult.shownFootnotes[0]).toMatchObject({ anchor: link, pinned: false });
   });
 });
 

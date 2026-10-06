@@ -37,6 +37,7 @@ import { getRuntimeCapabilities } from "./platform/runtimeCapabilities";
 import { getAppBuildSession } from "./config/appBuildSession";
 import { checkThenRecoverProgressRuntime, planFreshProgressOpen } from "./ui/progressOpenOrder";
 import { useAndroidBack } from "./platform/useAndroidBack";
+import { moveAndroidTaskToBack } from "./platform/androidAppTask";
 import { useExitPresence } from "./ui/menuMotion";
 import { SidebarDrawer, type SidebarMode, type SidebarTab } from "./ui/SidebarDrawer";
 import { AaPopover } from "./ui/AaPopover";
@@ -345,6 +346,10 @@ function portableNoteAnnotations(entry: ShelfEntry): Readonly<Record<string, Ann
 function hasOwnField(value: object, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
 }
+
+/** 书架根层“再滑一次退出”的提示/确认窗口。 */
+const EXIT_BACK_WINDOW_MS = 2000;
+
 const DIAGNOSTIC_ERROR_CODES = new Set([
   "invalid-data",
   "invalid-entity",
@@ -5115,6 +5120,37 @@ export default function App() {
     setShelfBackActive(active);
   }, []);
 
+  // 书架根层返回两次退出：首次只提示，提示期内再次返回才退到后台。
+  // 书架始终自己消费返回，避免 WebView 历史（iframe 导航）吃掉一次返回却没有任何反馈。
+  const [exitBackHint, setExitBackHint] = useState(false);
+  const exitBackArmedUntilRef = useRef(0);
+  const exitBackHintTimerRef = useRef<number | null>(null);
+  const clearExitBackHint = useCallback((): void => {
+    exitBackArmedUntilRef.current = 0;
+    if (exitBackHintTimerRef.current !== null) {
+      window.clearTimeout(exitBackHintTimerRef.current);
+      exitBackHintTimerRef.current = null;
+    }
+    setExitBackHint(false);
+  }, []);
+  const handleShelfRootBack = useCallback((): void => {
+    if (Date.now() < exitBackArmedUntilRef.current) {
+      clearExitBackHint();
+      void moveAndroidTaskToBack().catch(() => undefined);
+      return;
+    }
+    exitBackArmedUntilRef.current = Date.now() + EXIT_BACK_WINDOW_MS;
+    if (exitBackHintTimerRef.current !== null) window.clearTimeout(exitBackHintTimerRef.current);
+    setExitBackHint(true);
+    exitBackHintTimerRef.current = window.setTimeout(clearExitBackHint, EXIT_BACK_WINDOW_MS);
+  }, [clearExitBackHint]);
+  useEffect(() => {
+    if (view !== "shelf") clearExitBackHint();
+  }, [view, clearExitBackHint]);
+  useEffect(() => () => {
+    if (exitBackHintTimerRef.current !== null) window.clearTimeout(exitBackHintTimerRef.current);
+  }, []);
+
   const handleAndroidBack = useCallback((): void => {
     const activeElement = typeof document !== "undefined"
       ? document.activeElement as HTMLElement | null
@@ -5160,13 +5196,19 @@ export default function App() {
       return;
     }
     if (view === "shelf") {
-      shelfBackHandlerRef.current?.();
+      if (shelfBackHandlerRef.current?.()) {
+        clearExitBackHint();
+        return;
+      }
+      handleShelfRootBack();
     }
   }, [
+    clearExitBackHint,
     closeImageOverlay,
     closeLanSavePanel,
     closeSaveFileUi,
     handleBackToShelf,
+    handleShelfRootBack,
     isSidebarOpen,
     lanSaveOpen,
     lanSaveSession.active,
@@ -5181,6 +5223,7 @@ export default function App() {
   useAndroidBack(
     runtime.usesAndroidBack && (
       view === "reader" ||
+      view === "shelf" ||
       foreground.kind !== "none" ||
       imageRequest !== null ||
       shelfBackActive ||
@@ -6356,6 +6399,7 @@ export default function App() {
             pinned={footnote.pinned}
             rect={footnote.rect}
             onClose={handleFootnoteClose}
+            onPin={mobileChrome ? () => readerRef.current?.pinFootnote() : undefined}
             onExternalLink={handleExternalLink}
             onAnchor={handleFootnoteAnchor}
             onHoverChange={(over) => {
@@ -6463,6 +6507,11 @@ export default function App() {
           role="status"
         >
           {(shelfNotice ?? readerNotice)!.text}
+        </div>
+      )}
+      {exitBackHint && (
+        <div className="reader-bookmark-toast exit-back-hint" role="status" aria-live="polite">
+          <span className="bookmark-toast-text">再滑一次退出阅读器</span>
         </div>
       )}
       {bookmarkToast && (

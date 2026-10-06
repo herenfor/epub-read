@@ -2126,6 +2126,11 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
             slot.paginator.dismissFootnote();
           }
         },
+        pinFootnote() {
+          for (const slot of slotsRef.current.values()) {
+            slot.paginator.pinFootnote();
+          }
+        },
         setFootnoteOverlayHover(over) {
           for (const slot of slotsRef.current.values()) {
             slot.paginator.setFootnoteOverlayHover(over);

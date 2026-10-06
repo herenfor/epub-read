@@ -86,6 +86,8 @@ export interface ReaderHandle {
   } | null;
   /** UI 层关闭固定脚注后同步分页器状态 */
   dismissFootnote(): void;
+  /** 宿主点按弹注卡片：固定当前预览弹注。 */
+  pinFootnote(): void;
   /** 宿主脚注卡片 hover 进入/离开时同步 iframe 内 hover gate。 */
   setFootnoteOverlayHover(over: boolean): void;
   /** 清除正文 iframe 内的原生文本选区。 */
@@ -1807,6 +1809,9 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       },
       dismissFootnote() {
         paginatorRef.current?.dismissFootnote();
+      },
+      pinFootnote() {
+        paginatorRef.current?.pinFootnote();
       },
       setFootnoteOverlayHover(over: boolean) {
         paginatorRef.current?.setFootnoteOverlayHover(over);
