@@ -14,6 +14,7 @@ import {
   type PreciseNavigationStatus,
   type ReadingAnchor,
   type ReaderPositionSnapshot,
+  type RestoreReportTicket,
 } from "../render/paginator";
 import type { ResourceServer } from "../render/resources";
 import { normalizeTurnAnimation, type ReaderSettings, type TurnAnimation } from "../render/settings";
@@ -142,7 +143,7 @@ interface ReaderViewProps {
   notes: ReaderNoteForPaginator[];
   onPageState(s: ChapterState): void;
   /** Paginator display gate released after final anchor/page positioning. */
-  onDisplayReady(): void;
+  onDisplayReady(ticket: RestoreReportTicket | null): void;
   /** 请求切换到相邻章节（next/prev 或空章自动前进） */
   onRequestChapter(index: number, opts?: { atEnd?: boolean }): void;
   /** 章节切换请求（nonce 单调递增；atEnd=true 表示加载完成后翻到最后一页） */
@@ -157,12 +158,18 @@ interface ReaderViewProps {
   /** 连续模式语义锚点失败时结束 loading，但不冒充定位成功。 */
   onNavigationUnresolved?(reported: boolean): void;
   /** 连续宿主发生真实用户位移；程序化定位/重排不触发。 */
-  onUserReadingPositionChange?(): void;
+  onUserReadingPositionChange?(ticket: RestoreReportTicket | null): void;
   /**
    * 首次恢复结果（活动槽、本次加载一次）：located=false 表示保存的正文目标
    * 未能解析，页面可能停在章首，宿主不能把它当作新位置保存。
    */
-  onRestoreResult?(result: { chapterPath: string; located: boolean }): void;
+  onRestoreResult?(result: {
+    chapterPath: string;
+    located: boolean;
+    ticket: RestoreReportTicket | null;
+  }): void;
+  /** Immutable identity of this opening restore; forwarded into the paginator load. */
+  restoreTicket?: RestoreReportTicket | null;
   /** 外部链接（http/https/mailto/tel）交给系统默认浏览器/应用打开 */
   onExternalLink(url: string): void;
   /** 脚注弹层（文本/HTML/固定状态 + 标记在阅读区坐标系的矩形） */
@@ -244,6 +251,8 @@ interface PaginatorSlot {
   ready: boolean;
   generation: number;
   renderSettings: ReaderSettings;
+  /** One-shot restore identity for this load; null for normal navigation/preload. */
+  restoreTicket: RestoreReportTicket | null;
 }
 
 function parseViewport(vp: string | undefined): { w: number; h: number } | null {
@@ -439,7 +448,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     const target = plan.page;
     const done = (): void => {
       slideAnimRef.current = null;
-      if (paginatorRef.current === p) p.setPage(target);
+      if (paginatorRef.current === p) p.setPage(target, { userInitiated: true });
     };
     if (continuing) {
       // 松手续接：起始速度取手指离手速度，避免第一帧跳出一大截。
@@ -581,15 +590,8 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   const onImageActivationRef = useRef(props.onImageActivation);
   const onRestoreResultRef = useRef(props.onRestoreResult);
   const onUserReadingPositionChangeRef = useRef(props.onUserReadingPositionChange);
-  /**
-   * 真实用户翻页输入（按键/滚轮/按钮/滑动手势）后的有效期；期间活动槽落到
-   * 新的已提交位置才算“用户提交了新位置”。重排、图片补偿等没有输入不算。
-   */
-  const userTurnArmedUntilRef = useRef(0);
-  const lastCommittedPositionRef = useRef<string | null>(null);
-  const armUserTurn = (): void => {
-    userTurnArmedUntilRef.current = performance.now() + 3000;
-  };
+  // 用户提交只由 ChapterPaginator 的真实落定命令回调驱动；这里不再用
+  // touchstart + 时间窗推断，按下、预览、恢复或重排都不会解除失败保护。
   // 图片浮层打开时，分页器对按键/滚轮的回调被短路，触摸翻页也由下面的
   // overlay-active 样式屏蔽；关闭后不需要重新接线。
   const inputPausedRef = useRef(props.inputPaused === true);
@@ -665,7 +667,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       chapterEnterRef.current = null;
       setChapterTurnPhase("enter", enter, 280);
     }
-    onDisplayReadyRef.current();
+    onDisplayReadyRef.current(slot.restoreTicket ?? null);
     turnIntentRef.current.markReady();
     outerWheelRef.current.reset();
     outerScrollWheelRef.current.reset();
@@ -697,15 +699,8 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         } else {
           lastReadyEmptyRef.current = state.empty;
         }
-        if (state.status === "ready" && state.transient !== true) {
-          const position = `${slot.path ?? ""}#${state.currentPage}`;
-          const previous = lastCommittedPositionRef.current;
-          lastCommittedPositionRef.current = position;
-          if (previous !== null && previous !== position && performance.now() < userTurnArmedUntilRef.current) {
-            userTurnArmedUntilRef.current = 0;
-            onUserReadingPositionChangeRef.current?.();
-          }
-        }
+        // 用户位置提交由 paginator 的 setUserCommitHandler 在真实落定后发出；
+        // 这里只转发普通状态，绝不再按页号变化+时间窗推断用户输入。
         onPageStateRef.current(state);
         if (state.status !== "ready" || !state.empty || autoAdvanceRef.current) return;
         const next = nextLinearIndex(book, spineIndexRef.current, 1);
@@ -811,7 +806,6 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         // 运动层模式下按下不改任何东西：横向意图成立才接手，轻点不撤回旧命令。
         onGestureStart: () => {
           if (!isActiveSlot(slot)) return;
-          armUserTurn();
           if (!slot.paginator?.pageMotionAvailable) slideAnimRef.current?.finish();
         },
       },
@@ -833,9 +827,19 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     paginator.setPageMotionChapterHandler?.((direction) => {
       if (isActiveSlot(slot)) turnPageRef.current(direction, "ui");
     });
-    paginator.setRestoreResultHandler?.((located) => {
+    paginator.setRestoreResultHandler?.((result) => {
       // 预加载槽不得向活动会话提交恢复结果。
-      if (isActiveSlot(slot) && slot.path) onRestoreResultRef.current?.({ chapterPath: slot.path, located });
+      if (isActiveSlot(slot) && slot.path) {
+        onRestoreResultRef.current?.({
+          chapterPath: slot.path,
+          located: result.located,
+          ticket: result.ticket,
+        });
+      }
+    });
+    paginator.setUserCommitHandler?.(() => {
+      // 只由真实翻页/滑动落定路径回调，恢复/重排/按下不会走到这里。
+      if (isActiveSlot(slot)) onUserReadingPositionChangeRef.current?.(slot.restoreTicket ?? null);
     });
     return paginator;
   };
@@ -970,6 +974,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         ready: false,
         generation: ++preloadGenerationRef.current,
         renderSettings: latestRenderSettingsRef.current,
+        restoreTicket: null,
       };
       spareSlotsRef.current.push(slot);
       usedFrames.add(frame);
@@ -1406,6 +1411,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       ready: false,
       generation: 0,
       renderSettings: latestRenderSettingsRef.current,
+      restoreTicket: null,
     };
     const p = buildPaginator(slot);
     activeSlotRef.current = slot;
@@ -1504,6 +1510,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         activeSlot.path = path;
         activeSlot.spineIndex = spineIndex;
         activeSlot.renderSettings = latestRenderSettingsRef.current;
+        activeSlot.restoreTicket = props.restoreTicket ?? null;
       }
       // Retain valid cached slots in the new live window; only evict distant or stale slots.
       if (settingsChanged) {
@@ -1522,6 +1529,15 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       }
       turnIntentRef.current.reset();
       p.resetWheelAccumulator?.();
+      // Text/media targets are modern semantic identities: a failed resolve
+      // must show the chapter start without consuming the legacy page fallback.
+      // Legacy index-only anchors and explicit chapter starts keep old behavior.
+      const hasModernSemanticInitial = Boolean(
+        props.initialAnchor &&
+          (props.initialAnchor.anchorTextOffset !== null ||
+            props.initialAnchor.anchorTextSnippet !== null ||
+            props.initialAnchor.mediaAnchor),
+      );
       await p.load(path, {
         settings: latestRenderSettingsRef.current,
         hasNextChapter: nextLinearIndex(book, spineIndex, 1) >= 0,
@@ -1530,8 +1546,9 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         resetPage: true,
         startAtEnd,
         readingAnchor: props.initialAnchor,
-        fallbackPage: preciseTarget ? null : (props.initialPage ?? null),
+        fallbackPage: preciseTarget || hasModernSemanticInitial ? null : (props.initialPage ?? null),
         reportRestore: !book.fixedLayout && !preciseTarget,
+        restoreTicket: props.restoreTicket ?? null,
         preciseNavigation: preciseTarget
           ? {
               requestId: preciseTarget.requestId,
@@ -1691,7 +1708,6 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     // 页数未知时不执行，但保留最后一个方向；display-ready 后最多消费一次。
     const immediate = turnIntentRef.current.request(dir);
     if (immediate === null) return;
-    armUserTurn();
     if (latestRenderSettingsRef.current.readingMode === "scroll") {
       // 滚动模式：命令含义是移动视口约 0.9 屏；只有真实边界才换章。
       // 不用虚拟 currentPage 判断章尾，也不把惯性滚动变成连续切章。
@@ -1759,17 +1775,17 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     if (!plan) return;
     if (plan.kind === "page") {
       if (plan.page === p.currentPage && Math.abs(plan.to - plan.from) <= 0.5) {
-        p.setPage(plan.page);
+        p.setPage(plan.page, { userInitiated: true });
         return;
       }
       if (!startSlideTurn(p, plan)) {
         triggerTurnAnimation(immediate);
-        p.setPage(plan.page);
+        p.setPage(plan.page, { userInitiated: true });
       }
       return;
     }
     // 章边/书边：先正式提交该物理边界屏（接管后未发正式状态时补发）。
-    p.setPage(plan.kind === "chapter" ? plan.fromPage : plan.page);
+    p.setPage(plan.kind === "chapter" ? plan.fromPage : plan.page, { userInitiated: true });
     if (plan.kind === "chapter") requestChapterTurn(adjacent);
   };
 
@@ -1893,7 +1909,6 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       onPrev: () => turnPageRef.current(-1, "ui"),
       onPreview: (dx) => updateSwipePreviewRef.current(dx),
       onGestureStart: () => {
-        armUserTurn();
         paginatorRef.current?.prepareMotion(true);
       },
       onGestureEnd: () => paginatorRef.current?.endMotionContact(),

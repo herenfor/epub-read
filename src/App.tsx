@@ -171,6 +171,7 @@ import {
   reduceRestoreCommit,
   type RestoreCommitEvent,
   type RestoreCommitState,
+  type RestoreTicket,
 } from "./ui/restoreCommitGate";
 import type { ProgressLease } from "./ui/portableState/ownedProgressSessions";
 import { currentChapterCharsRead } from "./ui/readingProgress";
@@ -354,10 +355,6 @@ function toPersistedReaderAnchor(value: {
   };
 }
 
-/** Gate events without the ticket: App binds them to the current restore request. */
-type RestoreGateEvent = RestoreCommitEvent extends infer E
-  ? E extends RestoreCommitEvent ? Omit<E, "ticket"> : never
-  : never;
 
 type PortableProgressChoiceCandidate = {
   readonly stamp: Stamp;
@@ -783,6 +780,7 @@ export default function App() {
   const [runtimeIssues, setRuntimeIssues] = useState<string[]>([]);
   const [diagText, setDiagText] = useState<string | null>(null);
   const [initialAnchor, setInitialAnchor] = useState<PersistedReaderAnchor | null>(null);
+  const [initialRestoreTicket, setInitialRestoreTicket] = useState<RestoreTicket | null>(null);
   const [initialPage, setInitialPage] = useState<number | null>(0);
   const [initialAlignment, setInitialAlignment] = useState<"reading-line" | "context">("context");
   /** 正文图片浮层请求；null = 未打开。 */
@@ -1456,24 +1454,29 @@ export default function App() {
   const restoreRequestRef = useRef(0);
   /** 首次恢复已结算（统计任务在此之后启动，前台开章优先）。 */
   const [restoreSettled, setRestoreSettled] = useState(true);
-  const dispatchRestoreGate = useCallback((event: RestoreGateEvent) => {
+  const dispatchRestoreGate = useCallback((event: RestoreCommitEvent) => {
     const gate = restoreGateRef.current;
     if (!gate) return;
-    const next = reduceRestoreCommit(gate, { ...event, ticket: gate.ticket } as RestoreCommitEvent);
+    // Use the event's immutable ticket. A late callback from an old request
+    // must never be rewrapped as the current gate's identity.
+    const next = reduceRestoreCommit(gate, event);
     restoreGateRef.current = mayCommitRestoredProgress(next) ? null : next;
     if (next.phase !== "resolving") setRestoreSettled(true);
   }, []);
-  /** 只有当前会话、当前恢复请求、同一章节的结果才能结算。 */
-  const restoreResultMatches = useCallback((chapterPath: string): boolean => {
+  /** 只有当前会话、当前恢复请求、同一章节的完整 ticket 才能结算。 */
+  const restoreResultMatches = useCallback((ticket: RestoreTicket, chapterPath: string): boolean => {
     const gate = restoreGateRef.current;
     return gate !== null
-      && gate.ticket.session === activeSessionRef.current?.generation
-      && gate.ticket.chapterPath === chapterPath;
+      && gate.ticket.session === ticket.session
+      && gate.ticket.request === ticket.request
+      && gate.ticket.chapterPath === ticket.chapterPath
+      && gate.ticket.chapterPath === chapterPath
+      && activeSessionRef.current?.generation === ticket.session;
   }, []);
   /** 显式导航（目录/搜索/书签/历史/笔记）由用户选定目标：作废未结算的旧恢复。 */
   const releaseRestoreForExplicitNavigation = useCallback(() => {
-    if (!restoreGateRef.current) return;
-    restoreGateRef.current = null;
+    if (restoreGateRef.current) restoreGateRef.current = null;
+    setInitialRestoreTicket(null);
     setRestoreSettled(true);
   }, []);
   // 每个稳定位置只能被一次显式跳转捕获；新书初始加载时
@@ -1711,6 +1714,7 @@ export default function App() {
           gate = reduceRestoreCommit(gate, { type: "resolved", ticket, located: true });
         }
         restoreGateRef.current = gate;
+        setInitialRestoreTicket(ticket);
         setRestoreSettled(gate.phase !== "resolving");
       }
       lastStablePositionRef.current = {
@@ -2956,9 +2960,11 @@ export default function App() {
   }, []);
 
   /** 语义锚点失败：解除显示门，但守住进度，直到读者真实移动后再写。 */
-  const handleReaderNavigationUnresolved = useCallback((reported: boolean): void => {
-    dispatchRestoreGate({ type: "resolved", located: false });
-    dispatchRestoreGate({ type: "display-ready" });
+  const handleReaderNavigationUnresolved = useCallback((reported: boolean, ticket?: RestoreTicket | null): void => {
+    if (ticket) {
+      dispatchRestoreGate({ type: "resolved", ticket, located: false });
+      dispatchRestoreGate({ type: "display-ready", ticket });
+    }
     navigationPendingRef.current = false;
     historyCaptureAllowedRef.current = true;
     readerDisplayReadyRef.current = true;
@@ -2966,16 +2972,22 @@ export default function App() {
     setSearchNavigationBusy(false);
     setInitialAnchor(null);
     setInitialPage(0);
+    setInitialRestoreTicket(null);
     setInitialAlignment("context");
     suppressShelfProgressRef.current = true;
     if (!reported) showReaderNotice("未能定位保存位置，已停留在章节开头", "warn");
   }, [showReaderNotice, dispatchRestoreGate]);
 
   /** 分页视图的首次恢复结果；预加载与过期章节已在视图内/此处过滤。 */
-  const handleReaderRestoreResult = useCallback((result: { chapterPath: string; located: boolean }): void => {
-    if (!restoreResultMatches(result.chapterPath)) return;
+  const handleReaderRestoreResult = useCallback((result: {
+    chapterPath: string;
+    located: boolean;
+    ticket: RestoreTicket | null;
+  }): void => {
+    const ticket = result.ticket;
+    if (!ticket || !restoreResultMatches(ticket, result.chapterPath)) return;
     const resolving = restoreGateRef.current?.phase === "resolving";
-    dispatchRestoreGate({ type: "resolved", located: result.located });
+    dispatchRestoreGate({ type: "resolved", ticket, located: result.located });
     if (resolving && !result.located) {
       showReaderNotice("未能定位保存位置，已停留在章节开头；原阅读进度已保留", "warn");
     }
@@ -3656,10 +3668,10 @@ export default function App() {
   }, []);
 
   // ---- 章节状态回调 ----
-  const handleUserReadingPositionChange = useCallback(() => {
+  const handleUserReadingPositionChange = useCallback((ticket?: RestoreTicket | null) => {
     // 只有宿主实际用户位移才解除失败保护，重排和采样变化不能代替用户输入。
     suppressShelfProgressRef.current = false;
-    dispatchRestoreGate({ type: "user-position-committed" });
+    if (ticket) dispatchRestoreGate({ type: "user-position-committed", ticket });
   }, [dispatchRestoreGate]);
 
   const onPageState = useCallback((s: ChapterState) => {
@@ -3702,13 +3714,15 @@ export default function App() {
     }
   }, [dispatchScrub]);
 
-  const handleReaderDisplayReady = useCallback(() => {
+  const handleReaderDisplayReady = useCallback((ticket?: RestoreTicket | null) => {
     // 连续视图失败走 onNavigationUnresolved；能走到 display-ready 即目标已提交。
     // 分页视图由 onRestoreResult 结算，display-ready 不能解除失败保护。
-    if (readingModeRef.current === "scroll" && !bookRef.current?.fixedLayout) {
-      dispatchRestoreGate({ type: "resolved", located: true });
+    if (ticket) {
+      if (readingModeRef.current === "scroll" && !bookRef.current?.fixedLayout) {
+        dispatchRestoreGate({ type: "resolved", ticket, located: true });
+      }
+      dispatchRestoreGate({ type: "display-ready", ticket });
     }
-    dispatchRestoreGate({ type: "display-ready" });
     navigationPendingRef.current = false;
     historyCaptureAllowedRef.current = true;
     readerDisplayReadyRef.current = true;
@@ -3806,6 +3820,7 @@ export default function App() {
     // Future chapter changes are ordinary navigation, not another attempt to
     // apply this opening/history restore.
     setInitialAnchor(null);
+    setInitialRestoreTicket(null);
     setInitialPage(0);
     // Display-ready flips a state gate; the following render runs the normal
     // progress effect with the newest derived percentage and anchor.
@@ -6598,6 +6613,7 @@ export default function App() {
                   initialAnchor={initialAnchor}
                   initialPage={initialPage}
                   initialAlignment={initialAlignment}
+                  restoreTicket={initialRestoreTicket}
                   startAtEnd={startAtEnd}
                   preciseTarget={preciseTarget}
                   onPreciseNavigationStatus={handlePreciseNavigationStatus}

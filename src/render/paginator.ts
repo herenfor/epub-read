@@ -246,6 +246,8 @@ export interface LoadOptions {
    * unresolved so the host does not save that start over the original.
    */
   reportRestore?: boolean;
+  /** Immutable restore-request identity carried through this load. */
+  restoreTicket?: RestoreReportTicket | null;
   /** Exact search/note target for cross-chapter jumps; resolved before reveal. */
   preciseNavigation?: PreciseNavigationRequest | null;
   /**
@@ -254,6 +256,21 @@ export interface LoadOptions {
    * treating it as a new navigation.
    */
   preserveSearchHighlight?: SearchHighlightTarget | null;
+}
+
+/** Immutable identity of one host restore request. */
+export interface RestoreReportTicket {
+  readonly session: number;
+  readonly request: number;
+  readonly chapterPath: string;
+}
+
+/** One-shot first-restore report produced by the paginator. */
+export interface RestoreReportResult {
+  readonly located: boolean;
+  readonly ticket: RestoreReportTicket | null;
+  /** Load generation that produced the report; stale loads must not settle a newer request. */
+  readonly loadSeq: number;
 }
 
 /** Synchronous navigation that reuses the currently completed chapter layout. */
@@ -266,6 +283,7 @@ export interface WithinChapterNavigationOptions {
     ratio: number;
     anchorTextOffset: number | null;
     anchorTextSnippet: string | null;
+    mediaAnchor?: MediaReadingAnchor | null;
   } | null;
   /** 纯图片页的媒体身份锚点；连续宿主优先用文本，无文本时使用它。 */
   mediaAnchor?: MediaReadingAnchor | null;
@@ -561,7 +579,7 @@ export function resolveRestoredPage({
   return { page: Math.min(Math.max(0, currentPage), last), consumeFallback: false };
 }
 
-type ResolvedAnchorColumn = { col: number; source: "text" | "legacy" };
+type ResolvedAnchorColumn = { col: number; source: "text" | "legacy" | "media" };
 
 /** 屏号换算：列号减前置空列后除以有效列数（总约定 2）。 */
 export function columnToView(
@@ -2624,8 +2642,15 @@ export class ChapterPaginator {
   /** 本次加载入口携带的不可变锚点副本（滚动入口定位用）。 */
   private pendingRestoreAnchor: ReadingAnchor | null = null;
   /** First-restore report for the current load; null when none is owed. */
-  private restoreReport: { readonly semantic: boolean } | null = null;
-  private restoreResultHandler: ((located: boolean) => void) | null = null;
+  private restoreReport:
+    | { readonly semantic: boolean; readonly ticket: RestoreReportTicket | null; readonly loadSeq: number }
+    | null = null;
+  private restoreResultHandler: ((result: RestoreReportResult) => void) | null = null;
+  /**
+   * Called only after an explicit movement/page-turn command commits a new
+   * position. Presses, previews, reflow and restore do not emit it.
+   */
+  private userCommitHandler: (() => void) | null = null;
   /** 最近一次布局的有效列数（1/2）；窄窗回落结果。 */
   private effectiveColumns: 1 | 2 = 1;
   /** 前置空列数（page-break-before:always 等）；列→屏换算用。 */
@@ -2827,8 +2852,13 @@ export class ChapterPaginator {
 
   /** 宿主接收“落定后跨章”的预约结果（同向第二次命令在去末屏途中到达）。 */
   /** Receives each load's one-shot first-restore outcome (see LoadOptions.reportRestore). */
-  setRestoreResultHandler(handler: ((located: boolean) => void) | null): void {
+  setRestoreResultHandler(handler: ((result: RestoreReportResult) => void) | null): void {
     this.restoreResultHandler = handler;
+  }
+
+  /** Host notification for a successfully committed explicit user page turn. */
+  setUserCommitHandler(handler: (() => void) | null): void {
+    this.userCommitHandler = handler;
   }
 
   /**
@@ -2838,9 +2868,17 @@ export class ChapterPaginator {
    */
   private settleRestoreReport(semanticResolved: boolean): void {
     const report = this.restoreReport;
-    if (!report) return;
+    if (!report || report.loadSeq !== this.loadSeq) return;
     this.restoreReport = null;
-    this.restoreResultHandler?.(!report.semantic || semanticResolved);
+    this.restoreResultHandler?.({
+      located: !report.semantic || semanticResolved,
+      ticket: report.ticket,
+      loadSeq: report.loadSeq,
+    });
+  }
+
+  private notifyUserCommit(): void {
+    this.userCommitHandler?.();
   }
 
   setPageMotionChapterHandler(handler: ((direction: MotionDirection) => void) | null): void {
@@ -3249,6 +3287,8 @@ export class ChapterPaginator {
   private commitPageMotion(page: number): void {
     const motion = this.pageMotion;
     if (!motion || !this.viewer) return;
+    const previousPage = this.metrics.currentPage;
+    const committedNewPosition = page !== previousPage || this.adoptedPageUncommitted;
     motion.driver.holdSettledAt(motion.session.offsetOf(page));
     motion.lease.settled();
     this.pageMotionLivePage = null;
@@ -3256,6 +3296,7 @@ export class ChapterPaginator {
     this.metrics.currentPage = page;
     this.emit(this.readyState(false));
     this.scheduleAnchorSample();
+    if (committedNewPosition) this.notifyUserCommit();
     const pending = this.pageMotionPendingChapter;
     this.pageMotionPendingChapter = null;
     if (pending !== null && (pending === 1 ? page === motion.session.pageCount - 1 : page === 0)) {
@@ -3315,7 +3356,9 @@ export class ChapterPaginator {
     const livePage = this.nativeSnapLivePage;
     this.disarmNativeSnap();
     if (offsets.length === 0) return;
-    if (page !== this.metrics.currentPage || Math.abs(offsets[page] - left) > 0.5) this.setPage(page);
+    if (page !== this.metrics.currentPage || Math.abs(offsets[page] - left) > 0.5) {
+      this.setPage(page, { userInitiated: true });
+    }
     // 途中报告过别的页、最后又落回原页时 setPage 不会再发状态，这里补一次。
     else if (livePage !== null && livePage !== page) this.emit(this.readyState(false));
   }
@@ -3461,8 +3504,15 @@ export class ChapterPaginator {
     if (opts.readingAnchor) {
       preciseAnchor = this.setReadingAnchor(path, opts.readingAnchor);
     }
-    this.restoreReport = opts.reportRestore && !opts.preciseNavigation
-      ? { semantic: hasSemanticRestoreTarget(preciseAnchor) }
+    // Keep the report target/identity in a local until cleanupDoc() has run.
+    // cleanupDoc clears the previous document's report exactly like it clears
+    // pendingRestoreAnchor, so registering before it would erase this request.
+    const restoreReport = opts.reportRestore && !opts.preciseNavigation
+      ? {
+          semantic: hasSemanticRestoreTarget(preciseAnchor),
+          ticket: opts.restoreTicket ?? null,
+          loadSeq: seq,
+        }
       : null;
     this._currentPath = path;
     this.pendingAnchor = opts.anchor;
@@ -3499,6 +3549,7 @@ export class ChapterPaginator {
     // 恢复锚点与页码兜底一样，必须在 cleanupDoc() 之后写入：cleanupDoc 会清空
     // 上一份阅读态，写到它前面会被自己刚做的清理抹掉（滚动模式曾因此永远走页码兜底）。
     this.pendingRestoreAnchor = preciseAnchor ? { ...preciseAnchor } : null;
+    this.restoreReport = restoreReport;
     this.iframe.src = "about:blank";
     // 旧 iframe 已开始卸载后才退还资源持有者：如果这是最后一个持有者，
     // LRU 淘汰不会撤销仍在显示的图片/字体 URL。
@@ -4653,8 +4704,8 @@ export class ChapterPaginator {
     }
   }
 
-  /** 滚动模式下的入口定位：文字锚点 → 内容 y；legacy 元素锚点 → 元素顶边。 */
-  /** Returns whether a semantic target (text/element) was located. */
+  /** 滚动模式下的入口定位：文字锚点 → 媒体锚点 → legacy 元素/页码兜底。 */
+  /** Returns whether a semantic target (text/element/media) was located. */
   private applyScrollRestore(
     fallbackPage: number | null,
     preciseAnchor: ReadingAnchor | null
@@ -4665,6 +4716,7 @@ export class ChapterPaginator {
     const metrics = this.scrollMetrics();
     const inset = Math.round(Math.min(24, Math.max(0, metrics.viewportHeight * 0.04)));
     let rangeTop: number | null = null;
+    let directTop: number | null = null;
     if (preciseAnchor && this.anchorPath === this._currentPath) {
       if (index && preciseAnchor.textOffset !== null) {
         const offset = resolveTextAnchorOffset(index, preciseAnchor);
@@ -4702,8 +4754,29 @@ export class ChapterPaginator {
         const rect = el?.getBoundingClientRect();
         if (rect && Number.isFinite(rect.top)) rangeTop = rect.top + preciseAnchor.ratio * rect.height;
       }
+      if (rangeTop === null && preciseAnchor.mediaAnchor) {
+        const mediaContentY = this.resolveMediaAnchorContentY(preciseAnchor.mediaAnchor);
+        if (mediaContentY !== null) {
+          directTop = Math.max(
+            0,
+            Math.min(scrollMaxTop(metrics), Math.round(mediaContentY - inset)),
+          );
+          this.anchor = {
+            ...preciseAnchor,
+            index: -1,
+            ratio: preciseAnchor.mediaAnchor.ratio,
+            charsRead: 0,
+            totalChars: 0,
+            textOffset: null,
+            textSnippet: null,
+            mediaUnits: this.collectMediaElements().length,
+            mediaAnchor: { ...preciseAnchor.mediaAnchor },
+          };
+          this.anchorPath = this._currentPath;
+        }
+      }
     }
-    if (rangeTop === null && fallbackPage !== null && fallbackPage > 0) {
+    if (rangeTop === null && directTop === null && fallbackPage !== null && fallbackPage > 0) {
       // 页码兜底只在同章内使用：按“可用屏高”近似旧位置。
       const max = scrollMaxTop(metrics);
       const ratio = Math.min(1, fallbackPage / Math.max(1, this.metrics.pageCount - 1));
@@ -4717,13 +4790,15 @@ export class ChapterPaginator {
         metrics,
       });
       viewer.scrollTop = resolved.scrollTop;
+    } else if (directTop !== null) {
+      viewer.scrollTop = directTop;
     } else if (this.pendingStartAtEnd) {
       viewer.scrollTop = scrollMaxTop(metrics);
     } else {
       viewer.scrollTop = 0;
     }
     this.lastScrollTop = viewer.scrollTop;
-    return rangeTop !== null;
+    return rangeTop !== null || directTop !== null;
   }
 
   /** 滚动模式：一帧内的滚动范围换算与进度采样。 */
@@ -6208,6 +6283,7 @@ export class ChapterPaginator {
       viewer.children.length > 0 || (viewer.textContent ?? "").trim().length > 0;
     if (sw <= 0 || !hasContent) {
       this.metrics = { pageCount: 1, currentPage: 0 };
+      this.settleRestoreReport(false);
       this.emit({ status: "ready", pageCount: 1, currentPage: 0, empty: true });
       return true;
     }
@@ -6246,7 +6322,9 @@ export class ChapterPaginator {
       this.pendingAnchor = undefined;
       this.pendingStartAtEnd = false;
       this.pendingRestoreAnchor = null;
-      this.settleRestoreReport(true);
+      // An empty document cannot prove a saved text/media target resolved.
+      // settleRestoreReport(false) still reports success for a no-target start.
+      this.settleRestoreReport(false);
       this.lastScrollTop = viewer.scrollTop;
       this.emit(this.readyState(true));
       return;
@@ -6333,8 +6411,9 @@ export class ChapterPaginator {
     if (layout.empty) {
       this.removeTailSpacer();
       this.metrics = { pageCount: 1, currentPage: 0 };
-      // Nothing to locate in an empty chapter; its start is the position.
-      this.settleRestoreReport(true);
+      // Nothing to locate in an empty chapter; only a request without a
+      // semantic target may treat its start as the successfully located spot.
+      this.settleRestoreReport(false);
       this.emit({
         status: "ready",
         pageCount: 1,
@@ -6372,7 +6451,13 @@ export class ChapterPaginator {
     // progress writes; no layout rule is changed.
     if (resolvedAnchor?.source === "legacy") this.captureAnchor();
     // Only the anchored (load) pass settles the first restore; image reflow passes do not.
-    if (useAnchor) this.settleRestoreReport(resolvedAnchor !== null);
+    // A media anchor is located only after its identity resolved AND the
+    // spread commit succeeded (signature-only evidence is not enough).
+    if (useAnchor) {
+      const located = resolvedAnchor !== null &&
+        (resolvedAnchor.source !== "media" || commitResult.ok);
+      this.settleRestoreReport(located);
+    }
     this.emit(this.readyState(false));
     // 粘性锚点：使用锚点恢复时不重新取样（否则恢复后页心可能是下一段，
     // 反复缩放会逐段漂移）；仅当无锚点（首次加载）时建立
@@ -6824,6 +6909,29 @@ export class ChapterPaginator {
       this.anchor.textOffset = null;
       this.anchor.textSnippet = null;
       this.anchor.charsRead = 0;
+    }
+    // B-155/R4: pure-media anchors resolve by index/tag/signature, not by
+    // treating index=-1 as the chapter start. A zero-height/late image is not
+    // a successful restore; later reflow may still repair the live layout.
+    const mediaAnchor = this.anchor.mediaAnchor;
+    if (mediaAnchor) {
+      const mediaEl = this.resolveMediaAnchorElement(mediaAnchor);
+      const mediaRect = mediaEl?.getBoundingClientRect();
+      if (mediaEl && mediaRect && Number.isFinite(mediaRect.left) && mediaRect.height > 0) {
+        const absX = this.contentX(mediaRect.left);
+        if (this.spreadLayout) {
+          const physical = columnForContentPoint(absX, this.spreadLayout.geometry);
+          return {
+            col: spreadForColumn(this.spreadLayout, physical),
+            source: "media",
+          };
+        }
+        const physical = Math.max(0, Math.floor(absX / this.step));
+        return {
+          col: Math.max(0, columnToView(physical, this.leadingColumns, this.effectiveColumns)),
+          source: "media",
+        };
+      }
     }
     const all = Array.from(viewer.querySelectorAll("*"));
     if (!Number.isSafeInteger(this.anchor.index) || this.anchor.index < 0 || this.anchor.index >= all.length) return null;
@@ -7416,12 +7524,50 @@ export class ChapterPaginator {
         this.syncScrollMetrics(false);
         return true;
       }
+      const mediaAnchor = options.mediaAnchor ?? options.readingAnchor?.mediaAnchor ?? null;
       const adapted = options.readingAnchor ? adaptNavigationAnchor(options.readingAnchor) : null;
-      if (!adapted) return false;
+      const targetAnchor: ReadingAnchor | null = adapted
+        ? { ...adapted, ...(mediaAnchor ? { mediaAnchor } : {}) }
+        : mediaAnchor
+          ? {
+              index: -1,
+              ratio: mediaAnchor.ratio,
+              charsRead: 0,
+              totalChars: 0,
+              textOffset: null,
+              textSnippet: null,
+              mediaAnchor,
+            }
+          : null;
+      if (!targetAnchor) return false;
       const index = this.textIndex ?? this.buildTextIndex(doc, viewer);
       this.textIndex = index;
-      const offset = resolveTextAnchorOffset(index, adapted);
-      if (offset === null) return false;
+      const offset = resolveTextAnchorOffset(index, targetAnchor);
+      if (offset === null) {
+        if (!mediaAnchor) return false;
+        const mediaContentY = this.resolveMediaAnchorContentY(mediaAnchor);
+        if (mediaContentY === null) return false;
+        this.cancelPendingAnchorSample?.();
+        syncFragmentHash(this.iframe.contentWindow, "");
+        this.closeFootnoteForNavigation();
+        this.clearSearchHighlightForDocument();
+        const max = scrollMaxTop(this.scrollMetrics());
+        viewer.scrollTop = Math.round(Math.max(0, Math.min(max, mediaContentY - inset)));
+        this.anchor = {
+          ...targetAnchor,
+          index: -1,
+          ratio: mediaAnchor.ratio,
+          charsRead: 0,
+          totalChars: 0,
+          textOffset: null,
+          textSnippet: null,
+          mediaUnits: this.collectMediaElements().length,
+          mediaAnchor: { ...mediaAnchor },
+        };
+        this.anchorPath = this._currentPath;
+        this.syncScrollMetrics(false);
+        return true;
+      }
       const position = index.positionForOffset(offset);
       if (!position) return false;
       const range = doc.createRange();
@@ -7439,7 +7585,7 @@ export class ChapterPaginator {
       this.clearSearchHighlightForDocument();
       viewer.scrollTop = scrollTop;
       this.anchor = {
-        ...adapted,
+        ...targetAnchor,
         textOffset: offset,
         textSnippet: index.snippetAt(offset),
         charsRead: offset,
@@ -7464,10 +7610,23 @@ export class ChapterPaginator {
         (options.readingAnchor.anchorTextOffset !== null ||
           options.readingAnchor.anchorTextSnippet !== null),
     );
-    const semanticTarget = hasSemanticTextAnchor || Boolean(options.mediaAnchor);
+    const mediaAnchor = options.mediaAnchor ?? options.readingAnchor?.mediaAnchor ?? null;
+    const semanticTarget = hasSemanticTextAnchor || Boolean(mediaAnchor);
     const adapted = options.readingAnchor ? adaptNavigationAnchor(options.readingAnchor) : null;
-    if (adapted) {
-      const candidate: ReadingAnchor = { ...adapted };
+    const candidate: ReadingAnchor | null = adapted
+      ? { ...adapted, ...(mediaAnchor ? { mediaAnchor } : {}) }
+      : mediaAnchor
+        ? {
+            index: -1,
+            ratio: mediaAnchor.ratio,
+            charsRead: 0,
+            totalChars: 0,
+            textOffset: null,
+            textSnippet: null,
+            mediaAnchor,
+          }
+        : null;
+    if (candidate) {
       // Resolve on a temporary candidate. resolveAnchorCol may clear a stale
       // text anchor while attempting legacy fallback; the live anchor is not
       // touched until the result is known to be usable.
@@ -7890,6 +8049,16 @@ export class ChapterPaginator {
     return null;
   }
 
+  /** Resolve a saved media identity without guessing a replacement media. */
+  private resolveMediaAnchorElement(anchor: MediaReadingAnchor): Element | null {
+    const media = this.collectMediaElements();
+    let el: Element | undefined = media[anchor.index];
+    if (!el || el.tagName.toLowerCase() !== anchor.tag || this.mediaSignature(el) !== anchor.signature) {
+      el = media.find((candidate) => this.mediaSignature(candidate) === anchor.signature);
+    }
+    return el ?? null;
+  }
+
   /**
    * 重排补偿：把已保存的媒体锚点解析回同一图内比例的内容纵坐标。
    * 顺序身份与签名都失效（换文档、换图）时返回 null，不猜替代媒体。
@@ -7897,11 +8066,7 @@ export class ChapterPaginator {
   resolveMediaAnchorContentY(anchor: MediaReadingAnchor): number | null {
     const viewer = this.viewer;
     if (!viewer) return null;
-    const media = this.collectMediaElements();
-    let el: Element | undefined = media[anchor.index];
-    if (!el || el.tagName.toLowerCase() !== anchor.tag || this.mediaSignature(el) !== anchor.signature) {
-      el = media.find((candidate) => this.mediaSignature(candidate) === anchor.signature);
-    }
+    const el = this.resolveMediaAnchorElement(anchor);
     if (!el) return null;
     const rect = el.getBoundingClientRect();
     if (rect.height <= 0) return null;
@@ -8004,14 +8169,18 @@ export class ChapterPaginator {
     };
   }
 
-  /** 翻到第 i 页（分页）；滚动模式的命令语义由 scrollByViewport 提供。 */
-  setPage(i: number): void {
+  /**
+   * 翻到第 i 页（分页）；滚动模式的命令语义由 scrollByViewport 提供。
+   * `userInitiated` 只由显式用户命令传入：真实提交后通知宿主，按下/预览/恢复/重排不传。
+   */
+  setPage(i: number, options?: { userInitiated?: boolean }): void {
     if (!this.viewer) return;
     this.haltPageMotion();
     const { pageCount } = this.metrics;
     const target = Math.max(0, Math.min(pageCount - 1, Math.floor(i)));
     if (this.scrollMode) {
       this.scrollByViewport(target > this.metrics.currentPage ? 1 : -1);
+      if (options?.userInitiated) this.notifyUserCommit();
       return;
     }
     if (this.spreadLayout) {
@@ -8023,6 +8192,7 @@ export class ChapterPaginator {
       this.metrics.currentPage = res.page;
       this.emit(this.readyState(false));
       this.scheduleAnchorSample();
+      if (options?.userInitiated) this.notifyUserCommit();
       return;
     }
     const targetScrollLeft = target * this.viewStepPx;
@@ -8034,6 +8204,7 @@ export class ChapterPaginator {
         this.adoptedPageUncommitted = false;
         this.emit(this.readyState(false));
         this.scheduleAnchorSample();
+        if (options?.userInitiated) this.notifyUserCommit();
       }
       return;
     }
@@ -8046,6 +8217,7 @@ export class ChapterPaginator {
     this.emit(this.readyState(false));
     // B-153：普通翻页热路径只登记一次下一帧采样；连续翻页合并为最后一页。
     this.scheduleAnchorSample();
+    if (options?.userInitiated) this.notifyUserCommit();
   }
 
   /**
@@ -8311,6 +8483,7 @@ export class ChapterPaginator {
             ratio: a.ratio,
             anchorTextOffset: a.textOffset,
             anchorTextSnippet: a.textSnippet,
+            mediaAnchor: a.mediaAnchor ?? null,
           }
       : null;
     const adapted = adaptNavigationAnchor(persisted);

@@ -16,18 +16,38 @@ class MockPaginator {
   readyWaiters: Array<(ready: boolean) => void> = [];
   callbacks: unknown[];
   settings: ReaderSettings;
+  loadOptions: {
+    settings?: ReaderSettings;
+    restoreTicket?: { session: number; request: number; chapterPath: string } | null;
+    reportRestore?: boolean;
+    readingAnchor?: unknown;
+  } = {};
+  restoreHandler: ((result: { located: boolean; ticket: { session: number; request: number; chapterPath: string } | null; loadSeq: number }) => void) | null = null;
+  userCommitHandler: (() => void) | null = null;
   constructor(...args: unknown[]) {
     this.settings = args[2] as ReaderSettings;
     this.callbacks = args;
     instances.push(this);
   }
-  load = vi.fn(async (path: string, options: { settings?: ReaderSettings } = {}) => {
+  load = vi.fn(async (path: string, options: {
+    settings?: ReaderSettings;
+    restoreTicket?: { session: number; request: number; chapterPath: string } | null;
+    reportRestore?: boolean;
+    readingAnchor?: unknown;
+  } = {}) => {
     this.path = path;
+    this.loadOptions = options;
     if (options.settings) this.settings = options.settings;
     this.isDisplayReady = false;
     this.state = { status: "loading" };
     (this.callbacks[4] as Function)(this.state);
   });
+  setRestoreResultHandler(handler: typeof this.restoreHandler) {
+    this.restoreHandler = handler;
+  }
+  setUserCommitHandler(handler: typeof this.userCommitHandler) {
+    this.userCommitHandler = handler;
+  }
   loadAndWaitForDisplay = vi.fn(async (path: string) => {
     await this.load(path);
     return new Promise<boolean>((resolve) => { this.complete = () => resolve(true); });
@@ -317,6 +337,52 @@ describe("ReaderView preload settings lifecycle", () => {
     await act(async () => { active.finishEmpty(); });
     expect(props.onDisplayReady).toHaveBeenCalled();
     expect(props.onRequestChapter).not.toHaveBeenCalled();
+  });
+
+  it("把不可变恢复 ticket 传入 load 并原样上报", async () => {
+    const ticket = { session: 7, request: 11, chapterPath: "0.xhtml" };
+    const onRestoreResult = vi.fn();
+    props = {
+      ...props,
+      initialAnchor: {
+        index: -1,
+        ratio: 0.4,
+        anchorTextOffset: 12,
+        anchorTextSnippet: "正文",
+        mediaAnchor: null,
+      },
+      restoreTicket: ticket,
+      onRestoreResult,
+    };
+    await render();
+    const active = instances[0];
+    expect(active.loadOptions.restoreTicket).toEqual(ticket);
+    expect(active.loadOptions.reportRestore).toBe(true);
+
+    active.restoreHandler?.({ located: false, ticket, loadSeq: 1 });
+    await act(async () => {});
+    expect(onRestoreResult).toHaveBeenCalledWith({
+      chapterPath: "0.xhtml",
+      located: false,
+      ticket,
+    });
+  });
+
+  it("只把分页器真实用户提交回调及其来源 ticket 转发给宿主", async () => {
+    const ticket = { session: 8, request: 12, chapterPath: "0.xhtml" };
+    const onUserReadingPositionChange = vi.fn();
+    props = { ...props, restoreTicket: ticket, onUserReadingPositionChange };
+    await render();
+    const active = instances[0];
+    expect(active.loadOptions.restoreTicket).toEqual(ticket);
+    expect(active.userCommitHandler).toBeTypeOf("function");
+
+    await act(async () => { active.userCommitHandler?.(); });
+    expect(onUserReadingPositionChange).toHaveBeenCalledWith(ticket);
+
+    // 普通 ready / display-ready 页号变化不会重新推断成用户提交。
+    await finish(active);
+    expect(onUserReadingPositionChange).toHaveBeenCalledTimes(1);
   });
 
 });

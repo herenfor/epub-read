@@ -26,6 +26,7 @@ import {
   type ReadingAnchor,
   type ReadingAnchorAndContentY,
   type ResolvedContentFraction,
+  type RestoreReportTicket,
 } from "../render/paginator";
 import type { ResourceServer } from "../render/resources";
 import type { ReaderSettings } from "../render/settings";
@@ -90,7 +91,7 @@ export interface ContinuousReaderViewProps {
   userFonts: Array<{ family: string; url: string }>;
   notes: ReaderNoteForPaginator[];
   onPageState(s: ChapterState): void;
-  onDisplayReady(): void;
+  onDisplayReady(ticket: RestoreReportTicket | null): void;
   onRequestChapter(index: number, opts?: { atEnd?: boolean }): void;
   startAtEnd: { nonce: number; atEnd: boolean };
   onIssues(issues: string[]): void;
@@ -112,9 +113,9 @@ export interface ContinuousReaderViewProps {
     exact: boolean;
   }): void;
   /** 语义锚点解析失败时结束 busy 且不冒充成功；reported 表示已发精确状态。 */
-  onNavigationUnresolved?(reported: boolean): void;
+  onNavigationUnresolved?(reported: boolean, ticket: RestoreReportTicket | null): void;
   /** 通知宿主恢复失败定位后的进度保存，不通过采样比例推断用户输入。 */
-  onUserReadingPositionChange?(): void;
+  onUserReadingPositionChange?(ticket: RestoreReportTicket | null): void;
   initialAnchor?: {
     index: number;
     ratio: number;
@@ -124,6 +125,8 @@ export interface ContinuousReaderViewProps {
     mediaAnchor?: MediaReadingAnchor | null;
   } | null;
   initialPage?: number | null;
+  /** 本次打开/恢复的不可变身份；没有显式恢复时为 null。 */
+  restoreTicket?: RestoreReportTicket | null;
   /** 连续模式恢复初始对齐：reading-line 对齐到 20% 阅读线（书签恢复专用），context 对齐到顶部微小 inset（默认） */
   initialAlignment?: "reading-line" | "context";
   /** 视口上方约 20% 阅读线采样观察到的章节变化；只更新状态，不触发重载 */
@@ -314,6 +317,8 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
     onNavigationUnresolvedRef.current = props.onNavigationUnresolved;
     const onUserReadingPositionChangeRef = useRef(props.onUserReadingPositionChange);
     onUserReadingPositionChangeRef.current = props.onUserReadingPositionChange;
+    const restoreTicketRef = useRef<RestoreReportTicket | null>(props.restoreTicket ?? null);
+    if (props.restoreTicket) restoreTicketRef.current = props.restoreTicket;
     const [viewportHeight, setViewportHeight] = useState(600);
     // 宿主宽度只用于识别“需要重排的尺寸变化”，iframe 宽度仍是容器的 100%
     const [viewportWidth, setViewportWidth] = useState(0);
@@ -821,7 +826,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
         const movedByUser = userScroll && Math.abs(S - previousS) > 0.5;
         if (movedByUser) {
           readingPositionRef.current = releaseExplicitPosition(readingPositionRef.current);
-          onUserReadingPositionChangeRef.current?.();
+          onUserReadingPositionChangeRef.current?.(restoreTicketRef.current);
           for (const slot of slotsRef.current.values()) {
             slot.paginator.closeForNavigation();
           }
@@ -1072,7 +1077,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
       } else if (ticket.target.kind === "content-fraction") {
         props.onContentFractionFailed?.(ticket.target.token);
       }
-      onNavigationUnresolvedRef.current?.(reported);
+      onNavigationUnresolvedRef.current?.(reported, restoreTicketRef.current);
     };
 
     /**
@@ -1632,7 +1637,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
           // 再报告 settled；没有待处理导航才走普通 ready 发布。
           const settled = resolvePendingNavigationRef.current?.(key) === true;
           if (!settled && !pendingNavigationFailureRef.current &&
-              !pendingNavigationRef.current?.current()) onDisplayReady?.();
+              !pendingNavigationRef.current?.current()) onDisplayReady?.(restoreTicketRef.current);
           pendingNavigationFailureRef.current = false;
         }
         // 首章就绪后同步一次可见章节状态，否则状态栏会一直停在“加载中…”
@@ -2396,7 +2401,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
                 props.onFootnote,
                 props.onFootnoteClose,
                 props.onExternalLink,
-                props.onDisplayReady
+                () => props.onDisplayReady?.(restoreTicketRef.current)
               );
               auxPaginatorRef.current = paginator;
               const latestProjection = projectionReloadCoordinatorRef.current?.current();
