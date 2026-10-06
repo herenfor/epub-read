@@ -1050,6 +1050,13 @@ impl PortableStore {
         };
         let mut created_folders = 0usize;
         for create in creates {
+            // A concurrent writer may have created or tombstoned the UUID
+            // after the observation.  An existing active folder is reused; a
+            // tombstone is never revived and must not be passed to
+            // `CreateFolder`.
+            if envelope.state.folders.contains_key(&create.folder_id) {
+                continue;
+            }
             let needed = moves_by_folder
                 .iter()
                 .any(|(folder_id, _)| folder_id == &create.folder_id);
