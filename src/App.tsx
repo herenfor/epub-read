@@ -843,6 +843,14 @@ export default function App() {
   const contentAxisRef = useRef<ContentAxis | null>(null);
   const scrubSessionRef = useRef(0);
   const scrubRequestIdRef = useRef(0);
+  /**
+   * 分页模式进度条跨章：先换章，目标章显示就绪后再按章内比例定位一次。
+   * 一次性；就绪的不是目标章（期间又跳到别处）则丢弃。
+   */
+  const pendingChapterSeekRef = useRef<{
+    target: { key: string; spineIndex: number; fraction: number };
+    token: ScrubToken;
+  } | null>(null);
   const [scrubUiState, setScrubUiState] = useState<ScrubUiState>(() => initialScrubUi(0));
   const scrubUiStateRef = useRef(scrubUiState);
   scrubUiStateRef.current = scrubUiState;
@@ -3532,6 +3540,12 @@ export default function App() {
     setReaderDisplayReady(true);
     setSearchNavigationBusy(false);
     setInitialAlignment("context");
+    const pendingSeek = pendingChapterSeekRef.current;
+    pendingChapterSeekRef.current = null;
+    if (pendingSeek && pendingSeek.target.spineIndex === spineIndexRef.current) {
+      // setPage 同步发布页态，下面读到的就是定位后的状态。
+      readerRef.current?.seekContentFraction?.(pendingSeek.target, pendingSeek.token);
+    }
     const state = chapterStateRef.current;
     const readingAnchor = readerRef.current?.getReadingAnchor();
     const currentBook = bookRef.current;
@@ -3880,7 +3894,13 @@ export default function App() {
           } else {
             const currentBook = bookRef.current;
             const path = currentBook ? spineItemPath(currentBook, target.spineIndex) : undefined;
-            if (path) handleTocNavigate(path);
+            if (path) {
+              pendingChapterSeekRef.current = {
+                target: { key: target.key, spineIndex: target.spineIndex, fraction: target.fraction },
+                token,
+              };
+              handleTocNavigate(path);
+            }
           }
           dispatchScrub({
             type: "settled",
