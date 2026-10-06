@@ -3,7 +3,9 @@ import { ScopedProgressWriter, ShelfProgressWriter } from "./progressWriter";
 import type { ProgressLease } from "./portableState/ownedProgressSessions";
 import { LocalProgressCheckpoints, type LocalProgressCheckpoint } from "./localProgressCheckpoint";
 import {
+  openingBaselinePct,
   planCheckpointOpen,
+  sameCheckpointValue,
   stageCheckpointSample,
   persistCheckpointSample,
   ProgressWriteUnconfirmed,
@@ -244,6 +246,7 @@ type RepairPatch = {
   page: number;
   lastReadAtMs: number;
   chapterPath?: string | null;
+  progressPct?: number;
 };
 
 function memoryCheckpoints() {
@@ -337,6 +340,54 @@ describe("progress lifecycle repair", () => {
       async () => ({ status: "saved", entry: { ok: true }, shownStamp: stamp }),
     );
     expect(checkpoints.peek("book")?.checkpointId).toBe(newer.checkpointId);
+  });
+
+  it("gives a same-position percent fix its own checkpoint so the old ack cannot delete it", async () => {
+    const { checkpoints } = memoryCheckpoints();
+    const zero = stageCheckpointSample(checkpoints, "book", stamp, { page: 9, lastReadAtMs: 1, chapterPath: "a.xhtml", progressPct: 0 });
+    const fixed = stageCheckpointSample(checkpoints, "book", stamp, { page: 9, lastReadAtMs: 2, chapterPath: "a.xhtml", progressPct: 42 });
+    expect(fixed.checkpointId).not.toBe(zero.checkpointId);
+    expect(checkpoints.peek("book")?.patch.progressPct).toBe(42);
+    // Only lastReadAtMs changed: still the same record.
+    const touched = stageCheckpointSample(checkpoints, "book", stamp, { page: 9, lastReadAtMs: 3, chapterPath: "a.xhtml", progressPct: 42 });
+    expect(touched.checkpointId).toBe(fixed.checkpointId);
+
+    const saved = async () => ({ status: "saved" as const, entry: { ok: true }, shownStamp: stamp });
+    await persistCheckpointSample(checkpoints, "book", zero, saved);
+    expect(checkpoints.peek("book")?.checkpointId).toBe(fixed.checkpointId);
+    await persistCheckpointSample(checkpoints, "book", fixed, saved);
+    expect(checkpoints.peek("book")).toBeNull();
+  });
+
+  it("does not treat a stored same-locator value with another percent as saved", () => {
+    const locator = {
+      locatorVersion: 1 as const,
+      chapterPath: "a.xhtml",
+      target: { kind: "text" as const, textProfile: "visible-codepoints-no-whitespace-v1" as const, offset: 120, snippet: "abc" },
+    };
+    const value = (progressPctHint: number) => ({ locator, progressPctHint }) as Parameters<typeof sameCheckpointValue>[0];
+    expect(sameCheckpointValue(value(42), value(42))).toBe(true);
+    expect(sameCheckpointValue(value(42), value(0))).toBe(false);
+
+    const { checkpoints } = memoryCheckpoints();
+    const checkpoint = checkpoints.put("book", stamp, { page: 9, lastReadAtMs: 1, chapterPath: "a.xhtml", progressPct: 42 });
+    type V = { stamp: typeof stamp; value: ReturnType<typeof value> };
+    const same = (p: RepairPatch, v: V) => sameCheckpointValue(value(p.progressPct ?? 0), v.value);
+    // Same locator, stale 0%: not use-saved; the valid basis restores the local 42%.
+    expect(planCheckpointOpen(checkpoint, [{ stamp, value: value(0) }], same).kind).toBe("restore-local");
+    expect(planCheckpointOpen(checkpoint, [{ stamp, value: value(42) }], same).kind).toBe("use-saved");
+    expect(planCheckpointOpen(
+      checkpoint,
+      [{ stamp, value: value(0) }, { stamp: { deviceId: "other", counter: 2 }, value: value(42) }],
+      same,
+    ).kind).toBe("choose");
+  });
+
+  it("opens a restored local checkpoint with its own percent, not the stored 0%", () => {
+    expect(openingBaselinePct({ progressPct: 42 }, 0, true, 0)).toBe(42);
+    expect(openingBaselinePct(null, 37, true, 0)).toBe(37);
+    expect(openingBaselinePct(null, undefined, true, 12)).toBe(12);
+    expect(openingBaselinePct(null, 37, false, 12)).toBe(12);
   });
 
   it("retains the latest failed lane sample only for explicit handoff", async () => {

@@ -1,3 +1,4 @@
+import type { Locator, ProgressValue } from "../core/portableState/portable-state-types";
 import type { LocalProgressCheckpoint, LocalProgressCheckpoints } from "./localProgressCheckpoint";
 
 type Stamp = NonNullable<LocalProgressCheckpoint<unknown>["shownStamp"]>;
@@ -12,12 +13,13 @@ export type CheckpointOpenPlan<P, V> =
 export function planCheckpointOpen<P, V extends Stamped>(
   checkpoint: LocalProgressCheckpoint<P>,
   currentVersions: readonly V[],
-  sameLocation: (patch: P, version: V) => boolean,
+  sameValue: (patch: P, version: V) => boolean,
 ): CheckpointOpenPlan<P, V> {
   // Do not bypass the existing multiple-version choice, even if one branch matches.
   if (currentVersions.length > 1) return { kind: "choose", checkpoint };
   const current = currentVersions[0];
-  if (current && sameLocation(checkpoint.patch, current)) {
+  // Only an identical saved value (position and percent) proves the sample was persisted.
+  if (current && sameValue(checkpoint.patch, current)) {
     return { kind: "use-saved", version: current, checkpointId: checkpoint.checkpointId };
   }
   const shown = checkpoint.shownStamp;
@@ -57,6 +59,9 @@ function sameStableProgressPatch<P>(left: P, right: P): boolean {
     "anchorRatio",
     "anchorTextOffset",
     "anchorTextSnippet",
+    // A percent correction at the same position is a new sample: it needs its
+    // own checkpoint ID so a late ack of the old value cannot delete it.
+    "progressPct",
   ] as const;
   for (const field of stableFields) {
     if (leftRecord[field] !== rightRecord[field]) return false;
@@ -73,7 +78,7 @@ export function stageCheckpointSample<P>(
 ): CheckpointedSample<P> {
   const existing = checkpoints.peek(bookHash);
   if (existing && sameStableProgressPatch(existing.patch, patch)) {
-    // Same stable position: keep the existing recovery record/ID. The writer
+    // Same stable value: keep the existing recovery record/ID. The writer
     // will still persist the freshest patch but must not create a second record.
     return { patch, checkpointId: existing.checkpointId };
   }
@@ -108,4 +113,77 @@ export async function persistCheckpointSample<P, E>(
     /* retain */
   }
   return result;
+}
+
+function sameMediaAnchorFields(left: unknown, right: unknown): boolean {
+  if (left === null || left === undefined) return right === null || right === undefined;
+  if (right === null || right === undefined || typeof left !== "object" || typeof right !== "object") {
+    return false;
+  }
+  const a = left as { index?: unknown; tag?: unknown; signature?: unknown; ratio?: unknown };
+  const b = right as { index?: unknown; tag?: unknown; signature?: unknown; ratio?: unknown };
+  return a.index === b.index && a.tag === b.tag && a.signature === b.signature && a.ratio === b.ratio;
+}
+
+export function sameLocator(left: Locator | null | undefined, right: Locator | null | undefined): boolean {
+  if (!left || !right) return left === right;
+  if (left.locatorVersion !== right.locatorVersion) return false;
+  if (left.locatorVersion === 1 && right.locatorVersion === 1) {
+    if (left.chapterPath !== right.chapterPath) return false;
+    if (left.target.kind !== right.target.kind) return false;
+    if (left.target.kind === "chapter-start") return true;
+    if (left.target.kind === "text" && right.target.kind === "text") {
+      return (
+        left.target.textProfile === right.target.textProfile &&
+        left.target.offset === right.target.offset &&
+        left.target.snippet === right.target.snippet
+      );
+    }
+    if (left.target.kind === "media" && right.target.kind === "media") {
+      return (
+        left.target.signature === right.target.signature &&
+        left.target.indexHint === right.target.indexHint &&
+        left.target.tag === right.target.tag &&
+        left.target.ratio === right.target.ratio
+      );
+    }
+    return false;
+  }
+  if (left.locatorVersion === 0 && right.locatorVersion === 0) {
+    if (left.spineIndex !== right.spineIndex) return false;
+    if (left.mediaAnchor || right.mediaAnchor) {
+      return sameMediaAnchorFields(left.mediaAnchor, right.mediaAnchor);
+    }
+    return (
+      left.pageHint === right.pageHint &&
+      left.anchorTextOffset === right.anchorTextOffset &&
+      (left.anchorTextSnippet ?? null) === (right.anchorTextSnippet ?? null)
+    );
+  }
+  return false;
+}
+
+/**
+ * The checkpoint is already saved only when the stored value matches both its
+ * locator and its percent; a same-position percent fix must not be acknowledged.
+ */
+export function sameCheckpointValue(pending: ProgressValue, saved: ProgressValue): boolean {
+  if (!pending || !saved) return pending === null && saved === null;
+  return sameLocator(pending.locator, saved.locator)
+    && pending.progressPctHint === saved.progressPctHint;
+}
+
+/**
+ * Opening baseline percent. Restoring a local checkpoint uses that sample's
+ * percent, so an early sample (chapter weights not ready yet) cannot fall back
+ * to an older stored 0% and overwrite the recovery candidate.
+ */
+export function openingBaselinePct(
+  restoring: { readonly progressPct: number } | null,
+  chosenVersionHint: number | null | undefined,
+  hasChosenVersion: boolean,
+  entryPct: number,
+): number {
+  if (restoring) return restoring.progressPct;
+  return hasChosenVersion ? (chosenVersionHint ?? entryPct) : entryPct;
 }

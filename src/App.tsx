@@ -157,7 +157,9 @@ import { ScopedProgressWriter } from "./ui/progressWriter";
 import { ProgressRuntimeGate, type ProgressRuntimeStatus } from "./ui/portableState/progressRuntimeGate";
 import { LocalProgressCheckpoints, type LocalProgressCheckpoint } from "./ui/localProgressCheckpoint";
 import {
+  openingBaselinePct,
   planCheckpointOpen,
+  sameCheckpointValue,
   stageCheckpointSample,
   persistCheckpointSample,
   type CheckpointedSample,
@@ -492,61 +494,11 @@ function parseLocalProgressCheckpoint(value: unknown): LocalProgressCheckpoint<S
   };
 }
 
-function sameMediaAnchorFields(left: unknown, right: unknown): boolean {
-  if (left === null || left === undefined) return right === null || right === undefined;
-  if (right === null || right === undefined || typeof left !== "object" || typeof right !== "object") {
-    return false;
-  }
-  const a = left as { index?: unknown; tag?: unknown; signature?: unknown; ratio?: unknown };
-  const b = right as { index?: unknown; tag?: unknown; signature?: unknown; ratio?: unknown };
-  return a.index === b.index && a.tag === b.tag && a.signature === b.signature && a.ratio === b.ratio;
-}
-
-function sameLocator(left: Locator | null | undefined, right: Locator | null | undefined): boolean {
-  if (!left || !right) return left === right;
-  if (left.locatorVersion !== right.locatorVersion) return false;
-  if (left.locatorVersion === 1 && right.locatorVersion === 1) {
-    if (left.chapterPath !== right.chapterPath) return false;
-    if (left.target.kind !== right.target.kind) return false;
-    if (left.target.kind === "chapter-start") return true;
-    if (left.target.kind === "text" && right.target.kind === "text") {
-      return (
-        left.target.textProfile === right.target.textProfile &&
-        left.target.offset === right.target.offset &&
-        left.target.snippet === right.target.snippet
-      );
-    }
-    if (left.target.kind === "media" && right.target.kind === "media") {
-      return (
-        left.target.signature === right.target.signature &&
-        left.target.indexHint === right.target.indexHint &&
-        left.target.tag === right.target.tag &&
-        left.target.ratio === right.target.ratio
-      );
-    }
-    return false;
-  }
-  if (left.locatorVersion === 0 && right.locatorVersion === 0) {
-    if (left.spineIndex !== right.spineIndex) return false;
-    if (left.mediaAnchor || right.mediaAnchor) {
-      return sameMediaAnchorFields(left.mediaAnchor, right.mediaAnchor);
-    }
-    return (
-      left.pageHint === right.pageHint &&
-      left.anchorTextOffset === right.anchorTextOffset &&
-      (left.anchorTextSnippet ?? null) === (right.anchorTextSnippet ?? null)
-    );
-  }
-  return false;
-}
-
-function sameCheckpointLocation(
+function sameCheckpointPatchValue(
   patch: ShelfProgressPatch,
   version: Version<ProgressValue>,
 ): boolean {
-  const patchValue = progressValueFromPatch(patch);
-  if (!patchValue || !version.value) return patchValue === null && version.value === null;
-  return sameLocator(patchValue.locator, version.value.locator);
+  return sameCheckpointValue(progressValueFromPatch(patch), version.value);
 }
 
 function mergeNoteProjection(entry: ShelfEntry, written: ShelfEntry, fallback: ReaderNote[]): ShelfEntry {
@@ -3048,7 +3000,7 @@ export default function App() {
             setShelfNotice({ kind: "warn", text: `本机未确认阅读位置读取失败：${String(error)}` });
           }
           if (checkpointForOpen) {
-            const plan = planCheckpointOpen(checkpointForOpen, progressVersions, sameCheckpointLocation);
+            const plan = planCheckpointOpen(checkpointForOpen, progressVersions, sameCheckpointPatchValue);
             if (plan.kind === "use-saved") {
               chosenProgressVersion = plan.version;
               progressSelection = { kind: "chosen", stamp: plan.version.stamp };
@@ -3393,9 +3345,12 @@ export default function App() {
           saved,
           id,
           entry.contentHash ?? id,
-          chosenProgressVersion
-            ? (projectProgressVersion(chosenProgressVersion).value?.progressPctHint ?? entry.progressPct)
-            : entry.progressPct,
+          openingBaselinePct(
+            checkpointPatchToRestore?.patch ?? null,
+            chosenProgressVersion ? projectProgressVersion(chosenProgressVersion).value?.progressPctHint : undefined,
+            chosenProgressVersion !== null,
+            entry.progressPct,
+          ),
         );
         if (candidateLease) {
           activeProgressLeaseRef.current = candidateLease;
