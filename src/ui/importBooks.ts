@@ -12,6 +12,8 @@ export interface ImportSummary {
   importedCount: number;
   duplicateTitles: string[];
   failed: string[];
+  /** Native duplicate imports refresh the local source binding. */
+  refreshedCount?: number;
 }
 
 export interface DuplicateLookupContext {
@@ -75,12 +77,16 @@ export function truncateImportTitle(
 
 export function formatImportNotice(summary: ImportSummary): ImportNotice {
   const { sourceCount, importedCount, duplicateTitles, failed } = summary;
+  const refreshedCount = summary.refreshedCount ?? 0;
   if (
     sourceCount === 1 &&
     importedCount === 0 &&
     duplicateTitles.length === 1 &&
     failed.length === 0
   ) {
+    if (refreshedCount === 1) {
+      return { kind: "ok", text: "此书已在书架，已更新本机源文件绑定；原有进度和笔记已保留" };
+    }
     return { kind: "error", text: "此书已经被导入过了哦" };
   }
 
@@ -92,6 +98,7 @@ export function formatImportNotice(summary: ImportSummary): ImportNotice {
       .join("、");
     text += `；重复 ${duplicateTitles.length} 本：${names}`;
     if (duplicateTitles.length > 2) text += "等书";
+    if (refreshedCount > 0) text += `（已更新 ${refreshedCount} 本源文件绑定，保留原有进度和笔记）`;
   }
   if (failed.length > 0) {
     text += `；失败 ${failed.length} 本（${failed.join("；")}）`;
