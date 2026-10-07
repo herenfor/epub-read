@@ -193,7 +193,8 @@ import {
   type ChapterCountCollection,
 } from "./ui/chapterCounts";
 import { createChapterCountJob } from "./ui/chapterCountJob";
-import { readCachedChapterCounts, writeChapterCountCache } from "./ui/chapterCountCache";
+import { readCachedChapterCounts, readKnownChapterProgressKeys, writeChapterCountCache } from "./ui/chapterCountCache";
+import { projectShelfProgressReadiness } from "./ui/shelfProgressDisplay";
 import {
   archiveRecordsForBackend,
   buildLibraryArchiveWithIssues,
@@ -832,6 +833,7 @@ export default function App() {
     server: ResourceServer;
     bookKey: string;
     countCacheKey: string | null;
+    structuralCounts: ChapterCountCollection;
   } | null>(null);
   const baselineProgressPctRef = useRef(0);
   const chapterCountJobRef = useRef<{ cancel(): void } | null>(null);
@@ -1642,13 +1644,23 @@ export default function App() {
 
   const applyCountBatch = useCallback(
     (generation: number, values: readonly (readonly [number, number])[]): void => {
+      const active = activeSessionRef.current;
+      if (!active || active.generation !== generation) return;
       let next = chapterCountsRef.current;
       let changed = false;
       for (const [index, value] of values) {
+        // A visible chapter's measured weight wins in memory, but its
+        // structural estimate is still needed for the next open's cache.
+        active.structuralCounts = applyChapterCount(
+          active.structuralCounts, generation, index, value, "estimated",
+        ).collection;
         const result = applyChapterCount(next, generation, index, value, "estimated");
         if (!result.accepted) continue;
         next = result.collection;
         changed = true;
+      }
+      if (summarizeLinearCounts(active.structuralCounts, 0).complete) {
+        writeChapterCountCache(active.countCacheKey, next, active.structuralCounts);
       }
       if (!changed) return;
       chapterCountsRef.current = next;
@@ -1689,6 +1701,7 @@ export default function App() {
         server: srv,
         bookKey: key,
         countCacheKey,
+        structuralCounts: createChapterCountCollection(generation, b.spine.map((item) => item.linear)),
       };
       const linearMask = b.spine.map((item) => item.linear);
       let counts = createChapterCountCollection(
@@ -1699,6 +1712,7 @@ export default function App() {
       for (const [index, value] of cached) {
         counts = applyChapterCount(counts, generation, index, value, "estimated").collection;
       }
+      activeSessionRef.current.structuralCounts = counts;
       chapterCountsRef.current = counts;
       setChapterCountsState(chapterCountsRef.current);
       baselineProgressPctRef.current =
@@ -3646,7 +3660,7 @@ export default function App() {
         applyCountBatch(active.generation, values);
       },
       onCount: (index, value) => {
-        applyCount(active.generation, index, value, "estimated");
+        applyCountBatch(active.generation, [[index, value]]);
       },
       onError: (index) => applyCountError(active.generation, index),
       onIssue: (message) => {
@@ -3660,7 +3674,7 @@ export default function App() {
       job.cancel();
       if (chapterCountJobRef.current === job) chapterCountJobRef.current = null;
     };
-  }, [view, book, server, bookKey, restoreSettled, applyCount, applyCountBatch, applyCountError]);
+  }, [view, book, server, bookKey, restoreSettled, applyCountBatch, applyCountError]);
 
   // 统一固定内容轴：在本次书籍会话第一次得到完整有效 linear 章节权重时冻结一份轴
   useEffect(() => {
@@ -5209,6 +5223,12 @@ export default function App() {
   }, [fontSettingsOpen, handleImportFontPaths, handleImportSources]);
 
   // ---- 派生 ----
+  const shelfDisplayEntries = useMemo(
+    () => view === "shelf"
+      ? projectShelfProgressReadiness(shelfEntries, readKnownChapterProgressKeys())
+      : shelfEntries,
+    [view, shelfEntries],
+  );
   const ready = phase.phase === "ready" && book !== null && server !== null;
   // 搜索与“更多”关闭后保留一个退场动画时长再卸载，与其他菜单同速。
   const searchPresence = useExitPresence(searchOpen);
@@ -5395,7 +5415,7 @@ export default function App() {
   const persistChapterCountCache = useCallback(() => {
     const active = activeSessionRef.current;
     if (!active?.countCacheKey) return;
-    writeChapterCountCache(active.countCacheKey, chapterCountsRef.current);
+    writeChapterCountCache(active.countCacheKey, chapterCountsRef.current, active.structuralCounts);
   }, []);
   useEffect(() => {
     if (lastCountProgressSignatureRef.current === countProgressSignature) return;
@@ -6345,7 +6365,7 @@ export default function App() {
             )}
             <ShelfView
               compact={phoneChrome}
-              entries={shelfEntries}
+              entries={shelfDisplayEntries}
               organization={organization}
               scope={shelfScope}
               onScopeChange={setShelfScope}

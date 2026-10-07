@@ -1,4 +1,4 @@
-import type { ChapterCountCollection } from "./chapterCounts";
+import { summarizeLinearCounts, type ChapterCountCollection } from "./chapterCounts";
 
 const CACHE_KEY = "epub-reader-chapter-counts-v1";
 const CACHE_VERSION = 1;
@@ -9,6 +9,8 @@ interface CacheRecord {
   linear: boolean[];
   counts: Array<number | null>;
   touchedAt: number;
+  /** Local display metadata; never part of a portable progress record. */
+  progressKnown?: boolean;
 }
 
 interface CacheState {
@@ -49,6 +51,7 @@ function readState(): CacheState {
         linear: [...value.linear],
         counts: [...value.counts],
         touchedAt: typeof value.touchedAt === "number" && Number.isFinite(value.touchedAt) ? value.touchedAt : 0,
+        progressKnown: typeof value.progressKnown === "boolean" ? value.progressKnown : undefined,
       };
     }
     return { version: CACHE_VERSION, entries };
@@ -82,12 +85,27 @@ export function readCachedChapterCounts(
   return result;
 }
 
+/** Read once per shelf projection, rather than parsing storage for every card. */
+export function readKnownChapterProgressKeys(): ReadonlySet<string> {
+  const known = new Set<string>();
+  for (const [key, record] of Object.entries(readState().entries)) {
+    const complete = record.linear.every((linear, index) => !linear || validCount(record.counts[index]));
+    const nonempty = record.linear.some((linear, index) => linear && (record.counts[index] ?? 0) > 0);
+    if (record.progressKnown ?? (complete && nonempty)) known.add(key);
+  }
+  return known;
+}
+
 /**
  * Persist structural estimates only. A measured/error/unknown result must not
  * erase an older structural estimate for the same chapter: it remains useful
  * as a provisional baseline for the next open.
  */
-export function writeChapterCountCache(key: string | null, collection: ChapterCountCollection): void {
+export function writeChapterCountCache(
+  key: string | null,
+  collection: ChapterCountCollection,
+  structural: ChapterCountCollection = collection,
+): void {
   if (!key) return;
   const state = readState();
   const previous = state.entries[key];
@@ -97,17 +115,19 @@ export function writeChapterCountCache(key: string | null, collection: ChapterCo
     previous.counts.length === collection.linear.length &&
     previous.linear.every((value, index) => value === collection.linear[index])
   );
-  const counts: Array<number | null> = collection.counts.map((item, index) => {
+  const counts: Array<number | null> = structural.counts.map((item, index) => {
     if (!collection.linear[index]) return null;
     if (item.source === "estimated" && validCount(item.value)) return item.value;
     return previousMatches && previous?.counts[index] !== null && validCount(previous?.counts[index])
       ? previous.counts[index]
       : null;
   });
+  const summary = summarizeLinearCounts(collection, 0);
   state.entries[key] = {
     linear: [...collection.linear],
     counts,
     touchedAt: Date.now(),
+    progressKnown: summary.complete && summary.total > 0,
   };
   const entries = Object.entries(state.entries)
     .sort(([, a], [, b]) => b.touchedAt - a.touchedAt)
