@@ -1,0 +1,160 @@
+/* 目录导入：外壳与选项沿用 saveFileDialogs.css（save-file-*），这里只补列表/进度。 */
+.folder-import-dialog {
+  width: min(560px, 100%);
+}
+
+.folder-import-status {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.folder-import-hint {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.folder-import-warning {
+  margin: 0;
+  color: #a66300;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.folder-import-groups {
+  display: grid;
+  gap: 8px;
+}
+
+.folder-import-groups-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.folder-import-groups-head .folder-import-hint {
+  margin: 0;
+}
+
+.folder-import-groups ul,
+.folder-import-issues ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.folder-import-groups li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 220px);
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 9px;
+  background: var(--shelf-input-bg);
+}
+
+.folder-import-groups li.is-unresolved {
+  outline: 1px solid color-mix(in srgb, #d18a12 70%, transparent);
+  background: color-mix(in srgb, #d18a12 8%, var(--shelf-input-bg));
+}
+
+.folder-import-group-name {
+  min-width: 0;
+  font-size: 14px;
+}
+
+.folder-import-group-name strong {
+  display: block;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-import-groups select {
+  min-width: 0;
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 8px;
+  border: 1px solid var(--panel-border);
+  border-radius: 9px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+}
+
+.folder-import-more {
+  justify-self: start;
+  min-height: 36px;
+  padding: 6px 14px;
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.folder-import-more:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.folder-import-issues {
+  display: grid;
+  gap: 8px;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.folder-import-issues li {
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: var(--shelf-input-bg);
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.folder-import-progress {
+  display: grid;
+  gap: 8px;
+}
+
+.folder-import-bar {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
+}
+
+.folder-import-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 240ms ease;
+}
+
+@media (max-width: 560px) {
+  .folder-import-groups li {
+    grid-template-columns: 1fr;
+  }
+}
+
+.app[data-touch-ui="true"] .folder-import-groups select,
+.app[data-touch-ui="true"] .folder-import-more {
+  min-height: 44px;
+  font-size: 15px;
+}

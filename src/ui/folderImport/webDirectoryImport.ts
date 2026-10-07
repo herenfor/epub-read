@@ -1,0 +1,430 @@
+import type {
+  DirectoryImportPort,
+  DirectoryImportResult,
+  DirectoryProgress,
+  FolderTarget,
+  ImportCounts,
+  ImportIssue,
+  InputPage,
+  IssuePage,
+  ScanResult,
+} from "../../core/folderImport/contract";
+import {
+  planDirectoryImport,
+  SuccessfulSources,
+  type ImportOptions,
+  type ImportRoot,
+  type ScannedEpub,
+} from "../../core/folderImport/planner";
+import { disposeBook, DrmError, loadBook } from "../../core/book";
+import { findDuplicateEntry, sha256Hex } from "../importBooks";
+import type { ShelfEntry, ShelfStore } from "../shelf";
+import {
+  placementSnapshotOf,
+  type DirectoryPlacementCommitter,
+  type DirectoryPlacementItem,
+} from "./placementBatch";
+
+/**
+ * Public ShelfStore reads/saves plus the REQUIRED atomic placement batch. FI-I
+ * implements `commitDirectoryPlacementBatch` inside one IndexedDB transaction
+ * (see placementBatch.ts); the port never writes placement through separate
+ * applyOrganization calls.
+ */
+export type WebDirectoryImportStore = Pick<
+  ShelfStore,
+  "list" | "save" | "readBook" | "setContentHash" | "getOrganization"
+> & DirectoryPlacementCommitter;
+
+/** A picked directory: the File objects with their webkitRelativePath. */
+export type WebDirectoryPicker = () => Promise<readonly File[] | null>;
+
+export interface WebDirectoryImportOptions {
+  readonly store: WebDirectoryImportStore;
+  /** Defaults to an <input webkitdirectory> picker. */
+  readonly pickDirectory?: WebDirectoryPicker;
+  /** Defaults to crypto.randomUUID. */
+  readonly newId?: () => string;
+  /** Minimum interval between progress events. */
+  readonly progressIntervalMs?: number;
+}
+
+const PAGE_SIZE = 128;
+const ISSUE_PAGE_SIZE = 50;
+/** Books per organization commit; matches the native short-batch bound. */
+const PLACEMENT_BATCH = 64;
+
+/** Modern browsers expose directory selection through webkitdirectory (MDN). */
+export function supportsWebDirectoryPicker(): boolean {
+  return typeof HTMLInputElement !== "undefined" && "webkitdirectory" in HTMLInputElement.prototype;
+}
+
+/** One native directory dialog; resolves null when the user dismisses it. */
+export function pickWebDirectory(): Promise<readonly File[] | null> {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.webkitdirectory = true;
+    input.multiple = true;
+    input.style.display = "none";
+    let settled = false;
+    const finish = (files: readonly File[] | null) => {
+      if (settled) return;
+      settled = true;
+      input.remove();
+      resolve(files);
+    };
+    input.addEventListener("change", () => {
+      const files = input.files ? Array.from(input.files) : [];
+      finish(files.length > 0 ? files : null);
+    });
+    input.addEventListener("cancel", () => finish(null));
+    document.body.appendChild(input);
+    input.click();
+  });
+}
+
+/**
+ * Turn a picked directory listing into scan entries. The first path segment is
+ * the selected root and is dropped; the rest are the real parent segments.
+ * Only .epub candidates take part; real EPUB validity is decided on import.
+ */
+export function scanWebDirectoryFiles(
+  files: readonly File[],
+  rootKey: string,
+): { root: ImportRoot; items: ScannedEpub[]; files: Map<string, File> } {
+  let rootName = "";
+  const items: ScannedEpub[] = [];
+  const byInput = new Map<string, File>();
+  files.forEach((file, index) => {
+    const segments = (file.webkitRelativePath || file.name).split("/").filter((s) => s.length > 0);
+    if (segments.length === 0) return;
+    if (!rootName && segments.length > 1) rootName = segments[0];
+    const fileName = segments[segments.length - 1];
+    if (!fileName.toLowerCase().endsWith(".epub")) return;
+    const inputId = `w${index}`;
+    items.push({
+      inputId,
+      relativeParentSegments: segments.length > 1 ? segments.slice(1, -1) : [],
+      fileName,
+      sizeHint: file.size,
+    });
+    byInput.set(inputId, file);
+  });
+  // Plain Web has no real absolute root identity: every selection gets a new
+  // opaque key, so no cross-session binding is claimed.
+  return { root: { sourceRootKey: rootKey, name: rootName || "导入书籍" }, items, files: byInput };
+}
+
+interface WebJob {
+  readonly root: ImportRoot;
+  readonly items: readonly ScannedEpub[];
+  /** File references stay in this closure, never in React state or storage. */
+  files: Map<string, File> | null;
+  readonly issues: ImportIssue[];
+  running: Promise<DirectoryImportResult> | null;
+  finished: boolean;
+  cancelRequested: boolean;
+  committing: boolean;
+}
+
+function errorText(error: unknown): string {
+  if (error instanceof DrmError) return error.message;
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** Thrown between IO steps once cancel was requested; the item is not accepted. */
+class ImportCancelled extends Error {}
+
+/**
+ * Browser implementation of DirectoryImportPort: one directory dialog, then
+ * one book at a time in planner ordinal order, short placement batches that
+ * the store commits atomically with the conditional-placement rule.
+ */
+export function createWebDirectoryImportPort(options: WebDirectoryImportOptions): DirectoryImportPort {
+  const store = options.store;
+  const pick = options.pickDirectory ?? pickWebDirectory;
+  const newId = options.newId ?? (() => crypto.randomUUID());
+  const interval = options.progressIntervalMs ?? 250;
+  const jobs = new Map<string, WebJob>();
+
+  const jobFor = (jobId: string): WebJob => {
+    const job = jobs.get(jobId);
+    if (!job) throw new Error("导入作业已结束或不存在");
+    return job;
+  };
+
+  async function run(
+    jobId: string,
+    job: WebJob,
+    importOptions: ImportOptions,
+    targets: readonly FolderTarget[],
+    onProgress: (event: DirectoryProgress) => void,
+  ): Promise<DirectoryImportResult> {
+    const plan = planDirectoryImport(job.root, job.items, importOptions);
+    const targetByGroup = new Map(targets.map((target) => [target.groupKey, target]));
+    if (targets.length !== plan.groups.length || plan.groups.some((group) => !targetByGroup.has(group.groupKey))) {
+      throw new Error("导入目标与预览分组不一致，请重新预览");
+    }
+    const counts = {
+      completed: 0, imported: 0, duplicates: 0, failed: 0, placementSkipped: 0, createdFolders: 0,
+    };
+    const snapshotCounts = (): ImportCounts => ({ ...counts });
+    let lastEmit = 0;
+    let phase: DirectoryProgress["phase"] = "preparing";
+    const emit = (force = false) => {
+      const now = Date.now();
+      if (!force && now - lastEmit < interval) return;
+      lastEmit = now;
+      onProgress({ jobId, phase, scannedInputs: job.items.length, totalInputs: job.items.length, counts: snapshotCounts() });
+    };
+    const issue = (inputId: string, kind: ImportIssue["kind"], message: string) => {
+      job.issues.push({ inputId, kind, message });
+    };
+
+    // Same duplicate lookup state as the single-file Web import.
+    const entries = await store.list();
+    const contentHashById = new Map<string, string>();
+    const entryByContentHash = new Map<string, ShelfEntry>();
+    for (const entry of entries) {
+      if (!entry.contentHash) continue;
+      contentHashById.set(entry.id, entry.contentHash);
+      entryByContentHash.set(entry.contentHash, entry);
+    }
+    // Only for the observed snapshot of newly seen hashes; never authorizes a move.
+    let organization = await store.getOrganization();
+    const successful = new SuccessfulSources();
+    const winnerGroup = new Map<string, string | null>();
+    const createdTargets = new Set<string>();
+    let pending: DirectoryPlacementItem[] = [];
+    /** Throw at an IO boundary once cancel was requested: the item is not accepted. */
+    const checkCancel = () => {
+      if (job.cancelRequested) throw new ImportCancelled();
+    };
+
+    const flush = async () => {
+      if (pending.length === 0) return;
+      const batch = pending;
+      pending = [];
+      phase = "committing";
+      job.committing = true;
+      emit(true);
+      try {
+        // One store transaction re-checks every item and commits creates+moves together.
+        const committed = await store.commitDirectoryPlacementBatch({
+          policy: importOptions.existingPlacement,
+          items: batch,
+        });
+        for (const outcome of committed.outcomes) {
+          const decision = outcome.decision;
+          if (decision.kind !== "skipped") continue;
+          counts.placementSkipped++;
+          issue(outcome.inputId, decision.reason, decision.reason === "target-deleted"
+            ? "目标文件夹已被删除，书已导入但未归档"
+            : "导入期间这本书的分类发生变化，已保留新的分类");
+        }
+        for (const folderId of committed.createdFolderIds) {
+          if (createdTargets.has(folderId)) continue;
+          createdTargets.add(folderId);
+          counts.createdFolders++;
+        }
+        organization = committed.organization;
+      } catch (error) {
+        // The transaction committed nothing; books stay imported but unplaced.
+        for (const item of batch) issue(item.inputId, "placement-changed", `书已导入，归档失败：${errorText(error)}`);
+        counts.placementSkipped += batch.length;
+      } finally {
+        job.committing = false;
+        phase = "preparing";
+      }
+    };
+
+    for (const input of plan.inputs) {
+      if (job.cancelRequested) break;
+      const file = job.files?.get(input.inputId);
+      const target = input.groupKey === null ? null : targetByGroup.get(input.groupKey)!;
+      if (!file) {
+        counts.completed++;
+        counts.failed++;
+        issue(input.inputId, "source-failed", "源文件已不可用");
+        emit();
+        continue;
+      }
+      try {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        checkCancel();
+        const hash = await sha256Hex(bytes);
+        checkCancel();
+        const winner = successful.winner(hash);
+        if (winner !== undefined) {
+          counts.completed++;
+          counts.duplicates++;
+          if (winnerGroup.get(hash) !== input.groupKey) {
+            issue(input.inputId, "multiple-sources", `同一本书在多个目录出现，已采用排在前面的来源（${file.name}）`);
+          }
+          emit();
+          continue;
+        }
+        const duplicate = await findDuplicateEntry({
+          incomingHash: hash,
+          incomingSize: bytes.byteLength,
+          entries,
+          contentHashById,
+          entryByContentHash,
+          readBook: (id) => store.readBook(id),
+          setContentHash: (id, contentHash) => store.setContentHash(id, contentHash),
+        });
+        checkCancel();
+        let isExisting = duplicate !== null;
+        if (duplicate && duplicate.available !== false) {
+          // Existing canonical data is never re-saved: no fabricated 0% record.
+          counts.duplicates++;
+        } else {
+          const book = await loadBook(bytes, { selective: true });
+          try {
+            // Last check before the store write: past this point the book is accepted.
+            checkCancel();
+            if (book.spine.length === 0) throw new Error("书中没有可阅读的内容（spine 为空）");
+            const cover = book.coverHref ? book.resources.get(book.coverHref) : undefined;
+            const result = await store.save({
+              entry: {
+                id: hash,
+                title: book.metadata.title || file.name.replace(/\.epub$/i, ""),
+                creator: book.metadata.creator ?? "",
+                language: book.metadata.language || undefined,
+                fileName: file.name,
+                fileSize: bytes.byteLength,
+                coverMime: cover?.mediaType ?? "",
+                contentHash: hash,
+                addedAtMs: Date.now(),
+              },
+              bytes,
+              coverBytes: cover?.data,
+              coverMime: cover?.mediaType,
+            });
+            contentHashById.set(result.entry.id, hash);
+            entryByContentHash.set(hash, result.entry);
+            if (result.status === "duplicate") {
+              counts.duplicates++;
+              isExisting = true;
+            } else {
+              counts.imported++;
+            }
+          } finally {
+            disposeBook(book);
+          }
+        }
+        counts.completed++;
+        successful.recordPublished(hash, input.ordinal);
+        winnerGroup.set(hash, input.groupKey);
+        if (target) {
+          pending.push({
+            inputId: input.inputId,
+            contentHash: hash,
+            isExisting,
+            target,
+            // First time this hash is known: observe its current placement.
+            observed: placementSnapshotOf(organization, hash),
+          });
+          // A cancel stops new batches; only a batch already committing finishes.
+          if (pending.length >= PLACEMENT_BATCH && !job.cancelRequested) await flush();
+        }
+      } catch (error) {
+        // Cancelled mid-item: nothing was written for it; bytes/Book are released.
+        if (error instanceof ImportCancelled) break;
+        counts.completed++;
+        counts.failed++;
+        issue(input.inputId, "source-failed", `${file.name}：${errorText(error)}`);
+      }
+      emit();
+    }
+    if (job.cancelRequested) {
+      // No new batch after a cancel; imported books stay on the shelf, unplaced.
+      for (const item of pending) issue(item.inputId, "placement-changed", "已停止导入，书已导入但未归档");
+      counts.placementSkipped += pending.length;
+      pending = [];
+    } else {
+      await flush();
+    }
+    phase = "cleaning";
+    emit(true);
+    return {
+      jobId,
+      status: job.cancelRequested ? "cancelled" : "completed",
+      counts: snapshotCounts(),
+      issueCount: job.issues.length,
+    };
+  }
+
+  return {
+    async scan(onProgress): Promise<ScanResult | null> {
+      const files = await pick();
+      if (!files) return null;
+      const jobId = newId();
+      const scanned = scanWebDirectoryFiles(files, `web:${newId()}`);
+      jobs.set(jobId, {
+        root: scanned.root,
+        items: scanned.items,
+        files: scanned.files,
+        issues: [],
+        running: null,
+        finished: false,
+        cancelRequested: false,
+        committing: false,
+      });
+      onProgress({
+        jobId,
+        phase: "scanning",
+        scannedInputs: scanned.items.length,
+        totalInputs: scanned.items.length,
+        counts: { completed: 0, imported: 0, duplicates: 0, failed: 0, placementSkipped: 0, createdFolders: 0 },
+      });
+      return {
+        jobId,
+        root: scanned.root,
+        inputCount: scanned.items.length,
+        skippedDirectoryCount: 0,
+        unreadableDirectoryCount: 0,
+      };
+    },
+    async page(jobId, cursor): Promise<InputPage> {
+      const job = jobFor(jobId);
+      const start = cursor === undefined ? 0 : Number(cursor);
+      const end = Math.min(job.items.length, start + PAGE_SIZE);
+      // No persistent root identity on plain Web: no bindings to report.
+      return { items: job.items.slice(start, end), bindings: [], nextCursor: end < job.items.length ? String(end) : null };
+    },
+    start(input): Promise<DirectoryImportResult> {
+      const job = jobFor(input.jobId);
+      if (job.running || job.finished) return Promise.reject(new Error("导入作业只能启动一次"));
+      job.running = run(input.jobId, job, input.options, input.targets, input.onProgress)
+        .finally(() => {
+          job.finished = true;
+          job.files = null;
+        });
+      return job.running;
+    },
+    async issues(jobId, cursor): Promise<IssuePage> {
+      const job = jobFor(jobId);
+      const start = cursor === undefined ? 0 : Number(cursor);
+      const end = Math.min(job.issues.length, start + ISSUE_PAGE_SIZE);
+      return { items: job.issues.slice(start, end), nextCursor: end < job.issues.length ? String(end) : null };
+    },
+    async cancel(jobId) {
+      const job = jobs.get(jobId);
+      if (!job || job.finished || !job.running) return "already-finished";
+      job.cancelRequested = true;
+      return job.committing ? "settling" : "requested";
+    },
+    async dispose(jobId): Promise<void> {
+      const job = jobs.get(jobId);
+      if (!job) return;
+      if (job.running && !job.finished) {
+        job.cancelRequested = true;
+        await job.running.catch(() => undefined);
+      }
+      job.files = null;
+      jobs.delete(jobId);
+    },
+  };
+}

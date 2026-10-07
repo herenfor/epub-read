@@ -433,13 +433,16 @@ export function LanSavePanel(props: LanSavePanelProps) {
         {selectedCount === 0 && (
           <p className="lan-hint">只想发几本？先在书架上用「批量选择」选好，再打开这里。</p>
         )}
+        <p className="lan-hint">
+          阅读资料包含进度、书签、笔记、收藏及文件夹；全部书籍会带上空文件夹，已选的书只带相关文件夹。
+        </p>
         <label className="lan-switch-row">
           <span className="lan-switch-text">
             <strong>同时发送书籍文件</strong>
             <small>
               {includeBooks
                 ? "对方可以直接打开阅读，书多时需要多等一会儿"
-                : "只发送阅读进度、书签和笔记，对方需要已有这些书"}
+                : "只发送阅读资料，对方需要已有这些书"}
             </small>
           </span>
           <input
