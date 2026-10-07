@@ -323,7 +323,7 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
             updateState({
               status: "closed", busy: false, offer: null, preview: null,
               notice: event.message ?? "连接已结束，请重新连接。",
-              error: event.event === "error" ? event.message ?? "局域网互传失败。" : null,
+              error: event.event === "error" ? event.message ?? "设备互传失败。" : null,
               errorCode: event.code ?? null,
             });
           }

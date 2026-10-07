@@ -59,6 +59,8 @@ const Icon = {
   info: <svg {...svgProps}><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></svg>,
   alert: <svg {...svgProps}><circle cx="12" cy="12" r="9" /><path d="M12 7.5v5.5M12 16.5h.01" /></svg>,
   incoming: <svg {...svgProps}><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>,
+  help: <svg {...svgProps}><circle cx="12" cy="12" r="9" /><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6M12 17h.01" /></svg>,
+  send: <svg {...svgProps}><path d="M4 12 20 4l-6 16-3-7z" /></svg>,
   devices: (
     <svg viewBox="0 0 96 48" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <rect x="6" y="8" width="26" height="34" rx="4" />
@@ -258,7 +260,7 @@ export function LanSavePanel(props: LanSavePanelProps) {
     return (
       <SaveFileImportPreview
         preview={state.preview}
-        sourceLabel="局域网互传"
+        sourceLabel="设备互传"
         canceling={state.closing}
         onCancel={closePanel}
         onConfirm={(applyPreferences) => void props.session.commit(applyPreferences)}
@@ -292,40 +294,33 @@ export function LanSavePanel(props: LanSavePanelProps) {
       {renderBanner()}
       <div className="lan-intro">
         <span className="lan-intro-art">{Icon.devices}</span>
-        <p>两台设备连接同一个 Wi‑Fi，在一台上显示二维码，用另一台扫码，就能互相传送书籍和阅读进度。</p>
+        <p>两台设备连同一个 Wi‑Fi，一台显示二维码，另一台扫码，就能互传书籍和阅读进度。</p>
       </div>
-      <div className="lan-options">
-        <button type="button" className="lan-option" disabled={scanBusy} onClick={handleHost}>
-          <span className="lan-option-icon">{Icon.qr}</span>
-          <span className="lan-option-text">
-            <strong>显示二维码</strong>
-            <small>让另一台设备扫码连接这台设备</small>
-          </span>
-          <span className="lan-option-chevron">{Icon.chevron}</span>
+      <div className={`lan-tiles${props.isAndroid ? "" : " is-single"}`}>
+        <button type="button" className="lan-tile is-primary" disabled={scanBusy} onClick={handleHost}>
+          <span className="lan-tile-icon">{Icon.qr}</span>
+          <strong>显示二维码</strong>
+          <small>让另一台设备来扫</small>
         </button>
         {props.isAndroid && (
-          <button type="button" className="lan-option" disabled={scanBusy} onClick={() => void handleScan()}>
-            <span className="lan-option-icon">{scanBusy ? <Spinner /> : Icon.scan}</span>
-            <span className="lan-option-text">
-              <strong>{scanBusy ? "正在打开相机…" : "扫码连接"}</strong>
-              <small>扫描另一台设备上显示的二维码</small>
-            </span>
-            <span className="lan-option-chevron">{Icon.chevron}</span>
+          <button type="button" className="lan-tile" disabled={scanBusy} onClick={() => void handleScan()}>
+            <span className="lan-tile-icon">{scanBusy ? <Spinner /> : Icon.scan}</span>
+            <strong>{scanBusy ? "正在打开相机…" : "扫码连接"}</strong>
+            <small>扫另一台设备的二维码</small>
           </button>
         )}
+      </div>
+      <div className="lan-rows">
         <button
           type="button"
-          className={`lan-option${pasteOpen ? " is-open" : ""}`}
+          className={`lan-row${pasteOpen ? " is-open" : ""}`}
           aria-expanded={pasteOpen}
           disabled={scanBusy}
           onClick={() => setPasteOpen((value) => !value)}
         >
-          <span className="lan-option-icon">{Icon.paste}</span>
-          <span className="lan-option-text">
-            <strong>粘贴连接信息</strong>
-            <small>{props.isAndroid ? "不方便扫码时使用" : "在另一台设备点「复制连接信息」后粘贴到这里"}</small>
-          </span>
-          <span className="lan-option-chevron">{Icon.chevron}</span>
+          <span className="lan-row-icon">{Icon.paste}</span>
+          <span className="lan-row-text">{props.isAndroid ? "不方便扫码？粘贴连接信息" : "粘贴另一台设备的连接信息"}</span>
+          <span className="lan-row-chevron">{Icon.chevron}</span>
         </button>
         {pasteOpen && (
           <div className="lan-paste">
@@ -340,40 +335,46 @@ export function LanSavePanel(props: LanSavePanelProps) {
             </button>
           </div>
         )}
+        <details className="lan-help">
+          <summary className="lan-row">
+            <span className="lan-row-icon">{Icon.help}</span>
+            <span className="lan-row-text">连不上怎么办</span>
+            <span className="lan-row-chevron">{Icon.chevron}</span>
+          </summary>
+          <div className="lan-help-body">
+            <ul>
+              <li>确认两台设备连着同一个 Wi‑Fi，或者都连同一部手机的热点。</li>
+              <li>公司、学校、酒店的网络和路由器的“访客网络”常常禁止设备互连，可以改用手机热点。</li>
+              <li>电脑上如果弹出防火墙提示，请选择允许。</li>
+            </ul>
+            {addresses.length > 1 && (
+              <label className="lan-field">
+                <span>选择要使用的网络</span>
+                <select
+                  value={selectedAddress || addresses[0]?.address || ""}
+                  onChange={(event) => setSelectedAddress(event.target.value)}
+                >
+                  {addresses.map((address) => (
+                    <option key={`${address.interfaceId}:${address.address}`} value={address.address}>
+                      {address.label} · {address.address}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <label className="lan-field">
+              <span>高级：指定本机网络地址（一般不需要填写）</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={bindIp}
+                placeholder="例如 192.168.1.10"
+                onChange={(event) => setBindIp(event.target.value)}
+              />
+            </label>
+          </div>
+        </details>
       </div>
-      <details className="lan-help">
-        <summary>连不上怎么办？</summary>
-        <ul>
-          <li>确认两台设备连着同一个 Wi‑Fi，或者都连同一部手机的热点。</li>
-          <li>公司、学校、酒店的网络和路由器的“访客网络”常常禁止设备互连，可以改用手机热点。</li>
-          <li>电脑上如果弹出防火墙提示，请选择允许。</li>
-        </ul>
-        {addresses.length > 1 && (
-          <label className="lan-field">
-            <span>选择要使用的网络</span>
-            <select
-              value={selectedAddress || addresses[0]?.address || ""}
-              onChange={(event) => setSelectedAddress(event.target.value)}
-            >
-              {addresses.map((address) => (
-                <option key={`${address.interfaceId}:${address.address}`} value={address.address}>
-                  {address.label} · {address.address}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        <label className="lan-field">
-          <span>高级：指定本机网络地址（一般不需要填写）</span>
-          <input
-            type="text"
-            inputMode="decimal"
-            value={bindIp}
-            placeholder="例如 192.168.1.10"
-            onChange={(event) => setBindIp(event.target.value)}
-          />
-        </label>
-      </details>
     </>
   );
 
@@ -381,7 +382,7 @@ export function LanSavePanel(props: LanSavePanelProps) {
     <div className="lan-host">
       <div className="lan-qr-card">
         {qrDataUrl ? (
-          <img className="lan-qr" src={qrDataUrl} alt="局域网互传二维码" />
+          <img className="lan-qr" src={qrDataUrl} alt="设备互传二维码" />
         ) : qrFailed ? (
           <p className="lan-qr-fallback">二维码显示失败，请点下方「复制连接信息」，在另一台设备粘贴。</p>
         ) : (
@@ -390,7 +391,7 @@ export function LanSavePanel(props: LanSavePanelProps) {
       </div>
       <h3>用另一台设备扫描这个二维码</h3>
       <ol className="lan-steps">
-        <li>在另一台设备打开「书架菜单 → 局域网互传」</li>
+        <li>在另一台设备打开「书架设置 → 设备互传」</li>
         <li>选择「扫码连接」，对准这个二维码</li>
       </ol>
       <p className="lan-waiting"><span className="lan-pulse" aria-hidden />等待连接…</p>
@@ -406,59 +407,65 @@ export function LanSavePanel(props: LanSavePanelProps) {
   const renderConnected = () => (
     <>
       {renderBanner()}
-      <div className="lan-connected-chip"><span>{Icon.check}</span>已连接到另一台设备</div>
-      <section className="lan-card" aria-label="发送给对方">
-        <h3>发送给对方</h3>
-        <div className="lan-segmented" role="radiogroup" aria-label="发送范围">
-          <button
-            type="button"
-            role="radio"
-            aria-checked={scopeChoice === "all"}
-            className={scopeChoice === "all" ? "active" : ""}
-            onClick={() => setScopeChoice("all")}
-          >
-            全部书籍
-          </button>
-          <button
-            type="button"
-            role="radio"
-            aria-checked={scopeChoice === "selected"}
-            className={scopeChoice === "selected" ? "active" : ""}
-            disabled={selectedCount === 0}
-            onClick={() => setScopeChoice("selected")}
-          >
-            {selectedCount > 0 ? `已选的 ${selectedCount} 本` : "已选的书"}
-          </button>
+      <section className="lan-send" aria-label="发送给对方">
+        <div className="lan-send-group">
+          <h3>发送什么</h3>
+          <div className="lan-segmented" role="radiogroup" aria-label="发送范围">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={scopeChoice === "all"}
+              className={scopeChoice === "all" ? "active" : ""}
+              onClick={() => setScopeChoice("all")}
+            >
+              全部书籍
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={scopeChoice === "selected"}
+              className={scopeChoice === "selected" ? "active" : ""}
+              disabled={selectedCount === 0}
+              onClick={() => setScopeChoice("selected")}
+            >
+              {selectedCount > 0 ? `已选 ${selectedCount} 本` : "已选的书"}
+            </button>
+          </div>
+          {selectedCount === 0 && (
+            <p className="lan-hint">只想发几本？先在书架用「批量选择」选好，再点「发到设备」。</p>
+          )}
         </div>
-        {selectedCount === 0 && (
-          <p className="lan-hint">只想发几本？先在书架上用「批量选择」选好，再打开这里。</p>
-        )}
-        <p className="lan-hint">
-          阅读资料包含进度、书签、笔记、收藏及文件夹；全部书籍会带上空文件夹，已选的书只带相关文件夹。
-        </p>
-        <label className="lan-switch-row">
-          <span className="lan-switch-text">
-            <strong>同时发送书籍文件</strong>
-            <small>
-              {includeBooks
-                ? "对方可以直接打开阅读，书多时需要多等一会儿"
-                : "只发送阅读资料，对方需要已有这些书"}
-            </small>
-          </span>
-          <input
-            type="checkbox"
-            role="switch"
-            className="lan-switch"
-            checked={includeBooks}
-            onChange={(event) => setIncludeBooks(event.target.checked)}
-          />
-        </label>
-        <button type="button" className="lan-primary wide" disabled={state.busy} onClick={handleSend}>
-          发送
-        </button>
+        <div className="lan-send-options">
+          <label className="lan-switch-row">
+            <span className="lan-switch-text">
+              <strong>附带书籍文件</strong>
+              <small>
+                {includeBooks
+                  ? "对方可以直接打开阅读，书多时要多等一会"
+                  : "只发阅读资料，对方需要已有这些书"}
+              </small>
+            </span>
+            <input
+              type="checkbox"
+              role="switch"
+              className="lan-switch"
+              checked={includeBooks}
+              onChange={(event) => setIncludeBooks(event.target.checked)}
+            />
+          </label>
+          <p className="lan-send-note">
+            <span aria-hidden="true">{Icon.info}</span>
+            <span>总会带上阅读资料：进度、书签、笔记、收藏和文件夹。全部书籍含空文件夹，已选的书只带相关文件夹。</span>
+          </p>
+        </div>
       </section>
-      <p className="lan-waiting"><span className="lan-pulse" aria-hidden />也可以等对方发送给你</p>
-      <button type="button" className="lan-text-btn" onClick={handleReconnect}>断开连接</button>
+      <div className="lan-send-footer">
+        <button type="button" className="lan-primary wide" disabled={state.busy} onClick={handleSend}>
+          {Icon.send}
+          <span>发送</span>
+        </button>
+        <p className="lan-waiting"><span className="lan-pulse" aria-hidden />也可以等对方发给你</p>
+      </div>
     </>
   );
 
@@ -617,9 +624,7 @@ export function LanSavePanel(props: LanSavePanelProps) {
     ? "同一 Wi‑Fi 下直接传送，不经过云端"
     : state.status === "startingHost" || state.status === "hostReady"
       ? "等待另一台设备扫码"
-      : state.status === "connected"
-        ? "已连接，选择要发送的内容"
-        : "请保持两台设备都打开本应用";
+      : "请保持两台设备都打开本应用";
 
   // The App ends the session as soon as the panel starts closing; keep the last
   // frame on screen during the exit animation instead of flashing the start page.
@@ -627,10 +632,17 @@ export function LanSavePanel(props: LanSavePanelProps) {
     <>
       <header className="lan-head">
         <div className="lan-head-text">
-          <h2>局域网互传</h2>
-          <p>{subtitle}</p>
+          <h2>设备互传</h2>
+          {state.status === "connected" ? (
+            <p className="lan-head-status"><span className="lan-status-dot" aria-hidden="true" />已连接另一台设备</p>
+          ) : (
+            <p>{subtitle}</p>
+          )}
         </div>
-        <button type="button" className="lan-icon-btn lan-close" onClick={closePanel} aria-label="关闭局域网互传">
+        {state.status === "connected" && (
+          <button type="button" className="lan-head-pill" onClick={handleReconnect}>断开</button>
+        )}
+        <button type="button" className="lan-icon-btn lan-close" onClick={closePanel} aria-label="关闭设备互传">
           {Icon.close}
         </button>
       </header>
@@ -641,7 +653,7 @@ export function LanSavePanel(props: LanSavePanelProps) {
 
   return (
     <div className={`lan-backdrop${props.closing ? " is-closing" : ""}`} role="presentation">
-      <section className="lan-panel" role="dialog" aria-modal="true" aria-label="局域网互传">
+      <section className="lan-panel" role="dialog" aria-modal="true" aria-label="设备互传">
         {content}
       </section>
     </div>

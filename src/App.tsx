@@ -2240,7 +2240,7 @@ export default function App() {
       return;
     }
     if (saveFileJobStateRef.current.kind !== "idle" || saveFileLaunchRef.current || lanSaveActiveRef.current) {
-      setShelfNotice({ kind: "warn", text: "存档或局域网互传进行中，暂不能导入文件夹" });
+      setShelfNotice({ kind: "warn", text: "存档或设备互传进行中，暂不能导入文件夹" });
       return;
     }
     // Reserve the shared slot before any await; released only when the panel closes.
@@ -2488,7 +2488,7 @@ export default function App() {
       throw new Error("已有存档文件任务正在进行，请等待当前任务结束");
     }
     if (nativeImportRef.current) {
-      throw new Error("正在导入书籍，暂不开始局域网互传");
+      throw new Error("正在导入书籍，暂不开始设备互传");
     }
     const prepared = await resolveNativeExportScope(lanSaveSelectionRef.current, scopeChoice);
     return prepared.scope;

@@ -66,7 +66,7 @@ export function lanErrorText(code: string | null, step: LanUserStep | null, nati
     case "cancelled":
       return "已取消。";
     case "unsupported-platform":
-      return "这台设备暂不支持局域网互传。";
+      return "这台设备暂不支持设备互传。";
     default:
       return "这次传输没有完成。请重新连接后再试一次。";
   }

@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { MENU_CLOSE_MS } from "./menuMotion";
+import { MENU_CLOSE_MS, useExitPresence } from "./menuMotion";
+import { useUiMotion, type UiMotion } from "./motionPreference";
 import { createPortal } from "react-dom";
 import { getShelfMenuPortalHost, useShelfMenuPopover } from "./shelfMenuPlacement";
 import type { Theme } from "../render/settings";
@@ -113,7 +114,7 @@ export interface ShelfViewProps {
   saveFileActive?: boolean;
   /** LAN 会话活动期间禁用书架入口；一份会话结束并重新连接后再次开放。 */
   lanTransferActive?: boolean;
-  /** 打开共享的局域网互传面板，可携带当前批量选择用于“选中书籍”范围。 */
+  /** 打开共享的设备互传面板，可携带当前批量选择用于“选中书籍”范围。 */
   onOpenLanTransfer?(selectedEntries?: ShelfEntry[]): void;
   theme: Theme;
   onThemeChange(theme: Theme): void;
@@ -246,13 +247,220 @@ function ExportIcon() {
   );
 }
 
+/** 设备互传：电脑 + 手机，与互传面板、抽屉入口同一个图标。 */
 function LanTransferIcon() {
   return (
     <svg className="shelf-svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M5 12.5a7 7 0 0 1 14 0" />
-      <path d="M8.5 15.5a4.5 4.5 0 0 1 7 0" />
-      <circle cx="12" cy="19" r="1" fill="currentColor" stroke="none" />
+      <rect x="2.5" y="5" width="12" height="9" rx="1.5" />
+      <path d="M5.5 18h6" />
+      <rect x="16" y="8.5" width="5.5" height="11" rx="1.3" />
     </svg>
+  );
+}
+
+function BookAddIcon() {
+  return (
+    <svg className="shelf-svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+      <path d="M14 3v5h5" />
+      <path d="M12 11v6M9 14h6" />
+    </svg>
+  );
+}
+
+function FolderAddIcon() {
+  return (
+    <svg className="shelf-svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+      <path d="M12 10.5v5M9.5 13h5" />
+    </svg>
+  );
+}
+
+function CheckSquareIcon({ checked }: { checked: boolean }) {
+  return (
+    <svg className="shelf-svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3.5" y="3.5" width="17" height="17" rx="4" fill={checked ? "currentColor" : "none"} />
+      <path d="m8 12.2 2.8 2.8L16.2 9.4" stroke={checked ? "var(--accent-foreground, #fff)" : "currentColor"} />
+    </svg>
+  );
+}
+
+function ImportArchiveIcon() {
+  return (
+    <svg className="shelf-svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 3v12" />
+      <polyline points="7 10 12 15 17 10" />
+      <path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6" />
+    </svg>
+  );
+}
+
+function StorageIcon() {
+  return (
+    <svg className="shelf-svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <ellipse cx="12" cy="6" rx="7" ry="3" />
+      <path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6" />
+      <path d="M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" />
+    </svg>
+  );
+}
+
+function ChevronRightIcon() {
+  return (
+    <svg className="shelf-svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="9 6 15 12 9 18" />
+    </svg>
+  );
+}
+
+/** One row of a grouped drawer list: tinted icon, title, one-line detail, chevron. */
+function ShelfDrawerRow(props: {
+  icon: ReactNode;
+  title: string;
+  detail: string;
+  disabled?: boolean;
+  tone?: "accent" | "neutral";
+  onClick(): void;
+}) {
+  return (
+    <button
+      className={`shelf-drawer-row${props.tone === "neutral" ? " is-neutral" : ""}`}
+      type="button"
+      disabled={props.disabled}
+      onClick={props.onClick}
+    >
+      <span className="shelf-drawer-row-icon">{props.icon}</span>
+      <span className="shelf-drawer-row-text">
+        <strong>{props.title}</strong>
+        <small>{props.detail}</small>
+      </span>
+      <span className="shelf-drawer-row-chevron"><ChevronRightIcon /></span>
+    </button>
+  );
+}
+
+interface ShelfImportButtonProps extends ShelfSubmenuBackProps {
+  compact: boolean;
+  disabled: boolean;
+  /** Drag-and-drop works only with a mouse; hide the hint on touch. */
+  showDropHint: boolean;
+  onImport(): void;
+  onImportFolder?(): void;
+}
+
+/**
+ * Shelf import entry. With directory import available it is a split button
+ * (main action = 导入图书, caret = menu); on phones the whole 导入 button opens
+ * the menu. The menu animates in/out with the shared popover motion.
+ */
+function ShelfImportButton(props: ShelfImportButtonProps) {
+  const [open, setOpen] = useState(false);
+  const { present, closing } = useExitPresence(open);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useShelfSubmenuBack(open, () => setOpen(false), props);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (event: PointerEvent) => {
+      if (!wrapRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("pointerdown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (props.disabled) setOpen(false);
+  }, [props.disabled]);
+
+  if (!props.onImportFolder) {
+    return (
+      <button
+        className={`shelf-btn-primary${props.compact ? " shelf-mobile-import-btn" : ""}`}
+        type="button"
+        onClick={props.onImport}
+        disabled={props.disabled}
+        title="导入 EPUB 图书到书架"
+      >
+        <PlusIcon />
+        <span>{props.compact ? "导入" : "导入图书"}</span>
+      </button>
+    );
+  }
+
+  const choose = (action: () => void) => {
+    setOpen(false);
+    action();
+  };
+
+  return (
+    <div className="shelf-import-split" ref={wrapRef}>
+      {props.compact ? (
+        <button
+          className="shelf-btn-primary shelf-mobile-import-btn"
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          onClick={() => setOpen((value) => !value)}
+          disabled={props.disabled}
+          title="导入图书或文件夹"
+        >
+          <PlusIcon />
+          <span>导入</span>
+        </button>
+      ) : (
+        <>
+          <button
+            className="shelf-btn-primary shelf-import-main"
+            type="button"
+            onClick={props.onImport}
+            disabled={props.disabled}
+            title="导入 EPUB 图书到书架"
+          >
+            <PlusIcon />
+            <span>导入图书</span>
+          </button>
+          <button
+            className="shelf-btn-primary shelf-import-caret"
+            type="button"
+            aria-label="更多导入方式"
+            aria-haspopup="menu"
+            aria-expanded={open}
+            onClick={() => setOpen((value) => !value)}
+            disabled={props.disabled}
+          >
+            <ChevronDownIcon />
+          </button>
+        </>
+      )}
+      {present && (
+        <div className={`shelf-import-menu${closing ? " is-closing" : ""}`} role="menu" aria-label="导入方式">
+          <button className="shelf-import-menu-item" type="button" role="menuitem" onClick={() => choose(props.onImport)}>
+            <span className="shelf-import-menu-icon"><BookAddIcon /></span>
+            <span className="shelf-import-menu-text">
+              <strong>导入图书</strong>
+              <small>选择一本或多本 EPUB</small>
+            </span>
+          </button>
+          <button className="shelf-import-menu-item" type="button" role="menuitem" onClick={() => choose(props.onImportFolder!)}>
+            <span className="shelf-import-menu-icon"><FolderAddIcon /></span>
+            <span className="shelf-import-menu-text">
+              <strong>导入文件夹</strong>
+              <small>按目录自动整理到书架文件夹</small>
+            </span>
+          </button>
+          {props.showDropHint && <p className="shelf-import-menu-hint">也可以把 EPUB 文件直接拖到书架上</p>}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -626,33 +834,41 @@ const ShelfResumeStage = memo(function ShelfResumeStage({
 
   if (!activeBook) return null;
 
-  if (collapsed) {
-    return (
-      <div className="shelf-resume-stage">
+  const pct = Math.round(activeBook.progressPct ?? 0);
+  const barWidth = `${Math.max(2, Math.min(100, activeBook.progressPct ?? 0))}%`;
+  const chapterLabel = `第 ${(activeBook.spineIndex ?? 0) + 1} 章 · ${pct}%`;
+
+  // Both states stay mounted; the stage animates its grid rows between them so
+  // expanding/collapsing is one short height + cross-fade, not a remount jump.
+  return (
+    <div className={`shelf-resume-stage${collapsed ? " is-collapsed" : " is-expanded"}`}>
+      <div className="shelf-resume-pane shelf-resume-pane-compact" aria-hidden={!collapsed}>
         <div className="shelf-resume-collapsed">
-          <div className="shelf-resume-collapsed-left">
-            {!compact && (
-              <span className="shelf-resume-collapsed-tag">
-                <BookOpenIcon />
-                <span>继续阅读</span>
+          <button
+            className="shelf-resume-compact-open"
+            type="button"
+            tabIndex={collapsed ? 0 : -1}
+            onClick={() => onOpen(activeBook.id)}
+            title={`打开《${activeBook.title}》`}
+          >
+            <span className="shelf-resume-mini-cover" aria-hidden="true">
+              <Cover entry={activeBook} provider={provider} />
+            </span>
+            <span className="shelf-resume-compact-text">
+              <span className="shelf-resume-compact-title">{activeBook.title}</span>
+              <span className="shelf-resume-compact-meta">
+                <span>{chapterLabel}</span>
+                <span className="shelf-resume-mini-track" aria-hidden="true">
+                  <span style={{ width: barWidth }} />
+                </span>
               </span>
-            )}
-            <span
-              className="shelf-resume-collapsed-title"
-              onClick={() => onOpen(activeBook.id)}
-              title={`打开《${activeBook.title}》`}
-            >
-              《{activeBook.title}》
             </span>
-            <span className="shelf-resume-collapsed-progress">
-              {Math.round(activeBook.progressPct ?? 0)}%
-            </span>
-          </div>
+          </button>
           <div className="shelf-resume-collapsed-right">
             <button
-              className="shelf-btn-primary"
-              style={{ height: 28, padding: "0 10px", fontSize: 12 }}
+              className="shelf-resume-continue"
               type="button"
+              tabIndex={collapsed ? 0 : -1}
               onClick={() => onOpen(activeBook.id)}
               disabled={busy}
             >
@@ -662,128 +878,130 @@ const ShelfResumeStage = memo(function ShelfResumeStage({
             <button
               className="shelf-resume-toggle-btn"
               type="button"
+              tabIndex={collapsed ? 0 : -1}
               onClick={toggleCollapse}
-              title="展开展台 (显示封面与详细进度)"
-              aria-label="展开展台"
+              title="展开 (显示封面与详细进度)"
+              aria-label="展开正在阅读"
+              aria-expanded={false}
             >
               <ChevronDownIcon />
             </button>
           </div>
         </div>
       </div>
-    );
-  }
 
-  return (
-    <div className="shelf-resume-stage">
-      <div className="shelf-resume-expanded">
-        <div className="shelf-resume-main">
-          <div
-            className="shelf-resume-cover-box"
-            onClick={() => onOpen(activeBook.id)}
-            title={`打开《${activeBook.title}》`}
-          >
-            <Cover entry={activeBook} provider={provider} />
-          </div>
-          <div className="shelf-resume-info">
-            <div className="shelf-resume-meta-row">
-              <span className="shelf-resume-tag">
-                <BookOpenIcon />
-                <span>正在阅读</span>
-              </span>
-              <span className="shelf-resume-time">
-                {formatRelativeTime(activeBook.lastReadAtMs)}
-              </span>
-            </div>
-            <div
-              className="shelf-resume-title"
+      <div className="shelf-resume-pane shelf-resume-pane-full" aria-hidden={collapsed}>
+        <div className="shelf-resume-expanded">
+          <div className="shelf-resume-main">
+            <button
+              className="shelf-resume-cover-box"
+              type="button"
+              tabIndex={collapsed ? -1 : 0}
               onClick={() => onOpen(activeBook.id)}
-              title={activeBook.title}
+              title={`打开《${activeBook.title}》`}
             >
-              {activeBook.title}
-            </div>
-            <div className="shelf-resume-author">{activeBook.creator || "未知作者"}</div>
-            <div className="shelf-resume-anchor-row">
-              <div className="shelf-resume-anchor-text">
-                上次读到：第 {(activeBook.spineIndex ?? 0) + 1} 章 · {Math.round(activeBook.progressPct ?? 0)}%
+              <Cover entry={activeBook} provider={provider} />
+            </button>
+            <div className="shelf-resume-info">
+              <div className="shelf-resume-meta-row">
+                <span className="shelf-resume-tag">
+                  <BookOpenIcon />
+                  <span>正在阅读</span>
+                </span>
+                <span className="shelf-resume-time">
+                  {formatRelativeTime(activeBook.lastReadAtMs)}
+                </span>
               </div>
-              <div className="shelf-resume-progress-track">
-                <div
-                  className="shelf-resume-progress-bar"
-                  style={{ width: `${Math.max(2, Math.min(100, activeBook.progressPct ?? 0))}%` }}
-                />
+              <button
+                className="shelf-resume-title"
+                type="button"
+                tabIndex={collapsed ? -1 : 0}
+                onClick={() => onOpen(activeBook.id)}
+                title={activeBook.title}
+              >
+                {activeBook.title}
+              </button>
+              <div className="shelf-resume-author">{activeBook.creator || "未知作者"}</div>
+              <div className="shelf-resume-anchor-row">
+                <div className="shelf-resume-anchor-text">上次读到：{chapterLabel}</div>
+                <div className="shelf-resume-progress-track">
+                  <div className="shelf-resume-progress-bar" style={{ width: barWidth }} />
+                </div>
               </div>
             </div>
           </div>
-        </div>
-        <div className="shelf-resume-actions">
-          {readingBooks.length > 1 && (
-            <div className="shelf-more-reading-dropdown" ref={moreDropdownRef}>
-              <button
-                className="shelf-more-reading-btn"
-                type="button"
-                onClick={() => setMoreOpen(!moreOpen)}
-                aria-expanded={moreOpen}
-                title="查看更多在读书籍"
-              >
-                <span>更多在读 ({readingBooks.length})</span>
-                <ChevronDownIcon />
-              </button>
-              {moreOpen && (
-                <div className="shelf-more-reading-popover">
-                  {readingBooks.map((b) => (
-                    <div
-                      key={b.id}
-                      className={`shelf-more-reading-item${b.id === activeBook.id ? " active" : ""}`}
-                      onClick={() => {
-                        setSelectedId(b.id);
-                        setMoreOpen(false);
-                      }}
-                    >
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div className="shelf-more-reading-item-title">{b.title}</div>
-                        <div className="shelf-more-reading-item-meta">
-                          {Math.round(b.progressPct ?? 0)}% · {formatRelativeTime(b.lastReadAtMs)}
-                        </div>
-                      </div>
-                      <button
-                        className="shelf-btn-primary"
-                        style={{ height: 28, padding: "0 10px", fontSize: 12 }}
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onOpen(b.id);
+          <div className="shelf-resume-actions">
+            {readingBooks.length > 1 && (
+              <div className="shelf-more-reading-dropdown" ref={moreDropdownRef}>
+                <button
+                  className="shelf-more-reading-btn"
+                  type="button"
+                  tabIndex={collapsed ? -1 : 0}
+                  onClick={() => setMoreOpen(!moreOpen)}
+                  aria-expanded={moreOpen}
+                  title="查看更多在读书籍"
+                >
+                  <span>更多在读 ({readingBooks.length})</span>
+                  <ChevronDownIcon />
+                </button>
+                {moreOpen && (
+                  <div className="shelf-more-reading-popover">
+                    {readingBooks.map((b) => (
+                      <div
+                        key={b.id}
+                        className={`shelf-more-reading-item${b.id === activeBook.id ? " active" : ""}`}
+                        onClick={() => {
+                          setSelectedId(b.id);
                           setMoreOpen(false);
                         }}
                       >
-                        开书
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-          <button
-            className="shelf-btn-resume"
-            type="button"
-            onClick={() => onOpen(activeBook.id)}
-            disabled={busy}
-            title="继续阅读当前书籍 (按 Space 或 Enter 一键开书)"
-          >
-            <span>继续阅读</span>
-            <ArrowRightIcon />
-            {!compact && <span className="shelf-resume-key-hint">Enter</span>}
-          </button>
-          <button
-            className="shelf-resume-toggle-btn"
-            type="button"
-            onClick={toggleCollapse}
-            title="收起展台 (折叠为单行条)"
-            aria-label="收起展台"
-          >
-            <ChevronUpIcon />
-          </button>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div className="shelf-more-reading-item-title">{b.title}</div>
+                          <div className="shelf-more-reading-item-meta">
+                            {Math.round(b.progressPct ?? 0)}% · {formatRelativeTime(b.lastReadAtMs)}
+                          </div>
+                        </div>
+                        <button
+                          className="shelf-more-reading-open"
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onOpen(b.id);
+                            setMoreOpen(false);
+                          }}
+                        >
+                          开书
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            <button
+              className="shelf-btn-resume"
+              type="button"
+              tabIndex={collapsed ? -1 : 0}
+              onClick={() => onOpen(activeBook.id)}
+              disabled={busy}
+              title="继续阅读当前书籍 (按 Space 或 Enter 一键开书)"
+            >
+              <span>继续阅读</span>
+              <ArrowRightIcon />
+              {!compact && <span className="shelf-resume-key-hint">Enter</span>}
+            </button>
+            <button
+              className="shelf-resume-toggle-btn"
+              type="button"
+              tabIndex={collapsed ? -1 : 0}
+              onClick={toggleCollapse}
+              title="收起 (折叠为单行)"
+              aria-label="收起正在阅读"
+              aria-expanded={true}
+            >
+              <ChevronUpIcon />
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -2171,7 +2389,6 @@ interface ShelfSettingsDrawerProps extends ShelfSubmenuBackProps {
   onClose(): void;
   onOpenBook?(id: string): void;
   onImportArchive(): void;
-  onImportFolder?(): void;
   onExportArchive(selectedEntries?: ShelfEntry[]): void;
   onImportLegacyArchive?(): void;
   searchMode: ShelfSearchMode;
@@ -2183,6 +2400,7 @@ interface ShelfSettingsDrawerProps extends ShelfSubmenuBackProps {
 }
 
 function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
+  const [uiMotion, setUiMotion] = useUiMotion();
   const [mounted, setMounted] = useState(props.open);
   const [closing, setClosing] = useState(false);
   const [cachePanelOpen, setCachePanelOpen] = useState(false);
@@ -2585,6 +2803,21 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
               onChange={(value) => props.onThemeChange(value as Theme)}
             />
           </div>
+          <div className="shelf-drawer-setting">
+            <span>界面动画</span>
+            <ShelfSelect
+              registerSubmenuBackHandler={props.registerSubmenuBackHandler}
+              onSubmenuBackActiveChange={props.onSubmenuBackActiveChange}
+              value={uiMotion}
+              busy={props.busy}
+              title="界面动画"
+              options={[
+                { value: "full", label: "完整" },
+                { value: "reduced", label: "简化" },
+              ]}
+              onChange={(value) => setUiMotion(value as UiMotion)}
+            />
+          </div>
           {props.batteryIndicatorEnabled !== undefined && props.onBatteryIndicatorChange && (
             <div className="shelf-drawer-setting">
               <span>阅读电量</span>
@@ -2603,78 +2836,69 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
             </div>
           )}
 
-          <div className="shelf-drawer-group-label">数据与管理</div>
-          <div className="shelf-drawer-actions">
-            {capabilities.supportsCacheStorage && (
-              <button
-                className="tb-btn"
-                type="button"
-                onClick={() => setCachePanelOpen(true)}
-                disabled={props.busy}
-                title="查看缓存目录、索引占用并清除全文索引"
-              >
-                缓存与存储
-              </button>
-            )}
-            {props.onEnterSelection && (
-              <button
-                className="tb-btn"
-                type="button"
-                onClick={() => {
-                  props.onClose();
-                  props.onEnterSelection!();
-                }}
-                disabled={props.busy || props.entries.length === 0}
-                title="开启批量管理 (多选删除/移动/收藏)"
-              >
-                批量选择
-              </button>
-            )}
-            {props.onImportFolder && (
-              <button
-                className="tb-btn"
-                type="button"
-                onClick={() => {
-                  props.onClose();
-                  props.onImportFolder!();
-                }}
-                disabled={props.busy || props.importActive || props.saveFileActive || props.lanTransferActive}
-                title="选择一个文件夹，按目录导入其中的 EPUB 并整理到书架文件夹"
-              >
-                导入文件夹
-              </button>
-            )}
-            <button className="tb-btn" type="button" onClick={props.onImportArchive} disabled={props.busy || props.importArchiveDisabled || props.saveFileActive || props.lanTransferActive}>
-              导入存档
-            </button>
-            <button className="tb-btn" type="button" onClick={() => props.onExportArchive()} disabled={props.busy || props.saveFileActive || props.lanTransferActive || props.entries.length === 0}>
-              导出存档
-            </button>
+          <div className="shelf-drawer-group-label">备份与传输</div>
+          <div className="shelf-drawer-list">
             {capabilities.supportsLanTransfer && props.onOpenLanTransfer && (
-              <button
-                className="tb-btn"
-                type="button"
+              <ShelfDrawerRow
+                icon={<LanTransferIcon />}
+                title="设备互传"
+                detail="同一 Wi‑Fi 下传书和阅读进度"
                 disabled={!props.lanTransferActive && (props.busy || props.importActive || props.saveFileActive)}
-                title="在同一局域网的两台设备间互传书架资料"
                 onClick={() => props.onOpenLanTransfer!()}
-              >
-                局域网互传
-              </button>
+              />
+            )}
+            <ShelfDrawerRow
+              icon={<ExportIcon />}
+              title="导出存档"
+              detail="保存为 .epubsave 文件"
+              disabled={props.busy || props.saveFileActive || props.lanTransferActive || props.entries.length === 0}
+              onClick={() => props.onExportArchive()}
+            />
+            <ShelfDrawerRow
+              icon={<ImportArchiveIcon />}
+              title="导入存档"
+              detail="合并存档里的书和阅读资料"
+              disabled={props.busy || props.importArchiveDisabled || props.saveFileActive || props.lanTransferActive}
+              onClick={props.onImportArchive}
+            />
+            {props.onImportLegacyArchive && (
+              <ShelfDrawerRow
+                icon={<ImportArchiveIcon />}
+                title="导入旧版 JSON 存档"
+                detail="兼容早期版本导出的存档"
+                disabled={props.busy || props.importArchiveDisabled || props.saveFileActive || props.lanTransferActive}
+                onClick={props.onImportLegacyArchive}
+              />
             )}
           </div>
 
-          {props.onImportLegacyArchive && (
+          {(props.onEnterSelection || capabilities.supportsCacheStorage) && (
             <>
-              <div className="shelf-drawer-group-label">兼容旧版 JSON 存档</div>
-              <div className="shelf-drawer-actions">
-                <button
-                  className="tb-btn"
-                  type="button"
-                  onClick={props.onImportLegacyArchive}
-                  disabled={props.busy || props.importArchiveDisabled || props.saveFileActive || props.lanTransferActive}
-                >
-                  导入旧版 JSON 存档
-                </button>
+              <div className="shelf-drawer-group-label">管理</div>
+              <div className="shelf-drawer-list">
+                {props.onEnterSelection && (
+                  <ShelfDrawerRow
+                    icon={<CheckListIcon />}
+                    tone="neutral"
+                    title="批量选择"
+                    detail="多选后收藏、移动、导出或删除"
+                    disabled={props.busy || props.entries.length === 0}
+                    onClick={() => {
+                      props.onClose();
+                      props.onEnterSelection!();
+                    }}
+                  />
+                )}
+                {capabilities.supportsCacheStorage && (
+                  <ShelfDrawerRow
+                    icon={<StorageIcon />}
+                    tone="neutral"
+                    title="缓存与存储"
+                    detail="查看占用，清除全文索引"
+                    disabled={props.busy}
+                    onClick={() => setCachePanelOpen(true)}
+                  />
+                )}
               </div>
             </>
           )}
@@ -4359,13 +4583,15 @@ export function ShelfView(props: ShelfViewProps) {
               <button
                 className="shelf-selection-toggle-all"
                 type="button"
+                aria-pressed={selectedIds.size === visible.length && visible.length > 0}
                 disabled={props.busy || visible.length === 0}
                 onClick={() => {
                   if (selectedIds.size === visible.length) setSelectedIds(new Set());
                   else setSelectedIds(new Set(visible.map((e) => e.id)));
                 }}
               >
-                {selectedIds.size === visible.length && visible.length > 0 ? "取消全选" : "全选"}
+                <CheckSquareIcon checked={selectedIds.size === visible.length && visible.length > 0} />
+                <span>{selectedIds.size === visible.length && visible.length > 0 ? "取消全选" : "全选"}</span>
               </button>
             </div>
           </div>
@@ -4382,16 +4608,15 @@ export function ShelfView(props: ShelfViewProps) {
 
               {/* Level 1 右侧：导入图书主按钮、设置/更多 */}
               <div className="shelf-actions-zone-zen shelf-actions-zone-mobile">
-                <button
-                  className="shelf-btn-primary shelf-mobile-import-btn"
-                  type="button"
-                  onClick={props.onImport}
-                  disabled={props.busy || props.importActive}
-                  title="导入图书"
-                >
-                  <PlusIcon />
-                  <span>导入</span>
-                </button>
+                <ShelfImportButton
+                  compact
+                  disabled={Boolean(props.busy || props.importActive)}
+                  showDropHint={false}
+                  onImport={props.onImport}
+                  onImportFolder={props.onImportFolder}
+                  registerSubmenuBackHandler={registerSubmenuBackHandler}
+                  onSubmenuBackActiveChange={reportSubmenuBackActive}
+                />
 
                 <button
                   className="shelf-icon-btn-zen shelf-mobile-more-btn"
@@ -4480,27 +4705,17 @@ export function ShelfView(props: ShelfViewProps) {
 
             {/* Level 1 右侧：导入图书主按钮、视图切换 [⊞/☰]、设置 */}
             <div className="shelf-actions-zone-zen">
-              <button
-                className="shelf-btn-primary"
-                type="button"
-                onClick={props.onImport}
-                disabled={props.busy || props.importActive}
-                title="导入 EPUB 图书到书架"
-              >
-                <PlusIcon />
-                <span>导入图书</span>
-              </button>
-              {props.onImportFolder && (
-                <button
-                  className="shelf-btn-secondary"
-                  type="button"
-                  onClick={props.onImportFolder}
-                  disabled={props.busy || props.importActive || props.saveFileActive || props.lanTransferActive}
-                  title="按目录导入文件夹中的 EPUB，并整理到书架文件夹"
-                >
-                  <span>导入文件夹</span>
-                </button>
-              )}
+              <ShelfImportButton
+                compact={false}
+                disabled={Boolean(props.busy || props.importActive)}
+                showDropHint={!coarsePointer}
+                onImport={props.onImport}
+                onImportFolder={props.onImportFolder ? () => {
+                  if (!props.saveFileActive && !props.lanTransferActive) props.onImportFolder!();
+                } : undefined}
+                registerSubmenuBackHandler={registerSubmenuBackHandler}
+                onSubmenuBackActiveChange={reportSubmenuBackActive}
+              />
 
               {/* 视图切换 [⊞/☰] */}
               <div className="shelf-view-toggle-group" role="group" aria-label="视图模式切换">
@@ -4594,7 +4809,6 @@ export function ShelfView(props: ShelfViewProps) {
         lanTransferActive={props.lanTransferActive}
         onOpenLanTransfer={props.onOpenLanTransfer}
         onImportArchive={props.onImportArchive}
-        onImportFolder={props.onImportFolder}
         onExportArchive={props.onExportArchive}
         onImportLegacyArchive={props.onImportLegacyArchive}
         searchMode={props.searchMode ?? "metadata"}
@@ -4922,7 +5136,7 @@ export function ShelfView(props: ShelfViewProps) {
               type="button"
               onClick={() => setDensity(NEXT_SHELF_DENSITY[density])}
               title={`排布密度：${SHELF_DENSITY_LABEL[density]}，点按切换为${SHELF_DENSITY_LABEL[NEXT_SHELF_DENSITY[density]]}`}
-              style={{ width: "auto", height: 32, padding: "0 12px", fontSize: "13px" }}
+              style={{ width: "auto", padding: "0 12px", fontSize: "13px" }}
             >
               {SHELF_DENSITY_LABEL[density]}
             </button>
@@ -5466,6 +5680,7 @@ export function ShelfView(props: ShelfViewProps) {
               <FolderIcon />
               <span>移至文件夹</span>
             </button>
+            <span className="shelf-batch-divider" aria-hidden="true" />
             <button
               className="shelf-batch-action-btn"
               type="button"
@@ -5488,12 +5703,13 @@ export function ShelfView(props: ShelfViewProps) {
                   const targets = props.entries.filter((e) => selectedIds.has(e.id));
                   if (props.lanTransferActive || targets.length > 0) props.onOpenLanTransfer!(targets);
                 }}
-                title="将选中书籍资料加入局域网互传"
+                title="通过设备互传发给另一台设备"
               >
                 <LanTransferIcon />
-                <span>互传</span>
+                <span>发到设备</span>
               </button>
             )}
+            <span className="shelf-batch-divider" aria-hidden="true" />
             <button
               className="shelf-batch-action-btn danger"
               type="button"
@@ -5513,7 +5729,8 @@ export function ShelfView(props: ShelfViewProps) {
               onClick={exitSelection}
               title="退出多选"
             >
-              <span>✕ 退出选择</span>
+              <CloseIcon />
+              <span>退出选择</span>
             </button>
           </div>
         </div>
