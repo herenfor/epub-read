@@ -26,7 +26,7 @@ describe("Zen UI WhisperFooter 微提示状态栏与跳页器契约（Packet B�
     const html = renderToStaticMarkup(createElement(WhisperFooter, baseProps));
     expect(html).toContain("whisper-footer");
     expect(html).toContain("whisper-calm-text");
-    expect(html).toContain("第 12 / 120 页");
+    expect(html).toContain("本章 12 / 120 页");
     expect(html).not.toContain("分钟");
     expect(html).toContain("全书 18%");
   });
@@ -113,5 +113,12 @@ describe("Zen UI WhisperFooter 微提示状态栏与跳页器契约（Packet B�
       })
     );
     expect(lastSpreadHtml).toContain("本章 5 / 5 页");
+  });
+
+  it("手机底栏标明本章页码并给出章节位置，不把章内页码写成全书页码", () => {
+    const html = renderToStaticMarkup(
+      createElement(WhisperFooter, { ...baseProps, mobile: true, currentPage: 5, pageCount: 11, chapterIndex: 436, totalChapters: 1382 })
+    );
+    expect(html).toContain("本章 6/11 页 · 437/1382 章 · 全书");
   });
 });

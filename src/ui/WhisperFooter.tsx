@@ -497,16 +497,18 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
     return `${atEnd ? 100 : Math.min(99, Math.round(activeRatio * 100))}%`;
   };
 
-  // 极简微弱文案；触摸底栏空间有限，只留本章位置与全书百分比。
+  // 极简微弱文案。页码只在本章内计数，必须标"本章"，否则会被读成全书页码；
+  // 全书位置用"第几章/共几章"+百分比表达，不估算会随字号变化的全书页码。
   const textContent = (() => {
     if (mobile) {
       const parts: string[] = [];
       if (readingMode === "scroll") parts.push(`本章 ${currentChapterProgressPct}%`);
       else if (leafRange) {
         parts.push(leafRange.first === leafRange.last
-          ? `${leafRange.first}/${leafRange.total} 页`
-          : `${leafRange.first}–${leafRange.last}/${leafRange.total} 页`);
-      } else parts.push(`${currentPage + 1}/${pageCount || 1} 页`);
+          ? `本章 ${leafRange.first}/${leafRange.total} 页`
+          : `本章 ${leafRange.first}–${leafRange.last}/${leafRange.total} 页`);
+      } else parts.push(`本章 ${currentPage + 1}/${pageCount || 1} 页`);
+      if (totalChapters > 1) parts.push(`${chapterIndex + 1}/${totalChapters} 章`);
       parts.push(`全书 ${wholeBookLabel()}`);
       return parts.join(" · ");
     }
@@ -520,11 +522,11 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
         parts.push(`本章 ${leafRange.first}–${leafRange.last} / ${leafRange.total} 页`);
       }
     } else {
-      parts.push(`第 ${currentPage + 1} / ${pageCount || 1} 页`);
+      parts.push(`本章 ${currentPage + 1} / ${pageCount || 1} 页`);
     }
 
     if (totalChapters > 1) {
-      parts.push(`章 ${chapterIndex + 1}/${totalChapters}`);
+      parts.push(`第 ${chapterIndex + 1}/${totalChapters} 章`);
     }
 
     if (scrubState) {
