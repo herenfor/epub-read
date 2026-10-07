@@ -33,6 +33,7 @@ import {
   type ThumbnailProvider,
 } from "./thumbnail";
 import { hasReadPosition } from "./readEvidence";
+import { isShelfProgressPending, shelfProgressLabel } from "./shelfProgressDisplay";
 import { isShelfCardActionTarget } from "./shelfCardEventScope";
 import { getRuntimeCapabilities } from "../platform/runtimeCapabilities";
 import { AboutInfo } from "./AboutInfo";
@@ -880,9 +881,10 @@ const ShelfResumeStage = memo(function ShelfResumeStage({
 
   if (!activeBook) return null;
 
-  const pct = Math.round(activeBook.progressPct ?? 0);
-  const barWidth = `${Math.max(2, Math.min(100, activeBook.progressPct ?? 0))}%`;
-  const chapterLabel = `第 ${(activeBook.spineIndex ?? 0) + 1} 章 · ${pct}%`;
+  const barWidth = isShelfProgressPending(activeBook)
+    ? "0%"
+    : `${Math.max(2, Math.min(100, activeBook.progressPct ?? 0))}%`;
+  const chapterLabel = `第 ${(activeBook.spineIndex ?? 0) + 1} 章 · ${shelfProgressLabel(activeBook)}`;
 
   // Both states stay mounted; the stage animates its grid rows between them so
   // expanding/collapsing is one short height + cross-fade, not a remount jump.
@@ -1004,7 +1006,7 @@ const ShelfResumeStage = memo(function ShelfResumeStage({
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div className="shelf-more-reading-item-title">{b.title}</div>
                           <div className="shelf-more-reading-item-meta">
-                            {Math.round(b.progressPct ?? 0)}% · {formatRelativeTime(b.lastReadAtMs)}
+                            {shelfProgressLabel(b)} · {formatRelativeTime(b.lastReadAtMs)}
                           </div>
                         </div>
                         <button
@@ -1470,7 +1472,7 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
           </span>
           <span className="shelf-card-subline">
             {read ? (
-              <span className="shelf-read-stat">{entry.progressPct}% 已读</span>
+              <span className="shelf-read-stat">{shelfProgressLabel(entry, " 已读")}</span>
             ) : (
               <span className="shelf-read-stat unread">未读</span>
             )}
@@ -2663,8 +2665,8 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
                 <ul ref={resultListRef} className="shelf-drawer-results-list" role="listbox">
                   {matchingList.slice(0, 20).map((entry, index) => {
                     const isSelected = index === activeSearchIndex;
-                    const progressBadge = entry.progressPct > 0
-                      ? `${entry.progressPct}%`
+                    const progressBadge = isShelfProgressPending(entry) || entry.progressPct > 0
+                      ? shelfProgressLabel(entry)
                       : (entry.lastReadAtMs > 0 ? "在读" : "未读");
                     return (
                       <li
@@ -3459,7 +3461,7 @@ const ShelfTableRow = memo(function ShelfTableRow({
               style={{ width: `${Math.min(100, entry.progressPct ?? 0)}%` }}
             />
           </div>
-          <span className="shelf-table-progress-text">{Math.round(entry.progressPct ?? 0)}%</span>
+          <span className="shelf-table-progress-text">{shelfProgressLabel(entry)}</span>
         </div>
       </td>
       <td style={{ color: "var(--muted)", fontSize: 12, whiteSpace: "nowrap" }}>
@@ -3966,10 +3968,10 @@ export function ShelfView(props: ShelfViewProps) {
     switch (statusTab) {
       case "reading":
         return base.filter(
-          (e) => hasReadPosition(e) && (e.progressPct ?? 0) < 100 && (e.progressPct ?? 0) > 0
+          (e) => hasReadPosition(e) && (e.progressPct ?? 0) < 100 && ((e.progressPct ?? 0) > 0 || isShelfProgressPending(e))
         );
       case "unread":
-        return base.filter((e) => !hasReadPosition(e) || (e.progressPct ?? 0) === 0);
+        return base.filter((e) => !hasReadPosition(e) || ((e.progressPct ?? 0) === 0 && !isShelfProgressPending(e)));
       case "finished":
         return base.filter((e) => (e.progressPct ?? 0) >= 100);
       case "favorites":

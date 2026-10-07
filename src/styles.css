@@ -1349,12 +1349,19 @@ select option {
 .edge-turn-zone:hover .edge-turn-arrow {
   opacity: 0.45;
   transform: scale(1);
+  animation: edge-turn-hint-fade 1000ms ease-out forwards;
 }
 
 .edge-turn-zone:hover:active .edge-turn-arrow {
+  animation: none;
   opacity: 0.85;
   background: var(--btn-tint-hover);
   transform: scale(0.96);
+}
+
+@keyframes edge-turn-hint-fade {
+  0%, 20% { opacity: 0.45; }
+  100% { opacity: 0; }
 }
 
 /* ---- 连续滚动阅读视图 ---- */
