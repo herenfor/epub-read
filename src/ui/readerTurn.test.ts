@@ -11,6 +11,10 @@ class MockPaginator {
   state: { status: string; empty?: boolean; pageCount?: number; currentPage?: number } = { status: "loading" };
   currentPage = 0;
   pageCount = 5;
+  pageMotionAvailable = false;
+  motionBeginDrag = vi.fn(() => null);
+  prepareMotion() {}
+  endMotionContact() {}
   path = "";
   callbacks: unknown[];
   settings: ReaderSettings;
@@ -158,7 +162,7 @@ describe("Zen UI Packet C: 硬件加速平滑翻页与边缘翻页交互契约",
 
     await dom.click(nextZone);
 
-    expect(active.setPage).toHaveBeenCalledWith(1);
+    expect(active.setPage).toHaveBeenCalledWith(1, { userInitiated: true });
     const readerEl = dom.container.querySelector(".reader");
     expect(readerEl?.classList.contains("has-turn-anim")).toBe(true);
     expect(readerEl?.classList.contains("turn-next")).toBe(true);
@@ -180,7 +184,7 @@ describe("Zen UI Packet C: 硬件加速平滑翻页与边缘翻页交互契约",
 
     await dom.click(prevZone);
 
-    expect(active.setPage).toHaveBeenCalledWith(1);
+    expect(active.setPage).toHaveBeenCalledWith(1, { userInitiated: true });
     const readerEl = dom.container.querySelector(".reader");
     expect(readerEl?.classList.contains("has-turn-anim")).toBe(true);
     expect(readerEl?.classList.contains("turn-prev")).toBe(true);
@@ -202,7 +206,7 @@ describe("Zen UI Packet C: 硬件加速平滑翻页与边缘翻页交互契约",
     const nextZone = dom.container.querySelector(".edge-turn-zone.edge-turn-next") as HTMLElement;
     await dom.click(nextZone);
 
-    expect(active.setPage).toHaveBeenCalledWith(1);
+    expect(active.setPage).toHaveBeenCalledWith(1, { userInitiated: true });
     const readerEl = dom.container.querySelector(".reader");
     expect(readerEl?.classList.contains("has-turn-anim")).toBe(false);
   });
@@ -256,7 +260,32 @@ describe("Zen UI Packet C: 硬件加速平滑翻页与边缘翻页交互契约",
     });
     expect(active.previewPagedScroll).toHaveBeenLastCalledWith(100);
     expect(active.setPage).toHaveBeenCalledTimes(1);
-    expect(active.setPage).toHaveBeenCalledWith(1);
+    expect(active.setPage).toHaveBeenCalledWith(1, { userInitiated: true });
+  });
+
+  it("运动会话在创建时不可用：同一次拖动进入同章备用跟手，不显示章边提示", async () => {
+    window.requestAnimationFrame = callback => setTimeout(() => callback(performance.now()), 16) as unknown as number;
+    window.cancelAnimationFrame = handle => clearTimeout(handle);
+    props = { ...props, settings: { ...props.settings, turnAnimation: "slide" } };
+    await render();
+    const active = await finishActive();
+    active.pageMotionAvailable = true;
+    const reader = dom.container.querySelector(".reader") as HTMLElement;
+    const touch = async (type: string, x: number) => {
+      const event = new (window as unknown as { Event: typeof Event }).Event(type, { bubbles: true, cancelable: true });
+      Object.assign(event, { touches: [{ screenX: x, screenY: 100, clientX: x, clientY: 100 }] });
+      await dom.dispatch(reader, event);
+    };
+    await touch("touchstart", 250);
+    await touch("touchmove", 210);
+    await act(async () => { vi.advanceTimersByTime(16); });
+    expect(active.motionBeginDrag).toHaveBeenCalledWith(1);
+    expect(active.pagedSlideFrame).toHaveBeenCalledWith(1);
+    expect(active.previewPagedScroll).toHaveBeenLastCalledWith(40);
+    expect(reader.dataset.swipeFollow).toBe("true");
+    expect(reader.dataset.swipeDirection).toBeUndefined();
+    expect(props.onRequestChapter).not.toHaveBeenCalled();
+    expect(active.setPage).not.toHaveBeenCalled();
   });
 
   it("滑动模式下连续翻页先落位上一次动画再开始下一次", async () => {
@@ -270,12 +299,12 @@ describe("Zen UI Packet C: 硬件加速平滑翻页与边缘翻页交互契约",
     const nextZone = dom.container.querySelector(".edge-turn-zone.edge-turn-next") as HTMLElement;
     await dom.click(nextZone);
     await dom.click(nextZone);
-    expect(active.setPage).toHaveBeenCalledWith(1);
+    expect(active.setPage).toHaveBeenCalledWith(1, { userInitiated: true });
 
     await act(async () => {
       vi.advanceTimersByTime(400);
     });
-    expect(active.setPage).toHaveBeenLastCalledWith(2);
+    expect(active.setPage).toHaveBeenLastCalledWith(2, { userInitiated: true });
     expect(active.setPage).toHaveBeenCalledTimes(2);
   });
 

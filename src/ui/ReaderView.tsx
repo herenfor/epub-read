@@ -1843,7 +1843,9 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         return;
       }
       delete main.dataset.swipeFollow;
-    } else if (p && resolvedTurnAnimation() === "slide") {
+    }
+    // 会话可能在本次创建时拒绝几何；同章仍须接续备用跟手路径，不能冒充章边。
+    if (p && resolvedTurnAnimation() === "slide") {
       let drag = slideDragRef.current;
       if (!drag || drag.dir !== direction) {
         slideAnimRef.current?.finish();

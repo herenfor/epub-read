@@ -27,7 +27,8 @@ function fakeViewer(options: { scrollWidth?: () => number } = {}) {
     },
     get scrollLeft() { return scrollLeft; },
     set scrollLeft(value: number) { events.push(`scrollLeft=${value}`); scrollLeft = value; },
-    get scrollWidth() { return options.scrollWidth?.() ?? 1000; },
+    // 浏览器 scrollWidth 至少等于 clientWidth；短章扩成 5 屏会虚增宽度。
+    get scrollWidth() { return Math.max(options.scrollWidth?.() ?? 1000, viewer.clientWidth); },
     get clientWidth() { return Number.parseFloat(style.get("width")?.value ?? "100"); },
     animations: [] as Array<{ cancelled: boolean; finishCalled: boolean; resolve: () => void }>,
     animate(_frames: Keyframe[]) {
@@ -67,6 +68,41 @@ beforeAll(() => { (globalThis as Record<string, unknown>).DOMMatrixReadOnly = Fa
 afterAll(() => { delete (globalThis as Record<string, unknown>).DOMMatrixReadOnly; });
 
 describe("transform page motion driver", () => {
+  it.each([1, 2, 3, 4].flatMap(screens => [1, 2].map(columns => ({ screens, columns }))))(
+    "$screens 屏短章、每屏 $columns 栏：准备/动画/中断读数不虚增章宽，退出恢复原几何",
+    async ({ screens, columns }) => {
+      const viewer = fakeViewer({ scrollWidth: () => screens * 100 });
+      viewer.scrollLeft = 0;
+      viewer.style.setProperty("column-count", String(columns));
+      const faults: unknown[] = [];
+      const driver = new TransformPageMotion(viewer as unknown as HTMLElement, {
+        offsets: Array.from({ length: screens }, (_, i) => i * 100), step: 100, columnsPerScreen: columns,
+      }, 0, e => faults.push(e));
+      driver.write(0);
+      expect(faults).toEqual([]);
+      expect(viewer.scrollWidth).toBe(screens * 100);
+      expect(driver.active).toBe(true);
+      const target = (screens - 1) * 100;
+      if (screens > 1) {
+        driver.animateTo(target, { durationMs: 300, tauMs: 90 }, () => driver.holdSettledAt(target));
+        expect(viewer.animations).toHaveLength(1);
+        // 从正在呈现的 matrix 反算视觉坐标，覆盖偶数窗口与双栏。
+        viewer.present(Math.floor(screens / 2) * 100 - target + 25);
+        expect(driver.read().position).toBe(target - 25);
+        viewer.present(null);
+        viewer.animations[0].resolve();
+        await Promise.resolve();
+        expect(driver.read().position).toBe(target);
+      }
+      driver.settleTo(target);
+      expect(viewer.scrollLeft).toBe(target);
+      expect(viewer.style.getPropertyValue("width")).toBe("100px");
+      expect(viewer.style.getPropertyValue("column-count")).toBe(String(columns));
+      expect(driver.active).toBe(false);
+      expect(faults).toEqual([]);
+    },
+  );
+
   it("中断：先写同位置底层样式再 cancel，不 finish 到旧目标；落定恢复原几何并停在真实落点", async () => {
     const viewer = fakeViewer();
     const faults: unknown[] = [];

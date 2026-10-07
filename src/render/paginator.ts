@@ -3138,7 +3138,8 @@ export class ChapterPaginator {
   get pageMotionAvailable(): boolean {
     return Boolean(
       this.touchSlideWanted && this.viewer && !this.scrollMode && !this.disposed &&
-      this.pageMotionCapable() && this.prefersTouchPaging(),
+      this.pageMotionCapable() && this.prefersTouchPaging() &&
+      this.pageMotionUnsupportedKey !== this.snapOffsetsCache?.key,
     );
   }
 
