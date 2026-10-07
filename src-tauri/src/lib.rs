@@ -284,6 +284,23 @@ pub fn run() {
         .manage(lan_save::LanSaveManager::default())
         .manage(ai::AiState::default())
         .setup(|app| {
+            #[cfg(windows)]
+            if let Some(window) = app.get_webview_window("main") {
+                use windows::Win32::Foundation::{LPARAM, WPARAM};
+                use windows::Win32::UI::WindowsAndMessaging::{
+                    SendMessageW, ICON_BIG, ICON_SMALL2, WM_GETICON, WM_SETICON,
+                };
+                let hwnd = window.hwnd()?;
+                // Tao owns the configured small icon for this window's lifetime.
+                // Tauri sets only ICON_SMALL; Windows also needs ICON_BIG for the taskbar.
+                // Reuse that handle so both slots share the same asset and ownership.
+                unsafe {
+                    let icon = SendMessageW(hwnd, WM_GETICON, WPARAM(ICON_SMALL2 as usize), LPARAM(0));
+                    if icon.0 != 0 {
+                        SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_BIG as usize), LPARAM(icon.0));
+                    }
+                }
+            }
             let _ = save_file::cleanup_stale_staging(app.handle());
             let _ = lan_save::cleanup_stale_staging(app.handle());
             app.state::<ai::AiState>()
