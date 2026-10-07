@@ -52,7 +52,7 @@ pub struct InputPage {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", tag = "kind")]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase", tag = "kind")]
 pub enum FolderTarget {
     Reuse {
         group_key: String,
@@ -229,4 +229,22 @@ pub enum CancelStatus {
     Requested,
     Settling,
     AlreadyFinished,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FolderTarget;
+
+    #[test]
+    fn folder_targets_use_frontend_camel_case_fields() {
+        for wire in [
+            serde_json::json!({"kind":"reuse", "groupKey":"group", "folderId":"folder"}),
+            serde_json::json!({"kind":"create", "groupKey":"group", "folderId":"folder", "name":"分类"}),
+        ] {
+            let target: FolderTarget = serde_json::from_value(wire.clone()).unwrap();
+            assert_eq!(target.group_key(), "group");
+            assert_eq!(target.folder_id(), "folder");
+            assert_eq!(serde_json::to_value(target).unwrap(), wire);
+        }
+    }
 }
