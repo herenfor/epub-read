@@ -80,6 +80,9 @@ export function SaveFileExportDialog(props: SaveFileExportDialogProps) {
               <span>当前选中的书{props.selectedCount > 0 ? `（${props.selectedCount} 本）` : "（无选中）"}</span>
             </label>
           </fieldset>
+          <p className="save-file-muted">
+            阅读资料包含进度、书签、笔记、收藏及文件夹；全库包含空文件夹，选中的书只带相关文件夹。附带书籍文件与资料范围是两个独立选择。
+          </p>
           <label className="save-file-check">
             <input
               type="checkbox"
