@@ -4,6 +4,7 @@ import type { PortableStateV3 } from "../../core/portableState/portable-state-ty
 import type { Stamp } from "../../core/portableState/portable-register-core";
 import type { PortableStateCommandService } from "./service";
 import type { ProgressRuntimeStatus } from "./progressRuntimeGate";
+import type { DirectoryPlacementBatch, DirectoryPlacementBatchResult } from "../folderImport/placementBatch";
 
 export interface PortableActivationResult {
   readonly status: "fresh" | "migrated" | "already-migrated";
@@ -38,6 +39,8 @@ export interface PortableStateDataService extends PortableStateCommandService {
   getOrganization(): Promise<LibraryOrganization>;
   applyOrganization(command: OrganizationCommand): Promise<LibraryOrganization>;
   mergeOrganization(incoming: LibraryOrganization): Promise<LibraryOrganization>;
+  /** Web only: one repository transaction for a directory-import placement batch. */
+  commitDirectoryPlacementBatch?(batch: DirectoryPlacementBatch): Promise<DirectoryPlacementBatchResult>;
   reserveStamps(count: number): Promise<Stamp>;
   /** Read-only health probe; must not snapshot, migrate or activate a store. */
   runtimeStatus(): Promise<ProgressRuntimeStatus>;

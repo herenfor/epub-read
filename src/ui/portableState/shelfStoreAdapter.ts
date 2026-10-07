@@ -21,6 +21,7 @@ import type {
 import type { ReaderNote } from "../notes";
 import type { LibraryRecord } from "../libraryArchive";
 import type { LibraryOrganization } from "../libraryOrganization";
+import type { DirectoryPlacementBatch, DirectoryPlacementBatchResult } from "../folderImport/placementBatch";
 import type { ThumbnailAsset } from "../thumbnail";
 import {
   legacyLocatorFromReadingFields,
@@ -958,5 +959,13 @@ export class PortableShelfStore implements ShelfStore {
 
   async mergeOrganization(incoming: LibraryOrganization): Promise<LibraryOrganization> {
     return this.data.mergeOrganization(incoming);
+  }
+
+  async commitDirectoryPlacementBatch(batch: DirectoryPlacementBatch): Promise<DirectoryPlacementBatchResult> {
+    if (!this.data.commitDirectoryPlacementBatch) {
+      // Native directory jobs commit placement in the backend; never emulate it with separate writes.
+      throw new Error("当前存储后端不支持网页目录归档");
+    }
+    return this.data.commitDirectoryPlacementBatch(batch);
   }
 }

@@ -166,6 +166,33 @@
   cursor: not-allowed;
 }
 
+/* 次要入口（导入文件夹）：与主按钮同高同圆角，底色走输入框层，不抢主操作。 */
+.shelf-btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--panel-border, rgba(0, 0, 0, 0.1));
+  border-radius: 8px;
+  background: var(--shelf-input-bg, rgba(0, 0, 0, 0.05));
+  color: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.shelf-btn-secondary:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent, #2563eb) 45%, transparent);
+}
+
+.shelf-btn-secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .shelf-view-toggle-group {
   display: inline-flex;
   align-items: center;

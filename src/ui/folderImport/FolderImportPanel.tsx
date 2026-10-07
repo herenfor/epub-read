@@ -41,6 +41,8 @@ export interface FolderImportPanelProps {
   onClose(): void;
   /** Fallback entry for environments without directory selection. */
   onUseFileImport?(): void;
+  /** Incremented by the host (Android Back) to request the same close as 取消/关闭; ignored while importing. */
+  closeSignal?: number;
 }
 
 export const DEFAULT_FOLDER_IMPORT_OPTIONS: ImportOptions = {
@@ -296,6 +298,15 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
     ownerRef.current?.close();
     props.onClose();
   };
+
+  const closeRef = useRef(close);
+  closeRef.current = close;
+  const initialCloseSignal = useRef(props.closeSignal);
+  useEffect(() => {
+    if (props.closeSignal === initialCloseSignal.current) return;
+    initialCloseSignal.current = props.closeSignal;
+    closeRef.current();
+  }, [props.closeSignal]);
 
   const setChoice = (groupKey: string, value: string) => {
     setChoices((current) => ({

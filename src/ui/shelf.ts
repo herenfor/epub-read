@@ -17,6 +17,11 @@ import { createRepositoryReadinessRecovery } from "./portableState/repositoryRea
 import type { PortablePreferences } from "../core/portableState/portable-state-types";
 import type { LibraryRecord } from "./libraryArchive";
 import type { ThumbnailAsset, ThumbnailProvider } from "./thumbnail";
+import {
+  applyDirectoryPlacementBatch,
+  type DirectoryPlacementBatch,
+  type DirectoryPlacementBatchResult,
+} from "./folderImport/placementBatch";
 import { hasDuplicateReaderNoteIds, normalizeReaderNotes, type ReaderNote } from "./notes";
 import {
   applyCommand,
@@ -189,6 +194,12 @@ export interface ShelfStore {
   getOrganization(): Promise<LibraryOrganization>;
   applyOrganization(command: OrganizationCommand): Promise<LibraryOrganization>;
   mergeOrganization(incoming: LibraryOrganization): Promise<LibraryOrganization>;
+  /**
+   * Web directory import: re-check, create folders and move books in ONE
+   * storage transaction, or write nothing. Native directory jobs commit their
+   * own placement in the backend and never call this.
+   */
+  commitDirectoryPlacementBatch?(batch: DirectoryPlacementBatch): Promise<DirectoryPlacementBatchResult>;
   /**
    * CP-I-R single-entity v3 operations. Legacy backends may omit these and the
    * UI keeps its whole-array path for them; the portable facade never rewrites
@@ -1068,6 +1079,26 @@ class IndexedDbShelfStore implements ShelfStore {
   }
 
   async applyOrganization(command: OrganizationCommand): Promise<LibraryOrganization> {
+    return this.writeOrganization((envelope, knownHashes) => {
+      const next = applyCommand(envelope, command, knownHashes);
+      return { envelope: next, value: next.state };
+    });
+  }
+
+  async commitDirectoryPlacementBatch(batch: DirectoryPlacementBatch): Promise<DirectoryPlacementBatchResult> {
+    return this.writeOrganization((envelope, knownHashes) => {
+      const applied = applyDirectoryPlacementBatch(envelope, batch, knownHashes);
+      return { envelope: applied.envelope, value: applied.result };
+    });
+  }
+
+  /**
+   * Read the envelope and known hashes, compute, and put the next envelope in
+   * one meta+organization transaction. A throwing compute aborts: nothing lands.
+   */
+  private async writeOrganization<T>(
+    compute: (envelope: OrganizationEnvelope, knownHashes: ReadonlySet<string>) => { envelope: OrganizationEnvelope; value: T },
+  ): Promise<T> {
     const db = await openDb();
     try {
       const tx = db.transaction(["meta", "organization"], "readwrite");
@@ -1103,10 +1134,16 @@ class IndexedDbShelfStore implements ShelfStore {
         }
       }
 
-      const nextEnvelope = applyCommand(envelope, command, knownHashes);
-      orgStore.put(nextEnvelope, "current");
+      let computed: { envelope: OrganizationEnvelope; value: T };
+      try {
+        computed = compute(envelope, knownHashes);
+      } catch (error) {
+        try { tx.abort(); } catch { /* already finished */ }
+        throw error;
+      }
+      orgStore.put(computed.envelope, "current");
       await txDone(tx);
-      return nextEnvelope.state;
+      return computed.value;
     } finally {
       db.close();
     }

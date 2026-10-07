@@ -122,6 +122,8 @@ export interface ShelfViewProps {
   onBatteryIndicatorChange?(enabled: boolean): void;
   onOpen(id: string): void;
   onImport(): void;
+  /** Directory import entry; absent hides it. */
+  onImportFolder?(): void;
   onImportArchive(): void;
   /** `selectedEntries` is handled by App and resolved to 64-bit content hashes before any native job is created. */
   onExportArchive(selectedEntries?: ShelfEntry[]): void;
@@ -2169,6 +2171,7 @@ interface ShelfSettingsDrawerProps extends ShelfSubmenuBackProps {
   onClose(): void;
   onOpenBook?(id: string): void;
   onImportArchive(): void;
+  onImportFolder?(): void;
   onExportArchive(selectedEntries?: ShelfEntry[]): void;
   onImportLegacyArchive?(): void;
   searchMode: ShelfSearchMode;
@@ -2625,6 +2628,20 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
                 title="开启批量管理 (多选删除/移动/收藏)"
               >
                 批量选择
+              </button>
+            )}
+            {props.onImportFolder && (
+              <button
+                className="tb-btn"
+                type="button"
+                onClick={() => {
+                  props.onClose();
+                  props.onImportFolder!();
+                }}
+                disabled={props.busy || props.importActive || props.saveFileActive || props.lanTransferActive}
+                title="选择一个文件夹，按目录导入其中的 EPUB 并整理到书架文件夹"
+              >
+                导入文件夹
               </button>
             )}
             <button className="tb-btn" type="button" onClick={props.onImportArchive} disabled={props.busy || props.importArchiveDisabled || props.saveFileActive || props.lanTransferActive}>
@@ -4473,6 +4490,17 @@ export function ShelfView(props: ShelfViewProps) {
                 <PlusIcon />
                 <span>导入图书</span>
               </button>
+              {props.onImportFolder && (
+                <button
+                  className="shelf-btn-secondary"
+                  type="button"
+                  onClick={props.onImportFolder}
+                  disabled={props.busy || props.importActive || props.saveFileActive || props.lanTransferActive}
+                  title="按目录导入文件夹中的 EPUB，并整理到书架文件夹"
+                >
+                  <span>导入文件夹</span>
+                </button>
+              )}
 
               {/* 视图切换 [⊞/☰] */}
               <div className="shelf-view-toggle-group" role="group" aria-label="视图模式切换">
@@ -4566,6 +4594,7 @@ export function ShelfView(props: ShelfViewProps) {
         lanTransferActive={props.lanTransferActive}
         onOpenLanTransfer={props.onOpenLanTransfer}
         onImportArchive={props.onImportArchive}
+        onImportFolder={props.onImportFolder}
         onExportArchive={props.onExportArchive}
         onImportLegacyArchive={props.onImportLegacyArchive}
         searchMode={props.searchMode ?? "metadata"}
