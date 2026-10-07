@@ -3948,11 +3948,12 @@ export class ChapterPaginator {
     // 纯图片页（封面/插图，无文字）：不加上下留白，整页显示
     const hasText = (viewer.textContent ?? "").trim().length > 0;
     const hasImg = viewer.querySelector("img") !== null;
-    const pureImagePage = !this.fixedLayout && !hasText && hasImg;
+    const imagePageSequence = viewer.hasAttribute("data-reader-image-pages");
+    const pureImagePage = !this.fixedLayout && ((!hasText && hasImg) || imagePageSequence);
     const viewerClasses = viewer.classList;
     const fullpageVisual =
       viewerClasses?.contains?.("fullpage-image") === true ||
-      viewerClasses?.contains?.("pure-image-page") === true;
+      viewerClasses?.contains?.("pure-image-page") === true || imagePageSequence;
     const onlyChildClass =
       viewer.children.length === 1
         ? (viewer.firstElementChild as HTMLElement | null)?.className ?? ""

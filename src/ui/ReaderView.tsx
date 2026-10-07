@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import type { Book } from "../core/types";
 import { nextLinearIndex, spineItemPath } from "../core/book";
 import {
@@ -33,6 +33,9 @@ import { createSettingsReloadDebouncer } from "./settingsReload";
 import { TurnIntentBuffer, WheelTurnAccumulator } from "./turnIntent";
 import { ReadingWarmupPlan, backgroundPreparation, type WarmupTicket } from "./readerWarmup";
 import { ContinuousReaderView } from "./ContinuousReaderView";
+import { ImageChapterSpreads, type ImageChapterSpread } from "./imageChapterSpreads";
+import { ImageSpreadReaderView } from "./ImageSpreadReaderView";
+import { createSpreadGeometry } from "../render/pagedSpread";
 import type { ScrubToken } from "./readerProgressAxis";
 import { installPagedSwipe, PAGED_SWIPE_THRESHOLD_PX } from "../render/pagedSwipe";
 import {
@@ -122,7 +125,7 @@ export interface ReaderHandle {
   scrollByDelta(deltaY: number): void;
 }
 
-interface ReaderViewProps {
+export interface ReaderViewProps {
   book: Book;
   server: ResourceServer;
   spineIndex: number;
@@ -2251,8 +2254,52 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
 });
 
 export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function ReaderView(props, ref) {
+  const host = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(0);
+  const imageSpreads = useMemo(() => new ImageChapterSpreads(props.book,
+    (path, signal) => props.server.readTextFor(path, signal)), [props.book, props.server]);
+  const [imagePlan, setImagePlan] = useState<{
+    resolver: ImageChapterSpreads; index: number; spread: ImageChapterSpread | null;
+  } | null>(null);
+  const requestedSpread = props.settings.readingMode !== "scroll" &&
+    props.settings.columnsPerView === 2 && !props.book.fixedLayout;
+  useEffect(() => {
+    const element = host.current;
+    if (!element) return;
+    setWidth(element.clientWidth);
+    const observer = new ResizeObserver(() => setWidth(element.clientWidth));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  useEffect(() => {
+    if (!requestedSpread) return;
+    const controller = new AbortController();
+    void imageSpreads.resolve(props.spineIndex, controller.signal).then((spread) => {
+      if (!controller.signal.aborted) setImagePlan({ resolver: imageSpreads, index: props.spineIndex, spread });
+    }, () => {
+      // Ordinary chapter loading owns resource/parse errors. Never turn a
+      // failed classification into a permanently cached "not an image".
+      if (!controller.signal.aborted) setImagePlan({ resolver: imageSpreads, index: props.spineIndex, spread: null });
+    });
+    return () => controller.abort();
+  }, [imageSpreads, props.spineIndex, props.anchorNonce, requestedSpread]);
+  const imageGeometry = createSpreadGeometry(Math.max(0, width -
+    (props.settings.pageMarginsPx?.left ?? 0) - (props.settings.pageMarginsPx?.right ?? 0)), props.settings.gapPx, 2);
+  const planned = imageSpreads.peek(props.spineIndex) ?? (imagePlan?.resolver === imageSpreads &&
+    imagePlan.index === props.spineIndex ? imagePlan.spread : null);
+  const pair = requestedSpread && imageGeometry.columns === 2 ? planned : null;
+  let content;
   if (props.settings.readingMode === "scroll" && !props.book.fixedLayout) {
-    return <ContinuousReaderView {...props} ref={ref} />;
+    content = <ContinuousReaderView {...props} ref={ref} />;
+  } else if (pair) {
+    content = <ImageSpreadReaderView key={`${pair.left}:${pair.right}`} {...props} ref={ref}
+      spread={pair} gap={imageGeometry.gap} Page={PagedReaderView}
+      onUnsupported={() => {
+        imageSpreads.reject(pair);
+        setImagePlan({ resolver: imageSpreads, index: props.spineIndex, spread: null });
+      }} />;
+  } else {
+    content = <PagedReaderView {...props} ref={ref} />;
   }
-  return <PagedReaderView {...props} ref={ref} />;
+  return <div ref={host} className="reader-presentation-host">{content}</div>;
 });

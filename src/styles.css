@@ -1188,6 +1188,26 @@ select option {
   border: none;
 }
 
+.reader-presentation-host {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+}
+.reader-image-spread {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  box-sizing: border-box;
+  overflow: clip;
+}
+.reader-image-leaf { display: flex; min-width: 0; min-height: 0; }
+.reader-image-leaf .edge-turn-zone { display: none; }
+.reader-image-spread[data-image-spread-ready="false"] .reader-image-leaf { visibility: hidden; }
+
 /* ---- Zen UI Packet C: 硬件加速平滑翻页与边缘触控增强 ---- */
 .reader[data-swipe-input="true"] { overflow: clip; }
 
