@@ -6,7 +6,9 @@ import type { LanOfferSummary, LanProgress } from "../platform/lanSaveNativeBrid
  *
  * Native errors carry technical messages (TLS, JSON, file paths). The panel
  * never shows them: every text here is derived from the stable error code and
- * the step the user was taking.
+ * the step the user was taking. The one exception is a version explanation on
+ * `protocol-mismatch`, which the backend writes for the user (upgrade vs. use
+ * a save file) and the generic sentence would lose.
  */
 export type LanUserStep = "host" | "join" | "send" | "receive";
 
@@ -22,7 +24,7 @@ export function formatLanBytes(value: number): string {
   return `${amount >= 10 || unit === 0 ? Math.round(amount) : amount.toFixed(1)} ${units[unit]}`;
 }
 
-export function lanErrorText(code: string | null, step: LanUserStep | null): string {
+export function lanErrorText(code: string | null, step: LanUserStep | null, nativeMessage?: string | null): string {
   switch (code) {
     case "lan-unreachable":
       return "连不上对方设备。请确认两台设备连着同一个 Wi‑Fi。公司、学校或酒店的网络可能不允许设备互连，可以改用手机热点。";
@@ -51,8 +53,13 @@ export function lanErrorText(code: string | null, step: LanUserStep | null): str
         : "空间不足，无法接收这次传输。请释放空间后重新连接，或让对方少选一些书。";
     case "metadata-too-large":
       return "这次阅读资料太多。请少选一些书，分批发送。";
-    case "protocol-mismatch":
+    case "protocol-mismatch": {
+      const message = nativeMessage?.trim();
+      if (message && message.includes("版本") && message.length <= 80) {
+        return /[。！？]$/.test(message) ? message : `${message}。`;
+      }
       return "两台设备需要更新到支持同一互传协议的版本。";
+    }
     case "not-found":
     case "invalid-state":
       return "连接已经结束了。请重新连接。";

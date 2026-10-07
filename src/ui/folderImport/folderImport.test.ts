@@ -23,6 +23,8 @@ import {
 } from "../libraryOrganization";
 import type { ShelfEntry, ShelfSaveInput } from "../shelf";
 import { sha256Hex } from "../importBooks";
+import { MemoryPortableStateStorage } from "../portableState/memoryStorage";
+import { PortableStateService } from "../portableState/service";
 
 const { nativeInvoke } = vi.hoisted(() => ({ nativeInvoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", async (importOriginal) => ({
@@ -427,5 +429,65 @@ describe("native directory registration ownership", () => {
       "directory_import_pick", "directory_import_scan", "directory_import_cancel", "directory_import_dispose",
     ]);
     expect(updateUI).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("portable repository directory placement transaction", () => {
+  const HASH_A = "a".repeat(64);
+  const HASH_B = "b".repeat(64);
+  const FOLDER = "66666666-6666-4666-8666-666666666666";
+  const USER_FOLDER = "77777777-7777-4777-8777-777777777777";
+
+  function repository() {
+    const storage = new MemoryPortableStateStorage();
+    storage.seed({
+      metadata: [HASH_A, HASH_B].map((hash) => ({
+        hash,
+        metadata: {
+          value: { title: hash.slice(0, 1), creator: "", fileName: "x.epub", addedAtMs: 1 },
+          stamp: { deviceId: "00000000-0000-4000-8000-000000000009", counter: 1 },
+        },
+      })),
+    });
+    return new PortableStateService(storage);
+  }
+
+  it("rolls the whole batch back when one item fails, then commits a valid batch", async () => {
+    const service = repository();
+    const empty = await service.getOrganization();
+    const target: FolderTarget = { groupKey: "g", kind: "create", folderId: FOLDER, name: "新夹" };
+    const item = (contentHash: string) => ({
+      inputId: contentHash.slice(0, 1), contentHash, isExisting: false, target, observed: placementSnapshotOf(empty, contentHash),
+    });
+    await expect(service.commitDirectoryPlacementBatch({
+      policy: "fillUnclassified", items: [item(HASH_A), item("c".repeat(64))],
+    })).rejects.toThrow();
+    expect((await service.getOrganization()).folders).toEqual({}); // no half batch, no empty folder
+    const committed = await service.commitDirectoryPlacementBatch({ policy: "fillUnclassified", items: [item(HASH_A), item(HASH_B)] });
+    expect(committed.createdFolderIds).toEqual([FOLDER]);
+    const state = await service.getOrganization();
+    expect([effectiveFolderId(state, HASH_A), effectiveFolderId(state, HASH_B)]).toEqual([FOLDER, FOLDER]);
+  });
+
+  it("a user move that commits first wins over the import's stale observation", async () => {
+    const service = repository();
+    await service.applyOrganization({ type: "createFolder", folderId: USER_FOLDER, name: "我的" });
+    const observed = await service.getOrganization();
+    const target: FolderTarget = { groupKey: "g", kind: "create", folderId: FOLDER, name: "新夹" };
+    // Both writes race; the repository serializes them and the batch re-checks inside its own transaction.
+    const [, committed] = await Promise.all([
+      service.applyOrganization({ type: "moveBooks", contentHashes: [HASH_A], folderId: USER_FOLDER }),
+      service.commitDirectoryPlacementBatch({
+        policy: "fillUnclassified",
+        items: [HASH_A, HASH_B].map((contentHash) => ({
+          inputId: contentHash.slice(0, 1), contentHash, isExisting: true, target, observed: placementSnapshotOf(observed, contentHash),
+        })),
+      }),
+    ]);
+    expect(committed.outcomes.map((o) => o.decision.kind)).toEqual(["skipped", "move"]);
+    const state = await service.getOrganization();
+    expect(effectiveFolderId(state, HASH_A)).toBe(USER_FOLDER);
+    expect(effectiveFolderId(state, HASH_B)).toBe(FOLDER);
   });
 });

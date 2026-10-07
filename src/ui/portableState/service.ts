@@ -57,6 +57,11 @@ import {
   type OrganizationEnvelope,
 } from "../libraryOrganization";
 import type { ShelfEntry } from "../shelf";
+import {
+  applyDirectoryPlacementBatch,
+  type DirectoryPlacementBatch,
+  type DirectoryPlacementBatchResult,
+} from "../folderImport/placementBatch";
 import type { LibraryRecord } from "../libraryArchive";
 import type { PortableLegacyImportInput } from "./dataService";
 import type { ProgressRuntimeStatus } from "./progressRuntimeGate";
@@ -1001,6 +1006,21 @@ export class PortableStateService implements PortableStateCommandService {
       const next = applyCommand(envelope, command, knownHashes);
       await tx.putEnvelope(next);
       return next.state;
+    }));
+  }
+
+  /**
+   * Directory-import placement batch: re-check every item, create the needed
+   * folders and move the books against the envelope read in THIS transaction.
+   * Any throw rolls the whole transaction back, so no half batch is visible.
+   */
+  async commitDirectoryPlacementBatch(batch: DirectoryPlacementBatch): Promise<DirectoryPlacementBatchResult> {
+    return this.withStorage(async () => this.storage.transaction(async (tx) => {
+      const envelope = await this.requireEnvelope(tx);
+      const knownHashes = new Set((await tx.listMetadata()).map((row) => row.hash));
+      const applied = applyDirectoryPlacementBatch(envelope, batch, knownHashes);
+      if (applied.envelope !== envelope) await tx.putEnvelope(applied.envelope);
+      return applied.result;
     }));
   }
 

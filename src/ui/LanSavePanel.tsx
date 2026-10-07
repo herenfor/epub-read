@@ -266,7 +266,7 @@ export function LanSavePanel(props: LanSavePanelProps) {
     );
   }
 
-  const nativeError = state.error ? lanErrorText(state.errorCode, stepRef.current) : null;
+  const nativeError = state.error ? lanErrorText(state.errorCode, stepRef.current, state.error) : null;
   const selectedCount = props.selectedEntries.length;
 
   const renderBanner = () => {

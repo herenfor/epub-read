@@ -6453,6 +6453,7 @@ select option {
 
 /* 触摸书架顶部按钮至少 44px，紧凑密度也不缩回小命中区。 */
 .app[data-touch-ui="true"] .shelf-btn-primary,
+.app[data-touch-ui="true"] .shelf-btn-secondary,
 .app[data-touch-ui="true"] .shelf-manage-toggle-btn,
 .app[data-touch-ui="true"] .shelf-view-toggle-btn,
 .app[data-touch-ui="true"] .shelf-icon-btn-zen,

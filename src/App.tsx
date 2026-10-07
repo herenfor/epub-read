@@ -107,6 +107,13 @@ import { ReaderView, type ReaderHandle } from "./ui/ReaderView";
 import type { ReaderNoteForPaginator } from "./render/paginator";
 import { ShelfView } from "./ui/ShelfView";
 import { NativeImportPanel, type NativeImportCancelState } from "./ui/NativeImportPanel";
+import {
+  createNativeDirectoryImportPort,
+  createWebDirectoryImportPort,
+  FolderImportPanel,
+  supportsWebDirectoryPicker,
+} from "./ui/folderImport";
+import type { DirectoryImportPort } from "./core/folderImport/contract";
 import { LanSavePanel } from "./ui/LanSavePanel";
 import { useLanSaveSession } from "./ui/useLanSaveSession";
 import { SaveFileExportDialog, SaveFileImportPreview, SaveFileProgressPanel } from "./ui/SaveFileDialogs";
@@ -386,6 +393,8 @@ function hasOwnField(value: object, key: string): boolean {
 
 /** 书架根层“再滑一次退出”的提示/确认窗口。 */
 const EXIT_BACK_WINDOW_MS = 2000;
+/** nativeImportRef value while the directory-import panel holds the shared import slot. */
+const FOLDER_IMPORT_SLOT = "directory-import";
 
 const DIAGNOSTIC_ERROR_CODES = new Set([
   "invalid-data",
@@ -890,7 +899,18 @@ export default function App() {
     collapsed: boolean;
     fileNameSummary: string;
   } | null>(null);
+  /**
+   * The one import slot: native document imports hold their request ID, an
+   * open directory-import panel holds FOLDER_IMPORT_SLOT. Every import,
+   * delete, LAN and archive gate already checks this ref.
+   */
   const nativeImportRef = useRef<string | null>(null);
+  const [folderImport, setFolderImport] = useState<{
+    port: DirectoryImportPort;
+    organization: LibraryOrganization;
+    supported: boolean;
+  } | null>(null);
+  const [folderImportCloseSignal, setFolderImportCloseSignal] = useState(0);
   // One UI-owned file job; every picker/prepare/commit generation is tracked
   // in the hook, never generated during render.
   const saveFileJob = useSaveFileJob();
@@ -1743,6 +1763,10 @@ export default function App() {
       return name.toLowerCase().endsWith(".epub");
     });
     if (list.length === 0 || shelfBusyRef.current) return;
+    if (nativeImportRef.current) {
+      setShelfNotice({ kind: "warn", text: "已有导入任务正在进行，请等待当前任务结束" });
+      return;
+    }
     // Do not let a fast first import land in the legacy store before the
     // portable activation effect has committed its one-time switch.
     try {
@@ -2209,6 +2233,65 @@ export default function App() {
     setOrganization(org);
     setOrganizationError(null);
   }, []);
+
+  const handleOpenFolderImport = useCallback(async (): Promise<void> => {
+    if (shelfBusyRef.current || organizationBusyRef.current || nativeImportRef.current) {
+      setShelfNotice({ kind: "warn", text: "已有导入任务正在进行，请等待当前任务结束" });
+      return;
+    }
+    if (saveFileJobStateRef.current.kind !== "idle" || saveFileLaunchRef.current || lanSaveActiveRef.current) {
+      setShelfNotice({ kind: "warn", text: "存档或局域网互传进行中，暂不能导入文件夹" });
+      return;
+    }
+    // Reserve the shared slot before any await; released only when the panel closes.
+    nativeImportRef.current = FOLDER_IMPORT_SLOT;
+    try {
+      if (!isTauriEnv()) {
+        // Same as file import: let the portable switch land before the first write.
+        await activatePortableShelfState().catch(() => undefined);
+      }
+      const store = getShelfStore();
+      const organizationSnapshot = await store.getOrganization();
+      if (isTauriEnv()) {
+        setFolderImport({ port: createNativeDirectoryImportPort(), organization: organizationSnapshot, supported: true });
+        return;
+      }
+      const commit = store.commitDirectoryPlacementBatch?.bind(store);
+      const port = createWebDirectoryImportPort({
+        store: {
+          list: () => store.list(),
+          save: (input) => store.save(input),
+          readBook: (id) => store.readBook(id),
+          setContentHash: (id, hash) => store.setContentHash(id, hash),
+          getOrganization: () => store.getOrganization(),
+          commitDirectoryPlacementBatch: (batch) => {
+            if (!commit) throw new Error("当前存储后端不支持目录归档");
+            return commit(batch);
+          },
+        },
+      });
+      setFolderImport({
+        port,
+        organization: organizationSnapshot,
+        supported: supportsWebDirectoryPicker() && commit !== undefined,
+      });
+    } catch (error) {
+      if (nativeImportRef.current === FOLDER_IMPORT_SLOT) nativeImportRef.current = null;
+      setShelfNotice({ kind: "error", text: `无法打开文件夹导入：${String(error)}` });
+    }
+  }, []);
+
+  const closeFolderImport = useCallback((): void => {
+    setFolderImport(null);
+    if (nativeImportRef.current === FOLDER_IMPORT_SLOT) nativeImportRef.current = null;
+  }, []);
+
+  /** One real refresh after a started import settles (success, cancel or failure). */
+  const handleFolderImportSettled = useCallback((): void => {
+    void refreshShelfProjection().catch((error) => {
+      setShelfNotice({ kind: "error", text: `书架刷新失败：${String(error)}` });
+    });
+  }, [refreshShelfProjection]);
 
   const chooseSaveFileDestination = useCallback(async (): Promise<SaveFileLocation | null> => {
     const defaultName = `epub-reader-${new Date().toISOString().slice(0, 10)}.epubsave`;
@@ -5454,6 +5537,11 @@ export default function App() {
       activeElement.blur();
       return;
     }
+    if (folderImport) {
+      // The panel closes itself unless an import is running.
+      setFolderImportCloseSignal((value) => value + 1);
+      return;
+    }
     if (lanSaveOpen) {
       closeLanSavePanel();
       return;
@@ -5497,6 +5585,7 @@ export default function App() {
     closeImageOverlay,
     closeLanSavePanel,
     closeSaveFileUi,
+    folderImport,
     handleBackToShelf,
     handleShelfRootBack,
     isSidebarOpen,
@@ -5517,6 +5606,7 @@ export default function App() {
       foreground.kind !== "none" ||
       imageRequest !== null ||
       shelfBackActive ||
+      folderImport !== null ||
       saveFileActive ||
       lanSaveOpen ||
       lanSaveSession.active ||
@@ -6261,7 +6351,8 @@ export default function App() {
               onScopeChange={setShelfScope}
               onApplyOrganization={handleApplyOrganization}
               busy={shelfBusy}
-              importActive={nativeImport !== null}
+              importActive={nativeImport !== null || folderImport !== null}
+              onImportFolder={() => void handleOpenFolderImport()}
               saveFileActive={saveFileActive}
               lanTransferActive={lanSaveSession.active}
               onOpenLanTransfer={runtime.supportsLanTransfer ? handleOpenLanSave : undefined}
@@ -6907,6 +6998,17 @@ export default function App() {
           selectedEntries={lanSaveSelection}
           isAndroid={runtime.platform === "android"}
           onClose={closeLanSavePanel}
+        />
+      )}
+      {folderImport && (
+        <FolderImportPanel
+          port={folderImport.port}
+          organization={folderImport.organization}
+          directorySelectionSupported={folderImport.supported}
+          closeSignal={folderImportCloseSignal}
+          onSettled={handleFolderImportSettled}
+          onClose={closeFolderImport}
+          onUseFileImport={() => void handleChooseBooks()}
         />
       )}
       {nativeImport && (
