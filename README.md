@@ -6,6 +6,8 @@
 
 A lightweight EPUB reader for Windows and Android that respects each book's own typography.
 
+We would like it to feel like a good reading lamp: there when you open a book, quiet when you close it, and keeping your books and notes on your own device.
+
 EPUB Reader opens EPUB 2.0.1 and EPUB 3.x books as their authors designed them: page width, margins, floats, illustrations and footnotes keep the book's own layout, while the reader only supplies sensible defaults where they are missing.
 
 **Languages:** English | [中文](README.zh.md)
@@ -47,14 +49,18 @@ The app is not distributed through Google Play, so Play Protect may warn about a
 
 To update, download the newer `.apk` and install it over the existing app. Your library and reading progress are kept.
 
+To check for a new version, open the shelf settings, scroll to About and tap *检查更新* (Check for updates); it takes you straight to the releases page.
+
 ## Highlights
 
 - **Read the way you prefer** — turn one page or a two-page spread, or scroll continuously from one chapter straight into the next, and switch between them at any time without losing your place
 - **A quiet reading interface** — contents, bookmarks and notes share one drawer, and the rest of the reader stays out of the way
 - **Layout you adjust as you read** — page colour, font, size, line height, spacing, margins and columns, changed from a small panel over the page
+- **Kind to every pair of eyes** — Traditional/Simplified Chinese conversion and custom character replacement, grayscale/invert/dim filters, and assistance for red, green and blue colour weakness; all of them change only how the page is shown, never the book
 - **Made for touch too** — swipe to turn pages on phones and tablets, with a slide animation that follows your finger and a library and menus rearranged for small screens
 - **Illustrations at full size** — tap or click an image in the text to open it in an overlay, then zoom, pan or view it at its original size; closing returns you exactly where you were
 - **Faithful to the book** — percentages, asymmetric margins, floats, full-page illustrations and inline footnote markers keep their intended proportions
+- **Bring in a whole folder at once** — pick the folder where you keep your books, and they land on the shelf sorted into folders that follow your own directories, with duplicates recognised
 - **Hand over to another device on your Wi‑Fi** — show a QR code on one device and scan it with the other to send books, progress, bookmarks and notes directly between them, without any cloud
 - **Local by design** — no account and no upload; your books stay on your device
 
@@ -63,20 +69,24 @@ To update, download the newer `.apk` and install it over the existing app. Your 
 ### Library
 
 - Import books from a file picker, including batch import; on desktop, drag & drop works too
+- Folder import: scan a whole directory and turn its sub-folders into shelf folders; preview the grouping first, stop at any time, and keep whatever was already imported
 - Automatic duplicate detection — the same book is never added twice
 - Cover grid with generated placeholder covers and a "new" badge
 - Folders and favourites to organise the shelf — grouping a book never moves or copies the file
-- Search, sort, layout density and theme managed from a single menu
+- Search, sort, layout density, theme and interface motion (full or reduced) managed from a single menu
 - Reading progress and recently-read tracking; open a book right where you left it
 - Portable reading archives to carry progress, bookmarks and safe settings between devices
-- LAN transfer: on the same Wi‑Fi, pair two devices with a QR code (or by pasting the connection info) and send progress, bookmarks and notes, optionally with the book files — both devices need version 0.2.8 or later
+- Device transfer: on the same Wi‑Fi, pair two devices with a QR code (or by pasting the connection info) and send progress, bookmarks and notes, optionally with the book files — both devices need version 0.2.8 or later, and a version mismatch now says plainly that an update is needed
 
 ### Reading
 
 - EPUB 2 and EPUB 3 support, with contents, bookmarks and notes in a single drawer
 - Page turning one page or two at a time, or continuous scrolling that carries on from one chapter into the next, chosen per book and remembered
 - Layout controls: single or two-page spread, four page colours, font, size, line height, spacing, margins and columns
-- Page-turn animation: slide, fade or none
+- Page-turn animation: slide, fade or none; touch page turns can be interrupted and dragged back and forth
+- Character display: Traditional/Simplified conversion and custom replacement rules that change only what you see; search and "copy original" still follow the book's own text
+- Visual filters: grayscale, invert, dim, saturation and sharpen, with a press-and-hold button to compare against the original
+- Colour-weakness assistance for red, green and blue, with adjustable strength
 - Long chapters are prepared in the background, so opening a book or reaching a heavy chapter does not hold up what you are reading
 - A progress bar for the whole book, with chapter marks you can drag
 - Illustrations open in an overlay with zoom, pan, fit-to-window and original-size views
@@ -90,7 +100,7 @@ To update, download the newer `.apk` and install it over the existing app. Your 
 ### Per platform
 
 - **Windows** — the system title bar is replaced by a slim frame that follows the app theme, keeps the book title and the window controls in the same bar, and lets you drag the window from it; EPUB files stay where they are, and the library links to them instead of copying
-- **Android** — edge-to-edge immersive reading, swipe page turns, a battery indicator while reading, a built-in QR scanner for LAN transfer, and the system back gesture steps back one layer at a time
+- **Android** — edge-to-edge immersive reading, swipe page turns, a battery indicator while reading, a built-in QR scanner for device transfer, and the system back gesture steps back one layer at a time
 
 ### Compatibility
 
@@ -104,7 +114,7 @@ EPUB files vary a great deal, and the reader is built to tolerate that:
 
 EPUB Reader needs no account, collects no usage data, and never uploads your books, notes or reading progress anywhere. Everything stays on your device.
 
-LAN transfer connects your two devices directly over your local network with an encrypted, one-time pairing; nothing passes through a server. On Android the camera is used only while you scan a pairing QR code, and is requested the first time you do so.
+Device transfer connects your two devices directly over your local network with an encrypted, one-time pairing; nothing passes through a server. On Android the camera is used only while you scan a pairing QR code, and is requested the first time you do so.
 
 ## Building from source
 
@@ -128,7 +138,7 @@ pnpm test                # run the test suite
 
 ## Feedback
 
-Bugs and suggestions are welcome in [Issues](https://github.com/herenfor/epub-read/issues). Please include your platform and the app version (shown under About), and the book title if the problem only happens with one book.
+Bugs and suggestions are welcome in [Issues](https://github.com/herenfor/epub-read/issues) — every one of them gets read. Please include your platform and the app version (shown under About), and the book title if the problem only happens with one book.
 
 ## License
 
