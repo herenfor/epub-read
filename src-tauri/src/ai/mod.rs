@@ -4,6 +4,7 @@
 //! code. It owns only the derived-data boundary under `<app data>/ai`.
 
 mod cache_settings;
+mod cache_repair;
 #[cfg(feature = "ai")]
 mod download;
 #[cfg(feature = "ai")]
@@ -197,6 +198,23 @@ impl AiState {
         Ok(Some(self.ensure(app)?))
     }
 
+    fn reset_index_cache_in(&self, app_data: &Path, directory: &Path) -> Result<(), String> {
+        // The same publication gate owns open and reset. No new command can
+        // acquire the old store while its connections are being replaced.
+        let mut slot = self
+            .store
+            .lock()
+            .map_err(|_| "AI 存储状态锁已损坏".to_string())?;
+        if let Some(store) = slot.as_ref() {
+            if Arc::strong_count(store) != 1 {
+                return Err("索引缓存正在使用，请停止索引或等待当前查询结束后重试".into());
+            }
+            store.ensure_cache_reset_idle()?;
+        }
+        drop(slot.take());
+        *slot = Some(Arc::new(cache_repair::reset(app_data, directory)?));
+        Ok(())
+    }
     fn ensure(&self, app: &AppHandle) -> Result<Arc<AiStore>, String> {
         if let Some(store) = self.store_snapshot()? {
             return Ok(store);
@@ -729,8 +747,12 @@ pub(crate) fn ai_cleanup_all(app: AppHandle, state: State<'_, AiState>) -> Resul
 }
 
 #[tauri::command]
-pub(crate) fn ai_index_clear_all(app: AppHandle, state: State<'_, AiState>) -> Result<(), String> {
-    state.ensure(&app)?.clear_all_indexes()
+pub(crate) async fn ai_index_clear_all(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<AiState>().ensure(&app)?.clear_all_indexes()
+    })
+    .await
+    .map_err(|error| format!("AI 清理线程失败：{error}"))?
 }
 
 #[tauri::command]
@@ -808,6 +830,18 @@ pub(crate) async fn ai_cache_clear(app: AppHandle, kind: String) -> Result<(), S
     })
     .await
     .map_err(|error| format!("AI 清理线程失败：{error}"))?
+}
+
+#[tauri::command]
+pub(crate) async fn cache_storage_reset_indexes(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AiState>();
+        let active = state.resolve_active_cache(&app)?;
+        let app_data = AiState::app_data_dir(&app)?;
+        state.reset_index_cache_in(&app_data, &active.directory)
+    })
+    .await
+    .map_err(|error| format!("索引缓存重置线程失败：{error}"))?
 }
 
 #[tauri::command]
@@ -1040,6 +1074,43 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
+    #[test]
+    fn index_cache_reset_waits_for_owners_and_unfinished_work() {
+        let root = test_root();
+        let state = AiState::default();
+        let directory = AiStore::default_cache_directory(&root);
+        let owner = state.ensure_store_in(&root, &directory).unwrap();
+        assert!(state
+            .reset_index_cache_in(&root, &directory)
+            .unwrap_err()
+            .contains("正在使用"));
+        let task = owner
+            .enqueue_task("library-text-index".into(), None)
+            .unwrap();
+        drop(owner);
+        assert!(state
+            .reset_index_cache_in(&root, &directory)
+            .unwrap_err()
+            .contains("未结束任务"));
+        let owner = state.store_snapshot().unwrap().unwrap();
+        owner
+            .transition_task(&task.id, TaskTransition::Cancel)
+            .unwrap();
+        drop(owner);
+        state.reset_index_cache_in(&root, &directory).unwrap();
+        assert_eq!(
+            state
+                .store_snapshot()
+                .unwrap()
+                .unwrap()
+                .status()
+                .unwrap()
+                .books,
+            0
+        );
+        drop(state);
+        std::fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn cache_settings_review_concurrent_open_preserves_running_work() {
         let root = test_root();

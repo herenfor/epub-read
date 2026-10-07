@@ -4,6 +4,7 @@ import { getRuntimeCapabilities } from "../platform/runtimeCapabilities";
 import {
   clearFullTextIndex,
   getCacheStorageStatus,
+  resetIndexCaches,
   setCacheStorageDirectory,
   type AiCacheStatus,
   type CacheStorageStatus,
@@ -64,7 +65,7 @@ export function CacheStoragePanel(props: CacheStoragePanelProps) {
   const capabilities = getRuntimeCapabilities();
   const [status, setStatus] = useState<CacheStorageStatus | null>(null);
   const [loading, setLoading] = useState(false);
-  const [busy, setBusy] = useState<"choose" | "default" | "clear" | null>(null);
+  const [busy, setBusy] = useState<"choose" | "default" | "clear" | "reset" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -145,7 +146,24 @@ export function CacheStoragePanel(props: CacheStoragePanelProps) {
     try {
       await clearFullTextIndex();
       await refresh();
-      setNotice("全文索引已清除；全文搜索需要重新准备。");
+      setNotice("全文索引已清除，空闲缓存空间已回收；全文搜索需要重新准备。");
+    } catch (reason) {
+      await refresh();
+      setError(String(reason));
+    } finally {
+      setBusy(null);
+    }
+  }, [busy, refresh]);
+
+  const resetCaches = useCallback(async (): Promise<void> => {
+    if (busy) return;
+    setBusy("reset");
+    setError(null);
+    setNotice(null);
+    try {
+      await resetIndexCaches();
+      await refresh();
+      setNotice("全部索引缓存已重置；书本、进度和模型资料已保留，搜索需要重新准备。");
     } catch (reason) {
       await refresh();
       setError(String(reason));
@@ -188,6 +206,18 @@ export function CacheStoragePanel(props: CacheStoragePanelProps) {
         {notice && <div className="cache-storage-alert is-notice" role="status">{notice}</div>}
 
         {loading && !status && <div className="cache-storage-loading">正在读取缓存状态…</div>}
+        {!loading && (status !== null || error !== null) && (
+          <div className="cache-storage-category">
+            <p className="cache-storage-hint">
+              索引数据库损坏或无法清理时，可重置全部索引缓存。书本、阅读进度和模型资料保留。
+            </p>
+            <button type="button" className="tb-btn is-danger"
+              disabled={busy !== null || status?.caches.some((cache) => cache.state === "building")}
+              onClick={() => void resetCaches()}>
+              {busy === "reset" ? "正在重置…" : "重置全部索引缓存"}
+            </button>
+          </div>
+        )}
 
         {status && (
           <>
@@ -250,7 +280,7 @@ export function CacheStoragePanel(props: CacheStoragePanelProps) {
                 <div className="cache-storage-loading">暂无全文索引分类。</div>
               )}
               <p className="cache-storage-hint">
-                清除后全文搜索需要重新准备。显示的占用可能不会立即下降。
+                清除后全文搜索需要重新准备；清除时会整理数据库并回收空闲空间。
               </p>
             </div>
           </>
