@@ -2,7 +2,7 @@
  * 可中断的合成层翻页驱动（WAAPI transform），在一段连续运动期间接管 viewer。
  *
  * 整章设为可见溢出再整体平移，在手机上每写一次 transform 都要约 50ms 主线程。
- * 这里改用“K 屏窗口”（K=5）：viewer 仍是自身裁剪的滚动容器，宽度扩为 K 屏、左移
+ * 这里改用“K 屏窗口”（最多 5 屏，短章按实际屏数）：viewer 仍是自身裁剪的滚动容器，宽度扩为 K 屏、左移
  * MID 屏，栏数按比例放大（栏宽/栏距不变，各栏绝对位置不变），body 只露出中间
  * 一屏；运动只写窗口内的 transform。短暂静止时保留窗口供下一次翻页复用；
  * 锚点/快照使用视觉坐标。空闲退出或导航（settleTo/dispose）恢复原内联几何。
@@ -13,7 +13,6 @@ import type { InterruptResult, MotionSample, PageMotionDriver, SettlePlan } from
 import { settleProgress } from "./pageMotion";
 
 const WINDOW_SCREENS = 5;
-const WINDOW_MID = 2;
 const KEYFRAMES = 32;
 const WINDOW_PROPERTIES = ["width", "margin-left", "column-count", "transform", "will-change"] as const;
 
@@ -34,6 +33,8 @@ export class TransformPageMotion implements PageMotionDriver {
   /** 窗口模式下的 scrollLeft；null 表示 viewer 处于正常几何。 */
   private windowStart: number | null = null;
   private restoreInline: (() => void) | null = null;
+  private readonly windowScreens: number;
+  private readonly windowMid: number;
 
   constructor(
     private readonly viewer: HTMLElement,
@@ -42,6 +43,8 @@ export class TransformPageMotion implements PageMotionDriver {
     private readonly onFault: (error: unknown) => void,
   ) {
     this.held = initialPosition;
+    this.windowScreens = Math.min(WINDOW_SCREENS, layout.offsets.length);
+    this.windowMid = Math.floor(this.windowScreens / 2);
   }
 
   /** 是否处于窗口模式（运动中、拖动中或短暂空闲）。 */
@@ -56,7 +59,7 @@ export class TransformPageMotion implements PageMotionDriver {
     // 只在中断/显式快照/收尾时读取，不逐帧读。
     const value = this.viewer.ownerDocument.defaultView?.getComputedStyle(this.viewer).transform ?? "none";
     const x = value === "none" ? 0 : new DOMMatrixReadOnly(value).m41;
-    return { position: this.windowStart + WINDOW_MID * this.layout.step - x };
+    return { position: this.windowStart + this.windowMid * this.layout.step - x };
   }
 
   interrupt(): InterruptResult {
@@ -159,7 +162,7 @@ export class TransformPageMotion implements PageMotionDriver {
 
   private transformFor(position: number): string {
     const start = this.windowStart ?? 0;
-    return `translateX(${start + WINDOW_MID * this.layout.step - position}px)`;
+    return `translateX(${start + this.windowMid * this.layout.step - position}px)`;
   }
 
   private applyTransform(): void {
@@ -188,23 +191,24 @@ export class TransformPageMotion implements PageMotionDriver {
           else viewer.style.removeProperty(item.property);
         }
       };
-      viewer.style.setProperty("width", `${WINDOW_SCREENS * step}px`);
-      viewer.style.setProperty("margin-left", `${-WINDOW_MID * step}px`);
-      viewer.style.setProperty("column-count", String(WINDOW_SCREENS * columnsPerScreen));
+      viewer.style.setProperty("width", `${this.windowScreens * step}px`);
+      viewer.style.setProperty("margin-left", `${-this.windowMid * step}px`);
+      viewer.style.setProperty("column-count", String(this.windowScreens * columnsPerScreen));
       viewer.style.setProperty("will-change", "transform");
-      if (Math.abs(viewer.scrollWidth - before) > 1) {
+      const after = viewer.scrollWidth;
+      if (Math.abs(after - before) > 1) {
         this.restoreInline();
         this.restoreInline = null;
-        this.onFault(new Error(`page motion window changed layout (${before} → ${viewer.scrollWidth})`));
+        this.onFault(new Error(`page motion window changed layout (${before} → ${after})`));
         return false;
       }
       this.windowStart = -Infinity;
     }
-    const span = (WINDOW_SCREENS - 1) * step;
+    const span = (this.windowScreens - 1) * step;
     const start = this.windowStart as number;
     if (low >= start && high <= start + span) return true;
     const maxStart = Math.max(0, viewer.scrollWidth - viewer.clientWidth);
-    const wanted = Math.round((low + high) / 2 - WINDOW_MID * step);
+    const wanted = Math.round((low + high) / 2 - this.windowMid * step);
     viewer.scrollLeft = Math.max(0, Math.min(maxStart, wanted));
     this.windowStart = viewer.scrollLeft;
     this.applyTransform();
