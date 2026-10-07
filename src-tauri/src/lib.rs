@@ -6,6 +6,7 @@ mod android_uri_bridge;
 mod build_info;
 #[cfg(test)]
 mod build_info_contract;
+mod directory_import;
 mod import_gate;
 mod ipc_bytes;
 mod lan_save;
@@ -21,6 +22,13 @@ macro_rules! configure_invoke_handler {
             linked_library::linked_library_import_paths,
             linked_library::linked_library_list_records,
             linked_library::linked_library_import_documents,
+            directory_import::commands::directory_import_pick,
+            directory_import::commands::directory_import_scan,
+            directory_import::commands::directory_import_page,
+            directory_import::commands::directory_import_start,
+            directory_import::commands::directory_import_issues,
+            directory_import::commands::directory_import_cancel,
+            directory_import::commands::directory_import_dispose,
             linked_library::linked_library_cancel_document_import,
             android_uri_bridge::android_read_content_uri,
             android_uri_bridge::android_write_text_content_uri,
@@ -148,6 +156,13 @@ macro_rules! configure_invoke_handler {
             linked_library::linked_library_import_paths,
             linked_library::linked_library_list_records,
             linked_library::linked_library_import_documents,
+            directory_import::commands::directory_import_pick,
+            directory_import::commands::directory_import_scan,
+            directory_import::commands::directory_import_page,
+            directory_import::commands::directory_import_start,
+            directory_import::commands::directory_import_issues,
+            directory_import::commands::directory_import_cancel,
+            directory_import::commands::directory_import_dispose,
             linked_library::linked_library_cancel_document_import,
             android_uri_bridge::android_read_content_uri,
             android_uri_bridge::android_write_text_content_uri,
@@ -261,6 +276,7 @@ pub fn run() {
         .manage(LinkedLibraryWriteState::default())
         .manage(linked_library::NativeArchiveState::default())
         .manage(linked_library::ManagedImportState::default())
+        .manage(directory_import::job::DirectoryImportState::default())
         .manage(portable_state_commands::PortableStateManager::default())
         .manage(save_file::SaveFileManager::default())
         .manage(lan_save::LanSaveManager::default())
