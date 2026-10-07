@@ -1767,6 +1767,7 @@ export default function App() {
       setShelfNotice({ kind: "warn", text: "已有导入任务正在进行，请等待当前任务结束" });
       return;
     }
+    shelfBusyRef.current = true;
     // Do not let a fast first import land in the legacy store before the
     // portable activation effect has committed its one-time switch.
     try {
@@ -1775,7 +1776,6 @@ export default function App() {
       // Activation failure keeps the complete legacy mode; its effect reports
       // the visible error and getShelfStore() falls back to the old backend.
     }
-    shelfBusyRef.current = true;
     setShelfBusyMessage("正在导入书籍…");
     setShelfBusy(true);
     setShelfNotice(null);

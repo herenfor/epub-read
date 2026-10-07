@@ -25,7 +25,10 @@ export class FolderImportJobOwner {
   private scanToken = 0;
   private importing = false;
   private closed = false;
-  private readonly released = new Set<string>();
+  private readonly released = new Map<string, Promise<void>>();
+  private closing: Promise<void> | null = null;
+  private runSettled: Promise<void> | null = null;
+  private releasing: Promise<void> = Promise.resolve();
 
   constructor(private readonly port: DirectoryImportPort) {}
 
@@ -38,9 +41,10 @@ export class FolderImportJobOwner {
   }
 
   /** Starts a new scan attempt; any previous job is released. */
-  beginScan(): number {
-    void this.releaseCurrent();
-    return ++this.scanToken;
+  async beginScan(): Promise<number> {
+    const token = ++this.scanToken;
+    await this.releaseCurrent();
+    return token;
   }
 
   /**
@@ -71,13 +75,13 @@ export class FolderImportJobOwner {
     const jobId = this.jobId;
     if (!jobId || this.importing || this.closed) return false;
     this.importing = true;
-    this.port.start({ jobId, options: input.options, targets: input.targets, onProgress: handlers.onProgress })
+    this.runSettled = this.port.start({ jobId, options: input.options, targets: input.targets, onProgress: handlers.onProgress })
       .then(handlers.onResult, handlers.onError)
-      .finally(() => {
+      .finally(async () => {
         this.importing = false;
         // Books may have landed even when start() rejected: refresh regardless.
         handlers.onSettled();
-        if (this.closed) void this.releaseCurrent();
+        if (this.closed) await this.releaseCurrent();
       });
     return true;
   }
@@ -89,16 +93,16 @@ export class FolderImportJobOwner {
   }
 
   /** Panel close or unmount. */
-  close(): void {
-    if (this.closed) return;
+  close(): Promise<void> {
+    if (this.closing) return this.closing;
     this.closed = true;
     this.scanToken++;
     if (this.importing) {
       // Ownership stays until the run settles; it releases afterwards.
       void this.cancel();
-      return;
+      return this.closing = this.runSettled!;
     }
-    void this.releaseCurrent();
+    return this.closing = this.releaseCurrent();
   }
 
   /** Cancel, then dispose the current job (not while start() runs). */
@@ -106,13 +110,18 @@ export class FolderImportJobOwner {
     if (this.importing) return Promise.resolve();
     const jobId = this.jobId;
     this.jobId = null;
-    return jobId ? this.release(jobId) : Promise.resolve();
+    if (jobId) this.releasing = this.release(jobId);
+    return this.releasing;
   }
 
-  private async release(jobId: string): Promise<void> {
-    if (this.released.has(jobId)) return;
-    this.released.add(jobId);
-    await this.port.cancel(jobId).catch(() => undefined);
-    await this.port.dispose(jobId).catch(() => undefined);
+  private release(jobId: string): Promise<void> {
+    const existing = this.released.get(jobId);
+    if (existing) return existing;
+    const cleanup = (async () => {
+      await this.port.cancel(jobId).catch(() => undefined);
+      await this.port.dispose(jobId).catch(() => undefined);
+    })();
+    this.released.set(jobId, cleanup);
+    return cleanup;
   }
 }

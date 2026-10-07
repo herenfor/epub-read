@@ -142,7 +142,7 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
     return () => {
       mountedRef.current = false;
       // Scan/preview: cancel + dispose now. Import: request cancel, release after it settles.
-      owner.close();
+      void owner.close();
     };
   }, [port]);
 
@@ -198,17 +198,20 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
   const pickAndScan = async () => {
     const owner = ownerRef.current;
     if (!owner || owner.isImporting) return;
-    const token = owner.beginScan();
     setItems([]);
     setBindings([]);
     setChoices({});
     setVisibleRows(INITIAL_GROUP_ROWS);
     setIssues(null);
     set({ kind: "scanning", found: 0 });
+    let token: number | undefined;
     try {
+      token = await owner.beginScan();
+      if (!owner.isLive(token)) return;
+      const scanToken = token;
       const result = await port.scan((event) => {
         // The first event already names the job, so closing mid-scan can cancel it.
-        if (owner.adopt(token, event.jobId)) set({ kind: "scanning", found: event.scannedInputs });
+        if (owner.adopt(scanToken, event.jobId)) set({ kind: "scanning", found: event.scannedInputs });
       });
       if (!result) {
         if (owner.isLive(token)) set({ kind: "intro" });
@@ -236,7 +239,7 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
       setBindings([...bound.values()]);
       set(collected.length === 0 ? { kind: "empty", scan: result } : { kind: "preview", scan: result });
     } catch (error) {
-      if (!owner.isLive(token)) return;
+      if (token === undefined || !owner.isLive(token)) return;
       void owner.releaseCurrent();
       set({ kind: "error", message: `扫描失败：${errorText(error)}` });
     }
@@ -293,9 +296,9 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
     }
   };
 
-  const close = () => {
+  const close = async () => {
     if (importing) return;
-    ownerRef.current?.close();
+    await ownerRef.current?.close();
     props.onClose();
   };
 
@@ -554,7 +557,7 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
               <button type="button" onClick={close}>关闭</button>
               {props.directorySelectionSupported === false ? (
                 props.onUseFileImport && (
-                  <button type="button" className="primary" onClick={() => { close(); props.onUseFileImport?.(); }}>
+                  <button type="button" className="primary" onClick={async () => { await close(); props.onUseFileImport?.(); }}>
                     多选文件导入
                   </button>
                 )
