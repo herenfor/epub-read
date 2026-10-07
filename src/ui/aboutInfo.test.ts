@@ -36,10 +36,6 @@ describe("about info projection", () => {
       edition: "Core",
       channel: "Android 原生",
     });
-    expect(result?.copyText).toContain("Target：aarch64-linux-android");
-    expect(result?.copyText).toContain("Profile：release");
-    expect(result?.copyText).toContain("Debug：否");
-    expect(result?.copyText).not.toContain("0.0.0");
   });
 
   it("uses the Vite compile-time version for browser previews", () => {
@@ -49,7 +45,6 @@ describe("about info projection", () => {
       edition: "AI",
       channel: "Web 预览",
     });
-    expect(result?.copyText).toContain("来源：Web 预览（前端编译版本）");
   });
 
   it("never fakes a version without a bootstrap session", () => {

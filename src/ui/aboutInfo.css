@@ -41,40 +41,9 @@
   color: var(--muted, #777);
 }
 
-.about-copy-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 9px;
-}
-
-.about-copy-btn {
-  min-height: 32px;
-  padding: 0 12px;
-  border: 1px solid var(--menu-surface-border, var(--panel-border, rgba(128, 128, 128, 0.3)));
-  border-radius: 8px;
-  background: var(--bg, #fff);
-  color: var(--fg, #1a1a1a);
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.about-copy-btn:hover,
-.about-copy-btn:focus-visible {
-  border-color: var(--accent, #2b5b9e);
-  color: var(--accent, #2b5b9e);
-}
-
-.about-copy-status {
-  font-size: 12px;
-}
-
-.about-copy-status-copied {
-  color: var(--accent, #2b5b9e);
-}
-
-.about-copy-status-failed {
-  color: var(--error, #b3261e);
+.about-release-date {
+  color: var(--muted, #777);
+  font-size: 11px;
 }
 
 .about-release-toggle {
@@ -95,10 +64,20 @@
   cursor: pointer;
 }
 
-.about-release-toggle:hover,
-.about-release-toggle:focus-visible {
+/* 触屏点按后 :hover 会一直粘着，只在真正能悬停的设备上高亮。 */
+@media (hover: hover) and (pointer: fine) {
+  .about-release-toggle:hover,
+  .about-releases-link:hover {
+    border-color: var(--accent, #2b5b9e);
+    color: var(--accent, #2b5b9e);
+  }
+}
+
+.about-release-toggle:focus-visible,
+.about-releases-link:focus-visible {
   border-color: var(--accent, #2b5b9e);
   color: var(--accent, #2b5b9e);
+  outline: none;
 }
 
 .about-release-toggle-state {
@@ -184,66 +163,42 @@
   margin-top: 3px;
 }
 
-.about-release-history {
-  margin-top: 10px;
-  padding-top: 8px;
-  border-top: 1px dashed var(--panel-border, rgba(128, 128, 128, 0.3));
-}
-
-.about-release-history > summary,
-.about-release-history-entry > summary {
+.about-releases-link {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 4px 8px;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--menu-surface-border, var(--panel-border, rgba(128, 128, 128, 0.3)));
+  border-radius: 8px;
+  background: transparent;
   color: var(--fg, #1a1a1a);
-  font-size: 11px;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
-  list-style: none;
 }
 
-.about-release-history > summary {
-  color: var(--accent, #2b5b9e);
-  font-weight: 650;
+.about-releases-link > span {
+  display: grid;
+  gap: 1px;
 }
 
-.about-release-history > summary::-webkit-details-marker,
-.about-release-history-entry > summary::-webkit-details-marker {
-  display: none;
+.about-releases-link strong {
+  font-size: 12.5px;
+  font-weight: 600;
 }
 
-.about-release-history > summary::before,
-.about-release-history-entry > summary::before {
-  content: "▸";
+.about-releases-link small {
+  color: var(--muted, #777);
+  font-size: 11px;
+}
+
+.about-releases-link svg {
   flex: none;
-  color: var(--muted, #777);
-}
-
-.about-release-history[open] > summary::before,
-.about-release-history-entry[open] > summary::before {
-  content: "▾";
-}
-
-.about-release-history[open] > summary {
-  margin-bottom: 6px;
-}
-
-.about-release-history-list {
-  padding-left: 2px;
-}
-
-.about-release-history-entry {
-  margin-top: 6px;
-}
-
-.about-release-history-entry[open] > summary {
-  margin-bottom: 4px;
-}
-
-.about-release-history-entry .about-release-items {
-  margin-left: 14px;
-}
-
-.about-release-date {
-  color: var(--muted, #777);
+  width: 16px;
+  height: 16px;
+  color: var(--accent, #2b5b9e);
 }
