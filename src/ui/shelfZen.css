@@ -274,64 +274,140 @@
  * Level 2: 紧凑型“正在阅读”续读控制台 (Continue Reading Stage)
  * ========================================================================= */
 .shelf-resume-stage {
+  --resume-motion: 260ms;
+  display: grid;
+  /* 两个状态叠在同一张卡里：收起/展开只过渡行高与透明度，避免卸载重排的跳变。 */
+  grid-template-rows: 0fr 1fr;
   margin-bottom: 20px;
   border-radius: 12px;
   background: color-mix(in srgb, var(--shelf-card-bg, #ffffff) 92%, var(--accent, #3b82f6) 8%);
   border: 1px solid color-mix(in srgb, var(--shelf-card-border, rgba(0, 0, 0, 0.08)) 80%, var(--accent, #3b82f6) 20%);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.03);
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: grid-template-rows var(--resume-motion) var(--ease-emphasized);
   overflow: visible;
   position: relative;
   z-index: 10;
 }
 
-/* 折叠后的极简单行条 */
+.shelf-resume-stage.is-collapsed {
+  grid-template-rows: 1fr 0fr;
+}
+
+.shelf-resume-pane {
+  min-height: 0;
+  overflow: hidden;
+  opacity: 1;
+  visibility: visible;
+  transition: opacity calc(var(--resume-motion) * 0.7) ease calc(var(--resume-motion) * 0.3),
+              visibility 0s linear 0s;
+}
+
+/* 展开态的“更多在读”弹层需要伸出卡片。 */
+.shelf-resume-stage.is-expanded .shelf-resume-pane-full {
+  overflow: visible;
+}
+
+.shelf-resume-stage.is-collapsed .shelf-resume-pane-full,
+.shelf-resume-stage.is-expanded .shelf-resume-pane-compact {
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity calc(var(--resume-motion) * 0.45) ease,
+              visibility 0s linear var(--resume-motion);
+}
+
+.shelf-resume-toggle-btn .shelf-svg-icon {
+  transition: transform var(--resume-motion) var(--ease-emphasized);
+}
+
+/* 折叠后的单行条：封面缩略 + 书名（可两行）+ 章节进度，右侧按钮与收起键同高 */
 .shelf-resume-collapsed {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 8px 16px;
-  font-size: 13px;
-  min-height: 40px;
+  gap: 14px;
+  padding: 8px 10px 8px 12px;
+  min-height: 56px;
 }
 
-.shelf-resume-collapsed-left {
+.shelf-resume-compact-open {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
+  flex: 1;
   min-width: 0;
-}
-
-.shelf-resume-collapsed-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 7px;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--accent, #2563eb) 15%, transparent);
-  color: var(--accent, #2563eb);
-  font-size: 11px;
-  font-weight: 600;
-  flex-shrink: 0;
-}
-
-.shelf-resume-collapsed-title {
-  font-weight: 600;
-  color: var(--fg, #111827);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
 }
 
-.shelf-resume-collapsed-title:hover {
+.shelf-resume-mini-cover {
+  position: relative;
+  flex: none;
+  width: 30px;
+  height: 42px;
+  overflow: hidden;
+  border-radius: 3px;
+  box-shadow: 1px 2px 6px rgba(0, 0, 0, 0.14);
+}
+
+.shelf-resume-mini-cover img,
+.shelf-resume-mini-cover .shelf-cover {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.shelf-resume-compact-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.shelf-resume-compact-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--fg, #111827);
+}
+
+.shelf-resume-compact-open:hover .shelf-resume-compact-title {
   color: var(--accent, #2563eb);
 }
 
-.shelf-resume-collapsed-progress {
-  color: var(--muted, #6b7280);
+.shelf-resume-compact-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   font-size: 12px;
-  flex-shrink: 0;
+  color: var(--muted, #6b7280);
+  white-space: nowrap;
+}
+
+.shelf-resume-mini-track {
+  flex: 0 1 120px;
+  min-width: 36px;
+  height: 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg, #000) 9%, transparent);
+  overflow: hidden;
+}
+
+.shelf-resume-mini-track > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent, #2563eb);
 }
 
 .shelf-resume-collapsed-right {
@@ -339,6 +415,62 @@
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+}
+
+/* 收起态“继续”：与收起键同高，字号随触屏一起放大，不再被 48px 触控高度撑成方块。 */
+.shelf-resume-continue {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 34px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent, #2563eb);
+  color: var(--accent-foreground, #ffffff);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: filter 0.15s ease, transform 0.15s ease;
+}
+
+.shelf-resume-continue:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.shelf-resume-continue:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.shelf-resume-continue:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.shelf-resume-continue .shelf-svg-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.shelf-more-reading-open {
+  flex: none;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--accent, #2563eb) 35%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent, #2563eb) 10%, transparent);
+  color: var(--accent, #2563eb);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.shelf-more-reading-open:hover {
+  background: color-mix(in srgb, var(--accent, #2563eb) 16%, transparent);
 }
 
 /* 展开后的横向紧凑控制台 */
@@ -362,6 +494,10 @@
 /* 3D 精装微书脊阴影封面容器 */
 .shelf-resume-cover-box {
   position: relative;
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
   width: 58px;
   height: 80px;
   border-radius: 5px;
@@ -430,12 +566,19 @@
 }
 
 .shelf-resume-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
   font-size: 16px;
   font-weight: 700;
   color: var(--fg, #111827);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  text-align: left;
   cursor: pointer;
   line-height: 1.3;
 }
@@ -1737,8 +1880,8 @@
 }
 
 .app[data-mobile-chrome="true"][data-layout="compact"] .shelf-resume-collapsed {
-  min-height: 48px;
-  padding: 4px 12px;
+  gap: 10px;
+  padding: 6px 6px 6px 10px;
 }
 
 .app[data-mobile-chrome="true"][data-layout="compact"] .shelf-resume-toggle-btn {
@@ -1958,5 +2101,341 @@
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+/* =========================================================================
+ * 导入入口：主按钮 + 下拉（宽屏），手机整颗“导入”打开同一菜单
+ * ========================================================================= */
+.shelf-import-split {
+  position: relative;
+  display: inline-flex;
+}
+
+.shelf-import-split .shelf-import-main {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.shelf-import-split .shelf-import-caret {
+  justify-content: center;
+  padding: 0 9px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left: 1px solid color-mix(in srgb, var(--accent-foreground, #fff) 28%, transparent);
+}
+
+.shelf-import-split .shelf-import-caret .shelf-svg-icon {
+  transition: transform var(--motion-base, 220ms) var(--ease-emphasized);
+}
+
+.shelf-import-split .shelf-import-caret[aria-expanded="true"] .shelf-svg-icon {
+  transform: rotate(180deg);
+}
+
+.shelf-import-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 120;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 288px;
+  padding: 6px;
+  border-radius: 14px;
+  border: 1px solid var(--menu-surface-border, var(--panel-border));
+  background: var(--panel-bg);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.06);
+  transform-origin: top right;
+  animation: shelf-pop-in var(--menu-open) var(--ease-emphasized);
+}
+
+.shelf-import-menu.is-closing {
+  pointer-events: none;
+  animation: shelf-pop-out var(--menu-close) var(--ease-exit) forwards;
+}
+
+.shelf-import-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--motion-fast, 140ms) ease;
+}
+
+.shelf-import-menu-item:hover,
+.shelf-import-menu-item:focus-visible {
+  background: var(--menu-surface-hover, var(--btn-hover));
+  outline: none;
+}
+
+.shelf-import-menu-icon,
+.shelf-drawer-row-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  color: var(--accent);
+}
+
+.shelf-import-menu-icon .shelf-svg-icon,
+.shelf-drawer-row-icon .shelf-svg-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.shelf-import-menu-text,
+.shelf-drawer-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.shelf-import-menu-text strong,
+.shelf-drawer-row-text strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.shelf-import-menu-text small,
+.shelf-drawer-row-text small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.shelf-import-menu-hint {
+  margin: 4px 10px 6px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--panel-border) 70%, transparent);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* 手机：菜单从右上角的“导入”按钮弹出，宽度不超过屏幕。 */
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-import-menu {
+  width: min(300px, calc(100vw - 24px));
+}
+
+/* =========================================================================
+ * 设置抽屉：分组列表（图标 + 标题 + 一句说明 + 箭头）
+ * ========================================================================= */
+.shelf-drawer-list {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 70%, transparent);
+  background: var(--bg);
+}
+
+.shelf-drawer-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 58px;
+  padding: 8px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--motion-fast, 140ms) ease;
+}
+
+.shelf-drawer-row + .shelf-drawer-row {
+  border-top: 1px solid color-mix(in srgb, var(--panel-border) 60%, transparent);
+}
+
+.shelf-drawer-row:hover:not(:disabled),
+.shelf-drawer-row:focus-visible {
+  background: var(--menu-surface-hover, var(--btn-hover));
+  outline: none;
+}
+
+.shelf-drawer-row:active:not(:disabled) {
+  background: var(--menu-surface, var(--btn-hover));
+}
+
+.shelf-drawer-row:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.shelf-drawer-row.is-neutral .shelf-drawer-row-icon {
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+  color: color-mix(in srgb, var(--fg) 78%, transparent);
+}
+
+.shelf-drawer-row-chevron {
+  display: inline-flex;
+  margin-left: auto;
+  color: color-mix(in srgb, var(--muted) 80%, transparent);
+}
+
+.shelf-drawer-row-chevron .shelf-svg-icon {
+  width: 16px;
+  height: 16px;
+}
+
+/* =========================================================================
+ * 批量操作：分组细线；平板触屏改为“图标在上、短字在下”
+ * ========================================================================= */
+.shelf-batch-divider {
+  flex: none;
+  width: 1px;
+  height: 22px;
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-batch-divider {
+  display: none;
+}
+
+.app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-floating-batch-dock {
+  padding: 6px 10px 6px 18px;
+}
+
+.app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-floating-batch-actions {
+  gap: 2px;
+}
+
+.app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-batch-action-btn {
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  min-width: 68px;
+  height: auto;
+  min-height: 58px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-batch-action-btn .shelf-svg-icon {
+  width: 21px;
+  height: 21px;
+}
+
+.app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-batch-action-btn:active:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-batch-action-btn.cancel {
+  margin-left: 6px;
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+}
+
+/* 全选：带勾选框图标，一眼看出是可点的开关 */
+.shelf-selection-toggle-all .shelf-svg-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--accent);
+}
+
+.shelf-selection-toggle-all[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--shelf-card-border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--shelf-input-bg));
+  color: var(--accent);
+}
+
+/* =========================================================================
+ * 触屏比例：按钮被提到 48px 触控高度时，字号/内边距/圆角同步放大，
+ * 不再出现“高而字小”的方块按钮。手机紧凑布局另有更具体的规则，优先生效。
+ * ========================================================================= */
+.app[data-touch-ui="true"] :is(.shelf-btn-primary, .shelf-manage-toggle-btn, .shelf-selection-cancel,
+  .shelf-selection-delete, .shelf-selection-toggle-all, .shelf-action-folder, .shelf-more-reading-btn,
+  .shelf-btn-resume, .shelf-resume-continue) {
+  gap: 8px;
+  padding-inline: 18px;
+  border-radius: 11px;
+  font-size: 14px;
+}
+
+.app[data-touch-ui="true"] :is(.shelf-btn-resume, .shelf-more-reading-btn, .shelf-resume-continue) {
+  height: calc(48px * var(--ui-touch-comp, 1));
+}
+
+.app[data-touch-ui="true"] .shelf-import-split .shelf-import-caret {
+  padding-inline: 12px;
+}
+
+/* 分体按钮：触屏圆角规则之后再收紧中缝，两半拼成一颗按钮。 */
+.app .shelf-import-split .shelf-btn-primary.shelf-import-main {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.app .shelf-import-split .shelf-btn-primary.shelf-import-caret {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.app[data-touch-ui="true"] .shelf-more-reading-open {
+  height: calc(40px * var(--ui-touch-comp, 1));
+  padding: 0 14px;
+  font-size: 13.5px;
+}
+
+.app[data-touch-ui="true"] .shelf-more-reading-item {
+  min-height: calc(52px * var(--ui-touch-comp, 1));
+}
+
+.app[data-touch-ui="true"] .shelf-import-menu-item {
+  min-height: calc(56px * var(--ui-touch-comp, 1));
+}
+
+.app[data-touch-ui="true"] .shelf-resume-mini-cover {
+  width: 34px;
+  height: 48px;
+}
+
+.app[data-touch-ui="true"] .shelf-resume-compact-title {
+  font-size: 15px;
+}
+
+/* =========================================================================
+ * 简化动画（设置 → 界面动画 → 简化）：缩短面板时长，去掉毛玻璃与行高过渡。
+ * 阅读翻页动效不受影响。
+ * ========================================================================= */
+:root[data-motion="reduced"] {
+  --motion-fast: 80ms;
+  --motion-base: 120ms;
+  --motion-slow: 160ms;
+  --menu-open: 160ms;
+  --menu-close: 120ms;
+}
+
+:root[data-motion="reduced"] .shelf-resume-stage {
+  --resume-motion: 0ms;
+}
+
+:root[data-motion="reduced"] :is(.shelf-drawer, .shelf-drawer-backdrop, .shelf-floating-batch-dock,
+  .shelf-more-reading-popover, .shelf-card-pop-menu, .lan-backdrop, .lan-panel, .save-file-backdrop) {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shelf-resume-stage {
+    --resume-motion: 0ms;
   }
 }
