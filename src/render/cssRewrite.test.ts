@@ -1,5 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { hasAuthoredCssProperty, rewriteCssUrls, stripCssComments } from "./cssRewrite";
+import { cssResourceReferences, hasAuthoredCssProperty, rewriteCssUrls, stripCssComments } from "./cssRewrite";
+
+describe("CSS resource reference parity", () => {
+  it("discovers imports and quoted URLs while ignoring comments and preserving SVG fragments", () => {
+    const css = `/* url(hidden.png) @import 'hidden.css'; */
+@import url('nested.css') screen;
+body { background:url("../Images/background.png"); filter:url('../Images/effects.svg#blur'); }`;
+    expect(cssResourceReferences(css)).toEqual([
+      { href: "nested.css", stylesheet: true },
+      { href: "../Images/background.png", stylesheet: false },
+      { href: "../Images/effects.svg#blur", stylesheet: false },
+    ]);
+    const resolved: string[] = [];
+    const out = rewriteCssUrls(css, "OEBPS/Styles/main.css", (path) => {
+      resolved.push(path);
+      return `blob:test/${path}`;
+    });
+    expect(resolved).toEqual(["OEBPS/Styles/nested.css", "OEBPS/Images/background.png", "OEBPS/Images/effects.svg"]);
+    expect(out).toContain('url("blob:test/OEBPS/Images/effects.svg#blur")');
+  });
+});
 
 describe("rewriteCssUrls", () => {
   const urlFor = (p: string): string | undefined => `blob:test/${p}`;

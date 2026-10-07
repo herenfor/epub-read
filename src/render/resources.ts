@@ -1,6 +1,6 @@
 import type { Book, Resource } from "../core/types";
 import { disposeBook } from "../core/book";
-import { collectChapterDependencies } from "./chapterDependencies";
+import { ChapterDependencies } from "./chapterDependencies";
 import { ArchiveClosedError } from "../core/selectiveArchive";
 
 /** 解压后保留在内存中的资源字节默认预算；可被 ResourceServer 选项覆盖。 */
@@ -29,7 +29,7 @@ export interface MediaCacheStats {
  * 带缓存；书关闭时统一 revoke。
  *
  * 除文本 LRU 外，本轮还给已解压资源增加按字节预算。活章节通过
- * retainChapter 登记依赖持有者；只有没有持有者的资源才会被按 LRU 淘汰，
+ * acquireChapter 完成依赖加载并登记持有者；只有没有持有者的资源才会被按 LRU 淘汰，
  * 淘汰时同时撤销 blob URL、清空原始字节并置回 loaded=false。
  */
 export class ResourceServer {
@@ -51,11 +51,13 @@ export class ResourceServer {
   private nextHolderId = 1;
   private mediaEvictions = 0;
   private readonly mediaCacheMaxBytes: number;
+  private dependencies: ChapterDependencies | null;
 
   constructor(
     private book: Book | null,
     private options: ResourceServerOptions = {}
   ) {
+    this.dependencies = book ? new ChapterDependencies(book, (path) => this.rawTextFor(path)) : null;
     const configured = options.mediaCacheMaxBytes;
     this.mediaCacheMaxBytes =
       typeof configured === "number" && Number.isFinite(configured) && configured > 0
@@ -179,7 +181,8 @@ export class ResourceServer {
    */
   async acquireChapter(chapterPath: string): Promise<number> {
     const book = this.book;
-    if (!book) throw new ArchiveClosedError();
+    const dependencies = this.dependencies;
+    if (!book || !dependencies) throw new ArchiveClosedError();
     const holderId = this.nextHolderId++;
     this.heldDependencies.set(holderId, []);
     const required = new Set<string>([chapterPath]);
@@ -195,7 +198,14 @@ export class ResourceServer {
         for (const path of batch) attempted.add(path);
         await this.ensureResources(batch);
         if (this.book !== book) throw new ArchiveClosedError();
-        for (const dep of collectChapterDependencies(book, chapterPath, (p) => this.rawTextFor(p))) {
+        for (const path of batch) {
+          const resource = book.resources.get(path);
+          if (!resource || !isLoadedResource(resource)) throw new Error(`书内资源读取未完成：${path}`);
+        }
+        const discovered = await dependencies.collect(chapterPath);
+        // Parsing can yield too: a closed book must never acquire new holders.
+        if (this.book !== book) throw new ArchiveClosedError();
+        for (const dep of discovered) {
           required.add(dep);
         }
       }
@@ -203,24 +213,6 @@ export class ResourceServer {
       this.releaseHolder(holderId);
       throw error;
     }
-  }
-
-  /**
-   * 登记一个章节持有者及其当前已能发现的资源依赖，返回可用于释放的 id。
-   * 适用于依赖已就绪的同步场景；需要递归按需恢复时用 acquireChapter。
-   */
-  retainChapter(chapterPath: string): number {
-    const holderId = this.nextHolderId++;
-    this.heldDependencies.set(holderId, []);
-    const deps = new Set<string>([chapterPath]);
-    if (this.book) {
-      for (const dep of collectChapterDependencies(this.book, chapterPath, (p) => this.rawTextFor(p))) {
-        deps.add(dep);
-      }
-    }
-    this.pinPaths(holderId, deps);
-    this.enforceMediaBudget();
-    return holderId;
   }
 
   /** 释放某个章节/浮层持有者；释放后预算内的无主资源可按 LRU 淘汰。 */
@@ -276,6 +268,7 @@ export class ResourceServer {
     this.mediaTicks.clear();
     this.holders.clear();
     this.heldDependencies.clear();
+    this.dependencies = null;
     this.mediaBytes = 0;
     if (this.book) {
       disposeBook(this.book);

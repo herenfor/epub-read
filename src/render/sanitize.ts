@@ -1,4 +1,5 @@
-import { parseXmlText, hasParserError, getSerializer } from "../core/parseXml";
+import { getSerializer } from "../core/parseXml";
+import { parseChapterDocument, STRIPPED_CHAPTER_TAGS } from "./chapterDocument";
 import { resolvePath, isExternalUrl, isFragmentOnly } from "../core/paths";
 import { hasAuthoredCssProperty, rewriteCssInlineWidths, rewriteCssUrls } from "./cssRewrite";
 import { isFullPageImage, linkedImagePage } from "./fullPageImage";
@@ -26,20 +27,6 @@ export interface SanitizeResult {
   /** 是否发生了解析降级（XML 失败转 HTML） */
   downgraded: boolean;
 }
-
-const STRIP_TAGS = new Set([
-  "script",
-  "object",
-  "embed",
-  "iframe",
-  "frame",
-  "frameset",
-  "base",
-  "form",
-  "button",
-  "select",
-  "textarea",
-]);
 
 /** Escape a font family for a CSS quoted string, including CSS-significant
  * control characters that could otherwise terminate or inject declarations. */
@@ -333,35 +320,18 @@ export async function sanitizeChapter(
   htmlText: string,
   opts: SanitizeOptions
 ): Promise<SanitizeResult> {
-  // 关键修复：XHTML 风格的自闭合 <script src="..."/> 在 HTML5 解析器里
-  // 会被忽略自闭合标志（script 不在自闭合清单），导致 script 元素吞掉
-  // 后续全部内容直到 EOF 上不存在的 </script>——内容全部丢失。
-  // 先补成正常闭合，再由消毒循环按常规 script 删除。
-  htmlText = htmlText.replace(/<script\b([^>]*?)\/\s*>/gi, "<script$1></script>");
-  // 同类问题：<span class="em05"/> 等非 void 标签的自闭合写法会吞掉
-  // 后续文本（如目录页 C<span/>O<span/>N... 让后面字母全变小）。
-  // 统一把非 void 标签补成显式开闭标签；br/img 等 void 标签保持原样。
-  htmlText = htmlText.replace(
-    /<([A-Za-z][\w:.-]*)\b([^>]*?)\/\s*>/g,
-    (match, tag: string, attrs: string) =>
-      /^(area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)$/i.test(tag)
-        ? match
-        : `<${tag}${attrs}></${tag}>`
-  );
-
   const issues: string[] = [];
-  let doc: Document;
-  let downgraded = false;
-  if (opts.strictXml) {
-    doc = await parseXmlText(htmlText, "application/xml");
-    if (hasParserError(doc)) {
-      downgraded = true;
-      issues.push("XHTML 严格解析失败，已降级为宽松 HTML 解析");
-      doc = await parseXmlText(htmlText, "text/html");
+  const { doc, downgraded } = await parseChapterDocument(htmlText, opts.strictXml);
+  if (downgraded) issues.push("XHTML 严格解析失败，已降级为宽松 HTML 解析");
+  const missingResources = new Set<string>();
+  const urlFor = (path: string): string | undefined => {
+    const url = opts.urlFor(path);
+    if (!url && !missingResources.has(path)) {
+      missingResources.add(path);
+      issues.push(`书内资源无法加载：${path}`);
     }
-  } else {
-    doc = await parseXmlText(htmlText, "text/html");
-  }
+    return url;
+  };
 
   const root = doc.documentElement;
   if (!root) {
@@ -377,7 +347,7 @@ export async function sanitizeChapter(
         el.parentNode?.removeChild(el);
         continue;
       }
-    } else if (STRIP_TAGS.has(tag)) {
+    } else if (STRIPPED_CHAPTER_TAGS.has(tag)) {
       el.parentNode?.removeChild(el);
       continue;
     }
@@ -407,7 +377,7 @@ export async function sanitizeChapter(
         if (isFragmentOnly(value) || isExternalUrl(value) || value.startsWith("//")) {
           continue;
         }
-        const url = opts.urlFor(resolvePath(opts.basePath, value));
+        const url = urlFor(resolvePath(opts.basePath, value));
         if (url) {
           el.setAttribute(attr.name, url);
         } else {
@@ -423,7 +393,7 @@ export async function sanitizeChapter(
     // 3) 内联 style 中的 url()
     const style = el.getAttribute("style");
     if (style) {
-      el.setAttribute("style", rewriteCssUrls(style, opts.basePath, opts.urlFor));
+      el.setAttribute("style", rewriteCssUrls(style, opts.basePath, urlFor));
     }
   }
 
@@ -437,12 +407,12 @@ export async function sanitizeChapter(
         // 优先：读取 CSS 内容并改写其内部引用（@font-face/background/@import 相对路径）
         const cssText = opts.getText?.(cssPath);
         if (cssText !== undefined && opts.makeUrl) {
-          const rewritten = rewriteCssUrls(cssText, cssPath, opts.urlFor, {
+          const rewritten = rewriteCssUrls(cssText, cssPath, urlFor, {
             getText: opts.getText,
           });
           link.setAttribute("href", opts.makeUrl(rewritten, "text/css"));
         } else {
-          const url = opts.urlFor(cssPath);
+          const url = urlFor(cssPath);
           if (url) {
             link.setAttribute("href", url);
           } else {
@@ -460,7 +430,7 @@ export async function sanitizeChapter(
   for (const stEl of Array.from(doc.getElementsByTagName("style"))) {
     const text = stEl.textContent;
     if (text) {
-      const rewritten = rewriteCssUrls(text, opts.basePath, opts.urlFor);
+      const rewritten = rewriteCssUrls(text, opts.basePath, urlFor);
       while (stEl.firstChild) stEl.removeChild(stEl.firstChild);
       stEl.appendChild(doc.createTextNode(rewritten));
     }
