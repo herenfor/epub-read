@@ -11,6 +11,7 @@ import {
 import type { DirectoryImportPort, DirectoryProgress, FolderTarget } from "../../core/folderImport/contract";
 import { applyDirectoryPlacementBatch, placementSnapshotOf } from "./placementBatch";
 import { FolderImportJobOwner } from "./jobOwner";
+import { createNativeDirectoryImportPort } from "../../platform/directoryImportBridge";
 import { buildFolderTargets, DEFAULT_FOLDER_IMPORT_OPTIONS } from "./FolderImportPanel";
 import { createWebDirectoryImportPort, scanWebDirectoryFiles, type WebDirectoryImportStore } from "./webDirectoryImport";
 import {
@@ -22,6 +23,15 @@ import {
 } from "../libraryOrganization";
 import type { ShelfEntry, ShelfSaveInput } from "../shelf";
 import { sha256Hex } from "../importBooks";
+
+const { nativeInvoke } = vi.hoisted(() => ({ nativeInvoke: vi.fn() }));
+vi.mock("@tauri-apps/api/core", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@tauri-apps/api/core")>(),
+  invoke: nativeInvoke,
+  Channel: class {
+    onmessage: ((event: DirectoryProgress) => void) | null = null;
+  },
+}));
 
 const root = { sourceRootKey: "local-root", name: "全部书籍" };
 const auto: ImportOptions = DEFAULT_FOLDER_IMPORT_OPTIONS;
@@ -354,5 +364,68 @@ describe("folder import job ownership", () => {
     expect(handlers.onError).toHaveBeenCalledTimes(1);
     expect(handlers.onSettled).toHaveBeenCalledTimes(1);
     expect(calls).toEqual(["cancel:j2", "cancel:j2", "dispose:j2"]);
+  });
+});
+
+
+describe("native directory registration ownership", () => {
+  it("closing during the picker releases only after native registration", async () => {
+    function deferred<T>() {
+      let resolve!: (value: T) => void;
+      const promise = new Promise<T>((res) => { resolve = res; });
+      return { promise, resolve };
+    }
+    const pick = deferred<{ kind: "path"; path: string }>();
+    const invoked = deferred<void>();
+    const registered = deferred<void>();
+    const disposed = deferred<void>();
+    let exists = false;
+    let cancelled = false;
+    const calls: string[] = [];
+    nativeInvoke.mockReset();
+    nativeInvoke.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      calls.push(command);
+      if (command === "directory_import_pick") return pick.promise;
+      if (command === "directory_import_scan") {
+        invoked.resolve();
+        await registered.promise;
+        exists = true;
+        const jobId = args!.jobId as string;
+        (args!.onProgress as { onmessage(event: DirectoryProgress): void }).onmessage({
+          jobId, phase: "scanning", scannedInputs: 0, totalInputs: null,
+          counts: { completed: 0, imported: 0, duplicates: 0, failed: 0, placementSkipped: 0, createdFolders: 0 },
+        });
+        await disposed.promise;
+        return { jobId, inputCount: 0 };
+      }
+      if (command === "directory_import_cancel") {
+        cancelled = exists;
+        return { status: exists ? "requested" : "already-finished" };
+      }
+      if (command === "directory_import_dispose") {
+        exists = false;
+        disposed.resolve();
+      }
+    });
+    const port = createNativeDirectoryImportPort();
+    const owner = new FolderImportJobOwner(port);
+    const token = owner.beginScan();
+    const updateUI = vi.fn();
+    const scan = port.scan((event) => {
+      if (owner.adopt(token, event.jobId)) updateUI(event);
+    });
+    owner.close();
+    pick.resolve({ kind: "path", path: "/anonymous" });
+    await invoked.promise;
+    expect(calls).toEqual(["directory_import_pick", "directory_import_scan"]);
+    registered.resolve();
+    const result = await scan;
+    if (result) expect(owner.adopt(token, result.jobId)).toBe(false);
+    expect(cancelled).toBe(true);
+    expect(exists).toBe(false);
+    expect(calls).toEqual([
+      "directory_import_pick", "directory_import_scan", "directory_import_cancel", "directory_import_dispose",
+    ]);
+    expect(updateUI).not.toHaveBeenCalled();
   });
 });
