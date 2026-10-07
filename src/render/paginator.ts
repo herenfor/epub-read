@@ -545,6 +545,14 @@ export type PreciseNavigationStatus =
   | "unsupported-highlight"
   | "cancelled";
 
+/** Read the original request before resolution can clear a failed text identity. */
+function hasModernReadingAnchor(anchor: PersistedNavigationAnchor | ReadingAnchor | null | undefined): boolean {
+  if (!anchor) return false;
+  const offset = "textOffset" in anchor ? anchor.textOffset : anchor.anchorTextOffset;
+  const snippet = "textSnippet" in anchor ? anchor.textSnippet : anchor.anchorTextSnippet;
+  return offset != null || snippet != null || Boolean(anchor.mediaAnchor);
+}
+
 /** A restore target that names content (text, element or media), not just a page. */
 export function hasSemanticRestoreTarget(anchor: ReadingAnchor | null): boolean {
   if (!anchor) return false;
@@ -2643,7 +2651,7 @@ export class ChapterPaginator {
   private pendingRestoreAnchor: ReadingAnchor | null = null;
   /** First-restore report for the current load; null when none is owed. */
   private restoreReport:
-    | { readonly semantic: boolean; readonly ticket: RestoreReportTicket | null; readonly loadSeq: number }
+    | { readonly semantic: boolean; readonly modern: boolean; readonly ticket: RestoreReportTicket | null; readonly loadSeq: number }
     | null = null;
   private restoreResultHandler: ((result: RestoreReportResult) => void) | null = null;
   /**
@@ -3509,7 +3517,8 @@ export class ChapterPaginator {
     // pendingRestoreAnchor, so registering before it would erase this request.
     const restoreReport = opts.reportRestore && !opts.preciseNavigation
       ? {
-          semantic: hasSemanticRestoreTarget(preciseAnchor),
+          semantic: hasSemanticRestoreTarget(preciseAnchor) || hasModernReadingAnchor(opts.readingAnchor),
+          modern: hasModernReadingAnchor(opts.readingAnchor),
           ticket: opts.restoreTicket ?? null,
           loadSeq: seq,
         }
@@ -3543,7 +3552,7 @@ export class ChapterPaginator {
         }
       : null;
     this.pendingFallbackPage =
-      typeof opts.fallbackPage === "number" && Number.isSafeInteger(opts.fallbackPage) && opts.fallbackPage >= 0
+      !restoreReport?.modern && typeof opts.fallbackPage === "number" && Number.isSafeInteger(opts.fallbackPage) && opts.fallbackPage >= 0
         ? opts.fallbackPage
         : null;
     // 恢复锚点与页码兜底一样，必须在 cleanupDoc() 之后写入：cleanupDoc 会清空
@@ -4715,6 +4724,7 @@ export class ChapterPaginator {
     const index = this.textIndex;
     const metrics = this.scrollMetrics();
     const inset = Math.round(Math.min(24, Math.max(0, metrics.viewportHeight * 0.04)));
+    const allowLegacy = this.restoreReport?.modern !== true;
     let rangeTop: number | null = null;
     let directTop: number | null = null;
     if (preciseAnchor && this.anchorPath === this._currentPath) {
@@ -4748,7 +4758,7 @@ export class ChapterPaginator {
           }
         }
       }
-      if (rangeTop === null && Number.isSafeInteger(preciseAnchor.index) && preciseAnchor.index >= 0) {
+      if (allowLegacy && rangeTop === null && Number.isSafeInteger(preciseAnchor.index) && preciseAnchor.index >= 0) {
         const all = Array.from(viewer.querySelectorAll("*"));
         const el = all[preciseAnchor.index] as HTMLElement | undefined;
         const rect = el?.getBoundingClientRect();
@@ -4776,7 +4786,7 @@ export class ChapterPaginator {
         }
       }
     }
-    if (rangeTop === null && directTop === null && fallbackPage !== null && fallbackPage > 0) {
+    if (allowLegacy && rangeTop === null && directTop === null && fallbackPage !== null && fallbackPage > 0) {
       // 页码兜底只在同章内使用：按“可用屏高”近似旧位置。
       const max = scrollMaxTop(metrics);
       const ratio = Math.min(1, fallbackPage / Math.max(1, this.metrics.pageCount - 1));
@@ -4792,7 +4802,7 @@ export class ChapterPaginator {
       viewer.scrollTop = resolved.scrollTop;
     } else if (directTop !== null) {
       viewer.scrollTop = directTop;
-    } else if (this.pendingStartAtEnd) {
+    } else if (allowLegacy && this.pendingStartAtEnd) {
       viewer.scrollTop = scrollMaxTop(metrics);
     } else {
       viewer.scrollTop = 0;
@@ -6431,12 +6441,13 @@ export class ChapterPaginator {
 
     // 阅读位置保留：窗口缩放/设置变化用内容锚点定位；
     // 图片加载等内容变化保留当前页号（否则内容下移会把人拉到后几页）
-    const resolvedAnchor = useAnchor ? this.resolveAnchorCol() : null;
+    const modernRestore = this.restoreReport?.modern === true;
+    const resolvedAnchor = useAnchor ? this.resolveAnchorCol({ allowLegacy: !modernRestore }) : null;
     const anchorCol = resolvedAnchor?.col ?? null;
     const restored = resolveRestoredPage({
       pageCount,
       anchorCol,
-      fallbackPage: this.pendingFallbackPage,
+      fallbackPage: modernRestore ? null : this.pendingFallbackPage,
       currentPage: this.metrics.currentPage,
     });
     const current = restored.page;
@@ -6451,11 +6462,10 @@ export class ChapterPaginator {
     // progress writes; no layout rule is changed.
     if (resolvedAnchor?.source === "legacy") this.captureAnchor();
     // Only the anchored (load) pass settles the first restore; image reflow passes do not.
-    // A media anchor is located only after its identity resolved AND the
-    // spread commit succeeded (signature-only evidence is not enough).
+    // Resolving an identity is not sufficient if the viewport rejected its
+    // position: only a successful commit can settle the restore as located.
     if (useAnchor) {
-      const located = resolvedAnchor !== null &&
-        (resolvedAnchor.source !== "media" || commitResult.ok);
+      const located = resolvedAnchor !== null && commitResult.ok;
       this.settleRestoreReport(located);
     }
     this.emit(this.readyState(false));
@@ -6885,7 +6895,7 @@ export class ChapterPaginator {
     }
   }
 
-  private resolveAnchorCol(): ResolvedAnchorColumn | null {
+  private resolveAnchorCol(options?: { allowLegacy?: boolean }): ResolvedAnchorColumn | null {
     const viewer = this.viewer;
     if (!viewer || !this.anchor || this.step <= 0 || this.anchorPath !== this._currentPath) return null;
     const index = this.textIndex;
@@ -6906,9 +6916,11 @@ export class ChapterPaginator {
       }
       // A stale/ambiguous text anchor must not remain sticky after legacy
       // fallback succeeds. It would otherwise keep preventing the upgrade.
-      this.anchor.textOffset = null;
-      this.anchor.textSnippet = null;
-      this.anchor.charsRead = 0;
+      if (options?.allowLegacy !== false) {
+        this.anchor.textOffset = null;
+        this.anchor.textSnippet = null;
+        this.anchor.charsRead = 0;
+      }
     }
     // B-155/R4: pure-media anchors resolve by index/tag/signature, not by
     // treating index=-1 as the chapter start. A zero-height/late image is not
@@ -6933,6 +6945,7 @@ export class ChapterPaginator {
         };
       }
     }
+    if (options?.allowLegacy === false) return null;
     const all = Array.from(viewer.querySelectorAll("*"));
     if (!Number.isSafeInteger(this.anchor.index) || this.anchor.index < 0 || this.anchor.index >= all.length) return null;
     const el = all[this.anchor.index] as HTMLElement;
@@ -7193,7 +7206,7 @@ export class ChapterPaginator {
     try {
       this.anchor = { ...anchor };
       this.anchorPath = this._currentPath;
-      const resolved = this.resolveAnchorCol();
+      const resolved = this.resolveAnchorCol({ allowLegacy: !hasModernReadingAnchor(anchor) });
       if (!resolved || resolved.col < 0 || resolved.col >= this.metrics.pageCount) return null;
       return resolved;
     } catch {
@@ -7638,7 +7651,7 @@ export class ChapterPaginator {
       try {
         this.anchor = candidate;
         this.anchorPath = this._currentPath;
-        resolved = this.resolveAnchorCol();
+        resolved = this.resolveAnchorCol({ allowLegacy: !semanticTarget });
         resolvedCandidate = this.anchor ? { ...this.anchor } : null;
       } catch {
         resolveFailed = true;
@@ -8179,11 +8192,14 @@ export class ChapterPaginator {
     const { pageCount } = this.metrics;
     const target = Math.max(0, Math.min(pageCount - 1, Math.floor(i)));
     if (this.scrollMode) {
-      this.scrollByViewport(target > this.metrics.currentPage ? 1 : -1);
-      if (options?.userInitiated) this.notifyUserCommit();
+      const moved = this.scrollByViewport(target > this.metrics.currentPage ? 1 : -1);
+      if (options?.userInitiated && moved) this.notifyUserCommit();
       return;
     }
     if (this.spreadLayout) {
+      const previousPage = this.metrics.currentPage;
+      const previousLeft = this.viewer.scrollLeft;
+      const adopted = this.adoptedPageUncommitted;
       this.closeFootnoteForNavigation();
       this.clearSearchHighlightForDocument();
       const res = commitSpreadPosition(this.viewportPort, this.spreadLayout, target);
@@ -8192,7 +8208,8 @@ export class ChapterPaginator {
       this.metrics.currentPage = res.page;
       this.emit(this.readyState(false));
       this.scheduleAnchorSample();
-      if (options?.userInitiated) this.notifyUserCommit();
+      const moved = res.page !== previousPage || Math.abs(res.scrollLeft - previousLeft) > 0.5 || adopted;
+      if (options?.userInitiated && moved) this.notifyUserCommit();
       return;
     }
     const targetScrollLeft = target * this.viewStepPx;

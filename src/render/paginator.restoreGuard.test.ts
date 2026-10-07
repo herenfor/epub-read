@@ -9,6 +9,7 @@ vi.mock("./sanitize", () => ({
 }));
 
 import { adaptNavigationAnchor } from "./navigationAnchor";
+import { createSpreadGeometry, createSpreadLayout } from "./pagedSpread";
 import { ChapterPaginator, type MediaReadingAnchor } from "./paginator";
 
 function fakeStyle(): CSSStyleDeclaration {
@@ -88,16 +89,19 @@ describe("load restore report lifecycle and source ticket", () => {
       readingAnchor: { index: -1, ratio: 0, anchorTextOffset: 12, anchorTextSnippet: "正文" },
       reportRestore: true,
       restoreTicket: ticket,
+      fallbackPage: 3,
     });
 
     // The real load has run cleanupDoc before pausing at acquireChapter.
     // The old bug stored restoreReport before cleanup and lost it here.
     expect((paginator as unknown as { restoreReport: unknown }).restoreReport).toMatchObject({
       semantic: true,
+      modern: true,
       ticket,
       loadSeq: 1,
     });
 
+    expect((paginator as unknown as { pendingFallbackPage: number | null }).pendingFallbackPage).toBeNull();
     (paginator as unknown as { settleRestoreReport(value: boolean): void }).settleRestoreReport(true);
     expect(settle).toHaveBeenCalledWith({ located: true, ticket, loadSeq: 1 });
 
@@ -294,4 +298,125 @@ function makeMediaResolveContext(anchor: MediaReadingAnchor) {
     metrics: { pageCount: 1, currentPage: 0 },
     anchor: { index: -1, ratio: anchor.ratio, charsRead: 0, totalChars: 0, textOffset: null, textSnippet: null, mediaAnchor: anchor },
   });
+}
+
+
+describe("modern restore identity and meaningful user movement", () => {
+  it("a missing modern text cannot restore through a surviving legacy element", () => {
+    const context = makeModernRestoreContext(true);
+    context.recomputeInner(true, 1);
+    expect(context.reports).toEqual([{ located: false, ticket: null, loadSeq: 1 }]);
+    expect(context.metrics.currentPage).toBe(0);
+    expect(context.viewer.scrollLeft).toBe(0);
+  });
+
+  it("a missing modern text cannot commit a within-chapter legacy candidate", () => {
+    const context = makeModernRestoreContext(true);
+    const anchorBefore = context.anchor;
+    expect(context.navigateWithinCurrentChapter({
+      readingAnchor: { index: 0, ratio: 0, anchorTextOffset: 0, anchorTextSnippet: "已消失" },
+      fallbackPage: 1,
+    })).toBe(false);
+    expect(context.anchor).toBe(anchorBefore);
+    expect(context.viewer.scrollLeft).toBe(0);
+  });
+
+  it("a scrolling restore with missing modern text ignores the element and saved page", () => {
+    const context = makeModernRestoreContext(true);
+    context.viewer.scrollHeight = 2400;
+    context.viewer.clientHeight = 600;
+    expect(context.applyScrollRestore(1, context.anchor)).toBe(false);
+    expect(context.viewer.scrollTop).toBe(0);
+  });
+
+  it("legacy-only records still restore to their element", () => {
+    const context = makeModernRestoreContext(false);
+    context.recomputeInner(true, 1);
+    expect(context.reports).toEqual([{ located: true, ticket: null, loadSeq: 1 }]);
+    expect(context.metrics.currentPage).toBe(1);
+  });
+
+  it("a valid modern text still commits its resolved spread", () => {
+    const context = makeModernRestoreContext(true);
+    context.anchor.textSnippet = "新内容";
+    context.resolveTextAnchorCol = () => 1;
+    context.textIndex.snippetAt = () => "新内容";
+    context.recomputeInner(true, 1);
+    expect(context.reports).toEqual([{ located: true, ticket: null, loadSeq: 1 }]);
+    expect(context.metrics.currentPage).toBe(1);
+  });
+
+  it("a spread no-op does not unlock progress but a real move or adopted position does", () => {
+    const context = makeModernRestoreContext(false);
+    context.spreadLayout = createSpreadLayout(createSpreadGeometry(800, 24, 2), { first: 0, last: 3 });
+    context.metrics = { pageCount: 2, currentPage: 0 };
+    const handler = vi.fn();
+    context.setUserCommitHandler(handler);
+    context.setPage(0, { userInitiated: true });
+    expect(handler).not.toHaveBeenCalled();
+    context.setPage(1, { userInitiated: true });
+    expect(handler).toHaveBeenCalledTimes(1);
+    context.setPage(1, { userInitiated: true });
+    expect(handler).toHaveBeenCalledTimes(1);
+    context.adoptedPageUncommitted = true;
+    context.setPage(1, { userInitiated: true });
+    expect(handler).toHaveBeenCalledTimes(2);
+  });
+
+  it("a scrolling page command only notifies when it moved", () => {
+    const context = makeSetPageContext() as any;
+    Object.defineProperty(context, "scrollMode", { value: true, configurable: true });
+    context.haltPageMotion = () => {};
+    context.scrollByViewport = vi.fn().mockReturnValueOnce(false).mockReturnValueOnce(true);
+    const handler = vi.fn();
+    context.setUserCommitHandler(handler);
+    context.setPage(1, { userInitiated: true });
+    expect(handler).not.toHaveBeenCalled();
+    context.setPage(1, { userInitiated: true });
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+});
+
+function makeModernRestoreContext(modern: boolean): any {
+  const element = {
+    getBoundingClientRect: () => ({ left: 824, top: 800, width: 100, height: 80 }),
+  };
+  const context: any = Object.assign(makeSetPageContext(), {
+    disposed: false,
+    _currentPath: "chapter.xhtml",
+    anchorPath: "chapter.xhtml",
+    iframe: { contentWindow: null },
+    contentDoc: {},
+    viewer: {
+      scrollLeft: 0, scrollTop: 0, clientLeft: 0, clientWidth: 800, clientHeight: 600,
+      querySelectorAll: () => [element],
+      getBoundingClientRect: () => ({ left: 0, top: 0 }),
+    },
+    loadSeq: 1, step: 824, effectiveColumns: 1, leadingColumns: 0,
+    textIndex: { totalChars: 3, codePoints: Array.from("新内容"), snippetAt: () => "新内容" },
+    anchor: {
+      index: 0, ratio: 0, charsRead: 0, totalChars: 3,
+      textOffset: modern ? 0 : null, textSnippet: modern ? "已消失" : null,
+    },
+    spreadGeometry: createSpreadGeometry(800, 24, 1),
+    bookmarkSpreadCache: new Map(),
+    collectContentFragments: () => [{ left: 0, right: 100 }, { left: 824, right: 924 }],
+    pendingFallbackPage: 1,
+    captureAnchor() {},
+    haltPageMotion() {},
+    restoreReport: { semantic: true, modern, ticket: null, loadSeq: 1 },
+    reports: [] as unknown[],
+    lastState: { status: "ready" },
+  });
+  context.readyState = () => ({ status: "ready", ...context.metrics });
+  context.restoreResultHandler = (report: unknown) => context.reports.push(report);
+  let scrollWidth = 800;
+  Object.defineProperty(context, "viewportPort", { value: {
+    ensureScrollWidth: (width: number) => { scrollWidth = Math.max(scrollWidth, width); },
+    readScrollWidth: () => scrollWidth,
+    readClientWidth: () => 800,
+    readScrollLeft: () => context.viewer.scrollLeft,
+    writeScrollLeft: (left: number) => { context.viewer.scrollLeft = left; },
+  } });
+  return context;
 }
