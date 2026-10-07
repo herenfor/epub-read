@@ -1,3 +1,4 @@
+use super::version_policy::{select_archive_reader, ArchiveReader, VersionError};
 use super::{
     available_space_for, hex_digest, now_ms, valid_hash, LocalBinding, MissingBook,
     ProgressReporter, SaveExportScope, SaveFileError, SkippedBook, COPY_BUFFER_BYTES,
@@ -22,6 +23,17 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 pub(crate) const SAVE_FORMAT: &str = "epub-reader-save";
 pub(crate) const CONTAINER_VERSION: u32 = 1;
 pub(crate) const STATE_SCHEMA_VERSION: u64 = 3;
+
+/// Minimal header used only to choose a reader. It intentionally ignores all
+/// other fields; a future writer may add fields to this object. The strict
+/// [`SaveManifest`] decoder runs only after an exact reader is selected.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveManifestVersionProbe {
+    format: String,
+    container_version: u32,
+    state_schema_version: u64,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -119,6 +131,15 @@ pub(crate) fn scope_kind(scope: &SaveExportScope) -> &'static str {
     match scope {
         SaveExportScope::All => "all",
         SaveExportScope::Selected { .. } => "selected",
+    }
+}
+
+fn archive_version_error(error: VersionError) -> SaveFileError {
+    match error {
+        VersionError::NeedsNewerApp => {
+            SaveFileError::new("invalid-data", "此资料需要较新版本，请升级")
+        }
+        VersionError::UnsupportedFormat => SaveFileError::new("invalid-data", "不支持此存档格式"),
     }
 }
 
@@ -591,7 +612,7 @@ pub(crate) fn validate_and_extract_with_expectation(
                 "非法 ZIP 路径：{name}"
             )));
         }
-        if name.contains('\\') || name.starts_with('/') || !allowed_entry_path(name) {
+        if name.contains('\\') || name.starts_with('/') {
             return Err(SaveFileError::invalid_data(format!(
                 "存档包含清单外条目：{name}"
             )));
@@ -607,9 +628,6 @@ pub(crate) fn validate_and_extract_with_expectation(
     let manifest_index = *indexes
         .get("manifest.json")
         .ok_or_else(|| SaveFileError::invalid_data("存档缺少 manifest.json"))?;
-    let state_index = *indexes
-        .get("state.json")
-        .ok_or_else(|| SaveFileError::invalid_data("存档缺少 state.json"))?;
 
     let manifest_bytes = read_entry_bytes(
         &mut archive,
@@ -617,11 +635,27 @@ pub(crate) fn validate_and_extract_with_expectation(
         "manifest.json",
         MANIFEST_JSON_LIMIT,
     )?;
-    let manifest: SaveManifest = serde_json::from_slice(&manifest_bytes)
+    let version_probe: SaveManifestVersionProbe = serde_json::from_slice(&manifest_bytes)
         .map_err(|error| SaveFileError::invalid_data(format!("manifest.json 无法解析：{error}")))?;
-    if manifest.format != SAVE_FORMAT {
+    if version_probe.format != SAVE_FORMAT {
         return Err(SaveFileError::invalid_data("未知存档格式"));
     }
+    let reader = select_archive_reader(
+        version_probe.container_version,
+        version_probe.state_schema_version,
+    )
+    .map_err(archive_version_error)?;
+    match reader {
+        ArchiveReader::Container1State3 => {}
+    }
+    let state_index = *indexes
+        .get("state.json")
+        .ok_or_else(|| SaveFileError::invalid_data("存档缺少 state.json"))?;
+
+    // The exact current reader still parses every declared field strictly. The
+    // version probe above must not become the validated payload.
+    let manifest: SaveManifest = serde_json::from_slice(&manifest_bytes)
+        .map_err(|error| SaveFileError::invalid_data(format!("manifest.json 无法解析：{error}")))?;
     if manifest.container_version != CONTAINER_VERSION {
         return Err(SaveFileError::invalid_data("未知容器主版本"));
     }
@@ -749,6 +783,11 @@ pub(crate) fn validate_and_extract_with_expectation(
     )?;
     drop(state_bytes);
     validate_portable_state(&incoming)?;
+    if manifest.state_schema_version != incoming.schema_version {
+        return Err(SaveFileError::invalid_data(
+            "manifest.stateSchemaVersion 与 state.json 的 schemaVersion 不一致",
+        ));
+    }
 
     match manifest.scope.kind.as_str() {
         "selected" => {
@@ -1194,6 +1233,157 @@ mod tests {
         let error =
             validate_and_extract(&archive_path, &staging, &mut reporter, &cancelled).unwrap_err();
         assert_eq!(error.code, "invalid-data");
+    }
+
+    #[test]
+    fn archive_version_probe_rejects_future_and_old_combinations_early() {
+        let dir = TempDir::new("version-probe");
+        let invalid_state_bytes = b"not-json";
+        for (label, container, schema, include_future_field, expected, unexpected) in [
+            (
+                "new-container",
+                2_u32,
+                3_u64,
+                true,
+                "需要较新版本",
+                Some("不支持此存档格式"),
+            ),
+            (
+                "new-schema",
+                1_u32,
+                4_u64,
+                true,
+                "需要较新版本",
+                Some("不支持此存档格式"),
+            ),
+            (
+                "old-container",
+                0_u32,
+                3_u64,
+                false,
+                "不支持此存档格式",
+                Some("需要较新版本"),
+            ),
+            (
+                "old-schema",
+                1_u32,
+                2_u64,
+                false,
+                "不支持此存档格式",
+                Some("需要较新版本"),
+            ),
+        ] {
+            let path = dir.path().join(format!("{label}.epubsave"));
+            let mut manifest = json!({
+                "format": SAVE_FORMAT,
+                "containerVersion": container,
+                "stateSchemaVersion": schema,
+                "packageId": A,
+                "createdAtMs": 1,
+                "scope": { "kind": "all", "bookHashes": [] },
+                "entries": [{
+                    "path": "state.json",
+                    "bytes": invalid_state_bytes.len() as u64,
+                    "sha256": hex_digest(invalid_state_bytes)
+                }]
+            });
+            if include_future_field {
+                // A future manifest field must not be decoded by SaveManifest
+                // before the version selector rejects the package.
+                manifest["futureTopLevelField"] = json!({ "nested": true });
+            }
+            let mut zip = ZipWriter::new(File::create(&path).unwrap());
+            zip.start_file("manifest.json", SimpleFileOptions::default())
+                .unwrap();
+            zip.write_all(&serde_json::to_vec(&manifest).unwrap())
+                .unwrap();
+            zip.start_file("state.json", SimpleFileOptions::default())
+                .unwrap();
+            zip.write_all(invalid_state_bytes).unwrap();
+            if include_future_field {
+                // A future writer may add new ZIP entries; the version probe
+                // must still win over the current ZIP allow-list.
+                zip.start_file("future/data.bin", SimpleFileOptions::default())
+                    .unwrap();
+                zip.write_all(b"future").unwrap();
+            }
+            zip.finish().unwrap();
+
+            let staging = dir.path().join(format!("{label}-staging"));
+            let mut reporter = ProgressReporter::new(channel(), "test", None);
+            let error =
+                validate_and_extract(&path, &staging, &mut reporter, &AtomicBool::new(false))
+                    .unwrap_err();
+            assert_eq!(error.code, "invalid-data", "{label}");
+            assert!(error.message.contains(expected), "{label}: {error}");
+            if let Some(unexpected) = unexpected {
+                assert!(!error.message.contains(unexpected), "{label}: {error}");
+            }
+            assert!(
+                !staging.exists(),
+                "{label} rejected before state bytes were extracted"
+            );
+        }
+    }
+
+    #[test]
+    fn select_export_state_keeps_folder_relationships_without_a_second_wire() {
+        let mut state = test_state();
+        let referenced = "11111111-0000-4000-8000-000000000001";
+        let unrelated = "22222222-0000-4000-8000-000000000002";
+        state.organization = serde_json::from_value(json!({
+            "schemaVersion": 1,
+            "folders": {
+                referenced: {
+                    "name": {
+                        "value": "已引用夹",
+                        "stamp": { "deviceId": A, "counter": 1 }
+                    }
+                },
+                unrelated: {
+                    "name": {
+                        "value": "空夹",
+                        "stamp": { "deviceId": A, "counter": 2 }
+                    }
+                }
+            },
+            "books": {
+                HASH: {
+                    "folderId": {
+                        "value": referenced,
+                        "stamp": { "deviceId": A, "counter": 3 }
+                    }
+                }
+            }
+        }))
+        .unwrap();
+
+        let (all, all_hashes) = select_export_state(&state, &SaveExportScope::All).unwrap();
+        assert_eq!(all_hashes, vec![HASH.to_string()]);
+        assert_eq!(all.organization.folders.len(), 2);
+        assert!(all.organization.folders.contains_key(referenced));
+        assert!(all.organization.folders.contains_key(unrelated));
+        assert_eq!(
+            all.organization.books[HASH]
+                .folder_id
+                .as_ref()
+                .and_then(|register| register.value.as_deref()),
+            Some(referenced)
+        );
+
+        let (selected, selected_hashes) = select_export_state(
+            &state,
+            &SaveExportScope::Selected {
+                book_hashes: vec![HASH.to_string()],
+            },
+        )
+        .unwrap();
+        assert_eq!(selected_hashes, vec![HASH.to_string()]);
+        assert_eq!(selected.books.len(), 1);
+        assert_eq!(selected.organization.books.len(), 1);
+        assert_eq!(selected.organization.folders.len(), 1);
+        assert!(selected.organization.folders.contains_key(referenced));
+        assert!(!selected.organization.folders.contains_key(unrelated));
     }
 
     #[test]
