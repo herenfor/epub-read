@@ -4,6 +4,7 @@
 //! never retains EPUB bytes.  Temporary staging belongs to one running worker
 //! and is removed before `dispose` can release the slot.
 
+use super::activity::{ImportActivityGuard, ImportActivityState};
 use super::planner::directory_group_key;
 use super::scanner::{scan_path_root_cancellable, ScanOutput};
 use super::types::{
@@ -26,6 +27,7 @@ pub struct DirectoryImportJob {
     lifecycle: Mutex<Lifecycle>,
     worker_done: Condvar,
     result: Mutex<Option<super::types::DirectoryImportResult>>,
+    activity: ImportActivityGuard,
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -57,7 +59,7 @@ impl Drop for DirectoryWorkerGuard {
 }
 
 impl DirectoryImportJob {
-    fn new(id: String, source: DirectorySource) -> Self {
+    fn new(id: String, source: DirectorySource, activity: ImportActivityGuard) -> Self {
         Self {
             id,
             source,
@@ -69,6 +71,7 @@ impl DirectoryImportJob {
             lifecycle: Mutex::new(Lifecycle::default()),
             worker_done: Condvar::new(),
             result: Mutex::new(None),
+            activity,
         }
     }
 
@@ -262,9 +265,24 @@ fn directory_bindings(app: &AppHandle) -> Result<BTreeMap<String, String>, Strin
 #[derive(Default)]
 pub struct DirectoryImportState {
     jobs: Mutex<HashMap<String, Arc<DirectoryImportJob>>>,
+    activity: ImportActivityState,
 }
 
 impl DirectoryImportState {
+    /// Shared gate used by the legacy linked/managed import path.  The
+    /// directory command surface reaches it through `register`, while
+    /// `linked_library` borrows the same state from the Tauri app handle.
+    pub(crate) fn try_acquire_import_activity(
+        &self,
+        owner: String,
+    ) -> Result<ImportActivityGuard, String> {
+        self.activity.try_acquire(owner)
+    }
+
+    pub(crate) fn import_activity_busy(&self) -> Result<bool, String> {
+        self.activity.is_busy()
+    }
+
     pub fn register(
         &self,
         job_id: &str,
@@ -273,11 +291,18 @@ impl DirectoryImportState {
         if job_id.trim().is_empty() {
             return Err("jobId 不能为空".to_string());
         }
+        let activity = self
+            .activity
+            .try_acquire(format!("directory-import:{job_id}"))?;
         let mut jobs = self.jobs.lock().map_err(|_| "目录导入作业表已损坏")?;
         if jobs.contains_key(job_id) {
             return Err("该目录导入作业已注册".to_string());
         }
-        let job = Arc::new(DirectoryImportJob::new(job_id.to_string(), source));
+        let job = Arc::new(DirectoryImportJob::new(
+            job_id.to_string(),
+            source,
+            activity,
+        ));
         jobs.insert(job_id.to_string(), Arc::clone(&job));
         Ok(job)
     }
@@ -511,5 +536,37 @@ mod tests {
         job.request_dispose();
         assert!(job.begin_import().is_none());
         job.wait_for_workers();
+    }
+
+    #[test]
+    fn register_shares_the_activity_gate_and_remove_releases_it() {
+        let state = DirectoryImportState::default();
+        let legacy = state
+            .try_acquire_import_activity("legacy:test".to_string())
+            .unwrap();
+        assert!(state
+            .register(
+                "job-blocked",
+                DirectorySource::Path {
+                    path: "/tmp/books".to_string(),
+                },
+            )
+            .is_err());
+        drop(legacy);
+        let job = state
+            .register(
+                "job-1",
+                DirectorySource::Path {
+                    path: "/tmp/books".to_string(),
+                },
+            )
+            .unwrap();
+        assert!(state.import_activity_busy().unwrap());
+        assert!(state
+            .try_acquire_import_activity("legacy:two".to_string())
+            .is_err());
+        drop(job);
+        drop(state.remove("job-1").unwrap());
+        assert!(!state.import_activity_busy().unwrap());
     }
 }
