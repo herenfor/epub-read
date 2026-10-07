@@ -1,4 +1,4 @@
-import { resolvePath, isExternalUrl } from "../core/paths";
+import { resolvePath, isExternalUrl, splitHref } from "../core/paths";
 import { TEXT_MEASURE } from "./settings";
 
 function resolveOrKeep(
@@ -12,10 +12,11 @@ function resolveOrKeep(
   if (isExternalUrl(trimmed) || trimmed.startsWith("//") || trimmed.startsWith("#")) {
     return match;
   }
-  const resolved = resolvePath(basePath, trimmed);
+  const { path, anchor } = splitHref(trimmed);
+  const resolved = resolvePath(basePath, path);
   const url = resolveUrl(resolved);
   if (!url) return match; // 资源缺失：保留原样，由浏览器静默失败
-  return `url("${url}")`;
+  return `url("${url}${anchor ? `#${anchor}` : ""}")`;
 }
 
 export interface CssRewriteOptions {
@@ -115,6 +116,33 @@ export function hasAuthoredCssProperty(css: string, property: string): boolean {
   return new RegExp(`(?:^|[;{])\\s*${escaped}\\s*:`, "i").test(stripCssComments(css));
 }
 
+function mapCssImports(css: string, replace: (match: string, href: string, suffix: string) => string): string {
+  return css.replace(
+    /@import\s+(?:url\(\s*(?:"([^"]*)"|'([^']*)'|([^)'"\s]+))\s*\)|"([^"]*)"|'([^']*)')([^;]*);/gi,
+    (match, dq, sq, bare, sdq, ssq, suffix) =>
+      replace(match, (dq ?? sq ?? bare ?? sdq ?? ssq ?? "").trim(), suffix ?? ""),
+  );
+}
+
+function mapCssUrls(css: string, replace: (match: string, href: string) => string): string {
+  return css.replace(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^)'"\s]+))\s*\)/gi,
+    (match, dq, sq, bare) => replace(match, (dq ?? sq ?? bare ?? "").trim()));
+}
+
+/** The dependency graph uses exactly the same reference syntax as rewriting. */
+export function cssResourceReferences(css: string): Array<{ href: string; stylesheet: boolean }> {
+  const refs: Array<{ href: string; stylesheet: boolean }> = [];
+  const rest = mapCssImports(stripCssComments(css), (_match, href) => {
+    refs.push({ href, stylesheet: true });
+    return "";
+  });
+  mapCssUrls(rest, (match, href) => {
+    refs.push({ href, stylesheet: false });
+    return match;
+  });
+  return refs;
+}
+
 function hasCombinator(selector: string, context: CssCommentContext): boolean {
   const s = stripProtectedCssComments(selector, context).trim();
   if (!s || s.startsWith("@")) return false;
@@ -184,40 +212,32 @@ function rewriteCssUrlsInternal(
   // child stylesheet's restored comments can never be seen by a parent pass.
   let out = protectCssComments(css, context);
   // 先处理 @import（裸字符串与 url() 两种写法，保留媒体后缀）
-  out = out.replace(
-    /@import\s+(?:url\(\s*(?:"([^"]*)"|'([^']*)'|([^)'"\s]+))\s*\)|"([^"]*)"|'([^']*)')([^;]*);/gi,
-    (match, dq, sq, bare, sdq, ssq, suffix) => {
-      const raw = (dq ?? sq ?? bare ?? sdq ?? ssq ?? "").trim();
-      if (!raw || /^(data:|blob:|https?:|mailto:|#|\/\/)/i.test(raw)) return match;
-      const resolved = resolvePath(basePath, raw);
-      // 能读到内容就递归内联：width:%→em、url()→blob 都以被导入文件为基准，
-      // 也避免 blob 样式表里的相对路径失效
-      const importedText = options.getText?.(resolved);
-      if (importedText !== undefined) {
-        const seen = new Set(options.seen ?? []);
-        if (seen.has(resolved)) {
-          return protectCssComments(`/* 循环 @import 已跳过：${raw} */`, context);
-        }
-        seen.add(resolved);
-        const rewritten = rewriteCssUrlsInternal(importedText, resolved, resolveUrl, { ...options, seen }, context);
-        const note = `/* @import ${raw} → 内联 */`;
-        const media = suffix?.trim();
-        const protectedNote = protectCssComments(note, context);
-        return media
-          ? `${protectedNote}\n@media ${media} {\n${rewritten}\n}`
-          : `${protectedNote}\n${rewritten}`;
+  out = mapCssImports(out, (match, raw, suffix) => {
+    if (!raw || /^(data:|blob:|https?:|mailto:|#|\/\/)/i.test(raw)) return match;
+    const resolved = resolvePath(basePath, splitHref(raw).path);
+    // 能读到内容就递归内联：width:%→em、url()→blob 都以被导入文件为基准，
+    // 也避免 blob 样式表里的相对路径失效
+    const importedText = options.getText?.(resolved);
+    if (importedText !== undefined) {
+      const seen = new Set(options.seen ?? []);
+      if (seen.has(resolved)) {
+        return protectCssComments(`/* 循环 @import 已跳过：${raw} */`, context);
       }
-      const url = resolveUrl(resolved);
-      if (!url) return match;
-      return `@import url("${url}")${suffix ?? ""};`;
+      seen.add(resolved);
+      const rewritten = rewriteCssUrlsInternal(importedText, resolved, resolveUrl, { ...options, seen }, context);
+      const note = `/* @import ${raw} → 内联 */`;
+      const media = suffix?.trim();
+      const protectedNote = protectCssComments(note, context);
+      return media
+        ? `${protectedNote}\n@media ${media} {\n${rewritten}\n}`
+        : `${protectedNote}\n${rewritten}`;
     }
-  );
+    const url = resolveUrl(resolved);
+    if (!url) return match;
+    return `@import url("${url}")${suffix ?? ""};`;
+  });
   // 再处理其余 url(...)
-  out = out.replace(
-    /url\(\s*(?:"([^"]*)"|'([^']*)'|([^)'"\s]+))\s*\)/gi,
-    (match, dq: string | undefined, sq: string | undefined, bare: string | undefined) =>
-      resolveOrKeep((dq ?? sq ?? bare ?? "").trim(), basePath, resolveUrl, match)
-  );
+  out = mapCssUrls(out, (match, href) => resolveOrKeep(href, basePath, resolveUrl, match));
   // width:X% → 改写为 min(X%, X%×40rem)（与 sanitize 的 DOM 级重写配套）。
   // 书的 % 是按“页面≈版心”的阅读器写的，我们的页面=窗口全宽；
   // min() 保留两个候选让浏览器按真实包含块取值：

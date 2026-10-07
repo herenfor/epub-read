@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import type { Book } from "../core/types";
 import { decodeBytes, ResourceServer } from "./resources";
 import { ArchiveClosedError } from "../core/selectiveArchive";
+import * as chapterDocument from "./chapterDocument";
+import { sanitizeChapter } from "./sanitize";
+import { DEFAULT_SETTINGS } from "./settings";
 
 describe("decodeBytes（编码容错）", () => {
   it("UTF-8 正常解码", () => {
@@ -56,6 +59,131 @@ function book(): Book {
     drmProtected: false,
   };
 }
+
+function lazyBackgroundBook(style: string): Book {
+  const b = book();
+  b.version = 2;
+  const enc = new TextEncoder();
+  const payloads = new Map([
+    ["OEBPS/Text/message.xhtml", enc.encode(`<html xmlns="http://www.w3.org/1999/xhtml"><head/><body ${style}><p>制作信息</p></body></html>`)],
+    ["OEBPS/Images/cover-bg.png", new Uint8Array([9, 8, 7, 6])],
+  ]);
+  b.resources = new Map([...payloads].map(([path]) => [path, {
+    path, data: new Uint8Array(0), loaded: false,
+    mediaType: path.endsWith(".png") ? "image/png" : "application/xhtml+xml",
+  }]));
+  b.ensureResources = async (paths) => {
+    for (const path of paths) {
+      const resource = b.resources.get(path);
+      const data = payloads.get(path);
+      if (resource && data) {
+        resource.data = data;
+        resource.loaded = true;
+      }
+    }
+  };
+  return b;
+}
+
+describe("ResourceServer authored background lifecycle", () => {
+  it.each([
+    `style="background-image:url('../Images/cover-bg.png');background-size:cover"`,
+    `style='background-image:url("../Images/cover-bg.png");background-size:cover'`,
+    `style="background-image:url(&quot;../Images/cover-bg.png&quot;);background-size:cover"`,
+  ])("cold acquisition prepares and rewrites the complete style attribute: %s", async (style) => {
+    const b = lazyBackgroundBook(style);
+    const server = new ResourceServer(b);
+    try {
+      const holder = await server.acquireChapter("OEBPS/Text/message.xhtml");
+      const url = server.urlFor("OEBPS/Images/cover-bg.png")!;
+      expect(url).toMatch(/^blob:/);
+      expect(new Uint8Array(await (await fetch(url)).arrayBuffer())).toEqual(new Uint8Array([9, 8, 7, 6]));
+      expect(server.mediaCacheStats.holders).toBe(2);
+      const rendered = await sanitizeChapter(server.textFor("OEBPS/Text/message.xhtml")!, {
+        basePath: "OEBPS/Text/message.xhtml", strictXml: true,
+        urlFor: (path) => server.urlFor(path), settings: DEFAULT_SETTINGS,
+      });
+      expect(rendered.html).toContain(url);
+      expect(rendered.issues).toEqual([]);
+      server.releaseHolder(holder);
+    } finally {
+      server.revokeAll();
+    }
+  });
+
+  it("protects active background, evicts released bytes/URL, and restores on reentry without reparsing", async () => {
+    const b = lazyBackgroundBook(`style="background-image:url('../Images/cover-bg.png')"`);
+    const parse = vi.spyOn(chapterDocument, "parseChapterDocument");
+    const revoke = vi.spyOn(URL, "revokeObjectURL");
+    const server = new ResourceServer(b, { mediaCacheMaxBytes: 256 });
+    try {
+      const holder = await server.acquireChapter("OEBPS/Text/message.xhtml");
+      const oldUrl = server.urlFor("OEBPS/Images/cover-bg.png")!;
+      b.resources.set("pressure", { path: "pressure", data: new Uint8Array(512), mediaType: "image/png" });
+      await server.ensureResources(["pressure"]);
+      expect(b.resources.get("OEBPS/Images/cover-bg.png")!.loaded).toBe(true);
+      expect((await fetch(oldUrl)).ok).toBe(true);
+      server.releaseHolder(holder);
+      expect(b.resources.get("OEBPS/Images/cover-bg.png")!.loaded).toBe(false);
+      expect(revoke).toHaveBeenCalledWith(oldUrl);
+      expect(server.urlFor("OEBPS/Images/cover-bg.png")).toBeUndefined();
+      const restored = await server.acquireChapter("OEBPS/Text/message.xhtml");
+      expect(server.urlFor("OEBPS/Images/cover-bg.png")).toMatch(/^blob:/);
+      expect(server.urlFor("OEBPS/Images/cover-bg.png")).not.toBe(oldUrl);
+      expect(parse).toHaveBeenCalledTimes(1);
+      server.releaseHolder(restored);
+    } finally {
+      server.revokeAll();
+      parse.mockRestore();
+      revoke.mockRestore();
+    }
+  });
+
+  it("failed reads reject and release holders, then a retry discovers the background", async () => {
+    const b = lazyBackgroundBook(`style="background-image:url('../Images/cover-bg.png')"`);
+    const loader = b.ensureResources!;
+    b.ensureResources = async () => {};
+    const server = new ResourceServer(b);
+    try {
+      await expect(server.acquireChapter("OEBPS/Text/message.xhtml")).rejects.toThrow("书内资源读取未完成");
+      expect(server.mediaCacheStats.holders).toBe(0);
+      b.ensureResources = loader;
+      const holder = await server.acquireChapter("OEBPS/Text/message.xhtml");
+      expect(server.urlFor("OEBPS/Images/cover-bg.png")).toMatch(/^blob:/);
+      server.releaseHolder(holder);
+    } finally {
+      server.revokeAll();
+    }
+  });
+
+  it("closing while document parsing awaits cannot revive a chapter lease", async () => {
+    let resume!: () => void;
+    const blocker = new Promise<void>((resolve) => { resume = resolve; });
+    let entered!: () => void;
+    const parsing = new Promise<void>((resolve) => { entered = resolve; });
+    const original = chapterDocument.parseChapterDocument;
+    const parse = vi.spyOn(chapterDocument, "parseChapterDocument").mockImplementationOnce(async (...args) => {
+      const parsed = await original(...args);
+      entered();
+      await blocker;
+      return parsed;
+    });
+    const server = new ResourceServer(lazyBackgroundBook(`style="background-image:url('../Images/cover-bg.png')"`));
+    try {
+      const pending = server.acquireChapter("OEBPS/Text/message.xhtml");
+      await parsing;
+      server.revokeAll();
+      resume();
+      await expect(pending).rejects.toThrow(ArchiveClosedError);
+      expect(server.mediaCacheStats.holders).toBe(0);
+      expect(server.mediaCacheStats.urls).toBe(0);
+    } finally {
+      resume();
+      server.revokeAll();
+      parse.mockRestore();
+    }
+  });
+});
 
 describe("ResourceServer lifecycle", () => {
   it("共享资源 URL 复用，并在会话结束 revokeAll 后幂等清空", () => {
@@ -165,8 +293,8 @@ describe("ResourceServer media budget", () => {
     const totalBytes = [...b.resources.values()].reduce((sum, res) => sum + res.data.byteLength, 0);
     const server = new ResourceServer(b, { mediaCacheMaxBytes: totalBytes });
 
-    const first = server.retainChapter("OEBPS/ch1.xhtml");
-    const second = server.retainChapter("OEBPS/ch2.xhtml");
+    const first = await server.acquireChapter("OEBPS/ch1.xhtml");
+    const second = await server.acquireChapter("OEBPS/ch2.xhtml");
     expect(b.resources.get("OEBPS/shared.png")!.loaded).not.toBe(false);
     // ch1、ch2、style.css、shared.png 都至少有一个持有者。
     expect(server.mediaCacheStats.holders).toBe(4);

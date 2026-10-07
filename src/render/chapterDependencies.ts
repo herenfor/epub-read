@@ -1,183 +1,84 @@
 import { isExternalUrl, isFragmentOnly, resolvePath, splitHref } from "../core/paths";
 import type { Book } from "../core/types";
+import { childElements, localNameOf, type XmlElementLike } from "../core/xml";
+import { parseChapterDocument, STRIPPED_CHAPTER_TAGS } from "./chapterDocument";
+import { cssResourceReferences } from "./cssRewrite";
 
-function extractUrlsFromCss(css: string): string[] {
-  const urls: string[] = [];
-  // 匹配 url(...)
-  const urlRegex = /url\(\s*(?:"([^"]*)"|'([^']*)'|([^)'"\s]+))\s*\)/gi;
-  let match: RegExpExecArray | null;
-  while ((match = urlRegex.exec(css)) !== null) {
-    const raw = (match[1] ?? match[2] ?? match[3] ?? "").trim();
-    if (raw && !isExternalUrl(raw) && !raw.startsWith("data:") && !raw.startsWith("blob:") && !raw.startsWith("#")) {
-      urls.push(raw);
-    }
-  }
-  return urls;
-}
+type ResourceReference = { href: string; stylesheet: boolean };
 
-function extractImportsFromCss(css: string): string[] {
-  const imports: string[] = [];
-  const importRegex = /@import\s+(?:url\(\s*(?:"([^"]*)"|'([^']*)'|([^)'"\s]+))\s*\)|"([^"]*)"|'([^']*)')/gi;
-  let match: RegExpExecArray | null;
-  while ((match = importRegex.exec(css)) !== null) {
-    const raw = (match[1] ?? match[2] ?? match[3] ?? match[4] ?? match[5] ?? "").trim();
-    if (raw && !isExternalUrl(raw) && !raw.startsWith("data:") && !raw.startsWith("blob:") && !raw.startsWith("#")) {
-      imports.push(raw);
-    }
-  }
-  return imports;
-}
+/** One book session's reference metadata. No DOM, source text or media bytes are retained. */
+export class ChapterDependencies {
+  private references = new Map<string, Promise<ResourceReference[]>>();
 
-/**
- * 递归收集样式表及其 @import 和 url() 依赖。
- */
-function collectStylesheetDependencies(
-  cssPath: string,
-  getText: (path: string) => string | undefined,
-  deps: Set<string>,
-  seenCss: Set<string>
-): void {
-  if (seenCss.has(cssPath)) return;
-  seenCss.add(cssPath);
-  deps.add(cssPath);
+  constructor(private book: Book, private getText: (path: string) => string | undefined) {}
 
-  const text = getText(cssPath);
-  if (!text) return;
-
-  // 递归处理 @import
-  for (const imp of extractImportsFromCss(text)) {
-    const resolved = resolvePath(cssPath, splitHref(imp).path);
-    if (resolved) {
-      collectStylesheetDependencies(resolved, getText, deps, seenCss);
-    }
-  }
-
-  // 提取 url(...) 中的字体或背景图片
-  for (const url of extractUrlsFromCss(text)) {
-    const resolved = resolvePath(cssPath, splitHref(url).path);
-    if (resolved) {
-      deps.add(resolved);
-    }
-  }
-}
-
-/**
- * 解析并收集一个章节文档运行渲染所需的所有直接和间接书内资源依赖：
- * - 章节 XHTML 本身
- * - 外链 CSS 及其递归 @import
- * - CSS 内引用的字体与背景图
- * - <img> / <image> / <use> / srcset 图像
- * - 内联 style 属性中的 url()
- */
-export function collectChapterDependencies(
-  book: Book,
-  chapterPath: string,
-  getText: (path: string) => string | undefined
-): Set<string> {
-  const deps = new Set<string>();
-  deps.add(chapterPath);
-
-  const html = getText(chapterPath);
-  if (!html) return deps;
-
-  const seenCss = new Set<string>();
-
-  // 1. <link rel="stylesheet" href="...">
-  const linkRegex = /<link\b[^>]*>/gi;
-  let linkMatch: RegExpExecArray | null;
-  while ((linkMatch = linkRegex.exec(html)) !== null) {
-    const tag = linkMatch[0];
-    if (/rel\s*=\s*["'][^"']*stylesheet[^"']*["']/i.test(tag)) {
-      const hrefMatch = /href\s*=\s*["']([^"']+)["']/i.exec(tag);
-      if (hrefMatch) {
-        const raw = hrefMatch[1].trim();
-        if (!isExternalUrl(raw) && !isFragmentOnly(raw)) {
-          const resolved = resolvePath(chapterPath, splitHref(raw).path);
-          if (resolved) {
-            collectStylesheetDependencies(resolved, getText, deps, seenCss);
-          }
+  private async documentReferences(html: string): Promise<ResourceReference[]> {
+    const { doc } = await parseChapterDocument(html, this.book.version === 2);
+    const refs: ResourceReference[] = [];
+    const add = (href: string | null, stylesheet = false) => {
+      if (href) refs.push({ href, stylesheet });
+    };
+    const walk = (element: XmlElementLike): void => {
+      const tag = localNameOf(element).toLowerCase();
+      if (STRIPPED_CHAPTER_TAGS.has(tag)) return;
+      if (tag === "link" && /(?:^|\s)stylesheet(?:\s|$)/i.test(element.getAttribute("rel") ?? "")) {
+        add(element.getAttribute("href"), true);
+      }
+      if (tag === "img") add(element.getAttribute("src"));
+      if (tag === "image" || tag === "use") {
+        add(element.getAttribute("xlink:href") || element.getAttribute("href"));
+      }
+      if (tag === "img" || tag === "source") {
+        for (const candidate of (element.getAttribute("srcset") ?? "").split(",")) {
+          add(candidate.trim().split(/\s+/)[0]);
         }
       }
+      if (tag === "video") add(element.getAttribute("poster"));
+      if (tag === "style") refs.push(...cssResourceReferences(element.textContent ?? ""));
+      const style = element.getAttribute("style");
+      if (style) refs.push(...cssResourceReferences(style));
+      for (const child of childElements(element)) walk(child);
+    };
+    if (!doc.documentElement) throw new Error("章节内容为空，无法渲染");
+    walk(doc.documentElement);
+    return refs;
+  }
+
+  private async referencesFor(path: string, stylesheet: boolean): Promise<ResourceReference[]> {
+    const cached = this.references.get(path);
+    if (cached) return cached;
+    const text = this.getText(path);
+    // Not yet loaded is not an empty source. A later closure pass must retry it.
+    if (text === undefined) return [];
+    const pending = !text.trim() ? Promise.resolve([])
+      : stylesheet ? Promise.resolve(cssResourceReferences(text)) : this.documentReferences(text);
+    this.references.set(path, pending);
+    try {
+      return await pending;
+    } catch (error) {
+      this.references.delete(path);
+      throw error;
     }
   }
 
-  // 2. <style>...</style> 块
-  const styleBlockRegex = /<style\b[^>]*>([\s\S]*?)<\/style>/gi;
-  let styleMatch: RegExpExecArray | null;
-  while ((styleMatch = styleBlockRegex.exec(html)) !== null) {
-    const cssText = styleMatch[1];
-    for (const imp of extractImportsFromCss(cssText)) {
-      const resolved = resolvePath(chapterPath, splitHref(imp).path);
-      if (resolved) {
-        collectStylesheetDependencies(resolved, getText, deps, seenCss);
-      }
-    }
-    for (const url of extractUrlsFromCss(cssText)) {
-      const resolved = resolvePath(chapterPath, splitHref(url).path);
-      if (resolved) {
-        deps.add(resolved);
-      }
-    }
-  }
-
-  // 3. <img> 标签与 srcset
-  const imgRegex = /<img\b[^>]*>/gi;
-  let imgMatch: RegExpExecArray | null;
-  while ((imgMatch = imgRegex.exec(html)) !== null) {
-    const tag = imgMatch[0];
-    const srcMatch = /src\s*=\s*["']([^"']+)["']/i.exec(tag);
-    if (srcMatch) {
-      const raw = srcMatch[1].trim();
-      if (!isExternalUrl(raw) && !raw.startsWith("data:") && !raw.startsWith("blob:") && !isFragmentOnly(raw)) {
-        const resolved = resolvePath(chapterPath, splitHref(raw).path);
-        if (resolved) deps.add(resolved);
-      }
-    }
-    const srcsetMatch = /srcset\s*=\s*["']([^"']+)["']/i.exec(tag);
-    if (srcsetMatch) {
-      const candidates = srcsetMatch[1].split(",");
-      for (const cand of candidates) {
-        const url = cand.trim().split(/\s+/)[0];
-        if (url && !isExternalUrl(url) && !url.startsWith("data:") && !url.startsWith("blob:") && !isFragmentOnly(url)) {
-          const resolved = resolvePath(chapterPath, splitHref(url).path);
-          if (resolved) deps.add(resolved);
+  /** Revisit unloaded CSS edges as acquisition loads each batch, until the closure is complete. */
+  async collect(chapterPath: string): Promise<Set<string>> {
+    const deps = new Set<string>([chapterPath]);
+    const seenCss = new Set<string>();
+    const visit = async (base: string, refs: ResourceReference[]): Promise<void> => {
+      for (const ref of refs) {
+        const href = ref.href.trim();
+        if (!href || isExternalUrl(href) || isFragmentOnly(href) || href.startsWith("//")) continue;
+        const path = resolvePath(base, splitHref(href).path);
+        if (!this.book.resources.has(path)) continue;
+        deps.add(path);
+        if (ref.stylesheet && !seenCss.has(path)) {
+          seenCss.add(path);
+          await visit(path, await this.referencesFor(path, true));
         }
       }
-    }
+    };
+    await visit(chapterPath, await this.referencesFor(chapterPath, false));
+    return deps;
   }
-
-  // 4. SVG <image> 与 <use>
-  const svgImgRegex = /<(?:image|use)\b[^>]*>/gi;
-  let svgMatch: RegExpExecArray | null;
-  while ((svgMatch = svgImgRegex.exec(html)) !== null) {
-    const tag = svgMatch[0];
-    const hrefMatch = /(?:xlink:href|href)\s*=\s*["']([^"']+)["']/i.exec(tag);
-    if (hrefMatch) {
-      const raw = hrefMatch[1].trim();
-      if (!isExternalUrl(raw) && !raw.startsWith("data:") && !raw.startsWith("blob:") && !isFragmentOnly(raw)) {
-        const resolved = resolvePath(chapterPath, splitHref(raw).path);
-        if (resolved) deps.add(resolved);
-      }
-    }
-  }
-
-  // 5. 内联 style 属性中的 url(...)
-  const inlineStyleRegex = /\bstyle\s*=\s*["']([^"']+)["']/gi;
-  let inlineMatch: RegExpExecArray | null;
-  while ((inlineMatch = inlineStyleRegex.exec(html)) !== null) {
-    const css = inlineMatch[1];
-    for (const url of extractUrlsFromCss(css)) {
-      const resolved = resolvePath(chapterPath, splitHref(url).path);
-      if (resolved) deps.add(resolved);
-    }
-  }
-
-  // 只保留存在于书内资源清单中的路径
-  const validDeps = new Set<string>();
-  for (const dep of deps) {
-    if (book.resources.has(dep)) {
-      validDeps.add(dep);
-    }
-  }
-  return validDeps;
 }

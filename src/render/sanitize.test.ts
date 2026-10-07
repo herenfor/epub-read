@@ -42,6 +42,14 @@ function expectCombinatorsAndEscaping(out: string): void {
 }
 
 describe("sanitizeChapter", () => {
+  it("missing background references are reported once through the existing issues channel", async () => {
+    const result = await sanitizeChapter(`<html><head><style>body{background:url('../Images/missing.png')}</style></head>
+<body style="background-image:url('../Images/missing.png')"><p>正文</p></body></html>`, opts());
+    expect(result.issues.filter((issue) => issue.includes("书内资源无法加载"))).toEqual([
+      "书内资源无法加载：OEBPS/Images/missing.png",
+    ]);
+    expect(result.html).toContain("正文");
+  });
   it("注入 iframe 内的笔记 Custom Highlight 下划线规则，不包裹正文或设置背景", async () => {
     const { html: out } = await sanitizeChapter(
       `<html xmlns="http://www.w3.org/1999/xhtml"><body><p>正文</p></body></html>`,
