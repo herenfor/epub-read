@@ -1,11 +1,12 @@
 package dev.herenfor.epubreader
 
 import android.app.Activity
+import android.content.Intent
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.provider.DocumentsContract
-import androidx.activity.ComponentActivity
-import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.ActivityResult
+import app.tauri.annotation.ActivityCallback
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.TauriPlugin
@@ -65,22 +66,6 @@ class AndroidUriBridgePlugin(private val activity: Activity) : Plugin(activity) 
     }
     private val cancelledWrites = ConcurrentHashMap<String, Boolean>()
     private var pendingTreePick: Invoke? = null
-    private val hostActivity = activity as ComponentActivity
-    private val treePicker = hostActivity.registerForActivityResult(
-        ActivityResultContracts.OpenDocumentTree()
-    ) { uri ->
-        val invoke = pendingTreePick
-        pendingTreePick = null
-        if (invoke != null) {
-            postResponse {
-                val response = JSObject()
-                if (uri != null) {
-                    response.put("uri", uri.toString())
-                }
-                invoke.resolve(response)
-            }
-        }
-    }
 
     @Command
     fun pickDirectoryTree(invoke: Invoke) {
@@ -90,8 +75,30 @@ class AndroidUriBridgePlugin(private val activity: Activity) : Plugin(activity) 
         }
         pendingTreePick = invoke
         activity.runOnUiThread {
-            treePicker.launch(null)
+            try {
+                // Plugins load after Activity.onStart: use Tauri's existing
+                // activity-result registry instead of registering a launcher here.
+                val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or
+                        Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
+                }
+                startActivityForResult(invoke, intent, "directoryTreeResult")
+            } catch (error: Exception) {
+                pendingTreePick = null
+                invoke.reject(error.message ?: "unable to open directory picker")
+            }
         }
+    }
+
+    @ActivityCallback
+    fun directoryTreeResult(invoke: Invoke, result: ActivityResult) {
+        pendingTreePick = null
+        val response = JSObject()
+        if (result.resultCode == Activity.RESULT_OK) {
+            result.data?.data?.let { response.put("uri", it.toString()) }
+        }
+        invoke.resolve(response)
     }
 
     @Command
