@@ -2190,6 +2190,7 @@ describe("measure viewport height locking", () => {
       children: [],
       querySelector: () => null,
       querySelectorAll: () => [],
+      hasAttribute: () => false,
       parentElement: null,
       ...props,
     };

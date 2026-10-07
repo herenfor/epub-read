@@ -452,6 +452,18 @@ describe("sanitizeChapter", () => {
     expect(out).not.toContain("fullpage-image");
   });
 
+  it("双页图的导航图注留在同一图片页，滚动模式保留作者布局", async () => {
+    const html = `<html><body><a href="text.xhtml#image"><div class="kuchie"><img src="a.png"/></div><p>定位至文章</p></a></body></html>`;
+    const paged = await sanitizeChapter(html, opts());
+    expect(paged.html).toContain('data-reader-image-page="linked"');
+    expect(paged.html).toContain('data-reader-image-pages=""');
+    expect(paged.html).toContain("flex: 1; min-height: 0; height: auto !important");
+    expect(paged.html).toContain("定位至文章");
+    const scroll = await sanitizeChapter(html, { ...opts(), settings: { ...DEFAULT_SETTINGS, readingMode: "scroll" } });
+    expect(scroll.html).not.toContain("data-reader-image-page=");
+    expect(scroll.html).not.toContain('data-reader="linked-image-pages"');
+  });
+
   it("多图纯图片页不注入 fullpage-image（title 页上下两张图不能被拆成两页）", async () => {
     const html = `<html xmlns="http://www.w3.org/1999/xhtml"><body>
 <div style="margin:0 auto 1em"><p><img alt="t1" src="t1.png" style="width:21em"/></p></div>

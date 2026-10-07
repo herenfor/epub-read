@@ -1,7 +1,8 @@
 import { parseXmlText, hasParserError, getSerializer } from "../core/parseXml";
 import { resolvePath, isExternalUrl, isFragmentOnly } from "../core/paths";
-import { findElements, type XmlElementLike } from "../core/xml";
 import { hasAuthoredCssProperty, rewriteCssInlineWidths, rewriteCssUrls } from "./cssRewrite";
+import { isFullPageImage, linkedImagePage } from "./fullPageImage";
+import { childElements } from "../core/xml";
 import { imageLayoutPolicy, scrollMediaDefaultsCss } from "./imageLayoutPolicy";
 import { TEXT_MEASURE, type ReaderSettings } from "./settings";
 
@@ -204,6 +205,7 @@ function buildOverrideCss(s: ReaderSettings, bodyBgColor?: string): string {
 #${VIEWER_ID} .duokan-image-fullscreen {
   max-width: none !important;
   height: 100% !important;
+  break-inside: avoid;
   margin: 0 !important;
   padding: 0 !important;
   display: flex !important;
@@ -563,59 +565,34 @@ export async function sanitizeChapter(
   // 声明，不算限宽）；多图页、限宽 title 图按书自身排版，否则会把一页拆成
   // 两页 / 把限宽图放大到全屏。
   const bodyText = (bodyEl.textContent ?? "").trim();
-  const images = findElements(viewer, "img");
-  const svgs = findElements(viewer, "svg");
-  const svgImages = findElements(viewer, "image");
-  const hasOwnSize = (el: XmlElementLike): boolean => {
-    const st = el.getAttribute("style") ?? "";
-    if (
-      ["width", "height", "max-width", "max-height", "min-width", "min-height"].some(
-        (property) => hasAuthoredCssProperty(st, property)
-      )
-    ) {
-      return true;
+  const paginatedFillEligible = isFullPageImage(viewer, bodyText);
+  const imagePageChildren = childElements(viewer);
+  if (opts.settings.readingMode !== "scroll") {
+    for (const page of imagePageChildren) {
+      const media = linkedImagePage(page);
+      if (!media) continue;
+      (page as unknown as Element).setAttribute("data-reader-image-page", "linked");
+      (media as unknown as Element).setAttribute("data-reader-image-page-media", "");
     }
-    // xmldom 对不存在的属性返回 ""（不是 null），要按空值判断
-    return Boolean(el.getAttribute("width")) || Boolean(el.getAttribute("height"));
-  };
-  // C-54 `width:100%` 是“跟随容器”的流体声明，不是固定限宽：纯图片页的整页
-  // contain 保留同一个 100% 语义（样本 学习路线：width:100% 的路线图按版心
-  // 640px 缩放成 995px 高，超过一栏后被 Chromium 拆成 3 列，多出两张空
-  // 页）。只有这条唯一的流体宽度声明才放行；固定 px/em 宽度、显式高度和
-  // max/min 约束仍按书自身排版，限宽 title 图不会被放大到全屏。
-  const hasFluidInlineFullWidthOnly = (el: XmlElementLike): boolean => {
-    const st = el.getAttribute("style") ?? "";
-    const fluidWidth = /(?:^|;)\s*width\s*:\s*100(?:\.0+)?%\s*(?:!\s*important)?\s*(?:;|$)/iu;
-    if (!fluidWidth.test(st)) return false;
-    if (
-      ["height", "max-width", "max-height", "min-width", "min-height"].some((property) =>
-        hasAuthoredCssProperty(st, property)
-      )
-    ) {
-      return false;
+    if (imagePageChildren.length > 0 && imagePageChildren.every((page) =>
+      page.getAttribute("data-reader-image-page") === "linked" || isFullPageImage(page))) {
+      viewer.setAttribute("data-reader-image-pages", "");
     }
-    if (el.getAttribute("width") || el.getAttribute("height")) return false;
-    return !hasAuthoredCssProperty(st.replace(fluidWidth, ";"), "width");
-  };
-  const svgDirectChildren =
-    svgs.length === 1
-      ? Array.from((svgs[0] as unknown as Element).childNodes).filter(
-          (node): node is Element => node.nodeType === 1
-        )
-      : [];
-  const isPlainImagePage =
-    images.length === 1 &&
-    svgs.length === 0 &&
-    bodyText.length === 0 &&
-    (!hasOwnSize(images[0]) || hasFluidInlineFullWidthOnly(images[0]));
-  const isInlineSvgImagePage =
-    images.length === 0 &&
-    svgs.length === 1 &&
-    svgImages.length === 1 &&
-    svgDirectChildren.length === 1 &&
-    svgDirectChildren[0] === (svgImages[0] as unknown as Element) &&
-    Boolean(svgs[0].getAttribute("viewBox")) &&
-    bodyText.length === 0;
+    const linkedStyle = doc.createElement("style");
+    linkedStyle.setAttribute("data-reader", "linked-image-pages");
+    linkedStyle.textContent = `
+#${VIEWER_ID} [data-reader-image-page="linked"] {
+  display: flex; flex-direction: column; height: 100%; width: 100%;
+  max-width: none !important; break-inside: avoid;
+}
+#${VIEWER_ID} [data-reader-image-page="linked"] > [data-reader-image-page-media] {
+  flex: 1; min-height: 0; height: auto !important;
+}
+#${VIEWER_ID} [data-reader-image-page="linked"] > :not([data-reader-image-page-media]) {
+  flex: 0 0 auto; margin-top: 0 !important; margin-bottom: 0 !important;
+}`;
+    (doc.head ?? doc.documentElement).appendChild(linkedStyle);
+  }
   // 整页填充只属于分页：它把图片钉在一个页高内。滚动模式要让图片按自身比例
   // 自然流动（长图可滚动），并且不得拆掉作者的高度约束；注入整屏高度会把图
   // 压扁到一屏，注入 `width:100% + height:auto` 则会把限高的整页插图放大。
@@ -623,7 +600,7 @@ export async function sanitizeChapter(
   // 补偿），不再附带任何强制图片尺寸。
   const imagePolicy = imageLayoutPolicy({
     readingMode: opts.settings.readingMode,
-    paginatedFillEligible: isPlainImagePage || isInlineSvgImagePage,
+    paginatedFillEligible,
   });
   if (imagePolicy.viewerClass) {
     viewer.setAttribute("class", imagePolicy.viewerClass);
