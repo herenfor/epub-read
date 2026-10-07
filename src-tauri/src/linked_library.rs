@@ -11,6 +11,8 @@
 
 use crate::ai::AiState;
 use crate::android_uri_bridge::{RestrictedReadError, RestrictedReader};
+use crate::directory_import::activity::ImportActivityGuard;
+use crate::directory_import::job::DirectoryImportState;
 use crate::import_gate::{CancelReply as ImportCancelReply, ImportGate};
 use crate::library_organization::{
     self, LibraryOrganization, OrganizationCommand, OrganizationEnvelope,
@@ -33,12 +35,6 @@ use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
 use zip::ZipArchive;
 use crate::native_zip_session::{Fault, NativeZipSession, CHUNK_BYTES};
-
-// Temporary FI-N bridge: FI-I moves this declaration to `lib.rs` when it
-// registers the native commands.  Keeping it here lets this parallel package
-// compile and run its repository/runner tests without touching `lib.rs`.
-#[path = "directory_import/mod.rs"]
-pub(crate) mod directory_import;
 
 const MAX_THUMBNAIL_CACHE_BYTES: u64 = 100 * 1024 * 1024;
 const MAX_THUMBNAIL_BYTES: usize = 5 * 1024 * 1024;
@@ -116,6 +112,9 @@ pub struct ArchiveOpenView {
 struct ImportJob {
     request_id: String,
     gate: Arc<ImportGate>,
+    /// Shared activity token; keeps directory import from starting while this
+    /// managed import is alive (and is released with the task guard).
+    _activity: Option<ImportActivityGuard>,
 }
 
 /// Owns the active slot for the lifetime of a managed import and tracks every
@@ -288,8 +287,8 @@ impl<'de> Deserialize<'de> for StorageKind {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-struct DeviceBinding {
-    content_hash: String,
+pub(crate) struct DeviceBinding {
+    pub(crate) content_hash: String,
     #[serde(default)]
     storage_kind: StorageKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -491,22 +490,22 @@ struct ThumbnailEntry {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct FileSnapshot {
+pub(crate) struct FileSnapshot {
     size: u64,
     mtime_ns: u64,
 }
 
-struct BindingVerification {
-    available: bool,
+pub(crate) struct BindingVerification {
+    pub(crate) available: bool,
     changed: bool,
 }
 
 #[derive(Debug)]
-struct ImportedMetadata {
-    title: String,
-    creator: String,
-    language: String,
-    spine: Vec<String>,
+pub(crate) struct ImportedMetadata {
+    pub(crate) title: String,
+    pub(crate) creator: String,
+    pub(crate) language: String,
+    pub(crate) spine: Vec<String>,
     cover_zip_path: Option<String>,
     cover_mime: String,
 }
@@ -619,7 +618,7 @@ fn portable_file_name(name: &str) -> bool {
         && !name.to_ascii_lowercase().starts_with("file:")
 }
 
-fn library_root(app: &AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn library_root(app: &AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_local_data_dir()
         .map(|path| path.join("linked-library"))
@@ -629,7 +628,7 @@ fn library_root(app: &AppHandle) -> Result<PathBuf, String> {
 /// The sole authoritative location for an application-owned EPUB.  A managed
 /// binding never stores this path; callers derive it from the library root and
 /// the already validated canonical hash.
-fn managed_source_path(library_root: &Path, content_hash: &str) -> Result<PathBuf, String> {
+pub(crate) fn managed_source_path(library_root: &Path, content_hash: &str) -> Result<PathBuf, String> {
     if !valid_content_hash(content_hash) {
         return Err("managed 设备绑定缺少规范小写内容指纹".into());
     }
@@ -1114,12 +1113,12 @@ pub(crate) fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> Result<(), String
 }
 
 #[cfg(not(windows))]
-fn replace_file_atomically(source: &Path, target: &Path) -> std::io::Result<()> {
+pub(crate) fn replace_file_atomically(source: &Path, target: &Path) -> std::io::Result<()> {
     fs::rename(source, target)
 }
 
 #[cfg(windows)]
-fn replace_file_atomically(source: &Path, target: &Path) -> std::io::Result<()> {
+pub(crate) fn replace_file_atomically(source: &Path, target: &Path) -> std::io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
     #[link(name = "kernel32")]
     extern "system" {
@@ -1184,7 +1183,7 @@ fn save_thumbnail_index(app: &AppHandle, index: &ThumbnailIndex) -> Result<(), S
     save_thumbnail_index_at(&library_root(app)?, index)
 }
 
-fn snapshot(path: &Path) -> Result<FileSnapshot, String> {
+pub(crate) fn snapshot(path: &Path) -> Result<FileSnapshot, String> {
     let metadata = fs::metadata(path).map_err(|error| format!("无法读取源 EPUB 属性：{error}"))?;
     if !metadata.is_file() {
         return Err("导入目标不是普通文件".into());
@@ -1222,7 +1221,7 @@ fn is_epub(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-fn canonical_epub_path(raw: &str) -> Result<PathBuf, String> {
+pub(crate) fn canonical_epub_path(raw: &str) -> Result<PathBuf, String> {
     let path = PathBuf::from(raw);
     if !is_epub(&path) {
         return Err("只能导入 EPUB 文件".into());
@@ -1230,7 +1229,7 @@ fn canonical_epub_path(raw: &str) -> Result<PathBuf, String> {
     fs::canonicalize(&path).map_err(|error| format!("无法规范化源 EPUB 路径：{error}"))
 }
 
-fn hash_file(path: &Path) -> Result<(String, FileSnapshot), String> {
+pub(crate) fn hash_file(path: &Path) -> Result<(String, FileSnapshot), String> {
     let before = snapshot(path)?;
     let file = File::open(path).map_err(|error| format!("无法读取源 EPUB：{error}"))?;
     let mut reader = BufReader::with_capacity(64 * 1024, file);
@@ -1874,7 +1873,7 @@ fn read_zip_entry_bounded<R: Read>(
     Ok(bytes)
 }
 
-fn inspect_epub(path: &Path) -> Result<ImportedMetadata, String> {
+pub(crate) fn inspect_epub(path: &Path) -> Result<ImportedMetadata, String> {
     let file = File::open(path).map_err(|error| format!("无法打开 EPUB ZIP：{error}"))?;
     let mut archive =
         ZipArchive::new(file).map_err(|error| format!("EPUB 不是有效 ZIP：{error}"))?;
@@ -1990,7 +1989,7 @@ fn upsert_binding(bindings: &mut Vec<DeviceBinding>, binding: DeviceBinding) {
     bindings.push(binding);
 }
 
-fn make_binding(
+pub(crate) fn make_binding(
     hash: String,
     path: &Path,
     snapshot: FileSnapshot,
@@ -2048,7 +2047,7 @@ fn verify_binding(
 /// signature is reported unavailable until the user opens the book (explicit
 /// verification) or reimports it.  A managed refresh must never trigger an
 /// unconditional whole-book hash or rewrite the stored signature by itself.
-fn verify_binding_for_list_refresh(
+pub(crate) fn verify_binding_for_list_refresh(
     binding: &mut DeviceBinding,
     library_root: &Path,
 ) -> Result<BindingVerification, String> {
@@ -2190,9 +2189,22 @@ fn import_busy_message() -> String {
     "busy: 托管书籍导入进行中".to_string()
 }
 
-/// Reject conflicting library mutations while a managed import occupies the
-/// active slot. Callers already hold the library write lock, giving the fixed
-/// order library write lock -> active import slot.
+/// Acquire the process-wide import activity token shared with directory
+/// import.  A missing `DirectoryImportState` only happens in isolated unit
+/// tests that do not build the full Tauri app; production always registers it.
+fn acquire_import_activity(
+    app: &AppHandle,
+    owner: String,
+) -> Result<Option<ImportActivityGuard>, String> {
+    match app.try_state::<DirectoryImportState>() {
+        Some(state) => state.try_acquire_import_activity(owner).map(Some),
+        None => Ok(None),
+    }
+}
+
+/// Reject conflicting library mutations while a managed/path import or a
+/// directory import is active. Callers already hold the library write lock,
+/// giving the fixed order library write lock -> active import slot.
 fn ensure_import_idle(app: &AppHandle) -> Result<(), String> {
     let active = app.state::<ManagedImportState>();
     let slot = active
@@ -2200,10 +2212,15 @@ fn ensure_import_idle(app: &AppHandle) -> Result<(), String> {
         .lock()
         .map_err(|_| "导入活动槽锁已损坏".to_string())?;
     if slot.is_some() {
-        Err(import_busy_message())
-    } else {
-        Ok(())
+        return Err(import_busy_message());
     }
+    drop(slot);
+    if let Some(directory_state) = app.try_state::<DirectoryImportState>() {
+        if directory_state.import_activity_busy()? {
+            return Err(import_busy_message());
+        }
+    }
+    Ok(())
 }
 
 fn reserve_import(app: &AppHandle, request_id: &str) -> Result<Arc<ImportJob>, NativeImportError> {
@@ -2220,9 +2237,12 @@ fn reserve_import(app: &AppHandle, request_id: &str) -> Result<Arc<ImportJob>, N
     if slot.is_some() {
         return Err(NativeImportError::busy());
     }
+    let activity = acquire_import_activity(app, format!("managed-import:{request_id}"))
+        .map_err(|_| NativeImportError::busy())?;
     let job = Arc::new(ImportJob {
         request_id: request_id.to_string(),
         gate: Arc::new(ImportGate::default()),
+        _activity: activity,
     });
     *slot = Some(job.clone());
     Ok(job)
@@ -2294,7 +2314,7 @@ fn cleanup_stale_staging(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn new_staging_path(root: &Path) -> Result<PathBuf, String> {
+pub(crate) fn new_staging_path(root: &Path) -> Result<PathBuf, String> {
     let dir = root.join("books").join(".staging");
     fs::create_dir_all(&dir).map_err(|error| format!("无法创建导入临时目录：{error}"))?;
     let nonce = TEMP_FILE_NONCE.fetch_add(1, Ordering::Relaxed);
@@ -2340,12 +2360,12 @@ impl<W: Write> Write for HashingWriter<W> {
 }
 
 #[derive(Debug)]
-struct StagedFile {
-    content_hash: String,
+pub(crate) struct StagedFile {
+    pub(crate) content_hash: String,
 }
 
 #[derive(Debug)]
-enum PrepareError {
+pub(crate) enum PrepareError {
     Cancelled {
         content_hash: Option<String>,
     },
@@ -2389,7 +2409,7 @@ struct PublishOutcome {
 /// Copies one single-use restricted reader into staging while hashing the
 /// exact bytes that are written. The post-copy cancellation check is the
 /// integration point that catches a cancel requested during the final read.
-fn stream_restricted_reader_to_staging(
+pub(crate) fn stream_restricted_reader_to_staging(
     reader: &mut RestrictedReader,
     staging_path: &Path,
     cancelled: &dyn Fn() -> bool,
@@ -2532,7 +2552,7 @@ fn prepare_document(
     )
 }
 
-fn make_managed_binding(
+pub(crate) fn make_managed_binding(
     content_hash: String,
     file_snapshot: FileSnapshot,
     metadata: &ImportedMetadata,
@@ -2549,7 +2569,7 @@ fn make_managed_binding(
     }
 }
 
-fn make_managed_record(
+pub(crate) fn make_managed_record(
     content_hash: String,
     file_name: String,
     metadata: &ImportedMetadata,
@@ -3089,6 +3109,7 @@ pub fn linked_library_import_paths(
         .lock()
         .map_err(|_| "链接书库写入锁已损坏".to_string())?;
     ensure_import_idle(&app)?;
+    let _activity = acquire_import_activity(&app, "linked-library-import-paths".to_string())?;
     let root = library_root(&app)?;
     let mut records = load_records(&app)?;
     let mut bindings = load_bindings(&app)?;
