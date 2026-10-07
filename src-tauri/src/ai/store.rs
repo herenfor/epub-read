@@ -1574,12 +1574,38 @@ impl AiStore {
             transaction
                 .execute("DELETE FROM jobs WHERE kind = 'library-text-index'", [])
                 .map_err(|error| format!("清理 AI 全文索引任务失败：{error}"))?;
+            // FTS5 deletes leave old segments until a merge. Rebuild the now
+            // empty index so VACUUM can reclaim those pages as well.
+            transaction
+                .execute("INSERT INTO chunk_fts(chunk_fts) VALUES('rebuild')", [])
+                .map_err(|error| format!("清理 AI 全文索引内部数据失败：{error}"))?;
             transaction
                 .commit()
-                .map_err(|error| format!("提交 AI 全文索引清理事务失败：{error}"))
+                .map_err(|error| format!("提交 AI 全文索引清理事务失败：{error}"))?;
+            // Keep the connection lock through compaction, outside the delete
+            // transaction. Metadata lives in its own database and is untouched.
+            connection
+                .execute_batch("VACUUM")
+                .map_err(|error| format!("全文索引已清除，但回收缓存空间失败：{error}"))
         })
     }
 
+    pub(super) fn ensure_cache_reset_idle(&self) -> Result<(), String> {
+        self.with_connection(|connection| {
+            let busy: bool = connection
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM jobs WHERE state IN ('queued','running','paused'))
+                 OR EXISTS(SELECT 1 FROM index_staging)",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(|error| format!("无法检查缓存占用：{error}；请重启应用后再重置"))?;
+            if busy {
+                return Err("索引缓存存在未结束任务，请完成或取消后再重置".into());
+            }
+            Ok(())
+        })
+    }
     pub(crate) fn replace_book_index(&self, input: AiIndexBookInput) -> Result<u64, String> {
         let input = validate_index_book(input)?;
         let now = now_ms() as i64;
@@ -4192,6 +4218,83 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    #[test]
+    fn clearing_full_text_index_reclaims_disk_space_and_can_index_again() {
+        let (store, root) = test_store();
+        let hash = "c".repeat(64);
+        store.insert_book_for_test(&hash).unwrap();
+        // A real file and trigram FTS segments: row counts alone do not prove
+        // that clear reclaimed bytes or removed the old inverted index.
+        let text = "cache reclamation test text ".repeat(32_768);
+        store
+            .with_connection(|connection| {
+                connection.execute(
+                    "UPDATE chunks SET original_text=?1, normalized_text=?1",
+                    [&text],
+                ).map_err(|error| error.to_string())?;
+                connection.execute(
+                    "INSERT INTO chunk_fts(normalized_text, content_hash, chunk_id) VALUES (?1, ?2, 'chunk-1')",
+                    params![text, hash],
+                ).map_err(|error| error.to_string())?;
+                Ok(())
+            })
+            .unwrap();
+        let unrelated = store.enqueue_task("other-job".into(), None).unwrap();
+        let metadata_before = fs::read(AiStore::metadata_path(&root)).unwrap();
+        // Emulate the old release: logical deletion succeeded, but FTS
+        // segments and free database pages were never reclaimed.
+        store
+            .with_connection(|connection| {
+                connection
+                    .execute_batch("DELETE FROM chunk_fts; DELETE FROM chunks; DELETE FROM books;")
+                    .map_err(|error| error.to_string())
+            })
+            .unwrap();
+        assert_eq!(store.status().unwrap().books, 0);
+        let before = store.cache_database_size().unwrap();
+        store.clear_cache(FULL_TEXT_INDEX_CACHE_KIND).unwrap();
+        let after = store.cache_database_size().unwrap();
+        assert!(
+            after < before / 8,
+            "cache did not shrink: {before} -> {after}"
+        );
+        store
+            .with_connection(|connection| {
+                let free: u64 = connection
+                    .query_row("PRAGMA freelist_count", [], |row| row.get(0))
+                    .map_err(|error| error.to_string())?;
+                let fts_bytes: u64 = connection
+                    .query_row(
+                        "SELECT coalesce(sum(length(block)), 0) FROM chunk_fts_data",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .map_err(|error| error.to_string())?;
+                assert_eq!(free, 0);
+                assert!(fts_bytes < 4096, "old FTS segments remain: {fts_bytes}");
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(
+            store
+                .with_connection(|connection| read_job(connection, &unrelated.id))
+                .unwrap()
+                .kind,
+            "other-job"
+        );
+        assert_eq!(
+            fs::read(AiStore::metadata_path(&root)).unwrap(),
+            metadata_before
+        );
+        // Already-cleared caches from old versions can be reclaimed again.
+        store.clear_cache(FULL_TEXT_INDEX_CACHE_KIND).unwrap();
+        drop(store);
+        let store = AiStore::open(&root).unwrap();
+        store.insert_book_for_test(&hash).unwrap();
+        assert_eq!(store.status().unwrap().books, 1);
+        drop(store);
+        fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn library_index_task_is_acquired_idempotently_and_other_kinds_are_parallel() {
         let (store, root) = test_store();

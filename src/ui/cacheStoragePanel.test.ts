@@ -58,8 +58,12 @@ describe("CacheStoragePanel", () => {
 
   it("shows status, saves a directory for next restart, and clears full text", async () => {
     const harness = createReactDomHarness();
+    let cleared = false;
     mocks.invoke.mockImplementation(async (command: string) => {
-      if (command === "cache_storage_get_status") return baseStatus;
+      if (command === "cache_storage_get_status") return cleared
+        ? { ...baseStatus, totalSizeBytes: 4096, caches: [{ ...baseStatus.caches[0], itemCount: 0, state: "empty" }] }
+        : baseStatus;
+      if (command === "ai_cache_clear") { cleared = true; return undefined; }
       if (command === "cache_storage_set_directory") {
         return {
           ...baseStatus,
@@ -101,15 +105,20 @@ describe("CacheStoragePanel", () => {
       expect(mocks.invoke).toHaveBeenCalledWith("ai_cache_clear", {
         kind: "full-text-index",
       });
+      expect(harness.container.textContent).toContain("4.0 KB");
+      expect(harness.container.textContent).toContain("空闲缓存空间已回收");
     } finally {
       await harness.dispose();
     }
   });
-  it("keeps the cleanup error visible after refreshing status", async () => {
+  it.each([
+    "正在建立全文索引，请完成或取消后再清理",
+    "全文索引已清除，但回收缓存空间失败：disk full",
+  ])("keeps the cleanup error visible after refreshing status: %s", async (message) => {
     const harness = createReactDomHarness();
     mocks.invoke.mockImplementation(async (command: string) => {
       if (command === "cache_storage_get_status") return baseStatus;
-      if (command === "ai_cache_clear") throw new Error("正在建立全文索引，请完成或取消后再清理");
+      if (command === "ai_cache_clear") throw message;
       return undefined;
     });
     try {
@@ -117,10 +126,32 @@ describe("CacheStoragePanel", () => {
       await harness.run(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
       await harness.click(buttonByText(harness.container, "清除全文索引"));
       await harness.run(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
-      expect(harness.container.querySelector('[role="alert"]')?.textContent).toContain("正在建立全文索引");
+      expect(harness.container.querySelector('[role="alert"]')?.textContent).toContain(message);
     } finally {
       await harness.dispose();
     }
+  });
+
+  it("offers reset when the database status cannot load and recovers the panel", async () => {
+    const harness = createReactDomHarness();
+    let broken = true;
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "cache_storage_get_status") {
+        if (broken) throw "database disk image is malformed";
+        return baseStatus;
+      }
+      if (command === "cache_storage_reset_indexes") { broken = false; return undefined; }
+    });
+    try {
+      await harness.render(createElement(CacheStoragePanel, { open: true, onClose: vi.fn() }));
+      await harness.run(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+      expect(harness.container.querySelector('[role="alert"]')?.textContent).toContain("malformed");
+      await harness.click(buttonByText(harness.container, "重置全部索引缓存"));
+      await harness.run(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+      expect(mocks.invoke).toHaveBeenCalledWith("cache_storage_reset_indexes");
+      expect(harness.container.querySelector('[role="alert"]')).toBeNull();
+      expect(harness.container.textContent).toContain("全部索引缓存已重置");
+    } finally { await harness.dispose(); }
   });
 
 });

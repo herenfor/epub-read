@@ -33,3 +33,8 @@ export async function setCacheStorageDirectory(
 export async function clearFullTextIndex(): Promise<void> {
   await invoke("ai_cache_clear", { kind: "full-text-index" });
 }
+
+/** Explicit reset of all rebuildable indexes; durable user data stays intact. */
+export async function resetIndexCaches(): Promise<void> {
+  await invoke("cache_storage_reset_indexes");
+}
