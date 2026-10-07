@@ -6302,7 +6302,7 @@ export default function App() {
         onToggleBookmark={view === "reader" ? handleToggleBookmark : undefined}
         bookmarksOpen={view === "reader" && isSidebarOpen && activeSidebarTab === "bookmarks"}
         onOpenBookmarks={view === "reader" ? handleToggleBookmarks : undefined}
-        zenMode={view === "reader" && !mobileChrome && (readerZenMode || isFullscreen)}
+        zenMode={view === "reader" && !mobileChrome && readerZenMode}
         onToggleZenMode={view === "reader" ? toggleZenMode : undefined}
         progressPct={view === "reader" && ready ? progressPct : undefined}
         chapterIndex={view === "reader" && ready ? spineIndex : undefined}

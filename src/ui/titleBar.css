@@ -17,8 +17,7 @@
   transition: transform 180ms cubic-bezier(0.16, 1, 0.3, 1), opacity 180ms ease-out;
 }
 
-/* 全屏沉浸模式与悬浮顶栏（Zen Mode）：浮动于正文上方，彻底避免重排与视口跳动 */
-.app.is-fullscreen .titlebar-reader,
+/* 沉浸顶栏悬浮于正文上方；固定时参与布局，全屏也尊重用户的选择。 */
 .titlebar-reader.is-floating {
   position: fixed;
   top: 0;
