@@ -328,7 +328,11 @@ function ShelfDrawerRow(props: {
       className={`shelf-drawer-row${props.tone === "neutral" ? " is-neutral" : ""}`}
       type="button"
       disabled={props.disabled}
-      onClick={props.onClick}
+      onClick={(event) => {
+        // Pickers and panels take focus away; drop it so the row is not left highlighted.
+        event.currentTarget.blur();
+        props.onClick();
+      }}
     >
       <span className="shelf-drawer-row-icon">{props.icon}</span>
       <span className="shelf-drawer-row-text">

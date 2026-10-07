@@ -2165,7 +2165,14 @@
   transition: background-color var(--motion-fast, 140ms) ease;
 }
 
-.shelf-import-menu-item:hover,
+/* 触屏点按后 :hover 会粘住（例如从系统文件选择器切回来仍高亮），只给真正可悬停的指针。 */
+@media (hover: hover) and (pointer: fine) {
+  .shelf-import-menu-item:hover,
+  .shelf-drawer-row:hover:not(:disabled) {
+    background: var(--menu-surface-hover, var(--btn-hover));
+  }
+}
+
 .shelf-import-menu-item:focus-visible {
   background: var(--menu-surface-hover, var(--btn-hover));
   outline: none;
@@ -2256,7 +2263,6 @@
   border-top: 1px solid color-mix(in srgb, var(--panel-border) 60%, transparent);
 }
 
-.shelf-drawer-row:hover:not(:disabled),
 .shelf-drawer-row:focus-visible {
   background: var(--menu-surface-hover, var(--btn-hover));
   outline: none;
