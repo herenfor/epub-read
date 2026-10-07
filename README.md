@@ -6,8 +6,6 @@
 
 A lightweight EPUB reader for Windows and Android that respects each book's own typography.
 
-We would like it to feel like a good reading lamp: there when you open a book, quiet when you close it, and keeping your books and notes on your own device.
-
 EPUB Reader opens EPUB 2.0.1 and EPUB 3.x books as their authors designed them: page width, margins, floats, illustrations and footnotes keep the book's own layout, while the reader only supplies sensible defaults where they are missing.
 
 **Languages:** English | [中文](README.zh.md)
