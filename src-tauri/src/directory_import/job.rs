@@ -7,13 +7,11 @@
 use super::planner::directory_group_key;
 use super::scanner::{scan_path_root_cancellable, ScanOutput};
 use super::types::{
-    CancelStatus, DirectoryBinding, DirectoryCancelReply, DirectorySource, ImportIssue,
-    InputPage, IssuePage, ScanResult, ScannedEntry, ScannedEpub,
-    PAGE_MAX_ITEMS, PAGE_MAX_JSON_BYTES,
+    CancelStatus, DirectoryBinding, DirectoryCancelReply, DirectorySource, ImportIssue, InputPage,
+    IssuePage, ScanResult, ScannedEntry, ScannedEpub, PAGE_MAX_ITEMS, PAGE_MAX_JSON_BYTES,
 };
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use tauri::AppHandle;
 
@@ -25,17 +23,38 @@ pub struct DirectoryImportJob {
     entries: Mutex<Vec<ScannedEntry>>,
     scan_result: Mutex<Option<ScanResult>>,
     issues: Mutex<Vec<ImportIssue>>,
-    active_workers: Mutex<usize>,
+    lifecycle: Mutex<Lifecycle>,
     worker_done: Condvar,
-    active_phase: AtomicU8,
-    disposing: AtomicBool,
-    import_started: AtomicBool,
     result: Mutex<Option<super::types::DirectoryImportResult>>,
 }
 
-const PHASE_NONE: u8 = 0;
-const PHASE_SCANNING: u8 = 1;
-const PHASE_IMPORTING: u8 = 2;
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum Phase {
+    #[default]
+    Idle,
+    Scanning,
+    Importing,
+}
+
+#[derive(Default)]
+struct Lifecycle {
+    phase: Phase,
+    disposing: bool,
+    import_started: bool,
+}
+
+/// The non-idle phase is the single admitted worker, including queued work.
+/// Keep this guard inside spawn_blocking, so dropping the IPC future cannot
+/// release a worker that is still running.
+pub struct DirectoryWorkerGuard(Arc<DirectoryImportJob>);
+
+impl Drop for DirectoryWorkerGuard {
+    fn drop(&mut self) {
+        let mut lifecycle = self.0.lifecycle.lock().unwrap();
+        lifecycle.phase = Phase::Idle;
+        self.0.worker_done.notify_all();
+    }
+}
 
 impl DirectoryImportJob {
     fn new(id: String, source: DirectorySource) -> Self {
@@ -47,11 +66,8 @@ impl DirectoryImportJob {
             entries: Mutex::new(Vec::new()),
             scan_result: Mutex::new(None),
             issues: Mutex::new(Vec::new()),
-            active_workers: Mutex::new(0),
+            lifecycle: Mutex::new(Lifecycle::default()),
             worker_done: Condvar::new(),
-            active_phase: AtomicU8::new(PHASE_NONE),
-            disposing: AtomicBool::new(false),
-            import_started: AtomicBool::new(false),
             result: Mutex::new(None),
         }
     }
@@ -68,21 +84,10 @@ impl DirectoryImportJob {
         Arc::clone(&self.gate)
     }
 
-    pub fn begin_worker(&self) {
-        let mut active = self.active_workers.lock().unwrap();
-        *active += 1;
-    }
-
-    pub fn end_worker(&self) {
-        let mut active = self.active_workers.lock().unwrap();
-        *active = active.saturating_sub(1);
-        self.worker_done.notify_all();
-    }
-
     pub fn wait_for_workers(&self) {
-        let mut active = self.active_workers.lock().unwrap();
-        while *active > 0 {
-            active = self.worker_done.wait(active).unwrap();
+        let mut lifecycle = self.lifecycle.lock().unwrap();
+        while lifecycle.phase != Phase::Idle {
+            lifecycle = self.worker_done.wait(lifecycle).unwrap();
         }
     }
 
@@ -112,53 +117,32 @@ impl DirectoryImportJob {
         self.entries.lock().unwrap().clone()
     }
 
-    pub fn begin_scan(&self) -> bool {
-        if self.disposing.load(Ordering::Acquire) || self.import_started.load(Ordering::Acquire) {
-            return false;
-        }
-        self.active_phase
-            .compare_exchange(PHASE_NONE, PHASE_SCANNING, Ordering::AcqRel, Ordering::Acquire)
-            .is_ok()
+    pub fn begin_scan(self: &Arc<Self>) -> Option<DirectoryWorkerGuard> {
+        self.begin_phase(Phase::Scanning)
     }
 
-    pub fn end_scan(&self) {
-        let _ = self.active_phase.compare_exchange(
-            PHASE_SCANNING,
-            PHASE_NONE,
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        );
+    pub fn begin_import(self: &Arc<Self>) -> Option<DirectoryWorkerGuard> {
+        // Validate before admission: an early start cannot consume the one run.
+        if self.scan_result().is_none() {
+            return None;
+        }
+        self.begin_phase(Phase::Importing)
     }
 
-    pub fn begin_import(&self) -> bool {
-        if self.disposing.load(Ordering::Acquire) {
-            return false;
+    fn begin_phase(self: &Arc<Self>, phase: Phase) -> Option<DirectoryWorkerGuard> {
+        let mut lifecycle = self.lifecycle.lock().unwrap();
+        if lifecycle.disposing || lifecycle.import_started || lifecycle.phase != Phase::Idle {
+            return None;
         }
-        if self.import_started.swap(true, Ordering::AcqRel) {
-            return false;
+        lifecycle.phase = phase;
+        if phase == Phase::Importing {
+            lifecycle.import_started = true;
         }
-        if self
-            .active_phase
-            .compare_exchange(PHASE_NONE, PHASE_IMPORTING, Ordering::AcqRel, Ordering::Acquire)
-            .is_err()
-        {
-            self.import_started.store(false, Ordering::Release);
-            return false;
-        }
-        true
-    }
-
-    pub fn end_import(&self) {
-        let _ = self.active_phase.compare_exchange(
-            PHASE_IMPORTING,
-            PHASE_NONE,
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        );
+        Some(DirectoryWorkerGuard(Arc::clone(self)))
     }
 
     pub fn request_dispose(&self) {
-        self.disposing.store(true, Ordering::Release);
+        self.lifecycle.lock().unwrap().disposing = true;
     }
 
     pub fn set_result(&self, result: super::types::DirectoryImportResult) {
@@ -174,9 +158,7 @@ impl DirectoryImportJob {
     }
 
     pub fn page(&self, cursor: Option<&str>, app: &AppHandle) -> Result<InputPage, String> {
-        let root = self
-            .root()
-            .ok_or_else(|| "目录扫描尚未完成".to_string())?;
+        let root = self.root().ok_or_else(|| "目录扫描尚未完成".to_string())?;
         let entries = self.entries.lock().unwrap();
         let start = parse_cursor(cursor)?.min(entries.len());
         if start == entries.len() {
@@ -241,9 +223,7 @@ impl DirectoryImportJob {
 pub fn parse_cursor(cursor: Option<&str>) -> Result<usize, String> {
     match cursor {
         None => Ok(0),
-        Some(raw) => raw
-            .parse::<usize>()
-            .map_err(|_| "分页游标无效".to_string()),
+        Some(raw) => raw.parse::<usize>().map_err(|_| "分页游标无效".to_string()),
     }
 }
 
@@ -364,7 +344,7 @@ pub fn scan_job(
     app: &AppHandle,
     job: &DirectoryImportJob,
     on_progress: &tauri::ipc::Channel<super::types::DirectoryProgress>,
- ) -> Result<ScanResult, String> {
+) -> Result<ScanResult, String> {
     let _ = app;
     let progress = |scanned: usize| {
         let _ = on_progress.send(super::types::DirectoryProgress {
@@ -411,8 +391,8 @@ pub fn scan_job(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::types::ImportRoot;
+    use super::*;
 
     #[test]
     fn page_bindings_include_root_and_page_groups_without_names() {
@@ -442,8 +422,12 @@ mod tests {
         );
         let bindings = page_bindings(&root, &items, &known, true);
         assert_eq!(bindings.len(), 2);
-        assert!(bindings.iter().any(|binding| binding.folder_id == "root-folder"));
-        assert!(bindings.iter().any(|binding| binding.folder_id == "novel-folder"));
+        assert!(bindings
+            .iter()
+            .any(|binding| binding.folder_id == "root-folder"));
+        assert!(bindings
+            .iter()
+            .any(|binding| binding.folder_id == "novel-folder"));
     }
 
     #[test]
@@ -452,28 +436,80 @@ mod tests {
         assert_eq!(parse_cursor(Some("12")).unwrap(), 12);
         assert_eq!(parse_cursor(None).unwrap(), 0);
     }
-    #[test]
-    fn scan_import_and_dispose_have_mutually_exclusive_admission() {
-        let state = DirectoryImportState::default();
-        let job = state
+    fn registered_job() -> Arc<DirectoryImportJob> {
+        DirectoryImportState::default()
             .register(
                 "job-1",
                 DirectorySource::Path {
                     path: "/tmp/books".to_string(),
                 },
             )
-            .unwrap();
-        assert!(job.begin_scan());
-        assert!(!job.begin_scan());
-        assert!(!job.begin_import());
-        job.end_scan();
-        assert!(job.begin_import());
-        assert!(!job.begin_import());
-        assert!(!job.begin_scan());
-        job.end_import();
-        job.request_dispose();
-        assert!(!job.begin_scan());
-        assert!(!job.begin_import());
+            .unwrap()
     }
 
+    fn finish_scan(job: &DirectoryImportJob) {
+        *job.scan_result.lock().unwrap() = Some(ScanResult {
+            job_id: job.id.clone(),
+            root: ImportRoot {
+                source_root_key: "root".to_string(),
+                name: "books".to_string(),
+            },
+            input_count: 0,
+            skipped_directory_count: 0,
+            unreadable_directory_count: 0,
+        });
+    }
+
+    #[test]
+    fn scan_import_and_dispose_have_mutually_exclusive_admission() {
+        let job = registered_job();
+        let scan = job.begin_scan().unwrap();
+        assert!(job.begin_scan().is_none());
+        assert!(job.begin_import().is_none());
+        finish_scan(&job);
+        assert!(job.begin_import().is_none());
+        drop(scan);
+        let import = job.begin_import().unwrap();
+        assert!(job.begin_import().is_none());
+        assert!(job.begin_scan().is_none());
+        drop(import);
+        job.request_dispose();
+        assert!(job.begin_scan().is_none());
+        assert!(job.begin_import().is_none());
+    }
+
+    #[test]
+    fn dispose_waits_for_admitted_work_even_before_the_thread_starts() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+        let job = registered_job();
+        let worker = job.begin_scan().unwrap();
+        let waiting_job = Arc::clone(&job);
+        let (disposing_tx, disposing_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+        let waiting = std::thread::spawn(move || {
+            waiting_job.request_dispose();
+            disposing_tx.send(()).unwrap();
+            waiting_job.wait_for_workers();
+            done_tx.send(()).unwrap();
+        });
+        disposing_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert!(job.begin_scan().is_none());
+        assert!(done_rx.try_recv().is_err());
+        drop(worker);
+        done_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        waiting.join().unwrap();
+    }
+
+    #[test]
+    fn missing_scan_does_not_consume_admission_and_dispose_closes_it() {
+        let job = registered_job();
+        assert!(job.begin_import().is_none());
+        let scan = job.begin_scan().unwrap();
+        finish_scan(&job);
+        drop(scan);
+        job.request_dispose();
+        assert!(job.begin_import().is_none());
+        job.wait_for_workers();
+    }
 }
