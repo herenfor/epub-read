@@ -274,49 +274,43 @@
  * Level 2: 紧凑型“正在阅读”续读控制台 (Continue Reading Stage)
  * ========================================================================= */
 .shelf-resume-stage {
-  --resume-motion: 260ms;
-  display: grid;
-  /* 两个状态叠在同一张卡里：收起/展开只过渡行高与透明度，避免卸载重排的跳变。 */
-  grid-template-rows: 0fr 1fr;
+  --resume-motion: 280ms;
+  position: relative;
   margin-bottom: 20px;
   border-radius: 12px;
   background: color-mix(in srgb, var(--shelf-card-bg, #ffffff) 92%, var(--accent, #3b82f6) 8%);
   border: 1px solid color-mix(in srgb, var(--shelf-card-border, rgba(0, 0, 0, 0.08)) 80%, var(--accent, #3b82f6) 20%);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.03);
-  transition: grid-template-rows var(--resume-motion) var(--ease-emphasized);
   overflow: visible;
-  position: relative;
   z-index: 10;
 }
 
-.shelf-resume-stage.is-collapsed {
-  grid-template-rows: 1fr 0fr;
+/* 收起/展开：JS 固定旧高度后过渡到新高度，卡片真实地缩起、拉开；离场内容被裁切。 */
+.shelf-resume-stage.is-animating {
+  overflow: hidden;
+  transition: height var(--resume-motion) cubic-bezier(0.2, 0, 0, 1);
 }
 
+/* 离场层在前 24% 淡出，进场层从 22% 开始淡入：中途不空卡，也几乎不重影。 */
 .shelf-resume-pane {
-  min-height: 0;
-  overflow: hidden;
   opacity: 1;
   visibility: visible;
-  transition: opacity calc(var(--resume-motion) * 0.7) ease calc(var(--resume-motion) * 0.3),
+  transition: opacity calc(var(--resume-motion) * 0.55) cubic-bezier(0.2, 0, 0, 1) calc(var(--resume-motion) * 0.22),
               visibility 0s linear 0s;
 }
 
-/* 展开态的“更多在读”弹层需要伸出卡片。 */
-.shelf-resume-stage.is-expanded .shelf-resume-pane-full {
-  overflow: visible;
-}
-
+/* 离场的一层脱离文档流叠在顶部：卡片高度只由当前状态决定。 */
 .shelf-resume-stage.is-collapsed .shelf-resume-pane-full,
 .shelf-resume-stage.is-expanded .shelf-resume-pane-compact {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
   opacity: 0;
   visibility: hidden;
-  transition: opacity calc(var(--resume-motion) * 0.45) ease,
+  pointer-events: none;
+  transition: opacity calc(var(--resume-motion) * 0.24) ease-out,
               visibility 0s linear var(--resume-motion);
-}
-
-.shelf-resume-toggle-btn .shelf-svg-icon {
-  transition: transform var(--resume-motion) var(--ease-emphasized);
 }
 
 /* 折叠后的单行条：封面缩略 + 书名（可两行）+ 章节进度，右侧按钮与收起键同高 */

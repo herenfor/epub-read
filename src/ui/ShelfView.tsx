@@ -1,6 +1,6 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { MENU_CLOSE_MS, useExitPresence } from "./menuMotion";
-import { useUiMotion, type UiMotion } from "./motionPreference";
+import { uiMotionReduced, useUiMotion, type UiMotion } from "./motionPreference";
 import { createPortal } from "react-dom";
 import { getShelfMenuPortalHost, useShelfMenuPopover } from "./shelfMenuPlacement";
 import type { Theme } from "../render/settings";
@@ -794,7 +794,18 @@ const ShelfResumeStage = memo(function ShelfResumeStage({
     }
   });
 
+  const stageRef = useRef<HTMLDivElement>(null);
+  /** Height before a toggle; the layout effect animates from it to the new natural height. */
+  const heightBeforeToggleRef = useRef<number | null>(null);
+  const settleAnimationRef = useRef<(() => void) | null>(null);
+
   const toggleCollapse = useCallback(() => {
+    const stage = stageRef.current;
+    if (stage) {
+      // Mid-animation toggles continue from the height currently on screen.
+      heightBeforeToggleRef.current = stage.getBoundingClientRect().height;
+      settleAnimationRef.current?.();
+    }
     setCollapsed((prev) => {
       const next = !prev;
       try {
@@ -803,6 +814,37 @@ const ShelfResumeStage = memo(function ShelfResumeStage({
       return next;
     });
   }, []);
+
+  // Real height morph: pin the old height, then transition to the new natural
+  // height. The outgoing pane overlays and is clipped as the card shrinks or
+  // grows; panes only cross-fade. Height-only, one element, ~280ms.
+  useLayoutEffect(() => {
+    const stage = stageRef.current;
+    const from = heightBeforeToggleRef.current;
+    heightBeforeToggleRef.current = null;
+    if (!stage || from === null || uiMotionReduced()) return;
+    const to = stage.getBoundingClientRect().height;
+    if (Math.abs(to - from) < 1) return;
+    stage.classList.add("is-animating");
+    stage.style.height = `${from}px`;
+    void stage.offsetHeight;
+    stage.style.height = `${to}px`;
+    let timer = 0;
+    const settle = () => {
+      window.clearTimeout(timer);
+      stage.removeEventListener("transitionend", onEnd);
+      stage.classList.remove("is-animating");
+      stage.style.height = "";
+      settleAnimationRef.current = null;
+    };
+    const onEnd = (event: TransitionEvent) => {
+      if (event.target === stage && event.propertyName === "height") settle();
+    };
+    stage.addEventListener("transitionend", onEnd);
+    timer = window.setTimeout(settle, 450);
+    settleAnimationRef.current = settle;
+    return settle;
+  }, [collapsed]);
 
   const activeBook = useMemo(() => {
     if (readingBooks.length === 0) return null;
@@ -841,7 +883,7 @@ const ShelfResumeStage = memo(function ShelfResumeStage({
   // Both states stay mounted; the stage animates its grid rows between them so
   // expanding/collapsing is one short height + cross-fade, not a remount jump.
   return (
-    <div className={`shelf-resume-stage${collapsed ? " is-collapsed" : " is-expanded"}`}>
+    <div ref={stageRef} className={`shelf-resume-stage${collapsed ? " is-collapsed" : " is-expanded"}`}>
       <div className="shelf-resume-pane shelf-resume-pane-compact" aria-hidden={!collapsed}>
         <div className="shelf-resume-collapsed">
           <button
