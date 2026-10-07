@@ -6308,10 +6308,13 @@ select option {
   transform-origin: bottom right;
 }
 
-/* 列表复用封面覆层容器；清除封面 6px 偏移，适用于手机与平板所有移动宿主。 */
-.app[data-mobile-chrome="true"] .shelf-table .shelf-card-actions-wrap {
+/* 列表动作在单元格内居中；封面覆层的 6px 偏移只用于网格。 */
+.shelf-table .shelf-card-actions-wrap {
   top: auto;
   right: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table .shelf-card-actions-wrap {
@@ -6326,26 +6329,37 @@ select option {
   height: 48px;
 }
 
-/* 移动端表格动作按钮：透明背景，弱化外框，保持 48px 命中与 18px 图标 */
-.app[data-mobile-chrome="true"] .shelf-table .shelf-card-more-btn,
-.app[data-mobile-chrome="true"] .shelf-table .shelf-card-star-btn {
+/* 列表共用透明按钮外观；桌面 32px，移动端沿现有规则扩大触摸命中区。 */
+.shelf-table .shelf-card-more-btn,
+.shelf-table .shelf-card-star-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  width: 32px;
+  height: 32px;
   background: transparent;
   border-color: transparent;
   color: var(--muted);
   box-shadow: none;
+  backdrop-filter: none;
+  transform: none;
 }
 
-.app[data-mobile-chrome="true"] .shelf-table .shelf-card-star-btn.active {
+.shelf-table .shelf-card-star-btn.active {
   color: var(--accent);
 }
 
-.app[data-mobile-chrome="true"] .shelf-table .shelf-card-more-btn svg,
-.app[data-mobile-chrome="true"] .shelf-table .shelf-card-star-btn svg {
+.shelf-table .shelf-card-more-btn svg,
+.shelf-table .shelf-card-star-btn svg {
   width: 18px;
   height: 18px;
+}
+
+@media (hover: hover) {
+  .shelf-table .shelf-card-more-btn:hover,
+  .shelf-table .shelf-card-star-btn:hover {
+    background: color-mix(in srgb, var(--fg) 8%, transparent);
+  }
 }
 
 /* 移动紧凑顶栏及分类/目录下拉按钮：弱化背景外框，统一 18px 图标与 10px 圆角 */
