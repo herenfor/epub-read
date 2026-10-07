@@ -321,6 +321,32 @@ const zeroCounts = { completed: 0, imported: 0, duplicates: 0, failed: 0, placem
 const flushAsync = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("folder import job ownership", () => {
+  it("reselect and close wait for the previous native slot to be released", async () => {
+    let finishDispose!: () => void;
+    const { port, calls } = fakePort({
+      dispose: async (jobId) => {
+        calls.push(`dispose:${jobId}`);
+        await new Promise<void>((resolve) => { finishDispose = resolve; });
+      },
+    });
+    const owner = new FolderImportJobOwner(port);
+    const token = await owner.beginScan();
+    owner.adopt(token, "old-job");
+    const selected = vi.fn();
+    const closed = vi.fn();
+    const rescan = owner.beginScan().then(selected);
+    const close = owner.close().then(closed);
+    await flushAsync();
+    expect(calls).toEqual(["cancel:old-job", "dispose:old-job"]);
+    expect(selected).not.toHaveBeenCalled();
+    expect(closed).not.toHaveBeenCalled();
+    finishDispose();
+    await Promise.all([rescan, close]);
+    expect(selected).toHaveBeenCalledTimes(1);
+    expect(closed).toHaveBeenCalledTimes(1);
+    expect(owner.isLive(selected.mock.calls[0][0])).toBe(false);
+  });
+
   it("closing mid-scan cancels the job from its first event; the late result only cleans up", async () => {
     let finish!: (value: { jobId: string; root: { sourceRootKey: string; name: string }; inputCount: number; skippedDirectoryCount: number; unreadableDirectoryCount: number }) => void;
     const { port, calls } = fakePort({
@@ -330,7 +356,7 @@ describe("folder import job ownership", () => {
       },
     });
     const owner = new FolderImportJobOwner(port);
-    const token = owner.beginScan();
+    const token = await owner.beginScan();
     const scanning = port.scan((event) => owner.adopt(token, event.jobId));
     expect(owner.currentJobId).toBe("j1");
     owner.close();
@@ -353,7 +379,7 @@ describe("folder import job ownership", () => {
       start: () => new Promise((_, reject) => { fail = reject; }),
     });
     const owner = new FolderImportJobOwner(port);
-    const token = owner.beginScan();
+    const token = await owner.beginScan();
     await port.scan((event) => owner.adopt(token, event.jobId));
     const handlers = { onProgress: vi.fn(), onResult: vi.fn(), onError: vi.fn(), onSettled: vi.fn() };
     expect(owner.run({ options: auto, targets: [] }, handlers)).toBe(true);
@@ -411,7 +437,7 @@ describe("native directory registration ownership", () => {
     });
     const port = createNativeDirectoryImportPort();
     const owner = new FolderImportJobOwner(port);
-    const token = owner.beginScan();
+    const token = await owner.beginScan();
     const updateUI = vi.fn();
     const scan = port.scan((event) => {
       if (owner.adopt(token, event.jobId)) updateUI(event);

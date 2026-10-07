@@ -1,8 +1,5 @@
-//! Tauri command surface for FI-N.
-//!
-//! These commands are intentionally not registered in this package.  FI-I owns
-//! the `lib.rs` registration and the shared busy gate; the functions here
-//! compile independently and expose the frozen camelCase wire.
+//! Registered Tauri directory-import commands with the shared import activity
+//! gate. Job metadata/progress cross IPC; source bytes stay native.
 
 use super::job::{cancel_reply, scan_job, DirectoryImportJob, DirectoryImportState};
 use super::runner;
