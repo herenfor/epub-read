@@ -295,9 +295,19 @@ pub fn run() {
                 // Tauri sets only ICON_SMALL; Windows also needs ICON_BIG for the taskbar.
                 // Reuse that handle so both slots share the same asset and ownership.
                 unsafe {
-                    let icon = SendMessageW(hwnd, WM_GETICON, WPARAM(ICON_SMALL2 as usize), LPARAM(0));
+                    let icon = SendMessageW(
+                        hwnd,
+                        WM_GETICON,
+                        Some(WPARAM(ICON_SMALL2 as usize)),
+                        Some(LPARAM(0)),
+                    );
                     if icon.0 != 0 {
-                        SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_BIG as usize), LPARAM(icon.0));
+                        SendMessageW(
+                            hwnd,
+                            WM_SETICON,
+                            Some(WPARAM(ICON_BIG as usize)),
+                            Some(LPARAM(icon.0)),
+                        );
                     }
                 }
             }
