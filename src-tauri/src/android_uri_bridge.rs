@@ -421,8 +421,41 @@ mod android {
         cancelled: bool,
     }
 
-    #[derive(Deserialize)]
+
+    #[derive(Deserialize, Serialize)]
     struct EmptyPluginResponse {}
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) struct TreeDirectoryResponse {
+        pub parent_display_name: String,
+        pub entries: Vec<TreeEntryResponse>,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) struct TreeEntryResponse {
+        pub document_id: String,
+        pub uri: String,
+        pub display_name: String,
+        pub mime_type: String,
+        #[serde(default)]
+        pub size: Option<u64>,
+        pub is_directory: bool,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct PickTreeResponse {
+        uri: Option<String>,
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct QueryTreeDirectoryRequest<'a> {
+        tree_uri: &'a str,
+        parent_document_id: Option<&'a str>,
+    }
 
     pub(crate) fn plugin<R: Runtime>() -> TauriPlugin<R> {
         PluginBuilder::new(PLUGIN_NAME)
@@ -523,13 +556,49 @@ mod android {
             .map(|_| ())
             .map_err(|error| super::command_error("cancel_failed", error.to_string()))
     }
+
+    pub(crate) fn pick_directory_tree<R: Runtime>(
+        app: &AppHandle<R>,
+    ) -> Result<Option<String>, String> {
+        let bridge = app.state::<AndroidUriBridge<R>>();
+        let response = bridge
+            .0
+            .run_mobile_plugin::<PickTreeResponse>("pickDirectoryTree", EmptyPluginResponse {})
+            .map_err(|error| super::command_error("pick_failed", error.to_string()))?;
+        Ok(response.uri)
+    }
+
+    pub(crate) fn query_tree_directory<R: Runtime>(
+        app: &AppHandle<R>,
+        tree_uri: &str,
+        parent_document_id: Option<&str>,
+    ) -> Result<TreeDirectoryResponse, String> {
+        if !tree_uri.starts_with("content://") {
+            return Err(super::command_error(
+                "invalid_request",
+                "only content:// tree URIs are accepted",
+            ));
+        }
+        let bridge = app.state::<AndroidUriBridge<R>>();
+        bridge
+            .0
+            .run_mobile_plugin::<TreeDirectoryResponse>(
+                "queryTreeDirectory",
+                QueryTreeDirectoryRequest {
+                    tree_uri,
+                    parent_document_id,
+                },
+            )
+            .map_err(|error| super::command_error("query_failed", error.to_string()))
+    }
 }
 
 #[cfg(target_os = "android")]
 #[allow(unused_imports)]
 pub(crate) use android::{
-    cancel_write_blocking, open_content_uri, plugin, read_content_uri_blocking,
-    write_staged_file_blocking, write_text_content_uri_blocking,
+    cancel_write_blocking, open_content_uri, pick_directory_tree, plugin,
+    query_tree_directory, read_content_uri_blocking, write_staged_file_blocking,
+    write_text_content_uri_blocking,
 };
 
 #[tauri::command]
