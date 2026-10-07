@@ -35,6 +35,7 @@ import { ReadingWarmupPlan, backgroundPreparation, type WarmupTicket } from "./r
 import { ContinuousReaderView } from "./ContinuousReaderView";
 import { ImageChapterSpreads, type ImageChapterSpread } from "./imageChapterSpreads";
 import { ImageSpreadReaderView } from "./ImageSpreadReaderView";
+import { EdgeTurnZone } from "./EdgeTurnZone";
 import { createSpreadGeometry } from "../render/pagedSpread";
 import type { ScrubToken } from "./readerProgressAxis";
 import { installPagedSwipe, PAGED_SWIPE_THRESHOLD_PX } from "../render/pagedSwipe";
@@ -2204,50 +2205,11 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         aria-hidden="true"
       />
       <div ref={swipeHintRef} className="reader-swipe-hint" aria-hidden="true" />
-      {/* 左右边缘 5% 悬停感应区与翻页指示 (Zen UI Packet C) */}
-      <div
-        className="edge-turn-zone edge-turn-prev"
-        onPointerDown={() => paginatorRef.current?.prepareMotion?.()}
-        onClick={(e) => {
-          e.stopPropagation();
-          turnPageRef.current(-1);
-        }}
-        title="上一页"
-        aria-label="上一页"
-      >
-        <button
-          type="button"
-          className="edge-turn-arrow"
-          tabIndex={-1}
-          aria-hidden="true"
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="15 18 9 12 15 6" />
-          </svg>
-        </button>
-      </div>
-
-      <div
-        className="edge-turn-zone edge-turn-next"
-        onPointerDown={() => paginatorRef.current?.prepareMotion?.()}
-        onClick={(e) => {
-          e.stopPropagation();
-          turnPageRef.current(1);
-        }}
-        title="下一页"
-        aria-label="下一页"
-      >
-        <button
-          type="button"
-          className="edge-turn-arrow"
-          tabIndex={-1}
-          aria-hidden="true"
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="9 18 15 12 9 6" />
-          </svg>
-        </button>
-      </div>
+      {([-1, 1] as const).map((direction) => <EdgeTurnZone key={direction}
+        direction={direction}
+        onPrepare={() => paginatorRef.current?.prepareMotion?.()}
+        onTurn={() => turnPageRef.current(direction)}
+      />)}
       </div>
     </>
   );

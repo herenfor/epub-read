@@ -3,6 +3,7 @@ import { nextLinearIndex } from "../core/book";
 import type { ChapterState } from "../render/paginator";
 import type { ReaderHandle, ReaderViewProps } from "./ReaderView";
 import type { ImageChapterSpread } from "./imageChapterSpreads";
+import { EdgeTurnZone } from "./EdgeTurnZone";
 
 interface Props extends ReaderViewProps {
   spread: ImageChapterSpread;
@@ -126,15 +127,7 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
       paddingRight: props.settings.pageMarginsPx?.right ?? 0 }}>
     {page(props.spread.left, "left")}
     {props.spread.right !== null ? page(props.spread.right, "right") : <div className="reader-image-leaf is-empty" aria-hidden="true" />}
-    {([-1, 1] as const).map((direction) => <div key={direction}
-      className={`edge-turn-zone ${direction === -1 ? "edge-turn-prev" : "edge-turn-next"}`}
-      title={direction === -1 ? "上一页" : "下一页"} aria-label={direction === -1 ? "上一页" : "下一页"}
-      onClick={(event) => { event.stopPropagation(); turn(direction); }}>
-      <button type="button" className="edge-turn-arrow" tabIndex={-1} aria-hidden="true">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-          <polyline points={direction === -1 ? "15 18 9 12 15 6" : "9 18 15 12 9 6"} />
-        </svg>
-      </button>
-    </div>)}
+    {([-1, 1] as const).map((direction) => <EdgeTurnZone key={direction}
+      direction={direction} onTurn={() => turn(direction)} />)}
   </div>;
 });
