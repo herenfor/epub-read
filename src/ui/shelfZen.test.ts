@@ -1,5 +1,5 @@
 import { createElement } from "react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ShelfEntry } from "./shelf";
 import { emptyOrganization, type LibraryOrganization } from "./libraryOrganization";
 import { ShelfView, type ShelfViewProps } from "./ShelfView";
@@ -492,5 +492,79 @@ describe("ShelfZen Packet 1 现代书架体验", () => {
     } finally {
       await dom.dispose();
     }
+  });
+});
+
+
+describe("书架计数与最近在读补修", () => {
+  function props(entries: ShelfEntry[], onOpen = (_id: string) => {}): ShelfViewProps {
+    return {
+      entries, organization: emptyOrganization(), busy: false, theme: "light",
+      onThemeChange: () => {}, onOpen, onImport: () => {}, onImportArchive: () => {},
+      onExportArchive: () => {}, onDelete: () => {}, onDeleteMany: () => {},
+    };
+  }
+
+  function prefs() {
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => key === "epub_shelf_resume_collapsed" ? "false" : null,
+      setItem: () => {},
+    });
+  }
+
+  it("待统计的已读书计入在读，计数和网格/表格筛选一致", async () => {
+    const dom = createReactDomHarness();
+    prefs();
+    const pending = Array.from({ length: 20 }, (_, i) => ({
+      ...makeEntry(`pending-${i}`, `待统计${i}`, "作者", 0, 10000 + i),
+      progressPctPending: true,
+    }));
+    const unread = { ...makeEntry("unread", "真正未读", "作者", 0), isNew: true, spineIndex: 0, page: 0 };
+    const entries = [...pending, unread, makeEntry("reading", "在读", "作者", 30, 5000),
+      makeEntry("finished", "完成", "作者", 100, 5000)];
+    try {
+      await dom.render(createElement(ShelfView, props(entries)));
+      const tabs = () => [...dom.container.querySelectorAll(".shelf-capsule-tab")];
+      const counts = () => tabs().map(tab => tab.querySelector(".shelf-capsule-count")?.textContent);
+      expect(counts()).toEqual(["23", "21", "1", "1", "0"]);
+      await dom.click(tabs()[2]);
+      expect([...dom.container.querySelectorAll(".shelf-card")].map(e => e.getAttribute("data-book-id"))).toEqual(["unread"]);
+      await dom.click(dom.container.querySelector('[aria-label="列表视图"]')!);
+      expect([...dom.container.querySelectorAll(".shelf-table-row[data-book-id]")].map(e => e.getAttribute("data-book-id"))).toEqual(["unread"]);
+      await dom.click(tabs()[1]);
+      expect(dom.container.querySelectorAll(".shelf-table-row[data-book-id]")).toHaveLength(21);
+      await dom.render(createElement(ShelfView, props(entries.map(e => e.id === "pending-0"
+        ? { ...e, progressPct: 25, progressPctPending: false } : e))));
+      expect(counts()).toEqual(["23", "21", "1", "1", "0"]);
+      await dom.click(tabs()[3]);
+      expect([...dom.container.querySelectorAll(".shelf-table-row[data-book-id]")].map(e => e.getAttribute("data-book-id"))).toEqual(["finished"]);
+    } finally { await dom.dispose(); }
+  });
+
+  it("更多在读仅展示最近10本，排序、选择开书和全书架计数不受截断影响", async () => {
+    const dom = createReactDomHarness();
+    prefs();
+    const opened: string[] = [];
+    const books = Array.from({ length: 41 }, (_, i) => makeEntry(`recent-${i}`, `在读${i}`, "作者", 35, 10000 + i));
+    const entries = [...books.filter((_, i) => i % 2), ...books.filter((_, i) => !(i % 2)),
+      makeEntry("finished", "已经读完", "作者", 100, 99999)];
+    try {
+      await dom.render(createElement(ShelfView, props(entries, id => opened.push(id))));
+      const more = dom.container.querySelector(".shelf-more-reading-btn")!;
+      expect(more.textContent).toContain("更多在读 (10)");
+      await dom.click(more);
+      const items = [...dom.container.querySelectorAll(".shelf-more-reading-item")];
+      expect(items.map(e => e.querySelector(".shelf-more-reading-item-title")?.textContent))
+        .toEqual(books.slice(-10).reverse().map(e => e.title));
+      await dom.click(items[9]);
+      expect(dom.container.querySelector(".shelf-resume-title")?.textContent).toBe("在读31");
+      await dom.click(dom.container.querySelector(".shelf-resume-continue")!);
+      expect(opened).toEqual(["recent-31"]);
+      const readingTab = dom.container.querySelectorAll(".shelf-capsule-tab")[1];
+      expect(readingTab.querySelector(".shelf-capsule-count")?.textContent).toBe("41");
+      await dom.click(readingTab);
+      expect(dom.container.querySelectorAll(".shelf-card").length).toBeGreaterThan(10);
+      expect(dom.container.querySelector('[data-book-id="recent-11"]')).not.toBeNull();
+    } finally { await dom.dispose(); }
   });
 });

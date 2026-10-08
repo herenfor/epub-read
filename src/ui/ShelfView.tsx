@@ -99,6 +99,12 @@ export interface ShelfBodySearchProps {
 export type ShelfViewMode = "grid" | "list";
 export type ShelfStatusTab = "all" | "reading" | "unread" | "finished" | "favorites";
 
+function shelfReadingStatus(entry: ShelfEntry): "reading" | "unread" | "finished" {
+  if (entry.progressPct >= 100) return "finished";
+  if (hasReadPosition(entry) && (entry.progressPct > 0 || isShelfProgressPending(entry))) return "reading";
+  return "unread";
+}
+
 export interface ShelfViewProps {
   /** 移动端紧凑模式（由 App 根据 mobileChrome && compact 传入） */
   compact?: boolean;
@@ -755,7 +761,8 @@ const ShelfResumeStage = memo(function ShelfResumeStage({
           (e.progressPct ?? 0) < 100 &&
           e.lastReadAtMs > 0
       )
-      .sort((a, b) => b.lastReadAtMs - a.lastReadAtMs);
+      .sort((a, b) => b.lastReadAtMs - a.lastReadAtMs)
+      .slice(0, 10);
   }, [entries]);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -987,7 +994,7 @@ const ShelfResumeStage = memo(function ShelfResumeStage({
                   tabIndex={collapsed ? -1 : 0}
                   onClick={() => setMoreOpen(!moreOpen)}
                   aria-expanded={moreOpen}
-                  title="查看更多在读书籍"
+                  title="查看最近在读书籍（最多10本）"
                 >
                   <span>更多在读 ({readingBooks.length})</span>
                   <ChevronDownIcon />
@@ -3914,11 +3921,10 @@ export function ShelfView(props: ShelfViewProps) {
     for (const entry of source) {
       const hash = entry.contentHash ?? entry.id;
       if (isFavorite(organization, hash)) fav++;
-      const hasRead = hasReadPosition(entry);
-      const pct = entry.progressPct ?? 0;
-      if (pct >= 100) {
+      const status = shelfReadingStatus(entry);
+      if (status === "finished") {
         finished++;
-      } else if (hasRead && pct > 0) {
+      } else if (status === "reading") {
         read++;
       } else {
         unread++;
@@ -3967,13 +3973,11 @@ export function ShelfView(props: ShelfViewProps) {
     const base = scope.type === "folder" ? (folderBooksMap.get(scope.folderId) ?? []) : props.entries;
     switch (statusTab) {
       case "reading":
-        return base.filter(
-          (e) => hasReadPosition(e) && (e.progressPct ?? 0) < 100 && ((e.progressPct ?? 0) > 0 || isShelfProgressPending(e))
-        );
+        return base.filter((e) => shelfReadingStatus(e) === "reading");
       case "unread":
-        return base.filter((e) => !hasReadPosition(e) || ((e.progressPct ?? 0) === 0 && !isShelfProgressPending(e)));
+        return base.filter((e) => shelfReadingStatus(e) === "unread");
       case "finished":
-        return base.filter((e) => (e.progressPct ?? 0) >= 100);
+        return base.filter((e) => shelfReadingStatus(e) === "finished");
       case "favorites":
         return scope.type === "folder"
           ? base.filter((e) => isFavorite(organization, e.contentHash ?? e.id))
