@@ -1,3 +1,4 @@
+import { validArchiveEntryKey } from "../archiveReferences";
 /**
  * Strict parser for the frozen portable-state v3 wire.
  *
@@ -401,8 +402,7 @@ function parseChapterPath(raw: unknown, path: string, failures: PortableStateIss
   if (typeof raw !== "string" || raw.length === 0) {
     return fail(failures, path, "invalid-chapter-path", "expected a non-empty EPUB-internal path");
   }
-  if (raw.includes("\\") || raw.startsWith("/") || raw.includes("#") || raw.includes("?") ||
-      /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw) || raw.split("/").some((part) => part.length === 0 || part === "." || part === "..")) {
+  if (!validArchiveEntryKey(raw)) {
     return fail(failures, path, "invalid-chapter-path", "chapterPath must be a normalized EPUB-internal relative path");
   }
   return raw;

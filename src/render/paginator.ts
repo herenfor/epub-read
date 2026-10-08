@@ -1,3 +1,4 @@
+import { resolveArchiveHref, archiveHref } from "../core/archiveReferences";
 import { applyReaderBodyPercentageSpacing, applyReaderRootPercentageSpacing } from "./percentageSpacing";
 import { sanitizeChapter, VIEWER_ID } from "./sanitize";
 import { planCenteredTitleBody } from "./titlePageLayout";
@@ -12,7 +13,7 @@ import {
   type PagedStepPlan,
   type SnapPosition,
 } from "./nativeSnapPosition";
-import { resolvePath, isExternalUrl, isFragmentOnly, splitHref } from "../core/paths";
+import { isExternalUrl, isFragmentOnly } from "../core/paths";
 import { getFootnoteHoverAnchor, isFootnoteLink, resolveFootnote, type FootnoteInfo } from "./footnotes";
 import type { ResourceServer } from "./resources";
 import { OwnedBlobUrls } from "./blobOwnership";
@@ -3593,6 +3594,7 @@ export class ChapterPaginator {
     try {
       sanitized = await sanitizeChapter(htmlText, {
         basePath: path,
+        archiveReferences: this.server.archiveReferences,
         strictXml: this.strictXml,
         urlFor: (p) => this.server.urlFor(p),
         getText: (p) => this.server.textFor(p),
@@ -8923,9 +8925,9 @@ export class ChapterPaginator {
       }
       return;
     }
-    const { path, anchor } = splitHref(href);
-    const resolved = resolvePath(this._currentPath, path);
-    const destination = anchor ? `${resolved}#${anchor}` : resolved;
+    const { path: resolved, anchor } = resolveArchiveHref(this.server.archiveReferences, this._currentPath, href);
+    if (!resolved) return;
+    const destination = archiveHref(this.server.archiveReferences, resolved, anchor);
     if (resolved === this._currentPath) {
       // Same-chapter links never leave the iframe. Preflight before notifying
       // App so an invalid fragment cannot pollute navigation history.

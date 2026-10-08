@@ -1,3 +1,4 @@
+import type { ArchiveReferences } from "./archiveReferences";
 /** 核心数据模型（解析层输出，渲染层与 UI 层消费）。 */
 
 export type IssueKind = "book_error" | "reader_error" | "platform_error";
@@ -58,7 +59,7 @@ export interface TocNode {
 }
 
 export interface Resource {
-  /** 规范化的内部路径（资源查找 key） */
+  /** 已解析的 ZIP 内部键；不再按 URL 解码 */
   path: string;
   data: Uint8Array;
   mediaType: string;
@@ -68,7 +69,7 @@ export interface Resource {
 
 export interface Book {
   version: 2 | 3;
-  /** OPF 的规范化内部路径 */
+  /** OPF 的已解析 ZIP 内部键 */
   opfPath: string;
   metadata: BookMetadata;
   /** id -> item */
@@ -77,8 +78,10 @@ export interface Book {
   guide: GuideRef[];
   /** 目录树：EPUB3 nav 优先，EPUB2 NCX，都缺失时由 spine 生成 */
   toc: TocNode[];
-  /** 规范化路径 -> 资源 */
+  /** ZIP 内部键 -> 资源 */
   resources: Map<string, Resource>;
+  /** ZIP-name compatibility; absent for ordinary books. */
+  archiveReferences?: ArchiveReferences;
   coverHref?: string;
   /** 固定版式（rendition:layout=pre-paginated） */
   fixedLayout: boolean;

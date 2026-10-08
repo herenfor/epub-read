@@ -396,42 +396,22 @@ fn portable_file_name(name: &str) -> bool {
         && !name.to_ascii_lowercase().starts_with("file:")
 }
 
-fn percent_decode_once(value: &str) -> String {
-    let bytes = value.as_bytes();
-    let mut output = Vec::with_capacity(bytes.len());
-    let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index] == b'%' && index + 2 < bytes.len() {
-            let high = (bytes[index + 1] as char).to_digit(16);
-            let low = (bytes[index + 2] as char).to_digit(16);
-            if let (Some(high), Some(low)) = (high, low) {
-                output.push((high * 16 + low) as u8);
-                index += 3;
-                continue;
-            }
-        }
-        output.push(bytes[index]);
-        index += 1;
-    }
-    String::from_utf8_lossy(&output).into_owned()
-}
-
+/// A decoded ZIP identity, not an href or a host filesystem path.
 pub fn valid_chapter_path(value: &str) -> bool {
-    if value.is_empty() || value.contains('\0') || value.contains('\\') {
+    let bytes = value.as_bytes();
+    let drive_path =
+        bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'/';
+    if value.is_empty()
+        || value.contains('\0')
+        || value.contains('\\')
+        || value.starts_with('/')
+        || drive_path
+    {
         return false;
     }
-    if value.starts_with('/') || value.contains('#') || value.contains('?') {
-        return false;
-    }
-    let decoded = percent_decode_once(value);
-    if decoded.starts_with('/') || decoded.contains('\\') || decoded.contains('\0') {
-        return false;
-    }
-    let check = |path: &str| {
-        path.split('/')
-            .all(|segment| !segment.is_empty() && segment != "." && segment != "..")
-    };
-    check(value) && check(&decoded)
+    value
+        .split('/')
+        .all(|part| !part.is_empty() && part != "." && part != "..")
 }
 
 pub fn validate_book_metadata(metadata: &BookMetadata) -> PortableResult<()> {
@@ -1195,4 +1175,40 @@ fn legacy_media_anchor_from_value(value: &Value) -> PortableResult<LegacyMediaAn
         signature,
         ratio,
     })
+}
+
+#[cfg(test)]
+mod archive_identity_tests {
+    use super::*;
+
+    #[test]
+    fn obfuscated_zip_keys_roundtrip_locators_and_notes() {
+        for key in [
+            "OEBPS/Text/a?b#c%20.xhtml",
+            "Text/*?:|.xhtml",
+            "Text/%2e%2e.xhtml",
+            "Text/%00.xhtml",
+        ] {
+            assert!(valid_chapter_path(key));
+            let json = serde_json::json!({
+                "locatorVersion": 1, "chapterPath": key, "spineIndexHint": 0,
+                "target": { "kind": "chapter-start" }
+            });
+            let locator: Locator = serde_json::from_value(json.clone()).unwrap();
+            validate_locator(&locator).unwrap();
+            assert_eq!(serde_json::to_value(locator).unwrap(), json);
+            let json = serde_json::json!({
+                "chapterPath": key, "spineIndexHint": 0, "textProfile": TEXT_PROFILE,
+                "startTextOffset": 0, "endTextOffset": 2,
+                "startTextSnippet": "正文", "endTextSnippet": "正文", "selectedText": "正文",
+                "content": "note", "createdAtMs": 1
+            });
+            let note: NoteValue = serde_json::from_value(json.clone()).unwrap();
+            validate_note(&note).unwrap();
+            assert_eq!(serde_json::to_value(note).unwrap(), json);
+        }
+        for key in ["", "/a", "C:/a", "a\\b", "a/../b", "a//b", "a/./b", "a/\0b"] {
+            assert!(!valid_chapter_path(key));
+        }
+    }
 }

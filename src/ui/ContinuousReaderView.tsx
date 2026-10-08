@@ -1,3 +1,4 @@
+import { resolveArchiveHref } from "../core/archiveReferences";
 import {
   forwardRef,
   useCallback,
@@ -268,12 +269,12 @@ interface ReadingSample {
   media: MediaAnchorAndContentY | null;
 }
 
-function findChapterTitle(nodes: readonly TocNode[] | undefined, path: string): string | null {
+function findChapterTitle(nodes: readonly TocNode[] | undefined, path: string, book: Book): string | null {
   if (!nodes) return null;
   for (const node of nodes) {
-    const nodePath = splitHref(node.href).path;
+    const nodePath = book.archiveReferences ? resolveArchiveHref(book.archiveReferences, book.opfPath, node.href).path : splitHref(node.href).path;
     if (nodePath === path) return node.label;
-    const child = findChapterTitle(node.children, path);
+    const child = findChapterTitle(node.children, path, book);
     if (child) return child;
   }
   return null;
@@ -2474,7 +2475,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
             const isReady = slot?.status === "ready";
             const isError = slot?.status === "error";
             const item = linearItems[p.box.index];
-            const chapterTitle = findChapterTitle(book.toc, item?.path ?? "") ?? `第 ${p.box.index + 1} 章`;
+            const chapterTitle = findChapterTitle(book.toc, item?.path ?? "", book) ?? `第 ${p.box.index + 1} 章`;
 
             return (
               <div
