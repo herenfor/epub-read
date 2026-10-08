@@ -1,3 +1,4 @@
+import { detectArchiveReferences, archiveHref, archiveRootPath, type ArchiveReferences } from "./archiveReferences";
 import { unzipEpub, bytesToText } from "./zip";
 import { parseOpf, renditionInfo, type ParsedOpf } from "./opf";
 import { parseNcx } from "./ncx";
@@ -34,8 +35,9 @@ function getText(
   return f ? bytesToText(f.data) : undefined;
 }
 
-/** Manifest href 可以带锚点/查询串；资源 ZIP 路径不能带它们。 */
-function manifestResourcePath(opfPath: string, href: string): string {
+/** Separate href suffixes before decoding; literal ?/# may belong to the ZIP name. */
+function manifestResourcePath(opfPath: string, href: string, references?: ArchiveReferences): string {
+  if (references) return references.resolve(opfPath, href).path;
   const suffix = href.search(/[?#]/);
   return resolvePath(opfPath, suffix < 0 ? href : href.slice(0, suffix));
 }
@@ -79,7 +81,8 @@ function selectCoverHref(
   manifest: Map<string, ManifestItem>,
   metaPairs: Array<{ name: string; content: string }>,
   opfPath: string,
-  resources: Map<string, Resource>
+  resources: Map<string, Resource>,
+  references?: ArchiveReferences
 ): string | undefined {
   const items = [...manifest.values()];
   const candidates: ManifestItem[] = [];
@@ -90,11 +93,11 @@ function selectCoverHref(
     if (item) candidates.push(item);
   }
   candidates.push(
-    ...items.filter((item) => hasCoverFilename(manifestResourcePath(opfPath, item.href)))
+    ...items.filter((item) => hasCoverFilename(manifestResourcePath(opfPath, item.href, references)))
   );
 
   for (const item of candidates) {
-    const path = manifestResourcePath(opfPath, item.href);
+    const path = manifestResourcePath(opfPath, item.href, references);
     if (!resources.has(path) || !isSupportedCoverCandidate(item, path)) continue;
     return path;
   }
@@ -112,7 +115,8 @@ export function resolveTocHrefs(
   basePath: string,
   issues: BookIssue[],
   source: string,
-  canNavigate: (resolvedHref: string) => boolean
+  canNavigate: (resolvedHref: string) => boolean,
+  references?: ArchiveReferences
 ): TocNode[] {
   return nodes.map((n) => {
     const rawHref = (n.href ?? "").trim();
@@ -123,16 +127,19 @@ export function resolveTocHrefs(
     if (fragmentOnly) {
       // nav/NCX 中允许用 #id 指向目录文档自身；只有该文档本身位于
       // spine 时才有稳定的章节目标，避免把无上下文的 # 全局放行。
-      if (canNavigate(basePath)) {
+      if (canNavigate(archiveHref(references, basePath))) {
         const fragment = rawHref.slice(1);
-        href = fragment ? `${basePath}#${fragment}` : basePath;
+        href = references ? references.href(basePath, references.resolve(basePath, rawHref).anchor) : archiveHref(undefined, basePath, fragment);
       } else {
         disabled = true;
       }
     } else if (!usable) {
       disabled = true;
     } else {
-      href = resolvePath(basePath, href);
+      if (references) {
+        const target = references.resolve(basePath, href);
+        href = target.path ? references.href(target.path, target.anchor) : "";
+      } else href = resolvePath(basePath, href);
       if (!href) {
         disabled = true;
         issues.push({
@@ -148,7 +155,7 @@ export function resolveTocHrefs(
       ...n,
       href,
       disabled: disabled || undefined,
-      children: resolveTocHrefs(n.children, basePath, issues, source, canNavigate),
+      children: resolveTocHrefs(n.children, basePath, issues, source, canNavigate, references),
     };
   });
 }
@@ -156,7 +163,8 @@ export function resolveTocHrefs(
 /** 解析 META-INF/encryption.xml：返回受保护资源路径与算法，识别字体混淆与 DRM。 */
 async function parseEncryption(
   files: Map<string, { name: string; data: Uint8Array }>,
-  issues: BookIssue[]
+  issues: BookIssue[],
+  references?: ArchiveReferences
 ): Promise<{ obfuscated: string[]; drm: boolean }> {
   const xml = getText(files, "META-INF/encryption.xml");
   if (!xml) return { obfuscated: [], drm: false };
@@ -177,7 +185,7 @@ async function parseEncryption(
     const algo = methodEl?.getAttribute("Algorithm") ?? "";
     const refEl = findElements(ed, "CipherReference")[0];
     const uri = refEl?.getAttribute("URI") ?? "";
-    const path = uri ? normalizePath(uri) : "";
+    const path = uri ? (archiveRootPath(references, uri) || uri) : "";
     if (!path) continue;
     if (/idpf\.org\/2008\/embedding/i.test(algo)) {
       obfuscated.push(path);
@@ -201,7 +209,8 @@ async function parseEncryption(
 function fallbackTocFromSpine(
   parsed: ParsedOpf,
   opfPath: string,
-  issues: BookIssue[]
+  issues: BookIssue[],
+  references?: ArchiveReferences
 ): TocNode[] {
   const nodes: TocNode[] = [];
   for (const item of parsed.spine) {
@@ -211,7 +220,7 @@ function fallbackTocFromSpine(
     const label = mi.href.split("/").pop()?.replace(/\.[a-z0-9]+$/i, "") || mi.id;
     nodes.push({
       label,
-      href: resolvePath(opfPath, mi.href),
+      href: archiveHref(references, manifestResourcePath(opfPath, mi.href, references)),
       children: [],
     });
   }
@@ -229,7 +238,8 @@ async function buildToc(
   files: Map<string, { name: string; data: Uint8Array }>,
   parsed: ParsedOpf,
   opfPath: string,
-  issues: BookIssue[]
+  issues: BookIssue[],
+  references?: ArchiveReferences
 ): Promise<TocNode[]> {
   const manifest = parsed.manifest;
   // 找 nav 与 NCX 的 manifest item（NCX 按媒体类型识别，兼容未声明 spine@toc 的书）
@@ -245,13 +255,13 @@ async function buildToc(
     parsed.spine
       .map((s) => manifest.get(s.idref))
       .filter((m): m is ManifestItem => Boolean(m))
-      .map((m) => resolvePath(opfPath, m.href))
+      .map((m) => manifestResourcePath(opfPath, m.href, references))
   );
-  const canNavigate = (href: string): boolean => spinePaths.has(splitHref(href).path);
+  const canNavigate = (href: string): boolean => spinePaths.has(references ? references.resolve(opfPath, href).path : splitHref(href).path);
 
   const tryNav = async (): Promise<TocNode[] | undefined> => {
     if (!navItem) return undefined;
-    const path = resolvePath(opfPath, navItem.href);
+    const path = manifestResourcePath(opfPath, navItem.href, references);
     const xml = getText(files, path);
     if (!xml) {
       issues.push({ kind: "book_error", source: "nav", message: "nav 文档缺失" });
@@ -259,12 +269,12 @@ async function buildToc(
     }
     const doc = await parseXmlText(xml, "text/html");
     const nodes = parseNav(doc.documentElement);
-    return resolveTocHrefs(nodes, path, issues, "nav", canNavigate);
+    return resolveTocHrefs(nodes, path, issues, "nav", canNavigate, references);
   };
 
   const tryNcx = async (): Promise<TocNode[] | undefined> => {
     if (!ncxItem) return undefined;
-    const path = resolvePath(opfPath, ncxItem.href);
+    const path = manifestResourcePath(opfPath, ncxItem.href, references);
     const xml = getText(files, path);
     if (!xml) {
       issues.push({ kind: "book_error", source: "ncx", message: "NCX 文档缺失" });
@@ -276,7 +286,7 @@ async function buildToc(
       return undefined;
     }
     const nodes = parseNcx(doc.documentElement);
-    return resolveTocHrefs(nodes, path, issues, "ncx", canNavigate);
+    return resolveTocHrefs(nodes, path, issues, "ncx", canNavigate, references);
   };
 
   // EPUB 3：nav 优先；EPUB 2：NCX 优先；两者都缺失则用 spine 兜底
@@ -288,7 +298,7 @@ async function buildToc(
     if (ncxNodes && ncxNodes.length > 0) return ncxNodes;
     if (navNodes && navNodes.length > 0) return navNodes;
   }
-  return fallbackTocFromSpine(parsed, opfPath, issues);
+  return fallbackTocFromSpine(parsed, opfPath, issues, references);
 }
 
 /**
@@ -314,13 +324,14 @@ export async function loadBookSelectiveWithArchive(
   options: BookOptions = {}
 ): Promise<Book> {
   const issues: BookIssue[] = [];
+  const references = detectArchiveReferences(archiveClient.directory);
 
   try {
     const initFiles = await archiveClient.extract(["mimetype", "META-INF/container.xml"]);
     const containerData = initFiles.get("META-INF/container.xml");
     if (!containerData) throw new Error("缺少 META-INF/container.xml");
     const containerXml = bytesToText(containerData);
-    const opfPath = normalizePath(parseContainerXmlRef(containerXml));
+    const opfPath = archiveRootPath(references, parseContainerXmlRef(containerXml));
     if (!opfPath) throw new Error("container.xml 中未指定 OPF 路径");
 
     const opfFiles = await archiveClient.extract([opfPath]);
@@ -342,7 +353,7 @@ export async function loadBookSelectiveWithArchive(
         const encMap = new Map([
           ["META-INF/encryption.xml", { name: "META-INF/encryption.xml", data: encData }],
         ]);
-        const encResult = await parseEncryption(encMap, issues);
+        const encResult = await parseEncryption(encMap, issues, references);
         if (encResult.drm) {
           throw new DrmError("此书受 DRM 保护，无法打开");
         }
@@ -360,12 +371,13 @@ export async function loadBookSelectiveWithArchive(
         parsed.manifest,
         archiveClient.directory,
         options.parseToc !== false,
+        references,
       )) {
         textPathsToExtract.add(path);
       }
     } else {
       for (const item of parsed.manifest.values()) {
-        const path = manifestResourcePath(opfPath, item.href);
+        const path = manifestResourcePath(opfPath, item.href, references);
         if (!path || !archiveClient.directory.has(path)) continue;
         const mt = (item.mediaType || guessMediaType(path)).toLowerCase();
         if (
@@ -394,12 +406,12 @@ export async function loadBookSelectiveWithArchive(
     const toc =
       options.parseToc === false
         ? []
-        : await buildToc(allExtractedFiles, parsed, opfPath, issues);
+        : await buildToc(allExtractedFiles, parsed, opfPath, issues, references);
 
     // ---- 资源清单 ----
     const resources = new Map<string, Resource>();
     for (const item of parsed.manifest.values()) {
-      const path = manifestResourcePath(opfPath, item.href);
+      const path = manifestResourcePath(opfPath, item.href, references);
       if (!path) {
         issues.push({
           kind: "book_error",
@@ -429,7 +441,7 @@ export async function loadBookSelectiveWithArchive(
     }
 
     // ---- 封面与初始章节识别 ----
-    const coverHref = selectCoverHref(parsed.manifest, parsed.metaPairs, opfPath, resources);
+    const coverHref = selectCoverHref(parsed.manifest, parsed.metaPairs, opfPath, resources, references);
 
     const uniqueId = parsed.metadata.identifier;
 
@@ -530,6 +542,7 @@ export async function loadBookSelectiveWithArchive(
       guide: parsed.guide,
       toc,
       resources,
+      archiveReferences: references,
       coverHref,
       fixedLayout,
       viewport,
@@ -567,10 +580,11 @@ export async function loadBook(bytes: Uint8Array, options: BookOptions = {}): Pr
   }
   const issues: BookIssue[] = [];
   const files = unzipEpub(bytes);
+  const references = detectArchiveReferences(files);
 
   const containerXml = getText(files, "META-INF/container.xml");
   if (!containerXml) throw new Error("缺少 META-INF/container.xml");
-  const opfPath = normalizePath(parseContainerXmlRef(containerXml));
+  const opfPath = archiveRootPath(references, parseContainerXmlRef(containerXml));
   if (!opfPath) throw new Error("container.xml 中未指定 OPF 路径");
 
   const opfXml = getText(files, opfPath);
@@ -586,7 +600,7 @@ export async function loadBook(bytes: Uint8Array, options: BookOptions = {}): Pr
   const resources = new Map<string, Resource>();
   for (const item of parsed.manifest.values()) {
     // 基准是 OPF 文件本身（其所在目录为相对引用起点）
-    const path = manifestResourcePath(opfPath, item.href);
+    const path = manifestResourcePath(opfPath, item.href, references);
     if (!path) {
       issues.push({
         kind: "book_error",
@@ -614,10 +628,10 @@ export async function loadBook(bytes: Uint8Array, options: BookOptions = {}): Pr
   }
 
   // ---- 封面 ----
-  const coverHref = selectCoverHref(parsed.manifest, parsed.metaPairs, opfPath, resources);
+  const coverHref = selectCoverHref(parsed.manifest, parsed.metaPairs, opfPath, resources, references);
 
   // ---- 加密 / 字体混淆 / DRM ----
-  const { obfuscated, drm } = await parseEncryption(files, issues);
+  const { obfuscated, drm } = await parseEncryption(files, issues, references);
   if (drm) {
     throw new DrmError("此书受 DRM 保护，无法打开");
   }
@@ -647,7 +661,7 @@ export async function loadBook(bytes: Uint8Array, options: BookOptions = {}): Pr
   const toc =
     options.parseToc === false
       ? []
-      : await buildToc(files, parsed, opfPath, issues);
+      : await buildToc(files, parsed, opfPath, issues, references);
 
   const { fixedLayout, viewport } = renditionInfo(parsed.metaPairs, parsed.manifest);
 
@@ -660,6 +674,7 @@ export async function loadBook(bytes: Uint8Array, options: BookOptions = {}): Pr
     guide: parsed.guide,
     toc,
     resources,
+    archiveReferences: references,
     coverHref,
     fixedLayout,
     viewport,
@@ -682,11 +697,17 @@ export function spineItemPath(book: Book, index: number): string | undefined {
   if (!item) return undefined;
   const mi = book.manifest.get(item.idref);
   if (!mi) return undefined;
-  return resolvePath(book.opfPath, mi.href);
+  return book.archiveReferences ? book.archiveReferences.resolve(book.opfPath, mi.href).path : resolvePath(book.opfPath, mi.href);
 }
 
-/** 由内部路径（可含 #anchor）找对应 spine 下标（用于目录跳转）。 */
+/** Resolve an already-decoded archive identity without interpreting URI punctuation. */
+export function spineIndexForEntryKey(book: Book, path: string): number {
+  return book.spine.findIndex((_item, i) => spineItemPath(book, i) === path);
+}
+
+/** Resolve a navigation href (as distinct from a saved archive identity). */
 export function spineIndexForPath(book: Book, href: string): number {
+  if (book.archiveReferences) return spineIndexForEntryKey(book, book.archiveReferences.resolve(book.opfPath, href).path);
   const { path } = splitHref(href);
   if (!path) return -1;
   // 已含 OPF 所在目录前缀的视为根路径，否则按相对 OPF 解析
@@ -721,6 +742,7 @@ export function disposeBook(book: Book | null | undefined): void {
     res.loaded = false;
   }
   book.resources.clear();
+  book.archiveReferences = undefined;
   book.manifest.clear();
   book.spine = [];
   book.guide = [];

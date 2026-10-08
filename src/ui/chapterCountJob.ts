@@ -1,3 +1,4 @@
+import { resolveArchiveHref } from "../core/archiveReferences";
 import { resolvePath } from "../core/paths";
 import type { Book } from "../core/types";
 import {
@@ -133,7 +134,7 @@ export function createChapterCountJob(options: ChapterCountJobOptions): { cancel
         if (!manifest) {
           issue = `chapter ${index}: manifest item missing`;
         } else {
-          const path = resolvePath(options.book.opfPath, manifest.href);
+          const path = options.book.archiveReferences ? resolveArchiveHref(options.book.archiveReferences, options.book.opfPath, manifest.href).path : resolvePath(options.book.opfPath, manifest.href);
           const raw = readText(path);
           const text = typeof raw === "string" || raw === undefined ? raw : await raw;
           if (!current()) return;

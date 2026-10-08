@@ -1,3 +1,4 @@
+import { resolveArchiveHref, type ArchiveReferences } from "./archiveReferences";
 import type { ManifestItem } from "./types";
 import { resolvePath } from "./paths";
 
@@ -7,6 +8,7 @@ export function archiveBootstrapPaths(
   manifest: ReadonlyMap<string, ManifestItem>,
   directory: ReadonlyMap<string, unknown>,
   parseToc: boolean,
+  references?: ArchiveReferences,
 ): string[] {
   if (!parseToc) return [];
   const paths = new Set<string>();
@@ -19,7 +21,7 @@ export function archiveBootstrapPaths(
     if (isNav) navChosen = true;
     if (isNcx) ncxChosen = true;
     if (!isNav && !isNcx) continue;
-    const path = resolvePath(opfPath, item.href);
+    const path = references ? resolveArchiveHref(references, opfPath, item.href).path : resolvePath(opfPath, item.href);
     if (directory.has(path)) paths.add(path);
   }
   return [...paths];

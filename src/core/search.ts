@@ -160,10 +160,10 @@ function findAll(haystack: string, needle: string, from = 0): number[] {
 }
 
 function titleFor(book: Book, path: string): string {
-  const target = splitHref(path).path;
+  const target = book.archiveReferences ? path : splitHref(path).path;
   const visit = (nodes: TocNode[]): string | undefined => {
     for (const node of nodes) {
-      if (splitHref(node.href).path === target && node.label.trim()) return node.label.trim();
+      if ((book.archiveReferences ? book.archiveReferences.resolve(book.opfPath, node.href).path : splitHref(node.href).path) === target && node.label.trim()) return node.label.trim();
       const nested = visit(node.children);
       if (nested) return nested;
     }

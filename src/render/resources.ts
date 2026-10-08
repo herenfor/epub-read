@@ -74,6 +74,11 @@ export class ResourceServer {
     }
   }
 
+  /** The same per-book resolver used by dependency preparation and rendering. */
+  get archiveReferences() {
+    return this.book?.archiveReferences;
+  }
+
   /** 返回内部路径对应的 blob URL；资源缺失或尚未解压就绪返回 undefined。 */
   urlFor(path: string): string | undefined {
     const cached = this.urls.get(path);

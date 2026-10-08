@@ -1,3 +1,4 @@
+import { resolveArchiveHref, type ArchiveReferences } from "../core/archiveReferences";
 import { getSerializer } from "../core/parseXml";
 import { parseChapterDocument, STRIPPED_CHAPTER_TAGS } from "./chapterDocument";
 import { resolvePath, isExternalUrl, isFragmentOnly } from "../core/paths";
@@ -8,6 +9,7 @@ import { imageLayoutPolicy, scrollMediaDefaultsCss } from "./imageLayoutPolicy";
 import { TEXT_MEASURE, type ReaderSettings } from "./settings";
 
 export interface SanitizeOptions {
+  archiveReferences?: ArchiveReferences;
   /** 章节文件的内部路径，用于解析相对引用 */
   basePath: string;
   /** EPUB 2 用严格 XML 解析；EPUB 3 用宽松 HTML 解析 */
@@ -367,7 +369,7 @@ export async function sanitizeChapter(
         el.removeAttribute(attr.name);
         continue;
       }
-      if (name === "src" || name === "poster" || name === "data" || name === "xlink:href") {
+      if (name === "src" || name === "poster" || name === "data" || name === "xlink:href" || (opts.archiveReferences && name === "href" && (tag === "image" || tag === "use"))) {
         const value = attr.value.trim();
         if (!value) continue;
         if (/^\s*javascript:/i.test(value)) {
@@ -377,9 +379,12 @@ export async function sanitizeChapter(
         if (isFragmentOnly(value) || isExternalUrl(value) || value.startsWith("//")) {
           continue;
         }
-        const url = urlFor(resolvePath(opts.basePath, value));
+        const ref = opts.archiveReferences
+          ? resolveArchiveHref(opts.archiveReferences, opts.basePath, value)
+          : { path: resolvePath(opts.basePath, value), anchor: "" };
+        const url = urlFor(ref.path);
         if (url) {
-          el.setAttribute(attr.name, url);
+          el.setAttribute(attr.name, url + (ref.anchor ? "#" + encodeURIComponent(ref.anchor) : ""));
         } else {
           el.removeAttribute(attr.name);
           issues.push(`资源缺失，已移除引用：${value}`);
@@ -393,7 +398,7 @@ export async function sanitizeChapter(
     // 3) 内联 style 中的 url()
     const style = el.getAttribute("style");
     if (style) {
-      el.setAttribute("style", rewriteCssUrls(style, opts.basePath, urlFor));
+      el.setAttribute("style", rewriteCssUrls(style, opts.basePath, urlFor, { archiveReferences: opts.archiveReferences }));
     }
   }
 
@@ -403,12 +408,13 @@ export async function sanitizeChapter(
     if (rel.includes("stylesheet")) {
       const href = link.getAttribute("href");
       if (href && !isExternalUrl(href)) {
-        const cssPath = resolvePath(opts.basePath, href);
+        const cssPath = opts.archiveReferences ? resolveArchiveHref(opts.archiveReferences, opts.basePath, href).path : resolvePath(opts.basePath, href);
         // 优先：读取 CSS 内容并改写其内部引用（@font-face/background/@import 相对路径）
         const cssText = opts.getText?.(cssPath);
         if (cssText !== undefined && opts.makeUrl) {
           const rewritten = rewriteCssUrls(cssText, cssPath, urlFor, {
             getText: opts.getText,
+            archiveReferences: opts.archiveReferences,
           });
           link.setAttribute("href", opts.makeUrl(rewritten, "text/css"));
         } else {
@@ -430,7 +436,7 @@ export async function sanitizeChapter(
   for (const stEl of Array.from(doc.getElementsByTagName("style"))) {
     const text = stEl.textContent;
     if (text) {
-      const rewritten = rewriteCssUrls(text, opts.basePath, urlFor);
+      const rewritten = rewriteCssUrls(text, opts.basePath, urlFor, { archiveReferences: opts.archiveReferences });
       while (stEl.firstChild) stEl.removeChild(stEl.firstChild);
       stEl.appendChild(doc.createTextNode(rewritten));
     }

@@ -1,12 +1,13 @@
+import { resolveArchiveHref, archiveHref } from "./core/archiveReferences";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
-import { loadBook, loadBookFromArchive, spineIndexForPath, spineItemPath, DrmError, disposeBook, nextLinearIndex } from "./core/book";
+import { loadBook, loadBookFromArchive, spineIndexForPath, spineIndexForEntryKey, spineItemPath, DrmError, disposeBook, nextLinearIndex } from "./core/book";
 import type { Book } from "./core/types";
 import type { ArchiveClient } from "./core/selectiveArchive";
 import type { Annotation, Stamp, Version } from "./core/portableState/portable-register-core";
 import { compareStamp } from "./core/portableState/portable-register-core";
 import { latestVersion, projectProgressVersion, versionForStamp } from "./core/portableState/projection";
 import type { BookmarkValue, Locator, NoteValue, PortablePreferences, ProgressValue } from "./core/portableState/portable-state-types";
-import { isExternalUrl, isFragmentOnly, resolvePath, splitHref } from "./core/paths";
+import { isExternalUrl, isFragmentOnly, splitHref } from "./core/paths";
 import type { SearchResult, SearchSession } from "./core/search";
 import type { ExactTextHit } from "./core/exactTextHits";
 import type { SearchOccurrence } from "./core/searchOccurrence";
@@ -560,7 +561,7 @@ function savedProgressFromPortableLocator(
   fallback: SavedProgress,
 ): SavedProgress {
   if (locator.locatorVersion !== 1) return fallback;
-  const targetIndex = spineIndexForPath(book, locator.chapterPath);
+  const targetIndex = spineIndexForEntryKey(book, locator.chapterPath);
   if (targetIndex < 0) {
     throw new Error("保存的阅读位置对应章节已失效，未按默认章节打开");
   }
@@ -686,10 +687,10 @@ function bookKeyOf(b: Book, name: string, size: number): string {
 function chapterLabelForIndex(b: Book, index: number): string {
   const path = spineItemPath(b, index);
   if (!path) return "";
-  const { path: normalized } = splitHref(path);
+  const normalized = b.archiveReferences ? path : splitHref(path).path;
   const walk = (nodes: import("./core/types").TocNode[]): string => {
     for (const n of nodes) {
-      if (splitHref(n.href).path === normalized && n.label) return n.label;
+      if ((b.archiveReferences ? b.archiveReferences.resolve(b.opfPath, n.href).path : splitHref(n.href).path) === normalized && n.label) return n.label;
       const c = walk(n.children);
       if (c) return c;
     }
@@ -3401,7 +3402,7 @@ export default function App() {
         if (searchTarget) {
           let targetIndex = searchTarget.spineIndex;
           if (spineItemPath(b, targetIndex) !== searchTarget.chapterPath) {
-            targetIndex = spineIndexForPath(b, searchTarget.chapterPath);
+            targetIndex = spineIndexForEntryKey(b, searchTarget.chapterPath);
           }
           if (targetIndex < 0 || targetIndex >= b.spine.length) {
             throw new Error("索引结果对应的章节已不存在，请重建该书索引");
@@ -4045,7 +4046,7 @@ export default function App() {
     const currentBook = bookRef.current;
     let targetSpineIndex = spineIndex;
     if (readingAnchor?.path && currentBook) {
-      const resolved = spineIndexForPath(currentBook, readingAnchor.path);
+      const resolved = spineIndexForEntryKey(currentBook, readingAnchor.path);
       if (resolved >= 0) {
         targetSpineIndex = resolved;
       }
@@ -4135,7 +4136,7 @@ export default function App() {
     setPreciseTarget(null);
     latestPreciseRequestRef.current = null;
     const idx = spineIndexForPath(book, href);
-    const { anchor: a } = splitHref(href);
+    const a = book.archiveReferences ? book.archiveReferences.resolve(book.opfPath, href).anchor : splitHref(href).anchor;
     if (idx < 0) return false;
     if (
       sameChapterRoute({
@@ -4677,7 +4678,7 @@ export default function App() {
 
   const handleNoteNavigate = useCallback((note: ReaderNote): void => {
     if (!book || noteBusy) return;
-    const target = spineIndexForPath(book, note.chapterPath);
+    const target = spineIndexForEntryKey(book, note.chapterPath);
     if (target < 0 || target !== note.spineIndex) {
       setRuntimeIssues((issues) => [...issues, "笔记对应的章节已不存在"]);
       return;
@@ -5251,7 +5252,7 @@ export default function App() {
   const reading = chapterState.status === "ready" && !chapterState.empty;
   const currentPath = ready ? spineItemPath(book!, spineIndex) : undefined;
   const activeHref = currentPath
-    ? `${currentPath}${anchor ? `#${anchor}` : ""}`
+    ? archiveHref(book?.archiveReferences, currentPath, anchor ?? "")
     : undefined;
   // 阅读进度：以"标准页 = 1000 字"为尺度，按锚点所在字数位置推算
   // （标题页等短章节只占零点几个百分点，长章节按字数占大头）
@@ -5811,10 +5812,10 @@ export default function App() {
 
   const currentChapterLabel = (() => {
     if (!ready || !currentPath) return "";
-    const { path } = splitHref(currentPath);
+    const path = book?.archiveReferences ? currentPath : splitHref(currentPath).path;
     const walk = (nodes: import("./core/types").TocNode[]): string => {
       for (const n of nodes) {
-        if (splitHref(n.href).path === path && n.label) return n.label;
+        if ((book?.archiveReferences ? book.archiveReferences.resolve(book.opfPath, n.href).path : splitHref(n.href).path) === path && n.label) return n.label;
         const c = walk(n.children);
         if (c) return c;
       }
@@ -6775,16 +6776,16 @@ export default function App() {
                     }
                     if (isFragmentOnly(href)) {
                       const snapshot = currentReaderPosition();
-                      if (readerRef.current?.navigateWithinCurrentChapter({ fragment: href.slice(1) })) {
+                      const fragment = book?.archiveReferences ? book.archiveReferences.resolve(image.chapterPath, href).anchor : href.slice(1);
+                      if (readerRef.current?.navigateWithinCurrentChapter({ fragment })) {
                         commitReaderHistorySnapshot(snapshot);
                       }
                       return;
                     }
                     // ImageViewRequest keeps the original anchor href, which is
                     // relative to its chapter. Resolve it before App routing.
-                    const { path, anchor } = splitHref(href);
-                    const resolved = resolvePath(image.chapterPath, path);
-                    handleTocNavigate(anchor ? `${resolved}#${anchor}` : resolved);
+                    const { path: resolved, anchor } = resolveArchiveHref(book?.archiveReferences, image.chapterPath, href);
+                    if (resolved) handleTocNavigate(archiveHref(book?.archiveReferences, resolved, anchor));
                   }}
                 />
                 {selectionContext && (

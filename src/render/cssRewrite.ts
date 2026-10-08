@@ -1,25 +1,27 @@
-import { resolvePath, isExternalUrl, splitHref } from "../core/paths";
+import { resolveArchiveHref, type ArchiveReferences } from "../core/archiveReferences";
+import { isExternalUrl } from "../core/paths";
 import { TEXT_MEASURE } from "./settings";
 
 function resolveOrKeep(
   raw: string,
   basePath: string,
   resolveUrl: (path: string) => string | undefined,
-  match: string
+  match: string,
+  references?: ArchiveReferences
 ): string {
   const trimmed = raw.trim();
   if (!trimmed) return match;
   if (isExternalUrl(trimmed) || trimmed.startsWith("//") || trimmed.startsWith("#")) {
     return match;
   }
-  const { path, anchor } = splitHref(trimmed);
-  const resolved = resolvePath(basePath, path);
+  const { path: resolved, anchor } = resolveArchiveHref(references, basePath, trimmed);
   const url = resolveUrl(resolved);
   if (!url) return match; // 资源缺失：保留原样，由浏览器静默失败
-  return `url("${url}${anchor ? `#${anchor}` : ""}")`;
+  return `url("${url}${anchor ? `#${references ? encodeURIComponent(anchor) : anchor}` : ""}")`;
 }
 
 export interface CssRewriteOptions {
+  archiveReferences?: ArchiveReferences;
   /** 读取书内 CSS 文本（递归处理 @import 链用） */
   getText?: (path: string) => string | undefined;
   /** 已内联的样式表路径（防循环 @import） */
@@ -214,7 +216,7 @@ function rewriteCssUrlsInternal(
   // 先处理 @import（裸字符串与 url() 两种写法，保留媒体后缀）
   out = mapCssImports(out, (match, raw, suffix) => {
     if (!raw || /^(data:|blob:|https?:|mailto:|#|\/\/)/i.test(raw)) return match;
-    const resolved = resolvePath(basePath, splitHref(raw).path);
+    const resolved = resolveArchiveHref(options.archiveReferences, basePath, raw).path;
     // 能读到内容就递归内联：width:%→em、url()→blob 都以被导入文件为基准，
     // 也避免 blob 样式表里的相对路径失效
     const importedText = options.getText?.(resolved);
@@ -237,7 +239,7 @@ function rewriteCssUrlsInternal(
     return `@import url("${url}")${suffix ?? ""};`;
   });
   // 再处理其余 url(...)
-  out = mapCssUrls(out, (match, href) => resolveOrKeep(href, basePath, resolveUrl, match));
+  out = mapCssUrls(out, (match, href) => resolveOrKeep(href, basePath, resolveUrl, match, options.archiveReferences));
   // width:X% → 改写为 min(X%, X%×40rem)（与 sanitize 的 DOM 级重写配套）。
   // 书的 % 是按“页面≈版心”的阅读器写的，我们的页面=窗口全宽；
   // min() 保留两个候选让浏览器按真实包含块取值：

@@ -1,4 +1,5 @@
-import { isExternalUrl, isFragmentOnly, resolvePath, splitHref } from "../core/paths";
+import { resolveArchiveHref } from "../core/archiveReferences";
+import { isExternalUrl, isFragmentOnly } from "../core/paths";
 import type { Book } from "../core/types";
 import { childElements, localNameOf, type XmlElementLike } from "../core/xml";
 import { parseChapterDocument, STRIPPED_CHAPTER_TAGS } from "./chapterDocument";
@@ -69,7 +70,7 @@ export class ChapterDependencies {
       for (const ref of refs) {
         const href = ref.href.trim();
         if (!href || isExternalUrl(href) || isFragmentOnly(href) || href.startsWith("//")) continue;
-        const path = resolvePath(base, splitHref(href).path);
+        const path = resolveArchiveHref(this.book.archiveReferences, base, href).path;
         if (!this.book.resources.has(path)) continue;
         deps.add(path);
         if (ref.stylesheet && !seenCss.has(path)) {
