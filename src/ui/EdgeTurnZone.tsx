@@ -1,34 +1,25 @@
-import { useEffect, useRef, useState } from "react";
+import { useContext, useSyncExternalStore } from "react";
+import { EdgeTurnFeedbackContext, useEdgeTurnFeedbackOwner, type EdgeTurnDirection } from "./edgeTurnFeedback";
 
 interface Props {
-  direction: -1 | 1;
+  direction: EdgeTurnDirection;
   onTurn(): void;
   onPrepare?(): void;
 }
 
-/** Feedback is local to the edge, independent of navigation/motion readiness. */
+/** Click feedback survives host replacement, independent of motion readiness. */
 export function EdgeTurnZone({ direction, onTurn, onPrepare }: Props) {
-  const [holding, setHolding] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const show = () => {
-    if (timer.current !== null) clearTimeout(timer.current);
-    setHolding(true);
-    timer.current = setTimeout(() => {
-      timer.current = null;
-      setHolding(false);
-    }, 400);
-  };
-  useEffect(() => () => {
-    if (timer.current !== null) clearTimeout(timer.current);
-  }, []);
+  const shared = useContext(EdgeTurnFeedbackContext);
+  const own = useEdgeTurnFeedbackOwner();
+  const feedback = shared ?? own;
+  const holding = useSyncExternalStore(feedback.subscribe, () => feedback.holding(direction), () => false);
 
   const label = direction === -1 ? "上一页" : "下一页";
   return <div
     className={`edge-turn-zone ${direction === -1 ? "edge-turn-prev" : "edge-turn-next"}${holding ? " is-holding" : ""}`}
     title={label} aria-label={label}
-    onPointerEnter={(event) => { if (event.pointerType === "mouse") show(); }}
-    onPointerDown={() => { show(); onPrepare?.(); }}
-    onClick={(event) => { event.stopPropagation(); show(); onTurn(); }}
+    onPointerDown={() => onPrepare?.()}
+    onClick={(event) => { event.stopPropagation(); feedback.hold(direction); onTurn(); }}
   >
     <button type="button" className="edge-turn-arrow" tabIndex={-1} aria-hidden="true">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">

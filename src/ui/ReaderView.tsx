@@ -36,6 +36,7 @@ import { ContinuousReaderView } from "./ContinuousReaderView";
 import { ImageChapterSpreads, type ImageChapterSpread } from "./imageChapterSpreads";
 import { ImageSpreadReaderView } from "./ImageSpreadReaderView";
 import { EdgeTurnZone } from "./EdgeTurnZone";
+import { EdgeTurnFeedbackContext, useEdgeTurnFeedbackOwner } from "./edgeTurnFeedback";
 import { createSpreadGeometry } from "../render/pagedSpread";
 import type { ScrubToken } from "./readerProgressAxis";
 import { installPagedSwipe, PAGED_SWIPE_THRESHOLD_PX } from "../render/pagedSwipe";
@@ -2216,6 +2217,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
 });
 
 export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function ReaderView(props, ref) {
+  const edgeFeedback = useEdgeTurnFeedbackOwner();
   const host = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   const imageSpreads = useMemo(() => new ImageChapterSpreads(props.book,
@@ -2263,5 +2265,7 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
   } else {
     content = <PagedReaderView {...props} ref={ref} />;
   }
-  return <div ref={host} className="reader-presentation-host">{content}</div>;
+  return <EdgeTurnFeedbackContext.Provider value={edgeFeedback}>
+    <div ref={host} className="reader-presentation-host">{content}</div>
+  </EdgeTurnFeedbackContext.Provider>;
 });
