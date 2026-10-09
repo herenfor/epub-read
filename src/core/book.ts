@@ -700,6 +700,12 @@ export function spineItemPath(book: Book, index: number): string | undefined {
   return book.archiveReferences ? book.archiveReferences.resolve(book.opfPath, mi.href).path : resolvePath(book.opfPath, mi.href);
 }
 
+/** Navigation reference for a spine item; never pass a raw ZIP key to an href consumer. */
+export function spineItemHref(book: Book, index: number): string | undefined {
+  const path = spineItemPath(book, index);
+  return path ? archiveHref(book.archiveReferences, path) : undefined;
+}
+
 /** Resolve an already-decoded archive identity without interpreting URI punctuation. */
 export function spineIndexForEntryKey(book: Book, path: string): number {
   return book.spine.findIndex((_item, i) => spineItemPath(book, i) === path);

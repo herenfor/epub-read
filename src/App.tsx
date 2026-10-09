@@ -1,6 +1,6 @@
 import { resolveArchiveHref, archiveHref } from "./core/archiveReferences";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
-import { loadBook, loadBookFromArchive, spineIndexForPath, spineIndexForEntryKey, spineItemPath, DrmError, disposeBook, nextLinearIndex } from "./core/book";
+import { loadBook, loadBookFromArchive, spineIndexForPath, spineIndexForEntryKey, spineItemPath, spineItemHref, DrmError, disposeBook, nextLinearIndex } from "./core/book";
 import type { Book } from "./core/types";
 import type { ArchiveClient } from "./core/selectiveArchive";
 import type { Annotation, Stamp, Version } from "./core/portableState/portable-register-core";
@@ -3792,6 +3792,14 @@ export default function App() {
   const onPageState = useCallback((s: ChapterState) => {
     chapterStateRef.current = s;
     setChapterState(s);
+    if (s.status === "error") {
+      const failedSeek = pendingChapterSeekRef.current;
+      pendingChapterSeekRef.current = null;
+      if (failedSeek) {
+        dispatchScrub({ type: "failed", token: failedSeek.token });
+        navigationPendingRef.current = false;
+      }
+    }
     if (s.status === "ready" && s.mode !== "scroll" && !navigationPendingRef.current) {
       const axis = contentAxisRef.current;
       const currentBook = bookRef.current;
@@ -3848,9 +3856,14 @@ export default function App() {
     setInitialAlignment("context");
     const pendingSeek = pendingChapterSeekRef.current;
     pendingChapterSeekRef.current = null;
-    if (pendingSeek && pendingSeek.target.spineIndex === spineIndexRef.current) {
+    const scrubPending = scrubUiStateRef.current.pending;
+    const matchingSeek = pendingSeek && pendingSeek.target.spineIndex === spineIndexRef.current &&
+      pendingSeek.token.session === scrubPending?.session && pendingSeek.token.request === scrubPending?.request
+      ? pendingSeek : null;
+    if (pendingSeek && !matchingSeek) dispatchScrub({ type: "cancelled", token: pendingSeek.token });
+    if (matchingSeek) {
       // setPage 同步发布页态，下面读到的就是定位后的状态。
-      readerRef.current?.seekContentFraction?.(pendingSeek.target, pendingSeek.token);
+      readerRef.current?.seekContentFraction?.(matchingSeek.target, matchingSeek.token);
     }
     const state = chapterStateRef.current;
     const readingAnchor = readerRef.current?.getReadingAnchor();
@@ -3867,11 +3880,9 @@ export default function App() {
           const intra = state.pageCount > 1 ? state.currentPage / (state.pageCount - 1) : 1;
           const ratio = atEnd ? 1 : axis.ratioAt({ key: seg.key, fraction: intra });
           if (ratio !== null) {
-            dispatchScrub({
-              type: "sample",
-              session: scrubSessionRef.current,
-              actual: { ratio, atEnd },
-            });
+            dispatchScrub(matchingSeek
+              ? { type: "settled", token: matchingSeek.token, actual: { ratio, atEnd } }
+              : { type: "sample", session: scrubSessionRef.current, actual: { ratio, atEnd } });
           }
         } else if (atEnd) {
           dispatchScrub({
@@ -4182,10 +4193,10 @@ export default function App() {
   }, [book, spineIndex]);
 
   /** 侧边目录入口：先记录一次，再执行跳转。 */
-  const handleTocNavigate = useCallback((href: string): void => {
-    if (!book) return;
+  const handleTocNavigate = useCallback((href: string): boolean => {
+    if (!book) return false;
     const target = spineIndexForPath(book, href);
-    if (target < 0) return;
+    if (target < 0) return false;
     if (
       sameChapterRoute({
         currentSpineIndex: spineIndex,
@@ -4195,11 +4206,12 @@ export default function App() {
       }) === "direct"
     ) {
       const snapshot = currentReaderPosition();
-      if (navigateReaderHref(href)) commitReaderHistorySnapshot(snapshot);
-      return;
+      if (!navigateReaderHref(href)) return false;
+      commitReaderHistorySnapshot(snapshot);
+      return true;
     }
     captureReaderHistory(href);
-    navigateReaderHref(href);
+    return navigateReaderHref(href);
   }, [book, captureReaderHistory, navigateReaderHref, spineIndex, currentReaderPosition, commitReaderHistorySnapshot]);
 
   const handleCommitSeek = useCallback((ratio: number) => {
@@ -4231,21 +4243,29 @@ export default function App() {
       if (axis) {
         const target = axis.locate(r);
         if (target) {
-          if (target.spineIndex === spineIndexRef.current) {
+          // Requested chapter index can change before its paginator is ready.
+          // Keep a later fraction queued instead of applying it to the old document.
+          if (target.spineIndex === spineIndexRef.current && readerDisplayReadyRef.current) {
             readerRef.current?.seekContentFraction?.(
               { key: target.key, spineIndex: target.spineIndex, fraction: target.fraction },
               token
             );
           } else {
             const currentBook = bookRef.current;
-            const path = currentBook ? spineItemPath(currentBook, target.spineIndex) : undefined;
-            if (path) {
+            const href = currentBook ? spineItemHref(currentBook, target.spineIndex) : undefined;
+            if (href) {
               pendingChapterSeekRef.current = {
                 target: { key: target.key, spineIndex: target.spineIndex, fraction: target.fraction },
                 token,
               };
-              handleTocNavigate(path);
+              if (handleTocNavigate(href)) return; // Settle only after the target chapter and page are ready.
             }
+            pendingChapterSeekRef.current = null;
+            dispatchScrub({ type: "failed", token });
+            navigationPendingRef.current = false;
+            historyCaptureAllowedRef.current = true;
+            setReaderNotice({ kind: "warn", text: "未能定位到指定进度" });
+            return;
           }
           dispatchScrub({
             type: "settled",
@@ -4387,7 +4407,7 @@ export default function App() {
     }
 
     // 跨章先进入目标章节；精确范围/高亮在显示门内解析，失败不冒充命中。
-    captureReaderHistory(result.chapterPath);
+    captureReaderHistory(archiveHref(book.archiveReferences, result.chapterPath));
     navigationPendingRef.current = true;
     releaseRestoreForExplicitNavigation();
     historyCaptureAllowedRef.current = false;
@@ -4721,7 +4741,7 @@ export default function App() {
       showReaderNotice("未能定位笔记原文，请检查笔记锚点", "warn");
       return;
     }
-    captureReaderHistory(note.chapterPath);
+    captureReaderHistory(archiveHref(book.archiveReferences, note.chapterPath));
     navigationPendingRef.current = true;
     releaseRestoreForExplicitNavigation();
     historyCaptureAllowedRef.current = false;
@@ -4961,7 +4981,7 @@ export default function App() {
           return;
         }
       }
-      captureReaderHistory(spineItemPath(book, spineIndex) ?? "");
+      captureReaderHistory(spineItemHref(book, spineIndex) ?? "");
       navigationPendingRef.current = true;
       releaseRestoreForExplicitNavigation();
       historyCaptureAllowedRef.current = false;
@@ -6175,8 +6195,8 @@ export default function App() {
           if (st.readerHistory.back.length > 0) {
             handleHistoryBack();
           } else if (st.spineIndex > 0 && st.book) {
-            const path = spineItemPath(st.book, st.spineIndex - 1);
-            if (path) handleTocNavigate(path);
+            const href = spineItemHref(st.book, st.spineIndex - 1);
+            if (href) handleTocNavigate(href);
           }
         }
         return;
@@ -6187,8 +6207,8 @@ export default function App() {
           if (st.readerHistory.forward.length > 0) {
             handleHistoryForward();
           } else if (st.book && st.spineIndex < st.book.spine.length - 1) {
-            const path = spineItemPath(st.book, st.spineIndex + 1);
-            if (path) handleTocNavigate(path);
+            const href = spineItemHref(st.book, st.spineIndex + 1);
+            if (href) handleTocNavigate(href);
           }
         }
         return;
@@ -6198,16 +6218,16 @@ export default function App() {
       if (e.key === "[" && !e.ctrlKey && !e.altKey && !e.metaKey) {
         e.preventDefault();
         if (st.view === "reader" && st.readerDisplayReady && !st.navigationPending && st.spineIndex > 0 && st.book) {
-          const path = spineItemPath(st.book, st.spineIndex - 1);
-          if (path) handleTocNavigate(path);
+          const href = spineItemHref(st.book, st.spineIndex - 1);
+          if (href) handleTocNavigate(href);
         }
         return;
       }
       if (e.key === "]" && !e.ctrlKey && !e.altKey && !e.metaKey) {
         e.preventDefault();
         if (st.view === "reader" && st.readerDisplayReady && !st.navigationPending && st.book && st.spineIndex < st.book.spine.length - 1) {
-          const path = spineItemPath(st.book, st.spineIndex + 1);
-          if (path) handleTocNavigate(path);
+          const href = spineItemHref(st.book, st.spineIndex + 1);
+          if (href) handleTocNavigate(href);
         }
         return;
       }
@@ -6896,8 +6916,8 @@ export default function App() {
           }}
           onSeekChapter={(targetSpineIndex) => {
             if (targetSpineIndex >= 0 && targetSpineIndex < book!.spine.length) {
-              const path = spineItemPath(book!, targetSpineIndex);
-              if (path) handleTocNavigate(path);
+              const href = spineItemHref(book!, targetSpineIndex);
+              if (href) handleTocNavigate(href);
             }
           }}
           onSeekRatio={(targetRatio) => {
