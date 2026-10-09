@@ -37,6 +37,7 @@ import { checkThenRecoverProgressRuntime, planFreshProgressOpen } from "./ui/pro
 import { useAndroidBack } from "./platform/useAndroidBack";
 import { moveAndroidTaskToBack } from "./platform/androidAppTask";
 import { useExitPresence } from "./ui/menuMotion";
+import { createSidebarNavigationMemory, type SidebarNavigationMemory } from "./ui/sidebarSwipe";
 import { SidebarDrawer, type SidebarMode, type SidebarTab } from "./ui/SidebarDrawer";
 import { AaPopover } from "./ui/AaPopover";
 import { AboutInfo } from "./ui/AboutInfo";
@@ -1318,6 +1319,14 @@ export default function App() {
   const [sidebarPinned, setSidebarPinned] = useState(false);
 
   // 手机窄窗只派生 overlay 呈现，保留用户的 dock/pinned 偏好，放宽后恢复。
+  const sidebarNavigationMemories = useRef(new Map<string, SidebarNavigationMemory>());
+  const sidebarBookKey = currentShelfId ?? book?.metadata.identifier ?? "unshelved";
+  let sidebarNavigationMemory = sidebarNavigationMemories.current.get(sidebarBookKey);
+  if (!sidebarNavigationMemory) {
+    sidebarNavigationMemory = createSidebarNavigationMemory();
+    sidebarNavigationMemories.current.set(sidebarBookKey, sidebarNavigationMemory);
+  }
+
   const effectiveSidebarMode: SidebarMode = phoneChrome ? "overlay" : sidebarMode;
 
   const isSidebarOpen =
@@ -6333,6 +6342,8 @@ export default function App() {
       )}
       {view === "reader" && ready && (
         <SidebarDrawer
+          key={sidebarBookKey}
+          navigationMemory={sidebarNavigationMemory}
           open={isSidebarOpen}
           side={sidebarSide}
           activeTab={activeSidebarTab}

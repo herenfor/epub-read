@@ -1,7 +1,7 @@
 /**
  * 正文图片放大：从章内点击目标识别可查看的图片请求。
  *
- * 只负责“这次点击是不是一张可放大的正文图片”，不注册事件、不持有 Book/ResourceServer，
+ * 只负责“这次点击是不是一张可放大的正文图片”，不注册正文输入事件、不持有 Book/ResourceServer，
  * 也不自行打开链接。宿主（C）在既有 click 路由里按 脚注 → 选区/拖动 → 图片 → 链接
  * 的优先级调用本函数，拿到的 src 就是 sanitize 已解析的 blob URL。
  *
@@ -105,6 +105,8 @@ function imageRequestFromImg(img: HTMLImageElement, chapterPath: string): ImageV
  * 多看常见的整页包装 `<svg viewBox=...><image xlink:href=.../></svg>`。
  * 只处理 svg 唯一元素子节点就是该 image 的简单包装；复杂内联 SVG 不导出。
  */
+const svgIntrinsicSizes = new WeakMap<Element, { width: number; height: number }>();
+
 function imageRequestFromSvgImage(imageEl: Element, chapterPath: string): ImageViewRequest | null {
   if (insideFootnoteMarker(imageEl)) return null;
   const svg = imageEl.parentElement;
@@ -115,7 +117,7 @@ function imageRequestFromSvgImage(imageEl: Element, chapterPath: string): ImageV
   // sanitize 会把 xlink:href 改写成 blob URL；SVG2 裸 href 不会被资源改写，仅作回退。
   const src = (imageEl.getAttribute("xlink:href") || imageEl.getAttribute("href") || "").trim();
   if (!src) return null;
-  const size = svgImageSize(imageEl, svg);
+  const size = svgIntrinsicSizes.get(imageEl) ?? svgImageSize(imageEl, svg);
   if (!size) return null;
   return {
     src,
@@ -131,10 +133,106 @@ function imageRequestFromSvgImage(imageEl: Element, chapterPath: string): ImageV
  * 从章内点击目标构造图片查看请求；不是可放大的正文图片时返回 null。
  * 只读取目标的 tag/ownerDocument/属性，可安全传入 iframe 子文档节点。
  */
-export function imageRequestFromTarget(target: Element, chapterPath: string): ImageViewRequest | null {
+export function imageRequestFromTarget(target: Element, chapterPath: string, point?: ImageHitPoint): ImageViewRequest | null {
   if (!target || target.nodeType !== 1) return null;
   const tag = localName(target);
-  if (tag === "img") return imageRequestFromImg(target as HTMLImageElement, chapterPath);
-  if (tag === "image") return imageRequestFromSvgImage(target, chapterPath);
-  return null;
+  const request = tag === "img" ? imageRequestFromImg(target as HTMLImageElement, chapterPath)
+    : tag === "image" ? imageRequestFromSvgImage(target, chapterPath) : null;
+  return request && (!point || imageContainsPoint(target, request, point)) ? request : null;
+}
+
+
+export interface ImageHitPoint { clientX: number; clientY: number }
+
+/** Only the displayed image counts, not letterboxing in its CSS content box. */
+function imageContainsPoint(target: Element, image: ImageViewRequest, point: ImageHitPoint): boolean {
+  const rect = target.getBoundingClientRect();
+  let left = rect.left, top = rect.top, width = rect.width, height = rect.height;
+  if (localName(target) === "img") {
+    const style = target.ownerDocument.defaultView!.getComputedStyle(target);
+    const img = target as HTMLElement;
+    const scaleX = img.offsetWidth > 0 ? rect.width / img.offsetWidth : 1;
+    const scaleY = img.offsetHeight > 0 ? rect.height / img.offsetHeight : 1;
+    const px = (value: string): number => parseFloat(value) || 0;
+    const insetLeft = (px(style.borderLeftWidth) + px(style.paddingLeft)) * scaleX;
+    const insetTop = (px(style.borderTopWidth) + px(style.paddingTop)) * scaleY;
+    width -= insetLeft + (px(style.borderRightWidth) + px(style.paddingRight)) * scaleX;
+    height -= insetTop + (px(style.borderBottomWidth) + px(style.paddingBottom)) * scaleY;
+    left += insetLeft; top += insetTop;
+    const naturalWidth = image.naturalWidth * scaleX, naturalHeight = image.naturalHeight * scaleY;
+    const contain = Math.min(width / naturalWidth, height / naturalHeight);
+    const fit = style.objectFit;
+    const scale = fit === "contain" ? contain : fit === "cover" ? Math.max(width / naturalWidth, height / naturalHeight)
+      : fit === "scale-down" ? Math.min(1, contain) : 1;
+    if (fit === "contain" || fit === "cover" || fit === "scale-down" || fit === "none") {
+      const paintedWidth = naturalWidth * scale, paintedHeight = naturalHeight * scale;
+      const [x = "50%", y = "50%"] = style.objectPosition.split(/\s+(?![^()]*\))/);
+      const offset = (token: string, free: number, axisScale: number): number => {
+        if (token === "center") return free / 2;
+        if (token === "left" || token === "top") return 0;
+        if (token === "right" || token === "bottom") return free;
+        const calc = /^calc\(([-+.\d]+)%\s*([+-])\s*([-+.\d]+)px\)$/.exec(token);
+        if (calc) return free * Number(calc[1]) / 100 + (calc[2] === "-" ? -1 : 1) * Number(calc[3]) * axisScale;
+        return token.endsWith("%") ? free * px(token) / 100 : px(token) * axisScale;
+      };
+      // Intersect with the content box: cover/none may paint outside its clip.
+      const xOffset = offset(x, width - paintedWidth, scaleX), yOffset = offset(y, height - paintedHeight, scaleY);
+      left += Math.max(0, xOffset); top += Math.max(0, yOffset);
+      width = Math.min(width, xOffset + paintedWidth) - Math.max(0, xOffset);
+      height = Math.min(height, yOffset + paintedHeight) - Math.max(0, yOffset);
+    }
+  }
+  if (localName(target) === "image" && svgIntrinsicSizes.has(target)) {
+    const aspect = target.getAttribute("preserveAspectRatio") ?? "xMidYMid meet";
+    if (!aspect.includes("none") && !aspect.includes("slice")) {
+      const scale = Math.min(width / image.naturalWidth, height / image.naturalHeight);
+      const paintedWidth = image.naturalWidth * scale, paintedHeight = image.naturalHeight * scale;
+      left += (width - paintedWidth) * (aspect.includes("xMin") ? 0 : aspect.includes("xMax") ? 1 : 0.5);
+      top += (height - paintedHeight) * (aspect.includes("YMin") ? 0 : aspect.includes("YMax") ? 1 : 0.5);
+      width = paintedWidth; height = paintedHeight;
+    }
+  }
+  return width > 0 && height > 0 && point.clientX >= left && point.clientX < left + width &&
+    point.clientY >= top && point.clientY < top + height;
+}
+
+/** Same predicate for touch-menu routing and click activation, including linked images. */
+export function isImageBlankAtPoint(target: Element | null, point: ImageHitPoint): boolean {
+  if (!target) return false;
+  const candidate = localName(target) === "svg" ? target.querySelector(":scope > image") : target.closest("img, image");
+  if (!candidate) return false;
+  const image = imageRequestFromTarget(candidate, "");
+  return Boolean(image && !imageContainsPoint(candidate, image, point));
+}
+
+
+/** SVG <image> has no naturalWidth: read metadata using its already-loaded resource URL.
+ * Only current-document simple wrappers are probed. Keep two numbers, not another image/URL cache.
+ */
+export function prepareImageHitAreas(doc: Document): () => void {
+  const pending = new Set<HTMLImageElement>();
+  for (const target of Array.from(doc.querySelectorAll("svg > image"))) {
+    const request = imageRequestFromSvgImage(target, "");
+    if (!request) continue;
+    const probe = new doc.defaultView!.Image();
+    pending.add(probe);
+    const release = () => {
+      probe.onload = probe.onerror = null;
+      probe.removeAttribute("src");
+      pending.delete(probe);
+    };
+    const loaded = () => {
+      if (probe.naturalWidth > 0 && probe.naturalHeight > 0)
+        svgIntrinsicSizes.set(target, { width: probe.naturalWidth, height: probe.naturalHeight });
+      release();
+    };
+    probe.onload = loaded;
+    probe.onerror = release;
+    probe.src = request.src;
+    if (probe.complete && probe.naturalWidth > 0) loaded();
+  }
+  return () => {
+    for (const probe of pending) { probe.onload = probe.onerror = null; probe.removeAttribute("src"); }
+    pending.clear();
+  };
 }

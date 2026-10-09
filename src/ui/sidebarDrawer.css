@@ -253,24 +253,41 @@
 /* 抽屉内容容器 */
 .sidebar-body {
   flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: 8px 0;
+  min-height: 0;
+  overflow: hidden;
+  touch-action: pan-y pinch-zoom;
 }
 
-.sidebar-body::-webkit-scrollbar {
+.sidebar-pane::-webkit-scrollbar {
   width: 5px;
 }
 
-.sidebar-body::-webkit-scrollbar-thumb {
+.sidebar-pane::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--fg) 18%, transparent);
   border-radius: 3px;
+}
+
+.sidebar-track {
+  display: flex;
+  height: 100%;
+  min-height: 0;
 }
 
 .sidebar-pane {
   display: flex;
   flex-direction: column;
+  flex: 0 0 100%;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  box-sizing: border-box;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  padding: 8px 0;
 }
+
+.sidebar-pane > * { flex-shrink: 0; }
 
 .sidebar-empty {
   display: flex;
