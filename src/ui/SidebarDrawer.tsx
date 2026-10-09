@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { SIDEBAR_TABS, createSidebarNavigationMemory, installSidebarSwipe, type SidebarNavigationMemory, type SidebarSwipeMotion } from "./sidebarSwipe";
 import { MENU_CLOSE_MS } from "./menuMotion";
 import type { TocNode } from "../core/types";
 import { countTocNodes, findActiveTocNode } from "./TocPanel";
@@ -14,6 +15,7 @@ export type SidebarSide = "left" | "right";
 
 export interface SidebarDrawerProps {
   open: boolean;
+  navigationMemory?: SidebarNavigationMemory;
   side?: SidebarSide;
   activeTab: SidebarTab;
   onTabChange: (tab: SidebarTab) => void;
@@ -112,6 +114,7 @@ function TocBranch({
 
 export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
   open,
+  navigationMemory,
   side = "left",
   activeTab,
   onTabChange,
@@ -133,23 +136,74 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
   const activeTocNode = findActiveTocNode(toc, activeHref);
   const activeItemRef = useRef<HTMLDivElement>(null);
   const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
-  const [tocFilter, setTocFilter] = useState("");
+  const [tocFilter, setTocFilter] = useState(navigationMemory?.tocFilter ?? "");
   const [isClosing, setIsClosing] = useState(false);
+  const localMemory = useRef(createSidebarNavigationMemory());
+  const memory = navigationMemory ?? localMemory.current;
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const trackRef = useRef<HTMLDivElement>(null);
+  const paneRefs = useRef<Partial<Record<SidebarTab, HTMLDivElement>>>({});
+  const motionRef = useRef<SidebarSwipeMotion>();
+  const onTabChangeRef = useRef(onTabChange);
+  onTabChangeRef.current = onTabChange;
+  const closeTimer = useRef<ReturnType<typeof setTimeout>>();
+  const visible = open || isClosing;
 
   const requestClose = React.useCallback(() => {
+    clearTimeout(closeTimer.current);
     setIsClosing(true);
-    setTimeout(() => {
+    closeTimer.current = setTimeout(() => {
       setIsClosing(false);
       onClose();
     }, MENU_CLOSE_MS);
   }, [onClose]);
 
-  // 滚动活动目录到视图中央
+  useEffect(() => () => clearTimeout(closeTimer.current), []);
   useEffect(() => {
-    if (open && activeTab === "toc" && activeItemRef.current && !tocFilter) {
-      activeItemRef.current.scrollIntoView({ block: "center", behavior: "auto" });
+    if (!open) { clearTimeout(closeTimer.current); setIsClosing(false); }
+  }, [open]);
+
+  useLayoutEffect(() => {
+    if (!visible) return;
+    for (const tab of SIDEBAR_TABS) {
+      const pane = paneRefs.current[tab];
+      if (!pane) continue;
+      if (memory.scrollTop[tab] !== undefined) pane.scrollTop = memory.scrollTop[tab]!;
+      else if (tab === "toc" && activeItemRef.current) {
+        const item = activeItemRef.current;
+        const rect = pane.getBoundingClientRect();
+        const scaleY = rect.height / pane.clientHeight;
+        pane.scrollTop = (item.getBoundingClientRect().top - rect.top) / scaleY + pane.scrollTop
+          - (pane.clientHeight - item.clientHeight) / 2;
+      }
+      memory.scrollTop[tab] = pane.scrollTop;
     }
-  }, [open, activeTab, activeTocNode, tocFilter]);
+    const binding = installSidebarSwipe(viewportRef.current!, trackRef.current!, SIDEBAR_TABS.indexOf(activeTab),
+      index => onTabChangeRef.current(SIDEBAR_TABS[index]));
+    motionRef.current = binding.motion;
+    return () => { binding.dispose(); motionRef.current = undefined; };
+  }, [visible, memory]);
+
+  useLayoutEffect(() => {
+    motionRef.current?.select(SIDEBAR_TABS.indexOf(activeTab), false, false);
+  }, [activeTab]);
+
+  const selectTab = (tab: SidebarTab) => {
+    clearTimeout(closeTimer.current);
+    setIsClosing(false);
+    if (motionRef.current) motionRef.current.select(SIDEBAR_TABS.indexOf(tab), true);
+    else onTabChange(tab);
+  };
+
+  const paneProps = (tab: SidebarTab) => ({
+    ref: (pane: HTMLDivElement | null) => { if (pane) paneRefs.current[tab] = pane; },
+    role: "tabpanel",
+    "aria-label": tab === "toc" ? "目录" : tab === "bookmarks" ? "书签" : "笔记",
+    "aria-hidden": activeTab !== tab,
+    // React 18 does not type inert; the native attribute also removes hidden controls from tab order.
+    ...(activeTab !== tab ? { inert: "" } : {}),
+    onScroll: (event: React.UIEvent<HTMLDivElement>) => { memory.scrollTop[tab] = event.currentTarget.scrollTop; },
+  });
 
   if (!open && mode === "overlay" && !isClosing) {
     return null;
@@ -183,7 +237,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
               role="tab"
               aria-selected={activeTab === "toc"}
               className={`sidebar-tab${activeTab === "toc" ? " active" : ""}`}
-              onClick={() => onTabChange("toc")}
+              onClick={() => selectTab("toc")}
             >
               目录
             </button>
@@ -192,7 +246,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
               role="tab"
               aria-selected={activeTab === "bookmarks"}
               className={`sidebar-tab${activeTab === "bookmarks" ? " active" : ""}`}
-              onClick={() => onTabChange("bookmarks")}
+              onClick={() => selectTab("bookmarks")}
             >
               书签{bookmarks.length > 0 ? ` (${bookmarks.length})` : ""}
             </button>
@@ -201,7 +255,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
               role="tab"
               aria-selected={activeTab === "notes"}
               className={`sidebar-tab${activeTab === "notes" ? " active" : ""}`}
-              onClick={() => onTabChange("notes")}
+              onClick={() => selectTab("notes")}
             >
               笔记{notes.length > 0 ? ` (${notes.length})` : ""}
             </button>
@@ -232,10 +286,10 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
         </div>
 
         {/* 抽屉内容区 */}
-        <div className="sidebar-body">
+        <div className="sidebar-body" ref={viewportRef}>
+          <div className="sidebar-track" ref={trackRef}>
           {/* TAB 1: 目录 */}
-          {activeTab === "toc" && (
-            <div className="sidebar-pane sidebar-toc-pane">
+            <div className="sidebar-pane sidebar-toc-pane" {...paneProps("toc")}>
               {tocCount > 8 && (
                 <div className="sidebar-toc-filter-wrap">
                   <input
@@ -243,14 +297,14 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
                     className="sidebar-toc-filter-input"
                     placeholder="过滤章节..."
                     value={tocFilter}
-                    onChange={(e) => setTocFilter(e.target.value)}
+                    onChange={(e) => { memory.tocFilter = e.target.value; setTocFilter(e.target.value); }}
                     aria-label="过滤目录章节"
                   />
                   {tocFilter && (
                     <button
                       type="button"
                       className="sidebar-toc-filter-clear"
-                      onClick={() => setTocFilter("")}
+                      onClick={() => { memory.tocFilter = ""; setTocFilter(""); }}
                       title="清除过滤"
                       aria-label="清除过滤"
                     >
@@ -276,11 +330,10 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
                 />
               )}
             </div>
-          )}
+
 
           {/* TAB 2: 书签 */}
-          {activeTab === "bookmarks" && (
-            <div className="sidebar-pane sidebar-bookmarks-pane">
+            <div className="sidebar-pane sidebar-bookmarks-pane" {...paneProps("bookmarks")}>
               {bookmarks.length === 0 ? (
                 <div className="sidebar-empty">
                   <span>暂无书签</span>
@@ -329,11 +382,10 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
                 </div>
               )}
             </div>
-          )}
+
 
           {/* TAB 3: 笔记 */}
-          {activeTab === "notes" && (
-            <div className="sidebar-pane sidebar-notes-pane">
+            <div className="sidebar-pane sidebar-notes-pane" {...paneProps("notes")}>
               {sortedNotes.length === 0 ? (
                 <div className="sidebar-empty">
                   <span>暂无划线与笔记</span>
@@ -406,7 +458,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
                 </div>
               )}
             </div>
-          )}
+          </div>
         </div>
       </aside>
     </>

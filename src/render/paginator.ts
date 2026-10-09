@@ -86,7 +86,7 @@ import {
   spreadStart,
   visibleLeafRange,
 } from "./pagedSpread";
-import { imageRequestFromTarget } from "./imageActivation";
+import { imageRequestFromTarget, isImageBlankAtPoint, prepareImageHitAreas } from "./imageActivation";
 import { columnAtPoint, containingFragmentAtPoint, type FragmentSpace } from "./fragmentGeometry";
 import {
   foldSpreadIntoPages,
@@ -2630,6 +2630,7 @@ export class ChapterPaginator {
   private nativeSnapLiveFrame: number | null = null;
   private readonly nativeSnapScrollEndHandler = (): void => this.commitNativeSnap();
   /** 普通轻点检测清理函数；用于手机工具栏显隐。 */
+  private imageHitCleanup: (() => void) | null = null;
   private plainTapCleanup: (() => void) | null = null;
   /** 最近一次 scroll 事件的 rAF 合并句柄。 */
   private scrollFrame: number | undefined;
@@ -3661,6 +3662,8 @@ export class ChapterPaginator {
       return;
     }
     this.contentDoc = doc;
+    this.imageHitCleanup?.();
+    this.imageHitCleanup = prepareImageHitAreas(doc);
     const viewer = doc.getElementById(VIEWER_ID);
     if (!viewer) {
       this.emit({ status: "error", message: "章节缺少阅读器容器" });
@@ -3693,6 +3696,7 @@ export class ChapterPaginator {
       this.plainTapCleanup?.();
       this.plainTapCleanup = installPlainTap(doc, {
         onTap: () => this.onPlainTap?.(),
+        isBlankImageTap: isImageBlankAtPoint,
         shouldIgnore: () => this.shouldIgnorePlainTap?.() ?? false,
       });
     }
@@ -8866,6 +8870,8 @@ export class ChapterPaginator {
     if (!a) return;
     const href = (a.getAttribute("href") ?? "").trim();
     if (!href) return;
+    // Linked full-page letterboxing is plain paper, not an image/link activation.
+    if ((e as MouseEvent).detail !== 0 && isImageBlankAtPoint(target, e as MouseEvent)) { e.preventDefault(); return; }
     // 一律拦截：书内链接走阅读器，外部链接不跳转（防 iframe 被导航走）
     e.preventDefault();
     e.stopPropagation();
@@ -8899,7 +8905,7 @@ export class ChapterPaginator {
     }
     // 带链接的普通正文图片：用实际点击目标打开图片浮层；“打开链接”沿用
     // 原书链接路由。不要用 a.querySelector('img')，否则图下文字链接会被误判。
-    if (this.activateImage(target)) return;
+    if (this.activateImage(target, e as MouseEvent)) return;
     if (isFragmentOnly(href)) {
       // 脚注已在上方提前返回；这里只处理普通同章锚点。先通过原生 hash
       // 激活 :target，再由分页器将目标元素定位到对应分页列。
@@ -8991,7 +8997,7 @@ export class ChapterPaginator {
     const a = target?.closest<HTMLAnchorElement>("a");
     if (a && isFootnoteLink(a)) return; // 标记点击由 linkHandler 处理并 stopPropagation
     // 带普通链接的图片已由 linkHandler 消费；这里只处理无链接的正文图片。
-    if (!a && this.activateImage(target)) return;
+    if (!a && this.activateImage(target, e as MouseEvent)) return;
     if (this.prefersTouchPaging()) {
       // 触摸：未固定的预览点外面即关；已固定只由关闭按钮或翻页关闭。
       if (this.footnoteOpen() && !this.footnotePinned) this.resetFootnote({ notify: true });
@@ -9005,12 +9011,12 @@ export class ChapterPaginator {
    * 正文图片激活：脚注语义优先（调用前已返回），带普通链接的图片也可放大。
    * 识别交给 AI-A 的 imageActivation；这里只做活动章节路由与链接原值转发。
    */
-  private activateImage(target: Element | null): boolean {
+  private activateImage(target: Element | null, point: MouseEvent): boolean {
     if (!this.contentDoc || !this.onImageActivation || this.disposed || !target) return false;
     // 点击点可能落在包裹图片的链接/容器上；识别仍交给 A 的 img/image 判定。
     const candidate = this.imageCandidate(target);
     if (!candidate) return false;
-    const request = imageRequestFromTarget(candidate, this._currentPath);
+    const request = imageRequestFromTarget(candidate, this._currentPath, point.detail === 0 ? undefined : point);
     if (!request) return false;
     const linkHref = request.linkHref ?? "";
     this.onImageActivation({
@@ -9218,6 +9224,8 @@ export class ChapterPaginator {
     this.pagedSwipeCleanup = null;
     this.plainTapCleanup?.();
     this.plainTapCleanup = null;
+    this.imageHitCleanup?.();
+    this.imageHitCleanup = null;
     this.restoreSpreadReadingAreaStyles();
     this.clearNoteHighlights();
     this.clearSearchHighlightForDocument();

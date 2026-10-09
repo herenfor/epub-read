@@ -159,3 +159,82 @@ describe("imageRequestFromTarget：跨 iframe 文档节点", () => {
     expect(request?.naturalHeight).toBe(30);
   });
 });
+
+describe("displayed image hit area", () => {
+  function fitted(position = "50% 50%", fit = "contain") {
+    const d = doc(`<a href="other.xhtml"><img src="image.png"/></a>`);
+    const img = loaded(pick(d, "img"), 600, 1200) as HTMLElement;
+    img.getBoundingClientRect = () => ({ left: 10, top: 20, width: 360, height: 600 }) as DOMRect;
+    Object.defineProperty(img, "offsetWidth", { value: 360 });
+    Object.defineProperty(img, "offsetHeight", { value: 600 });
+    d.defaultView!.getComputedStyle = () => ({ objectFit: fit, objectPosition: position,
+      paddingLeft: "0", paddingRight: "0", paddingTop: "0", paddingBottom: "0",
+      borderLeftWidth: "0", borderRightWidth: "0", borderTopWidth: "0", borderBottomWidth: "0" }) as CSSStyleDeclaration;
+    return { img, d };
+  }
+  it("portrait full-page image ignores both side margins while retaining image and link activation", () => {
+    const { img } = fitted();
+    expect(imageRequestFromTarget(img, "ch.xhtml", { clientX: 20, clientY: 300 })).toBeNull();
+    expect(imageRequestFromTarget(img, "ch.xhtml", { clientX: 360, clientY: 300 })).toBeNull();
+    expect(imageRequestFromTarget(img, "ch.xhtml", { clientX: 180, clientY: 300 })?.linkHref).toBe("other.xhtml");
+  });
+  it("object-position changes the painted area, cover keeps the full clipped content clickable", () => {
+    const { img } = fitted("left top");
+    expect(imageRequestFromTarget(img, "ch.xhtml", { clientX: 20, clientY: 300 })).not.toBeNull();
+    expect(imageRequestFromTarget(img, "ch.xhtml", { clientX: 330, clientY: 300 })).toBeNull();
+    const { img: cover } = fitted("50% 50%", "cover");
+    expect(imageRequestFromTarget(cover, "ch.xhtml", { clientX: 20, clientY: 300 })).not.toBeNull();
+  });
+  it("a simple SVG wrapper ignores space outside its transformed image bounds", async () => {
+    const { isImageBlankAtPoint } = await import("./imageActivation");
+    const d = doc('<svg viewBox="0 0 600 1200"><image href="page.png" width="600" height="1200"/></svg>');
+    const svg = pick(d, "svg"), image = pick(d, "image");
+    image.getBoundingClientRect = () => ({ left: 40, top: 20, width: 300, height: 600 }) as DOMRect;
+    expect(isImageBlankAtPoint(svg, { clientX: 20, clientY: 300 })).toBe(true);
+    expect(isImageBlankAtPoint(svg, { clientX: 180, clientY: 300 })).toBe(false);
+  });
+  it("SVG's own meet letterboxing uses actual intrinsic size; closing cancels pending metadata reads", async () => {
+    const { prepareImageHitAreas, isImageBlankAtPoint } = await import("./imageActivation");
+    const d = doc('<svg viewBox="0 0 360 600"><image href="page.png" width="360" height="600"/></svg>');
+    const image = pick(d, "image"), svg = pick(d, "svg");
+    image.getBoundingClientRect = () => ({ left: 0, top: 0, width: 360, height: 600 }) as DOMRect;
+    const probes: any[] = [];
+    class Probe {
+      naturalWidth = 600; naturalHeight = 1200; complete = false;
+      onload: (() => void) | null = null; onerror: (() => void) | null = null; src = "";
+      constructor() { probes.push(this); }
+      removeAttribute() { this.src = ""; }
+    }
+    Object.defineProperty(d, "defaultView", { value: { Image: Probe } });
+    const cleanup = prepareImageHitAreas(d);
+    probes[0].onload();
+    expect(imageRequestFromTarget(image, "ch.xhtml")?.naturalHeight).toBe(1200);
+    expect(isImageBlankAtPoint(svg, { clientX: 10, clientY: 300 })).toBe(true);
+    expect(isImageBlankAtPoint(svg, { clientX: 180, clientY: 300 })).toBe(false);
+    expect(probes[0].src).toBe("");
+    cleanup();
+    const cancel = prepareImageHitAreas(d);
+    cancel();
+    expect(probes[1].onload).toBeNull();
+    expect(probes[1].src).toBe("");
+  });
+  it("linked image blank touch toggles chrome once, painted image and drag keep their existing priorities", async () => {
+    const { isImageBlankAtPoint } = await import("./imageActivation");
+    const { installPlainTap } = await import("./plainTap");
+    const { img, d } = fitted();
+    let taps = 0;
+    const cleanup = installPlainTap(d, { onTap: () => taps++, isBlankImageTap: isImageBlankAtPoint });
+    const touch = (type: string, clientX: number) => {
+      const event = new d.defaultView!.Event(type, { bubbles: true });
+      Object.defineProperty(event, "touches", { value: type === "touchend" ? [] : [{ clientX, clientY: 300 }] });
+      Object.defineProperty(event, "changedTouches", { value: [{ clientX, clientY: 300 }] });
+      img.dispatchEvent(event);
+    };
+    touch("touchstart", 20); touch("touchend", 20);
+    touch("touchstart", 180); touch("touchend", 180);
+    touch("touchstart", 38); touch("touchend", 42); // Cross into the image within tap tolerance.
+    touch("touchstart", 20); touch("touchmove", 80); touch("touchend", 80);
+    expect(taps).toBe(1);
+    cleanup();
+  });
+});
