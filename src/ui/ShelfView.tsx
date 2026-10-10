@@ -130,6 +130,8 @@ export interface ShelfViewProps {
   onBatteryIndicatorChange?(enabled: boolean): void;
   hideReaderSystemStatusBar?: boolean;
   onHideReaderSystemStatusBarChange?(hidden: boolean): void;
+  keepScreenOnWhileReading?: boolean;
+  onKeepScreenOnWhileReadingChange?(enabled: boolean): void;
   onOpen(id: string): void;
   onImport(): void;
   /** Directory import entry; absent hides it. */
@@ -2407,6 +2409,8 @@ interface ShelfSettingsDrawerProps extends ShelfSubmenuBackProps {
   onBatteryIndicatorChange?(enabled: boolean): void;
   hideReaderSystemStatusBar?: boolean;
   onHideReaderSystemStatusBarChange?(hidden: boolean): void;
+  keepScreenOnWhileReading?: boolean;
+  onKeepScreenOnWhileReadingChange?(enabled: boolean): void;
   filters: ShelfFilters;
   facets: ShelfFilterFacets;
   matchingCount: number;
@@ -2872,6 +2876,21 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
                 title="阅读时隐藏系统状态栏"
                 options={[{ value: "hide", label: "隐藏" }, { value: "show", label: "显示" }]}
                 onChange={(value) => props.onHideReaderSystemStatusBarChange!(value === "hide")}
+              />
+            </div>
+          )}
+
+          {props.keepScreenOnWhileReading !== undefined && props.onKeepScreenOnWhileReadingChange && (
+            <div className="shelf-drawer-setting">
+              <span>阅读时屏幕常亮</span>
+              <ShelfSelect
+                registerSubmenuBackHandler={props.registerSubmenuBackHandler}
+                onSubmenuBackActiveChange={props.onSubmenuBackActiveChange}
+                value={props.keepScreenOnWhileReading ? "on" : "off"}
+                busy={props.busy}
+                title="阅读时保持屏幕常亮，回到书架或切到后台即恢复系统熄屏"
+                options={[{ value: "off", label: "关闭" }, { value: "on", label: "开启" }]}
+                onChange={(value) => props.onKeepScreenOnWhileReadingChange!(value === "on")}
               />
             </div>
           )}
@@ -4831,6 +4850,8 @@ export function ShelfView(props: ShelfViewProps) {
         onThemeChange={props.onThemeChange}
         hideReaderSystemStatusBar={props.hideReaderSystemStatusBar}
         onHideReaderSystemStatusBarChange={props.onHideReaderSystemStatusBarChange}
+        keepScreenOnWhileReading={props.keepScreenOnWhileReading}
+        onKeepScreenOnWhileReadingChange={props.onKeepScreenOnWhileReadingChange}
         batteryIndicatorEnabled={props.batteryIndicatorEnabled}
         onBatteryIndicatorChange={props.onBatteryIndicatorChange}
         filters={filters}

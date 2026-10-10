@@ -16,12 +16,15 @@ export interface RuntimeCapabilities {
   supportsLanTransfer: boolean;
   /** Only an established Android native session can control system status bars. */
   supportsReaderSystemStatusBar: boolean;
+  /** Same native-session gate: reader-scoped keep-screen-on is Android-only. */
+  supportsReaderKeepScreenOn: boolean;
 }
 
 export function getRuntimeCapabilities(): RuntimeCapabilities {
   const session = getAppBuildSession();
   const platform = session?.platform ?? APP_PLATFORM;
   const shell = session?.shell ?? APP_SHELL;
+  const androidNativeSession = session?.source === "desktop" && platform === "android";
   return {
     platform,
     shell,
@@ -30,6 +33,7 @@ export function getRuntimeCapabilities(): RuntimeCapabilities {
     supportsCacheStorage: platform === "windows" || platform === "android",
     supportsCustomCacheDirectory: platform === "windows",
     supportsLanTransfer: platform === "windows" || platform === "android",
-    supportsReaderSystemStatusBar: session?.source === "desktop" && platform === "android",
+    supportsReaderSystemStatusBar: androidNativeSession,
+    supportsReaderKeepScreenOn: androidNativeSession,
   };
 }
