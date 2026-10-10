@@ -7,6 +7,12 @@ import {
   writeHideReaderSystemStatusBar,
   setReaderSystemStatusBarHidden,
 } from "./platform/androidReaderSystemStatusBar";
+import {
+  createReaderKeepScreenOnCoordinator,
+  readReaderKeepScreenOn,
+  shouldKeepReaderScreenOn,
+  writeReaderKeepScreenOn,
+} from "./platform/androidReaderKeepScreenOn";
 import { resolveArchiveHref, archiveHref } from "./core/archiveReferences";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { loadBook, loadBookFromArchive, spineIndexForPath, spineIndexForEntryKey, spineItemPath, spineItemHref, DrmError, disposeBook, nextLinearIndex } from "./core/book";
@@ -909,6 +915,16 @@ export default function App() {
       setHideReaderSystemStatusBar(hidden);
     } catch (error) {
       setShelfNotice({ kind: "error", text: `系统状态栏设置保存失败：${String(error)}` });
+    }
+  }, []);
+  const [keepScreenOnWhileReading, setKeepScreenOnWhileReading] = useState(readReaderKeepScreenOn);
+  const [readerScreenOn] = useState(() => createReaderKeepScreenOnCoordinator());
+  const changeKeepScreenOnWhileReading = useCallback((enabled: boolean) => {
+    try {
+      writeReaderKeepScreenOn(enabled);
+      setKeepScreenOnWhileReading(enabled);
+    } catch (error) {
+      setShelfNotice({ kind: "error", text: `屏幕常亮设置保存失败：${String(error)}` });
     }
   }, []);
 
@@ -3097,6 +3113,32 @@ export default function App() {
     });
     // The app root owns the intent. Reader/menu cleanup must never submit a stale false.
   }, [view, hideReaderSystemStatusBar, runtime.supportsReaderSystemStatusBar, readerSystemBars, showReaderNotice]);
+
+  useEffect(() => {
+    if (!runtime.supportsReaderKeepScreenOn) return;
+    // Re-subscribed whenever route/preference change, so the listener never reads stale state.
+    const submit = (force: boolean) => {
+      void readerScreenOn.requestEnabled(shouldKeepReaderScreenOn({
+        readerActive: view === "reader",
+        keepWhileReading: keepScreenOnWhileReading,
+        visible: document.visibilityState !== "hidden",
+      }), force).catch((error) => {
+        const message = `屏幕常亮设置失败：${String(error)}`;
+        if (view === "reader") showReaderNotice(message, "warn");
+        else setShelfNotice({ kind: "warn", text: message });
+      });
+    };
+    submit(false);
+    // Native already clears the flag in the background; returning resubmits the current intent.
+    const onVisibilityChange = () => submit(document.visibilityState !== "hidden");
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, [view, keepScreenOnWhileReading, runtime.supportsReaderKeepScreenOn, readerScreenOn, showReaderNotice]);
+  useEffect(() => {
+    if (!runtime.supportsReaderKeepScreenOn) return;
+    // Root teardown goes through the same serializer; no second invoke chain.
+    return () => { void readerScreenOn.requestEnabled(false).catch(() => {}); };
+  }, [runtime.supportsReaderKeepScreenOn, readerScreenOn]);
 
   /** 语义锚点失败：解除显示门，但守住进度，直到读者真实移动后再写。 */
   const handleReaderNavigationUnresolved = useCallback((reported: boolean, ticket?: RestoreTicket | null): void => {
@@ -6444,6 +6486,8 @@ export default function App() {
               onThemeChange={changeTheme}
               hideReaderSystemStatusBar={runtime.supportsReaderSystemStatusBar ? hideReaderSystemStatusBar : undefined}
               onHideReaderSystemStatusBarChange={changeHideReaderSystemStatusBar}
+              keepScreenOnWhileReading={runtime.supportsReaderKeepScreenOn ? keepScreenOnWhileReading : undefined}
+              onKeepScreenOnWhileReadingChange={changeKeepScreenOnWhileReading}
               batteryIndicatorEnabled={runtime.platform === "android" ? batteryIndicatorEnabled : undefined}
               onBatteryIndicatorChange={runtime.platform === "android" ? changeBatteryIndicatorEnabled : undefined}
               onOpen={handleShelfOpen}
