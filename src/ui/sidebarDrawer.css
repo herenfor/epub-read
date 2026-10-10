@@ -394,6 +394,53 @@
   opacity: 0.88;
 }
 
+/* 多级目录折叠：三角列固定宽度，叶子用同宽占位保持文字对齐。 */
+.sidebar-toc-toggle,
+.sidebar-toc-toggle-spacer {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  margin-right: 2px;
+}
+
+.sidebar-toc-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.sidebar-toc-toggle svg {
+  transition: transform var(--ui-control-quick) var(--ui-ease);
+}
+
+.sidebar-toc-toggle.is-open svg {
+  transform: rotate(90deg);
+}
+
+.sidebar-toc-toggle:hover {
+  background: color-mix(in srgb, var(--btn-tint-hover) 80%, transparent);
+  color: var(--fg);
+}
+
+.sidebar-toc-item.has-toggle-column {
+  justify-content: flex-start;
+}
+
+.sidebar-toc-item.has-toggle-column .sidebar-disabled-icon {
+  margin-left: auto;
+}
+
+.sidebar-toc-item:focus-visible {
+  outline: 2px solid var(--ui-navigation-active);
+  outline-offset: -2px;
+}
+
 .sidebar-disabled-icon {
   color: var(--ui-warning);
   flex-shrink: 0;

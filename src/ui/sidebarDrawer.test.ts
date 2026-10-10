@@ -85,6 +85,45 @@ describe("Zen UI SidebarDrawer 组件与交互契约（Packet B）", () => {
     expect(html).toContain("active");
   });
 
+  it("大目录默认只展开当前章所在分支，其余分支收起", () => {
+    const volumes: TocNode[] = Array.from({ length: 4 }, (_, v) => ({
+      label: `卷${v}`,
+      href: `v${v}.xhtml`,
+      children: Array.from({ length: 10 }, (_, c) => ({ label: `卷${v}第${c}章`, href: `v${v}.xhtml#c${c}`, children: [] })),
+    }));
+    const html = renderToStaticMarkup(
+      createElement(SidebarDrawer, { ...baseProps, toc: volumes, activeHref: "v2.xhtml#c3" })
+    );
+    expect(html).toContain("卷2第3章");
+    expect(html).not.toContain("卷0第0章");
+    expect(html).not.toContain("卷3第9章");
+    expect(html).toContain("sidebar-toc-toggle is-open");
+    expect(html.match(/aria-expanded="false"/g)).toHaveLength(3);
+
+    const filtered = renderToStaticMarkup(createElement(SidebarDrawer, {
+      ...baseProps,
+      toc: volumes,
+      activeHref: "v2.xhtml#c3",
+      navigationMemory: { scrollTop: {}, tocFilter: "第9章" },
+    }));
+    expect(filtered).toContain("卷0第9章");
+    expect(filtered).toContain("卷3第9章");
+    expect(filtered).not.toContain("卷2第3章");
+  });
+
+  it("小目录保持全部展开；没有子级的平铺目录不出现折叠列", () => {
+    const nested = renderToStaticMarkup(createElement(SidebarDrawer, { ...baseProps, activeHref: "chapter2.xhtml" }));
+    expect(nested).toContain("1.2 水手");
+    expect(nested).toContain('aria-expanded="true"');
+    const flat = renderToStaticMarkup(createElement(SidebarDrawer, {
+      ...baseProps,
+      toc: [{ label: "甲", href: "a.xhtml", children: [] }, { label: "乙", href: "b.xhtml", children: [] }],
+      activeHref: "a.xhtml",
+    }));
+    expect(flat).not.toContain("sidebar-toc-toggle");
+    expect(flat).not.toContain("has-toggle-column");
+  });
+
   it("书签 Tab 正确渲染书签列表与所属章节", () => {
     const html = renderToStaticMarkup(
       createElement(SidebarDrawer, { ...baseProps, activeTab: "bookmarks" })
