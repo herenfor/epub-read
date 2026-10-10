@@ -1466,7 +1466,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     const path = spineItemPath(book, spineIndex);
     if (!path) {
       turnIntentRef.current.reset();
-      props.onPageState({ status: "error", message: "章节资源缺失" });
+      props.onPageState({ status: "error", message: uiText("readerMisc.chapter.missing") });
       return;
     }
     void (async () => {
@@ -1978,7 +1978,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         this.setPage(targetPage);
       },
       diagnose() {
-        return paginatorRef.current?.diagnose() ?? "（阅读器未初始化）";
+        return paginatorRef.current?.diagnose() ?? uiText("log.diagnostics.unavailable");
       },
       getReadingAnchor() {
         return paginatorRef.current?.getReadingAnchor() ?? null;

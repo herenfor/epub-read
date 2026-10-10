@@ -1,4 +1,5 @@
 import { useContext, useSyncExternalStore } from "react";
+import { useUiText } from "./localization/UiLanguageProvider";
 import { EdgeTurnFeedbackContext, useEdgeTurnFeedbackOwner, type EdgeTurnDirection } from "./edgeTurnFeedback";
 
 interface Props {
@@ -14,7 +15,8 @@ export function EdgeTurnZone({ direction, onTurn, onPrepare }: Props) {
   const feedback = shared ?? own;
   const holding = useSyncExternalStore(feedback.subscribe, () => feedback.holding(direction), () => false);
 
-  const label = direction === -1 ? "上一页" : "下一页";
+  const { t } = useUiText();
+  const label = t(direction === -1 ? "readerMisc.edge.prev" : "readerMisc.edge.next");
   return <div
     className={`edge-turn-zone ${direction === -1 ? "edge-turn-prev" : "edge-turn-next"}${holding ? " is-holding" : ""}`}
     title={label} aria-label={label}
