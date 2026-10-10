@@ -5501,6 +5501,11 @@ export class ChapterPaginator {
         // leaving reader-top auto centering in charge after this transaction.
         // This must stay after C-31 and before C-04; authored/unknown margins,
         // floats, full-page elements and intrinsic-size paths never enter it.
+        // Typed OM keeps UA `auto` as a keyword. Resolved px from
+        // getComputedStyle(hr) is centering space, not an inset to deduct.
+        const uaMargins = !hadFitContent && authoredHorizontalMargins.get(el) === false
+          ? readComputedHorizontalMarginSpecifiedValues(el)
+          : undefined;
         const uaSymmetricMaxWidth =
           !hadFitContent
             ? getReaderTopUaSymmetricInsetMaxWidth({
@@ -5517,8 +5522,8 @@ export class ChapterPaginator {
                 borderBoxWidth: width,
                 cssWidth: Number.parseFloat(cs.width),
                 boxSizing: cs.boxSizing,
-                marginLeft: left,
-                marginRight: right,
+                marginLeft: uaMargins?.left ?? left,
+                marginRight: uaMargins?.right ?? right,
               })
             : null;
         if (uaSymmetricMaxWidth !== null) {

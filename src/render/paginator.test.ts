@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { parseHTML } from "linkedom";
 import {
   ChapterPaginator,
   getBorderBoxWidth,
@@ -3039,5 +3040,60 @@ describe("native snap paging handoff", () => {
     expect(p.writes).toEqual([]);
     expect(p.styles.get("scroll-snap-type")).toBe("x mandatory");
     expect(p.emitted).toEqual([]);
+  });
+});
+
+// Exercise the actual compensation transaction: pure px-only inputs cannot
+// distinguish an hr's resolved auto margins from blockquote's UA length inset.
+describe("applyBookMargins UA margin semantics", () => {
+  it.each([
+    { tag: "hr", cssWidth: 640, border: 1, margin: 170.3125, specified: "auto", inline: "", expected: "" },
+    { tag: "blockquote", cssWidth: 640, border: 0, margin: 40, specified: "40px", inline: "", expected: "560px" },
+    { tag: "hr", cssWidth: 240, border: 1, margin: 16, specified: "16px", inline: "width:240px;margin-left:16px;margin-right:16px", expected: "" },
+  ])("$tag keeps $specified margins distinct from resolved centering space", (input) => {
+    const { document } = parseHTML(`<html><body><div id="viewer"><${input.tag} class="reader-top" style="${input.inline}"></${input.tag}></div></body></html>`);
+    const viewer = document.getElementById("viewer")!;
+    const element = viewer.firstElementChild as HTMLElement;
+    // Linkedom omits this CSSOM method; none of this fixture's inline styles is important.
+    const inlineStyle = element.style;
+    Object.defineProperty(element, "style", { value: new Proxy(inlineStyle, {
+      get(target, property) {
+        if (property === "getPropertyPriority") return () => "";
+        const value = Reflect.get(target, property);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    }) });
+    Object.defineProperty(viewer, "clientWidth", { value: 982.625 });
+    Object.defineProperty(element, "computedStyleMap", {
+      value: () => new Map([
+        ["margin-left", { toString: () => input.specified }],
+        ["margin-right", { toString: () => input.specified }],
+      ]),
+    });
+    const boxStyle = {
+      width: `${input.cssWidth}px`, maxWidth: "640px", boxSizing: "content-box",
+      marginLeft: `${input.margin}px`, marginRight: `${input.margin}px`,
+      paddingLeft: "0px", paddingRight: "0px",
+      borderLeftWidth: `${input.border}px`, borderRightWidth: `${input.border}px`,
+      float: "none", clear: "none", display: "block", position: "static",
+      writingMode: "horizontal-tb", textAlign: "start", direction: "ltr",
+    };
+    const context = {
+      contentDoc: {
+        styleSheets: [],
+        defaultView: { getComputedStyle: (el: unknown) => el === element ? boxStyle : {
+          paddingLeft: "0px", paddingRight: "0px", writingMode: "horizontal-tb",
+        } },
+      },
+      viewer, settings: { fontSizePx: 16, readingMode: "paginated" },
+      fixedLayout: false, scrollMode: false, effectiveColumnWidth: 982.625,
+      fitContentFixes: [], marginFixes: [], floatLayoutFixes: [], step: 982.625,
+      disableReaderTopMarginRules: () => () => {},
+    };
+    (ChapterPaginator.prototype as any).applyBookMargins.call(context);
+    expect(element.style.getPropertyValue("max-width")).toBe(input.expected);
+    // The margin fix must not change the rule's border or replace authored width.
+    expect(element.style.getPropertyValue("border")).toBe("");
+    expect(element.style.getPropertyValue("width")).toBe(input.inline ? "240px" : "");
   });
 });
