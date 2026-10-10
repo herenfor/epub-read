@@ -3795,6 +3795,11 @@ select option {
   line-height: 1.5;
 }
 
+/* 保存失败原因是原始技术文本，可能是不带空格的长路径。 */
+.save-failure-reason {
+  overflow-wrap: anywhere;
+}
+
 .shelf-confirm-actions {
   margin-top: 16px;
   display: flex;
