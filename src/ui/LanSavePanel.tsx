@@ -14,6 +14,7 @@ import {
   type LanUserStep,
 } from "./lanSaveMessages";
 import "./lanSavePanel.css";
+import { uiText, useUiText } from "./localization/UiLanguageProvider";
 
 export interface LanSavePanelProps {
   open: boolean;
@@ -93,6 +94,7 @@ function Spinner() {
 }
 
 export function LanSavePanel(props: LanSavePanelProps) {
+  const { t, tn } = useUiText();
   const state = props.session.state;
   const [joinText, setJoinText] = useState("");
   const [pasteOpen, setPasteOpen] = useState(false);
@@ -191,7 +193,7 @@ export function LanSavePanel(props: LanSavePanelProps) {
       await navigator.clipboard.writeText(info);
       setCopied(true);
     } catch {
-      setLocalError("没能复制到剪贴板，请再试一次。");
+      setLocalError(uiText("lanPanel.copyFailed"));
     }
   }, [props.session.state.pairingInfo]);
 
@@ -260,7 +262,7 @@ export function LanSavePanel(props: LanSavePanelProps) {
     return (
       <SaveFileImportPreview
         preview={state.preview}
-        sourceLabel="设备互传"
+        sourceLabel={t("lanPanel.sourceLabel")}
         canceling={state.closing}
         onCancel={closePanel}
         onConfirm={(applyPreferences) => void props.session.commit(applyPreferences)}
@@ -281,7 +283,7 @@ export function LanSavePanel(props: LanSavePanelProps) {
           <p>{text}</p>
           {showSettingsLink && props.isAndroid && (
             <button type="button" className="lan-link" onClick={() => void openAndroidAppSettings().catch(() => undefined)}>
-              打开系统设置
+              {t("lanPanel.openSettings")}
             </button>
           )}
         </div>
@@ -294,19 +296,19 @@ export function LanSavePanel(props: LanSavePanelProps) {
       {renderBanner()}
       <div className="lan-intro">
         <span className="lan-intro-art">{Icon.devices}</span>
-        <p>两台设备连同一个 Wi‑Fi，一台显示二维码，另一台扫码，就能互传书籍和阅读进度。</p>
+        <p>{t("lanPanel.intro")}</p>
       </div>
       <div className={`lan-tiles${props.isAndroid ? "" : " is-single"}`}>
         <button type="button" className="lan-tile is-primary" disabled={scanBusy} onClick={handleHost}>
           <span className="lan-tile-icon">{Icon.qr}</span>
-          <strong>显示二维码</strong>
-          <small>让另一台设备来扫</small>
+          <strong>{t("lanPanel.host")}</strong>
+          <small>{t("lanPanel.host.detail")}</small>
         </button>
         {props.isAndroid && (
           <button type="button" className="lan-tile" disabled={scanBusy} onClick={() => void handleScan()}>
             <span className="lan-tile-icon">{scanBusy ? <Spinner /> : Icon.scan}</span>
-            <strong>{scanBusy ? "正在打开相机…" : "扫码连接"}</strong>
-            <small>扫另一台设备的二维码</small>
+            <strong>{scanBusy ? t("lanPanel.scanOpening") : t("lanPanel.scan")}</strong>
+            <small>{t("lanPanel.scan.detail")}</small>
           </button>
         )}
       </div>
@@ -319,37 +321,37 @@ export function LanSavePanel(props: LanSavePanelProps) {
           onClick={() => setPasteOpen((value) => !value)}
         >
           <span className="lan-row-icon">{Icon.paste}</span>
-          <span className="lan-row-text">{props.isAndroid ? "不方便扫码？粘贴连接信息" : "粘贴另一台设备的连接信息"}</span>
+          <span className="lan-row-text">{props.isAndroid ? t("lanPanel.paste.android") : t("lanPanel.paste")}</span>
           <span className="lan-row-chevron">{Icon.chevron}</span>
         </button>
         {pasteOpen && (
           <div className="lan-paste">
             <textarea
-              aria-label="连接信息"
+              aria-label={t("lanPanel.pairingInfo")}
               value={joinText}
-              placeholder="粘贴另一台设备复制的连接信息"
+              placeholder={t("lanPanel.paste.placeholder")}
               onChange={(event) => setJoinText(event.target.value)}
             />
             <button type="button" className="lan-primary" disabled={scanBusy || !joinText.trim()} onClick={handleJoin}>
-              连接
+              {t("lanPanel.connect")}
             </button>
           </div>
         )}
         <details className="lan-help">
           <summary className="lan-row">
             <span className="lan-row-icon">{Icon.help}</span>
-            <span className="lan-row-text">连不上怎么办</span>
+            <span className="lan-row-text">{t("lanPanel.help")}</span>
             <span className="lan-row-chevron">{Icon.chevron}</span>
           </summary>
           <div className="lan-help-body">
             <ul>
-              <li>确认两台设备连着同一个 Wi‑Fi，或者都连同一部手机的热点。</li>
-              <li>公司、学校、酒店的网络和路由器的“访客网络”常常禁止设备互连，可以改用手机热点。</li>
-              <li>电脑上如果弹出防火墙提示，请选择允许。</li>
+              <li>{t("lanPanel.help.sameWifi")}</li>
+              <li>{t("lanPanel.help.guestNetwork")}</li>
+              <li>{t("lanPanel.help.firewall")}</li>
             </ul>
             {addresses.length > 1 && (
               <label className="lan-field">
-                <span>选择要使用的网络</span>
+                <span>{t("lanPanel.network")}</span>
                 <select
                   value={selectedAddress || addresses[0]?.address || ""}
                   onChange={(event) => setSelectedAddress(event.target.value)}
@@ -363,12 +365,12 @@ export function LanSavePanel(props: LanSavePanelProps) {
               </label>
             )}
             <label className="lan-field">
-              <span>高级：指定本机网络地址（一般不需要填写）</span>
+              <span>{t("lanPanel.bindIp")}</span>
               <input
                 type="text"
                 inputMode="decimal"
                 value={bindIp}
-                placeholder="例如 192.168.1.10"
+                placeholder={t("lanPanel.bindIp.placeholder")}
                 onChange={(event) => setBindIp(event.target.value)}
               />
             </label>
@@ -382,24 +384,24 @@ export function LanSavePanel(props: LanSavePanelProps) {
     <div className="lan-host">
       <div className="lan-qr-card">
         {qrDataUrl ? (
-          <img className="lan-qr" src={qrDataUrl} alt="设备互传二维码" />
+          <img className="lan-qr" src={qrDataUrl} alt={t("lanPanel.qr")} />
         ) : qrFailed ? (
-          <p className="lan-qr-fallback">二维码显示失败，请点下方「复制连接信息」，在另一台设备粘贴。</p>
+          <p className="lan-qr-fallback">{t("lanPanel.qrFailed")}</p>
         ) : (
           <Spinner />
         )}
       </div>
-      <h3>用另一台设备扫描这个二维码</h3>
+      <h3>{t("lanPanel.scanThis")}</h3>
       <ol className="lan-steps">
-        <li>在另一台设备打开「书架设置 → 设备互传」</li>
-        <li>选择「扫码连接」，对准这个二维码</li>
+        <li>{t("lanPanel.step.open")}</li>
+        <li>{t("lanPanel.step.scan")}</li>
       </ol>
-      <p className="lan-waiting"><span className="lan-pulse" aria-hidden />等待连接…</p>
+      <p className="lan-waiting"><span className="lan-pulse" aria-hidden />{t("lanPanel.waiting")}</p>
       <div className="lan-actions">
         <button type="button" className="lan-secondary" disabled={!state.pairingInfo} onClick={() => void handleCopy()}>
-          {copied ? "已复制" : "复制连接信息"}
+          {copied ? t("lanPanel.copied") : t("lanPanel.copy")}
         </button>
-        <button type="button" className="lan-ghost" onClick={handleReconnect}>取消</button>
+        <button type="button" className="lan-ghost" onClick={handleReconnect}>{t("lanPanel.cancel")}</button>
       </div>
     </div>
   );
@@ -407,10 +409,10 @@ export function LanSavePanel(props: LanSavePanelProps) {
   const renderConnected = () => (
     <>
       {renderBanner()}
-      <section className="lan-send" aria-label="发送给对方">
+      <section className="lan-send" aria-label={t("lanPanel.send.region")}>
         <div className="lan-send-group">
-          <h3>发送什么</h3>
-          <div className="lan-segmented" role="radiogroup" aria-label="发送范围">
+          <h3>{t("lanPanel.send.what")}</h3>
+          <div className="lan-segmented" role="radiogroup" aria-label={t("lanPanel.send.scope")}>
             <button
               type="button"
               role="radio"
@@ -418,7 +420,7 @@ export function LanSavePanel(props: LanSavePanelProps) {
               className={scopeChoice === "all" ? "active" : ""}
               onClick={() => setScopeChoice("all")}
             >
-              全部书籍
+              {t("lanPanel.send.all")}
             </button>
             <button
               type="button"
@@ -428,21 +430,21 @@ export function LanSavePanel(props: LanSavePanelProps) {
               disabled={selectedCount === 0}
               onClick={() => setScopeChoice("selected")}
             >
-              {selectedCount > 0 ? `已选 ${selectedCount} 本` : "已选的书"}
+              {selectedCount > 0 ? tn("lanPanel.send.selected", selectedCount, { count: selectedCount }) : t("lanPanel.send.selectedNone")}
             </button>
           </div>
           {selectedCount === 0 && (
-            <p className="lan-hint">只想发几本？先在书架用「批量选择」选好，再点「发到设备」。</p>
+            <p className="lan-hint">{t("lanPanel.send.selectHint")}</p>
           )}
         </div>
         <div className="lan-send-options">
           <label className="lan-switch-row">
             <span className="lan-switch-text">
-              <strong>附带书籍文件</strong>
+              <strong>{t("lanPanel.send.includeBooks")}</strong>
               <small>
                 {includeBooks
-                  ? "对方可以直接打开阅读，书多时要多等一会"
-                  : "只发阅读资料，对方需要已有这些书"}
+                  ? t("lanPanel.send.includeBooks.on")
+                  : t("lanPanel.send.includeBooks.off")}
               </small>
             </span>
             <input
@@ -455,16 +457,16 @@ export function LanSavePanel(props: LanSavePanelProps) {
           </label>
           <p className="lan-send-note">
             <span aria-hidden="true">{Icon.info}</span>
-            <span>总会带上阅读资料：进度、书签、笔记、收藏和文件夹。全部书籍含空文件夹，已选的书只带相关文件夹。</span>
+            <span>{t("lanPanel.send.note")}</span>
           </p>
         </div>
       </section>
       <div className="lan-send-footer">
         <button type="button" className="lan-primary wide" disabled={state.busy} onClick={handleSend}>
           {Icon.send}
-          <span>发送</span>
+          <span>{t("lanPanel.send")}</span>
         </button>
-        <p className="lan-waiting"><span className="lan-pulse" aria-hidden />也可以等对方发给你</p>
+        <p className="lan-waiting"><span className="lan-pulse" aria-hidden />{t("lanPanel.waitPeer")}</p>
       </div>
     </>
   );
@@ -476,10 +478,10 @@ export function LanSavePanel(props: LanSavePanelProps) {
         <span className="lan-offer-icon">{Icon.incoming}</span>
         <h3>{lanOfferTitle(offer)}</h3>
         <p>{lanOfferDetail(offer)}</p>
-        <p className="lan-hint">接收后会先显示导入预览，确认后才会写入书架。</p>
+        <p className="lan-hint">{t("lanPanel.offer.hint")}</p>
         <div className="lan-actions stacked">
-          <button type="button" className="lan-primary" onClick={handleAccept}>接收</button>
-          <button type="button" className="lan-secondary" onClick={() => void props.session.decline()}>拒绝</button>
+          <button type="button" className="lan-primary" onClick={handleAccept}>{t("lanPanel.accept")}</button>
+          <button type="button" className="lan-secondary" onClick={() => void props.session.decline()}>{t("lanPanel.decline")}</button>
         </div>
       </div>
     );
@@ -487,10 +489,10 @@ export function LanSavePanel(props: LanSavePanelProps) {
 
   const renderProgress = () => {
     const view = lanProgressView(state.progress);
-    const title = state.status === "sending" ? "正在发送"
-      : state.status === "receiving" ? "正在接收"
-        : state.status === "preparing" ? "正在检查收到的资料"
-          : "正在写入书架";
+    const title = state.status === "sending" ? t("lanPanel.progress.sending")
+      : state.status === "receiving" ? t("lanPanel.progress.receiving")
+        : state.status === "preparing" ? t("lanPanel.progress.checking")
+          : t("lanPanel.progress.writing");
     return (
       <div className="lan-progress" role="status" aria-live="polite">
         <h3>{title}</h3>
@@ -504,13 +506,13 @@ export function LanSavePanel(props: LanSavePanelProps) {
           <span style={view.percent === null ? undefined : { width: `${view.percent}%` }} />
         </div>
         <p className="lan-progress-meta">
-          <span>{view.percent === null ? view.label : `${view.label} ${view.percent}%`}</span>
+          <span>{view.percent === null ? view.label : t("lanPanel.progress.percent", { label: view.label, percent: view.percent })}</span>
           {view.detail && <span>{view.detail}</span>}
         </p>
         {state.status === "committing" ? (
-          <p className="lan-hint">马上就好。现在关闭面板也不会中断，完成后书架会自动更新。</p>
+          <p className="lan-hint">{t("lanPanel.progress.committing")}</p>
         ) : (
-          <button type="button" className="lan-secondary" onClick={handleReconnect}>取消</button>
+          <button type="button" className="lan-secondary" onClick={handleReconnect}>{t("lanPanel.cancel")}</button>
         )}
       </div>
     );
@@ -520,13 +522,13 @@ export function LanSavePanel(props: LanSavePanelProps) {
     <>
       {primary === "done" ? (
         <>
-          <button type="button" className="lan-primary" onClick={closePanel}>完成</button>
-          <button type="button" className="lan-secondary" onClick={handleReconnect}>再传一次</button>
+          <button type="button" className="lan-primary" onClick={closePanel}>{t("lanPanel.done")}</button>
+          <button type="button" className="lan-secondary" onClick={handleReconnect}>{t("lanPanel.again")}</button>
         </>
       ) : (
         <>
-          <button type="button" className="lan-primary" onClick={handleReconnect}>重新连接</button>
-          <button type="button" className="lan-secondary" onClick={closePanel}>关闭</button>
+          <button type="button" className="lan-primary" onClick={handleReconnect}>{t("lanPanel.reconnect")}</button>
+          <button type="button" className="lan-secondary" onClick={closePanel}>{t("lanPanel.close")}</button>
         </>
       )}
     </>
@@ -535,14 +537,14 @@ export function LanSavePanel(props: LanSavePanelProps) {
   const renderSendResult = () => {
     const result = state.sendResult;
     const skipped = result?.skippedBooks.length ?? 0;
-    const skippedNote = skipped > 0 ? `有 ${skipped} 本书的文件没有找到，只发送了它们的阅读进度。` : "";
+    const skippedNote = skipped > 0 ? tn("lanPanel.skipped", skipped, { count: skipped }) : "";
     if (state.status === "sendComplete") {
       const imported = state.remoteCommit?.importedBookCount;
       return (
         <ResultView
           tone="success"
-          title="发送完成"
-          detail={`${imported !== undefined ? `对方已导入 ${imported} 本书。` : "对方已收到并导入。"}${skippedNote}`}
+          title={t("lanPanel.sent.title")}
+          detail={`${imported !== undefined ? tn("lanPanel.sent.imported", imported, { count: imported }) : t("lanPanel.sent.received")}${skippedNote}`}
           actions={reconnectActions("done")}
         />
       );
@@ -551,8 +553,8 @@ export function LanSavePanel(props: LanSavePanelProps) {
       return (
         <ResultView
           tone="info"
-          title="已发送，但没收到对方确认"
-          detail="连接在对方确认前断开了。请在对方设备的书架上看看这些书是否已经导入。"
+          title={t("lanPanel.unconfirmed.title")}
+          detail={t("lanPanel.unconfirmed.detail")}
           actions={reconnectActions("done")}
         />
       );
@@ -561,8 +563,8 @@ export function LanSavePanel(props: LanSavePanelProps) {
       return (
         <ResultView
           tone="info"
-          title="发送没有完成"
-          detail="发送被取消，或者对方没有接收。对方的书架没有任何变化。"
+          title={t("lanPanel.notSent.title")}
+          detail={t("lanPanel.notSent.detail")}
           actions={reconnectActions("reconnect")}
         />
       );
@@ -570,7 +572,7 @@ export function LanSavePanel(props: LanSavePanelProps) {
     return (
       <ResultView
         tone="error"
-        title="发送失败"
+        title={t("lanPanel.failed.title")}
         detail={nativeError ?? lanErrorText(null, "send")}
         actions={reconnectActions("reconnect")}
       />
@@ -583,8 +585,8 @@ export function LanSavePanel(props: LanSavePanelProps) {
       return (
         <div className="lan-busy" role="status">
           <Spinner />
-          <h3>正在连接…</h3>
-          <button type="button" className="lan-secondary" onClick={handleReconnect}>取消</button>
+          <h3>{t("lanPanel.connecting")}</h3>
+          <button type="button" className="lan-secondary" onClick={handleReconnect}>{t("lanPanel.cancel")}</button>
         </div>
       );
     }
@@ -600,8 +602,8 @@ export function LanSavePanel(props: LanSavePanelProps) {
       return (
         <ResultView
           tone="success"
-          title="导入完成"
-          detail={imported > 0 ? `已导入 ${imported} 本书，书架已经更新。` : "资料已导入，书架已经更新。"}
+          title={t("lanPanel.imported.title")}
+          detail={imported > 0 ? tn("lanPanel.imported.books", imported, { count: imported }) : t("lanPanel.imported.data")}
           actions={reconnectActions("done")}
         />
       );
@@ -610,8 +612,8 @@ export function LanSavePanel(props: LanSavePanelProps) {
       return (
         <ResultView
           tone={nativeError ? "error" : "info"}
-          title="连接已断开"
-          detail={nativeError ?? "对方已经断开连接。需要继续传送时，请重新连接。"}
+          title={t("lanPanel.closed.title")}
+          detail={nativeError ?? t("lanPanel.closed.detail")}
           actions={reconnectActions("reconnect")}
         />
       );
@@ -621,10 +623,10 @@ export function LanSavePanel(props: LanSavePanelProps) {
   };
 
   const subtitle = state.status === "idle"
-    ? "同一 Wi‑Fi 下直接传送，不经过云端"
+    ? t("lanPanel.subtitle.idle")
     : state.status === "startingHost" || state.status === "hostReady"
-      ? "等待另一台设备扫码"
-      : "请保持两台设备都打开本应用";
+      ? t("lanPanel.subtitle.host")
+      : t("lanPanel.subtitle.active");
 
   // The App ends the session as soon as the panel starts closing; keep the last
   // frame on screen during the exit animation instead of flashing the start page.
@@ -632,17 +634,17 @@ export function LanSavePanel(props: LanSavePanelProps) {
     <>
       <header className="lan-head">
         <div className="lan-head-text">
-          <h2>设备互传</h2>
+          <h2>{t("lanPanel.title")}</h2>
           {state.status === "connected" ? (
-            <p className="lan-head-status"><span className="lan-status-dot" aria-hidden="true" />已连接另一台设备</p>
+            <p className="lan-head-status"><span className="lan-status-dot" aria-hidden="true" />{t("lanPanel.connected")}</p>
           ) : (
             <p>{subtitle}</p>
           )}
         </div>
         {state.status === "connected" && (
-          <button type="button" className="lan-head-pill" onClick={handleReconnect}>断开</button>
+          <button type="button" className="lan-head-pill" onClick={handleReconnect}>{t("lanPanel.disconnect")}</button>
         )}
-        <button type="button" className="lan-icon-btn lan-close" onClick={closePanel} aria-label="关闭设备互传">
+        <button type="button" className="lan-icon-btn lan-close" onClick={closePanel} aria-label={t("lanPanel.close.label")}>
           {Icon.close}
         </button>
       </header>
@@ -653,7 +655,7 @@ export function LanSavePanel(props: LanSavePanelProps) {
 
   return (
     <div className={`lan-backdrop${props.closing ? " is-closing" : ""}`} role="presentation">
-      <section className="lan-panel" role="dialog" aria-modal="true" aria-label="设备互传">
+      <section className="lan-panel" role="dialog" aria-modal="true" aria-label={t("lanPanel.dialog")}>
         {content}
       </section>
     </div>
