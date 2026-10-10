@@ -1,3 +1,4 @@
+import { READER_PALETTES } from "../config/readerPalette";
 import React, { useState } from "react";
 import { MENU_CLOSE_MS } from "./menuMotion";
 import type { Theme, TurnAnimation } from "../render/settings";
@@ -118,12 +119,20 @@ export const THEME_PALETTES: Array<{
   bg: string;
   fg: string;
   border: string;
-}> = [
-  { id: "light", name: "白底", nameKey: "aa.theme.light", bg: "#ffffff", fg: "#1a1a1a", border: "#e2e8f0" },
-  { id: "sepia", name: "羊皮纸", nameKey: "aa.theme.sepia", bg: "#fbf0d9", fg: "#5f4b32", border: "#e8dac0" },
-  { id: "gray", name: "深灰", nameKey: "aa.theme.gray", bg: "#2d2d30", fg: "#cccccc", border: "#3e3e42" },
-  { id: "dark", name: "暗夜", nameKey: "aa.theme.dark", bg: "#18181b", fg: "#e4e4e7", border: "#27272a" },
-];
+}> = ([
+  { id: "light", name: "白底", nameKey: "aa.theme.light" },
+  { id: "sepia", name: "羊皮纸", nameKey: "aa.theme.sepia" },
+  { id: "gray", name: "深灰", nameKey: "aa.theme.gray" },
+  { id: "dark", name: "暗夜", nameKey: "aa.theme.dark" },
+] as const).map((choice) => {
+  const palette = READER_PALETTES[choice.id];
+  return {
+    ...choice,
+    bg: palette.background,
+    fg: palette.foreground,
+    border: palette.previewBorder,
+  };
+});
 
 /** label is the internal preset id; labelKey is what the UI shows. */
 export const LINE_HEIGHT_PRESETS: Array<{ label: string; labelKey: PlainMessageKey; value: number }> = [

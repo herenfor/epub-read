@@ -1,3 +1,4 @@
+/* Theme bg/fg mirror config/readerPalette.ts; readerPalette.test.ts checks them. */
 :root {
   --bg: #ffffff;
   --fg: #1a1a1a;
