@@ -16,7 +16,7 @@ describe("UI language provider", () => {
     const dom = createReactDomHarness();
     const store = createUiLanguageStore({ read: () => null, write: () => {}, systemLanguages: () => [] });
     try {
-      await dom.render(createElement(UiLanguageProvider, { store }, createElement(Probe)));
+      await dom.render(createElement(UiLanguageProvider, { store, children: createElement(Probe) }));
       const button = dom.container.querySelector("button")!;
       await dom.click(button);
       expect(button.textContent).toBe("取消:1");

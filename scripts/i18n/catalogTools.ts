@@ -22,7 +22,8 @@ function sourceFiles(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
     const path = join(dir, name);
     if (statSync(path).isDirectory()) {
-      if (name !== "localization" && name !== "node_modules") sourceFiles(path, out);
+      // Catalog sources/data define keys rather than use them.
+      if (!path.endsWith("localization/catalogs") && !path.endsWith("localization/en") && name !== "node_modules") sourceFiles(path, out);
     } else if (/\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name)) out.push(path);
   }
   return out;
@@ -38,6 +39,11 @@ export function usageIndex(): Map<string, string[]> {
         const list = index.get(match[1]) ?? [];
         list.push(`${relative(ROOT, file)}:${row + 1}`);
         index.set(match[1], list);
+        // tn("x.count", n) uses "x.count.one" / "x.count.other".
+        for (const form of ["one", "other"]) {
+          const plural = `${match[1]}.${form}`;
+          index.set(plural, [...(index.get(plural) ?? []), `${relative(ROOT, file)}:${row + 1}`]);
+        }
       }
     });
   }
