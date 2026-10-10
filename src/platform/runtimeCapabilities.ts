@@ -14,6 +14,8 @@ export interface RuntimeCapabilities {
   supportsCustomCacheDirectory: boolean;
   /** Shared LAN save panel is delivered on Windows and Android only in this package. */
   supportsLanTransfer: boolean;
+  /** Only an established Android native session can control system status bars. */
+  supportsReaderSystemStatusBar: boolean;
 }
 
 export function getRuntimeCapabilities(): RuntimeCapabilities {
@@ -28,5 +30,6 @@ export function getRuntimeCapabilities(): RuntimeCapabilities {
     supportsCacheStorage: platform === "windows" || platform === "android",
     supportsCustomCacheDirectory: platform === "windows",
     supportsLanTransfer: platform === "windows" || platform === "android",
+    supportsReaderSystemStatusBar: session?.source === "desktop" && platform === "android",
   };
 }

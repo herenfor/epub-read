@@ -1,3 +1,5 @@
+import { FolderNameField } from "./FolderNameField";
+import { validateFolderNameDraft, folderNameDraftError } from "./folderNameDraft";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { MENU_CLOSE_MS, useExitPresence } from "./menuMotion";
 import { uiMotionReduced, useUiMotion, type UiMotion } from "./motionPreference";
@@ -18,8 +20,6 @@ import {
   emptyOrganization,
   generateFolderId,
   isFavorite,
-  normalizeFolderName,
-  MAX_FOLDER_NAME_CODE_POINTS,
   type LibraryOrganization,
   type OrganizationCommand,
   type ShelfScope,
@@ -128,6 +128,8 @@ export interface ShelfViewProps {
   /** Android 阅读栏电量显示（本机偏好）；未提供时不显示该设置。 */
   batteryIndicatorEnabled?: boolean;
   onBatteryIndicatorChange?(enabled: boolean): void;
+  hideReaderSystemStatusBar?: boolean;
+  onHideReaderSystemStatusBarChange?(hidden: boolean): void;
   onOpen(id: string): void;
   onImport(): void;
   /** Directory import entry; absent hides it. */
@@ -1704,22 +1706,13 @@ function ShelfCreateFolderDialog(props: ShelfCreateFolderDialogProps) {
 
   const handleSubmit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
-    const normalized = normalizeFolderName(name);
-    if (!normalized) {
-      setError("文件夹名称不能为空");
-      return;
-    }
-    const codePoints = Array.from(normalized).length;
-    if (codePoints > MAX_FOLDER_NAME_CODE_POINTS) {
-      setError(`名称不能超过 ${MAX_FOLDER_NAME_CODE_POINTS} 个字符`);
-      return;
-    }
-    if (props.existingNames.includes(normalized)) {
-      setError("已存在同名文件夹");
+    const draft = validateFolderNameDraft(name, props.existingNames);
+    if (!draft.ok) {
+      setError(folderNameDraftError(draft.code));
       return;
     }
     try {
-      await props.onCreate(normalized);
+      await props.onCreate(draft.name);
     } catch (err) {
       setError(String(err));
     }
@@ -1736,26 +1729,23 @@ function ShelfCreateFolderDialog(props: ShelfCreateFolderDialogProps) {
             </div>
           )}
           <div style={{ margin: "14px 0" }}>
-            <input
-              ref={inputRef}
-              className="shelf-dialog-input"
-              type="text"
-              placeholder="请输入文件夹名称…"
+            <FolderNameField
+              inputRef={inputRef}
               value={name}
               disabled={props.busy}
-              onChange={(e) => {
-                setName(e.target.value);
+              placeholder="请输入文件夹名称…"
+              error={error}
+              onChange={(value) => {
+                setName(value);
                 setError(null);
               }}
-              maxLength={MAX_FOLDER_NAME_CODE_POINTS * 2}
             />
-            {error && <div className="shelf-dialog-error" style={{ marginTop: 6 }}>{error}</div>}
           </div>
           <div className="shelf-confirm-actions">
             <button className="shelf-selection-cancel" type="button" onClick={handleCancel} disabled={props.busy}>
               取消
             </button>
-            <button className="shelf-confirm-primary" type="submit" disabled={props.busy || !name.trim()}>
+            <button className="shelf-confirm-primary" type="submit" disabled={props.busy}>
               {props.busy ? "创建中…" : "创建"}
             </button>
           </div>
@@ -1792,26 +1782,17 @@ function ShelfRenameDialog(props: ShelfRenameDialogProps) {
 
   const handleSubmit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
-    const normalized = normalizeFolderName(name);
-    if (!normalized) {
-      setError("文件夹名称不能为空");
+    const draft = validateFolderNameDraft(name, props.existingNames, props.currentName);
+    if (!draft.ok) {
+      setError(folderNameDraftError(draft.code));
       return;
     }
-    const codePoints = Array.from(normalized).length;
-    if (codePoints > MAX_FOLDER_NAME_CODE_POINTS) {
-      setError(`名称不能超过 ${MAX_FOLDER_NAME_CODE_POINTS} 个字符`);
-      return;
-    }
-    if (normalized !== props.currentName && props.existingNames.includes(normalized)) {
-      setError("已存在同名文件夹");
-      return;
-    }
-    if (normalized === props.currentName) {
+    if (draft.unchanged) {
       handleCancel();
       return;
     }
     try {
-      await props.onRename(props.folderId, normalized);
+      await props.onRename(props.folderId, draft.name);
     } catch (err) {
       setError(String(err));
     }
@@ -1823,25 +1804,23 @@ function ShelfRenameDialog(props: ShelfRenameDialogProps) {
         <form onSubmit={handleSubmit}>
           <div className="shelf-confirm-title">重命名文件夹</div>
           <div style={{ margin: "14px 0" }}>
-            <input
-              ref={inputRef}
-              className="shelf-dialog-input"
-              type="text"
+            <FolderNameField
+              inputRef={inputRef}
               value={name}
               disabled={props.busy}
-              onChange={(e) => {
-                setName(e.target.value);
+              placeholder="请输入文件夹名称…"
+              error={error}
+              onChange={(value) => {
+                setName(value);
                 setError(null);
               }}
-              maxLength={MAX_FOLDER_NAME_CODE_POINTS * 2}
             />
-            {error && <div className="shelf-dialog-error" style={{ marginTop: 6 }}>{error}</div>}
           </div>
           <div className="shelf-confirm-actions">
             <button className="shelf-selection-cancel" type="button" onClick={handleCancel} disabled={props.busy}>
               取消
             </button>
-            <button className="shelf-confirm-primary" type="submit" disabled={props.busy || !name.trim()}>
+            <button className="shelf-confirm-primary" type="submit" disabled={props.busy}>
               {props.busy ? "保存中…" : "确定"}
             </button>
           </div>
@@ -1922,22 +1901,13 @@ function ShelfMoveDialog(props: ShelfMoveDialogProps) {
   const [error, setError] = useState<string | null>(null);
 
   const handleCreateInline = async (): Promise<void> => {
-    const normalized = normalizeFolderName(newName);
-    if (!normalized) {
-      setError("文件夹名称不能为空");
-      return;
-    }
-    const codePoints = Array.from(normalized).length;
-    if (codePoints > MAX_FOLDER_NAME_CODE_POINTS) {
-      setError(`名称不能超过 ${MAX_FOLDER_NAME_CODE_POINTS} 个字符`);
-      return;
-    }
-    if (props.folders.some((f) => f.name === normalized)) {
-      setError("已存在同名文件夹");
+    const draft = validateFolderNameDraft(newName, props.folders.map((folder) => folder.name));
+    if (!draft.ok) {
+      setError(folderNameDraftError(draft.code));
       return;
     }
     try {
-      const createdId = await props.onCreateFolder(normalized);
+      const createdId = await props.onCreateFolder(draft.name);
       setSelectedFolderId(createdId);
       setCreating(false);
       setNewName("");
@@ -2002,7 +1972,7 @@ function ShelfMoveDialog(props: ShelfMoveDialogProps) {
                   }}
                 />
                 <span className="shelf-move-item-icon"><FolderIcon /></span>
-                <span className="shelf-move-item-name">{f.name}</span>
+                <span className="shelf-move-item-name" title={f.name}>{f.name}</span>
                 <span className="shelf-move-item-count">{f.count} 本</span>
                 {isFolderCurrent && <span className="shelf-move-current-badge">（当前）</span>}
               </label>
@@ -2012,17 +1982,15 @@ function ShelfMoveDialog(props: ShelfMoveDialogProps) {
 
         {creating ? (
           <div className="shelf-move-create-box">
-            <input
-              className="shelf-dialog-input"
-              type="text"
-              placeholder="新文件夹名称…"
+            <FolderNameField
               value={newName}
-              onChange={(e) => {
-                setNewName(e.target.value);
+              disabled={props.busy}
+              placeholder="新文件夹名称…"
+              error={error}
+              onChange={(value) => {
+                setNewName(value);
                 setError(null);
               }}
-              autoFocus
-              maxLength={MAX_FOLDER_NAME_CODE_POINTS * 2}
             />
             <div className="shelf-move-create-actions">
               <button
@@ -2039,7 +2007,7 @@ function ShelfMoveDialog(props: ShelfMoveDialogProps) {
               <button
                 className="shelf-confirm-primary"
                 type="button"
-                disabled={props.busy || !newName.trim()}
+                disabled={props.busy}
                 onClick={() => void handleCreateInline()}
               >
                 创建并选择
@@ -2058,7 +2026,7 @@ function ShelfMoveDialog(props: ShelfMoveDialogProps) {
           </button>
         )}
 
-        {error && <div className="shelf-dialog-error" style={{ marginBottom: 10 }}>{error}</div>}
+        {error && !creating && <div className="shelf-dialog-error" role="alert" style={{ marginBottom: 10 }}>{error}</div>}
 
         <div className="shelf-confirm-actions">
           <button className="shelf-selection-cancel" type="button" onClick={handleCancel} disabled={props.busy}>
@@ -2137,7 +2105,7 @@ const ShelfFolderModal = memo(function ShelfFolderModal(props: ShelfFolderModalP
         <div className="shelf-folder-modal-head">
           <div className="shelf-folder-modal-title-box">
             <FolderIcon />
-            <span className="shelf-folder-modal-title">{folder.name}</span>
+            <span className="shelf-folder-modal-title" title={folder.name}>{folder.name}</span>
             <span className="shelf-folder-modal-count">{books.length} 本</span>
           </div>
           <div className="shelf-folder-modal-actions">
@@ -2437,6 +2405,8 @@ interface ShelfSettingsDrawerProps extends ShelfSubmenuBackProps {
   onThemeChange(theme: Theme): void;
   batteryIndicatorEnabled?: boolean;
   onBatteryIndicatorChange?(enabled: boolean): void;
+  hideReaderSystemStatusBar?: boolean;
+  onHideReaderSystemStatusBarChange?(hidden: boolean): void;
   filters: ShelfFilters;
   facets: ShelfFilterFacets;
   matchingCount: number;
@@ -2887,6 +2857,21 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
                   { value: "off", label: "隐藏" },
                 ]}
                 onChange={(value) => props.onBatteryIndicatorChange!(value === "on")}
+              />
+            </div>
+          )}
+
+          {props.hideReaderSystemStatusBar !== undefined && props.onHideReaderSystemStatusBarChange && (
+            <div className="shelf-drawer-setting">
+              <span>阅读时系统状态栏</span>
+              <ShelfSelect
+                registerSubmenuBackHandler={props.registerSubmenuBackHandler}
+                onSubmenuBackActiveChange={props.onSubmenuBackActiveChange}
+                value={props.hideReaderSystemStatusBar ? "hide" : "show"}
+                busy={props.busy}
+                title="阅读时隐藏系统状态栏"
+                options={[{ value: "hide", label: "隐藏" }, { value: "show", label: "显示" }]}
+                onChange={(value) => props.onHideReaderSystemStatusBarChange!(value === "hide")}
               />
             </div>
           )}
@@ -4844,6 +4829,8 @@ export function ShelfView(props: ShelfViewProps) {
         onEnterSelection={enterSelection}
         theme={props.theme}
         onThemeChange={props.onThemeChange}
+        hideReaderSystemStatusBar={props.hideReaderSystemStatusBar}
+        onHideReaderSystemStatusBarChange={props.onHideReaderSystemStatusBarChange}
         batteryIndicatorEnabled={props.batteryIndicatorEnabled}
         onBatteryIndicatorChange={props.onBatteryIndicatorChange}
         filters={filters}
@@ -4982,7 +4969,7 @@ export function ShelfView(props: ShelfViewProps) {
               title="选择或管理文件夹"
             >
               <FolderIcon />
-              <span className="shelf-folder-dropdown-label">
+              <span className="shelf-folder-dropdown-label" title={currentFolder?.name}>
                 {scope.type === "folder"
                   ? currentFolder?.name ?? "文件夹"
                   : `文件夹 (${activeFolders.length})`}
@@ -5077,7 +5064,7 @@ export function ShelfView(props: ShelfViewProps) {
                 <CloseIcon />
               </button>
               <div className="shelf-folder-active-info">
-                <span>《{currentFolder?.name ?? "文件夹"}》</span>
+                <span className="shelf-folder-active-name" title={currentFolder?.name}>《{currentFolder?.name ?? "文件夹"}》</span>
                 <span className="shelf-folder-active-count">
                   {(folderBooksMap.get(scope.folderId) ?? []).length} 本书
                 </span>

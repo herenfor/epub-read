@@ -4044,6 +4044,7 @@ select option {
 }
 
 .shelf-confirm-title {
+  overflow-wrap: anywhere;
   font-size: 16px;
   font-weight: 700;
 }
@@ -5916,6 +5917,7 @@ select option {
 }
 
 .shelf-folder-modal-title-box {
+  flex: 1;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -5930,6 +5932,8 @@ select option {
 }
 
 .shelf-folder-modal-title {
+  flex: 1;
+  min-width: 0;
   font-size: 16px;
   font-weight: 600;
   color: var(--fg);
@@ -7471,4 +7475,14 @@ select option {
 
 .mobile-more-backdrop {
   animation: reader-panel-fade-in var(--menu-open) ease;
+}
+
+.shelf-folder-name-hint {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
 }
