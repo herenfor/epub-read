@@ -3,6 +3,8 @@ import { validateFolderNameDraft, folderNameDraftError } from "./folderNameDraft
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { MENU_CLOSE_MS, useExitPresence } from "./menuMotion";
 import { uiMotionReduced, useUiMotion, type UiMotion } from "./motionPreference";
+import { useUiLanguageChoice } from "./localization/useUiLanguageChoice";
+import type { UiLanguagePreference } from "./localization/core";
 import { createPortal } from "react-dom";
 import { getShelfMenuPortalHost, useShelfMenuPopover } from "./shelfMenuPlacement";
 import type { Theme } from "../render/settings";
@@ -2430,6 +2432,7 @@ interface ShelfSettingsDrawerProps extends ShelfSubmenuBackProps {
 
 function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
   const [uiMotion, setUiMotion] = useUiMotion();
+  const language = useUiLanguageChoice();
   const [mounted, setMounted] = useState(props.open);
   const [closing, setClosing] = useState(false);
   const [cachePanelOpen, setCachePanelOpen] = useState(false);
@@ -2766,6 +2769,19 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
           }
 
           <div className="shelf-drawer-group-label">显示设置</div>
+          <div className="shelf-drawer-setting">
+            <span>{language.label}</span>
+            <ShelfSelect
+              registerSubmenuBackHandler={props.registerSubmenuBackHandler}
+              onSubmenuBackActiveChange={props.onSubmenuBackActiveChange}
+              value={language.preference}
+              busy={props.busy}
+              title={language.label}
+              options={language.options}
+              onChange={(value) => language.choose(value as UiLanguagePreference)}
+            />
+          </div>
+          {language.error && <p className="shelf-drawer-setting-error" role="alert">{language.error}</p>}
           {props.viewMode && props.onViewModeChange && (
             <div className="shelf-drawer-setting">
               <span>视图模式</span>

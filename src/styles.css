@@ -2984,6 +2984,13 @@ select option {
   flex: 1;
 }
 
+.shelf-drawer-setting-error {
+  margin: 4px 8px 8px;
+  color: var(--danger, #c44);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
 .shelf-drawer-setting .shelf-select-wrap {
   width: 118px;
   flex-shrink: 0;

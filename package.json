@@ -25,7 +25,9 @@
     "pack": "node scripts/pack-epub.mjs",
     "check": "tsx scripts/check-book.ts",
     "pw-fonts": "node scripts/setup-pw-fonts.mjs",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "i18n:export": "tsx scripts/i18n/export-translation.ts",
+    "i18n:import": "tsx scripts/i18n/import-translation.ts"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",

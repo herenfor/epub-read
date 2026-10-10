@@ -6,6 +6,7 @@ import { platformFromTarget } from "./config/platformValue";
 import type { AppBuildInfo } from "./config/appBuildInfo";
 import { validateAppBuildInfo } from "./config/appBuildInfo";
 import { clearAppBuildSession, setAppBuildSession } from "./config/appBuildSession";
+import { createAppUiLanguageStore, UiLanguageProvider, useUiText } from "./ui/localization/UiLanguageProvider";
 
 type AppModule = { default: ComponentType };
 
@@ -31,27 +32,37 @@ async function loadApp(): Promise<AppModule> {
 }
 
 function mountApp(root: HTMLElement, App: ComponentType): void {
+  // One UI-language store for the app's lifetime; switching never remounts App.
+  const language = createAppUiLanguageStore();
   createRoot(root).render(
     <StrictMode>
-      <App />
+      <UiLanguageProvider store={language}>
+        <App />
+      </UiLanguageProvider>
     </StrictMode>,
   );
 }
 
 export function StartupFailurePage({ error }: { error: unknown }) {
   const message = error instanceof Error ? error.message : String(error);
+  const { t } = useUiText();
   const mismatch = message.includes("不匹配");
   return (
     <main className="startup-failure" role="alert">
-      <h1>{mismatch ? "发行组件不匹配" : "无法验证发行组件"}</h1>
-      <p>{mismatch ? "前端与原生后端不是同一发行版，应用已停止启动。" : "原生发行版握手失败，应用已停止启动。"}</p>
+      <h1>{mismatch ? t("startup.mismatch.title") : t("startup.failed.title")}</h1>
+      <p>{mismatch ? t("startup.mismatch.body") : t("startup.failed.body")}</p>
       <code>{message}</code>
     </main>
   );
 }
 
 function mountFailure(root: HTMLElement, error: unknown): void {
-  createRoot(root).render(<StartupFailurePage error={error} />);
+  // Only the language modules load here; App and AI stay unloaded after a failed handshake.
+  createRoot(root).render(
+    <UiLanguageProvider store={createAppUiLanguageStore()}>
+      <StartupFailurePage error={error} />
+    </UiLanguageProvider>,
+  );
 }
 
 export function createDefaultAppBootstrapDependencies(): AppBootstrapDependencies {

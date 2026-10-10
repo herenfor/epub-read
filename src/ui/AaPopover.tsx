@@ -17,6 +17,7 @@ import {
   WrenchIcon,
 } from "./readerIcons";
 import "./aaPopover.css";
+import { useUiLanguageChoice } from "./localization/useUiLanguageChoice";
 
 const TURN_ANIMATION_OPTIONS: ReadonlyArray<{ value: TurnAnimation; label: string }> = [
   { value: "slide", label: "滑动" },
@@ -189,6 +190,7 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
   onClose,
 }) => {
   const [activeTab, setActiveTab] = useState<"quick" | "detailed">("quick");
+  const language = useUiLanguageChoice();
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [cssDraft, setCssDraft] = useState(customCss);
   const [isClosing, setIsClosing] = useState(false);
@@ -623,6 +625,25 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
                   </div>
                 </div>
               )}
+
+              <div className="aa-section aa-control-row">
+                <span className="aa-section-label">{language.label}</span>
+                <div className="aa-segmented-capsule" role="radiogroup" aria-label={language.label}>
+                  {language.options.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      role="radio"
+                      aria-checked={language.preference === option.value}
+                      className={`aa-segmented-btn${language.preference === option.value ? " active" : ""}`}
+                      onClick={() => language.choose(option.value)}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {language.error && <p className="aa-section-note aa-section-error" role="alert">{language.error}</p>}
 
               {/* 直达详细参数切换按钮 */}
               <button
