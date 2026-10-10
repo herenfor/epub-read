@@ -135,6 +135,8 @@ import type { DirectoryImportPort } from "./core/folderImport/contract";
 import { LanSavePanel } from "./ui/LanSavePanel";
 import { useLanSaveSession } from "./ui/useLanSaveSession";
 import { SaveFileExportDialog, SaveFileImportPreview, SaveFileProgressPanel } from "./ui/SaveFileDialogs";
+import { SaveFailureDialog } from "./ui/SaveFailureDialog";
+import { releaseUnsavedLane, type SaveFailurePrompt } from "./ui/saveFailureExit";
 import { useSaveFileJob } from "./ui/useSaveFileJob";
 import { invoke } from "@tauri-apps/api/core";
 import { serveArchivePort } from "./platform/archiveWorkerBridge";
@@ -905,6 +907,10 @@ export default function App() {
   const activeNoteEditContextRef = useRef<NoteEditContext | null>(null);
   const [shelfEntries, setShelfEntries] = useState<ShelfEntry[]>([]);
   const [shelfError, setShelfError] = useState<string | null>(null);
+  const [saveFailurePrompt, setSaveFailurePrompt] = useState<SaveFailurePrompt | null>(null);
+  const saveFailurePromptRef = useRef(saveFailurePrompt);
+  saveFailurePromptRef.current = saveFailurePrompt;
+  const windowCloseRef = useRef<((leaveUnsaved: boolean) => Promise<void>) | null>(null);
   const [shelfNotice, setShelfNotice] = useState<{
     kind: "ok" | "warn" | "error";
     text: string;
@@ -1190,6 +1196,15 @@ export default function App() {
         : `progress-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     );
   }
+  // Re-stage a lane's latest sample as the book's local recovery record before
+  // the lane is dropped; throws (keeping the lane) when that is impossible.
+  const retainUnsavedSample = useCallback((lease: ProgressLease) => (sample: CheckpointedSample<ShelfProgressPatch>): void => {
+    const checkpoints = localCheckpointsRef.current;
+    const store = getShelfStore();
+    const bookHash = store.progressSessionBookHash?.(lease) ?? contentHashByIdRef.current.get(lease.bookId);
+    if (!checkpoints || !bookHash) throw new Error("本机进度检查点不可用");
+    stageCheckpointSample(checkpoints, bookHash, store.progressSessionChosenStamp?.(lease) ?? null, sample.patch);
+  }, []);
   const lifecycleDiagnosticsRef = useRef<string[]>([]);
   const firstSampleFailureRecordedRef = useRef(false);
   const jsBootIdRef = useRef<string | null>(null);
@@ -5491,34 +5506,46 @@ export default function App() {
     if (countSummary.complete) persistChapterCountCache();
   }, [countProgressSignature, countSummary.complete, persistChapterCountCache]);
 
-  const handleBackToShelf = useCallback(async () => {
+  const leaveReader = useCallback(async (leaveUnsaved: boolean) => {
     // 返回书架前先关浮层，再释放整本书的 ResourceServer。
     closeImageOverlay();
     persistShelfProgress(true);
-    recordLifecycleDiagnostic("back_to_shelf", { stage: "save", result: "begin" });
+    recordLifecycleDiagnostic("back_to_shelf", { stage: "save", result: leaveUnsaved ? "leave-unsaved" : "begin" });
     shelfBusyRef.current = true;
     setShelfBusyMessage(uiText("notice.progress.saving"));
     setShelfBusy(true);
+    let outcome = "saved";
     try {
       const lease = activeProgressLeaseRef.current;
       if (lease) {
         const saved = await progressWriterRef.current?.flush(lease);
-        if (saved?.status === "failed") throw saved.error;
-        progressWriterRef.current?.retire(lease);
-        await getShelfStore().closeProgressLease?.(lease);
-        activeProgressLeaseRef.current = null;
+        if (saved?.status === "failed") {
+          if (!leaveUnsaved) throw saved.error;
+          // Explicit user choice after a failed save: never block leaving.
+          // The sample moves to the local checkpoint; if even that cannot
+          // run, the lane stays paused and a later open/close retries it.
+          const writer = progressWriterRef.current!;
+          if (releaseUnsavedLane(writer, lease, retainUnsavedSample(lease)) === "checkpoint") {
+            await getShelfStore().closeProgressLease?.(lease).catch(() => undefined);
+            activeProgressLeaseRef.current = null;
+          }
+          setShelfError(uiText("notice.progress.saveFailed", { error: String(saved.error) }));
+          outcome = "left-unsaved";
+        } else {
+          progressWriterRef.current?.retire(lease);
+          await getShelfStore().closeProgressLease?.(lease);
+          activeProgressLeaseRef.current = null;
+        }
       }
       persistChapterCountCache();
-      recordLifecycleDiagnostic("back_to_shelf", { stage: "save", result: "saved" });
+      recordLifecycleDiagnostic("back_to_shelf", { stage: "save", result: outcome });
     } catch (error) {
       recordLifecycleDiagnostic("back_to_shelf", {
         stage: "save",
         result: "failed",
         errorCode: (error as { readonly code?: unknown } | null)?.code as string | undefined,
       });
-      const message = uiText("notice.progress.saveFailed", { error: String(error) });
-      setShelfError(message);
-      showReaderNotice(message, "error");
+      setSaveFailurePrompt({ kind: "shelf", error: String(error) });
       shelfBusyRef.current = false;
       setShelfBusy(false);
       return;
@@ -5541,7 +5568,16 @@ export default function App() {
     setView("shelf");
     shelfBusyRef.current = false;
     setShelfBusy(false);
-  }, [persistShelfProgress, persistChapterCountCache, closeForeground, closeImageOverlay, showReaderNotice]);
+  }, [persistShelfProgress, persistChapterCountCache, closeForeground, closeImageOverlay, retainUnsavedSample]);
+  const handleBackToShelf = useCallback(() => leaveReader(false), [leaveReader]);
+  const resolveSaveFailurePrompt = useCallback((leaveUnsaved: boolean): void => {
+    const prompt = saveFailurePrompt;
+    if (!prompt) return;
+    setSaveFailurePrompt(null);
+    if (prompt.kind === "window") void windowCloseRef.current?.(leaveUnsaved);
+    else void leaveReader(leaveUnsaved);
+  }, [leaveReader, saveFailurePrompt]);
+  const dismissSaveFailurePrompt = useCallback((): void => setSaveFailurePrompt(null), []);
 
   const toggleAppearancePanel = useCallback((): void => {
     if (menuOpen) closePanel("menu");
@@ -5612,6 +5648,10 @@ export default function App() {
   }, []);
 
   const handleAndroidBack = useCallback((): void => {
+    if (saveFailurePromptRef.current) {
+      setSaveFailurePrompt(null);
+      return;
+    }
     const activeElement = typeof document !== "undefined"
       ? document.activeElement as HTMLElement | null
       : null;
@@ -5846,23 +5886,39 @@ export default function App() {
     let unlisten: (() => void) | undefined;
     let closing = false;
     const appWindow = getCurrentWindow();
+    const closeWindow = async (leaveUnsaved: boolean): Promise<void> => {
+      if (closing) return;
+      closing = true;
+      persistShelfProgressRef.current(true);
+      persistChapterCountCache();
+      try {
+        // Deliberate full flush at real window exit; report failed lanes.
+        const writer = progressWriterRef.current;
+        const results = await writer?.flushBooks() ?? [];
+        const failures = results.filter((result) => result.status === "failed");
+        if (failures.length > 0) {
+          const first = failures[0];
+          if (!leaveUnsaved && first.status === "failed") throw first.error;
+          // Explicit "close anyway": hand failed lanes to local checkpoints
+          // where possible; closing never waits on that succeeding.
+          for (const failure of failures) releaseUnsavedLane(writer!, failure.lease, retainUnsavedSample(failure.lease));
+          recordLifecycleDiagnostic("window_close", { stage: "save", result: "left-unsaved", count: failures.length });
+        }
+        await appWindow.destroy();
+      } catch (error) {
+        closing = false;
+        setSaveFailurePrompt({ kind: "window", error: String(error) });
+      }
+    };
+    windowCloseRef.current = closeWindow;
     void appWindow
       .onCloseRequested(async (event) => {
         if (closing) return;
         event.preventDefault();
-        closing = true;
-        persistShelfProgressRef.current(true);
-        persistChapterCountCache();
-        try {
-          // Deliberate full flush at real window exit; report failed lanes.
-          const results = await progressWriterRef.current?.flushBooks() ?? [];
-          const failure = results.find((result) => result.status === "failed");
-          if (failure?.status === "failed") throw failure.error;
-          await appWindow.destroy();
-        } catch (error) {
-          closing = false;
-          setShelfNotice({ kind: "error", text: uiText("notice.progress.saveFailed", { error: String(error) }) });
-        }
+        // A repeated close request while the choice is on screen keeps the
+        // same choice instead of silently retrying or closing.
+        if (saveFailurePromptRef.current?.kind === "window") return;
+        await closeWindow(false);
       })
       .then((stop) => {
         unlisten = stop;
@@ -5872,6 +5928,7 @@ export default function App() {
       });
     return () => {
       document.removeEventListener("visibilitychange", onVisibilityChange);
+      windowCloseRef.current = null;
       unlisten?.();
     };
   }, []);
@@ -7313,6 +7370,14 @@ export default function App() {
             </button>
           </div>
         </div>
+      )}
+      {saveFailurePrompt && (
+        <SaveFailureDialog
+          prompt={saveFailurePrompt}
+          onRetry={() => resolveSaveFailurePrompt(false)}
+          onLeave={() => resolveSaveFailurePrompt(true)}
+          onDismiss={dismissSaveFailurePrompt}
+        />
       )}
     </div>
   );
