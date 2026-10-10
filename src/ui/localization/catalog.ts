@@ -74,7 +74,12 @@ import readerMiscEn from "./en/readerMisc.json";
 import logEn from "./en/log.json";
 import aiEn from "./en/ai.json";
 
-export const CATALOGS = [common, folder, language, reader, startup, titlebar, footer, sidebar, notes, imageViewer, search, aa, fonts, display, about, cache, saveFile, importProgress, lan, lanPanel, folderImport, shelf, shelfFolder, shelfMenu, shelfMain, notice, appUi, readerMisc, log, ai] as const;
+declare const __APP_EDITION__: "core" | "ai";
+// Vite removes AI-only text from Core alongside the AI panel. Translation
+// tooling runs outside Vite and must still see every catalog.
+const includeAi = typeof __APP_EDITION__ === "undefined" || __APP_EDITION__ === "ai";
+
+export const CATALOGS = [common, folder, language, reader, startup, titlebar, footer, sidebar, notes, imageViewer, search, aa, fonts, display, about, cache, saveFile, importProgress, lan, lanPanel, folderImport, shelf, shelfFolder, shelfMenu, shelfMain, notice, appUi, readerMisc, log, ...(includeAi ? [ai] : [])] as const;
 
 export const zhCN = {
   ...common.zh,
@@ -106,7 +111,8 @@ export const zhCN = {
   ...appUi.zh,
   ...readerMisc.zh,
   ...log.zh,
-  ...ai.zh,
+  // Keep the complete key type for AI components; Core never renders them.
+  ...(includeAi ? ai.zh : {} as typeof ai.zh),
 };
 
 export type MessageKey = keyof typeof zhCN;
@@ -142,7 +148,7 @@ export const en: Partial<Record<MessageKey, string>> = {
   ...appUiEn,
   ...readerMiscEn,
   ...logEn,
-  ...aiEn,
+  ...(includeAi ? aiEn : {}),
 };
 
 /** Namespace → English file contents, for the integrity test and translation tooling. */
@@ -176,5 +182,5 @@ export const EN_FILES: Readonly<Record<string, Readonly<Record<string, string>>>
   appUi: appUiEn,
   readerMisc: readerMiscEn,
   log: logEn,
-  ai: aiEn,
+  ...(includeAi ? { ai: aiEn } : {}),
 };

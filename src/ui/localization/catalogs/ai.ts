@@ -6,7 +6,7 @@ import { defineMessages } from "../defineMessages";
  * linked, DirectML, LUID, Top-K and cosine untranslated. Messages produced by AI runtime modules are
  * diagnostics and are not in this catalog.
  */
-export const ai = defineMessages("ai", {
+export const ai = /* @__PURE__ */ defineMessages("ai", {
   "ai.unknown": "未知",
   "ai.cancel": "取消",
   "ai.rebuild": "重建",
