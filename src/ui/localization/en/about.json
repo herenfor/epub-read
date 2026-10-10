@@ -1,1 +1,17 @@
-{}
+{
+  "about.webPreview": "Web Preview",
+  "about.native": "{platform} Native",
+  "about.notesEmpty": "No release notes for this version",
+  "about.region": "About",
+  "about.unavailable": "Version information unavailable",
+  "about.version": "Version {version}",
+  "about.releasedOn": "Released on {date}",
+  "about.notes": "What’s New",
+  "about.collapse": "Collapse",
+  "about.expand": "Expand",
+  "about.category.new": "New",
+  "about.category.improved": "Improved",
+  "about.category.fixed": "Fixed",
+  "about.checkUpdates": "Check for Updates",
+  "about.checkUpdates.detail": "Download the latest version from the GitHub releases page"
+}

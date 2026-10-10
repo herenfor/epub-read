@@ -1,1 +1,23 @@
-{}
+{
+  "fonts.dialog": "Font Settings",
+  "fonts.title": "Font Settings",
+  "fonts.close": "Close font settings",
+  "fonts.current": "Current font: {name}",
+  "fonts.followBook": "Follow Book",
+  "fonts.search": "Search font names",
+  "fonts.tab.system": "System ({count})",
+  "fonts.tab.imported": "Imported ({count})",
+  "fonts.system.loading": "Loading system fonts...",
+  "fonts.system.failed": "Failed to load system fonts: {error}",
+  "fonts.unknownError": "Unknown error",
+  "fonts.retry": "Retry",
+  "fonts.unavailable": "Unavailable on this device: {name}",
+  "fonts.system.none": "No system fonts found",
+  "fonts.imported.none": "No imported fonts yet",
+  "fonts.delete": "Delete Font",
+  "fonts.drop": "Drop font files to import",
+  "fonts.importing": "Importing fonts...",
+  "fonts.dropRelease": "Release to import fonts",
+  "fonts.dropHint": "Supports TTF, OTF, WOFF, or WOFF2 fonts",
+  "fonts.import": "＋ Import Font"
+}

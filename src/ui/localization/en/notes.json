@@ -1,1 +1,11 @@
-{}
+{
+  "notes.edit": "Edit Note",
+  "notes.add": "Add Note",
+  "notes.closeTitled": "Close {title}",
+  "notes.placeholder": "Write your thoughts here...",
+  "notes.content": "Note content",
+  "notes.empty": "Note content cannot be empty",
+  "notes.tooLong": "Note content cannot exceed {limit} characters",
+  "notes.cancel": "Cancel",
+  "notes.save": "Save"
+}

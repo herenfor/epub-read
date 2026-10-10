@@ -1,1 +1,27 @@
-{}
+{
+  "footer.chapterN": "Chapter {n}",
+  "footer.scrub.chapterBook": "{title} · {percent}% of book",
+  "footer.scrub.page": "Page {page} of {total} · {title}",
+  "footer.chapterPercent": "{percent}% in chapter",
+  "footer.mobile.page": "p. {page}/{total} in ch.",
+  "footer.mobile.pageRange": "p. {first}–{last}/{total}",
+  "footer.mobile.chapters": "{current}/{total} ch.",
+  "footer.page": "Page {page} of {total} in chapter",
+  "footer.pageRange": "Pages {first}–{last} of {total} in chapter",
+  "footer.chapters": "Chapter {current} of {total}",
+  "footer.book": "Book {progress}",
+  "footer.preparing": "Preparing...",
+  "footer.region.mobile": "Reading tools & progress",
+  "footer.region.desktop": "Reading progress & navigation",
+  "footer.scrubber": "Book reading progress",
+  "footer.progress": "Reading progress",
+  "footer.actions": "Reading tools",
+  "footer.action.toc.label": "Contents, Bookmarks & Notes",
+  "footer.action.toc": "Contents",
+  "footer.action.search.label": "Search book",
+  "footer.action.search": "Search",
+  "footer.action.layout.label": "Appearance & typography",
+  "footer.action.layout": "Layout",
+  "footer.action.more.label": "More reading options",
+  "footer.action.more": "More"
+}
