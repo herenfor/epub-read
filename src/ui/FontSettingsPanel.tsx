@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent }
 import type { SystemFont, UserFont } from "./fontStore";
 import { createDragDepthTracker } from "./fontDrop";
 import { CloseIcon } from "./readerIcons";
+import { useUiText } from "./localization/UiLanguageProvider";
 
 export interface FontSettingsPanelProps {
   source?: "system" | "imported";
@@ -50,6 +51,7 @@ export function visibleFontWindow<T>(items: readonly T[], offset: number, size: 
 }
 
 export function FontSettingsPanel(props: FontSettingsPanelProps) {
+  const { t } = useUiText();
   const [query, setQuery] = useState("");
   const [tab, setTab] = useState<"system" | "imported">("system");
   const [scrollTop, setScrollTop] = useState(0);
@@ -121,35 +123,35 @@ export function FontSettingsPanel(props: FontSettingsPanelProps) {
   };
   const dragActive = htmlDragActive || props.nativeDragActive === true;
   const effectiveBusy = props.busy || dropBusy;
-  return <div className={`font-settings-panel${dragActive ? " font-drag-active" : ""}`} role="dialog" aria-modal="true" aria-label="字体设置"
+  return <div className={`font-settings-panel${dragActive ? " font-drag-active" : ""}`} role="dialog" aria-modal="true" aria-label={t("fonts.dialog")}
     onDragEnter={onDragEnter}
     onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = effectiveBusy ? "none" : "copy"; }}
     onDragLeave={onDragLeave} onDrop={onDrop}>
     <div className="drawer-drag-handle" aria-hidden="true" />
     <div className="menu-head">
       <div className="drawer-title-wrap">
-        <span>字体设置</span>
+        <span>{t("fonts.title")}</span>
       </div>
-      <button className="tb-btn tb-close" onClick={props.onClose} title="关闭字体设置" aria-label="关闭字体设置">
+      <button className="tb-btn tb-close" onClick={props.onClose} title={t("fonts.close")} aria-label={t("fonts.close")}>
         <CloseIcon size={14} />
       </button>
     </div>
     <div className="font-settings-current">
-      当前字体：{props.source === "system" || props.source === "imported" ? props.customFontName : "跟随书籍"}
+      {t("fonts.current", { name: (props.source === "system" || props.source === "imported" ? props.customFontName : undefined) ?? t("fonts.followBook") })}
     </div>
-    <button className={`font-settings-row${!props.source ? " active" : ""}`} onClick={props.onSelectBook}>跟随书籍{!props.source ? " ✓" : ""}</button>
-    <input className="font-search" placeholder="搜索字体名称" value={query}
+    <button className={`font-settings-row${!props.source ? " active" : ""}`} onClick={props.onSelectBook}>{t("fonts.followBook")}{!props.source ? " ✓" : ""}</button>
+    <input className="font-search" placeholder={t("fonts.search")} value={query}
       onChange={(event) => { setQuery(event.target.value); resetScroll(); }} />
     <div className="font-settings-tabs">
-      <button className={tab === "system" ? "active" : ""} onClick={() => selectTab("system")}>系统字体（{systems.length}）</button>
-      <button className={tab === "imported" ? "active" : ""} onClick={() => selectTab("imported")}>已导入（{imported.length}）</button>
+      <button className={tab === "system" ? "active" : ""} onClick={() => selectTab("system")}>{t("fonts.tab.system", { count: systems.length })}</button>
+      <button className={tab === "imported" ? "active" : ""} onClick={() => selectTab("imported")}>{t("fonts.tab.imported", { count: imported.length })}</button>
     </div>
     <div ref={scrollRef} className="font-settings-scroll" onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}>
-      {tab === "system" && props.systemFontsStatus === "loading" && <div className="font-empty">正在读取系统字体…</div>}
-      {tab === "system" && props.systemFontsStatus === "error" && <div className="font-empty">系统字体读取失败：{props.systemFontsError ?? "未知错误"}<br /><button className="menu-item" onClick={props.onLoadSystemFonts}>重试</button></div>}
-      {tab === "system" && props.systemFontsStatus !== "loading" && props.systemFontsStatus !== "error" && props.source === "system" && props.customFontName && props.systemFontsStatus === "ready" && !systems.some((font) => font.family === props.customFontName) && <div className="font-empty">当前设备不可用：{props.customFontName}</div>}
-      {tab === "system" && systems.length === 0 && props.systemFontsStatus === "ready" && <div className="font-empty">未找到系统字体</div>}
-      {tab === "imported" && imported.length === 0 && <div className="font-empty">尚未导入字体</div>}
+      {tab === "system" && props.systemFontsStatus === "loading" && <div className="font-empty">{t("fonts.system.loading")}</div>}
+      {tab === "system" && props.systemFontsStatus === "error" && <div className="font-empty">{t("fonts.system.failed", { error: props.systemFontsError ?? t("fonts.unknownError") })}<br /><button className="menu-item" onClick={props.onLoadSystemFonts}>{t("fonts.retry")}</button></div>}
+      {tab === "system" && props.systemFontsStatus !== "loading" && props.systemFontsStatus !== "error" && props.source === "system" && props.customFontName && props.systemFontsStatus === "ready" && !systems.some((font) => font.family === props.customFontName) && <div className="font-empty">{t("fonts.unavailable", { name: props.customFontName })}</div>}
+      {tab === "system" && systems.length === 0 && props.systemFontsStatus === "ready" && <div className="font-empty">{t("fonts.system.none")}</div>}
+      {tab === "imported" && imported.length === 0 && <div className="font-empty">{t("fonts.imported.none")}</div>}
       <div style={{ height: virtual.totalHeight, position: "relative" }}>
         <div style={{ height: virtual.top }} />
       {virtual.items.map((font) => tab === "system" ? <button key={(font as unknown as SystemFont).family}
@@ -157,15 +159,15 @@ export function FontSettingsPanel(props: FontSettingsPanelProps) {
         onClick={() => props.onSelectSystem((font as unknown as SystemFont).family)}>{(font as unknown as SystemFont).family}{props.source === "system" && props.customFontName === (font as unknown as SystemFont).family ? " ✓" : ""}</button> : <div key={(font as UserFont).id} className="font-settings-row-wrap">
         <button className={`font-settings-row${props.source === "imported" && props.customFontId === (font as UserFont).id ? " active" : ""}`}
           onClick={() => props.onSelectImported(font as UserFont)} title={(font as UserFont).fileName}>{(font as UserFont).family}{props.customFontId === (font as UserFont).id ? " ✓" : ""}</button>
-        <button className="font-delete" onClick={() => props.onDelete((font as UserFont).id)} disabled={effectiveBusy} title="删除字体">✕</button>
+        <button className="font-delete" onClick={() => props.onDelete((font as UserFont).id)} disabled={effectiveBusy} title={t("fonts.delete")}>✕</button>
       </div>)}
         <div style={{ height: virtual.bottom }} />
       </div>
     </div>
-    <div className="font-drop-zone" aria-live="polite" aria-label="拖入字体文件导入">
-      {effectiveBusy ? "正在导入字体…" : dragActive ? "松开以导入字体" : "可拖入 TTF、OTF、WOFF 或 WOFF2 字体"}
+    <div className="font-drop-zone" aria-live="polite" aria-label={t("fonts.drop")}>
+      {effectiveBusy ? t("fonts.importing") : dragActive ? t("fonts.dropRelease") : t("fonts.dropHint")}
     </div>
-    <button className="menu-item" onClick={() => inputRef.current?.click()} disabled={effectiveBusy}>＋ 导入字体</button>
+    <button className="menu-item" onClick={() => inputRef.current?.click()} disabled={effectiveBusy}>{t("fonts.import")}</button>
     <input ref={inputRef} type="file" accept=".ttf,.otf,.woff,.woff2" multiple hidden onChange={(event) => {
       const files = Array.from(event.target.files ?? []); void importFiles(files); event.target.value = "";
     }} />

@@ -5,6 +5,7 @@ import {
 } from "../../render/visual/readerVisualPreferences";
 import { RotateCcwIcon } from "../readerIcons";
 import "./readerVisualSettingsPanel.css";
+import { useUiText } from "../localization/UiLanguageProvider";
 
 export function isVisualCompareKey(key: string): boolean {
   return key === " " || key === "Enter";
@@ -53,6 +54,7 @@ function VisualSlider(props: VisualSliderProps) {
 }
 
 export function ReaderVisualSettingsPanel(props: ReaderVisualSettingsPanelProps) {
+  const { t } = useUiText();
   const [internalCompareOriginal, setInternalCompareOriginal] = useState(false);
   const compareOriginal = props.compareOriginal ?? internalCompareOriginal;
   const setCompareOriginal = (next: boolean): void => {
@@ -81,18 +83,18 @@ export function ReaderVisualSettingsPanel(props: ReaderVisualSettingsPanelProps)
 
   return (
     <>
-      <section className="rd-section reader-visual-panel" role="region" aria-label="画面滤镜">
-        <div className="aa-group-title">画面滤镜</div>
+      <section className="rd-section reader-visual-panel" role="region" aria-label={t("display.visual.section")}>
+        <div className="aa-group-title">{t("display.visual.title")}</div>
         <div className="aa-control-row">
           <div className="aa-detail-label-wrap">
-            <span className="aa-section-label">启用滤镜</span>
-            <span className="aa-detail-sub">总开关，同时控制色弱辅助；不重排章节</span>
+            <span className="aa-section-label">{t("display.visual.enable")}</span>
+            <span className="aa-detail-sub">{t("display.visual.enable.note")}</span>
           </div>
           <label className="aa-switch-label">
             <input
               type="checkbox"
               checked={props.value.enabled}
-              aria-label="启用画面滤镜"
+              aria-label={t("display.visual.enable.label")}
               onChange={(event) => commit({ enabled: event.currentTarget.checked })}
             />
             <span className="aa-switch-track" />
@@ -101,19 +103,19 @@ export function ReaderVisualSettingsPanel(props: ReaderVisualSettingsPanelProps)
 
         <div className={`rd-controls${props.value.enabled ? "" : " rd-disabled"}`} aria-disabled={!props.value.enabled}>
           <div className="aa-control-row">
-            <span className="aa-section-label">反色</span>
+            <span className="aa-section-label">{t("display.visual.invert")}</span>
             <label className="aa-switch-label">
               <input
                 type="checkbox"
                 checked={props.value.invert}
-                aria-label="反色/反相"
+                aria-label={t("display.visual.invert.label")}
                 onChange={(event) => commit({ invert: event.currentTarget.checked })}
               />
               <span className="aa-switch-track" />
             </label>
           </div>
           <VisualSlider
-            label="灰度"
+            label={t("display.visual.grayscale")}
             value={props.value.grayscale}
             min={0}
             max={100}
@@ -122,7 +124,7 @@ export function ReaderVisualSettingsPanel(props: ReaderVisualSettingsPanelProps)
             onValueChange={(grayscale) => commit({ grayscale })}
           />
           <VisualSlider
-            label="饱和度"
+            label={t("display.visual.saturation")}
             value={props.value.saturation}
             min={0}
             max={200}
@@ -131,7 +133,7 @@ export function ReaderVisualSettingsPanel(props: ReaderVisualSettingsPanelProps)
             onValueChange={(saturation) => commit({ saturation })}
           />
           <VisualSlider
-            label="锐化"
+            label={t("display.visual.sharpen")}
             value={props.value.sharpen}
             min={0}
             max={100}
@@ -140,7 +142,7 @@ export function ReaderVisualSettingsPanel(props: ReaderVisualSettingsPanelProps)
             onValueChange={(sharpen) => commit({ sharpen })}
           />
           <VisualSlider
-            label="暗化"
+            label={t("display.visual.dim")}
             value={props.value.dim}
             min={0}
             max={80}
@@ -157,13 +159,13 @@ export function ReaderVisualSettingsPanel(props: ReaderVisualSettingsPanelProps)
             onClick={() => props.onChange(resetVisualFilterPreferences(props.value))}
           >
             <RotateCcwIcon size={12} />
-            恢复默认
+            {t("display.visual.reset")}
           </button>
           <button
             type="button"
             className={`aa-mini-action-btn reader-visual-compare${compareOriginal ? " is-active" : ""}`}
             aria-pressed={compareOriginal}
-            title="按住临时查看原画面，松开恢复滤镜"
+            title={t("display.visual.compare.tip")}
             onPointerDown={beginCompare}
             onPointerUp={endCompare}
             onPointerCancel={endCompare}
@@ -173,7 +175,7 @@ export function ReaderVisualSettingsPanel(props: ReaderVisualSettingsPanelProps)
             onBlur={endCompare}
             onContextMenu={(event) => event.preventDefault()}
           >
-            按住查看原画面
+            {t("display.visual.compare")}
           </button>
         </div>
       </section>

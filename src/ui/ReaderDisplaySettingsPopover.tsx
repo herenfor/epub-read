@@ -3,6 +3,7 @@ import { MENU_CLOSE_MS } from "./menuMotion";
 import { ArrowLeftIcon, CloseIcon } from "./readerIcons";
 import "./aaPopover.css";
 import "./readerDisplaySettings.css";
+import { useUiText } from "./localization/UiLanguageProvider";
 
 export interface ReaderDisplaySettingsPopoverProps {
   /** 回到 Aa 主面板（不播放退场，主面板自带入场）。 */
@@ -16,6 +17,7 @@ export interface ReaderDisplaySettingsPopoverProps {
  * 手机底部面板与触摸尺寸），只替换头部与内容。
  */
 export function ReaderDisplaySettingsPopover({ onBack, onClose, children }: ReaderDisplaySettingsPopoverProps) {
+  const { t } = useUiText();
   const [isClosing, setIsClosing] = useState(false);
   const requestClose = useCallback(() => {
     setIsClosing(true);
@@ -36,25 +38,25 @@ export function ReaderDisplaySettingsPopover({ onBack, onClose, children }: Read
       <div
         className={`aa-popover aa-display-popover${isClosing ? " is-closing" : ""}`}
         role="dialog"
-        aria-label="字符与画面设置"
+        aria-label={t("display.dialog")}
       >
         <div className="aa-popover-header aa-display-header">
           <button
             type="button"
             className="aa-popover-close-btn"
             onClick={onBack}
-            title="返回排版与外观"
-            aria-label="返回"
+            title={t("display.back.tip")}
+            aria-label={t("display.back")}
           >
             <ArrowLeftIcon size={14} />
           </button>
-          <span className="aa-popover-title">字符与画面</span>
+          <span className="aa-popover-title">{t("display.title")}</span>
           <button
             type="button"
             className="aa-popover-close-btn"
             onClick={requestClose}
-            title="关闭设置 (Esc)"
-            aria-label="关闭"
+            title={t("display.close.tip")}
+            aria-label={t("display.close")}
           >
             <CloseIcon size={13} />
           </button>

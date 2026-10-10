@@ -1,6 +1,8 @@
 import type { CSSProperties } from "react";
 import { correctionMatrix, previewColor, type AssistKind } from "../../render/colorAssist/colorAssistCore";
 import "./colorAssistPanel.css";
+import { useUiText } from "../localization/UiLanguageProvider";
+import type { PlainMessageKey } from "../localization/core";
 
 export interface ColorAssistValue {
   kind: AssistKind;
@@ -14,30 +16,31 @@ export interface ColorAssistPanelProps {
 
 interface ColorAssistOption {
   kind: AssistKind;
-  label: string;
-  detail: string;
+  label: PlainMessageKey;
+  /** Translated subtitle, or a fixed technical name (Protan/Deutan/Tritan). */
+  detail: { key: PlainMessageKey } | { text: string };
 }
 
 export interface ColorAssistSwatch {
-  label: string;
+  label: PlainMessageKey;
   rgba: readonly [number, number, number, number];
 }
 
 export const COLOR_ASSIST_OPTIONS: readonly ColorAssistOption[] = [
-  { kind: "off", label: "关闭", detail: "不改变画面" },
-  { kind: "protan", label: "红色弱／红色盲辅助", detail: "Protan" },
-  { kind: "deutan", label: "绿色弱／绿色盲辅助", detail: "Deutan" },
-  { kind: "tritan", label: "蓝色弱／蓝色盲辅助", detail: "Tritan" },
+  { kind: "off", label: "display.assist.off", detail: { key: "display.assist.off.detail" } },
+  { kind: "protan", label: "display.assist.protan", detail: { text: "Protan" } },
+  { kind: "deutan", label: "display.assist.deutan", detail: { text: "Deutan" } },
+  { kind: "tritan", label: "display.assist.tritan", detail: { text: "Tritan" } },
 ];
 
 /** Small preview palette only; it never becomes a full-page CPU filter. */
 export const COLOR_ASSIST_PREVIEW_SWATCHES: readonly ColorAssistSwatch[] = [
-  { label: "红", rgba: [0.84, 0.20, 0.18, 1] },
-  { label: "黄", rgba: [0.93, 0.76, 0.16, 1] },
-  { label: "绿", rgba: [0.22, 0.70, 0.32, 1] },
-  { label: "青", rgba: [0.16, 0.68, 0.76, 1] },
-  { label: "蓝", rgba: [0.20, 0.36, 0.88, 1] },
-  { label: "洋红", rgba: [0.78, 0.22, 0.68, 1] },
+  { label: "display.assist.swatch.red", rgba: [0.84, 0.20, 0.18, 1] },
+  { label: "display.assist.swatch.yellow", rgba: [0.93, 0.76, 0.16, 1] },
+  { label: "display.assist.swatch.green", rgba: [0.22, 0.70, 0.32, 1] },
+  { label: "display.assist.swatch.cyan", rgba: [0.16, 0.68, 0.76, 1] },
+  { label: "display.assist.swatch.blue", rgba: [0.20, 0.36, 0.88, 1] },
+  { label: "display.assist.swatch.magenta", rgba: [0.78, 0.22, 0.68, 1] },
 ];
 
 export function normalizeColorAssistStrength(strength: number): number {
@@ -60,11 +63,12 @@ function rgbaToCss(rgba: readonly [number, number, number, number]): string {
 }
 
 export function ColorAssistPanel({ value, onChange }: ColorAssistPanelProps) {
+  const { t } = useUiText();
   const activeKind = value.kind;
   const strength = normalizeColorAssistStrength(value.strength);
   const strengthPercent = Math.round(strength * 100);
   const matrix = correctionMatrix(activeKind, strength);
-  const activeLabel = COLOR_ASSIST_OPTIONS.find((option) => option.kind === activeKind)?.label ?? "关闭";
+  const activeLabel = t(COLOR_ASSIST_OPTIONS.find((option) => option.kind === activeKind)?.label ?? "display.assist.off");
 
   const chooseKind = (kind: AssistKind) => {
     const next = selectColorAssistKind(value, kind);
@@ -72,10 +76,10 @@ export function ColorAssistPanel({ value, onChange }: ColorAssistPanelProps) {
   };
 
   return (
-    <section className="rd-section color-assist-panel" aria-label="色弱辅助">
-      <div className="aa-group-title">色弱辅助</div>
-      <p className="rd-note">把易混的色差移到更好分辨的颜色方向；只改变显示，不宣称修复视力。</p>
-      <div className="color-assist-options" role="group" aria-label="辅助类型">
+    <section className="rd-section color-assist-panel" aria-label={t("display.assist.section")}>
+      <div className="aa-group-title">{t("display.assist.title")}</div>
+      <p className="rd-note">{t("display.assist.note")}</p>
+      <div className="color-assist-options" role="group" aria-label={t("display.assist.kind")}>
         {COLOR_ASSIST_OPTIONS.map((option) => {
           const selected = option.kind === activeKind;
           return (
@@ -86,14 +90,14 @@ export function ColorAssistPanel({ value, onChange }: ColorAssistPanelProps) {
               aria-pressed={selected}
               onClick={() => chooseKind(option.kind)}
             >
-              <span className="color-assist-option-label">{option.label}</span>
-              <span className="color-assist-option-detail">{option.detail}</span>
+              <span className="color-assist-option-label">{t(option.label)}</span>
+              <span className="color-assist-option-detail">{"key" in option.detail ? t(option.detail.key) : option.detail.text}</span>
             </button>
           );
         })}
       </div>
       <label className="rd-range-row">
-        <span className="aa-section-label">强度</span>
+        <span className="aa-section-label">{t("display.assist.strength")}</span>
         <input
           type="range"
           className="rd-range"
@@ -102,25 +106,25 @@ export function ColorAssistPanel({ value, onChange }: ColorAssistPanelProps) {
           step="1"
           value={strengthPercent}
           disabled={activeKind === "off"}
-          aria-label="色弱辅助强度"
+          aria-label={t("display.assist.strength.label")}
           style={{ "--fill": `${activeKind === "off" ? 0 : strengthPercent}%` } as CSSProperties}
           onChange={(event) => onChange({ kind: activeKind, strength: normalizeColorAssistStrength(Number(event.target.value) / 100) })}
         />
         <output className="rd-range-value">{activeKind === "off" ? "—" : `${strengthPercent}%`}</output>
       </label>
-      <div className="color-assist-preview" aria-label={`同屏预览：上排原色，下排${activeLabel}辅助后`}>
-        <span className="color-assist-preview-label">原色</span>
+      <div className="color-assist-preview" aria-label={t("display.assist.preview", { mode: activeLabel })}>
+        <span className="color-assist-preview-label">{t("display.assist.original")}</span>
         <div className="color-assist-swatch-row">
           {COLOR_ASSIST_PREVIEW_SWATCHES.map((swatch) => (
             <span
               key={`original-${swatch.label}`}
               className="color-assist-swatch"
               style={{ backgroundColor: rgbaToCss(swatch.rgba) }}
-              title={`${swatch.label} 原色`}
+              title={t("display.assist.swatchOriginal", { color: t(swatch.label) })}
             />
           ))}
         </div>
-        <span className="color-assist-preview-label">辅助后</span>
+        <span className="color-assist-preview-label">{t("display.assist.after")}</span>
         <div className="color-assist-swatch-row">
           {COLOR_ASSIST_PREVIEW_SWATCHES.map((swatch) => {
             const assisted = previewColor(matrix, swatch.rgba);
@@ -129,13 +133,13 @@ export function ColorAssistPanel({ value, onChange }: ColorAssistPanelProps) {
                 key={`assisted-${swatch.label}`}
                 className="color-assist-swatch"
                 style={{ backgroundColor: rgbaToCss(assisted) }}
-                title={`${swatch.label} ${activeLabel}辅助后`}
+                title={t("display.assist.swatchAfter", { color: t(swatch.label), mode: activeLabel })}
               />
             );
           })}
         </div>
       </div>
-      <p className="rd-note">同时开启灰度时，色差会被抹去，辅助效果随之减弱。</p>
+      <p className="rd-note">{t("display.assist.grayscaleNote")}</p>
     </section>
   );
 }
