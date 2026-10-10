@@ -55,4 +55,3 @@ export function limitNotes(
   const safeLimit = Math.max(0, Math.floor(limit));
   return { items: sorted.slice(0, safeLimit), limited: sorted.length > safeLimit };
 }
-
