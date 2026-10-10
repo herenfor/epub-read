@@ -28,4 +28,19 @@ describe("UI message catalogs", () => {
       }
     }
   });
+
+  it("keeps the render and core layers free of the UI language module", async () => {
+    // @ts-expect-error The project intentionally does not include @types/node.
+    const { readdir, readFile } = await import("node:fs/promises");
+    const offenders: string[] = [];
+    for (const dir of ["src/render", "src/core"]) {
+      for (const entry of await readdir(dir, { recursive: true })) {
+        if (!/\.tsx?$/.test(entry) || /\.test\.tsx?$/.test(entry)) continue;
+        const source = await readFile(`${dir}/${entry}`, "utf8");
+        if (/from\s+["'][^"']*\/localization\//.test(source)) offenders.push(`${dir}/${entry}`);
+      }
+    }
+    // Text drawn inside the book frame is injected by the host (e.g. ChapterPaginator.setEndText).
+    expect(offenders).toEqual([]);
+  });
 });

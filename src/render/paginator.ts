@@ -93,7 +93,14 @@ import {
   resolveSpreadReadingArea,
   type SpreadReadingArea,
 } from "./spreadReadingArea";
-import { uiText } from "../ui/localization/UiLanguageProvider";
+
+/** 滚动模式全书末尾提示的文案；由界面层按当前界面语言注入，分页核心不依赖语言模块。 */
+export interface ReaderEndText {
+  title: string;
+  hint: string;
+}
+
+const DEFAULT_READER_END_TEXT: ReaderEndText = { title: "全书完", hint: "已读完全部章节" };
 
 /** 常规布局应远早于此完成；极端字体/引擎停滞时只解除隐藏，不伪造 ready。 */
 const INITIAL_RENDER_GATE_TIMEOUT_MS = 20_000;
@@ -2455,6 +2462,7 @@ export class ChapterPaginator {
   private scrollWheelResetTimer: number | undefined;
   private hasNextChapter = true;
   private hasPrevChapter = true;
+  private endText: ReaderEndText = DEFAULT_READER_END_TEXT;
   private lockedReverseDir: 1 | -1 | 0 = 0;
   private reverseLockUntil = 0;
   private sameDirThrottleUntil = 0;
@@ -3398,6 +3406,21 @@ export class ChapterPaginator {
 
   setSelectionContextMenuHandler(handler?: (payload: SelectionContextPayload | null) => void): void {
     this.selectionContextMenuHandler = handler;
+  }
+
+  /**
+   * 更新全书末尾提示文案。已渲染的提示只改文字，不重排、不改滚动位置；
+   * 提示不计入 contentHeight（见 getContinuousContentHeight）。
+   */
+  setEndText(text: ReaderEndText): void {
+    if (text.title === this.endText.title && text.hint === this.endText.hint) return;
+    this.endText = { title: text.title, hint: text.hint };
+    const existing = this.viewer?.querySelector?.('[data-reader="chapter-end"]');
+    if (!existing) return;
+    const title = existing.querySelector(".chapter-end-divider > span");
+    const hint = existing.querySelector(".chapter-end-hint");
+    if (title) title.textContent = this.endText.title;
+    if (hint) hint.textContent = this.endText.hint;
   }
 
   /** 清除 iframe 内原生文本选区（关闭选区菜单或进入笔记编辑时使用）。 */
@@ -6396,13 +6419,13 @@ export class ChapterPaginator {
     const divider = this.contentDoc.createElement("div");
     divider.className = "chapter-end-divider";
     const span = this.contentDoc.createElement("span");
-    span.textContent = uiText("readerMisc.bookEnd");
+    span.textContent = this.endText.title;
     divider.appendChild(span);
     endEl.appendChild(divider);
 
     const hint = this.contentDoc.createElement("div");
     hint.className = "chapter-end-hint";
-    hint.textContent = uiText("readerMisc.bookEnd.hint");
+    hint.textContent = this.endText.hint;
     endEl.appendChild(hint);
 
     this.viewer.appendChild(endEl);

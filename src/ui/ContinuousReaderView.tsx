@@ -27,6 +27,7 @@ import {
   type ReadingAnchor,
   type ReadingAnchorAndContentY,
   type ResolvedContentFraction,
+  type ReaderEndText,
   type RestoreReportTicket,
 } from "../render/paginator";
 import type { ResourceServer } from "../render/resources";
@@ -77,7 +78,7 @@ import {
   sameRenderingSettings,
   type ReaderHandle,
 } from "./ReaderView";
-import { uiText } from "./localization/UiLanguageProvider";
+import { useUiText } from "./localization/UiLanguageProvider";
 
 export interface ContinuousReaderViewProps {
   book: Book;
@@ -305,6 +306,15 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
       onImageActivation,
       onPreciseNavigationStatus,
     } = props;
+
+    const { t } = useUiText();
+    // 全书完提示画在 iframe 内，由分页核心持有；语言切换时就地改字，不重载章节。
+    const endText = useMemo<ReaderEndText>(
+      () => ({ title: t("readerMisc.bookEnd"), hint: t("readerMisc.bookEnd.hint") }),
+      [t],
+    );
+    const endTextRef = useRef(endText);
+    endTextRef.current = endText;
 
     const inputPausedRef = useRef(inputPaused === true);
     inputPausedRef.current = inputPaused === true;
@@ -1526,6 +1536,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
         // 仍由 ChapterLoadGate 票据路径负责，这里不重复结束票据或重报就绪。
         // 只注册一次转发，避免旧槽位持有创建时的 V / 几何闭包。
         paginator.setLayoutSettledHandler(() => layoutSettledRef.current(key));
+        paginator.setEndText(endTextRef.current);
         const latestProjection = projectionReloadCoordinatorRef.current?.current();
         paginator.setTextProjectionPreferences?.(
           latestProjection?.preferences ?? DEFAULT_TEXT_PROJECTION_PREFERENCES,
@@ -1836,6 +1847,11 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
     // T-1 配置变化：所有存活槽位统一换版本，按同一阅读点重载并重测章节高度。
     // 同一 version 只更新 latest ref；compiled 稍后抵达不会先取消再跳过。
     const appliedProjectionVersionRef = useRef<string | null>(null);
+    useEffect(() => {
+      for (const slot of slotsRef.current.values()) slot.paginator.setEndText(endText);
+      auxPaginatorRef.current?.setEndText(endText);
+    }, [endText]);
+
     useEffect(() => {
       const coordinator = projectionReloadCoordinatorRef.current;
       if (!coordinator) return;
@@ -2406,6 +2422,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
                 () => props.onDisplayReady?.(restoreTicketRef.current)
               );
               auxPaginatorRef.current = paginator;
+              paginator.setEndText(endTextRef.current);
               const latestProjection = projectionReloadCoordinatorRef.current?.current();
               paginator.setTextProjectionPreferences?.(
                 latestProjection?.preferences ?? DEFAULT_TEXT_PROJECTION_PREFERENCES,
@@ -2476,7 +2493,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
             const isReady = slot?.status === "ready";
             const isError = slot?.status === "error";
             const item = linearItems[p.box.index];
-            const chapterTitle = findChapterTitle(book.toc, item?.path ?? "", book) ?? uiText("readerMisc.chapterN", { n: p.box.index + 1 });
+            const chapterTitle = findChapterTitle(book.toc, item?.path ?? "", book) ?? t("readerMisc.chapterN", { n: p.box.index + 1 });
 
             return (
               <div
@@ -2495,13 +2512,13 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
                 {!isReady && !isError && (
                   <div className="chapter-placeholder">
                     <span className="chapter-placeholder-title">{chapterTitle}</span>
-                    <span className="chapter-placeholder-hint">{uiText("readerMisc.chapter.preparing")}</span>
+                    <span className="chapter-placeholder-hint">{t("readerMisc.chapter.preparing")}</span>
                   </div>
                 )}
                 {isError && (
                   <div className="chapter-placeholder">
                     <span className="chapter-placeholder-title">{chapterTitle}</span>
-                    <span className="chapter-placeholder-error">{uiText("readerMisc.chapter.failed")}</span>
+                    <span className="chapter-placeholder-error">{t("readerMisc.chapter.failed")}</span>
                     <button
                       type="button"
                       className="chapter-retry-btn"
@@ -2513,7 +2530,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
                         }
                       }}
                     >
-                      {uiText("readerMisc.chapter.retry")}
+                      {t("readerMisc.chapter.retry")}
                     </button>
                   </div>
                 )}
