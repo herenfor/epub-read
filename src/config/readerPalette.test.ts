@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { parseHTML } from "linkedom";
 import { READER_PALETTES } from "./readerPalette";
@@ -9,12 +8,14 @@ import { THEME_PALETTES } from "../ui/AaPopover";
 const themes: Theme[] = ["light", "sepia", "gray", "dark"];
 
 describe("reader palette boundaries", () => {
-  it("keeps application colors and Aa previews aligned with their semantic palette", () => {
-    const css = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
+  it("keeps application colors and Aa previews aligned with their semantic palette", async () => {
+    // @ts-expect-error The project intentionally does not include @types/node.
+    const { readFile } = await import("node:fs/promises");
+    const css = await readFile(new URL("../styles.css", import.meta.url), "utf8");
     for (const theme of themes) {
       const palette = READER_PALETTES[theme];
       const selector = theme === "light" ? ":root" : `[data-theme="${theme}"]`;
-      const block = css.slice(css.indexOf(`${selector} {`)).split("}")[0];
+      const block = css.slice(css.indexOf(`\n${selector} {`)).split("}")[0];
       expect(block).toContain(`--bg: ${palette.background};`);
       expect(block).toContain(`--fg: ${palette.uiForeground};`);
       expect(THEME_PALETTES.find((preview) => preview.id === theme)).toMatchObject({
