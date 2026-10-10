@@ -255,6 +255,7 @@ import {
   writeProgress,
   readSavedSettings,
   writeSavedSettings,
+  toSavedReaderSettings,
   type SavedProgress,
 } from "./ui/storage";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -5134,48 +5135,8 @@ export default function App() {
 
   // ---- 设置持久化 ----
   useEffect(() => {
-    writeSavedSettings({
-      fontSizePx: settings.fontSizePx,
-      theme: settings.theme,
-      uiScale,
-      lineHeight: settings.lineHeight,
-      fontWeight: settings.fontWeight,
-      letterSpacingPx: settings.letterSpacingPx,
-      wordSpacingPx: settings.wordSpacingPx,
-      customFontName: settings.customFontName,
-      fontSource: settings.fontSource,
-      customFontId: settings.customFontId,
-      customCss: settings.customCss,
-      forceHorizontal: settings.forceHorizontal === true,
-      preloadNextChapter: settings.preloadNextChapter === true,
-      turnAnimation: normalizeTurnAnimation(settings.turnAnimation),
-      readingMode: settings.readingMode === "scroll" ? "scroll" : "paginated",
-      pageMarginsPx: settings.pageMarginsPx,
-      columnsPerView: settings.columnsPerView === 2 ? 2 : 1,
-      gapPx: settings.gapPx,
-      spreadGapMode: settings.spreadGapMode ?? "auto",
-    });
-  }, [
-    settings.fontSizePx,
-    settings.theme,
-    settings.lineHeight,
-    settings.fontWeight,
-    settings.letterSpacingPx,
-    settings.wordSpacingPx,
-    settings.customFontName,
-    settings.fontSource,
-    settings.customFontId,
-    settings.customCss,
-    settings.forceHorizontal,
-    settings.preloadNextChapter,
-    settings.turnAnimation,
-    settings.readingMode,
-    settings.pageMarginsPx,
-    settings.columnsPerView,
-    settings.gapPx,
-    settings.spreadGapMode,
-    uiScale,
-  ]);
+    writeSavedSettings(toSavedReaderSettings(settings, uiScale));
+  }, [settings, uiScale]);
 
   const changeTheme = (theme: Theme): void => {
     setSettings((s) => ({ ...s, theme }));

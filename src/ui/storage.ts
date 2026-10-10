@@ -1,6 +1,6 @@
 import { sanitizePersistedTextAnchor } from "../render/textAnchor";
 import type { MediaReadingAnchor } from "../render/paginator";
-import type { PageMarginsPx, ReadingMode, SpreadGapMode } from "../render/settings";
+import { normalizeTurnAnimation, type PageMarginsPx, type ReadingMode, type ReaderSettings, type SpreadGapMode } from "../render/settings";
 
 const PREFIX = "epub-reader:";
 
@@ -82,6 +82,31 @@ export interface SavedSettings {
   gapPx?: number;
   /** 双页中缝模式；旧设置缺省，读取边界按 gap 迁移 */
   spreadGapMode?: SpreadGapMode;
+}
+
+/** Persist user choices only. Resolved fonts and session blob URLs stay in memory. */
+export function toSavedReaderSettings(settings: ReaderSettings, uiScale: number): SavedSettings {
+  return {
+    fontSizePx: settings.fontSizePx,
+    theme: settings.theme,
+    uiScale,
+    lineHeight: settings.lineHeight,
+    fontWeight: settings.fontWeight,
+    letterSpacingPx: settings.letterSpacingPx,
+    wordSpacingPx: settings.wordSpacingPx,
+    customFontName: settings.customFontName,
+    fontSource: settings.fontSource,
+    customFontId: settings.customFontId,
+    customCss: settings.customCss,
+    forceHorizontal: settings.forceHorizontal === true,
+    preloadNextChapter: settings.preloadNextChapter === true,
+    turnAnimation: normalizeTurnAnimation(settings.turnAnimation),
+    readingMode: settings.readingMode === "scroll" ? "scroll" : "paginated",
+    pageMarginsPx: settings.pageMarginsPx,
+    columnsPerView: settings.columnsPerView === 2 ? 2 : 1,
+    gapPx: settings.gapPx,
+    spreadGapMode: settings.spreadGapMode ?? "auto",
+  };
 }
 
 export function readSavedSettings(): SavedSettings {
