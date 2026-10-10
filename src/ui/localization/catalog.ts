@@ -17,6 +17,10 @@ import { search } from "./catalogs/search";
 import { aa } from "./catalogs/aa";
 import { fonts } from "./catalogs/fonts";
 import { display } from "./catalogs/display";
+import { about } from "./catalogs/about";
+import { cache } from "./catalogs/cache";
+import { saveFile } from "./catalogs/saveFile";
+import { importProgress } from "./catalogs/importProgress";
 import commonEn from "./en/common.json";
 import folderEn from "./en/folder.json";
 import languageEn from "./en/language.json";
@@ -31,8 +35,12 @@ import searchEn from "./en/search.json";
 import aaEn from "./en/aa.json";
 import fontsEn from "./en/fonts.json";
 import displayEn from "./en/display.json";
+import aboutEn from "./en/about.json";
+import cacheEn from "./en/cache.json";
+import saveFileEn from "./en/saveFile.json";
+import importProgressEn from "./en/importProgress.json";
 
-export const CATALOGS = [common, folder, language, reader, startup, titlebar, footer, sidebar, notes, imageViewer, search, aa, fonts, display] as const;
+export const CATALOGS = [common, folder, language, reader, startup, titlebar, footer, sidebar, notes, imageViewer, search, aa, fonts, display, about, cache, saveFile, importProgress] as const;
 
 export const zhCN = {
   ...common.zh,
@@ -49,6 +57,10 @@ export const zhCN = {
   ...aa.zh,
   ...fonts.zh,
   ...display.zh,
+  ...about.zh,
+  ...cache.zh,
+  ...saveFile.zh,
+  ...importProgress.zh,
 };
 
 export type MessageKey = keyof typeof zhCN;
@@ -69,6 +81,10 @@ export const en: Partial<Record<MessageKey, string>> = {
   ...aaEn,
   ...fontsEn,
   ...displayEn,
+  ...aboutEn,
+  ...cacheEn,
+  ...saveFileEn,
+  ...importProgressEn,
 };
 
 /** Namespace → English file contents, for the integrity test and translation tooling. */
@@ -87,4 +103,8 @@ export const EN_FILES: Readonly<Record<string, Readonly<Record<string, string>>>
   aa: aaEn,
   fonts: fontsEn,
   display: displayEn,
+  about: aboutEn,
+  cache: cacheEn,
+  saveFile: saveFileEn,
+  importProgress: importProgressEn,
 };

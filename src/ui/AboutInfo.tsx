@@ -7,12 +7,13 @@ import { getAppBuildSession, type AppBuildSession } from "../config/appBuildSess
 import type { AppPlatform } from "../config/platformValue";
 import {
   findReleaseNote,
-  RELEASE_CATEGORY_LABELS,
   RELEASES_PAGE_URL,
   type ReleaseNote,
   type ReleaseNoteCategory,
 } from "../config/releaseNotes";
 import "./aboutInfo.css";
+import { uiText, useUiText } from "./localization/UiLanguageProvider";
+import type { PlainMessageKey } from "./localization/core";
 
 export interface AboutProjection {
   productName: "EPUB Reader";
@@ -32,6 +33,11 @@ const PLATFORM_LABELS: Record<AppPlatform, string> = {
 };
 
 const RELEASE_CATEGORIES: readonly ReleaseNoteCategory[] = ["new", "improved", "fixed"];
+const RELEASE_CATEGORY_KEYS: Readonly<Record<ReleaseNoteCategory, PlainMessageKey>> = {
+  new: "about.category.new",
+  improved: "about.category.improved",
+  fixed: "about.category.fixed",
+};
 
 function editionLabel(edition: AppEdition): "Core" | "AI" {
   return edition === "ai" ? "AI" : "Core";
@@ -57,7 +63,7 @@ export function projectAboutInfo(
       productName: "EPUB Reader",
       version: buildInfo.version,
       edition,
-      channel: session.platform === "web" ? "Web 预览" : `${platform} 原生`,
+      channel: session.platform === "web" ? uiText("about.webPreview") : uiText("about.native", { platform }),
     };
   }
 
@@ -65,13 +71,14 @@ export function projectAboutInfo(
     productName: "EPUB Reader",
     version: compiled.version,
     edition: editionLabel(compiled.edition),
-    channel: "Web 预览",
+    channel: uiText("about.webPreview"),
   };
 }
 
 function ReleaseNoteItems({ note }: { note: ReleaseNote }) {
+  const { t } = useUiText();
   if (note.items.length === 0) {
-    return <p className="about-release-empty">暂无此版本的说明</p>;
+    return <p className="about-release-empty">{t("about.notesEmpty")}</p>;
   }
 
   return (
@@ -81,7 +88,7 @@ function ReleaseNoteItems({ note }: { note: ReleaseNote }) {
         if (items.length === 0) return null;
         return (
           <div className="about-release-group" key={category}>
-            <div className="about-release-group-title">{RELEASE_CATEGORY_LABELS[category]}</div>
+            <div className="about-release-group-title">{t(RELEASE_CATEGORY_KEYS[category])}</div>
             <ul className="about-release-list">
               {items.map((item, index) => (
                 <li key={`${category}-${index}`}>{item.text}</li>
@@ -104,6 +111,7 @@ function openReleasesPage(): void {
 }
 
 export function AboutInfo() {
+  const { t } = useUiText();
   const [releaseNotesOpen, setReleaseNotesOpen] = useState(false);
   const releaseNotesPanelId = useId();
   const projection = projectAboutInfo(getAppBuildSession(), {
@@ -113,8 +121,8 @@ export function AboutInfo() {
 
   if (!projection) {
     return (
-      <section className="about-info" aria-label="关于">
-        <div className="about-info-unavailable">版本信息不可用</div>
+      <section className="about-info" aria-label={t("about.region")}>
+        <div className="about-info-unavailable">{t("about.unavailable")}</div>
       </section>
     );
   }
@@ -122,14 +130,14 @@ export function AboutInfo() {
   const currentRelease = findReleaseNote(projection.version);
 
   return (
-    <section className="about-info" aria-label="关于">
+    <section className="about-info" aria-label={t("about.region")}>
       <div className="about-product">{projection.productName}</div>
       <div className="about-version-row">
-        <span className="about-version">版本 {projection.version}</span>
+        <span className="about-version">{t("about.version", { version: projection.version })}</span>
         <span className="about-edition">{projection.edition}</span>
         {currentRelease?.releasedOn && (
           <time className="about-release-date" dateTime={currentRelease.releasedOn}>
-            {currentRelease.releasedOn} 发布
+            {t("about.releasedOn", { date: currentRelease.releasedOn })}
           </time>
         )}
       </div>
@@ -145,8 +153,8 @@ export function AboutInfo() {
           setReleaseNotesOpen((open) => !open);
         }}
       >
-        <span>本版更新</span>
-        <span className="about-release-toggle-state">{releaseNotesOpen ? "收起" : "展开"}</span>
+        <span>{t("about.notes")}</span>
+        <span className="about-release-toggle-state">{releaseNotesOpen ? t("about.collapse") : t("about.expand")}</span>
       </button>
 
       {releaseNotesOpen && (
@@ -154,7 +162,7 @@ export function AboutInfo() {
           {currentRelease ? (
             <ReleaseNoteItems note={currentRelease} />
           ) : (
-            <p className="about-release-empty">暂无此版本的说明</p>
+            <p className="about-release-empty">{t("about.notesEmpty")}</p>
           )}
         </div>
       )}
@@ -168,8 +176,8 @@ export function AboutInfo() {
         }}
       >
         <span>
-          <strong>检查更新</strong>
-          <small>在 GitHub 发布页下载最新版本</small>
+          <strong>{t("about.checkUpdates")}</strong>
+          <small>{t("about.checkUpdates.detail")}</small>
         </span>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M14 5h5v5M19 5l-8 8M18 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h4" />
