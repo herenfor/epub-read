@@ -1,6 +1,7 @@
 import { useId, type RefObject } from "react";
 import { codePointCount, MAX_FOLDER_NAME_CODE_POINTS } from "./libraryOrganization";
 import { folderNameDraftError } from "./folderNameDraft";
+import { useUiText } from "./localization/UiLanguageProvider";
 
 /** Keep the complete draft, including IME/paste input; never truncate a user's name. */
 export function FolderNameField(props: {
@@ -11,6 +12,7 @@ export function FolderNameField(props: {
   placeholder: string;
   inputRef?: RefObject<HTMLInputElement>;
 }) {
+  const { t } = useUiText();
   const hintId = useId();
   const count = codePointCount(props.value.trim());
   const overflow = count > MAX_FOLDER_NAME_CODE_POINTS;
@@ -20,7 +22,7 @@ export function FolderNameField(props: {
       ref={props.inputRef}
       className="shelf-dialog-input"
       type="text"
-      aria-label="文件夹名称"
+      aria-label={t("folder.name.label")}
       aria-describedby={hintId}
       aria-invalid={!!error}
       placeholder={props.placeholder}
@@ -29,7 +31,7 @@ export function FolderNameField(props: {
       onChange={(event) => props.onChange(event.target.value)}
     />
     <div id={hintId} className="shelf-folder-name-hint">
-      <span>{count}/{MAX_FOLDER_NAME_CODE_POINTS} 个字符</span>
+      <span>{t("folder.name.count", { count, limit: MAX_FOLDER_NAME_CODE_POINTS })}</span>
       {error && <span className="shelf-dialog-error" role="alert">{error}</span>}
     </div>
   </>;

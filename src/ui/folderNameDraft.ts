@@ -1,4 +1,5 @@
 import { codePointCount, MAX_FOLDER_NAME_CODE_POINTS } from "./libraryOrganization";
+import { uiText } from "./localization/UiLanguageProvider";
 
 export type FolderNameDraft =
   | { readonly ok: true; readonly name: string; readonly count: number; readonly unchanged: boolean }
@@ -23,8 +24,8 @@ export function validateFolderNameDraft(
 
 export function folderNameDraftError(code: "empty" | "too-long" | "duplicate"): string {
   switch (code) {
-    case "empty": return "文件夹名称不能为空";
-    case "too-long": return `名称不能超过 ${MAX_FOLDER_NAME_CODE_POINTS} 个字符`;
-    case "duplicate": return "已存在同名文件夹";
+    case "empty": return uiText("folder.name.empty");
+    case "too-long": return uiText("folder.name.too-long", { limit: MAX_FOLDER_NAME_CODE_POINTS });
+    case "duplicate": return uiText("folder.name.duplicate");
   }
 }

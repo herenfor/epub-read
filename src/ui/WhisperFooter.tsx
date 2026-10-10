@@ -7,6 +7,7 @@ import {
   type ContentAxis,
   type ScrubUiState,
 } from "./readerProgressAxis";
+import { useUiText } from "./localization/UiLanguageProvider";
 
 export interface WhisperFooterChapterTick {
   spineIndex: number;
@@ -194,6 +195,7 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
   moreOpen = false,
   statusAccessory,
 }) => {
+  const { t } = useUiText();
   const [isHovered, setIsHovered] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -288,23 +290,23 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
       const point = contentAxis.locate(rawPct);
       if (point) {
         const tick = chapterTicks.find((t) => t.spineIndex === point.spineIndex);
-        const title = tick?.title || (point.spineIndex === chapterIndex ? chapterTitle : `第 ${point.spineIndex + 1} 章`);
+        const title = tick?.title || (point.spineIndex === chapterIndex ? chapterTitle : t("footer.chapterN", { n: point.spineIndex + 1 }));
         if (readingMode === "scroll") {
           return {
             pct: pct100,
-            text: `${title || `第 ${point.spineIndex + 1} 章`} · 全书 ${Math.round(pct100)}%`,
+            text: t("footer.scrub.chapterBook", { title: title || t("footer.chapterN", { n: point.spineIndex + 1 }), percent: Math.round(pct100) }),
           };
         }
         if (point.spineIndex === chapterIndex && pageCount > 1) {
           const pageInChapter = Math.min(pageCount - 1, Math.max(0, Math.round(point.fraction * (pageCount - 1))));
           return {
             pct: pct100,
-            text: `第 ${pageInChapter + 1} / ${pageCount} 页 · ${title || ""}`,
+            text: t("footer.scrub.page", { page: pageInChapter + 1, total: pageCount, title: title || "" }),
           };
         }
         return {
           pct: pct100,
-          text: `${title || `第 ${point.spineIndex + 1} 章`} · 全书 ${Math.round(pct100)}%`,
+          text: t("footer.scrub.chapterBook", { title: title || t("footer.chapterN", { n: point.spineIndex + 1 }), percent: Math.round(pct100) }),
         };
       }
     }
@@ -321,11 +323,11 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
       if (!targetTick) targetTick = chapterTicks[0];
     }
     const targetSpine = targetTick?.spineIndex ?? Math.min(Math.max(0, totalChapters - 1), Math.floor(rawPct * Math.max(1, totalChapters)));
-    const targetTitle = targetTick?.title || (targetSpine === chapterIndex ? chapterTitle : `第 ${targetSpine + 1} 章`);
+    const targetTitle = targetTick?.title || (targetSpine === chapterIndex ? chapterTitle : t("footer.chapterN", { n: targetSpine + 1 }));
 
     return {
       pct: pct100,
-      text: `${targetTitle || `第 ${targetSpine + 1} 章`} · 全书 ${Math.round(pct100)}%`,
+      text: t("footer.scrub.chapterBook", { title: targetTitle || t("footer.chapterN", { n: targetSpine + 1 }), percent: Math.round(pct100) }),
     };
   };
 
@@ -502,44 +504,44 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
   const textContent = (() => {
     if (mobile) {
       const parts: string[] = [];
-      if (readingMode === "scroll") parts.push(`本章 ${currentChapterProgressPct}%`);
+      if (readingMode === "scroll") parts.push(t("footer.chapterPercent", { percent: currentChapterProgressPct }));
       else if (leafRange) {
         parts.push(leafRange.first === leafRange.last
-          ? `本章 ${leafRange.first}/${leafRange.total} 页`
-          : `本章 ${leafRange.first}–${leafRange.last}/${leafRange.total} 页`);
-      } else parts.push(`本章 ${currentPage + 1}/${pageCount || 1} 页`);
-      if (totalChapters > 1) parts.push(`${chapterIndex + 1}/${totalChapters} 章`);
-      parts.push(`全书 ${wholeBookLabel()}`);
+          ? t("footer.mobile.page", { page: leafRange.first, total: leafRange.total })
+          : t("footer.mobile.pageRange", { first: leafRange.first, last: leafRange.last, total: leafRange.total }));
+      } else parts.push(t("footer.mobile.page", { page: currentPage + 1, total: pageCount || 1 }));
+      if (totalChapters > 1) parts.push(t("footer.mobile.chapters", { current: chapterIndex + 1, total: totalChapters }));
+      parts.push(t("footer.book", { progress: wholeBookLabel() }));
       return parts.join(" · ");
     }
     const parts: string[] = [];
     if (readingMode === "scroll") {
-      parts.push(`本章 ${currentChapterProgressPct}%`);
+      parts.push(t("footer.chapterPercent", { percent: currentChapterProgressPct }));
     } else if (leafRange) {
       if (leafRange.first === leafRange.last) {
-        parts.push(`本章 ${leafRange.first} / ${leafRange.total} 页`);
+        parts.push(t("footer.page", { page: leafRange.first, total: leafRange.total }));
       } else {
-        parts.push(`本章 ${leafRange.first}–${leafRange.last} / ${leafRange.total} 页`);
+        parts.push(t("footer.pageRange", { first: leafRange.first, last: leafRange.last, total: leafRange.total }));
       }
     } else {
-      parts.push(`本章 ${currentPage + 1} / ${pageCount || 1} 页`);
+      parts.push(t("footer.page", { page: currentPage + 1, total: pageCount || 1 }));
     }
 
     if (totalChapters > 1) {
-      parts.push(`第 ${chapterIndex + 1}/${totalChapters} 章`);
+      parts.push(t("footer.chapters", { current: chapterIndex + 1, total: totalChapters }));
     }
 
     if (scrubState) {
       if (scrubState.actual) {
-        parts.push(`全书 ${labelProgressPct(scrubState.actual)}%`);
+        parts.push(t("footer.book", { progress: `${labelProgressPct(scrubState.actual)}%` }));
       } else if (activeRatio !== null) {
         const atEnd = typeof bookProgressPct === "number" && bookProgressPct >= 100;
-        parts.push(`全书 ${atEnd ? 100 : Math.min(99, Math.round(activeRatio * 100))}%`);
+        parts.push(t("footer.book", { progress: `${atEnd ? 100 : Math.min(99, Math.round(activeRatio * 100))}%` }));
       } else {
-        parts.push("准备进度…");
+        parts.push(t("footer.preparing"));
       }
     } else {
-      parts.push(`全书 ${Math.round(fallbackWholeBookPct)}%`);
+      parts.push(t("footer.book", { progress: `${Math.round(fallbackWholeBookPct)}%` }));
     }
 
     return parts.join(" · ");
@@ -574,7 +576,7 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
         onMouseEnter={mobile ? undefined : handleMouseEnter}
         onMouseLeave={mobile ? undefined : handleMouseLeave}
         role="contentinfo"
-        aria-label={mobile ? "阅读工具与进度" : "阅读进度与导览"}
+        aria-label={mobile ? t("footer.region.mobile") : t("footer.region.desktop")}
       >
         {/* 悬停展开的 Scrubber 互动条（24px 宽幅热区） */}
         <div className="whisper-scrubber-wrap">
@@ -588,7 +590,7 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
             onLostPointerCapture={handleLostPointerCapture}
             onKeyDown={handleKeyDown}
             role="slider"
-            aria-label="全书阅读进度"
+            aria-label={t("footer.scrubber")}
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={Math.round(activePct)}
@@ -633,7 +635,7 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
 
         {/* 底部克制平静文本：手机也保留精简阅读位置。 */}
         <div className="whisper-meta-line">
-          <span className="whisper-calm-text" title={chapterTitle || "阅读进度"}>
+          <span className="whisper-calm-text" title={chapterTitle || t("footer.progress")}>
             {textContent}
           </span>
           {statusAccessory}
@@ -641,50 +643,50 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
 
         {/* 手机/平板触摸底部动作行；由 App 与顶栏共用 toolsVisible。 */}
         {mobile && (
-          <nav className="mobile-reader-actions" aria-label="阅读工具">
+          <nav className="mobile-reader-actions" aria-label={t("footer.actions")}>
             <button
               type="button"
               className={`mobile-reader-action${sidebarOpen ? " active" : ""}`}
               onClick={onToggleSidebar}
-              aria-label="目录、书签与笔记"
+              aria-label={t("footer.action.toc.label")}
               aria-expanded={sidebarOpen}
               disabled={!onToggleSidebar}
             >
               <BookOpenIcon size={19} />
-              <span>目录</span>
+              <span>{t("footer.action.toc")}</span>
             </button>
             <button
               type="button"
               className={`mobile-reader-action${searchOpen ? " active" : ""}`}
               onClick={onOpenSearch}
-              aria-label="搜索正文"
+              aria-label={t("footer.action.search.label")}
               aria-expanded={searchOpen}
               disabled={!onOpenSearch}
             >
               <SearchIcon size={19} />
-              <span>搜索</span>
+              <span>{t("footer.action.search")}</span>
             </button>
             <button
               type="button"
               className={`mobile-reader-action${appearanceOpen ? " active" : ""}`}
               onClick={onToggleAppearance}
-              aria-label="外观与排版设置"
+              aria-label={t("footer.action.layout.label")}
               aria-expanded={appearanceOpen}
               disabled={!onToggleAppearance}
             >
               <span className="mobile-reader-aa" aria-hidden="true">Aa</span>
-              <span>排版</span>
+              <span>{t("footer.action.layout")}</span>
             </button>
             <button
               type="button"
               className={`mobile-reader-action${moreOpen ? " active" : ""}`}
               onClick={onOpenMore}
-              aria-label="更多阅读操作"
+              aria-label={t("footer.action.more.label")}
               aria-expanded={moreOpen}
               disabled={!onOpenMore}
             >
               <MenuHamburgerIcon size={19} />
-              <span>更多</span>
+              <span>{t("footer.action.more")}</span>
             </button>
           </nav>
         )}

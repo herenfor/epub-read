@@ -8,6 +8,7 @@ import { limitNotes } from "./NotesPanel";
 import type { Bookmark } from "./shelf";
 import { BookmarkIcon, CloseIcon, PinIcon, WarningCircleIcon } from "./readerIcons";
 import "./sidebarDrawer.css";
+import { currentUiLocale, uiText, useUiText } from "./localization/UiLanguageProvider";
 
 export type SidebarTab = "toc" | "bookmarks" | "notes";
 export type SidebarMode = "overlay" | "docked";
@@ -43,8 +44,8 @@ export interface SidebarDrawerProps {
 }
 
 function formatDate(timestamp: number): string {
-  if (!Number.isFinite(timestamp)) return "未知时间";
-  return new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "short" }).format(new Date(timestamp));
+  if (!Number.isFinite(timestamp)) return uiText("sidebar.unknownTime");
+  return new Intl.DateTimeFormat(currentUiLocale(), { dateStyle: "short", timeStyle: "short" }).format(new Date(timestamp));
 }
 
 function filterTocNodes(nodes: TocNode[], query: string): TocNode[] {
@@ -77,6 +78,7 @@ function TocBranch({
   activeItemRef: React.RefObject<HTMLDivElement | null>;
   onNavigate: (href: string) => void;
 }) {
+  const { t } = useUiText();
   return (
     <div className="sidebar-toc-branch">
       {nodes.map((node, i) => {
@@ -88,12 +90,12 @@ function TocBranch({
               ref={active ? (activeItemRef as React.Ref<HTMLDivElement>) : undefined}
               className={`sidebar-toc-item level-${Math.min(level, 3)}${active ? " active" : ""}${disabled ? " disabled" : ""}`}
               style={{ paddingLeft: `${14 + level * 16}px` }}
-              title={disabled ? `无法使用：${node.href || "无有效链接"}` : node.label}
+              title={disabled ? t("sidebar.toc.unavailable", { href: node.href || t("sidebar.toc.noLink") }) : node.label}
               onClick={() => {
                 if (!disabled) onNavigate(node.href);
               }}
             >
-              <span className="sidebar-toc-text">{node.label || "(无标题)"}</span>
+              <span className="sidebar-toc-text">{node.label || t("sidebar.toc.untitled")}</span>
               {disabled ? <WarningCircleIcon size={13} className="sidebar-disabled-icon" /> : null}
             </div>
             {node.children.length > 0 ? (
@@ -133,6 +135,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
   onEditNote,
   onDeleteNote,
 }) => {
+  const { t } = useUiText();
   const activeTocNode = findActiveTocNode(toc, activeHref);
   const activeItemRef = useRef<HTMLDivElement>(null);
   const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
@@ -198,7 +201,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
   const paneProps = (tab: SidebarTab) => ({
     ref: (pane: HTMLDivElement | null) => { if (pane) paneRefs.current[tab] = pane; },
     role: "tabpanel",
-    "aria-label": tab === "toc" ? "目录" : tab === "bookmarks" ? "书签" : "笔记",
+    "aria-label": tab === "toc" ? t("sidebar.tab.toc") : tab === "bookmarks" ? t("sidebar.tab.bookmarks") : t("sidebar.tab.notes"),
     "aria-hidden": activeTab !== tab,
     // React 18 does not type inert; the native attribute also removes hidden controls from tab order.
     ...(activeTab !== tab ? { inert: "" } : {}),
@@ -227,7 +230,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
       <aside
         className={`sidebar-drawer ${mode === "docked" ? "is-docked" : "is-overlay"} side-${side}${compact ? " is-compact" : ""}${open ? " is-open" : " is-closed"}${isClosing ? " is-closing" : ""}`}
         role="region"
-        aria-label="阅读导航与笔记抽屉"
+        aria-label={t("sidebar.drawer")}
       >
         {/* 抽屉顶栏：Segmented Tabs + Pin + 关闭 */}
         <div className="sidebar-header">
@@ -239,7 +242,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
               className={`sidebar-tab${activeTab === "toc" ? " active" : ""}`}
               onClick={() => selectTab("toc")}
             >
-              目录
+              {t("sidebar.tab.toc")}
             </button>
             <button
               type="button"
@@ -248,7 +251,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
               className={`sidebar-tab${activeTab === "bookmarks" ? " active" : ""}`}
               onClick={() => selectTab("bookmarks")}
             >
-              书签{bookmarks.length > 0 ? ` (${bookmarks.length})` : ""}
+              {bookmarks.length > 0 ? t("sidebar.tab.count", { label: t("sidebar.tab.bookmarks"), count: bookmarks.length }) : t("sidebar.tab.bookmarks")}
             </button>
             <button
               type="button"
@@ -257,7 +260,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
               className={`sidebar-tab${activeTab === "notes" ? " active" : ""}`}
               onClick={() => selectTab("notes")}
             >
-              笔记{notes.length > 0 ? ` (${notes.length})` : ""}
+              {notes.length > 0 ? t("sidebar.tab.count", { label: t("sidebar.tab.notes"), count: notes.length }) : t("sidebar.tab.notes")}
             </button>
           </div>
 
@@ -267,8 +270,8 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
               type="button"
               className={`sidebar-icon-btn sidebar-pin-btn${mode === "docked" ? " active" : ""}`}
               onClick={() => onModeChange(mode === "docked" ? "overlay" : "docked")}
-              title={mode === "docked" ? "取消固定（浮动遮罩模式）" : "固定驻留侧边栏"}
-              aria-label={mode === "docked" ? "取消固定" : "固定驻留侧边栏"}
+              title={mode === "docked" ? t("sidebar.unpin.tip") : t("sidebar.pin")}
+              aria-label={mode === "docked" ? t("sidebar.unpin") : t("sidebar.pin")}
             >
               <PinIcon size={14} pinned={mode === "docked"} />
             </button>
@@ -277,8 +280,8 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
               type="button"
               className="sidebar-icon-btn sidebar-close-btn"
               onClick={requestClose}
-              title="关闭侧边栏 (Esc)"
-              aria-label="关闭侧边栏"
+              title={t("sidebar.close.tip")}
+              aria-label={t("sidebar.close")}
             >
               <CloseIcon size={14} />
             </button>
@@ -295,18 +298,18 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
                   <input
                     type="search"
                     className="sidebar-toc-filter-input"
-                    placeholder="过滤章节..."
+                    placeholder={t("sidebar.toc.filter")}
                     value={tocFilter}
                     onChange={(e) => { memory.tocFilter = e.target.value; setTocFilter(e.target.value); }}
-                    aria-label="过滤目录章节"
+                    aria-label={t("sidebar.toc.filter.label")}
                   />
                   {tocFilter && (
                     <button
                       type="button"
                       className="sidebar-toc-filter-clear"
                       onClick={() => { memory.tocFilter = ""; setTocFilter(""); }}
-                      title="清除过滤"
-                      aria-label="清除过滤"
+                      title={t("sidebar.toc.filter.clear")}
+                      aria-label={t("sidebar.toc.filter.clear")}
                     >
                       <CloseIcon size={11} />
                     </button>
@@ -314,9 +317,9 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
                 </div>
               )}
               {tocCount === 0 ? (
-                <div className="sidebar-empty">本书暂无目录</div>
+                <div className="sidebar-empty">{t("sidebar.toc.empty")}</div>
               ) : displayedToc.length === 0 ? (
-                <div className="sidebar-empty">无匹配章节</div>
+                <div className="sidebar-empty">{t("sidebar.toc.noMatch")}</div>
               ) : (
                 <TocBranch
                   nodes={displayedToc}
@@ -336,8 +339,8 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
             <div className="sidebar-pane sidebar-bookmarks-pane" {...paneProps("bookmarks")}>
               {bookmarks.length === 0 ? (
                 <div className="sidebar-empty">
-                  <span>暂无书签</span>
-                  <span className="sidebar-empty-tip">按 Ctrl+B 或顶栏 🔖 标记当前页</span>
+                  <span>{t("sidebar.bookmarks.empty")}</span>
+                  <span className="sidebar-empty-tip">{t("sidebar.bookmarks.emptyTip")}</span>
                 </div>
               ) : (
                 <div className="sidebar-bookmark-list">
@@ -356,10 +359,10 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
                           <BookmarkIcon size={14} active={true} />
                         </span>
                         <span className="sidebar-bookmark-meta">
-                          <span className="sidebar-bookmark-text">{b.text || "（无书签文字）"}</span>
+                          <span className="sidebar-bookmark-text">{b.text || t("sidebar.bookmark.noText")}</span>
                           <span className="sidebar-bookmark-chapter">
                             {b.chapterLabel ? `${b.chapterLabel} · ` : ""}
-                            添加于 {formatDate(b.createdAtMs)}
+                            {t("sidebar.bookmark.addedAt", { time: formatDate(b.createdAtMs) })}
                           </span>
                         </span>
                       </button>
@@ -371,8 +374,8 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
                             e.stopPropagation();
                             onDeleteBookmark(b.id);
                           }}
-                          title="删除此书签"
-                          aria-label="删除书签"
+                          title={t("sidebar.bookmark.delete.tip")}
+                          aria-label={t("sidebar.bookmark.delete")}
                         >
                           <CloseIcon size={12} />
                         </button>
@@ -388,8 +391,8 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
             <div className="sidebar-pane sidebar-notes-pane" {...paneProps("notes")}>
               {sortedNotes.length === 0 ? (
                 <div className="sidebar-empty">
-                  <span>暂无划线与笔记</span>
-                  <span className="sidebar-empty-tip">在正文选中文本即可添加笔记</span>
+                  <span>{t("sidebar.notes.empty")}</span>
+                  <span className="sidebar-empty-tip">{t("sidebar.notes.emptyTip")}</span>
                 </div>
               ) : (
                 <div className="sidebar-notes-list">
@@ -408,7 +411,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
                           {note.chapterTitle} · {formatDate(note.createdAtMs)}
                         </span>
                         <span className="sidebar-note-selection" title={note.selectedText}>
-                          “{note.selectedText}”
+                          {t("sidebar.note.quote", { text: note.selectedText })}
                         </span>
                       </button>
                       <div className="sidebar-note-actions">
@@ -418,13 +421,13 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
                             className="sidebar-note-act"
                             onClick={() => onEditNote(note)}
                           >
-                            编辑
+                            {t("sidebar.note.edit")}
                           </button>
                         )}
                         {onDeleteNote &&
                           (deletingNoteId === note.id ? (
                             <>
-                              <span className="sidebar-note-confirm">确认删除？</span>
+                              <span className="sidebar-note-confirm">{t("sidebar.note.confirmDelete")}</span>
                               <button
                                 type="button"
                                 className="sidebar-note-act danger"
@@ -433,14 +436,14 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
                                   setDeletingNoteId(null);
                                 }}
                               >
-                                删除
+                                {t("sidebar.note.delete")}
                               </button>
                               <button
                                 type="button"
                                 className="sidebar-note-act"
                                 onClick={() => setDeletingNoteId(null)}
                               >
-                                取消
+                                {t("sidebar.note.cancel")}
                               </button>
                             </>
                           ) : (
@@ -449,7 +452,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
                               className="sidebar-note-act danger"
                               onClick={() => setDeletingNoteId(note.id)}
                             >
-                              删除
+                              {t("sidebar.note.delete")}
                             </button>
                           ))}
                       </div>

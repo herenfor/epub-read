@@ -8,13 +8,23 @@ import { folder } from "./catalogs/folder";
 import { language } from "./catalogs/language";
 import { reader } from "./catalogs/reader";
 import { startup } from "./catalogs/startup";
+import { titlebar } from "./catalogs/titlebar";
+import { footer } from "./catalogs/footer";
+import { sidebar } from "./catalogs/sidebar";
+import { notes } from "./catalogs/notes";
+import { imageViewer } from "./catalogs/imageViewer";
 import commonEn from "./en/common.json";
 import folderEn from "./en/folder.json";
 import languageEn from "./en/language.json";
 import readerEn from "./en/reader.json";
 import startupEn from "./en/startup.json";
+import titlebarEn from "./en/titlebar.json";
+import footerEn from "./en/footer.json";
+import sidebarEn from "./en/sidebar.json";
+import notesEn from "./en/notes.json";
+import imageViewerEn from "./en/imageViewer.json";
 
-export const CATALOGS = [common, folder, language, reader, startup] as const;
+export const CATALOGS = [common, folder, language, reader, startup, titlebar, footer, sidebar, notes, imageViewer] as const;
 
 export const zhCN = {
   ...common.zh,
@@ -22,6 +32,11 @@ export const zhCN = {
   ...language.zh,
   ...reader.zh,
   ...startup.zh,
+  ...titlebar.zh,
+  ...footer.zh,
+  ...sidebar.zh,
+  ...notes.zh,
+  ...imageViewer.zh,
 };
 
 export type MessageKey = keyof typeof zhCN;
@@ -33,6 +48,11 @@ export const en: Partial<Record<MessageKey, string>> = {
   ...languageEn,
   ...readerEn,
   ...startupEn,
+  ...titlebarEn,
+  ...footerEn,
+  ...sidebarEn,
+  ...notesEn,
+  ...imageViewerEn,
 };
 
 /** Namespace → English file contents, for the integrity test and translation tooling. */
@@ -42,4 +62,9 @@ export const EN_FILES: Readonly<Record<string, Readonly<Record<string, string>>>
   language: languageEn,
   reader: readerEn,
   startup: startupEn,
+  titlebar: titlebarEn,
+  footer: footerEn,
+  sidebar: sidebarEn,
+  notes: notesEn,
+  imageViewer: imageViewerEn,
 };
