@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createUiLanguageStore, readUiLanguagePreference, resolveUiLocale, translate } from "./core";
-import { en } from "./messages";
+import { en } from "./catalog";
 
 describe("UI language core", () => {
   it("preserves Chinese on upgrade and follows the primary system language only when requested", () => {

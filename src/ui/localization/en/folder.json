@@ -1,0 +1,6 @@
+{
+  "folder.name.empty": "Enter a folder name",
+  "folder.name.too-long": "Use no more than {limit} characters",
+  "folder.name.duplicate": "A folder with this name already exists",
+  "folder.name.count": "{count}/{limit}"
+}

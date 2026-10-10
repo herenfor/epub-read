@@ -769,3 +769,10 @@
 .app[data-touch-ui="true"] .aa-switch-to-detail-btn { font-size: 14px; }
 .app[data-touch-ui="true"] .aa-detail-group-title { font-size: 13px; }
 .app[data-touch-ui="true"] .aa-detail-sub { font-size: 12px; }
+
+.aa-section-error {
+  margin: 0 0 8px;
+  color: var(--danger, #c44);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}

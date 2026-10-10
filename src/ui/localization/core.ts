@@ -1,4 +1,4 @@
-import { en, zhCN, type MessageKey } from "./messages";
+import { en, zhCN, type MessageKey } from "./catalog";
 
 export type UiLocale = "zh-CN" | "en";
 export type UiLanguagePreference = UiLocale | "system";
@@ -18,7 +18,7 @@ export function resolveUiLocale(preference: UiLanguagePreference, systemLanguage
 type Placeholders<S extends string> = S extends `${string}{${infer Name}}${infer Tail}`
   ? Name | Placeholders<Tail>
   : never;
-type MessageArguments<K extends MessageKey> = [Placeholders<(typeof zhCN)[K]>] extends [never]
+export type MessageArguments<K extends MessageKey> = [Placeholders<(typeof zhCN)[K]>] extends [never]
   ? []
   : [values: Record<Placeholders<(typeof zhCN)[K]>, string | number>];
 
