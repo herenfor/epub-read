@@ -51,6 +51,7 @@ import {
 } from "./SearchPanel";
 import "./shelfZen.css";
 import { uiPlural, uiText, useUiText } from "./localization/UiLanguageProvider";
+import { localizeFacetOptions } from "./shelfFacetLabels";
 
 export type { ShelfScope };
 export type ShelfDensity = "comfortable" | "standard" | "compact";
@@ -1525,6 +1526,7 @@ interface ShelfFolderCardProps extends ShelfSubmenuBackProps {
 }
 
 const ShelfFolderCard = memo(function ShelfFolderCard(props: ShelfFolderCardProps) {
+  const { t, tn } = useUiText();
   const [menuOpen, setMenuOpen] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
   const {
@@ -1570,14 +1572,14 @@ const ShelfFolderCard = memo(function ShelfFolderCard(props: ShelfFolderCardProp
           handleCardClick();
         }
       }}
-      title={`文件夹：${props.name}（${props.books.length} 本）`}
+      title={tn("shelfFolder.card.tip", props.books.length, { name: props.name, count: props.books.length })}
     >
       <div className="shelf-cover-box shelf-folder-cover-box">
         {props.isDropTarget && (
           <div className="shelf-folder-drop-overlay" aria-hidden="true">
             <div className="shelf-folder-drop-badge">
               <PlusIcon />
-              <span>放入文件夹</span>
+              <span>{t("shelfFolder.card.drop")}</span>
             </div>
           </div>
         )}
@@ -1601,8 +1603,8 @@ const ShelfFolderCard = memo(function ShelfFolderCard(props: ShelfFolderCardProp
               ref={triggerRef}
               className={`shelf-card-more-btn${menuOpen ? " active" : ""}`}
               type="button"
-              title="文件夹选项"
-              aria-label={`文件夹选项：${props.name}`}
+              title={t("shelfFolder.options.tip")}
+              aria-label={t("shelfFolder.options", { name: props.name })}
               aria-expanded={menuOpen}
               onClick={(e) => {
                 e.stopPropagation();
@@ -1648,7 +1650,7 @@ const ShelfFolderCard = memo(function ShelfFolderCard(props: ShelfFolderCardProp
                     }}
                   >
                     <FolderIcon />
-                    <span>打开文件夹</span>
+                    <span>{t("shelfFolder.open")}</span>
                   </button>
                   <button
                     className="shelf-card-pop-item"
@@ -1660,7 +1662,7 @@ const ShelfFolderCard = memo(function ShelfFolderCard(props: ShelfFolderCardProp
                     }}
                   >
                     <EditIcon />
-                    <span>重命名</span>
+                    <span>{t("shelfFolder.rename")}</span>
                   </button>
                   <button
                     className="shelf-card-pop-item danger"
@@ -1672,7 +1674,7 @@ const ShelfFolderCard = memo(function ShelfFolderCard(props: ShelfFolderCardProp
                     }}
                   >
                     <TrashIcon />
-                    <span>解散文件夹</span>
+                    <span>{t("shelfFolder.dissolve")}</span>
                   </button>
                 </div>,
                 getShelfMenuPortalHost(triggerRef.current),
@@ -1684,7 +1686,7 @@ const ShelfFolderCard = memo(function ShelfFolderCard(props: ShelfFolderCardProp
       <div className="shelf-card-info">
         <div className="shelf-card-title">{props.name}</div>
         <div className="shelf-card-meta">
-          <span className="shelf-card-creator">{props.books.length} 本书</span>
+          <span className="shelf-card-creator">{tn("shelfFolder.bookCount", props.books.length, { count: props.books.length })}</span>
         </div>
       </div>
     </div>
@@ -1704,6 +1706,7 @@ interface ShelfCreateFolderDialogProps {
 }
 
 function ShelfCreateFolderDialog(props: ShelfCreateFolderDialogProps) {
+  const { t } = useUiText();
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isClosing, setIsClosing] = useState(false);
@@ -1736,7 +1739,7 @@ function ShelfCreateFolderDialog(props: ShelfCreateFolderDialogProps) {
     <div className={`shelf-confirm-backdrop${isClosing ? " is-closing" : ""}`} onClick={handleCancel}>
       <div className="shelf-confirm" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <form onSubmit={handleSubmit}>
-          <div className="shelf-confirm-title">新建文件夹</div>
+          <div className="shelf-confirm-title">{t("shelfFolder.create.title")}</div>
           {props.subtitle && (
             <div style={{ fontSize: 13, color: "var(--muted)", margin: "4px 0 10px" }}>
               {props.subtitle}
@@ -1747,7 +1750,7 @@ function ShelfCreateFolderDialog(props: ShelfCreateFolderDialogProps) {
               inputRef={inputRef}
               value={name}
               disabled={props.busy}
-              placeholder="请输入文件夹名称…"
+              placeholder={t("shelfFolder.name.placeholder")}
               error={error}
               onChange={(value) => {
                 setName(value);
@@ -1757,10 +1760,10 @@ function ShelfCreateFolderDialog(props: ShelfCreateFolderDialogProps) {
           </div>
           <div className="shelf-confirm-actions">
             <button className="shelf-selection-cancel" type="button" onClick={handleCancel} disabled={props.busy}>
-              取消
+              {t("shelfFolder.cancel")}
             </button>
             <button className="shelf-confirm-primary" type="submit" disabled={props.busy}>
-              {props.busy ? "创建中…" : "创建"}
+              {props.busy ? t("shelfFolder.creating") : t("shelfFolder.create")}
             </button>
           </div>
         </form>
@@ -1779,6 +1782,7 @@ interface ShelfRenameDialogProps {
 }
 
 function ShelfRenameDialog(props: ShelfRenameDialogProps) {
+  const { t } = useUiText();
   const [name, setName] = useState(props.currentName);
   const [error, setError] = useState<string | null>(null);
   const [isClosing, setIsClosing] = useState(false);
@@ -1816,13 +1820,13 @@ function ShelfRenameDialog(props: ShelfRenameDialogProps) {
     <div className={`shelf-confirm-backdrop${isClosing ? " is-closing" : ""}`} onClick={handleCancel}>
       <div className="shelf-confirm" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <form onSubmit={handleSubmit}>
-          <div className="shelf-confirm-title">重命名文件夹</div>
+          <div className="shelf-confirm-title">{t("shelfFolder.rename.title")}</div>
           <div style={{ margin: "14px 0" }}>
             <FolderNameField
               inputRef={inputRef}
               value={name}
               disabled={props.busy}
-              placeholder="请输入文件夹名称…"
+              placeholder={t("shelfFolder.name.placeholder")}
               error={error}
               onChange={(value) => {
                 setName(value);
@@ -1832,10 +1836,10 @@ function ShelfRenameDialog(props: ShelfRenameDialogProps) {
           </div>
           <div className="shelf-confirm-actions">
             <button className="shelf-selection-cancel" type="button" onClick={handleCancel} disabled={props.busy}>
-              取消
+              {t("shelfFolder.cancel")}
             </button>
             <button className="shelf-confirm-primary" type="submit" disabled={props.busy}>
-              {props.busy ? "保存中…" : "确定"}
+              {props.busy ? t("shelfFolder.saving") : t("shelfFolder.confirm")}
             </button>
           </div>
         </form>
@@ -1853,6 +1857,7 @@ interface ShelfDissolveDialogProps {
 }
 
 function ShelfDissolveDialog(props: ShelfDissolveDialogProps) {
+  const { t } = useUiText();
   const [isClosing, setIsClosing] = useState(false);
 
   const handleCancel = () => {
@@ -1863,11 +1868,11 @@ function ShelfDissolveDialog(props: ShelfDissolveDialogProps) {
   return (
     <div className={`shelf-confirm-backdrop${isClosing ? " is-closing" : ""}`} onClick={handleCancel}>
       <div className="shelf-confirm" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
-        <div className="shelf-confirm-title">解散文件夹“{props.folderName}”？</div>
-        <div className="shelf-confirm-hint">书籍将回到未归类，收藏、进度和笔记保留。</div>
+        <div className="shelf-confirm-title">{t("shelfFolder.dissolve.title", { name: props.folderName })}</div>
+        <div className="shelf-confirm-hint">{t("shelfFolder.dissolve.hint")}</div>
         <div className="shelf-confirm-actions">
           <button className="shelf-selection-cancel" type="button" onClick={handleCancel} disabled={props.busy}>
-            取消
+            {t("shelfFolder.cancel")}
           </button>
           <button
             className="shelf-selection-delete"
@@ -1875,7 +1880,7 @@ function ShelfDissolveDialog(props: ShelfDissolveDialogProps) {
             disabled={props.busy}
             onClick={() => void props.onDissolve(props.folderId)}
           >
-            {props.busy ? "解散中…" : "解散文件夹"}
+            {props.busy ? t("shelfFolder.dissolving") : t("shelfFolder.dissolve")}
           </button>
         </div>
       </div>
@@ -1894,6 +1899,7 @@ interface ShelfMoveDialogProps {
 }
 
 function ShelfMoveDialog(props: ShelfMoveDialogProps) {
+  const { t, tn } = useUiText();
   const [isClosing, setIsClosing] = useState(false);
 
   const handleCancel = () => {
@@ -1941,8 +1947,8 @@ function ShelfMoveDialog(props: ShelfMoveDialogProps) {
 
   const targetTitle =
     props.targets.length === 1
-      ? `《${props.targets[0].title}》`
-      : `${props.targets.length} 本书`;
+      ? t("shelfFolder.move.oneBook", { title: props.targets[0].title })
+      : tn("shelfFolder.move.books", props.targets.length, { count: props.targets.length });
 
   const isRootCurrent = props.currentFolderId === null;
   const isSelectedSame = selectedFolderId === props.currentFolderId;
@@ -1950,11 +1956,11 @@ function ShelfMoveDialog(props: ShelfMoveDialogProps) {
   return (
     <div className={`shelf-confirm-backdrop${isClosing ? " is-closing" : ""}`} onClick={handleCancel}>
       <div className="shelf-confirm shelf-move-dialog" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
-        <div className="shelf-confirm-title">移动 {targetTitle} 至</div>
+        <div className="shelf-confirm-title">{t("shelfFolder.move.title", { target: targetTitle })}</div>
         <div className="shelf-move-list" role="radiogroup">
           <label
             className={`shelf-move-item${selectedFolderId === null ? " selected" : ""}${isRootCurrent ? " disabled is-current" : ""}`}
-            title={isRootCurrent ? "当前所在位置" : undefined}
+            title={isRootCurrent ? t("shelfFolder.move.current") : undefined}
           >
             <input
               type="radio"
@@ -1965,8 +1971,8 @@ function ShelfMoveDialog(props: ShelfMoveDialogProps) {
                 if (!isRootCurrent) setSelectedFolderId(null);
               }}
             />
-            <span className="shelf-move-item-name">未归类（书架根目录）</span>
-            {isRootCurrent && <span className="shelf-move-current-badge">（当前）</span>}
+            <span className="shelf-move-item-name">{t("shelfFolder.move.root")}</span>
+            {isRootCurrent && <span className="shelf-move-current-badge">{t("shelfFolder.move.currentBadge")}</span>}
           </label>
           {props.folders.map((f) => {
             const isFolderCurrent = props.currentFolderId === f.id;
@@ -1974,7 +1980,7 @@ function ShelfMoveDialog(props: ShelfMoveDialogProps) {
               <label
                 key={f.id}
                 className={`shelf-move-item${selectedFolderId === f.id ? " selected" : ""}${isFolderCurrent ? " disabled is-current" : ""}`}
-                title={isFolderCurrent ? "当前所在位置" : undefined}
+                title={isFolderCurrent ? t("shelfFolder.move.current") : undefined}
               >
                 <input
                   type="radio"
@@ -1987,8 +1993,8 @@ function ShelfMoveDialog(props: ShelfMoveDialogProps) {
                 />
                 <span className="shelf-move-item-icon"><FolderIcon /></span>
                 <span className="shelf-move-item-name" title={f.name}>{f.name}</span>
-                <span className="shelf-move-item-count">{f.count} 本</span>
-                {isFolderCurrent && <span className="shelf-move-current-badge">（当前）</span>}
+                <span className="shelf-move-item-count">{tn("shelfFolder.move.count", f.count, { count: f.count })}</span>
+                {isFolderCurrent && <span className="shelf-move-current-badge">{t("shelfFolder.move.currentBadge")}</span>}
               </label>
             );
           })}
@@ -1999,7 +2005,7 @@ function ShelfMoveDialog(props: ShelfMoveDialogProps) {
             <FolderNameField
               value={newName}
               disabled={props.busy}
-              placeholder="新文件夹名称…"
+              placeholder={t("shelfFolder.move.newPlaceholder")}
               error={error}
               onChange={(value) => {
                 setNewName(value);
@@ -2016,7 +2022,7 @@ function ShelfMoveDialog(props: ShelfMoveDialogProps) {
                   setError(null);
                 }}
               >
-                取消
+                {t("shelfFolder.cancel")}
               </button>
               <button
                 className="shelf-confirm-primary"
@@ -2024,7 +2030,7 @@ function ShelfMoveDialog(props: ShelfMoveDialogProps) {
                 disabled={props.busy}
                 onClick={() => void handleCreateInline()}
               >
-                创建并选择
+                {t("shelfFolder.move.createAndSelect")}
               </button>
             </div>
           </div>
@@ -2036,7 +2042,7 @@ function ShelfMoveDialog(props: ShelfMoveDialogProps) {
             disabled={props.busy}
           >
             <PlusIcon />
-            <span>新建文件夹</span>
+            <span>{t("shelfFolder.move.new")}</span>
           </button>
         )}
 
@@ -2044,7 +2050,7 @@ function ShelfMoveDialog(props: ShelfMoveDialogProps) {
 
         <div className="shelf-confirm-actions">
           <button className="shelf-selection-cancel" type="button" onClick={handleCancel} disabled={props.busy}>
-            取消
+            {t("shelfFolder.cancel")}
           </button>
           <button
             className="shelf-confirm-primary"
@@ -2052,7 +2058,7 @@ function ShelfMoveDialog(props: ShelfMoveDialogProps) {
             disabled={props.busy || isSelectedSame || (selectedFolderId === null && isRootCurrent)}
             onClick={() => void handleConfirmMove()}
           >
-            {props.busy ? "移动中…" : "确定移动"}
+            {props.busy ? t("shelfFolder.moving") : t("shelfFolder.move.confirm")}
           </button>
         </div>
       </div>
@@ -2088,6 +2094,7 @@ interface ShelfFolderModalProps extends ShelfSubmenuBackProps {
 }
 
 const ShelfFolderModal = memo(function ShelfFolderModal(props: ShelfFolderModalProps) {
+  const { t, tn } = useUiText();
   const { folder, books, closing, modalRef } = props;
 
   useEffect(() => {
@@ -2114,20 +2121,20 @@ const ShelfFolderModal = memo(function ShelfFolderModal(props: ShelfFolderModalP
         ref={modalRef}
         role="dialog"
         aria-modal="true"
-        aria-label={`文件夹：${folder.name}`}
+        aria-label={t("shelfFolder.modal", { name: folder.name })}
       >
         <div className="shelf-folder-modal-head">
           <div className="shelf-folder-modal-title-box">
             <FolderIcon />
             <span className="shelf-folder-modal-title" title={folder.name}>{folder.name}</span>
-            <span className="shelf-folder-modal-count">{books.length} 本</span>
+            <span className="shelf-folder-modal-count">{tn("shelfFolder.modal.count", books.length, { count: books.length })}</span>
           </div>
           <div className="shelf-folder-modal-actions">
             <button
               className="shelf-folder-modal-action-btn"
               type="button"
-              title="重命名文件夹"
-              aria-label="重命名文件夹"
+              title={t("shelfFolder.modal.rename")}
+              aria-label={t("shelfFolder.modal.rename")}
               onClick={() => props.onRename(folder.id, folder.name)}
             >
               <EditIcon />
@@ -2135,8 +2142,8 @@ const ShelfFolderModal = memo(function ShelfFolderModal(props: ShelfFolderModalP
             <button
               className="shelf-folder-modal-action-btn danger"
               type="button"
-              title="解散文件夹"
-              aria-label="解散文件夹"
+              title={t("shelfFolder.dissolve")}
+              aria-label={t("shelfFolder.dissolve")}
               onClick={() => props.onDissolve(folder.id, folder.name)}
             >
               <TrashIcon />
@@ -2144,8 +2151,8 @@ const ShelfFolderModal = memo(function ShelfFolderModal(props: ShelfFolderModalP
             <button
               className="shelf-folder-modal-action-btn"
               type="button"
-              title="关闭"
-              aria-label="关闭文件夹"
+              title={t("shelfFolder.modal.close.tip")}
+              aria-label={t("shelfFolder.modal.close")}
               onClick={props.onClose}
             >
               <CloseIcon />
@@ -2156,8 +2163,8 @@ const ShelfFolderModal = memo(function ShelfFolderModal(props: ShelfFolderModalP
           {books.length === 0 ? (
             <div className="shelf-folder-modal-empty">
               {props.compact
-                ? "文件夹暂无书籍，可在书籍“更多”菜单中选择“移动到文件夹”"
-                : "文件夹暂无书籍，从书架将书拖入此处或移出"}
+                ? t("shelfFolder.modal.empty.touch")
+                : t("shelfFolder.modal.empty.pointer")}
             </div>
           ) : (
             <div className="shelf-folder-modal-grid">
@@ -2228,6 +2235,7 @@ function ShelfFilterOptionList(props: {
   onToggle(value: string): void;
   emptyLabel: string;
 }) {
+  const { t } = useUiText();
   const [query, setQuery] = useState("");
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const options = props.options.filter((option) =>
@@ -2240,14 +2248,14 @@ function ShelfFilterOptionList(props: {
         <input
           className="shelf-filter-search"
           type="search"
-          placeholder={`搜索${props.emptyLabel}`}
+          placeholder={t("shelfFolder.filter.search", { label: props.emptyLabel })}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          aria-label={`搜索${props.emptyLabel}`}
+          aria-label={t("shelfFolder.filter.search", { label: props.emptyLabel })}
         />
       )}
       {limited.length === 0 ? (
-        <div className="shelf-filter-empty">没有匹配项</div>
+        <div className="shelf-filter-empty">{t("shelfFolder.filter.none")}</div>
       ) : (
         limited.map((option) => (
           <label className="shelf-filter-option" key={option.value}>
@@ -2262,7 +2270,7 @@ function ShelfFilterOptionList(props: {
         ))
       )}
       {options.length > limited.length && (
-        <div className="shelf-filter-limit">仅显示前 {limited.length} 项，请搜索以缩小范围</div>
+        <div className="shelf-filter-limit">{t("shelfFolder.filter.limited", { count: limited.length })}</div>
       )}
     </div>
   );
@@ -2442,6 +2450,7 @@ interface ShelfSettingsDrawerProps extends ShelfSubmenuBackProps {
 
 function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
   const [uiMotion, setUiMotion] = useUiMotion();
+  const { t, tn } = useUiText();
   const language = useUiLanguageChoice();
   const [mounted, setMounted] = useState(props.open);
   const [closing, setClosing] = useState(false);
@@ -2571,43 +2580,43 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
   return (
     <div className={`shelf-drawer-layer${closing ? " closing" : ""}`}>
       <div className={`shelf-drawer-backdrop${closing ? " closing" : ""}`} aria-hidden="true" onClick={props.onClose} />
-      <aside id="shelf-settings-drawer" className={`shelf-drawer${closing ? " closing" : ""}`} role="dialog" aria-modal="true" aria-label="书架菜单">
+      <aside id="shelf-settings-drawer" className={`shelf-drawer${closing ? " closing" : ""}`} role="dialog" aria-modal="true" aria-label={t("shelfMenu.dialog")}>
         <div className="shelf-drawer-head">
           <div>
-            <div className="shelf-drawer-title">书架菜单</div>
-            <div className="shelf-drawer-subtitle">{props.entries.length} 本书</div>
+            <div className="shelf-drawer-title">{t("shelfMenu.title")}</div>
+            <div className="shelf-drawer-subtitle">{tn("shelfMenu.bookCount", props.entries.length, { count: props.entries.length })}</div>
           </div>
-          <button className="shelf-drawer-close tb-btn" type="button" onClick={props.onClose} aria-label="关闭书架菜单">
+          <button className="shelf-drawer-close tb-btn" type="button" onClick={props.onClose} aria-label={t("shelfMenu.close")}>
             <CloseIcon />
           </button>
         </div>
 
         <div className="shelf-drawer-scroll">
           {props.onSearchModeChange && body && (
-            <div className="shelf-search-mode" role="group" aria-label="书架搜索模式">
-              <button type="button" className={props.searchMode === "metadata" ? "active" : ""} aria-pressed={props.searchMode === "metadata"} onClick={() => props.onSearchModeChange?.("metadata")}>书名与作者</button>
-              <button type="button" className={props.searchMode === "body" ? "active" : ""} aria-pressed={props.searchMode === "body"} onClick={() => props.onSearchModeChange?.("body")}>正文</button>
+            <div className="shelf-search-mode" role="group" aria-label={t("shelfMenu.searchMode")}>
+              <button type="button" className={props.searchMode === "metadata" ? "active" : ""} aria-pressed={props.searchMode === "metadata"} onClick={() => props.onSearchModeChange?.("metadata")}>{t("shelfMenu.searchMode.metadata")}</button>
+              <button type="button" className={props.searchMode === "body" ? "active" : ""} aria-pressed={props.searchMode === "body"} onClick={() => props.onSearchModeChange?.("body")}>{t("shelfMenu.searchMode.body")}</button>
             </div>
           )}
 
           {props.searchMode === "body" && body ? <div className="shelf-body-search">
-            <div className="shelf-body-search-scope-note">范围：全部书籍</div>
+            <div className="shelf-body-search-scope-note">{t("shelfMenu.body.scope")}</div>
             <label className="shelf-drawer-search-wrap">
               <span className="shelf-drawer-search-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><circle cx="11" cy="11" r="7" /><path d="m16.25 16.25 4.25 4.25" /></svg></span>
-              <input className="shelf-drawer-search shelf-search" type="search" placeholder="搜索全部书籍正文" value={body.query} disabled={props.busy || bodyIndexUnavailable} onChange={(event) => body.onQueryChange(event.target.value)} />
-              {body.query && <button className="shelf-drawer-search-clear" type="button" onClick={() => body.onQueryChange("")} aria-label="清除正文搜索">×</button>}
+              <input className="shelf-drawer-search shelf-search" type="search" placeholder={t("search.placeholder.all")} value={body.query} disabled={props.busy || bodyIndexUnavailable} onChange={(event) => body.onQueryChange(event.target.value)} />
+              {body.query && <button className="shelf-drawer-search-clear" type="button" onClick={() => body.onQueryChange("")} aria-label={t("shelfMenu.body.clear")}>×</button>}
             </label>
-            {(body.onRebuildIndex || body.onClearIndex) && <div className="search-index-actions" aria-label="全文索引管理">
-              {body.onRebuildIndex && <button type="button" disabled={body.status === "searching" || bodyIndexBusy || indexActionBusy} onClick={() => runIndexAction(body.onRebuildIndex)}>重新建立索引</button>}
-              {body.onClearIndex && <button type="button" disabled={body.status === "searching" || bodyIndexBusy || indexActionBusy} onClick={() => runIndexAction(body.onClearIndex)}>清除索引</button>}
+            {(body.onRebuildIndex || body.onClearIndex) && <div className="search-index-actions" aria-label={t("search.indexActions")}>
+              {body.onRebuildIndex && <button type="button" disabled={body.status === "searching" || bodyIndexBusy || indexActionBusy} onClick={() => runIndexAction(body.onRebuildIndex)}>{t("search.rebuild")}</button>}
+              {body.onClearIndex && <button type="button" disabled={body.status === "searching" || bodyIndexBusy || indexActionBusy} onClick={() => runIndexAction(body.onClearIndex)}>{t("search.clearIndex")}</button>}
             </div>}
             {body.indexStatus && <SearchIndexCard props={{ ...body, onClose: () => undefined, scope: "all" }} />}
-            <div className="search-status" aria-live="polite">{bodyStatus}{body.status === "searching" && body.onCancel && <button className="search-cancel" type="button" onClick={body.onCancel}>取消</button>}{body.status === "error" && body.errorMessage && <span className="search-error">：{body.errorMessage}</span>}</div>
-            {!bodyHasQuery && body.status !== "searching" && <div className="search-empty">输入关键词搜索全部书籍的正文</div>}
-            {body.status === "complete" && bodyHasQuery && body.results.length === 0 && <div className="search-empty">未找到匹配内容</div>}
-            {body.navigationBusy && <div className="search-navigation-busy">正在定位结果…</div>}
+            <div className="search-status" aria-live="polite">{bodyStatus}{body.status === "searching" && body.onCancel && <button className="search-cancel" type="button" onClick={body.onCancel}>{t("search.cancel")}</button>}{body.status === "error" && body.errorMessage && <span className="search-error">{t("search.errorDetail", { message: body.errorMessage })}</span>}</div>
+            {!bodyHasQuery && body.status !== "searching" && <div className="search-empty">{t("search.hint.all")}</div>}
+            {body.status === "complete" && bodyHasQuery && body.results.length === 0 && <div className="search-empty">{t("search.empty")}</div>}
+            {body.navigationBusy && <div className="search-navigation-busy">{t("search.locating")}</div>}
             <SearchResultList results={body.results} navigationBusy={body.navigationBusy} onSelect={body.onSelect} />
-            {body.truncated && body.results.length <= 100 && <div className="search-truncated">结果较多，仅显示前 100 条</div>}
+            {body.truncated && body.results.length <= 100 && <div className="search-truncated">{t("search.truncated", { limit: 100 })}</div>}
           </div> : <>
           <label className="shelf-drawer-search-wrap">
             <span className="shelf-drawer-search-icon" aria-hidden="true">
@@ -2620,40 +2629,40 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
               ref={searchRef}
               className="shelf-drawer-search shelf-search"
               type="search"
-              placeholder="搜索书名或作者"
+              placeholder={t("shelfMenu.search.placeholder")}
               value={props.query}
               disabled={props.busy}
               onChange={(event) => props.onQueryChange(event.target.value)}
               onKeyDown={onSearchKeyDown}
             />
             {props.query && (
-              <button className="shelf-drawer-search-clear" type="button" onClick={() => props.onQueryChange("")} aria-label="清除搜索">
+              <button className="shelf-drawer-search-clear" type="button" onClick={() => props.onQueryChange("")} aria-label={t("shelfMenu.search.clear")}>
                 ×
               </button>
             )}
           </label>
 
           {isSearchActive ? (
-            <div className="shelf-drawer-live-results" role="region" aria-label="搜索结果直达">
+            <div className="shelf-drawer-live-results" role="region" aria-label={t("shelfMenu.results")}>
               <div className="shelf-drawer-results-head">
                 <span className="shelf-drawer-results-count">
-                  找到 {matchingList.length} 本匹配书籍
+                  {tn("shelfMenu.results.found", matchingList.length, { count: matchingList.length })}
                 </span>
                 {matchingList.length > 0 && (
                   <button
                     type="button"
                     className="shelf-drawer-view-shelf-btn"
                     onClick={props.onClose}
-                    title="在书架中浏览结果并收起菜单"
+                    title={t("shelfMenu.results.browse.tip")}
                   >
-                    在书架中浏览 ➔
+                    {t("shelfMenu.results.browse")}
                   </button>
                 )}
               </div>
 
               {matchingList.length === 0 ? (
                 <div className="shelf-drawer-search-empty">
-                  未找到与 “{props.query.trim()}” 相关的书籍
+                  {t("shelfMenu.results.none", { query: props.query.trim() })}
                 </div>
               ) : (
                 <ul ref={resultListRef} className="shelf-drawer-results-list" role="listbox">
@@ -2661,7 +2670,7 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
                     const isSelected = index === activeSearchIndex;
                     const progressBadge = isShelfProgressPending(entry) || entry.progressPct > 0
                       ? shelfProgressLabel(entry)
-                      : (entry.lastReadAtMs > 0 ? "在读" : "未读");
+                      : (entry.lastReadAtMs > 0 ? t("shelfMenu.results.reading") : t("shelfMenu.results.unread"));
                     return (
                       <li
                         key={entry.id}
@@ -2680,7 +2689,7 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
                           </div>
                           <div className="shelf-drawer-result-meta">
                             <span className="shelf-drawer-result-creator">
-                              {entry.creator || "未知作者"}
+                              {entry.creator || t("shelf.unknownAuthor")}
                             </span>
                           </div>
                         </div>
@@ -2692,7 +2701,7 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
                   })}
                   {matchingList.length > 20 && (
                     <li className="shelf-drawer-results-more">
-                      仅显示前 20 本，可在书架中浏览全部 {matchingList.length} 本
+                      {t("shelfMenu.results.more", { count: matchingList.length })}
                     </li>
                   )}
                 </ul>
@@ -2700,7 +2709,7 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
             </div>
           ) : (
             <>
-              <div className="shelf-drawer-group-label">书籍筛选</div>
+              <div className="shelf-drawer-group-label">{t("shelfMenu.filters")}</div>
               <button
                 className={`shelf-all-books${allBooksExpanded ? " expanded" : ""}`}
                 type="button"
@@ -2708,27 +2717,27 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
                 onClick={() => setAllBooksExpanded((value) => !value)}
               >
                 <span className="shelf-all-books-icon" aria-hidden="true"><FolderIcon /></span>
-                <span className="shelf-all-books-label">全部书籍</span>
+                <span className="shelf-all-books-label">{t("shelfMenu.allBooks")}</span>
                 <span className="shelf-all-books-count">{props.matchingCount}</span>
                 <span className="shelf-filter-section-arrow" aria-hidden="true" />
               </button>
               <div className="shelf-all-books-details">
                 <div className="shelf-all-books-details-inner">
                   <ShelfFilterSection
-                    label="作者"
+                    label={t("shelfMenu.filter.author")}
                     count={props.facets.authors.options.length}
                     open={expandedSections.has("author")}
                     onToggleOpen={() => toggleSection("author")}
                   >
                     <ShelfFilterOptionList
-                      options={props.facets.authors.options}
+                      options={localizeFacetOptions("authors", props.facets.authors.options, t)}
                       selected={props.filters.authors}
                       onToggle={(value) => toggleFilter("authors", value)}
-                      emptyLabel="作者"
+                      emptyLabel={t("shelfMenu.filter.author")}
                     />
                   </ShelfFilterSection>
                   <ShelfFilterSection
-                    label="书名"
+                    label={t("shelfMenu.filter.title")}
                     count={props.facets.titles.options.length}
                     open={expandedSections.has("title")}
                     onToggleOpen={() => toggleSection("title")}
@@ -2737,40 +2746,40 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
                       options={props.facets.titles.options}
                       selected={props.filters.titles}
                       onToggle={(value) => toggleFilter("titles", value)}
-                      emptyLabel="书名"
+                      emptyLabel={t("shelfMenu.filter.title")}
                     />
                   </ShelfFilterSection>
                   <ShelfFilterSection
-                    label="保存时间"
+                    label={t("shelfMenu.filter.saved")}
                     count={props.facets.timeSegments.options.filter((item) => item.count > 0).length}
                     open={expandedSections.has("saved")}
                     onToggleOpen={() => toggleSection("saved")}
                   >
                     <ShelfFilterOptionList
-                      options={props.facets.timeSegments.options}
+                      options={localizeFacetOptions("timeSegments", props.facets.timeSegments.options, t)}
                       selected={props.filters.saved}
                       onToggle={(value) => toggleFilter("saved", value)}
-                      emptyLabel="保存时间"
+                      emptyLabel={t("shelfMenu.filter.saved")}
                     />
                   </ShelfFilterSection>
                   <ShelfFilterSection
-                    label="语言"
+                    label={t("shelfMenu.filter.language")}
                     count={props.facets.languages.options.length}
                     open={expandedSections.has("language")}
                     onToggleOpen={() => toggleSection("language")}
                   >
                     <ShelfFilterOptionList
-                      options={props.facets.languages.options}
+                      options={localizeFacetOptions("languages", props.facets.languages.options, t)}
                       selected={props.filters.languages}
                       onToggle={(value) => toggleFilter("languages", value)}
-                      emptyLabel="语言"
+                      emptyLabel={t("shelfMenu.filter.language")}
                     />
                   </ShelfFilterSection>
                 </div>
               </div>
               {activeFilterCount > 0 && (
                 <button className="shelf-filter-clear" type="button" onClick={clearFilters}>
-                  清除筛选（{activeFilterCount}）
+                  {t("shelfMenu.filter.clear", { count: activeFilterCount })}
                 </button>
               )}
             </>
@@ -2778,7 +2787,7 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
           </>
           }
 
-          <div className="shelf-drawer-group-label">显示设置</div>
+          <div className="shelf-drawer-group-label">{t("shelfMenu.display")}</div>
           <div className="shelf-drawer-setting">
             <span>{language.label}</span>
             <ShelfSelect
@@ -2794,97 +2803,97 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
           {language.error && <p className="shelf-drawer-setting-error" role="alert">{language.error}</p>}
           {props.viewMode && props.onViewModeChange && (
             <div className="shelf-drawer-setting">
-              <span>视图模式</span>
+              <span>{t("shelfMenu.viewMode")}</span>
               <ShelfSelect
                 registerSubmenuBackHandler={props.registerSubmenuBackHandler}
                 onSubmenuBackActiveChange={props.onSubmenuBackActiveChange}
                 value={props.viewMode}
                 busy={props.busy}
-                title="视图模式"
+                title={t("shelfMenu.viewMode")}
                 options={[
-                  { value: "grid", label: "网格视图" },
-                  { value: "list", label: "列表视图" },
+                  { value: "grid", label: t("shelfMenu.viewMode.grid") },
+                  { value: "list", label: t("shelfMenu.viewMode.list") },
                 ]}
                 onChange={(value) => props.onViewModeChange!(value as ShelfViewMode)}
               />
             </div>
           )}
           <div className="shelf-drawer-setting">
-            <span>排列方式</span>
+            <span>{t("shelfMenu.sort")}</span>
             <ShelfSelect
               registerSubmenuBackHandler={props.registerSubmenuBackHandler}
               onSubmenuBackActiveChange={props.onSubmenuBackActiveChange}
               value={props.sort}
               busy={props.busy}
-              title="排列方式"
+              title={t("shelfMenu.sort")}
               options={[
-                { value: "recent", label: "最近阅读" },
-                { value: "added", label: "最近添加" },
-                { value: "title", label: "书名" },
+                { value: "recent", label: t("shelfMenu.sort.recent") },
+                { value: "added", label: t("shelfMenu.sort.added") },
+                { value: "title", label: t("shelfMenu.sort.title") },
               ]}
               onChange={(value) => props.onSortChange(value as ShelfSort)}
             />
           </div>
           <div className="shelf-drawer-setting">
-            <span>排布密度</span>
+            <span>{t("shelfMenu.density")}</span>
             <ShelfSelect
               registerSubmenuBackHandler={props.registerSubmenuBackHandler}
               onSubmenuBackActiveChange={props.onSubmenuBackActiveChange}
               value={props.density}
               busy={props.busy}
-              title="排布密度"
+              title={t("shelfMenu.density")}
               options={[
-                { value: "comfortable", label: "舒适" },
-                { value: "standard", label: "标准" },
-                { value: "compact", label: "紧凑" },
+                { value: "comfortable", label: t("shelfMenu.density.comfortable") },
+                { value: "standard", label: t("shelfMenu.density.standard") },
+                { value: "compact", label: t("shelfMenu.density.compact") },
               ]}
               onChange={(value) => props.onDensityChange(value as ShelfDensity)}
             />
           </div>
           <div className="shelf-drawer-setting">
-            <span>主题</span>
+            <span>{t("shelfMenu.theme")}</span>
             <ShelfSelect
               registerSubmenuBackHandler={props.registerSubmenuBackHandler}
               onSubmenuBackActiveChange={props.onSubmenuBackActiveChange}
               value={props.theme}
               busy={props.busy}
-              title="书架主题"
+              title={t("shelfMenu.theme.tip")}
               options={[
-                { value: "light", label: "浅色" },
-                { value: "dark", label: "深色" },
-                { value: "sepia", label: "羊皮纸" },
-                { value: "gray", label: "深灰" },
+                { value: "light", label: t("shelfMenu.theme.light") },
+                { value: "dark", label: t("shelfMenu.theme.dark") },
+                { value: "sepia", label: t("shelfMenu.theme.sepia") },
+                { value: "gray", label: t("shelfMenu.theme.gray") },
               ]}
               onChange={(value) => props.onThemeChange(value as Theme)}
             />
           </div>
           <div className="shelf-drawer-setting">
-            <span>界面动画</span>
+            <span>{t("shelfMenu.motion")}</span>
             <ShelfSelect
               registerSubmenuBackHandler={props.registerSubmenuBackHandler}
               onSubmenuBackActiveChange={props.onSubmenuBackActiveChange}
               value={uiMotion}
               busy={props.busy}
-              title="界面动画"
+              title={t("shelfMenu.motion")}
               options={[
-                { value: "full", label: "完整" },
-                { value: "reduced", label: "简化" },
+                { value: "full", label: t("shelfMenu.motion.full") },
+                { value: "reduced", label: t("shelfMenu.motion.reduced") },
               ]}
               onChange={(value) => setUiMotion(value as UiMotion)}
             />
           </div>
           {props.batteryIndicatorEnabled !== undefined && props.onBatteryIndicatorChange && (
             <div className="shelf-drawer-setting">
-              <span>阅读电量</span>
+              <span>{t("shelfMenu.battery")}</span>
               <ShelfSelect
                 registerSubmenuBackHandler={props.registerSubmenuBackHandler}
                 onSubmenuBackActiveChange={props.onSubmenuBackActiveChange}
                 value={props.batteryIndicatorEnabled ? "on" : "off"}
                 busy={props.busy}
-                title="阅读栏显示电量"
+                title={t("shelfMenu.battery.tip")}
                 options={[
-                  { value: "on", label: "显示" },
-                  { value: "off", label: "隐藏" },
+                  { value: "on", label: t("shelfMenu.show") },
+                  { value: "off", label: t("shelfMenu.hide") },
                 ]}
                 onChange={(value) => props.onBatteryIndicatorChange!(value === "on")}
               />
@@ -2893,14 +2902,14 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
 
           {props.hideReaderSystemStatusBar !== undefined && props.onHideReaderSystemStatusBarChange && (
             <div className="shelf-drawer-setting">
-              <span>阅读时系统状态栏</span>
+              <span>{t("shelfMenu.statusBar")}</span>
               <ShelfSelect
                 registerSubmenuBackHandler={props.registerSubmenuBackHandler}
                 onSubmenuBackActiveChange={props.onSubmenuBackActiveChange}
                 value={props.hideReaderSystemStatusBar ? "hide" : "show"}
                 busy={props.busy}
-                title="阅读时隐藏系统状态栏"
-                options={[{ value: "hide", label: "隐藏" }, { value: "show", label: "显示" }]}
+                title={t("shelfMenu.statusBar.tip")}
+                options={[{ value: "hide", label: t("shelfMenu.hide") }, { value: "show", label: t("shelfMenu.show") }]}
                 onChange={(value) => props.onHideReaderSystemStatusBarChange!(value === "hide")}
               />
             </div>
@@ -2908,49 +2917,49 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
 
           {props.keepScreenOnWhileReading !== undefined && props.onKeepScreenOnWhileReadingChange && (
             <div className="shelf-drawer-setting">
-              <span>阅读时屏幕常亮</span>
+              <span>{t("shelfMenu.keepScreenOn")}</span>
               <ShelfSelect
                 registerSubmenuBackHandler={props.registerSubmenuBackHandler}
                 onSubmenuBackActiveChange={props.onSubmenuBackActiveChange}
                 value={props.keepScreenOnWhileReading ? "on" : "off"}
                 busy={props.busy}
-                title="阅读时保持屏幕常亮，回到书架或切到后台即恢复系统熄屏"
-                options={[{ value: "off", label: "关闭" }, { value: "on", label: "开启" }]}
+                title={t("shelfMenu.keepScreenOn.tip")}
+                options={[{ value: "off", label: t("shelfMenu.off") }, { value: "on", label: t("shelfMenu.on") }]}
                 onChange={(value) => props.onKeepScreenOnWhileReadingChange!(value === "on")}
               />
             </div>
           )}
 
-          <div className="shelf-drawer-group-label">备份与传输</div>
+          <div className="shelf-drawer-group-label">{t("shelfMenu.backup")}</div>
           <div className="shelf-drawer-list">
             {capabilities.supportsLanTransfer && props.onOpenLanTransfer && (
               <ShelfDrawerRow
                 icon={<LanTransferIcon />}
-                title="设备互传"
-                detail="同一 Wi‑Fi 下传书和阅读进度"
+                title={t("shelfMenu.lan")}
+                detail={t("shelfMenu.lan.detail")}
                 disabled={!props.lanTransferActive && (props.busy || props.importActive || props.saveFileActive)}
                 onClick={() => props.onOpenLanTransfer!()}
               />
             )}
             <ShelfDrawerRow
               icon={<ExportIcon />}
-              title="导出存档"
-              detail="保存为 .epubsave 文件"
+              title={t("shelfMenu.export")}
+              detail={t("shelfMenu.export.detail")}
               disabled={props.busy || props.saveFileActive || props.lanTransferActive || props.entries.length === 0}
               onClick={() => props.onExportArchive()}
             />
             <ShelfDrawerRow
               icon={<ImportArchiveIcon />}
-              title="导入存档"
-              detail="合并存档里的书和阅读资料"
+              title={t("shelfMenu.importArchive")}
+              detail={t("shelfMenu.importArchive.detail")}
               disabled={props.busy || props.importArchiveDisabled || props.saveFileActive || props.lanTransferActive}
               onClick={props.onImportArchive}
             />
             {props.onImportLegacyArchive && (
               <ShelfDrawerRow
                 icon={<ImportArchiveIcon />}
-                title="导入旧版 JSON 存档"
-                detail="兼容早期版本导出的存档"
+                title={t("shelfMenu.importLegacy")}
+                detail={t("shelfMenu.importLegacy.detail")}
                 disabled={props.busy || props.importArchiveDisabled || props.saveFileActive || props.lanTransferActive}
                 onClick={props.onImportLegacyArchive}
               />
@@ -2959,14 +2968,14 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
 
           {(props.onEnterSelection || capabilities.supportsCacheStorage) && (
             <>
-              <div className="shelf-drawer-group-label">管理</div>
+              <div className="shelf-drawer-group-label">{t("shelfMenu.manage")}</div>
               <div className="shelf-drawer-list">
                 {props.onEnterSelection && (
                   <ShelfDrawerRow
                     icon={<CheckListIcon />}
                     tone="neutral"
-                    title="批量选择"
-                    detail="多选后收藏、移动、导出或删除"
+                    title={t("shelfMenu.batch")}
+                    detail={t("shelfMenu.batch.detail")}
                     disabled={props.busy || props.entries.length === 0}
                     onClick={() => {
                       props.onClose();
@@ -2978,8 +2987,8 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
                   <ShelfDrawerRow
                     icon={<StorageIcon />}
                     tone="neutral"
-                    title="缓存与存储"
-                    detail="查看占用，清除全文索引"
+                    title={t("shelfMenu.cache")}
+                    detail={t("shelfMenu.cache.detail")}
                     disabled={props.busy}
                     onClick={() => setCachePanelOpen(true)}
                   />
@@ -2988,7 +2997,7 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
             </>
           )}
 
-          <div className="shelf-drawer-group-label">关于</div>
+          <div className="shelf-drawer-group-label">{t("shelfMenu.about")}</div>
           <AboutInfo />
         </div>
       </aside>
@@ -3053,8 +3062,9 @@ interface ShelfAZRailProps {
 }
 
 const ShelfAZRail = memo(function ShelfAZRail({ letterIndexMap, onSelectLetter }: ShelfAZRailProps) {
+  const { t } = useUiText();
   return (
-    <div className="shelf-az-rail" aria-label="首字母快速索引">
+    <div className="shelf-az-rail" aria-label={t("shelfMenu.azRail")}>
       {AZ_LETTERS.map((letter) => {
         const hasBooks = letterIndexMap.has(letter);
         return (
@@ -3069,7 +3079,7 @@ const ShelfAZRail = memo(function ShelfAZRail({ letterIndexMap, onSelectLetter }
                 onSelectLetter(letter, idx);
               }
             }}
-            title={hasBooks ? `跳转到首字母 ${letter}` : undefined}
+            title={hasBooks ? t("shelfMenu.azRail.jump", { letter }) : undefined}
           >
             {letter}
           </button>
