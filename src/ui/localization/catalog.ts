@@ -15,6 +15,8 @@ import { notes } from "./catalogs/notes";
 import { imageViewer } from "./catalogs/imageViewer";
 import { search } from "./catalogs/search";
 import { aa } from "./catalogs/aa";
+import { fonts } from "./catalogs/fonts";
+import { display } from "./catalogs/display";
 import commonEn from "./en/common.json";
 import folderEn from "./en/folder.json";
 import languageEn from "./en/language.json";
@@ -27,8 +29,10 @@ import notesEn from "./en/notes.json";
 import imageViewerEn from "./en/imageViewer.json";
 import searchEn from "./en/search.json";
 import aaEn from "./en/aa.json";
+import fontsEn from "./en/fonts.json";
+import displayEn from "./en/display.json";
 
-export const CATALOGS = [common, folder, language, reader, startup, titlebar, footer, sidebar, notes, imageViewer, search, aa] as const;
+export const CATALOGS = [common, folder, language, reader, startup, titlebar, footer, sidebar, notes, imageViewer, search, aa, fonts, display] as const;
 
 export const zhCN = {
   ...common.zh,
@@ -43,6 +47,8 @@ export const zhCN = {
   ...imageViewer.zh,
   ...search.zh,
   ...aa.zh,
+  ...fonts.zh,
+  ...display.zh,
 };
 
 export type MessageKey = keyof typeof zhCN;
@@ -61,6 +67,8 @@ export const en: Partial<Record<MessageKey, string>> = {
   ...imageViewerEn,
   ...searchEn,
   ...aaEn,
+  ...fontsEn,
+  ...displayEn,
 };
 
 /** Namespace → English file contents, for the integrity test and translation tooling. */
@@ -77,4 +85,6 @@ export const EN_FILES: Readonly<Record<string, Readonly<Record<string, string>>>
   imageViewer: imageViewerEn,
   search: searchEn,
   aa: aaEn,
+  fonts: fontsEn,
+  display: displayEn,
 };
