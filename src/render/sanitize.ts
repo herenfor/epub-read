@@ -165,6 +165,11 @@ function buildOverrideCss(s: ReaderSettings, bodyBgColor?: string): string {
 /* [L3] pre 的 UA white-space:pre 会禁止折行；保留空白但允许软换行。 */
 :where(#${VIEWER_ID} pre) {
   white-space: pre-wrap;
+}
+/* [L3] 正文里没有断点的长串（网址、======、————）只在溢出时折行，
+   不影响可正常断行的中文排版；书显式的 overflow-wrap 仍然优先。 */
+:where(#${VIEWER_ID}) {
+  overflow-wrap: break-word;
 }`;
 
   // ---- L5 引擎兼容补偿：Chromium 多栏布局 bug 的最小兜底 ----
@@ -231,6 +236,15 @@ function buildOverrideCss(s: ReaderSettings, bodyBgColor?: string): string {
   const bodyFontCss = s.customFontName
     ? `font-family: "${escapeFamily(s.customFontName)}" !important;`
     : "";
+  // 书常把字体写在 div/p 上，元素自身声明会压过 body 的继承值。用户明确选了
+  // 字体时覆盖到正文后代；等宽代码与 SVG/MathML 保留书的字体（版面依赖它）。
+  const descendantFontCss = s.customFontName
+    ? `
+/* [L2] 用户指定字体覆盖正文后代（"跟随书籍"时不输出）。 */
+:where(#${VIEWER_ID}) :not(pre, code, kbd, samp, tt, pre *, code *, kbd *, samp *, tt *, svg, svg *, math, math *) {
+  ${bodyFontCss}
+}`
+    : "";
   const writingModeCss = s.forceHorizontal === true
     ? `
 /* [L2/C-46] 可重排章节的强制横排：覆盖书籍 html/body、分页 viewer 及其普通后代。
@@ -249,7 +263,7 @@ html { font-size: ${s.fontSizePx}px !important; font-family: ${family}; }
 ${fontFaceCss}
 /* [L2] 主题只覆盖背景色，不用 background 简写（会重置书的 body 背景图）。
    浅色主题下安全的书籍 bgcolor 作为默认值合入这里，用户 CSS 仍在本样式末尾。 */
-body { color: ${fg}; background-color: ${bodyBgColor ?? bg}; ${bodyFontCss} }
+body { color: ${fg}; background-color: ${bodyBgColor ?? bg}; ${bodyFontCss} }${descendantFontCss}
 /* [L2] 笔记标记：CSS Custom Highlight 只绘制下划线，不包裹正文节点，
    因此不会改变文字几何尺寸、分页或作者选择器匹配。颜色按 iframe 主题固定，
    不依赖宿主页面变量；不设置背景，避免遮挡原书文字。 */
