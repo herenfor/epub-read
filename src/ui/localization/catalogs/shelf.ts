@@ -58,6 +58,8 @@ export const shelf = defineMessages("shelf", {
   "shelf.card.readSuffix": { zh: " 已读", note: "Appended after a percentage, e.g. '42% read'. Keep the leading space if your language needs it." },
   "shelf.card.unread": { zh: "未读", max: 8 },
   "shelf.progress.pending": { zh: "待统计", note: "Progress not computed yet.", max: 10 },
+  "shelf.table.select": "选择 {title}",
+  "shelf.table.more": "更多选项：{title}",
   "shelf.timeSegment.today": "今天",
   "shelf.timeSegment.last7Days": "最近 7 天",
   "shelf.timeSegment.last30Days": "最近 30 天",
