@@ -1,4 +1,5 @@
 import type { ShelfEntry } from "./shelf";
+import { uiPlural, uiText } from "./localization/UiLanguageProvider";
 
 export const IMPORT_TITLE_MAX_CHARS = 14;
 
@@ -69,7 +70,7 @@ export function truncateImportTitle(
   title: string,
   maxChars = IMPORT_TITLE_MAX_CHARS
 ): string {
-  const chars = Array.from(title.trim() || "未命名书籍");
+  const chars = Array.from(title.trim() || uiText("notice.importBooks.untitled"));
   if (chars.length <= maxChars) return chars.join("");
   if (maxChars <= 1) return "…";
   return `${chars.slice(0, maxChars - 1).join("")}…`;
@@ -85,23 +86,24 @@ export function formatImportNotice(summary: ImportSummary): ImportNotice {
     failed.length === 0
   ) {
     if (refreshedCount === 1) {
-      return { kind: "ok", text: "此书已在书架，已更新本机源文件绑定；原有进度和笔记已保留" };
+      return { kind: "ok", text: uiText("notice.importBooks.rebound") };
     }
-    return { kind: "error", text: "此书已经被导入过了哦" };
+    return { kind: "error", text: uiText("notice.importBooks.alreadyImported") };
   }
 
-  let text = `已导入 ${importedCount} 本`;
+  const sep = uiText("notice.sep");
+  let text = uiPlural("notice.importBooks.imported", importedCount, { count: importedCount });
   if (duplicateTitles.length > 0) {
     const names = duplicateTitles
       .slice(0, 2)
-      .map((title) => `《${truncateImportTitle(title)}》`)
-      .join("、");
-    text += `；重复 ${duplicateTitles.length} 本：${names}`;
-    if (duplicateTitles.length > 2) text += "等书";
-    if (refreshedCount > 0) text += `（已更新 ${refreshedCount} 本源文件绑定，保留原有进度和笔记）`;
+      .map((title) => uiText("notice.importBooks.title", { title: truncateImportTitle(title) }))
+      .join(uiText("notice.listSep"));
+    text += sep + uiText("notice.importBooks.duplicates", { count: duplicateTitles.length, names });
+    if (duplicateTitles.length > 2) text += uiText("notice.importBooks.duplicatesMore");
+    if (refreshedCount > 0) text += uiText("notice.importBooks.rebindNote", { count: refreshedCount });
   }
   if (failed.length > 0) {
-    text += `；失败 ${failed.length} 本（${failed.join("；")}）`;
+    text += sep + uiText("notice.importBooks.failedList", { count: failed.length, list: failed.join(sep) });
   }
 
   const kind: ImportNotice["kind"] =
