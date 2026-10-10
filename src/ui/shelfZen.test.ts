@@ -111,7 +111,8 @@ describe("ShelfZen Packet 1 现代书架体验", () => {
 
       const collapsed = dom.container.querySelector(".shelf-resume-collapsed");
       expect(collapsed).not.toBeNull();
-      expect(collapsed?.textContent).toContain("《红楼梦》");
+      expect(collapsed?.textContent).toContain("红楼梦");
+      expect(collapsed?.textContent).toContain("第 3 章");
     } finally {
       await dom.dispose();
     }
