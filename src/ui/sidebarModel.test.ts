@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TocNode } from "../core/types";
-import { countTocNodes, findActiveTocNode } from "./TocPanel";
+import { countTocNodes, findActiveTocNode, limitNotes, sortNotesNewestFirst, type NoteViewModel } from "./sidebarModel";
 
 const item = (label: string, href: string, children: TocNode[] = []): TocNode => ({
   label,
@@ -8,7 +8,7 @@ const item = (label: string, href: string, children: TocNode[] = []): TocNode =>
   children,
 });
 
-describe("TocPanel helpers", () => {
+describe("sidebar TOC helpers", () => {
   it("递归统计全部目录层级", () => {
     const nodes = [
       item("章", "OEBPS/ch.xhtml", [
@@ -53,5 +53,39 @@ describe("TocPanel helpers", () => {
 
     // 3. 点击回主章 2.1：高亮移回主章节
     expect(findActiveTocNode([chap21], "OEBPS/Text/Chapter2-1.xhtml")?.label).toBe("2.1 基本排版元素");
+  });
+});
+
+const batchSize = 200;
+const note = (id: string, createdAtMs: number): NoteViewModel => ({
+  id,
+  content: id,
+  selectedText: id,
+  chapterTitle: "第一章",
+  createdAtMs,
+});
+
+describe("sidebar note helpers", () => {
+  it("sorts newest first with a deterministic tie breaker", () => {
+    expect(sortNotesNewestFirst([note("a", 1), note("c", 3), note("b", 3)]).map((item) => item.id)).toEqual(["c", "b", "a"]);
+  });
+
+  it("bounds rendered cards for a large note collection", () => {
+    const notes = Array.from({ length: batchSize + 3 }, (_, index) => note(String(index), index));
+    const result = limitNotes(notes, batchSize);
+    expect(result.items).toHaveLength(batchSize);
+    expect(result.limited).toBe(true);
+    expect(result.items[0]?.id).toBe(String(batchSize + 2));
+  });
+
+  it("can expose every note through successive batches", () => {
+    const notes = Array.from({ length: batchSize * 2 + 1 }, (_, index) => note(String(index), index));
+    const first = limitNotes(notes, batchSize);
+    const second = limitNotes(notes, batchSize * 2);
+    const final = limitNotes(notes, batchSize * 3);
+    expect(first.limited).toBe(true);
+    expect(second.items).toHaveLength(batchSize * 2);
+    expect(final.items).toHaveLength(notes.length);
+    expect(final.limited).toBe(false);
   });
 });

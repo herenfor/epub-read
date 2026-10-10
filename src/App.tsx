@@ -115,7 +115,7 @@ import {
 } from "./features/ai/indexing/corpusConcurrencyPreference";
 import { ReaderContextMenu } from "./ui/ReaderContextMenu";
 import { NoteComposer } from "./ui/NoteComposer";
-import type { NoteViewModel } from "./ui/NotesPanel";
+import type { NoteViewModel } from "./ui/sidebarModel";
 import type { ReaderNote } from "./ui/notes";
 import { createLazyFontController } from "./ui/fontRuntime";
 import { currentUiLocale, uiPlural, uiText, useUiText } from "./ui/localization/UiLanguageProvider";
