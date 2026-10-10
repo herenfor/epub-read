@@ -454,10 +454,10 @@ select option {
 }
 
 /* ---- 统一阅读器二级面板遮罩体系（轻柔微光蒙层） ---- */
-.toc-backdrop,
+
 .menu-backdrop,
 .search-backdrop,
-.notes-backdrop,
+
 .log-backdrop,
 .ai-backdrop {
   position: fixed;
@@ -525,177 +525,6 @@ select option {
   gap: 8px;
 }
 
-/* ---- 左侧书脊微浮岛：目录面板 ---- */
-.toc-panel {
-  position: fixed;
-  top: 14px;
-  bottom: 14px;
-  left: 14px;
-  z-index: 50;
-  width: min(360px, calc(100vw - 28px));
-  max-width: 100%;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  border: 1px solid var(--panel-border);
-  border-radius: 18px;
-  background: var(--panel-bg);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  color: var(--fg);
-  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.3), 0 4px 14px rgba(0, 0, 0, 0.12);
-  transform: translateX(0) scale(1);
-  opacity: 1;
-  animation: panel-float-from-left var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
-  pointer-events: auto;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", system-ui, Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  font-size: 13.5px;
-}
-
-.toc-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px 18px 12px;
-  border-bottom: 1px solid var(--panel-border);
-  background: var(--panel-bg);
-  flex-shrink: 0;
-}
-
-.toc-title {
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--fg);
-}
-
-.toc-count {
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--muted);
-  background: color-mix(in srgb, var(--fg) 7%, transparent);
-}
-
-.toc-content {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: 8px 8px 16px;
-  overscroll-behavior: contain;
-}
-
-.toc-empty {
-  padding: 32px 16px;
-  color: var(--muted);
-  text-align: center;
-  font-size: 13px;
-}
-
-.toc-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  cursor: pointer;
-  padding: 7px 10px;
-  margin: 1px 0;
-  border-radius: 8px;
-  font-size: 13.5px;
-  line-height: 1.45;
-  color: var(--fg);
-  gap: 8px;
-  user-select: none;
-  transition: background-color 150ms ease, color 150ms ease, box-shadow 150ms ease;
-  position: relative;
-}
-
-.toc-item:hover:not(.disabled) {
-  background: var(--btn-hover);
-}
-
-.toc-item.active {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  color: var(--accent);
-  font-weight: 600;
-  box-shadow: inset 3px 0 0 var(--accent);
-}
-
-.toc-item.disabled {
-  color: var(--muted);
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.toc-item.level-0 {
-  font-weight: 550;
-  color: var(--fg);
-}
-
-.toc-item.level-1 {
-  font-weight: 450;
-  font-size: 13px;
-  color: color-mix(in srgb, var(--fg) 85%, var(--muted));
-}
-
-.toc-item.level-2,
-.toc-item.level-3 {
-  font-weight: 400;
-  font-size: 12.5px;
-  color: color-mix(in srgb, var(--fg) 75%, var(--muted));
-}
-
-.toc-item.active.level-0,
-.toc-item.active.level-1,
-.toc-item.active.level-2,
-.toc-item.active.level-3 {
-  color: var(--accent);
-}
-
-.toc-item-text {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* ---- 底部居中升起微浮岛控制台：设置与外观 ---- */
-.menu-panel {
-  position: fixed;
-  bottom: 20px;
-  left: 50%;
-  z-index: 50;
-  width: min(600px, calc(100vw - 32px));
-  max-height: min(620px, calc(100vh - 40px));
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-  /* Keep menu cards the same width before and after “详细设置” makes the
-     panel scrollable. Chromium otherwise allocates the scrollbar lazily. */
-  scrollbar-gutter: stable;
-  border: 1px solid var(--panel-border);
-  border-radius: 20px;
-  background: var(--panel-bg);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  color: var(--fg);
-  box-shadow: 0 24px 54px rgba(0, 0, 0, 0.35), 0 6px 18px rgba(0, 0, 0, 0.12);
-  transform: translate(-50%, 0) scale(1);
-  opacity: 1;
-  animation: panel-float-from-bottom var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
-  pointer-events: auto;
-  padding: 0 16px 20px;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", system-ui, Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  font-size: 13.5px;
-}
-
 .menu-head {
   display: flex;
   align-items: center;
@@ -710,25 +539,6 @@ select option {
   font-weight: 600;
   font-size: 15px;
   margin-bottom: 6px;
-}
-
-.menu-section {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 16px 0 8px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 2px;
-  color: var(--muted);
-  white-space: nowrap;
-}
-
-.menu-section::after {
-  content: "";
-  flex: 1;
-  height: 1px;
-  background: var(--panel-border);
 }
 
 .menu-item {
@@ -749,32 +559,6 @@ select option {
 
 .menu-item:hover:not(:disabled) {
   background: var(--btn-tint-hover);
-}
-
-.menu-panel .menu-item {
-  min-height: 38px;
-  height: auto;
-  background: var(--menu-surface);
-  border: 1px solid var(--menu-surface-border);
-  border-radius: 11px;
-  transition: background 140ms ease, border-color 140ms ease, transform 140ms ease;
-}
-
-.menu-panel .menu-item:hover:not(:disabled) {
-  background: var(--menu-surface-hover);
-  border-color: color-mix(in srgb, var(--accent) 34%, var(--panel-border));
-}
-
-.menu-panel .menu-item:active:not(:disabled) {
-  transform: translateY(1px);
-}
-
-.menu-panel .menu-item:focus-visible,
-.menu-panel .theme-btn:focus-visible,
-.menu-panel .step-btn:focus-visible,
-.menu-panel .detail-toggle:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
 }
 
 .menu-row .menu-item {
@@ -1115,44 +899,7 @@ select option {
   color: var(--muted);
 }
 
-.menu-panel .theme-row {
-  display: flex;
-  gap: 8px;
-  padding: 4px;
-  border: 1px solid var(--menu-surface-border);
-  border-radius: 13px;
-  background: color-mix(in srgb, var(--accent) 3%, var(--panel-bg));
-}
-
-.menu-panel .theme-btn {
-  flex: 1;
-  height: 34px;
-  background: var(--menu-surface);
-  border: 1px solid transparent;
-  border-radius: 9px;
-  color: var(--fg);
-  padding: 0;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.menu-panel .theme-btn:hover {
-  background: var(--menu-surface-hover);
-  border-color: var(--menu-surface-border);
-}
-
-/* 激活主题：填充高亮，提示用户当前设置 */
-.menu-panel .theme-btn.active {
-  background: var(--accent);
-  color: var(--accent-foreground);
-  font-weight: 600;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-foreground) 40%, transparent);
-}
-
-
-.menu-head .tb-close,
-.toc-head .tb-close,
-.notes-head .tb-close {
+.menu-head .tb-close {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1167,9 +914,7 @@ select option {
   transition: background-color 140ms ease, color 140ms ease;
 }
 
-.menu-head .tb-close:hover,
-.toc-head .tb-close:hover,
-.notes-head .tb-close:hover {
+.menu-head .tb-close:hover {
   background: var(--btn-tint-hover);
   color: var(--fg);
 }
@@ -1525,7 +1270,6 @@ select option {
   transition: opacity 320ms cubic-bezier(0.16, 1, 0.3, 1), transform 360ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-
 .status-bar .sb-clock {
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.5px;
@@ -1632,22 +1376,6 @@ select option {
   color: inherit;
   text-decoration: none;
   cursor: inherit;
-}
-
-/* ---- 目录与设置菜单：完全隐藏原生滚动条，保留流畅滚轮/触控/键盘翻阅 ---- */
-.toc-panel,
-.toc-content,
-.menu-panel {
-  scrollbar-width: none !important;
-  -ms-overflow-style: none !important;
-}
-
-.toc-panel::-webkit-scrollbar,
-.toc-content::-webkit-scrollbar,
-.menu-panel::-webkit-scrollbar {
-  display: none !important;
-  width: 0 !important;
-  height: 0 !important;
 }
 
 /* ---- 阅读器辅助弹层滚动条（日志/脚注/书签弹层；书架 UI 独立设计） ---- */
@@ -1801,14 +1529,6 @@ select option {
 
 /* ---- UI 界面缩放（只作用于界面组件，不影响书页 iframe 的分页测量） ---- */
 .titlebar {
-  zoom: var(--ui-scale, 1);
-}
-
-.menu-panel {
-  zoom: var(--ui-scale, 1);
-}
-
-.toc-panel {
   zoom: var(--ui-scale, 1);
 }
 
@@ -4859,8 +4579,8 @@ select option {
   z-index: 46;
   background: rgba(0, 0, 0, .28);
 }
-.note-composer-head, .notes-head { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; }
-.note-composer-head > span, .notes-head > span:first-child { flex: 1; min-width: 0; }
+.note-composer-head { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; }
+.note-composer-head > span { flex: 1; min-width: 0; }
 .note-selected-text {
   max-height: 120px;
   overflow: auto;
@@ -4893,73 +4613,6 @@ select option {
 .note-composer-error { margin-top: -6px; font-size: 12px; }
 .note-composer-actions { display: flex; justify-content: flex-end; gap: 7px; }
 
-.notes-panel {
-  position: fixed;
-  top: 14px;
-  bottom: 14px;
-  right: 14px;
-  z-index: 50;
-  width: min(440px, calc(100vw - 28px));
-  max-width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 0 0 14px;
-  border: 1px solid var(--panel-border);
-  border-radius: 18px;
-  background: var(--panel-bg);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  color: var(--fg);
-  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.3), 0 4px 14px rgba(0, 0, 0, 0.12);
-  transform: translateX(0) scale(1);
-  opacity: 1;
-  animation: panel-float-from-right var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
-  pointer-events: auto;
-  overflow: hidden;
-  box-sizing: border-box;
-  font-family: var(--font-ui);
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  zoom: var(--ui-scale, 1);
-}
-.notes-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px 18px 12px;
-  border-bottom: 1px solid var(--panel-border);
-  background: var(--panel-bg);
-  flex-shrink: 0;
-  font-weight: 600;
-  font-size: 15px;
-}
-.notes-count {
-  padding: 2px 7px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--muted);
-  background: color-mix(in srgb, var(--fg) 6%, transparent);
-}
-.notes-list { min-height: 0; flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 7px; padding: 0 14px; scrollbar-width: thin; scrollbar-color: var(--scroll-thumb) transparent; }
-.note-card { position: relative; flex: none; min-width: 0; padding: 9px 10px 7px; border: 1px solid var(--panel-border); border-radius: 8px; background: var(--btn-tint); }
-.note-card-main { display: flex; flex-direction: column; align-items: stretch; gap: 5px; width: 100%; min-width: 0; padding: 0 0 4px; border: 0; color: var(--fg); background: transparent; text-align: left; cursor: pointer; }
-.note-card-main:hover .note-card-content { color: var(--accent); }
-.note-card-content { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.5; }
-.note-card-meta { overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.note-card-selection { align-self: flex-end; max-width: 78%; overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.note-card-actions { display: flex; justify-content: flex-end; align-items: center; gap: 5px; min-height: 24px; }
-.note-action { padding: 3px 7px; border: 0; border-radius: 5px; color: var(--muted); background: transparent; font-size: 11px; cursor: pointer; }
-.note-action:hover { color: var(--fg); background: var(--btn-tint-hover); }
-.note-action.danger { color: var(--error); }
-.note-delete-question { color: var(--error); font-size: 11px; }
-.notes-empty, .notes-limited { padding: 16px 8px; color: var(--muted); font-size: 13px; text-align: center; }
-.notes-limited { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 2px 8px 0; font-size: 11px; }
-.note-show-more { padding: 3px 8px; border: 1px solid var(--panel-border); border-radius: 999px; color: var(--fg); background: var(--btn-tint); font-size: 11px; cursor: pointer; }
-.note-show-more:hover { background: var(--btn-tint-hover); }
-
 .startup-failure {
   box-sizing: border-box;
   min-height: 100%;
@@ -4972,7 +4625,7 @@ select option {
 .startup-failure p { margin: 0 0 16px; color: var(--muted); line-height: 1.6; }
 .startup-failure code { display: block; max-width: 720px; padding: 10px 12px; overflow-wrap: anywhere; color: var(--error); background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 6px; white-space: pre-wrap; }
 
-.notes-panel, .notes-list, .note-selected-text { scrollbar-width: thin; scrollbar-color: var(--scroll-thumb) transparent; }
+.note-selected-text { scrollbar-width: thin; scrollbar-color: var(--scroll-thumb) transparent; }
 
 /* ---- 移动端自适应底部抽屉（Bottom Sheet）全量统一规则 ---- */
 @media (max-width: 640px) {
@@ -4987,10 +4640,7 @@ select option {
     opacity: 0.8;
   }
 
-  .toc-panel,
-  .notes-panel,
   .app:not([data-mobile-chrome="true"]) .search-panel,
-  .menu-panel,
   .font-settings-panel,
   .app:not([data-mobile-chrome="true"]) .log-panel {
     top: auto !important;
