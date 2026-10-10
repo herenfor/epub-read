@@ -18,6 +18,7 @@ import {
   type SaveFileCommitResult,
   type SaveFilePrepareResult,
 } from "../platform/lanSaveNativeBridge";
+import { uiPlural, uiText } from "./localization/UiLanguageProvider";
 
 export type LanSaveSessionStatus =
   | "idle"
@@ -197,7 +198,7 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
         updateState({
           closing: false,
           cancelTooLate: true,
-          notice: "提交已经开始，关闭窗口不会回滚。",
+          notice: uiText("lan.notice.committing"),
         });
       } else {
         closeFinishedRef.current = true;
@@ -262,7 +263,7 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
             busy: false,
             error: null,
             errorCode: null,
-            notice: "已连接：可以发送资料，也可以等待对端发送。",
+            notice: uiText("lan.notice.connected"),
           });
           break;
         case "offered": {
@@ -316,14 +317,14 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
         case "error":
           peerEndedRef.current = true;
           if (operationRef.current || launchPendingRef.current) {
-            updateState({ notice: event.message ?? "连接已结束，正在等待本机结果。" });
+            updateState({ notice: event.message ?? uiText("lan.notice.endedWaiting") });
           } else {
             // A prepared import is gone after peer EOF/background cancellation.
             // Never leave an actionable preview for a discarded native job.
             updateState({
               status: "closed", busy: false, offer: null, preview: null,
-              notice: event.message ?? "连接已结束，请重新连接。",
-              error: event.event === "error" ? event.message ?? "设备互传失败。" : null,
+              notice: event.message ?? uiText("lan.notice.ended"),
+              error: event.event === "error" ? event.message ?? uiText("lan.notice.failed") : null,
               errorCode: event.code ?? null,
             });
           }
@@ -420,7 +421,7 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
     if (busyRef.current || stateRef.current.status !== "idle") return;
     const trimmed = pairingInfo.trim();
     if (!trimmed) {
-      updateState({ error: "请先粘贴完整的连接信息。", errorCode: "invalid-request" });
+      updateState({ error: uiText("lan.notice.pasteFirst"), errorCode: "invalid-request" });
       return;
     }
 
@@ -462,7 +463,7 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
         busy: false,
         error: null,
         errorCode: null,
-        notice: "已连接：可以发送资料，也可以等待对端发送。",
+        notice: uiText("lan.notice.connected"),
       }));
     } catch (error) {
       if (generationRef.current !== generation) return;
@@ -515,20 +516,20 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
       if (generationRef.current !== generation) return;
 
       let status: LanSaveSessionStatus = "sendFailed";
-      let notice: string | null = result.message ?? "发送失败。";
+      let notice: string | null = result.message ?? uiText("lan.notice.sendFailed");
       let error: string | null = null;
       let errorCode: string | null = null;
       if (result.status === "completed") {
         status = "sendComplete";
-        notice = "对方已导入。";
+        notice = uiText("lan.notice.peerImported");
       } else if (result.status === "unconfirmed") {
         status = "sendUnconfirmed";
-        notice = "连接已结束，对方导入结果未确认。";
+        notice = uiText("lan.notice.peerUnconfirmed");
       } else if (result.status === "cancelled") {
         status = "sendCancelled";
-        notice = result.message ?? "已取消发送。";
+        notice = result.message ?? uiText("lan.notice.sendCancelled");
       } else {
-        error = result.message ?? "发送失败。";
+        error = result.message ?? uiText("lan.notice.sendFailed");
         errorCode = result.code;
       }
 
@@ -681,7 +682,7 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
         localCommit: result,
         error: null,
         errorCode: null,
-        notice: `已导入 ${result.importedBooks.length} 本资料。`,
+        notice: uiPlural("lan.notice.imported", result.importedBooks.length, { count: result.importedBooks.length }),
       });
     } catch (error) {
       if (generationRef.current !== generation) return;
