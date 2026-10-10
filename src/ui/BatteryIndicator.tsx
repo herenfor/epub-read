@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { getRuntimeCapabilities } from "../platform/runtimeCapabilities";
 import { subscribeBattery, type BatteryStatus } from "../platform/batteryStatus";
 import "./batteryIndicator.css";
+import { useUiText } from "./localization/UiLanguageProvider";
 
 export interface BatteryIndicatorProps {
   /**
@@ -16,6 +17,7 @@ export const BatteryIndicator: React.FC<BatteryIndicatorProps> = ({
   enabled = true,
   className,
 }) => {
+  const { t } = useUiText();
   const runtime = getRuntimeCapabilities();
   const shouldRender = enabled && runtime.platform === "android";
   const [status, setStatus] = useState<BatteryStatus | null>(null);
@@ -36,9 +38,9 @@ export const BatteryIndicator: React.FC<BatteryIndicatorProps> = ({
   const label =
     levelPct === null
       ? charging
-        ? "正在充电，电量未知"
-        : "电量未知"
-      : `${charging ? "正在充电，" : ""}剩余电量 ${levelPct}%`;
+        ? t("readerMisc.battery.chargingUnknown")
+        : t("readerMisc.battery.unknown")
+      : t(charging ? "readerMisc.battery.chargingLevel" : "readerMisc.battery.level", { percent: levelPct });
 
   const fillWidth =
     levelPct === null ? 0 : Math.max(0, Math.min(17.3, (levelPct / 100) * 17.3));

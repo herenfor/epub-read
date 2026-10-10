@@ -50,6 +50,7 @@ import {
   type SlideFrame,
   type ValueAnimation,
 } from "./pagedSlide";
+import { uiText } from "./localization/UiLanguageProvider";
 
 export interface ReaderHandle {
   nextPage(): void;
@@ -1886,8 +1887,8 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     main.style.setProperty("--reader-swipe-opacity", String(Math.min(1, Math.abs(dx) / PAGED_SWIPE_THRESHOLD_PX)));
     if (swipeHintRef.current) {
       swipeHintRef.current.textContent = !canTurn
-        ? direction === 1 ? "已到末尾" : "已到开头"
-        : `${chapterEdge ? (direction === 1 ? "下一章 ›" : "‹ 上一章") : (direction === 1 ? "下一页 ›" : "‹ 上一页")}${ready ? " · 松手翻页" : ""}`;
+        ? uiText(direction === 1 ? "readerMisc.swipe.end" : "readerMisc.swipe.start")
+        : uiText(chapterEdge ? (direction === 1 ? "readerMisc.swipe.nextChapter" : "readerMisc.swipe.prevChapter") : (direction === 1 ? "readerMisc.swipe.nextPage" : "readerMisc.swipe.prevPage")) + (ready ? uiText("readerMisc.swipe.release") : "");
     }
   };
   updateSwipePreviewRef.current = (dx) => {

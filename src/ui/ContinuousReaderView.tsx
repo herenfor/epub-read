@@ -77,6 +77,7 @@ import {
   sameRenderingSettings,
   type ReaderHandle,
 } from "./ReaderView";
+import { uiText } from "./localization/UiLanguageProvider";
 
 export interface ContinuousReaderViewProps {
   book: Book;
@@ -2475,7 +2476,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
             const isReady = slot?.status === "ready";
             const isError = slot?.status === "error";
             const item = linearItems[p.box.index];
-            const chapterTitle = findChapterTitle(book.toc, item?.path ?? "", book) ?? `第 ${p.box.index + 1} 章`;
+            const chapterTitle = findChapterTitle(book.toc, item?.path ?? "", book) ?? uiText("readerMisc.chapterN", { n: p.box.index + 1 });
 
             return (
               <div
@@ -2494,13 +2495,13 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
                 {!isReady && !isError && (
                   <div className="chapter-placeholder">
                     <span className="chapter-placeholder-title">{chapterTitle}</span>
-                    <span className="chapter-placeholder-hint">正在准备…</span>
+                    <span className="chapter-placeholder-hint">{uiText("readerMisc.chapter.preparing")}</span>
                   </div>
                 )}
                 {isError && (
                   <div className="chapter-placeholder">
                     <span className="chapter-placeholder-title">{chapterTitle}</span>
-                    <span className="chapter-placeholder-error">章节加载失败</span>
+                    <span className="chapter-placeholder-error">{uiText("readerMisc.chapter.failed")}</span>
                     <button
                       type="button"
                       className="chapter-retry-btn"
@@ -2512,7 +2513,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
                         }
                       }}
                     >
-                      重试
+                      {uiText("readerMisc.chapter.retry")}
                     </button>
                   </div>
                 )}

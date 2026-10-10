@@ -93,6 +93,7 @@ import {
   resolveSpreadReadingArea,
   type SpreadReadingArea,
 } from "./spreadReadingArea";
+import { uiText } from "../ui/localization/UiLanguageProvider";
 
 /** 常规布局应远早于此完成；极端字体/引擎停滞时只解除隐藏，不伪造 ready。 */
 const INITIAL_RENDER_GATE_TIMEOUT_MS = 20_000;
@@ -6395,13 +6396,13 @@ export class ChapterPaginator {
     const divider = this.contentDoc.createElement("div");
     divider.className = "chapter-end-divider";
     const span = this.contentDoc.createElement("span");
-    span.textContent = "全书完";
+    span.textContent = uiText("readerMisc.bookEnd");
     divider.appendChild(span);
     endEl.appendChild(divider);
 
     const hint = this.contentDoc.createElement("div");
     hint.className = "chapter-end-hint";
-    hint.textContent = "已读完全部章节";
+    hint.textContent = uiText("readerMisc.bookEnd.hint");
     endEl.appendChild(hint);
 
     this.viewer.appendChild(endEl);

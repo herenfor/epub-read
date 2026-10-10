@@ -3,6 +3,7 @@ import type { Bookmark } from "./shelf";
 import { BookmarkIcon } from "./readerIcons";
 import { bookmarkPopoverLayout, type BookmarkPopoverLayout } from "./bookmarkPopoverLayout";
 import "./bookmarksPopover.css";
+import { useUiText } from "./localization/UiLanguageProvider";
 
 export type BookmarksPopoverEntry = Bookmark & { chapterLabel?: string };
 
@@ -56,6 +57,7 @@ export function BookmarksPopover({
   onSelect,
   onClose,
 }: BookmarksPopoverProps) {
+  const { t } = useUiText();
   const panelRef = useRef<HTMLDivElement | null>(null);
   // 点击时记录的坐标：浮层挂载后工具栏/标题栏按钮可能立刻被 CSS 隐藏，
   // 此时不能再用归零的实时 rect 定位。
@@ -116,7 +118,7 @@ export function BookmarksPopover({
         ref={panelRef}
         className="reader-bookmarks-popover"
         role="dialog"
-        aria-label="书签"
+        aria-label={t("readerMisc.bookmarks")}
         tabIndex={-1}
         style={
           layout
@@ -132,13 +134,13 @@ export function BookmarksPopover({
         }
       >
         <div className="reader-bookmarks-title">
-          <span>书签</span>
+          <span>{t("readerMisc.bookmarks")}</span>
           {bookmarks.length > 0 ? (
             <span className="reader-bookmarks-count">{bookmarks.length}</span>
           ) : null}
         </div>
         {bookmarks.length === 0 ? (
-          <div className="bookmark-empty">暂无书签</div>
+          <div className="bookmark-empty">{t("readerMisc.bookmarks.empty")}</div>
         ) : (
           bookmarks.map((bookmark) => (
             <button
@@ -152,7 +154,7 @@ export function BookmarksPopover({
                 <BookmarkIcon size={14} active={true} />
               </span>
               <span className="bookmark-main">
-                <span className="bookmark-text">{bookmark.text || "（无文字）"}</span>
+                <span className="bookmark-text">{bookmark.text || t("readerMisc.bookmark.noText")}</span>
                 <span className="bookmark-chapter">{bookmark.chapterLabel || ""}</span>
               </span>
             </button>

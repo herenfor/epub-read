@@ -1,0 +1,33 @@
+import { defineMessages } from "../defineMessages";
+
+/** Smaller reader surfaces: selection menu, bookmark popover, battery, footnotes, swipe hints, continuous-scroll placeholders. */
+export const readerMisc = defineMessages("readerMisc", {
+  "readerMisc.selection": "选区操作",
+  "readerMisc.copy": { zh: "复制", max: 10 },
+  "readerMisc.copyOriginal": { zh: "复制原文", note: "Copy the book's original text (before character conversion).", max: 14 },
+  "readerMisc.addNote": { zh: "添加笔记", max: 12 },
+  "readerMisc.bookmarks": "书签",
+  "readerMisc.bookmarks.empty": "暂无书签",
+  "readerMisc.bookmark.noText": "（无文字）",
+  "readerMisc.battery.chargingUnknown": "正在充电，电量未知",
+  "readerMisc.battery.unknown": "电量未知",
+  "readerMisc.battery.level": "剩余电量 {percent}%",
+  "readerMisc.battery.chargingLevel": "正在充电，剩余电量 {percent}%",
+  "readerMisc.footnote.pinned": { zh: "注释 · 已固定", max: 18 },
+  "readerMisc.footnote.tapToPin": { zh: "注释 · 点按固定", max: 18 },
+  "readerMisc.footnote": { zh: "注释", max: 10 },
+  "readerMisc.footnote.close": "关闭",
+  "readerMisc.swipe.end": { zh: "已到末尾", note: "Swipe hint at the last page.", max: 14 },
+  "readerMisc.swipe.start": { zh: "已到开头", note: "Swipe hint at the first page.", max: 14 },
+  "readerMisc.swipe.nextChapter": { zh: "下一章 ›", max: 14 },
+  "readerMisc.swipe.prevChapter": { zh: "‹ 上一章", max: 14 },
+  "readerMisc.swipe.nextPage": { zh: "下一页 ›", max: 14 },
+  "readerMisc.swipe.prevPage": { zh: "‹ 上一页", max: 14 },
+  "readerMisc.swipe.release": { zh: " · 松手翻页", note: "Appended to the swipe hint: release to turn.", max: 14 },
+  "readerMisc.chapterN": "第 {n} 章",
+  "readerMisc.chapter.preparing": "正在准备…",
+  "readerMisc.chapter.failed": "章节加载失败",
+  "readerMisc.chapter.retry": { zh: "重试", max: 8 },
+  "readerMisc.bookEnd": { zh: "全书完", note: "Shown after the last chapter: 'The End'." },
+  "readerMisc.bookEnd.hint": "已读完全部章节",
+});

@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
+import { useUiText } from "./localization/UiLanguageProvider";
 
 export interface ReaderSelectionPayload {
   text: string;
@@ -69,6 +70,7 @@ export interface ReaderContextMenuProps {
 }
 
 export function ReaderContextMenu(props: ReaderContextMenuProps) {
+  const { t } = useUiText();
   const menuRef = useRef<HTMLDivElement>(null);
   const [placement, setPlacement] = useState<ContextMenuPlacement>(() => getContextMenuPlacement(props.position, {
     width: typeof window === "undefined" ? 1024 : window.innerWidth,
@@ -123,18 +125,18 @@ export function ReaderContextMenu(props: ReaderContextMenuProps) {
       ref={menuRef}
       className={`reader-context-menu is-${placement.horizontal} is-${placement.vertical}`}
       role="menu"
-      aria-label="选区操作"
+      aria-label={t("readerMisc.selection")}
       style={{ left: placement.x, top: placement.y }}
       onPointerDown={handlePointerDown}
     >
-      <button type="button" role="menuitem" onClick={copy}>复制</button>
+      <button type="button" role="menuitem" onClick={copy}>{t("readerMisc.copy")}</button>
       {props.onCopyOriginal && (
         <button type="button" role="menuitem" onClick={() => {
           if (selection.originalText) props.onCopyOriginal?.(selection.originalText);
           props.onClose();
-        }}>复制原文</button>
+        }}>{t("readerMisc.copyOriginal")}</button>
       )}
-      <button type="button" role="menuitem" onClick={() => { props.onClose(); props.onAddNote(selection); }}>添加笔记</button>
+      <button type="button" role="menuitem" onClick={() => { props.onClose(); props.onAddNote(selection); }}>{t("readerMisc.addNote")}</button>
     </div>
   );
 }
