@@ -20,7 +20,7 @@ describe("AI release development-action boundary", () => {
     expect(source).toContain("allowDevelopmentActions: boolean");
     expect(source).toContain("{allowDevelopmentActions && <button");
     expect(source).toContain("controller.registerDevelopmentCatalog()");
-    expect(source).toContain("选择模型库");
-    expect(source).toContain("导入 linked 目录");
+    expect(source).toContain('t("ai.assets.chooseLibrary")');
+    expect(source).toContain('t("ai.assets.importLinked")');
   });
 });

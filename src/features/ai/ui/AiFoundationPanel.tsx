@@ -12,19 +12,21 @@ import { HardwareSection } from "./HardwareSection";
 import "./ai.css";
 import { getAppBuildSession, isAiDevelopmentActionsAllowed } from "../../../config/appBuildSession";
 import { CloseIcon } from "../../../ui/readerIcons";
+import { useUiText, type Translate } from "../../../ui/localization/UiLanguageProvider";
+import type { PlainMessageKey } from "../../../ui/localization/core";
 
-const CAPABILITY_LABELS: Record<AiCapability, string> = {
-  embedding: "向量嵌入",
-  generation: "文本生成",
-  reranking: "重排",
+const CAPABILITY_LABELS: Record<AiCapability, PlainMessageKey> = {
+  embedding: "ai.capability.embedding",
+  generation: "ai.capability.generation",
+  reranking: "ai.capability.reranking",
 };
 
-function capabilityState(snapshot: AiRuntimeSnapshot, capability: AiCapability): string {
-  if (snapshot.status === "disabled") return "未启用";
-  if (snapshot.status === "initializing") return "准备中";
-  if (snapshot.status === "error") return "异常";
+function capabilityState(t: Translate, snapshot: AiRuntimeSnapshot, capability: AiCapability): string {
+  if (snapshot.status === "disabled") return t("ai.state.disabled");
+  if (snapshot.status === "initializing") return t("ai.state.initializing");
+  if (snapshot.status === "error") return t("ai.state.error");
   const descriptor = snapshot.manifest && getCapability(snapshot.manifest, capability);
-  return descriptor?.availability === "available" ? "可用" : "不可用";
+  return t(descriptor?.availability === "available" ? "ai.state.available" : "ai.state.unavailable");
 }
 
 export interface AiFoundationPanelProps {
@@ -38,38 +40,39 @@ export interface AiFoundationPanelProps {
 
 /** AI assets and explicitly gated mock diagnostics. */
 export function AiFoundationPanel({ snapshot, onEnable, onDisable, onClose, preparation, semantic }: AiFoundationPanelProps) {
+  const { t } = useUiText();
   const developmentActionsAllowed = isAiDevelopmentActionsAllowed();
   const desktopDevelopmentActionsAllowed = developmentActionsAllowed && getAppBuildSession()?.source === "desktop";
-  const health = snapshot.status === "disabled"
-    ? "未检查"
+  const health = t(snapshot.status === "disabled"
+    ? "ai.health.unchecked"
     : snapshot.health?.status === "healthy"
-      ? "健康"
+      ? "ai.health.healthy"
       : snapshot.health?.status === "checking"
-        ? "检查中"
+        ? "ai.health.checking"
         : snapshot.health?.status === "degraded"
-          ? "降级"
+          ? "ai.health.degraded"
           : snapshot.health?.status === "unhealthy"
-            ? "不健康"
-            : snapshot.status === "error" ? "异常" : "未知";
+            ? "ai.health.unhealthy"
+            : snapshot.status === "error" ? "ai.state.error" : "ai.unknown");
 
   return (
-    <aside className="ai-foundation-panel" role="dialog" aria-label="AI 与模型（开发）">
+    <aside className="ai-foundation-panel" role="dialog" aria-label={t("ai.panel.title")}>
       <div className="drawer-drag-handle" aria-hidden="true" />
       <div className="ai-foundation-head">
         <div>
-          <h2>AI 与模型（开发）</h2>
-          <p>开发模式能力检查</p>
+          <h2>{t("ai.panel.title")}</h2>
+          <p>{t("ai.panel.subtitle")}</p>
         </div>
-        <button className="tb-btn tb-close panel-close" onClick={onClose} aria-label="关闭 AI 与模型（开发）" title="关闭">
+        <button className="tb-btn tb-close panel-close" onClick={onClose} aria-label={t("ai.panel.close")} title={t("common.close")}>
           <CloseIcon size={14} />
         </button>
       </div>
       <div className="ai-foundation-note">
         {developmentActionsAllowed
           ? desktopDevelopmentActionsAllowed
-            ? "能力检查使用 mock；下方索引测试仅在显式开始后读取当前书并写入本机 SQLite，不加载真实模型。"
-            : "下方可恢复索引使用浏览器 IndexedDB，可直接测试建库、取消、恢复和引用跳转；不加载真实模型。"
-          : "当前发行版只管理模型文件与下载元数据；未启用 Provider，不加载模型、不读取正文、不建向量、不执行推理。"}
+            ? t("ai.panel.note.desktop")
+            : t("ai.panel.note.browser")
+          : t("ai.panel.note.release")}
       </div>
       {developmentActionsAllowed && <HardwareSection />}
       {developmentActionsAllowed && preparation && <PreparationSection key={`preparation:${preparation.fingerprint}`} {...preparation} />}
@@ -77,12 +80,12 @@ export function AiFoundationPanel({ snapshot, onEnable, onDisable, onClose, prep
       {developmentActionsAllowed && <ModelLockSection />}
       <div className="ai-foundation-health">
         <div className="ai-foundation-row ai-foundation-row-health">
-          <span>Provider 健康</span><strong>{health}</strong>
+          <span>{t("ai.panel.providerHealth")}</span><strong>{health}</strong>
         </div>
         {AI_CAPABILITIES.map((capability) => (
           <div className="ai-foundation-row" key={capability}>
-            <span>{CAPABILITY_LABELS[capability]}</span>
-            <strong>{capabilityState(snapshot, capability)}</strong>
+            <span>{t(CAPABILITY_LABELS[capability])}</span>
+            <strong>{capabilityState(t, snapshot, capability)}</strong>
           </div>
         ))}
       </div>
@@ -90,11 +93,11 @@ export function AiFoundationPanel({ snapshot, onEnable, onDisable, onClose, prep
       {developmentActionsAllowed && <div className="ai-foundation-actions">
         {snapshot.status === "disabled" || snapshot.status === "error" ? (
           <button className="ai-foundation-primary" onClick={() => void onEnable()}>
-            启用 mock
+            {t("ai.panel.enableMock")}
           </button>
         ) : (
           <button className="ai-foundation-secondary" onClick={() => void onDisable()}>
-            禁用并释放
+            {t("ai.panel.disable")}
           </button>
         )}
       </div>}

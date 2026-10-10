@@ -10,6 +10,8 @@ import { createPreparationStore } from "../preparation/nativeStore";
 import { getAppBuildSession } from "../../../config/appBuildSession";
 import { runMockIndex } from "../preparation/mockIndexer";
 import { preparationCitation } from "../preparation/citation";
+import { uiText, useUiText } from "../../../ui/localization/UiLanguageProvider";
+import { liveMessage, rawMessage, type LiveMessage } from "./liveMessage";
 
 export interface PreparationSectionProps {
   book: Book;
@@ -23,10 +25,11 @@ const preparationGovernor = new ResourceGovernor(MOCK_PROBE);
 
 /** Explicit debug harness; mounting/reading a book does not open a database or start a job. */
 export function PreparationSection({ book, fingerprint, readingBusy, onNavigate }: PreparationSectionProps) {
+  const { t, tn } = useUiText();
   const governor = preparationGovernor;
   const [store] = useState(createPreparationStore);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("尚未运行；只使用确定性假向量，没有语义搜索能力。");
+  const [message, setMessage] = useState<LiveMessage>(() => liveMessage(({ t }) => t("ai.prep.initial")));
   const [status, setStatus] = useState<PreparationStatus | null>(null);
   const [citations, setCitations] = useState<DocumentChunk[]>([]);
   const [fault, setFault] = useState<"none" | "oom" | "crash">("none");
@@ -44,7 +47,7 @@ export function PreparationSection({ book, fingerprint, readingBusy, onNavigate 
     const controller = new AbortController(); abort.current = controller;
     try {
       if (action === "run" || action === "rebuild") {
-        setMessage("正在准备 mock 索引；取消或关闭面板会保留恢复点。");
+        setMessage(liveMessage(({ t }) => t("ai.prep.running")));
         const result = await runMockIndex({
           manifest: mockIndexManifest(fingerprint), store, governor, force: action === "rebuild", signal: controller.signal,
           onProgress: (value) => { if (current()) setStatus(value); },
@@ -61,53 +64,52 @@ export function PreparationSection({ book, fingerprint, readingBusy, onNavigate 
               const embed = provider.embed.bind(provider);
               let calls = 0;
               provider.embed = async (...args) => {
-                if (++calls === 2) throw new Error(fault === "oom" ? "模拟内存不足" : "模拟 Provider 崩溃");
+                if (++calls === 2) throw new Error(uiText(fault === "oom" ? "ai.prep.fault.oomError" : "ai.prep.fault.crashError"));
                 return embed(...args);
               };
             }
             return provider;
           },
         });
-        if (current()) { setStatus(result); setMessage("mock 索引已完成。下面仅显示前 20 个原文引用，用于核对跳转。"); }
+        if (current()) { setStatus(result); setMessage(liveMessage(({ t }) => t("ai.prep.done"))); }
       } else {
         const response = await store.request(action === "clear"
           ? { action: "clear", book: fingerprint, owner: crypto.randomUUID() }
           : { action: "status", book: fingerprint });
-        if (current()) { setStatus(response.status); setMessage(action === "clear" ? "本书 mock 索引已清理，全文搜索与模型文件保留。" : "状态已读取；不会自动开始建库。"); }
+        if (current()) { setStatus(response.status); setMessage(liveMessage(({ t }) => t(action === "clear" ? "ai.prep.cleared" : "ai.prep.statusRead"))); }
       }
       if (current() && !controller.signal.aborted) {
         const response = await store.request({ action: "citations", book: fingerprint });
         if (current()) setCitations(response.citations);
       }
     } catch (error) {
-      if (current()) setMessage(controller.signal.aborted ? "已取消；再次继续将校验并复用已保存批次。" : String(error));
+      if (current()) setMessage(controller.signal.aborted ? liveMessage(({ t }) => t("ai.prep.cancelled")) : rawMessage(String(error)));
     } finally {
       if (current()) { locked.current = false; abort.current = null; setBusy(false); }
     }
   };
   const disabled = busy || book.fixedLayout || !/^[a-f0-9]{64}$/.test(fingerprint);
-  return <section className="model-assets-section" aria-label="可恢复 mock 索引">
-    <h3>可恢复 mock 索引（调试）</h3>
+  return <section className="model-assets-section" aria-label={t("ai.prep.region")}>
+    <h3>{t("ai.prep.title")}</h3>
     <p className="model-assets-note">{getAppBuildSession()?.source === "browser"
-      ? "当前使用浏览器 IndexedDB：可测试建库、取消、刷新恢复和引用跳转。数据仅保存在当前浏览器，与桌面 SQLite 独立。"
-      : "当前使用桌面 SQLite。"}</p>
-    <p className="model-assets-note">仅处理当前书。关闭面板取消任务并保留恢复点；清理只影响本书假向量。预算为注入的测试值，不代表实际硬件探测。</p>
-    <label>故障注入 <select value={fault} disabled={busy} onChange={(e) => setFault(e.target.value as typeof fault)}>
-      <option value="none">关闭</option><option value="oom">第 2 批内存不足</option><option value="crash">第 2 批 Provider 崩溃</option>
+      ? t("ai.prep.note.browser")
+      : t("ai.prep.note.desktop")}</p>
+    <p className="model-assets-note">{t("ai.prep.note.scope")}</p>
+    <label>{t("ai.prep.fault")} <select value={fault} disabled={busy} onChange={(e) => setFault(e.target.value as typeof fault)}>
+      <option value="none">{t("ai.prep.fault.none")}</option><option value="oom">{t("ai.prep.fault.oom")}</option><option value="crash">{t("ai.prep.fault.crash")}</option>
     </select></label>
     <div className="ai-foundation-actions">
-      <button disabled={disabled} onClick={() => void execute("run")}>开始 / 继续</button>
-      <button disabled={disabled} onClick={() => void execute("rebuild")}>重建</button>
-      <button disabled={disabled} onClick={() => void execute("status")}>读取状态</button>
-      <button disabled={disabled} onClick={() => void execute("clear")}>清理假向量</button>
-      <button disabled={!busy} onClick={() => abort.current?.abort()}>取消</button>
+      <button disabled={disabled} onClick={() => void execute("run")}>{t("ai.prep.run")}</button>
+      <button disabled={disabled} onClick={() => void execute("rebuild")}>{t("ai.rebuild")}</button>
+      <button disabled={disabled} onClick={() => void execute("status")}>{t("ai.prep.status")}</button>
+      <button disabled={disabled} onClick={() => void execute("clear")}>{t("ai.prep.clear")}</button>
+      <button disabled={!busy} onClick={() => abort.current?.abort()}>{t("ai.cancel")}</button>
     </div>
-    <p role="status">{message}</p>
-    {status && <p className="model-assets-meta">暂存 {status.stagedChunks} 块 / 已发布 {status.publishedChunks} 块；恢复点 {status.nextBatch}。
-      {status.storage === "indexeddb" ? `IndexedDB 版本 ${status.databaseSchema}，mock 组件 ${status.componentVersion}。`
-        : `SQLite ${status.sqliteVersion}，数据库版本 ${status.databaseSchema}（支持至 ${status.supportedDatabaseSchema}），mock 组件 ${status.componentVersion}，锁等待 ${status.busyTimeoutMs} ms。`}
-      已预留 {governor.snapshot.reservedBytes} 字节。</p>}
+    <p role="status">{message.render({ t, tn })}</p>
+    {status && <p className="model-assets-meta">{status.storage === "indexeddb"
+      ? t("ai.prep.summary.indexeddb", { staged: status.stagedChunks, published: status.publishedChunks, next: status.nextBatch, schema: status.databaseSchema, component: status.componentVersion, bytes: governor.snapshot.reservedBytes })
+      : t("ai.prep.summary.sqlite", { staged: status.stagedChunks, published: status.publishedChunks, next: status.nextBatch, sqlite: status.sqliteVersion, schema: status.databaseSchema, supported: status.supportedDatabaseSchema, component: status.componentVersion, timeout: status.busyTimeoutMs, bytes: governor.snapshot.reservedBytes })}</p>}
     {citations.map((chunk) => <button className="preparation-citation" key={chunk.chunkId} disabled={busy}
-      onClick={() => onNavigate(preparationCitation(chunk))}>{chunk.chapterTitle}：{chunk.originalText.slice(0, 100)}</button>)}
+      onClick={() => onNavigate(preparationCitation(chunk))}>{t("ai.citation", { chapter: chunk.chapterTitle, text: chunk.originalText.slice(0, 100) })}</button>)}
   </section>;
 }

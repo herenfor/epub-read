@@ -10,6 +10,8 @@ import { SemanticQueryController, type SemanticHit, type SemanticQueryStatus } f
 import type { EmbeddingProfile } from "../semantic/contracts";
 import { createPreviewSession } from "../semantic/previewSession";
 import { embeddingErrorMessage, probeSemanticEmbedding } from "../semantic/nativeSession";
+import { uiText, useUiText, type Translate } from "../../../ui/localization/UiLanguageProvider";
+import { liveMessage, rawMessage, type LiveMessage } from "./liveMessage";
 
 export interface SemanticSectionProps {
   book: Book;
@@ -18,21 +20,22 @@ export interface SemanticSectionProps {
   onNavigate(result: SearchResult): void;
 }
 
-const INITIAL_MESSAGE = "尚未建库。语义索引只在点击“建立索引”后开始，不会自动下载模型或后台建库。";
+const INITIAL_MESSAGE = liveMessage(({ t }) => t("ai.sem.initial"));
 
 /** Debug harness for the single-book semantic index.  Web builds exercise real
  * storage and the real ranking code with preview vectors and say so; only a
  * Windows AI build loads the ONNX Runtime DirectML model. */
 export function SemanticSection({ book, fingerprint, readingBusy, onNavigate }: SemanticSectionProps) {
+  const { t, tn } = useUiText();
   const preview = getAppBuildSession()?.source === "browser";
   const packageId = preview ? "preview-test-vectors" : "bge-small-zh-v1.5";
   const [status, setStatus] = useState<SemanticQueryStatus | null>(null);
   const [hits, setHits] = useState<readonly SemanticHit[]>([]);
-  const [message, setMessage] = useState(INITIAL_MESSAGE);
+  const [message, setMessage] = useState<LiveMessage>(INITIAL_MESSAGE);
   const [question, setQuestion] = useState("");
   const [topK, setTopK] = useState(5);
   const [running, setRunning] = useState(false);
-  const [probe, setProbe] = useState<string | null>(null);
+  const [probe, setProbe] = useState<LiveMessage | null>(null);
   const generation = useRef(0);
   const readingBusyRef = useRef(readingBusy);
   readingBusyRef.current = readingBusy;
@@ -42,7 +45,7 @@ export function SemanticSection({ book, fingerprint, readingBusy, onNavigate }: 
     return new SemanticQueryController({
       store,
       previewSession: preview
-        ? { packageId, session: createPreviewSession(), device: { adapterName: "浏览器 IndexedDB", luid: null } }
+        ? { packageId, session: createPreviewSession(), device: { adapterName: uiText("ai.sem.browserStore"), luid: null } }
         : undefined,
       chunks: (_book, signal, profile) => iterateBookChunks(book, fingerprint, signal, profile),
       yieldToReader: () => new Promise((resolve) => setTimeout(resolve, 0)),
@@ -58,7 +61,7 @@ export function SemanticSection({ book, fingerprint, readingBusy, onNavigate }: 
     setStatus(null);
     if (!/^[a-f0-9]{64}$/.test(fingerprint) || book.fixedLayout) return;
     void controller.refresh(fingerprint).then((value) => {
-      if (seq === generation.current && value.state === "ready") setMessage(value.message);
+      if (seq === generation.current && value.state === "ready") setMessage(rawMessage(value.message));
     });
     return () => { generation.current++; controller.cancel(); };
   }, [book, controller, fingerprint]);
@@ -72,16 +75,16 @@ export function SemanticSection({ book, fingerprint, readingBusy, onNavigate }: 
         const value = await controller.clear(fingerprint);
         if (seq === generation.current) {
           setHits([]);
-          setMessage(value.message);
+          setMessage(rawMessage(value.message));
         }
       } else {
         setHits([]);
-        setMessage(action === "rebuild" ? "正在重建；不会复用旧的已发布代次。" : "正在建立语义索引；关闭面板会保留可恢复检查点。");
+        setMessage(liveMessage(({ t }) => t(action === "rebuild" ? "ai.sem.rebuilding" : "ai.sem.building")));
         const value = await controller.build(fingerprint, packageId, null, action === "rebuild");
-        if (seq === generation.current) setMessage(value.message);
+        if (seq === generation.current) setMessage(rawMessage(value.message));
       }
     } catch (error) {
-      setMessage(embeddingErrorMessage(error));
+      setMessage(rawMessage(embeddingErrorMessage(error)));
     } finally {
       if (seq === generation.current) setRunning(false);
     }
@@ -92,14 +95,16 @@ export function SemanticSection({ book, fingerprint, readingBusy, onNavigate }: 
     setRunning(true);
     const seq = generation.current;
     try {
-      setMessage("正在查询本地已发布代次…");
+      setMessage(liveMessage(({ t }) => t("ai.sem.querying")));
       const results = await controller.query(fingerprint, packageId, null, question.trim(), topK);
       if (seq === generation.current) {
         setHits(results);
-        setMessage(results.length ? `第 ${results[0].generation} 代命中 ${results.length} 段。cosine 得分只表示相似度排序，不是置信概率。` : "没有命中任何段落。");
+        setMessage(results.length
+          ? liveMessage(({ tn }) => tn("ai.sem.hits", results.length, { generation: results[0].generation, count: results.length }))
+          : liveMessage(({ t }) => t("ai.sem.noHits")));
       }
     } catch (error) {
-      setMessage(embeddingErrorMessage(error));
+      setMessage(rawMessage(embeddingErrorMessage(error)));
     } finally {
       if (seq === generation.current) setRunning(false);
     }
@@ -108,70 +113,79 @@ export function SemanticSection({ book, fingerprint, readingBusy, onNavigate }: 
   const runProbe = async () => {
     if (running) return;
     setRunning(true);
-    setProbe("正在加载已验证模型并运行一次真实短句嵌入…");
+    setProbe(liveMessage(({ t }) => t("ai.sem.probing")));
     try {
       const report = await probeSemanticEmbedding(question.trim() || undefined);
-      setProbe(`设备 ${report.device.adapterName ?? "未知"}（LUID ${report.device.luid ?? "未知"}，DirectML 索引 ${report.device.deviceIndex ?? "?"}）`
-        + `｜运行库 ${report.profile.runtimeVersion}｜token 查询/段落 ${report.queryTokens}/${report.passageTokens}`
-        + `｜归一 ${report.vectorNorm.toFixed(6)}，最大绝对值 ${report.vectorMaxAbs.toFixed(6)}`
-        + `｜向量摘要 ${report.vectorDigest.slice(0, 16)}…｜耗时 ${report.elapsedMs} ms｜query/passage cosine ${report.queryPassageCosine.toFixed(6)}`);
+      setProbe(liveMessage(({ t }) => t("ai.sem.probeReport", {
+        adapter: report.device.adapterName ?? t("ai.unknown"),
+        luid: report.device.luid ?? t("ai.unknown"),
+        index: report.device.deviceIndex ?? "?",
+        runtime: report.profile.runtimeVersion,
+        queryTokens: report.queryTokens,
+        passageTokens: report.passageTokens,
+        norm: report.vectorNorm.toFixed(6),
+        maxAbs: report.vectorMaxAbs.toFixed(6),
+        digest: report.vectorDigest.slice(0, 16),
+        ms: report.elapsedMs,
+        cosine: report.queryPassageCosine.toFixed(6),
+      })));
     } catch (error) {
-      setProbe(`探针失败：${embeddingErrorMessage(error)}`);
+      const detail = embeddingErrorMessage(error);
+      setProbe(liveMessage(({ t }) => t("ai.sem.probeFailed", { error: detail })));
     } finally {
       setRunning(false);
     }
   };
 
   const disabled = running || book.fixedLayout || !/^[a-f0-9]{64}$/.test(fingerprint);
-  return <section className="model-assets-section semantic-section" aria-label="单书语义检索">
-    <h3>单书语义检索（调试）</h3>
+  return <section className="model-assets-section semantic-section" aria-label={t("ai.sem.region")}>
+    <h3>{t("ai.sem.title")}</h3>
     <p className="model-assets-note">{preview
-      ? "浏览器预览：使用固定测试向量在 IndexedDB 中真实建库、恢复与排序，用于验证交互；这不是本机 Windows GPU 模型结果，也不代表已接入真实 Embedding。"
-      : "桌面 AI 调试版：使用已验证的本机 ONNX Runtime DirectML 模型；查询与建库共享同一原生许可，阅读优先在批次边界让行。"}</p>
-    <p className="model-assets-note">一次只处理当前书。不自动下载模型，不做问答、总结或跨书融合。
-      {preview && " 需要真实语义检索时请在 Windows AI 调试版运行。"}</p>
+      ? t("ai.sem.note.preview")
+      : t("ai.sem.note.desktop")}</p>
+    <p className="model-assets-note">{t(preview ? "ai.sem.note.scopePreview" : "ai.sem.note.scope")}</p>
     <div className="semantic-summary" role="status">
-      <span>状态：{semanticStateLabel(status?.state ?? "idle")}</span>
-      <span>模型：{status?.model ?? (preview ? "preview-test-vectors" : "尚未打开")}</span>
-      <span>设备：{status?.device ?? (preview ? "浏览器 IndexedDB" : "尚未探测")}</span>
-      <span>已发布代次：{status?.generation ?? "无"}</span>
-      <span>已发布段落：{status?.publishedRows ?? 0}</span>
-      <span>暂存/恢复点：{status?.stagedRows ?? 0} / 第 {status?.checkpointBatch ?? 0} 批</span>
+      <span>{t("ai.sem.summary.state", { state: semanticStateLabel(t, status?.state ?? "idle") })}</span>
+      <span>{t("ai.sem.summary.model", { model: status?.model ?? (preview ? "preview-test-vectors" : t("ai.sem.notOpened")) })}</span>
+      <span>{t("ai.sem.summary.device", { device: status?.device ?? (preview ? t("ai.sem.browserStore") : t("ai.sem.notProbed")) })}</span>
+      <span>{t("ai.sem.summary.generation", { generation: status?.generation ?? t("ai.sem.none") })}</span>
+      <span>{t("ai.sem.summary.rows", { rows: status?.publishedRows ?? 0 })}</span>
+      <span>{t("ai.sem.summary.staged", { staged: status?.stagedRows ?? 0, batch: status?.checkpointBatch ?? 0 })}</span>
     </div>
     <div className="ai-foundation-actions">
-      <button disabled={disabled} onClick={() => void run("build")}>建立索引 / 继续</button>
-      <button disabled={disabled} onClick={() => void run("rebuild")}>重建</button>
-      <button disabled={disabled} onClick={() => void run("clear")}>清理本书语义索引</button>
-      <button disabled={!running} onClick={() => { controller.cancel(); setMessage("已请求取消；driver 结束前会保留占用与恢复点。"); }}>取消</button>
+      <button disabled={disabled} onClick={() => void run("build")}>{t("ai.sem.build")}</button>
+      <button disabled={disabled} onClick={() => void run("rebuild")}>{t("ai.rebuild")}</button>
+      <button disabled={disabled} onClick={() => void run("clear")}>{t("ai.sem.clear")}</button>
+      <button disabled={!running} onClick={() => { controller.cancel(); setMessage(liveMessage(({ t }) => t("ai.sem.cancelRequested"))); }}>{t("ai.cancel")}</button>
     </div>
-    <label>查询<input value={question} disabled={disabled} placeholder="用自然语言描述要查找的内容"
+    <label>{t("ai.sem.query")}<input value={question} disabled={disabled} placeholder={t("ai.sem.queryPlaceholder")}
       onChange={(event) => setQuestion(event.target.value)}
       onKeyDown={(event) => { if (event.key === "Enter") void search(); }} /></label>
     <label>Top-K <select value={topK} disabled={disabled} onChange={(event) => setTopK(Number(event.target.value))}>
       {[3, 5, 8, 10].map((value) => <option key={value} value={value}>{value}</option>)}
     </select></label>
     <div className="ai-foundation-actions">
-      <button disabled={disabled || !question.trim()} onClick={() => void search()}>查询</button>
-      {!preview && <button disabled={running} onClick={() => void runProbe()}>真实模型探针</button>}
+      <button disabled={disabled || !question.trim()} onClick={() => void search()}>{t("ai.sem.query")}</button>
+      {!preview && <button disabled={running} onClick={() => void runProbe()}>{t("ai.sem.probe")}</button>}
     </div>
-    {probe && <p className="model-assets-meta">{probe}</p>}
-    <p role="status">{message}</p>
-    {status?.state === "failed" && <button className="ai-foundation-secondary" onClick={() => void controller.refresh(fingerprint)}>重试读取状态</button>}
+    {probe && <p className="model-assets-meta">{probe.render({ t, tn })}</p>}
+    <p role="status">{message.render({ t, tn })}</p>
+    {status?.state === "failed" && <button className="ai-foundation-secondary" onClick={() => void controller.refresh(fingerprint)}>{t("ai.sem.retry")}</button>}
     {hits.map((hit) => <button className="preparation-citation" key={`${hit.generation}-${hit.chunkId}-${hit.chunk.textAnchor.start}`} disabled={running}
       onClick={() => onNavigate(toSearchResult(hit))}>
-      {hit.citation.chapterTitle}（{hit.score.toFixed(3)}）：{hit.citation.snippet.slice(0, 100)}
+      {t("ai.sem.hit", { chapter: hit.citation.chapterTitle, score: hit.score.toFixed(3), text: hit.citation.snippet.slice(0, 100) })}
     </button>)}
   </section>;
 }
 
-function semanticStateLabel(state: SemanticQueryStatus["state"]): string {
+function semanticStateLabel(t: Translate, state: SemanticQueryStatus["state"]): string {
   switch (state) {
-    case "idle": return "未检查";
-    case "checking": return "检查中";
-    case "unavailable": return "未接入/不可用";
-    case "building": return "处理中";
-    case "ready": return "已就绪";
-    case "failed": return "失败";
+    case "idle": return t("ai.sem.state.idle");
+    case "checking": return t("ai.sem.state.checking");
+    case "unavailable": return t("ai.sem.state.unavailable");
+    case "building": return t("ai.sem.state.building");
+    case "ready": return t("ai.sem.state.ready");
+    case "failed": return t("ai.sem.state.failed");
   }
 }
 
