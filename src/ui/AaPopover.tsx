@@ -1,6 +1,6 @@
 import { READER_PALETTES } from "../config/readerPalette";
 import React, { useState } from "react";
-import { MENU_CLOSE_MS } from "./menuMotion";
+import { useMenuClose } from "./menuMotion";
 import type { Theme, TurnAnimation } from "../render/settings";
 import { PAGE_GAP_MAX_PX, type PageMarginsPx, type ReadingMode, type SpreadGapMode } from "../render/pageLayout";
 import {
@@ -208,16 +208,7 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
   const { t } = useUiText();
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [cssDraft, setCssDraft] = useState(customCss);
-  const [isClosing, setIsClosing] = useState(false);
-
-  const requestClose = React.useCallback(() => {
-    setIsClosing(true);
-    // 与 aaPopover.css 退场动画（--menu-close）一致；遮罩随 .is-closing 同步淡出。
-    setTimeout(() => {
-      setIsClosing(false);
-      onClose();
-    }, MENU_CLOSE_MS);
-  }, [onClose]);
+  const { isClosing, requestClose } = useMenuClose(onClose);
 
   const presentation = readingPresentation({
     readingMode: readingMode ?? "paginated",

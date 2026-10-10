@@ -3,10 +3,10 @@
   position: fixed;
   inset: 0;
   z-index: 190;
-  background: rgba(0, 0, 0, 0.38);
+  background: var(--ui-backdrop);
   backdrop-filter: blur(2px);
   -webkit-backdrop-filter: blur(2px);
-  animation: reader-panel-fade-in var(--menu-open) ease forwards;
+  animation: reader-panel-fade-in var(--menu-open) var(--ui-ease) forwards;
   pointer-events: auto;
 }
 
@@ -38,7 +38,7 @@
   }
 }
 
-/* 250ms 优雅退场动画 */
+/* 退场时长由 --menu-close 决定，与挂载生命周期一致。 */
 @keyframes panel-float-out-left {
   from {
     opacity: 1;
@@ -67,15 +67,15 @@
 }
 
 .sidebar-backdrop.is-closing {
-  animation: reader-panel-fade-out var(--menu-close) ease forwards;
+  animation: reader-panel-fade-out var(--menu-close) var(--ui-ease) forwards;
 }
 
 .sidebar-drawer.side-left.is-closing {
-  animation: panel-float-out-left var(--menu-close) cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  animation: panel-float-out-left var(--menu-close) var(--ui-ease-panel-exit) forwards;
 }
 
 .sidebar-drawer.side-right.is-closing {
-  animation: panel-float-out-right var(--menu-close) cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  animation: panel-float-out-right var(--menu-close) var(--ui-ease-panel-exit) forwards;
 }
 
 .sidebar-drawer {
@@ -110,13 +110,13 @@
 .sidebar-drawer.is-overlay.side-left {
   left: 14px;
   right: auto;
-  animation: panel-float-from-left var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
+  animation: panel-float-from-left var(--menu-open) var(--ease-emphasized);
 }
 
 .sidebar-drawer.is-overlay.side-right {
   right: 14px;
   left: auto;
-  animation: panel-float-from-right var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
+  animation: panel-float-from-right var(--menu-open) var(--ease-emphasized);
 }
 
 .sidebar-drawer.is-overlay.is-closed {
@@ -141,7 +141,7 @@
   border-top: none;
   border-bottom: none;
   border-radius: 0 16px 16px 0;
-  animation: panel-float-from-left var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
+  animation: panel-float-from-left var(--menu-open) var(--ease-emphasized);
 }
 
 .sidebar-drawer.is-docked.side-right {
@@ -152,7 +152,7 @@
   border-top: none;
   border-bottom: none;
   border-radius: 16px 0 0 16px;
-  animation: panel-float-from-right var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
+  animation: panel-float-from-right var(--menu-open) var(--ease-emphasized);
 }
 
 .sidebar-drawer.is-docked.is-closed {
@@ -175,7 +175,7 @@
 .sidebar-tabs {
   display: inline-flex;
   align-items: center;
-  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  background: var(--ui-control-bg);
   padding: 2px;
   border-radius: 8px;
   gap: 2px;
@@ -195,7 +195,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: background-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
+  transition: background-color var(--ui-control) var(--ui-ease), color var(--ui-control) var(--ui-ease), box-shadow var(--ui-control) var(--ui-ease);
   white-space: nowrap;
 }
 
@@ -204,7 +204,7 @@
 }
 
 .sidebar-tab.active {
-  background: var(--panel-bg, #ffffff);
+  background: var(--ui-control-selected);
   color: var(--fg);
   font-weight: 600;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08), 0 0 1px rgba(0, 0, 0, 0.06);
@@ -212,7 +212,6 @@
 
 [data-theme="dark"] .sidebar-tab.active,
 [data-theme="gray"] .sidebar-tab.active {
-  background: color-mix(in srgb, var(--panel-bg) 140%, #fff 8%);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
 }
 
@@ -236,7 +235,7 @@
   color: var(--fg);
   opacity: 0.65;
   cursor: pointer;
-  transition: opacity 140ms ease, background-color 140ms ease;
+  transition: opacity var(--ui-control) var(--ui-ease), background-color var(--ui-control) var(--ui-ease);
 }
 
 .sidebar-icon-btn:hover {
@@ -246,8 +245,8 @@
 
 .sidebar-pin-btn.active {
   opacity: 1;
-  color: #8b5cf6;
-  background: color-mix(in srgb, #8b5cf6 15%, transparent);
+  color: var(--ui-pin);
+  background: color-mix(in srgb, var(--ui-pin) 15%, transparent);
 }
 
 /* 抽屉内容容器 */
@@ -310,7 +309,7 @@
 .sidebar-toc-filter-wrap {
   position: relative;
   padding: 8px 12px 6px;
-  border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 35%, transparent);
+  border-bottom: 1px solid var(--ui-border-subtle);
   flex-shrink: 0;
 }
 
@@ -319,13 +318,13 @@
   height: 28px;
   box-sizing: border-box;
   border-radius: 6px;
-  border: 1px solid color-mix(in srgb, var(--panel-border) 60%, transparent);
-  background: color-mix(in srgb, var(--fg) 4%, transparent);
+  border: 1px solid var(--ui-border-control);
+  background: var(--ui-field-bg);
   color: var(--fg);
   font-size: 12px;
   padding: 0 24px 0 8px;
   outline: none;
-  transition: border-color 140ms ease, background-color 140ms ease;
+  transition: border-color var(--ui-control) var(--ui-ease), background-color var(--ui-control) var(--ui-ease);
 }
 
 .sidebar-toc-filter-input:focus {
@@ -363,7 +362,7 @@
   line-height: 1.4;
   color: color-mix(in srgb, var(--fg) 85%, transparent);
   cursor: pointer;
-  transition: background-color 120ms ease, color 120ms ease;
+  transition: background-color var(--ui-control-quick) var(--ui-ease), color var(--ui-control-quick) var(--ui-ease);
   border-left: 2px solid transparent;
 }
 
@@ -373,10 +372,10 @@
 }
 
 .sidebar-toc-item.active {
-  background: color-mix(in srgb, #10b981 12%, transparent);
-  color: #10b981;
+  background: color-mix(in srgb, var(--ui-navigation-active) 12%, transparent);
+  color: var(--ui-navigation-active);
   font-weight: 600;
-  border-left-color: #10b981;
+  border-left-color: var(--ui-navigation-active);
 }
 
 .sidebar-toc-text {
@@ -396,7 +395,7 @@
 }
 
 .sidebar-disabled-icon {
-  color: #f59e0b;
+  color: var(--ui-warning);
   flex-shrink: 0;
   margin-left: 6px;
 }
@@ -422,13 +421,13 @@
   padding: 8px 30px 8px 10px;
   border-radius: 8px;
   border: 1px solid transparent;
-  background: color-mix(in srgb, var(--fg) 3%, transparent);
+  background: var(--ui-card-bg);
   color: var(--fg);
   text-align: left;
   cursor: pointer;
   width: 100%;
   box-sizing: border-box;
-  transition: background-color 140ms ease, border-color 140ms ease, transform 120ms ease;
+  transition: background-color var(--ui-control) var(--ui-ease), border-color var(--ui-control) var(--ui-ease), transform var(--ui-control-quick) var(--ui-ease);
 }
 
 .sidebar-bookmark-card:hover {
@@ -453,7 +452,7 @@
   align-items: center;
   justify-content: center;
   opacity: 0;
-  transition: opacity 120ms ease, background-color 120ms ease, color 120ms ease;
+  transition: opacity var(--ui-control-quick) var(--ui-ease), background-color var(--ui-control-quick) var(--ui-ease), color var(--ui-control-quick) var(--ui-ease);
 }
 
 .sidebar-bookmark-row:hover .sidebar-bookmark-del-btn {
@@ -462,12 +461,12 @@
 
 .sidebar-bookmark-del-btn:hover {
   opacity: 1 !important;
-  background: color-mix(in srgb, #f43f5e 15%, transparent);
-  color: #f43f5e;
+  background: color-mix(in srgb, var(--ui-danger) 15%, transparent);
+  color: var(--ui-danger);
 }
 
 .sidebar-bookmark-icon {
-  color: #f43f5e;
+  color: var(--ui-bookmark);
   margin-top: 1px;
   flex-shrink: 0;
 }
@@ -509,7 +508,7 @@
   flex-direction: column;
   padding: 9px 10px;
   border-radius: 8px;
-  background: color-mix(in srgb, var(--fg) 3%, transparent);
+  background: var(--ui-card-bg);
   border: 1px solid color-mix(in srgb, var(--panel-border) 40%, transparent);
   gap: 6px;
 }
@@ -550,7 +549,7 @@
   background: color-mix(in srgb, var(--fg) 5%, transparent);
   padding: 3px 6px;
   border-radius: 4px;
-  border-left: 2px solid #f59e0b;
+  border-left: 2px solid var(--ui-note-quote);
 }
 
 .sidebar-note-actions {
@@ -570,7 +569,7 @@
   background: transparent;
   color: var(--muted);
   cursor: pointer;
-  transition: background-color 120ms ease, color 120ms ease;
+  transition: background-color var(--ui-control-quick) var(--ui-ease), color var(--ui-control-quick) var(--ui-ease);
 }
 
 .sidebar-note-act:hover {
@@ -579,13 +578,13 @@
 }
 
 .sidebar-note-act.danger:hover {
-  background: color-mix(in srgb, #f43f5e 15%, transparent);
-  color: #f43f5e;
+  background: color-mix(in srgb, var(--ui-danger) 15%, transparent);
+  color: var(--ui-danger);
 }
 
 .sidebar-note-confirm {
   font-size: 11px;
-  color: #f43f5e;
+  color: var(--ui-danger);
 }
 
 /* 驻留模式对正文容器的影响：正文版心自适应收缩 */
@@ -593,13 +592,13 @@
 .app.has-docked-sidebar:not(.docked-side-right) .main {
   margin-left: 320px;
   margin-right: 0;
-  transition: margin 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  transition: margin var(--ui-dock) var(--ease-emphasized);
 }
 
 .app.has-docked-sidebar.docked-side-right .main {
   margin-right: 320px;
   margin-left: 0;
-  transition: margin 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  transition: margin var(--ui-dock) var(--ease-emphasized);
 }
 
 /* ---- 手机紧凑抽屉：覆盖层不占正文，安全区与 IME 由外层统一处理 ---- */
@@ -632,10 +631,10 @@
 /* 退场规则须晚于且不低于入场规则的优先级，否则 is-closing 时仍播放入场动画、直接消失。 */
 .sidebar-drawer.is-overlay.side-left.is-closing,
 .sidebar-drawer.is-docked.side-left.is-closing {
-  animation: panel-float-out-left var(--menu-close) cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  animation: panel-float-out-left var(--menu-close) var(--ui-ease-panel-exit) forwards;
 }
 
 .sidebar-drawer.is-overlay.side-right.is-closing,
 .sidebar-drawer.is-docked.side-right.is-closing {
-  animation: panel-float-out-right var(--menu-close) cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  animation: panel-float-out-right var(--menu-close) var(--ui-ease-panel-exit) forwards;
 }

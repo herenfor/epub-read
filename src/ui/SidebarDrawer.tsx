@@ -1,6 +1,6 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
+import React, { useLayoutEffect, useRef, useState } from "react";
 import { SIDEBAR_TABS, createSidebarNavigationMemory, installSidebarSwipe, type SidebarNavigationMemory, type SidebarSwipeMotion } from "./sidebarSwipe";
-import { MENU_CLOSE_MS } from "./menuMotion";
+import { useMenuClose } from "./menuMotion";
 import type { TocNode } from "../core/types";
 import { countTocNodes, findActiveTocNode, limitNotes, type NoteViewModel } from "./sidebarModel";
 import type { Bookmark } from "./shelf";
@@ -138,7 +138,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
   const activeItemRef = useRef<HTMLDivElement>(null);
   const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
   const [tocFilter, setTocFilter] = useState(navigationMemory?.tocFilter ?? "");
-  const [isClosing, setIsClosing] = useState(false);
+  const { isClosing, requestClose, cancelClose } = useMenuClose(onClose, open);
   const localMemory = useRef(createSidebarNavigationMemory());
   const memory = navigationMemory ?? localMemory.current;
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -147,22 +147,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
   const motionRef = useRef<SidebarSwipeMotion>();
   const onTabChangeRef = useRef(onTabChange);
   onTabChangeRef.current = onTabChange;
-  const closeTimer = useRef<ReturnType<typeof setTimeout>>();
   const visible = open || isClosing;
-
-  const requestClose = React.useCallback(() => {
-    clearTimeout(closeTimer.current);
-    setIsClosing(true);
-    closeTimer.current = setTimeout(() => {
-      setIsClosing(false);
-      onClose();
-    }, MENU_CLOSE_MS);
-  }, [onClose]);
-
-  useEffect(() => () => clearTimeout(closeTimer.current), []);
-  useEffect(() => {
-    if (!open) { clearTimeout(closeTimer.current); setIsClosing(false); }
-  }, [open]);
 
   useLayoutEffect(() => {
     if (!visible) return;
@@ -190,8 +175,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
   }, [activeTab]);
 
   const selectTab = (tab: SidebarTab) => {
-    clearTimeout(closeTimer.current);
-    setIsClosing(false);
+    cancelClose();
     if (motionRef.current) motionRef.current.select(SIDEBAR_TABS.indexOf(tab), true);
     else onTabChange(tab);
   };

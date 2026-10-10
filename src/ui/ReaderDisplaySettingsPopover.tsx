@@ -1,5 +1,5 @@
-import { useCallback, useState, type ReactNode } from "react";
-import { MENU_CLOSE_MS } from "./menuMotion";
+import type { ReactNode } from "react";
+import { useMenuClose } from "./menuMotion";
 import { ArrowLeftIcon, CloseIcon } from "./readerIcons";
 import "./aaPopover.css";
 import "./readerDisplaySettings.css";
@@ -18,15 +18,7 @@ export interface ReaderDisplaySettingsPopoverProps {
  */
 export function ReaderDisplaySettingsPopover({ onBack, onClose, children }: ReaderDisplaySettingsPopoverProps) {
   const { t } = useUiText();
-  const [isClosing, setIsClosing] = useState(false);
-  const requestClose = useCallback(() => {
-    setIsClosing(true);
-    // 与 aaPopover.css 退场动画（--menu-close）一致；遮罩随 .is-closing 同步淡出。
-    setTimeout(() => {
-      setIsClosing(false);
-      onClose();
-    }, MENU_CLOSE_MS);
-  }, [onClose]);
+  const { isClosing, requestClose } = useMenuClose(onClose);
 
   return (
     <>
