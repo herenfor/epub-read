@@ -40,6 +40,7 @@ import { shelfMenu } from "./catalogs/shelfMenu";
 import { shelfMain } from "./catalogs/shelfMain";
 import { notice } from "./catalogs/notice";
 import { appUi } from "./catalogs/appUi";
+import { readerMisc } from "./catalogs/readerMisc";
 import commonEn from "./en/common.json";
 import folderEn from "./en/folder.json";
 import languageEn from "./en/language.json";
@@ -67,8 +68,9 @@ import shelfMenuEn from "./en/shelfMenu.json";
 import shelfMainEn from "./en/shelfMain.json";
 import noticeEn from "./en/notice.json";
 import appUiEn from "./en/appUi.json";
+import readerMiscEn from "./en/readerMisc.json";
 
-export const CATALOGS = [common, folder, language, reader, startup, titlebar, footer, sidebar, notes, imageViewer, search, aa, fonts, display, about, cache, saveFile, importProgress, lan, lanPanel, folderImport, shelf, shelfFolder, shelfMenu, shelfMain, notice, appUi] as const;
+export const CATALOGS = [common, folder, language, reader, startup, titlebar, footer, sidebar, notes, imageViewer, search, aa, fonts, display, about, cache, saveFile, importProgress, lan, lanPanel, folderImport, shelf, shelfFolder, shelfMenu, shelfMain, notice, appUi, readerMisc] as const;
 
 export const zhCN = {
   ...common.zh,
@@ -98,6 +100,7 @@ export const zhCN = {
   ...shelfMain.zh,
   ...notice.zh,
   ...appUi.zh,
+  ...readerMisc.zh,
 };
 
 export type MessageKey = keyof typeof zhCN;
@@ -131,6 +134,7 @@ export const en: Partial<Record<MessageKey, string>> = {
   ...shelfMainEn,
   ...noticeEn,
   ...appUiEn,
+  ...readerMiscEn,
 };
 
 /** Namespace → English file contents, for the integrity test and translation tooling. */
@@ -162,4 +166,5 @@ export const EN_FILES: Readonly<Record<string, Readonly<Record<string, string>>>
   shelfMain: shelfMainEn,
   notice: noticeEn,
   appUi: appUiEn,
+  readerMisc: readerMiscEn,
 };

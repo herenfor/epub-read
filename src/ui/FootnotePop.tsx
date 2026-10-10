@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { placeFootnote } from "./footnotePlacement";
+import { useUiText } from "./localization/UiLanguageProvider";
 
 export interface FootnotePopProps {
   text: string;
@@ -26,6 +27,7 @@ export interface FootnotePopProps {
  * 内容可滚动（超长注释），滚轮在弹层内不会触发翻页。
  */
 export function FootnotePop(props: FootnotePopProps) {
+  const { t } = useUiText();
   const cardRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 300, h: 120 });
   const [containerSize, setContainerSize] = useState(() => {
@@ -105,8 +107,8 @@ export function FootnotePop(props: FootnotePopProps) {
         }}
       >
         <div className="footnote-head">
-          <span>{props.pinned ? "注释 · 已固定" : props.onPin ? "注释 · 点按固定" : "注释"}</span>
-          <button className="tb-btn" onClick={props.onClose} title="关闭">
+          <span>{props.pinned ? t("readerMisc.footnote.pinned") : props.onPin ? t("readerMisc.footnote.tapToPin") : t("readerMisc.footnote")}</span>
+          <button className="tb-btn" onClick={props.onClose} title={t("readerMisc.footnote.close")}>
             ✕
           </button>
         </div>
