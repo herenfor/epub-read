@@ -13,8 +13,8 @@ describe("UI language core", () => {
 
   it("returns readable text and interpolates 0 without treating user text as HTML", () => {
     expect(translate("en", "folder.name.too-long", { limit: 40 })).toBe("Use no more than 40 characters");
-    expect(translate("zh-CN", "folder.name.count", { count: 0, limit: 40 })).toBe("0/40");
-    expect(translate("en", "folder.name.count", { count: "<b>0</b>", limit: 40 })).toBe("<b>0</b>/40");
+    expect(translate("zh-CN", "folder.name.count", { count: 0, limit: 40 })).toBe("0/40 个字符");
+    expect(translate("en", "folder.name.count", { count: "<b>0</b>", limit: 40 })).toBe("<b>0</b>/40 characters");
     const previous = en["common.cancel"];
     try {
       en["common.cancel"] = "";

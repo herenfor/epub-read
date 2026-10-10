@@ -3,6 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getRuntimeCapabilities } from "../platform/runtimeCapabilities";
 import { PinIcon } from "./readerIcons";
 import "./titleBar.css";
+import { useUiText } from "./localization/UiLanguageProvider";
 
 function isTauriEnv(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -86,6 +87,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   logOpen,
   onToggleLog,
 }) => {
+  const { t } = useUiText();
   const [isMaximized, setIsMaximized] = useState(false);
   const [isZenRevealed, setIsZenRevealed] = useState(false);
   const zenHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -266,8 +268,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({
               type="button"
               className="titlebar-tools-toggle"
               onClick={onToggleTools}
-              title={toolsVisible ? "隐藏阅读工具" : "显示阅读工具"}
-              aria-label={toolsVisible ? "隐藏阅读工具" : "显示阅读工具"}
+              title={toolsVisible ? t("titlebar.tools.hide") : t("titlebar.tools.show")}
+              aria-label={toolsVisible ? t("titlebar.tools.hide") : t("titlebar.tools.show")}
               aria-pressed={toolsVisible}
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -280,13 +282,13 @@ export const TitleBar: React.FC<TitleBarProps> = ({
               type="button"
               className="titlebar-btn-pill titlebar-back-btn"
               onClick={onBackToShelf}
-              title="返回书架 (Esc)"
-              aria-label="返回书架"
+              title={t("titlebar.backToShelf.tip")}
+              aria-label={t("titlebar.backToShelf")}
             >
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M10 12L6 8l4-4" />
               </svg>
-              <span>书架</span>
+              <span>{t("titlebar.shelf")}</span>
             </button>
           )}
 
@@ -296,8 +298,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({
               type="button"
               className={`titlebar-btn-pill titlebar-toc-btn${sidebarOpen ? " active" : ""}`}
               onClick={() => onToggleSidebar("left")}
-              title="切换目录与书签侧边栏 (Ctrl+T)"
-              aria-label="切换侧边栏"
+              title={t("titlebar.sidebar.tip")}
+              aria-label={t("titlebar.sidebar")}
               aria-expanded={sidebarOpen}
               data-testid="titlebar-toc-btn"
             >
@@ -306,7 +308,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
                 <line x1="2" y1="8" x2="14" y2="8" />
                 <line x1="2" y1="12" x2="10" y2="12" />
               </svg>
-              <span>目录</span>
+              <span>{t("titlebar.toc")}</span>
             </button>
           )}
 
@@ -317,7 +319,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
                 {...dragProps}
                 title={title}
               >
-                {title || "EPUB 阅读器"}
+                {title || t("titlebar.appName")}
               </span>
               {chapterTitle && (
                 <>
@@ -330,7 +332,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
             </div>
           ) : (
             <span className="titlebar-app-title" {...dragProps} title={title}>
-              {title || "EPUB 阅读器"}
+              {title || t("titlebar.appName")}
             </span>
           )}
         </div>
@@ -358,8 +360,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({
                   type="button"
                   className={`titlebar-action-btn titlebar-sidebar-btn${sidebarOpen ? " active" : ""}`}
                   onClick={() => onToggleSidebar?.("left")}
-                  title="切换侧边栏目录与书签 (Ctrl+T)"
-                  aria-label="切换侧边栏"
+                  title={t("titlebar.sidebar.tipCompact")}
+                  aria-label={t("titlebar.sidebar")}
                   aria-expanded={sidebarOpen}
                 >
                   <svg width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -375,8 +377,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({
                   type="button"
                   className={`titlebar-action-btn titlebar-appearance-btn${appearanceOpen ? " active" : ""}`}
                   onClick={onToggleAppearance}
-                  title="外观与排版设置"
-                  aria-label="外观与排版设置"
+                  title={t("titlebar.appearance")}
+                  aria-label={t("titlebar.appearance")}
                   aria-expanded={appearanceOpen}
                 >
                   <span className="titlebar-aa-text">Aa</span>
@@ -389,8 +391,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({
                   type="button"
                   className={`titlebar-action-btn titlebar-search-btn${searchOpen ? " active" : ""}`}
                   onClick={onOpenSearch}
-                  title="搜索正文 (Ctrl+F)"
-                  aria-label="搜索正文"
+                  title={t("titlebar.search.tip")}
+                  aria-label={t("titlebar.search")}
                   aria-expanded={searchOpen}
                 >
                   <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -406,8 +408,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({
                   type="button"
                   className={`titlebar-action-btn titlebar-bookmark-btn${isBookmarked ? " active" : ""}`}
                   onClick={onToggleBookmark}
-                  title={isBookmarked ? "移除当前页书签 (Ctrl+B)" : "添加当前页书签 (Ctrl+B)"}
-                  aria-label={isBookmarked ? "移除当前页书签" : "添加当前页书签"}
+                  title={isBookmarked ? t("titlebar.bookmark.remove.tip") : t("titlebar.bookmark.add.tip")}
+                  aria-label={isBookmarked ? t("titlebar.bookmark.remove") : t("titlebar.bookmark.add")}
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill={isBookmarked ? "#f43f5e" : "none"} stroke={isBookmarked ? "#f43f5e" : "currentColor"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
@@ -421,8 +423,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({
                   type="button"
                   className={`titlebar-action-btn titlebar-bookmark-list-btn${bookmarksOpen ? " active" : ""}`}
                   onClick={(event) => onOpenBookmarks(event.currentTarget)}
-                  title="查看所有书签 (Ctrl+Shift+B)"
-                  aria-label="查看所有书签"
+                  title={t("titlebar.bookmarks.all.tip")}
+                  aria-label={t("titlebar.bookmarks.all")}
                   aria-expanded={bookmarksOpen === true}
                 >
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -438,8 +440,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({
                   className={`titlebar-action-btn titlebar-fullscreen-btn${isFullscreen ? " active" : ""}`}
                   onClick={onToggleFullscreen}
                   disabled={fullscreenBusy}
-                  title={isFullscreen ? "退出全屏 (F11 / Esc)" : "全屏沉浸阅读 (F11)"}
-                  aria-label={isFullscreen ? "退出全屏" : "全屏阅读"}
+                  title={isFullscreen ? t("titlebar.fullscreen.exit.tip") : t("titlebar.fullscreen.enter.tip")}
+                  aria-label={isFullscreen ? t("titlebar.fullscreen.exit") : t("titlebar.fullscreen.enter")}
                 >
                   {isFullscreen ? (
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -459,8 +461,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({
                   type="button"
                   className={`titlebar-action-btn titlebar-pin-btn${!zenMode ? " active" : ""}`}
                   onClick={onToggleZenMode}
-                  title={zenMode ? "顶栏当前为自动隐藏沉浸模式 (点击固定常驻)" : "顶栏当前已固定常驻 (点击开启自动隐藏沉浸模式)"}
-                  aria-label={zenMode ? "固定常驻顶栏" : "开启自动隐藏沉浸"}
+                  title={zenMode ? t("titlebar.zen.on.tip") : t("titlebar.zen.off.tip")}
+                  aria-label={zenMode ? t("titlebar.zen.pin") : t("titlebar.zen.autoHide")}
                   aria-pressed={!zenMode}
                 >
                   <PinIcon size={14} pinned={!zenMode} />
@@ -473,8 +475,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({
                   type="button"
                   className={`titlebar-action-btn titlebar-assistant-btn${assistantOpen ? " active" : ""}`}
                   onClick={onToggleAssistant}
-                  title="AI 助手"
-                  aria-label="AI 助手"
+                  title={t("titlebar.ai")}
+                  aria-label={t("titlebar.ai")}
                   aria-expanded={assistantOpen}
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -489,8 +491,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({
                   type="button"
                   className={`titlebar-action-btn titlebar-log-btn${logOpen ? " active" : ""}`}
                   onClick={onToggleLog}
-                  title="查看问题与诊断日志"
-                  aria-label="查看问题与诊断日志"
+                  title={t("titlebar.diagnostics")}
+                  aria-label={t("titlebar.diagnostics")}
                   aria-expanded={logOpen}
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -505,13 +507,13 @@ export const TitleBar: React.FC<TitleBarProps> = ({
 
           {/* 窗口三联按键（仅在 Tauri 桌面原生环境中渲染） */}
           {desktopChrome && (
-            <nav className="titlebar-controls" aria-label="窗口控制">
+            <nav className="titlebar-controls" aria-label={t("titlebar.window")}>
               <button
                 type="button"
                 className="titlebar-btn titlebar-minimize"
                 onClick={handleMinimize}
-                title="最小化"
-                aria-label="最小化"
+                title={t("titlebar.minimize")}
+                aria-label={t("titlebar.minimize")}
               >
                 <svg width="10" height="1" viewBox="0 0 10 1" fill="currentColor">
                   <rect width="10" height="1" />
@@ -522,8 +524,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({
                 className="titlebar-btn titlebar-maximize"
                 onClick={handleToggleMaximize}
                 disabled={isFullscreen || fullscreenBusy}
-                title={isFullscreen || fullscreenBusy ? "全屏模式下不可最大化" : (isMaximized ? "向下还原" : "最大化")}
-                aria-label={isMaximized ? "向下还原" : "最大化"}
+                title={isFullscreen || fullscreenBusy ? t("titlebar.maximize.disabled") : (isMaximized ? t("titlebar.restore") : t("titlebar.maximize"))}
+                aria-label={isMaximized ? t("titlebar.restore") : t("titlebar.maximize")}
               >
                 {isMaximized ? (
                   <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor">
@@ -540,8 +542,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({
                 type="button"
                 className="titlebar-btn titlebar-close"
                 onClick={handleClose}
-                title="关闭"
-                aria-label="关闭"
+                title={t("titlebar.close")}
+                aria-label={t("titlebar.close")}
               >
                 <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor">
                   <path d="M1 1L9 9M9 1L1 9" strokeWidth="1.2" strokeLinecap="round" />
@@ -570,19 +572,20 @@ function ReaderProgressCapsule({
   sidebarOpen = false,
   onToggleSidebar,
 }: ReaderProgressCapsuleProps) {
+  const { t } = useUiText();
   return (
     <button
       type="button"
       className={`titlebar-progress-pill${onToggleSidebar ? " is-clickable" : ""}`}
       disabled={!onToggleSidebar}
       onClick={() => onToggleSidebar?.("left")}
-      aria-label="切换章节目录"
+      aria-label={t("titlebar.progress.toggleToc")}
       aria-expanded={sidebarOpen}
-      title={`阅读进度：${Math.round(progressPct ?? 0)}% (点击切换章节目录)`}
+      title={t("titlebar.progress.tip", { percent: Math.round(progressPct ?? 0) })}
     >
       {chapterIndex !== undefined && totalChapters !== undefined && totalChapters > 0 && (
         <span className="titlebar-chapter-badge">
-          第 {chapterIndex + 1}/{totalChapters} 章
+          {t("titlebar.progress.chapter", { current: chapterIndex + 1, total: totalChapters })}
         </span>
       )}
       {progressPct !== undefined && (

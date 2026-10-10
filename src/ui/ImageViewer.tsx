@@ -24,6 +24,7 @@ import {
   type Point,
 } from "./imageViewerGeometry";
 import "./imageViewer.css";
+import { useUiText } from "./localization/UiLanguageProvider";
 
 export interface ImageViewerProps {
   image: ImageViewRequest | null;
@@ -63,6 +64,7 @@ export function ImageViewer({
   compareOriginal = false,
   onCompareOriginalChange,
 }: ImageViewerProps) {
+  const { t } = useUiText();
   const open = image !== null;
   const overlayRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -382,7 +384,7 @@ export function ImageViewer({
       className="image-viewer"
       role="dialog"
       aria-modal="true"
-      aria-label="图片查看"
+      aria-label={t("imageViewer.dialog")}
       onClick={handleOverlayClick}
     >
       <div
@@ -414,15 +416,15 @@ export function ImageViewer({
           aria-hidden="true"
         />
       </div>
-      <div className="image-viewer-controls" role="group" aria-label="图片查看控件">
+      <div className="image-viewer-controls" role="group" aria-label={t("imageViewer.controls")}>
         {image.linkHref && onFollowLinkRef.current ? (
           <button
             type="button"
             className="image-viewer-btn image-viewer-link"
             onClick={() => onFollowLinkRef.current?.(image)}
-            title="打开链接"
+            title={t("imageViewer.openLink")}
           >
-            打开链接
+            {t("imageViewer.openLink")}
           </button>
         ) : null}
         <button
@@ -430,8 +432,8 @@ export function ImageViewer({
           className="image-viewer-btn"
           onClick={() => zoomAroundCenter(1 / BUTTON_ZOOM_STEP)}
           disabled={atFit}
-          title="缩小"
-          aria-label="缩小"
+          title={t("imageViewer.zoomOut")}
+          aria-label={t("imageViewer.zoomOut")}
         >
           <MinusIcon size={16} />
         </button>
@@ -441,8 +443,8 @@ export function ImageViewer({
           className="image-viewer-btn"
           onClick={() => zoomAroundCenter(BUTTON_ZOOM_STEP)}
           disabled={atMax}
-          title="放大"
-          aria-label="放大"
+          title={t("imageViewer.zoomIn")}
+          aria-label={t("imageViewer.zoomIn")}
         >
           <PlusIcon size={16} />
         </button>
@@ -451,8 +453,8 @@ export function ImageViewer({
           className="image-viewer-btn"
           onClick={resetToFit}
           disabled={atFit}
-          title="适配窗口"
-          aria-label="适配窗口"
+          title={t("imageViewer.fit")}
+          aria-label={t("imageViewer.fit")}
         >
           <RotateCcwIcon size={16} />
         </button>
@@ -460,8 +462,8 @@ export function ImageViewer({
           type="button"
           className="image-viewer-btn image-viewer-original"
           onClick={useOriginalSize}
-          title="原始大小"
-          aria-label="原始大小"
+          title={t("imageViewer.actualSize")}
+          aria-label={t("imageViewer.actualSize")}
         >
           1:1
         </button>
@@ -470,7 +472,7 @@ export function ImageViewer({
             type="button"
             className={`image-viewer-btn image-viewer-compare${compareOriginal ? " is-active" : ""}`}
             aria-pressed={compareOriginal}
-            title="按住临时查看原图，松开恢复滤镜"
+            title={t("imageViewer.compare.tip")}
             onPointerDown={(event) => {
               event.preventDefault();
               onCompareOriginalChange(true);
@@ -481,7 +483,7 @@ export function ImageViewer({
             onBlur={() => onCompareOriginalChange(false)}
             onContextMenu={(event) => event.preventDefault()}
           >
-            原图
+            {t("imageViewer.compare")}
           </button>
         ) : null}
         <button
@@ -489,8 +491,8 @@ export function ImageViewer({
           type="button"
           className="image-viewer-btn image-viewer-close"
           onClick={() => onCloseRef.current()}
-          title="关闭"
-          aria-label="关闭"
+          title={t("imageViewer.close")}
+          aria-label={t("imageViewer.close")}
         >
           <CloseIcon size={16} />
         </button>

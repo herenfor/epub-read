@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ChangeEvent, KeyboardEvent } from "react";
+import { useUiText } from "./localization/UiLanguageProvider";
 
 export const NOTE_CONTENT_MAX_CODE_POINTS = 10_000;
 
@@ -29,12 +30,13 @@ export interface NoteComposerProps {
 }
 
 export function NoteComposer(props: NoteComposerProps) {
+  const { t } = useUiText();
   const [content, setContent] = useState(() => props.initialContent ?? "");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const count = countCodePoints(content);
   const valid = isNoteContentSavable(content);
   const editing = props.mode === "edit" || (props.mode === undefined && props.initialContent !== undefined);
-  const title = props.title ?? (editing ? "编辑笔记" : "添加笔记");
+  const title = props.title ?? (editing ? t("notes.edit") : t("notes.add"));
   const contentError = getNoteContentError(content);
   const dirty = content !== (props.initialContent ?? "");
 
@@ -66,7 +68,7 @@ export function NoteComposer(props: NoteComposerProps) {
 
   return (
     <div className="note-composer" role="dialog" aria-modal="true" aria-label={title}>
-      <div className="note-composer-head"><span>{title}</span><button type="button" className="tb-btn" onClick={props.onCancel} aria-label={`关闭${title}`}>✕</button></div>
+      <div className="note-composer-head"><span>{title}</span><button type="button" className="tb-btn" onClick={props.onCancel} aria-label={t("notes.closeTitled", { title })}>✕</button></div>
       <div className="note-selected-text" title={props.selectedText}>{props.selectedText}</div>
       <textarea
         ref={textareaRef}
@@ -74,17 +76,17 @@ export function NoteComposer(props: NoteComposerProps) {
         value={content}
         onChange={handleChange}
         onKeyDown={handleKeyDown}
-        placeholder="写下此刻的想法…"
-        aria-label="笔记内容"
+        placeholder={t("notes.placeholder")}
+        aria-label={t("notes.content")}
       />
       <div className={`note-composer-count${count >= NOTE_CONTENT_MAX_CODE_POINTS ? " is-limit" : ""}`}>
         {count}/{NOTE_CONTENT_MAX_CODE_POINTS}
       </div>
-      {contentError === "empty" && content.length > 0 && <div className="note-composer-error">笔记内容不能为空</div>}
-      {contentError === "too-long" && <div className="note-composer-error">笔记内容不能超过 {NOTE_CONTENT_MAX_CODE_POINTS} 个字符</div>}
+      {contentError === "empty" && content.length > 0 && <div className="note-composer-error">{t("notes.empty")}</div>}
+      {contentError === "too-long" && <div className="note-composer-error">{t("notes.tooLong", { limit: NOTE_CONTENT_MAX_CODE_POINTS })}</div>}
       <div className="note-composer-actions">
-        <button type="button" className="tb-btn" onClick={props.onCancel}>取消</button>
-        <button type="button" className="tb-btn active" disabled={!valid} onClick={save}>保存</button>
+        <button type="button" className="tb-btn" onClick={props.onCancel}>{t("notes.cancel")}</button>
+        <button type="button" className="tb-btn active" disabled={!valid} onClick={save}>{t("notes.save")}</button>
       </div>
     </div>
   );
