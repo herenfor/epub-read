@@ -33,6 +33,7 @@ import {
   type OrganizationCommand,
   type OrganizationEnvelope,
 } from "./libraryOrganization";
+import { currentUiLocale } from "./localization/UiLanguageProvider";
 
 // Keep the optional module out of the Core import graph, including dynamic chunks.
 const cleanupBrowserPreparation = IS_AI_EDITION
@@ -695,11 +696,11 @@ export function formatShelfTime(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return "";
   const d = new Date(ms);
   const now = new Date();
-  const pad = (n: number): string => String(n).padStart(2, "0");
   const sameYear = d.getFullYear() === now.getFullYear();
+  // zh-CN renders "10月10日" / "2025/03/04"; other UI languages get their own order.
   return sameYear
-    ? `${d.getMonth() + 1}月${d.getDate()}日`
-    : `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())}`;
+    ? new Intl.DateTimeFormat(currentUiLocale(), { month: "short", day: "numeric" }).format(d)
+    : new Intl.DateTimeFormat(currentUiLocale(), { year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
 }
 
 // ---- IndexedDB（浏览器 dev / 非 Tauri 环境回退） ----
