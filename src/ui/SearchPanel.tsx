@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { MENU_CLOSE_MS } from "./menuMotion";
 import type { KeyboardEvent } from "react";
 import { CloseIcon } from "./readerIcons";
+import { uiText, useUiText } from "./localization/UiLanguageProvider";
 
 export type SearchStatus = "idle" | "searching" | "complete" | "error";
 export type SearchScope = "current" | "all";
@@ -137,10 +138,10 @@ export function highlightSearchSnippet(
 export function getSearchStatusLabel(status: SearchStatus, processed: number, total: number): string {
   if (status === "searching") {
     const safeTotal = Math.max(0, total);
-    return `正在搜索 ${Math.max(0, processed)}/${safeTotal} 章`;
+    return uiText("search.status.searching", { processed: Math.max(0, processed), total: safeTotal });
   }
-  if (status === "complete") return "搜索完成";
-  if (status === "error") return "搜索失败";
+  if (status === "complete") return uiText("search.status.complete");
+  if (status === "error") return uiText("search.status.error");
   return "";
 }
 
@@ -276,6 +277,7 @@ function ConcurrencySelect(props: {
 }
 
 export function SearchIndexCard({ props }: { props: SearchPanelProps }) {
+  const { t, tn } = useUiText();
   const state = props.indexStatus ?? "idle";
   const progress = indexProgressValues(props.indexProgress);
   const pending = getSearchIndexPending(props.indexProgress);
@@ -294,8 +296,8 @@ export function SearchIndexCard({ props }: { props: SearchPanelProps }) {
 
   if (state === "checking") {
     return <div className="search-index-card search-index-card-checking" role="status" aria-live="polite">
-      <div className="search-index-card-title">正在检查书库索引…</div>
-      <div className="search-index-card-description">只检查已有索引状态，不会读取或处理 EPUB。</div>
+      <div className="search-index-card-title">{t("search.index.checking")}</div>
+      <div className="search-index-card-description">{t("search.index.checkingDetail")}</div>
     </div>;
   }
 
@@ -303,16 +305,16 @@ export function SearchIndexCard({ props }: { props: SearchPanelProps }) {
     const cancelling = state === "cancelling";
     return <div className="search-index-card search-index-card-progress" role="status" aria-live="polite">
       <div className="search-index-progress-head">
-        <span>{cancelling ? "正在取消索引" : "正在建立全文索引"} {progress.completed}/{progress.total} 本</span>
+        <span>{tn(cancelling ? "search.index.cancelProgress" : "search.index.progress", progress.total, { completed: progress.completed, total: progress.total })}</span>
         {props.onCancelIndex && <button
           className="search-index-cancel"
           type="button"
           disabled={cancelling}
           onClick={props.onCancelIndex}
-        >{cancelling ? "正在取消…" : "取消"}</button>}
+        >{cancelling ? t("search.index.cancelling") : t("search.index.cancel")}</button>}
       </div>
       <div className="search-index-progress-book" title={props.indexProgress?.currentBookTitle || undefined}>
-        当前：{props.indexProgress?.currentBookTitle || (cancelling ? "正在等待当前任务结束…" : "准备中…")}
+        {t("search.index.current", { title: props.indexProgress?.currentBookTitle || (cancelling ? t("search.index.waiting") : t("search.index.preparing")) })}
       </div>
       <div className="search-index-progress-track" aria-hidden="true">
         <span style={{ width: `${progress.total > 0 ? Math.min(100, (progress.completed / progress.total) * 100) : 0}%` }} />
@@ -324,30 +326,30 @@ export function SearchIndexCard({ props }: { props: SearchPanelProps }) {
   const isPartial = state === "partial";
   const isCancelled = state === "cancelled";
   const heading = isConfirmation
-    ? "建立全部书籍索引"
+    ? t("search.index.confirm.title")
     : isPartial
-      ? "书库索引尚未完成"
+      ? t("search.index.partial.title")
       : isCancelled
-        ? "索引已取消"
-        : "索引建立失败";
+        ? t("search.index.cancelled.title")
+        : t("search.index.error.title");
   const description = isConfirmation
-    ? "建立全库索引会读取需要处理的 EPUB，期间可能占用较多 CPU 和内存，并需要一段时间。索引建立后会保留，后续搜索无需重复处理。"
+    ? t("search.index.confirm.body")
     : isPartial
-      ? "已完成的书籍可以正常搜索；继续建立索引后，剩余书籍也会加入搜索范围。"
+      ? t("search.index.partial.body")
       : isCancelled
-        ? "已完成的书籍仍然保留，可以继续搜索；需要时可从剩余书籍继续建立索引。"
-      : (props.indexErrorMessage || "本次索引未能完成，已完成的书籍仍然保留。");
+        ? t("search.index.cancelled.body")
+      : (props.indexErrorMessage || t("search.index.error.body"));
   const detectedLogicalProcessors = Math.max(1, Math.floor(props.detectedCores ?? 1));
   const maximumConcurrency = Math.min(16, Math.max(1, detectedLogicalProcessors - 1));
 
   const concurrencyOptions: ConcurrencyOption[] = [
     {
       value: "automatic",
-      label: `自动${props.recommendedConcurrency ? `（推荐 ${props.recommendedConcurrency}）` : ""}`,
+      label: props.recommendedConcurrency ? t("search.index.autoRecommended", { count: props.recommendedConcurrency }) : t("search.index.auto"),
     },
     {
       value: "manual",
-      label: "手动",
+      label: t("search.index.manual"),
     },
   ];
 
@@ -357,13 +359,13 @@ export function SearchIndexCard({ props }: { props: SearchPanelProps }) {
     {props.indexErrorMessage && state !== "error" && (
       <div className="search-index-card-notice">{props.indexErrorMessage}</div>
     )}
-    {showStats && <div className="search-index-stats" aria-label="索引统计">
-      <span>书库总数 <strong>{progress.total}</strong></span>
-      <span>已可搜索 <strong>{progress.completed}</strong></span>
-      <span>待处理 <strong>{pending}</strong></span>
+    {showStats && <div className="search-index-stats" aria-label={t("search.index.stats")}>
+      <span>{t("search.index.stats.total")} <strong>{progress.total}</strong></span>
+      <span>{t("search.index.stats.done")} <strong>{progress.completed}</strong></span>
+      <span>{t("search.index.stats.pending")} <strong>{pending}</strong></span>
     </div>}
-    {props.onConcurrencyChange && <div className="search-index-concurrency" aria-label="索引并发设置">
-      <span className="search-index-concurrency-label">索引并发</span>
+    {props.onConcurrencyChange && <div className="search-index-concurrency" aria-label={t("search.index.concurrency")}>
+      <span className="search-index-concurrency-label">{t("search.index.concurrency.label")}</span>
       <ConcurrencySelect
         value={props.concurrencyMode ?? "automatic"}
         options={concurrencyOptions}
@@ -375,10 +377,10 @@ export function SearchIndexCard({ props }: { props: SearchPanelProps }) {
           className="search-index-stepper-btn"
           disabled={(props.concurrency ?? 1) <= 1}
           onClick={() => props.onConcurrencyChange?.("manual", Math.max(1, (props.concurrency ?? 1) - 1))}
-          aria-label="减少并发数"
+          aria-label={t("search.index.concurrency.less")}
         >−</button>
         <input
-          aria-label="索引并发数"
+          aria-label={t("search.index.concurrency.value")}
           type="number"
           min={1}
           max={maximumConcurrency}
@@ -390,18 +392,18 @@ export function SearchIndexCard({ props }: { props: SearchPanelProps }) {
           className="search-index-stepper-btn"
           disabled={(props.concurrency ?? 1) >= maximumConcurrency}
           onClick={() => props.onConcurrencyChange?.("manual", Math.min(maximumConcurrency, (props.concurrency ?? 1) + 1))}
-          aria-label="增加并发数"
+          aria-label={t("search.index.concurrency.more")}
         >+</button>
       </div>}
-      {props.detectedCores && <small className="search-index-cores-chip">检测到 {props.detectedCores} 个逻辑处理器</small>}
+      {props.detectedCores && <small className="search-index-cores-chip">{t("search.index.cores", { count: props.detectedCores })}</small>}
     </div>}
     {props.onConcurrencyChange && props.detectedCores && <div className="search-index-concurrency-help">
-      自动推荐 {props.recommendedConcurrency ?? 1}；手动最大 {maximumConcurrency}。在可用时为系统至少保留 1 个逻辑处理器，且应用硬上限为 16；并发越高，占用的内存也越多。
+      {t("search.index.concurrency.help", { recommended: props.recommendedConcurrency ?? 1, maximum: maximumConcurrency })}
     </div>}
     <div className="search-index-card-actions">
-      {(isConfirmation || isPartial) && props.onDeferIndex && <button type="button" className="search-index-secondary" onClick={props.onDeferIndex}>暂不建立</button>}
-      {isCancelled && props.onDeferIndex && <button type="button" className="search-index-secondary" onClick={props.onDeferIndex}>暂不处理</button>}
-      {canStart && (isConfirmation || isPartial || isCancelled || state === "error") && <button type="button" className="search-index-primary" onClick={handleStart} disabled={(pending === 0 && !isConfirmation) || startDebounce}>{isConfirmation ? "开始建立索引" : "继续建立索引"}</button>}
+      {(isConfirmation || isPartial) && props.onDeferIndex && <button type="button" className="search-index-secondary" onClick={props.onDeferIndex}>{t("search.index.defer")}</button>}
+      {isCancelled && props.onDeferIndex && <button type="button" className="search-index-secondary" onClick={props.onDeferIndex}>{t("search.index.skip")}</button>}
+      {canStart && (isConfirmation || isPartial || isCancelled || state === "error") && <button type="button" className="search-index-primary" onClick={handleStart} disabled={(pending === 0 && !isConfirmation) || startDebounce}>{isConfirmation ? t("search.index.start") : t("search.index.resume")}</button>}
     </div>
   </section>;
 }
@@ -412,10 +414,11 @@ export function SearchResultList({
   navigationBusy = false,
   onSelect,
 }: Pick<SearchPanelProps, "results" | "onSelect"> & { navigationBusy?: boolean }) {
+  const { t } = useUiText();
   const rendered = limitSearchResults(results);
   return <>
     {rendered.items.length > 0 && (
-      <div className="search-results" role="list" aria-label="搜索结果">
+      <div className="search-results" role="list" aria-label={t("search.results")}>
         {rendered.items.map((result) => (
           <button
             key={result.id}
@@ -439,12 +442,13 @@ export function SearchResultList({
       </div>
     )}
     {(results.length > SEARCH_RESULT_RENDER_LIMIT || rendered.limited) && (
-      <div className="search-truncated">结果较多，仅显示前 {SEARCH_RESULT_RENDER_LIMIT} 条</div>
+      <div className="search-truncated">{t("search.truncated", { limit: SEARCH_RESULT_RENDER_LIMIT })}</div>
     )}
   </>;
 }
 
 export function SearchPanel(props: SearchPanelProps) {
+  const { t, tn } = useUiText();
   const inputRef = useRef<HTMLInputElement>(null);
   const rendered = limitSearchResults(props.results);
   const statusLabel = props.statusMessage ?? getSearchStatusLabel(props.status, props.processed, props.total);
@@ -515,7 +519,7 @@ export function SearchPanel(props: SearchPanelProps) {
         className={`search-panel${props.closing ? " is-closing" : ""}`}
         role="dialog"
         aria-modal="true"
-        aria-label="正文搜索"
+        aria-label={t("search.dialog")}
         onKeyDown={handleKeyDown}
         style={dragOffset ? {
           transform: `translate(calc(-50% + ${dragOffset.x}px), calc(-50% + ${dragOffset.y}px))`,
@@ -536,56 +540,56 @@ export function SearchPanel(props: SearchPanelProps) {
           onPointerMove={handleHeaderPointerMove}
           onPointerUp={handleHeaderPointerUp}
           onPointerCancel={handleHeaderPointerUp}
-          title="按住标题栏可自由拖动搜索窗口"
+          title={t("search.drag.tip")}
         >
           <div className="drawer-title-wrap">
-            <span className="search-title">正文搜索</span>
+            <span className="search-title">{t("search.title")}</span>
             {props.status === "complete" && hasQuery && (
               <span className="search-count-badge">
-                {props.results.length > 0 ? `${props.results.length} 条` : "无结果"}
+                {props.results.length > 0 ? tn("search.count", props.results.length, { count: props.results.length }) : t("search.none")}
               </span>
             )}
           </div>
-          <button className="tb-btn tb-close" type="button" onClick={props.onClose} aria-label="关闭搜索" title="关闭搜索">
+          <button className="tb-btn tb-close" type="button" onClick={props.onClose} aria-label={t("search.close")} title={t("search.close")}>
             <CloseIcon size={14} />
           </button>
         </div>
         {props.onScopeChange && (
-          <div className="search-scope" role="group" aria-label="搜索范围">
+          <div className="search-scope" role="group" aria-label={t("search.scope")}>
             <button
               type="button"
               className={scope === "current" ? "active" : ""}
               aria-pressed={scope === "current"}
               onClick={() => props.onScopeChange?.("current")}
-            >当前书</button>
+            >{t("search.scope.current")}</button>
             <button
               type="button"
               className={scope === "all" ? "active" : ""}
               aria-pressed={scope === "all"}
               onClick={() => props.onScopeChange?.("all")}
-            >全部书籍</button>
+            >{t("search.scope.all")}</button>
           </div>
         )}
         {scope === "current" && props.onSearchViewChange && (
-          <div className="search-scope search-view-toggle" role="group" aria-label="当前书搜索文字">
+          <div className="search-scope search-view-toggle" role="group" aria-label={t("search.view")}>
             <button
               type="button"
               className={(props.searchView ?? "display") === "display" ? "active" : ""}
               aria-pressed={(props.searchView ?? "display") === "display"}
               onClick={() => props.onSearchViewChange?.("display")}
-            >当前显示</button>
+            >{t("search.view.display")}</button>
             <button
               type="button"
               className={props.searchView === "original" ? "active" : ""}
               aria-pressed={props.searchView === "original"}
               onClick={() => props.onSearchViewChange?.("original")}
-            >原文</button>
+            >{t("search.view.original")}</button>
           </div>
         )}
         {scope === "all" && (props.onRebuildIndex || props.onClearIndex) && (
-          <div className="search-index-actions" aria-label="全文索引管理">
-            {props.onRebuildIndex && <button type="button" disabled={props.status === "searching" || indexBusy} onClick={props.onRebuildIndex}>重新建立索引</button>}
-            {props.onClearIndex && <button type="button" disabled={props.status === "searching" || indexBusy} onClick={props.onClearIndex}>清除索引</button>}
+          <div className="search-index-actions" aria-label={t("search.indexActions")}>
+            {props.onRebuildIndex && <button type="button" disabled={props.status === "searching" || indexBusy} onClick={props.onRebuildIndex}>{t("search.rebuild")}</button>}
+            {props.onClearIndex && <button type="button" disabled={props.status === "searching" || indexBusy} onClick={props.onClearIndex}>{t("search.clearIndex")}</button>}
           </div>
         )}
         {scope === "all" && <SearchIndexCard props={props} />}
@@ -597,15 +601,15 @@ export function SearchPanel(props: SearchPanelProps) {
             value={props.query}
             disabled={indexSearchUnavailable}
             onChange={(event) => props.onQueryChange(event.target.value)}
-            placeholder={scope === "all" ? "搜索全部书籍正文" : "搜索当前书正文"}
-            aria-label={scope === "all" ? "搜索全部书籍正文" : "搜索当前书正文"}
+            placeholder={scope === "all" ? t("search.placeholder.all") : t("search.placeholder.current")}
+            aria-label={scope === "all" ? t("search.placeholder.all") : t("search.placeholder.current")}
           />
           {props.query.length > 0 && (
             <button
               className="search-clear"
               type="button"
               onClick={() => props.onQueryChange("")}
-              aria-label="清空搜索"
+              aria-label={t("search.clear")}
             >
               ×
             </button>
@@ -614,19 +618,19 @@ export function SearchPanel(props: SearchPanelProps) {
         <div className="search-status" aria-live="polite">
           {statusLabel}
           {props.status === "searching" && props.onCancel && (
-            <button className="search-cancel" type="button" onClick={props.onCancel}>取消</button>
+            <button className="search-cancel" type="button" onClick={props.onCancel}>{t("search.cancel")}</button>
           )}
-          {props.status === "error" && props.errorMessage && <span className="search-error">：{props.errorMessage}</span>}
+          {props.status === "error" && props.errorMessage && <span className="search-error">{t("search.errorDetail", { message: props.errorMessage })}</span>}
         </div>
         {!hasQuery && props.status !== "searching" && (
           <div className="search-empty">
-            {scope === "all" ? "输入关键词搜索全部书籍的正文" : "输入关键词搜索当前书的正文"}
+            {scope === "all" ? t("search.hint.all") : t("search.hint.current")}
           </div>
         )}
-        {showEmpty && <div className="search-empty">未找到匹配内容</div>}
-        {props.navigationBusy && <div className="search-navigation-busy">正在定位结果…</div>}
+        {showEmpty && <div className="search-empty">{t("search.empty")}</div>}
+        {props.navigationBusy && <div className="search-navigation-busy">{t("search.locating")}</div>}
         <SearchResultList results={props.results} navigationBusy={props.navigationBusy} onSelect={props.onSelect} />
-        {props.truncated && !rendered.limited && <div className="search-truncated">结果较多，仅显示前 {SEARCH_RESULT_RENDER_LIMIT} 条</div>}
+        {props.truncated && !rendered.limited && <div className="search-truncated">{t("search.truncated", { limit: SEARCH_RESULT_RENDER_LIMIT })}</div>}
       </div>
     </>
   );

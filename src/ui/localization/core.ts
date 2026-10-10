@@ -15,9 +15,14 @@ export function resolveUiLocale(preference: UiLanguagePreference, systemLanguage
   return primary?.toLowerCase().startsWith("zh") ? "zh-CN" : "en";
 }
 
+// Mirrors the runtime /\{(\w+)\}/ pattern: braces around non-identifiers (CSS examples) are literal text.
+type Identifier<S extends string> = S extends "" | `${string}${" " | ":" | ";" | "!" | "-" | "." | "{"}${string}` ? never : S;
 type Placeholders<S extends string> = S extends `${string}{${infer Name}}${infer Tail}`
-  ? Name | Placeholders<Tail>
+  ? Identifier<Name> | Placeholders<Tail>
   : never;
+/** Keys without placeholders: safe to store in tables and pass to t() as a variable. */
+export type PlainMessageKey = { [K in MessageKey]: [Placeholders<(typeof zhCN)[K]>] extends [never] ? K : never }[MessageKey];
+
 export type MessageArguments<K extends MessageKey> = [Placeholders<(typeof zhCN)[K]>] extends [never]
   ? []
   : [values: Record<Placeholders<(typeof zhCN)[K]>, string | number>];
@@ -31,6 +36,28 @@ export function translate<K extends MessageKey>(locale: UiLocale, key: K, ...arg
     if (value === undefined) throw new Error(`Missing UI message argument: ${name}`);
     return String(value);
   });
+}
+
+/** Base keys that have a "<base>.other" plural form (and optionally "<base>.one"). */
+export type PluralKey = { [K in MessageKey]: K extends `${infer Base}.other` ? Base : never }[MessageKey];
+type PluralArguments<B extends PluralKey> = MessageArguments<`${B}.other` & MessageKey>;
+
+const pluralRules = new Map<UiLocale, Intl.PluralRules>();
+
+/**
+ * Count-dependent text. Picks "<base>.<category>" by Intl.PluralRules for the
+ * UI locale (English: one/other), falling back to "<base>.other". Chinese
+ * catalogs keep the same text in every form.
+ */
+export function translatePlural<B extends PluralKey>(locale: UiLocale, base: B, count: number, ...args: PluralArguments<B>): string {
+  let rules = pluralRules.get(locale);
+  if (!rules) {
+    rules = new Intl.PluralRules(locale);
+    pluralRules.set(locale, rules);
+  }
+  const specific = `${base}.${rules.select(count)}`;
+  const key = (specific in zhCN ? specific : `${base}.other`) as MessageKey;
+  return (translate as (locale: UiLocale, key: MessageKey, ...rest: unknown[]) => string)(locale, key, ...args);
 }
 
 export interface UiLanguageSnapshot {
