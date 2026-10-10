@@ -20,3 +20,11 @@ export function validateFolderNameDraft(
   }
   return { ok: true, name, count, unchanged: name === currentName };
 }
+
+export function folderNameDraftError(code: "empty" | "too-long" | "duplicate"): string {
+  switch (code) {
+    case "empty": return "文件夹名称不能为空";
+    case "too-long": return `名称不能超过 ${MAX_FOLDER_NAME_CODE_POINTS} 个字符`;
+    case "duplicate": return "已存在同名文件夹";
+  }
+}

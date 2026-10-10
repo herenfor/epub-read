@@ -1,3 +1,12 @@
+import {
+  createReaderStatusBarCoordinator,
+  shouldHideReaderSystemStatusBar,
+} from "./platform/readerSystemStatusBar";
+import {
+  readHideReaderSystemStatusBar,
+  writeHideReaderSystemStatusBar,
+  setReaderSystemStatusBarHidden,
+} from "./platform/androidReaderSystemStatusBar";
 import { resolveArchiveHref, archiveHref } from "./core/archiveReferences";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { loadBook, loadBookFromArchive, spineIndexForPath, spineIndexForEntryKey, spineItemPath, spineItemHref, DrmError, disposeBook, nextLinearIndex } from "./core/book";
@@ -892,6 +901,17 @@ export default function App() {
     text: string;
   } | null>(null);
   const [shelfNoticeFading, setShelfNoticeFading] = useState(false);
+  const [hideReaderSystemStatusBar, setHideReaderSystemStatusBar] = useState(readHideReaderSystemStatusBar);
+  const [readerSystemBars] = useState(() => createReaderStatusBarCoordinator(setReaderSystemStatusBarHidden));
+  const changeHideReaderSystemStatusBar = useCallback((hidden: boolean) => {
+    try {
+      writeHideReaderSystemStatusBar(hidden);
+      setHideReaderSystemStatusBar(hidden);
+    } catch (error) {
+      setShelfNotice({ kind: "error", text: `系统状态栏设置保存失败：${String(error)}` });
+    }
+  }, []);
+
   const [shelfBusy, setShelfBusy] = useState(false);
   const [shelfBusyMessage, setShelfBusyMessage] = useState("正在处理…");
   const [nativeImport, setNativeImport] = useState<{
@@ -3065,6 +3085,18 @@ export default function App() {
   const showReaderNotice = useCallback((text: string, kind: "ok" | "warn" | "error" = "warn"): void => {
     setReaderNotice({ kind, text });
   }, []);
+
+  useEffect(() => {
+    if (!runtime.supportsReaderSystemStatusBar) return;
+    void readerSystemBars.requestHidden(shouldHideReaderSystemStatusBar({
+      supported: true, readerActive: view === "reader", hideWhileReading: hideReaderSystemStatusBar,
+    })).catch((error) => {
+      const message = `系统状态栏调整失败：${String(error)}`;
+      if (view === "reader") showReaderNotice(message, "warn");
+      else setShelfNotice({ kind: "warn", text: message });
+    });
+    // The app root owns the intent. Reader/menu cleanup must never submit a stale false.
+  }, [view, hideReaderSystemStatusBar, runtime.supportsReaderSystemStatusBar, readerSystemBars, showReaderNotice]);
 
   /** 语义锚点失败：解除显示门，但守住进度，直到读者真实移动后再写。 */
   const handleReaderNavigationUnresolved = useCallback((reported: boolean, ticket?: RestoreTicket | null): void => {
@@ -6410,6 +6442,8 @@ export default function App() {
               onOpenLanTransfer={runtime.supportsLanTransfer ? handleOpenLanSave : undefined}
               theme={settings.theme}
               onThemeChange={changeTheme}
+              hideReaderSystemStatusBar={runtime.supportsReaderSystemStatusBar ? hideReaderSystemStatusBar : undefined}
+              onHideReaderSystemStatusBarChange={changeHideReaderSystemStatusBar}
               batteryIndicatorEnabled={runtime.platform === "android" ? batteryIndicatorEnabled : undefined}
               onBatteryIndicatorChange={runtime.platform === "android" ? changeBatteryIndicatorEnabled : undefined}
               onOpen={handleShelfOpen}

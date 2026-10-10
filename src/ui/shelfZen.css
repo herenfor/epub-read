@@ -848,6 +848,7 @@
 }
 
 .shelf-folder-dropdown-btn {
+  max-width: 240px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -903,6 +904,7 @@
 }
 
 .shelf-folder-menu-item {
+  gap: 8px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -956,6 +958,7 @@
 
 /* 处于特定文件夹时的面包屑条 */
 .shelf-folder-active-bar {
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -966,6 +969,8 @@
 }
 
 .shelf-folder-active-info {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -975,6 +980,7 @@
 }
 
 .shelf-folder-active-count {
+  flex-shrink: 0;
   font-size: 12px;
   font-weight: 400;
   color: var(--muted, #6b7280);
@@ -1790,6 +1796,7 @@
 }
 
 .shelf-folder-summary-info {
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -2438,4 +2445,30 @@
   .shelf-resume-stage {
     --resume-motion: 0ms;
   }
+}
+
+.shelf-folder-active-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shelf-folder-active-bar > button,
+.shelf-folder-active-more-wrap {
+  flex-shrink: 0;
+}
+
+.shelf-folder-dropdown-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shelf-folder-dropdown-btn > .shelf-svg-icon,
+.shelf-folder-menu-item > .shelf-capsule-count {
+  flex-shrink: 0;
+}
+.shelf-folder-menu-item > span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
