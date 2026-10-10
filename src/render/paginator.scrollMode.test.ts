@@ -499,6 +499,7 @@ describe("scroll mode commands", () => {
       contentDoc: doc,
       viewer,
       hasNextChapter: true,
+      endText: { title: "全书完", hint: "已读完全部章节" },
       onWheelNavigate: navigate,
       scrollToEnd() {
         viewer.scrollTop = 400;
@@ -522,6 +523,19 @@ describe("scroll mode commands", () => {
     expect(dividerLast?.textContent).toBe("全书完");
     expect(endElLast?.querySelector(".chapter-end-next-btn")).toBeNull();
     expect(endElLast?.querySelector(".chapter-end-hint")?.textContent).toBe("已读完全部章节");
+
+    // 界面语言切换：同一个节点就地改字，不重建、不改滚动位置
+    viewer.scrollTop = 321;
+    ChapterPaginator.prototype.setEndText.call(context as unknown as ChapterPaginator, { title: "The End", hint: "You have finished every chapter" });
+    const endElSwitched = viewer.querySelector('[data-reader="chapter-end"]');
+    expect(endElSwitched).toBe(endElLast);
+    expect(endElSwitched?.querySelector(".chapter-end-divider")?.textContent).toBe("The End");
+    expect(endElSwitched?.querySelector(".chapter-end-hint")?.textContent).toBe("You have finished every chapter");
+    expect(viewer.scrollTop).toBe(321);
+
+    // 之后重新渲染也使用新文案
+    internals.renderScrollChapterEnd.call(context);
+    expect(viewer.querySelector(".chapter-end-divider")?.textContent).toBe("The End");
   });
 });
 describe("scroll mode C-53 toolbar centering", () => {
