@@ -21,6 +21,8 @@ import { effectiveFolderId, type LibraryOrganization } from "../libraryOrganizat
 import { FolderImportJobOwner } from "./jobOwner";
 import "../saveFileDialogs.css";
 import "./folderImportPanel.css";
+import { uiText, useUiText } from "../localization/UiLanguageProvider";
+import type { PlainMessageKey } from "../localization/core";
 
 export interface FolderImportPanelProps {
   /** Native bridge or Web port; the panel never touches files or bytes. */
@@ -108,11 +110,11 @@ type Phase =
 const INITIAL_GROUP_ROWS = 20;
 const MORE_GROUP_ROWS = 50;
 
-const PHASE_LABEL: Record<DirectoryProgress["phase"], string> = {
-  scanning: "正在扫描",
-  preparing: "正在读取书籍",
-  committing: "正在保存当前批次",
-  cleaning: "正在清理",
+const PHASE_LABEL: Record<DirectoryProgress["phase"], PlainMessageKey> = {
+  scanning: "folderImport.phase.scanning",
+  preparing: "folderImport.phase.preparing",
+  committing: "folderImport.phase.committing",
+  cleaning: "folderImport.phase.cleaning",
 };
 
 function errorText(error: unknown): string {
@@ -120,6 +122,7 @@ function errorText(error: unknown): string {
 }
 
 export function FolderImportPanel(props: FolderImportPanelProps) {
+  const { t, tn } = useUiText();
   const { port } = props;
   const [phase, setPhase] = useState<Phase>({ kind: "intro" });
   const [items, setItems] = useState<readonly ScannedEpub[]>([]);
@@ -161,7 +164,10 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
     }
     return counts;
   }, [props.organization]);
-  const folderLabel = (folder: ActiveFolder) => `放入已有「${folder.name}」（${folderBookCounts.get(folder.folderId) ?? 0} 本）`;
+  const folderLabel = (folder: ActiveFolder) => {
+    const count = folderBookCounts.get(folder.folderId) ?? 0;
+    return tn("folderImport.target.existing", count, { name: folder.name, count });
+  };
   const plan = useMemo(
     () => (scan ? planDirectoryImport(scan.root, items, options) : null),
     [scan, items, options],
@@ -241,7 +247,7 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
     } catch (error) {
       if (token === undefined || !owner.isLive(token)) return;
       void owner.releaseCurrent();
-      set({ kind: "error", message: `扫描失败：${errorText(error)}` });
+      set({ kind: "error", message: uiText("folderImport.scanFailed", { error: errorText(error) }) });
     }
   };
 
@@ -260,7 +266,7 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
         set({ kind: "done", result });
       },
       onError: (error) => {
-        set({ kind: "error", message: `导入失败：${errorText(error)}。已完成的书仍保留在书架。` });
+        set({ kind: "error", message: uiText("folderImport.importFailed", { error: errorText(error) }) });
       },
       onSettled: () => {
         if (mountedRef.current) setImporting(false);
@@ -322,37 +328,37 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
 
   return (
     <div className="save-file-backdrop" role="presentation">
-      <section className="save-file-dialog folder-import-dialog" role="dialog" aria-modal="true" aria-label="导入文件夹">
+      <section className="save-file-dialog folder-import-dialog" role="dialog" aria-modal="true" aria-label={t("folderImport.dialog")}>
         <header className="save-file-dialog-head">
-          <h2>导入文件夹</h2>
-          <p>选择一个系统文件夹，自动找出其中的 EPUB，并按目录整理到书架文件夹。只读取，不改动原文件。</p>
+          <h2>{t("folderImport.title")}</h2>
+          <p>{t("folderImport.subtitle")}</p>
         </header>
 
         {phase.kind === "intro" && (
           <div className="save-file-dialog-body">
             {props.directorySelectionSupported === false ? (
-              <p className="save-file-muted">当前环境不支持选择文件夹。可以用「导入图书」一次多选文件，但不会保留目录关系。</p>
+              <p className="save-file-muted">{t("folderImport.unsupported")}</p>
             ) : (
-              <p className="save-file-muted">扫描只读取文件名和目录，不读正文；确认一次后开始导入，可随时停止，已完成的书会保留。</p>
+              <p className="save-file-muted">{t("folderImport.intro")}</p>
             )}
           </div>
         )}
 
         {phase.kind === "scanning" && (
           <div className="save-file-dialog-body">
-            <p className="folder-import-status">正在扫描文件夹…{phase.found > 0 ? `已发现 ${phase.found} 本` : ""}</p>
+            <p className="folder-import-status">{phase.found > 0 ? tn("folderImport.scanning.found", phase.found, { count: phase.found }) : t("folderImport.scanning")}</p>
           </div>
         )}
 
         {phase.kind === "listing" && (
           <div className="save-file-dialog-body">
-            <p className="folder-import-status">正在整理清单 {phase.loaded} / {phase.scan.inputCount}</p>
+            <p className="folder-import-status">{t("folderImport.listing", { loaded: phase.loaded, total: phase.scan.inputCount })}</p>
           </div>
         )}
 
         {phase.kind === "empty" && (
           <div className="save-file-dialog-body">
-            <p className="folder-import-status">「{phase.scan.root.name}」中未找到 EPUB。</p>
+            <p className="folder-import-status">{t("folderImport.empty", { name: phase.scan.root.name })}</p>
             <ScanNotes scan={phase.scan} />
           </div>
         )}
@@ -360,20 +366,20 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
         {phase.kind === "preview" && plan && (
           <div className="save-file-dialog-body">
             <dl className="save-file-summary">
-              <div><dt>EPUB 候选</dt><dd>{items.length} 本</dd></div>
-              <div><dt>书架文件夹</dt><dd>{plan.groups.length} 个</dd></div>
+              <div><dt>{t("folderImport.candidates")}</dt><dd>{tn("folderImport.candidates.count", items.length, { count: items.length })}</dd></div>
+              <div><dt>{t("folderImport.shelfFolders")}</dt><dd>{tn("folderImport.shelfFolders.count", plan.groups.length, { count: plan.groups.length })}</dd></div>
             </dl>
             <ScanNotes scan={phase.scan} />
             {plan.flattened && (
-              <p className="save-file-muted">深层目录已展开：书架只保留一层，文件夹名带上级目录，例如「分类 · 子分类」。</p>
+              <p className="save-file-muted">{t("folderImport.flattened")}</p>
             )}
 
             <fieldset className="save-file-fieldset">
-              <legend>整理方式</legend>
+              <legend>{t("folderImport.grouping")}</legend>
               {([
-                ["auto", "按目录整理", "每个目录对应一个书架文件夹"],
-                ["singleFolder", `统一放入「${rootName}」`, "所有书放进一个同名文件夹"],
-                ["none", "不自动分类", "只导入书籍，不创建文件夹"],
+                ["auto", t("folderImport.grouping.auto"), t("folderImport.grouping.auto.hint")],
+                ["singleFolder", t("folderImport.grouping.single", { name: rootName }), t("folderImport.grouping.single.hint")],
+                ["none", t("folderImport.grouping.none"), t("folderImport.grouping.none.hint")],
               ] as const).map(([value, label, hint]) => (
                 <label key={value} className="save-file-radio">
                   <input
@@ -389,7 +395,7 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
 
             {options.grouping === "auto" && hasLooseAndCategories && (
               <fieldset className="save-file-fieldset">
-                <legend>「{rootName}」直属的书</legend>
+                <legend>{t("folderImport.loose", { name: rootName })}</legend>
                 <label className="save-file-radio">
                   <input
                     type="radio"
@@ -397,7 +403,7 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
                     checked={options.looseRootBooks === "root"}
                     onChange={() => setOptions({ ...options, looseRootBooks: "root" })}
                   />
-                  <span>留在未分类</span>
+                  <span>{t("folderImport.loose.unclassified")}</span>
                 </label>
                 <label className="save-file-radio">
                   <input
@@ -406,18 +412,18 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
                     checked={options.looseRootBooks === "namedFolder"}
                     onChange={() => setOptions({ ...options, looseRootBooks: "namedFolder" })}
                   />
-                  <span>放入「{rootName}」文件夹</span>
+                  <span>{t("folderImport.loose.namedFolder", { name: rootName })}</span>
                 </label>
               </fieldset>
             )}
 
             {options.grouping !== "none" && (
               <fieldset className="save-file-fieldset">
-                <legend>书架里已有的书</legend>
+                <legend>{t("folderImport.existing")}</legend>
                 {([
-                  ["fillUnclassified", "只整理未分类的已有书", "已在文件夹里的书保持不动（推荐）"],
-                  ["preserveAll", "保留已有归属", "已有的书一律不移动"],
-                  ["replace", "按此次目录调整", "已有的书也按目录移动"],
+                  ["fillUnclassified", t("folderImport.existing.fill"), t("folderImport.existing.fill.hint")],
+                  ["preserveAll", t("folderImport.existing.preserve"), t("folderImport.existing.preserve.hint")],
+                  ["replace", t("folderImport.existing.replace"), t("folderImport.existing.replace.hint")],
                 ] as const).map(([value, label, hint]) => (
                   <label key={value} className="save-file-radio">
                     <input
@@ -435,11 +441,11 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
             {plan.groups.length > 0 && (
               <div className="folder-import-groups">
                 <div className="folder-import-groups-head">
-                  <span>文件夹</span>
-                  {groupCounts.loose > 0 && <span className="folder-import-hint">另有 {groupCounts.loose} 本留在未分类</span>}
+                  <span>{t("folderImport.folders")}</span>
+                  {groupCounts.loose > 0 && <span className="folder-import-hint">{tn("folderImport.looseCount", groupCounts.loose, { count: groupCounts.loose })}</span>}
                 </div>
                 {unresolved.length > 0 && (
-                  <p className="folder-import-warning">有 {unresolved.length} 个文件夹与书架上多个同名文件夹对应，请为它们选择目标。</p>
+                  <p className="folder-import-warning">{tn("folderImport.unresolved", unresolved.length, { count: unresolved.length })}</p>
                 )}
                 <ul>
                   {groupRows.slice(0, visibleRows).map(({ group, resolution }) => {
@@ -453,20 +459,20 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
                         <div className="folder-import-group-name">
                           <strong>{group.suggestedName}</strong>
                           <span className="folder-import-hint" title={[rootName, ...group.sourceSegments].join(" / ")}>
-                            {[rootName, ...group.sourceSegments].join(" / ")} · {groupCounts.counts.get(group.groupKey) ?? 0} 本
+                            {tn("folderImport.groupPath", groupCounts.counts.get(group.groupKey) ?? 0, { path: [rootName, ...group.sourceSegments].join(" / "), count: groupCounts.counts.get(group.groupKey) ?? 0 })}
                           </span>
                         </div>
                         <select
-                          aria-label={`${group.suggestedName} 的目标文件夹`}
+                          aria-label={t("folderImport.groupTarget", { name: group.suggestedName })}
                           value={value}
                           onChange={(event) => setChoice(group.groupKey, event.target.value)}
                         >
-                          {!choice && <option value="" disabled>请选择…</option>}
+                          {!choice && <option value="" disabled>{t("folderImport.choose")}</option>}
                           {candidates.map((folder) => (
                             <option key={folder.folderId} value={folder.folderId}>{folderLabel(folder)}</option>
                           ))}
                           <option value="__create">
-                            {resolution.kind === "create" ? `新建「${createName}」` : `新建同名「${createName}」`}
+                            {resolution.kind === "create" ? t("folderImport.create", { name: createName }) : t("folderImport.createSameName", { name: createName })}
                           </option>
                           {others.map((folder) => (
                             <option key={folder.folderId} value={folder.folderId}>{folderLabel(folder)}</option>
@@ -478,40 +484,40 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
                 </ul>
                 {plan.groups.length > visibleRows && (
                   <button type="button" className="folder-import-more" onClick={() => setVisibleRows(visibleRows + MORE_GROUP_ROWS)}>
-                    显示更多（还有 {plan.groups.length - visibleRows} 个）
+                    {t("folderImport.showMore", { count: plan.groups.length - visibleRows })}
                   </button>
                 )}
               </div>
             )}
-            <p className="save-file-muted">书数为候选数量；重复的书会在导入时按内容识别，进度、笔记、书签和收藏都会保留。</p>
+            <p className="save-file-muted">{t("folderImport.duplicatesNote")}</p>
           </div>
         )}
 
         {phase.kind === "importing" && (
           <div className="save-file-dialog-body">
             <ImportProgress progress={phase.progress} />
-            {phase.cancel === "settling" && <p className="folder-import-warning">正在完成当前批次，之后停止。已完成的书会保留。</p>}
-            {phase.cancel === "requested" && <p className="save-file-muted">正在停止，已完成的书会保留。</p>}
+            {phase.cancel === "settling" && <p className="folder-import-warning">{t("folderImport.settling")}</p>}
+            {phase.cancel === "requested" && <p className="save-file-muted">{t("folderImport.stopping")}</p>}
           </div>
         )}
 
         {phase.kind === "done" && (
           <div className="save-file-dialog-body">
             <p className="folder-import-status">
-              {phase.result.status === "cancelled" ? "已停止导入，已完成的书保留在书架。" : phase.result.status === "failed" ? "导入未全部完成，已完成的书保留在书架。" : "导入完成。"}
+              {phase.result.status === "cancelled" ? t("folderImport.done.cancelled") : phase.result.status === "failed" ? t("folderImport.done.failed") : t("folderImport.done.ok")}
             </p>
             <dl className="save-file-summary">
-              <div><dt>新增</dt><dd>{phase.result.counts.imported}</dd></div>
-              <div><dt>重复</dt><dd>{phase.result.counts.duplicates}</dd></div>
-              <div><dt>失败</dt><dd>{phase.result.counts.failed}</dd></div>
-              <div><dt>未归档</dt><dd>{phase.result.counts.placementSkipped}</dd></div>
-              <div><dt>新建文件夹</dt><dd>{phase.result.counts.createdFolders}</dd></div>
-              <div><dt>已处理</dt><dd>{phase.result.counts.completed}</dd></div>
+              <div><dt>{t("folderImport.result.imported")}</dt><dd>{phase.result.counts.imported}</dd></div>
+              <div><dt>{t("folderImport.result.duplicates")}</dt><dd>{phase.result.counts.duplicates}</dd></div>
+              <div><dt>{t("folderImport.result.failed")}</dt><dd>{phase.result.counts.failed}</dd></div>
+              <div><dt>{t("folderImport.result.unplaced")}</dt><dd>{phase.result.counts.placementSkipped}</dd></div>
+              <div><dt>{t("folderImport.result.createdFolders")}</dt><dd>{phase.result.counts.createdFolders}</dd></div>
+              <div><dt>{t("folderImport.result.completed")}</dt><dd>{phase.result.counts.completed}</dd></div>
             </dl>
             {phase.result.issueCount > 0 && (
               issues === null ? (
                 <button type="button" className="folder-import-more" onClick={() => void loadIssues()}>
-                  查看问题（{phase.result.issueCount}）
+                  {t("folderImport.issues", { count: phase.result.issueCount })}
                 </button>
               ) : (
                 <div className="folder-import-issues">
@@ -522,7 +528,7 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
                   </ul>
                   {issues.next !== null && (
                     <button type="button" className="folder-import-more" disabled={issues.loading} onClick={() => void loadIssues()}>
-                      {issues.loading ? "正在加载…" : "加载更多"}
+                      {issues.loading ? t("folderImport.loading") : t("folderImport.loadMore")}
                     </button>
                   )}
                 </div>
@@ -539,31 +545,31 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
 
         <footer className="save-file-dialog-actions">
           {phase.kind === "importing" ? (
-            <button type="button" disabled={phase.cancel !== "none"} onClick={() => void cancelImport()}>停止导入</button>
+            <button type="button" disabled={phase.cancel !== "none"} onClick={() => void cancelImport()}>{t("folderImport.stop")}</button>
           ) : phase.kind === "scanning" || phase.kind === "listing" ? (
-            <button type="button" onClick={close}>取消</button>
+            <button type="button" onClick={close}>{t("folderImport.cancel")}</button>
           ) : phase.kind === "preview" ? (
             <>
-              <button type="button" onClick={close}>取消</button>
-              <button type="button" onClick={() => void pickAndScan()}>重新选择</button>
+              <button type="button" onClick={close}>{t("folderImport.cancel")}</button>
+              <button type="button" onClick={() => void pickAndScan()}>{t("folderImport.rechoose")}</button>
               <button type="button" className="primary" disabled={unresolved.length > 0} onClick={startImport}>
-                开始导入
+                {t("folderImport.start")}
               </button>
             </>
           ) : phase.kind === "done" ? (
-            <button type="button" className="primary" onClick={close}>完成</button>
+            <button type="button" className="primary" onClick={close}>{t("folderImport.done")}</button>
           ) : (
             <>
-              <button type="button" onClick={close}>关闭</button>
+              <button type="button" onClick={close}>{t("folderImport.close")}</button>
               {props.directorySelectionSupported === false ? (
                 props.onUseFileImport && (
                   <button type="button" className="primary" onClick={async () => { await close(); props.onUseFileImport?.(); }}>
-                    多选文件导入
+                    {t("folderImport.useFiles")}
                   </button>
                 )
               ) : (
                 <button type="button" className="primary" onClick={() => void pickAndScan()}>
-                  {phase.kind === "intro" ? "选择文件夹" : "重新选择"}
+                  {phase.kind === "intro" ? t("folderImport.chooseFolder") : t("folderImport.rechoose")}
                 </button>
               )}
             </>
@@ -575,25 +581,27 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
 }
 
 function ScanNotes({ scan }: { scan: ScanResult }) {
+  const { t } = useUiText();
   if (scan.skippedDirectoryCount === 0 && scan.unreadableDirectoryCount === 0) return null;
   return (
     <p className="save-file-muted">
-      {scan.unreadableDirectoryCount > 0 && `${scan.unreadableDirectoryCount} 个目录无法读取，预览只包含已访问的部分。`}
-      {scan.skippedDirectoryCount > 0 && `已跳过 ${scan.skippedDirectoryCount} 个链接目录。`}
+      {scan.unreadableDirectoryCount > 0 && t("folderImport.unreadable", { count: scan.unreadableDirectoryCount })}
+      {scan.skippedDirectoryCount > 0 && t("folderImport.skippedLinks", { count: scan.skippedDirectoryCount })}
     </p>
   );
 }
 
 function ImportProgress({ progress }: { progress: DirectoryProgress | null }) {
-  if (!progress) return <p className="folder-import-status">正在准备…</p>;
+  const { t } = useUiText();
+  if (!progress) return <p className="folder-import-status">{t("folderImport.preparing")}</p>;
   const total = progress.totalInputs;
   const pct = total !== null && total > 0 ? Math.min(100, Math.round((progress.counts.completed / total) * 100)) : null;
   const { counts } = progress;
   return (
     <div className="folder-import-progress">
       <p className="folder-import-status">
-        {PHASE_LABEL[progress.phase]}
-        {total !== null ? ` · ${counts.completed} / ${total}` : ` · 已处理 ${counts.completed}`}
+        {t(PHASE_LABEL[progress.phase])}
+        {total !== null ? t("folderImport.progress.of", { completed: counts.completed, total }) : t("folderImport.progress.processed", { completed: counts.completed })}
       </p>
       {pct !== null && (
         <div className="folder-import-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
@@ -601,8 +609,8 @@ function ImportProgress({ progress }: { progress: DirectoryProgress | null }) {
         </div>
       )}
       <p className="save-file-muted">
-        新增 {counts.imported} · 重复 {counts.duplicates} · 失败 {counts.failed}
-        {counts.placementSkipped > 0 ? ` · 未归档 ${counts.placementSkipped}` : ""}
+        {t("folderImport.progress.counts", { imported: counts.imported, duplicates: counts.duplicates, failed: counts.failed })}
+        {counts.placementSkipped > 0 ? t("folderImport.progress.unplaced", { count: counts.placementSkipped }) : ""}
       </p>
     </div>
   );

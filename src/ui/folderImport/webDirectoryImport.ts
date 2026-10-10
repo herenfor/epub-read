@@ -24,6 +24,7 @@ import {
   type DirectoryPlacementCommitter,
   type DirectoryPlacementItem,
 } from "./placementBatch";
+import { uiText } from "../localization/UiLanguageProvider";
 
 /**
  * Public ShelfStore reads/saves plus the REQUIRED atomic placement batch. FI-I
@@ -220,8 +221,8 @@ export function createWebDirectoryImportPort(options: WebDirectoryImportOptions)
           if (decision.kind !== "skipped") continue;
           counts.placementSkipped++;
           issue(outcome.inputId, decision.reason, decision.reason === "target-deleted"
-            ? "目标文件夹已被删除，书已导入但未归档"
-            : "导入期间这本书的分类发生变化，已保留新的分类");
+            ? uiText("folderImport.issue.folderDeleted")
+            : uiText("folderImport.issue.categoryChanged"));
         }
         for (const folderId of committed.createdFolderIds) {
           if (createdTargets.has(folderId)) continue;
@@ -231,7 +232,7 @@ export function createWebDirectoryImportPort(options: WebDirectoryImportOptions)
         organization = committed.organization;
       } catch (error) {
         // The transaction committed nothing; books stay imported but unplaced.
-        for (const item of batch) issue(item.inputId, "placement-changed", `书已导入，归档失败：${errorText(error)}`);
+        for (const item of batch) issue(item.inputId, "placement-changed", uiText("folderImport.issue.placementFailed", { error: errorText(error) }));
         counts.placementSkipped += batch.length;
       } finally {
         job.committing = false;
@@ -246,7 +247,7 @@ export function createWebDirectoryImportPort(options: WebDirectoryImportOptions)
       if (!file) {
         counts.completed++;
         counts.failed++;
-        issue(input.inputId, "source-failed", "源文件已不可用");
+        issue(input.inputId, "source-failed", uiText("folderImport.issue.sourceGone"));
         emit();
         continue;
       }
@@ -260,7 +261,7 @@ export function createWebDirectoryImportPort(options: WebDirectoryImportOptions)
           counts.completed++;
           counts.duplicates++;
           if (winnerGroup.get(hash) !== input.groupKey) {
-            issue(input.inputId, "multiple-sources", `同一本书在多个目录出现，已采用排在前面的来源（${file.name}）`);
+            issue(input.inputId, "multiple-sources", uiText("folderImport.issue.multipleSources", { file: file.name }));
           }
           emit();
           continue;
@@ -334,13 +335,13 @@ export function createWebDirectoryImportPort(options: WebDirectoryImportOptions)
         if (error instanceof ImportCancelled) break;
         counts.completed++;
         counts.failed++;
-        issue(input.inputId, "source-failed", `${file.name}：${errorText(error)}`);
+        issue(input.inputId, "source-failed", uiText("folderImport.issue.sourceFailed", { file: file.name, error: errorText(error) }));
       }
       emit();
     }
     if (job.cancelRequested) {
       // No new batch after a cancel; imported books stay on the shelf, unplaced.
-      for (const item of pending) issue(item.inputId, "placement-changed", "已停止导入，书已导入但未归档");
+      for (const item of pending) issue(item.inputId, "placement-changed", uiText("folderImport.issue.stopped"));
       counts.placementSkipped += pending.length;
       pending = [];
     } else {

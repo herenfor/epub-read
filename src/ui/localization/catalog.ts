@@ -23,6 +23,7 @@ import { saveFile } from "./catalogs/saveFile";
 import { importProgress } from "./catalogs/importProgress";
 import { lan } from "./catalogs/lan";
 import { lanPanel } from "./catalogs/lanPanel";
+import { folderImport } from "./catalogs/folderImport";
 import commonEn from "./en/common.json";
 import folderEn from "./en/folder.json";
 import languageEn from "./en/language.json";
@@ -43,8 +44,9 @@ import saveFileEn from "./en/saveFile.json";
 import importProgressEn from "./en/importProgress.json";
 import lanEn from "./en/lan.json";
 import lanPanelEn from "./en/lanPanel.json";
+import folderImportEn from "./en/folderImport.json";
 
-export const CATALOGS = [common, folder, language, reader, startup, titlebar, footer, sidebar, notes, imageViewer, search, aa, fonts, display, about, cache, saveFile, importProgress, lan, lanPanel] as const;
+export const CATALOGS = [common, folder, language, reader, startup, titlebar, footer, sidebar, notes, imageViewer, search, aa, fonts, display, about, cache, saveFile, importProgress, lan, lanPanel, folderImport] as const;
 
 export const zhCN = {
   ...common.zh,
@@ -67,6 +69,7 @@ export const zhCN = {
   ...importProgress.zh,
   ...lan.zh,
   ...lanPanel.zh,
+  ...folderImport.zh,
 };
 
 export type MessageKey = keyof typeof zhCN;
@@ -93,6 +96,7 @@ export const en: Partial<Record<MessageKey, string>> = {
   ...importProgressEn,
   ...lanEn,
   ...lanPanelEn,
+  ...folderImportEn,
 };
 
 /** Namespace → English file contents, for the integrity test and translation tooling. */
@@ -117,4 +121,5 @@ export const EN_FILES: Readonly<Record<string, Readonly<Record<string, string>>>
   importProgress: importProgressEn,
   lan: lanEn,
   lanPanel: lanPanelEn,
+  folderImport: folderImportEn,
 };
