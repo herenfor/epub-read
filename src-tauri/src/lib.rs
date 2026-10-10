@@ -1,5 +1,6 @@
 mod android_app_task;
 mod android_reader_system_bars;
+mod reader_keep_screen_on;
 mod android_battery;
 mod android_lan_network;
 mod android_lan_scan;
@@ -39,6 +40,7 @@ macro_rules! configure_invoke_handler {
             android_lan_scan::android_lan_open_app_settings,
             android_app_task::android_move_task_to_back,
         android_reader_system_bars::android_reader_system_bars,
+            reader_keep_screen_on::reader_set_keep_screen_on,
             linked_library::linked_library_read_source_raw,
             linked_library::linked_library_read_cover_raw,
             linked_library::linked_library_archive_open,
@@ -175,6 +177,7 @@ macro_rules! configure_invoke_handler {
             android_lan_scan::android_lan_open_app_settings,
             android_app_task::android_move_task_to_back,
         android_reader_system_bars::android_reader_system_bars,
+            reader_keep_screen_on::reader_set_keep_screen_on,
             linked_library::linked_library_read_source_raw,
             linked_library::linked_library_read_cover_raw,
             linked_library::linked_library_archive_open,
@@ -328,6 +331,7 @@ pub fn run() {
         .plugin(android_uri_bridge::plugin())
         .plugin(android_app_task::plugin())
         .plugin(android_reader_system_bars::plugin())
+        .plugin(reader_keep_screen_on::plugin())
         .plugin(android_battery::plugin())
         .plugin(android_lan_network::plugin())
         .plugin(android_lan_scan::plugin());
