@@ -1,4 +1,5 @@
 import { CloseIcon } from "./readerIcons";
+import { useUiText } from "./localization/UiLanguageProvider";
 
 export interface LogItem {
   kind: string;
@@ -14,26 +15,27 @@ export interface LogPanelProps {
 }
 
 export function LogPanel(props: LogPanelProps) {
+  const { t, tn } = useUiText();
   return (
     <>
       <div className="log-backdrop" onClick={props.onClose} aria-hidden="true" />
-      <div className="log-panel" role="dialog" aria-modal="true" aria-label="日志与诊断">
+      <div className="log-panel" role="dialog" aria-modal="true" aria-label={t("log.title")}>
         <div className="drawer-drag-handle" aria-hidden="true" />
         <div className="log-head">
           <div className="drawer-title-wrap">
-            <span>日志与诊断</span>
+            <span>{t("log.title")}</span>
             <span className={`log-badge${props.items.length > 0 ? " has-issues" : ""}`}>
-              {props.items.length > 0 ? `${props.items.length} 个问题` : "正常"}
+              {props.items.length > 0 ? tn("log.issues", props.items.length, { count: props.items.length }) : t("log.ok")}
             </span>
           </div>
-          <button className="tb-btn tb-close" onClick={props.onClose} aria-label="关闭日志与诊断" title="关闭">
+          <button className="tb-btn tb-close" onClick={props.onClose} aria-label={t("log.close")} title={t("common.close")}>
             <CloseIcon size={14} />
           </button>
         </div>
         <div className="log-body">
-          <div className="log-section-title">问题记录</div>
+          <div className="log-section-title">{t("log.records")}</div>
           {props.items.length === 0 ? (
-            <div className="log-empty">没有记录到异常问题。</div>
+            <div className="log-empty">{t("log.empty")}</div>
           ) : (
             <div className="log-list">
               {props.items.map((item, i) => (
@@ -44,9 +46,9 @@ export function LogPanel(props: LogPanelProps) {
               ))}
             </div>
           )}
-          <div className="log-section-title">渲染状态诊断</div>
+          <div className="log-section-title">{t("log.diagnostics")}</div>
           <pre className="log-diag-pre">
-            {props.diagText ?? "（打开面板时自动采集）"}
+            {props.diagText ?? t("log.diagnostics.pending")}
           </pre>
         </div>
       </div>
