@@ -466,6 +466,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
     const projectionsRef = useRef<ChapterProjection[]>([]);
     // linear=no 辅助章节的单章 paginator（设置变更时用 key 重建，需显式销毁旧的）
     const auxPaginatorRef = useRef<ChapterPaginator | null>(null);
+    const auxIframeRef = useRef<HTMLIFrameElement | null>(null);
 
     // 重排补偿：上次稳定阅读位置、待用锚点与合并重测的帧调度
     const lastStableSpotRef = useRef<ReadingSpot | null>(null);
@@ -1767,6 +1768,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
         reloadingRef.current.clear();
         auxPaginatorRef.current?.dispose();
         auxPaginatorRef.current = null;
+        auxIframeRef.current = null;
       };
     }, []);
 
@@ -2399,8 +2401,12 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
             key={`${spineIndex}:${JSON.stringify(settings)}`}
             ref={(node) => {
               if (!node) return;
+              // React rebinds this inline ref on UI updates. The same iframe
+              // already owns its chapter; only a new keyed node needs a load.
+              if (auxIframeRef.current === node && auxPaginatorRef.current) return;
               const path = spineItemPath(book, spineIndex);
               if (!path) return;
+              auxIframeRef.current = node;
               // 设置变更会让 key 变化并重建 iframe，这里显式销毁上一份 paginator
               auxPaginatorRef.current?.dispose();
               const paginator = new ChapterPaginator(
