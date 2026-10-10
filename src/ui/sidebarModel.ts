@@ -33,6 +33,45 @@ export function findActiveTocNode(
   return samePath.find((node) => splitHref(node.href).anchor === "") ?? samePath[0];
 }
 
+/** 目录不超过此数量时默认全部展开，保持小目录原来的体验。 */
+export const TOC_EXPAND_ALL_LIMIT = 30;
+
+/** 目录节点的稳定键：在原始目录中的下标路径，如 "0.2.1"。 */
+export function tocNodeKeys(nodes: TocNode[]): Map<TocNode, string> {
+  const keys = new Map<TocNode, string>();
+  const walk = (items: TocNode[], prefix: string): void => {
+    items.forEach((item, index) => {
+      const key = prefix ? `${prefix}.${index}` : String(index);
+      keys.set(item, key);
+      walk(item.children, key);
+    });
+  };
+  walk(nodes, "");
+  return keys;
+}
+
+/** target 的全部祖先键（不含自身）；不在目录里时返回空数组。 */
+export function tocAncestorKeys(nodes: TocNode[], target: TocNode | undefined): string[] {
+  if (!target) return [];
+  const keys = tocNodeKeys(nodes);
+  const key = keys.get(target);
+  if (!key) return [];
+  const parts = key.split(".");
+  return parts.slice(0, -1).map((_, index) => parts.slice(0, index + 1).join("."));
+}
+
+/**
+ * 初始展开状态：小目录全部展开；大目录全部收起，由调用方再展开当前章所在分支。
+ */
+export function defaultExpandedTocKeys(nodes: TocNode[]): Set<string> {
+  if (countTocNodes(nodes) > TOC_EXPAND_ALL_LIMIT) return new Set();
+  const expanded = new Set<string>();
+  for (const [node, key] of tocNodeKeys(nodes)) {
+    if (node.children.length > 0) expanded.add(key);
+  }
+  return expanded;
+}
+
 export interface NoteViewModel {
   id: string;
   content: string;

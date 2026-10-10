@@ -18,6 +18,8 @@
   "sidebar.toc.filter.clear": "Clear filter",
   "sidebar.toc.empty": "No table of contents",
   "sidebar.toc.noMatch": "No matching chapters",
+  "sidebar.toc.expand": "Expand subsections",
+  "sidebar.toc.collapse": "Collapse subsections",
   "sidebar.bookmarks.empty": "No bookmarks",
   "sidebar.bookmarks.emptyTip": "Press Ctrl+B or 🔖 in the top bar to bookmark this page",
   "sidebar.bookmark.noText": "(No bookmark text)",

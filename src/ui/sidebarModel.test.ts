@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 import type { TocNode } from "../core/types";
-import { countTocNodes, findActiveTocNode, limitNotes, sortNotesNewestFirst, type NoteViewModel } from "./sidebarModel";
+import {
+  TOC_EXPAND_ALL_LIMIT,
+  countTocNodes,
+  defaultExpandedTocKeys,
+  findActiveTocNode,
+  limitNotes,
+  sortNotesNewestFirst,
+  tocAncestorKeys,
+  tocNodeKeys,
+  type NoteViewModel,
+} from "./sidebarModel";
 
 const item = (label: string, href: string, children: TocNode[] = []): TocNode => ({
   label,
@@ -63,6 +73,34 @@ const note = (id: string, createdAtMs: number): NoteViewModel => ({
   selectedText: id,
   chapterTitle: "第一章",
   createdAtMs,
+});
+
+describe("sidebar TOC collapse helpers", () => {
+  const leaf = item("1.1", "a.xhtml#1");
+  const toc = [item("卷一", "a.xhtml", [item("第一章", "a.xhtml#c", [leaf])]), item("卷二", "b.xhtml")];
+
+  it("keys nodes by their index path in the original TOC", () => {
+    const keys = tocNodeKeys(toc);
+    expect(keys.get(toc[0])).toBe("0");
+    expect(keys.get(toc[0].children[0])).toBe("0.0");
+    expect(keys.get(leaf)).toBe("0.0.0");
+    expect(keys.get(toc[1])).toBe("1");
+  });
+
+  it("lists every ancestor of the active entry, not the entry itself", () => {
+    expect(tocAncestorKeys(toc, leaf)).toEqual(["0", "0.0"]);
+    expect(tocAncestorKeys(toc, toc[1])).toEqual([]);
+    expect(tocAncestorKeys(toc, item("外来", "x.xhtml"))).toEqual([]);
+    expect(tocAncestorKeys(toc, undefined)).toEqual([]);
+  });
+
+  it("expands every branch of a small TOC and none of a large one", () => {
+    expect([...defaultExpandedTocKeys(toc)].sort()).toEqual(["0", "0.0"]);
+    const large = Array.from({ length: 4 }, (_, v) =>
+      item(`卷${v}`, `v${v}.xhtml`, Array.from({ length: 10 }, (_, c) => item(`第${c}章`, `v${v}.xhtml#${c}`))));
+    expect(countTocNodes(large)).toBeGreaterThan(TOC_EXPAND_ALL_LIMIT);
+    expect(defaultExpandedTocKeys(large).size).toBe(0);
+  });
 });
 
 describe("sidebar note helpers", () => {

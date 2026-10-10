@@ -21,6 +21,8 @@ export const sidebar = defineMessages("sidebar", {
   "sidebar.toc.filter.clear": "清除过滤",
   "sidebar.toc.empty": "本书暂无目录",
   "sidebar.toc.noMatch": "无匹配章节",
+  "sidebar.toc.expand": "展开子章节",
+  "sidebar.toc.collapse": "收起子章节",
   "sidebar.bookmarks.empty": "暂无书签",
   "sidebar.bookmarks.emptyTip": { zh: "按 Ctrl+B 或顶栏 🔖 标记当前页", note: "Keep the shortcut and the emoji." },
   "sidebar.bookmark.noText": "（无书签文字）",
