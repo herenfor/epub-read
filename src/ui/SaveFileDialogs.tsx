@@ -5,6 +5,7 @@ import type {
 } from "../platform/saveFileNativeBridge";
 import type { SaveFileJobState } from "./useSaveFileJob";
 import "./saveFileDialogs.css";
+import { uiText, useUiText } from "./localization/UiLanguageProvider";
 
 function formatBytes(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return "0 B";
@@ -20,14 +21,14 @@ function formatBytes(value: number): string {
 
 function phaseLabel(phase: string): string {
   switch (phase) {
-    case "preparing": return "正在准备";
-    case "reading": return "正在读取资料";
-    case "extracting": return "正在解析存档";
-    case "writing": return "正在写入";
-    case "finalizing": return "正在收尾";
-    case "copying": return "正在写入目标";
-    case "committing": return "正在提交到书库";
-    default: return phase || "进行中";
+    case "preparing": return uiText("saveFile.phase.preparing");
+    case "reading": return uiText("saveFile.phase.reading");
+    case "extracting": return uiText("saveFile.phase.extracting");
+    case "writing": return uiText("saveFile.phase.writing");
+    case "finalizing": return uiText("saveFile.phase.finalizing");
+    case "copying": return uiText("saveFile.phase.copying");
+    case "committing": return uiText("saveFile.phase.committing");
+    default: return phase || uiText("saveFile.phase.working");
   }
 }
 
@@ -35,10 +36,10 @@ function progressText(progress: SaveFileProgress): string {
   const label = phaseLabel(progress.phase);
   if (progress.totalBytes !== null && progress.totalBytes > 0) {
     const pct = Math.min(100, Math.round((progress.processedBytes / progress.totalBytes) * 100));
-    return `${label} ${pct}% · ${formatBytes(progress.processedBytes)} / ${formatBytes(progress.totalBytes)}`;
+    return uiText("saveFile.progress.bytes", { phase: label, percent: pct, done: formatBytes(progress.processedBytes), total: formatBytes(progress.totalBytes) });
   }
-  if (progress.processedBytes > 0) return `${label} · 已处理 ${formatBytes(progress.processedBytes)}`;
-  return `${label}…`;
+  if (progress.processedBytes > 0) return uiText("saveFile.progress.processed", { phase: label, done: formatBytes(progress.processedBytes) });
+  return uiText("saveFile.progress.pending", { phase: label });
 }
 
 export interface SaveFileExportDialogProps {
@@ -48,18 +49,19 @@ export interface SaveFileExportDialogProps {
 }
 
 export function SaveFileExportDialog(props: SaveFileExportDialogProps) {
+  const { t, tn } = useUiText();
   const [scope, setScope] = useState<"all" | "selected">(props.selectedCount > 0 ? "selected" : "all");
   const [includeBooks, setIncludeBooks] = useState(false);
   return (
     <div className="save-file-backdrop" role="presentation">
-      <section className="save-file-dialog" role="dialog" aria-modal="true" aria-label="导出存档">
+      <section className="save-file-dialog" role="dialog" aria-modal="true" aria-label={t("saveFile.export.dialog")}>
         <header className="save-file-dialog-head">
-          <h2>导出存档</h2>
-          <p>新格式为 .epubsave，包含可移植资料与所选书籍文件。</p>
+          <h2>{t("saveFile.export.title")}</h2>
+          <p>{t("saveFile.export.subtitle")}</p>
         </header>
         <div className="save-file-dialog-body">
           <fieldset className="save-file-fieldset">
-            <legend>导出范围</legend>
+            <legend>{t("saveFile.export.scope")}</legend>
             <label className="save-file-radio">
               <input
                 type="radio"
@@ -67,7 +69,7 @@ export function SaveFileExportDialog(props: SaveFileExportDialogProps) {
                 checked={scope === "all"}
                 onChange={() => setScope("all")}
               />
-              <span>全库</span>
+              <span>{t("saveFile.export.all")}</span>
             </label>
             <label className={`save-file-radio${props.selectedCount === 0 ? " disabled" : ""}`}>
               <input
@@ -77,11 +79,11 @@ export function SaveFileExportDialog(props: SaveFileExportDialogProps) {
                 checked={scope === "selected"}
                 onChange={() => setScope("selected")}
               />
-              <span>当前选中的书{props.selectedCount > 0 ? `（${props.selectedCount} 本）` : "（无选中）"}</span>
+              <span>{props.selectedCount > 0 ? tn("saveFile.export.selectedCount", props.selectedCount, { count: props.selectedCount }) : t("saveFile.export.selectedNone")}</span>
             </label>
           </fieldset>
           <p className="save-file-muted">
-            阅读资料包含进度、书签、笔记、收藏及文件夹；全库包含空文件夹，选中的书只带相关文件夹。附带书籍文件与资料范围是两个独立选择。
+            {t("saveFile.export.explain")}
           </p>
           <label className="save-file-check">
             <input
@@ -89,18 +91,18 @@ export function SaveFileExportDialog(props: SaveFileExportDialogProps) {
               checked={includeBooks}
               onChange={(event) => setIncludeBooks(event.target.checked)}
             />
-            <span>附带书籍文件（默认关；开启后可在另一设备直接阅读）</span>
+            <span>{t("saveFile.export.includeBooks")}</span>
           </label>
         </div>
         <footer className="save-file-dialog-actions">
-          <button type="button" onClick={props.onCancel}>取消</button>
+          <button type="button" onClick={props.onCancel}>{t("saveFile.cancel")}</button>
           <button
             type="button"
             className="primary"
             disabled={scope === "selected" && props.selectedCount === 0}
             onClick={() => props.onConfirm(scope, includeBooks)}
           >
-            选择保存位置并导出
+            {t("saveFile.export.confirm")}
           </button>
         </footer>
       </section>
@@ -117,27 +119,28 @@ export interface SaveFileImportPreviewProps {
 }
 
 export function SaveFileImportPreview(props: SaveFileImportPreviewProps) {
+  const { t, tn } = useUiText();
   const [applyPreferences, setApplyPreferences] = useState(false);
   const visibleMissing = props.preview.missingBooks.slice(0, 3);
   return (
     <div className="save-file-backdrop" role="presentation">
-      <section className="save-file-dialog save-file-import-preview" role="dialog" aria-modal="true" aria-label="导入存档预览">
+      <section className="save-file-dialog save-file-import-preview" role="dialog" aria-modal="true" aria-label={t("saveFile.import.dialog")}>
         <header className="save-file-dialog-head">
-          <h2>导入存档预览</h2>
-          <p>{props.sourceLabel || "已选择存档"}；预览不会写入书库。</p>
+          <h2>{t("saveFile.import.title")}</h2>
+          <p>{t("saveFile.import.subtitle", { source: props.sourceLabel || t("saveFile.import.selected") })}</p>
         </header>
         <div className="save-file-dialog-body">
           <dl className="save-file-summary">
-            <div><dt>存档资料书数</dt><dd>{props.preview.bookCount}</dd></div>
-            <div><dt>新资料数</dt><dd>{props.preview.newBookCount}</dd></div>
-            <div><dt>实际附带书籍</dt><dd>{props.preview.attachedBooks.length}</dd></div>
-            <div><dt>待补书籍</dt><dd>{props.preview.missingBooks.length}</dd></div>
-            <div><dt>进度分歧</dt><dd>{props.preview.progressConflictCount}</dd></div>
+            <div><dt>{t("saveFile.import.bookCount")}</dt><dd>{props.preview.bookCount}</dd></div>
+            <div><dt>{t("saveFile.import.newBooks")}</dt><dd>{props.preview.newBookCount}</dd></div>
+            <div><dt>{t("saveFile.import.attached")}</dt><dd>{props.preview.attachedBooks.length}</dd></div>
+            <div><dt>{t("saveFile.import.missing")}</dt><dd>{props.preview.missingBooks.length}</dd></div>
+            <div><dt>{t("saveFile.import.conflicts")}</dt><dd>{props.preview.progressConflictCount}</dd></div>
           </dl>
           {visibleMissing.length > 0 && (
             <p className="save-file-muted">
-              待补：{visibleMissing.map((book) => book.title || book.contentHash.slice(0, 8)).join("、")}
-              {props.preview.missingBooks.length > visibleMissing.length ? ` 等 ${props.preview.missingBooks.length} 本` : ""}
+              {t("saveFile.import.missingList", { titles: visibleMissing.map((book) => book.title || book.contentHash.slice(0, 8)).join(t("saveFile.listSeparator")) })}
+              {props.preview.missingBooks.length > visibleMissing.length ? tn("saveFile.import.more", props.preview.missingBooks.length, { count: props.preview.missingBooks.length }) : ""}
             </p>
           )}
           {props.preview.hasPreferences && (
@@ -147,16 +150,16 @@ export function SaveFileImportPreview(props: SaveFileImportPreviewProps) {
                 checked={applyPreferences}
                 onChange={(event) => setApplyPreferences(event.target.checked)}
               />
-              <span>采用存档中的外观设置（只应用主题、字号、行距等白名单字段）</span>
+              <span>{t("saveFile.import.applyPreferences")}</span>
             </label>
           )}
           <p className="save-file-muted">
-            确认后会把资料并入当前书库；未附带文件的书保留原进度/笔记并显示为待补充书籍。
+            {t("saveFile.import.explain")}
           </p>
         </div>
         <footer className="save-file-dialog-actions">
           <button type="button" onClick={props.onCancel} disabled={props.canceling}>
-            {props.canceling ? "正在取消…" : "取消"}
+            {props.canceling ? t("saveFile.canceling") : t("saveFile.cancel")}
           </button>
           <button
             type="button"
@@ -164,7 +167,7 @@ export function SaveFileImportPreview(props: SaveFileImportPreviewProps) {
             disabled={props.canceling}
             onClick={() => props.onConfirm(props.preview.hasPreferences && applyPreferences)}
           >
-            确认导入
+            {t("saveFile.import.confirm")}
           </button>
         </footer>
       </section>
@@ -178,23 +181,24 @@ export interface SaveFileProgressPanelProps {
 }
 
 export function SaveFileProgressPanel(props: SaveFileProgressPanelProps) {
+  const { t } = useUiText();
   const { state } = props;
   if (state.kind === "idle" || state.kind === "prepared") return null;
-  let title = "正在导出存档";
+  let title = t("saveFile.progress.exporting");
   let cancellable = true;
-  let cancelText = "取消";
+  let cancelText = t("saveFile.cancel");
   let cancelDisabled = false;
   if (state.kind === "preparing") {
-    title = "正在读取存档";
-    cancelText = state.canceling ? "取消中…" : "取消";
+    title = t("saveFile.progress.reading");
+    cancelText = state.canceling ? t("saveFile.progress.cancelingShort") : t("saveFile.cancel");
     cancelDisabled = state.canceling || state.cancelTooLate;
   } else if (state.kind === "committing") {
-    title = "正在提交到书库";
-    cancelText = "提交中不可取消";
+    title = t("saveFile.progress.committing");
+    cancelText = t("saveFile.progress.noCancel");
     cancellable = false;
     cancelDisabled = true;
   } else if (state.kind === "exporting") {
-    cancelText = state.canceling ? "取消中…" : "取消";
+    cancelText = state.canceling ? t("saveFile.progress.cancelingShort") : t("saveFile.cancel");
     cancelDisabled = state.canceling || state.cancelTooLate;
   }
   const tooLate = state.kind !== "committing" && state.cancelTooLate;
@@ -202,8 +206,8 @@ export function SaveFileProgressPanel(props: SaveFileProgressPanelProps) {
     <section className="save-file-progress" role="status" aria-live="polite" aria-label={title}>
       <div className="save-file-progress-title">{title}</div>
       <div className="save-file-progress-text">{progressText(state.progress)}</div>
-      {tooLate && <div className="save-file-progress-note">已进入不可回退阶段，等待真实结果。</div>}
-      {state.kind === "committing" && <div className="save-file-progress-note">提交已开始，关闭窗口也不会回滚。</div>}
+      {tooLate && <div className="save-file-progress-note">{t("saveFile.progress.tooLate")}</div>}
+      {state.kind === "committing" && <div className="save-file-progress-note">{t("saveFile.progress.committed")}</div>}
       {cancellable && (
         <button type="button" onClick={props.onCancel} disabled={cancelDisabled}>
           {cancelText}

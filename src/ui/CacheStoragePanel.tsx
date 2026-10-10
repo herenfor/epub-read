@@ -10,6 +10,7 @@ import {
   type CacheStorageStatus,
 } from "../platform/cacheStorage";
 import "./cacheStoragePanel.css";
+import { currentUiLocale, uiText, useUiText } from "./localization/UiLanguageProvider";
 
 interface CacheStoragePanelProps {
   open: boolean;
@@ -27,7 +28,7 @@ function formatBytes(bytes: number | null | undefined): string {
 function formatTimestamp(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return "—";
   try {
-    return new Date(value).toLocaleString();
+    return new Date(value).toLocaleString(currentUiLocale());
   } catch {
     return "—";
   }
@@ -36,32 +37,34 @@ function formatTimestamp(value: number): string {
 function cacheStateLabel(state: string): string {
   switch (state) {
     case "building":
-      return "正在建立";
+      return uiText("cache.state.building");
     case "ready":
-      return "可用";
+      return uiText("cache.state.ready");
     case "partial":
-      return "部分可用";
+      return uiText("cache.state.partial");
     case "error":
-      return "异常";
+      return uiText("cache.state.error");
     case "empty":
-      return "空";
+      return uiText("cache.state.empty");
     default:
       return state;
   }
 }
 
 function FullTextCacheRow({ cache }: { cache: AiCacheStatus }) {
+  const { t } = useUiText();
   return (
     <>
-      <div>已索引书籍 <strong>{cache.itemCount}</strong></div>
-      <div>状态 <strong>{cacheStateLabel(cache.state)}</strong></div>
-      <div>最近更新 <strong>{formatTimestamp(cache.updatedAt)}</strong></div>
-      <div>分类占用 <strong>{formatBytes(cache.sizeBytes)}</strong></div>
+      <div>{t("cache.indexedBooks")} <strong>{cache.itemCount}</strong></div>
+      <div>{t("cache.state")} <strong>{cacheStateLabel(cache.state)}</strong></div>
+      <div>{t("cache.updated")} <strong>{formatTimestamp(cache.updatedAt)}</strong></div>
+      <div>{t("cache.size")} <strong>{formatBytes(cache.sizeBytes)}</strong></div>
     </>
   );
 }
 
 export function CacheStoragePanel(props: CacheStoragePanelProps) {
+  const { t } = useUiText();
   const capabilities = getRuntimeCapabilities();
   const [status, setStatus] = useState<CacheStorageStatus | null>(null);
   const [loading, setLoading] = useState(false);
@@ -110,12 +113,12 @@ export function CacheStoragePanel(props: CacheStoragePanelProps) {
       const selected = await openDialog({
         directory: true,
         multiple: false,
-        title: "选择缓存目录",
+        title: uiText("cache.chooseDirectory.title"),
       });
       const selectedPath = Array.isArray(selected) ? selected[0] : selected;
       if (!selectedPath) return;
       setStatus(await setCacheStorageDirectory(selectedPath));
-      setNotice("已保存；本次仍使用原目录，下次启动生效。");
+      setNotice(uiText("cache.saved"));
     } catch (reason) {
       setError(String(reason));
     } finally {
@@ -130,7 +133,7 @@ export function CacheStoragePanel(props: CacheStoragePanelProps) {
     setNotice(null);
     try {
       setStatus(await setCacheStorageDirectory(null));
-      setNotice("已恢复默认；本次仍使用原目录，下次启动生效。");
+      setNotice(uiText("cache.restored"));
     } catch (reason) {
       setError(String(reason));
     } finally {
@@ -146,7 +149,7 @@ export function CacheStoragePanel(props: CacheStoragePanelProps) {
     try {
       await clearFullTextIndex();
       await refresh();
-      setNotice("全文索引已清除，空闲缓存空间已回收；全文搜索需要重新准备。");
+      setNotice(uiText("cache.cleared"));
     } catch (reason) {
       await refresh();
       setError(String(reason));
@@ -163,7 +166,7 @@ export function CacheStoragePanel(props: CacheStoragePanelProps) {
     try {
       await resetIndexCaches();
       await refresh();
-      setNotice("全部索引缓存已重置；书本、进度和模型资料已保留，搜索需要重新准备。");
+      setNotice(uiText("cache.reset.done"));
     } catch (reason) {
       await refresh();
       setError(String(reason));
@@ -184,37 +187,37 @@ export function CacheStoragePanel(props: CacheStoragePanelProps) {
         className="cache-storage-panel"
         role="dialog"
         aria-modal="true"
-        aria-label="缓存与存储"
+        aria-label={t("cache.dialog")}
         onClick={(event) => event.stopPropagation()}
       >
         <header className="cache-storage-head">
           <div>
-            <h2>缓存与存储</h2>
-            <p>设置只用于当前设备。</p>
+            <h2>{t("cache.title")}</h2>
+            <p>{t("cache.deviceOnly")}</p>
           </div>
-          <button type="button" className="tb-btn" onClick={props.onClose} aria-label="关闭缓存与存储">
-            关闭
+          <button type="button" className="tb-btn" onClick={props.onClose} aria-label={t("cache.close.label")}>
+            {t("cache.close")}
           </button>
         </header>
 
         {error && <div className="cache-storage-alert is-error" role="alert">{error}</div>}
         {status?.fallbackReason && (
           <div className="cache-storage-alert is-warn" role="status">
-            自定义目录不可用，已回退到默认目录：{status.fallbackReason}
+            {t("cache.fallback", { reason: status.fallbackReason })}
           </div>
         )}
         {notice && <div className="cache-storage-alert is-notice" role="status">{notice}</div>}
 
-        {loading && !status && <div className="cache-storage-loading">正在读取缓存状态…</div>}
+        {loading && !status && <div className="cache-storage-loading">{t("cache.loading")}</div>}
         {!loading && (status !== null || error !== null) && (
           <div className="cache-storage-category">
             <p className="cache-storage-hint">
-              索引数据库损坏或无法清理时，可重置全部索引缓存。书本、阅读进度和模型资料保留。
+              {t("cache.reset.hint")}
             </p>
             <button type="button" className="tb-btn is-danger"
               disabled={busy !== null || status?.caches.some((cache) => cache.state === "building")}
               onClick={() => void resetCaches()}>
-              {busy === "reset" ? "正在重置…" : "重置全部索引缓存"}
+              {busy === "reset" ? t("cache.resetting") : t("cache.reset")}
             </button>
           </div>
         )}
@@ -223,25 +226,25 @@ export function CacheStoragePanel(props: CacheStoragePanelProps) {
           <>
             <dl className="cache-storage-paths">
               <div>
-                <dt>本次使用目录</dt>
+                <dt>{t("cache.activeDirectory")}</dt>
                 <dd className="cache-storage-path" title={status.activeDirectory}>{status.activeDirectory}</dd>
               </div>
               <div>
-                <dt>已保存目录</dt>
-                <dd className="cache-storage-path" title={status.configuredBaseDirectory ?? "默认目录"}>
-                  {status.configuredBaseDirectory ?? "默认（应用数据目录）"}
+                <dt>{t("cache.savedDirectory")}</dt>
+                <dd className="cache-storage-path" title={status.configuredBaseDirectory ?? t("cache.defaultDirectory")}>
+                  {status.configuredBaseDirectory ?? t("cache.defaultDirectory.detail")}
                 </dd>
               </div>
             </dl>
 
             {status.restartRequired && (
-              <div className="cache-storage-restart">设置已保存，重启应用后生效。</div>
+              <div className="cache-storage-restart">{t("cache.restartRequired")}</div>
             )}
 
             {capabilities.supportsCustomCacheDirectory && (
               <div className="cache-storage-actions">
                 <button type="button" className="tb-btn" onClick={() => void chooseDirectory()} disabled={busy !== null}>
-                  {busy === "choose" ? "正在选择…" : "选择缓存目录"}
+                  {busy === "choose" ? t("cache.choosing") : t("cache.chooseDirectory")}
                 </button>
                 <button
                   type="button"
@@ -249,27 +252,27 @@ export function CacheStoragePanel(props: CacheStoragePanelProps) {
                   onClick={() => void restoreDefault()}
                   disabled={busy !== null || status.configuredBaseDirectory === null}
                 >
-                  {busy === "default" ? "正在恢复…" : "恢复默认"}
+                  {busy === "default" ? t("cache.restoring") : t("cache.restoreDefault")}
                 </button>
               </div>
             )}
 
             <div className="cache-storage-total">
-              <span>索引缓存数据库总占用</span>
+              <span>{t("cache.total")}</span>
               <strong>{formatBytes(status.totalSizeBytes)}</strong>
             </div>
 
             <div className="cache-storage-category">
               <div className="cache-storage-category-head">
-                <h3>全文索引</h3>
+                <h3>{t("cache.fullText")}</h3>
                 <button
                   type="button"
                   className="tb-btn is-danger"
                   onClick={() => void clearIndex()}
                   disabled={clearDisabled}
-                  title={fullText?.state === "building" ? "正在建立全文索引，完成后才能清理" : "清除全文索引"}
+                  title={fullText?.state === "building" ? t("cache.clear.building") : t("cache.clear")}
                 >
-                  {busy === "clear" ? "正在清除…" : "清除全文索引"}
+                  {busy === "clear" ? t("cache.clearing") : t("cache.clear")}
                 </button>
               </div>
               {fullText ? (
@@ -277,10 +280,10 @@ export function CacheStoragePanel(props: CacheStoragePanelProps) {
                   <FullTextCacheRow cache={fullText} />
                 </div>
               ) : (
-                <div className="cache-storage-loading">暂无全文索引分类。</div>
+                <div className="cache-storage-loading">{t("cache.fullText.none")}</div>
               )}
               <p className="cache-storage-hint">
-                清除后全文搜索需要重新准备；清除时会整理数据库并回收空闲空间。
+                {t("cache.clear.hint")}
               </p>
             </div>
           </>
