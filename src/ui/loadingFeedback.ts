@@ -1,4 +1,5 @@
 import type { ChapterState } from "../render/paginator";
+import { uiText } from "./localization/UiLanguageProvider";
 
 export type ReaderLoadFeedbackKind = "loading" | "empty" | "error";
 
@@ -28,17 +29,17 @@ export function resolveReaderLoadFeedback(
 ): ReaderLoadFeedback | null {
   if (!input.visible) return null;
   if (input.chapter.status === "error") {
-    return { kind: "error", text: `章节加载失败：${input.chapter.message}` };
+    return { kind: "error", text: uiText("notice.loading.chapterFailed", { error: input.chapter.message }) };
   }
   if (input.chapter.status === "ready" && input.chapter.empty) {
-    return { kind: "empty", text: "本章无可显示内容" };
+    return { kind: "empty", text: uiText("notice.loading.empty") };
   }
   if (input.displayReady) return null;
   if (!input.displayedOnce) {
-    return { kind: "loading", text: "准备阅读位置…" };
+    return { kind: "loading", text: uiText("notice.loading.position") };
   }
   if (input.chapter.status === "loading") {
-    return { kind: "loading", text: "正在加载章节…" };
+    return { kind: "loading", text: uiText("notice.loading.chapter") };
   }
-  return { kind: "loading", text: "正在准备排版…" };
+  return { kind: "loading", text: uiText("notice.loading.layout") };
 }

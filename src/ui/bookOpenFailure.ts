@@ -1,3 +1,5 @@
+import { uiText } from "./localization/UiLanguageProvider";
+
 /** Native commands may reject with a string rather than an Error. */
 export function bookOpenErrorMessage(error: unknown): string {
   if (typeof error === "string" && error.trim()) return error;
@@ -5,7 +7,7 @@ export function bookOpenErrorMessage(error: unknown): string {
       "message" in error && typeof error.message === "string" && error.message.trim()) {
     return error.message;
   }
-  return "未收到具体错误原因，请重试；若仍失败，请保留现场反馈";
+  return uiText("notice.openFailure.noReason");
 }
 
 export function describeBookOpenFailure(error: unknown): {
@@ -19,13 +21,13 @@ export function describeBookOpenFailure(error: unknown): {
   const mismatch = message === "选择的 EPUB 内容与目标书籍不一致，未重新绑定";
   if (changed || mismatch) {
     return {
-      message: `${message}。原书进度和笔记已保留；请选择原文件，或将修改后的文件导入为另一版本`,
+      message: uiText("notice.openFailure.changed", { message }),
       sourceUnavailable: changed,
     };
   }
   if (missing) {
     return {
-      message: `${message}。原书进度和笔记已保留；可重新导入原文件，无需先删除书架记录`,
+      message: uiText("notice.openFailure.missing", { message }),
       sourceUnavailable: true,
     };
   }

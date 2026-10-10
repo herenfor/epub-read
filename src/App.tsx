@@ -118,6 +118,7 @@ import { NoteComposer } from "./ui/NoteComposer";
 import type { NoteViewModel } from "./ui/NotesPanel";
 import type { ReaderNote } from "./ui/notes";
 import { createLazyFontController } from "./ui/fontRuntime";
+import { currentUiLocale, uiPlural, uiText, useUiText } from "./ui/localization/UiLanguageProvider";
 import { FootnotePop } from "./ui/FootnotePop";
 import { LogPanel, type LogItem } from "./ui/LogPanel";
 import { ReaderView, type ReaderHandle } from "./ui/ReaderView";
@@ -294,9 +295,9 @@ function displayNameFromContentUri(uri: string): string {
   try {
     const last = decodeURIComponent(uri.split("/").filter(Boolean).pop() ?? "");
     const base = last.split(/[\\/]/).pop() ?? "";
-    return base || "选中文件";
+    return base || uiText("notice.selectedFile");
   } catch {
-    return "选中文件";
+    return uiText("notice.selectedFile");
   }
 }
 
@@ -744,6 +745,7 @@ function createShelfBookArchiveInput(id: string): { port: MessagePort; dispose()
 }
 
 export default function App() {
+  const { t } = useUiText();
   const runtime = getRuntimeCapabilities();
   const responsive = useResponsiveEnvironment();
   const mobileChrome = responsive.touchUi;
@@ -914,7 +916,7 @@ export default function App() {
       writeHideReaderSystemStatusBar(hidden);
       setHideReaderSystemStatusBar(hidden);
     } catch (error) {
-      setShelfNotice({ kind: "error", text: `系统状态栏设置保存失败：${String(error)}` });
+      setShelfNotice({ kind: "error", text: uiText("notice.statusBar.saveFailed", { error: String(error) }) });
     }
   }, []);
   const [keepScreenOnWhileReading, setKeepScreenOnWhileReading] = useState(readReaderKeepScreenOn);
@@ -924,12 +926,12 @@ export default function App() {
       writeReaderKeepScreenOn(enabled);
       setKeepScreenOnWhileReading(enabled);
     } catch (error) {
-      setShelfNotice({ kind: "error", text: `屏幕常亮设置保存失败：${String(error)}` });
+      setShelfNotice({ kind: "error", text: uiText("notice.keepScreenOn.saveFailed", { error: String(error) }) });
     }
   }, []);
 
   const [shelfBusy, setShelfBusy] = useState(false);
-  const [shelfBusyMessage, setShelfBusyMessage] = useState("正在处理…");
+  const [shelfBusyMessage, setShelfBusyMessage] = useState(() => uiText("notice.busy"));
   const [nativeImport, setNativeImport] = useState<{
     requestId: string;
     phase: "starting" | "preparing" | "committing";
@@ -1343,7 +1345,7 @@ export default function App() {
   const requestCloseForeground = useCallback((): void => {
     const current = foregroundRef.current;
     if (shouldConfirmNoteDiscard(current, noteComposerDirtyRef.current)) {
-      if (typeof window !== "undefined" && !window.confirm("放弃未保存的笔记？")) return;
+      if (typeof window !== "undefined" && !window.confirm(uiText("notice.discardNote"))) return;
     }
     closeForeground();
   }, [closeForeground]);
@@ -1482,7 +1484,7 @@ export default function App() {
 
   const reportAiLifecycleError = useCallback((error: unknown): void => {
     const message = error instanceof Error ? error.message : String(error);
-    setRuntimeIssues((issues) => [...issues, `AI 地基：${message}`]);
+    setRuntimeIssues((issues) => [...issues, uiText("appUi.runtime.ai", { message })]);
   }, []);
   const enableAi = useCallback((): void => {
     void aiRuntime.enable().catch(reportAiLifecycleError);
@@ -1824,7 +1826,7 @@ export default function App() {
     });
     if (list.length === 0 || shelfBusyRef.current) return;
     if (nativeImportRef.current) {
-      setShelfNotice({ kind: "warn", text: "已有导入任务正在进行，请等待当前任务结束" });
+      setShelfNotice({ kind: "warn", text: uiText("notice.import.busy") });
       return;
     }
     shelfBusyRef.current = true;
@@ -1836,7 +1838,7 @@ export default function App() {
       // Activation failure keeps the complete legacy mode; its effect reports
       // the visible error and getShelfStore() falls back to the old backend.
     }
-    setShelfBusyMessage("正在导入书籍…");
+    setShelfBusyMessage(uiText("notice.import.running"));
     setShelfBusy(true);
     setShelfNotice(null);
     const imported: ShelfEntry[] = [];
@@ -1854,13 +1856,13 @@ export default function App() {
         const batch = await store.importPaths(paths);
         for (const item of batch.results) {
           const source = list[item.inputIndex];
-          const fileName = source?.kind === "path" ? source.name : `第 ${item.inputIndex + 1} 本`;
+          const fileName = source?.kind === "path" ? source.name : uiText("notice.nthBook", { n: item.inputIndex + 1 });
           if (item.status === "failed") {
-            failed.push(`${fileName}：${item.error || "导入失败"}`);
+            failed.push(uiText("notice.import.itemFailed", { name: fileName, error: item.error || uiText("notice.import.failedShort") }));
             continue;
           }
           if (!item.record) {
-            failed.push(`${fileName}：后端未返回书架记录`);
+            failed.push(uiText("notice.import.itemFailed", { name: fileName, error: uiText("notice.import.noRecord") }));
             continue;
           }
           contentHashByIdRef.current.set(item.record.id, item.record.contentHash ?? item.record.id);
@@ -1929,7 +1931,7 @@ export default function App() {
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             failed.push(
-              `${fileName}：${error instanceof DrmError ? error.message : message}`
+              uiText("notice.import.itemFailed", { name: fileName, error: error instanceof DrmError ? error.message : message })
             );
           }
         }
@@ -1950,10 +1952,10 @@ export default function App() {
             entryByContentHashRef.current.set(entry.contentHash ?? entry.id, entry);
           }
           if (imported.length > 0 && unavailable.length > 0) {
-            refreshWarning = "书架仍有源文件不可用的旧书，原进度和笔记已保留；内容不同的文件作为另一版本导入";
+            refreshWarning = uiText("notice.import.oldVersionKept");
           }
         } catch (error) {
-          refreshWarning = `导入已完成，但书架刷新失败：${bookOpenErrorMessage(error)}`;
+          refreshWarning = uiText("notice.import.refreshFailed", { error: bookOpenErrorMessage(error) });
         }
       } else if (imported.length > 0) {
         setShelfEntries((previous) => mergeShelfEntries(previous, imported));
@@ -1966,12 +1968,12 @@ export default function App() {
         refreshedCount: isTauriEnv() ? duplicateTitles.length : 0,
       });
       if (refreshWarning) {
-        notice.text += `；${refreshWarning}`;
+        notice.text += uiText("notice.sep") + refreshWarning;
         if (notice.kind === "ok") notice.kind = "warn";
       }
       setShelfNotice(notice);
     } catch (error) {
-      setShelfNotice({ kind: "error", text: `导入失败：${String(error)}` });
+      setShelfNotice({ kind: "error", text: uiText("notice.import.failed", { error: String(error) }) });
     } finally {
       shelfBusyRef.current = false;
       setShelfBusy(false);
@@ -1983,7 +1985,7 @@ export default function App() {
     options: { silentError?: boolean } = {}
   ): Promise<AndroidImportBatchResult | null> => {
     if (nativeImportRef.current) {
-      setShelfNotice({ kind: "warn", text: "已有导入任务正在进行，请等待当前任务结束" });
+      setShelfNotice({ kind: "warn", text: uiText("notice.import.busy") });
       return null;
     }
     const requestId = createNativeImportRequestId();
@@ -1995,7 +1997,7 @@ export default function App() {
       total: documents.length,
       cancelState: "idle",
       collapsed: false,
-      fileNameSummary: documents.length === 1 ? "1 本 EPUB" : `${documents.length} 个文件`,
+      fileNameSummary: documents.length === 1 ? uiText("notice.import.oneEpub") : uiPlural("notice.import.files", documents.length, { count: documents.length }),
     });
     try {
       return await importDocuments(requestId, documents, (progress) => {
@@ -2016,7 +2018,7 @@ export default function App() {
         }
       }
       if (!options.silentError) {
-        setShelfNotice({ kind: "error", text: `导入失败：${nativeError.message}` });
+        setShelfNotice({ kind: "error", text: uiText("notice.import.failed", { error: nativeError.message }) });
       }
       return null;
     } finally {
@@ -2033,9 +2035,9 @@ export default function App() {
     const cancelled: string[] = [];
     for (const item of batch.results) {
       const document = documents[item.inputIndex];
-      const label = document ? displayNameFromContentUri(document.uri) : `第 ${item.inputIndex + 1} 本`;
+      const label = document ? displayNameFromContentUri(document.uri) : uiText("notice.nthBook", { n: item.inputIndex + 1 });
       if (item.status === "failed") {
-        failed.push(`${label}：${item.error || "导入失败"}`);
+        failed.push(uiText("notice.import.itemFailed", { name: label, error: item.error || uiText("notice.import.failedShort") }));
         continue;
       }
       if (item.status === "cancelled") {
@@ -2043,7 +2045,7 @@ export default function App() {
         continue;
       }
       if (!item.record) {
-        failed.push(`${label}：后端未返回书架记录`);
+        failed.push(uiText("notice.import.itemFailed", { name: label, error: uiText("notice.import.noRecord") }));
         continue;
       }
       accepted.push(item.record);
@@ -2070,7 +2072,7 @@ export default function App() {
       refreshedCount: duplicateTitles.length,
     });
     if (cancelled.length > 0) {
-      notice.text += `；已取消 ${cancelled.length} 本`;
+      notice.text += uiText("notice.sep") + uiPlural("notice.import.cancelledCount", cancelled.length, { count: cancelled.length });
       if (notice.kind === "ok") notice.kind = "warn";
     }
     setShelfNotice(notice);
@@ -2092,7 +2094,7 @@ export default function App() {
           : previous
       ));
     } catch (error) {
-      setShelfNotice({ kind: "error", text: `取消导入失败：${String(error)}` });
+      setShelfNotice({ kind: "error", text: uiText("notice.import.cancelFailed", { error: String(error) }) });
       setNativeImport((previous) => (
         previous && previous.requestId === current.requestId
           ? { ...previous, cancelState: "idle" }
@@ -2109,13 +2111,13 @@ export default function App() {
 
   const reimportAndroidMissing = useCallback(async (entry: ShelfEntry): Promise<ShelfEntry | null> => {
     if (nativeImportRef.current) {
-      setShelfNotice({ kind: "warn", text: "已有导入任务正在进行，请等待当前任务结束" });
+      setShelfNotice({ kind: "warn", text: uiText("notice.import.busy") });
       return null;
     }
     const selected = await openFileDialog({
       multiple: false,
       directory: false,
-      title: `重新导入《${entry.title}》`,
+      title: uiText("notice.reimport.title", { title: entry.title }),
     });
     const uri = Array.isArray(selected) ? selected[0] : selected;
     if (!uri) return null;
@@ -2137,8 +2139,8 @@ export default function App() {
       setShelfNotice({
         kind: cancelled ? "warn" : "error",
         text: cancelled
-          ? `《${entry.title}》重新导入已取消`
-          : `选择的文件与《${entry.title}》内容不一致，无法恢复`,
+          ? uiText("notice.reimport.cancelled", { title: entry.title })
+          : uiText("notice.reimport.mismatch", { title: entry.title }),
       });
       return null;
     }
@@ -2157,14 +2159,14 @@ export default function App() {
     }
     if (runtime.platform === "android") {
       if (nativeImportRef.current) {
-        setShelfNotice({ kind: "warn", text: "已有导入任务正在进行，请等待当前任务结束" });
+        setShelfNotice({ kind: "warn", text: uiText("notice.import.busy") });
         return;
       }
       try {
         const selected = await openFileDialog({
           multiple: true,
           directory: false,
-          title: "选择 EPUB 书籍",
+          title: uiText("notice.picker.chooseEpub"),
         });
         const uris = (Array.isArray(selected) ? selected : selected ? [selected] : []).filter(
           (value): value is string => typeof value === "string" && value.length > 0
@@ -2174,7 +2176,7 @@ export default function App() {
         const batch = await runNativeDocumentImport(documents);
         if (batch) await applyNativeImportBatch(batch, documents);
       } catch (error) {
-        setShelfNotice({ kind: "error", text: `无法打开文件选择器：${String(error)}` });
+        setShelfNotice({ kind: "error", text: uiText("notice.picker.failed", { error: String(error) }) });
       }
       return;
     }
@@ -2182,8 +2184,8 @@ export default function App() {
       const selected = await openFileDialog({
         multiple: true,
         directory: false,
-        title: "选择 EPUB 书籍",
-        filters: [{ name: "EPUB 电子书", extensions: ["epub"] }],
+        title: uiText("notice.picker.chooseEpub"),
+        filters: [{ name: uiText("notice.picker.epubFilter"), extensions: ["epub"] }],
       });
       const paths = Array.isArray(selected) ? selected : selected ? [selected] : [];
       if (paths.length === 0) return;
@@ -2195,7 +2197,7 @@ export default function App() {
         }))
       );
     } catch (error) {
-      setShelfNotice({ kind: "error", text: `无法打开文件选择器：${String(error)}` });
+      setShelfNotice({ kind: "error", text: uiText("notice.picker.failed", { error: String(error) }) });
     }
   }, [applyNativeImportBatch, handleImportSources, runNativeDocumentImport]);
 
@@ -2228,7 +2230,7 @@ export default function App() {
       if (organizationError) {
         setShelfNotice({
           kind: "error",
-          text: "收藏与文件夹读取失败，已禁用修改以防止覆盖现有数据",
+          text: uiText("notice.organization.readFailedLocked"),
         });
         throw new Error("收藏与文件夹处于错误状态，已禁用修改");
       }
@@ -2250,7 +2252,7 @@ export default function App() {
         const nextOrg = await getShelfStore().applyOrganization(finalCommand);
         setOrganization(nextOrg);
       } catch (error) {
-        setShelfNotice({ kind: "error", text: `操作失败：${String(error)}` });
+        setShelfNotice({ kind: "error", text: uiText("notice.operationFailed", { error: String(error) }) });
         throw error;
       } finally {
         organizationBusyRef.current = false;
@@ -2296,11 +2298,11 @@ export default function App() {
 
   const handleOpenFolderImport = useCallback(async (): Promise<void> => {
     if (shelfBusyRef.current || organizationBusyRef.current || nativeImportRef.current) {
-      setShelfNotice({ kind: "warn", text: "已有导入任务正在进行，请等待当前任务结束" });
+      setShelfNotice({ kind: "warn", text: uiText("notice.import.busy") });
       return;
     }
     if (saveFileJobStateRef.current.kind !== "idle" || saveFileLaunchRef.current || lanSaveActiveRef.current) {
-      setShelfNotice({ kind: "warn", text: "存档或设备互传进行中，暂不能导入文件夹" });
+      setShelfNotice({ kind: "warn", text: uiText("notice.folderImport.blocked") });
       return;
     }
     // Reserve the shared slot before any await; released only when the panel closes.
@@ -2337,7 +2339,7 @@ export default function App() {
       });
     } catch (error) {
       if (nativeImportRef.current === FOLDER_IMPORT_SLOT) nativeImportRef.current = null;
-      setShelfNotice({ kind: "error", text: `无法打开文件夹导入：${String(error)}` });
+      setShelfNotice({ kind: "error", text: uiText("notice.folderImport.openFailed", { error: String(error) }) });
     }
   }, []);
 
@@ -2349,7 +2351,7 @@ export default function App() {
   /** One real refresh after a started import settles (success, cancel or failure). */
   const handleFolderImportSettled = useCallback((): void => {
     void refreshShelfProjection().catch((error) => {
-      setShelfNotice({ kind: "error", text: `书架刷新失败：${String(error)}` });
+      setShelfNotice({ kind: "error", text: uiText("notice.shelf.refreshFailed", { error: String(error) }) });
     });
   }, [refreshShelfProjection]);
 
@@ -2357,7 +2359,7 @@ export default function App() {
     const defaultName = `epub-reader-${new Date().toISOString().slice(0, 10)}.epubsave`;
     if (runtime.platform === "android") {
       const selected = await saveFileDialog({
-        title: "导出存档",
+        title: uiText("notice.archive.exportTitle"),
         defaultPath: defaultName,
       });
       if (typeof selected !== "string" || selected.length === 0) return null;
@@ -2365,9 +2367,9 @@ export default function App() {
     }
     if (!isTauriEnv()) return null;
     const selected = await saveFileDialog({
-      title: "导出存档",
+      title: uiText("notice.archive.exportTitle"),
       defaultPath: defaultName,
-      filters: [{ name: "EPUB Reader 存档", extensions: ["epubsave"] }],
+      filters: [{ name: uiText("notice.archive.filter"), extensions: ["epubsave"] }],
     });
     if (typeof selected !== "string" || selected.length === 0) return null;
     return { kind: "path", path: selected };
@@ -2381,18 +2383,18 @@ export default function App() {
       const selected = await openFileDialog({
         multiple: false,
         directory: false,
-        title: "导入存档",
+        title: uiText("notice.archive.importTitle"),
       });
       const uri = Array.isArray(selected) ? selected[0] : selected;
       if (typeof uri !== "string" || uri.length === 0) return null;
-      return { source: { kind: "uri", uri }, label: uri.split("/").pop() || "Android 文档" };
+      return { source: { kind: "uri", uri }, label: uri.split("/").pop() || uiText("notice.archive.androidDocument") };
     }
     if (!isTauriEnv()) return null;
     const selected = await openFileDialog({
       multiple: false,
       directory: false,
-      title: "导入存档",
-      filters: [{ name: "EPUB Reader 存档", extensions: ["epubsave"] }],
+      title: uiText("notice.archive.importTitle"),
+      filters: [{ name: uiText("notice.archive.filter"), extensions: ["epubsave"] }],
     });
     const path = Array.isArray(selected) ? selected[0] : selected;
     if (typeof path !== "string" || path.length === 0) return null;
@@ -2422,10 +2424,10 @@ export default function App() {
         throw new Error("选中书籍没有可用的内容指纹，未发起导出");
       }
       scope = { kind: "selected", bookHashes };
-      rangeLabel = `选中的 ${bookHashes.length} 本资料`;
+      rangeLabel = uiPlural("notice.archive.rangeSelected", bookHashes.length, { count: bookHashes.length });
     } else {
       scope = { kind: "all" };
-      rangeLabel = "全库资料";
+      rangeLabel = uiText("notice.archive.rangeAll");
     }
 
     try {
@@ -2449,7 +2451,7 @@ export default function App() {
     includeBooks: boolean,
   ): Promise<void> => {
     if (saveFileJob.active || saveFileLaunchRef.current || lanSaveActiveRef.current) {
-      setShelfNotice({ kind: "warn", text: "已有存档或互传任务正在进行，请等待当前任务结束" });
+      setShelfNotice({ kind: "warn", text: uiText("notice.archive.busy") });
       return;
     }
     saveFileLaunchRef.current = true;
@@ -2458,7 +2460,7 @@ export default function App() {
     try {
       destination = await chooseSaveFileDestination();
     } catch (error) {
-      setShelfNotice({ kind: "error", text: `无法打开保存位置选择器：${saveFileErrorMessage(error)}` });
+      setShelfNotice({ kind: "error", text: uiText("notice.archive.savePickerFailed", { error: saveFileErrorMessage(error) }) });
       return;
     }
     if (!destination) return;
@@ -2482,27 +2484,27 @@ export default function App() {
     try {
       const result = await saveFileJob.beginExport({ destination, scope, includeBooks });
       if (result.status === "cancelled") {
-        setShelfNotice({ kind: "warn", text: "已取消导出存档" });
+        setShelfNotice({ kind: "warn", text: uiText("notice.archive.exportCancelled") });
         return;
       }
       if (result.skippedBooks.length > 0) {
         const first = result.skippedBooks[0];
         setShelfNotice({
           kind: "warn",
-          text: `已导出${rangeLabel}；附带书籍 ${result.writtenBooks} 本，跳过 ${result.skippedBooks.length} 本（如《${first.title}》：${first.reason}）`,
+          text: uiText("notice.archive.exportedSkipped", { range: rangeLabel, written: result.writtenBooks, skipped: result.skippedBooks.length, title: first.title, reason: first.reason }),
         });
       } else {
         setShelfNotice({
           kind: "ok",
-          text: `已导出${rangeLabel}${includeBooks ? `，附带书籍 ${result.writtenBooks} 本` : "（未附带书籍文件）"}`,
+          text: includeBooks ? uiText("notice.archive.exportedWithBooks", { range: rangeLabel, written: result.writtenBooks }) : uiText("notice.archive.exportedNoBooks", { range: rangeLabel }),
         });
       }
     } catch (error) {
       if (saveFileErrorCode(error) === "cancelled") {
-        setShelfNotice({ kind: "warn", text: "已取消导出存档" });
+        setShelfNotice({ kind: "warn", text: uiText("notice.archive.exportCancelled") });
         return;
       }
-      setShelfNotice({ kind: "error", text: `存档导出失败：${saveFileErrorMessage(error)}` });
+      setShelfNotice({ kind: "error", text: uiText("notice.archive.exportFailed", { error: saveFileErrorMessage(error) }) });
     }
     } finally {
       saveFileLaunchRef.current = false;
@@ -2511,7 +2513,7 @@ export default function App() {
 
   const startNativeImport = useCallback(async (): Promise<void> => {
     if (saveFileJob.active || saveFileLaunchRef.current || lanSaveActiveRef.current) {
-      setShelfNotice({ kind: "warn", text: "已有存档或互传任务正在进行，请等待当前任务结束" });
+      setShelfNotice({ kind: "warn", text: uiText("notice.archive.busy") });
       return;
     }
     saveFileLaunchRef.current = true;
@@ -2520,7 +2522,7 @@ export default function App() {
     try {
       selected = await chooseSaveFileSource();
     } catch (error) {
-      setShelfNotice({ kind: "error", text: `无法打开存档选择器：${saveFileErrorMessage(error)}` });
+      setShelfNotice({ kind: "error", text: uiText("notice.archive.openPickerFailed", { error: saveFileErrorMessage(error) }) });
       return;
     }
     if (!selected) return;
@@ -2530,10 +2532,10 @@ export default function App() {
     } catch (error) {
       const code = saveFileErrorCode(error);
       if (code === "cancelled") {
-        setShelfNotice({ kind: "warn", text: "已取消导入存档" });
+        setShelfNotice({ kind: "warn", text: uiText("notice.archive.importCancelled") });
         return;
       }
-      setShelfNotice({ kind: "error", text: `存档导入准备失败：${saveFileErrorMessage(error)}` });
+      setShelfNotice({ kind: "error", text: uiText("notice.archive.prepareFailed", { error: saveFileErrorMessage(error) }) });
     }
     } finally {
       saveFileLaunchRef.current = false;
@@ -2563,7 +2565,7 @@ export default function App() {
       await refreshShelfProjection();
     } catch (error) {
       refreshFailed = true;
-      setShelfError(`存档已提交，但刷新书架失败：${saveFileErrorMessage(error)}`);
+      setShelfError(uiText("notice.archive.committedRefreshFailed", { error: saveFileErrorMessage(error) }));
     }
 
     let preferencesFailed = false;
@@ -2576,23 +2578,23 @@ export default function App() {
         preferencesFailed = true;
         setShelfNotice({
           kind: "warn",
-          text: `书籍资料已导入，但外观设置读取失败：${saveFileErrorMessage(error)}`,
+          text: uiText("notice.archive.preferencesReadFailed", { error: saveFileErrorMessage(error) }),
         });
       }
     }
 
     if (preferencesFailed) return;
     const conflictNote = result.progressConflictBooks.length > 0
-      ? `；${result.progressConflictBooks.length} 本有进度分歧，打开时可选择`
+      ? uiText("notice.sep") + uiText("notice.archive.conflicts", { count: result.progressConflictBooks.length })
       : "";
     const preferenceNote = applyPreferences && !result.appliedPreferences
-      ? "；存档外观设置未应用，本机设置保持不变"
+      ? uiText("notice.sep") + uiText("notice.archive.preferencesNotApplied")
       : preferencesApplied
-        ? "；已应用存档中的外观设置"
+        ? uiText("notice.sep") + uiText("notice.archive.preferencesApplied")
         : "";
     setShelfNotice({
       kind: result.missingBooks.length > 0 || refreshFailed || (applyPreferences && !result.appliedPreferences) ? "warn" : "ok",
-      text: `已导入 ${result.importedBooks.length} 本资料；${result.missingBooks.length} 本待补书籍${conflictNote}${preferenceNote}${refreshFailed ? "；书架刷新失败" : ""}`,
+      text: uiText("notice.archive.imported", { imported: result.importedBooks.length, missing: result.missingBooks.length }) + conflictNote + preferenceNote + (refreshFailed ? uiText("notice.sep") + uiText("notice.shelf.refreshFailedShort") : ""),
     });
   }, [applyPortablePreferences, refreshShelfProjection]);
 
@@ -2608,7 +2610,7 @@ export default function App() {
       const result = await saveFileJob.commit(applyPreferences);
       await applySaveFileCommitResult(result, applyPreferences);
     } catch (error) {
-      setShelfNotice({ kind: "error", text: `存档导入失败：${saveFileErrorMessage(error)}` });
+      setShelfNotice({ kind: "error", text: uiText("notice.archive.importFailed", { error: saveFileErrorMessage(error) }) });
     }
   }, [applySaveFileCommitResult, saveFileJob]);
 
@@ -2633,7 +2635,7 @@ export default function App() {
     try {
       await saveFileJob.cancelCurrent();
     } catch (error) {
-      setShelfNotice({ kind: "warn", text: `取消存档任务失败：${saveFileErrorMessage(error)}` });
+      setShelfNotice({ kind: "warn", text: uiText("notice.archive.cancelFailed", { error: saveFileErrorMessage(error) }) });
     }
   }, [saveFileJob]);
 
@@ -2649,7 +2651,7 @@ export default function App() {
 
   const handleLegacyExportArchive = useCallback(async () => {
     if (organizationBusyRef.current) {
-      setShelfNotice({ kind: "warn", text: "正在保存分类修改，请稍后再试" });
+      setShelfNotice({ kind: "warn", text: uiText("notice.archive.savingOrganization") });
       return;
     }
     try {
@@ -2667,17 +2669,17 @@ export default function App() {
       const text = exportLibraryArchive(built.archive);
       if (runtime.platform === "android") {
         const uri = await saveFileDialog({
-          title: "导出阅读存档",
+          title: uiText("notice.legacy.exportTitle"),
           defaultPath: `epub-reader-${new Date().toISOString().slice(0, 10)}.json`,
-          filters: [{ name: "EPUB Reader 存档", extensions: ["application/json", "json"] }],
+          filters: [{ name: uiText("notice.archive.filter"), extensions: ["application/json", "json"] }],
         });
         if (!uri || Array.isArray(uri)) return;
         await writeTextContentUri(uri, text);
       } else if (isTauriEnv()) {
         const path = await saveFileDialog({
-          title: "导出阅读存档",
+          title: uiText("notice.legacy.exportTitle"),
           defaultPath: `epub-reader-${new Date().toISOString().slice(0, 10)}.json`,
-          filters: [{ name: "EPUB Reader 存档", extensions: ["json"] }],
+          filters: [{ name: uiText("notice.archive.filter"), extensions: ["json"] }],
         });
         if (!path) return;
         await writeTextFile(path, text);
@@ -2691,22 +2693,22 @@ export default function App() {
       }
       setShelfNotice({
         kind: "ok",
-        text: `已导出 ${Object.keys(built.archive.records).length} 本书及分类组织存档`,
+        text: uiText("notice.legacy.exported", { count: Object.keys(built.archive.records).length }),
       });
     } catch (error) {
-      setShelfNotice({ kind: "error", text: `存档导出失败：${String(error)}` });
+      setShelfNotice({ kind: "error", text: uiText("notice.archive.exportFailed", { error: String(error) }) });
     }
   }, [settings, uiScale]);
 
   const handleLegacyImportArchive = useCallback(async () => {
     if (shelfBusyRef.current || organizationBusyRef.current) return;
     if (nativeImportRef.current) {
-      setShelfNotice({ kind: "warn", text: "正在导入书籍，暂不能替换书库记录" });
+      setShelfNotice({ kind: "warn", text: uiText("notice.legacy.importBlocked") });
       return;
     }
     shelfBusyRef.current = true;
     organizationBusyRef.current = true;
-    setShelfBusyMessage("正在导入存档…");
+    setShelfBusyMessage(uiText("notice.legacy.importing"));
     setShelfBusy(true);
     try {
       let text: string | null = null;
@@ -2714,7 +2716,7 @@ export default function App() {
         const selected = await openFileDialog({
           multiple: false,
           directory: false,
-          title: "导入阅读存档",
+          title: uiText("notice.legacy.importTitle"),
         });
         const uri = Array.isArray(selected) ? selected[0] : selected;
         if (uri) {
@@ -2724,8 +2726,8 @@ export default function App() {
         const path = await openFileDialog({
           multiple: false,
           directory: false,
-          title: "导入阅读存档",
-          filters: [{ name: "EPUB Reader 存档", extensions: ["json"] }],
+          title: uiText("notice.legacy.importTitle"),
+          filters: [{ name: uiText("notice.archive.filter"), extensions: ["json"] }],
         });
         if (path && !Array.isArray(path)) {
           if ((await statFile(path)).size > 16 * 1024 * 1024) {
@@ -2742,7 +2744,7 @@ export default function App() {
             const file = input.files?.[0];
             if (!file) resolve(null);
             else if (file.size > 16 * 1024 * 1024) {
-              setShelfNotice({ kind: "error", text: "存档文件超过 16 MiB，已拒绝读取" });
+              setShelfNotice({ kind: "error", text: uiText("notice.legacy.tooLarge") });
               resolve(null);
             } else void file.text().then(resolve, () => resolve(null));
           };
@@ -2789,10 +2791,10 @@ export default function App() {
 
       setShelfNotice({
         kind: unavailableCount > 0 ? "warn" : "ok",
-        text: `已导入 ${Object.keys(incoming.archive.records).length} 本书的记录与分类${unavailableCount > 0 ? `；${unavailableCount} 本需重新定位源文件` : ""}；旧版 JSON 中的外观设置未自动应用`,
+        text: uiText("notice.legacy.imported", { count: Object.keys(incoming.archive.records).length }) + (unavailableCount > 0 ? uiText("notice.sep") + uiText("notice.legacy.relocate", { count: unavailableCount }) : "") + uiText("notice.sep") + uiText("notice.legacy.preferencesNotApplied"),
       });
     } catch (error) {
-      setShelfNotice({ kind: "error", text: `存档导入失败：${String(error)}` });
+      setShelfNotice({ kind: "error", text: uiText("notice.archive.importFailed", { error: String(error) }) });
     } finally {
       shelfBusyRef.current = false;
       organizationBusyRef.current = false;
@@ -2806,7 +2808,7 @@ export default function App() {
       return;
     }
     if (saveFileJob.active) {
-      setShelfNotice({ kind: "warn", text: "已有存档文件任务正在进行，请等待当前任务结束" });
+      setShelfNotice({ kind: "warn", text: uiText("notice.archiveFile.busy") });
       return;
     }
     setSaveFileExportSetup({ selectedEntries: selectedEntries ?? [] });
@@ -2830,7 +2832,7 @@ export default function App() {
         if (!cancelled) {
           setShelfNotice({
             kind: "error",
-            text: `跨平台资料未激活，继续使用旧模式：${String(error)}`,
+            text: uiText("notice.portable.inactive", { error: String(error) }),
           });
         }
       }
@@ -2863,7 +2865,7 @@ export default function App() {
         })
         .catch((e) => {
           if (!cancelled) {
-            setShelfError(`无法读取书架：${String(e)}`);
+            setShelfError(uiText("notice.shelf.readFailed", { error: String(e) }));
             recordLifecycleDiagnostic("startup_list", {
               stage: "list",
               result: "failed",
@@ -2883,10 +2885,10 @@ export default function App() {
         })
         .catch((e) => {
           if (!cancelled) {
-            setOrganizationError(`无法读取收藏与文件夹：${String(e)}`);
+            setOrganizationError(uiText("notice.organization.readFailed", { error: String(e) }));
             setShelfNotice({
               kind: "error",
-              text: `无法读取收藏与文件夹：${String(e)}；已禁用分类写入以保护现有数据`,
+              text: uiText("notice.organization.readFailedWrites", { error: String(e) }),
             });
           }
         });
@@ -2982,7 +2984,7 @@ export default function App() {
   const handleImportFonts = useCallback(async (files: File[]) => {
     const result = await fontImportRef.current!.importFiles(files);
     if (result.kind === "busy") {
-      setShelfNotice({ kind: "error", text: "正在导入字体，请稍候" });
+      setShelfNotice({ kind: "error", text: uiText("notice.font.busy") });
       return;
     }
     if (result.kind === "error") {
@@ -2993,8 +2995,8 @@ export default function App() {
       setShelfNotice({
         kind: "error",
         text: result.imported > 0
-          ? `已导入 ${result.imported} 个字体；忽略 ${result.unsupported} 个非字体文件`
-          : `已忽略 ${result.unsupported} 个非字体文件，仅支持 TTF/OTF/WOFF/WOFF2`,
+          ? uiText("notice.font.importedIgnored", { imported: result.imported, ignored: result.unsupported })
+          : uiText("notice.font.ignoredOnly", { ignored: result.unsupported }),
       });
       return;
     }
@@ -3004,7 +3006,7 @@ export default function App() {
   const handleImportFontPaths = useCallback(async (paths: string[]) => {
     const result = await fontImportRef.current!.importPaths(paths);
     if (result.kind === "busy") {
-      setShelfNotice({ kind: "error", text: "正在导入字体，请稍候" });
+      setShelfNotice({ kind: "error", text: uiText("notice.font.busy") });
       return;
     }
     if (result.kind === "error") {
@@ -3025,8 +3027,8 @@ export default function App() {
       setShelfNotice({
         kind: "error",
         text: result.imported > 0
-          ? `已导入 ${result.imported} 个字体；忽略 ${result.unsupported} 个非字体文件`
-          : `已忽略 ${result.unsupported} 个非字体文件，仅支持 TTF/OTF/WOFF/WOFF2`,
+          ? uiText("notice.font.importedIgnored", { imported: result.imported, ignored: result.unsupported })
+          : uiText("notice.font.ignoredOnly", { ignored: result.unsupported }),
       });
       return;
     }
@@ -3053,7 +3055,7 @@ export default function App() {
           setSettings((s) => ({ ...s, fontSource: undefined, customFontId: undefined, customFontName: undefined }));
         }
       } catch (e) {
-        setShelfNotice({ kind: "error", text: `字体删除失败：${String(e)}` });
+        setShelfNotice({ kind: "error", text: uiText("notice.font.deleteFailed", { error: String(e) }) });
       } finally {
         setFontBusy(false);
       }
@@ -3107,7 +3109,7 @@ export default function App() {
     void readerSystemBars.requestHidden(shouldHideReaderSystemStatusBar({
       supported: true, readerActive: view === "reader", hideWhileReading: hideReaderSystemStatusBar,
     })).catch((error) => {
-      const message = `系统状态栏调整失败：${String(error)}`;
+      const message = uiText("notice.statusBar.failed", { error: String(error) });
       if (view === "reader") showReaderNotice(message, "warn");
       else setShelfNotice({ kind: "warn", text: message });
     });
@@ -3123,7 +3125,7 @@ export default function App() {
         keepWhileReading: keepScreenOnWhileReading,
         visible: document.visibilityState !== "hidden",
       }), force).catch((error) => {
-        const message = `屏幕常亮设置失败：${String(error)}`;
+        const message = uiText("notice.keepScreenOn.failed", { error: String(error) });
         if (view === "reader") showReaderNotice(message, "warn");
         else setShelfNotice({ kind: "warn", text: message });
       });
@@ -3159,7 +3161,7 @@ export default function App() {
     if (!restoreGateRef.current) setInitialRestoreTicket(null);
     setInitialAlignment("context");
     suppressShelfProgressRef.current = true;
-    if (!reported) showReaderNotice("未能定位保存位置，已停留在章节开头", "warn");
+    if (!reported) showReaderNotice(uiText("notice.reader.positionNotFound"), "warn");
   }, [showReaderNotice, dispatchRestoreGate]);
 
   /** 分页视图的首次恢复结果；预加载与过期章节已在视图内/此处过滤。 */
@@ -3173,7 +3175,7 @@ export default function App() {
     const resolving = restoreGateRef.current?.phase === "resolving";
     dispatchRestoreGate({ type: "resolved", ticket, located: result.located });
     if (resolving && !result.located) {
-      showReaderNotice("未能定位保存位置，已停留在章节开头；原阅读进度已保留", "warn");
+      showReaderNotice(uiText("notice.reader.positionNotFoundKept"), "warn");
     }
   }, [dispatchRestoreGate, restoreResultMatches, showReaderNotice]);
 
@@ -3186,11 +3188,11 @@ export default function App() {
     latestPreciseRequestRef.current = null;
     setPreciseTarget(null);
     if (status.status === "unresolved") {
-      showReaderNotice("未能定位原文，请重新搜索或检查笔记", "warn");
+      showReaderNotice(uiText("notice.reader.sourceNotFoundNote"), "warn");
     } else if (status.status === "located-reference") {
-      showReaderNotice("已定位结果段落，未能标出精确匹配", "warn");
+      showReaderNotice(uiText("notice.reader.paragraphOnly"), "warn");
     } else if (status.status === "unsupported-highlight") {
-      showReaderNotice("当前内核不支持正文高亮；已定位原文", "warn");
+      showReaderNotice(uiText("notice.reader.noHighlight"), "warn");
     }
   }, [showReaderNotice]);
 
@@ -3208,7 +3210,7 @@ export default function App() {
       // Acquire the single-operation guard before the first await, including
       // readiness recovery and any user position-choice dialog.
       shelfBusyRef.current = true;
-      setShelfBusyMessage("正在打开书籍…");
+      setShelfBusyMessage(uiText("notice.open.opening"));
       setShelfBusy(true);
       let preparationStage = "check";
       const store = getShelfStore();
@@ -3261,7 +3263,7 @@ export default function App() {
           try {
             checkpointForOpen = localCheckpointsRef.current?.peek(checkpointBookHash) ?? null;
           } catch (error) {
-            setShelfNotice({ kind: "warn", text: `本机未确认阅读位置读取失败：${String(error)}` });
+            setShelfNotice({ kind: "warn", text: uiText("notice.open.checkpointReadFailed", { error: String(error) }) });
           }
           if (checkpointForOpen) {
             const plan = planCheckpointOpen(checkpointForOpen, progressVersions, sameCheckpointPatchValue);
@@ -3296,7 +3298,7 @@ export default function App() {
               } else {
                 setShelfNotice({
                   kind: "warn",
-                  text: "已按同步位置打开；本机未确认阅读位置仍保留，待实际写入成功后确认。",
+                  text: uiText("notice.open.syncedPosition"),
                 });
               }
             }
@@ -3325,7 +3327,7 @@ export default function App() {
               if (!selectedStamp) return null;
               chosenProgressVersion = versionForStamp(progressVersions, selectedStamp);
               if (!chosenProgressVersion) {
-                setShelfNotice({ kind: "error", text: "所选进度版本已失效，请重新打开" });
+                setShelfNotice({ kind: "error", text: uiText("notice.open.versionGone") });
                 return null;
               }
               explicitPositionChoice = true;
@@ -3347,7 +3349,7 @@ export default function App() {
         checkpointPatchToRestore } = openPlan.decision;
       if (!progressSelection) return;
       shelfBusyRef.current = true;
-      setShelfBusyMessage("正在打开书籍…");
+      setShelfBusyMessage(uiText("notice.open.opening"));
       setShelfBusy(true);
       setShelfError(null);
       if (searchTarget) setSearchNavigationBusy(true);
@@ -3377,7 +3379,7 @@ export default function App() {
           } else {
             setShelfNotice({
               kind: "warn",
-              text: "上一本书进度未保存，已保留到下次重试；本次继续打开当前书。",
+              text: uiText("notice.open.previousUnsaved"),
             });
           }
         }
@@ -3397,8 +3399,8 @@ export default function App() {
             const selected = await openFileDialog({
               multiple: false,
               directory: false,
-              title: `重新定位《${entry.title}》`,
-              filters: [{ name: "EPUB 电子书", extensions: ["epub"] }],
+              title: uiText("notice.open.relocateTitle", { title: entry.title }),
+              filters: [{ name: uiText("notice.picker.epubFilter"), extensions: ["epub"] }],
             });
             if (!selected || Array.isArray(selected)) {
               shelfBusyRef.current = false;
@@ -3672,9 +3674,9 @@ export default function App() {
           // A failed second-open must not replace the still-valid old reader
           // with the loading/error body.
           setPhase({ phase: "ready" });
-          showReaderNotice(`打开失败：${failure.message}`, "error");
+          showReaderNotice(uiText("notice.open.failed", { error: failure.message }), "error");
         } else {
-          setShelfError(`打开失败：${failure.message}`);
+          setShelfError(uiText("notice.open.failed", { error: failure.message }));
           setPhase({ phase: "error", message: failure.message });
         }
         setSearchNavigationBusy(false);
@@ -3706,7 +3708,7 @@ export default function App() {
           stage: preparationStage, result: "failed", errorCode: detail?.code,
           count: detail?.recordsCount, targetFound: detail?.targetFound,
         });
-        setShelfNotice({ kind: "error", text: `打开失败：${describeBookOpenFailure(error).message}` });
+        setShelfNotice({ kind: "error", text: uiText("notice.open.failed", { error: describeBookOpenFailure(error).message }) });
       } finally {
         shelfBusyRef.current = false;
         setShelfBusy(false);
@@ -3796,11 +3798,11 @@ export default function App() {
 
   const handleShelfDelete = useCallback(async (id: string) => {
     if (shelfBusyRef.current || nativeImportRef.current) {
-      if (nativeImportRef.current) setShelfNotice({ kind: "warn", text: "正在导入书籍，暂不能删除" });
+      if (nativeImportRef.current) setShelfNotice({ kind: "warn", text: uiText("notice.delete.importing") });
       return;
     }
     shelfBusyRef.current = true;
-    setShelfBusyMessage("正在移除书籍…");
+    setShelfBusyMessage(uiText("notice.delete.removing"));
     setShelfBusy(true);
     const checkpointEntry = shelfEntriesRef.current.find((entry) => entry.id === id);
     try {
@@ -3812,7 +3814,7 @@ export default function App() {
       setCurrentShelfId((curr) => (curr === id ? null : curr));
       setShelfError(null);
     } catch (e) {
-      setShelfError(`删除失败：${String(e)}`);
+      setShelfError(uiText("notice.delete.failed", { error: String(e) }));
     } finally {
       shelfBusyRef.current = false;
       setShelfBusy(false);
@@ -3822,11 +3824,11 @@ export default function App() {
   const handleShelfDeleteMany = useCallback(async (ids: string[]) => {
     if (shelfBusyRef.current || ids.length === 0) return;
     if (nativeImportRef.current) {
-      setShelfNotice({ kind: "warn", text: "正在导入书籍，暂不能删除" });
+      setShelfNotice({ kind: "warn", text: uiText("notice.delete.importing") });
       return;
     }
     shelfBusyRef.current = true;
-    setShelfBusyMessage("正在移除书籍…");
+    setShelfBusyMessage(uiText("notice.delete.removing"));
     setShelfBusy(true);
     const checkpointEntries = shelfEntriesRef.current.filter((entry) => ids.includes(entry.id));
     try {
@@ -3841,9 +3843,9 @@ export default function App() {
       setCurrentShelfId((curr) => (curr && deletedIds.has(curr) ? null : curr));
       if (failed.length === 0) {
         setShelfError(null);
-        setShelfNotice({ kind: "ok", text: `已删除 ${deleted.length} 本` });
+        setShelfNotice({ kind: "ok", text: uiPlural("notice.delete.done", deleted.length, { count: deleted.length }) });
       } else {
-        setShelfError(`删除失败 ${failed.length} 本：${[...new Set(failed.map((item) => item.error))].join("；")}`);
+        setShelfError(uiText("notice.delete.partial", { count: failed.length, errors: [...new Set(failed.map((item) => item.error))].join(uiText("notice.sep")) }));
       }
     } finally {
       shelfBusyRef.current = false;
@@ -4338,7 +4340,7 @@ export default function App() {
             dispatchScrub({ type: "failed", token });
             navigationPendingRef.current = false;
             historyCaptureAllowedRef.current = true;
-            setReaderNotice({ kind: "warn", text: "未能定位到指定进度" });
+            setReaderNotice({ kind: "warn", text: uiText("notice.reader.progressNotFound") });
             return;
           }
           dispatchScrub({
@@ -4396,7 +4398,7 @@ export default function App() {
   const handleContentFractionFailed = useCallback((token: ScrubToken) => {
     navigationPendingRef.current = false;
     dispatchScrub({ type: "failed", token });
-    setReaderNotice({ kind: "warn", text: "未能定位到指定进度" });
+    setReaderNotice({ kind: "warn", text: uiText("notice.reader.progressNotFound") });
   }, [dispatchScrub]);
 
   const handleUserProgressSample = useCallback((
@@ -4455,13 +4457,13 @@ export default function App() {
           setAnchor(undefined);
           commitReaderHistorySnapshot(snapshot);
           if (status === "unsupported-highlight") {
-            showReaderNotice("当前内核不支持正文高亮；已定位原文", "warn");
+            showReaderNotice(uiText("notice.reader.noHighlight"), "warn");
           }
           handleFootnoteClose();
           closeForeground();
           return;
         }
-        showReaderNotice("未能定位原文，请重新搜索", "warn");
+        showReaderNotice(uiText("notice.reader.sourceNotFound"), "warn");
         return;
       }
       const direct = readerRef.current?.navigateWithinCurrentChapter({
@@ -4471,12 +4473,12 @@ export default function App() {
       if (direct) {
         setAnchor(undefined);
         commitReaderHistorySnapshot(snapshot);
-        showReaderNotice("已定位结果段落，未能标出精确匹配", "warn");
+        showReaderNotice(uiText("notice.reader.paragraphOnly"), "warn");
         handleFootnoteClose();
         closeForeground();
         return;
       }
-      showReaderNotice("未能定位原文，请重新搜索", "warn");
+      showReaderNotice(uiText("notice.reader.sourceNotFound"), "warn");
       return;
     }
 
@@ -4679,7 +4681,7 @@ export default function App() {
       setShelfEntries((entries) => entries.map((entry) =>
         entry.id === currentShelfId ? { ...entry, notes: previous } : entry
       ));
-      setRuntimeIssues((issues) => [...issues, `笔记保存失败：${String(error)}`]);
+      setRuntimeIssues((issues) => [...issues, uiText("appUi.issue.noteSaveFailed", { error: String(error) })]);
       return false;
     } finally {
       noteBusyRef.current = false;
@@ -4701,7 +4703,7 @@ export default function App() {
         !draft.selection.startTextSnippet ||
         !draft.selection.endTextSnippet
       ) {
-        setRuntimeIssues((issues) => [...issues, "选区已失效，无法保存笔记"]);
+        setRuntimeIssues((issues) => [...issues, uiText("appUi.issue.selectionGone")]);
         return;
       }
       const created: ReaderNote = {
@@ -4768,14 +4770,14 @@ export default function App() {
       ? latestVersion(annotation.versions)
       : null;
     if (!displayedVersion) {
-      setRuntimeIssues((issues) => [...issues, "笔记展示版本信息缺失，已取消编辑以避免覆盖后台更新"]);
+      setRuntimeIssues((issues) => [...issues, uiText("appUi.issue.noteVersionMissing")]);
       return;
     }
     try {
       const context = await store.beginNoteEdit(currentShelfId, noteId, displayedVersion.stamp);
       openComposer({ mode: "edit", note, ...(context ? { editContext: context } : {}) });
     } catch (error) {
-      setRuntimeIssues((issues) => [...issues, `无法打开笔记编辑：${String(error)}`]);
+      setRuntimeIssues((issues) => [...issues, uiText("appUi.issue.noteEditFailed", { error: String(error) })]);
     }
   }, [currentNotes, currentShelfId, openComposer]);
 
@@ -4783,7 +4785,7 @@ export default function App() {
     if (!book || noteBusy) return;
     const target = spineIndexForEntryKey(book, note.chapterPath);
     if (target < 0 || target !== note.spineIndex) {
-      setRuntimeIssues((issues) => [...issues, "笔记对应的章节已不存在"]);
+      setRuntimeIssues((issues) => [...issues, uiText("appUi.issue.noteChapterGone")]);
       return;
     }
     const targetAnchor: PersistedReaderAnchor = {
@@ -4812,7 +4814,7 @@ export default function App() {
         closeForeground();
         return;
       }
-      showReaderNotice("未能定位笔记原文，请检查笔记锚点", "warn");
+      showReaderNotice(uiText("notice.reader.noteAnchorNotFound"), "warn");
       return;
     }
     captureReaderHistory(archiveHref(book.archiveReferences, note.chapterPath));
@@ -4954,7 +4956,7 @@ export default function App() {
     const isAdded = added !== null;
     const addedBookmark = added;
     const removedBookmarkId = removedId;
-    showBookmarkToast(isAdded ? "已加入书签" : "已移除书签", isAdded ? "add" : "remove");
+    showBookmarkToast(isAdded ? uiText("notice.bookmark.added") : uiText("notice.bookmark.removed"), isAdded ? "add" : "remove");
     setShelfEntries((prev) =>
       prev.map((entry) => (entry.id === currentShelfId ? { ...entry, bookmarks: next } : entry))
     );
@@ -4978,7 +4980,7 @@ export default function App() {
         setShelfEntries((prev) =>
           prev.map((entry) => (entry.id === currentShelfId ? { ...entry, bookmarks: previous } : entry))
         );
-        setShelfError(`书签保存失败：${String(error)}`);
+        setShelfError(uiText("notice.bookmark.saveFailed", { error: String(error) }));
       });
   }, [currentShelfId, currentBookmarks, spineIndex, readReaderPosition, showBookmarkToast, book]);
 
@@ -4987,7 +4989,7 @@ export default function App() {
       if (!currentShelfId) return;
       const previous = currentBookmarks;
       const next = currentBookmarks.filter((bookmark) => bookmark.id !== bookmarkId);
-      showBookmarkToast("已移除书签", "remove");
+      showBookmarkToast(uiText("notice.bookmark.removed"), "remove");
       setShelfEntries((prev) =>
         prev.map((entry) => (entry.id === currentShelfId ? { ...entry, bookmarks: next } : entry))
       );
@@ -5007,7 +5009,7 @@ export default function App() {
           setShelfEntries((prev) =>
             prev.map((entry) => (entry.id === currentShelfId ? { ...entry, bookmarks: previous } : entry))
           );
-          setShelfError(`书签删除失败：${String(error)}`);
+          setShelfError(uiText("notice.bookmark.deleteFailed", { error: String(error) }));
         });
     },
     [currentShelfId, currentBookmarks, showBookmarkToast]
@@ -5086,7 +5088,7 @@ export default function App() {
     if (!/^(https?|mailto|tel):/i.test(url)) return;
     if (isTauriEnv()) {
       void openUrl(url).catch((err: unknown) => {
-        setRuntimeIssues((prev) => [...prev, `打开外部链接失败：${String(err)}`]);
+        setRuntimeIssues((prev) => [...prev, uiText("appUi.issue.linkFailed", { error: String(err) })]);
       });
     } else {
       window.open(url, "_blank", "noopener,noreferrer");
@@ -5240,7 +5242,7 @@ export default function App() {
         const epubFiles = files.filter((f) => f.name.toLowerCase().endsWith(".epub"));
         const fontFiles = files.filter((f) => isSupportedFontFileName(f.name));
         if (fontFiles.length > 0 && !fontSettingsOpen) {
-          setShelfNotice({ kind: "error", text: "请打开字体设置后拖入字体" });
+          setShelfNotice({ kind: "error", text: uiText("notice.font.dropHere") });
         }
         if (epubFiles.length > 0) {
           void handleImportSources(epubFiles.map((file) => ({ kind: "file" as const, file })));
@@ -5293,12 +5295,12 @@ export default function App() {
           if (overFontPanel) {
             void handleImportFontPaths(p.paths);
             if (epubPaths.length > 0) {
-              setShelfNotice({ kind: "error", text: "字体面板仅支持 TTF/OTF/WOFF/WOFF2 字体文件" });
+              setShelfNotice({ kind: "error", text: uiText("notice.font.dropUnsupported") });
             }
             return;
           }
           if (hasNonFont) {
-            setShelfNotice({ kind: "error", text: "请打开字体设置后拖入字体" });
+            setShelfNotice({ kind: "error", text: uiText("notice.font.dropHere") });
           }
           if (epubPaths.length > 0) {
             void handleImportSources(
@@ -5318,7 +5320,7 @@ export default function App() {
       })
       .catch((error) => {
         console.error("原生拖放监听注册失败，字体面板仍可用导入按钮", error);
-        setShelfNotice({ kind: "error", text: "拖放不可用，可用导入按钮重试" });
+        setShelfNotice({ kind: "error", text: uiText("notice.font.dropUnavailable") });
       });
     return () => {
       cancelled = true;
@@ -5496,7 +5498,7 @@ export default function App() {
           const sample = stageCheckpointSample(checkpoints, bookHash, shownStamp, patch);
           progressWriterRef.current?.enqueue(lease, sample);
         } catch (error) {
-          showReaderNotice("阅读进度保存失败：本机恢复位置无法写入", "error");
+          showReaderNotice(uiText("notice.progress.localWriteFailed"), "error");
         }
       }
     }
@@ -5534,7 +5536,7 @@ export default function App() {
     persistShelfProgress(true);
     recordLifecycleDiagnostic("back_to_shelf", { stage: "save", result: "begin" });
     shelfBusyRef.current = true;
-    setShelfBusyMessage("正在保存进度…");
+    setShelfBusyMessage(uiText("notice.progress.saving"));
     setShelfBusy(true);
     try {
       const lease = activeProgressLeaseRef.current;
@@ -5553,7 +5555,7 @@ export default function App() {
         result: "failed",
         errorCode: (error as { readonly code?: unknown } | null)?.code as string | undefined,
       });
-      const message = `阅读进度保存失败：${String(error)}`;
+      const message = uiText("notice.progress.saveFailed", { error: String(error) });
       setShelfError(message);
       showReaderNotice(message, "error");
       shelfBusyRef.current = false;
@@ -5871,7 +5873,7 @@ export default function App() {
             result: "failed",
             errorCode: (error as { readonly code?: unknown } | null)?.code as string | undefined,
           });
-          setReaderNotice({ kind: "warn", text: `资料服务暂不可用：${String(error)}` });
+          setReaderNotice({ kind: "warn", text: uiText("notice.service.unavailable", { error: String(error) }) });
         }
       })();
     };
@@ -5898,7 +5900,7 @@ export default function App() {
           await appWindow.destroy();
         } catch (error) {
           closing = false;
-          setShelfNotice({ kind: "error", text: `阅读进度保存失败：${String(error)}` });
+          setShelfNotice({ kind: "error", text: uiText("notice.progress.saveFailed", { error: String(error) }) });
         }
       })
       .then((stop) => {
@@ -5939,7 +5941,7 @@ export default function App() {
     librarySearchSnapshot.results.map((hit) => presentCrossBookHit(
       hit,
       librarySearchSnapshot.query,
-      entryByContentHashRef.current.has(hit.contentHash) ? undefined : "书架中未绑定源文件",
+      entryByContentHashRef.current.has(hit.contentHash) ? undefined : uiText("notice.search.unbound"),
     )), [librarySearchSnapshot.results, librarySearchSnapshot.query, libraryIndexSignature]);
   const searchPanelResults = useMemo<SearchPanelResult[]>(() =>
     searchScope === "all"
@@ -6020,7 +6022,7 @@ export default function App() {
         }
       }
     } catch (err) {
-      setRuntimeIssues((issues) => [...issues, `全屏切换失败：${String(err)}`]);
+      setRuntimeIssues((issues) => [...issues, uiText("appUi.issue.fullscreenFailed", { error: String(err) })]);
     }
   }, []);
 
@@ -6032,7 +6034,7 @@ export default function App() {
           await controller.toggle();
         } catch (err) {
           console.warn("Tauri setFullscreen failed", err);
-          setRuntimeIssues((issues) => [...issues, `窗口全屏切换失败：${String(err)}`]);
+          setRuntimeIssues((issues) => [...issues, uiText("appUi.issue.windowFullscreenFailed", { error: String(err) })]);
         }
       }
       return;
@@ -6385,7 +6387,7 @@ export default function App() {
     >
       <TitleBar
         view={view}
-        title={view === "reader" ? (ready ? book!.metadata.title : (book?.metadata.title ?? "")) : "EPUB 阅读器"}
+        title={view === "reader" ? (ready ? book!.metadata.title : (book?.metadata.title ?? "")) : t("appUi.appName")}
         chapterTitle={view === "reader" && ready ? currentChapterLabel : undefined}
         onBackToShelf={view === "reader" ? handleBackToShelf : undefined}
         onToggleSidebar={view === "reader" ? handleToggleSidebar : undefined}
@@ -6429,9 +6431,9 @@ export default function App() {
           type="button"
           className="reader-tools-reveal"
           onClick={revealReaderTools}
-          aria-label="显示阅读工具"
+          aria-label={t("appUi.showTools")}
         >
-          显示阅读工具
+          {t("appUi.showTools")}
         </button>
       )}
       {view === "reader" && ready && (
@@ -6528,10 +6530,10 @@ export default function App() {
                     ? librarySearchSnapshot.indexProgress.completed
                     : librarySearchSnapshot.indexSummary.indexed,
                   pending: librarySearchSnapshot.indexSummary.pending,
-                  currentBookTitle: librarySearchSnapshot.indexProgress.titles.join("、") || undefined,
+                  currentBookTitle: librarySearchSnapshot.indexProgress.titles.join(t("notice.listSep")) || undefined,
                 },
                 indexErrorMessage: librarySearchSnapshot.rebuildRequested
-                  ? "重新建立会清除现有全文索引，并重新处理全部可用书籍。"
+                  ? t("notice.index.rebuildWarning")
                   : librarySearchSnapshot.indexError,
                 onStartIndex: handleStartLibraryIndex,
                 onDeferIndex: handleDeferLibraryIndex,
@@ -6733,10 +6735,10 @@ export default function App() {
                           ? librarySearchSnapshot.indexProgress.completed
                           : librarySearchSnapshot.indexSummary.indexed,
                         pending: librarySearchSnapshot.indexSummary.pending,
-                        currentBookTitle: librarySearchSnapshot.indexProgress.titles.join("、") || undefined,
+                        currentBookTitle: librarySearchSnapshot.indexProgress.titles.join(t("notice.listSep")) || undefined,
                       } : undefined}
                       indexErrorMessage={librarySearchSnapshot.rebuildRequested
-                          ? "重新建立会清除现有全文索引，并重新处理全部可用书籍。"
+                          ? t("notice.index.rebuildWarning")
                           : librarySearchSnapshot.indexError}
                       onStartIndex={searchScope === "all" ? handleStartLibraryIndex : undefined}
                       onDeferIndex={searchScope === "all" ? handleDeferLibraryIndex : undefined}
@@ -6781,7 +6783,7 @@ export default function App() {
                 {assistantOpen && LazyAiFoundationPanel && (
                   <>
                     <div className="ai-backdrop" onClick={() => closePanel("assistant")} aria-hidden="true" />
-                    <Suspense fallback={<aside className="ai-foundation-panel" role="status">正在加载 AI 开发面板…</aside>}>
+                    <Suspense fallback={<aside className="ai-foundation-panel" role="status">{t("appUi.aiLoading")}</aside>}>
                       <LazyAiFoundationPanel
                         snapshot={aiRuntimeSnapshot}
                         preparation={book && currentShelfId ? {
@@ -6907,14 +6909,14 @@ export default function App() {
                     position={{ x: selectionContext.rect.right + 6, y: selectionContext.rect.bottom + 6 }}
                     onCopy={(text) => {
                       void navigator.clipboard.writeText(text).catch((error) =>
-                        setRuntimeIssues((issues) => [...issues, `复制失败：${String(error)}`])
+                        setRuntimeIssues((issues) => [...issues, uiText("appUi.issue.copyFailed", { error: String(error) })])
                       );
                       closeForeground();
                       readerRef.current?.clearTextSelection();
                     }}
                     onCopyOriginal={(text) => {
                       void navigator.clipboard.writeText(text).catch((error) =>
-                        setRuntimeIssues((issues) => [...issues, `复制原文失败：${String(error)}`])
+                        setRuntimeIssues((issues) => [...issues, uiText("appUi.issue.copyOriginalFailed", { error: String(error) })])
                       );
                       closeForeground();
                       readerRef.current?.clearTextSelection();
@@ -6947,13 +6949,13 @@ export default function App() {
               </>
             ) : (
               <div className={`placeholder ${phase.phase === "error" ? "error" : ""}`}>
-                {phase.phase === "idle" && <div className="big">正在准备书架…</div>}
-                {phase.phase === "loading" && <div>正在打开《{phase.fileName}》…</div>}
+                {phase.phase === "idle" && <div className="big">{t("appUi.preparingShelf")}</div>}
+                {phase.phase === "loading" && <div>{t("appUi.openingFile", { name: phase.fileName })}</div>}
                 {phase.phase === "error" && (
                   <>
-                    <div className="big">无法打开</div>
+                    <div className="big">{t("appUi.cannotOpen")}</div>
                     <div>{phase.message}</div>
-                    <button onClick={() => void handleChooseBooks()}>重新选择文件</button>
+                    <button onClick={() => void handleChooseBooks()}>{t("appUi.chooseAgain")}</button>
                   </>
                 )}
               </div>
@@ -7030,8 +7032,8 @@ export default function App() {
             onClick={() => setMobileMoreOpen(false)}
             aria-hidden="true"
           />
-          <div className={`mobile-more-sheet${moreSheetPresence.closing ? " is-closing" : ""}`} role="dialog" aria-modal="true" aria-label="更多阅读操作">
-            <div className="mobile-more-title">更多</div>
+          <div className={`mobile-more-sheet${moreSheetPresence.closing ? " is-closing" : ""}`} role="dialog" aria-modal="true" aria-label={t("appUi.more.dialog")}>
+            <div className="mobile-more-title">{t("appUi.more.title")}</div>
             {/* 书签/笔记已在“目录”面板的标签页，导入在书架；此处不再重复入口。 */}
             {IS_AI_EDITION && (
               <button
@@ -7041,7 +7043,7 @@ export default function App() {
                   setMobileMoreOpen(false);
                 }}
               >
-                AI 助手
+                {t("appUi.more.ai")}
               </button>
             )}
             <button
@@ -7051,7 +7053,7 @@ export default function App() {
                 setMobileMoreOpen(false);
               }}
             >
-              诊断日志
+              {t("appUi.more.log")}
             </button>
             <div className="mobile-more-about">
               <AboutInfo />
@@ -7079,7 +7081,7 @@ export default function App() {
       )}
       {exitBackHint && (
         <div className="reader-bookmark-toast exit-back-hint" role="status" aria-live="polite">
-          <span className="bookmark-toast-text">再滑一次退出阅读器</span>
+          <span className="bookmark-toast-text">{t("appUi.exitHint")}</span>
         </div>
       )}
       {bookmarkToast && (
@@ -7157,7 +7159,7 @@ export default function App() {
         visible={readerOpeningVisible}
         title={readerOpeningTitle}
         creator={readerOpeningCreator}
-        stage={phase.phase === "loading" ? "正在打开书籍…" : readerLoadFeedback?.text ?? "准备阅读位置…"}
+        stage={phase.phase === "loading" ? t("notice.open.opening") : readerLoadFeedback?.text ?? t("notice.loading.position")}
       />
       {(shelfBusy || phase.phase === "loading") && nativeImport === null && !readerOpeningVisible && (
         <div className="app-busy" role="status" aria-live="polite" aria-busy="true">
@@ -7189,7 +7191,7 @@ export default function App() {
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="选择未确认阅读位置"
+          aria-label={t("appUi.checkpoint.dialog")}
           style={{
             position: "fixed",
             inset: 0,
@@ -7211,10 +7213,9 @@ export default function App() {
               boxShadow: "0 12px 40px rgba(0, 0, 0, 0.3)",
             }}
           >
-            <h3 style={{ margin: "0 0 8px", fontSize: 18 }}>选择阅读位置</h3>
+            <h3 style={{ margin: "0 0 8px", fontSize: 18 }}>{t("appUi.checkpoint.title")}</h3>
             <p style={{ margin: "0 0 14px", fontSize: 14, lineHeight: 1.5 }}>
-              《{localCheckpointConflict.title}》有一处本机未确认位置，且原显示版本已失效
-              {localCheckpointConflict.hasSynced ? "；同步位置也可用" : ""}。请选择本次打开方式。
+              {t("appUi.checkpoint.body", { title: localCheckpointConflict.title, synced: localCheckpointConflict.hasSynced ? t("appUi.checkpoint.syncedAvailable") : "" })}
             </p>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               <button
@@ -7230,7 +7231,7 @@ export default function App() {
                   cursor: "pointer",
                 }}
               >
-                使用本机未确认位置
+                {t("appUi.checkpoint.useLocal")}
               </button>
               {localCheckpointConflict.hasSynced && (
                 <button
@@ -7246,7 +7247,7 @@ export default function App() {
                     cursor: "pointer",
                   }}
                 >
-                  使用同步位置
+                  {t("appUi.checkpoint.useSynced")}
                 </button>
               )}
             </div>
@@ -7264,7 +7265,7 @@ export default function App() {
                 cursor: "pointer",
               }}
             >
-              取消
+              {t("appUi.cancel")}
             </button>
           </div>
         </div>
@@ -7273,7 +7274,7 @@ export default function App() {
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="选择恢复进度"
+          aria-label={t("appUi.progressChoice.dialog")}
           style={{
             position: "fixed",
             inset: 0,
@@ -7297,9 +7298,9 @@ export default function App() {
               boxShadow: "0 12px 40px rgba(0, 0, 0, 0.3)",
             }}
           >
-            <h3 style={{ margin: "0 0 8px", fontSize: 18 }}>选择恢复进度</h3>
+            <h3 style={{ margin: "0 0 8px", fontSize: 18 }}>{t("appUi.progressChoice.title")}</h3>
             <p style={{ margin: "0 0 14px", fontSize: 14, lineHeight: 1.5 }}>
-              《{progressChoice.title}》有 {progressChoice.candidates.length} 个阅读进度版本，请选择要恢复的一项。
+              {uiPlural("appUi.progressChoice.body", progressChoice.candidates.length, { title: progressChoice.title, count: progressChoice.candidates.length })}
             </p>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {progressChoice.candidates.map((candidate) => (
@@ -7325,10 +7326,10 @@ export default function App() {
                   <strong style={{ fontSize: 14 }}>
                     {candidate.chapterPath
                       ? candidate.chapterPath.split("/").pop() || candidate.chapterPath
-                      : `第 ${candidate.spineIndex + 1} 章`}
+                      : t("appUi.chapterN", { n: candidate.spineIndex + 1 })}
                   </strong>
                   <span style={{ fontSize: 12, opacity: 0.75 }}>
-                    {candidate.progressPct}% · {new Date(candidate.updatedAtMs).toLocaleString()}
+                    {candidate.progressPct}% · {new Date(candidate.updatedAtMs).toLocaleString(currentUiLocale())}
                   </span>
                 </button>
               ))}
@@ -7347,7 +7348,7 @@ export default function App() {
                 cursor: "pointer",
               }}
             >
-              取消
+              {t("appUi.cancel")}
             </button>
           </div>
         </div>

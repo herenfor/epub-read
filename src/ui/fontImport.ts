@@ -1,5 +1,6 @@
 import { fontFamilyFromFileName, type FontStore, type UserFont } from "./fontStore";
 import { partitionFontItems, runFontImportBatch } from "./fontDrop";
+import { uiPlural, uiText } from "./localization/UiLanguageProvider";
 
 /** 字体导入结果：提示文案由调用方渲染，控制器本身不持有 UI 状态。 */
 export type FontImportResult =
@@ -41,7 +42,7 @@ export function createFontImportController(options: FontImportControllerOptions)
       await runFontImportBatch(supported, importOne);
       imported = supported.length;
     } catch (error) {
-      return { kind: "error", imported, message: `字体导入失败：${String(error)}` };
+      return { kind: "error", imported, message: uiText("notice.font.failed", { error: String(error) }) };
     } finally {
       busy = false;
       options.onBusyChange(false);
@@ -56,8 +57,8 @@ export function createFontImportController(options: FontImportControllerOptions)
       async (file) => { await options.importFile(file); },
       (supported, imported) => {
         if (imported === 0) return undefined;
-        if (imported === 1 && supported.length === 1) return `已导入字体：${fontFamilyFromFileName(supported[0].name)}`;
-        return `已导入 ${imported} 个字体`;
+        if (imported === 1 && supported.length === 1) return uiText("notice.font.importedOne", { family: fontFamilyFromFileName(supported[0].name) });
+        return uiPlural("notice.font.imported", imported, { count: imported });
       },
     );
 
@@ -70,29 +71,29 @@ export function createFontImportController(options: FontImportControllerOptions)
         kind: "ok",
         imported: 0,
         unsupported: unsupported.length,
-        message: `已忽略 ${unsupported.length} 个非字体文件，仅支持 TTF/OTF/WOFF/WOFF2`,
+        message: uiText("notice.font.ignoredOnly", { ignored: unsupported.length }),
       };
     }
     const store = options.store();
     if (!store.importFontPaths) {
-      return { kind: "error", imported: 0, message: "当前环境不支持原生字体路径导入" };
+      return { kind: "error", imported: 0, message: uiText("notice.font.nativeUnsupported") };
     }
     busy = true;
     options.onBusyChange(true);
     try {
       const entries = await store.importFontPaths(supported);
       if (entries.length === 0) {
-        return { kind: "error", imported: 0, message: "未发现支持的字体文件，仅支持 TTF/OTF/WOFF/WOFF2" };
+        return { kind: "error", imported: 0, message: uiText("notice.font.noneSupported") };
       }
       return {
         kind: "ok",
         imported: entries.length,
         entry: entries[0],
         unsupported: unsupported.length,
-        message: entries.length === 1 ? `已导入字体：${entries[0].family}` : `已导入 ${entries.length} 个字体`,
+        message: entries.length === 1 ? uiText("notice.font.importedOne", { family: entries[0].family }) : uiPlural("notice.font.imported", entries.length, { count: entries.length }),
       };
     } catch (error) {
-      return { kind: "error", imported: 0, message: `字体导入失败：${String(error)}` };
+      return { kind: "error", imported: 0, message: uiText("notice.font.failed", { error: String(error) }) };
     } finally {
       busy = false;
       options.onBusyChange(false);
