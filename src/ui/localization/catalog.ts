@@ -1,7 +1,17 @@
 /**
- * The single registry of UI message catalogs. Adding a panel = one Chinese
- * catalog in catalogs/, one English JSON in en/, and one line in each list
- * below. Nothing else needs to change.
+ * The single registry of UI message catalogs.
+ *
+ * Adding a panel:
+ * 1. catalogs/<name>.ts — `defineMessages("<name>", { "<name>.key": "中文" })`;
+ *    use `{ zh, note, max }` when a translator needs context or a length budget,
+ *    and "<base>.one"/"<base>.other" pairs for count-dependent text.
+ * 2. en/<name>.json — `{}`; translations arrive via `npm run i18n:import`.
+ * 3. Register both below (import + CATALOGS + zhCN + en + EN_FILES).
+ * 4. In components: `const { t, tn } = useUiText()`; outside React render
+ *    (notices, helpers): `uiText()` / `uiPlural()`. Never compare locales in
+ *    components, never build sentences from fragments without a key.
+ * Book content, titles, folder names and technical error details are data,
+ * not messages.
  */
 import { common } from "./catalogs/common";
 import { folder } from "./catalogs/folder";
