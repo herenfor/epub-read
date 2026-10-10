@@ -2,5 +2,6 @@
   "language.setting": "Interface language",
   "language.system": "Follow system",
   "language.zh-CN": "简体中文",
-  "language.en": "English"
+  "language.en": "English",
+  "language.saveFailed": "Failed to save interface language: {error}"
 }

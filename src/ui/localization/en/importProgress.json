@@ -1,1 +1,14 @@
-{}
+{
+  "importProgress.starting": "Starting import...",
+  "importProgress.committing": "Saving to library...",
+  "importProgress.processed": "{completed}/{total} processed",
+  "importProgress.preparing": "Preparing...",
+  "importProgress.expand": "Expand import progress: {status}",
+  "importProgress.region": "Import Progress",
+  "importProgress.title": "Importing",
+  "importProgress.collapse": "Collapse import progress",
+  "importProgress.cancelRequested": "Cancellation requested, waiting to finish...",
+  "importProgress.tooLate": "Saving in progress, waiting for results...",
+  "importProgress.cancel": "Cancel",
+  "importProgress.canceling": "Canceling…"
+}

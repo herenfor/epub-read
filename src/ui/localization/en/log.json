@@ -1,1 +1,12 @@
-{}
+{
+  "log.title": "Logs & Diagnostics",
+  "log.close": "Close logs and diagnostics",
+  "log.issues.one": "{count} issue",
+  "log.issues.other": "{count} issues",
+  "log.ok": "Normal",
+  "log.records": "Issue History",
+  "log.empty": "No issues recorded.",
+  "log.diagnostics": "Render Diagnostics",
+  "log.diagnostics.pending": "(Collected automatically when panel opens)",
+  "log.diagnostics.unavailable": "(Reader not initialized)"
+}

@@ -1,1 +1,6 @@
-{}
+{
+  "startup.mismatch.title": "Release Component Mismatch",
+  "startup.mismatch.body": "The frontend and native backend are from different releases. Application startup has stopped.",
+  "startup.failed.title": "Unable to Verify Release Components",
+  "startup.failed.body": "Native release handshake failed. Application startup has stopped."
+}

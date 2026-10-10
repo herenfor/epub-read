@@ -1,1 +1,12 @@
-{}
+{
+  "imageViewer.dialog": "Image Viewer",
+  "imageViewer.controls": "Image viewer controls",
+  "imageViewer.openLink": "Open Link",
+  "imageViewer.zoomOut": "Zoom Out",
+  "imageViewer.zoomIn": "Zoom In",
+  "imageViewer.fit": "Fit to Window",
+  "imageViewer.actualSize": "Actual Size",
+  "imageViewer.compare.tip": "Hold to view original image, release to restore filters",
+  "imageViewer.compare": "Original",
+  "imageViewer.close": "Close"
+}
