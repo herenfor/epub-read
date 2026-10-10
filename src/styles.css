@@ -1,3 +1,5 @@
+@import "./ui/uiTokens.css";
+
 /* Theme bg/fg mirror config/readerPalette.ts; readerPalette.test.ts checks them. */
 :root {
   --bg: #ffffff;
@@ -10,7 +12,7 @@
   --muted: #777777;
   /* 现代高精度无衬线界面字体栈（全端抗锯齿与极简现代排版） */
   --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", system-ui, Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
-  /* 动效语言：三档时长 + 三条曲线，Windows/Android/未来 Apple 共用；新动效只引用这些变量。 */
+  /* 既有通用动效；普通面板控件的保留时长见 ui/uiTokens.css。 */
   --motion-fast: 140ms;
   --motion-base: 220ms;
   --motion-slow: 320ms;
@@ -6698,7 +6700,21 @@ select option {
   padding: 10px 14px;
 }
 
-/* 系统要求减少动态效果时，所有引用动效变量的过渡与动画直接落位。 */
+/* 应用级简化偏好：与系统偏好集中维护，阅读运动控制器不依赖 UI token。 */
+:root[data-motion="reduced"] {
+  --motion-fast: 80ms;
+  --motion-base: 120ms;
+  --motion-slow: 160ms;
+  --menu-open: 160ms;
+  --menu-close: 120ms;
+  --ui-control-quick: 60ms;
+  --ui-control: 80ms;
+  --ui-toggle: 80ms;
+  --ui-scrollbar: 120ms;
+  --ui-dock: 0ms;
+}
+
+/* 系统减少动效优先；菜单关闭定时器读取实际 --menu-close，不另留 200ms。 */
 @media (prefers-reduced-motion: reduce) {
   :root {
     --motion-fast: 0ms;
@@ -6706,6 +6722,16 @@ select option {
     --motion-slow: 0ms;
     --menu-open: 0ms;
     --menu-close: 0ms;
+  }
+  :root,
+  :root[data-motion="reduced"] {
+    --menu-open: 0ms;
+    --menu-close: 0ms;
+    --ui-control-quick: 0ms;
+    --ui-control: 0ms;
+    --ui-toggle: 0ms;
+    --ui-scrollbar: 0ms;
+    --ui-dock: 0ms;
   }
 }
 

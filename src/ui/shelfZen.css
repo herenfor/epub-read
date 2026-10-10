@@ -2423,13 +2423,7 @@
  * 简化动画（设置 → 界面动画 → 简化）：缩短面板时长，去掉毛玻璃与行高过渡。
  * 阅读翻页动效不受影响。
  * ========================================================================= */
-:root[data-motion="reduced"] {
-  --motion-fast: 80ms;
-  --motion-base: 120ms;
-  --motion-slow: 160ms;
-  --menu-open: 160ms;
-  --menu-close: 120ms;
-}
+/* Shared durations live in styles.css; shelf-specific material/layout rules stay here. */
 
 :root[data-motion="reduced"] .shelf-resume-stage {
   --resume-motion: 0ms;

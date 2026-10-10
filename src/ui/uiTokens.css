@@ -1,0 +1,38 @@
+/* Ordinary UI controls only. Reader page motion and swipe physics own their timing. */
+:root {
+  --ui-control-quick: 120ms;
+  --ui-control: 140ms;
+  --ui-toggle: 160ms;
+  --ui-scrollbar: 200ms;
+  --ui-dock: 200ms;
+  --ui-ease: ease;
+  --ui-ease-out: ease-out;
+  --ui-ease-panel-exit: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Resolve theme-dependent mixes on .app, where the theme variables are defined.
+   Defining them on :root would freeze inherited mixes to the default theme. */
+.app {
+  --ui-control-bg: color-mix(in srgb, var(--fg) 6%, transparent);
+  --ui-control-hover: color-mix(in srgb, var(--fg) 10%, transparent);
+  --ui-field-bg: color-mix(in srgb, var(--fg) 4%, transparent);
+  --ui-card-bg: color-mix(in srgb, var(--fg) 3%, transparent);
+  --ui-border-subtle: color-mix(in srgb, var(--panel-border) 35%, transparent);
+  --ui-border-control: color-mix(in srgb, var(--panel-border) 60%, transparent);
+  --ui-control-selected: var(--panel-bg);
+  --ui-navigation-active: #10b981;
+  --ui-pin: #8b5cf6;
+  --ui-warning: #f59e0b;
+  --ui-note-quote: #f59e0b;
+  --ui-danger: #f43f5e;
+  --ui-bookmark: #f43f5e;
+  --ui-switch-knob: #ffffff;
+  --ui-on-solid-accent: #ffffff;
+  --ui-backdrop: rgba(0, 0, 0, 0.38);
+  --ui-backdrop-light: rgba(0, 0, 0, 0.28);
+}
+
+.app[data-theme="dark"],
+.app[data-theme="gray"] {
+  --ui-control-selected: color-mix(in srgb, var(--panel-bg) 140%, #fff 8%);
+}

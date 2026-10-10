@@ -7,12 +7,12 @@
 }
 
 .aa-popover-backdrop {
-  animation: reader-panel-fade-in var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
+  animation: reader-panel-fade-in var(--menu-open) var(--ease-emphasized);
 }
 
 .aa-popover-backdrop.is-closing {
   pointer-events: none;
-  animation: reader-panel-fade-out var(--menu-close) ease forwards;
+  animation: reader-panel-fade-out var(--menu-close) var(--ui-ease) forwards;
 }
 
 .aa-popover {
@@ -25,21 +25,21 @@
   box-sizing: border-box;
   background: color-mix(in srgb, var(--panel-bg, #ffffff) 96%, transparent);
   color: var(--fg);
-  border: 1px solid color-mix(in srgb, var(--panel-border) 60%, transparent);
+  border: 1px solid var(--ui-border-control);
   border-radius: 14px;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18), 0 3px 10px rgba(0, 0, 0, 0.06);
   backdrop-filter: blur(28px) saturate(180%);
   -webkit-backdrop-filter: blur(28px) saturate(180%);
   user-select: none;
   -webkit-user-select: none;
-  animation: aaPopoverFadeIn var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
+  animation: aaPopoverFadeIn var(--menu-open) var(--ease-emphasized);
   overflow: hidden;
   display: flex;
   flex-direction: column;
 }
 
 .aa-popover.is-closing {
-  animation: aaPopoverFadeOut var(--menu-close) ease forwards;
+  animation: aaPopoverFadeOut var(--menu-close) var(--ui-ease) forwards;
   pointer-events: none;
 }
 
@@ -71,7 +71,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 8px 10px 8px 12px;
-  border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 35%, transparent);
+  border-bottom: 1px solid var(--ui-border-subtle);
 }
 
 /* ---- 双模分段 Tab 切换 ---- */
@@ -80,9 +80,9 @@
   align-items: center;
   gap: 2px;
   padding: 2px;
-  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  background: var(--ui-control-bg);
   border-radius: 8px;
-  border: 1px solid color-mix(in srgb, var(--panel-border) 35%, transparent);
+  border: 1px solid var(--ui-border-subtle);
 }
 
 .aa-tab-btn {
@@ -94,7 +94,7 @@
   font-weight: 500;
   color: var(--muted);
   cursor: pointer;
-  transition: all 140ms ease;
+  transition: all var(--ui-control) var(--ui-ease);
   user-select: none;
 }
 
@@ -122,7 +122,7 @@
   background: transparent;
   color: var(--muted);
   cursor: pointer;
-  transition: background-color 140ms ease, color 140ms ease;
+  transition: background-color var(--ui-control) var(--ui-ease), color var(--ui-control) var(--ui-ease);
 }
 
 .aa-popover-close-btn:hover {
@@ -137,7 +137,7 @@
   overflow-x: hidden;
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
-  transition: scrollbar-color 0.2s ease;
+  transition: scrollbar-color var(--ui-scrollbar) var(--ui-ease);
   padding: 12px 14px;
   display: flex;
   flex-direction: column;
@@ -159,7 +159,7 @@
 .aa-popover-body::-webkit-scrollbar-thumb {
   background: transparent;
   border-radius: 999px;
-  transition: background-color 0.2s ease;
+  transition: background-color var(--ui-scrollbar) var(--ui-ease);
 }
 
 .aa-popover-body:hover::-webkit-scrollbar-thumb {
@@ -187,7 +187,7 @@
   border: 1.5px solid transparent;
   cursor: pointer;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-  transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
+  transition: transform var(--ui-control-quick) var(--ui-ease), box-shadow var(--ui-control-quick) var(--ui-ease), border-color var(--ui-control-quick) var(--ui-ease);
   position: relative;
   padding: 4px;
 }
@@ -234,7 +234,7 @@
 .aa-stepper-capsule {
   display: inline-flex;
   align-items: center;
-  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  background: var(--ui-control-bg);
   border-radius: 8px;
   height: 28px;
   box-sizing: border-box;
@@ -254,11 +254,11 @@
   background: transparent;
   color: var(--fg);
   cursor: pointer;
-  transition: background-color 120ms ease;
+  transition: background-color var(--ui-control-quick) var(--ui-ease);
 }
 
 .aa-step-btn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--fg) 10%, transparent);
+  background: var(--ui-control-hover);
 }
 
 .aa-step-btn:disabled {
@@ -294,17 +294,17 @@
   height: 28px;
   box-sizing: border-box;
   padding: 0 10px;
-  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  background: var(--ui-control-bg);
   border-radius: 8px;
   border: none;
   color: var(--fg);
   font-size: 12px;
   cursor: pointer;
-  transition: background-color 120ms ease;
+  transition: background-color var(--ui-control-quick) var(--ui-ease);
 }
 
 .aa-font-trigger:hover {
-  background: color-mix(in srgb, var(--fg) 10%, transparent);
+  background: var(--ui-control-hover);
 }
 
 .aa-font-name {
@@ -322,7 +322,7 @@
 .aa-segmented-capsule {
   display: inline-flex;
   align-items: center;
-  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  background: var(--ui-control-bg);
   border-radius: 8px;
   height: 28px;
   box-sizing: border-box;
@@ -341,7 +341,7 @@
   font-size: 11px;
   font-weight: 500;
   cursor: pointer;
-  transition: background-color 120ms ease, color 120ms ease;
+  transition: background-color var(--ui-control-quick) var(--ui-ease), color var(--ui-control-quick) var(--ui-ease);
 }
 
 .aa-segmented-btn:hover {
@@ -349,7 +349,7 @@
 }
 
 .aa-segmented-btn.active {
-  background: var(--panel-bg, #ffffff);
+  background: var(--ui-control-selected);
   color: var(--fg);
   font-weight: 600;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
@@ -357,7 +357,6 @@
 
 [data-theme="dark"] .aa-segmented-btn.active,
 [data-theme="gray"] .aa-segmented-btn.active {
-  background: color-mix(in srgb, var(--panel-bg) 140%, #fff 8%);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
 }
 
@@ -386,7 +385,7 @@
   background: color-mix(in srgb, var(--fg) 18%, transparent);
   border-radius: 12px;
   position: relative;
-  transition: background-color 160ms ease;
+  transition: background-color var(--ui-toggle) var(--ui-ease);
 }
 
 .aa-switch-track::after {
@@ -397,9 +396,9 @@
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: #ffffff;
+  background: var(--ui-switch-knob);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
-  transition: transform 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform var(--ui-toggle) var(--ease-emphasized);
 }
 
 .aa-switch-label input:checked + .aa-switch-track {
@@ -426,12 +425,12 @@
   padding: 0 8px;
   border-radius: 6px;
   border: none;
-  background: color-mix(in srgb, var(--fg) 4%, transparent);
+  background: var(--ui-field-bg);
   color: var(--muted);
   font-size: 11.5px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 120ms ease;
+  transition: all var(--ui-control-quick) var(--ui-ease);
 }
 
 .aa-advanced-toggle:hover {
@@ -444,7 +443,7 @@
   flex-direction: column;
   gap: 8px;
   padding-top: 6px;
-  animation: aaAdvancedOpen 140ms ease-out;
+  animation: aaAdvancedOpen var(--ui-control) var(--ui-ease-out);
 }
 
 @keyframes aaAdvancedOpen {
@@ -484,8 +483,8 @@
   font-size: 11px;
   border-radius: 6px;
   padding: 6px 8px;
-  border: 1px solid color-mix(in srgb, var(--panel-border) 60%, transparent);
-  background: color-mix(in srgb, var(--fg) 4%, transparent);
+  border: 1px solid var(--ui-border-control);
+  background: var(--ui-field-bg);
   color: var(--fg);
   resize: vertical;
 }
@@ -498,7 +497,7 @@
   border-radius: 4px;
   border: none;
   background: var(--accent, #6366f1);
-  color: #fff;
+  color: var(--ui-on-solid-accent);
   cursor: pointer;
 }
 
@@ -519,11 +518,11 @@
   padding: 0 8px;
   border-radius: 6px;
   border: 1px solid color-mix(in srgb, var(--panel-border) 40%, transparent);
-  background: color-mix(in srgb, var(--fg) 4%, transparent);
+  background: var(--ui-field-bg);
   color: var(--fg);
   font-size: 11.5px;
   cursor: pointer;
-  transition: all 120ms ease;
+  transition: all var(--ui-control-quick) var(--ui-ease);
 }
 
 .aa-mini-action-btn:hover {
@@ -561,7 +560,7 @@
   font-size: 12px;
   font-weight: 550;
   cursor: pointer;
-  transition: all 140ms ease;
+  transition: all var(--ui-control) var(--ui-ease);
 }
 
 .aa-switch-to-detail-btn:hover {
@@ -576,7 +575,7 @@
   display: flex;
   flex-direction: column;
   gap: 9px;
-  animation: aaPopoverFadeIn 140ms ease-out;
+  animation: aaPopoverFadeIn var(--ui-control) var(--ui-ease-out);
 }
 
 /* 详细视图中，中央步进值使用短文案后保持单行，避免状态切换时胶囊高度变化。 */
@@ -593,7 +592,7 @@
   text-transform: uppercase;
   margin: 8px 0 2px 2px;
   padding-bottom: 3px;
-  border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 35%, transparent);
+  border-bottom: 1px solid var(--ui-border-subtle);
 }
 
 .aa-detail-label-wrap {
@@ -624,7 +623,7 @@
   background: transparent;
   color: var(--muted);
   cursor: pointer;
-  transition: color 120ms ease, background-color 120ms ease;
+  transition: color var(--ui-control-quick) var(--ui-ease), background-color var(--ui-control-quick) var(--ui-ease);
   margin-right: 2px;
   flex-shrink: 0;
 }
@@ -636,7 +635,7 @@
 
 /* ---- 手机 Aa 底部面板：只调整浮层，不改正文高度；IME 只影响该面板可用区 ---- */
 .app[data-mobile-chrome="true"] .aa-popover-backdrop {
-  background: rgba(0, 0, 0, 0.28);
+  background: var(--ui-backdrop-light);
 }
 
 .app[data-mobile-chrome="true"][data-layout="compact"] .aa-popover {
@@ -648,11 +647,11 @@
   max-width: none;
   max-height: min(85vh, calc(var(--visual-viewport-height, 100vh) * 0.85));
   border-radius: 16px 16px 0 0;
-  animation: aaMobileSheetIn var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
+  animation: aaMobileSheetIn var(--menu-open) var(--ease-emphasized);
 }
 
 .app[data-mobile-chrome="true"][data-layout="compact"] .aa-popover.is-closing {
-  animation: aaMobileSheetOut var(--menu-close) ease forwards;
+  animation: aaMobileSheetOut var(--menu-close) var(--ui-ease) forwards;
 }
 
 .app[data-mobile-chrome="true"][data-layout="compact"] .aa-popover-header {
@@ -739,7 +738,7 @@
 
 /* ---- 触摸端：面板本体已近不透明，去掉其自身模糊（与遮罩毛玻璃叠算无可见差别）；文字放大一档 ---- */
 .app[data-touch-ui="true"] .aa-popover {
-  background: var(--panel-bg, #ffffff);
+  background: var(--ui-control-selected);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
   will-change: transform, opacity;
