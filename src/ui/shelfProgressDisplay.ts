@@ -1,5 +1,6 @@
 import { hasReadPosition } from "./readEvidence";
 import type { ShelfEntry } from "./shelf";
+import { uiText } from "./localization/UiLanguageProvider";
 
 /** Presentation only: not added to ShelfEntry, storage DTOs or sync payloads. */
 type DisplayProgress = { progressPct: number; progressPctPending?: boolean };
@@ -21,5 +22,5 @@ export function isShelfProgressPending(entry: DisplayProgress): boolean {
 }
 
 export function shelfProgressLabel(entry: DisplayProgress, suffix = ""): string {
-  return isShelfProgressPending(entry) ? "待统计" : `${Math.round(entry.progressPct)}%${suffix}`;
+  return isShelfProgressPending(entry) ? uiText("shelf.progress.pending") : `${Math.round(entry.progressPct)}%${suffix}`;
 }

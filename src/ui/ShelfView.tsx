@@ -50,6 +50,7 @@ import {
   type SearchStatus,
 } from "./SearchPanel";
 import "./shelfZen.css";
+import { uiPlural, uiText, useUiText } from "./localization/UiLanguageProvider";
 
 export type { ShelfScope };
 export type ShelfDensity = "comfortable" | "standard" | "compact";
@@ -372,6 +373,7 @@ interface ShelfImportButtonProps extends ShelfSubmenuBackProps {
  * the menu. The menu animates in/out with the shared popover motion.
  */
 function ShelfImportButton(props: ShelfImportButtonProps) {
+  const { t } = useUiText();
   const [open, setOpen] = useState(false);
   const { present, closing } = useExitPresence(open);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -405,10 +407,10 @@ function ShelfImportButton(props: ShelfImportButtonProps) {
         type="button"
         onClick={props.onImport}
         disabled={props.disabled}
-        title="导入 EPUB 图书到书架"
+        title={t("shelf.import.tip")}
       >
         <PlusIcon />
-        <span>{props.compact ? "导入" : "导入图书"}</span>
+        <span>{props.compact ? t("shelf.import.short") : t("shelf.import.books")}</span>
       </button>
     );
   }
@@ -428,10 +430,10 @@ function ShelfImportButton(props: ShelfImportButtonProps) {
           aria-expanded={open}
           onClick={() => setOpen((value) => !value)}
           disabled={props.disabled}
-          title="导入图书或文件夹"
+          title={t("shelf.import.menu.tip")}
         >
           <PlusIcon />
-          <span>导入</span>
+          <span>{t("shelf.import.short")}</span>
         </button>
       ) : (
         <>
@@ -440,15 +442,15 @@ function ShelfImportButton(props: ShelfImportButtonProps) {
             type="button"
             onClick={props.onImport}
             disabled={props.disabled}
-            title="导入 EPUB 图书到书架"
+            title={t("shelf.import.tip")}
           >
             <PlusIcon />
-            <span>导入图书</span>
+            <span>{t("shelf.import.books")}</span>
           </button>
           <button
             className="shelf-btn-primary shelf-import-caret"
             type="button"
-            aria-label="更多导入方式"
+            aria-label={t("shelf.import.more")}
             aria-haspopup="menu"
             aria-expanded={open}
             onClick={() => setOpen((value) => !value)}
@@ -459,22 +461,22 @@ function ShelfImportButton(props: ShelfImportButtonProps) {
         </>
       )}
       {present && (
-        <div className={`shelf-import-menu${closing ? " is-closing" : ""}`} role="menu" aria-label="导入方式">
+        <div className={`shelf-import-menu${closing ? " is-closing" : ""}`} role="menu" aria-label={t("shelf.import.menu")}>
           <button className="shelf-import-menu-item" type="button" role="menuitem" onClick={() => choose(props.onImport)}>
             <span className="shelf-import-menu-icon"><BookAddIcon /></span>
             <span className="shelf-import-menu-text">
-              <strong>导入图书</strong>
-              <small>选择一本或多本 EPUB</small>
+              <strong>{t("shelf.import.books")}</strong>
+              <small>{t("shelf.import.books.detail")}</small>
             </span>
           </button>
           <button className="shelf-import-menu-item" type="button" role="menuitem" onClick={() => choose(props.onImportFolder!)}>
             <span className="shelf-import-menu-icon"><FolderAddIcon /></span>
             <span className="shelf-import-menu-text">
-              <strong>导入文件夹</strong>
-              <small>按目录自动整理到书架文件夹</small>
+              <strong>{t("shelf.import.folder")}</strong>
+              <small>{t("shelf.import.folder.detail")}</small>
             </span>
           </button>
-          {props.showDropHint && <p className="shelf-import-menu-hint">也可以把 EPUB 文件直接拖到书架上</p>}
+          {props.showDropHint && <p className="shelf-import-menu-hint">{t("shelf.import.dropHint")}</p>}
         </div>
       )}
     </div>
@@ -618,7 +620,7 @@ function getMorandiPalette(title: string, id: string) {
     hash |= 0;
   }
   const idx = Math.abs(hash) % MORANDI_PALETTES.length;
-  const initial = title.trim().charAt(0) || "书";
+  const initial = title.trim().charAt(0) || uiText("shelf.cover.initialFallback");
   return { ...MORANDI_PALETTES[idx], initial };
 }
 
@@ -722,9 +724,15 @@ const Cover = memo(function Cover({
 function formatRelativeTime(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return "";
   const diff = Date.now() - ms;
-  if (diff < 60 * 1000) return "刚刚";
-  if (diff < 60 * 60 * 1000) return `${Math.floor(diff / (60 * 1000))} 分钟前`;
-  if (diff < 24 * 60 * 60 * 1000) return `${Math.floor(diff / (60 * 60 * 1000))} 小时前`;
+  if (diff < 60 * 1000) return uiText("shelf.time.justNow");
+  if (diff < 60 * 60 * 1000) {
+    const minutes = Math.floor(diff / (60 * 1000));
+    return uiPlural("shelf.time.minutesAgo", minutes, { count: minutes });
+  }
+  if (diff < 24 * 60 * 60 * 1000) {
+    const hours = Math.floor(diff / (60 * 60 * 1000));
+    return uiPlural("shelf.time.hoursAgo", hours, { count: hours });
+  }
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
   const target = new Date(ms);
@@ -733,7 +741,7 @@ function formatRelativeTime(ms: number): string {
     target.getMonth() === yesterday.getMonth() &&
     target.getFullYear() === yesterday.getFullYear()
   ) {
-    return "昨天";
+    return uiText("shelf.time.yesterday");
   }
   return formatShelfTime(ms);
 }
@@ -759,6 +767,7 @@ const ShelfResumeStage = memo(function ShelfResumeStage({
   registerSubmenuBackHandler,
   onSubmenuBackActiveChange,
 }: ShelfResumeStageProps) {
+  const { t } = useUiText();
   const readingBooks = useMemo(() => {
     return entries
       .filter(
@@ -897,7 +906,7 @@ const ShelfResumeStage = memo(function ShelfResumeStage({
   const barWidth = isShelfProgressPending(activeBook)
     ? "0%"
     : `${Math.max(2, Math.min(100, activeBook.progressPct ?? 0))}%`;
-  const chapterLabel = `第 ${(activeBook.spineIndex ?? 0) + 1} 章 · ${shelfProgressLabel(activeBook)}`;
+  const chapterLabel = t("shelf.resume.chapter", { n: (activeBook.spineIndex ?? 0) + 1, progress: shelfProgressLabel(activeBook) });
 
   // Both states stay mounted; the stage animates its grid rows between them so
   // expanding/collapsing is one short height + cross-fade, not a remount jump.
@@ -910,7 +919,7 @@ const ShelfResumeStage = memo(function ShelfResumeStage({
             type="button"
             tabIndex={collapsed ? 0 : -1}
             onClick={() => onOpen(activeBook.id)}
-            title={`打开《${activeBook.title}》`}
+            title={t("shelf.resume.open", { title: activeBook.title })}
           >
             <span className="shelf-resume-mini-cover" aria-hidden="true">
               <Cover entry={activeBook} provider={provider} />
@@ -933,7 +942,7 @@ const ShelfResumeStage = memo(function ShelfResumeStage({
               onClick={() => onOpen(activeBook.id)}
               disabled={busy}
             >
-              <span>继续</span>
+              <span>{t("shelf.resume.continue")}</span>
               <ArrowRightIcon />
             </button>
             <button
@@ -941,8 +950,8 @@ const ShelfResumeStage = memo(function ShelfResumeStage({
               type="button"
               tabIndex={collapsed ? 0 : -1}
               onClick={toggleCollapse}
-              title="展开 (显示封面与详细进度)"
-              aria-label="展开正在阅读"
+              title={t("shelf.resume.expand.tip")}
+              aria-label={t("shelf.resume.expand")}
               aria-expanded={false}
             >
               <ChevronDownIcon />
@@ -959,7 +968,7 @@ const ShelfResumeStage = memo(function ShelfResumeStage({
               type="button"
               tabIndex={collapsed ? -1 : 0}
               onClick={() => onOpen(activeBook.id)}
-              title={`打开《${activeBook.title}》`}
+              title={t("shelf.resume.open", { title: activeBook.title })}
             >
               <Cover entry={activeBook} provider={provider} />
             </button>
@@ -967,7 +976,7 @@ const ShelfResumeStage = memo(function ShelfResumeStage({
               <div className="shelf-resume-meta-row">
                 <span className="shelf-resume-tag">
                   <BookOpenIcon />
-                  <span>正在阅读</span>
+                  <span>{t("shelf.resume.reading")}</span>
                 </span>
                 <span className="shelf-resume-time">
                   {formatRelativeTime(activeBook.lastReadAtMs)}
@@ -982,9 +991,9 @@ const ShelfResumeStage = memo(function ShelfResumeStage({
               >
                 {activeBook.title}
               </button>
-              <div className="shelf-resume-author">{activeBook.creator || "未知作者"}</div>
+              <div className="shelf-resume-author">{activeBook.creator || t("shelf.unknownAuthor")}</div>
               <div className="shelf-resume-anchor-row">
-                <div className="shelf-resume-anchor-text">上次读到：{chapterLabel}</div>
+                <div className="shelf-resume-anchor-text">{t("shelf.resume.lastAt", { place: chapterLabel })}</div>
                 <div className="shelf-resume-progress-track">
                   <div className="shelf-resume-progress-bar" style={{ width: barWidth }} />
                 </div>
@@ -1000,9 +1009,9 @@ const ShelfResumeStage = memo(function ShelfResumeStage({
                   tabIndex={collapsed ? -1 : 0}
                   onClick={() => setMoreOpen(!moreOpen)}
                   aria-expanded={moreOpen}
-                  title="查看最近在读书籍（最多10本）"
+                  title={t("shelf.resume.more.tip")}
                 >
-                  <span>更多在读 ({readingBooks.length})</span>
+                  <span>{t("shelf.resume.more", { count: readingBooks.length })}</span>
                   <ChevronDownIcon />
                 </button>
                 {moreOpen && (
@@ -1031,7 +1040,7 @@ const ShelfResumeStage = memo(function ShelfResumeStage({
                             setMoreOpen(false);
                           }}
                         >
-                          开书
+                          {t("shelf.resume.openBook")}
                         </button>
                       </div>
                     ))}
@@ -1045,9 +1054,9 @@ const ShelfResumeStage = memo(function ShelfResumeStage({
               tabIndex={collapsed ? -1 : 0}
               onClick={() => onOpen(activeBook.id)}
               disabled={busy}
-              title="继续阅读当前书籍 (按 Space 或 Enter 一键开书)"
+              title={t("shelf.resume.continueReading.tip")}
             >
-              <span>继续阅读</span>
+              <span>{t("shelf.resume.continueReading")}</span>
               <ArrowRightIcon />
               {!compact && <span className="shelf-resume-key-hint">Enter</span>}
             </button>
@@ -1056,8 +1065,8 @@ const ShelfResumeStage = memo(function ShelfResumeStage({
               type="button"
               tabIndex={collapsed ? -1 : 0}
               onClick={toggleCollapse}
-              title="收起 (折叠为单行)"
-              aria-label="收起正在阅读"
+              title={t("shelf.resume.collapse.tip")}
+              aria-label={t("shelf.resume.collapse")}
               aria-expanded={true}
             >
               <ChevronUpIcon />
@@ -1097,6 +1106,7 @@ interface ShelfCardProps extends ShelfSubmenuBackProps {
 }
 
 const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
+  const { t } = useUiText();
   const { entry } = props;
   const [menuOpen, setMenuOpen] = useState(false);
   const [removePending, setRemovePending] = useState(false);
@@ -1287,7 +1297,7 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
           <div className="shelf-card-folder-sim-overlay" aria-hidden="true">
             <div className="shelf-folder-sim-pill">
               <FolderIcon />
-              <span>松手新建文件夹</span>
+              <span>{t("shelf.card.dropToCreateFolder")}</span>
             </div>
             <div className="shelf-folder-sim-mosaic">
               <div className="shelf-folder-sim-thumb primary">
@@ -1307,8 +1317,8 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
           <button
             className={`shelf-card-star-btn${props.isFavorite ? " active" : ""}`}
             type="button"
-            title={props.isFavorite ? "取消收藏" : "加入收藏"}
-            aria-label={props.isFavorite ? `取消收藏：${entry.title}` : `加入收藏：${entry.title}`}
+            title={props.isFavorite ? t("shelf.card.unfavorite") : t("shelf.card.favorite")}
+            aria-label={props.isFavorite ? t("shelf.card.unfavoriteBook", { title: entry.title }) : t("shelf.card.favoriteBook", { title: entry.title })}
             aria-pressed={props.isFavorite}
             onClick={(e) => {
               e.stopPropagation();
@@ -1329,12 +1339,12 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
         {/* 状态徽标（极简胶囊，不破坏封面比例） */}
         <div className="shelf-card-badges" aria-hidden="true">
           {entry.available === false ? (
-            <span className="shelf-badge missing">{getRuntimeCapabilities().platform === "android" ? "需重新导入" : "源文件缺失"}</span>
+            <span className="shelf-badge missing">{getRuntimeCapabilities().platform === "android" ? t("shelf.card.reimport") : t("shelf.card.sourceMissing")}</span>
           ) : (
             <>
-              {entry.isNew && !props.selectionMode && <span className="shelf-badge new">新</span>}
+              {entry.isNew && !props.selectionMode && <span className="shelf-badge new">{t("shelf.card.new")}</span>}
               {recent && read && !entry.isNew && !props.selectionMode && (
-                <span className="shelf-badge reading">在读</span>
+                <span className="shelf-badge reading">{t("shelf.card.reading")}</span>
               )}
             </>
           )}
@@ -1342,7 +1352,7 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
 
         {/* 贴合封面底边的纤细微光进度条 */}
         {entry.progressPct > 0 && (
-          <div className="shelf-card-progress-bar" title={`阅读进度 ${entry.progressPct}%`}>
+          <div className="shelf-card-progress-bar" title={t("shelf.card.progress", { percent: entry.progressPct })}>
             <div
               className="shelf-card-progress-fill"
               style={{ width: `${Math.min(100, entry.progressPct)}%` }}
@@ -1357,8 +1367,8 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
               ref={triggerRef}
               className={`shelf-card-more-btn${menuOpen ? " active" : ""}`}
               type="button"
-              title="更多选项"
-              aria-label={`更多书籍选项：${entry.title}`}
+              title={t("shelf.card.more.tip")}
+              aria-label={t("shelf.card.more", { title: entry.title })}
               aria-expanded={menuOpen}
               onClick={(e) => {
                 e.stopPropagation();
@@ -1394,7 +1404,7 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
                   onClick={(e) => e.stopPropagation()}
                   onPointerDown={(e) => e.stopPropagation()}
                 >
-                  <div className="shelf-card-pop-title" aria-label={`完整书名：${entry.title}`}>
+                  <div className="shelf-card-pop-title" aria-label={t("shelf.card.fullTitle", { title: entry.title })}>
                     {entry.title}
                   </div>
                   <button
@@ -1407,7 +1417,7 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
                     }}
                   >
                     <BookLogoIcon />
-                    <span>打开阅读</span>
+                    <span>{t("shelf.card.open")}</span>
                   </button>
                   {props.onToggleFavorite && (
                     <button
@@ -1420,7 +1430,7 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
                       }}
                     >
                       <StarIcon filled={props.isFavorite} />
-                      <span>{props.isFavorite ? "取消收藏" : "加入收藏"}</span>
+                      <span>{props.isFavorite ? t("shelf.card.unfavorite") : t("shelf.card.favorite")}</span>
                     </button>
                   )}
                   {props.onMoveToFolder && (
@@ -1434,7 +1444,7 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
                       }}
                     >
                       <FolderIcon />
-                      <span>移至文件夹</span>
+                      <span>{t("shelf.card.moveToFolder")}</span>
                     </button>
                   )}
                   {props.onRemoveFromFolder && (
@@ -1448,7 +1458,7 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
                       }}
                     >
                       <FolderIcon />
-                      <span>{removePending ? "正在移出…" : "从文件夹移除"}</span>
+                      <span>{removePending ? t("shelf.card.removing") : t("shelf.card.removeFromFolder")}</span>
                     </button>
                   )}
                   {removeError && (
@@ -1467,7 +1477,7 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
                     }}
                   >
                     <TrashIcon />
-                    <span>从书架删除</span>
+                    <span>{t("shelf.card.delete")}</span>
                   </button>
                 </div>,
                 getShelfMenuPortalHost(triggerRef.current),
@@ -1480,17 +1490,17 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
       <div className="shelf-card-info">
         <div className="shelf-card-title">{entry.title}</div>
         <div className="shelf-card-meta">
-          <span className="shelf-card-creator" title={entry.creator || "未知作者"}>
-            {entry.creator || "未知作者"}
+          <span className="shelf-card-creator" title={entry.creator || t("shelf.unknownAuthor")}>
+            {entry.creator || t("shelf.unknownAuthor")}
           </span>
           <span className="shelf-card-subline">
             {read ? (
-              <span className="shelf-read-stat">{shelfProgressLabel(entry, " 已读")}</span>
+              <span className="shelf-read-stat">{shelfProgressLabel(entry, t("shelf.card.readSuffix"))}</span>
             ) : (
-              <span className="shelf-read-stat unread">未读</span>
+              <span className="shelf-read-stat unread">{t("shelf.card.unread")}</span>
             )}
             <span className="shelf-dot" aria-hidden="true">·</span>
-            <span className="shelf-time">{formatShelfTime(last) || "刚刚"}</span>
+            <span className="shelf-time">{formatShelfTime(last) || t("shelf.time.justNow")}</span>
           </span>
         </div>
       </div>
