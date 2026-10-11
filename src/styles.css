@@ -455,6 +455,12 @@ select option {
   position: relative;
 }
 
+/* PC 阅读静止隐藏指针（ui/readerCursorIdle.ts）；正文 iframe 内规则见 sanitize.ts。 */
+:root[data-reader-cursor-idle],
+:root[data-reader-cursor-idle] * {
+  cursor: none !important;
+}
+
 /* ---- 统一阅读器二级面板遮罩体系（轻柔微光蒙层） ---- */
 
 .menu-backdrop,
