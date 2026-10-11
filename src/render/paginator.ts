@@ -17,7 +17,7 @@ import { isExternalUrl, isFragmentOnly } from "../core/paths";
 import { getFootnoteHoverAnchor, isFootnoteLink, resolveFootnote, type FootnoteInfo } from "./footnotes";
 import type { ResourceServer } from "./resources";
 import { OwnedBlobUrls } from "./blobOwnership";
-import { TEXT_MEASURE, type ReaderSettings } from "./settings";
+import { TEXT_MEASURE, type ReaderSettings, type Theme } from "./settings";
 import { VisibilityGate } from "./displayGate";
 import { hasAuthoredCssProperty } from "./cssRewrite";
 import { clearDocumentSelection, isSelectAllShortcut } from "./selectionGuard";
@@ -31,7 +31,7 @@ import {
   adaptNavigationAnchor,
   type PersistedNavigationAnchor,
 } from "./navigationAnchor";
-import { applyDarkThemeContrast } from "./darkThemeContrast";
+import { createReaderTheme, type ReaderThemeController } from "./readerTheme";
 import { FootnoteHoverGate } from "./footnoteHoverGate";
 import { waitForDoubleRaf, waitForFontsReady } from "./asyncWait";
 import {
@@ -2708,6 +2708,8 @@ export class ChapterPaginator {
   private scrollPageCount = 1;
   /** 宿主连续滚动投影状态门，防止投影滚动事件反向触发章内导航或重置。 */
   private isProjectingScroll = false;
+  /** 主题原位更新控制器：管理当前加载文档的纯主题颜色与深色对比度修补生命周期。 */
+  private themeController: ReaderThemeController | null = null;
 
   constructor(
     private iframe: HTMLIFrameElement,
@@ -3774,15 +3776,15 @@ export class ChapterPaginator {
     // 可保证 blob 文档的第一帧也不会漏出，同时 visibility:hidden 仍可测量。
     this.displayGate.hold(seq);
     this.emit({ status: "measuring" });
-    if (this.settings.theme === "dark" || this.settings.theme === "gray") {
-      try {
-        applyDarkThemeContrast(doc, {
-          theme: this.settings.theme,
-          userOwnsColor: this.userOwnsColorForDocument(doc),
-        });
-      } catch {
-        // Contrast repair is conservative and must never block chapter display.
-      }
+    this.themeController?.dispose();
+    try {
+      this.themeController = createReaderTheme({
+        doc,
+        theme: this.settings.theme,
+        userOwnsColor: this.userOwnsColorForDocument(doc),
+      });
+    } catch {
+      this.themeController = null;
     }
     doc.addEventListener("load", this.imgHandler, true);
     // 拦截书内链接：防止 iframe 自身导航导致内容丢失
@@ -8673,6 +8675,23 @@ export class ChapterPaginator {
     await this.load(path, { anchor, readingAnchor, fallbackPage, preserveSearchHighlight });
   }
 
+  /**
+   * 原位同步更新主题（纯颜色、深色对比度修补、作者安全背景），
+   * 不重新加载章节、不重新测页、不重建 iframe 或正文节点，保留运动窗口与阅读位置。
+   */
+  updateTheme(theme: Theme): boolean {
+    this.settings = { ...this.settings, theme };
+    if (this.themeController) {
+      try {
+        this.themeController.update(theme);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  }
+
   /** 设置变更（字号/主题/阅读方式）后整体重载（保留阅读位置）。 */
   async reloadWithSettings(settings: ReaderSettings, anchor?: string): Promise<void> {
     const path = this.currentPath;
@@ -9259,6 +9278,8 @@ export class ChapterPaginator {
   }
 
   private cleanupDoc(): void {
+    this.themeController?.dispose();
+    this.themeController = null;
     this.abortMeasureWaits();
     this.restoreBackdropCompatibility();
     this.resetFootnote({ notify: true });

@@ -4,6 +4,7 @@ import { READER_PALETTES } from "../config/readerPalette";
 import { DARK_THEME_MARKER, type DarkThemeComputedStyle, type DarkThemeStyleAdapter } from "./darkThemeContrast";
 import {
   buildThemeCss,
+  classifySettingsChange,
   createReaderTheme,
   getAuthorSafeBackgroundColor,
   isReaderTheme,
@@ -299,9 +300,57 @@ describe("readerTheme: 纯颜色与在位更新核心", () => {
     expect(document.querySelector('style[data-reader="theme"]')).not.toBeNull();
     expect(p.getAttribute(DARK_THEME_MARKER)).toBe("1");
 
+    // owner2 继承了修补记录，切回 light 时能够完整撤销深色修补
+    owner2.update("light");
+    expect(p.hasAttribute(DARK_THEME_MARKER)).toBe(false);
+    expect(p.style.color).toBe("");
+
     // owner2 正常 dispose
     owner2.dispose();
     expect(document.querySelector('style[data-reader="theme"]')).toBeNull();
-    expect(p.hasAttribute(DARK_THEME_MARKER)).toBe(false);
+  });
+
+  it("设置分层分类：正确区分无变化、纯主题变更与几何排版变更", () => {
+    const base: any = {
+      fontSizePx: 18,
+      theme: "light",
+      fontFamily: "serif",
+      customFontName: undefined,
+      fontSource: undefined,
+      customFontId: undefined,
+      forceFontOverride: false,
+      customFonts: [],
+      customCss: "",
+      gapPx: 40,
+      readingMode: "paged",
+      columnsPerView: 1,
+      spreadGapMode: "normal",
+      pageMarginsPx: { top: 20, bottom: 20, left: 20, right: 20 },
+      lineHeight: 1.6,
+      fontWeight: 400,
+      letterSpacingPx: 0,
+      wordSpacingPx: 0,
+      forceHorizontal: false,
+      preloadNextChapter: false,
+    };
+
+    // 1. 无渲染变更（预加载开关不影响渲染）
+    expect(classifySettingsChange(base, { ...base, preloadNextChapter: true })).toBe("none");
+
+    // 2. 纯主题变更
+    expect(classifySettingsChange(base, { ...base, theme: "dark" })).toBe("theme-only");
+    expect(classifySettingsChange(base, { ...base, theme: "sepia" })).toBe("theme-only");
+
+    // 3. 几何排版变更（字号改变）
+    expect(classifySettingsChange(base, { ...base, fontSizePx: 20 })).toBe("layout");
+
+    // 4. 主题与字号同次变更 -> 必须走 layout 重排
+    expect(classifySettingsChange(base, { ...base, theme: "dark", fontSizePx: 20 })).toBe("layout");
+
+    // 5. 字体改变 -> 走 layout 重排
+    expect(classifySettingsChange(base, { ...base, fontFamily: "sans-serif" })).toBe("layout");
+
+    // 6. userFonts 改变 -> 走 layout 重排
+    expect(classifySettingsChange(base, base, "fontsA", "fontsB")).toBe("layout");
   });
 });
