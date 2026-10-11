@@ -5913,8 +5913,10 @@ export default function App() {
     windowCloseRef.current = closeWindow;
     void appWindow
       .onCloseRequested(async (event) => {
-        if (closing) return;
+        // Every request stays intercepted until our save/choice path destroys
+        // the window, including repeated requests during an in-flight save.
         event.preventDefault();
+        if (closing) return;
         // A repeated close request while the choice is on screen keeps the
         // same choice instead of silently retrying or closing.
         if (saveFailurePromptRef.current?.kind === "window") return;
