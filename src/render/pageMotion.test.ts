@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   PageMotionSession,
+  desktopSettlePlan,
   settlePlan,
   settleProgress,
   type InterruptResult,
@@ -51,6 +52,26 @@ function session(start = 100) {
 }
 
 describe("page motion session", () => {
+  it("desktop preserves 280ms cubic timing and cancels stale commits on reverse input", () => {
+    const driver = new FakeDriver(100);
+    const commits: number[] = [];
+    const s = new PageMotionSession(driver, offsets, 1, page => commits.push(page), () => {},
+      distance => desktopSettlePlan(distance, 100));
+    s.turn(1, 1);
+    const plan = driver.animations[0].plan;
+    expect(plan).toMatchObject({ durationMs: 280, curve: "ease-out-cubic" });
+    expect(settleProgress(plan, 0.5)).toBe(0.875);
+    driver.advance(0.5);
+    s.turn(2, -1);
+    expect(driver.animations[1].to).toBe(100);
+    expect(driver.animations[1].plan.durationMs).toBe(198);
+    driver.animations[0].done();
+    expect(commits).toEqual([]);
+    driver.finish();
+    expect(commits).toEqual([1]);
+    expect(desktopSettlePlan(0, 100).durationMs).toBe(0);
+    expect(desktopSettlePlan(1, 100).durationMs).toBe(90);
+  });
   it("A→B 半途反向回到 A；独立输入继续累计，同一输入 ID 只消费一次", () => {
     const { driver, s, commits } = session(100);
     expect(s.turn(1, 1)).toMatchObject({ kind: "moving", targetPage: 2 });
