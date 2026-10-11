@@ -19,7 +19,8 @@ function cleanText(value: unknown): string | null {
 function cleanRule(value: unknown, index: number): TextProjectionRule | null {
   if (!isRecord(value)) return null;
   const from = cleanText(value.from);
-  const to = cleanText(value.to);
+  // An empty target deletes the match; explicit whitespace is also meaningful.
+  const to = typeof value.to === "string" ? value.to : null;
   if (from === null || to === null) return null;
   const id = typeof value.id === "string" && value.id.length > 0 ? value.id : `rule-${index + 1}`;
   return { id, from, to, enabled: value.enabled !== false };
@@ -61,5 +62,5 @@ export function duplicateRuleIds(rules: readonly TextProjectionRule[]): Set<stri
 }
 
 export function enabledReplacementRules(rules: readonly TextProjectionRule[]) {
-  return rules.filter((rule) => rule.enabled && rule.from.trim().length > 0 && rule.to.trim().length > 0);
+  return rules.filter((rule) => rule.enabled && rule.from.trim().length > 0);
 }

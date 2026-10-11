@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   compileReplacementStage,
   codePointBoundary,
@@ -16,6 +16,8 @@ import {
 import { createNodeProjection, sourceRangeForDisplayRange } from "./nodeProjection";
 import { clearOpenCCStageCacheForTests, loadOpenCCStage, parseOpenCCDictionary } from "./opencc";
 import { createDisplaySearchSession } from "./displaySearch";
+import { sanitizeTextProjectionPreferences } from "./preferences";
+import { loadTextProjectionPreferences, saveTextProjectionPreferences } from "../../ui/textProjection/preferencesStorage";
 import { extractSearchText, extractSearchTextSegments } from "../../core/corpus";
 import { resolveSearchOccurrence } from "../../core/searchOccurrence";
 import type { Book } from "../../core/types";
@@ -51,6 +53,107 @@ function fakeBook(chapters: string[]): Book {
 }
 
 describe("text projection core", () => {
+  describe("B-227 empty replacement", () => {
+    it("persists deletion and explicit spaces while rejecting missing or null targets", async () => {
+      const preferences = sanitizeTextProjectionPreferences({ mode: "original", rules: [
+        { id: "delete", from: "删", to: "", enabled: true },
+        { id: "space", from: "隔", to: "  ", enabled: true },
+        { from: "甲" },
+        { from: "乙", to: null },
+        { from: "", to: "字" },
+        { from: "  ", to: "字" },
+      ] });
+      expect(preferences.rules.map(({ from, to }) => ({ from, to }))).toEqual([
+        { from: "删", to: "" },
+        { from: "隔", to: "  " },
+      ]);
+      let stored: string | null = null;
+      vi.stubGlobal("localStorage", {
+        getItem: () => stored,
+        setItem: (_key: string, value: string) => { stored = value; },
+      });
+      try {
+        saveTextProjectionPreferences(preferences);
+        const reopened = loadTextProjectionPreferences();
+        expect(reopened).toEqual(preferences);
+        expect(projectText("甲删隔乙", await compileTextProjection(reopened))).toBe("甲  乙");
+        expect(isIdentityTextProjection(reopened)).toBe(false);
+        const disabled = { ...reopened, rules: reopened.rules.map((rule) => ({ ...rule, enabled: false })) };
+        expect(isIdentityTextProjection(disabled)).toBe(true);
+        expect(textProjectionVersion(disabled)).not.toBe(textProjectionVersion(reopened));
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it("keeps longest-match and first-rule priority when the winning rule deletes", () => {
+      const stage = compileReplacementStage([
+        { from: "AB", to: "" },
+        { from: "AB", to: "重" },
+        { from: "A", to: "短" },
+      ]);
+      expect(stage("ABXAB").display).toBe("X");
+    });
+
+    it("excludes deleted prefixes and suffixes from visible Unicode ranges", async () => {
+      const compiled = await compileTextProjection(original([{ from: "删", to: "" }]));
+      const projection = createNodeProjection("删😀乙删", compiled);
+      expect(projection.original).toBe("删😀乙删");
+      expect(projection.display).toBe("😀乙");
+      expect(sourceRangeForDisplayRange(projection.original, compiled, 0, 2)).toEqual({ start: 1, end: 3 });
+      expect(sourceRangeForDisplayRange(projection.original, compiled, 2, 3)).toEqual({ start: 3, end: 4 });
+      expect([0, 1, 3, 4, 5].map((offset) => projection.toDisplay(offset))).toEqual([0, 0, 2, 3, 3]);
+    });
+
+    it("maps each side of a deleted middle to its visible source and keeps internal gaps", async () => {
+      const compiled = await compileTextProjection(original([{ from: "删", to: "" }]));
+      const source = "甲删删乙";
+      expect(sourceRangeForDisplayRange(source, compiled, 0, 1)).toEqual({ start: 0, end: 1 });
+      expect(sourceRangeForDisplayRange(source, compiled, 1, 2)).toEqual({ start: 3, end: 4 });
+      expect(sourceRangeForDisplayRange(source, compiled, 0, 2)).toEqual({ start: 0, end: 4 });
+      const projection = createNodeProjection(source, compiled);
+      expect([0, 1, 2].map((offset) => projection.toSource(offset, "start"))).toEqual([0, 3, 4]);
+      expect([0, 1, 2].map((offset) => projection.toSource(offset, "end"))).toEqual([0, 1, 4]);
+    });
+
+    it("keeps an entirely deleted node bounded without inventing a visible range", async () => {
+      const compiled = await compileTextProjection(original([{ from: "😀", to: "" }]));
+      const projection = createNodeProjection("😀😀", compiled);
+      expect(projection.display).toBe("");
+      expect([0, 2, 4].map((offset) => projection.toDisplay(offset))).toEqual([0, 0, 0]);
+      expect(projection.toSource(0, "start")).toBe(4);
+      expect(projection.toSource(0, "end")).toBe(0);
+      expect(sourceRangeForDisplayRange("😀😀", compiled, 0, 0)).toBeNull();
+      const pipeline = projectPipeline("AB乙", [
+        compileReplacementStage([{ from: "AB", to: "X" }]),
+        compileReplacementStage([{ from: "X", to: "" }]),
+      ]);
+      expect(pipeline.display).toBe("乙");
+      expect(pipeline.toSource(0, "start")).toBe(2);
+      expect(pipeline.toSource(1, "end")).toBe(3);
+    });
+
+    it("searches visible characters using their original positions after deletion", async () => {
+      const compiled = await compileTextProjection(original([{ from: "删", to: "" }]));
+      const session = createDisplaySearchSession(
+        fakeBook(["<html><body><p>删甲删乙删</p></body></html>"]),
+        compiled,
+        { yieldToHost: async () => {} },
+      );
+      try {
+        expect(await session.search("删")).toHaveLength(0);
+        const first = await session.search("甲");
+        const second = await session.search("乙");
+        expect(first).toHaveLength(1);
+        expect(first[0].textHits).toEqual([{ start: 1, end: 2, exactText: "甲" }]);
+        expect(second).toHaveLength(1);
+        expect(second[0].textHits).toEqual([{ start: 3, end: 4, exactText: "乙" }]);
+      } finally {
+        session.dispose();
+      }
+    });
+  });
+
   it("uses longest match, first equal-length rule and a single pass", () => {
     const stage = compileReplacementStage([
       { from: "A", to: "1" },

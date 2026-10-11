@@ -31,13 +31,11 @@ function isUsableReplacement(rule: Replacement): boolean {
     typeof rule.from === "string" &&
     typeof rule.to === "string" &&
     rule.from.length > 0 &&
-    rule.to.length > 0 &&
-    rule.from.trim().length > 0 &&
-    rule.to.trim().length > 0
+    rule.from.trim().length > 0
   );
 }
 
-/** Validate nonempty rules once at the configuration boundary. First duplicate wins. */
+/** A nonempty match may have an empty target. First duplicate wins. */
 export function compileReplacementStage(rules: readonly Replacement[]) {
   const root: Trie = { next: new Map() };
   for (const rule of rules) {
@@ -94,7 +92,11 @@ export function compileReplacementStage(rules: readonly Replacement[]) {
   };
 }
 
-/** Exact edges; a non-invertible replacement interior expands toward bias. */
+/**
+ * Replacement interiors expand toward bias. At a deleted output boundary,
+ * start maps after the deleted source and end maps before it, so a visible
+ * selection excludes hidden text immediately outside its edges.
+ */
 export function mapBoundary(
   projection: Projection,
   offset: number,
@@ -109,18 +111,25 @@ export function mapBoundary(
   const b1 = forward ? "displayEnd" : "sourceEnd";
   const last = projection.runs[projection.runs.length - 1];
   const lastEnd = last[a1];
-  if (offset <= 0) return projection.runs[0][b0];
-  if (offset >= lastEnd) return last[b1];
+  if (forward) {
+    if (offset <= 0) return projection.runs[0][b0];
+    if (offset >= lastEnd) return last[b1];
+  } else {
+    offset = Math.max(0, Math.min(offset, lastEnd));
+  }
+  const includeEnd = !forward && bias === "end";
   let low = 0;
   let high = projection.runs.length;
   while (low < high) {
     const mid = (low + high) >>> 1;
-    if (projection.runs[mid][a1] <= offset) low = mid + 1;
+    const end = projection.runs[mid][a1];
+    if (includeEnd ? end < offset : end <= offset) low = mid + 1;
     else high = mid;
   }
   const run = projection.runs[low];
   if (!run) return last[b1];
   if (offset === run[a0]) return run[b0];
+  if (offset === run[a1]) return run[b1];
   if (run.identity) return run[b0] + offset - run[a0];
   return bias === "start" ? run[b0] : run[b1];
 }

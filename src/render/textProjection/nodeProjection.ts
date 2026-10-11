@@ -10,7 +10,7 @@ import type { CompiledTextProjection } from "./compile";
  * Immutable per-Text-node snapshot. It keeps the original string, the display
  * string and explicit UTF-16↔code-point maps. Both directions are fragment
  * aware: non-identity replacement interiors always collapse to the fragment
- * edge selected by `bias`.
+ * edge selected by `bias`. Range edges exclude adjacent deleted source text.
  */
 export interface NodeProjection {
   readonly original: string;
