@@ -3174,8 +3174,17 @@ select option {
   touch-action: pan-y;
 }
 
-.shelf-card:hover,
-.shelf-card:focus-within {
+/* 悬停只属于真正能悬停的指针：触屏点按后浏览器模拟的 :hover 会粘住（返回书架后卡片仍浮起）。
+ * 混合设备按实际输入切换（.shelf-view[data-input]，由书架按 pointerType 维护）。键盘焦点照常抬层。 */
+@media (hover: hover) {
+  :where(.shelf-view:not([data-input="touch"])) .shelf-card:hover {
+    z-index: 3;
+  }
+}
+
+.shelf-card:focus-visible,
+.shelf-card:has(:focus-visible),
+.shelf-card.menu-open {
   z-index: 3;
 }
 
@@ -3199,7 +3208,14 @@ select option {
   will-change: transform;
 }
 
-.shelf-card:hover .shelf-cover-box,
+@media (hover: hover) {
+  :where(.shelf-view:not([data-input="touch"])) .shelf-card:hover .shelf-cover-box {
+    transform: translateY(-4px);
+    box-shadow: var(--shelf-card-hover-shadow);
+    border-color: color-mix(in srgb, var(--accent) 32%, var(--shelf-card-border));
+  }
+}
+
 .shelf-card:focus-visible .shelf-cover-box {
   transform: translateY(-4px);
   box-shadow: var(--shelf-card-hover-shadow);
@@ -3311,7 +3327,7 @@ select option {
   opacity: 0.55;
 }
 
-/* 卡片独立操作菜单（右上角悬浮按钮与轻量弹出框） */
+/* 卡片右上角三点按钮（菜单本体见 shelfZen.css 的 .shelf-action-*） */
 .shelf-card-actions-wrap {
   position: absolute;
   top: 6px;
@@ -3335,70 +3351,28 @@ select option {
   transition: opacity 0.14s ease, background-color 0.14s ease;
 }
 
-.shelf-card:hover .shelf-card-more-btn,
 .shelf-card-more-btn.active,
-.shelf-card-more-btn:focus-visible {
+.shelf-card-more-btn:focus-visible,
+.shelf-card:focus-visible .shelf-card-more-btn {
   opacity: 1;
 }
 
-.shelf-card-more-btn:hover {
-  background: rgba(0, 0, 0, 0.65);
+@media (hover: hover) {
+  :where(.shelf-view:not([data-input="touch"])) .shelf-card:hover .shelf-card-more-btn {
+    opacity: 1;
+  }
+
+  :where(.shelf-view:not([data-input="touch"])) .shelf-card-more-btn:hover {
+    background: rgba(0, 0, 0, 0.65);
+  }
 }
 
-.shelf-card-pop-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  min-width: 126px;
-  padding: 4px;
-  border-radius: 8px;
-  background: var(--panel-bg);
-  border: 1px solid var(--panel-border);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
-  z-index: 20;
-  animation: shelf-drawer-fade-in var(--menu-open) ease;
-}
 
-.shelf-card-pop-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 6px 8px;
-  border: none;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--fg);
-  font-size: 12px;
-  line-height: normal;
-  cursor: pointer;
-  text-align: left;
-}
 
-.shelf-card-pop-item .shelf-svg-icon {
-  display: block;
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-}
 
-.shelf-card-pop-item > span {
-  display: inline-flex;
-  align-items: center;
-  line-height: normal;
-}
 
-.shelf-card-pop-item:hover {
-  background: var(--btn-hover);
-}
 
-.shelf-card-pop-item.danger {
-  color: var(--error);
-}
 
-.shelf-card-pop-item.danger:hover {
-  background: color-mix(in srgb, var(--error) 12%, transparent);
-}
 
 /* 多选模式：封面卡片勾选标记与状态 */
 .shelf-view.selection-mode .shelf-card {
@@ -3467,8 +3441,10 @@ select option {
   transition: color 0.15s ease;
 }
 
-.shelf-card:hover .shelf-card-title {
-  color: var(--accent);
+@media (hover: hover) {
+  :where(.shelf-view:not([data-input="touch"])) .shelf-card:hover .shelf-card-title {
+    color: var(--accent);
+  }
 }
 
 .shelf-card-meta {
@@ -5068,10 +5044,16 @@ select option {
   padding: 0;
 }
 
-.shelf-card:hover .shelf-card-star-btn,
-.shelf-card:focus-within .shelf-card-star-btn,
+.shelf-card:has(:focus-visible) .shelf-card-star-btn,
+.shelf-card:focus-visible .shelf-card-star-btn,
 .shelf-card-star-btn.active {
   opacity: 1;
+}
+
+@media (hover: hover) {
+  :where(.shelf-view:not([data-input="touch"])) .shelf-card:hover .shelf-card-star-btn {
+    opacity: 1;
+  }
 }
 
 .shelf-card-star-btn.active {
@@ -5079,9 +5061,11 @@ select option {
   background: rgba(0, 0, 0, 0.55);
 }
 
-.shelf-card-star-btn:hover {
-  transform: scale(1.1);
-  background: rgba(0, 0, 0, 0.7);
+@media (hover: hover) {
+  :where(.shelf-view:not([data-input="touch"])) .shelf-card-star-btn:hover {
+    transform: scale(1.1);
+    background: rgba(0, 0, 0, 0.7);
+  }
 }
 
 .shelf-action-fav {
@@ -5991,14 +5975,6 @@ select option {
   font-size: 11px;
 }
 
-/* 列表行靠近视口底部时，菜单翻到按钮上方；默认仍向下，不裁切也不遮住原按钮。 */
-.shelf-card-pop-menu.placement-up,
-.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-table .shelf-card-pop-menu.placement-up {
-  top: auto;
-  bottom: calc(100% + 4px);
-  transform-origin: bottom right;
-}
-
 /* 列表动作在单元格内居中；封面覆层的 6px 偏移只用于网格。 */
 .shelf-table .shelf-card-actions-wrap {
   top: auto;
@@ -6380,13 +6356,10 @@ select option {
   margin: 5px;
 }
 
-/* 安卓 WebView 默认点按高亮会把整张书卡刷成蓝块；触摸端统一关掉，按压反馈由各控件 :active 承担。 */
+/* 安卓 WebView 默认点按高亮会把整张书卡刷成蓝块；触摸端统一关掉。书卡/列表行的按压与长按反馈
+ * 由书架手势识别器写 data-press（shelfZen.css），不再依赖时有时无的 :active。 */
 .app[data-touch-ui="true"] {
   -webkit-tap-highlight-color: transparent;
-}
-
-.app[data-touch-ui="true"] .shelf-card:active:not(:has(.shelf-card-actions-wrap:active)) .shelf-cover-box {
-  transform: scale(0.98);
 }
 
 .app[data-touch-ui="true"] .shelf-card-star-btn {
@@ -6542,14 +6515,6 @@ select option {
   min-height: calc(48px * var(--ui-touch-comp, 1));
 }
 
-.app[data-mobile-chrome="true"] .shelf-card-pop-menu {
-  min-width: 200px;
-  max-width: min(320px, calc(100vw - 24px));
-  max-height: min(420px, calc(var(--visual-viewport-height, 100vh) - 24px));
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  box-sizing: border-box;
-}
 
 /* 共享书架菜单宿主：放在 .app 内，继承主题与移动选择器，zoom 1 */
 .shelf-menu-portal-host {
@@ -6563,40 +6528,10 @@ select option {
   pointer-events: none;
 }
 
-.shelf-menu-portal-host .shelf-card-pop-menu {
-  position: fixed;
-  right: auto !important;
-  bottom: auto !important;
-  margin: 0;
-  pointer-events: auto;
-}
 
-.shelf-menu-portal-host .shelf-card-pop-menu.placement-up {
-  transform-origin: bottom right;
-}
 
-.shelf-menu-portal-host .shelf-card-pop-menu.placement-down {
-  transform-origin: top right;
-}
 
-.app[data-mobile-chrome="true"] .shelf-card-pop-item {
-  min-height: 48px;
-  box-sizing: border-box;
-  padding: 10px 14px;
-  font-size: 13.5px;
-}
 
-.shelf-card-pop-title {
-  padding: 8px 12px 6px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--fg);
-  line-height: 1.4;
-  word-break: break-word;
-  white-space: normal;
-  border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 60%, transparent);
-  margin-bottom: 4px;
-}
 
 .app[data-mobile-chrome="true"] .log-panel {
   top: auto;
