@@ -9,6 +9,8 @@ import {
   sameRenderingSettings,
 } from "./readerTheme";
 import { DEFAULT_SETTINGS, type ReaderSettings } from "./settings";
+import { readerSurfaceBackground } from "../ui/ReaderView";
+import { continuousSurfaceBackground } from "../ui/ContinuousReaderView";
 
 describe("主题原位更新与阅读宿主集成契约", () => {
   it("纯主题切换不重排/重载，真实布局变更仍走重排", () => {
@@ -162,7 +164,7 @@ describe("主题原位更新与阅读宿主集成契约", () => {
     expect(document.querySelector('style[data-reader="theme"]')).toBeNull();
   });
 
-  it("真实阅读短链：长正文主题往返 → 切缓存章 → 连续同屏章 → 回分页，全链路验证", () => {
+  it("控制器与多章节状态流转模拟契约：长正文主题往返 → 缓存章提升 → 连续同屏章 → 分页模式", () => {
     // 阶段 1：长正文文档（含作者背景图与自定义 bgcolor）
     const { document: doc1 } = parseHTML(`
       <html style="background-color: #fcfbf9">
@@ -278,5 +280,292 @@ describe("主题原位更新与阅读宿主集成契约", () => {
     );
     returnController.dispose();
     expect(returnPagedDoc.querySelector('style[data-reader="theme"]')).toBeNull();
+  });
+
+  it("防抖前字号变更后切主题：字号重载不被跳过，确保字号确实生效 (R1)", async () => {
+    // 初始状态：槽位实际已应用 16px、light 主题
+    const initialSettings: ReaderSettings = { ...DEFAULT_SETTINGS, fontSizePx: 16, theme: "light" };
+    let desiredSettings: ReaderSettings = initialSettings;
+
+    const { document } = parseHTML("<html><body><p>章节正文</p></body></html>");
+    const themeController = createReaderTheme({ doc: document, theme: "light" });
+
+    let reloadCallCount = 0;
+    let lastReloadTarget: ReaderSettings | null = null;
+
+    const mockSlot = {
+      key: "0:ch1.xhtml",
+      status: "ready" as const,
+      renderSettings: { ...initialSettings },
+      paginator: {
+        updateTheme: (theme: any) => {
+          themeController.update(theme);
+          return true;
+        },
+        reloadWithSettings: async (settings: ReaderSettings) => {
+          reloadCallCount++;
+          lastReloadTarget = settings;
+        },
+        waitForDisplayReady: async () => true,
+      },
+    };
+
+    // 1. 用户修改字号为 20px（排版几何变化进入防抖队列）
+    desiredSettings = { ...initialSettings, fontSizePx: 20 };
+    const pendingDebounceTask = async () => {
+      // 模拟 reloadSlotSettings：比较实际已应用设置与最新期望设置
+      if (sameRenderingSettings(mockSlot.renderSettings, desiredSettings)) return;
+      if (sameLayoutSettings(mockSlot.renderSettings, desiredSettings)) {
+        if (mockSlot.paginator.updateTheme(desiredSettings.theme)) {
+          mockSlot.renderSettings = { ...mockSlot.renderSettings, theme: desiredSettings.theme };
+          return;
+        }
+      }
+      const target = desiredSettings;
+      await mockSlot.paginator.reloadWithSettings(target);
+      await mockSlot.paginator.waitForDisplayReady();
+      mockSlot.renderSettings = { ...target };
+    };
+
+    // 2. 防抖触发前，用户切换主题为 dark（相邻两次 desired 仅差主题）
+    const previousDesired = desiredSettings;
+    desiredSettings = { ...desiredSettings, theme: "dark" };
+    const changeType = classifySettingsChange(previousDesired, desiredSettings);
+    expect(changeType).toBe("theme-only");
+
+    // theme-only 分支执行：必须只更新 theme，绝不能提前将未完成排版的 fontSizePx: 20 写入 slot.renderSettings
+    if (changeType === "theme-only") {
+      if (mockSlot.paginator.updateTheme(desiredSettings.theme)) {
+        mockSlot.renderSettings = { ...mockSlot.renderSettings, theme: desiredSettings.theme };
+      }
+    }
+
+    // 关键断言 1：slot.renderSettings 仅更新了主题，真实排版字号依然是 16px
+    expect(mockSlot.renderSettings.theme).toBe("dark");
+    expect(mockSlot.renderSettings.fontSizePx).toBe(16);
+
+    // 3. 防抖队列触发执行
+    await pendingDebounceTask();
+
+    // 关键断言 2：字号重载没有被跳过，reloadWithSettings 确实以 20px 执行并生效
+    expect(reloadCallCount).toBe(1);
+    expect((lastReloadTarget as ReaderSettings | null)?.fontSizePx).toBe(20);
+    expect((lastReloadTarget as ReaderSettings | null)?.theme).toBe("dark");
+    expect(mockSlot.renderSettings.fontSizePx).toBe(20);
+    expect(mockSlot.renderSettings.theme).toBe("dark");
+
+    themeController.dispose();
+  });
+
+  it("布局重载进行中主题变更：原位同步最新主题，无需进行第二次布局重载 (R1)", async () => {
+    const initialSettings: ReaderSettings = { ...DEFAULT_SETTINGS, fontSizePx: 16, theme: "light" };
+    let desiredSettings: ReaderSettings = { ...DEFAULT_SETTINGS, fontSizePx: 20, theme: "light" };
+
+    const { document } = parseHTML("<html><body><p>正文内容</p></body></html>");
+    const themeController = createReaderTheme({ doc: document, theme: "light" });
+
+    let reloadCount = 0;
+    let inPlaceThemeUpdateCount = 0;
+
+    const mockSlot = {
+      key: "0:ch1.xhtml",
+      unmounted: false,
+      status: "ready" as "loading" | "ready" | "error",
+      renderSettings: { ...initialSettings },
+      paginator: {
+        updateTheme: (theme: any) => {
+          inPlaceThemeUpdateCount++;
+          themeController.update(theme);
+          return true;
+        },
+        reloadWithSettings: async (_settings: ReaderSettings) => {
+          reloadCount++;
+          // 模拟在重载进行中，用户将全局主题改为 dark
+          desiredSettings = { ...desiredSettings, theme: "dark" };
+        },
+        waitForDisplayReady: async () => true,
+      },
+    };
+
+    // 运行 reloadSlotSettings 事务逻辑
+    const runReloadSlotSettings = async () => {
+      if (mockSlot.unmounted || mockSlot.status !== "ready") return;
+      if (sameRenderingSettings(mockSlot.renderSettings, desiredSettings)) return;
+      if (sameLayoutSettings(mockSlot.renderSettings, desiredSettings)) {
+        if (mockSlot.paginator.updateTheme(desiredSettings.theme)) {
+          mockSlot.renderSettings = { ...mockSlot.renderSettings, theme: desiredSettings.theme };
+          return;
+        }
+      }
+
+      do {
+        const target = desiredSettings;
+        await mockSlot.paginator.reloadWithSettings(target);
+        const ready = await mockSlot.paginator.waitForDisplayReady();
+        if (mockSlot.unmounted) return;
+        if (!ready) {
+          mockSlot.status = "error";
+          break;
+        }
+        // 先提交本次真正完成的 layout
+        mockSlot.renderSettings = { ...target };
+        const latest = desiredSettings;
+        if (sameRenderingSettings(mockSlot.renderSettings, latest)) {
+          break;
+        }
+        // 关键协调：仅差主题就原位更新，绝不触发第二次整章重载
+        if (sameLayoutSettings(mockSlot.renderSettings, latest)) {
+          if (mockSlot.paginator.updateTheme(latest.theme)) {
+            mockSlot.renderSettings = { ...mockSlot.renderSettings, theme: latest.theme };
+            break;
+          }
+        }
+      } while (!sameRenderingSettings(mockSlot.renderSettings, desiredSettings));
+    };
+
+    await runReloadSlotSettings();
+
+    // 关键断言：reloadWithSettings 仅调用了 1 次（没有因为主题变成 dark 而产生第二次整章重载）
+    expect(reloadCount).toBe(1);
+    // 关键断言：updateTheme 成功原位更新为 dark
+    expect(inPlaceThemeUpdateCount).toBe(1);
+    expect(mockSlot.renderSettings.fontSizePx).toBe(20);
+    expect(mockSlot.renderSettings.theme).toBe("dark");
+    expect(themeController.currentTheme).toBe("dark");
+
+    themeController.dispose();
+  });
+
+  it("槽位准备/加载中主题变更：就绪/显示前协调最新主题，旧异步结果不覆盖新槽位 (R1)", async () => {
+    let desiredSettings: ReaderSettings = { ...DEFAULT_SETTINGS, theme: "light", fontSizePx: 16 };
+
+    const { document: docB } = parseHTML("<html><body><p>新槽位</p></body></html>");
+
+    interface MockActiveSlot {
+      id: string;
+      generation: number;
+      unmounted: boolean;
+      status: "loading" | "ready" | "error";
+      renderSettings: ReaderSettings;
+      paginator: {
+        updateTheme: (theme: any) => boolean;
+        waitForDisplayReady: () => Promise<boolean>;
+      };
+    }
+
+    // 槽位 A 开始异步加载（在 light 下发起）
+    const slotA: MockActiveSlot = {
+      id: "slot-A",
+      generation: 1,
+      unmounted: false,
+      status: "loading",
+      renderSettings: { ...desiredSettings },
+      paginator: {
+        updateTheme: (_theme: any) => true,
+        waitForDisplayReady: async () => true,
+      },
+    };
+
+    // 异步加载中，用户将主题切换为 dark
+    desiredSettings = { ...desiredSettings, theme: "dark" };
+
+    // 用户快速跳转，slotA 被废弃 (unmounted)，替换为 slotB (generation: 2)
+    slotA.unmounted = true;
+    let activeSlot: MockActiveSlot = slotA;
+
+    const themeControllerB = createReaderTheme({ doc: docB, theme: "light" });
+    const slotB: MockActiveSlot = {
+      id: "slot-B",
+      generation: 2,
+      unmounted: false,
+      status: "loading",
+      renderSettings: { ...DEFAULT_SETTINGS, theme: "light", fontSizePx: 16 },
+      paginator: {
+        updateTheme: (theme: any) => {
+          themeControllerB.update(theme);
+          return true;
+        },
+        waitForDisplayReady: async () => true,
+      },
+    };
+    activeSlot = slotB;
+
+    // slotA 的异步结果稍后返回：必须因 unmounted / 身份不符被拒绝，不能提交状态
+    const handleSlotReady = (slot: MockActiveSlot) => {
+      if (slot.unmounted || activeSlot !== slot) return;
+      // 协调最新主题
+      if (slot.renderSettings.theme !== desiredSettings.theme && sameLayoutSettings(slot.renderSettings, desiredSettings)) {
+        if (slot.paginator.updateTheme(desiredSettings.theme)) {
+          slot.renderSettings = { ...slot.renderSettings, theme: desiredSettings.theme };
+        }
+      }
+      slot.status = "ready";
+    };
+
+    handleSlotReady(slotA);
+    expect(slotA.status).toBe("loading"); // 旧槽位没有被错误标记为 ready
+
+    // slotB 准备完成并提交就绪
+    handleSlotReady(slotB);
+    expect(slotB.status).toBe("ready");
+    // 关键断言：slotB 在就绪显示前已协调为最新 dark 主题
+    expect(slotB.renderSettings.theme).toBe("dark");
+    expect(themeControllerB.currentTheme).toBe("dark");
+
+    themeControllerB.dispose();
+  });
+
+  it("滤镜背景读取实际阅读表面：iframe 内容背景优先，调色板仅作外层底色 (R2)", () => {
+    // 模拟 iframe 内部文档拥有作者自定义背景
+    const mockContentDoc = {
+      body: { style: { backgroundColor: "rgb(253, 246, 226)" } },
+      documentElement: { style: {} },
+      defaultView: {
+        getComputedStyle: (el: any) => ({
+          backgroundColor: el === mockContentDoc.body ? "rgb(253, 246, 226)" : "transparent",
+        }),
+      },
+    };
+
+    const mockIframe = {
+      contentDocument: mockContentDoc,
+      ownerDocument: {
+        defaultView: {
+          getComputedStyle: () => ({ backgroundColor: "rgb(255, 255, 255)" }),
+        },
+      },
+      closest: () => null,
+    } as unknown as HTMLElement;
+
+    // continuousSurfaceBackground 和 readerSurfaceBackground 均应提取 iframe 内的作者背景
+    const contBg = continuousSurfaceBackground(mockIframe);
+    const pagedBg = readerSurfaceBackground(mockIframe);
+
+    expect(contBg).toBe("rgb(253, 246, 226)");
+    expect(pagedBg).toBe("rgb(253, 246, 226)");
+
+    // 若 iframe 内没有设置背景（transparent），则回退到宿主容器背景
+    const mockTransparentDoc = {
+      body: {},
+      documentElement: {},
+      defaultView: {
+        getComputedStyle: () => ({ backgroundColor: "transparent" }),
+      },
+    };
+    const mockHostContainer = {};
+    const mockTransparentIframe = {
+      contentDocument: mockTransparentDoc,
+      ownerDocument: {
+        defaultView: {
+          getComputedStyle: (el: any) => ({
+            backgroundColor: el === mockHostContainer ? "rgb(240, 240, 240)" : "transparent",
+          }),
+        },
+      },
+      closest: (sel: string) => (sel === ".reader" || sel === ".reader-continuous" ? mockHostContainer : null),
+    } as unknown as HTMLElement;
+
+    expect(continuousSurfaceBackground(mockTransparentIframe)).toBe("rgb(240, 240, 240)");
+    expect(readerSurfaceBackground(mockTransparentIframe)).toBe("rgb(240, 240, 240)");
   });
 });

@@ -29,7 +29,6 @@ import {
 } from "../render/visual/readerVisualPreferences";
 import { attachReaderPaint } from "../render/visual/readerVisualPaint";
 import type { ReaderPaintHandle } from "../render/visual/readerVisualPreferences";
-import { READER_PALETTES } from "../config/readerPalette";
 import {
   classifySettingsChange,
   sameLayoutSettings,
@@ -280,7 +279,20 @@ function parseViewport(vp: string | undefined): { w: number; h: number } | null 
 }
 
 /** Paper color behind a transparent body iframe, applied only while filters are active. */
-function readerSurfaceBackground(surface: HTMLElement): string | null {
+export function readerSurfaceBackground(surface: HTMLElement): string | null {
+  const contentDoc = (surface as HTMLIFrameElement).contentDocument;
+  if (contentDoc && contentDoc.defaultView) {
+    try {
+      for (const candidate of [contentDoc.body, contentDoc.documentElement]) {
+        if (!candidate) continue;
+        const color = contentDoc.defaultView.getComputedStyle(candidate).backgroundColor;
+        if (color && color !== "transparent" && color !== "rgba(0, 0, 0, 0)") return color;
+      }
+    } catch {
+      // Cross-origin or detached iframe fallback
+    }
+  }
+
   const doc = surface.ownerDocument;
   const candidates = [
     surface.closest(".reader") as HTMLElement | null,
@@ -988,6 +1000,13 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
           if (!slot.ready) {
             failedPreloadsRef.current.add(`${index}:${path}`);
             disposeSpareSlot(slot);
+          } else {
+            const latest = latestRenderSettingsRef.current;
+            if (slot.renderSettings.theme !== latest.theme && sameLayoutSettings(slot.renderSettings, latest)) {
+              if (paginator.updateTheme(latest.theme)) {
+                slot.renderSettings = { ...slot.renderSettings, theme: latest.theme };
+              }
+            }
           }
           scheduleAdjacentPreloadsDebounced(150);
         })
@@ -1304,8 +1323,9 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     const next = spareSlotsRef.current.find((slot) => slot.path === path && slot.spineIndex === targetIndex);
     if (next && next.paginator && sameLayoutSettings(next.renderSettings, latestRenderSettingsRef.current)) {
       if (next.renderSettings.theme !== latestRenderSettingsRef.current.theme) {
-        next.paginator.updateTheme(latestRenderSettingsRef.current.theme);
-        next.renderSettings = latestRenderSettingsRef.current;
+        if (next.paginator.updateTheme(latestRenderSettingsRef.current.theme)) {
+          next.renderSettings = { ...next.renderSettings, theme: latestRenderSettingsRef.current.theme };
+        }
       }
     }
     if (
@@ -1497,8 +1517,9 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
           sameLayoutSettings(inFlight.renderSettings, latestRenderSettingsRef.current)
         ) {
           if (inFlight.renderSettings.theme !== latestRenderSettingsRef.current.theme) {
-            inFlight.paginator.updateTheme(latestRenderSettingsRef.current.theme);
-            inFlight.renderSettings = latestRenderSettingsRef.current;
+            if (inFlight.paginator.updateTheme(latestRenderSettingsRef.current.theme)) {
+              inFlight.renderSettings = { ...inFlight.renderSettings, theme: latestRenderSettingsRef.current.theme };
+            }
           }
           const ready = await inFlight.paginator.waitForDisplayReady();
           if (ready && activeSlotRef.current?.spineIndex !== spineIndex) {
@@ -1562,6 +1583,16 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
             }
           : null,
       });
+      if (activeSlotRef.current && activeSlotRef.current.paginator === p) {
+        const latest = latestRenderSettingsRef.current;
+        if (activeSlotRef.current.renderSettings.theme !== latest.theme && sameLayoutSettings(activeSlotRef.current.renderSettings, latest)) {
+          if (p.updateTheme(latest.theme)) {
+            activeSlotRef.current.renderSettings = { ...activeSlotRef.current.renderSettings, theme: latest.theme };
+            const surface = activeIframeRef.current;
+            paintHandleRef.current?.setSurfaceBackground(surface ? readerSurfaceBackground(surface) : null);
+          }
+        }
+      }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [book, spineIndex, props.anchorNonce, props.startAtEnd.nonce]);
@@ -1597,14 +1628,17 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       settingsIdentityRef.current = { settings, userFonts: props.userFonts };
       const active = activeSlotRef.current;
       if (active) {
-        active.renderSettings = effSettings;
-        active.paginator?.updateTheme(effSettings.theme);
+        if (active.paginator?.updateTheme(effSettings.theme)) {
+          active.renderSettings = { ...active.renderSettings, theme: effSettings.theme };
+        }
       }
       for (const slot of spareSlotsRef.current) {
-        slot.renderSettings = effSettings;
-        slot.paginator?.updateTheme(effSettings.theme);
+        if (slot.paginator?.updateTheme(effSettings.theme)) {
+          slot.renderSettings = { ...slot.renderSettings, theme: effSettings.theme };
+        }
       }
-      paintHandleRef.current?.setSurfaceBackground(READER_PALETTES[effSettings.theme].background);
+      const surface = activeIframeRef.current;
+      paintHandleRef.current?.setSurfaceBackground(surface ? readerSurfaceBackground(surface) : null);
       return;
     }
 
@@ -1614,11 +1648,23 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     settingsIdentityRef.current = { settings, userFonts: props.userFonts };
     const p = paginatorRef.current;
     if (!p) return;
-    settingsReloadDebouncerRef.current?.schedule(() => {
+    settingsReloadDebouncerRef.current?.schedule(async () => {
       const current = paginatorRef.current;
       if (!current || current !== p) return;
-      if (activeSlotRef.current) activeSlotRef.current.renderSettings = latestRenderSettingsRef.current;
-      void current.reloadWithSettings(latestRenderSettingsRef.current);
+      const target = latestRenderSettingsRef.current;
+      await current.reloadWithSettings(target);
+      if (paginatorRef.current !== current) return;
+      if (activeSlotRef.current && activeSlotRef.current.paginator === current) {
+        activeSlotRef.current.renderSettings = { ...target };
+        const latest = latestRenderSettingsRef.current;
+        if (sameLayoutSettings(target, latest) && target.theme !== latest.theme) {
+          if (current.updateTheme(latest.theme)) {
+            activeSlotRef.current.renderSettings = { ...activeSlotRef.current.renderSettings, theme: latest.theme };
+            const surface = activeIframeRef.current;
+            paintHandleRef.current?.setSurfaceBackground(surface ? readerSurfaceBackground(surface) : null);
+          }
+        }
+      }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings, props.userFonts]);
@@ -1674,7 +1720,8 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
 
   useEffect(() => {
     paintHandleRef.current?.update(visualPreferences, props.compareOriginal === true);
-    paintHandleRef.current?.setSurfaceBackground(READER_PALETTES[settings.theme].background);
+    const surface = activeIframeRef.current;
+    paintHandleRef.current?.setSurfaceBackground(surface ? readerSurfaceBackground(surface) : null);
   }, [visualPreferences, props.compareOriginal, settings.theme]);
 
   // The setting is deliberately a scheduler toggle: it must not reload the
