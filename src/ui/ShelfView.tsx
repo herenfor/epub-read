@@ -3771,8 +3771,10 @@ export function ShelfView(props: ShelfViewProps) {
     return activeFolders.filter((f) => f.name.toLowerCase().includes(q));
   }, [scope, statusTab, activeFolders, query]);
 
+  // 展开的文件夹卡片只是内容状态：文件夹弹窗盖在上面时它不参与返回链，返回先关弹窗。
   useShelfSubmenuBack(
-    isCompactMobile && viewMode === "grid" && scope.type === "root" && visibleFolders.length > 0 && folderPrefixExpanded,
+    isCompactMobile && viewMode === "grid" && scope.type === "root" && visibleFolders.length > 0 && folderPrefixExpanded &&
+      activeFolderModal === null,
     () => setFolderPrefixExpanded(false),
     {
       registerSubmenuBackHandler,
