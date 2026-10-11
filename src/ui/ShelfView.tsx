@@ -1147,8 +1147,10 @@ function buttonMenuOpener(event: React.MouseEvent<HTMLElement>, pressedWith: str
 }
 
 function contextMenuOpener(event: React.MouseEvent<HTMLElement>, trigger: HTMLElement | null): ShelfMenuOpener {
-  const pointerType = (event.nativeEvent as Partial<PointerEvent>).pointerType ?? "mouse";
-  const keyboard = pointerType === "";
+  // Touch long press never gets here (the press recognizer owns it). A right button is the mouse;
+  // the context-menu key / Shift+F10 arrives without it and anchors at the card's own button.
+  const keyboard = event.button !== 2;
+  const pointerType = keyboard ? "" : ((event.nativeEvent as Partial<PointerEvent>).pointerType || "mouse");
   return {
     trigger,
     point: keyboard ? undefined : { x: event.clientX, y: event.clientY },

@@ -119,6 +119,19 @@ export class ShelfPressGesture {
     this.schedule(SHELF_LONG_PRESS_MS, () => this.fire(kind));
   }
 
+  /**
+   * A press that began on a control inside the card (star, three-dot) belongs to that control.
+   * Sliding off and releasing over the card makes the browser click the card itself; that click
+   * must not open or select.
+   */
+  foreign(pointer: ShelfPressPointer): void {
+    if (pointer.isPrimary === false || pointer.button !== 0) return;
+    this.clearTimers();
+    this.lastPointerType = pointer.pointerType;
+    this.press = { pointerId: pointer.pointerId, pointerType: pointer.pointerType, x: pointer.clientX, y: pointer.clientY, status: "withdrawn" };
+    this.consumed = true;
+  }
+
   move(pointer: Pick<ShelfPressPointer, "pointerId" | "clientX" | "clientY">): void {
     const press = this.press;
     if (!press || press.pointerId !== pointer.pointerId || press.status !== "pending") return;
@@ -263,7 +276,11 @@ export function useShelfPress(options: ShelfPressOptions): ShelfPressBindings {
     onPointerDown(event) {
       if (event.isPrimary === false) { gesture.withdraw(); detach(); return; }
       // Controls inside the card (three-dot, star, checkbox) own their own press.
-      if (isShelfCardActionTarget(event.target, event.currentTarget)) return;
+      if (isShelfCardActionTarget(event.target, event.currentTarget)) {
+        gesture.foreign(event);
+        detach();
+        return;
+      }
       elementRef.current = event.currentTarget;
       gesture.down(event);
       if (gesture.active) attach(event.pointerId);

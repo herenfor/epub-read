@@ -107,6 +107,16 @@ describe("shelf press recognizer", () => {
     expect(g.press.takeClick()).toBe(false);
   });
 
+  it("a press that began on a control inside the card never opens the card", () => {
+    const g = gesture();
+    g.press.foreign({ pointerId: 1, pointerType: "mouse", button: 0, isPrimary: true, clientX: 10, clientY: 10 });
+    g.time.advance(600);
+    g.press.up({ pointerId: 1 });
+    expect(g.fired).toEqual([]);
+    expect(g.phases).toEqual([]);
+    expect(g.press.takeClick()).toBe(true);
+  });
+
   it("a second finger cancels the press", () => {
     const g = gesture();
     g.down();

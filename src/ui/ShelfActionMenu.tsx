@@ -48,7 +48,22 @@ function moveFocus(root: HTMLElement | null, key: string): boolean {
   return true;
 }
 
-function ActionList(props: Pick<ShelfActionMenuProps, "groups" | "onAction" | "closing">) {
+/**
+ * A click only counts when its press began after this menu appeared. The finger that long-pressed
+ * a card is still down when the sheet slides in; its release must not hit the backdrop or a row
+ * that moved under it. Keyboard/programmatic clicks (detail 0) are always fine.
+ */
+function useFreshPress() {
+  const pressed = useRef(false);
+  return {
+    arm: () => { pressed.current = true; },
+    accepts: (event: React.MouseEvent) => !(event.detail > 0) || pressed.current,
+  };
+}
+
+function ActionList(props: Pick<ShelfActionMenuProps, "groups" | "onAction" | "closing"> & {
+  accepts(event: React.MouseEvent): boolean;
+}) {
   return <>
     {props.groups.map(({ group, items }, index) => <div key={group}
       className={`shelf-action-group is-${group}`} role="group">
@@ -57,7 +72,7 @@ function ActionList(props: Pick<ShelfActionMenuProps, "groups" | "onAction" | "c
         className={`shelf-action-item${group === "danger" ? " danger" : ""}${item.pending ? " is-pending" : ""}`}
         disabled={item.disabled || item.pending || props.closing}
         aria-busy={item.pending || undefined}
-        onClick={() => props.onAction(item.id)}>
+        onClick={(event) => { if (props.accepts(event)) props.onAction(item.id); }}>
         <span className="shelf-action-icon" aria-hidden="true">{item.icon}</span>
         <span className="shelf-action-label">{item.label}</span>
       </button>)}
@@ -74,21 +89,39 @@ export function ShelfActionMenu(props: ShelfActionMenuProps) {
   return props.presentation === "sheet" ? <ShelfActionSheet {...props} /> : <ShelfActionPopover {...props} />;
 }
 
-function useInitialFocus(root: React.RefObject<HTMLElement>, focusFirstItem: boolean): void {
+/** Focus once per opening, after the shell is actually visible (a hidden element cannot take focus). */
+function useInitialFocus(root: React.RefObject<HTMLElement>, focusFirstItem: boolean, ready: boolean): void {
+  const done = useRef(false);
   useEffect(() => {
     const element = root.current;
-    if (!element) return;
+    if (!ready || done.current || !element) return;
+    done.current = true;
     const first = focusFirstItem ? enabledItems(element)[0] : null;
     (first ?? element).focus({ preventScroll: true });
-    // Focus once per opening; re-renders of the same menu keep the user's position.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [focusFirstItem, ready, root]);
+}
+
+/** The menu is the top layer: Escape closes it before any dialog below sees the key, wherever focus is. */
+function useEscapeDismiss(closing: boolean, onDismiss: () => void): void {
+  useEffect(() => {
+    if (closing) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      onDismiss();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [closing, onDismiss]);
 }
 
 function ShelfActionPopover(props: ShelfActionMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [place, setPlace] = useState<ShelfMenuPlacementResult | null>(null);
-  useInitialFocus(ref, props.focusFirstItem);
+  const fresh = useFreshPress();
+  useInitialFocus(ref, props.focusFirstItem, place !== null);
+  useEscapeDismiss(props.closing, props.onDismiss);
 
   useLayoutEffect(() => {
     const element = ref.current;
@@ -102,7 +135,7 @@ function ShelfActionPopover(props: ShelfActionMenuProps) {
       top: vv ? vv.offsetTop : 0,
       width: vv ? vv.width : window.innerWidth,
       height: vv ? vv.height : window.innerHeight,
-    }));
+    }, props.anchor.left === props.anchor.right && props.anchor.top === props.anchor.bottom ? "start" : "end"));
   }, [props.anchor]);
 
   // The page moved under the anchor: the popover would point at nothing.
@@ -130,13 +163,13 @@ function ShelfActionPopover(props: ShelfActionMenuProps) {
       onContextMenu={(event) => event.preventDefault()}
       onWheel={() => props.onDismiss()} />
     <div ref={ref} tabIndex={-1} role="menu" aria-label={props.label}
+      onPointerDownCapture={fresh.arm}
       className={`shelf-action-popover${place?.placement === "up" ? " placement-up" : " placement-down"}${props.closing ? " is-closing" : ""}`}
       style={place
         ? { left: place.left, top: place.top, maxWidth: place.width, maxHeight: place.maxHeight }
         : { left: -9999, top: -9999, visibility: "hidden" }}
       onKeyDown={(event) => {
-        if (event.key === "Escape" || event.key === "Tab") {
-          if (event.key === "Escape") event.preventDefault();
+        if (event.key === "Tab") {
           event.stopPropagation();
           props.onDismiss();
           return;
@@ -149,7 +182,7 @@ function ShelfActionPopover(props: ShelfActionMenuProps) {
       onContextMenu={(event) => event.preventDefault()}>
       <div className="shelf-action-popover-title">{props.header}</div>
       {props.error && <div className="shelf-action-error" role="alert">{props.error}</div>}
-      <ActionList groups={props.groups} onAction={props.onAction} closing={props.closing} />
+      <ActionList groups={props.groups} onAction={props.onAction} closing={props.closing} accepts={fresh.accepts} />
     </div>
   </>;
 }
@@ -158,7 +191,9 @@ function ShelfActionSheet(props: ShelfActionMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
   const drag = useRef<{ pointerId: number; startY: number; lastY: number; lastAt: number; velocity: number } | null>(null);
   const [dragging, setDragging] = useState(false);
-  useInitialFocus(ref, props.focusFirstItem);
+  const fresh = useFreshPress();
+  useInitialFocus(ref, props.focusFirstItem, true);
+  useEscapeDismiss(props.closing, props.onDismiss);
 
   const endDrag = (close: boolean) => {
     const sheet = ref.current;
@@ -211,17 +246,13 @@ function ShelfActionSheet(props: ShelfActionMenuProps) {
   return <>
     <div className={`shelf-action-sheet-backdrop${props.closing ? " is-closing" : ""}`}
       aria-hidden="true"
-      onClick={() => props.onDismiss()}
+      onPointerDown={fresh.arm}
+      onClick={(event) => { if (fresh.accepts(event)) props.onDismiss(); }}
       onContextMenu={(event) => event.preventDefault()} />
     <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={props.label}
+      onPointerDownCapture={fresh.arm}
       className={`shelf-action-sheet${props.closing ? " is-closing" : ""}${dragging ? " is-dragging" : ""}`}
       onKeyDown={(event) => {
-        if (event.key === "Escape") {
-          event.preventDefault();
-          event.stopPropagation();
-          props.onDismiss();
-          return;
-        }
         if (moveFocus(ref.current, event.key)) {
           event.preventDefault();
           event.stopPropagation();
@@ -234,7 +265,7 @@ function ShelfActionSheet(props: ShelfActionMenuProps) {
       <div className="shelf-action-sheet-head" {...grip}>{props.header}</div>
       {props.error && <div className="shelf-action-error" role="alert">{props.error}</div>}
       <div className="shelf-action-sheet-list" role="menu" aria-label={props.label}>
-        <ActionList groups={props.groups} onAction={props.onAction} closing={props.closing} />
+        <ActionList groups={props.groups} onAction={props.onAction} closing={props.closing} accepts={fresh.accepts} />
       </div>
     </div>
   </>;

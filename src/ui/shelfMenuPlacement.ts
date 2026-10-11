@@ -33,6 +33,8 @@ export function placeShelfMenu(
   anchor: ShelfMenuAnchorRect,
   menu: ShelfMenuSize,
   viewport: ShelfMenuViewport,
+  /** "end" lines the menu's right edge up with a button; "start" opens rightwards from a cursor. */
+  align: "end" | "start" = "end",
 ): ShelfMenuPlacementResult {
   const edge = 12;
   const gap = 4;
@@ -50,7 +52,7 @@ export function placeShelfMenu(
   const clamp = (value: number, min: number, max: number) =>
     Math.min(max, Math.max(min, value));
   return {
-    left: clamp(anchor.right - width, leftEdge, rightEdge - width),
+    left: clamp(align === "start" ? anchor.left : anchor.right - width, leftEdge, rightEdge - width),
     top: clamp(
       up ? anchor.top - gap - height : anchor.bottom + gap,
       topEdge,
