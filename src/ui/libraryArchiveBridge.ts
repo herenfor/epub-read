@@ -29,6 +29,7 @@ const SETTINGS_KEYS = [
   "customFontName",
   "fontSource",
   "customFontId",
+  "forceFontOverride",
   "customCss",
   "gapPx",
   "spreadGapMode",

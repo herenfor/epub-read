@@ -786,6 +786,7 @@ export default function App() {
       customFontName: saved.customFontName,
       fontSource: saved.fontSource === "system" || saved.fontSource === "imported" ? saved.fontSource : undefined,
       customFontId: saved.customFontId,
+      forceFontOverride: saved.forceFontOverride === true,
       customCss: saved.customCss,
       forceHorizontal: saved.forceHorizontal === true,
       preloadNextChapter: saved.preloadNextChapter === true,
@@ -6625,6 +6626,8 @@ export default function App() {
                   source={settings.fontSource}
                   customFontId={settings.customFontId}
                   customFontName={settings.customFontName}
+                  forceFontOverride={settings.forceFontOverride === true}
+                  onForceFontOverrideChange={(enabled) => setSettings((s) => ({ ...s, forceFontOverride: enabled }))}
                   systemFonts={systemFonts}
                   userFonts={userFonts}
                   systemFontsStatus={systemFontsStatus}
