@@ -1,7 +1,7 @@
 import { nextLinearIndex, spineItemPath } from "../core/book";
-import { hasParserError, parseXmlText } from "../core/parseXml";
 import type { Book } from "../core/types";
 import { findElements } from "../core/xml";
+import { parseChapterDocument } from "../render/chapterDocument";
 import { isImageChapterLeaf } from "../render/fullPageImage";
 
 export interface ImageChapterSpread {
@@ -37,8 +37,9 @@ export class ImageChapterSpreads {
     if (!path) return false;
     const html = await this.readText(path, signal);
     if (signal.aborted) throw new DOMException("操作已取消", "AbortError");
-    let doc = await parseXmlText(html, this.book.version === 2 ? "application/xml" : "text/html");
-    if (hasParserError(doc)) doc = await parseXmlText(html, "text/html");
+    // Same normalization as rendering: EPUB3 parses as HTML, where a
+    // self-closing <script/> would otherwise swallow the image body.
+    const { doc } = await parseChapterDocument(html, this.book.version === 2);
     const body = findElements(doc, "body")[0];
     const image = body !== undefined && isImageChapterLeaf(body);
     this.pages.set(index, image);
