@@ -66,12 +66,9 @@ function organizationWithFolder(): LibraryOrganization {
 
 type Harness = ReturnType<typeof createReactDomHarness>;
 
-function childrenOf(root: unknown): Element[] {
-  return Array.from((root as { children: ArrayLike<Element> }).children);
-}
-
-function findByTextWithin(root: unknown, text: string): HTMLElement {
-  const match = childrenOf(root).find((el) => (el.textContent ?? "").trim() === text);
+function findByTextWithin(root: Element, text: string): HTMLElement {
+  const match = Array.from(root.querySelectorAll(".shelf-action-item"))
+    .find((el) => (el.textContent ?? "").trim() === text);
   if (!match) throw new Error(`missing element with text: ${text}`);
   return match as unknown as HTMLElement;
 }
@@ -91,10 +88,10 @@ async function pressEnter(dom: Harness, element: Element): Promise<void> {
   element.dispatchEvent(event);
 }
 
-/** 卡片菜单通过 portal 挂到 document.body，只会同时打开一个，按文档查找即可。 */
+/** 书架唯一的操作菜单经 portal 挂出，只会同时打开一个，按文档查找即可。 */
 function cardMenu(dom: Harness, bookId: string): Element {
   cardFor(dom, bookId);
-  const menu = dom.container.ownerDocument.querySelector(".shelf-card-pop-menu");
+  const menu = dom.container.ownerDocument.querySelector(".shelf-action-popover, .shelf-action-sheet");
   if (!menu) throw new Error(`menu is not open for: ${bookId}`);
   return menu as unknown as Element;
 }
@@ -233,7 +230,7 @@ describe("isShelfCardActionTarget", () => {
       card.className = "shelf-card";
       const host = document.createElement("div");
       host.className = "shelf-menu-portal-host";
-      host.innerHTML = '<div class="shelf-card-pop-menu"><button>移至文件夹</button></div>';
+      host.innerHTML = '<div class="shelf-action-popover"><button>移至文件夹</button></div>';
       const outsideButton = document.createElement("button");
       document.body.append(card, host, outsideButton);
       expect(isShelfCardActionTarget(host.querySelector("button"), card)).toBe(true);
@@ -300,7 +297,7 @@ describe("从文件夹移除", () => {
     try {
       const menu = await shelf.openMenu(filedBook.id);
       const removeButton = findByTextWithin(menu, "从文件夹移除") as HTMLButtonElement;
-      // 组件按 disabled={removePending || props.busy} 渲染；linkedom 不把 disabled
+      // 组件按 disabled={busy || pending} 渲染；linkedom 不把 disabled
       // 反射到属性上，因此这里同时校验属性与等效的可观察行为。
       expect(removeButton.hasAttribute("disabled")).toBe(true);
       await shelf.dom.click(removeButton);

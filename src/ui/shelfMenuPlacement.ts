@@ -1,6 +1,3 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { MENU_CLOSE_MS } from "./menuMotion";
-
 /**
  * Viewport placement calculation for shelf popover menus.
  * Inputs and outputs are in CSS viewport coordinates (matching visualViewport).
@@ -36,6 +33,8 @@ export function placeShelfMenu(
   anchor: ShelfMenuAnchorRect,
   menu: ShelfMenuSize,
   viewport: ShelfMenuViewport,
+  /** "end" lines the menu's right edge up with a button; "start" opens rightwards from a cursor. */
+  align: "end" | "start" = "end",
 ): ShelfMenuPlacementResult {
   const edge = 12;
   const gap = 4;
@@ -53,7 +52,7 @@ export function placeShelfMenu(
   const clamp = (value: number, min: number, max: number) =>
     Math.min(max, Math.max(min, value));
   return {
-    left: clamp(anchor.right - width, leftEdge, rightEdge - width),
+    left: clamp(align === "start" ? anchor.left : anchor.right - width, leftEdge, rightEdge - width),
     top: clamp(
       up ? anchor.top - gap - height : anchor.bottom + gap,
       topEdge,
@@ -63,22 +62,6 @@ export function placeShelfMenu(
     maxHeight,
     placement: up ? "up" : "down",
   };
-}
-
-/** Legacy signature for backwards compatibility with existing unit tests. */
-export function chooseShelfMenuPlacement(
-  triggerRect: { top: number; bottom: number },
-  viewportHeight: number,
-  menuHeight: number = 240,
-): "up" | "down" {
-  const gap = 4;
-  const edge = 12;
-  const spaceBelow = viewportHeight - triggerRect.bottom - gap - edge;
-  const spaceAbove = triggerRect.top - gap - edge;
-  if (spaceBelow < menuHeight && spaceAbove > spaceBelow) {
-    return "up";
-  }
-  return "down";
 }
 
 /**
@@ -97,96 +80,4 @@ export function getShelfMenuPortalHost(fallbackContainer?: Element | null): HTML
   host.className = "shelf-menu-portal-host";
   container.appendChild(host);
   return host;
-}
-
-/**
- * Hook providing position calculation, outside-click detection, and scroll-to-dismiss
- * for portaled shelf card/row popover menus.
- */
-export function useShelfMenuPopover(
-  menuOpen: boolean,
-  setMenuOpen: React.Dispatch<React.SetStateAction<boolean>>,
-) {
-  const [menuClosing, setMenuClosing] = useState(false);
-  const [menuCoords, setMenuCoords] = useState<ShelfMenuPlacementResult | null>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const menuPanelRef = useRef<HTMLDivElement>(null);
-
-  const closeMenu = useCallback(() => {
-    setMenuClosing(true);
-    window.setTimeout(() => {
-      setMenuOpen(false);
-      setMenuClosing(false);
-      setMenuCoords(null);
-    }, MENU_CLOSE_MS);
-  }, [setMenuOpen]);
-
-  useLayoutEffect(() => {
-    if (!menuOpen || !triggerRef.current || !menuPanelRef.current) {
-      if (!menuOpen) setMenuCoords(null);
-      return;
-    }
-    const btnRect = triggerRef.current.getBoundingClientRect();
-    const menuEl = menuPanelRef.current;
-    const vv = window.visualViewport;
-    const viewport: ShelfMenuViewport = {
-      left: vv ? vv.offsetLeft : 0,
-      top: vv ? vv.offsetTop : 0,
-      width: vv ? vv.width : window.innerWidth,
-      height: vv ? vv.height : window.innerHeight,
-    };
-    const menuSize: ShelfMenuSize = {
-      width: menuEl.offsetWidth || 200,
-      height: menuEl.offsetHeight || 240,
-    };
-    setMenuCoords(placeShelfMenu(btnRect, menuSize, viewport));
-  }, [menuOpen]);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onDown = (e: PointerEvent): void => {
-      const target = e.target as Node;
-      if (
-        !triggerRef.current?.contains(target) &&
-        !menuPanelRef.current?.contains(target)
-      ) {
-        closeMenu();
-      }
-    };
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") closeMenu();
-    };
-    const onScroll = (e: Event): void => {
-      if (
-        menuPanelRef.current &&
-        (e.target === menuPanelRef.current || menuPanelRef.current.contains(e.target as Node))
-      ) {
-        return;
-      }
-      closeMenu();
-    };
-    const onResize = (): void => {
-      closeMenu();
-    };
-    window.addEventListener("pointerdown", onDown);
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("scroll", onScroll, true);
-    window.addEventListener("resize", onResize);
-    window.visualViewport?.addEventListener("resize", onResize);
-    return () => {
-      window.removeEventListener("pointerdown", onDown);
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("scroll", onScroll, true);
-      window.removeEventListener("resize", onResize);
-      window.visualViewport?.removeEventListener("resize", onResize);
-    };
-  }, [menuOpen, closeMenu]);
-
-  return {
-    menuClosing,
-    menuCoords,
-    triggerRef,
-    menuPanelRef,
-    closeMenu,
-  };
 }

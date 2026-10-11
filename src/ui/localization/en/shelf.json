@@ -48,6 +48,8 @@
   "shelf.card.moveToFolder": "Move to Folder",
   "shelf.card.removing": "Removing...",
   "shelf.card.removeFromFolder": "Remove from Folder",
+  "shelf.card.removeFailed": "Couldn't remove it from the folder: {error}",
+  "shelf.card.select": "Select",
   "shelf.card.delete": "Delete from Library",
   "shelf.card.readSuffix": "read",
   "shelf.card.unread": "Unread",
