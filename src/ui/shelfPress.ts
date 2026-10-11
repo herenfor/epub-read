@@ -204,6 +204,41 @@ export class ShelfPressGesture {
   }
 }
 
+/**
+ * Shelf-wide tail of a gesture whose long press already acted. Entering selection mode can move
+ * books under the finger, so the click that ends that gesture may land on another card; it must
+ * reach none. The next pointerdown starts a new gesture and clears the tail immediately.
+ */
+export class ShelfGestureTail {
+  private state: { released: boolean; until: number } | null = null;
+
+  constructor(private readonly now: () => number = () => Date.now()) {}
+
+  arm(): void {
+    this.state = { released: false, until: 0 };
+  }
+
+  pointerDown(): void {
+    this.state = null;
+  }
+
+  pointerUp(): void {
+    const state = this.state;
+    if (state && !state.released) {
+      state.released = true;
+      state.until = this.now() + SHELF_PRESS_CLICK_TAIL_MS;
+    }
+  }
+
+  /** True for the pointer click that ends the armed gesture; keyboard clicks (detail 0) never match. */
+  takeClick(detail: number): boolean {
+    const state = this.state;
+    if (!state || !(detail > 0)) return false;
+    this.state = null;
+    return !state.released || this.now() <= state.until;
+  }
+}
+
 export interface ShelfPressOptions {
   longPressKind(pointerType: string): ShelfLongPress | null;
   onLongPress(kind: ShelfLongPress, point: { x: number; y: number }, element: HTMLElement): void;

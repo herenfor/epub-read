@@ -7,7 +7,7 @@ import { useUiLanguageChoice } from "./localization/useUiLanguageChoice";
 import type { UiLanguagePreference } from "./localization/core";
 import { createPortal } from "react-dom";
 import { getShelfMenuPortalHost, type ShelfMenuAnchorRect } from "./shelfMenuPlacement";
-import { shelfLongPressKind, useShelfPress, type ShelfLongPress } from "./shelfPress";
+import { ShelfGestureTail, shelfLongPressKind, useShelfPress, type ShelfLongPress } from "./shelfPress";
 import {
   groupShelfActions,
   shelfBookActions,
@@ -3619,6 +3619,10 @@ export function ShelfView(props: ShelfViewProps) {
     window.setTimeout(() => { dragJustEndedRef.current = false; }, 0);
   }, []);
 
+  /** The click ending a gesture whose long press acted reaches no card, even if books moved under the finger. */
+  const [gestureTail] = useState(() => new ShelfGestureTail());
+  const armGestureTail = useCallback((): void => gestureTail.arm(), [gestureTail]);
+
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
 
   const activeFolders = useMemo(() => {
@@ -4286,7 +4290,15 @@ export function ShelfView(props: ShelfViewProps) {
   // 拖动进行中，以及结束拖动的那一次 pointerup 所带的合成点击，不交给卡片；弹窗区域正常响应。
   // 只按手势吞掉这一次，不设时间窗，松手后的新点击立即可用。
   useEffect(() => {
-    const handleWindowClickCapture = (e: MouseEvent): void => {
+    const handleDocumentPointerDown = (): void => gestureTail.pointerDown();
+    const handleDocumentPointerUp = (): void => gestureTail.pointerUp();
+    const handleDocumentClickCapture = (e: MouseEvent): void => {
+      if (gestureTail.takeClick(e.detail)) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        return;
+      }
       const target = e.target as HTMLElement | null;
       if (
         target?.closest?.(
@@ -4301,11 +4313,18 @@ export function ShelfView(props: ShelfViewProps) {
         e.stopImmediatePropagation();
       }
     };
-    window.addEventListener("click", handleWindowClickCapture, { capture: true });
+    // Document capture still runs before React's root listeners.
+    document.addEventListener("pointerdown", handleDocumentPointerDown, { capture: true });
+    document.addEventListener("pointerup", handleDocumentPointerUp, { capture: true });
+    document.addEventListener("pointercancel", handleDocumentPointerUp, { capture: true });
+    document.addEventListener("click", handleDocumentClickCapture, { capture: true });
     return () => {
-      window.removeEventListener("click", handleWindowClickCapture, { capture: true });
+      document.removeEventListener("pointerdown", handleDocumentPointerDown, { capture: true });
+      document.removeEventListener("pointerup", handleDocumentPointerUp, { capture: true });
+      document.removeEventListener("pointercancel", handleDocumentPointerUp, { capture: true });
+      document.removeEventListener("click", handleDocumentClickCapture, { capture: true });
     };
-  }, []);
+  }, [gestureTail]);
 
   const handleCreateFolder = useCallback(
     async (name: string): Promise<string> => {
@@ -4398,17 +4417,19 @@ export function ShelfView(props: ShelfViewProps) {
 
   const handleBookLongPress = useCallback(
     (entry: ShelfEntry, kind: ShelfLongPress, point: { x: number; y: number }): void => {
+      armGestureTail();
       if (kind === "select") handleTouchLongPressSelect(entry.id);
       else if (kind === "drag") handleDragStart(entry, point);
     },
-    [handleDragStart, handleTouchLongPressSelect]
+    [armGestureTail, handleDragStart, handleTouchLongPressSelect]
   );
 
   const handleFolderModalLongPress = useCallback(
     (entry: ShelfEntry, kind: ShelfLongPress, point: { x: number; y: number }): void => {
+      armGestureTail();
       if (kind === "drag") handleFolderBookDragStart(entry, point);
     },
-    [handleFolderBookDragStart]
+    [armGestureTail, handleFolderBookDragStart]
   );
 
   // 菜单目标消失（同步、删除、解散）或其所在的文件夹弹窗已关：立即安全关闭，不对旧对象执行迟到动作。
