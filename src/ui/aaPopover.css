@@ -634,8 +634,9 @@
 }
 
 /* ---- 手机 Aa 底部面板：只调整浮层，不改正文高度；IME 只影响该面板可用区 ---- */
+/* 手机同样不压暗正文（见 styles.css 的 .menu-backdrop），面板外点击仍关闭。 */
 .app[data-mobile-chrome="true"] .aa-popover-backdrop {
-  background: var(--ui-backdrop-light);
+  background: transparent;
 }
 
 .app[data-mobile-chrome="true"][data-layout="compact"] .aa-popover {

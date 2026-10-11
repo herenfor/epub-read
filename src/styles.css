@@ -6719,6 +6719,31 @@ select option {
   --ui-dock: 0ms;
 }
 
+/* [F5] 低特效（界面动画→简化）：界面毛玻璃一律改用面板自身底色（各面板底色
+   均≥85% 不透明，遮罩自带深色），并去掉悬停上浮。正文 iframe 不受影响；
+   以后新增的装饰效果也挂在这里，不另设开关。 */
+:root[data-motion="reduced"] *,
+:root[data-motion="reduced"] *::before,
+:root[data-motion="reduced"] *::after {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+:root[data-motion="reduced"] :is(.shelf-card:hover .shelf-cover-box, .shelf-card:focus-visible .shelf-cover-box,
+  .shelf-resume-cover-box:hover, .shelf-btn-primary:hover:not(:disabled), .shelf-btn-resume:hover) {
+  transform: none;
+}
+/* 系统“减少动态效果”按低特效处理，但不改写用户保存的选择。 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+  :is(.shelf-card:hover .shelf-cover-box, .shelf-card:focus-visible .shelf-cover-box,
+    .shelf-resume-cover-box:hover, .shelf-btn-primary:hover:not(:disabled), .shelf-btn-resume:hover) {
+    transform: none;
+  }
+}
+
 /* 系统减少动效优先；菜单关闭定时器读取实际 --menu-close，不另留 200ms。 */
 @media (prefers-reduced-motion: reduce) {
   :root {
@@ -6742,6 +6767,14 @@ select option {
 
 /* ---- 触摸端阅读面板：去掉整屏毛玻璃，字体面板置于遮罩之上并按设备成形 ---- */
 /* 遮罩保留毛玻璃；排版面板关闭时遮罩与面板同步淡出，避免面板退场后整屏亮度骤变。 */
+/* [F5] Aa 面板及其字体/显示子面板用于边调边看：遮罩只负责点外关闭，
+   不模糊、不压暗正文（与低特效开关无关）。 */
+.menu-backdrop.menu-backdrop {
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
 .menu-backdrop {
   animation-duration: var(--menu-open);
   animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
