@@ -170,6 +170,11 @@ function buildOverrideCss(s: ReaderSettings, bodyBgColor?: string): string {
    不影响可正常断行的中文排版；书显式的 overflow-wrap 仍然优先。 */
 :where(#${VIEWER_ID}) {
   overflow-wrap: break-word;
+}
+/* [L3] 书显式 overflow-wrap/word-wrap:normal 时，普通段落仍不能越过栏边界：
+   word-break:break-word 同样只在一行放不下时折行；表格内段落不加，免改列宽。 */
+:where(#${VIEWER_ID} p:not(td *, th *)) {
+  word-break: break-word;
 }`;
 
   // ---- L5 引擎兼容补偿：Chromium 多栏布局 bug 的最小兜底 ----
