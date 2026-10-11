@@ -1,0 +1,22 @@
+{
+  "tapRegions.title": "Tap-to-Turn Areas",
+  "tapRegions.scope.pc": "Desktop only; phones and tablets are set separately",
+  "tapRegions.scope.touch": "Phones and tablets only; desktop is set separately",
+  "tapRegions.preview.note": "The preview matches the current reading area; tapping it never turns a page",
+  "tapRegions.size": "Size",
+  "tapRegions.mode.default": "Default",
+  "tapRegions.mode.custom": "Custom",
+  "tapRegions.range.hint": "0–35% per side; 0 turns that side off. At least 30% stays in the middle",
+  "tapRegions.left": "Left",
+  "tapRegions.right": "Right",
+  "tapRegions.center": "Middle",
+  "tapRegions.center.action": "Book text",
+  "tapRegions.prev": "Previous",
+  "tapRegions.next": "Next",
+  "tapRegions.off": "Off",
+  "tapRegions.narrowed": "The reading area is narrow, so both sides were reduced to keep the middle free",
+  "tapRegions.scrollMode": "Scroll mode has no tap-to-turn; these settings apply in page mode",
+  "tapRegions.leftForward": "Left Tap Also Goes Forward",
+  "tapRegions.leftForward.hint": "Both sides turn to the next page; swiping, keys and other ways back are unchanged",
+  "tapRegions.reset": "Reset"
+}

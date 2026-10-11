@@ -117,6 +117,52 @@ describe("edge turn feedback", () => {
     } finally { await dom.dispose(); }
   });
 
+  it("keeps the original markup for calls without a side or region", async () => {
+    const dom = createReactDomHarness();
+    try {
+      await dom.render(createElement(EdgeTurnZone, { direction: 1, onTurn: () => {} }));
+      const zone = dom.container.firstElementChild!;
+      expect(zone.getAttribute("class")).toBe("edge-turn-zone edge-turn-next");
+      expect(zone.getAttribute("style")).toBeNull();
+      expect(zone.hasAttribute("data-edge-side")).toBe(false);
+    } finally { await dom.dispose(); }
+  });
+
+  it("left band turning forward keeps its side and feedback, while label and arrow show the action", async () => {
+    const dom = createReactDomHarness();
+    const turn = vi.fn();
+    function Bands() {
+      const feedback = useEdgeTurnFeedbackOwner();
+      return createElement(EdgeTurnFeedbackContext.Provider, { value: feedback },
+        createElement(EdgeTurnZone, { side: "left", direction: 1, onTurn: turn, region: { width: 140, arrowCenter: 22 } }),
+        createElement(EdgeTurnZone, { side: "right", direction: 1, onTurn: turn, region: { width: 0, arrowCenter: 0 } }),
+        createElement(EdgeTurnZone, { side: "right", direction: 1, onTurn: turn }));
+    }
+    try {
+      await dom.render(createElement(Bands));
+      const zones = [...dom.container.querySelectorAll(".edge-turn-zone")];
+      // Width 0 turns the band off entirely.
+      expect(zones).toHaveLength(2);
+      const [left, right] = zones;
+      expect(left.classList.contains("edge-turn-left")).toBe(true);
+      expect(left.classList.contains("edge-turn-next")).toBe(false);
+      expect(left.classList.contains("edge-turn-prev")).toBe(false);
+      expect(left.getAttribute("data-edge-action")).toBe("next");
+      expect(left.getAttribute("title")).toBe("下一页");
+      expect(left.querySelector("polyline")?.getAttribute("points")).toBe("9 18 15 12 9 6");
+      expect((left as HTMLElement).style.width).toBe("140px");
+      expect((left as HTMLElement).style.getPropertyValue("--edge-turn-arrow-center")).toBe("22px");
+      expect(right.getAttribute("class")).toBe("edge-turn-zone edge-turn-next edge-turn-right");
+
+      await dom.click(left);
+      expect(turn).toHaveBeenCalledWith(1);
+      expect(left.classList.contains("is-holding")).toBe(true);
+      expect(right.classList.contains("is-holding")).toBe(false);
+      await dom.run(() => { vi.advanceTimersByTime(400); });
+      expect(left.classList.contains("is-holding")).toBe(false);
+    } finally { await dom.dispose(); }
+  });
+
   it("does not reveal the arrow when the mouse passes through the edge", async () => {
     const dom = createReactDomHarness();
     try {

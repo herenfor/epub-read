@@ -1,0 +1,244 @@
+/* 点击翻页区域：物理侧定位与设置预览。默认尺寸/箭头外观仍在 styles.css 的 .edge-turn-*。 */
+
+.edge-turn-zone.edge-turn-left {
+  left: 0;
+  right: auto;
+}
+
+.edge-turn-zone.edge-turn-right {
+  right: 0;
+  left: auto;
+}
+
+/* 实测宽度下箭头留在原位置（外缘默认带中心），不随加宽的命中区漂进正文。 */
+.edge-turn-zone[data-edge-region] .edge-turn-arrow {
+  position: absolute;
+  top: 50%;
+}
+
+.edge-turn-zone.edge-turn-left[data-edge-region] .edge-turn-arrow {
+  left: var(--edge-turn-arrow-center);
+  translate: -50% -50%;
+}
+
+.edge-turn-zone.edge-turn-right[data-edge-region] .edge-turn-arrow {
+  right: var(--edge-turn-arrow-center);
+  translate: 50% -50%;
+}
+
+/* ---- 设置面板 ---- */
+.tap-regions-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.tap-regions-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tap-regions-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.tap-regions-note {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.tap-regions-preview {
+  position: relative;
+  width: 100%;
+  max-height: 220px;
+  margin-inline: auto;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg, #fff);
+  border: 1px solid color-mix(in srgb, var(--panel-border, #ccc) 70%, transparent);
+  box-sizing: border-box;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.tap-regions-page-lines {
+  position: absolute;
+  inset: 14% 9%;
+  display: flex;
+  gap: 8%;
+}
+
+.tap-regions-page-column {
+  flex: 1;
+  min-width: 0;
+  background: repeating-linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--fg) 14%, transparent) 0 3px,
+    transparent 3px 9px
+  );
+}
+
+.tap-regions-band {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+.tap-regions-band.is-side {
+  background: color-mix(in srgb, var(--accent, #6366f1) 20%, transparent);
+}
+
+.tap-regions-band.is-left {
+  border-right: 1px dashed color-mix(in srgb, var(--accent, #6366f1) 70%, transparent);
+}
+
+.tap-regions-band.is-right {
+  border-left: 1px dashed color-mix(in srgb, var(--accent, #6366f1) 70%, transparent);
+}
+
+.tap-regions-band-arrow {
+  position: absolute;
+  top: 50%;
+  display: inline-flex;
+  color: var(--accent, #6366f1);
+}
+
+.tap-regions-band-arrow.is-left {
+  translate: -50% -50%;
+}
+
+.tap-regions-band-arrow.is-right {
+  translate: 50% -50%;
+}
+
+.tap-regions-band-center-label {
+  font-size: 10.5px;
+  color: var(--muted);
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bg, #fff) 80%, transparent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.tap-regions-off-tag {
+  position: absolute;
+  top: 6px;
+  font-size: 10px;
+  color: var(--muted);
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px dashed color-mix(in srgb, var(--muted) 60%, transparent);
+  background: color-mix(in srgb, var(--bg, #fff) 85%, transparent);
+}
+
+.tap-regions-off-tag.is-left { left: 6px; }
+.tap-regions-off-tag.is-right { right: 6px; }
+
+.tap-regions-legend {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  font-size: 11px;
+}
+
+.tap-regions-legend-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.tap-regions-legend-item:nth-child(2) { text-align: center; }
+.tap-regions-legend-item:nth-child(3) { text-align: right; }
+
+.tap-regions-legend-name {
+  color: var(--fg);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tap-regions-legend-value {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.tap-regions-slider-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 4.5em;
+  align-items: center;
+  gap: 10px;
+}
+
+.tap-regions-slider-row input[type="range"] {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  accent-color: var(--accent, #6366f1);
+}
+
+.tap-regions-slider-value {
+  font-size: 11px;
+  color: var(--muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.tap-regions-switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tap-regions-switch-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--fg);
+}
+
+.tap-regions-switch-text .tap-regions-note {
+  white-space: normal;
+}
+
+.tap-regions-reset {
+  align-self: flex-start;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid var(--ui-border-control, color-mix(in srgb, var(--fg) 18%, transparent));
+  background: var(--ui-control-bg, transparent);
+  color: var(--fg);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.tap-regions-reset:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+@media (pointer: coarse) {
+  .tap-regions-slider-row input[type="range"] { height: 32px; }
+  .tap-regions-reset { height: 34px; padding: 0 14px; }
+}
