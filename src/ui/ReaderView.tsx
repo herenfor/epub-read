@@ -638,6 +638,9 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
 
   const setActiveFrameVisual = (frame: LiveReaderFrame): void => {
     activeFrameRef.current = frame;
+    // Demote cached chapters before revealing/preparing the new active owner.
+    for (const slot of spareSlotsRef.current) slot.paginator?.setMotionWindowForeground?.(false);
+    activeSlotRef.current?.paginator?.setMotionWindowForeground?.(document.visibilityState !== "hidden");
     const primary = primaryIframeRef.current;
     const secondary = secondaryIframeRef.current;
     const tertiary = tertiaryIframeRef.current;
@@ -834,6 +837,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       () => !isActiveSlot(slot) || inputPausedRef.current || slot.state.status !== "ready"
     );
     slot.paginator = paginator;
+    paginator.setMotionWindowForeground?.(false);
     paginator.setTextProjectionPreferences?.(
       props.textProjectionPreferences ?? DEFAULT_TEXT_PROJECTION_PREFERENCES,
       props.textProjection ?? null,
@@ -1297,6 +1301,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   useEffect(() => {
     const syncBackgroundPreparation = (): void => {
       if (document.visibilityState === "hidden") {
+        activeSlotRef.current?.paginator?.setMotionWindowForeground?.(false);
         backgroundPausedRef.current = true;
         clearPreloadTimer();
         const pendingPreload = preloadInFlightSlotRef.current;
@@ -1312,6 +1317,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       }
       if (!backgroundPausedRef.current) return;
       backgroundPausedRef.current = false;
+      activeSlotRef.current?.paginator?.setMotionWindowForeground?.(true);
       if (preloadAllowedRef.current) scheduleAdjacentPreloadsDebounced(250);
     };
     document.addEventListener("visibilitychange", syncBackgroundPreparation);
@@ -1353,7 +1359,6 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     activeSlotRef.current = next;
     paginatorRef.current = next.paginator;
     activeIframeRef.current = next.iframe;
-    setActiveFrameVisual(next.frame as LiveReaderFrame);
     next.paginator.setNotes(props.notes);
     autoAdvanceRef.current = false;
     triggerChapterTransitionWheelLock();
@@ -1373,6 +1378,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         next.paginator.setPage(0);
       }
     }
+    setActiveFrameVisual(next.frame as LiveReaderFrame);
     const promotedState = next.paginator.getStateSnapshot();
     if (promotedState.status !== "ready") return false;
     next.state = promotedState;
