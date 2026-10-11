@@ -4,6 +4,8 @@
  * 几何端点来自 ChapterPaginator.pagedSlideFrame()；本模块只做纯计算与
  * 帧调度，不读写分页状态。页码提交仍由调用方在结束时 setPage() 完成。
  */
+import { DESKTOP_SLIDE_FULL_MS, desktopSettlePlan } from "../render/pageMotion";
+
 export interface SlideFrame {
   /** 当前页 scrollLeft */
   from: number;
@@ -12,7 +14,7 @@ export interface SlideFrame {
 }
 
 /** 完整翻过一页的时长；剩余距离越短越快，下限保证仍可见。 */
-export const SLIDE_FULL_MS = 280;
+export const SLIDE_FULL_MS = DESKTOP_SLIDE_FULL_MS;
 const SLIDE_MIN_MS = 90;
 
 /**
@@ -26,10 +28,7 @@ export function dragScrollLeft(frame: SlideFrame, dx: number): number {
 }
 
 export function slideDurationMs(remainingPx: number, spanPx: number): number {
-  if (!(spanPx > 0)) return 0;
-  const ratio = Math.max(0, Math.min(1, Math.abs(remainingPx) / spanPx));
-  if (ratio === 0) return 0;
-  return Math.round(Math.max(SLIDE_MIN_MS, SLIDE_FULL_MS * Math.sqrt(ratio)));
+  return desktopSettlePlan(remainingPx, spanPx).durationMs;
 }
 
 /** 减速收尾，与 --ease-emphasized 同一手感。 */

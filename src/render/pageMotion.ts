@@ -18,7 +18,7 @@ export type InterruptResult =
 export interface SettlePlan {
   readonly durationMs: number;
   readonly tauMs: number;
-  readonly curve?: "finite-drift";
+  readonly curve?: "finite-drift" | "ease-out-cubic";
 }
 
 /**
@@ -62,6 +62,17 @@ const SETTLE_MAX_MS = 700;
 /** 距目标小于该值视为已落定（不再值得一段动画）。 */
 const SETTLE_REST_PX = 0.5;
 
+/** Desktop keeps its existing click/key/wheel timing when sharing the motion driver. */
+export const DESKTOP_SLIDE_FULL_MS = 280;
+export function desktopSettlePlan(distance: number, span: number): SettlePlan {
+  const ratio = span > 0 ? Math.min(1, Math.abs(distance) / span) : 0;
+  return {
+    durationMs: ratio === 0 ? 0 : Math.round(Math.max(90, DESKTOP_SLIDE_FULL_MS * Math.sqrt(ratio))),
+    tauMs: SETTLE_TAP_TAU_MS,
+    curve: "ease-out-cubic",
+  };
+}
+
 /**
  * 松手/点按的收尾：沿松手速度先指数减速，再平滑停到目标。
  * velocity 为位置单位的 px/ms；方向与剩余距离一致时让初速度接上手指，否则用点按常数。
@@ -86,6 +97,7 @@ export function settlePlan(distance: number, velocity: number | null): SettlePla
 export function settleProgress(plan: SettlePlan, t: number): number {
   if (plan.durationMs <= 0) return 1;
   const clamped = Math.max(0, Math.min(1, t));
+  if (plan.curve === "ease-out-cubic") return 1 - (1 - clamped) ** 3;
   if (plan.curve === "finite-drift") {
     if (clamped <= 0.5) return 1 - Math.exp(-4 * clamped);
     // p 与 dp/dt 在中点连续；终点速度为零。平方剩余量始终非负，绝不越界。
@@ -121,6 +133,7 @@ export class PageMotionSession {
     initialPage: number,
     private readonly onCommit: (page: number, sample: MotionSample) => void,
     private readonly onMismatch: (sample: MotionSample) => void,
+    private readonly planSettlement: (distance: number, velocity: number | null) => SettlePlan = settlePlan,
   ) {
     this.current = { kind: "idle", page: initialPage };
   }
@@ -254,7 +267,7 @@ export class PageMotionSession {
     const ticket = ++this.epoch;
     this.current = { kind: "settling", originPage, targetPage, ticket };
     const to = this.offsets[targetPage];
-    this.driver.animateTo(to, settlePlan(to - from.position, velocity), () => {
+    this.driver.animateTo(to, this.planSettlement(to - from.position, velocity), () => {
       if (ticket !== this.epoch || this.current.kind === "disposed") return;
       this.commit(ticket, this.driver.read(), targetPage);
     });

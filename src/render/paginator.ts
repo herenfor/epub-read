@@ -2,7 +2,7 @@ import { resolveArchiveHref, archiveHref } from "../core/archiveReferences";
 import { applyReaderBodyPercentageSpacing, applyReaderRootPercentageSpacing } from "./percentageSpacing";
 import { sanitizeChapter, VIEWER_ID } from "./sanitize";
 import { planCenteredTitleBody } from "./titlePageLayout";
-import { PageMotionSession, type Direction as MotionDirection } from "./pageMotion";
+import { desktopSettlePlan, PageMotionSession, settlePlan, type Direction as MotionDirection } from "./pageMotion";
 import { TransformPageMotion } from "./transformPageMotion";
 import { MotionWindowIdleLease } from "./motionWindowIdleLease";
 import {
@@ -2615,10 +2615,10 @@ export class ChapterPaginator {
   /** JS 接管时采纳了视觉页但尚未发正式状态；下一次 setPage 即使不移动也要补发。 */
   private adoptedPageUncommitted = false;
   /**
-   * 触摸“滑动”翻页：宿主想要的滑动模式。浏览器支持 WAAPI 时由可中断的合成层
-   * 运动驱动（pageMotion）；否则退回原生吸附。
+   * 宿主想要的滑动模式。支持 WAAPI 时双端共用可中断合成运动；
+   * 不支持时触摸退回原生吸附，桌面继续使用原有数值动画。
    */
-  private touchSlideWanted = false;
+  private slideMotionWanted = false;
   /** 当前布局的运动会话；布局/章节/视口改变时销毁。 */
   private pageMotion: {
     session: PageMotionSession;
@@ -2863,7 +2863,7 @@ export class ChapterPaginator {
    * 浏览器不支持 WAAPI 时退回原生吸附。关闭时两者都撤，恢复 JS 跟手。
    */
   setNativeSnapPaging(enabled: boolean): void {
-    this.touchSlideWanted = enabled;
+    this.slideMotionWanted = enabled;
     if (!enabled) this.disposePageMotion();
     this.nativeSnapEnabled = enabled;
     this.syncNativeSnapViewer();
@@ -3145,11 +3145,11 @@ export class ChapterPaginator {
     return planPagedStep(this.nativeSnapOffsets(), position, direction, hasAdjacentChapter);
   }
 
-  /** 宿主是否应把同章触摸翻页交给运动会话（滑动模式、触摸主指针、支持 WAAPI）。 */
+  /** 同章滑动共用运动会话；指针类型只决定曲线，不决定是否走合成驱动。 */
   get pageMotionAvailable(): boolean {
     return Boolean(
-      this.touchSlideWanted && this.viewer && !this.scrollMode && !this.disposed &&
-      this.pageMotionCapable() && this.prefersTouchPaging() &&
+      this.slideMotionWanted && this.viewer && !this.scrollMode && !this.disposed &&
+      this.pageMotionCapable() &&
       this.pageMotionUnsupportedKey !== this.snapOffsetsCache?.key,
     );
   }
@@ -3165,6 +3165,9 @@ export class ChapterPaginator {
     if (!motion) return "unavailable";
     if (this.pageMotionPendingChapter !== direction) this.pageMotionPendingChapter = null;
     const result = motion.session.turn(inputId, direction);
+    // A geometry/driver fault disposes this owner synchronously. Let the caller
+    // use the normal paging fallback instead of publishing a target that cannot finish.
+    if (this.pageMotion !== motion) return "unavailable";
     if (result.kind === "moving") {
       this.pageMotionStarted(result.targetPage);
       return "moving";
@@ -3274,6 +3277,8 @@ export class ChapterPaginator {
       readSnapPosition(offsets, start)?.page ?? this.metrics.currentPage,
       (page) => this.commitPageMotion(page),
       (sample) => this.commitPageMotion(readSnapPosition(offsets, sample.position)?.page ?? 0),
+      (distance, velocity) => this.prefersTouchPaging()
+        ? settlePlan(distance, velocity) : desktopSettlePlan(distance, step),
     );
     const lease = new MotionWindowIdleLease({
       after: (delay, callback) => setTimeout(callback, delay),

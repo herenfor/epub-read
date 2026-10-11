@@ -80,6 +80,38 @@ function pagerFixture() {
 }
 
 describe("paginator retained motion window", () => {
+  it("a synchronous driver fault hands the same turn back to the fallback without a stale live page", () => {
+    const p = Object.create(ChapterPaginator.prototype) as Pager;
+    p.pageMotionStarted = vi.fn();
+    const motion = { session: { turn: () => {
+      p.pageMotion = null;
+      return { kind: "moving", targetPage: 6 };
+    } } };
+    p.pageMotion = motion;
+    p.ensurePageMotion = () => motion;
+    expect(p.motionTurn(1, 1, false)).toBe("unavailable");
+    expect(p.pageMotionStarted).not.toHaveBeenCalled();
+  });
+  it("desktop uses the shared driver; unsupported animation, scroll and disabled slide keep the fallback", () => {
+    const p = Object.create(ChapterPaginator.prototype) as Pager;
+    Object.assign(p, {
+      viewer: { animate: vi.fn() }, slideMotionWanted: true, disposed: false,
+      settings: { readingMode: "paginated" }, pageMotionUnsupportedKey: null, snapOffsetsCache: { key: "layout" },
+      prefersTouchPaging: () => false,
+    });
+    expect(p.pageMotionAvailable).toBe(true);
+    p.slideMotionWanted = false;
+    expect(p.pageMotionAvailable).toBe(false);
+    p.slideMotionWanted = true;
+    p.settings.readingMode = "scroll";
+    expect(p.pageMotionAvailable).toBe(false);
+    p.settings.readingMode = "paginated";
+    p.pageMotionUnsupportedKey = "layout";
+    expect(p.pageMotionAvailable).toBe(false);
+    p.pageMotionUnsupportedKey = null;
+    p.viewer.animate = undefined;
+    expect(p.pageMotionAvailable).toBe(false);
+  });
   it("进度采样使用视觉正文坐标，不撤窗口；正式快照不被误标 transient", () => {
     const { p, driver, caret } = pagerFixture();
     p.captureAnchor();

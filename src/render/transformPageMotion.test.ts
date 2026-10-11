@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { TransformPageMotion } from "./transformPageMotion";
+import { desktopSettlePlan } from "./pageMotion";
 
 /** 只解析 matrix(a,b,c,d,e,f) 的 e（m41）；测试环境没有 DOMMatrix。 */
 class FakeMatrix {
@@ -30,14 +31,16 @@ function fakeViewer(options: { scrollWidth?: () => number } = {}) {
     // 浏览器 scrollWidth 至少等于 clientWidth；短章扩成 5 屏会虚增宽度。
     get scrollWidth() { return Math.max(options.scrollWidth?.() ?? 1000, viewer.clientWidth); },
     get clientWidth() { return Number.parseFloat(style.get("width")?.value ?? "100"); },
-    animations: [] as Array<{ cancelled: boolean; finishCalled: boolean; resolve: () => void }>,
-    animate(_frames: Keyframe[]) {
+    animations: [] as Array<{ cancelled: boolean; finishCalled: boolean; resolve: () => void;
+      frames: Keyframe[]; options?: KeyframeAnimationOptions }>,
+    animate(frames: Keyframe[], options?: KeyframeAnimationOptions) {
       let resolve!: () => void;
       let reject!: (error: unknown) => void;
       const finished = new Promise<void>((ok, fail) => { resolve = ok; reject = fail; });
       const record = {
         cancelled: false,
         finishCalled: false,
+        frames, options,
         resolve: () => resolve(),
         finished,
         cancel() { events.push("cancel"); record.cancelled = true; reject(new Error("AbortError")); },
@@ -68,6 +71,43 @@ beforeAll(() => { (globalThis as Record<string, unknown>).DOMMatrixReadOnly = Fa
 afterAll(() => { delete (globalThis as Record<string, unknown>).DOMMatrixReadOnly; });
 
 describe("transform page motion driver", () => {
+  it("single-page column gap is not counted as a trailing gap when expanding the window", () => {
+    const gap = 20;
+    const viewer = fakeViewer({ scrollWidth: () => {
+      const columns = Number(viewer.style.getPropertyValue("column-count") || 1);
+      const columnWidth = (viewer.clientWidth - (columns - 1) * gap) / columns;
+      return 10 * columnWidth + 9 * gap;
+    } });
+    const faults: unknown[] = [];
+    const driver = new TransformPageMotion(viewer as unknown as HTMLElement, {
+      offsets: Array.from({ length: 10 }, (_, page) => page * 120), step: 120, columnsPerScreen: 1,
+    }, 300, error => faults.push(error));
+    driver.write(360);
+    expect(viewer.clientWidth).toBe(580);
+    expect(viewer.scrollWidth).toBe(1180);
+    expect(driver.read().position).toBe(360);
+    expect(faults).toEqual([]);
+    driver.settleTo(360);
+    expect(viewer.clientWidth).toBe(100);
+    expect(viewer.scrollWidth).toBe(1180);
+    expect(viewer.scrollLeft).toBe(360);
+  });
+  it("desktop hands two endpoints and the unchanged cubic timing to the browser", async () => {
+    const viewer = fakeViewer();
+    const faults: unknown[] = [];
+    const driver = new TransformPageMotion(viewer as unknown as HTMLElement, layout, 300,
+      error => faults.push(error));
+    const done = () => driver.holdSettledAt(400);
+    driver.animateTo(400, desktopSettlePlan(100, 100), done);
+    const animation = viewer.animations[0];
+    expect(animation.frames).toHaveLength(2);
+    expect(animation.options).toMatchObject({ duration: 280,
+      easing: "cubic-bezier(0.3333333333, 1, 0.6666666667, 1)" });
+    animation.resolve();
+    await Promise.resolve();
+    expect(driver.read().position).toBe(400);
+    expect(faults).toEqual([]);
+  });
   it.each([1, 2, 3, 4].flatMap(screens => [1, 2].map(columns => ({ screens, columns }))))(
     "$screens 屏短章、每屏 $columns 栏：准备/动画/中断读数不虚增章宽，退出恢复原几何",
     async ({ screens, columns }) => {

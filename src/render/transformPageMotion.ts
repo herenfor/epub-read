@@ -95,13 +95,23 @@ export class TransformPageMotion implements PageMotionDriver {
       return;
     }
     const frames: Keyframe[] = [];
-    for (let k = 0; k <= KEYFRAMES; k++) {
-      const progress = settleProgress(plan, k / KEYFRAMES);
-      frames.push({ transform: this.transformFor(from + (position - from) * progress), offset: k / KEYFRAMES });
+    const desktop = plan.curve === "ease-out-cubic";
+    if (desktop) {
+      frames.push({ transform: this.transformFor(from) }, { transform: this.transformFor(position) });
+    } else {
+      for (let k = 0; k <= KEYFRAMES; k++) {
+        const progress = settleProgress(plan, k / KEYFRAMES);
+        frames.push({ transform: this.transformFor(from + (position - from) * progress), offset: k / KEYFRAMES });
+      }
     }
     let animation: Animation;
     try {
-      animation = this.viewer.animate(frames, { duration: plan.durationMs, easing: "linear", fill: "both" });
+      animation = this.viewer.animate(frames, {
+        duration: plan.durationMs,
+        // Linear time coordinate and cubic position: exactly the desktop's easeOutCubic.
+        easing: desktop ? "cubic-bezier(0.3333333333, 1, 0.6666666667, 1)" : "linear",
+        fill: "both",
+      });
     } catch (error) {
       this.onFault(error);
       this.settleTo(position);
@@ -180,6 +190,7 @@ export class TransformPageMotion implements PageMotionDriver {
     if (!(step > 0)) return false;
     if (this.windowStart === null) {
       const before = viewer.scrollWidth;
+      const width = viewer.clientWidth;
       const snapshot = WINDOW_PROPERTIES.map((property) => ({
         property,
         value: viewer.style.getPropertyValue(property),
@@ -191,7 +202,9 @@ export class TransformPageMotion implements PageMotionDriver {
           else viewer.style.removeProperty(item.property);
         }
       };
-      viewer.style.setProperty("width", `${this.windowScreens * step}px`);
+      // The last column has no trailing gap. Multiplying step by K adds that
+      // gap to the window and changes column width in ordinary single-page layouts.
+      viewer.style.setProperty("width", `${width + (this.windowScreens - 1) * step}px`);
       viewer.style.setProperty("margin-left", `${-this.windowMid * step}px`);
       viewer.style.setProperty("column-count", String(this.windowScreens * columnsPerScreen));
       viewer.style.setProperty("will-change", "transform");
