@@ -29,6 +29,13 @@ import {
 } from "../render/visual/readerVisualPreferences";
 import { attachReaderPaint } from "../render/visual/readerVisualPaint";
 import type { ReaderPaintHandle } from "../render/visual/readerVisualPreferences";
+import { READER_PALETTES } from "../config/readerPalette";
+import {
+  classifySettingsChange,
+  sameLayoutSettings,
+  sameRenderingSettings,
+  samePageMargins,
+} from "../render/readerTheme";
 import { createSettingsReloadDebouncer } from "./settingsReload";
 import { TurnIntentBuffer, WheelTurnAccumulator } from "./turnIntent";
 import { ReadingWarmupPlan, backgroundPreparation, type WarmupTicket } from "./readerWarmup";
@@ -303,42 +310,7 @@ export function effectiveReaderSettings(settings: ReaderSettings, fixedLayout: b
 }
 
 /** 预加载开关只影响调度，不属于活动 paginator 的布局身份。 */
-export function sameRenderingSettings(a: ReaderSettings, b: ReaderSettings): boolean {
-  return (
-    a.fontSizePx === b.fontSizePx &&
-    a.theme === b.theme &&
-    a.fontFamily === b.fontFamily &&
-    a.customFontName === b.customFontName &&
-    a.fontSource === b.fontSource &&
-    a.customFontId === b.customFontId &&
-    (a.forceFontOverride === true) === (b.forceFontOverride === true) &&
-    a.customFonts === b.customFonts &&
-    a.customCss === b.customCss &&
-    a.gapPx === b.gapPx &&
-    a.readingMode === b.readingMode &&
-    a.columnsPerView === b.columnsPerView &&
-    a.spreadGapMode === b.spreadGapMode &&
-    // 值比较：新建同值对象不应触发重载。
-    samePageMargins(a.pageMarginsPx, b.pageMarginsPx) &&
-    a.lineHeight === b.lineHeight &&
-    a.fontWeight === b.fontWeight &&
-    a.letterSpacingPx === b.letterSpacingPx &&
-    a.wordSpacingPx === b.wordSpacingPx &&
-    a.forceHorizontal === b.forceHorizontal
-  );
-}
-
-function samePageMargins(
-  a: ReaderSettings["pageMarginsPx"],
-  b: ReaderSettings["pageMarginsPx"],
-): boolean {
-  if (a === b) return true;
-  const keys = ["top", "bottom", "left", "right"] as const;
-  for (const key of keys) {
-    if ((a?.[key] ?? null) !== (b?.[key] ?? null)) return false;
-  }
-  return true;
-}
+export { sameRenderingSettings, sameLayoutSettings, samePageMargins, classifySettingsChange };
 
 const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function PagedReaderView(
   props,
@@ -1330,6 +1302,12 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   const promotePreparedChapter = (path: string, targetIndex: number, atEnd: boolean): boolean => {
     const current = activeSlotRef.current;
     const next = spareSlotsRef.current.find((slot) => slot.path === path && slot.spineIndex === targetIndex);
+    if (next && next.paginator && sameLayoutSettings(next.renderSettings, latestRenderSettingsRef.current)) {
+      if (next.renderSettings.theme !== latestRenderSettingsRef.current.theme) {
+        next.paginator.updateTheme(latestRenderSettingsRef.current.theme);
+        next.renderSettings = latestRenderSettingsRef.current;
+      }
+    }
     if (
       !current ||
       !sameRenderingSettings(current.renderSettings, latestRenderSettingsRef.current) ||
@@ -1516,8 +1494,12 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         if (
           inFlight &&
           inFlight.paginator &&
-          sameRenderingSettings(inFlight.renderSettings, latestRenderSettingsRef.current)
+          sameLayoutSettings(inFlight.renderSettings, latestRenderSettingsRef.current)
         ) {
+          if (inFlight.renderSettings.theme !== latestRenderSettingsRef.current.theme) {
+            inFlight.paginator.updateTheme(latestRenderSettingsRef.current.theme);
+            inFlight.renderSettings = latestRenderSettingsRef.current;
+          }
           const ready = await inFlight.paginator.waitForDisplayReady();
           if (ready && activeSlotRef.current?.spineIndex !== spineIndex) {
             if (promotePreparedChapter(path, spineIndex, startAtEnd)) return;
@@ -1584,21 +1566,24 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [book, spineIndex, props.anchorNonce, props.startAtEnd.nonce]);
 
-  // 设置变更 → 合并后重载（阅读位置由分页器内容锚点保留；仅在实际变化时触发）。
-  // 章节 effect 已先记录该次 render 的设置，因此章节切换只走一次正常 load，
-  // 不会再被 settings effect 追加一个重载。
+  // 设置变更 → 分层处理：
+  // 1. 纯主题变更：原位更新当前活跃槽位与所有备用槽位样式，同步滤镜背景；不重排、不销毁槽位、不丢弃运动窗口
+  // 2. 几何排版变更：取消旧近邻缓存并进入防抖重载事务（阅读位置由内容锚点保留）
   useEffect(() => {
     const previous = settingsIdentityRef.current;
     if (!previous) {
       settingsIdentityRef.current = { settings, userFonts: props.userFonts };
       return;
     }
-    const renderingUnchanged =
-      sameRenderingSettings(
-        effectiveReaderSettings(previous.settings, book.fixedLayout),
-        effSettings,
-      ) && previous.userFonts === props.userFonts;
-    if (renderingUnchanged) {
+    const prevEff = effectiveReaderSettings(previous.settings, book.fixedLayout);
+    const changeType = classifySettingsChange(
+      prevEff,
+      effSettings,
+      previous.userFonts,
+      props.userFonts,
+    );
+
+    if (changeType === "none") {
       if (preloadAllowedRef.current) scheduleAdjacentPreloads();
       else {
         resetFullBookWarmup();
@@ -1607,6 +1592,22 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       settingsIdentityRef.current = { settings, userFonts: props.userFonts };
       return;
     }
+
+    if (changeType === "theme-only") {
+      settingsIdentityRef.current = { settings, userFonts: props.userFonts };
+      const active = activeSlotRef.current;
+      if (active) {
+        active.renderSettings = effSettings;
+        active.paginator?.updateTheme(effSettings.theme);
+      }
+      for (const slot of spareSlotsRef.current) {
+        slot.renderSettings = effSettings;
+        slot.paginator?.updateTheme(effSettings.theme);
+      }
+      paintHandleRef.current?.setSurfaceBackground(READER_PALETTES[effSettings.theme].background);
+      return;
+    }
+
     // 布局代次变化：取消旧 epoch 的临时测量队列和近邻缓存。
     resetFullBookWarmup();
     disposeSpareSlots();
@@ -1667,13 +1668,14 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       handle.dispose();
       if (paintHandleRef.current === handle) paintHandleRef.current = null;
     };
-    // Reattach only when the visible active iframe changes; slider updates use the second effect.
+    // Reattach only when the visible active iframe changes; slider and theme updates use the second effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeFrame, book, settings.readingMode, settings.theme]);
+  }, [activeFrame, book, settings.readingMode]);
 
   useEffect(() => {
     paintHandleRef.current?.update(visualPreferences, props.compareOriginal === true);
-  }, [visualPreferences, props.compareOriginal]);
+    paintHandleRef.current?.setSurfaceBackground(READER_PALETTES[settings.theme].background);
+  }, [visualPreferences, props.compareOriginal, settings.theme]);
 
   // The setting is deliberately a scheduler toggle: it must not reload the
   // active chapter, but enabling it after a ready chapter should start one

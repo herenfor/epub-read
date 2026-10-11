@@ -73,7 +73,9 @@ import {
   rebasePosition,
   type ReadingPositionSnapshot,
 } from "./bookmarkReadingPosition";
+import { READER_PALETTES } from "../config/readerPalette";
 import {
+  classifySettingsChange,
   effectiveReaderSettings,
   sameRenderingSettings,
   type ReaderHandle,
@@ -1826,8 +1828,23 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
         settingsIdentityRef.current = current;
         return;
       }
-      if (sameRenderingSettings(previous, current)) return;
+      const changeType = classifySettingsChange(previous, current);
+      if (changeType === "none") return;
       settingsIdentityRef.current = current;
+
+      if (changeType === "theme-only") {
+        for (const slot of slotsRef.current.values()) {
+          slot.renderSettings = current;
+          slot.paginator?.updateTheme(current.theme);
+        }
+        auxPaginatorRef.current?.updateTheme(current.theme);
+        const bg = READER_PALETTES[current.theme].background;
+        for (const handle of paintHandlesRef.current.values()) {
+          handle.setSurfaceBackground(bg);
+        }
+        backdropPaintRef.current?.setSurfaceBackground(bg);
+        return;
+      }
 
       const debouncer = settingsReloadDebouncerRef.current;
       if (!debouncer) return;
@@ -1908,11 +1925,11 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
     }, [layout, slotUpdateNonce, V, props.compareOriginal, props.visualPreferences]);
 
     useEffect(() => {
-      for (const handle of paintHandlesRef.current.values()) handle.dispose();
-      paintHandlesRef.current.clear();
-      backdropPaintRef.current?.dispose();
-      backdropPaintRef.current = null;
-      syncVisualPaintRef.current();
+      const bg = READER_PALETTES[settings.theme].background;
+      for (const handle of paintHandlesRef.current.values()) {
+        handle.setSurfaceBackground(bg);
+      }
+      backdropPaintRef.current?.setSurfaceBackground(bg);
     }, [settings.theme]);
 
     // 显式导航响应（TOC / 搜索 / 笔记 / 书签 / 历史返回 / 打开书）

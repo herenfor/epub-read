@@ -6,7 +6,7 @@ import {
   type DarkThemeStyleAdapter,
 } from "./darkThemeContrast";
 import { VIEWER_ID } from "./sanitize";
-import type { Theme } from "./settings";
+import type { ReaderSettings, Theme } from "./settings";
 
 export type ReaderThemeKind = Theme;
 
@@ -128,16 +128,91 @@ export interface ReaderThemeController {
   dispose(): void;
 }
 
+interface DocThemeState {
+  ownerId: number;
+  currentTheme: ReaderThemeKind;
+  contrastRecords: DarkThemeContrastRecord[];
+  authorBgColor: string | null;
+  styleEl: HTMLStyleElement | null;
+}
+
 /**
- * 记录活跃文档的 ownerId，保证：
- * "每份doc只一个owner，旧owner不能撤销新owner样式"
+ * 记录活跃文档的当前状态与 ownerId，保证：
+ * 1. 每份 doc 只有一个活跃 owner，旧 owner 无法撤销新 owner 样式；
+ * 2. 新 owner 接管同一文档时，继承旧修补记录与基线状态，切回浅色时能精准还原；
+ * 3. 同主题重复接管不重复触发 DOM 扫描。
  */
-const activeDocOwners = new WeakMap<Document, number>();
+const activeDocStates = new WeakMap<Document, DocThemeState>();
 let nextOwnerId = 0;
+
+/**
+ * 扫描文档中 data-reader="user-css" 样式表，判断指定元素是否有用户定义的显式 color 规则。
+ * 供未显式传入 userOwnsColor 的环境作为兜底所有权判定。
+ */
+export function createUserOwnsColorFilter(doc: Document): (element: Element) => boolean {
+  const styles = Array.from(doc.getElementsByTagName?.("style") ?? []);
+  const userStyle = styles.find(
+    (style) => style.getAttribute("data-reader") === "user-css"
+  ) as HTMLStyleElement | undefined;
+  const sheet = userStyle?.sheet;
+  if (!sheet) return () => false;
+
+  let rules: CSSRuleList;
+  try {
+    rules = sheet.cssRules;
+  } catch {
+    return () => true;
+  }
+
+  const colorSelectors: string[] = [];
+  const walk = (list: CSSRuleList): void => {
+    for (const rule of Array.from(list)) {
+      if ((rule as any).type === 1 /* CSSRule.STYLE_RULE */) {
+        const styleRule = rule as CSSStyleRule;
+        if (styleRule.style && styleRule.style.getPropertyValue("color").trim() !== "") {
+          colorSelectors.push(styleRule.selectorText);
+        }
+      }
+      const nested = rule as CSSRule & { cssRules?: CSSRuleList };
+      try {
+        if (nested.cssRules) walk(nested.cssRules);
+      } catch {}
+    }
+  };
+  try {
+    walk(rules);
+  } catch {
+    return () => true;
+  }
+
+  if (colorSelectors.length === 0) return () => false;
+
+  const cache = new WeakMap<Element, boolean>();
+  return (element: Element): boolean => {
+    const cached = cache.get(element);
+    if (cached !== undefined) return cached;
+    let owns = false;
+    for (const selector of colorSelectors) {
+      if (!selector) continue;
+      try {
+        if (element.matches(selector)) {
+          owns = true;
+          break;
+        }
+      } catch {
+        owns = true;
+        break;
+      }
+    }
+    cache.set(element, owns);
+    return owns;
+  };
+}
 
 /**
  * 创建轻量主题原位更新控制器：
  * - 拥有 doc 的主题样式与深色对比度修补所有权；
+ * - 接管已存在控制器的文档时，平滑继承其对比度记录与基线；
  * - update(theme) 同步应用新主题：先撤销旧修补再依据新主题处理，避免已修颜色被当成作者颜色；
  * - dispose() 仅撤销自己持有的改动，释放所有引用，销毁后不持有已卸载节点；
  * - 同主题重复 update 幂等；旧 owner 不撤销新 owner 样式。
@@ -145,32 +220,60 @@ let nextOwnerId = 0;
 export function createReaderTheme(options: ReaderThemeOptions): ReaderThemeController {
   let doc: Document | null = options.doc;
   const adapter = options.adapter;
-  const userOwnsColor = options.userOwnsColor;
+  const userOwnsColor =
+    options.userOwnsColor ?? (doc ? createUserOwnsColorFilter(doc) : () => false);
+
+  const existingState = doc ? activeDocStates.get(doc) : undefined;
   const authorBgColor =
     options.authorBgColor !== undefined
       ? options.authorBgColor
+      : existingState?.authorBgColor ?? (doc ? getAuthorSafeBackgroundColor(doc) : null);
+
+  const ownerId = ++nextOwnerId;
+  let currentTheme: ReaderThemeKind = options.theme;
+  let contrastRecords: DarkThemeContrastRecord[] = existingState ? existingState.contrastRecords : [];
+  let disposed = false;
+
+  let styleEl: HTMLStyleElement | null =
+    existingState?.styleEl && existingState.styleEl.isConnected
+      ? existingState.styleEl
       : doc
-        ? getAuthorSafeBackgroundColor(doc)
+        ? findOrCreateThemeStyleElement(doc)
         : null;
 
-  let currentTheme: ReaderThemeKind = options.theme;
-  let contrastRecords: DarkThemeContrastRecord[] = [];
-  let disposed = false;
-  const ownerId = ++nextOwnerId;
-
   if (doc) {
-    activeDocOwners.set(doc, ownerId);
-  }
-
-  let styleEl: HTMLStyleElement | null = doc ? findOrCreateThemeStyleElement(doc) : null;
-  if (styleEl && doc) {
-    styleEl.textContent = buildThemeCss(currentTheme, authorBgColor);
-    if (currentTheme === "dark" || currentTheme === "gray") {
-      applyDarkThemeContrast(doc, {
-        theme: currentTheme,
-        adapter,
-        userOwnsColor,
-        records: contrastRecords,
+    if (existingState && existingState.currentTheme === currentTheme) {
+      // 主题一致：沿用已有样式和修补，无需重复扫描或改写
+      activeDocStates.set(doc, {
+        ownerId,
+        currentTheme,
+        contrastRecords,
+        authorBgColor,
+        styleEl,
+      });
+    } else {
+      // 全新创建或接管并切换主题
+      if (contrastRecords.length > 0) {
+        revertDarkThemeContrast(contrastRecords, adapter);
+        contrastRecords = [];
+      }
+      if (styleEl) {
+        styleEl.textContent = buildThemeCss(currentTheme, authorBgColor);
+      }
+      if (currentTheme === "dark" || currentTheme === "gray") {
+        applyDarkThemeContrast(doc, {
+          theme: currentTheme,
+          adapter,
+          userOwnsColor,
+          records: contrastRecords,
+        });
+      }
+      activeDocStates.set(doc, {
+        ownerId,
+        currentTheme,
+        contrastRecords,
+        authorBgColor,
+        styleEl,
       });
     }
   }
@@ -184,7 +287,8 @@ export function createReaderTheme(options: ReaderThemeOptions): ReaderThemeContr
     },
     update(theme: ReaderThemeKind) {
       if (disposed || !doc) return;
-      if (activeDocOwners.get(doc) !== ownerId) return;
+      const state = activeDocStates.get(doc);
+      if (!state || state.ownerId !== ownerId) return;
       if (theme === currentTheme) return;
 
       // 1. 先撤销旧修补，保证 DOM 恢复作者原色
@@ -210,21 +314,27 @@ export function createReaderTheme(options: ReaderThemeOptions): ReaderThemeContr
       }
 
       currentTheme = theme;
+      state.currentTheme = theme;
+      state.contrastRecords = contrastRecords;
+      state.styleEl = styleEl;
     },
     dispose() {
       if (disposed) return;
       disposed = true;
 
-      if (doc && activeDocOwners.get(doc) === ownerId) {
-        activeDocOwners.delete(doc);
+      if (doc) {
+        const state = activeDocStates.get(doc);
+        if (state && state.ownerId === ownerId) {
+          activeDocStates.delete(doc);
 
-        if (contrastRecords.length > 0) {
-          revertDarkThemeContrast(contrastRecords, adapter);
-          contrastRecords = [];
-        }
+          if (contrastRecords.length > 0) {
+            revertDarkThemeContrast(contrastRecords, adapter);
+            contrastRecords = [];
+          }
 
-        if (styleEl && styleEl.parentNode) {
-          styleEl.parentNode.removeChild(styleEl);
+          if (styleEl && styleEl.parentNode) {
+            styleEl.parentNode.removeChild(styleEl);
+          }
         }
       }
 
@@ -233,4 +343,72 @@ export function createReaderTheme(options: ReaderThemeOptions): ReaderThemeContr
       doc = null;
     },
   };
+}
+
+export function samePageMargins(
+  a: ReaderSettings["pageMarginsPx"],
+  b: ReaderSettings["pageMarginsPx"],
+): boolean {
+  if (a === b) return true;
+  const keys = ["top", "bottom", "left", "right"] as const;
+  for (const key of keys) {
+    if ((a?.[key] ?? null) !== (b?.[key] ?? null)) return false;
+  }
+  return true;
+}
+
+/**
+ * 比较两份阅读设置中影响几何排版/分栏/字号/字体的属性（不含纯主题颜色与预加载等纯调度属性）。
+ */
+export function sameLayoutSettings(a: ReaderSettings, b: ReaderSettings): boolean {
+  return (
+    a.fontSizePx === b.fontSizePx &&
+    a.fontFamily === b.fontFamily &&
+    a.customFontName === b.customFontName &&
+    a.fontSource === b.fontSource &&
+    a.customFontId === b.customFontId &&
+    (a.forceFontOverride === true) === (b.forceFontOverride === true) &&
+    a.customFonts === b.customFonts &&
+    a.customCss === b.customCss &&
+    a.gapPx === b.gapPx &&
+    a.readingMode === b.readingMode &&
+    a.columnsPerView === b.columnsPerView &&
+    a.spreadGapMode === b.spreadGapMode &&
+    samePageMargins(a.pageMarginsPx, b.pageMarginsPx) &&
+    a.lineHeight === b.lineHeight &&
+    a.fontWeight === b.fontWeight &&
+    a.letterSpacingPx === b.letterSpacingPx &&
+    a.wordSpacingPx === b.wordSpacingPx &&
+    a.forceHorizontal === b.forceHorizontal
+  );
+}
+
+/**
+ * 比较两份阅读设置是否对当前渲染完全一致（含主题颜色）。
+ */
+export function sameRenderingSettings(a: ReaderSettings, b: ReaderSettings): boolean {
+  return a.theme === b.theme && sameLayoutSettings(a, b);
+}
+
+export type SettingsChangeClassification = "none" | "theme-only" | "layout";
+
+/**
+ * 对设置变更进行分层分类：
+ * - "none": 无渲染相关变更
+ * - "theme-only": 纯主题颜色变更，无需重排/测页/重载
+ * - "layout": 涉及字号/字体/分栏/排版等几何属性，必须走重排/重载
+ */
+export function classifySettingsChange(
+  previous: ReaderSettings,
+  current: ReaderSettings,
+  previousUserFonts?: unknown,
+  currentUserFonts?: unknown,
+): SettingsChangeClassification {
+  if (sameRenderingSettings(previous, current) && previousUserFonts === currentUserFonts) {
+    return "none";
+  }
+  if (sameLayoutSettings(previous, current) && previousUserFonts === currentUserFonts) {
+    return "theme-only";
+  }
+  return "layout";
 }
