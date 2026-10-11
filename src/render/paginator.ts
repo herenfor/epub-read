@@ -2714,7 +2714,7 @@ export class ChapterPaginator {
     private settings: ReaderSettings,
     private strictXml: boolean,
     private onState: (s: ChapterState) => void,
-    private onIssues?: (issues: string[]) => void,
+    private onIssues?: (issues: string[], unresolvedResources: readonly string[]) => void,
     /** 固定版式书：不做行宽自适应，整页显示 */
     private fixedLayout = false,
     /** 书内链接点击回调（已解析为书内路径，含可选锚点），供阅读器跳转 */
@@ -3684,7 +3684,9 @@ export class ChapterPaginator {
       this.blobUrl = nextBlobUrl;
       this.iframe.addEventListener("load", this.onIframeLoad);
       this.iframe.src = nextBlobUrl;
-      if (sanitized.issues.length > 0) this.onIssues?.(sanitized.issues);
+      if (sanitized.issues.length > 0 || sanitized.unresolvedResources.length > 0) {
+        this.onIssues?.(sanitized.issues, sanitized.unresolvedResources);
+      }
     } catch (e) {
       this.releaseResourceHolder(holderId);
       this.pendingCssUrls.delete(ownedCssUrls);

@@ -157,7 +157,8 @@ export interface ReaderViewProps {
   chapterNeighbor?(index: number, dir: 1 | -1): number;
   /** 章节切换请求（nonce 单调递增；atEnd=true 表示加载完成后翻到最后一页） */
   startAtEnd: { nonce: number; atEnd: boolean };
-  onIssues(issues: string[]): void;
+  /** unresolvedResources: book paths with no usable URL in this chapter, for session-level aggregation. */
+  onIssues(issues: string[], unresolvedResources?: readonly string[]): void;
   /** 书内链接跳转（已解析为书内路径，含可选 #anchor） */
   onInternalLink(href: string): void;
   /** 普通书内链接改变位置前通知 UI 记录一次撤销快照。 */
@@ -723,8 +724,8 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
           onRequestChapterRef.current(next);
         }
       },
-      (issues) => {
-        if (isActiveSlot(slot)) onIssuesRef.current(issues);
+      (issues, unresolvedResources) => {
+        if (isActiveSlot(slot)) onIssuesRef.current(issues, unresolvedResources);
       },
       book.fixedLayout,
       (href) => {

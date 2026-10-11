@@ -27,6 +27,9 @@ export interface SanitizeOptions {
 export interface SanitizeResult {
   html: string;
   issues: string[];
+  /** 本章没有可用 URL 的书内资源路径（已去重）。路径即故障身份，由界面按
+   * 书会话聚合，并区分“书中不存在”与“存在但读取失败”。 */
+  unresolvedResources: string[];
   /** 是否发生了解析降级（XML 失败转 HTML） */
   downgraded: boolean;
 }
@@ -334,10 +337,7 @@ export async function sanitizeChapter(
   const missingResources = new Set<string>();
   const urlFor = (path: string): string | undefined => {
     const url = opts.urlFor(path);
-    if (!url && !missingResources.has(path)) {
-      missingResources.add(path);
-      issues.push(`书内资源无法加载：${path}`);
-    }
+    if (!url) missingResources.add(path);
     return url;
   };
 
@@ -393,7 +393,6 @@ export async function sanitizeChapter(
           el.setAttribute(attr.name, url + (ref.anchor ? "#" + encodeURIComponent(ref.anchor) : ""));
         } else {
           el.removeAttribute(attr.name);
-          issues.push(`资源缺失，已移除引用：${value}`);
         }
       } else if (name === "href" && el.tagName.toLowerCase() === "a") {
         const value = attr.value.trim();
@@ -429,7 +428,6 @@ export async function sanitizeChapter(
             link.setAttribute("href", url);
           } else {
             link.parentNode?.removeChild(link);
-            issues.push(`样式表缺失，已移除：${href}`);
           }
         }
       }
@@ -735,5 +733,5 @@ ${VIEWER_TAG}#${VIEWER_ID}::-webkit-scrollbar {
 
   const serialized = (await getSerializer()).serializeToString(doc);
   const html = restoreStyleRawTextCombinators(serialized);
-  return { html, issues, downgraded };
+  return { html, issues, unresolvedResources: [...missingResources], downgraded };
 }

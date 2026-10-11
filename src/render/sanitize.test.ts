@@ -42,12 +42,11 @@ function expectCombinatorsAndEscaping(out: string): void {
 }
 
 describe("sanitizeChapter", () => {
-  it("missing background references are reported once through the existing issues channel", async () => {
+  it("missing background references are reported once, by path", async () => {
     const result = await sanitizeChapter(`<html><head><style>body{background:url('../Images/missing.png')}</style></head>
 <body style="background-image:url('../Images/missing.png')"><p>正文</p></body></html>`, opts());
-    expect(result.issues.filter((issue) => issue.includes("书内资源无法加载"))).toEqual([
-      "书内资源无法加载：OEBPS/Images/missing.png",
-    ]);
+    expect(result.unresolvedResources).toEqual(["OEBPS/Images/missing.png"]);
+    expect(result.issues).toEqual([]);
     expect(result.html).toContain("正文");
   });
   it("注入 iframe 内的笔记 Custom Highlight 下划线规则，不包裹正文或设置背景", async () => {
@@ -149,7 +148,7 @@ describe("sanitizeChapter", () => {
     expect(document.getElementById("fallback-submit")).toBeNull();
   });
 
-  it("图片 src 改写为 blob URL；缺失资源移除并记 issue", async () => {
+  it("图片 src 改写为 blob URL；缺失资源移除并按路径记录", async () => {
     const html = `<html xmlns="http://www.w3.org/1999/xhtml"><body>
 <img src="images/a.png" alt="a"/>
 <img src="images/missing.png" alt="b"/>
@@ -157,7 +156,7 @@ describe("sanitizeChapter", () => {
     const res = await sanitizeChapter(html, opts());
     expect(res.html).toContain('src="blob:test/OEBPS/Text/images/a.png"');
     expect(res.html).not.toContain("missing.png");
-    expect(res.issues.some((i) => i.includes("missing.png"))).toBe(true);
+    expect(res.unresolvedResources).toEqual(["OEBPS/Text/images/missing.png"]);
   });
 
   it("样式表 link 改写为 blob URL", async () => {
