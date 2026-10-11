@@ -311,6 +311,7 @@ export function sameRenderingSettings(a: ReaderSettings, b: ReaderSettings): boo
     a.customFontName === b.customFontName &&
     a.fontSource === b.fontSource &&
     a.customFontId === b.customFontId &&
+    (a.forceFontOverride === true) === (b.forceFontOverride === true) &&
     a.customFonts === b.customFonts &&
     a.customCss === b.customCss &&
     a.gapPx === b.gapPx &&

@@ -3,11 +3,14 @@ import type { SystemFont, UserFont } from "./fontStore";
 import { createDragDepthTracker } from "./fontDrop";
 import { CloseIcon } from "./readerIcons";
 import { useUiText } from "./localization/UiLanguageProvider";
+import "./aaPopover.css";
 
 export interface FontSettingsPanelProps {
   source?: "system" | "imported";
   customFontId?: string;
   customFontName?: string;
+  forceFontOverride?: boolean;
+  onForceFontOverrideChange?(enabled: boolean): void;
   systemFonts: SystemFont[];
   userFonts: UserFont[];
   busy: boolean;
@@ -139,6 +142,15 @@ export function FontSettingsPanel(props: FontSettingsPanelProps) {
     <div className="font-settings-current">
       {t("fonts.current", { name: (props.source === "system" || props.source === "imported" ? props.customFontName : undefined) ?? t("fonts.followBook") })}
     </div>
+    {props.onForceFontOverrideChange && <div className="font-settings-override">
+      <label className="aa-switch-label">
+        <span>{t("fonts.override")}</span>
+        <input type="checkbox" checked={props.forceFontOverride === true} disabled={!props.source}
+          onChange={(event) => props.onForceFontOverrideChange?.(event.target.checked)} />
+        <span className="aa-switch-track" />
+      </label>
+      <span className="font-settings-override-hint">{t("fonts.override.hint")}</span>
+    </div>}
     <button className={`font-settings-row${!props.source ? " active" : ""}`} onClick={props.onSelectBook}>{t("fonts.followBook")}{!props.source ? " ✓" : ""}</button>
     <input className="font-search" placeholder={t("fonts.search")} value={query}
       onChange={(event) => { setQuery(event.target.value); resetScroll(); }} />

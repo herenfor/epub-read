@@ -864,9 +864,25 @@ background-position:center center;background-size:cover;background-color:#f9ebdf
     expect(out).toContain('font-family: "MyFont" !important;');
   });
 
+  it("开启覆盖书籍字体时才覆盖 div/p 上的书字体，并保留等宽代码与 SVG", async () => {
+    const html = `<html xmlns="http://www.w3.org/1999/xhtml"><head><style>div { font-family: "cnepub"; }</style></head><body><div><p>正文</p></div></body></html>`;
+    const rule = (forceFontOverride: boolean) => async () => readStyleText((await sanitizeChapter(html, {
+      ...opts(),
+      settings: { ...DEFAULT_SETTINGS, customFontName: "MyFont", forceFontOverride },
+    })).html, "overrides").match(new RegExp(`:where\\(#${VIEWER_ID}\\) :not\\(([^)]*)\\) \\{\\s*font-family: "MyFont" !important;`));
+    // 关闭：只作缺省字体（body 级），作者后代声明优先。
+    expect(await rule(false)()).toBeNull();
+    const on = await rule(true)();
+    expect(on).not.toBeNull();
+    for (const kept of ["pre", "code", "kbd", "samp", "tt", "pre *", "code *", "svg", "svg *", "math *"]) {
+      expect(on![1].split(",").map((part) => part.trim())).toContain(kept);
+    }
+  });
+
   it("跟随书籍字体时不输出后代字体覆盖", async () => {
     const html = `<html xmlns="http://www.w3.org/1999/xhtml"><body><p>正文</p></body></html>`;
-    const { html: out } = await sanitizeChapter(html, { ...opts(), settings: { ...DEFAULT_SETTINGS } });
+    // 开关保留为开也不应作用于“跟随书籍”。
+    const { html: out } = await sanitizeChapter(html, { ...opts(), settings: { ...DEFAULT_SETTINGS, forceFontOverride: true } });
     expect(readStyleText(out, "overrides")).not.toMatch(/:not\(pre, code[^{]*\{\s*font-family/);
   });
 
