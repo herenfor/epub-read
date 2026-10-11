@@ -71,6 +71,8 @@ export const aa = defineMessages("aa", {
   "aa.detail.open": "详细排版微调（字重/间距/四向边距）",
   "aa.more": "更多高级设置",
   "aa.forceHorizontal": "强制竖排转横排",
+  "aa.motion": { zh: "简化界面动画", note: "Switch; same setting as the shelf's 'Interface animation: Reduced'.", max: 12 },
+  "aa.motion.hint": { zh: "去掉毛玻璃与悬停动效，面板动画更短；翻页动画不受影响", note: "Help text under the switch." },
   "aa.preload": "高性能预读",
   "aa.preload.warning": "对硬件要求较高",
   "aa.css": "自定义 CSS",

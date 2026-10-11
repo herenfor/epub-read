@@ -1,6 +1,7 @@
 import { READER_PALETTES } from "../config/readerPalette";
 import React, { useState } from "react";
 import { useMenuClose } from "./menuMotion";
+import { useUiMotion } from "./motionPreference";
 import type { Theme, TurnAnimation } from "../render/settings";
 import { PAGE_GAP_MAX_PX, type PageMarginsPx, type ReadingMode, type SpreadGapMode } from "../render/pageLayout";
 import {
@@ -206,6 +207,7 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
   const [activeTab, setActiveTab] = useState<"quick" | "detailed">("quick");
   const language = useUiLanguageChoice();
   const { t } = useUiText();
+  const [uiMotion, setUiMotion] = useUiMotion();
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [cssDraft, setCssDraft] = useState(customCss);
   const { isClosing, requestClose } = useMenuClose(onClose);
@@ -689,6 +691,21 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
                         </label>
                       </div>
                     )}
+
+                    <div className="aa-advanced-row">
+                      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                        <span>{t("aa.motion")}</span>
+                        <span className="aa-detail-sub">{t("aa.motion.hint")}</span>
+                      </div>
+                      <label className="aa-switch-label">
+                        <input
+                          type="checkbox"
+                          checked={uiMotion === "reduced"}
+                          onChange={(e) => setUiMotion(e.target.checked ? "reduced" : "full")}
+                        />
+                        <span className="aa-switch-track" />
+                      </label>
+                    </div>
 
                     {onPreloadNextChapterChange && (
                       <div className="aa-advanced-row">
@@ -1210,6 +1227,22 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
                   </label>
                 </div>
               )}
+
+              {/* 简化界面动画（低特效）：与书架“界面动画”同一设置 */}
+              <div className="aa-section aa-control-row aa-toggle-row">
+                <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                  <span className="aa-section-label">{t("aa.motion")}</span>
+                  <span className="aa-detail-sub">{t("aa.motion.hint")}</span>
+                </div>
+                <label className="aa-switch-label">
+                  <input
+                    type="checkbox"
+                    checked={uiMotion === "reduced"}
+                    onChange={(e) => setUiMotion(e.target.checked ? "reduced" : "full")}
+                  />
+                  <span className="aa-switch-track" />
+                </label>
+              </div>
 
               {/* 高性能预加载 */}
               {onPreloadNextChapterChange && (

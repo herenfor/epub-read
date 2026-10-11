@@ -21,13 +21,7 @@
   gap: 12px;
 }
 
-/* 调滤镜/繁简时要看清正文真实效果：两层遮罩都不压暗、不模糊，只负责点外关闭。 */
-.app:has(.aa-display-popover) .menu-backdrop.menu-backdrop,
-.app .aa-popover-backdrop.aa-popover-backdrop:has(+ .aa-display-popover) {
-  background: transparent;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-}
+/* 调滤镜/繁简时看清正文：遮罩不压暗、不模糊由所有 Aa 面板共用（styles.css .menu-backdrop）。 */
 
 /* 手机底部面板矮一些，上方保留一段正文用于对照效果。 */
 .app[data-mobile-chrome="true"][data-layout="compact"] .aa-popover.aa-display-popover {
