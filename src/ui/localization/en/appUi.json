@@ -33,5 +33,7 @@
   "appUi.issue.fullscreenFailed": "Failed to toggle fullscreen: {error}",
   "appUi.issue.windowFullscreenFailed": "Failed to toggle window fullscreen: {error}",
   "appUi.issue.copyFailed": "Failed to copy: {error}",
-  "appUi.issue.copyOriginalFailed": "Failed to copy original text: {error}"
+  "appUi.issue.copyOriginalFailed": "Failed to copy original text: {error}",
+  "appUi.issue.resourceAbsent": "Referenced file missing from book, ignored: {path}",
+  "appUi.issue.resourceUnavailable": "Failed to load book resource: {path}"
 }

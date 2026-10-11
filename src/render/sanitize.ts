@@ -27,6 +27,9 @@ export interface SanitizeOptions {
 export interface SanitizeResult {
   html: string;
   issues: string[];
+  /** 本章没有可用 URL 的书内资源路径（已去重）。路径即故障身份，由界面按
+   * 书会话聚合，并区分“书中不存在”与“存在但读取失败”。 */
+  unresolvedResources: string[];
   /** 是否发生了解析降级（XML 失败转 HTML） */
   downgraded: boolean;
 }
@@ -170,6 +173,11 @@ function buildOverrideCss(s: ReaderSettings, bodyBgColor?: string): string {
    不影响可正常断行的中文排版；书显式的 overflow-wrap 仍然优先。 */
 :where(#${VIEWER_ID}) {
   overflow-wrap: break-word;
+}
+/* [L3] 书显式 overflow-wrap/word-wrap:normal 时，普通段落仍不能越过栏边界：
+   word-break:break-word 同样只在一行放不下时折行；表格内段落不加，免改列宽。 */
+:where(#${VIEWER_ID} p:not(td *, th *)) {
+  word-break: break-word;
 }`;
 
   // ---- L5 引擎兼容补偿：Chromium 多栏布局 bug 的最小兜底 ----
@@ -329,10 +337,7 @@ export async function sanitizeChapter(
   const missingResources = new Set<string>();
   const urlFor = (path: string): string | undefined => {
     const url = opts.urlFor(path);
-    if (!url && !missingResources.has(path)) {
-      missingResources.add(path);
-      issues.push(`书内资源无法加载：${path}`);
-    }
+    if (!url) missingResources.add(path);
     return url;
   };
 
@@ -388,7 +393,6 @@ export async function sanitizeChapter(
           el.setAttribute(attr.name, url + (ref.anchor ? "#" + encodeURIComponent(ref.anchor) : ""));
         } else {
           el.removeAttribute(attr.name);
-          issues.push(`资源缺失，已移除引用：${value}`);
         }
       } else if (name === "href" && el.tagName.toLowerCase() === "a") {
         const value = attr.value.trim();
@@ -424,7 +428,6 @@ export async function sanitizeChapter(
             link.setAttribute("href", url);
           } else {
             link.parentNode?.removeChild(link);
-            issues.push(`样式表缺失，已移除：${href}`);
           }
         }
       }
@@ -730,5 +733,5 @@ ${VIEWER_TAG}#${VIEWER_ID}::-webkit-scrollbar {
 
   const serialized = (await getSerializer()).serializeToString(doc);
   const html = restoreStyleRawTextCombinators(serialized);
-  return { html, issues, downgraded };
+  return { html, issues, unresolvedResources: [...missingResources], downgraded };
 }

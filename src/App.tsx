@@ -810,6 +810,8 @@ export default function App() {
       : 1;
   });
   const [runtimeIssues, setRuntimeIssues] = useState<string[]>([]);
+  /** B-225: category + book path already logged in this book session. */
+  const reportedResourcesRef = useRef(new Set<string>());
   const [diagText, setDiagText] = useState<string | null>(null);
   const [initialAnchor, setInitialAnchor] = useState<PersistedReaderAnchor | null>(null);
   const [initialRestoreTicket, setInitialRestoreTicket] = useState<RestoreTicket | null>(null);
@@ -1793,6 +1795,7 @@ export default function App() {
       setServer(srv);
       setBookKey(key);
       setRuntimeIssues([]);
+      reportedResourcesRef.current = new Set();
       setChapterState({ status: "loading" });
       hasReaderDisplayedRef.current = false;
       setReaderDisplayReady(false);
@@ -4088,8 +4091,20 @@ export default function App() {
     [closeForeground, closeImageOverlay]
   );
 
-  const handleIssues = useCallback((issues: string[]) => {
-    if (issues.length > 0) setRuntimeIssues((prev) => [...prev, ...issues]);
+  const handleIssues = useCallback((issues: string[], unresolvedResources: readonly string[] = []) => {
+    // Every chapter that shares a stylesheet re-reports the same reference:
+    // log each book file once per session, and say whether the book lacks it
+    // (an authored reference/fallback) or it exists but could not be read.
+    const resources = bookRef.current?.resources;
+    const next = [...issues];
+    for (const path of unresolvedResources) {
+      const absent = resources?.has(path) === false;
+      const identity = `${absent ? "absent" : "unavailable"}:${path}`;
+      if (reportedResourcesRef.current.has(identity)) continue;
+      reportedResourcesRef.current.add(identity);
+      next.push(uiText(absent ? "appUi.issue.resourceAbsent" : "appUi.issue.resourceUnavailable", { path }));
+    }
+    if (next.length > 0) setRuntimeIssues((prev) => [...prev, ...next]);
   }, []);
 
   const handleToggleLog = useCallback(() => {

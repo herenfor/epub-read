@@ -97,7 +97,7 @@ export interface ContinuousReaderViewProps {
   onDisplayReady(ticket: RestoreReportTicket | null): void;
   onRequestChapter(index: number, opts?: { atEnd?: boolean }): void;
   startAtEnd: { nonce: number; atEnd: boolean };
-  onIssues(issues: string[]): void;
+  onIssues(issues: string[], unresolvedResources?: readonly string[]): void;
   onInternalLink(href: string): void;
   onBeforeInternalNavigate(href: string): void;
   onInternalNavigationSettled(): void;
