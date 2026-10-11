@@ -34,6 +34,7 @@ describe("saved reader settings", () => {
       customFontName: "Imported family",
       fontSource: "imported" as const,
       customFontId: "font-id",
+      forceFontOverride: true,
       customFonts: [{ family: "Imported family", url: "blob:session-font" }],
       customCss: "p { text-indent: 2em; }",
       lineHeight: 1.7,
@@ -53,6 +54,7 @@ describe("saved reader settings", () => {
     expect(readSavedSettings()).toEqual({
       fontSizePx: 20, theme: "sepia", uiScale: 1.15,
       customFontName: "Imported family", fontSource: "imported", customFontId: "font-id",
+      forceFontOverride: true,
       customCss: "p { text-indent: 2em; }", lineHeight: 1.7, fontWeight: 500,
       letterSpacingPx: 0.2, wordSpacingPx: 0.3,
       forceHorizontal: true, preloadNextChapter: true, turnAnimation: "fade",
