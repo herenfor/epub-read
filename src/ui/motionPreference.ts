@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 
 /**
- * Interface motion level. "full" keeps every panel/menu animation; "reduced"
- * shortens them, drops backdrop blur and skips layout-driven transitions such
- * as the resume card height. Reader page-turn motion is not affected.
+ * Interface motion level ("low effects"). "full" keeps every panel/menu
+ * animation; "reduced" shortens them, drops all interface backdrop blur and
+ * hover lifts, and skips layout-driven transitions such as the resume card
+ * height. Reader page-turn motion is not affected. New decorative effects
+ * should hang off :root[data-motion="reduced"] rather than a switch of their own.
  */
 export type UiMotion = "full" | "reduced";
 
@@ -33,16 +35,30 @@ export function uiMotionReduced(): boolean {
   }
 }
 
+// One value shared by every entry (shelf menu, reader Aa panel).
+let current: UiMotion | null = null;
+const listeners = new Set<() => void>();
+
+function snapshot(): UiMotion {
+  return (current ??= readUiMotion());
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+export function setUiMotion(next: UiMotion): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, next);
+  } catch {
+    /* the in-memory value still applies for this session */
+  }
+  current = next;
+  applyUiMotion(next);
+  for (const listener of listeners) listener();
+}
+
 export function useUiMotion(): [UiMotion, (next: UiMotion) => void] {
-  const [motion, setMotion] = useState<UiMotion>(readUiMotion);
-  useEffect(() => applyUiMotion(motion), [motion]);
-  const update = useCallback((next: UiMotion) => {
-    try {
-      localStorage.setItem(STORAGE_KEY, next);
-    } catch {
-      /* the in-memory value still applies for this session */
-    }
-    setMotion(next);
-  }, []);
-  return [motion, update];
+  return [useSyncExternalStore(subscribe, snapshot, () => "full"), setUiMotion];
 }

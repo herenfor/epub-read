@@ -152,9 +152,13 @@ export interface ReaderViewProps {
   onDisplayReady(ticket: RestoreReportTicket | null): void;
   /** 请求切换到相邻章节（next/prev 或空章自动前进） */
   onRequestChapter(index: number, opts?: { atEnd?: boolean }): void;
+  /** Turn target for a page-turn input; an image-spread leaf answers for its
+   * whole pair so a boundary leaf never starts a chapter exit with no target. */
+  chapterNeighbor?(index: number, dir: 1 | -1): number;
   /** 章节切换请求（nonce 单调递增；atEnd=true 表示加载完成后翻到最后一页） */
   startAtEnd: { nonce: number; atEnd: boolean };
-  onIssues(issues: string[]): void;
+  /** unresolvedResources: book paths with no usable URL in this chapter, for session-level aggregation. */
+  onIssues(issues: string[], unresolvedResources?: readonly string[]): void;
   /** 书内链接跳转（已解析为书内路径，含可选 #anchor） */
   onInternalLink(href: string): void;
   /** 普通书内链接改变位置前通知 UI 记录一次撤销快照。 */
@@ -307,6 +311,7 @@ export function sameRenderingSettings(a: ReaderSettings, b: ReaderSettings): boo
     a.customFontName === b.customFontName &&
     a.fontSource === b.fontSource &&
     a.customFontId === b.customFontId &&
+    (a.forceFontOverride === true) === (b.forceFontOverride === true) &&
     a.customFonts === b.customFonts &&
     a.customCss === b.customCss &&
     a.gapPx === b.gapPx &&
@@ -340,6 +345,10 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   ref
 ) {
   const { book, server, spineIndex, settings } = props;
+  const chapterNeighborRef = useRef(props.chapterNeighbor);
+  chapterNeighborRef.current = props.chapterNeighbor;
+  const neighbor = (index: number, dir: 1 | -1): number =>
+    chapterNeighborRef.current?.(index, dir) ?? nextLinearIndex(book, index, dir);
   const primaryIframeRef = useRef<HTMLIFrameElement>(null);
   const secondaryIframeRef = useRef<HTMLIFrameElement>(null);
   const tertiaryIframeRef = useRef<HTMLIFrameElement>(null);
@@ -716,8 +725,8 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
           onRequestChapterRef.current(next);
         }
       },
-      (issues) => {
-        if (isActiveSlot(slot)) onIssuesRef.current(issues);
+      (issues, unresolvedResources) => {
+        if (isActiveSlot(slot)) onIssuesRef.current(issues, unresolvedResources);
       },
       book.fixedLayout,
       (href) => {
@@ -1546,8 +1555,8 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       );
       await p.load(path, {
         settings: latestRenderSettingsRef.current,
-        hasNextChapter: nextLinearIndex(book, spineIndex, 1) >= 0,
-        hasPrevChapter: nextLinearIndex(book, spineIndex, -1) >= 0,
+        hasNextChapter: neighbor(spineIndex, 1) >= 0,
+        hasPrevChapter: neighbor(spineIndex, -1) >= 0,
         anchor: props.anchor,
         resetPage: true,
         startAtEnd,
@@ -1724,7 +1733,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       // 同向连续换章微防抖（150ms）
       if (Date.now() < sameDirThrottleUntilRef.current) return;
       if (immediate === 1) {
-        const next = nextLinearIndex(book, spineIndexRef.current, 1);
+        const next = neighbor(spineIndexRef.current, 1);
         if (next >= 0) {
           triggerChapterTransitionWheelLock();
           lockedReverseDirRef.current = -1;
@@ -1734,7 +1743,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
           props.onRequestChapter(next);
         }
       } else {
-        const prev = nextLinearIndex(book, spineIndexRef.current, -1);
+        const prev = neighbor(spineIndexRef.current, -1);
         if (prev >= 0) {
           triggerChapterTransitionWheelLock();
           lockedReverseDirRef.current = 1;
@@ -1761,7 +1770,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       motionDragRef.current = null;
       if (motionDrag && p.motionRelease(motionDrag.ticket, immediate,
         releaseVelocity(motionDrag.samples, performance.now()))) return;
-      const adjacent = nextLinearIndex(book, spineIndexRef.current, immediate);
+      const adjacent = neighbor(spineIndexRef.current, immediate);
       const outcome = p.motionTurn(immediate, ++motionInputIdRef.current, adjacent >= 0);
       if (outcome === "chapter") requestChapterTurn(adjacent);
       if (outcome !== "unavailable") return;
@@ -1776,7 +1785,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     }
     if (drag) p.previewPagedScroll(drag.frame.from);
     // 计划按真实视觉位置生成（原生吸附途中正式页号可能落后）。
-    const adjacent = nextLinearIndex(book, spineIndexRef.current, immediate);
+    const adjacent = neighbor(spineIndexRef.current, immediate);
     const plan = p.planPagedTurn(immediate, adjacent >= 0);
     if (!plan) return;
     if (plan.kind === "page") {
@@ -1874,8 +1883,8 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       delete main.dataset.swipeFollow;
     }
     const canTurn = Boolean(p && (direction === 1
-      ? p.currentPage < p.pageCount - 1 || nextLinearIndex(book, spineIndexRef.current, 1) >= 0
-      : p.currentPage > 0 || nextLinearIndex(book, spineIndexRef.current, -1) >= 0));
+      ? p.currentPage < p.pageCount - 1 || neighbor(spineIndexRef.current, 1) >= 0
+      : p.currentPage > 0 || neighbor(spineIndexRef.current, -1) >= 0));
     const ready = canTurn && Math.abs(dx) >= PAGED_SWIPE_THRESHOLD_PX;
     const chapterEdge = Boolean(p && (direction === 1 ? p.currentPage >= p.pageCount - 1 : p.currentPage <= 0));
     const offset = resolvedTurnAnimation() === "none" ? 0

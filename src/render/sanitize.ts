@@ -27,6 +27,9 @@ export interface SanitizeOptions {
 export interface SanitizeResult {
   html: string;
   issues: string[];
+  /** 本章没有可用 URL 的书内资源路径（已去重）。路径即故障身份，由界面按
+   * 书会话聚合，并区分“书中不存在”与“存在但读取失败”。 */
+  unresolvedResources: string[];
   /** 是否发生了解析降级（XML 失败转 HTML） */
   downgraded: boolean;
 }
@@ -170,6 +173,11 @@ function buildOverrideCss(s: ReaderSettings, bodyBgColor?: string): string {
    不影响可正常断行的中文排版；书显式的 overflow-wrap 仍然优先。 */
 :where(#${VIEWER_ID}) {
   overflow-wrap: break-word;
+}
+/* [L3] 书显式 overflow-wrap/word-wrap:normal 时，普通段落仍不能越过栏边界：
+   word-break:break-word 同样只在一行放不下时折行；表格内段落不加，免改列宽。 */
+:where(#${VIEWER_ID} p:not(td *, th *)) {
+  word-break: break-word;
 }`;
 
   // ---- L5 引擎兼容补偿：Chromium 多栏布局 bug 的最小兜底 ----
@@ -236,6 +244,15 @@ function buildOverrideCss(s: ReaderSettings, bodyBgColor?: string): string {
   const bodyFontCss = s.customFontName
     ? `font-family: "${escapeFamily(s.customFontName)}" !important;`
     : "";
+  // 书常把字体写在 div/p 上，元素自身声明会压过 body 的继承值。只有用户
+  // 打开“覆盖书籍字体”才覆盖正文后代；等宽代码与 SVG/MathML 保留书的字体。
+  const descendantFontCss = s.customFontName && s.forceFontOverride === true
+    ? `
+/* [L2] 用户开启覆盖书籍字体：选定字体覆盖正文后代（关闭时不输出）。 */
+:where(#${VIEWER_ID}) :not(pre, code, kbd, samp, tt, pre *, code *, kbd *, samp *, tt *, svg, svg *, math, math *) {
+  ${bodyFontCss}
+}`
+    : "";
   const writingModeCss = s.forceHorizontal === true
     ? `
 /* [L2/C-46] 可重排章节的强制横排：覆盖书籍 html/body、分页 viewer 及其普通后代。
@@ -254,7 +271,7 @@ html { font-size: ${s.fontSizePx}px !important; font-family: ${family}; }
 ${fontFaceCss}
 /* [L2] 主题只覆盖背景色，不用 background 简写（会重置书的 body 背景图）。
    浅色主题下安全的书籍 bgcolor 作为默认值合入这里，用户 CSS 仍在本样式末尾。 */
-body { color: ${fg}; background-color: ${bodyBgColor ?? bg}; ${bodyFontCss} }
+body { color: ${fg}; background-color: ${bodyBgColor ?? bg}; ${bodyFontCss} }${descendantFontCss}
 /* [L2] 笔记标记：CSS Custom Highlight 只绘制下划线，不包裹正文节点，
    因此不会改变文字几何尺寸、分页或作者选择器匹配。颜色按 iframe 主题固定，
    不依赖宿主页面变量；不设置背景，避免遮挡原书文字。 */
@@ -271,6 +288,9 @@ body { color: ${fg}; background-color: ${bodyBgColor ?? bg}; ${bodyFontCss} }
   background-color: ${searchBackground};
   color: ${searchForeground};
 }
+/* [L2] PC 阅读静止隐藏指针：宿主在本文档根上切换 data-reader-cursor-idle
+   （见 ui/readerCursorIdle.ts）；移动鼠标即移除。 */
+:root[data-reader-cursor-idle], :root[data-reader-cursor-idle] * { cursor: none !important; }
 /* [L2] ruby 注音 rt 随主题换色（书常固定 ruby>rt{color:#333}）。 */
 #${VIEWER_ID} rt { color: ${fg}; }
 ${writingModeCss}
@@ -329,10 +349,7 @@ export async function sanitizeChapter(
   const missingResources = new Set<string>();
   const urlFor = (path: string): string | undefined => {
     const url = opts.urlFor(path);
-    if (!url && !missingResources.has(path)) {
-      missingResources.add(path);
-      issues.push(`书内资源无法加载：${path}`);
-    }
+    if (!url) missingResources.add(path);
     return url;
   };
 
@@ -388,7 +405,6 @@ export async function sanitizeChapter(
           el.setAttribute(attr.name, url + (ref.anchor ? "#" + encodeURIComponent(ref.anchor) : ""));
         } else {
           el.removeAttribute(attr.name);
-          issues.push(`资源缺失，已移除引用：${value}`);
         }
       } else if (name === "href" && el.tagName.toLowerCase() === "a") {
         const value = attr.value.trim();
@@ -424,7 +440,6 @@ export async function sanitizeChapter(
             link.setAttribute("href", url);
           } else {
             link.parentNode?.removeChild(link);
-            issues.push(`样式表缺失，已移除：${href}`);
           }
         }
       }
@@ -730,5 +745,5 @@ ${VIEWER_TAG}#${VIEWER_ID}::-webkit-scrollbar {
 
   const serialized = (await getSerializer()).serializeToString(doc);
   const html = restoreStyleRawTextCombinators(serialized);
-  return { html, issues, downgraded };
+  return { html, issues, unresolvedResources: [...missingResources], downgraded };
 }

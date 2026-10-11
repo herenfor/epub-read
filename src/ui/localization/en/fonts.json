@@ -4,6 +4,8 @@
   "fonts.close": "Close font settings",
   "fonts.current": "Current font: {name}",
   "fonts.followBook": "Follow Book",
+  "fonts.override": "Override Book Fonts",
+  "fonts.override.hint": "When off, the chosen font only replaces text without a book-specified font. When on, all body text uses it; code and formulas keep their original fonts.",
   "fonts.search": "Search font names",
   "fonts.tab.system": "System ({count})",
   "fonts.tab.imported": "Imported ({count})",

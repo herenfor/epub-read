@@ -42,12 +42,11 @@ function expectCombinatorsAndEscaping(out: string): void {
 }
 
 describe("sanitizeChapter", () => {
-  it("missing background references are reported once through the existing issues channel", async () => {
+  it("missing background references are reported once, by path", async () => {
     const result = await sanitizeChapter(`<html><head><style>body{background:url('../Images/missing.png')}</style></head>
 <body style="background-image:url('../Images/missing.png')"><p>正文</p></body></html>`, opts());
-    expect(result.issues.filter((issue) => issue.includes("书内资源无法加载"))).toEqual([
-      "书内资源无法加载：OEBPS/Images/missing.png",
-    ]);
+    expect(result.unresolvedResources).toEqual(["OEBPS/Images/missing.png"]);
+    expect(result.issues).toEqual([]);
     expect(result.html).toContain("正文");
   });
   it("注入 iframe 内的笔记 Custom Highlight 下划线规则，不包裹正文或设置背景", async () => {
@@ -149,7 +148,7 @@ describe("sanitizeChapter", () => {
     expect(document.getElementById("fallback-submit")).toBeNull();
   });
 
-  it("图片 src 改写为 blob URL；缺失资源移除并记 issue", async () => {
+  it("图片 src 改写为 blob URL；缺失资源移除并按路径记录", async () => {
     const html = `<html xmlns="http://www.w3.org/1999/xhtml"><body>
 <img src="images/a.png" alt="a"/>
 <img src="images/missing.png" alt="b"/>
@@ -157,7 +156,7 @@ describe("sanitizeChapter", () => {
     const res = await sanitizeChapter(html, opts());
     expect(res.html).toContain('src="blob:test/OEBPS/Text/images/a.png"');
     expect(res.html).not.toContain("missing.png");
-    expect(res.issues.some((i) => i.includes("missing.png"))).toBe(true);
+    expect(res.unresolvedResources).toEqual(["OEBPS/Text/images/missing.png"]);
   });
 
   it("样式表 link 改写为 blob URL", async () => {
@@ -865,9 +864,25 @@ background-position:center center;background-size:cover;background-color:#f9ebdf
     expect(out).toContain('font-family: "MyFont" !important;');
   });
 
+  it("开启覆盖书籍字体时才覆盖 div/p 上的书字体，并保留等宽代码与 SVG", async () => {
+    const html = `<html xmlns="http://www.w3.org/1999/xhtml"><head><style>div { font-family: "cnepub"; }</style></head><body><div><p>正文</p></div></body></html>`;
+    const rule = (forceFontOverride: boolean) => async () => readStyleText((await sanitizeChapter(html, {
+      ...opts(),
+      settings: { ...DEFAULT_SETTINGS, customFontName: "MyFont", forceFontOverride },
+    })).html, "overrides").match(new RegExp(`:where\\(#${VIEWER_ID}\\) :not\\(([^)]*)\\) \\{\\s*font-family: "MyFont" !important;`));
+    // 关闭：只作缺省字体（body 级），作者后代声明优先。
+    expect(await rule(false)()).toBeNull();
+    const on = await rule(true)();
+    expect(on).not.toBeNull();
+    for (const kept of ["pre", "code", "kbd", "samp", "tt", "pre *", "code *", "svg", "svg *", "math *"]) {
+      expect(on![1].split(",").map((part) => part.trim())).toContain(kept);
+    }
+  });
+
   it("跟随书籍字体时不输出后代字体覆盖", async () => {
     const html = `<html xmlns="http://www.w3.org/1999/xhtml"><body><p>正文</p></body></html>`;
-    const { html: out } = await sanitizeChapter(html, { ...opts(), settings: { ...DEFAULT_SETTINGS } });
+    // 开关保留为开也不应作用于“跟随书籍”。
+    const { html: out } = await sanitizeChapter(html, { ...opts(), settings: { ...DEFAULT_SETTINGS, forceFontOverride: true } });
     expect(readStyleText(out, "overrides")).not.toMatch(/:not\(pre, code[^{]*\{\s*font-family/);
   });
 
@@ -876,6 +891,10 @@ background-position:center center;background-size:cover;background-color:#f9ebdf
     const { html: out } = await sanitizeChapter(html, { ...opts(), settings: { ...DEFAULT_SETTINGS } });
     expect(readStyleText(out, "overrides")).toMatch(
       new RegExp(`:where\\(#${VIEWER_ID}\\) \\{\\s*overflow-wrap: break-word;\\s*\\}`),
+    );
+    // 书显式 overflow-wrap:normal 也不能越栏；表格内段落不改列宽。
+    expect(readStyleText(out, "overrides")).toMatch(
+      new RegExp(`:where\\(#${VIEWER_ID} p:not\\(td \\*, th \\*\\)\\) \\{\\s*word-break: break-word;\\s*\\}`),
     );
   });
 
