@@ -64,6 +64,8 @@ export interface SavedSettings {
   customFontName?: string;
   fontSource?: "system" | "imported";
   customFontId?: string;
+  /** 选定字体是否覆盖书的正文后代字体；旧设置缺省为 false */
+  forceFontOverride?: boolean;
   /** 用户自定义 CSS 文本 */
   customCss?: string;
   /** 可重排章节是否强制覆盖为横排；旧设置缺省为 false */
@@ -97,6 +99,7 @@ export function toSavedReaderSettings(settings: ReaderSettings, uiScale: number)
     customFontName: settings.customFontName,
     fontSource: settings.fontSource,
     customFontId: settings.customFontId,
+    forceFontOverride: settings.forceFontOverride === true,
     customCss: settings.customCss,
     forceHorizontal: settings.forceHorizontal === true,
     preloadNextChapter: settings.preloadNextChapter === true,

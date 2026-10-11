@@ -20,7 +20,7 @@
   "display.text.rule.from": "Rule {n} original text",
   "display.text.rule.fromPlaceholder": "Original",
   "display.text.rule.to": "Rule {n} display text",
-  "display.text.rule.toPlaceholder": "Show as",
+  "display.text.rule.toPlaceholder": "(Optional)",
   "display.text.rule.disable": "Disable this rule",
   "display.text.rule.enable": "Enable this rule",
   "display.text.rule.enableN": "Enable rule {n}",

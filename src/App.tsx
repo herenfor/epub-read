@@ -52,6 +52,7 @@ import { checkThenRecoverProgressRuntime, planFreshProgressOpen } from "./ui/pro
 import { useAndroidBack } from "./platform/useAndroidBack";
 import { moveAndroidTaskToBack } from "./platform/androidAppTask";
 import { useExitPresence } from "./ui/menuMotion";
+import { useReaderCursorIdle } from "./ui/readerCursorIdle";
 import { createSidebarNavigationMemory, type SidebarNavigationMemory } from "./ui/sidebarSwipe";
 import { SidebarDrawer, type SidebarMode, type SidebarTab } from "./ui/SidebarDrawer";
 import { AaPopover } from "./ui/AaPopover";
@@ -786,6 +787,7 @@ export default function App() {
       customFontName: saved.customFontName,
       fontSource: saved.fontSource === "system" || saved.fontSource === "imported" ? saved.fontSource : undefined,
       customFontId: saved.customFontId,
+      forceFontOverride: saved.forceFontOverride === true,
       customCss: saved.customCss,
       forceHorizontal: saved.forceHorizontal === true,
       preloadNextChapter: saved.preloadNextChapter === true,
@@ -810,6 +812,8 @@ export default function App() {
       : 1;
   });
   const [runtimeIssues, setRuntimeIssues] = useState<string[]>([]);
+  /** B-225: category + book path already logged in this book session. */
+  const reportedResourcesRef = useRef(new Set<string>());
   const [diagText, setDiagText] = useState<string | null>(null);
   const [initialAnchor, setInitialAnchor] = useState<PersistedReaderAnchor | null>(null);
   const [initialRestoreTicket, setInitialRestoreTicket] = useState<RestoreTicket | null>(null);
@@ -1793,6 +1797,7 @@ export default function App() {
       setServer(srv);
       setBookKey(key);
       setRuntimeIssues([]);
+      reportedResourcesRef.current = new Set();
       setChapterState({ status: "loading" });
       hasReaderDisplayedRef.current = false;
       setReaderDisplayReady(false);
@@ -4088,8 +4093,20 @@ export default function App() {
     [closeForeground, closeImageOverlay]
   );
 
-  const handleIssues = useCallback((issues: string[]) => {
-    if (issues.length > 0) setRuntimeIssues((prev) => [...prev, ...issues]);
+  const handleIssues = useCallback((issues: string[], unresolvedResources: readonly string[] = []) => {
+    // Every chapter that shares a stylesheet re-reports the same reference:
+    // log each book file once per session, and say whether the book lacks it
+    // (an authored reference/fallback) or it exists but could not be read.
+    const resources = bookRef.current?.resources;
+    const next = [...issues];
+    for (const path of unresolvedResources) {
+      const absent = resources?.has(path) === false;
+      const identity = `${absent ? "absent" : "unavailable"}:${path}`;
+      if (reportedResourcesRef.current.has(identity)) continue;
+      reportedResourcesRef.current.add(identity);
+      next.push(uiText(absent ? "appUi.issue.resourceAbsent" : "appUi.issue.resourceUnavailable", { path }));
+    }
+    if (next.length > 0) setRuntimeIssues((prev) => [...prev, ...next]);
   }, []);
 
   const handleToggleLog = useCallback(() => {
@@ -5314,6 +5331,9 @@ export default function App() {
   const ready = phase.phase === "ready" && book !== null && server !== null;
   // 搜索与“更多”关闭后保留一个退场动画时长再卸载，与其他菜单同速。
   const searchPresence = useExitPresence(searchOpen);
+  // PC 阅读：鼠标静止后隐藏指针；书架、面板/浮层与弹窗期间始终显示。
+  useReaderCursorIdle(view === "reader" && !mobileChrome && foreground.kind === "none" &&
+    !saveFailurePrompt && !progressChoice && imageRequest === null);
   const moreSheetPresence = useExitPresence(mobileChrome && view === "reader" && ready && mobileMoreOpen);
   const lanSavePresence = useExitPresence(lanSaveOpen && runtime.supportsLanTransfer);
   const readerLoadFeedback = resolveReaderLoadFeedback({
@@ -6610,6 +6630,8 @@ export default function App() {
                   source={settings.fontSource}
                   customFontId={settings.customFontId}
                   customFontName={settings.customFontName}
+                  forceFontOverride={settings.forceFontOverride === true}
+                  onForceFontOverrideChange={(enabled) => setSettings((s) => ({ ...s, forceFontOverride: enabled }))}
                   systemFonts={systemFonts}
                   userFonts={userFonts}
                   systemFontsStatus={systemFontsStatus}

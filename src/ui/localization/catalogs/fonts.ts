@@ -7,6 +7,8 @@ export const fonts = defineMessages("fonts", {
   "fonts.close": "关闭字体设置",
   "fonts.current": { zh: "当前字体：{name}", note: "{name} is a font family name or 'Follow book'." },
   "fonts.followBook": "跟随书籍",
+  "fonts.override": { zh: "覆盖书籍字体", note: "Switch label: apply the chosen font to all body text, even where the book sets its own font.", max: 10 },
+  "fonts.override.hint": { zh: "关闭时，所选字体只替换书未指定字体的文字；开启后正文全部改用所选字体，代码与公式保留原字体。", note: "Help text under the switch." },
   "fonts.search": "搜索字体名称",
   "fonts.tab.system": { zh: "系统字体（{count}）", max: 18 },
   "fonts.tab.imported": { zh: "已导入（{count}）", max: 18 },

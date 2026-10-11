@@ -1519,6 +1519,35 @@ export function isPercentageMarginLayout(
 }
 
 /**
+ * C-04：把书的不对称 margin 解释为“相对居中版心列的缩进”：
+ * 正文列左缘 = (parent - width)/2；书 margin-left:2em 意味着
+ * 元素左缘再缩进 2em，与正文首行 text-indent 对齐。
+ * 包含块已窄于默认版心时（双栏/手机），auto 宽度盒被作者 margin 压窄后
+ * 恰好填满包含块，正文列就是包含块本身：保留作者原位，不再按压窄后的
+ * 宽度居中再叠加一次 margin（B-229 目录标题多偏半个 margin）。
+ */
+export function planColumnIndentMargins({
+  parentWidth,
+  width,
+  marginLeft,
+  marginRight,
+}: {
+  parentWidth: number;
+  width: number;
+  marginLeft: number;
+  marginRight: number;
+}): { left: number; right: number } {
+  const fillsParent = marginLeft + width + marginRight >= parentWidth - 0.5;
+  const base = fillsParent ? 0 : (parentWidth - width) / 2;
+  if (marginLeft > 0) {
+    const left = base + marginLeft;
+    return { left, right: parentWidth - left - width };
+  }
+  const right = base + marginRight;
+  return { left: parentWidth - right - width, right };
+}
+
+/**
  * 最后一道跨引擎兜底：未知来源的 margin 在作者原位仍留有明确余量，但
  * C-04 再叠加正文版心会越出包含块时，保留作者原位。仅接受有限、非负、
  * 非 auto-like 的显式 margin；普通 2em 缩进与作者原位本就越列不命中。
@@ -2685,7 +2714,7 @@ export class ChapterPaginator {
     private settings: ReaderSettings,
     private strictXml: boolean,
     private onState: (s: ChapterState) => void,
-    private onIssues?: (issues: string[]) => void,
+    private onIssues?: (issues: string[], unresolvedResources: readonly string[]) => void,
     /** 固定版式书：不做行宽自适应，整页显示 */
     private fixedLayout = false,
     /** 书内链接点击回调（已解析为书内路径，含可选锚点），供阅读器跳转 */
@@ -3660,7 +3689,9 @@ export class ChapterPaginator {
       this.blobUrl = nextBlobUrl;
       this.iframe.addEventListener("load", this.onIframeLoad);
       this.iframe.src = nextBlobUrl;
-      if (sanitized.issues.length > 0) this.onIssues?.(sanitized.issues);
+      if (sanitized.issues.length > 0 || sanitized.unresolvedResources.length > 0) {
+        this.onIssues?.(sanitized.issues, sanitized.unresolvedResources);
+      }
     } catch (e) {
       this.releaseResourceHolder(holderId);
       this.pendingCssUrls.delete(ownedCssUrls);
@@ -5757,21 +5788,13 @@ export class ChapterPaginator {
           continue;
         }
 
-        // 把书的不对称 margin 解释为“相对居中版心列的缩进”：
-        // 正文列左缘 = (parent - width)/2；书 margin-left:2em 意味着
-        // 元素左缘再缩进 2em，与正文首行 text-indent 对齐。
-        const base = (parentW - width) / 2;
-        let desiredLeft: number;
-        let desiredRight: number;
-        if (ml > 0) {
-          desiredLeft = base + ml;
-          desiredRight = parentW - desiredLeft - width;
-        } else if (mr > 0) {
-          desiredRight = base + mr;
-          desiredLeft = parentW - desiredRight - width;
-        } else {
-          continue;
-        }
+        if (ml <= 0 && mr <= 0) continue;
+        const { left: desiredLeft, right: desiredRight } = planColumnIndentMargins({
+          parentWidth: parentW,
+          width,
+          marginLeft: ml,
+          marginRight: mr,
+        });
 
         this.marginFixes.push({
           el,

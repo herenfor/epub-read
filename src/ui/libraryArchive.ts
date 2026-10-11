@@ -329,6 +329,7 @@ const SETTING_KEYS = new Set([
   "fontSizePx", "theme", "fontFamily", "customFontName", "fontSource", "customFontId", "customCss", "gapPx", "spreadGapMode",
   "lineHeight", "fontWeight", "letterSpacingPx", "wordSpacingPx", "uiScale",
   "forceHorizontal",
+  "forceFontOverride",
   "preloadNextChapter",
 ]);
 
