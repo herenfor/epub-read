@@ -52,6 +52,7 @@ import { checkThenRecoverProgressRuntime, planFreshProgressOpen } from "./ui/pro
 import { useAndroidBack } from "./platform/useAndroidBack";
 import { moveAndroidTaskToBack } from "./platform/androidAppTask";
 import { useExitPresence } from "./ui/menuMotion";
+import { useReaderCursorIdle } from "./ui/readerCursorIdle";
 import { createSidebarNavigationMemory, type SidebarNavigationMemory } from "./ui/sidebarSwipe";
 import { SidebarDrawer, type SidebarMode, type SidebarTab } from "./ui/SidebarDrawer";
 import { AaPopover } from "./ui/AaPopover";
@@ -5330,6 +5331,9 @@ export default function App() {
   const ready = phase.phase === "ready" && book !== null && server !== null;
   // 搜索与“更多”关闭后保留一个退场动画时长再卸载，与其他菜单同速。
   const searchPresence = useExitPresence(searchOpen);
+  // PC 阅读：鼠标静止后隐藏指针；书架、面板/浮层与弹窗期间始终显示。
+  useReaderCursorIdle(view === "reader" && !mobileChrome && foreground.kind === "none" &&
+    !saveFailurePrompt && !progressChoice && imageRequest === null);
   const moreSheetPresence = useExitPresence(mobileChrome && view === "reader" && ready && mobileMoreOpen);
   const lanSavePresence = useExitPresence(lanSaveOpen && runtime.supportsLanTransfer);
   const readerLoadFeedback = resolveReaderLoadFeedback({

@@ -288,6 +288,9 @@ body { color: ${fg}; background-color: ${bodyBgColor ?? bg}; ${bodyFontCss} }${d
   background-color: ${searchBackground};
   color: ${searchForeground};
 }
+/* [L2] PC 阅读静止隐藏指针：宿主在本文档根上切换 data-reader-cursor-idle
+   （见 ui/readerCursorIdle.ts）；移动鼠标即移除。 */
+:root[data-reader-cursor-idle], :root[data-reader-cursor-idle] * { cursor: none !important; }
 /* [L2] ruby 注音 rt 随主题换色（书常固定 ruby>rt{color:#333}）。 */
 #${VIEWER_ID} rt { color: ${fg}; }
 ${writingModeCss}
