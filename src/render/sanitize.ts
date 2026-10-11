@@ -1,4 +1,3 @@
-import { READER_PALETTES } from "../config/readerPalette";
 import { resolveArchiveHref, type ArchiveReferences } from "../core/archiveReferences";
 import { getSerializer } from "../core/parseXml";
 import { parseChapterDocument, STRIPPED_CHAPTER_TAGS } from "./chapterDocument";
@@ -7,6 +6,7 @@ import { hasAuthoredCssProperty, rewriteCssInlineWidths, rewriteCssUrls } from "
 import { isFullPageImage, linkedImagePage } from "./fullPageImage";
 import { childElements } from "../core/xml";
 import { imageLayoutPolicy, scrollMediaDefaultsCss } from "./imageLayoutPolicy";
+import { buildThemeCss } from "./readerTheme";
 import { TEXT_MEASURE, type ReaderSettings } from "./settings";
 
 export interface SanitizeOptions {
@@ -32,6 +32,8 @@ export interface SanitizeResult {
   unresolvedResources: string[];
   /** 是否发生了解析降级（XML 失败转 HTML） */
   downgraded: boolean;
+  /** 提取并保留的作者安全背景颜色（若存在） */
+  authorBgColor?: string;
 }
 
 /** Escape a font family for a CSS quoted string, including CSS-significant
@@ -69,7 +71,7 @@ function restoreStyleRawTextCombinators(serialized: string): string {
 }
 
 /** 仅接受 #hex 或安全色名，防止书里的 bgcolor 注入任意 CSS */
-function isSafeColor(v: string): boolean {
+export function isSafeColor(v: string): boolean {
   if (/^#[0-9a-fA-F]{3,8}$/.test(v.trim())) return true;
   const SAFE_NAMES = new Set([
     "white", "black", "ivory", "beige", "linen", "seashell", "floralwhite",
@@ -82,15 +84,7 @@ function isSafeColor(v: string): boolean {
   return SAFE_NAMES.has(v.trim().toLowerCase());
 }
 
-function buildOverrideCss(s: ReaderSettings, bodyBgColor?: string): string {
-  const palette = READER_PALETTES[s.theme];
-  const {
-    background: bg,
-    foreground: fg,
-    noteUnderline,
-    searchBackground,
-    searchForeground,
-  } = palette;
+function buildOverrideCss(s: ReaderSettings): string {
   const family =
     s.fontFamily ??
     `"Segoe UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Source Han Sans SC", sans-serif`;
@@ -265,50 +259,19 @@ html, body, #${VIEWER_ID},
   text-orientation: mixed !important;
 }`
     : "";
-  const themeCss = `
-/* [L2] 字体 fallback 只放 html；书在 body 上的内嵌字体声明优先。 */
-html { font-size: ${s.fontSizePx}px !important; font-family: ${family}; }
-${fontFaceCss}
-/* [L2] 主题只覆盖背景色，不用 background 简写（会重置书的 body 背景图）。
-   浅色主题下安全的书籍 bgcolor 作为默认值合入这里，用户 CSS 仍在本样式末尾。 */
-body { color: ${fg}; background-color: ${bodyBgColor ?? bg}; ${bodyFontCss} }${descendantFontCss}
-/* [L2] 笔记标记：CSS Custom Highlight 只绘制下划线，不包裹正文节点，
-   因此不会改变文字几何尺寸、分页或作者选择器匹配。颜色按 iframe 主题固定，
-   不依赖宿主页面变量；不设置背景，避免遮挡原书文字。 */
-::highlight(reader-notes) {
-  text-decoration-line: underline;
-  text-decoration-style: solid;
-  text-decoration-thickness: 2px;
-  text-underline-offset: 0.15em;
-  text-decoration-color: ${noteUnderline};
-}
-/* [L2] 搜索正文命中：只使用 CSS Custom Highlight 支持的绘制属性；
-   背景色保证作者白字/彩字可读，笔记下划线仍可与搜索背景共存。 */
-::highlight(reader-search-hit) {
-  background-color: ${searchBackground};
-  color: ${searchForeground};
-}
-/* [L2] PC 阅读静止隐藏指针：宿主在本文档根上切换 data-reader-cursor-idle
-   （见 ui/readerCursorIdle.ts）；移动鼠标即移除。 */
-:root[data-reader-cursor-idle], :root[data-reader-cursor-idle] * { cursor: none !important; }
-/* [L2] ruby 注音 rt 随主题换色（书常固定 ruby>rt{color:#333}）。 */
-#${VIEWER_ID} rt { color: ${fg}; }
-${writingModeCss}
-${
-  s.theme === "dark" || s.theme === "gray"
-    ? `/* [L2] 深色主题下着重号（text-emphasis）随前景色换色；
-   书常写 text-emphasis:circle #000，深色背景上看不见。 */
-#${VIEWER_ID} * { -webkit-text-emphasis-color: ${fg}; text-emphasis-color: ${fg}; }
-/* [L2/C-45] 深色主题可读性兜底：让未自行声明 text-shadow 的文字
-   继承与阅读器背景一致的阴影；作者后代的明确声明（包括 none）可覆盖。 */
-#${VIEWER_ID} { text-shadow: 1px 1px 1px ${bg}; }
-/* [L2] 深色主题目录链接换色：书常写 .toc a{color:#000}。
-   与 Sigil 深色预览一致的浅蓝。 */
-#${VIEWER_ID} .toc a { color: ${READER_PALETTES[s.theme === "gray" ? "gray" : "dark"].tocLink}; }
-/* [L2] 深色主题下清除图片投影，避免在深色背景上形成白色光晕 */
-#${VIEWER_ID} img { box-shadow: none !important; }`
-    : ""
-}`;
+  const typographyCss = [
+    `/* [L2] 字体 fallback 只放 html；书在 body 上的内嵌字体声明优先。 */`,
+    `html { font-size: ${s.fontSizePx}px !important; font-family: ${family}; }`,
+    fontFaceCss,
+    bodyFontCss ? `body { ${bodyFontCss} }` : "",
+    descendantFontCss,
+    `/* [L2] PC 阅读静止隐藏指针：宿主在本文档根上切换 data-reader-cursor-idle
+   （见 ui/readerCursorIdle.ts）；移动鼠标即移除。 */`,
+    `:root[data-reader-cursor-idle], :root[data-reader-cursor-idle] * { cursor: none !important; }`,
+    writingModeCss,
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   return [
     `/* [L1/L3-C21] 正文只由 viewer 分页，不使用根页面原生滚动。
@@ -328,7 +291,7 @@ ${VIEWER_TAG}#${VIEWER_ID} { display: block; height: 100%; overflow: hidden; mar
     codeWrapCss,
     compatCss,
     imageCss,
-    themeCss,
+    typographyCss,
   ].join("\n");
 }
 
@@ -461,11 +424,17 @@ export async function sanitizeChapter(
   // 5) 把正文包进分页容器（paginator 依赖 #epub-viewer 做多栏分页）
   const bodyEl = doc.getElementsByTagName("body")[0] ?? root;
   const rawBgColor = bodyEl.getAttribute("bgcolor")?.trim() ?? "";
+  const existingAuthorBg = bodyEl.getAttribute("data-reader-author-bgcolor")?.trim() ?? "";
+  const candidateBg = rawBgColor || existingAuthorBg;
+  const safeAuthorBgColor = candidateBg && isSafeColor(candidateBg) ? candidateBg : undefined;
+  if (safeAuthorBgColor) {
+    bodyEl.setAttribute("data-reader-author-bgcolor", safeAuthorBgColor);
+  }
   // 书籍 bgcolor 只作为浅色主题的安全默认背景色；深色/纸色主题保持主题色。
   // 该值只进入 background-color longhand，不会重置 body 背景图。
   const bodyBgColor =
-    opts.settings.theme === "light" && rawBgColor && isSafeColor(rawBgColor)
-      ? rawBgColor
+    opts.settings.theme === "light" && safeAuthorBgColor
+      ? safeAuthorBgColor
       : undefined;
   // The old implementation emitted a separate bgcolor rule with !important
   // after the user CSS, so it deterministically overrode user background
@@ -731,8 +700,13 @@ ${VIEWER_TAG}#${VIEWER_ID}::-webkit-scrollbar {
 
   const styleEl = doc.createElement("style");
   styleEl.setAttribute("data-reader", "overrides");
-  styleEl.textContent = buildOverrideCss(opts.settings, bodyBgColor);
+  styleEl.textContent = buildOverrideCss(opts.settings);
   head.appendChild(styleEl);
+
+  const themeStyleEl = doc.createElement("style");
+  themeStyleEl.setAttribute("data-reader", "theme");
+  themeStyleEl.textContent = buildThemeCss(opts.settings.theme, bodyBgColor);
+  head.appendChild(themeStyleEl);
 
   // 用户自定义 CSS 单独成表，顺序仍在阅读器覆盖样式之后；来源标记只用于
   // 主题对比度修复识别用户明确的 color 意图，不改变 CSS 层叠顺序。
@@ -745,5 +719,11 @@ ${VIEWER_TAG}#${VIEWER_ID}::-webkit-scrollbar {
 
   const serialized = (await getSerializer()).serializeToString(doc);
   const html = restoreStyleRawTextCombinators(serialized);
-  return { html, issues, unresolvedResources: [...missingResources], downgraded };
+  return {
+    html,
+    issues,
+    unresolvedResources: [...missingResources],
+    downgraded,
+    authorBgColor: safeAuthorBgColor,
+  };
 }
