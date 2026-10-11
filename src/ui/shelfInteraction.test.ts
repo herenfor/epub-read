@@ -333,6 +333,32 @@ describe("shelf menu and gesture lifecycle", () => {
     }
   });
 
+  it("Back closes a folder dialog before collapsing the expanded folder cards beneath it", async () => {
+    let back: (() => boolean) | null = null;
+    const shelf = await mount({
+      compact: true,
+      organization: folderOrganization(["b1"]),
+      registerBackHandler: (handler) => { back = handler; },
+    });
+    try {
+      await shelf.dom.click(shelf.dom.container.querySelector(".shelf-folder-dropdown-btn")!);
+      const expand = [...shelf.dom.container.querySelectorAll(".shelf-folder-menu-item")]
+        .find((item) => item.textContent?.includes("展开"))!;
+      await shelf.dom.click(expand);
+      await shelf.dom.click(shelf.dom.container.querySelector(".shelf-folder-card")!);
+      expect(shelf.dom.container.querySelector(".shelf-folder-modal")).not.toBeNull();
+      await shelf.dom.run(() => { expect(back?.()).toBe(true); });
+      await shelf.dom.run(() => { vi.advanceTimersByTime(1000); });
+      expect(shelf.dom.container.querySelector(".shelf-folder-modal")).toBeNull();
+      // The cards are still expanded; the next Back collapses them.
+      expect(shelf.dom.container.querySelector(".shelf-folder-card")).not.toBeNull();
+      await shelf.dom.run(() => { expect(back?.()).toBe(true); });
+      expect(shelf.dom.container.querySelector(".shelf-folder-card")).toBeNull();
+    } finally {
+      await shelf.dom.dispose();
+    }
+  });
+
   it("scrolling during a press withdraws it: no selection, no open, no press state left", async () => {
     const shelf = await mount();
     try {
