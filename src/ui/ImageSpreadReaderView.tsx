@@ -29,11 +29,16 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
       ? { ...state, effectiveColumns: 2, atEnd: nextLinearIndex(p.book, last, 1) < 0 }
       : state;
   };
+  // Both leaves turn from the pair's outer edge: at the book start/end there
+  // is no target, so neither leaf may begin a chapter exit.
+  const neighbor = (dir: 1 | -1) => {
+    const { book, spread } = latest.current;
+    return nextLinearIndex(book, dir === 1 ? spread.right ?? spread.left : spread.left, dir);
+  };
   const turn = (dir: 1 | -1) => {
     const p = latest.current;
     if (p.inputPaused || displayed.current.size < (p.spread.right === null ? 1 : 2)) return;
-    const from = dir === 1 ? p.spread.right ?? p.spread.left : p.spread.left;
-    const target = nextLinearIndex(p.book, from, dir);
+    const target = neighbor(dir);
     if (target >= 0) p.onRequestChapter(target, dir === -1 ? { atEnd: true } : undefined);
   };
   useImperativeHandle(ref, () => ({
@@ -107,6 +112,7 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
           } else if (ready && selected) latest.current.onPageState(spreadState(state));
         }}
         onDisplayReady={() => { displayed.current.add(index); publish(); }}
+        chapterNeighbor={(_, dir) => neighbor(dir)}
         onRequestChapter={(target, options) => {
           // Empty/hidden authored pictures retain ordinary chapter handling.
           const state = states.current.get(index);

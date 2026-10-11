@@ -37,4 +37,6 @@ export const appUi = defineMessages("appUi", {
   "appUi.issue.windowFullscreenFailed": "窗口全屏切换失败：{error}",
   "appUi.issue.copyFailed": "复制失败：{error}",
   "appUi.issue.copyOriginalFailed": "复制原文失败：{error}",
+  "appUi.issue.resourceAbsent": { zh: "书中引用的文件不存在，已忽略：{path}", note: "Diagnostic log: the book's CSS/HTML references a file the EPUB does not contain (often an unused fallback font). Logged once per file." },
+  "appUi.issue.resourceUnavailable": { zh: "书内资源无法加载：{path}", note: "Diagnostic log: the file exists in the EPUB but could not be read. Logged once per file." },
 });

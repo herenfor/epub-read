@@ -27,7 +27,7 @@ export const display = defineMessages("display", {
   "display.text.rule.from": { zh: "规则 {n} 原文", note: "Accessible label of rule n's 'find' field." },
   "display.text.rule.fromPlaceholder": { zh: "原文", note: "Placeholder: text to find.", max: 10 },
   "display.text.rule.to": { zh: "规则 {n} 显示", note: "Accessible label of rule n's 'show as' field." },
-  "display.text.rule.toPlaceholder": { zh: "显示为", note: "Placeholder: replacement shown instead.", max: 10 },
+  "display.text.rule.toPlaceholder": { zh: "显示为（可留空）", note: "Placeholder: replacement shown instead; blank deletes the match.", max: 10 },
   "display.text.rule.disable": "停用此规则",
   "display.text.rule.enable": "启用此规则",
   "display.text.rule.enableN": "启用规则 {n}",

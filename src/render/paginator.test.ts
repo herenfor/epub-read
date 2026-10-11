@@ -32,6 +32,7 @@ import {
   restoreInlineStyleProperty,
   shouldKeepSymmetricMarginsCentered,
   shouldKeepContainingBlockMarginsWhenBaseWouldOverflow,
+  planColumnIndentMargins,
   shouldApplyInlineBoxOverflowFix,
   shouldApplyBookMarginCompensation,
   shouldProbeAuthoredHorizontalMargin,
@@ -1897,6 +1898,18 @@ describe("book margin layout", () => {
     expect(shouldProbeAuthoredHorizontalMargin(undefined, "0px", "auto")).toBe(false);
     expect(shouldProbeAuthoredHorizontalMargin(undefined, "40px", "0px")).toBe(true);
     expect(shouldProbeAuthoredHorizontalMargin(true, "448px", "0px")).toBe(false);
+  });
+
+  it("C-04 宽栏缩进相对版心列，窄栏被作者 margin 压满时保留作者原位", () => {
+    // 宽栏：640 版心居中后再缩进 2em。
+    expect(planColumnIndentMargins({ parentWidth: 1400, width: 640, marginLeft: 33.6, marginRight: 0 }))
+      .toEqual({ left: 413.6, right: 346.4 });
+    // B-229 双栏：512 栏内 auto 宽度 = 512 - 33.6，不能再加半个 margin。
+    expect(planColumnIndentMargins({ parentWidth: 512, width: 478.4, marginLeft: 33.6, marginRight: 0 }))
+      .toEqual({ left: 33.6, right: 0 });
+    // 右侧缩进同理。
+    expect(planColumnIndentMargins({ parentWidth: 360, width: 328, marginLeft: 0, marginRight: 32 }))
+      .toEqual({ left: 0, right: 32 });
   });
 
   it("只在作者原位可容纳、叠加版心才越列时保留未知来源的水平 margin", () => {
