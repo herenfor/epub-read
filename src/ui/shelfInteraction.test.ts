@@ -4,7 +4,7 @@ import { createReactDomHarness } from "../test/reactDomHarness";
 import { emptyOrganization, type LibraryOrganization, type OrganizationCommand } from "./libraryOrganization";
 import type { ShelfEntry } from "./shelf";
 import { groupShelfActions, shelfBookActions, shelfMenuPresentation } from "./shelfActions";
-import { ShelfPressGesture, shelfLongPressKind, type ShelfPressPhase } from "./shelfPress";
+import { ShelfGestureTail, ShelfPressGesture, shelfLongPressKind, type ShelfPressPhase } from "./shelfPress";
 import { ShelfView, type ShelfViewProps } from "./ShelfView";
 
 function fakeClock() {
@@ -115,6 +115,29 @@ describe("shelf press recognizer", () => {
     expect(g.fired).toEqual([]);
     expect(g.phases).toEqual([]);
     expect(g.press.takeClick()).toBe(true);
+  });
+
+  it("the click ending an acted long press reaches no book, even one that moved under the finger", () => {
+    let now = 0;
+    const tail = new ShelfGestureTail(() => now);
+    tail.arm();
+    // Still pressed: whatever element the release hits, its click is the gesture's own.
+    tail.pointerUp();
+    now += 100;
+    expect(tail.takeClick(1)).toBe(true);
+    expect(tail.takeClick(1)).toBe(false);
+    // Keyboard activation is never part of a pointer gesture.
+    tail.arm();
+    tail.pointerUp();
+    expect(tail.takeClick(0)).toBe(false);
+    // A new press clears the tail at once: an independent tap acts.
+    tail.pointerDown();
+    expect(tail.takeClick(1)).toBe(false);
+    // A click long after release belongs to nothing.
+    tail.arm();
+    tail.pointerUp();
+    now += 5000;
+    expect(tail.takeClick(1)).toBe(false);
   });
 
   it("a second finger cancels the press", () => {
