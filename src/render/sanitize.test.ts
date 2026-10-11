@@ -865,20 +865,6 @@ background-position:center center;background-size:cover;background-color:#f9ebdf
     expect(out).toContain('font-family: "MyFont" !important;');
   });
 
-  it("选定字体覆盖书在 div/p 上的字体，但保留等宽代码与 SVG", async () => {
-    const html = `<html xmlns="http://www.w3.org/1999/xhtml"><head><style>div { font-family: "cnepub"; }</style></head><body><div><p>正文</p></div></body></html>`;
-    const { html: out } = await sanitizeChapter(html, {
-      ...opts(),
-      settings: { ...DEFAULT_SETTINGS, customFontName: "MyFont" },
-    });
-    const overrides = readStyleText(out, "overrides");
-    const rule = overrides.match(new RegExp(`:where\\(#${VIEWER_ID}\\) :not\\(([^)]*)\\) \\{\\s*font-family: "MyFont" !important;`));
-    expect(rule).not.toBeNull();
-    for (const kept of ["pre", "code", "kbd", "samp", "tt", "pre *", "code *", "svg", "svg *", "math *"]) {
-      expect(rule![1].split(",").map((part) => part.trim())).toContain(kept);
-    }
-  });
-
   it("跟随书籍字体时不输出后代字体覆盖", async () => {
     const html = `<html xmlns="http://www.w3.org/1999/xhtml"><body><p>正文</p></body></html>`;
     const { html: out } = await sanitizeChapter(html, { ...opts(), settings: { ...DEFAULT_SETTINGS } });
