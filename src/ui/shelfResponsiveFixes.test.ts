@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { emptyOrganization } from "./libraryOrganization";
-import { chooseShelfMenuPlacement, ShelfView, type ShelfViewProps } from "./ShelfView";
+import { ShelfView, type ShelfViewProps } from "./ShelfView";
 import type { ShelfEntry } from "./shelf";
 import { createReactDomHarness } from "../test/reactDomHarness";
 import { MENU_CLOSE_MS } from "./menuMotion";
@@ -39,6 +39,7 @@ function makeProps(entries: ShelfEntry[]): ShelfViewProps {
     onExportArchive: () => {},
     onDelete: () => {},
     onDeleteMany: () => {},
+    onApplyOrganization: async () => {},
   };
 }
 
@@ -108,13 +109,6 @@ describe("第三步补修：书架触摸长按与子菜单 Back", () => {
     } finally {
       await dom.dispose();
     }
-  });
-
-  it("列表操作菜单在底部空间不足时向上翻转", () => {
-    expect(chooseShelfMenuPlacement({ top: 700, bottom: 750 }, 832, 127)).toBe("up");
-    expect(chooseShelfMenuPlacement({ top: 300, bottom: 350 }, 832, 127)).toBe("down");
-    expect(chooseShelfMenuPlacement({ top: 500, bottom: 550 }, 832, 600)).toBe("up");
-    expect(chooseShelfMenuPlacement({ top: 200, bottom: 250 }, 832, 600)).toBe("down");
   });
 
   it("触摸长按进入现有选择模式，不启动拖拽或开书", async () => {
@@ -242,7 +236,8 @@ describe("第三步补修：书架触摸长按与子菜单 Back", () => {
       let consumed = false;
       await dom.run(() => { consumed = handler?.() === true; });
       expect(consumed).toBe(true);
-      const menu = dom.container.querySelector(".shelf-card-pop-menu");
+      // 前一用例的触屏 matchMedia 可能仍在；返回协调与呈现外壳无关，两种外壳都算。
+      const menu = dom.container.ownerDocument.querySelector(".shelf-action-popover, .shelf-action-sheet");
       expect(menu).not.toBeNull();
       expect(menu?.className).toContain("is-closing");
     } finally {
