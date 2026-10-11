@@ -13,6 +13,9 @@ export interface ReaderSettings {
   fontFamily?: string;
   /** 用户选择的已上传自定义字体 family（优先于 fontFamily 与书字体） */
   customFontName?: string;
+  /** 选定字体也覆盖书在正文后代（div/p 等）上的字体声明；undefined/false =
+   * 只作缺省（body 级）字体，作者的后代声明优先。代码/SVG/MathML 始终保留。 */
+  forceFontOverride?: boolean;
   /** 字体来源；缺省时兼容旧版 customFontName。 */
   fontSource?: "system" | "imported";
   /** fontSource=imported 时对应的本地字体元数据 id。 */
@@ -63,6 +66,7 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
   columnsPerView: 1,
   spreadGapMode: "auto",
   forceHorizontal: false,
+  forceFontOverride: false,
   preloadNextChapter: false,
   turnAnimation: "slide",
 };
