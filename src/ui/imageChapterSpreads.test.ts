@@ -3,9 +3,9 @@ import type { Book } from "../core/types";
 import { ImageChapterSpreads } from "./imageChapterSpreads";
 
 const image = (name: string) => `<html xmlns="http://www.w3.org/1999/xhtml"><body><div><img src="${name}.png"/></div></body></html>`;
-function fixture(bodies: string[], nonLinear = -1) {
+function fixture(bodies: string[], nonLinear = -1, version = 2) {
   const book = {
-    version: 2, opfPath: "book.opf",
+    version, opfPath: "book.opf",
     spine: bodies.map((_, index) => ({ idref: `${index}`, linear: index !== nonLinear })),
     manifest: new Map(bodies.map((_, index) => [`${index}`, { href: `${index}.xhtml` }])),
   } as Book;
@@ -53,5 +53,12 @@ describe("image chapter spreads", () => {
     const { resolver, signal } = fixture([linked, image("b"), `<html><body><p>正文</p>${linked}</body></html>`]);
     expect(await resolver.resolve(1, signal)).toEqual({ left: 0, right: 1 });
     expect(await resolver.resolve(2, signal)).toBeNull();
+  });
+  it("classifies EPUB3 image chapters through the renderer's normalization of self-closing scripts", async () => {
+    // B-228: an HTML parse would let <script/> swallow the picture body.
+    const page = (name: string) => `<?xml version="1.0" encoding="utf-8"?><!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml"><head><title>插图</title><script type="text/javascript" src="../Misc/script.js"/></head><body><div class="kuchie"><img alt="" src="../Images/${name}.webp"/></div></body></html>`;
+    const { resolver, signal } = fixture(["<html><body><p>目录</p></body></html>", ...["a", "b", "c"].map(page)], -1, 3);
+    expect(await resolver.resolve(1, signal)).toEqual({ left: 1, right: 2 });
+    expect(await resolver.resolve(3, signal)).toEqual({ left: 3, right: null });
   });
 });
