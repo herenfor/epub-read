@@ -65,6 +65,8 @@
   "aa.detail.open": "Detailed Typography (weight/spacing/margins)",
   "aa.more": "More Advanced Settings",
   "aa.forceHorizontal": "Convert Vertical Text to Horizontal",
+  "aa.motion": "Reduce Interface Motion",
+  "aa.motion.hint": "Removes frosted glass and hover effects and shortens panel animations; page turns are unaffected",
   "aa.preload": "High-Performance Preloading",
   "aa.preload.warning": "Higher hardware requirements",
   "aa.css": "Custom CSS",

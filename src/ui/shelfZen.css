@@ -2428,12 +2428,7 @@
 :root[data-motion="reduced"] .shelf-resume-stage {
   --resume-motion: 0ms;
 }
-
-:root[data-motion="reduced"] :is(.shelf-drawer, .shelf-drawer-backdrop, .shelf-floating-batch-dock,
-  .shelf-more-reading-popover, .shelf-card-pop-menu, .lan-backdrop, .lan-panel, .save-file-backdrop) {
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-}
+/* 毛玻璃与悬停上浮由 styles.css 的低特效规则统一去掉。 */
 
 @media (prefers-reduced-motion: reduce) {
   .shelf-resume-stage {
