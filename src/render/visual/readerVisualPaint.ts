@@ -448,6 +448,17 @@ export function attachReaderPaint(
       group.forceNextFlush = true;
       scheduleGroupFlush(group);
     },
+    setSurfaceBackground(background) {
+      if (disposed) return;
+      const registration = group.surfaces.find((candidate) => candidate.surface === surface);
+      if (!registration) return;
+      if (registration.background === background) return;
+      registration.background = background;
+      const active = group.preferences.enabled && !group.compareOriginal;
+      if (active) {
+        registration.surface.style.backgroundColor = registration.background ?? registration.originalBackground;
+      }
+    },
     dispose() {
       if (disposed) return;
       disposed = true;
