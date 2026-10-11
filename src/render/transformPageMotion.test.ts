@@ -71,6 +71,29 @@ beforeAll(() => { (globalThis as Record<string, unknown>).DOMMatrixReadOnly = Fa
 afterAll(() => { delete (globalThis as Record<string, unknown>).DOMMatrixReadOnly; });
 
 describe("transform page motion driver", () => {
+  it("a burst beyond the bounded window commits its full target without showing clipped content", () => {
+    const viewer = fakeViewer();
+    const driver = new TransformPageMotion(viewer as unknown as HTMLElement, layout, 300, () => {});
+    driver.write(300);
+    let completed = 0;
+    driver.animateTo(900, desktopSettlePlan(600, 100), () => completed++);
+    expect(viewer.animations).toHaveLength(0);
+    expect(viewer.scrollLeft).toBe(900);
+    expect(driver.active).toBe(false);
+    expect(completed).toBe(1);
+  });
+
+  it("a disposed faulting driver cannot move to its old target after the fallback takes over", () => {
+    const viewer = fakeViewer({ scrollWidth: () =>
+      Number(viewer.style.getPropertyValue("column-count") || 1) > 1 ? 2000 : 1000 });
+    const driver = new TransformPageMotion(viewer as unknown as HTMLElement, layout, 300,
+      () => driver.dispose());
+    let completed = 0;
+    driver.animateTo(400, desktopSettlePlan(100, 100), () => completed++);
+    expect(viewer.scrollLeft).toBe(300);
+    expect(viewer.animations).toHaveLength(0);
+    expect(completed).toBe(0);
+  });
   it("single-page column gap is not counted as a trailing gap when expanding the window", () => {
     const gap = 20;
     const viewer = fakeViewer({ scrollWidth: () => {

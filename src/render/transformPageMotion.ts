@@ -87,10 +87,11 @@ export class TransformPageMotion implements PageMotionDriver {
     this.held = from;
     const ticket = ++this.generation;
     if (plan.durationMs <= 0 || !this.ensureWindow(Math.min(from, position), Math.max(from, position))) {
-      // 无需动画或窗口前提不成立：直接落到目标（正常几何下写 scrollLeft）。
-      this.held = position;
-      if (this.windowStart !== null) this.applyTransform();
-      else this.viewer.scrollLeft = position;
+      // A fault may synchronously dispose this driver and transfer ownership.
+      if (this.disposed) return;
+      // Extremely fast repeated inputs may span more than the bounded window.
+      // Commit that target in normal geometry instead of exposing a clipped blank.
+      this.settleTo(position);
       done();
       return;
     }
@@ -158,8 +159,8 @@ export class TransformPageMotion implements PageMotionDriver {
       this.windowStart = null;
       this.restoreInline?.();
       this.restoreInline = null;
-      this.viewer.scrollLeft = position;
     }
+    this.viewer.scrollLeft = position;
     previous?.cancel();
   }
 
@@ -188,6 +189,7 @@ export class TransformPageMotion implements PageMotionDriver {
     const viewer = this.viewer;
     const { step, columnsPerScreen } = this.layout;
     if (!(step > 0)) return false;
+    if (high - low > (this.windowScreens - 1) * step + 0.5) return false;
     if (this.windowStart === null) {
       const before = viewer.scrollWidth;
       const width = viewer.clientWidth;
