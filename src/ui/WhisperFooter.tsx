@@ -68,9 +68,15 @@ const READING_KEYS = new Set([
   "PageDown", "PageUp", " ", "[", "]",
 ]);
 
+/**
+ * Zen-mode desktop footer. A pointer resting on the footer no longer holds it
+ * open (Issue #1 item 9): it collapses HIDE_DELAY_MS after the last movement,
+ * like the rest of the reading chrome. Only an active scrub drag or keyboard
+ * focus inside the footer keeps it visible.
+ */
 function useDesktopFooterReveal(enabled: boolean) {
   const [revealed, setRevealed] = useState(false);
-  const heldRef = useRef({ hovered: false, dragging: false });
+  const heldRef = useRef({ focused: false, dragging: false });
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const clearHideTimer = useCallback(() => {
@@ -80,10 +86,10 @@ function useDesktopFooterReveal(enabled: boolean) {
 
   const scheduleHide = useCallback(() => {
     clearHideTimer();
-    if (!enabled || heldRef.current.hovered || heldRef.current.dragging) return;
+    if (!enabled || heldRef.current.focused || heldRef.current.dragging) return;
     timerRef.current = setTimeout(() => {
       timerRef.current = null;
-      if (!heldRef.current.hovered && !heldRef.current.dragging) {
+      if (!heldRef.current.focused && !heldRef.current.dragging) {
         setRevealed(false);
       }
     }, HIDE_DELAY_MS);
@@ -97,14 +103,14 @@ function useDesktopFooterReveal(enabled: boolean) {
 
   const hide = useCallback(() => {
     clearHideTimer();
-    if (!heldRef.current.hovered && !heldRef.current.dragging) {
+    if (!heldRef.current.focused && !heldRef.current.dragging) {
       setRevealed(false);
     }
   }, [clearHideTimer]);
 
-  const setHovered = useCallback((hovered: boolean) => {
-    heldRef.current.hovered = hovered;
-    if (hovered) {
+  const setFocused = useCallback((focused: boolean) => {
+    heldRef.current.focused = focused;
+    if (focused) {
       clearHideTimer();
       if (enabled) setRevealed(true);
     } else {
@@ -112,9 +118,8 @@ function useDesktopFooterReveal(enabled: boolean) {
     }
   }, [enabled, clearHideTimer, scheduleHide]);
 
-  const setDragging = useCallback((dragging: boolean, hovered = heldRef.current.hovered) => {
+  const setDragging = useCallback((dragging: boolean) => {
     heldRef.current.dragging = dragging;
-    heldRef.current.hovered = hovered;
     if (dragging) {
       clearHideTimer();
       if (enabled) setRevealed(true);
@@ -125,7 +130,7 @@ function useDesktopFooterReveal(enabled: boolean) {
 
   const reset = useCallback(() => {
     clearHideTimer();
-    heldRef.current.hovered = false;
+    heldRef.current.focused = false;
     heldRef.current.dragging = false;
     setRevealed(false);
   }, [clearHideTimer]);
@@ -160,7 +165,7 @@ function useDesktopFooterReveal(enabled: boolean) {
     };
   }, [enabled, clearHideTimer, reveal, scheduleHide, hide]);
 
-  return { revealed, reveal, setHovered, setDragging, reset };
+  return { revealed, reveal, setFocused, setDragging, reset };
 }
 
 export const WhisperFooter: React.FC<WhisperFooterProps> = ({
@@ -214,15 +219,15 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
   const trackRef = useRef<HTMLDivElement>(null);
   const pointerIdRef = useRef<number | null>(null);
 
+  // Entering is not movement: the footer (or the sensor) appearing under a
+  // resting pointer must not re-arm itself, or it would flash every cycle.
   const handleMouseEnter = () => {
     setIsHovered(true);
-    footerReveal.setHovered(true);
   };
 
   const handleMouseLeave = () => {
     setIsHovered(false);
     setHoverTooltip(null);
-    footerReveal.setHovered(false);
   };
 
   // 全局失去焦点时清理拖拽状态与拦截罩
@@ -417,7 +422,7 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
     pointerIdRef.current = null;
     setIsDragging(false);
     setIsHovered(overFooter);
-    footerReveal.setDragging(false, overFooter);
+    footerReveal.setDragging(false);
 
     if (track) {
       try {
@@ -443,7 +448,7 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
     setIsDragging(false);
     setIsHovered(false);
     setDragTooltip(null);
-    footerReveal.setDragging(false, false);
+    footerReveal.setDragging(false);
     if (track) {
       try {
         track.releasePointerCapture(e.pointerId);
@@ -460,7 +465,7 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
     setIsDragging(false);
     setIsHovered(false);
     setDragTooltip(null);
-    footerReveal.setDragging(false, false);
+    footerReveal.setDragging(false);
     onPreviewChange?.(null);
   };
 
@@ -549,7 +554,7 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
 
   const isVisible = mobile
     ? toolsVisible
-    : (!zenMode || footerReveal.revealed || isHovered || isDragging);
+    : (!zenMode || footerReveal.revealed || isDragging);
   const activeTooltip = isDragging ? dragTooltip : isHovered ? hoverTooltip : null;
 
   return (
@@ -566,7 +571,7 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
         <div
           className="whisper-footer-reveal-sensor"
           aria-hidden="true"
-          onMouseEnter={footerReveal.reveal}
+          onMouseMove={footerReveal.reveal}
         />
       )}
 
@@ -575,6 +580,10 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
         className={`whisper-footer${mobile ? " is-mobile" : ""}${isVisible ? " is-visible" : " is-hidden"}${isHovered || isDragging ? " is-hovered" : ""}`}
         onMouseEnter={mobile ? undefined : handleMouseEnter}
         onMouseLeave={mobile ? undefined : handleMouseLeave}
+        onFocus={mobile ? undefined : () => footerReveal.setFocused(true)}
+        onBlur={mobile ? undefined : (event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) footerReveal.setFocused(false);
+        }}
         role="contentinfo"
         aria-label={mobile ? t("footer.region.mobile") : t("footer.region.desktop")}
       >
