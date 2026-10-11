@@ -877,6 +877,10 @@ background-position:center center;background-size:cover;background-color:#f9ebdf
     expect(readStyleText(out, "overrides")).toMatch(
       new RegExp(`:where\\(#${VIEWER_ID}\\) \\{\\s*overflow-wrap: break-word;\\s*\\}`),
     );
+    // 书显式 overflow-wrap:normal 也不能越栏；表格内段落不改列宽。
+    expect(readStyleText(out, "overrides")).toMatch(
+      new RegExp(`:where\\(#${VIEWER_ID} p:not\\(td \\*, th \\*\\)\\) \\{\\s*word-break: break-word;\\s*\\}`),
+    );
   });
 
   it("滚动模式注入的样式让 viewer 保持唯一纵向滚动容器", async () => {
