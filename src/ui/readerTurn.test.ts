@@ -14,6 +14,7 @@ class MockPaginator {
   pageMotionAvailable = false;
   motionBeginDrag = vi.fn(() => null);
   prepareMotion() {}
+  setMotionWindowForeground = vi.fn();
   endMotionContact() {}
   path = "";
   callbacks: unknown[];
@@ -126,6 +127,7 @@ describe("Zen UI Packet C: 硬件加速平滑翻页与边缘翻页交互契约",
 
   afterEach(async () => {
     await dom.dispose();
+    vi.unstubAllGlobals();
     vi.useRealTimers();
   });
 
@@ -138,6 +140,20 @@ describe("Zen UI Packet C: 硬件加速平滑翻页与边缘翻页交互契约",
     });
     return active;
   };
+
+  it("motion window 前台由阅读器持有，后台释放，返回前台恢复", async () => {
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    await render();
+    const active = await finishActive();
+    expect(active.setMotionWindowForeground).toHaveBeenLastCalledWith(true);
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+    await act(async () => document.dispatchEvent(new window.Event("visibilitychange")));
+    expect(active.setMotionWindowForeground).toHaveBeenLastCalledWith(false);
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    await act(async () => document.dispatchEvent(new window.Event("visibilitychange")));
+    expect(active.setMotionWindowForeground).toHaveBeenLastCalledWith(true);
+  });
 
   it("渲染左右 5% 悬停感应区与边缘翻页指示箭头", async () => {
     await render();

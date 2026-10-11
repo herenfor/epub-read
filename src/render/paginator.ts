@@ -2648,6 +2648,7 @@ export class ChapterPaginator {
    * 不支持时触摸退回原生吸附，桌面继续使用原有数值动画。
    */
   private slideMotionWanted = false;
+  private motionWindowForeground = false;
   /** 当前布局的运动会话；布局/章节/视口改变时销毁。 */
   private pageMotion: {
     session: PageMotionSession;
@@ -2896,6 +2897,14 @@ export class ChapterPaginator {
     if (!enabled) this.disposePageMotion();
     this.nativeSnapEnabled = enabled;
     this.syncNativeSnapViewer();
+    if (enabled && this.isDisplayReady) this.prepareMotion();
+  }
+
+  /** Only the visible foreground chapter retains a bounded compositor window. */
+  setMotionWindowForeground(foreground: boolean): void {
+    this.motionWindowForeground = foreground;
+    if (!foreground) this.disposePageMotion();
+    else if (this.isDisplayReady) this.prepareMotion();
   }
 
   /** 宿主接收“落定后跨章”的预约结果（同向第二次命令在去末屏途中到达）。 */
@@ -3177,7 +3186,7 @@ export class ChapterPaginator {
   /** 同章滑动共用运动会话；指针类型只决定曲线，不决定是否走合成驱动。 */
   get pageMotionAvailable(): boolean {
     return Boolean(
-      this.slideMotionWanted && this.viewer && !this.scrollMode && !this.disposed &&
+      this.motionWindowForeground && this.slideMotionWanted && this.viewer && !this.scrollMode && !this.disposed &&
       this.pageMotionCapable() &&
       this.pageMotionUnsupportedKey !== this.snapOffsetsCache?.key,
     );
@@ -3254,8 +3263,8 @@ export class ChapterPaginator {
   }
 
   /**
-   * 手指或翻页按钮按下：画面仍静止时提前进入运动窗口，把窗口重排（长章约
-   * 20ms）放在动画开始之前；一段时间内没有运动就退回正常几何。
+   * 显示前或按下时在实际位置准备有限运动窗口。前台阅读期间保留，后台、
+   * 缓存章、重排或关闭由 owner 主动释放；不以用户阅读停顿反复拆建。
    */
   prepareMotion(touchContact = false): void {
     const motion = this.ensurePageMotion();
@@ -3316,7 +3325,7 @@ export class ChapterPaginator {
       canExitIdleWindow: () => !this.disposed && this.viewer === viewer &&
         this.pageMotion?.session === session && driver.active && session.state.kind === "idle",
       exitIdleWindow: () => this.exitIdlePageMotionWindow(),
-    });
+    }, null);
     this.pageMotion = { session, driver, lease, key, viewer };
     return this.pageMotion;
   }
@@ -3337,7 +3346,7 @@ export class ChapterPaginator {
     this.emit({ ...this.readyState(false, page), transient: true } as ChapterState);
   }
 
-  /** 运动落定：立即提交页码/锚点，短暂保留窗口以复用连续翻页。 */
+  /** 运动落定：立即提交页码/锚点；前台 owner 保留有限窗口。 */
   private commitPageMotion(page: number): void {
     const motion = this.pageMotion;
     if (!motion || !this.viewer) return;
@@ -3897,6 +3906,7 @@ export class ChapterPaginator {
       this.pendingStartAtEnd = false;
       this.setPage(Math.max(0, this.metrics.pageCount - 1));
     }
+    this.prepareMotion();
     return true;
   }
 
@@ -3948,6 +3958,8 @@ export class ChapterPaginator {
     ) {
       return false;
     }
+    // Measurements must never read the expanded motion-window column geometry.
+    this.disposePageMotion();
     const win = doc.defaultView;
     const measuredWidth = this.iframe.clientWidth;
     const measuredHeight = this.iframe.clientHeight;
@@ -6378,6 +6390,9 @@ export class ChapterPaginator {
       }
     }
     this.recomputeInner(useAnchor, loadSeq);
+    // Initial loading primes only after exact navigation. Later reflows prime
+    // after restoration and anchor sampling have finished on normal geometry.
+    if (this.isDisplayReady) this.prepareMotion();
     return !this.disposed && loadSeq === this.loadSeq;
   }
 
@@ -8275,6 +8290,7 @@ export class ChapterPaginator {
       this.scheduleAnchorSample();
       const moved = res.page !== previousPage || Math.abs(res.scrollLeft - previousLeft) > 0.5 || adopted;
       if (options?.userInitiated && moved) this.notifyUserCommit();
+      if (this.isDisplayReady) this.prepareMotion();
       return;
     }
     const targetScrollLeft = target * this.viewStepPx;
@@ -8288,6 +8304,7 @@ export class ChapterPaginator {
         this.scheduleAnchorSample();
         if (options?.userInitiated) this.notifyUserCommit();
       }
+      if (this.isDisplayReady) this.prepareMotion();
       return;
     }
     this.adoptedPageUncommitted = false;
@@ -8300,6 +8317,7 @@ export class ChapterPaginator {
     // B-153：普通翻页热路径只登记一次下一帧采样；连续翻页合并为最后一页。
     this.scheduleAnchorSample();
     if (options?.userInitiated) this.notifyUserCommit();
+    if (this.isDisplayReady) this.prepareMotion();
   }
 
   /**
