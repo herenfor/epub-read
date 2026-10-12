@@ -1388,28 +1388,24 @@ select option {
 
 /* ---- 阅读器辅助弹层滚动条（日志/脚注/书签弹层；书架 UI 独立设计） ---- */
 .log-panel,
-.footnote-card,
-.reader-bookmarks-popover {
+.footnote-card {
   scrollbar-width: thin;
   scrollbar-color: var(--scroll-thumb) transparent;
 }
 
 .log-panel::-webkit-scrollbar,
-.footnote-card::-webkit-scrollbar,
-.reader-bookmarks-popover::-webkit-scrollbar {
+.footnote-card::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
 .log-panel::-webkit-scrollbar-track,
-.footnote-card::-webkit-scrollbar-track,
-.reader-bookmarks-popover::-webkit-scrollbar-track {
+.footnote-card::-webkit-scrollbar-track {
   background: transparent;
 }
 
 .log-panel::-webkit-scrollbar-thumb,
-.footnote-card::-webkit-scrollbar-thumb,
-.reader-bookmarks-popover::-webkit-scrollbar-thumb {
+.footnote-card::-webkit-scrollbar-thumb {
   background: var(--scroll-thumb);
   border-radius: 999px;
   border: 2px solid transparent;
@@ -1417,8 +1413,7 @@ select option {
 }
 
 .log-panel::-webkit-scrollbar-thumb:hover,
-.footnote-card::-webkit-scrollbar-thumb:hover,
-.reader-bookmarks-popover::-webkit-scrollbar-thumb:hover {
+.footnote-card::-webkit-scrollbar-thumb:hover {
   background: var(--scroll-thumb-hover);
   border: 2px solid transparent;
   background-clip: padding-box;
@@ -4092,79 +4087,6 @@ select option {
 
 .bookmark-dropdown .chevron-open {
   transform: rotate(180deg);
-}
-
-@keyframes bookmark-pop-in {
-  from {
-    opacity: 0;
-    transform: scale(0.96) translateY(-4px);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-  }
-}
-
-/* 书签浮层已提升为 App 前景层的独立组件：容器、定位与标题规则见
- * src/ui/bookmarksPopover.css，列表项仍复用下方的 .bookmark-item 系列。
- * 下面只保留该组件复用的入场动画。 */
-.bookmark-empty {
-  padding: 14px 10px;
-  font-size: 13px;
-  color: var(--muted);
-  text-align: center;
-}
-
-.bookmark-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  width: 100%;
-  padding: 7px 8px;
-  border: none;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--fg);
-  font-size: 13px;
-  text-align: left;
-  cursor: pointer;
-  transition: background-color 140ms ease;
-}
-
-.bookmark-item:hover {
-  background: var(--btn-tint-hover);
-}
-
-.bookmark-icon {
-  flex: none;
-  margin-top: 2px;
-  color: var(--accent);
-}
-
-.bookmark-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-}
-
-.bookmark-text {
-  width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.bookmark-chapter {
-  align-self: flex-end;
-  max-width: 100%;
-  margin-top: 2px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 10px;
-  color: var(--muted);
 }
 
 /* =========================================================================
