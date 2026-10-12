@@ -62,6 +62,8 @@ import { WhisperFooter, type WhisperFooterChapterTick } from "./ui/WhisperFooter
 import { BatteryIndicator } from "./ui/BatteryIndicator";
 import { ReaderOpening } from "./ui/ReaderOpening";
 import { readBatteryIndicatorEnabled, writeBatteryIndicatorEnabled } from "./ui/batteryPreferences";
+import { readTapRegionPreferences, writeTapRegionPreferences } from "./ui/tapRegionPreferences";
+import type { ReaderTapPreferences } from "./ui/readerTapRegions";
 import { useResponsiveEnvironment } from "./ui/responsiveEnvironment";
 import { shouldConfirmNoteDiscard } from "./ui/readerCloseGuards";
 import {
@@ -904,6 +906,16 @@ export default function App() {
     setBatteryIndicatorEnabled(enabled);
     writeBatteryIndicatorEnabled(enabled);
   }, []);
+  // 点击翻页区域：本机偏好，PC 与触屏各一份；Android 平板按触屏界面判定，不因宽屏算作 PC。
+  const [tapRegionPreferences, setTapRegionPreferences] = useState(readTapRegionPreferences);
+  const changeTapRegionPreferences = useCallback((next: ReaderTapPreferences) => {
+    setTapRegionPreferences(next);
+    writeTapRegionPreferences(next);
+  }, []);
+  const tapRegions = useMemo(() => ({
+    device: mobileChrome ? "touch" as const : "pc" as const,
+    preferences: tapRegionPreferences,
+  }), [mobileChrome, tapRegionPreferences]);
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const [shelfBackActive, setShelfBackActive] = useState(false);
   const shelfBackHandlerRef = useRef<(() => boolean) | null>(null);
@@ -6532,6 +6544,8 @@ export default function App() {
               onKeepScreenOnWhileReadingChange={changeKeepScreenOnWhileReading}
               batteryIndicatorEnabled={runtime.platform === "android" ? batteryIndicatorEnabled : undefined}
               onBatteryIndicatorChange={runtime.platform === "android" ? changeBatteryIndicatorEnabled : undefined}
+              tapRegions={tapRegions}
+              onTapRegionsChange={changeTapRegionPreferences}
               onOpen={handleShelfOpen}
               onImport={() => void handleChooseBooks()}
               onDelete={handleShelfDelete}
@@ -6886,6 +6900,7 @@ export default function App() {
                   onImageActivation={handleImageActivation}
                   inputPaused={imageRequest !== null}
                   onPlainTap={mobileChrome ? handleReaderPlainTap : undefined}
+                  tapRegions={tapRegions}
                   initialAnchor={initialAnchor}
                   initialPage={initialPage}
                   initialAlignment={initialAlignment}

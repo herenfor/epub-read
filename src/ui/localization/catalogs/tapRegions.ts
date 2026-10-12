@@ -1,23 +1,26 @@
 import { defineMessages } from "../defineMessages";
 
 /**
- * Tap-to-turn region settings and preview (ReaderTapRegionsPanel).
- * Not registered in catalog.ts yet: the integrator registers it and maps
- * TAP_REGION_LABEL_KEYS through t() into the panel's labels prop.
+ * Tap-to-turn region settings and preview (ReaderTapRegionsPanel), opened
+ * from the shelf settings. Hosts map TAP_REGION_LABEL_KEYS through t() into
+ * the panel's labels prop and use "tapRegions.title" for their own heading.
  */
 export const tapRegions = defineMessages("tapRegions", {
   "tapRegions.title": { zh: "点击翻页区域", max: 20 },
-  "tapRegions.scope.pc": { zh: "仅用于电脑端，手机和平板单独设置", note: "The panel edits the desktop profile only." },
-  "tapRegions.scope.touch": { zh: "仅用于手机和平板，电脑端单独设置", note: "The panel edits the touch-device profile only." },
   "tapRegions.preview.note": { zh: "预览按当前阅读区域的比例显示，点按预览不会翻页", note: "Under the preview drawing." },
   "tapRegions.size": { zh: "区域大小", max: 8 },
   "tapRegions.mode.default": { zh: "默认", max: 8 },
   "tapRegions.mode.custom": { zh: "自定义", max: 8 },
-  "tapRegions.range.hint": { zh: "每侧 0～35%，设为 0 即关闭该侧；中间至少保留 30%", note: "Under the two sliders." },
+  "tapRegions.range.hint": { zh: "设为 0% 即关闭这一侧", note: "Under the two sliders (each 0–35%)." },
   "tapRegions.left": { zh: "左侧", max: 6 },
   "tapRegions.right": { zh: "右侧", max: 6 },
   "tapRegions.center": { zh: "中间", max: 6 },
   "tapRegions.center.action": { zh: "正文操作", note: "Middle area: taps reach the book text (menus, links, selection).", max: 10 },
+  "tapRegions.entry.default": { zh: "默认", note: "Shelf settings row summary: default bands.", max: 12 },
+  "tapRegions.entry.custom": { zh: "左 {left}% · 右 {right}%", note: "Shelf settings row summary for a custom split; {left}/{right} are whole percents.", max: 20 },
+  "tapRegions.entry.leftForward": { zh: "左侧也下一页", note: "Appended to the row summary when the touch switch is on.", max: 14 },
+  "tapRegions.close": { zh: "关闭", max: 6 },
+  "tapRegions.back": { zh: "返回", max: 6 },
   "tapRegions.prev": { zh: "上一页", max: 8 },
   "tapRegions.next": { zh: "下一页", max: 8 },
   "tapRegions.off": { zh: "关闭", note: "A side whose tap area is set to 0.", max: 6 },
@@ -30,9 +33,6 @@ export const tapRegions = defineMessages("tapRegions", {
 
 /** ReaderTapRegionsLabels field → message key. */
 export const TAP_REGION_LABEL_KEYS = {
-  title: "tapRegions.title",
-  scopePc: "tapRegions.scope.pc",
-  scopeTouch: "tapRegions.scope.touch",
   previewNote: "tapRegions.preview.note",
   size: "tapRegions.size",
   modeDefault: "tapRegions.mode.default",
