@@ -54,6 +54,11 @@ export interface TitleBarProps {
   /** 日志 / 诊断 */
   onToggleLog?: () => void;
   logOpen?: boolean;
+  /** Desktop jump history: present only when there is somewhere to go (labels name the chapter, "" = this chapter). */
+  onHistoryBack?: () => void;
+  onHistoryForward?: () => void;
+  historyBackLabel?: string;
+  historyForwardLabel?: string;
 }
 
 export const TitleBar: React.FC<TitleBarProps> = ({
@@ -86,6 +91,10 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   onToggleAssistant,
   logOpen,
   onToggleLog,
+  onHistoryBack,
+  onHistoryForward,
+  historyBackLabel,
+  historyForwardLabel,
 }) => {
   const { t } = useUiText();
   const [isMaximized, setIsMaximized] = useState(false);
@@ -333,6 +342,36 @@ export const TitleBar: React.FC<TitleBarProps> = ({
               </svg>
               <span>{t("titlebar.toc")}</span>
             </button>
+          )}
+
+          {/* 跳转历史：有可回去的位置才出现；快捷键 Alt+← / Alt+→ 同源。 */}
+          {view === "reader" && !mobileCompact && (onHistoryBack || onHistoryForward) && (
+            <div className="titlebar-history" role="group" aria-label={t("readerMisc.return.group")}>
+              <button
+                type="button"
+                className="titlebar-action-btn titlebar-history-btn"
+                onClick={onHistoryBack}
+                disabled={!onHistoryBack}
+                title={onHistoryBack ? `${historyBackLabel ? t("readerMisc.return.backTo", { place: historyBackLabel }) : t("readerMisc.return.back")} · ${t("readerMisc.return.back.tip")}` : t("readerMisc.return.back")}
+                aria-label={historyBackLabel ? t("readerMisc.return.backTo", { place: historyBackLabel }) : t("readerMisc.return.back")}
+              >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M10 12L6 8l4-4" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                className="titlebar-action-btn titlebar-history-btn"
+                onClick={onHistoryForward}
+                disabled={!onHistoryForward}
+                title={onHistoryForward ? `${historyForwardLabel ? t("readerMisc.return.forwardTo", { place: historyForwardLabel }) : t("readerMisc.return.forward")} · ${t("readerMisc.return.forward.tip")}` : t("readerMisc.return.forward")}
+                aria-label={historyForwardLabel ? t("readerMisc.return.forwardTo", { place: historyForwardLabel }) : t("readerMisc.return.forward")}
+              >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M6 4l4 4-4 4" />
+                </svg>
+              </button>
+            </div>
           )}
 
           {view === "reader" ? (
