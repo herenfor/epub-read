@@ -45,7 +45,6 @@ export const shelfFolder = defineMessages("shelfFolder", {
   "shelfFolder.modal.close": "关闭文件夹",
   "shelfFolder.modal.empty.touch": { zh: "文件夹暂无书籍，可在书籍“更多”菜单中选择“移动到文件夹”", note: "Quoted names refer to the book card 'More' menu and its 'Move to folder' item (shelf.card.moveToFolder)." },
   "shelfFolder.modal.empty.pointer": "文件夹暂无书籍，从书架将书拖入此处或移出",
-  "shelfFolder.filter.search": { zh: "搜索{label}", note: "Placeholder: search within a filter list, e.g. 'Search authors'." },
   "shelfFolder.filter.none": "没有匹配项",
   "shelfFolder.filter.limited": "仅显示前 {count} 项，请搜索以缩小范围",
 });
