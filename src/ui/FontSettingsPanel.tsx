@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import type { SystemFont, UserFont } from "./fontStore";
 import { createDragDepthTracker } from "./fontDrop";
-import { CloseIcon } from "./readerIcons";
+import { ArrowLeftIcon } from "./readerIcons";
+import { useSheetDrag } from "./sheetDrag";
 import { useUiText } from "./localization/UiLanguageProvider";
 import "./aaPopover.css";
 
@@ -126,18 +127,21 @@ export function FontSettingsPanel(props: FontSettingsPanelProps) {
   };
   const dragActive = htmlDragActive || props.nativeDragActive === true;
   const effectiveBusy = props.busy || dropBusy;
-  return <div className={`font-settings-panel${dragActive ? " font-drag-active" : ""}`} role="dialog" aria-modal="true" aria-label={t("fonts.dialog")}
+  // Aa 的子页：把手下拉和左上返回都回到 Aa 主页，不关闭整个 Aa。
+  const panelRef = useRef<HTMLDivElement>(null);
+  const { dragging, grip } = useSheetDrag({ sheetRef: panelRef, onDismiss: props.onClose });
+  return <div ref={panelRef} className={`font-settings-panel${dragActive ? " font-drag-active" : ""}${dragging ? " is-dragging" : ""}`} role="dialog" aria-modal="true" aria-label={t("fonts.dialog")}
     onDragEnter={onDragEnter}
     onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = effectiveBusy ? "none" : "copy"; }}
     onDragLeave={onDragLeave} onDrop={onDrop}>
-    <div className="drawer-drag-handle" aria-hidden="true" />
-    <div className="menu-head">
+    <div className="drawer-drag-handle font-settings-grip" aria-hidden="true" {...grip} />
+    <div className="menu-head font-settings-head">
+      <button className="tb-btn tb-close" onClick={props.onClose} title={t("fonts.back")} aria-label={t("fonts.back")}>
+        <ArrowLeftIcon size={14} />
+      </button>
       <div className="drawer-title-wrap">
         <span>{t("fonts.title")}</span>
       </div>
-      <button className="tb-btn tb-close" onClick={props.onClose} title={t("fonts.close")} aria-label={t("fonts.close")}>
-        <CloseIcon size={14} />
-      </button>
     </div>
     <div className="font-settings-current">
       {t("fonts.current", { name: (props.source === "system" || props.source === "imported" ? props.customFontName : undefined) ?? t("fonts.followBook") })}

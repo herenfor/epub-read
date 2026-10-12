@@ -1,6 +1,7 @@
 import { READER_PALETTES } from "../config/readerPalette";
 import React, { useEffect, useRef, useState } from "react";
 import { useMenuClose } from "./menuMotion";
+import { useSheetDrag } from "./sheetDrag";
 import { useUiMotion } from "./motionPreference";
 import type { Theme, TurnAnimation } from "../render/settings";
 import { PAGE_GAP_MAX_PX, type PageMarginsPx, type ReadingMode, type SpreadGapMode } from "../render/pageLayout";
@@ -363,6 +364,15 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
   useEffect(() => {
     dialogRef.current?.focus({ preventScroll: true });
   }, []);
+  // 手机：半高打开，常用项一屏可见、正文仍露出；拖把手上拉展开全部，下拉收起或关闭。
+  const [expanded, setExpanded] = useState(false);
+  const { dragging, grip } = useSheetDrag({
+    sheetRef: dialogRef,
+    disabled: isClosing,
+    onDismiss: requestClose,
+    expanded,
+    onExpandedChange: setExpanded,
+  });
 
   return (
     <>
@@ -373,11 +383,15 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
       />
       <div
         ref={dialogRef}
-        className={`aa-popover${isClosing ? " is-closing" : ""}`}
+        className={`aa-popover${isClosing ? " is-closing" : ""}${expanded ? " is-expanded" : ""}${dragging ? " is-dragging" : ""}`}
         role="dialog"
         tabIndex={-1}
         aria-label={t("aa.dialog")}
       >
+        {/* 手机底部面板把手（桌面隐藏） */}
+        <div className="aa-sheet-grip" aria-hidden="true" {...grip}>
+          <span className="aa-sheet-handle" />
+        </div>
         {/* 头部：双模分段 Tab 切换与关闭按键 */}
         <div className="aa-popover-header">
           <div className="aa-popover-tabs" role="tablist" aria-label={t("aa.tabs")}>

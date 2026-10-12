@@ -4,7 +4,7 @@ import { defineMessages } from "../defineMessages";
 export const fonts = defineMessages("fonts", {
   "fonts.dialog": "字体设置",
   "fonts.title": "字体设置",
-  "fonts.close": "关闭字体设置",
+  "fonts.back": { zh: "返回外观与排版", note: "Font page is a sub-page of Aa; this goes back to the Aa main page." },
   "fonts.current": { zh: "当前字体：{name}", note: "{name} is a font family name or 'Follow book'." },
   "fonts.followBook": "跟随书籍",
   "fonts.override": { zh: "覆盖书籍字体", note: "Switch label: apply the chosen font to all body text, even where the book sets its own font.", max: 10 },

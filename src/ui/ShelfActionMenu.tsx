@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { placeShelfMenu, type ShelfMenuAnchorRect, type ShelfMenuPlacementResult } from "./shelfMenuPlacement";
 import type { ShelfActionGroup, ShelfActionId } from "./shelfActions";
+import { useSheetDrag } from "./sheetDrag";
 
 export interface ShelfActionMenuItem {
   id: ShelfActionId;
@@ -25,10 +26,6 @@ export interface ShelfActionMenuProps {
   onAction(id: ShelfActionId): void;
   onDismiss(): void;
 }
-
-/** Sheet drag distance or fling speed that closes it. */
-const SHEET_CLOSE_DISTANCE_PX = 72;
-const SHEET_CLOSE_VELOCITY = 0.5;
 
 function enabledItems(root: HTMLElement | null): HTMLElement[] {
   return root ? [...root.querySelectorAll<HTMLElement>(".shelf-action-item:not(:disabled)")] : [];
@@ -189,59 +186,10 @@ function ShelfActionPopover(props: ShelfActionMenuProps) {
 
 function ShelfActionSheet(props: ShelfActionMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
-  const drag = useRef<{ pointerId: number; startY: number; lastY: number; lastAt: number; velocity: number } | null>(null);
-  const [dragging, setDragging] = useState(false);
   const fresh = useFreshPress();
   useInitialFocus(ref, props.focusFirstItem, true);
   useEscapeDismiss(props.closing, props.onDismiss);
-
-  const endDrag = (close: boolean) => {
-    const sheet = ref.current;
-    drag.current = null;
-    setDragging(false);
-    if (sheet) sheet.style.transform = "";
-    if (close) props.onDismiss();
-  };
-
-  // Backgrounding drops a half-finished drag; the sheet itself stays open.
-  const endDragRef = useRef(endDrag);
-  endDragRef.current = endDrag;
-  useEffect(() => {
-    if (!dragging) return;
-    const onHidden = () => { if (document.visibilityState === "hidden") endDragRef.current(false); };
-    document.addEventListener("visibilitychange", onHidden);
-    return () => document.removeEventListener("visibilitychange", onHidden);
-  }, [dragging]);
-
-  const grip = {
-    onPointerDown(event: React.PointerEvent<HTMLElement>) {
-      if (props.closing || event.button !== 0 || !event.isPrimary) return;
-      drag.current = { pointerId: event.pointerId, startY: event.clientY, lastY: event.clientY, lastAt: event.timeStamp, velocity: 0 };
-      try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* synthetic events */ }
-      setDragging(true);
-    },
-    onPointerMove(event: React.PointerEvent<HTMLElement>) {
-      const state = drag.current;
-      const sheet = ref.current;
-      if (!state || !sheet || state.pointerId !== event.pointerId) return;
-      const dt = Math.max(1, event.timeStamp - state.lastAt);
-      state.velocity = (event.clientY - state.lastY) / dt;
-      state.lastY = event.clientY;
-      state.lastAt = event.timeStamp;
-      const dy = event.clientY - state.startY;
-      // Upward pull only gives a little; the sheet never detaches from the bottom.
-      sheet.style.transform = `translateY(${dy >= 0 ? dy : dy / 4}px)`;
-    },
-    onPointerUp(event: React.PointerEvent<HTMLElement>) {
-      const state = drag.current;
-      if (!state || state.pointerId !== event.pointerId) return;
-      const dy = event.clientY - state.startY;
-      endDrag(dy > SHEET_CLOSE_DISTANCE_PX || (dy > 16 && state.velocity > SHEET_CLOSE_VELOCITY));
-    },
-    onPointerCancel(event: React.PointerEvent<HTMLElement>) {
-      if (drag.current?.pointerId === event.pointerId) endDrag(false);
-    },
-  };
+  const { dragging, grip } = useSheetDrag({ sheetRef: ref, disabled: props.closing, onDismiss: props.onDismiss });
 
   return <>
     <div className={`shelf-action-sheet-backdrop${props.closing ? " is-closing" : ""}`}

@@ -625,9 +625,42 @@
   left: 0;
   width: auto;
   max-width: none;
-  max-height: min(85vh, calc(var(--visual-viewport-height, 100vh) * 0.85));
+  /* 半高：常用项一屏放下，正文仍露出、能看到实时变化；把手上拉展开全部。 */
+  max-height: min(56vh, calc(var(--visual-viewport-height, 100vh) * 0.56));
   border-radius: 16px 16px 0 0;
   animation: aaMobileSheetIn var(--menu-open) var(--ease-emphasized);
+  transition: max-height var(--menu-open) var(--ease-emphasized);
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .aa-popover.is-expanded {
+  max-height: min(88vh, calc(var(--visual-viewport-height, 100vh) * 0.88));
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .aa-popover.is-dragging {
+  transition: none;
+}
+
+/* 底部面板把手：只在手机紧凑布局出现，可拖动展开、收起和关闭。 */
+.aa-sheet-grip {
+  display: none;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .aa-sheet-grip {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  margin-bottom: -8px;
+  touch-action: none;
+  cursor: grab;
+}
+
+.aa-sheet-handle {
+  width: 36px;
+  height: 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--fg) 22%, transparent);
 }
 
 .app[data-mobile-chrome="true"][data-layout="compact"] .aa-popover.is-closing {
@@ -635,7 +668,7 @@
 }
 
 .app[data-mobile-chrome="true"][data-layout="compact"] .aa-popover-header {
-  padding-top: 10px;
+  padding-top: 4px;
 }
 
 .app[data-mobile-chrome="true"][data-layout="compact"] .aa-popover-body {
