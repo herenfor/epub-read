@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { BookOpenIcon, MenuHamburgerIcon, SearchIcon } from "./readerIcons";
+import { MenuHamburgerIcon, ReaderBarContentsIcon, SearchIcon } from "./readerIcons";
 import "./whisperFooter.css";
 import { FOOTER_REVEAL_EDGE_PX, useBottomEdgePointer } from "./readerPointerEdge";
 import {
@@ -664,7 +664,7 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
               aria-expanded={sidebarOpen}
               disabled={!onToggleSidebar}
             >
-              <BookOpenIcon size={19} />
+              <ReaderBarContentsIcon size={19} />
               <span>{t("footer.action.toc")}</span>
             </button>
             <button

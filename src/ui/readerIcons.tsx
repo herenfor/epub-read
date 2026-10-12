@@ -79,9 +79,10 @@ export function MenuHamburgerIcon({ size = 19, className = "", ...props }: IconP
       aria-hidden="true"
       {...props}
     >
-      <line x1="3.5" y1="5.5" x2="16.5" y2="5.5" />
+      {/* Reader bar band: ink spans y 3.25–16.75 like the other bar icons. */}
+      <line x1="3.5" y1="4" x2="16.5" y2="4" />
       <line x1="3.5" y1="10" x2="16.5" y2="10" />
-      <line x1="3.5" y1="14.5" x2="16.5" y2="14.5" />
+      <line x1="3.5" y1="16" x2="16.5" y2="16" />
     </svg>
   );
 }
@@ -166,6 +167,32 @@ export function BookOpenIcon({ size = 19, className = "", ...props }: IconProps)
   );
 }
 
+/**
+ * Contents (open book) for the reader bottom bar. The bar's four marks share
+ * one vertical band — ink from y 3.25 to 16.75 of the 20-unit box (stroke
+ * included) — so their tops and bottoms line up; BookOpenIcon keeps its
+ * taller shape for other uses.
+ */
+export function ReaderBarContentsIcon({ size = 19, className = "", ...props }: IconProps) {
+  return (
+    <svg
+      className={`reader-svg-icon icon-toc ${className}`.trim()}
+      viewBox="0 0 20 20"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      {...props}
+    >
+      <path d="M2.5 6A2 2 0 0 1 4.5 4H9v10H4.5A2 2 0 0 0 2.5 16V6zM17.5 6A2 2 0 0 0 15.5 4H11v10h4.5a2 2 0 0 1 2 2V6z" />
+    </svg>
+  );
+}
+
 export function SearchIcon({ size = 19, className = "", ...props }: IconProps) {
   return (
     <svg
@@ -181,8 +208,9 @@ export function SearchIcon({ size = 19, className = "", ...props }: IconProps) {
       aria-hidden="true"
       {...props}
     >
-      <circle cx="9" cy="9" r="5.5" />
-      <path d="M13.2 13.2L17.5 17.5" />
+      {/* Reader bar band: ink spans y 3.25–16.75 like the other bar icons. */}
+      <circle cx="9" cy="9" r="5" />
+      <path d="M12.54 12.54L16 16" />
     </svg>
   );
 }

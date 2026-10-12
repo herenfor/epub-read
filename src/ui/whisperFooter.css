@@ -353,8 +353,17 @@
   transition: none;
 }
 
+/* “Aa”是文字不是图标：占与图标相同的 19px 高并居中，下面的“排版”才和其他三个标签同一基线。
+   字号 18px 使大写高度与图标线条带（约 12.8px）相同；0.27px 为手机实测的光学下移，
+   让字顶与基线落在图标的上下沿上。 */
 .mobile-reader-aa {
-  font-size: 15px;
+  position: relative;
+  top: 0.27px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 19px;
+  font-size: 18px;
   font-weight: 700;
   letter-spacing: -0.5px;
   line-height: 1;
