@@ -41,6 +41,7 @@ import { shelfMain } from "./catalogs/shelfMain";
 import { notice } from "./catalogs/notice";
 import { appUi } from "./catalogs/appUi";
 import { readerMisc } from "./catalogs/readerMisc";
+import { tapRegions } from "./catalogs/tapRegions";
 import { log } from "./catalogs/log";
 import { ai } from "./catalogs/ai";
 import commonEn from "./en/common.json";
@@ -71,6 +72,7 @@ import shelfMainEn from "./en/shelfMain.json";
 import noticeEn from "./en/notice.json";
 import appUiEn from "./en/appUi.json";
 import readerMiscEn from "./en/readerMisc.json";
+import tapRegionsEn from "./en/tapRegions.json";
 import logEn from "./en/log.json";
 import aiEn from "./en/ai.json";
 
@@ -79,7 +81,7 @@ declare const __APP_EDITION__: "core" | "ai";
 // tooling runs outside Vite and must still see every catalog.
 const includeAi = typeof __APP_EDITION__ === "undefined" || __APP_EDITION__ === "ai";
 
-export const CATALOGS = [common, folder, language, reader, startup, titlebar, footer, sidebar, notes, imageViewer, search, aa, fonts, display, about, cache, saveFile, importProgress, lan, lanPanel, folderImport, shelf, shelfFolder, shelfMenu, shelfMain, notice, appUi, readerMisc, log, ...(includeAi ? [ai] : [])] as const;
+export const CATALOGS = [common, folder, language, reader, startup, titlebar, footer, sidebar, notes, imageViewer, search, aa, fonts, display, about, cache, saveFile, importProgress, lan, lanPanel, folderImport, shelf, shelfFolder, shelfMenu, shelfMain, notice, appUi, readerMisc, tapRegions, log, ...(includeAi ? [ai] : [])] as const;
 
 export const zhCN = {
   ...common.zh,
@@ -110,6 +112,7 @@ export const zhCN = {
   ...notice.zh,
   ...appUi.zh,
   ...readerMisc.zh,
+  ...tapRegions.zh,
   ...log.zh,
   // Keep the complete key type for AI components; Core never renders them.
   ...(includeAi ? ai.zh : {} as typeof ai.zh),
@@ -147,6 +150,7 @@ export const en: Partial<Record<MessageKey, string>> = {
   ...noticeEn,
   ...appUiEn,
   ...readerMiscEn,
+  ...tapRegionsEn,
   ...logEn,
   ...(includeAi ? aiEn : {}),
 };
@@ -181,6 +185,7 @@ export const EN_FILES: Readonly<Record<string, Readonly<Record<string, string>>>
   notice: noticeEn,
   appUi: appUiEn,
   readerMisc: readerMiscEn,
+  tapRegions: tapRegionsEn,
   log: logEn,
   ...(includeAi ? { ai: aiEn } : {}),
 };

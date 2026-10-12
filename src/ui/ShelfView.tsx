@@ -50,6 +50,9 @@ import { isShelfCardActionTarget } from "./shelfCardEventScope";
 import { getRuntimeCapabilities } from "../platform/runtimeCapabilities";
 import { AboutInfo } from "./AboutInfo";
 import { CacheStoragePanel } from "./CacheStoragePanel";
+import { TapRegionsSettingsPanel, tapRegionsSummary } from "./TapRegionsSettingsPanel";
+import type { ReaderTapPreferences } from "./readerTapRegions";
+import type { ReaderTapRegionSettings } from "./readerTapRouting";
 import {
   getSearchStatusLabel,
   SearchIndexCard,
@@ -147,6 +150,9 @@ export interface ShelfViewProps {
   onHideReaderSystemStatusBarChange?(hidden: boolean): void;
   keepScreenOnWhileReading?: boolean;
   onKeepScreenOnWhileReadingChange?(enabled: boolean): void;
+  /** 点击翻页区域（本机偏好，编辑当前设备类别那一份）；未提供时不显示入口。 */
+  tapRegions?: ReaderTapRegionSettings;
+  onTapRegionsChange?(next: ReaderTapPreferences): void;
   onOpen(id: string): void;
   onImport(): void;
   /** Directory import entry; absent hides it. */
@@ -318,6 +324,15 @@ function ImportArchiveIcon() {
       <path d="M12 3v12" />
       <polyline points="7 10 12 15 17 10" />
       <path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6" />
+    </svg>
+  );
+}
+
+function TapRegionsIcon() {
+  return (
+    <svg className="shelf-svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="4" y="3" width="16" height="18" rx="2" />
+      <path d="M8.5 3v18M15.5 3v18" />
     </svg>
   );
 }
@@ -2212,6 +2227,8 @@ interface ShelfSettingsDrawerProps extends ShelfSubmenuBackProps {
   onHideReaderSystemStatusBarChange?(hidden: boolean): void;
   keepScreenOnWhileReading?: boolean;
   onKeepScreenOnWhileReadingChange?(enabled: boolean): void;
+  tapRegions?: ReaderTapRegionSettings;
+  onTapRegionsChange?(next: ReaderTapPreferences): void;
   filters: ShelfFilters;
   facets: ShelfFilterFacets;
   matchingCount: number;
@@ -2236,9 +2253,16 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
   const [mounted, setMounted] = useState(props.open);
   const [closing, setClosing] = useState(false);
   const [cachePanelOpen, setCachePanelOpen] = useState(false);
+  const [tapPanelOpen, setTapPanelOpen] = useState(false);
+  const tapPanelOpenRef = useRef(tapPanelOpen);
+  tapPanelOpenRef.current = tapPanelOpen;
+  const closeTapPanel = useCallback(() => setTapPanelOpen(false), []);
 
   useEffect(() => {
-    if (!props.open) setCachePanelOpen(false);
+    if (!props.open) {
+      setCachePanelOpen(false);
+      setTapPanelOpen(false);
+    }
   }, [props.open]);
 
   useEffect(() => {
@@ -2263,6 +2287,7 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
   const capabilities = getRuntimeCapabilities();
 
   useShelfSubmenuBack(cachePanelOpen, () => setCachePanelOpen(false), props);
+  useShelfSubmenuBack(tapPanelOpen, closeTapPanel, props);
 
   const isSearchActive = Boolean(props.query.trim());
   const matchingList = props.matchingEntries ?? props.entries;
@@ -2312,7 +2337,8 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
     if (!props.open) return;
     searchRef.current?.focus();
     const onKey = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") props.onClose();
+      // Esc closes the tap-region panel first, not the drawer behind it.
+      if (event.key === "Escape" && !tapPanelOpenRef.current) props.onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -2711,6 +2737,18 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
             </div>
           )}
 
+          {props.tapRegions && props.onTapRegionsChange && (
+            <div className="shelf-drawer-list shelf-drawer-tap-entry">
+              <ShelfDrawerRow
+                icon={<TapRegionsIcon />}
+                tone="neutral"
+                title={t("tapRegions.title")}
+                detail={tapRegionsSummary(props.tapRegions.preferences, props.tapRegions.device, t)}
+                onClick={() => setTapPanelOpen(true)}
+              />
+            </div>
+          )}
+
           <div className="shelf-drawer-group-label">{t("shelfMenu.backup")}</div>
           <div className="shelf-drawer-list">
             {capabilities.supportsLanTransfer && props.onOpenLanTransfer && (
@@ -2783,6 +2821,15 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
         </div>
       </aside>
       <CacheStoragePanel open={cachePanelOpen} onClose={() => setCachePanelOpen(false)} />
+      {props.tapRegions && props.onTapRegionsChange && (
+        <TapRegionsSettingsPanel
+          open={tapPanelOpen}
+          device={props.tapRegions.device}
+          value={props.tapRegions.preferences}
+          onChange={props.onTapRegionsChange}
+          onClose={closeTapPanel}
+        />
+      )}
     </div>
   );
 }
@@ -4829,6 +4876,8 @@ export function ShelfView(props: ShelfViewProps) {
         onKeepScreenOnWhileReadingChange={props.onKeepScreenOnWhileReadingChange}
         batteryIndicatorEnabled={props.batteryIndicatorEnabled}
         onBatteryIndicatorChange={props.onBatteryIndicatorChange}
+        tapRegions={props.tapRegions}
+        onTapRegionsChange={props.onTapRegionsChange}
         filters={filters}
         facets={filterModel.facets}
         matchingCount={filterModel.entries.length}

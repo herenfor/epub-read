@@ -17,11 +17,8 @@ import {
   type TapRegionSide,
 } from "./readerTapRegions";
 
-/** Already translated by the host (see catalogs/tapRegions.ts). */
+/** Already translated by the host (see catalogs/tapRegions.ts); the host shows the title. */
 export interface ReaderTapRegionsLabels {
-  title: string;
-  scopePc: string;
-  scopeTouch: string;
   previewNote: string;
   size: string;
   modeDefault: string;
@@ -53,6 +50,11 @@ export interface ReaderTapRegionsPanelProps {
   columns?: 1 | 2;
   /** Scroll mode has no tap turning; settings still apply to paged mode. */
   scrollMode?: boolean;
+  /**
+   * No book is open (shelf settings): the preview is a sample page at the
+   * window's proportions, so it shows shares only, never pixel widths.
+   */
+  schematic?: boolean;
   labels: ReaderTapRegionsLabels;
 }
 
@@ -62,9 +64,9 @@ function percentOf(geometry: TapRegionGeometry, px: number): string {
   return geometry.availableWidth > 0 ? `${(px / geometry.availableWidth) * 100}%` : "0%";
 }
 
-function amount(geometry: TapRegionGeometry, px: number): string {
+function amount(geometry: TapRegionGeometry, px: number, schematic?: boolean): string {
   const percent = geometry.availableWidth > 0 ? Math.round(px / geometry.availableWidth * 100) : 0;
-  return `${percent}% · ${Math.round(px)}px`;
+  return schematic ? `${percent}%` : `${percent}% · ${Math.round(px)}px`;
 }
 
 function Chevron({ direction }: { direction: -1 | 1 }) {
@@ -115,7 +117,7 @@ export function ReaderTapRegionsPanel(props: ReaderTapRegionsPanelProps) {
     const band = side === "left" ? geometry.left : geometry.right;
     return <div className="tap-regions-legend-item">
       <span className="tap-regions-legend-name">{side === "left" ? labels.left : labels.right} · {band.width > 0 ? actionLabel(side) : labels.off}</span>
-      <span className="tap-regions-legend-value">{amount(geometry, band.width)}</span>
+      <span className="tap-regions-legend-value">{amount(geometry, band.width, props.schematic)}</span>
     </div>;
   };
   const slider = (side: TapRegionSide) => {
@@ -131,10 +133,6 @@ export function ReaderTapRegionsPanel(props: ReaderTapRegionsPanelProps) {
   };
 
   return <div className="tap-regions-panel" data-tap-device={device}>
-    <div className="tap-regions-heading">
-      <span className="tap-regions-title">{labels.title}</span>
-      <span className="tap-regions-note">{device === "touch" ? labels.scopeTouch : labels.scopePc}</span>
-    </div>
     {props.scrollMode && <div className="tap-regions-note" role="note">{labels.scrollMode}</div>}
 
     <div className="tap-regions-preview" style={previewStyle} aria-hidden="true">
@@ -153,11 +151,11 @@ export function ReaderTapRegionsPanel(props: ReaderTapRegionsPanelProps) {
       {legendSide("left")}
       <div className="tap-regions-legend-item">
         <span className="tap-regions-legend-name">{labels.center}</span>
-        <span className="tap-regions-legend-value">{amount(geometry, geometry.center.width)}</span>
+        <span className="tap-regions-legend-value">{amount(geometry, geometry.center.width, props.schematic)}</span>
       </div>
       {legendSide("right")}
     </div>
-    <span className="tap-regions-note">{labels.previewNote}</span>
+    {!props.schematic && <span className="tap-regions-note">{labels.previewNote}</span>}
     {geometry.narrowed && <span className="tap-regions-note" role="note">{labels.narrowed}</span>}
 
     <div className="aa-control-row">
