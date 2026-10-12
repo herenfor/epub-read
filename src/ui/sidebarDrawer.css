@@ -256,6 +256,9 @@
 
 .sidebar-pane > * { flex-shrink: 0; }
 
+/* The virtual tree's offsetTop is measured in this native scroll container. */
+.sidebar-toc-pane { position: relative; overflow-anchor: none; }
+
 .sidebar-empty {
   display: flex;
   flex-direction: column;

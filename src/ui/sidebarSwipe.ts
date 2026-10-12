@@ -1,6 +1,6 @@
 /** Navigation drawer motion is local UI state; it never calls the reader's page executor. */
 export const SIDEBAR_TABS = ["toc", "bookmarks", "notes"] as const;
-export type SidebarNavigationMemory = { scrollTop: Partial<Record<typeof SIDEBAR_TABS[number], number>>; tocFilter?: string; tocExpanded?: ReadonlySet<string> };
+export type SidebarNavigationMemory = { scrollTop: Partial<Record<typeof SIDEBAR_TABS[number], number>>; tocFilter?: string; tocExpanded?: ReadonlySet<string>; tocRowHeights?: readonly number[] };
 export function createSidebarNavigationMemory(): SidebarNavigationMemory { return { scrollTop: {} }; }
 
 export interface SidebarMotionDriver {

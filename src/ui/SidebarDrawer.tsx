@@ -2,9 +2,11 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "re
 import { SIDEBAR_TABS, createSidebarNavigationMemory, installSidebarSwipe, type SidebarNavigationMemory, type SidebarSwipeMotion } from "./sidebarSwipe";
 import { useMenuClose } from "./menuMotion";
 import type { TocNode } from "../core/types";
-import { countTocNodes, defaultExpandedTocKeys, findActiveTocNode, limitNotes, tocAncestorKeys, tocNodeKeys, type NoteViewModel } from "./sidebarModel";
+import { limitNotes, TOC_EXPAND_ALL_LIMIT, type NoteViewModel } from "./sidebarModel";
+import { activeTocEntry, indexToc, visibleTocRows, type IndexedTocNode } from "./sidebarToc";
+import { SidebarTocList } from "./SidebarTocList";
 import type { Bookmark } from "./shelf";
-import { BookmarkIcon, ChevronRightIcon, CloseIcon, PinIcon, WarningCircleIcon } from "./readerIcons";
+import { BookmarkIcon, CloseIcon, PinIcon } from "./readerIcons";
 import "./sidebarDrawer.css";
 import { currentUiLocale, uiText, useUiText } from "./localization/UiLanguageProvider";
 
@@ -46,123 +48,6 @@ function formatDate(timestamp: number): string {
   return new Intl.DateTimeFormat(currentUiLocale(), { dateStyle: "short", timeStyle: "short" }).format(new Date(timestamp));
 }
 
-function filterTocNodes(nodes: TocNode[], query: string): TocNode[] {
-  if (!query) return nodes;
-  const q = query.toLowerCase();
-  const res: TocNode[] = [];
-  for (const node of nodes) {
-    const selfMatch = (node.label || "").toLowerCase().includes(q);
-    const filteredChildren = node.children.length > 0 ? filterTocNodes(node.children, query) : [];
-    if (selfMatch || filteredChildren.length > 0) {
-      res.push({
-        ...node,
-        children: filteredChildren,
-      });
-    }
-  }
-  return res;
-}
-
-interface TocTreeState {
-  keys: Map<TocNode, string>;
-  /** null: every branch is shown (filtering). */
-  expanded: ReadonlySet<string> | null;
-  /** Whether any node has children; flat TOCs keep their original layout. */
-  nested: boolean;
-  toggle(key: string, expand: boolean): void;
-}
-
-function TocBranch({
-  nodes,
-  level,
-  activeNode,
-  activeItemRef,
-  onNavigate,
-  tree,
-}: {
-  nodes: TocNode[];
-  level: number;
-  activeNode?: TocNode;
-  activeItemRef: React.RefObject<HTMLDivElement | null>;
-  onNavigate: (href: string) => void;
-  tree: TocTreeState;
-}) {
-  const { t } = useUiText();
-  return (
-    <div className="sidebar-toc-branch" role={level === 0 ? "tree" : "group"}>
-      {nodes.map((node, i) => {
-        const active = node === activeNode;
-        const disabled = node.disabled === true;
-        const key = tree.keys.get(node);
-        const parent = node.children.length > 0;
-        const open = parent && (tree.expanded === null || (key !== undefined && tree.expanded.has(key)));
-        const canToggle = parent && tree.expanded !== null && key !== undefined;
-        return (
-          <div key={`${level}-${i}-${node.label}`}>
-            <div
-              ref={active ? (activeItemRef as React.Ref<HTMLDivElement>) : undefined}
-              className={`sidebar-toc-item level-${Math.min(level, 3)}${active ? " active" : ""}${disabled ? " disabled" : ""}${tree.nested ? " has-toggle-column" : ""}`}
-              style={{ paddingLeft: `${(tree.nested ? 4 : 14) + level * 16}px` }}
-              title={disabled ? t("sidebar.toc.unavailable", { href: node.href || t("sidebar.toc.noLink") }) : node.label}
-              role="treeitem"
-              tabIndex={0}
-              aria-current={active ? "location" : undefined}
-              aria-expanded={parent ? open : undefined}
-              aria-disabled={disabled || undefined}
-              onClick={() => {
-                if (!disabled) onNavigate(node.href);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  if (!disabled) onNavigate(node.href);
-                } else if ((event.key === "ArrowLeft" || event.key === "ArrowRight") && !event.altKey && !event.ctrlKey && !event.metaKey) {
-                  // Never let arrows fall through to page turning while the TOC has focus.
-                  event.preventDefault();
-                  event.stopPropagation();
-                  if (canToggle) tree.toggle(key!, event.key === "ArrowRight");
-                }
-              }}
-            >
-              {tree.nested ? (
-                canToggle ? (
-                  <button
-                    type="button"
-                    className={`sidebar-toc-toggle${open ? " is-open" : ""}`}
-                    tabIndex={-1}
-                    aria-label={open ? t("sidebar.toc.collapse") : t("sidebar.toc.expand")}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      tree.toggle(key!, !open);
-                    }}
-                  >
-                    <ChevronRightIcon size={12} />
-                  </button>
-                ) : (
-                  <span className="sidebar-toc-toggle-spacer" aria-hidden="true" />
-                )
-              ) : null}
-              <span className="sidebar-toc-text">{node.label || t("sidebar.toc.untitled")}</span>
-              {disabled ? <WarningCircleIcon size={13} className="sidebar-disabled-icon" /> : null}
-            </div>
-            {open ? (
-              <TocBranch
-                nodes={node.children}
-                level={level + 1}
-                activeNode={activeNode}
-                activeItemRef={activeItemRef}
-                onNavigate={onNavigate}
-                tree={tree}
-              />
-            ) : null}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
   open,
   navigationMemory,
@@ -185,8 +70,8 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
   onDeleteNote,
 }) => {
   const { t } = useUiText();
-  const activeTocNode = findActiveTocNode(toc, activeHref);
-  const activeItemRef = useRef<HTMLDivElement>(null);
+  const tocIndex = useMemo(() => indexToc(toc), [toc]);
+  const activeEntry = useMemo(() => activeTocEntry(tocIndex, activeHref), [tocIndex, activeHref]);
   const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
   const [tocFilter, setTocFilter] = useState(navigationMemory?.tocFilter ?? "");
   const { isClosing, requestClose, cancelClose } = useMenuClose(onClose, open);
@@ -204,19 +89,19 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
   const onTabChangeRef = useRef(onTabChange);
   onTabChangeRef.current = onTabChange;
   const visible = open || isClosing;
-  const tocKeys = useMemo(() => tocNodeKeys(toc), [toc]);
-  const tocNested = useMemo(() => toc.some((node) => node.children.length > 0), [toc]);
   const [tocExpanded, setTocExpanded] = useState<ReadonlySet<string>>(
-    () => memory.tocExpanded ?? defaultExpandedTocKeys(toc),
+    () => memory.tocExpanded ?? new Set(tocIndex.entries.length <= TOC_EXPAND_ALL_LIMIT
+      ? tocIndex.entries.filter(entry => entry.children.length > 0).map(entry => entry.key) : []),
   );
   // Each time the drawer opens or the current chapter changes, reveal the
   // current entry's branch before the scroll-to-active layout effect runs.
   // Adjusting state during render keeps that in the same commit.
-  const revealTarget = visible ? activeTocNode ?? null : null;
-  const [revealedTarget, setRevealedTarget] = useState<TocNode | null>(null);
+  const revealTarget = visible ? activeEntry ?? null : null;
+  const [revealedTarget, setRevealedTarget] = useState<IndexedTocNode | null>(null);
   if (revealTarget !== revealedTarget) {
     setRevealedTarget(revealTarget);
-    const ancestors = tocAncestorKeys(toc, revealTarget ?? undefined);
+    const ancestors: string[] = [];
+    for (let parent = revealTarget?.parent; parent; parent = parent.parent) ancestors.push(parent.key);
     if (ancestors.some((key) => !tocExpanded.has(key))) {
       const next = new Set(tocExpanded);
       for (const key of ancestors) next.add(key);
@@ -240,14 +125,9 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
     for (const tab of SIDEBAR_TABS) {
       const pane = paneRefs.current[tab];
       if (!pane) continue;
+      // The TOC owns its measured window and first-open centering.
+      if (tab === "toc") continue;
       if (memory.scrollTop[tab] !== undefined) pane.scrollTop = memory.scrollTop[tab]!;
-      else if (tab === "toc" && activeItemRef.current) {
-        const item = activeItemRef.current;
-        const rect = pane.getBoundingClientRect();
-        const scaleY = rect.height / pane.clientHeight;
-        pane.scrollTop = (item.getBoundingClientRect().top - rect.top) / scaleY + pane.scrollTop
-          - (pane.clientHeight - item.clientHeight) / 2;
-      }
       memory.scrollTop[tab] = pane.scrollTop;
     }
     const binding = installSidebarSwipe(viewportRef.current!, trackRef.current!, SIDEBAR_TABS.indexOf(activeTab),
@@ -276,13 +156,14 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
     onScroll: (event: React.UIEvent<HTMLDivElement>) => { memory.scrollTop[tab] = event.currentTarget.scrollTop; },
   });
 
+  const tocRows = useMemo(() => visibleTocRows(tocIndex, tocExpanded, tocFilter), [tocIndex, tocExpanded, tocFilter]);
+  const sortedNotes = useMemo(() => limitNotes(notes, 200).items, [notes]);
+
   if (!open && mode === "overlay" && !isClosing) {
     return null;
   }
 
-  const tocCount = countTocNodes(toc);
-  const displayedToc = tocFilter.trim() ? filterTocNodes(toc, tocFilter.trim()) : toc;
-  const sortedNotes = limitNotes(notes, 200).items;
+  const tocCount = tocIndex.entries.length;
 
   return (
     <>
@@ -388,21 +269,16 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
               )}
               {tocCount === 0 ? (
                 <div className="sidebar-empty">{t("sidebar.toc.empty")}</div>
-              ) : displayedToc.length === 0 ? (
+              ) : tocRows.length === 0 ? (
                 <div className="sidebar-empty">{t("sidebar.toc.noMatch")}</div>
               ) : (
-                <TocBranch
-                  nodes={displayedToc}
-                  level={0}
-                  activeNode={activeTocNode}
-                  activeItemRef={activeItemRef}
-                  tree={{
-                    keys: tocKeys,
-                    // Filtered results are already pruned to matches and their ancestors.
-                    expanded: tocFilter.trim() ? null : tocExpanded,
-                    nested: tocNested,
-                    toggle: toggleTocBranch,
-                  }}
+                <SidebarTocList
+                  rows={tocRows}
+                  activeKey={activeEntry?.key}
+                  nested={tocIndex.nested}
+                  filtering={Boolean(tocFilter.trim())}
+                  memory={memory}
+                  onToggle={toggleTocBranch}
                   onNavigate={(href) => {
                     onNavigateToc(href);
                     if (mode === "overlay") requestClose();
