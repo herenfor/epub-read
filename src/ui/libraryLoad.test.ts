@@ -10,6 +10,7 @@ import {
   libraryReadFailed,
   libraryReadSucceeded,
   shelfLibraryView,
+  shelfMembershipChanged,
   type ShelfLibraryView,
 } from "./libraryLoad";
 import type { ShelfEntry } from "./shelf";
@@ -26,13 +27,13 @@ function deferred<T>() {
 function harness() {
   const reads: Array<ReturnType<typeof deferred<string[]>>> = [];
   let writes = 0;
-  let repository: object = { name: "legacy" };
+  let repository = "store-1:legacy";
   const published: string[][] = [];
   const failed: unknown[] = [];
   const reader = createLibraryReader<string[]>({
     read: () => { const next = deferred<string[]>(); reads.push(next); return next.promise; },
     writeCount: () => writes,
-    repository: () => repository,
+    repository: async () => repository,
     publish: (value) => published.push(value),
     fail: (error) => failed.push(error),
   });
@@ -40,7 +41,7 @@ function harness() {
   return {
     reader, reads, published, failed, settle,
     write: () => { writes += 1; },
-    switchRepository: () => { repository = { name: "portable" }; },
+    switchRepository: (key: string) => { repository = key; },
   };
 }
 
@@ -72,8 +73,7 @@ describe("library reader (startup read, retry, late answers)", () => {
     const load = h.reader.load();
     h.write(); // import merged "new" into the list while the first read was out
     h.reads[0].resolve(["old"]);
-    await Promise.resolve();
-    await Promise.resolve();
+    await h.settle();
     expect(h.published).toEqual([]);
     expect(h.reads).toHaveLength(2);
     h.reads[1].resolve(["old", "new"]);
@@ -161,12 +161,33 @@ describe("library reader publish gate (review L1/L2)", () => {
   it("a read that started on another repository is read again on the current one", async () => {
     const h = harness();
     const load = h.reader.load();
-    h.switchRepository(); // portable activation swapped the store behind the facade
+    h.switchRepository("store-2:portable-gen-1"); // portable activation swapped the store behind the facade
     h.reads[0].resolve(["legacy rows"]);
     await h.settle();
     h.reads[1].resolve(["portable rows"]);
     await load;
     expect(h.published).toEqual([["portable rows"]]);
+  });
+
+  it("a native repository reopened under the same store instance (restore) is caught by its generation", async () => {
+    const h = harness();
+    h.switchRepository("store-2:gen-a");
+    const load = h.reader.load();
+    await h.settle();
+    h.switchRepository("store-2:gen-b"); // same JS store, native repository replaced
+    h.reads[0].resolve(["rows from gen-a"]);
+    await h.settle();
+    h.reads[1].resolve(["rows from gen-b"]);
+    await load;
+    expect(h.published).toEqual([["rows from gen-b"]]);
+  });
+
+  it("counts only writes that add or remove books, not updates to a listed book", () => {
+    const a = { id: "a" }, b = { id: "b" }, c = { id: "c" };
+    expect(shelfMembershipChanged([a, b], [a, b, c])).toBe(true);   // import
+    expect(shelfMembershipChanged([a, b], [a])).toBe(true);         // delete
+    expect(shelfMembershipChanged([a, b], [a, c])).toBe(true);      // replaced record
+    expect(shelfMembershipChanged([a, b], [{ ...b }, { ...a }])).toBe(false); // opened / notes / progress / reorder
   });
 
   it("teardown supersedes a refresh: its late answer touches nothing", async () => {

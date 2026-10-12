@@ -41,12 +41,26 @@ export function shelfLibraryView(load: LibraryLoadState, hasBooks: boolean, orga
   return load.status === "failed" ? { kind: "failed", error: load.error } : { kind: "loading" };
 }
 
+/**
+ * Whether a write changed which books are on the shelf (import, delete,
+ * sync replacing records). Updates to a book already there (opened, notes,
+ * progress) do not make a library read stale and are not counted.
+ */
+export function shelfMembershipChanged(previous: readonly { id: string }[], next: readonly { id: string }[]): boolean {
+  if (previous.length !== next.length) return true;
+  const ids = new Set(previous.map((entry) => entry.id));
+  return next.some((entry) => !ids.has(entry.id));
+}
+
 export interface LibraryReaderDeps<T> {
   read(): Promise<T>;
-  /** Bumped by every other write to the same data (import, delete, sync, user edits). */
+  /** Bumped by every other write that changes the same data (books added/removed, folder edits). */
   writeCount(): number;
-  /** The repository behind the reads; a read that started on another one is never published. */
-  repository(): unknown;
+  /**
+   * Identity of the repository behind the reads (store instance plus its
+   * runtime generation); a read that started on another one is never published.
+   */
+  repository(): Promise<string>;
   publish(value: T): void;
   fail(error: unknown): void;
 }
@@ -90,15 +104,17 @@ export function createLibraryReader<T>(deps: LibraryReaderDeps<T>) {
   const run = async (mine: number): Promise<LibraryReadOutcome<T>> => {
     for (let attempt = 0; ; attempt++) {
       const writes = deps.writeCount();
-      const repository = deps.repository();
+      // Asked alongside the read so the identity check adds no latency before it.
+      const repositoryBefore = deps.repository();
       let result: { ok: true; value: T } | { ok: false; error: unknown };
       try {
         result = { ok: true, value: await deps.read() };
       } catch (error) {
         result = { ok: false, error };
       }
+      const repositoryChanged = (await repositoryBefore) !== (await deps.repository());
       if (mine !== generation) return { kind: "superseded" };
-      if (deps.writeCount() !== writes || deps.repository() !== repository) {
+      if (deps.writeCount() !== writes || repositoryChanged) {
         if (attempt < MAX_LIBRARY_REREADS) continue;
         const error = new LibraryReadInterruptedError();
         deps.fail(error);
