@@ -17,7 +17,7 @@ import { isExternalUrl, isFragmentOnly } from "../core/paths";
 import { getFootnoteHoverAnchor, isFootnoteLink, resolveFootnote, type FootnoteInfo } from "./footnotes";
 import type { ResourceServer } from "./resources";
 import { OwnedBlobUrls } from "./blobOwnership";
-import { TEXT_MEASURE, type ReaderSettings } from "./settings";
+import { TEXT_MEASURE, type ReaderSettings, type Theme } from "./settings";
 import { VisibilityGate } from "./displayGate";
 import { hasAuthoredCssProperty } from "./cssRewrite";
 import { clearDocumentSelection, isSelectAllShortcut } from "./selectionGuard";
@@ -31,7 +31,7 @@ import {
   adaptNavigationAnchor,
   type PersistedNavigationAnchor,
 } from "./navigationAnchor";
-import { applyDarkThemeContrast } from "./darkThemeContrast";
+import { createReaderTheme, type ReaderThemeController } from "./readerTheme";
 import { FootnoteHoverGate } from "./footnoteHoverGate";
 import { waitForDoubleRaf, waitForFontsReady } from "./asyncWait";
 import {
@@ -431,6 +431,13 @@ interface AnchorSampleOptions {
   visibleRatio: number;
   /** paginated 分栏换算；scroll 忽略 */
   geometry?: { columnWidth: number; columnStep: number; viewStep: number; leadingColumns: number };
+  /** B-237 paginated only: visible media in the sampled column when the point has no text. */
+  mediaAt?: (point: VisibleSamplePoint) => VisibleMediaSample | null;
+}
+
+interface VisibleMediaSample {
+  element: Element;
+  anchor: MediaReadingAnchor;
 }
 
 /** scroll：可见屏内固定高度；paginated：第一可见列（不是含 gap 的整屏中心）。 */
@@ -506,10 +513,13 @@ function captureAnchorAtPoint(
     }
   }
   const textOffset = textNode ? index.offsetForNode(textNode, rawOffset) : null;
-  const el = textNode?.parentElement ?? visibleElementAt(doc, viewer, point);
+  // Text first; with no text under the point (an image page) the column's
+  // media gives a stable identity instead of only its element index.
+  const media = textOffset === null ? options.mediaAt?.(point) ?? null : null;
+  const el = textNode?.parentElement ?? media?.element ?? visibleElementAt(doc, viewer, point);
   const idx = el ? index.elementIndex(el, viewer) : -1;
   const rect = el ? (el as HTMLElement).getBoundingClientRect() : null;
-  if (textOffset === null && idx < 0) return null;
+  if (textOffset === null && idx < 0 && !media) return null;
   const ratio = rect && rect.width > 0
     ? Math.min(1, Math.max(0, (point.x - rect.left) / rect.width))
     : 0;
@@ -521,6 +531,7 @@ function captureAnchorAtPoint(
     mediaUnits: index.mediaUnits,
     textOffset,
     textSnippet: textOffset === null ? null : index.snippetAt(textOffset),
+    ...(media ? { mediaAnchor: media.anchor } : {}),
   };
 }
 
@@ -2648,6 +2659,7 @@ export class ChapterPaginator {
    * 不支持时触摸退回原生吸附，桌面继续使用原有数值动画。
    */
   private slideMotionWanted = false;
+  private motionWindowForeground = false;
   /** 当前布局的运动会话；布局/章节/视口改变时销毁。 */
   private pageMotion: {
     session: PageMotionSession;
@@ -2707,6 +2719,8 @@ export class ChapterPaginator {
   private scrollPageCount = 1;
   /** 宿主连续滚动投影状态门，防止投影滚动事件反向触发章内导航或重置。 */
   private isProjectingScroll = false;
+  /** 主题原位更新控制器：管理当前加载文档的纯主题颜色与深色对比度修补生命周期。 */
+  private themeController: ReaderThemeController | null = null;
 
   constructor(
     private iframe: HTMLIFrameElement,
@@ -2896,6 +2910,14 @@ export class ChapterPaginator {
     if (!enabled) this.disposePageMotion();
     this.nativeSnapEnabled = enabled;
     this.syncNativeSnapViewer();
+    if (enabled && this.isDisplayReady) this.prepareMotion();
+  }
+
+  /** Only the visible foreground chapter retains a bounded compositor window. */
+  setMotionWindowForeground(foreground: boolean): void {
+    this.motionWindowForeground = foreground;
+    if (!foreground) this.disposePageMotion();
+    else if (this.isDisplayReady) this.prepareMotion();
   }
 
   /** 宿主接收“落定后跨章”的预约结果（同向第二次命令在去末屏途中到达）。 */
@@ -3177,7 +3199,7 @@ export class ChapterPaginator {
   /** 同章滑动共用运动会话；指针类型只决定曲线，不决定是否走合成驱动。 */
   get pageMotionAvailable(): boolean {
     return Boolean(
-      this.slideMotionWanted && this.viewer && !this.scrollMode && !this.disposed &&
+      this.motionWindowForeground && this.slideMotionWanted && this.viewer && !this.scrollMode && !this.disposed &&
       this.pageMotionCapable() &&
       this.pageMotionUnsupportedKey !== this.snapOffsetsCache?.key,
     );
@@ -3254,8 +3276,8 @@ export class ChapterPaginator {
   }
 
   /**
-   * 手指或翻页按钮按下：画面仍静止时提前进入运动窗口，把窗口重排（长章约
-   * 20ms）放在动画开始之前；一段时间内没有运动就退回正常几何。
+   * 显示前或按下时在实际位置准备有限运动窗口。前台阅读期间保留，后台、
+   * 缓存章、重排或关闭由 owner 主动释放；不以用户阅读停顿反复拆建。
    */
   prepareMotion(touchContact = false): void {
     const motion = this.ensurePageMotion();
@@ -3316,7 +3338,7 @@ export class ChapterPaginator {
       canExitIdleWindow: () => !this.disposed && this.viewer === viewer &&
         this.pageMotion?.session === session && driver.active && session.state.kind === "idle",
       exitIdleWindow: () => this.exitIdlePageMotionWindow(),
-    });
+    }, null);
     this.pageMotion = { session, driver, lease, key, viewer };
     return this.pageMotion;
   }
@@ -3337,7 +3359,7 @@ export class ChapterPaginator {
     this.emit({ ...this.readyState(false, page), transient: true } as ChapterState);
   }
 
-  /** 运动落定：立即提交页码/锚点，短暂保留窗口以复用连续翻页。 */
+  /** 运动落定：立即提交页码/锚点；前台 owner 保留有限窗口。 */
   private commitPageMotion(page: number): void {
     const motion = this.pageMotion;
     if (!motion || !this.viewer) return;
@@ -3765,15 +3787,15 @@ export class ChapterPaginator {
     // 可保证 blob 文档的第一帧也不会漏出，同时 visibility:hidden 仍可测量。
     this.displayGate.hold(seq);
     this.emit({ status: "measuring" });
-    if (this.settings.theme === "dark" || this.settings.theme === "gray") {
-      try {
-        applyDarkThemeContrast(doc, {
-          theme: this.settings.theme,
-          userOwnsColor: this.userOwnsColorForDocument(doc),
-        });
-      } catch {
-        // Contrast repair is conservative and must never block chapter display.
-      }
+    this.themeController?.dispose();
+    try {
+      this.themeController = createReaderTheme({
+        doc,
+        theme: this.settings.theme,
+        userOwnsColor: this.userOwnsColorForDocument(doc),
+      });
+    } catch {
+      this.themeController = null;
     }
     doc.addEventListener("load", this.imgHandler, true);
     // 拦截书内链接：防止 iframe 自身导航导致内容丢失
@@ -3897,6 +3919,7 @@ export class ChapterPaginator {
       this.pendingStartAtEnd = false;
       this.setPage(Math.max(0, this.metrics.pageCount - 1));
     }
+    this.prepareMotion();
     return true;
   }
 
@@ -3948,6 +3971,8 @@ export class ChapterPaginator {
     ) {
       return false;
     }
+    // Measurements must never read the expanded motion-window column geometry.
+    this.disposePageMotion();
     const win = doc.defaultView;
     const measuredWidth = this.iframe.clientWidth;
     const measuredHeight = this.iframe.clientHeight;
@@ -6378,6 +6403,9 @@ export class ChapterPaginator {
       }
     }
     this.recomputeInner(useAnchor, loadSeq);
+    // Initial loading primes only after exact navigation. Later reflows prime
+    // after restoration and anchor sampling have finished on normal geometry.
+    if (this.isDisplayReady) this.prepareMotion();
     return !this.disposed && loadSeq === this.loadSeq;
   }
 
@@ -6909,6 +6937,7 @@ export class ChapterPaginator {
             viewStep: this.effectiveViewStep,
             leadingColumns: this.leadingColumns,
           },
+      mediaAt: this.scrollMode ? undefined : (point) => this.visibleMediaAt(point),
     });
     if (!anchor) return;
     this.anchor = anchor;
@@ -8078,6 +8107,43 @@ export class ChapterPaginator {
     return elements.filter((el) => !elements.some((parent) => parent !== el && parent.contains(el)));
   }
 
+  /**
+   * B-237: the media actually visible in the sampled column. A full-page image
+   * has no text under the sample point, and its element index alone is not a
+   * persistable identity. The rect is in the same viewport coordinates as the
+   * point (a moving window's transform included), so this only reads layout.
+   * The point's column is the media's horizontal span; one beside it is not borrowed.
+   */
+  private visibleMediaAt(point: VisibleSamplePoint): VisibleMediaSample | null {
+    const doc = this.contentDoc;
+    const viewer = this.viewer;
+    if (!doc || !viewer) return null;
+    const viewportHeight = doc.documentElement?.clientHeight || viewer.clientHeight;
+    let fallback: VisibleMediaSample | null = null;
+    const media = this.collectMediaElements();
+    for (let index = 0; index < media.length; index += 1) {
+      const element = media[index];
+      const rect = element.getBoundingClientRect();
+      if (!(rect.width > 0 && rect.height > 0) || point.x < rect.left || point.x > rect.right) continue;
+      const top = Math.max(rect.top, 0);
+      const bottom = Math.min(rect.bottom, viewportHeight);
+      if (bottom <= top) continue;
+      const y = Math.max(top, Math.min(bottom, point.y));
+      const sample: VisibleMediaSample = {
+        element,
+        anchor: {
+          index,
+          tag: element.tagName.toLowerCase(),
+          signature: this.mediaSignature(element),
+          ratio: Math.max(0, Math.min(1, (y - rect.top) / rect.height)),
+        },
+      };
+      if (point.y >= rect.top && point.y <= rect.bottom) return sample;
+      fallback ??= sample;
+    }
+    return fallback;
+  }
+
   private mediaSignature(el: Element): string {
     const rawSrc =
       el.getAttribute("src") ?? el.getAttribute("href") ?? el.getAttribute("xlink:href") ?? "";
@@ -8275,6 +8341,7 @@ export class ChapterPaginator {
       this.scheduleAnchorSample();
       const moved = res.page !== previousPage || Math.abs(res.scrollLeft - previousLeft) > 0.5 || adopted;
       if (options?.userInitiated && moved) this.notifyUserCommit();
+      if (this.isDisplayReady) this.prepareMotion();
       return;
     }
     const targetScrollLeft = target * this.viewStepPx;
@@ -8288,6 +8355,7 @@ export class ChapterPaginator {
         this.scheduleAnchorSample();
         if (options?.userInitiated) this.notifyUserCommit();
       }
+      if (this.isDisplayReady) this.prepareMotion();
       return;
     }
     this.adoptedPageUncommitted = false;
@@ -8300,6 +8368,7 @@ export class ChapterPaginator {
     // B-153：普通翻页热路径只登记一次下一帧采样；连续翻页合并为最后一页。
     this.scheduleAnchorSample();
     if (options?.userInitiated) this.notifyUserCommit();
+    if (this.isDisplayReady) this.prepareMotion();
   }
 
   /**
@@ -8389,9 +8458,9 @@ export class ChapterPaginator {
       }
     }
     if (targetPage === null && bookmark.mediaAnchor) {
-      const media = this.collectMediaElements();
-      const el = media[bookmark.mediaAnchor.index];
-      if (el) {
+      // Same identity check as restore: index, then signature; never another image.
+      const el = this.resolveMediaAnchorElement(bookmark.mediaAnchor);
+      if (el && el.getBoundingClientRect().height > 0) {
         const r = el.getBoundingClientRect();
         const colX = this.contentX(r.left);
         const physical = columnForContentPoint(colX, this.spreadLayout.geometry);
@@ -8417,20 +8486,13 @@ export class ChapterPaginator {
     mediaUnits: number;
     textOffset: number | null;
     textSnippet: string | null;
+    /** B-237: stable and in-motion readings carry the same media identity. */
+    mediaAnchor: MediaReadingAnchor | null;
   } | null {
     // 进度写入、书签、历史快照和关书前必须补齐最新一页采样，不能保存旧页。
     this.flushReadingAnchor();
     if (!this.anchor || !this.anchorPath) return null;
-    return {
-      path: this.anchorPath,
-      index: this.anchor.index,
-      ratio: this.anchor.ratio,
-      charsRead: this.anchor.charsRead,
-      totalChars: this.anchor.totalChars,
-      mediaUnits: this.anchor.mediaUnits ?? 0,
-      textOffset: this.anchor.textOffset,
-      textSnippet: this.anchor.textSnippet,
-    };
+    return this.publicReadingAnchor(this.anchor, this.anchorPath);
   }
 
   /**
@@ -8508,6 +8570,7 @@ export class ChapterPaginator {
       mediaUnits: anchor.mediaUnits ?? 0,
       textOffset: anchor.textOffset,
       textSnippet: anchor.textSnippet,
+      mediaAnchor: anchor.mediaAnchor ? { ...anchor.mediaAnchor } : null,
     };
   }
 
@@ -8544,6 +8607,7 @@ export class ChapterPaginator {
         viewStep: this.effectiveViewStep,
         leadingColumns: this.leadingColumns,
       },
+      mediaAt: (point) => this.visibleMediaAt(point),
     };
     for (const point of visibleSamplePoints(options)) {
       const anchor = captureAnchorAtPoint(options, { x, y: point.y });
@@ -8655,6 +8719,23 @@ export class ChapterPaginator {
     await this.load(path, { anchor, readingAnchor, fallbackPage, preserveSearchHighlight });
   }
 
+  /**
+   * 原位同步更新主题（纯颜色、深色对比度修补、作者安全背景），
+   * 不重新加载章节、不重新测页、不重建 iframe 或正文节点，保留运动窗口与阅读位置。
+   */
+  updateTheme(theme: Theme): boolean {
+    this.settings = { ...this.settings, theme };
+    if (this.themeController) {
+      try {
+        this.themeController.update(theme);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  }
+
   /** 设置变更（字号/主题/阅读方式）后整体重载（保留阅读位置）。 */
   async reloadWithSettings(settings: ReaderSettings, anchor?: string): Promise<void> {
     const path = this.currentPath;
@@ -8693,6 +8774,55 @@ export class ChapterPaginator {
         }
       : null;
     await this.load(path, { anchor, readingAnchor, fallbackPage, preserveSearchHighlight });
+  }
+
+  /**
+   * 设置变更后整体重载并等待该次重载对应的 display-ready。
+   * 返回 true 表示该次设置变更成功应用且已完成排版交互就绪；
+   * 若期间被更新的重载/加载取代、取消或加载失败，则返回 false。
+   */
+  async reloadWithSettingsAndWaitForDisplay(settings: ReaderSettings, anchor?: string): Promise<boolean> {
+    const path = this.currentPath;
+    if (!path) {
+      this.settings = settings;
+      return true;
+    }
+    if (this.scrollMode) this.captureScrollAnchor();
+    else {
+      const position = this.readVisualPosition();
+      const transient =
+        position &&
+        (position.page !== this.metrics.currentPage ||
+          !position.aligned ||
+          (this.pageMotion && this.pageMotion.session.state.kind !== "idle"));
+      if (position && (transient || this.pageMotion?.driver.active)) {
+        const sampled = this.sampleAnchorAtVisualPosition(position);
+        this.takeOverNativePaging();
+        if (sampled) {
+          this.anchor = sampled;
+          this.anchorPath = path;
+        }
+      } else if (!this.flushReadingAnchor()) this.captureAnchor();
+    }
+    const readingAnchor = this.anchor && this.anchorPath === path ? { ...this.anchor } : null;
+    const fallbackPage = this.metrics.currentPage;
+    this.settings = settings;
+    const preserveSearchHighlight = this.searchHighlightTarget
+      ? {
+          requestId: this.searchHighlightTarget.requestId,
+          textHits: cloneExactTextHits(this.searchHighlightTarget.textHits),
+          occurrence: cloneSearchOccurrence(this.searchHighlightTarget.occurrence),
+          displayTarget: cloneDisplayTarget(this.searchHighlightTarget.displayTarget),
+        }
+      : null;
+    const loading = this.load(path, { anchor, readingAnchor, fallbackPage, preserveSearchHighlight });
+    const expectedLoadSeq = this.loadSeq;
+    try {
+      await loading;
+      return await this.waitForDisplayReady(expectedLoadSeq);
+    } catch {
+      return false;
+    }
   }
 
   private get currentPath(): string {
@@ -9241,6 +9371,8 @@ export class ChapterPaginator {
   }
 
   private cleanupDoc(): void {
+    this.themeController?.dispose();
+    this.themeController = null;
     this.abortMeasureWaits();
     this.restoreBackdropCompatibility();
     this.resetFootnote({ notify: true });

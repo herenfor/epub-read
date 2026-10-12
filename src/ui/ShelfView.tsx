@@ -1,12 +1,22 @@
 import { FolderNameField } from "./FolderNameField";
 import { validateFolderNameDraft, folderNameDraftError } from "./folderNameDraft";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { MENU_CLOSE_MS, useExitPresence } from "./menuMotion";
+import { MENU_CLOSE_MS, menuCloseMs, useExitPresence } from "./menuMotion";
 import { uiMotionReduced, useUiMotion, type UiMotion } from "./motionPreference";
 import { useUiLanguageChoice } from "./localization/useUiLanguageChoice";
 import type { UiLanguagePreference } from "./localization/core";
 import { createPortal } from "react-dom";
-import { getShelfMenuPortalHost, useShelfMenuPopover } from "./shelfMenuPlacement";
+import { getShelfMenuPortalHost, type ShelfMenuAnchorRect } from "./shelfMenuPlacement";
+import { ShelfGestureTail, shelfLongPressKind, useShelfPress, type ShelfLongPress } from "./shelfPress";
+import {
+  groupShelfActions,
+  shelfBookActions,
+  shelfFolderActions,
+  shelfMenuPresentation,
+  type ShelfAction,
+  type ShelfActionId,
+} from "./shelfActions";
+import { ShelfActionMenu } from "./ShelfActionMenu";
 import type { Theme } from "../render/settings";
 import {
   createShelfFilterModel,
@@ -614,6 +624,21 @@ const MORANDI_PALETTES = [
   { bg: "#48524B", fg: "#EDF5EF", border: "rgba(237, 245, 239, 0.25)", accent: "rgba(237, 245, 239, 0.18)" }, // 艾绿
 ];
 
+function shelfActionIcon(id: ShelfActionId): ReactNode {
+  switch (id) {
+    case "open": return <BookLogoIcon />;
+    case "select": return <CheckListIcon />;
+    case "favorite": return <StarIcon />;
+    case "unfavorite": return <StarIcon filled />;
+    case "move":
+    case "removeFromFolder":
+    case "openFolder": return <FolderIcon />;
+    case "renameFolder": return <EditIcon />;
+    case "delete":
+    case "dissolveFolder": return <TrashIcon />;
+  }
+}
+
 function getMorandiPalette(title: string, id: string) {
   let hash = 0;
   const str = id + title;
@@ -1084,209 +1109,130 @@ const ShelfResumeStage = memo(function ShelfResumeStage({
  * 书籍卡片组件（现代极简排版、内嵌进度条、触控安全区）
  * ========================================================================= */
 
-interface ShelfCardProps extends ShelfSubmenuBackProps {
+/** Which shelf object a menu is for; identity is the stable id, never a captured entry object. */
+export type ShelfMenuTarget =
+  | { kind: "book"; id: string; surface: "grid" | "list" | "folderModal" }
+  | { kind: "folder"; id: string };
+
+/** How a card asked for its menu. */
+export interface ShelfMenuOpener {
+  trigger: HTMLElement | null;
+  /** Right-click position; absent anchors at the trigger. */
+  point?: { x: number; y: number };
+  pointerType: string;
+  keyboard: boolean;
+  /** The three-dot of an already open menu closes it instead of reopening. */
+  toggle: boolean;
+}
+
+interface ShelfMenuSession {
+  /** Every opening gets a new token; async results only land on the menu that started them. */
+  token: number;
+  target: ShelfMenuTarget;
+  presentation: "sheet" | "popover";
+  anchor: ShelfMenuAnchorRect;
+  trigger: HTMLElement | null;
+  focusFirstItem: boolean;
+}
+
+function sameShelfMenuTarget(a: ShelfMenuTarget, b: ShelfMenuTarget): boolean {
+  if (a.kind !== b.kind || a.id !== b.id) return false;
+  return a.kind !== "book" || b.kind !== "book" || a.surface === b.surface;
+}
+
+function buttonMenuOpener(event: React.MouseEvent<HTMLElement>, pressedWith: string): ShelfMenuOpener {
+  const keyboard = event.detail === 0;
+  const pointerType = keyboard ? "" : ((event.nativeEvent as Partial<PointerEvent>).pointerType || pressedWith);
+  return { trigger: event.currentTarget, pointerType, keyboard, toggle: true };
+}
+
+function contextMenuOpener(event: React.MouseEvent<HTMLElement>, trigger: HTMLElement | null): ShelfMenuOpener {
+  // Touch long press never gets here (the press recognizer owns it). A right button is the mouse;
+  // the context-menu key / Shift+F10 arrives without it and anchors at the card's own button.
+  const keyboard = event.button !== 2;
+  const pointerType = keyboard ? "" : ((event.nativeEvent as Partial<PointerEvent>).pointerType || "mouse");
+  return {
+    trigger,
+    point: keyboard ? undefined : { x: event.clientX, y: event.clientY },
+    pointerType,
+    keyboard,
+    toggle: false,
+  };
+}
+
+interface ShelfCardProps {
   entry: ShelfEntry;
+  /** Folder-dialog books have no selection mode; their long press drags them out. */
+  surface: "book" | "folderModalBook";
   selected: boolean;
   selectionMode: boolean;
   provider: ThumbnailProvider;
   isFavorite?: boolean;
   isDragging?: boolean;
   isDropTargetBook?: boolean;
-  /** 全局忙（打开/删除中）：禁用卡片内会写数据的操作 */
-  busy?: boolean;
-  /** 原生导入活动期间：仅禁用删除等冲突入口，不影响打开阅读/收藏/文件夹。 */
-  deleteDisabled?: boolean;
   draggedEntry?: ShelfEntry | null;
+  menuOpen?: boolean;
+  canSelect?: boolean;
+  canDrag?: boolean;
   onOpen(id: string): void;
   onToggleSelected(id: string): void;
-  onDeleteRequest(entry: ShelfEntry): void;
-  onMoveToFolder?(entry: ShelfEntry): void;
-  onRemoveFromFolder?(entry: ShelfEntry): Promise<void>;
   onToggleFavorite?(entry: ShelfEntry): void;
-  onDragStart?(entry: ShelfEntry, point: { x: number; y: number }): void;
-  onLongPressSelect?(id: string): void;
+  onRequestMenu?(target: ShelfMenuTarget, opener: ShelfMenuOpener): void;
+  onLongPress?(entry: ShelfEntry, kind: ShelfLongPress, point: { x: number; y: number }): void;
 }
 
 const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
   const { t } = useUiText();
   const { entry } = props;
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [removePending, setRemovePending] = useState(false);
-  const [removeError, setRemoveError] = useState<string | null>(null);
-
-  const {
-    menuClosing,
-    menuCoords,
-    triggerRef,
-    menuPanelRef,
-    closeMenu,
-  } = useShelfMenuPopover(menuOpen, setMenuOpen);
-
-  useShelfSubmenuBack(menuOpen, closeMenu, props);
+  const moreRef = useRef<HTMLButtonElement>(null);
+  const morePressedWith = useRef("");
 
   const last = entry.lastReadAtMs > 0 ? entry.lastReadAtMs : entry.addedAtMs;
   const recent = Date.now() - last < 1000 * 60 * 60 * 24 * 7;
   const read = hasReadPosition(entry);
 
-  const longPressTimerRef = useRef<number | null>(null);
-  const startPosRef = useRef<{ x: number; y: number } | null>(null);
-  const isDraggingRef = useRef(false);
-  const didLongPressRef = useRef(false);
-  const suppressClickUntilRef = useRef(0);
+  const press = useShelfPress({
+    longPressKind: (pointerType) => shelfLongPressKind(props.surface, pointerType, props.selectionMode, {
+      select: props.canSelect, drag: props.canDrag,
+    }),
+    onLongPress: (kind, point) => props.onLongPress?.(entry, kind, point),
+  });
 
-  const cancelLongPress = useCallback(() => {
-    if (longPressTimerRef.current !== null) {
-      window.clearTimeout(longPressTimerRef.current);
-      longPressTimerRef.current = null;
-    }
-    startPosRef.current = null;
-    isDraggingRef.current = false;
-  }, []);
-
-  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>): void => {
-    if (e.button !== 0) return;
-    // 触摸：普通状态长按进入多选；多选状态再长按才拖动书本（移入文件夹/合并新文件夹），
-    // 手指先移动则仍是上下滚动。鼠标沿用长按即拖动，多选状态不拖。
-    const touch = e.pointerType === "touch";
-    if (props.selectionMode && !(touch && props.onDragStart)) return;
-    const target = e.target as HTMLElement;
-    if (
-      target.closest("button") ||
-      target.closest("input") ||
-      target.closest(".shelf-card-pop-menu") ||
-      target.closest(".shelf-card-actions-wrap") ||
-      target.closest(".shelf-card-star-btn")
-    ) {
-      didLongPressRef.current = false;
-      return;
-    }
-
-    const touchLongPressSelect = touch && !props.selectionMode && Boolean(props.onLongPressSelect);
-    if (!touchLongPressSelect && !props.onDragStart) return;
-
-    startPosRef.current = { x: e.clientX, y: e.clientY };
-    isDraggingRef.current = false;
-    didLongPressRef.current = false;
-
-    if (longPressTimerRef.current !== null) {
-      window.clearTimeout(longPressTimerRef.current);
-    }
-
-    longPressTimerRef.current = window.setTimeout(() => {
-      didLongPressRef.current = true;
-      suppressClickUntilRef.current = Date.now() + 2000;
-      if (typeof navigator !== "undefined" && navigator.vibrate) {
-        try {
-          navigator.vibrate(40);
-        } catch {
-          // ignore
-        }
-      }
-      if (touchLongPressSelect) {
-        props.onLongPressSelect?.(entry.id);
-        return;
-      }
-      isDraggingRef.current = true;
-      props.onDragStart?.(entry, { x: e.clientX, y: e.clientY });
-    }, 500);
+  const activate = (): void => {
+    if (props.selectionMode) props.onToggleSelected(entry.id);
+    else props.onOpen(entry.id);
   };
 
-  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>): void => {
-    if (!startPosRef.current || isDraggingRef.current) return;
-    const dx = e.clientX - startPosRef.current.x;
-    const dy = e.clientY - startPosRef.current.y;
-    if (Math.hypot(dx, dy) > 8) {
-      cancelLongPress();
-    }
-  };
-
-  const handlePointerUp = (): void => {
-    if (longPressTimerRef.current !== null) {
-      window.clearTimeout(longPressTimerRef.current);
-      longPressTimerRef.current = null;
-    }
-    if (didLongPressRef.current) {
-      suppressClickUntilRef.current = Math.max(suppressClickUntilRef.current, Date.now() + 600);
-      window.setTimeout(() => {
-        didLongPressRef.current = false;
-      }, 350);
-    }
-    startPosRef.current = null;
-  };
-
-  const handlePointerCancel = (): void => {
-    cancelLongPress();
-  };
-
-  useEffect(() => () => cancelLongPress(), [cancelLongPress]);
-
-
-  const handleClickCapture = (e: React.MouseEvent): void => {
-    if (isShelfCardActionTarget(e.target, e.currentTarget)) return;
-    if (didLongPressRef.current || Date.now() < suppressClickUntilRef.current) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
-  };
-
-  const handleCardClick = (e?: React.MouseEvent): void => {
-    if (e && isShelfCardActionTarget(e.target, e.currentTarget)) return;
-    if (didLongPressRef.current || Date.now() < suppressClickUntilRef.current) {
-      didLongPressRef.current = false;
-      if (e) {
-        e.preventDefault();
-        e.stopPropagation();
-      }
-      return;
-    }
-    if (props.selectionMode) {
-      props.onToggleSelected(entry.id);
-    } else {
-      props.onOpen(entry.id);
-    }
-  };
-
-  const handleContextMenu = (e: React.MouseEvent): void => {
-    e.preventDefault();
-    // 多选状态的长按留给拖动，不弹系统/卡片菜单。
+  const requestMenu = (opener: ShelfMenuOpener): void => {
     if (props.selectionMode) return;
-    setMenuOpen(true);
-  };
-
-  const handleRemoveFromFolder = async (): Promise<void> => {
-    if (!props.onRemoveFromFolder || removePending) return;
-    setRemovePending(true);
-    setRemoveError(null);
-    try {
-      await props.onRemoveFromFolder(entry);
-      setMenuOpen(false);
-    } catch (err) {
-      setRemoveError(String(err));
-    } finally {
-      setRemovePending(false);
-    }
+    props.onRequestMenu?.({ kind: "book", id: entry.id, surface: props.surface === "folderModalBook" ? "folderModal" : "grid" }, opener);
   };
 
   return (
     <div
-      className={`shelf-card${props.selected ? " selected" : ""}${entry.available === false ? " unavailable" : ""}${props.isDragging ? " is-dragging" : ""}${props.isDropTargetBook ? " drag-over-book" : ""}`}
+      className={`shelf-card${props.selected ? " selected" : ""}${entry.available === false ? " unavailable" : ""}${props.isDragging ? " is-dragging" : ""}${props.isDropTargetBook ? " drag-over-book" : ""}${props.menuOpen ? " menu-open" : ""}`}
       role="button"
       tabIndex={0}
       data-shelf-target="book"
       data-book-id={entry.id}
-      onClick={handleCardClick}
-      onClickCapture={handleClickCapture}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-      onPointerCancel={handlePointerCancel}
+      {...press.handlers}
+      onClick={(e) => {
+        if (isShelfCardActionTarget(e.target, e.currentTarget)) return;
+        if (press.swallowClick(e)) return;
+        activate();
+      }}
       onDragStart={(e) => e.preventDefault()}
-      onContextMenu={handleContextMenu}
+      onContextMenu={(e) => {
+        if (press.swallowTouchContextMenu(e)) return;
+        e.preventDefault();
+        // 多选状态的长按留给拖动，不弹系统/卡片菜单。
+        requestMenu(contextMenuOpener(e, moreRef.current ?? e.currentTarget));
+      }}
       onKeyDown={(e) => {
         if (isShelfCardActionTarget(e.target, e.currentTarget)) return;
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          handleCardClick();
+          activate();
         }
       }}
       title={`${entry.title}${entry.creator ? ` · ${entry.creator}` : ""}`}
@@ -1362,128 +1308,25 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
           </div>
         )}
 
-        {/* 卡片独立操作菜单按钮（悬浮/聚焦可见，替代生硬的直接删除按钮） */}
-        {!props.selectionMode && (
+        {/* 三点按钮只请求书架唯一的操作菜单；按钮自身的按压不进入卡片手势。 */}
+        {!props.selectionMode && props.onRequestMenu && (
           <div className="shelf-card-actions-wrap">
             <button
-              ref={triggerRef}
-              className={`shelf-card-more-btn${menuOpen ? " active" : ""}`}
+              ref={moreRef}
+              className={`shelf-card-more-btn${props.menuOpen ? " active" : ""}`}
               type="button"
               title={t("shelf.card.more.tip")}
               aria-label={t("shelf.card.more", { title: entry.title })}
-              aria-expanded={menuOpen}
+              aria-haspopup="menu"
+              aria-expanded={props.menuOpen === true}
+              onPointerDown={(e) => { morePressedWith.current = e.pointerType; }}
               onClick={(e) => {
                 e.stopPropagation();
-                setMenuOpen((v) => !v);
+                requestMenu(buttonMenuOpener(e, morePressedWith.current));
               }}
             >
               <DotsVerticalIcon />
             </button>
-
-            {typeof document !== "undefined" && (menuOpen || menuClosing) &&
-              createPortal(
-                <div
-                  ref={menuPanelRef}
-                  className={`shelf-card-pop-menu${menuCoords?.placement === "up" ? " placement-up" : " placement-down"}${menuClosing ? " is-closing" : ""}`}
-                  role="menu"
-                  style={
-                    menuCoords
-                      ? {
-                          position: "fixed",
-                          left: `${menuCoords.left}px`,
-                          top: `${menuCoords.top}px`,
-                          maxWidth: `${menuCoords.width}px`,
-                          maxHeight: `${menuCoords.maxHeight}px`,
-                          visibility: "visible",
-                        }
-                      : {
-                          position: "fixed",
-                          left: "-9999px",
-                          top: "-9999px",
-                          visibility: "hidden",
-                        }
-                  }
-                  onClick={(e) => e.stopPropagation()}
-                  onPointerDown={(e) => e.stopPropagation()}
-                >
-                  <div className="shelf-card-pop-title" aria-label={t("shelf.card.fullTitle", { title: entry.title })}>
-                    {entry.title}
-                  </div>
-                  <button
-                    className="shelf-card-pop-item"
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      props.onOpen(entry.id);
-                    }}
-                  >
-                    <BookLogoIcon />
-                    <span>{t("shelf.card.open")}</span>
-                  </button>
-                  {props.onToggleFavorite && (
-                    <button
-                      className="shelf-card-pop-item"
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        setMenuOpen(false);
-                        props.onToggleFavorite?.(entry);
-                      }}
-                    >
-                      <StarIcon filled={props.isFavorite} />
-                      <span>{props.isFavorite ? t("shelf.card.unfavorite") : t("shelf.card.favorite")}</span>
-                    </button>
-                  )}
-                  {props.onMoveToFolder && (
-                    <button
-                      className="shelf-card-pop-item"
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        setMenuOpen(false);
-                        props.onMoveToFolder?.(entry);
-                      }}
-                    >
-                      <FolderIcon />
-                      <span>{t("shelf.card.moveToFolder")}</span>
-                    </button>
-                  )}
-                  {props.onRemoveFromFolder && (
-                    <button
-                      className="shelf-card-pop-item"
-                      type="button"
-                      role="menuitem"
-                      disabled={removePending || props.busy}
-                      onClick={() => {
-                        void handleRemoveFromFolder();
-                      }}
-                    >
-                      <FolderIcon />
-                      <span>{removePending ? t("shelf.card.removing") : t("shelf.card.removeFromFolder")}</span>
-                    </button>
-                  )}
-                  {removeError && (
-                    <div className="shelf-dialog-error" role="alert" style={{ padding: "4px 8px 2px" }}>
-                      {removeError}
-                    </div>
-                  )}
-                  <button
-                    className="shelf-card-pop-item danger"
-                    type="button"
-                    role="menuitem"
-                    disabled={props.deleteDisabled}
-                    onClick={() => {
-                      setMenuOpen(false);
-                      props.onDeleteRequest(entry);
-                    }}
-                  >
-                    <TrashIcon />
-                    <span>{t("shelf.card.delete")}</span>
-                  </button>
-                </div>,
-                getShelfMenuPortalHost(triggerRef.current),
-              )}
           </div>
         )}
       </div>
@@ -1514,40 +1357,39 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
  * 文件夹卡片组件（4图马赛克拼图、弹层菜单、触控安全区）
  * ========================================================================= */
 
-interface ShelfFolderCardProps extends ShelfSubmenuBackProps {
+interface ShelfFolderCardProps {
   id: string;
   name: string;
   books: ShelfEntry[];
   provider: ThumbnailProvider;
   selectionMode: boolean;
   isDropTarget?: boolean;
+  menuOpen?: boolean;
   onOpen(id: string, element?: HTMLElement | null): void;
-  onRename(id: string, name: string): void;
-  onDissolve(id: string, name: string): void;
+  onRequestMenu?(target: ShelfMenuTarget, opener: ShelfMenuOpener): void;
 }
 
 const ShelfFolderCard = memo(function ShelfFolderCard(props: ShelfFolderCardProps) {
   const { t, tn } = useUiText();
-  const [menuOpen, setMenuOpen] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
-  const {
-    menuClosing,
-    menuCoords,
-    triggerRef,
-    menuPanelRef,
-    closeMenu,
-  } = useShelfMenuPopover(menuOpen, setMenuOpen);
+  const moreRef = useRef<HTMLButtonElement>(null);
+  const morePressedWith = useRef("");
 
-  useShelfSubmenuBack(menuOpen, closeMenu, props);
+  const requestMenu = (opener: ShelfMenuOpener): void => {
+    if (props.selectionMode) return;
+    props.onRequestMenu?.({ kind: "folder", id: props.id }, opener);
+  };
 
-  const handleCardClick = (e?: React.MouseEvent): void => {
-    const target = e?.target as HTMLElement | null;
-    if (target?.closest(".shelf-card-actions-wrap, .shelf-card-pop-menu")) {
-      return;
-    }
-    if (!props.selectionMode) {
-      props.onOpen(props.id, cardRef.current);
-    }
+  // 触屏长按文件夹直接给出操作面板（原先依赖系统 contextmenu，会和点击抢同一手势）。
+  const press = useShelfPress({
+    longPressKind: (pointerType) => shelfLongPressKind("folder", pointerType, props.selectionMode, { menu: Boolean(props.onRequestMenu) }),
+    onLongPress: (kind) => {
+      if (kind === "menu") requestMenu({ trigger: moreRef.current ?? cardRef.current, pointerType: "touch", keyboard: false, toggle: false });
+    },
+  });
+
+  const handleCardClick = (): void => {
+    if (!props.selectionMode) props.onOpen(props.id, cardRef.current);
   };
 
   const sampleBooks = props.books.slice(0, 9);
@@ -1555,19 +1397,25 @@ const ShelfFolderCard = memo(function ShelfFolderCard(props: ShelfFolderCardProp
   return (
     <div
       ref={cardRef}
-      className={`shelf-card shelf-folder-card${props.isDropTarget ? " is-drop-target" : ""}`}
+      className={`shelf-card shelf-folder-card${props.isDropTarget ? " is-drop-target" : ""}${props.menuOpen ? " menu-open" : ""}`}
       role="button"
       tabIndex={0}
       data-shelf-target="folder"
       data-folder-id={props.id}
-      onClick={handleCardClick}
+      {...press.handlers}
+      onClick={(e) => {
+        if (isShelfCardActionTarget(e.target, e.currentTarget)) return;
+        if (press.swallowClick(e)) return;
+        handleCardClick();
+      }}
       onDragStart={(e) => e.preventDefault()}
       onContextMenu={(e) => {
-        if (props.selectionMode) return;
+        if (press.swallowTouchContextMenu(e)) return;
         e.preventDefault();
-        setMenuOpen(true);
+        requestMenu(contextMenuOpener(e, moreRef.current ?? e.currentTarget));
       }}
       onKeyDown={(e) => {
+        if (isShelfCardActionTarget(e.target, e.currentTarget)) return;
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           handleCardClick();
@@ -1598,88 +1446,24 @@ const ShelfFolderCard = memo(function ShelfFolderCard(props: ShelfFolderCardProp
           </div>
         )}
 
-        {!props.selectionMode && (
+        {!props.selectionMode && props.onRequestMenu && (
           <div className="shelf-card-actions-wrap">
             <button
-              ref={triggerRef}
-              className={`shelf-card-more-btn${menuOpen ? " active" : ""}`}
+              ref={moreRef}
+              className={`shelf-card-more-btn${props.menuOpen ? " active" : ""}`}
               type="button"
               title={t("shelfFolder.options.tip")}
               aria-label={t("shelfFolder.options", { name: props.name })}
-              aria-expanded={menuOpen}
+              aria-haspopup="menu"
+              aria-expanded={props.menuOpen === true}
+              onPointerDown={(e) => { morePressedWith.current = e.pointerType; }}
               onClick={(e) => {
                 e.stopPropagation();
-                setMenuOpen((v) => !v);
+                requestMenu(buttonMenuOpener(e, morePressedWith.current));
               }}
             >
               <DotsVerticalIcon />
             </button>
-
-            {typeof document !== "undefined" && (menuOpen || menuClosing) &&
-              createPortal(
-                <div
-                  ref={menuPanelRef}
-                  className={`shelf-card-pop-menu${menuCoords?.placement === "up" ? " placement-up" : " placement-down"}${menuClosing ? " is-closing" : ""}`}
-                  role="menu"
-                  style={
-                    menuCoords
-                      ? {
-                          position: "fixed",
-                          left: `${menuCoords.left}px`,
-                          top: `${menuCoords.top}px`,
-                          maxWidth: `${menuCoords.width}px`,
-                          maxHeight: `${menuCoords.maxHeight}px`,
-                          visibility: "visible",
-                        }
-                      : {
-                          position: "fixed",
-                          left: "-9999px",
-                          top: "-9999px",
-                          visibility: "hidden",
-                        }
-                  }
-                  onClick={(e) => e.stopPropagation()}
-                  onPointerDown={(e) => e.stopPropagation()}
-                >
-                  <button
-                    className="shelf-card-pop-item"
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      props.onOpen(props.id, cardRef.current);
-                    }}
-                  >
-                    <FolderIcon />
-                    <span>{t("shelfFolder.open")}</span>
-                  </button>
-                  <button
-                    className="shelf-card-pop-item"
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      props.onRename(props.id, props.name);
-                    }}
-                  >
-                    <EditIcon />
-                    <span>{t("shelfFolder.rename")}</span>
-                  </button>
-                  <button
-                    className="shelf-card-pop-item danger"
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      props.onDissolve(props.id, props.name);
-                    }}
-                  >
-                    <TrashIcon />
-                    <span>{t("shelfFolder.dissolve")}</span>
-                  </button>
-                </div>,
-                getShelfMenuPortalHost(triggerRef.current),
-              )}
           </div>
         )}
       </div>
@@ -2071,42 +1855,45 @@ function ShelfMoveDialog(props: ShelfMoveDialogProps) {
  * 手机拟物居中文件夹弹窗组件（Folder Modal）
  * ========================================================================= */
 
-interface ShelfFolderModalProps extends ShelfSubmenuBackProps {
+interface ShelfFolderModalProps {
   folder: { id: string; name: string };
   books: ShelfEntry[];
   provider: ThumbnailProvider;
   originRect?: DOMRect;
   closing: boolean;
-  busy: boolean;
-  deleteDisabled?: boolean;
   draggedEntry: ShelfEntry | null;
   organization: LibraryOrganization;
+  /** Book whose action menu is open, for the trigger's expanded state. */
+  menuBookId: string | null;
   onClose(): void;
   onOpenBook(id: string): void;
   onRename(folderId: string, currentName: string): void;
   onDissolve(folderId: string, folderName: string): void;
-  onDeleteRequest(entry: ShelfEntry): void;
-  onMoveToFolder(entry: ShelfEntry): void;
-  onRemoveFromFolder(entry: ShelfEntry): Promise<void>;
   onToggleFavorite(entry: ShelfEntry): void;
-  onDragStart(entry: ShelfEntry, pt: { x: number; y: number }): void;
+  onRequestMenu(target: ShelfMenuTarget, opener: ShelfMenuOpener): void;
+  onLongPress(entry: ShelfEntry, kind: ShelfLongPress, point: { x: number; y: number }): void;
   compact?: boolean;
   modalRef: React.RefObject<HTMLDivElement>;
 }
 
+const noopToggle = (): void => {};
+
 const ShelfFolderModal = memo(function ShelfFolderModal(props: ShelfFolderModalProps) {
   const { t, tn } = useUiText();
   const { folder, books, closing, modalRef } = props;
+  const closeRef = useRef(props.onClose);
+  closeRef.current = props.onClose;
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") {
-        props.onClose();
+      // An action menu above the dialog consumes its own Escape first.
+      if (e.key === "Escape" && !e.defaultPrevented) {
+        closeRef.current();
       }
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [props]);
+  }, []);
 
   return (
     <div
@@ -2169,34 +1956,27 @@ const ShelfFolderModal = memo(function ShelfFolderModal(props: ShelfFolderModalP
             </div>
           ) : (
             <div className="shelf-folder-modal-grid">
-              {books.map((entry) => {
-                const hash = entry.contentHash ?? entry.id;
-                const inFolder = effectiveFolderId(props.organization, hash) !== null;
-                return (
-                  <ShelfCard
-                    key={entry.id}
-                    entry={entry}
-                    selected={false}
-                    selectionMode={false}
-                    provider={props.provider}
-                    busy={props.busy}
-                    deleteDisabled={props.deleteDisabled}
-                    isFavorite={isFavorite(props.organization, hash)}
-                    isDragging={props.draggedEntry?.id === entry.id}
-                    isDropTargetBook={false}
-                    draggedEntry={props.draggedEntry}
-                    onOpen={props.onOpenBook}
-                    onToggleSelected={() => {}}
-                    onDeleteRequest={props.onDeleteRequest}
-                    onMoveToFolder={props.onMoveToFolder}
-                    onRemoveFromFolder={inFolder ? props.onRemoveFromFolder : undefined}
-                    onToggleFavorite={props.onToggleFavorite}
-                    onDragStart={props.onDragStart}
-                    registerSubmenuBackHandler={props.registerSubmenuBackHandler}
-                    onSubmenuBackActiveChange={props.onSubmenuBackActiveChange}
-                  />
-                );
-              })}
+              {books.map((entry) => (
+                <ShelfCard
+                  key={entry.id}
+                  entry={entry}
+                  surface="folderModalBook"
+                  selected={false}
+                  selectionMode={false}
+                  provider={props.provider}
+                  isFavorite={isFavorite(props.organization, entry.contentHash ?? entry.id)}
+                  isDragging={props.draggedEntry?.id === entry.id}
+                  isDropTargetBook={false}
+                  draggedEntry={props.draggedEntry}
+                  menuOpen={props.menuBookId === entry.id}
+                  canDrag
+                  onOpen={props.onOpenBook}
+                  onToggleSelected={noopToggle}
+                  onToggleFavorite={props.onToggleFavorite}
+                  onRequestMenu={props.onRequestMenu}
+                  onLongPress={props.onLongPress}
+                />
+              ))}
             </div>
           )}
         </div>
@@ -3311,40 +3091,19 @@ function useShelfVirtualizer(
  * 列表模式单行组件 (ShelfTableRow)
  * ========================================================================= */
 
-interface ShelfTableRowProps extends ShelfSubmenuBackProps {
+interface ShelfTableRowProps {
   entry: ShelfEntry;
   index: number;
   provider: ThumbnailProvider;
   selected: boolean;
   selectionMode: boolean;
   isFavorite: boolean;
-  inFolder: boolean;
-  busy?: boolean;
-  deleteDisabled?: boolean;
+  menuOpen?: boolean;
   onOpen(id: string): void;
   onToggleSelected(id: string): void;
   onToggleFavorite(entry: ShelfEntry): void;
-  onDeleteRequest(entry: ShelfEntry): void;
-  onMoveToFolder(entry: ShelfEntry): void;
-  onRemoveFromFolder?(entry: ShelfEntry): Promise<void>;
-  onLongPressSelect?(id: string): void;
-}
-
-export function chooseShelfMenuPlacement(
-  anchor: { top: number; bottom: number },
-  viewportHeight: number,
-  menuHeight: number
-): "up" | "down" {
-  const margin = 8;
-  const fitsDown = anchor.bottom + 4 + menuHeight <= viewportHeight - margin;
-  const fitsUp = anchor.top - 4 - menuHeight >= margin;
-  if (!fitsDown && fitsUp) return "up";
-  if (!fitsDown && !fitsUp) {
-    const spaceDown = viewportHeight - margin - (anchor.bottom + 4);
-    const spaceUp = anchor.top - 4 - margin;
-    return spaceUp > spaceDown ? "up" : "down";
-  }
-  return "down";
+  onRequestMenu?(target: ShelfMenuTarget, opener: ShelfMenuOpener): void;
+  onLongPress?(entry: ShelfEntry, kind: ShelfLongPress, point: { x: number; y: number }): void;
 }
 
 const ShelfTableRow = memo(function ShelfTableRow({
@@ -3354,123 +3113,45 @@ const ShelfTableRow = memo(function ShelfTableRow({
   selected,
   selectionMode,
   isFavorite,
-  inFolder,
-  busy,
-  deleteDisabled,
+  menuOpen,
   onOpen,
   onToggleSelected,
   onToggleFavorite,
-  onDeleteRequest,
-  onMoveToFolder,
-  onRemoveFromFolder,
-  onLongPressSelect,
-  registerSubmenuBackHandler,
-  onSubmenuBackActiveChange,
+  onRequestMenu,
+  onLongPress,
 }: ShelfTableRowProps) {
   const { t } = useUiText();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const {
-    menuClosing,
-    menuCoords,
-    triggerRef,
-    menuPanelRef,
-    closeMenu,
-  } = useShelfMenuPopover(menuOpen, setMenuOpen);
+  const moreRef = useRef<HTMLButtonElement>(null);
+  const morePressedWith = useRef("");
 
-  useShelfSubmenuBack(menuOpen, closeMenu, {
-    registerSubmenuBackHandler,
-    onSubmenuBackActiveChange,
+  const press = useShelfPress({
+    longPressKind: (pointerType) => shelfLongPressKind("row", pointerType, selectionMode, { select: Boolean(onLongPress) }),
+    onLongPress: (kind, point) => onLongPress?.(entry, kind, point),
   });
 
-  const longPressTimerRef = useRef<number | null>(null);
-  const pointerStartRef = useRef<{ x: number; y: number } | null>(null);
-  const longPressDidFireRef = useRef(false);
-  const suppressClickUntilRef = useRef(0);
-
-  const cancelLongPress = useCallback(() => {
-    if (longPressTimerRef.current !== null) {
-      window.clearTimeout(longPressTimerRef.current);
-      longPressTimerRef.current = null;
-    }
-    pointerStartRef.current = null;
-  }, []);
-
-  const handleRowPointerDown = (e: React.PointerEvent<HTMLTableRowElement>): void => {
-    if (selectionMode || e.button !== 0 || e.pointerType !== "touch" || !onLongPressSelect) return;
-    const target = e.target as HTMLElement;
-    if (target.closest("button, input, select, .shelf-card-pop-menu, .shelf-card-actions-wrap, .shelf-card-star-btn")) return;
-    pointerStartRef.current = { x: e.clientX, y: e.clientY };
-    longPressDidFireRef.current = false;
-    if (longPressTimerRef.current !== null) window.clearTimeout(longPressTimerRef.current);
-    longPressTimerRef.current = window.setTimeout(() => {
-      longPressDidFireRef.current = true;
-      suppressClickUntilRef.current = Date.now() + 2000;
-      if (typeof navigator !== "undefined" && navigator.vibrate) {
-        try {
-          navigator.vibrate(40);
-        } catch {
-          // ignore
-        }
-      }
-      onLongPressSelect(entry.id);
-    }, 500);
-  };
-
-  const handleRowPointerMove = (e: React.PointerEvent<HTMLTableRowElement>): void => {
-    if (!pointerStartRef.current || longPressDidFireRef.current) return;
-    const dx = e.clientX - pointerStartRef.current.x;
-    const dy = e.clientY - pointerStartRef.current.y;
-    if (Math.hypot(dx, dy) > 10) cancelLongPress();
-  };
-
-  const handleRowPointerUp = (): void => {
-    if (longPressTimerRef.current !== null) {
-      window.clearTimeout(longPressTimerRef.current);
-      longPressTimerRef.current = null;
-    }
-    if (longPressDidFireRef.current) {
-      suppressClickUntilRef.current = Math.max(suppressClickUntilRef.current, Date.now() + 600);
-      window.setTimeout(() => {
-        longPressDidFireRef.current = false;
-      }, 350);
-    }
-    pointerStartRef.current = null;
-  };
-
-  useEffect(() => () => cancelLongPress(), [cancelLongPress]);
-
-  const handleRowClick = (e: React.MouseEvent) => {
-    if (longPressDidFireRef.current || Date.now() < suppressClickUntilRef.current) {
-      e.preventDefault();
-      e.stopPropagation();
-      longPressDidFireRef.current = false;
-      return;
-    }
-    const target = e.target as HTMLElement | null;
-    if (
-      target?.closest(
-        "button, input, select, .shelf-card-pop-menu, .shelf-card-actions-wrap, .shelf-card-star-btn"
-      )
-    ) {
-      return;
-    }
-    if (selectionMode) {
-      onToggleSelected(entry.id);
-    } else {
-      onOpen(entry.id);
-    }
+  // 列表的三点在多选状态下仍可用（保持原行为）；右键只在普通状态打开。
+  const requestMenu = (opener: ShelfMenuOpener): void => {
+    onRequestMenu?.({ kind: "book", id: entry.id, surface: "list" }, opener);
   };
 
   return (
     <tr
-      className={`shelf-table-row${selected ? " selected" : ""}`}
+      className={`shelf-table-row${selected ? " selected" : ""}${menuOpen ? " menu-open" : ""}`}
       data-shelf-target="book"
       data-book-id={entry.id}
-      onClick={handleRowClick}
-      onPointerDown={handleRowPointerDown}
-      onPointerMove={handleRowPointerMove}
-      onPointerUp={handleRowPointerUp}
-      onPointerCancel={cancelLongPress}
+      {...press.handlers}
+      onClick={(e) => {
+        if (isShelfCardActionTarget(e.target, e.currentTarget)) return;
+        if (press.swallowClick(e)) return;
+        if (selectionMode) onToggleSelected(entry.id);
+        else onOpen(entry.id);
+      }}
+      onContextMenu={(e) => {
+        if (press.swallowTouchContextMenu(e)) return;
+        if (selectionMode || !onRequestMenu) return;
+        e.preventDefault();
+        requestMenu(contextMenuOpener(e, moreRef.current ?? e.currentTarget));
+      }}
     >
       <td style={{ textAlign: "center", width: 44 }}>
         {selectionMode ? (
@@ -3534,119 +3215,27 @@ const ShelfTableRow = memo(function ShelfTableRow({
           >
             <StarIcon filled={isFavorite} />
           </button>
-          <div className="shelf-card-actions-wrap" style={{ position: "relative", opacity: 1 }}>
-            <button
-              ref={triggerRef}
-              className={`shelf-card-more-btn${menuOpen ? " active" : ""}`}
-              style={{ position: "static", opacity: 1 }}
-              type="button"
-              title={t("shelf.card.more.tip")}
-              aria-label={t("shelf.table.more", { title: entry.title })}
-              aria-expanded={menuOpen}
-              onClick={(e) => {
-                e.stopPropagation();
-                setMenuOpen((v) => !v);
-              }}
-            >
-              <DotsVerticalIcon />
-            </button>
-            {typeof document !== "undefined" && (menuOpen || menuClosing) &&
-              createPortal(
-                <div
-                  ref={menuPanelRef}
-                  className={`shelf-card-pop-menu${menuCoords?.placement === "up" ? " placement-up" : " placement-down"}${menuClosing ? " is-closing" : ""}`}
-                  role="menu"
-                  style={
-                    menuCoords
-                      ? {
-                          position: "fixed",
-                          left: `${menuCoords.left}px`,
-                          top: `${menuCoords.top}px`,
-                          maxWidth: `${menuCoords.width}px`,
-                          maxHeight: `${menuCoords.maxHeight}px`,
-                          visibility: "visible",
-                        }
-                      : {
-                          position: "fixed",
-                          left: "-9999px",
-                          top: "-9999px",
-                          visibility: "hidden",
-                        }
-                  }
-                  onClick={(e) => e.stopPropagation()}
-                  onPointerDown={(e) => e.stopPropagation()}
-                >
-                  <div className="shelf-card-pop-title" aria-label={t("shelf.card.fullTitle", { title: entry.title })}>
-                    {entry.title}
-                  </div>
-                  <button
-                    className="shelf-card-pop-item"
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      onOpen(entry.id);
-                    }}
-                  >
-                    <BookLogoIcon />
-                    <span>{t("shelf.card.open")}</span>
-                  </button>
-                  <button
-                    className="shelf-card-pop-item"
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      onToggleFavorite(entry);
-                    }}
-                  >
-                    <StarIcon filled={isFavorite} />
-                    <span>{isFavorite ? t("shelf.card.unfavorite") : t("shelf.card.favorite")}</span>
-                  </button>
-                  <button
-                    className="shelf-card-pop-item"
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      onMoveToFolder(entry);
-                    }}
-                  >
-                    <FolderIcon />
-                    <span>{t("shelf.card.moveToFolder")}</span>
-                  </button>
-                  {inFolder && onRemoveFromFolder && (
-                    <button
-                      className="shelf-card-pop-item"
-                      type="button"
-                      role="menuitem"
-                      disabled={busy}
-                      onClick={() => {
-                        setMenuOpen(false);
-                        void onRemoveFromFolder(entry);
-                      }}
-                    >
-                      <FolderIcon />
-                      <span>{t("shelf.card.removeFromFolder")}</span>
-                    </button>
-                  )}
-                  <button
-                    className="shelf-card-pop-item danger"
-                    type="button"
-                    role="menuitem"
-                    disabled={busy || deleteDisabled}
-                    onClick={() => {
-                      setMenuOpen(false);
-                      onDeleteRequest(entry);
-                    }}
-                  >
-                    <TrashIcon />
-                    <span>{t("shelf.card.delete")}</span>
-                  </button>
-                </div>,
-                getShelfMenuPortalHost(triggerRef.current),
-              )}
-          </div>
+          {onRequestMenu && (
+            <div className="shelf-card-actions-wrap" style={{ position: "relative", opacity: 1 }}>
+              <button
+                ref={moreRef}
+                className={`shelf-card-more-btn${menuOpen ? " active" : ""}`}
+                style={{ position: "static", opacity: 1 }}
+                type="button"
+                title={t("shelf.card.more.tip")}
+                aria-label={t("shelf.table.more", { title: entry.title })}
+                aria-haspopup="menu"
+                aria-expanded={menuOpen === true}
+                onPointerDown={(e) => { morePressedWith.current = e.pointerType; }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  requestMenu(buttonMenuOpener(e, morePressedWith.current));
+                }}
+              >
+                <DotsVerticalIcon />
+              </button>
+            </div>
+          )}
         </div>
       </td>
     </tr>
@@ -3735,11 +3324,11 @@ export function ShelfView(props: ShelfViewProps) {
   const [selectionMode, setSelectionMode] = useState(false);
   const [dockClosing, setDockClosing] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [deleteTargets, setDeleteTargets] = useState<ShelfEntry[] | null>(null);
+  const [deleteTargetIds, setDeleteTargetIds] = useState<string[] | null>(null);
   const [createFolderOpen, setCreateFolderOpen] = useState(false);
   const [renameFolderTarget, setRenameFolderTarget] = useState<{ id: string; name: string } | null>(null);
   const [dissolveFolderTarget, setDissolveFolderTarget] = useState<{ id: string; name: string } | null>(null);
-  const [moveDialogTargets, setMoveDialogTargets] = useState<ShelfEntry[] | null>(null);
+  const [moveDialogTargetIds, setMoveDialogTargetIds] = useState<string[] | null>(null);
   const [deleteTargetsClosing, setDeleteTargetsClosing] = useState(false);
   const [toastLetter, setToastLetter] = useState<string | null>(null);
   const toastTimerRef = useRef<number | null>(null);
@@ -3762,6 +3351,14 @@ export function ShelfView(props: ShelfViewProps) {
       return window.matchMedia?.("(pointer: coarse)").matches === true;
     } catch {
       return false;
+    }
+  });
+  // 无悬停能力的设备从一开始就按触屏处理悬停样式；之后跟随实际输入切换。
+  const [initialShelfInput] = useState<"touch" | undefined>(() => {
+    try {
+      return window.matchMedia?.("(hover: none)").matches === true ? "touch" : undefined;
+    } catch {
+      return undefined;
     }
   });
   const emptyShelfHint = getRuntimeCapabilities().platform === "android"
@@ -3832,12 +3429,99 @@ export function ShelfView(props: ShelfViewProps) {
     setSelectionMode(true);
   }, []);
 
+  // ---- 书架唯一的操作菜单：三点、右键、触屏长按文件夹都由这里接管 ----
+  const [menu, setMenu] = useState<ShelfMenuSession | null>(null);
+  const [menuClosing, setMenuClosing] = useState(false);
+  const [menuPending, setMenuPending] = useState<{ token: number; action: ShelfActionId } | null>(null);
+  const [menuError, setMenuError] = useState<{ token: number; text: string } | null>(null);
+  const menuRef = useRef(menu);
+  menuRef.current = menu;
+  const menuTokenRef = useRef(0);
+  const menuCloseTimerRef = useRef<number | null>(null);
+  const menuPendingRef = useRef(menuPending);
+  menuPendingRef.current = menuPending;
+
+  const clearMenuCloseTimer = useCallback((): void => {
+    if (menuCloseTimerRef.current === null) return;
+    window.clearTimeout(menuCloseTimerRef.current);
+    menuCloseTimerRef.current = null;
+  }, []);
+
+  /** Closes the current menu; a menu opened meanwhile is never unmounted by this timer. */
+  const closeMenu = useCallback((options?: { restoreFocus?: boolean; immediate?: boolean }): void => {
+    const current = menuRef.current;
+    if (!current) return;
+    if (options?.restoreFocus !== false && current.trigger?.isConnected) {
+      current.trigger.focus({ preventScroll: true });
+    }
+    if (options?.immediate) {
+      clearMenuCloseTimer();
+      menuRef.current = null;
+      setMenu(null);
+      setMenuClosing(false);
+      return;
+    }
+    if (menuCloseTimerRef.current !== null) return;
+    setMenuClosing(true);
+    const token = current.token;
+    menuCloseTimerRef.current = window.setTimeout(() => {
+      menuCloseTimerRef.current = null;
+      if (menuRef.current?.token !== token) return;
+      menuRef.current = null;
+      setMenu(null);
+      setMenuClosing(false);
+    }, menuCloseMs());
+  }, [clearMenuCloseTimer]);
+
+  const requestMenu = useCallback((target: ShelfMenuTarget, opener: ShelfMenuOpener): void => {
+    const current = menuRef.current;
+    if (opener.toggle && current && menuCloseTimerRef.current === null && sameShelfMenuTarget(current.target, target)) {
+      closeMenu();
+      return;
+    }
+    // 新菜单直接接管：关闭中的旧菜单立即让位，它的定时器不会再卸载新菜单。
+    clearMenuCloseTimer();
+    const rect = opener.point
+      ? { left: opener.point.x, right: opener.point.x, top: opener.point.y, bottom: opener.point.y }
+      : opener.trigger?.getBoundingClientRect() ?? { left: 0, right: 0, top: 0, bottom: 0 };
+    const session: ShelfMenuSession = {
+      token: ++menuTokenRef.current,
+      target,
+      presentation: shelfMenuPresentation(opener.pointerType, coarsePointer),
+      anchor: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom },
+      trigger: opener.trigger,
+      focusFirstItem: opener.keyboard,
+    };
+    menuRef.current = session;
+    setMenu(session);
+    setMenuClosing(false);
+    setMenuError(null);
+  }, [clearMenuCloseTimer, closeMenu, coarsePointer]);
+
+  const dismissMenu = useCallback((): void => closeMenu(), [closeMenu]);
+
+  useEffect(() => clearMenuCloseTimer, [clearMenuCloseTimer]);
+
+  const deleteCloseTimerRef = useRef<number | null>(null);
   const handleCancelDelete = useCallback(() => {
+    if (deleteCloseTimerRef.current !== null) return;
     setDeleteTargetsClosing(true);
-    window.setTimeout(() => {
-      setDeleteTargets(null);
+    deleteCloseTimerRef.current = window.setTimeout(() => {
+      deleteCloseTimerRef.current = null;
+      setDeleteTargetIds(null);
       setDeleteTargetsClosing(false);
     }, MENU_CLOSE_MS);
+  }, []);
+
+  /** A new confirmation takes over a closing one instead of being cleared by its timer. */
+  const requestDelete = useCallback((ids: string[]): void => {
+    if (ids.length === 0) return;
+    if (deleteCloseTimerRef.current !== null) {
+      window.clearTimeout(deleteCloseTimerRef.current);
+      deleteCloseTimerRef.current = null;
+    }
+    setDeleteTargetsClosing(false);
+    setDeleteTargetIds(ids);
   }, []);
 
   // 全局快捷键：按 / 键聚焦快速书名过滤框，按 Esc 退出批量选择模式
@@ -3895,7 +3579,7 @@ export function ShelfView(props: ShelfViewProps) {
     | { type: "book"; id: string }
     | null
   >(null);
-  const [pendingMergeBooks, setPendingMergeBooks] = useState<ShelfEntry[] | null>(null);
+  const [pendingMergeIds, setPendingMergeIds] = useState<string[] | null>(null);
 
   const draggedEntryRef = useRef<ShelfEntry | null>(null);
   draggedEntryRef.current = draggedEntry;
@@ -3906,7 +3590,38 @@ export function ShelfView(props: ShelfViewProps) {
   const entriesRef = useRef(props.entries);
   entriesRef.current = props.entries;
 
-  const dragEndedAtRef = useRef(0);
+  // 弹层与菜单只按稳定 id 指向书：每次渲染从当前真实资料取对象，书不在了就安全关闭。
+  const entriesById = useMemo(() => new Map(props.entries.map((entry) => [entry.id, entry])), [props.entries]);
+  const entriesByIdRef = useRef(entriesById);
+  entriesByIdRef.current = entriesById;
+  const resolveEntries = useCallback((ids: string[] | null): ShelfEntry[] | null => {
+    if (!ids) return null;
+    const found = ids.flatMap((id) => entriesById.get(id) ?? []);
+    return found.length > 0 ? found : null;
+  }, [entriesById]);
+  const deleteTargets = useMemo(() => resolveEntries(deleteTargetIds), [resolveEntries, deleteTargetIds]);
+  const moveDialogTargets = useMemo(() => resolveEntries(moveDialogTargetIds), [resolveEntries, moveDialogTargetIds]);
+  const pendingMergeBooks = useMemo(() => resolveEntries(pendingMergeIds), [resolveEntries, pendingMergeIds]);
+  useEffect(() => {
+    if (deleteTargetIds && !deleteTargets) setDeleteTargetIds(null);
+    if (moveDialogTargetIds && !moveDialogTargets) setMoveDialogTargetIds(null);
+    if (pendingMergeIds && (pendingMergeBooks?.length ?? 0) < pendingMergeIds.length) {
+      // 合并的一本已离开书架：放弃这次合并，不对旧对象建文件夹。
+      setPendingMergeIds(null);
+      setCreateFolderOpen(false);
+    }
+  }, [deleteTargetIds, deleteTargets, moveDialogTargetIds, moveDialogTargets, pendingMergeIds, pendingMergeBooks]);
+
+  /** Swallows only the click dispatched with the pointerup that ended a drag. */
+  const dragJustEndedRef = useRef(false);
+  const markDragEnded = useCallback((): void => {
+    dragJustEndedRef.current = true;
+    window.setTimeout(() => { dragJustEndedRef.current = false; }, 0);
+  }, []);
+
+  /** The click ending a gesture whose long press acted reaches no card, even if books moved under the finger. */
+  const [gestureTail] = useState(() => new ShelfGestureTail());
+  const armGestureTail = useCallback((): void => gestureTail.arm(), [gestureTail]);
 
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
 
@@ -4056,8 +3771,10 @@ export function ShelfView(props: ShelfViewProps) {
     return activeFolders.filter((f) => f.name.toLowerCase().includes(q));
   }, [scope, statusTab, activeFolders, query]);
 
+  // 展开的文件夹卡片只是内容状态：文件夹弹窗盖在上面时它不参与返回链，返回先关弹窗。
   useShelfSubmenuBack(
-    isCompactMobile && viewMode === "grid" && scope.type === "root" && visibleFolders.length > 0 && folderPrefixExpanded,
+    isCompactMobile && viewMode === "grid" && scope.type === "root" && visibleFolders.length > 0 && folderPrefixExpanded &&
+      activeFolderModal === null,
     () => setFolderPrefixExpanded(false),
     {
       registerSubmenuBackHandler,
@@ -4189,41 +3906,40 @@ export function ShelfView(props: ShelfViewProps) {
     }, 150);
   }, []);
 
-  const onDeleteRequest = useCallback((entry: ShelfEntry): void => {
-    setDeleteTargets([entry]);
-  }, []);
-
   const closeDrawer = useCallback((): void => {
     setDrawerOpen(false);
     menuButtonRef.current?.focus();
   }, []);
 
-  const handleToggleFavorite = useCallback(
-    async (entry: ShelfEntry): Promise<void> => {
-      const hash = entry.contentHash ?? entry.id;
-      const current = isFavorite(organization, hash);
-      await props.onApplyOrganization?.({
-        type: "setFavorite",
-        contentHashes: [hash],
-        value: !current,
-      });
+  /** Resolves false on failure; App has already reported it through the shelf notice. */
+  const applyFavorite = useCallback(
+    async (targets: ShelfEntry[], value: boolean): Promise<boolean> => {
+      const hashes = targets.map((e) => e.contentHash ?? e.id);
+      if (hashes.length === 0 || !props.onApplyOrganization) return false;
+      try {
+        await props.onApplyOrganization({ type: "setFavorite", contentHashes: hashes, value });
+        return true;
+      } catch {
+        return false;
+      }
     },
-    [organization, props.onApplyOrganization]
+    [props.onApplyOrganization]
+  );
+
+  const handleToggleFavorite = useCallback(
+    (entry: ShelfEntry): void => {
+      void applyFavorite([entry], !isFavorite(organization, entry.contentHash ?? entry.id));
+    },
+    [applyFavorite, organization]
   );
 
   const handleBatchFavorite = useCallback(
     async (value: boolean): Promise<void> => {
       const targets = props.entries.filter((e) => selectedIds.has(e.id));
-      const hashes = targets.map((e) => e.contentHash ?? e.id);
-      if (hashes.length === 0) return;
-      await props.onApplyOrganization?.({
-        type: "setFavorite",
-        contentHashes: hashes,
-        value,
-      });
-      exitSelection();
+      // 失败时保留选择，方便直接重试。
+      if (await applyFavorite(targets, value)) exitSelection();
     },
-    [selectedIds, props.entries, props.onApplyOrganization]
+    [applyFavorite, selectedIds, props.entries]
   );
 
   const scopeRef = useRef(scope);
@@ -4248,6 +3964,11 @@ export function ShelfView(props: ShelfViewProps) {
   }, []);
 
   const handleRootBack = useCallback((): boolean => {
+    // 操作菜单总在最上层（包括文件夹弹窗之上），先关它。
+    if (menuRef.current && menuCloseTimerRef.current === null) {
+      closeMenu();
+      return true;
+    }
     if (submenuBackHandlerRef.current?.()) return true;
     if (deleteTargets) {
       handleCancelDelete();
@@ -4255,15 +3976,15 @@ export function ShelfView(props: ShelfViewProps) {
     }
     if (createFolderOpen) {
       setCreateFolderOpen(false);
-      setPendingMergeBooks(null);
+      setPendingMergeIds(null);
       return true;
     }
     if (pendingMergeBooks) {
-      setPendingMergeBooks(null);
+      setPendingMergeIds(null);
       return true;
     }
     if (moveDialogTargets) {
-      setMoveDialogTargets(null);
+      setMoveDialogTargetIds(null);
       return true;
     }
     if (renameFolderTarget) {
@@ -4297,6 +4018,7 @@ export function ShelfView(props: ShelfViewProps) {
     return false;
   }, [
     activeFolderModal,
+    closeMenu,
     closeDrawer,
     createFolderOpen,
     deleteTargets,
@@ -4317,6 +4039,7 @@ export function ShelfView(props: ShelfViewProps) {
   const shelfBackHandlerRef = useRef(handleRootBack);
   shelfBackHandlerRef.current = handleRootBack;
   const shelfBackActive = Boolean(
+    (menu && !menuClosing) ||
     deleteTargets ||
     pendingMergeBooks ||
     moveDialogTargets ||
@@ -4341,17 +4064,18 @@ export function ShelfView(props: ShelfViewProps) {
     return () => props.onBackAvailabilityChange?.(false);
   }, [props.onBackAvailabilityChange, shelfBackActive]);
 
-  // 触摸拖书只在多选状态由长按发起：此时挂一个非被动 touchmove，拖动中阻止页面滚动，
+  // 触摸拖书只在多选状态或文件夹弹窗内由长按发起：此时挂一个非被动 touchmove，拖动中阻止页面滚动，
   // 否则浏览器接管为平移并发 pointercancel 中断拖动。必须在 touchstart 前就已注册，
   // 合成器才会等主线程决定；未拖动时不拦截，上下滚动照常。
+  const touchDragPossible = selectionMode || activeFolderModal !== null;
   useEffect(() => {
-    if (!selectionMode) return;
+    if (!touchDragPossible) return;
     const blockScrollWhileDragging = (e: TouchEvent): void => {
       if (draggedEntryRef.current && e.cancelable) e.preventDefault();
     };
     window.addEventListener("touchmove", blockScrollWhileDragging, { passive: false });
     return () => window.removeEventListener("touchmove", blockScrollWhileDragging);
-  }, [selectionMode]);
+  }, [touchDragPossible]);
 
   const handleDragStart = useCallback(
     (entry: ShelfEntry, point: { x: number; y: number }): void => {
@@ -4469,7 +4193,9 @@ export function ShelfView(props: ShelfViewProps) {
     if (canAutoScroll) autoScrollFrame = window.requestAnimationFrame(autoScrollStep);
 
     const handleWindowPointerUp = async (): Promise<void> => {
-      const currentDragged = draggedEntryRef.current;
+      // pointerup 与兼容 mouseup 只结算一次。
+      const dragged = draggedEntryRef.current;
+      draggedEntryRef.current = null;
       const currentTarget = dropTargetRef.current;
       const fromFolderId = draggedFromFolderIdRef.current;
       const wasInsideModal = isDraggingFromFolderModalRef.current;
@@ -4478,14 +4204,14 @@ export function ShelfView(props: ShelfViewProps) {
       isDraggingFromFolderModalRef.current = false;
       draggedFromFolderIdRef.current = null;
 
-      if (currentDragged) {
-        dragEndedAtRef.current = Date.now();
-      }
+      if (dragged) markDragEnded();
 
       setDraggedEntry(null);
       setDragCoord(null);
       setDropTarget(null);
 
+      // 以松手时书架里的真实条目为准；拖动中被删除/替换的书不再执行整理。
+      const currentDragged = dragged ? entriesByIdRef.current.get(dragged.id) : undefined;
       if (!currentDragged) return;
 
       if (currentTarget) {
@@ -4497,12 +4223,12 @@ export function ShelfView(props: ShelfViewProps) {
               type: "moveBooks",
               folderId: currentTarget.id,
               contentHashes: [hash],
-            });
+            }).catch(() => { /* App 已用书架提示报告失败 */ });
           }
         } else if (currentTarget.type === "book") {
           const otherBook = entriesRef.current.find((b) => b.id === currentTarget.id);
           if (otherBook && otherBook.id !== currentDragged.id) {
-            setPendingMergeBooks([currentDragged, otherBook]);
+            setPendingMergeIds([currentDragged.id, otherBook.id]);
             setCreateFolderOpen(true);
           }
         }
@@ -4513,14 +4239,13 @@ export function ShelfView(props: ShelfViewProps) {
           type: "moveBooks",
           folderId: null,
           contentHashes: [hash],
-        });
+        }).catch(() => { /* App 已用书架提示报告失败 */ });
       }
     };
 
     const handleWindowPointerCancel = (): void => {
-      if (draggedEntryRef.current) {
-        dragEndedAtRef.current = Date.now();
-      }
+      if (draggedEntryRef.current) markDragEnded();
+      draggedEntryRef.current = null;
       isDraggingFromFolderModalRef.current = false;
       draggedFromFolderIdRef.current = null;
       setDraggedEntry(null);
@@ -4533,8 +4258,16 @@ export function ShelfView(props: ShelfViewProps) {
     window.addEventListener("pointerup", handleWindowPointerUp);
     window.addEventListener("mouseup", handleWindowPointerUp);
     window.addEventListener("pointercancel", handleWindowPointerCancel);
+    // 切后台/失焦：撤销拖动，不在回来时按旧落点执行整理。
+    const handleHidden = (): void => {
+      if (document.visibilityState === "hidden") handleWindowPointerCancel();
+    };
+    window.addEventListener("blur", handleWindowPointerCancel);
+    document.addEventListener("visibilitychange", handleHidden);
 
     return () => {
+      window.removeEventListener("blur", handleWindowPointerCancel);
+      document.removeEventListener("visibilitychange", handleHidden);
       window.removeEventListener("pointermove", handleWindowPointerMove);
       window.removeEventListener("mousemove", handleWindowPointerMove);
       window.removeEventListener("pointerup", handleWindowPointerUp);
@@ -4542,30 +4275,58 @@ export function ShelfView(props: ShelfViewProps) {
       window.removeEventListener("pointercancel", handleWindowPointerCancel);
       if (canAutoScroll) window.cancelAnimationFrame(autoScrollFrame);
     };
-  }, [draggedEntry, handleCloseFolderModal, props.onApplyOrganization]);
+  }, [draggedEntry, handleCloseFolderModal, markDragEnded, props.onApplyOrganization]);
 
-  // 全局点击捕获拦截器：长按/拖拽识别后（或松手 400ms 内），拦截卡片合成点击，杜绝误开书籍；弹窗区域正常响应
+  // 拖动的书在拖动中离开书架（同步/删除）：直接撤销拖动。
   useEffect(() => {
-    const handleWindowClickCapture = (e: MouseEvent): void => {
+    if (draggedEntry && !entriesById.has(draggedEntry.id)) {
+      draggedEntryRef.current = null;
+      isDraggingFromFolderModalRef.current = false;
+      draggedFromFolderIdRef.current = null;
+      setDraggedEntry(null);
+      setDragCoord(null);
+      setDropTarget(null);
+    }
+  }, [draggedEntry, entriesById]);
+
+  // 拖动进行中，以及结束拖动的那一次 pointerup 所带的合成点击，不交给卡片；弹窗区域正常响应。
+  // 只按手势吞掉这一次，不设时间窗，松手后的新点击立即可用。
+  useEffect(() => {
+    const handleDocumentPointerDown = (): void => gestureTail.pointerDown();
+    const handleDocumentPointerUp = (): void => gestureTail.pointerUp();
+    const handleDocumentClickCapture = (e: MouseEvent): void => {
+      if (gestureTail.takeClick(e.detail)) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        return;
+      }
       const target = e.target as HTMLElement | null;
       if (
         target?.closest?.(
-          ".shelf-confirm-backdrop, .shelf-confirm, dialog, [role='dialog'], .shelf-card-pop-menu, .shelf-card-actions-wrap, .shelf-folder-modal"
+          ".shelf-confirm-backdrop, .shelf-confirm, dialog, [role='dialog'], .shelf-menu-portal-host, .shelf-card-actions-wrap, .shelf-folder-modal"
         )
       ) {
         return;
       }
-      if (draggedEntryRef.current || Date.now() - dragEndedAtRef.current < 400) {
+      if (draggedEntryRef.current || dragJustEndedRef.current) {
         e.preventDefault();
         e.stopPropagation();
         e.stopImmediatePropagation();
       }
     };
-    window.addEventListener("click", handleWindowClickCapture, { capture: true });
+    // Document capture still runs before React's root listeners.
+    document.addEventListener("pointerdown", handleDocumentPointerDown, { capture: true });
+    document.addEventListener("pointerup", handleDocumentPointerUp, { capture: true });
+    document.addEventListener("pointercancel", handleDocumentPointerUp, { capture: true });
+    document.addEventListener("click", handleDocumentClickCapture, { capture: true });
     return () => {
-      window.removeEventListener("click", handleWindowClickCapture, { capture: true });
+      document.removeEventListener("pointerdown", handleDocumentPointerDown, { capture: true });
+      document.removeEventListener("pointerup", handleDocumentPointerUp, { capture: true });
+      document.removeEventListener("pointercancel", handleDocumentPointerUp, { capture: true });
+      document.removeEventListener("click", handleDocumentClickCapture, { capture: true });
     };
-  }, []);
+  }, [gestureTail]);
 
   const handleCreateFolder = useCallback(
     async (name: string): Promise<string> => {
@@ -4582,7 +4343,7 @@ export function ShelfView(props: ShelfViewProps) {
           folderId,
           contentHashes: hashes,
         });
-        setPendingMergeBooks(null);
+        setPendingMergeIds(null);
       }
       setCreateFolderOpen(false);
       return folderId;
@@ -4619,10 +4380,6 @@ export function ShelfView(props: ShelfViewProps) {
     [activeFolderModal?.folderId, handleCloseFolderModal, props.onApplyOrganization, scope, setScope]
   );
 
-  const handleSingleMoveToFolder = useCallback((entry: ShelfEntry) => {
-    setMoveDialogTargets([entry]);
-  }, []);
-
   const handleRemoveFromFolder = useCallback(
     async (entry: ShelfEntry): Promise<void> => {
       if (props.busy) return;
@@ -4644,7 +4401,7 @@ export function ShelfView(props: ShelfViewProps) {
         contentHashes: hashes,
         folderId: targetFolderId,
       });
-      setMoveDialogTargets(null);
+      setMoveDialogTargetIds(null);
       if (selectionMode) exitSelection();
     },
     [moveDialogTargets, props.onApplyOrganization, selectionMode]
@@ -4658,11 +4415,190 @@ export function ShelfView(props: ShelfViewProps) {
     }));
   }, [activeFolders, folderBooksMap]);
 
+  const canOrganize = Boolean(props.onApplyOrganization);
+
+  const handleBookLongPress = useCallback(
+    (entry: ShelfEntry, kind: ShelfLongPress, point: { x: number; y: number }): void => {
+      armGestureTail();
+      if (kind === "select") handleTouchLongPressSelect(entry.id);
+      else if (kind === "drag") handleDragStart(entry, point);
+    },
+    [armGestureTail, handleDragStart, handleTouchLongPressSelect]
+  );
+
+  const handleFolderModalLongPress = useCallback(
+    (entry: ShelfEntry, kind: ShelfLongPress, point: { x: number; y: number }): void => {
+      armGestureTail();
+      if (kind === "drag") handleFolderBookDragStart(entry, point);
+    },
+    [armGestureTail, handleFolderBookDragStart]
+  );
+
+  // 菜单目标消失（同步、删除、解散）或其所在的文件夹弹窗已关：立即安全关闭，不对旧对象执行迟到动作。
+  const menuTargetGone = menu !== null && (
+    menu.target.kind === "book"
+      ? !entriesById.has(menu.target.id) || (menu.target.surface === "folderModal" && activeFolderModal === null)
+      : !activeFolders.some((folder) => folder.id === menu.target.id)
+  );
+  useEffect(() => {
+    if (menuTargetGone) closeMenu({ immediate: true, restoreFocus: false });
+  }, [closeMenu, menuTargetGone]);
+
+  // 底部面板是模态：锁住书架滚动，关闭/卸载时只恢复自己改过的值。
+  const sheetLocked = menu?.presentation === "sheet" && !menuClosing;
+  useEffect(() => {
+    const scroller = shelfViewRef.current;
+    if (!sheetLocked || !scroller) return;
+    const previous = scroller.style.overflow;
+    scroller.style.overflow = "hidden";
+    return () => { scroller.style.overflow = previous; };
+  }, [sheetLocked]);
+
+  const runMenuAction = useCallback((action: ShelfActionId): void => {
+    const session = menuRef.current;
+    if (!session || menuCloseTimerRef.current !== null) return;
+    const { target, token } = session;
+    if (target.kind === "folder") {
+      const folder = activeFolders.find((f) => f.id === target.id);
+      if (!folder) {
+        closeMenu({ immediate: true, restoreFocus: false });
+        return;
+      }
+      closeMenu({ restoreFocus: action !== "openFolder" });
+      if (action === "openFolder") handleOpenFolderModal(folder.id, session.trigger?.closest<HTMLElement>(".shelf-folder-card") ?? null);
+      else if (action === "renameFolder") setRenameFolderTarget({ id: folder.id, name: folder.name });
+      else if (action === "dissolveFolder") setDissolveFolderTarget({ id: folder.id, name: folder.name });
+      return;
+    }
+    const entry = entriesByIdRef.current.get(target.id);
+    if (!entry) {
+      closeMenu({ immediate: true, restoreFocus: false });
+      return;
+    }
+    switch (action) {
+      case "open":
+        closeMenu({ restoreFocus: false });
+        props.onOpen(entry.id);
+        return;
+      case "select":
+        closeMenu({ restoreFocus: false });
+        handleTouchLongPressSelect(entry.id);
+        return;
+      case "favorite":
+      case "unfavorite":
+        closeMenu();
+        void applyFavorite([entry], action === "favorite");
+        return;
+      case "move":
+        closeMenu({ restoreFocus: false });
+        setMoveDialogTargetIds([entry.id]);
+        return;
+      case "delete":
+        closeMenu({ restoreFocus: false });
+        requestDelete([entry.id]);
+        return;
+      case "removeFromFolder": {
+        // 同一次菜单内在途时不重复提交；仍可正常返回/关闭。
+        if (menuPendingRef.current?.token === token) return;
+        const pending = { token, action };
+        menuPendingRef.current = pending;
+        setMenuPending(pending);
+        setMenuError(null);
+        void handleRemoveFromFolder(entry).then(() => {
+          if (menuRef.current?.token === token) closeMenu();
+        }, (error: unknown) => {
+          // 结果只回写到发起它的那一次菜单；菜单已换书或已关时由 App 的书架提示报告。
+          if (menuRef.current?.token === token) {
+            setMenuError({ token, text: uiText("shelf.card.removeFailed", { error: String(error) }) });
+          }
+        }).finally(() => {
+          if (menuPendingRef.current === pending) menuPendingRef.current = null;
+          setMenuPending((current) => (current === pending ? null : current));
+        });
+        return;
+      }
+    }
+  }, [activeFolders, applyFavorite, closeMenu, handleOpenFolderModal, handleRemoveFromFolder, handleTouchLongPressSelect, props.onOpen, requestDelete]);
+
+  const menuView = useMemo(() => {
+    if (!menu || menuTargetGone) return null;
+    const pendingAction = menuPending?.token === menu.token ? menuPending.action : null;
+    const toItems = (actions: ShelfAction[]) => groupShelfActions(actions).map(({ group, actions: list }) => ({
+      group,
+      items: list.map((action) => ({
+        id: action.id,
+        label: t(pendingAction === action.id && action.pendingLabel ? action.pendingLabel : action.label),
+        icon: shelfActionIcon(action.id),
+        disabled: action.disabled,
+        pending: pendingAction === action.id,
+      })),
+    }));
+    if (menu.target.kind === "folder") {
+      const folderId = menu.target.id;
+      const folder = activeFolders.find((f) => f.id === folderId);
+      if (!folder) return null;
+      const count = (folderBooksMap.get(folder.id) ?? []).length;
+      return {
+        label: t("shelfFolder.options", { name: folder.name }),
+        header: menu.presentation === "sheet"
+          ? <div className="shelf-action-head">
+              <span className="shelf-action-head-icon" aria-hidden="true"><FolderIcon /></span>
+              <span className="shelf-action-head-text">
+                <span className="shelf-action-head-title">{folder.name}</span>
+                <span className="shelf-action-head-sub">{tn("shelfFolder.bookCount", count, { count })}</span>
+              </span>
+            </div>
+          : folder.name,
+        groups: toItems(shelfFolderActions()),
+      };
+    }
+    const entry = entriesById.get(menu.target.id);
+    if (!entry) return null;
+    const hash = entry.contentHash ?? entry.id;
+    const actions = shelfBookActions({
+      favorite: isFavorite(organization, hash),
+      inFolder: effectiveFolderId(organization, hash) !== null,
+      busy: props.busy,
+      deleteDisabled: Boolean(props.importActive),
+      canSelect: menu.target.surface !== "folderModal" && !selectionMode,
+      canFavorite: canOrganize,
+      canMove: canOrganize,
+      canRemoveFromFolder: canOrganize,
+    });
+    return {
+      label: t("shelf.card.more", { title: entry.title }),
+      header: menu.presentation === "sheet"
+        ? <div className="shelf-action-head">
+            <span className="shelf-action-head-cover" aria-hidden="true"><Cover entry={entry} provider={thumbnailProvider} /></span>
+            <span className="shelf-action-head-text">
+              <span className="shelf-action-head-title">{entry.title}</span>
+              <span className="shelf-action-head-sub">{entry.creator || t("shelf.unknownAuthor")}</span>
+            </span>
+          </div>
+        : entry.title,
+      groups: toItems(actions),
+    };
+  }, [activeFolders, canOrganize, entriesById, folderBooksMap, menu, menuPending, menuTargetGone, organization, props.busy, props.importActive, selectionMode, t, thumbnailProvider, tn]);
+
+  const openMenuKey = menu && !menuClosing
+    ? (menu.target.kind === "book" ? `${menu.target.surface}:${menu.target.id}` : `folder:${menu.target.id}`)
+    : null;
+
+  /** Hover styling follows the input actually used, so a tap on a hybrid device never leaves a lifted card. */
+  const noteShelfInput = useCallback((pointerType: string): void => {
+    const view = shelfViewRef.current;
+    const input = pointerType === "touch" ? "touch" : "pointer";
+    if (view && view.dataset.input !== input) view.dataset.input = input;
+  }, []);
+
   return (
     <div
       ref={shelfViewRef}
       className={`shelf-view density-${density}${selectionMode ? " selection-mode" : ""} view-${viewMode}${props.busy ? " busy" : ""}${props.importActive ? " import-active" : ""}`}
       aria-busy={props.busy || props.importActive}
+      data-input={initialShelfInput}
+      onPointerDownCapture={(e) => noteShelfInput(e.pointerType)}
+      onPointerMove={(e) => { if (e.pointerType === "mouse") noteShelfInput("mouse"); }}
     >
       {/* 现代极简顶部操作栏 (Level 1) */}
       <header className="shelf-head shelf-head-zen">
@@ -5415,7 +5351,6 @@ export function ShelfView(props: ShelfViewProps) {
               {renderedBooks.map((entry, idx) => {
                 const actualIndex = virtualizer.isVirtual ? virtualizer.startIndex + idx : idx;
                 const hash = entry.contentHash ?? entry.id;
-                const inFolder = effectiveFolderId(organization, hash) !== null;
                 return (
                   <ShelfTableRow
                     key={entry.id}
@@ -5425,18 +5360,12 @@ export function ShelfView(props: ShelfViewProps) {
                     selected={selectedIds.has(entry.id)}
                     selectionMode={selectionMode}
                     isFavorite={isFavorite(organization, hash)}
-                    inFolder={inFolder}
-                    busy={props.busy}
-                    deleteDisabled={props.importActive}
+                    menuOpen={openMenuKey === `list:${entry.id}`}
                     onOpen={props.onOpen}
                     onToggleSelected={toggleSelected}
                     onToggleFavorite={handleToggleFavorite}
-                    onDeleteRequest={onDeleteRequest}
-                    onMoveToFolder={handleSingleMoveToFolder}
-                    onRemoveFromFolder={inFolder ? handleRemoveFromFolder : undefined}
-                    onLongPressSelect={handleTouchLongPressSelect}
-                    registerSubmenuBackHandler={registerSubmenuBackHandler}
-                    onSubmenuBackActiveChange={reportSubmenuBackActive}
+                    onRequestMenu={requestMenu}
+                    onLongPress={handleBookLongPress}
                   />
                 );
               })}
@@ -5480,11 +5409,9 @@ export function ShelfView(props: ShelfViewProps) {
                     provider={thumbnailProvider}
                     selectionMode={selectionMode}
                     isDropTarget={dropTarget?.type === "folder" && dropTarget.id === folder.id}
-                    onOpen={(fId, el) => handleOpenFolderModal(fId, el)}
-                    onRename={(fId, fName) => setRenameFolderTarget({ id: fId, name: fName })}
-                    onDissolve={(fId, fName) => setDissolveFolderTarget({ id: fId, name: fName })}
-                    registerSubmenuBackHandler={registerSubmenuBackHandler}
-                    onSubmenuBackActiveChange={reportSubmenuBackActive}
+                    menuOpen={openMenuKey === `folder:${folder.id}`}
+                    onOpen={handleOpenFolderModal}
+                    onRequestMenu={canOrganize ? requestMenu : undefined}
                   />
                 ))}
               </div>
@@ -5498,35 +5425,28 @@ export function ShelfView(props: ShelfViewProps) {
             }}
           >
             <div className="shelf-grid shelf-book-grid">
-              {renderedBooks.map((entry) => {
-                const hash = entry.contentHash ?? entry.id;
-                const inFolder = effectiveFolderId(organization, hash) !== null;
-                return (
-                  <ShelfCard
-                    key={entry.id}
-                    entry={entry}
-                    selected={selectedIds.has(entry.id)}
-                    selectionMode={selectionMode}
-                    provider={thumbnailProvider}
-                    busy={props.busy}
-                    deleteDisabled={props.importActive}
-                    isFavorite={isFavorite(organization, hash)}
-                    isDragging={draggedEntry?.id === entry.id}
-                    isDropTargetBook={dropTarget?.type === "book" && dropTarget.id === entry.id}
-                    draggedEntry={draggedEntry}
-                    onOpen={props.onOpen}
-                    onToggleSelected={toggleSelected}
-                    onDeleteRequest={onDeleteRequest}
-                    onMoveToFolder={handleSingleMoveToFolder}
-                    onRemoveFromFolder={inFolder ? handleRemoveFromFolder : undefined}
-                    onToggleFavorite={handleToggleFavorite}
-                    onDragStart={handleDragStart}
-                    onLongPressSelect={handleTouchLongPressSelect}
-                    registerSubmenuBackHandler={registerSubmenuBackHandler}
-                    onSubmenuBackActiveChange={reportSubmenuBackActive}
-                  />
-                );
-              })}
+              {renderedBooks.map((entry) => (
+                <ShelfCard
+                  key={entry.id}
+                  entry={entry}
+                  surface="book"
+                  selected={selectedIds.has(entry.id)}
+                  selectionMode={selectionMode}
+                  provider={thumbnailProvider}
+                  isFavorite={isFavorite(organization, entry.contentHash ?? entry.id)}
+                  isDragging={draggedEntry?.id === entry.id}
+                  isDropTargetBook={dropTarget?.type === "book" && dropTarget.id === entry.id}
+                  draggedEntry={draggedEntry}
+                  menuOpen={openMenuKey === `grid:${entry.id}`}
+                  canSelect
+                  canDrag={canOrganize}
+                  onOpen={props.onOpen}
+                  onToggleSelected={toggleSelected}
+                  onToggleFavorite={canOrganize ? handleToggleFavorite : undefined}
+                  onRequestMenu={requestMenu}
+                  onLongPress={handleBookLongPress}
+                />
+              ))}
             </div>
           </div>
         </>
@@ -5544,7 +5464,7 @@ export function ShelfView(props: ShelfViewProps) {
           }
           onCancel={() => {
             setCreateFolderOpen(false);
-            setPendingMergeBooks(null);
+            setPendingMergeIds(null);
           }}
           onCreate={async (name) => {
             await handleCreateFolder(name);
@@ -5596,7 +5516,7 @@ export function ShelfView(props: ShelfViewProps) {
           }
           folders={moveDialogFolderOptions}
           busy={props.busy}
-          onCancel={() => setMoveDialogTargets(null)}
+          onCancel={() => setMoveDialogTargetIds(null)}
           onMove={handleMoveConfirm}
           onCreateFolder={handleCreateFolder}
         />
@@ -5613,24 +5533,19 @@ export function ShelfView(props: ShelfViewProps) {
             folder={folder}
             books={books}
             provider={thumbnailProvider}
-            busy={props.busy}
-            deleteDisabled={props.importActive}
             originRect={activeFolderModal.originRect}
             closing={folderModalClosing}
             draggedEntry={draggedEntry}
             organization={organization}
             modalRef={folderModalRef}
+            menuBookId={openMenuKey?.startsWith("folderModal:") ? openMenuKey.slice("folderModal:".length) : null}
             onClose={handleCloseFolderModal}
             onOpenBook={props.onOpen}
             onRename={(fId, fName) => setRenameFolderTarget({ id: fId, name: fName })}
             onDissolve={(fId, fName) => setDissolveFolderTarget({ id: fId, name: fName })}
-            onDeleteRequest={onDeleteRequest}
-            onMoveToFolder={handleSingleMoveToFolder}
-            onRemoveFromFolder={handleRemoveFromFolder}
             onToggleFavorite={handleToggleFavorite}
-            onDragStart={handleFolderBookDragStart}
-            registerSubmenuBackHandler={registerSubmenuBackHandler}
-            onSubmenuBackActiveChange={reportSubmenuBackActive}
+            onRequestMenu={requestMenu}
+            onLongPress={handleFolderModalLongPress}
           />
         );
       })()}
@@ -5674,7 +5589,7 @@ export function ShelfView(props: ShelfViewProps) {
                 disabled={props.busy || props.importActive}
                 onClick={() => {
                   const ids = deleteTargets.map((target) => target.id);
-                  setDeleteTargets(null);
+                  setDeleteTargetIds(null);
                   if (selectionMode) {
                     if (ids.length > 1) props.onDeleteMany(ids);
                     else props.onDelete(ids[0]);
@@ -5772,7 +5687,7 @@ export function ShelfView(props: ShelfViewProps) {
               disabled={noneSelected || props.busy}
               onClick={() => {
                 const targets = props.entries.filter((e) => selectedIds.has(e.id));
-                if (targets.length > 0) setMoveDialogTargets(targets);
+                if (targets.length > 0) setMoveDialogTargetIds(targets.map((entry) => entry.id));
               }}
               title={t("shelfMain.dock.move")}
             >
@@ -5815,7 +5730,7 @@ export function ShelfView(props: ShelfViewProps) {
               disabled={noneSelected || props.busy || props.importActive}
               onClick={() => {
                 const targets = props.entries.filter((e) => selectedIds.has(e.id));
-                if (targets.length > 0) setDeleteTargets(targets);
+                if (targets.length > 0) requestDelete(targets.map((entry) => entry.id));
               }}
               title={t("shelfMain.dock.delete.tip")}
             >
@@ -5833,6 +5748,24 @@ export function ShelfView(props: ShelfViewProps) {
             </button>
           </div>
         </div>
+      )}
+
+      {/* 书架唯一的操作菜单：触屏底部面板 / PC 锚定浮层，同一份动作描述 */}
+      {menu && menuView && typeof document !== "undefined" && createPortal(
+        <ShelfActionMenu
+          key={menu.token}
+          presentation={menu.presentation}
+          closing={menuClosing}
+          label={menuView.label}
+          header={menuView.header}
+          groups={menuView.groups}
+          error={menuError?.token === menu.token ? menuError.text : null}
+          anchor={menu.anchor}
+          focusFirstItem={menu.focusFirstItem}
+          onAction={runMenuAction}
+          onDismiss={dismissMenu}
+        />,
+        getShelfMenuPortalHost(shelfViewRef.current),
       )}
 
       {/* 首字母快速索引轨与吐司 (A-Z Fast Index Rail) */}

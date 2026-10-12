@@ -73,8 +73,11 @@ import {
   rebasePosition,
   type ReadingPositionSnapshot,
 } from "./bookmarkReadingPosition";
+import { READER_PALETTES } from "../config/readerPalette";
 import {
+  classifySettingsChange,
   effectiveReaderSettings,
+  sameLayoutSettings,
   sameRenderingSettings,
   type ReaderHandle,
 } from "./ReaderView";
@@ -148,7 +151,20 @@ export interface ContinuousReaderViewProps {
   }): void;
 }
 
-function continuousSurfaceBackground(surface: HTMLElement): string | null {
+export function continuousSurfaceBackground(surface: HTMLElement): string | null {
+  const contentDoc = (surface as HTMLIFrameElement).contentDocument;
+  if (contentDoc && contentDoc.defaultView) {
+    try {
+      for (const candidate of [contentDoc.body, contentDoc.documentElement]) {
+        if (!candidate) continue;
+        const color = contentDoc.defaultView.getComputedStyle(candidate).backgroundColor;
+        if (color && color !== "transparent" && color !== "rgba(0, 0, 0, 0)") return color;
+      }
+    } catch {
+      // Cross-origin or detached iframe fallback
+    }
+  }
+
   const doc = surface.ownerDocument;
   const candidates = [
     surface.closest(".reader-continuous") as HTMLElement | null,
@@ -579,6 +595,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
         const existing = paintHandlesRef.current.get(slot.iframe);
         if (existing) {
           existing.update(preferences, compare);
+          existing.setSurfaceBackground(continuousSurfaceBackground(slot.iframe));
         } else {
           const handle = attachReaderPaint(
             slot.iframe,
@@ -1634,6 +1651,12 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
         if (!sameChapterReload) {
           if (!gateRef.current.finish(ticket)) return true;
           slot.status = "ready";
+          const desired = desiredSettingsRef.current;
+          if (slot.renderSettings.theme !== desired.theme && sameLayoutSettings(slot.renderSettings, desired)) {
+            if (slot.paginator.updateTheme(desired.theme)) {
+              slot.renderSettings = { ...slot.renderSettings, theme: desired.theme };
+            }
+          }
           setSlotUpdateNonce((n) => n + 1);
         }
         // 统一的批量提交入口：新高度、宿主位置与 iframe 投影同帧生效。
@@ -1776,6 +1799,17 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
     reloadSlotSettingsRef.current = async (slot: ActiveSlot) => {
       if (slot.unmounted || slot.status !== "ready" || reloadingRef.current.has(slot.key)) return;
       if (sameRenderingSettings(slot.renderSettings, desiredSettingsRef.current)) return;
+      // 若几何已一致，仅差主题，则直接原位更新，不启动重量级重载
+      if (sameLayoutSettings(slot.renderSettings, desiredSettingsRef.current)) {
+        if (slot.paginator.updateTheme(desiredSettingsRef.current.theme)) {
+          slot.renderSettings = { ...slot.renderSettings, theme: desiredSettingsRef.current.theme };
+          const handle = paintHandlesRef.current.get(slot.iframe);
+          if (handle) {
+            handle.setSurfaceBackground(continuousSurfaceBackground(slot.iframe));
+          }
+          return;
+        }
+      }
       dampedScrollRef.current.stop();
       if (!pendingSpotRef.current) {
         pendingSpotRef.current = lastStableSpotRef.current ?? captureReadingSpot();
@@ -1784,14 +1818,28 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
       try {
         do {
           const target = desiredSettingsRef.current;
-          await slot.paginator.reloadWithSettings(target);
-          const ready = await slot.paginator.waitForDisplayReady();
+          const ready = await slot.paginator.reloadWithSettingsAndWaitForDisplay(target);
           if (slot.unmounted || slotsRef.current.get(slot.key) !== slot) return;
           if (!ready) {
             slot.status = "error";
             break;
           }
-          slot.renderSettings = target;
+          slot.renderSettings = { ...target };
+          const latest = desiredSettingsRef.current;
+          if (sameRenderingSettings(slot.renderSettings, latest)) {
+            break;
+          }
+          // 比较该 slot 与最新 desired：仅差主题就原位更新，避免第二次无必要的布局重载
+          if (sameLayoutSettings(slot.renderSettings, latest)) {
+            if (slot.paginator.updateTheme(latest.theme)) {
+              slot.renderSettings = { ...slot.renderSettings, theme: latest.theme };
+              const handle = paintHandlesRef.current.get(slot.iframe);
+              if (handle) {
+                handle.setSurfaceBackground(continuousSurfaceBackground(slot.iframe));
+              }
+              break;
+            }
+          }
         } while (!sameRenderingSettings(slot.renderSettings, desiredSettingsRef.current));
       } catch {
         if (!slot.unmounted) slot.status = "error";
@@ -1807,8 +1855,8 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
     /**
      * 设置变更 → 重载已挂载章节。
      *
-     * 主题/字号/字体等渲染设置是“烘焙”进每章文档 HTML 的（`sanitize` 生成 themeCss
-     * 与页面色），因此只改外层 CSS 变量不会影响书页：必须用新设置重新 sanitize 该章。
+     * 字号/字体等几何渲染设置需要重新排版/测页；纯主题变更则由 paginator.updateTheme 原位更新
+     * （通过 ThemeController 切换调色板 CSS 变量、对比度修补与作者背景），无需重新 sanitize 或重建章节。
      * 翻页模式由 `PagedReaderView` 的 `reloadWithSettings` 覆盖；连续滚动的分发发生
      * 在那个 effect 之前，所以这里必须自己做一遍，否则只有新加载的章节会跟随主题。
      *
@@ -1826,8 +1874,23 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
         settingsIdentityRef.current = current;
         return;
       }
-      if (sameRenderingSettings(previous, current)) return;
+      const changeType = classifySettingsChange(previous, current);
+      if (changeType === "none") return;
       settingsIdentityRef.current = current;
+
+      if (changeType === "theme-only") {
+        for (const slot of slotsRef.current.values()) {
+          if (slot.paginator?.updateTheme(current.theme)) {
+            slot.renderSettings = { ...slot.renderSettings, theme: current.theme };
+          }
+        }
+        auxPaginatorRef.current?.updateTheme(current.theme);
+        for (const [iframe, handle] of paintHandlesRef.current.entries()) {
+          handle.setSurfaceBackground(continuousSurfaceBackground(iframe));
+        }
+        backdropPaintRef.current?.setSurfaceBackground(READER_PALETTES[current.theme].background);
+        return;
+      }
 
       const debouncer = settingsReloadDebouncerRef.current;
       if (!debouncer) return;
@@ -1908,11 +1971,10 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
     }, [layout, slotUpdateNonce, V, props.compareOriginal, props.visualPreferences]);
 
     useEffect(() => {
-      for (const handle of paintHandlesRef.current.values()) handle.dispose();
-      paintHandlesRef.current.clear();
-      backdropPaintRef.current?.dispose();
-      backdropPaintRef.current = null;
-      syncVisualPaintRef.current();
+      for (const [iframe, handle] of paintHandlesRef.current.entries()) {
+        handle.setSurfaceBackground(continuousSurfaceBackground(iframe));
+      }
+      backdropPaintRef.current?.setSurfaceBackground(READER_PALETTES[settings.theme].background);
     }, [settings.theme]);
 
     // 显式导航响应（TOC / 搜索 / 笔记 / 书签 / 历史返回 / 打开书）

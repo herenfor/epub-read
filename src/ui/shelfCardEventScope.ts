@@ -1,7 +1,7 @@
 /** Only controls owned by this card suppress its default open/select action. */
 const CARD_ACTION_SELECTOR = [
   "button", "input", "select", "textarea", "a[href]",
-  ".shelf-card-actions-wrap", ".shelf-card-pop-menu", ".shelf-card-star-btn",
+  ".shelf-card-actions-wrap", ".shelf-card-star-btn",
   ".shelf-confirm-backdrop", ".shelf-confirm", "dialog", "[role='dialog']",
 ].join(", ");
 
@@ -11,7 +11,7 @@ export function isShelfCardActionTarget(
 ): boolean {
   const ElementCtor = typeof Element === "undefined" ? null : Element;
   if (!ElementCtor || !(target instanceof ElementCtor)) return false;
-  if (target.closest(".shelf-card-pop-menu, .shelf-menu-portal-host")) {
+  if (target.closest(".shelf-menu-portal-host")) {
     return true;
   }
   const action = target.closest(CARD_ACTION_SELECTOR);

@@ -502,9 +502,11 @@
   transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.18s ease;
 }
 
-.shelf-resume-cover-box:hover {
-  transform: translateY(-2px) scale(1.02);
-  box-shadow: 3px 6px 16px rgba(0, 0, 0, 0.18), 0 2px 4px rgba(0, 0, 0, 0.1);
+@media (hover: hover) {
+  :where(.shelf-view:not([data-input="touch"])) .shelf-resume-cover-box:hover {
+    transform: translateY(-2px) scale(1.02);
+    box-shadow: 3px 6px 16px rgba(0, 0, 0, 0.18), 0 2px 4px rgba(0, 0, 0, 0.1);
+  }
 }
 
 .shelf-resume-cover-box img,
@@ -1229,8 +1231,10 @@
   cursor: pointer;
 }
 
-.shelf-table-row:hover {
-  background: color-mix(in srgb, var(--fg, #000) 3%, var(--shelf-card-bg, #fff));
+@media (hover: hover) {
+  :where(.shelf-view:not([data-input="touch"])) .shelf-table-row:hover {
+    background: color-mix(in srgb, var(--fg, #000) 3%, var(--shelf-card-bg, #fff));
+  }
 }
 
 .shelf-table-row.selected {
@@ -1270,8 +1274,10 @@
   transition: color 0.12s ease;
 }
 
-.shelf-table-row:hover .shelf-table-title {
-  color: var(--accent, #2563eb);
+@media (hover: hover) {
+  :where(.shelf-view:not([data-input="touch"])) .shelf-table-row:hover .shelf-table-title {
+    color: var(--accent, #2563eb);
+  }
 }
 
 .shelf-table-progress-wrap {
@@ -1542,21 +1548,7 @@
   animation: shelf-modal-dialog-out var(--menu-close) cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
-.shelf-card-pop-menu {
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--panel-bg, #ffffff) 94%, transparent);
-  border: 1px solid color-mix(in srgb, var(--panel-border) 60%, transparent);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18), 0 2px 6px rgba(0, 0, 0, 0.08);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  z-index: 50;
-  animation: shelf-pop-in var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
-  transform-origin: top right;
-}
 
-.shelf-card-pop-menu.is-closing {
-  animation: shelf-pop-out var(--menu-close) cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
 
 @keyframes shelf-modal-backdrop-in {
   from { opacity: 0; }
@@ -2460,4 +2452,427 @@
 .shelf-folder-menu-item > span:first-child {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+/* =========================================================================
+ * 书架按压/长按反馈与唯一操作菜单（PC 浮层 / 触屏底部面板）
+ * data-press 由 shelfPress 手势识别器写入：pressed（按下 60ms 后）→ charging（200ms 起蓄力，
+ * 到 500ms 触发长按后回弹）。不依赖 :active，安卓 WebView + pan-y 下它时有时无。
+ * ========================================================================= */
+.shelf-view .shelf-card[data-press="pressed"] .shelf-cover-box {
+  transform: scale(0.97);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  transition-duration: 100ms;
+}
+
+.shelf-view .shelf-card[data-press="charging"] .shelf-cover-box {
+  transform: scale(0.94);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  /* 覆盖 200→500ms 的剩余蓄力时间，触发时正好沉到底。 */
+  transition: transform 300ms cubic-bezier(0.4, 0, 0.6, 1), box-shadow 300ms ease;
+}
+
+.shelf-view .shelf-table-row[data-press="pressed"] {
+  background: color-mix(in srgb, var(--fg, #000) 6%, var(--shelf-card-bg, #fff));
+}
+
+.shelf-view .shelf-table-row[data-press="charging"] {
+  background: color-mix(in srgb, var(--accent, #2563eb) 14%, var(--shelf-card-bg, #fff));
+  transition: background-color 300ms linear;
+}
+
+.shelf-menu-portal-host {
+  --shelf-sheet-in: 220ms;
+  --shelf-popover-in: 120ms;
+}
+
+/* ---- 共用菜单行 ---- */
+.shelf-action-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  box-sizing: border-box;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  line-height: 1.3;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms ease, transform 120ms ease;
+}
+
+.shelf-action-item:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.shelf-action-item.is-pending {
+  opacity: 0.75;
+  cursor: progress;
+}
+
+.shelf-action-item.danger {
+  color: var(--error);
+}
+
+.shelf-action-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.shelf-action-item:active:not(:disabled) {
+  background: color-mix(in srgb, var(--fg) 9%, transparent);
+}
+
+.shelf-action-item.danger:active:not(:disabled) {
+  background: color-mix(in srgb, var(--error) 14%, transparent);
+}
+
+.shelf-action-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  color: var(--muted);
+}
+
+.shelf-action-item.danger .shelf-action-icon {
+  color: inherit;
+}
+
+.shelf-action-icon .shelf-svg-icon {
+  width: 100%;
+  height: 100%;
+}
+
+.shelf-action-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.shelf-action-separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: color-mix(in srgb, var(--panel-border) 70%, transparent);
+}
+
+.shelf-action-error {
+  margin: 4px 6px 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--error);
+  background: color-mix(in srgb, var(--error) 10%, transparent);
+  overflow-wrap: anywhere;
+}
+
+/* ---- PC 锚定浮层：透明遮挡层让“点外面”只关闭菜单，不同时打开下面的书 ---- */
+.shelf-action-popover-scrim {
+  position: fixed;
+  inset: 0;
+  pointer-events: auto;
+  background: transparent;
+}
+
+.shelf-action-popover-scrim.is-closing {
+  pointer-events: none;
+}
+
+.shelf-action-popover {
+  position: fixed;
+  min-width: 200px;
+  max-width: min(320px, calc(100vw - 24px));
+  box-sizing: border-box;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 6px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 70%, transparent);
+  background: var(--panel-bg);
+  color: var(--fg);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18), 0 2px 6px rgba(0, 0, 0, 0.08);
+  pointer-events: auto;
+  outline: none;
+  transform-origin: top right;
+  animation: shelf-action-pop-in var(--shelf-popover-in) cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.shelf-action-popover.placement-up {
+  transform-origin: bottom right;
+}
+
+.shelf-action-popover.is-closing {
+  pointer-events: none;
+  animation: shelf-action-pop-out var(--menu-close) ease forwards;
+}
+
+.shelf-action-popover-title {
+  padding: 6px 10px 8px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 60%, transparent);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.shelf-action-popover .shelf-action-item {
+  min-height: 32px;
+  padding: 6px 10px;
+  font-size: 13.5px;
+}
+
+@media (hover: hover) {
+  .shelf-action-popover .shelf-action-item:hover:not(:disabled) {
+    background: var(--btn-hover);
+  }
+
+  .shelf-action-popover .shelf-action-item.danger:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--error) 12%, transparent);
+  }
+}
+
+@keyframes shelf-action-pop-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes shelf-action-pop-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: scale(0.98); }
+}
+
+/* ---- 触屏底部操作面板 ---- */
+.shelf-action-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  pointer-events: auto;
+  background: rgba(15, 23, 42, 0.38);
+  /* 遮罩上的手势只用来关闭，不滚动下面的书架。 */
+  touch-action: none;
+  animation: shelf-action-fade-in var(--shelf-sheet-in) ease-out;
+  transition: opacity var(--menu-close) ease;
+}
+
+.shelf-action-sheet-backdrop.is-closing {
+  opacity: 0;
+  pointer-events: none;
+  animation: none;
+}
+
+.shelf-action-sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  max-width: 560px;
+  max-height: min(78vh, calc(var(--visual-viewport-height, 100vh) - 48px));
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  padding: 0 8px calc(10px + env(safe-area-inset-bottom, 0px));
+  border-radius: 16px 16px 0 0;
+  background: var(--panel-bg);
+  color: var(--fg);
+  box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.18);
+  pointer-events: auto;
+  outline: none;
+  animation: shelf-action-sheet-in var(--shelf-sheet-in) cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.shelf-action-sheet.is-dragging {
+  transition: none;
+}
+
+.shelf-action-sheet.is-closing {
+  pointer-events: none;
+  transform: translateY(100%);
+  animation: none;
+  transition: transform var(--menu-close) cubic-bezier(0.4, 0, 1, 1);
+}
+
+.shelf-action-sheet-grip {
+  display: flex;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 8px 0 6px;
+  touch-action: none;
+  cursor: grab;
+}
+
+.shelf-action-sheet-handle {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--fg) 22%, transparent);
+}
+
+.shelf-action-sheet-head {
+  flex-shrink: 0;
+  padding: 2px 10px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 60%, transparent);
+  touch-action: none;
+}
+
+.shelf-action-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.shelf-action-head-cover {
+  flex: 0 0 auto;
+  width: 40px;
+  aspect-ratio: 128 / 188;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--shelf-card-bg);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.16);
+}
+
+.shelf-action-head-cover .shelf-cover {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.shelf-action-head-cover .shelf-cover.fallback {
+  padding: 4px;
+}
+
+.shelf-action-head-cover .fallback-title {
+  display: none;
+}
+
+.shelf-action-head-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+
+.shelf-action-head-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.shelf-action-head-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.shelf-action-head-sub {
+  overflow: hidden;
+  font-size: 12.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.shelf-action-sheet-list {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-top: 6px;
+}
+
+.shelf-action-sheet .shelf-action-item {
+  min-height: 52px;
+  padding: 0 14px;
+  gap: 14px;
+  border-radius: 10px;
+  font-size: 15px;
+}
+
+.shelf-action-sheet .shelf-action-item:active:not(:disabled) {
+  transform: scale(0.985);
+}
+
+.shelf-action-sheet .shelf-action-icon {
+  width: 20px;
+  height: 20px;
+}
+
+.shelf-action-sheet .shelf-action-separator {
+  margin: 6px 8px;
+}
+
+@keyframes shelf-action-sheet-in {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+@keyframes shelf-action-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* 减少动效：按压改为静态变暗，不缩放；菜单与面板直接出现/消失。 */
+:root[data-motion="reduced"] .shelf-view .shelf-card[data-press] .shelf-cover-box {
+  transform: none;
+  opacity: 0.8;
+  transition: none;
+}
+
+:root[data-motion="reduced"] .shelf-view .shelf-table-row[data-press] {
+  transition: none;
+}
+
+:root[data-motion="reduced"] :is(.shelf-action-popover, .shelf-action-sheet, .shelf-action-sheet-backdrop) {
+  animation: none;
+}
+
+:root[data-motion="reduced"] .shelf-action-sheet,
+:root[data-motion="reduced"] .shelf-action-item {
+  transition: none;
+}
+
+:root[data-motion="reduced"] .shelf-action-sheet .shelf-action-item:active:not(:disabled) {
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shelf-view .shelf-card[data-press] .shelf-cover-box {
+    transform: none;
+    opacity: 0.8;
+    transition: none;
+  }
+
+  .shelf-view .shelf-table-row[data-press] {
+    transition: none;
+  }
+
+  :is(.shelf-action-popover, .shelf-action-sheet, .shelf-action-sheet-backdrop) {
+    animation: none;
+  }
+
+  .shelf-action-sheet,
+  .shelf-action-item {
+    transition: none;
+  }
+
+  .shelf-action-sheet .shelf-action-item:active:not(:disabled) {
+    transform: none;
+  }
 }

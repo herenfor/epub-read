@@ -20,6 +20,8 @@ export interface ReaderVisualPreferences {
 /** Mounted viewport-sized book surfaces only; never layout/motion containers. */
 export interface ReaderPaintHandle {
   update(preferences: ReaderVisualPreferences, compareOriginal: boolean): void;
+  /** 原位更新当前 surface 的背景底色，不销毁/重建 SVG 滤镜叠层 */
+  setSurfaceBackground(background: string | null): void;
   dispose(): void;
 }
 

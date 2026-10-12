@@ -230,6 +230,36 @@ describe("reader visual paint", () => {
     expect(host.querySelector("filter")).toBeNull();
     expect(host.querySelector(".reader-visual-dim-overlay")).toBeNull();
   });
+
+  it("updates surface background in place without rebuilding SVG filters", () => {
+    const { host, surface } = setup();
+    surface.style.backgroundColor = "transparent";
+    const initialPrefs = preferences({ enabled: true, invert: true });
+    const handle = attachReaderPaint(surface, host, initialPrefs, "rgb(255, 255, 255)");
+
+    const initialFilter = host.querySelector("filter");
+    expect(initialFilter).not.toBeNull();
+    const filterId = initialFilter?.getAttribute("id");
+    expect(surface.style.backgroundColor).toBe("rgb(255, 255, 255)");
+
+    // 更新为暗色背景：原位生效，未重建滤镜节点
+    handle.setSurfaceBackground("rgb(30, 30, 30)");
+    expect(surface.style.backgroundColor).toBe("rgb(30, 30, 30)");
+    expect(host.querySelector("filter")?.getAttribute("id")).toBe(filterId);
+
+    // 滤镜关闭时，恢复 originalBackground；但已记录的新背景在再次开启时生效
+    handle.update(preferences({ enabled: false }), false);
+    expect(surface.style.backgroundColor).toBe("transparent");
+
+    handle.setSurfaceBackground("rgb(244, 236, 216)");
+    expect(surface.style.backgroundColor).toBe("transparent");
+
+    handle.update(preferences({ enabled: true, invert: true }), false);
+    expect(surface.style.backgroundColor).toBe("rgb(244, 236, 216)");
+
+    handle.dispose();
+    expect(surface.style.backgroundColor).toBe("transparent");
+  });
 });
 
 describe("reader visual preferences", () => {

@@ -67,18 +67,29 @@ function mediaTag(value: unknown): "img" | "svg" | "video" | null {
   return value === "img" || value === "svg" || value === "video" ? value : null;
 }
 
-function locatorFromReadingFields(
-  fields: {
-    readonly spineIndex: number;
-    readonly page: number;
-    readonly anchorIndex: number | null;
-    readonly anchorRatio: number | null;
-    readonly anchorTextOffset?: number | null;
-    readonly anchorTextSnippet?: string | null;
-    readonly mediaAnchor?: { readonly index: number; readonly tag: string; readonly signature: string; readonly ratio: number } | null;
-  },
-  chapterPath?: string | null,
-): Locator {
+interface ReadingFields {
+  readonly spineIndex: number;
+  readonly page: number;
+  readonly anchorIndex: number | null;
+  readonly anchorRatio: number | null;
+  readonly anchorTextOffset?: number | null;
+  readonly anchorTextSnippet?: string | null;
+  readonly mediaAnchor?: { readonly index: number; readonly tag: string; readonly signature: string; readonly ratio: number } | null;
+}
+
+function legacyLocatorFromFields(fields: ReadingFields): Locator {
+  return legacyLocatorFromReadingFields({
+    spineIndex: fields.spineIndex,
+    page: fields.page,
+    anchorIndex: fields.anchorIndex,
+    anchorRatio: fields.anchorRatio,
+    anchorTextOffset: fields.anchorTextOffset ?? null,
+    anchorTextSnippet: fields.anchorTextSnippet ?? null,
+    mediaAnchor: fields.mediaAnchor ?? null,
+  });
+}
+
+function locatorFromReadingFields(fields: ReadingFields, chapterPath?: string | null): Locator {
   const media = fields.mediaAnchor;
   const tag = media ? mediaTag(media.tag) : null;
   if (chapterPath) {
@@ -104,17 +115,20 @@ function locatorFromReadingFields(
         ratio: media.ratio,
       });
     }
+    // B-237: no text/media identity is not proof of the chapter start. A real
+    // mid-chapter element anchor or page keeps its version 0 fields, as the
+    // legacy migration does; only a genuine start becomes chapter-start.
+    const elementAnchor = fields.anchorIndex !== null && Number.isSafeInteger(fields.anchorIndex) && fields.anchorIndex >= 0;
+    if (elementAnchor || fields.page > 0) {
+      try {
+        return legacyLocatorFromFields(fields);
+      } catch {
+        // Unparseable legacy fields: the modern start is still a valid record.
+      }
+    }
     return modernChapterStartLocator(chapterPath, fields.spineIndex);
   }
-  return legacyLocatorFromReadingFields({
-    spineIndex: fields.spineIndex,
-    page: fields.page,
-    anchorIndex: fields.anchorIndex,
-    anchorRatio: fields.anchorRatio,
-    anchorTextOffset: fields.anchorTextOffset ?? null,
-    anchorTextSnippet: fields.anchorTextSnippet ?? null,
-    mediaAnchor: media ?? null,
-  });
+  return legacyLocatorFromFields(fields);
 }
 
 function bookmarkValueFromBookmark(input: Bookmark, fallbackChapterPath?: string | null): BookmarkValue {

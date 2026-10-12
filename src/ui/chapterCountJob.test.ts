@@ -171,6 +171,37 @@ describe("incremental chapter count job", () => {
     expect(counts).toEqual([[0, 1000]]);
   });
 
+  it("counts from the same self-closing normalization as the rendered chapter", () => {
+    // Real Chrome/WebView2 154 parses this raw markup as text/html with an
+    // empty body (text 0, media 0); XML and the normalized markup keep it.
+    // linkedom does not swallow the body, so assert what the parser receives.
+    const clock = scheduler();
+    const counts: Array<[number, number]> = [];
+    const seen: string[] = [];
+    const raw = '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>p-003</title>' +
+      '<link rel="stylesheet" href="a.css"/><script type="text/javascript" src="../Misc/a.js"/></head>' +
+      '<body><p>彩页说明</p><img src="p.jpg" alt=""/><span/>后续</body></html>';
+    createChapterCountJob({
+      book: book(),
+      server: { textFor: (path) => path.endsWith("a.xhtml") ? raw : "第二章" },
+      generation: 13,
+      maxPerSlice: 1,
+      scheduler: clock.scheduler,
+      parse: (text) => {
+        seen.push(text);
+        return parseHTML(text).document as unknown as Document;
+      },
+      onCount: (index, value) => counts.push([index, value]),
+    });
+    clock.runNext();
+    expect(seen[0]).toContain('<script type="text/javascript" src="../Misc/a.js"></script>');
+    expect(seen[0]).toContain("<span></span>后续");
+    // Void elements keep their original form.
+    expect(seen[0]).toContain('<link rel="stylesheet" href="a.css"/>');
+    expect(seen[0]).toContain('<img src="p.jpg" alt=""/>');
+    expect(counts).toEqual([[0, 6]]);
+  });
+
   it("skips cached chapters and submits one bounded batch per default slice", () => {
     const clock = scheduler();
     const batches: Array<Array<[number, number]>> = [];

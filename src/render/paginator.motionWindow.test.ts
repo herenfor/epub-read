@@ -5,18 +5,28 @@ import { MotionWindowIdleLease } from "./motionWindowIdleLease";
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 
-function leaseFixture() {
+function leaseFixture(idleMs: number | null = 900) {
   let idle = true;
   const exit = vi.fn();
   const callbacks: Array<() => void> = [];
   const lease = new MotionWindowIdleLease({
     after: (ms, callback) => { callbacks.push(callback); return setTimeout(callback, ms); },
     cancel: handle => clearTimeout(handle as ReturnType<typeof setTimeout>),
-  }, { canExitIdleWindow: () => idle, exitIdleWindow: exit });
+  }, { canExitIdleWindow: () => idle, exitIdleWindow: exit }, idleMs);
   return { lease, exit, callbacks, moving: () => { idle = false; }, idle: () => { idle = true; } };
 }
 
 describe("motion window idle lease", () => {
+  it("前台有限窗口没有阅读超时或轮询，接触与连续落定均由 owner 回收", () => {
+    const f = leaseFixture(null);
+    f.lease.settled(); f.lease.beginContact(); f.lease.endContact();
+    f.lease.moving(); f.lease.settled();
+    vi.advanceTimersByTime(60000);
+    expect(f.exit).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+    expect(f.callbacks).toHaveLength(0);
+    f.lease.dispose();
+  });
   it("连续落定延后退出；旧定时回调不能拆掉新窗口", () => {
     const f = leaseFixture();
     f.lease.settled();
@@ -96,10 +106,14 @@ describe("paginator retained motion window", () => {
     const p = Object.create(ChapterPaginator.prototype) as Pager;
     Object.assign(p, {
       viewer: { animate: vi.fn() }, slideMotionWanted: true, disposed: false,
+      motionWindowForeground: true,
       settings: { readingMode: "paginated" }, pageMotionUnsupportedKey: null, snapOffsetsCache: { key: "layout" },
       prefersTouchPaging: () => false,
     });
     expect(p.pageMotionAvailable).toBe(true);
+    p.motionWindowForeground = false;
+    expect(p.pageMotionAvailable).toBe(false);
+    p.motionWindowForeground = true;
     p.slideMotionWanted = false;
     expect(p.pageMotionAvailable).toBe(false);
     p.slideMotionWanted = true;
@@ -111,6 +125,55 @@ describe("paginator retained motion window", () => {
     p.pageMotionUnsupportedKey = null;
     p.viewer.animate = undefined;
     expect(p.pageMotionAvailable).toBe(false);
+  });
+  it("背景/缓存章立即释放；恢复前台只对已完成定位的当前章准备", () => {
+    const p = Object.create(ChapterPaginator.prototype) as Pager;
+    Object.assign(p, {
+      loadSeq: 1, displayReadySeq: 0, displayReadyResult: false,
+      disposePageMotion: vi.fn(), prepareMotion: vi.fn(),
+    });
+    p.setMotionWindowForeground(true);
+    expect(p.prepareMotion).not.toHaveBeenCalled();
+    p.displayReadySeq = 1; p.displayReadyResult = true;
+    p.setMotionWindowForeground(false);
+    expect(p.disposePageMotion).toHaveBeenCalledOnce();
+    p.setMotionWindowForeground(true);
+    expect(p.prepareMotion).toHaveBeenCalledOnce();
+  });
+  it("首次窗口准备在精确定位和章末定位之后，取消代次不准备", async () => {
+    const p = Object.create(ChapterPaginator.prototype) as Pager;
+    const order: string[] = [];
+    Object.assign(p, {
+      loadSeq: 1, disposed: false, settings: { readingMode: "paginated" }, metrics: { pageCount: 10 },
+      prepareTextProjection: async () => true, measure: async () => true,
+      rebuildTextIndexForCurrentDoc: () => {}, recompute: async () => true,
+      applyPendingPreciseNavigation: () => { order.push("precise"); return "located"; },
+      setPage: (page: number) => order.push(`page:${page}`),
+      prepareMotion: () => order.push("window"),
+    });
+    expect(await p.prepareChapterForDisplay(1, true)).toBe(true);
+    expect(order).toEqual(["precise", "page:9", "window"]);
+    order.length = 0;
+    expect(await p.prepareChapterForDisplay(0, false)).toBe(false);
+    expect(order).toEqual([]);
+  });
+  it("显式跳页后先提交实际目标再预热，不额外提交用户进度", () => {
+    const { p } = pagerFixture();
+    Object.assign(p, {
+      loadSeq: 1, displayReadySeq: 1, displayReadyResult: true,
+      metrics: { currentPage: 4, pageCount: 10 },
+      haltPageMotion: vi.fn(() => { p.viewer.scrollLeft = 400; }),
+      closeFootnoteForNavigation: vi.fn(), clearSearchHighlightForDocument: vi.fn(),
+      notifyUserCommit: vi.fn(),
+      prepareMotion: vi.fn(() => {
+        expect(p.viewer.scrollLeft).toBe(600);
+        expect(p.metrics.currentPage).toBe(6);
+      }),
+    });
+    p.setPage(6);
+    expect(p.prepareMotion).toHaveBeenCalledOnce();
+    expect(p.scheduleAnchorSample).toHaveBeenCalledOnce();
+    expect(p.notifyUserCommit).not.toHaveBeenCalled();
   });
   it("进度采样使用视觉正文坐标，不撤窗口；正式快照不被误标 transient", () => {
     const { p, driver, caret } = pagerFixture();
