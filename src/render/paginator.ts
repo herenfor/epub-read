@@ -8732,6 +8732,55 @@ export class ChapterPaginator {
     await this.load(path, { anchor, readingAnchor, fallbackPage, preserveSearchHighlight });
   }
 
+  /**
+   * 设置变更后整体重载并等待该次重载对应的 display-ready。
+   * 返回 true 表示该次设置变更成功应用且已完成排版交互就绪；
+   * 若期间被更新的重载/加载取代、取消或加载失败，则返回 false。
+   */
+  async reloadWithSettingsAndWaitForDisplay(settings: ReaderSettings, anchor?: string): Promise<boolean> {
+    const path = this.currentPath;
+    if (!path) {
+      this.settings = settings;
+      return true;
+    }
+    if (this.scrollMode) this.captureScrollAnchor();
+    else {
+      const position = this.readVisualPosition();
+      const transient =
+        position &&
+        (position.page !== this.metrics.currentPage ||
+          !position.aligned ||
+          (this.pageMotion && this.pageMotion.session.state.kind !== "idle"));
+      if (position && (transient || this.pageMotion?.driver.active)) {
+        const sampled = this.sampleAnchorAtVisualPosition(position);
+        this.takeOverNativePaging();
+        if (sampled) {
+          this.anchor = sampled;
+          this.anchorPath = path;
+        }
+      } else if (!this.flushReadingAnchor()) this.captureAnchor();
+    }
+    const readingAnchor = this.anchor && this.anchorPath === path ? { ...this.anchor } : null;
+    const fallbackPage = this.metrics.currentPage;
+    this.settings = settings;
+    const preserveSearchHighlight = this.searchHighlightTarget
+      ? {
+          requestId: this.searchHighlightTarget.requestId,
+          textHits: cloneExactTextHits(this.searchHighlightTarget.textHits),
+          occurrence: cloneSearchOccurrence(this.searchHighlightTarget.occurrence),
+          displayTarget: cloneDisplayTarget(this.searchHighlightTarget.displayTarget),
+        }
+      : null;
+    const loading = this.load(path, { anchor, readingAnchor, fallbackPage, preserveSearchHighlight });
+    const expectedLoadSeq = this.loadSeq;
+    try {
+      await loading;
+      return await this.waitForDisplayReady(expectedLoadSeq);
+    } catch {
+      return false;
+    }
+  }
+
   private get currentPath(): string {
     return this._currentPath;
   }

@@ -35,6 +35,7 @@ import {
   sameRenderingSettings,
   samePageMargins,
 } from "../render/readerTheme";
+import { PagedLayoutTransactionCoordinator } from "./pagedLayoutTransaction";
 import { createSettingsReloadDebouncer } from "./settingsReload";
 import { TurnIntentBuffer, WheelTurnAccumulator } from "./turnIntent";
 import { ReadingWarmupPlan, backgroundPreparation, type WarmupTicket } from "./readerWarmup";
@@ -322,7 +323,13 @@ export function effectiveReaderSettings(settings: ReaderSettings, fixedLayout: b
 }
 
 /** 预加载开关只影响调度，不属于活动 paginator 的布局身份。 */
-export { sameRenderingSettings, sameLayoutSettings, samePageMargins, classifySettingsChange };
+export {
+  sameRenderingSettings,
+  sameLayoutSettings,
+  samePageMargins,
+  classifySettingsChange,
+  PagedLayoutTransactionCoordinator,
+};
 
 const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function PagedReaderView(
   props,
@@ -348,6 +355,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   const paintHandleRef = useRef<ReaderPaintHandle | null>(null);
   const paginatorRef = useRef<ChapterPaginator | null>(null);
   const activeSlotRef = useRef<PaginatorSlot | null>(null);
+  const layoutCoordinatorRef = useRef(new PagedLayoutTransactionCoordinator());
   // 高性能模式下活动章加最多四个邻章组成当前章 ±2 五章活缓存。
   // Spare slots are never allowed to emit UI callbacks; their state is only
   // used by the cache scheduler.
@@ -1438,6 +1446,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     paginatorRef.current = p;
     setActiveFrameVisual("primary");
     return () => {
+      layoutCoordinatorRef.current.invalidate();
       resetFullBookWarmup();
       clearPreloadTimer();
       settingsReloadDebouncerRef.current?.cancel();
@@ -1498,6 +1507,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       triggerChapterTransitionWheelLock();
       outerWheelRef.current.reset();
       turnIntentRef.current.reset();
+      layoutCoordinatorRef.current.invalidate();
       const preciseTarget = props.preciseTarget && props.preciseTarget.chapterPath === path
         ? props.preciseTarget
         : null;
@@ -1647,24 +1657,38 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     disposeSpareSlots();
     settingsIdentityRef.current = { settings, userFonts: props.userFonts };
     const p = paginatorRef.current;
-    if (!p) return;
+    const active = activeSlotRef.current;
+    if (!p || !active || active.paginator !== p) return;
+
+    const epoch = layoutCoordinatorRef.current.requestLayoutReload();
+    const targetPath = active.path;
+    const targetSpineIndex = active.spineIndex;
+    const targetGeneration = active.generation;
+
     settingsReloadDebouncerRef.current?.schedule(async () => {
-      const current = paginatorRef.current;
-      if (!current || current !== p) return;
-      const target = latestRenderSettingsRef.current;
-      await current.reloadWithSettings(target);
-      if (paginatorRef.current !== current) return;
-      if (activeSlotRef.current && activeSlotRef.current.paginator === current) {
-        activeSlotRef.current.renderSettings = { ...target };
-        const latest = latestRenderSettingsRef.current;
-        if (sameLayoutSettings(target, latest) && target.theme !== latest.theme) {
-          if (current.updateTheme(latest.theme)) {
-            activeSlotRef.current.renderSettings = { ...activeSlotRef.current.renderSettings, theme: latest.theme };
-            const surface = activeIframeRef.current;
-            paintHandleRef.current?.setSurfaceBackground(surface ? readerSurfaceBackground(surface) : null);
-          }
-        }
-      }
+      await layoutCoordinatorRef.current.runTransaction({
+        epoch,
+        slot: active,
+        isCurrent: () => {
+          const curActive = activeSlotRef.current;
+          const curP = paginatorRef.current;
+          return Boolean(
+            curActive &&
+              curP &&
+              curActive === active &&
+              curP === p &&
+              curActive.paginator === p &&
+              curActive.path === targetPath &&
+              curActive.spineIndex === targetSpineIndex &&
+              curActive.generation === targetGeneration
+          );
+        },
+        getDesiredSettings: () => latestRenderSettingsRef.current,
+        onSyncTheme: () => {
+          const surface = activeIframeRef.current;
+          paintHandleRef.current?.setSurfaceBackground(surface ? readerSurfaceBackground(surface) : null);
+        },
+      });
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings, props.userFonts]);

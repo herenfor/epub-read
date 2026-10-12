@@ -11,6 +11,10 @@ import {
 import { DEFAULT_SETTINGS, type ReaderSettings } from "./settings";
 import { readerSurfaceBackground } from "../ui/ReaderView";
 import { continuousSurfaceBackground } from "../ui/ContinuousReaderView";
+import {
+  PagedLayoutTransactionCoordinator,
+  type PagedLayoutSlotTarget,
+} from "../ui/pagedLayoutTransaction";
 
 describe("主题原位更新与阅读宿主集成契约", () => {
   it("纯主题切换不重排/重载，真实布局变更仍走重排", () => {
@@ -357,80 +361,215 @@ describe("主题原位更新与阅读宿主集成契约", () => {
     themeController.dispose();
   });
 
-  it("布局重载进行中主题变更：原位同步最新主题，无需进行第二次布局重载 (R1)", async () => {
+  it("生产协调器事务代次保护：旧24晚于新26完成，旧任务被废弃不覆盖新26状态 (05点复核追加)", async () => {
+    const coordinator = new PagedLayoutTransactionCoordinator();
+    const initialSettings: ReaderSettings = { ...DEFAULT_SETTINGS, fontSizePx: 18, theme: "light" };
+    let desiredSettings: ReaderSettings = initialSettings;
+
+    // 可控异步资源屏障：让旧 24 的资源准备暂停在屏障前
+    let releaseBarrier24: () => void = () => {};
+    const barrier24Promise = new Promise<void>((resolve) => {
+      releaseBarrier24 = resolve;
+    });
+
+    const activeSlot: PagedLayoutSlotTarget = {
+      path: "ch1.xhtml",
+      spineIndex: 0,
+      generation: 1,
+      renderSettings: { ...initialSettings },
+      paginator: {
+        reloadWithSettingsAndWaitForDisplay: async (settings: ReaderSettings) => {
+          if (settings.fontSizePx === 24) {
+            // 模拟慢请求 24 暂停在资源加载入口
+            await barrier24Promise;
+            // 当 24 恢复时，paginator 内部代次已被 26 取代，返回 false
+            return false;
+          }
+          if (settings.fontSizePx === 26) {
+            // 新请求 26 正常快速完成并达成 display-ready
+            return true;
+          }
+          return true;
+        },
+        updateTheme: () => true,
+      },
+    };
+
+    // 1. 请求 24 发起
+    desiredSettings = { ...initialSettings, fontSizePx: 24 };
+    const epoch24 = coordinator.requestLayoutReload();
+    const task24Promise = coordinator.runTransaction({
+      epoch: epoch24,
+      slot: activeSlot,
+      isCurrent: () => coordinator.epoch === epoch24 && activeSlot.spineIndex === 0 && activeSlot.generation === 1,
+      getDesiredSettings: () => desiredSettings,
+    });
+
+    // 2. 在 24 挂起期间，新请求 26 发起并顺利完成
+    desiredSettings = { ...initialSettings, fontSizePx: 26 };
+    const epoch26 = coordinator.requestLayoutReload();
+    const success26 = await coordinator.runTransaction({
+      epoch: epoch26,
+      slot: activeSlot,
+      isCurrent: () => coordinator.epoch === epoch26 && activeSlot.spineIndex === 0 && activeSlot.generation === 1,
+      getDesiredSettings: () => desiredSettings,
+    });
+
+    expect(success26).toBe(true);
+    expect(activeSlot.renderSettings.fontSizePx).toBe(26);
+
+    // 3. 放开旧 24 的资源屏障
+    releaseBarrier24();
+    const success24 = await task24Promise;
+
+    // 关键断言：
+    // - 旧 24 事务被生产协调器拦截拒绝（返回 false）
+    // - slot 的实际应用记录保持 26，绝对没有被写回 24！
+    expect(success24).toBe(false);
+    expect(activeSlot.renderSettings.fontSizePx).toBe(26);
+    expect(desiredSettings.fontSizePx).toBe(26);
+  });
+
+  it("生产协调器事务代次保护：load返回但尚未display-ready或加载失败，不提交实际layout状态 (05点复核追加)", async () => {
+    const coordinator = new PagedLayoutTransactionCoordinator();
+    const initialSettings: ReaderSettings = { ...DEFAULT_SETTINGS, fontSizePx: 18, theme: "light" };
+    const desiredSettings: ReaderSettings = { ...DEFAULT_SETTINGS, fontSizePx: 20, theme: "light" };
+
+    const activeSlot: PagedLayoutSlotTarget = {
+      path: "ch1.xhtml",
+      spineIndex: 0,
+      generation: 1,
+      renderSettings: { ...initialSettings },
+      paginator: {
+        reloadWithSettingsAndWaitForDisplay: async () => {
+          // load 返回了，但排版未 ready（例如资源错误或被取消）
+          return false;
+        },
+        updateTheme: () => true,
+      },
+    };
+
+    const epoch = coordinator.requestLayoutReload();
+    const success = await coordinator.runTransaction({
+      epoch,
+      slot: activeSlot,
+      isCurrent: () => coordinator.epoch === epoch,
+      getDesiredSettings: () => desiredSettings,
+    });
+
+    expect(success).toBe(false);
+    // 关键断言：未达到 display-ready 时，slot.renderSettings 保持 18px，绝不提前承诺 20px
+    expect(activeSlot.renderSettings.fontSizePx).toBe(18);
+  });
+
+  it("生产协调器事务代次保护：换章导航后使旧事务失效，旧任务不污染新章槽位 (05点复核追加)", async () => {
+    const coordinator = new PagedLayoutTransactionCoordinator();
+    const initialSettings: ReaderSettings = { ...DEFAULT_SETTINGS, fontSizePx: 18, theme: "light" };
+
+    let resolveSlowReload: () => void = () => {};
+    const slowReloadPromise = new Promise<void>((resolve) => {
+      resolveSlowReload = resolve;
+    });
+
+    const slotChapter1: PagedLayoutSlotTarget = {
+      path: "ch1.xhtml",
+      spineIndex: 0,
+      generation: 1,
+      renderSettings: { ...initialSettings },
+      paginator: {
+        reloadWithSettingsAndWaitForDisplay: async () => {
+          await slowReloadPromise;
+          return true;
+        },
+        updateTheme: () => true,
+      },
+    };
+
+    let activeSlot = slotChapter1;
+
+    // 1. 在 Chapter 1 上发起 24px 重载
+    const epoch1 = coordinator.requestLayoutReload();
+    const task1Promise = coordinator.runTransaction({
+      epoch: epoch1,
+      slot: slotChapter1,
+      isCurrent: () => coordinator.epoch === epoch1 && activeSlot === slotChapter1 && activeSlot.spineIndex === 0,
+      getDesiredSettings: () => ({ ...initialSettings, fontSizePx: 24 }),
+    });
+
+    // 2. 用户导航到 Chapter 2：使旧协调器代次失效，激活槽位切换到 Chapter 2
+    coordinator.invalidate();
+    const slotChapter2: PagedLayoutSlotTarget = {
+      path: "ch2.xhtml",
+      spineIndex: 1,
+      generation: 2,
+      renderSettings: { ...initialSettings, fontSizePx: 18 },
+      paginator: {
+        reloadWithSettingsAndWaitForDisplay: async () => true,
+        updateTheme: () => true,
+      },
+    };
+    activeSlot = slotChapter2;
+
+    // 3. Chapter 1 的慢重排返回
+    resolveSlowReload();
+    const success1 = await task1Promise;
+
+    // 关键断言：
+    // - Chapter 1 的旧事务被废弃退出
+    // - Chapter 2 的槽位未受污染，依然保持 Chapter 2 的状态
+    expect(success1).toBe(false);
+    expect(slotChapter2.renderSettings.fontSizePx).toBe(18);
+    expect(slotChapter2.path).toBe("ch2.xhtml");
+  });
+
+  it("生产协调器与主题原位协调：布局重载进行中主题变更，原位同步最新主题，无需进行第二次布局重载 (R1/05点复核追加)", async () => {
+    const coordinator = new PagedLayoutTransactionCoordinator();
     const initialSettings: ReaderSettings = { ...DEFAULT_SETTINGS, fontSizePx: 16, theme: "light" };
     let desiredSettings: ReaderSettings = { ...DEFAULT_SETTINGS, fontSizePx: 20, theme: "light" };
 
     const { document } = parseHTML("<html><body><p>正文内容</p></body></html>");
     const themeController = createReaderTheme({ doc: document, theme: "light" });
 
-    let reloadCount = 0;
-    let inPlaceThemeUpdateCount = 0;
+    let reloadCallCount = 0;
+    let themeUpdateCount = 0;
 
-    const mockSlot = {
-      key: "0:ch1.xhtml",
-      unmounted: false,
-      status: "ready" as "loading" | "ready" | "error",
+    const slot: PagedLayoutSlotTarget = {
+      path: "ch1.xhtml",
+      spineIndex: 0,
+      generation: 1,
       renderSettings: { ...initialSettings },
       paginator: {
-        updateTheme: (theme: any) => {
-          inPlaceThemeUpdateCount++;
+        reloadWithSettingsAndWaitForDisplay: async (settings: ReaderSettings) => {
+          reloadCallCount++;
+          // 模拟在重载进行中，用户将全局主题改为 dark（纯主题变更不改变 layout epoch）
+          desiredSettings = { ...settings, theme: "dark" };
+          return true;
+        },
+        updateTheme: (theme: ReaderSettings["theme"]) => {
+          themeUpdateCount++;
           themeController.update(theme);
           return true;
         },
-        reloadWithSettings: async (_settings: ReaderSettings) => {
-          reloadCount++;
-          // 模拟在重载进行中，用户将全局主题改为 dark
-          desiredSettings = { ...desiredSettings, theme: "dark" };
-        },
-        waitForDisplayReady: async () => true,
       },
     };
 
-    // 运行 reloadSlotSettings 事务逻辑
-    const runReloadSlotSettings = async () => {
-      if (mockSlot.unmounted || mockSlot.status !== "ready") return;
-      if (sameRenderingSettings(mockSlot.renderSettings, desiredSettings)) return;
-      if (sameLayoutSettings(mockSlot.renderSettings, desiredSettings)) {
-        if (mockSlot.paginator.updateTheme(desiredSettings.theme)) {
-          mockSlot.renderSettings = { ...mockSlot.renderSettings, theme: desiredSettings.theme };
-          return;
-        }
-      }
+    const epoch = coordinator.requestLayoutReload();
+    const success = await coordinator.runTransaction({
+      epoch,
+      slot,
+      isCurrent: () => coordinator.epoch === epoch && slot.spineIndex === 0,
+      getDesiredSettings: () => desiredSettings,
+    });
 
-      do {
-        const target = desiredSettings;
-        await mockSlot.paginator.reloadWithSettings(target);
-        const ready = await mockSlot.paginator.waitForDisplayReady();
-        if (mockSlot.unmounted) return;
-        if (!ready) {
-          mockSlot.status = "error";
-          break;
-        }
-        // 先提交本次真正完成的 layout
-        mockSlot.renderSettings = { ...target };
-        const latest = desiredSettings;
-        if (sameRenderingSettings(mockSlot.renderSettings, latest)) {
-          break;
-        }
-        // 关键协调：仅差主题就原位更新，绝不触发第二次整章重载
-        if (sameLayoutSettings(mockSlot.renderSettings, latest)) {
-          if (mockSlot.paginator.updateTheme(latest.theme)) {
-            mockSlot.renderSettings = { ...mockSlot.renderSettings, theme: latest.theme };
-            break;
-          }
-        }
-      } while (!sameRenderingSettings(mockSlot.renderSettings, desiredSettings));
-    };
-
-    await runReloadSlotSettings();
-
-    // 关键断言：reloadWithSettings 仅调用了 1 次（没有因为主题变成 dark 而产生第二次整章重载）
-    expect(reloadCount).toBe(1);
-    // 关键断言：updateTheme 成功原位更新为 dark
-    expect(inPlaceThemeUpdateCount).toBe(1);
-    expect(mockSlot.renderSettings.fontSizePx).toBe(20);
-    expect(mockSlot.renderSettings.theme).toBe("dark");
+    expect(success).toBe(true);
+    // 关键断言：
+    // - reloadWithSettingsAndWaitForDisplay 仅调用了 1 次（没有因为主题改变而发生第二次布局重载）
+    // - updateTheme 成功在位更新为 dark
+    // - slot.renderSettings 最终为 20px + dark
+    expect(reloadCallCount).toBe(1);
+    expect(themeUpdateCount).toBe(1);
+    expect(slot.renderSettings.fontSizePx).toBe(20);
+    expect(slot.renderSettings.theme).toBe("dark");
     expect(themeController.currentTheme).toBe("dark");
 
     themeController.dispose();
