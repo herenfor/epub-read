@@ -3,7 +3,7 @@ import type { ReaderNote } from "./notes";
 import type { NoteEditContext } from "./shelf";
 
 /** Ordinary reader surfaces. Add a new member here and its renderer only. */
-export type ReaderPanelId = "menu" | "toc" | "bookmarks" | "search" | "notes" | "log" | "assistant";
+export type ReaderPanelId = "menu" | "toc" | "bookmarks" | "search" | "notes" | "log" | "assistant" | "reading";
 export type MenuSubview = "main" | "fonts" | "extras";
 
 export type NoteComposerDraft =

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { Theme } from "../render/settings";
 import { READER_PALETTES } from "../config/readerPalette";
 import { getRuntimeCapabilities } from "../platform/runtimeCapabilities";
@@ -9,13 +9,11 @@ import { useUiMotion, type UiMotion } from "./motionPreference";
 import { useUiText } from "./localization/UiLanguageProvider";
 import { useUiLanguageChoice } from "./localization/useUiLanguageChoice";
 import type { UiLanguagePreference } from "./localization/core";
-import { TAP_REGION_LABEL_KEYS } from "./localization/catalogs/tapRegions";
-import { ReaderTapRegionsPanel, type ReaderTapRegionsLabels } from "./ReaderTapRegionsPanel";
 import type { ReaderTapPreferences } from "./readerTapRegions";
 import type { ReaderTapRegionSettings } from "./readerTapRouting";
+import { ReadingSettingsContent, useReadingSettingsTitles, type ReadingSettingsProps } from "./ReadingSettings";
 import { SearchIndexCard } from "./SearchPanel";
 import type { ShelfBodySearchProps } from "./ShelfView";
-import "./readerTapRegions.css";
 import "./shelfSettings.css";
 
 export type ShelfSettingsSection = "appearance" | "reading" | "data" | "storage" | "about";
@@ -94,14 +92,6 @@ function SettingsRow(props: { icon: ReactNode; title: string; detail?: string; d
   </button>;
 }
 
-function Switch(props: { label: string; checked: boolean; onChange(checked: boolean): void }) {
-  return <label className="shelf-settings-switch">
-    <span className="shelf-settings-switch-label">{props.label}</span>
-    <input type="checkbox" role="switch" checked={props.checked} onChange={(event) => props.onChange(event.target.checked)} />
-    <span className="shelf-settings-switch-track" aria-hidden="true" />
-  </label>;
-}
-
 function Segmented<T extends string>(props: { label: string; value: T; options: Array<{ value: T; label: string }>; onChange(value: T): void }) {
   return <div className="shelf-settings-control">
     <span>{props.label}</span>
@@ -129,8 +119,7 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
   const [section, setSection] = useState<ShelfSettingsSection | null>(props.initialSection ?? (dialog ? "appearance" : null));
   const [cacheOpen, setCacheOpen] = useState(false);
   const [indexBusy, setIndexBusy] = useState(false);
-  const tapLabels = useMemo(() => Object.fromEntries(Object.entries(TAP_REGION_LABEL_KEYS)
-    .map(([field, key]) => [field, t(key)])) as unknown as ReaderTapRegionsLabels, [t]);
+  const readingTitles = useReadingSettingsTitles(props);
 
   useEffect(() => {
     if (props.open) setSection(props.initialSection ?? (dialog ? "appearance" : null));
@@ -165,28 +154,17 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
 
   const busy = props.busy;
   const archiveBusy = busy || props.saveFileActive || props.lanTransferActive;
-  const reading: Array<{ key: string; title: string; node: ReactNode }> = [];
-  if (props.tapRegions && props.onTapRegionsChange) {
-    reading.push({ key: "tap", title: t("tapRegions.title"), node: <div className="shelf-settings-card" key="tap">
-      <div className="shelf-settings-card-title">{t("tapRegions.title")}</div>
-      <ReaderTapRegionsPanel device={props.tapRegions.device} value={props.tapRegions.preferences}
-        onChange={props.onTapRegionsChange} availableWidth={window.innerWidth} availableHeight={window.innerHeight}
-        scrollMode={props.tapRegionsScrollMode} schematic labels={tapLabels} />
-    </div> });
-  }
-  const switches: ReactNode[] = [];
-  if (props.keepScreenOnWhileReading !== undefined && props.onKeepScreenOnWhileReadingChange) {
-    reading.push({ key: "screen", title: t("shelfMenu.keepScreenOn"), node: null });
-    switches.push(<Switch key="screen" label={t("shelfMenu.keepScreenOn")} checked={props.keepScreenOnWhileReading} onChange={props.onKeepScreenOnWhileReadingChange} />);
-  }
-  if (props.hideReaderSystemStatusBar !== undefined && props.onHideReaderSystemStatusBarChange) {
-    reading.push({ key: "status", title: t("shelfMenu.statusBar"), node: null });
-    switches.push(<Switch key="status" label={t("shelfMenu.statusBar.tip")} checked={props.hideReaderSystemStatusBar} onChange={props.onHideReaderSystemStatusBarChange} />);
-  }
-  if (props.batteryIndicatorEnabled !== undefined && props.onBatteryIndicatorChange) {
-    reading.push({ key: "battery", title: t("shelfMenu.battery"), node: null });
-    switches.push(<Switch key="battery" label={t("shelfMenu.battery.tip")} checked={props.batteryIndicatorEnabled} onChange={props.onBatteryIndicatorChange} />);
-  }
+  const readingProps: ReadingSettingsProps = {
+    tapRegions: props.tapRegions,
+    onTapRegionsChange: props.onTapRegionsChange,
+    tapRegionsScrollMode: props.tapRegionsScrollMode,
+    keepScreenOnWhileReading: props.keepScreenOnWhileReading,
+    onKeepScreenOnWhileReadingChange: props.onKeepScreenOnWhileReadingChange,
+    hideReaderSystemStatusBar: props.hideReaderSystemStatusBar,
+    onHideReaderSystemStatusBarChange: props.onHideReaderSystemStatusBarChange,
+    batteryIndicatorEnabled: props.batteryIndicatorEnabled,
+    onBatteryIndicatorChange: props.onBatteryIndicatorChange,
+  };
 
   const dataRows = [
     capabilities.supportsLanTransfer && props.onOpenLanTransfer ? <SettingsRow key="lan" icon={ROW_ICONS.lan} title={t("shelfMenu.lan")} detail={t("shelfMenu.lan.detail")}
@@ -233,12 +211,9 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
     {language.error && <p className="shelf-settings-error" role="alert">{language.error}</p>}
   </div>;
   sections.push({ id: "appearance", title: t("shelfSettings.section.appearance"), detail: "", content: appearance });
-  if (reading.length > 0) {
-    sections.push({ id: "reading", title: t("shelfSettings.section.reading"), detail: reading.map((item) => item.title).join(t("notice.listSep")),
-      content: <>
-        {reading.map((item) => item.node)}
-        {switches.length > 0 && <div className="shelf-settings-card is-list">{switches}</div>}
-      </> });
+  if (readingTitles.length > 0) {
+    sections.push({ id: "reading", title: t("shelfSettings.section.reading"), detail: readingTitles.join(t("notice.listSep")),
+      content: <ReadingSettingsContent {...readingProps} /> });
   }
   sections.push({ id: "data", title: t("shelfSettings.section.data"),
     detail: [t("shelfMenu.export"), t("shelfMenu.importArchive"), ...(capabilities.supportsLanTransfer && props.onOpenLanTransfer ? [t("shelfMenu.lan")] : [])].join(t("notice.listSep")),
