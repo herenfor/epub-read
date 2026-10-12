@@ -33,6 +33,7 @@
   "notice.operationFailed": "Operation failed: {error}",
   "notice.folderImport.blocked": "Archive task or device transfer in progress; folder import temporarily unavailable",
   "notice.folderImport.openFailed": "Failed to open folder import: {error}",
+  "notice.shelf.readInterrupted": "The library kept changing while it was being read; nothing was replaced. Please retry.",
   "notice.shelf.refreshFailed": "Failed to refresh library: {error}",
   "notice.shelf.refreshFailedShort": "Failed to refresh library",
   "notice.archive.exportTitle": "Export Archive",

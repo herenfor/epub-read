@@ -126,7 +126,7 @@ import { LogPanel, type LogItem } from "./ui/LogPanel";
 import { ReaderView, type ReaderHandle } from "./ui/ReaderView";
 import type { ReaderNoteForPaginator } from "./render/paginator";
 import { ShelfView } from "./ui/ShelfView";
-import { createLibraryReader, LIBRARY_LOADING, libraryReadFailed, libraryReadSucceeded, shelfLibraryView, type LibraryLoadState } from "./ui/libraryLoad";
+import { createLibraryReader, LIBRARY_LOADING, LibraryReadInterruptedError, libraryReadFailed, libraryReadSucceeded, shelfLibraryView, type LibraryLoadState } from "./ui/libraryLoad";
 import { ReaderReadingSettings, SettingsSwitch } from "./ui/ReadingSettings";
 import { ChevronRightIcon } from "./ui/readerIcons";
 import { NativeImportPanel, type NativeImportCancelState } from "./ui/NativeImportPanel";
@@ -751,6 +751,11 @@ function createShelfBookArchiveInput(id: string): { port: MessagePort; dispose()
       owner.dispose();
     },
   };
+}
+
+/** Library read errors as shown on the shelf; the "kept changing" case gets its own wording. */
+function libraryReadErrorText(error: unknown): string {
+  return error instanceof LibraryReadInterruptedError ? uiText("notice.shelf.readInterrupted") : String(error);
 }
 
 export default function App() {
@@ -2377,7 +2382,7 @@ export default function App() {
       })();
     },
     failList(error) {
-      setLibraryLoad((previous) => libraryReadFailed(previous, String(error)));
+      setLibraryLoad((previous) => libraryReadFailed(previous, libraryReadErrorText(error)));
       recordLifecycleDiagnostic("startup_list", {
         stage: "list",
         result: "failed",
@@ -2392,20 +2397,23 @@ export default function App() {
     },
     failOrganization(error) {
       // Keep the folders already known; writes stay blocked while organizationError is set.
-      setOrganizationError(uiText("notice.organization.readFailed", { error: String(error) }));
+      setOrganizationError(uiText("notice.organization.readFailed", { error: libraryReadErrorText(error) }));
       setOrganizationSettled(true);
-      setShelfNotice({ kind: "error", text: uiText("notice.organization.readFailedWrites", { error: String(error) }) });
+      setShelfNotice({ kind: "error", text: uiText("notice.organization.readFailedWrites", { error: libraryReadErrorText(error) }) });
     },
   };
+  // The facade's store instance is the repository identity: activation swaps it.
   const [libraryReader] = useState(() => createLibraryReader<ShelfEntry[]>({
     read: () => getShelfStore().list(),
     writeCount: () => shelfWritesRef.current,
+    repository: () => getShelfStore(),
     publish: (entries) => libraryReadDepsRef.current!.publishList(entries),
     fail: (error) => libraryReadDepsRef.current!.failList(error),
   }));
   const [organizationReader] = useState(() => createLibraryReader<LibraryOrganization>({
     read: () => getShelfStore().getOrganization(),
     writeCount: () => organizationWritesRef.current,
+    repository: () => getShelfStore(),
     publish: (org) => libraryReadDepsRef.current!.publishOrganization(org),
     fail: (error) => libraryReadDepsRef.current!.failOrganization(error),
   }));
@@ -2415,22 +2423,17 @@ export default function App() {
     if (organizationError) void organizationReader.load();
   }, [libraryReader, organizationReader, organizationError]);
 
-  /** Authoritative re-read after imports and sync; supersedes any library read still in flight. */
+  /**
+   * Authoritative re-read after imports and sync. It goes through the same
+   * publish gate as the first read and supersedes any read still in flight;
+   * a newer refresh, a write during the read or teardown keeps this one from
+   * publishing. Books and folders fail independently; only a list failure
+   * rejects, so callers keep their own error wording.
+   */
   const refreshShelfProjection = useCallback(async (): Promise<void> => {
-    libraryReader.invalidate();
-    organizationReader.invalidate();
-    const store = getShelfStore();
-    const [list, org] = await Promise.allSettled([store.list(), store.getOrganization()]);
-    // The two reads fail independently: books still show when only the folders failed.
-    if (org.status === "fulfilled") libraryReadDepsRef.current!.publishOrganization(org.value);
-    else libraryReadDepsRef.current!.failOrganization(org.reason);
-    if (list.status === "rejected") {
-      setLibraryLoad((previous) => libraryReadFailed(previous, String(list.reason)));
-      throw list.reason;
-    }
-    setShelfEntries(list.value);
-    setLibraryLoad(libraryReadSucceeded());
-  }, [libraryReader, organizationReader, setShelfEntries]);
+    const [list] = await Promise.all([libraryReader.refresh(), organizationReader.refresh()]);
+    if (list.kind === "failed") throw list.error;
+  }, [libraryReader, organizationReader]);
 
   const handleOpenFolderImport = useCallback(async (): Promise<void> => {
     if (shelfBusyRef.current || organizationBusyRef.current || nativeImportRef.current) {

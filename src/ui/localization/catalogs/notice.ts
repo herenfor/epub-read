@@ -40,6 +40,7 @@ export const notice = defineMessages("notice", {
   "notice.operationFailed": "操作失败：{error}",
   "notice.folderImport.blocked": "存档或设备互传进行中，暂不能导入文件夹",
   "notice.folderImport.openFailed": "无法打开文件夹导入：{error}",
+  "notice.shelf.readInterrupted": { zh: "读取期间书库一直在变化，现有内容未被替换；请重试", note: "Library read gave up because imports/sync kept changing it; nothing was replaced." },
   "notice.shelf.refreshFailed": "书架刷新失败：{error}",
   "notice.shelf.refreshFailedShort": { zh: "书架刷新失败", note: "A clause appended to a summary notice." },
   "notice.archive.exportTitle": { zh: "导出存档", note: "System save dialog title." },
