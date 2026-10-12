@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { forwardRef, useContext, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import type { Book } from "../core/types";
 import { nextLinearIndex, spineItemPath } from "../core/book";
 import {
@@ -44,6 +44,18 @@ import { ImageChapterSpreads, type ImageChapterSpread } from "./imageChapterSpre
 import { ImageSpreadReaderView } from "./ImageSpreadReaderView";
 import { EdgeTurnZone } from "./EdgeTurnZone";
 import { EdgeTurnFeedbackContext, useEdgeTurnFeedbackOwner } from "./edgeTurnFeedback";
+import type { PlainTapInfo, PlainTapPoint } from "../render/plainTap";
+import {
+  createReaderTapGeometry,
+  edgeFeedbackKeyOf,
+  edgeTurnZoneSpecs,
+  ReaderTapRoutingContext,
+  ReaderTurnOwnerContext,
+  routeReaderTap,
+  useReaderTapRouting,
+  type ReaderTapRegionSettings,
+  type ReaderTapRouting,
+} from "./readerTapRouting";
 import { createSpreadGeometry } from "../render/pagedSpread";
 import type { ScrubToken } from "./readerProgressAxis";
 import { installPagedSwipe, PAGED_SWIPE_THRESHOLD_PX } from "../render/pagedSwipe";
@@ -201,8 +213,10 @@ export interface ReaderViewProps {
   onImageActivation?(image: ImageActivationPayload): void;
   /** 图片浮层打开时暂停正文按键/滚轮/触摸翻页输入。 */
   inputPaused?: boolean;
-  /** 手机触摸普通轻点：用于显隐阅读工具；由 App 根协调者决定动作。 */
+  /** 手机触摸普通轻点：用于显隐阅读工具；由 App 根协调者决定动作。分页模式下只收到中间区域的轻点。 */
   onPlainTap?: () => void;
+  /** 分页模式点击翻页区域：当前设备类别与本机偏好；未提供时保持原默认边缘区。 */
+  tapRegions?: ReaderTapRegionSettings;
   /** paginator 对跨章精确目标的最终定位状态。 */
   onPreciseNavigationStatus?(status: {
     requestId: number;
@@ -819,16 +833,20 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
           if (!slot.paginator?.pageMotionAvailable) slideAnimRef.current?.finish();
         },
       },
-      props.onPlainTap
-        ? () => {
-            if (isActiveSlot(slot) && !inputPausedRef.current && slot.state.status === "ready") {
-              props.onPlainTap?.();
-            }
-          }
-        : undefined,
+      // 正文点击总是安装：PC 鼠标单击与触屏轻点都按点击区几何路由；坐标换成顶层窗口坐标。
+      (tap) => {
+        if (isActiveSlot(slot) && !inputPausedRef.current && slot.state.status === "ready") {
+          const rect = slot.iframe.getBoundingClientRect();
+          plainTapRef.current({ ...tap, clientX: tap.clientX + rect.left, clientY: tap.clientY + rect.top });
+        }
+      },
       () => !isActiveSlot(slot) || inputPausedRef.current || slot.state.status !== "ready"
     );
     slot.paginator = paginator;
+    paginator.setPlainTapRepeatClaim?.((point) => {
+      const rect = slot.iframe.getBoundingClientRect();
+      return claimsRepeatTapRef.current({ clientX: point.clientX + rect.left, clientY: point.clientY + rect.top });
+    });
     paginator.setMotionWindowForeground?.(false);
     paginator.setTextProjectionPreferences?.(
       props.textProjectionPreferences ?? DEFAULT_TEXT_PROJECTION_PREFERENCES,
@@ -1791,6 +1809,28 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
 
   // 翻页逻辑（滚轮与按钮/键盘共用）
   const turnPageRef = useRef<(dir: 1 | -1, source?: "wheel" | "key" | "ui") => void>(() => {});
+  const tapRouting = useReaderTapRouting();
+  const turnOwner = useContext(ReaderTurnOwnerContext);
+  const routeTap = (clientX: number) => {
+    const hostLeft = tapRouting?.hostLeft();
+    return tapRouting && hostLeft !== null && hostLeft !== undefined
+      ? routeReaderTap(tapRouting, hostLeft, clientX)
+      : { kind: "center" } as const;
+  };
+  // 一次正文点击只走这一处：左右区翻页（反馈归物理侧），中间交给宿主（手机呼出菜单，PC 不动作）。
+  const plainTapRef = useRef<(tap: PlainTapInfo) => void>(() => {});
+  plainTapRef.current = (tap) => {
+    const route = routeTap(tap.clientX);
+    if (route.kind === "turn" && tapRouting) {
+      tapRouting.feedback.hold(edgeFeedbackKeyOf(route.side));
+      if (turnOwner) turnOwner(route.direction);
+      else turnPageRef.current(route.direction);
+    } else if (route.kind === "center") {
+      props.onPlainTap?.();
+    }
+  };
+  const claimsRepeatTapRef = useRef<(point: PlainTapPoint) => boolean>(() => false);
+  claimsRepeatTapRef.current = (point) => routeTap(point.clientX).kind === "turn";
   turnPageRef.current = (dir, source) => {
     pauseBackgroundWarmupForInput();
     const p = paginatorRef.current;
@@ -2295,10 +2335,12 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         aria-hidden="true"
       />
       <div ref={swipeHintRef} className="reader-swipe-hint" aria-hidden="true" />
-      {([-1, 1] as const).map((direction) => <EdgeTurnZone key={direction}
-        direction={direction}
+      {edgeTurnZoneSpecs(tapRouting).map((zone) => <EdgeTurnZone key={zone.side}
+        direction={zone.direction}
+        side={zone.sideProp}
+        region={zone.region}
         onPrepare={() => paginatorRef.current?.prepareMotion?.()}
-        onTurn={() => turnPageRef.current(direction)}
+        onTurn={(direction) => turnPageRef.current(direction)}
       />)}
       </div>
     </>
@@ -2341,6 +2383,14 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
   const planned = imageSpreads.peek(props.spineIndex) ?? (imagePlan?.resolver === imageSpreads &&
     imagePlan.index === props.spineIndex ? imagePlan.spread : null);
   const pair = requestedSpread && imageGeometry.columns === 2 ? planned : null;
+  const tapGeometry = useMemo(() => createReaderTapGeometry(width, props.tapRegions), [width, props.tapRegions]);
+  const tapRouting = useMemo<ReaderTapRouting | null>(() => props.tapRegions ? {
+    device: props.tapRegions.device,
+    preferences: props.tapRegions.preferences,
+    geometry: tapGeometry,
+    hostLeft: () => host.current?.getBoundingClientRect().left ?? null,
+    feedback: edgeFeedback,
+  } : null, [props.tapRegions, tapGeometry, edgeFeedback]);
   let content;
   if (props.settings.readingMode === "scroll" && !props.book.fixedLayout) {
     content = <ContinuousReaderView {...props} ref={ref} />;
@@ -2355,6 +2405,8 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
     content = <PagedReaderView {...props} ref={ref} />;
   }
   return <EdgeTurnFeedbackContext.Provider value={edgeFeedback}>
-    <div ref={host} className="reader-presentation-host">{content}</div>
+    <ReaderTapRoutingContext.Provider value={tapRouting}>
+      <div ref={host} className="reader-presentation-host">{content}</div>
+    </ReaderTapRoutingContext.Provider>
   </EdgeTurnFeedbackContext.Provider>;
 });
