@@ -365,13 +365,17 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
     dialogRef.current?.focus({ preventScroll: true });
   }, []);
   // 手机：半高打开，常用项一屏可见、正文仍露出；拖把手上拉展开全部，下拉收起或关闭。
+  // 半高时在内容区任意处上划也先展开；展开后内容已在顶部时下划收回半高。
   const [expanded, setExpanded] = useState(false);
+  const bodyRef = useRef<HTMLDivElement>(null);
   const { dragging, grip } = useSheetDrag({
     sheetRef: dialogRef,
     disabled: isClosing,
     onDismiss: requestClose,
     expanded,
     onExpandedChange: setExpanded,
+    contentRef: bodyRef,
+    contentDragEnabled: () => Boolean(dialogRef.current?.closest('.app[data-mobile-chrome="true"][data-layout="compact"]')),
   });
 
   return (
@@ -425,7 +429,7 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
           </button>
         </div>
 
-        <div className="aa-popover-body">
+        <div className="aa-popover-body" ref={bodyRef}>
           {/* =========================================================
            * TAB 1: 常用外观 (Quick View)
            * ========================================================= */}

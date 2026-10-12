@@ -24,6 +24,35 @@ export function resolveSheetDrag(
   return "stay";
 }
 
+/** Movement before a content drag is classified as sheet drag or native scroll. */
+export const CONTENT_DRAG_SLOP_PX = 8;
+
+export type ContentDragClaim = "expand" | "collapse" | null;
+
+/**
+ * Whether a vertical drag that began inside the sheet's scrolling content
+ * moves the sheet instead of scrolling. `dy` is positive downward.
+ * Half height: any upward drag expands first, so content scrolls only once
+ * the sheet is tall. Expanded: a downward drag with the content already at
+ * its top collapses. Everything else is ordinary scrolling.
+ */
+export function claimContentDrag(
+  dx: number,
+  dy: number,
+  sheet: { expanded: boolean; atTop: boolean },
+): ContentDragClaim {
+  if (Math.abs(dy) < CONTENT_DRAG_SLOP_PX || Math.abs(dy) <= Math.abs(dx)) return null;
+  if (!sheet.expanded) return dy < 0 ? "expand" : null;
+  return dy > 0 && sheet.atTop ? "collapse" : null;
+}
+
+/**
+ * Controls that own their own drags (sliders, text fields). Buttons and
+ * segmented pickers are taps, which a drag past the slop never fires, so
+ * they move the sheet like the rest of the content.
+ */
+const CONTENT_DRAG_EXEMPT = "input, textarea, select, [contenteditable], [role='slider'], [data-sheet-drag='off']";
+
 export interface SheetDragOptions {
   sheetRef: RefObject<HTMLElement>;
   disabled?: boolean;
@@ -31,12 +60,17 @@ export interface SheetDragOptions {
   /** Half-height sheets: pull up to expand, pull down from full height to collapse. */
   expanded?: boolean;
   onExpandedChange?(expanded: boolean): void;
+  /** Scrolling body of an expandable sheet: drags inside it can expand or collapse the sheet too. */
+  contentRef?: RefObject<HTMLElement>;
+  /** Content drags apply only while this returns true (e.g. phone bottom-sheet layout). */
+  contentDragEnabled?(): boolean;
 }
 
 /**
  * Bottom-sheet grip: the sheet follows a downward drag, resists an upward
  * one, and on release closes, collapses, expands or springs back. Spread
- * `grip` on the grip and header elements.
+ * `grip` on the grip and header elements. With `contentRef`, drags in the
+ * scrolling body expand and collapse the sheet as `claimContentDrag` says.
  */
 export function useSheetDrag(options: SheetDragOptions) {
   const drag = useRef<{ pointerId: number; startY: number; lastY: number; lastAt: number; velocity: number } | null>(null);
@@ -93,6 +127,74 @@ export function useSheetDrag(options: SheetDragOptions) {
       if (drag.current?.pointerId === event.pointerId) endDrag("stay");
     },
   };
+
+  // Content drags use touch events: they must decide before the browser
+  // starts scrolling, and cancel that scroll (non-passive) once claimed.
+  const contentRef = options.contentRef;
+  const contentExpandable = Boolean(options.onExpandedChange);
+  useEffect(() => {
+    const contentEl = contentRef?.current;
+    if (!contentEl || !contentExpandable) return;
+    let gesture: { startX: number; startY: number; lastY: number; lastAt: number; velocity: number; claim: ContentDragClaim | "scroll" } | null = null;
+    const onStart = (event: TouchEvent) => {
+      const opts = latest.current;
+      gesture = null;
+      if (opts.disabled || event.touches.length !== 1 || (opts.contentDragEnabled && !opts.contentDragEnabled())) return;
+      const target = event.target as Element | null;
+      if (target?.closest?.(CONTENT_DRAG_EXEMPT)) return;
+      const touch = event.touches[0];
+      gesture = { startX: touch.clientX, startY: touch.clientY, lastY: touch.clientY, lastAt: event.timeStamp, velocity: 0, claim: null };
+    };
+    const onMove = (event: TouchEvent) => {
+      if (!gesture || gesture.claim === "scroll") return;
+      const touch = event.touches[0];
+      const dy = touch.clientY - gesture.startY;
+      if (gesture.claim === null) {
+        const dx = touch.clientX - gesture.startX;
+        const sheetState = { expanded: latest.current.expanded ?? false, atTop: contentEl.scrollTop <= 0 };
+        const claim = claimContentDrag(dx, dy, sheetState);
+        if (claim === null) {
+          if (Math.abs(dy) >= CONTENT_DRAG_SLOP_PX || Math.abs(dx) >= CONTENT_DRAG_SLOP_PX) {
+            gesture.claim = "scroll";
+          } else if (claimContentDrag(dx, Math.sign(dy) * CONTENT_DRAG_SLOP_PX, sheetState) !== null) {
+            // Still inside the slop but heading the claimable way: hold the
+            // native scroll now, since the browser stops letting us cancel it
+            // once it has started.
+            event.preventDefault();
+          }
+          return;
+        }
+        gesture.claim = claim;
+        setDragging(true);
+      }
+      event.preventDefault();
+      const dt = Math.max(1, event.timeStamp - gesture.lastAt);
+      gesture.velocity = (touch.clientY - gesture.lastY) / dt;
+      gesture.lastY = touch.clientY;
+      gesture.lastAt = event.timeStamp;
+      const sheet = latest.current.sheetRef.current;
+      if (sheet) sheet.style.transform = `translateY(${gesture.claim === "collapse" ? Math.max(0, dy) : Math.min(0, dy) / 4}px)`;
+    };
+    const onEnd = (event: TouchEvent) => {
+      const state = gesture;
+      gesture = null;
+      if (!state || (state.claim !== "expand" && state.claim !== "collapse")) return;
+      if (event.type === "touchcancel") { endDragRef.current("stay"); return; }
+      const outcome = resolveSheetDrag(state.lastY - state.startY, state.velocity, { expandable: true, expanded: state.claim === "collapse" });
+      // A content drag only expands or collapses; closing stays on the grip.
+      endDragRef.current(outcome === state.claim ? outcome : "stay");
+    };
+    contentEl.addEventListener("touchstart", onStart, { passive: true });
+    contentEl.addEventListener("touchmove", onMove, { passive: false });
+    contentEl.addEventListener("touchend", onEnd);
+    contentEl.addEventListener("touchcancel", onEnd);
+    return () => {
+      contentEl.removeEventListener("touchstart", onStart);
+      contentEl.removeEventListener("touchmove", onMove);
+      contentEl.removeEventListener("touchend", onEnd);
+      contentEl.removeEventListener("touchcancel", onEnd);
+    };
+  }, [contentRef, contentExpandable]);
 
   return { dragging, grip };
 }
