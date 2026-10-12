@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveSheetDrag, SHEET_CLOSE_DISTANCE_PX, SHEET_EXPAND_DISTANCE_PX } from "./sheetDrag";
+import { claimContentDrag, CONTENT_DRAG_SLOP_PX, resolveSheetDrag, SHEET_CLOSE_DISTANCE_PX, SHEET_EXPAND_DISTANCE_PX } from "./sheetDrag";
 
 describe("bottom sheet drag", () => {
   const plain = { expandable: false, expanded: false };
@@ -19,5 +19,21 @@ describe("bottom sheet drag", () => {
     expect(resolveSheetDrag(SHEET_CLOSE_DISTANCE_PX + 1, 0, half)).toBe("dismiss");
     expect(resolveSheetDrag(SHEET_CLOSE_DISTANCE_PX + 1, 0, full)).toBe("collapse");
     expect(resolveSheetDrag(-200, -2, full)).toBe("stay");
+  });
+
+  it("lets a content drag expand first at half height and collapse only from the top", () => {
+    const halfTop = { expanded: false, atTop: true };
+    const fullTop = { expanded: true, atTop: true };
+    const fullScrolled = { expanded: true, atTop: false };
+    // Below the slop or mostly sideways: undecided, the browser keeps the gesture.
+    expect(claimContentDrag(0, -(CONTENT_DRAG_SLOP_PX - 1), halfTop)).toBeNull();
+    expect(claimContentDrag(30, -20, halfTop)).toBeNull();
+    // Half height: up expands before any scrolling; down is left alone.
+    expect(claimContentDrag(2, -20, halfTop)).toBe("expand");
+    expect(claimContentDrag(0, 40, halfTop)).toBeNull();
+    // Expanded: up scrolls; down collapses only with the content at its top.
+    expect(claimContentDrag(0, -40, fullTop)).toBeNull();
+    expect(claimContentDrag(0, 40, fullTop)).toBe("collapse");
+    expect(claimContentDrag(0, 40, fullScrolled)).toBeNull();
   });
 });
