@@ -1,7 +1,13 @@
 import { summarizeLinearCounts, type ChapterCountCollection } from "./chapterCounts";
 
 const CACHE_KEY = "epub-reader-chapter-counts-v1";
-const CACHE_VERSION = 1;
+/**
+ * Bump whenever the structural estimate itself changes. 2: chapters with an
+ * XHTML `<script/>` were counted from an unnormalized HTML parse (B-236), so
+ * version 1 estimates and their progressKnown flags are dropped and rebuilt.
+ * Same key: the next write simply replaces the old record.
+ */
+const CACHE_VERSION = 2;
 const MAX_ENTRIES = 256;
 const MAX_TOTAL_COUNTS = 100_000;
 

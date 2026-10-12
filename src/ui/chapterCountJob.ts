@@ -1,6 +1,7 @@
 import { resolveArchiveHref } from "../core/archiveReferences";
 import { resolvePath } from "../core/paths";
 import type { Book } from "../core/types";
+import { normalizeChapterMarkup } from "../render/chapterDocument";
 import {
   hasStructurallyExcludedAncestor,
   isStructurallyHiddenElement,
@@ -57,6 +58,7 @@ export interface ChapterCountJobOptions {
   skipIndices?: ReadonlySet<number>;
   /** Bounded number of chapters handled by one scheduler callback. */
   maxPerSlice?: number;
+  /** HTML parser; it receives markup already normalized like the rendered chapter. */
   parse?: (text: string) => Document;
   onCount(index: number, value: number): void;
   onCounts?(counts: Array<[number, number]>): void;
@@ -141,7 +143,9 @@ export function createChapterCountJob(options: ChapterCountJobOptions): { cancel
           if (text === undefined) {
             issue = `chapter ${index}: text resource missing (${path})`;
           } else {
-            value = countStructuralChapter((options.parse ?? defaultParse)(text));
+            // Same self-closing normalization as the rendered chapter: a raw
+            // `<script/>` would otherwise swallow the body and count as 0.
+            value = countStructuralChapter((options.parse ?? defaultParse)(normalizeChapterMarkup(text)));
           }
         }
       } catch (error) {
