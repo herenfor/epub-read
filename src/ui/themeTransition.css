@@ -1,0 +1,57 @@
+/**
+ * 整屏主题淡入装饰过渡专用样式
+ *
+ * 作用范围严格限定于当前控制器激活期间（:root[data-theme-transitioning] / :root.theme-transitioning）。
+ * 控制器结束或中断时立即移除相应标记，样式即刻失效。
+ *
+ * 契约防护：
+ * 1. 临时过渡层不阻挡用户点击与输入（pointer-events: none）。
+ * 2. 严禁使用全局 `*` 动画清零，不污染菜单/翻页或作者自定义 CSS。
+ * 3. 严格遵循系统及应用级减弱动效偏好（prefers-reduced-motion / data-motion="reduced"）。
+ * 4. 约 200ms 快速淡入淡出，不阻碍阅读与连续操作。
+ */
+
+:root[data-theme-transitioning="true"]::view-transition,
+:root.theme-transitioning::view-transition {
+  pointer-events: none;
+}
+
+:root[data-theme-transitioning="true"]::view-transition-group(root),
+:root.theme-transitioning::view-transition-group(root) {
+  animation-duration: 200ms;
+  animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+:root[data-theme-transitioning="true"]::view-transition-old(root),
+:root.theme-transitioning::view-transition-old(root) {
+  animation-duration: 200ms;
+  animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+:root[data-theme-transitioning="true"]::view-transition-new(root),
+:root.theme-transitioning::view-transition-new(root) {
+  animation-duration: 200ms;
+  animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* 系统减弱动效偏好 */
+@media (prefers-reduced-motion: reduce) {
+  :root[data-theme-transitioning]::view-transition-group(root),
+  :root[data-theme-transitioning]::view-transition-old(root),
+  :root[data-theme-transitioning]::view-transition-new(root),
+  :root.theme-transitioning::view-transition-group(root),
+  :root.theme-transitioning::view-transition-old(root),
+  :root.theme-transitioning::view-transition-new(root) {
+    animation: none !important;
+  }
+}
+
+/* 应用级低动效模式 */
+:root[data-motion="reduced"][data-theme-transitioning]::view-transition-group(root),
+:root[data-motion="reduced"][data-theme-transitioning]::view-transition-old(root),
+:root[data-motion="reduced"][data-theme-transitioning]::view-transition-new(root),
+:root[data-motion="reduced"].theme-transitioning::view-transition-group(root),
+:root[data-motion="reduced"].theme-transitioning::view-transition-old(root),
+:root[data-motion="reduced"].theme-transitioning::view-transition-new(root) {
+  animation: none !important;
+}
