@@ -1,9 +1,9 @@
 import { defineMessages } from "../defineMessages";
 
 /**
- * Tap-to-turn region settings and preview (ReaderTapRegionsPanel), opened
- * from the shelf settings. Hosts map TAP_REGION_LABEL_KEYS through t() into
- * the panel's labels prop and use "tapRegions.title" for their own heading.
+ * Tap-to-turn region settings and preview (ReaderTapRegionsPanel), shown in
+ * Settings › Reading. Hosts map TAP_REGION_LABEL_KEYS through t() into the
+ * panel's labels prop and use "tapRegions.title" for their own heading.
  */
 export const tapRegions = defineMessages("tapRegions", {
   "tapRegions.title": { zh: "点击翻页区域", max: 20 },
@@ -16,11 +16,6 @@ export const tapRegions = defineMessages("tapRegions", {
   "tapRegions.right": { zh: "右侧", max: 6 },
   "tapRegions.center": { zh: "中间", max: 6 },
   "tapRegions.center.action": { zh: "正文操作", note: "Middle area: taps reach the book text (menus, links, selection).", max: 10 },
-  "tapRegions.entry.default": { zh: "默认", note: "Shelf settings row summary: default bands.", max: 12 },
-  "tapRegions.entry.custom": { zh: "左 {left}% · 右 {right}%", note: "Shelf settings row summary for a custom split; {left}/{right} are whole percents.", max: 20 },
-  "tapRegions.entry.leftForward": { zh: "左侧也下一页", note: "Appended to the row summary when the touch switch is on.", max: 14 },
-  "tapRegions.close": { zh: "关闭", max: 6 },
-  "tapRegions.back": { zh: "返回", max: 6 },
   "tapRegions.prev": { zh: "上一页", max: 8 },
   "tapRegions.next": { zh: "下一页", max: 8 },
   "tapRegions.off": { zh: "关闭", note: "A side whose tap area is set to 0.", max: 6 },
