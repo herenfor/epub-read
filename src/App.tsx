@@ -56,7 +56,6 @@ import { useReaderCursorIdle } from "./ui/readerCursorIdle";
 import { createSidebarNavigationMemory, type SidebarNavigationMemory } from "./ui/sidebarSwipe";
 import { SidebarDrawer, type SidebarMode, type SidebarTab } from "./ui/SidebarDrawer";
 import { AaPopover } from "./ui/AaPopover";
-import { AboutInfo } from "./ui/AboutInfo";
 import { resolveReaderLoadFeedback } from "./ui/loadingFeedback";
 import { WhisperFooter, type WhisperFooterChapterTick } from "./ui/WhisperFooter";
 import { BatteryIndicator } from "./ui/BatteryIndicator";
@@ -127,6 +126,8 @@ import { LogPanel, type LogItem } from "./ui/LogPanel";
 import { ReaderView, type ReaderHandle } from "./ui/ReaderView";
 import type { ReaderNoteForPaginator } from "./render/paginator";
 import { ShelfView } from "./ui/ShelfView";
+import { ReaderReadingSettings, SettingsSwitch } from "./ui/ReadingSettings";
+import { ChevronRightIcon } from "./ui/readerIcons";
 import { NativeImportPanel, type NativeImportCancelState } from "./ui/NativeImportPanel";
 import {
   createNativeDirectoryImportPort,
@@ -1304,6 +1305,7 @@ export default function App() {
   const notesOpen = foreground.kind === "panel" && foreground.panel === "notes";
   const logOpen = foreground.kind === "panel" && foreground.panel === "log";
   const assistantOpen = foreground.kind === "panel" && foreground.panel === "assistant";
+  const readingSettingsOpen = foreground.kind === "panel" && foreground.panel === "reading";
 
   useEffect(() => {
     if (!displaySettingsOpen) setVisualCompareOriginal(false);
@@ -6218,6 +6220,7 @@ export default function App() {
     notesOpen ||
     logOpen ||
     assistantOpen ||
+    readingSettingsOpen ||
     noteComposer !== null
   );
 
@@ -7096,32 +7099,71 @@ export default function App() {
           />
           <div className={`mobile-more-sheet${moreSheetPresence.closing ? " is-closing" : ""}`} role="dialog" aria-modal="true" aria-label={t("appUi.more.dialog")}>
             <div className="mobile-more-title">{t("appUi.more.title")}</div>
-            {/* 书签/笔记已在“目录”面板的标签页，导入在书架；此处不再重复入口。 */}
-            {IS_AI_EDITION && (
+            {/* 书签/笔记在“目录”页签；诊断日志和关于在 书架 › 设置 › 关于。 */}
+            <div className="mobile-more-list">
+              {runtime.supportsReaderKeepScreenOn && (
+                <SettingsSwitch
+                  label={t("shelfMenu.keepScreenOn")}
+                  checked={keepScreenOnWhileReading}
+                  onChange={changeKeepScreenOnWhileReading}
+                />
+              )}
+              {runtime.supportsReaderSystemStatusBar && (
+                <SettingsSwitch
+                  label={t("shelfMenu.statusBar.tip")}
+                  checked={hideReaderSystemStatusBar}
+                  onChange={changeHideReaderSystemStatusBar}
+                />
+              )}
               <button
                 type="button"
+                className="shelf-settings-row"
                 onClick={() => {
-                  openPanel("assistant");
+                  // 先收起“更多”，阅读设置关闭后直接回到正文。
                   setMobileMoreOpen(false);
+                  openPanel("reading");
                 }}
               >
-                {t("appUi.more.ai")}
+                <span className="shelf-settings-row-text">
+                  <strong>{t("tapRegions.title")}</strong>
+                  <small>{t("appUi.more.tapRegions.detail")}</small>
+                </span>
+                <ChevronRightIcon size={15} className="shelf-settings-row-chevron" />
               </button>
-            )}
-            <button
-              type="button"
-              onClick={() => {
-                openPanel("log");
-                setMobileMoreOpen(false);
-              }}
-            >
-              {t("appUi.more.log")}
-            </button>
-            <div className="mobile-more-about">
-              <AboutInfo />
+              {IS_AI_EDITION && (
+                <button
+                  type="button"
+                  className="shelf-settings-row"
+                  onClick={() => {
+                    openPanel("assistant");
+                    setMobileMoreOpen(false);
+                  }}
+                >
+                  <span className="shelf-settings-row-text">
+                    <strong>{t("appUi.more.ai")}</strong>
+                  </span>
+                  <ChevronRightIcon size={15} className="shelf-settings-row-chevron" />
+                </button>
+              )}
             </div>
           </div>
         </>
+      )}
+      {view === "reader" && (
+        <ReaderReadingSettings
+          open={readingSettingsOpen}
+          presentation={mobileChrome ? "page" : "dialog"}
+          onClose={() => closePanel("reading")}
+          tapRegions={tapRegions}
+          onTapRegionsChange={changeTapRegionPreferences}
+          tapRegionsScrollMode={settings.readingMode === "scroll"}
+          keepScreenOnWhileReading={runtime.supportsReaderKeepScreenOn ? keepScreenOnWhileReading : undefined}
+          onKeepScreenOnWhileReadingChange={changeKeepScreenOnWhileReading}
+          hideReaderSystemStatusBar={runtime.supportsReaderSystemStatusBar ? hideReaderSystemStatusBar : undefined}
+          onHideReaderSystemStatusBarChange={changeHideReaderSystemStatusBar}
+          batteryIndicatorEnabled={runtime.platform === "android" ? batteryIndicatorEnabled : undefined}
+          onBatteryIndicatorChange={runtime.platform === "android" ? changeBatteryIndicatorEnabled : undefined}
+        />
       )}
       {logOpen && (
         <LogPanel

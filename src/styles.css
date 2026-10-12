@@ -5275,44 +5275,32 @@ select option {
   color: var(--muted);
 }
 
-.mobile-more-sheet button {
+/* 方案 A：开关和入口同放一张卡片，行样式复用设置页（shelfSettings.css）。 */
+.mobile-more-list {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 48px;
-  padding: 0 12px;
-  border: none;
-  border-radius: 10px;
-  background: transparent;
-  color: var(--fg);
-  font-size: 14px;
-  text-align: left;
-  cursor: pointer;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 70%, transparent);
+  border-radius: 14px;
+  background: var(--bg);
 }
 
-.mobile-more-sheet button:hover,
-.mobile-more-sheet button:focus-visible {
+.mobile-more-list .shelf-settings-row {
+  min-height: 56px;
+}
+
+/* 与同卡片里的开关标签同一字重。 */
+.mobile-more-list .shelf-settings-row-text strong {
+  font-weight: 400;
+}
+
+.mobile-more-list .shelf-settings-row:hover,
+.mobile-more-list .shelf-settings-row:focus-visible {
   background: var(--btn-tint-hover);
 }
 
-.mobile-more-about {
-  margin-top: 4px;
-  padding: 10px 8px 4px;
-  border-top: 1px solid color-mix(in srgb, var(--panel-border) 55%, transparent);
-}
-
-.mobile-more-about .about-info {
-  padding: 0;
-  border: none;
-  background: transparent;
-}
-
-.mobile-more-sheet .mobile-more-about .about-copy-btn {
-  min-height: 48px;
-  border: 1px solid var(--menu-surface-border, var(--panel-border));
-  border-radius: 10px;
-  background: transparent;
-  color: var(--fg);
+.mobile-more-list > :last-child {
+  border-bottom: 0;
 }
 
 /* 工具栏隐藏时保留一个有语义、可键盘/TalkBack 触达的唤出入口；不覆盖正文交互层。 */

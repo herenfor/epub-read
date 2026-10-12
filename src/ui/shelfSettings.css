@@ -63,6 +63,18 @@
   animation: shelf-settings-pop-in var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+/* 阅读器内的“阅读设置”：盖在阅读工具栏和“更多”弹层之上。 */
+.shelf-settings-layer.is-reader {
+  z-index: 302;
+}
+
+/* 只有一节内容时不要左侧导航，窗口按内容收高。 */
+.shelf-settings-window.is-single {
+  width: min(560px, 100%);
+  height: auto;
+  max-height: min(720px, calc(100vh - 48px));
+}
+
 .shelf-settings-layer.is-closing .shelf-settings-backdrop,
 .shelf-settings-layer.is-closing .shelf-settings-window {
   animation: shelf-settings-fade-out var(--menu-close) ease both;

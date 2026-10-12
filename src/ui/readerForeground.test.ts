@@ -46,6 +46,9 @@ describe("reader foreground transitions", () => {
     expect(stepBackFromMenuSubview(menu)).toBeNull();
     expect(stepBackFromMenuSubview(openReaderPanel(none, "search"))).toBeNull();
     expect(stepBackFromMenuSubview(none)).toBeNull();
+    // Reading settings opened from "More" is one layer: Back closes it straight to the page.
+    expect(stepBackFromMenuSubview(openReaderPanel(none, "reading"))).toBeNull();
+    expect(openReaderPanel(menu, "reading")).toEqual({ kind: "panel", panel: "reading" });
   });
 
   it("replaces panels when a transient appears and keeps transients exclusive", () => {

@@ -1,6 +1,6 @@
 import { defineMessages } from "../defineMessages";
 
-/** App frame pieces outside the panels: placeholders, the phone "more" sheet and progress-choice dialogs. */
+/** App frame pieces outside the panels: placeholders, the phone "more" sheet, in-reader reading settings and progress-choice dialogs. */
 export const appUi = defineMessages("appUi", {
   "appUi.appName": { zh: "EPUB 阅读器", note: "Window/top bar title on the shelf." },
   "appUi.showTools": "显示阅读工具",
@@ -12,7 +12,10 @@ export const appUi = defineMessages("appUi", {
   "appUi.more.dialog": "更多阅读操作",
   "appUi.more.title": { zh: "更多", max: 10 },
   "appUi.more.ai": "AI 助手",
-  "appUi.more.log": "诊断日志",
+  "appUi.more.tapRegions.detail": { zh: "打开 设置 › 阅读", note: "Subtitle under the tap-regions row of the phone More sheet; opens the in-reader reading settings." },
+  "appUi.reading.title": { zh: "阅读设置", max: 12 },
+  "appUi.reading.close": "关闭阅读设置",
+  "appUi.reading.back": { zh: "返回阅读", max: 8 },
   "appUi.exitHint": { zh: "再滑一次退出阅读器", note: "Android back gesture: swipe once more to leave the reader." },
   "appUi.checkpoint.dialog": "选择未确认阅读位置",
   "appUi.checkpoint.title": "选择阅读位置",
