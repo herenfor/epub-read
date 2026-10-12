@@ -362,7 +362,12 @@
   opacity: 1;
 }
 
+/* “Aa”是文字不是图标：占与图标相同的 19px 高并居中，下面的“排版”才和其他三个标签同一基线。 */
 .mobile-reader-aa {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 19px;
   font-size: 15px;
   font-weight: 700;
   letter-spacing: -0.5px;
