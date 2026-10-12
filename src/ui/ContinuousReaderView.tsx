@@ -1818,8 +1818,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
       try {
         do {
           const target = desiredSettingsRef.current;
-          await slot.paginator.reloadWithSettings(target);
-          const ready = await slot.paginator.waitForDisplayReady();
+          const ready = await slot.paginator.reloadWithSettingsAndWaitForDisplay(target);
           if (slot.unmounted || slotsRef.current.get(slot.key) !== slot) return;
           if (!ready) {
             slot.status = "error";
