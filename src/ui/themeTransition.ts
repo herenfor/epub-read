@@ -38,9 +38,13 @@ export type ThemeTransitionHost = {
    */
   onTransitionStart?: (generation: number) => void;
   /**
-   * 过渡结束或中断时的清理回调（注入当前代次）。
+   * 过渡结束或中断时的清理回调（注入当前代次）。同一代次保证只收口一次。
    */
   onTransitionEnd?: (generation: number) => void;
+  /**
+   * 异步更新回调（如 ViewTransition updateCallback）发生异常时的错误出口。
+   */
+  onCommitError?: (error: unknown, generation: number) => void;
 };
 
 /**
@@ -58,13 +62,16 @@ export function isViewTransitionSupported(doc?: Document): boolean {
  * 1. 宿主注入的同步 commit 始终是状态与 DOM 的唯一真值，控制器不自行读写 settings 或 paginator。
  * 2. 递增代次与 committed 标记保护：新请求取代旧请求，最新请求的 commit 绝不丢失；
  *    旧回调、迟到 promise 绝不晚提交，旧 finally 绝不误删新请求的临时样式类。
- * 3. skipTransition 仅跳过装饰动画，不会取消浏览器的 updateCallback；必须通过代次检查阻止旧目标晚提交。
- * 4. 读者输入、换页导航或切后台时立即 interrupt()：同步提交最新目标并跳过动画，不留半段动画，不回滚，不锁输入。
- * 5. 妥善捕获 ready/finished 等 Promise 拒绝，避免非预期的 unhandled rejection。
+ * 3. 销毁语义（dispose）：彻底撤销未提交目标，使旧代次失效；已销毁控制器不再提交任何新请求，
+ *    迟到回调与 promise 绝不再碰已卸载宿主。
+ * 4. 中断语义（interrupt）：活宿主主动中断（用户手势、翻页、切后台），同步提交最新目标并跳过动画，
+ *    提交异常向外保留，且通过 try/finally 确保彻底清理属于本次的过渡与临时样式。
+ * 5. 一次收口保证：同一代次过渡只触发一次 onTransitionEnd，迟到结算不重复触发。
  */
 export class ThemeTransitionController {
   private generation = 0;
   private committedGeneration = 0;
+  private readonly closedGenerations = new Set<number>();
   private pendingRequest: ThemeTransitionRequest | null = null;
   private activeTransition: { skipTransition(): void } | null = null;
   private disposed = false;
@@ -83,7 +90,7 @@ export class ThemeTransitionController {
 
     if (this.doc && typeof this.doc.addEventListener === "function") {
       this.boundVisibilityHandler = () => {
-        if (this.isBackgrounded()) {
+        if (!this.disposed && this.isBackgrounded()) {
           this.interrupt();
         }
       };
@@ -93,11 +100,10 @@ export class ThemeTransitionController {
 
   /**
    * 发起主题过渡请求。
-   * 新请求取代旧请求；最新请求的 commit 保证被执行。
+   * 新请求取代旧请求；最新请求的 commit 保证被执行。已销毁控制器不执行任何操作。
    */
   request(req: ThemeTransitionRequest): void {
     if (this.disposed) {
-      req.commit();
       return;
     }
 
@@ -110,7 +116,7 @@ export class ThemeTransitionController {
       !this.isBackgrounded();
 
     if (!canAnimate) {
-      // 不满足动效条件（无需动画、无 API、减弱动效、后台中）：直接瞬时同步提交
+      // 不满足动效条件：瞬时直接同步提交
       this.interruptCurrentAnimation();
       const gen = ++this.generation;
       this.committedGeneration = gen;
@@ -131,7 +137,9 @@ export class ThemeTransitionController {
     this.interruptCurrentAnimation();
 
     this.applyTransitionScope(true);
-    this.host.onTransitionStart?.(gen);
+    if (!this.disposed) {
+      this.host.onTransitionStart?.(gen);
+    }
 
     let transition: any;
     try {
@@ -142,17 +150,30 @@ export class ThemeTransitionController {
         }
         this.committedGeneration = gen;
         this.pendingRequest = null;
-        req.commit();
+        try {
+          req.commit();
+        } catch (err) {
+          this.host.onCommitError?.(err, gen);
+          throw err;
+        }
       });
     } catch {
       // 启动动画失败（例如环境限制或文档状态不可用）：
-      // 仍走同一个有效目标提交，释放本次样式，不把错误吞成静默丢失
-      if (!this.disposed && this.generation === gen && this.committedGeneration !== gen) {
+      // 仍走同一个有效目标提交，并通过 try/finally 确保释放本次样式
+      const pending = (!this.disposed && this.generation === gen && this.committedGeneration !== gen)
+        ? this.pendingRequest
+        : null;
+      if (pending) {
         this.committedGeneration = gen;
         this.pendingRequest = null;
-        req.commit();
       }
-      this.cleanup(gen);
+      try {
+        if (pending) {
+          pending.commit();
+        }
+      } finally {
+        this.cleanup(gen);
+      }
       return;
     }
 
@@ -180,46 +201,60 @@ export class ThemeTransitionController {
 
   /**
    * 中断当前装饰过渡：
-   * 提交当前未提交的最新目标，跳过装饰动画，释放属于本次的临时样式；
-   * 立即允许读者继续阅读与交互，不锁死界面。
+   * 活宿主主动中断，提交当前未提交的最新目标，跳过装饰动画，释放属于本次的临时样式；
+   * 提交异常向外保留，try/finally 保证过渡状态与样式完全清理。
    */
   interrupt(): void {
     if (this.disposed) return;
-    const currentGen = this.generation;
+    const targetGen = this.generation;
+    const transitionToCancel = this.activeTransition;
+    const pendingReq = (this.pendingRequest && this.committedGeneration !== targetGen)
+      ? this.pendingRequest
+      : null;
 
-    // 若最新目标尚未提交，立即同步提交
-    if (this.pendingRequest && this.committedGeneration !== currentGen) {
-      this.committedGeneration = currentGen;
-      const req = this.pendingRequest;
+    if (pendingReq) {
+      this.committedGeneration = targetGen;
       this.pendingRequest = null;
-      req.commit();
     }
 
-    this.interruptCurrentAnimation();
-    this.cleanup(currentGen);
+    try {
+      if (pendingReq) {
+        pendingReq.commit();
+      }
+    } finally {
+      if (transitionToCancel && this.activeTransition === transitionToCancel) {
+        this.activeTransition = null;
+        try {
+          transitionToCancel.skipTransition();
+        } catch {
+          // 忽略 skipTransition 可能抛出的异常
+        }
+      }
+      this.cleanup(targetGen);
+    }
   }
 
   /**
    * 释放过渡、事件监听与临时样式。
-   * 后续回调不再操作已卸载宿主。
+   * 撤销未提交目标，使旧代次失效；后续回调不再触碰已卸载宿主。
    */
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
     const currentGen = this.generation;
 
-    if (this.pendingRequest && this.committedGeneration !== currentGen) {
-      this.committedGeneration = currentGen;
-      const req = this.pendingRequest;
-      this.pendingRequest = null;
+    // 撤销未提交的挂起请求，不触碰已卸载宿主
+    this.pendingRequest = null;
+
+    if (this.activeTransition) {
+      const transition = this.activeTransition;
+      this.activeTransition = null;
       try {
-        req.commit();
+        transition.skipTransition();
       } catch {
-        // 宿主卸载期间容错
+        // 忽略 skipTransition 异常
       }
     }
-
-    this.interruptCurrentAnimation();
 
     if (this.boundVisibilityHandler && this.doc && typeof this.doc.removeEventListener === "function") {
       this.doc.removeEventListener("visibilitychange", this.boundVisibilityHandler);
@@ -231,7 +266,7 @@ export class ThemeTransitionController {
 
   /** 当前是否有正在播放的视图过渡动画 */
   get isTransitioning(): boolean {
-    return this.activeTransition !== null;
+    return !this.disposed && this.activeTransition !== null;
   }
 
   /** 当前最新的请求代次 */
@@ -257,15 +292,22 @@ export class ThemeTransitionController {
   }
 
   private cleanup(gen: number): void {
-    // 代次检查：旧 finally 不能移除新请求的临时类
-    if (this.generation !== gen && !this.disposed) {
+    // 代次检查与一次收口：
+    // 旧代次且未销毁时不清理新代次；已收口过的代次不重复处理
+    if ((this.generation !== gen && !this.disposed) || this.closedGenerations.has(gen)) {
       return;
     }
+    this.closedGenerations.add(gen);
+
     if (this.generation === gen) {
       this.activeTransition = null;
     }
     this.applyTransitionScope(false);
-    this.host.onTransitionEnd?.(gen);
+
+    // 销毁后不再次通知宿主
+    if (!this.disposed) {
+      this.host.onTransitionEnd?.(gen);
+    }
   }
 
   private applyTransitionScope(active: boolean): void {
