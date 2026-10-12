@@ -12,6 +12,8 @@ export interface TapRegionsSettingsPanelProps {
   value: ReaderTapPreferences;
   onChange(next: ReaderTapPreferences): void;
   onClose(): void;
+  /** The reader is in scroll mode, where tap turning does not apply. */
+  scrollMode?: boolean;
 }
 
 /**
@@ -57,6 +59,7 @@ export function TapRegionsSettingsPanel(props: TapRegionsSettingsPanelProps) {
           onChange={props.onChange}
           availableWidth={window.innerWidth}
           availableHeight={window.innerHeight}
+          scrollMode={props.scrollMode}
           schematic
           labels={labels}
         />

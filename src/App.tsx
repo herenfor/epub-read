@@ -6546,6 +6546,7 @@ export default function App() {
               onBatteryIndicatorChange={runtime.platform === "android" ? changeBatteryIndicatorEnabled : undefined}
               tapRegions={tapRegions}
               onTapRegionsChange={changeTapRegionPreferences}
+              tapRegionsScrollMode={settings.readingMode === "scroll"}
               onOpen={handleShelfOpen}
               onImport={() => void handleChooseBooks()}
               onDelete={handleShelfDelete}
