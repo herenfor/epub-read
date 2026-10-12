@@ -87,6 +87,8 @@ export interface SearchPanelProps {
   detectedCores?: number;
   recommendedConcurrency?: number;
   onConcurrencyChange?(mode: "automatic" | "manual", value?: number): void;
+  /** Desktop: docked on the right so the book stays visible; no dragging, no grip. */
+  docked?: boolean;
 }
 
 /** Keep a large result set from creating an equally large DOM tree. */
@@ -514,33 +516,33 @@ export function SearchPanel(props: SearchPanelProps) {
 
   return (
     <>
-      <div className={`search-backdrop${props.closing ? " is-closing" : ""}`} aria-hidden="true" onClick={props.onClose} />
+      <div className={`search-backdrop${props.docked ? " is-docked" : ""}${props.closing ? " is-closing" : ""}`} aria-hidden="true" onClick={props.onClose} />
       <div
-        className={`search-panel${props.closing ? " is-closing" : ""}`}
+        className={`search-panel${props.docked ? " is-docked" : ""}${props.closing ? " is-closing" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-label={t("search.dialog")}
         onKeyDown={handleKeyDown}
-        style={dragOffset ? {
+        style={dragOffset && !props.docked ? {
           transform: `translate(calc(-50% + ${dragOffset.x}px), calc(-50% + ${dragOffset.y}px))`,
           animation: "none",
         } : undefined}
       >
-        <div
+        {!props.docked && <div
           className="drawer-drag-handle search-drag-handle"
           aria-hidden="true"
           onPointerDown={handleHeaderPointerDown}
           onPointerMove={handleHeaderPointerMove}
           onPointerUp={handleHeaderPointerUp}
           onPointerCancel={handleHeaderPointerUp}
-        />
+        />}
         <div
           className="menu-head search-head"
-          onPointerDown={handleHeaderPointerDown}
-          onPointerMove={handleHeaderPointerMove}
-          onPointerUp={handleHeaderPointerUp}
-          onPointerCancel={handleHeaderPointerUp}
-          title={t("search.drag.tip")}
+          onPointerDown={props.docked ? undefined : handleHeaderPointerDown}
+          onPointerMove={props.docked ? undefined : handleHeaderPointerMove}
+          onPointerUp={props.docked ? undefined : handleHeaderPointerUp}
+          onPointerCancel={props.docked ? undefined : handleHeaderPointerUp}
+          title={props.docked ? undefined : t("search.drag.tip")}
         >
           <div className="drawer-title-wrap">
             <span className="search-title">{t("search.title")}</span>

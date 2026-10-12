@@ -31,7 +31,8 @@
 }
 
 /* PC 浮层侧栏打开时，标题栏留在遮罩之上：点 Aa 或搜索直接换成那个面板，不必先关侧栏。 */
-.app:has(.sidebar-drawer.is-overlay.is-open:not(.is-compact)) .titlebar-reader {
+.app:has(.sidebar-drawer.is-overlay.is-open:not(.is-compact)) .titlebar-reader,
+.app:has(.search-panel.is-docked) .titlebar-reader {
   z-index: 195;
 }
 

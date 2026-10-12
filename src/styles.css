@@ -287,72 +287,15 @@ select option {
 }
 
 /* ---- 多彩矢量图标体系（雅致高阶色彩） ---- */
-.tb-back .reader-svg-icon { color: #e06c53; }
-.tb-history-back .reader-svg-icon,
-.tb-history-forward .reader-svg-icon { color: #64748b; }
-.tb-menu .reader-svg-icon { color: #6366f1; }
-.bookmark-toggle .reader-svg-icon { color: #f43f5e; }
-.bookmark-toggle.active .reader-svg-icon { color: #fff; }
-.bookmark-dropdown .reader-svg-icon { color: #64748b; }
-.tb-toc .reader-svg-icon { color: #10b981; }
-.tb-search .reader-svg-icon { color: #0ea5e9; }
-.tb-notes .reader-svg-icon { color: #f59e0b; }
-.tb-assistant .reader-svg-icon { color: #a855f7; }
 .tb-pin .reader-svg-icon { color: #8b5cf6; }
 .tb-diagnostics .reader-svg-icon { color: #64748b; }
 
-[data-theme="dark"] .tb-back .reader-svg-icon,
-[data-theme="gray"] .tb-back .reader-svg-icon { color: #f87171; }
-[data-theme="dark"] .tb-history-back .reader-svg-icon,
-[data-theme="dark"] .tb-history-forward .reader-svg-icon,
-[data-theme="gray"] .tb-history-back .reader-svg-icon,
-[data-theme="gray"] .tb-history-forward .reader-svg-icon { color: #94a3b8; }
-[data-theme="dark"] .tb-menu .reader-svg-icon,
-[data-theme="gray"] .tb-menu .reader-svg-icon { color: #818cf8; }
-[data-theme="dark"] .bookmark-toggle .reader-svg-icon,
-[data-theme="gray"] .bookmark-toggle .reader-svg-icon { color: #fb7185; }
-[data-theme="dark"] .bookmark-toggle.active .reader-svg-icon,
-[data-theme="gray"] .bookmark-toggle.active .reader-svg-icon { color: #fff; }
-[data-theme="dark"] .bookmark-dropdown .reader-svg-icon,
-[data-theme="gray"] .bookmark-dropdown .reader-svg-icon { color: #94a3b8; }
-[data-theme="dark"] .tb-toc .reader-svg-icon,
-[data-theme="gray"] .tb-toc .reader-svg-icon { color: #34d399; }
-[data-theme="dark"] .tb-search .reader-svg-icon,
-[data-theme="gray"] .tb-search .reader-svg-icon { color: #38bdf8; }
-[data-theme="dark"] .tb-notes .reader-svg-icon,
-[data-theme="gray"] .tb-notes .reader-svg-icon { color: #fbbf24; }
-[data-theme="dark"] .tb-assistant .reader-svg-icon,
-[data-theme="gray"] .tb-assistant .reader-svg-icon { color: #c084fc; }
 [data-theme="dark"] .tb-pin .reader-svg-icon,
 [data-theme="gray"] .tb-pin .reader-svg-icon { color: #a78bfa; }
 [data-theme="dark"] .tb-diagnostics .reader-svg-icon,
 [data-theme="gray"] .tb-diagnostics .reader-svg-icon { color: #94a3b8; }
 
 /* 悬停与激活对应柔和微光底色 */
-.tb-back:hover:not(:disabled) {
-  background: color-mix(in srgb, #e06c53 14%, var(--btn-tint));
-  border-color: color-mix(in srgb, #e06c53 30%, transparent);
-}
-.tb-menu:hover:not(:disabled) {
-  background: color-mix(in srgb, #6366f1 14%, var(--btn-tint));
-  border-color: color-mix(in srgb, #6366f1 30%, transparent);
-}
-.tb-toc:hover:not(:disabled) {
-  background: color-mix(in srgb, #10b981 14%, var(--btn-tint));
-  border-color: color-mix(in srgb, #10b981 30%, transparent);
-}
-.tb-search:hover:not(:disabled) {
-  background: color-mix(in srgb, #0ea5e9 14%, var(--btn-tint));
-  border-color: color-mix(in srgb, #0ea5e9 30%, transparent);
-}
-.tb-notes:hover:not(:disabled) {
-  background: color-mix(in srgb, #f59e0b 14%, var(--btn-tint));
-  border-color: color-mix(in srgb, #f59e0b 30%, transparent);
-}
-.tb-assistant:hover:not(:disabled) {
-  background: color-mix(in srgb, #a855f7 14%, var(--btn-tint));
-  border-color: color-mix(in srgb, #a855f7 30%, transparent);
-}
 .tb-pin:hover:not(:disabled) {
   background: color-mix(in srgb, #8b5cf6 14%, var(--btn-tint));
   border-color: color-mix(in srgb, #8b5cf6 30%, transparent);
@@ -423,11 +366,6 @@ select option {
   font-size: 13px;
   font-weight: 500;
   line-height: 1;
-}
-
-.tb-back {
-  padding: 0 10px 0 8px;
-  gap: 4px;
 }
 
 .tb-diagnostics {
@@ -1529,14 +1467,6 @@ select option {
   color: var(--muted);
   margin: 0 2px;
   user-select: none;
-}
-
-.toolbar-sep {
-  width: 1px;
-  height: 18px;
-  background: var(--panel-border);
-  margin: 0 6px;
-  flex: none;
 }
 
 .log-panel .log-section-title {
@@ -3044,10 +2974,6 @@ select option {
   background: color-mix(in srgb, var(--error) 32%, transparent);
 }
 
-.tb-back {
-  font-weight: 600;
-}
-
 .toolbar-history {
   display: inline-flex;
   flex: none;
@@ -4009,32 +3935,6 @@ select option {
 
 .toolbar-bookmark .tb-btn:hover:not(:disabled) {
   background: var(--btn-tint-hover);
-}
-
-.bookmark-toggle {
-  width: 32px;
-  padding: 0;
-  border-right: 1px solid var(--panel-border) !important;
-  border-radius: 7px 0 0 7px !important;
-}
-
-.bookmark-toggle.active {
-  background: var(--accent) !important;
-  color: #fff !important;
-}
-
-.bookmark-dropdown {
-  width: 22px;
-  padding: 0;
-  border-radius: 0 7px 7px 0 !important;
-}
-
-.bookmark-dropdown .reader-svg-icon {
-  transition: transform 150ms ease;
-}
-
-.bookmark-dropdown .chevron-open {
-  transform: rotate(180deg);
 }
 
 /* =========================================================================
@@ -6286,6 +6186,39 @@ select option {
 
 .app[data-mobile-chrome="true"][data-layout="compact"] .search-panel.is-closing {
   animation: menuSheetOut var(--menu-close) ease forwards !important;
+}
+
+/* PC：搜索停靠在右侧，边看结果边看正文；不居中、不可拖动，内容留出左右边距。 */
+.search-panel.is-docked {
+  top: 48px;
+  right: 16px;
+  bottom: 18px;
+  left: auto;
+  transform: none;
+  width: min(400px, calc(100vw - 32px));
+  height: auto;
+  padding: 0 16px 16px;
+  border-radius: 18px;
+  animation: panel-float-from-right var(--menu-open) var(--ease-emphasized);
+}
+
+.search-panel.is-docked .search-head {
+  margin: 0 -16px;
+  cursor: default;
+  touch-action: auto;
+}
+
+.search-panel.is-docked .search-head:active {
+  cursor: default;
+}
+
+.search-panel.is-docked.is-closing {
+  animation: panel-float-out-right var(--menu-close) var(--ease-exit) forwards !important;
+}
+
+/* 停靠时遮罩不压暗正文，只负责点外关闭。 */
+.search-backdrop.is-docked {
+  background: transparent;
 }
 
 .mobile-more-sheet.is-closing {

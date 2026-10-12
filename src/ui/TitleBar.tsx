@@ -437,8 +437,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({
                 </button>
               )}
 
-              {/* 沉浸/锁定常驻切换 */}
-              {desktopTools && onToggleZenMode && (
+              {/* 沉浸/锁定常驻切换：手机靠轻点显隐工具栏，不用桌面的自动隐藏。 */}
+              {desktopTools && !mobileCompact && onToggleZenMode && (
                 <button
                   type="button"
                   className={`titlebar-action-btn titlebar-pin-btn${!zenMode ? " active" : ""}`}

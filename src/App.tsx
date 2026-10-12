@@ -6756,9 +6756,10 @@ export default function App() {
               <>
                 {searchPresence.present && (
                   <>
-                    <div className={`search-backdrop${searchPresence.closing ? " is-closing" : ""}`} onClick={() => closePanel("search")} />
+                    <div className={`search-backdrop${!mobileChrome ? " is-docked" : ""}${searchPresence.closing ? " is-closing" : ""}`} onClick={() => closePanel("search")} />
                     <SearchPanel
                       closing={searchPresence.closing}
+                      docked={!mobileChrome}
                       query={searchScope === "all" ? librarySearchSnapshot.query : searchQuery}
                       onQueryChange={searchScope === "all" ? librarySearchRuntime.setQuery.bind(librarySearchRuntime) : setSearchQuery}
                       scope={searchScope}
