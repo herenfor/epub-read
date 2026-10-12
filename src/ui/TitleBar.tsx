@@ -90,6 +90,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   const { t } = useUiText();
   const [isMaximized, setIsMaximized] = useState(false);
   const [isZenRevealed, setIsZenRevealed] = useState(false);
+  const isZenRevealedRef = useRef(isZenRevealed);
+  isZenRevealedRef.current = isZenRevealed;
   const zenHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pointerOverTitlebarRef = useRef(false);
 
@@ -152,7 +154,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
         setIsZenRevealed((prev) => !prev);
         return;
       }
-      if (e.key === "Escape" && isZenRevealed && !isAnyMenuOpen) {
+      if (e.key === "Escape" && isZenRevealedRef.current && !isAnyMenuOpen) {
         clearZenTimer();
         setIsZenRevealed(false);
         return;
@@ -202,7 +204,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
       window.removeEventListener("wheel", handleWheel);
       clearZenTimer();
     };
-  }, [desktopTools, view, zenMode, isZenRevealed, isAnyMenuOpen]);
+  }, [desktopTools, view, zenMode, isAnyMenuOpen]);
 
   // Effect cleanup can cancel a deadline armed before React committed the
   // reveal. Re-arm after that commit and after menus close with no new leave.
