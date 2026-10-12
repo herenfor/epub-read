@@ -6220,6 +6220,15 @@ select option {
   background: transparent;
 }
 
+/* 宽窗：正文让出搜索面板的位置（面板宽 + 两侧各 16px），不再被盖住。
+   窄窗让出后版心太窄，仍然叠在正文上。 */
+@media (min-width: 1100px) {
+  .app.has-docked-search .main {
+    margin-right: calc(min(400px, 100vw - 32px) + 32px);
+    transition: margin var(--ui-dock) var(--ease-emphasized);
+  }
+}
+
 .mobile-more-sheet.is-closing {
   pointer-events: none;
   animation: aaMobileSheetOut var(--menu-close) ease forwards;

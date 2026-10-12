@@ -1419,6 +1419,8 @@ export default function App() {
   })();
 
   const isDockedSidebar = view === "reader" && effectiveSidebarMode === "docked" && sidebarPinned;
+  // 桌面正文搜索停靠右侧时正文让出位置（宽窗由 CSS 决定），结果和正文同时可见。
+  const isDockedSearch = view === "reader" && !mobileChrome && searchOpen;
 
   const handleSidebarTabChange = useCallback((tab: SidebarTab) => {
     setSidebarTab(tab);
@@ -6433,7 +6435,7 @@ export default function App() {
 
   return (
     <div
-      className={`app${dragActive ? " drag-active" : ""}${isFullscreen ? " is-fullscreen" : ""}${isDockedSidebar ? ` has-docked-sidebar docked-side-${sidebarSide}` : ""}`}
+      className={`app${dragActive ? " drag-active" : ""}${isFullscreen ? " is-fullscreen" : ""}${isDockedSidebar ? ` has-docked-sidebar docked-side-${sidebarSide}` : ""}${isDockedSearch ? " has-docked-search" : ""}`}
       data-platform={runtime.platform}
       data-shell={runtime.shell}
       data-layout={responsive.layout}
