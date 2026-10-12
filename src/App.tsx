@@ -76,7 +76,7 @@ import {
   type AxisInput,
 } from "./ui/readerProgressAxis";
 import { FontSettingsPanel } from "./ui/FontSettingsPanel";
-import { SearchPanel, type SearchPanelResult, type SearchScope, type SearchStatus } from "./ui/SearchPanel";
+import { SearchPanel, type SearchPanelResult, type SearchStatus } from "./ui/SearchPanel";
 import { TextProjectionPanel } from "./ui/textProjection/TextProjectionPanel";
 import {
   loadTextProjectionPreferences,
@@ -1131,8 +1131,7 @@ export default function App() {
       cancelled = true;
     };
   }, [readerTextProjectionPreferences]);
-  // 阅读器搜索只搜当前书；全库正文搜索在书架搜索框。"all" 分支留待阅读器搜索面板清理时一并删除。
-  const [searchScope] = useState<SearchScope>("current");
+  // 阅读器搜索只搜当前书；全库正文搜索在书架搜索框（librarySearchRuntime）。
   const [shelfSearchMode, setShelfSearchMode] = useState<"metadata" | "body">("metadata");
   const readerPriorityBusyRef = useRef(false);
   readerPriorityBusyRef.current = view === "reader"
@@ -1672,10 +1671,6 @@ export default function App() {
       })));
   }, [librarySearchRuntime, shelfEntries]);
 
-  useEffect(() => {
-    if (searchOpen && searchScope === "all") void librarySearchRuntime.checkIndex();
-  }, [librarySearchRuntime, searchOpen, searchScope]);
-
   // 输入防抖只延迟查询，不延迟取消：每次改字都会立即终止旧扫描，已完成
   // 的章节仍保留在 SearchSession 内供新查询复用。
   useEffect(() => {
@@ -1684,7 +1679,7 @@ export default function App() {
     const generation = ++searchGenerationRef.current;
     const query = searchQuery.trim();
     const session = searchSessionRef.current;
-    if (!searchOpen || searchScope !== "current" || !session) {
+    if (!searchOpen || !session) {
       setSearchResults([]);
       setSearchStatus("idle");
       setSearchProgress({ processed: 0, total: 0 });
@@ -1732,7 +1727,7 @@ export default function App() {
       searchAbortRef.current?.abort();
       searchAbortRef.current = null;
     };
-  }, [searchOpen, searchQuery, searchScope, book, searchView, compiledTextProjection]);
+  }, [searchOpen, searchQuery, book, searchView, compiledTextProjection]);
 
   const applyCount = useCallback(
     (generation: number, index: number, value: number, source: "estimated" | "measured"): boolean => {
@@ -6055,15 +6050,13 @@ export default function App() {
       entryByContentHashRef.current.has(hit.contentHash) ? undefined : uiText("notice.search.unbound"),
     )), [librarySearchSnapshot.results, librarySearchSnapshot.query, libraryIndexSignature]);
   const searchPanelResults = useMemo<SearchPanelResult[]>(() =>
-    searchScope === "all"
-      ? crossBookPanelResults
-      : searchResults.map((result) => ({
-          id: `${result.spineIndex}:${result.originalRange.start}:${result.originalRange.end}:${result.display?.range.start ?? -1}:${result.display?.range.end ?? -1}:${result.matchType}`,
-          chapterTitle: result.chapterTitle,
-          chapterPath: result.chapterPath,
-          snippet: result.snippet,
-          matchRanges: result.snippetMatchRanges,
-        })), [searchScope, crossBookPanelResults, searchResults]);
+    searchResults.map((result) => ({
+      id: `${result.spineIndex}:${result.originalRange.start}:${result.originalRange.end}:${result.display?.range.start ?? -1}:${result.display?.range.end ?? -1}:${result.matchType}`,
+      chapterTitle: result.chapterTitle,
+      chapterPath: result.chapterPath,
+      snippet: result.snippet,
+      matchRanges: result.snippetMatchRanges,
+    })), [searchResults]);
 
   const handleStartLibraryIndex = useCallback((): void => librarySearchRuntime.startIndex(), [librarySearchRuntime]);
   const handleCancelLibraryIndex = useCallback((): void => librarySearchRuntime.cancelIndex(), [librarySearchRuntime]);
@@ -6822,11 +6815,10 @@ export default function App() {
                     <SearchPanel
                       closing={searchPresence.closing}
                       docked={!mobileChrome}
-                      query={searchScope === "all" ? librarySearchSnapshot.query : searchQuery}
-                      onQueryChange={searchScope === "all" ? librarySearchRuntime.setQuery.bind(librarySearchRuntime) : setSearchQuery}
-                      scope={searchScope}
-                      searchView={searchScope === "all" ? "original" : searchView}
-                      onSearchViewChange={searchScope === "current" && !isIdentityTextProjection(readerTextProjectionPreferences) ? (view) => {
+                      query={searchQuery}
+                      onQueryChange={setSearchQuery}
+                      searchView={searchView}
+                      onSearchViewChange={!isIdentityTextProjection(readerTextProjectionPreferences) ? (view) => {
                         searchAbortRef.current?.abort();
                         searchAbortRef.current = null;
                         searchGenerationRef.current++;
@@ -6836,62 +6828,26 @@ export default function App() {
                         setSearchError(undefined);
                       } : undefined}
                       results={searchPanelResults}
-                      status={searchScope === "all" ? librarySearchSnapshot.searchStatus : searchStatus}
-                      processed={searchScope === "all" ? librarySearchSnapshot.indexSummary.indexed : searchProgress.processed}
-                      total={searchScope === "all" ? librarySearchSnapshot.indexSummary.total : searchProgress.total}
-                      truncated={(searchScope === "all" ? librarySearchSnapshot.results.length : searchResults.length) > 100}
-                      errorMessage={searchScope === "all" ? librarySearchSnapshot.searchError : searchError}
+                      status={searchStatus}
+                      processed={searchProgress.processed}
+                      total={searchProgress.total}
+                      truncated={searchResults.length > 100}
+                      errorMessage={searchError}
                       navigationBusy={searchNavigationBusy}
-                      indexStatus={searchScope === "all" ? librarySearchSnapshot.indexState : undefined}
-                      indexProgress={searchScope === "all" ? {
-                        total: librarySearchSnapshot.indexState === "indexing" || librarySearchSnapshot.indexState === "cancelling"
-                          ? librarySearchSnapshot.indexProgress.total
-                          : librarySearchSnapshot.indexSummary.total,
-                        completed: librarySearchSnapshot.indexState === "indexing" || librarySearchSnapshot.indexState === "cancelling"
-                          ? librarySearchSnapshot.indexProgress.completed
-                          : librarySearchSnapshot.indexSummary.indexed,
-                        pending: librarySearchSnapshot.indexSummary.pending,
-                        currentBookTitle: librarySearchSnapshot.indexProgress.titles.join(t("notice.listSep")) || undefined,
-                      } : undefined}
-                      indexErrorMessage={librarySearchSnapshot.rebuildRequested
-                          ? t("notice.index.rebuildWarning")
-                          : librarySearchSnapshot.indexError}
-                      onStartIndex={searchScope === "all" ? handleStartLibraryIndex : undefined}
-                      onDeferIndex={searchScope === "all" ? handleDeferLibraryIndex : undefined}
-                      onCancelIndex={searchScope === "all" ? handleCancelLibraryIndex : undefined}
-                      onRebuildIndex={searchScope === "all" ? handleRebuildTextIndex : undefined}
-                      onClearIndex={searchScope === "all" ? handleClearTextIndex : undefined}
-                      concurrencyMode={searchScope === "all" ? corpusConcurrencyPreference.mode : undefined}
-                      concurrency={searchScope === "all" ? corpusConcurrencyPreference.maxConcurrency : undefined}
-                      detectedCores={searchScope === "all" ? logicalCores : undefined}
-                      recommendedConcurrency={searchScope === "all" ? recommendedCorpusConcurrency : undefined}
-                      onConcurrencyChange={searchScope === "all" ? (mode, value) => {
-                        setCorpusConcurrencyPreference(normalizeCorpusConcurrencyPreference({
-                          mode,
-                          maxConcurrency: value ?? corpusConcurrencyPreference.maxConcurrency,
-                        }, logicalCores));
-                      } : undefined}
                       onSelect={(panelResult) => {
-                        if (searchScope === "all") {
-                          const crossResult = crossBookPanelResults.find((candidate) => candidate.id === panelResult.id);
-                          if (!crossResult) return;
-                          const entry = entryByContentHashRef.current.get(crossResult.hit.contentHash);
-                          if (entry) void handleShelfOpen(entry.id, crossResult.hit, crossResult.textHits, crossResult.occurrence);
-                          return;
-                        }
                         const result = searchResults.find((candidate) =>
                           `${candidate.spineIndex}:${candidate.originalRange.start}:${candidate.originalRange.end}:${candidate.display?.range.start ?? -1}:${candidate.display?.range.end ?? -1}:${candidate.matchType}` === panelResult.id
                         );
                         if (result) handleSearchNavigate(result);
                       }}
-                      onCancel={searchScope === "current" ? () => {
+                      onCancel={() => {
                         searchAbortRef.current?.abort();
                         searchAbortRef.current = null;
                         searchGenerationRef.current++;
                         setSearchResults([]);
                         setSearchStatus("idle");
                         setSearchProgress({ processed: 0, total: 0 });
-                      } : undefined}
+                      }}
                       onClose={() => closePanel("search")}
                     />
                   </>
