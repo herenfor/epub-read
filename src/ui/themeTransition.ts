@@ -71,7 +71,7 @@ export function isViewTransitionSupported(doc?: Document): boolean {
 export class ThemeTransitionController {
   private generation = 0;
   private committedGeneration = 0;
-  private readonly closedGenerations = new Set<number>();
+  private closedGeneration = -1;
   private pendingRequest: ThemeTransitionRequest | null = null;
   private activeTransition: { skipTransition(): void } | null = null;
   private disposed = false;
@@ -292,12 +292,12 @@ export class ThemeTransitionController {
   }
 
   private cleanup(gen: number): void {
-    // 代次检查与一次收口：
-    // 旧代次且未销毁时不清理新代次；已收口过的代次不重复处理
-    if ((this.generation !== gen && !this.disposed) || this.closedGenerations.has(gen)) {
+    // Only the current generation may clean its scope, even after disposal.
+    // Old promises must not touch a replacement controller's root styles.
+    if (this.generation !== gen || this.closedGeneration === gen) {
       return;
     }
-    this.closedGenerations.add(gen);
+    this.closedGeneration = gen;
 
     if (this.generation === gen) {
       this.activeTransition = null;

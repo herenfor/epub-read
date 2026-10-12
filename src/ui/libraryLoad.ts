@@ -41,20 +41,9 @@ export function shelfLibraryView(load: LibraryLoadState, hasBooks: boolean, orga
   return load.status === "failed" ? { kind: "failed", error: load.error } : { kind: "loading" };
 }
 
-/**
- * Whether a write changed which books are on the shelf (import, delete,
- * sync replacing records). Updates to a book already there (opened, notes,
- * progress) do not make a library read stale and are not counted.
- */
-export function shelfMembershipChanged(previous: readonly { id: string }[], next: readonly { id: string }[]): boolean {
-  if (previous.length !== next.length) return true;
-  const ids = new Set(previous.map((entry) => entry.id));
-  return next.some((entry) => !ids.has(entry.id));
-}
-
 export interface LibraryReaderDeps<T> {
   read(): Promise<T>;
-  /** Bumped by every other write that changes the same data (books added/removed, folder edits). */
+  /** Bumped by every external projection write, including changes to existing books or folders. */
   writeCount(): number;
   /**
    * Identity of the repository behind the reads (store instance plus its

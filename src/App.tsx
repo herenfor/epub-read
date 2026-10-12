@@ -126,7 +126,7 @@ import { LogPanel, type LogItem } from "./ui/LogPanel";
 import { ReaderView, type ReaderHandle } from "./ui/ReaderView";
 import type { ReaderNoteForPaginator } from "./render/paginator";
 import { ShelfView } from "./ui/ShelfView";
-import { createLibraryReader, LIBRARY_LOADING, LibraryReadInterruptedError, libraryReadFailed, libraryReadSucceeded, shelfLibraryView, shelfMembershipChanged, type LibraryLoadState } from "./ui/libraryLoad";
+import { createLibraryReader, LIBRARY_LOADING, LibraryReadInterruptedError, libraryReadFailed, libraryReadSucceeded, shelfLibraryView, type LibraryLoadState } from "./ui/libraryLoad";
 import { ReaderReadingSettings, SettingsSwitch } from "./ui/ReadingSettings";
 import { ChevronRightIcon } from "./ui/readerIcons";
 import { NativeImportPanel, type NativeImportCancelState } from "./ui/NativeImportPanel";
@@ -955,15 +955,11 @@ export default function App() {
   const noteComposerDirtyRef = useRef(false);
   const activeNoteEditContextRef = useRef<NoteEditContext | null>(null);
   const [shelfEntries, setShelfEntriesState] = useState<ShelfEntry[]>([]);
-  // Writes that add or remove books outside the library reader are counted, so
-  // a read still in flight re-reads instead of replacing what was just written.
-  // Updates to a book already listed (opened, notes, progress) are not.
+  // Every external projection write invalidates an in-flight list snapshot,
+  // including progress, notes and bookmarks of books already on the shelf.
   const shelfWritesRef = useRef(0);
   const setShelfEntries = useCallback<Dispatch<SetStateAction<ShelfEntry[]>>>((next) => {
-    // Judged at call time against the latest list: updaters only run at render.
-    const current = shelfEntriesRef.current;
-    const preview = typeof next === "function" ? next(current) : next;
-    if (shelfMembershipChanged(current, preview)) shelfWritesRef.current += 1;
+    shelfWritesRef.current += 1;
     setShelfEntriesState(next);
   }, []);
   // First real read of the library: loading / failed / ready (see ui/libraryLoad).

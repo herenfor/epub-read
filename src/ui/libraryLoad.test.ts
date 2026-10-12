@@ -10,7 +10,6 @@ import {
   libraryReadFailed,
   libraryReadSucceeded,
   shelfLibraryView,
-  shelfMembershipChanged,
   type ShelfLibraryView,
 } from "./libraryLoad";
 import type { ShelfEntry } from "./shelf";
@@ -182,12 +181,27 @@ describe("library reader publish gate (review L1/L2)", () => {
     expect(h.published).toEqual([["rows from gen-b"]]);
   });
 
-  it("counts only writes that add or remove books, not updates to a listed book", () => {
-    const a = { id: "a" }, b = { id: "b" }, c = { id: "c" };
-    expect(shelfMembershipChanged([a, b], [a, b, c])).toBe(true);   // import
-    expect(shelfMembershipChanged([a, b], [a])).toBe(true);         // delete
-    expect(shelfMembershipChanged([a, b], [a, c])).toBe(true);      // replaced record
-    expect(shelfMembershipChanged([a, b], [{ ...b }, { ...a }])).toBe(false); // opened / notes / progress / reorder
+  it("re-reads after progress, notes and bookmarks change without changing the book id", async () => {
+    type Entry = { id: string; progress: number; notes: string[]; bookmarks: string[] };
+    const old = [{ id: "book", progress: 10, notes: [], bookmarks: [] }] as Entry[];
+    const latest = [{ id: "book", progress: 80, notes: ["note"], bookmarks: ["bookmark"] }];
+    const first = deferred<Entry[]>();
+    let writes = 0;
+    let readCount = 0;
+    const published: Entry[][] = [];
+    const reader = createLibraryReader<Entry[]>({
+      read: () => ++readCount === 1 ? first.promise : Promise.resolve(latest),
+      repository: async () => "same-repository",
+      writeCount: () => writes,
+      publish: (value) => published.push(value),
+      fail: (error) => { throw error; },
+    });
+    const loading = reader.load();
+    writes++; // App now counts this field update just like an import/delete.
+    first.resolve(old);
+    await loading;
+    expect(readCount).toBe(2);
+    expect(published).toEqual([latest]);
   });
 
   it("teardown supersedes a refresh: its late answer touches nothing", async () => {
