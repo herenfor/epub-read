@@ -649,7 +649,7 @@
   color: var(--fg);
   box-shadow: 0 18px 40px rgba(20, 20, 30, 0.16), 0 2px 6px rgba(20, 20, 30, 0.06);
   overflow: hidden;
-  animation: shelf-filter-drop-in var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: shelf-filter-drop-in var(--popover-open) cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .shelf-filter-layer.is-closing .shelf-filter-panel,
@@ -956,7 +956,7 @@
   background: var(--bg);
   color: var(--fg);
   box-shadow: 0 18px 40px rgba(20, 20, 30, 0.16), 0 2px 6px rgba(20, 20, 30, 0.06);
-  animation: shelf-filter-drop-in var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: shelf-filter-drop-in var(--popover-open) cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .shelf-body-search-status {

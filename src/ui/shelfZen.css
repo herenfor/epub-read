@@ -728,7 +728,7 @@
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18), 0 2px 6px rgba(0, 0, 0, 0.08);
   padding: 6px;
   z-index: 100;
-  animation: shelf-pop-in var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
+  animation: shelf-pop-in var(--popover-open) cubic-bezier(0.16, 1, 0.3, 1);
   scrollbar-width: thin;
   scrollbar-color: var(--scroll-thumb, rgba(128, 128, 128, 0.3)) transparent;
 }
@@ -927,7 +927,7 @@
   padding: 6px;
   z-index: 50;
   scrollbar-width: thin;
-  animation: shelf-pop-in var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
+  animation: shelf-pop-in var(--popover-open) cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .shelf-folder-popover-menu::-webkit-scrollbar {
@@ -1780,7 +1780,7 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  animation: shelf-pop-in var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
+  animation: shelf-pop-in var(--popover-open) cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .shelf-category-menu-item {
@@ -2199,12 +2199,12 @@
   background: var(--panel-bg);
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.06);
   transform-origin: top right;
-  animation: shelf-pop-in var(--menu-open) var(--ease-emphasized);
+  animation: shelf-pop-in var(--popover-open) var(--ease-emphasized);
 }
 
 .shelf-import-menu.is-closing {
   pointer-events: none;
-  animation: shelf-pop-out var(--menu-close) var(--ease-exit) forwards;
+  animation: shelf-pop-out var(--popover-close) var(--ease-exit) forwards;
 }
 
 .shelf-import-menu-item {
@@ -2481,8 +2481,8 @@
 }
 
 .shelf-menu-portal-host {
-  --shelf-sheet-in: 220ms;
-  --shelf-popover-in: 120ms;
+  --shelf-sheet-in: var(--menu-open);
+  --shelf-popover-in: var(--popover-open);
 }
 
 /* ---- 共用菜单行 ---- */
@@ -2606,7 +2606,7 @@
 
 .shelf-action-popover.is-closing {
   pointer-events: none;
-  animation: shelf-action-pop-out var(--menu-close) ease forwards;
+  animation: shelf-action-pop-out var(--popover-close) ease forwards;
 }
 
 .shelf-action-popover-title {
