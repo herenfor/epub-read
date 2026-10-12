@@ -5,6 +5,8 @@ import { emptyOrganization } from "./libraryOrganization";
 import {
   createLibraryReader,
   LIBRARY_LOADING,
+  LibraryReadInterruptedError,
+  MAX_LIBRARY_REREADS,
   libraryReadFailed,
   libraryReadSucceeded,
   shelfLibraryView,
@@ -20,19 +22,26 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-/** The production reader wired like App: a write counter, publish and fail sinks, and a scripted store. */
+/** The production reader wired like App: a write counter, repository identity, publish/fail sinks and a scripted store. */
 function harness() {
   const reads: Array<ReturnType<typeof deferred<string[]>>> = [];
   let writes = 0;
+  let repository: object = { name: "legacy" };
   const published: string[][] = [];
   const failed: unknown[] = [];
   const reader = createLibraryReader<string[]>({
     read: () => { const next = deferred<string[]>(); reads.push(next); return next.promise; },
     writeCount: () => writes,
+    repository: () => repository,
     publish: (value) => published.push(value),
     fail: (error) => failed.push(error),
   });
-  return { reader, reads, published, failed, write: () => { writes += 1; } };
+  const settle = async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); };
+  return {
+    reader, reads, published, failed, settle,
+    write: () => { writes += 1; },
+    switchRepository: () => { repository = { name: "portable" }; },
+  };
 }
 
 describe("library reader (startup read, retry, late answers)", () => {
@@ -83,6 +92,89 @@ describe("library reader (startup read, retry, late answers)", () => {
     h.reader.invalidate();
     h.reads[1].resolve(["stale"]);
     await again;
+    expect(h.published).toEqual([]);
+  });
+});
+
+describe("library reader publish gate (review L1/L2)", () => {
+  it("never publishes a stale snapshot once the re-read budget is spent, and a later retry publishes the latest", async () => {
+    const h = harness();
+    const load = h.reader.load();
+    // Every read returns snapshot-n, and an import commits before it answers.
+    for (let n = 0; n <= MAX_LIBRARY_REREADS; n++) {
+      h.write();
+      h.reads[n].resolve([`snapshot-${n}`]);
+      await h.settle();
+    }
+    const outcome = await load;
+    expect(h.published).toEqual([]);
+    expect(outcome.kind).toBe("failed");
+    expect(h.failed).toHaveLength(1);
+    expect(h.failed[0]).toBeInstanceOf(LibraryReadInterruptedError);
+    // Writes stop: Retry reads once more and publishes the current list.
+    const retry = h.reader.load();
+    h.reads[MAX_LIBRARY_REREADS + 1].resolve(["snapshot-latest"]);
+    expect(await retry).toEqual({ kind: "published", value: ["snapshot-latest"] });
+    expect(h.published).toEqual([["snapshot-latest"]]);
+  });
+
+  it("does not publish a read error that writes made stale, even on the last attempt", async () => {
+    const h = harness();
+    const load = h.reader.load();
+    for (let n = 0; n <= MAX_LIBRARY_REREADS; n++) {
+      h.write();
+      h.reads[n].reject(new Error(`old failure ${n}`));
+      await h.settle();
+    }
+    await load;
+    expect(h.failed).toHaveLength(1);
+    expect(h.failed[0]).toBeInstanceOf(LibraryReadInterruptedError);
+  });
+
+  it("A starts, B starts, B answers, A answers late: only B is published, whether A succeeds or fails", async () => {
+    for (const lateA of ["success", "failure"] as const) {
+      const h = harness();
+      const a = h.reader.refresh();
+      const b = h.reader.refresh();
+      h.reads[1].resolve(["B"]);
+      expect(await b).toEqual({ kind: "published", value: ["B"] });
+      if (lateA === "success") h.reads[0].resolve(["A"]);
+      else h.reads[0].reject(new Error("A failed"));
+      expect(await a).toEqual({ kind: "superseded" });
+      expect(h.published).toEqual([["B"]]);
+      expect(h.failed).toEqual([]);
+    }
+  });
+
+  it("a refresh during an import re-reads, so the imported book is kept; Retry joins the refresh in flight", async () => {
+    const h = harness();
+    const refresh = h.reader.refresh();
+    expect(h.reader.load()).toBe(refresh);
+    h.write(); // import committed while the refresh read was out
+    h.reads[0].resolve(["old"]);
+    await h.settle();
+    h.reads[1].resolve(["old", "imported"]);
+    await refresh;
+    expect(h.published).toEqual([["old", "imported"]]);
+  });
+
+  it("a read that started on another repository is read again on the current one", async () => {
+    const h = harness();
+    const load = h.reader.load();
+    h.switchRepository(); // portable activation swapped the store behind the facade
+    h.reads[0].resolve(["legacy rows"]);
+    await h.settle();
+    h.reads[1].resolve(["portable rows"]);
+    await load;
+    expect(h.published).toEqual([["portable rows"]]);
+  });
+
+  it("teardown supersedes a refresh: its late answer touches nothing", async () => {
+    const h = harness();
+    const refresh = h.reader.refresh();
+    h.reader.invalidate();
+    h.reads[0].resolve(["late"]);
+    expect(await refresh).toEqual({ kind: "superseded" });
     expect(h.published).toEqual([]);
   });
 });
