@@ -236,6 +236,8 @@
   position: fixed;
   inset: 0;
   z-index: 1200;
+  /* Rendered inside the shelf drawer layer, which ignores pointer events. */
+  pointer-events: auto;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -331,4 +333,9 @@
 
 .tap-settings-layer[data-tap-device="touch"] .tap-settings-body {
   padding: 4px 16px 20px;
+}
+
+/* Shelf settings row that opens the panel: set apart from the select rows above. */
+.shelf-drawer-tap-entry {
+  margin-top: 10px;
 }
