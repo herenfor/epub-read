@@ -1,4 +1,4 @@
-import { forwardRef, useContext, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { forwardRef, useContext, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Book } from "../core/types";
 import { nextLinearIndex, spineItemPath } from "../core/book";
 import {
@@ -380,13 +380,18 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   // ---- 翻页过渡：滑动（同章跟手 scrollLeft）、淡入（落位轻推）、跨章滑入 ----
   const [turnAnim, setTurnAnim] = useState<{ direction: 1 | -1 } | null>(null);
   const turnAnimTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /** 进行中的同章滑动动画；连续翻页/外部跳转前先 finish 落位提交。 */
+  /** 同章连续翻页先 finish；新章节导航取消旧动画，不能提交到复用后的文档。 */
   const slideAnimRef = useRef<ValueAnimation | null>(null);
   /** 同章拖动中的视觉位置；松手后由翻页接续或下一微任务回弹。frame.page 是拖动目标屏。 */
   const slideDragRef = useRef<{ dir: 1 | -1; frame: SlideFrame & { page: number }; scrollLeft: number; samples: Array<{ t: number; x: number }> } | null>(null);
-  /** 跨章滑动：旧章滑出后，新章 display-ready 时按此方向滑入。 */
-  const chapterEnterRef = useRef<1 | -1 | null>(null);
+  /** A new committed navigation invalidates waits, including reentry into the same chapter. */
+  const chapterNavigationRef = useRef(0);
+  /** Entry belongs to one target and one navigation, not to whichever chapter becomes ready first. */
+  const chapterEnterRef = useRef<{
+    direction: 1 | -1; spineIndex: number; book: Book; anchorNonce: number; navigation: number | null;
+  } | null>(null);
   const chapterTurnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const chapterTurnPhaseRef = useRef(0);
 
   useEffect(() => {
     return () => {
@@ -428,6 +433,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
    * 加上滑入态之间漏出一帧已就位的新章。
    */
   const setChapterTurnPhase = (phase: "exit" | "enter" | null, dir: 1 | -1 = 1, durationMs = 0): void => {
+    const phaseTicket = ++chapterTurnPhaseRef.current;
     if (chapterTurnTimerRef.current) clearTimeout(chapterTurnTimerRef.current);
     chapterTurnTimerRef.current = null;
     const main = readerContainerRef.current;
@@ -437,6 +443,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     if (phase === null) return;
     main.dataset[phase === "exit" ? "turnExit" : "turnEnter"] = dir === 1 ? "next" : "prev";
     chapterTurnTimerRef.current = setTimeout(() => {
+      if (phaseTicket !== chapterTurnPhaseRef.current) return;
       // 滑出兜底：新章失败/取消时不能让正文停在滑出态。
       if (phase === "exit") chapterEnterRef.current = null;
       setChapterTurnPhase(null);
@@ -444,13 +451,41 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   };
 
   /** 跨章翻页：滑动模式让旧章滑出并登记滑入方向；其他模式保持原落位动画。 */
-  const beginChapterTurn = (dir: 1 | -1): void => {
+  const beginChapterTurn = (dir: 1 | -1, targetIndex: number): void => {
     if (resolvedTurnAnimation() !== "slide") {
       triggerTurnAnimation(dir);
       return;
     }
-    chapterEnterRef.current = dir;
+    chapterEnterRef.current = { direction: dir, spineIndex: targetIndex, book, anchorNonce: props.anchorNonce, navigation: null };
     setChapterTurnPhase("exit", dir, 1500);
+  };
+
+  useLayoutEffect(() => {
+    const navigation = ++chapterNavigationRef.current;
+    // Stop the old fallback before a reused iframe can show the new document.
+    slideAnimRef.current?.cancel();
+    slideAnimRef.current = null;
+    slideDragRef.current = null;
+    motionDragRef.current = null;
+    updateSwipePreviewRef.current(null);
+    const enter = chapterEnterRef.current;
+    if (enter && enter.navigation === null && enter.book === book &&
+        enter.spineIndex === spineIndex && enter.anchorNonce === props.anchorNonce) {
+      enter.navigation = navigation;
+    } else {
+      chapterEnterRef.current = null;
+      setChapterTurnPhase(null);
+    }
+    return () => { ++chapterNavigationRef.current; };
+    // Only a new navigation changes ownership, not rerenders or theme updates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [book, server, spineIndex, props.anchorNonce, props.startAtEnd.nonce]);
+
+  const redirectEmptyChapterEntry = (targetIndex: number): void => {
+    const enter = chapterEnterRef.current;
+    if (enter?.navigation === chapterNavigationRef.current) {
+      chapterEnterRef.current = { ...enter, spineIndex: targetIndex, navigation: null };
+    }
   };
 
   /**
@@ -676,7 +711,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   const publishActiveDisplayReady = (): void => {
     const slot = activeSlotRef.current;
     const paginator = paginatorRef.current;
-    if (!slot || !paginator || !isActiveSlot(slot)) return;
+    if (!slot || !paginator || !isActiveSlot(slot) || slot.spineIndex !== spineIndexRef.current) return;
     const state = paginator.getStateSnapshot();
     lastStateRef.current = state.status;
     if (state.status !== "ready") return;
@@ -687,9 +722,9 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     lastReadyEmptyRef.current = state.empty;
     armChapterTransitionDisplaySettled();
     const enter = chapterEnterRef.current;
-    if (enter !== null) {
+    if (enter !== null && enter.navigation === chapterNavigationRef.current && enter.spineIndex === slot.spineIndex) {
       chapterEnterRef.current = null;
-      setChapterTurnPhase("enter", enter, 280);
+      setChapterTurnPhase("enter", enter.direction, 280);
     }
     onDisplayReadyRef.current(slot.restoreTicket ?? null);
     turnIntentRef.current.markReady();
@@ -712,7 +747,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       (state) => {
         slot.state = state;
         if (state.status !== "ready") slot.ready = false;
-        if (!isActiveSlot(slot)) return;
+        if (!isActiveSlot(slot) || slot.spineIndex !== spineIndexRef.current) return;
         lastStateRef.current = state.status;
         if (state.status === "loading" || state.status === "measuring") {
           turnIntentRef.current.markLoading();
@@ -731,6 +766,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         if (next >= 0) {
           autoAdvanceRef.current = true;
           turnIntentRef.current.markLoading();
+          redirectEmptyChapterEntry(next);
           onRequestChapterRef.current(next);
         }
       },
@@ -1415,6 +1451,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       if (nextIndex >= 0) {
         autoAdvanceRef.current = true;
         turnIntentRef.current.markLoading();
+        redirectEmptyChapterEntry(nextIndex);
         onRequestChapterRef.current(nextIndex);
         return true;
       }
@@ -1500,8 +1537,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     clearPreloadTimer();
     settingsReloadDebouncerRef.current?.cancel();
     settingsIdentityRef.current = { settings, userFonts: props.userFonts };
-    const p = paginatorRef.current;
-    if (!p) return;
+    if (!paginatorRef.current) return;
     autoAdvanceRef.current = false;
     const path = spineItemPath(book, spineIndex);
     if (!path) {
@@ -1509,6 +1545,9 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       props.onPageState({ status: "error", message: uiText("readerMisc.chapter.missing") });
       return;
     }
+    const navigation = chapterNavigationRef.current;
+    let abandoned = false;
+    const isCurrentNavigation = (): boolean => !abandoned && navigation === chapterNavigationRef.current;
     void (async () => {
       // 跨章/兼容重载是显式章节跳转：回到开头或页内锚点，
       // 而不是沿用旧页号与旧阅读锚点。回翻上一章时把 atEnd 交给 paginator：
@@ -1550,20 +1589,22 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
             }
           }
           const ready = await inFlight.paginator.waitForDisplayReady();
+          if (!isCurrentNavigation()) return;
           if (ready && activeSlotRef.current?.spineIndex !== spineIndex) {
             if (promotePreparedChapter(path, spineIndex, startAtEnd)) return;
           }
         }
       }
+      if (!isCurrentNavigation()) return;
       const activeSlot = activeSlotRef.current;
-      const oldIndex = activeSlot?.spineIndex ?? null;
-      const settingsChanged = activeSlot && !sameRenderingSettings(activeSlot.renderSettings, latestRenderSettingsRef.current);
-      if (activeSlot) {
-        activeSlot.path = path;
-        activeSlot.spineIndex = spineIndex;
-        activeSlot.renderSettings = latestRenderSettingsRef.current;
-        activeSlot.restoreTicket = props.restoreTicket ?? null;
-      }
+      const p = activeSlot?.paginator;
+      if (!activeSlot || !p) return;
+      const oldIndex = activeSlot.spineIndex;
+      const settingsChanged = !sameRenderingSettings(activeSlot.renderSettings, latestRenderSettingsRef.current);
+      activeSlot.path = path;
+      activeSlot.spineIndex = spineIndex;
+      activeSlot.renderSettings = latestRenderSettingsRef.current;
+      activeSlot.restoreTicket = props.restoreTicket ?? null;
       // Retain valid cached slots in the new live window; only evict distant or stale slots.
       if (settingsChanged) {
         disposeSpareSlots();
@@ -1611,7 +1652,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
             }
           : null,
       });
-      if (activeSlotRef.current && activeSlotRef.current.paginator === p) {
+      if (isCurrentNavigation() && activeSlotRef.current === activeSlot && paginatorRef.current === p) {
         const latest = latestRenderSettingsRef.current;
         if (activeSlotRef.current.renderSettings.theme !== latest.theme && sameLayoutSettings(activeSlotRef.current.renderSettings, latest)) {
           if (p.updateTheme(latest.theme)) {
@@ -1622,6 +1663,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         }
       }
     })();
+    return () => { abandoned = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [book, spineIndex, props.anchorNonce, props.startAtEnd.nonce]);
 
@@ -1875,7 +1917,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       return;
     }
     const requestChapterTurn = (adjacent: number): void => {
-      beginChapterTurn(immediate);
+      beginChapterTurn(immediate, adjacent);
       triggerChapterTransitionWheelLock();
       lockedReverseDirRef.current = immediate === 1 ? -1 : 1;
       reverseLockUntilRef.current = Date.now() + 250;

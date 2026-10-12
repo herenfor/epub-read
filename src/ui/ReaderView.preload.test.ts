@@ -112,6 +112,7 @@ describe("ReaderView preload settings lifecycle", () => {
     vi.useFakeTimers();
     instances.length = 0;
     dom = createReactDomHarness();
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
     const book = {
       version: 3, opfPath: "book.opf", fixedLayout: false,
       spine: [0, 1, 2, 3].map((i) => ({ idref: String(i), linear: true })),
@@ -137,6 +138,149 @@ describe("ReaderView preload settings lifecycle", () => {
       vi.advanceTimersByTime(500);
     });
   };
+
+  it("chapter navigation: cancelled B cannot promote after returning to A", async () => {
+    await render();
+    const active = instances[0];
+    await finish(active);
+    const next = instances[1];
+    const promoted = vi.spyOn(next, "setPage");
+    props = { ...props, spineIndex: 1 };
+    await render();
+    expect(next.readyWaiters).toHaveLength(1);
+    props = { ...props, spineIndex: 0 };
+    await render();
+    await act(async () => { active.finish(); });
+    vi.mocked(props.onDisplayReady).mockClear();
+    await act(async () => { next.finish(); });
+    expect(promoted).not.toHaveBeenCalled();
+    expect(props.onDisplayReady).not.toHaveBeenCalled();
+    expect(active.path).toBe("0.xhtml");
+  });
+
+  it("chapter navigation: A B A B consumes only the latest B request", async () => {
+    await render();
+    const active = instances[0];
+    await finish(active);
+    const next = instances[1];
+    const promoted = vi.spyOn(next, "setPage");
+    props = { ...props, spineIndex: 1 };
+    await render();
+    props = { ...props, spineIndex: 0 };
+    await render();
+    await act(async () => { active.finish(); });
+    props = { ...props, spineIndex: 1 };
+    await render();
+    expect(next.readyWaiters).toHaveLength(2);
+    active.load.mockClear();
+    vi.mocked(props.onDisplayReady).mockClear();
+    await act(async () => { next.finish(); });
+    expect(promoted).toHaveBeenCalledTimes(1);
+    expect(active.load).not.toHaveBeenCalled();
+    expect(props.onDisplayReady).toHaveBeenCalledTimes(1);
+  });
+
+  it("chapter navigation: the old active chapter cannot consume B's entry, and B enters only once", async () => {
+    const ref = createRef<ReaderHandle>();
+    const renderWithRef = () => dom.render(createElement(ReaderView, { ...props, ref }));
+    await renderWithRef();
+    const active = instances[0];
+    await finish(active);
+    const next = instances[1];
+    active.currentPage = active.pageCount - 1;
+    await act(async () => { ref.current!.nextPage(); });
+    expect(props.onRequestChapter).toHaveBeenCalledWith(1);
+    props = { ...props, spineIndex: 1, startAtEnd: { nonce: 1, atEnd: false } };
+    await renderWithRef();
+    const reader = dom.container.querySelector<HTMLElement>(".reader")!;
+    vi.mocked(props.onPageState).mockClear();
+    await act(async () => { active.finish(); });
+    expect(props.onPageState).not.toHaveBeenCalled();
+    expect(reader.dataset.turnExit).toBe("next");
+    expect(reader.dataset.turnEnter).toBeUndefined();
+    await act(async () => { next.finish(); });
+    expect(reader.dataset.turnEnter).toBe("next");
+    await act(async () => { vi.advanceTimersByTime(100); next.finish(); });
+    await act(async () => { vi.advanceTimersByTime(180); });
+    expect(reader.dataset.turnEnter).toBeUndefined();
+  });
+
+  it("chapter navigation: an explicit target supersedes the pending entry animation", async () => {
+    const ref = createRef<ReaderHandle>();
+    const renderWithRef = () => dom.render(createElement(ReaderView, { ...props, ref }));
+    await renderWithRef();
+    const active = instances[0];
+    await finish(active);
+    const next = instances[1];
+    active.currentPage = active.pageCount - 1;
+    await act(async () => { ref.current!.nextPage(); });
+    props = { ...props, spineIndex: 1, startAtEnd: { nonce: 1, atEnd: false } };
+    await renderWithRef();
+    props = { ...props, spineIndex: 3, anchorNonce: 1 };
+    await renderWithRef();
+    await act(async () => { active.finish(); next.finish(); });
+    const reader = dom.container.querySelector<HTMLElement>(".reader")!;
+    expect(reader.dataset.turnEnter).toBeUndefined();
+    expect(reader.dataset.turnExit).toBeUndefined();
+    expect(active.path).toBe("3.xhtml");
+  });
+
+  it("chapter navigation: ordinary-mode iframe reuse cancels old fallback frames without blocking a new turn", async () => {
+    props = { ...props, settings: { ...props.settings, preloadNextChapter: false } };
+    const ref = createRef<ReaderHandle>();
+    const renderWithRef = () => dom.render(createElement(ReaderView, { ...props, ref }));
+    await renderWithRef();
+    const active = instances[0];
+    await act(async () => { active.finish(); });
+    vi.spyOn(active, "planPagedTurn").mockReturnValue({ kind: "page", page: 1, from: 0, to: 100 });
+    const preview = vi.spyOn(active, "previewPagedScroll");
+    const commit = vi.spyOn(active, "setPage");
+    await act(async () => { ref.current!.nextPage(); vi.advanceTimersByTime(16); });
+    const frameCount = preview.mock.calls.length;
+    expect(frameCount).toBeGreaterThan(0);
+    props = { ...props, spineIndex: 1 };
+    await renderWithRef();
+    await act(async () => { vi.advanceTimersByTime(400); });
+    expect(preview).toHaveBeenCalledTimes(frameCount);
+    expect(commit).not.toHaveBeenCalled();
+    await act(async () => { active.finish(); ref.current!.nextPage(); vi.advanceTimersByTime(16); });
+    expect(preview.mock.calls.length).toBeGreaterThan(frameCount);
+  });
+
+  it("chapter navigation: skipping an empty chapter carries entry to the actual visible destination", async () => {
+    props = { ...props, settings: { ...props.settings, preloadNextChapter: false } };
+    const ref = createRef<ReaderHandle>();
+    const renderWithRef = () => dom.render(createElement(ReaderView, { ...props, ref }));
+    await renderWithRef();
+    const active = instances[0];
+    await act(async () => { active.finish(); });
+    active.currentPage = active.pageCount - 1;
+    await act(async () => { ref.current!.nextPage(); });
+    props = { ...props, spineIndex: 1, startAtEnd: { nonce: 1, atEnd: false } };
+    await renderWithRef();
+    await act(async () => { active.finishEmpty(); });
+    expect(props.onRequestChapter).toHaveBeenLastCalledWith(2);
+    props = { ...props, spineIndex: 2, startAtEnd: { nonce: 2, atEnd: false } };
+    await renderWithRef();
+    await act(async () => { active.finish(); });
+    expect(dom.container.querySelector<HTMLElement>(".reader")!.dataset.turnEnter).toBe("next");
+  });
+
+  it("chapter navigation: normal ready-cache turns still reuse the prepared chapter", async () => {
+    await render();
+    const active = instances[0];
+    await finish(active);
+    const next = instances[1];
+    await act(async () => { next.finish(); });
+    const promoted = vi.spyOn(next, "setPage");
+    active.load.mockClear();
+    vi.mocked(props.onDisplayReady).mockClear();
+    props = { ...props, spineIndex: 1 };
+    await render();
+    expect(promoted).toHaveBeenCalledTimes(1);
+    expect(active.load).not.toHaveBeenCalled();
+    expect(props.onDisplayReady).toHaveBeenCalledTimes(1);
+  });
 
   it("uses current theme/font in preloads scheduled by an older paginator callback", async () => {
     await render();
