@@ -1112,7 +1112,8 @@ export default function App() {
       cancelled = true;
     };
   }, [readerTextProjectionPreferences]);
-  const [searchScope, setSearchScope] = useState<SearchScope>("current");
+  // 阅读器搜索只搜当前书；全库正文搜索在书架搜索框。"all" 分支留待阅读器搜索面板清理时一并删除。
+  const [searchScope] = useState<SearchScope>("current");
   const [shelfSearchMode, setShelfSearchMode] = useState<"metadata" | "body">("metadata");
   const readerPriorityBusyRef = useRef(false);
   readerPriorityBusyRef.current = view === "reader"
@@ -6547,6 +6548,8 @@ export default function App() {
               tapRegions={tapRegions}
               onTapRegionsChange={changeTapRegionPreferences}
               tapRegionsScrollMode={settings.readingMode === "scroll"}
+              touchUi={mobileChrome}
+              onOpenDiagnostics={() => openPanel("log")}
               onOpen={handleShelfOpen}
               onImport={() => void handleChooseBooks()}
               onDelete={handleShelfDelete}
@@ -6756,16 +6759,6 @@ export default function App() {
                       query={searchScope === "all" ? librarySearchSnapshot.query : searchQuery}
                       onQueryChange={searchScope === "all" ? librarySearchRuntime.setQuery.bind(librarySearchRuntime) : setSearchQuery}
                       scope={searchScope}
-                      onScopeChange={(scope) => {
-                        searchAbortRef.current?.abort();
-                        searchAbortRef.current = null;
-                        searchGenerationRef.current++;
-                        setSearchScope(scope);
-                        setSearchResults([]);
-                        setSearchStatus("idle");
-                        setSearchError(undefined);
-                        if (scope === "all") void librarySearchRuntime.checkIndex();
-                      }}
                       searchView={searchScope === "all" ? "original" : searchView}
                       onSearchViewChange={searchScope === "current" && !isIdentityTextProjection(readerTextProjectionPreferences) ? (view) => {
                         searchAbortRef.current?.abort();

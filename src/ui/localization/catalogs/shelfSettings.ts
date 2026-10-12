@@ -1,0 +1,49 @@
+import { defineMessages } from "../defineMessages";
+
+/**
+ * Shelf settings page (dialog on desktop, full-screen page on touch), the
+ * shelf filter popover/sheet with its summary chips, and the scope switch
+ * of the shelf search box. Row titles and option labels reuse shelfMenu.
+ */
+export const shelfSettings = defineMessages("shelfSettings", {
+  "shelfSettings.title": { zh: "设置", max: 10 },
+  "shelfSettings.close": "关闭设置",
+  "shelfSettings.back": { zh: "返回", max: 6 },
+  "shelfSettings.nav": "设置分类",
+  "shelfSettings.section.appearance": { zh: "外观", max: 12 },
+  "shelfSettings.section.reading": { zh: "阅读", max: 12 },
+  "shelfSettings.section.data": { zh: "数据与备份", max: 14 },
+  "shelfSettings.section.storage": { zh: "存储", max: 12 },
+  "shelfSettings.section.about": { zh: "关于", max: 12 },
+  "shelfSettings.more": { zh: "更多设置", note: "Touch settings home: heading above the section rows.", max: 16 },
+  "shelfSettings.index": { zh: "正文搜索索引", max: 20 },
+  "shelfSettings.index.detail": "全部书籍的正文搜索依赖这份索引；重建会重新读取每本书",
+  "shelfSettings.diagnostics": { zh: "诊断日志", max: 16 },
+  "shelfSettings.diagnostics.detail": "查看导入和阅读时记录的问题",
+  "shelfSettings.filter.button": { zh: "筛选", max: 8 },
+  "shelfSettings.filter.button.count": { zh: "筛选，已选 {count} 项", note: "Accessible name of the filter button with active filters." },
+  "shelfSettings.filter.title": { zh: "筛选", max: 12 },
+  "shelfSettings.filter.title.sheet": { zh: "筛选与排序", note: "Phone bottom sheet title.", max: 16 },
+  "shelfSettings.filter.conditions": { zh: "已选 {count} 项条件", max: 18 },
+  "shelfSettings.filter.dimensions": "筛选维度",
+  "shelfSettings.filter.tab.count": { zh: "{label} · {count}", note: "Dimension tab: {label} is Author/Language/Saved, {count} how many values are selected.", max: 16 },
+  "shelfSettings.filter.search": { zh: "在 {count} 项中搜索", note: "Placeholder of the search box above a long value list." },
+  "shelfSettings.filter.picked": { zh: "已选 {count}", max: 12 },
+  "shelfSettings.filter.clearDimension": { zh: "清除{label}", note: "{label} is a dimension name, e.g. Author.", max: 14 },
+  "shelfSettings.filter.morePicked": { zh: "还有 {count} 项已选 · 展开", max: 24 },
+  "shelfSettings.filter.collapsePicked": { zh: "收起", max: 8 },
+  "shelfSettings.filter.allByCount": { zh: "全部{label} · 按书数", note: "Heading of the unselected values, sorted by number of books.", max: 24 },
+  "shelfSettings.filter.clearAll": { zh: "清除全部", max: 10 },
+  "shelfSettings.filter.show.other": { zh: "显示 {count} 本书", max: 16 },
+  "shelfSettings.filter.show.one": { zh: "显示 {count} 本书", note: "Singular form.", max: 16 },
+  "shelfSettings.filter.done": { zh: "完成", max: 6 },
+  "shelfSettings.filter.applied": { zh: "已筛选", note: "Label in front of the active filter chips on the shelf.", max: 8 },
+  "shelfSettings.filter.chip": { zh: "{label}：{values}", note: "Active filter chip; {values} are up to two selected values joined by the list separator." },
+  "shelfSettings.filter.chip.many": { zh: "{label}：{values} 等 {count} 项", note: "Like the chip, when more values are selected; {count} is the total." },
+  "shelfSettings.filter.chip.compact": { zh: "{label} {count}", note: "Phone chip: dimension name and number of selected values.", max: 12 },
+  "shelfSettings.filter.chip.clear": "清除{label}筛选",
+  "shelfSettings.search.scope": "搜索范围",
+  "shelfSettings.search.results": "正文搜索结果",
+  "shelfSettings.search.manageIndex": { zh: "管理索引", max: 10 },
+  "shelfSettings.search.close": "关闭正文搜索",
+});

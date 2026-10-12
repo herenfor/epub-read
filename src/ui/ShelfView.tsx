@@ -2,9 +2,7 @@ import { FolderNameField } from "./FolderNameField";
 import { validateFolderNameDraft, folderNameDraftError } from "./folderNameDraft";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { MENU_CLOSE_MS, menuCloseMs, useExitPresence } from "./menuMotion";
-import { uiMotionReduced, useUiMotion, type UiMotion } from "./motionPreference";
-import { useUiLanguageChoice } from "./localization/useUiLanguageChoice";
-import type { UiLanguagePreference } from "./localization/core";
+import { uiMotionReduced } from "./motionPreference";
 import { createPortal } from "react-dom";
 import { getShelfMenuPortalHost, type ShelfMenuAnchorRect } from "./shelfMenuPlacement";
 import { ShelfGestureTail, shelfLongPressKind, useShelfPress, type ShelfLongPress } from "./shelfPress";
@@ -22,10 +20,8 @@ import {
   createShelfFilterModel,
   formatShelfTime,
   sortShelfEntries,
-  type ShelfFilterFacets,
   type ShelfEntry,
   type ShelfSort,
-  type ShelfTimeSegment,
 } from "./shelf";
 import {
   effectiveFolderId,
@@ -48,15 +44,18 @@ import { hasReadPosition } from "./readEvidence";
 import { isShelfProgressPending, shelfProgressLabel } from "./shelfProgressDisplay";
 import { isShelfCardActionTarget } from "./shelfCardEventScope";
 import { getRuntimeCapabilities } from "../platform/runtimeCapabilities";
-import { AboutInfo } from "./AboutInfo";
-import { CacheStoragePanel } from "./CacheStoragePanel";
-import { TapRegionsSettingsPanel, tapRegionsSummary } from "./TapRegionsSettingsPanel";
 import type { ReaderTapPreferences } from "./readerTapRegions";
 import type { ReaderTapRegionSettings } from "./readerTapRouting";
+import { ShelfSettingsPage, type ShelfSettingsSection } from "./ShelfSettingsPage";
 import {
-  getSearchStatusLabel,
-  SearchIndexCard,
-  SearchResultList,
+  EMPTY_SHELF_FILTERS,
+  ShelfFilterPanel,
+  ShelfFilterSummary,
+  shelfFilterCount,
+  type ShelfFilters,
+} from "./ShelfFilterPanel";
+import { ShelfBodySearchDropdown, ShelfBodySearchPage } from "./ShelfBodySearch";
+import {
   type SearchIndexProgress,
   type SearchIndexStatus,
   type SearchPanelResult,
@@ -64,7 +63,6 @@ import {
 } from "./SearchPanel";
 import "./shelfZen.css";
 import { uiPlural, uiText, useUiText } from "./localization/UiLanguageProvider";
-import { localizeFacetOptions } from "./shelfFacetLabels";
 import type { PlainMessageKey } from "./localization/core";
 
 export type { ShelfScope };
@@ -155,6 +153,10 @@ export interface ShelfViewProps {
   onTapRegionsChange?(next: ReaderTapPreferences): void;
   /** 阅读器处于滚动模式：点击翻页设置只在分页模式生效。 */
   tapRegionsScrollMode?: boolean;
+  /** 触屏界面（手机和平板）：设置为全屏页，筛选为底部面板。 */
+  touchUi?: boolean;
+  /** 设置 › 关于 › 诊断日志；未提供时不显示。 */
+  onOpenDiagnostics?(): void;
   onOpen(id: string): void;
   onImport(): void;
   /** Directory import entry; absent hides it. */
@@ -317,73 +319,6 @@ function CheckSquareIcon({ checked }: { checked: boolean }) {
       <rect x="3.5" y="3.5" width="17" height="17" rx="4" fill={checked ? "currentColor" : "none"} />
       <path d="m8 12.2 2.8 2.8L16.2 9.4" stroke={checked ? "var(--accent-foreground, #fff)" : "currentColor"} />
     </svg>
-  );
-}
-
-function ImportArchiveIcon() {
-  return (
-    <svg className="shelf-svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M12 3v12" />
-      <polyline points="7 10 12 15 17 10" />
-      <path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6" />
-    </svg>
-  );
-}
-
-function TapRegionsIcon() {
-  return (
-    <svg className="shelf-svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="4" y="3" width="16" height="18" rx="2" />
-      <path d="M8.5 3v18M15.5 3v18" />
-    </svg>
-  );
-}
-
-function StorageIcon() {
-  return (
-    <svg className="shelf-svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <ellipse cx="12" cy="6" rx="7" ry="3" />
-      <path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6" />
-      <path d="M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" />
-    </svg>
-  );
-}
-
-function ChevronRightIcon() {
-  return (
-    <svg className="shelf-svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <polyline points="9 6 15 12 9 18" />
-    </svg>
-  );
-}
-
-/** One row of a grouped drawer list: tinted icon, title, one-line detail, chevron. */
-function ShelfDrawerRow(props: {
-  icon: ReactNode;
-  title: string;
-  detail: string;
-  disabled?: boolean;
-  tone?: "accent" | "neutral";
-  onClick(): void;
-}) {
-  return (
-    <button
-      className={`shelf-drawer-row${props.tone === "neutral" ? " is-neutral" : ""}`}
-      type="button"
-      disabled={props.disabled}
-      onClick={(event) => {
-        // Pickers and panels take focus away; drop it so the row is not left highlighted.
-        event.currentTarget.blur();
-        props.onClick();
-      }}
-    >
-      <span className="shelf-drawer-row-icon">{props.icon}</span>
-      <span className="shelf-drawer-row-text">
-        <strong>{props.title}</strong>
-        <small>{props.detail}</small>
-      </span>
-      <span className="shelf-drawer-row-chevron"><ChevronRightIcon /></span>
-    </button>
   );
 }
 
@@ -2026,95 +1961,6 @@ interface ShelfSelectOption {
   label: string;
 }
 
-type ShelfFilterKey = "author" | "title" | "saved" | "language";
-
-interface ShelfFilters {
-  authors: Set<string>;
-  titles: Set<string>;
-  saved: Set<ShelfTimeSegment>;
-  languages: Set<string>;
-}
-
-const EMPTY_SHELF_FILTERS: ShelfFilters = {
-  authors: new Set(),
-  titles: new Set(),
-  saved: new Set(),
-  languages: new Set(),
-};
-
-function ShelfFilterOptionList(props: {
-  options: Array<{ value: string; label: string; count: number }>;
-  selected: ReadonlySet<string>;
-  onToggle(value: string): void;
-  emptyLabel: string;
-}) {
-  const { t } = useUiText();
-  const [query, setQuery] = useState("");
-  const normalizedQuery = query.trim().toLocaleLowerCase();
-  const options = props.options.filter((option) =>
-    !normalizedQuery || option.label.toLocaleLowerCase().includes(normalizedQuery)
-  );
-  const limited = options.slice(0, 80);
-  return (
-    <div className="shelf-filter-options">
-      {props.options.length > 8 && (
-        <input
-          className="shelf-filter-search"
-          type="search"
-          placeholder={t("shelfFolder.filter.search", { label: props.emptyLabel })}
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          aria-label={t("shelfFolder.filter.search", { label: props.emptyLabel })}
-        />
-      )}
-      {limited.length === 0 ? (
-        <div className="shelf-filter-empty">{t("shelfFolder.filter.none")}</div>
-      ) : (
-        limited.map((option) => (
-          <label className="shelf-filter-option" key={option.value}>
-            <input
-              type="checkbox"
-              checked={props.selected.has(option.value)}
-              onChange={() => props.onToggle(option.value)}
-            />
-            <span className="shelf-filter-option-label" title={option.label}>{option.label}</span>
-            <span className="shelf-filter-option-count">{option.count}</span>
-          </label>
-        ))
-      )}
-      {options.length > limited.length && (
-        <div className="shelf-filter-limit">{t("shelfFolder.filter.limited", { count: limited.length })}</div>
-      )}
-    </div>
-  );
-}
-
-function ShelfFilterSection(props: {
-  label: string;
-  count: number;
-  open: boolean;
-  onToggleOpen(): void;
-  children: ReactNode;
-}) {
-  return (
-    <section className={`shelf-filter-section${props.open ? " open" : ""}`}>
-      <button
-        className="shelf-filter-section-toggle"
-        type="button"
-        aria-expanded={props.open}
-        onClick={props.onToggleOpen}
-      >
-        <span>{props.label}</span>
-        <span className="shelf-filter-section-count">{props.count}</span>
-        <span className="shelf-filter-section-arrow" aria-hidden="true" />
-      </button>
-      <div className="shelf-filter-section-body">
-        <div className="shelf-filter-section-content">{props.children}</div>
-      </div>
-    </section>
-  );
-}
-
 function ShelfSelect(props: ShelfSubmenuBackProps & {
   value: string;
   options: ShelfSelectOption[];
@@ -2211,643 +2057,6 @@ function ShelfSelect(props: ShelfSubmenuBackProps & {
             </button>
           ))}
         </div>
-      )}
-    </div>
-  );
-}
-
-/* =========================================================================
- * 书架侧边抽屉组件
- * ========================================================================= */
-
-interface ShelfSettingsDrawerProps extends ShelfSubmenuBackProps {
-  open: boolean;
-  entries: ShelfEntry[];
-  matchingEntries?: ShelfEntry[];
-  busy: boolean;
-  importArchiveDisabled?: boolean;
-  importActive?: boolean;
-  saveFileActive?: boolean;
-  lanTransferActive?: boolean;
-  onOpenLanTransfer?(selectedEntries?: ShelfEntry[]): void;
-  query: string;
-  onQueryChange(value: string): void;
-  sort: ShelfSort;
-  onSortChange(value: ShelfSort): void;
-  density: ShelfDensity;
-  onDensityChange(value: ShelfDensity): void;
-  theme: Theme;
-  onThemeChange(theme: Theme): void;
-  batteryIndicatorEnabled?: boolean;
-  onBatteryIndicatorChange?(enabled: boolean): void;
-  hideReaderSystemStatusBar?: boolean;
-  onHideReaderSystemStatusBarChange?(hidden: boolean): void;
-  keepScreenOnWhileReading?: boolean;
-  onKeepScreenOnWhileReadingChange?(enabled: boolean): void;
-  tapRegions?: ReaderTapRegionSettings;
-  onTapRegionsChange?(next: ReaderTapPreferences): void;
-  tapRegionsScrollMode?: boolean;
-  filters: ShelfFilters;
-  facets: ShelfFilterFacets;
-  matchingCount: number;
-  onFiltersChange(filters: ShelfFilters): void;
-  onClose(): void;
-  onOpenBook?(id: string): void;
-  onImportArchive(): void;
-  onExportArchive(selectedEntries?: ShelfEntry[]): void;
-  onImportLegacyArchive?(): void;
-  searchMode: ShelfSearchMode;
-  onSearchModeChange?: (mode: ShelfSearchMode) => void;
-  bodySearch?: ShelfBodySearchProps;
-  viewMode?: ShelfViewMode;
-  onViewModeChange?: (mode: ShelfViewMode) => void;
-  onEnterSelection?: () => void;
-}
-
-function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
-  const [uiMotion, setUiMotion] = useUiMotion();
-  const { t, tn } = useUiText();
-  const language = useUiLanguageChoice();
-  const [mounted, setMounted] = useState(props.open);
-  const [closing, setClosing] = useState(false);
-  const [cachePanelOpen, setCachePanelOpen] = useState(false);
-  const [tapPanelOpen, setTapPanelOpen] = useState(false);
-  const tapPanelOpenRef = useRef(tapPanelOpen);
-  tapPanelOpenRef.current = tapPanelOpen;
-  const closeTapPanel = useCallback(() => setTapPanelOpen(false), []);
-
-  useEffect(() => {
-    if (!props.open) {
-      setCachePanelOpen(false);
-      setTapPanelOpen(false);
-    }
-  }, [props.open]);
-
-  useEffect(() => {
-    if (props.open) {
-      setMounted(true);
-      setClosing(false);
-    } else if (mounted) {
-      setClosing(true);
-      const timer = setTimeout(() => {
-        setMounted(false);
-        setClosing(false);
-      }, MENU_CLOSE_MS);
-      return () => clearTimeout(timer);
-    }
-  }, [props.open, mounted]);
-
-  const searchRef = useRef<HTMLInputElement | null>(null);
-  const resultListRef = useRef<HTMLUListElement | null>(null);
-  const [allBooksExpanded, setAllBooksExpanded] = useState(false);
-  const [expandedSections, setExpandedSections] = useState<Set<ShelfFilterKey>>(new Set());
-  const [activeSearchIndex, setActiveSearchIndex] = useState(-1);
-  const capabilities = getRuntimeCapabilities();
-
-  useShelfSubmenuBack(cachePanelOpen, () => setCachePanelOpen(false), props);
-  useShelfSubmenuBack(tapPanelOpen, closeTapPanel, props);
-
-  const isSearchActive = Boolean(props.query.trim());
-  const matchingList = props.matchingEntries ?? props.entries;
-
-  useEffect(() => {
-    setActiveSearchIndex(-1);
-  }, [props.query]);
-
-  useEffect(() => {
-    if (activeSearchIndex >= 0 && resultListRef.current) {
-      const activeEl = resultListRef.current.children[activeSearchIndex] as HTMLElement | undefined;
-      activeEl?.scrollIntoView?.({ block: "nearest" });
-    }
-  }, [activeSearchIndex]);
-
-  const openingBookRef = useRef(false);
-  const handleOpenBook = useCallback((id: string) => {
-    if (openingBookRef.current) return;
-    openingBookRef.current = true;
-    props.onOpenBook?.(id);
-    props.onClose();
-    setTimeout(() => {
-      openingBookRef.current = false;
-    }, 600);
-  }, [props.onOpenBook, props.onClose]);
-
-  const onSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>): void => {
-    if (!isSearchActive || matchingList.length === 0) return;
-    const maxItems = Math.min(matchingList.length, 20);
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      setActiveSearchIndex((prev) => (prev < maxItems - 1 ? prev + 1 : 0));
-    } else if (event.key === "ArrowUp") {
-      event.preventDefault();
-      setActiveSearchIndex((prev) => (prev > 0 ? prev - 1 : maxItems - 1));
-    } else if (event.key === "Enter") {
-      event.preventDefault();
-      const targetIndex = activeSearchIndex >= 0 ? activeSearchIndex : 0;
-      const target = matchingList[targetIndex];
-      if (target) {
-        handleOpenBook(target.id);
-      }
-    }
-  };
-
-  useEffect(() => {
-    if (!props.open) return;
-    searchRef.current?.focus();
-    const onKey = (event: KeyboardEvent): void => {
-      // Esc closes the tap-region panel first, not the drawer behind it.
-      if (event.key === "Escape" && !tapPanelOpenRef.current) props.onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [props.open, props.onClose]);
-
-  const toggleSection = (key: ShelfFilterKey): void => {
-    setExpandedSections((previous) => {
-      const next = new Set(previous);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  };
-
-  const toggleFilter = (key: keyof ShelfFilters, value: string): void => {
-    const previous = props.filters[key];
-    const next = new Set(previous);
-    if (next.has(value as never)) next.delete(value as never);
-    else next.add(value as never);
-    props.onFiltersChange({ ...props.filters, [key]: next });
-  };
-
-  const clearFilters = (): void => props.onFiltersChange({
-    authors: new Set(),
-    titles: new Set(),
-    saved: new Set(),
-    languages: new Set(),
-  });
-  const activeFilterCount = props.filters.authors.size + props.filters.titles.size
-    + props.filters.saved.size + props.filters.languages.size;
-
-  const [indexActionBusy, setIndexActionBusy] = useState(false);
-  const runIndexAction = (fn?: () => void) => {
-    if (indexActionBusy || !fn) return;
-    setIndexActionBusy(true);
-    fn();
-    setTimeout(() => setIndexActionBusy(false), 600);
-  };
-
-  if (!mounted) return null;
-  const body = props.bodySearch;
-  const bodyIndexBusy = body?.indexStatus === "indexing" || body?.indexStatus === "cancelling";
-  const bodyIndexUnavailable = body?.indexStatus === "checking" || bodyIndexBusy;
-  const bodyStatus = body?.statusMessage ?? (body ? getSearchStatusLabel(body.status, body.processed, body.total) : "");
-  const bodyHasQuery = Boolean(body?.query.trim());
-  return (
-    <div className={`shelf-drawer-layer${closing ? " closing" : ""}`}>
-      <div className={`shelf-drawer-backdrop${closing ? " closing" : ""}`} aria-hidden="true" onClick={props.onClose} />
-      <aside id="shelf-settings-drawer" className={`shelf-drawer${closing ? " closing" : ""}`} role="dialog" aria-modal="true" aria-label={t("shelfMenu.dialog")}>
-        <div className="shelf-drawer-head">
-          <div>
-            <div className="shelf-drawer-title">{t("shelfMenu.title")}</div>
-            <div className="shelf-drawer-subtitle">{tn("shelfMenu.bookCount", props.entries.length, { count: props.entries.length })}</div>
-          </div>
-          <button className="shelf-drawer-close tb-btn" type="button" onClick={props.onClose} aria-label={t("shelfMenu.close")}>
-            <CloseIcon />
-          </button>
-        </div>
-
-        <div className="shelf-drawer-scroll">
-          {props.onSearchModeChange && body && (
-            <div className="shelf-search-mode" role="group" aria-label={t("shelfMenu.searchMode")}>
-              <button type="button" className={props.searchMode === "metadata" ? "active" : ""} aria-pressed={props.searchMode === "metadata"} onClick={() => props.onSearchModeChange?.("metadata")}>{t("shelfMenu.searchMode.metadata")}</button>
-              <button type="button" className={props.searchMode === "body" ? "active" : ""} aria-pressed={props.searchMode === "body"} onClick={() => props.onSearchModeChange?.("body")}>{t("shelfMenu.searchMode.body")}</button>
-            </div>
-          )}
-
-          {props.searchMode === "body" && body ? <div className="shelf-body-search">
-            <div className="shelf-body-search-scope-note">{t("shelfMenu.body.scope")}</div>
-            <label className="shelf-drawer-search-wrap">
-              <span className="shelf-drawer-search-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><circle cx="11" cy="11" r="7" /><path d="m16.25 16.25 4.25 4.25" /></svg></span>
-              <input className="shelf-drawer-search shelf-search" type="search" placeholder={t("search.placeholder.all")} value={body.query} disabled={props.busy || bodyIndexUnavailable} onChange={(event) => body.onQueryChange(event.target.value)} />
-              {body.query && <button className="shelf-drawer-search-clear" type="button" onClick={() => body.onQueryChange("")} aria-label={t("shelfMenu.body.clear")}>×</button>}
-            </label>
-            {(body.onRebuildIndex || body.onClearIndex) && <div className="search-index-actions" aria-label={t("search.indexActions")}>
-              {body.onRebuildIndex && <button type="button" disabled={body.status === "searching" || bodyIndexBusy || indexActionBusy} onClick={() => runIndexAction(body.onRebuildIndex)}>{t("search.rebuild")}</button>}
-              {body.onClearIndex && <button type="button" disabled={body.status === "searching" || bodyIndexBusy || indexActionBusy} onClick={() => runIndexAction(body.onClearIndex)}>{t("search.clearIndex")}</button>}
-            </div>}
-            {body.indexStatus && <SearchIndexCard props={{ ...body, onClose: () => undefined, scope: "all" }} />}
-            <div className="search-status" aria-live="polite">{bodyStatus}{body.status === "searching" && body.onCancel && <button className="search-cancel" type="button" onClick={body.onCancel}>{t("search.cancel")}</button>}{body.status === "error" && body.errorMessage && <span className="search-error">{t("search.errorDetail", { message: body.errorMessage })}</span>}</div>
-            {!bodyHasQuery && body.status !== "searching" && <div className="search-empty">{t("search.hint.all")}</div>}
-            {body.status === "complete" && bodyHasQuery && body.results.length === 0 && <div className="search-empty">{t("search.empty")}</div>}
-            {body.navigationBusy && <div className="search-navigation-busy">{t("search.locating")}</div>}
-            <SearchResultList results={body.results} navigationBusy={body.navigationBusy} onSelect={body.onSelect} />
-            {body.truncated && body.results.length <= 100 && <div className="search-truncated">{t("search.truncated", { limit: 100 })}</div>}
-          </div> : <>
-          <label className="shelf-drawer-search-wrap">
-            <span className="shelf-drawer-search-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" focusable="false">
-                <circle cx="11" cy="11" r="7" />
-                <path d="m16.25 16.25 4.25 4.25" />
-              </svg>
-            </span>
-            <input
-              ref={searchRef}
-              className="shelf-drawer-search shelf-search"
-              type="search"
-              placeholder={t("shelfMenu.search.placeholder")}
-              value={props.query}
-              disabled={props.busy}
-              onChange={(event) => props.onQueryChange(event.target.value)}
-              onKeyDown={onSearchKeyDown}
-            />
-            {props.query && (
-              <button className="shelf-drawer-search-clear" type="button" onClick={() => props.onQueryChange("")} aria-label={t("shelfMenu.search.clear")}>
-                ×
-              </button>
-            )}
-          </label>
-
-          {isSearchActive ? (
-            <div className="shelf-drawer-live-results" role="region" aria-label={t("shelfMenu.results")}>
-              <div className="shelf-drawer-results-head">
-                <span className="shelf-drawer-results-count">
-                  {tn("shelfMenu.results.found", matchingList.length, { count: matchingList.length })}
-                </span>
-                {matchingList.length > 0 && (
-                  <button
-                    type="button"
-                    className="shelf-drawer-view-shelf-btn"
-                    onClick={props.onClose}
-                    title={t("shelfMenu.results.browse.tip")}
-                  >
-                    {t("shelfMenu.results.browse")}
-                  </button>
-                )}
-              </div>
-
-              {matchingList.length === 0 ? (
-                <div className="shelf-drawer-search-empty">
-                  {t("shelfMenu.results.none", { query: props.query.trim() })}
-                </div>
-              ) : (
-                <ul ref={resultListRef} className="shelf-drawer-results-list" role="listbox">
-                  {matchingList.slice(0, 20).map((entry, index) => {
-                    const isSelected = index === activeSearchIndex;
-                    const progressBadge = isShelfProgressPending(entry) || entry.progressPct > 0
-                      ? shelfProgressLabel(entry)
-                      : (entry.lastReadAtMs > 0 ? t("shelfMenu.results.reading") : t("shelfMenu.results.unread"));
-                    return (
-                      <li
-                        key={entry.id}
-                        role="option"
-                        aria-selected={isSelected}
-                        className={`shelf-drawer-result-item${isSelected ? " active" : ""}`}
-                        onClick={() => handleOpenBook(entry.id)}
-                        onMouseEnter={() => setActiveSearchIndex(index)}
-                      >
-                        <div className="shelf-drawer-result-icon" aria-hidden="true">
-                          <BookLogoIcon />
-                        </div>
-                        <div className="shelf-drawer-result-info">
-                          <div className="shelf-drawer-result-title" title={entry.title}>
-                            {entry.title}
-                          </div>
-                          <div className="shelf-drawer-result-meta">
-                            <span className="shelf-drawer-result-creator">
-                              {entry.creator || t("shelf.unknownAuthor")}
-                            </span>
-                          </div>
-                        </div>
-                        <div className={`shelf-drawer-result-badge${entry.progressPct > 0 ? " has-progress" : ""}`}>
-                          {progressBadge}
-                        </div>
-                      </li>
-                    );
-                  })}
-                  {matchingList.length > 20 && (
-                    <li className="shelf-drawer-results-more">
-                      {t("shelfMenu.results.more", { count: matchingList.length })}
-                    </li>
-                  )}
-                </ul>
-              )}
-            </div>
-          ) : (
-            <>
-              <div className="shelf-drawer-group-label">{t("shelfMenu.filters")}</div>
-              <button
-                className={`shelf-all-books${allBooksExpanded ? " expanded" : ""}`}
-                type="button"
-                aria-expanded={allBooksExpanded}
-                onClick={() => setAllBooksExpanded((value) => !value)}
-              >
-                <span className="shelf-all-books-icon" aria-hidden="true"><FolderIcon /></span>
-                <span className="shelf-all-books-label">{t("shelfMenu.allBooks")}</span>
-                <span className="shelf-all-books-count">{props.matchingCount}</span>
-                <span className="shelf-filter-section-arrow" aria-hidden="true" />
-              </button>
-              <div className="shelf-all-books-details">
-                <div className="shelf-all-books-details-inner">
-                  <ShelfFilterSection
-                    label={t("shelfMenu.filter.author")}
-                    count={props.facets.authors.options.length}
-                    open={expandedSections.has("author")}
-                    onToggleOpen={() => toggleSection("author")}
-                  >
-                    <ShelfFilterOptionList
-                      options={localizeFacetOptions("authors", props.facets.authors.options, t)}
-                      selected={props.filters.authors}
-                      onToggle={(value) => toggleFilter("authors", value)}
-                      emptyLabel={t("shelfMenu.filter.author")}
-                    />
-                  </ShelfFilterSection>
-                  <ShelfFilterSection
-                    label={t("shelfMenu.filter.title")}
-                    count={props.facets.titles.options.length}
-                    open={expandedSections.has("title")}
-                    onToggleOpen={() => toggleSection("title")}
-                  >
-                    <ShelfFilterOptionList
-                      options={props.facets.titles.options}
-                      selected={props.filters.titles}
-                      onToggle={(value) => toggleFilter("titles", value)}
-                      emptyLabel={t("shelfMenu.filter.title")}
-                    />
-                  </ShelfFilterSection>
-                  <ShelfFilterSection
-                    label={t("shelfMenu.filter.saved")}
-                    count={props.facets.timeSegments.options.filter((item) => item.count > 0).length}
-                    open={expandedSections.has("saved")}
-                    onToggleOpen={() => toggleSection("saved")}
-                  >
-                    <ShelfFilterOptionList
-                      options={localizeFacetOptions("timeSegments", props.facets.timeSegments.options, t)}
-                      selected={props.filters.saved}
-                      onToggle={(value) => toggleFilter("saved", value)}
-                      emptyLabel={t("shelfMenu.filter.saved")}
-                    />
-                  </ShelfFilterSection>
-                  <ShelfFilterSection
-                    label={t("shelfMenu.filter.language")}
-                    count={props.facets.languages.options.length}
-                    open={expandedSections.has("language")}
-                    onToggleOpen={() => toggleSection("language")}
-                  >
-                    <ShelfFilterOptionList
-                      options={localizeFacetOptions("languages", props.facets.languages.options, t)}
-                      selected={props.filters.languages}
-                      onToggle={(value) => toggleFilter("languages", value)}
-                      emptyLabel={t("shelfMenu.filter.language")}
-                    />
-                  </ShelfFilterSection>
-                </div>
-              </div>
-              {activeFilterCount > 0 && (
-                <button className="shelf-filter-clear" type="button" onClick={clearFilters}>
-                  {t("shelfMenu.filter.clear", { count: activeFilterCount })}
-                </button>
-              )}
-            </>
-          )}
-          </>
-          }
-
-          <div className="shelf-drawer-group-label">{t("shelfMenu.display")}</div>
-          <div className="shelf-drawer-setting">
-            <span>{language.label}</span>
-            <ShelfSelect
-              registerSubmenuBackHandler={props.registerSubmenuBackHandler}
-              onSubmenuBackActiveChange={props.onSubmenuBackActiveChange}
-              value={language.preference}
-              busy={props.busy}
-              title={language.label}
-              options={language.options}
-              onChange={(value) => language.choose(value as UiLanguagePreference)}
-            />
-          </div>
-          {language.error && <p className="shelf-drawer-setting-error" role="alert">{language.error}</p>}
-          {props.viewMode && props.onViewModeChange && (
-            <div className="shelf-drawer-setting">
-              <span>{t("shelfMenu.viewMode")}</span>
-              <ShelfSelect
-                registerSubmenuBackHandler={props.registerSubmenuBackHandler}
-                onSubmenuBackActiveChange={props.onSubmenuBackActiveChange}
-                value={props.viewMode}
-                busy={props.busy}
-                title={t("shelfMenu.viewMode")}
-                options={[
-                  { value: "grid", label: t("shelfMenu.viewMode.grid") },
-                  { value: "list", label: t("shelfMenu.viewMode.list") },
-                ]}
-                onChange={(value) => props.onViewModeChange!(value as ShelfViewMode)}
-              />
-            </div>
-          )}
-          <div className="shelf-drawer-setting">
-            <span>{t("shelfMenu.sort")}</span>
-            <ShelfSelect
-              registerSubmenuBackHandler={props.registerSubmenuBackHandler}
-              onSubmenuBackActiveChange={props.onSubmenuBackActiveChange}
-              value={props.sort}
-              busy={props.busy}
-              title={t("shelfMenu.sort")}
-              options={[
-                { value: "recent", label: t("shelfMenu.sort.recent") },
-                { value: "added", label: t("shelfMenu.sort.added") },
-                { value: "title", label: t("shelfMenu.sort.title") },
-              ]}
-              onChange={(value) => props.onSortChange(value as ShelfSort)}
-            />
-          </div>
-          <div className="shelf-drawer-setting">
-            <span>{t("shelfMenu.density")}</span>
-            <ShelfSelect
-              registerSubmenuBackHandler={props.registerSubmenuBackHandler}
-              onSubmenuBackActiveChange={props.onSubmenuBackActiveChange}
-              value={props.density}
-              busy={props.busy}
-              title={t("shelfMenu.density")}
-              options={[
-                { value: "comfortable", label: t("shelfMenu.density.comfortable") },
-                { value: "standard", label: t("shelfMenu.density.standard") },
-                { value: "compact", label: t("shelfMenu.density.compact") },
-              ]}
-              onChange={(value) => props.onDensityChange(value as ShelfDensity)}
-            />
-          </div>
-          <div className="shelf-drawer-setting">
-            <span>{t("shelfMenu.theme")}</span>
-            <ShelfSelect
-              registerSubmenuBackHandler={props.registerSubmenuBackHandler}
-              onSubmenuBackActiveChange={props.onSubmenuBackActiveChange}
-              value={props.theme}
-              busy={props.busy}
-              title={t("shelfMenu.theme.tip")}
-              options={[
-                { value: "light", label: t("shelfMenu.theme.light") },
-                { value: "dark", label: t("shelfMenu.theme.dark") },
-                { value: "sepia", label: t("shelfMenu.theme.sepia") },
-                { value: "gray", label: t("shelfMenu.theme.gray") },
-              ]}
-              onChange={(value) => props.onThemeChange(value as Theme)}
-            />
-          </div>
-          <div className="shelf-drawer-setting">
-            <span>{t("shelfMenu.motion")}</span>
-            <ShelfSelect
-              registerSubmenuBackHandler={props.registerSubmenuBackHandler}
-              onSubmenuBackActiveChange={props.onSubmenuBackActiveChange}
-              value={uiMotion}
-              busy={props.busy}
-              title={t("shelfMenu.motion")}
-              options={[
-                { value: "full", label: t("shelfMenu.motion.full") },
-                { value: "reduced", label: t("shelfMenu.motion.reduced") },
-              ]}
-              onChange={(value) => setUiMotion(value as UiMotion)}
-            />
-          </div>
-          {props.batteryIndicatorEnabled !== undefined && props.onBatteryIndicatorChange && (
-            <div className="shelf-drawer-setting">
-              <span>{t("shelfMenu.battery")}</span>
-              <ShelfSelect
-                registerSubmenuBackHandler={props.registerSubmenuBackHandler}
-                onSubmenuBackActiveChange={props.onSubmenuBackActiveChange}
-                value={props.batteryIndicatorEnabled ? "on" : "off"}
-                busy={props.busy}
-                title={t("shelfMenu.battery.tip")}
-                options={[
-                  { value: "on", label: t("shelfMenu.show") },
-                  { value: "off", label: t("shelfMenu.hide") },
-                ]}
-                onChange={(value) => props.onBatteryIndicatorChange!(value === "on")}
-              />
-            </div>
-          )}
-
-          {props.hideReaderSystemStatusBar !== undefined && props.onHideReaderSystemStatusBarChange && (
-            <div className="shelf-drawer-setting">
-              <span>{t("shelfMenu.statusBar")}</span>
-              <ShelfSelect
-                registerSubmenuBackHandler={props.registerSubmenuBackHandler}
-                onSubmenuBackActiveChange={props.onSubmenuBackActiveChange}
-                value={props.hideReaderSystemStatusBar ? "hide" : "show"}
-                busy={props.busy}
-                title={t("shelfMenu.statusBar.tip")}
-                options={[{ value: "hide", label: t("shelfMenu.hide") }, { value: "show", label: t("shelfMenu.show") }]}
-                onChange={(value) => props.onHideReaderSystemStatusBarChange!(value === "hide")}
-              />
-            </div>
-          )}
-
-          {props.keepScreenOnWhileReading !== undefined && props.onKeepScreenOnWhileReadingChange && (
-            <div className="shelf-drawer-setting">
-              <span>{t("shelfMenu.keepScreenOn")}</span>
-              <ShelfSelect
-                registerSubmenuBackHandler={props.registerSubmenuBackHandler}
-                onSubmenuBackActiveChange={props.onSubmenuBackActiveChange}
-                value={props.keepScreenOnWhileReading ? "on" : "off"}
-                busy={props.busy}
-                title={t("shelfMenu.keepScreenOn.tip")}
-                options={[{ value: "off", label: t("shelfMenu.off") }, { value: "on", label: t("shelfMenu.on") }]}
-                onChange={(value) => props.onKeepScreenOnWhileReadingChange!(value === "on")}
-              />
-            </div>
-          )}
-
-          {props.tapRegions && props.onTapRegionsChange && (
-            <div className="shelf-drawer-list shelf-drawer-tap-entry">
-              <ShelfDrawerRow
-                icon={<TapRegionsIcon />}
-                tone="neutral"
-                title={t("tapRegions.title")}
-                detail={tapRegionsSummary(props.tapRegions.preferences, props.tapRegions.device, t)}
-                onClick={() => setTapPanelOpen(true)}
-              />
-            </div>
-          )}
-
-          <div className="shelf-drawer-group-label">{t("shelfMenu.backup")}</div>
-          <div className="shelf-drawer-list">
-            {capabilities.supportsLanTransfer && props.onOpenLanTransfer && (
-              <ShelfDrawerRow
-                icon={<LanTransferIcon />}
-                title={t("shelfMenu.lan")}
-                detail={t("shelfMenu.lan.detail")}
-                disabled={!props.lanTransferActive && (props.busy || props.importActive || props.saveFileActive)}
-                onClick={() => props.onOpenLanTransfer!()}
-              />
-            )}
-            <ShelfDrawerRow
-              icon={<ExportIcon />}
-              title={t("shelfMenu.export")}
-              detail={t("shelfMenu.export.detail")}
-              disabled={props.busy || props.saveFileActive || props.lanTransferActive || props.entries.length === 0}
-              onClick={() => props.onExportArchive()}
-            />
-            <ShelfDrawerRow
-              icon={<ImportArchiveIcon />}
-              title={t("shelfMenu.importArchive")}
-              detail={t("shelfMenu.importArchive.detail")}
-              disabled={props.busy || props.importArchiveDisabled || props.saveFileActive || props.lanTransferActive}
-              onClick={props.onImportArchive}
-            />
-            {props.onImportLegacyArchive && (
-              <ShelfDrawerRow
-                icon={<ImportArchiveIcon />}
-                title={t("shelfMenu.importLegacy")}
-                detail={t("shelfMenu.importLegacy.detail")}
-                disabled={props.busy || props.importArchiveDisabled || props.saveFileActive || props.lanTransferActive}
-                onClick={props.onImportLegacyArchive}
-              />
-            )}
-          </div>
-
-          {(props.onEnterSelection || capabilities.supportsCacheStorage) && (
-            <>
-              <div className="shelf-drawer-group-label">{t("shelfMenu.manage")}</div>
-              <div className="shelf-drawer-list">
-                {props.onEnterSelection && (
-                  <ShelfDrawerRow
-                    icon={<CheckListIcon />}
-                    tone="neutral"
-                    title={t("shelfMenu.batch")}
-                    detail={t("shelfMenu.batch.detail")}
-                    disabled={props.busy || props.entries.length === 0}
-                    onClick={() => {
-                      props.onClose();
-                      props.onEnterSelection!();
-                    }}
-                  />
-                )}
-                {capabilities.supportsCacheStorage && (
-                  <ShelfDrawerRow
-                    icon={<StorageIcon />}
-                    tone="neutral"
-                    title={t("shelfMenu.cache")}
-                    detail={t("shelfMenu.cache.detail")}
-                    disabled={props.busy}
-                    onClick={() => setCachePanelOpen(true)}
-                  />
-                )}
-              </div>
-            </>
-          )}
-
-          <div className="shelf-drawer-group-label">{t("shelfMenu.about")}</div>
-          <AboutInfo />
-        </div>
-      </aside>
-      <CacheStoragePanel open={cachePanelOpen} onClose={() => setCachePanelOpen(false)} />
-      {props.tapRegions && props.onTapRegionsChange && (
-        <TapRegionsSettingsPanel
-          open={tapPanelOpen}
-          device={props.tapRegions.device}
-          value={props.tapRegions.preferences}
-          onChange={props.onTapRegionsChange}
-          onClose={closeTapPanel}
-          scrollMode={props.tapRegionsScrollMode}
-        />
       )}
     </div>
   );
@@ -3385,7 +2594,12 @@ export function ShelfView(props: ShelfViewProps) {
 
   const quickInputRef = useRef<HTMLInputElement | null>(null);
 
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<ShelfSettingsSection | undefined>(undefined);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [bodySearchOpen, setBodySearchOpen] = useState(false);
+  const filterButtonRef = useRef<HTMLButtonElement | null>(null);
+  const searchBoxRef = useRef<HTMLDivElement | null>(null);
   const [filters, setFilters] = useState<ShelfFilters>(EMPTY_SHELF_FILTERS);
   const [selectionMode, setSelectionMode] = useState(false);
   const [dockClosing, setDockClosing] = useState(false);
@@ -3980,10 +3194,39 @@ export function ShelfView(props: ShelfViewProps) {
     }, 150);
   }, []);
 
-  const closeDrawer = useCallback((): void => {
-    setDrawerOpen(false);
+  const closeSettings = useCallback((): void => {
+    setSettingsOpen(false);
     menuButtonRef.current?.focus();
   }, []);
+  const openSettings = useCallback((section?: ShelfSettingsSection): void => {
+    setBodySearchOpen(false);
+    setFilterOpen(false);
+    setSettingsSection(section);
+    setSettingsOpen(true);
+  }, []);
+  const closeFilter = useCallback((): void => {
+    setFilterOpen(false);
+    filterButtonRef.current?.focus();
+  }, []);
+  const closeBodySearch = useCallback((): void => setBodySearchOpen(false), []);
+  // 正文搜索只在书架搜索框里：PC 在框下展开结果，手机进入全屏搜索页，离开时回到书名作者。
+  const bodySearch = props.onSearchModeChange ? props.bodySearch : undefined;
+  const searchMode = bodySearch ? props.searchMode ?? "metadata" : "metadata";
+  const onSearchModeChange = props.onSearchModeChange;
+  const changeSearchMode = useCallback((mode: ShelfSearchMode): void => {
+    if (mode === "body") {
+      setQuery("");
+      setBodySearchOpen(true);
+    } else {
+      setBodySearchOpen(false);
+    }
+    onSearchModeChange?.(mode);
+  }, [onSearchModeChange]);
+  const leaveBodySearch = useCallback((): void => {
+    setBodySearchOpen(false);
+    if (isCompactMobile) onSearchModeChange?.("metadata");
+  }, [isCompactMobile, onSearchModeChange]);
+  const filterCount = shelfFilterCount(filters);
 
   /** Resolves false on failure; App has already reported it through the shelf notice. */
   const applyFavorite = useCallback(
@@ -4073,8 +3316,16 @@ export function ShelfView(props: ShelfViewProps) {
       handleCloseFolderModal();
       return true;
     }
-    if (drawerOpen) {
-      closeDrawer();
+    if (settingsOpen) {
+      closeSettings();
+      return true;
+    }
+    if (filterOpen) {
+      closeFilter();
+      return true;
+    }
+    if (bodySearchOpen) {
+      leaveBodySearch();
       return true;
     }
     if (folderMenuOpen) {
@@ -4093,11 +3344,15 @@ export function ShelfView(props: ShelfViewProps) {
   }, [
     activeFolderModal,
     closeMenu,
-    closeDrawer,
+    closeSettings,
+    closeFilter,
+    filterOpen,
+    bodySearchOpen,
+    leaveBodySearch,
     createFolderOpen,
     deleteTargets,
     dissolveFolderTarget,
-    drawerOpen,
+    settingsOpen,
     exitSelection,
     folderMenuOpen,
     handleCancelDelete,
@@ -4121,7 +3376,9 @@ export function ShelfView(props: ShelfViewProps) {
     renameFolderTarget ||
     dissolveFolderTarget ||
     activeFolderModal ||
-    drawerOpen ||
+    settingsOpen ||
+    filterOpen ||
+    bodySearchOpen ||
     folderMenuOpen ||
     selectionMode ||
     submenuBackActive ||
@@ -4665,6 +3922,35 @@ export function ShelfView(props: ShelfViewProps) {
     if (view && view.dataset.input !== input) view.dataset.input = input;
   }, []);
 
+  const searchScopeSwitch = (
+    <div className="shelf-search-scope" role="group" aria-label={t("shelfSettings.search.scope")}>
+      <button type="button" aria-pressed={searchMode === "metadata"} className={searchMode === "metadata" ? "active" : ""}
+        disabled={props.busy} onClick={() => changeSearchMode("metadata")}>{t("shelfMenu.searchMode.metadata")}</button>
+      <button type="button" aria-pressed={searchMode === "body"} className={searchMode === "body" ? "active" : ""}
+        disabled={props.busy} onClick={() => changeSearchMode("body")}>{t("shelfMenu.searchMode.body")}</button>
+    </div>
+  );
+  const filterButton = (
+    <button
+      ref={filterButtonRef}
+      className={`shelf-filter-btn${isCompactMobile ? " is-icon" : ""}${filterCount > 0 ? " is-active" : ""}`}
+      type="button"
+      aria-haspopup="dialog"
+      aria-expanded={filterOpen}
+      aria-label={filterCount > 0 ? t("shelfSettings.filter.button.count", { count: filterCount }) : t("shelfSettings.filter.button")}
+      title={t("shelfSettings.filter.button")}
+      disabled={props.busy}
+      onClick={() => {
+        setBodySearchOpen(false);
+        setFilterOpen((open) => !open);
+      }}
+    >
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4" /></svg>
+      {!isCompactMobile && <span>{t("shelfSettings.filter.button")}</span>}
+      {filterCount > 0 && <span className="shelf-filter-badge" aria-hidden="true">{filterCount}</span>}
+    </button>
+  );
+
   return (
     <div
       ref={shelfViewRef}
@@ -4728,9 +4014,9 @@ export function ShelfView(props: ShelfViewProps) {
                   ref={menuButtonRef}
                   type="button"
                   aria-label={t("shelfMain.settings.mobile")}
-                  aria-expanded={drawerOpen}
-                  aria-controls="shelf-settings-drawer"
-                  onClick={() => setDrawerOpen(true)}
+                  aria-expanded={settingsOpen}
+                  aria-haspopup="dialog"
+                  onClick={() => openSettings()}
                   disabled={props.busy}
                   title={t("shelfMain.settings.mobile")}
                 >
@@ -4766,7 +4052,9 @@ export function ShelfView(props: ShelfViewProps) {
                     <CloseIcon />
                   </button>
                 )}
+                {bodySearch && searchScopeSwitch}
               </div>
+              {filterButton}
             </div>
           </div>
         ) : (
@@ -4780,31 +4068,60 @@ export function ShelfView(props: ShelfViewProps) {
               <span className="shelf-brand-title">{t("shelfMain.brand")}</span>
             </div>
 
-            {/* Level 1 中间：极速书名快速过滤框 [ 🔍 快速搜书名... (按 / 键聚焦) ] */}
-            <div className="shelf-quick-filter-box">
-              <span className="shelf-quick-filter-icon" aria-hidden="true">
-                <SearchIcon />
-              </span>
-              <input
-                ref={quickInputRef}
-                className="shelf-quick-filter-input"
-                type="search"
-                placeholder={t("shelfMain.search.quick")}
-                value={query}
-                disabled={props.busy}
-                onChange={(e) => setQuery(e.target.value)}
-                aria-label={t("shelfMain.search.quick.label")}
-              />
-              {query && (
-                <button
-                  className="shelf-quick-filter-clear"
-                  type="button"
-                  onClick={() => setQuery("")}
-                  aria-label={t("shelfMain.search.clear")}
-                  title={t("shelfMain.search.clear.tip")}
-                >
-                  <CloseIcon />
-                </button>
+            {/* Level 1 中间：书架搜索框，范围切换“书名作者 | 正文”；正文结果在框下展开 */}
+            <div className="shelf-quick-filter-anchor" ref={searchBoxRef}>
+              <div className={`shelf-quick-filter-box${searchMode === "body" ? " is-body" : ""}`}>
+                <span className="shelf-quick-filter-icon" aria-hidden="true">
+                  <SearchIcon />
+                </span>
+                {searchMode === "body" && bodySearch ? (
+                  <input
+                    ref={quickInputRef}
+                    className="shelf-quick-filter-input"
+                    type="search"
+                    placeholder={t("search.placeholder.all")}
+                    value={bodySearch.query}
+                    disabled={props.busy || bodySearch.indexStatus === "checking" || bodySearch.indexStatus === "indexing" || bodySearch.indexStatus === "cancelling"}
+                    onFocus={() => setBodySearchOpen(true)}
+                    onChange={(e) => {
+                      bodySearch.onQueryChange(e.target.value);
+                      setBodySearchOpen(true);
+                    }}
+                    aria-label={t("search.placeholder.all")}
+                  />
+                ) : (
+                  <input
+                    ref={quickInputRef}
+                    className="shelf-quick-filter-input"
+                    type="search"
+                    placeholder={t("shelfMain.search.quick")}
+                    value={query}
+                    disabled={props.busy}
+                    onChange={(e) => setQuery(e.target.value)}
+                    aria-label={t("shelfMain.search.quick.label")}
+                  />
+                )}
+                {searchMode === "metadata" && query && (
+                  <button
+                    className="shelf-quick-filter-clear"
+                    type="button"
+                    onClick={() => setQuery("")}
+                    aria-label={t("shelfMain.search.clear")}
+                    title={t("shelfMain.search.clear.tip")}
+                  >
+                    <CloseIcon />
+                  </button>
+                )}
+                {bodySearch && searchScopeSwitch}
+              </div>
+              {bodySearch && (
+                <ShelfBodySearchDropdown
+                  open={searchMode === "body" && bodySearchOpen}
+                  body={bodySearch}
+                  anchor={searchBoxRef.current}
+                  onClose={closeBodySearch}
+                  onManageIndex={() => openSettings("storage")}
+                />
               )}
             </div>
 
@@ -4859,15 +4176,17 @@ export function ShelfView(props: ShelfViewProps) {
                 <span>{t("shelfMain.batch.enter")}</span>
               </button>
 
+              {filterButton}
+
               {/* 设置按钮 */}
               <button
                 className="shelf-icon-btn-zen"
                 ref={menuButtonRef}
                 type="button"
                 aria-label={t("shelfMain.settings")}
-                aria-expanded={drawerOpen}
-                aria-controls="shelf-settings-drawer"
-                onClick={() => setDrawerOpen(true)}
+                aria-expanded={settingsOpen}
+                aria-haspopup="dialog"
+                onClick={() => openSettings()}
                 disabled={props.busy}
                 title={t("shelfMain.settings")}
               >
@@ -4878,23 +4197,13 @@ export function ShelfView(props: ShelfViewProps) {
         )}
       </header>
 
-      {/* 书架高级设置与分面抽屉 */}
-      <ShelfSettingsDrawer
-        registerSubmenuBackHandler={registerSubmenuBackHandler}
-        onSubmenuBackActiveChange={reportSubmenuBackActive}
-        open={drawerOpen}
-        entries={props.entries}
-        matchingEntries={visible}
-        busy={props.busy}
-        query={query}
-        onQueryChange={setQuery}
-        sort={sort}
-        onSortChange={setSort}
-        density={density}
-        onDensityChange={setDensity}
-        viewMode={viewMode}
-        onViewModeChange={handleViewModeChange}
-        onEnterSelection={enterSelection}
+      {/* 设置页：PC 对话框，触屏全屏页 */}
+      <ShelfSettingsPage
+        open={settingsOpen}
+        presentation={props.touchUi || isCompactMobile ? "page" : "dialog"}
+        initialSection={settingsSection}
+        busy={Boolean(props.busy)}
+        bookCount={props.entries.length}
         theme={props.theme}
         onThemeChange={props.onThemeChange}
         hideReaderSystemStatusBar={props.hideReaderSystemStatusBar}
@@ -4906,27 +4215,50 @@ export function ShelfView(props: ShelfViewProps) {
         tapRegions={props.tapRegions}
         onTapRegionsChange={props.onTapRegionsChange}
         tapRegionsScrollMode={props.tapRegionsScrollMode}
-        filters={filters}
-        facets={filterModel.facets}
-        matchingCount={filterModel.entries.length}
-        onFiltersChange={setFilters}
-        onClose={closeDrawer}
-        onOpenBook={(id) => {
-          props.onOpen(id);
-          closeDrawer();
-        }}
         importArchiveDisabled={props.importActive}
         importActive={props.importActive}
         saveFileActive={props.saveFileActive}
         lanTransferActive={props.lanTransferActive}
-        onOpenLanTransfer={props.onOpenLanTransfer}
+        onOpenLanTransfer={props.onOpenLanTransfer ? () => props.onOpenLanTransfer!() : undefined}
         onImportArchive={props.onImportArchive}
-        onExportArchive={props.onExportArchive}
+        onExportArchive={() => props.onExportArchive()}
         onImportLegacyArchive={props.onImportLegacyArchive}
-        searchMode={props.searchMode ?? "metadata"}
-        onSearchModeChange={props.onSearchModeChange}
-        bodySearch={props.bodySearch}
+        bodySearch={bodySearch}
+        onOpenDiagnostics={props.onOpenDiagnostics ? () => {
+          closeSettings();
+          props.onOpenDiagnostics!();
+        } : undefined}
+        registerSubmenuBackHandler={registerSubmenuBackHandler}
+        onClose={closeSettings}
       />
+
+      {/* 筛选与排序：PC 浮层，手机底部面板（手机上兼管排序、视图、密度） */}
+      <ShelfFilterPanel
+        open={filterOpen}
+        presentation={isCompactMobile ? "sheet" : "popover"}
+        anchor={filterButtonRef.current}
+        filters={filters}
+        facets={filterModel.facets}
+        matchingCount={filterModel.entries.length}
+        onFiltersChange={setFilters}
+        onClose={closeFilter}
+        sort={sort}
+        onSortChange={setSort}
+        viewMode={viewMode}
+        onViewModeChange={handleViewModeChange}
+        density={density}
+        onDensityChange={setDensity}
+      />
+
+      {bodySearch && isCompactMobile && (
+        <ShelfBodySearchPage
+          open={searchMode === "body" && bodySearchOpen}
+          body={bodySearch}
+          busy={props.busy}
+          onClose={leaveBodySearch}
+          onManageIndex={() => openSettings("storage")}
+        />
+      )}
 
       {/* Level 2: 紧凑型“正在阅读”续读控制台 */}
       <ShelfResumeStage
@@ -5255,6 +4587,9 @@ export function ShelfView(props: ShelfViewProps) {
           </div>
         )}
       </nav>
+
+      {/* 生效的筛选：每个维度一个可删除的摘要标签，不逐个列出选中的值 */}
+      <ShelfFilterSummary filters={filters} facets={filterModel.facets} compact={isCompactMobile} onFiltersChange={setFilters} />
 
       {/* 书架内容区 */}
       {props.entries.length === 0 && (activeFolders.length === 0 || scope.type === "all") ? (
