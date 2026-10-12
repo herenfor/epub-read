@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { createReactDomHarness } from "../test/reactDomHarness";
 import {
   SEARCH_RESULT_RENDER_LIMIT,
   getSearchStatusLabel,
@@ -163,5 +164,73 @@ describe("search result presentation helpers", () => {
     expect(markup).not.toContain("全部书籍");
     expect(markup).not.toContain("建立全部书籍索引");
     expect(markup).toContain('class="search-input"');
+  });
+});
+
+describe("search panel header input by layout", () => {
+  async function mount(layout: "phone" | "centered" | "docked") {
+    const dom = createReactDomHarness();
+    const onClose = vi.fn();
+    const panel = createElement(SearchPanel, {
+      query: "", onQueryChange: () => undefined, results: [], status: "idle", processed: 0, total: 0,
+      onSelect: () => undefined, onClose, docked: layout === "docked",
+    });
+    await dom.render(layout === "phone"
+      ? createElement("div", { className: "app", "data-mobile-chrome": "true", "data-layout": "compact" }, panel)
+      : createElement("div", { className: "app" }, panel));
+    const doc = dom.container.ownerDocument;
+    const win = doc.defaultView as unknown as typeof globalThis;
+    const head = doc.querySelector(".search-head") as HTMLElement;
+    const sheet = doc.querySelector(".search-panel") as HTMLElement;
+    const captured = new Set<number>();
+    Object.assign(head, {
+      setPointerCapture: (id: number) => captured.add(id),
+      hasPointerCapture: (id: number) => captured.has(id),
+      releasePointerCapture: (id: number) => captured.delete(id),
+    });
+    let at = 0;
+    const pointer = async (type: string, y: number, target: Element = head) => {
+      const event = new win.Event(type, { bubbles: true, cancelable: true });
+      Object.assign(event, { pointerId: 3, clientX: 50, clientY: y, button: 0, isPrimary: true });
+      Object.defineProperty(event, "timeStamp", { value: (at += 16) });
+      await dom.dispatch(target, event);
+      return event;
+    };
+    return { dom, onClose, head, sheet, captured, pointer, close: doc.querySelector(".tb-close") as HTMLElement };
+  }
+
+  it("phone bottom sheet: the header is the shared sheet grip (pull down closes), never the invisible desktop move", async () => {
+    const t = await mount("phone");
+    try {
+      const down = await t.pointer("pointerdown", 100);
+      expect(down.defaultPrevented).toBe(false);
+      await t.pointer("pointermove", 160);
+      expect(t.sheet.style.transform).toBe("translateY(60px)");
+      await t.pointer("pointermove", 220);
+      await t.pointer("pointerup", 220);
+      expect(t.onClose).toHaveBeenCalledTimes(1);
+      expect(t.captured.size).toBe(0);
+    } finally { await t.dom.dispose(); }
+  });
+
+  it("centered panel keeps free move; lost capture ends it; the close button and docked panel never capture", async () => {
+    const t = await mount("centered");
+    try {
+      await t.pointer("pointerdown", 100);
+      expect(t.captured.has(3)).toBe(true);
+      await t.pointer("pointermove", 130);
+      expect(t.sheet.getAttribute("style")).toContain("calc(-50% + 30px)");
+      await t.pointer("lostpointercapture", 130);
+      await t.pointer("pointermove", 200);
+      expect(t.sheet.getAttribute("style")).toContain("calc(-50% + 30px)");
+      t.captured.clear();
+      await t.pointer("pointerdown", 100, t.close);
+      expect(t.captured.size).toBe(0);
+    } finally { await t.dom.dispose(); }
+    const docked = await mount("docked");
+    try {
+      await docked.pointer("pointerdown", 100);
+      expect(docked.captured.size).toBe(0);
+    } finally { await docked.dom.dispose(); }
   });
 });
