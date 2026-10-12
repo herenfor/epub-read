@@ -153,6 +153,8 @@ export interface ShelfViewProps {
   /** 点击翻页区域（本机偏好，编辑当前设备类别那一份）；未提供时不显示入口。 */
   tapRegions?: ReaderTapRegionSettings;
   onTapRegionsChange?(next: ReaderTapPreferences): void;
+  /** 阅读器处于滚动模式：点击翻页设置只在分页模式生效。 */
+  tapRegionsScrollMode?: boolean;
   onOpen(id: string): void;
   onImport(): void;
   /** Directory import entry; absent hides it. */
@@ -2229,6 +2231,7 @@ interface ShelfSettingsDrawerProps extends ShelfSubmenuBackProps {
   onKeepScreenOnWhileReadingChange?(enabled: boolean): void;
   tapRegions?: ReaderTapRegionSettings;
   onTapRegionsChange?(next: ReaderTapPreferences): void;
+  tapRegionsScrollMode?: boolean;
   filters: ShelfFilters;
   facets: ShelfFilterFacets;
   matchingCount: number;
@@ -2828,6 +2831,7 @@ function ShelfSettingsDrawer(props: ShelfSettingsDrawerProps) {
           value={props.tapRegions.preferences}
           onChange={props.onTapRegionsChange}
           onClose={closeTapPanel}
+          scrollMode={props.tapRegionsScrollMode}
         />
       )}
     </div>
@@ -4878,6 +4882,7 @@ export function ShelfView(props: ShelfViewProps) {
         onBatteryIndicatorChange={props.onBatteryIndicatorChange}
         tapRegions={props.tapRegions}
         onTapRegionsChange={props.onTapRegionsChange}
+        tapRegionsScrollMode={props.tapRegionsScrollMode}
         filters={filters}
         facets={filterModel.facets}
         matchingCount={filterModel.entries.length}
