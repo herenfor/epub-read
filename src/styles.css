@@ -3262,7 +3262,7 @@ select option {
   font-size: 11px;
   line-height: 1.4;
   color: var(--muted);
-  word-break: break-all;
+  overflow-wrap: anywhere;
 }
 
 /* 封面底边内嵌纤细微光进度条：不遮挡封面，2.5px 高度 */
@@ -3436,7 +3436,8 @@ select option {
   font-weight: 550;
   line-height: 1.4;
   color: var(--fg);
-  word-break: break-all;
+  /* CJK still breaks between characters; Latin titles break at spaces, not mid-word. */
+  overflow-wrap: anywhere;
   min-height: calc(13px * 1.4 * 2);
   transition: color 0.15s ease;
 }
@@ -3613,6 +3614,9 @@ select option {
   background: color-mix(in srgb, var(--error) 12%, transparent);
   color: var(--fg);
   font-size: 13px;
+  line-height: 1.5;
+  /* Error text may carry a path or raw message without spaces. */
+  overflow-wrap: anywhere;
 }
 
 /* 导入结果 toast：底部居中浮出，3 秒后 1 秒淡出；不拦截鼠标 */

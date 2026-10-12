@@ -789,6 +789,10 @@
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  /* A long folder name must not widen the rail past the viewport: the active
+   * bar shrinks and its name ellipsizes, keeping the count and actions visible. */
+  min-width: 0;
+  max-width: 100%;
 }
 
 /* 状态分流胶囊组 */
@@ -961,6 +965,7 @@
 /* 处于特定文件夹时的面包屑条 */
 .shelf-folder-active-bar {
   min-width: 0;
+  max-width: 100%;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -1125,7 +1130,7 @@
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  word-break: break-all;
+  overflow-wrap: anywhere;
 }
 
 .morandi-creator {
@@ -2362,11 +2367,16 @@
  * ========================================================================= */
 .app[data-touch-ui="true"] :is(.shelf-btn-primary, .shelf-manage-toggle-btn, .shelf-selection-cancel,
   .shelf-selection-delete, .shelf-selection-toggle-all, .shelf-action-folder, .shelf-more-reading-btn,
-  .shelf-btn-resume, .shelf-resume-continue) {
+  .shelf-btn-resume, .shelf-resume-continue, .shelf-confirm-primary) {
   gap: 8px;
   padding-inline: 18px;
   border-radius: 11px;
   font-size: 14px;
+}
+
+/* Dialog actions: the primary button gets the same touch height as Cancel beside it. */
+.app[data-touch-ui="true"] .shelf-confirm-primary {
+  min-height: calc(48px * var(--ui-touch-comp, 1));
 }
 
 .app[data-touch-ui="true"] :is(.shelf-btn-resume, .shelf-more-reading-btn, .shelf-resume-continue) {
@@ -2875,4 +2885,18 @@
   .shelf-action-sheet .shelf-action-item:active:not(:disabled) {
     transform: none;
   }
+}
+
+/* No-result state: one clear way back per active narrowing, side by side. */
+.shelf-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* Shelf error banner follows the compact shelf gutter. */
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-error {
+  margin: 8px 12px 0;
 }
