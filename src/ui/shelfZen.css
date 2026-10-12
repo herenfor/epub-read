@@ -121,9 +121,11 @@
   transition: background-color 0.15s ease, color 0.15s ease;
 }
 
-.shelf-quick-filter-clear:hover {
-  background: color-mix(in srgb, var(--fg, #000) 22%, transparent);
-  color: var(--fg, #111827);
+@media (hover: hover) {
+  .shelf-quick-filter-clear:hover {
+    background: color-mix(in srgb, var(--fg, #000) 22%, transparent);
+    color: var(--fg, #111827);
+  }
 }
 
 /* 顶栏右侧工具 */
@@ -151,10 +153,12 @@
   box-shadow: 0 1px 3px color-mix(in srgb, var(--accent, #2563eb) 30%, transparent);
 }
 
-.shelf-btn-primary:hover:not(:disabled) {
-  transform: translateY(-1px);
-  filter: brightness(1.06);
-  box-shadow: 0 3px 8px color-mix(in srgb, var(--accent, #2563eb) 35%, transparent);
+@media (hover: hover) {
+  .shelf-btn-primary:hover:not(:disabled) {
+    transform: translateY(-1px);
+    filter: brightness(1.06);
+    box-shadow: 0 3px 8px color-mix(in srgb, var(--accent, #2563eb) 35%, transparent);
+  }
 }
 
 .shelf-btn-primary:active:not(:disabled) {
@@ -184,8 +188,10 @@
   transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
-.shelf-btn-secondary:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--accent, #2563eb) 45%, transparent);
+@media (hover: hover) {
+  .shelf-btn-secondary:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--accent, #2563eb) 45%, transparent);
+  }
 }
 
 .shelf-btn-secondary:disabled {
@@ -238,10 +244,12 @@
   transition: all 0.15s ease;
 }
 
-.shelf-icon-btn-zen:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--fg, #000) 5%, var(--shelf-card-bg, #fff));
-  border-color: color-mix(in srgb, var(--accent, #2563eb) 30%, var(--shelf-card-border));
-  color: var(--accent, #2563eb);
+@media (hover: hover) {
+  .shelf-icon-btn-zen:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--fg, #000) 5%, var(--shelf-card-bg, #fff));
+    border-color: color-mix(in srgb, var(--accent, #2563eb) 30%, var(--shelf-card-border));
+    color: var(--accent, #2563eb);
+  }
 }
 
 .shelf-manage-toggle-btn {
@@ -259,9 +267,11 @@
   transition: all 0.15s ease;
 }
 
-.shelf-manage-toggle-btn:hover:not(:disabled) {
-  border-color: var(--accent, #2563eb);
-  color: var(--accent, #2563eb);
+@media (hover: hover) {
+  .shelf-manage-toggle-btn:hover:not(:disabled) {
+    border-color: var(--accent, #2563eb);
+    color: var(--accent, #2563eb);
+  }
 }
 
 .shelf-manage-toggle-btn.active {
@@ -375,8 +385,10 @@
   color: var(--fg, #111827);
 }
 
-.shelf-resume-compact-open:hover .shelf-resume-compact-title {
-  color: var(--accent, #2563eb);
+@media (hover: hover) {
+  .shelf-resume-compact-open:hover .shelf-resume-compact-title {
+    color: var(--accent, #2563eb);
+  }
 }
 
 .shelf-resume-compact-meta {
@@ -431,8 +443,10 @@
   transition: filter 0.15s ease, transform 0.15s ease;
 }
 
-.shelf-resume-continue:hover:not(:disabled) {
-  filter: brightness(1.06);
+@media (hover: hover) {
+  .shelf-resume-continue:hover:not(:disabled) {
+    filter: brightness(1.06);
+  }
 }
 
 .shelf-resume-continue:active:not(:disabled) {
@@ -463,8 +477,10 @@
   cursor: pointer;
 }
 
-.shelf-more-reading-open:hover {
-  background: color-mix(in srgb, var(--accent, #2563eb) 16%, transparent);
+@media (hover: hover) {
+  .shelf-more-reading-open:hover {
+    background: color-mix(in srgb, var(--accent, #2563eb) 16%, transparent);
+  }
 }
 
 /* 展开后的横向紧凑控制台 */
@@ -579,8 +595,10 @@
   line-height: 1.3;
 }
 
-.shelf-resume-title:hover {
-  color: var(--accent, #2563eb);
+@media (hover: hover) {
+  .shelf-resume-title:hover {
+    color: var(--accent, #2563eb);
+  }
 }
 
 .shelf-resume-author {
@@ -645,10 +663,12 @@
   transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.shelf-btn-resume:hover {
-  transform: translateY(-1px) scale(1.02);
-  filter: brightness(1.08);
-  box-shadow: 0 4px 12px color-mix(in srgb, var(--accent, #2563eb) 45%, transparent);
+@media (hover: hover) {
+  .shelf-btn-resume:hover {
+    transform: translateY(-1px) scale(1.02);
+    filter: brightness(1.08);
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--accent, #2563eb) 45%, transparent);
+  }
 }
 
 .shelf-btn-resume:active {
@@ -686,9 +706,11 @@
   transition: all 0.15s ease;
 }
 
-.shelf-more-reading-btn:hover {
-  background: color-mix(in srgb, var(--accent, #2563eb) 8%, var(--shelf-card-bg, #fff));
-  border-color: var(--accent, #2563eb);
+@media (hover: hover) {
+  .shelf-more-reading-btn:hover {
+    background: color-mix(in srgb, var(--accent, #2563eb) 8%, var(--shelf-card-bg, #fff));
+    border-color: var(--accent, #2563eb);
+  }
 }
 
 .shelf-more-reading-popover {
@@ -730,8 +752,10 @@
   transition: background-color 0.15s ease;
 }
 
-.shelf-more-reading-item:hover {
-  background: color-mix(in srgb, var(--fg, #000) 5%, transparent);
+@media (hover: hover) {
+  .shelf-more-reading-item:hover {
+    background: color-mix(in srgb, var(--fg, #000) 5%, transparent);
+  }
 }
 
 .shelf-more-reading-item.active {
@@ -766,10 +790,12 @@
   transition: all 0.15s ease;
 }
 
-.shelf-resume-toggle-btn:hover {
-  background: color-mix(in srgb, var(--accent, #2563eb) 8%, var(--shelf-card-bg, #fff));
-  border-color: color-mix(in srgb, var(--accent, #2563eb) 35%, transparent);
-  color: var(--accent, #2563eb);
+@media (hover: hover) {
+  .shelf-resume-toggle-btn:hover {
+    background: color-mix(in srgb, var(--accent, #2563eb) 8%, var(--shelf-card-bg, #fff));
+    border-color: color-mix(in srgb, var(--accent, #2563eb) 35%, transparent);
+    color: var(--accent, #2563eb);
+  }
 }
 
 /* =========================================================================
@@ -789,6 +815,10 @@
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  /* A long folder name must not widen the rail past the viewport: the active
+   * bar shrinks and its name ellipsizes, keeping the count and actions visible. */
+  min-width: 0;
+  max-width: 100%;
 }
 
 /* 状态分流胶囊组 */
@@ -819,9 +849,11 @@
   white-space: nowrap;
 }
 
-.shelf-capsule-tab:hover:not(.active) {
-  color: var(--fg, #111827);
-  background: color-mix(in srgb, var(--fg, #000) 4%, transparent);
+@media (hover: hover) {
+  .shelf-capsule-tab:hover:not(.active) {
+    color: var(--fg, #111827);
+    background: color-mix(in srgb, var(--fg, #000) 4%, transparent);
+  }
 }
 
 .shelf-capsule-tab.active {
@@ -866,9 +898,11 @@
   transition: all 0.15s ease;
 }
 
-.shelf-folder-dropdown-btn:hover {
-  border-color: var(--accent, #2563eb);
-  color: var(--accent, #2563eb);
+@media (hover: hover) {
+  .shelf-folder-dropdown-btn:hover {
+    border-color: var(--accent, #2563eb);
+    color: var(--accent, #2563eb);
+  }
 }
 
 .shelf-folder-dropdown-btn.active {
@@ -922,8 +956,10 @@
   transition: background-color 0.15s ease;
 }
 
-.shelf-folder-menu-item:hover {
-  background: color-mix(in srgb, var(--fg, #000) 5%, transparent);
+@media (hover: hover) {
+  .shelf-folder-menu-item:hover {
+    background: color-mix(in srgb, var(--fg, #000) 5%, transparent);
+  }
 }
 
 .shelf-folder-menu-item.selected {
@@ -954,13 +990,16 @@
   transition: background-color 0.15s ease;
 }
 
-.shelf-folder-menu-new-btn:hover {
-  background: color-mix(in srgb, var(--accent, #2563eb) 10%, transparent);
+@media (hover: hover) {
+  .shelf-folder-menu-new-btn:hover {
+    background: color-mix(in srgb, var(--accent, #2563eb) 10%, transparent);
+  }
 }
 
 /* 处于特定文件夹时的面包屑条 */
 .shelf-folder-active-bar {
   min-width: 0;
+  max-width: 100%;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -1002,9 +1041,11 @@
   transition: all 0.15s ease;
 }
 
-.shelf-folder-active-exit:hover {
-  background: color-mix(in srgb, var(--accent, #2563eb) 15%, transparent);
-  color: var(--accent, #2563eb);
+@media (hover: hover) {
+  .shelf-folder-active-exit:hover {
+    background: color-mix(in srgb, var(--accent, #2563eb) 15%, transparent);
+    color: var(--accent, #2563eb);
+  }
 }
 
 /* 右侧排序与密度轨 */
@@ -1033,8 +1074,10 @@
   transition: border-color 0.15s ease;
 }
 
-.shelf-sort-select-zen:hover {
-  border-color: var(--accent, #2563eb);
+@media (hover: hover) {
+  .shelf-sort-select-zen:hover {
+    border-color: var(--accent, #2563eb);
+  }
 }
 
 @keyframes shelf-pop-in {
@@ -1125,7 +1168,7 @@
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  word-break: break-all;
+  overflow-wrap: anywhere;
 }
 
 .morandi-creator {
@@ -1211,8 +1254,10 @@
   transition: color 0.15s ease;
 }
 
-.shelf-table th.sortable:hover {
-  color: var(--accent, #2563eb);
+@media (hover: hover) {
+  .shelf-table th.sortable:hover {
+    color: var(--accent, #2563eb);
+  }
 }
 
 .shelf-table th.sortable.active {
@@ -1349,10 +1394,12 @@
   transition: all 0.12s ease;
 }
 
-.shelf-az-letter:hover:not(.disabled) {
-  background: color-mix(in srgb, var(--accent, #2563eb) 15%, transparent);
-  color: var(--accent, #2563eb);
-  transform: scale(1.2);
+@media (hover: hover) {
+  .shelf-az-letter:hover:not(.disabled) {
+    background: color-mix(in srgb, var(--accent, #2563eb) 15%, transparent);
+    color: var(--accent, #2563eb);
+    transform: scale(1.2);
+  }
 }
 
 .shelf-az-letter.active {
@@ -1474,10 +1521,12 @@
   white-space: nowrap;
 }
 
-.shelf-batch-action-btn:hover:not(:disabled) {
-  border-color: var(--accent, #2563eb);
-  color: var(--accent, #2563eb);
-  background: color-mix(in srgb, var(--accent, #2563eb) 8%, var(--shelf-card-bg, #fff));
+@media (hover: hover) {
+  .shelf-batch-action-btn:hover:not(:disabled) {
+    border-color: var(--accent, #2563eb);
+    color: var(--accent, #2563eb);
+    background: color-mix(in srgb, var(--accent, #2563eb) 8%, var(--shelf-card-bg, #fff));
+  }
 }
 
 .shelf-batch-action-btn:disabled {
@@ -1489,10 +1538,12 @@
   color: #ef4444;
 }
 
-.shelf-batch-action-btn.danger:hover:not(:disabled) {
-  border-color: #ef4444;
-  color: #ef4444;
-  background: color-mix(in srgb, #ef4444 10%, var(--shelf-card-bg, #fff));
+@media (hover: hover) {
+  .shelf-batch-action-btn.danger:hover:not(:disabled) {
+    border-color: #ef4444;
+    color: #ef4444;
+    background: color-mix(in srgb, #ef4444 10%, var(--shelf-card-bg, #fff));
+  }
 }
 
 .shelf-batch-action-btn.cancel {
@@ -1501,9 +1552,11 @@
   color: var(--muted, #6b7280);
 }
 
-.shelf-batch-action-btn.cancel:hover {
-  background: color-mix(in srgb, var(--fg, #000) 12%, transparent);
-  color: var(--fg, #111827);
+@media (hover: hover) {
+  .shelf-batch-action-btn.cancel:hover {
+    background: color-mix(in srgb, var(--fg, #000) 12%, transparent);
+    color: var(--fg, #111827);
+  }
 }
 
 @keyframes shelf-batch-slide-up {
@@ -1706,9 +1759,11 @@
   transition: all 0.15s ease;
 }
 
-.shelf-category-dropdown-btn:hover {
-  background: color-mix(in srgb, var(--accent, #2563eb) 8%, var(--shelf-card-bg, #fff));
-  border-color: color-mix(in srgb, var(--accent, #2563eb) 35%, transparent);
+@media (hover: hover) {
+  .shelf-category-dropdown-btn:hover {
+    background: color-mix(in srgb, var(--accent, #2563eb) 8%, var(--shelf-card-bg, #fff));
+    border-color: color-mix(in srgb, var(--accent, #2563eb) 35%, transparent);
+  }
 }
 
 .shelf-category-popover-menu {
@@ -1747,11 +1802,18 @@
   transition: background-color 0.12s ease;
 }
 
-.shelf-category-menu-item:hover,
 .shelf-category-menu-item.selected {
   background: color-mix(in srgb, var(--accent, #2563eb) 12%, transparent);
   color: var(--accent, #2563eb);
   font-weight: 600;
+}
+
+@media (hover: hover) {
+  .shelf-category-menu-item:hover {
+    background: color-mix(in srgb, var(--accent, #2563eb) 12%, transparent);
+    color: var(--accent, #2563eb);
+    font-weight: 600;
+  }
 }
 
 /* 文件夹下拉及摘要栏 */
@@ -2362,11 +2424,16 @@
  * ========================================================================= */
 .app[data-touch-ui="true"] :is(.shelf-btn-primary, .shelf-manage-toggle-btn, .shelf-selection-cancel,
   .shelf-selection-delete, .shelf-selection-toggle-all, .shelf-action-folder, .shelf-more-reading-btn,
-  .shelf-btn-resume, .shelf-resume-continue) {
+  .shelf-btn-resume, .shelf-resume-continue, .shelf-confirm-primary) {
   gap: 8px;
   padding-inline: 18px;
   border-radius: 11px;
   font-size: 14px;
+}
+
+/* Dialog actions: the primary button gets the same touch height as Cancel beside it. */
+.app[data-touch-ui="true"] .shelf-confirm-primary {
+  min-height: calc(48px * var(--ui-touch-comp, 1));
 }
 
 .app[data-touch-ui="true"] :is(.shelf-btn-resume, .shelf-more-reading-btn, .shelf-resume-continue) {
@@ -2875,4 +2942,18 @@
   .shelf-action-sheet .shelf-action-item:active:not(:disabled) {
     transform: none;
   }
+}
+
+/* No-result state: one clear way back per active narrowing, side by side. */
+.shelf-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* Shelf error banner follows the compact shelf gutter. */
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-error {
+  margin: 8px 12px 0;
 }
