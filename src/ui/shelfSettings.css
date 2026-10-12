@@ -243,10 +243,7 @@
   font-weight: 700;
 }
 
-.shelf-theme-swatch[data-swatch="light"] { --swatch-bg: #ffffff; --swatch-fg: #1a1a1a; --swatch-border: #e0e0e0; }
-.shelf-theme-swatch[data-swatch="sepia"] { --swatch-bg: #f4ecd8; --swatch-fg: #3c332a; --swatch-border: #e3d6bb; }
-.shelf-theme-swatch[data-swatch="gray"] { --swatch-bg: #2d2d30; --swatch-fg: #d4d4d8; --swatch-border: #2d2d30; }
-.shelf-theme-swatch[data-swatch="dark"] { --swatch-bg: #1e1e1e; --swatch-fg: #d4d4d4; --swatch-border: #1e1e1e; }
+/* Swatch colours come from READER_PALETTES, the same data as the themes. */
 
 .shelf-settings-row {
   display: flex;
