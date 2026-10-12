@@ -30,7 +30,7 @@ function createMockTransition(): MockTransition {
   });
 
   const skipTransition = vi.fn(() => {
-    // 模拟原生行为：skipTransition 导致 ready 和 finished reject
+    // 模拟原生行为：skipTransition 导致 ready 和 finished reject (AbortError)
     const abortErr = new Error("Transition was skipped");
     rejectReady(abortErr);
     rejectFinished(abortErr);
@@ -50,6 +50,7 @@ function createTestHarness(options?: {
   supportsApi?: boolean;
   reducedMotion?: boolean;
   backgrounded?: boolean;
+  onCommitError?: (error: unknown, generation: number) => void;
 }) {
   const { document } = parseHTML("<html><head></head><body></body></html>");
   let activeMockTransition: MockTransition | null = null;
@@ -67,6 +68,7 @@ function createTestHarness(options?: {
   const isBackgrounded = vi.fn(() => Boolean(options?.backgrounded));
   const onStart = vi.fn();
   const onEnd = vi.fn();
+  const onCommitError = options?.onCommitError ?? vi.fn();
 
   const controller = new ThemeTransitionController({
     document,
@@ -74,6 +76,7 @@ function createTestHarness(options?: {
     isBackgrounded,
     onTransitionStart: onStart,
     onTransitionEnd: onEnd,
+    onCommitError,
   });
 
   return {
@@ -83,6 +86,7 @@ function createTestHarness(options?: {
     isBackgrounded,
     onStart,
     onEnd,
+    onCommitError,
     getActiveTransition: () => activeMockTransition,
     flushUpdateCallback: () => {
       const cb = nextUpdateCallback;
@@ -184,7 +188,6 @@ describe("ThemeTransitionController", () => {
     const commit1 = vi.fn();
     const commit2 = vi.fn();
 
-    // 抓取第 1 次 startViewTransition 的 updateCallback，先不执行
     let cb1: (() => void) | null = null;
     let cb2: (() => void) | null = null;
     (document as any).startViewTransition = vi.fn((cb: () => void) => {
@@ -300,7 +303,94 @@ describe("ThemeTransitionController", () => {
     expect(document.documentElement.hasAttribute("data-theme-transitioning")).toBe(false);
   });
 
-  it("still commits target and releases style scope if startViewTransition throws synchronously", () => {
+  it("T1: dispose cancels pending target, ignores late callbacks and rejects future requests", () => {
+    const harness = createTestHarness();
+    const { controller, document, getActiveTransition, flushUpdateCallback } = harness;
+
+    const commit1 = vi.fn();
+    controller.request({ commit: commit1, animate: true });
+    expect(controller.currentGeneration).toBe(1);
+
+    // 在浏览器 updateCallback 之前调用 dispose
+    controller.dispose();
+    expect(controller.isDisposed).toBe(true);
+    expect(controller.isTransitioning).toBe(false);
+    expect(getActiveTransition()?.skipTransition).toHaveBeenCalledTimes(1);
+    expect(document.documentElement.hasAttribute("data-theme-transitioning")).toBe(false);
+
+    // 契约 T1: dispose 撤销未提交目标，不触碰已卸载宿主
+    expect(commit1).toHaveBeenCalledTimes(0);
+
+    // 迟到的浏览器 updateCallback 不执行
+    flushUpdateCallback();
+    expect(commit1).toHaveBeenCalledTimes(0);
+
+    // 销毁后的新 request 同样不提交
+    const commit2 = vi.fn();
+    controller.request({ commit: commit2, animate: true });
+    expect(commit2).toHaveBeenCalledTimes(0);
+  });
+
+  it("T1: does not double-notify onTransitionEnd when finished promise settles after interrupt", async () => {
+    const harness = createTestHarness();
+    const { controller, onEnd, getActiveTransition, flushUpdateCallback } = harness;
+
+    const commit = vi.fn();
+    controller.request({ commit, animate: true });
+    flushUpdateCallback();
+    expect(commit).toHaveBeenCalledTimes(1);
+
+    // 主动中断
+    controller.interrupt();
+    expect(onEnd).toHaveBeenCalledTimes(1);
+    expect(onEnd).toHaveBeenCalledWith(1);
+
+    // 之后 transition.finished promise reject (skip) 结算
+    const transition = getActiveTransition();
+    await transition!.finished.catch(() => {});
+
+    // 契约 T1: 同一代次过渡只收口一次，不重复 onTransitionEnd
+    expect(onEnd).toHaveBeenCalledTimes(1);
+  });
+
+  it("T1: does not notify onTransitionEnd after dispose when in-flight transition settles", async () => {
+    const harness = createTestHarness();
+    const { controller, onEnd, getActiveTransition, flushUpdateCallback } = harness;
+
+    const commit = vi.fn();
+    controller.request({ commit, animate: true });
+    flushUpdateCallback();
+
+    controller.dispose();
+    const transition = getActiveTransition();
+    await transition!.finished.catch(() => {});
+
+    // 契约 T1: 迟到 promise 不再次通知已销毁宿主
+    expect(onEnd).toHaveBeenCalledTimes(0);
+  });
+
+  it("T2: interrupt cleans up transition and styles completely even when commit throws", () => {
+    const harness = createTestHarness();
+    const { controller, document, getActiveTransition } = harness;
+
+    const commit = vi.fn(() => {
+      throw new Error("Commit explosion in host");
+    });
+    controller.request({ commit, animate: true });
+    expect(controller.isTransitioning).toBe(true);
+    expect(document.documentElement.hasAttribute("data-theme-transitioning")).toBe(true);
+
+    // interrupt 时 commit 抛错
+    expect(() => controller.interrupt()).toThrow("Commit explosion in host");
+
+    // 契约 T2: 即使 commit 抛错，try/finally 保证清理完毕
+    expect(controller.isTransitioning).toBe(false);
+    expect(document.documentElement.hasAttribute("data-theme-transitioning")).toBe(false);
+    expect(document.documentElement.classList.contains("theme-transitioning")).toBe(false);
+    expect(getActiveTransition()?.skipTransition).toHaveBeenCalledTimes(1);
+  });
+
+  it("T2: startViewTransition start error fallback cleans up styles even when fallback commit throws", () => {
     const { document, isMotionReduced, isBackgrounded } = createTestHarness();
     (document as any).startViewTransition = vi.fn(() => {
       throw new Error("InvalidStateError");
@@ -312,32 +402,32 @@ describe("ThemeTransitionController", () => {
       isBackgrounded,
     });
 
-    const commit = vi.fn();
-    controller.request({ commit, animate: true });
+    const commit = vi.fn(() => {
+      throw new Error("Fallback commit exploded");
+    });
 
-    // 启动失败仍走同一个有效目标提交，释放属于本次的样式，不丢目标
-    expect(commit).toHaveBeenCalledTimes(1);
+    expect(() => controller.request({ commit, animate: true })).toThrow("Fallback commit exploded");
+
+    // 契约 T2: 启动抛错且 fallback 提交抛错后，临时属性不能残留
     expect(controller.isTransitioning).toBe(false);
     expect(document.documentElement.hasAttribute("data-theme-transitioning")).toBe(false);
+    expect(document.documentElement.classList.contains("theme-transitioning")).toBe(false);
   });
 
-  it("dispose() skips in-flight transition, removes event listeners and prevents leaking", () => {
-    const harness = createTestHarness();
-    const { controller, document, getActiveTransition, flushUpdateCallback } = harness;
+  it("T2: provides observable error exit via onCommitError when async updateCallback throws", () => {
+    const onCommitError = vi.fn();
+    const harness = createTestHarness({ onCommitError });
+    const { controller } = harness;
 
-    const commit = vi.fn();
+    const commit = vi.fn(() => {
+      throw new Error("Async commit failed in updateCallback");
+    });
+
     controller.request({ commit, animate: true });
-    flushUpdateCallback();
 
-    controller.dispose();
-    expect(controller.isDisposed).toBe(true);
-    expect(getActiveTransition()?.skipTransition).toHaveBeenCalledTimes(1);
-    expect(document.documentElement.hasAttribute("data-theme-transitioning")).toBe(false);
-
-    // dispose 后新请求直接同步 commit，不碰 transition 逻辑
-    const commit2 = vi.fn();
-    controller.request({ commit: commit2, animate: true });
-    expect(commit2).toHaveBeenCalledTimes(1);
+    // 模拟浏览器调用 updateCallback
+    expect(() => harness.flushUpdateCallback()).toThrow("Async commit failed in updateCallback");
+    expect(onCommitError).toHaveBeenCalledWith(expect.any(Error), 1);
   });
 
   it("factory function createThemeTransitionController creates functional controller instance", () => {
