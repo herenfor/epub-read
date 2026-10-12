@@ -650,15 +650,12 @@
   max-height: min(56vh, calc(var(--visual-viewport-height, 100vh) * 0.56));
   border-radius: 16px 16px 0 0;
   animation: aaMobileSheetIn var(--menu-open) var(--ease-emphasized);
-  transition: max-height var(--menu-open) var(--ease-emphasized);
+  /* No max-height transition: the height changes in one layout step and
+     useSheetDrag eases the position from the frame on screen (one motion owner). */
 }
 
 .app[data-mobile-chrome="true"][data-layout="compact"] .aa-popover.is-expanded {
   max-height: min(88vh, calc(var(--visual-viewport-height, 100vh) * 0.88));
-}
-
-.app[data-mobile-chrome="true"][data-layout="compact"] .aa-popover.is-dragging {
-  transition: none;
 }
 
 /* 底部面板把手：只在手机紧凑布局出现，可拖动展开、收起和关闭。 */
@@ -772,7 +769,8 @@
 
 /* ---- 触摸端：面板本体已近不透明，去掉其自身模糊（与遮罩毛玻璃叠算无可见差别）；文字放大一档 ---- */
 .app[data-touch-ui="true"] .aa-popover {
-  background: var(--ui-control-selected);
+  /* Opaque panel surface; only selected controls use --ui-control-selected. No blur on touch. */
+  background: var(--panel-bg);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
   will-change: transform, opacity;

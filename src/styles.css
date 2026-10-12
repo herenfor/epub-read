@@ -6129,8 +6129,9 @@ select option {
   max-height: none;
   border-radius: 20px 20px 0 0;
   border-bottom: none;
-  transform: none !important;
-  /* transform 被 !important 锁住（屏蔽桌面拖动位移），进出场改用独立的 translate 属性。 */
+  /* 不再居中；桌面自由移动在手机不接（SearchPanel 按布局分流），transform 只归底部面板把手
+     （useSheetDrag 内联位移），进出场用独立的 translate 属性，两者不抢同一属性。 */
+  transform: none;
   animation: menuSheetIn var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
 }
 
