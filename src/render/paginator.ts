@@ -431,6 +431,13 @@ interface AnchorSampleOptions {
   visibleRatio: number;
   /** paginated 分栏换算；scroll 忽略 */
   geometry?: { columnWidth: number; columnStep: number; viewStep: number; leadingColumns: number };
+  /** B-237 paginated only: visible media in the sampled column when the point has no text. */
+  mediaAt?: (point: VisibleSamplePoint) => VisibleMediaSample | null;
+}
+
+interface VisibleMediaSample {
+  element: Element;
+  anchor: MediaReadingAnchor;
 }
 
 /** scroll：可见屏内固定高度；paginated：第一可见列（不是含 gap 的整屏中心）。 */
@@ -506,10 +513,13 @@ function captureAnchorAtPoint(
     }
   }
   const textOffset = textNode ? index.offsetForNode(textNode, rawOffset) : null;
-  const el = textNode?.parentElement ?? visibleElementAt(doc, viewer, point);
+  // Text first; with no text under the point (an image page) the column's
+  // media gives a stable identity instead of only its element index.
+  const media = textOffset === null ? options.mediaAt?.(point) ?? null : null;
+  const el = textNode?.parentElement ?? media?.element ?? visibleElementAt(doc, viewer, point);
   const idx = el ? index.elementIndex(el, viewer) : -1;
   const rect = el ? (el as HTMLElement).getBoundingClientRect() : null;
-  if (textOffset === null && idx < 0) return null;
+  if (textOffset === null && idx < 0 && !media) return null;
   const ratio = rect && rect.width > 0
     ? Math.min(1, Math.max(0, (point.x - rect.left) / rect.width))
     : 0;
@@ -521,6 +531,7 @@ function captureAnchorAtPoint(
     mediaUnits: index.mediaUnits,
     textOffset,
     textSnippet: textOffset === null ? null : index.snippetAt(textOffset),
+    ...(media ? { mediaAnchor: media.anchor } : {}),
   };
 }
 
@@ -6926,6 +6937,7 @@ export class ChapterPaginator {
             viewStep: this.effectiveViewStep,
             leadingColumns: this.leadingColumns,
           },
+      mediaAt: this.scrollMode ? undefined : (point) => this.visibleMediaAt(point),
     });
     if (!anchor) return;
     this.anchor = anchor;
@@ -8095,6 +8107,43 @@ export class ChapterPaginator {
     return elements.filter((el) => !elements.some((parent) => parent !== el && parent.contains(el)));
   }
 
+  /**
+   * B-237: the media actually visible in the sampled column. A full-page image
+   * has no text under the sample point, and its element index alone is not a
+   * persistable identity. The rect is in the same viewport coordinates as the
+   * point (a moving window's transform included), so this only reads layout.
+   * The point's column is the media's horizontal span; one beside it is not borrowed.
+   */
+  private visibleMediaAt(point: VisibleSamplePoint): VisibleMediaSample | null {
+    const doc = this.contentDoc;
+    const viewer = this.viewer;
+    if (!doc || !viewer) return null;
+    const viewportHeight = doc.documentElement?.clientHeight || viewer.clientHeight;
+    let fallback: VisibleMediaSample | null = null;
+    const media = this.collectMediaElements();
+    for (let index = 0; index < media.length; index += 1) {
+      const element = media[index];
+      const rect = element.getBoundingClientRect();
+      if (!(rect.width > 0 && rect.height > 0) || point.x < rect.left || point.x > rect.right) continue;
+      const top = Math.max(rect.top, 0);
+      const bottom = Math.min(rect.bottom, viewportHeight);
+      if (bottom <= top) continue;
+      const y = Math.max(top, Math.min(bottom, point.y));
+      const sample: VisibleMediaSample = {
+        element,
+        anchor: {
+          index,
+          tag: element.tagName.toLowerCase(),
+          signature: this.mediaSignature(element),
+          ratio: Math.max(0, Math.min(1, (y - rect.top) / rect.height)),
+        },
+      };
+      if (point.y >= rect.top && point.y <= rect.bottom) return sample;
+      fallback ??= sample;
+    }
+    return fallback;
+  }
+
   private mediaSignature(el: Element): string {
     const rawSrc =
       el.getAttribute("src") ?? el.getAttribute("href") ?? el.getAttribute("xlink:href") ?? "";
@@ -8409,9 +8458,9 @@ export class ChapterPaginator {
       }
     }
     if (targetPage === null && bookmark.mediaAnchor) {
-      const media = this.collectMediaElements();
-      const el = media[bookmark.mediaAnchor.index];
-      if (el) {
+      // Same identity check as restore: index, then signature; never another image.
+      const el = this.resolveMediaAnchorElement(bookmark.mediaAnchor);
+      if (el && el.getBoundingClientRect().height > 0) {
         const r = el.getBoundingClientRect();
         const colX = this.contentX(r.left);
         const physical = columnForContentPoint(colX, this.spreadLayout.geometry);
@@ -8437,20 +8486,13 @@ export class ChapterPaginator {
     mediaUnits: number;
     textOffset: number | null;
     textSnippet: string | null;
+    /** B-237: stable and in-motion readings carry the same media identity. */
+    mediaAnchor: MediaReadingAnchor | null;
   } | null {
     // 进度写入、书签、历史快照和关书前必须补齐最新一页采样，不能保存旧页。
     this.flushReadingAnchor();
     if (!this.anchor || !this.anchorPath) return null;
-    return {
-      path: this.anchorPath,
-      index: this.anchor.index,
-      ratio: this.anchor.ratio,
-      charsRead: this.anchor.charsRead,
-      totalChars: this.anchor.totalChars,
-      mediaUnits: this.anchor.mediaUnits ?? 0,
-      textOffset: this.anchor.textOffset,
-      textSnippet: this.anchor.textSnippet,
-    };
+    return this.publicReadingAnchor(this.anchor, this.anchorPath);
   }
 
   /**
@@ -8528,6 +8570,7 @@ export class ChapterPaginator {
       mediaUnits: anchor.mediaUnits ?? 0,
       textOffset: anchor.textOffset,
       textSnippet: anchor.textSnippet,
+      mediaAnchor: anchor.mediaAnchor ? { ...anchor.mediaAnchor } : null,
     };
   }
 
@@ -8564,6 +8607,7 @@ export class ChapterPaginator {
         viewStep: this.effectiveViewStep,
         leadingColumns: this.leadingColumns,
       },
+      mediaAt: (point) => this.visibleMediaAt(point),
     };
     for (const point of visibleSamplePoints(options)) {
       const anchor = captureAnchorAtPoint(options, { x, y: point.y });
