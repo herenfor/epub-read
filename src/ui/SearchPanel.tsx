@@ -5,7 +5,6 @@ import { CloseIcon } from "./readerIcons";
 import { uiText, useUiText } from "./localization/UiLanguageProvider";
 
 export type SearchStatus = "idle" | "searching" | "complete" | "error";
-export type SearchScope = "current" | "all";
 
 /** Lifecycle of the optional all-books text index. */
 export type SearchIndexStatus =
@@ -67,15 +66,13 @@ export interface SearchPanelProps {
   onClose(): void;
   onCancel?(): void;
   navigationBusy?: boolean;
-  scope?: SearchScope;
-  onScopeChange?(scope: SearchScope): void;
-  /** Independent from scope: display text vs canonical original text. */
+  /** Display text vs canonical original text of the current book. */
   searchView?: "display" | "original";
   onSearchViewChange?(view: "display" | "original"): void;
   statusMessage?: string;
   onRebuildIndex?(): void;
   onClearIndex?(): void;
-  /** Optional all-books index state. Omit these props to retain the legacy UI. */
+  /** All-books index state, read by SearchIndexCard on the shelf; the reader panel searches the current book only. */
   indexStatus?: SearchIndexStatus;
   indexProgress?: SearchIndexProgress;
   onStartIndex?(): void;
@@ -456,14 +453,6 @@ export function SearchPanel(props: SearchPanelProps) {
   const statusLabel = props.statusMessage ?? getSearchStatusLabel(props.status, props.processed, props.total);
   const hasQuery = props.query.trim().length > 0;
   const showEmpty = props.status === "complete" && hasQuery && props.results.length === 0;
-  const scope = props.scope ?? "current";
-  const indexBusy = props.indexStatus === "indexing" || props.indexStatus === "cancelling";
-  const indexSearchUnavailable = scope === "all" && (
-    props.indexStatus === "checking"
-    || indexBusy
-    || ((props.indexStatus === "confirmation" || props.indexStatus === "cancelled" || props.indexStatus === "error")
-      && (props.indexProgress?.completed ?? 0) === 0)
-  );
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -556,23 +545,7 @@ export function SearchPanel(props: SearchPanelProps) {
             <CloseIcon size={14} />
           </button>
         </div>
-        {props.onScopeChange && (
-          <div className="search-scope" role="group" aria-label={t("search.scope")}>
-            <button
-              type="button"
-              className={scope === "current" ? "active" : ""}
-              aria-pressed={scope === "current"}
-              onClick={() => props.onScopeChange?.("current")}
-            >{t("search.scope.current")}</button>
-            <button
-              type="button"
-              className={scope === "all" ? "active" : ""}
-              aria-pressed={scope === "all"}
-              onClick={() => props.onScopeChange?.("all")}
-            >{t("search.scope.all")}</button>
-          </div>
-        )}
-        {scope === "current" && props.onSearchViewChange && (
+        {props.onSearchViewChange && (
           <div className="search-scope search-view-toggle" role="group" aria-label={t("search.view")}>
             <button
               type="button"
@@ -588,23 +561,15 @@ export function SearchPanel(props: SearchPanelProps) {
             >{t("search.view.original")}</button>
           </div>
         )}
-        {scope === "all" && (props.onRebuildIndex || props.onClearIndex) && (
-          <div className="search-index-actions" aria-label={t("search.indexActions")}>
-            {props.onRebuildIndex && <button type="button" disabled={props.status === "searching" || indexBusy} onClick={props.onRebuildIndex}>{t("search.rebuild")}</button>}
-            {props.onClearIndex && <button type="button" disabled={props.status === "searching" || indexBusy} onClick={props.onClearIndex}>{t("search.clearIndex")}</button>}
-          </div>
-        )}
-        {scope === "all" && <SearchIndexCard props={props} />}
         <div className="search-input-wrap">
           <input
             ref={inputRef}
             className="search-input"
             type="search"
             value={props.query}
-            disabled={indexSearchUnavailable}
             onChange={(event) => props.onQueryChange(event.target.value)}
-            placeholder={scope === "all" ? t("search.placeholder.all") : t("search.placeholder.current")}
-            aria-label={scope === "all" ? t("search.placeholder.all") : t("search.placeholder.current")}
+            placeholder={t("search.placeholder.current")}
+            aria-label={t("search.placeholder.current")}
           />
           {props.query.length > 0 && (
             <button
@@ -626,7 +591,7 @@ export function SearchPanel(props: SearchPanelProps) {
         </div>
         {!hasQuery && props.status !== "searching" && (
           <div className="search-empty">
-            {scope === "all" ? t("search.hint.all") : t("search.hint.current")}
+            {t("search.hint.current")}
           </div>
         )}
         {showEmpty && <div className="search-empty">{t("search.empty")}</div>}

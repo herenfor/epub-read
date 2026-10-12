@@ -228,7 +228,7 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
         {body && <div className="shelf-settings-card">
           <div className="shelf-settings-card-title">{t("shelfSettings.index")}</div>
           <p className="shelf-settings-note">{t("shelfSettings.index.detail")}</p>
-          {body.indexStatus && <SearchIndexCard props={{ ...body, onClose: () => undefined, scope: "all" }} />}
+          {body.indexStatus && <SearchIndexCard props={{ ...body, onClose: () => undefined}} />}
           {(body.onRebuildIndex || body.onClearIndex) && <div className="shelf-settings-actions">
             {body.onRebuildIndex && <button type="button" disabled={body.status === "searching" || indexing || indexBusy}
               onClick={() => runIndex(body.onRebuildIndex)}>{t("search.rebuild")}</button>}

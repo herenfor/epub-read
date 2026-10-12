@@ -13,7 +13,7 @@ function BodySearchResults(props: { body: ShelfBodySearchProps; onManageIndex?()
   const hasQuery = Boolean(body.query.trim());
   return <>
     {/* Concurrency tuning stays in Settings › Storage; here only what is needed to search. */}
-    {body.indexStatus && <SearchIndexCard props={{ ...body, onConcurrencyChange: undefined, onClose: () => undefined, scope: "all" }} />}
+    {body.indexStatus && <SearchIndexCard props={{ ...body, onConcurrencyChange: undefined, onClose: () => undefined}} />}
     <div className="shelf-body-search-status" aria-live="polite">
       <span>{status}</span>
       {body.status === "searching" && body.onCancel && <button type="button" onClick={body.onCancel}>{t("search.cancel")}</button>}
