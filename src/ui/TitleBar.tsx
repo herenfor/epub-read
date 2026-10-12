@@ -202,7 +202,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
     clearZenTimer();
     zenHideTimerRef.current = setTimeout(() => {
       setIsZenRevealed(false);
-    }, 2000);
+    }, 1000);
   };
 
   const handleMinimize = useCallback(() => {
