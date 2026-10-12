@@ -145,6 +145,11 @@ export interface ReaderHandle {
   scrollByViewport(direction: 1 | -1): boolean;
   /** 滚动模式：按像素位移滚动正文。 */
   scrollByDelta(deltaY: number): void;
+  /**
+   * 同步原位提交主题：返回前所有在用正文宿主（分页槽位、连续章节、图组两页、
+   * 辅助章）已换色。主题过渡在 ViewTransition 更新回调内调用；同主题不重做。
+   */
+  applyTheme(theme: ReaderSettings["theme"]): void;
 }
 
 export interface ReaderViewProps {
@@ -1625,6 +1630,19 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [book, spineIndex, props.anchorNonce, props.startAtEnd.nonce]);
 
+  // 纯主题原位提交：活跃槽位与所有备用槽位换色并同步滤镜背景。effect 与
+  // ReaderHandle.applyTheme（主题过渡回调内同步提交）共用；updateTheme 同主题不重做。
+  const applyThemeInPlaceRef = useRef<(theme: ReaderSettings["theme"]) => void>(() => {});
+  applyThemeInPlaceRef.current = (theme) => {
+    for (const slot of [activeSlotRef.current, ...spareSlotsRef.current]) {
+      if (slot?.paginator?.updateTheme(theme)) {
+        slot.renderSettings = { ...slot.renderSettings, theme };
+      }
+    }
+    const surface = activeIframeRef.current;
+    paintHandleRef.current?.setSurfaceBackground(surface ? readerSurfaceBackground(surface) : null);
+  };
+
   // 设置变更 → 分层处理：
   // 1. 纯主题变更：原位更新当前活跃槽位与所有备用槽位样式，同步滤镜背景；不重排、不销毁槽位、不丢弃运动窗口
   // 2. 几何排版变更：取消旧近邻缓存并进入防抖重载事务（阅读位置由内容锚点保留）
@@ -1654,19 +1672,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
 
     if (changeType === "theme-only") {
       settingsIdentityRef.current = { settings, userFonts: props.userFonts };
-      const active = activeSlotRef.current;
-      if (active) {
-        if (active.paginator?.updateTheme(effSettings.theme)) {
-          active.renderSettings = { ...active.renderSettings, theme: effSettings.theme };
-        }
-      }
-      for (const slot of spareSlotsRef.current) {
-        if (slot.paginator?.updateTheme(effSettings.theme)) {
-          slot.renderSettings = { ...slot.renderSettings, theme: effSettings.theme };
-        }
-      }
-      const surface = activeIframeRef.current;
-      paintHandleRef.current?.setSurfaceBackground(surface ? readerSurfaceBackground(surface) : null);
+      applyThemeInPlaceRef.current(effSettings.theme);
       return;
     }
 
@@ -2071,6 +2077,9 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   useImperativeHandle(
     ref,
     () => ({
+      applyTheme(theme) {
+        applyThemeInPlaceRef.current(theme);
+      },
       nextPage() {
         turnPageRef.current(1);
       },

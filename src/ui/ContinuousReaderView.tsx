@@ -1852,6 +1852,26 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
       }
     };
 
+    // 纯主题原位提交：全部已挂载章节与辅助章换色并同步背景。设置 effect 与
+    // ReaderHandle.applyTheme（主题过渡回调内同步提交）共用；updateTheme 同主题不重做。
+    // 先更新 desired，使此刻仍在加载的章节就绪后采用最新主题。
+    const applyThemeInPlaceRef = useRef<(theme: ReaderSettings["theme"]) => void>(() => {});
+    applyThemeInPlaceRef.current = (theme) => {
+      if (desiredSettingsRef.current.theme !== theme) {
+        desiredSettingsRef.current = { ...desiredSettingsRef.current, theme };
+      }
+      for (const slot of slotsRef.current.values()) {
+        if (slot.paginator?.updateTheme(theme)) {
+          slot.renderSettings = { ...slot.renderSettings, theme };
+        }
+      }
+      auxPaginatorRef.current?.updateTheme(theme);
+      for (const [iframe, handle] of paintHandlesRef.current.entries()) {
+        handle.setSurfaceBackground(continuousSurfaceBackground(iframe));
+      }
+      backdropPaintRef.current?.setSurfaceBackground(READER_PALETTES[theme].background);
+    };
+
     /**
      * 设置变更 → 重载已挂载章节。
      *
@@ -1879,16 +1899,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
       settingsIdentityRef.current = current;
 
       if (changeType === "theme-only") {
-        for (const slot of slotsRef.current.values()) {
-          if (slot.paginator?.updateTheme(current.theme)) {
-            slot.renderSettings = { ...slot.renderSettings, theme: current.theme };
-          }
-        }
-        auxPaginatorRef.current?.updateTheme(current.theme);
-        for (const [iframe, handle] of paintHandlesRef.current.entries()) {
-          handle.setSurfaceBackground(continuousSurfaceBackground(iframe));
-        }
-        backdropPaintRef.current?.setSurfaceBackground(READER_PALETTES[current.theme].background);
+        applyThemeInPlaceRef.current(current.theme);
         return;
       }
 
@@ -2090,6 +2101,9 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
     useImperativeHandle(
       ref,
       () => ({
+        applyTheme(theme) {
+          applyThemeInPlaceRef.current(theme);
+        },
         nextPage() {
           handleExternalViewportStep(1);
         },

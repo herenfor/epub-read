@@ -48,6 +48,11 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
   const [turnOwner] = useState(() => (dir: 1 | -1) => turnRef.current(dir));
   const tapRouting = useReaderTapRouting();
   useImperativeHandle(ref, () => ({
+    // Both leaves are live body hosts: each recolors before this returns.
+    applyTheme: (theme) => {
+      leftHandle.current?.applyTheme(theme);
+      rightHandle.current?.applyTheme(theme);
+    },
     nextPage: () => turn(1),
     prevPage: () => turn(-1),
     setPage: (page) => active()?.setPage(page),
