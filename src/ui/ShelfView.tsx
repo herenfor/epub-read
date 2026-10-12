@@ -639,6 +639,20 @@ function shelfActionIcon(id: ShelfActionId): ReactNode {
   }
 }
 
+/** The one presentation for an empty shelf, an empty scope and a list with no match. */
+function ShelfEmptyState(props: { icon: ReactNode; title: string; hint: string; children?: ReactNode }) {
+  return (
+    <div className="shelf-empty">
+      <div className="shelf-empty-icon" aria-hidden="true">
+        {props.icon}
+      </div>
+      <div className="shelf-empty-title">{props.title}</div>
+      <div className="shelf-empty-hint">{props.hint}</div>
+      {props.children}
+    </div>
+  );
+}
+
 function getMorandiPalette(title: string, id: string) {
   let hash = 0;
   const str = id + title;
@@ -1189,7 +1203,8 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
 
   const last = entry.lastReadAtMs > 0 ? entry.lastReadAtMs : entry.addedAtMs;
   const recent = Date.now() - last < 1000 * 60 * 60 * 24 * 7;
-  const read = hasReadPosition(entry);
+  // Badge and status line follow the same judgement as the status filters.
+  const status = shelfReadingStatus(entry);
 
   const press = useShelfPress({
     longPressKind: (pointerType) => shelfLongPressKind(props.surface, pointerType, props.selectionMode, {
@@ -1291,7 +1306,7 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
           ) : (
             <>
               {entry.isNew && !props.selectionMode && <span className="shelf-badge new">{t("shelf.card.new")}</span>}
-              {recent && read && !entry.isNew && !props.selectionMode && (
+              {recent && status === "reading" && !entry.isNew && !props.selectionMode && (
                 <span className="shelf-badge reading">{t("shelf.card.reading")}</span>
               )}
             </>
@@ -1339,7 +1354,7 @@ const ShelfCard = memo(function ShelfCard(props: ShelfCardProps) {
             {entry.creator || t("shelf.unknownAuthor")}
           </span>
           <span className="shelf-card-subline">
-            {read ? (
+            {status !== "unread" ? (
               <span className="shelf-read-stat">{shelfProgressLabel(entry, t("shelf.card.readSuffix"))}</span>
             ) : (
               <span className="shelf-read-stat unread">{t("shelf.card.unread")}</span>
@@ -3763,6 +3778,14 @@ export function ShelfView(props: ShelfViewProps) {
     [filterModel.entries, sort]
   );
 
+  /** Status tab or drawer facets narrow the list (the query is reported separately). */
+  const narrowedByFilters = statusTab !== "all" || filters.authors.size + filters.titles.size
+    + filters.saved.size + filters.languages.size > 0;
+  const clearShelfFilters = (): void => {
+    setStatusTab("all");
+    setFilters({ authors: new Set(), titles: new Set(), saved: new Set(), languages: new Set() });
+  };
+
   const visibleFolders = useMemo(() => {
     if (scope.type !== "root") return [];
     if (statusTab !== "all") return [];
@@ -5180,71 +5203,49 @@ export function ShelfView(props: ShelfViewProps) {
       </nav>
 
       {/* 书架内容区 */}
-      {props.entries.length === 0 && activeFolders.length === 0 ? (
-        <div className="shelf-empty">
-          <div className="shelf-empty-icon" aria-hidden="true">
-            <BookLogoIcon />
-          </div>
-          <div className="shelf-empty-title">{t("shelfMain.empty.title")}</div>
-          <div className="shelf-empty-hint">
-            {emptyShelfHint}
-          </div>
+      {props.entries.length === 0 && (activeFolders.length === 0 || scope.type === "all") ? (
+        <ShelfEmptyState icon={<BookLogoIcon />} title={t("shelfMain.empty.title")} hint={emptyShelfHint}>
           <button className="shelf-empty-btn" onClick={props.onImport} disabled={props.busy || props.importActive}>
             <PlusIcon />
             <span>{t("shelfMain.empty.import")}</span>
           </button>
-        </div>
-      ) : scope.type === "all" && props.entries.length === 0 ? (
-        <div className="shelf-empty">
-          <div className="shelf-empty-icon" aria-hidden="true">
-            <BookLogoIcon />
-          </div>
-          <div className="shelf-empty-title">{t("shelfMain.empty.title")}</div>
-          <div className="shelf-empty-hint">
-            {emptyShelfHint}
-          </div>
-          <button className="shelf-empty-btn" onClick={props.onImport} disabled={props.busy || props.importActive}>
-            <PlusIcon />
-            <span>{t("shelfMain.empty.import")}</span>
-          </button>
-        </div>
+        </ShelfEmptyState>
       ) : scope.type === "favorites" && favoriteBooks.length === 0 ? (
-        <div className="shelf-empty">
-          <div className="shelf-empty-icon" aria-hidden="true">
-            <StarIcon />
-          </div>
-          <div className="shelf-empty-title">{t("shelfMain.favorites.empty")}</div>
-          <div className="shelf-empty-hint">{t("shelfMain.favorites.hint")}</div>
+        <ShelfEmptyState icon={<StarIcon />} title={t("shelfMain.favorites.empty")} hint={t("shelfMain.favorites.hint")}>
           <button className="shelf-empty-btn" onClick={() => setScope({ type: "all" })} disabled={props.busy}>
             <BookLogoIcon />
             <span>{t("shelfMain.favorites.viewAll")}</span>
           </button>
-        </div>
+        </ShelfEmptyState>
       ) : scope.type === "folder" && (folderBooksMap.get(scope.folderId) ?? []).length === 0 ? (
-        <div className="shelf-empty">
-          <div className="shelf-empty-icon" aria-hidden="true">
-            <FolderIcon />
-          </div>
-          <div className="shelf-empty-title">{t("shelfMain.folder.empty")}</div>
-          <div className="shelf-empty-hint">{t("shelfMain.folder.emptyHint")}</div>
+        <ShelfEmptyState icon={<FolderIcon />} title={t("shelfMain.folder.empty")} hint={t("shelfMain.folder.emptyHint")}>
           <button className="shelf-empty-btn" onClick={() => setScope({ type: "root" })} disabled={props.busy}>
             <BookLogoIcon />
             <span>{t("shelfMain.folder.back")}</span>
           </button>
-        </div>
+        </ShelfEmptyState>
       ) : visible.length === 0 && visibleFolders.length === 0 ? (
-        <div className="shelf-empty">
-          <div className="shelf-empty-icon" aria-hidden="true">
-            <SearchIcon />
-          </div>
-          <div className="shelf-empty-title">{t("shelfMain.search.none")}</div>
-          <div className="shelf-empty-hint">{t("shelfMain.search.noneHint")}</div>
-          {query && (
-            <button className="shelf-selection-cancel" type="button" onClick={() => setQuery("")}>
-              {t("shelfMain.search.clearQuery")}
-            </button>
+        // Nothing matches: name the cause and offer the way back for each active narrowing.
+        <ShelfEmptyState
+          icon={<SearchIcon />}
+          title={query.trim() ? t("shelfMain.search.none") : t("shelfMain.filter.none")}
+          hint={query.trim() ? t("shelfMain.search.noneHint") : t("shelfMain.filter.noneHint")}
+        >
+          {(query || narrowedByFilters) && (
+            <div className="shelf-empty-actions">
+              {query && (
+                <button className="shelf-selection-cancel" type="button" onClick={() => setQuery("")}>
+                  {t("shelfMain.search.clearQuery")}
+                </button>
+              )}
+              {narrowedByFilters && (
+                <button className="shelf-selection-cancel" type="button" onClick={clearShelfFilters}>
+                  {t("shelfMain.filter.clear")}
+                </button>
+              )}
+            </div>
           )}
-        </div>
+        </ShelfEmptyState>
       ) : viewMode === "list" ? (
         <div className="shelf-table-view">
           <table className="shelf-table">

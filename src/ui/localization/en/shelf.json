@@ -51,7 +51,7 @@
   "shelf.card.removeFailed": "Couldn't remove it from the folder: {error}",
   "shelf.card.select": "Select",
   "shelf.card.delete": "Delete from Library",
-  "shelf.card.readSuffix": "read",
+  "shelf.card.readSuffix": " read",
   "shelf.card.unread": "Unread",
   "shelf.progress.pending": "Pending",
   "shelf.table.select": "Select {title}",
