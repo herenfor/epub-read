@@ -135,3 +135,75 @@ describe("content drag lifecycle (real hook)", () => {
     } finally { await t.dom.dispose(); }
   });
 });
+
+describe("grip drag (real hook)", () => {
+  function Sheet(props: { onDismiss(): void }) {
+    const sheetRef = useRef<HTMLDivElement>(null);
+    const { grip } = useSheetDrag({ sheetRef, onDismiss: props.onDismiss });
+    return createElement("div", { ref: sheetRef, id: "sheet" }, createElement("div", { id: "grip", ...grip }));
+  }
+
+  async function setup() {
+    const dom = createReactDomHarness();
+    const onDismiss = vi.fn();
+    await dom.render(createElement(Sheet, { onDismiss }));
+    const doc = dom.container.ownerDocument;
+    const win = doc.defaultView as unknown as typeof globalThis;
+    const sheet = doc.getElementById("sheet") as HTMLElement;
+    const grip = doc.getElementById("grip") as HTMLElement;
+    // Every position the sheet is given, in order.
+    const writes: string[] = [];
+    const style = sheet.style;
+    const logged = new Proxy(style, {
+      get: (target, key) => Reflect.get(target, key),
+      set: (target, key, value) => { if (key === "transform") writes.push(value); return Reflect.set(target, key, value); },
+    });
+    Object.defineProperty(sheet, "style", { configurable: true, get: () => logged });
+    const captured = new Set<number>();
+    Object.assign(grip, {
+      setPointerCapture: (id: number) => captured.add(id),
+      hasPointerCapture: (id: number) => captured.has(id),
+      releasePointerCapture: (id: number) => captured.delete(id),
+    });
+    let at = 0;
+    const pointer = (type: string, y: number) => {
+      const event = new win.Event(type, { bubbles: true, cancelable: true });
+      Object.assign(event, { pointerId: 7, clientY: y, button: 0, isPrimary: true });
+      Object.defineProperty(event, "timeStamp", { value: (at += 16) });
+      return dom.dispatch(grip, event);
+    };
+    return { dom, onDismiss, sheet, writes, captured, pointer };
+  }
+
+  it("a release that closes exits from the released position, not from 0, and frees only its own capture", async () => {
+    const t = await setup();
+    try {
+      await t.pointer("pointerdown", 100);
+      expect(t.captured.has(7)).toBe(true);
+      await t.pointer("pointermove", 180);
+      await t.pointer("pointermove", 260);
+      t.writes.length = 0;
+      await t.pointer("pointerup", 260);
+      expect(t.onDismiss).toHaveBeenCalledTimes(1);
+      expect(t.captured.size).toBe(0);
+      // Pinned at 160px, then sent off-screen; never back to 0 or cleared first.
+      expect(t.writes[0]).toBe("translateY(160px)");
+      expect(t.writes).not.toContain("");
+      expect(t.writes).not.toContain("translateY(0px)");
+    } finally { await t.dom.dispose(); }
+  });
+
+  it("losing the capture mid-drag returns the sheet to rest and later moves do nothing", async () => {
+    const t = await setup();
+    try {
+      await t.pointer("pointerdown", 100);
+      await t.pointer("pointermove", 150);
+      await t.pointer("lostpointercapture", 150);
+      expect(t.sheet.style.transform).toBe("");
+      await t.pointer("pointermove", 260);
+      await t.pointer("pointerup", 260);
+      expect(t.sheet.style.transform).toBe("");
+      expect(t.onDismiss).not.toHaveBeenCalled();
+    } finally { await t.dom.dispose(); }
+  });
+});

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MENU_CLOSE_MS } from "./menuMotion";
+import { useSheetDrag } from "./sheetDrag";
 import type { KeyboardEvent } from "react";
 import { CloseIcon } from "./readerIcons";
 import { uiText, useUiText } from "./localization/UiLanguageProvider";
@@ -458,42 +459,83 @@ export function SearchPanel(props: SearchPanelProps) {
     inputRef.current?.focus();
   }, []);
 
+  // Header/handle input by layout, decided when the press starts:
+  // - docked (PC): nothing to drag;
+  // - phone bottom sheet: the shared sheet grip (pull down to close); the
+  //   panel's own native scrolling is never claimed;
+  // - centered panel (desktop window, touch wide screen): free move, as before.
+  const panelRef = useRef<HTMLDivElement>(null);
+  const isPhoneSheet = () => Boolean(panelRef.current?.closest('.app[data-mobile-chrome="true"][data-layout="compact"]'));
+  const sheet = useSheetDrag({ sheetRef: panelRef, disabled: props.closing || props.docked, onDismiss: props.onClose });
+
   const [dragOffset, setDragOffset] = useState<{ x: number; y: number } | null>(null);
-  const isDraggingRef = useRef(false);
-  const dragStartRef = useRef<{ startX: number; startY: number; initX: number; initY: number } | null>(null);
+  const freeMoveRef = useRef<{ pointerId: number; element: HTMLElement; startX: number; startY: number; initX: number; initY: number } | null>(null);
+  const headModeRef = useRef<"sheet" | "move" | null>(null);
 
-  const handleHeaderPointerDown = (e: React.PointerEvent) => {
-    const target = e.target as HTMLElement;
-    if (target.closest("button, input, select, textarea")) return;
-    isDraggingRef.current = true;
-    e.preventDefault();
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    dragStartRef.current = {
-      startX: e.clientX,
-      startY: e.clientY,
-      initX: dragOffset?.x ?? 0,
-      initY: dragOffset?.y ?? 0,
+  // Single end for a free move: release, cancel, lost capture, closing, backgrounding.
+  const endFreeMove = useCallback(() => {
+    const state = freeMoveRef.current;
+    freeMoveRef.current = null;
+    headModeRef.current = null;
+    if (!state) return;
+    try {
+      if (state.element.hasPointerCapture?.(state.pointerId)) state.element.releasePointerCapture(state.pointerId);
+    } catch { /* already released */ }
+  }, []);
+  useEffect(() => {
+    if (props.closing) endFreeMove();
+  }, [props.closing, endFreeMove]);
+  useEffect(() => {
+    const onHidden = () => { if (document.visibilityState === "hidden") endFreeMove(); };
+    document.addEventListener("visibilitychange", onHidden);
+    return () => {
+      document.removeEventListener("visibilitychange", onHidden);
+      endFreeMove();
     };
-  };
+  }, [endFreeMove]);
 
-  const handleHeaderPointerMove = (e: React.PointerEvent) => {
-    if (!isDraggingRef.current || !dragStartRef.current) return;
-    const dx = e.clientX - dragStartRef.current.startX;
-    const dy = e.clientY - dragStartRef.current.startY;
-    setDragOffset({
-      x: dragStartRef.current.initX + dx,
-      y: dragStartRef.current.initY + dy,
-    });
-  };
-
-  const handleHeaderPointerUp = (e: React.PointerEvent) => {
-    if (isDraggingRef.current) {
-      isDraggingRef.current = false;
-      dragStartRef.current = null;
-      try {
-        (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-      } catch {}
-    }
+  const headInput = {
+    onPointerDown(e: React.PointerEvent<HTMLElement>) {
+      if (props.docked || props.closing) return;
+      const target = e.target as HTMLElement;
+      // Taps on the close button or a field stay taps; capture would retarget their click.
+      if (target.closest("button, input, select, textarea")) return;
+      if (isPhoneSheet()) {
+        headModeRef.current = "sheet";
+        sheet.grip.onPointerDown(e);
+        return;
+      }
+      if (e.button !== 0 || !e.isPrimary || freeMoveRef.current) return;
+      e.preventDefault();
+      headModeRef.current = "move";
+      freeMoveRef.current = {
+        pointerId: e.pointerId,
+        element: e.currentTarget,
+        startX: e.clientX,
+        startY: e.clientY,
+        initX: dragOffset?.x ?? 0,
+        initY: dragOffset?.y ?? 0,
+      };
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* synthetic events */ }
+    },
+    onPointerMove(e: React.PointerEvent<HTMLElement>) {
+      if (headModeRef.current === "sheet") { sheet.grip.onPointerMove(e); return; }
+      const state = freeMoveRef.current;
+      if (!state || state.pointerId !== e.pointerId) return;
+      setDragOffset({ x: state.initX + e.clientX - state.startX, y: state.initY + e.clientY - state.startY });
+    },
+    onPointerUp(e: React.PointerEvent<HTMLElement>) {
+      if (headModeRef.current === "sheet") { headModeRef.current = null; sheet.grip.onPointerUp(e); return; }
+      if (freeMoveRef.current?.pointerId === e.pointerId) endFreeMove();
+    },
+    onPointerCancel(e: React.PointerEvent<HTMLElement>) {
+      if (headModeRef.current === "sheet") { headModeRef.current = null; sheet.grip.onPointerCancel(e); return; }
+      if (freeMoveRef.current?.pointerId === e.pointerId) endFreeMove();
+    },
+    onLostPointerCapture(e: React.PointerEvent<HTMLElement>) {
+      if (headModeRef.current === "sheet") { headModeRef.current = null; sheet.grip.onLostPointerCapture(e); return; }
+      if (freeMoveRef.current?.pointerId === e.pointerId) endFreeMove();
+    },
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -507,7 +549,8 @@ export function SearchPanel(props: SearchPanelProps) {
     <>
       <div className={`search-backdrop${props.docked ? " is-docked" : ""}${props.closing ? " is-closing" : ""}`} aria-hidden="true" onClick={props.onClose} />
       <div
-        className={`search-panel${props.docked ? " is-docked" : ""}${props.closing ? " is-closing" : ""}`}
+        ref={panelRef}
+        className={`search-panel${props.docked ? " is-docked" : ""}${props.closing ? " is-closing" : ""}${sheet.dragging ? " is-dragging" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-label={t("search.dialog")}
@@ -520,17 +563,11 @@ export function SearchPanel(props: SearchPanelProps) {
         {!props.docked && <div
           className="drawer-drag-handle search-drag-handle"
           aria-hidden="true"
-          onPointerDown={handleHeaderPointerDown}
-          onPointerMove={handleHeaderPointerMove}
-          onPointerUp={handleHeaderPointerUp}
-          onPointerCancel={handleHeaderPointerUp}
+          {...headInput}
         />}
         <div
           className="menu-head search-head"
-          onPointerDown={props.docked ? undefined : handleHeaderPointerDown}
-          onPointerMove={props.docked ? undefined : handleHeaderPointerMove}
-          onPointerUp={props.docked ? undefined : handleHeaderPointerUp}
-          onPointerCancel={props.docked ? undefined : handleHeaderPointerUp}
+          {...(props.docked ? {} : headInput)}
           title={props.docked ? undefined : t("search.drag.tip")}
         >
           <div className="drawer-title-wrap">

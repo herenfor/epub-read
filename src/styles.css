@@ -6129,8 +6129,9 @@ select option {
   max-height: none;
   border-radius: 20px 20px 0 0;
   border-bottom: none;
-  transform: none !important;
-  /* transform 被 !important 锁住（屏蔽桌面拖动位移），进出场改用独立的 translate 属性。 */
+  /* 不再居中；桌面自由移动在手机不接（SearchPanel 按布局分流），transform 只归底部面板把手
+     （useSheetDrag 内联位移），进出场用独立的 translate 属性，两者不抢同一属性。 */
+  transform: none;
   animation: menuSheetIn var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -6206,14 +6207,7 @@ select option {
   background: transparent;
 }
 
-/* 宽窗：正文让出搜索面板的位置（面板宽 + 两侧各 16px），不再被盖住。
-   窄窗让出后版心太窄，仍然叠在正文上。 */
-@media (min-width: 1100px) {
-  .app.has-docked-search .main {
-    margin-right: calc(min(400px, 100vw - 32px) + 32px);
-    transition: margin var(--ui-dock) var(--ease-emphasized);
-  }
-}
+/* PC 停靠搜索像窗口一样从右侧滑出、叠在正文上：正文不让位，避免开关时整页逐帧重排。 */
 
 .mobile-more-sheet.is-closing {
   pointer-events: none;
