@@ -344,8 +344,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
               progressPct={progressPct}
               chapterIndex={chapterIndex}
               totalChapters={totalChapters}
-              sidebarOpen={sidebarOpen}
-              onToggleSidebar={onToggleSidebar}
+              dragProps={dragProps}
             />
           )}
         </div>
@@ -354,23 +353,6 @@ export const TitleBar: React.FC<TitleBarProps> = ({
         <div className="titlebar-right">
           {view === "reader" && (
             <div className="titlebar-actions">
-              {/* 侧边栏开关（综合目录/书签/笔记抽屉） */}
-              {!mobileCompact && onToggleSidebar && (
-                <button
-                  type="button"
-                  className={`titlebar-action-btn titlebar-sidebar-btn${sidebarOpen ? " active" : ""}`}
-                  onClick={() => onToggleSidebar?.("left")}
-                  title={t("titlebar.sidebar.tipCompact")}
-                  aria-label={t("titlebar.sidebar")}
-                  aria-expanded={sidebarOpen}
-                >
-                  <svg width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <rect x="3" y="3" width="14" height="14" rx="2" />
-                    <line x1="8" y1="3" x2="8" y2="17" />
-                  </svg>
-                </button>
-              )}
-
               {/* Aa 外观设置：手机放在共享底部栏。 */}
               {!mobileCompact && onToggleAppearance && (
                 <button
@@ -561,26 +543,22 @@ interface ReaderProgressCapsuleProps {
   progressPct?: number;
   chapterIndex?: number;
   totalChapters?: number;
-  sidebarOpen?: boolean;
-  onToggleSidebar?: (side?: "left" | "right") => void;
+  /** The capsule only shows progress; dragging it moves the window like the area around it. */
+  dragProps: Record<string, unknown>;
 }
 
+/** Display only: the "目录" button is the one entry to the sidebar. */
 function ReaderProgressCapsule({
   progressPct,
   chapterIndex,
   totalChapters,
-  sidebarOpen = false,
-  onToggleSidebar,
+  dragProps,
 }: ReaderProgressCapsuleProps) {
   const { t } = useUiText();
   return (
-    <button
-      type="button"
-      className={`titlebar-progress-pill${onToggleSidebar ? " is-clickable" : ""}`}
-      disabled={!onToggleSidebar}
-      onClick={() => onToggleSidebar?.("left")}
-      aria-label={t("titlebar.progress.toggleToc")}
-      aria-expanded={sidebarOpen}
+    <div
+      className="titlebar-progress-pill"
+      {...dragProps}
       title={t("titlebar.progress.tip", { percent: Math.round(progressPct ?? 0) })}
     >
       {chapterIndex !== undefined && totalChapters !== undefined && totalChapters > 0 && (
@@ -599,7 +577,7 @@ function ReaderProgressCapsule({
           <span className="titlebar-progress-text">{Math.round(progressPct)}%</span>
         </>
       )}
-    </button>
+    </div>
   );
 }
 

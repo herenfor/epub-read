@@ -94,11 +94,12 @@ describe("Zen UI AaPopover 组件与交互契约（Packet B）", () => {
     expect(html).toContain("aa-advanced-toggle");
   });
 
-  it("包含常用外观与详细排版双模 Tab 切换器以及直达按钮", () => {
+  it("详细排版只有页签一个入口，界面语言不在 Aa 里", () => {
     const html = renderToStaticMarkup(createElement(AaPopover, baseProps));
     expect(html).toContain("常用外观");
     expect(html).toContain("详细排版");
-    expect(html).toContain("详细排版微调（字重/间距/四向边距）");
+    expect(html).not.toContain("aa-switch-to-detail-btn");
+    expect(html).not.toContain("界面语言");
   });
 
   it("当使用自定义微调行高与非模板边距时，呈现自定义徽标指示", () => {

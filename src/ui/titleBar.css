@@ -183,16 +183,6 @@
   transition: background-color 140ms ease, border-color 140ms ease, transform 120ms ease;
 }
 
-.titlebar-progress-pill.is-clickable {
-  cursor: pointer;
-}
-
-.titlebar-progress-pill.is-clickable:hover {
-  background: var(--btn-tint-hover);
-  border-color: color-mix(in srgb, var(--panel-border) 45%, transparent);
-  transform: translateY(-1px);
-}
-
 .titlebar-chapter-badge {
   font-size: 11px;
   font-weight: 500;
@@ -318,11 +308,6 @@
 .titlebar-action-btn.active {
   opacity: 1;
   background: color-mix(in srgb, var(--btn-tint-hover) 90%, transparent);
-}
-
-/* 侧边栏按钮激活色彩 */
-.titlebar-sidebar-btn.active {
-  color: #10b981;
 }
 
 /* Aa 外观文本图标 */

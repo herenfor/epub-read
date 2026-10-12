@@ -8,7 +8,6 @@
   "titlebar.sidebar": "Toggle Sidebar",
   "titlebar.toc": "Contents",
   "titlebar.appName": "EPUB Reader",
-  "titlebar.sidebar.tipCompact": "Toggle contents & bookmarks (Ctrl+T)",
   "titlebar.appearance": "Appearance & Typography",
   "titlebar.search.tip": "Search text (Ctrl+F)",
   "titlebar.search": "Search Text",
@@ -34,7 +33,6 @@
   "titlebar.restore": "Restore Down",
   "titlebar.maximize": "Maximize",
   "titlebar.close": "Close",
-  "titlebar.progress.toggleToc": "Toggle table of contents",
   "titlebar.progress.tip": "Reading progress: {percent}% (click to toggle contents)",
   "titlebar.progress.chapter": "Ch. {current}/{total}"
 }
