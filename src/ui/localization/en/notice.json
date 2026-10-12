@@ -72,7 +72,6 @@
   "notice.legacy.preferencesNotApplied": "Appearance settings from legacy JSON not automatically applied",
   "notice.archiveFile.busy": "Archive file task in progress; please wait for current task to finish",
   "notice.portable.inactive": "Cross-platform data not active, continuing in legacy mode: {error}",
-  "notice.shelf.readFailed": "Unable to read library: {error}",
   "notice.organization.readFailed": "Unable to read favorites and folders: {error}",
   "notice.organization.readFailedWrites": "Unable to read favorites and folders: {error}; category saving disabled to protect existing data",
   "notice.font.busy": "Importing fonts, please wait",

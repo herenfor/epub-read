@@ -2732,6 +2732,37 @@ select option {
   line-height: 1.5;
 }
 
+/* 书库首次读取中：中性文字，不放导入引导、骨架或进度。 */
+.shelf-library-state .shelf-empty-title {
+  font-weight: 500;
+  color: var(--muted);
+}
+
+/* 读取失败的原因可能很长（路径、系统错误），允许折行。 */
+.shelf-empty-hint {
+  overflow-wrap: anywhere;
+}
+
+/* 已有书时的刷新失败：一条可重试的提示，不遮住书架。 */
+.shelf-library-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 12px;
+  padding: 8px 8px 8px 14px;
+  border: 1px solid color-mix(in srgb, var(--ui-danger, #c0392b) 35%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--ui-danger, #c0392b) 8%, var(--panel-bg));
+  color: var(--fg);
+  font-size: 13px;
+}
+
+.shelf-library-banner-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .shelf-empty-btn {
   display: inline-flex;
   align-items: center;
