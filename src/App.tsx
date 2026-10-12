@@ -14,7 +14,7 @@ import {
   writeReaderKeepScreenOn,
 } from "./platform/androidReaderKeepScreenOn";
 import { resolveArchiveHref, archiveHref } from "./core/archiveReferences";
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type Dispatch, type SetStateAction } from "react";
 import { loadBook, loadBookFromArchive, spineIndexForPath, spineIndexForEntryKey, spineItemPath, spineItemHref, DrmError, disposeBook, nextLinearIndex } from "./core/book";
 import type { Book } from "./core/types";
 import type { ArchiveClient } from "./core/selectiveArchive";
@@ -126,6 +126,7 @@ import { LogPanel, type LogItem } from "./ui/LogPanel";
 import { ReaderView, type ReaderHandle } from "./ui/ReaderView";
 import type { ReaderNoteForPaginator } from "./render/paginator";
 import { ShelfView } from "./ui/ShelfView";
+import { createLibraryReader, LIBRARY_LOADING, libraryReadFailed, libraryReadSucceeded, shelfLibraryView, type LibraryLoadState } from "./ui/libraryLoad";
 import { ReaderReadingSettings, SettingsSwitch } from "./ui/ReadingSettings";
 import { ChevronRightIcon } from "./ui/readerIcons";
 import { NativeImportPanel, type NativeImportCancelState } from "./ui/NativeImportPanel";
@@ -923,7 +924,16 @@ export default function App() {
   const shelfBackHandlerRef = useRef<(() => boolean) | null>(null);
   const noteComposerDirtyRef = useRef(false);
   const activeNoteEditContextRef = useRef<NoteEditContext | null>(null);
-  const [shelfEntries, setShelfEntries] = useState<ShelfEntry[]>([]);
+  const [shelfEntries, setShelfEntriesState] = useState<ShelfEntry[]>([]);
+  // Every write to the list outside the library reader is counted, so a read
+  // still in flight re-reads instead of replacing what was just written.
+  const shelfWritesRef = useRef(0);
+  const setShelfEntries = useCallback<Dispatch<SetStateAction<ShelfEntry[]>>>((next) => {
+    shelfWritesRef.current += 1;
+    setShelfEntriesState(next);
+  }, []);
+  // First real read of the library: loading / failed / ready (see ui/libraryLoad).
+  const [libraryLoad, setLibraryLoad] = useState<LibraryLoadState>(LIBRARY_LOADING);
   const [shelfError, setShelfError] = useState<string | null>(null);
   const [saveFailurePrompt, setSaveFailurePrompt] = useState<SaveFailurePrompt | null>(null);
   const saveFailurePromptRef = useRef(saveFailurePrompt);
@@ -999,8 +1009,15 @@ export default function App() {
   const currentShelfIdRef = useRef<string | null>(null);
   currentShelfIdRef.current = currentShelfId;
   // ---- 收藏与文件夹 ----
-  const [organization, setOrganization] = useState<LibraryOrganization>(emptyOrganization);
+  const [organization, setOrganizationState] = useState<LibraryOrganization>(emptyOrganization);
+  const organizationWritesRef = useRef(0);
+  const setOrganization = useCallback<Dispatch<SetStateAction<LibraryOrganization>>>((next) => {
+    organizationWritesRef.current += 1;
+    setOrganizationState(next);
+  }, []);
   const [organizationError, setOrganizationError] = useState<string | null>(null);
+  // The organization read has answered (either way): only then may an empty list mean an empty shelf.
+  const [organizationSettled, setOrganizationSettled] = useState(false);
   const [shelfScope, setShelfScope] = useState<ShelfScope>({ type: "root" });
   const organizationRef = useRef<LibraryOrganization>(organization);
   organizationRef.current = organization;
@@ -2333,13 +2350,92 @@ export default function App() {
     return true;
   }, []);
 
+  // ---- 书库读取：首次读取、失败重试共用同一读取入口 ----
+  // Readers are created once; what they publish into is refreshed every render.
+  const libraryReadDepsRef = useRef<{
+    publishList(entries: ShelfEntry[]): void;
+    failList(error: unknown): void;
+    publishOrganization(org: LibraryOrganization): void;
+    failOrganization(error: unknown): void;
+  } | null>(null);
+  libraryReadDepsRef.current = {
+    publishList(entries) {
+      setShelfEntriesState(entries);
+      setLibraryLoad(libraryReadSucceeded());
+      void (async () => {
+        let repositoryGeneration: string | undefined;
+        try {
+          const status = await getShelfStore().runtimeStatus?.();
+          repositoryGeneration = status?.repositoryGeneration;
+          lastNativeRecordsReadRef.current = status?.lastRecordsRead ?? null;
+          if (repositoryGeneration) lastRepositoryGenerationRef.current = repositoryGeneration;
+        } catch {
+          /* The list result stays authoritative; diagnostics may lack generation. */
+        }
+        recordLifecycleDiagnostic("startup_list", {
+          stage: "list",
+          result: "success",
+          backend: portableShelfStateActive() ? "v3" : "legacy",
+          count: entries.length,
+          repositoryGeneration,
+        });
+      })();
+    },
+    failList(error) {
+      setLibraryLoad((previous) => libraryReadFailed(previous, String(error)));
+      recordLifecycleDiagnostic("startup_list", {
+        stage: "list",
+        result: "failed",
+        backend: portableShelfStateActive() ? "v3" : "legacy",
+        errorCode: (error as { readonly code?: unknown } | null)?.code as string | undefined,
+      });
+    },
+    publishOrganization(org) {
+      setOrganizationState(org);
+      setOrganizationError(null);
+      setOrganizationSettled(true);
+    },
+    failOrganization(error) {
+      // Keep the folders already known; writes stay blocked while organizationError is set.
+      setOrganizationError(uiText("notice.organization.readFailed", { error: String(error) }));
+      setOrganizationSettled(true);
+      setShelfNotice({ kind: "error", text: uiText("notice.organization.readFailedWrites", { error: String(error) }) });
+    },
+  };
+  const [libraryReader] = useState(() => createLibraryReader<ShelfEntry[]>({
+    read: () => getShelfStore().list(),
+    writeCount: () => shelfWritesRef.current,
+    publish: (entries) => libraryReadDepsRef.current!.publishList(entries),
+    fail: (error) => libraryReadDepsRef.current!.failList(error),
+  }));
+  const [organizationReader] = useState(() => createLibraryReader<LibraryOrganization>({
+    read: () => getShelfStore().getOrganization(),
+    writeCount: () => organizationWritesRef.current,
+    publish: (org) => libraryReadDepsRef.current!.publishOrganization(org),
+    fail: (error) => libraryReadDepsRef.current!.failOrganization(error),
+  }));
+  /** Retry from the shelf: the same real reads, never activation/migration again; a second tap joins the read in flight. */
+  const retryLibraryLoad = useCallback((): void => {
+    void libraryReader.load();
+    if (organizationError) void organizationReader.load();
+  }, [libraryReader, organizationReader, organizationError]);
+
+  /** Authoritative re-read after imports and sync; supersedes any library read still in flight. */
   const refreshShelfProjection = useCallback(async (): Promise<void> => {
+    libraryReader.invalidate();
+    organizationReader.invalidate();
     const store = getShelfStore();
-    const [entries, org] = await Promise.all([store.list(), store.getOrganization()]);
-    setShelfEntries(entries);
-    setOrganization(org);
-    setOrganizationError(null);
-  }, []);
+    const [list, org] = await Promise.allSettled([store.list(), store.getOrganization()]);
+    // The two reads fail independently: books still show when only the folders failed.
+    if (org.status === "fulfilled") libraryReadDepsRef.current!.publishOrganization(org.value);
+    else libraryReadDepsRef.current!.failOrganization(org.reason);
+    if (list.status === "rejected") {
+      setLibraryLoad((previous) => libraryReadFailed(previous, String(list.reason)));
+      throw list.reason;
+    }
+    setShelfEntries(list.value);
+    setLibraryLoad(libraryReadSucceeded());
+  }, [libraryReader, organizationReader, setShelfEntries]);
 
   const handleOpenFolderImport = useCallback(async (): Promise<void> => {
     if (shelfBusyRef.current || organizationBusyRef.current || nativeImportRef.current) {
@@ -2395,9 +2491,8 @@ export default function App() {
 
   /** One real refresh after a started import settles (success, cancel or failure). */
   const handleFolderImportSettled = useCallback((): void => {
-    void refreshShelfProjection().catch((error) => {
-      setShelfNotice({ kind: "error", text: uiText("notice.shelf.refreshFailed", { error: String(error) }) });
-    });
+    // A failed refresh stays on the shelf as a refresh error with a retry.
+    void refreshShelfProjection().catch(() => undefined);
   }, [refreshShelfProjection]);
 
   const chooseSaveFileDestination = useCallback(async (): Promise<SaveFileLocation | null> => {
@@ -2885,64 +2980,16 @@ export default function App() {
       // the first real open must not reuse a pre-activation cached check.
       progressRuntimeGateRef.current?.invalidate();
       if (cancelled) return;
-      const store = getShelfStore();
-      store
-        .list()
-        .then(async (entries) => {
-          if (cancelled) return;
-          setShelfEntries(entries);
-          let repositoryGeneration: string | undefined;
-          try {
-            const status = await store.runtimeStatus?.();
-            repositoryGeneration = status?.repositoryGeneration;
-            lastNativeRecordsReadRef.current = status?.lastRecordsRead ?? null;
-            if (repositoryGeneration) lastRepositoryGenerationRef.current = repositoryGeneration;
-          } catch {
-            /* The list result stays authoritative; diagnostics may lack generation. */
-          }
-          recordLifecycleDiagnostic("startup_list", {
-            stage: "list",
-            result: "success",
-            backend: portableShelfStateActive() ? "v3" : "legacy",
-            count: entries.length,
-            repositoryGeneration,
-          });
-        })
-        .catch((e) => {
-          if (!cancelled) {
-            setShelfError(uiText("notice.shelf.readFailed", { error: String(e) }));
-            recordLifecycleDiagnostic("startup_list", {
-              stage: "list",
-              result: "failed",
-              backend: portableShelfStateActive() ? "v3" : "legacy",
-              errorCode: (e as { readonly code?: unknown } | null)?.code as string | undefined,
-            });
-          }
-        });
-
-      store
-        .getOrganization()
-        .then((org) => {
-          if (!cancelled) {
-            setOrganization(org);
-            setOrganizationError(null);
-          }
-        })
-        .catch((e) => {
-          if (!cancelled) {
-            setOrganizationError(uiText("notice.organization.readFailed", { error: String(e) }));
-            setShelfNotice({
-              kind: "error",
-              text: uiText("notice.organization.readFailedWrites", { error: String(e) }),
-            });
-          }
-        });
+      void libraryReader.load();
+      void organizationReader.load();
     })();
 
     return () => {
       cancelled = true;
+      libraryReader.invalidate();
+      organizationReader.invalidate();
     };
-  }, []);
+  }, [libraryReader, organizationReader]);
 
   // ---- 字体元数据启动加载（只列元数据，绝不预读所有字体文件） ----
   useEffect(() => {
@@ -6565,6 +6612,8 @@ export default function App() {
               tapRegionsScrollMode={settings.readingMode === "scroll"}
               touchUi={mobileChrome}
               onOpenDiagnostics={() => openPanel("log")}
+              libraryState={shelfLibraryView(libraryLoad, shelfEntries.length > 0, organizationSettled)}
+              onRetryLibraryLoad={retryLibraryLoad}
               onOpen={handleShelfOpen}
               onImport={() => void handleChooseBooks()}
               onDelete={handleShelfDelete}

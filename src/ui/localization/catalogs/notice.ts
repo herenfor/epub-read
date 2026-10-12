@@ -79,7 +79,6 @@ export const notice = defineMessages("notice", {
   "notice.legacy.preferencesNotApplied": "旧版 JSON 中的外观设置未自动应用",
   "notice.archiveFile.busy": "已有存档文件任务正在进行，请等待当前任务结束",
   "notice.portable.inactive": "跨平台资料未激活，继续使用旧模式：{error}",
-  "notice.shelf.readFailed": "无法读取书架：{error}",
   "notice.organization.readFailed": "无法读取收藏与文件夹：{error}",
   "notice.organization.readFailedWrites": "无法读取收藏与文件夹：{error}；已禁用分类写入以保护现有数据",
   "notice.font.busy": "正在导入字体，请稍候",

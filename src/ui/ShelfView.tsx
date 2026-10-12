@@ -1,4 +1,5 @@
 import { FolderNameField } from "./FolderNameField";
+import type { ShelfLibraryView } from "./libraryLoad";
 import { validateFolderNameDraft, folderNameDraftError } from "./folderNameDraft";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { MENU_CLOSE_MS, menuCloseMs, useExitPresence } from "./menuMotion";
@@ -157,6 +158,9 @@ export interface ShelfViewProps {
   touchUi?: boolean;
   /** 设置 › 关于 › 诊断日志；未提供时不显示。 */
   onOpenDiagnostics?(): void;
+  /** The library read itself (App owns it): loading and failure replace the empty-shelf invitation. */
+  libraryState?: ShelfLibraryView;
+  onRetryLibraryLoad?(): void;
   onOpen(id: string): void;
   onImport(): void;
   /** Directory import entry; absent hides it. */
@@ -2641,6 +2645,8 @@ export function ShelfView(props: ShelfViewProps) {
       return undefined;
     }
   });
+  // Without a library state (tests, older hosts) the list is taken as already read.
+  const library: ShelfLibraryView = props.libraryState ?? { kind: "ready", refreshError: null };
   const emptyShelfHint = getRuntimeCapabilities().platform === "android"
     ? t("shelfMain.empty.hint.android")
     : t("shelfMain.empty.hint.desktop");
@@ -4593,8 +4599,32 @@ export function ShelfView(props: ShelfViewProps) {
       {/* 生效的筛选：每个维度一个可删除的摘要标签，不逐个列出选中的值 */}
       <ShelfFilterSummary filters={filters} facets={filterModel.facets} compact={isCompactMobile} onFiltersChange={setFilters} />
 
+      {/* 书库刷新失败：已知的卡片和文件夹照常显示，只多一条可重试的提示 */}
+      {library.kind === "ready" && library.refreshError && (
+        <div className="shelf-library-banner" role="alert">
+          <span className="shelf-library-banner-text">{t("notice.shelf.refreshFailed", { error: library.refreshError })}</span>
+          {props.onRetryLibraryLoad && (
+            <button type="button" className="shelf-selection-cancel" onClick={props.onRetryLibraryLoad}>
+              {t("shelfMain.library.retry")}
+            </button>
+          )}
+        </div>
+      )}
+
       {/* 书架内容区 */}
-      {props.entries.length === 0 && (activeFolders.length === 0 || scope.type === "all") ? (
+      {library.kind === "loading" ? (
+        <div className="shelf-empty shelf-library-state" role="status" aria-live="polite">
+          <div className="shelf-empty-title">{t("shelfMain.library.loading")}</div>
+        </div>
+      ) : library.kind === "failed" ? (
+        <ShelfEmptyState icon={<BookLogoIcon />} title={t("shelfMain.library.failed")} hint={library.error}>
+          {props.onRetryLibraryLoad && (
+            <button className="shelf-empty-btn" type="button" onClick={props.onRetryLibraryLoad}>
+              <span>{t("shelfMain.library.retry")}</span>
+            </button>
+          )}
+        </ShelfEmptyState>
+      ) : props.entries.length === 0 && (activeFolders.length === 0 || scope.type === "all") ? (
         <ShelfEmptyState icon={<BookLogoIcon />} title={t("shelfMain.empty.title")} hint={emptyShelfHint}>
           <button className="shelf-empty-btn" onClick={props.onImport} disabled={props.busy || props.importActive}>
             <PlusIcon />
