@@ -91,6 +91,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   const [isMaximized, setIsMaximized] = useState(false);
   const [isZenRevealed, setIsZenRevealed] = useState(false);
   const zenHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pointerOverTitlebarRef = useRef(false);
 
   const runtime = getRuntimeCapabilities();
   const desktopChrome = runtime.hasDesktopWindowChrome;
@@ -100,10 +101,18 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   const dragProps = desktopChrome ? { "data-tauri-drag-region": dragRegion } : {};
 
   const clearZenTimer = () => {
-    if (zenHideTimerRef.current) {
+    if (zenHideTimerRef.current !== null) {
       clearTimeout(zenHideTimerRef.current);
       zenHideTimerRef.current = null;
     }
+  };
+
+  const startZenTimer = () => {
+    if (zenHideTimerRef.current !== null) return;
+    zenHideTimerRef.current = setTimeout(() => {
+      zenHideTimerRef.current = null;
+      setIsZenRevealed(false);
+    }, 1000);
   };
 
   // Tauri 窗口最大化状态监听
@@ -135,6 +144,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
       setIsZenRevealed(false);
       return;
     }
+    if (pointerOverTitlebarRef.current) setIsZenRevealed(true);
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Alt") {
@@ -167,7 +177,10 @@ export const TitleBar: React.FC<TitleBarProps> = ({
     const handleMouseMove = (e: MouseEvent) => {
       // 鼠标滑到顶部 0~40px 感应区即刻唤出
       if (e.clientY <= 40) {
-        clearZenTimer();
+        // A wake-up can replace the sensor without producing header hover.
+        // Only actual hover cancels hiding; otherwise keep a bounded deadline.
+        if (pointerOverTitlebarRef.current) clearZenTimer();
+        else if (!isAnyMenuOpen) startZenTimer();
         setIsZenRevealed(true);
       }
     };
@@ -191,18 +204,26 @@ export const TitleBar: React.FC<TitleBarProps> = ({
     };
   }, [desktopTools, view, zenMode, isZenRevealed, isAnyMenuOpen]);
 
+  // Effect cleanup can cancel a deadline armed before React committed the
+  // reveal. Re-arm after that commit and after menus close with no new leave.
+  useEffect(() => {
+    clearZenTimer();
+    if (desktopTools && view === "reader" && zenMode && isZenRevealed &&
+      !isAnyMenuOpen && !pointerOverTitlebarRef.current) startZenTimer();
+    return clearZenTimer;
+  }, [desktopTools, view, zenMode, isZenRevealed, isAnyMenuOpen]);
+
   const handleMouseEnter = () => {
+    pointerOverTitlebarRef.current = true;
     if (!desktopTools || !zenMode) return;
     clearZenTimer();
     setIsZenRevealed(true);
   };
 
   const handleMouseLeave = () => {
+    pointerOverTitlebarRef.current = false;
     if (!desktopTools || !zenMode || isAnyMenuOpen) return;
-    clearZenTimer();
-    zenHideTimerRef.current = setTimeout(() => {
-      setIsZenRevealed(false);
-    }, 1000);
+    startZenTimer();
   };
 
   const handleMinimize = useCallback(() => {

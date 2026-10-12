@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { TitleBar, ReaderHeaderBar } from "./TitleBar";
+import { createReactDomHarness } from "../test/reactDomHarness";
 
 describe("Reader Integrated HeaderBar & Desktop Flow (Packet 3)", () => {
   it("导出 ReaderHeaderBar 别名组件契约，确保与 TitleBar 一致", () => {
@@ -147,5 +148,76 @@ describe("Reader Integrated HeaderBar & Desktop Flow (Packet 3)", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe("desktop titlebar auto-hide lifecycle", () => {
+  async function setup() {
+    vi.useFakeTimers();
+    const dom = createReactDomHarness();
+    const render = (appearanceOpen = false) => dom.render(createElement(TitleBar, {
+      view: "reader", zenMode: true, appearanceOpen, onToggleAppearance: () => {},
+    }));
+    await render();
+    const header = () => dom.container.querySelector("header")!;
+    const event = (type: string, relatedTarget: EventTarget) => {
+      const next = new window.Event(type, { bubbles: true });
+      Object.defineProperty(next, "relatedTarget", { value: relatedTarget });
+      return next;
+    };
+    const enter = () => dom.dispatch(header(), event("mouseover", document.body));
+    const leave = () => dom.dispatch(header(), event("mouseout", document.body));
+    const advance = (ms: number) => dom.run(() => { vi.advanceTimersByTime(ms); });
+    const hidden = () => header().classList.contains("zen-hidden");
+    const dispose = async () => { await dom.dispose(); vi.useRealTimers(); };
+    return { dom, render, header, event, enter, leave, advance, hidden, dispose };
+  }
+
+  it("retains the one-second hide deadline when reveal and leave share a React update", async () => {
+    const h = await setup();
+    try {
+      await h.dom.run(() => {
+        h.header().dispatchEvent(h.event("mouseover", document.body));
+        h.header().dispatchEvent(h.event("mouseout", document.body));
+      });
+      expect(h.hidden()).toBe(false);
+      await h.advance(999);
+      expect(h.hidden()).toBe(false);
+      await h.advance(1);
+      expect(h.hidden()).toBe(true);
+    } finally { await h.dispose(); }
+  });
+
+  it("restarts hiding after a menu closes with the pointer already away", async () => {
+    const h = await setup();
+    try {
+      await h.enter();
+      await h.render(true);
+      await h.leave();
+      await h.advance(2000);
+      expect(h.hidden()).toBe(false);
+      await h.render(false);
+      await h.advance(999);
+      expect(h.hidden()).toBe(false);
+      await h.advance(1);
+      expect(h.hidden()).toBe(true);
+    } finally { await h.dispose(); }
+  });
+
+  it("cancels hiding on pointer reentry and starts a fresh second on the next leave", async () => {
+    const h = await setup();
+    try {
+      await h.enter();
+      await h.leave();
+      await h.advance(600);
+      await h.enter();
+      await h.advance(2000);
+      expect(h.hidden()).toBe(false);
+      await h.leave();
+      await h.advance(999);
+      expect(h.hidden()).toBe(false);
+      await h.advance(1);
+      expect(h.hidden()).toBe(true);
+    } finally { await h.dispose(); }
   });
 });
