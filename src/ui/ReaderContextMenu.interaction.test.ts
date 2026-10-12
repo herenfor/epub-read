@@ -22,4 +22,21 @@ describe("selection menu handoff", () => {
       expect(dom.container.textContent).toBe("composer");
     } finally { await dom.dispose(); }
   });
+
+  it("offers copying the original only when the shown text differs from it", async () => {
+    const dom = createReactDomHarness();
+    const menu = (text: string, originalText?: string) => createElement(ReaderContextMenu, {
+      selection: { text, originalText }, position: { x: 50, y: 50 },
+      onClose: () => undefined, onAddNote: () => undefined, onCopyOriginal: () => undefined,
+    });
+    const labels = () => [...dom.container.querySelectorAll("button")].map((button) => button.textContent);
+    try {
+      await dom.render(menu("同一段话", "同一段话"));
+      expect(labels()).not.toContain("复制原文");
+      await dom.render(menu("没有原文"));
+      expect(labels()).not.toContain("复制原文");
+      await dom.render(menu("轉換後的文字", "转换后的文字"));
+      expect(labels()).toContain("复制原文");
+    } finally { await dom.dispose(); }
+  });
 });
