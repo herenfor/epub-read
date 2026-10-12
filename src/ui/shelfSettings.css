@@ -178,6 +178,12 @@
   padding: 6px 24px 24px;
 }
 
+/* 内容变高（如点击翻页区域展开“自定义”）时应由这一层滚动，而不是把卡片压扁：
+   overflow:hidden 的列表卡在 flex 列里最小高度为 0，会被压缩并裁掉底部设置。 */
+.shelf-settings-scroll > * {
+  flex-shrink: 0;
+}
+
 .shelf-settings-card {
   display: flex;
   flex-direction: column;
