@@ -126,7 +126,7 @@ import { LogPanel, type LogItem } from "./ui/LogPanel";
 import { ReaderView, type ReaderHandle } from "./ui/ReaderView";
 import type { ReaderNoteForPaginator } from "./render/paginator";
 import { ShelfView } from "./ui/ShelfView";
-import { createLibraryReader, LIBRARY_LOADING, LibraryReadInterruptedError, libraryReadFailed, libraryReadSucceeded, shelfLibraryView, type LibraryLoadState } from "./ui/libraryLoad";
+import { createLibraryReader, LIBRARY_LOADING, LibraryReadInterruptedError, libraryReadFailed, libraryReadSucceeded, shelfLibraryView, shelfMembershipChanged, type LibraryLoadState } from "./ui/libraryLoad";
 import { ReaderReadingSettings, SettingsSwitch } from "./ui/ReadingSettings";
 import { ChevronRightIcon } from "./ui/readerIcons";
 import { NativeImportPanel, type NativeImportCancelState } from "./ui/NativeImportPanel";
@@ -753,6 +753,31 @@ function createShelfBookArchiveInput(id: string): { port: MessagePort; dispose()
   };
 }
 
+const shelfStoreIds = new WeakMap<object, number>();
+let shelfStoreIdSeq = 0;
+/**
+ * Identity of the repository behind library reads: the facade's store
+ * instance (activation swaps it) plus the runtime generation the store
+ * reports, which changes when the native repository is reopened or replaced
+ * (a restore) even though the JS instance stays. The status check is
+ * read-only; if it fails, only the instance is compared.
+ */
+async function shelfRepositoryKey(): Promise<string> {
+  const store = getShelfStore();
+  let id = shelfStoreIds.get(store);
+  if (id === undefined) {
+    id = ++shelfStoreIdSeq;
+    shelfStoreIds.set(store, id);
+  }
+  let generation = "unknown";
+  try {
+    generation = (await store.runtimeStatus?.())?.repositoryGeneration ?? "none";
+  } catch {
+    /* Diagnostics-only failure: fall back to the instance identity. */
+  }
+  return `${id}:${generation}`;
+}
+
 /** Library read errors as shown on the shelf; the "kept changing" case gets its own wording. */
 function libraryReadErrorText(error: unknown): string {
   return error instanceof LibraryReadInterruptedError ? uiText("notice.shelf.readInterrupted") : String(error);
@@ -930,11 +955,15 @@ export default function App() {
   const noteComposerDirtyRef = useRef(false);
   const activeNoteEditContextRef = useRef<NoteEditContext | null>(null);
   const [shelfEntries, setShelfEntriesState] = useState<ShelfEntry[]>([]);
-  // Every write to the list outside the library reader is counted, so a read
-  // still in flight re-reads instead of replacing what was just written.
+  // Writes that add or remove books outside the library reader are counted, so
+  // a read still in flight re-reads instead of replacing what was just written.
+  // Updates to a book already listed (opened, notes, progress) are not.
   const shelfWritesRef = useRef(0);
   const setShelfEntries = useCallback<Dispatch<SetStateAction<ShelfEntry[]>>>((next) => {
-    shelfWritesRef.current += 1;
+    // Judged at call time against the latest list: updaters only run at render.
+    const current = shelfEntriesRef.current;
+    const preview = typeof next === "function" ? next(current) : next;
+    if (shelfMembershipChanged(current, preview)) shelfWritesRef.current += 1;
     setShelfEntriesState(next);
   }, []);
   // First real read of the library: loading / failed / ready (see ui/libraryLoad).
@@ -2402,18 +2431,17 @@ export default function App() {
       setShelfNotice({ kind: "error", text: uiText("notice.organization.readFailedWrites", { error: libraryReadErrorText(error) }) });
     },
   };
-  // The facade's store instance is the repository identity: activation swaps it.
   const [libraryReader] = useState(() => createLibraryReader<ShelfEntry[]>({
     read: () => getShelfStore().list(),
     writeCount: () => shelfWritesRef.current,
-    repository: () => getShelfStore(),
+    repository: shelfRepositoryKey,
     publish: (entries) => libraryReadDepsRef.current!.publishList(entries),
     fail: (error) => libraryReadDepsRef.current!.failList(error),
   }));
   const [organizationReader] = useState(() => createLibraryReader<LibraryOrganization>({
     read: () => getShelfStore().getOrganization(),
     writeCount: () => organizationWritesRef.current,
-    repository: () => getShelfStore(),
+    repository: shelfRepositoryKey,
     publish: (org) => libraryReadDepsRef.current!.publishOrganization(org),
     fail: (error) => libraryReadDepsRef.current!.failOrganization(error),
   }));
