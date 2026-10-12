@@ -36,7 +36,7 @@ describe("chapter count cache", () => {
   });
 
   it("ignores malformed cache data", () => {
-    localStorage.setItem("epub-reader-chapter-counts-v1", JSON.stringify({ version: 1, entries: { hash: { linear: [true], counts: [-1], touchedAt: 1 } } }));
+    localStorage.setItem("epub-reader-chapter-counts-v1", JSON.stringify({ version: 2, entries: { hash: { linear: [true], counts: [-1], touchedAt: 1 } } }));
     expect(readCachedChapterCounts("hash", [true])).toEqual(new Map());
   });
 
@@ -63,10 +63,27 @@ describe("chapter count cache", () => {
   });
 
   it("recognizes complete legacy caches without inventing readiness for missing chapters", () => {
-    localStorage.setItem("epub-reader-chapter-counts-v1", JSON.stringify({ version: 1, entries: {
+    localStorage.setItem("epub-reader-chapter-counts-v1", JSON.stringify({ version: 2, entries: {
       ready: { linear: [true, true], counts: [12, 20], touchedAt: 1 },
       pending: { linear: [true, true], counts: [12, null], touchedAt: 1 },
     } }));
     expect(readKnownChapterProgressKeys()).toEqual(new Set(["ready"]));
+  });
+
+  it("drops version 1 estimates and readiness, then rebuilds under the same key", () => {
+    // Version 1 could hold a 0 for a chapter whose raw `<script/>` swallowed the body.
+    localStorage.setItem("epub-reader-chapter-counts-v1", JSON.stringify({ version: 1, entries: {
+      hash: { linear: [true, true], counts: [0, 20], touchedAt: 1, progressKnown: true },
+    } }));
+    expect(readCachedChapterCounts("hash", [true, true])).toEqual(new Map());
+    expect(readKnownChapterProgressKeys().has("hash")).toBe(false);
+    let collection = createChapterCountCollection(1, [true, true]);
+    collection = applyChapterCount(collection, 1, 0, 451, "estimated").collection;
+    collection = applyChapterCount(collection, 1, 1, 20, "estimated").collection;
+    writeChapterCountCache("hash", collection);
+    const stored = JSON.parse(localStorage.getItem("epub-reader-chapter-counts-v1") ?? "null");
+    expect(stored.version).toBe(2);
+    expect(stored.entries.hash.counts).toEqual([451, 20]);
+    expect(readKnownChapterProgressKeys().has("hash")).toBe(true);
   });
 });

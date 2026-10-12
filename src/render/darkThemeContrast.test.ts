@@ -2,12 +2,15 @@ import { parseHTML } from "linkedom";
 import { describe, expect, it } from "vitest";
 import {
   DARK_THEME_CANDIDATE,
+  DARK_THEME_MARKER,
   applyDarkThemeContrast,
+  revertDarkThemeContrast,
   compositeRgba,
   contrastRatio,
   parseRgba,
   type DarkThemeComputedStyle,
   type DarkThemeStyleAdapter,
+  type DarkThemeContrastRecord,
 } from "./darkThemeContrast";
 
 function style(overrides: Partial<DarkThemeComputedStyle> = {}): DarkThemeComputedStyle {
@@ -155,5 +158,71 @@ describe("dark theme contrast repair", () => {
     expect(colored.hasAttribute("data-reader-dark-contrast")).toBe(false);
     expect(faded.hasAttribute("data-reader-dark-contrast")).toBe(false);
     expect(image.hasAttribute("data-reader-dark-contrast")).toBe(false);
+  });
+
+  it("records modifications and completely reverts inline style, priority and marker", () => {
+    const { document } = parseHTML(
+      '<html><body><p id="plain">plain</p><p id="has-style" style="color: rgb(30, 30, 30); font-weight: bold">styled</p></body></html>'
+    );
+    const plain = document.querySelector("#plain") as HTMLElement;
+    const styled = document.querySelector("#has-style") as HTMLElement;
+
+    const styles = new Map<Element, DarkThemeComputedStyle>([
+      [document.body, style({ backgroundColor: "rgb(30, 30, 30)" })],
+      [plain, style({ color: "rgb(40, 40, 40)" })],
+      [styled, style({ color: "rgb(40, 40, 40)" })],
+    ]);
+
+    const records: DarkThemeContrastRecord[] = [];
+    const count = applyDarkThemeContrast(document as unknown as Document, {
+      theme: "dark",
+      adapter: adapter(styles),
+      records,
+    });
+    expect(count).toBe(2);
+    expect(records).toHaveLength(2);
+    expect(plain.getAttribute(DARK_THEME_MARKER)).toBe("1");
+    expect(styled.getAttribute(DARK_THEME_MARKER)).toBe("1");
+    expect(styles.get(plain)?.color).toBe("#d4d4d4");
+    expect(styles.get(styled)?.color).toBe("#d4d4d4");
+
+    // 撤销修补
+    const customAdapter = adapter(styles);
+    const reverted = revertDarkThemeContrast(records, customAdapter);
+    expect(reverted).toBe(2);
+    expect(plain.hasAttribute(DARK_THEME_MARKER)).toBe(false);
+    expect(styled.hasAttribute(DARK_THEME_MARKER)).toBe(false);
+    expect(styled.style.color).toBe("rgb(30, 30, 30)");
+    expect(styled.style.fontWeight).toBe("bold");
+    expect(plain.getAttribute("style") ?? "").toBe("");
+  });
+
+  it("does not overwrite external new color if modified during session", () => {
+    const { document } = parseHTML('<html><body><p id="target">text</p></body></html>');
+    const target = document.querySelector("#target") as HTMLElement;
+
+    const styles = new Map<Element, DarkThemeComputedStyle>([
+      [document.body, style({ backgroundColor: "rgb(30, 30, 30)" })],
+      [target, style({ color: "rgb(40, 40, 40)" })],
+    ]);
+
+    const records: DarkThemeContrastRecord[] = [];
+    applyDarkThemeContrast(document as unknown as Document, {
+      theme: "dark",
+      adapter: adapter(styles),
+      records,
+    });
+    expect(records).toHaveLength(1);
+    expect(target.getAttribute(DARK_THEME_MARKER)).toBe("1");
+
+    // 外部中途修改颜色为 blue
+    target.style.color = "blue";
+    styles.set(target, style({ color: "blue" }));
+
+    // 撤销时不覆盖外部新值，仅清除 marker
+    const reverted = revertDarkThemeContrast(records, adapter(styles));
+    expect(reverted).toBe(0); // 未恢复旧值
+    expect(target.style.color).toBe("blue"); // 保留外部值
+    expect(target.hasAttribute(DARK_THEME_MARKER)).toBe(false); // marker 移除
   });
 });

@@ -9,8 +9,26 @@ export interface DarkThemeComputedStyle {
 
 export interface DarkThemeStyleAdapter {
   getComputedStyle(element: Element): DarkThemeComputedStyle;
-  setColor(element: Element, color: string): void;
+  setColor(element: Element, color: string, priority?: string): void;
   mark(element: Element): void;
+  unmark?(element: Element): void;
+  getColor?(element: Element): { value: string; priority: string; hasInline: boolean } | null;
+  restoreColor?(
+    element: Element,
+    originalValue: string,
+    originalPriority: string,
+    hadInlineColor: boolean,
+    hadStyleAttribute: boolean,
+  ): void;
+}
+
+export interface DarkThemeContrastRecord {
+  element: Element;
+  originalValue: string;
+  originalPriority: string;
+  hadInlineColor: boolean;
+  hadStyleAttribute: boolean;
+  appliedColor: string;
 }
 
 export interface DarkThemeContrastOptions {
@@ -21,6 +39,10 @@ export interface DarkThemeContrastOptions {
    * 由接线层识别规则来源，不从颜色值反推用户意图。
    */
   userOwnsColor?: (element: Element) => boolean;
+  /**
+   * 收集被修改元素的记录，供后续可撤销修补使用。
+   */
+  records?: DarkThemeContrastRecord[];
 }
 
 export const DARK_THEME_FOREGROUND = { r: 212, g: 212, b: 212, a: 1 } as const;
@@ -100,7 +122,7 @@ export function contrastRatio(foreground: Rgba, background: Rgba): number {
 
 function defaultAdapter(doc: Document): DarkThemeStyleAdapter | null {
   const win = doc.defaultView;
-  if (!win) return null;
+  if (!win || typeof win.getComputedStyle !== "function") return null;
   return {
     getComputedStyle: (element) => {
       const style = win.getComputedStyle(element);
@@ -113,8 +135,46 @@ function defaultAdapter(doc: Document): DarkThemeStyleAdapter | null {
         visibility: style.visibility,
       };
     },
-    setColor: (element, color) => (element as HTMLElement).style.setProperty("color", color, ""),
+    setColor: (element, color, priority = "") => {
+      (element as HTMLElement).style.setProperty("color", color, priority);
+    },
     mark: (element) => element.setAttribute(DARK_THEME_MARKER, "1"),
+    unmark: (element) => element.removeAttribute(DARK_THEME_MARKER),
+    getColor: (element) => {
+      const el = element as HTMLElement;
+      if (!el.style) return null;
+      const value =
+        typeof el.style.getPropertyValue === "function"
+          ? el.style.getPropertyValue("color")
+          : typeof el.style.color === "string"
+            ? el.style.color
+            : "";
+      const priority =
+        typeof el.style.getPropertyPriority === "function"
+          ? el.style.getPropertyPriority("color")
+          : "";
+      const hasInline =
+        value.trim() !== "" || (el.getAttribute?.("style")?.includes("color") ?? false);
+      return { value, priority, hasInline };
+    },
+    restoreColor: (
+      element,
+      originalValue,
+      originalPriority,
+      hadInlineColor,
+      hadStyleAttribute,
+    ) => {
+      const el = element as HTMLElement;
+      if (!el.style) return;
+      if (hadInlineColor) {
+        el.style.setProperty("color", originalValue, originalPriority);
+      } else {
+        el.style.removeProperty("color");
+        if (!hadStyleAttribute && el.getAttribute?.("style") === "") {
+          el.removeAttribute("style");
+        }
+      }
+    },
   };
 }
 
@@ -206,7 +266,12 @@ export function applyDarkThemeContrast(doc: Document, options: DarkThemeContrast
     if (style.display === "none" || style.visibility === "hidden") return;
     const background = extendBackground(inheritedBackground, style);
     const foreground = parseRgba(style.color);
-    if (!background.unsafe && (element.textContent ?? "").trim() !== "" && foreground) {
+    if (
+      !background.unsafe &&
+      (element.textContent ?? "").trim() !== "" &&
+      foreground &&
+      element.getAttribute(DARK_THEME_MARKER) !== "1"
+    ) {
       const repaired = chooseDarkThemeTextRepair({
         foreground,
         background: background.color,
@@ -214,9 +279,53 @@ export function applyDarkThemeContrast(doc: Document, options: DarkThemeContrast
         userOwnsColor: options.userOwnsColor?.(element) ?? false,
       });
       if (repaired !== null) {
-        adapter.setColor(element, repaired);
+        let originalValue = "";
+        let originalPriority = "";
+        let hadInlineColor = false;
+        let hadStyleAttribute = false;
+
+        if (adapter.getColor) {
+          const info = adapter.getColor(element);
+          if (info) {
+            originalValue = info.value;
+            originalPriority = info.priority;
+            hadInlineColor = info.hasInline;
+            hadStyleAttribute = info.hasInline;
+          }
+        } else {
+          const el = element as HTMLElement;
+          if (el.style) {
+            originalValue =
+              typeof el.style.getPropertyValue === "function"
+                ? el.style.getPropertyValue("color")
+                : typeof el.style.color === "string"
+                  ? el.style.color
+                  : "";
+            originalPriority =
+              typeof el.style.getPropertyPriority === "function"
+                ? el.style.getPropertyPriority("color")
+                : "";
+            hadStyleAttribute = typeof el.hasAttribute === "function" ? el.hasAttribute("style") : false;
+            hadInlineColor =
+              originalValue.trim() !== "" ||
+              (typeof el.getAttribute === "function" && (el.getAttribute("style")?.includes("color") ?? false));
+          }
+        }
+
+        adapter.setColor(element, repaired, originalPriority);
         adapter.mark(element);
         fixed++;
+
+        if (options.records) {
+          options.records.push({
+            element,
+            originalValue,
+            originalPriority,
+            hadInlineColor,
+            hadStyleAttribute,
+            appliedColor: repaired,
+          });
+        }
       }
     }
     for (const child of Array.from(element.children)) visit(child, background);
@@ -224,4 +333,106 @@ export function applyDarkThemeContrast(doc: Document, options: DarkThemeContrast
 
   visit(doc.body, rootBackground);
   return fixed;
+}
+
+/**
+ * 撤销深色对比度修补：
+ * 仅恢复自己写入的 inline color 及 marker（包括原 value、priority 与 style 属性是否存在）。
+ * 中途外部改了颜色的元素不覆盖外部新值，仅移除 marker。
+ */
+export function revertDarkThemeContrast(
+  records: readonly DarkThemeContrastRecord[],
+  adapter?: DarkThemeStyleAdapter,
+): number {
+  let reverted = 0;
+  for (const record of records) {
+    const el = record.element as HTMLElement;
+    if (!el || typeof el.getAttribute !== "function") continue;
+    if (el.getAttribute(DARK_THEME_MARKER) !== "1") continue;
+
+    let currentColor = "";
+    if (adapter?.getColor) {
+      currentColor = adapter.getColor(el)?.value ?? "";
+    } else if (adapter?.getComputedStyle) {
+      currentColor = adapter.getComputedStyle(el).color;
+    } else if (typeof el.style?.getPropertyValue === "function" && el.style.getPropertyValue("color")) {
+      currentColor = el.style.getPropertyValue("color");
+    } else if (typeof el.style?.color === "string" && el.style.color) {
+      currentColor = el.style.color;
+    }
+
+    const currentRgba = parseRgba(currentColor);
+    const appliedRgba = parseRgba(record.appliedColor);
+    const isUnchanged =
+      currentColor === record.appliedColor ||
+      (currentRgba !== null &&
+        appliedRgba !== null &&
+        currentRgba.r === appliedRgba.r &&
+        currentRgba.g === appliedRgba.g &&
+        currentRgba.b === appliedRgba.b &&
+        Math.abs(currentRgba.a - appliedRgba.a) < 0.01);
+
+    if (isUnchanged) {
+      if (adapter?.restoreColor) {
+        adapter.restoreColor(
+          el,
+          record.originalValue,
+          record.originalPriority,
+          record.hadInlineColor,
+          record.hadStyleAttribute,
+        );
+      } else {
+        if (adapter) {
+          adapter.setColor(el, record.originalValue, record.originalPriority);
+        }
+        if (el.style) {
+          if (typeof el.style.setProperty === "function") {
+            if (record.hadInlineColor) {
+              el.style.setProperty("color", record.originalValue, record.originalPriority);
+            } else {
+              if (typeof el.style.removeProperty === "function") {
+                el.style.removeProperty("color");
+              } else {
+                el.style.color = "";
+              }
+              if (
+                !record.hadStyleAttribute &&
+                (!el.getAttribute?.("style") ||
+                  el.getAttribute("style") === "" ||
+                  el.getAttribute("style") === "color:")
+              ) {
+                el.removeAttribute("style");
+              }
+            }
+          } else if (record.hadInlineColor) {
+            el.style.color = record.originalValue;
+          } else {
+            el.style.color = "";
+            if (
+              !record.hadStyleAttribute &&
+              (!el.getAttribute?.("style") ||
+                el.getAttribute("style") === "" ||
+                el.getAttribute("style") === "color:")
+            ) {
+              el.removeAttribute("style");
+            }
+          }
+        }
+      }
+      if (adapter?.unmark) {
+        adapter.unmark(el);
+      } else {
+        el.removeAttribute(DARK_THEME_MARKER);
+      }
+      reverted++;
+    } else {
+      // 外部中途修改了颜色，保留外部新值，仅撤销 marker
+      if (adapter?.unmark) {
+        adapter.unmark(el);
+      } else {
+        el.removeAttribute(DARK_THEME_MARKER);
+      }
+    }
+  }
+  return reverted;
 }

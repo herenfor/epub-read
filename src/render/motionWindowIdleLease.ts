@@ -1,4 +1,4 @@
-/** Internal performance core: reuse one already-validated window for a short burst. */
+/** Internal performance core: retain a validated window until idle or owner release. */
 export interface WindowLeasePort {
   /** True only for the same live paginator/layout, active window and idle motion. */
   canExitIdleWindow(): boolean;
@@ -27,7 +27,8 @@ export class MotionWindowIdleLease {
   constructor(
     private readonly clock: LeaseClock,
     private readonly port: WindowLeasePort,
-    private readonly idleMs = 900,
+    // null: foreground chapter owns the bounded window until explicit release.
+    private readonly idleMs: number | null = 900,
   ) {}
 
   beginContact(): void {
@@ -59,7 +60,7 @@ export class MotionWindowIdleLease {
 
   private armIfIdle(): void {
     this.retireTimer();
-    if (this.contact || !this.port.canExitIdleWindow()) return;
+    if (this.idleMs === null || this.contact || !this.port.canExitIdleWindow()) return;
     const ticket = this.epoch;
     this.handle = this.clock.after(this.idleMs, () => {
       if (this.disposed || ticket !== this.epoch) return;

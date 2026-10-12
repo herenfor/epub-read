@@ -54,6 +54,8 @@ export const shelf = defineMessages("shelf", {
   "shelf.card.moveToFolder": "移至文件夹",
   "shelf.card.removing": "正在移出…",
   "shelf.card.removeFromFolder": "从文件夹移除",
+  "shelf.card.removeFailed": { zh: "移出失败：{error}", note: "Shown inside the book's menu when removing it from its folder failed." },
+  "shelf.card.select": { zh: "多选", note: "Menu action: start multi-select with this book already selected.", max: 12 },
   "shelf.card.delete": "从书架删除",
   "shelf.card.readSuffix": { zh: " 已读", note: "Appended after a percentage, e.g. '42% read'. Keep the leading space if your language needs it." },
   "shelf.card.unread": { zh: "未读", max: 8 },
