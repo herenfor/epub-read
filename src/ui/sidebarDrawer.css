@@ -4,66 +4,30 @@
   inset: 0;
   z-index: 190;
   background: var(--ui-backdrop);
-  backdrop-filter: blur(2px);
-  -webkit-backdrop-filter: blur(2px);
   animation: reader-panel-fade-in var(--menu-open) var(--ui-ease) forwards;
   pointer-events: auto;
 }
 
-@keyframes reader-panel-fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
 /* ---- 面板入场方向动画（左侧、右侧） ---- */
 @keyframes panel-float-from-left {
-  from {
-    opacity: 0;
-    transform: translateX(-16px) scale(0.97);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0) scale(1);
-  }
+  from { transform: translateX(calc(-100% - 24px)); }
+  to { transform: none; }
 }
 
 @keyframes panel-float-from-right {
-  from {
-    opacity: 0;
-    transform: translateX(16px) scale(0.97);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0) scale(1);
-  }
+  from { transform: translateX(calc(100% + 24px)); }
+  to { transform: none; }
 }
 
 /* 退场时长由 --menu-close 决定，与挂载生命周期一致。 */
 @keyframes panel-float-out-left {
-  from {
-    opacity: 1;
-    transform: translateX(0) scale(1);
-  }
-  to {
-    opacity: 0;
-    transform: translateX(-16px) scale(0.97);
-  }
+  from { transform: none; }
+  to { transform: translateX(calc(-100% - 24px)); }
 }
 
 @keyframes panel-float-out-right {
-  from {
-    opacity: 1;
-    transform: translateX(0) scale(1);
-  }
-  to {
-    opacity: 0;
-    transform: translateX(16px) scale(0.97);
-  }
-}
-
-@keyframes reader-panel-fade-out {
-  from { opacity: 1; }
-  to { opacity: 0; }
+  from { transform: none; }
+  to { transform: translateX(calc(100% + 24px)); }
 }
 
 .sidebar-backdrop.is-closing {

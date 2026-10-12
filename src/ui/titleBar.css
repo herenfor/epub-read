@@ -14,7 +14,7 @@
   background: var(--bg);
   color: var(--fg);
   border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 40%, transparent);
-  transition: transform 180ms cubic-bezier(0.16, 1, 0.3, 1), opacity 180ms ease-out;
+  transition: transform var(--chrome-motion) var(--ease-emphasized), opacity var(--chrome-motion) var(--ease-emphasized);
 }
 
 /* 沉浸顶栏悬浮于正文上方；固定时参与布局，全屏也尊重用户的选择。 */

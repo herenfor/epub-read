@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 /** Full-motion defaults; CSS-aware exits use menuCloseMs() below. */
-export const MENU_OPEN_MS = 440;
+export const MENU_OPEN_MS = 300;
 export const MENU_CLOSE_MS = 200;
 
 /** CSS is authoritative, including app/system reduced motion. Read only on exit. */

@@ -14,7 +14,7 @@
   user-select: none;
   -webkit-user-select: none;
   pointer-events: auto;
-  transition: opacity 220ms ease, transform 220ms cubic-bezier(0.16, 1, 0.3, 1), background-color 200ms ease;
+  transition: opacity var(--chrome-motion) var(--ease-emphasized), transform var(--chrome-motion) var(--ease-emphasized), background-color 200ms ease;
   background: transparent;
 }
 
