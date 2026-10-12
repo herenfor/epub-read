@@ -3925,7 +3925,9 @@ export function ShelfView(props: ShelfViewProps) {
   const searchScopeSwitch = (
     <div className="shelf-search-scope" role="group" aria-label={t("shelfSettings.search.scope")}>
       <button type="button" aria-pressed={searchMode === "metadata"} className={searchMode === "metadata" ? "active" : ""}
-        disabled={props.busy} onClick={() => changeSearchMode("metadata")}>{t("shelfMenu.searchMode.metadata")}</button>
+        disabled={props.busy} onClick={() => changeSearchMode("metadata")}>
+        {isCompactMobile ? t("shelfSettings.search.scope.titleShort") : t("shelfMenu.searchMode.metadata")}
+      </button>
       <button type="button" aria-pressed={searchMode === "body"} className={searchMode === "body" ? "active" : ""}
         disabled={props.busy} onClick={() => changeSearchMode("body")}>{t("shelfMenu.searchMode.body")}</button>
     </div>
@@ -4013,12 +4015,12 @@ export function ShelfView(props: ShelfViewProps) {
                   className="shelf-icon-btn-zen shelf-mobile-more-btn"
                   ref={menuButtonRef}
                   type="button"
-                  aria-label={t("shelfMain.settings.mobile")}
+                  aria-label={t("shelfSettings.title")}
                   aria-expanded={settingsOpen}
                   aria-haspopup="dialog"
                   onClick={() => openSettings()}
                   disabled={props.busy}
-                  title={t("shelfMain.settings.mobile")}
+                  title={t("shelfSettings.title")}
                 >
                   <SettingsIcon />
                 </button>
@@ -4183,12 +4185,12 @@ export function ShelfView(props: ShelfViewProps) {
                 className="shelf-icon-btn-zen"
                 ref={menuButtonRef}
                 type="button"
-                aria-label={t("shelfMain.settings")}
+                aria-label={t("shelfSettings.title")}
                 aria-expanded={settingsOpen}
                 aria-haspopup="dialog"
                 onClick={() => openSettings()}
                 disabled={props.busy}
-                title={t("shelfMain.settings")}
+                title={t("shelfSettings.title")}
               >
                 <SettingsIcon />
               </button>

@@ -43,6 +43,7 @@ export const shelfSettings = defineMessages("shelfSettings", {
   "shelfSettings.filter.chip.compact": { zh: "{label} {count}", note: "Phone chip: dimension name and number of selected values.", max: 12 },
   "shelfSettings.filter.chip.clear": "清除{label}筛选",
   "shelfSettings.search.scope": "搜索范围",
+  "shelfSettings.search.scope.titleShort": { zh: "书名", note: "Phone search box scope: titles and authors (short form).", max: 6 },
   "shelfSettings.search.results": "正文搜索结果",
   "shelfSettings.search.manageIndex": { zh: "管理索引", max: 10 },
   "shelfSettings.search.close": "关闭正文搜索",

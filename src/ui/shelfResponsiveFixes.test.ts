@@ -88,24 +88,28 @@ describe("第三步补修：书架触摸长按与子菜单 Back", () => {
     }
   });
 
-  it("设置里的排序下拉先关闭，再次 Back 才关闭书架设置", async () => {
+  it("触屏设置页：Back 先回到设置首页，再次 Back 才关闭设置", async () => {
     const dom = createReactDomHarness();
     let back: (() => boolean) | null = null;
     try {
       await dom.render(createElement(ShelfView, {
         ...makeProps([makeEntry("b1", "第一本")]),
+        compact: true,
+        touchUi: true,
         registerBackHandler: (handler: (() => boolean) | null) => { back = handler; },
       }));
-      await dom.click(dom.container.querySelector('[aria-label="书架设置与高级工具"]') as HTMLElement);
-      await dom.click(dom.container.querySelector(".shelf-drawer .shelf-select-btn") as HTMLElement);
-      expect(dom.container.querySelector(".shelf-drawer .shelf-select-pop")).not.toBeNull();
+      await dom.click(dom.container.querySelector('.shelf-normal-bar-mobile [aria-label="设置"]') as HTMLElement);
+      const row = [...dom.container.querySelectorAll(".shelf-settings-row")]
+        .find((item) => item.textContent?.includes("数据与备份")) as HTMLElement;
+      await dom.click(row);
+      expect(dom.container.querySelector(".shelf-settings-sheet h2")?.textContent).toBe("数据与备份");
       await dom.run(() => { expect(back?.()).toBe(true); });
-      expect(dom.container.querySelector(".shelf-select-pop")?.className).toContain("closing");
-      expect(dom.container.querySelector(".shelf-drawer")?.className).not.toContain("closing");
+      expect(dom.container.querySelector(".shelf-settings-sheet h2")?.textContent).toBe("设置");
+      await dom.run(() => { expect(back?.()).toBe(true); });
+      expect(dom.container.querySelector(".shelf-settings-layer")?.className).toContain("is-closing");
       await dom.run(() => new Promise<void>((resolve) => setTimeout(resolve, MENU_CLOSE_MS + 20)));
-      expect(dom.container.querySelector(".shelf-select-pop")).toBeNull();
-      await dom.run(() => { expect(back?.()).toBe(true); });
-      expect(dom.container.querySelector(".shelf-drawer")?.className).toContain("closing");
+      expect(dom.container.querySelector(".shelf-settings-layer")).toBeNull();
+      await dom.run(() => { expect(back?.()).toBe(false); });
     } finally {
       await dom.dispose();
     }
@@ -295,13 +299,19 @@ describe("第三步补修：书架触摸长按与子菜单 Back", () => {
       // 4. 外部右轨移除
       expect(dom.container.querySelector(".shelf-nav-rail-right")).toBeNull();
 
-      // 5. 设置抽屉内具备视图切换与批量管理
+      // 5. 视图、排序、密度在“筛选与排序”底部面板；批量选择在触屏上用长按，设置里不再重复
+      await dom.click(dom.container.querySelector(".shelf-search-row .shelf-filter-btn") as HTMLElement);
+      const sheet = dom.container.querySelector(".shelf-filter-layer.is-sheet");
+      expect(sheet).not.toBeNull();
+      expect(sheet?.textContent).toContain("视图模式");
+      expect(sheet?.textContent).toContain("排列方式");
+      expect(sheet?.textContent).toContain("排布密度");
+      await dom.click(dom.container.querySelector(".shelf-filter-done") as HTMLElement);
       const moreBtn = dom.container.querySelector(".shelf-mobile-more-btn") as HTMLButtonElement;
       await dom.click(moreBtn);
-      const drawer = dom.container.querySelector(".shelf-drawer");
-      expect(drawer).not.toBeNull();
-      expect(drawer?.textContent).toContain("视图模式");
-      expect(drawer?.textContent).toContain("批量选择");
+      const settings = dom.container.querySelector(".shelf-settings-layer");
+      expect(settings).not.toBeNull();
+      expect(settings?.textContent).not.toContain("批量选择");
     } finally {
       await dom.dispose();
     }
