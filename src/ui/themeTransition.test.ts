@@ -30,10 +30,10 @@ function createMockTransition(): MockTransition {
   });
 
   const skipTransition = vi.fn(() => {
-    // 模拟原生行为：skipTransition 导致 ready 和 finished reject (AbortError)
+    // Skipping decoration rejects ready; a successful update can still finish.
     const abortErr = new Error("Transition was skipped");
     rejectReady(abortErr);
-    rejectFinished(abortErr);
+    resolveFinished();
   });
 
   return {
@@ -345,7 +345,7 @@ describe("ThemeTransitionController", () => {
     expect(onEnd).toHaveBeenCalledTimes(1);
     expect(onEnd).toHaveBeenCalledWith(1);
 
-    // 之后 transition.finished promise reject (skip) 结算
+    // The skipped transition finishes without notifying the host again.
     const transition = getActiveTransition();
     await transition!.finished.catch(() => {});
 
@@ -367,6 +367,35 @@ describe("ThemeTransitionController", () => {
 
     // 契约 T1: 迟到 promise 不再次通知已销毁宿主
     expect(onEnd).toHaveBeenCalledTimes(0);
+  });
+
+  it("old replaced promises cannot clear a replacement controller's scope after disposal", async () => {
+    const { document } = parseHTML("<html><body></body></html>");
+    const finishes: Array<() => void> = [];
+    (document as any).startViewTransition = () => ({
+      ready: Promise.resolve(),
+      finished: new Promise<void>((resolve) => finishes.push(resolve)),
+      skipTransition() {},
+    });
+    const make = () => new ThemeTransitionController({
+      document, isMotionReduced: () => false, isBackgrounded: () => false,
+    });
+    const old = make();
+    old.request({ animate: true, commit() {} });
+    old.request({ animate: true, commit() {} });
+    old.dispose();
+    const replacement = make();
+    try {
+      replacement.request({ animate: true, commit() {} });
+      finishes[0]();
+      finishes[1]();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(document.documentElement.getAttribute("data-theme-transitioning")).toBe("true");
+      expect(replacement.isTransitioning).toBe(true);
+    } finally {
+      replacement.dispose();
+    }
   });
 
   it("T2: interrupt cleans up transition and styles completely even when commit throws", () => {
