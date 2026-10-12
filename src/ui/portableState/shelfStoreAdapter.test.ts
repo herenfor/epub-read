@@ -876,4 +876,41 @@ describe("CP-I portable ShelfStore facade", () => {
     });
   });
 
+  test("image bookmarks keep media identity; identity-less mid-chapter marks are not moved to the chapter start", async () => {
+    const legacy = new FakeLegacyStore([entry()]);
+    const service = new PortableStateService(new MemoryPortableStateStorage());
+    await activatePortableShelfStore(legacy, service);
+    const store = new PortableShelfStore(legacy, service);
+    const media = { index: 2, tag: "img", signature: "img|||../Images/p-019.jpg", ratio: 0.5 };
+    const [withMedia, elementOnly, chapterStart] = [generateFolderId(), generateFolderId(), generateFolderId()];
+    const base = {
+      spineIndex: 18,
+      anchorTextOffset: null,
+      anchorTextSnippet: null,
+      chapterPath: "OEBPS/Text/p19.xhtml",
+      text: "",
+      createdAtMs: 5,
+    };
+    await store.setBookmarks(LOCAL_ID, [
+      { ...base, id: withMedia, page: 3, anchorIndex: 41, anchorRatio: 0.5, mediaAnchor: media },
+      // What an older reader stored for the image page: element index and page only.
+      { ...base, id: elementOnly, page: 3, anchorIndex: 41, anchorRatio: 0.5, mediaAnchor: null },
+      { ...base, id: chapterStart, page: 0, anchorIndex: null, anchorRatio: null, mediaAnchor: null },
+    ]);
+    const marks = (await service.snapshot()).books[HASH].bookmarks;
+    const locator = (id: string) => latestVersion(marks[id].versions)?.value?.locator;
+    expect(locator(withMedia)).toMatchObject({
+      locatorVersion: 1,
+      chapterPath: "OEBPS/Text/p19.xhtml",
+      target: { kind: "media", signature: media.signature, indexHint: 2, tag: "img", ratio: 0.5 },
+    });
+    expect(locator(elementOnly)).toMatchObject({
+      locatorVersion: 0, spineIndex: 18, pageHint: 3, anchorIndex: 41, anchorRatio: 0.5,
+    });
+    expect(locator(chapterStart)).toMatchObject({ locatorVersion: 1, target: { kind: "chapter-start" } });
+    const projected = (await store.list())[0].bookmarks ?? [];
+    expect(projected.find((mark) => mark.id === withMedia)?.mediaAnchor).toEqual(media);
+    expect(projected.find((mark) => mark.id === elementOnly)).toMatchObject({ page: 3, anchorIndex: 41 });
+  });
+
 });
