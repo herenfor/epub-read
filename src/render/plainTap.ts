@@ -1,17 +1,34 @@
 /**
- * Minimal plain-tap detector for touch-first reader chrome toggling.
+ * Minimal plain-tap detector for the reader body: touch taps and primary
+ * mouse clicks on non-interactive content.
  *
- * It only reports a tap on non-interactive content; it never prevents
+ * It reports where the tap landed (iframe client coordinates) and which
+ * input made it; the host decides what that point means. It never prevents
  * default, so links, selection, image activation and native gestures keep
- * their existing priority.
+ * their existing priority. The only exception is a repeated click that the
+ * host claims as a turn: its word-selecting default is suppressed so rapid
+ * clicks keep turning instead of selecting text.
  */
+export interface PlainTapPoint {
+  clientX: number;
+  clientY: number;
+}
+
+export interface PlainTapInfo extends PlainTapPoint {
+  pointerType: "touch" | "mouse" | "pen";
+}
+
 export interface PlainTapHandlers {
-  onTap(): void;
+  onTap(tap: PlainTapInfo): void;
   shouldIgnore?: () => boolean;
-  isBlankImageTap?: (target: Element | null, point: { clientX: number; clientY: number }) => boolean;
+  isBlankImageTap?: (target: Element | null, point: PlainTapPoint) => boolean;
+  /** A double/triple click here turns pages, so it must not select a word. */
+  claimsRepeatClick?: (point: PlainTapPoint) => boolean;
 }
 
 const MOVE_TOLERANCE_PX = 10;
+/** Compatibility mouse events trail a touch; never count them as a second tap. */
+const TOUCH_MOUSE_GUARD_MS = 800;
 
 function isInteractiveTarget(target: EventTarget | null): boolean {
   const element = target as (Element & { closest?: (selector: string) => Element | null }) | null;
@@ -33,20 +50,28 @@ export function installPlainTap(doc: Document, handlers: PlainTapHandlers): () =
   let tracking = false;
   let startX = 0;
   let startY = 0;
+  let mouseTracking = false;
+  let mouseX = 0;
+  let mouseY = 0;
+  let lastPointerType = "";
+  let lastTouchAt = Number.NEGATIVE_INFINITY;
 
   const reset = (): void => {
     tracking = false;
     startX = 0;
     startY = 0;
   };
+  const resetMouse = (): void => {
+    mouseTracking = false;
+  };
+  const blocked = (target: EventTarget | null, point: PlainTapPoint): boolean =>
+    (isInteractiveTarget(target) && !handlers.isBlankImageTap?.(target as Element, point)) ||
+    hasActiveSelection(doc) ||
+    handlers.shouldIgnore?.() === true;
 
   const onTouchStart = (event: TouchEvent): void => {
-    if (
-      event.touches.length !== 1 ||
-      (isInteractiveTarget(event.target) && !handlers.isBlankImageTap?.(event.target as Element, event.touches[0])) ||
-      hasActiveSelection(doc) ||
-      handlers.shouldIgnore?.() === true
-    ) {
+    lastTouchAt = Date.now();
+    if (event.touches.length !== 1 || blocked(event.target, event.touches[0])) {
       reset();
       return;
     }
@@ -69,18 +94,51 @@ export function installPlainTap(doc: Document, handlers: PlainTapHandlers): () =
   };
 
   const onTouchEnd = (event: TouchEvent): void => {
+    lastTouchAt = Date.now();
     if (event.touches.length) { reset(); return; }
     if (!tracking) return;
     const endPoint = event.changedTouches?.[0] ?? { clientX: startX, clientY: startY };
-    if (isInteractiveTarget(event.target) && !handlers.isBlankImageTap?.(event.target as Element, endPoint)) { reset(); return; }
-    const wasTracking = tracking;
     reset();
-    if (!wasTracking || hasActiveSelection(doc) || handlers.shouldIgnore?.() === true) return;
-    handlers.onTap();
+    if (blocked(event.target, endPoint)) return;
+    handlers.onTap({ clientX: endPoint.clientX, clientY: endPoint.clientY, pointerType: "touch" });
   };
 
   const onTouchCancel = (): void => {
     reset();
+  };
+
+  const onPointerDown = (event: Event): void => {
+    lastPointerType = (event as PointerEvent).pointerType ?? "";
+  };
+
+  const fromMouse = (): boolean =>
+    (lastPointerType === "mouse" || lastPointerType === "pen") && Date.now() - lastTouchAt > TOUCH_MOUSE_GUARD_MS;
+
+  const onMouseDown = (event: MouseEvent): void => {
+    resetMouse();
+    if (!fromMouse() || event.button !== 0 || blocked(event.target, event)) return;
+    if (event.detail >= 2 && handlers.claimsRepeatClick?.(event) === true) event.preventDefault();
+    mouseTracking = true;
+    mouseX = event.clientX;
+    mouseY = event.clientY;
+  };
+
+  const onMouseMove = (event: MouseEvent): void => {
+    if (mouseTracking && Math.hypot(event.clientX - mouseX, event.clientY - mouseY) > MOVE_TOLERANCE_PX) {
+      resetMouse();
+    }
+  };
+
+  const onClick = (event: MouseEvent): void => {
+    if (!mouseTracking) return;
+    resetMouse();
+    if (!fromMouse() || event.button !== 0 || blocked(event.target, event)) return;
+    if (Math.hypot(event.clientX - mouseX, event.clientY - mouseY) > MOVE_TOLERANCE_PX) return;
+    handlers.onTap({
+      clientX: event.clientX,
+      clientY: event.clientY,
+      pointerType: lastPointerType === "pen" ? "pen" : "mouse",
+    });
   };
 
   doc.addEventListener("touchstart", onTouchStart, { capture: true, passive: true });
@@ -89,8 +147,13 @@ export function installPlainTap(doc: Document, handlers: PlainTapHandlers): () =
   doc.addEventListener("touchcancel", onTouchCancel, { capture: true, passive: true });
   const onPointerCancel = (event: Event): void => {
     if ((event as PointerEvent).pointerType !== "touch") reset();
+    resetMouse();
   };
   doc.addEventListener("pointercancel", onPointerCancel, true);
+  doc.addEventListener("pointerdown", onPointerDown, true);
+  doc.addEventListener("mousedown", onMouseDown, true);
+  doc.addEventListener("mousemove", onMouseMove, { capture: true, passive: true });
+  doc.addEventListener("click", onClick, true);
 
   return () => {
     doc.removeEventListener("touchstart", onTouchStart, true);
@@ -98,5 +161,9 @@ export function installPlainTap(doc: Document, handlers: PlainTapHandlers): () =
     doc.removeEventListener("touchend", onTouchEnd, true);
     doc.removeEventListener("touchcancel", onTouchCancel, true);
     doc.removeEventListener("pointercancel", onPointerCancel, true);
+    doc.removeEventListener("pointerdown", onPointerDown, true);
+    doc.removeEventListener("mousedown", onMouseDown, true);
+    doc.removeEventListener("mousemove", onMouseMove, true);
+    doc.removeEventListener("click", onClick, true);
   };
 }

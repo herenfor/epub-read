@@ -4,6 +4,7 @@ import type { ChapterState } from "../render/paginator";
 import type { ReaderHandle, ReaderViewProps } from "./ReaderView";
 import type { ImageChapterSpread } from "./imageChapterSpreads";
 import { EdgeTurnZone } from "./EdgeTurnZone";
+import { edgeTurnZoneSpecs, ReaderTurnOwnerContext, useReaderTapRouting } from "./readerTapRouting";
 
 interface Props extends ReaderViewProps {
   spread: ImageChapterSpread;
@@ -41,6 +42,11 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
     const target = neighbor(dir);
     if (target >= 0) p.onRequestChapter(target, dir === -1 ? { atEnd: true } : undefined);
   };
+  // Body taps in either leaf turn the pair, like its outer bands.
+  const turnRef = useRef(turn);
+  turnRef.current = turn;
+  const [turnOwner] = useState(() => (dir: 1 | -1) => turnRef.current(dir));
+  const tapRouting = useReaderTapRouting();
   useImperativeHandle(ref, () => ({
     nextPage: () => turn(1),
     prevPage: () => turn(-1),
@@ -131,9 +137,12 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
   return <div className="reader-image-spread" data-image-spread-ready={ready}
     style={{ gap: props.gap, paddingLeft: props.settings.pageMarginsPx?.left ?? 0,
       paddingRight: props.settings.pageMarginsPx?.right ?? 0 }}>
-    {page(props.spread.left, "left")}
-    {props.spread.right !== null ? page(props.spread.right, "right") : <div className="reader-image-leaf is-empty" aria-hidden="true" />}
-    {([-1, 1] as const).map((direction) => <EdgeTurnZone key={direction}
-      direction={direction} onTurn={() => turn(direction)} />)}
+    <ReaderTurnOwnerContext.Provider value={turnOwner}>
+      {page(props.spread.left, "left")}
+      {props.spread.right !== null ? page(props.spread.right, "right") : <div className="reader-image-leaf is-empty" aria-hidden="true" />}
+    </ReaderTurnOwnerContext.Provider>
+    {edgeTurnZoneSpecs(tapRouting).map((zone) => <EdgeTurnZone key={zone.side}
+      direction={zone.direction} side={zone.sideProp} region={zone.region}
+      onTurn={(direction) => turn(direction)} />)}
   </div>;
 });
