@@ -33,7 +33,6 @@ import {
   DEFAULT_SETTINGS,
   normalizeTurnAnimation,
   type ReaderSettings,
-  type Theme,
 } from "./render/settings";
 import type { ChapterState, MediaReadingAnchor, PreciseNavigationStatus, ReadingAnchor } from "./render/paginator";
 import { normalizePageOptions } from "./render/pageLayout";
@@ -105,6 +104,7 @@ import {
 import { setColorAssistMatrixProvider } from "./render/visual/readerVisualPaint";
 import { ReaderDisplaySettingsPopover } from "./ui/ReaderDisplaySettingsPopover";
 import "./ui/readerDisplaySettings.css";
+import "./ui/themeTransition.css";
 import { presentCrossBookHit, type CrossBookPanelResult } from "./ui/crossBookSearch";
 import type { ResolvedCrossBookSearchHit } from "./features/ai/indexing/indexStore";
 import { createDefaultLibrarySearchRuntime } from "./features/ai/indexing/librarySearchRuntime";
@@ -126,6 +126,8 @@ import { LogPanel, type LogItem } from "./ui/LogPanel";
 import { ReaderView, type ReaderHandle } from "./ui/ReaderView";
 import type { ReaderNoteForPaginator } from "./render/paginator";
 import { ShelfView } from "./ui/ShelfView";
+import { applyDocumentTheme, useThemeTransition } from "./ui/themeTransitionHost";
+import { useReadingInputStart } from "./ui/readerPointerEdge";
 import { createLibraryReader, LIBRARY_LOADING, LibraryReadInterruptedError, libraryReadFailed, libraryReadSucceeded, shelfLibraryView, type LibraryLoadState } from "./ui/libraryLoad";
 import { ReaderReadingSettings, SettingsSwitch } from "./ui/ReadingSettings";
 import { ChevronRightIcon } from "./ui/readerIcons";
@@ -1590,6 +1592,18 @@ export default function App() {
   }, [aiRuntime]);
 
   const readerRef = useRef<ReaderHandle>(null);
+  // 主题过渡判定用的最新提交值；busy 在算出 ready 后每次渲染更新。
+  const committedThemeRef = useRef(settings.theme);
+  committedThemeRef.current = settings.theme;
+  const readerThemeBusyRef = useRef(false);
+  const themeTransition = useThemeTransition({
+    setSettings,
+    committedTheme: () => committedThemeRef.current,
+    reader: () => readerRef.current,
+    busy: () => readerThemeBusyRef.current,
+    onError: (error) => setShelfNotice({ kind: "error", text: uiText("notice.theme.applyFailed", { error: String(error) }) }),
+  });
+  const commitThemeSettings = themeTransition.commitSettings;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chapterStateRef = useRef<ChapterState>(chapterState);
   chapterStateRef.current = chapterState;
@@ -2350,7 +2364,8 @@ export default function App() {
 
   const applyPortablePreferences = useCallback((preferences?: PortablePreferences): boolean => {
     if (!preferences) return false;
-    setSettings((previous) => {
+    // 导入偏好可能同时改主题与字号等：直接提交，并取代未提交的主题过渡请求。
+    commitThemeSettings(() => setSettings((previous) => {
       const next = { ...previous };
       if (preferences.theme === "light" || preferences.theme === "dark" || preferences.theme === "sepia" || preferences.theme === "gray") {
         next.theme = preferences.theme;
@@ -2371,9 +2386,9 @@ export default function App() {
         next.wordSpacingPx = preferences.wordSpacingPx;
       }
       return next;
-    });
+    }));
     return true;
-  }, []);
+  }, [commitThemeSettings]);
 
   // ---- 书库读取：首次读取、失败重试共用同一读取入口 ----
   // Readers are created once; what they publish into is refreshed every render.
@@ -5263,25 +5278,21 @@ export default function App() {
     writeSavedSettings(toSavedReaderSettings(settings, uiScale));
   }, [settings, uiScale]);
 
-  const changeTheme = (theme: Theme): void => {
-    setSettings((s) => ({ ...s, theme }));
-  };
+  // 书架设置与阅读 Aa 共用的主题入口：仅主题变化走约 200ms 整屏淡入，更新回调内
+  // 同步提交 React 外层、html/body 与全部在用正文宿主（见 ui/themeTransitionHost）。
+  const changeTheme = themeTransition.changeTheme;
 
-  // 同步主题至 html 与 body，保证全屏与全端窗口背景无死角对齐
+  // 同步主题至 html 与 body，保证全屏与全端窗口背景无死角对齐（过渡提交已先行同步，这里幂等）
   useEffect(() => {
-    const themeVal = settings.theme && settings.theme !== "light" ? settings.theme : null;
-    if (themeVal) {
-      document.documentElement.setAttribute("data-theme", themeVal);
-      document.body.setAttribute("data-theme", themeVal);
-    } else {
-      document.documentElement.removeAttribute("data-theme");
-      document.body.removeAttribute("data-theme");
-    }
+    applyDocumentTheme(document, settings.theme);
   }, [settings.theme]);
 
+  // 恢复默认同时改几何：经同一控制器直接提交（取代未提交的主题请求），排版走原有事务。
   const resetDefaults = (): void => {
-    setSettings({ ...DEFAULT_SETTINGS });
-    setUiScale(1);
+    themeTransition.commitSettings(() => {
+      setSettings({ ...DEFAULT_SETTINGS });
+      setUiScale(1);
+    });
   };
 
   const adjustFont = (delta: number): void => {
@@ -5422,6 +5433,10 @@ export default function App() {
     [view, shelfEntries],
   );
   const ready = phase.phase === "ready" && book !== null && server !== null;
+  // 开书/换章仍在加载：主题直接提交，加载完成后按最新主题（既有 desired/代次契约）。
+  readerThemeBusyRef.current = view === "reader" && (!ready || !readerDisplayReady);
+  // 阅读输入（含正文 iframe 内的按下/触摸/滚轮/按键）开始即中断主题装饰，不加输入锁。
+  useReadingInputStart(view === "reader", themeTransition.interrupt);
   // 搜索与“更多”关闭后保留一个退场动画时长再卸载，与其他菜单同速。
   const searchPresence = useExitPresence(searchOpen);
   // PC 阅读：鼠标静止后隐藏指针；书架、面板/浮层与弹窗期间始终显示。
