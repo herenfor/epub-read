@@ -72,8 +72,13 @@ export interface SheetDragOptions {
  * `grip` on the grip and header elements. With `contentRef`, drags in the
  * scrolling body expand and collapse the sheet as `claimContentDrag` says.
  */
+type ContentGesture = { startX: number; startY: number; lastY: number; lastAt: number; velocity: number; claim: ContentDragClaim | "scroll" };
+
 export function useSheetDrag(options: SheetDragOptions) {
   const drag = useRef<{ pointerId: number; startY: number; lastY: number; lastAt: number; velocity: number } | null>(null);
+  // A touch in the content lives here too, so one end/cancel path clears both
+  // and a late move or release from a cancelled touch finds nothing to commit.
+  const contentGesture = useRef<ContentGesture | null>(null);
   const [dragging, setDragging] = useState(false);
   const latest = useRef(options);
   latest.current = options;
@@ -81,6 +86,7 @@ export function useSheetDrag(options: SheetDragOptions) {
   const endDrag = (outcome: SheetDragOutcome) => {
     const { sheetRef, onDismiss, onExpandedChange } = latest.current;
     drag.current = null;
+    contentGesture.current = null;
     setDragging(false);
     if (sheetRef.current) sheetRef.current.style.transform = "";
     if (outcome === "dismiss") onDismiss();
@@ -88,15 +94,25 @@ export function useSheetDrag(options: SheetDragOptions) {
     else if (outcome === "collapse") onExpandedChange?.(false);
   };
 
-  // Backgrounding drops a half-finished drag; the sheet itself stays open.
+  // Backgrounding or disabling drops a half-finished drag, including a
+  // content touch still inside the slop; the sheet itself stays open.
   const endDragRef = useRef(endDrag);
   endDragRef.current = endDrag;
+  const cancelActive = () => {
+    if (drag.current || contentGesture.current) endDragRef.current("stay");
+  };
   useEffect(() => {
-    if (!dragging) return;
-    const onHidden = () => { if (document.visibilityState === "hidden") endDragRef.current("stay"); };
+    const onHidden = () => { if (document.visibilityState === "hidden") cancelActive(); };
     document.addEventListener("visibilitychange", onHidden);
-    return () => document.removeEventListener("visibilitychange", onHidden);
-  }, [dragging]);
+    return () => {
+      document.removeEventListener("visibilitychange", onHidden);
+      drag.current = null;
+      contentGesture.current = null;
+    };
+  }, []);
+  useEffect(() => {
+    if (options.disabled) cancelActive();
+  }, [options.disabled]);
 
   const grip = {
     onPointerDown(event: ReactPointerEvent<HTMLElement>) {
@@ -135,17 +151,17 @@ export function useSheetDrag(options: SheetDragOptions) {
   useEffect(() => {
     const contentEl = contentRef?.current;
     if (!contentEl || !contentExpandable) return;
-    let gesture: { startX: number; startY: number; lastY: number; lastAt: number; velocity: number; claim: ContentDragClaim | "scroll" } | null = null;
     const onStart = (event: TouchEvent) => {
       const opts = latest.current;
-      gesture = null;
+      contentGesture.current = null;
       if (opts.disabled || event.touches.length !== 1 || (opts.contentDragEnabled && !opts.contentDragEnabled())) return;
       const target = event.target as Element | null;
       if (target?.closest?.(CONTENT_DRAG_EXEMPT)) return;
       const touch = event.touches[0];
-      gesture = { startX: touch.clientX, startY: touch.clientY, lastY: touch.clientY, lastAt: event.timeStamp, velocity: 0, claim: null };
+      contentGesture.current = { startX: touch.clientX, startY: touch.clientY, lastY: touch.clientY, lastAt: event.timeStamp, velocity: 0, claim: null };
     };
     const onMove = (event: TouchEvent) => {
+      const gesture = contentGesture.current;
       if (!gesture || gesture.claim === "scroll") return;
       const touch = event.touches[0];
       const dy = touch.clientY - gesture.startY;
@@ -176,8 +192,8 @@ export function useSheetDrag(options: SheetDragOptions) {
       if (sheet) sheet.style.transform = `translateY(${gesture.claim === "collapse" ? Math.max(0, dy) : Math.min(0, dy) / 4}px)`;
     };
     const onEnd = (event: TouchEvent) => {
-      const state = gesture;
-      gesture = null;
+      const state = contentGesture.current;
+      contentGesture.current = null;
       if (!state || (state.claim !== "expand" && state.claim !== "collapse")) return;
       if (event.type === "touchcancel") { endDragRef.current("stay"); return; }
       const outcome = resolveSheetDrag(state.lastY - state.startY, state.velocity, { expandable: true, expanded: state.claim === "collapse" });
