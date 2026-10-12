@@ -67,8 +67,6 @@ export const aa = defineMessages("aa", {
   "aa.presentation.narrow": "窗口较窄，暂以单页显示",
   "aa.group.advanced": "翻页与进阶",
   "aa.turnAnimation": { zh: "翻页动画", max: 14 },
-  "aa.detail.open.tip": "展开详细排版参数设置",
-  "aa.detail.open": "详细排版微调（字重/间距/四向边距）",
   "aa.more": "更多高级设置",
   "aa.forceHorizontal": "强制竖排转横排",
   "aa.motion": { zh: "简化界面动画", note: "Switch; same setting as the shelf's 'Interface animation: Reduced'.", max: 12 },

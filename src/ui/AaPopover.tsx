@@ -19,7 +19,6 @@ import {
   WrenchIcon,
 } from "./readerIcons";
 import "./aaPopover.css";
-import { useUiLanguageChoice } from "./localization/useUiLanguageChoice";
 import { useUiText } from "./localization/UiLanguageProvider";
 import type { PlainMessageKey } from "./localization/core";
 
@@ -205,7 +204,6 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
   onClose,
 }) => {
   const [activeTab, setActiveTab] = useState<"quick" | "detailed">("quick");
-  const language = useUiLanguageChoice();
   const { t } = useUiText();
   const [uiMotion, setUiMotion] = useUiMotion();
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -641,36 +639,6 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
                   </div>
                 </div>
               )}
-
-              <div className="aa-section aa-control-row">
-                <span className="aa-section-label">{language.label}</span>
-                <div className="aa-segmented-capsule" role="radiogroup" aria-label={language.label}>
-                  {language.options.map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      role="radio"
-                      aria-checked={language.preference === option.value}
-                      className={`aa-segmented-btn${language.preference === option.value ? " active" : ""}`}
-                      onClick={() => language.choose(option.value)}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              {language.error && <p className="aa-section-note aa-section-error" role="alert">{language.error}</p>}
-
-              {/* 直达详细参数切换按钮 */}
-              <button
-                type="button"
-                className="aa-switch-to-detail-btn"
-                onClick={() => setActiveTab("detailed")}
-                title={t("aa.detail.open.tip")}
-              >
-                <span>{t("aa.detail.open")}</span>
-                <ChevronRightIcon size={12} />
-              </button>
 
               {/* 折叠区：更多高级设置 */}
               <div className="aa-advanced-container">

@@ -549,32 +549,6 @@
   line-height: 1.2;
 }
 
-.aa-switch-to-detail-btn {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  box-sizing: border-box;
-  height: 32px;
-  padding: 0 12px;
-  margin-top: 4px;
-  border-radius: 8px;
-  border: 1px solid color-mix(in srgb, var(--accent, #6366f1) 28%, transparent);
-  background: color-mix(in srgb, var(--accent, #6366f1) 7%, transparent);
-  color: var(--accent, #6366f1);
-  font-size: 12px;
-  font-weight: 550;
-  cursor: pointer;
-  transition: all var(--ui-control) var(--ui-ease);
-}
-
-.aa-switch-to-detail-btn:hover {
-  background: color-mix(in srgb, var(--accent, #6366f1) 14%, transparent);
-  border-color: var(--accent, #6366f1);
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px color-mix(in srgb, var(--accent, #6366f1) 18%, transparent);
-}
-
 /* ---- 详细排版视图 (Detailed View) ---- */
 .aa-detailed-view {
   display: flex;
@@ -771,13 +745,6 @@
 .app[data-touch-ui="true"] .aa-btn-save-css { font-size: 13px; }
 .app[data-touch-ui="true"] .aa-mini-action-btn { font-size: 13.5px; }
 .app[data-touch-ui="true"] .aa-custom-pill { font-size: 11.5px; }
-.app[data-touch-ui="true"] .aa-switch-to-detail-btn { font-size: 14px; }
 .app[data-touch-ui="true"] .aa-detail-group-title { font-size: 13px; }
 .app[data-touch-ui="true"] .aa-detail-sub { font-size: 12px; }
 
-.aa-section-error {
-  margin: 0 0 8px;
-  color: var(--danger, #c44);
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}

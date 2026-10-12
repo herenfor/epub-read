@@ -51,7 +51,9 @@ describe("CSD TitleBar 组件与样式契约（Zen UI Packet A）", () => {
       expect(htmlReader).toContain("Moby-Dick");
       expect(htmlReader).toContain("Chapter 1");
       expect(htmlReader).toContain("titlebar-back-btn");
-      expect(htmlReader).toContain("titlebar-sidebar-btn");
+      // One entry to the sidebar: the "目录" button on the left.
+      expect(htmlReader).toContain("titlebar-toc-btn");
+      expect(htmlReader).not.toContain("titlebar-sidebar-btn");
       expect(htmlReader).toContain("titlebar-appearance-btn");
       expect(htmlReader).toContain("titlebar-search-btn");
       expect(htmlReader).toContain("titlebar-bookmark-btn");
@@ -146,13 +148,14 @@ describe("CSD TitleBar 组件与样式契约（Zen UI Packet A）", () => {
       expect(html).toContain("titlebar-toc-btn");
       expect(html).toContain("目录");
       expect(html).toContain("titlebar-pin-btn");
-      expect(html).toContain("titlebar-progress-pill is-clickable");
+      expect(html).toContain("titlebar-progress-pill");
+      expect(html).not.toContain("is-clickable");
     } finally {
       vi.unstubAllGlobals();
     }
   });
 
-  it("阅读进度胶囊是真实按钮且不传播窗口拖拽属性", () => {
+  it("阅读进度胶囊只做展示，拖动它也能移动窗口", () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
     try {
       const html = renderToStaticMarkup(createElement(TitleBar, {
@@ -164,9 +167,10 @@ describe("CSD TitleBar 组件与样式契约（Zen UI Packet A）", () => {
         chapterIndex: 0,
         totalChapters: 10,
       }));
-      const pill = html.match(/<button[^>]*titlebar-progress-pill[\s\S]*?<\/button>/);
+      expect(html).not.toMatch(/<button[^>]*titlebar-progress-pill/);
+      const pill = html.match(/<div[^>]*titlebar-progress-pill[^>]*>/);
       expect(pill).not.toBeNull();
-      expect(pill![0]).not.toContain("data-tauri-drag-region");
+      expect(pill![0]).toContain("data-tauri-drag-region");
       expect(html).toContain('titlebar-drag-area titlebar-middle" data-tauri-drag-region');
     } finally {
       vi.unstubAllGlobals();

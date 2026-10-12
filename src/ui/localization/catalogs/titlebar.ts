@@ -11,7 +11,6 @@ export const titlebar = defineMessages("titlebar", {
   "titlebar.sidebar": "切换侧边栏",
   "titlebar.toc": { zh: "目录", note: "Short button text.", max: 8 },
   "titlebar.appName": { zh: "EPUB 阅读器", note: "Shown when a book has no title." },
-  "titlebar.sidebar.tipCompact": { zh: "切换侧边栏目录与书签 (Ctrl+T)", note: "Tooltip; keep the shortcut." },
   "titlebar.appearance": "外观与排版设置",
   "titlebar.search.tip": { zh: "搜索正文 (Ctrl+F)", note: "Tooltip; keep the shortcut." },
   "titlebar.search": "搜索正文",
@@ -37,7 +36,6 @@ export const titlebar = defineMessages("titlebar", {
   "titlebar.restore": "向下还原",
   "titlebar.maximize": "最大化",
   "titlebar.close": "关闭",
-  "titlebar.progress.toggleToc": "切换章节目录",
   "titlebar.progress.tip": { zh: "阅读进度：{percent}% (点击切换章节目录)", note: "Tooltip on the progress pill." },
   "titlebar.progress.chapter": { zh: "第 {current}/{total} 章", note: "Chapter position badge, e.g. 'Ch. 3/30'.", max: 14 },
 });
