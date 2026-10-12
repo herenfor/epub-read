@@ -30,6 +30,11 @@
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.07);
 }
 
+/* PC 浮层侧栏打开时，标题栏留在遮罩之上：点 Aa 或搜索直接换成那个面板，不必先关侧栏。 */
+.app:has(.sidebar-drawer.is-overlay.is-open:not(.is-compact)) .titlebar-reader {
+  z-index: 195;
+}
+
 /* 沉浸隐藏模式（Zen Mode）：向上滑出淡隐，零重排 */
 .titlebar.zen-hidden {
   transform: translateY(-100%);

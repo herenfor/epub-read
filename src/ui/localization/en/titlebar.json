@@ -1,7 +1,7 @@
 {
   "titlebar.tools.hide": "Hide reading tools",
   "titlebar.tools.show": "Show reading tools",
-  "titlebar.backToShelf.tip": "Back to Library (Esc)",
+  "titlebar.backToShelf.tip": "Back to Library",
   "titlebar.backToShelf": "Back to Library",
   "titlebar.shelf": "Library",
   "titlebar.sidebar.tip": "Toggle sidebar (Ctrl+T)",

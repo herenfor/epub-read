@@ -1,4 +1,4 @@
-import React, { useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { SIDEBAR_TABS, createSidebarNavigationMemory, installSidebarSwipe, type SidebarNavigationMemory, type SidebarSwipeMotion } from "./sidebarSwipe";
 import { useMenuClose } from "./menuMotion";
 import type { TocNode } from "../core/types";
@@ -190,6 +190,11 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
   const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
   const [tocFilter, setTocFilter] = useState(navigationMemory?.tocFilter ?? "");
   const { isClosing, requestClose, cancelClose } = useMenuClose(onClose, open);
+  // 浮层模式打开时焦点进入抽屉；停靠模式是阅读的一部分，不抢焦点。
+  const drawerRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (open && mode === "overlay") drawerRef.current?.focus({ preventScroll: true });
+  }, [open, mode]);
   const localMemory = useRef(createSidebarNavigationMemory());
   const memory = navigationMemory ?? localMemory.current;
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -291,6 +296,8 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
       )}
 
       <aside
+        ref={drawerRef}
+        tabIndex={-1}
         className={`sidebar-drawer ${mode === "docked" ? "is-docked" : "is-overlay"} side-${side}${compact ? " is-compact" : ""}${open ? " is-open" : " is-closed"}${isClosing ? " is-closing" : ""}`}
         role="region"
         aria-label={t("sidebar.drawer")}
