@@ -1,7 +1,7 @@
 {
   "fonts.dialog": "Font Settings",
   "fonts.title": "Font Settings",
-  "fonts.close": "Close font settings",
+  "fonts.back": "Back to Appearance",
   "fonts.current": "Current font: {name}",
   "fonts.followBook": "Follow Book",
   "fonts.override": "Override Book Fonts",

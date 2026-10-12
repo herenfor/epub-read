@@ -276,6 +276,7 @@ import {
   openReaderPanel,
   openReaderTransient,
   setMenuSubview,
+  stepBackFromMenuSubview,
   type ReaderForeground,
   type ReaderPanelId,
   type NoteComposerDraft,
@@ -1454,6 +1455,12 @@ export default function App() {
     const current = foregroundRef.current;
     if (current.kind === "modal" && current.modal === "note-composer") {
       requestCloseForeground();
+      return;
+    }
+    // Back/Esc on an Aa sub-page returns to the Aa main page; only there does it close Aa.
+    const stepped = stepBackFromMenuSubview(current);
+    if (stepped) {
+      setForeground(stepped);
       return;
     }
     if (isSidebarOpen) {

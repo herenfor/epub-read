@@ -42,6 +42,17 @@ export function setMenuSubview(
   return { kind: "panel", panel: "menu", view };
 }
 
+/**
+ * One step of Back/Esc inside Aa: a sub-page (fonts, display) returns to the
+ * Aa main page instead of closing Aa. Null means "nothing to step back to";
+ * the caller closes the surface as usual.
+ */
+export function stepBackFromMenuSubview(current: ReaderForeground): ReaderForeground | null {
+  return current.kind === "panel" && current.panel === "menu" && current.view !== "main"
+    ? { kind: "panel", panel: "menu", view: "main" }
+    : null;
+}
+
 /** Selection and footnotes are mutually exclusive and replace ordinary panels. */
 export function openReaderTransient(
   current: ReaderForeground,

@@ -3161,6 +3161,17 @@ select option {
   margin-bottom: 6px;
 }
 
+/* 字体页是 Aa 的子页：返回箭头在左，标题紧随；把手可下拉返回 Aa 主页。 */
+.font-settings-panel .font-settings-head {
+  justify-content: flex-start;
+  gap: 6px;
+}
+
+.font-settings-panel .font-settings-grip {
+  touch-action: none;
+  cursor: grab;
+}
+
 .font-settings-panel {
   position: fixed;
   bottom: 20px;

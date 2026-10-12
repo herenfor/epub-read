@@ -5,6 +5,7 @@ import {
   openReaderPanel,
   openReaderTransient,
   setMenuSubview,
+  stepBackFromMenuSubview,
   type ReaderForeground,
 } from "./readerForeground";
 
@@ -36,6 +37,15 @@ describe("reader foreground transitions", () => {
   it("models fonts as the menu subview", () => {
     const menu = openReaderPanel(none, "menu");
     expect(setMenuSubview(menu, "fonts")).toEqual({ kind: "panel", panel: "menu", view: "fonts" });
+  });
+
+  it("steps back from an Aa sub-page to the Aa main page, and only from there", () => {
+    const menu = openReaderPanel(none, "menu");
+    expect(stepBackFromMenuSubview(setMenuSubview(menu, "fonts"))).toEqual(menu);
+    expect(stepBackFromMenuSubview(setMenuSubview(menu, "extras"))).toEqual(menu);
+    expect(stepBackFromMenuSubview(menu)).toBeNull();
+    expect(stepBackFromMenuSubview(openReaderPanel(none, "search"))).toBeNull();
+    expect(stepBackFromMenuSubview(none)).toBeNull();
   });
 
   it("replaces panels when a transient appears and keeps transients exclusive", () => {
