@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { Theme } from "../render/settings";
+import { READER_PALETTES } from "../config/readerPalette";
 import { getRuntimeCapabilities } from "../platform/runtimeCapabilities";
 import { AboutInfo } from "./AboutInfo";
 import { CacheStoragePanel } from "./CacheStoragePanel";
@@ -213,7 +214,12 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
       <span>{t("shelfMenu.theme")}</span>
       <div className="shelf-theme-swatches" role="radiogroup" aria-label={t("shelfMenu.theme")}>
         {THEMES.map((theme) => <button key={theme.value} type="button" role="radio" aria-checked={props.theme === theme.value}
-          className={`shelf-theme-swatch${props.theme === theme.value ? " active" : ""}`} data-swatch={theme.value}
+          className={`shelf-theme-swatch${props.theme === theme.value ? " active" : ""}`}
+          style={{
+            "--swatch-bg": READER_PALETTES[theme.value].background,
+            "--swatch-fg": READER_PALETTES[theme.value].uiForeground,
+            "--swatch-border": READER_PALETTES[theme.value].previewBorder,
+          } as CSSProperties}
           disabled={busy} onClick={() => props.onThemeChange(theme.value)}>
           <span className="shelf-theme-swatch-sample" aria-hidden="true">Aa</span>
           <span>{t(theme.label)}</span>

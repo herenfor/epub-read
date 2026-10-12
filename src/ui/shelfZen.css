@@ -1601,8 +1601,6 @@
   animation: shelf-modal-dialog-out var(--menu-close) cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
-
-
 @keyframes shelf-modal-backdrop-in {
   from { opacity: 0; }
   to { opacity: 1; }
@@ -2076,8 +2074,6 @@
   }
 }
 
-
-
 /* 触摸拖书时的文件夹落点条：贴顶浮出，横向可滚，悬停的文件夹高亮。 */
 .shelf-drag-folder-strip {
   position: fixed;
@@ -2228,8 +2224,7 @@
 
 /* 触屏点按后 :hover 会粘住（例如从系统文件选择器切回来仍高亮），只给真正可悬停的指针。 */
 @media (hover: hover) and (pointer: fine) {
-  .shelf-import-menu-item:hover,
-  .shelf-drawer-row:hover:not(:disabled) {
+  .shelf-import-menu-item:hover {
     background: var(--menu-surface-hover, var(--btn-hover));
   }
 }
@@ -2239,8 +2234,7 @@
   outline: none;
 }
 
-.shelf-import-menu-icon,
-.shelf-drawer-row-icon {
+.shelf-import-menu-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2252,28 +2246,24 @@
   color: var(--accent);
 }
 
-.shelf-import-menu-icon .shelf-svg-icon,
-.shelf-drawer-row-icon .shelf-svg-icon {
+.shelf-import-menu-icon .shelf-svg-icon {
   width: 18px;
   height: 18px;
 }
 
-.shelf-import-menu-text,
-.shelf-drawer-row-text {
+.shelf-import-menu-text {
   display: flex;
   flex-direction: column;
   gap: 2px;
   min-width: 0;
 }
 
-.shelf-import-menu-text strong,
-.shelf-drawer-row-text strong {
+.shelf-import-menu-text strong {
   font-size: 14px;
   font-weight: 600;
 }
 
-.shelf-import-menu-text small,
-.shelf-drawer-row-text small {
+.shelf-import-menu-text small {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.4;
@@ -2295,64 +2285,6 @@
 /* =========================================================================
  * 设置抽屉：分组列表（图标 + 标题 + 一句说明 + 箭头）
  * ========================================================================= */
-.shelf-drawer-list {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  border-radius: 14px;
-  border: 1px solid color-mix(in srgb, var(--panel-border) 70%, transparent);
-  background: var(--bg);
-}
-
-.shelf-drawer-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  min-height: 58px;
-  padding: 8px 12px;
-  border: 0;
-  background: transparent;
-  color: var(--fg);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: background-color var(--motion-fast, 140ms) ease;
-}
-
-.shelf-drawer-row + .shelf-drawer-row {
-  border-top: 1px solid color-mix(in srgb, var(--panel-border) 60%, transparent);
-}
-
-.shelf-drawer-row:focus-visible {
-  background: var(--menu-surface-hover, var(--btn-hover));
-  outline: none;
-}
-
-.shelf-drawer-row:active:not(:disabled) {
-  background: var(--menu-surface, var(--btn-hover));
-}
-
-.shelf-drawer-row:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
-.shelf-drawer-row.is-neutral .shelf-drawer-row-icon {
-  background: color-mix(in srgb, var(--fg) 7%, transparent);
-  color: color-mix(in srgb, var(--fg) 78%, transparent);
-}
-
-.shelf-drawer-row-chevron {
-  display: inline-flex;
-  margin-left: auto;
-  color: color-mix(in srgb, var(--muted) 80%, transparent);
-}
-
-.shelf-drawer-row-chevron .shelf-svg-icon {
-  width: 16px;
-  height: 16px;
-}
 
 /* =========================================================================
  * 批量操作：分组细线；平板触屏改为“图标在上、短字在下”
