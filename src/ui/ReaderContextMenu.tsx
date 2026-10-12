@@ -130,7 +130,8 @@ export function ReaderContextMenu(props: ReaderContextMenuProps) {
       onPointerDown={handlePointerDown}
     >
       <button type="button" role="menuitem" onClick={copy}>{t("readerMisc.copy")}</button>
-      {props.onCopyOriginal && (
+      {/* Only when the shown text differs from the book (e.g. after character conversion). */}
+      {props.onCopyOriginal && selection.originalText && selection.originalText !== selection.text && (
         <button type="button" role="menuitem" onClick={() => {
           if (selection.originalText) props.onCopyOriginal?.(selection.originalText);
           props.onClose();
