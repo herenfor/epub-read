@@ -6677,6 +6677,7 @@ export default function App() {
                   nativeDragActive={fontNativeDragActive}
                   onClose={() => setForeground((current) => setMenuSubview(current, "main"))}
                 /> : <AaPopover
+                  phoneLayout={phoneChrome}
                   fontSize={settings.fontSizePx}
                   onFontSizeChange={(v) =>
                     setSettings((s2) => {

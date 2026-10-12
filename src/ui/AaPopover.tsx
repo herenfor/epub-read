@@ -108,6 +108,8 @@ export interface AaPopoverProps {
   onToggleLog?: () => void;
   issueCount?: number;
   onOpenFile?: () => void;
+  /** Phone bottom sheet: line height and presentation move up into the half-height first screen. */
+  phoneLayout?: boolean;
 
   onClose: () => void;
 }
@@ -191,6 +193,7 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
   onPresentationChange,
   turnAnimation = "slide",
   onTurnAnimationChange,
+  phoneLayout = false,
   forceHorizontal = false,
   onForceHorizontalChange,
   preloadNextChapter = false,
@@ -378,6 +381,205 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
     contentDragEnabled: () => Boolean(dialogRef.current?.closest('.app[data-mobile-chrome="true"][data-layout="compact"]')),
   });
 
+  // 常用设置的各行：桌面按“主题与字号 / 排版与版式”分组；手机半高一屏
+  // 先放主题、字号、行高、排版，字体和显示这类要点进下一页的往后放。
+  const themeRow = (
+    <div className="aa-section aa-theme-section" role="radiogroup" aria-label={t("aa.themes")}>
+      {THEME_PALETTES.map((palette) => {
+        const active = theme === palette.id;
+        return (
+          <button
+            key={palette.id}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            className={`aa-theme-card${active ? " active" : ""}`}
+            style={{
+              backgroundColor: palette.bg,
+              color: palette.fg,
+              borderColor: active ? "var(--accent, #6366f1)" : palette.border,
+            }}
+            onClick={() => onThemeChange(palette.id)}
+            title={t("aa.theme.tip", { name: t(palette.nameKey) })}
+          >
+            <span className="aa-theme-letter">Aa</span>
+            <span className="aa-theme-label">{t(palette.nameKey)}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+  const fontSizeRow = (
+    <div className="aa-section aa-control-row">
+      <span className="aa-section-label">{t("aa.fontSize")}</span>
+      <div className="aa-stepper-capsule">
+        <button
+          type="button"
+          className="aa-step-btn"
+          onClick={onFontDec}
+          disabled={fontSize <= 12}
+          title={t("aa.fontSize.dec.tip")}
+          aria-label={t("aa.fontSize.dec")}
+        >
+          <span className="aa-stepper-text-small">{t("aa.fontSize.small")}</span>
+        </button>
+        <span className="aa-stepper-val" title={t("aa.fontSize.current", { px: fontSize })}>
+          {fontSize}px
+        </span>
+        <button
+          type="button"
+          className="aa-step-btn"
+          onClick={onFontInc}
+          disabled={fontSize >= 32}
+          title={t("aa.fontSize.inc.tip")}
+          aria-label={t("aa.fontSize.inc")}
+        >
+          <span className="aa-stepper-text-large">{t("aa.fontSize.large")}</span>
+        </button>
+      </div>
+    </div>
+  );
+  const fontAndDisplayRows = (
+    <>
+      <div className="aa-section aa-control-row">
+        <span className="aa-section-label">{t("aa.font")}</span>
+        <button
+          type="button"
+          className="aa-font-trigger"
+          onClick={() => onOpenFontSettings()}
+          title={t("aa.font.tip")}
+        >
+          <span className="aa-font-name">
+            {customFontName || t("aa.font.default")}
+          </span>
+          <ChevronRightIcon size={13} className="aa-chevron" />
+        </button>
+      </div>
+
+      {onOpenDisplaySettings && (
+        <div className="aa-section aa-control-row">
+          <span className="aa-section-label">{t("aa.display")}</span>
+          <button
+            type="button"
+            className="aa-font-trigger"
+            onClick={onOpenDisplaySettings}
+            title={t("aa.display.tip")}
+          >
+            <span className="aa-font-name">{t("aa.display.open")}</span>
+            <ChevronRightIcon size={13} className="aa-chevron" />
+          </button>
+        </div>
+      )}
+    </>
+  );
+  const lineHeightRow = (
+    <div className="aa-section aa-control-row">
+      <span className="aa-section-label">
+        {t("aa.lineHeight")}
+        {currentLineHeightLevel === null && lineHeight !== undefined && (
+          <span className="aa-custom-pill" title={t("aa.lineHeight.custom")}>
+            {lineHeight.toFixed(1)}
+          </span>
+        )}
+      </span>
+      <div className="aa-segmented-capsule" role="group" aria-label={t("aa.lineHeight")}>
+        {LINE_HEIGHT_PRESETS.map((preset) => (
+          <button
+            key={preset.label}
+            type="button"
+            className={`aa-segmented-btn${currentLineHeightLevel === preset.label ? " active" : ""}`}
+            onClick={() => onLineHeightChange(preset.value)}
+          >
+            {t(preset.labelKey)}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+  const marginsRow = onPageMarginsChange && (
+    <div className="aa-section aa-control-row">
+      <span className="aa-section-label">
+        {t("aa.margins")}
+        {currentMarginLevel === null && (
+          <span className="aa-custom-pill" title={t("aa.margins.custom.tip")}>
+            {t("aa.margins.custom")}
+          </span>
+        )}
+      </span>
+      <div className="aa-segmented-capsule" role="group" aria-label={t("aa.margins.group")}>
+        <button
+          type="button"
+          className={`aa-segmented-btn${currentMarginLevel === "自动" ? " active" : ""}`}
+          onClick={() => onPageMarginsChange({})}
+        >
+          {t("aa.margin.auto")}
+        </button>
+        {MARGIN_PRESETS.map((preset) => (
+          <button
+            key={preset.label}
+            type="button"
+            className={`aa-segmented-btn${currentMarginLevel === preset.label ? " active" : ""}`}
+            onClick={() => onPageMarginsChange(preset.margins)}
+          >
+            {t(preset.labelKey)}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+  const presentationRows = (
+    <>
+      <div className="aa-section aa-control-row">
+        <span className="aa-section-label">{t("aa.presentation")}</span>
+        <div className="aa-segmented-capsule" role="radiogroup" aria-label={t("aa.presentation.group")}>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={presentation === "single"}
+            className={`aa-segmented-btn${presentation === "single" ? " active" : ""}`}
+            onClick={() => handlePresentationClick("single")}
+          >
+            {t("aa.presentation.single")}
+          </button>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={presentation === "spread"}
+            className={`aa-segmented-btn${presentation === "spread" ? " active" : ""}`}
+            onClick={() => handlePresentationClick("spread")}
+          >
+            {t("aa.presentation.spread")}
+          </button>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={presentation === "scroll"}
+            className={`aa-segmented-btn${presentation === "scroll" ? " active" : ""}`}
+            onClick={() => handlePresentationClick("scroll")}
+          >
+            {t("aa.presentation.scroll")}
+          </button>
+        </div>
+      </div>
+      {presentation === "spread" && effectiveColumns === 1 && (
+        <div
+          className="aa-section-note"
+          role="status"
+          style={{
+            fontSize: "11px",
+            color: "var(--text-secondary, #888)",
+            marginTop: "-6px",
+            marginBottom: "4px",
+            textAlign: "right",
+            paddingRight: "4px",
+          }}
+        >
+          {t("aa.presentation.narrow")}
+        </div>
+      )}
+    </>
+  );
+
   return (
     <>
       <div
@@ -435,203 +637,29 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
            * ========================================================= */}
           {activeTab === "quick" && (
             <>
-              {/* Group 1: 主题与字号 */}
-              <div className="aa-group-title">{t("aa.group.themeSize")}</div>
-
-              {/* Row 1: 4 款预设主题色块 */}
-              <div className="aa-section aa-theme-section" role="radiogroup" aria-label={t("aa.themes")}>
-                {THEME_PALETTES.map((palette) => {
-                  const active = theme === palette.id;
-                  return (
-                    <button
-                      key={palette.id}
-                      type="button"
-                      role="radio"
-                      aria-checked={active}
-                      className={`aa-theme-card${active ? " active" : ""}`}
-                      style={{
-                        backgroundColor: palette.bg,
-                        color: palette.fg,
-                        borderColor: active ? "var(--accent, #6366f1)" : palette.border,
-                      }}
-                      onClick={() => onThemeChange(palette.id)}
-                      title={t("aa.theme.tip", { name: t(palette.nameKey) })}
-                    >
-                      <span className="aa-theme-letter">Aa</span>
-                      <span className="aa-theme-label">{t(palette.nameKey)}</span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Row 2: 字号步进调节 */}
-              <div className="aa-section aa-control-row">
-                <span className="aa-section-label">{t("aa.fontSize")}</span>
-                <div className="aa-stepper-capsule">
-                  <button
-                    type="button"
-                    className="aa-step-btn"
-                    onClick={onFontDec}
-                    disabled={fontSize <= 12}
-                    title={t("aa.fontSize.dec.tip")}
-                    aria-label={t("aa.fontSize.dec")}
-                  >
-                    <span className="aa-stepper-text-small">{t("aa.fontSize.small")}</span>
-                  </button>
-                  <span className="aa-stepper-val" title={t("aa.fontSize.current", { px: fontSize })}>
-                    {fontSize}px
-                  </span>
-                  <button
-                    type="button"
-                    className="aa-step-btn"
-                    onClick={onFontInc}
-                    disabled={fontSize >= 32}
-                    title={t("aa.fontSize.inc.tip")}
-                    aria-label={t("aa.fontSize.inc")}
-                  >
-                    <span className="aa-stepper-text-large">{t("aa.fontSize.large")}</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Row 3: 字体选择 */}
-              <div className="aa-section aa-control-row">
-                <span className="aa-section-label">{t("aa.font")}</span>
-                <button
-                  type="button"
-                  className="aa-font-trigger"
-                  onClick={() => onOpenFontSettings()}
-                  title={t("aa.font.tip")}
-                >
-                  <span className="aa-font-name">
-                    {customFontName || t("aa.font.default")}
-                  </span>
-                  <ChevronRightIcon size={13} className="aa-chevron" />
-                </button>
-              </div>
-
-              {onOpenDisplaySettings && (
-                <div className="aa-section aa-control-row">
-                  <span className="aa-section-label">{t("aa.display")}</span>
-                  <button
-                    type="button"
-                    className="aa-font-trigger"
-                    onClick={onOpenDisplaySettings}
-                    title={t("aa.display.tip")}
-                  >
-                    <span className="aa-font-name">{t("aa.display.open")}</span>
-                    <ChevronRightIcon size={13} className="aa-chevron" />
-                  </button>
-                </div>
-              )}
-
-              {/* Group 2: 排版与版式 */}
-              <div className="aa-group-title">{t("aa.group.layout")}</div>
-
-              {/* Row 4: 行高与页边距 (双向联动，若处于自定义值则清晰提示) */}
-              <div className="aa-section aa-control-row">
-                <span className="aa-section-label">
-                  {t("aa.lineHeight")}
-                  {currentLineHeightLevel === null && lineHeight !== undefined && (
-                    <span className="aa-custom-pill" title={t("aa.lineHeight.custom")}>
-                      {lineHeight.toFixed(1)}
-                    </span>
-                  )}
-                </span>
-                <div className="aa-segmented-capsule" role="group" aria-label={t("aa.lineHeight")}>
-                  {LINE_HEIGHT_PRESETS.map((preset) => (
-                    <button
-                      key={preset.label}
-                      type="button"
-                      className={`aa-segmented-btn${currentLineHeightLevel === preset.label ? " active" : ""}`}
-                      onClick={() => onLineHeightChange(preset.value)}
-                    >
-                      {t(preset.labelKey)}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {onPageMarginsChange && (
-                <div className="aa-section aa-control-row">
-                  <span className="aa-section-label">
-                    {t("aa.margins")}
-                    {currentMarginLevel === null && (
-                      <span className="aa-custom-pill" title={t("aa.margins.custom.tip")}>
-                        {t("aa.margins.custom")}
-                      </span>
-                    )}
-                  </span>
-                  <div className="aa-segmented-capsule" role="group" aria-label={t("aa.margins.group")}>
-                    <button
-                      type="button"
-                      className={`aa-segmented-btn${currentMarginLevel === "自动" ? " active" : ""}`}
-                      onClick={() => onPageMarginsChange({})}
-                    >
-                      {t("aa.margin.auto")}
-                    </button>
-                    {MARGIN_PRESETS.map((preset) => (
-                      <button
-                        key={preset.label}
-                        type="button"
-                        className={`aa-segmented-btn${currentMarginLevel === preset.label ? " active" : ""}`}
-                        onClick={() => onPageMarginsChange(preset.margins)}
-                      >
-                        {t(preset.labelKey)}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Row 5: 唯一阅读方式选项 单页 | 双页 | 滚动 */}
-              <div className="aa-section aa-control-row">
-                <span className="aa-section-label">{t("aa.presentation")}</span>
-                <div className="aa-segmented-capsule" role="radiogroup" aria-label={t("aa.presentation.group")}>
-                  <button
-                    type="button"
-                    role="radio"
-                    aria-checked={presentation === "single"}
-                    className={`aa-segmented-btn${presentation === "single" ? " active" : ""}`}
-                    onClick={() => handlePresentationClick("single")}
-                  >
-                    {t("aa.presentation.single")}
-                  </button>
-                  <button
-                    type="button"
-                    role="radio"
-                    aria-checked={presentation === "spread"}
-                    className={`aa-segmented-btn${presentation === "spread" ? " active" : ""}`}
-                    onClick={() => handlePresentationClick("spread")}
-                  >
-                    {t("aa.presentation.spread")}
-                  </button>
-                  <button
-                    type="button"
-                    role="radio"
-                    aria-checked={presentation === "scroll"}
-                    className={`aa-segmented-btn${presentation === "scroll" ? " active" : ""}`}
-                    onClick={() => handlePresentationClick("scroll")}
-                  >
-                    {t("aa.presentation.scroll")}
-                  </button>
-                </div>
-              </div>
-              {presentation === "spread" && effectiveColumns === 1 && (
-                <div
-                  className="aa-section-note"
-                  role="status"
-                  style={{
-                    fontSize: "11px",
-                    color: "var(--text-secondary, #888)",
-                    marginTop: "-6px",
-                    marginBottom: "4px",
-                    textAlign: "right",
-                    paddingRight: "4px",
-                  }}
-                >
-                  {t("aa.presentation.narrow")}
-                </div>
+              {phoneLayout ? (
+                <>
+                  <div className="aa-group-title">{t("aa.group.themeSize")}</div>
+                  {themeRow}
+                  {fontSizeRow}
+                  <div className="aa-group-title">{t("aa.group.layout")}</div>
+                  {lineHeightRow}
+                  {presentationRows}
+                  {marginsRow}
+                  <div className="aa-group-title">{t("aa.group.fontDisplay")}</div>
+                  {fontAndDisplayRows}
+                </>
+              ) : (
+                <>
+                  <div className="aa-group-title">{t("aa.group.themeSize")}</div>
+                  {themeRow}
+                  {fontSizeRow}
+                  {fontAndDisplayRows}
+                  <div className="aa-group-title">{t("aa.group.layout")}</div>
+                  {lineHeightRow}
+                  {marginsRow}
+                  {presentationRows}
+                </>
               )}
 
               {/* Group 3: 翻页与高级选项 */}
