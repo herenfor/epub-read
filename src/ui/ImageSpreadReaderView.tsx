@@ -5,6 +5,7 @@ import type { ReaderHandle, ReaderViewProps } from "./ReaderView";
 import type { ImageChapterSpread } from "./imageChapterSpreads";
 import { EdgeTurnZone } from "./EdgeTurnZone";
 import { edgeTurnZoneSpecs, ReaderTurnOwnerContext, useReaderTapRouting } from "./readerTapRouting";
+import { WheelTurnAccumulator } from "./turnIntent";
 
 interface Props extends ReaderViewProps {
   spread: ImageChapterSpread;
@@ -19,6 +20,7 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
   const rightHandle = useRef<ReaderHandle>(null);
   const states = useRef(new Map<number, ChapterState>());
   const displayed = useRef(new Set<number>());
+  const outerWheel = useRef(new WheelTurnAccumulator());
   const [ready, setReady] = useState(false);
   const latest = useRef(props);
   latest.current = props;
@@ -135,6 +137,23 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
     </div>;
   };
   return <div className="reader-image-spread" data-image-spread-ready={ready}
+    onWheel={(event) => {
+      // A leaf's ReaderView already owns its wheel events. Only fill the
+      // blank leaf, gutter and outer-band paths without counting input twice.
+      if (event.defaultPrevented || event.ctrlKey ||
+        (event.target instanceof Element && event.target.closest(".reader"))) return;
+      if (props.inputPaused || !ready) {
+        outerWheel.current.reset();
+        return;
+      }
+      const delta = event.deltaMode === 1 ? event.deltaY * 28
+        : event.deltaMode === 2 ? event.deltaY * event.currentTarget.clientHeight
+        : event.deltaY;
+      const direction = outerWheel.current.push(delta);
+      if (direction === null) return;
+      event.preventDefault();
+      turn(direction);
+    }}
     style={{ gap: props.gap, paddingLeft: props.settings.pageMarginsPx?.left ?? 0,
       paddingRight: props.settings.pageMarginsPx?.right ?? 0 }}>
     <ReaderTurnOwnerContext.Provider value={turnOwner}>

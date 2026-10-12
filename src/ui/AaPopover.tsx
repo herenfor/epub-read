@@ -715,7 +715,7 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
                     )}
 
                     <div className="aa-advanced-row">
-                      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                      <div className="aa-toggle-text">
                         <span>{t("aa.motion")}</span>
                         <span className="aa-detail-sub">{t("aa.motion.hint")}</span>
                       </div>
@@ -731,7 +731,7 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
 
                     {onPreloadNextChapterChange && (
                       <div className="aa-advanced-row">
-                        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                        <div className="aa-toggle-text">
                           <span>{t("aa.preload")}</span>
                           <span style={{ fontSize: 11, color: "var(--color-error, #e53935)", lineHeight: 1.2 }}>
                             {t("aa.preload.warning")}
@@ -1252,7 +1252,7 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
 
               {/* 简化界面动画（低特效）：与书架“界面动画”同一设置 */}
               <div className="aa-section aa-control-row aa-toggle-row">
-                <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                <div className="aa-toggle-text">
                   <span className="aa-section-label">{t("aa.motion")}</span>
                   <span className="aa-detail-sub">{t("aa.motion.hint")}</span>
                 </div>
@@ -1269,7 +1269,7 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
               {/* 高性能预加载 */}
               {onPreloadNextChapterChange && (
                 <div className="aa-section aa-control-row aa-toggle-row">
-                  <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                  <div className="aa-toggle-text">
                     <span className="aa-section-label">{t("aa.preload")}</span>
                     <span style={{ fontSize: 11, color: "var(--color-error, #e53935)", lineHeight: 1.2 }}>
                       {t("aa.preload.warning")}
