@@ -63,6 +63,14 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Touch drawers already use an opaque panel surface. Blurring the reader
+   behind that surface adds compositor work throughout the slide without
+   changing its appearance. Keep the transform animation on the browser. */
+.app[data-touch-ui="true"] .sidebar-drawer {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
 /* 浮动微浮岛模式（Overlay - 用户原版设计弹窗模式） */
 .sidebar-drawer.is-overlay {
   position: fixed;
