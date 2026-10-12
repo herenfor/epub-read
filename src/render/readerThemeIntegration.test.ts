@@ -430,6 +430,53 @@ describe("主题原位更新与阅读宿主集成契约", () => {
     expect(desiredSettings.fontSizePx).toBe(26);
   });
 
+  it.each(["light", "dark"] as const)("加载中改回已提交字号仍实际重排，最后主题为 %s", async (theme) => {
+    const coordinator = new PagedLayoutTransactionCoordinator();
+    const baseline = { ...DEFAULT_SETTINGS, fontSizePx: 26, theme: "light" as const };
+    let desired: ReaderSettings = baseline;
+    let loadGeneration = 0;
+    let actualFont = 26;
+    const requestedFonts: number[] = [];
+    let releaseOld!: () => void;
+    const barrier = new Promise<void>((resolve) => { releaseOld = resolve; });
+    const slot: PagedLayoutSlotTarget = {
+      path: "ch1.xhtml",
+      spineIndex: 0,
+      generation: 1,
+      renderSettings: baseline,
+      paginator: {
+        reloadWithSettingsAndWaitForDisplay: async (settings) => {
+          const generation = ++loadGeneration;
+          requestedFonts.push(settings.fontSizePx);
+          if (settings.fontSizePx === 24) await barrier;
+          if (generation !== loadGeneration) return false;
+          actualFont = settings.fontSizePx;
+          return true;
+        },
+        updateTheme: () => true,
+      },
+    };
+    const run = () => coordinator.runTransaction({
+      epoch: coordinator.requestLayoutReload(),
+      slot,
+      isCurrent: () => true,
+      getDesiredSettings: () => desired,
+    });
+
+    desired = { ...baseline, fontSizePx: 24 };
+    const oldRequest = run();
+    desired = { ...baseline, theme };
+    const restored = await run();
+    releaseOld();
+
+    expect(await oldRequest).toBe(false);
+    expect(restored).toBe(true);
+    expect(requestedFonts).toEqual([24, 26]);
+    expect(actualFont).toBe(26);
+    expect(slot.renderSettings.fontSizePx).toBe(26);
+    expect(slot.renderSettings.theme).toBe(theme);
+  });
+
   it("生产协调器事务代次保护：load返回但尚未display-ready或加载失败，不提交实际layout状态 (05点复核追加)", async () => {
     const coordinator = new PagedLayoutTransactionCoordinator();
     const initialSettings: ReaderSettings = { ...DEFAULT_SETTINGS, fontSizePx: 18, theme: "light" };

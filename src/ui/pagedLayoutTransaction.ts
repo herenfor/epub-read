@@ -65,18 +65,10 @@ export class PagedLayoutTransactionCoordinator {
       if (!isCurrent() || this.currentEpoch !== epoch) return false;
       const target = getDesiredSettings();
 
-      // 若设置已完全一致，无需重载
-      if (sameRenderingSettings(slot.renderSettings, target)) return true;
-
-      // 若几何已一致，仅差主题，直接原位更新
-      if (sameLayoutSettings(slot.renderSettings, target)) {
-        if (paginator.updateTheme(target.theme)) {
-          slot.renderSettings = { ...slot.renderSettings, theme: target.theme };
-          onSyncTheme?.(target.theme);
-        }
-        return true;
-      }
-
+      // A layout request must replace any older load, even when it returns to
+      // the last committed settings. That record may describe the document
+      // before an in-flight reload, rather than the document being displayed.
+      // Theme-only requests are handled by the host without entering here.
       // 等待本次事务在 paginator 内部对应代次的最终 display-ready
       const ready = await paginator.reloadWithSettingsAndWaitForDisplay(target);
 
