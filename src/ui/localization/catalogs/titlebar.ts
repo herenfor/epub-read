@@ -4,7 +4,7 @@ import { defineMessages } from "../defineMessages";
 export const titlebar = defineMessages("titlebar", {
   "titlebar.tools.hide": "隐藏阅读工具",
   "titlebar.tools.show": "显示阅读工具",
-  "titlebar.backToShelf.tip": { zh: "返回书架 (Esc)", note: "Tooltip; keep the key name in parentheses." },
+  "titlebar.backToShelf.tip": { zh: "返回书架", note: "Tooltip. Esc does not go back to the library: it only closes panels and leaves fullscreen." },
   "titlebar.backToShelf": "返回书架",
   "titlebar.shelf": { zh: "书架", note: "Short button text next to the back icon.", max: 8 },
   "titlebar.sidebar.tip": { zh: "切换目录与书签侧边栏 (Ctrl+T)", note: "Tooltip; keep the shortcut." },

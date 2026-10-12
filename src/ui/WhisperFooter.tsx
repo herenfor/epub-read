@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { BookOpenIcon, MenuHamburgerIcon, SearchIcon } from "./readerIcons";
 import "./whisperFooter.css";
+import { FOOTER_REVEAL_EDGE_PX, useBottomEdgePointer } from "./readerPointerEdge";
 import {
   displayedScrubRatio,
   labelProgressPct,
@@ -216,6 +217,8 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
 
   const footerRef = useRef<HTMLElement>(null);
   const footerReveal = useDesktopFooterReveal(!mobile && zenMode);
+  // 底部 40px 内移动鼠标即唤出底栏，正文 iframe 上也算（它不把指针事件冒泡给窗口）。
+  useBottomEdgePointer(!mobile && zenMode, FOOTER_REVEAL_EDGE_PX, footerReveal.reveal);
   const trackRef = useRef<HTMLDivElement>(null);
   const pointerIdRef = useRef<number | null>(null);
 

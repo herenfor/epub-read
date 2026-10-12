@@ -15,6 +15,11 @@
   animation: reader-panel-fade-out var(--menu-close) var(--ui-ease) forwards;
 }
 
+/* The panel itself takes focus on open; only its controls show a focus ring. */
+.aa-popover:focus {
+  outline: none;
+}
+
 .aa-popover {
   position: fixed;
   top: 44px;

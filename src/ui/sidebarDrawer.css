@@ -78,6 +78,10 @@
   animation: panel-float-out-right var(--menu-close) var(--ui-ease-panel-exit) forwards;
 }
 
+.sidebar-drawer:focus {
+  outline: none;
+}
+
 .sidebar-drawer {
   width: min(360px, calc(100vw - 28px));
   max-width: 100%;

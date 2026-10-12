@@ -6377,6 +6377,9 @@ export default function App() {
 
       // 指针位于交互式浮层（脚注弹窗等）上时不翻页，滚轮/按钮交给浮层自身处理
       if (overlayHoverRef.current) return;
+      // 面板、浮层抽屉或书签菜单打开时，键盘归最上层：方向键和翻页键不在背后翻页。
+      // 停靠的侧栏不算前景，照常翻页。
+      if (st.isReaderPanelOpen || st.bookmarkMenuOpen) return;
       if (e.key === "ArrowRight" || e.key === "PageDown" || e.key === " ") {
         e.preventDefault();
         readerRef.current?.nextPage();

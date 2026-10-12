@@ -1,5 +1,5 @@
 import { READER_PALETTES } from "../config/readerPalette";
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useMenuClose } from "./menuMotion";
 import { useUiMotion } from "./motionPreference";
 import type { Theme, TurnAnimation } from "../render/settings";
@@ -360,6 +360,12 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
     }
   };
 
+  // 打开即把焦点交给面板：Tab 从面板内开始，方向键不再落到背后的正文。
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    dialogRef.current?.focus({ preventScroll: true });
+  }, []);
+
   return (
     <>
       <div
@@ -368,8 +374,10 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
         aria-hidden="true"
       />
       <div
+        ref={dialogRef}
         className={`aa-popover${isClosing ? " is-closing" : ""}`}
         role="dialog"
+        tabIndex={-1}
         aria-label={t("aa.dialog")}
       >
         {/* 头部：双模分段 Tab 切换与关闭按键 */}
