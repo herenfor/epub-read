@@ -25,7 +25,7 @@
   "shelfSettings.filter.clearDimension": "Clear {label}",
   "shelfSettings.filter.morePicked": "{count} more selected · Show",
   "shelfSettings.filter.collapsePicked": "Show less",
-  "shelfSettings.filter.allByCount": "All {label} · by books",
+  "shelfSettings.filter.allByCount": "{label} · all, by book count",
   "shelfSettings.filter.clearAll": "Clear All",
   "shelfSettings.filter.show.other": "Show {count} books",
   "shelfSettings.filter.show.one": "Show {count} book",
@@ -36,6 +36,7 @@
   "shelfSettings.filter.chip.compact": "{label} {count}",
   "shelfSettings.filter.chip.clear": "Clear {label} filter",
   "shelfSettings.search.scope": "Search scope",
+  "shelfSettings.search.scope.titleShort": "Title",
   "shelfSettings.search.results": "Full-text results",
   "shelfSettings.search.manageIndex": "Manage Index",
   "shelfSettings.search.close": "Close full-text search"

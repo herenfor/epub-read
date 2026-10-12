@@ -548,7 +548,7 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-  padding: 0 24px 10px;
+  padding: 0 0 10px;
 }
 
 .shelf-filter-summary-label {
@@ -612,7 +612,7 @@
   .shelf-filter-summary {
     flex-wrap: nowrap;
     overflow-x: auto;
-    padding: 2px 16px 10px;
+    padding: 2px 0 10px;
   }
 
   .shelf-filter-chip {
