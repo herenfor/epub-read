@@ -1741,9 +1741,11 @@ select option {
   padding: 0;
 }
 
-.shelf-quick-search-clear:hover {
-  background: color-mix(in srgb, var(--fg) 10%, transparent);
-  color: var(--fg);
+@media (hover: hover) {
+  .shelf-quick-search-clear:hover {
+    background: color-mix(in srgb, var(--fg) 10%, transparent);
+    color: var(--fg);
+  }
 }
 
 .shelf-quick-search-clear .shelf-svg-icon {
@@ -1836,14 +1838,16 @@ select option {
   color: var(--fg);
 }
 
-.shelf-manage-btn:hover:not(:disabled),
-.shelf-selection-toggle-all:hover:not(:disabled),
-.shelf-selection-cancel:hover:not(:disabled),
-.shelf-action-folder:hover:not(:disabled) {
-  background: var(--btn-hover);
-  border-color: color-mix(in srgb, var(--accent) 30%, var(--shelf-card-border));
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+@media (hover: hover) {
+  .shelf-manage-btn:hover:not(:disabled),
+  .shelf-selection-toggle-all:hover:not(:disabled),
+  .shelf-selection-cancel:hover:not(:disabled),
+  .shelf-action-folder:hover:not(:disabled) {
+    background: var(--btn-hover);
+    border-color: color-mix(in srgb, var(--accent) 30%, var(--shelf-card-border));
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  }
 }
 
 .shelf-manage-btn:active:not(:disabled),
@@ -1854,9 +1858,11 @@ select option {
   box-shadow: none;
 }
 
-.shelf-manage-btn:hover:not(:disabled) .shelf-svg-icon {
-  transform: scale(1.08);
-  transition: transform 0.15s ease;
+@media (hover: hover) {
+  .shelf-manage-btn:hover:not(:disabled) .shelf-svg-icon {
+    transform: scale(1.08);
+    transition: transform 0.15s ease;
+  }
 }
 
 /* 主要行动与确认按钮（导入书籍、创建/重命名/移动确认）：主题色实心强调，与全局设计语言保持统一 */
@@ -1868,12 +1874,14 @@ select option {
   font-weight: 550;
 }
 
-.shelf-import-btn:hover:not(:disabled),
-.shelf-confirm-primary:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--accent) 88%, #000);
-  border-color: color-mix(in srgb, var(--accent) 88%, #000);
-  transform: translateY(-1px);
-  box-shadow: 0 3px 12px color-mix(in srgb, var(--accent) 35%, transparent);
+@media (hover: hover) {
+  .shelf-import-btn:hover:not(:disabled),
+  .shelf-confirm-primary:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--accent) 88%, #000);
+    border-color: color-mix(in srgb, var(--accent) 88%, #000);
+    transform: translateY(-1px);
+    box-shadow: 0 3px 12px color-mix(in srgb, var(--accent) 35%, transparent);
+  }
 }
 
 .shelf-import-btn:active:not(:disabled),
@@ -1896,8 +1904,10 @@ select option {
   transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.shelf-import-btn:hover:not(:disabled) .shelf-svg-icon {
-  transform: rotate(90deg) scale(1.1);
+@media (hover: hover) {
+  .shelf-import-btn:hover:not(:disabled) .shelf-svg-icon {
+    transform: rotate(90deg) scale(1.1);
+  }
 }
 
 /* 危险动作按钮（批量删除） */
@@ -1908,11 +1918,13 @@ select option {
   font-weight: 550;
 }
 
-.shelf-selection-delete:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--error) 88%, #000);
-  border-color: color-mix(in srgb, var(--error) 88%, #000);
-  transform: translateY(-1px);
-  box-shadow: 0 3px 12px color-mix(in srgb, var(--error) 35%, transparent);
+@media (hover: hover) {
+  .shelf-selection-delete:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--error) 88%, #000);
+    border-color: color-mix(in srgb, var(--error) 88%, #000);
+    transform: translateY(-1px);
+    box-shadow: 0 3px 12px color-mix(in srgb, var(--error) 35%, transparent);
+  }
 }
 
 .shelf-selection-delete:active:not(:disabled) {
@@ -1924,8 +1936,10 @@ select option {
   transition: transform 0.18s ease;
 }
 
-.shelf-selection-delete:hover:not(:disabled) .shelf-svg-icon {
-  transform: translateY(-1px) scale(1.1);
+@media (hover: hover) {
+  .shelf-selection-delete:hover:not(:disabled) .shelf-svg-icon {
+    transform: translateY(-1px) scale(1.1);
+  }
 }
 
 .shelf-selection-delete:disabled {
@@ -1972,12 +1986,20 @@ select option {
   will-change: transform;
 }
 
-.shelf-menu-btn:hover:not(:disabled),
 .shelf-menu-btn.open {
   border-color: color-mix(in srgb, var(--accent) 30%, var(--shelf-card-border));
   background: var(--btn-hover);
   transform: translateY(-1px);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+@media (hover: hover) {
+  .shelf-menu-btn:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--accent) 30%, var(--shelf-card-border));
+    background: var(--btn-hover);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  }
 }
 
 .shelf-menu-btn:active:not(:disabled) {
@@ -2165,9 +2187,11 @@ select option {
   transform: translateY(-50%);
 }
 
-.shelf-drawer-search-clear:hover {
-  background: var(--btn-hover);
-  color: var(--fg);
+@media (hover: hover) {
+  .shelf-drawer-search-clear:hover {
+    background: var(--btn-hover);
+    color: var(--fg);
+  }
 }
 
 /* =========================================================================
@@ -2220,9 +2244,11 @@ select option {
   transition: background 150ms ease, border-color 150ms ease;
 }
 
-.shelf-drawer-view-shelf-btn:hover {
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-  border-color: var(--accent);
+@media (hover: hover) {
+  .shelf-drawer-view-shelf-btn:hover {
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    border-color: var(--accent);
+  }
 }
 
 .shelf-drawer-search-empty {
@@ -2261,10 +2287,16 @@ select option {
   box-sizing: border-box;
 }
 
-.shelf-drawer-result-item:hover,
 .shelf-drawer-result-item.active {
   background: var(--btn-hover);
   border-color: color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+@media (hover: hover) {
+  .shelf-drawer-result-item:hover {
+    background: var(--btn-hover);
+    border-color: color-mix(in srgb, var(--accent) 25%, transparent);
+  }
 }
 
 .shelf-drawer-result-icon {
@@ -2468,10 +2500,16 @@ select option {
   transition: border-color 0.14s ease, background-color 0.14s ease;
 }
 
-.shelf-all-books:hover,
 .shelf-all-books.expanded {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--panel-border));
   background: var(--btn-hover);
+}
+
+@media (hover: hover) {
+  .shelf-all-books:hover {
+    border-color: color-mix(in srgb, var(--accent) 55%, var(--panel-border));
+    background: var(--btn-hover);
+  }
 }
 
 .shelf-all-books:focus-visible,
@@ -2585,8 +2623,10 @@ select option {
   line-height: normal;
 }
 
-.shelf-filter-section-toggle:hover {
-  color: var(--accent);
+@media (hover: hover) {
+  .shelf-filter-section-toggle:hover {
+    color: var(--accent);
+  }
 }
 
 .shelf-filter-section-body {
@@ -2659,8 +2699,10 @@ select option {
   cursor: pointer;
 }
 
-.shelf-filter-option:hover {
-  background: var(--btn-hover);
+@media (hover: hover) {
+  .shelf-filter-option:hover {
+    background: var(--btn-hover);
+  }
 }
 
 .shelf-filter-option input {
@@ -2754,10 +2796,12 @@ select option {
   transition: transform 0.14s ease, background-color 0.14s ease, border-color 0.14s ease;
 }
 
-.shelf-drawer-actions .tb-btn:hover:not(:disabled) {
-  background: var(--btn-hover);
-  border-color: color-mix(in srgb, var(--accent) 30%, var(--shelf-card-border));
-  transform: translateY(-1px);
+@media (hover: hover) {
+  .shelf-drawer-actions .tb-btn:hover:not(:disabled) {
+    background: var(--btn-hover);
+    border-color: color-mix(in srgb, var(--accent) 30%, var(--shelf-card-border));
+    transform: translateY(-1px);
+  }
 }
 
 @keyframes shelf-drawer-fade-in {
@@ -2947,11 +2991,13 @@ select option {
   line-height: 1;
 }
 
-.shelf-select-btn:hover:not(:disabled) {
-  background: var(--btn-hover);
-  border-color: color-mix(in srgb, var(--accent) 30%, var(--shelf-card-border));
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+@media (hover: hover) {
+  .shelf-select-btn:hover:not(:disabled) {
+    background: var(--btn-hover);
+    border-color: color-mix(in srgb, var(--accent) 30%, var(--shelf-card-border));
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  }
 }
 
 .shelf-select-btn:active:not(:disabled) {
@@ -3061,8 +3107,10 @@ select option {
   transition: background-color 0.12s ease, color 0.12s ease;
 }
 
-.shelf-select-option:hover {
-  background: var(--btn-hover);
+@media (hover: hover) {
+  .shelf-select-option:hover {
+    background: var(--btn-hover);
+  }
 }
 
 .shelf-select-option.selected {
@@ -3093,8 +3141,10 @@ select option {
   background: color-mix(in srgb, var(--error) 10%, var(--panel-bg));
 }
 
-.shelf-batch-btn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--error) 20%, var(--panel-bg));
+@media (hover: hover) {
+  .shelf-batch-btn:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--error) 20%, var(--panel-bg));
+  }
 }
 
 .shelf-select-cancel {
@@ -3107,8 +3157,10 @@ select option {
   border: 1px solid color-mix(in srgb, var(--error) 40%, transparent);
 }
 
-.shelf-select-delete:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--error) 22%, var(--panel-bg));
+@media (hover: hover) {
+  .shelf-select-delete:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--error) 22%, var(--panel-bg));
+  }
 }
 
 /* =========================================================================
@@ -3262,7 +3314,7 @@ select option {
   font-size: 11px;
   line-height: 1.4;
   color: var(--muted);
-  word-break: break-all;
+  overflow-wrap: anywhere;
 }
 
 /* 封面底边内嵌纤细微光进度条：不遮挡封面，2.5px 高度 */
@@ -3436,7 +3488,8 @@ select option {
   font-weight: 550;
   line-height: 1.4;
   color: var(--fg);
-  word-break: break-all;
+  /* CJK still breaks between characters; Latin titles break at spaces, not mid-word. */
+  overflow-wrap: anywhere;
   min-height: calc(13px * 1.4 * 2);
   transition: color 0.15s ease;
 }
@@ -3506,8 +3559,10 @@ select option {
   border-radius: 4px;
 }
 
-.shelf-breadcrumb-item:hover {
-  background: var(--btn-hover);
+@media (hover: hover) {
+  .shelf-breadcrumb-item:hover {
+    background: var(--btn-hover);
+  }
 }
 
 .shelf-breadcrumb-sep {
@@ -3581,11 +3636,13 @@ select option {
   transition: transform 0.14s ease, background-color 0.14s ease, box-shadow 0.14s ease;
 }
 
-.shelf-empty-btn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--accent) 88%, #000);
-  border-color: color-mix(in srgb, var(--accent) 88%, #000);
-  transform: translateY(-1px);
-  box-shadow: 0 3px 12px color-mix(in srgb, var(--accent) 35%, transparent);
+@media (hover: hover) {
+  .shelf-empty-btn:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--accent) 88%, #000);
+    border-color: color-mix(in srgb, var(--accent) 88%, #000);
+    transform: translateY(-1px);
+    box-shadow: 0 3px 12px color-mix(in srgb, var(--accent) 35%, transparent);
+  }
 }
 
 .shelf-empty-btn:active:not(:disabled) {
@@ -3613,6 +3670,9 @@ select option {
   background: color-mix(in srgb, var(--error) 12%, transparent);
   color: var(--fg);
   font-size: 13px;
+  line-height: 1.5;
+  /* Error text may carry a path or raw message without spaces. */
+  overflow-wrap: anywhere;
 }
 
 /* 导入结果 toast：底部居中浮出，3 秒后 1 秒淡出；不拦截鼠标 */
@@ -4903,9 +4963,11 @@ select option {
   transition: all 0.15s ease;
 }
 
-.shelf-scope-item:hover {
-  background: var(--btn-hover);
-  border-color: var(--accent);
+@media (hover: hover) {
+  .shelf-scope-item:hover {
+    background: var(--btn-hover);
+    border-color: var(--accent);
+  }
 }
 
 .shelf-scope-item.active {
@@ -4946,9 +5008,11 @@ select option {
   transition: all 0.15s ease;
 }
 
-.shelf-new-folder-btn:hover:not(:disabled) {
-  background: var(--btn-hover);
-  border-color: var(--accent);
+@media (hover: hover) {
+  .shelf-new-folder-btn:hover:not(:disabled) {
+    background: var(--btn-hover);
+    border-color: var(--accent);
+  }
 }
 
 /* 文件夹卡片与拼图 */
@@ -5083,9 +5147,11 @@ select option {
   transition: all 0.15s ease;
 }
 
-.shelf-action-fav:hover:not(:disabled) {
-  background: var(--btn-hover);
-  border-color: var(--accent);
+@media (hover: hover) {
+  .shelf-action-fav:hover:not(:disabled) {
+    background: var(--btn-hover);
+    border-color: var(--accent);
+  }
 }
 
 /* 文件夹面包屑与动作栏 */
@@ -5108,8 +5174,10 @@ select option {
   font-weight: 500;
 }
 
-.shelf-breadcrumb-item:hover {
-  background: var(--btn-hover);
+@media (hover: hover) {
+  .shelf-breadcrumb-item:hover {
+    background: var(--btn-hover);
+  }
 }
 
 .shelf-breadcrumb-sep {
@@ -5147,16 +5215,20 @@ select option {
   min-height: 32px;
 }
 
-.shelf-folder-action-btn:hover {
-  background: var(--btn-hover);
+@media (hover: hover) {
+  .shelf-folder-action-btn:hover {
+    background: var(--btn-hover);
+  }
 }
 
 .shelf-folder-action-btn.danger {
   color: var(--error, #e53e3e);
 }
 
-.shelf-folder-action-btn.danger:hover {
-  background: color-mix(in srgb, var(--error, #e53e3e) 15%, transparent);
+@media (hover: hover) {
+  .shelf-folder-action-btn.danger:hover {
+    background: color-mix(in srgb, var(--error, #e53e3e) 15%, transparent);
+  }
 }
 
 /* 移动选择器弹层 */
@@ -5193,8 +5265,10 @@ select option {
   min-height: 44px;
 }
 
-.shelf-move-item:hover {
-  background: var(--btn-hover);
+@media (hover: hover) {
+  .shelf-move-item:hover {
+    background: var(--btn-hover);
+  }
 }
 
 .shelf-move-item.selected {
@@ -5260,9 +5334,11 @@ select option {
   min-height: 42px;
 }
 
-.shelf-move-new-btn:hover {
-  background: var(--btn-hover);
-  border-color: var(--accent);
+@media (hover: hover) {
+  .shelf-move-new-btn:hover {
+    background: var(--btn-hover);
+    border-color: var(--accent);
+  }
 }
 
 .shelf-move-create-box {
@@ -5632,16 +5708,20 @@ select option {
   transition: background 0.12s ease;
 }
 
-.shelf-folder-modal-action-btn:hover {
-  background: var(--btn-hover, rgba(128, 128, 128, 0.14));
+@media (hover: hover) {
+  .shelf-folder-modal-action-btn:hover {
+    background: var(--btn-hover, rgba(128, 128, 128, 0.14));
+  }
 }
 
 .shelf-folder-modal-action-btn.danger {
   color: var(--error, #ef4444);
 }
 
-.shelf-folder-modal-action-btn.danger:hover {
-  background: color-mix(in srgb, var(--error, #ef4444) 15%, transparent);
+@media (hover: hover) {
+  .shelf-folder-modal-action-btn.danger:hover {
+    background: color-mix(in srgb, var(--error, #ef4444) 15%, transparent);
+  }
 }
 
 .app[data-mobile-chrome="true"] .shelf-folder-modal-action-btn {
