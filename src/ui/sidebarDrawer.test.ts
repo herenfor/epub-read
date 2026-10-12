@@ -124,6 +124,16 @@ describe("Zen UI SidebarDrawer 组件与交互契约（Packet B）", () => {
     expect(flat).not.toContain("has-toggle-column");
   });
 
+  it("千行目录只挂载当前窗口，仍能首次显示远处的活动章", () => {
+    const toc = Array.from({ length: 1400 }, (_, i) => ({ label: `Chapter ${i}`, href: `${i}.xhtml`, children: [] }));
+    const html = renderToStaticMarkup(createElement(SidebarDrawer, { ...baseProps, toc, activeHref: "1200.xhtml" }));
+    expect(html.match(/role="treeitem"/g)!.length).toBeLessThan(45);
+    expect(html).toContain("Chapter 1200</span>");
+    expect(html).not.toContain("Chapter 0</span>");
+    expect(html).toContain('aria-setsize="1400"');
+    expect(html).toContain('aria-posinset="1201"');
+  });
+
   it("书签 Tab 正确渲染书签列表与所属章节", () => {
     const html = renderToStaticMarkup(
       createElement(SidebarDrawer, { ...baseProps, activeTab: "bookmarks" })
