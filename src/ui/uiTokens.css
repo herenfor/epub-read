@@ -20,7 +20,8 @@
   --ui-border-subtle: color-mix(in srgb, var(--panel-border) 35%, transparent);
   --ui-border-control: color-mix(in srgb, var(--panel-border) 60%, transparent);
   --ui-control-selected: var(--panel-bg);
-  --ui-navigation-active: #10b981;
+  /* Current chapter and other "you are here" marks follow the theme accent. */
+  --ui-navigation-active: var(--accent);
   --ui-pin: #8b5cf6;
   --ui-warning: #f59e0b;
   --ui-note-quote: #f59e0b;
