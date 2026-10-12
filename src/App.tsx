@@ -126,6 +126,7 @@ import { LogPanel, type LogItem } from "./ui/LogPanel";
 import { ReaderView, type ReaderHandle } from "./ui/ReaderView";
 import type { ReaderNoteForPaginator } from "./render/paginator";
 import { ShelfView } from "./ui/ShelfView";
+import { ReaderReturnControl } from "./ui/ReaderReturnControl";
 import { createLibraryReader, LIBRARY_LOADING, LibraryReadInterruptedError, libraryReadFailed, libraryReadSucceeded, shelfLibraryView, type LibraryLoadState } from "./ui/libraryLoad";
 import { ReaderReadingSettings, SettingsSwitch } from "./ui/ReadingSettings";
 import { ChevronRightIcon } from "./ui/readerIcons";
@@ -1056,6 +1057,11 @@ export default function App() {
   const [readerHistory, setReaderHistory] = useState<ReaderNavigationHistory>(
     emptyReaderNavigationHistory
   );
+  // 跳转返回入口：每次跳转（或返回/前进）后自动出现，用户自己翻页/滚动即收起。
+  const [returnPromptShown, setReturnPromptShown] = useState(false);
+  useEffect(() => {
+    setReturnPromptShown(readerHistory.back.length > 0 || readerHistory.forward.length > 0);
+  }, [readerHistory]);
   // ---- 书签反馈轻量弹窗 ----
   const [bookmarkToast, setBookmarkToast] = useState<{
     text: string;
@@ -3971,6 +3977,7 @@ export default function App() {
   const handleUserReadingPositionChange = useCallback((ticket?: RestoreTicket | null) => {
     // 只有宿主实际用户位移才解除失败保护，重排和采样变化不能代替用户输入。
     suppressShelfProgressRef.current = false;
+    setReturnPromptShown(false);
     if (ticket) {
       dispatchRestoreGate({ type: "user-position-committed", ticket });
       // A matching user commit normally clears the gate. If it did not match
@@ -4170,6 +4177,8 @@ export default function App() {
     (index: number, opts?: { atEnd?: boolean }) => {
       // 换章前先关闭图片浮层，避免继续引用即将撤销的资源 URL。
       closeImageOverlay();
+      // 翻过章节边界也是用户自己往下读：收起跳转返回提示（跳转本身随后会重新显示它）。
+      setReturnPromptShown(false);
       setPreciseTarget(null);
       latestPreciseRequestRef.current = null;
       navigationPendingRef.current = true;
@@ -4233,11 +4242,6 @@ export default function App() {
     overlayHoverRef.current = false;
     readerRef.current?.dismissFootnote();
   }, []);
-
-  const handleFootnoteAnchor = useCallback((anchor: string) => {
-    readerRef.current?.jumpToAnchor(anchor);
-    handleFootnoteClose();
-  }, [handleFootnoteClose]);
 
   /**
    * 页号与锚点的同一次读数：分页模式由分页器给出（原生滑动途中取视觉屏，
@@ -4351,6 +4355,21 @@ export default function App() {
     historyCaptureAllowedRef.current = true;
     readerDisplayReadyRef.current = true;
   }, []);
+
+  /**
+   * 弹注里的本章锚点：与其他书内跳转一样可以返回。只有确实换了页才记历史；
+   * 很多书整段注释就是指回引用处的链接，点它常常还在同一页。
+   */
+  const handleFootnoteAnchor = useCallback((anchor: string) => {
+    const snapshot = currentReaderPosition();
+    if (readerRef.current?.navigateWithinCurrentChapter({ fragment: anchor })) {
+      const landed = currentReaderPosition();
+      if (landed.spineIndex !== snapshot.spineIndex || landed.page !== snapshot.page) commitReaderHistorySnapshot(snapshot);
+    } else {
+      readerRef.current?.jumpToAnchor(anchor);
+    }
+    handleFootnoteClose();
+  }, [commitReaderHistorySnapshot, currentReaderPosition, handleFootnoteClose]);
 
   /** 只执行 href 跳转，不记录历史；UI 入口和 paginator 通知入口共用。 */
   const navigateReaderHref = useCallback((href: string): boolean => {
@@ -6048,19 +6067,28 @@ export default function App() {
     };
   }, []);
 
-  const currentChapterLabel = (() => {
-    if (!ready || !currentPath) return "";
-    const path = book?.archiveReferences ? currentPath : splitHref(currentPath).path;
+  /** 章节在目录里的名字；没有目录项时为空串。 */
+  const tocLabelForPath = (chapterPath: string): string => {
+    if (!book) return "";
+    const path = book.archiveReferences ? chapterPath : splitHref(chapterPath).path;
     const walk = (nodes: import("./core/types").TocNode[]): string => {
       for (const n of nodes) {
-        if ((book?.archiveReferences ? book.archiveReferences.resolve(book.opfPath, n.href).path : splitHref(n.href).path) === path && n.label) return n.label;
+        if ((book.archiveReferences ? book.archiveReferences.resolve(book.opfPath, n.href).path : splitHref(n.href).path) === path && n.label) return n.label;
         const c = walk(n.children);
         if (c) return c;
       }
       return "";
     };
-    return walk(book!.toc);
-  })();
+    return walk(book.toc);
+  };
+  const currentChapterLabel = ready && currentPath ? tocLabelForPath(currentPath) : "";
+  /** 跳转历史目标的位置名：本章为空串，其他章用目录名或“第 N 章”；无目标为 null。 */
+  const historyPlaceLabel = (position: ReaderNavigationPosition | undefined): string | null => {
+    if (!position || !book || !ready) return null;
+    if (position.spineIndex === spineIndex) return "";
+    const path = spineItemPath(book, position.spineIndex);
+    return (path && tocLabelForPath(path)) || t("footer.chapterN", { n: position.spineIndex + 1 });
+  };
 
   const renderUserFonts = useMemo(
     () =>
@@ -6292,6 +6320,23 @@ export default function App() {
     readingSettingsOpen ||
     noteComposer !== null
   );
+
+  // 跳转返回 / 前进入口（与 Alt+← / Alt+→ 同一历史、同一就绪条件）。
+  const historyBackPlace = view === "reader" ? historyPlaceLabel(readerHistory.back.at(-1)) : null;
+  const historyForwardPlace = view === "reader" ? historyPlaceLabel(readerHistory.forward.at(-1)) : null;
+  const goHistoryBack = (): void => {
+    if (!readerDisplayReadyRef.current || navigationPendingRef.current) return;
+    handleHistoryBack();
+  };
+  const goHistoryForward = (): void => {
+    if (!readerDisplayReadyRef.current || navigationPendingRef.current) return;
+    handleHistoryForward();
+  };
+  // 手机：跳转后自动出现，或随阅读工具一起出现；PC：跳转后自动出现，常驻入口在标题栏。
+  const returnControlVisible =
+    (historyBackPlace !== null || historyForwardPlace !== null) &&
+    !isReaderPanelOpen && !isSidebarOpen && imageRequest === null &&
+    (returnPromptShown || (mobileChrome && readerToolsVisible));
 
   // 保存快捷键所需最新状态 ref，避免闭包捕获旧状态或频繁解绑事件
   const latestShortcutStateRef = useRef({
@@ -6551,6 +6596,10 @@ export default function App() {
         isFullscreen={isFullscreen}
         fullscreenBusy={fullscreenBusy}
         onToggleFullscreen={view === "reader" ? toggleFullscreen : undefined}
+        onHistoryBack={historyBackPlace !== null ? goHistoryBack : undefined}
+        onHistoryForward={historyForwardPlace !== null ? goHistoryForward : undefined}
+        historyBackLabel={historyBackPlace ?? undefined}
+        historyForwardLabel={historyForwardPlace ?? undefined}
         onToggleAssistant={
           view === "reader" && IS_AI_EDITION
             ? () => {
@@ -7123,6 +7172,16 @@ export default function App() {
             // 唯一电量订阅：工具栏仅用 CSS 隐藏仍挂载，必须传实际可见态以释放 receiver。
             <BatteryIndicator enabled={batteryIndicatorEnabled && (!mobileChrome || readerToolsVisible)} />
           }
+        />
+      )}
+      {view === "reader" && ready && returnControlVisible && (
+        <ReaderReturnControl
+          back={historyBackPlace}
+          forward={historyForwardPlace}
+          onBack={goHistoryBack}
+          onForward={goHistoryForward}
+          placement={mobileChrome ? "phone" : "desktop"}
+          raised={mobileChrome && readerToolsVisible}
         />
       )}
       {moreSheetPresence.present && (

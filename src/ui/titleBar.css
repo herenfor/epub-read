@@ -306,6 +306,20 @@
   transform: scale(0.93);
 }
 
+.titlebar-history {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+
+.titlebar-history-btn:disabled {
+  opacity: 0.28;
+  cursor: default;
+  background: transparent;
+  transform: none;
+}
+
 .titlebar-action-btn.active {
   opacity: 1;
   background: color-mix(in srgb, var(--btn-tint-hover) 90%, transparent);
