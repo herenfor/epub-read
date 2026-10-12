@@ -220,4 +220,18 @@ describe("desktop titlebar auto-hide lifecycle", () => {
       expect(h.hidden()).toBe(true);
     } finally { await h.dispose(); }
   });
+
+  it("keeps Alt's explicit hide action even while the pointer is over the header", async () => {
+    const h = await setup();
+    try {
+      await h.enter();
+      expect(h.hidden()).toBe(false);
+      await h.dom.run(() => {
+        const event = new window.Event("keydown", { bubbles: true });
+        Object.defineProperty(event, "key", { value: "Alt" });
+        window.dispatchEvent(event);
+      });
+      expect(h.hidden()).toBe(true);
+    } finally { await h.dispose(); }
+  });
 });
