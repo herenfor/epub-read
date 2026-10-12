@@ -338,7 +338,15 @@
   cursor: default;
 }
 
-.mobile-reader-action:hover:not(:disabled),
+/* Touch screens keep :hover on the last tapped button after its panel closes:
+   hover feedback only for a real mouse; keyboard focus and .active stay separate. */
+@media (hover: hover) and (pointer: fine) {
+  .mobile-reader-action:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--btn-tint-hover) 80%, transparent);
+    opacity: 1;
+  }
+}
+
 .mobile-reader-action:focus-visible {
   background: color-mix(in srgb, var(--btn-tint-hover) 80%, transparent);
   opacity: 1;
