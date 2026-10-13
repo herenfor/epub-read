@@ -780,7 +780,6 @@
   width: 380px;
 }
 
-.app[data-touch-ui="true"] .aa-tab-btn { font-size: 14px; }
 .app[data-touch-ui="true"] .aa-popover-title { font-size: 16px; }
 .app[data-touch-ui="true"] .aa-theme-letter { font-size: 16px; }
 .app[data-touch-ui="true"] .aa-theme-label { font-size: 12px; }
@@ -800,3 +799,45 @@
 .app[data-touch-ui="true"] .aa-detail-group-title { font-size: 13px; }
 .app[data-touch-ui="true"] .aa-detail-sub { font-size: 12px; }
 
+/* ---- 触摸端头部：分段 Tab 收紧一档，关闭键做成同高的方块，二者顶边底边对齐；命中区用伪元素补到 48px ---- */
+.app[data-touch-ui="true"] .aa-popover .aa-popover-tabs {
+  box-sizing: border-box;
+  height: 38px;
+}
+
+.app[data-touch-ui="true"] .aa-popover .aa-tab-btn {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+.app[data-touch-ui="true"] .aa-popover .aa-tab-btn::before,
+.app[data-touch-ui="true"] .aa-popover .aa-popover-close-btn::before {
+  content: "";
+  position: absolute;
+  inset: -5px 0;
+}
+
+.app[data-touch-ui="true"] .aa-popover .aa-popover-close-btn {
+  position: relative;
+  box-sizing: border-box;
+  width: 38px;
+  height: 38px;
+  min-width: 38px;
+  min-height: 0;
+  flex-shrink: 0;
+  border-radius: 8px;
+  border: 1px solid var(--ui-border-subtle);
+  background: var(--ui-control-bg);
+}
+
+.app[data-touch-ui="true"] .aa-popover .aa-popover-close-btn::before {
+  inset: -5px;
+}
+
+.app[data-touch-ui="true"] .aa-popover .aa-popover-close-btn svg {
+  width: 18px;
+  height: 18px;
+}

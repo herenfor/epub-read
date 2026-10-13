@@ -23,16 +23,18 @@ describe("bottom sheet drag", () => {
     expect(resolveSheetDrag(-200, -2, full)).toBe("stay");
   });
 
-  it("lets a content drag expand first at half height and collapse only from the top", () => {
+  it("lets a content drag expand first at half height and collapse or close only from the top", () => {
     const halfTop = { expanded: false, atTop: true };
+    const halfScrolled = { expanded: false, atTop: false };
     const fullTop = { expanded: true, atTop: true };
     const fullScrolled = { expanded: true, atTop: false };
     // Below the slop or mostly sideways: undecided, the browser keeps the gesture.
     expect(claimContentDrag(0, -(CONTENT_DRAG_SLOP_PX - 1), halfTop)).toBeNull();
     expect(claimContentDrag(30, -20, halfTop)).toBeNull();
-    // Half height: up expands before any scrolling; down is left alone.
+    // Half height: up expands before any scrolling; down from the top closes.
     expect(claimContentDrag(2, -20, halfTop)).toBe("expand");
-    expect(claimContentDrag(0, 40, halfTop)).toBeNull();
+    expect(claimContentDrag(0, 40, halfTop)).toBe("dismiss");
+    expect(claimContentDrag(0, 40, halfScrolled)).toBeNull();
     // Expanded: up scrolls; down collapses only with the content at its top.
     expect(claimContentDrag(0, -40, fullTop)).toBeNull();
     expect(claimContentDrag(0, 40, fullTop)).toBe("collapse");
@@ -41,28 +43,39 @@ describe("bottom sheet drag", () => {
 });
 
 describe("content drag lifecycle (real hook)", () => {
-  function Sheet(props: { disabled?: boolean; onExpandedChange(expanded: boolean): void }) {
+  function Sheet(props: { disabled?: boolean; onExpandedChange(expanded: boolean): void; onDismiss(): void }) {
     const sheetRef = useRef<HTMLDivElement>(null);
     const contentRef = useRef<HTMLDivElement>(null);
-    useSheetDrag({ sheetRef, contentRef, disabled: props.disabled, expanded: false, onExpandedChange: props.onExpandedChange, onDismiss: () => {} });
+    useSheetDrag({ sheetRef, contentRef, disabled: props.disabled, expanded: false, onExpandedChange: props.onExpandedChange, onDismiss: props.onDismiss });
     return createElement("div", { ref: sheetRef, id: "sheet" },
+      createElement("div", { id: "header" }, "header"),
       createElement("div", { ref: contentRef, id: "content" }, createElement("span", { id: "row" }, "row")));
   }
 
   async function setup() {
     const dom = createReactDomHarness();
     const onExpandedChange = vi.fn();
-    const render = (disabled = false) => dom.render(createElement(Sheet, { disabled, onExpandedChange }));
+    const onDismiss = vi.fn();
+    const render = (disabled = false) => dom.render(createElement(Sheet, { disabled, onExpandedChange, onDismiss }));
     await render();
     const doc = dom.container.ownerDocument;
     const row = doc.getElementById("row")!;
     const sheet = doc.getElementById("sheet") as HTMLElement;
+    const content = doc.getElementById("content") as HTMLElement;
+    Object.defineProperty(content, "scrollTop", { configurable: true, value: 0 });
     let at = 0;
-    const touch = (type: string, y?: number) => {
+    const touchOn = (target: Element, type: string, y?: number) => {
       const event = new (doc.defaultView as unknown as typeof globalThis).Event(type, { bubbles: true, cancelable: true });
       Object.defineProperty(event, "touches", { value: y === undefined ? [] : [{ clientX: 10, clientY: y }] });
       Object.defineProperty(event, "timeStamp", { value: (at += 16) });
-      return dom.dispatch(row, event);
+      return dom.dispatch(target, event);
+    };
+    const touch = (type: string, y?: number) => touchOn(row, type, y);
+    const downSwipe = async (target: Element = row) => {
+      await touchOn(target, "touchstart", 100);
+      await touchOn(target, "touchmove", 150);
+      await touchOn(target, "touchmove", 220);
+      await touchOn(target, "touchend");
     };
     let visibility = "visible";
     Object.defineProperty(doc, "visibilityState", { configurable: true, get: () => visibility });
@@ -76,8 +89,26 @@ describe("content drag lifecycle (real hook)", () => {
       await touch("touchmove", 100);
       await touch("touchend");
     };
-    return { dom, onExpandedChange, render, sheet, touch, setVisibility, upSwipe };
+    return { dom, onExpandedChange, onDismiss, render, sheet, content, doc, touch, downSwipe, setVisibility, upSwipe };
   }
+
+  it("closes a half-height sheet on a downward drag from the content top or the header", async () => {
+    const t = await setup();
+    try {
+      await t.downSwipe();
+      expect(t.onDismiss).toHaveBeenCalledTimes(1);
+      expect(t.onExpandedChange).not.toHaveBeenCalled();
+    } finally { await t.dom.dispose(); }
+    const h = await setup();
+    try {
+      // Content scrolled down: the content drag scrolls, the header drag still closes.
+      Object.defineProperty(h.content, "scrollTop", { configurable: true, value: 120 });
+      await h.downSwipe();
+      expect(h.onDismiss).not.toHaveBeenCalled();
+      await h.downSwipe(h.doc.getElementById("header")!);
+      expect(h.onDismiss).toHaveBeenCalledTimes(1);
+    } finally { await h.dom.dispose(); }
+  });
 
   it("expands on an ordinary upward content drag", async () => {
     const t = await setup();
