@@ -35,10 +35,10 @@ pub(crate) struct LanPairing {
 fn map_lan_version_error(error: VersionError) -> LanSaveError {
     match error {
         VersionError::NeedsNewerApp => {
-            LanSaveError::new("protocol-mismatch", "此连接信息需要较新版本，请升级")
+            LanSaveError::new("protocol-too-new", "此连接信息需要较新版本，请升级")
         }
         VersionError::UnsupportedFormat => LanSaveError::new(
-            "protocol-mismatch",
+            "protocol-unsupported",
             "本版本不支持该旧互传协议，可使用双方支持的存档文件方式",
         ),
     }
@@ -121,7 +121,7 @@ impl LanPairing {
         }
         if self.version != PAIRING_VERSION {
             return Err(LanSaveError::new(
-                "protocol-mismatch",
+                "protocol-version-differs",
                 "两台设备需要更新到支持同一互传协议的版本",
             ));
         }
@@ -252,7 +252,7 @@ mod tests {
             })
             .to_string();
             let error = LanPairing::parse(&raw).unwrap_err();
-            assert_eq!(error.code, "protocol-mismatch", "version {version}");
+            assert_eq!(error.code, "protocol-unsupported", "version {version}");
             assert!(
                 error.message.contains("不支持该旧互传协议"),
                 "version {version}: {error}"
@@ -275,8 +275,17 @@ mod tests {
         })
         .to_string();
         let error = LanPairing::parse(&raw).unwrap_err();
-        assert_eq!(error.code, "protocol-mismatch");
+        assert_eq!(error.code, "protocol-too-new");
         assert!(error.message.contains("需要较新版本"), "{error}");
+    }
+
+    #[test]
+    fn selected_pairing_validation_reports_version_difference() {
+        let mut pairing = LanPairing::new(UUID.into(), Ipv4Addr::new(10, 0, 0, 1), 47777, HASH.into(), HASH.into());
+        pairing.version = 1;
+        let error = pairing.validate().unwrap_err();
+        assert_eq!(error.code, "protocol-version-differs");
+        assert_eq!(serde_json::to_value(error).unwrap()["code"], "protocol-version-differs");
     }
 
     #[test]
