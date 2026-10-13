@@ -1,3 +1,4 @@
+import { surfaceBackground } from "./readerSurfaceBackground";
 import { forwardRef, useContext, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Book } from "../core/types";
 import { nextLinearIndex, spineItemPath } from "../core/book";
@@ -300,35 +301,7 @@ function parseViewport(vp: string | undefined): { w: number; h: number } | null 
 
 /** Paper color behind a transparent body iframe, applied only while filters are active. */
 export function readerSurfaceBackground(surface: HTMLElement): string | null {
-  const contentDoc = (surface as HTMLIFrameElement).contentDocument;
-  if (contentDoc && contentDoc.defaultView) {
-    try {
-      for (const candidate of [contentDoc.body, contentDoc.documentElement]) {
-        if (!candidate) continue;
-        const color = contentDoc.defaultView.getComputedStyle(candidate).backgroundColor;
-        if (color && color !== "transparent" && color !== "rgba(0, 0, 0, 0)") return color;
-      }
-    } catch {
-      // Cross-origin or detached iframe fallback
-    }
-  }
-
-  const doc = surface.ownerDocument;
-  const candidates = [
-    surface.closest(".reader") as HTMLElement | null,
-    doc?.body,
-    doc?.documentElement,
-  ];
-  try {
-    for (const candidate of candidates) {
-      if (!candidate || !doc?.defaultView) continue;
-      const color = doc.defaultView.getComputedStyle(candidate).backgroundColor;
-      if (color && color !== "transparent" && color !== "rgba(0, 0, 0, 0)") return color;
-    }
-  } catch {
-    // Fall through to no synthesized background.
-  }
-  return null;
+  return surfaceBackground(surface, ".reader");
 }
 
 /** 固定版式页面保持原始版式；强制横排只作用于可重排正文。 */
