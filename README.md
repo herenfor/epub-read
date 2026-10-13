@@ -8,6 +8,8 @@ A lightweight EPUB reader for Windows and Android that respects each book's own 
 
 EPUB Reader opens EPUB 2.0.1 and EPUB 3.x books as their authors designed them: page width, margins, floats, illustrations and footnotes keep the book's own layout, while the reader only supplies sensible defaults where they are missing.
 
+<p align="center"><img src=".github/readme/reading.svg" width="860" alt="The reader on Windows with the contents drawer open, and a page turn on an Android phone"></p>
+
 **Languages:** English | [中文](README.zh.md)
 
 ## Contents
@@ -61,6 +63,10 @@ To check for a new version, open the shelf settings, scroll to About and tap *�
 - **Bring in a whole folder at once** — pick the folder where you keep your books, and they land on the shelf sorted into folders that follow your own directories, with duplicates recognised
 - **Hand over to another device on your Wi‑Fi** — show a QR code on one device and scan it with the other to send books, progress, bookmarks and notes directly between them, without any cloud
 - **Local by design** — no account and no upload; your books stay on your device
+
+<p align="center"><img src=".github/readme/layout.svg" width="860" alt="The layout panel switching between the Light, Sepia, Gray and Night themes while line height and margins change the page"></p>
+
+<p align="center"><img src=".github/readme/handoff.svg" width="860" alt="Device transfer: the desktop shows a QR code and the phone receives a book over the same Wi-Fi, without any cloud"></p>
 
 ## Features
 
