@@ -33,7 +33,7 @@ function fixture(): Uint8Array {
   add('OEBPS/nav?%.xhtml', `<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><ol><li><a href="${encode(chapter.slice(6))}">Chapter</a><ol><li><a href="${encode(chapter.slice(6))}#sec">Section</a></li></ol></li></ol></nav></body></html>`);
   add(chapter, markup);
   add(css, `@import "${encode(importedCss.split('/').pop()!)}";body{background:url('../Images/${encode(picture.split('/').pop()!)}');margin:2em}`);
-  add(importedCss, `@font-face{font-family:test;src:url('../Fonts/${encode(font.split('/').pop()!)}')}.box{padding:1em}`);
+  add(importedCss, `@font-face{font-family:test;src:url('../Fonts/${encode(font.split('/').pop()!)}')}.box{padding:1em}p{font-family:test}`);
   add(picture, '<svg xmlns="http://www.w3.org/2000/svg"><path id="shape"/></svg>');
   add(font, 'test font bytes');
   return zipSync(files);

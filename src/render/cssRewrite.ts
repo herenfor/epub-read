@@ -132,6 +132,40 @@ function mapCssUrls(css: string, replace: (match: string, href: string) => strin
 }
 
 /** The dependency graph uses exactly the same reference syntax as rewriting. */
+function cssFamilyNames(value: string): string[] {
+  return value.split(",").map((name) => name.trim().replace(/^["']|["']$/g, "").trim().toLowerCase()).filter(Boolean);
+}
+
+/**
+ * E10: which @font-face files a stylesheet declares, and which selectors ask
+ * for which font families. Rules inside other at-rules are read the same way.
+ */
+export function cssFontUsage(css: string): {
+  faces: Array<{ families: string[]; hrefs: string[] }>;
+  rules: Array<{ selector: string; families: string[] }>;
+} {
+  const text = stripCssComments(css);
+  const faces: Array<{ families: string[]; hrefs: string[] }> = [];
+  const rules: Array<{ selector: string; families: string[] }> = [];
+  for (const match of text.matchAll(/([^{};]*)\{([^{}]*)\}/g)) {
+    const head = match[1].trim();
+    const family = /(?:^|;)\s*font-family\s*:\s*([^;]+)/i.exec(match[2])?.[1];
+    if (/^@font-face$/i.test(head)) {
+      const hrefs: string[] = [];
+      mapCssUrls(match[2], (whole, href) => { hrefs.push(href); return whole; });
+      faces.push({ families: family ? cssFamilyNames(family) : [], hrefs });
+    } else if (family && head && !head.startsWith("@")) {
+      rules.push({ selector: head, families: cssFamilyNames(family.replace(/!important/i, "")) });
+    }
+  }
+  return { faces, rules };
+}
+
+export function cssInlineFontFamilies(style: string): string[] {
+  const family = /(?:^|;)\s*font-family\s*:\s*([^;]+)/i.exec(style)?.[1];
+  return family ? cssFamilyNames(family.replace(/!important/i, "")) : [];
+}
+
 export function cssResourceReferences(css: string): Array<{ href: string; stylesheet: boolean }> {
   const refs: Array<{ href: string; stylesheet: boolean }> = [];
   const rest = mapCssImports(stripCssComments(css), (_match, href) => {
