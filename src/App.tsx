@@ -23,7 +23,7 @@ import { compareStamp } from "./core/portableState/portable-register-core";
 import { latestVersion, projectProgressVersion, versionForStamp } from "./core/portableState/projection";
 import type { BookmarkValue, Locator, NoteValue, PortablePreferences, ProgressValue } from "./core/portableState/portable-state-types";
 import { isExternalUrl, isFragmentOnly, splitHref } from "./core/paths";
-import type { SearchResult, SearchSession } from "./core/search";
+import type { SearchResult } from "./core/search";
 import type { ExactTextHit } from "./core/exactTextHits";
 import type { SearchOccurrence } from "./core/searchOccurrence";
 import { ResourceServer } from "./render/resources";
@@ -71,7 +71,11 @@ import {
   type AxisInput,
 } from "./ui/readerProgressAxis";
 import { FontSettingsPanel } from "./ui/FontSettingsPanel";
-import { SearchPanel, type SearchPanelResult, type SearchStatus } from "./ui/SearchPanel";
+import { SearchPanel } from "./ui/SearchPanel";
+import { useReaderSearchView, useReaderSearchState, useReaderSearchRefs,
+  useReaderSearchSession, useReaderSearchQuery, useReaderSearchPanel } from "./ui/useReaderSearch";
+import { useShelfSearchMode, useLibrarySearchRuntime, useLibrarySearchBooks,
+  useLibrarySearchResults, useLibrarySearchActions } from "./ui/useLibrarySearch";
 import { TextProjectionPanel } from "./ui/textProjection/TextProjectionPanel";
 import {
   loadTextProjectionPreferences,
@@ -84,10 +88,6 @@ import {
   type CompiledTextProjection,
 } from "./render/textProjection/compile";
 import type { TextProjectionPreferences } from "./render/textProjection/types";
-import {
-  createTextSearchSession,
-  type TextSearchView,
-} from "./render/textProjection/displaySearch";
 import { ColorAssistPanel } from "./ui/colorAssist/ColorAssistPanel";
 import { correctionMatrix, svgMatrixValues } from "./render/colorAssist/colorAssistCore";
 import { ReaderVisualSettingsPanel } from "./ui/visual/ReaderVisualSettingsPanel";
@@ -101,16 +101,7 @@ import { setColorAssistMatrixProvider } from "./render/visual/readerVisualPaint"
 import { ReaderDisplaySettingsPopover } from "./ui/ReaderDisplaySettingsPopover";
 import "./ui/readerDisplaySettings.css";
 import "./ui/themeTransition.css";
-import { presentCrossBookHit, type CrossBookPanelResult } from "./ui/crossBookSearch";
 import type { ResolvedCrossBookSearchHit } from "./features/ai/indexing/indexStore";
-import { createDefaultLibrarySearchRuntime } from "./features/ai/indexing/librarySearchRuntime";
-import {
-  detectedLogicalCores,
-  loadCorpusConcurrencyPreference,
-  normalizeCorpusConcurrencyPreference,
-  resolveCorpusConcurrency,
-  saveCorpusConcurrencyPreference,
-} from "./features/ai/indexing/corpusConcurrencyPreference";
 import { ReaderContextMenu } from "./ui/ReaderContextMenu";
 import { NoteComposer } from "./ui/NoteComposer";
 import type { NoteViewModel } from "./ui/sidebarModel";
@@ -144,8 +135,6 @@ import { SaveFileExportDialog, SaveFileImportPreview, SaveFileProgressPanel } fr
 import { SaveFailureDialog } from "./ui/SaveFailureDialog";
 import { releaseUnsavedLane, type SaveFailurePrompt } from "./ui/saveFailureExit";
 import { useSaveFileJob } from "./ui/useSaveFileJob";
-import { invoke } from "@tauri-apps/api/core";
-import { serveArchivePort } from "./platform/archiveWorkerBridge";
 import {
   readContentUriText,
   writeTextContentUri,
@@ -687,34 +676,6 @@ function chapterLabelForIndex(b: Book, index: number): string {
   return walk(b.toc);
 }
 
-/**
- * 模块级阅读器闭包工厂：严禁在 App 组件体内内联创建带词法作用域的闭包，
- * 避免 long-lived 的 LibrarySearchRuntime.books 隐式持有 App 内部的 Book / ResourceServer。
- */
-function createShelfBookReader(id: string): () => Promise<Uint8Array> {
-  return () => getShelfStore().readBook(id);
-}
-
-/**
- * Native Android full-library indexing input: the window owns the fixed-book
- * bridge and only transfers a bounded MessagePort to the Worker.
- */
-function createShelfBookArchiveInput(id: string): { port: MessagePort; dispose(): void } {
-  const channel = new MessageChannel();
-  const owner = serveArchivePort(channel.port1, id, invoke);
-  return {
-    port: channel.port2,
-    dispose() {
-      try {
-        channel.port2.close();
-      } catch {
-        // Port may already be detached after transfer; owner still owns session cleanup.
-      }
-      owner.dispose();
-    },
-  };
-}
-
 // One panel per batch keeps each GPU burst short. The most used panels are
 // drawn under the opening veil, the rest once reading is quiet.
 const PANEL_WARM_VEIL_BATCHES: readonly PanelWarmBatch[] = [["aa"], ["aa-detailed"], ["toc"]];
@@ -956,7 +917,8 @@ export default function App() {
   const [readerTextProjectionPreferences, setReaderTextProjectionPreferences] = useState<TextProjectionPreferences>(
     textProjectionPreferences,
   );
-  const [searchView, setSearchView] = useState<TextSearchView>("display");
+  const readerSearchView = useReaderSearchView();
+  const { searchView } = readerSearchView;
 
   // ---- FX-1/FX-2 本机显示偏好（滑条只改绘制，不触发章节重载） ----
   const [visualPreferences, setVisualPreferences] = useState<ReaderVisualPreferences>(
@@ -967,12 +929,9 @@ export default function App() {
   visualPreferencesRef.current = visualPreferences;
 
   // ---- 当前书正文搜索（索引仅在本次打开书籍期间存在） ----
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
-  const [searchStatus, setSearchStatus] = useState<SearchStatus>("idle");
-  const [searchProgress, setSearchProgress] = useState({ processed: 0, total: 0 });
-  const [searchError, setSearchError] = useState<string | undefined>(undefined);
-  const [searchNavigationBusy, setSearchNavigationBusy] = useState(false);
+  const readerSearchState = useReaderSearchState();
+  const { searchQuery, setSearchQuery, searchResults, searchStatus, searchProgress, searchError,
+    searchNavigationBusy, setSearchNavigationBusy } = readerSearchState;
 
   // The panel keeps draft rules (a new rule starts with empty from/to); only the
   // stored copy and the reader snapshot are sanitized, so drafts are not dropped
@@ -1024,45 +983,14 @@ export default function App() {
     };
   }, [readerTextProjectionPreferences]);
   // 阅读器搜索只搜当前书；全库正文搜索在书架搜索框（librarySearchRuntime）。
-  const [shelfSearchMode, setShelfSearchMode] = useState<"metadata" | "body">("metadata");
+  const { shelfSearchMode, setShelfSearchMode } = useShelfSearchMode();
   const readerPriorityBusyRef = useRef(false);
   readerPriorityBusyRef.current = view === "reader"
     && (!readerDisplayReady || chapterState.status === "loading" || searchNavigationBusy);
-  const librarySearchRuntimeRef = useRef<ReturnType<typeof createDefaultLibrarySearchRuntime> | null>(null);
-  if (!librarySearchRuntimeRef.current) {
-    librarySearchRuntimeRef.current = createDefaultLibrarySearchRuntime(isTauriEnv(), {
-      waitUntilRunnable: async (signal) => {
-        while (readerPriorityBusyRef.current && !signal.aborted) {
-          await new Promise<void>((resolve) => window.setTimeout(resolve, 50));
-        }
-      },
-    });
-  }
-  const librarySearchRuntime = librarySearchRuntimeRef.current;
-  const librarySearchSnapshot = useSyncExternalStore(
-    librarySearchRuntime.subscribe,
-    librarySearchRuntime.getSnapshot,
-    librarySearchRuntime.getSnapshot,
-  );
-  const logicalCores = useMemo(() => detectedLogicalCores(), []);
-  const [corpusConcurrencyPreference, setCorpusConcurrencyPreference] = useState(
-    () => loadCorpusConcurrencyPreference(undefined, logicalCores),
-  );
-  const recommendedCorpusConcurrency = useMemo(
-    () => resolveCorpusConcurrency({ mode: "automatic", maxConcurrency: 1 }, logicalCores),
-    [logicalCores],
-  );
-  const effectiveCorpusConcurrency = useMemo(
-    () => resolveCorpusConcurrency(corpusConcurrencyPreference, logicalCores),
-    [corpusConcurrencyPreference, logicalCores],
-  );
-  useEffect(() => {
-    librarySearchRuntime.setConcurrency(effectiveCorpusConcurrency);
-    saveCorpusConcurrencyPreference(corpusConcurrencyPreference);
-  }, [corpusConcurrencyPreference, effectiveCorpusConcurrency, librarySearchRuntime]);
-  const searchSessionRef = useRef<SearchSession | null>(null);
-  const searchAbortRef = useRef<AbortController | null>(null);
-  const searchGenerationRef = useRef(0);
+  const librarySearch = useLibrarySearchRuntime(isTauriEnv, readerPriorityBusyRef);
+  const { librarySearchRuntime, librarySearchSnapshot, logicalCores, corpusConcurrencyPreference,
+    recommendedCorpusConcurrency } = librarySearch;
+  const readerSearchRefs = useReaderSearchRefs();
   // ---- 正文笔记 ----
   const [noteBusy, setNoteBusy] = useState(false);
   const noteBusyRef = useRef(false);
@@ -1352,114 +1280,12 @@ export default function App() {
   const persistShelfProgressRef = useRef<(explicit?: boolean) => void>(() => {});
   readerDisplayReadyRef.current = readerDisplayReady;
 
-  // 搜索索引按“打开一本书”的会话持有；创建本身不读取章节，首次查询才
-  // 按 spine 渐进提取。换书/返回书架时释放全部正文和位置映射。
-  useEffect(() => {
-    searchAbortRef.current?.abort();
-    searchAbortRef.current = null;
-    searchSessionRef.current?.dispose();
-    searchSessionRef.current = null;
-    searchGenerationRef.current++;
-    setSearchResults([]);
-    setSearchStatus("idle");
-    setSearchProgress({ processed: 0, total: 0 });
-    setSearchError(undefined);
-    setSearchNavigationBusy(false);
-    if (view !== "reader" || !book || !server || book.fixedLayout) return;
-    const session = createTextSearchSession(
-      book,
-      searchView,
-      searchView === "display" ? compiledTextProjection : null,
-      { resourceServer: server },
-    );
-    searchSessionRef.current = session;
-    return () => {
-      searchAbortRef.current?.abort();
-      searchAbortRef.current = null;
-      if (searchSessionRef.current === session) searchSessionRef.current = null;
-      session.dispose();
-      searchGenerationRef.current++;
-    };
-  }, [view, book, server, searchView, compiledTextProjection]);
-
-  // 全库搜索属于应用级运行时：两个 UI 入口只订阅，不以面板生命周期
-  // 启停任务。书架变化只更新候选，下次状态检查/续建会精确补齐。
-  useEffect(() => {
-    const nativeArchive = runtime.platform === "android" && Boolean(getShelfStore().openArchive);
-    librarySearchRuntime.setBooks(shelfEntries
-      .filter((entry): entry is ShelfEntry & { contentHash: string } => Boolean(entry.contentHash))
-      .map((entry) => ({
-        id: entry.id,
-        contentHash: entry.contentHash,
-        title: entry.title,
-        creator: entry.creator,
-        language: entry.language,
-        available: entry.available !== false,
-        fileSize: entry.fileSize,
-        read: createShelfBookReader(entry.id),
-        ...(nativeArchive
-          ? { openArchiveInput: () => createShelfBookArchiveInput(entry.contentHash!) }
-          : {}),
-      })));
-  }, [librarySearchRuntime, shelfEntries]);
-
-  // 输入防抖只延迟查询，不延迟取消：每次改字都会立即终止旧扫描，已完成
-  // 的章节仍保留在 SearchSession 内供新查询复用。
-  useEffect(() => {
-    searchAbortRef.current?.abort();
-    searchAbortRef.current = null;
-    const generation = ++searchGenerationRef.current;
-    const query = searchQuery.trim();
-    const session = searchSessionRef.current;
-    if (!searchOpen || !session) {
-      setSearchResults([]);
-      setSearchStatus("idle");
-      setSearchProgress({ processed: 0, total: 0 });
-      setSearchError(undefined);
-      return;
-    }
-    if (!query) {
-      setSearchResults([]);
-      setSearchStatus("idle");
-      setSearchProgress({ processed: 0, total: 0 });
-      setSearchError(undefined);
-      return;
-    }
-    setSearchStatus("searching");
-    setSearchProgress({
-      processed: 0,
-      total: book?.spine.filter((item) => item.linear).length ?? 0,
-    });
-    setSearchError(undefined);
-    const timer = window.setTimeout(() => {
-      const controller = new AbortController();
-      searchAbortRef.current = controller;
-      const request = session.search(query, {
-        signal: controller.signal,
-        maxResults: 101,
-        onProgress: ({ completed, total }) => {
-          if (generation !== searchGenerationRef.current) return;
-          setSearchProgress({ processed: completed, total });
-        },
-      });
-      void request.then((results) => {
-        if (generation !== searchGenerationRef.current) return;
-        setSearchResults(results);
-        setSearchStatus("complete");
-      }).catch((error: unknown) => {
-        if (generation !== searchGenerationRef.current || (error as Error)?.name === "AbortError") return;
-        setSearchError(String(error));
-        setSearchStatus("error");
-      }).finally(() => {
-        if (searchAbortRef.current === controller) searchAbortRef.current = null;
-      });
-    }, 180);
-    return () => {
-      window.clearTimeout(timer);
-      searchAbortRef.current?.abort();
-      searchAbortRef.current = null;
-    };
-  }, [searchOpen, searchQuery, book, searchView, compiledTextProjection]);
+  // Preserve session → library candidates → query effect ordering.
+  const readerSearchContext = { ...readerSearchState, ...readerSearchRefs,
+    view, book, server, searchView, compiledTextProjection };
+  useReaderSearchSession(readerSearchContext);
+  useLibrarySearchBooks({ runtime, librarySearchRuntime, shelfEntries });
+  useReaderSearchQuery({ ...readerSearchContext, searchOpen });
 
   const applyCount = useCallback(
     (generation: number, index: number, value: number, source: "estimated" | "measured"): boolean => {
@@ -5167,29 +4993,15 @@ export default function App() {
     [userFonts, fontUrls]
   );
 
-  const crossBookPanelResults = useMemo<CrossBookPanelResult[]>(() =>
-    librarySearchSnapshot.results.map((hit) => presentCrossBookHit(
-      hit,
-      librarySearchSnapshot.query,
-      entryByContentHashRef.current.has(hit.contentHash) ? undefined : uiText("notice.search.unbound"),
-    )), [librarySearchSnapshot.results, librarySearchSnapshot.query, libraryIndexSignature]);
-  const searchPanelResults = useMemo<SearchPanelResult[]>(() =>
-    searchResults.map((result) => ({
-      id: `${result.spineIndex}:${result.originalRange.start}:${result.originalRange.end}:${result.display?.range.start ?? -1}:${result.display?.range.end ?? -1}:${result.matchType}`,
-      chapterTitle: result.chapterTitle,
-      chapterPath: result.chapterPath,
-      snippet: result.snippet,
-      matchRanges: result.snippetMatchRanges,
-    })), [searchResults]);
-
-  const handleStartLibraryIndex = useCallback((): void => librarySearchRuntime.startIndex(), [librarySearchRuntime]);
-  const handleCancelLibraryIndex = useCallback((): void => librarySearchRuntime.cancelIndex(), [librarySearchRuntime]);
-  const handleDeferLibraryIndex = useCallback((): void => librarySearchRuntime.deferIndex(), [librarySearchRuntime]);
-  const handleRebuildTextIndex = useCallback((): void => librarySearchRuntime.requestRebuild(), [librarySearchRuntime]);
-  const handleClearTextIndex = useCallback((): void => {
-    setSearchNavigationBusy(true);
-    void librarySearchRuntime.clearIndex().finally(() => setSearchNavigationBusy(false));
-  }, [librarySearchRuntime]);
+  const crossBookPanelResults = useLibrarySearchResults(librarySearchSnapshot, entryByContentHashRef, libraryIndexSignature);
+  const { searchPanelResults, handleSearchViewChange, handleSearchCancel } = useReaderSearchPanel({
+    ...readerSearchState, ...readerSearchRefs, setSearchView: readerSearchView.setSearchView,
+  });
+  const { handleStartLibraryIndex, handleCancelLibraryIndex, handleDeferLibraryIndex, handleRebuildTextIndex,
+    handleClearTextIndex, handleShelfSearchModeChange, handleCorpusConcurrencyChange,
+    handleLibrarySearchQueryChange } = useLibrarySearchActions({
+      ...librarySearch, setShelfSearchMode, setSearchNavigationBusy,
+    });
   const loadSystemFonts = useCallback(async (): Promise<void> => {
     if (systemFontsStatus === "loading" || systemFontsStatus === "ready") return;
     setSystemFontsStatus("loading");
@@ -5770,13 +5582,10 @@ export default function App() {
               }
               thumbnailProvider={shelfThumbnailProvider}
               searchMode={shelfSearchMode}
-              onSearchModeChange={(mode) => {
-                setShelfSearchMode(mode);
-                if (mode === "body") void librarySearchRuntime.checkIndex();
-              }}
+              onSearchModeChange={handleShelfSearchModeChange}
               bodySearch={{
                 query: librarySearchSnapshot.query,
-                onQueryChange: librarySearchRuntime.setQuery.bind(librarySearchRuntime),
+                onQueryChange: handleLibrarySearchQueryChange,
                 results: crossBookPanelResults,
                 status: librarySearchSnapshot.searchStatus,
                 processed: librarySearchSnapshot.indexSummary.indexed,
@@ -5807,12 +5616,7 @@ export default function App() {
                 concurrency: corpusConcurrencyPreference.maxConcurrency,
                 detectedCores: logicalCores,
                 recommendedConcurrency: recommendedCorpusConcurrency,
-                onConcurrencyChange: (mode, value) => {
-                  setCorpusConcurrencyPreference(normalizeCorpusConcurrencyPreference({
-                    mode,
-                    maxConcurrency: value ?? corpusConcurrencyPreference.maxConcurrency,
-                  }, logicalCores));
-                },
+                onConcurrencyChange: handleCorpusConcurrencyChange,
                 onSelect: (panelResult) => {
                   const result = crossBookPanelResults.find((candidate) => candidate.id === panelResult.id);
                   if (!result) return;
@@ -5941,15 +5745,7 @@ export default function App() {
                       query={searchQuery}
                       onQueryChange={setSearchQuery}
                       searchView={searchView}
-                      onSearchViewChange={!isIdentityTextProjection(readerTextProjectionPreferences) ? (view) => {
-                        searchAbortRef.current?.abort();
-                        searchAbortRef.current = null;
-                        searchGenerationRef.current++;
-                        setSearchView(view);
-                        setSearchResults([]);
-                        setSearchStatus("idle");
-                        setSearchError(undefined);
-                      } : undefined}
+                      onSearchViewChange={!isIdentityTextProjection(readerTextProjectionPreferences) ? handleSearchViewChange : undefined}
                       results={searchPanelResults}
                       status={searchStatus}
                       processed={searchProgress.processed}
@@ -5963,14 +5759,7 @@ export default function App() {
                         );
                         if (result) handleSearchNavigate(result);
                       }}
-                      onCancel={() => {
-                        searchAbortRef.current?.abort();
-                        searchAbortRef.current = null;
-                        searchGenerationRef.current++;
-                        setSearchResults([]);
-                        setSearchStatus("idle");
-                        setSearchProgress({ processed: 0, total: 0 });
-                      }}
+                      onCancel={handleSearchCancel}
                       onClose={() => closePanel("search")}
                     />
                   </PanelPaintWarmup>
