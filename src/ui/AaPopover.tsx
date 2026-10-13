@@ -112,6 +112,14 @@ export interface AaPopoverProps {
   /** Phone bottom sheet: line height and presentation move up into the half-height first screen. */
   phoneLayout?: boolean;
 
+  /**
+   * False keeps the panel mounted but closed: prepared while a book opens,
+   * laid out at its real size and theme, hidden, inert and without motion.
+   * Each opening then starts like a fresh one (quick tab at the top).
+   */
+  open?: boolean;
+  /** Called once after the first closed (prepared) layout. */
+  onPrepared?: () => void;
   onClose: () => void;
 }
 
@@ -206,6 +214,8 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
   onToggleLog,
   issueCount = 0,
   onOpenFile,
+  open = true,
+  onPrepared,
   onClose,
 }) => {
   const [activeTab, setActiveTab] = useState<"quick" | "detailed">("quick");
@@ -213,7 +223,8 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
   const [uiMotion, setUiMotion] = useUiMotion();
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [cssDraft, setCssDraft] = useState(customCss);
-  const { isClosing, requestClose } = useMenuClose(onClose);
+  const { isClosing, requestClose } = useMenuClose(onClose, open);
+  const visible = open || isClosing;
 
   const presentation = readingPresentation({
     readingMode: readingMode ?? "paginated",
@@ -366,8 +377,8 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
   // 打开即把焦点交给面板：Tab 从面板内开始，方向键不再落到背后的正文。
   const dialogRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    dialogRef.current?.focus({ preventScroll: true });
-  }, []);
+    if (open) dialogRef.current?.focus({ preventScroll: true });
+  }, [open]);
   // 手机：半高打开，常用项一屏可见、正文仍露出；拖把手上拉展开全部，下拉收起或关闭。
   // 头部和内容区也能拖：半高时上划先展开、内容在顶部时下划关闭；展开后内容在顶部时下划收回半高。
   const [expanded, setExpanded] = useState(false);
@@ -391,15 +402,43 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
     if (tabsMotionRef.current) tabsMotionRef.current.select(tab === "quick" ? 0 : 1, true);
     else setActiveTab(tab);
   };
-  const { dragging, grip } = useSheetDrag({
+  const { dragging, grip, reset: resetSheet } = useSheetDrag({
     sheetRef: dialogRef,
-    disabled: isClosing,
+    disabled: isClosing || !open,
     onDismiss: requestClose,
     expanded,
     onExpandedChange: setExpanded,
     contentRef: activeTab === "quick" ? quickBodyRef : detailedBodyRef,
     contentDragEnabled: () => Boolean(dialogRef.current?.closest('.app[data-mobile-chrome="true"][data-layout="compact"]')),
   });
+
+  // Closed but mounted (prepared, or after a close): return to what a fresh
+  // opening shows — quick tab at the top, half height, advanced folded —
+  // while still hidden, so the opening itself is one class change.
+  useLayoutEffect(() => {
+    if (open) {
+      setCssDraft((draft) => (draft === customCss ? draft : customCss));
+      return;
+    }
+    resetSheet();
+    setActiveTab("quick");
+    setExpanded(false);
+    setAdvancedOpen(false);
+    tabsMotionRef.current?.select(0, false, false);
+    if (quickBodyRef.current) quickBodyRef.current.scrollTop = 0;
+    if (detailedBodyRef.current) detailedBodyRef.current.scrollTop = 0;
+  }, [open]);
+  const onPreparedRef = useRef(onPrepared);
+  onPreparedRef.current = onPrepared;
+  const prepared = useRef(false);
+  useLayoutEffect(() => {
+    if (open || prepared.current) return;
+    prepared.current = true;
+    // Style and layout at the real size and theme. visibility:hidden is not
+    // painted, so this prepares DOM and layout only, not the first raster.
+    dialogRef.current?.getBoundingClientRect();
+    onPreparedRef.current?.();
+  }, [open]);
 
   // 常用设置的各行：桌面按“主题与字号 / 排版与版式”分组；手机半高一屏
   // 先放主题、字号、行高、排版，字体和显示这类要点进下一页的往后放。
@@ -602,17 +641,21 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
 
   return (
     <>
-      <div
-        className={`aa-popover-backdrop${isClosing ? " is-closing" : ""}`}
-        onClick={requestClose}
-        aria-hidden="true"
-      />
+      {visible && (
+        <div
+          className={`aa-popover-backdrop${isClosing ? " is-closing" : ""}`}
+          onClick={requestClose}
+          aria-hidden="true"
+        />
+      )}
       <div
         ref={dialogRef}
-        className={`aa-popover${isClosing ? " is-closing" : ""}${expanded ? " is-expanded" : ""}${dragging ? " is-dragging" : ""}`}
+        className={`aa-popover${visible ? "" : " is-warm"}${isClosing ? " is-closing" : ""}${expanded ? " is-expanded" : ""}${dragging ? " is-dragging" : ""}`}
         role="dialog"
         tabIndex={-1}
         aria-label={t("aa.dialog")}
+        aria-hidden={visible ? undefined : true}
+        {...(visible ? {} : { inert: "" })}
       >
         {/* 手机底部面板把手（桌面隐藏） */}
         <div className="aa-sheet-grip" aria-hidden="true" {...grip}>

@@ -25,6 +25,14 @@ export interface SidebarDrawerProps {
   onClose: () => void;
   /** 手机窄窗强制浮层，隐藏 pin/dock 入口，避免抽走正文真实宽度。 */
   compact?: boolean;
+  /**
+   * Keep the closed overlay drawer mounted (prepared when a book opens):
+   * laid out hidden and inert; the TOC window waits for a real opening to
+   * center or restore its scroll.
+   */
+  warm?: boolean;
+  /** Called once after the first closed (prepared) layout. */
+  onPrepared?: () => void;
 
   // 目录数据
   toc: TocNode[];
@@ -58,6 +66,8 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
   onModeChange,
   onClose,
   compact = false,
+  warm = false,
+  onPrepared,
   toc,
   activeHref,
   onNavigateToc,
@@ -156,10 +166,23 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
     onScroll: (event: React.UIEvent<HTMLDivElement>) => { memory.scrollTop[tab] = event.currentTarget.scrollTop; },
   });
 
+  const onPreparedRef = useRef(onPrepared);
+  onPreparedRef.current = onPrepared;
+  const prepared = useRef(false);
+  useLayoutEffect(() => {
+    if (visible || !warm || prepared.current) return;
+    prepared.current = true;
+    // Style and layout only: a visibility:hidden drawer is not painted.
+    drawerRef.current?.getBoundingClientRect();
+    onPreparedRef.current?.();
+  }, [visible, warm]);
+  // A kept drawer reopens like a remounted one: no half-confirmed delete.
+  if (!visible && deletingNoteId !== null) setDeletingNoteId(null);
+
   const tocRows = useMemo(() => visibleTocRows(tocIndex, tocExpanded, tocFilter), [tocIndex, tocExpanded, tocFilter]);
   const sortedNotes = useMemo(() => limitNotes(notes, 200).items, [notes]);
 
-  if (!open && mode === "overlay" && !isClosing) {
+  if (!open && mode === "overlay" && !isClosing && !warm) {
     return null;
   }
 
@@ -179,9 +202,11 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
       <aside
         ref={drawerRef}
         tabIndex={-1}
-        className={`sidebar-drawer ${mode === "docked" ? "is-docked" : "is-overlay"} side-${side}${compact ? " is-compact" : ""}${open ? " is-open" : " is-closed"}${isClosing ? " is-closing" : ""}`}
+        className={`sidebar-drawer ${mode === "docked" ? "is-docked" : "is-overlay"} side-${side}${compact ? " is-compact" : ""}${open ? " is-open" : " is-closed"}${isClosing ? " is-closing" : ""}${visible ? "" : " is-warm"}`}
         role="region"
         aria-label={t("sidebar.drawer")}
+        aria-hidden={visible ? undefined : true}
+        {...(visible ? {} : { inert: "" })}
       >
         {/* 抽屉顶栏：Segmented Tabs + Pin + 关闭 */}
         <div className="sidebar-header">
@@ -278,6 +303,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
                   nested={tocIndex.nested}
                   filtering={Boolean(tocFilter.trim())}
                   memory={memory}
+                  live={visible}
                   onToggle={toggleTocBranch}
                   onNavigate={(href) => {
                     onNavigateToc(href);

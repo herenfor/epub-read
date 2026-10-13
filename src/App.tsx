@@ -56,6 +56,7 @@ import { useReaderCursorIdle } from "./ui/readerCursorIdle";
 import { createSidebarNavigationMemory, type SidebarNavigationMemory } from "./ui/sidebarSwipe";
 import { SidebarDrawer, type SidebarMode, type SidebarTab } from "./ui/SidebarDrawer";
 import { AaPopover } from "./ui/AaPopover";
+import { useOpeningPanelPrep } from "./ui/openingPanelPrep";
 import { resolveReaderLoadFeedback } from "./ui/loadingFeedback";
 import { WhisperFooter, type WhisperFooterChapterTick } from "./ui/WhisperFooter";
 import { BatteryIndicator } from "./ui/BatteryIndicator";
@@ -5435,10 +5436,15 @@ export default function App() {
     displayedOnce: hasReaderDisplayedRef.current,
     chapter: chapterState,
   });
-  // 开书过渡覆盖“解析书籍”与首次“准备阅读位置”；之后的换章只用顶部细进度线。
+  // 首页显示后、过渡解除前先准备 Aa，再准备目录（挂载为关闭态，留到离开阅读器）。
+  const openingPanels = useOpeningPanelPrep(
+    view === "reader" && ready && hasReaderDisplayedRef.current && bookKey ? bookKey : null,
+  );
+  // 开书过渡覆盖“解析书籍”、首次“准备阅读位置”与有限的面板准备；之后的换章只用顶部细进度线。
   const readerOpeningVisible =
     phase.phase === "loading" ||
-    (readerLoadFeedback?.kind === "loading" && !hasReaderDisplayedRef.current);
+    (readerLoadFeedback?.kind === "loading" && !hasReaderDisplayedRef.current) ||
+    openingPanels.pending;
   const readerOpeningTitle = phase.phase === "loading"
     ? phase.title || phase.fileName
     : book?.metadata.title ?? "";
@@ -6583,6 +6589,8 @@ export default function App() {
           onModeChange={handleSidebarModeChange}
           onClose={handleSidebarClose}
           compact={phoneChrome}
+          warm={openingPanels.toc}
+          onPrepared={() => openingPanels.prepared(bookKey, "toc")}
           toc={book!.toc}
           activeHref={activeHref}
           onNavigateToc={handleTocNavigate}
@@ -6747,92 +6755,98 @@ export default function App() {
                   onImport={handleImportFonts}
                   nativeDragActive={fontNativeDragActive}
                   onClose={() => setForeground((current) => setMenuSubview(current, "main"))}
-                /> : <AaPopover
-                  phoneLayout={phoneChrome}
-                  fontSize={settings.fontSizePx}
-                  onFontSizeChange={(v) =>
-                    setSettings((s2) => {
-                      const fontSizePx = clamp(v, 12, 32);
-                      return fontSizePx === s2.fontSizePx ? s2 : { ...s2, fontSizePx };
-                    })
-                  }
-                  onFontDec={() => adjustFont(-2)}
-                  onFontInc={() => adjustFont(2)}
-                  theme={settings.theme}
-                  onThemeChange={changeTheme}
-                  customFontName={settings.customFontName}
-                  onOpenFontSettings={() => setForeground((current) => setMenuSubview(current, "fonts"))}
-                  onOpenDisplaySettings={() => setForeground((current) => setMenuSubview(current, "extras"))}
-                  lineHeight={settings.lineHeight}
-                  onLineHeightChange={(v) =>
-                    setSettings((s2) => {
-                      const lineHeight = clamp(v, 1.2, 2.4);
-                      return lineHeight === s2.lineHeight ? s2 : { ...s2, lineHeight };
-                    })
-                  }
-                  onResetLineHeight={() =>
-                    setSettings((s2) => ({ ...s2, lineHeight: undefined }))
-                  }
-                  fontWeight={settings.fontWeight}
-                  onFontWeightChange={(v) =>
-                    setSettings((s2) => ({ ...s2, fontWeight: v }))
-                  }
-                  letterSpacingPx={settings.letterSpacingPx}
-                  onLetterSpacingChange={(v) =>
-                    setSettings((s2) => ({ ...s2, letterSpacingPx: v }))
-                  }
-                  wordSpacingPx={settings.wordSpacingPx}
-                  onWordSpacingChange={(v) =>
-                    setSettings((s2) => ({ ...s2, wordSpacingPx: v }))
-                  }
-                  gapPx={settings.gapPx}
-                  spreadGapMode={settings.spreadGapMode ?? "auto"}
-                  onGapPxChange={(gap) =>
-                    setSettings((s2) => ({ ...s2, gapPx: gap, spreadGapMode: "manual" }))
-                  }
-                  onSpreadGapModeChange={(mode) =>
-                    setSettings((s2) => ({ ...s2, spreadGapMode: mode }))
-                  }
-                  spreadArea={chapterState.status === "ready" ? chapterState.spreadArea : undefined}
-                  uiScale={uiScale}
-                  onUiScaleChange={(scale) => setUiScale(scale)}
-                  pageMargins={settings.pageMarginsPx}
-                  onPageMarginsChange={(margins) =>
-                    setSettings((s2) => ({ ...s2, pageMarginsPx: margins }))
-                  }
-                  columnsPerView={settings.columnsPerView === 2 ? 2 : 1}
-                  onColumnsChange={(cols) => handlePresentationChange({ columnsPerView: cols })}
-                  readingMode={settings.readingMode === "scroll" ? "scroll" : "paginated"}
-                  onReadingModeChange={(mode) => handlePresentationChange({ readingMode: mode })}
-                  effectiveColumns={chapterState.status === "ready" ? chapterState.effectiveColumns : undefined}
-                  onPresentationChange={handlePresentationChange}
-                  turnAnimation={normalizeTurnAnimation(settings.turnAnimation)}
-                  onTurnAnimationChange={(turnAnimation) =>
-                    setSettings((s2) => ({ ...s2, turnAnimation }))
-                  }
-                  forceHorizontal={settings.forceHorizontal === true}
-                  onForceHorizontalChange={(enabled) =>
-                    setSettings((s2) => ({ ...s2, forceHorizontal: enabled }))
-                  }
-                  preloadNextChapter={settings.preloadNextChapter === true}
-                  preloadNextChapterDisabled={book?.fixedLayout === true}
-                  onPreloadNextChapterChange={(enabled) =>
-                    setSettings((s2) => ({ ...s2, preloadNextChapter: enabled }))
-                  }
-                  customCss={settings.customCss}
-                  onCustomCssChange={(css) =>
-                    setSettings((s2) => ({ ...s2, customCss: css }))
-                  }
-                  onResetDefaults={resetDefaults}
-                  onToggleLog={handleToggleLog}
-                  issueCount={logItems.length}
-                  onOpenFile={() => {
-                    void handleChooseBooks();
-                    closeForeground();
-                  }}
-                  onClose={closeForeground}
-                />}
+                /> : null}
               </>
+            )}
+            {((menuOpen && !displaySettingsOpen && !fontSettingsOpen) || openingPanels.aa) && (
+              <AaPopover
+                key={bookKey}
+                open={menuOpen && !displaySettingsOpen && !fontSettingsOpen}
+                onPrepared={() => openingPanels.prepared(bookKey, "aa")}
+                phoneLayout={phoneChrome}
+                fontSize={settings.fontSizePx}
+                onFontSizeChange={(v) =>
+                  setSettings((s2) => {
+                    const fontSizePx = clamp(v, 12, 32);
+                    return fontSizePx === s2.fontSizePx ? s2 : { ...s2, fontSizePx };
+                  })
+                }
+                onFontDec={() => adjustFont(-2)}
+                onFontInc={() => adjustFont(2)}
+                theme={settings.theme}
+                onThemeChange={changeTheme}
+                customFontName={settings.customFontName}
+                onOpenFontSettings={() => setForeground((current) => setMenuSubview(current, "fonts"))}
+                onOpenDisplaySettings={() => setForeground((current) => setMenuSubview(current, "extras"))}
+                lineHeight={settings.lineHeight}
+                onLineHeightChange={(v) =>
+                  setSettings((s2) => {
+                    const lineHeight = clamp(v, 1.2, 2.4);
+                    return lineHeight === s2.lineHeight ? s2 : { ...s2, lineHeight };
+                  })
+                }
+                onResetLineHeight={() =>
+                  setSettings((s2) => ({ ...s2, lineHeight: undefined }))
+                }
+                fontWeight={settings.fontWeight}
+                onFontWeightChange={(v) =>
+                  setSettings((s2) => ({ ...s2, fontWeight: v }))
+                }
+                letterSpacingPx={settings.letterSpacingPx}
+                onLetterSpacingChange={(v) =>
+                  setSettings((s2) => ({ ...s2, letterSpacingPx: v }))
+                }
+                wordSpacingPx={settings.wordSpacingPx}
+                onWordSpacingChange={(v) =>
+                  setSettings((s2) => ({ ...s2, wordSpacingPx: v }))
+                }
+                gapPx={settings.gapPx}
+                spreadGapMode={settings.spreadGapMode ?? "auto"}
+                onGapPxChange={(gap) =>
+                  setSettings((s2) => ({ ...s2, gapPx: gap, spreadGapMode: "manual" }))
+                }
+                onSpreadGapModeChange={(mode) =>
+                  setSettings((s2) => ({ ...s2, spreadGapMode: mode }))
+                }
+                spreadArea={chapterState.status === "ready" ? chapterState.spreadArea : undefined}
+                uiScale={uiScale}
+                onUiScaleChange={(scale) => setUiScale(scale)}
+                pageMargins={settings.pageMarginsPx}
+                onPageMarginsChange={(margins) =>
+                  setSettings((s2) => ({ ...s2, pageMarginsPx: margins }))
+                }
+                columnsPerView={settings.columnsPerView === 2 ? 2 : 1}
+                onColumnsChange={(cols) => handlePresentationChange({ columnsPerView: cols })}
+                readingMode={settings.readingMode === "scroll" ? "scroll" : "paginated"}
+                onReadingModeChange={(mode) => handlePresentationChange({ readingMode: mode })}
+                effectiveColumns={chapterState.status === "ready" ? chapterState.effectiveColumns : undefined}
+                onPresentationChange={handlePresentationChange}
+                turnAnimation={normalizeTurnAnimation(settings.turnAnimation)}
+                onTurnAnimationChange={(turnAnimation) =>
+                  setSettings((s2) => ({ ...s2, turnAnimation }))
+                }
+                forceHorizontal={settings.forceHorizontal === true}
+                onForceHorizontalChange={(enabled) =>
+                  setSettings((s2) => ({ ...s2, forceHorizontal: enabled }))
+                }
+                preloadNextChapter={settings.preloadNextChapter === true}
+                preloadNextChapterDisabled={book?.fixedLayout === true}
+                onPreloadNextChapterChange={(enabled) =>
+                  setSettings((s2) => ({ ...s2, preloadNextChapter: enabled }))
+                }
+                customCss={settings.customCss}
+                onCustomCssChange={(css) =>
+                  setSettings((s2) => ({ ...s2, customCss: css }))
+                }
+                onResetDefaults={resetDefaults}
+                onToggleLog={handleToggleLog}
+                issueCount={logItems.length}
+                onOpenFile={() => {
+                  void handleChooseBooks();
+                  closeForeground();
+                }}
+                onClose={closeForeground}
+              />
             )}
             {ready ? (
               <>
