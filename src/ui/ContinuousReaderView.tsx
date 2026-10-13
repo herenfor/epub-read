@@ -312,9 +312,6 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
       onPageState,
       onDisplayReady,
       onIssues,
-      onInternalLink,
-      onBeforeInternalNavigate,
-      onInternalNavigationSettled,
       onExternalLink,
       onFootnote,
       onFootnoteClose,
@@ -346,6 +343,12 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
     const canvasRef = useRef<HTMLDivElement>(null);
     const onInternalNavigationSettledRef = useRef(props.onInternalNavigationSettled);
     onInternalNavigationSettledRef.current = props.onInternalNavigationSettled;
+    // 槽位 paginator 活到回收为止，比创建它时的 App 章节更久；链接回调必须转发到
+    // 最新实现，否则预加载章节里的链接会按创建时的当前章判断同章/跨章。
+    const onInternalLinkRef = useRef(props.onInternalLink);
+    onInternalLinkRef.current = props.onInternalLink;
+    const onBeforeInternalNavigateRef = useRef(props.onBeforeInternalNavigate);
+    onBeforeInternalNavigateRef.current = props.onBeforeInternalNavigate;
     const onNavigationUnresolvedRef = useRef(props.onNavigationUnresolved);
     onNavigationUnresolvedRef.current = props.onNavigationUnresolved;
     const onUserReadingPositionChangeRef = useRef(props.onUserReadingPositionChange);
@@ -1455,9 +1458,9 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
           () => {},
           onIssues,
           false,
-          onInternalLink,
-          onBeforeInternalNavigate,
-          onInternalNavigationSettled,
+          (href) => onInternalLinkRef.current(href),
+          (href) => onBeforeInternalNavigateRef.current(href),
+          () => onInternalNavigationSettledRef.current(),
           () => {}, // 不使用旧 onWheelNavigate
           () => {}, // 不使用旧 onKeyNavigate
           (payload) => {
@@ -1596,14 +1599,11 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
         book,
         handleExternalViewportStep,
         handleExternalWheelPixels,
-        onBeforeInternalNavigate,
         onDisplayReady,
         onExternalLink,
         onFootnote,
         onFootnoteClose,
         onImageActivation,
-        onInternalLink,
-        onInternalNavigationSettled,
         onIssues,
         onPreciseNavigationStatus,
         onSelectionContextMenu,
