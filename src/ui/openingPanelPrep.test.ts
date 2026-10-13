@@ -133,6 +133,35 @@ describe("prepared panels are reused by the first real opening", () => {
     }
   });
 
+  it("Aa: a sub-page suspends it in place; returning keeps its page and skips the entrance, a real close resets", async () => {
+    const dom = createReactDomHarness();
+    stubLayoutApis();
+    const props = aaProps({ open: true });
+    const selected = () => [...dom.container.querySelectorAll(".aa-tab-btn")].findIndex((b) => b.getAttribute("aria-selected") === "true");
+    try {
+      await dom.render(createElement(AaPopover, props));
+      await dom.click(dom.container.querySelectorAll(".aa-tab-btn")[1]);
+      const detailed = dom.container.querySelectorAll(".aa-popover-body")[1] as HTMLElement;
+      detailed.scrollTop = 90;
+      // Into a sub-page and back: same page, same scroll, no entrance.
+      await dom.render(createElement(AaPopover, { ...props, open: false, suspended: true }));
+      await dom.render(createElement(AaPopover, { ...props, open: true }));
+      const dialog = dom.container.querySelector(".aa-popover") as HTMLElement;
+      expect(dialog.className).toContain("is-resumed");
+      expect(selected()).toBe(1);
+      expect(detailed.scrollTop).toBe(90);
+      // A sub-page closed for good (menu closed from it) resets like any close.
+      await dom.render(createElement(AaPopover, { ...props, open: false, suspended: true }));
+      await dom.render(createElement(AaPopover, { ...props, open: false, suspended: false }));
+      await dom.render(createElement(AaPopover, { ...props, open: true }));
+      expect(dialog.className).not.toContain("is-resumed");
+      expect(selected()).toBe(0);
+      expect(detailed.scrollTop).toBe(0);
+    } finally {
+      await dom.dispose();
+    }
+  });
+
   it("Aa: prepared hidden without user callbacks or focus, then opened in place at the quick tab", async () => {
     const dom = createReactDomHarness();
     stubLayoutApis();
