@@ -7076,6 +7076,7 @@ export class ChapterPaginator {
       geometry: this.scrollMode
         ? undefined
         : {
+            progression: this.flowProgression,
             columnWidth: this.effectiveColumnWidth,
             columnStep: this.effectiveColumnStep,
             viewStep: this.effectiveViewStep,
