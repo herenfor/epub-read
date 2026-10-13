@@ -1,11 +1,11 @@
 use super::archive::{
     imported_progress_conflicts, plan_export_books, plan_export_books_for_missing,
-    preview_missing_books, scope_kind, select_export_state, validate_and_extract_with_expectation,
+    scope_kind, select_export_state, validate_and_extract_with_expectation,
     write_export_archive,
 };
 use super::{
     copy_reader_with_progress, managed_book_path, new_staging_dir, new_uuid, parse_bindings,
-    valid_job_id, LocalBinding, MissingBook, PreparedImport, ProgressReporter, SaveExportScope,
+    valid_job_id, LocalBinding, PreparedImport, ProgressReporter, SaveExportScope,
     SaveFileCancelResult, SaveFileCommitResult, SaveFileError, SaveFileExportResult,
     SaveFileLocation, SaveFilePrepareResult, SaveFileProgress, SkippedBook,
 };
@@ -13,7 +13,7 @@ use crate::linked_library::LinkedLibraryWriteState;
 use crate::portable_state::PortableStateV3;
 use crate::portable_state_commands::with_existing_store;
 use serde::Serialize;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -720,25 +720,17 @@ fn prepare_from_staging<R: Runtime>(
         return Err(SaveFileError::cancelled());
     }
 
-    let root = library_root(app)?;
     let (local_snapshot, raw_bindings) = store_parts(app)?;
-    let local_bindings = parse_bindings(raw_bindings)?;
-    let mut missing = preview_missing_books(&validated.incoming, &validated.attachments);
-    missing.retain(|book| {
-        !local_bindings
-            .get(&book.content_hash)
-            .map(|binding| binding.is_valid(&root))
-            .unwrap_or(false)
-    });
+    let mut eligible: BTreeSet<String> = local_snapshot.books.keys()
+        .filter(|hash| raw_bindings.contains_key(*hash)).cloned().collect();
+    eligible.extend(validated.attachments.iter().map(|a| a.content_hash.clone()));
+    let selection = crate::portable_state::select_local_import(
+        &local_snapshot, &validated.incoming, &eligible, &BTreeSet::new(),
+    )?;
     let progress_conflict_count =
-        super::archive::count_progress_conflicts(&local_snapshot, &validated.incoming)?;
-    let local_hashes: BTreeSet<&str> = local_snapshot.books.keys().map(String::as_str).collect();
-    let new_book_count = validated
-        .incoming
-        .books
-        .keys()
-        .filter(|hash| !local_hashes.contains(hash.as_str()))
-        .count();
+        super::archive::count_progress_conflicts(&local_snapshot, &selection.state)?;
+    let new_book_count = selection.state.books.keys()
+        .filter(|hash| !local_snapshot.books.contains_key(*hash)).count();
     let preview = SaveFilePrepareResult {
         status: "prepared".to_string(),
         job_id: task.job_id.clone(),
@@ -750,7 +742,8 @@ fn prepare_from_staging<R: Runtime>(
             .iter()
             .map(|attachment| attachment.content_hash.clone())
             .collect(),
-        missing_books: missing,
+        skipped_book_count: selection.skipped_books.len(),
+        skipped_books: selection.skipped_books,
         progress_conflict_count,
         new_book_count,
         has_preferences: validated.incoming.preferences.is_some(),
@@ -790,36 +783,6 @@ impl<W: Write> Write for ReportingWriter<'_, W> {
     fn flush(&mut self) -> std::io::Result<()> {
         self.inner.flush()
     }
-}
-
-fn compute_missing_books(
-    incoming: &PortableStateV3,
-    attachments: &[super::PreparedAttachment],
-    local_bindings: &std::collections::BTreeMap<String, LocalBinding>,
-    root: &Path,
-    published_hashes: &BTreeSet<String>,
-) -> Vec<MissingBook> {
-    let attached: BTreeSet<&str> = attachments
-        .iter()
-        .map(|attachment| attachment.content_hash.as_str())
-        .collect();
-    incoming
-        .books
-        .iter()
-        .filter(|(hash, _)| {
-            if attached.contains(hash.as_str()) || published_hashes.contains(hash.as_str()) {
-                return false;
-            }
-            !local_bindings
-                .get(hash.as_str())
-                .map(|binding| binding.is_valid(root))
-                .unwrap_or(false)
-        })
-        .map(|(hash, book)| MissingBook {
-            content_hash: hash.clone(),
-            title: book.metadata.value.title.clone(),
-        })
-        .collect()
 }
 
 fn existing_attachment_matches(target: &Path, content_hash: &str) -> Result<bool, SaveFileError> {
@@ -903,6 +866,34 @@ fn cleanup_published_targets(targets: &[PathBuf]) -> Result<(), SaveFileError> {
     }
 }
 
+fn publish_attachment_binding(
+    attachment: &super::PreparedAttachment,
+    root: &Path,
+) -> Result<(String, Option<PathBuf>), SaveFileError> {
+    let cover = crate::linked_library::inspect_epub(&attachment.staging_path)
+        .map_err(SaveFileError::invalid_data)?;
+    let target = managed_book_path(root, &attachment.content_hash);
+    if let Some(parent) = target.parent() { fs::create_dir_all(parent)?; }
+    let created = publish_attachment(attachment, &target)?;
+    let result = (|| {
+        let metadata = fs::metadata(&target)?;
+        let mut binding = LocalBinding::new_managed(
+            &attachment.content_hash, metadata.len(), metadata_mtime_ns(&metadata),
+        );
+        binding.cover_zip_path = cover.cover_zip_path;
+        binding.cover_mime = cover.cover_mime;
+        serde_json::to_string(&binding)
+            .map_err(|error| SaveFileError::storage_error(format!("设备绑定无法序列化：{error}")))
+    })();
+    match result {
+        Ok(raw) => Ok((raw, created.then_some(target))),
+        Err(error) => {
+            if created { cleanup_published_targets(&[target])?; }
+            Err(error)
+        }
+    }
+}
+
 fn cover_repair_row(
     existing: &LocalBinding,
     root: &Path,
@@ -947,7 +938,7 @@ pub(crate) fn run_commit<R: Runtime>(
     let mut published_targets: Vec<PathBuf> = Vec::new();
     let result: Result<SaveFileCommitResult, SaveFileError> = (|| {
         let mut binding_rows: Vec<(String, String)> = Vec::new();
-        let mut published_hashes = BTreeSet::new();
+        let mut attachment_failures = BTreeMap::new();
         for attachment in &prepared.attachments {
             if task.cancelled.load(Ordering::Acquire) {
                 return Err(SaveFileError::cancelled());
@@ -963,25 +954,13 @@ pub(crate) fn run_commit<R: Runtime>(
                 }
                 continue;
             }
-            let target = managed_book_path(&root, &attachment.content_hash);
-            if let Some(parent) = target.parent() {
-                fs::create_dir_all(parent)?;
+            match publish_attachment_binding(attachment, &root) {
+                Ok((raw, created)) => {
+                    if let Some(target) = created { published_targets.push(target); }
+                    binding_rows.push((attachment.content_hash.clone(), raw));
+                }
+                Err(error) => { attachment_failures.insert(attachment.content_hash.clone(), error.message); }
             }
-            if publish_attachment(attachment, &target)? {
-                published_targets.push(target.clone());
-            }
-            published_hashes.insert(attachment.content_hash.clone());
-            let metadata = fs::metadata(&target)?;
-            let mut binding = LocalBinding::new_managed(
-                &attachment.content_hash,
-                metadata.len(),
-                metadata_mtime_ns(&metadata),
-            );
-            binding.fill_cover_from_epub(&target);
-            let raw = serde_json::to_string(&binding).map_err(|error| {
-                SaveFileError::storage_error(format!("设备绑定无法序列化：{error}"))
-            })?;
-            binding_rows.push((attachment.content_hash.clone(), raw));
         }
 
         // Books whose body was reused still need the existing cover-repair
@@ -993,7 +972,7 @@ pub(crate) fn run_commit<R: Runtime>(
             .map(|attachment| attachment.content_hash.as_str())
             .collect();
         for hash in prepared.incoming.books.keys() {
-            if attached_hashes.contains(hash.as_str()) || published_hashes.contains(hash) {
+            if attached_hashes.contains(hash.as_str()) {
                 continue;
             }
             if let Some(existing) = local_bindings
@@ -1006,43 +985,38 @@ pub(crate) fn run_commit<R: Runtime>(
             }
         }
 
-        let missing_books = compute_missing_books(
-            &prepared.incoming,
-            &prepared.attachments,
-            &local_bindings,
-            &root,
-            &published_hashes,
-        );
-        let incoming_hashes: Vec<String> = prepared.incoming.books.keys().cloned().collect();
-
-        let (merged, visible_before) = with_existing_store(&app, |store| {
+        let failed_hashes = attachment_failures.keys().cloned().collect();
+        let (outcome, visible_before) = with_existing_store(&app, |store| {
             let visible_before = store.local_visible_hashes()?;
-            let merged = store.merge_validated_import_ref(
-                &prepared.incoming,
-                binding_rows,
-                apply_preferences,
+            let outcome = store.merge_local_import_ref(
+                &prepared.incoming, binding_rows, &failed_hashes, apply_preferences,
             )?;
-            Ok((merged, visible_before))
+            Ok((outcome, visible_before))
         })
         .map_err(SaveFileError::from)
         .and_then(|result| {
             result.ok_or_else(|| SaveFileError::storage_error("可移植资料仓储尚未激活"))
         })?;
-        let progress_conflict_books = imported_progress_conflicts(&merged, &prepared.incoming);
-        let new_visible = incoming_hashes
-            .iter()
-            .filter(|hash| !visible_before.contains(*hash))
-            .cloned()
-            .collect();
+        let mut skipped_books = outcome.skipped_books;
+        for book in &mut skipped_books {
+            book.message = attachment_failures.remove(&book.content_hash);
+        }
+        let accepted_hashes: BTreeSet<&str> = outcome.imported_books.iter().map(String::as_str).collect();
+        let progress_conflict_books = imported_progress_conflicts(&outcome.state, &prepared.incoming)
+            .into_iter().filter(|hash| accepted_hashes.contains(hash.as_str())).collect();
+        let incoming_hashes = outcome.imported_books;
+        let new_visible = incoming_hashes.iter()
+            .filter(|hash| !visible_before.contains(*hash)).cloned().collect();
         reporter.force();
         let applied_preferences = apply_preferences && prepared.incoming.preferences.is_some();
         Ok(SaveFileCommitResult {
             status: "committed".to_string(),
             job_id: task.job_id.clone(),
-            merged_books: merged.books.len(),
+            merged_books: outcome.state.books.len(),
             imported_books: incoming_hashes,
             new_visible_books: new_visible,
-            missing_books,
+            skipped_book_count: skipped_books.len(),
+            skipped_books,
             progress_conflict_books,
             applied_preferences,
         })
@@ -1195,6 +1169,30 @@ pub async fn save_file_cancel(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn c6_attachment_validation_precedes_publication() {
+        use std::io::Write;
+        let dir = std::env::temp_dir().join(format!("epub-c6-{}", new_uuid().unwrap()));
+        fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("incoming.epub");
+        fs::write(&source, b"not an EPUB").unwrap();
+        let mut attachment = super::super::PreparedAttachment { content_hash:super::super::hex_digest(b"not an EPUB"), staging_path:source.clone(), bytes:11, sha256:String::new() };
+        assert!(publish_attachment_binding(&attachment, &dir).is_err());
+        assert!(!managed_book_path(&dir, &attachment.content_hash).exists());
+        let mut zip = zip::ZipWriter::new(fs::File::create(&source).unwrap());
+        for (name, text) in [
+            ("META-INF/container.xml", "<container><rootfiles><rootfile full-path=\"OPS/book.opf\"/></rootfiles></container>"),
+            ("OPS/book.opf", "<package><metadata><title>synthetic</title></metadata><manifest><item id=\"c\" href=\"c.xhtml\" media-type=\"application/xhtml+xml\"/></manifest><spine><itemref idref=\"c\"/></spine></package>"),
+            ("OPS/c.xhtml", "<html><body>synthetic</body></html>")
+        ] { zip.start_file(name, zip::write::SimpleFileOptions::default()).unwrap(); zip.write_all(text.as_bytes()).unwrap(); }
+        zip.finish().unwrap();
+        attachment.content_hash = super::super::hex_digest(&fs::read(&source).unwrap());
+        let (raw, created) = publish_attachment_binding(&attachment, &dir).unwrap();
+        assert!(created.unwrap().exists());
+        assert_eq!(serde_json::from_str::<LocalBinding>(&raw).unwrap().content_hash, attachment.content_hash);
+        fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn file_review_android_copy_fallback_is_exclusive_and_idempotent() {

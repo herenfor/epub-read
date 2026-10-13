@@ -256,7 +256,7 @@ async fn lan_cover_roundtrip(already_imported: bool) {
     } else {
         assert_eq!(preview.attached_books, vec![content_hash.clone()]);
     }
-    assert!(preview.missing_books.is_empty());
+    assert!(preview.skipped_books.is_empty());
     let committed = commit(&receiver_handle, &session_id, &transfer_id, false)
         .await
         .expect("commit should succeed");

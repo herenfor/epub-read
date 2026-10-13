@@ -647,8 +647,8 @@ pub(crate) struct ImportedMetadata {
     pub(crate) creator: String,
     pub(crate) language: String,
     pub(crate) spine: Vec<String>,
-    cover_zip_path: Option<String>,
-    cover_mime: String,
+    pub(crate) cover_zip_path: Option<String>,
+    pub(crate) cover_mime: String,
 }
 
 

@@ -14,6 +14,9 @@ mod legacy;
 mod merge;
 mod repository;
 mod schema;
+mod import_selection;
+
+pub use import_selection::{select_local_import, LocalImportSelection, SkippedImportBook};
 
 pub use dto::{
     code_point_count, normalized_code_point_count, parse_portable_state_json,
@@ -41,7 +44,7 @@ pub use repository::{
     AnnotationProjection, AnnotationWriteOutcome, DeleteOutcome, DeleteStatus,
     DirectoryBindingWrite, DirectoryFolderCreate, DirectoryImportBatchOutcome,
     DirectoryPlacementDecision, DirectoryPlacementOutcome, DirectoryPlacementRequest,
-    DirectoryPlacementSnapshot, MigrationOutcome, PortableStore, ProgressProjection, ReleaseTarget,
+    DirectoryPlacementSnapshot, LocalImportOutcome, MigrationOutcome, PortableStore, ProgressProjection, ReleaseTarget,
     ShelfBookProjection, ShelfProjection, WriteOutcome, WriteStatus,
 };
 
@@ -901,16 +904,17 @@ mod tests {
     }
 
     #[test]
-    fn repository_legacy_import_merges_missing_annotations_without_replacing_v3_progress() {
+    fn c6_legacy_import_merges_missing_annotations_without_replacing_v3_progress() {
         let mut store = PortableStore::open_in_memory().unwrap();
         let state: PortableStateV3 = serde_json::from_value(state_json_with_one_book()).unwrap();
         let merged = store.merge_validated_state(state).unwrap();
         let organization = merged.organization.clone();
+        store.save_binding_raw(HASH, "{}").unwrap();
 
         let imported = store
             .import_legacy_records_json(vec![legacy_record_json()], organization)
             .unwrap();
-        let book = &imported.books[HASH];
+        let book = &imported.state.books[HASH];
         assert_eq!(book.metadata.value.title, "书");
         assert_eq!(book.progress.versions.len(), 1);
         assert_eq!(

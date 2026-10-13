@@ -401,7 +401,7 @@ pub fn portable_state_merge_legacy_records(
     manager: State<'_, PortableStateManager>,
     records: Vec<serde_json::Value>,
     organization: Option<LibraryOrganization>,
-) -> PortableResult<PortableStateV3> {
+) -> PortableResult<crate::portable_state::LocalImportOutcome> {
     with_store(&app, &manager, |store| {
         let organization = match organization {
             Some(organization) => organization,
