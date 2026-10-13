@@ -99,6 +99,15 @@
   display: none;
 }
 
+/* A closed overlay drawer kept for reuse (prepared when a book opens): laid
+   out at its real size, never painted or hit; opening plays the entrance. */
+.sidebar-drawer.is-overlay.is-closed.is-warm {
+  display: flex;
+  visibility: hidden;
+  pointer-events: none;
+  animation: none !important;
+}
+
 /* 固定驻留模式（Docked Pin） */
 .sidebar-drawer.is-docked {
   position: fixed;
