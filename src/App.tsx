@@ -2601,11 +2601,11 @@ export default function App() {
       try {
         for (const entry of selectedEntries) resolved.push(await resolveContentHashForEntry(entry));
       } catch (error) {
-        throw new Error(`无法解析选中书籍的内容指纹：${saveFileErrorMessage(error)}`);
+        throw new Error(uiText("notice.archive.hashResolveFailed", { error: saveFileErrorMessage(error) }));
       }
       const bookHashes = [...new Set(resolved)];
       if (bookHashes.length === 0) {
-        throw new Error("选中书籍没有可用的内容指纹，未发起导出");
+        throw new Error(uiText("notice.archive.noContentHash"));
       }
       scope = { kind: "selected", bookHashes };
       rangeLabel = uiPlural("notice.archive.rangeSelected", bookHashes.length, { count: bookHashes.length });
@@ -2624,7 +2624,7 @@ export default function App() {
       const failed = results.find((result) => result.status === "failed");
       if (failed?.status === "failed") throw failed.error;
     } catch (error) {
-      throw new Error(`导出前保存阅读进度失败：${saveFileErrorMessage(error)}`);
+      throw new Error(uiText("notice.archive.progressFlushFailed", { error: saveFileErrorMessage(error) }));
     }
     return { scope, rangeLabel };
   }, [resolveContentHashForEntry]);
