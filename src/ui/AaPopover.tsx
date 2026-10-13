@@ -401,10 +401,12 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
     tabsMotionRef.current?.select(activeTab === "quick" ? 0 : 1, false, false);
   }, [activeTab]);
   // Warm-up draws the detailed page as a real selection (tab highlight and
-  // page state included), then returns to the quick page while still closed.
+  // page state included). Whenever that ends, including an opening during
+  // the stage, the panel is back on the quick page.
+  const warmDetailed = paintWarm === "detailed" && !visible;
   useEffect(() => {
-    if (!visible) setActiveTab(paintWarm === "detailed" ? "detailed" : "quick");
-  }, [paintWarm, visible]);
+    setActiveTab(warmDetailed ? "detailed" : "quick");
+  }, [warmDetailed]);
   const selectTab = (tab: "quick" | "detailed") => {
     if (tabsMotionRef.current) tabsMotionRef.current.select(tab === "quick" ? 0 : 1, true);
     else setActiveTab(tab);
