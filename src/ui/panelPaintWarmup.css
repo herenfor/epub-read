@@ -1,5 +1,6 @@
 /* A panel drawn once under the opening veil (see panelPaintWarmup.tsx).
-   1% opacity still rasterizes and composites everything; 0 would skip it.
+   0.1% opacity still rasterizes and composites everything (below one 8-bit
+   step on screen); 0 would skip it.
    Above the opening veil (300) so nothing occludes it; never hit. */
 .panel-paint-warmup {
   position: fixed;

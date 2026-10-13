@@ -108,7 +108,7 @@
   animation: none !important;
 }
 
-/* Drawn once while warm (panelPaintWarmup): 1% opacity still rasterizes it. */
+/* Drawn once while warm (panelPaintWarmup): 0.1% opacity still rasterizes it. */
 .sidebar-drawer.is-overlay.is-closed.is-warm.is-paint-warm {
   visibility: visible;
   opacity: 0.001;

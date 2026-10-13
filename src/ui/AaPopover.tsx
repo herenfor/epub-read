@@ -120,7 +120,7 @@ export interface AaPopoverProps {
   open?: boolean;
   /** Called once after the first closed (prepared) layout. */
   onPrepared?: () => void;
-  /** While closed: draw this page once, almost transparent (panelPaintWarmup). */
+  /** While closed: draw this page once, practically invisible (panelPaintWarmup). */
   paintWarm?: "quick" | "detailed";
   onClose: () => void;
 }

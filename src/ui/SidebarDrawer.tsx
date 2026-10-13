@@ -33,7 +33,7 @@ export interface SidebarDrawerProps {
   warm?: boolean;
   /** Called once after the first closed (prepared) layout. */
   onPrepared?: () => void;
-  /** While warm: draw once, almost transparent (panelPaintWarmup). */
+  /** While warm: draw once, practically invisible (panelPaintWarmup). */
   paintWarm?: boolean;
 
   // 目录数据

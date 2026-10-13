@@ -57,7 +57,7 @@
   transition: none !important;
 }
 
-/* Drawn once while closed (panelPaintWarmup): 1% opacity still rasterizes
+/* Drawn once while closed (panelPaintWarmup): 0.1% opacity still rasterizes
    it, so the first real opening skips that work. */
 .aa-popover.is-warm.is-paint-warm {
   visibility: visible;
