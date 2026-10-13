@@ -54,6 +54,7 @@ export const notice = defineMessages("notice", {
   "notice.archive.busy": "已有存档或互传任务正在进行，请等待当前任务结束",
   "notice.archive.savePickerFailed": "无法打开保存位置选择器：{error}",
   "notice.archive.exportCancelled": "已取消导出存档",
+  "notice.archive.emptySelection": "没有选中的书可导出",
   "notice.archive.exportedSkipped": { zh: "已导出{range}；附带书籍 {written} 本，跳过 {skipped} 本（如《{title}》：{reason}）", note: "{range} is e.g. 'all library data'." },
   "notice.archive.exportedWithBooks": "已导出{range}，附带书籍 {written} 本",
   "notice.archive.exportedNoBooks": "已导出{range}（未附带书籍文件）",

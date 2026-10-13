@@ -4,7 +4,7 @@ import { APP_EDITION } from "./config/edition";
 import { APP_PLATFORM } from "./config/appPlatform";
 import { platformFromTarget } from "./config/platformValue";
 import type { AppBuildInfo } from "./config/appBuildInfo";
-import { validateAppBuildInfo } from "./config/appBuildInfo";
+import { AppBuildMismatchError, validateAppBuildInfo } from "./config/appBuildInfo";
 import { clearAppBuildSession, setAppBuildSession } from "./config/appBuildSession";
 import { createAppUiLanguageStore, UiLanguageProvider, useUiText } from "./ui/localization/UiLanguageProvider";
 
@@ -46,7 +46,7 @@ function mountApp(root: HTMLElement, App: ComponentType): void {
 export function StartupFailurePage({ error }: { error: unknown }) {
   const message = error instanceof Error ? error.message : String(error);
   const { t } = useUiText();
-  const mismatch = message.includes("不匹配");
+  const mismatch = error instanceof AppBuildMismatchError;
   return (
     <main className="startup-failure" role="alert">
       <h1>{mismatch ? t("startup.mismatch.title") : t("startup.failed.title")}</h1>
@@ -100,7 +100,7 @@ export async function bootstrapApp(
       // Browser preview is allowed to load a Tauri dev host; packaged builds
       // pass an explicit platform and must match the native target.
       if (APP_PLATFORM !== "web" && actualPlatform !== APP_PLATFORM) {
-        throw new Error(`平台不匹配：前端为 ${APP_PLATFORM}，后端为 ${validated.target}`);
+        throw new AppBuildMismatchError(`平台不匹配：前端为 ${APP_PLATFORM}，后端为 ${validated.target}`);
       }
       setAppBuildSession({ source: "desktop", buildInfo: validated, platform: actualPlatform });
     } else {
