@@ -13,6 +13,7 @@ mod error;
 mod legacy;
 mod merge;
 mod repository;
+mod schema;
 
 pub use dto::{
     code_point_count, normalized_code_point_count, parse_portable_state_json,
