@@ -897,6 +897,6 @@
   flex: 0 0 100%;
   min-width: 0;
   box-sizing: border-box;
-  overscroll-behavior: contain;
+  overscroll-behavior: none;
   touch-action: pan-y;
 }

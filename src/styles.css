@@ -149,6 +149,22 @@ body,
   color: var(--fg);
 }
 
+/* 不要滚到头的拉伸回弹（"果冻"）：安卓 WebView 会把滚到头的滚动区整块拉伸压缩，
+ * 只有 overscroll-behavior: none 能关掉（contain 仍会显示）。只加在真正滚动的区域上：
+ * 加在卡片这类"超出隐藏"的元素上会截断手势，书架就滚不动了。其余滚动区原本的 contain 也改成了 none。 */
+.shelf-view,
+.shelf-filter-body,
+.shelf-settings-scroll,
+.shelf-body-search-page-scroll,
+.shelf-body-search-dropdown,
+.shelf-move-list,
+.shelf-folder-modal-body,
+.shelf-folder-popover-menu,
+.shelf-more-reading-popover,
+.font-settings-scroll {
+  overscroll-behavior: none;
+}
+
 body {
   font-family: var(--font-ui);
   -webkit-font-smoothing: antialiased;
@@ -5981,7 +5997,7 @@ select option {
 .app[data-mobile-chrome="true"] .search-panel {
   overflow-x: hidden;
   overflow-y: auto;
-  overscroll-behavior: contain;
+  overscroll-behavior: none;
   padding: 0 16px 16px;
   gap: 12px;
 }

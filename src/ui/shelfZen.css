@@ -2584,7 +2584,7 @@
   max-width: min(320px, calc(100vw - 24px));
   box-sizing: border-box;
   overflow-y: auto;
-  overscroll-behavior: contain;
+  overscroll-behavior: none;
   padding: 6px;
   border-radius: 10px;
   border: 1px solid color-mix(in srgb, var(--panel-border) 70%, transparent);
@@ -2789,7 +2789,7 @@
 .shelf-action-sheet-list {
   min-height: 0;
   overflow-y: auto;
-  overscroll-behavior: contain;
+  overscroll-behavior: none;
   padding-top: 6px;
 }
 

@@ -274,7 +274,7 @@
   box-sizing: border-box;
   overflow-y: auto;
   overflow-x: hidden;
-  overscroll-behavior: contain;
+  overscroll-behavior: none;
   padding: 8px 0;
 }
 
