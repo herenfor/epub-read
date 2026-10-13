@@ -715,12 +715,11 @@ function createShelfBookArchiveInput(id: string): { port: MessagePort; dispose()
   };
 }
 
-// Display and fonts share one slot, and Aa shows one page at a time: two batches.
-const PANEL_WARM_BATCHES: readonly PanelWarmBatch[] = [
-  ["aa", "toc", "search", "reading", "display"],
-  ["aa-detailed", "fonts"],
-];
-const PANEL_WARM_BATCHES_MOBILE: readonly PanelWarmBatch[] = [[...PANEL_WARM_BATCHES[0], "more"], PANEL_WARM_BATCHES[1]];
+// One panel per batch keeps each GPU burst short. The most used panels are
+// drawn under the opening veil, the rest once reading is quiet.
+const PANEL_WARM_VEIL_BATCHES: readonly PanelWarmBatch[] = [["aa"], ["aa-detailed"], ["toc"]];
+const PANEL_WARM_IDLE_BATCHES: readonly PanelWarmBatch[] = [["search"], ["reading"], ["display"], ["fonts"]];
+const PANEL_WARM_IDLE_BATCHES_MOBILE: readonly PanelWarmBatch[] = [["more"], ...PANEL_WARM_IDLE_BATCHES];
 
 export default function App() {
   const { t } = useUiText();
@@ -4511,13 +4510,16 @@ export default function App() {
   const openingPanels = useOpeningPanelPrep(
     view === "reader" && ready && hasReaderDisplayedRef.current && bookKey ? bookKey : null,
   );
-  // 安卓本次运行首次开书：过渡仍遮住时把各面板分两批各画一次（几乎透明、不可交互），
-  // 之后的首次打开不再承担 GPU 首绘。
+  // 安卓本次运行：Aa 与目录在首次开书过渡仍遮住时各画一次，其余面板在阅读安静时逐个画一次
+  // （几乎不可见、不可交互），之后的首次打开不再承担 GPU 首绘。
+  const androidRuntime = runtime.platform === "android";
   const panelWarmup = usePanelPaintWarmup(
     view === "reader" && ready && readerDisplayReady && openingPanels.aa && openingPanels.toc &&
       !openingPanels.pending && foreground.kind === "none" && !mobileMoreOpen && !assistantOpen,
-    runtime.platform !== "android" ? [] : mobileChrome ? PANEL_WARM_BATCHES_MOBILE : PANEL_WARM_BATCHES,
+    androidRuntime ? PANEL_WARM_VEIL_BATCHES : [],
+    !androidRuntime ? [] : mobileChrome ? PANEL_WARM_IDLE_BATCHES_MOBILE : PANEL_WARM_IDLE_BATCHES,
   );
+  useReadingInputStart(view === "reader", panelWarmup.interrupt);
   const warming = panelWarmup.warming;
   // 开书过渡覆盖“解析书籍”、首次“准备阅读位置”与有限的面板准备；之后的换章只用顶部细进度线。
   const readerOpeningVisible =

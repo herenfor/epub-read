@@ -111,7 +111,7 @@
 /* Drawn once while warm (panelPaintWarmup): 1% opacity still rasterizes it. */
 .sidebar-drawer.is-overlay.is-closed.is-warm.is-paint-warm {
   visibility: visible;
-  opacity: 0.01;
+  opacity: 0.001;
   z-index: 400; /* above the opening veil, which covers the warm-up */
 }
 
