@@ -48,7 +48,7 @@ function setup() {
     const [currentId, setCurrentShelfId] = useState<string | null>("a");
     const [isBusy, setShelfBusy] = useState(false);
     const [, setShelfBusyMessage] = useState("");
-    const deletion = useShelfDeletion({ shelfBusyRef: busy, nativeImportRef: native, shelfEntriesRef: entriesRef, localCheckpointsRef: checkpoint, setShelfBusyMessage, setShelfBusy, setShelfEntries: entries.setShelfEntries, setCurrentShelfId, setShelfError: entries.setShelfError, setShelfNotice: notices.setShelfNotice });
+    const deletion = useShelfDeletion({ shelfBusyRef: busy, nativeImportRef: native, shelfEntriesRef: entriesRef, localCheckpointsRef: checkpoint, setShelfBusyMessage, setShelfBusy, setShelfEntries: entries.setShelfEntries, setCurrentShelfId, setShelfError: entries.setShelfError, setShelfNotice: notices.setShelfNotice, refreshOrganization: library.organizationReader.refresh });
     return { entries, notices, organization, hashes, library, actions, deletion, currentId, isBusy };
   }
   let api!: ReturnType<typeof useHost>;
@@ -99,10 +99,13 @@ describe("shelf library host extraction", () => {
       expect(t.store.deleteBook).not.toHaveBeenCalled();
       t.native.current = null;
       t.store.deleteBook.mockImplementation(async (id: string) => { if (id === "b") throw new Error("locked"); });
+      t.store.getOrganization.mockClear();
       await t.dom.run(() => t.current().deletion.handleShelfDeleteMany(["a", "b"]));
       expect(t.current().entries.shelfEntries).toEqual([entry("b")]);
       expect(t.current().currentId).toBeNull();
       expect(t.removeCheckpoint).toHaveBeenCalledExactlyOnceWith("a".repeat(64));
+      // C5: the purge also cleared favorites/folders in the repository; the shelf re-reads them.
+      expect(t.store.getOrganization).toHaveBeenCalled();
       expect(t.current().hashes.contentHashByIdRef.current.has("a")).toBe(false);
       expect(t.current().entries.shelfError).toContain("locked");
       expect(t.busy.current).toBe(false);
