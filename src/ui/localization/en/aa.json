@@ -45,7 +45,7 @@
   "aa.font.default": "System / Book Default",
   "aa.display": "Display",
   "aa.display.tip": "Character replacement, script conversion, screen filters & color assistance",
-  "aa.display.open": "Character & Screen",
+  "aa.display.open": "Text & Filters",
   "aa.group.layout": "Layout & Margins",
   "aa.group.fontDisplay": "Font & Display",
   "aa.lineHeight": "Line Spacing",

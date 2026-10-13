@@ -65,6 +65,12 @@
   z-index: 400; /* above the opening veil, which covers the warm-up */
 }
 
+/* Back from a sub-page (fonts, display): in place, no entrance. */
+.aa-popover.is-resumed,
+.aa-popover-backdrop.is-resumed {
+  animation: none !important;
+}
+
 @keyframes aaPopoverFadeIn {
   from {
     opacity: 0;
@@ -805,7 +811,7 @@
   width: 380px;
 }
 
-.app[data-touch-ui="true"] .aa-popover-title { font-size: 16px; }
+.app[data-touch-ui="true"] .aa-popover-title { font-size: 15px; }
 .app[data-touch-ui="true"] .aa-theme-letter { font-size: 16px; }
 .app[data-touch-ui="true"] .aa-theme-label { font-size: 12px; }
 .app[data-touch-ui="true"] .aa-section-label { font-size: 14px; }

@@ -51,7 +51,7 @@ export const aa = defineMessages("aa", {
   "aa.font.default": "系统 / 书籍默认",
   "aa.display": { zh: "显示", max: 10 },
   "aa.display.tip": "字符替换、繁简显示、画面滤镜与色弱辅助",
-  "aa.display.open": { zh: "字符与画面", note: "Opens character display and visual filter settings." },
+  "aa.display.open": { zh: "字符与滤镜", note: "Opens character display and visual filter settings." },
   "aa.group.layout": "排版与版式",
   "aa.group.fontDisplay": { zh: "字体与显示", note: "Phone Aa sheet only: heading above the font and display rows, placed after layout." },
   "aa.lineHeight": { zh: "行高", max: 10 },
