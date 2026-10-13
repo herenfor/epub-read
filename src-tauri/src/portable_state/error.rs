@@ -54,6 +54,14 @@ impl PortableError {
         Self::new("clock-exhausted", message)
     }
 
+    pub fn unsupported_database_version(message: impl Into<String>) -> Self {
+        Self::new("unsupported-database-version", message)
+    }
+
+    pub fn unrecognized_database_format(message: impl Into<String>) -> Self {
+        Self::new("unrecognized-database-format", message)
+    }
+
     pub fn storage_error(message: impl Into<String>) -> Self {
         Self::new("storage-error", message)
     }

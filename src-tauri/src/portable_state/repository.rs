@@ -834,43 +834,8 @@ impl PortableStore {
         Self::from_connection(connection)
     }
 
-    fn from_connection(connection: Connection) -> PortableResult<Self> {
-        connection.execute_batch(
-            "PRAGMA foreign_keys = ON;
-             CREATE TABLE IF NOT EXISTS book_meta (
-                 hash TEXT PRIMARY KEY NOT NULL,
-                 json TEXT NOT NULL
-             );
-             CREATE TABLE IF NOT EXISTS progress (
-                 hash TEXT PRIMARY KEY NOT NULL,
-                 json TEXT NOT NULL,
-                 local_revision INTEGER NOT NULL
-             );
-             CREATE TABLE IF NOT EXISTS annotations (
-                 hash TEXT NOT NULL,
-                 kind TEXT NOT NULL,
-                 id TEXT NOT NULL,
-                 json TEXT NOT NULL,
-                 local_revision INTEGER NOT NULL,
-                 PRIMARY KEY (hash, kind, id)
-             );
-             CREATE TABLE IF NOT EXISTS organization (
-                 key TEXT PRIMARY KEY NOT NULL,
-                 json TEXT NOT NULL
-             );
-             CREATE TABLE IF NOT EXISTS device_bindings (
-                 hash TEXT PRIMARY KEY NOT NULL,
-                 json TEXT NOT NULL
-             );
-             CREATE TABLE IF NOT EXISTS local_meta (
-                 key TEXT PRIMARY KEY NOT NULL,
-                 json TEXT NOT NULL
-             );
-             CREATE TABLE IF NOT EXISTS directory_bindings (
-                 directory_key TEXT PRIMARY KEY NOT NULL,
-                 folder_id TEXT NOT NULL
-             );",
-        )?;
+    fn from_connection(mut connection: Connection) -> PortableResult<Self> {
+        super::schema::initialize(&mut connection)?;
         Ok(Self {
             connection,
             next_handle: 0,
