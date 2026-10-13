@@ -33,6 +33,8 @@ export interface SidebarDrawerProps {
   warm?: boolean;
   /** Called once after the first closed (prepared) layout. */
   onPrepared?: () => void;
+  /** While warm: draw once, almost transparent (panelPaintWarmup). */
+  paintWarm?: boolean;
 
   // 目录数据
   toc: TocNode[];
@@ -68,6 +70,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
   compact = false,
   warm = false,
   onPrepared,
+  paintWarm = false,
   toc,
   activeHref,
   onNavigateToc,
@@ -202,7 +205,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
       <aside
         ref={drawerRef}
         tabIndex={-1}
-        className={`sidebar-drawer ${mode === "docked" ? "is-docked" : "is-overlay"} side-${side}${compact ? " is-compact" : ""}${open ? " is-open" : " is-closed"}${isClosing ? " is-closing" : ""}${visible ? "" : " is-warm"}`}
+        className={`sidebar-drawer ${mode === "docked" ? "is-docked" : "is-overlay"} side-${side}${compact ? " is-compact" : ""}${open ? " is-open" : " is-closed"}${isClosing ? " is-closing" : ""}${visible ? "" : " is-warm"}${!visible && paintWarm ? " is-paint-warm" : ""}`}
         role="region"
         aria-label={t("sidebar.drawer")}
         aria-hidden={visible ? undefined : true}

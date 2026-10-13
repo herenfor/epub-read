@@ -108,6 +108,12 @@
   animation: none !important;
 }
 
+/* Drawn once while warm (panelPaintWarmup): 1% opacity still rasterizes it. */
+.sidebar-drawer.is-overlay.is-closed.is-warm.is-paint-warm {
+  visibility: visible;
+  opacity: 0.01;
+}
+
 /* 固定驻留模式（Docked Pin） */
 .sidebar-drawer.is-docked {
   position: fixed;
