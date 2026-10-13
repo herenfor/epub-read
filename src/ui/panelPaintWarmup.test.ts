@@ -72,11 +72,11 @@ describe("panel paint warm-up", () => {
   it("hosts a warm-up instance inert and hidden from assistive tech, and adds nothing when inactive", async () => {
     const dom = createReactDomHarness();
     try {
-      await dom.render(createElement(PanelPaintWarmup, { active: true }, createElement("input", { id: "probe" })));
+      await dom.render(createElement(PanelPaintWarmup, { active: true, children: createElement("input", { id: "probe" }) }));
       const host = dom.container.querySelector(".panel-paint-warmup");
       expect(host?.hasAttribute("inert")).toBe(true);
       expect(host?.getAttribute("aria-hidden")).toBe("true");
-      await dom.render(createElement(PanelPaintWarmup, { active: false }, createElement("input", { id: "probe" })));
+      await dom.render(createElement(PanelPaintWarmup, { active: false, children: createElement("input", { id: "probe" }) }));
       expect(dom.container.querySelector(".panel-paint-warmup")).toBeNull();
       expect(dom.container.querySelector("#probe")?.parentElement).toBe(dom.container);
     } finally {
