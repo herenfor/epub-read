@@ -104,6 +104,35 @@ describe("prepared panels are reused by the first real opening", () => {
     ...over,
   });
 
+  it("Aa: the detailed warm-up draws a real tab selection and every opening still starts at the quick tab", async () => {
+    const dom = createReactDomHarness();
+    stubLayoutApis();
+    const props = aaProps({ open: false });
+    const selected = () => [...dom.container.querySelectorAll(".aa-tab-btn")].findIndex((b) => b.getAttribute("aria-selected") === "true");
+    try {
+      await dom.render(createElement(AaPopover, { ...props, paintWarm: "detailed" }));
+      const dialog = dom.container.querySelector(".aa-popover") as HTMLElement;
+      expect(dialog.className).toContain("is-paint-warm");
+      expect(dialog.hasAttribute("inert")).toBe(true);
+      expect(selected()).toBe(1);
+      for (const [name, value] of Object.entries(props)) {
+        if (typeof value === "function") expect(value, name).not.toHaveBeenCalled();
+      }
+      // The stage ends while closed: back to quick.
+      await dom.render(createElement(AaPopover, props));
+      expect(dialog.className).not.toContain("is-paint-warm");
+      expect(selected()).toBe(0);
+      // Opened in the middle of the stage: opens at quick, not as a warm-up.
+      await dom.render(createElement(AaPopover, { ...props, paintWarm: "detailed" }));
+      expect(selected()).toBe(1);
+      await dom.render(createElement(AaPopover, { ...props, open: true, paintWarm: "detailed" }));
+      expect(dialog.className).not.toContain("is-paint-warm");
+      expect(selected()).toBe(0);
+    } finally {
+      await dom.dispose();
+    }
+  });
+
   it("Aa: prepared hidden without user callbacks or focus, then opened in place at the quick tab", async () => {
     const dom = createReactDomHarness();
     stubLayoutApis();
