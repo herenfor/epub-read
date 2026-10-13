@@ -48,8 +48,7 @@ import { useAndroidBack } from "./platform/useAndroidBack";
 import { moveAndroidTaskToBack } from "./platform/androidAppTask";
 import { useExitPresence } from "./ui/menuMotion";
 import { useReaderCursorIdle } from "./ui/readerCursorIdle";
-import { createSidebarNavigationMemory, type SidebarNavigationMemory } from "./ui/sidebarSwipe";
-import { SidebarDrawer, type SidebarMode, type SidebarTab } from "./ui/SidebarDrawer";
+import { SidebarDrawer } from "./ui/SidebarDrawer";
 import { AaPopover } from "./ui/AaPopover";
 import { useOpeningPanelPrep } from "./ui/openingPanelPrep";
 import { resolveReaderLoadFeedback } from "./ui/loadingFeedback";
@@ -60,7 +59,6 @@ import { readBatteryIndicatorEnabled, writeBatteryIndicatorEnabled } from "./ui/
 import { readTapRegionPreferences, writeTapRegionPreferences } from "./ui/tapRegionPreferences";
 import type { ReaderTapPreferences } from "./ui/readerTapRegions";
 import { useResponsiveEnvironment } from "./ui/responsiveEnvironment";
-import { shouldConfirmNoteDiscard } from "./ui/readerCloseGuards";
 import {
   createContentAxis,
   reduceScrubUi,
@@ -271,15 +269,15 @@ import { readTextFile, stat as statFile, writeTextFile } from "@tauri-apps/plugi
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   closeReaderForeground,
-  openNoteComposer,
   openReaderPanel,
-  openReaderTransient,
-  setMenuSubview,
-  stepBackFromMenuSubview,
   type ReaderForeground,
-  type ReaderPanelId,
-  type NoteComposerDraft,
 } from "./ui/readerForeground";
+import {
+  readerForegroundSurfaces,
+  useReaderForeground,
+  useReaderForegroundState,
+  useReaderSidebar,
+} from "./ui/useReaderForeground";
 import { createEditionAiRuntime } from "./features/ai/lifecycle/editionRuntime";
 import { IS_AI_EDITION } from "./config/edition";
 
@@ -794,7 +792,7 @@ export default function App() {
   const [anchor, setAnchor] = useState<string | undefined>(undefined);
   const [anchorNonce, setAnchorNonce] = useState(0);
   const [startAtEnd, setStartAtEnd] = useState({ nonce: 0, atEnd: false });
-  const [foreground, setForeground] = useState<ReaderForeground>({ kind: "none" });
+  const [foreground, setForeground] = useReaderForegroundState();
   // The runtime is inert until the development panel explicitly enables it.
   const aiRuntimeRef = useRef<ReturnType<typeof createEditionAiRuntime> | null>(null);
   if (!aiRuntimeRef.current) aiRuntimeRef.current = createEditionAiRuntime();
@@ -1306,18 +1304,11 @@ export default function App() {
   const foregroundRef = useRef<ReaderForeground>({ kind: "none" });
   foregroundRef.current = foreground;
 
-  // All reader-facing surfaces share one discriminated state. These values
-  // are deliberately derived, never independently writable booleans.
-  const menuOpen = foreground.kind === "panel" && foreground.panel === "menu";
-  const fontSettingsOpen = foreground.kind === "panel" && foreground.panel === "menu" && foreground.view === "fonts";
-  const displaySettingsOpen = foreground.kind === "panel" && foreground.panel === "menu" && foreground.view === "extras";
-  const tocOpen = foreground.kind === "panel" && foreground.panel === "toc";
-  const bookmarkMenuOpen = foreground.kind === "panel" && foreground.panel === "bookmarks";
-  const searchOpen = foreground.kind === "panel" && foreground.panel === "search";
-  const notesOpen = foreground.kind === "panel" && foreground.panel === "notes";
-  const logOpen = foreground.kind === "panel" && foreground.panel === "log";
-  const assistantOpen = foreground.kind === "panel" && foreground.panel === "assistant";
-  const readingSettingsOpen = foreground.kind === "panel" && foreground.panel === "reading";
+  const {
+    menuOpen, fontSettingsOpen, displaySettingsOpen, tocOpen, bookmarkMenuOpen,
+    searchOpen, notesOpen, logOpen, assistantOpen, readingSettingsOpen,
+    selectionContext, footnote, noteComposer,
+  } = readerForegroundSurfaces(foreground);
 
   useEffect(() => {
     if (!displaySettingsOpen) setVisualCompareOriginal(false);
@@ -1330,185 +1321,33 @@ export default function App() {
   useEffect(() => {
     if (imageRequest === null) setVisualCompareOriginal(false);
   }, [imageRequest]);
-  const selectionContext = foreground.kind === "transient" && foreground.transient === "selection"
-    ? foreground.payload
-    : null;
-  const footnote = foreground.kind === "transient" && foreground.transient === "footnote"
-    ? foreground.payload
-    : null;
-  const noteComposer = foreground.kind === "modal" && foreground.modal === "note-composer"
-    ? foreground.draft
-    : null;
-
-  const openPanel = useCallback((panel: ReaderPanelId): void => {
-    const current = foregroundRef.current;
-    if (current.kind === "transient" && current.transient === "footnote") {
-      overlayHoverRef.current = false;
-      readerRef.current?.dismissFootnote();
-    } else if (current.kind === "transient" && current.transient === "selection") {
-      readerRef.current?.clearTextSelection();
-    }
-    setForeground((current) => openReaderPanel(current, panel));
-  }, []);
-  const openTransient = useCallback(
-    (transient: "selection" | "footnote", payload: Parameters<typeof openReaderTransient>[2]): void => {
-      const current = foregroundRef.current;
-      if (current.kind === "transient" && current.transient === "footnote" && transient === "selection") {
-        overlayHoverRef.current = false;
-        readerRef.current?.dismissFootnote();
-      } else if (current.kind === "transient" && current.transient === "selection" && transient === "footnote") {
-        readerRef.current?.clearTextSelection();
+  const { openPanel, openTransient, openComposer, closePanel, closeForeground, requestCloseForeground, showMenuSubview } = useReaderForeground({
+    foregroundRef,
+    setForeground,
+    overlayHoverRef,
+    reader: () => readerRef.current,
+    beforeOpenComposer: (draft) => {
+      const previousContext = activeNoteEditContextRef.current;
+      const nextContext = draft.mode === "edit" ? draft.editContext ?? null : null;
+      activeNoteEditContextRef.current = nextContext;
+      if (previousContext && previousContext !== nextContext) {
+        void getShelfStore().endNoteEdit?.(previousContext).catch(() => undefined);
       }
-      setForeground((state) => openReaderTransient(state, transient, payload));
     },
-  []);
-  const openComposer = useCallback((draft: NoteComposerDraft): void => {
-    const previousContext = activeNoteEditContextRef.current;
-    const nextContext = draft.mode === "edit" ? draft.editContext ?? null : null;
-    activeNoteEditContextRef.current = nextContext;
-    if (previousContext && previousContext !== nextContext) {
-      void getShelfStore().endNoteEdit?.(previousContext).catch(() => undefined);
-    }
-    const current = foregroundRef.current;
-    if (current.kind === "transient" && current.transient === "footnote") {
-      overlayHoverRef.current = false;
-      readerRef.current?.dismissFootnote();
-    } else if (current.kind === "transient" && current.transient === "selection") {
-      readerRef.current?.clearTextSelection();
-    }
-    setForeground((state) => openNoteComposer(state, draft));
-  }, []);
-  const closePanel = useCallback((panel: ReaderPanelId): void => {
-    setForeground((current) =>
-      current.kind === "panel" && current.panel === panel ? closeReaderForeground() : current
-    );
-  }, []);
-  const closeForeground = useCallback((): void => {
-    setForeground(closeReaderForeground());
-    overlayHoverRef.current = false;
-    readerRef.current?.dismissFootnote();
-  }, []);
+    noteComposerDirtyRef,
+  });
 
-  /** 统一前景关闭入口：笔记未保存时确认放弃，其他层直接关闭。 */
-  const requestCloseForeground = useCallback((): void => {
-    const current = foregroundRef.current;
-    if (shouldConfirmNoteDiscard(current, noteComposerDirtyRef.current)) {
-      if (typeof window !== "undefined" && !window.confirm(uiText("notice.discardNote"))) return;
-    }
-    closeForeground();
-  }, [closeForeground]);
-
-  // ---- 统一抽屉（Zen UI Packet B） ----
-  const [sidebarTab, setSidebarTab] = useState<SidebarTab>("toc");
-  const [sidebarSide, setSidebarSide] = useState<"left" | "right">("left");
-  const [sidebarMode, setSidebarMode] = useState<SidebarMode>("overlay");
-  const [sidebarPinned, setSidebarPinned] = useState(false);
-
-  // 手机窄窗只派生 overlay 呈现，保留用户的 dock/pinned 偏好，放宽后恢复。
-  const sidebarNavigationMemories = useRef(new Map<string, SidebarNavigationMemory>());
   const sidebarBookKey = currentShelfId ?? book?.metadata.identifier ?? "unshelved";
-  let sidebarNavigationMemory = sidebarNavigationMemories.current.get(sidebarBookKey);
-  if (!sidebarNavigationMemory) {
-    sidebarNavigationMemory = createSidebarNavigationMemory();
-    sidebarNavigationMemories.current.set(sidebarBookKey, sidebarNavigationMemory);
-  }
-
-  const effectiveSidebarMode: SidebarMode = phoneChrome ? "overlay" : sidebarMode;
-
-  const isSidebarOpen =
-    view === "reader" &&
-    ((effectiveSidebarMode === "docked" && sidebarPinned) ||
-      (foreground.kind === "panel" &&
-        (foreground.panel === "toc" || foreground.panel === "bookmarks" || foreground.panel === "notes")));
-
-  const activeSidebarTab: SidebarTab = (() => {
-    if (foreground.kind === "panel") {
-      if (foreground.panel === "toc") return "toc";
-      if (foreground.panel === "bookmarks") return "bookmarks";
-      if (foreground.panel === "notes") return "notes";
-    }
-    return sidebarTab;
-  })();
-
-  const isDockedSidebar = view === "reader" && effectiveSidebarMode === "docked" && sidebarPinned;
-  // 桌面正文搜索停靠右侧时正文让出位置（宽窗由 CSS 决定），结果和正文同时可见。
-  const isDockedSearch = view === "reader" && !mobileChrome && searchOpen;
-
-  const handleSidebarTabChange = useCallback((tab: SidebarTab) => {
-    setSidebarTab(tab);
-    if (effectiveSidebarMode === "overlay") {
-      openPanel(tab);
-    }
-  }, [effectiveSidebarMode, openPanel]);
-
-  const handleSidebarModeChange = useCallback((mode: SidebarMode) => {
-    setSidebarMode(mode);
-    if (mode === "docked") {
-      setSidebarPinned(true);
-      if (
-        foregroundRef.current.kind === "panel" &&
-        (foregroundRef.current.panel === "toc" ||
-          foregroundRef.current.panel === "bookmarks" ||
-          foregroundRef.current.panel === "notes")
-      ) {
-        closeForeground();
-      }
-    } else {
-      setSidebarPinned(false);
-      openPanel(sidebarTab);
-    }
-  }, [sidebarTab, openPanel, closeForeground]);
-
-  const handleSidebarClose = useCallback(() => {
-    if (!phoneChrome && sidebarMode === "docked") {
-      setSidebarPinned(false);
-    }
-    closeForeground();
-  }, [closeForeground, phoneChrome, sidebarMode]);
-
-  /** 键盘/返回键关闭当前可见层；笔记模态先走统一 dirty 确认。 */
-  const requestCloseCurrentSurface = useCallback((): void => {
-    const current = foregroundRef.current;
-    if (current.kind === "modal" && current.modal === "note-composer") {
-      requestCloseForeground();
-      return;
-    }
-    // Back/Esc on an Aa sub-page returns to the Aa main page; only there does it close Aa.
-    const stepped = stepBackFromMenuSubview(current);
-    if (stepped) {
-      setForeground(stepped);
-      return;
-    }
-    if (isSidebarOpen) {
-      handleSidebarClose();
-      return;
-    }
-    requestCloseForeground();
-  }, [handleSidebarClose, isSidebarOpen, requestCloseForeground]);
-
-  const handleToggleSidebar = useCallback((side?: "left" | "right") => {
-    const targetSide = side || "left";
-    if (isSidebarOpen && sidebarSide === targetSide) {
-      handleSidebarClose();
-    } else {
-      setSidebarSide(targetSide);
-      if (effectiveSidebarMode === "docked") {
-        setSidebarPinned(true);
-      } else {
-        openPanel(sidebarTab);
-      }
-    }
-  }, [isSidebarOpen, sidebarSide, handleSidebarClose, effectiveSidebarMode, sidebarTab, openPanel]);
-
-  const handleOpenBookmarks = useCallback(() => {
-    setSidebarSide("right");
-    setSidebarTab("bookmarks");
-    if (effectiveSidebarMode === "docked") {
-      setSidebarPinned(true);
-    } else {
-      openPanel("bookmarks");
-    }
-  }, [effectiveSidebarMode, openPanel]);
+  const {
+    sidebarSide, sidebarNavigationMemory, effectiveSidebarMode,
+    isSidebarOpen, activeSidebarTab, isDockedSidebar, isDockedSearch,
+    handleSidebarTabChange, handleSidebarModeChange, handleSidebarClose,
+    requestCloseCurrentSurface, handleToggleSidebar, handleOpenBookmarks,
+  } = useReaderSidebar({
+    foreground, foregroundRef, setForeground, view, phoneChrome, mobileChrome,
+    sidebarBookKey,
+    openPanel, closeForeground, requestCloseForeground,
+  });
 
   /** 关闭正文图片浮层；不改变页码/滚动位置，也不记入阅读历史。 */
   const closeImageOverlay = useCallback((): void => {
@@ -6693,7 +6532,7 @@ export default function App() {
                 <div className="menu-backdrop" onClick={closeForeground} />
                 {displaySettingsOpen ? (
                   <ReaderDisplaySettingsPopover
-                    onBack={() => setForeground((current) => setMenuSubview(current, "main"))}
+                    onBack={() => showMenuSubview("main")}
                     onClose={closeForeground}
                   >
                     <TextProjectionPanel
@@ -6731,7 +6570,7 @@ export default function App() {
                   onDelete={(id) => void handleDeleteFont(id)}
                   onImport={handleImportFonts}
                   nativeDragActive={fontNativeDragActive}
-                  onClose={() => setForeground((current) => setMenuSubview(current, "main"))}
+                  onClose={() => showMenuSubview("main")}
                 /> : null}
               </>
             )}
@@ -6748,8 +6587,8 @@ export default function App() {
                 theme={settings.theme}
                 onThemeChange={changeTheme}
                 customFontName={settings.customFontName}
-                onOpenFontSettings={() => setForeground((current) => setMenuSubview(current, "fonts"))}
-                onOpenDisplaySettings={() => setForeground((current) => setMenuSubview(current, "extras"))}
+                onOpenFontSettings={() => showMenuSubview("fonts")}
+                onOpenDisplaySettings={() => showMenuSubview("extras")}
                 lineHeight={settings.lineHeight}
                 onLineHeightChange={settingsActions.setLineHeight}
                 onResetLineHeight={settingsActions.resetLineHeight}
