@@ -13,7 +13,7 @@
   padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
   background: rgba(10, 10, 12, 0.94);
   color: #f2f2f2;
-  overscroll-behavior: contain;
+  overscroll-behavior: none;
   touch-action: none;
 }
 
@@ -26,7 +26,7 @@
   justify-content: center;
   overflow: hidden;
   touch-action: none;
-  overscroll-behavior: contain;
+  overscroll-behavior: none;
   cursor: grab;
 }
 
