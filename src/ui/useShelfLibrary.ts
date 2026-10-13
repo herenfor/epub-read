@@ -256,6 +256,7 @@ export function useShelfOrganizationActions({
 export function useShelfDeletion({
   shelfBusyRef, nativeImportRef, shelfEntriesRef, localCheckpointsRef,
   setShelfBusyMessage, setShelfBusy, setShelfEntries, setCurrentShelfId, setShelfError, setShelfNotice,
+  refreshOrganization,
 }: {
   shelfBusyRef: MutableRefObject<boolean>;
   nativeImportRef: MutableRefObject<string | null>;
@@ -267,6 +268,8 @@ export function useShelfDeletion({
   setCurrentShelfId: Dispatch<SetStateAction<string | null>>;
   setShelfError: EntriesState["setShelfError"];
   setShelfNotice: SetNotice;
+  /** C5: deletion also purges the book's favorite and folder placement; re-read them so a reimport starts clean. */
+  refreshOrganization?: () => Promise<unknown>;
 }) {
   const handleShelfDelete = useCallback(async (id: string) => {
     if (shelfBusyRef.current || nativeImportRef.current) {
@@ -285,13 +288,14 @@ export function useShelfDeletion({
       setShelfEntries((prev) => prev.filter((e) => e.id !== id));
       setCurrentShelfId((curr) => (curr === id ? null : curr));
       setShelfError(null);
+      void refreshOrganization?.().catch(() => undefined);
     } catch (e) {
       setShelfError(uiText("notice.delete.failed", { error: String(e) }));
     } finally {
       shelfBusyRef.current = false;
       setShelfBusy(false);
     }
-  }, []);
+  }, [refreshOrganization]);
 
   const handleShelfDeleteMany = useCallback(async (ids: string[]) => {
     if (shelfBusyRef.current || ids.length === 0) return;
@@ -313,6 +317,7 @@ export function useShelfDeletion({
       }
       setShelfEntries((prev) => prev.filter((entry) => !deletedIds.has(entry.id)));
       setCurrentShelfId((curr) => (curr && deletedIds.has(curr) ? null : curr));
+      if (deleted.length > 0) void refreshOrganization?.().catch(() => undefined);
       if (failed.length === 0) {
         setShelfError(null);
         setShelfNotice({ kind: "ok", text: uiPlural("notice.delete.done", deleted.length, { count: deleted.length }) });
@@ -323,7 +328,7 @@ export function useShelfDeletion({
       shelfBusyRef.current = false;
       setShelfBusy(false);
     }
-  }, []);
+  }, [refreshOrganization]);
 
   return { handleShelfDelete, handleShelfDeleteMany };
 }

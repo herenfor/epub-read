@@ -2734,6 +2734,7 @@ export default function App() {
   const { handleShelfDelete, handleShelfDeleteMany } = useShelfDeletion({
     shelfBusyRef, nativeImportRef, shelfEntriesRef, localCheckpointsRef,
     setShelfBusyMessage, setShelfBusy, setShelfEntries, setCurrentShelfId, setShelfError, setShelfNotice,
+    refreshOrganization: organizationReader.refresh,
   });
 
   // ---- 章节状态回调 ----
