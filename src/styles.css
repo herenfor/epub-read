@@ -4851,7 +4851,10 @@ select option {
 
 /* 手机/平板新书架按实际可用宽度重排，不强制固定列数。 */
 .app[data-mobile-chrome="true"] .shelf-view {
-  padding: 0 12px 24px;
+  padding: 0 28px 24px 12px;
+  /* 安卓 WebView 不支持 scrollbar-width，滑动时右缘会冒出滚动条：滚动区向右多伸 16px，
+   * 让滚动条落在屏幕外（内容位置不变，右侧多出的内边距正好抵消）。 */
+  margin-right: -16px;
 }
 
 .app[data-mobile-chrome="true"] .shelf-head {
