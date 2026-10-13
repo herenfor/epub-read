@@ -61,7 +61,7 @@
    it, so the first real opening skips that work. */
 .aa-popover.is-warm.is-paint-warm {
   visibility: visible;
-  opacity: 0.01;
+  opacity: 0.001;
   z-index: 400; /* above the opening veil, which covers the warm-up */
 }
 
