@@ -1191,6 +1191,19 @@ impl PortableStore {
         Ok(bindings)
     }
 
+    /// Original-file export never needs progress or annotation bodies.
+    pub(crate) fn book_source_metadata(&self) -> PortableResult<BTreeMap<String, BookMetadata>> {
+        let mut query = self.connection.prepare("SELECT hash, json FROM book_meta")?;
+        let rows = query.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        let mut result = BTreeMap::new();
+        for row in rows {
+            let (hash, raw) = row?;
+            let register: Register<BookMetadata> = parse_json(&raw, "book metadata")?;
+            result.insert(hash, register.value);
+        }
+        Ok(result)
+    }
+
     pub fn snapshot(&self) -> PortableResult<PortableStateV3> {
         let transaction = self.connection.unchecked_transaction()?;
         let state = load_state_at_connection(&transaction)?;
