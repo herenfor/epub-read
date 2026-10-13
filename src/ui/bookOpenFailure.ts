@@ -10,27 +10,34 @@ export function bookOpenErrorMessage(error: unknown): string {
   return uiText("notice.openFailure.noReason");
 }
 
+// Machine codes from the source commands' {code, message} rejection (C3a).
+// Only these codes decide the notice; the backend message is never parsed.
+const SOURCE_FAILURES = {
+  "source-unbound": { key: "notice.openFailure.unbound", sourceUnavailable: true },
+  "source-missing": { key: "notice.openFailure.missing", sourceUnavailable: true },
+  "source-changed": { key: "notice.openFailure.changed", sourceUnavailable: true },
+  "source-unavailable": { key: "notice.openFailure.unavailable", sourceUnavailable: true },
+  "relink-mismatch": { key: "notice.openFailure.relinkMismatch", sourceUnavailable: false },
+} as const;
+
+function sourceFailureCode(error: unknown): keyof typeof SOURCE_FAILURES | null {
+  if (typeof error !== "object" || error === null || !("code" in error)) return null;
+  const { code } = error;
+  return typeof code === "string" && Object.hasOwn(SOURCE_FAILURES, code)
+    ? code as keyof typeof SOURCE_FAILURES
+    : null;
+}
+
 export function describeBookOpenFailure(error: unknown): {
   message: string;
   sourceUnavailable: boolean;
 } {
-  const message = bookOpenErrorMessage(error);
-  const missing = message === "本机没有这本书的源文件绑定" ||
-    message === "源 EPUB 已变化或丢失；请重新导入或重新定位";
-  const changed = message.startsWith("源 EPUB 在") && message.includes("发生了变化");
-  const mismatch = message === "选择的 EPUB 内容与目标书籍不一致，未重新绑定";
-  if (changed || mismatch) {
-    return {
-      message: uiText("notice.openFailure.changed", { message }),
-      sourceUnavailable: changed,
-    };
+  const code = sourceFailureCode(error);
+  if (code) {
+    const failure = SOURCE_FAILURES[code];
+    return { message: uiText(failure.key), sourceUnavailable: failure.sourceUnavailable };
   }
-  if (missing) {
-    return {
-      message: uiText("notice.openFailure.missing", { message }),
-      sourceUnavailable: true,
-    };
-  }
-  // Repository, permission and transient IPC errors are not proof of a lost source.
-  return { message, sourceUnavailable: false };
+  // `failed`, unknown codes, repository, permission and transient IPC errors
+  // are not proof of a lost source.
+  return { message: bookOpenErrorMessage(error), sourceUnavailable: false };
 }

@@ -8,19 +8,31 @@ it("开书保护保留原生字符串和结构化错误原因，不显示 undefi
   expect(bookOpenErrorMessage(undefined)).toContain("未收到具体错误原因");
 });
 
-it("开书保护仅在确认源文件缺失或内容变化时标记不可用", () => {
-  for (const error of ["源 EPUB 已变化或丢失；请重新导入或重新定位", "源 EPUB 在打开期间发生了变化；未将旧进度应用到新内容"]) {
-    const failure = describeBookOpenFailure(error);
+it("开书保护只按机器码标记源文件不可用", () => {
+  for (const code of ["source-unbound", "source-missing", "source-changed", "source-unavailable"]) {
+    const failure = describeBookOpenFailure({ code, message: "后端原文" });
     expect(failure.sourceUnavailable).toBe(true);
     expect(failure.message).toContain("原书进度和笔记已保留");
+    expect(failure.message).not.toContain("后端原文");
   }
-  for (const error of ["书库中没有这本书", "读取结果已过期：源文件绑定已变化", { message: "书库写入锁已损坏" }, "无法读取源 EPUB：Permission denied"]) {
-    expect(describeBookOpenFailure(error).sourceUnavailable).toBe(false);
+  expect(describeBookOpenFailure({ code: "source-unavailable", message: "" }).message).toContain("重新导入或重新定位");
+});
+
+it("开书保护不从中文报错猜原因，failed 和未知码显示原文", () => {
+  for (const error of [
+    "源 EPUB 已变化或丢失；请重新导入或重新定位",
+    { message: "本机没有这本书的源文件绑定" },
+    { code: "failed", message: "无法读取源 EPUB：Permission denied" },
+    { code: "storage-error", message: "书库写入锁已损坏" },
+  ]) {
+    const failure = describeBookOpenFailure(error);
+    expect(failure.sourceUnavailable).toBe(false);
+    expect(failure.message).toBe(typeof error === "string" ? error : error.message);
   }
 });
 
 it("开书保护拒绝把另一版本重绑到旧书，并给出独立导入的办法", () => {
-  const failure = describeBookOpenFailure("选择的 EPUB 内容与目标书籍不一致，未重新绑定");
+  const failure = describeBookOpenFailure({ code: "relink-mismatch", message: "选择的 EPUB 内容与目标书籍不一致，未重新绑定" });
   expect(failure.message).toContain("导入为另一版本");
   expect(failure.sourceUnavailable).toBe(false);
 });
