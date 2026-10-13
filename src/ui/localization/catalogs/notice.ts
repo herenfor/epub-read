@@ -14,6 +14,7 @@ export const notice = defineMessages("notice", {
   "notice.statusBar.failed": "系统状态栏调整失败：{error}",
   "notice.keepScreenOn.saveFailed": "屏幕常亮设置保存失败：{error}",
   "notice.keepScreenOn.failed": "屏幕常亮设置失败：{error}",
+  "notice.theme.applyFailed": "主题切换失败：{error}",
   "notice.busy": "正在处理…",
   "notice.discardNote": "放弃未保存的笔记？",
   "notice.import.busy": "已有导入任务正在进行，请等待当前任务结束",
