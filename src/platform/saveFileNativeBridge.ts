@@ -31,9 +31,12 @@ export interface SaveFileExportResult {
   skippedBooks: SkippedBook[];
 }
 
-export interface MissingBook {
+/** C6: a book in an incoming archive that this device did not accept. */
+export interface ImportSkippedBook {
   contentHash: string;
   title: string;
+  reason: "not-local" | "attachment-import-failed" | (string & {});
+  message?: string;
 }
 
 export interface SaveFilePrepareResult {
@@ -43,7 +46,8 @@ export interface SaveFilePrepareResult {
   scopeKind: "all" | "selected";
   bookCount: number;
   attachedBooks: string[];
-  missingBooks: MissingBook[];
+  skippedBookCount: number;
+  skippedBooks: ImportSkippedBook[];
   progressConflictCount: number;
   newBookCount: number;
   hasPreferences: boolean;
@@ -57,7 +61,8 @@ export interface SaveFileCommitResult {
   mergedBooks: number;
   importedBooks: string[];
   newVisibleBooks: string[];
-  missingBooks: MissingBook[];
+  skippedBookCount: number;
+  skippedBooks: ImportSkippedBook[];
   progressConflictBooks: string[];
   appliedPreferences: boolean;
 }

@@ -103,8 +103,8 @@ export function useBookImport({
     try {
       await activatePortableShelfState();
     } catch {
-      // Activation failure keeps the complete legacy mode; its effect reports
-      // the visible error and getShelfStore() falls back to the old backend.
+      // Activation failure keeps the complete legacy mode, or blocks the shelf
+      // for a database this build cannot read; its effect reports the error.
     }
     setShelfBusyMessage(uiText("notice.import.running"));
     setShelfBusy(true);

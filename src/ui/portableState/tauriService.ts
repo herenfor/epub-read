@@ -19,7 +19,7 @@ import type { EntityRef } from "../../core/portableState/portable-write-core";
 import type { Stamp } from "../../core/portableState/portable-register-core";
 import type { PortableStateV3 } from "../../core/portableState/portable-state-types";
 import type { LibraryOrganization, OrganizationCommand } from "../libraryOrganization";
-import type { PortableActivationResult, PortableLegacyImportInput, PortableMergeOptions, PortableStateDataService } from "./dataService";
+import type { PortableActivationResult, PortableLegacyImportInput, PortableLegacyImportResult, PortableMergeOptions, PortableStateDataService } from "./dataService";
 import type { ProgressRuntimeStatus } from "./progressRuntimeGate";
 
 const ERROR_CODES = new Set<PortableStateErrorCode>([
@@ -146,9 +146,9 @@ export class TauriPortableStateService implements PortableStateDataService {
     }
   }
 
-  async mergeLegacyRecords(input: PortableLegacyImportInput): Promise<PortableStateV3> {
+  async mergeLegacyRecords(input: PortableLegacyImportInput): Promise<PortableLegacyImportResult> {
     try {
-      return await invoke<PortableStateV3>("portable_state_merge_legacy_records", {
+      return await invoke<PortableLegacyImportResult>("portable_state_merge_legacy_records", {
         records: input.records,
         organization: input.organization ?? null,
       });

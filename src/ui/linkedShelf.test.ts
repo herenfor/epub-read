@@ -4,13 +4,24 @@ const invokeMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
 
-import { getShelfStore, resetShelfStoreForTest } from "./shelf";
+import { activatePortableShelfState, getShelfStore, LibraryDatabaseBlockedError, resetShelfStoreForTest } from "./shelf";
 
 describe("Tauri linked ShelfStore IPC", () => {
   beforeEach(() => {
     invokeMock.mockReset();
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
     resetShelfStoreForTest();
+  });
+
+  it("blocks the shelf instead of falling back to the legacy store when the database is too new", async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === "portable_state_activate") throw { code: "unsupported-database-version", message: "user_version 3" };
+      throw new Error(`unexpected ${command}`);
+    });
+    await expect(activatePortableShelfState()).rejects.toMatchObject({ code: "unsupported-database-version" });
+    await expect(getShelfStore().list()).rejects.toBeInstanceOf(LibraryDatabaseBlockedError);
+    await expect(getShelfStore().importPaths(["C:\\Books\\a.epub"])).rejects.toBeInstanceOf(LibraryDatabaseBlockedError);
+    expect(invokeMock.mock.calls.map(([command]) => command)).toEqual(["portable_state_activate"]);
   });
 
   it("lists and imports linked paths without sending EPUB bytes", async () => {
