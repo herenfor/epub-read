@@ -64,6 +64,8 @@
   "aa.turnAnimation": "Page Turn",
   "aa.more": "More Advanced Settings",
   "aa.forceHorizontal": "Convert Vertical Text to Horizontal",
+  "aa.pageDirectionLtr": "Always Turn Pages Left to Right",
+  "aa.pageDirectionLtr.hint": "When off, follow the book: in right-to-left books (such as vertical CJK), tap the left side or press ← for the next page",
   "aa.motion": "Reduce Interface Motion",
   "aa.motion.hint": "Removes frosted glass and hover effects and shortens panel animations; page turns are unaffected",
   "aa.preload": "High-Performance Preloading",

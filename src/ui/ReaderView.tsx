@@ -18,7 +18,7 @@ import {
   type RestoreReportTicket,
 } from "../render/paginator";
 import type { ResourceServer } from "../render/resources";
-import { normalizeTurnAnimation, type ReaderSettings, type TurnAnimation } from "../render/settings";
+import { arrowKeyDirection, effectivePageProgression, normalizeTurnAnimation, type ReaderSettings, type TurnAnimation } from "../render/settings";
 import { textProjectionVersion, type CompiledTextProjection } from "../render/textProjection/compile";
 import {
   DEFAULT_TEXT_PROJECTION_PREFERENCES,
@@ -644,6 +644,8 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   onExternalLinkRef.current = props.onExternalLink;
   onPreciseNavigationStatusRef.current = props.onPreciseNavigationStatus;
   onImageActivationRef.current = props.onImageActivation;
+  const progressionRef = useRef<"ltr" | "rtl">("ltr");
+  progressionRef.current = effectivePageProgression(props.book.pageProgression, props.settings, props.book.fixedLayout);
   onRestoreResultRef.current = props.onRestoreResult;
   onUserReadingPositionChangeRef.current = props.onUserReadingPositionChange;
   inputPausedRef.current = props.inputPaused === true;
@@ -769,8 +771,9 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         if (dir === lockedReverseDirRef.current && Date.now() < reverseLockUntilRef.current) return;
         turnPageRef.current(dir, "wheel");
       },
-      onKeyNavigate: (dir) => {
-        if (isActiveSlot(slot) && !inputPausedRef.current) turnPageRef.current(dir, "key");
+      onKeyNavigate: (dir, key) => {
+        if (!isActiveSlot(slot) || inputPausedRef.current) return;
+        turnPageRef.current(arrowKeyDirection(dir, key, progressionRef.current), "key");
       },
       onFootnote: (payload) => {
         if (!isActiveSlot(slot)) return;
@@ -2407,13 +2410,15 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
     imagePlan.index === props.spineIndex ? imagePlan.spread : null);
   const pair = requestedSpread && imageGeometry.columns === 2 ? planned : null;
   const tapGeometry = useMemo(() => createReaderTapGeometry(width, props.tapRegions), [width, props.tapRegions]);
+  const progression = effectivePageProgression(props.book.pageProgression, props.settings, props.book.fixedLayout);
   const tapRouting = useMemo<ReaderTapRouting | null>(() => props.tapRegions ? {
     device: props.tapRegions.device,
     preferences: props.tapRegions.preferences,
+    progression,
     geometry: tapGeometry,
     hostLeft: () => host.current?.getBoundingClientRect().left ?? null,
     feedback: edgeFeedback,
-  } : null, [props.tapRegions, tapGeometry, edgeFeedback]);
+  } : null, [props.tapRegions, progression, tapGeometry, edgeFeedback]);
   let content;
   if (props.settings.readingMode === "scroll" && !props.book.fixedLayout) {
     content = <ContinuousReaderView {...props} ref={ref} />;

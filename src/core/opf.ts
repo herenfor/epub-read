@@ -13,6 +13,8 @@ export interface ParsedOpf {
   metadata: BookMetadata;
   manifest: Map<string, ManifestItem>;
   spine: SpineItem[];
+  /** spine@page-progression-direction; "default" and absent mean the book does not say. */
+  pageProgression?: "ltr" | "rtl";
   guide: GuideRef[];
   /** meta 元素的 name/content 与 property/content（epub3）原始列表 */
   metaPairs: Array<{ name: string; content: string }>;
@@ -139,6 +141,8 @@ export function parseOpf(root: XmlNodeLike): ParsedOpf {
   // ---- spine ----
   const spine: SpineItem[] = [];
   const spineEl = findElements(packageEl, "spine")[0];
+  const progression = spineEl ? attr(spineEl, "page-progression-direction").trim().toLowerCase() : "";
+  const pageProgression = progression === "rtl" || progression === "ltr" ? progression : undefined;
   if (spineEl) {
     for (const ref of findElements(spineEl, "itemref")) {
       const idref = attr(ref, "idref");
@@ -170,7 +174,7 @@ export function parseOpf(root: XmlNodeLike): ParsedOpf {
     }
   }
 
-  return { version, metadata, manifest, spine, guide, metaPairs, issues };
+  return { version, metadata, manifest, spine, pageProgression, guide, metaPairs, issues };
 }
 
 /** 从 metaPairs 里取 EPUB3 rendition 信息。 */

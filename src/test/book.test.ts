@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { strToU8, zipSync } from "fflate";
 import { buildEpub } from "./fixtures";
 import { loadBook, resolveTocHrefs, spineIndexForPath, spineItemPath, DrmError } from "../core/book";
 import { SelectiveEpubArchive } from "../core/selectiveArchive";
@@ -225,5 +226,21 @@ describe("loadBook selective: 按需解压并发收敛", () => {
       extract.mockRestore();
       book.archive?.close();
     }
+  });
+});
+
+describe("spine page-progression-direction", () => {
+  const epub = (spineAttr: string) => zipSync({
+    mimetype: strToU8("application/epub+zip"),
+    "META-INF/container.xml": strToU8('<container><rootfiles><rootfile full-path="OEBPS/book.opf"/></rootfiles></container>'),
+    "OEBPS/book.opf": strToU8(`<package version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>T</dc:title></metadata><manifest><item id="c" href="c.xhtml" media-type="application/xhtml+xml"/></manifest><spine${spineAttr}><itemref idref="c"/></spine></package>`),
+    "OEBPS/c.xhtml": strToU8(CH1),
+  });
+  it("reads rtl/ltr and leaves default or missing undeclared", async () => {
+    expect((await loadBook(epub(' page-progression-direction="rtl"'))).pageProgression).toBe("rtl");
+    expect((await loadBook(epub(' page-progression-direction="ltr"'))).pageProgression).toBe("ltr");
+    expect((await loadBook(epub(' page-progression-direction="default"'))).pageProgression).toBeUndefined();
+    expect((await loadBook(epub(""))).pageProgression).toBeUndefined();
+    expect((await loadBook(epub(' page-progression-direction="rtl"'), { selective: true })).pageProgression).toBe("rtl");
   });
 });

@@ -60,7 +60,8 @@ export function ReadingSettingsContent(props: ReadingSettingsProps) {
       <div className="shelf-settings-card-title">{t("tapRegions.title")}</div>
       <ReaderTapRegionsPanel device={props.tapRegions.device} value={props.tapRegions.preferences}
         onChange={props.onTapRegionsChange} availableWidth={window.innerWidth} availableHeight={window.innerHeight}
-        scrollMode={props.tapRegionsScrollMode} schematic labels={tapLabels} />
+        scrollMode={props.tapRegionsScrollMode} schematic labels={tapLabels}
+        progression={props.tapRegions.progression} />
     </div>}
     {switches.length > 0 && <div className="shelf-settings-card is-list">{switches}</div>}
   </>;

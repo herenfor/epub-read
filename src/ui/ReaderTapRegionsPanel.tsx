@@ -14,6 +14,7 @@ import {
   type ReaderTapPreferences,
   type TapRegionDevice,
   type TapRegionGeometry,
+  type PageProgression,
   type TapRegionSide,
 } from "./readerTapRegions";
 
@@ -35,6 +36,7 @@ export interface ReaderTapRegionsLabels {
   scrollMode: string;
   leftForward: string;
   leftForwardHint: string;
+  rightForward: string;
   reset: string;
 }
 
@@ -56,6 +58,8 @@ export interface ReaderTapRegionsPanelProps {
    */
   schematic?: boolean;
   labels: ReaderTapRegionsLabels;
+  /** Direction of the open book: the preview and the back-side switch follow it. */
+  progression?: PageProgression;
 }
 
 const PREVIEW_MAX_HEIGHT = 220;
@@ -93,7 +97,7 @@ export function ReaderTapRegionsPanel(props: ReaderTapRegionsPanelProps) {
   const split = custom && profile.custom ? profile.custom : tapRegionSplitOf(geometry);
   const update = (next: typeof profile) => props.onChange(withTapRegionProfile(value, device, next));
   const actionLabel = (side: TapRegionSide) =>
-    tapRegionAction(side, device, value) === 1 ? labels.next : labels.prev;
+    tapRegionAction(side, device, value, props.progression) === 1 ? labels.next : labels.prev;
 
   const previewStyle = {
     aspectRatio: `${width} / ${height}`,
@@ -109,7 +113,7 @@ export function ReaderTapRegionsPanel(props: ReaderTapRegionsPanelProps) {
         style={{ left: percentOf(geometry, band.start), width: percentOf(geometry, band.width) }} />,
       <span key={`${side}-arrow`} className={`tap-regions-band-arrow is-${side}`}
         style={{ [side]: percentOf(geometry, band.arrowCenter) }}>
-        <Chevron direction={tapRegionAction(side, device, value)} />
+        <Chevron direction={tapRegionAction(side, device, value, props.progression)} />
       </span>,
     ];
   };
@@ -177,11 +181,12 @@ export function ReaderTapRegionsPanel(props: ReaderTapRegionsPanelProps) {
 
     {device === "touch" && <div className="tap-regions-switch-row">
       <div className="tap-regions-switch-text">
-        <span>{labels.leftForward}</span>
+        <span>{props.progression === "rtl" ? labels.rightForward : labels.leftForward}</span>
         <span className="tap-regions-note">{labels.leftForwardHint}</span>
       </div>
       <label className="aa-switch-label">
-        <input type="checkbox" checked={value.touchLeftTapForward} aria-label={labels.leftForward}
+        <input type="checkbox" checked={value.touchLeftTapForward}
+          aria-label={props.progression === "rtl" ? labels.rightForward : labels.leftForward}
           onChange={(event) => props.onChange({ ...value, touchLeftTapForward: event.target.checked })} />
         <span className="aa-switch-track" />
       </label>

@@ -48,6 +48,35 @@ export interface ReaderSettings {
   preloadNextChapter?: boolean;
   /** 分页翻页动画；undefined = 滑动。只影响绘制，不参与重排比较。 */
   turnAnimation?: TurnAnimation;
+  /** 翻页方向：book 跟随书籍的 page-progression-direction；ltr 始终从左往右。undefined = book。 */
+  pageDirection?: PageDirectionSetting;
+}
+
+export type PageDirectionSetting = "book" | "ltr";
+
+export function normalizePageDirection(value: unknown): PageDirectionSetting {
+  return value === "ltr" ? "ltr" : "book";
+}
+
+/**
+ * The direction pages actually turn in. A right-to-left book turns right to
+ * left unless the reader asked for left-to-right, or forced vertical text into
+ * horizontal lines (horizontal text read right-to-left would be backwards).
+ */
+export function effectivePageProgression(
+  bookProgression: "ltr" | "rtl" | undefined,
+  settings: Pick<ReaderSettings, "pageDirection" | "forceHorizontal">,
+  fixedLayout = false,
+): "ltr" | "rtl" {
+  if (bookProgression !== "rtl" || normalizePageDirection(settings.pageDirection) === "ltr") return "ltr";
+  // forceHorizontal never applies to fixed layout, so such pages keep the book's direction.
+  return settings.forceHorizontal === true && !fixedLayout ? "ltr" : "rtl";
+}
+
+/** ← and → follow the page direction; PageUp, PageDown and Space keep their meaning. */
+export function arrowKeyDirection(dir: 1 | -1, key: string | undefined, progression: "ltr" | "rtl"): 1 | -1 {
+  if (progression !== "rtl" || (key !== "ArrowLeft" && key !== "ArrowRight")) return dir;
+  return dir === 1 ? -1 : 1;
 }
 
 /** slide：内容跟手平移；fade：落位轻推淡入；none：瞬翻。 */
@@ -69,6 +98,7 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
   forceFontOverride: false,
   preloadNextChapter: false,
   turnAnimation: "slide",
+  pageDirection: "book",
 };
 
 /**

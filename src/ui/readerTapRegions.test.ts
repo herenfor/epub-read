@@ -93,6 +93,16 @@ describe("tap region actions", () => {
     expect(tapRegionAction("left", "pc", on)).toBe(-1);
     expect(tapRegionAction("right", "pc", off)).toBe(1);
   });
+
+  it("mirrors forward to the left in a right-to-left book; the back-side option then covers the right", () => {
+    const on = { touchLeftTapForward: true };
+    const off = { touchLeftTapForward: false };
+    expect(tapRegionAction("left", "pc", off, "rtl")).toBe(1);
+    expect(tapRegionAction("right", "pc", on, "rtl")).toBe(-1);
+    expect(tapRegionAction("right", "touch", off, "rtl")).toBe(-1);
+    expect(tapRegionAction("right", "touch", on, "rtl")).toBe(1);
+    expect(tapRegionAction("left", "touch", on, "rtl")).toBe(1);
+  });
 });
 
 describe("tap region panel", () => {

@@ -4,7 +4,7 @@ import { useMenuClose } from "./menuMotion";
 import { useSheetDrag } from "./sheetDrag";
 import { installSidebarSwipe, type SidebarSwipeMotion } from "./sidebarSwipe";
 import { useUiMotion } from "./motionPreference";
-import type { Theme, TurnAnimation } from "../render/settings";
+import type { PageDirectionSetting, Theme, TurnAnimation } from "../render/settings";
 import { PAGE_GAP_MAX_PX, type PageMarginsPx, type ReadingMode, type SpreadGapMode } from "../render/pageLayout";
 import {
   presentationPatch,
@@ -100,6 +100,9 @@ export interface AaPopoverProps {
   // 更多高级选项（折叠）
   forceHorizontal?: boolean;
   onForceHorizontalChange?: (enabled: boolean) => void;
+  /** 翻页方向：跟随书籍 / 始终从左往右 */
+  pageDirection?: PageDirectionSetting;
+  onPageDirectionChange?: (value: PageDirectionSetting) => void;
   preloadNextChapter?: boolean;
   preloadNextChapterDisabled?: boolean;
   onPreloadNextChapterChange?: (enabled: boolean) => void;
@@ -226,6 +229,8 @@ export const AaPopover = React.memo(function AaPopover({
   phoneLayout = false,
   forceHorizontal = false,
   onForceHorizontalChange,
+  pageDirection = "book",
+  onPageDirectionChange,
   preloadNextChapter = false,
   preloadNextChapterDisabled = false,
   onPreloadNextChapterChange,
@@ -798,6 +803,23 @@ export const AaPopover = React.memo(function AaPopover({
                       </div>
                     )}
 
+                    {onPageDirectionChange && (
+                      <div className="aa-advanced-row">
+                        <div className="aa-toggle-text">
+                          <span>{t("aa.pageDirectionLtr")}</span>
+                          <span className="aa-detail-sub">{t("aa.pageDirectionLtr.hint")}</span>
+                        </div>
+                        <label className="aa-switch-label">
+                          <input
+                            type="checkbox"
+                            checked={pageDirection === "ltr"}
+                            onChange={(e) => onPageDirectionChange(e.target.checked ? "ltr" : "book")}
+                          />
+                          <span className="aa-switch-track" />
+                        </label>
+                      </div>
+                    )}
+
                     <div className="aa-advanced-row">
                       <div className="aa-toggle-text">
                         <span>{t("aa.motion")}</span>
@@ -1329,6 +1351,24 @@ export const AaPopover = React.memo(function AaPopover({
                       type="checkbox"
                       checked={forceHorizontal}
                       onChange={(e) => onForceHorizontalChange(e.target.checked)}
+                    />
+                    <span className="aa-switch-track" />
+                  </label>
+                </div>
+              )}
+
+              {/* 翻页方向：关闭时跟随书籍（台版竖排书从右往左翻） */}
+              {onPageDirectionChange && (
+                <div className="aa-section aa-control-row aa-toggle-row">
+                  <div className="aa-toggle-text">
+                    <span className="aa-section-label">{t("aa.pageDirectionLtr")}</span>
+                    <span className="aa-detail-sub">{t("aa.pageDirectionLtr.hint")}</span>
+                  </div>
+                  <label className="aa-switch-label">
+                    <input
+                      type="checkbox"
+                      checked={pageDirection === "ltr"}
+                      onChange={(e) => onPageDirectionChange(e.target.checked ? "ltr" : "book")}
                     />
                     <span className="aa-switch-track" />
                   </label>

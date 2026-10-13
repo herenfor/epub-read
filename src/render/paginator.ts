@@ -2444,8 +2444,8 @@ export interface ChapterPaginatorOptions {
   onInternalNavigationSettled?: () => void;
   /** 滚轮翻页回调（累积阈值后触发，1=下一页 -1=上一页） */
   onWheelNavigate?: (dir: 1 | -1) => void;
-  /** 键盘翻页回调（焦点在书页内时也有效） */
-  onKeyNavigate?: (dir: 1 | -1) => void;
+  /** 键盘翻页回调（焦点在书页内时也有效）；key 让宿主按翻页方向对调左右方向键 */
+  onKeyNavigate?: (dir: 1 | -1, key?: string) => void;
   /** 脚注弹层回调（含文本/HTML/固定状态），由阅读器 UI 显示 */
   onFootnote?: (payload: FootnotePayload) => void;
   /** 桌面端 hover 离开脚注标记时关闭弹层（移动端无 hover，弹层由点击/✕ 关闭） */
@@ -2781,7 +2781,7 @@ export class ChapterPaginator {
   private onBeforeInternalNavigate?: (href: string) => void;
   private onInternalNavigationSettled?: () => void;
   private onWheelNavigate?: (dir: 1 | -1) => void;
-  private onKeyNavigate?: (dir: 1 | -1) => void;
+  private onKeyNavigate?: (dir: 1 | -1, key?: string) => void;
   private onFootnote?: (payload: FootnotePayload) => void;
   private onFootnoteClose?: () => void;
   private onExternalLink?: (url: string) => void;
@@ -8988,10 +8988,10 @@ export class ChapterPaginator {
     const k = e.key;
     if (k === "ArrowRight" || k === "PageDown" || k === " ") {
       e.preventDefault();
-      this.onKeyNavigate?.(1);
+      this.onKeyNavigate?.(1, k);
     } else if (k === "ArrowLeft" || k === "PageUp") {
       e.preventDefault();
-      this.onKeyNavigate?.(-1);
+      this.onKeyNavigate?.(-1, k);
     }
   }
 

@@ -7,6 +7,7 @@ import {
   tapRegionAt,
   tapRegionProfileFor,
   type EdgeTurnRegion,
+  type PageProgression,
   type ReaderTapPreferences,
   type TapRegionDevice,
   type TapRegionGeometry,
@@ -30,11 +31,15 @@ import {
 export interface ReaderTapRegionSettings {
   device: TapRegionDevice;
   preferences: ReaderTapPreferences;
+  /** Direction of the open book; settings opened from the shelf have none (left to right). */
+  progression?: PageProgression;
 }
 
 export interface ReaderTapRouting {
   device: TapRegionDevice;
   preferences: ReaderTapPreferences;
+  /** Undefined = left to right. */
+  progression?: PageProgression;
   geometry: TapRegionGeometry;
   /** Left edge of the presentation host in top-level client coordinates; null when detached. */
   hostLeft(): number | null;
@@ -58,14 +63,14 @@ export function createReaderTapGeometry(availableWidth: number, settings: Reader
 
 /** `clientX` is top-level; `hostLeft` is the presentation host's left edge in the same coordinates. */
 export function routeReaderTap(
-  routing: Pick<ReaderTapRouting, "device" | "preferences" | "geometry">,
+  routing: Pick<ReaderTapRouting, "device" | "preferences" | "geometry" | "progression">,
   hostLeft: number,
   clientX: number,
 ): ReaderTapRoute {
   const region = tapRegionAt(routing.geometry, clientX - hostLeft);
   if (region === null) return { kind: "outside" };
   if (region === "center") return { kind: "center" };
-  return { kind: "turn", side: region, direction: tapRegionAction(region, routing.device, routing.preferences) };
+  return { kind: "turn", side: region, direction: tapRegionAction(region, routing.device, routing.preferences, routing.progression) };
 }
 
 /** Feedback key of a physical side: the arrow belongs to the band that was tapped. */
@@ -97,7 +102,7 @@ export interface EdgeTurnZoneSpec {
 export function edgeTurnZoneSpecs(routing: ReaderTapRouting | null): EdgeTurnZoneSpec[] {
   return (["left", "right"] as const).map((side) => {
     if (!routing) return { side, direction: side === "left" ? -1 : 1 };
-    const direction = tapRegionAction(side, routing.device, routing.preferences);
+    const direction = tapRegionAction(side, routing.device, routing.preferences, routing.progression);
     const natural = (side === "left") === (direction === -1);
     return {
       side,

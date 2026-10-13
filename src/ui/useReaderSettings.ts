@@ -3,7 +3,9 @@ import type { PortablePreferences } from "../core/portableState/portable-state-t
 import { normalizePageOptions } from "../render/pageLayout";
 import {
   DEFAULT_SETTINGS,
+  normalizePageDirection,
   normalizeTurnAnimation,
+  type PageDirectionSetting,
   type PageMarginsPx,
   type ReaderSettings,
   type SpreadGapMode,
@@ -36,6 +38,7 @@ export function useReaderSettings() {
       forceHorizontal: saved.forceHorizontal === true,
       preloadNextChapter: saved.preloadNextChapter === true,
       turnAnimation: normalizeTurnAnimation(saved.turnAnimation),
+      pageDirection: normalizePageDirection(saved.pageDirection),
       // Normalize page options only at the saved-settings boundary.
       ...normalizePageOptions({
         readingMode: saved.readingMode,
@@ -90,6 +93,7 @@ export function useReaderSettings() {
         setSettings((s2) => ({ ...s2, ...patch })),
       setTurnAnimation: (turnAnimation: TurnAnimation) => setSettings((s2) => ({ ...s2, turnAnimation })),
       setForceHorizontal: (enabled: boolean) => setSettings((s2) => ({ ...s2, forceHorizontal: enabled })),
+      setPageDirection: (pageDirection: PageDirectionSetting) => setSettings((s2) => ({ ...s2, pageDirection })),
       setPreloadNextChapter: (enabled: boolean) => setSettings((s2) => ({ ...s2, preloadNextChapter: enabled })),
       setCustomCss: (css: string) => setSettings((s2) => ({ ...s2, customCss: css })),
       setForceFontOverride: (enabled: boolean) => setSettings((s) => ({ ...s, forceFontOverride: enabled })),
