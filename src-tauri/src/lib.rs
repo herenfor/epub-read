@@ -656,6 +656,7 @@ mod tests {
 mod ai;
 mod library_organization;
 mod linked_library;
+mod linked_library_error;
 mod portable_state;
 mod system_fonts;
 
