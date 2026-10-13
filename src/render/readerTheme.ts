@@ -379,7 +379,8 @@ export function sameLayoutSettings(a: ReaderSettings, b: ReaderSettings): boolea
     a.fontWeight === b.fontWeight &&
     a.letterSpacingPx === b.letterSpacingPx &&
     a.wordSpacingPx === b.wordSpacingPx &&
-    a.forceHorizontal === b.forceHorizontal
+    a.forceHorizontal === b.forceHorizontal &&
+    (a.pageDirection ?? "book") === (b.pageDirection ?? "book")
   );
 }
 

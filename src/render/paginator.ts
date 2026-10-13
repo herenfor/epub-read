@@ -1,3 +1,5 @@
+import { effectivePageProgression } from "./settings";
+import { pageAxisSign, pageContentX, readPageScroll, writePageScroll, setPagedFlowDirection, type PageProgression } from "./pagedDirection";
 import { resolveArchiveHref, archiveHref } from "../core/archiveReferences";
 import { applyReaderBodyPercentageSpacing, applyReaderRootPercentageSpacing } from "./percentageSpacing";
 import { sanitizeChapter, VIEWER_ID } from "./sanitize";
@@ -430,7 +432,7 @@ interface AnchorSampleOptions {
   /** scroll：可见区域高度比例；paginated：可见列宽度比例 */
   visibleRatio: number;
   /** paginated 分栏换算；scroll 忽略 */
-  geometry?: { columnWidth: number; columnStep: number; viewStep: number; leadingColumns: number };
+  geometry?: { progression?: PageProgression; columnWidth: number; columnStep: number; viewStep: number; leadingColumns: number };
   /** B-237 paginated only: visible media in the sampled column when the point has no text. */
   mediaAt?: (point: VisibleSamplePoint) => VisibleMediaSample | null;
 }
@@ -463,8 +465,15 @@ function visibleSamplePoints(options: AnchorSampleOptions): VisibleSamplePoint[]
   // （首屏 scrollLeft=0 时看起来正常，一翻页就静默失效）。
   // 版心左原点 = viewer 的 border + padding；第一可见列就在这里。
   const left = viewer.getBoundingClientRect().left + (viewer.clientLeft || 0) + viewerPaddingLeft(viewer);
-  const x = left + colInset;
+  const x = geometry.progression === "rtl"
+    ? viewer.getBoundingClientRect().right - viewerPaddingRight(viewer) - colInset
+    : left + colInset;
   return clampedYs.map((y) => ({ x, y }));
+}
+
+function viewerPaddingRight(viewer: HTMLElement): number {
+  const computed = viewer.ownerDocument.defaultView?.getComputedStyle(viewer);
+  return (parseFloat(computed?.paddingRight ?? "") || 0) + (parseFloat(computed?.borderRightWidth ?? "") || 0);
 }
 
 /** viewer 内容左原点所需的 padding-left（取不到时为 0）。 */
@@ -2436,6 +2445,8 @@ export interface ChapterPaginatorOptions {
   onIssues?: (issues: string[], unresolvedResources: readonly string[]) => void;
   /** 固定版式书：不做行宽自适应，整页显示 */
   fixedLayout?: boolean;
+  /** OPF page progression; logical page/locator identities stay unchanged. */
+  pageProgression?: PageProgression;
   /** 书内链接点击回调（已解析为书内路径，含可选锚点），供阅读器跳转 */
   onNavigate?: (href: string) => void;
   /** 有效书内链接真正改变位置前通知 UI 记录一次可撤销快照。 */
@@ -2777,6 +2788,9 @@ export class ChapterPaginator {
   private onState: (s: ChapterState) => void;
   private onIssues?: (issues: string[], unresolvedResources: readonly string[]) => void;
   private fixedLayout: boolean;
+  private bookPageProgression: PageProgression;
+  private flowProgression: PageProgression = "ltr";
+  private directionSnapshot: { viewer: HTMLElement; key: string; restore: () => void } | null = null;
   private onNavigate?: (href: string) => void;
   private onBeforeInternalNavigate?: (href: string) => void;
   private onInternalNavigationSettled?: () => void;
@@ -2797,6 +2811,53 @@ export class ChapterPaginator {
   private onPlainTap?: (tap: PlainTapInfo) => void;
   private shouldIgnorePlainTap?: () => boolean;
 
+  private readPagedScroll(): number {
+    return this.viewer ? readPageScroll(this.viewer, this.flowProgression) : 0;
+  }
+
+  private writePagedScroll(value: number): void {
+    if (this.viewer) writePageScroll(this.viewer, value, this.flowProgression);
+  }
+
+  private contentClientOrigin(): number {
+    const viewer = this.viewer;
+    if (!viewer) return 0;
+    const rect = viewer.getBoundingClientRect();
+    const style = this.contentDoc?.defaultView?.getComputedStyle(viewer);
+    return this.flowProgression === "rtl"
+      ? (rect.right ?? rect.left + rect.width) - (parseFloat(style?.borderRightWidth ?? "") || 0) - (parseFloat(style?.paddingRight ?? "") || 0)
+      : rect.left + (viewer.clientLeft || 0) + (parseFloat(style?.paddingLeft ?? "") || 0);
+  }
+
+  private axisClientRect(rect: { left: number; right: number }): { left: number; right: number } {
+    if (this.flowProgression !== "rtl" || !this.viewer) return rect;
+    const viewer = this.viewer.getBoundingClientRect();
+    const sum = viewer.left + viewer.right;
+    return { left: sum - rect.right, right: sum - rect.left };
+  }
+
+  private axisContentOrigin(): number {
+    if (this.flowProgression !== "rtl" || !this.viewer) return this.contentClientOrigin();
+    const viewer = this.viewer.getBoundingClientRect();
+    return viewer.left + viewer.right - this.contentClientOrigin();
+  }
+
+  private leadingClientX(rect: { left: number; right?: number; width?: number }): number {
+    return this.flowProgression === "rtl" ? rect.right ?? rect.left + (rect.width ?? 0) : rect.left;
+  }
+
+  private configurePageProgression(viewer: HTMLElement, width: number, height: number): void {
+    const progression = this.scrollMode ? "ltr" : effectivePageProgression(this.bookPageProgression, this.settings, this.fixedLayout);
+    const key = `${progression}:${this.scrollMode}:${width}:${height}`;
+    if (this.directionSnapshot?.viewer === viewer && this.directionSnapshot.key === key) return;
+    this.directionSnapshot?.restore();
+    this.directionSnapshot = null;
+    this.flowProgression = progression;
+    if (!this.scrollMode && (progression === "rtl" || viewer.ownerDocument.defaultView?.getComputedStyle(viewer).direction === "rtl")) {
+      this.directionSnapshot = { viewer, key, restore: setPagedFlowDirection(viewer, progression) };
+    }
+  }
+
   constructor({
     iframe,
     server,
@@ -2805,6 +2866,7 @@ export class ChapterPaginator {
     onState,
     onIssues,
     fixedLayout = false,
+    pageProgression = "ltr",
     onNavigate,
     onBeforeInternalNavigate,
     onInternalNavigationSettled,
@@ -2829,6 +2891,7 @@ export class ChapterPaginator {
     this.onState = onState;
     this.onIssues = onIssues;
     this.fixedLayout = fixedLayout;
+    this.bookPageProgression = pageProgression;
     this.onNavigate = onNavigate;
     this.onBeforeInternalNavigate = onBeforeInternalNavigate;
     this.onInternalNavigationSettled = onInternalNavigationSettled;
@@ -3094,9 +3157,9 @@ export class ChapterPaginator {
     const count = this.metrics.pageCount;
     const layout = this.spreadLayout;
     const step = this.viewStepPx;
-    const key = layout
+    const key = `${this.flowProgression}:` + (layout
       ? `s:${count}:${layout.requiredScrollWidth}:${count > 0 ? spreadStart(layout, count - 1) : 0}`
-      : `p:${count}:${step}`;
+      : `p:${count}:${step}`);
     const cached = this.snapOffsetsCache;
     if (cached && cached.key === key) return cached.offsets;
     const offsets: number[] = [];
@@ -3119,7 +3182,7 @@ export class ChapterPaginator {
   private visualOffset(): number {
     const motion = this.pageMotion;
     if (motion && motion.viewer === this.viewer && motion.driver.active) return motion.driver.read().position;
-    return this.viewer?.scrollLeft ?? 0;
+    return this.readPagedScroll();
   }
 
   /**
@@ -3131,7 +3194,7 @@ export class ChapterPaginator {
     if (!this.nativeSnapAvailable() || !this.viewer) return false;
     const now = this.readVisualPosition();
     if (!now) return false;
-    return chooseNativeSwipeOwner(this.nativeGestureOrigin ?? now, now, direction) === "native";
+    return chooseNativeSwipeOwner(this.nativeGestureOrigin ?? now, now, (direction * pageAxisSign(this.flowProgression)) as 1 | -1) === "native";
   }
 
   /** 手指按下：按当前排版放置吸附点（零尺寸裁剪层，不撑大 scrollWidth）并开启吸附。 */
@@ -3140,17 +3203,17 @@ export class ChapterPaginator {
     const doc = this.contentDoc;
     if (!this.nativeSnapAvailable() || !viewer || !doc) return;
     const offsets = this.nativeSnapOffsets();
-    this.nativeGestureOrigin = readSnapPosition(offsets, viewer.scrollLeft);
+    this.nativeGestureOrigin = readSnapPosition(offsets, this.readPagedScroll());
     if (offsets.length < 2) return;
     const key = offsets.map((value) => value.toFixed(2)).join(",");
     if (!this.nativeSnapLayer || this.nativeSnapLayer.parentNode !== viewer || this.nativeSnapKey !== key) {
       this.nativeSnapLayer?.remove();
       const layer = doc.createElement("epub-snap-points");
       layer.setAttribute("aria-hidden", "true");
-      layer.style.cssText = "position:absolute;left:0;top:0;width:0;height:0;overflow:clip;pointer-events:none;";
+      layer.style.cssText = `position:absolute;${this.flowProgression === "rtl" ? "right" : "left"}:0;top:0;width:0;height:0;overflow:clip;pointer-events:none;`;
       for (const offset of offsets) {
         const point = doc.createElement("span");
-        point.style.cssText = `position:absolute;top:0;left:${offset}px;width:1px;height:1px;scroll-snap-align:start;scroll-snap-stop:always;`;
+        point.style.cssText = `position:absolute;top:0;${this.flowProgression === "rtl" ? "right" : "left"}:${offset}px;width:1px;height:1px;scroll-snap-align:start;scroll-snap-stop:always;`;
         layer.appendChild(point);
       }
       viewer.appendChild(layer);
@@ -3219,7 +3282,7 @@ export class ChapterPaginator {
     if (!this.viewer) return null;
     const offsets = this.nativeSnapOffsets();
     if (offsets.length === 0) return null;
-    const left = this.viewer.scrollLeft;
+    const left = this.readPagedScroll();
     let page = 0;
     for (let i = 1; i < offsets.length; i++) {
       if (Math.abs(offsets[i] - left) < Math.abs(offsets[page] - left)) page = i;
@@ -3400,8 +3463,8 @@ export class ChapterPaginator {
       this.pageMotionUnsupportedKey = key;
       return null;
     }
-    const start = viewer.scrollLeft;
-    const driver = new TransformPageMotion(viewer, { offsets, step, columnsPerScreen: columns }, start,
+    const start = this.readPagedScroll();
+    const driver = new TransformPageMotion(viewer, { offsets, step, columnsPerScreen: columns, progression: this.flowProgression }, start,
       (error) => this.onPageMotionFault(error));
     const session = new PageMotionSession(
       driver,
@@ -3508,7 +3571,7 @@ export class ChapterPaginator {
   private commitNativeSnap(): void {
     if (!this.nativeSnapArmed || !this.viewer || this.nativeSnapTouching) return;
     const offsets = this.nativeSnapOffsets();
-    const left = this.viewer.scrollLeft;
+    const left = this.readPagedScroll();
     const page = this.nearestNativeSnapPage() ?? 0;
     const livePage = this.nativeSnapLivePage;
     this.disarmNativeSnap();
@@ -4058,6 +4121,7 @@ export class ChapterPaginator {
     const win = doc.defaultView;
     const measuredWidth = this.iframe.clientWidth;
     const measuredHeight = this.iframe.clientHeight;
+    this.configurePageProgression(viewer, measuredWidth, measuredHeight);
     // 舒适双页的根内联样式先精确恢复，再恢复其余二阶段补偿。
     this.restoreSpreadReadingAreaStyles();
     // 第二遍 margin / fit-content 处理写回的 inline 值要先恢复，
@@ -4148,8 +4212,7 @@ export class ChapterPaginator {
       try {
         const viewerCs = win?.getComputedStyle(viewer);
         comfortEligible =
-          viewerCs?.writingMode.trim().toLowerCase() === "horizontal-tb" &&
-          viewerCs?.direction.trim().toLowerCase() === "ltr";
+          viewerCs?.writingMode.trim().toLowerCase() === "horizontal-tb";
       } catch {
         comfortEligible = false;
       }
@@ -5500,16 +5563,16 @@ export class ChapterPaginator {
         }
         const rects = members.map((member) =>
           Array.from(member.getClientRects()).map((rect) => ({
-            left: rect.left,
-            right: rect.right,
+            left: this.axisClientRect(rect).left,
+            right: this.axisClientRect(rect).right,
             top: rect.top,
             width: rect.width,
           }))
         );
         const validGeometry = isPercentageFloatGroupGeometryValid({
           rects,
-          viewerLeft: viewerRect.left + (viewer.clientLeft || 0) + viewerPaddingLeft,
-          scrollLeft: viewer.scrollLeft,
+          viewerLeft: this.flowProgression === "rtl" ? this.axisContentOrigin() : viewerRect.left + (viewer.clientLeft || 0) + viewerPaddingLeft,
+          scrollLeft: this.readPagedScroll(),
           step: this.step,
           parentWidth: parentW,
           contentWidth,
@@ -6056,13 +6119,11 @@ export class ChapterPaginator {
     let space: FragmentSpace | null = null;
     if (geometry && geometry.columnWidth > 0 && geometry.columnStep > 0) {
       try {
-        const viewerRect = viewer.getBoundingClientRect();
-        const viewerStyle = win.getComputedStyle(viewer);
-        const paddingLeft = parseFloat(viewerStyle.paddingLeft) || 0;
         space = {
           geometry,
-          originClientX: viewerRect.left + (viewer.clientLeft || 0) + paddingLeft,
-          scrollLeft: viewer.scrollLeft || 0,
+          originClientX: this.contentClientOrigin(),
+          scrollLeft: this.readPagedScroll(),
+          progression: this.flowProgression,
         };
       } catch {
         space = null;
@@ -6106,7 +6167,8 @@ export class ChapterPaginator {
         if (parent === viewer) {
           const column = columnAtPoint(point, space);
           if (column === null) return null;
-          const left = space.originClientX - space.scrollLeft + column * space.geometry.columnStep;
+          const start = space.originClientX + pageAxisSign(this.flowProgression) * (column * space.geometry.columnStep - space.scrollLeft);
+          const left = this.flowProgression === "rtl" ? start - space.geometry.columnWidth : start;
           return {
             el: parent,
             rect: {
@@ -6339,11 +6401,11 @@ export class ChapterPaginator {
     const paddingBottom = parseFloat(viewerCs.paddingBottom) || 0;
     const contentBottom = viewerRect.bottom - paddingBottom;
     // 列坐标原点是 viewer 内容盒左缘（单页边距写在 viewer 的左右 padding 里）。
-    const viewerContentLeft = viewerRect.left + (viewer.clientLeft || 0) + (parseFloat(viewerCs.paddingLeft) || 0);
+    const viewerContentLeft = this.flowProgression === "rtl" ? this.axisContentOrigin() : viewerRect.left + (viewer.clientLeft || 0) + (parseFloat(viewerCs.paddingLeft) || 0);
     const epsilon = 0.5;
     const toRect = (r: DOMRect): FloatFixRect => ({
-      left: r.left,
-      right: r.right,
+      left: this.axisClientRect(r).left,
+      right: this.axisClientRect(r).right,
       top: r.top,
       bottom: r.bottom,
       width: r.width,
@@ -6354,7 +6416,7 @@ export class ChapterPaginator {
     const beforeRects = rectsOf(candidate);
     if (!beforeRects.length) return;
     const columnFor = (x: number): number =>
-      Math.floor((x + viewer.scrollLeft - viewerContentLeft + epsilon) / this.step);
+      Math.floor((x + this.readPagedScroll() - viewerContentLeft + epsilon) / this.step);
     const columnsFor = (rects: FloatFixRect[]): number[] =>
       Array.from(
         new Set(
@@ -6404,7 +6466,7 @@ export class ChapterPaginator {
       estimatedBeforeBottom,
       contentBottom,
       viewerLeft: viewerContentLeft,
-      scrollLeft: viewer.scrollLeft,
+      scrollLeft: this.readPagedScroll(),
       step: this.step,
       pageWidth: this.pageWidth,
       epsilon,
@@ -6665,8 +6727,8 @@ export class ChapterPaginator {
       if (fixes.has(el)) {
         const r = el.getBoundingClientRect();
         if (r.width > 0 || r.height > 0) {
-          const l = r.left + (viewer.scrollLeft || 0);
-          const right = (r.right ?? r.left + r.width) + (viewer.scrollLeft || 0);
+          const l = this.flowProgression === "rtl" ? this.contentX(r.right ?? r.left + r.width) : r.left + (viewer.scrollLeft || 0);
+          const right = this.flowProgression === "rtl" ? this.contentX(r.left) : (r.right ?? r.left + r.width) + (viewer.scrollLeft || 0);
           if (l < minX) minX = l;
           if (right > maxX) maxX = right;
         }
@@ -6683,8 +6745,8 @@ export class ChapterPaginator {
       if (skip) continue;
       const r = el.getBoundingClientRect();
       if (r.width > 0 || r.height > 0) {
-        const l = r.left + (viewer.scrollLeft || 0);
-        const right = (r.right ?? r.left + r.width) + (viewer.scrollLeft || 0);
+        const l = this.flowProgression === "rtl" ? this.contentX(r.right ?? r.left + r.width) : r.left + (viewer.scrollLeft || 0);
+        const right = this.flowProgression === "rtl" ? this.contentX(r.left) : (r.right ?? r.left + r.width) + (viewer.scrollLeft || 0);
         if (l < minX) minX = l;
         if (right > maxX) maxX = right;
       }
@@ -6697,7 +6759,7 @@ export class ChapterPaginator {
     const doc = this.contentDoc;
     if (!viewer || !doc) return [];
     const fragments: Array<{ left: number; right: number }> = [];
-    const scrollLeft = viewer.scrollLeft || 0;
+    const scrollLeft = this.readPagedScroll();
     const viewerRect = viewer.getBoundingClientRect();
     let paddingLeft = 0;
     try {
@@ -6706,7 +6768,7 @@ export class ChapterPaginator {
     } catch {
       paddingLeft = 0;
     }
-    const originClientX = viewerRect.left + (viewer.clientLeft || 0) + paddingLeft;
+    const originClientX = this.flowProgression === "rtl" ? this.contentClientOrigin() : viewerRect.left + (viewer.clientLeft || 0) + paddingLeft;
 
     const clipBounds = new Map<Element, DOMRect>();
     for (const fix of this.inlineClipFixes) {
@@ -6731,8 +6793,8 @@ export class ChapterPaginator {
             const rRight = Math.min(r.right, clip?.right ?? Infinity);
             if (rRight <= rLeft) continue;
             fragments.push({
-              left: clientXToColumnX(rLeft, originClientX, scrollLeft),
-              right: clientXToColumnX(rRight, originClientX, scrollLeft),
+              left: pageContentX(this.flowProgression === "rtl" ? rRight : rLeft, originClientX, scrollLeft, this.flowProgression),
+              right: pageContentX(this.flowProgression === "rtl" ? rLeft : rRight, originClientX, scrollLeft, this.flowProgression),
             });
           }
         } catch {
@@ -6751,8 +6813,8 @@ export class ChapterPaginator {
         const rRight = Math.min(r.right, clip?.right ?? Infinity);
         if (rRight <= rLeft) continue;
         fragments.push({
-          left: clientXToColumnX(rLeft, originClientX, scrollLeft),
-          right: clientXToColumnX(rRight, originClientX, scrollLeft),
+          left: pageContentX(this.flowProgression === "rtl" ? rRight : rLeft, originClientX, scrollLeft, this.flowProgression),
+          right: pageContentX(this.flowProgression === "rtl" ? rLeft : rRight, originClientX, scrollLeft, this.flowProgression),
         });
       } catch {
         // ignore
@@ -6766,8 +6828,8 @@ export class ChapterPaginator {
         const r = (el as HTMLElement).getBoundingClientRect();
         if (r.width <= 0 || r.height <= 0) continue;
         fragments.push({
-          left: clientXToColumnX(r.left, originClientX, scrollLeft),
-          right: clientXToColumnX(r.right, originClientX, scrollLeft),
+          left: pageContentX(this.leadingClientX(r), originClientX, scrollLeft, this.flowProgression),
+          right: pageContentX(this.flowProgression === "rtl" ? r.left : r.right, originClientX, scrollLeft, this.flowProgression),
         });
       }
     }
@@ -6842,10 +6904,10 @@ export class ChapterPaginator {
       },
       readScrollWidth: () => this.viewer?.scrollWidth ?? 0,
       readClientWidth: () => this.viewer?.clientWidth ?? 0,
-      readScrollLeft: () => this.viewer?.scrollLeft ?? 0,
+      readScrollLeft: () => this.readPagedScroll(),
       writeScrollLeft: (value: number) => {
         if (this.viewer) {
-          this.viewer.scrollLeft = value;
+          this.writePagedScroll(value);
         }
       },
     };
@@ -7042,7 +7104,9 @@ export class ChapterPaginator {
         ? viewer.getBoundingClientRect()
         : { left: 0, top: 0, width: (viewer as HTMLElement).clientWidth || 0, height: (viewer as HTMLElement).clientHeight || 0 };
     const originClientX = viewerRect.left + (viewer.clientLeft || 0) + paddingLeft;
-    return clientXToColumnX(clientLeft, originClientX, viewer.scrollLeft || 0);
+    return this.flowProgression === "rtl"
+      ? pageContentX(clientLeft, this.contentClientOrigin(), this.readPagedScroll(), "rtl")
+      : clientXToColumnX(clientLeft, originClientX, viewer.scrollLeft || 0);
   }
 
   private resolveTextAnchorCol(index: VisibleTextIndex, textOffset: number): number | null {
@@ -7059,12 +7123,12 @@ export class ChapterPaginator {
       const rect = Array.from(range.getClientRects()).find((candidate) => candidate.width > 0 || candidate.height > 0);
       if (!rect) return null;
       if (this.spreadLayout) {
-        const colX = this.contentX(rect.left);
+        const colX = this.contentX(this.leadingClientX(rect));
         const physical = columnForContentPoint(colX, this.spreadLayout.geometry);
         return spreadForColumn(this.spreadLayout, physical);
       }
       // 分栏时同一屏内第二栏命中留在包含它的那一屏：物理列 → 屏号。
-      const physical = Math.max(0, Math.floor(this.contentX(rect.left) / this.step));
+      const physical = Math.max(0, Math.floor(this.contentX(this.leadingClientX(rect)) / this.step));
       return Math.max(0, columnToView(physical, this.leadingColumns, this.effectiveColumns));
     } catch {
       return null;
@@ -7106,7 +7170,7 @@ export class ChapterPaginator {
       const mediaEl = this.resolveMediaAnchorElement(mediaAnchor);
       const mediaRect = mediaEl?.getBoundingClientRect();
       if (mediaEl && mediaRect && Number.isFinite(mediaRect.left) && mediaRect.height > 0) {
-        const absX = this.contentX(mediaRect.left);
+        const absX = this.contentX(this.leadingClientX(mediaRect));
         if (this.spreadLayout) {
           const physical = columnForContentPoint(absX, this.spreadLayout.geometry);
           return {
@@ -7127,14 +7191,14 @@ export class ChapterPaginator {
     const el = all[this.anchor.index] as HTMLElement;
     const rect = el.getBoundingClientRect();
     if (this.spreadLayout) {
-      const absX = this.contentX(rect.left) + this.anchor.ratio * rect.width;
+      const absX = this.contentX(rect.left + this.anchor.ratio * rect.width);
       const physical = columnForContentPoint(absX, this.spreadLayout.geometry);
       return {
         col: spreadForColumn(this.spreadLayout, physical),
         source: "legacy",
       };
     }
-    const absX = this.contentX(rect.left) + this.anchor.ratio * rect.width;
+    const absX = this.contentX(rect.left + this.anchor.ratio * rect.width);
     const physical = Math.max(0, Math.floor(absX / this.step));
     return {
       col: Math.max(0, columnToView(physical, this.leadingColumns, this.effectiveColumns)),
@@ -7159,7 +7223,7 @@ export class ChapterPaginator {
         page = commitRes.page;
       }
     } else if (!this.scrollMode) {
-      viewer.scrollLeft = page * this.viewStepPx;
+      this.writePagedScroll(page * this.viewStepPx);
     }
     if (candidate) {
       this.anchor = candidate;
@@ -7296,11 +7360,11 @@ export class ChapterPaginator {
       const rect = rects[0];
       if (!rect) return null;
       if (this.spreadLayout) {
-        const colX = this.contentX(rect.left);
+        const colX = this.contentX(this.leadingClientX(rect));
         const physical = columnForContentPoint(colX, this.spreadLayout.geometry);
         return spreadForColumn(this.spreadLayout, physical);
       }
-      const physical = Math.max(0, Math.floor(this.contentX(rect.left) / this.step));
+      const physical = Math.max(0, Math.floor(this.contentX(this.leadingClientX(rect)) / this.step));
       const col = columnToView(physical, this.leadingColumns, this.effectiveColumns);
       return Number.isFinite(col) ? Math.max(0, col) : null;
     } catch {
@@ -7635,11 +7699,11 @@ export class ChapterPaginator {
     const rect = (target as HTMLElement).getBoundingClientRect();
     let page: number;
     if (this.spreadLayout) {
-      const colX = this.contentX(rect.left);
+      const colX = this.contentX(this.leadingClientX(rect));
       const physical = columnForContentPoint(colX, this.spreadLayout.geometry);
       page = spreadForColumn(this.spreadLayout, physical);
     } else {
-      const physical = Math.max(0, Math.floor(this.contentX(rect.left) / this.step));
+      const physical = Math.max(0, Math.floor(this.contentX(this.leadingClientX(rect)) / this.step));
       page = columnToView(physical, this.leadingColumns, this.effectiveColumns);
     }
     if (!Number.isFinite(page) || page < 0 || page >= this.metrics.pageCount) return null;
@@ -8411,7 +8475,7 @@ export class ChapterPaginator {
     }
     if (this.spreadLayout) {
       const previousPage = this.metrics.currentPage;
-      const previousLeft = this.viewer.scrollLeft;
+      const previousLeft = this.readPagedScroll();
       const adopted = this.adoptedPageUncommitted;
       this.closeFootnoteForNavigation();
       this.clearSearchHighlightForDocument();
@@ -8429,7 +8493,7 @@ export class ChapterPaginator {
     const targetScrollLeft = target * this.viewStepPx;
     const actuallyMoved =
       target !== this.metrics.currentPage ||
-      Math.abs(this.viewer.scrollLeft - targetScrollLeft) > 0.5;
+      Math.abs(this.readPagedScroll() - targetScrollLeft) > 0.5;
     if (!actuallyMoved) {
       if (this.adoptedPageUncommitted) {
         this.adoptedPageUncommitted = false;
@@ -8443,7 +8507,7 @@ export class ChapterPaginator {
     this.adoptedPageUncommitted = false;
     this.closeFootnoteForNavigation();
     this.clearSearchHighlightForDocument();
-    this.viewer.scrollLeft = targetScrollLeft;
+    this.writePagedScroll(targetScrollLeft);
     this.metrics.currentPage = target;
     // 空章判定只由 recompute 负责（此处标记 false，避免误触发自动跳章）
     this.emit(this.readyState(false));
@@ -8479,7 +8543,7 @@ export class ChapterPaginator {
     if (this.footnoteOpen()) this.closeFootnoteForNavigation();
     // JS 动画接手时吸附必须关闭，否则中间帧会被就近吸到整页。
     this.disarmNativeSnap();
-    this.viewer.scrollLeft = scrollLeft;
+    this.writePagedScroll(scrollLeft);
   }
 
   /** 跳到页内锚点（分页：元素所在屏；滚动：元素顶边）。 */
@@ -8502,12 +8566,12 @@ export class ChapterPaginator {
     this.clearSearchHighlightForDocument();
     const rect = el.getBoundingClientRect();
     if (this.spreadLayout) {
-      const colX = this.contentX(rect.left);
+      const colX = this.contentX(this.leadingClientX(rect));
       const physical = columnForContentPoint(colX, this.spreadLayout.geometry);
       this.setPage(spreadForColumn(this.spreadLayout, physical));
       return;
     }
-    const physical = Math.max(0, Math.floor(this.contentX(rect.left) / this.step));
+    const physical = Math.max(0, Math.floor(this.contentX(this.leadingClientX(rect)) / this.step));
     this.setPage(columnToView(physical, this.leadingColumns, this.effectiveColumns));
   }
 
@@ -8544,7 +8608,7 @@ export class ChapterPaginator {
       const el = this.resolveMediaAnchorElement(bookmark.mediaAnchor);
       if (el && el.getBoundingClientRect().height > 0) {
         const r = el.getBoundingClientRect();
-        const colX = this.contentX(r.left);
+        const colX = this.contentX(this.leadingClientX(r));
         const physical = columnForContentPoint(colX, this.spreadLayout.geometry);
         targetPage = spreadForColumn(this.spreadLayout, physical);
       }
@@ -8663,13 +8727,13 @@ export class ChapterPaginator {
     if (!doc || !viewer || viewer.clientWidth <= 0) return null;
     const index = this.textIndex ?? this.buildTextIndex(doc, viewer);
     this.textIndex = index;
-    const rect = viewer.getBoundingClientRect();
     // 通用原点：viewer 矩形（含运动层 transform/窗口偏移）+ 内边距，再换算到视觉偏移；
     // 静止时 position.left 就是 scrollLeft。可视范围是 iframe 视口而非 viewer 盒。
     const x = visibleSnapColumnSampleX({
       position,
-      contentOriginClientX: rect.left + (viewer.clientLeft || 0) + viewerPaddingLeft(viewer) +
-        (position.left - viewer.scrollLeft),
+      contentOriginClientX: this.contentClientOrigin() +
+        pageAxisSign(this.flowProgression) * (position.left - this.readPagedScroll()),
+      progression: this.flowProgression,
       viewportLeft: 0,
       viewportRight: doc.documentElement.clientWidth || viewer.clientWidth,
       columnWidth: this.effectiveColumnWidth,
@@ -8684,6 +8748,7 @@ export class ChapterPaginator {
       mode: "paginated",
       visibleRatio: 0.5,
       geometry: {
+        progression: this.flowProgression,
         columnWidth: this.effectiveColumnWidth,
         columnStep: this.effectiveColumnStep,
         viewStep: this.effectiveViewStep,
@@ -9534,6 +9599,8 @@ export class ChapterPaginator {
 
   dispose(): void {
     this.disposePageMotion();
+    this.directionSnapshot?.restore();
+    this.directionSnapshot = null;
     this.disposed = true;
     this.cancelPendingAnchorSample?.();
     if (this.pendingPrecise) {

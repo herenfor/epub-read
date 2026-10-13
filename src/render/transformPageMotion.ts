@@ -11,6 +11,7 @@
  */
 import type { InterruptResult, MotionSample, PageMotionDriver, SettlePlan } from "./pageMotion";
 import { settleProgress } from "./pageMotion";
+import { pageAxisSign, readPageScroll, writePageScroll, type PageProgression } from "./pagedDirection";
 
 const WINDOW_SCREENS = 5;
 const KEYFRAMES = 32;
@@ -23,6 +24,7 @@ export interface TransformMotionLayout {
   readonly step: number;
   /** 每屏栏数（双页为 2）。 */
   readonly columnsPerScreen: number;
+  readonly progression?: PageProgression;
 }
 
 export class TransformPageMotion implements PageMotionDriver {
@@ -35,6 +37,7 @@ export class TransformPageMotion implements PageMotionDriver {
   private restoreInline: (() => void) | null = null;
   private readonly windowScreens: number;
   private readonly windowMid: number;
+  private readonly progression: PageProgression;
 
   constructor(
     private readonly viewer: HTMLElement,
@@ -43,6 +46,7 @@ export class TransformPageMotion implements PageMotionDriver {
     private readonly onFault: (error: unknown) => void,
   ) {
     this.held = initialPosition;
+    this.progression = layout.progression ?? "ltr";
     this.windowScreens = Math.min(WINDOW_SCREENS, layout.offsets.length);
     this.windowMid = Math.floor(this.windowScreens / 2);
   }
@@ -54,12 +58,12 @@ export class TransformPageMotion implements PageMotionDriver {
 
   read(): MotionSample {
     // 正常几何下以真实 scrollLeft 为准：两次运动之间可能有跳转/恢复直接改过它。
-    if (this.windowStart === null) return { position: this.viewer.scrollLeft };
+    if (this.windowStart === null) return { position: readPageScroll(this.viewer, this.progression) };
     if (!this.animation) return { position: this.held };
     // 只在中断/显式快照/收尾时读取，不逐帧读。
     const value = this.viewer.ownerDocument.defaultView?.getComputedStyle(this.viewer).transform ?? "none";
     const x = value === "none" ? 0 : new DOMMatrixReadOnly(value).m41;
-    return { position: this.windowStart + this.windowMid * this.layout.step - x };
+    return { position: this.windowStart + this.windowMid * this.layout.step - x * pageAxisSign(this.progression) };
   }
 
   interrupt(): InterruptResult {
@@ -83,7 +87,7 @@ export class TransformPageMotion implements PageMotionDriver {
 
   animateTo(position: number, plan: SettlePlan, done: () => void): void {
     if (this.disposed) return;
-    const from = this.windowStart === null ? this.viewer.scrollLeft : this.held;
+    const from = this.windowStart === null ? readPageScroll(this.viewer, this.progression) : this.held;
     this.held = from;
     const ticket = ++this.generation;
     if (plan.durationMs <= 0 || !this.ensureWindow(Math.min(from, position), Math.max(from, position))) {
@@ -142,7 +146,7 @@ export class TransformPageMotion implements PageMotionDriver {
     this.animation = null;
     this.held = position;
     if (this.windowStart !== null) this.applyTransform();
-    else this.viewer.scrollLeft = position;
+    else writePageScroll(this.viewer, position, this.progression);
     previous?.cancel();
   }
 
@@ -160,7 +164,7 @@ export class TransformPageMotion implements PageMotionDriver {
       this.restoreInline?.();
       this.restoreInline = null;
     }
-    this.viewer.scrollLeft = position;
+    writePageScroll(this.viewer, position, this.progression);
     previous?.cancel();
   }
 
@@ -173,7 +177,7 @@ export class TransformPageMotion implements PageMotionDriver {
 
   private transformFor(position: number): string {
     const start = this.windowStart ?? 0;
-    return `translateX(${start + this.windowMid * this.layout.step - position}px)`;
+    return `translateX(${pageAxisSign(this.progression) * (start + this.windowMid * this.layout.step - position)}px)`;
   }
 
   private applyTransform(): void {
@@ -207,7 +211,8 @@ export class TransformPageMotion implements PageMotionDriver {
       // The last column has no trailing gap. Multiplying step by K adds that
       // gap to the window and changes column width in ordinary single-page layouts.
       viewer.style.setProperty("width", `${width + (this.windowScreens - 1) * step}px`);
-      viewer.style.setProperty("margin-left", `${-this.windowMid * step}px`);
+      const physicalMid = this.progression === "rtl" ? this.windowScreens - 1 - this.windowMid : this.windowMid;
+      viewer.style.setProperty("margin-left", `${-physicalMid * step}px`);
       viewer.style.setProperty("column-count", String(this.windowScreens * columnsPerScreen));
       viewer.style.setProperty("will-change", "transform");
       const after = viewer.scrollWidth;
@@ -224,8 +229,8 @@ export class TransformPageMotion implements PageMotionDriver {
     if (low >= start && high <= start + span) return true;
     const maxStart = Math.max(0, viewer.scrollWidth - viewer.clientWidth);
     const wanted = Math.round((low + high) / 2 - this.windowMid * step);
-    viewer.scrollLeft = Math.max(0, Math.min(maxStart, wanted));
-    this.windowStart = viewer.scrollLeft;
+    writePageScroll(viewer, Math.max(0, Math.min(maxStart, wanted)), this.progression);
+    this.windowStart = readPageScroll(viewer, this.progression);
     this.applyTransform();
     return true;
   }

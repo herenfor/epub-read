@@ -1,3 +1,4 @@
+import { pageAxisSign } from "../render/pagedDirection";
 import { surfaceBackground } from "./readerSurfaceBackground";
 import { forwardRef, useContext, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Book } from "../core/types";
@@ -402,7 +403,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       return;
     }
     if (turnAnimTimerRef.current) clearTimeout(turnAnimTimerRef.current);
-    setTurnAnim({ direction: dir });
+    setTurnAnim({ direction: (dir * pageAxisSign(progressionRef.current)) as 1 | -1 });
     turnAnimTimerRef.current = setTimeout(() => setTurnAnim(null), 180);
   };
 
@@ -419,7 +420,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     delete main.dataset.turnExit;
     delete main.dataset.turnEnter;
     if (phase === null) return;
-    main.dataset[phase === "exit" ? "turnExit" : "turnEnter"] = dir === 1 ? "next" : "prev";
+    main.dataset[phase === "exit" ? "turnExit" : "turnEnter"] = dir * pageAxisSign(progressionRef.current) === 1 ? "next" : "prev";
     chapterTurnTimerRef.current = setTimeout(() => {
       if (phaseTicket !== chapterTurnPhaseRef.current) return;
       // 滑出兜底：新章失败/取消时不能让正文停在滑出态。
@@ -724,6 +725,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       server: server,
       settings: slot.renderSettings,
       strictXml: book.version === 2,
+      pageProgression: book.pageProgression,
       onState: (state) => {
         slot.state = state;
         if (state.status !== "ready") slot.ready = false;
@@ -833,8 +835,8 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       },
       externalScroll: undefined,
       pagedSwipe: {
-        onNext: () => turnPageRef.current(1, "ui"),
-        onPrev: () => turnPageRef.current(-1, "ui"),
+        onNext: () => turnPageRef.current(pageAxisSign(progressionRef.current), "ui"),
+        onPrev: () => turnPageRef.current((-pageAxisSign(progressionRef.current)) as 1 | -1, "ui"),
         shouldIgnore: () =>
           !isActiveSlot(slot) ||
           inputPausedRef.current ||
@@ -1978,7 +1980,8 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       }
       return;
     }
-    const direction = dx < 0 ? 1 : -1;
+    const logicalDx = dx * pageAxisSign(progressionRef.current);
+    const direction = logicalDx < 0 ? 1 : -1;
     const p = paginatorRef.current;
     if (p && resolvedTurnAnimation() === "slide" && p.pageMotionAvailable) {
       let motionDrag = motionDragRef.current;
@@ -1994,8 +1997,8 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       }
       if (motionDrag) {
         // 运动层 1:1 跟手（只写合成层 transform）；静止于章边向外拖则走下方跨章预览。
-        p.motionDrag(motionDrag.ticket, dx);
-        motionDrag.samples.push({ t: performance.now(), x: -dx });
+        p.motionDrag(motionDrag.ticket, logicalDx);
+        motionDrag.samples.push({ t: performance.now(), x: -logicalDx });
         if (motionDrag.samples.length > 8) motionDrag.samples.shift();
         return;
       }
@@ -2013,7 +2016,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       }
       if (drag) {
         // 同章相邻页已在同一多栏文档内：内容 1:1 跟手，不再平移 iframe 或显示文字提示。
-        drag.scrollLeft = dragScrollLeft(drag.frame, dx);
+        drag.scrollLeft = dragScrollLeft(drag.frame, logicalDx);
         p.previewPagedScroll(drag.scrollLeft);
         drag.samples.push({ t: performance.now(), x: drag.scrollLeft });
         if (drag.samples.length > 8) drag.samples.shift();
@@ -2064,8 +2067,8 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     if (!main || settings.readingMode === "scroll") return;
     main.dataset.swipeInput = "true";
     const cleanup = installPagedSwipe(main, {
-      onNext: () => turnPageRef.current(1, "ui"),
-      onPrev: () => turnPageRef.current(-1, "ui"),
+      onNext: () => turnPageRef.current(pageAxisSign(progressionRef.current), "ui"),
+      onPrev: () => turnPageRef.current((-pageAxisSign(progressionRef.current)) as 1 | -1, "ui"),
       onPreview: (dx) => updateSwipePreviewRef.current(dx),
       onGestureStart: () => {
         paginatorRef.current?.prepareMotion(true);
