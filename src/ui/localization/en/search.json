@@ -21,6 +21,7 @@
   "search.index.partial.body": "Indexed books can be searched normally. Continuing indexing will add the remaining books.",
   "search.index.cancelled.body": "Completed books remain indexed and searchable. You can resume indexing remaining books whenever needed.",
   "search.index.error.body": "Indexing could not be completed. Completed books remain indexed.",
+  "search.index.interrupted": "The last indexing run stopped when the app exited. Books already indexed can still be searched.",
   "search.index.auto": "Auto",
   "search.index.autoRecommended": "Auto (Rec. {count})",
   "search.index.manual": "Manual",

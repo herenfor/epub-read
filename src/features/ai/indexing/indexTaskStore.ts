@@ -45,7 +45,10 @@ export function listLibraryIndexTasks(): Promise<NativeIndexTask[]> {
   );
 }
 
-/** A cancelled active task with the startup-reclaim message represents an unclean exit. */
+/** Machine code the backend writes on a task it cancelled because the app exited (C3c). */
+export const APP_EXIT_TASK_ERROR = "app-exit";
+
+/** A cancelled active task reclaimed at app exit represents an unclean exit. */
 export function latestInterruptedLibraryIndexTask(
   tasks: readonly NativeIndexTask[],
 ): NativeIndexTask | undefined {
@@ -54,7 +57,7 @@ export function latestInterruptedLibraryIndexTask(
     .sort((left, right) => right.updatedAtMs - left.updatedAtMs)[0];
   return latest?.state === "cancelled"
     && latest.cancelRequested
-    && latest.error?.includes("应用退出")
+    && latest.error === APP_EXIT_TASK_ERROR
     ? latest
     : undefined;
 }

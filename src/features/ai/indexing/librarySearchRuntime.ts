@@ -14,6 +14,7 @@ import {
   type LibraryIndexProgress,
   type LibraryIndexResult,
 } from "./libraryIndexer";
+import { uiText } from "../../../ui/localization/UiLanguageProvider";
 import { createDefaultCorpusWorkerFactory } from "./corpusWorkerProtocol";
 import { createWorkerLibraryIndexerFactory } from "./workerLibraryIndexer";
 import {
@@ -162,7 +163,7 @@ export class LibrarySearchRuntime {
           indexSummary: summary,
           indexProgress: { completed: summary.indexed, total: summary.total, titles: [] },
           indexState: phaseAfterIndexCheck(summary),
-          indexError: summary.interrupted ? "上次建库在应用退出时中断，已完成书籍仍然可用。" : undefined,
+          indexError: summary.interrupted ? uiText("search.index.interrupted") : undefined,
         });
         this.scheduleSearch();
       })
