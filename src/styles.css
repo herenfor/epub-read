@@ -3263,9 +3263,8 @@ select option {
 .font-settings-override .aa-switch-label:has(input:disabled) { opacity: 0.5; cursor: default; }
 .font-settings-override-hint { color: var(--muted); font-size: 11px; line-height: 1.45; }
 .font-search { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--panel-border); border-radius: 5px; background: var(--bg); color: var(--fg); }
-.font-settings-tabs { display: flex; gap: 4px; }
-.font-settings-tabs button { flex: 1; border: 0; border-radius: 4px; padding: 7px 4px; color: var(--fg); background: transparent; }
-.font-settings-tabs button.active { color: var(--accent); background: var(--btn-tint); font-weight: 600; }
+/* 系统/已导入：与 Aa 里的分段胶囊同款（aa-segmented-capsule），占满一行。 */
+.font-settings-panel .font-settings-tabs { display: flex; flex: none; }
 .font-settings-scroll { min-height: 0; flex: 1; overflow: auto; }
 .font-settings-section { padding: 10px 4px 5px; color: var(--muted); font-size: 11px; font-weight: 700; }
 .font-settings-row-wrap { display: flex; align-items: center; min-height: 36px; }
@@ -5797,7 +5796,7 @@ select option {
 }
 
 .app[data-touch-ui="true"] .font-settings-panel .menu-head {
-  font-size: 16px;
+  font-size: 15px; /* 与“字符与滤镜”子页标题一致 */
 }
 
 .app[data-touch-ui="true"] .font-settings-current {
@@ -5820,10 +5819,14 @@ select option {
   font-size: 15px;
 }
 
-.app[data-touch-ui="true"] .font-settings-tabs button {
-  min-height: 44px;
-  border-radius: 10px;
-  font-size: 14px;
+.app[data-touch-ui="true"] .font-settings-panel .font-settings-tabs {
+  height: auto;
+  min-height: 52px; /* 与 Aa 胶囊一致：内部 48px 命中 + 上下各 2px */
+}
+
+.app[data-touch-ui="true"] .font-settings-tabs .aa-segmented-btn {
+  height: auto;
+  min-height: 48px;
 }
 
 .app[data-touch-ui="true"] .font-settings-section {

@@ -13,7 +13,7 @@ export interface ReaderDisplaySettingsPopoverProps {
 }
 
 /**
- * “字符与画面”是 Aa 面板的子页：沿用同一外壳（位置、材质、遮罩、入退场、
+ * “字符与滤镜”是 Aa 面板的子页：沿用同一外壳（位置、材质、遮罩、入退场、
  * 手机底部面板与触摸尺寸），只替换头部与内容。
  */
 export function ReaderDisplaySettingsPopover({ onBack, onClose, children }: ReaderDisplaySettingsPopoverProps) {

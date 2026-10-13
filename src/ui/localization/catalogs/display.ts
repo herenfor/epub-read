@@ -1,14 +1,14 @@
 import { defineMessages } from "../defineMessages";
 
 /**
- * Reader "字符与画面" sub-page: character display (Chinese script conversion
+ * Reader "字符与滤镜" sub-page: character display (Chinese script conversion
  * and replacement rules), visual filters and colour-weakness assistance.
  */
 export const display = defineMessages("display", {
-  "display.dialog": "字符与画面设置",
+  "display.dialog": "字符与滤镜设置",
   "display.back.tip": "返回排版与外观",
   "display.back": "返回",
-  "display.title": { zh: "字符与画面", max: 16 },
+  "display.title": { zh: "字符与滤镜", max: 16 },
   "display.close.tip": "关闭设置 (Esc)",
   "display.close": "关闭",
 

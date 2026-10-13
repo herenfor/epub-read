@@ -5875,6 +5875,7 @@ export default function App() {
               <AaPopover
                 key={bookKey}
                 open={menuOpen && !displaySettingsOpen && !fontSettingsOpen}
+                suspended={menuOpen && (displaySettingsOpen || fontSettingsOpen)}
                 onPrepared={() => openingPanels.prepared(bookKey, "aa")}
                 paintWarm={warming("aa-detailed") ? "detailed" : warming("aa") ? "quick" : undefined}
                 phoneLayout={phoneChrome}

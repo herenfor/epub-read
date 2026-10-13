@@ -158,9 +158,9 @@ export function FontSettingsPanel(props: FontSettingsPanelProps) {
     <button className={`font-settings-row${!props.source ? " active" : ""}`} onClick={props.onSelectBook}>{t("fonts.followBook")}{!props.source ? " ✓" : ""}</button>
     <input className="font-search" placeholder={t("fonts.search")} value={query}
       onChange={(event) => { setQuery(event.target.value); resetScroll(); }} />
-    <div className="font-settings-tabs">
-      <button className={tab === "system" ? "active" : ""} onClick={() => selectTab("system")}>{t("fonts.tab.system", { count: systems.length })}</button>
-      <button className={tab === "imported" ? "active" : ""} onClick={() => selectTab("imported")}>{t("fonts.tab.imported", { count: imported.length })}</button>
+    <div className="font-settings-tabs aa-segmented-capsule">
+      <button type="button" className={`aa-segmented-btn${tab === "system" ? " active" : ""}`} onClick={() => selectTab("system")}>{t("fonts.tab.system", { count: systems.length })}</button>
+      <button type="button" className={`aa-segmented-btn${tab === "imported" ? " active" : ""}`} onClick={() => selectTab("imported")}>{t("fonts.tab.imported", { count: imported.length })}</button>
     </div>
     <div ref={scrollRef} className="font-settings-scroll" onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}>
       {tab === "system" && props.systemFontsStatus === "loading" && <div className="font-empty">{t("fonts.system.loading")}</div>}

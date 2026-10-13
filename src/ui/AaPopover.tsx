@@ -122,6 +122,11 @@ export interface AaPopoverProps {
   onPrepared?: () => void;
   /** While closed: draw this page once, practically invisible (panelPaintWarmup). */
   paintWarm?: "quick" | "detailed";
+  /**
+   * Hidden behind one of its own sub-pages (fonts, display): keeps its page,
+   * height and scroll, and comes back in place without an entrance.
+   */
+  suspended?: boolean;
   onClose: () => void;
 }
 
@@ -233,6 +238,7 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
   open = true,
   onPrepared,
   paintWarm,
+  suspended = false,
   onClose,
 }) => {
   const [activeTab, setActiveTab] = useState<"quick" | "detailed">("quick");
@@ -423,12 +429,16 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
 
   // Closed but mounted (prepared, or after a close): return to what a fresh
   // opening shows — quick tab at the top, half height, advanced folded —
-  // while still hidden, so the opening itself is one class change.
+  // while still hidden, so the opening itself is one class change. A
+  // sub-page only suspends the panel: it keeps its place and returns as is.
+  const [resumed, setResumed] = useState(false);
   useLayoutEffect(() => {
     if (open) {
       setCssDraft((draft) => (draft === customCss ? draft : customCss));
       return;
     }
+    setResumed(suspended);
+    if (suspended) return;
     resetSheet();
     setActiveTab("quick");
     setExpanded(false);
@@ -436,7 +446,7 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
     tabsMotionRef.current?.reset(0);
     if (quickBodyRef.current) quickBodyRef.current.scrollTop = 0;
     if (detailedBodyRef.current) detailedBodyRef.current.scrollTop = 0;
-  }, [open]);
+  }, [open, suspended]);
   const onPreparedRef = useRef(onPrepared);
   onPreparedRef.current = onPrepared;
   const prepared = useRef(false);
@@ -652,14 +662,14 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
     <>
       {visible && (
         <div
-          className={`aa-popover-backdrop${isClosing ? " is-closing" : ""}`}
+          className={`aa-popover-backdrop${isClosing ? " is-closing" : ""}${resumed ? " is-resumed" : ""}`}
           onClick={requestClose}
           aria-hidden="true"
         />
       )}
       <div
         ref={dialogRef}
-        className={`aa-popover${visible ? "" : " is-warm"}${!visible && paintWarm ? " is-paint-warm" : ""}${isClosing ? " is-closing" : ""}${expanded ? " is-expanded" : ""}${dragging ? " is-dragging" : ""}`}
+        className={`aa-popover${visible ? "" : " is-warm"}${!visible && paintWarm ? " is-paint-warm" : ""}${visible && resumed ? " is-resumed" : ""}${isClosing ? " is-closing" : ""}${expanded ? " is-expanded" : ""}${dragging ? " is-dragging" : ""}`}
         role="dialog"
         tabIndex={-1}
         aria-label={t("aa.dialog")}

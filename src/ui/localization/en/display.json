@@ -1,8 +1,8 @@
 {
-  "display.dialog": "Character & Display Settings",
+  "display.dialog": "Text & Filter Settings",
   "display.back.tip": "Back to Appearance & Typography",
   "display.back": "Back",
-  "display.title": "Text & Screen",
+  "display.title": "Text & Filters",
   "display.close.tip": "Close settings (Esc)",
   "display.close": "Close",
   "display.text.section": "Character replacement & Chinese script conversion",
