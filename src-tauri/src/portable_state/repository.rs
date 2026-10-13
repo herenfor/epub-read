@@ -818,6 +818,22 @@ fn book_meta_exists(connection: &Connection, content_hash: &str) -> PortableResu
     Ok(found.is_some())
 }
 
+fn load_locally_bound_hashes(connection: &Connection) -> PortableResult<BTreeSet<String>> {
+    let mut query = connection.prepare("SELECT b.hash FROM book_meta b JOIN device_bindings d ON d.hash=b.hash")?;
+    let rows = query.query_map([], |row| row.get::<_, String>(0))?;
+    Ok(rows.collect::<Result<BTreeSet<_>, _>>()?)
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalImportOutcome {
+    #[serde(flatten)]
+    pub state: PortableStateV3,
+    pub imported_books: Vec<String>,
+    pub skipped_book_count: usize,
+    pub skipped_books: Vec<super::SkippedImportBook>,
+}
+
 impl PortableStore {
     pub fn open(path: &Path) -> PortableResult<Self> {
         if let Some(parent) = path.parent() {
@@ -1215,7 +1231,7 @@ impl PortableStore {
     /// This is the F-N file-import entry point. It intentionally mirrors
     /// `merge_validated_state` but also writes only the binding rows for
     /// managed copies published by the file job; it never touches existing
-    /// valid local bindings. Visible hashes are extended with every incoming
+    /// valid local bindings. Visible hashes are extended with every eligible incoming
     /// book, and `isNew` is only added for hashes that were not visible before
     /// this transaction.
     pub fn merge_validated_import(
@@ -1235,6 +1251,17 @@ impl PortableStore {
         bindings: Vec<(String, String)>,
         apply_preferences: bool,
     ) -> PortableResult<PortableStateV3> {
+        self.merge_local_import_ref(incoming, bindings, &BTreeSet::new(), apply_preferences)
+            .map(|outcome| outcome.state)
+    }
+
+    pub fn merge_local_import_ref(
+        &mut self,
+        incoming: &PortableStateV3,
+        bindings: Vec<(String, String)>,
+        failed_attachments: &BTreeSet<String>,
+        apply_preferences: bool,
+    ) -> PortableResult<LocalImportOutcome> {
         dto::validate_portable_state(incoming)?;
         for (content_hash, raw) in &bindings {
             if !dto::valid_content_hash(content_hash) {
@@ -1252,10 +1279,14 @@ impl PortableStore {
             })?;
         }
 
-        let imported_hashes: BTreeSet<String> = incoming.books.keys().cloned().collect();
-        let incoming_max = super::merge::maximum_received_counter_from_state(&incoming)?;
         let transaction = self.connection.unchecked_transaction()?;
         let local = load_state_at_connection(&transaction)?;
+        let mut eligible = load_locally_bound_hashes(&transaction)?;
+        eligible.extend(bindings.iter().map(|(hash, _)| hash.clone()));
+        let selection = super::select_local_import(&local, incoming, &eligible, failed_attachments)?;
+        let incoming = &selection.state;
+        let imported_hashes: BTreeSet<String> = incoming.books.keys().cloned().collect();
+        let incoming_max = super::merge::maximum_received_counter_from_state(incoming)?;
         let local_preferences = local.preferences.clone();
         let visible_before = load_local_visible_hashes(&transaction)?;
         let mut visible = visible_before.clone();
@@ -1298,7 +1329,7 @@ impl PortableStore {
             None => remove_meta(&transaction, KEY_PREFERENCES)?,
         }
 
-        for (hash, raw) in &bindings {
+        for (hash, raw) in bindings.iter().filter(|(hash, _)| imported_hashes.contains(hash)) {
             transaction.execute(
                 "INSERT INTO device_bindings(hash, json) VALUES(?1, ?2)
                  ON CONFLICT(hash) DO UPDATE SET json = excluded.json",
@@ -1316,7 +1347,11 @@ impl PortableStore {
         save_local_is_new_hashes(&transaction, &is_new)?;
         store_counter(&transaction, next_counter)?;
         transaction.commit()?;
-        Ok(merged)
+        Ok(LocalImportOutcome {
+            state: merged, imported_books: imported_hashes.into_iter().collect(),
+            skipped_book_count: selection.skipped_books.len(),
+            skipped_books: selection.skipped_books,
+        })
     }
 
     /// R3: merge old archive records into the current v3 state in one SQLite
@@ -1326,13 +1361,9 @@ impl PortableStore {
         &mut self,
         records: Vec<legacy::LegacyRecord>,
         organization: LibraryOrganization,
-    ) -> PortableResult<PortableStateV3> {
+    ) -> PortableResult<LocalImportOutcome> {
         crate::library_organization::validate_organization(&organization)
             .map_err(PortableError::invalid_data)?;
-        let imported_hashes: BTreeSet<String> = records
-            .iter()
-            .map(|record| record.content_hash().to_string())
-            .collect();
         let transaction = self.connection.unchecked_transaction()?;
         let local = load_state_at_connection(&transaction)?;
         let installation_id = ensure_installation_id(&transaction)?;
@@ -1345,6 +1376,9 @@ impl PortableStore {
             &mut counter,
             &installation_id,
         )?;
+        let selection = super::select_local_import(&local, &incoming, &load_locally_bound_hashes(&transaction)?, &BTreeSet::new())?;
+        let incoming = selection.state;
+        let imported_hashes: BTreeSet<String> = incoming.books.keys().cloned().collect();
         let merged = merge_portable_states(&local, &incoming)?;
         dto::validate_portable_state(&merged)?;
         counter = counter.max(super::merge::maximum_received_counter_from_state(&merged)?);
@@ -1363,11 +1397,11 @@ impl PortableStore {
         store_counter(&transaction, counter)?;
         if !imported_hashes.is_empty() {
             let mut visible = load_local_visible_hashes(&transaction)?;
-            visible.extend(imported_hashes);
+            visible.extend(imported_hashes.iter().cloned());
             save_local_visible_hashes(&transaction, &visible)?;
         }
         transaction.commit()?;
-        Ok(merged)
+        Ok(LocalImportOutcome { state: merged, imported_books: imported_hashes.into_iter().collect(), skipped_book_count: selection.skipped_books.len(), skipped_books: selection.skipped_books })
     }
 
     /// JSON boundary used by the Tauri command; validation/conversion stays in
@@ -1376,7 +1410,7 @@ impl PortableStore {
         &mut self,
         records: Vec<serde_json::Value>,
         organization: LibraryOrganization,
-    ) -> PortableResult<PortableStateV3> {
+    ) -> PortableResult<LocalImportOutcome> {
         let parsed = legacy::parse_legacy_records(records)?;
         self.import_legacy_records(parsed, organization)
     }
@@ -2544,10 +2578,66 @@ mod file_import_tests {
     }
 
     #[test]
+    fn c6_whole_book_filter_and_bound_missing_source() {
+        let mut store = PortableStore::open_in_memory().unwrap();
+        let incoming = state_at(2);
+        let skipped = store.merge_local_import_ref(&incoming, vec![], &BTreeSet::new(), false).unwrap();
+        assert!(skipped.state.books.is_empty());
+        assert_eq!(skipped.skipped_books[0].reason, "not-local");
+        assert!(store.local_visible_hashes().unwrap().is_empty());
+        // A successful EPUB publication gives its binding in this same commit.
+        let accepted = store.merge_local_import_ref(&incoming, vec![(HASH.into(), "{\"sourcePath\":\"/missing.epub\"}".into())], &BTreeSet::new(), false).unwrap();
+        assert_eq!(accepted.imported_books, vec![HASH]);
+        assert!(accepted.skipped_books.is_empty());
+        // Eligibility does not stat that path, and new progress is accepted.
+        let accepted = store.merge_local_import_ref(&state_at(3), vec![], &BTreeSet::new(), false).unwrap();
+        assert_eq!(accepted.state.books[HASH].progress.versions[0].stamp.counter, 3);
+        let before = store.snapshot().unwrap();
+        let failed = store.merge_local_import_ref(&state_at(4), vec![], &BTreeSet::from([HASH.into()]), false).unwrap();
+        assert_eq!(failed.skipped_books[0].reason, "attachment-import-failed");
+        assert_eq!(failed.state, before);
+    }
+
+    #[test]
+    fn c6_folders_only_follow_winning_retained_placements() {
+        let folder = "00000000-0000-4000-8000-000000000010";
+        let unused = "00000000-0000-4000-8000-000000000011";
+        let mut incoming = state_at(2);
+        incoming.organization = serde_json::from_value(serde_json::json!({
+            "schemaVersion":1,
+            "folders": {
+                folder:{"name":{"value":"used","stamp":{"deviceId":A,"counter":2}}},
+                unused:{"name":{"value":"unused","stamp":{"deviceId":A,"counter":2}}}
+            },
+            "books":{HASH:{"favorite":{"value":true,"stamp":{"deviceId":A,"counter":2}},"folderId":{"value":folder,"stamp":{"deviceId":A,"counter":2}}}}
+        })).unwrap();
+        let mut store = PortableStore::open_in_memory().unwrap();
+        let skipped = store.merge_local_import_ref(&incoming, vec![], &BTreeSet::new(), false).unwrap();
+        assert!(skipped.state.organization.folders.is_empty());
+        assert!(skipped.state.organization.books.is_empty());
+        let accepted = store.merge_local_import_ref(&incoming, vec![(HASH.into(), "{}".into())], &BTreeSet::new(), false).unwrap();
+        assert_eq!(accepted.state.organization.folders.len(), 1);
+        assert!(is_favorite(&accepted.state.organization, HASH));
+        // Local newer removal wins; an incoming stale placement cannot create a folder.
+        let mut local = accepted.state;
+        local.organization.books.get_mut(HASH).unwrap().folder_id.as_mut().unwrap().value = None;
+        local.organization.books.get_mut(HASH).unwrap().folder_id.as_mut().unwrap().stamp.counter = 9;
+        store.merge_validated_state(local).unwrap();
+        incoming.organization.books.get_mut(HASH).unwrap().folder_id.as_mut().unwrap().value = Some(unused.into());
+        incoming.organization.folders.get_mut(folder).unwrap().name.value = "renamed".into();
+        incoming.organization.folders.get_mut(folder).unwrap().name.stamp.counter = 10;
+        incoming.organization.folders.get_mut(folder).unwrap().deleted = Some(OrganizationStamp { device_id:A.into(), counter:11 });
+        let merged = store.merge_local_import_ref(&incoming, vec![], &BTreeSet::new(), false).unwrap();
+        assert!(!merged.state.organization.folders.contains_key(unused));
+        assert_eq!(merged.state.organization.folders[folder].name.value, "renamed");
+        assert!(merged.state.organization.folders[folder].deleted.is_some());
+    }
+
+    #[test]
     fn file_import_uses_current_state_and_binding_failure_rolls_back_all_markers() {
         let mut store = PortableStore::open_in_memory().unwrap();
         store
-            .merge_validated_import(state_at(1), Vec::new(), false)
+            .merge_validated_import(state_at(1), vec![(HASH.into(), "{}".into())], false)
             .unwrap();
         store
             .merge_validated_import(state_at(2), Vec::new(), false)
@@ -2597,7 +2687,7 @@ mod file_import_tests {
         assert_eq!(store.local_visible_hashes().unwrap(), visible_before);
         assert_eq!(store.local_is_new_hashes().unwrap(), is_new_before);
         assert_eq!(store.counter().unwrap(), counter_before);
-        assert!(store.binding_raw(HASH).unwrap().is_none());
+        assert_eq!(store.binding_raw(HASH).unwrap().as_deref(), Some("{}"));
     }
 }
 

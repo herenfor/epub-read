@@ -1,6 +1,6 @@
 use super::version_policy::{select_archive_reader, ArchiveReader, VersionError};
 use super::{
-    available_space_for, hex_digest, now_ms, valid_hash, LocalBinding, MissingBook,
+    available_space_for, hex_digest, now_ms, valid_hash, LocalBinding,
     ProgressReporter, SaveExportScope, SaveFileError, SkippedBook, COPY_BUFFER_BYTES,
     MANIFEST_JSON_LIMIT, STATE_JSON_LIMIT,
 };
@@ -949,25 +949,6 @@ pub(crate) fn validate_and_extract_with_expectation(
     })
 }
 
-pub(crate) fn preview_missing_books(
-    incoming: &PortableStateV3,
-    attachments: &[super::PreparedAttachment],
-) -> Vec<MissingBook> {
-    let attached: BTreeSet<&str> = attachments
-        .iter()
-        .map(|attachment| attachment.content_hash.as_str())
-        .collect();
-    incoming
-        .books
-        .iter()
-        .filter(|(hash, _)| !attached.contains(hash.as_str()))
-        .map(|(hash, book)| MissingBook {
-            content_hash: hash.clone(),
-            title: book.metadata.value.title.clone(),
-        })
-        .collect()
-}
-
 pub(crate) fn count_progress_conflicts(
     local: &PortableStateV3,
     incoming: &PortableStateV3,
@@ -1134,10 +1115,10 @@ mod tests {
 
         let mut store = PortableStore::open_in_memory().unwrap();
         let first = store
-            .merge_validated_import(parsed.incoming.clone(), Vec::new(), false)
+            .merge_validated_import(parsed.incoming.clone(), vec![(HASH.to_string(), "{}".into())], false)
             .unwrap();
         let second = store
-            .merge_validated_import(parsed.incoming.clone(), Vec::new(), false)
+            .merge_validated_import(parsed.incoming.clone(), vec![(HASH.to_string(), "{}".into())], false)
             .unwrap();
         assert_eq!(first, second);
         let snapshot = store.snapshot().unwrap();

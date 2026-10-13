@@ -232,13 +232,6 @@ pub struct SaveFileExportResult {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct MissingBook {
-    pub content_hash: String,
-    pub title: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct SaveFilePrepareResult {
     pub status: String,
     pub job_id: String,
@@ -246,7 +239,8 @@ pub struct SaveFilePrepareResult {
     pub scope_kind: String,
     pub book_count: usize,
     pub attached_books: Vec<String>,
-    pub missing_books: Vec<MissingBook>,
+    pub skipped_book_count: usize,
+    pub skipped_books: Vec<crate::portable_state::SkippedImportBook>,
     pub progress_conflict_count: usize,
     pub new_book_count: usize,
     pub has_preferences: bool,
@@ -262,7 +256,8 @@ pub struct SaveFileCommitResult {
     pub merged_books: usize,
     pub imported_books: Vec<String>,
     pub new_visible_books: Vec<String>,
-    pub missing_books: Vec<MissingBook>,
+    pub skipped_book_count: usize,
+    pub skipped_books: Vec<crate::portable_state::SkippedImportBook>,
     pub progress_conflict_books: Vec<String>,
     pub applied_preferences: bool,
 }

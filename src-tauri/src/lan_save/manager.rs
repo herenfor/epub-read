@@ -2040,9 +2040,11 @@ pub(crate) async fn commit<R: Runtime>(
 
 fn commit_summary(result: &SaveFileCommitResult) -> LanCommitSummary {
     LanCommitSummary {
-        imported_book_count: result.imported_books.len() as u64,
+        // Keep the old compact wire's processed-total and unavailable subset:
+        // old peers require importedBookCount == Offer.bookCount.
+        imported_book_count: (result.imported_books.len() + result.skipped_books.len()) as u64,
         new_visible_book_count: result.new_visible_books.len() as u64,
-        missing_book_count: result.missing_books.len() as u64,
+        missing_book_count: result.skipped_books.len() as u64,
         progress_conflict_book_count: result.progress_conflict_books.len() as u64,
         applied_preferences: result.applied_preferences,
     }
@@ -2271,4 +2273,28 @@ pub(crate) async fn host_with_bind_ip<R: Runtime>(
         ));
     }
     start_host(app, bind_ip, sink).await
+}
+
+#[cfg(test)]
+mod c6_wire_tests {
+    use super::*;
+    #[test]
+    fn c6_skipped_books_preserve_v2_summary_contract() {
+        let result = SaveFileCommitResult {
+            status:"committed".into(), job_id:String::new(), merged_books:1,
+            imported_books:vec!["a".repeat(64)], new_visible_books:vec![],
+            skipped_book_count:1, skipped_books:vec![crate::portable_state::SkippedImportBook {
+                content_hash:"b".repeat(64), title:"synthetic".into(), reason:"not-local".into(), message:None
+            }], progress_conflict_books:vec![], applied_preferences:false,
+        };
+        let wire = commit_summary(&result);
+        crate::transfer_policy::CompactCommit { imported_book_count:wire.imported_book_count, new_visible_book_count:wire.new_visible_book_count, missing_book_count:wire.missing_book_count, progress_conflict_book_count:wire.progress_conflict_book_count, applied_preferences:wire.applied_preferences }.validate(2, false).unwrap();
+        let json = serde_json::to_value(&wire).unwrap();
+        assert_eq!(json["missingBookCount"], 1);
+        assert_eq!(json.as_object().unwrap().len(), 5);
+        assert_eq!(serde_json::from_value::<LanCommitSummary>(json).unwrap(), wire);
+        let local = serde_json::to_value(&result).unwrap();
+        assert_eq!(local["skippedBookCount"], 1);
+        assert!(local.get("missingBooks").is_none());
+    }
 }
