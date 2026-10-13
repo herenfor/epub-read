@@ -1,7 +1,8 @@
 import { READER_PALETTES } from "../config/readerPalette";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useMenuClose } from "./menuMotion";
 import { useSheetDrag } from "./sheetDrag";
+import { installSidebarSwipe, type SidebarSwipeMotion } from "./sidebarSwipe";
 import { useUiMotion } from "./motionPreference";
 import type { Theme, TurnAnimation } from "../render/settings";
 import { PAGE_GAP_MAX_PX, type PageMarginsPx, type ReadingMode, type SpreadGapMode } from "../render/pageLayout";
@@ -370,14 +371,33 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
   // 手机：半高打开，常用项一屏可见、正文仍露出；拖把手上拉展开全部，下拉收起或关闭。
   // 头部和内容区也能拖：半高时上划先展开、内容在顶部时下划关闭；展开后内容在顶部时下划收回半高。
   const [expanded, setExpanded] = useState(false);
-  const bodyRef = useRef<HTMLDivElement>(null);
+  // Keep both panes mounted: each owns its native scroll position while this Aa is open.
+  const quickBodyRef = useRef<HTMLDivElement>(null);
+  const detailedBodyRef = useRef<HTMLDivElement>(null);
+  const tabsViewportRef = useRef<HTMLDivElement>(null);
+  const tabsTrackRef = useRef<HTMLDivElement>(null);
+  const tabsMotionRef = useRef<SidebarSwipeMotion>();
+  useLayoutEffect(() => {
+    if (isClosing) return;
+    const binding = installSidebarSwipe(tabsViewportRef.current!, tabsTrackRef.current!,
+      activeTab === "quick" ? 0 : 1, index => setActiveTab(index === 0 ? "quick" : "detailed"), 2);
+    tabsMotionRef.current = binding.motion;
+    return () => { binding.dispose(); tabsMotionRef.current = undefined; };
+  }, [isClosing]);
+  useLayoutEffect(() => {
+    tabsMotionRef.current?.select(activeTab === "quick" ? 0 : 1, false, false);
+  }, [activeTab]);
+  const selectTab = (tab: "quick" | "detailed") => {
+    if (tabsMotionRef.current) tabsMotionRef.current.select(tab === "quick" ? 0 : 1, true);
+    else setActiveTab(tab);
+  };
   const { dragging, grip } = useSheetDrag({
     sheetRef: dialogRef,
     disabled: isClosing,
     onDismiss: requestClose,
     expanded,
     onExpandedChange: setExpanded,
-    contentRef: bodyRef,
+    contentRef: activeTab === "quick" ? quickBodyRef : detailedBodyRef,
     contentDragEnabled: () => Boolean(dialogRef.current?.closest('.app[data-mobile-chrome="true"][data-layout="compact"]')),
   });
 
@@ -606,7 +626,7 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
               role="tab"
               aria-selected={activeTab === "quick"}
               className={`aa-tab-btn${activeTab === "quick" ? " active" : ""}`}
-              onClick={() => setActiveTab("quick")}
+              onClick={() => selectTab("quick")}
             >
               {t("aa.tab.quick")}
             </button>
@@ -615,7 +635,7 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
               role="tab"
               aria-selected={activeTab === "detailed"}
               className={`aa-tab-btn${activeTab === "detailed" ? " active" : ""}`}
-              onClick={() => setActiveTab("detailed")}
+              onClick={() => selectTab("detailed")}
             >
               {t("aa.tab.detailed")}
             </button>
@@ -631,12 +651,14 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
           </button>
         </div>
 
-        <div className="aa-popover-body" ref={bodyRef}>
+        <div className="aa-tabs-viewport" ref={tabsViewportRef}>
+          <div className="aa-tabs-track" ref={tabsTrackRef}>
           {/* =========================================================
            * TAB 1: 常用外观 (Quick View)
            * ========================================================= */}
-          {activeTab === "quick" && (
-            <>
+            <div className="aa-popover-body" ref={quickBodyRef} role="tabpanel"
+              aria-label={t("aa.tab.quick")} aria-hidden={activeTab !== "quick"}
+              {...(activeTab !== "quick" ? { inert: "" } : {})}>
               {phoneLayout ? (
                 <>
                   <div className="aa-group-title">{t("aa.group.themeSize")}</div>
@@ -808,14 +830,15 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
                   </div>
                 )}
               </div>
-            </>
-          )}
+            </div>
 
           {/* =========================================================
            * TAB 2: 详细排版工作台 (Detailed Typography & Layout)
            * ========================================================= */}
-          {activeTab === "detailed" && (
-            <div className="aa-detailed-view" role="tabpanel" aria-label={t("aa.detail")}>
+            <div className="aa-popover-body" ref={detailedBodyRef} role="tabpanel"
+              aria-label={t("aa.detail")} aria-hidden={activeTab !== "detailed"}
+              {...(activeTab !== "detailed" ? { inert: "" } : {})}>
+            <div className="aa-detailed-view">
               {/* 分组 1: 正文微调 */}
               <div className="aa-detail-group-title">{t("aa.detail.text")}</div>
 
@@ -1336,7 +1359,8 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
                 )}
               </div>
             </div>
-          )}
+            </div>
+          </div>
         </div>
       </div>
     </>
