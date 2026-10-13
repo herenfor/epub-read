@@ -324,6 +324,11 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
     } = props;
 
     const { t } = useUiText();
+    // 渲染层设置：与翻页一致，把导入字体的 blob URL 交给分页器/sanitize。
+    const renderSettings = useMemo<ReaderSettings>(
+      () => ({ ...effectiveReaderSettings(settings, false), customFonts: props.userFonts }),
+      [settings, props.userFonts]
+    );
     // 全书完提示画在 iframe 内，由分页核心持有；语言切换时就地改字，不重载章节。
     const endText = useMemo<ReaderEndText>(
       () => ({ title: t("readerMisc.bookEnd"), hint: t("readerMisc.bookEnd.hint") }),
@@ -477,7 +482,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
       settingsReloadDebouncerRef.current = createSettingsReloadDebouncer(150);
     }
     const reloadingRef = useRef(new Set<string>());
-    const desiredSettingsRef = useRef(effectiveReaderSettings(settings, false));
+    const desiredSettingsRef = useRef(renderSettings);
     const reloadSlotSettingsRef = useRef<(slot: ActiveSlot) => Promise<void>>(async () => {});
     const projectionsRef = useRef<ChapterProjection[]>([]);
     // linear=no 辅助章节的单章 paginator（设置变更时用 key 重建，需显式销毁旧的）
@@ -1442,12 +1447,10 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
 
         let slot: ActiveSlot;
 
-        const effectiveSettings = effectiveReaderSettings(settings, false);
-
         const paginator = new ChapterPaginator(
           iframe,
           server,
-          effectiveSettings,
+          renderSettings,
           false,
           () => {},
           onIssues,
@@ -1547,7 +1550,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
           paginator,
           ticket,
           status: "loading",
-          renderSettings: effectiveSettings,
+          renderSettings,
         };
 
         // 已就绪章节的重排（图片晚加载、窗口尺寸变化）走独立通知：首次 ready
@@ -1573,7 +1576,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
           spineIdx === props.spineIndex ? (props.initialPage ?? null) : null;
         try {
           await paginator.load(path, {
-            settings: effectiveSettings,
+            settings: renderSettings,
             hasNextChapter: nextLinearIndex(book, spineIdx, 1) >= 0,
             hasPrevChapter: nextLinearIndex(book, spineIdx, -1) >= 0,
             resetPage: true,
@@ -1609,7 +1612,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
         props.initialPage,
         props.spineIndex,
         server,
-        settings,
+        renderSettings,
       ]
     );
 
@@ -1888,7 +1891,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
      */
     useEffect(() => {
       const previous = settingsIdentityRef.current;
-      const current = effectiveReaderSettings(settings, false);
+      const current = renderSettings;
       desiredSettingsRef.current = current;
       if (!previous) {
         settingsIdentityRef.current = current;
@@ -1918,7 +1921,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
         }
         scheduleLayoutRemeasure(pendingSpotRef.current);
       });
-    }, [captureReadingSpot, scheduleLayoutRemeasure, settings]);
+    }, [captureReadingSpot, scheduleLayoutRemeasure, renderSettings]);
 
     // T-1 配置变化：所有存活槽位统一换版本，按同一阅读点重载并重测章节高度。
     // 同一 version 只更新 latest ref；compiled 稍后抵达不会先取消再跳过。
@@ -2474,7 +2477,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
       return (
         <div className="reader" style={{ position: "relative", width: "100%", height: "100%" }}>
           <iframe
-            key={`${spineIndex}:${JSON.stringify(settings)}`}
+            key={`${spineIndex}:${JSON.stringify(renderSettings)}`}
             ref={(node) => {
               if (!node) return;
               // React rebinds this inline ref on UI updates. The same iframe
@@ -2488,7 +2491,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
               const paginator = new ChapterPaginator(
                 node,
                 server,
-                effectiveReaderSettings(settings, false),
+                renderSettings,
                 false,
                 props.onPageState,
                 props.onIssues,
@@ -2511,7 +2514,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
                 latestProjection?.compiled ?? null,
               );
               void paginator.load(path, {
-                settings: effectiveReaderSettings(settings, false),
+                settings: renderSettings,
                 hasNextChapter: false,
                 hasPrevChapter: false,
                 resetPage: true,
