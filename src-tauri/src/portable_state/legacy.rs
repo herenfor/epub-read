@@ -105,8 +105,6 @@ pub(crate) struct MigrationPlan {
     pub bindings: Vec<(String, String)>,
     pub installation_id: String,
     pub counter: u64,
-    pub migrated_books: usize,
-    pub migrated_annotations: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -490,7 +488,6 @@ pub(crate) fn build_migration_plan(root: &Path) -> PortableResult<MigrationPlan>
     let installation_id = organization.device_id.clone();
 
     let mut books = BTreeMap::new();
-    let mut migrated_annotations = 0;
     for record in &records {
         if books.contains_key(&record.content_hash) {
             return Err(PortableError::invalid_data(
@@ -498,7 +495,6 @@ pub(crate) fn build_migration_plan(root: &Path) -> PortableResult<MigrationPlan>
             ));
         }
         let book = convert_record(record, &mut counter, &installation_id)?;
-        migrated_annotations += book.bookmarks.len() + book.notes.len();
         books.insert(record.content_hash.clone(), book);
     }
     let bindings = parse_bindings(root)?;
@@ -513,8 +509,6 @@ pub(crate) fn build_migration_plan(root: &Path) -> PortableResult<MigrationPlan>
         bindings,
         installation_id,
         counter,
-        migrated_books: records.len(),
-        migrated_annotations,
     })
 }
 

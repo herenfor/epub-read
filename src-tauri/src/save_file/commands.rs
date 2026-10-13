@@ -987,7 +987,7 @@ pub(crate) fn run_commit<R: Runtime>(
 
         let failed_hashes = attachment_failures.keys().cloned().collect();
         let (outcome, visible_before) = with_existing_store(&app, |store| {
-            let visible_before = store.local_visible_hashes()?;
+            let visible_before = store.local_shelf_hashes()?;
             let outcome = store.merge_local_import_ref(
                 &prepared.incoming, binding_rows, &failed_hashes, apply_preferences,
             )?;

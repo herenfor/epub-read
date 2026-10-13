@@ -101,7 +101,8 @@ fn open_and_activate<R: Runtime>(
         }
         Err(error) => {
             drop(store);
-            let _ = std::fs::remove_file(&path);
+            // Activation can fail for an existing recognized database too.
+            // Keep it for retry/repair; legacy migration is transactional.
             Err(error)
         }
     }
