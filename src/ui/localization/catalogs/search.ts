@@ -24,6 +24,7 @@ export const search = defineMessages("search", {
   "search.index.partial.body": "已完成的书籍可以正常搜索；继续建立索引后，剩余书籍也会加入搜索范围。",
   "search.index.cancelled.body": "已完成的书籍仍然保留，可以继续搜索；需要时可从剩余书籍继续建立索引。",
   "search.index.error.body": "本次索引未能完成，已完成的书籍仍然保留。",
+  "search.index.interrupted": "上次建库在应用退出时中断，已完成书籍仍然可用。",
   "search.index.auto": { zh: "自动", max: 16 },
   "search.index.autoRecommended": { zh: "自动（推荐 {count}）", note: "Concurrency option; {count} is a number of workers.", max: 22 },
   "search.index.manual": { zh: "手动", max: 16 },

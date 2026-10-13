@@ -45,12 +45,20 @@ describe("library index persistent task bridge", () => {
   });
 
   it("filters task kinds and detects the latest startup-reclaimed run", async () => {
-    const older = task({ id: "old", state: "cancelled", cancelRequested: true, error: "应用退出，未完成任务已回收", updatedAtMs: 2 });
-    const latest = task({ id: "new", state: "cancelled", cancelRequested: true, error: "应用退出，未完成任务已回收", updatedAtMs: 4 });
+    const older = task({ id: "old", state: "cancelled", cancelRequested: true, error: "app-exit", updatedAtMs: 2 });
+    const latest = task({ id: "new", state: "cancelled", cancelRequested: true, error: "app-exit", updatedAtMs: 4 });
     invokeMock.mockResolvedValue([older, task({ id: "other", kind: "embedding" }), latest]);
     const tasks = await listLibraryIndexTasks();
     expect(tasks).toHaveLength(2);
     expect(latestInterruptedLibraryIndexTask(tasks)?.id).toBe("new");
     expect(latestInterruptedLibraryIndexTask([...tasks, task({ id: "done", state: "completed", updatedAtMs: 5 })])).toBeUndefined();
+    // Only the code counts: Chinese text and a failed or uncancelled run are not an app exit.
+    for (const other of [
+      task({ id: "zh", state: "cancelled", cancelRequested: true, error: "应用退出，未完成任务已回收", updatedAtMs: 6 }),
+      task({ id: "failed", state: "failed", cancelRequested: true, error: "app-exit", updatedAtMs: 6 }),
+      task({ id: "user", state: "cancelled", cancelRequested: false, error: "app-exit", updatedAtMs: 6 }),
+    ]) {
+      expect(latestInterruptedLibraryIndexTask([...tasks, other])).toBeUndefined();
+    }
   });
 });
