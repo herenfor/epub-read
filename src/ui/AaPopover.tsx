@@ -368,7 +368,7 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
     dialogRef.current?.focus({ preventScroll: true });
   }, []);
   // 手机：半高打开，常用项一屏可见、正文仍露出；拖把手上拉展开全部，下拉收起或关闭。
-  // 半高时在内容区任意处上划也先展开；展开后内容已在顶部时下划收回半高。
+  // 头部和内容区也能拖：半高时上划先展开、内容在顶部时下划关闭；展开后内容在顶部时下划收回半高。
   const [expanded, setExpanded] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
   const { dragging, grip } = useSheetDrag({
