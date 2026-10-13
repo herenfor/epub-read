@@ -91,6 +91,12 @@ export function readCachedChapterCounts(
   return result;
 }
 
+/** The linear mask last seen for a book, so the shelf can number chapters like the reader. */
+export function readCachedLinearMask(key: string | null): readonly boolean[] | null {
+  if (!key) return null;
+  return readState().entries[key]?.linear ?? null;
+}
+
 /** Read once per shelf projection, rather than parsing storage for every card. */
 export function readKnownChapterProgressKeys(): ReadonlySet<string> {
   const known = new Set<string>();

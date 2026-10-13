@@ -31,6 +31,19 @@ describe("Zen UI WhisperFooter 微提示状态栏与跳页器契约（Packet B�
     expect(html).toContain("全书 18%");
   });
 
+  it("章节序号只数正文章节，封面和末尾 nav（linear=no）不计入", () => {
+    // cover(no) · ch1 · ch2 · ch3 · nav(no)：spine 第 2 项是第 2 章，共 3 章
+    const linearSpine = [false, true, true, true, false];
+    const html = renderToStaticMarkup(
+      createElement(WhisperFooter, { ...baseProps, chapterIndex: 2, totalChapters: 5, linearSpine }),
+    );
+    expect(html).toContain("第 2/3 章");
+    const onNav = renderToStaticMarkup(
+      createElement(WhisperFooter, { ...baseProps, chapterIndex: 4, totalChapters: 5, linearSpine }),
+    );
+    expect(onNav).not.toContain("/3 章");
+  });
+
   it("滚动模式下正确展示章节滚动进度百分比", () => {
     const html = renderToStaticMarkup(
       createElement(WhisperFooter, {

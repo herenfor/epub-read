@@ -15,7 +15,7 @@ import {
 } from "./platform/androidReaderKeepScreenOn";
 import { resolveArchiveHref, archiveHref } from "./core/archiveReferences";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
-import { loadBook, loadBookFromArchive, spineIndexForPath, spineIndexForEntryKey, spineItemPath, spineItemHref, disposeBook, nextLinearIndex } from "./core/book";
+import { loadBook, loadBookFromArchive, spineIndexForPath, spineIndexForEntryKey, spineItemPath, spineItemHref, disposeBook, nextLinearIndex, linearChapterNumber, linearChapterTotal } from "./core/book";
 import type { Book } from "./core/types";
 import type { ArchiveClient } from "./core/selectiveArchive";
 import type { Stamp, Version } from "./core/portableState/portable-register-core";
@@ -3878,6 +3878,9 @@ export default function App() {
     [view, shelfEntries],
   );
   const ready = phase.phase === "ready" && book !== null && server !== null;
+  // Chapter numbers shown to the reader count linear items only (no trailing nav).
+  const spineLinear = useMemo(() => book?.spine.map((item) => item.linear) ?? [], [book]);
+  const linearChapter = linearChapterNumber(spineLinear, spineIndex);
   // 开书/换章仍在加载：主题直接提交，加载完成后按最新主题（既有 desired/代次契约）。
   readerThemeBusyRef.current = view === "reader" && (!ready || !readerDisplayReady);
   // 阅读输入（含正文 iframe 内的按下/触摸/滚轮/按键）开始即中断主题装饰，不加输入锁。
@@ -4544,7 +4547,8 @@ export default function App() {
     if (!position || !book || !ready) return null;
     if (position.spineIndex === spineIndex) return "";
     const path = spineItemPath(book, position.spineIndex);
-    return (path && tocLabelForPath(path)) || t("footer.chapterN", { n: position.spineIndex + 1 });
+    return (path && tocLabelForPath(path)) ||
+      t("footer.chapterN", { n: linearChapterNumber(spineLinear, position.spineIndex) ?? position.spineIndex + 1 });
   };
 
   const renderUserFonts = useMemo(
@@ -5039,8 +5043,8 @@ export default function App() {
         zenMode={view === "reader" && !mobileChrome && readerZenMode}
         onToggleZenMode={view === "reader" ? toggleZenMode : undefined}
         progressPct={view === "reader" && ready ? progressPct : undefined}
-        chapterIndex={view === "reader" && ready ? spineIndex : undefined}
-        totalChapters={view === "reader" && ready && book ? book.spine.length : undefined}
+        chapterIndex={view === "reader" && ready && linearChapter !== null ? linearChapter - 1 : undefined}
+        totalChapters={view === "reader" && ready ? linearChapterTotal(spineLinear) : undefined}
         isFullscreen={isFullscreen}
         fullscreenBusy={fullscreenBusy}
         onToggleFullscreen={view === "reader" ? toggleFullscreen : undefined}
@@ -5539,6 +5543,7 @@ export default function App() {
           chapterTitle={currentChapterLabel || book!.metadata.title}
           chapterIndex={spineIndex}
           totalChapters={book!.spine.length}
+          linearSpine={spineLinear}
           bookProgressPct={progressPct}
           onSeekPage={(targetPage) => {
             readerRef.current?.setPage(targetPage);
@@ -5926,7 +5931,7 @@ export default function App() {
                   <strong style={{ fontSize: 14 }}>
                     {candidate.chapterPath
                       ? candidate.chapterPath.split("/").pop() || candidate.chapterPath
-                      : t("appUi.chapterN", { n: candidate.spineIndex + 1 })}
+                      : t("appUi.chapterN", { n: linearChapterNumber(spineLinear, candidate.spineIndex) ?? candidate.spineIndex + 1 })}
                   </strong>
                   <span style={{ fontSize: 12, opacity: 0.75 }}>
                     {candidate.progressPct}% · {new Date(candidate.updatedAtMs).toLocaleString(currentUiLocale())}
