@@ -6,13 +6,18 @@ import { tocOffsets, tocWindow, type TocRow } from "./sidebarToc";
 
 const WINDOW_THRESHOLD = 80;
 
-/** Only this list updates its window. Scrolling never rebuilds the TOC or the drawer. */
-export function SidebarTocList({ rows, activeKey, nested, filtering, memory, onToggle, onNavigate }: {
+/**
+ * Only this list updates its window. Scrolling never rebuilds the TOC or the drawer.
+ * While not `live` (drawer closed or only prepared) it keeps its rows but does
+ * not scroll, center, measure or write the remembered position.
+ */
+export function SidebarTocList({ rows, activeKey, nested, filtering, memory, live = true, onToggle, onNavigate }: {
   rows: readonly TocRow[];
   activeKey?: string;
   nested: boolean;
   filtering: boolean;
   memory: SidebarNavigationMemory;
+  live?: boolean;
   onToggle(key: string, expand: boolean): void;
   onNavigate(href: string): void;
 }) {
@@ -50,6 +55,7 @@ export function SidebarTocList({ rows, activeKey, nested, filtering, memory, onT
   syncRef.current = syncWindow;
 
   useLayoutEffect(() => {
+    if (!live) return;
     const list = root.current!, pane = list.closest<HTMLDivElement>(".sidebar-toc-pane")!;
     const active = current.current.rowByKey.get(activeKey ?? "");
     pane.scrollTop = memory.scrollTop.toc ?? (active === undefined ? 0 : Math.max(0,
@@ -65,9 +71,10 @@ export function SidebarTocList({ rows, activeKey, nested, filtering, memory, onT
     observer.observe(pane);
     pane.addEventListener("scroll", scroll, { passive: true });
     return () => { cancelAnimationFrame(frame); observer.disconnect(); pane.removeEventListener("scroll", scroll); };
-  }, [memory]);
+  }, [memory, live]);
 
   useLayoutEffect(() => {
+    if (!live) return;
     const list = root.current!, pane = list.closest<HTMLDivElement>(".sidebar-toc-pane")!;
     const old = previousOffsets.current;
     // A newly measured height must not move the visible row under the user's finger.
@@ -113,7 +120,7 @@ export function SidebarTocList({ rows, activeKey, nested, filtering, memory, onT
       if (!observed.has(row.dataset.tocLevel!)) { observed.add(row.dataset.tocLevel!); observer.observe(row); }
     }
     return () => observer.disconnect();
-  }, [offsets, rendered.start, rendered.end, heights, memory]);
+  }, [offsets, rendered.start, rendered.end, heights, memory, live]);
 
   const focusRow = (at: number) => {
     const list = root.current!, pane = list.closest<HTMLDivElement>(".sidebar-toc-pane")!;

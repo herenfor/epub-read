@@ -403,5 +403,16 @@ export function useSheetDrag(options: SheetDragOptions) {
     };
   }, [sheetRef, contentRef, contentExpandable, motion]);
 
-  return { dragging, grip };
+  // A sheet kept mounted while closed starts its next opening from rest:
+  // drop any gesture, settle or exit still owning its transform.
+  const reset = () => {
+    releaseCapture(drag.current);
+    drag.current = null;
+    contentGesture.current = null;
+    pendingLayout.current = null;
+    setDragging(false);
+    motion.terminate();
+  };
+
+  return { dragging, grip, reset };
 }

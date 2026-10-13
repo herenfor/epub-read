@@ -48,6 +48,15 @@
   pointer-events: none;
 }
 
+/* Kept mounted while closed (prepared when a book opens): real size and theme,
+   never painted or hit. Removing the class plays the normal entrance. */
+.aa-popover.is-warm {
+  visibility: hidden;
+  pointer-events: none;
+  animation: none !important;
+  transition: none !important;
+}
+
 @keyframes aaPopoverFadeIn {
   from {
     opacity: 0;
