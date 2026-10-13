@@ -18,6 +18,8 @@ export const lan = defineMessages("lan", {
   "lan.error.spaceReceive": "空间不足，无法接收这次传输。请释放空间后重新连接，或让对方少选一些书。",
   "lan.error.metadataTooLarge": "这次阅读资料太多。请少选一些书，分批发送。",
   "lan.error.protocol": "两台设备需要更新到支持同一互传协议的版本。",
+  "lan.error.protocolTooNew": "这份连接信息来自更新的版本，请先把本机的应用升级到最新版。",
+  "lan.error.protocolUnsupported": "本版本不再支持对方使用的旧互传协议。可以改用两边都支持的存档文件导出和导入。",
   "lan.error.ended": "连接已经结束了。请重新连接。",
   "lan.error.cancelled": "已取消。",
   "lan.error.unsupported": "这台设备暂不支持设备互传。",

@@ -1,6 +1,6 @@
 import type { AndroidLanScanStatus } from "../platform/androidLanScanBridge";
 import type { LanOfferSummary, LanProgress } from "../platform/lanSaveNativeBridge";
-import { currentUiLocale, uiPlural, uiText } from "./localization/UiLanguageProvider";
+import { uiPlural, uiText } from "./localization/UiLanguageProvider";
 import type { PlainMessageKey } from "./localization/core";
 
 /**
@@ -8,9 +8,7 @@ import type { PlainMessageKey } from "./localization/core";
  *
  * Native errors carry technical messages (TLS, JSON, file paths). The panel
  * never shows them: every text here is derived from the stable error code and
- * the step the user was taking. The one exception is a version explanation on
- * `protocol-mismatch`, which the backend writes for the user (upgrade vs. use
- * a save file) and the generic sentence would lose.
+ * the step the user was taking.
  */
 export type LanUserStep = "host" | "join" | "send" | "receive";
 
@@ -26,7 +24,7 @@ export function formatLanBytes(value: number): string {
   return `${amount >= 10 || unit === 0 ? Math.round(amount) : amount.toFixed(1)} ${units[unit]}`;
 }
 
-export function lanErrorText(code: string | null, step: LanUserStep | null, nativeMessage?: string | null): string {
+export function lanErrorText(code: string | null, step: LanUserStep | null): string {
   switch (code) {
     case "lan-unreachable":
       return uiText("lan.error.unreachable");
@@ -55,14 +53,14 @@ export function lanErrorText(code: string | null, step: LanUserStep | null, nati
         : uiText("lan.error.spaceReceive");
     case "metadata-too-large":
       return uiText("lan.error.metadataTooLarge");
-    case "protocol-mismatch": {
-      const message = nativeMessage?.trim();
-      // The backend writes this explanation in Chinese; other UI languages use the generic sentence.
-      if (currentUiLocale() === "zh-CN" && message && message.includes("版本") && message.length <= 80) {
-        return /[。！？]$/.test(message) ? message : `${message}。`;
-      }
+    case "protocol-too-new":
+      return uiText("lan.error.protocolTooNew");
+    case "protocol-unsupported":
+      return uiText("lan.error.protocolUnsupported");
+    // `protocol-mismatch` still comes from older apps on the other device.
+    case "protocol-version-differs":
+    case "protocol-mismatch":
       return uiText("lan.error.protocol");
-    }
     case "not-found":
     case "invalid-state":
       return uiText("lan.error.ended");

@@ -139,10 +139,11 @@ it("已连接且未选书时默认发送全部书籍、不附带书籍文件", a
 });
 
 
-it("协议不匹配时保留后端写给用户的版本说明，技术信息仍用通用文案", () => {
-  expect(lanErrorText("protocol-mismatch", "join", "此连接信息需要较新版本，请升级")).toBe("此连接信息需要较新版本，请升级。");
-  expect(lanErrorText("protocol-mismatch", "join", "本版本不支持该旧互传协议，可使用双方支持的存档文件方式"))
-    .toContain("存档文件");
-  expect(lanErrorText("protocol-mismatch", "join", "unexpected frame 0x7f")).toBe("两台设备需要更新到支持同一互传协议的版本。");
-  expect(lanErrorText("network", "join", "此连接信息需要较新版本")).toContain("网络连接中断");
+it("协议版本问题只按机器码显示，不读后端中文", () => {
+  expect(lanErrorText("protocol-too-new", "join")).toContain("升级");
+  expect(lanErrorText("protocol-unsupported", "join")).toContain("存档文件");
+  for (const code of ["protocol-version-differs", "protocol-mismatch"]) {
+    expect(lanErrorText(code, "join")).toBe("两台设备需要更新到支持同一互传协议的版本。");
+  }
+  expect(lanErrorText("network", "join")).toContain("网络连接中断");
 });
