@@ -80,6 +80,7 @@
   "notice.legacy.preferencesNotApplied": "Appearance settings from legacy JSON not automatically applied",
   "notice.archiveFile.busy": "Archive file task in progress; please wait for current task to finish",
   "notice.portable.inactive": "Cross-platform data not active, continuing in legacy mode: {error}",
+  "notice.portable.databaseUnavailable": "The current library could not be read. Access to old data has stopped to prevent overwriting it. Retry or restart the app: {error}",
   "notice.portable.databaseTooNew": "This library was created by a newer version of the reader and can't be opened here. It was left unchanged; please update the reader.",
   "notice.portable.databaseUnrecognized": "The library file's format isn't recognized, so reading stopped. The library was left unchanged.",
   "notice.organization.readFailed": "Unable to read favorites and folders: {error}",

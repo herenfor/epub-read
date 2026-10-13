@@ -42,7 +42,12 @@ function isErrorPayload(value: unknown): value is { code: PortableStateErrorCode
 }
 
 function nativeError(error: unknown): never {
-  if (isErrorPayload(error)) throw new PortableStateError(error.code, error.message);
+  if (isErrorPayload(error)) {
+    const converted = new PortableStateError(error.code, error.message);
+    const allowed = (error as { legacyFallbackAllowed?: unknown }).legacyFallbackAllowed;
+    if (typeof allowed === "boolean") Object.assign(converted, { legacyFallbackAllowed: allowed });
+    throw converted;
+  }
   throw error;
 }
 

@@ -1332,10 +1332,12 @@ let portableReadinessRecovery: ReturnType<typeof createRepositoryReadinessRecove
  * shelf read and write fails with this error until the next activation.
  */
 export class LibraryDatabaseBlockedError extends Error {
-  readonly code: "unsupported-database-version" | "unrecognized-database-format";
+  readonly code: string;
 
   constructor(code: LibraryDatabaseBlockedError["code"], detail: string) {
-    super(uiText(code === "unsupported-database-version" ? "notice.portable.databaseTooNew" : "notice.portable.databaseUnrecognized"));
+    super(uiText(code === "unsupported-database-version" ? "notice.portable.databaseTooNew"
+      : code === "unrecognized-database-format" ? "notice.portable.databaseUnrecognized"
+      : "notice.portable.databaseUnavailable", { error: detail }));
     this.name = "LibraryDatabaseBlockedError";
     this.code = code;
     this.cause = detail;
@@ -1344,8 +1346,9 @@ export class LibraryDatabaseBlockedError extends Error {
 
 function blockingDatabaseError(error: unknown): LibraryDatabaseBlockedError | null {
   if (!error || typeof error !== "object") return null;
-  const { code, message } = error as { code?: unknown; message?: unknown };
-  if (code !== "unsupported-database-version" && code !== "unrecognized-database-format") return null;
+  const { code, message, legacyFallbackAllowed } = error as { code?: unknown; message?: unknown; legacyFallbackAllowed?: unknown };
+  if (code !== "unsupported-database-version" && code !== "unrecognized-database-format"
+    && !(typeof code === "string" && legacyFallbackAllowed === false)) return null;
   return new LibraryDatabaseBlockedError(code, typeof message === "string" ? message : "");
 }
 

@@ -57,6 +57,21 @@ function setup() {
 }
 
 describe("shelf library host extraction", () => {
+  it("keeps deletion busy until the purged organization has been read", async () => {
+    const t = setup();
+    const next = deferred<ReturnType<typeof emptyOrganization>>();
+    try {
+      await t.render();
+      t.store.getOrganization.mockReturnValue(next.promise);
+      let deletion!: Promise<void>;
+      await t.dom.run(() => { deletion = t.current().deletion.handleShelfDelete("a"); });
+      expect(t.busy.current).toBe(true);
+      expect(t.store.getOrganization).toHaveBeenCalled();
+      await t.dom.run(async () => { next.resolve(emptyOrganization()); await deletion; });
+      expect(t.busy.current).toBe(false);
+      expect(t.current().organization.organization).toEqual(emptyOrganization());
+    } finally { await t.dom.dispose(); }
+  });
   it("keeps the read gate on external writes and retains a snapshot after refresh failure", async () => {
     const t = setup();
     const stale = deferred<ShelfEntry[]>();

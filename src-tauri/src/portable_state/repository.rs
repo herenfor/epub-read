@@ -1144,6 +1144,15 @@ impl PortableStore {
             .unwrap_or(false))
     }
 
+    /// Only the initial empty repository may still treat legacy JSON as truth.
+    pub fn legacy_fallback_allowed(&self) -> PortableResult<bool> {
+        let local_rows: i64 = self.connection.query_row(
+            "SELECT (SELECT count(*) FROM local_meta) + (SELECT count(*) FROM device_bindings)
+                    + (SELECT count(*) FROM directory_bindings)", [], |r| r.get(0),
+        )?;
+        Ok(local_rows == 0 && !has_portable_rows(&self.connection)?)
+    }
+
     /// Raw device-binding JSON is intentionally kept as an opaque local row:
     /// it contains absolute paths and must never leak into the portable state.
     pub fn binding_raw(&self, content_hash: &str) -> PortableResult<Option<String>> {

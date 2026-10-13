@@ -87,6 +87,7 @@ export const notice = defineMessages("notice", {
   "notice.legacy.preferencesNotApplied": "旧版 JSON 中的外观设置未自动应用",
   "notice.archiveFile.busy": "已有存档文件任务正在进行，请等待当前任务结束",
   "notice.portable.inactive": "跨平台资料未激活，继续使用旧模式：{error}",
+  "notice.portable.databaseUnavailable": "当前书库无法读取，已停止访问旧资料以避免覆盖。请重试或重启应用：{error}",
   "notice.portable.databaseTooNew": "书库由更新版本的阅读器创建，当前版本无法打开。书库没有被改动，请升级阅读器后再打开。",
   "notice.portable.databaseUnrecognized": "无法识别书库文件的格式，已停止读取。书库没有被改动。",
   "notice.organization.readFailed": "无法读取收藏与文件夹：{error}",
