@@ -18,7 +18,7 @@ export class SidebarSwipeMotion {
   private dragging = false;
   private settling = false;
   constructor(private driver: SidebarMotionDriver, private width: number, public index: number,
-    private onSelect: (index: number) => void) { driver.write(index * width); }
+    private onSelect: (index: number) => void, private paneCount = 3) { driver.write(index * width); }
 
   begin(): number {
     this.origin = this.driver.read();
@@ -31,7 +31,7 @@ export class SidebarSwipeMotion {
   }
   move(ticket: number, dx: number): void {
     if (!this.dragging || ticket !== this.generation) return;
-    const raw = this.origin - dx, end = 2 * this.width;
+    const raw = this.origin - dx, end = (this.paneCount - 1) * this.width;
     // Bounded rubber band: even an enormous outward drag reveals no imaginary fourth pane.
     const limit = this.width * 0.16;
     const resist = (distance: number) => limit * distance / (limit + distance);
@@ -42,7 +42,7 @@ export class SidebarSwipeMotion {
     let next = this.originIndex;
     // One gesture advances one tab; short drag-back/cancel keeps its original destination.
     if (!cancelled && Math.abs(dx) >= Math.min(64, this.width * 0.2)) {
-      next = Math.max(0, Math.min(2, this.originIndex + (dx < 0 ? 1 : -1)));
+      next = Math.max(0, Math.min(this.paneCount - 1, this.originIndex + (dx < 0 ? 1 : -1)));
     }
     this.select(cancelled ? this.originIndex : next, true);
   }
@@ -76,7 +76,7 @@ export class SidebarSwipeMotion {
 
 /** Compositor animation, not per-frame React rendering. read() samples the interrupted frame. */
 export function installSidebarSwipe(viewport: HTMLElement, track: HTMLElement, index: number,
-  onSelect: (index: number) => void): { motion: SidebarSwipeMotion; dispose(): void } {
+  onSelect: (index: number) => void, paneCount = 3): { motion: SidebarSwipeMotion; dispose(): void } {
   let animation: Animation | undefined;
   const window = viewport.ownerDocument.defaultView!;
   const driver: SidebarMotionDriver = {
@@ -93,7 +93,7 @@ export function installSidebarSwipe(viewport: HTMLElement, track: HTMLElement, i
       current.onfinish = () => { if (animation === current) { animation = undefined; done(); } };
     },
   };
-  const motion = new SidebarSwipeMotion(driver, viewport.clientWidth, index, onSelect);
+  const motion = new SidebarSwipeMotion(driver, viewport.clientWidth, index, onSelect, paneCount);
   let start: { x: number; y: number } | undefined;
   let ticket: number | undefined;
   let dx = 0;
@@ -104,7 +104,7 @@ export function installSidebarSwipe(viewport: HTMLElement, track: HTMLElement, i
     if (ticket !== undefined) motion.end(ticket, dx, true);
     reset(); suppressClick = false;
     if (event.touches.length !== 1 || window.getSelection()?.toString() ||
-        (event.target as Element).closest("input,textarea,select,[contenteditable='true']")) return;
+        (event.target as Element).closest("input,textarea,select,[contenteditable='true'],[role='slider'],[data-sheet-drag='off']")) return;
     start = point(event.touches[0]);
   };
   const onMove = (event: TouchEvent) => {

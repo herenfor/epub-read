@@ -1,14 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import { createSidebarNavigationMemory, SidebarSwipeMotion } from "./sidebarSwipe";
 
-function setup(index = 0) {
+function setup(index = 0, paneCount = 3) {
   let position = index * 360;
   const completions: Array<() => void> = [];
   const onSelect = vi.fn();
   const stop = vi.fn();
   const driver = { read: () => position, stop, write: (next: number) => { position = next; },
     animate: (_next: number, done: () => void) => { completions.push(done); } };
-  const motion = new SidebarSwipeMotion(driver, 360, index, onSelect);
+  const motion = new SidebarSwipeMotion(driver, 360, index, onSelect, paneCount);
   return { motion, driver, completions, onSelect, stop, position: () => position };
 }
 
@@ -100,6 +100,23 @@ describe("sidebar swipe interruption", () => {
     expect(s.position()).toBe(40);
     s.completions[2]();
     expect(s.position()).toBe(360);
+  });
+
+  it("a two-pane Aa bounces at its last pane and accepts an immediate reverse", () => {
+    const s = setup(1, 2);
+    const outward = s.motion.begin();
+    s.motion.move(outward, -200);
+    expect(s.position()).toBeGreaterThan(360);
+    expect(s.position()).toBeLessThan(360 * 1.16);
+    s.motion.end(outward, -200);
+    expect(s.motion.index).toBe(1);
+    const reverse = s.motion.begin();
+    s.motion.move(reverse, 120);
+    s.motion.end(reverse, 120);
+    expect(s.motion.index).toBe(0);
+    s.completions[0]();
+    s.completions[1]();
+    expect(s.position()).toBe(0);
   });
 
   it("an external tab update animates without echoing the user's command", () => {

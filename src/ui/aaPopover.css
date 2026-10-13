@@ -841,3 +841,26 @@
   width: 18px;
   height: 18px;
 }
+
+/* Reuse the drawer's compositor swipe; each Aa pane keeps its own scroll container. */
+.aa-tabs-viewport {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.aa-tabs-track {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.aa-tabs-track > .aa-popover-body {
+  flex: 0 0 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+}
