@@ -1281,14 +1281,16 @@ impl PortableStore {
 
         let transaction = self.connection.unchecked_transaction()?;
         let local = load_state_at_connection(&transaction)?;
-        let mut eligible = load_locally_bound_hashes(&transaction)?;
+        let locally_bound = load_locally_bound_hashes(&transaction)?;
+        let mut eligible = locally_bound.clone();
         eligible.extend(bindings.iter().map(|(hash, _)| hash.clone()));
         let selection = super::select_local_import(&local, incoming, &eligible, failed_attachments)?;
         let incoming = &selection.state;
         let imported_hashes: BTreeSet<String> = incoming.books.keys().cloned().collect();
         let incoming_max = super::merge::maximum_received_counter_from_state(incoming)?;
         let local_preferences = local.preferences.clone();
-        let visible_before = load_local_visible_hashes(&transaction)?;
+        let mut visible_before = load_local_visible_hashes(&transaction)?;
+        visible_before.extend(locally_bound);
         let mut visible = visible_before.clone();
         let mut is_new = load_local_is_new_hashes(&transaction)?;
         let local_max = super::merge::maximum_received_counter_from_state(&local)?;
@@ -1413,6 +1415,13 @@ impl PortableStore {
     ) -> PortableResult<LocalImportOutcome> {
         let parsed = legacy::parse_legacy_records(records)?;
         self.import_legacy_records(parsed, organization)
+    }
+
+    /// Actual shelf visibility also includes bound books with missing old flags.
+    pub fn local_shelf_hashes(&self) -> PortableResult<Vec<String>> {
+        let mut hashes = load_local_visible_hashes(&self.connection)?;
+        hashes.extend(load_locally_bound_hashes(&self.connection)?);
+        Ok(hashes.into_iter().collect())
     }
 
     /// Local visibility hashes created by an archive import without bytes.
@@ -1745,8 +1754,8 @@ impl PortableStore {
         Ok(())
     }
 
-    /// Local removal of a linked/managed row: drop binding and visibility while
-    /// preserving the portable book and its tombstones for future sync.
+    /// Local deletion purges the book and its portable data; no book tombstone.
+    /// The legacy method name remains for existing command callers.
     pub fn hide_linked_record(&mut self, content_hash: &str) -> PortableResult<()> {
         self.hide_linked_records(&[content_hash.to_string()])
     }
@@ -1760,16 +1769,11 @@ impl PortableStore {
             }
         }
         let transaction = self.connection.unchecked_transaction()?;
-        let mut visible = load_local_visible_hashes(&transaction)?;
-        let mut is_new = load_local_is_new_hashes(&transaction)?;
-        for hash in content_hashes {
-            transaction.execute("DELETE FROM device_bindings WHERE hash = ?1", params![hash])?;
-            visible.remove(hash);
-            is_new.remove(hash);
-        }
-        save_local_visible_hashes(&transaction, &visible)?;
-        save_local_is_new_hashes(&transaction, &is_new)?;
+        super::local_books::purge(&transaction, content_hashes)?;
         transaction.commit()?;
+        for hash in content_hashes {
+            self.release(ReleaseTarget::BookHash(hash.clone()))?;
+        }
         Ok(())
     }
 
@@ -1964,12 +1968,17 @@ impl PortableStore {
         save_local_visible_hashes(&transaction, &migrated_visible)?;
         put_meta_json(&transaction, KEY_INSTALLATION_ID, &plan.installation_id)?;
         store_counter(&transaction, plan.counter)?;
+        // Legacy JSON activation is another one-time old-format conversion.
+        // Fresh v2 databases must not acquire old unbound sync leftovers here.
+        super::local_books::purge_unbound(&transaction)?;
         put_meta_json(&transaction, KEY_MIGRATION, &legacy::completed_marker())?;
         remove_meta(&transaction, KEY_PREFERENCES)?;
+        let books: usize = transaction.query_row("SELECT count(*) FROM book_meta", [], |r| r.get(0))?;
+        let annotations: usize = transaction.query_row("SELECT count(*) FROM annotations", [], |r| r.get(0))?;
         transaction.commit()?;
         Ok(MigrationOutcome::Migrated {
-            books: plan.migrated_books,
-            annotations: plan.migrated_annotations,
+            books,
+            annotations,
         })
     }
 }
@@ -2538,6 +2547,39 @@ mod file_import_tests {
     const HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     const A: &str = "00000000-0000-4000-8000-000000000001";
 
+    #[test]
+    fn c5_delete_purges_all_data_and_reimport_is_fresh() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch(include_str!("testdata/local-schema-v1.sql")).unwrap();
+        let mut store = PortableStore::from_connection(connection).unwrap();
+        let hash = "c".repeat(64);
+        let mut fresh = store.snapshot().unwrap();
+        let book = fresh.books.get_mut(&hash).unwrap();
+        book.progress.versions.clear();
+        book.bookmarks.clear();
+        book.notes.clear();
+        fresh.organization = empty_organization();
+        let (read, _) = store.read(&hash).unwrap();
+        store.hide_linked_record(&hash).unwrap();
+        for table in ["book_meta", "progress", "annotations", "device_bindings"] {
+            assert_eq!(store.connection.query_row(&format!("SELECT count(*) FROM {table} WHERE hash=?1"), [&hash], |r| r.get::<_, i64>(0)).unwrap(), 0);
+        }
+        assert!(store.local_visible_hashes().unwrap().is_empty());
+        assert!(store.local_is_new_hashes().unwrap().is_empty());
+        let state = store.snapshot().unwrap();
+        assert!(state.organization.books.is_empty());
+        assert_eq!(state.organization.folders.len(), 1);
+        assert!(store.adopt(&read, EntityRef::Progress { book_hash:hash.clone() }, AdoptSelection::Empty).is_err());
+        store.merge_validated_import(fresh, vec![(hash.clone(), "{}".into())], false).unwrap();
+        let state = store.snapshot().unwrap();
+        assert!(state.books[&hash].progress.versions.is_empty());
+        assert!(state.books[&hash].notes.is_empty());
+        assert!(state.books[&hash].bookmarks.is_empty());
+        assert!(!is_favorite(&state.organization, &hash));
+        assert!(effective_folder_id(&state.organization, &hash).is_none());
+        assert_eq!(store.local_is_new_hashes().unwrap(), vec![hash]);
+    }
+
     fn state_at(counter: u64) -> PortableStateV3 {
         serde_json::from_value(serde_json::json!({
             "schemaVersion": 3,
@@ -2589,9 +2631,13 @@ mod file_import_tests {
         let accepted = store.merge_local_import_ref(&incoming, vec![(HASH.into(), "{\"sourcePath\":\"/missing.epub\"}".into())], &BTreeSet::new(), false).unwrap();
         assert_eq!(accepted.imported_books, vec![HASH]);
         assert!(accepted.skipped_books.is_empty());
+        // Missing historical flags do not turn a bound book into a new book.
+        store.set_local_visible(HASH, false).unwrap();
+        store.set_local_is_new(HASH, false).unwrap();
         // Eligibility does not stat that path, and new progress is accepted.
         let accepted = store.merge_local_import_ref(&state_at(3), vec![], &BTreeSet::new(), false).unwrap();
         assert_eq!(accepted.state.books[HASH].progress.versions[0].stamp.counter, 3);
+        assert!(store.local_is_new_hashes().unwrap().is_empty());
         let before = store.snapshot().unwrap();
         let failed = store.merge_local_import_ref(&state_at(4), vec![], &BTreeSet::from([HASH.into()]), false).unwrap();
         assert_eq!(failed.skipped_books[0].reason, "attachment-import-failed");

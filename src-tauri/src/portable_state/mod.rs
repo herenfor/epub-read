@@ -15,6 +15,7 @@ mod merge;
 mod repository;
 mod schema;
 mod import_selection;
+mod local_books;
 
 pub use import_selection::{select_local_import, LocalImportSelection, SkippedImportBook};
 
@@ -442,9 +443,16 @@ mod tests {
     }
 
     #[test]
-    fn repository_migration_reads_old_sample_then_reopens_with_same_identity() {
+    fn c5_legacy_activation_keeps_bound_records_and_reuses_identity() {
         let root = TempDir::new("migration");
         legacy_repository_fixture(root.path());
+        let records_path = root.path().join("library-records.json");
+        let mut records: Vec<Value> = serde_json::from_str(&fs::read_to_string(&records_path).unwrap()).unwrap();
+        let mut unbound = records[0].clone();
+        unbound["contentHash"] = json!(HASH_2);
+        records.push(unbound);
+        fs::write(&records_path, serde_json::to_string(&records).unwrap()).unwrap();
+
         let database = root.path().join("library.sqlite3");
 
         let mut store = PortableStore::open(&database).unwrap();
@@ -466,6 +474,8 @@ mod tests {
             .contains(&HASH.to_string()));
 
         let state = store.snapshot().unwrap();
+        assert!(!state.books.contains_key(HASH_2));
+
         let book = state.books.get(HASH).unwrap();
         assert_eq!(book.metadata.value.title, "旧书");
         assert_eq!(book.metadata.value.added_at_ms, 1000);
@@ -846,9 +856,8 @@ mod tests {
         assert!(store.binding_raw(HASH).unwrap().is_none());
         assert!(store.binding_raw(HASH_2).unwrap().is_some());
         let state = store.snapshot().unwrap();
-        assert_eq!(state.books.len(), 2);
-        assert!(state.books[HASH].notes.contains_key(OLD_NOTE_ID));
-        assert_eq!(state.books[HASH].progress.versions.len(), 1);
+        assert_eq!(state.books.len(), 1);
+        assert!(!state.books.contains_key(HASH));
     }
 
     #[test]
@@ -899,8 +908,8 @@ mod tests {
             .local_is_new_hashes()
             .unwrap()
             .contains(&HASH.to_string()));
-        // Local removal keeps the portable metadata for future sync.
-        assert!(store.snapshot().unwrap().books.contains_key(HASH));
+        // Local removal purges portable data, without a tombstone.
+        assert!(!store.snapshot().unwrap().books.contains_key(HASH));
     }
 
     #[test]
