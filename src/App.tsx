@@ -29,13 +29,9 @@ import type { SearchOccurrence } from "./core/searchOccurrence";
 import { ResourceServer } from "./render/resources";
 import { sanitizePersistedTextAnchor } from "./render/textAnchor";
 import { clearDocumentSelection, isSelectAllShortcut } from "./render/selectionGuard";
-import {
-  DEFAULT_SETTINGS,
-  normalizeTurnAnimation,
-  type ReaderSettings,
-} from "./render/settings";
+import { normalizeTurnAnimation } from "./render/settings";
 import type { ChapterState, MediaReadingAnchor, PreciseNavigationStatus, ReadingAnchor } from "./render/paginator";
-import { normalizePageOptions } from "./render/pageLayout";
+import { useReaderSettings, useReaderSettingsPersistence } from "./ui/useReaderSettings";
 import { sanitizeTextProjectionPreferences } from "./render/textProjection/preferences";
 import type { ImageViewRequest } from "./render/imageActivation";
 import { ImageViewer } from "./ui/ImageViewer";
@@ -264,9 +260,6 @@ import {
 import {
   readProgress,
   writeProgress,
-  readSavedSettings,
-  writeSavedSettings,
-  toSavedReaderSettings,
   type SavedProgress,
 } from "./ui/storage";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -813,43 +806,7 @@ export default function App() {
   );
   const [chapterState, setChapterState] = useState<ChapterState>({ status: "loading" });
   const [readerDisplayReady, setReaderDisplayReady] = useState(false);
-  const [settings, setSettings] = useState<ReaderSettings>(() => {
-    const saved = readSavedSettings();
-    return {
-      ...DEFAULT_SETTINGS,
-      fontSizePx: saved.fontSizePx ?? DEFAULT_SETTINGS.fontSizePx,
-      theme: saved.theme ?? DEFAULT_SETTINGS.theme,
-      lineHeight: saved.lineHeight,
-      fontWeight: saved.fontWeight,
-      letterSpacingPx: saved.letterSpacingPx,
-      wordSpacingPx: saved.wordSpacingPx,
-      customFontName: saved.customFontName,
-      fontSource: saved.fontSource === "system" || saved.fontSource === "imported" ? saved.fontSource : undefined,
-      customFontId: saved.customFontId,
-      forceFontOverride: saved.forceFontOverride === true,
-      customCss: saved.customCss,
-      forceHorizontal: saved.forceHorizontal === true,
-      preloadNextChapter: saved.preloadNextChapter === true,
-      turnAnimation: normalizeTurnAnimation(saved.turnAnimation),
-      // 页面选项只在读取边界规范化一次；后续布局函数不再重复校验。
-      ...normalizePageOptions({
-        readingMode: saved.readingMode,
-        pageMarginsPx: saved.pageMarginsPx,
-        columnsPerView: saved.columnsPerView,
-        gapPx: saved.gapPx,
-        spreadGapMode: saved.spreadGapMode,
-      }),
-    };
-  });
-  // UI 界面缩放（独立于正文字号）
-  const [uiScale, setUiScale] = useState<number>(() => {
-    const saved = readSavedSettings();
-    return saved.uiScale !== undefined &&
-      saved.uiScale >= 0.75 &&
-      saved.uiScale <= 1.5
-      ? saved.uiScale
-      : 1;
-  });
+  const { settings, setSettings, uiScale, settingsActions } = useReaderSettings();
   const [runtimeIssues, setRuntimeIssues] = useState<string[]>([]);
   /** B-225: category + book path already logged in this book session. */
   const reportedResourcesRef = useRef(new Set<string>());
@@ -2372,30 +2329,9 @@ export default function App() {
   const applyPortablePreferences = useCallback((preferences?: PortablePreferences): boolean => {
     if (!preferences) return false;
     // 导入偏好可能同时改主题与字号等：直接提交，并取代未提交的主题过渡请求。
-    commitThemeSettings(() => setSettings((previous) => {
-      const next = { ...previous };
-      if (preferences.theme === "light" || preferences.theme === "dark" || preferences.theme === "sepia" || preferences.theme === "gray") {
-        next.theme = preferences.theme;
-      }
-      if (typeof preferences.fontSizePx === "number" && preferences.fontSizePx >= 12 && preferences.fontSizePx <= 32) {
-        next.fontSizePx = preferences.fontSizePx;
-      }
-      if (typeof preferences.lineHeight === "number" && preferences.lineHeight >= 1 && preferences.lineHeight <= 3) {
-        next.lineHeight = preferences.lineHeight;
-      }
-      if (typeof preferences.fontWeight === "number" && preferences.fontWeight >= 100 && preferences.fontWeight <= 900) {
-        next.fontWeight = preferences.fontWeight;
-      }
-      if (typeof preferences.letterSpacingPx === "number" && preferences.letterSpacingPx >= 0 && preferences.letterSpacingPx <= 32) {
-        next.letterSpacingPx = preferences.letterSpacingPx;
-      }
-      if (typeof preferences.wordSpacingPx === "number" && preferences.wordSpacingPx >= 0 && preferences.wordSpacingPx <= 64) {
-        next.wordSpacingPx = preferences.wordSpacingPx;
-      }
-      return next;
-    }));
+    commitThemeSettings(() => settingsActions.applyPortablePreferences(preferences));
     return true;
-  }, [commitThemeSettings]);
+  }, [commitThemeSettings, settingsActions]);
 
   // ---- 书库读取：首次读取、失败重试共用同一读取入口 ----
   // Readers are created once; what they publish into is refreshed every render.
@@ -3098,12 +3034,7 @@ export default function App() {
     const family = fontFamilyFromFileName(file.name);
     const entry = await getFontStore().importFont({ id, fileName: file.name, family, bytes });
     setUserFonts((prev) => [entry, ...prev.filter((f) => f.id !== id)]);
-    setSettings((previous) => ({
-      ...previous,
-      fontSource: "imported",
-      customFontId: id,
-      customFontName: entry.family,
-    }));
+    settingsActions.selectImportedFont({ id, family: entry.family });
   }, []);
 
   // 本地文件与原生路径共用同一控制器：同一时刻只有一个在途批次，路径入口不再重入 busy。
@@ -3151,12 +3082,7 @@ export default function App() {
     const entry = result.entry;
     if (entry) {
       setUserFonts((prev) => [entry, ...prev.filter((f) => f.id !== entry.id)]);
-      setSettings((previous) => ({
-        ...previous,
-        fontSource: "imported",
-        customFontId: entry.id,
-        customFontName: entry.family,
-      }));
+      settingsActions.selectImportedFont(entry);
     }
     if (result.unsupported > 0) {
       setShelfNotice({
@@ -4328,7 +4254,7 @@ export default function App() {
           setAnchorNonce((n) => n + 1);
         }
       }
-      setSettings((s2) => ({ ...s2, ...patch }));
+      settingsActions.setPresentation(patch);
     },
     [currentReaderPosition, settings.columnsPerView, settings.readingMode]
   );
@@ -5293,9 +5219,7 @@ export default function App() {
   }, [phase, book, bookKey, spineIndex, chapterState, readerDisplayReady]);
 
   // ---- 设置持久化 ----
-  useEffect(() => {
-    writeSavedSettings(toSavedReaderSettings(settings, uiScale));
-  }, [settings, uiScale]);
+  useReaderSettingsPersistence(settings, uiScale);
 
   // 书架设置与阅读 Aa 共用的主题入口：仅主题变化走约 200ms 整屏淡入，更新回调内
   // 同步提交 React 外层、html/body 与全部在用正文宿主（见 ui/themeTransitionHost）。
@@ -5307,19 +5231,9 @@ export default function App() {
   }, [settings.theme]);
 
   // 恢复默认同时改几何：经同一控制器直接提交（取代未提交的主题请求），排版走原有事务。
-  const resetDefaults = (): void => {
-    themeTransition.commitSettings(() => {
-      setSettings({ ...DEFAULT_SETTINGS });
-      setUiScale(1);
-    });
-  };
-
-  const adjustFont = (delta: number): void => {
-    setSettings((s) => {
-      const fontSizePx = clamp(s.fontSizePx + delta, 12, 32);
-      return fontSizePx === s.fontSizePx ? s : { ...s, fontSizePx };
-    });
-  };
+  const resetDefaults = useCallback((): void => {
+    commitThemeSettings(settingsActions.resetDefaults);
+  }, [commitThemeSettings, settingsActions]);
 
   // ---- 脚注弹层随重排重定位 ----
   useEffect(() => {
@@ -6804,16 +6718,16 @@ export default function App() {
                   customFontId={settings.customFontId}
                   customFontName={settings.customFontName}
                   forceFontOverride={settings.forceFontOverride === true}
-                  onForceFontOverrideChange={(enabled) => setSettings((s) => ({ ...s, forceFontOverride: enabled }))}
+                  onForceFontOverrideChange={settingsActions.setForceFontOverride}
                   systemFonts={systemFonts}
                   userFonts={userFonts}
                   systemFontsStatus={systemFontsStatus}
                   systemFontsError={systemFontsError}
                   onLoadSystemFonts={() => void loadSystemFonts()}
                   busy={fontBusy}
-                  onSelectSystem={(family) => setSettings((s) => ({ ...s, fontSource: "system", customFontName: family, customFontId: undefined }))}
-                  onSelectBook={() => setSettings((s) => ({ ...s, fontSource: undefined, customFontName: undefined, customFontId: undefined }))}
-                  onSelectImported={(font) => setSettings((s) => ({ ...s, fontSource: "imported", customFontId: font.id, customFontName: font.family }))}
+                  onSelectSystem={settingsActions.selectSystemFont}
+                  onSelectBook={settingsActions.selectBookFont}
+                  onSelectImported={settingsActions.selectImportedFont}
                   onDelete={(id) => void handleDeleteFont(id)}
                   onImport={handleImportFonts}
                   nativeDragActive={fontNativeDragActive}
@@ -6828,56 +6742,32 @@ export default function App() {
                 onPrepared={() => openingPanels.prepared(bookKey, "aa")}
                 phoneLayout={phoneChrome}
                 fontSize={settings.fontSizePx}
-                onFontSizeChange={(v) =>
-                  setSettings((s2) => {
-                    const fontSizePx = clamp(v, 12, 32);
-                    return fontSizePx === s2.fontSizePx ? s2 : { ...s2, fontSizePx };
-                  })
-                }
-                onFontDec={() => adjustFont(-2)}
-                onFontInc={() => adjustFont(2)}
+                onFontSizeChange={settingsActions.setFontSize}
+                onFontDec={settingsActions.decreaseFont}
+                onFontInc={settingsActions.increaseFont}
                 theme={settings.theme}
                 onThemeChange={changeTheme}
                 customFontName={settings.customFontName}
                 onOpenFontSettings={() => setForeground((current) => setMenuSubview(current, "fonts"))}
                 onOpenDisplaySettings={() => setForeground((current) => setMenuSubview(current, "extras"))}
                 lineHeight={settings.lineHeight}
-                onLineHeightChange={(v) =>
-                  setSettings((s2) => {
-                    const lineHeight = clamp(v, 1.2, 2.4);
-                    return lineHeight === s2.lineHeight ? s2 : { ...s2, lineHeight };
-                  })
-                }
-                onResetLineHeight={() =>
-                  setSettings((s2) => ({ ...s2, lineHeight: undefined }))
-                }
+                onLineHeightChange={settingsActions.setLineHeight}
+                onResetLineHeight={settingsActions.resetLineHeight}
                 fontWeight={settings.fontWeight}
-                onFontWeightChange={(v) =>
-                  setSettings((s2) => ({ ...s2, fontWeight: v }))
-                }
+                onFontWeightChange={settingsActions.setFontWeight}
                 letterSpacingPx={settings.letterSpacingPx}
-                onLetterSpacingChange={(v) =>
-                  setSettings((s2) => ({ ...s2, letterSpacingPx: v }))
-                }
+                onLetterSpacingChange={settingsActions.setLetterSpacing}
                 wordSpacingPx={settings.wordSpacingPx}
-                onWordSpacingChange={(v) =>
-                  setSettings((s2) => ({ ...s2, wordSpacingPx: v }))
-                }
+                onWordSpacingChange={settingsActions.setWordSpacing}
                 gapPx={settings.gapPx}
                 spreadGapMode={settings.spreadGapMode ?? "auto"}
-                onGapPxChange={(gap) =>
-                  setSettings((s2) => ({ ...s2, gapPx: gap, spreadGapMode: "manual" }))
-                }
-                onSpreadGapModeChange={(mode) =>
-                  setSettings((s2) => ({ ...s2, spreadGapMode: mode }))
-                }
+                onGapPxChange={settingsActions.setGap}
+                onSpreadGapModeChange={settingsActions.setSpreadGapMode}
                 spreadArea={chapterState.status === "ready" ? chapterState.spreadArea : undefined}
                 uiScale={uiScale}
-                onUiScaleChange={(scale) => setUiScale(scale)}
+                onUiScaleChange={settingsActions.setUiScale}
                 pageMargins={settings.pageMarginsPx}
-                onPageMarginsChange={(margins) =>
-                  setSettings((s2) => ({ ...s2, pageMarginsPx: margins }))
-                }
+                onPageMarginsChange={settingsActions.setPageMargins}
                 columnsPerView={settings.columnsPerView === 2 ? 2 : 1}
                 onColumnsChange={(cols) => handlePresentationChange({ columnsPerView: cols })}
                 readingMode={settings.readingMode === "scroll" ? "scroll" : "paginated"}
@@ -6885,22 +6775,14 @@ export default function App() {
                 effectiveColumns={chapterState.status === "ready" ? chapterState.effectiveColumns : undefined}
                 onPresentationChange={handlePresentationChange}
                 turnAnimation={normalizeTurnAnimation(settings.turnAnimation)}
-                onTurnAnimationChange={(turnAnimation) =>
-                  setSettings((s2) => ({ ...s2, turnAnimation }))
-                }
+                onTurnAnimationChange={settingsActions.setTurnAnimation}
                 forceHorizontal={settings.forceHorizontal === true}
-                onForceHorizontalChange={(enabled) =>
-                  setSettings((s2) => ({ ...s2, forceHorizontal: enabled }))
-                }
+                onForceHorizontalChange={settingsActions.setForceHorizontal}
                 preloadNextChapter={settings.preloadNextChapter === true}
                 preloadNextChapterDisabled={book?.fixedLayout === true}
-                onPreloadNextChapterChange={(enabled) =>
-                  setSettings((s2) => ({ ...s2, preloadNextChapter: enabled }))
-                }
+                onPreloadNextChapterChange={settingsActions.setPreloadNextChapter}
                 customCss={settings.customCss}
-                onCustomCssChange={(css) =>
-                  setSettings((s2) => ({ ...s2, customCss: css }))
-                }
+                onCustomCssChange={settingsActions.setCustomCss}
                 onResetDefaults={resetDefaults}
                 onToggleLog={handleToggleLog}
                 issueCount={logItems.length}
