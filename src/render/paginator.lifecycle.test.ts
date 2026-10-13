@@ -87,13 +87,13 @@ describe("ChapterPaginator CSS Blob URL lifecycle", () => {
       ...serverOverrides,
     };
     const iframe = fakeIframe();
-    const paginator = new ChapterPaginator(
-      iframe,
-      server as never,
-      DEFAULT_SETTINGS,
-      true,
-      vi.fn()
-    );
+    const paginator = new ChapterPaginator({
+      iframe: iframe,
+      server: server as never,
+      settings: DEFAULT_SETTINGS,
+      strictXml: true,
+      onState: vi.fn()
+    });
     return { paginator, server, iframe };
   }
 

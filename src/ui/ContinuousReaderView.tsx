@@ -1423,20 +1423,20 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
 
         let slot: ActiveSlot;
 
-        const paginator = new ChapterPaginator(
-          iframe,
-          server,
-          renderSettings,
-          false,
-          () => {},
-          onIssues,
-          false,
-          (href) => onInternalLinkRef.current(href),
-          (href) => onBeforeInternalNavigateRef.current(href),
-          () => onInternalNavigationSettledRef.current(),
-          () => {}, // 不使用旧 onWheelNavigate
-          () => {}, // 不使用旧 onKeyNavigate
-          (payload) => {
+        const paginator = new ChapterPaginator({
+          iframe: iframe,
+          server: server,
+          settings: renderSettings,
+          strictXml: false,
+          onState: () => {},
+          onIssues: onIssues,
+          fixedLayout: false,
+          onNavigate: (href) => onInternalLinkRef.current(href),
+          onBeforeInternalNavigate: (href) => onBeforeInternalNavigateRef.current(href),
+          onInternalNavigationSettled: () => onInternalNavigationSettledRef.current(),
+          onWheelNavigate: () => {},
+          onKeyNavigate: () => {},
+          onFootnote: (payload) => {
             // 纠正脚注文档内标记的坐标为宿主阅读区坐标
             const el = containerRef.current;
             if (!el) {
@@ -1457,9 +1457,9 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
               },
             });
           },
-          onFootnoteClose,
-          onExternalLink,
-          () => {
+          onFootnoteClose: onFootnoteClose,
+          onExternalLink: onExternalLink,
+          onDisplayReady: () => {
             // onDisplayReady 回调：先尝试提交真实高度。
             // 同章设置重载走独立分支：它沿用同一个 paginator，gate 里已没有本次票据，
             // 只需重测高度并刷新布局，不重复置 ready / 不重放 onDisplayReady。
@@ -1478,7 +1478,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
               scheduleChapterMeasurementRef.current(key, paginator, ticket);
             }
           },
-          (payload) => {
+          onSelectionContextMenu: (payload) => {
             if (!payload) {
               onSelectionContextMenu?.(null);
               return;
@@ -1502,21 +1502,21 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
               },
             });
           },
-          (status) => {
+          onPreciseNavigationStatus: (status) => {
             onPreciseNavigationStatus?.(status);
           },
-          onImageActivation,
-          {
+          onImageActivation: onImageActivation,
+          externalScroll: {
             onWheelPixels: (delta) => externalScrollHandlersRef.current.onWheelPixels(delta),
             onViewportStep: (direction) =>
               externalScrollHandlersRef.current.onViewportStep(direction),
           },
-          undefined,
-          () => {
+          pagedSwipe: undefined,
+          onPlainTap: () => {
             if (!inputPausedRef.current) onPlainTapRef.current?.();
           },
-          () => inputPausedRef.current
-        );
+          shouldIgnorePlainTap: () => inputPausedRef.current
+        });
 
         slot = {
           key,
@@ -2461,24 +2461,24 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
               auxIframeRef.current = node;
               // 设置变更会让 key 变化并重建 iframe，这里显式销毁上一份 paginator
               auxPaginatorRef.current?.dispose();
-              const paginator = new ChapterPaginator(
-                node,
-                server,
-                renderSettings,
-                false,
-                props.onPageState,
-                props.onIssues,
-                false,
-                props.onInternalLink,
-                props.onBeforeInternalNavigate,
-                props.onInternalNavigationSettled,
-                () => {},
-                () => {},
-                props.onFootnote,
-                props.onFootnoteClose,
-                props.onExternalLink,
-                () => props.onDisplayReady?.(restoreTicketRef.current)
-              );
+              const paginator = new ChapterPaginator({
+                iframe: node,
+                server: server,
+                settings: renderSettings,
+                strictXml: false,
+                onState: props.onPageState,
+                onIssues: props.onIssues,
+                fixedLayout: false,
+                onNavigate: props.onInternalLink,
+                onBeforeInternalNavigate: props.onBeforeInternalNavigate,
+                onInternalNavigationSettled: props.onInternalNavigationSettled,
+                onWheelNavigate: () => {},
+                onKeyNavigate: () => {},
+                onFootnote: props.onFootnote,
+                onFootnoteClose: props.onFootnoteClose,
+                onExternalLink: props.onExternalLink,
+                onDisplayReady: () => props.onDisplayReady?.(restoreTicketRef.current)
+              });
               auxPaginatorRef.current = paginator;
               paginator.setEndText(endTextRef.current);
               const latestProjection = projectionReloadCoordinatorRef.current?.current();

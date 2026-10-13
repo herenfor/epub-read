@@ -1,3 +1,4 @@
+import type { ChapterPaginatorOptions } from "../render/paginator";
 import { act, createElement, createRef, type ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_SETTINGS, type ReaderSettings } from "../render/settings";
@@ -14,7 +15,7 @@ class MockPaginator {
   path = "";
   complete: (() => void) | undefined;
   readyWaiters: Array<(ready: boolean) => void> = [];
-  callbacks: unknown[];
+  callbacks: ChapterPaginatorOptions;
   settings: ReaderSettings;
   loadOptions: {
     settings?: ReaderSettings;
@@ -24,9 +25,9 @@ class MockPaginator {
   } = {};
   restoreHandler: ((result: { located: boolean; ticket: { session: number; request: number; chapterPath: string } | null; loadSeq: number }) => void) | null = null;
   userCommitHandler: (() => void) | null = null;
-  constructor(...args: unknown[]) {
-    this.settings = args[2] as ReaderSettings;
-    this.callbacks = args;
+  constructor(options: ChapterPaginatorOptions) {
+    this.settings = options.settings;
+    this.callbacks = options;
     instances.push(this);
   }
   load = vi.fn(async (path: string, options: {
@@ -40,7 +41,7 @@ class MockPaginator {
     if (options.settings) this.settings = options.settings;
     this.isDisplayReady = false;
     this.state = { status: "loading" };
-    (this.callbacks[4] as Function)(this.state);
+    (this.callbacks.onState as Function)(this.state);
   });
   setRestoreResultHandler(handler: typeof this.restoreHandler) {
     this.restoreHandler = handler;
@@ -56,19 +57,27 @@ class MockPaginator {
     this.settings = settings;
     await this.load(this.path);
   });
+  reloadWithSettingsAndWaitForDisplay = vi.fn(async (settings: ReaderSettings) => {
+    await this.reloadWithSettings(settings);
+    return this.waitForDisplayReady();
+  });
+  updateTheme(theme: ReaderSettings["theme"]) {
+    this.settings = { ...this.settings, theme };
+    return true;
+  }
   finish() {
     this.isDisplayReady = true;
     this.state = { status: "ready", empty: false, pageCount: this.pageCount, currentPage: this.currentPage };
-    (this.callbacks[4] as Function)(this.state);
-    (this.callbacks[15] as Function)();
+    (this.callbacks.onState as Function)(this.state);
+    (this.callbacks.onDisplayReady as Function)();
     this.complete?.();
     this.flushReadyWaiters(true);
   }
   finishEmpty() {
     this.isDisplayReady = true;
     this.state = { status: "ready", empty: true, pageCount: 1, currentPage: 0 };
-    (this.callbacks[4] as Function)(this.state);
-    (this.callbacks[15] as Function)();
+    (this.callbacks.onState as Function)(this.state);
+    (this.callbacks.onDisplayReady as Function)();
     this.complete?.();
     this.flushReadyWaiters(true);
   }
@@ -101,7 +110,7 @@ class MockPaginator {
   dispose() { this.disposed = true; this.complete?.(); this.flushReadyWaiters(false); }
 }
 vi.mock("../render/paginator", () => ({
-  ChapterPaginator: class { constructor(...args: unknown[]) { return new MockPaginator(...args); } },
+  ChapterPaginator: class { constructor(options: ChapterPaginatorOptions) { return new MockPaginator(options); } },
 }));
 import { ReaderView, type ReaderHandle } from "./ReaderView";
 
@@ -133,8 +142,9 @@ describe("ReaderView preload settings lifecycle", () => {
   afterEach(async () => { await dom.dispose(); vi.useRealTimers(); });
   const render = () => dom.render(createElement(ReaderView, props));
   const finish = async (p: MockPaginator) => {
+    // Display-ready resolves the reload transaction before a later idle timer runs.
+    await act(async () => { p.finish(); });
     await act(async () => {
-      p.finish();
       vi.advanceTimersByTime(500);
     });
   };
