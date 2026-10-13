@@ -717,12 +717,12 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   const buildPaginator = (slot: PaginatorSlot): ChapterPaginator => {
     // Display-ready callbacks can outlive the render that created them.
     slot.renderSettings = latestRenderSettingsRef.current;
-    const paginator = new ChapterPaginator(
-      slot.iframe,
-      server,
-      slot.renderSettings,
-      book.version === 2,
-      (state) => {
+    const paginator = new ChapterPaginator({
+      iframe: slot.iframe,
+      server: server,
+      settings: slot.renderSettings,
+      strictXml: book.version === 2,
+      onState: (state) => {
         slot.state = state;
         if (state.status !== "ready") slot.ready = false;
         if (!isActiveSlot(slot) || slot.spineIndex !== spineIndexRef.current) return;
@@ -748,20 +748,20 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
           onRequestChapterRef.current(next);
         }
       },
-      (issues, unresolvedResources) => {
+      onIssues: (issues, unresolvedResources) => {
         if (isActiveSlot(slot)) onIssuesRef.current(issues, unresolvedResources);
       },
-      book.fixedLayout,
-      (href) => {
+      fixedLayout: book.fixedLayout,
+      onNavigate: (href) => {
         if (isActiveSlot(slot)) onInternalLinkRef.current(href);
       },
-      (href) => {
+      onBeforeInternalNavigate: (href) => {
         if (isActiveSlot(slot)) onBeforeInternalNavigateRef.current(href);
       },
-      () => {
+      onInternalNavigationSettled: () => {
         if (isActiveSlot(slot)) onInternalNavigationSettledRef.current();
       },
-      (dir) => {
+      onWheelNavigate: (dir) => {
         if (!isActiveSlot(slot)) return;
         // 输入到达先于切换判断：即使处于换章静默期，也暂停未发布的后台测量。
         pauseBackgroundWarmupForInput();
@@ -769,10 +769,10 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         if (dir === lockedReverseDirRef.current && Date.now() < reverseLockUntilRef.current) return;
         turnPageRef.current(dir, "wheel");
       },
-      (dir) => {
+      onKeyNavigate: (dir) => {
         if (isActiveSlot(slot) && !inputPausedRef.current) turnPageRef.current(dir, "key");
       },
-      (payload) => {
+      onFootnote: (payload) => {
         if (!isActiveSlot(slot)) return;
         const main = slot.iframe.parentElement;
         if (!main) {
@@ -793,18 +793,18 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
           },
         });
       },
-      () => {
+      onFootnoteClose: () => {
         if (isActiveSlot(slot)) onFootnoteCloseRef.current();
       },
-      (url) => {
+      onExternalLink: (url) => {
         if (isActiveSlot(slot)) onExternalLinkRef.current(url);
       },
-      () => {
+      onDisplayReady: () => {
         slot.ready = true;
         slot.state = paginator.getStateSnapshot();
         if (isActiveSlot(slot)) publishActiveDisplayReady();
       },
-      (payload) => {
+      onSelectionContextMenu: (payload) => {
         if (!isActiveSlot(slot)) return;
         if (!payload) {
           onSelectionContextMenuRef.current?.(null);
@@ -821,15 +821,15 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
           },
         });
       },
-      (status) => {
+      onPreciseNavigationStatus: (status) => {
         if (isActiveSlot(slot)) onPreciseNavigationStatusRef.current?.(status);
       },
-      (image) => {
+      onImageActivation: (image) => {
         // 非活动槽（预加载）不得打开浮层；同时避免借用已撤销的 blob URL。
         if (isActiveSlot(slot)) onImageActivationRef.current?.(image);
       },
-      undefined,
-      {
+      externalScroll: undefined,
+      pagedSwipe: {
         onNext: () => turnPageRef.current(1, "ui"),
         onPrev: () => turnPageRef.current(-1, "ui"),
         shouldIgnore: () =>
@@ -847,15 +847,14 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
           if (!slot.paginator?.pageMotionAvailable) slideAnimRef.current?.finish();
         },
       },
-      // 正文点击总是安装：PC 鼠标单击与触屏轻点都按点击区几何路由；坐标换成顶层窗口坐标。
-      (tap) => {
+      onPlainTap: (tap) => {
         if (isActiveSlot(slot) && !inputPausedRef.current && slot.state.status === "ready") {
           const rect = slot.iframe.getBoundingClientRect();
           plainTapRef.current({ ...tap, clientX: tap.clientX + rect.left, clientY: tap.clientY + rect.top });
         }
       },
-      () => !isActiveSlot(slot) || inputPausedRef.current || slot.state.status !== "ready"
-    );
+      shouldIgnorePlainTap: () => !isActiveSlot(slot) || inputPausedRef.current || slot.state.status !== "ready"
+    });
     slot.paginator = paginator;
     paginator.setPlainTapRepeatClaim?.((point) => {
       const rect = slot.iframe.getBoundingClientRect();

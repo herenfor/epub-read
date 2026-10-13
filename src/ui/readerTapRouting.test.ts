@@ -1,3 +1,4 @@
+import type { ChapterPaginatorOptions } from "../render/paginator";
 import { act, createElement, createRef, type ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_SETTINGS, type ReaderSettings } from "../render/settings";
@@ -19,28 +20,28 @@ class MockPaginator {
   setMotionWindowForeground = vi.fn();
   endMotionContact() {}
   path = "";
-  callbacks: unknown[];
+  callbacks: ChapterPaginatorOptions;
   settings: ReaderSettings;
-  constructor(...args: unknown[]) {
-    this.settings = args[2] as ReaderSettings;
-    this.callbacks = args;
+  constructor(options: ChapterPaginatorOptions) {
+    this.settings = options.settings;
+    this.callbacks = options;
     instances.push(this);
   }
   load = vi.fn(async (path: string) => {
     this.path = path;
     this.state = { status: "loading" };
-    (this.callbacks[4] as Function)(this.state);
+    (this.callbacks.onState as Function)(this.state);
   });
   loadAndWaitForDisplay = vi.fn(async (path: string) => { await this.load(path); return true; });
   finish() {
     this.isDisplayReady = true;
     this.state = { status: "ready", empty: false, pageCount: this.pageCount, currentPage: this.currentPage };
-    (this.callbacks[4] as Function)(this.state);
-    (this.callbacks[15] as Function)();
+    (this.callbacks.onState as Function)(this.state);
+    (this.callbacks.onDisplayReady as Function)();
   }
   /** The body-tap entry ReaderView hands to the paginator (iframe client coordinates). */
   tap(clientX: number, pointerType: "touch" | "mouse" = "mouse") {
-    (this.callbacks[this.callbacks.length - 2] as Function)({ clientX, clientY: 300, pointerType });
+    (this.callbacks.onPlainTap as Function)({ clientX, clientY: 300, pointerType });
   }
   getStateSnapshot() { return this.state; }
   getCurrentPath() { return this.path; }
@@ -57,7 +58,7 @@ class MockPaginator {
   setPage = vi.fn((page: number) => {
     this.currentPage = page;
     this.state = { ...this.state, currentPage: page };
-    (this.callbacks[4] as Function)(this.state);
+    (this.callbacks.onState as Function)(this.state);
   });
   navigateToSearchTarget() { return "unresolved" as const; }
   closeForNavigation() {}
@@ -67,7 +68,7 @@ class MockPaginator {
 }
 
 vi.mock("../render/paginator", () => ({
-  ChapterPaginator: class { constructor(...args: unknown[]) { return new MockPaginator(...args); } },
+  ChapterPaginator: class { constructor(options: ChapterPaginatorOptions) { return new MockPaginator(options); } },
 }));
 
 import { ReaderView, type ReaderHandle } from "./ReaderView";

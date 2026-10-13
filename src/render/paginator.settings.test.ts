@@ -27,13 +27,13 @@ function anchor(): ReadingAnchor {
 
 describe("settings reload snapshots", () => {
   it("passes an immutable anchor snapshot and current page fallback before load", async () => {
-    const paginator = new ChapterPaginator(
-      iframe(),
-      { textFor: () => "chapter" } as never,
-      DEFAULT_SETTINGS,
-      true,
-      vi.fn()
-    ) as unknown as {
+    const paginator = new ChapterPaginator({
+      iframe: iframe(),
+      server: { textFor: () => "chapter" } as never,
+      settings: DEFAULT_SETTINGS,
+      strictXml: true,
+      onState: vi.fn()
+    }) as unknown as {
       anchor: ReadingAnchor | null;
       anchorPath: string;
       _currentPath: string;
@@ -54,13 +54,13 @@ describe("settings reload snapshots", () => {
   });
 
   it("carries the committed search highlight identity across a settings reload", async () => {
-    const paginator = new ChapterPaginator(
-      iframe(),
-      { textFor: () => "chapter" } as never,
-      DEFAULT_SETTINGS,
-      true,
-      vi.fn()
-    ) as unknown as {
+    const paginator = new ChapterPaginator({
+      iframe: iframe(),
+      server: { textFor: () => "chapter" } as never,
+      settings: DEFAULT_SETTINGS,
+      strictXml: true,
+      onState: vi.fn()
+    }) as unknown as {
       anchor: ReadingAnchor | null;
       anchorPath: string;
       _currentPath: string;
@@ -89,13 +89,13 @@ describe("settings reload snapshots", () => {
   });
 
   it("keeps an existing anchor when capture has no document", async () => {
-    const paginator = new ChapterPaginator(
-      iframe(),
-      { textFor: () => "chapter" } as never,
-      DEFAULT_SETTINGS,
-      true,
-      vi.fn()
-    ) as unknown as {
+    const paginator = new ChapterPaginator({
+      iframe: iframe(),
+      server: { textFor: () => "chapter" } as never,
+      settings: DEFAULT_SETTINGS,
+      strictXml: true,
+      onState: vi.fn()
+    }) as unknown as {
       anchor: ReadingAnchor | null;
       anchorPath: string;
       _currentPath: string;

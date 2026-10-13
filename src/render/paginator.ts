@@ -2427,6 +2427,53 @@ interface CenteredTitleFix {
   heading: HTMLElement;
 }
 
+export interface ChapterPaginatorOptions {
+  iframe: HTMLIFrameElement;
+  server: ResourceServer;
+  settings: ReaderSettings;
+  strictXml: boolean;
+  onState: (s: ChapterState) => void;
+  onIssues?: (issues: string[], unresolvedResources: readonly string[]) => void;
+  /** 固定版式书：不做行宽自适应，整页显示 */
+  fixedLayout?: boolean;
+  /** 书内链接点击回调（已解析为书内路径，含可选锚点），供阅读器跳转 */
+  onNavigate?: (href: string) => void;
+  /** 有效书内链接真正改变位置前通知 UI 记录一次可撤销快照。 */
+  onBeforeInternalNavigate?: (href: string) => void;
+  /** 不需要重载章节的同章锚点跳转已同步完成。 */
+  onInternalNavigationSettled?: () => void;
+  /** 滚轮翻页回调（累积阈值后触发，1=下一页 -1=上一页） */
+  onWheelNavigate?: (dir: 1 | -1) => void;
+  /** 键盘翻页回调（焦点在书页内时也有效） */
+  onKeyNavigate?: (dir: 1 | -1) => void;
+  /** 脚注弹层回调（含文本/HTML/固定状态），由阅读器 UI 显示 */
+  onFootnote?: (payload: FootnotePayload) => void;
+  /** 桌面端 hover 离开脚注标记时关闭弹层（移动端无 hover，弹层由点击/✕ 关闭） */
+  onFootnoteClose?: () => void;
+  /** 外部链接（http/https/mailto/tel）点击回调，由 App 层调系统默认浏览器打开 */
+  onExternalLink?: (url: string) => void;
+  /** 首次测量、分页与最终入口定位全部完成，iframe 已可安全交互。 */
+  onDisplayReady?: () => void;
+  /** 有效正文选区的现代右键菜单数据；通过 setter 可保持最新 UI 回调。 */
+  onSelectionContextMenu?: (payload: SelectionContextPayload | null) => void;
+  /** 精确搜索/笔记目标定位结果；未定位不伪装成功。 */
+  onPreciseNavigationStatus?: (status: {
+      requestId: number;
+      status: PreciseNavigationStatus;
+      exact: boolean;
+    }) => void;
+  /** 正文图片激活（活动章节专用；由 UI 打开独立浮层）。 */
+  onImageActivation?: (image: ImageActivationPayload) => void;
+  /** 连续滚动模式外部适配器；提供时滚轮与按键转交宿主，不再触发章末保护链。 */
+  externalScroll?: ExternalScrollAdapter;
+  /** 翻页模式单指横滑；连续模式/缓存非活动章由调用方忽略。 */
+  pagedSwipe?: PagedSwipeHandlers;
+  /** 正文普通轻点/单击；只表达非交互正文短触及其位置，不阻止默认行为。 */
+  onPlainTap?: (tap: PlainTapInfo) => void;
+  /** 普通轻点是否当前应忽略；由调用方检查活动章/输入暂停/ready 状态。 */
+  shouldIgnorePlainTap?: () => boolean;
+}
+
 export class ChapterPaginator {
   private blobUrl?: string;
   /** sanitize 本章外链 CSS 产生的局部 Blob URL；不包含 ResourceServer 共享资源。 */
@@ -2723,52 +2770,80 @@ export class ChapterPaginator {
   /** 主题原位更新控制器：管理当前加载文档的纯主题颜色与深色对比度修补生命周期。 */
   private themeController: ReaderThemeController | null = null;
 
-  constructor(
-    private iframe: HTMLIFrameElement,
-    private server: ResourceServer,
-    private settings: ReaderSettings,
-    private strictXml: boolean,
-    private onState: (s: ChapterState) => void,
-    private onIssues?: (issues: string[], unresolvedResources: readonly string[]) => void,
-    /** 固定版式书：不做行宽自适应，整页显示 */
-    private fixedLayout = false,
-    /** 书内链接点击回调（已解析为书内路径，含可选锚点），供阅读器跳转 */
-    private onNavigate?: (href: string) => void,
-    /** 有效书内链接真正改变位置前通知 UI 记录一次可撤销快照。 */
-    private onBeforeInternalNavigate?: (href: string) => void,
-    /** 不需要重载章节的同章锚点跳转已同步完成。 */
-    private onInternalNavigationSettled?: () => void,
-    /** 滚轮翻页回调（累积阈值后触发，1=下一页 -1=上一页） */
-    private onWheelNavigate?: (dir: 1 | -1) => void,
-    /** 键盘翻页回调（焦点在书页内时也有效） */
-    private onKeyNavigate?: (dir: 1 | -1) => void,
-    /** 脚注弹层回调（含文本/HTML/固定状态），由阅读器 UI 显示 */
-    private onFootnote?: (payload: FootnotePayload) => void,
-    /** 桌面端 hover 离开脚注标记时关闭弹层（移动端无 hover，弹层由点击/✕ 关闭） */
-    private onFootnoteClose?: () => void,
-    /** 外部链接（http/https/mailto/tel）点击回调，由 App 层调系统默认浏览器打开 */
-    private onExternalLink?: (url: string) => void,
-    /** 首次测量、分页与最终入口定位全部完成，iframe 已可安全交互。 */
-    private onDisplayReady?: () => void,
-    /** 有效正文选区的现代右键菜单数据；通过 setter 可保持最新 UI 回调。 */
-    onSelectionContextMenu?: (payload: SelectionContextPayload | null) => void,
-    /** 精确搜索/笔记目标定位结果；未定位不伪装成功。 */
-    private onPreciseNavigationStatus?: (status: {
+  private iframe: HTMLIFrameElement;
+  private server: ResourceServer;
+  private settings: ReaderSettings;
+  private strictXml: boolean;
+  private onState: (s: ChapterState) => void;
+  private onIssues?: (issues: string[], unresolvedResources: readonly string[]) => void;
+  private fixedLayout: boolean;
+  private onNavigate?: (href: string) => void;
+  private onBeforeInternalNavigate?: (href: string) => void;
+  private onInternalNavigationSettled?: () => void;
+  private onWheelNavigate?: (dir: 1 | -1) => void;
+  private onKeyNavigate?: (dir: 1 | -1) => void;
+  private onFootnote?: (payload: FootnotePayload) => void;
+  private onFootnoteClose?: () => void;
+  private onExternalLink?: (url: string) => void;
+  private onDisplayReady?: () => void;
+  private onPreciseNavigationStatus?: (status: {
       requestId: number;
       status: PreciseNavigationStatus;
       exact: boolean;
-    }) => void,
-    /** 正文图片激活（活动章节专用；由 UI 打开独立浮层）。 */
-    private onImageActivation?: (image: ImageActivationPayload) => void,
-    /** 连续滚动模式外部适配器；提供时滚轮与按键转交宿主，不再触发章末保护链。 */
-    private externalScroll?: ExternalScrollAdapter,
-    /** 翻页模式单指横滑；连续模式/缓存非活动章由调用方忽略。 */
-    private pagedSwipe?: PagedSwipeHandlers,
-    /** 正文普通轻点/单击；只表达非交互正文短触及其位置，不阻止默认行为。 */
-    private onPlainTap?: (tap: PlainTapInfo) => void,
-    /** 普通轻点是否当前应忽略；由调用方检查活动章/输入暂停/ready 状态。 */
-    private shouldIgnorePlainTap?: () => boolean
-  ) {
+    }) => void;
+  private onImageActivation?: (image: ImageActivationPayload) => void;
+  private externalScroll?: ExternalScrollAdapter;
+  private pagedSwipe?: PagedSwipeHandlers;
+  private onPlainTap?: (tap: PlainTapInfo) => void;
+  private shouldIgnorePlainTap?: () => boolean;
+
+  constructor({
+    iframe,
+    server,
+    settings,
+    strictXml,
+    onState,
+    onIssues,
+    fixedLayout = false,
+    onNavigate,
+    onBeforeInternalNavigate,
+    onInternalNavigationSettled,
+    onWheelNavigate,
+    onKeyNavigate,
+    onFootnote,
+    onFootnoteClose,
+    onExternalLink,
+    onDisplayReady,
+    onSelectionContextMenu,
+    onPreciseNavigationStatus,
+    onImageActivation,
+    externalScroll,
+    pagedSwipe,
+    onPlainTap,
+    shouldIgnorePlainTap,
+  }: ChapterPaginatorOptions) {
+    this.iframe = iframe;
+    this.server = server;
+    this.settings = settings;
+    this.strictXml = strictXml;
+    this.onState = onState;
+    this.onIssues = onIssues;
+    this.fixedLayout = fixedLayout;
+    this.onNavigate = onNavigate;
+    this.onBeforeInternalNavigate = onBeforeInternalNavigate;
+    this.onInternalNavigationSettled = onInternalNavigationSettled;
+    this.onWheelNavigate = onWheelNavigate;
+    this.onKeyNavigate = onKeyNavigate;
+    this.onFootnote = onFootnote;
+    this.onFootnoteClose = onFootnoteClose;
+    this.onExternalLink = onExternalLink;
+    this.onDisplayReady = onDisplayReady;
+    this.onPreciseNavigationStatus = onPreciseNavigationStatus;
+    this.onImageActivation = onImageActivation;
+    this.externalScroll = externalScroll;
+    this.pagedSwipe = pagedSwipe;
+    this.onPlainTap = onPlainTap;
+    this.shouldIgnorePlainTap = shouldIgnorePlainTap;
     this.selectionContextMenuHandler = onSelectionContextMenu;
     this.displayGate = new VisibilityGate(this.iframe, {
       timeoutMs: INITIAL_RENDER_GATE_TIMEOUT_MS,
