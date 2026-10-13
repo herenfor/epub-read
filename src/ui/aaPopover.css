@@ -108,7 +108,12 @@
   font-weight: 500;
   color: var(--muted);
   cursor: pointer;
-  transition: all var(--ui-control) var(--ui-ease);
+  /* Only the visual state changes animate. With `all`, the closed (warm)
+     panel's inherited visibility change became a child transition and the
+     tabs stayed visible over the text for a moment after closing. */
+  transition: background-color var(--ui-control) var(--ui-ease),
+              color var(--ui-control) var(--ui-ease),
+              box-shadow var(--ui-control) var(--ui-ease);
   user-select: none;
 }
 
@@ -464,7 +469,8 @@
   font-size: 11.5px;
   font-weight: 500;
   cursor: pointer;
-  transition: all var(--ui-control-quick) var(--ui-ease);
+  transition: background-color var(--ui-control-quick) var(--ui-ease),
+              color var(--ui-control-quick) var(--ui-ease);
 }
 
 .aa-advanced-toggle:hover {
@@ -557,7 +563,9 @@
   color: var(--fg);
   font-size: 11.5px;
   cursor: pointer;
-  transition: all var(--ui-control-quick) var(--ui-ease);
+  transition: background-color var(--ui-control-quick) var(--ui-ease),
+              border-color var(--ui-control-quick) var(--ui-ease),
+              color var(--ui-control-quick) var(--ui-ease);
 }
 
 .aa-mini-action-btn:hover {
