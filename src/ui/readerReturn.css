@@ -1,7 +1,7 @@
 /* 跳转返回 / 前进：跳转后自动出现，用户自己翻页即收起；手机在工具栏呼出时也显示。 */
 .reader-return {
   position: fixed;
-  z-index: 110; /* 正文与底栏之上，各面板（≥ 200）之下 */
+  z-index: calc(var(--z-ui-mobile-bar) + 10); /* 正文与底栏之上，各面板（≥ 200）之下 */
   display: flex;
   gap: 6px;
   max-width: calc(100vw - 24px);

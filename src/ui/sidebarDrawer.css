@@ -2,7 +2,7 @@
 .sidebar-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 190;
+  z-index: calc(var(--z-ui-drawer) - 10);
   background: var(--ui-backdrop);
   animation: reader-panel-fade-in var(--menu-open) var(--ui-ease) forwards;
   pointer-events: auto;
@@ -76,7 +76,7 @@
   position: fixed;
   top: 48px;
   bottom: 18px;
-  z-index: 200;
+  z-index: var(--z-ui-drawer);
   border: 1px solid var(--panel-border);
   border-radius: 18px;
   box-shadow: 0 20px 48px rgba(0, 0, 0, 0.3), 0 4px 14px rgba(0, 0, 0, 0.12);
@@ -112,7 +112,7 @@
 .sidebar-drawer.is-overlay.is-closed.is-warm.is-paint-warm {
   visibility: visible;
   opacity: 0.001;
-  z-index: 400; /* above the opening veil, which covers the warm-up */
+  z-index: var(--z-ui-warmup); /* above the opening veil, which covers the warm-up */
 }
 
 /* 固定驻留模式（Docked Pin） */
@@ -120,7 +120,7 @@
   position: fixed;
   top: 38px;
   bottom: 0;
-  z-index: 40;
+  z-index: var(--z-ui-docked);
   width: 320px;
   box-shadow: 0 0 20px rgba(0, 0, 0, 0.08);
 }

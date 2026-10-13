@@ -34,7 +34,7 @@
 .shelf-settings-layer {
   position: fixed;
   inset: 0;
-  z-index: 80;
+  z-index: var(--z-ui-page);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -65,7 +65,7 @@
 
 /* 阅读器内的“阅读设置”：盖在阅读工具栏和“更多”弹层之上。 */
 .shelf-settings-layer.is-reader {
-  z-index: 302;
+  z-index: calc(var(--z-ui-opening) + 2);
 }
 
 /* 只有一节内容时不要左侧导航，窗口按内容收高。 */
@@ -640,7 +640,7 @@
 .shelf-filter-layer {
   position: fixed;
   inset: 0;
-  z-index: 80;
+  z-index: var(--z-ui-page);
   pointer-events: auto;
 }
 
@@ -973,7 +973,7 @@
   position: absolute;
   top: calc(100% + 8px);
   left: 0;
-  z-index: 60;
+  z-index: var(--z-ui-popover);
   width: max(100%, 520px);
   max-width: calc(100vw - 32px);
   max-height: min(560px, calc(100vh - 140px));
@@ -1014,7 +1014,7 @@
 .shelf-body-search-page {
   position: fixed;
   inset: 0;
-  z-index: 80;
+  z-index: var(--z-ui-page);
   display: flex;
   flex-direction: column;
   padding-top: env(safe-area-inset-top, 0px);

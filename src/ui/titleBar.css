@@ -10,7 +10,7 @@
   box-sizing: border-box;
   flex-shrink: 0;
   position: relative;
-  z-index: 50;
+  z-index: var(--z-ui-bar);
   background: var(--bg);
   color: var(--fg);
   border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 40%, transparent);
@@ -23,7 +23,7 @@
   top: 0;
   left: 0;
   right: 0;
-  z-index: 100;
+  z-index: var(--z-ui-mobile-bar);
   background: color-mix(in srgb, var(--bg) 92%, transparent);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
@@ -33,7 +33,7 @@
 /* PC 浮层侧栏打开时，标题栏留在遮罩之上：点 Aa 或搜索直接换成那个面板，不必先关侧栏。 */
 .app:has(.sidebar-drawer.is-overlay.is-open:not(.is-compact)) .titlebar-reader,
 .app:has(.search-panel.is-docked) .titlebar-reader {
-  z-index: 195;
+  z-index: calc(var(--z-ui-drawer) - 5);
 }
 
 /* 沉浸隐藏模式（Zen Mode）：向上滑出淡隐，零重排 */
@@ -50,7 +50,7 @@
   left: 0;
   right: 0;
   height: 40px;
-  z-index: 999;
+  z-index: calc(var(--z-ui-system) - 1);
   pointer-events: auto;
   cursor: default;
 }
@@ -456,7 +456,7 @@
   right: 0;
   height: var(--mobile-reader-topbar, 56px);
   padding: 0 6px 0 8px;
-  z-index: 100;
+  z-index: var(--z-ui-mobile-bar);
   background: color-mix(in srgb, var(--bg) 94%, transparent);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);

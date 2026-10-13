@@ -4,7 +4,7 @@
   left: 50%;
   bottom: calc(18px + env(safe-area-inset-bottom));
   transform: translateX(-50%);
-  z-index: 1200;
+  z-index: calc(var(--z-ui-system) + 200);
   box-sizing: border-box;
   color: var(--fg);
   background: color-mix(in srgb, var(--panel, var(--bg)) 94%, transparent);
