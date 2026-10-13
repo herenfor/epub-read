@@ -44,6 +44,7 @@ export interface ShelfSettingsPageProps {
   onOpenLanTransfer?(): void;
   onImportArchive(): void;
   onExportArchive(): void;
+  onExportAllBooks?(): void;
   onImportLegacyArchive?(): void;
   bodySearch?: ShelfBodySearchProps;
   onOpenDiagnostics?(): void;
@@ -171,6 +172,8 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
       disabled={!props.lanTransferActive && (busy || props.importActive || props.saveFileActive)} onClick={() => props.onOpenLanTransfer!()} /> : null,
     <SettingsRow key="export" icon={ROW_ICONS.export} title={t("shelfMenu.export")} detail={t("shelfMenu.export.detail")}
       disabled={archiveBusy || props.bookCount === 0} onClick={props.onExportArchive} />,
+    props.onExportAllBooks ? <SettingsRow key="exportBooks" icon={ROW_ICONS.export} title={t("bookExport.all")} detail={t("bookExport.all.detail")}
+      disabled={archiveBusy || props.bookCount === 0} onClick={props.onExportAllBooks} /> : null,
     <SettingsRow key="import" icon={ROW_ICONS.import} title={t("shelfMenu.importArchive")} detail={t("shelfMenu.importArchive.detail")}
       disabled={archiveBusy || props.importArchiveDisabled} onClick={props.onImportArchive} />,
     props.onImportLegacyArchive ? <SettingsRow key="legacy" icon={ROW_ICONS.import} title={t("shelfMenu.importLegacy")} detail={t("shelfMenu.importLegacy.detail")}

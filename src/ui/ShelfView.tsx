@@ -170,6 +170,8 @@ export interface ShelfViewProps {
   onImportArchive(): void;
   /** `selectedEntries` is handled by App and resolved to 64-bit content hashes before any native job is created. */
   onExportArchive(selectedEntries?: ShelfEntry[]): void;
+  /** SBE-U: save original EPUB files; no entries means the whole shelf. */
+  onExportBooks?(selectedEntries?: ShelfEntry[]): void;
   /** Legacy v1/v2 JSON import stays secondary on native; Web can leave this undefined and use its existing entry. */
   onImportLegacyArchive?(): void;
   onDelete(id: string): void;
@@ -588,6 +590,7 @@ function shelfActionIcon(id: ShelfActionId): ReactNode {
     case "select": return <CheckListIcon />;
     case "favorite": return <StarIcon />;
     case "unfavorite": return <StarIcon filled />;
+    case "exportBook": return <ExportIcon />;
     case "move":
     case "removeFromFolder":
     case "openFolder": return <FolderIcon />;
@@ -3841,6 +3844,10 @@ export function ShelfView(props: ShelfViewProps) {
         closeMenu({ restoreFocus: false });
         requestDelete([entry.id]);
         return;
+      case "exportBook":
+        closeMenu({ restoreFocus: false });
+        props.onExportBooks?.([entry]);
+        return;
       case "removeFromFolder": {
         // 同一次菜单内在途时不重复提交；仍可正常返回/关闭。
         if (menuPendingRef.current?.token === token) return;
@@ -3908,6 +3915,8 @@ export function ShelfView(props: ShelfViewProps) {
       canFavorite: canOrganize,
       canMove: canOrganize,
       canRemoveFromFolder: canOrganize,
+      canExport: Boolean(props.onExportBooks),
+      exportDisabled: Boolean(props.saveFileActive || props.lanTransferActive),
     });
     return {
       label: t("shelf.card.more", { title: entry.title }),
@@ -4237,6 +4246,7 @@ export function ShelfView(props: ShelfViewProps) {
         onOpenLanTransfer={props.onOpenLanTransfer ? () => props.onOpenLanTransfer!() : undefined}
         onImportArchive={props.onImportArchive}
         onExportArchive={() => props.onExportArchive()}
+        onExportAllBooks={props.onExportBooks ? () => props.onExportBooks!() : undefined}
         onImportLegacyArchive={props.onImportLegacyArchive}
         bodySearch={bodySearch}
         onOpenDiagnostics={props.onOpenDiagnostics ? () => {
@@ -5137,6 +5147,21 @@ export function ShelfView(props: ShelfViewProps) {
               <ExportIcon />
               <span>{t("shelfMain.dock.export")}</span>
             </button>
+            {props.onExportBooks && (
+              <button
+                className="shelf-batch-action-btn"
+                type="button"
+                disabled={noneSelected || props.busy || props.saveFileActive || props.lanTransferActive}
+                onClick={() => {
+                  const targets = props.entries.filter((e) => selectedIds.has(e.id));
+                  if (targets.length > 0) props.onExportBooks!(targets);
+                }}
+                title={t("bookExport.action.tip")}
+              >
+                <ExportIcon />
+                <span>{t("bookExport.action")}</span>
+              </button>
+            )}
             {getRuntimeCapabilities().supportsLanTransfer && props.onOpenLanTransfer && (
               <button
                 className="shelf-batch-action-btn"
