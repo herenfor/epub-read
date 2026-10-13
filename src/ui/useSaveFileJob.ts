@@ -12,11 +12,14 @@ import {
   type SaveFileProgress,
   type SaveExportScope,
 } from "../platform/saveFileNativeBridge";
+import { exportBookSources, type BookSourceExportResult } from "../platform/bookExportNativeBridge";
 
 export type SaveFileJobState =
   | { kind: "idle" }
   | {
       kind: "exporting";
+      /** SBE-U: original book files share the export slot, progress card and cancel. */
+      subject?: "books";
       jobId: string;
       progress: SaveFileProgress;
       canceling: boolean;
@@ -59,6 +62,11 @@ export interface UseSaveFileJobResult {
     scope: SaveExportScope;
     includeBooks: boolean;
   }): Promise<SaveFileExportResult>;
+  beginBookExport(input: {
+    destination: SaveFileLocation;
+    scope: SaveExportScope;
+    destinationIsNew: boolean;
+  }): Promise<BookSourceExportResult>;
   beginPrepare(input: {
     source: SaveFileLocation;
     sourceLabel: string;
@@ -126,6 +134,42 @@ export function useSaveFileJob(): UseSaveFileJobResult {
         destination: input.destination,
         scope: input.scope,
         includeBooks: input.includeBooks,
+        onProgress: (progress) => {
+          if (!isCurrent(generation)) return;
+          const current = stateRef.current;
+          if (current.kind !== "exporting") return;
+          replaceState({ ...current, progress });
+        },
+      });
+    } finally {
+      finish(generation);
+    }
+  }, [finish, isCurrent, replaceState]);
+
+  const beginBookExport = useCallback(async (input: {
+    destination: SaveFileLocation;
+    scope: SaveExportScope;
+    destinationIsNew: boolean;
+  }): Promise<BookSourceExportResult> => {
+    if (activeRef.current) throw new Error("已有存档文件任务正在进行");
+    const jobId = crypto.randomUUID();
+    const generation = generationRef.current + 1;
+    generationRef.current = generation;
+    activeRef.current = { jobId, generation, operation: "export", cancelRequested: false };
+    replaceState({
+      kind: "exporting",
+      subject: "books",
+      jobId,
+      progress: initialProgress("preparing"),
+      canceling: false,
+      cancelTooLate: false,
+    });
+    try {
+      return await exportBookSources({
+        jobId,
+        scope: input.scope,
+        destination: input.destination,
+        destinationIsNew: input.destinationIsNew,
         onProgress: (progress) => {
           if (!isCurrent(generation)) return;
           const current = stateRef.current;
@@ -279,6 +323,7 @@ export function useSaveFileJob(): UseSaveFileJobResult {
     state,
     active: state.kind !== "idle",
     beginExport,
+    beginBookExport,
     beginPrepare,
     commit,
     cancelCurrent,

@@ -7,7 +7,7 @@ import type { PlainMessageKey } from "./localization/core";
  */
 
 export type ShelfActionGroup = "read" | "organize" | "danger";
-export type ShelfBookActionId = "open" | "select" | "favorite" | "unfavorite" | "move" | "removeFromFolder" | "delete";
+export type ShelfBookActionId = "open" | "select" | "favorite" | "unfavorite" | "move" | "removeFromFolder" | "exportBook" | "delete";
 export type ShelfFolderActionId = "openFolder" | "renameFolder" | "dissolveFolder";
 export type ShelfActionId = ShelfBookActionId | ShelfFolderActionId;
 
@@ -32,6 +32,10 @@ export interface ShelfBookActionContext {
   canFavorite: boolean;
   canMove: boolean;
   canRemoveFromFolder: boolean;
+  /** SBE-U: only shelves that can save the original EPUB show the action. */
+  canExport?: boolean;
+  /** Another export/import or a LAN transfer holds the save-file slot. */
+  exportDisabled?: boolean;
 }
 
 export function shelfBookActions(ctx: ShelfBookActionContext): ShelfAction[] {
@@ -48,6 +52,7 @@ export function shelfBookActions(ctx: ShelfBookActionContext): ShelfAction[] {
       pendingLabel: "shelf.card.removing", disabled: ctx.busy,
     });
   }
+  if (ctx.canExport) actions.push({ id: "exportBook", group: "organize", label: "bookExport.action", disabled: ctx.busy || Boolean(ctx.exportDisabled) });
   if (ctx.canSelect) actions.push({ id: "select", group: "organize", label: "shelf.card.select", disabled: false });
   actions.push({ id: "delete", group: "danger", label: "shelf.card.delete", disabled: ctx.busy || ctx.deleteDisabled });
   return actions;

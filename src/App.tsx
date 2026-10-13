@@ -134,6 +134,8 @@ import { LanSavePanel } from "./ui/LanSavePanel";
 import { useLanSaveSession } from "./ui/useLanSaveSession";
 import { SaveFileExportDialog, SaveFileImportPreview, SaveFileProgressPanel } from "./ui/SaveFileDialogs";
 import { importSkippedNotice } from "./ui/importSkippedText";
+import { bookExportErrorNotice, bookExportFileName, bookExportResultNotice, bookExportTargetLabel } from "./ui/bookExportText";
+import type { BookSourceExportError } from "./platform/bookExportNativeBridge";
 import { SaveFailureDialog } from "./ui/SaveFailureDialog";
 import { releaseUnsavedLane, type SaveFailurePrompt } from "./ui/saveFailureExit";
 import { useSaveFileJob } from "./ui/useSaveFileJob";
@@ -1514,6 +1516,65 @@ export default function App() {
       saveFileLaunchRef.current = false;
     }
   }, [chooseSaveFileDestination, resolveNativeExportScope, saveFileJob]);
+
+  /** SBE-U: copy the shelf's original EPUB files out; one book saves as .epub, several or all as one .zip. */
+  const startBookSourceExport = useCallback(async (selectedEntries?: ShelfEntry[]): Promise<void> => {
+    if (saveFileJob.active || saveFileLaunchRef.current || lanSaveActiveRef.current) {
+      setShelfNotice({ kind: "warn", text: uiText("notice.archive.busy") });
+      return;
+    }
+    if (selectedEntries && selectedEntries.length === 0) return;
+    saveFileLaunchRef.current = true;
+    try {
+      let scope: SaveExportScope = { kind: "all" };
+      let single: ShelfEntry | null = null;
+      if (selectedEntries) {
+        let hashes: string[];
+        try {
+          hashes = [...new Set(await Promise.all(selectedEntries.map((entry) => resolveContentHashForEntry(entry))))];
+        } catch (error) {
+          setShelfNotice({ kind: "error", text: uiText("bookExport.failed", { error: saveFileErrorMessage(error) }) });
+          return;
+        }
+        scope = { kind: "selected", bookHashes: hashes };
+        if (hashes.length === 1) single = selectedEntries[0];
+      }
+      const zip = single === null;
+      const defaultPath = zip
+        ? `epub-reader-books-${new Date().toISOString().slice(0, 10)}.zip`
+        : bookExportFileName(single!.fileName, single!.title);
+      let destination: SaveFileLocation | null = null;
+      try {
+        const selected = await saveFileDialog({
+          title: uiText("bookExport.dialogTitle"),
+          defaultPath,
+          ...(runtime.platform === "android" ? {} : {
+            filters: [zip
+              ? { name: uiText("bookExport.filter.zip"), extensions: ["zip"] }
+              : { name: uiText("bookExport.filter.epub"), extensions: ["epub"] }],
+          }),
+        });
+        if (typeof selected === "string" && selected.length > 0) {
+          destination = runtime.platform === "android" ? { kind: "uri", uri: selected } : { kind: "path", path: selected };
+        }
+      } catch (error) {
+        setShelfNotice({ kind: "error", text: uiText("notice.archive.savePickerFailed", { error: saveFileErrorMessage(error) }) });
+        return;
+      }
+      if (!destination) return;
+      try {
+        await activatePortableShelfState();
+        // A picked document may be an existing file the user chose to replace; only
+        // the backend's own new files are ever deleted on failure.
+        const result = await saveFileJob.beginBookExport({ destination, scope, destinationIsNew: false });
+        setShelfNotice(bookExportResultNotice(result, bookExportTargetLabel(destination)));
+      } catch (error) {
+        setShelfNotice(bookExportErrorNotice(error as BookSourceExportError));
+      }
+    } finally {
+      saveFileLaunchRef.current = false;
+    }
+  }, [resolveContentHashForEntry, runtime.platform, saveFileJob]);
 
   const startNativeImport = useCallback(async (): Promise<void> => {
     if (saveFileJob.active || saveFileLaunchRef.current || lanSaveActiveRef.current) {
@@ -5161,6 +5222,11 @@ export default function App() {
               registerBackHandler={registerShelfBackHandler}
               onBackAvailabilityChange={reportShelfBackActive}
               onExportArchive={handleExportArchive}
+              onExportBooks={
+                runtime.platform === "web" || !isTauriEnv()
+                  ? undefined
+                  : (entries?: ShelfEntry[]) => void startBookSourceExport(entries)
+              }
               onImportArchive={handleImportArchive}
               onImportLegacyArchive={
                 runtime.platform === "web" || !isTauriEnv()

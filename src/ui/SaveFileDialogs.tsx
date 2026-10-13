@@ -198,6 +198,7 @@ export function SaveFileProgressPanel(props: SaveFileProgressPanelProps) {
     cancellable = false;
     cancelDisabled = true;
   } else if (state.kind === "exporting") {
+    if (state.subject === "books") title = t("bookExport.progress");
     cancelText = state.canceling ? t("saveFile.progress.cancelingShort") : t("saveFile.cancel");
     cancelDisabled = state.canceling || state.cancelTooLate;
   }

@@ -175,6 +175,8 @@ describe("shelf action descriptors", () => {
     const busy = shelfBookActions({ ...base, busy: true });
     expect(busy.filter((a) => a.disabled).map((a) => a.id)).toEqual(["favorite", "move", "removeFromFolder", "delete"]);
     expect(shelfBookActions({ ...base, deleteDisabled: true }).find((a) => a.id === "delete")?.disabled).toBe(true);
+    expect(ids({ ...base, canExport: true } as typeof base)).toEqual(["read:open", "organize:favorite,move,removeFromFolder,exportBook,select", "danger:delete"]);
+    expect(shelfBookActions({ ...base, canExport: true, exportDisabled: true }).find((a) => a.id === "exportBook")?.disabled).toBe(true);
     expect(shelfMenuPresentation("touch", false)).toBe("sheet");
     expect(shelfMenuPresentation("mouse", true)).toBe("popover");
     expect(shelfMenuPresentation("", true)).toBe("sheet");

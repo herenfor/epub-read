@@ -1,0 +1,29 @@
+import { defineMessages } from "../defineMessages";
+
+/** Exporting the shelf's original EPUB files (single EPUB or a ZIP of several). */
+export const bookExport = defineMessages("bookExport", {
+  "bookExport.action": { zh: "导出书籍", note: "Book menu and selection dock: save the original EPUB file(s).", max: 10 },
+  "bookExport.action.tip": "把选中书籍的原文件导出为一个 ZIP",
+  "bookExport.all": "导出全部书籍",
+  "bookExport.all.detail": "把书架上所有书的原 EPUB 文件打包成一个 ZIP，用于备份或在其他阅读器中使用。不含阅读进度和笔记。",
+  "bookExport.dialogTitle": "导出书籍原文件",
+  "bookExport.filter.epub": "EPUB 书籍",
+  "bookExport.filter.zip": "ZIP 压缩包",
+  "bookExport.progress": "正在导出书籍原文件",
+  "bookExport.done": { zh: "已导出 {count} 本书的原文件（{file}）", note: "{file} is the saved file name." },
+  "bookExport.partial": { zh: "已导出 {written}/{requested} 本书的原文件（{file}）；未导出：{list}", note: "{list} names up to three books with reasons." },
+  "bookExport.noBooks": { zh: "没有导出任何书，也没有生成文件：{list}", note: "{list} names up to three books with reasons." },
+  "bookExport.cancelled": "已取消导出书籍",
+  "bookExport.failed": "导出书籍失败：{error}",
+  "bookExport.partialOutput": { zh: "。保存的文件可能不完整，请删除后重试", note: "Appended to a failure; the shelf copy is not affected." },
+  "bookExport.error.space": "存储空间不足",
+  "bookExport.error.busy": "已有导出或导入任务正在进行",
+  "bookExport.skippedItem": { zh: "《{title}》（{reason}）", note: "One book that was not exported." },
+  "bookExport.skippedMore": { zh: " 等 {count} 本", note: "Appended after a shortened list; {count} is the total." },
+  "bookExport.reason.notFound": "书架上没有这本书",
+  "bookExport.reason.unbound": "没有关联的源文件",
+  "bookExport.reason.missing": "源文件找不到了",
+  "bookExport.reason.unreadable": "源文件无法读取",
+  "bookExport.reason.changed": "源文件在导出时被修改",
+  "bookExport.reason.other": "未导出",
+});
