@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { APP_BUILD_INFO_PROTOCOL_VERSION, validateAppBuildInfo } from "./appBuildInfo";
+import { APP_BUILD_INFO_PROTOCOL_VERSION, AppBuildMismatchError, validateAppBuildInfo } from "./appBuildInfo";
 
 const valid = {
   version: "0.3.1",
@@ -20,6 +20,8 @@ describe("app_build_info contract", () => {
       .toThrow("前端为 core，后端为 ai");
     expect(() => validateAppBuildInfo(valid, "ai"))
       .toThrow("前端为 ai，后端为 core");
+    // The failure page recognises the mismatch by type, not by its wording.
+    expect(() => validateAppBuildInfo(valid, "ai")).toThrow(AppBuildMismatchError);
   });
 
   it("rejects malformed or incompatible payloads", () => {

@@ -146,18 +146,32 @@ export const THEME_PALETTES: Array<{
   };
 });
 
-/** label is the internal preset id; labelKey is what the UI shows. */
-export const LINE_HEIGHT_PRESETS: Array<{ label: string; labelKey: PlainMessageKey; value: number }> = [
-  { label: "紧凑", labelKey: "aa.lineHeight.compact", value: 1.4 },
-  { label: "标准", labelKey: "aa.lineHeight.standard", value: 1.7 },
-  { label: "宽松", labelKey: "aa.lineHeight.loose", value: 2.0 },
+/** id is the internal preset key; labelKey is what the UI shows. */
+export const LINE_HEIGHT_PRESETS: Array<{ id: "compact" | "standard" | "loose"; labelKey: PlainMessageKey; value: number }> = [
+  { id: "compact", labelKey: "aa.lineHeight.compact", value: 1.4 },
+  { id: "standard", labelKey: "aa.lineHeight.standard", value: 1.7 },
+  { id: "loose", labelKey: "aa.lineHeight.loose", value: 2.0 },
 ];
 
-export const MARGIN_PRESETS: Array<{ label: string; labelKey: PlainMessageKey; margins: PageMarginsPx }> = [
-  { label: "窄", labelKey: "aa.margin.narrow", margins: { left: 20, right: 20, top: 20, bottom: 20 } },
-  { label: "适中", labelKey: "aa.margin.medium", margins: { left: 40, right: 40, top: 28, bottom: 28 } },
-  { label: "宽", labelKey: "aa.margin.wide", margins: { left: 64, right: 64, top: 36, bottom: 36 } },
+export const MARGIN_PRESETS: Array<{ id: "narrow" | "medium" | "wide"; labelKey: PlainMessageKey; margins: Required<PageMarginsPx> }> = [
+  { id: "narrow", labelKey: "aa.margin.narrow", margins: { left: 20, right: 20, top: 20, bottom: 20 } },
+  { id: "medium", labelKey: "aa.margin.medium", margins: { left: 40, right: 40, top: 28, bottom: 28 } },
+  { id: "wide", labelKey: "aa.margin.wide", margins: { left: 64, right: 64, top: 36, bottom: 36 } },
 ];
+
+/** Preset the line height matches (unset = standard), or null for a custom value. */
+export function lineHeightPresetId(lineHeight: number | undefined): (typeof LINE_HEIGHT_PRESETS)[number]["id"] | null {
+  if (lineHeight === undefined) return "standard";
+  return LINE_HEIGHT_PRESETS.find((preset) => Math.abs(lineHeight - preset.value) < 0.05)?.id ?? null;
+}
+
+/** Preset the margins match ("auto" when none are set), or null for custom margins. */
+export function marginPresetId(margins: PageMarginsPx | undefined): (typeof MARGIN_PRESETS)[number]["id"] | "auto" | null {
+  if (!margins || Object.keys(margins).length === 0) return "auto";
+  return MARGIN_PRESETS.find(({ margins: preset }) =>
+    margins.left === preset.left && margins.right === preset.right &&
+    margins.top === preset.top && margins.bottom === preset.bottom)?.id ?? null;
+}
 
 export const UI_SCALES: Array<{ value: number; label: string }> = [
   { value: 0.85, label: "85%" },
@@ -245,24 +259,9 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
     }
   };
 
-  // 判断当前边距属于哪档预设（若为自定义四向独立边距则返回 null）
-  const currentMarginLevel = (() => {
-    if (!pageMargins || Object.keys(pageMargins).length === 0) return "自动";
-    const { left, right, top, bottom } = pageMargins;
-    if (left === 20 && right === 20 && top === 20 && bottom === 20) return "窄";
-    if (left === 40 && right === 40 && top === 28 && bottom === 28) return "适中";
-    if (left === 64 && right === 64 && top === 36 && bottom === 36) return "宽";
-    return null;
-  })();
-
-  // 判断当前行高属于哪档预设（若为自定义数值则返回 null）
-  const currentLineHeightLevel = (() => {
-    if (lineHeight === undefined) return "标准";
-    if (Math.abs(lineHeight - 1.4) < 0.05) return "紧凑";
-    if (Math.abs(lineHeight - 1.7) < 0.05) return "标准";
-    if (Math.abs(lineHeight - 2.0) < 0.05) return "宽松";
-    return null;
-  })();
+  // 当前边距/行高属于哪档预设（自定义数值为 null）
+  const currentMarginLevel = marginPresetId(pageMargins);
+  const currentLineHeightLevel = lineHeightPresetId(lineHeight);
 
   // ---- 详细设置辅助调度器 ----
   const setMarginSide = (side: keyof PageMarginsPx, next: number | undefined) => {
@@ -544,9 +543,9 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
       <div className="aa-segmented-capsule" role="group" aria-label={t("aa.lineHeight")}>
         {LINE_HEIGHT_PRESETS.map((preset) => (
           <button
-            key={preset.label}
+            key={preset.id}
             type="button"
-            className={`aa-segmented-btn${currentLineHeightLevel === preset.label ? " active" : ""}`}
+            className={`aa-segmented-btn${currentLineHeightLevel === preset.id ? " active" : ""}`}
             onClick={() => onLineHeightChange(preset.value)}
           >
             {t(preset.labelKey)}
@@ -568,16 +567,16 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
       <div className="aa-segmented-capsule" role="group" aria-label={t("aa.margins.group")}>
         <button
           type="button"
-          className={`aa-segmented-btn${currentMarginLevel === "自动" ? " active" : ""}`}
+          className={`aa-segmented-btn${currentMarginLevel === "auto" ? " active" : ""}`}
           onClick={() => onPageMarginsChange({})}
         >
           {t("aa.margin.auto")}
         </button>
         {MARGIN_PRESETS.map((preset) => (
           <button
-            key={preset.label}
+            key={preset.id}
             type="button"
-            className={`aa-segmented-btn${currentMarginLevel === preset.label ? " active" : ""}`}
+            className={`aa-segmented-btn${currentMarginLevel === preset.id ? " active" : ""}`}
             onClick={() => onPageMarginsChange(preset.margins)}
           >
             {t(preset.labelKey)}

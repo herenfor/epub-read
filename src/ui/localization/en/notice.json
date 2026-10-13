@@ -47,6 +47,7 @@
   "notice.archive.busy": "Archive or device transfer task in progress; please wait for current task to finish",
   "notice.archive.savePickerFailed": "Failed to open save location picker: {error}",
   "notice.archive.exportCancelled": "Archive export cancelled",
+  "notice.archive.emptySelection": "No selected books to export",
   "notice.archive.exportedSkipped": "Exported {range}; included {written} books, skipped {skipped} books (e.g. \"{title}\": {reason})",
   "notice.archive.exportedWithBooks": "Exported {range}, including {written} books",
   "notice.archive.exportedNoBooks": "Exported {range} (without book files)",
