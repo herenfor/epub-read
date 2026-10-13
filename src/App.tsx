@@ -14,8 +14,8 @@ import {
   writeReaderKeepScreenOn,
 } from "./platform/androidReaderKeepScreenOn";
 import { resolveArchiveHref, archiveHref } from "./core/archiveReferences";
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type Dispatch, type SetStateAction } from "react";
-import { loadBook, loadBookFromArchive, spineIndexForPath, spineIndexForEntryKey, spineItemPath, spineItemHref, DrmError, disposeBook, nextLinearIndex } from "./core/book";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { loadBook, loadBookFromArchive, spineIndexForPath, spineIndexForEntryKey, spineItemPath, spineItemHref, disposeBook, nextLinearIndex } from "./core/book";
 import type { Book } from "./core/types";
 import type { ArchiveClient } from "./core/selectiveArchive";
 import type { Annotation, Stamp, Version } from "./core/portableState/portable-register-core";
@@ -124,17 +124,19 @@ import { ShelfView } from "./ui/ShelfView";
 import { ReaderReturnControl } from "./ui/ReaderReturnControl";
 import { applyDocumentTheme, useThemeTransition } from "./ui/themeTransitionHost";
 import { useReadingInputStart } from "./ui/readerPointerEdge";
-import { createLibraryReader, LIBRARY_LOADING, LibraryReadInterruptedError, libraryReadFailed, libraryReadSucceeded, shelfLibraryView, type LibraryLoadState } from "./ui/libraryLoad";
+import { shelfLibraryView } from "./ui/libraryLoad";
+import {
+  useShelfEntriesState, useShelfNoticeState, useShelfOrganizationState,
+  useShelfContentHashes, useShelfLibrary, useShelfOrganizationActions,
+  useShelfDeletion, useShelfNoticeLifetime,
+} from "./ui/useShelfLibrary";
+import { useBookImportState, useBookImport, useFolderImport } from "./ui/useBookImport";
 import { ReaderReadingSettings, SettingsSwitch } from "./ui/ReadingSettings";
 import { ChevronRightIcon } from "./ui/readerIcons";
-import { NativeImportPanel, type NativeImportCancelState } from "./ui/NativeImportPanel";
+import { NativeImportPanel } from "./ui/NativeImportPanel";
 import {
-  createNativeDirectoryImportPort,
-  createWebDirectoryImportPort,
   FolderImportPanel,
-  supportsWebDirectoryPicker,
 } from "./ui/folderImport";
-import type { DirectoryImportPort } from "./core/folderImport/contract";
 import { LanSavePanel } from "./ui/LanSavePanel";
 import { useLanSaveSession } from "./ui/useLanSaveSession";
 import { SaveFileExportDialog, SaveFileImportPreview, SaveFileProgressPanel } from "./ui/SaveFileDialogs";
@@ -144,13 +146,8 @@ import { useSaveFileJob } from "./ui/useSaveFileJob";
 import { invoke } from "@tauri-apps/api/core";
 import { serveArchivePort } from "./platform/archiveWorkerBridge";
 import {
-  cancelDocumentImport,
-  importDocuments,
   readContentUriText,
   writeTextContentUri,
-  type AndroidDocumentSelection,
-  type AndroidImportBatchResult,
-  type AndroidNativeImportError,
 } from "./platform/androidNativeBridge";
 import {
   saveFileErrorCode,
@@ -164,7 +161,6 @@ import {
   applyShelfProgressPatch,
   ensurePortableRepositoryReady,
   getShelfStore,
-  deleteShelfBooks,
   markShelfEntryOpened,
   readPortablePreferencesSnapshot,
   readingAnchorFromShelfEntry,
@@ -177,9 +173,6 @@ import {
   type ShelfProgressPatch,
 } from "./ui/shelf";
 import {
-  formatImportNotice,
-  findDuplicateEntry,
-  mergeShelfEntries,
   sha256Hex,
 } from "./ui/importBooks";
 import { bookOpenErrorMessage, describeBookOpenFailure } from "./ui/bookOpenFailure";
@@ -228,11 +221,7 @@ import {
   parseLibraryArchive,
 } from "./ui/libraryArchive";
 import {
-  emptyOrganization,
   generateFolderId,
-  type LibraryOrganization,
-  type OrganizationCommand,
-  type ShelfScope,
 } from "./ui/libraryOrganization";
 import {
   emptyReaderNavigationHistory,
@@ -293,23 +282,6 @@ const EMPTY_CHAPTER_NOTES: ReaderNoteForPaginator[] = [];
 
 function isTauriEnv(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-}
-
-function displayNameFromContentUri(uri: string): string {
-  try {
-    const last = decodeURIComponent(uri.split("/").filter(Boolean).pop() ?? "");
-    const base = last.split(/[\\/]/).pop() ?? "";
-    return base || uiText("notice.selectedFile");
-  } catch {
-    return uiText("notice.selectedFile");
-  }
-}
-
-function createNativeImportRequestId(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  return `android-import-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 type AppPhase =
@@ -416,8 +388,6 @@ function hasOwnField(value: object, key: string): boolean {
 
 /** 书架根层“再滑一次退出”的提示/确认窗口。 */
 const EXIT_BACK_WINDOW_MS = 2000;
-/** nativeImportRef value while the directory-import panel holds the shared import slot. */
-const FOLDER_IMPORT_SLOT = "directory-import";
 
 const DIAGNOSTIC_ERROR_CODES = new Set([
   "invalid-data",
@@ -685,10 +655,6 @@ function bookmarkMatchesPosition(
   return sameMediaReadingAnchor(bookmark.mediaAnchor, anchor?.mediaAnchor ?? null);
 }
 
-type ImportSource =
-  | { kind: "file"; file: File }
-  | { kind: "path"; path: string; name: string };
-
 function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
 }
@@ -746,36 +712,6 @@ function createShelfBookArchiveInput(id: string): { port: MessagePort; dispose()
       owner.dispose();
     },
   };
-}
-
-const shelfStoreIds = new WeakMap<object, number>();
-let shelfStoreIdSeq = 0;
-/**
- * Identity of the repository behind library reads: the facade's store
- * instance (activation swaps it) plus the runtime generation the store
- * reports, which changes when the native repository is reopened or replaced
- * (a restore) even though the JS instance stays. The status check is
- * read-only; if it fails, only the instance is compared.
- */
-async function shelfRepositoryKey(): Promise<string> {
-  const store = getShelfStore();
-  let id = shelfStoreIds.get(store);
-  if (id === undefined) {
-    id = ++shelfStoreIdSeq;
-    shelfStoreIds.set(store, id);
-  }
-  let generation = "unknown";
-  try {
-    generation = (await store.runtimeStatus?.())?.repositoryGeneration ?? "none";
-  } catch {
-    /* Diagnostics-only failure: fall back to the instance identity. */
-  }
-  return `${id}:${generation}`;
-}
-
-/** Library read errors as shown on the shelf; the "kept changing" case gets its own wording. */
-function libraryReadErrorText(error: unknown): string {
-  return error instanceof LibraryReadInterruptedError ? uiText("notice.shelf.readInterrupted") : String(error);
 }
 
 export default function App() {
@@ -913,26 +849,14 @@ export default function App() {
   const shelfBackHandlerRef = useRef<(() => boolean) | null>(null);
   const noteComposerDirtyRef = useRef(false);
   const activeNoteEditContextRef = useRef<NoteEditContext | null>(null);
-  const [shelfEntries, setShelfEntriesState] = useState<ShelfEntry[]>([]);
-  // Every external projection write invalidates an in-flight list snapshot,
-  // including progress, notes and bookmarks of books already on the shelf.
-  const shelfWritesRef = useRef(0);
-  const setShelfEntries = useCallback<Dispatch<SetStateAction<ShelfEntry[]>>>((next) => {
-    shelfWritesRef.current += 1;
-    setShelfEntriesState(next);
-  }, []);
-  // First real read of the library: loading / failed / ready (see ui/libraryLoad).
-  const [libraryLoad, setLibraryLoad] = useState<LibraryLoadState>(LIBRARY_LOADING);
-  const [shelfError, setShelfError] = useState<string | null>(null);
+  const shelfState = useShelfEntriesState();
+  const { shelfEntries, setShelfEntries, libraryLoad, shelfError, setShelfError } = shelfState;
   const [saveFailurePrompt, setSaveFailurePrompt] = useState<SaveFailurePrompt | null>(null);
   const saveFailurePromptRef = useRef(saveFailurePrompt);
   saveFailurePromptRef.current = saveFailurePrompt;
   const windowCloseRef = useRef<((leaveUnsaved: boolean) => Promise<void>) | null>(null);
-  const [shelfNotice, setShelfNotice] = useState<{
-    kind: "ok" | "warn" | "error";
-    text: string;
-  } | null>(null);
-  const [shelfNoticeFading, setShelfNoticeFading] = useState(false);
+  const shelfNotices = useShelfNoticeState();
+  const { shelfNotice, setShelfNotice, shelfNoticeFading } = shelfNotices;
   const [hideReaderSystemStatusBar, setHideReaderSystemStatusBar] = useState(readHideReaderSystemStatusBar);
   const [readerSystemBars] = useState(() => createReaderStatusBarCoordinator(setReaderSystemStatusBarHidden));
   const changeHideReaderSystemStatusBar = useCallback((hidden: boolean) => {
@@ -954,29 +878,8 @@ export default function App() {
     }
   }, []);
 
-  const [shelfBusy, setShelfBusy] = useState(false);
-  const [shelfBusyMessage, setShelfBusyMessage] = useState(() => uiText("notice.busy"));
-  const [nativeImport, setNativeImport] = useState<{
-    requestId: string;
-    phase: "starting" | "preparing" | "committing";
-    completed: number;
-    total: number;
-    cancelState: NativeImportCancelState;
-    collapsed: boolean;
-    fileNameSummary: string;
-  } | null>(null);
-  /**
-   * The one import slot: native document imports hold their request ID, an
-   * open directory-import panel holds FOLDER_IMPORT_SLOT. Every import,
-   * delete, LAN and archive gate already checks this ref.
-   */
-  const nativeImportRef = useRef<string | null>(null);
-  const [folderImport, setFolderImport] = useState<{
-    port: DirectoryImportPort;
-    organization: LibraryOrganization;
-    supported: boolean;
-  } | null>(null);
-  const [folderImportCloseSignal, setFolderImportCloseSignal] = useState(0);
+  const bookImportState = useBookImportState();
+  const { shelfBusy, setShelfBusy, shelfBusyMessage, setShelfBusyMessage, nativeImport, nativeImportRef, folderImport, folderImportCloseSignal, setFolderImportCloseSignal } = bookImportState;
   // One UI-owned file job; every picker/prepare/commit generation is tracked
   // in the hook, never generated during render.
   const saveFileJob = useSaveFileJob();
@@ -997,20 +900,8 @@ export default function App() {
   shelfEntriesRef.current = shelfEntries;
   const currentShelfIdRef = useRef<string | null>(null);
   currentShelfIdRef.current = currentShelfId;
-  // ---- 收藏与文件夹 ----
-  const [organization, setOrganizationState] = useState<LibraryOrganization>(emptyOrganization);
-  const organizationWritesRef = useRef(0);
-  const setOrganization = useCallback<Dispatch<SetStateAction<LibraryOrganization>>>((next) => {
-    organizationWritesRef.current += 1;
-    setOrganizationState(next);
-  }, []);
-  const [organizationError, setOrganizationError] = useState<string | null>(null);
-  // The organization read has answered (either way): only then may an empty list mean an empty shelf.
-  const [organizationSettled, setOrganizationSettled] = useState(false);
-  const [shelfScope, setShelfScope] = useState<ShelfScope>({ type: "root" });
-  const organizationRef = useRef<LibraryOrganization>(organization);
-  organizationRef.current = organization;
-  const organizationBusyRef = useRef(false);
+  const shelfOrganization = useShelfOrganizationState();
+  const { organization, setOrganization, organizationSettled, shelfScope, setShelfScope, organizationRef, organizationBusyRef } = shelfOrganization;
   // ---- 阅读跳转历史（后退/前进各最多 3 步） ----
   const [readerHistory, setReaderHistory] = useState<ReaderNavigationHistory>(
     emptyReaderNavigationHistory
@@ -1172,20 +1063,7 @@ export default function App() {
   if (!fontRuntimeRef.current) {
     fontRuntimeRef.current = createLazyFontController((id) => getFontStore().readFont(id));
   }
-  const contentHashByIdRef = useRef(new Map<string, string>());
-  const entryByContentHashRef = useRef(new Map<string, ShelfEntry>());
-  const currentShelfIds = new Set(shelfEntries.map((entry) => entry.id));
-  for (const [id, hash] of contentHashByIdRef.current) {
-    if (!currentShelfIds.has(id)) {
-      contentHashByIdRef.current.delete(id);
-      entryByContentHashRef.current.delete(hash);
-    }
-  }
-  for (const entry of shelfEntries) {
-    if (!entry.contentHash) continue;
-    contentHashByIdRef.current.set(entry.id, entry.contentHash);
-    entryByContentHashRef.current.set(entry.contentHash, entry);
-  }
+  const { contentHashByIdRef, entryByContentHashRef } = useShelfContentHashes(shelfEntries);
   const libraryIndexSignature = shelfEntries
     .map((entry) => `${entry.id}:${entry.contentHash ?? ""}:${entry.available === false ? 0 : 1}`)
     .join("|");
@@ -1722,448 +1600,16 @@ export default function App() {
     []
   );
 
-  // ---- 批量导入 EPUB 并入库（逐本有界处理；结束后只刷新一次书架） ----
-  const handleImportSources = useCallback(async (sources: ImportSource[]) => {
-    const list = sources.filter((source) => {
-      const name = source.kind === "file" ? source.file.name : source.name;
-      return name.toLowerCase().endsWith(".epub");
-    });
-    if (list.length === 0 || shelfBusyRef.current) return;
-    if (nativeImportRef.current) {
-      setShelfNotice({ kind: "warn", text: uiText("notice.import.busy") });
-      return;
-    }
-    shelfBusyRef.current = true;
-    // Do not let a fast first import land in the legacy store before the
-    // portable activation effect has committed its one-time switch.
-    try {
-      await activatePortableShelfState();
-    } catch {
-      // Activation failure keeps the complete legacy mode; its effect reports
-      // the visible error and getShelfStore() falls back to the old backend.
-    }
-    setShelfBusyMessage(uiText("notice.import.running"));
-    setShelfBusy(true);
-    setShelfNotice(null);
-    const imported: ShelfEntry[] = [];
-    const accepted: ShelfEntry[] = [];
-    const duplicateTitles: string[] = [];
-    const failed: string[] = [];
-    const store = getShelfStore();
+  const { handleImportSources, handleCancelNativeImport, handleToggleNativeImportCollapsed, reimportAndroidMissing, handleChooseBooks } = useBookImport({
+    importState: bookImportState,
+    runtime, isTauriEnv, fileInputRef, shelfBusyRef, shelfEntriesRef,
+    contentHashByIdRef, entryByContentHashRef, setShelfEntries, setShelfNotice,
+  });
 
-    try {
-      if (isTauriEnv()) {
-        const paths = list.flatMap((source) => source.kind === "path" ? [source.path] : []);
-        if (paths.length !== list.length) {
-          throw new Error("桌面版导入必须保留用户选择的源文件路径");
-        }
-        const batch = await store.importPaths(paths);
-        for (const item of batch.results) {
-          const source = list[item.inputIndex];
-          const fileName = source?.kind === "path" ? source.name : uiText("notice.nthBook", { n: item.inputIndex + 1 });
-          if (item.status === "failed") {
-            failed.push(uiText("notice.import.itemFailed", { name: fileName, error: item.error || uiText("notice.import.failedShort") }));
-            continue;
-          }
-          if (!item.record) {
-            failed.push(uiText("notice.import.itemFailed", { name: fileName, error: uiText("notice.import.noRecord") }));
-            continue;
-          }
-          contentHashByIdRef.current.set(item.record.id, item.record.contentHash ?? item.record.id);
-          entryByContentHashRef.current.set(item.record.contentHash ?? item.record.id, item.record);
-          accepted.push(item.record);
-          if (item.status === "duplicate") {
-            duplicateTitles.push(item.record.title || fileName.replace(/\.epub$/i, ""));
-          } else {
-            imported.push(item.record);
-          }
-        }
-      } else {
-        for (const source of list) {
-          const fileName = source.kind === "file" ? source.file.name : source.name;
-          try {
-            if (source.kind !== "file") {
-              throw new Error("浏览器预览无法读取原生文件路径");
-            }
-            const arrayBuffer = await source.file.arrayBuffer();
-            const buf = new Uint8Array(arrayBuffer);
-            const contentHash = await sha256Hex(buf);
-
-            const duplicate = await findDuplicateEntry({
-              incomingHash: contentHash,
-              incomingSize: buf.byteLength,
-              entries: shelfEntriesRef.current,
-              contentHashById: contentHashByIdRef.current,
-              entryByContentHash: entryByContentHashRef.current,
-              readBook: (id) => store.readBook(id),
-              setContentHash: (id, hash) => store.setContentHash(id, hash),
-            });
-
-            if (duplicate && duplicate.available !== false) {
-              duplicateTitles.push(duplicate.title || fileName.replace(/\.epub$/i, ""));
-              continue;
-            }
-
-            const b = await loadBook(buf, { selective: true });
-            if (b.spine.length === 0) {
-              throw new Error("书中没有可阅读的内容（spine 为空）");
-            }
-            const cover = b.coverHref ? b.resources.get(b.coverHref) : undefined;
-            const result = await store.save({
-              entry: {
-                id: contentHash,
-                title: b.metadata.title || fileName.replace(/\.epub$/i, ""),
-                creator: b.metadata.creator ?? "",
-                language: b.metadata.language || undefined,
-                fileName,
-                fileSize: buf.byteLength,
-                coverMime: cover?.mediaType ?? "",
-                contentHash,
-                addedAtMs: Date.now(),
-              },
-              bytes: buf,
-              coverBytes: cover?.data,
-              coverMime: cover?.mediaType,
-            });
-            contentHashByIdRef.current.set(result.entry.id, contentHash);
-            entryByContentHashRef.current.set(contentHash, result.entry);
-            if (result.status === "duplicate") {
-              duplicateTitles.push(result.entry.title || fileName.replace(/\.epub$/i, ""));
-            } else {
-              imported.push(result.entry);
-            }
-          } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            failed.push(
-              uiText("notice.import.itemFailed", { name: fileName, error: error instanceof DrmError ? error.message : message })
-            );
-          }
-        }
-      }
-
-      let refreshWarning = "";
-      if (isTauriEnv() && accepted.length > 0) {
-        // Publish both new and rebound rows immediately. A later list failure
-        // must not turn an already committed import into an import failure.
-        setShelfEntries((previous) => mergeShelfEntries(previous, accepted));
-        try {
-          const entries = await store.list();
-          const existingIds = new Set(shelfEntriesRef.current.map((entry) => entry.id));
-          const unavailable = entries.filter((entry) => existingIds.has(entry.id) && entry.available === false);
-          setShelfEntries(entries);
-          for (const entry of entries) {
-            contentHashByIdRef.current.set(entry.id, entry.contentHash ?? entry.id);
-            entryByContentHashRef.current.set(entry.contentHash ?? entry.id, entry);
-          }
-          if (imported.length > 0 && unavailable.length > 0) {
-            refreshWarning = uiText("notice.import.oldVersionKept");
-          }
-        } catch (error) {
-          refreshWarning = uiText("notice.import.refreshFailed", { error: bookOpenErrorMessage(error) });
-        }
-      } else if (imported.length > 0) {
-        setShelfEntries((previous) => mergeShelfEntries(previous, imported));
-      }
-      const notice = formatImportNotice({
-        sourceCount: list.length,
-        importedCount: imported.length,
-        duplicateTitles,
-        failed,
-        refreshedCount: isTauriEnv() ? duplicateTitles.length : 0,
-      });
-      if (refreshWarning) {
-        notice.text += uiText("notice.sep") + refreshWarning;
-        if (notice.kind === "ok") notice.kind = "warn";
-      }
-      setShelfNotice(notice);
-    } catch (error) {
-      setShelfNotice({ kind: "error", text: uiText("notice.import.failed", { error: String(error) }) });
-    } finally {
-      shelfBusyRef.current = false;
-      setShelfBusy(false);
-    }
-  }, []);
-
-  const runNativeDocumentImport = useCallback(async (
-    documents: AndroidDocumentSelection[],
-    options: { silentError?: boolean } = {}
-  ): Promise<AndroidImportBatchResult | null> => {
-    if (nativeImportRef.current) {
-      setShelfNotice({ kind: "warn", text: uiText("notice.import.busy") });
-      return null;
-    }
-    const requestId = createNativeImportRequestId();
-    nativeImportRef.current = requestId;
-    setNativeImport({
-      requestId,
-      phase: "starting",
-      completed: 0,
-      total: documents.length,
-      cancelState: "idle",
-      collapsed: false,
-      fileNameSummary: documents.length === 1 ? uiText("notice.import.oneEpub") : uiPlural("notice.import.files", documents.length, { count: documents.length }),
-    });
-    try {
-      return await importDocuments(requestId, documents, (progress) => {
-        setNativeImport((previous) => (
-          previous && previous.requestId === progress.requestId
-            ? { ...previous, phase: progress.phase, completed: progress.completed, total: progress.total }
-            : previous
-        ));
-      });
-    } catch (error) {
-      const nativeError = error as AndroidNativeImportError;
-      if (nativeError.requiresReload) {
-        try {
-          const entries = await getShelfStore().list();
-          setShelfEntries(entries);
-        } catch {
-          // Keep the error visible even if the refresh fails.
-        }
-      }
-      if (!options.silentError) {
-        setShelfNotice({ kind: "error", text: uiText("notice.import.failed", { error: nativeError.message }) });
-      }
-      return null;
-    } finally {
-      nativeImportRef.current = null;
-      setNativeImport(null);
-    }
-  }, []);
-
-  const applyNativeImportBatch = useCallback(async (batch: AndroidImportBatchResult, documents: AndroidDocumentSelection[]): Promise<void> => {
-    const imported: ShelfEntry[] = [];
-    const accepted: ShelfEntry[] = [];
-    const duplicateTitles: string[] = [];
-    const failed: string[] = [];
-    const cancelled: string[] = [];
-    for (const item of batch.results) {
-      const document = documents[item.inputIndex];
-      const label = document ? displayNameFromContentUri(document.uri) : uiText("notice.nthBook", { n: item.inputIndex + 1 });
-      if (item.status === "failed") {
-        failed.push(uiText("notice.import.itemFailed", { name: label, error: item.error || uiText("notice.import.failedShort") }));
-        continue;
-      }
-      if (item.status === "cancelled") {
-        cancelled.push(label);
-        continue;
-      }
-      if (!item.record) {
-        failed.push(uiText("notice.import.itemFailed", { name: label, error: uiText("notice.import.noRecord") }));
-        continue;
-      }
-      accepted.push(item.record);
-      if (item.status === "duplicate") {
-        duplicateTitles.push(item.record.title || label);
-      } else {
-        imported.push(item.record);
-      }
-    }
-    if (accepted.length > 0) {
-      const store = getShelfStore();
-      const entries = store.importRecords ? await store.importRecords(accepted) : accepted;
-      for (const entry of entries) {
-        contentHashByIdRef.current.set(entry.id, entry.contentHash ?? entry.id);
-        entryByContentHashRef.current.set(entry.contentHash ?? entry.id, entry);
-      }
-      setShelfEntries((previous) => mergeShelfEntries(previous, entries));
-    }
-    const notice = formatImportNotice({
-      sourceCount: documents.length,
-      importedCount: imported.length,
-      duplicateTitles,
-      failed,
-      refreshedCount: duplicateTitles.length,
-    });
-    if (cancelled.length > 0) {
-      notice.text += uiText("notice.sep") + uiPlural("notice.import.cancelledCount", cancelled.length, { count: cancelled.length });
-      if (notice.kind === "ok") notice.kind = "warn";
-    }
-    setShelfNotice(notice);
-  }, []);
-
-  const handleCancelNativeImport = useCallback(async (): Promise<void> => {
-    const current = nativeImport;
-    if (!current || current.phase !== "preparing" || current.cancelState !== "idle") return;
-    setNativeImport((previous) => (
-      previous && previous.requestId === current.requestId
-        ? { ...previous, cancelState: "requesting" }
-        : previous
-    ));
-    try {
-      const status = await cancelDocumentImport(current.requestId);
-      setNativeImport((previous) => (
-        previous && previous.requestId === current.requestId
-          ? { ...previous, cancelState: status === "too_late" ? "too_late" : previous.cancelState }
-          : previous
-      ));
-    } catch (error) {
-      setShelfNotice({ kind: "error", text: uiText("notice.import.cancelFailed", { error: String(error) }) });
-      setNativeImport((previous) => (
-        previous && previous.requestId === current.requestId
-          ? { ...previous, cancelState: "idle" }
-          : previous
-      ));
-    }
-  }, [nativeImport]);
-
-  const handleToggleNativeImportCollapsed = useCallback((): void => {
-    setNativeImport((previous) => (
-      previous ? { ...previous, collapsed: !previous.collapsed } : previous
-    ));
-  }, []);
-
-  const reimportAndroidMissing = useCallback(async (entry: ShelfEntry): Promise<ShelfEntry | null> => {
-    if (nativeImportRef.current) {
-      setShelfNotice({ kind: "warn", text: uiText("notice.import.busy") });
-      return null;
-    }
-    const selected = await openFileDialog({
-      multiple: false,
-      directory: false,
-      title: uiText("notice.reimport.title", { title: entry.title }),
-    });
-    const uri = Array.isArray(selected) ? selected[0] : selected;
-    if (!uri) return null;
-    const documents: AndroidDocumentSelection[] = [{ uri }];
-    const batch = await runNativeDocumentImport(documents);
-    if (!batch) return null;
-    const wanted = entry.contentHash && /^[a-f0-9]{64}$/.test(entry.contentHash)
-      ? entry.contentHash
-      : /^[a-f0-9]{64}$/.test(entry.id)
-        ? entry.id
-        : null;
-    const match = batch.results.find((item) =>
-      (item.status === "saved" || item.status === "duplicate") &&
-      item.record &&
-      (wanted ? item.record.contentHash === wanted : true)
-    );
-    if (!match?.record) {
-      const cancelled = batch.results.some((item) => item.status === "cancelled");
-      setShelfNotice({
-        kind: cancelled ? "warn" : "error",
-        text: cancelled
-          ? uiText("notice.reimport.cancelled", { title: entry.title })
-          : uiText("notice.reimport.mismatch", { title: entry.title }),
-      });
-      return null;
-    }
-    const store = getShelfStore();
-    const [restored] = store.importRecords ? await store.importRecords([match.record]) : [match.record];
-    contentHashByIdRef.current.set(restored.id, restored.contentHash ?? restored.id);
-    entryByContentHashRef.current.set(restored.contentHash ?? restored.id, restored);
-    setShelfEntries((previous) => mergeShelfEntries(previous, [restored]));
-    return restored;
-  }, [runNativeDocumentImport]);
-
-  const handleChooseBooks = useCallback(async () => {
-    if (!isTauriEnv()) {
-      fileInputRef.current?.click();
-      return;
-    }
-    if (runtime.platform === "android") {
-      if (nativeImportRef.current) {
-        setShelfNotice({ kind: "warn", text: uiText("notice.import.busy") });
-        return;
-      }
-      try {
-        const selected = await openFileDialog({
-          multiple: true,
-          directory: false,
-          title: uiText("notice.picker.chooseEpub"),
-        });
-        const uris = (Array.isArray(selected) ? selected : selected ? [selected] : []).filter(
-          (value): value is string => typeof value === "string" && value.length > 0
-        );
-        if (uris.length === 0) return;
-        const documents: AndroidDocumentSelection[] = uris.map((uri) => ({ uri }));
-        const batch = await runNativeDocumentImport(documents);
-        if (batch) await applyNativeImportBatch(batch, documents);
-      } catch (error) {
-        setShelfNotice({ kind: "error", text: uiText("notice.picker.failed", { error: String(error) }) });
-      }
-      return;
-    }
-    try {
-      const selected = await openFileDialog({
-        multiple: true,
-        directory: false,
-        title: uiText("notice.picker.chooseEpub"),
-        filters: [{ name: uiText("notice.picker.epubFilter"), extensions: ["epub"] }],
-      });
-      const paths = Array.isArray(selected) ? selected : selected ? [selected] : [];
-      if (paths.length === 0) return;
-      await handleImportSources(
-        paths.map((path) => ({
-          kind: "path" as const,
-          path,
-          name: path.split(/[\\/]/).pop() || "book.epub",
-        }))
-      );
-    } catch (error) {
-      setShelfNotice({ kind: "error", text: uiText("notice.picker.failed", { error: String(error) }) });
-    }
-  }, [applyNativeImportBatch, handleImportSources, runNativeDocumentImport]);
-
-  const resolveContentHashForEntry = useCallback(async (entry: ShelfEntry): Promise<string> => {
-    if (entry.contentHash && /^[a-f0-9]{64}$/.test(entry.contentHash)) {
-      return entry.contentHash;
-    }
-    if (/^[a-f0-9]{64}$/.test(entry.id)) {
-      return entry.id;
-    }
-    if (entry.available === false) {
-      throw new Error(`《${entry.title}》文件失联且无指纹，${runtime.platform === "android" ? "请重新导入文件" : "请重新关联文件"}后再加入分类或收藏`);
-    }
-    try {
-      const buf = await getShelfStore().readBook(entry.id);
-      const hash = await sha256Hex(buf);
-      const updated = await getShelfStore().setContentHash(entry.id, hash);
-      setShelfEntries((prev) => prev.map((item) => (item.id === entry.id ? updated : item)));
-      return hash;
-    } catch (err) {
-      throw new Error(`无法读取《${entry.title}》计算内容指纹：${String(err)}`);
-    }
-  }, []);
-
-  const handleApplyOrganization = useCallback(
-    async (command: OrganizationCommand): Promise<void> => {
-      if (organizationBusyRef.current || shelfBusyRef.current) {
-        return;
-      }
-      if (organizationError) {
-        setShelfNotice({
-          kind: "error",
-          text: uiText("notice.organization.readFailedLocked"),
-        });
-        throw new Error("收藏与文件夹处于错误状态，已禁用修改");
-      }
-      organizationBusyRef.current = true;
-      try {
-        let finalCommand = command;
-        if ("contentHashes" in command) {
-          const resolvedHashes: string[] = [];
-          for (const idOrHash of command.contentHashes) {
-            const entry = shelfEntriesRef.current.find(
-              (e) => e.id === idOrHash || e.contentHash === idOrHash
-            );
-            if (!entry) throw new Error("所选书籍在书架中不存在");
-            const hash = await resolveContentHashForEntry(entry);
-            resolvedHashes.push(hash);
-          }
-          finalCommand = { ...command, contentHashes: resolvedHashes } as OrganizationCommand;
-        }
-        const nextOrg = await getShelfStore().applyOrganization(finalCommand);
-        setOrganization(nextOrg);
-      } catch (error) {
-        setShelfNotice({ kind: "error", text: uiText("notice.operationFailed", { error: String(error) }) });
-        throw error;
-      } finally {
-        organizationBusyRef.current = false;
-      }
-    },
-    [organizationError, resolveContentHashForEntry]
-  );
+  const { resolveContentHashForEntry, handleApplyOrganization } = useShelfOrganizationActions({
+    runtime, shelfEntriesRef, shelfBusyRef, organizationState: shelfOrganization,
+    setShelfEntries, setShelfNotice,
+  });
 
   const applyPortablePreferences = useCallback((preferences?: PortablePreferences): boolean => {
     if (!preferences) return false;
@@ -2172,18 +1618,9 @@ export default function App() {
     return true;
   }, [commitThemeSettings, settingsActions]);
 
-  // ---- 书库读取：首次读取、失败重试共用同一读取入口 ----
-  // Readers are created once; what they publish into is refreshed every render.
-  const libraryReadDepsRef = useRef<{
-    publishList(entries: ShelfEntry[]): void;
-    failList(error: unknown): void;
-    publishOrganization(org: LibraryOrganization): void;
-    failOrganization(error: unknown): void;
-  } | null>(null);
-  libraryReadDepsRef.current = {
-    publishList(entries) {
-      setShelfEntriesState(entries);
-      setLibraryLoad(libraryReadSucceeded());
+  const { libraryReader, organizationReader, retryLibraryLoad, refreshShelfProjection } = useShelfLibrary({
+    entriesState: shelfState, organizationState: shelfOrganization, setShelfNotice,
+    onListPublished(entries) {
       void (async () => {
         let repositoryGeneration: string | undefined;
         try {
@@ -2203,8 +1640,7 @@ export default function App() {
         });
       })();
     },
-    failList(error) {
-      setLibraryLoad((previous) => libraryReadFailed(previous, libraryReadErrorText(error)));
+    onListFailed(error) {
       recordLifecycleDiagnostic("startup_list", {
         stage: "list",
         result: "failed",
@@ -2212,107 +1648,13 @@ export default function App() {
         errorCode: (error as { readonly code?: unknown } | null)?.code as string | undefined,
       });
     },
-    publishOrganization(org) {
-      setOrganizationState(org);
-      setOrganizationError(null);
-      setOrganizationSettled(true);
-    },
-    failOrganization(error) {
-      // Keep the folders already known; writes stay blocked while organizationError is set.
-      setOrganizationError(uiText("notice.organization.readFailed", { error: libraryReadErrorText(error) }));
-      setOrganizationSettled(true);
-      setShelfNotice({ kind: "error", text: uiText("notice.organization.readFailedWrites", { error: libraryReadErrorText(error) }) });
-    },
-  };
-  const [libraryReader] = useState(() => createLibraryReader<ShelfEntry[]>({
-    read: () => getShelfStore().list(),
-    writeCount: () => shelfWritesRef.current,
-    repository: shelfRepositoryKey,
-    publish: (entries) => libraryReadDepsRef.current!.publishList(entries),
-    fail: (error) => libraryReadDepsRef.current!.failList(error),
-  }));
-  const [organizationReader] = useState(() => createLibraryReader<LibraryOrganization>({
-    read: () => getShelfStore().getOrganization(),
-    writeCount: () => organizationWritesRef.current,
-    repository: shelfRepositoryKey,
-    publish: (org) => libraryReadDepsRef.current!.publishOrganization(org),
-    fail: (error) => libraryReadDepsRef.current!.failOrganization(error),
-  }));
-  /** Retry from the shelf: the same real reads, never activation/migration again; a second tap joins the read in flight. */
-  const retryLibraryLoad = useCallback((): void => {
-    void libraryReader.load();
-    if (organizationError) void organizationReader.load();
-  }, [libraryReader, organizationReader, organizationError]);
+  });
 
-  /**
-   * Authoritative re-read after imports and sync. It goes through the same
-   * publish gate as the first read and supersedes any read still in flight;
-   * a newer refresh, a write during the read or teardown keeps this one from
-   * publishing. Books and folders fail independently; only a list failure
-   * rejects, so callers keep their own error wording.
-   */
-  const refreshShelfProjection = useCallback(async (): Promise<void> => {
-    const [list] = await Promise.all([libraryReader.refresh(), organizationReader.refresh()]);
-    if (list.kind === "failed") throw list.error;
-  }, [libraryReader, organizationReader]);
-
-  const handleOpenFolderImport = useCallback(async (): Promise<void> => {
-    if (shelfBusyRef.current || organizationBusyRef.current || nativeImportRef.current) {
-      setShelfNotice({ kind: "warn", text: uiText("notice.import.busy") });
-      return;
-    }
-    if (saveFileJobStateRef.current.kind !== "idle" || saveFileLaunchRef.current || lanSaveActiveRef.current) {
-      setShelfNotice({ kind: "warn", text: uiText("notice.folderImport.blocked") });
-      return;
-    }
-    // Reserve the shared slot before any await; released only when the panel closes.
-    nativeImportRef.current = FOLDER_IMPORT_SLOT;
-    try {
-      if (!isTauriEnv()) {
-        // Same as file import: let the portable switch land before the first write.
-        await activatePortableShelfState().catch(() => undefined);
-      }
-      const store = getShelfStore();
-      const organizationSnapshot = await store.getOrganization();
-      if (isTauriEnv()) {
-        setFolderImport({ port: createNativeDirectoryImportPort(), organization: organizationSnapshot, supported: true });
-        return;
-      }
-      const commit = store.commitDirectoryPlacementBatch?.bind(store);
-      const port = createWebDirectoryImportPort({
-        store: {
-          list: () => store.list(),
-          save: (input) => store.save(input),
-          readBook: (id) => store.readBook(id),
-          setContentHash: (id, hash) => store.setContentHash(id, hash),
-          getOrganization: () => store.getOrganization(),
-          commitDirectoryPlacementBatch: (batch) => {
-            if (!commit) throw new Error("当前存储后端不支持目录归档");
-            return commit(batch);
-          },
-        },
-      });
-      setFolderImport({
-        port,
-        organization: organizationSnapshot,
-        supported: supportsWebDirectoryPicker() && commit !== undefined,
-      });
-    } catch (error) {
-      if (nativeImportRef.current === FOLDER_IMPORT_SLOT) nativeImportRef.current = null;
-      setShelfNotice({ kind: "error", text: uiText("notice.folderImport.openFailed", { error: String(error) }) });
-    }
-  }, []);
-
-  const closeFolderImport = useCallback((): void => {
-    setFolderImport(null);
-    if (nativeImportRef.current === FOLDER_IMPORT_SLOT) nativeImportRef.current = null;
-  }, []);
-
-  /** One real refresh after a started import settles (success, cancel or failure). */
-  const handleFolderImportSettled = useCallback((): void => {
-    // A failed refresh stays on the shelf as a refresh error with a retry.
-    void refreshShelfProjection().catch(() => undefined);
-  }, [refreshShelfProjection]);
+  const { handleOpenFolderImport, closeFolderImport, handleFolderImportSettled } = useFolderImport({
+    importState: bookImportState, shelfBusyRef, organizationBusyRef,
+    saveFileJobStateRef, saveFileLaunchRef, lanSaveActiveRef,
+    isTauriEnv, setShelfNotice, refreshShelfProjection,
+  });
 
   const chooseSaveFileDestination = useCallback(async (): Promise<SaveFileLocation | null> => {
     const defaultName = `epub-reader-${new Date().toISOString().slice(0, 10)}.epubsave`;
@@ -2963,20 +2305,7 @@ export default function App() {
     [fontUrls, userFonts, settings.customFontId]
   );
 
-  // 导入结果 toast：展示 3 秒后用 1 秒淡出，期间不拦截鼠标
-  useEffect(() => {
-    if (!shelfNotice) {
-      setShelfNoticeFading(false);
-      return;
-    }
-    setShelfNoticeFading(false);
-    const fadeTimer = window.setTimeout(() => setShelfNoticeFading(true), 3000);
-    const closeTimer = window.setTimeout(() => setShelfNotice(null), 4000);
-    return () => {
-      window.clearTimeout(fadeTimer);
-      window.clearTimeout(closeTimer);
-    };
-  }, [shelfNotice]);
+  useShelfNoticeLifetime(shelfNotices);
 
   useEffect(() => {
     if (!readerNotice) {
@@ -3696,62 +3025,10 @@ export default function App() {
     }
   }, [view, book, chapterCountsState, dispatchScrub]);
 
-  const handleShelfDelete = useCallback(async (id: string) => {
-    if (shelfBusyRef.current || nativeImportRef.current) {
-      if (nativeImportRef.current) setShelfNotice({ kind: "warn", text: uiText("notice.delete.importing") });
-      return;
-    }
-    shelfBusyRef.current = true;
-    setShelfBusyMessage(uiText("notice.delete.removing"));
-    setShelfBusy(true);
-    const checkpointEntry = shelfEntriesRef.current.find((entry) => entry.id === id);
-    try {
-      await getShelfStore().deleteBook(id);
-      if (checkpointEntry) {
-        localCheckpointsRef.current?.remove(checkpointEntry.contentHash ?? checkpointEntry.id);
-      }
-      setShelfEntries((prev) => prev.filter((e) => e.id !== id));
-      setCurrentShelfId((curr) => (curr === id ? null : curr));
-      setShelfError(null);
-    } catch (e) {
-      setShelfError(uiText("notice.delete.failed", { error: String(e) }));
-    } finally {
-      shelfBusyRef.current = false;
-      setShelfBusy(false);
-    }
-  }, []);
-
-  const handleShelfDeleteMany = useCallback(async (ids: string[]) => {
-    if (shelfBusyRef.current || ids.length === 0) return;
-    if (nativeImportRef.current) {
-      setShelfNotice({ kind: "warn", text: uiText("notice.delete.importing") });
-      return;
-    }
-    shelfBusyRef.current = true;
-    setShelfBusyMessage(uiText("notice.delete.removing"));
-    setShelfBusy(true);
-    const checkpointEntries = shelfEntriesRef.current.filter((entry) => ids.includes(entry.id));
-    try {
-      const { deleted, failed } = await deleteShelfBooks(getShelfStore(), ids);
-      const deletedIds = new Set(deleted);
-      for (const entry of checkpointEntries) {
-        if (deletedIds.has(entry.id)) {
-          localCheckpointsRef.current?.remove(entry.contentHash ?? entry.id);
-        }
-      }
-      setShelfEntries((prev) => prev.filter((entry) => !deletedIds.has(entry.id)));
-      setCurrentShelfId((curr) => (curr && deletedIds.has(curr) ? null : curr));
-      if (failed.length === 0) {
-        setShelfError(null);
-        setShelfNotice({ kind: "ok", text: uiPlural("notice.delete.done", deleted.length, { count: deleted.length }) });
-      } else {
-        setShelfError(uiText("notice.delete.partial", { count: failed.length, errors: [...new Set(failed.map((item) => item.error))].join(uiText("notice.sep")) }));
-      }
-    } finally {
-      shelfBusyRef.current = false;
-      setShelfBusy(false);
-    }
-  }, []);
+  const { handleShelfDelete, handleShelfDeleteMany } = useShelfDeletion({
+    shelfBusyRef, nativeImportRef, shelfEntriesRef, localCheckpointsRef,
+    setShelfBusyMessage, setShelfBusy, setShelfEntries, setCurrentShelfId, setShelfError, setShelfNotice,
+  });
 
   // ---- 章节状态回调 ----
   const handleUserReadingPositionChange = useCallback((ticket?: RestoreTicket | null) => {
