@@ -400,6 +400,11 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
   useLayoutEffect(() => {
     tabsMotionRef.current?.select(activeTab === "quick" ? 0 : 1, false, false);
   }, [activeTab]);
+  // Warm-up draws the detailed page as a real selection (tab highlight and
+  // page state included), then returns to the quick page while still closed.
+  useEffect(() => {
+    if (!visible) setActiveTab(paintWarm === "detailed" ? "detailed" : "quick");
+  }, [paintWarm, visible]);
   const selectTab = (tab: "quick" | "detailed") => {
     if (tabsMotionRef.current) tabsMotionRef.current.select(tab === "quick" ? 0 : 1, true);
     else setActiveTab(tab);
@@ -652,7 +657,7 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
       )}
       <div
         ref={dialogRef}
-        className={`aa-popover${visible ? "" : " is-warm"}${!visible && paintWarm ? ` is-paint-warm is-paint-warm-${paintWarm}` : ""}${isClosing ? " is-closing" : ""}${expanded ? " is-expanded" : ""}${dragging ? " is-dragging" : ""}`}
+        className={`aa-popover${visible ? "" : " is-warm"}${!visible && paintWarm ? " is-paint-warm" : ""}${isClosing ? " is-closing" : ""}${expanded ? " is-expanded" : ""}${dragging ? " is-dragging" : ""}`}
         role="dialog"
         tabIndex={-1}
         aria-label={t("aa.dialog")}
