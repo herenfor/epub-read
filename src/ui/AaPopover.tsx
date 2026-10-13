@@ -424,7 +424,7 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
     setActiveTab("quick");
     setExpanded(false);
     setAdvancedOpen(false);
-    tabsMotionRef.current?.select(0, false, false);
+    tabsMotionRef.current?.reset(0);
     if (quickBodyRef.current) quickBodyRef.current.scrollTop = 0;
     if (detailedBodyRef.current) detailedBodyRef.current.scrollTop = 0;
   }, [open]);

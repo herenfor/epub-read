@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useRef } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
 
 /**
  * Opening a book prepares two panels before the opening veil lifts: the Aa
@@ -39,23 +39,31 @@ export function panelPrepReducer(state: PanelPrep | null, event: PanelPrepEvent)
  */
 export function useOpeningPanelPrep(session: string | null) {
   const [state, dispatch] = useReducer(panelPrepReducer, null);
+  // Each reader visit owns its queued work, including re-opening the same book.
+  const owner = useMemo(() => ({ key: session }), [session]);
+  const currentOwner = useRef(owner);
+  currentOwner.current = owner;
+  const frame = useRef(0);
   useEffect(() => {
     if (!session) {
       dispatch({ type: "release" });
       return;
     }
     dispatch({ type: "start", key: session });
-    const timer = setTimeout(() => dispatch({ type: "expire", key: session }), PANEL_PREP_BUDGET_MS);
-    return () => clearTimeout(timer);
-  }, [session]);
+    const timer = setTimeout(() => {
+      if (currentOwner.current === owner) dispatch({ type: "expire", key: session });
+    }, PANEL_PREP_BUDGET_MS);
+    return () => { clearTimeout(timer); cancelAnimationFrame(frame.current); };
+  }, [owner]);
   // The next stage starts on the following frame, so the two panels are not
   // built in one task; the frame is a yield point, not a paint/GPU signal.
-  const frame = useRef(0);
-  useEffect(() => () => cancelAnimationFrame(frame.current), []);
   const prepared = useCallback((key: string, stage: "aa" | "toc") => {
+    if (currentOwner.current !== owner || key !== owner.key) return;
     cancelAnimationFrame(frame.current);
-    frame.current = requestAnimationFrame(() => dispatch({ type: "prepared", key, stage }));
-  }, []);
+    frame.current = requestAnimationFrame(() => {
+      if (currentOwner.current === owner) dispatch({ type: "prepared", key, stage });
+    });
+  }, [owner]);
   const current = session !== null && state?.key === session ? state : null;
   return {
     /** Aa is mounted (closed) for this session. */
