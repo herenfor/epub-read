@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { applyChapterCount, createChapterCountCollection } from "./chapterCounts";
-import { readCachedChapterCounts, readKnownChapterProgressKeys, writeChapterCountCache } from "./chapterCountCache";
+import { readCachedChapterCounts, readCachedLinearMask, readKnownChapterProgressKeys, writeChapterCountCache } from "./chapterCountCache";
+import { linearChapterNumber, linearChapterTotal } from "../core/book";
 
 describe("chapter count cache", () => {
   const memory = new Map<string, string>();
@@ -23,6 +24,16 @@ describe("chapter count cache", () => {
     writeChapterCountCache("hash", collection);
     expect(readCachedChapterCounts("hash", [true, true, false])).toEqual(new Map([[0, 12], [1, 20]]));
     expect(readCachedChapterCounts("hash", [true, false, true])).toEqual(new Map());
+  });
+
+  it("numbers chapters among linear items so a cover or trailing nav is not counted", () => {
+    // cover(no) · ch1 · ch2 · nav(no)
+    const linear = [false, true, true, false];
+    expect(linearChapterTotal(linear)).toBe(2);
+    expect([0, 1, 2, 3].map((index) => linearChapterNumber(linear, index))).toEqual([null, 1, 2, null]);
+    writeChapterCountCache("hash", createChapterCountCollection(1, linear));
+    expect(readCachedLinearMask("hash")).toEqual(linear);
+    expect(readCachedLinearMask("other")).toBeNull();
   });
 
   it("preserves older structural estimates when a chapter becomes measured", () => {

@@ -9,6 +9,7 @@ import {
   type ScrubUiState,
 } from "./readerProgressAxis";
 import { useUiText } from "./localization/UiLanguageProvider";
+import { linearChapterNumber, linearChapterTotal } from "../core/book";
 
 export interface WhisperFooterChapterTick {
   spineIndex: number;
@@ -29,6 +30,8 @@ export interface WhisperFooterProps {
   chapterTitle?: string;
   chapterIndex: number;
   totalChapters: number;
+  /** Per spine item: linear or not. Labels number linear chapters only; seeking keeps spine indices. */
+  linearSpine?: readonly boolean[];
 
   bookProgressPct?: number;
   /** 连续滚动模式下整本书 0..1 的精确宏观几何位置 */
@@ -179,6 +182,7 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
   chapterTitle,
   chapterIndex,
   totalChapters,
+  linearSpine,
   bookProgressPct,
   onSeekPage,
   onSeekChapter,
@@ -202,6 +206,11 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
   statusAccessory,
 }) => {
   const { t } = useUiText();
+  // Without a linear mask fall back to raw spine positions.
+  const chapterNumber = linearSpine ? linearChapterNumber(linearSpine, chapterIndex) : chapterIndex + 1;
+  const chapterCount = linearSpine ? linearChapterTotal(linearSpine) : totalChapters;
+  const chapterName = (spine: number): string =>
+    t("footer.chapterN", { n: (linearSpine ? linearChapterNumber(linearSpine, spine) : null) ?? spine + 1 });
   const [isHovered, setIsHovered] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -298,11 +307,11 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
       const point = contentAxis.locate(rawPct);
       if (point) {
         const tick = chapterTicks.find((t) => t.spineIndex === point.spineIndex);
-        const title = tick?.title || (point.spineIndex === chapterIndex ? chapterTitle : t("footer.chapterN", { n: point.spineIndex + 1 }));
+        const title = tick?.title || (point.spineIndex === chapterIndex ? chapterTitle : chapterName(point.spineIndex));
         if (readingMode === "scroll") {
           return {
             pct: pct100,
-            text: t("footer.scrub.chapterBook", { title: title || t("footer.chapterN", { n: point.spineIndex + 1 }), percent: Math.round(pct100) }),
+            text: t("footer.scrub.chapterBook", { title: title || chapterName(point.spineIndex), percent: Math.round(pct100) }),
           };
         }
         if (point.spineIndex === chapterIndex && pageCount > 1) {
@@ -314,7 +323,7 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
         }
         return {
           pct: pct100,
-          text: t("footer.scrub.chapterBook", { title: title || t("footer.chapterN", { n: point.spineIndex + 1 }), percent: Math.round(pct100) }),
+          text: t("footer.scrub.chapterBook", { title: title || chapterName(point.spineIndex), percent: Math.round(pct100) }),
         };
       }
     }
@@ -331,11 +340,11 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
       if (!targetTick) targetTick = chapterTicks[0];
     }
     const targetSpine = targetTick?.spineIndex ?? Math.min(Math.max(0, totalChapters - 1), Math.floor(rawPct * Math.max(1, totalChapters)));
-    const targetTitle = targetTick?.title || (targetSpine === chapterIndex ? chapterTitle : t("footer.chapterN", { n: targetSpine + 1 }));
+    const targetTitle = targetTick?.title || (targetSpine === chapterIndex ? chapterTitle : chapterName(targetSpine));
 
     return {
       pct: pct100,
-      text: t("footer.scrub.chapterBook", { title: targetTitle || t("footer.chapterN", { n: targetSpine + 1 }), percent: Math.round(pct100) }),
+      text: t("footer.scrub.chapterBook", { title: targetTitle || chapterName(targetSpine), percent: Math.round(pct100) }),
     };
   };
 
@@ -518,7 +527,7 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
           ? t("footer.mobile.page", { page: leafRange.first, total: leafRange.total })
           : t("footer.mobile.pageRange", { first: leafRange.first, last: leafRange.last, total: leafRange.total }));
       } else parts.push(t("footer.mobile.page", { page: currentPage + 1, total: pageCount || 1 }));
-      if (totalChapters > 1) parts.push(t("footer.mobile.chapters", { current: chapterIndex + 1, total: totalChapters }));
+      if (chapterNumber !== null && chapterCount > 1) parts.push(t("footer.mobile.chapters", { current: chapterNumber, total: chapterCount }));
       parts.push(t("footer.book", { progress: wholeBookLabel() }));
       return parts.join(" · ");
     }
@@ -535,8 +544,8 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
       parts.push(t("footer.page", { page: currentPage + 1, total: pageCount || 1 }));
     }
 
-    if (totalChapters > 1) {
-      parts.push(t("footer.chapters", { current: chapterIndex + 1, total: totalChapters }));
+    if (chapterNumber !== null && chapterCount > 1) {
+      parts.push(t("footer.chapters", { current: chapterNumber, total: chapterCount }));
     }
 
     if (scrubState) {

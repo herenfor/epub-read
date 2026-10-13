@@ -737,6 +737,23 @@ export function nextLinearIndex(book: Book, from: number, dir: 1 | -1): number {
 }
 
 /**
+ * "Chapter N" as a reader counts it: 1-based among linear spine items, so a
+ * trailing nav or a linear="no" cover is not numbered. Null for such items.
+ */
+export function linearChapterNumber(linear: readonly boolean[], index: number): number | null {
+  if (!linear[index]) return null;
+  let n = 0;
+  for (let i = 0; i <= index; i++) if (linear[i]) n++;
+  return n;
+}
+
+export function linearChapterTotal(linear: readonly boolean[]): number {
+  let n = 0;
+  for (const item of linear) if (item) n++;
+  return n;
+}
+
+/**
  * 释放整本书籍的解析资源（主要为解压的原始字节资源），
  * 彻底切断 Uint8Array / ArrayBuffer 引用，避免关书后在长期运行中被意外闭包持有。
  */
