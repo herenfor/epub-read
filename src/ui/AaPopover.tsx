@@ -187,7 +187,7 @@ export const UI_SCALES: Array<{ value: number; label: string }> = [
   { value: 1.3, label: "130%" },
 ];
 
-export const AaPopover: React.FC<AaPopoverProps> = ({
+export const AaPopover = React.memo(function AaPopover({
   fontSize,
   onFontSizeChange: _onFontSizeChange,
   onFontDec,
@@ -240,7 +240,7 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
   paintWarm,
   suspended = false,
   onClose,
-}) => {
+}: AaPopoverProps) {
   const [activeTab, setActiveTab] = useState<"quick" | "detailed">("quick");
   const { t } = useUiText();
   const [uiMotion, setUiMotion] = useUiMotion();
@@ -1427,4 +1427,4 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
       </div>
     </>
   );
-};
+});
