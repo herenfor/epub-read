@@ -7,6 +7,7 @@
   "notice.statusBar.failed": "Failed to adjust system status bar: {error}",
   "notice.keepScreenOn.saveFailed": "Failed to save keep-screen-on setting: {error}",
   "notice.keepScreenOn.failed": "Failed to set keep screen on: {error}",
+  "notice.theme.applyFailed": "Failed to switch theme: {error}",
   "notice.busy": "Processing...",
   "notice.discardNote": "Discard unsaved note?",
   "notice.import.busy": "Another import is in progress. Please wait for it to finish.",
