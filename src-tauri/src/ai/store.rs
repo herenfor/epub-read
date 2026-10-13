@@ -34,6 +34,8 @@ const MAX_STAGE_CHUNK_BYTES: usize = 4 * 1024 * 1024;
 const MAX_STAGE_TOTAL_CHUNKS: u64 = 1_000_000;
 const MAX_STAGE_TOTAL_BYTES: u64 = 512 * 1024 * 1024;
 pub(crate) const LIBRARY_TEXT_INDEX_TASK_KIND: &str = "library-text-index";
+const APP_EXIT_REASON: &str = "app-exit";
+const LEGACY_APP_EXIT_REASON: &str = "应用退出，未完成任务已回收";
 static JOB_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[cfg(windows)]
@@ -2195,9 +2197,9 @@ impl AiStore {
             return;
         };
         let _ = connection.execute(
-            "UPDATE jobs SET state = 'cancelled', error = '应用退出，未完成任务已回收', cancel_requested = 1, updated_at_ms = ?1
+            "UPDATE jobs SET state = 'cancelled', error = ?2, cancel_requested = 1, updated_at_ms = ?1
              WHERE state IN ('queued', 'running', 'paused')",
-            [now_ms() as i64],
+            params![now_ms() as i64, APP_EXIT_REASON],
         );
     }
 
@@ -2832,6 +2834,15 @@ fn find_active_task(connection: &Connection, kind: &str) -> Result<Option<AiJob>
     id.map(|id| read_job(connection, &id)).transpose()
 }
 
+/// Normalize only the known legacy exit reason, without rewriting history.
+fn project_task_error(state: TaskState, cancel_requested: bool, error: Option<String>) -> Option<String> {
+    if state == TaskState::Cancelled && cancel_requested && error.as_deref() == Some(LEGACY_APP_EXIT_REASON) {
+        Some(APP_EXIT_REASON.to_string())
+    } else {
+        error
+    }
+}
+
 fn read_job_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AiJob> {
     let state: String = row.get(3)?;
     let state = TaskState::parse(&state).ok_or_else(|| {
@@ -2845,14 +2856,16 @@ fn read_job_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AiJob> {
             .into(),
         )
     })?;
+    let cancel_requested = row.get::<_, i64>(6)? != 0;
+    let error = project_task_error(state, cancel_requested, row.get(5)?);
     Ok(AiJob {
         id: row.get(0)?,
         kind: row.get(1)?,
         content_hash: row.get(2)?,
         state,
         progress: row.get(4)?,
-        error: row.get(5)?,
-        cancel_requested: row.get::<_, i64>(6)? != 0,
+        error,
+        cancel_requested,
         created_at_ms: row.get::<_, i64>(7)?.max(0) as u64,
         updated_at_ms: row.get::<_, i64>(8)?.max(0) as u64,
     })
@@ -3796,7 +3809,26 @@ mod tests {
     }
 
     #[test]
-    fn startup_reclaims_active_jobs() {
+    fn task_exit_reason_legacy_projection_does_not_rewrite_history() {
+        let (store, root) = test_store();
+        let job = store.enqueue_task("index".into(), None).unwrap();
+        store.with_connection(|c| c.execute("UPDATE jobs SET state='cancelled',cancel_requested=1,error=?1,updated_at_ms=123 WHERE id=?2", params![LEGACY_APP_EXIT_REASON, job.id]).map(|_| ()).map_err(|e| e.to_string())).unwrap();
+        let listed = store.list_tasks().unwrap();
+        assert_eq!(listed[0].error.as_deref(), Some(APP_EXIT_REASON));
+        assert_eq!(listed[0].updated_at_ms, 123);
+        let raw: (String, i64) = store.with_connection(|c| c.query_row("SELECT error,updated_at_ms FROM jobs WHERE id=?1", [&job.id], |r| Ok((r.get(0)?, r.get(1)?))).map_err(|e| e.to_string())).unwrap();
+        assert_eq!(raw, (LEGACY_APP_EXIT_REASON.to_string(), 123));
+        let wire = serde_json::to_value(&listed[0]).unwrap();
+        assert_eq!(wire["error"], APP_EXIT_REASON);
+        assert_eq!(wire["cancelRequested"], true);
+        assert_eq!(project_task_error(TaskState::Cancelled, true, Some("应用退出：别的原因".into())).as_deref(), Some("应用退出：别的原因"));
+        assert_eq!(project_task_error(TaskState::Failed, false, Some(LEGACY_APP_EXIT_REASON.into())).as_deref(), Some(LEGACY_APP_EXIT_REASON));
+        drop(store);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn task_exit_reason_startup_reclaims_active_jobs() {
         let (store, root) = test_store();
         let job = store.enqueue_task("index".into(), None).unwrap();
         store
@@ -3807,6 +3839,9 @@ mod tests {
         let jobs = reopened.list_tasks().unwrap();
         assert_eq!(jobs[0].state, TaskState::Cancelled);
         assert!(jobs[0].cancel_requested);
+        assert_eq!(jobs[0].error.as_deref(), Some(APP_EXIT_REASON));
+        let raw: String = reopened.with_connection(|c| c.query_row("SELECT error FROM jobs WHERE id=?1", [&job.id], |r| r.get(0)).map_err(|e| e.to_string())).unwrap();
+        assert_eq!(raw, APP_EXIT_REASON);
         drop(reopened);
         fs::remove_dir_all(root).unwrap();
     }
