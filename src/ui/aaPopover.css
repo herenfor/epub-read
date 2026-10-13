@@ -58,15 +58,10 @@
 }
 
 /* Drawn once while closed (panelPaintWarmup): 1% opacity still rasterizes
-   it, so the first real opening skips that work. The detailed stage shows
-   the second page of the tab track. */
+   it, so the first real opening skips that work. */
 .aa-popover.is-warm.is-paint-warm {
   visibility: visible;
   opacity: 0.01;
-}
-
-.aa-popover.is-paint-warm-detailed .aa-tabs-track {
-  transform: translateX(-100%) !important;
 }
 
 @keyframes aaPopoverFadeIn {
