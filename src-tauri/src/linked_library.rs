@@ -10,6 +10,7 @@
 //! never removes a user-owned linked source file.
 
 use crate::ai::AiState;
+use crate::linked_library_error::LinkedLibraryError;
 use crate::android_uri_bridge::{RestrictedReadError, RestrictedReader};
 use crate::directory_import::activity::ImportActivityGuard;
 use crate::directory_import::job::DirectoryImportState;
@@ -1230,6 +1231,10 @@ pub(crate) fn canonical_epub_path(raw: &str) -> Result<PathBuf, String> {
 }
 
 pub(crate) fn hash_file(path: &Path) -> Result<(String, FileSnapshot), String> {
+    hash_source_file(path).map_err(|error| error.message)
+}
+
+fn hash_source_file(path: &Path) -> Result<(String, FileSnapshot), LinkedLibraryError> {
     let before = snapshot(path)?;
     let file = File::open(path).map_err(|error| format!("无法读取源 EPUB：{error}"))?;
     let mut reader = BufReader::with_capacity(64 * 1024, file);
@@ -1246,7 +1251,7 @@ pub(crate) fn hash_file(path: &Path) -> Result<(String, FileSnapshot), String> {
     }
     let after = snapshot(path)?;
     if before.size != after.size || before.mtime_ns != after.mtime_ns {
-        return Err("源 EPUB 在计算指纹期间发生了变化，请重新导入".into());
+        return Err(LinkedLibraryError::changed("源 EPUB 在计算指纹期间发生了变化，请重新导入"));
     }
     Ok((format!("{:x}", digest.finalize()), after))
 }
@@ -1288,11 +1293,11 @@ struct SourceReadResult {
     read_snapshot: FileSnapshot,
 }
 
-fn source_open_error(error: std::io::Error) -> String {
+fn source_open_error(error: std::io::Error) -> LinkedLibraryError {
     if error.kind() == std::io::ErrorKind::NotFound {
-        "源 EPUB 已变化或丢失；请重新导入或重新定位".into()
+        LinkedLibraryError::new("source-missing", "源 EPUB 已变化或丢失；请重新导入或重新定位")
     } else {
-        format!("无法打开源 EPUB：{error}")
+        format!("无法打开源 EPUB：{error}").into()
     }
 }
 
@@ -1301,7 +1306,7 @@ fn prepare_source_read(
     records: &[LinkedLibraryRecord],
     bindings: &[DeviceBinding],
     content_hash: &str,
-) -> Result<PendingSourceRead, String> {
+) -> Result<PendingSourceRead, LinkedLibraryError> {
     let found = records
         .iter()
         .any(|record| record.content_hash == content_hash);
@@ -1312,7 +1317,7 @@ fn prepare_source_read(
     let binding = bindings
         .iter()
         .find(|binding| binding.content_hash == content_hash)
-        .ok_or_else(|| "本机没有这本书的源文件绑定".to_string())?;
+        .ok_or_else(|| LinkedLibraryError::new("source-unbound", "本机没有这本书的源文件绑定"))?;
     let identity = SourceIdentity::from_binding(binding, library_root)?;
     let file = File::open(&identity.path).map_err(source_open_error)?;
     Ok(PendingSourceRead {
@@ -1328,7 +1333,7 @@ fn prepare_source_read(
 fn read_source_bytes_and_hash(
     file: &File,
     expected_hash: &str,
-) -> Result<SourceReadResult, String> {
+) -> Result<SourceReadResult, LinkedLibraryError> {
     let before = snapshot_file(file)?;
     let mut reader = BufReader::with_capacity(64 * 1024, file);
     let mut bytes = Vec::new();
@@ -1338,10 +1343,10 @@ fn read_source_bytes_and_hash(
     drop(reader);
     let after = snapshot_file(file)?;
     if before.size != after.size || before.mtime_ns != after.mtime_ns {
-        return Err("源 EPUB 在读取期间发生了变化；未将旧进度应用到新内容".into());
+        return Err(LinkedLibraryError::changed("源 EPUB 在读取期间发生了变化；未将旧进度应用到新内容"));
     }
     if hash_bytes(&bytes) != expected_hash {
-        return Err("源 EPUB 在打开期间发生了变化；未将旧进度应用到新内容".into());
+        return Err(LinkedLibraryError::changed("源 EPUB 在打开期间发生了变化；未将旧进度应用到新内容"));
     }
     Ok(SourceReadResult {
         bytes,
@@ -1353,7 +1358,7 @@ fn read_source_bytes_and_hash(
 /// caller must have opened the handle at offset 0.  This is only used by the
 /// cover slow path after the cheap binding signature no longer matches; it
 /// never materializes the book in a `Vec` and never reopens by path.
-fn hash_opened_file(file: &File) -> Result<(String, FileSnapshot), String> {
+fn hash_opened_file(file: &File) -> Result<(String, FileSnapshot), LinkedLibraryError> {
     let before = snapshot_file(file)?;
     let mut reader = BufReader::with_capacity(64 * 1024, file);
     let mut digest = Sha256::new();
@@ -1370,7 +1375,7 @@ fn hash_opened_file(file: &File) -> Result<(String, FileSnapshot), String> {
     drop(reader);
     let after = snapshot_file(file)?;
     if before.size != after.size || before.mtime_ns != after.mtime_ns {
-        return Err("源 EPUB 在验证封面期间发生了变化".into());
+        return Err(LinkedLibraryError::changed("源 EPUB 在验证封面期间发生了变化"));
     }
     Ok((format!("{:x}", digest.finalize()), after))
 }
@@ -1387,21 +1392,21 @@ fn read_cover_from_opened_file(
     limit: u64,
     expected_hash: &str,
     old_snapshot: &FileSnapshot,
-) -> Result<SourceReadResult, String> {
+) -> Result<SourceReadResult, LinkedLibraryError> {
     let initial = snapshot_file(file)?;
     let trusted_snapshot = if initial == *old_snapshot {
         initial
     } else {
         let (actual_hash, verified_snapshot) = hash_opened_file(file)?;
         if actual_hash != expected_hash {
-            return Err("源 EPUB 已变化或丢失；请重新导入或重新定位".into());
+            return Err(LinkedLibraryError::changed("源 EPUB 已变化或丢失；请重新导入或重新定位"));
         }
         verified_snapshot
     };
 
     let before_zip = snapshot_file(file)?;
     if before_zip != trusted_snapshot {
-        return Err("源 EPUB 在读取封面期间发生了变化".into());
+        return Err(LinkedLibraryError::changed("源 EPUB 在读取封面期间发生了变化"));
     }
     let bytes = {
         let mut archive =
@@ -1413,7 +1418,7 @@ fn read_cover_from_opened_file(
     };
     let after_zip = snapshot_file(file)?;
     if after_zip != trusted_snapshot {
-        return Err("源 EPUB 在读取封面期间发生了变化".into());
+        return Err(LinkedLibraryError::changed("源 EPUB 在读取封面期间发生了变化"));
     }
     Ok(SourceReadResult {
         bytes,
@@ -1427,7 +1432,7 @@ fn read_cover_from_opened_file(
 fn prepare_library_source_read(
     app: &AppHandle,
     content_hash: &str,
-) -> Result<(PathBuf, PendingSourceRead), String> {
+) -> Result<(PathBuf, PendingSourceRead), LinkedLibraryError> {
     let state = app.state::<LinkedLibraryWriteState>();
     let _guard = state
         .0
@@ -1448,7 +1453,7 @@ fn finalize_library_source_read(
     identity: &SourceIdentity,
     old_snapshot: &FileSnapshot,
     read_snapshot: &FileSnapshot,
-) -> Result<(), String> {
+) -> Result<(), LinkedLibraryError> {
     let state = app.state::<LinkedLibraryWriteState>();
     let _guard = state
         .0
@@ -1480,7 +1485,7 @@ fn finalize_source_read(
     identity: &SourceIdentity,
     old_snapshot: &FileSnapshot,
     read_snapshot: &FileSnapshot,
-) -> Result<bool, String> {
+) -> Result<bool, LinkedLibraryError> {
     if !records
         .iter()
         .any(|record| record.content_hash == identity.content_hash)
@@ -1492,12 +1497,12 @@ fn finalize_source_read(
         .position(|binding| binding.content_hash == identity.content_hash)
         .ok_or_else(|| "读取结果已过期：源文件绑定已缺失".to_string())?;
     let current_identity = SourceIdentity::from_binding(&bindings[binding_index], library_root)
-        .map_err(|_| "源 EPUB 已变化或丢失；请重新导入或重新定位".to_string())?;
+        .map_err(|_| LinkedLibraryError::unavailable("源 EPUB 已变化或丢失；请重新导入或重新定位"))?;
     if &current_identity != identity {
         return Err("读取结果已过期：源文件绑定已变化".into());
     }
     let now_snapshot = snapshot(&current_identity.path)
-        .map_err(|_| "源 EPUB 已变化或丢失；请重新导入或重新定位".to_string())?;
+        .map_err(|_| LinkedLibraryError::unavailable("源 EPUB 已变化或丢失；请重新导入或重新定位"))?;
     let binding_snapshot = FileSnapshot {
         size: bindings[binding_index].file_size,
         mtime_ns: bindings[binding_index].source_mtime_ns,
@@ -3220,7 +3225,7 @@ pub fn linked_library_import_paths(
 pub async fn linked_library_read_source_raw(
     app: AppHandle,
     content_hash: String,
-) -> Result<tauri::ipc::Response, String> {
+) -> Result<tauri::ipc::Response, LinkedLibraryError> {
     tauri::async_runtime::spawn_blocking(move || read_source_raw_blocking(app, content_hash))
         .await
         .map_err(|error| format!("源 EPUB 读取工作线程失败：{error}"))?
@@ -3229,7 +3234,7 @@ pub async fn linked_library_read_source_raw(
 fn read_source_raw_blocking(
     app: AppHandle,
     content_hash: String,
-) -> Result<tauri::ipc::Response, String> {
+) -> Result<tauri::ipc::Response, LinkedLibraryError> {
     if !valid_content_hash(&content_hash) {
         return Err("无效的书籍内容指纹".into());
     }
@@ -3281,7 +3286,7 @@ fn read_source_raw_blocking(
 pub async fn linked_library_read_cover_raw(
     app: AppHandle,
     content_hash: String,
-) -> Result<tauri::ipc::Response, String> {
+) -> Result<tauri::ipc::Response, LinkedLibraryError> {
     tauri::async_runtime::spawn_blocking(move || read_cover_raw_blocking(app, content_hash))
         .await
         .map_err(|error| format!("封面读取工作线程失败：{error}"))?
@@ -3290,7 +3295,7 @@ pub async fn linked_library_read_cover_raw(
 fn read_cover_raw_blocking(
     app: AppHandle,
     content_hash: String,
-) -> Result<tauri::ipc::Response, String> {
+) -> Result<tauri::ipc::Response, LinkedLibraryError> {
     if !valid_content_hash(&content_hash) {
         return Err("无效的书籍内容指纹".into());
     }
@@ -3315,7 +3320,7 @@ fn read_cover_raw_blocking(
         let binding = bindings
             .iter()
             .find(|binding| binding.content_hash == content_hash)
-            .ok_or_else(|| "本机没有这本书的源文件绑定".to_string())?;
+            .ok_or_else(|| LinkedLibraryError::new("source-unbound", "本机没有这本书的源文件绑定"))?;
         let Some(cover_path) = binding.cover_zip_path.clone() else {
             return Ok(tauri::ipc::Response::new(Vec::new()));
         };
@@ -3359,15 +3364,15 @@ fn read_cover_raw_blocking(
 
 
 
-fn archive_fault_message(fault: Fault) -> String {
+fn archive_fault_error(fault: Fault) -> LinkedLibraryError {
     match fault {
-        Fault::Closed => "原生归档会话已关闭".to_string(),
-        Fault::InvalidRequest => "原生归档请求无效".to_string(),
-        Fault::InvalidArchive => "EPUB 归档结构无效".to_string(),
-        Fault::CorruptEntry => "EPUB 资源校验失败".to_string(),
-        Fault::SourceChanged => "源 EPUB 在读取期间发生了变化；请重新导入或重新定位".to_string(),
-        Fault::DirectoryTooLarge => "EPUB 归档目录条目过大".to_string(),
-        Fault::Io => "读取源 EPUB 失败".to_string(),
+        Fault::Closed => "原生归档会话已关闭".into(),
+        Fault::InvalidRequest => "原生归档请求无效".into(),
+        Fault::InvalidArchive => "EPUB 归档结构无效".into(),
+        Fault::CorruptEntry => "EPUB 资源校验失败".into(),
+        Fault::SourceChanged => LinkedLibraryError::changed("源 EPUB 在读取期间发生了变化；请重新导入或重新定位"),
+        Fault::DirectoryTooLarge => "EPUB 归档目录条目过大".into(),
+        Fault::Io => "读取源 EPUB 失败".into(),
     }
 }
 
@@ -3394,9 +3399,9 @@ fn archive_open_blocking(
     app: AppHandle,
     owner: String,
     content_hash: String,
-) -> Result<ArchiveOpenView, String> {
+) -> Result<ArchiveOpenView, LinkedLibraryError> {
     if !valid_content_hash(&content_hash) {
-        return Err("无效的书籍内容指纹".to_string());
+        return Err("无效的书籍内容指纹".into());
     }
 
     let (root, pending) = prepare_library_source_read(&app, &content_hash)?;
@@ -3407,7 +3412,7 @@ fn archive_open_blocking(
     } = pending;
     let (actual_hash, verified_snapshot) = hash_opened_file(&file)?;
     if !actual_hash.eq_ignore_ascii_case(&content_hash) {
-        return Err("源 EPUB 在打开期间发生了变化；未将旧进度应用到新内容".to_string());
+        return Err(LinkedLibraryError::changed("源 EPUB 在打开期间发生了变化；未将旧进度应用到新内容"));
     }
     file.seek(SeekFrom::Start(0))
         .map_err(|error| format!("无法重新定位源 EPUB：{error}"))?;
@@ -3424,13 +3429,13 @@ fn archive_open_blocking(
         }
     };
 
-    let session = NativeZipSession::from_verified_file(file, guard).map_err(archive_fault_message)?;
+    let session = NativeZipSession::from_verified_file(file, guard).map_err(archive_fault_error)?;
     let entry_count = session.entry_count;
     finalize_library_source_read(&app, &root, &identity, &old_snapshot, &verified_snapshot)?;
 
     if app.get_webview_window(&owner).is_none() {
         session.close();
-        return Err("打开原生归档的窗口已关闭".to_string());
+        return Err("打开原生归档的窗口已关闭".into());
     }
 
     let session_id = random_uuid_v4()?;
@@ -3461,7 +3466,7 @@ pub async fn linked_library_archive_open(
     app: AppHandle,
     window: tauri::Window,
     content_hash: String,
-) -> Result<ArchiveOpenView, String> {
+) -> Result<ArchiveOpenView, LinkedLibraryError> {
     let owner = window.label().to_string();
     tauri::async_runtime::spawn_blocking(move || archive_open_blocking(app, owner, content_hash))
         .await
@@ -3474,13 +3479,13 @@ pub async fn linked_library_archive_directory(
     window: tauri::Window,
     session_id: String,
     start: usize,
-) -> Result<crate::native_zip_session::DirectoryPage, String> {
+) -> Result<crate::native_zip_session::DirectoryPage, LinkedLibraryError> {
     let owner = window.label().to_string();
     let session = native_archive_session(&app, &owner, &session_id)?;
     tauri::async_runtime::spawn_blocking(move || {
         session
             .directory_page(start)
-            .map_err(archive_fault_message)
+            .map_err(archive_fault_error)
     })
     .await
     .map_err(|error| format!("原生归档目录工作线程失败：{error}"))?
@@ -3493,14 +3498,14 @@ pub async fn linked_library_archive_read(
     session_id: String,
     entry_index: usize,
     offset: u64,
-) -> Result<tauri::ipc::Response, String> {
+) -> Result<tauri::ipc::Response, LinkedLibraryError> {
     let owner = window.label().to_string();
     let session = native_archive_session(&app, &owner, &session_id)?;
     tauri::async_runtime::spawn_blocking(move || {
         session
             .read_chunk(entry_index, offset)
             .map(tauri::ipc::Response::new)
-            .map_err(archive_fault_message)
+            .map_err(archive_fault_error)
     })
     .await
     .map_err(|error| format!("原生归档读取工作线程失败：{error}"))?
@@ -3570,14 +3575,14 @@ pub fn linked_library_relink(
     state: State<'_, LinkedLibraryWriteState>,
     content_hash: String,
     source_path: String,
-) -> Result<LinkedLibraryRecordView, String> {
+) -> Result<LinkedLibraryRecordView, LinkedLibraryError> {
     if !valid_content_hash(&content_hash) {
         return Err("无效的书籍内容指纹".into());
     }
     let path = canonical_epub_path(&source_path)?;
-    let (actual_hash, hashed_snapshot) = hash_file(&path)?;
+    let (actual_hash, hashed_snapshot) = hash_source_file(&path)?;
     if !actual_hash.eq_ignore_ascii_case(&content_hash) {
-        return Err("选择的 EPUB 内容与目标书籍不一致，未重新绑定".into());
+        return Err(LinkedLibraryError::new("relink-mismatch", "选择的 EPUB 内容与目标书籍不一致，未重新绑定"));
     }
     let metadata = inspect_epub(&path)?;
     if metadata.spine.is_empty() {
@@ -3587,7 +3592,7 @@ pub fn linked_library_relink(
     if final_snapshot.size != hashed_snapshot.size
         || final_snapshot.mtime_ns != hashed_snapshot.mtime_ns
     {
-        return Err("源 EPUB 在解析期间发生了变化，请重新定位".into());
+        return Err(LinkedLibraryError::changed("源 EPUB 在解析期间发生了变化，请重新定位"));
     }
     let _guard = state
         .0
@@ -4332,6 +4337,27 @@ fn merge_organization_command(
 mod tests {
     use super::*;
 
+    #[test]
+    fn source_error_wire_keeps_codes_separate_from_message_text() {
+        let error = archive_fault_error(Fault::SourceChanged);
+        let wire = serde_json::to_value(error).unwrap();
+        assert_eq!(wire["code"], "source-changed");
+        assert!(wire["message"].as_str().unwrap().contains("源 EPUB"));
+        let generic: LinkedLibraryError = "源 EPUB 在一条未知外部信息里发生了变化".into();
+        assert_eq!(generic.code, "failed");
+        assert_eq!(source_open_error(std::io::Error::from(std::io::ErrorKind::PermissionDenied)).code, "failed");
+    }
+
+    #[test]
+    fn source_error_missing_binding_is_proven_at_lookup() {
+        let root = organization_temp_dir("source-error-unbound");
+        let hash = "a".repeat(64);
+        let records = vec![bk2_record(&hash, 77)];
+        assert_eq!(prepare_source_read(&root, &records, &[], &hash).err().unwrap().code, "source-unbound");
+        assert_eq!(prepare_source_read(&root, &[], &[], &hash).err().unwrap().code, "failed");
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[cfg(unix)]
     #[test]
     fn source_protection_open_distinguishes_missing_and_permission_failures() {
@@ -4349,12 +4375,14 @@ mod tests {
         let denied = prepare_source_read(&root, &records, &bindings, &hash).err();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
         let denied = denied.expect("unreadable source must fail");
-        assert!(denied.starts_with("无法打开源 EPUB："));
-        assert!(!denied.contains("变化或丢失"));
+        assert_eq!(denied.code, "failed");
+        assert!(denied.message.starts_with("无法打开源 EPUB："));
+        assert!(!denied.message.contains("变化或丢失"));
 
         fs::remove_file(&path).unwrap();
         let missing = prepare_source_read(&root, &records, &bindings, &hash).err().unwrap();
-        assert_eq!(missing, "源 EPUB 已变化或丢失；请重新导入或重新定位");
+        assert_eq!(missing.code, "source-missing");
+        assert_eq!(missing.message, "源 EPUB 已变化或丢失；请重新导入或重新定位");
         assert_eq!(records[0].progress_pct, 77);
         fs::remove_dir_all(root).unwrap();
     }
@@ -5809,7 +5837,7 @@ mod tests {
             snapshot(&path).unwrap(),
         )];
         let pending = prepare_source_read(&root, &records, &bindings, &expected_hash).unwrap();
-        assert!(read_source_bytes_and_hash(&pending.file, &expected_hash).is_err());
+        assert_eq!(read_source_bytes_and_hash(&pending.file, &expected_hash).err().unwrap().code, "source-changed");
 
         let _ = fs::remove_dir_all(&root);
     }
@@ -5830,7 +5858,8 @@ mod tests {
         let file = File::open(&archive_path).unwrap();
         let error =
             read_cover_from_opened_file(&file, "OPS/cover.jpg", 4, &hash, &snapshot).unwrap_err();
-        assert!(error.contains("超过允许大小"));
+        assert_eq!(error.code, "failed");
+        assert!(error.message.contains("超过允许大小"));
 
         let file = File::open(&archive_path).unwrap();
         assert!(read_cover_from_opened_file(
