@@ -4890,8 +4890,10 @@ export default function App() {
         if (st.view === "reader" && st.readerDisplayReady && !st.navigationPending) {
           if (st.readerHistory.back.length > 0) {
             handleHistoryBack();
-          } else if (st.spineIndex > 0 && st.book) {
-            const href = spineItemHref(st.book, st.spineIndex - 1);
+          } else if (st.book) {
+            // Same neighbour as page turns: skip linear="no" items such as a trailing nav.
+            const prev = nextLinearIndex(st.book, st.spineIndex, -1);
+            const href = prev >= 0 ? spineItemHref(st.book, prev) : undefined;
             if (href) handleTocNavigate(href);
           }
         }
@@ -4902,8 +4904,9 @@ export default function App() {
         if (st.view === "reader" && st.readerDisplayReady && !st.navigationPending) {
           if (st.readerHistory.forward.length > 0) {
             handleHistoryForward();
-          } else if (st.book && st.spineIndex < st.book.spine.length - 1) {
-            const href = spineItemHref(st.book, st.spineIndex + 1);
+          } else if (st.book) {
+            const next = nextLinearIndex(st.book, st.spineIndex, 1);
+            const href = next >= 0 ? spineItemHref(st.book, next) : undefined;
             if (href) handleTocNavigate(href);
           }
         }
@@ -4913,16 +4916,18 @@ export default function App() {
       // 7. [ 与 ] 键：快速跳转上一章 / 下一章
       if (e.key === "[" && !e.ctrlKey && !e.altKey && !e.metaKey) {
         e.preventDefault();
-        if (st.view === "reader" && st.readerDisplayReady && !st.navigationPending && st.spineIndex > 0 && st.book) {
-          const href = spineItemHref(st.book, st.spineIndex - 1);
+        if (st.view === "reader" && st.readerDisplayReady && !st.navigationPending && st.book) {
+          const prev = nextLinearIndex(st.book, st.spineIndex, -1);
+          const href = prev >= 0 ? spineItemHref(st.book, prev) : undefined;
           if (href) handleTocNavigate(href);
         }
         return;
       }
       if (e.key === "]" && !e.ctrlKey && !e.altKey && !e.metaKey) {
         e.preventDefault();
-        if (st.view === "reader" && st.readerDisplayReady && !st.navigationPending && st.book && st.spineIndex < st.book.spine.length - 1) {
-          const href = spineItemHref(st.book, st.spineIndex + 1);
+        if (st.view === "reader" && st.readerDisplayReady && !st.navigationPending && st.book) {
+          const next = nextLinearIndex(st.book, st.spineIndex, 1);
+          const href = next >= 0 ? spineItemHref(st.book, next) : undefined;
           if (href) handleTocNavigate(href);
         }
         return;
