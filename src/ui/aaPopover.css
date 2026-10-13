@@ -725,13 +725,17 @@
 }
 
 .app[data-mobile-chrome="true"] .aa-popover .aa-stepper-capsule,
-.app[data-mobile-chrome="true"] .aa-popover .aa-segmented-capsule {
+.app[data-mobile-chrome="true"] .aa-popover .aa-segmented-capsule,
+.app[data-mobile-chrome="true"] .aa-display-body .aa-stepper-capsule,
+.app[data-mobile-chrome="true"] .aa-display-body .aa-segmented-capsule {
   height: auto;
   min-height: 52px; /* 内部 48px 命中 + 上下各 2px padding */
 }
 
 .app[data-mobile-chrome="true"] .aa-popover .aa-step-btn,
-.app[data-mobile-chrome="true"] .aa-popover .aa-step-reset-btn {
+.app[data-mobile-chrome="true"] .aa-popover .aa-step-reset-btn,
+.app[data-mobile-chrome="true"] .aa-display-body .aa-step-btn,
+.app[data-mobile-chrome="true"] .aa-display-body .aa-step-reset-btn {
   min-width: 48px;
   min-height: 48px;
   flex-shrink: 0;
@@ -745,7 +749,8 @@
   flex-shrink: 0;
 }
 
-.app[data-mobile-chrome="true"] .aa-popover .aa-switch-label {
+.app[data-mobile-chrome="true"] .aa-popover .aa-switch-label,
+.app[data-mobile-chrome="true"] .aa-display-body .aa-switch-label {
   display: inline-flex;
   align-items: center;
   min-width: 48px;
