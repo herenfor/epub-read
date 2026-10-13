@@ -85,6 +85,8 @@ export interface Book {
   coverHref?: string;
   /** 固定版式（rendition:layout=pre-paginated） */
   fixedLayout: boolean;
+  /** OPF spine 的翻页方向；未声明时为 undefined（按从左到右）。 */
+  pageProgression?: "ltr" | "rtl";
   /** rendition:viewport，形如 "600x800" */
   viewport?: string;
   issues: BookIssue[];

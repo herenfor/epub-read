@@ -16,5 +16,6 @@
   "tapRegions.scrollMode": "Scroll mode has no tap-to-turn; these settings apply in page mode",
   "tapRegions.leftForward": "Left Tap Also Goes Forward",
   "tapRegions.leftForward.hint": "Both sides turn to the next page; swiping, keys and other ways back are unchanged",
+  "tapRegions.rightForward": "Right Tap Also Goes Forward",
   "tapRegions.reset": "Reset"
 }

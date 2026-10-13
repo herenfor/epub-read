@@ -29,7 +29,7 @@ import type { SearchOccurrence } from "./core/searchOccurrence";
 import { ResourceServer } from "./render/resources";
 import { sanitizePersistedTextAnchor } from "./render/textAnchor";
 import { clearDocumentSelection, isSelectAllShortcut } from "./render/selectionGuard";
-import { normalizeTurnAnimation } from "./render/settings";
+import { arrowKeyDirection, effectivePageProgression, normalizeTurnAnimation } from "./render/settings";
 import type { ChapterState, MediaReadingAnchor, PreciseNavigationStatus, ReadingAnchor } from "./render/paginator";
 import { useReaderSettings, useReaderSettingsPersistence } from "./ui/useReaderSettings";
 import { sanitizeTextProjectionPreferences } from "./render/textProjection/preferences";
@@ -3892,6 +3892,9 @@ export default function App() {
   // Chapter numbers shown to the reader count linear items only (no trailing nav).
   const spineLinear = useMemo(() => book?.spine.map((item) => item.linear) ?? [], [book]);
   const linearChapter = linearChapterNumber(spineLinear, spineIndex);
+  // In-reader settings preview the open book's direction; the shelf copy stays left to right.
+  const pageProgression = book ? effectivePageProgression(book.pageProgression, settings, book.fixedLayout) : "ltr";
+  const readerTapRegions = useMemo(() => ({ ...tapRegions, progression: pageProgression }), [tapRegions, pageProgression]);
   // 开书/换章仍在加载：主题直接提交，加载完成后按最新主题（既有 desired/代次契约）。
   readerThemeBusyRef.current = view === "reader" && (!ready || !readerDisplayReady);
   // 阅读输入（含正文 iframe 内的按下/触摸/滚轮/按键）开始即中断主题装饰，不加输入锁。
@@ -4801,6 +4804,7 @@ export default function App() {
     view,
     ready,
     book,
+    pageProgression,
     spineIndex,
     searchOpen,
     tocOpen,
@@ -4818,6 +4822,7 @@ export default function App() {
     view,
     ready,
     book,
+    pageProgression,
     spineIndex,
     searchOpen,
     tocOpen,
@@ -4967,12 +4972,12 @@ export default function App() {
       // 面板、浮层抽屉或书签菜单打开时，键盘归最上层：方向键和翻页键不在背后翻页。
       // 停靠的侧栏不算前景，照常翻页。
       if (st.isReaderPanelOpen || st.bookmarkMenuOpen) return;
-      if (e.key === "ArrowRight" || e.key === "PageDown" || e.key === " ") {
+      const keyDir = e.key === "ArrowRight" || e.key === "PageDown" || e.key === " " ? 1
+        : e.key === "ArrowLeft" || e.key === "PageUp" ? -1 : 0;
+      if (keyDir !== 0) {
         e.preventDefault();
-        readerRef.current?.nextPage();
-      } else if (e.key === "ArrowLeft" || e.key === "PageUp") {
-        e.preventDefault();
-        readerRef.current?.prevPage();
+        if (arrowKeyDirection(keyDir, e.key, st.pageProgression) === 1) readerRef.current?.nextPage();
+        else readerRef.current?.prevPage();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -5301,6 +5306,8 @@ export default function App() {
                 onTurnAnimationChange={settingsActions.setTurnAnimation}
                 forceHorizontal={settings.forceHorizontal === true}
                 onForceHorizontalChange={settingsActions.setForceHorizontal}
+                pageDirection={settings.pageDirection}
+                onPageDirectionChange={settingsActions.setPageDirection}
                 preloadNextChapter={settings.preloadNextChapter === true}
                 preloadNextChapterDisabled={book?.fixedLayout === true}
                 onPreloadNextChapterChange={settingsActions.setPreloadNextChapter}
@@ -5555,6 +5562,7 @@ export default function App() {
           chapterIndex={spineIndex}
           totalChapters={book!.spine.length}
           linearSpine={spineLinear}
+          rtl={pageProgression === "rtl"}
           bookProgressPct={progressPct}
           onSeekPage={(targetPage) => {
             readerRef.current?.setPage(targetPage);
@@ -5665,7 +5673,7 @@ export default function App() {
             open={readingSettingsOpen || warming("reading")}
             presentation={mobileChrome ? "page" : "dialog"}
             onClose={() => closePanel("reading")}
-            tapRegions={tapRegions}
+            tapRegions={readerTapRegions}
             onTapRegionsChange={changeTapRegionPreferences}
             tapRegionsScrollMode={settings.readingMode === "scroll"}
             keepScreenOnWhileReading={runtime.supportsReaderKeepScreenOn ? keepScreenOnWhileReading : undefined}

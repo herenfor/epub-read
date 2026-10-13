@@ -70,6 +70,8 @@ export const aa = defineMessages("aa", {
   "aa.turnAnimation": { zh: "翻页动画", max: 14 },
   "aa.more": "更多高级设置",
   "aa.forceHorizontal": "强制竖排转横排",
+  "aa.pageDirectionLtr": "始终从左往右翻页",
+  "aa.pageDirectionLtr.hint": { zh: "关闭时跟随书籍：台版竖排等从右往左翻的书，点左侧和按 ← 是下一页", note: "Help text under the switch. Off = follow the book's page-progression-direction." },
   "aa.motion": { zh: "简化界面动画", note: "Switch; same setting as the shelf's 'Interface animation: Reduced'.", max: 12 },
   "aa.motion.hint": { zh: "去掉毛玻璃与悬停动效，面板动画更短；翻页动画不受影响", note: "Help text under the switch." },
   "aa.preload": "高性能预读",

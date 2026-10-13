@@ -134,12 +134,20 @@ export function tapRegionAt(geometry: TapRegionGeometry, x: number): TapRegionSi
 }
 
 /** Turn executed by a tap on `side`. PC ignores the touch-only left-forward option. */
+export type PageProgression = "ltr" | "rtl";
+
+/**
+ * Forward is the right side, or the left side in a right-to-left book.
+ * `touchLeftTapForward` means "the back side also goes forward": in a
+ * right-to-left book that back side is the right one.
+ */
 export function tapRegionAction(
   side: TapRegionSide,
   device: TapRegionDevice,
   preferences: Pick<ReaderTapPreferences, "touchLeftTapForward">,
+  progression: PageProgression = "ltr",
 ): EdgeTurnDirection {
-  if (side === "right") return 1;
+  if (side === (progression === "rtl" ? "left" : "right")) return 1;
   return device === "touch" && preferences.touchLeftTapForward ? 1 : -1;
 }
 

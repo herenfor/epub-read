@@ -32,6 +32,8 @@ export interface WhisperFooterProps {
   totalChapters: number;
   /** Per spine item: linear or not. Labels number linear chapters only; seeking keeps spine indices. */
   linearSpine?: readonly boolean[];
+  /** Right-to-left book: the bar fills from the right and dragging left moves forward. */
+  rtl?: boolean;
 
   bookProgressPct?: number;
   /** 连续滚动模式下整本书 0..1 的精确宏观几何位置 */
@@ -183,6 +185,7 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
   chapterIndex,
   totalChapters,
   linearSpine,
+  rtl = false,
   bookProgressPct,
   onSeekPage,
   onSeekChapter,
@@ -373,6 +376,12 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
     }
   };
 
+  // The track is mirrored for right-to-left books; the ratio is always "how far into the book".
+  const pointerRatio = (clientX: number, rect: DOMRect): number => {
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    return rtl ? 1 - ratio : ratio;
+  };
+
   // Pointer Events: 原生 pointer capture 机制
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
@@ -393,7 +402,7 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
     }
     setIsDragging(true);
 
-    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const ratio = pointerRatio(e.clientX, rect);
     const tooltip = computeTooltip(ratio);
     setDragTooltip(tooltip);
     onPreviewChange?.(ratio);
@@ -404,7 +413,7 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
     if (!track) return;
     const rect = track.getBoundingClientRect();
     if (rect.width <= 0) return;
-    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const ratio = pointerRatio(e.clientX, rect);
 
     if (isDragging && pointerIdRef.current === e.pointerId) {
       e.preventDefault();
@@ -447,7 +456,7 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
 
     const rect = track?.getBoundingClientRect();
     if (rect && rect.width > 0) {
-      const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      const ratio = pointerRatio(e.clientX, rect);
       commitSeek(ratio);
     }
     onPreviewChange?.(null);
@@ -485,9 +494,9 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     const current = activeRatio ?? 0;
     let step = 0;
-    if (e.key === "ArrowLeft" || e.key === "ArrowDown") {
+    if ((e.key === "ArrowLeft" && !rtl) || (e.key === "ArrowRight" && rtl) || e.key === "ArrowDown") {
       step = -0.01;
-    } else if (e.key === "ArrowRight" || e.key === "ArrowUp") {
+    } else if (e.key === "ArrowRight" || e.key === "ArrowLeft" || e.key === "ArrowUp") {
       step = 0.01;
     } else if (e.key === "PageDown") {
       step = -0.05;
@@ -603,7 +612,7 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
         <div className="whisper-scrubber-wrap">
           <div
             ref={trackRef}
-            className={`whisper-scrubber-track${isDragging ? " is-dragging" : ""}`}
+            className={`whisper-scrubber-track${isDragging ? " is-dragging" : ""}${rtl ? " is-rtl" : ""}`}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
@@ -647,7 +656,7 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
           {(isHovered || isDragging) && activeTooltip && (
             <div
               className="whisper-scrub-tooltip"
-              style={{ left: `${activeTooltip.pct}%` }}
+              style={{ left: `${rtl ? 100 - activeTooltip.pct : activeTooltip.pct}%` }}
             >
               {activeTooltip.text}
             </div>

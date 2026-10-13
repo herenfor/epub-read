@@ -107,6 +107,11 @@
   cursor: pointer;
 }
 
+/* Right-to-left books: mirror fill, ticks and thumb; pointer math mirrors the ratio. */
+.whisper-scrubber-track.is-rtl {
+  transform: scaleX(-1);
+}
+
 .whisper-scrubber-track:hover {
   height: 6px;
   margin-top: 3px;

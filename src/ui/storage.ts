@@ -1,6 +1,6 @@
 import { sanitizePersistedTextAnchor } from "../render/textAnchor";
 import type { MediaReadingAnchor } from "../render/paginator";
-import { normalizeTurnAnimation, type PageMarginsPx, type ReadingMode, type ReaderSettings, type SpreadGapMode } from "../render/settings";
+import { normalizePageDirection, normalizeTurnAnimation, type PageMarginsPx, type ReadingMode, type ReaderSettings, type SpreadGapMode } from "../render/settings";
 
 const PREFIX = "epub-reader:";
 
@@ -74,6 +74,8 @@ export interface SavedSettings {
   preloadNextChapter?: boolean;
   /** 翻页动画；旧设置缺省为滑动 */
   turnAnimation?: "slide" | "fade" | "none";
+  /** 翻页方向；旧设置缺省为跟随书籍。只存本机，不进存档。 */
+  pageDirection?: "book" | "ltr";
   /** 阅读方式；旧设置缺省为分页 */
   readingMode?: ReadingMode;
   /** 阅读器视口四边留白；未设置的边沿用旧默认 */
@@ -104,6 +106,7 @@ export function toSavedReaderSettings(settings: ReaderSettings, uiScale: number)
     forceHorizontal: settings.forceHorizontal === true,
     preloadNextChapter: settings.preloadNextChapter === true,
     turnAnimation: normalizeTurnAnimation(settings.turnAnimation),
+    pageDirection: normalizePageDirection(settings.pageDirection),
     readingMode: settings.readingMode === "scroll" ? "scroll" : "paginated",
     pageMarginsPx: settings.pageMarginsPx,
     columnsPerView: settings.columnsPerView === 2 ? 2 : 1,
