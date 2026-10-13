@@ -119,6 +119,17 @@ describe("sidebar swipe interruption", () => {
     expect(s.position()).toBe(0);
   });
 
+  it("resetting a retained closed pane lands immediately and invalidates its old animation", () => {
+    const s = setup(1, 2);
+    s.motion.select(0);
+    s.driver.write(190);
+    s.motion.reset(0);
+    expect(s.motion.moving).toBe(false);
+    expect(s.position()).toBe(0);
+    s.completions[0]();
+    expect(s.position()).toBe(0);
+  });
+
   it("an external tab update animates without echoing the user's command", () => {
     const s = setup();
     s.motion.select(2, false, false);

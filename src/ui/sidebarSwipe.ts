@@ -63,6 +63,11 @@ export class SidebarSwipeMotion {
       this.driver.write(this.index * this.width);
     });
   }
+  /** A closed, retained pane resets immediately; no invisible animation leaks into reopening. */
+  reset(index: number): void {
+    this.index = index;
+    this.resize(this.width);
+  }
   resize(width: number): void {
     ++this.generation;
     this.dragging = this.settling = false;

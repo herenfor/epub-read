@@ -48,6 +48,32 @@ describe("opening panel preparation session", () => {
       vi.useRealTimers();
     }
   });
+  it("a late old visit cannot cancel the current visit's prepared frame, even for the same book", async () => {
+    vi.useFakeTimers();
+    const dom = createReactDomHarness();
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => setTimeout(() => cb(0), 16) as unknown as number);
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => clearTimeout(id));
+    let api!: ReturnType<typeof useOpeningPanelPrep>;
+    const Probe = (props: { session: string | null }) => { api = useOpeningPanelPrep(props.session); return null; };
+    try {
+      await dom.render(createElement(Probe, { session: "same-book" }));
+      const oldPrepared = api.prepared;
+      await dom.render(createElement(Probe, { session: null }));
+      await dom.render(createElement(Probe, { session: "same-book" }));
+      api.prepared("same-book", "aa");
+      oldPrepared("same-book", "aa");
+      await dom.run(() => { vi.advanceTimersByTime(20); });
+      expect(api).toMatchObject({ aa: true, toc: true, pending: true });
+      api.prepared("same-book", "toc");
+      oldPrepared("same-book", "aa");
+      await dom.run(() => { vi.advanceTimersByTime(20); });
+      expect(api.pending).toBe(false);
+    } finally {
+      await dom.dispose();
+      vi.useRealTimers();
+    }
+  });
+
 });
 
 // linkedom has no layout observers or frames; the panels only need them to exist.
