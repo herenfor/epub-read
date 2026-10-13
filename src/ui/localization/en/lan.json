@@ -12,6 +12,8 @@
   "lan.error.spaceReceive": "Insufficient storage space to receive this transfer. Free up space and reconnect, or ask the sender to select fewer books.",
   "lan.error.metadataTooLarge": "Too much reading data for this transfer. Please select fewer books and transfer in batches.",
   "lan.error.protocol": "Both devices must be updated to a version that supports the same transfer protocol.",
+  "lan.error.protocolTooNew": "This connection info comes from a newer version. Update the app on this device first.",
+  "lan.error.protocolUnsupported": "This version no longer supports the older transfer protocol on the other device. Use a save file export and import instead, which both support.",
   "lan.error.ended": "The connection has ended. Please reconnect.",
   "lan.error.cancelled": "Cancelled.",
   "lan.error.unsupported": "Device transfer is not supported on this device.",
