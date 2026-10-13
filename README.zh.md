@@ -8,6 +8,8 @@
 
 EPUB 阅读器支持 EPUB 2.0.1 与 EPUB 3.x，尽量按作者的意图呈现书籍：版心、边距、浮动、插图和脚注都保留书内本身的排版，阅读器只在书籍缺少声明时提供合理的默认值。
 
+<p align="center"><img src=".github/readme/reading.svg" width="860" alt="Windows 上打开目录抽屉的阅读界面，以及在 Android 手机上翻页"></p>
+
 **语言：** [English](README.md) | 中文
 
 ## 目录
@@ -61,6 +63,10 @@ EPUB 阅读器支持 EPUB 2.0.1 与 EPUB 3.x，尽量按作者的意图呈现书
 - **整个文件夹一次搬进来** —— 选一个存书的文件夹，书会按原来的目录自动整理进书架文件夹，重复的书会被认出来
 - **同一 Wi‑Fi 下换设备接着读** —— 一台设备显示二维码、另一台扫一下，就能把书籍、进度、书签和笔记直接传过去，不经过任何云端
 - **本地优先** —— 无需账号、不上传，书籍就在原来的位置被读取
+
+<p align="center"><img src=".github/readme/layout.svg" width="860" alt="排版面板在白底、羊皮纸、深灰、暗夜四种主题间切换，行高和边距随之改变页面"></p>
+
+<p align="center"><img src=".github/readme/handoff.svg" width="860" alt="设备互传：电脑显示二维码，手机在同一 Wi‑Fi 下直接接收书籍，不经过云端"></p>
 
 ## 功能
 
