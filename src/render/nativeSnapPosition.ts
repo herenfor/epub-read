@@ -97,13 +97,15 @@ export function visibleSnapColumnSampleX(input: {
   readonly columnWidth: number;
   readonly columnStep: number;
   readonly columns: 1 | 2;
+  readonly progression?: "ltr" | "rtl";
 }): number | null {
+  const sign = input.progression === "rtl" ? -1 : 1;
   for (let leaf = 0; leaf < input.columns; leaf++) {
-    const start = input.contentOriginClientX + input.position.snapLeft
-      + leaf * input.columnStep - input.position.left;
-    const end = start + input.columnWidth;
-    const left = Math.max(input.viewportLeft, start);
-    const right = Math.min(input.viewportRight, end);
+    const start = input.contentOriginClientX + sign * (input.position.snapLeft
+      + leaf * input.columnStep - input.position.left);
+    const end = start + sign * input.columnWidth;
+    const left = Math.max(input.viewportLeft, Math.min(start, end));
+    const right = Math.min(input.viewportRight, Math.max(start, end));
     if (right - left >= 4) return (left + right) / 2;
   }
   return null;

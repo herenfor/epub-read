@@ -1,3 +1,4 @@
+import { effectivePageProgression } from "../render/settings";
 import { forwardRef, useImperativeHandle, useRef, useState, type ForwardRefExoticComponent, type RefAttributes } from "react";
 import { nextLinearIndex } from "../core/book";
 import type { ChapterState } from "../render/paginator";
@@ -16,6 +17,7 @@ interface Props extends ReaderViewProps {
 
 /** Two isolated original documents, one visual spread. No synthetic chapter IDs or DOM merging. */
 export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function ImageSpreadReaderView(props, ref) {
+  const rtl = effectivePageProgression(props.book.pageProgression, props.settings, props.book.fixedLayout) === "rtl";
   const leftHandle = useRef<ReaderHandle>(null);
   const rightHandle = useRef<ReaderHandle>(null);
   const states = useRef(new Map<number, ChapterState>());
@@ -94,7 +96,8 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
   const page = (index: number, side: "left" | "right") => {
     const selected = index === props.spineIndex;
     const Page = props.Page;
-    return <div className="reader-image-leaf" data-image-chapter={index} data-image-side={side}>
+    return <div className="reader-image-leaf" data-image-chapter={index} data-image-side={rtl ? (side === "left" ? "right" : "left") : side}
+      style={{ gridColumn: (side === "left") !== rtl ? 1 : 2, gridRow: 1 }}>
       <Page {...props}
         ref={side === "left" ? leftHandle : rightHandle}
         spineIndex={index}
@@ -163,7 +166,8 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
       paddingRight: props.settings.pageMarginsPx?.right ?? 0 }}>
     <ReaderTurnOwnerContext.Provider value={turnOwner}>
       {page(props.spread.left, "left")}
-      {props.spread.right !== null ? page(props.spread.right, "right") : <div className="reader-image-leaf is-empty" aria-hidden="true" />}
+      {props.spread.right !== null ? page(props.spread.right, "right") : <div className="reader-image-leaf is-empty"
+        data-image-side={rtl ? "left" : "right"} style={{ gridColumn: rtl ? 1 : 2, gridRow: 1 }} aria-hidden="true" />}
     </ReaderTurnOwnerContext.Provider>
     {edgeTurnZoneSpecs(tapRouting).map((zone) => <EdgeTurnZone key={zone.side}
       direction={zone.direction} side={zone.sideProp} region={zone.region}

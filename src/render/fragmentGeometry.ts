@@ -1,11 +1,11 @@
 /**
- * 横向 LTR 普通流的片段几何。
+ * 横向普通流的片段几何；列轴可按书籍方向左右推进。
  *
  * 输入都来自同一个 iframe 的 client 坐标系。双栏正文中，父元素的
  * `getClientRects()` 会按物理栏返回多个片段；只用 Y 重叠会在左右栏同高时
  * 选错栏。这里同时用点所在物理栏和矩形二维包含关系选中唯一片段。
  *
- * 仅用于 horizontal-tb / LTR / 无 transform / 非跨栏 union 的普通流。
+ * 仅用于 horizontal-tb / 无 transform / 非跨栏 union 的普通流。
  * 绝对定位、float、Writing Mode 或 transform 的坐标空间由调用方保留原路径，
  * 不套用本模块。
  */
@@ -23,6 +23,7 @@ export interface FragmentSpace {
   readonly geometry: Pick<SpreadGeometry, "columnWidth" | "columnStep">;
   readonly originClientX: number;
   readonly scrollLeft: number;
+  readonly progression?: "ltr" | "rtl";
 }
 
 function isValidSpace(space: FragmentSpace): boolean {
@@ -42,7 +43,7 @@ export function columnAtPoint(
   space: FragmentSpace,
 ): number | null {
   if (!isValidSpace(space) || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
-  const x = point.x - space.originClientX + space.scrollLeft;
+  const x = (point.x - space.originClientX) * (space.progression === "rtl" ? -1 : 1) + space.scrollLeft;
   if (x < 0) return null;
   const column = Math.floor(x / space.geometry.columnStep);
   const within = x - column * space.geometry.columnStep;
@@ -66,7 +67,9 @@ export function containingFragmentAtPoint(
   if (!isValidSpace(space) || !Number.isFinite(epsilon) || epsilon < 0) return null;
   const column = columnAtPoint(point, space);
   if (column === null) return null;
-  const columnLeft = space.originClientX - space.scrollLeft + column * space.geometry.columnStep;
+  const sign = space.progression === "rtl" ? -1 : 1;
+  const start = space.originClientX + sign * (column * space.geometry.columnStep - space.scrollLeft);
+  const columnLeft = space.progression === "rtl" ? start - space.geometry.columnWidth : start;
   const columnRight = columnLeft + space.geometry.columnWidth;
   let match: number | null = null;
   for (let i = 0; i < fragments.length; i++) {

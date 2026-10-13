@@ -71,6 +71,31 @@ beforeAll(() => { (globalThis as Record<string, unknown>).DOMMatrixReadOnly = Fa
 afterAll(() => { delete (globalThis as Record<string, unknown>).DOMMatrixReadOnly; });
 
 describe("transform page motion driver", () => {
+  it.each([2, 4, 10])("RTL %i-screen motion interrupts at its displayed position and restores a negative scroll origin", async screens => {
+    const viewer = fakeViewer({ scrollWidth: () => screens * 100 });
+    viewer.scrollLeft = 0;
+    const faults: unknown[] = [];
+    const driver = new TransformPageMotion(viewer as unknown as HTMLElement, {
+      offsets: Array.from({ length: screens }, (_, i) => i * 100), step: 100,
+      columnsPerScreen: 2, progression: "rtl",
+    }, 0, e => faults.push(e));
+    let done = 0;
+    driver.animateTo(100, desktopSettlePlan(100, 100), () => done++);
+    const old = viewer.animations[0];
+    const mid = Math.floor(Math.min(5, screens) / 2);
+    viewer.present(-(-viewer.scrollLeft + mid * 100 - 40));
+    expect(driver.interrupt().sample.position).toBe(40);
+    viewer.present(null);
+    driver.animateTo(0, desktopSettlePlan(-40, 100), () => done++);
+    old.resolve();
+    await Promise.resolve();
+    expect(done).toBe(0);
+    driver.settleTo(100);
+    expect(viewer.scrollLeft).toBe(-100);
+    expect(driver.read().position).toBe(100);
+    expect(viewer.style.getPropertyValue("width")).toBe("100px");
+    expect(faults).toEqual([]);
+  });
   it("a burst beyond the bounded window commits its full target without showing clipped content", () => {
     const viewer = fakeViewer();
     const driver = new TransformPageMotion(viewer as unknown as HTMLElement, layout, 300, () => {});

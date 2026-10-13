@@ -59,6 +59,13 @@ it("turns the blank leaf, gutter and edge once while preserving leaf, pause and 
     await render(true);
     await wheel(blank, 120);
     expect(onRequestChapter).toHaveBeenCalledTimes(4);
+    props.book.pageProgression = "rtl";
+    await render();
+    expect((dom.container.querySelector("[data-image-chapter='0']") as HTMLElement).style.gridColumn).toBe("2");
+    expect(dom.container.querySelector("[data-image-chapter='0']")?.getAttribute("data-image-side")).toBe("right");
+    expect(dom.container.querySelector(".is-empty")?.getAttribute("data-image-side")).toBe("left");
+    await wheel(dom.container.querySelector(".is-empty")!, 120);
+    expect(onRequestChapter).toHaveBeenLastCalledWith(1, undefined);
   } finally {
     await dom.dispose();
   }
