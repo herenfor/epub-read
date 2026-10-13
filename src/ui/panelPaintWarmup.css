@@ -1,0 +1,16 @@
+/* A panel drawn once while the reader is idle (see panelPaintWarmup.tsx).
+   1% opacity still rasterizes and composites everything; 0 would skip it.
+   Above the reader so nothing occludes it; never hit. */
+.panel-paint-warmup {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  opacity: 0.01;
+  pointer-events: none;
+}
+
+.panel-paint-warmup * {
+  animation: none !important;
+  transition: none !important;
+  pointer-events: none !important;
+}

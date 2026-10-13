@@ -51,6 +51,7 @@ import { useReaderCursorIdle } from "./ui/readerCursorIdle";
 import { SidebarDrawer } from "./ui/SidebarDrawer";
 import { AaPopover } from "./ui/AaPopover";
 import { useOpeningPanelPrep } from "./ui/openingPanelPrep";
+import { PanelPaintWarmup, usePanelPaintWarmup, type PanelWarmStage } from "./ui/panelPaintWarmup";
 import { resolveReaderLoadFeedback } from "./ui/loadingFeedback";
 import { WhisperFooter, type WhisperFooterChapterTick } from "./ui/WhisperFooter";
 import { BatteryIndicator } from "./ui/BatteryIndicator";
@@ -713,6 +714,9 @@ function createShelfBookArchiveInput(id: string): { port: MessagePort; dispose()
     },
   };
 }
+
+const PANEL_WARM_STAGES: readonly PanelWarmStage[] = ["aa", "aa-detailed", "toc", "search", "reading", "display", "fonts"];
+const PANEL_WARM_STAGES_MOBILE: readonly PanelWarmStage[] = [...PANEL_WARM_STAGES.slice(0, 3), "more", ...PANEL_WARM_STAGES.slice(3)];
 
 export default function App() {
   const { t } = useUiText();
@@ -4503,6 +4507,14 @@ export default function App() {
   const openingPanels = useOpeningPanelPrep(
     view === "reader" && ready && hasReaderDisplayedRef.current && bookKey ? bookKey : null,
   );
+  // 阅读空闲时把各面板各画一次（几乎透明、不可交互），首次打开不再承担 GPU 首绘。
+  const panelWarmup = usePanelPaintWarmup(
+    view === "reader" && ready && readerDisplayReady && openingPanels.aa && openingPanels.toc &&
+      !openingPanels.pending && foreground.kind === "none" && !mobileMoreOpen && !assistantOpen,
+    mobileChrome ? PANEL_WARM_STAGES_MOBILE : PANEL_WARM_STAGES,
+  );
+  useReadingInputStart(view === "reader", panelWarmup.interrupt);
+  const warmStage = panelWarmup.stage;
   // 开书过渡覆盖“解析书籍”、首次“准备阅读位置”与有限的面板准备；之后的换章只用顶部细进度线。
   const readerOpeningVisible =
     phase.phase === "loading" ||
@@ -5684,6 +5696,7 @@ export default function App() {
           compact={phoneChrome}
           warm={openingPanels.toc}
           onPrepared={() => openingPanels.prepared(bookKey, "toc")}
+          paintWarm={warmStage === "toc"}
           toc={book!.toc}
           activeHref={activeHref}
           onNavigateToc={handleTocNavigate}
@@ -5804,10 +5817,10 @@ export default function App() {
           </div>
         ) : (
           <>
-            {menuOpen && (
-              <>
-                <div className="menu-backdrop" onClick={closeForeground} />
-                {displaySettingsOpen ? (
+            {(menuOpen || warmStage === "display" || warmStage === "fonts") && (
+              <PanelPaintWarmup active={!menuOpen}>
+                {menuOpen && <div className="menu-backdrop" onClick={closeForeground} />}
+                {(menuOpen ? displaySettingsOpen : warmStage === "display") ? (
                   <ReaderDisplaySettingsPopover
                     onBack={() => showMenuSubview("main")}
                     onClose={closeForeground}
@@ -5829,7 +5842,7 @@ export default function App() {
                       }
                     />
                   </ReaderDisplaySettingsPopover>
-                ) : fontSettingsOpen ? <FontSettingsPanel
+                ) : (menuOpen ? fontSettingsOpen : warmStage === "fonts") ? <FontSettingsPanel
                   source={settings.fontSource}
                   customFontId={settings.customFontId}
                   customFontName={settings.customFontName}
@@ -5849,13 +5862,14 @@ export default function App() {
                   nativeDragActive={fontNativeDragActive}
                   onClose={() => showMenuSubview("main")}
                 /> : null}
-              </>
+              </PanelPaintWarmup>
             )}
             {((menuOpen && !displaySettingsOpen && !fontSettingsOpen) || openingPanels.aa) && (
               <AaPopover
                 key={bookKey}
                 open={menuOpen && !displaySettingsOpen && !fontSettingsOpen}
                 onPrepared={() => openingPanels.prepared(bookKey, "aa")}
+                paintWarm={warmStage === "aa" ? "quick" : warmStage === "aa-detailed" ? "detailed" : undefined}
                 phoneLayout={phoneChrome}
                 fontSize={settings.fontSizePx}
                 onFontSizeChange={settingsActions.setFontSize}
@@ -5911,8 +5925,8 @@ export default function App() {
             )}
             {ready ? (
               <>
-                {searchPresence.present && (
-                  <>
+                {(searchPresence.present || warmStage === "search") && (
+                  <PanelPaintWarmup active={!searchPresence.present}>
                     <div className={`search-backdrop${!mobileChrome ? " is-docked" : ""}${searchPresence.closing ? " is-closing" : ""}`} onClick={() => closePanel("search")} />
                     <SearchPanel
                       closing={searchPresence.closing}
@@ -5952,7 +5966,7 @@ export default function App() {
                       }}
                       onClose={() => closePanel("search")}
                     />
-                  </>
+                  </PanelPaintWarmup>
                 )}
                 {assistantOpen && LazyAiFoundationPanel && (
                   <>
@@ -6210,8 +6224,8 @@ export default function App() {
           raised={mobileChrome && readerToolsVisible}
         />
       )}
-      {moreSheetPresence.present && (
-        <>
+      {(moreSheetPresence.present || warmStage === "more") && (
+        <PanelPaintWarmup active={!moreSheetPresence.present}>
           <div
             className={`mobile-more-backdrop${moreSheetPresence.closing ? " is-closing" : ""}`}
             onClick={() => setMobileMoreOpen(false)}
@@ -6267,23 +6281,25 @@ export default function App() {
               )}
             </div>
           </div>
-        </>
+        </PanelPaintWarmup>
       )}
       {view === "reader" && (
-        <ReaderReadingSettings
-          open={readingSettingsOpen}
-          presentation={mobileChrome ? "page" : "dialog"}
-          onClose={() => closePanel("reading")}
-          tapRegions={tapRegions}
-          onTapRegionsChange={changeTapRegionPreferences}
-          tapRegionsScrollMode={settings.readingMode === "scroll"}
-          keepScreenOnWhileReading={runtime.supportsReaderKeepScreenOn ? keepScreenOnWhileReading : undefined}
-          onKeepScreenOnWhileReadingChange={changeKeepScreenOnWhileReading}
-          hideReaderSystemStatusBar={runtime.supportsReaderSystemStatusBar ? hideReaderSystemStatusBar : undefined}
-          onHideReaderSystemStatusBarChange={changeHideReaderSystemStatusBar}
-          batteryIndicatorEnabled={runtime.platform === "android" ? batteryIndicatorEnabled : undefined}
-          onBatteryIndicatorChange={runtime.platform === "android" ? changeBatteryIndicatorEnabled : undefined}
-        />
+        <PanelPaintWarmup active={warmStage === "reading" && !readingSettingsOpen}>
+          <ReaderReadingSettings
+            open={readingSettingsOpen || warmStage === "reading"}
+            presentation={mobileChrome ? "page" : "dialog"}
+            onClose={() => closePanel("reading")}
+            tapRegions={tapRegions}
+            onTapRegionsChange={changeTapRegionPreferences}
+            tapRegionsScrollMode={settings.readingMode === "scroll"}
+            keepScreenOnWhileReading={runtime.supportsReaderKeepScreenOn ? keepScreenOnWhileReading : undefined}
+            onKeepScreenOnWhileReadingChange={changeKeepScreenOnWhileReading}
+            hideReaderSystemStatusBar={runtime.supportsReaderSystemStatusBar ? hideReaderSystemStatusBar : undefined}
+            onHideReaderSystemStatusBarChange={changeHideReaderSystemStatusBar}
+            batteryIndicatorEnabled={runtime.platform === "android" ? batteryIndicatorEnabled : undefined}
+            onBatteryIndicatorChange={runtime.platform === "android" ? changeBatteryIndicatorEnabled : undefined}
+          />
+        </PanelPaintWarmup>
       )}
       {logOpen && (
         <LogPanel

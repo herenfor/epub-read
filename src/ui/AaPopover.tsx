@@ -120,6 +120,8 @@ export interface AaPopoverProps {
   open?: boolean;
   /** Called once after the first closed (prepared) layout. */
   onPrepared?: () => void;
+  /** While closed: draw this page once, almost transparent (panelPaintWarmup). */
+  paintWarm?: "quick" | "detailed";
   onClose: () => void;
 }
 
@@ -230,6 +232,7 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
   onOpenFile,
   open = true,
   onPrepared,
+  paintWarm,
   onClose,
 }) => {
   const [activeTab, setActiveTab] = useState<"quick" | "detailed">("quick");
@@ -649,7 +652,7 @@ export const AaPopover: React.FC<AaPopoverProps> = ({
       )}
       <div
         ref={dialogRef}
-        className={`aa-popover${visible ? "" : " is-warm"}${isClosing ? " is-closing" : ""}${expanded ? " is-expanded" : ""}${dragging ? " is-dragging" : ""}`}
+        className={`aa-popover${visible ? "" : " is-warm"}${!visible && paintWarm ? ` is-paint-warm is-paint-warm-${paintWarm}` : ""}${isClosing ? " is-closing" : ""}${expanded ? " is-expanded" : ""}${dragging ? " is-dragging" : ""}`}
         role="dialog"
         tabIndex={-1}
         aria-label={t("aa.dialog")}
