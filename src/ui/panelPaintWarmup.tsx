@@ -1,86 +1,84 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import "./panelPaintWarmup.css";
 
 /**
  * The first time a panel is drawn in an app run, the GPU prepares what it
  * needs to draw it (phone traces: a 30-50 ms raster/compositor stall and
- * 4-14 dropped frames); later opens reuse that work. While the reader sits
- * idle after its first page, each panel is drawn once, almost transparent
- * and inert, so the first real opening costs what a second one does.
+ * 4-14 dropped frames); later opens reuse that work. While the opening veil
+ * still covers the first book of a run, every panel is drawn once, almost
+ * transparent and inert, so each first real opening is a second one.
  *
  * Mounting a panel hidden is not enough: a `visibility: hidden` or
- * `opacity: 0` subtree is never drawn. The stages run one at a time and
- * once per app run, because what they prepare is shared by the whole run.
+ * `opacity: 0` subtree is never drawn. Panels that can share the screen are
+ * drawn together in one batch; a batch stays up long enough for the GPU to
+ * finish (shorter holds were measured to lose part of the gain).
  */
 export type PanelWarmStage = "aa" | "aa-detailed" | "toc" | "more" | "search" | "reading" | "display" | "fonts";
+export type PanelWarmBatch = readonly PanelWarmStage[];
 
-/** Quiet reading time before a stage starts (and after any reading input). */
-export const PANEL_WARM_DELAY_MS = 1200;
-/** How long a stage stays drawn after its first two frames. */
+/**
+ * How long a batch stays drawn after its first two frames. Phone traces show
+ * the GPU saturated while a batch is up (six panels: about 250 ms), so the
+ * hold grows with its panels.
+ */
 export const PANEL_WARM_HOLD_MS = 200;
+export const PANEL_WARM_HOLD_PER_PANEL_MS = 50;
+export const panelWarmHold = (batch: PanelWarmBatch): number =>
+  Math.max(PANEL_WARM_HOLD_MS, PANEL_WARM_HOLD_PER_PANEL_MS * batch.length);
 
 const warmedThisRun = new Set<PanelWarmStage>();
 
-export function nextPanelWarmStage(
-  stages: readonly PanelWarmStage[],
+export function nextPanelWarmBatch(
+  batches: readonly PanelWarmBatch[],
   warmed: ReadonlySet<PanelWarmStage>,
-): PanelWarmStage | null {
-  return stages.find((stage) => !warmed.has(stage)) ?? null;
+): PanelWarmBatch | null {
+  return batches.find((batch) => batch.some((stage) => !warmed.has(stage))) ?? null;
 }
 
 /**
- * `ready`: the reader shows text and nothing is open or loading. Any change
- * of `ready`, and any reading input reported through `interrupt`, ends the
- * current stage unfinished and restarts the quiet delay.
+ * `ready`: the first page is shown under the veil and nothing is open.
+ * `pending` holds the veil while batches remain in this run; it is never
+ * true while `ready` is false, so the veil cannot wait on a stopped warm-up.
  */
-export function usePanelPaintWarmup(ready: boolean, stages: readonly PanelWarmStage[]) {
-  const [stage, setStage] = useState<PanelWarmStage | null>(null);
-  const restartRef = useRef<() => void>(() => {});
-  const stagesKey = stages.join(",");
+export function usePanelPaintWarmup(ready: boolean, batches: readonly PanelWarmBatch[]) {
+  const [batch, setBatch] = useState<PanelWarmBatch | null>(null);
+  const batchesKey = batches.map((b) => b.join("+")).join(",");
   useEffect(() => {
-    setStage(null);
+    setBatch(null);
     if (!ready) return;
     let timer = 0;
     let frame = 0;
-    const schedule = (): void => {
-      clearTimeout(timer);
-      cancelAnimationFrame(frame);
-      timer = window.setTimeout(run, PANEL_WARM_DELAY_MS);
-    };
     const run = (): void => {
-      const next = nextPanelWarmStage(stages, warmedThisRun);
+      const next = nextPanelWarmBatch(batches, warmedThisRun);
       if (!next) return;
-      setStage(next);
+      setBatch(next);
       frame = requestAnimationFrame(() => {
         frame = requestAnimationFrame(() => {
           timer = window.setTimeout(() => {
-            warmedThisRun.add(next);
-            setStage(null);
-            schedule();
-          }, PANEL_WARM_HOLD_MS);
+            for (const stage of next) warmedThisRun.add(stage);
+            setBatch(null);
+            timer = window.setTimeout(run, 0);
+          }, panelWarmHold(next));
         });
       });
     };
-    restartRef.current = () => {
-      setStage(null);
-      schedule();
-    };
-    schedule();
+    run();
     return () => {
       clearTimeout(timer);
       cancelAnimationFrame(frame);
-      restartRef.current = () => {};
     };
-    // `stages` is read through its key: callers may pass a fresh array each render.
-  }, [ready, stagesKey]);
-  const interrupt = useCallback(() => restartRef.current(), []);
-  return { stage, interrupt };
+    // `batches` is read through its key: callers may pass a fresh array each render.
+  }, [ready, batchesKey]);
+  return {
+    warming: (stage: PanelWarmStage): boolean => batch?.includes(stage) ?? false,
+    pending: ready && nextPanelWarmBatch(batches, warmedThisRun) !== null,
+  };
 }
 
 /**
  * Hosts a panel instance mounted only to be drawn once: almost transparent,
- * inert (no focus, no keyboard, no hits) and without entrance motion.
- * Inactive, it adds nothing around its children.
+ * inert (no focus, no keyboard, no hits), above the opening veil and without
+ * entrance motion. Inactive, it adds nothing around its children.
  */
 export function PanelPaintWarmup({ active, children }: { active: boolean; children: ReactNode }) {
   if (!active) return <>{children}</>;

@@ -2,66 +2,72 @@ import { describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { createReactDomHarness } from "../test/reactDomHarness";
 import {
-  nextPanelWarmStage,
+  nextPanelWarmBatch,
   PanelPaintWarmup,
-  PANEL_WARM_DELAY_MS,
-  PANEL_WARM_HOLD_MS,
+  panelWarmHold,
   usePanelPaintWarmup,
+  type PanelWarmBatch,
   type PanelWarmStage,
 } from "./panelPaintWarmup";
 
 const FRAME = 16;
 
 describe("panel paint warm-up", () => {
-  it("picks the first stage not yet drawn", () => {
-    expect(nextPanelWarmStage(["aa", "toc"], new Set<PanelWarmStage>())).toBe("aa");
-    expect(nextPanelWarmStage(["aa", "toc"], new Set<PanelWarmStage>(["aa"]))).toBe("toc");
-    expect(nextPanelWarmStage(["aa", "toc"], new Set<PanelWarmStage>(["aa", "toc"]))).toBeNull();
+  it("holds a batch longer the more panels it draws", () => {
+    expect(panelWarmHold(["fonts"])).toBe(200);
+    expect(panelWarmHold(["aa", "toc", "search", "reading", "display", "more"])).toBe(300);
   });
 
-  it("draws one stage at a time while idle, restarts an interrupted stage, and never repeats a finished one", async () => {
+  it("picks the first batch with a stage not yet drawn", () => {
+    const batches: PanelWarmBatch[] = [["aa", "toc"], ["aa-detailed"]];
+    expect(nextPanelWarmBatch(batches, new Set<PanelWarmStage>())).toEqual(["aa", "toc"]);
+    expect(nextPanelWarmBatch(batches, new Set<PanelWarmStage>(["aa", "toc"]))).toEqual(["aa-detailed"]);
+    expect(nextPanelWarmBatch(batches, new Set<PanelWarmStage>(["aa", "toc", "aa-detailed"]))).toBeNull();
+  });
+
+  it("draws the batches back to back while ready, holds the veil only while ready, and never repeats in a run", async () => {
     vi.useFakeTimers();
     const dom = createReactDomHarness();
     vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => setTimeout(() => cb(0), FRAME) as unknown as number);
     vi.stubGlobal("cancelAnimationFrame", (id: number) => clearTimeout(id));
     let api!: ReturnType<typeof usePanelPaintWarmup>;
-    const stages: PanelWarmStage[] = ["display", "fonts"];
-    const Probe = (props: { ready: boolean }) => { api = usePanelPaintWarmup(props.ready, [...stages]); return null; };
+    const batches: PanelWarmBatch[] = [["search", "reading"], ["fonts"]];
+    const Probe = (props: { ready: boolean }) => { api = usePanelPaintWarmup(props.ready, batches.map((b) => [...b])); return null; };
     const advance = (ms: number) => dom.run(() => { vi.advanceTimersByTime(ms); });
+    const drawn = () => (["search", "reading", "fonts"] as const).filter((s) => api.warming(s));
     try {
-      await dom.render(createElement(Probe, { ready: true }));
-      expect(api.stage).toBeNull();
-      await advance(PANEL_WARM_DELAY_MS);
-      expect(api.stage).toBe("display");
-
-      // Reading input mid-stage: the stage ends unfinished and waits for quiet again.
-      await dom.run(() => api.interrupt());
-      expect(api.stage).toBeNull();
-      await advance(PANEL_WARM_DELAY_MS - 1);
-      expect(api.stage).toBeNull();
-      await advance(1);
-      expect(api.stage).toBe("display");
-
-      await advance(2 * FRAME + PANEL_WARM_HOLD_MS);
-      expect(api.stage).toBeNull();
-      await advance(PANEL_WARM_DELAY_MS);
-      expect(api.stage).toBe("fonts");
-
-      // Leaving the idle state (a panel opens) ends the stage too.
       await dom.render(createElement(Probe, { ready: false }));
-      expect(api.stage).toBeNull();
-      await advance(10 * PANEL_WARM_DELAY_MS);
-      expect(api.stage).toBeNull();
+      expect(api.pending).toBe(false);
+      expect(drawn()).toEqual([]);
 
       await dom.render(createElement(Probe, { ready: true }));
-      await advance(PANEL_WARM_DELAY_MS);
-      expect(api.stage).toBe("fonts");
-      await advance(2 * FRAME + PANEL_WARM_HOLD_MS);
-      expect(api.stage).toBeNull();
+      expect(api.pending).toBe(true);
+      expect(drawn()).toEqual(["search", "reading"]);
 
-      // Drawn stages are not drawn again in this run.
-      await advance(10 * PANEL_WARM_DELAY_MS);
-      expect(api.stage).toBeNull();
+      // Not ready any more (a panel opened): the batch ends and the veil is not held.
+      await dom.render(createElement(Probe, { ready: false }));
+      expect(drawn()).toEqual([]);
+      expect(api.pending).toBe(false);
+
+      await dom.render(createElement(Probe, { ready: true }));
+      expect(drawn()).toEqual(["search", "reading"]);
+      await advance(2 * FRAME + panelWarmHold(batches[0]) - 1);
+      expect(drawn()).toEqual(["search", "reading"]);
+      await advance(1);
+      // The next batch follows at once (the zero-delay timer fires on the next tick).
+      await advance(1);
+      expect(drawn()).toEqual(["fonts"]);
+      expect(api.pending).toBe(true);
+      await advance(2 * FRAME + panelWarmHold(batches[1]));
+      expect(drawn()).toEqual([]);
+      expect(api.pending).toBe(false);
+
+      // Drawn batches are not drawn again in this run.
+      await dom.render(createElement(Probe, { ready: false }));
+      await dom.render(createElement(Probe, { ready: true }));
+      await advance(1000);
+      expect(drawn()).toEqual([]);
+      expect(api.pending).toBe(false);
     } finally {
       await dom.dispose();
       vi.unstubAllGlobals();
