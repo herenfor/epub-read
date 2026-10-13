@@ -541,6 +541,13 @@ mod android {
             .map_err(|error| super::command_error("write_failed", error.to_string()))
     }
 
+    /// Only called for an output the system picker declared newly created.
+    pub(crate) fn delete_created_document_blocking<R: Runtime>(app: &AppHandle<R>, uri: &str) -> Result<(), String> {
+        let bridge = app.state::<AndroidUriBridge<R>>();
+        bridge.0.run_mobile_plugin::<EmptyPluginResponse>("deleteCreatedDocument", OpenReadOnlyRequest { uri })
+            .map(|_| ()).map_err(|error| super::command_error("cleanup_failed", error.to_string()))
+    }
+
     pub(crate) fn cancel_write_blocking<R: Runtime>(
         app: &AppHandle<R>,
         job_id: &str,
@@ -596,7 +603,7 @@ mod android {
 #[cfg(target_os = "android")]
 #[allow(unused_imports)]
 pub(crate) use android::{
-    cancel_write_blocking, open_content_uri, pick_directory_tree, plugin,
+    cancel_write_blocking, delete_created_document_blocking, open_content_uri, pick_directory_tree, plugin,
     query_tree_directory, read_content_uri_blocking, write_staged_file_blocking,
     write_text_content_uri_blocking,
 };

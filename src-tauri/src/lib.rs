@@ -16,6 +16,7 @@ pub(crate) mod native_zip_session;
 pub(crate) mod transfer_policy;
 mod portable_state_commands;
 mod save_file;
+mod book_export;
 
 #[cfg(feature = "ai")]
 macro_rules! configure_invoke_handler {
@@ -79,6 +80,7 @@ macro_rules! configure_invoke_handler {
             portable_state_commands::portable_state_merge_organization,
             portable_state_commands::portable_state_reserve_stamps,
             save_file::commands::save_file_export,
+            book_export::book_source_export,
             save_file::commands::save_file_prepare_import,
             save_file::commands::save_file_commit_import,
             save_file::commands::save_file_cancel,
@@ -216,6 +218,7 @@ macro_rules! configure_invoke_handler {
             portable_state_commands::portable_state_merge_organization,
             portable_state_commands::portable_state_reserve_stamps,
             save_file::commands::save_file_export,
+            book_export::book_source_export,
             save_file::commands::save_file_prepare_import,
             save_file::commands::save_file_commit_import,
             save_file::commands::save_file_cancel,

@@ -37,9 +37,9 @@ enum TaskPhase {
 
 #[derive(Debug)]
 pub(crate) struct FileTask {
-    job_id: String,
-    cancelled: AtomicBool,
-    published: AtomicBool,
+    pub(crate) job_id: String,
+    pub(crate) cancelled: AtomicBool,
+    pub(crate) published: AtomicBool,
     phase: Mutex<TaskPhase>,
     ready: Condvar,
     prepared: Mutex<Option<PreparedImport>>,
@@ -204,7 +204,7 @@ pub(crate) fn take_prepared_for_commit(
     }
 }
 
-fn begin_publication(task: &FileTask) -> Result<(), SaveFileError> {
+pub(crate) fn begin_publication(task: &FileTask) -> Result<(), SaveFileError> {
     let mut phase = task.phase.lock().map_err(|_| lock_error())?;
     if task.cancelled.load(Ordering::Acquire) {
         return Err(SaveFileError::cancelled());
@@ -292,7 +292,7 @@ fn store_parts<R: Runtime>(
     result.ok_or_else(|| SaveFileError::storage_error("可移植资料仓储尚未激活"))
 }
 
-fn export_temp_path<R: Runtime>(
+pub(crate) fn export_temp_path<R: Runtime>(
     app: &AppHandle<R>,
     destination: &SaveFileLocation,
     package_id: &str,
@@ -320,7 +320,7 @@ fn export_temp_path<R: Runtime>(
     }
 }
 
-fn destination_path(destination: &SaveFileLocation) -> Result<PathBuf, SaveFileError> {
+pub(crate) fn destination_path(destination: &SaveFileLocation) -> Result<PathBuf, SaveFileError> {
     match destination {
         SaveFileLocation::Path { path } => {
             let path = PathBuf::from(path);

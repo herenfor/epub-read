@@ -191,6 +191,26 @@ class AndroidUriBridgePlugin(private val activity: Activity) : Plugin(activity) 
     }
 
     @Command
+    fun deleteCreatedDocument(invoke: Invoke) {
+        val args = invoke.parseArgs(OpenReadOnlyArgs::class.java)
+        ioExecutor.execute {
+            try {
+                val uri = Uri.parse(args.uri)
+                if (uri.scheme != "content") throw IOException("only content URIs are accepted")
+                val deleted = if (DocumentsContract.isDocumentUri(activity, uri)) {
+                    DocumentsContract.deleteDocument(activity.contentResolver, uri)
+                } else {
+                    activity.contentResolver.delete(uri, null, null) > 0
+                }
+                if (!deleted) throw IOException("provider did not remove the incomplete output")
+                postResponse { invoke.resolve(JSObject()) }
+            } catch (error: Throwable) {
+                postResponse { invoke.reject(error.message ?: error.toString()) }
+            }
+        }
+    }
+
+    @Command
     fun cancelWrite(invoke: Invoke) {
         val args = invoke.parseArgs(CancelWriteArgs::class.java)
         if (args.cancelled) cancelledWrites[args.jobId] = true
