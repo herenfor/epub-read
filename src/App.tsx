@@ -51,7 +51,7 @@ import { useReaderCursorIdle } from "./ui/readerCursorIdle";
 import { SidebarDrawer } from "./ui/SidebarDrawer";
 import { AaPopover } from "./ui/AaPopover";
 import { useOpeningPanelPrep } from "./ui/openingPanelPrep";
-import { PanelPaintWarmup, usePanelPaintWarmup, type PanelWarmStage } from "./ui/panelPaintWarmup";
+import { PanelPaintWarmup, usePanelPaintWarmup, type PanelWarmBatch } from "./ui/panelPaintWarmup";
 import { resolveReaderLoadFeedback } from "./ui/loadingFeedback";
 import { WhisperFooter, type WhisperFooterChapterTick } from "./ui/WhisperFooter";
 import { BatteryIndicator } from "./ui/BatteryIndicator";
@@ -715,8 +715,12 @@ function createShelfBookArchiveInput(id: string): { port: MessagePort; dispose()
   };
 }
 
-const PANEL_WARM_STAGES: readonly PanelWarmStage[] = ["aa", "aa-detailed", "toc", "search", "reading", "display", "fonts"];
-const PANEL_WARM_STAGES_MOBILE: readonly PanelWarmStage[] = [...PANEL_WARM_STAGES.slice(0, 3), "more", ...PANEL_WARM_STAGES.slice(3)];
+// Display and fonts share one slot, and Aa shows one page at a time: two batches.
+const PANEL_WARM_BATCHES: readonly PanelWarmBatch[] = [
+  ["aa", "toc", "search", "reading", "display"],
+  ["aa-detailed", "fonts"],
+];
+const PANEL_WARM_BATCHES_MOBILE: readonly PanelWarmBatch[] = [[...PANEL_WARM_BATCHES[0], "more"], PANEL_WARM_BATCHES[1]];
 
 export default function App() {
   const { t } = useUiText();
@@ -4507,19 +4511,20 @@ export default function App() {
   const openingPanels = useOpeningPanelPrep(
     view === "reader" && ready && hasReaderDisplayedRef.current && bookKey ? bookKey : null,
   );
-  // 阅读空闲时把各面板各画一次（几乎透明、不可交互），首次打开不再承担 GPU 首绘。
+  // 安卓本次运行首次开书：过渡仍遮住时把各面板分两批各画一次（几乎透明、不可交互），
+  // 之后的首次打开不再承担 GPU 首绘。
   const panelWarmup = usePanelPaintWarmup(
     view === "reader" && ready && readerDisplayReady && openingPanels.aa && openingPanels.toc &&
       !openingPanels.pending && foreground.kind === "none" && !mobileMoreOpen && !assistantOpen,
-    mobileChrome ? PANEL_WARM_STAGES_MOBILE : PANEL_WARM_STAGES,
+    runtime.platform !== "android" ? [] : mobileChrome ? PANEL_WARM_BATCHES_MOBILE : PANEL_WARM_BATCHES,
   );
-  useReadingInputStart(view === "reader", panelWarmup.interrupt);
-  const warmStage = panelWarmup.stage;
+  const warming = panelWarmup.warming;
   // 开书过渡覆盖“解析书籍”、首次“准备阅读位置”与有限的面板准备；之后的换章只用顶部细进度线。
   const readerOpeningVisible =
     phase.phase === "loading" ||
     (readerLoadFeedback?.kind === "loading" && !hasReaderDisplayedRef.current) ||
-    openingPanels.pending;
+    openingPanels.pending ||
+    panelWarmup.pending;
   const readerOpeningTitle = phase.phase === "loading"
     ? phase.title || phase.fileName
     : book?.metadata.title ?? "";
@@ -5696,7 +5701,7 @@ export default function App() {
           compact={phoneChrome}
           warm={openingPanels.toc}
           onPrepared={() => openingPanels.prepared(bookKey, "toc")}
-          paintWarm={warmStage === "toc"}
+          paintWarm={warming("toc")}
           toc={book!.toc}
           activeHref={activeHref}
           onNavigateToc={handleTocNavigate}
@@ -5817,10 +5822,10 @@ export default function App() {
           </div>
         ) : (
           <>
-            {(menuOpen || warmStage === "display" || warmStage === "fonts") && (
+            {(menuOpen || warming("display") || warming("fonts")) && (
               <PanelPaintWarmup active={!menuOpen}>
                 {menuOpen && <div className="menu-backdrop" onClick={closeForeground} />}
-                {(menuOpen ? displaySettingsOpen : warmStage === "display") ? (
+                {(menuOpen ? displaySettingsOpen : warming("display")) ? (
                   <ReaderDisplaySettingsPopover
                     onBack={() => showMenuSubview("main")}
                     onClose={closeForeground}
@@ -5842,7 +5847,7 @@ export default function App() {
                       }
                     />
                   </ReaderDisplaySettingsPopover>
-                ) : (menuOpen ? fontSettingsOpen : warmStage === "fonts") ? <FontSettingsPanel
+                ) : (menuOpen ? fontSettingsOpen : warming("fonts")) ? <FontSettingsPanel
                   source={settings.fontSource}
                   customFontId={settings.customFontId}
                   customFontName={settings.customFontName}
@@ -5869,7 +5874,7 @@ export default function App() {
                 key={bookKey}
                 open={menuOpen && !displaySettingsOpen && !fontSettingsOpen}
                 onPrepared={() => openingPanels.prepared(bookKey, "aa")}
-                paintWarm={warmStage === "aa" ? "quick" : warmStage === "aa-detailed" ? "detailed" : undefined}
+                paintWarm={warming("aa-detailed") ? "detailed" : warming("aa") ? "quick" : undefined}
                 phoneLayout={phoneChrome}
                 fontSize={settings.fontSizePx}
                 onFontSizeChange={settingsActions.setFontSize}
@@ -5925,7 +5930,7 @@ export default function App() {
             )}
             {ready ? (
               <>
-                {(searchPresence.present || warmStage === "search") && (
+                {(searchPresence.present || warming("search")) && (
                   <PanelPaintWarmup active={!searchPresence.present}>
                     <div className={`search-backdrop${!mobileChrome ? " is-docked" : ""}${searchPresence.closing ? " is-closing" : ""}`} onClick={() => closePanel("search")} />
                     <SearchPanel
@@ -6224,7 +6229,7 @@ export default function App() {
           raised={mobileChrome && readerToolsVisible}
         />
       )}
-      {(moreSheetPresence.present || warmStage === "more") && (
+      {(moreSheetPresence.present || warming("more")) && (
         <PanelPaintWarmup active={!moreSheetPresence.present}>
           <div
             className={`mobile-more-backdrop${moreSheetPresence.closing ? " is-closing" : ""}`}
@@ -6284,9 +6289,9 @@ export default function App() {
         </PanelPaintWarmup>
       )}
       {view === "reader" && (
-        <PanelPaintWarmup active={warmStage === "reading" && !readingSettingsOpen}>
+        <PanelPaintWarmup active={warming("reading") && !readingSettingsOpen}>
           <ReaderReadingSettings
-            open={readingSettingsOpen || warmStage === "reading"}
+            open={readingSettingsOpen || warming("reading")}
             presentation={mobileChrome ? "page" : "dialog"}
             onClose={() => closePanel("reading")}
             tapRegions={tapRegions}

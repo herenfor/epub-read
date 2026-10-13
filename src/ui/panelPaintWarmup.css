@@ -1,6 +1,6 @@
-/* A panel drawn once while the reader is idle (see panelPaintWarmup.tsx).
+/* A panel drawn once under the opening veil (see panelPaintWarmup.tsx).
    1% opacity still rasterizes and composites everything; 0 would skip it.
-   Above the reader so nothing occludes it; never hit. */
+   Above the opening veil (300) so nothing occludes it; never hit. */
 .panel-paint-warmup {
   position: fixed;
   inset: 0;

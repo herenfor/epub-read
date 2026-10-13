@@ -112,6 +112,7 @@
 .sidebar-drawer.is-overlay.is-closed.is-warm.is-paint-warm {
   visibility: visible;
   opacity: 0.01;
+  z-index: 400; /* above the opening veil, which covers the warm-up */
 }
 
 /* 固定驻留模式（Docked Pin） */
