@@ -2635,11 +2635,10 @@ export default function App() {
       scope = prepared.scope;
       rangeLabel = prepared.rangeLabel;
     } catch (error) {
-      const emptySelection = saveFileErrorCode(error) === "empty-selection"
-        || saveFileErrorMessage(error).includes("没有选中的书可导出");
+      const emptySelection = saveFileErrorCode(error) === "empty-selection";
       setShelfNotice({
         kind: emptySelection ? "warn" : "error",
-        text: saveFileErrorMessage(error),
+        text: emptySelection ? uiText("notice.archive.emptySelection") : saveFileErrorMessage(error),
       });
       return;
     }

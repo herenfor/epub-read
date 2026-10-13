@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { AaPopover, THEME_PALETTES, type AaPopoverProps } from "./AaPopover";
+import { AaPopover, THEME_PALETTES, lineHeightPresetId, marginPresetId, type AaPopoverProps } from "./AaPopover";
 
 describe("Zen UI AaPopover 组件与交互契约（Packet B）", () => {
   const baseProps: AaPopoverProps = {
@@ -119,5 +119,16 @@ describe("Zen UI AaPopover 组件与交互契约（Packet B）", () => {
     expect(html).toContain("aa-custom-pill");
     // 边距显示微调胶囊
     expect(html).toContain("微调");
+  });
+
+  it("档位按内部 id 识别，不依赖界面文字", () => {
+    expect(lineHeightPresetId(undefined)).toBe("standard");
+    expect(lineHeightPresetId(1.42)).toBe("compact");
+    expect(lineHeightPresetId(2.0)).toBe("loose");
+    expect(lineHeightPresetId(1.9)).toBeNull();
+    expect(marginPresetId(undefined)).toBe("auto");
+    expect(marginPresetId({})).toBe("auto");
+    expect(marginPresetId({ left: 40, right: 40, top: 28, bottom: 28 })).toBe("medium");
+    expect(marginPresetId({ left: 20, right: 20 })).toBeNull();
   });
 });
