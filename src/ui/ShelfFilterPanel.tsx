@@ -1,5 +1,6 @@
-import { useEffect, useLayoutEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useExitPresence } from "./menuMotion";
+import { useSheetDrag } from "./sheetDrag";
 import { useUiText, type Translate } from "./localization/UiLanguageProvider";
 import { localizeFacetOptions, type ShelfFacetKind } from "./shelfFacetLabels";
 import type { ShelfFilterFacets, ShelfSort, ShelfTimeSegment } from "./shelf";
@@ -271,38 +272,64 @@ export function ShelfFilterPanel(props: ShelfFilterPanelProps) {
   }
   return <div className={`shelf-filter-layer is-${props.presentation}${closing ? " is-closing" : ""}`}>
     <div className="shelf-filter-backdrop" aria-hidden="true" onClick={props.onClose} />
-    <section className="shelf-filter-panel" role="dialog" aria-modal={sheet} style={sheet ? undefined : position}
-      aria-label={sheet ? t("shelfSettings.filter.title.sheet") : t("shelfSettings.filter.title")}>
-      {sheet && <div className="shelf-filter-grip" aria-hidden="true" />}
-      <header className="shelf-filter-head">
+    <ShelfFilterSection sheet={sheet} closing={closing} style={sheet ? undefined : position} onClose={props.onClose}
+      label={sheet ? t("shelfSettings.filter.title.sheet") : t("shelfSettings.filter.title")}
+      head={<>
         <span className="shelf-filter-title">{sheet ? t("shelfSettings.filter.title.sheet") : t("shelfSettings.filter.title")}</span>
         {count > 0 && !sheet && <span className="shelf-filter-head-note">{t("shelfSettings.filter.conditions", { count })}</span>}
-        {sheet && <button type="button" className="shelf-filter-done" onClick={props.onClose}>{t("shelfSettings.filter.done")}</button>}
-      </header>
-      <div className="shelf-filter-body">
-        {controls}
-        {current && <div className="shelf-filter-facets">
-          {sheet && <span className="shelf-filter-control-label">{t("shelfSettings.filter.title")}</span>}
-          <div className="shelf-filter-tabs" role="tablist" aria-label={t("shelfSettings.filter.dimensions")}>
-            {available.map((dimension) => {
-              const selected = props.filters[dimension.key].size;
-              const label = t(dimension.label);
-              return <button key={dimension.key} type="button" role="tab" aria-selected={dimension.key === current.key}
-                className={dimension.key === current.key ? "active" : ""} onClick={() => setActive(dimension.key)}>
-                {selected > 0 ? t("shelfSettings.filter.tab.count", { label, count: selected }) : label}
-              </button>;
-            })}
-          </div>
-          <FacetValues key={current.key} dimension={current} facets={props.facets} filters={props.filters} onFiltersChange={props.onFiltersChange} />
-        </div>}
-      </div>
-      <footer className="shelf-filter-foot">
+        {sheet && <button type="button" className="shelf-filter-done" onPointerDown={(event) => event.stopPropagation()} onClick={props.onClose}>{t("shelfSettings.filter.done")}</button>}
+      </>}
+      foot={<footer className="shelf-filter-foot">
         <button type="button" className="shelf-filter-clear-all" disabled={count === 0}
           onClick={() => props.onFiltersChange(EMPTY_SHELF_FILTERS)}>{t("shelfSettings.filter.clearAll")}</button>
         <button type="button" className="shelf-filter-show" onClick={props.onClose}>
           {tn("shelfSettings.filter.show", props.matchingCount, { count: props.matchingCount })}
         </button>
-      </footer>
-    </section>
+      </footer>}>
+      {controls}
+      {current && <div className="shelf-filter-facets">
+        {sheet && <span className="shelf-filter-control-label">{t("shelfSettings.filter.title")}</span>}
+        <div className="shelf-filter-tabs" role="tablist" aria-label={t("shelfSettings.filter.dimensions")}>
+          {available.map((dimension) => {
+            const selected = props.filters[dimension.key].size;
+            const label = t(dimension.label);
+            return <button key={dimension.key} type="button" role="tab" aria-selected={dimension.key === current.key}
+              className={dimension.key === current.key ? "active" : ""} onClick={() => setActive(dimension.key)}>
+              {selected > 0 ? t("shelfSettings.filter.tab.count", { label, count: selected }) : label}
+            </button>;
+          })}
+        </div>
+        <FacetValues key={current.key} dimension={current} facets={props.facets} filters={props.filters} onFiltersChange={props.onFiltersChange} />
+      </div>}
+    </ShelfFilterSection>
   </div>;
+}
+
+interface ShelfFilterSectionProps {
+  sheet: boolean;
+  closing: boolean;
+  style?: CSSProperties;
+  label: string;
+  onClose(): void;
+  head: ReactNode;
+  foot: ReactNode;
+  children: ReactNode;
+}
+
+/**
+ * The panel itself. It mounts only while shown, so the phone sheet's drag
+ * listeners attach to it: like Aa, a downward drag anywhere (the body once
+ * scrolled to its top, the grip or the header) puts it away.
+ */
+function ShelfFilterSection(props: ShelfFilterSectionProps) {
+  const panelRef = useRef<HTMLElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const { dragging, grip } = useSheetDrag({ sheetRef: panelRef, contentRef: bodyRef, disabled: !props.sheet || props.closing, onDismiss: props.onClose });
+  return <section ref={panelRef} className={`shelf-filter-panel${dragging ? " is-dragging" : ""}`} role="dialog" aria-modal={props.sheet} style={props.style}
+    aria-label={props.label}>
+    {props.sheet && <div className="shelf-filter-grip" aria-hidden="true" {...grip}><span className="shelf-filter-grip-handle" /></div>}
+    <header className="shelf-filter-head" {...(props.sheet ? grip : {})}>{props.head}</header>
+    <div ref={bodyRef} className="shelf-filter-body">{props.children}</div>
+    {props.foot}
+  </section>;
 }

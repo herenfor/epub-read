@@ -39,17 +39,20 @@ export type ContentDragClaim = "expand" | "collapse" | "dismiss" | null;
  * outside it (the header).
  * Half height: any upward drag expands first, so content scrolls only once
  * the sheet is tall; a downward drag from the top closes. Expanded: a
- * downward drag from the top collapses. Everything else is ordinary scrolling.
+ * downward drag from the top collapses. A sheet that cannot expand
+ * (`expandable: false`) only closes on a downward drag from the top.
+ * Everything else is ordinary scrolling.
  */
 export function claimContentDrag(
   dx: number,
   dy: number,
-  sheet: { expanded: boolean; atTop: boolean },
+  sheet: { expanded: boolean; atTop: boolean; expandable?: boolean },
 ): ContentDragClaim {
+  const expandable = sheet.expandable ?? true;
   if (Math.abs(dy) < CONTENT_DRAG_SLOP_PX || Math.abs(dy) <= Math.abs(dx)) return null;
-  if (dy < 0) return sheet.expanded ? null : "expand";
+  if (dy < 0) return sheet.expanded || !expandable ? null : "expand";
   if (!sheet.atTop) return null;
-  return sheet.expanded ? "collapse" : "dismiss";
+  return expandable && sheet.expanded ? "collapse" : "dismiss";
 }
 
 /**
@@ -69,9 +72,9 @@ export interface SheetDragOptions {
   /** Class that gives the sheet its expanded height (measured once per collapse). */
   expandedClassName?: string;
   /**
-   * Scrolling body of an expandable sheet. Drags anywhere in the sheet but
-   * the grip then expand, collapse or close it as `claimContentDrag` says,
-   * scrolling this body when they do not.
+   * Scrolling body of the sheet. Drags anywhere in the sheet but the grip
+   * then expand, collapse or close it as `claimContentDrag` says, scrolling
+   * this body when they do not. Without `onExpandedChange` they only close it.
    */
   contentRef?: RefObject<HTMLElement>;
   /** Content drags apply only while this returns true (e.g. phone bottom-sheet layout). */
@@ -334,7 +337,7 @@ export function useSheetDrag(options: SheetDragOptions) {
   useEffect(() => {
     const sheetEl = sheetRef.current;
     const contentEl = contentRef?.current;
-    if (!sheetEl || !contentEl || !contentExpandable) return;
+    if (!sheetEl || !contentEl) return;
     const onStart = (event: TouchEvent) => {
       const opts = latest.current;
       // A second finger or a new touch never inherits an old gesture.
@@ -354,7 +357,7 @@ export function useSheetDrag(options: SheetDragOptions) {
       const dy = touch.clientY - gesture.startY;
       if (gesture.claim === null) {
         const dx = touch.clientX - gesture.startX;
-        const sheetState = { expanded: latest.current.expanded ?? false, atTop: !gesture.inContent || contentEl.scrollTop <= 0 };
+        const sheetState = { expanded: latest.current.expanded ?? false, atTop: !gesture.inContent || contentEl.scrollTop <= 0, expandable: contentExpandable };
         const claim = claimContentDrag(dx, dy, sheetState);
         if (claim === null) {
           if (Math.abs(dy) >= CONTENT_DRAG_SLOP_PX || Math.abs(dx) >= CONTENT_DRAG_SLOP_PX) {

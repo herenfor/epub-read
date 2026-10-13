@@ -693,12 +693,23 @@
 }
 
 .shelf-filter-grip {
-  align-self: center;
+  display: flex;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 8px 0 4px;
+  touch-action: none;
+  cursor: grab;
+}
+
+.shelf-filter-grip-handle {
   width: 36px;
   height: 5px;
-  margin-top: 8px;
   border-radius: 3px;
   background: color-mix(in srgb, var(--fg) 22%, transparent);
+}
+
+.shelf-filter-layer.is-sheet .shelf-filter-head {
+  touch-action: none;
 }
 
 .shelf-filter-head {

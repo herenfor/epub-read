@@ -40,6 +40,14 @@ describe("bottom sheet drag", () => {
     expect(claimContentDrag(0, 40, fullTop)).toBe("collapse");
     expect(claimContentDrag(0, 40, fullScrolled)).toBeNull();
   });
+
+  it("lets a content drag only close a sheet that cannot expand", () => {
+    const top = { expanded: false, atTop: true, expandable: false };
+    const scrolled = { expanded: false, atTop: false, expandable: false };
+    expect(claimContentDrag(0, -40, top)).toBeNull();
+    expect(claimContentDrag(0, 40, top)).toBe("dismiss");
+    expect(claimContentDrag(0, 40, scrolled)).toBeNull();
+  });
 });
 
 describe("content drag lifecycle (real hook)", () => {
