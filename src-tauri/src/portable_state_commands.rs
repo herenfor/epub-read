@@ -2,8 +2,8 @@
 //!
 //! The repository algorithms live in `portable_state`; this module owns the
 //! process-lifetime `PortableStore`, the one-time legacy migration and the
-//! Tauri command boundary. Migration failure returns an error and removes the
-//! just-created database file so callers can keep the complete legacy mode.
+//! Tauri command boundary. Failed activation preserves the database and only
+//! permits legacy fallback when initial empty-repository migration failed.
 
 use crate::library_organization::{LibraryOrganization, OrganizationCommand};
 use crate::portable_state::{
@@ -54,7 +54,11 @@ fn open_and_activate<R: Runtime>(
 ) -> PortableResult<(PortableStore, PortableActivationResult)> {
     let root = data_root(app)?;
     let path = root.join("library.sqlite3");
-    let mut store = PortableStore::open(&path)?;
+    let existed = path.try_exists().map_err(|error| {
+        storage_error(format!("无法确认本机资料库状态：{error}")).with_legacy_fallback(false)
+    })?;
+    let mut store = PortableStore::open(&path)
+        .map_err(|error| error.with_legacy_fallback(!existed))?;
     if store.migration_completed()? {
         let state = store.snapshot()?;
         let annotations = state
@@ -71,6 +75,8 @@ fn open_and_activate<R: Runtime>(
             },
         ));
     }
+    let fallback_allowed = store.legacy_fallback_allowed()
+        .map_err(|error| error.with_legacy_fallback(false))?;
     match store.migrate_legacy(&root) {
         Ok(MigrationOutcome::Migrated { books, annotations }) => {
             let state = store.snapshot()?;
@@ -103,7 +109,7 @@ fn open_and_activate<R: Runtime>(
             drop(store);
             // Activation can fail for an existing recognized database too.
             // Keep it for retry/repair; legacy migration is transactional.
-            Err(error)
+            Err(error.with_legacy_fallback(fallback_allowed))
         }
     }
 }
@@ -178,7 +184,10 @@ pub fn portable_state_activate(
     manager: State<'_, PortableStateManager>,
 ) -> PortableResult<PortableActivationResult> {
     let _ = manager;
-    activate_store(&app)
+    activate_store(&app).map_err(|error| {
+        if error.legacy_fallback_allowed.is_some() { error }
+        else { error.with_legacy_fallback(false) }
+    })
 }
 
 fn runtime_status_for_manager(
@@ -445,6 +454,17 @@ pub fn portable_state_reserve_stamps(
 mod tests {
     use super::*;
     use crate::portable_state::PortableStore;
+
+    #[test]
+    fn activation_fallback_requires_an_empty_initial_repository() {
+        let mut store = PortableStore::open_in_memory().unwrap();
+        assert!(store.legacy_fallback_allowed().unwrap());
+        store.save_binding_raw(&"a".repeat(64), "{}").unwrap();
+        assert!(!store.legacy_fallback_allowed().unwrap());
+        let error = storage_error("copy failed").with_legacy_fallback(true);
+        assert_eq!(serde_json::to_value(error).unwrap()["legacyFallbackAllowed"], true);
+        assert!(serde_json::to_value(storage_error("ordinary error")).unwrap().get("legacyFallbackAllowed").is_none());
+    }
 
     #[test]
     fn runtime_status_is_read_only_and_reports_store_generation() {

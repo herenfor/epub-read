@@ -191,6 +191,8 @@ describe("useLanSaveSession", () => {
         transferId: "transfer-1",
         summary: {
           archiveBytes: 1024,
+          bookBytes: 100,
+          reusedBookCount: 0,
           bookCount: 2,
           attachedBookCount: 1,
           includeBooks: true,

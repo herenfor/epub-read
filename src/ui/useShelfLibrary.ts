@@ -288,7 +288,7 @@ export function useShelfDeletion({
       setShelfEntries((prev) => prev.filter((e) => e.id !== id));
       setCurrentShelfId((curr) => (curr === id ? null : curr));
       setShelfError(null);
-      void refreshOrganization?.().catch(() => undefined);
+      await refreshOrganization?.().catch(() => undefined);
     } catch (e) {
       setShelfError(uiText("notice.delete.failed", { error: String(e) }));
     } finally {
@@ -317,7 +317,7 @@ export function useShelfDeletion({
       }
       setShelfEntries((prev) => prev.filter((entry) => !deletedIds.has(entry.id)));
       setCurrentShelfId((curr) => (curr && deletedIds.has(curr) ? null : curr));
-      if (deleted.length > 0) void refreshOrganization?.().catch(() => undefined);
+      if (deleted.length > 0) await refreshOrganization?.().catch(() => undefined);
       if (failed.length === 0) {
         setShelfError(null);
         setShelfNotice({ kind: "ok", text: uiPlural("notice.delete.done", deleted.length, { count: deleted.length }) });

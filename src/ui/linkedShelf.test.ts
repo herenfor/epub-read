@@ -24,6 +24,22 @@ describe("Tauri linked ShelfStore IPC", () => {
     expect(invokeMock.mock.calls.map(([command]) => command)).toEqual(["portable_state_activate"]);
   });
 
+  it.each([["storage-error", false], ["storage-error", true], ["invalid-data", false]] as const)("uses the native activation decision for %s fallback: %s", async (code, allowed) => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === "portable_state_activate") throw { code, message: "disk failure", legacyFallbackAllowed: allowed };
+      if (command === "linked_library_list_records") return [];
+      throw new Error(`unexpected ${command}`);
+    });
+    await expect(activatePortableShelfState()).rejects.toMatchObject({ code });
+    if (allowed) {
+      await expect(getShelfStore().list()).resolves.toEqual([]);
+    } else {
+      await expect(getShelfStore().list()).rejects.toBeInstanceOf(LibraryDatabaseBlockedError);
+      await expect(getShelfStore().deleteBook("a")).rejects.toBeInstanceOf(LibraryDatabaseBlockedError);
+      expect(invokeMock.mock.calls.map(([command]) => command)).toEqual(["portable_state_activate"]);
+    }
+  });
+
   it("lists and imports linked paths without sending EPUB bytes", async () => {
     invokeMock
       .mockResolvedValueOnce([])

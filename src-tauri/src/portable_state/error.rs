@@ -12,6 +12,9 @@ pub type PortableResult<T> = std::result::Result<T, PortableError>;
 pub struct PortableError {
     pub code: String,
     pub message: String,
+    /// Activation-only decision. Absence retains older IPC behavior.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub legacy_fallback_allowed: Option<bool>,
 }
 
 impl PortableError {
@@ -19,7 +22,13 @@ impl PortableError {
         Self {
             code: code.to_string(),
             message: message.into(),
+            legacy_fallback_allowed: None,
         }
+    }
+
+    pub fn with_legacy_fallback(mut self, allowed: bool) -> Self {
+        self.legacy_fallback_allowed = Some(allowed);
+        self
     }
 
     pub fn invalid_data(message: impl Into<String>) -> Self {
