@@ -5365,6 +5365,7 @@ select option {
 .app[data-touch-ui="true"] .search-panel button,
 .app[data-touch-ui="true"] .sidebar-drawer button,
 .app[data-touch-ui="true"] .aa-popover button,
+.app[data-touch-ui="true"] .aa-display-body button,
 .app[data-touch-ui="true"] .note-composer button {
   min-height: 44px;
 }
@@ -5631,6 +5632,7 @@ select option {
 .app[data-touch-ui="true"] .search-panel button,
 .app[data-touch-ui="true"] .sidebar-drawer button,
 .app[data-touch-ui="true"] .aa-popover button,
+.app[data-touch-ui="true"] .aa-display-body button,
 .app[data-touch-ui="true"] .note-composer button {
   min-height: 48px;
 }

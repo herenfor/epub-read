@@ -5,28 +5,19 @@
   pointer-events: none;
 }
 
-/* ---- “字符与画面”：Aa 面板子页，外壳/宽度/遮罩/入退场全部沿用 .aa-popover，
- * 前后切换时面板不跳宽度 ---- */
-.aa-display-header {
-  gap: 4px;
-  padding-left: 6px;
-}
-
-.aa-display-header .aa-popover-title {
+/* ---- “字符与滤镜”：Aa 子页，外壳与字体页相同（.font-settings-panel），
+ * 这里只排内容区；控件的触屏尺寸见 aaPopover.css / styles.css 的 .aa-display-body ---- */
+.aa-display-panel .aa-display-body {
   flex: 1;
-  min-width: 0;
-}
-
-.aa-display-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
 }
 
 /* 调滤镜/繁简时看清正文：遮罩不压暗、不模糊由所有 Aa 面板共用（styles.css .menu-backdrop）。 */
-
-/* 手机底部面板矮一些，上方保留一段正文用于对照效果。 */
-.app[data-mobile-chrome="true"][data-layout="compact"] .aa-popover.aa-display-popover {
-  max-height: min(66vh, calc(var(--visual-viewport-height, 100vh) * 0.66));
-}
 
 /* ---- 三个子面板共用的小部件（只用应用主题变量） ---- */
 .rd-section {

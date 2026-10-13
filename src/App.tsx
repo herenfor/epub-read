@@ -5830,7 +5830,6 @@ export default function App() {
                 {(menuOpen ? displaySettingsOpen : warming("display")) ? (
                   <ReaderDisplaySettingsPopover
                     onBack={() => showMenuSubview("main")}
-                    onClose={closeForeground}
                   >
                     <TextProjectionPanel
                       preferences={textProjectionPreferences}
