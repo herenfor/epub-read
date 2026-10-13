@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import * as QRCode from "qrcode";
 import type { ShelfEntry } from "./shelf";
 import { SaveFileImportPreview } from "./SaveFileDialogs";
+import { importSkippedNotice } from "./importSkippedText";
 import { openAndroidAppSettings, scanAndroidQrCode } from "../platform/androidLanScanBridge";
 import { listLanSaveAddresses, type LanAddressOption } from "../platform/lanSaveNativeBridge";
 import type { UseLanSaveSessionResult } from "./useLanSaveSession";
@@ -599,11 +600,14 @@ export function LanSavePanel(props: LanSavePanelProps) {
     }
     if (state.status === "commitComplete") {
       const imported = state.localCommit?.importedBooks.length ?? 0;
+      const skippedNote = state.localCommit
+        ? importSkippedNotice(state.localCommit.skippedBookCount, state.localCommit.skippedBooks)
+        : "";
       return (
         <ResultView
           tone="success"
           title={t("lanPanel.imported.title")}
-          detail={imported > 0 ? tn("lanPanel.imported.books", imported, { count: imported }) : t("lanPanel.imported.data")}
+          detail={(imported > 0 ? tn("lanPanel.imported.books", imported, { count: imported }) : t("lanPanel.imported.data")) + (skippedNote ? t("notice.sep") + skippedNote : "")}
           actions={reconnectActions("done")}
         />
       );

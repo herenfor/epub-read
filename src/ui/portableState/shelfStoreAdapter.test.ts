@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
-import type { Bookmark, LinkedImportBatchResult, ShelfEntry, ShelfProgressPatch, ShelfSaveInput, ShelfSaveResult, ShelfStore } from "../shelf";
+import type { Bookmark, LinkedImportBatchResult, PortableRecordsImportResult, ShelfEntry, ShelfProgressPatch, ShelfSaveInput, ShelfSaveResult, ShelfStore } from "../shelf";
 import type { ReaderNote } from "../notes";
 import type { LibraryOrganization, OrganizationCommand } from "../libraryOrganization";
 import { emptyOrganization } from "../libraryOrganization";
@@ -122,7 +122,7 @@ class FakeLegacyStore implements ShelfStore {
     throw new Error("no relink");
   }
 
-  async replacePortableRecords(recordsInput: Parameters<ShelfStore["replacePortableRecords"]>[0]): Promise<ShelfEntry[]> {
+  async replacePortableRecords(recordsInput: Parameters<ShelfStore["replacePortableRecords"]>[0]): Promise<PortableRecordsImportResult> {
     this.entries = recordsInput.map((record) => ({
       ...entry({ id: record.contentHash, contentHash: record.contentHash }),
       ...record,
@@ -132,7 +132,7 @@ class FakeLegacyStore implements ShelfStore {
       coverMime: "",
       available: false,
     }));
-    return this.entries;
+    return { entries: this.entries, skippedBookCount: 0, skippedBooks: [] };
   }
 
   async readThumbnail(): Promise<null> {

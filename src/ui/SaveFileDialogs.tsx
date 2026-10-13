@@ -4,6 +4,7 @@ import type {
   SaveFileProgress,
 } from "../platform/saveFileNativeBridge";
 import type { SaveFileJobState } from "./useSaveFileJob";
+import { importSkippedList } from "./importSkippedText";
 import "./saveFileDialogs.css";
 import { uiText, useUiText } from "./localization/UiLanguageProvider";
 
@@ -119,9 +120,9 @@ export interface SaveFileImportPreviewProps {
 }
 
 export function SaveFileImportPreview(props: SaveFileImportPreviewProps) {
-  const { t, tn } = useUiText();
+  const { t } = useUiText();
   const [applyPreferences, setApplyPreferences] = useState(false);
-  const visibleMissing = props.preview.missingBooks.slice(0, 3);
+  const skippedCount = Math.max(props.preview.skippedBookCount, props.preview.skippedBooks.length);
   return (
     <div className="save-file-backdrop" role="presentation">
       <section className="save-file-dialog save-file-import-preview" role="dialog" aria-modal="true" aria-label={t("saveFile.import.dialog")}>
@@ -134,13 +135,12 @@ export function SaveFileImportPreview(props: SaveFileImportPreviewProps) {
             <div><dt>{t("saveFile.import.bookCount")}</dt><dd>{props.preview.bookCount}</dd></div>
             <div><dt>{t("saveFile.import.newBooks")}</dt><dd>{props.preview.newBookCount}</dd></div>
             <div><dt>{t("saveFile.import.attached")}</dt><dd>{props.preview.attachedBooks.length}</dd></div>
-            <div><dt>{t("saveFile.import.missing")}</dt><dd>{props.preview.missingBooks.length}</dd></div>
+            <div><dt>{t("saveFile.import.skipped")}</dt><dd>{skippedCount}</dd></div>
             <div><dt>{t("saveFile.import.conflicts")}</dt><dd>{props.preview.progressConflictCount}</dd></div>
           </dl>
-          {visibleMissing.length > 0 && (
+          {skippedCount > 0 && (
             <p className="save-file-muted">
-              {t("saveFile.import.missingList", { titles: visibleMissing.map((book) => book.title || book.contentHash.slice(0, 8)).join(t("saveFile.listSeparator")) })}
-              {props.preview.missingBooks.length > visibleMissing.length ? tn("saveFile.import.more", props.preview.missingBooks.length, { count: props.preview.missingBooks.length }) : ""}
+              {t("saveFile.import.skippedList", { titles: importSkippedList(props.preview.skippedBooks, skippedCount) })}
             </p>
           )}
           {props.preview.hasPreferences && (

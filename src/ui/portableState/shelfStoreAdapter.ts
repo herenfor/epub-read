@@ -12,6 +12,7 @@ import type {
   LinkedImportBatchResult,
   NoteEditContext,
   PortableProgressSelection,
+  PortableRecordsImportResult,
   ShelfEntry,
   ShelfProgressPatch,
   ShelfSaveInput,
@@ -918,12 +919,17 @@ export class PortableShelfStore implements ShelfStore {
     return this.currentProjectedEntry(hash);
   }
 
-  async replacePortableRecords(records: LibraryRecord[], organization?: LibraryOrganization): Promise<ShelfEntry[]> {
+  async replacePortableRecords(records: LibraryRecord[], organization?: LibraryOrganization): Promise<PortableRecordsImportResult> {
     // R3: the repository merges records, missing entities, organization and
     // local waiting-for-source visibility in one transaction. Do not touch the
     // legacy whole-record array first.
-    await this.data.mergeLegacyRecords({ records, ...(organization ? { organization } : {}) });
-    return this.list();
+    const merged = await this.data.mergeLegacyRecords({ records, ...(organization ? { organization } : {}) });
+    const skippedBooks = [...(merged.skippedBooks ?? [])];
+    return {
+      entries: await this.list(),
+      skippedBookCount: merged.skippedBookCount ?? skippedBooks.length,
+      skippedBooks,
+    };
   }
 
   async readThumbnail(contentHash: string, mime?: string): Promise<ThumbnailAsset | null> {

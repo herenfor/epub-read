@@ -5,6 +5,7 @@ import type { Stamp } from "../../core/portableState/portable-register-core";
 import type { PortableStateCommandService } from "./service";
 import type { ProgressRuntimeStatus } from "./progressRuntimeGate";
 import type { DirectoryPlacementBatch, DirectoryPlacementBatchResult } from "../folderImport/placementBatch";
+import type { ImportSkippedBook } from "../../platform/saveFileNativeBridge";
 
 export interface PortableActivationResult {
   readonly status: "fresh" | "migrated" | "already-migrated";
@@ -22,6 +23,13 @@ export interface PortableLegacyImportInput {
   readonly organization?: LibraryOrganization;
 }
 
+/** C6: the native merge also reports which incoming books it did not accept; Web returns the plain state. */
+export type PortableLegacyImportResult = PortableStateV3 & {
+  readonly importedBooks?: readonly string[];
+  readonly skippedBookCount?: number;
+  readonly skippedBooks?: readonly ImportSkippedBook[];
+};
+
 /**
  * Integration-facing data surface. Command methods stay the frozen S0 wire;
  * these additional internal methods are used by the ShelfStore facade and do
@@ -32,7 +40,7 @@ export interface PortableStateDataService extends PortableStateCommandService {
   snapshot(): Promise<PortableStateV3>;
   mergeValidatedState(input: unknown, options?: PortableMergeOptions): Promise<PortableStateV3>;
   /** R3: merge old archive records and organization in one repository transaction. */
-  mergeLegacyRecords(input: PortableLegacyImportInput): Promise<PortableStateV3>;
+  mergeLegacyRecords(input: PortableLegacyImportInput): Promise<PortableLegacyImportResult>;
   /** Local visibility rows created by an archive import without a byte binding. */
   listLocalVisibleHashes(): Promise<readonly string[]>;
   setLocalVisible(hash: string, visible: boolean): Promise<void>;

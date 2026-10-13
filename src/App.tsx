@@ -133,6 +133,7 @@ import {
 import { LanSavePanel } from "./ui/LanSavePanel";
 import { useLanSaveSession } from "./ui/useLanSaveSession";
 import { SaveFileExportDialog, SaveFileImportPreview, SaveFileProgressPanel } from "./ui/SaveFileDialogs";
+import { importSkippedNotice } from "./ui/importSkippedText";
 import { SaveFailureDialog } from "./ui/SaveFailureDialog";
 import { releaseUnsavedLane, type SaveFailurePrompt } from "./ui/saveFailureExit";
 import { useSaveFileJob } from "./ui/useSaveFileJob";
@@ -149,6 +150,7 @@ import {
 } from "./platform/saveFileNativeBridge";
 import {
   activatePortableShelfState,
+  LibraryDatabaseBlockedError,
   applyShelfProgressPatch,
   ensurePortableRepositoryReady,
   getShelfStore,
@@ -1594,9 +1596,10 @@ export default function App() {
       : preferencesApplied
         ? uiText("notice.sep") + uiText("notice.archive.preferencesApplied")
         : "";
+    const skippedNote = importSkippedNotice(result.skippedBookCount, result.skippedBooks);
     setShelfNotice({
-      kind: result.missingBooks.length > 0 || refreshFailed || (applyPreferences && !result.appliedPreferences) ? "warn" : "ok",
-      text: uiText("notice.archive.imported", { imported: result.importedBooks.length, missing: result.missingBooks.length }) + conflictNote + preferenceNote + (refreshFailed ? uiText("notice.sep") + uiText("notice.shelf.refreshFailedShort") : ""),
+      kind: skippedNote || refreshFailed || (applyPreferences && !result.appliedPreferences) ? "warn" : "ok",
+      text: uiText("notice.archive.imported", { imported: result.importedBooks.length }) + (skippedNote ? uiText("notice.sep") + skippedNote : "") + conflictNote + preferenceNote + (refreshFailed ? uiText("notice.sep") + uiText("notice.shelf.refreshFailedShort") : ""),
     });
   }, [applyPortablePreferences, refreshShelfProjection]);
 
@@ -1778,13 +1781,18 @@ export default function App() {
 
       // 记录与 organization 必须在本机仓储边界内一并合并；旧 v3 进度不被旧包导入时间覆盖。
       let unavailableCount = 0;
+      let skippedCount = 0;
+      let skippedNote = "";
       try {
         const store = getShelfStore();
-        const nextEntries = await store.replacePortableRecords(
+        const imported = await store.replacePortableRecords(
           archiveRecordsForBackend(incoming.archive),
           incoming.archive.organization,
         );
+        const nextEntries = imported.entries;
         unavailableCount = nextEntries.filter((entry) => entry.available === false).length;
+        skippedCount = Math.max(imported.skippedBookCount, imported.skippedBooks.length);
+        skippedNote = importSkippedNotice(imported.skippedBookCount, imported.skippedBooks);
         setShelfEntries(nextEntries);
         setOrganization(await store.getOrganization());
       } catch (err) {
@@ -1792,8 +1800,8 @@ export default function App() {
       }
 
       setShelfNotice({
-        kind: unavailableCount > 0 ? "warn" : "ok",
-        text: uiText("notice.legacy.imported", { count: Object.keys(incoming.archive.records).length }) + (unavailableCount > 0 ? uiText("notice.sep") + uiText("notice.legacy.relocate", { count: unavailableCount }) : "") + uiText("notice.sep") + uiText("notice.legacy.preferencesNotApplied"),
+        kind: unavailableCount > 0 || skippedNote ? "warn" : "ok",
+        text: uiText("notice.legacy.imported", { count: Math.max(0, Object.keys(incoming.archive.records).length - skippedCount) }) + (skippedNote ? uiText("notice.sep") + skippedNote : "") + (unavailableCount > 0 ? uiText("notice.sep") + uiText("notice.legacy.relocate", { count: unavailableCount }) : "") + uiText("notice.sep") + uiText("notice.legacy.preferencesNotApplied"),
       });
     } catch (error) {
       setShelfNotice({ kind: "error", text: uiText("notice.archive.importFailed", { error: String(error) }) });
@@ -1834,7 +1842,9 @@ export default function App() {
         if (!cancelled) {
           setShelfNotice({
             kind: "error",
-            text: uiText("notice.portable.inactive", { error: String(error) }),
+            text: error instanceof LibraryDatabaseBlockedError
+              ? error.message
+              : uiText("notice.portable.inactive", { error: String(error) }),
           });
         }
       }
