@@ -2,7 +2,7 @@
 .reader-opening {
   position: fixed;
   inset: 0;
-  z-index: 300;
+  z-index: var(--z-ui-opening);
   display: flex;
   align-items: center;
   justify-content: center;

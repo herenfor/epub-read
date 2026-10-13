@@ -1,7 +1,7 @@
 .cache-storage-layer {
   position: fixed;
   inset: 0;
-  z-index: 1200;
+  z-index: calc(var(--z-ui-system) + 200);
   pointer-events: auto;
   display: flex;
   align-items: center;

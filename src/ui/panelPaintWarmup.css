@@ -5,7 +5,7 @@
 .panel-paint-warmup {
   position: fixed;
   inset: 0;
-  z-index: 400;
+  z-index: var(--z-ui-warmup);
   opacity: 0.001;
   pointer-events: none;
 }

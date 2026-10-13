@@ -257,7 +257,7 @@ select option {
   content: "松开以导入图书或字体";
   position: fixed;
   inset: 0;
-  z-index: 200;
+  z-index: var(--z-ui-drawer);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -428,7 +428,7 @@ select option {
 .ai-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 190;
+  z-index: calc(var(--z-ui-drawer) - 10);
   /* 只压暗、不模糊：边看边调，也省一层整屏合成。 */
   background: rgba(0, 0, 0, 0.38);
   animation: reader-panel-fade-in var(--menu-open) ease forwards;
@@ -1238,7 +1238,7 @@ select option {
 .footnote-pop {
   position: absolute;
   inset: 0;
-  z-index: 60;
+  z-index: var(--z-ui-popover);
   pointer-events: none; /* 容器不拦截阅读区事件 */
 }
 
@@ -1359,7 +1359,7 @@ select option {
   position: fixed;
   bottom: 20px;
   left: 50%;
-  z-index: 191;
+  z-index: calc(var(--z-ui-drawer) - 9);
   width: min(640px, calc(100vw - 32px));
   height: min(520px, calc(100vh - 40px));
   display: flex;
@@ -2224,7 +2224,7 @@ select option {
   width: 100%;
   min-width: 100%;
   box-sizing: border-box;
-  z-index: 50;
+  z-index: var(--z-ui-bar);
   padding: 4px;
   border: 1px solid var(--panel-border);
   border-radius: 10px;
@@ -2843,7 +2843,7 @@ select option {
   position: fixed;
   left: 50%;
   bottom: 28px;
-  z-index: 280;
+  z-index: calc(var(--z-ui-panel) + 30);
   transform: translateX(-50%);
   max-width: min(520px, calc(100vw - 48px));
   padding: 10px 18px;
@@ -2888,7 +2888,7 @@ select option {
   bottom: 56px;
   left: 50%;
   transform: translate(-50%, 0);
-  z-index: 320;
+  z-index: calc(var(--z-ui-opening) + 20);
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -2956,7 +2956,7 @@ select option {
 .shelf-confirm-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 1200;
+  z-index: calc(var(--z-ui-system) + 200);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3055,7 +3055,7 @@ select option {
 .app-busy {
   position: fixed;
   inset: 0;
-  z-index: 300;
+  z-index: var(--z-ui-opening);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -3107,7 +3107,7 @@ select option {
   top: 0;
   left: 0;
   right: 0;
-  z-index: 150;
+  z-index: calc(var(--z-ui-mobile-bar) + 50);
   height: 3px;
   overflow: hidden;
   background: color-mix(in srgb, var(--accent) 14%, transparent);
@@ -3140,7 +3140,7 @@ select option {
   position: absolute;
   top: 12px;
   left: 50%;
-  z-index: 150;
+  z-index: calc(var(--z-ui-mobile-bar) + 50);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -3225,7 +3225,7 @@ select option {
   left: 50%;
   transform: translate(-50%, 0) scale(1);
   /* 需高于阅读面板遮罩(190)与阅读工具栏(100)，否则桌面端同样被模糊遮罩盖住且无法点选。 */
-  z-index: 260;
+  z-index: calc(var(--z-ui-panel) + 10);
   width: min(600px, calc(100vw - 32px));
   height: min(580px, calc(100vh - 40px));
   display: flex;
@@ -3295,7 +3295,7 @@ select option {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  z-index: 260;
+  z-index: calc(var(--z-ui-panel) + 10);
   width: min(680px, calc(100vw - 32px));
   height: min(560px, calc(100vh - 80px));
   display: flex;
@@ -3716,7 +3716,7 @@ select option {
 /* ---- 正文笔记 ---- */
 .reader-context-menu {
   position: fixed;
-  z-index: 48;
+  z-index: calc(var(--z-ui-inline) + 3);
   display: flex;
   gap: 4px;
   padding: 5px;
@@ -3743,7 +3743,7 @@ select option {
 
 .note-composer {
   position: absolute;
-  z-index: 47;
+  z-index: calc(var(--z-ui-inline) + 2);
   top: 50%;
   left: 50%;
   display: flex;
@@ -3766,7 +3766,7 @@ select option {
      intentionally reject panel opens. */
   position: fixed;
   inset: 0;
-  z-index: 46;
+  z-index: calc(var(--z-ui-inline) + 1);
   background: rgba(0, 0, 0, .28);
 }
 .note-composer-head { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; }
@@ -4425,7 +4425,7 @@ select option {
 
 .shelf-drag-ghost {
   position: fixed;
-  z-index: 10000;
+  z-index: var(--z-ui-image-drag);
   pointer-events: none;
   width: 86px;
   height: 124px;
@@ -4595,7 +4595,7 @@ select option {
 .shelf-folder-drop-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 45;
+  z-index: var(--z-ui-inline);
   background: rgba(15, 23, 42, 0.38);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
@@ -4621,7 +4621,7 @@ select option {
 .shelf-folder-modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 1000;
+  z-index: var(--z-ui-system);
   background: rgba(15, 23, 42, 0.45);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
@@ -5255,7 +5255,7 @@ select option {
 .mobile-more-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 300;
+  z-index: var(--z-ui-opening);
   background: rgba(0, 0, 0, 0.3);
 }
 
@@ -5264,7 +5264,7 @@ select option {
   left: 0;
   right: 0;
   bottom: calc(env(safe-area-inset-bottom, 0px) + var(--ime-bottom, 0px));
-  z-index: 301;
+  z-index: calc(var(--z-ui-opening) + 1);
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -5324,7 +5324,7 @@ select option {
   position: fixed;
   top: calc(env(safe-area-inset-top, 0px) + 6px);
   right: 8px;
-  z-index: 120;
+  z-index: calc(var(--z-ui-mobile-bar) + 20);
   min-width: 44px;
   min-height: 44px;
   padding: 0 10px;
@@ -5585,7 +5585,7 @@ select option {
   left: 0;
   width: 0;
   height: 0;
-  z-index: 1100;
+  z-index: calc(var(--z-ui-system) + 100);
   zoom: 1;
   pointer-events: none;
 }
@@ -5665,11 +5665,11 @@ select option {
 
 /* 模态笔记必须高于手机工具层，遮罩低于面板但高于所有工具/抽屉。 */
 .note-composer-backdrop {
-  z-index: 360;
+  z-index: var(--z-ui-modal);
 }
 
 .note-composer {
-  z-index: 361;
+  z-index: calc(var(--z-ui-modal) + 1);
 }
 
 /* ---- C1：文件夹前缀与书籍虚拟占位所有权分离 ---- */
@@ -5691,7 +5691,7 @@ select option {
 
 /* ---- C2：移动阅读选区菜单高于工具层、低于笔记模态；固定外框不随 uiScale 缩放 ---- */
 .app[data-mobile-reader="true"] .reader-context-menu {
-  z-index: 200;
+  z-index: var(--z-ui-drawer);
   zoom: 1;
   max-width: calc(100vw - 16px);
 }

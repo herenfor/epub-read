@@ -1,5 +1,23 @@
 /* Ordinary UI controls only. Reader page motion and swipe physics own their timing. */
 :root {
+  /* Cross-component layers keep their historical computed values.
+     Use these bases and local offsets for new global UI; iframe styles are separate. */
+  --z-ui-docked: 40;
+  --z-ui-inline: 45;
+  --z-ui-bar: 50;
+  --z-ui-popover: 60;
+  --z-ui-page: 80;
+  --z-ui-mobile-bar: 100;
+  --z-ui-drawer: 200;
+  --z-ui-panel: 250;
+  --z-ui-opening: 300;
+  --z-ui-modal: 360;
+  --z-ui-warmup: 400;
+  --z-ui-system: 1000;
+  --z-ui-folder-drag: 9000;
+  --z-ui-image-drag: 10000;
+  --z-ui-drag-capture: 99999;
+
   --ui-control-quick: 120ms;
   --ui-control: 140ms;
   --ui-toggle: 160ms;

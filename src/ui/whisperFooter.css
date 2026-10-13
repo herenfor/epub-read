@@ -71,7 +71,7 @@
 .whisper-drag-veil {
   position: fixed;
   inset: 0;
-  z-index: 99999;
+  z-index: var(--z-ui-drag-capture);
   cursor: grabbing;
   user-select: none;
   -webkit-user-select: none;
@@ -230,7 +230,7 @@
   min-height: 0;
   padding: 4px 10px 4px;
   gap: 2px;
-  z-index: 100;
+  z-index: var(--z-ui-mobile-bar);
   background: color-mix(in srgb, var(--bg) 94%, transparent);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);

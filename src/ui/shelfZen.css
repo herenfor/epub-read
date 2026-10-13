@@ -726,7 +726,7 @@
   border: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.12));
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18), 0 2px 6px rgba(0, 0, 0, 0.08);
   padding: 6px;
-  z-index: 100;
+  z-index: var(--z-ui-mobile-bar);
   animation: shelf-pop-in var(--popover-open) cubic-bezier(0.16, 1, 0.3, 1);
   scrollbar-width: thin;
   scrollbar-color: var(--scroll-thumb, rgba(128, 128, 128, 0.3)) transparent;
@@ -923,7 +923,7 @@
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.06);
   /* 底色 94% 不透明，不用毛玻璃（安卓首开省 0～2 帧）。 */
   padding: 6px;
-  z-index: 50;
+  z-index: var(--z-ui-bar);
   scrollbar-width: thin;
   animation: shelf-pop-in var(--popover-open) cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -1426,7 +1426,7 @@
   font-size: 32px;
   font-weight: 800;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-  z-index: 100;
+  z-index: var(--z-ui-mobile-bar);
   pointer-events: none;
   animation: shelf-toast-pop 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
@@ -1469,7 +1469,7 @@
   -webkit-backdrop-filter: blur(20px);
   border: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.12));
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.08);
-  z-index: 100;
+  z-index: var(--z-ui-mobile-bar);
   animation: shelf-batch-slide-up 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
@@ -1772,7 +1772,7 @@
   border: 1px solid color-mix(in srgb, var(--panel-border) 60%, transparent);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18), 0 2px 6px rgba(0, 0, 0, 0.08);
   /* 底色 96% 不透明，不用毛玻璃（安卓冷启动首开会丢 7～11 帧）。 */
-  z-index: 60;
+  z-index: var(--z-ui-popover);
   padding: 4px;
   display: flex;
   flex-direction: column;
@@ -1909,7 +1909,7 @@
   background: var(--panel-bg, #ffffff);
   border: 1px solid var(--panel-border, rgba(0, 0, 0, 0.1));
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
-  z-index: 60;
+  z-index: var(--z-ui-popover);
   padding: 4px;
   display: flex;
   flex-direction: column;
@@ -2077,7 +2077,7 @@
   top: calc(env(safe-area-inset-top, 0px) + 8px);
   left: 12px;
   right: 12px;
-  z-index: 9000;
+  z-index: var(--z-ui-folder-drag);
   display: flex;
   align-items: center;
   gap: 10px;
@@ -2185,7 +2185,7 @@
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
-  z-index: 120;
+  z-index: calc(var(--z-ui-mobile-bar) + 20);
   display: flex;
   flex-direction: column;
   gap: 2px;
