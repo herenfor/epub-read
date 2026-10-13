@@ -3899,6 +3899,15 @@ export default function App() {
   const openingPanels = useOpeningPanelPrep(
     view === "reader" && ready && hasReaderDisplayedRef.current && bookKey ? bookKey : null,
   );
+  const prepareAaPanel = useCallback(() => openingPanels.prepared(bookKey, "aa"), [openingPanels.prepared, bookKey]);
+  const openAaFonts = useCallback(() => showMenuSubview("fonts"), [showMenuSubview]);
+  const openAaDisplay = useCallback(() => showMenuSubview("extras"), [showMenuSubview]);
+  const changeAaColumns = useCallback((columnsPerView: 1 | 2) => handlePresentationChange({ columnsPerView }), [handlePresentationChange]);
+  const changeAaReadingMode = useCallback((readingMode: "paginated" | "scroll") => handlePresentationChange({ readingMode }), [handlePresentationChange]);
+  const chooseBookFromAa = useCallback(() => {
+    void handleChooseBooks();
+    closeForeground();
+  }, [handleChooseBooks, closeForeground]);
   // 安卓本次运行：Aa 与目录在首次开书过渡仍遮住时各画一次，其余面板在阅读安静时逐个画一次
   // （几乎不可见、不可交互），之后的首次打开不再承担 GPU 首绘。
   const androidRuntime = runtime.platform === "android";
@@ -5232,7 +5241,7 @@ export default function App() {
                 key={bookKey}
                 open={menuOpen && !displaySettingsOpen && !fontSettingsOpen}
                 suspended={menuOpen && (displaySettingsOpen || fontSettingsOpen)}
-                onPrepared={() => openingPanels.prepared(bookKey, "aa")}
+                onPrepared={prepareAaPanel}
                 paintWarm={warming("aa-detailed") ? "detailed" : warming("aa") ? "quick" : undefined}
                 phoneLayout={phoneChrome}
                 fontSize={settings.fontSizePx}
@@ -5242,8 +5251,8 @@ export default function App() {
                 theme={settings.theme}
                 onThemeChange={changeTheme}
                 customFontName={settings.customFontName}
-                onOpenFontSettings={() => showMenuSubview("fonts")}
-                onOpenDisplaySettings={() => showMenuSubview("extras")}
+                onOpenFontSettings={openAaFonts}
+                onOpenDisplaySettings={openAaDisplay}
                 lineHeight={settings.lineHeight}
                 onLineHeightChange={settingsActions.setLineHeight}
                 onResetLineHeight={settingsActions.resetLineHeight}
@@ -5263,9 +5272,9 @@ export default function App() {
                 pageMargins={settings.pageMarginsPx}
                 onPageMarginsChange={settingsActions.setPageMargins}
                 columnsPerView={settings.columnsPerView === 2 ? 2 : 1}
-                onColumnsChange={(cols) => handlePresentationChange({ columnsPerView: cols })}
+                onColumnsChange={changeAaColumns}
                 readingMode={settings.readingMode === "scroll" ? "scroll" : "paginated"}
-                onReadingModeChange={(mode) => handlePresentationChange({ readingMode: mode })}
+                onReadingModeChange={changeAaReadingMode}
                 effectiveColumns={chapterState.status === "ready" ? chapterState.effectiveColumns : undefined}
                 onPresentationChange={handlePresentationChange}
                 turnAnimation={normalizeTurnAnimation(settings.turnAnimation)}
@@ -5280,10 +5289,7 @@ export default function App() {
                 onResetDefaults={resetDefaults}
                 onToggleLog={handleToggleLog}
                 issueCount={logItems.length}
-                onOpenFile={() => {
-                  void handleChooseBooks();
-                  closeForeground();
-                }}
+                onOpenFile={chooseBookFromAa}
                 onClose={closeForeground}
               />
             )}
