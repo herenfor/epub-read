@@ -3288,9 +3288,8 @@ select option {
   gap: 10px;
   border: 1px solid var(--panel-border);
   border-radius: 20px;
+  /* 不用毛玻璃：底色已 95% 不透明，模糊在安卓上让每次打开丢 3～12 帧。 */
   background: color-mix(in srgb, var(--panel-bg) 95%, transparent);
-  backdrop-filter: blur(28px);
-  -webkit-backdrop-filter: blur(28px);
   color: var(--fg);
   box-shadow: 0 28px 72px rgba(0, 0, 0, 0.38), 0 8px 24px rgba(0, 0, 0, 0.16);
   opacity: 1;
@@ -5256,8 +5255,7 @@ select option {
   border-top: 1px solid color-mix(in srgb, var(--panel-border) 60%, transparent);
   border-radius: 16px 16px 0 0;
   box-shadow: 0 -16px 40px rgba(0, 0, 0, 0.2);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
+  /* 同搜索面板：底色 96% 不透明，不用毛玻璃（切后台回来首开会丢 9～16 帧）。 */
   animation: aaMobileSheetIn var(--menu-open) var(--ease-emphasized);
 }
 
