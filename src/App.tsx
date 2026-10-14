@@ -200,6 +200,7 @@ import {
   type RestoreCommitState,
   type RestoreTicket,
 } from "./ui/restoreCommitGate";
+import { reduceReaderSession, type ReaderSessionEvent } from "./ui/readerSession";
 import type { ProgressLease } from "./ui/portableState/ownedProgressSessions";
 import { currentChapterCharsRead } from "./ui/readingProgress";
 import {
@@ -1156,6 +1157,27 @@ export default function App() {
   // 每个稳定位置只能被一次显式跳转捕获；新书初始加载时
   // 仍允许以已保存的基线位置记录“第一次跳转”。
   const historyCaptureAllowedRef = useRef(true);
+  /** B3：五个会话标志只经这里成组写入；ref 供事件处理同步读取，就绪另发 state 驱动渲染。 */
+  const dispatchReaderSession = useCallback((event: ReaderSessionEvent) => {
+    const next = reduceReaderSession({
+      displayReady: readerDisplayReadyRef.current,
+      displayedOnce: hasReaderDisplayedRef.current,
+      navigationPending: navigationPendingRef.current,
+      historyCaptureAllowed: historyCaptureAllowedRef.current,
+      suppressProgress: suppressShelfProgressRef.current,
+    }, event);
+    readerDisplayReadyRef.current = next.displayReady;
+    hasReaderDisplayedRef.current = next.displayedOnce;
+    navigationPendingRef.current = next.navigationPending;
+    historyCaptureAllowedRef.current = next.historyCaptureAllowed;
+    suppressShelfProgressRef.current = next.suppressProgress;
+    setReaderDisplayReady(next.displayReady);
+  }, []);
+  /** 目录、书内链接、搜索、历史、笔记、书签、换章：用户选定新目标。 */
+  const beginExplicitNavigation = useCallback(() => {
+    dispatchReaderSession({ type: "begin-explicit" });
+    releaseRestoreForExplicitNavigation();
+  }, [dispatchReaderSession, releaseRestoreForExplicitNavigation]);
   const lastStablePositionRef = useRef<ReaderHistoryPosition>({
     spineIndex: 0,
     page: 0,
@@ -1277,8 +1299,6 @@ export default function App() {
       setRuntimeIssues([]);
       reportedResourcesRef.current = new Set();
       setChapterState({ status: "loading" });
-      hasReaderDisplayedRef.current = false;
-      setReaderDisplayReady(false);
       setSpineIndex(start);
       setAnchor(undefined);
       setInitialPage(saved?.page ?? 0);
@@ -1303,8 +1323,7 @@ export default function App() {
         page: saved?.page ?? 0,
         anchor: toPersistedReaderAnchor(saved?.anchor),
       };
-      navigationPendingRef.current = true;
-      historyCaptureAllowedRef.current = true;
+      dispatchReaderSession({ type: "open" });
       setCurrentShelfId(shelfId);
       setReaderHistory(emptyReaderNavigationHistory());
       setForeground(closeReaderForeground());
@@ -2159,10 +2178,7 @@ export default function App() {
       dispatchRestoreGate({ type: "resolved", ticket, located: false });
       dispatchRestoreGate({ type: "display-ready", ticket });
     }
-    navigationPendingRef.current = false;
-    historyCaptureAllowedRef.current = true;
-    readerDisplayReadyRef.current = true;
-    setReaderDisplayReady(true);
+    dispatchReaderSession({ type: "navigation-unresolved" });
     setSearchNavigationBusy(false);
     setInitialAnchor(null);
     setInitialPage(0);
@@ -2171,7 +2187,6 @@ export default function App() {
     // clears it separately via releaseRestoreForExplicitNavigation.
     if (!restoreGateRef.current) setInitialRestoreTicket(null);
     setInitialAlignment("context");
-    suppressShelfProgressRef.current = true;
     if (!reported) showReaderNotice(uiText("notice.reader.positionNotFound"), "warn");
   }, [showReaderNotice, dispatchRestoreGate]);
 
@@ -2816,7 +2831,7 @@ export default function App() {
   // ---- 章节状态回调 ----
   const handleUserReadingPositionChange = useCallback((ticket?: RestoreTicket | null) => {
     // 只有宿主实际用户位移才解除失败保护，重排和采样变化不能代替用户输入。
-    suppressShelfProgressRef.current = false;
+    dispatchReaderSession({ type: "user-position-committed" });
     setReturnPromptShown(false);
     if (ticket) {
       dispatchRestoreGate({ type: "user-position-committed", ticket });
@@ -2834,7 +2849,7 @@ export default function App() {
       pendingChapterSeekRef.current = null;
       if (failedSeek) {
         dispatchScrub({ type: "failed", token: failedSeek.token });
-        navigationPendingRef.current = false;
+        dispatchReaderSession({ type: "scrub-reader-aborted" });
       }
     }
     if (s.status === "ready" && s.mode !== "scroll" && !navigationPendingRef.current) {
@@ -2883,12 +2898,7 @@ export default function App() {
       }
       dispatchRestoreGate({ type: "display-ready", ticket });
     }
-    navigationPendingRef.current = false;
-    historyCaptureAllowedRef.current = true;
-    readerDisplayReadyRef.current = true;
-    hasReaderDisplayedRef.current = true;
-    suppressShelfProgressRef.current = false;
-    setReaderDisplayReady(true);
+    dispatchReaderSession({ type: "display-ready" });
     setSearchNavigationBusy(false);
     setInitialAlignment("context");
     const pendingSeek = pendingChapterSeekRef.current;
@@ -3021,11 +3031,7 @@ export default function App() {
       setReturnPromptShown(false);
       setPreciseTarget(null);
       latestPreciseRequestRef.current = null;
-      navigationPendingRef.current = true;
-      releaseRestoreForExplicitNavigation();
-      historyCaptureAllowedRef.current = false;
-      readerDisplayReadyRef.current = false;
-      setReaderDisplayReady(false);
+      beginExplicitNavigation();
       setSpineIndex(index);
       setAnchor(undefined);
       // 对象每次请求都新建：连续回翻多次时每次都能触发 atEnd 武装
@@ -3183,7 +3189,7 @@ export default function App() {
               : null,
           };
     lastStablePositionRef.current = snapshot;
-    historyCaptureAllowedRef.current = false;
+    dispatchReaderSession({ type: "history-captured" });
     setReaderHistory((prev) => recordReaderNavigation(prev, snapshot));
   }, [book, view, spineIndex, currentReaderPosition]);
 
@@ -3192,9 +3198,8 @@ export default function App() {
     setReaderHistory((prev) => commitDirectHistory(prev, snapshot, true));
     // Same-chapter navigation never enters the display gate. The paginator
     // settles synchronously, so the next explicit jump may be captured now.
-    historyCaptureAllowedRef.current = true;
-    readerDisplayReadyRef.current = true;
-  }, []);
+    dispatchReaderSession({ type: "direct-settled" });
+  }, [dispatchReaderSession]);
 
   /**
    * 弹注里的本章锚点：与其他书内跳转一样可以返回。只有确实换了页才记历史；
@@ -3238,11 +3243,7 @@ export default function App() {
       return false;
     }
     if (idx >= 0) {
-      navigationPendingRef.current = true;
-      releaseRestoreForExplicitNavigation();
-      historyCaptureAllowedRef.current = false;
-      readerDisplayReadyRef.current = false;
-      setReaderDisplayReady(false);
+      beginExplicitNavigation();
       closePanel("bookmarks");
       setSpineIndex(idx);
       setAnchor(a || undefined);
@@ -3283,9 +3284,8 @@ export default function App() {
       session: scrubSessionRef.current,
       request: scrubRequestIdRef.current,
     };
-    navigationPendingRef.current = true;
+    dispatchReaderSession({ type: "begin-scrub" });
     releaseRestoreForExplicitNavigation();
-    historyCaptureAllowedRef.current = false;
     dispatchScrub({ type: "begin", token, ratio: r });
 
     if (settings.readingMode === "scroll") {
@@ -3323,8 +3323,7 @@ export default function App() {
             }
             pendingChapterSeekRef.current = null;
             dispatchScrub({ type: "failed", token });
-            navigationPendingRef.current = false;
-            historyCaptureAllowedRef.current = true;
+            dispatchReaderSession({ type: "scrub-local-settled" });
             setReaderNotice({ kind: "warn", text: uiText("notice.reader.progressNotFound") });
             return;
           }
@@ -3333,8 +3332,7 @@ export default function App() {
             token,
             actual: { ratio: r, atEnd: r >= 1 },
           });
-          navigationPendingRef.current = false;
-          historyCaptureAllowedRef.current = true;
+          dispatchReaderSession({ type: "scrub-local-settled" });
           return;
         }
       }
@@ -3344,10 +3342,9 @@ export default function App() {
         token,
         actual: { ratio: r, atEnd: r >= 1 },
       });
-      navigationPendingRef.current = false;
-      historyCaptureAllowedRef.current = true;
+      dispatchReaderSession({ type: "scrub-local-settled" });
     }
-  }, [settings.readingMode, handleTocNavigate, dispatchScrub]);
+  }, [settings.readingMode, handleTocNavigate, dispatchScrub, dispatchReaderSession, releaseRestoreForExplicitNavigation]);
 
   const handleScrubPreviewChange = useCallback((ratio: number | null) => {
     dispatchScrub({
@@ -3361,10 +3358,7 @@ export default function App() {
     token: ScrubToken,
     location: { key: string; spineIndex: number; fraction: number; atEnd: boolean }
   ) => {
-    navigationPendingRef.current = false;
-    historyCaptureAllowedRef.current = true;
-    readerDisplayReadyRef.current = true;
-    setReaderDisplayReady(true);
+    dispatchReaderSession({ type: "scrub-reader-settled" });
     const axis = contentAxisRef.current;
     const ratio = axis ? axis.ratioAt({ key: location.key, fraction: location.fraction }) : null;
     const actualRatio = ratio !== null ? ratio : (scrubUiStateRef.current.pending?.ratio ?? 0);
@@ -3376,12 +3370,12 @@ export default function App() {
   }, [dispatchScrub]);
 
   const handleContentFractionCancelled = useCallback((token: ScrubToken) => {
-    navigationPendingRef.current = false;
+    dispatchReaderSession({ type: "scrub-reader-aborted" });
     dispatchScrub({ type: "cancelled", token });
-  }, [dispatchScrub]);
+  }, [dispatchScrub, dispatchReaderSession]);
 
   const handleContentFractionFailed = useCallback((token: ScrubToken) => {
-    navigationPendingRef.current = false;
+    dispatchReaderSession({ type: "scrub-reader-aborted" });
     dispatchScrub({ type: "failed", token });
     setReaderNotice({ kind: "warn", text: uiText("notice.reader.progressNotFound") });
   }, [dispatchScrub]);
@@ -3469,11 +3463,7 @@ export default function App() {
 
     // 跨章先进入目标章节；精确范围/高亮在显示门内解析，失败不冒充命中。
     captureReaderHistory(archiveHref(book.archiveReferences, result.chapterPath));
-    navigationPendingRef.current = true;
-    releaseRestoreForExplicitNavigation();
-    historyCaptureAllowedRef.current = false;
-    readerDisplayReadyRef.current = false;
-    setReaderDisplayReady(false);
+    beginExplicitNavigation();
     setSearchNavigationBusy(true);
     setInitialPage(null);
     setInitialAnchor(targetAnchor);
@@ -3538,17 +3528,12 @@ export default function App() {
       if (direct) {
         setAnchor(undefined);
         setReaderHistory(commitHistoryTransition(readerHistory, transition, true));
-        historyCaptureAllowedRef.current = true;
-        readerDisplayReadyRef.current = true;
+        dispatchReaderSession({ type: "direct-settled" });
         return;
       }
     }
     lastStablePositionRef.current = transition.target;
-    navigationPendingRef.current = true;
-    releaseRestoreForExplicitNavigation();
-    historyCaptureAllowedRef.current = false;
-    readerDisplayReadyRef.current = false;
-    setReaderDisplayReady(false);
+    beginExplicitNavigation();
     setReaderHistory(transition.history);
     // 恢复跳转前位置：章节 + 页码 + 内容锚点
     setSpineIndex(pos.spineIndex);
@@ -3591,17 +3576,12 @@ export default function App() {
       if (direct) {
         setAnchor(undefined);
         setReaderHistory(commitHistoryTransition(readerHistory, transition, true));
-        historyCaptureAllowedRef.current = true;
-        readerDisplayReadyRef.current = true;
+        dispatchReaderSession({ type: "direct-settled" });
         return;
       }
     }
     lastStablePositionRef.current = transition.target;
-    navigationPendingRef.current = true;
-    releaseRestoreForExplicitNavigation();
-    historyCaptureAllowedRef.current = false;
-    readerDisplayReadyRef.current = false;
-    setReaderDisplayReady(false);
+    beginExplicitNavigation();
     setReaderHistory(transition.history);
     setSpineIndex(pos.spineIndex);
     setAnchor(undefined);
@@ -3657,11 +3637,7 @@ export default function App() {
       return;
     }
     captureReaderHistory(archiveHref(book.archiveReferences, note.chapterPath));
-    navigationPendingRef.current = true;
-    releaseRestoreForExplicitNavigation();
-    historyCaptureAllowedRef.current = false;
-    readerDisplayReadyRef.current = false;
-    setReaderDisplayReady(false);
+    beginExplicitNavigation();
     setInitialPage(null);
     setInitialAnchor(targetAnchor);
     setInitialAlignment("context");
@@ -3743,11 +3719,7 @@ export default function App() {
         }
       }
       captureReaderHistory(spineItemHref(book, spineIndex) ?? "");
-      navigationPendingRef.current = true;
-      releaseRestoreForExplicitNavigation();
-      historyCaptureAllowedRef.current = false;
-      readerDisplayReadyRef.current = false;
-      setReaderDisplayReady(false);
+      beginExplicitNavigation();
       setInitialAlignment("reading-line");
       setSpineIndex(bookmark.spineIndex);
       setAnchor(undefined);
@@ -4574,16 +4546,13 @@ export default function App() {
     scrubSessionRef.current += 1;
     dispatchScrub({ type: "reset", session: scrubSessionRef.current });
     setChapterState({ status: "loading" });
-    hasReaderDisplayedRef.current = false;
-    setReaderDisplayReady(false);
     setReaderHistory(emptyReaderNavigationHistory());
     overlayHoverRef.current = false;
     closeForeground();
     setSearchNavigationBusy(false);
     setPreciseTarget(null);
     latestPreciseRequestRef.current = null;
-    navigationPendingRef.current = false;
-    historyCaptureAllowedRef.current = true;
+    dispatchReaderSession({ type: "leave" });
   }, [view]);
 
   // A11：上一个会话的清理 effect（同一次提交、声明在前）跑完后，才打开目标标签。
