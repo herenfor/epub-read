@@ -13,7 +13,10 @@ const bridge = vi.hoisted(() => ({
   prepareSaveFileImport: vi.fn(),
   commitSaveFileImport: vi.fn(),
   cancelSaveFile: vi.fn(),
+  exportBookSources: vi.fn(),
 }));
+
+vi.mock("../platform/bookExportNativeBridge", () => ({ exportBookSources: bridge.exportBookSources }));
 
 vi.mock("../platform/saveFileNativeBridge", () => ({
   saveFileErrorMessage: (error: unknown) => String(error),
@@ -80,8 +83,33 @@ describe("useSaveFileJob", () => {
     bridge.prepareSaveFileImport.mockReset();
     bridge.commitSaveFileImport.mockReset();
     bridge.cancelSaveFile.mockReset();
+    bridge.exportBookSources.mockReset();
     latest = null;
     dom = createReactDomHarness();
+  });
+
+  it("book export holds the shared job until its real response and preserves failed cleanup", async () => {
+    const pending = deferred<never>();
+    bridge.exportBookSources.mockReturnValue(pending.promise);
+    bridge.cancelSaveFile.mockResolvedValue("cancelled");
+    await dom.render(createElement(Probe));
+    let command!: Promise<unknown>;
+    const failure = Object.assign(new Error("cancelled"), { code: "cancelled", partialOutputRetained: true });
+    await dom.run(() => { command = latest!.beginBookExport({
+      scope: { kind: "all" }, destination: { kind: "uri", uri: "content://new-output" }, destinationIsNew: true,
+    }); });
+    const input = bridge.exportBookSources.mock.calls[0][0];
+    expect(input.destinationIsNew).toBe(true);
+    expect(latest?.state.kind === "exporting" && latest.state.subject).toBe("books");
+    await dom.run(async () => {
+      await expect(latest!.beginExport({ scope: { kind: "all" }, destination: { kind: "path", path: "x" }, includeBooks: false })).rejects.toThrow();
+      input.onProgress({ phase: "copying", processedBytes: 10, totalBytes: 20 });
+      await latest!.cancelCurrent();
+    });
+    expect(bridge.cancelSaveFile).toHaveBeenCalledWith(input.jobId);
+    expect(latest?.state.kind).toBe("exporting");
+    await dom.run(async () => { pending.reject(failure); await expect(command).rejects.toBe(failure); });
+    expect(latest?.state.kind).toBe("idle");
   });
 
   afterEach(async () => {

@@ -3,12 +3,13 @@ import { defineMessages } from "../defineMessages";
 /** Exporting the shelf's original EPUB files (single EPUB or a ZIP of several). */
 export const bookExport = defineMessages("bookExport", {
   "bookExport.action": { zh: "导出书籍", note: "Book menu and selection dock: save the original EPUB file(s).", max: 10 },
-  "bookExport.action.tip": "把选中书籍的原文件导出为一个 ZIP",
+  "bookExport.action.tip": "导出选中书籍的原文件：单本 EPUB，多本 ZIP",
   "bookExport.all": "导出全部书籍",
   "bookExport.all.detail": "把书架上所有书的原 EPUB 文件打包成一个 ZIP，用于备份或在其他阅读器中使用。不含阅读进度和笔记。",
   "bookExport.dialogTitle": "导出书籍原文件",
   "bookExport.filter.epub": "EPUB 书籍",
   "bookExport.filter.zip": "ZIP 压缩包",
+  "bookExport.target.selected": "所选文件",
   "bookExport.progress": "正在导出书籍原文件",
   "bookExport.done": { zh: "已导出 {count} 本书的原文件（{file}）", note: "{file} is the saved file name." },
   "bookExport.partial": { zh: "已导出 {written}/{requested} 本书的原文件（{file}）；未导出：{list}", note: "{list} names up to three books with reasons." },

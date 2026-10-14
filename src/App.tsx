@@ -1545,14 +1545,19 @@ export default function App() {
         : bookExportFileName(single!.fileName, single!.title);
       let destination: SaveFileLocation | null = null;
       try {
+        // Fail before ACTION_CREATE_DOCUMENT can create an external file.
+        await activatePortableShelfState();
+      } catch (error) {
+        setShelfNotice(bookExportErrorNotice(error as BookSourceExportError));
+        return;
+      }
+      try {
         const selected = await saveFileDialog({
           title: uiText("bookExport.dialogTitle"),
           defaultPath,
-          ...(runtime.platform === "android" ? {} : {
-            filters: [zip
-              ? { name: uiText("bookExport.filter.zip"), extensions: ["zip"] }
-              : { name: uiText("bookExport.filter.epub"), extensions: ["epub"] }],
-          }),
+          filters: [zip
+            ? { name: uiText("bookExport.filter.zip"), extensions: [runtime.platform === "android" ? "application/zip" : "zip"] }
+            : { name: uiText("bookExport.filter.epub"), extensions: [runtime.platform === "android" ? "application/epub+zip" : "epub"] }],
         });
         if (typeof selected === "string" && selected.length > 0) {
           destination = runtime.platform === "android" ? { kind: "uri", uri: selected } : { kind: "path", path: selected };
@@ -1563,10 +1568,9 @@ export default function App() {
       }
       if (!destination) return;
       try {
-        await activatePortableShelfState();
-        // A picked document may be an existing file the user chose to replace; only
-        // the backend's own new files are ever deleted on failure.
-        const result = await saveFileJob.beginBookExport({ destination, scope, destinationIsNew: false });
+        // Android's pinned dialog plugin uses ACTION_CREATE_DOCUMENT; a Windows
+        // save path may name an existing target and must never be cleaned as new.
+        const result = await saveFileJob.beginBookExport({ destination, scope, destinationIsNew: runtime.platform === "android" });
         setShelfNotice(bookExportResultNotice(result, bookExportTargetLabel(destination)));
       } catch (error) {
         setShelfNotice(bookExportErrorNotice(error as BookSourceExportError));

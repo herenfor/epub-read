@@ -34,7 +34,11 @@ describe("book export text", () => {
   it("suggests a safe .epub name and labels saved targets", () => {
     expect(bookExportFileName("a:b?.epub", "x")).toBe("a_b_.epub");
     expect(bookExportFileName("", "书名. ")).toBe("书名.epub");
+    expect(bookExportFileName("CON.epub", "x")).toBe("book.epub");
+    expect(bookExportFileName("COM¹.epub", "x")).toBe("book.epub");
+    expect(bookExportFileName("字".repeat(160) + ".epub", "x").length).toBe(85);
     expect(bookExportTargetLabel({ kind: "path", path: "C:\\Users\\me\\books.zip" })).toBe("books.zip");
     expect(bookExportTargetLabel({ kind: "uri", uri: "content://com.android.externalstorage.documents/document/primary%3ADownload%2Fa.epub" })).toBe("a.epub");
+    expect(bookExportTargetLabel({ kind: "uri", uri: "content://com.android.providers.downloads.documents/document/314" })).toBe("所选文件");
   });
 });
