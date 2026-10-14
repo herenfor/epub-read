@@ -210,14 +210,17 @@ export interface BookmarkPageFrame {
 }
 
 /**
- * 只读已提交的几何：内容盒左缘、宽度和两侧可用留白。双页时中线两侧各一页，
- * 外缘取各自外侧留白（最多 56px）；单页挂右侧外缘。RTL 只交换左右对应的阅读顺序。
+ * 只读已提交的几何：这一屏第一栏的左缘、栏宽和正文限宽（单页正文在栏内居中，
+ * 不超过限宽）。页外缘 = 版心外侧再留最多 56px，不超出可见视口。
+ * 双页中线两侧各一页；单页挂右侧（图片双页左叶传 left）。RTL 只交换左右对应的阅读顺序。
  */
 export function bookmarkPageFrames(input: {
   readonly contentLeft: number;
   readonly geometry: Pick<SpreadGeometry, "columns" | "columnWidth" | "columnStep">;
-  readonly roomLeft: number;
-  readonly roomRight: number;
+  /** 正文限宽（px）；栏比它宽时正文居中。 */
+  readonly measure: number;
+  readonly viewportLeft: number;
+  readonly viewportRight: number;
   readonly rtl: boolean;
   /** 阅读顺序上第一、第二页是否有正文（末屏右页可能空）。 */
   readonly present: readonly [boolean, boolean];
@@ -225,9 +228,12 @@ export function bookmarkPageFrames(input: {
   readonly singleSide?: "left" | "right";
 }): BookmarkPageFrame[] {
   const { contentLeft, geometry, rtl, present } = input;
-  const leftEdge = contentLeft - Math.max(0, Math.min(input.roomLeft, BOOKMARK_PAGE_MARGIN_MAX_PX));
-  const lastRight = contentLeft + (geometry.columns - 1) * geometry.columnStep + geometry.columnWidth;
-  const rightEdge = lastRight + Math.max(0, Math.min(input.roomRight, BOOKMARK_PAGE_MARGIN_MAX_PX));
+  const text = Math.min(geometry.columnWidth, Math.max(0, input.measure) || geometry.columnWidth);
+  const inset = (geometry.columnWidth - text) / 2;
+  const textLeft = contentLeft + inset;
+  const textRight = contentLeft + (geometry.columns - 1) * geometry.columnStep + inset + text;
+  const leftEdge = textLeft - Math.max(0, Math.min(textLeft - input.viewportLeft, BOOKMARK_PAGE_MARGIN_MAX_PX));
+  const rightEdge = textRight + Math.max(0, Math.min(input.viewportRight - textRight, BOOKMARK_PAGE_MARGIN_MAX_PX));
   if (geometry.columns !== 2) {
     const side = input.singleSide ?? "right";
     return present[0] ? [{ lane: 0, side, outerX: side === "left" ? leftEdge : rightEdge }] : [];

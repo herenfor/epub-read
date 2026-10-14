@@ -287,7 +287,8 @@ describe("A15 bookmark placement in a spread", () => {
   });
 
   it("hangs left and right pages on their outer edges, mirrored for RTL", () => {
-    const base = { contentLeft: 51, geometry: g, roomLeft: 51, roomRight: 51 } as const;
+    // 1102 wide viewport, text 51..1051: both outer margins are 51px.
+    const base = { contentLeft: 51, geometry: g, measure: 640, viewportLeft: 0, viewportRight: 1102 } as const;
     expect(bookmarkPageFrames({ ...base, rtl: false, present: [true, true] })).toEqual([
       { lane: 0, side: "left", outerX: 0 },
       { lane: 1, side: "right", outerX: 1102 },
@@ -297,16 +298,18 @@ describe("A15 bookmark placement in a spread", () => {
     ]);
   });
 
-  it("keeps a single page ribbon next to the centred text, not the window edge", () => {
-    const single = createSpreadGeometry(600, 40, 1);
-    expect(bookmarkPageFrames({
-      contentLeft: 400, geometry: single, roomLeft: 400, roomRight: 400, rtl: false, present: [true, false],
-    })).toEqual([{ lane: 0, side: "right", outerX: 1000 + BOOKMARK_PAGE_MARGIN_MAX_PX }]);
-    expect(bookmarkPageFrames({
-      contentLeft: 400, geometry: single, roomLeft: 30, roomRight: 400, rtl: false, present: [true, false], singleSide: "left",
-    })).toEqual([{ lane: 0, side: "left", outerX: 370 }]);
-    expect(bookmarkPageFrames({
-      contentLeft: 20, geometry: single, roomLeft: 20, roomRight: 20, rtl: false, present: [false, false],
-    })).toEqual([]);
+  it("keeps a single page ribbon next to the centred text measure, not the window edge", () => {
+    // A full-width column with a 640px measure: text 380..1020 in a 1400px window.
+    const single = createSpreadGeometry(1400, 40, 1);
+    const base = { contentLeft: 0, geometry: single, measure: 640, viewportLeft: 0, viewportRight: 1400, rtl: false } as const;
+    expect(bookmarkPageFrames({ ...base, present: [true, false] }))
+      .toEqual([{ lane: 0, side: "right", outerX: 1020 + BOOKMARK_PAGE_MARGIN_MAX_PX }]);
+    expect(bookmarkPageFrames({ ...base, present: [true, false], singleSide: "left" }))
+      .toEqual([{ lane: 0, side: "left", outerX: 380 - BOOKMARK_PAGE_MARGIN_MAX_PX }]);
+    // A phone: text nearly to the edge, the ribbon stays inside the screen.
+    const phone = createSpreadGeometry(340, 40, 1);
+    expect(bookmarkPageFrames({ ...base, contentLeft: 20, geometry: phone, viewportRight: 380, present: [true, false] }))
+      .toEqual([{ lane: 0, side: "right", outerX: 380 }]);
+    expect(bookmarkPageFrames({ ...base, present: [false, false] })).toEqual([]);
   });
 });

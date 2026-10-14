@@ -8207,11 +8207,11 @@ export class ChapterPaginator {
     const body = doc.body ? doc.defaultView?.getComputedStyle(doc.body) : null;
     const fontSize = parseFloat(body?.fontSize ?? "") || 16;
     const lineHeight = parseFloat(body?.lineHeight ?? "") || fontSize * 1.6;
-    return {
-      left: rect.left + (viewer.clientLeft || 0) + (parseFloat(style?.paddingLeft ?? "") || 0) + dx,
-      right: rect.right - (parseFloat(style?.borderRightWidth ?? "") || 0) - (parseFloat(style?.paddingRight ?? "") || 0) + dx,
-      lineHalf: lineHeight / 2,
-    };
+    const left = rect.left + (viewer.clientLeft || 0) + (parseFloat(style?.paddingLeft ?? "") || 0);
+    const right = rect.right - (parseFloat(style?.borderRightWidth ?? "") || 0) - (parseFloat(style?.paddingRight ?? "") || 0);
+    // 正文按限宽居中（与分页同一 TEXT_MEASURE），丝带挂在版心外侧而不是窗口边。
+    const inset = Math.max(0, (right - left - TEXT_MEASURE.maxEm * this.settings.fontSizePx) / 2);
+    return { left: left + inset + dx, right: right - inset + dx, lineHalf: lineHeight / 2 };
   }
 
   /**
@@ -8692,17 +8692,24 @@ export class ChapterPaginator {
       !layout.empty && visibleColumnInterval(layout, page, 0) !== null,
       !layout.empty && visibleColumnInterval(layout, page, 1) !== null,
     ];
-    const rect = viewer.getBoundingClientRect();
-    const paddingLeft = parseFloat(doc.defaultView?.getComputedStyle(viewer).paddingLeft ?? "") || 0;
-    const contentLeft = rect.left + (viewer.clientLeft || 0) + paddingLeft;
-    const docWidth = doc.documentElement.clientWidth || rect.right;
+    // 用与锚点采样相同的视觉换算：运动层窗口模式下 viewer 被加宽、平移，不能直接读它的矩形。
+    const geometry = layout.geometry;
+    const position = this.readVisualPosition();
+    const scroll = this.readPagedScroll();
+    const rtl = this.flowProgression === "rtl";
+    const firstStart = this.contentClientOrigin() + pageAxisSign(this.flowProgression) * ((position?.snapLeft ?? scroll) - scroll);
+    // LTR：firstStart 是第一栏左缘；RTL：是第一栏右缘，整屏向左展开。
+    const contentLeft = rtl
+      ? firstStart - (geometry.columns - 1) * geometry.columnStep - geometry.columnWidth
+      : firstStart;
     const host = (doc.defaultView?.frameElement as HTMLElement | null)?.getBoundingClientRect();
     const frames = bookmarkPageFrames({
       contentLeft,
-      geometry: layout.geometry,
-      roomLeft: contentLeft,
-      roomRight: docWidth - (contentLeft + layout.geometry.viewportWidth),
-      rtl: this.flowProgression === "rtl",
+      geometry,
+      measure: TEXT_MEASURE.maxEm * this.settings.fontSizePx,
+      viewportLeft: 0,
+      viewportRight: doc.documentElement.clientWidth || viewer.clientWidth,
+      rtl,
       present,
       singleSide,
     });
