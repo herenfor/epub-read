@@ -8682,7 +8682,7 @@ export class ChapterPaginator {
    * A15：当前屏各页的外缘（顶层窗口坐标）。只读已提交布局，与整开背景同一几何。
    * 滚动、固定版式或尚无布局时返回 null。
    */
-  bookmarkPageFrames(singleSide?: "left" | "right"): { top: number; columns: 1 | 2; frames: BookmarkPageFrame[] } | null {
+  bookmarkPageFrames(slot?: { side: "left" | "right"; shift: number }): { top: number; columns: 1 | 2; frames: BookmarkPageFrame[] } | null {
     const spread = this.visualSpreadOrigin();
     const doc = this.contentDoc;
     const viewer = this.viewer;
@@ -8696,7 +8696,7 @@ export class ChapterPaginator {
       viewportRight: doc.documentElement.clientWidth || viewer.clientWidth,
       rtl: spread.rtl,
       present: spread.present,
-      singleSide,
+      slot,
     });
     const dx = host?.left ?? 0;
     return {

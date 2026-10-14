@@ -298,13 +298,22 @@ describe("A15 bookmark placement in a spread", () => {
     ]);
   });
 
+  it("A13: a one-leaf chapter moved into the right slot hangs its ribbon on that slot's outer edge", () => {
+    const base = { contentLeft: 51, geometry: g, measure: 640, viewportLeft: 0, viewportRight: 1102, rtl: false } as const;
+    // Shown 550px (one column step) to the right: in its own coordinates the edge is 1102 - 550.
+    expect(bookmarkPageFrames({ ...base, present: [true, false], slot: { side: "right", shift: 550 } }))
+      .toEqual([{ lane: 0, side: "right", outerX: 552 }]);
+    expect(bookmarkPageFrames({ ...base, present: [true, false], slot: { side: "left", shift: 0 } }))
+      .toEqual([{ lane: 0, side: "left", outerX: 0 }]);
+  });
+
   it("keeps a single page ribbon next to the centred text measure, not the window edge", () => {
     // A full-width column with a 640px measure: text 380..1020 in a 1400px window.
     const single = createSpreadGeometry(1400, 40, 1);
     const base = { contentLeft: 0, geometry: single, measure: 640, viewportLeft: 0, viewportRight: 1400, rtl: false } as const;
     expect(bookmarkPageFrames({ ...base, present: [true, false] }))
       .toEqual([{ lane: 0, side: "right", outerX: 1020 + BOOKMARK_PAGE_MARGIN_MAX_PX }]);
-    expect(bookmarkPageFrames({ ...base, present: [true, false], singleSide: "left" }))
+    expect(bookmarkPageFrames({ ...base, present: [true, false], slot: { side: "left", shift: 0 } }))
       .toEqual([{ lane: 0, side: "left", outerX: 380 - BOOKMARK_PAGE_MARGIN_MAX_PX }]);
     // A phone: text nearly to the edge, the ribbon stays inside the screen.
     const phone = createSpreadGeometry(340, 40, 1);

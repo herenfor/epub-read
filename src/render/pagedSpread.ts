@@ -224,8 +224,12 @@ export function bookmarkPageFrames(input: {
   readonly rtl: boolean;
   /** 阅读顺序上第一、第二页是否有正文（末屏右页可能空）。 */
   readonly present: readonly [boolean, boolean];
-  /** 单页挂哪一侧；图片双页的左叶传 left。默认外侧（右）。 */
-  readonly singleSide?: "left" | "right";
+  /**
+   * 一页章并排（A13 裁剪显示）：这一章只露出第一页，被挪到 side 那一格，挪动了 shift 像素。
+   * 丝带挂在那一格的外缘；结果仍在本章自己的坐标里（显示时整体再挪 shift）。
+   * 单栏时只用 side。默认：单页挂外侧（右）。
+   */
+  readonly slot?: { readonly side: "left" | "right"; readonly shift: number };
 }): BookmarkPageFrame[] {
   const { contentLeft, geometry, rtl, present } = input;
   const text = Math.min(geometry.columnWidth, Math.max(0, input.measure) || geometry.columnWidth);
@@ -234,9 +238,10 @@ export function bookmarkPageFrames(input: {
   const textRight = contentLeft + (geometry.columns - 1) * geometry.columnStep + inset + text;
   const leftEdge = textLeft - Math.max(0, Math.min(textLeft - input.viewportLeft, BOOKMARK_PAGE_MARGIN_MAX_PX));
   const rightEdge = textRight + Math.max(0, Math.min(input.viewportRight - textRight, BOOKMARK_PAGE_MARGIN_MAX_PX));
-  if (geometry.columns !== 2) {
-    const side = input.singleSide ?? "right";
-    return present[0] ? [{ lane: 0, side, outerX: side === "left" ? leftEdge : rightEdge }] : [];
+  if (geometry.columns !== 2 || input.slot) {
+    const side = input.slot?.side ?? "right";
+    const shift = geometry.columns === 2 ? input.slot?.shift ?? 0 : 0;
+    return present[0] ? [{ lane: 0, side, outerX: (side === "left" ? leftEdge : rightEdge) - shift }] : [];
   }
   const frames: BookmarkPageFrame[] = [];
   for (const lane of [0, 1] as const) {

@@ -201,6 +201,29 @@ export function useNoteProjection(shelfEntries: ShelfEntry[], currentShelfId: st
       selectedText: note.selectedText,
     }));
   }, [currentNotes, spineIndex, currentChapterPath]);
+  // A13：一页章并排时另一章也显示笔记；按章缓存，引用稳定，只在笔记变化时重建。
+  const notesByChapter = useMemo(() => {
+    const map = new Map<number, ReaderNoteForPaginator[]>();
+    if (!book) return map;
+    for (const note of currentNotes) {
+      if (note.chapterPath !== spineItemPath(book, note.spineIndex)) continue;
+      const list = map.get(note.spineIndex) ?? [];
+      list.push({
+        id: note.id,
+        startTextOffset: note.startTextOffset,
+        endTextOffset: note.endTextOffset,
+        startTextSnippet: note.startTextSnippet,
+        endTextSnippet: note.endTextSnippet,
+        selectedText: note.selectedText,
+      });
+      map.set(note.spineIndex, list);
+    }
+    return map;
+  }, [currentNotes, book]);
+  const notesForChapter = useCallback(
+    (index: number) => notesByChapter.get(index) ?? EMPTY_CHAPTER_NOTES,
+    [notesByChapter],
+  );
   const noteViewModels: NoteViewModel[] = book
     ? currentNotes.map((note) => ({
         id: note.id,
@@ -213,7 +236,7 @@ export function useNoteProjection(shelfEntries: ShelfEntry[], currentShelfId: st
       }))
     : [];
 
-  return { currentNotes, currentChapterNotes, noteViewModels };
+  return { currentNotes, currentChapterNotes, notesForChapter, noteViewModels };
 }
 
 type NoteBusyState = ReturnType<typeof useNoteBusyState>;

@@ -23,7 +23,7 @@ it("turns the blank leaf, gutter and edge once while preserving leaf, pause and 
   const onRequestChapter = vi.fn();
   const props = {
     book: { spine: [0, 1, 2].map((id) => ({ idref: String(id), linear: true })) } as Book,
-    spineIndex: 0, spread: { left: 0, right: null }, gap: 24,
+    spineIndex: 0, spread: { left: 0, right: null },
     settings: { ...DEFAULT_SETTINGS, columnsPerView: 2 as const },
     userFonts: [], notes: [], anchorNonce: 0, startAtEnd: { nonce: 0, atEnd: false },
     onRequestChapter, onPageState: vi.fn(), onDisplayReady: vi.fn(),
@@ -61,7 +61,8 @@ it("turns the blank leaf, gutter and edge once while preserving leaf, pause and 
     expect(onRequestChapter).toHaveBeenCalledTimes(4);
     props.book.pageProgression = "rtl";
     await render();
-    expect((dom.container.querySelector("[data-image-chapter='0']") as HTMLElement).style.gridColumn).toBe("2");
+    // A13 crop display: the first chapter shows only its own (right) slot.
+    expect((dom.container.querySelector("[data-image-chapter='0']") as HTMLElement).style.clipPath).toBe("inset(0 0 0 50%)");
     expect(dom.container.querySelector("[data-image-chapter='0']")?.getAttribute("data-image-side")).toBe("right");
     expect(dom.container.querySelector(".is-empty")?.getAttribute("data-image-side")).toBe("left");
     await wheel(dom.container.querySelector(".is-empty")!, 120);
