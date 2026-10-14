@@ -1,4 +1,6 @@
 import { surfaceBackground } from "./readerSurfaceBackground";
+import { BookmarkRibbonLayer } from "./BookmarkRibbonLayer";
+import { RIBBON_LENGTH_PX, type RibbonBookmark, type RibbonCue, type RibbonMark } from "./bookmarkRibbons";
 import { resolveArchiveHref } from "../core/archiveReferences";
 import {
   forwardRef,
@@ -114,6 +116,9 @@ export interface ContinuousReaderViewProps {
   inputPaused?: boolean;
   /** 手机普通轻点：显隐阅读工具；连续模式不在 iframe 内阻止默认行为。 */
   onPlainTap?: () => void;
+  /** A15：本书书签与丝带动画提示。 */
+  bookmarks?: readonly RibbonBookmark[];
+  bookmarkCue?: (RibbonCue & { at: number }) | null;
   onPreciseNavigationStatus?(status: {
     requestId: number;
     status: PreciseNavigationStatus;
@@ -517,6 +522,64 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
 
     // 有界窗口投影计算
     const V = viewportHeight > 0 ? viewportHeight : 600;
+
+    // ---- A15 书签丝带：挂在书签那一行旁边，放在画布里随正文一起滚 ----
+    const bookmarksRef = useRef(props.bookmarks);
+    bookmarksRef.current = props.bookmarks;
+    const ribbonYCacheRef = useRef(new Map<string, { revision: number; y: number | null }>());
+    const [ribbonMarks, setRibbonMarks] = useState<RibbonMark[]>([]);
+    /** 纵坐标沿用跳转定位（锚点 → 内容纵坐标），每次重排只算一次。 */
+    const computeRibbonMarks = (): RibbonMark[] => {
+      const container = containerRef.current;
+      const bookmarks = bookmarksRef.current ?? [];
+      if (!container || bookmarks.length === 0) return [];
+      const hostLeft = container.getBoundingClientRect().left;
+      const revision = layoutRevisionRef.current;
+      const lines = new Map<number, RibbonMark>();
+      for (const slot of slotsRef.current.values()) {
+        if (slot.status !== "ready" || !slot.paginator.isDisplayReady) continue;
+        const box = layoutRef.current.boxFor(slot.key);
+        const own = bookmarks.filter((bookmark) => bookmark.spineIndex === slot.spineIndex);
+        const edges = own.length > 0 ? slot.paginator.scrollTextEdges() : null;
+        if (!box || !edges) continue;
+        // 左侧页边放得下横挂丝带就挂左边；放不下（手机）改为右缘小角标。
+        const room = edges.left - hostLeft;
+        const tab = room < RIBBON_LENGTH_PX + 16;
+        for (const bookmark of own) {
+          const cacheKey = `${slot.key}|${bookmark.id}`;
+          let cached = ribbonYCacheRef.current.get(cacheKey);
+          if (!cached || cached.revision !== revision) {
+            let y = slot.paginator.resolvePersistedAnchorContentY({
+              index: bookmark.anchorIndex ?? -1,
+              ratio: bookmark.anchorRatio ?? 0,
+              anchorTextOffset: bookmark.anchorTextOffset ?? null,
+              anchorTextSnippet: bookmark.anchorTextSnippet ?? null,
+            });
+            if (y === null && bookmark.mediaAnchor) y = slot.paginator.resolveMediaAnchorContentY(bookmark.mediaAnchor);
+            cached = { revision, y };
+            ribbonYCacheRef.current.set(cacheKey, cached);
+          }
+          if (cached.y === null) continue;
+          const y = Math.round(box.top + cached.y + edges.lineHalf);
+          const same = lines.get(y);
+          if (same) {
+            lines.set(y, { ...same, ids: [...same.ids, bookmark.id] });
+            continue;
+          }
+          lines.set(y, {
+            key: bookmark.id,
+            ids: [bookmark.id],
+            x: tab ? container.clientWidth - 16 : Math.max(4, room - RIBBON_LENGTH_PX - 10),
+            y,
+            kind: tab ? "tab" : "scroll",
+            side: tab ? "right" : "left",
+          });
+        }
+      }
+      return [...lines.values()];
+    };
+    const computeRibbonMarksRef = useRef(computeRibbonMarks);
+    computeRibbonMarksRef.current = computeRibbonMarks;
     // 资源预算已超时收缩后台预读窗口：只保留真正可见章，先让 LRU 有机会
     // 淘汰已离开投影区的无主资源；当前可见章仍允许暂时超预算。
     const mediaBudgetExceeded = server.mediaCacheBudgetExceeded;
@@ -2236,6 +2299,16 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
           const slot = continuousAnchor ? slotsRef.current.get(continuousAnchor.key) : null;
           return slot?.paginator.getAnchorText() ?? null;
         },
+        screenBookmarks() {
+          const el = containerRef.current;
+          if (!el) return null;
+          const top = el.scrollTop;
+          const bottom = top + el.clientHeight;
+          const ids = computeRibbonMarksRef.current()
+            .filter((mark) => mark.y >= top && mark.y <= bottom)
+            .flatMap((mark) => mark.ids);
+          return { kind: "scroll", columns: 1, pages: [{ lane: 0, side: "right", spineIndex: -1, ids }] };
+        },
         // 连续滚动没有原生吸附：宿主沿用已发布状态 + 上面的滚动锚点组装位置。
         readPositionSnapshot() {
           return null;
@@ -2500,6 +2573,11 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
       );
     }
 
+    useLayoutEffect(() => {
+      const next = computeRibbonMarksRef.current();
+      setRibbonMarks((prev) => JSON.stringify(prev) === JSON.stringify(next) ? prev : next);
+    }, [layout, slotUpdateNonce, props.bookmarks, viewportWidth]);
+
     return (
       <div
         ref={containerRef}
@@ -2609,6 +2687,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
               </div>
             );
           })}
+          <BookmarkRibbonLayer marks={ribbonMarks} cue={props.bookmarkCue ?? null} />
         </div>
         <div
           ref={visualOverlayRef}

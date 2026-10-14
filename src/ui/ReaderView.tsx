@@ -72,6 +72,8 @@ import {
   type ValueAnimation,
 } from "./pagedSlide";
 import { uiText } from "./localization/UiLanguageProvider";
+import { BookmarkRibbonLayer } from "./BookmarkRibbonLayer";
+import { pageRibbonLeft, type RibbonBookmark, type RibbonCue, type RibbonMark, type ScreenBookmarks } from "./bookmarkRibbons";
 
 export interface ReaderHandle {
   nextPage(): void;
@@ -107,6 +109,15 @@ export interface ReaderHandle {
     mediaAnchor?: MediaReadingAnchor | null;
     page?: number;
   }): number | null;
+  /** A15：当前屏上各页和挂在上面的书签（滚动模式为屏上能看到丝带的书签）。 */
+  screenBookmarks?(bookmarks: readonly RibbonBookmark[]): ScreenBookmarks | null;
+  /** A15：在当前屏第 lane 页取书签位置（双页补右页用）；该页没有正文时为 null。 */
+  captureBookmarkAnchor?(lane: 0 | 1): {
+    spineIndex: number;
+    page: number;
+    anchor: ReadingAnchor;
+    text: string | null;
+  } | null;
   /** 当前锚点元素的一行文本（书签列表展示用） */
   getAnchorText(): string | null;
   /**
@@ -257,6 +268,12 @@ export interface ReaderViewProps {
     fraction: number;
     atEnd: boolean;
   }): void;
+  /** A15：本书书签；视图自己筛出本章、按已有解析挂丝带。 */
+  bookmarks?: readonly RibbonBookmark[];
+  /** A15：放入 / 收回 / 跳转提示动画。 */
+  bookmarkCue?: (RibbonCue & { at: number }) | null;
+  /** 图片双页的叶子：丝带挂在这一侧外缘。 */
+  ribbonSide?: "left" | "right";
 }
 
 type ReaderFrame = "primary" | "secondary" | "tertiary" | "quaternary" | "quinary" | "warmup";
@@ -358,6 +375,75 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
 
   // ---- 翻页过渡：滑动（同章跟手 scrollLeft）、淡入（落位轻推）、跨章滑入 ----
   const [turnAnim, setTurnAnim] = useState<{ direction: 1 | -1 } | null>(null);
+  // ---- A15 书签丝带：只读已提交布局，落定后按当前屏重挂 ----
+  const [ribbonMarks, setRibbonMarks] = useState<RibbonMark[]>([]);
+  const [ribbonMotion, setRibbonMotion] = useState(false);
+  const ribbonMotionRef = useRef(false);
+  const ribbonSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bookmarksRef = useRef(props.bookmarks);
+  bookmarksRef.current = props.bookmarks;
+  const ribbonSideRef = useRef(props.ribbonSide);
+  ribbonSideRef.current = props.ribbonSide;
+  const readScreenBookmarks = (bookmarks: readonly RibbonBookmark[]) => {
+    const p = paginatorRef.current;
+    const slot = activeSlotRef.current;
+    if (!p || !slot || slot.state.status !== "ready" || slot.spineIndex === null) return null;
+    const placed = p.bookmarkPageFrames(ribbonSideRef.current);
+    if (!placed) return null;
+    const page = p.currentPage;
+    const spineIndex = slot.spineIndex;
+    const own = bookmarks.filter((bookmark) => bookmark.spineIndex === spineIndex);
+    return {
+      top: placed.top,
+      columns: placed.columns,
+      pages: placed.frames.map((frame) => ({
+        lane: frame.lane,
+        side: frame.side,
+        outerX: frame.outerX,
+        spineIndex,
+        ids: own.filter((bookmark) => {
+          const placement = p.resolveBookmarkPlacement(bookmark);
+          return placement?.page === page && placement.lane === frame.lane;
+        }).map((bookmark) => bookmark.id),
+      })),
+    };
+  };
+  const refreshRibbonsRef = useRef<() => void>(() => {});
+  refreshRibbonsRef.current = () => {
+    if (ribbonSettleTimerRef.current) clearTimeout(ribbonSettleTimerRef.current);
+    ribbonSettleTimerRef.current = null;
+    ribbonMotionRef.current = false;
+    setRibbonMotion(false);
+    const host = readerContainerRef.current?.getBoundingClientRect();
+    const screen = host ? readScreenBookmarks(bookmarksRef.current ?? []) : null;
+    if (!host || !screen) {
+      setRibbonMarks((marks) => marks.length === 0 ? marks : []);
+      return;
+    }
+    setRibbonMarks(screen.pages.filter((page) => page.ids.length > 0).map((page) => ({
+      key: `${page.spineIndex}:${page.lane}`,
+      ids: page.ids,
+      x: pageRibbonLeft(page.side, page.outerX) - host.left,
+      y: screen.top - host.top,
+      kind: "page",
+      side: page.side,
+    })));
+  };
+  /** 翻页途中丝带先淡出；没有落到新页（回弹）时稍后按原页恢复。 */
+  const markRibbonMotion = (settleMs = 0): void => {
+    if (!ribbonMotionRef.current) {
+      ribbonMotionRef.current = true;
+      setRibbonMotion(true);
+    }
+    if (ribbonSettleTimerRef.current) clearTimeout(ribbonSettleTimerRef.current);
+    ribbonSettleTimerRef.current = settleMs > 0 ? setTimeout(() => refreshRibbonsRef.current(), settleMs) : null;
+  };
+  useEffect(() => {
+    refreshRibbonsRef.current();
+  }, [props.bookmarks, props.ribbonSide]);
+  useEffect(() => () => {
+    if (ribbonSettleTimerRef.current) clearTimeout(ribbonSettleTimerRef.current);
+  }, []);
   const turnAnimTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** 同章连续翻页先 finish；新章节导航取消旧动画，不能提交到复用后的文档。 */
   const slideAnimRef = useRef<ValueAnimation | null>(null);
@@ -477,6 +563,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     drag: { frame: SlideFrame; scrollLeft: number; samples: Array<{ t: number; x: number }> } | null = null,
   ): boolean => {
     if (resolvedTurnAnimation() !== "slide") return false;
+    markRibbonMotion(1200);
     const continuing = drag !== null;
     const frame = continuing ? drag.frame : { from: plan.from, to: plan.to };
     const start = continuing ? drag.scrollLeft : plan.from;
@@ -743,6 +830,8 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         // 用户位置提交由 paginator 的 setUserCommitHandler 在真实落定后发出；
         // 这里只转发普通状态，绝不再按页号变化+时间窗推断用户输入。
         onPageStateRef.current(state);
+        if (state.status === "ready") refreshRibbonsRef.current();
+        else markRibbonMotion();
         if (state.status !== "ready" || !state.empty || autoAdvanceRef.current) return;
         const next = nextLinearIndex(book, spineIndexRef.current, 1);
         if (next >= 0) {
@@ -1427,6 +1516,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     lastStateRef.current = promotedState.status;
     lastReadyEmptyRef.current = promotedState.empty;
     onPageStateRef.current(promotedState);
+    refreshRibbonsRef.current();
     // B-151：空章缓存被提升时也要走同一自动前进规则；末章空章才发布 ready。
     if (promotedState.empty && next.spineIndex !== null) {
       const nextIndex = nextLinearIndex(book, next.spineIndex, 1);
@@ -2047,6 +2137,8 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   };
   updateSwipePreviewRef.current = (dx) => {
     const preview = swipePreviewRef.current;
+    if (dx !== null && Math.abs(dx) > 2) markRibbonMotion();
+    else if (dx === null && ribbonMotionRef.current) markRibbonMotion(450);
     preview.dx = dx;
     if (dx === null) {
       if (preview.frame) window.cancelAnimationFrame(preview.frame);
@@ -2142,6 +2234,19 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       },
       resolveBookmarkPage(bookmark) {
         return paginatorRef.current?.resolveBookmarkPage?.(bookmark) ?? bookmark.page ?? null;
+      },
+      screenBookmarks(bookmarks) {
+        const screen = readScreenBookmarks(bookmarks);
+        return screen
+          ? { kind: "paged", columns: screen.columns, pages: screen.pages.map(({ lane, side, spineIndex, ids }) => ({ lane, side, spineIndex, ids })) }
+          : null;
+      },
+      captureBookmarkAnchor(lane) {
+        const p = paginatorRef.current;
+        const slot = activeSlotRef.current;
+        if (!p || !slot || slot.spineIndex === null || slot.state.status !== "ready") return null;
+        const captured = p.captureLaneAnchor(lane);
+        return captured ? { spineIndex: slot.spineIndex, page: p.currentPage, ...captured } : null;
       },
       getAnchorText() {
         return paginatorRef.current?.getAnchorText() ?? null;
@@ -2363,6 +2468,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         className="reader-visual-overlay-host"
         aria-hidden="true"
       />
+      {!book.fixedLayout && <BookmarkRibbonLayer marks={ribbonMarks} cue={props.bookmarkCue ?? null} motion={ribbonMotion} />}
       <div ref={swipeHintRef} className="reader-swipe-hint" aria-hidden="true" />
       {edgeTurnZoneSpecs(tapRouting).map((zone) => <EdgeTurnZone key={zone.side}
         direction={zone.direction}

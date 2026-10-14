@@ -1,0 +1,151 @@
+/* A15 书签丝带：参数照演示 v13（中号 14×48、78%、离外缘 14px）。 */
+.bookmark-ribbon-layer {
+  --bookmark-ribbon: #c0392f;
+  --ribbon-w: 14px;
+  --ribbon-h: 48px;
+  --ribbon-opacity: 0.78;
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  /* 在正文之上、左右翻页区（25）之下。 */
+  z-index: 24;
+  transition: opacity 120ms ease-out;
+}
+
+[data-theme="dark"] .bookmark-ribbon-layer,
+[data-theme="gray"] .bookmark-ribbon-layer {
+  --bookmark-ribbon: #e0645c;
+}
+
+/* 翻页途中丝带跟不上正文，先淡出，落定后按新页重画。 */
+.bookmark-ribbon-layer[data-motion="true"] {
+  opacity: 0;
+  transition-duration: 60ms;
+}
+
+.bookmark-ribbon {
+  position: absolute;
+  background: var(--bookmark-ribbon);
+  opacity: var(--ribbon-opacity);
+}
+
+.bookmark-ribbon.is-page {
+  width: var(--ribbon-w);
+  height: var(--ribbon-h);
+  margin-top: -2px;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 80%, 0 100%);
+  transform-origin: top center;
+}
+
+/* 电脑滚动：书签那一行左侧页边横挂。 */
+.bookmark-ribbon.is-scroll {
+  width: var(--ribbon-h);
+  height: var(--ribbon-w);
+  margin-top: calc(var(--ribbon-w) / -2);
+  clip-path: polygon(0 0, 100% 0, 80% 50%, 100% 100%, 0 100%);
+  transform-origin: left center;
+}
+
+/* 手机滚动：右边缘探出的燕尾小角标。 */
+.bookmark-ribbon.is-tab {
+  width: 16px;
+  height: 12px;
+  margin-top: -6px;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%, 40% 50%);
+  transform-origin: right center;
+}
+
+.bookmark-ribbon.is-page.ribbon-drop {
+  animation: bookmarkRibbonDrop 0.5s cubic-bezier(0.2, 0.9, 0.25, 1.15) both,
+    bookmarkRibbonSway 0.7s 0.5s ease-out;
+}
+.bookmark-ribbon.is-page.ribbon-lift { animation: bookmarkRibbonLift 0.3s ease-in both; }
+.bookmark-ribbon.is-page.ribbon-peek { animation: bookmarkRibbonPeek 0.7s 0.26s ease-in-out both; }
+
+.bookmark-ribbon.is-scroll.ribbon-drop { animation: bookmarkRibbonDropX 0.45s cubic-bezier(0.2, 0.9, 0.25, 1.15) both; }
+.bookmark-ribbon.is-scroll.ribbon-lift { animation: bookmarkRibbonLiftX 0.3s ease-in both; }
+.bookmark-ribbon.is-scroll.ribbon-peek,
+.bookmark-ribbon.is-tab.ribbon-peek { animation: bookmarkRibbonPeekX 0.7s 0.26s ease-in-out both; }
+.bookmark-ribbon.is-tab.ribbon-drop { animation: bookmarkRibbonDropXR 0.45s cubic-bezier(0.2, 0.9, 0.25, 1.15) both; }
+.bookmark-ribbon.is-tab.ribbon-lift { animation: bookmarkRibbonLiftXR 0.3s ease-in both; }
+
+@keyframes bookmarkRibbonDrop {
+  from { transform: translateY(calc(-1 * var(--ribbon-h) - 10px)) scaleY(0.6); }
+  to { transform: translateY(0) scaleY(1); }
+}
+@keyframes bookmarkRibbonSway {
+  0% { transform: rotate(0); }
+  35% { transform: rotate(4deg); }
+  70% { transform: rotate(-2deg); }
+  100% { transform: rotate(0); }
+}
+@keyframes bookmarkRibbonLift { to { transform: translateY(-120%); } }
+/* 跳转提示：顶端固定、往下伸长，不整体下移（不和页边断开）。 */
+@keyframes bookmarkRibbonPeek {
+  0%, 100% { transform: scaleY(1); }
+  40% { transform: scaleY(1.3); }
+  70% { transform: scaleY(0.94); }
+}
+@keyframes bookmarkRibbonDropX { from { transform: translateX(-120%); opacity: 0; } to { transform: none; } }
+@keyframes bookmarkRibbonLiftX { to { transform: translateX(-120%); opacity: 0; } }
+@keyframes bookmarkRibbonDropXR { from { transform: translateX(120%); opacity: 0; } to { transform: none; } }
+@keyframes bookmarkRibbonLiftXR { to { transform: translateX(120%); opacity: 0; } }
+@keyframes bookmarkRibbonPeekX {
+  0%, 100% { transform: scaleX(1); }
+  40% { transform: scaleX(1.3); }
+  70% { transform: scaleX(0.94); }
+}
+
+/* 跳转光晕：丝带处一团（从 50% 起），尖端下方一道向下渐淡的柔光，方向和伸长一致。 */
+.bookmark-ribbon-glow {
+  position: absolute;
+  display: block;
+  border-radius: 50%;
+  pointer-events: none;
+}
+.bookmark-ribbon-glow.is-bloom {
+  width: 56px;
+  height: calc(var(--ribbon-h) * 1.3 + 20px);
+  margin: -10px 0 0 -28px;
+  filter: blur(7px);
+  background: radial-gradient(ellipse at 50% 35%, color-mix(in srgb, var(--bookmark-ribbon) 60%, transparent) 0, transparent 70%);
+  animation: bookmarkRibbonBloom 0.75s 0.26s ease-out both;
+}
+.bookmark-ribbon-glow.is-trail {
+  width: 44px;
+  height: calc(var(--ribbon-h) * 3.2);
+  margin: calc(var(--ribbon-h) * 0.6) 0 0 -22px;
+  filter: blur(9px);
+  transform-origin: top center;
+  background: radial-gradient(ellipse at 50% 0,
+    color-mix(in srgb, var(--bookmark-ribbon) 50%, transparent) 0,
+    color-mix(in srgb, var(--bookmark-ribbon) 18%, transparent) 45%, transparent 72%);
+  animation: bookmarkRibbonTrail 0.9s 0.26s cubic-bezier(0.25, 0.8, 0.3, 1) both;
+}
+/* 滚动模式只要丝带处一团，横向。 */
+.bookmark-ribbon-glow.is-bloom.is-line {
+  width: calc(var(--ribbon-h) * 1.3 + 20px);
+  height: 40px;
+  margin: -20px 0 0 calc(var(--ribbon-h) * -0.65 - 10px);
+  background: radial-gradient(ellipse at 35% 50%, color-mix(in srgb, var(--bookmark-ribbon) 60%, transparent) 0, transparent 70%);
+}
+
+@keyframes bookmarkRibbonBloom {
+  0% { transform: scale(0.7); opacity: 0.5; }
+  40% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(1.08); opacity: 0; }
+}
+@keyframes bookmarkRibbonTrail {
+  0% { transform: scaleY(0.15); opacity: 0.5; }
+  40% { transform: scaleY(1); opacity: 1; }
+  100% { transform: translateY(14px) scaleY(1.05); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bookmark-ribbon,
+  .bookmark-ribbon-glow {
+    animation-duration: 0.01s !important;
+    animation-delay: 0s !important;
+  }
+}

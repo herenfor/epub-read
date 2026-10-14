@@ -303,6 +303,9 @@ describe("A15 bookmark placement in a spread", () => {
       contentLeft: 400, geometry: single, roomLeft: 400, roomRight: 400, rtl: false, present: [true, false],
     })).toEqual([{ lane: 0, side: "right", outerX: 1000 + BOOKMARK_PAGE_MARGIN_MAX_PX }]);
     expect(bookmarkPageFrames({
+      contentLeft: 400, geometry: single, roomLeft: 30, roomRight: 400, rtl: false, present: [true, false], singleSide: "left",
+    })).toEqual([{ lane: 0, side: "left", outerX: 370 }]);
+    expect(bookmarkPageFrames({
       contentLeft: 20, geometry: single, roomLeft: 20, roomRight: 20, rtl: false, present: [false, false],
     })).toEqual([]);
   });

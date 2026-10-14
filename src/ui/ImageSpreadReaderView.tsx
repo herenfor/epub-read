@@ -65,6 +65,14 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
     diagnose: () => `image spread ${latest.current.spread.left}/${latest.current.spread.right ?? "blank"}\n${active()?.diagnose() ?? ""}`,
     getReadingAnchor: () => active()?.getReadingAnchor() ?? null,
     resolveBookmarkPage: (bookmark) => active()?.resolveBookmarkPage?.(bookmark) ?? null,
+    // Leaf order is reading order: the first leaf is lane 0 wherever it sits.
+    screenBookmarks: (bookmarks) => {
+      const leaves = [leftHandle.current, rightHandle.current];
+      const pages = leaves.flatMap((leaf, lane) => (leaf?.screenBookmarks?.(bookmarks)?.pages ?? [])
+        .map((page) => ({ ...page, lane: lane as 0 | 1 })));
+      return pages.length > 0 ? { kind: "paged", columns: 2, pages } : null;
+    },
+    captureBookmarkAnchor: (lane) => (lane === 0 ? leftHandle.current : rightHandle.current)?.captureBookmarkAnchor?.(0) ?? null,
     getAnchorText: () => active()?.getAnchorText() ?? null,
     readPositionSnapshot: (options) => {
       const snapshot = active()?.readPositionSnapshot(options);
@@ -101,6 +109,7 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
       <Page {...props}
         ref={side === "left" ? leftHandle : rightHandle}
         spineIndex={index}
+        ribbonSide={(side === "left") !== rtl ? "left" : "right"}
         settings={{ ...props.settings, columnsPerView: 1, preloadNextChapter: false,
           pageMarginsPx: { ...props.settings.pageMarginsPx, left: 0, right: 0 } }}
         anchor={selected ? props.anchor : undefined}

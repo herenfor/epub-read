@@ -221,13 +221,16 @@ export function bookmarkPageFrames(input: {
   readonly rtl: boolean;
   /** 阅读顺序上第一、第二页是否有正文（末屏右页可能空）。 */
   readonly present: readonly [boolean, boolean];
+  /** 单页挂哪一侧；图片双页的左叶传 left。默认外侧（右）。 */
+  readonly singleSide?: "left" | "right";
 }): BookmarkPageFrame[] {
   const { contentLeft, geometry, rtl, present } = input;
   const leftEdge = contentLeft - Math.max(0, Math.min(input.roomLeft, BOOKMARK_PAGE_MARGIN_MAX_PX));
   const lastRight = contentLeft + (geometry.columns - 1) * geometry.columnStep + geometry.columnWidth;
   const rightEdge = lastRight + Math.max(0, Math.min(input.roomRight, BOOKMARK_PAGE_MARGIN_MAX_PX));
   if (geometry.columns !== 2) {
-    return present[0] ? [{ lane: 0, side: "right", outerX: rightEdge }] : [];
+    const side = input.singleSide ?? "right";
+    return present[0] ? [{ lane: 0, side, outerX: side === "left" ? leftEdge : rightEdge }] : [];
   }
   const frames: BookmarkPageFrame[] = [];
   for (const lane of [0, 1] as const) {
