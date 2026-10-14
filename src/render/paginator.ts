@@ -86,8 +86,10 @@ import {
   type SpreadLayout,
   spreadForColumn,
   spreadStart,
+  visibleColumnInterval,
   visibleLeafRange,
 } from "./pagedSpread";
+import { installPageBackgroundLanes, type PageBackgroundLanes } from "./pageBackgroundLanes";
 import { imageRequestFromTarget, isImageBlankAtPoint, prepareImageHitAreas } from "./imageActivation";
 import { columnAtPoint, containingFragmentAtPoint, type FragmentSpace } from "./fragmentGeometry";
 import {
@@ -2497,6 +2499,8 @@ export class ChapterPaginator {
   /** 已创建的 reader-owned 标题内层布局盒，用于重测和清理时精确恢复。 */
   private centeredTitleFix: CenteredTitleFix | null = null;
   private contentDoc: Document | null = null;
+  /** A12：本文档双页时的分页背景层；lanes 为 null 表示书没有整页背景图。 */
+  private pageBackground: { doc: Document; lanes: PageBackgroundLanes | null } | null = null;
   private step = 0;
   private pageWidth = 0;
   /** 本次布局的分栏几何（B 的 computePagedGeometry 结果）。 */
@@ -9524,6 +9528,7 @@ export class ChapterPaginator {
   }
 
   private cleanupDoc(): void {
+    this.releasePageBackground();
     this.themeController?.dispose();
     this.themeController = null;
     this.abortMeasureWaits();
@@ -9632,7 +9637,44 @@ export class ChapterPaginator {
     this.measureControllers.clear();
   }
 
+  private releasePageBackground(): void {
+    this.pageBackground?.lanes?.dispose();
+    this.pageBackground = null;
+  }
+
+  /**
+   * A12：双页分页时，书的整页背景图改由左右两个显示层按页铺，有正文的页才铺。
+   * 只读已提交的布局与页号，不参与分页；单页/滚动/固定版式恢复原样。
+   */
+  private syncPageBackground(): void {
+    const doc = this.contentDoc;
+    const viewer = this.viewer;
+    const layout = this.spreadLayout;
+    if (this.pageBackground && this.pageBackground.doc !== doc) this.releasePageBackground();
+    if (!doc || !viewer || !layout || this.scrollMode || this.fixedLayout || layout.geometry.columns !== 2) {
+      this.releasePageBackground();
+      return;
+    }
+    if (!this.pageBackground) this.pageBackground = { doc, lanes: installPageBackgroundLanes(doc) };
+    const lanes = this.pageBackground.lanes;
+    if (!lanes) return;
+    const page = this.metrics.currentPage;
+    const first = !layout.empty && visibleColumnInterval(layout, page, 0) !== null;
+    const second = !layout.empty && visibleColumnInterval(layout, page, 1) !== null;
+    const rect = viewer.getBoundingClientRect();
+    const paddingLeft = parseFloat(doc.defaultView?.getComputedStyle(viewer).paddingLeft ?? "") || 0;
+    // viewer 内容盒正好是“两栏 + 栏距”，中线就是两页分界，与翻页方向无关。
+    const splitX = rect.left + (viewer.clientLeft || 0) + paddingLeft + layout.geometry.viewportWidth / 2;
+    const rtl = this.flowProgression === "rtl";
+    lanes.update({ splitX, leftFilled: rtl ? second : first, rightFilled: rtl ? first : second });
+  }
+
   private emit(s: ChapterState): void {
+    try {
+      this.syncPageBackground();
+    } catch {
+      // 背景层只影响观感；读不到几何时保持上一状态，不拦截阅读状态。
+    }
     this.lastState = s;
     if (!this.disposed) this.onState(s);
   }
