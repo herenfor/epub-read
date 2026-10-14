@@ -3,19 +3,24 @@ import { forwardRef, useImperativeHandle, useRef, useState, type ForwardRefExoti
 import { nextLinearIndex } from "../core/book";
 import type { ChapterState } from "../render/paginator";
 import type { ReaderHandle, ReaderViewProps } from "./ReaderView";
-import type { ImageChapterSpread } from "./imageChapterSpreads";
+import type { SingleLeafSpread } from "./singleLeafSpreads";
 import { EdgeTurnZone } from "./EdgeTurnZone";
 import { edgeTurnZoneSpecs, ReaderTurnOwnerContext, useReaderTapRouting } from "./readerTapRouting";
 import { WheelTurnAccumulator } from "./turnIntent";
 
 interface Props extends ReaderViewProps {
-  spread: ImageChapterSpread;
-  gap: number;
+  spread: SingleLeafSpread;
   onUnsupported(): void;
   Page: ForwardRefExoticComponent<ReaderViewProps & RefAttributes<ReaderHandle>>;
 }
 
-/** Two isolated original documents, one visual spread. No synthetic chapter IDs or DOM merging. */
+/**
+ * Two isolated original documents, one visual spread. No synthetic chapter IDs or DOM merging.
+ *
+ * A13 裁剪显示：两章都按原来的整开双页几何排版（栏宽、页边、CSS 都不变），各自只露出
+ * 第一页；阅读顺序第二章整体挪一个栏步长到另一格。任何一章不止一页（内容伸进第二页）就
+ * 不并排，退回单章显示；两章都确认前不显示。
+ */
 export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function ImageSpreadReaderView(props, ref) {
   const rtl = effectivePageProgression(props.book.pageProgression, props.settings, props.book.fixedLayout) === "rtl";
   const leftHandle = useRef<ReaderHandle>(null);
@@ -24,6 +29,8 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
   const displayed = useRef(new Set<number>());
   const outerWheel = useRef(new WheelTurnAccumulator());
   const [ready, setReady] = useState(false);
+  /** 第二章挪到另一格的距离（= 已提交几何的栏步长）；确认前为 null。 */
+  const [step, setStep] = useState<number | null>(null);
   const latest = useRef(props);
   latest.current = props;
   const active = () => latest.current.spineIndex === latest.current.spread.left ? leftHandle.current : rightHandle.current;
@@ -97,6 +104,14 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
     const p = latest.current;
     const state = states.current.get(p.spineIndex);
     if (displayed.current.size < (p.spread.right === null ? 1 : 2) || state?.status !== "ready") return;
+    const first = leftHandle.current;
+    // 没有这项查询的视图（测试替身）不挪动；真实分页视图没有双页几何时不并排。
+    const columnStep = first?.spreadColumnStep ? first.spreadColumnStep() : 0;
+    if (columnStep === null) {
+      p.onUnsupported();
+      return;
+    }
+    setStep(columnStep);
     setReady(true);
     p.onPageState(spreadState(state));
     p.onDisplayReady(p.restoreTicket ?? null);
@@ -104,14 +119,18 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
   const page = (index: number, side: "left" | "right") => {
     const selected = index === props.spineIndex;
     const Page = props.Page;
-    return <div className="reader-image-leaf" data-image-chapter={index} data-image-side={rtl ? (side === "left" ? "right" : "left") : side}
-      style={{ gridColumn: (side === "left") !== rtl ? 1 : 2, gridRow: 1 }}>
+    // side 是阅读顺序（left = 第一章）；physical 是显示在哪一格。第一章的第一页本来就在
+    // 自己那一格，第二章挪一个栏步长过去。
+    const physical: "left" | "right" = (side === "left") !== rtl ? "left" : "right";
+    const shift = side === "left" || step === null ? 0 : (rtl ? -step : step);
+    return <div className="reader-image-leaf" data-image-chapter={index} data-image-side={physical}
+      style={{ clipPath: physical === "left" ? "inset(0 50% 0 0)" : "inset(0 0 0 50%)" }}>
+      <div className="reader-image-leaf-shift" style={shift ? { transform: `translateX(${shift}px)` } : undefined}>
       <Page {...props}
         ref={side === "left" ? leftHandle : rightHandle}
         spineIndex={index}
-        ribbonSide={(side === "left") !== rtl ? "left" : "right"}
-        settings={{ ...props.settings, columnsPerView: 1, preloadNextChapter: false,
-          pageMarginsPx: { ...props.settings.pageMarginsPx, left: 0, right: 0 } }}
+        leafSlot={{ side: physical, shift }}
+        settings={{ ...props.settings, preloadNextChapter: false }}
         anchor={selected ? props.anchor : undefined}
         anchorNonce={selected ? props.anchorNonce : 0}
         initialAnchor={selected ? props.initialAnchor : null}
@@ -119,14 +138,16 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
         preciseTarget={selected ? props.preciseTarget : null}
         restoreTicket={selected ? props.restoreTicket : null}
         startAtEnd={selected ? props.startAtEnd : { nonce: 0, atEnd: false }}
-        notes={selected ? props.notes : []}
+        notes={selected ? props.notes : props.notesForChapter?.(index) ?? []}
         inputPaused={props.inputPaused || !ready}
         onPageState={(state) => {
           states.current.set(index, state);
           // Raw XHTML eligibility is not a page-count measurement. Author
           // CSS that produces multiple/empty leaves must keep the normal
           // paginator; never skip unseen pages by jumping to the next pair.
-          if (state.status === "ready" && (state.empty || state.pageCount !== 1)) {
+          // 整开几何下只能占第一页：伸进第二页（第二栏）也不并排。
+          if (state.status === "ready" && (state.empty || state.pageCount !== 1 ||
+            state.effectiveColumns !== 2 || (state.leafRange?.total ?? 1) > 1)) {
             latest.current.onUnsupported();
             return;
           }
@@ -151,6 +172,7 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
         onUserProgressSample={selected ? props.onUserProgressSample : undefined}
         onPreciseNavigationStatus={selected ? props.onPreciseNavigationStatus : undefined}
       />
+      </div>
     </div>;
   };
   return <div className="reader-image-spread" data-image-spread-ready={ready}
@@ -171,12 +193,12 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
       event.preventDefault();
       turn(direction);
     }}
-    style={{ gap: props.gap, paddingLeft: props.settings.pageMarginsPx?.left ?? 0,
-      paddingRight: props.settings.pageMarginsPx?.right ?? 0 }}>
+    >
     <ReaderTurnOwnerContext.Provider value={turnOwner}>
       {page(props.spread.left, "left")}
       {props.spread.right !== null ? page(props.spread.right, "right") : <div className="reader-image-leaf is-empty"
-        data-image-side={rtl ? "left" : "right"} style={{ gridColumn: rtl ? 1 : 2, gridRow: 1 }} aria-hidden="true" />}
+        data-image-side={rtl ? "left" : "right"} style={{ clipPath: rtl ? "inset(0 50% 0 0)" : "inset(0 0 0 50%)" }}
+        aria-hidden="true" />}
     </ReaderTurnOwnerContext.Provider>
     {edgeTurnZoneSpecs(tapRouting).map((zone) => <EdgeTurnZone key={zone.side}
       direction={zone.direction} side={zone.sideProp} region={zone.region}

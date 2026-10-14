@@ -3522,7 +3522,7 @@ export default function App() {
   }, [readerHistory, currentReaderPosition, spineIndex, handleFootnoteClose]);
 
   // ---- 正文笔记 ----
-  const { currentNotes, currentChapterNotes, noteViewModels } = useNoteProjection(shelfEntries, currentShelfId, book, spineIndex);
+  const { currentNotes, currentChapterNotes, notesForChapter, noteViewModels } = useNoteProjection(shelfEntries, currentShelfId, book, spineIndex);
   const { handleSaveNote, handleDeleteNote, handleEditNote } = useNoteActions({
     ...noteBusyState, currentShelfId, currentNotes, setShelfEntries, setRuntimeIssues,
     noteComposer, book, setForeground, shelfEntriesRef, openComposer,
@@ -5488,6 +5488,7 @@ export default function App() {
                   compareOriginal={visualCompareOriginal}
                   userFonts={renderUserFonts}
                   notes={currentChapterNotes}
+                  notesForChapter={notesForChapter}
                   onSelectionContextMenu={(payload) => {
                     if (!payload) {
                       setForeground((current) =>

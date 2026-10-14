@@ -21,6 +21,7 @@ export class SingleLeafSpreads {
   private single = new Map<number, boolean>();
   private runStarts = new Map<number, number>();
   private spreads = new Map<number, SingleLeafSpread | null>();
+  private rejected = new Set<number>();
   private readonly ordinals: number[];
 
   constructor(
@@ -40,6 +41,17 @@ export class SingleLeafSpreads {
   reject(spread: SingleLeafSpread): void {
     this.spreads.set(spread.left, null);
     if (spread.right !== null) this.spreads.set(spread.right, null);
+    this.rejected.add(spread.left);
+    if (spread.right !== null) this.rejected.add(spread.right);
+  }
+
+  /**
+   * 版式变了（窗口、字号等）：之前因“不止一页”退回单章的组下次进入时重新确认。
+   * 分段和配对只看章节判断，不受影响。
+   */
+  retryRejected(): void {
+    for (const index of this.rejected) this.spreads.delete(index);
+    this.rejected.clear();
   }
 
   private forcedStart(index: number): boolean {

@@ -42,7 +42,8 @@ import { createSettingsReloadDebouncer } from "./settingsReload";
 import { TurnIntentBuffer, WheelTurnAccumulator } from "./turnIntent";
 import { ReadingWarmupPlan, backgroundPreparation, type WarmupTicket } from "./readerWarmup";
 import { ContinuousReaderView } from "./ContinuousReaderView";
-import { ImageChapterSpreads, type ImageChapterSpread } from "./imageChapterSpreads";
+import { SingleLeafSpreads, type SingleLeafSpread } from "./singleLeafSpreads";
+import { createLeafChapterClassifier } from "./leafChapterCandidates";
 import { ImageSpreadReaderView } from "./ImageSpreadReaderView";
 import { EdgeTurnZone } from "./EdgeTurnZone";
 import { EdgeTurnFeedbackContext, useEdgeTurnFeedbackOwner } from "./edgeTurnFeedback";
@@ -118,6 +119,8 @@ export interface ReaderHandle {
     anchor: ReadingAnchor;
     text: string | null;
   } | null;
+  /** A13：已提交双页几何的栏步长（一页章并排时把第二章挪到右格用）；没有布局时为 null。 */
+  spreadColumnStep?(): number | null;
   /** 当前锚点元素的一行文本（书签列表展示用） */
   getAnchorText(): string | null;
   /**
@@ -182,6 +185,8 @@ export interface ReaderViewProps {
   compareOriginal?: boolean;
   /** 用户上传字体的会话内资源（family + blob URL） */
   userFonts: Array<{ family: string; url: string }>;
+  /** A13：一页章并排时，另一章（非当前章）的笔记；返回值需稳定。 */
+  notesForChapter?(spineIndex: number): ReaderNoteForPaginator[];
   /** 当前章节笔记；更新仅重建 CSS Highlight，不触发章节重载。 */
   notes: ReaderNoteForPaginator[];
   onPageState(s: ChapterState): void;
@@ -272,8 +277,11 @@ export interface ReaderViewProps {
   bookmarks?: readonly RibbonBookmark[];
   /** A15：放入 / 收回 / 跳转提示动画。 */
   bookmarkCue?: (RibbonCue & { at: number }) | null;
-  /** 图片双页的叶子：丝带挂在这一侧外缘。 */
-  ribbonSide?: "left" | "right";
+  /**
+   * A13 一页章并排的叶子：这一章只露出第一页，显示在 side 那一格，整体挪动了 shift 像素；
+   * 丝带挂在那一格的外缘。
+   */
+  leafSlot?: { side: "left" | "right"; shift: number };
   /** 手机右上角看不见的书签点击区（与书签按钮相同）。 */
   onBookmarkCornerTap?(): void;
 }
@@ -384,13 +392,13 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   const ribbonSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bookmarksRef = useRef(props.bookmarks);
   bookmarksRef.current = props.bookmarks;
-  const ribbonSideRef = useRef(props.ribbonSide);
-  ribbonSideRef.current = props.ribbonSide;
+  const leafSlotRef = useRef(props.leafSlot);
+  leafSlotRef.current = props.leafSlot;
   const readScreenBookmarks = (bookmarks: readonly RibbonBookmark[]) => {
     const p = paginatorRef.current;
     const slot = activeSlotRef.current;
     if (!p || !slot || slot.state.status !== "ready" || slot.spineIndex === null) return null;
-    const placed = p.bookmarkPageFrames?.(ribbonSideRef.current);
+    const placed = p.bookmarkPageFrames?.(leafSlotRef.current);
     if (!placed) return null;
     const page = p.currentPage;
     const spineIndex = slot.spineIndex;
@@ -442,7 +450,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   };
   useEffect(() => {
     refreshRibbonsRef.current();
-  }, [props.bookmarks, props.ribbonSide]);
+  }, [props.bookmarks, props.leafSlot?.side, props.leafSlot?.shift]);
   useEffect(() => () => {
     if (ribbonSettleTimerRef.current) clearTimeout(ribbonSettleTimerRef.current);
   }, []);
@@ -2248,6 +2256,10 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
           ? { kind: "paged", columns: screen.columns, pages: screen.pages.map(({ lane, side, spineIndex, ids }) => ({ lane, side, spineIndex, ids })) }
           : null;
       },
+      spreadColumnStep() {
+        const geometry = paginatorRef.current?.spreadLayoutSnapshot?.geometry;
+        return geometry && geometry.columns === 2 ? geometry.columnStep : null;
+      },
       captureBookmarkAnchor(lane) {
         const p = paginatorRef.current;
         const slot = activeSlotRef.current;
@@ -2493,10 +2505,12 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
   const edgeFeedback = useEdgeTurnFeedbackOwner();
   const host = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
-  const imageSpreads = useMemo(() => new ImageChapterSpreads(props.book,
-    (path, signal) => props.server.readTextFor(path, signal)), [props.book, props.server]);
+  // A13：整图章和短文字章（只读 XHTML 判断）连续成段，两两并排；能否并排由显示确认。
+  const imageSpreads = useMemo(() => new SingleLeafSpreads(props.book,
+    createLeafChapterClassifier(props.book, (path, signal) => props.server.readTextFor(path, signal))),
+  [props.book, props.server]);
   const [imagePlan, setImagePlan] = useState<{
-    resolver: ImageChapterSpreads; index: number; spread: ImageChapterSpread | null;
+    resolver: SingleLeafSpreads; index: number; spread: SingleLeafSpread | null;
   } | null>(null);
   const requestedSpread = props.settings.readingMode !== "scroll" &&
     props.settings.columnsPerView === 2 && !props.book.fixedLayout;
@@ -2504,7 +2518,11 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
     const element = host.current;
     if (!element) return;
     setWidth(element.clientWidth);
-    const observer = new ResizeObserver(() => setWidth(element.clientWidth));
+    setHeight(element.clientHeight);
+    const observer = new ResizeObserver(() => {
+      setWidth(element.clientWidth);
+      setHeight(element.clientHeight);
+    });
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
@@ -2520,6 +2538,14 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
     });
     return () => controller.abort();
   }, [imageSpreads, props.spineIndex, props.anchorNonce, requestedSpread]);
+  // 版式身份变了（窗口高宽、字号、行距、页边距、字体……）：退回过单章的组下次进入时重新确认。
+  // 只换主题颜色不影响排版，不算。
+  const [height, setHeight] = useState(0);
+  const { theme: _theme, ...layoutSettings } = props.settings;
+  const layoutIdentity = `${width}x${height}|${JSON.stringify(layoutSettings)}`;
+  useEffect(() => {
+    imageSpreads.retryRejected();
+  }, [imageSpreads, layoutIdentity]);
   const imageGeometry = createSpreadGeometry(Math.max(0, width -
     (props.settings.pageMarginsPx?.left ?? 0) - (props.settings.pageMarginsPx?.right ?? 0)), props.settings.gapPx, 2);
   const planned = imageSpreads.peek(props.spineIndex) ?? (imagePlan?.resolver === imageSpreads &&
@@ -2541,7 +2567,7 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
     content = <ContinuousReaderView {...props} ref={ref} />;
   } else if (pair) {
     content = <ImageSpreadReaderView key={`${pair.left}:${pair.right}`} {...props} ref={ref}
-      spread={pair} gap={imageGeometry.gap} Page={PagedReaderView}
+      spread={pair} Page={PagedReaderView}
       onUnsupported={() => {
         imageSpreads.reject(pair);
         setImagePlan({ resolver: imageSpreads, index: props.spineIndex, spread: null });

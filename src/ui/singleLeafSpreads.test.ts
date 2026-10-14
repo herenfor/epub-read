@@ -78,4 +78,14 @@ describe("single-leaf chapter spreads (A13)", () => {
     expect(await spreads.resolve(1, new AbortController().signal)).toEqual({ left: 0, right: 1 });
     expect(calls).toBe(3);
   });
+  it("retries a rejected pair after the layout changes, keeping the same pairing", async () => {
+    const { spreads, signal } = fixture("M1111M");
+    const pair = await spreads.resolve(3, signal);
+    expect(pair).toEqual({ left: 3, right: 4 });
+    spreads.reject(pair!);
+    expect(await spreads.resolve(4, signal)).toBeNull();
+    expect(await spreads.resolve(1, signal)).toEqual({ left: 1, right: 2 });
+    spreads.retryRejected();
+    expect(await spreads.resolve(4, signal)).toEqual({ left: 3, right: 4 });
+  });
 });
