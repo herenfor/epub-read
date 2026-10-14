@@ -199,6 +199,8 @@ export class TransformPageMotion implements PageMotionDriver {
     if (this.windowStart === null) {
       const before = viewer.scrollWidth;
       const width = viewer.clientWidth;
+      const insetLeft = this.layout.nativeVerticalFlow
+        ? parseFloat(viewer.style.getPropertyValue("margin-left")) || 0 : 0;
       const snapshot = WINDOW_PROPERTIES.map((property) => ({
         property,
         value: viewer.style.getPropertyValue(property),
@@ -214,7 +216,7 @@ export class TransformPageMotion implements PageMotionDriver {
       // gap to the window and changes column width in ordinary single-page layouts.
       viewer.style.setProperty("width", `${width + (this.windowScreens - 1) * step}px`);
       const physicalMid = this.progression === "rtl" ? this.windowScreens - 1 - this.windowMid : this.windowMid;
-      viewer.style.setProperty("margin-left", `${-physicalMid * step}px`);
+      viewer.style.setProperty("margin-left", `${insetLeft - physicalMid * step}px`);
       if (!this.layout.nativeVerticalFlow) {
         viewer.style.setProperty("column-count", String(this.windowScreens * columnsPerScreen));
       }

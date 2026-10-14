@@ -98,6 +98,27 @@ describe("transform page motion driver", () => {
     expect(viewer.clientWidth).toBe(100);
     expect(faults).toEqual([]);
   });
+  it("preserves vertical viewport margins with measured nonuniform leaf offsets and on interruption", () => {
+    const viewer = fakeViewer();
+    viewer.style.setProperty("margin-left", "20px");
+    viewer.style.setProperty("column-count", "auto");
+    viewer.scrollLeft = 0;
+    const faults: unknown[] = [];
+    const driver = new TransformPageMotion(viewer as unknown as HTMLElement, {
+      offsets: [0, 90, 185], step: 100, columnsPerScreen: 1,
+      progression: "rtl", nativeVerticalFlow: true,
+    }, 0, error => faults.push(error));
+    driver.animateTo(90, desktopSettlePlan(90, 100), () => {});
+    expect(viewer.style.getPropertyValue("margin-left")).toBe("-80px");
+    viewer.present(-60);
+    expect(driver.interrupt().sample.position).toBe(40);
+    viewer.present(null);
+    driver.settleTo(185);
+    expect(viewer.scrollLeft).toBe(-185);
+    expect(viewer.style.getPropertyValue("margin-left")).toBe("20px");
+    expect(viewer.clientWidth).toBe(100);
+    expect(faults).toEqual([]);
+  });
   it.each([2, 4, 10])("RTL %i-screen motion interrupts at its displayed position and restores a negative scroll origin", async screens => {
     const viewer = fakeViewer({ scrollWidth: () => screens * 100 });
     viewer.scrollLeft = 0;

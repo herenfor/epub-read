@@ -30,6 +30,8 @@ export interface SpreadGeometry {
   readonly columnWidth: number;
   readonly columnStep: number;
   readonly spreadStep: number;
+  /** Optional measured single-leaf edges (native vertical flow). */
+  readonly pageIntervals?: readonly { readonly start: number; readonly end: number }[];
 }
 
 /** viewportWidth 是最终列容器内容宽，已且仅已扣一次读者边距/根 padding。 */
@@ -65,6 +67,16 @@ export function clientXToColumnX(clientX: number, originClientX: number, scrollL
 }
 
 export function columnForContentPoint(x: number, geometry: SpreadGeometry): number {
+  const pages = geometry.pageIntervals;
+  if (pages?.length) {
+    let lo = 0, hi = pages.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (pages[mid].end <= x) lo = mid + 1;
+      else hi = mid;
+    }
+    return Math.min(lo, pages.length - 1);
+  }
   return Math.max(0, Math.floor(x / geometry.columnStep));
 }
 
@@ -111,7 +123,8 @@ export function createSpreadLayout(
   const firstColumn = occupied?.first ?? 0;
   const lastColumn = occupied?.last ?? -1;
   const pageCount = occupied ? Math.ceil((lastColumn - firstColumn + 1) / geometry.columns) : 1;
-  const lastStart = occupied ? (firstColumn + (pageCount - 1) * geometry.columns) * geometry.columnStep : 0;
+  const lastIndex = firstColumn + (pageCount - 1) * geometry.columns;
+  const lastStart = occupied ? geometry.pageIntervals?.[lastIndex]?.start ?? lastIndex * geometry.columnStep : 0;
   return {
     geometry, firstColumn, lastColumn, pageCount, empty: occupied === null,
     requiredScrollWidth: lastStart + geometry.viewportWidth,
@@ -133,7 +146,8 @@ export function laneForColumn(layout: SpreadLayout, physicalColumn: number): 0 |
 
 export function spreadStart(layout: SpreadLayout, page: number): number {
   const clamped = Math.max(0, Math.min(layout.pageCount - 1, Math.floor(page)));
-  return layout.empty ? 0 : (layout.firstColumn + clamped * layout.geometry.columns) * layout.geometry.columnStep;
+  const index = layout.firstColumn + clamped * layout.geometry.columns;
+  return layout.empty ? 0 : layout.geometry.pageIntervals?.[index]?.start ?? index * layout.geometry.columnStep;
 }
 
 /** 第一/第二可见列的采样坐标；第二列不存在正文时返回 null。 */
@@ -145,7 +159,9 @@ export function visibleColumnInterval(layout: SpreadLayout, page: number, lane: 
   return {
     physicalColumn,
     screenLeft: lane * layout.geometry.columnStep,
-    screenRight: lane * layout.geometry.columnStep + layout.geometry.columnWidth,
+    screenRight: lane * layout.geometry.columnStep + (layout.geometry.pageIntervals?.[physicalColumn]
+      ? Math.min(layout.geometry.columnWidth, layout.geometry.pageIntervals[physicalColumn].end - layout.geometry.pageIntervals[physicalColumn].start)
+      : layout.geometry.columnWidth),
   };
 }
 
