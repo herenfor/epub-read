@@ -3536,7 +3536,7 @@ export class ChapterPaginator {
   private pageMotionStarted(targetPage: number | null): void {
     // animateTo 可同步落定（剩余距离为零）；不能撤掉刚在 commit 中安排的回收。
     if (this.pageMotion?.session.state.kind !== "idle") {
-      this.verticalViewport?.setBlankAfter(0);
+      this.verticalViewport?.beginMotion();
       this.pageMotion?.lease.moving();
     }
     this.closeFootnoteForNavigation();
@@ -3599,6 +3599,7 @@ export class ChapterPaginator {
     const sample = motion.session.halt();
     const position = sample?.position ?? motion.driver.read().position;
     motion.driver.settleTo(position);
+    this.updateVerticalLeafClip(position);
     this.pageMotionPendingChapter = null;
     if (this.pageMotionLivePage !== null) this.adoptedPageUncommitted = true;
     this.pageMotionLivePage = null;

@@ -33,12 +33,13 @@ export function basicVerticalGridBottom(height: number, top: number, bottom: num
 }
 
 /** The margin belongs to the viewport, not the beginning of the chapter.
- * The body clips the expanded compositor window to the same reading area.
+ * The body clips a settled leaf to its reading area. During motion the shared
+ * compositor window is open, so the margins do not become fixed side strips.
  * A short leaf's unused end is blank, never a slice of the following column. */
 export function applyBasicVerticalViewport(
   viewer: HTMLElement, left: number, right: number, mode: VerticalWritingMode,
   width: number, height: number,
-): { restore: () => void; setBlankAfter: (blank: number) => void } {
+): { restore: () => void; beginMotion: () => void; setBlankAfter: (blank: number) => void } {
   const parent = viewer.parentElement!;
   const value = parent.style.getPropertyValue("clip-path");
   const priority = parent.style.getPropertyPriority("clip-path");
@@ -59,11 +60,18 @@ export function applyBasicVerticalViewport(
     element.style.setProperty("max-width", `${width}px`, "important");
     element.style.setProperty("max-height", `${height}px`, "important");
   }
+  let moving = false;
+  const beginMotion = () => {
+    if (moving) return;
+    moving = true;
+    parent.style.setProperty("clip-path", "none");
+  };
   const setBlankAfter = (blank: number) => {
+    moving = false;
     parent.style.setProperty("clip-path", `inset(0px ${right + (mode === "vertical-lr" ? blank : 0)}px 0px ${left + (mode === "vertical-rl" ? blank : 0)}px)`);
   };
   setBlankAfter(0);
-  return { setBlankAfter, restore: () => {
+  return { beginMotion, setBlankAfter, restore: () => {
     if (value) parent.style.setProperty("clip-path", value, priority);
     else parent.style.removeProperty("clip-path");
     for (const { element, properties } of media) {
