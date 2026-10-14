@@ -222,7 +222,7 @@ export class VisibleTextIndex {
     const cached = this.elementIndexMap.get(el);
     if (cached !== undefined) return cached;
     if (fallbackViewer && typeof fallbackViewer.querySelectorAll === "function") {
-      const all = Array.from(fallbackViewer.querySelectorAll("*"));
+      const all = Array.from(fallbackViewer.querySelectorAll("*:not([data-reader-page-gap])"));
       return all.indexOf(el as HTMLElement);
     }
     return -1;
@@ -579,7 +579,7 @@ export function buildVisibleTextIndex(
   }
   const mediaTags = new Set(["img", "video", "audio", "canvas", "svg", "object", "embed"]);
   let mediaUnits = 0;
-  const allElements = Array.from(viewer.querySelectorAll("*"));
+  const allElements = Array.from(viewer.querySelectorAll("*:not([data-reader-page-gap])"));
   const elementIndexMap = new Map<Element, number>();
   for (let i = 0; i < allElements.length; i++) {
     const element = allElements[i];

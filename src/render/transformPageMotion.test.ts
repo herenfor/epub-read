@@ -98,24 +98,24 @@ describe("transform page motion driver", () => {
     expect(viewer.clientWidth).toBe(100);
     expect(faults).toEqual([]);
   });
-  it("preserves vertical viewport margins with measured nonuniform leaf offsets and on interruption", () => {
+  it("uses screen-wide vertical leaf offsets and restores the shared motion window on interruption", () => {
     const viewer = fakeViewer();
-    viewer.style.setProperty("margin-left", "20px");
+    viewer.style.setProperty("margin-left", "0px");
     viewer.style.setProperty("column-count", "auto");
     viewer.scrollLeft = 0;
     const faults: unknown[] = [];
     const driver = new TransformPageMotion(viewer as unknown as HTMLElement, {
-      offsets: [0, 90, 185], step: 100, columnsPerScreen: 1,
+      offsets: [0, 100, 200], step: 100, columnsPerScreen: 1,
       progression: "rtl", nativeVerticalFlow: true,
     }, 0, error => faults.push(error));
-    driver.animateTo(90, desktopSettlePlan(90, 100), () => {});
-    expect(viewer.style.getPropertyValue("margin-left")).toBe("-80px");
+    driver.animateTo(100, desktopSettlePlan(100, 100), () => {});
+    expect(viewer.style.getPropertyValue("margin-left")).toBe("-100px");
     viewer.present(-60);
     expect(driver.interrupt().sample.position).toBe(40);
     viewer.present(null);
-    driver.settleTo(185);
-    expect(viewer.scrollLeft).toBe(-185);
-    expect(viewer.style.getPropertyValue("margin-left")).toBe("20px");
+    driver.settleTo(200);
+    expect(viewer.scrollLeft).toBe(-200);
+    expect(viewer.style.getPropertyValue("margin-left")).toBe("0px");
     expect(viewer.clientWidth).toBe(100);
     expect(faults).toEqual([]);
   });
