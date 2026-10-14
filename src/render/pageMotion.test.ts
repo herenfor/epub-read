@@ -138,33 +138,42 @@ describe("page motion session", () => {
     expect(driver.animations).toHaveLength(1);
   });
 
-  it("收尾曲线：接上松手速度、指数减速并恰好落定；点按用默认常数", () => {
-    const fast = settlePlan(300, 3); // 300px 剩余，3px/ms 同向
-    expect(fast.tauMs).toBe(100);
-    expect(settleProgress(fast, 1)).toBeCloseTo(1, 6);
-    expect(settleProgress(fast, 0.2)).toBeGreaterThan(0.5); // 前段快、尾段长
+  it("收尾曲线：点按截断指数；反向速度不接；时长有上下限", () => {
     expect(settlePlan(300, -3).tauMs).toBe(90); // 反向速度不接
+    expect(settlePlan(300, -3).curve).toBeUndefined();
     expect(settlePlan(0.2, null).durationMs).toBe(0);
     expect(settlePlan(5000, null).durationMs).toBe(700);
-  });
-
-  it("手势尾段接续原速度、单调落定且终速为零；点按保持指数曲线", () => {
-    const plan = settlePlan(-166.5, -166.5 / 135);
-    expect(plan).toMatchObject({ curve: "finite-drift", durationMs: 540, tauMs: 135 });
-    const epsilon = 0.00001;
-    const slope = (t: number) => (settleProgress(plan, t + epsilon) - settleProgress(plan, t)) / epsilon;
-    expect(166.5 * slope(0) / plan.durationMs).toBeCloseTo(166.5 / 135, 3);
-    expect(slope(0.5 - epsilon)).toBeCloseTo(slope(0.5), 3);
-    expect(slope(1 - epsilon)).toBeLessThan(0.0001);
-    expect(settleProgress(plan, 1)).toBe(1);
-    let previous = 0;
-    for (let i = 1; i <= 100; i++) {
-      const progress = settleProgress(plan, i / 100);
-      expect(progress).toBeGreaterThanOrEqual(previous);
-      expect(progress).toBeLessThanOrEqual(1);
-      previous = progress;
-    }
     expect(settlePlan(166.5, null).curve).toBeUndefined();
     expect(settlePlan(166.5, -1).curve).toBeUndefined();
+  });
+
+  it("松手漂移：起速接上手指，单调，终点速度和减速度都为零（不在结尾硬停）", () => {
+    const epsilon = 0.00001;
+    const slopeOf = (plan: ReturnType<typeof settlePlan>) => (t: number) =>
+      (settleProgress(plan, t + epsilon) - settleProgress(plan, t)) / epsilon;
+    for (const [distance, velocity] of [[300, 1.5], [300, 3], [-166.5, -166.5 / 135], [384, 0.6], [200, 2.5]] as const) {
+      const plan = settlePlan(distance, velocity);
+      expect(plan.curve).toBe("matched-ease");
+      expect(plan.durationMs).toBeGreaterThanOrEqual(180);
+      expect(plan.durationMs).toBeLessThanOrEqual(700);
+      const slope = slopeOf(plan);
+      // 起速 = 松手速度（px/ms）。
+      expect(Math.abs(distance) * slope(0) / plan.durationMs).toBeCloseTo(Math.abs(velocity), 2);
+      expect(settleProgress(plan, 1)).toBe(1);
+      expect(slope(1 - epsilon)).toBeLessThan(0.001);
+      // 最后 5% 的减速度比前面小得多：结尾越来越轻。
+      const accel = (t: number) => (slope(t + 0.01) - slope(t)) / 0.01;
+      expect(Math.abs(accel(0.97))).toBeLessThan(Math.abs(accel(0.5)) * 0.2);
+      let previous = 0;
+      for (let i = 1; i <= 100; i++) {
+        const progress = settleProgress(plan, i / 100);
+        expect(progress).toBeGreaterThanOrEqual(previous);
+        expect(progress).toBeLessThanOrEqual(1);
+        previous = progress;
+      }
+    }
+    // 极快的甩动：时长到下限后起始斜率限 4，仍单调。
+    const flick = settlePlan(300, 12);
+    expect(flick).toMatchObject({ durationMs: 180, startSlope: 4 });
   });
 });
