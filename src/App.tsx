@@ -1184,7 +1184,6 @@ export default function App() {
     anchor: null,
   });
   const persistShelfProgressRef = useRef<(explicit?: boolean) => void>(() => {});
-  readerDisplayReadyRef.current = readerDisplayReady;
 
   // Preserve session → library candidates → query effect ordering.
   const readerSearchContext = { ...readerSearchState, ...readerSearchRefs,
