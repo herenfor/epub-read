@@ -908,6 +908,10 @@
             let hash = hash_bytes(b"source");
             let mut existing = bk2_record(&hash, 77);
             existing.file_name = old_name.into();
+            let mut store = crate::portable_state::PortableStore::open_in_memory().unwrap();
+            store.publish_linked_imports(vec![serde_json::to_value(&existing).unwrap()],
+                Vec::new(), vec![hash.clone()], Vec::new()).unwrap();
+            let before = store.snapshot().unwrap();
             let mut expected = existing.clone();
             if old_name == "book.epub" {
                 expected.file_name = "原書.epub".into();
@@ -927,8 +931,20 @@
             assert_eq!(result.records_changed, old_name == "book.epub");
             assert_eq!(
                 serde_json::to_value(&records[0]).unwrap(),
-                serde_json::to_value(expected).unwrap()
+                serde_json::to_value(&expected).unwrap()
             );
+            let unbound = store.publish_linked_imports(
+                records.iter().map(|r| serde_json::to_value(r).unwrap()).collect(),
+                Vec::new(), vec![hash.clone()], Vec::new()).unwrap();
+            assert_eq!(unbound.books[&hash].metadata.value.file_name, old_name);
+            let after = store.publish_linked_imports(
+                records.iter().map(|r| serde_json::to_value(r).unwrap()).collect(),
+                bindings.iter().map(|b| (b.content_hash.clone(), serde_json::to_string(b).unwrap())).collect(),
+                vec![hash.clone()], Vec::new()).unwrap();
+            assert_eq!(after.books[&hash].metadata.value.file_name, expected.file_name);
+            assert_eq!(after.books[&hash].progress, before.books[&hash].progress);
+            assert_eq!(after.books[&hash].bookmarks, before.books[&hash].bookmarks);
+            assert_eq!(after.books[&hash].notes, before.books[&hash].notes);
             fs::remove_dir_all(root).unwrap();
         }
     }
