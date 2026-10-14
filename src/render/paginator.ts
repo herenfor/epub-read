@@ -100,7 +100,8 @@ import {
   resolveSpreadReadingArea,
   type SpreadReadingArea,
 } from "./spreadReadingArea";
-import { applyBasicVerticalShell, basicVerticalMode, verticalProgression, type VerticalWritingMode } from "./basicVertical";
+import { applyBasicVerticalShell, applyBasicVerticalViewport, basicVerticalMode, verticalProgression, type VerticalWritingMode } from "./basicVertical";
+import { buildVerticalPageModel } from "./vertical/pageModel";
 
 /** 滚动模式全书末尾提示的文案；由界面层按当前界面语言注入，分页核心不依赖语言模块。 */
 export interface ReaderEndText {
@@ -2810,6 +2811,8 @@ export class ChapterPaginator {
   private directionSnapshot: { viewer: HTMLElement; key: string; restore: () => void } | null = null;
   private verticalMode: VerticalWritingMode | null = null;
   private restoreVerticalShell: (() => void) | null = null;
+  private verticalViewport: ReturnType<typeof applyBasicVerticalViewport> | null = null;
+  private verticalLayoutGeneration = 0;
   private onNavigate?: (href: string) => void;
   private onBeforeInternalNavigate?: (href: string) => void;
   private onInternalNavigationSettled?: () => void;
@@ -2835,7 +2838,16 @@ export class ChapterPaginator {
   }
 
   private writePagedScroll(value: number): void {
-    if (this.viewer) writePageScroll(this.viewer, value, this.flowProgression);
+    if (this.viewer) {
+      writePageScroll(this.viewer, value, this.flowProgression);
+      this.updateVerticalLeafClip(value);
+    }
+  }
+
+  private updateVerticalLeafClip(position: number): void {
+    const geometry = this.spreadGeometry;
+    const page = geometry?.pageIntervals?.[columnForContentPoint(position, geometry)];
+    this.verticalViewport?.setBlankAfter(page ? Math.max(0, this.pageWidth - (page.end - page.start)) : 0);
   }
 
   private contentClientOrigin(): number {
@@ -3179,7 +3191,7 @@ export class ChapterPaginator {
     const count = this.metrics.pageCount;
     const layout = this.spreadLayout;
     const step = this.viewStepPx;
-    const key = `${this.flowProgression}:` + (layout
+    const key = `${this.flowProgression}:${this.verticalLayoutGeneration}:` + (layout
       ? `s:${count}:${layout.requiredScrollWidth}:${count > 0 ? spreadStart(layout, count - 1) : 0}`
       : `p:${count}:${step}`);
     const cached = this.snapOffsetsCache;
@@ -3487,11 +3499,11 @@ export class ChapterPaginator {
     if (existing && existing.viewer === viewer && existing.key === key) return existing;
     this.disposePageMotion();
     if (offsets.length === 0 || key === this.pageMotionUnsupportedKey) return null;
-    const step = offsets.length > 1 ? offsets[1] - offsets[0] : viewer.clientWidth;
+    const step = this.verticalMode ? viewer.clientWidth : offsets.length > 1 ? offsets[1] - offsets[0] : viewer.clientWidth;
     const uniform = offsets.every((value, index) => Math.abs(value - offsets[0] - index * step) <= 0.5);
     const columns = this.verticalMode ? 1 : Number.parseInt(
       this.contentDoc?.defaultView?.getComputedStyle(viewer).columnCount ?? "", 10);
-    if (!(step > 0) || !uniform || !(columns >= 1)) {
+    if (!(step > 0) || (!this.verticalMode && !uniform) || !(columns >= 1)) {
       this.pageMotionUnsupportedKey = key;
       return null;
     }
@@ -3523,7 +3535,10 @@ export class ChapterPaginator {
   /** 运动真正开始：关弹注/清高亮/作废待采样；目标页先以 transient 报给底栏。 */
   private pageMotionStarted(targetPage: number | null): void {
     // animateTo 可同步落定（剩余距离为零）；不能撤掉刚在 commit 中安排的回收。
-    if (this.pageMotion?.session.state.kind !== "idle") this.pageMotion?.lease.moving();
+    if (this.pageMotion?.session.state.kind !== "idle") {
+      this.verticalViewport?.setBlankAfter(0);
+      this.pageMotion?.lease.moving();
+    }
     this.closeFootnoteForNavigation();
     this.clearSearchHighlightForDocument();
     this.cancelPendingAnchorSample?.();
@@ -3543,6 +3558,7 @@ export class ChapterPaginator {
     const previousPage = this.metrics.currentPage;
     const committedNewPosition = page !== previousPage || this.adoptedPageUncommitted;
     motion.driver.holdSettledAt(motion.session.offsetOf(page));
+    this.updateVerticalLeafClip(motion.session.offsetOf(page));
     motion.lease.settled();
     this.pageMotionLivePage = null;
     this.adoptedPageUncommitted = false;
@@ -4156,6 +4172,8 @@ export class ChapterPaginator {
     const measuredHeight = this.iframe.clientHeight;
     this.restoreVerticalShell?.();
     this.restoreVerticalShell = null;
+    this.verticalViewport?.restore();
+    this.verticalViewport = null;
     // 舒适双页的根内联样式先精确恢复，再恢复其余二阶段补偿。
     this.restoreSpreadReadingAreaStyles();
     // 第二遍 margin / fit-content 处理写回的 inline 值要先恢复，
@@ -4325,8 +4343,9 @@ export class ChapterPaginator {
       if (parent && authorInsetLeft + authorInsetRight > 0) this.foldParentHorizontalPadding(parent);
     }
     if (this.verticalMode) {
-      // Natural vertical flow advances by a viewport, without multicol gaps.
-      // Existing content anchors/spread commits remain on the same logical x axis.
+      // Each vertical leaf has a fixed, inset viewport. Padding on the whole
+      // chapter would disappear after the first leaf (and in motion windows).
+      w = legacyW;
       geometry = createSpreadGeometry(w, 0, 1, MIN_COLUMN_WIDTH_PX);
     }
     this.spreadGeometry = geometry;
@@ -4353,6 +4372,10 @@ export class ChapterPaginator {
       viewer.style.boxSizing = "border-box";
       viewer.style.paddingLeft = `${insetLeft}px`;
       viewer.style.paddingRight = `${insetRight}px`;
+    }
+    if (this.verticalMode) {
+      this.verticalViewport = applyBasicVerticalViewport(viewer, insetLeft, insetRight, this.verticalMode,
+        w, Math.max(em, h - padTop - padBottom));
     }
     viewer.style.paddingTop = `${padTop}px`;
     viewer.style.paddingBottom = `${padBottom}px`;
@@ -6692,7 +6715,7 @@ export class ChapterPaginator {
     }
     this.bookmarkSpreadCache.clear();
 
-    const geometry = this.spreadGeometry ?? createSpreadGeometry(
+    let geometry = this.spreadGeometry ?? createSpreadGeometry(
       this.pageWidth,
       this.settings.gapPx,
       this.fixedLayout ? 1 : this.settings.columnsPerView === 2 ? 2 : 1,
@@ -6702,6 +6725,14 @@ export class ChapterPaginator {
     this.effectiveColumns = geometry.columns;
 
     const fragments = this.collectContentFragments();
+    if (this.verticalMode) {
+      // Measure once per reflow, never during an animation frame. Existing
+      // canonical coordinates select the measured leaf through the geometry.
+      const model = buildVerticalPageModel(fragments.map(({ left, right }) => ({ start: left, end: right })), geometry.viewportWidth);
+      geometry = { ...geometry, pageIntervals: model.kind === "ready" ? model.pages : undefined };
+      this.spreadGeometry = geometry;
+      ++this.verticalLayoutGeneration;
+    }
     const occupied = occupiedColumns(fragments, geometry);
     const layout = createSpreadLayout(geometry, occupied);
     this.spreadLayout = layout;
@@ -9761,6 +9792,8 @@ export class ChapterPaginator {
     this.restoreSpreadReadingAreaStyles();
     this.restoreVerticalShell?.();
     this.restoreVerticalShell = null;
+    this.verticalViewport?.restore();
+    this.verticalViewport = null;
     this.verticalMode = null;
     this.clearNoteHighlights();
     this.clearSearchHighlightForDocument();

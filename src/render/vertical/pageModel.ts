@@ -28,7 +28,7 @@ export function buildVerticalPageModel(
     else groups.push({ ...item });
   }
   if (groups.length === 0) return { kind: "empty", pageWidth, extent: 0, pages: [] };
-  const wide = groups.find(group => group.end - group.start > pageWidth);
+  const wide = groups.find(group => group.end - group.start > pageWidth + EPSILON);
   if (wide) return { kind: "unsupported", reason: "wide-group", group: wide, pageWidth };
 
   const extent = groups.at(-1)!.end;
@@ -37,9 +37,10 @@ export function buildVerticalPageModel(
   while (start < extent) {
     const ideal = Math.min(start + pageWidth, extent);
     if (ideal <= start) throw new RangeError("pageWidth is below coordinate precision");
-    while (cursor < groups.length && groups[cursor].end <= ideal) cursor++;
+    while (cursor < groups.length && groups[cursor].end <= ideal + EPSILON) cursor++;
     const crossing = groups[cursor];
-    const end = crossing && crossing.start < ideal ? crossing.start : ideal;
+    const end = crossing && crossing.start < ideal ? crossing.start
+      : Math.min(extent, Math.max(ideal, groups[cursor - 1]?.end ?? ideal));
     // A too-wide atom can never be partially accepted or create a zero-step loop.
     if (end <= start) return { kind: "unsupported", reason: "wide-group", group: crossing, pageWidth };
     pages.push({ start, end, blankAfter: Math.max(0, pageWidth - (end - start)) });

@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 import { buildVerticalPageModel, verticalPageAt, verticalPageScrollLeft } from "./pageModel";
 
 describe("vertical page edges", () => {
+  it("accepts subpixel viewport rounding without an unsupported chapter or a phantom sliver page", () => {
+    const model = buildVerticalPageModel([{ start: 0, end: 100.005 }], 100);
+    expect(model).toMatchObject({ kind: "ready", pages: [{ start: 0, end: 100.005, blankAfter: 0 }] });
+    expect(buildVerticalPageModel([{ start: 0, end: 100.02 }], 100).kind).toBe("unsupported");
+  });
   it("does not merge touching columns into a false oversize group", () => {
     const model = buildVerticalPageModel([{ start: 0, end: 20 }, { start: 20, end: 40 }, { start: 40, end: 60 }], 40);
     expect(model.kind).toBe("ready");

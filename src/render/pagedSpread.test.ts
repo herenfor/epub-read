@@ -21,6 +21,26 @@ import {
 } from "./pagedSpread";
 
 describe("pagedSpread core", () => {
+  it("uses measured vertical leaf edges for lookup, commits and the unused last-leaf area", () => {
+    const geometry = { ...createSpreadGeometry(100, 0, 1),
+      pageIntervals: [{ start: 0, end: 90 }, { start: 90, end: 185 }, { start: 185, end: 210 }] };
+    const occupied = occupiedColumns([{ left: 0, right: 20 }, { left: 90, right: 115 }, { left: 185, right: 210 }], geometry);
+    const layout = createSpreadLayout(geometry, occupied);
+    expect(layout.pageCount).toBe(3);
+    expect(layout.requiredScrollWidth).toBe(285);
+    expect([0, 1, 2].map(page => spreadStart(layout, page))).toEqual([0, 90, 185]);
+    expect(columnForContentPoint(89.99, geometry)).toBe(0);
+    expect(columnForContentPoint(90, geometry)).toBe(1);
+    expect(columnForContentPoint(185, geometry)).toBe(2);
+    expect(visibleColumnInterval(layout, 2, 0)?.screenRight).toBe(25);
+    let scroll = 0, width = 210;
+    const result = commitSpreadPosition({
+      ensureScrollWidth: value => { width = value; }, readScrollWidth: () => width,
+      readClientWidth: () => 100, readScrollLeft: () => scroll,
+      writeScrollLeft: value => { scroll = value; },
+    }, layout, 2);
+    expect(result).toEqual({ ok: true, page: 2, scrollLeft: 185 });
+  });
   describe("readingPresentation and presentationPatch", () => {
     it("maps preferences to presentation choice and back", () => {
       expect(readingPresentation({})).toBe("single");
