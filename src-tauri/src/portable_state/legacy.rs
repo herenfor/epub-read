@@ -94,6 +94,10 @@ pub(crate) struct LegacyRecord {
 }
 
 impl LegacyRecord {
+    pub(crate) fn file_name(&self) -> &str {
+        &self.file_name
+    }
+
     pub(crate) fn content_hash(&self) -> &str {
         &self.content_hash
     }

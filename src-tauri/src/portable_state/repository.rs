@@ -1649,13 +1649,31 @@ impl PortableStore {
         let installation_id = ensure_installation_id(&transaction)?;
         let mut counter = load_counter(&transaction)?
             .max(super::merge::maximum_received_counter_from_state(&local)?);
-        let incoming = legacy::build_import_state(
+        let mut incoming = legacy::build_import_state(
             &local,
             &parsed,
             &local.organization,
             &mut counter,
             &installation_id,
         )?;
+        // A locally published source can supply the display name missing from
+        // old Android imports. Keep the general legacy merge immutable; this
+        // narrow repair changes only bound books' placeholder metadata.
+        let bound: BTreeSet<&str> = bindings.iter().map(|(hash, _)| hash.as_str()).collect();
+        for record in &parsed {
+            if record.file_name() == "book.epub" || !bound.contains(record.content_hash()) {
+                continue;
+            }
+            let Some(existing) = local.books.get(record.content_hash()) else { continue };
+            if existing.metadata.value.file_name != "book.epub" { continue; }
+            let mut value = existing.metadata.value.clone();
+            value.file_name = record.file_name().to_owned();
+            counter = next_local_counter(counter, 0)?;
+            incoming.books.get_mut(record.content_hash()).unwrap().metadata = Register {
+                value,
+                stamp: Stamp { device_id: installation_id.clone(), counter },
+            };
+        }
         let merged = merge_portable_states(&local, &incoming)?;
         dto::validate_portable_state(&merged)?;
         counter = counter.max(super::merge::maximum_received_counter_from_state(&merged)?);
