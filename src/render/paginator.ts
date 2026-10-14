@@ -6877,7 +6877,12 @@ export class ChapterPaginator {
     }
     const physicalScrollWidth = requiredScrollWidth + horizontalPadding;
     if (physicalScrollWidth > viewer.clientWidth) {
-      spacer.style.left = `${Math.ceil(physicalScrollWidth - 1)}px`;
+      // RTL 页序的可滚动溢出在左侧：尾垫必须从右缘量起，否则奇数页章节的
+      // 最后一屏没有足够的滚动宽度，提交位置被判为 unreachable、卡在倒数第二屏。
+      const offset = `${Math.ceil(physicalScrollWidth - 1)}px`;
+      const rtl = this.flowProgression === "rtl";
+      spacer.style.left = rtl ? "auto" : offset;
+      spacer.style.right = rtl ? offset : "auto";
       spacer.style.display = "block";
     } else {
       spacer.style.display = "none";
