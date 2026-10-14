@@ -3,8 +3,11 @@ import { prefersReducedMotion } from "./pagedSlide";
 import { RIBBON_WIDTH_PX, type RibbonCue, type RibbonMark } from "./bookmarkRibbons";
 import "./bookmarkRibbons.css";
 
-/** 晚到的提示（例如跨章跳转要等加载）仍可播放，但过久的旧提示不再重播。 */
-const CUE_TTL_MS = 6000;
+/**
+ * 提示的有效期：跳转提示要等跨章加载，可以晚到；放入、收回、悬停是当场的，
+ * 过了就不再播（否则重建的视图，例如图片双页翻回来，会把刚才的放入再播一遍）。
+ */
+const CUE_TTL_MS: Record<RibbonCue["kind"], number> = { peek: 6000, drop: 1500, lift: 1500, hint: 1500 };
 const ANIMATIONS = ["ribbon-drop", "ribbon-lift", "ribbon-peek", "ribbon-hint"] as const;
 /** 动画类在 React 重渲染时保留到播完；之后同一位置重新挂上不再重播。 */
 const ANIMATION_MS: Record<RibbonCue["kind"], number> = { drop: 1250, lift: 900, peek: 1250, hint: 500 };
@@ -24,7 +27,7 @@ export function BookmarkRibbonLayer({ marks, cue, motion }: Props) {
 
   useLayoutEffect(() => {
     const layer = layerRef.current;
-    if (!layer || !cue || Date.now() - cue.at > CUE_TTL_MS) return;
+    if (!layer || !cue || Date.now() - cue.at > CUE_TTL_MS[cue.kind]) return;
     for (const mark of marks) {
       const id = mark.ids.find((candidate) => cue.ids.includes(candidate));
       if (!id) continue;
