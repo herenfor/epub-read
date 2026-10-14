@@ -71,6 +71,33 @@ beforeAll(() => { (globalThis as Record<string, unknown>).DOMMatrixReadOnly = Fa
 afterAll(() => { delete (globalThis as Record<string, unknown>).DOMMatrixReadOnly; });
 
 describe("transform page motion driver", () => {
+  it("vertical flow keeps native columns and permits a viewport wider than a short chapter", async () => {
+    const viewer = fakeViewer({ scrollWidth: () => 240 });
+    viewer.style.setProperty("column-count", "auto");
+    viewer.scrollLeft = 0;
+    const faults: unknown[] = [];
+    const driver = new TransformPageMotion(viewer as unknown as HTMLElement, {
+      offsets: [0, 100, 200], step: 100, columnsPerScreen: 1,
+      progression: "rtl", nativeVerticalFlow: true,
+    }, 0, error => faults.push(error));
+    let done = 0;
+    driver.animateTo(100, desktopSettlePlan(100, 100), () => done++);
+    expect(viewer.style.getPropertyValue("column-count")).toBe("auto");
+    expect(viewer.clientWidth).toBe(300);
+    const old = viewer.animations[0];
+    viewer.present(-60); // native-window origin 100 minus 60 => visual position 40
+    expect(driver.interrupt().sample.position).toBe(40);
+    viewer.present(null);
+    driver.animateTo(0, desktopSettlePlan(-40, 100), () => done++);
+    old.resolve();
+    await Promise.resolve();
+    expect(done).toBe(0);
+    driver.settleTo(200);
+    expect(viewer.scrollLeft).toBe(-200);
+    expect(viewer.style.getPropertyValue("column-count")).toBe("auto");
+    expect(viewer.clientWidth).toBe(100);
+    expect(faults).toEqual([]);
+  });
   it.each([2, 4, 10])("RTL %i-screen motion interrupts at its displayed position and restores a negative scroll origin", async screens => {
     const viewer = fakeViewer({ scrollWidth: () => screens * 100 });
     viewer.scrollLeft = 0;
