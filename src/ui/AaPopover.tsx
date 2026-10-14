@@ -99,6 +99,8 @@ export interface AaPopoverProps {
 
   // 更多高级选项（折叠）
   forceHorizontal?: boolean;
+  /** A10s：竖排书已自动转横排，开关只显示状态、不可关闭。 */
+  forceHorizontalAuto?: boolean;
   onForceHorizontalChange?: (enabled: boolean) => void;
   /** 翻页方向：跟随书籍 / 始终从左往右 */
   pageDirection?: PageDirectionSetting;
@@ -228,6 +230,7 @@ export const AaPopover = React.memo(function AaPopover({
   onTurnAnimationChange,
   phoneLayout = false,
   forceHorizontal = false,
+  forceHorizontalAuto = false,
   onForceHorizontalChange,
   pageDirection = "book",
   onPageDirectionChange,
@@ -791,11 +794,15 @@ export const AaPopover = React.memo(function AaPopover({
                   <div className="aa-advanced-body">
                     {onForceHorizontalChange && (
                       <div className="aa-advanced-row">
-                        <span>{t("aa.forceHorizontal")}</span>
+                        <div className="aa-toggle-text">
+                          <span>{t("aa.forceHorizontal")}</span>
+                          {forceHorizontalAuto && <span className="aa-detail-sub">{t("aa.forceHorizontal.auto")}</span>}
+                        </div>
                         <label className="aa-switch-label">
                           <input
                             type="checkbox"
                             checked={forceHorizontal}
+                            disabled={forceHorizontalAuto}
                             onChange={(e) => onForceHorizontalChange(e.target.checked)}
                           />
                           <span className="aa-switch-track" />
@@ -1345,11 +1352,15 @@ export const AaPopover = React.memo(function AaPopover({
               {/* 强制横排 */}
               {onForceHorizontalChange && (
                 <div className="aa-section aa-control-row aa-toggle-row">
-                  <span className="aa-section-label">{t("aa.forceHorizontal")}</span>
+                  <div className="aa-toggle-text">
+                    <span className="aa-section-label">{t("aa.forceHorizontal")}</span>
+                    {forceHorizontalAuto && <span className="aa-detail-sub">{t("aa.forceHorizontal.auto")}</span>}
+                  </div>
                   <label className="aa-switch-label">
                     <input
                       type="checkbox"
                       checked={forceHorizontal}
+                      disabled={forceHorizontalAuto}
                       onChange={(e) => onForceHorizontalChange(e.target.checked)}
                     />
                     <span className="aa-switch-track" />
