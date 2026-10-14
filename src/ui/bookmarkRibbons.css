@@ -70,6 +70,13 @@
 .bookmark-ribbon.is-tab.ribbon-drop { animation: bookmarkRibbonDropXR 0.45s cubic-bezier(0.2, 0.9, 0.25, 1.15) both; }
 .bookmark-ribbon.is-tab.ribbon-lift { animation: bookmarkRibbonLiftXR 0.3s ease-in both; }
 
+/* 缩略书页悬停删除项：对应丝带轻轻伸缩。 */
+.bookmark-ribbon.is-page.ribbon-hint { animation: bookmarkRibbonHint 0.45s ease-in-out; }
+.bookmark-ribbon.is-scroll.ribbon-hint,
+.bookmark-ribbon.is-tab.ribbon-hint { animation: bookmarkRibbonHintX 0.45s ease-in-out; }
+@keyframes bookmarkRibbonHint { 50% { transform: scaleY(1.12); } }
+@keyframes bookmarkRibbonHintX { 50% { transform: scaleX(1.12); } }
+
 @keyframes bookmarkRibbonDrop {
   from { transform: translateY(calc(-1 * var(--ribbon-h) - 10px)) scaleY(0.6); }
   to { transform: translateY(0) scaleY(1); }

@@ -94,6 +94,29 @@
   border-left: 1px dashed color-mix(in srgb, var(--accent, #6366f1) 70%, transparent);
 }
 
+/* A15：顶部让出的一条（中间点按）与手机右上角书签点击区。 */
+.tap-regions-bookmark-corner {
+  position: absolute;
+  top: 0;
+  right: 0;
+  box-sizing: border-box;
+  border-left: 1px dashed color-mix(in srgb, #c0392f 55%, transparent);
+  border-bottom: 1px dashed color-mix(in srgb, #c0392f 55%, transparent);
+  background: repeating-linear-gradient(45deg, transparent 0 5px, color-mix(in srgb, #c0392f 9%, transparent) 5px 6px);
+}
+
+.tap-regions-bookmark-glyph {
+  position: absolute;
+  top: 0;
+  right: 30%;
+  width: 6px;
+  height: 45%;
+  max-height: 14px;
+  background: #c0392f;
+  opacity: 0.78;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 80%, 0 100%);
+}
+
 .tap-regions-band-arrow {
   position: absolute;
   top: 50%;

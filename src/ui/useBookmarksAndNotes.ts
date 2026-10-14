@@ -15,8 +15,12 @@ import type { SidebarTab } from "./SidebarDrawer";
 import { generateFolderId } from "./libraryOrganization";
 import { closeReaderForeground, type NoteComposerDraft, type ReaderForeground } from "./readerForeground";
 import { uiText } from "./localization/UiLanguageProvider";
+import { bookmarkButtonAction, RIBBON_LIFT_MS, screenBookmarkIds, type RibbonCue } from "./bookmarkRibbons";
+import { prefersReducedMotion } from "./pagedSlide";
 
 const EMPTY_NOTES: ReaderNote[] = [];
+/** 删除提示（带撤销）停留时长；Ctrl+Z 也只在这段时间内有效。 */
+const BOOKMARK_UNDO_MS = 5000;
 const EMPTY_CHAPTER_NOTES: ReaderNoteForPaginator[] = [];
 
 function portableNoteAnnotations(entry: ShelfEntry): Readonly<Record<string, Annotation<NoteValue>>> {
@@ -138,22 +142,25 @@ export function useBookmarkToast() {
     text: string;
     action: "add" | "remove";
     closing: boolean;
+    /** A15：删除后带“撤销”，停留更久。 */
+    undo?: boolean;
   } | null>(null);
   const bookmarkToastTimerRef = useRef<number | null>(null);
 
-  const showBookmarkToast = useCallback((text: string, action: "add" | "remove") => {
+  const showBookmarkToast = useCallback((text: string, action: "add" | "remove", options?: { undo?: boolean }) => {
     if (bookmarkToastTimerRef.current) {
       window.clearTimeout(bookmarkToastTimerRef.current);
       bookmarkToastTimerRef.current = null;
     }
-    setBookmarkToast({ text, action, closing: false });
+    const undo = options?.undo === true;
+    setBookmarkToast({ text, action, closing: false, ...(undo ? { undo } : {}) });
     bookmarkToastTimerRef.current = window.setTimeout(() => {
       setBookmarkToast((prev) => (prev ? { ...prev, closing: true } : null));
       bookmarkToastTimerRef.current = window.setTimeout(() => {
         setBookmarkToast(null);
         bookmarkToastTimerRef.current = null;
       }, 180);
-    }, 1400);
+    }, undo ? BOOKMARK_UNDO_MS : 1400);
   }, []);
   return { bookmarkToast, bookmarkToastTimerRef, showBookmarkToast };
 }
@@ -362,8 +369,13 @@ export function useBookmarkProjection({ currentShelfId, shelfEntries, chapterSta
     chapterState.status === "ready" && chapterState.mode === "scroll"
       ? readerRef.current?.getReadingAnchor() ?? null
       : null;
-  const isCurrentPageBookmarked =
-    chapterState.status === "ready" &&
+  // A15：滚动模式下屏上能看到任何一条丝带就亮，不再要求恰好在那一行。
+  const scrollScreen = chapterState.status === "ready" && chapterState.mode === "scroll"
+    ? readerRef.current?.screenBookmarks?.(currentBookmarks) ?? null
+    : null;
+  const isCurrentPageBookmarked = scrollScreen
+    ? screenBookmarkIds(scrollScreen).length > 0
+    : chapterState.status === "ready" &&
     currentBookmarks.some((bookmark) =>
       bookmarkMatchesPosition(
         bookmark,
@@ -419,7 +431,7 @@ export function useBookmarkActions({ currentShelfId, readReaderPosition, current
   spineIndex: number;
   book: Book | null;
   readerRef: MutableRefObject<ReaderHandle | null>;
-  showBookmarkToast(text: string, action: "add" | "remove"): void;
+  showBookmarkToast(text: string, action: "add" | "remove", options?: { undo?: boolean }): void;
   setShelfEntries: Dispatch<SetStateAction<ShelfEntry[]>>;
   setShelfError: Dispatch<SetStateAction<string | null>>;
 }) {
@@ -565,4 +577,222 @@ export function useNoteEditRelease({ noteComposer, noteComposerDirtyRef, activeN
       });
     }
   }, [noteComposer]);
+}
+
+/**
+ * A15 书签丝带的放和取（只点击）：双页总是弹出缩略书页，本屏没有书签时先放在第一页；
+ * 单页、滚动没有就加、有就删本屏全部。删除先播收回动画，可撤销（按钮或 Ctrl+Z）。
+ * 书签数据格式不变；撤销用新 id 重新创建，不复活已删除的注解。
+ */
+export function useBookmarkRibbonActions({ currentShelfId, readReaderPosition, currentBookmarks, spineIndex, book,
+  readerRef, showBookmarkToast, setShelfEntries, setShelfError, legacyToggle,
+}: {
+  currentShelfId: string | null;
+  readReaderPosition(withText?: boolean): { state: ChapterState; readingAnchor: ReadingAnchor | null; anchorText: string | null };
+  currentBookmarks: Bookmark[];
+  spineIndex: number;
+  book: Book | null;
+  readerRef: MutableRefObject<ReaderHandle | null>;
+  showBookmarkToast(text: string, action: "add" | "remove", options?: { undo?: boolean }): void;
+  setShelfEntries: Dispatch<SetStateAction<ShelfEntry[]>>;
+  setShelfError: Dispatch<SetStateAction<string | null>>;
+  /** 固定版式等没有丝带的视图沿用原来的切换。 */
+  legacyToggle(): void;
+}) {
+  const [bookmarkCue, setBookmarkCue] = useState<(RibbonCue & { at: number }) | null>(null);
+  const [bookmarkPagesOpen, setBookmarkPagesOpen] = useState(false);
+  const cueNonceRef = useRef(0);
+  const bookmarksRef = useRef(currentBookmarks);
+  bookmarksRef.current = currentBookmarks;
+  const undoRef = useRef<{ shelfId: string; bookmarks: Bookmark[]; at: number } | null>(null);
+  const pendingWritesRef = useRef(0);
+  const writeChainRef = useRef<Promise<unknown>>(Promise.resolve());
+
+  const cue = useCallback((kind: RibbonCue["kind"], ids: readonly string[]) => {
+    setBookmarkCue({ kind, ids, nonce: ++cueNonceRef.current, at: Date.now() });
+  }, []);
+
+  /** 乐观更新后依次写入；只有最后一次写入回来时才用存储的投影覆盖，避免中途闪回。 */
+  const write = useCallback((
+    shelfId: string,
+    apply: (bookmarks: Bookmark[]) => Bookmark[],
+    revert: (bookmarks: Bookmark[]) => Bookmark[],
+    commit: () => Promise<ShelfEntry>,
+    failure: "notice.bookmark.saveFailed" | "notice.bookmark.deleteFailed",
+  ) => {
+    setShelfEntries((prev) => prev.map((entry) =>
+      entry.id === shelfId ? { ...entry, bookmarks: apply(entry.bookmarks ?? []) } : entry));
+    pendingWritesRef.current += 1;
+    const run = writeChainRef.current.then(commit);
+    writeChainRef.current = run.catch(() => undefined);
+    void run
+      .then((written) => {
+        if (pendingWritesRef.current > 1) return;
+        setShelfEntries((prev) => prev.map((entry) =>
+          entry.id === shelfId ? mergeBookmarkProjection(entry, written, entry.bookmarks ?? []) : entry));
+      })
+      .catch((error) => {
+        setShelfEntries((prev) => prev.map((entry) =>
+          entry.id === shelfId ? { ...entry, bookmarks: revert(entry.bookmarks ?? []) } : entry));
+        setShelfError(uiText(failure, { error: String(error) }));
+      })
+      .finally(() => {
+        pendingWritesRef.current -= 1;
+      });
+  }, []);
+
+  const createAll = useCallback((shelfId: string, created: Bookmark[]) => {
+    const ids = new Set(created.map((bookmark) => bookmark.id));
+    const store = getShelfStore();
+    write(
+      shelfId,
+      (bookmarks) => [...bookmarks, ...created],
+      (bookmarks) => bookmarks.filter((bookmark) => !ids.has(bookmark.id)),
+      async () => {
+        let written: ShelfEntry | null = null;
+        for (const bookmark of created) {
+          written = store.createBookmark
+            ? await store.createBookmark(shelfId, bookmark)
+            : await store.setBookmarks(shelfId, [...bookmarksRef.current.filter((item) => !ids.has(item.id)), ...created]);
+          if (!store.createBookmark) break;
+        }
+        return written!;
+      },
+      "notice.bookmark.saveFailed",
+    );
+  }, [write]);
+
+  const makeBookmark = (
+    at: { spineIndex: number; page: number; anchor: ReadingAnchor | null; text: string | null },
+  ): Bookmark => ({
+    id: generateFolderId(),
+    spineIndex: at.spineIndex,
+    page: at.page,
+    anchorIndex: at.anchor && at.anchor.index >= 0 ? at.anchor.index : null,
+    anchorRatio: at.anchor && at.anchor.index >= 0 ? at.anchor.ratio : null,
+    anchorTextOffset: at.anchor?.textOffset ?? null,
+    anchorTextSnippet: at.anchor?.textSnippet ?? null,
+    mediaAnchor: at.anchor?.mediaAnchor ?? null,
+    chapterPath: book ? spineItemPath(book, at.spineIndex) ?? null : null,
+    text: (at.text ?? "").slice(0, 80),
+    createdAtMs: Date.now(),
+  });
+
+  /** lane 不给：在阅读位置放（与原来相同的一次读数）；给了：放在这一屏的第 lane 页。 */
+  const addBookmark = useCallback((lane?: 0 | 1): boolean => {
+    if (!currentShelfId) return false;
+    let bookmark: Bookmark;
+    if (lane !== undefined) {
+      const captured = readerRef.current?.captureBookmarkAnchor?.(lane);
+      if (!captured) return false;
+      bookmark = makeBookmark({ spineIndex: captured.spineIndex, page: captured.page, anchor: captured.anchor, text: captured.text });
+    } else {
+      const position = readReaderPosition(true);
+      if (position.state.status !== "ready") return false;
+      bookmark = makeBookmark({
+        spineIndex, page: position.state.currentPage, anchor: position.readingAnchor, text: position.anchorText,
+      });
+    }
+    undoRef.current = null;
+    createAll(currentShelfId, [bookmark]);
+    cue("drop", [bookmark.id]);
+    showBookmarkToast(uiText("notice.bookmark.added"), "add");
+    return true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentShelfId, spineIndex, book, readReaderPosition, createAll, cue, showBookmarkToast]);
+
+  /** 一次删掉这些书签（一页的全部或本屏全部）；丝带先收回，删除可撤销。 */
+  const removeBookmarks = useCallback((ids: readonly string[], options: { animate?: boolean } = {}) => {
+    const shelfId = currentShelfId;
+    if (!shelfId) return;
+    const removed = bookmarksRef.current.filter((bookmark) => ids.includes(bookmark.id));
+    if (removed.length === 0) return;
+    const finish = () => {
+      const gone = new Set(removed.map((bookmark) => bookmark.id));
+      const store = getShelfStore();
+      write(
+        shelfId,
+        (bookmarks) => bookmarks.filter((bookmark) => !gone.has(bookmark.id)),
+        (bookmarks) => [...bookmarks, ...removed.filter((bookmark) => !bookmarks.some((item) => item.id === bookmark.id))],
+        async () => {
+          if (!store.deleteBookmark) {
+            return store.setBookmarks(shelfId, bookmarksRef.current.filter((bookmark) => !gone.has(bookmark.id)));
+          }
+          let written: ShelfEntry | null = null;
+          for (const bookmark of removed) written = await store.deleteBookmark(shelfId, bookmark.id);
+          return written!;
+        },
+        "notice.bookmark.deleteFailed",
+      );
+      undoRef.current = { shelfId, bookmarks: removed, at: Date.now() };
+      showBookmarkToast(
+        removed.length > 1
+          ? uiText("notice.bookmark.removedMany", { count: removed.length })
+          : uiText("notice.bookmark.removed"),
+        "remove",
+        { undo: true },
+      );
+    };
+    if (options.animate && !prefersReducedMotion()) {
+      cue("lift", removed.map((bookmark) => bookmark.id));
+      window.setTimeout(finish, RIBBON_LIFT_MS);
+    } else {
+      finish();
+    }
+  }, [currentShelfId, write, cue, showBookmarkToast]);
+
+  /** 撤销最近一次删除；超时、换书或之后又加过书签则不再生效。 */
+  const undoBookmarkRemoval = useCallback((): boolean => {
+    const undo = undoRef.current;
+    if (!undo || undo.shelfId !== currentShelfId || Date.now() - undo.at > BOOKMARK_UNDO_MS) return false;
+    undoRef.current = null;
+    const restored = undo.bookmarks.map((bookmark) => ({ ...bookmark, id: generateFolderId() }));
+    createAll(undo.shelfId, restored);
+    cue("drop", restored.map((bookmark) => bookmark.id));
+    showBookmarkToast(uiText("notice.bookmark.restored"), "add");
+    return true;
+  }, [currentShelfId, createAll, cue, showBookmarkToast]);
+
+  /** 书签按钮、Ctrl+B 和手机右上角点击区共用。 */
+  const handleBookmarkButton = useCallback(() => {
+    if (!currentShelfId) return;
+    const screen = readerRef.current?.screenBookmarks?.(bookmarksRef.current) ?? null;
+    if (!screen) {
+      legacyToggle();
+      return;
+    }
+    const action = bookmarkButtonAction(screen);
+    if (action.kind === "pages") {
+      if (bookmarkPagesOpen) {
+        setBookmarkPagesOpen(false);
+        return;
+      }
+      if (action.addFirst) addBookmark(0);
+      setBookmarkPagesOpen(true);
+      return;
+    }
+    if (action.kind === "add") addBookmark();
+    else removeBookmarks(action.ids, { animate: true });
+  }, [currentShelfId, bookmarkPagesOpen, legacyToggle, addBookmark, removeBookmarks]);
+
+  const closeBookmarkPages = useCallback(() => setBookmarkPagesOpen(false), []);
+  const hintBookmarks = useCallback((ids: readonly string[]) => cue("hint", ids), [cue]);
+
+  // 换书后撤销不跨书。
+  useEffect(() => {
+    undoRef.current = null;
+    setBookmarkPagesOpen(false);
+  }, [currentShelfId]);
+
+  return {
+    bookmarkCue,
+    cueBookmarks: cue,
+    bookmarkPagesOpen,
+    closeBookmarkPages,
+    hintBookmarks,
+    handleBookmarkButton,
+    addBookmark,
+    removeBookmarks,
+    undoBookmarkRemoval,
+  };
 }

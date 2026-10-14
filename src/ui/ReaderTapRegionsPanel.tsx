@@ -7,6 +7,8 @@ import {
   setTapRegionMode,
   setTapRegionPercent,
   TAP_REGION_MAX_PERCENT,
+  TAP_REGION_TOP_INSET_PX,
+  BOOKMARK_CORNER_PX,
   tapRegionAction,
   tapRegionProfileFor,
   tapRegionSplitOf,
@@ -103,6 +105,8 @@ export function ReaderTapRegionsPanel(props: ReaderTapRegionsPanelProps) {
     aspectRatio: `${width} / ${height}`,
     width: `min(100%, ${(PREVIEW_MAX_HEIGHT * width) / height}px)`,
   } as CSSProperties;
+  // A15：两侧竖带让出顶部一条（书签丝带挂在那里）；手机右上角是书签点击区。
+  const topInset = `${Math.min(40, (TAP_REGION_TOP_INSET_PX / height) * 100)}%`;
   const sideBand = (side: TapRegionSide) => {
     const band = side === "left" ? geometry.left : geometry.right;
     if (band.width <= 0) {
@@ -110,7 +114,7 @@ export function ReaderTapRegionsPanel(props: ReaderTapRegionsPanelProps) {
     }
     return [
       <div key={side} className={`tap-regions-band is-side is-${side}`}
-        style={{ left: percentOf(geometry, band.start), width: percentOf(geometry, band.width) }} />,
+        style={{ left: percentOf(geometry, band.start), width: percentOf(geometry, band.width), top: topInset }} />,
       <span key={`${side}-arrow`} className={`tap-regions-band-arrow is-${side}`}
         style={{ [side]: percentOf(geometry, band.arrowCenter) }}>
         <Chevron direction={tapRegionAction(side, device, value, props.progression)} />
@@ -150,6 +154,10 @@ export function ReaderTapRegionsPanel(props: ReaderTapRegionsPanelProps) {
       </div>
       {sideBand("left")}
       {sideBand("right")}
+      {device === "touch" && <div className="tap-regions-bookmark-corner"
+        style={{ width: percentOf(geometry, Math.min(BOOKMARK_CORNER_PX, geometry.availableWidth)), height: topInset }}>
+        <span className="tap-regions-bookmark-glyph" />
+      </div>}
     </div>
     <div className="tap-regions-legend">
       {legendSide("left")}

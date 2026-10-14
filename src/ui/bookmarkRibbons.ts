@@ -47,7 +47,7 @@ export interface RibbonMark {
 
 /** 宿主发给丝带层的一次动画；nonce 递增，同一条丝带只播一次。 */
 export interface RibbonCue {
-  readonly kind: "drop" | "lift" | "peek";
+  readonly kind: "drop" | "lift" | "peek" | "hint";
   readonly ids: readonly string[];
   readonly nonce: number;
 }

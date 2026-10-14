@@ -24,6 +24,13 @@ export const DEFAULT_TAP_REGION_MAX_PX = 80;
 export const EDGE_TURN_ARROW_WIDTH_PX = 36;
 /** Custom size per side, in whole percent of the available reading width; 0 turns the side off. */
 export const TAP_REGION_MAX_PERCENT = 35;
+/**
+ * A15: both side bands leave the top strip free (the bookmark ribbons hang
+ * there), so a tap in it is a centre tap. On touch the outer top-right square
+ * of the same height is the invisible bookmark corner.
+ */
+export const TAP_REGION_TOP_INSET_PX = 56;
+export const BOOKMARK_CORNER_PX = 56;
 /** The central content area never drops below this share, in any mode. */
 export const TAP_REGION_MIN_CENTER_RATIO = 0.3;
 
@@ -125,9 +132,15 @@ export function edgeTurnRegionOf(geometry: TapRegionGeometry, side: TapRegionSid
   return { width: band.width, arrowCenter: band.arrowCenter };
 }
 
-/** `x` is measured from the left edge of the same box the geometry was computed for. */
-export function tapRegionAt(geometry: TapRegionGeometry, x: number): TapRegionSide | "center" | null {
+/**
+ * `x` (and `y`) are measured from the left (top) edge of the same box the
+ * geometry was computed for. Without `y` the top strip is not considered.
+ */
+export function tapRegionAt(geometry: TapRegionGeometry, x: number, y?: number): TapRegionSide | "center" | "corner" | null {
   if (!Number.isFinite(x) || x < 0 || x >= geometry.availableWidth) return null;
+  if (y !== undefined && Number.isFinite(y) && y >= 0 && y < TAP_REGION_TOP_INSET_PX) {
+    return x >= geometry.availableWidth - BOOKMARK_CORNER_PX ? "corner" : "center";
+  }
   if (x < geometry.left.width) return "left";
   if (geometry.right.width > 0 && x >= geometry.right.start) return "right";
   return "center";

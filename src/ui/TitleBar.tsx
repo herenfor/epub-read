@@ -26,6 +26,9 @@ export interface TitleBarProps {
   /** 书签：切换当前页书签 */
   isBookmarked?: boolean;
   onToggleBookmark?: () => void;
+  /** A15：双页时书签按钮弹出缩略书页（左页 / 右页）。 */
+  bookmarkSpread?: boolean;
+  bookmarkPagesOpen?: boolean;
   /** 书签浮层是否已展开 */
   bookmarksOpen?: boolean;
   /** 收到实际点击的按钮，供 App 决定浮层定位 */
@@ -81,6 +84,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   searchOpen,
   isBookmarked,
   onToggleBookmark,
+  bookmarkSpread,
+  bookmarkPagesOpen,
   bookmarksOpen,
   onOpenBookmarks,
   zenMode = false,
@@ -497,8 +502,11 @@ export const TitleBar: React.FC<TitleBarProps> = ({
                   type="button"
                   className={`titlebar-action-btn titlebar-bookmark-btn${isBookmarked ? " active" : ""}`}
                   onClick={onToggleBookmark}
-                  title={isBookmarked ? t("titlebar.bookmark.remove.tip") : t("titlebar.bookmark.add.tip")}
-                  aria-label={isBookmarked ? t("titlebar.bookmark.remove") : t("titlebar.bookmark.add")}
+                  title={bookmarkSpread ? t("titlebar.bookmark.spread.tip")
+                    : isBookmarked ? t("titlebar.bookmark.remove.tip") : t("titlebar.bookmark.add.tip")}
+                  aria-label={bookmarkSpread ? t("titlebar.bookmark.spread")
+                    : isBookmarked ? t("titlebar.bookmark.remove") : t("titlebar.bookmark.add")}
+                  aria-expanded={bookmarkSpread ? bookmarkPagesOpen === true : undefined}
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill={isBookmarked ? "#f43f5e" : "none"} stroke={isBookmarked ? "#f43f5e" : "currentColor"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />

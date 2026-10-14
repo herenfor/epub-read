@@ -1,0 +1,128 @@
+/* A15 缩略书页：结构照演示 v13，颜色和动效跟随阅读器主题（面板变量），以后再缩小。 */
+.bookmark-pages-popover {
+  --bookmark-ribbon: #c0392f;
+  position: fixed;
+  z-index: calc(var(--z-ui-opening, 900) + 21);
+  display: flex;
+  gap: 2px;
+  padding: 8px;
+  box-sizing: border-box;
+  border-radius: 12px;
+  border: 1px solid var(--panel-border);
+  background: color-mix(in srgb, var(--panel-bg, #ffffff) 94%, transparent);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.18), 0 3px 10px rgba(0, 0, 0, 0.06);
+  transform-origin: top right;
+  animation: bookmarkPagesIn 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+[data-theme="dark"] .bookmark-pages-popover,
+[data-theme="gray"] .bookmark-pages-popover {
+  --bookmark-ribbon: #e0645c;
+}
+
+@keyframes bookmarkPagesIn {
+  from { opacity: 0; transform: translateY(-4px) scale(0.96); }
+}
+
+.bookmark-page-tile {
+  position: relative;
+  flex: none;
+  width: 44px;
+  height: 54px;
+  padding: 14px 8px 6px;
+  box-sizing: border-box;
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  border: 1px solid var(--panel-border);
+  background: var(--bg);
+  color: var(--fg);
+  cursor: pointer;
+  font: inherit;
+}
+
+.bookmark-page-tile.is-left { border-radius: 4px 1px 1px 4px; }
+.bookmark-page-tile.is-right { border-radius: 1px 4px 4px 1px; }
+.bookmark-page-tile:hover,
+.bookmark-page-tile:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+.bookmark-page-tile:disabled {
+  cursor: default;
+  opacity: 0.45;
+  border-color: var(--panel-border);
+}
+
+.bookmark-page-tile .tile-line {
+  height: 2px;
+  border-radius: 1px;
+  background: var(--panel-border);
+}
+.bookmark-page-tile .tile-line.short { width: 60%; }
+
+.bookmark-page-tile .tile-ribbon {
+  position: absolute;
+  top: -1px;
+  width: 7px;
+  height: 14px;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 78%, 0 100%);
+}
+.bookmark-page-tile.is-left .tile-ribbon { left: 6px; }
+.bookmark-page-tile.is-right .tile-ribbon { right: 6px; }
+.bookmark-page-tile.has .tile-ribbon {
+  background: var(--bookmark-ribbon);
+  transition: opacity 0.15s;
+}
+.bookmark-page-tile.empty .tile-ribbon {
+  clip-path: none;
+  outline: 1px dashed color-mix(in srgb, var(--bookmark-ribbon) 60%, transparent);
+  outline-offset: -1px;
+}
+
+.bookmark-page-tile .tile-count {
+  position: absolute;
+  top: -6px;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 3px;
+  box-sizing: border-box;
+  border-radius: 7px;
+  background: var(--bookmark-ribbon);
+  color: #fff;
+  font-size: 9px;
+  line-height: 13px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.bookmark-page-tile.is-left .tile-count { left: -5px; }
+.bookmark-page-tile.is-right .tile-count { right: -5px; }
+
+.bookmark-page-tile .tile-mark {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 6px;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1;
+}
+.bookmark-page-tile .tile-mark.is-add { color: var(--accent); }
+.bookmark-page-tile .tile-mark.is-remove {
+  color: var(--bookmark-ribbon);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.bookmark-page-tile.has:hover .tile-mark.is-remove,
+.bookmark-page-tile.has:focus-visible .tile-mark.is-remove { opacity: 1; }
+.bookmark-page-tile.has:hover .tile-ribbon { opacity: 0.45; }
+
+@media (hover: none) {
+  .bookmark-page-tile.has .tile-mark.is-remove { opacity: 0.7; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bookmark-pages-popover { animation: none; }
+}

@@ -1,5 +1,6 @@
 import { surfaceBackground } from "./readerSurfaceBackground";
 import { BookmarkRibbonLayer } from "./BookmarkRibbonLayer";
+import { BOOKMARK_CORNER_PX } from "./readerTapRegions";
 import { RIBBON_LENGTH_PX, type RibbonBookmark, type RibbonCue, type RibbonMark } from "./bookmarkRibbons";
 import { resolveArchiveHref } from "../core/archiveReferences";
 import {
@@ -119,6 +120,8 @@ export interface ContinuousReaderViewProps {
   /** A15：本书书签与丝带动画提示。 */
   bookmarks?: readonly RibbonBookmark[];
   bookmarkCue?: (RibbonCue & { at: number }) | null;
+  /** 手机右上角书签点击区；只在宿主提供时生效。 */
+  onBookmarkCornerTap?(): void;
   onPreciseNavigationStatus?(status: {
     requestId: number;
     status: PreciseNavigationStatus;
@@ -316,6 +319,8 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
     inputPausedRef.current = inputPaused === true;
     const onPlainTapRef = useRef(props.onPlainTap);
     onPlainTapRef.current = props.onPlainTap;
+    const onBookmarkCornerTapRef = useRef(props.onBookmarkCornerTap);
+    onBookmarkCornerTapRef.current = props.onBookmarkCornerTap;
     const containerRef = useRef<HTMLDivElement>(null);
     /** 显式总高的 canvas：几何提交必须先于宿主 scrollTop，见 commitContinuousGeometry。 */
     const canvasRef = useRef<HTMLDivElement>(null);
@@ -540,7 +545,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
         if (slot.status !== "ready" || !slot.paginator.isDisplayReady) continue;
         const box = layoutRef.current.boxFor(slot.key);
         const own = bookmarks.filter((bookmark) => bookmark.spineIndex === slot.spineIndex);
-        const edges = own.length > 0 ? slot.paginator.scrollTextEdges() : null;
+        const edges = own.length > 0 ? slot.paginator.scrollTextEdges?.() ?? null : null;
         if (!box || !edges) continue;
         // 左侧页边放得下横挂丝带就挂左边；放不下（手机）改为右缘小角标。
         const room = edges.left - hostLeft;
@@ -1575,8 +1580,22 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
               externalScrollHandlersRef.current.onViewportStep(direction),
           },
           pagedSwipe: undefined,
-          onPlainTap: () => {
-            if (!inputPausedRef.current) onPlainTapRef.current?.();
+          onPlainTap: (tap) => {
+            if (inputPausedRef.current) return;
+            // A15：手机右上角看不见的书签点击区，规则与分页相同。
+            const el = containerRef.current;
+            const corner = onBookmarkCornerTapRef.current;
+            if (el && corner) {
+              const hostRect = el.getBoundingClientRect();
+              const iframeRect = iframe.getBoundingClientRect();
+              const x = tap.clientX + iframeRect.left - hostRect.left;
+              const y = tap.clientY + iframeRect.top - hostRect.top;
+              if (y >= 0 && y < BOOKMARK_CORNER_PX && x >= el.clientWidth - BOOKMARK_CORNER_PX) {
+                corner();
+                return;
+              }
+            }
+            onPlainTapRef.current?.();
           },
           shouldIgnorePlainTap: () => inputPausedRef.current
         });
