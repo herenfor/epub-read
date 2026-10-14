@@ -33,6 +33,34 @@ function fixture(text = "甲😀乙丙丁") {
 }
 
 describe("vertical canonical location", () => {
+  it("keeps 3px-overlapping font ink as distinct line boxes and clamps the leading overhang", () => {
+    const { doc, root } = fixture("甲乙丙丁戊己庚辛");
+    Object.defineProperty(doc.defaultView, "getComputedStyle", { configurable: true,
+      value: () => ({ writingMode: "vertical-rl", borderRightWidth: "0px", display: "block", visibility: "visible", fontSize: "20px", lineHeight: "20px" }) });
+    doc.createRange = () => {
+      let node: Text, start = 0, end = 0;
+      return {
+        selectNodeContents(n: Text) { node = n; start = 0; end = n.length; },
+        setStart(n: Text, s: number) { node = n; start = s; },
+        setEnd(n: Text, e: number) { node = n; end = e; },
+        getClientRects() {
+          return Array.from(node.data.slice(start, end), (_, n) => {
+            const x = (start + n) * 20 - 1.5;
+            return { right: 500 - x - root.scrollLeft, left: 477 - x - root.scrollLeft, width: 23, height: 20 };
+          });
+        },
+      } as unknown as Range;
+    };
+    const layout = new VerticalTextLayout(root, buildVisibleTextIndex(doc, root), 60);
+    expect(layout.model.kind).toBe("ready");
+    if (layout.model.kind === "ready") {
+      expect(layout.model.groups).toHaveLength(8);
+      expect(layout.model.pages.map(p => p.end)).toEqual([60, 120, 160]);
+    }
+    expect(layout.locate({ textOffset: 0, textSnippet: "甲" })).toMatchObject({ status: "located", page: 0 });
+    expect(layout.locate({ textOffset: 3, textSnippet: "丁" })).toMatchObject({ status: "located", page: 1 });
+  });
+
   it("keeps annotation and base together even with a horizontal gap between their ink", () => {
     const { doc, root } = fixture();
     root.innerHTML = "<p>甲<ruby>漢<rt>あ</rt></ruby></p>";
