@@ -42,6 +42,27 @@ function expectCombinatorsAndEscaping(out: string): void {
 }
 
 describe("sanitizeChapter", () => {
+  it("projects authored XHTML language for HTML layout without replacing local or explicit language declarations", async () => {
+    const result = await sanitizeChapter(`<html xml:lang="ja"><head></head><body>
+      <p>　本文<span xml:lang="en">inline</span></p><p lang="zh-Hant" xml:lang="ja">原声明</p>
+      <p lang="" xml:lang="ja">unknown</p></body></html>`, opts());
+    const { document } = parseHTML(result.html);
+    expect(document.documentElement.getAttribute("lang")).toBe("ja");
+    expect(document.querySelector("span")?.getAttribute("lang")).toBe("en");
+    expect(Array.from(document.querySelectorAll("p")).map(e => e.getAttribute("lang"))).toEqual([null, "zh-Hant", ""]);
+    expect(document.querySelector("p")?.textContent?.startsWith("　")).toBe(true);
+    const unknown = await sanitizeChapter(`<html><head></head><body><p>text</p></body></html>`, opts());
+    expect(parseHTML(unknown.html).document.documentElement.hasAttribute("lang")).toBe(false);
+  });
+  it("keeps horizontal emergency wrapping out of native vertical paragraphs", async () => {
+    const result = await sanitizeChapter(`<html xml:lang="ja"><head><style>body{-webkit-word-break:normal;-webkit-line-break:normal}</style></head><body><p>　本文</p></body></html>`, opts());
+    const css = readStyleText(result.html, "overrides");
+    expect(css).toContain(":where(#epub-viewer:not([data-reader-vertical]) p:not(td *, th *))");
+    expect(css).toContain(":where(#epub-viewer:not([data-reader-vertical]))");
+    expect(css).not.toContain("line-break: strict");
+    expect(result.html).toContain("-webkit-line-break:normal");
+    expect(result.html).toContain("-webkit-word-break:normal");
+  });
   it("missing background references are reported once, by path", async () => {
     const result = await sanitizeChapter(`<html><head><style>body{background:url('../Images/missing.png')}</style></head>
 <body style="background-image:url('../Images/missing.png')"><p>正文</p></body></html>`, opts());
@@ -895,11 +916,11 @@ background-position:center center;background-size:cover;background-color:#f9ebdf
     const html = `<html xmlns="http://www.w3.org/1999/xhtml"><body><p>https://example.com/${"a".repeat(200)}</p><p>${"=".repeat(120)}</p></body></html>`;
     const { html: out } = await sanitizeChapter(html, { ...opts(), settings: { ...DEFAULT_SETTINGS } });
     expect(readStyleText(out, "overrides")).toMatch(
-      new RegExp(`:where\\(#${VIEWER_ID}\\) \\{\\s*overflow-wrap: break-word;\\s*\\}`),
+      new RegExp(`:where\\(#${VIEWER_ID}:not\\(\\[data-reader-vertical\\]\\)\\) \\{\\s*overflow-wrap: break-word;\\s*\\}`),
     );
     // 书显式 overflow-wrap:normal 也不能越栏；表格内段落不改列宽。
     expect(readStyleText(out, "overrides")).toMatch(
-      new RegExp(`:where\\(#${VIEWER_ID} p:not\\(td \\*, th \\*\\)\\) \\{\\s*word-break: break-word;\\s*\\}`),
+      new RegExp(`:where\\(#${VIEWER_ID}:not\\(\\[data-reader-vertical\\]\\) p:not\\(td \\*, th \\*\\)\\) \\{\\s*word-break: break-word;\\s*\\}`),
     );
   });
 

@@ -165,12 +165,12 @@ function buildOverrideCss(s: ReaderSettings): string {
 }
 /* [L3] 正文里没有断点的长串（网址、======、————）只在溢出时折行，
    不影响可正常断行的中文排版；书显式的 overflow-wrap 仍然优先。 */
-:where(#${VIEWER_ID}) {
+:where(#${VIEWER_ID}:not([data-reader-vertical])) {
   overflow-wrap: break-word;
 }
 /* [L3] 书显式 overflow-wrap/word-wrap:normal 时，普通段落仍不能越过栏边界：
    word-break:break-word 同样只在一行放不下时折行；表格内段落不加，免改列宽。 */
-:where(#${VIEWER_ID} p:not(td *, th *)) {
+:where(#${VIEWER_ID}:not([data-reader-vertical]) p:not(td *, th *)) {
   word-break: break-word;
 }`;
 
@@ -344,6 +344,13 @@ export async function sanitizeChapter(
     }
 
     // 2) 清理属性
+    // XHTML is displayed as text/html in the iframe. xml:lang alone does not
+    // establish HTML's language for Japanese breaking/justification. Project
+    // the author's declaration, including local overrides; never guess from
+    // writing-mode or overwrite an explicit HTML lang (even lang="").
+    if (!el.hasAttribute("lang") && el.hasAttribute("xml:lang")) {
+      el.setAttribute("lang", el.getAttribute("xml:lang") ?? "");
+    }
     for (const attr of Array.from(el.attributes)) {
       const name = attr.name.toLowerCase();
       if (name.startsWith("on")) {
