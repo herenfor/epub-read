@@ -1,3 +1,5 @@
+import { PAGE_BACKGROUND_SOURCE_ATTR } from "./pageBackgroundLanes";
+
 export interface DarkThemeComputedStyle {
   color: string;
   backgroundColor: string;
@@ -129,7 +131,9 @@ function defaultAdapter(doc: Document): DarkThemeStyleAdapter | null {
       return {
         color: style.color,
         backgroundColor: style.backgroundColor,
-        backgroundImage: style.backgroundImage,
+        // A12 moves a spread's page background image onto display lanes; the
+        // text still sits on that image, so keep treating the source as imaged.
+        backgroundImage: element.getAttribute(PAGE_BACKGROUND_SOURCE_ATTR) || style.backgroundImage,
         opacity: style.opacity,
         display: style.display,
         visibility: style.visibility,
