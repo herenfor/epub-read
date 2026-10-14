@@ -124,10 +124,10 @@ function buildOverrideCss(s: ReaderSettings): string {
   // margin auto 需要 important，压过书的通用 reset（div{margin:0}）。
   const measureCss = `
 /* [L3 默认版心] viewer 直接子打 reader-top 标记；嵌套元素不在默认层。 */
-:where(#${VIEWER_ID} .reader-top) {
+:where(#${VIEWER_ID}:not([data-reader-vertical]) .reader-top) {
   max-width: ${maxEm}rem;
 }
-:where(#${VIEWER_ID}) .reader-top {
+:where(#${VIEWER_ID}:not([data-reader-vertical])) .reader-top {
   margin-left: auto !important;
   margin-right: auto !important;
 }

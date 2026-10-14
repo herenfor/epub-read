@@ -100,6 +100,7 @@ import {
   resolveSpreadReadingArea,
   type SpreadReadingArea,
 } from "./spreadReadingArea";
+import { applyBasicVerticalShell, basicVerticalMode, verticalProgression, type VerticalWritingMode } from "./basicVertical";
 
 /** 滚动模式全书末尾提示的文案；由界面层按当前界面语言注入，分页核心不依赖语言模块。 */
 export interface ReaderEndText {
@@ -2807,6 +2808,8 @@ export class ChapterPaginator {
   private bookPageProgression: PageProgression;
   private flowProgression: PageProgression = "ltr";
   private directionSnapshot: { viewer: HTMLElement; key: string; restore: () => void } | null = null;
+  private verticalMode: VerticalWritingMode | null = null;
+  private restoreVerticalShell: (() => void) | null = null;
   private onNavigate?: (href: string) => void;
   private onBeforeInternalNavigate?: (href: string) => void;
   private onInternalNavigationSettled?: () => void;
@@ -2863,13 +2866,16 @@ export class ChapterPaginator {
   }
 
   private configurePageProgression(viewer: HTMLElement, width: number, height: number): void {
-    const progression = this.scrollMode ? "ltr" : effectivePageProgression(this.bookPageProgression, this.settings, this.fixedLayout);
-    const key = `${progression}:${this.scrollMode}:${width}:${height}`;
+    const progression = this.verticalMode ? verticalProgression(this.verticalMode)
+      : this.scrollMode ? "ltr" : effectivePageProgression(this.bookPageProgression, this.settings, this.fixedLayout);
+    const key = `${progression}:${this.verticalMode}:${this.scrollMode}:${width}:${height}`;
     if (this.directionSnapshot?.viewer === viewer && this.directionSnapshot.key === key) return;
     this.directionSnapshot?.restore();
     this.directionSnapshot = null;
     this.flowProgression = progression;
-    if (!this.scrollMode && (progression === "rtl" || viewer.ownerDocument.defaultView?.getComputedStyle(viewer).direction === "rtl")) {
+    // Vertical block progression is controlled by writing-mode, not the text's
+    // inline direction. Preserve Japanese LTR glyph order within each column.
+    if (!this.verticalMode && !this.scrollMode && (progression === "rtl" || viewer.ownerDocument.defaultView?.getComputedStyle(viewer).direction === "rtl")) {
       this.directionSnapshot = { viewer, key, restore: setPagedFlowDirection(viewer, progression) };
     }
   }
@@ -3483,14 +3489,15 @@ export class ChapterPaginator {
     if (offsets.length === 0 || key === this.pageMotionUnsupportedKey) return null;
     const step = offsets.length > 1 ? offsets[1] - offsets[0] : viewer.clientWidth;
     const uniform = offsets.every((value, index) => Math.abs(value - offsets[0] - index * step) <= 0.5);
-    const columns = Number.parseInt(
+    const columns = this.verticalMode ? 1 : Number.parseInt(
       this.contentDoc?.defaultView?.getComputedStyle(viewer).columnCount ?? "", 10);
     if (!(step > 0) || !uniform || !(columns >= 1)) {
       this.pageMotionUnsupportedKey = key;
       return null;
     }
     const start = this.readPagedScroll();
-    const driver = new TransformPageMotion(viewer, { offsets, step, columnsPerScreen: columns, progression: this.flowProgression }, start,
+    const driver = new TransformPageMotion(viewer, { offsets, step, columnsPerScreen: columns, progression: this.flowProgression,
+      nativeVerticalFlow: Boolean(this.verticalMode) }, start,
       (error) => this.onPageMotionFault(error));
     const session = new PageMotionSession(
       driver,
@@ -4147,7 +4154,8 @@ export class ChapterPaginator {
     const win = doc.defaultView;
     const measuredWidth = this.iframe.clientWidth;
     const measuredHeight = this.iframe.clientHeight;
-    this.configurePageProgression(viewer, measuredWidth, measuredHeight);
+    this.restoreVerticalShell?.();
+    this.restoreVerticalShell = null;
     // 舒适双页的根内联样式先精确恢复，再恢复其余二阶段补偿。
     this.restoreSpreadReadingAreaStyles();
     // 第二遍 margin / fit-content 处理写回的 inline 值要先恢复，
@@ -4160,7 +4168,10 @@ export class ChapterPaginator {
     this.restoreFloatWidths();
     this.restoreTrailingFloatFixes();
     this.restorePercentageSpacing();
-    this.restorePercentageSpacing = applyReaderRootPercentageSpacing(
+    this.verticalMode = basicVerticalMode(win?.getComputedStyle(viewer).writingMode ?? "", this.fixedLayout, this.scrollMode);
+    this.configurePageProgression(viewer, measuredWidth, measuredHeight);
+    if (this.verticalMode) this.restoreVerticalShell = applyBasicVerticalShell(viewer, this.verticalMode);
+    this.restorePercentageSpacing = this.verticalMode ? () => {} : applyReaderRootPercentageSpacing(
       doc,
       viewer,
       TEXT_MEASURE.maxEm * this.settings.fontSizePx,
@@ -4226,7 +4237,9 @@ export class ChapterPaginator {
       /(?:^|\s)(?:illus|kuchie|cover|duokan-image-fullscreen)(?:\s|$)/u.test(onlyChildClass);
     const padTop = pureImagePage ? 0 : Math.round(requestedTop * verticalScale);
     const padBottom = pureImagePage ? 0 : Math.round(requestedBottom * verticalScale);
-    const requestedColumns = this.fixedLayout || scrollMode ? 1 : this.settings.columnsPerView === 2 ? 2 : 1;
+    // Basic vertical compatibility uses one native-flow viewport. Precise
+    // dual leaves are a separate feature; never feed vertical text to multicol.
+    const requestedColumns = this.fixedLayout || scrollMode || this.verticalMode ? 1 : this.settings.columnsPerView === 2 ? 2 : 1;
 
     // 舒适双页仅用于普通横排 LTR 可重排正文；eligible 与预算是否足够分开：
     // 非横排/纯图 eligible=false，仍走原 requestedColumns 路径（横排 RTL 自 A9 起同样 eligible）；
@@ -4311,6 +4324,11 @@ export class ChapterPaginator {
       w = pageW + authorInsetLeft + authorInsetRight;
       if (parent && authorInsetLeft + authorInsetRight > 0) this.foldParentHorizontalPadding(parent);
     }
+    if (this.verticalMode) {
+      // Natural vertical flow advances by a viewport, without multicol gaps.
+      // Existing content anchors/spread commits remain on the same logical x axis.
+      geometry = createSpreadGeometry(w, 0, 1, MIN_COLUMN_WIDTH_PX);
+    }
     this.spreadGeometry = geometry;
     this.effectiveColumns = geometry.columns;
     this.step = geometry.columnStep;
@@ -4339,7 +4357,7 @@ export class ChapterPaginator {
     viewer.style.paddingTop = `${padTop}px`;
     viewer.style.paddingBottom = `${padBottom}px`;
     this.applyCompositedPagedScroll();
-    if (scrollMode) {
+    if (scrollMode || this.verticalMode) {
       viewer.style.columnCount = "auto";
       viewer.style.columnWidth = "auto";
       viewer.style.columnGap = "0px";
@@ -4411,6 +4429,13 @@ export class ChapterPaginator {
       }
       // [L5-C18] fit-content 会改变最终 border-box 宽度，必须先稳定宽度再计算
       // 页面级 margin；反过来会把多栏中的异常旧宽度固化成错误横向位置。
+      if (this.verticalMode) {
+        // Physical-width and float compensation below assumes horizontal
+        // multicol. Applying it to vertical paragraphs can force max-width:0.
+        this.restoreBackdropCompatibility();
+        this.measuredViewport = { width: measuredWidth, height: measuredHeight };
+        return true;
+      }
       if (this.scrollMode) {
         // 滚动模式：分页专用的分片/尾部占位/backdrop 避免补偿都不执行。
         // viewer 是唯一纵向滚动容器，html/body 仍不承担正文滚动。
@@ -9734,6 +9759,9 @@ export class ChapterPaginator {
     this.imageHitCleanup?.();
     this.imageHitCleanup = null;
     this.restoreSpreadReadingAreaStyles();
+    this.restoreVerticalShell?.();
+    this.restoreVerticalShell = null;
+    this.verticalMode = null;
     this.clearNoteHighlights();
     this.clearSearchHighlightForDocument();
     this.pendingPrecise = null;

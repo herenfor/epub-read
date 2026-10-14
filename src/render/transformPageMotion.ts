@@ -25,6 +25,8 @@ export interface TransformMotionLayout {
   /** 每屏栏数（双页为 2）。 */
   readonly columnsPerScreen: number;
   readonly progression?: PageProgression;
+  /** Native vertical text flows by block width, without CSS multicol. */
+  readonly nativeVerticalFlow?: boolean;
 }
 
 export class TransformPageMotion implements PageMotionDriver {
@@ -213,10 +215,13 @@ export class TransformPageMotion implements PageMotionDriver {
       viewer.style.setProperty("width", `${width + (this.windowScreens - 1) * step}px`);
       const physicalMid = this.progression === "rtl" ? this.windowScreens - 1 - this.windowMid : this.windowMid;
       viewer.style.setProperty("margin-left", `${-physicalMid * step}px`);
-      viewer.style.setProperty("column-count", String(this.windowScreens * columnsPerScreen));
+      if (!this.layout.nativeVerticalFlow) {
+        viewer.style.setProperty("column-count", String(this.windowScreens * columnsPerScreen));
+      }
       viewer.style.setProperty("will-change", "transform");
       const after = viewer.scrollWidth;
-      if (Math.abs(after - before) > 1) {
+      const expected = this.layout.nativeVerticalFlow ? Math.max(before, viewer.clientWidth) : before;
+      if (Math.abs(after - expected) > 1) {
         this.restoreInline();
         this.restoreInline = null;
         this.onFault(new Error(`page motion window changed layout (${before} → ${after})`));

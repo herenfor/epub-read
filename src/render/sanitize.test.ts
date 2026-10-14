@@ -326,7 +326,7 @@ describe("sanitizeChapter", () => {
   it("主题覆盖样式尊重书声明的更窄 max-width（类规则优先）", async () => {
     const html = `<html xmlns="http://www.w3.org/1999/xhtml"><body><div class="paper">信件</div></body></html>`;
     const { html: out } = await sanitizeChapter(html, opts());
-    expect(out).toContain(`:where(#${VIEWER_ID} .reader-top)`);
+    expect(out).toContain(`:where(#${VIEWER_ID}:not([data-reader-vertical]) .reader-top)`);
     expect(out).toContain("max-width: 40rem;");
     expect(out).not.toContain("max-width: 40rem !important");
   });
@@ -353,7 +353,7 @@ describe("sanitizeChapter", () => {
     expect(out).toContain(`class="cut reader-top"`);
     expect(out).toContain(`class="toc"`);
     // 居中规则针对 reader-top；B-007 已保证子组合器也能安全序列化。
-    expect(out).toContain(`:where(#${VIEWER_ID}) .reader-top`);
+    expect(out).toContain(`:where(#${VIEWER_ID}:not([data-reader-vertical])) .reader-top`);
     expect(out).toContain("margin-left: auto !important;");
     expect(out).toContain("margin-right: auto !important;");
   });
@@ -559,7 +559,11 @@ describe("sanitizeChapter", () => {
     const { html: out } = await sanitizeChapter(html, opts());
     // 通用图片规则：零特异性默认值，书的 img 规则可覆盖
     expect(out).toContain("max-width: 100%; object-fit: contain");
-    expect(out).not.toContain("height: auto !important");
+    // Full-page media has separate sizing rules. Only inspect the ordinary
+    // image default, not unrelated declarations elsewhere in the document.
+    const imageDefault = readStyleText(out, "overrides").match(/:where\(#epub-viewer\) img\s*\{([^}]*)\}/)?.[1];
+    expect(imageDefault).toBeDefined();
+    expect(imageDefault).not.toMatch(/(?:^|;)\s*height\s*:/);
   });
 
   it("book 的 bgcolor 在浅色主题下应用到版面，深色/纸色忽略", async () => {
@@ -761,7 +765,8 @@ describe("sanitizeChapter", () => {
     expect(forced.html).toContain("-webkit-writing-mode: horizontal-tb !important;");
     expect(forced.html).toContain("text-orientation: mixed !important;");
     expect(forced.html).toContain('style="writing-mode:vertical-rl"');
-    expect(forced.html).not.toContain("direction:");
+    // flex-direction belongs to media wrappers; it does not reverse glyphs.
+    expect(readStyleText(forced.html, "overrides")).not.toMatch(/(?:^|[;{\s])direction\s*:/);
 
     for (const theme of ["light", "dark", "sepia", "gray"] as const) {
       const themed = await sanitizeChapter(html, {
