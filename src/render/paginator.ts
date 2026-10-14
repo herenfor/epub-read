@@ -4207,7 +4207,7 @@ export class ChapterPaginator {
     const requestedColumns = this.fixedLayout || scrollMode ? 1 : this.settings.columnsPerView === 2 ? 2 : 1;
 
     // 舒适双页仅用于普通横排 LTR 可重排正文；eligible 与预算是否足够分开：
-    // 非横排/RTL/纯图 eligible=false，仍走原 requestedColumns 路径；
+    // 非横排/纯图 eligible=false，仍走原 requestedColumns 路径（横排 RTL 自 A9 起同样 eligible）；
     // eligible=true 但核心返回 null 才是窄窗/大字号单页回退。
     const comfortSpreadRequested =
       requestedColumns === 2 && hasText && !pureImagePage && !fullpageVisual && !fullpageChild;

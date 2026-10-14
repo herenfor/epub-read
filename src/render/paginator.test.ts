@@ -2402,7 +2402,7 @@ describe("measure viewport height locking", () => {
     await promise;
   });
 
-  it("keeps legacy requestedColumns=2 for RTL text and reports no comfort area", async () => {
+  it("gives horizontal RTL text the same comfort spread as LTR", async () => {
     const parent = makeFakeElement({ clientWidth: 1024, clientHeight: 768 });
     const viewer = makeFakeElement({ parentElement: parent });
     const defaultView = {
@@ -2464,17 +2464,19 @@ describe("measure viewport height locking", () => {
 
     const promise = (ChapterPaginator.prototype as any).measure.call(context, 1);
 
-    // RTL 不是舒适区 eligible，但 requestedColumns=2 仍走旧双页，且不得套舒适区单页回退。
-    expect(context.spreadArea).toBeNull();
+    // A9 起横排 RTL 与 LTR 同走舒适双页，几何只按逻辑页轴镜像，不再退回旧双页。
+    expect(context.spreadArea).not.toBeNull();
     expect(context.effectiveColumns).toBe(2);
     expect(viewer.style.columnCount).toBe("2");
     expect(parseFloat(viewer.style.width)).toBeCloseTo(1024, 5);
-    expect(viewer.style.marginLeft ?? "").toBe("");
-    expect(viewer.style.marginRight ?? "").toBe("");
-    expect(parseFloat(viewer.style.columnGap)).toBeCloseTo(40, 5);
-    expect(context.spreadGeometry.columnWidth).toBeCloseTo(492, 5);
-    expect(context.step).toBeCloseTo(532, 5);
-    expect(context.spreadGeometry.spreadStep).toBeCloseTo(1064, 5);
+    expect(parseFloat(viewer.style.marginLeft)).toBeCloseTo(0, 5);
+    expect(parseFloat(viewer.style.marginRight)).toBeCloseTo(0, 5);
+    expect(parseFloat(viewer.style.paddingLeft)).toBeCloseTo(51.2, 5);
+    expect(parseFloat(viewer.style.paddingRight)).toBeCloseTo(51.2, 5);
+    expect(parseFloat(viewer.style.columnGap)).toBeCloseTo(102.4, 5);
+    expect(context.spreadGeometry.columnWidth).toBeCloseTo(409.6, 5);
+    expect(context.step).toBeCloseTo(512, 5);
+    expect(context.spreadGeometry.spreadStep).toBeCloseTo(1024, 5);
 
     for (const c of measureControllers) c.abort();
     await promise;
