@@ -434,7 +434,8 @@
   border: 0;
   border-radius: 8px;
   background: var(--accent, #2563eb);
-  color: var(--accent-foreground, #ffffff);
+  /* 与展开态“继续阅读”同色：深色主题的 accent-foreground 是深色，会让收起态文字变黑。 */
+  color: #ffffff;
   font: inherit;
   font-size: 13px;
   font-weight: 600;
