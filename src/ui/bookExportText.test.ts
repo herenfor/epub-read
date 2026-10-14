@@ -33,6 +33,8 @@ describe("book export text", () => {
 
   it("suggests a safe .epub name and labels saved targets", () => {
     expect(bookExportFileName("a:b?.epub", "x")).toBe("a_b_.epub");
+    expect(bookExportFileName("book.epub", "原书标题")).toBe("原书标题.epub");
+    expect(bookExportFileName("原文件.epub", "别的标题")).toBe("原文件.epub");
     expect(bookExportFileName("", "书名. ")).toBe("书名.epub");
     expect(bookExportFileName("CON.epub", "x")).toBe("book.epub");
     expect(bookExportFileName("COM¹.epub", "x")).toBe("book.epub");

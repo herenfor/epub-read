@@ -141,6 +141,7 @@ pub(crate) struct OpenReadOnlyResponse {
     fd: Option<i32>,
     start_offset: Option<i64>,
     declared_length: Option<i64>,
+    display_name: Option<String>,
 }
 
 /// A single-use, bounded adapter over a raw provider fd.
@@ -155,6 +156,7 @@ pub(crate) struct RestrictedReader {
     prefix_skip: u64,
     prepared: bool,
     finished: bool,
+    display_name: Option<String>,
 }
 
 impl RestrictedReader {
@@ -185,6 +187,7 @@ impl RestrictedReader {
             prefix_skip: 0,
             prepared: false,
             finished: false,
+            display_name: None,
         })
     }
 
@@ -209,6 +212,10 @@ impl RestrictedReader {
     /// unknown length (`declaredLength == -1`).
     pub(crate) fn declared_length(&self) -> Option<u64> {
         self.declared_length
+    }
+
+    pub(crate) fn display_name(&self) -> Option<&str> {
+        self.display_name.as_deref()
     }
 
     /// Copies exactly the declared range (or the remainder of the provider
@@ -290,7 +297,9 @@ fn restricted_reader_from_response(
     let declared_length = response.declared_length.ok_or_else(|| {
         RestrictedReadError::AndroidBridge("Android provider omitted declaredLength".into())
     })?;
-    RestrictedReader::from_file(file, start_offset, declared_length)
+    let mut reader = RestrictedReader::from_file(file, start_offset, declared_length)?;
+    reader.display_name = response.display_name;
+    Ok(reader)
 }
 
 fn copy_reader_to<R: Read, W: Write>(
@@ -420,7 +429,6 @@ mod android {
         job_id: &'a str,
         cancelled: bool,
     }
-
 
     #[derive(Deserialize, Serialize)]
     struct EmptyPluginResponse {}
@@ -841,12 +849,37 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn c7_reader_carries_display_name_and_accepts_old_bridge_metadata() {
+        let path = temp_path("c7-display-name");
+        fs::write(&path, b"abc").unwrap();
+        for name in [Some("繁體原名 ? #.epub"), None] {
+            let fd = File::open(&path).unwrap().into_raw_fd();
+            let mut payload =
+                serde_json::json!({ "fd": fd, "startOffset": 0, "declaredLength": 3 });
+            if let Some(name) = name {
+                payload["displayName"] = name.into();
+            }
+            let response = serde_json::from_value(payload).unwrap();
+            let mut reader = restricted_reader_from_response(response).unwrap();
+            assert_eq!(reader.display_name(), name);
+            let mut bytes = Vec::new();
+            reader
+                .copy_limited_to(&mut bytes, &never_cancelled())
+                .unwrap();
+            assert_eq!(bytes, b"abc");
+        }
+        fs::remove_file(path).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn missing_response_fields_are_errors() {
         assert!(matches!(
             restricted_reader_from_response(OpenReadOnlyResponse {
                 fd: None,
                 start_offset: Some(0),
                 declared_length: Some(0),
+                display_name: None,
             }),
             Err(RestrictedReadError::AndroidBridge(_))
         ));
@@ -859,6 +892,7 @@ mod tests {
                 fd: Some(fd),
                 start_offset: None,
                 declared_length: Some(1),
+                display_name: None,
             }),
             Err(RestrictedReadError::AndroidBridge(_))
         ));
