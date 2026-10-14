@@ -14,11 +14,16 @@ export type InterruptResult =
   | { readonly kind: "held"; readonly sample: MotionSample }
   | { readonly kind: "unsupported"; readonly sample: MotionSample };
 
-/** 收尾曲线；手势漂移先指数减速，再以同速度接入有限尾段。 */
+/**
+ * 收尾曲线。点按：截断指数。松手漂移：起速接上手指的四次缓出（matched-ease）。
+ * 桌面：缓出三次。三者终点速度都趋于零，不在结尾硬停。
+ */
 export interface SettlePlan {
   readonly durationMs: number;
   readonly tauMs: number;
-  readonly curve?: "finite-drift" | "ease-out-cubic";
+  readonly curve?: "matched-ease" | "ease-out-cubic";
+  /** matched-ease 的起始斜率（进度/时间比例），= 松手速度 × 时长 / 剩余距离，限 0–4。 */
+  readonly startSlope?: number;
 }
 
 /**
@@ -55,12 +60,13 @@ export type DragStartResult =
 
 /** 点按（无初速度）时的衰减常数。 */
 export const SETTLE_TAP_TAU_MS = 90;
-const SETTLE_TAU_MIN_MS = 60;
-const SETTLE_TAU_MAX_MS = 160;
 const SETTLE_MIN_MS = 180;
 const SETTLE_MAX_MS = 700;
 /** 距目标小于该值视为已落定（不再值得一段动画）。 */
 const SETTLE_REST_PX = 0.5;
+/** 四次缓出保持单调的最大起始斜率；3 即缓出三次。 */
+const MATCHED_EASE_MAX_SLOPE = 4;
+const MATCHED_EASE_SLOPE = 3;
 
 /** Desktop keeps its existing click/key/wheel timing when sharing the motion driver. */
 export const DESKTOP_SLIDE_FULL_MS = 280;
@@ -74,20 +80,25 @@ export function desktopSettlePlan(distance: number, span: number): SettlePlan {
 }
 
 /**
- * 松手/点按的收尾：沿松手速度先指数减速，再平滑停到目标。
- * velocity 为位置单位的 px/ms；方向与剩余距离一致时让初速度接上手指，否则用点按常数。
+ * 松手/点按的收尾。velocity 为位置单位的 px/ms；方向与剩余距离一致时让初速度接上手指，
+ * 否则用点按的截断指数。
+ *
+ * 松手漂移用四次缓出 p(t) = 1 − (1−t)³(1 + (3−a)t)：起始斜率 a 由松手速度决定（起步严格
+ * 接上手指），终点速度与减速度同时为零，不会在快结束时“顿”一下。时长按 a≈3 取
+ * 3×剩余/速度，限 180–700ms；被限时 a 随之变化，超过 4 时取 4（极快的甩动略慢于手指）。
  */
 export function settlePlan(distance: number, velocity: number | null): SettlePlan {
   const remaining = Math.abs(distance);
-  let tauMs = SETTLE_TAP_TAU_MS;
   const drifting = velocity !== null && Math.abs(velocity) > 0.05 && Math.sign(velocity) === Math.sign(distance);
+  if (remaining <= SETTLE_REST_PX) return { durationMs: 0, tauMs: SETTLE_TAP_TAU_MS };
   if (drifting) {
-    tauMs = Math.max(SETTLE_TAU_MIN_MS, Math.min(SETTLE_TAU_MAX_MS, remaining / Math.abs(velocity)));
+    const speed = Math.abs(velocity!);
+    const durationMs = Math.round(Math.min(SETTLE_MAX_MS,
+      Math.max(SETTLE_MIN_MS, MATCHED_EASE_SLOPE * remaining / speed)));
+    const startSlope = Math.min(MATCHED_EASE_MAX_SLOPE, speed * durationMs / remaining);
+    return { durationMs, tauMs: remaining / speed, curve: "matched-ease", startSlope };
   }
-  if (remaining <= SETTLE_REST_PX) return { durationMs: 0, tauMs };
-  // 两个 tau 的指数前段保留松手速度；两个 tau 的尾段从该速度减到零。
-  // 总长 240–640ms，不截短后跳到目标，也不把已近乎静止的微移拖到 700ms。
-  if (drifting) return { durationMs: 4 * tauMs, tauMs, curve: "finite-drift" };
+  const tauMs = SETTLE_TAP_TAU_MS;
   const durationMs = Math.round(Math.min(SETTLE_MAX_MS,
     Math.max(SETTLE_MIN_MS, tauMs * Math.log(remaining / SETTLE_REST_PX))));
   return { durationMs, tauMs };
@@ -98,10 +109,9 @@ export function settleProgress(plan: SettlePlan, t: number): number {
   if (plan.durationMs <= 0) return 1;
   const clamped = Math.max(0, Math.min(1, t));
   if (plan.curve === "ease-out-cubic") return 1 - (1 - clamped) ** 3;
-  if (plan.curve === "finite-drift") {
-    if (clamped <= 0.5) return 1 - Math.exp(-4 * clamped);
-    // p 与 dp/dt 在中点连续；终点速度为零。平方剩余量始终非负，绝不越界。
-    return 1 - Math.exp(-2) * (2 * (1 - clamped)) ** 2;
+  if (plan.curve === "matched-ease") {
+    const a = Math.max(0, Math.min(MATCHED_EASE_MAX_SLOPE, plan.startSlope ?? MATCHED_EASE_SLOPE));
+    return 1 - (1 - clamped) ** 3 * (1 + (3 - a) * clamped);
   }
   const norm = 1 - Math.exp(-plan.durationMs / plan.tauMs);
   return (1 - Math.exp(-clamped * plan.durationMs / plan.tauMs)) / norm;
