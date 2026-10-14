@@ -17,14 +17,29 @@ export class VerticalTextLayout {
       throw new Error("vertical text viewport must itself use vertical-rl");
     }
     const intervals: VerticalInterval[] = [];
+    const rubies = new Set<Element>();
     const origin = this.origin();
     const range = root.ownerDocument.createRange();
     for (const node of index.textNodes) {
       if (!root.contains(node)) throw new Error("canonical index belongs to another document");
+      const ruby = node.parentElement?.closest("ruby");
+      if (ruby && root.contains(ruby)) rubies.add(ruby);
       range.selectNodeContents(node);
       for (const rect of Array.from(range.getClientRects())) {
         if (rect.width > 0 && rect.height > 0) intervals.push(this.interval(rect, origin));
       }
+    }
+    // Annotation ink may be separated from its base by a gap. Keep a ruby
+    // together even when text-only rectangles do not overlap horizontally.
+    for (const ruby of rubies) {
+      range.selectNodeContents(ruby);
+      let start = Infinity, end = -Infinity;
+      for (const rect of Array.from(range.getClientRects())) {
+        if (rect.width <= 0 || rect.height <= 0) continue;
+        start = Math.min(start, origin - rect.right);
+        end = Math.max(end, origin - rect.left);
+      }
+      if (end > start) intervals.push({ start, end });
     }
     this.model = buildVerticalPageModel(intervals, pageWidth);
   }

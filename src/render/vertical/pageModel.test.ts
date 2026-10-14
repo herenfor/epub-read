@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 import { buildVerticalPageModel, verticalPageAt, verticalPageScrollLeft } from "./pageModel";
 
 describe("vertical page edges", () => {
+  it("does not merge touching columns into a false oversize group", () => {
+    const model = buildVerticalPageModel([{ start: 0, end: 20 }, { start: 20, end: 40 }, { start: 40, end: 60 }], 40);
+    expect(model.kind).toBe("ready");
+    if (model.kind === "ready") expect(model.pages.map(p => p.end)).toEqual([40, 60]);
+  });
   it("leaves a gap instead of cutting a text/ruby group; edges select the following page", () => {
     const model = buildVerticalPageModel([{ start: 95, end: 115 }, { start: 0, end: 20 }, { start: 90, end: 110 }], 100);
     expect(model.kind).toBe("ready");
