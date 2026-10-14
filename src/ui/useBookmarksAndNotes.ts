@@ -678,14 +678,18 @@ export function useBookmarkRibbonActions({ currentShelfId, readReaderPosition, c
     createdAtMs: Date.now(),
   });
 
-  /** lane 不给：在阅读位置放（与原来相同的一次读数）；给了：放在这一屏的第 lane 页。 */
+  /**
+   * lane 给了（分页）：放在这一屏第 lane 页的第一行，书签记“这一页从哪里开始”；
+   * 取不到时退回阅读位置。lane 不给（滚动）：阅读线那一行（与原来相同的一次读数）。
+   */
   const addBookmark = useCallback((lane?: 0 | 1): boolean => {
     if (!currentShelfId) return false;
     let bookmark: Bookmark;
-    if (lane !== undefined) {
-      const captured = readerRef.current?.captureBookmarkAnchor?.(lane);
-      if (!captured) return false;
+    const captured = lane !== undefined ? readerRef.current?.captureBookmarkAnchor?.(lane) : null;
+    if (captured) {
       bookmark = makeBookmark({ spineIndex: captured.spineIndex, page: captured.page, anchor: captured.anchor, text: captured.text });
+    } else if (lane === 1) {
+      return false;
     } else {
       const position = readReaderPosition(true);
       if (position.state.status !== "ready") return false;
@@ -771,7 +775,7 @@ export function useBookmarkRibbonActions({ currentShelfId, readReaderPosition, c
       setBookmarkPagesOpen(true);
       return;
     }
-    if (action.kind === "add") addBookmark();
+    if (action.kind === "add") addBookmark(screen.kind === "paged" ? 0 : undefined);
     else removeBookmarks(action.ids, { animate: true });
   }, [currentShelfId, bookmarkPagesOpen, legacyToggle, addBookmark, removeBookmarks]);
 

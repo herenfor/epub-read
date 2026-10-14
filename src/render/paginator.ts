@@ -8683,16 +8683,46 @@ export class ChapterPaginator {
    * 滚动、固定版式或尚无布局时返回 null。
    */
   bookmarkPageFrames(singleSide?: "left" | "right"): { top: number; columns: 1 | 2; frames: BookmarkPageFrame[] } | null {
+    const spread = this.visualSpreadOrigin();
     const doc = this.contentDoc;
     const viewer = this.viewer;
+    if (!spread || !doc || !viewer || this.fixedLayout || this.lastState.status !== "ready") return null;
+    const host = (doc.defaultView?.frameElement as HTMLElement | null)?.getBoundingClientRect();
+    const frames = bookmarkPageFrames({
+      contentLeft: spread.contentLeft,
+      geometry: spread.geometry,
+      measure: TEXT_MEASURE.maxEm * this.settings.fontSizePx,
+      viewportLeft: 0,
+      viewportRight: doc.documentElement.clientWidth || viewer.clientWidth,
+      rtl: spread.rtl,
+      present: spread.present,
+      singleSide,
+    });
+    const dx = host?.left ?? 0;
+    return {
+      top: host?.top ?? 0,
+      columns: spread.geometry.columns,
+      frames: frames.map((frame) => ({ ...frame, outerX: frame.outerX + dx })),
+    };
+  }
+
+  /**
+   * 当前屏（吸附后的那一屏）第一栏在 iframe 视口里的左缘。与锚点采样同一视觉换算：
+   * 运动层窗口模式下 viewer 被加宽、平移，不能直接读它的矩形。
+   */
+  private visualSpreadOrigin(): {
+    contentLeft: number;
+    rtl: boolean;
+    geometry: SpreadGeometry;
+    present: [boolean, boolean];
+  } | null {
     const layout = this.spreadLayout;
-    if (!doc || !viewer || !layout || this.scrollMode || this.fixedLayout || this.lastState.status !== "ready") return null;
+    if (!this.contentDoc || !this.viewer || !layout || this.scrollMode) return null;
     const page = this.metrics.currentPage;
     const present: [boolean, boolean] = [
       !layout.empty && visibleColumnInterval(layout, page, 0) !== null,
       !layout.empty && visibleColumnInterval(layout, page, 1) !== null,
     ];
-    // 用与锚点采样相同的视觉换算：运动层窗口模式下 viewer 被加宽、平移，不能直接读它的矩形。
     const geometry = layout.geometry;
     const position = this.readVisualPosition();
     const scroll = this.readPagedScroll();
@@ -8702,35 +8732,19 @@ export class ChapterPaginator {
     const contentLeft = rtl
       ? firstStart - (geometry.columns - 1) * geometry.columnStep - geometry.columnWidth
       : firstStart;
-    const host = (doc.defaultView?.frameElement as HTMLElement | null)?.getBoundingClientRect();
-    const frames = bookmarkPageFrames({
-      contentLeft,
-      geometry,
-      measure: TEXT_MEASURE.maxEm * this.settings.fontSizePx,
-      viewportLeft: 0,
-      viewportRight: doc.documentElement.clientWidth || viewer.clientWidth,
-      rtl,
-      present,
-      singleSide,
-    });
-    const dx = host?.left ?? 0;
-    return {
-      top: host?.top ?? 0,
-      columns: layout.geometry.columns,
-      frames: frames.map((frame) => ({ ...frame, outerX: frame.outerX + dx })),
-    };
+    return { contentLeft, rtl, geometry, present };
   }
 
   /**
-   * A15：在当前屏第 lane 页取一个书签锚点（与阅读锚点同一采样：该页正文中线）。
-   * 第二页没有正文时返回 null。不改阅读锚点。
+   * A15：在当前屏第 lane 页取书签锚点：这一页的第一行（书签记“这一页从哪里开始”），
+   * 取不到（页首是空白等）时退回阅读锚点同样的页中线采样。复用阅读进度的取点
+   * （captureAnchorAtPoint、插图用媒体身份）与视觉换算；不改阅读锚点。第二页没有正文时为 null。
    */
   captureLaneAnchor(lane: 0 | 1): { anchor: ReadingAnchor; text: string | null } | null {
     const doc = this.contentDoc;
     const viewer = this.viewer;
-    const layout = this.spreadLayout;
-    if (!doc || !viewer || !layout || this.scrollMode || viewer.clientWidth <= 0) return null;
-    if (layout.empty || visibleColumnInterval(layout, this.metrics.currentPage, lane) === null) return null;
+    const spread = this.visualSpreadOrigin();
+    if (!doc || !viewer || !spread || viewer.clientWidth <= 0 || !spread.present[lane]) return null;
     const index = this.textIndex ?? this.buildTextIndex(doc, viewer);
     this.textIndex = index;
     const options: AnchorSampleOptions = {
@@ -8748,9 +8762,21 @@ export class ChapterPaginator {
       },
       mediaAt: (point) => this.visibleMediaAt(point),
     };
-    const shift = lane * layout.geometry.columnStep * pageAxisSign(this.flowProgression);
-    for (const point of visibleSamplePoints(options)) {
-      const anchor = captureAnchorAtPoint(options, { x: point.x + shift, y: point.y });
+    const { geometry, rtl } = spread;
+    // 栏中线也是正文中线（限宽在栏内居中），与文字方向无关地落在第一行上。
+    const physical = rtl ? geometry.columns - 1 - lane : lane;
+    const x = spread.contentLeft + physical * geometry.columnStep + geometry.columnWidth / 2;
+    const style = doc.defaultView?.getComputedStyle(viewer);
+    const top = viewer.getBoundingClientRect().top + (viewer.clientTop || 0) + (parseFloat(style?.paddingTop ?? "") || 0);
+    const body = doc.body ? doc.defaultView?.getComputedStyle(doc.body) : null;
+    const fontSize = parseFloat(body?.fontSize ?? "") || this.settings.fontSizePx;
+    const line = parseFloat(body?.lineHeight ?? "") || fontSize * 1.6;
+    const height = viewer.clientHeight;
+    const ys = [top + line * 0.5, top + line * 1.5, top + line * 2.5,
+      height * 0.5, height * 0.5 - 40, height * 0.5 + 40, height * 0.5 - 80, height * 0.5 + 80]
+      .map((y) => Math.round(Math.max(2, Math.min(height - 2, y))));
+    for (const y of ys) {
+      const anchor = captureAnchorAtPoint(options, { x, y });
       if (anchor) return { anchor, text: this.anchorTextFor(anchor) };
     }
     return null;
