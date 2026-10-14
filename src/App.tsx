@@ -193,15 +193,8 @@ import {
   type CheckpointedSample,
 } from "./ui/checkpointProgressRepair";
 import { progressValueFromPatch } from "./ui/portableState/shelfStoreAdapter";
-import {
-  beginRestoreCommit,
-  mayCommitRestoredProgress,
-  reduceRestoreCommit,
-  type RestoreCommitEvent,
-  type RestoreCommitState,
-  type RestoreTicket,
-} from "./ui/restoreCommitGate";
-import { reduceReaderSession, type ReaderSessionEvent } from "./ui/readerSession";
+import { mayCommitRestoredProgress, type RestoreTicket } from "./ui/restoreCommitGate";
+import { useReaderSession } from "./ui/useReaderSession";
 import type { ProgressLease } from "./ui/portableState/ownedProgressSessions";
 import { currentChapterCharsRead } from "./ui/readingProgress";
 import {
@@ -618,7 +611,13 @@ export default function App() {
     aiRuntime.getSnapshot,
   );
   const [chapterState, setChapterState] = useState<ChapterState>({ status: "loading" });
-  const [readerDisplayReady, setReaderDisplayReady] = useState(false);
+  // B3：阅读会话标志与开书恢复门的唯一宿主；本文件只读 ref/state、经它的动作写入。
+  const {
+    readerDisplayReadyRef, navigationPendingRef, historyCaptureAllowedRef, suppressShelfProgressRef, restoreGateRef,
+    readerDisplayReady, displayedOnce, restoreSettled, initialRestoreTicket, setInitialRestoreTicket,
+    dispatchReaderSession, beginExplicitNavigation, releaseRestoreForExplicitNavigation,
+    dispatchRestoreGate, restoreResultMatches, startRestore, clearRestore,
+  } = useReaderSession(() => activeSessionRef.current?.generation);
   const { settings, setSettings, uiScale, settingsActions } = useReaderSettings();
   // A10s：竖排未上线前，竖排书按强制横排显示；只影响本书渲染，不改已保存的设置。
   const readerSettings = useMemo(() => withVerticalFallback(settings, book), [settings, book]);
@@ -627,7 +626,6 @@ export default function App() {
   const reportedResourcesRef = useRef(new Set<string>());
   const [diagText, setDiagText] = useState<string | null>(null);
   const [initialAnchor, setInitialAnchor] = useState<PersistedReaderAnchor | null>(null);
-  const [initialRestoreTicket, setInitialRestoreTicket] = useState<RestoreTicket | null>(null);
   const [initialPage, setInitialPage] = useState<number | null>(0);
   const [initialAlignment, setInitialAlignment] = useState<"reading-line" | "context">("context");
   /** 正文图片浮层请求；null = 未打开。 */
@@ -1117,70 +1115,8 @@ export default function App() {
   serverRef.current = server;
   const spineIndexRef = useRef(spineIndex);
   spineIndexRef.current = spineIndex;
-  const navigationPendingRef = useRef(false);
-  const readerDisplayReadyRef = useRef(false);
-  const hasReaderDisplayedRef = useRef(false);
-  /** 语义锚点失败后先结束 loading，但禁止把失败落点当作成功进度写盘。 */
-  const suppressShelfProgressRef = useRef(false);
-  /**
-   * 开书恢复的进度回写门。null = 没有待结算的恢复（显式导航已接管或已结算）。
-   * 恢复目标解析失败时页面可显示章首，但在用户真实提交新位置前不得写进度。
-   */
   const readingModeRef = useRef(settings.readingMode);
   readingModeRef.current = settings.readingMode;
-  const restoreGateRef = useRef<RestoreCommitState | null>(null);
-  const restoreRequestRef = useRef(0);
-  /** 首次恢复已结算（统计任务在此之后启动，前台开章优先）。 */
-  const [restoreSettled, setRestoreSettled] = useState(true);
-  const dispatchRestoreGate = useCallback((event: RestoreCommitEvent) => {
-    const gate = restoreGateRef.current;
-    if (!gate) return;
-    // Use the event's immutable ticket. A late callback from an old request
-    // must never be rewrapped as the current gate's identity.
-    const next = reduceRestoreCommit(gate, event);
-    restoreGateRef.current = mayCommitRestoredProgress(next) ? null : next;
-    if (next.phase !== "resolving") setRestoreSettled(true);
-  }, []);
-  /** 只有当前会话、当前恢复请求、同一章节的完整 ticket 才能结算。 */
-  const restoreResultMatches = useCallback((ticket: RestoreTicket, chapterPath: string): boolean => {
-    const gate = restoreGateRef.current;
-    return gate !== null
-      && gate.ticket.session === ticket.session
-      && gate.ticket.request === ticket.request
-      && gate.ticket.chapterPath === ticket.chapterPath
-      && gate.ticket.chapterPath === chapterPath
-      && activeSessionRef.current?.generation === ticket.session;
-  }, []);
-  /** 显式导航（目录/搜索/书签/历史/笔记）由用户选定目标：作废未结算的旧恢复。 */
-  const releaseRestoreForExplicitNavigation = useCallback(() => {
-    if (restoreGateRef.current) restoreGateRef.current = null;
-    setInitialRestoreTicket(null);
-    setRestoreSettled(true);
-  }, []);
-  // 每个稳定位置只能被一次显式跳转捕获；新书初始加载时
-  // 仍允许以已保存的基线位置记录“第一次跳转”。
-  const historyCaptureAllowedRef = useRef(true);
-  /** B3：五个会话标志只经这里成组写入；ref 供事件处理同步读取，就绪另发 state 驱动渲染。 */
-  const dispatchReaderSession = useCallback((event: ReaderSessionEvent) => {
-    const next = reduceReaderSession({
-      displayReady: readerDisplayReadyRef.current,
-      displayedOnce: hasReaderDisplayedRef.current,
-      navigationPending: navigationPendingRef.current,
-      historyCaptureAllowed: historyCaptureAllowedRef.current,
-      suppressProgress: suppressShelfProgressRef.current,
-    }, event);
-    readerDisplayReadyRef.current = next.displayReady;
-    hasReaderDisplayedRef.current = next.displayedOnce;
-    navigationPendingRef.current = next.navigationPending;
-    historyCaptureAllowedRef.current = next.historyCaptureAllowed;
-    suppressShelfProgressRef.current = next.suppressProgress;
-    setReaderDisplayReady(next.displayReady);
-  }, []);
-  /** 目录、书内链接、搜索、历史、笔记、书签、换章：用户选定新目标。 */
-  const beginExplicitNavigation = useCallback(() => {
-    dispatchReaderSession({ type: "begin-explicit" });
-    releaseRestoreForExplicitNavigation();
-  }, [dispatchReaderSession, releaseRestoreForExplicitNavigation]);
   const lastStablePositionRef = useRef<ReaderHistoryPosition>({
     spineIndex: 0,
     page: 0,
@@ -1305,21 +1241,8 @@ export default function App() {
       setAnchor(undefined);
       setInitialPage(saved?.page ?? 0);
       setInitialAnchor(toPersistedReaderAnchor(saved?.anchor));
-      {
-        const ticket = {
-          session: generation,
-          request: ++restoreRequestRef.current,
-          chapterPath: spineItemPath(b, start) ?? "",
-        };
-        let gate = beginRestoreCommit(ticket);
-        // 没有正文/元素/媒体目标（新书、章首、旧页码、固定版式）：按正常开章结算。
-        if (b.fixedLayout || !toPersistedReaderAnchor(saved?.anchor)) {
-          gate = reduceRestoreCommit(gate, { type: "resolved", ticket, located: true });
-        }
-        restoreGateRef.current = gate;
-        setInitialRestoreTicket(ticket);
-        setRestoreSettled(gate.phase !== "resolving");
-      }
+      // 没有正文/元素/媒体目标（新书、章首、旧页码、固定版式）：按正常开章结算。
+      startRestore(generation, spineItemPath(b, start) ?? "", b.fixedLayout || !toPersistedReaderAnchor(saved?.anchor));
       lastStablePositionRef.current = {
         spineIndex: start,
         page: saved?.page ?? 0,
@@ -3959,12 +3882,12 @@ export default function App() {
   const readerLoadFeedback = resolveReaderLoadFeedback({
     visible: view === "reader" && ready,
     displayReady: readerDisplayReady,
-    displayedOnce: hasReaderDisplayedRef.current,
+    displayedOnce,
     chapter: chapterState,
   });
   // 首页显示后、过渡解除前先准备 Aa，再准备目录（挂载为关闭态，留到离开阅读器）。
   const openingPanels = useOpeningPanelPrep(
-    view === "reader" && ready && hasReaderDisplayedRef.current && bookKey ? bookKey : null,
+    view === "reader" && ready && displayedOnce && bookKey ? bookKey : null,
   );
   const prepareAaPanel = useCallback(() => openingPanels.prepared(bookKey, "aa"), [openingPanels.prepared, bookKey]);
   const openAaFonts = useCallback(() => showMenuSubview("fonts"), [showMenuSubview]);
@@ -3989,7 +3912,7 @@ export default function App() {
   // 开书过渡覆盖“解析书籍”、首次“准备阅读位置”与有限的面板准备；之后的换章只用顶部细进度线。
   const readerOpeningVisible =
     phase.phase === "loading" ||
-    (readerLoadFeedback?.kind === "loading" && !hasReaderDisplayedRef.current) ||
+    (readerLoadFeedback?.kind === "loading" && !displayedOnce) ||
     openingPanels.pending ||
     panelWarmup.pending;
   const readerOpeningTitle = phase.phase === "loading"
@@ -4526,8 +4449,7 @@ export default function App() {
     if (book) {
       disposeBook(book);
     }
-    restoreGateRef.current = null;
-    setInitialRestoreTicket(null);
+    clearRestore();
     setBook(null);
     setServer(null);
     setCurrentShelfId(null);
@@ -5569,7 +5491,7 @@ export default function App() {
                   onContentFractionFailed={handleContentFractionFailed}
                   onUserProgressSample={handleUserProgressSample}
                 />
-                {readerLoadFeedback?.kind === "loading" && hasReaderDisplayedRef.current && (
+                {readerLoadFeedback?.kind === "loading" && displayedOnce && (
                   <div className="reader-load-line" role="status" aria-live="polite">
                     <span className="reader-load-line-text">{readerLoadFeedback.text}</span>
                   </div>
