@@ -33,6 +33,26 @@ function fixture(text = "甲😀乙丙丁") {
 }
 
 describe("vertical canonical location", () => {
+  it("keeps annotation and base together even with a horizontal gap between their ink", () => {
+    const { doc, root } = fixture();
+    root.innerHTML = "<p>甲<ruby>漢<rt>あ</rt></ruby></p>";
+    const rect = (start: number, end: number) => ({ right: 500 - start, left: 500 - end, width: end - start, height: 18 });
+    doc.createRange = () => {
+      let selected: Node;
+      return {
+        selectNodeContents(node: Node) { selected = node; },
+        setStart(node: Node) { selected = node; },
+        setEnd() {},
+        getClientRects() {
+          if (selected.nodeType === 1) return [rect(65, 85), rect(45, 55)];
+          return [(selected as Text).data === "甲" ? rect(0, 20) : (selected as Text).data === "漢" ? rect(65, 85) : rect(45, 55)];
+        },
+      } as unknown as Range;
+    };
+    const layout = new VerticalTextLayout(root, buildVisibleTextIndex(doc, root), 60);
+    expect(layout.locate({ textOffset: 1, textSnippet: "漢" })).toMatchObject({ status: "located", page: 1 });
+    expect(layout.locate({ textOffset: 2, textSnippet: "あ" })).toMatchObject({ status: "located", page: 1 });
+  });
   it("keeps Unicode canonical identity while a new width selects a new page", () => {
     const { root, index } = fixture();
     const anchor = { textOffset: 4, textSnippet: "丁" };

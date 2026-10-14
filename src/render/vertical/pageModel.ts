@@ -8,7 +8,7 @@ export type VerticalPageModel =
   | { readonly kind: "ready"; readonly pageWidth: number; readonly extent: number;
       readonly pages: readonly VerticalPage[]; readonly groups: readonly VerticalInterval[] };
 
-/** Only numerical noise is joined; separate columns must keep their gap. */
+/** Tolerance at the leading edge only; touching columns remain separable. */
 const EPSILON = 0.01;
 
 export function buildVerticalPageModel(
@@ -24,7 +24,7 @@ export function buildVerticalPageModel(
   const groups: Array<{ start: number; end: number }> = [];
   for (const item of sorted) {
     const last = groups.at(-1);
-    if (last && item.start <= last.end + EPSILON) last.end = Math.max(last.end, item.end);
+    if (last && item.start < last.end) last.end = Math.max(last.end, item.end);
     else groups.push({ ...item });
   }
   if (groups.length === 0) return { kind: "empty", pageWidth, extent: 0, pages: [] };
