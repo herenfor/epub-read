@@ -59,6 +59,13 @@ export interface TitleBarProps {
   onHistoryForward?: () => void;
   historyBackLabel?: string;
   historyForwardLabel?: string;
+  /** A11 V1 (dev builds only): open books as tabs in place of the single book title. */
+  readerTabs?: {
+    tabs: ReadonlyArray<{ id: string; title: string }>;
+    activeId: string | null;
+    onSelect(id: string): void;
+    onClose(id: string): void;
+  };
 }
 
 export const TitleBar: React.FC<TitleBarProps> = ({
@@ -95,6 +102,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   onHistoryForward,
   historyBackLabel,
   historyForwardLabel,
+  readerTabs,
 }) => {
   const { t } = useUiText();
   const [isMaximized, setIsMaximized] = useState(false);
@@ -374,7 +382,44 @@ export const TitleBar: React.FC<TitleBarProps> = ({
             </div>
           )}
 
-          {view === "reader" ? (
+          {view === "reader" && readerTabs && readerTabs.tabs.length > 0 && !mobileCompact ? (
+            <div className="titlebar-reader-tabs" role="tablist" aria-label={t("titlebar.tabs")}>
+              {readerTabs.tabs.map((tab) => {
+                const active = tab.id === readerTabs.activeId;
+                return (
+                  <div
+                    key={tab.id}
+                    className={`titlebar-reader-tab${active ? " is-active" : ""}`}
+                    onAuxClick={(event) => {
+                      if (event.button === 1) readerTabs.onClose(tab.id);
+                    }}
+                  >
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={active}
+                      className="titlebar-reader-tab-label"
+                      title={t("titlebar.tabs.tip", { title: tab.title })}
+                      onClick={() => readerTabs.onSelect(tab.id)}
+                    >
+                      {tab.title}
+                    </button>
+                    <button
+                      type="button"
+                      className="titlebar-reader-tab-close"
+                      aria-label={t("titlebar.tabs.close", { title: tab.title })}
+                      title={t("titlebar.tabs.close", { title: tab.title })}
+                      onClick={() => readerTabs.onClose(tab.id)}
+                    >
+                      <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
+                        <path d="M2 2l6 6M8 2l-6 6" />
+                      </svg>
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          ) : view === "reader" ? (
             <div className="titlebar-book-meta" {...dragProps}>
               <span
                 className="titlebar-app-title titlebar-book-title"

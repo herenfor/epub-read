@@ -38,4 +38,7 @@ export const titlebar = defineMessages("titlebar", {
   "titlebar.close": "关闭",
   "titlebar.progress.tip": { zh: "阅读进度：{percent}% (点击切换章节目录)", note: "Tooltip on the progress pill." },
   "titlebar.progress.chapter": { zh: "第 {current}/{total} 章", note: "Chapter position badge, e.g. 'Ch. 3/30'.", max: 14 },
+  "titlebar.tabs": { zh: "已打开的书", note: "Accessible name of the reader tab strip (dev builds only)." },
+  "titlebar.tabs.close": { zh: "关闭 {title}", note: "Close button on one reader tab; {title} is the book title." },
+  "titlebar.tabs.tip": { zh: "{title}（Ctrl+Tab 切换，Ctrl+W 关闭）", note: "Tooltip on a reader tab; keep the shortcuts." },
 });

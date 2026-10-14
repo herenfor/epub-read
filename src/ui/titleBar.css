@@ -85,6 +85,69 @@
   overflow: hidden;
 }
 
+/* A11 V1（仅 Dev 构建）：已打开的书作为标签，替代单本书名。 */
+.titlebar-reader-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.titlebar-reader-tabs::-webkit-scrollbar { display: none; }
+
+.titlebar-reader-tab {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 1 auto;
+  min-width: 72px;
+  max-width: 200px;
+  height: 26px;
+  border-radius: 7px;
+  color: var(--fg);
+  opacity: 0.7;
+}
+.titlebar-reader-tab:hover { opacity: 0.9; background: color-mix(in srgb, var(--btn-tint) 45%, transparent); }
+.titlebar-reader-tab.is-active {
+  opacity: 1;
+  background: color-mix(in srgb, var(--btn-tint) 80%, transparent);
+}
+
+.titlebar-reader-tab-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding: 0 4px 0 10px;
+  border: none;
+  background: none;
+  color: inherit;
+  font-size: 12px;
+  font-weight: 550;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.titlebar-reader-tab-close {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-right: 4px;
+  border: none;
+  border-radius: 5px;
+  background: none;
+  color: inherit;
+  opacity: 0;
+}
+.titlebar-reader-tab.is-active .titlebar-reader-tab-close,
+.titlebar-reader-tab:hover .titlebar-reader-tab-close,
+.titlebar-reader-tab-close:focus-visible { opacity: 0.75; }
+.titlebar-reader-tab-close:hover { opacity: 1; background: color-mix(in srgb, var(--fg) 12%, transparent); }
+
 /* 返回书架胶囊按键 */
 .titlebar-back-btn {
   display: inline-flex;

@@ -43,6 +43,17 @@ import {
 } from "./ui/windowFullscreen";
 import { getRuntimeCapabilities } from "./platform/runtimeCapabilities";
 import { getAppBuildSession } from "./config/appBuildSession";
+import {
+  EMPTY_READER_TABS,
+  READER_TABS_STORAGE_KEY,
+  activeReaderTabs,
+  closeReaderTab,
+  cycleReaderTab,
+  openReaderTab,
+  parseReaderTabs,
+  pruneReaderTabs,
+  serializeReaderTabs,
+} from "./ui/readerTabs";
 import { checkThenRecoverProgressRuntime, planFreshProgressOpen } from "./ui/progressOpenOrder";
 import { useAndroidBack } from "./platform/useAndroidBack";
 import { moveAndroidTaskToBack } from "./platform/androidAppTask";
@@ -4187,7 +4198,7 @@ export default function App() {
     if (countSummary.complete) persistChapterCountCache();
   }, [countProgressSignature, countSummary.complete, persistChapterCountCache]);
 
-  const leaveReader = useCallback(async (leaveUnsaved: boolean) => {
+  const leaveReader = useCallback(async (leaveUnsaved: boolean): Promise<boolean> => {
     // 返回书架前先关浮层，再释放整本书的 ResourceServer。
     closeImageOverlay();
     persistShelfProgress(true);
@@ -4229,7 +4240,7 @@ export default function App() {
       setSaveFailurePrompt({ kind: "shelf", error: String(error) });
       shelfBusyRef.current = false;
       setShelfBusy(false);
-      return;
+      return false;
     }
     closeForeground();
     setSearchQuery("");
@@ -4249,8 +4260,88 @@ export default function App() {
     setView("shelf");
     shelfBusyRef.current = false;
     setShelfBusy(false);
+    return true;
   }, [persistShelfProgress, persistChapterCountCache, closeForeground, closeImageOverlay, retainUnsavedSample]);
   const handleBackToShelf = useCallback(() => leaveReader(false), [leaveReader]);
+
+  // A11 V1：多本书标签页，只在非正式构建启用（浏览器开发模式、调试包和 optimized-dev
+  // 测试包；后者 Rust profile 仍是 dev 但 debug 标志关闭），正式发布构建不渲染也不读写。
+  // 只挂一个阅读器：切标签 = 走现有“返回书架”保存并释放当前书，等会话清理
+  // effect 提交后再走现有“从书架打开”。阅读层与分页器不感知标签。
+  const readerTabsEnabled = useMemo(() => {
+    const session = getAppBuildSession();
+    if (!session) return import.meta.env.DEV;
+    return session.buildInfo ? session.buildInfo.profile !== "release" : session.debug;
+  }, []);
+  const [readerTabs, setReaderTabs] = useState(() => {
+    if (!readerTabsEnabled) return EMPTY_READER_TABS;
+    try {
+      return parseReaderTabs(localStorage.getItem(READER_TABS_STORAGE_KEY));
+    } catch {
+      return EMPTY_READER_TABS;
+    }
+  });
+  const readerTabsRef = useRef(readerTabs);
+  readerTabsRef.current = readerTabs;
+  const pendingTabOpenRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!readerTabsEnabled) return;
+    try {
+      localStorage.setItem(READER_TABS_STORAGE_KEY, serializeReaderTabs(readerTabs));
+    } catch {
+      // 本机便利功能：写不进存储只影响重启后恢复标签。
+    }
+  }, [readerTabs, readerTabsEnabled]);
+  useEffect(() => {
+    if (!readerTabsEnabled || view !== "reader" || !currentShelfId) return;
+    setReaderTabs((state) => openReaderTab(state, currentShelfId));
+  }, [currentShelfId, readerTabsEnabled, view]);
+  useEffect(() => {
+    if (!readerTabsEnabled || libraryLoad.status !== "ready") return;
+    const ids = new Set(shelfEntries.map((entry) => entry.id));
+    setReaderTabs((state) => pruneReaderTabs(state, (id) => ids.has(id)));
+  }, [libraryLoad.status, readerTabsEnabled, shelfEntries]);
+  const switchReaderTab = useCallback(async (id: string | null): Promise<void> => {
+    if (!readerTabsEnabled || id === currentShelfIdRef.current || shelfBusyRef.current) return;
+    if (!(await leaveReader(false))) return;
+    pendingTabOpenRef.current = id;
+  }, [leaveReader, readerTabsEnabled]);
+  const closeReaderTabById = useCallback((id: string): void => {
+    if (!readerTabsEnabled || shelfBusyRef.current) return;
+    const { state, next } = closeReaderTab(readerTabsRef.current, id);
+    setReaderTabs(state);
+    if (id === currentShelfIdRef.current) void switchReaderTab(next);
+  }, [readerTabsEnabled, switchReaderTab]);
+  const readerTabStrip = useMemo(() => {
+    if (!readerTabsEnabled) return undefined;
+    const titles = new Map(shelfEntries.map((entry) => [entry.id, entry.title] as const));
+    return {
+      tabs: activeReaderTabs(readerTabs).tabs
+        .filter((id) => titles.has(id))
+        .map((id) => ({ id, title: titles.get(id) || id })),
+      activeId: currentShelfId,
+      onSelect: (id: string) => void switchReaderTab(id),
+      onClose: closeReaderTabById,
+    };
+  }, [closeReaderTabById, currentShelfId, readerTabs, readerTabsEnabled, shelfEntries, switchReaderTab]);
+  useEffect(() => {
+    if (!readerTabsEnabled || view !== "reader") return;
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (!event.ctrlKey || event.altKey || event.metaKey) return;
+      if (event.key === "Tab") {
+        event.preventDefault();
+        const next = cycleReaderTab(readerTabsRef.current, event.shiftKey ? -1 : 1);
+        if (next) void switchReaderTab(next);
+      } else if (event.key.toLowerCase() === "w" && !event.shiftKey) {
+        const id = currentShelfIdRef.current;
+        if (!id) return;
+        event.preventDefault();
+        closeReaderTabById(id);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [closeReaderTabById, readerTabsEnabled, switchReaderTab, view]);
   const resolveSaveFailurePrompt = useCallback((leaveUnsaved: boolean): void => {
     const prompt = saveFailurePrompt;
     if (!prompt) return;
@@ -4494,6 +4585,14 @@ export default function App() {
     navigationPendingRef.current = false;
     historyCaptureAllowedRef.current = true;
   }, [view]);
+
+  // A11：上一个会话的清理 effect（同一次提交、声明在前）跑完后，才打开目标标签。
+  useEffect(() => {
+    if (view !== "shelf") return;
+    const id = pendingTabOpenRef.current;
+    pendingTabOpenRef.current = null;
+    if (id) void handleShelfOpen(id);
+  }, [handleShelfOpen, view]);
 
   useEffect(() => {
     if (chapterState.status !== "error") return;
@@ -5103,6 +5202,7 @@ export default function App() {
         title={view === "reader" ? (ready ? book!.metadata.title : (book?.metadata.title ?? "")) : t("appUi.appName")}
         chapterTitle={view === "reader" && ready ? currentChapterLabel : undefined}
         onBackToShelf={view === "reader" ? handleBackToShelf : undefined}
+        readerTabs={view === "reader" ? readerTabStrip : undefined}
         onToggleSidebar={view === "reader" ? handleToggleSidebar : undefined}
         sidebarOpen={view === "reader" && isSidebarOpen}
         // 触摸设备（手机与平板）共用同一阅读顶栏，随 toolsVisible 一起显隐；
