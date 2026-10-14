@@ -28,6 +28,7 @@ describe("vertical page edges", () => {
   });
 
   it("reports empty and oversize/overlapping atoms without a zero-step loop", () => {
+    expect(buildVerticalPageModel([{ start: -3, end: 17 }], 100)).toMatchObject({ kind: "ready", groups: [{ start: 0, end: 17 }] });
     expect(buildVerticalPageModel([], 100).kind).toBe("empty");
     expect(verticalPageAt(buildVerticalPageModel([], 100), 0)).toBeNull();
     expect(buildVerticalPageModel([{ start: 10, end: 111 }], 100)).toMatchObject({ kind: "unsupported", reason: "wide-group" });

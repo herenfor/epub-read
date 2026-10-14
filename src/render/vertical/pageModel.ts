@@ -8,7 +8,7 @@ export type VerticalPageModel =
   | { readonly kind: "ready"; readonly pageWidth: number; readonly extent: number;
       readonly pages: readonly VerticalPage[]; readonly groups: readonly VerticalInterval[] };
 
-/** Tolerance at the leading edge only; touching columns remain separable. */
+/** Ignore subpixel rounding at touching column edges. */
 const EPSILON = 0.01;
 
 export function buildVerticalPageModel(
@@ -16,15 +16,15 @@ export function buildVerticalPageModel(
 ): VerticalPageModel {
   if (!Number.isFinite(pageWidth) || pageWidth <= 0) throw new RangeError("pageWidth must be positive");
   const sorted = intervals.map(({ start, end }) => {
-    if (!Number.isFinite(start) || !Number.isFinite(end) || start < -EPSILON || end <= start) {
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
       throw new RangeError("invalid vertical content interval");
     }
     return { start: Math.max(0, start), end };
-  }).sort((a, b) => a.start - b.start || a.end - b.end);
+  }).filter(item => item.end > item.start).sort((a, b) => a.start - b.start || a.end - b.end);
   const groups: Array<{ start: number; end: number }> = [];
   for (const item of sorted) {
     const last = groups.at(-1);
-    if (last && item.start < last.end) last.end = Math.max(last.end, item.end);
+    if (last && item.start < last.end - EPSILON) last.end = Math.max(last.end, item.end);
     else groups.push({ ...item });
   }
   if (groups.length === 0) return { kind: "empty", pageWidth, extent: 0, pages: [] };

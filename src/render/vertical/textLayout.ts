@@ -11,6 +11,7 @@ export type VerticalTextLocation =
 export class VerticalTextLayout {
   readonly model: VerticalPageModel;
   private valid = true;
+  private readonly columnWidths = new WeakMap<Element, number>();
 
   constructor(private readonly root: HTMLElement, private readonly index: VisibleTextIndex, pageWidth: number) {
     if (root.ownerDocument.defaultView?.getComputedStyle(root).writingMode !== "vertical-rl") {
@@ -26,7 +27,7 @@ export class VerticalTextLayout {
       if (ruby && root.contains(ruby)) rubies.add(ruby);
       range.selectNodeContents(node);
       for (const rect of Array.from(range.getClientRects())) {
-        if (rect.width > 0 && rect.height > 0) intervals.push(this.interval(rect, origin));
+        if (rect.width > 0 && rect.height > 0) intervals.push(this.columnInterval(rect, origin, node));
       }
     }
     // Annotation ink may be separated from its base by a gap. Keep a ruby
@@ -53,8 +54,23 @@ export class VerticalTextLayout {
     return this.root.getBoundingClientRect().right - borderRight - this.root.scrollLeft;
   }
 
-  private interval(rect: Pick<DOMRect, "left" | "right">, origin: number): VerticalInterval {
-    return { start: origin - rect.right, end: origin - rect.left };
+  // Range rectangles are font ink/content metrics, not line boxes. Tight
+  // line-height can overlap neighbouring ink by several pixels; it must not
+  // turn distinct columns into one indivisible chapter. Ruby ink is protected
+  // separately above. Cache per element, never read style once per character.
+  private columnInterval(rect: Pick<DOMRect, "left" | "right">, origin: number, node: Text): VerticalInterval {
+    const element = node.parentElement!;
+    let width = this.columnWidths.get(element);
+    if (width === undefined) {
+      const style = this.root.ownerDocument.defaultView!.getComputedStyle(element);
+      const em = parseFloat(style.fontSize);
+      const line = parseFloat(style.lineHeight);
+      width = Number.isFinite(em) && em > 0 ? Math.min(em, Number.isFinite(line) && line > 0 ? line : em) : Infinity;
+      this.columnWidths.set(element, width);
+    }
+    const half = Math.min(rect.right - rect.left, width) / 2;
+    const centre = origin - (rect.left + rect.right) / 2;
+    return { start: Math.max(0, centre - half), end: centre + half };
   }
 
   locate(anchor: TextAnchorData): VerticalTextLocation {
@@ -75,7 +91,7 @@ export class VerticalTextLayout {
     range.setEnd(position.node, start + (text.codePointAt(start)! > 0xffff ? 2 : 1));
     const rect = Array.from(range.getClientRects()).find(rect => rect.width > 0 && rect.height > 0);
     if (!rect) return { status: "unresolved" };
-    const logicalOffset = this.interval(rect, this.origin()).start;
+    const logicalOffset = this.columnInterval(rect, this.origin(), position.node).start;
     const page = verticalPageAt(this.model, logicalOffset);
     return page === null ? { status: "unresolved" } : {
       status: "located", page, logicalOffset,
