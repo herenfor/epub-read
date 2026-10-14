@@ -274,6 +274,8 @@ export interface ReaderViewProps {
   bookmarkCue?: (RibbonCue & { at: number }) | null;
   /** 图片双页的叶子：丝带挂在这一侧外缘。 */
   ribbonSide?: "left" | "right";
+  /** 手机右上角看不见的书签点击区（与书签按钮相同）。 */
+  onBookmarkCornerTap?(): void;
 }
 
 type ReaderFrame = "primary" | "secondary" | "tertiary" | "quaternary" | "quinary" | "warmup";
@@ -388,7 +390,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     const p = paginatorRef.current;
     const slot = activeSlotRef.current;
     if (!p || !slot || slot.state.status !== "ready" || slot.spineIndex === null) return null;
-    const placed = p.bookmarkPageFrames(ribbonSideRef.current);
+    const placed = p.bookmarkPageFrames?.(ribbonSideRef.current);
     if (!placed) return null;
     const page = p.currentPage;
     const spineIndex = slot.spineIndex;
@@ -402,7 +404,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         outerX: frame.outerX,
         spineIndex,
         ids: own.filter((bookmark) => {
-          const placement = p.resolveBookmarkPlacement(bookmark);
+          const placement = p.resolveBookmarkPlacement?.(bookmark);
           return placement?.page === page && placement.lane === frame.lane;
         }).map((bookmark) => bookmark.id),
       })),
@@ -1926,17 +1928,22 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   const turnPageRef = useRef<(dir: 1 | -1, source?: "wheel" | "key" | "ui") => void>(() => {});
   const tapRouting = useReaderTapRouting();
   const turnOwner = useContext(ReaderTurnOwnerContext);
-  const routeTap = (clientX: number) => {
+  const routeTap = (clientX: number, clientY?: number) => {
     const hostLeft = tapRouting?.hostLeft();
+    const hostTop = tapRouting?.hostTop?.();
     return tapRouting && hostLeft !== null && hostLeft !== undefined
-      ? routeReaderTap(tapRouting, hostLeft, clientX)
+      ? routeReaderTap(tapRouting, hostLeft, clientX,
+        clientY !== undefined && hostTop !== null && hostTop !== undefined ? { hostTop, clientY } : undefined)
       : { kind: "center" } as const;
   };
   // 一次正文点击只走这一处：左右区翻页（反馈归物理侧），中间交给宿主（手机呼出菜单，PC 不动作）。
   const plainTapRef = useRef<(tap: PlainTapInfo) => void>(() => {});
   plainTapRef.current = (tap) => {
-    const route = routeTap(tap.clientX);
-    if (route.kind === "turn" && tapRouting) {
+    const route = routeTap(tap.clientX, tap.clientY);
+    if (route.kind === "bookmark") {
+      if (props.onBookmarkCornerTap) props.onBookmarkCornerTap();
+      else props.onPlainTap?.();
+    } else if (route.kind === "turn" && tapRouting) {
       tapRouting.feedback.hold(edgeFeedbackKeyOf(route.side));
       if (turnOwner) turnOwner(route.direction);
       else turnPageRef.current(route.direction);
@@ -1945,7 +1952,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     }
   };
   const claimsRepeatTapRef = useRef<(point: PlainTapPoint) => boolean>(() => false);
-  claimsRepeatTapRef.current = (point) => routeTap(point.clientX).kind === "turn";
+  claimsRepeatTapRef.current = (point) => routeTap(point.clientX, point.clientY).kind === "turn";
   turnPageRef.current = (dir, source) => {
     pauseBackgroundWarmupForInput();
     const p = paginatorRef.current;
@@ -2245,7 +2252,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         const p = paginatorRef.current;
         const slot = activeSlotRef.current;
         if (!p || !slot || slot.spineIndex === null || slot.state.status !== "ready") return null;
-        const captured = p.captureLaneAnchor(lane);
+        const captured = p.captureLaneAnchor?.(lane);
         return captured ? { spineIndex: slot.spineIndex, page: p.currentPage, ...captured } : null;
       },
       getAnchorText() {
@@ -2526,6 +2533,7 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
     progression,
     geometry: tapGeometry,
     hostLeft: () => host.current?.getBoundingClientRect().left ?? null,
+    hostTop: () => host.current?.getBoundingClientRect().top ?? null,
     feedback: edgeFeedback,
   } : null, [props.tapRegions, progression, tapGeometry, edgeFeedback]);
   let content;

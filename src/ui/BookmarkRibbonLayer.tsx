@@ -5,9 +5,9 @@ import "./bookmarkRibbons.css";
 
 /** 晚到的提示（例如跨章跳转要等加载）仍可播放，但过久的旧提示不再重播。 */
 const CUE_TTL_MS = 6000;
-const ANIMATIONS = ["ribbon-drop", "ribbon-lift", "ribbon-peek"] as const;
+const ANIMATIONS = ["ribbon-drop", "ribbon-lift", "ribbon-peek", "ribbon-hint"] as const;
 /** 动画类在 React 重渲染时保留到播完；之后同一位置重新挂上不再重播。 */
-const ANIMATION_MS: Record<RibbonCue["kind"], number> = { drop: 1250, lift: 900, peek: 1250 };
+const ANIMATION_MS: Record<RibbonCue["kind"], number> = { drop: 1250, lift: 900, peek: 1250, hint: 500 };
 
 interface Props {
   marks: readonly RibbonMark[];

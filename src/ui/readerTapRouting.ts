@@ -43,6 +43,8 @@ export interface ReaderTapRouting {
   geometry: TapRegionGeometry;
   /** Left edge of the presentation host in top-level client coordinates; null when detached. */
   hostLeft(): number | null;
+  /** Top edge of the same host; without it the top strip is not carved out. */
+  hostTop?(): number | null;
   feedback: EdgeTurnFeedback;
 }
 
@@ -54,6 +56,8 @@ export const ReaderTurnOwnerContext = createContext<((direction: EdgeTurnDirecti
 export type ReaderTapRoute =
   | { kind: "turn"; side: TapRegionSide; direction: EdgeTurnDirection }
   | { kind: "center" }
+  /** Touch only: the invisible top-right bookmark corner (A15). */
+  | { kind: "bookmark" }
   | { kind: "outside" };
 
 export function createReaderTapGeometry(availableWidth: number, settings: ReaderTapRegionSettings | undefined): TapRegionGeometry {
@@ -61,14 +65,21 @@ export function createReaderTapGeometry(availableWidth: number, settings: Reader
   return computeTapRegionGeometry(availableWidth, profile);
 }
 
-/** `clientX` is top-level; `hostLeft` is the presentation host's left edge in the same coordinates. */
+/**
+ * `clientX`/`clientY` are top-level; `hostLeft`/`hostTop` are the presentation
+ * host's edges in the same coordinates. The top strip is centre (PC) or, at the
+ * outer top-right corner on touch, the bookmark corner.
+ */
 export function routeReaderTap(
   routing: Pick<ReaderTapRouting, "device" | "preferences" | "geometry" | "progression">,
   hostLeft: number,
   clientX: number,
+  vertical?: { hostTop: number; clientY: number },
 ): ReaderTapRoute {
-  const region = tapRegionAt(routing.geometry, clientX - hostLeft);
+  const region = tapRegionAt(routing.geometry, clientX - hostLeft,
+    vertical ? vertical.clientY - vertical.hostTop : undefined);
   if (region === null) return { kind: "outside" };
+  if (region === "corner") return routing.device === "touch" ? { kind: "bookmark" } : { kind: "center" };
   if (region === "center") return { kind: "center" };
   return { kind: "turn", side: region, direction: tapRegionAction(region, routing.device, routing.preferences, routing.progression) };
 }

@@ -119,7 +119,10 @@ import { NoteComposer } from "./ui/NoteComposer";
 import type { ReaderNote } from "./ui/notes";
 import { hasOwnField, chapterLabelForIndex, useNoteEditRef, replaceNoteEditContext,
   useBookmarkToast, useBookmarkToastCleanup, useNoteBusyState, useNoteProjection, useNoteActions,
-  useBookmarkProjection, useBookmarkSidebarToggle, useBookmarkActions, useNoteEditRelease } from "./ui/useBookmarksAndNotes";
+  useBookmarkProjection, useBookmarkSidebarToggle, useBookmarkActions, useBookmarkRibbonActions,
+  useNoteEditRelease } from "./ui/useBookmarksAndNotes";
+import { BookmarkPagesPopover } from "./ui/BookmarkPagesPopover";
+import { isEditableTarget } from "./ui/bookmarkRibbons";
 import { createLazyFontController } from "./ui/fontRuntime";
 import { currentUiLocale, uiPlural, uiText, useUiText } from "./ui/localization/UiLanguageProvider";
 import { FootnotePop } from "./ui/FootnotePop";
@@ -3596,10 +3599,30 @@ export default function App() {
   const handleToggleBookmarks = useBookmarkSidebarToggle({
     isSidebarOpen, sidebarSide, activeSidebarTab, handleSidebarClose, handleOpenBookmarks,
   });
-  const { handleToggleBookmark, handleDeleteBookmark } = useBookmarkActions({
+  const { handleToggleBookmark } = useBookmarkActions({
     currentShelfId, readReaderPosition, currentBookmarks, spineIndex, book, readerRef,
     showBookmarkToast, setShelfEntries, setShelfError,
   });
+  const {
+    bookmarkCue, cueBookmarks, bookmarkPagesOpen, closeBookmarkPages, hintBookmarks,
+    handleBookmarkButton, addBookmark, removeBookmarks, undoBookmarkRemoval,
+  } = useBookmarkRibbonActions({
+    currentShelfId, readReaderPosition, currentBookmarks, spineIndex, book, readerRef,
+    showBookmarkToast, setShelfEntries, setShelfError, legacyToggle: handleToggleBookmark,
+  });
+  // 书签列表逐条删除也可撤销；丝带在屏上时一样先收回。
+  const handleDeleteBookmark = useCallback(
+    (bookmarkId: string) => removeBookmarks([bookmarkId], { animate: true }),
+    [removeBookmarks],
+  );
+  // 缩略书页只在双页且这一屏没有变化时显示；翻页、换章、收起工具栏都关掉。
+  const bookmarkPagesScreen = bookmarkPagesOpen && view === "reader"
+    ? readerRef.current?.screenBookmarks?.(currentBookmarks) ?? null
+    : null;
+  const bookmarkPagesKey = `${spineIndex}:${chapterState.status === "ready" ? chapterState.currentPage : -1}`;
+  useEffect(() => {
+    closeBookmarkPages();
+  }, [bookmarkPagesKey, view, closeBookmarkPages]);
 
   const handleSelectBookmark = useCallback(
     (bookmarkId: string) => {
@@ -3640,9 +3663,11 @@ export default function App() {
           setAnchor(undefined);
           commitReaderHistorySnapshot(snapshot);
           closeForeground();
+          cueBookmarks("peek", [bookmark.id]);
           return;
         }
       }
+      cueBookmarks("peek", [bookmark.id]);
       captureReaderHistory(spineItemHref(book, spineIndex) ?? "");
       beginExplicitNavigation();
       setInitialAlignment("reading-line");
@@ -3661,6 +3686,7 @@ export default function App() {
       currentReaderPosition,
       commitReaderHistorySnapshot,
       closeForeground,
+      cueBookmarks,
     ]
   );
 
@@ -4944,13 +4970,21 @@ export default function App() {
         return;
       }
 
-      // 4. Ctrl + B：添加/移除当前页书签
+      // 4. Ctrl + B：书签按钮（双页弹出缩略书页，其他模式放 / 取）
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === "b" || e.key === "B")) {
         e.preventDefault();
         if (st.view === "reader") {
-          handleToggleBookmark();
+          handleBookmarkButton();
         }
         return;
+      }
+
+      // 4b. Ctrl + Z：撤销刚删除的书签；焦点在输入框时让给输入框
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === "z" || e.key === "Z")) {
+        if (st.view === "reader" && !isEditableTarget(e.target) && undoBookmarkRemoval()) {
+          e.preventDefault();
+          return;
+        }
       }
 
       // 5. F11：进入/退出全屏（纯净沉浸模式）
@@ -5044,7 +5078,8 @@ export default function App() {
     fullscreenBusy,
     handleHistoryBack,
     handleHistoryForward,
-    handleToggleBookmark,
+    handleBookmarkButton,
+    undoBookmarkRemoval,
     handleToggleBookmarks,
     handleToggleSidebar,
     handleSidebarClose,
@@ -5111,7 +5146,10 @@ export default function App() {
         }
         searchOpen={view === "reader" && searchOpen}
         isBookmarked={view === "reader" && isCurrentPageBookmarked}
-        onToggleBookmark={view === "reader" ? handleToggleBookmark : undefined}
+        onToggleBookmark={view === "reader" ? handleBookmarkButton : undefined}
+        bookmarkSpread={view === "reader" && chapterState.status === "ready" && chapterState.mode !== "scroll" &&
+          chapterState.effectiveColumns === 2}
+        bookmarkPagesOpen={view === "reader" && bookmarkPagesOpen}
         bookmarksOpen={view === "reader" && isSidebarOpen && activeSidebarTab === "bookmarks"}
         onOpenBookmarks={view === "reader" ? handleToggleBookmarks : undefined}
         zenMode={view === "reader" && !mobileChrome && readerZenMode}
@@ -5479,6 +5517,9 @@ export default function App() {
                   inputPaused={imageRequest !== null}
                   onPlainTap={mobileChrome ? handleReaderPlainTap : undefined}
                   tapRegions={tapRegions}
+                  bookmarks={currentBookmarks}
+                  bookmarkCue={bookmarkCue}
+                  onBookmarkCornerTap={mobileChrome ? handleBookmarkButton : undefined}
                   initialAnchor={initialAnchor}
                   initialPage={initialPage}
                   initialAlignment={initialAlignment}
@@ -5774,7 +5815,7 @@ export default function App() {
       )}
       {bookmarkToast && (
         <div
-          className={`reader-bookmark-toast ${bookmarkToast.action}${bookmarkToast.closing ? " is-closing" : ""}`}
+          className={`reader-bookmark-toast ${bookmarkToast.action}${bookmarkToast.closing ? " is-closing" : ""}${bookmarkToast.undo ? " has-undo" : ""}`}
           role="status"
           aria-live="polite"
         >
@@ -5791,7 +5832,21 @@ export default function App() {
             )}
           </span>
           <span className="bookmark-toast-text">{bookmarkToast.text}</span>
+          {bookmarkToast.undo && (
+            <button type="button" className="bookmark-toast-undo" onClick={() => undoBookmarkRemoval()}>
+              {t("notice.bookmark.undo")}
+            </button>
+          )}
         </div>
+      )}
+      {bookmarkPagesScreen?.kind === "paged" && bookmarkPagesScreen.columns === 2 && (
+        <BookmarkPagesPopover
+          screen={bookmarkPagesScreen}
+          onRemove={(ids) => removeBookmarks(ids, { animate: true })}
+          onAdd={(lane) => { addBookmark(lane); }}
+          onHint={hintBookmarks}
+          onClose={closeBookmarkPages}
+        />
       )}
       {saveFileExportSetup && (
         <SaveFileExportDialog

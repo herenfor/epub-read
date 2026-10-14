@@ -1010,10 +1010,11 @@ select option {
   }
 }
 
-/* 左右边缘命中区常驻；反馈只按最后一次操作保持/淡出。 */
+/* 左右边缘命中区常驻；反馈只按最后一次操作保持/淡出。
+   A15：让出最上面 56px（书签丝带挂在那里），与 readerTapRegions 的 TAP_REGION_TOP_INSET_PX 一致。 */
 .edge-turn-zone {
   position: absolute;
-  top: 0;
+  top: 56px;
   bottom: 0;
   width: 5%;
   min-width: 44px;
@@ -2906,6 +2907,30 @@ select option {
   user-select: none;
   animation: bookmark-toast-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   will-change: transform, opacity;
+}
+
+/* A15：删除书签后带“撤销”，此时提示条接收点击。 */
+.reader-bookmark-toast.has-undo {
+  pointer-events: auto;
+  padding-right: 8px;
+}
+
+.reader-bookmark-toast .bookmark-toast-undo {
+  margin-left: 4px;
+  padding: 4px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.reader-bookmark-toast .bookmark-toast-undo:hover,
+.reader-bookmark-toast .bookmark-toast-undo:focus-visible {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  outline: none;
 }
 
 .reader-bookmark-toast.is-closing {

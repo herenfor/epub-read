@@ -93,6 +93,21 @@ describe("tap routing geometry", () => {
     expect(routeReaderTap(pc, 100, 50)).toEqual({ kind: "outside" });
   });
 
+  it("A15: frees the top strip of both bands; on touch its outer top-right square is the bookmark corner", () => {
+    const geometry = computeTapRegionGeometry(1000, custom(30, 20).pc);
+    const prefs = custom(30, 20);
+    const pc = { device: "pc" as const, preferences: prefs, geometry };
+    const touch = { device: "touch" as const, preferences: prefs, geometry };
+    const top = (clientY: number) => ({ hostTop: 40, clientY });
+    // Host top at y=40: y=95 is 55px into it (top strip), y=96 is the band.
+    expect(routeReaderTap(pc, 100, 350, top(95))).toEqual({ kind: "center" });
+    expect(routeReaderTap(pc, 100, 350, top(96))).toEqual({ kind: "turn", side: "left", direction: -1 });
+    expect(routeReaderTap(pc, 100, 1050, top(60))).toEqual({ kind: "center" });
+    expect(routeReaderTap(touch, 100, 1050, top(60))).toEqual({ kind: "bookmark" });
+    expect(routeReaderTap(touch, 100, 1043, top(60))).toEqual({ kind: "center" });
+    expect(routeReaderTap(touch, 100, 1050, top(120))).toEqual({ kind: "turn", side: "right", direction: 1 });
+  });
+
   it("never widens the transparent band past the default; default mode keeps the old markup", () => {
     const wide = computeTapRegionGeometry(1000, custom(35, 3).pc);
     expect(edgeTurnOverlayOf(wide, "left")?.width).toBe(50);
