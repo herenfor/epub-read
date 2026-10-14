@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  BOOKMARK_PAGE_MARGIN_MAX_PX,
+  bookmarkPageFrames,
   clientXToColumnX,
   columnForContentPoint,
   commitSpreadPosition,
   createSpreadGeometry,
   createSpreadLayout,
+  laneForColumn,
   occupiedColumns,
   PagedViewportPort,
   planSpreadTurn,
@@ -267,5 +270,40 @@ describe("pagedSpread core", () => {
       expect(result).toEqual({ ok: false, reason: "unreachable" });
       expect(scrollLeft).toBe(500); // restored
     });
+  });
+});
+
+describe("A15 bookmark placement in a spread", () => {
+  const g = createSpreadGeometry(1000, 100, 2, 280);
+
+  it("gives the first or second page of the spread from the same column", () => {
+    const layout = createSpreadLayout(g, { first: 1, last: 6 });
+    expect([1, 2, 3, 4, 5, 6].map((c) => [spreadForColumn(layout, c), laneForColumn(layout, c)])).toEqual([
+      [0, 0], [0, 1], [1, 0], [1, 1], [2, 0], [2, 1],
+    ]);
+    // Clamped like spreadForColumn: before the first column is the first page.
+    expect(laneForColumn(layout, 0)).toBe(0);
+    expect(laneForColumn(createSpreadLayout(createSpreadGeometry(500, 40, 1), { first: 0, last: 3 }), 3)).toBe(0);
+  });
+
+  it("hangs left and right pages on their outer edges, mirrored for RTL", () => {
+    const base = { contentLeft: 51, geometry: g, roomLeft: 51, roomRight: 51 } as const;
+    expect(bookmarkPageFrames({ ...base, rtl: false, present: [true, true] })).toEqual([
+      { lane: 0, side: "left", outerX: 0 },
+      { lane: 1, side: "right", outerX: 1102 },
+    ]);
+    expect(bookmarkPageFrames({ ...base, rtl: true, present: [true, false] })).toEqual([
+      { lane: 0, side: "right", outerX: 1102 },
+    ]);
+  });
+
+  it("keeps a single page ribbon next to the centred text, not the window edge", () => {
+    const single = createSpreadGeometry(600, 40, 1);
+    expect(bookmarkPageFrames({
+      contentLeft: 400, geometry: single, roomLeft: 400, roomRight: 400, rtl: false, present: [true, false],
+    })).toEqual([{ lane: 0, side: "right", outerX: 1000 + BOOKMARK_PAGE_MARGIN_MAX_PX }]);
+    expect(bookmarkPageFrames({
+      contentLeft: 20, geometry: single, roomLeft: 20, roomRight: 20, rtl: false, present: [false, false],
+    })).toEqual([]);
   });
 });

@@ -123,6 +123,14 @@ export function spreadForColumn(layout: SpreadLayout, physicalColumn: number): n
     Math.floor((physicalColumn - layout.firstColumn) / layout.geometry.columns)));
 }
 
+/** A15：物理列在所在屏中的阅读顺序位置（0 = 第一页，1 = 第二页）；与 spreadForColumn 同一夹取。 */
+export function laneForColumn(layout: SpreadLayout, physicalColumn: number): 0 | 1 {
+  if (layout.geometry.columns !== 2) return 0;
+  const spread = spreadForColumn(layout, physicalColumn);
+  const lane = physicalColumn - layout.firstColumn - spread * layout.geometry.columns;
+  return lane >= 1 ? 1 : 0;
+}
+
 export function spreadStart(layout: SpreadLayout, page: number): number {
   const clamped = Math.max(0, Math.min(layout.pageCount - 1, Math.floor(page)));
   return layout.empty ? 0 : (layout.firstColumn + clamped * layout.geometry.columns) * layout.geometry.columnStep;
@@ -187,4 +195,45 @@ export function commitSpreadPosition(port: PagedViewportPort, layout: SpreadLayo
     return { ok: false, reason: "unreachable" };
   }
   return { ok: true, page, scrollLeft: accepted };
+}
+
+/** A15 书签丝带挂点：页外缘离正文最多这么远（单页跟着版心，不贴窗口边）。 */
+export const BOOKMARK_PAGE_MARGIN_MAX_PX = 56;
+
+export interface BookmarkPageFrame {
+  /** 阅读顺序：0 = 这一屏的第一页。 */
+  readonly lane: 0 | 1;
+  /** 物理位置；丝带挂在这一侧的外缘。单页按外侧（右）。 */
+  readonly side: "left" | "right";
+  /** 页外缘的横坐标（与输入同一坐标系）。 */
+  readonly outerX: number;
+}
+
+/**
+ * 只读已提交的几何：内容盒左缘、宽度和两侧可用留白。双页时中线两侧各一页，
+ * 外缘取各自外侧留白（最多 56px）；单页挂右侧外缘。RTL 只交换左右对应的阅读顺序。
+ */
+export function bookmarkPageFrames(input: {
+  readonly contentLeft: number;
+  readonly geometry: Pick<SpreadGeometry, "columns" | "columnWidth" | "columnStep">;
+  readonly roomLeft: number;
+  readonly roomRight: number;
+  readonly rtl: boolean;
+  /** 阅读顺序上第一、第二页是否有正文（末屏右页可能空）。 */
+  readonly present: readonly [boolean, boolean];
+}): BookmarkPageFrame[] {
+  const { contentLeft, geometry, rtl, present } = input;
+  const leftEdge = contentLeft - Math.max(0, Math.min(input.roomLeft, BOOKMARK_PAGE_MARGIN_MAX_PX));
+  const lastRight = contentLeft + (geometry.columns - 1) * geometry.columnStep + geometry.columnWidth;
+  const rightEdge = lastRight + Math.max(0, Math.min(input.roomRight, BOOKMARK_PAGE_MARGIN_MAX_PX));
+  if (geometry.columns !== 2) {
+    return present[0] ? [{ lane: 0, side: "right", outerX: rightEdge }] : [];
+  }
+  const frames: BookmarkPageFrame[] = [];
+  for (const lane of [0, 1] as const) {
+    if (!present[lane]) continue;
+    const side = (lane === 0) !== rtl ? "left" : "right";
+    frames.push({ lane, side, outerX: side === "left" ? leftEdge : rightEdge });
+  }
+  return frames;
 }

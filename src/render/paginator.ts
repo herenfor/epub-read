@@ -80,7 +80,10 @@ import {
   commitSpreadPosition,
   createSpreadGeometry,
   createSpreadLayout,
+  bookmarkPageFrames,
+  laneForColumn,
   occupiedColumns,
+  type BookmarkPageFrame,
   type PagedViewportPort,
   type SpreadGeometry,
   type SpreadLayout,
@@ -619,6 +622,15 @@ export function resolveRestoredPage({
 }
 
 type ResolvedAnchorColumn = { col: number; source: "text" | "legacy" | "media" };
+
+/** 书签解析只用这些字段；书签数据格式不变。 */
+export interface BookmarkPlacementInput {
+  id?: string;
+  anchorTextOffset?: number | null;
+  anchorTextSnippet?: string | null;
+  mediaAnchor?: MediaReadingAnchor | null;
+  page?: number;
+}
 
 /** 屏号换算：列号减前置空列后除以有效列数（总约定 2）。 */
 export function columnToView(
@@ -2511,7 +2523,7 @@ export class ChapterPaginator {
   /** 舒适双页根内联样式快照；restore 精确、仅限 reader-owned 属性。 */
   private spreadAreaStyleRestore: (() => void) | null = null;
   private tailSpacer: HTMLElement | null = null;
-  private bookmarkSpreadCache = new Map<string, number>();
+  private bookmarkSpreadCache = new Map<string, { page: number; lane: 0 | 1 }>();
 
   get spreadLayoutSnapshot(): SpreadLayout | null {
     return this.spreadLayout;
@@ -7120,6 +7132,23 @@ export class ChapterPaginator {
   }
 
   private resolveTextAnchorCol(index: VisibleTextIndex, textOffset: number): number | null {
+    const x = this.textAnchorContentX(index, textOffset);
+    if (x === null) return null;
+    if (this.spreadLayout) {
+      return spreadForColumn(this.spreadLayout, columnForContentPoint(x, this.spreadLayout.geometry));
+    }
+    // 分栏时同一屏内第二栏命中留在包含它的那一屏：物理列 → 屏号。
+    const physical = Math.max(0, Math.floor(x / this.step));
+    return Math.max(0, columnToView(physical, this.leadingColumns, this.effectiveColumns));
+  }
+
+  /** A15：文本锚点所在的物理列（舒适双页几何）；与 resolveTextAnchorCol 同一测量。 */
+  private textAnchorPhysicalColumn(index: VisibleTextIndex, textOffset: number): number | null {
+    const x = this.spreadLayout ? this.textAnchorContentX(index, textOffset) : null;
+    return x === null || !this.spreadLayout ? null : columnForContentPoint(x, this.spreadLayout.geometry);
+  }
+
+  private textAnchorContentX(index: VisibleTextIndex, textOffset: number): number | null {
     const doc = this.contentDoc;
     const viewer = this.viewer;
     if (!doc || !viewer || this.step <= 0) return null;
@@ -7132,14 +7161,7 @@ export class ChapterPaginator {
       range.setEnd(end.node, end.rawOffset);
       const rect = Array.from(range.getClientRects()).find((candidate) => candidate.width > 0 || candidate.height > 0);
       if (!rect) return null;
-      if (this.spreadLayout) {
-        const colX = this.contentX(this.leadingClientX(rect));
-        const physical = columnForContentPoint(colX, this.spreadLayout.geometry);
-        return spreadForColumn(this.spreadLayout, physical);
-      }
-      // 分栏时同一屏内第二栏命中留在包含它的那一屏：物理列 → 屏号。
-      const physical = Math.max(0, Math.floor(this.contentX(this.leadingClientX(rect)) / this.step));
-      return Math.max(0, columnToView(physical, this.leadingColumns, this.effectiveColumns));
+      return this.contentX(this.leadingClientX(rect));
     } catch {
       return null;
     }
@@ -8589,47 +8611,118 @@ export class ChapterPaginator {
    * 解析书签属于当前布局的哪一屏；缓存解析结果，布局变化时清空。
    * 支持文本 Range、媒体元素与旧页码兜底。
    */
-  resolveBookmarkPage(bookmark: {
-    id?: string;
-    anchorTextOffset?: number | null;
-    anchorTextSnippet?: string | null;
-    mediaAnchor?: MediaReadingAnchor | null;
-    page?: number;
-  }): number | null {
+  resolveBookmarkPage(bookmark: BookmarkPlacementInput): number | null {
     if (!this.spreadLayout) {
       return bookmark.page ?? null;
     }
+    return this.resolveBookmarkPlacement(bookmark)?.page ?? null;
+  }
+
+  /**
+   * A15：同一次解析同时给出屏号和它在这一屏的第几页（阅读顺序，0/1）。
+   * 与图标变色共用缓存，不另算；旧页码兜底时记为第一页。
+   */
+  resolveBookmarkPlacement(bookmark: BookmarkPlacementInput): { page: number; lane: 0 | 1 } | null {
+    const layout = this.spreadLayout;
+    if (!layout) return null;
     const cacheKey = bookmark.id ?? `${bookmark.anchorTextOffset}:${bookmark.mediaAnchor?.index}:${bookmark.page}`;
-    if (this.bookmarkSpreadCache.has(cacheKey)) {
-      return this.bookmarkSpreadCache.get(cacheKey)!;
-    }
-    let targetPage: number | null = null;
+    const cached = this.bookmarkSpreadCache.get(cacheKey);
+    if (cached) return cached;
+    let physical: number | null = null;
     if (this.textIndex && bookmark.anchorTextOffset !== undefined && bookmark.anchorTextOffset !== null) {
       const offset = resolveTextAnchorOffset(this.textIndex, {
         textOffset: bookmark.anchorTextOffset,
         textSnippet: bookmark.anchorTextSnippet ?? null,
       });
       if (offset !== null) {
-        targetPage = this.resolveTextAnchorCol(this.textIndex, offset);
+        physical = this.textAnchorPhysicalColumn(this.textIndex, offset);
       }
     }
-    if (targetPage === null && bookmark.mediaAnchor) {
+    if (physical === null && bookmark.mediaAnchor) {
       // Same identity check as restore: index, then signature; never another image.
       const el = this.resolveMediaAnchorElement(bookmark.mediaAnchor);
       if (el && el.getBoundingClientRect().height > 0) {
         const r = el.getBoundingClientRect();
-        const colX = this.contentX(this.leadingClientX(r));
-        const physical = columnForContentPoint(colX, this.spreadLayout.geometry);
-        targetPage = spreadForColumn(this.spreadLayout, physical);
+        physical = columnForContentPoint(this.contentX(this.leadingClientX(r)), layout.geometry);
       }
     }
-    if (targetPage === null && typeof bookmark.page === "number") {
-      targetPage = Math.max(0, Math.min(this.spreadLayout.pageCount - 1, bookmark.page));
+    let placement: { page: number; lane: 0 | 1 } | null = null;
+    if (physical !== null) {
+      placement = { page: spreadForColumn(layout, physical), lane: laneForColumn(layout, physical) };
+    } else if (typeof bookmark.page === "number") {
+      placement = { page: Math.max(0, Math.min(layout.pageCount - 1, bookmark.page)), lane: 0 };
     }
-    if (targetPage !== null) {
-      this.bookmarkSpreadCache.set(cacheKey, targetPage);
+    if (placement) this.bookmarkSpreadCache.set(cacheKey, placement);
+    return placement;
+  }
+
+  /**
+   * A15：当前屏各页的外缘（顶层窗口坐标）。只读已提交布局，与整开背景同一几何。
+   * 滚动、固定版式或尚无布局时返回 null。
+   */
+  bookmarkPageFrames(): { top: number; frames: BookmarkPageFrame[] } | null {
+    const doc = this.contentDoc;
+    const viewer = this.viewer;
+    const layout = this.spreadLayout;
+    if (!doc || !viewer || !layout || this.scrollMode || this.fixedLayout || this.lastState.status !== "ready") return null;
+    const page = this.metrics.currentPage;
+    const present: [boolean, boolean] = [
+      !layout.empty && visibleColumnInterval(layout, page, 0) !== null,
+      !layout.empty && visibleColumnInterval(layout, page, 1) !== null,
+    ];
+    const rect = viewer.getBoundingClientRect();
+    const paddingLeft = parseFloat(doc.defaultView?.getComputedStyle(viewer).paddingLeft ?? "") || 0;
+    const contentLeft = rect.left + (viewer.clientLeft || 0) + paddingLeft;
+    const docWidth = doc.documentElement.clientWidth || rect.right;
+    const host = (doc.defaultView?.frameElement as HTMLElement | null)?.getBoundingClientRect();
+    const frames = bookmarkPageFrames({
+      contentLeft,
+      geometry: layout.geometry,
+      roomLeft: contentLeft,
+      roomRight: docWidth - (contentLeft + layout.geometry.viewportWidth),
+      rtl: this.flowProgression === "rtl",
+      present,
+    });
+    const dx = host?.left ?? 0;
+    return {
+      top: host?.top ?? 0,
+      frames: frames.map((frame) => ({ ...frame, outerX: frame.outerX + dx })),
+    };
+  }
+
+  /**
+   * A15：在当前屏第 lane 页取一个书签锚点（与阅读锚点同一采样：该页正文中线）。
+   * 第二页没有正文时返回 null。不改阅读锚点。
+   */
+  captureLaneAnchor(lane: 0 | 1): { anchor: ReadingAnchor; text: string | null } | null {
+    const doc = this.contentDoc;
+    const viewer = this.viewer;
+    const layout = this.spreadLayout;
+    if (!doc || !viewer || !layout || this.scrollMode || viewer.clientWidth <= 0) return null;
+    if (layout.empty || visibleColumnInterval(layout, this.metrics.currentPage, lane) === null) return null;
+    const index = this.textIndex ?? this.buildTextIndex(doc, viewer);
+    this.textIndex = index;
+    const options: AnchorSampleOptions = {
+      viewer,
+      doc,
+      index,
+      mode: "paginated",
+      visibleRatio: 0.5,
+      geometry: {
+        progression: this.flowProgression,
+        columnWidth: this.effectiveColumnWidth,
+        columnStep: this.effectiveColumnStep,
+        viewStep: this.effectiveViewStep,
+        leadingColumns: this.leadingColumns,
+      },
+      mediaAt: (point) => this.visibleMediaAt(point),
+    };
+    const shift = lane * layout.geometry.columnStep * pageAxisSign(this.flowProgression);
+    for (const point of visibleSamplePoints(options)) {
+      const anchor = captureAnchorAtPoint(options, { x: point.x + shift, y: point.y });
+      if (anchor) return { anchor, text: this.anchorTextFor(anchor) };
     }
-    return targetPage;
+    return null;
   }
 
   /** 当前阅读锚点（供阅读记录持久化与内容进度推算）。 */
