@@ -439,7 +439,7 @@ interface AnchorSampleOptions {
   /** scroll：可见区域高度比例；paginated：可见列宽度比例 */
   visibleRatio: number;
   /** paginated 分栏换算；scroll 忽略 */
-  geometry?: { progression?: PageProgression; columnWidth: number; columnStep: number; viewStep: number; leadingColumns: number };
+  geometry?: { progression?: PageProgression; columnWidth: number; columnStep: number; viewStep: number; leadingColumns: number; vertical?: boolean };
   /** B-237 paginated only: visible media in the sampled column when the point has no text. */
   mediaAt?: (point: VisibleSamplePoint) => VisibleMediaSample | null;
 }
@@ -551,12 +551,34 @@ function captureAnchorAtPoint(
   };
 }
 
+/** Try a nearby column when a vertical page centre is an authored empty
+ * paragraph. Keep the legacy fallback only after text/media candidates fail. */
+function verticalAnchorPoints(x: number, ys: readonly number[], columnWidth: number, viewportWidth: number): VisibleSamplePoint[] {
+  return [x, x - columnWidth / 4, x + columnWidth / 4]
+    .filter(point => point >= 2 && point <= viewportWidth - 2)
+    .flatMap(point => ys.map(y => ({ x: point, y })));
+}
+
+function captureFirstAnchor(options: AnchorSampleOptions, points: VisibleSamplePoint[], preferIdentity: boolean): ReadingAnchor | null {
+  let legacy: ReadingAnchor | null = null;
+  for (const point of points) {
+    const anchor = captureAnchorAtPoint(options, point);
+    if (!anchor) continue;
+    if (!preferIdentity || anchor.textOffset !== null || anchor.mediaAnchor) return anchor;
+    legacy ??= anchor;
+  }
+  return legacy;
+}
+
 /** 依次尝试采样点；caret API 缺失时回退到可见元素，避免整章进度归零。 */
 function captureVisibleAnchor(options: AnchorSampleOptions): ReadingAnchor | null {
-  for (const point of visibleSamplePoints(options)) {
-    const anchor = captureAnchorAtPoint(options, point);
-    if (anchor) return anchor;
+  let points = visibleSamplePoints(options);
+  if (options.geometry?.vertical && points.length) {
+    points = verticalAnchorPoints(points[0].x, points.map(p => p.y), options.geometry.columnWidth,
+      options.doc.documentElement.clientWidth || options.viewer.clientWidth);
   }
+  const anchor = captureFirstAnchor(options, points, Boolean(options.geometry?.vertical));
+  if (anchor) return anchor;
   const geometry = options.geometry;
   const fallbackPoint = options.mode === "scroll"
     ? visibleSamplePoints(options)[0]
@@ -7173,6 +7195,7 @@ export class ChapterPaginator {
             columnStep: this.effectiveColumnStep,
             viewStep: this.effectiveViewStep,
             leadingColumns: this.leadingColumns,
+            vertical: Boolean(this.verticalMode),
           },
       mediaAt: this.scrollMode ? undefined : (point) => this.visibleMediaAt(point),
     });
@@ -8987,11 +9010,11 @@ export class ChapterPaginator {
       },
       mediaAt: (point) => this.visibleMediaAt(point),
     };
-    for (const point of visibleSamplePoints(options)) {
-      const anchor = captureAnchorAtPoint(options, { x, y: point.y });
-      if (anchor) return anchor;
-    }
-    return null;
+    const ys = visibleSamplePoints(options).map(point => point.y);
+    const points = this.verticalMode && position.aligned
+      ? verticalAnchorPoints(x, ys, this.effectiveColumnWidth, doc.documentElement.clientWidth || viewer.clientWidth)
+      : ys.map(y => ({ x, y }));
+    return captureFirstAnchor(options, points, Boolean(this.verticalMode));
   }
 
   /** 恢复阅读锚点（打开书时定位到上次阅读处）。 */

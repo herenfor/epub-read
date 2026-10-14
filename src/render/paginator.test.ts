@@ -3130,3 +3130,32 @@ describe("applyBookMargins UA margin semantics", () => {
     expect(element.style.getPropertyValue("width")).toBe(input.inline ? "240px" : "");
   });
 });
+
+
+describe("vertical canonical sampling across empty columns", () => {
+  it.each([true, false])("tries another visible column only for native vertical flow (%s)", vertical => {
+    const emptyParagraph = { nodeType: 1, tagName: "P", getBoundingClientRect: () => ({ left: 186, width: 28 }) };
+    const paragraph = { getBoundingClientRect: () => ({ left: 100, width: 28 }) };
+    const text = { nodeType: 3, parentElement: paragraph };
+    const doc = {
+      documentElement: { clientWidth: 384 },
+      defaultView: { getComputedStyle: () => ({ paddingLeft: "32px", paddingRight: "32px" }) },
+      caretRangeFromPoint: (x: number) => ({ startContainer: x === 192 ? emptyParagraph : text, startOffset: 0 }),
+      elementFromPoint: () => emptyParagraph,
+    };
+    const viewer = { clientWidth: 384, clientHeight: 798, clientLeft: 0, ownerDocument: doc,
+      getBoundingClientRect: () => ({ left: 0, right: 384 }) };
+    const context = {
+      contentDoc: doc, viewer, verticalMode: vertical ? "vertical-rl" : null, flowProgression: "rtl",
+      textIndex: { offsetForNode: () => 5900, totalChars: 31464, mediaUnits: 0,
+        elementIndex: () => 207, snippetAt: () => null },
+      contentClientOrigin: () => 352, readPagedScroll: () => 7680,
+      effectiveColumnWidth: 320, effectiveColumnStep: 384, effectiveViewStep: 384,
+      leadingColumns: 0, spreadGeometry: { columns: 1 }, visibleMediaAt: () => null,
+    };
+    const result = (ChapterPaginator.prototype as any).sampleAnchorAtVisualPosition.call(context,
+      { page: 20, left: 7680, snapLeft: 7680, aligned: true, atStart: false, atEnd: false });
+    expect(result.textOffset).toBe(vertical ? 5900 : null);
+    expect(result.index).toBe(207);
+  });
+});
