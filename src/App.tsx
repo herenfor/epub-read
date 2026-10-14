@@ -31,7 +31,6 @@ import { ResourceServer } from "./render/resources";
 import { sanitizePersistedTextAnchor } from "./render/textAnchor";
 import { clearDocumentSelection, isSelectAllShortcut } from "./render/selectionGuard";
 import { arrowKeyDirection, effectivePageProgression, normalizeTurnAnimation } from "./render/settings";
-import { withVerticalFallback } from "./render/verticalFallback";
 import type { ChapterState, MediaReadingAnchor, PreciseNavigationStatus, ReadingAnchor } from "./render/paginator";
 import { useReaderSettings, useReaderSettingsPersistence } from "./ui/useReaderSettings";
 import { sanitizeTextProjectionPreferences } from "./render/textProjection/preferences";
@@ -630,8 +629,6 @@ export default function App() {
     dispatchRestoreGate, restoreResultMatches, startRestore, clearRestore,
   } = useReaderSession(() => activeSessionRef.current?.generation);
   const { settings, setSettings, uiScale, settingsActions } = useReaderSettings();
-  // A10s：竖排未上线前，竖排书按强制横排显示；只影响本书渲染，不改已保存的设置。
-  const readerSettings = useMemo(() => withVerticalFallback(settings, book), [settings, book]);
   const [runtimeIssues, setRuntimeIssues] = useState<string[]>([]);
   /** B-225: category + book path already logged in this book session. */
   const reportedResourcesRef = useRef(new Set<string>());
@@ -3962,7 +3959,7 @@ export default function App() {
   const spineLinear = useMemo(() => book?.spine.map((item) => item.linear) ?? [], [book]);
   const linearChapter = linearChapterNumber(spineLinear, spineIndex);
   // In-reader settings preview the open book's direction; the shelf copy stays left to right.
-  const pageProgression = book ? effectivePageProgression(book.pageProgression, readerSettings, book.fixedLayout) : "ltr";
+  const pageProgression = book ? effectivePageProgression(book.pageProgression, settings, book.fixedLayout) : "ltr";
   const readerTapRegions = useMemo(() => ({ ...tapRegions, progression: pageProgression }), [tapRegions, pageProgression]);
   // 开书/换章仍在加载：主题直接提交，加载完成后按最新主题（既有 desired/代次契约）。
   readerThemeBusyRef.current = view === "reader" && (!ready || !readerDisplayReady);
@@ -5476,8 +5473,7 @@ export default function App() {
                 onPresentationChange={handlePresentationChange}
                 turnAnimation={normalizeTurnAnimation(settings.turnAnimation)}
                 onTurnAnimationChange={settingsActions.setTurnAnimation}
-                forceHorizontal={readerSettings.forceHorizontal === true}
-                forceHorizontalAuto={readerSettings !== settings}
+                forceHorizontal={settings.forceHorizontal === true}
                 onForceHorizontalChange={settingsActions.setForceHorizontal}
                 pageDirection={settings.pageDirection}
                 onPageDirectionChange={settingsActions.setPageDirection}
@@ -5552,7 +5548,7 @@ export default function App() {
                   spineIndex={spineIndex}
                   anchor={anchor}
                   anchorNonce={anchorNonce}
-                  settings={readerSettings}
+                  settings={settings}
                   textProjectionPreferences={readerTextProjectionPreferences}
                   textProjection={compiledTextProjection}
                   visualPreferences={visualPreferences}
