@@ -8193,6 +8193,28 @@ export class ChapterPaginator {
   }
 
   /**
+   * A15 滚动丝带：正文内容盒左右缘（顶层窗口坐标）与半行高，只读。
+   * 丝带纵坐标仍用跳转同一套 resolvePersistedAnchorContentY。
+   */
+  scrollTextEdges(): { left: number; right: number; lineHalf: number } | null {
+    const doc = this.contentDoc;
+    const viewer = this.viewer;
+    if (!doc || !viewer) return null;
+    const style = doc.defaultView?.getComputedStyle(viewer);
+    const rect = viewer.getBoundingClientRect();
+    const host = (doc.defaultView?.frameElement as HTMLElement | null)?.getBoundingClientRect();
+    const dx = host?.left ?? 0;
+    const body = doc.body ? doc.defaultView?.getComputedStyle(doc.body) : null;
+    const fontSize = parseFloat(body?.fontSize ?? "") || 16;
+    const lineHeight = parseFloat(body?.lineHeight ?? "") || fontSize * 1.6;
+    return {
+      left: rect.left + (viewer.clientLeft || 0) + (parseFloat(style?.paddingLeft ?? "") || 0) + dx,
+      right: rect.right - (parseFloat(style?.borderRightWidth ?? "") || 0) - (parseFloat(style?.paddingRight ?? "") || 0) + dx,
+      lineHalf: lineHeight / 2,
+    };
+  }
+
+  /**
    * B-155：只读解析 persisted 文本锚点到当前文档的内容纵坐标。
    * 不写 this.anchor、不滚 viewer、不切换 hash，供连续宿主自行提交外层 S。
    */
@@ -8660,7 +8682,7 @@ export class ChapterPaginator {
    * A15：当前屏各页的外缘（顶层窗口坐标）。只读已提交布局，与整开背景同一几何。
    * 滚动、固定版式或尚无布局时返回 null。
    */
-  bookmarkPageFrames(): { top: number; frames: BookmarkPageFrame[] } | null {
+  bookmarkPageFrames(singleSide?: "left" | "right"): { top: number; columns: 1 | 2; frames: BookmarkPageFrame[] } | null {
     const doc = this.contentDoc;
     const viewer = this.viewer;
     const layout = this.spreadLayout;
@@ -8682,10 +8704,12 @@ export class ChapterPaginator {
       roomRight: docWidth - (contentLeft + layout.geometry.viewportWidth),
       rtl: this.flowProgression === "rtl",
       present,
+      singleSide,
     });
     const dx = host?.left ?? 0;
     return {
       top: host?.top ?? 0,
+      columns: layout.geometry.columns,
       frames: frames.map((frame) => ({ ...frame, outerX: frame.outerX + dx })),
     };
   }
