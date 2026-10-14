@@ -51,6 +51,8 @@ export function buildVerticalChapterModel(text: VerticalPageModel, images: reado
   for (const image of sorted) {
     if (!Number.isFinite(image.start) || !Number.isFinite(image.end) || image.start < 0 ||
         Math.abs(image.end - image.start - pageWidth) > 0.01 ||
+        !Number.isFinite(image.naturalWidth) || !Number.isFinite(image.naturalHeight) ||
+        image.naturalWidth < 0 || image.naturalHeight < 0 ||
         !image.anchor.signature || !Number.isInteger(image.anchor.index) || image.anchor.index < 0 ||
         seenIndices.has(image.anchor.index) || !image.anchor.tag || !Number.isFinite(image.anchor.ratio) || image.anchor.ratio < 0 || image.anchor.ratio > 1) {
       return { kind: "unsupported", reason: "image-box" };
