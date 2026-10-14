@@ -2549,6 +2549,11 @@ export class ChapterPaginator {
   private tailSpacer: HTMLElement | null = null;
   private bookmarkSpreadCache = new Map<string, { page: number; lane: 0 | 1 }>();
 
+  /** 本章实际翻页方向（竖排按书写方向决定，可能与书的元数据不同）；宿主的手势/按键换算以它为准。 */
+  get pageProgression(): PageProgression {
+    return this.flowProgression;
+  }
+
   get spreadLayoutSnapshot(): SpreadLayout | null {
     return this.spreadLayout;
   }

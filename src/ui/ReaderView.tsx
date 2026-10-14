@@ -1,6 +1,6 @@
 import { pageAxisSign } from "../render/pagedDirection";
 import { surfaceBackground } from "./readerSurfaceBackground";
-import { forwardRef, useContext, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useCallback, useContext, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Book } from "../core/types";
 import { nextLinearIndex, spineItemPath } from "../core/book";
 import {
@@ -284,9 +284,10 @@ export interface ReaderViewProps {
    * 丝带挂在那一格的外缘。
    */
   leafSlot?: { side: "left" | "right"; shift: number };
-  /** 手机右上角看不见的书签点击区（与书签按钮相同）。 */
   /** 触摸顶部角落（物理左右）；返回 false 表示这里不是书签区，按普通点击处理。 */
   onBookmarkCornerTap?(side: "left" | "right"): boolean;
+  /** 本章排好后的实际翻页方向（竖排按书写方向）；外层的点击翻页区据此映射左右。 */
+  onFlowProgression?(progression: "ltr" | "rtl"): void;
 }
 
 type ReaderFrame = "primary" | "secondary" | "tertiary" | "quaternary" | "quinary" | "warmup";
@@ -509,7 +510,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       return;
     }
     if (turnAnimTimerRef.current) clearTimeout(turnAnimTimerRef.current);
-    setTurnAnim({ direction: (dir * pageAxisSign(progressionRef.current)) as 1 | -1 });
+    setTurnAnim({ direction: (dir * pageAxisSign(progressionNow())) as 1 | -1 });
     turnAnimTimerRef.current = setTimeout(() => setTurnAnim(null), 180);
   };
 
@@ -526,7 +527,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     delete main.dataset.turnExit;
     delete main.dataset.turnEnter;
     if (phase === null) return;
-    main.dataset[phase === "exit" ? "turnExit" : "turnEnter"] = dir * pageAxisSign(progressionRef.current) === 1 ? "next" : "prev";
+    main.dataset[phase === "exit" ? "turnExit" : "turnEnter"] = dir * pageAxisSign(progressionNow()) === 1 ? "next" : "prev";
     chapterTurnTimerRef.current = setTimeout(() => {
       if (phaseTicket !== chapterTurnPhaseRef.current) return;
       // 滑出兜底：新章失败/取消时不能让正文停在滑出态。
@@ -752,8 +753,11 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   onExternalLinkRef.current = props.onExternalLink;
   onPreciseNavigationStatusRef.current = props.onPreciseNavigationStatus;
   onImageActivationRef.current = props.onImageActivation;
+  // 书的元数据方向只作排好之前的兜底；竖排正文按书写方向翻页（vertical-rl 从右往左），
+  // 元数据没写或写错时两边会相反，拖动就会逆着手指走。手势、按键、动画一律取分页器实际方向。
   const progressionRef = useRef<"ltr" | "rtl">("ltr");
   progressionRef.current = effectivePageProgression(props.book.pageProgression, props.settings, props.book.fixedLayout);
+  const progressionNow = (): "ltr" | "rtl" => paginatorRef.current?.pageProgression ?? progressionRef.current;
   onRestoreResultRef.current = props.onRestoreResult;
   onUserReadingPositionChangeRef.current = props.onUserReadingPositionChange;
   inputPausedRef.current = props.inputPaused === true;
@@ -853,6 +857,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         // transient 是运动途中的页码预览，不是落定：丝带继续隐藏。
         if (state.status === "ready" && !state.transient) refreshRibbonsRef.current();
         else markRibbonMotion();
+        if (state.status === "ready") props.onFlowProgression?.(paginator.pageProgression);
         if (state.status !== "ready" || !state.empty || autoAdvanceRef.current) return;
         const next = nextLinearIndex(book, spineIndexRef.current, 1);
         if (next >= 0) {
@@ -885,7 +890,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       },
       onKeyNavigate: (dir, key) => {
         if (!isActiveSlot(slot) || inputPausedRef.current) return;
-        turnPageRef.current(arrowKeyDirection(dir, key, progressionRef.current), "key");
+        turnPageRef.current(arrowKeyDirection(dir, key, progressionNow()), "key");
       },
       onFootnote: (payload) => {
         if (!isActiveSlot(slot)) return;
@@ -945,8 +950,8 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       },
       externalScroll: undefined,
       pagedSwipe: {
-        onNext: () => turnPageRef.current(pageAxisSign(progressionRef.current), "ui"),
-        onPrev: () => turnPageRef.current((-pageAxisSign(progressionRef.current)) as 1 | -1, "ui"),
+        onNext: () => turnPageRef.current(pageAxisSign(progressionNow()), "ui"),
+        onPrev: () => turnPageRef.current((-pageAxisSign(progressionNow())) as 1 | -1, "ui"),
         shouldIgnore: () =>
           !isActiveSlot(slot) ||
           inputPausedRef.current ||
@@ -2095,7 +2100,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       }
       return;
     }
-    const logicalDx = dx * pageAxisSign(progressionRef.current);
+    const logicalDx = dx * pageAxisSign(progressionNow());
     const direction = logicalDx < 0 ? 1 : -1;
     const p = paginatorRef.current;
     if (p && resolvedTurnAnimation() === "slide" && p.pageMotionAvailable) {
@@ -2184,8 +2189,8 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     if (!main || settings.readingMode === "scroll") return;
     main.dataset.swipeInput = "true";
     const cleanup = installPagedSwipe(main, {
-      onNext: () => turnPageRef.current(pageAxisSign(progressionRef.current), "ui"),
-      onPrev: () => turnPageRef.current((-pageAxisSign(progressionRef.current)) as 1 | -1, "ui"),
+      onNext: () => turnPageRef.current(pageAxisSign(progressionNow()), "ui"),
+      onPrev: () => turnPageRef.current((-pageAxisSign(progressionNow())) as 1 | -1, "ui"),
       onPreview: (dx) => updateSwipePreviewRef.current(dx),
       onGestureStart: () => {
         paginatorRef.current?.prepareMotion(true);
@@ -2565,7 +2570,13 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
     imagePlan.index === props.spineIndex ? imagePlan.spread : null);
   const pair = requestedSpread && imageGeometry.columns === 2 ? planned : null;
   const tapGeometry = useMemo(() => createReaderTapGeometry(width, props.tapRegions), [width, props.tapRegions]);
-  const progression = effectivePageProgression(props.book.pageProgression, props.settings, props.book.fixedLayout);
+  const bookProgression = effectivePageProgression(props.book.pageProgression, props.settings, props.book.fixedLayout);
+  // 点击翻页区按本章实际方向映射（竖排书元数据没写方向时与元数据不同）。
+  const [flow, setFlow] = useState<{ book: Book; progression: "ltr" | "rtl" } | null>(null);
+  const progression = flow?.book === props.book ? flow.progression : bookProgression;
+  const onFlowProgression = useCallback((value: "ltr" | "rtl") => {
+    setFlow((current) => current?.book === props.book && current.progression === value ? current : { book: props.book, progression: value });
+  }, [props.book]);
   const tapRouting = useMemo<ReaderTapRouting | null>(() => props.tapRegions ? {
     device: props.tapRegions.device,
     preferences: props.tapRegions.preferences,
@@ -2586,7 +2597,7 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
         setImagePlan({ resolver: imageSpreads, index: props.spineIndex, spread: null });
       }} />;
   } else {
-    content = <PagedReaderView {...props} ref={ref} />;
+    content = <PagedReaderView {...props} ref={ref} onFlowProgression={onFlowProgression} />;
   }
   return <EdgeTurnFeedbackContext.Provider value={edgeFeedback}>
     <ReaderTapRoutingContext.Provider value={tapRouting}>
