@@ -13,6 +13,25 @@ export function verticalProgression(mode: VerticalWritingMode): PageProgression 
   return mode === "vertical-rl" ? "rtl" : "ltr";
 }
 
+/** Reader defaults, not a prescribed Japanese paper margin ratio. Keep the
+ * existing head position; reserve two em at each side and four at the foot. */
+export function basicVerticalAutoMargins(
+  fontSize: number, base: { top: number; bottom: number; left: number; right: number },
+) {
+  return { top: base.top, bottom: Math.max(base.bottom, Math.round(4 * fontSize)),
+    left: Math.max(base.left, Math.round(2 * fontSize)),
+    right: Math.max(base.right, Math.round(2 * fontSize)) };
+}
+
+/** JLREQ's integral base-character line length. Keep the head fixed and put
+ * the fractional remainder at the foot. Paragraph ends/indentation are free
+ * to leave space; this never edits text or forces a short line to justify. */
+export function basicVerticalGridBottom(height: number, top: number, bottom: number, fontSize: number): number {
+  const available = Math.max(0, height - top - bottom);
+  const textHeight = Math.floor(available / fontSize) * fontSize;
+  return bottom + available - textHeight;
+}
+
 /** The margin belongs to the viewport, not the beginning of the chapter.
  * The body clips the expanded compositor window to the same reading area.
  * A short leaf's unused end is blank, never a slice of the following column. */

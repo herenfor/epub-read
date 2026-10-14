@@ -1,7 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { applyBasicVerticalShell, applyBasicVerticalViewport, basicVerticalMode, verticalProgression } from "./basicVertical";
+import { applyBasicVerticalShell, applyBasicVerticalViewport, basicVerticalAutoMargins, basicVerticalGridBottom, basicVerticalMode, verticalProgression } from "./basicVertical";
 
 describe("basic vertical compatibility", () => {
+  it("keeps the head position, reserves the foot and fits a whole-character line length", () => {
+    const margins = basicVerticalAutoMargins(16, { top: 42, bottom: 34, left: 20, right: 20 });
+    expect(margins).toEqual({ top: 42, bottom: 64, left: 32, right: 32 });
+    const bottom = basicVerticalGridBottom(798, margins.top, margins.bottom, 16);
+    expect(bottom).toBe(68);
+    expect((798 - margins.top - bottom) / 16).toBe(43);
+    expect(basicVerticalGridBottom(800, 48, 64, 16)).toBe(64);
+    expect(basicVerticalGridBottom(160, 48, 64, 16)).toBe(64);
+    // Caller supplies the selected margins first; the grid does not shrink
+    // them or redistribute the remainder to the already aligned head.
+    expect(basicVerticalGridBottom(798, 50, 80, 16)).toBe(92);
+  });
   it.each(["vertical-rl", "vertical-lr"] as const)("keeps both viewport margins during motion and restores the author's clip (%s)", mode => {
     const values = new Map<string, string>([["clip-path", "inset(1px)"]]);
     const parent = { style: {

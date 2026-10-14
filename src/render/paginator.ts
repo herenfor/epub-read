@@ -100,7 +100,7 @@ import {
   resolveSpreadReadingArea,
   type SpreadReadingArea,
 } from "./spreadReadingArea";
-import { applyBasicVerticalShell, applyBasicVerticalViewport, basicVerticalMode, verticalProgression, type VerticalWritingMode } from "./basicVertical";
+import { applyBasicVerticalShell, applyBasicVerticalViewport, basicVerticalAutoMargins, basicVerticalGridBottom, basicVerticalMode, verticalProgression, type VerticalWritingMode } from "./basicVertical";
 import { buildVerticalPageModel } from "./vertical/pageModel";
 
 /** 滚动模式全书末尾提示的文案；由界面层按当前界面语言注入，分页核心不依赖语言模块。 */
@@ -4222,7 +4222,8 @@ export class ChapterPaginator {
     // 旧单页/滚动语义保留：滚动左右默认 16px；分页左右无显式值时宽屏为 0，
     // 窄屏（手机竖屏）用 autoPageMarginsPx 的紧凑口径，避免正文贴边。
     const compactAuto = !scrollMode && !this.fixedLayout && pageW > 0 && pageW < COMPACT_PAGE_WIDTH_PX;
-    const autoMargins = autoPageMarginsPx(em, compactAuto);
+    const baseAutoMargins = autoPageMarginsPx(em, compactAuto);
+    const autoMargins = this.verticalMode ? basicVerticalAutoMargins(em, baseAutoMargins) : baseAutoMargins;
     const marginLeft = Math.max(0, margins.left ?? (scrollMode ? 16 : this.fixedLayout ? 0 : autoMargins.left));
     const marginRight = Math.max(0, margins.right ?? (scrollMode ? 16 : this.fixedLayout ? 0 : autoMargins.right));
     const legacyW = scrollMode ? pageW : Math.max(0, pageW - marginLeft - marginRight);
@@ -4232,7 +4233,7 @@ export class ChapterPaginator {
       : this.fixedLayout ? 0 : scrollMode ? 12 : compactAuto ? autoMargins.top : TEXT_MEASURE.vTopEm * em;
     const requestedBottom = margins.bottom !== undefined
       ? Math.max(0, margins.bottom)
-      : this.fixedLayout ? 0 : scrollMode ? 12 : compactAuto ? autoMargins.bottom : TEXT_MEASURE.vBottomEm * em;
+      : this.fixedLayout ? 0 : scrollMode ? 12 : this.verticalMode || compactAuto ? autoMargins.bottom : TEXT_MEASURE.vBottomEm * em;
     const verticalBudget = Math.max(0, pageH - 2 * em);
     const verticalScale = requestedTop + requestedBottom > verticalBudget && requestedTop + requestedBottom > 0
       ? verticalBudget / (requestedTop + requestedBottom)
@@ -4254,7 +4255,11 @@ export class ChapterPaginator {
       typeof onlyChildClass === "string" &&
       /(?:^|\s)(?:illus|kuchie|cover|duokan-image-fullscreen)(?:\s|$)/u.test(onlyChildClass);
     const padTop = pureImagePage ? 0 : Math.round(requestedTop * verticalScale);
-    const padBottom = pureImagePage ? 0 : Math.round(requestedBottom * verticalScale);
+    const minimumPadBottom = pureImagePage ? 0 : Math.round(requestedBottom * verticalScale);
+    // An explicit character spacing preference has a different advance; keep
+    // it rather than pretending those lines still use the unspaced em grid.
+    const padBottom = this.verticalMode && !pureImagePage && !this.settings.letterSpacingPx && !this.settings.wordSpacingPx
+      ? basicVerticalGridBottom(h, padTop, minimumPadBottom, em) : minimumPadBottom;
     // Basic vertical compatibility uses one native-flow viewport. Precise
     // dual leaves are a separate feature; never feed vertical text to multicol.
     const requestedColumns = this.fixedLayout || scrollMode || this.verticalMode ? 1 : this.settings.columnsPerView === 2 ? 2 : 1;
