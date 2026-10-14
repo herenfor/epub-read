@@ -65,6 +65,12 @@ const paginatedCommitInternals = {
   effectiveColumns: 1 as const,
   leadingColumns: 0,
   viewStepPx: 100,
+  // Navigation-only hosts borrow the actual axis helpers; no active motion.
+  readPagedScroll: (ChapterPaginator.prototype as any).readPagedScroll,
+  writePagedScroll: (ChapterPaginator.prototype as any).writePagedScroll,
+  haltPageMotion: (ChapterPaginator.prototype as any).haltPageMotion,
+  leadingClientX: (ChapterPaginator.prototype as any).leadingClientX,
+  contentClientOrigin: (ChapterPaginator.prototype as any).contentClientOrigin,
   applyResolvedPosition: (
     ChapterPaginator.prototype as unknown as {
       applyResolvedPosition: (
@@ -115,6 +121,7 @@ describe("content-anchor restore precedence", () => {
       textSnippet: "星君",
     };
     const context: Record<string, unknown> = {
+      ...paginatedCommitInternals,
       viewer: { scrollLeft: 0 },
       effectiveColumns: 1,
       leadingColumns: 0,
@@ -915,6 +922,7 @@ describe("internal link history notification", () => {
       getWithinChapterFragmentPage: (ChapterPaginator.prototype as unknown as { getWithinChapterFragmentPage: (fragment: string) => unknown }).getWithinChapterFragmentPage,
       commitWithinChapterPage: (ChapterPaginator.prototype as unknown as { commitWithinChapterPage: (page: number, candidate: unknown) => void }).commitWithinChapterPage,
       ...paginatedCommitInternals,
+      server: { archiveReferences: undefined },
       captureAnchor() {},
       closeFootnoteForNavigation() {},
       clearSearchHighlightForDocument() {},
@@ -2195,9 +2203,13 @@ describe("search highlight range drawing", () => {
 
 describe("measure viewport height locking", () => {
   function makeFakeElement(props: Record<string, any> = {}) {
-    const style: Record<string, string> = {};
+    const { document } = parseHTML("<html><body></body></html>");
+    const style = document.createElement("div").style;
+    // linkedom omits this CSSOM method; these fixtures have no priorities.
+    Object.assign(style, { getPropertyPriority: () => "" });
     return {
       style,
+      ownerDocument: null as any,
       clientWidth: 800,
       clientHeight: 600,
       textContent: "Sample text content",
@@ -2233,6 +2245,7 @@ describe("measure viewport height locking", () => {
       fonts: { ready: Promise.resolve() },
     };
 
+    viewer.ownerDocument = doc;
     const measureControllers = new Set<AbortController>();
     const context = Object.create(ChapterPaginator.prototype) as any;
     Object.assign(context, {
@@ -2246,6 +2259,7 @@ describe("measure viewport height locking", () => {
       restoreInlineBoxFixes: vi.fn(),
       restoreFloatLayoutFixes: vi.fn(),
       restoreBookMargins: vi.fn(),
+      restoreContainedMediaFixes: vi.fn(),
       restoreFitContentFix: vi.fn(),
       restoreFloatWidths: vi.fn(),
       restoreTrailingFloatFixes: vi.fn(),
@@ -2277,6 +2291,7 @@ describe("measure viewport height locking", () => {
       fonts: { ready: Promise.resolve() },
     };
 
+    viewer.ownerDocument = doc;
     const measureControllers = new Set<AbortController>();
     const context = Object.create(ChapterPaginator.prototype) as any;
     Object.assign(context, {
@@ -2290,6 +2305,7 @@ describe("measure viewport height locking", () => {
       restoreInlineBoxFixes: vi.fn(),
       restoreFloatLayoutFixes: vi.fn(),
       restoreBookMargins: vi.fn(),
+      restoreContainedMediaFixes: vi.fn(),
       restoreFitContentFix: vi.fn(),
       restoreFloatWidths: vi.fn(),
       restoreTrailingFloatFixes: vi.fn(),
@@ -2338,6 +2354,7 @@ describe("measure viewport height locking", () => {
       body: { clientWidth: 1024 },
       fonts: { ready: Promise.resolve() },
     };
+    viewer.ownerDocument = doc;
     const measureControllers = new Set<AbortController>();
     const context = Object.create(ChapterPaginator.prototype) as any;
     Object.assign(context, {
@@ -2416,6 +2433,7 @@ describe("measure viewport height locking", () => {
       body: { clientWidth: 1024 },
       fonts: { ready: Promise.resolve() },
     };
+    viewer.ownerDocument = doc;
     const measureControllers = new Set<AbortController>();
     const context = Object.create(ChapterPaginator.prototype) as any;
     Object.assign(context, {
