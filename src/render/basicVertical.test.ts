@@ -14,12 +14,13 @@ describe("basic vertical compatibility", () => {
     // them or redistribute the remainder to the already aligned head.
     expect(basicVerticalGridBottom(798, 50, 80, 16)).toBe(92);
   });
-  it.each(["vertical-rl", "vertical-lr"] as const)("keeps both viewport margins during motion and restores the author's clip (%s)", mode => {
+  it.each(["vertical-rl", "vertical-lr"] as const)("opens motion once, restores complete leaf margins on landing and preserves author styles (%s)", mode => {
     const values = new Map<string, string>([["clip-path", "inset(1px)"]]);
+    let writes = 0;
     const parent = { style: {
       getPropertyValue: (key: string) => values.get(key) ?? "",
       getPropertyPriority: () => "important",
-      setProperty: (key: string, value: string, priority = "") => { values.set(key, value); values.set("priority", priority); },
+      setProperty: (key: string, value: string, priority = "") => { writes++; values.set(key, value); values.set("priority", priority); },
       removeProperty: (key: string) => { values.delete(key); },
     } };
     const mediaProperties = new Map<string, { value: string; priority: string }>([
@@ -40,8 +41,18 @@ describe("basic vertical compatibility", () => {
     viewport.setBlankAfter(8);
     expect(values.get("clip-path")).toBe(mode === "vertical-rl"
       ? "inset(0px 24px 0px 28px)" : "inset(0px 32px 0px 20px)");
+    viewport.beginMotion();
+    expect(values.get("clip-path")).toBe("none");
+    const startedWrites = writes;
+    // Repeated preview frames and a reverse catch do not toggle the layer.
+    viewport.beginMotion();
+    expect(writes).toBe(startedWrites);
+    viewport.setBlankAfter(8);
+    expect(values.get("clip-path")).toBe(mode === "vertical-rl"
+      ? "inset(0px 24px 0px 28px)" : "inset(0px 32px 0px 20px)");
     viewport.setBlankAfter(0);
     expect(values.get("clip-path")).toBe("inset(0px 24px 0px 20px)");
+    viewport.beginMotion();
     viewport.restore();
     expect(values.get("clip-path")).toBe("inset(1px)");
     expect(values.get("priority")).toBe("important");
