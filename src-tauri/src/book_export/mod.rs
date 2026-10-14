@@ -282,7 +282,41 @@ pub async fn book_source_export(
     if matches!(&destination, SaveFileLocation::Uri { .. }) {
         return Err(SaveFileError::unsupported_platform("content URI仅支持Android").into());
     }
-    let task = reserve_job(&app, &job_id)?;
+    let task = match reserve_job(&app, &job_id) {
+        Ok(task) => task,
+        Err(error) => {
+            // The Android picker already created this target, even though a
+            // competing job can reject us before the export worker starts.
+            #[cfg(target_os = "android")]
+            if let SaveFileLocation::Uri { uri } = &destination {
+                if destination_is_new.unwrap_or(false) {
+                    let cleanup_app = app.clone();
+                    let uri = uri.clone();
+                    return tauri::async_runtime::spawn_blocking(move || {
+                        let mut error = BookExportError::from(error);
+                        if let Err(cleanup) =
+                            crate::android_uri_bridge::delete_created_document_blocking(
+                                &cleanup_app,
+                                &uri,
+                            )
+                        {
+                            error.partial_output_retained = true;
+                            error.message =
+                                format!("{}；无法删除本任务新建输出：{cleanup}", error.message);
+                        }
+                        Err(error)
+                    })
+                    .await
+                    .map_err(|join| BookExportError {
+                        code: "output-cleanup-failed".into(),
+                        message: format!("输出清理线程失败：{join}"),
+                        partial_output_retained: true,
+                    })?;
+                }
+            }
+            return Err(error.into());
+        }
+    };
     let worker_task = task.clone();
     let worker_app = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
