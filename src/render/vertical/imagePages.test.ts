@@ -49,6 +49,7 @@ describe("vertical independent image leaves", () => {
   it("does not call unloaded images empty or discard overlapping text and media", () => {
     const empty = buildVerticalPageModel([], 100);
     expect(buildVerticalChapterModel(empty, [{ ...image(0), naturalWidth: 0 }], 150)).toEqual({ kind: "pending", reason: "image-size" });
+    expect(buildVerticalChapterModel(empty, [{ ...image(0), naturalWidth: NaN }], 150)).toEqual({ kind: "unsupported", reason: "image-box" });
     expect(buildVerticalChapterModel(empty, [], 150).kind).toBe("empty");
     expect(buildVerticalChapterModel(empty, [image(0), image(100)], 150)).toEqual({ kind: "unsupported", reason: "image-box" });
     expect(buildVerticalChapterModel(empty, [image(0), image(50, 100, 1)], 150)).toEqual({ kind: "unsupported", reason: "overlap" });
