@@ -34,5 +34,8 @@
   "titlebar.maximize": "Maximize",
   "titlebar.close": "Close",
   "titlebar.progress.tip": "Reading progress: {percent}% (click to toggle contents)",
-  "titlebar.progress.chapter": "Ch. {current}/{total}"
+  "titlebar.progress.chapter": "Ch. {current}/{total}",
+  "titlebar.tabs": "Open books",
+  "titlebar.tabs.close": "Close {title}",
+  "titlebar.tabs.tip": "{title} (Ctrl+Tab to switch, Ctrl+W to close)"
 }
