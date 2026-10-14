@@ -888,6 +888,52 @@
     }
 
     #[test]
+    fn c7_display_name_prefers_provider_without_decoding_uri_paths() {
+        assert_eq!(
+            import_display_name(Some("原書 %20 #?.epub"), Some("selected.epub")),
+            "原書 %20 #?.epub"
+        );
+        assert_eq!(
+            import_display_name(Some("../bad.epub"), Some("selected.epub")),
+            "selected.epub"
+        );
+        assert_eq!(import_display_name(Some("\n"), None), "book.epub");
+        assert_eq!(import_display_name(None, None), "book.epub");
+    }
+
+    #[test]
+    fn c7_duplicate_import_repairs_only_placeholder_and_keeps_reading_data() {
+        for old_name in ["book.epub", "original.epub"] {
+            let root = organization_temp_dir("c7-duplicate-name");
+            let hash = hash_bytes(b"source");
+            let mut existing = bk2_record(&hash, 77);
+            existing.file_name = old_name.into();
+            let mut expected = existing.clone();
+            if old_name == "book.epub" {
+                expected.file_name = "原書.epub".into();
+            }
+            let mut records = vec![existing];
+            let mut bindings = Vec::new();
+            let mut document = bk2_prepared_document(&root, &hash, 0, b"source", "Different title");
+            document.file_name = "原書.epub".into();
+            let result = publish_prepared_documents(
+                &root,
+                &mut records,
+                &mut bindings,
+                &[PreparedItem::Ready(document)],
+            )
+            .unwrap();
+            assert_eq!(result.statuses[&hash], "duplicate");
+            assert_eq!(result.records_changed, old_name == "book.epub");
+            assert_eq!(
+                serde_json::to_value(&records[0]).unwrap(),
+                serde_json::to_value(expected).unwrap()
+            );
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
     fn bk2_publish_duplicate_keeps_latest_record_and_replaces_managed_file() {
         let root = organization_temp_dir("bk2-publish-duplicate");
         let hash = "b".repeat(64);

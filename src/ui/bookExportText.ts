@@ -5,7 +5,11 @@ import { uiText } from "./localization/UiLanguageProvider";
 
 /** A safe default save name for one book: its shelf file name, else its title. */
 export function bookExportFileName(fileName: string | undefined, title: string): string {
-  const raw = (fileName?.trim() || title.trim()).replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_");
+  const original = fileName?.trim();
+  // Older Android imports stored this placeholder, without provenance.
+  // Only the suggested export name changes; the shelf record stays intact.
+  const raw = ((original && original.toLowerCase() !== "book.epub" ? original : title.trim()) || "book")
+    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_");
   const stem = Array.from(raw.replace(/\.epub$/i, "")).slice(0, 80).join("").replace(/[. ]+$/, "");
   const device = stem.split(".")[0];
   const reserved = /^(CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³])$/i.test(device);

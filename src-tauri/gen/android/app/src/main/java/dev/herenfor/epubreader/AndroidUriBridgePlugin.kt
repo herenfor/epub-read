@@ -120,8 +120,10 @@ class AndroidUriBridgePlugin(private val activity: Activity) : Plugin(activity) 
     private fun openReadOnlyOnWorker(invoke: Invoke, uri: String) {
         var rawFd = -1
         try {
+            val parsedUri = Uri.parse(uri)
+            val displayName = queryDisplayName(parsedUri)
             val afd = activity.contentResolver.openAssetFileDescriptor(
-                Uri.parse(uri),
+                parsedUri,
                 "r"
             ) ?: throw IOException("content provider returned no file descriptor")
             try {
@@ -135,6 +137,7 @@ class AndroidUriBridgePlugin(private val activity: Activity) : Plugin(activity) 
                     put("fd", rawFd)
                     put("startOffset", startOffset)
                     put("declaredLength", declaredLength)
+                    if (displayName != null) put("displayName", displayName)
                 }
                 postResponse { invoke.resolve(result) }
                 // `resolve` has been posted and now owns the fd. Do not close it
@@ -155,6 +158,18 @@ class AndroidUriBridgePlugin(private val activity: Activity) : Plugin(activity) 
             val message = error.message?.takeIf { it.isNotBlank() } ?: error.toString()
             postResponse { invoke.reject(message) }
         }
+    }
+
+    // Display names are metadata, not URI paths. Some providers omit the
+    // column; that must not prevent an otherwise readable document import.
+    private fun queryDisplayName(uri: Uri): String? = try {
+        val column = DocumentsContract.Document.COLUMN_DISPLAY_NAME
+        activity.contentResolver.query(uri, arrayOf(column), null, null, null)?.use { cursor ->
+            val index = cursor.getColumnIndex(column)
+            if (index >= 0 && cursor.moveToFirst()) cursor.getString(index) else null
+        }
+    } catch (_: Exception) {
+        null
     }
 
     @Command

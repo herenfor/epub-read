@@ -40,7 +40,10 @@ pub(super) fn ensure_import_idle(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-pub(super) fn reserve_import(app: &AppHandle, request_id: &str) -> Result<Arc<ImportJob>, NativeImportError> {
+pub(super) fn reserve_import(
+    app: &AppHandle,
+    request_id: &str,
+) -> Result<Arc<ImportJob>, NativeImportError> {
     let write_state = app.state::<LinkedLibraryWriteState>();
     let _write_guard = write_state
         .0
@@ -216,6 +219,19 @@ pub(crate) fn stream_restricted_reader_to_staging(
     Ok(StagedFile { content_hash })
 }
 
+pub(super) fn import_display_name(provider: Option<&str>, selected: Option<&str>) -> String {
+    provider
+        .into_iter()
+        .chain(selected)
+        .find(|name| {
+            portable_file_name(name)
+                && !name.trim().is_empty()
+                && !name.chars().any(char::is_control)
+        })
+        .unwrap_or("book.epub")
+        .to_string()
+}
+
 pub(super) fn prepare_document_from_reader(
     reader: &mut RestrictedReader,
     gate: &ImportGate,
@@ -223,6 +239,7 @@ pub(super) fn prepare_document_from_reader(
     staging_path: &Path,
     file_name: Option<String>,
 ) -> Result<PreparedDocument, PrepareError> {
+    let file_name = import_display_name(reader.display_name(), file_name.as_deref());
     let staged =
         stream_restricted_reader_to_staging(reader, staging_path, &|| gate.is_cancelled())?;
     let content_hash = staged.content_hash;
@@ -257,7 +274,7 @@ pub(super) fn prepare_document_from_reader(
         input_index,
         content_hash,
         staging_path: staging_path.to_path_buf(),
-        file_name: file_name.unwrap_or_else(|| "book.epub".to_string()),
+        file_name,
         metadata,
     })
 }
@@ -402,6 +419,16 @@ pub(super) fn publish_prepared_documents(
         outcome.bindings_changed = true;
 
         if preexisting_hashes.contains(&document.content_hash) {
+            // Reimport can repair a historical missing display name. Do not
+            // rename genuine names or replace any reading/annotation state.
+            if let Some(record) = records.iter_mut().find(|record| {
+                record.content_hash == document.content_hash && record.file_name == "book.epub"
+            }) {
+                if document.file_name != "book.epub" {
+                    record.file_name = document.file_name.clone();
+                    outcome.records_changed = true;
+                }
+            }
             outcome
                 .statuses
                 .insert(document.content_hash.clone(), "duplicate".to_string());
