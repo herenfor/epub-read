@@ -121,7 +121,7 @@ export interface ContinuousReaderViewProps {
   bookmarks?: readonly RibbonBookmark[];
   bookmarkCue?: (RibbonCue & { at: number }) | null;
   /** 手机右上角书签点击区；只在宿主提供时生效。 */
-  onBookmarkCornerTap?(): void;
+  onBookmarkCornerTap?(side: "left" | "right"): boolean;
   onPreciseNavigationStatus?(status: {
     requestId: number;
     status: PreciseNavigationStatus;
@@ -1590,8 +1590,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
               const iframeRect = iframe.getBoundingClientRect();
               const x = tap.clientX + iframeRect.left - hostRect.left;
               const y = tap.clientY + iframeRect.top - hostRect.top;
-              if (y >= 0 && y < BOOKMARK_CORNER_PX && x >= el.clientWidth - BOOKMARK_CORNER_PX) {
-                corner();
+              if (y >= 0 && y < BOOKMARK_CORNER_PX && x >= el.clientWidth - BOOKMARK_CORNER_PX && corner("right")) {
                 return;
               }
             }

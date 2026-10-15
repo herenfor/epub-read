@@ -73,6 +73,27 @@ export function bookmarkButtonAction(screen: ScreenBookmarks | null): BookmarkBu
   return ids.length === 0 ? { kind: "add" } : { kind: "remove", ids };
 }
 
+export type BookmarkCornerAction =
+  | { readonly kind: "add"; readonly lane: 0 | 1 }
+  | { readonly kind: "remove"; readonly ids: readonly string[] }
+  /** 单页、滚动：右上角与书签按钮同一规则（有就删、没有就加）。 */
+  | { readonly kind: "button" }
+  /** 这个角落不是书签区（单页左上角、双页没有正文的那一页）：当普通点击。 */
+  | { readonly kind: "pass" };
+
+/**
+ * 触摸顶部角落直接作用于所点的那一页：双页按物理左右找页（RTL、两章并排时
+ * 左右与阅读顺序不同，不能按 lane 猜），有书签就删、没有就加；不弹缩略书页。
+ */
+export function bookmarkCornerAction(screen: ScreenBookmarks | null, side: "left" | "right"): BookmarkCornerAction {
+  if (screen?.kind === "paged" && screen.columns === 2) {
+    const page = screen.pages.find((candidate) => candidate.side === side);
+    if (!page) return { kind: "pass" };
+    return page.ids.length > 0 ? { kind: "remove", ids: page.ids } : { kind: "add", lane: page.lane };
+  }
+  return side === "right" ? { kind: "button" } : { kind: "pass" };
+}
+
 /** 丝带默认中号：宽 14、长 48、离页外缘 14。 */
 export const RIBBON_WIDTH_PX = 14;
 export const RIBBON_LENGTH_PX = 48;

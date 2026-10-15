@@ -15,7 +15,7 @@ import type { SidebarTab } from "./SidebarDrawer";
 import { generateFolderId } from "./libraryOrganization";
 import { closeReaderForeground, type NoteComposerDraft, type ReaderForeground } from "./readerForeground";
 import { uiText } from "./localization/UiLanguageProvider";
-import { bookmarkButtonAction, RIBBON_LIFT_MS, screenBookmarkIds, type RibbonCue } from "./bookmarkRibbons";
+import { bookmarkButtonAction, bookmarkCornerAction, RIBBON_LIFT_MS, screenBookmarkIds, type RibbonCue } from "./bookmarkRibbons";
 import { prefersReducedMotion } from "./pagedSlide";
 
 const EMPTY_NOTES: ReaderNote[] = [];
@@ -802,6 +802,21 @@ export function useBookmarkRibbonActions({ currentShelfId, readReaderPosition, c
     else removeBookmarks(action.ids, { animate: true });
   }, [currentShelfId, bookmarkPagesOpen, legacyToggle, addBookmark, removeBookmarks]);
 
+  /**
+   * 手机/平板顶部看不见的角落：直接增删所点的那一页（双页按物理左右），与
+   * 工具栏按钮分开（按钮在双页仍弹缩略书页）。返回 false 时宿主按普通点击处理。
+   */
+  const handleBookmarkCorner = useCallback((side: "left" | "right"): boolean => {
+    if (!currentShelfId) return side === "right";
+    const screen = readerRef.current?.screenBookmarks?.(bookmarksRef.current) ?? null;
+    const action = bookmarkCornerAction(screen, side);
+    if (action.kind === "pass") return false;
+    if (action.kind === "button") handleBookmarkButton();
+    else if (action.kind === "add") addBookmark(action.lane);
+    else removeBookmarks(action.ids, { animate: true });
+    return true;
+  }, [currentShelfId, handleBookmarkButton, addBookmark, removeBookmarks]);
+
   const closeBookmarkPages = useCallback(() => setBookmarkPagesOpen(false), []);
   const hintBookmarks = useCallback((ids: readonly string[]) => cue("hint", ids), [cue]);
 
@@ -818,6 +833,7 @@ export function useBookmarkRibbonActions({ currentShelfId, readReaderPosition, c
     closeBookmarkPages,
     hintBookmarks,
     handleBookmarkButton,
+    handleBookmarkCorner,
     addBookmark,
     removeBookmarks,
     undoBookmarkRemoval,

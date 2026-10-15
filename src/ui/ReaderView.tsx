@@ -283,7 +283,8 @@ export interface ReaderViewProps {
    */
   leafSlot?: { side: "left" | "right"; shift: number };
   /** 手机右上角看不见的书签点击区（与书签按钮相同）。 */
-  onBookmarkCornerTap?(): void;
+  /** 触摸顶部角落（物理左右）；返回 false 表示这里不是书签区，按普通点击处理。 */
+  onBookmarkCornerTap?(side: "left" | "right"): boolean;
 }
 
 type ReaderFrame = "primary" | "secondary" | "tertiary" | "quaternary" | "quinary" | "warmup";
@@ -1957,8 +1958,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   plainTapRef.current = (tap) => {
     const route = routeTap(tap.clientX, tap.clientY);
     if (route.kind === "bookmark") {
-      if (props.onBookmarkCornerTap) props.onBookmarkCornerTap();
-      else props.onPlainTap?.();
+      if (!props.onBookmarkCornerTap?.(route.side)) props.onPlainTap?.();
     } else if (route.kind === "turn" && tapRouting) {
       tapRouting.feedback.hold(edgeFeedbackKeyOf(route.side));
       if (turnOwner) turnOwner(route.direction);
