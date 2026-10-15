@@ -59,6 +59,10 @@ export const RELEASE_NOTES: readonly ReleaseNote[] = [
         text: "要求从右往左翻页的书，现在按书的方向翻页。",
       },
       {
+        category: "new",
+        text: "竖排显示（实验性）：竖排的书按竖排显示，一页一页从右往左翻。排版效果还不完善，不理想时可以在 Aa 设置里打开“强制竖排转横排”。",
+      },
+      {
         category: "improved",
         text: "翻页更跟手：松手后页面接着手指的速度滑到位，结尾不再顿一下；刚打开书的前几秒翻页也不再卡顿。",
       },
@@ -68,7 +72,7 @@ export const RELEASE_NOTES: readonly ReleaseNote[] = [
       },
       {
         category: "improved",
-        text: "双页时书的整页背景图按页铺，不再横跨两页拉伸。竖排书暂时按横排显示，避免排版错乱。",
+        text: "双页时书的整页背景图按页铺，不再横跨两页拉伸。",
       },
       {
         category: "improved",
