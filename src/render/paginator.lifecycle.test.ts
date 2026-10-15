@@ -70,7 +70,7 @@ describe("ChapterPaginator CSS Blob URL lifecycle", () => {
     sanitizeMock.mockReset();
     sanitizeMock.mockImplementation(async (_html: string, opts: { makeUrl?: (text: string, mediaType: string) => string }) => {
       opts.makeUrl?.("rewritten css", "text/css");
-      return { html: "<html><body><epub-viewer id='epub-viewer'/></body></html>", issues: [], downgraded: false };
+      return { html: "<html><body><epub-viewer id='epub-viewer'/></body></html>", issues: [], unresolvedResources: [], downgraded: false };
     });
   });
 
@@ -138,7 +138,7 @@ describe("ChapterPaginator CSS Blob URL lifecycle", () => {
     const staleLoad = paginator.load("stale.xhtml");
     await Promise.resolve();
     await paginator.load("current.xhtml");
-    first.resolve({ html: "<html/>", issues: [], downgraded: false });
+    first.resolve({ html: "<html/>", issues: [], unresolvedResources: [], downgraded: false });
     await staleLoad;
     expect(iframe.style.getPropertyValue("visibility")).toBe("hidden");
     paginator.dispose();
@@ -172,7 +172,7 @@ describe("ChapterPaginator CSS Blob URL lifecycle", () => {
     await Promise.resolve();
     await paginator.load("current.xhtml");
     expect(revoke).toHaveBeenCalledWith("blob:test/1");
-    first.resolve({ html: "<html/>", issues: [], downgraded: false });
+    first.resolve({ html: "<html/>", issues: [], unresolvedResources: [], downgraded: false });
     await staleLoad;
     // current chapter created CSS URL #2 and HTML URL #3; stale completion
     // cannot revoke or replace them.
