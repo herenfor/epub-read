@@ -589,6 +589,10 @@ function bookKeyOf(b: Book, name: string, size: number): string {
 const PANEL_WARM_VEIL_BATCHES: readonly PanelWarmBatch[] = [["aa"], ["aa-detailed"], ["toc"]];
 const PANEL_WARM_IDLE_BATCHES: readonly PanelWarmBatch[] = [["search"], ["reading"], ["display"], ["fonts"], ["bookmark-pages"]];
 const noopBookmarkPages = (): void => {};
+/** 书签跳转落定后，角落点击再等跳转光晕（1.25 秒）播完。 */
+const BOOKMARK_JUMP_GUARD_AFTER_LANDING_MS = 1300;
+/** 跳转迟迟不落定（失败、被别的导航取代）时，保护最多持续这么久。 */
+const BOOKMARK_JUMP_GUARD_MAX_MS = 8000;
 const PANEL_WARM_IDLE_BATCHES_MOBILE: readonly PanelWarmBatch[] = [["more"], ...PANEL_WARM_IDLE_BATCHES];
 
 export default function App() {
@@ -3643,12 +3647,44 @@ export default function App() {
     closeBookmarkPages();
   }, [bookmarkPagesKey, view, closeBookmarkPages]);
 
+  // A17：角落点击的保护。
+  // - 跳转/换章途中目标页还没显示：读不到这一屏的书签，会退回旧的切换、按加载中的位置增删。
+  // - 从书签列表跳转后，落定到跳转光晕播完之前：连点多半是误触，会删掉刚跳到的书签。
+  // 这两段时间角落点击一律吞掉（不增删、也不当普通点击）；跳转迟迟不落定时最多保护 8 秒。
+  const bookmarkJumpRef = useRef<{ selectedAt: number; landedAt: number | null } | null>(null);
+  useEffect(() => {
+    const jump = bookmarkJumpRef.current;
+    if (!jump || jump.landedAt !== null) return;
+    if (chapterState.status === "ready" && !chapterState.transient && !navigationPendingRef.current &&
+      readerDisplayReadyRef.current) {
+      jump.landedAt = performance.now();
+    }
+  }, [chapterState, navigationPendingRef, readerDisplayReadyRef]);
+  const handleBookmarkCornerTap = useCallback((side: "left" | "right"): boolean => {
+    if (navigationPendingRef.current || !readerDisplayReadyRef.current) return true;
+    const jump = bookmarkJumpRef.current;
+    if (jump) {
+      const now = performance.now();
+      const guarded = now - jump.selectedAt < BOOKMARK_JUMP_GUARD_MAX_MS &&
+        (jump.landedAt === null || now - jump.landedAt < BOOKMARK_JUMP_GUARD_AFTER_LANDING_MS);
+      if (guarded) return true;
+      bookmarkJumpRef.current = null;
+    }
+    return handleBookmarkCorner(side);
+  }, [handleBookmarkCorner, navigationPendingRef, readerDisplayReadyRef]);
+
   const handleSelectBookmark = useCallback(
     (bookmarkId: string) => {
       setPreciseTarget(null);
       latestPreciseRequestRef.current = null;
       const bookmark = currentBookmarks.find((item) => item.id === bookmarkId);
       if (!bookmark || !book) return;
+      bookmarkJumpRef.current = { selectedAt: performance.now(), landedAt: null };
+      // A17：触摸界面的工具栏盖在丝带上；跳转的同时收起（走原有收起动画），让跳转光晕露出来。
+      if (mobileChrome) {
+        setMobileMoreOpen(false);
+        setReaderToolsVisible(false);
+      }
       const bookmarkAnchor = toPersistedReaderAnchor({
         index: bookmark.anchorIndex,
         ratio: bookmark.anchorRatio,
@@ -3679,6 +3715,8 @@ export default function App() {
           alignment: "reading-line",
         });
         if (direct) {
+          // 本章直达当场落定（目标就在这一页时不会再有新的页状态）。
+          if (bookmarkJumpRef.current) bookmarkJumpRef.current.landedAt = performance.now();
           setAnchor(undefined);
           commitReaderHistorySnapshot(snapshot);
           closeForeground();
@@ -3706,6 +3744,7 @@ export default function App() {
       commitReaderHistorySnapshot,
       closeForeground,
       cueBookmarks,
+      mobileChrome,
     ]
   );
 
@@ -5539,7 +5578,7 @@ export default function App() {
                   tapRegions={tapRegions}
                   bookmarks={currentBookmarks}
                   bookmarkCue={bookmarkCue}
-                  onBookmarkCornerTap={mobileChrome ? handleBookmarkCorner : undefined}
+                  onBookmarkCornerTap={mobileChrome ? handleBookmarkCornerTap : undefined}
                   initialAnchor={initialAnchor}
                   initialPage={initialPage}
                   initialAlignment={initialAlignment}
