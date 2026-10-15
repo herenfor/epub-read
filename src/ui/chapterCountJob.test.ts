@@ -102,6 +102,29 @@ describe("incremental chapter count job", () => {
     expect(clock.size()).toBe(0);
   });
 
+  it("Q5: skips a slice while the reader is busy and counts once it is idle", () => {
+    const clock = scheduler();
+    const counts: Array<[number, number]> = [];
+    let busy = true;
+    createChapterCountJob({
+      book: book(),
+      server: { textFor: () => "第一章" },
+      generation: 1,
+      maxPerSlice: 1,
+      scheduler: clock.scheduler,
+      shouldYield: () => busy,
+      parse: (text) => parseHTML(`<html><body>${text}</body></html>`).document as unknown as Document,
+      onCount: (index, value) => counts.push([index, value]),
+    });
+    clock.runNext();
+    clock.runNext();
+    expect(counts).toEqual([]);
+    expect(clock.size()).toBe(1);
+    busy = false;
+    clock.runNext();
+    expect(counts).toEqual([[0, 3]]);
+  });
+
   it("keeps missing resources as error/unknown and aborts stale A→B work", () => {
     const clock = scheduler();
     const counts: Array<[number, number]> = [];

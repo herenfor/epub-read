@@ -589,6 +589,8 @@ function bookKeyOf(b: Book, name: string, size: number): string {
 const PANEL_WARM_VEIL_BATCHES: readonly PanelWarmBatch[] = [["aa"], ["aa-detailed"], ["toc"]];
 const PANEL_WARM_IDLE_BATCHES: readonly PanelWarmBatch[] = [["search"], ["reading"], ["display"], ["fonts"], ["bookmark-pages"]];
 const noopBookmarkPages = (): void => {};
+/** Q5：翻页落定后这段时间内仍算“阅读在忙”，后台准备工作不开始。 */
+const READER_SETTLE_QUIET_MS = 500;
 /** 书签跳转落定后，角落点击再等跳转光晕（1.25 秒）播完。 */
 const BOOKMARK_JUMP_GUARD_AFTER_LANDING_MS = 1300;
 /** 跳转迟迟不落定（失败、被别的导航取代）时，保护最多持续这么久。 */
@@ -1108,6 +1110,15 @@ export default function App() {
   }, [aiRuntime]);
 
   const readerRef = useRef<ReaderHandle>(null);
+  // Q5：翻页在动、或刚落定不到半秒时，后台准备工作（面板首绘预热、全书统计）让路，
+  // 否则 GPU 首绘会压在松手动画上掉帧。安静期从落定算起，不从按下算起。
+  const lastPageSettleAtRef = useRef(0);
+  useEffect(() => {
+    if (chapterState.status === "ready" && !chapterState.transient) lastPageSettleAtRef.current = performance.now();
+  }, [chapterState]);
+  const readerBusy = useCallback((): boolean =>
+    readerRef.current?.pageMotionIdle?.() === false ||
+    performance.now() - lastPageSettleAtRef.current < READER_SETTLE_QUIET_MS, []);
   // 主题过渡判定用的最新提交值；busy 在算出 ready 后每次渲染更新。
   const committedThemeRef = useRef(settings.theme);
   committedThemeRef.current = settings.theme;
@@ -2716,6 +2727,7 @@ export default function App() {
         );
       },
       skipIndices: cachedIndices,
+      shouldYield: readerBusy,
       onCounts: (values) => {
         applyCountBatch(active.generation, values);
       },
@@ -2734,7 +2746,7 @@ export default function App() {
       job.cancel();
       if (chapterCountJobRef.current === job) chapterCountJobRef.current = null;
     };
-  }, [view, book, server, bookKey, restoreSettled, applyCountBatch, applyCountError]);
+  }, [view, book, server, bookKey, restoreSettled, applyCountBatch, applyCountError, readerBusy]);
 
   // 统一固定内容轴：在本次书籍会话第一次得到完整有效 linear 章节权重时冻结一份轴
   useEffect(() => {
@@ -3990,6 +4002,7 @@ export default function App() {
       !openingPanels.pending && foreground.kind === "none" && !mobileMoreOpen && !assistantOpen,
     androidRuntime ? PANEL_WARM_VEIL_BATCHES : [],
     !androidRuntime ? [] : mobileChrome ? PANEL_WARM_IDLE_BATCHES_MOBILE : PANEL_WARM_IDLE_BATCHES,
+    readerBusy,
   );
   useReadingInputStart(view === "reader", panelWarmup.interrupt);
   const warming = panelWarmup.warming;

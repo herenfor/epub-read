@@ -73,6 +73,7 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
     getReadingAnchor: () => active()?.getReadingAnchor() ?? null,
     resolveBookmarkPage: (bookmark) => active()?.resolveBookmarkPage?.(bookmark) ?? null,
     // Leaf order is reading order: the first leaf is lane 0 wherever it sits.
+    pageMotionIdle: () => [leftHandle.current, rightHandle.current].every((leaf) => leaf?.pageMotionIdle?.() ?? true),
     screenBookmarks: (bookmarks) => {
       const leaves = [leftHandle.current, rightHandle.current];
       const pages = leaves.flatMap((leaf, lane) => (leaf?.screenBookmarks?.(bookmarks)?.pages ?? [])

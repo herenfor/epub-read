@@ -50,9 +50,17 @@ export function usePanelPaintWarmup(
   ready: boolean,
   veilBatches: readonly PanelWarmBatch[],
   idleBatches: readonly PanelWarmBatch[],
+  /**
+   * Q5: reading is still busy (a page turn in flight or just settled). A GPU
+   * first draw during a turn's release animation drops frames, so after-veil
+   * batches wait until this is false; read when a batch would start.
+   */
+  isBusy?: () => boolean,
 ) {
   const [batch, setBatch] = useState<PanelWarmBatch | null>(null);
   const restartRef = useRef<() => void>(() => {});
+  const isBusyRef = useRef(isBusy);
+  isBusyRef.current = isBusy;
   const key = [veilBatches, idleBatches].map((list) => list.map((b) => b.join("+")).join(",")).join("|");
   useEffect(() => {
     setBatch(null);
@@ -77,6 +85,10 @@ export function usePanelPaintWarmup(
       timer = window.setTimeout(runIdle, delay);
     };
     const runIdle = (): void => {
+      if (isBusyRef.current?.()) {
+        scheduleIdle(PANEL_WARM_IDLE_DELAY_MS);
+        return;
+      }
       const next = nextPanelWarmBatch(idleBatches, warmedThisRun);
       if (next) draw(next, () => scheduleIdle(PANEL_WARM_IDLE_GAP_MS));
     };

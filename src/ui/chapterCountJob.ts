@@ -56,6 +56,8 @@ export interface ChapterCountJobOptions {
   isCurrent?: (generation: number, book: Book, server: ChapterCountJobServer) => boolean;
   /** Cached structural estimates; these indices are not scheduled again. */
   skipIndices?: ReadonlySet<number>;
+  /** Q5: the reader is busy (a page turn in flight); the next slice waits for another idle callback. */
+  shouldYield?: () => boolean;
   /** Bounded number of chapters handled by one scheduler callback. */
   maxPerSlice?: number;
   /** HTML parser; it receives markup already normalized like the rendered chapter. */
@@ -171,6 +173,10 @@ export function createChapterCountJob(options: ChapterCountJobOptions): { cancel
     scheduled = scheduler.request(() => {
       scheduled = null;
       if (!current() || running) return;
+      if (options.shouldYield?.()) {
+        schedule();
+        return;
+      }
       running = true;
       const settle = (): void => {
         running = false;
