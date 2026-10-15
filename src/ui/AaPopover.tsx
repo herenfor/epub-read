@@ -865,6 +865,7 @@ export const AaPopover = React.memo(function AaPopover({
                     {onCustomCssChange && (
                       <div className="aa-css-editor-section">
                         <span className="aa-css-label">{t("aa.css")}</span>
+                        <span className="aa-css-hint">{t("aa.css.hint")}</span>
                         <textarea
                           className="aa-css-textarea"
                           rows={3}
@@ -1427,6 +1428,7 @@ export const AaPopover = React.memo(function AaPopover({
               {onCustomCssChange && (
                 <div className="aa-css-editor-section">
                   <span className="aa-css-label">{t("aa.css.inject")}</span>
+                  <span className="aa-css-hint">{t("aa.css.hint")}</span>
                   <textarea
                     className="aa-css-textarea"
                     rows={4}
