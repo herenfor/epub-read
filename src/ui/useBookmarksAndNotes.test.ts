@@ -247,11 +247,23 @@ describe("annotation responsibilities extracted from App", () => {
       await t.render();
       const show = t.current().showBookmarkToast;
       await t.dom.run(() => show("added", "add"));
-      await t.advance(1400);
+      await t.advance(1999);
+      expect(t.current().bookmarkToast!.closing).toBe(false);
+      await t.advance(1);
       expect(t.current().bookmarkToast!.closing).toBe(true);
-      await t.dom.run(() => show("removed", "remove"));
-      await t.advance(180);
-      expect(t.current().bookmarkToast).toEqual({ text: "removed", action: "remove", closing: false });
+      const first = t.current().bookmarkToast!.id;
+      await t.dom.run(() => show("removed", "remove", { undo: true }));
+      await t.advance(220);
+      // A new message is a new toast; the old exit timer cannot close or drop it.
+      expect(t.current().bookmarkToast).toMatchObject({ text: "removed", action: "remove", closing: false, undo: true });
+      expect(t.current().bookmarkToast!.id).not.toBe(first);
+      // A17: the undo toast shows as long as the others, then plays its exit before unmounting.
+      await t.advance(1780);
+      expect(t.current().bookmarkToast!.closing).toBe(true);
+      await t.advance(219);
+      expect(t.current().bookmarkToast).not.toBeNull();
+      await t.advance(1);
+      expect(t.current().bookmarkToast).toBeNull();
       await t.dom.run(() => t.current().toggleSidebar());
       expect(t.openBookmarks).toHaveBeenCalledTimes(1);
       t.sidebar(true); await t.render();

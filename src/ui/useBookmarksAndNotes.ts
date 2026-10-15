@@ -20,7 +20,12 @@ import { prefersReducedMotion } from "./pagedSlide";
 
 const EMPTY_NOTES: ReaderNote[] = [];
 /** 删除提示（带撤销）停留时长；Ctrl+Z 也只在这段时间内有效。 */
+/** 删除后可撤销的期限（提示条消失后 Ctrl+Z 仍可用到这时）。 */
 const BOOKMARK_UNDO_MS = 5000;
+/** A17：添加、删除、已恢复的提示一律停留这么久，再播缩回。 */
+const BOOKMARK_TOAST_MS = 2000;
+/** 与 styles.css 的 bookmark-toast-out 时长一致：播完才卸载。 */
+const BOOKMARK_TOAST_EXIT_MS = 220;
 const EMPTY_CHAPTER_NOTES: ReaderNoteForPaginator[] = [];
 
 function portableNoteAnnotations(entry: ShelfEntry): Readonly<Record<string, Annotation<NoteValue>>> {
@@ -139,13 +144,16 @@ export function replaceNoteEditContext(draft: NoteComposerDraft, activeNoteEditC
 
 export function useBookmarkToast() {
   const [bookmarkToast, setBookmarkToast] = useState<{
+    /** 每条新提示一个编号：作为 key 重新挂载，播自己的进场，不在旧节点上换字。 */
+    id: number;
     text: string;
     action: "add" | "remove";
     closing: boolean;
-    /** A15：删除后带“撤销”，停留更久。 */
+    /** A15：删除后带“撤销”。 */
     undo?: boolean;
   } | null>(null);
   const bookmarkToastTimerRef = useRef<number | null>(null);
+  const bookmarkToastIdRef = useRef(0);
 
   const showBookmarkToast = useCallback((text: string, action: "add" | "remove", options?: { undo?: boolean }) => {
     if (bookmarkToastTimerRef.current) {
@@ -153,14 +161,16 @@ export function useBookmarkToast() {
       bookmarkToastTimerRef.current = null;
     }
     const undo = options?.undo === true;
-    setBookmarkToast({ text, action, closing: false, ...(undo ? { undo } : {}) });
+    const id = ++bookmarkToastIdRef.current;
+    setBookmarkToast({ id, text, action, closing: false, ...(undo ? { undo } : {}) });
+    // 计时只作用于自己这一条：之后来的新提示不会被旧计时收起或删掉。
     bookmarkToastTimerRef.current = window.setTimeout(() => {
-      setBookmarkToast((prev) => (prev ? { ...prev, closing: true } : null));
+      setBookmarkToast((prev) => (prev?.id === id ? { ...prev, closing: true } : prev));
       bookmarkToastTimerRef.current = window.setTimeout(() => {
-        setBookmarkToast(null);
+        setBookmarkToast((prev) => (prev?.id === id ? null : prev));
         bookmarkToastTimerRef.current = null;
-      }, 180);
-    }, undo ? BOOKMARK_UNDO_MS : 1400);
+      }, BOOKMARK_TOAST_EXIT_MS);
+    }, BOOKMARK_TOAST_MS);
   }, []);
   return { bookmarkToast, bookmarkToastTimerRef, showBookmarkToast };
 }

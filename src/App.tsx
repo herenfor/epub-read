@@ -5835,6 +5835,7 @@ export default function App() {
       )}
       {bookmarkToast && (
         <div
+          key={bookmarkToast.id}
           className={`reader-bookmark-toast ${bookmarkToast.action}${bookmarkToast.closing ? " is-closing" : ""}${bookmarkToast.undo ? " has-undo" : ""}`}
           role="status"
           aria-live="polite"
