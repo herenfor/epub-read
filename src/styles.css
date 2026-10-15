@@ -2947,8 +2947,10 @@ select option {
   outline: none;
 }
 
+/* A17：缩回与进场对称（往下收、缩小、淡出），时长同 BOOKMARK_TOAST_EXIT_MS。 */
 .reader-bookmark-toast.is-closing {
-  animation: bookmark-toast-out 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  pointer-events: none;
+  animation: bookmark-toast-out 0.22s cubic-bezier(0.4, 0, 1, 1) forwards;
 }
 
 .reader-bookmark-toast .bookmark-toast-icon {
@@ -2986,7 +2988,7 @@ select option {
   }
   to {
     opacity: 0;
-    transform: translate(-50%, 8px) scale(0.96);
+    transform: translate(-50%, 14px) scale(0.9);
   }
 }
 
