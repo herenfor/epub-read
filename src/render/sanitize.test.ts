@@ -246,7 +246,8 @@ describe("sanitizeChapter", () => {
     expect(out).toContain('url("blob:test/OEBPS/Fonts/main.ttf")');
     // 阅读器 fallback 移到 html，body 规则不再覆盖 font-family
     expect(out).toContain('font-family: "Segoe UI"');
-    expect(out).toContain("html { font-size: 16px !important; font-family:");
+    expect(readStyleText(out, "font-fallback")).toContain(":where(html) { font-family:");
+    expect(readStyleText(out, "overrides")).toContain("html { font-size: 16px !important; }");
     expect(out).toMatch(/body\s*\{\s*color:[^}]*\}/);
     expect(out).not.toMatch(/body\s*\{\s*color:[^}]*font-family:/);
   });
@@ -873,6 +874,26 @@ background-position:center center;background-size:cover;background-color:#f9ebdf
     expect(out).toContain("#epub-viewer p { color: red !important; }");
     expect(readStyleText(out, "user-css")).toContain("#epub-viewer p { color: red !important; }");
     expect(readStyleText(out, "overrides")).not.toContain("#epub-viewer p { color: red !important; }");
+  });
+
+  it("默认字体位于作者样式前的独立低优先级层，不覆盖作者 html 字体", async () => {
+    const source = `<html><head><style>@layer book-font { html { font-family: BookEmbedded; } }</style></head><body><p>正文</p></body></html>`;
+    const { html: out } = await sanitizeChapter(source, { ...opts(), strictXml: false });
+    expect(readStyleText(out, "font-fallback")).toContain("@layer epub-reader-font-fallback");
+    expect(readStyleText(out, "font-fallback")).toContain(":where(html)");
+    expect(out.indexOf("@layer epub-reader-font-fallback")).toBeLessThan(out.indexOf("@layer book-font"));
+    const rootRule = readStyleText(out, "overrides").match(/html \{([^}]+)\}/)?.[1];
+    expect(rootRule).toContain("font-size: 16px !important");
+    expect(rootRule).not.toContain("font-family");
+    expect(out).toContain("font-family: BookEmbedded;");
+  });
+
+  it("明确指定根字体仍保持原优先级，不与默认字体回退混为一项", async () => {
+    const { html: out } = await sanitizeChapter(`<html><body><p>正文</p></body></html>`, {
+      ...opts(), strictXml: false,
+      settings: { ...DEFAULT_SETTINGS, fontFamily: "serif" },
+    });
+    expect(readStyleText(out, "overrides")).toMatch(/html \{[^}]*font-family: serif;/);
   });
 
   it("用户上传字体注入 @font-face 并可在选择后强制 body 字体", async () => {
