@@ -129,7 +129,7 @@ describe("ChapterPaginator CSS Blob URL lifecycle", () => {
   });
 
   it("旧任务过期时不 release 新 load 的 VisibilityGate 代次", async () => {
-    const first = deferred<{ html: string; issues: string[]; downgraded: boolean }>();
+    const first = deferred<{ html: string; issues: string[]; unresolvedResources: string[]; downgraded: boolean }>();
     sanitizeMock.mockImplementationOnce(async (_html: string, opts: { makeUrl?: (text: string, mediaType: string) => string }) => {
       opts.makeUrl?.("stale css", "text/css");
       return first.promise;
@@ -162,7 +162,7 @@ describe("ChapterPaginator CSS Blob URL lifecycle", () => {
   });
 
   it("loadSeq 过期时撤销旧任务的局部 CSS URL，并保留新章 URL 到 dispose", async () => {
-    const first = deferred<{ html: string; issues: string[]; downgraded: boolean }>();
+    const first = deferred<{ html: string; issues: string[]; unresolvedResources: string[]; downgraded: boolean }>();
     sanitizeMock.mockImplementationOnce(async (_html: string, opts: { makeUrl?: (text: string, mediaType: string) => string }) => {
       opts.makeUrl?.("stale css", "text/css");
       return first.promise;
