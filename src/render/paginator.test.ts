@@ -44,7 +44,6 @@ import {
   createAutoMarginBatch,
   resolvedMarginKind,
   planAutoBlockBox,
-  planContainedMediaMaxWidth,
   readComputedHorizontalMarginSpecifiedValues,
 } from "./paginator";
 
@@ -2762,25 +2761,6 @@ describe("reader local width core", () => {
     });
   });
 
-  it("图片局部上限保留作者更小的 max-width，未知值不伪装为 0", () => {
-    expect(planContainedMediaMaxWidth({
-      containingContentWidth: 640,
-      marginLeft: 0,
-      marginRight: 0,
-      boxSizing: "content-box",
-      paddingBorderWidth: 0,
-      authoredMaxWidth: Infinity,
-    })).toBe(640);
-    expect(planContainedMediaMaxWidth({
-      containingContentWidth: 640,
-      marginLeft: 0,
-      marginRight: 0,
-      boxSizing: "content-box",
-      paddingBorderWidth: 0,
-      authoredMaxWidth: 32,
-    })).toBe(32);
-  });
-
   it("Typed OM 同时取 margin-left/right 最终 token，旧引擎返回 undefined", () => {
     const typed = {
       computedStyleMap: () =>
@@ -2801,7 +2781,7 @@ describe("reader local width core", () => {
     { label: "手机分页背景图盒（auto 被解析为负 margin）", tag: "div", scroll: false, container: 384, column: 328, width: 380, border: 1.6, right: -53.6, expected: "326.4px" },
     { label: "手机滚动背景图盒", tag: "div", scroll: true, container: 384, column: 328, width: 380, border: 1.6, right: -53.6, expected: "326.4px" },
     { label: "平板列宽足够，保留原背景图盒", tag: "div", scroll: false, container: 1200, column: 583, width: 380, border: 1.6, right: 0, expected: undefined },
-  ])("局部媒体限宽：$label，不改 width/height", ({ tag, scroll, container, column, width, border, right, expected }) => {
+  ])("叶内媒体限宽：$label，不改 width/height", ({ tag, scroll, container, column, width, border, right, expected }) => {
     const values = new Map<string, string>();
     const priorities = new Map<string, string>();
     const imgStyle = {
@@ -2828,6 +2808,13 @@ describe("reader local width core", () => {
       closest: () => null,
       naturalWidth: 1500,
       naturalHeight: 899,
+      // 片段从叶的起点开始；图片按原图比例，背景图盒高度与本用例无关。
+      getClientRects: () => [{
+        left: (container - column) / 2,
+        right: (container - column) / 2 + width + border,
+        width: width + border,
+        height: tag === "img" ? (width * 899) / 1500 : 120,
+      }],
       computedStyleMap: () => new Map([
         ["margin-left", { toString: () => "auto" }],
         ["margin-right", { toString: () => "auto" }],
@@ -2835,6 +2822,7 @@ describe("reader local width core", () => {
     } as unknown as HTMLImageElement;
     const viewer = {
       clientWidth: container,
+      clientHeight: 4000,
       classList: { contains: () => false },
       querySelectorAll: () => [img],
     } as unknown as HTMLElement;
@@ -2880,6 +2868,8 @@ describe("reader local width core", () => {
       fixedLayout: false,
       containedMediaFixes: [],
       pageWidth: column,
+      // 单叶几何由分页器提供；这里只验证叶内预算与写回。
+      contentLeafFor: () => ({ left: (container - column) / 2, right: (container + column) / 2 }),
     });
 
     (ChapterPaginator.prototype as unknown as {
@@ -2888,6 +2878,12 @@ describe("reader local width core", () => {
 
     expect(values.get("max-width")).toBe(expected);
     expect(priorities.get("max-width")).toBe(expected ? "important" : undefined);
+    // 图片宽高同比：高度上限跟着宽度缩放比例；背景图盒只限宽。
+    if (tag === "img") {
+      expect(parseFloat(values.get("max-height") ?? "")).toBeCloseTo((column * 899) / 1500, 3);
+    } else {
+      expect(values.has("max-height")).toBe(false);
+    }
     expect(values.has("height")).toBe(false);
     expect(values.has("width")).toBe(false);
     expect(values.has("background-size")).toBe(false);
@@ -2898,6 +2894,7 @@ describe("reader local width core", () => {
     }).restoreContainedMediaFixes.call(context);
     expect(values.has("max-width")).toBe(false);
     expect(priorities.has("max-width")).toBe(false);
+    expect(values.has("max-height")).toBe(false);
   });
 });
 
