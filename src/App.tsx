@@ -3623,7 +3623,7 @@ export default function App() {
   });
   const {
     bookmarkCue, cueBookmarks, bookmarkPagesOpen, closeBookmarkPages, hintBookmarks,
-    handleBookmarkButton, addBookmark, removeBookmarks, undoBookmarkRemoval,
+    handleBookmarkButton, handleBookmarkCorner, addBookmark, removeBookmarks, undoBookmarkRemoval,
   } = useBookmarkRibbonActions({
     currentShelfId, readReaderPosition, currentBookmarks, spineIndex, book, readerRef,
     showBookmarkToast, setShelfEntries, setShelfError, legacyToggle: handleToggleBookmark,
@@ -5538,7 +5538,7 @@ export default function App() {
                   tapRegions={tapRegions}
                   bookmarks={currentBookmarks}
                   bookmarkCue={bookmarkCue}
-                  onBookmarkCornerTap={mobileChrome ? handleBookmarkButton : undefined}
+                  onBookmarkCornerTap={mobileChrome ? handleBookmarkCorner : undefined}
                   initialAnchor={initialAnchor}
                   initialPage={initialPage}
                   initialAlignment={initialAlignment}

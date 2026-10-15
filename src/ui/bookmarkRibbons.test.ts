@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   bookmarkButtonAction,
+  bookmarkCornerAction,
   isEditableTarget,
   pageRibbonLeft,
   screenBookmarkIds,
@@ -41,5 +42,27 @@ describe("A15 bookmark button rules", () => {
     expect(isEditableTarget({ tagName: "DIV", isContentEditable: true } as unknown as EventTarget)).toBe(true);
     expect(isEditableTarget({ tagName: "BUTTON" } as unknown as EventTarget)).toBe(false);
     expect(isEditableTarget(null)).toBe(false);
+  });
+});
+
+describe("A17 touch bookmark corners act on the tapped page", () => {
+  it("maps a spread corner by physical side, also when the reading order runs right to left", () => {
+    const ltr: ScreenBookmarks = { kind: "paged", columns: 2, pages: [page(0, []), page(1, ["b"])] };
+    expect(bookmarkCornerAction(ltr, "left")).toEqual({ kind: "add", lane: 0 });
+    expect(bookmarkCornerAction(ltr, "right")).toEqual({ kind: "remove", ids: ["b"] });
+    const rtl: ScreenBookmarks = { kind: "paged", columns: 2, pages: [
+      { lane: 0, side: "right", spineIndex: 3, ids: [] },
+      { lane: 1, side: "left", spineIndex: 4, ids: [] },
+    ] };
+    expect(bookmarkCornerAction(rtl, "right")).toEqual({ kind: "add", lane: 0 });
+    expect(bookmarkCornerAction(rtl, "left")).toEqual({ kind: "add", lane: 1 });
+  });
+
+  it("passes a corner over a page without text and the left corner outside spreads", () => {
+    const lastSpread: ScreenBookmarks = { kind: "paged", columns: 2, pages: [page(0, [])] };
+    expect(bookmarkCornerAction(lastSpread, "right")).toEqual({ kind: "pass" });
+    expect(bookmarkCornerAction({ kind: "paged", columns: 1, pages: [page(0, [])] }, "left")).toEqual({ kind: "pass" });
+    expect(bookmarkCornerAction({ kind: "paged", columns: 1, pages: [page(0, [])] }, "right")).toEqual({ kind: "button" });
+    expect(bookmarkCornerAction(null, "right")).toEqual({ kind: "button" });
   });
 });

@@ -103,8 +103,12 @@ describe("tap routing geometry", () => {
     expect(routeReaderTap(pc, 100, 350, top(95))).toEqual({ kind: "center" });
     expect(routeReaderTap(pc, 100, 350, top(96))).toEqual({ kind: "turn", side: "left", direction: -1 });
     expect(routeReaderTap(pc, 100, 1050, top(60))).toEqual({ kind: "center" });
-    expect(routeReaderTap(touch, 100, 1050, top(60))).toEqual({ kind: "bookmark" });
+    expect(routeReaderTap(touch, 100, 1050, top(60))).toEqual({ kind: "bookmark", side: "right" });
     expect(routeReaderTap(touch, 100, 1043, top(60))).toEqual({ kind: "center" });
+    // The outer top-left square is the left corner; the host decides whether it is live.
+    expect(routeReaderTap(touch, 100, 155, top(60))).toEqual({ kind: "bookmark", side: "left" });
+    expect(routeReaderTap(touch, 100, 156, top(60))).toEqual({ kind: "center" });
+    expect(routeReaderTap(pc, 100, 120, top(60))).toEqual({ kind: "center" });
     expect(routeReaderTap(touch, 100, 1050, top(120))).toEqual({ kind: "turn", side: "right", direction: 1 });
   });
 
