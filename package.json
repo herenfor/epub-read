@@ -1,7 +1,7 @@
 {
   "name": "epub-reader",
   "private": true,
-  "version": "0.3.2",
+  "version": "0.3.3",
   "license": "SEE LICENSE IN LICENSE",
   "type": "module",
   "scripts": {
