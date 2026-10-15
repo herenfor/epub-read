@@ -36,7 +36,8 @@ export const RELEASES_PAGE_URL = "https://github.com/herenfor/epub-read/releases
 export const RELEASE_NOTES: readonly ReleaseNote[] = [
   {
     version: "0.3.2",
-    status: "development",
+    status: "released",
+    releasedOn: "2026-10-16",
     items: [
       {
         category: "new",

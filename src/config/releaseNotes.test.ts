@@ -3,7 +3,7 @@ import { findReleaseNote, RELEASES_PAGE_URL } from "./releaseNotes";
 
 describe("release notes", () => {
   it("matches the shipped version with an optional leading v", () => {
-    expect(findReleaseNote("0.3.2")).toMatchObject({ version: "0.3.2" });
+    expect(findReleaseNote("0.3.2")).toMatchObject({ version: "0.3.2", status: "released" });
     expect(findReleaseNote("v0.3.2")?.items.length).toBeGreaterThan(0);
   });
 
