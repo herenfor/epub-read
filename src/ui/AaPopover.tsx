@@ -791,7 +791,10 @@ export const AaPopover = React.memo(function AaPopover({
                   <div className="aa-advanced-body">
                     {onForceHorizontalChange && (
                       <div className="aa-advanced-row">
-                        <span>{t("aa.forceHorizontal")}</span>
+                        <div className="aa-toggle-text">
+                          <span>{t("aa.forceHorizontal")}</span>
+                          <span className="aa-detail-sub">{t("aa.forceHorizontal.hint")}</span>
+                        </div>
                         <label className="aa-switch-label">
                           <input
                             type="checkbox"
@@ -1346,7 +1349,10 @@ export const AaPopover = React.memo(function AaPopover({
               {/* 强制横排 */}
               {onForceHorizontalChange && (
                 <div className="aa-section aa-control-row aa-toggle-row">
-                  <span className="aa-section-label">{t("aa.forceHorizontal")}</span>
+                  <div className="aa-toggle-text">
+                    <span className="aa-section-label">{t("aa.forceHorizontal")}</span>
+                    <span className="aa-detail-sub">{t("aa.forceHorizontal.hint")}</span>
+                  </div>
                   <label className="aa-switch-label">
                     <input
                       type="checkbox"

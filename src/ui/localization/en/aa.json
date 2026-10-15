@@ -64,6 +64,7 @@
   "aa.turnAnimation": "Page Turn",
   "aa.more": "More Advanced Settings",
   "aa.forceHorizontal": "Convert Vertical Text to Horizontal",
+  "aa.forceHorizontal.hint": "Vertical layout is experimental; turn this on to read such books horizontally",
   "aa.pageDirectionLtr": "Always Turn Pages Left to Right",
   "aa.pageDirectionLtr.hint": "When off, follow the book: in right-to-left books (such as vertical CJK), tap the left side or press ← for the next page",
   "aa.motion": "Reduce Interface Motion",
