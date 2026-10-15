@@ -691,14 +691,18 @@ export default function App() {
   } | null>(null);
   const [scrubUiState, setScrubUiState] = useState<ScrubUiState>(() => initialScrubUi(0));
   const scrubUiStateRef = useRef(scrubUiState);
-  scrubUiStateRef.current = scrubUiState;
 
   const dispatchScrub = useCallback((event: ScrubUiEvent) => {
-    setScrubUiState((prev) => {
-      const next = reduceScrubUi(prev, event);
-      scrubUiStateRef.current = next;
-      return next;
-    });
+    // Navigation may report synchronously before React renders a begin/reset.
+    const next = reduceScrubUi(scrubUiStateRef.current, event);
+    scrubUiStateRef.current = next;
+    setScrubUiState(next);
+  }, []);
+
+  const acceptsScrubResult = useCallback((token: ScrubToken): boolean => {
+    const state = scrubUiStateRef.current;
+    return state.session === token.session &&
+      state.pending?.session === token.session && state.pending.request === token.request;
   }, []);
 
   const [dragActive, setDragActive] = useState(false);
@@ -3286,6 +3290,7 @@ export default function App() {
     token: ScrubToken,
     location: { key: string; spineIndex: number; fraction: number; atEnd: boolean }
   ) => {
+    if (!acceptsScrubResult(token)) return;
     dispatchReaderSession({ type: "scrub-reader-settled" });
     const axis = contentAxisRef.current;
     const ratio = axis ? axis.ratioAt({ key: location.key, fraction: location.fraction }) : null;
@@ -3295,18 +3300,20 @@ export default function App() {
       token,
       actual: { ratio: actualRatio, atEnd: location.atEnd },
     });
-  }, [dispatchScrub]);
+  }, [acceptsScrubResult, dispatchScrub, dispatchReaderSession]);
 
   const handleContentFractionCancelled = useCallback((token: ScrubToken) => {
+    if (!acceptsScrubResult(token)) return;
     dispatchReaderSession({ type: "scrub-reader-aborted" });
     dispatchScrub({ type: "cancelled", token });
-  }, [dispatchScrub, dispatchReaderSession]);
+  }, [acceptsScrubResult, dispatchScrub, dispatchReaderSession]);
 
   const handleContentFractionFailed = useCallback((token: ScrubToken) => {
+    if (!acceptsScrubResult(token)) return;
     dispatchReaderSession({ type: "scrub-reader-aborted" });
     dispatchScrub({ type: "failed", token });
     setReaderNotice({ kind: "warn", text: uiText("notice.reader.progressNotFound") });
-  }, [dispatchScrub]);
+  }, [acceptsScrubResult, dispatchScrub, dispatchReaderSession]);
 
   const handleUserProgressSample = useCallback((
     location: { key: string; spineIndex: number; fraction: number; atEnd: boolean }
