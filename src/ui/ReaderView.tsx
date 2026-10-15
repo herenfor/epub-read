@@ -121,6 +121,8 @@ export interface ReaderHandle {
   } | null;
   /** A13：已提交双页几何的栏步长（一页章并排时把第二章挪到右格用）；没有布局时为 null。 */
   spreadColumnStep?(): number | null;
+  /** Q5：没有进行中的翻页运动（拖动、松手漂移、按键动画）；后台准备工作据此让路。 */
+  pageMotionIdle?(): boolean;
   /** 当前锚点元素的一行文本（书签列表展示用） */
   getAnchorText(): string | null;
   /**
@@ -2263,6 +2265,9 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         return screen
           ? { kind: "paged", columns: screen.columns, pages: screen.pages.map(({ lane, side, spineIndex, ids }) => ({ lane, side, spineIndex, ids })) }
           : null;
+      },
+      pageMotionIdle() {
+        return paginatorRef.current?.pageMotionIdle ?? true;
       },
       spreadColumnStep() {
         const geometry = paginatorRef.current?.spreadLayoutSnapshot?.geometry;
