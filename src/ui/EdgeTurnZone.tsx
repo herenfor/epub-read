@@ -48,9 +48,11 @@ export function EdgeTurnZone({ direction, onTurn, onPrepare, side, region }: Pro
     onPointerDown={() => onPrepare?.()}
     onClick={(event) => { event.stopPropagation(); feedback.hold(feedbackKey); onTurn(direction); }}
   >
+    {/* The chevron points at its own edge; what the tap does (next / previous,
+        right-to-left books, "left also forward") is in the label, not the glyph. */}
     <button type="button" className="edge-turn-arrow" tabIndex={-1} aria-hidden="true">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-        <polyline points={direction === -1 ? "15 18 9 12 15 6" : "9 18 15 12 9 6"} />
+        <polyline points={physical === "left" ? "15 18 9 12 15 6" : "9 18 15 12 9 6"} />
       </svg>
     </button>
   </div>;

@@ -149,7 +149,8 @@ describe("edge turn feedback", () => {
       expect(left.classList.contains("edge-turn-prev")).toBe(false);
       expect(left.getAttribute("data-edge-action")).toBe("next");
       expect(left.getAttribute("title")).toBe("下一页");
-      expect(left.querySelector("polyline")?.getAttribute("points")).toBe("9 18 15 12 9 6");
+      // A forward band on the left still points left: the glyph marks the edge, not the action.
+      expect(left.querySelector("polyline")?.getAttribute("points")).toBe("15 18 9 12 15 6");
       expect((left as HTMLElement).style.width).toBe("140px");
       expect((left as HTMLElement).style.getPropertyValue("--edge-turn-arrow-center")).toBe("22px");
       expect(right.getAttribute("class")).toBe("edge-turn-zone edge-turn-next edge-turn-right");
