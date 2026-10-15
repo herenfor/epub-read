@@ -404,6 +404,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     const spineIndex = slot.spineIndex;
     const own = bookmarks.filter((bookmark) => bookmark.spineIndex === spineIndex);
     return {
+      page,
       top: placed.top,
       columns: placed.columns,
       pages: placed.frames.map((frame) => ({
@@ -422,6 +423,11 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   refreshRibbonsRef.current = () => {
     if (ribbonSettleTimerRef.current) clearTimeout(ribbonSettleTimerRef.current);
     ribbonSettleTimerRef.current = null;
+    // 运动在途时画出来的是半路位置（会在新页某处闪一下）；保持隐藏，等落定的 ready 再画。
+    if (paginatorRef.current?.pageMotionIdle === false) {
+      markRibbonMotion();
+      return;
+    }
     ribbonMotionRef.current = false;
     setRibbonMotion(false);
     const host = readerContainerRef.current?.getBoundingClientRect();
@@ -431,7 +437,8 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       return;
     }
     setRibbonMarks(screen.pages.filter((page) => page.ids.length > 0).map((page) => ({
-      key: `${page.spineIndex}:${page.lane}`,
+      // 带页号：换页后是新的节点，不沿用上一页丝带的动画状态。
+      key: `${page.spineIndex}:${screen.page}:${page.lane}`,
       ids: page.ids,
       x: pageRibbonLeft(page.side, page.outerX) - host.left,
       y: screen.top - host.top,
@@ -840,7 +847,8 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         // 用户位置提交由 paginator 的 setUserCommitHandler 在真实落定后发出；
         // 这里只转发普通状态，绝不再按页号变化+时间窗推断用户输入。
         onPageStateRef.current(state);
-        if (state.status === "ready") refreshRibbonsRef.current();
+        // transient 是运动途中的页码预览，不是落定：丝带继续隐藏。
+        if (state.status === "ready" && !state.transient) refreshRibbonsRef.current();
         else markRibbonMotion();
         if (state.status !== "ready" || !state.empty || autoAdvanceRef.current) return;
         const next = nextLinearIndex(book, spineIndexRef.current, 1);

@@ -3366,6 +3366,16 @@ export class ChapterPaginator {
   }
 
   /**
+   * 没有进行中的翻页运动（拖动、松手漂移、按键动画、原生吸附途中都算在途）。
+   * 屏上叠加物（书签丝带）只在此时按已提交页重画；落定会再发一次非 transient 的 ready。
+   */
+  get pageMotionIdle(): boolean {
+    if (this.nativeSnapLivePage !== null) return false;
+    const kind = this.pageMotion?.session.state.kind;
+    return kind === undefined || kind === "idle" || kind === "disposed";
+  }
+
+  /**
    * 独立翻页命令（按钮/按键/滚轮）。"moving"：同章运动已开始或改了目标；
    * "chapter"/"book-edge"：已真实落在章边；"reserved"：仍在去章边途中，落定后
    * 由宿主处理器执行一次跨章；"unavailable"：该布局不能用运动驱动，走旧路径。
