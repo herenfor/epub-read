@@ -75,10 +75,11 @@ function amount(geometry: TapRegionGeometry, px: number, schematic?: boolean): s
   return schematic ? `${percent}%` : `${percent}% · ${Math.round(px)}px`;
 }
 
-function Chevron({ direction }: { direction: -1 | 1 }) {
+/** Points at its own edge, like the reader's edge arrows; the band's action is in its label. */
+function Chevron({ side }: { side: "left" | "right" }) {
   return <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"
     strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <polyline points={direction === -1 ? "15 18 9 12 15 6" : "9 18 15 12 9 6"} />
+    <polyline points={side === "left" ? "15 18 9 12 15 6" : "9 18 15 12 9 6"} />
   </svg>;
 }
 
@@ -117,7 +118,7 @@ export function ReaderTapRegionsPanel(props: ReaderTapRegionsPanelProps) {
         style={{ left: percentOf(geometry, band.start), width: percentOf(geometry, band.width), top: topInset }} />,
       <span key={`${side}-arrow`} className={`tap-regions-band-arrow is-${side}`}
         style={{ [side]: percentOf(geometry, band.arrowCenter) }}>
-        <Chevron direction={tapRegionAction(side, device, value, props.progression)} />
+        <Chevron side={side} />
       </span>,
     ];
   };
