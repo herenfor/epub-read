@@ -16,6 +16,8 @@ class ReaderSystemBarsController(private val window: Window) {
   private var resumed = false
   private var focused = false
   private var needsApply = false
+  private var wantedDarkIcons: Boolean? = null
+  private var appearanceDirty = false
   private var previous: Snapshot? = null
   private var firstLayoutPending = true
   private val decor get() = window.decorView
@@ -39,10 +41,18 @@ class ReaderSystemBarsController(private val window: Window) {
     reconcile()
   }
 
+  fun setDarkStatusBarIcons(darkIcons: Boolean) {
+    checkUiThread()
+    if (wantedDarkIcons != darkIcons) appearanceDirty = true
+    wantedDarkIcons = darkIcons
+    reconcile()
+  }
+
   fun onResume() {
     checkUiThread()
     resumed = true
     needsApply = true
+    appearanceDirty = wantedDarkIcons != null
     reconcile()
   }
 
@@ -54,6 +64,7 @@ class ReaderSystemBarsController(private val window: Window) {
   fun onWindowFocusChanged(hasFocus: Boolean) {
     checkUiThread()
     focused = hasFocus
+    if (hasFocus) appearanceDirty = wantedDarkIcons != null
     // Focus changes alone must not fight the user's temporary system-bar reveal.
     reconcile()
   }
@@ -61,6 +72,7 @@ class ReaderSystemBarsController(private val window: Window) {
   fun onConfigurationChanged() {
     checkUiThread()
     needsApply = true
+    appearanceDirty = wantedDarkIcons != null
     reconcile()
   }
 
@@ -73,9 +85,15 @@ class ReaderSystemBarsController(private val window: Window) {
   }
 
   private fun reconcile() {
-    if (!resumed || !focused || !needsApply) return
-    val insets = ViewCompat.getRootWindowInsets(decor) ?: return
+    if (!resumed || !focused) return
     val controller = WindowCompat.getInsetsController(window, decor)
+    if (appearanceDirty) {
+      // Android's "light status bar" means dark foreground on a light surface.
+      controller.isAppearanceLightStatusBars = wantedDarkIcons!!
+      appearanceDirty = false
+    }
+    if (!needsApply) return
+    val insets = ViewCompat.getRootWindowInsets(decor) ?: return
     val statusBars = WindowInsetsCompat.Type.statusBars()
     if (wantedHidden) {
       if (previous == null) {

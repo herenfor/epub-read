@@ -1,4 +1,22 @@
-//! Activity-owned, status-bar-only reader immersion. No window fullscreen or data changes.
+//! Activity-owned status-bar immersion and app-theme icon appearance.
+
+#[tauri::command]
+pub async fn android_status_bar_appearance(
+    app: tauri::AppHandle,
+    dark_icons: bool,
+) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        tauri::async_runtime::spawn_blocking(move || android::set_appearance(&app, dark_icons))
+            .await
+            .map_err(|error| format!("android_status_bar_appearance worker join failed: {error}"))?
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (app, dark_icons);
+        Err("android_status_bar_appearance: unsupported platform".to_string())
+    }
+}
 
 #[tauri::command]
 pub async fn android_reader_system_bars(app: tauri::AppHandle, hidden: bool) -> Result<(), String> {
@@ -27,6 +45,12 @@ mod android {
         hidden: bool,
     }
 
+    #[derive(serde::Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct AppearanceIntent {
+        dark_icons: bool,
+    }
+
     pub(crate) fn plugin<R: Runtime>() -> TauriPlugin<R> {
         PluginBuilder::new("readerSystemBars")
             .setup(|app, api| {
@@ -44,6 +68,14 @@ mod android {
             .run_mobile_plugin::<serde_json::Value>("setHidden", HiddenIntent { hidden })
             .map(|_| ())
             .map_err(|error| format!("android_reader_system_bars failed: {error}"))
+    }
+
+    pub(crate) fn set_appearance<R: Runtime>(app: &AppHandle<R>, dark_icons: bool) -> Result<(), String> {
+        app.state::<ReaderSystemBars<R>>()
+            .0
+            .run_mobile_plugin::<serde_json::Value>("setAppearance", AppearanceIntent { dark_icons })
+            .map(|_| ())
+            .map_err(|error| format!("android_status_bar_appearance failed: {error}"))
     }
 }
 
