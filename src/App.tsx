@@ -122,7 +122,7 @@ import { hasOwnField, chapterLabelForIndex, useNoteEditRef, replaceNoteEditConte
   useBookmarkToast, useBookmarkToastCleanup, useNoteBusyState, useNoteProjection, useNoteActions,
   useBookmarkProjection, useBookmarkSidebarToggle, useBookmarkActions, useBookmarkRibbonActions,
   useNoteEditRelease } from "./ui/useBookmarksAndNotes";
-import { BookmarkPagesPopover } from "./ui/BookmarkPagesPopover";
+import { BookmarkPagesPopover, WARM_BOOKMARK_PAGES_SCREEN } from "./ui/BookmarkPagesPopover";
 import { isEditableTarget } from "./ui/bookmarkRibbons";
 import { createLazyFontController } from "./ui/fontRuntime";
 import { currentUiLocale, uiPlural, uiText, useUiText } from "./ui/localization/UiLanguageProvider";
@@ -587,7 +587,8 @@ function bookKeyOf(b: Book, name: string, size: number): string {
 // One panel per batch keeps each GPU burst short. The most used panels are
 // drawn under the opening veil, the rest once reading is quiet.
 const PANEL_WARM_VEIL_BATCHES: readonly PanelWarmBatch[] = [["aa"], ["aa-detailed"], ["toc"]];
-const PANEL_WARM_IDLE_BATCHES: readonly PanelWarmBatch[] = [["search"], ["reading"], ["display"], ["fonts"]];
+const PANEL_WARM_IDLE_BATCHES: readonly PanelWarmBatch[] = [["search"], ["reading"], ["display"], ["fonts"], ["bookmark-pages"]];
+const noopBookmarkPages = (): void => {};
 const PANEL_WARM_IDLE_BATCHES_MOBILE: readonly PanelWarmBatch[] = [["more"], ...PANEL_WARM_IDLE_BATCHES];
 
 export default function App() {
@@ -5857,6 +5858,12 @@ export default function App() {
             </button>
           )}
         </div>
+      )}
+      {view === "reader" && warming("bookmark-pages") && (
+        <PanelPaintWarmup active>
+          <BookmarkPagesPopover warm screen={WARM_BOOKMARK_PAGES_SCREEN}
+            onRemove={noopBookmarkPages} onAdd={noopBookmarkPages} onHint={noopBookmarkPages} onClose={noopBookmarkPages} />
+        </PanelPaintWarmup>
       )}
       {bookmarkPagesScreen?.kind === "paged" && bookmarkPagesScreen.columns === 2 && (
         <BookmarkPagesPopover

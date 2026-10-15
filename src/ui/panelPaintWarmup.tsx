@@ -14,7 +14,8 @@ import "./panelPaintWarmup.css";
  * the first book of a run (and hold it), the rest one by one once reading
  * is quiet, giving way to any reading input.
  */
-export type PanelWarmStage = "aa" | "aa-detailed" | "toc" | "more" | "search" | "reading" | "display" | "fonts";
+export type PanelWarmStage =
+  | "aa" | "aa-detailed" | "toc" | "more" | "search" | "reading" | "display" | "fonts" | "bookmark-pages";
 export type PanelWarmBatch = readonly PanelWarmStage[];
 
 /**
