@@ -1,4 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { Theme } from "../render/settings";
+import { createReaderStatusBarCoordinator } from "./readerSystemStatusBar";
 
 const PREFERENCE_KEY = "epub-reader:hide-system-status-bar";
 
@@ -14,4 +16,14 @@ export function writeHideReaderSystemStatusBar(hidden: boolean): void {
 
 export async function setReaderSystemStatusBarHidden(hidden: boolean): Promise<void> {
   await invoke("android_reader_system_bars", { hidden });
+}
+
+/** Native appearance is independent of immersion: changing theme must not hide a revealed bar. */
+export function createStatusBarAppearanceCoordinator(
+  apply: (darkIcons: boolean) => Promise<void> = (darkIcons) => invoke("android_status_bar_appearance", { darkIcons }),
+) {
+  const driver = createReaderStatusBarCoordinator(apply);
+  return {
+    requestTheme: (theme: Theme) => driver.requestHidden(theme === "light" || theme === "sepia"),
+  };
 }

@@ -6,6 +6,7 @@ import {
   readHideReaderSystemStatusBar,
   writeHideReaderSystemStatusBar,
   setReaderSystemStatusBarHidden,
+  createStatusBarAppearanceCoordinator,
 } from "./platform/androidReaderSystemStatusBar";
 import {
   createReaderKeepScreenOnCoordinator,
@@ -745,6 +746,7 @@ export default function App() {
   const { shelfNotice, setShelfNotice, shelfNoticeFading } = shelfNotices;
   const [hideReaderSystemStatusBar, setHideReaderSystemStatusBar] = useState(readHideReaderSystemStatusBar);
   const [readerSystemBars] = useState(() => createReaderStatusBarCoordinator(setReaderSystemStatusBarHidden));
+  const [statusBarAppearance] = useState(() => createStatusBarAppearanceCoordinator());
   const changeHideReaderSystemStatusBar = useCallback((hidden: boolean) => {
     try {
       writeHideReaderSystemStatusBar(hidden);
@@ -2077,6 +2079,15 @@ export default function App() {
     });
     // The app root owns the intent. Reader/menu cleanup must never submit a stale false.
   }, [view, hideReaderSystemStatusBar, runtime.supportsReaderSystemStatusBar, readerSystemBars, showReaderNotice]);
+
+  useEffect(() => {
+    if (!runtime.supportsReaderSystemStatusBar) return;
+    void statusBarAppearance.requestTheme(settings.theme).catch((error) => {
+      const message = uiText("notice.statusBar.failed", { error: String(error) });
+      if (view === "reader") showReaderNotice(message, "warn");
+      else setShelfNotice({ kind: "warn", text: message });
+    });
+  }, [settings.theme, view, runtime.supportsReaderSystemStatusBar, statusBarAppearance, showReaderNotice]);
 
   useEffect(() => {
     if (!runtime.supportsReaderKeepScreenOn) return;

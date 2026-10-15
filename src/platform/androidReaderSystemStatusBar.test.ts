@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { readHideReaderSystemStatusBar, writeHideReaderSystemStatusBar, setReaderSystemStatusBarHidden } from "./androidReaderSystemStatusBar";
+import { createStatusBarAppearanceCoordinator, readHideReaderSystemStatusBar, writeHideReaderSystemStatusBar, setReaderSystemStatusBarHidden } from "./androidReaderSystemStatusBar";
 import { getRuntimeCapabilities } from "./runtimeCapabilities";
 import { clearAppBuildSession, setAppBuildSession } from "../config/appBuildSession";
 import type { AppBuildInfo } from "../config/appBuildInfo";
@@ -44,5 +44,33 @@ describe("Android reader status bar boundary", () => {
     await setReaderSystemStatusBarHidden(true);
     await setReaderSystemStatusBarHidden(false);
     expect(invoke.mock.calls).toEqual([["android_reader_system_bars", { hidden: true }], ["android_reader_system_bars", { hidden: false }]]);
+  });
+
+  it("maps the four app surfaces to legible icons without changing bar visibility", async () => {
+    const appearance = createStatusBarAppearanceCoordinator();
+    await appearance.requestTheme("light");
+    await appearance.requestTheme("sepia");
+    await appearance.requestTheme("gray");
+    await appearance.requestTheme("dark");
+    expect(invoke.mock.calls).toEqual([
+      ["android_status_bar_appearance", { darkIcons: true }],
+      ["android_status_bar_appearance", { darkIcons: false }],
+    ]);
+  });
+
+  it("keeps the final app theme when an older native appearance request finishes late", async () => {
+    let release!: () => void;
+    const first = new Promise<void>((resolve) => { release = resolve; });
+    const apply = vi.fn().mockImplementationOnce(() => first).mockResolvedValue(undefined);
+    const appearance = createStatusBarAppearanceCoordinator(apply);
+    const pending = appearance.requestTheme("light");
+    await Promise.resolve();
+    appearance.requestTheme("dark");
+    appearance.requestTheme("sepia");
+    appearance.requestTheme("gray");
+    expect(apply.mock.calls).toEqual([[true]]);
+    release();
+    await pending;
+    expect(apply.mock.calls).toEqual([[true], [false]]);
   });
 });
