@@ -87,6 +87,8 @@ describe("Zen UI Packet C: 硬件加速平滑翻页与边缘翻页交互契约",
     vi.useFakeTimers();
     instances.length = 0;
     dom = createReactDomHarness();
+    // The paged dispatcher tracks its host size; linkedom has no ResizeObserver.
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
     // linkedom omits this standard CSSOM method; the paged swipe surface needs it.
     const styleProto = Object.getPrototypeOf(dom.container.style);
     if (typeof styleProto.getPropertyPriority !== "function") {
@@ -143,7 +145,6 @@ describe("Zen UI Packet C: 硬件加速平滑翻页与边缘翻页交互契约",
   };
 
   it("motion window 前台由阅读器持有，后台释放，返回前台恢复", async () => {
-    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
     Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
     await render();
     const active = await finishActive();
