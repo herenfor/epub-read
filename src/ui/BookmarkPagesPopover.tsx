@@ -10,7 +10,19 @@ interface Props {
   /** 电脑悬停删除项时，正文里对应的丝带轻轻伸缩一下。 */
   onHint(ids: readonly string[]): void;
   onClose(): void;
+  /** 只为预热画一次（见 panelPaintWarmup）：不定位、不聚焦、不挂关闭监听。 */
+  warm?: boolean;
 }
+
+/** 预热用的两页：一页有书签、一页没有，两种小页都画到。不对应真实书签。 */
+export const WARM_BOOKMARK_PAGES_SCREEN: ScreenBookmarks = {
+  kind: "paged",
+  columns: 2,
+  pages: [
+    { lane: 0, side: "left", spineIndex: 0, ids: [] },
+    { lane: 1, side: "right", spineIndex: 0, ids: ["warm"] },
+  ],
+};
 
 const TILE_WIDTH_PX = 44;
 const POPOVER_FALLBACK_TOP_PX = 60;
@@ -19,21 +31,23 @@ const POPOVER_FALLBACK_TOP_PX = 60;
  * 双页书签“缩略书页”：两个并排的小页对应真实的左右页。实心丝带 = 有书签（点了删除这一页
  * 全部书签），虚线丝带 + ＋ = 没有（点了添加）。文字只在悬停提示和读屏标签里。
  */
-export function BookmarkPagesPopover({ screen, onRemove, onAdd, onHint, onClose }: Props) {
+export function BookmarkPagesPopover({ screen, onRemove, onAdd, onHint, onClose, warm = false }: Props) {
   const { t } = useUiText();
   const ref = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState<{ top: number; right: number }>({ top: POPOVER_FALLBACK_TOP_PX, right: 10 });
 
   useLayoutEffect(() => {
+    if (warm) return;
     // 挂在书签按钮下方；按钮不可见（手机收起工具栏）时放在右上角。
     const button = document.querySelector<HTMLElement>(".titlebar-bookmark-btn");
     const rect = button?.getBoundingClientRect();
     if (rect && rect.width > 0 && rect.bottom > 0) {
       setPosition({ top: rect.bottom + 6, right: Math.max(8, window.innerWidth - rect.right - 8) });
     }
-  }, []);
+  }, [warm]);
 
   useEffect(() => {
+    if (warm) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -57,7 +71,7 @@ export function BookmarkPagesPopover({ screen, onRemove, onAdd, onHint, onClose 
       document.removeEventListener("pointerdown", onPointer, true);
       window.removeEventListener("blur", onBlur);
     };
-  }, [onClose]);
+  }, [onClose, warm]);
 
   // 物理左右顺序；双页末屏没有第二页时补一张空白小页。
   const tiles = (["left", "right"] as const).map((side) => ({
