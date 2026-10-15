@@ -84,10 +84,9 @@ export function isSafeColor(v: string): boolean {
   return SAFE_NAMES.has(v.trim().toLowerCase());
 }
 
+const DEFAULT_FONT_FAMILY = `"Segoe UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Source Han Sans SC", sans-serif`;
+
 function buildOverrideCss(s: ReaderSettings): string {
-  const family =
-    s.fontFamily ??
-    `"Segoe UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Source Han Sans SC", sans-serif`;
   const maxEm = TEXT_MEASURE.maxEm;
 
   // ---- L1 安全/阅读器底线：脚注 aside 必须从正文流隐藏 ----
@@ -227,7 +226,7 @@ function buildOverrideCss(s: ReaderSettings): string {
   border: 0;
 }`;
 
-  // ---- L2 用户设置：字号/主题/字体 fallback（书 body 字体声明优先） ----
+  // ---- L2 用户设置：字号和用户明确选择的字体。默认字体在独立低优先级层。 ----
   const escapeFamily = escapeCssString;
   const fontFaceCss = (s.fontSource === "system" ? [] : (s.customFonts ?? []))
     .map(
@@ -260,8 +259,7 @@ html, body, #${VIEWER_ID},
 }`
     : "";
   const typographyCss = [
-    `/* [L2] 字体 fallback 只放 html；书在 body 上的内嵌字体声明优先。 */`,
-    `html { font-size: ${s.fontSizePx}px !important; font-family: ${family}; }`,
+    `html { font-size: ${s.fontSizePx}px !important;${s.fontFamily ? ` font-family: ${s.fontFamily};` : ""} }`,
     fontFaceCss,
     bodyFontCss ? `body { ${bodyFontCss} }` : "",
     descendantFontCss,
@@ -704,6 +702,20 @@ ${VIEWER_TAG}#${VIEWER_ID}::-webkit-scrollbar {
 }`;
     head.appendChild(scrollStyle);
   }
+
+  // Establish this normal-priority layer before any author CSS layers. Both
+  // author html and body declarations must beat the reader's default font.
+  // Keep it separate from explicit font overrides and the user CSS below.
+  const fontFallback = doc.createElement("style");
+  fontFallback.setAttribute("data-reader", "font-fallback");
+  fontFallback.textContent = `@layer epub-reader-font-fallback { :where(html) { font-family: ${DEFAULT_FONT_FAMILY}; } }`;
+  // XML documents (including the Node parser) do not expose HTMLDocument.head.
+  const fontHead = doc.getElementsByTagName("head")[0] ?? head;
+  const firstStylesheet = Array.from(fontHead.childNodes)
+    .filter((node): node is Element => node.nodeType === 1).find(el =>
+      el.localName === "style" || (el.localName === "link" && /\bstylesheet\b/iu.test(el.getAttribute("rel") ?? ""))
+    ) ?? null;
+  fontHead.insertBefore(fontFallback, firstStylesheet);
 
   const styleEl = doc.createElement("style");
   styleEl.setAttribute("data-reader", "overrides");
