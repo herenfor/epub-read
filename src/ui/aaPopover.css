@@ -531,6 +531,14 @@
   color: var(--muted);
 }
 
+/* 书本用了更具体的选择器或内联样式时，普通规则覆盖不了，只能加 !important。 */
+.aa-css-hint {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted);
+  opacity: 0.8;
+}
+
 .aa-css-textarea {
   width: 100%;
   box-sizing: border-box;
@@ -828,6 +836,7 @@
 .app[data-touch-ui="true"] .aa-advanced-toggle,
 .app[data-touch-ui="true"] .aa-advanced-row { font-size: 14px; }
 .app[data-touch-ui="true"] .aa-css-label,
+.app[data-touch-ui="true"] .aa-css-hint,
 .app[data-touch-ui="true"] .aa-css-textarea,
 .app[data-touch-ui="true"] .aa-btn-save-css { font-size: 13px; }
 .app[data-touch-ui="true"] .aa-mini-action-btn { font-size: 13.5px; }

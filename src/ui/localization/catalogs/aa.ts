@@ -80,6 +80,7 @@ export const aa = defineMessages("aa", {
   "aa.css": "自定义 CSS",
   "aa.css.placeholder": { zh: "/* 自定义注入 CSS */", note: "Placeholder inside a CSS editor; keep it a CSS comment." },
   "aa.css.save": "保存并应用 CSS",
+  "aa.css.hint": { zh: "要覆盖书本自带的样式，请在声明后加 !important", note: "Hint under the custom CSS editor; keep !important as is." },
   "aa.importBooks.tip": "打开并导入书籍",
   "aa.importBooks": "导入书籍",
   "aa.log.tip": "打开日志与诊断",

@@ -74,6 +74,7 @@
   "aa.css": "Custom CSS",
   "aa.css.placeholder": "/* Custom injected CSS */",
   "aa.css.save": "Save & Apply CSS",
+  "aa.css.hint": "To override the book's own styles, add !important after a declaration",
   "aa.importBooks.tip": "Open and import books",
   "aa.importBooks": "Import Books",
   "aa.log.tip": "Open logs & diagnostics",
