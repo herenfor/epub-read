@@ -47,4 +47,6 @@ export const shelfFolder = defineMessages("shelfFolder", {
   "shelfFolder.modal.empty.pointer": "文件夹暂无书籍，从书架将书拖入此处或移出",
   "shelfFolder.filter.none": "没有匹配项",
   "shelfFolder.filter.limited": "仅显示前 {count} 项，请搜索以缩小范围",
+  "shelfFolder.select": { zh: "选择文件夹 {name} 中的全部书", note: "Batch selection: checkbox label of a folder; selecting it selects every book in it." },
+  "shelfFolder.select.empty": { zh: "文件夹里没有书，无法选择", note: "Batch selection: tooltip on an empty folder." },
 });

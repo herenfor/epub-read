@@ -84,6 +84,7 @@
   "shelfMain.table.folderCount.one": "{count} book",
   "shelfMain.table.folder": "Folder",
   "shelfMain.table.openFolder": "Open Folder",
+  "shelfMain.table.folderFirst": "First: {title}",
   "shelfMain.folders.summary": "Folders ({count})",
   "shelfMain.folders.collapse.tip": "Collapse folder list",
   "shelfMain.folders.collapse": "Collapse",

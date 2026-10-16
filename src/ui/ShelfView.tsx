@@ -25,6 +25,13 @@ import {
   type ShelfSort,
 } from "./shelf";
 import {
+  folderSelectionState,
+  selectableBookIds,
+  sortShelfFolders,
+  toggleFolderSelection,
+  type FolderSelectionState,
+} from "./shelfFolderSelection";
+import {
   effectiveFolderId,
   emptyOrganization,
   generateFolderId,
@@ -1344,6 +1351,9 @@ interface ShelfFolderCardProps {
   books: ShelfEntry[];
   provider: ThumbnailProvider;
   selectionMode: boolean;
+  /** Batch selection: derived from the selected books (see shelfFolderSelection). */
+  selectionState?: FolderSelectionState;
+  onToggleSelected?(id: string): void;
   isDropTarget?: boolean;
   menuOpen?: boolean;
   onOpen(id: string, element?: HTMLElement | null): void;
@@ -1369,17 +1379,24 @@ const ShelfFolderCard = memo(function ShelfFolderCard(props: ShelfFolderCardProp
     },
   });
 
+  const selectable = props.selectionState !== undefined && props.selectionState !== "empty";
   const handleCardClick = (): void => {
     if (!props.selectionMode) props.onOpen(props.id, cardRef.current);
+    else if (selectable) props.onToggleSelected?.(props.id);
   };
 
   const sampleBooks = props.books.slice(0, 9);
+  const checked = props.selectionState === "all";
+  const mixed = props.selectionState === "mixed";
 
   return (
     <div
       ref={cardRef}
-      className={`shelf-card shelf-folder-card${props.isDropTarget ? " is-drop-target" : ""}${props.menuOpen ? " menu-open" : ""}`}
-      role="button"
+      className={`shelf-card shelf-folder-card${props.isDropTarget ? " is-drop-target" : ""}${props.menuOpen ? " menu-open" : ""}${props.selectionMode && checked ? " selected" : ""}`}
+      role={props.selectionMode ? "checkbox" : "button"}
+      aria-checked={props.selectionMode ? (mixed ? "mixed" : checked) : undefined}
+      aria-disabled={props.selectionMode && !selectable ? true : undefined}
+      aria-label={props.selectionMode ? t("shelfFolder.select", { name: props.name }) : undefined}
       tabIndex={0}
       data-shelf-target="folder"
       data-folder-id={props.id}
@@ -1402,9 +1419,17 @@ const ShelfFolderCard = memo(function ShelfFolderCard(props: ShelfFolderCardProp
           handleCardClick();
         }
       }}
-      title={tn("shelfFolder.card.tip", props.books.length, { name: props.name, count: props.books.length })}
+      title={props.selectionMode && !selectable
+        ? t("shelfFolder.select.empty")
+        : tn("shelfFolder.card.tip", props.books.length, { name: props.name, count: props.books.length })}
     >
       <div className="shelf-cover-box shelf-folder-cover-box">
+        {props.selectionMode && (
+          <div className={`shelf-card-checkbox${checked ? " checked" : ""}${mixed ? " mixed" : ""}${selectable ? "" : " disabled"}`} aria-hidden="true">
+            {checked && <CheckIcon />}
+            {mixed && <span className="shelf-card-checkbox-dash" />}
+          </div>
+        )}
         {props.isDropTarget && (
           <div className="shelf-folder-drop-overlay" aria-hidden="true">
             <div className="shelf-folder-drop-badge">
@@ -2330,7 +2355,8 @@ function useShelfVirtualizer(
     }
     if (viewMode === "list") {
       const { scrollTop, viewportHeight } = scrollState;
-      const rowHeight = 52;
+      // List rows follow the density (cover size and cell padding in shelfZen.css).
+      const rowHeight = density === "comfortable" ? 72 : density === "compact" ? 36 : 52;
       const overscan = 5;
       const startRow = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan);
       const endRow = Math.min(totalCount, Math.ceil((scrollTop + viewportHeight) / rowHeight) + overscan);
@@ -2373,7 +2399,7 @@ function useShelfVirtualizer(
       isVirtual: true,
       gridGeometry: geometry,
     };
-  }, [totalCount, threshold, scrollState, viewMode, gridGeometry]);
+  }, [totalCount, threshold, scrollState, viewMode, gridGeometry, density]);
 }
 
 /* =========================================================================
@@ -2526,6 +2552,129 @@ const ShelfTableRow = memo(function ShelfTableRow({
             </div>
           )}
         </div>
+      </td>
+    </tr>
+  );
+});
+
+/**
+ * 列表模式文件夹行：文件夹名与总书数之外，作者/进度/大小/时间显示当前排序下的
+ * 首本书，并明确标注“首本”，不当作整个文件夹的统计。批选时整行切换选择。
+ */
+const ShelfFolderTableRow = memo(function ShelfFolderTableRow(props: {
+  id: string;
+  name: string;
+  books: ShelfEntry[];
+  provider: ThumbnailProvider;
+  selectionMode: boolean;
+  selectionState: FolderSelectionState;
+  onOpen(id: string): void;
+  onToggleSelected(id: string): void;
+}) {
+  const { t, tn } = useUiText();
+  const checkboxRef = useRef<HTMLInputElement>(null);
+  const first = props.books[0] as ShelfEntry | undefined;
+  const selectable = props.selectionState !== "empty";
+  useEffect(() => {
+    if (checkboxRef.current) checkboxRef.current.indeterminate = props.selectionState === "mixed";
+  }, [props.selectionState, props.selectionMode]);
+  const activate = (): void => {
+    if (!props.selectionMode) props.onOpen(props.id);
+    else if (selectable) props.onToggleSelected(props.id);
+  };
+  return (
+    <tr
+      className={`shelf-table-row folder-row${props.selectionMode && props.selectionState === "all" ? " selected" : ""}`}
+      data-shelf-target="folder"
+      data-folder-id={props.id}
+      title={props.selectionMode && !selectable ? t("shelfFolder.select.empty") : undefined}
+      onClick={activate}
+    >
+      <td style={{ textAlign: "center" }}>
+        {props.selectionMode ? (
+          <input
+            ref={checkboxRef}
+            type="checkbox"
+            checked={props.selectionState === "all"}
+            disabled={!selectable}
+            onClick={(e) => e.stopPropagation()}
+            onChange={() => props.onToggleSelected(props.id)}
+            aria-label={t("shelfFolder.select", { name: props.name })}
+          />
+        ) : (
+          <FolderIcon />
+        )}
+      </td>
+      <td>
+        {first ? (
+          <div className="shelf-table-thumb-box shelf-table-folder-thumb">
+            <Cover entry={first} provider={props.provider} />
+            <span className="shelf-table-folder-badge" aria-hidden="true"><FolderIcon /></span>
+          </div>
+        ) : (
+          <div className="shelf-table-thumb-box shelf-table-folder-thumb is-empty">
+            <FolderIcon />
+          </div>
+        )}
+      </td>
+      <td>
+        <div className="shelf-table-title-cell">
+          <span className="shelf-table-title" style={{ fontWeight: 700 }} title={props.name}>
+            {props.name}
+          </span>
+          <span className="shelf-capsule-count">
+            {tn("shelfMain.table.folderCount", props.books.length, { count: props.books.length })}
+          </span>
+        </div>
+        {first && (
+          <div className="shelf-table-folder-first" title={first.title}>
+            {t("shelfMain.table.folderFirst", { title: first.title })}
+          </div>
+        )}
+      </td>
+      {first ? (
+        <>
+          <td style={{ color: "var(--muted)", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {first.creator || t("shelf.unknownAuthor")}
+          </td>
+          <td>
+            <div className="shelf-table-progress-wrap">
+              <div className="shelf-table-progress-track">
+                <div className="shelf-table-progress-bar" style={{ width: `${Math.min(100, first.progressPct ?? 0)}%` }} />
+              </div>
+              <span className="shelf-table-progress-text">{shelfProgressLabel(first)}</span>
+            </div>
+          </td>
+          <td style={{ color: "var(--muted)", fontSize: 12, whiteSpace: "nowrap" }}>
+            {formatFileSize(first.fileSize)}
+          </td>
+          <td style={{ color: "var(--muted)", fontSize: 12, whiteSpace: "nowrap" }}>
+            {formatRelativeTime(first.lastReadAtMs) || formatShelfTime(first.addedAtMs) || t("shelf.time.justNow")}
+          </td>
+        </>
+      ) : (
+        <>
+          <td style={{ color: "var(--muted)" }}>{t("shelfMain.table.folder")}</td>
+          <td style={{ color: "var(--muted)" }}>--</td>
+          <td style={{ color: "var(--muted)" }}>--</td>
+          <td style={{ color: "var(--muted)" }}>--</td>
+        </>
+      )}
+      <td className="shelf-table-action-cell">
+        {!props.selectionMode && (
+          <button
+            className="shelf-card-more-btn"
+            style={{ position: "static", opacity: 1 }}
+            type="button"
+            title={t("shelfMain.table.openFolder")}
+            onClick={(e) => {
+              e.stopPropagation();
+              props.onOpen(props.id);
+            }}
+          >
+            <ArrowRightIcon />
+          </button>
+        )}
       </td>
     </tr>
   );
@@ -2962,8 +3111,10 @@ export function ShelfView(props: ShelfViewProps) {
         favorites.push(entry);
       }
     }
+    // Books inside a folder follow the shelf sort too; the first one represents the folder.
+    for (const [id, books] of folderMap) folderMap.set(id, sortShelfEntries(books, sort));
     return { folderBooksMap: folderMap, unclassifiedBooks: unclassified, favoriteBooks: favorites };
-  }, [organization, props.entries, activeFolders]);
+  }, [organization, props.entries, activeFolders, sort]);
 
   // Level 3 状态分流计数
   const { allCount, readingCount, unreadCount, finishedCount, favoriteCount } = useMemo(() => {
@@ -3070,10 +3221,10 @@ export function ShelfView(props: ShelfViewProps) {
   const visibleFolders = useMemo(() => {
     if (scope.type !== "root") return [];
     if (statusTab !== "all") return [];
-    if (!query.trim()) return activeFolders;
     const q = query.trim().toLowerCase();
-    return activeFolders.filter((f) => f.name.toLowerCase().includes(q));
-  }, [scope, statusTab, activeFolders, query]);
+    const matched = q ? activeFolders.filter((f) => f.name.toLowerCase().includes(q)) : activeFolders;
+    return sortShelfFolders(matched, folderBooksMap, sort);
+  }, [scope, statusTab, activeFolders, query, folderBooksMap, sort]);
 
   // 展开的文件夹卡片只是内容状态：文件夹弹窗盖在上面时它不参与返回链，返回先关弹窗。
   useShelfSubmenuBack(
@@ -3170,11 +3321,17 @@ export function ShelfView(props: ShelfViewProps) {
 
   const thumbnailProvider = props.thumbnailProvider ?? legacyThumbnailProvider;
 
-  // 当可见书籍变化或筛选/scope 变更时，自动清理不在当前可见范围的选择
+  // Visible books plus whole visible folders (a folder selects all its books, whatever the book filters).
+  const selectableIds = useMemo(
+    () => selectableBookIds(visible, visibleFolders.map((folder) => folderBooksMap.get(folder.id) ?? [])),
+    [visible, visibleFolders, folderBooksMap],
+  );
+
+  // 当可选范围变化（筛选/scope/文件夹成员）时，自动清理已不可选的书
   useEffect(() => {
     setSelectedIds((prev) => {
       if (prev.size === 0) return prev;
-      const visibleIds = new Set(visible.map((e) => e.id));
+      const visibleIds = selectableIds;
       let changed = false;
       const next = new Set<string>();
       for (const id of prev) {
@@ -3183,7 +3340,7 @@ export function ShelfView(props: ShelfViewProps) {
       }
       return changed ? next : prev;
     });
-  }, [visible]);
+  }, [selectableIds]);
 
   const toggleSelected = useCallback((id: string): void => {
     setSelectedIds((prev) => {
@@ -3193,6 +3350,11 @@ export function ShelfView(props: ShelfViewProps) {
       return next;
     });
   }, []);
+
+  const toggleFolderSelected = useCallback((folderId: string): void => {
+    const books = folderBooksMap.get(folderId) ?? [];
+    setSelectedIds((prev) => toggleFolderSelection(books, prev));
+  }, [folderBooksMap]);
 
   const enterSelection = (): void => {
     setSelectedIds(new Set());
@@ -3998,15 +4160,15 @@ export function ShelfView(props: ShelfViewProps) {
               <button
                 className="shelf-selection-toggle-all"
                 type="button"
-                aria-pressed={selectedIds.size === visible.length && visible.length > 0}
-                disabled={props.busy || visible.length === 0}
+                aria-pressed={selectedIds.size === selectableIds.size && selectableIds.size > 0}
+                disabled={props.busy || selectableIds.size === 0}
                 onClick={() => {
-                  if (selectedIds.size === visible.length) setSelectedIds(new Set());
-                  else setSelectedIds(new Set(visible.map((e) => e.id)));
+                  if (selectedIds.size === selectableIds.size) setSelectedIds(new Set());
+                  else setSelectedIds(new Set(selectableIds));
                 }}
               >
-                <CheckSquareIcon checked={selectedIds.size === visible.length && visible.length > 0} />
-                <span>{selectedIds.size === visible.length && visible.length > 0 ? t("shelfMain.selection.clearAll") : t("shelfMain.selection.none")}</span>
+                <CheckSquareIcon checked={selectedIds.size === selectableIds.size && selectableIds.size > 0} />
+                <span>{selectedIds.size === selectableIds.size && selectableIds.size > 0 ? t("shelfMain.selection.clearAll") : t("shelfMain.selection.none")}</span>
               </button>
             </div>
           </div>
@@ -4723,65 +4885,19 @@ export function ShelfView(props: ShelfViewProps) {
             </thead>
             <tbody>
               {scope.type === "root" &&
-                visibleFolders.map((folder) => {
-                  const fBooks = folderBooksMap.get(folder.id) ?? [];
-                  return (
-                    <tr
-                      key={folder.id}
-                      className="shelf-table-row folder-row"
-                      data-shelf-target="folder"
-                      data-folder-id={folder.id}
-                      onClick={() => handleOpenFolderModal(folder.id)}
-                    >
-                      <td style={{ textAlign: "center" }}>
-                        <FolderIcon />
-                      </td>
-                      <td>
-                        <div
-                          className="shelf-table-thumb-box"
-                          style={{
-                            background:
-                              "color-mix(in srgb, var(--accent, #2563eb) 12%, transparent)",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            color: "var(--accent)",
-                          }}
-                        >
-                          <FolderIcon />
-                        </div>
-                      </td>
-                      <td>
-                        <div className="shelf-table-title-cell">
-                          <span className="shelf-table-title" style={{ fontWeight: 700 }} title={folder.name}>
-                            {folder.name}
-                          </span>
-                          <span className="shelf-capsule-count">
-                            {tn("shelfMain.table.folderCount", fBooks.length, { count: fBooks.length })}
-                          </span>
-                        </div>
-                      </td>
-                      <td style={{ color: "var(--muted)" }}>{t("shelfMain.table.folder")}</td>
-                      <td style={{ color: "var(--muted)" }}>--</td>
-                      <td style={{ color: "var(--muted)" }}>--</td>
-                      <td style={{ color: "var(--muted)" }}>--</td>
-                      <td className="shelf-table-action-cell">
-                        <button
-                          className="shelf-card-more-btn"
-                          style={{ position: "static", opacity: 1 }}
-                          type="button"
-                          title={t("shelfMain.table.openFolder")}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleOpenFolderModal(folder.id);
-                          }}
-                        >
-                          <ArrowRightIcon />
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
+                visibleFolders.map((folder) => (
+                  <ShelfFolderTableRow
+                    key={folder.id}
+                    id={folder.id}
+                    name={folder.name}
+                    books={folderBooksMap.get(folder.id) ?? []}
+                    provider={thumbnailProvider}
+                    selectionMode={selectionMode}
+                    selectionState={folderSelectionState(folderBooksMap.get(folder.id) ?? [], selectedIds)}
+                    onOpen={handleOpenFolderModal}
+                    onToggleSelected={toggleFolderSelected}
+                  />
+                ))}
               {virtualizer.topPadding > 0 && (
                 <tr style={{ height: `${virtualizer.topPadding}px` }} aria-hidden="true">
                   <td colSpan={8} style={{ padding: 0, border: "none" }} />
@@ -4847,6 +4963,8 @@ export function ShelfView(props: ShelfViewProps) {
                     books={folderBooksMap.get(folder.id) ?? []}
                     provider={thumbnailProvider}
                     selectionMode={selectionMode}
+                    selectionState={selectionMode ? folderSelectionState(folderBooksMap.get(folder.id) ?? [], selectedIds) : undefined}
+                    onToggleSelected={toggleFolderSelected}
                     isDropTarget={dropTarget?.type === "folder" && dropTarget.id === folder.id}
                     menuOpen={openMenuKey === `folder:${folder.id}`}
                     onOpen={handleOpenFolderModal}

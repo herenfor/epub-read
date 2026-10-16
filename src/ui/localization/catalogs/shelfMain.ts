@@ -90,6 +90,7 @@ export const shelfMain = defineMessages("shelfMain", {
   "shelfMain.table.folderCount.one": { zh: "{count} 本", note: "Singular form.", max: 10 },
   "shelfMain.table.folder": { zh: "文件夹", note: "Author column for a folder row.", max: 10 },
   "shelfMain.table.openFolder": "打开文件夹",
+  "shelfMain.table.folderFirst": { zh: "首本：{title}", note: "List view folder row: the author, progress, size and time columns show this first book (under the current sort).", max: 40 },
   "shelfMain.folders.summary": "文件夹 ({count})",
   "shelfMain.folders.collapse.tip": "收起文件夹目录",
   "shelfMain.folders.collapse": { zh: "收起", max: 8 },
