@@ -3,10 +3,14 @@ import { isExternalUrl, isFragmentOnly } from "../core/paths";
 import type { Book } from "../core/types";
 import { childElements, localNameOf, type XmlElementLike } from "../core/xml";
 import { parseChapterDocument, STRIPPED_CHAPTER_TAGS } from "./chapterDocument";
-import { cssFontUsage, cssInlineFontFamilies, cssResourceReferences } from "./cssRewrite";
+import { cssFontUsage, cssFontDeclarations, cssResourceReferences } from "./cssRewrite";
 
 type ResourceReference = { href: string; stylesheet: boolean };
-type ChapterTokens = { tags: Set<string>; classes: Set<string>; ids: Set<string>; families: Set<string> };
+type ChapterTokens = {
+  tags: Set<string>; classes: Set<string>; ids: Set<string>; families: Set<string>;
+  inlineFonts: ReturnType<typeof cssFontUsage>[];
+  uncertainFonts: boolean;
+};
 
 /**
  * Whether a selector's subject could match an element of this chapter. Only
@@ -35,7 +39,10 @@ export class ChapterDependencies {
   private async documentReferences(path: string, html: string): Promise<ResourceReference[]> {
     const { doc } = await parseChapterDocument(html, this.book.version === 2);
     const refs: ResourceReference[] = [];
-    const tokens: ChapterTokens = { tags: new Set(), classes: new Set(), ids: new Set(), families: new Set() };
+    const tokens: ChapterTokens = {
+      tags: new Set(), classes: new Set(), ids: new Set(), families: new Set(),
+      inlineFonts: [], uncertainFonts: false,
+    };
     const add = (href: string | null, stylesheet = false) => {
       if (href) refs.push({ href, stylesheet });
     };
@@ -59,11 +66,17 @@ export class ChapterDependencies {
         }
       }
       if (tag === "video") add(element.getAttribute("poster"));
-      if (tag === "style") refs.push(...cssResourceReferences(element.textContent ?? ""));
+      if (tag === "style") {
+        const text = element.textContent ?? "";
+        refs.push(...cssResourceReferences(text));
+        tokens.inlineFonts.push(cssFontUsage(text));
+      }
       const style = element.getAttribute("style");
       if (style) {
         refs.push(...cssResourceReferences(style));
-        for (const family of cssInlineFontFamilies(style)) tokens.families.add(family);
+        const fonts = cssFontDeclarations(style);
+        for (const family of fonts.families) tokens.families.add(family);
+        tokens.uncertainFonts ||= fonts.uncertain;
       }
       for (const child of childElements(element)) walk(child);
     };
@@ -119,20 +132,25 @@ export class ChapterDependencies {
    */
   private dropUnusedFonts(chapterPath: string, deps: Set<string>, stylesheets: Set<string>): void {
     const tokens = this.tokens.get(chapterPath);
-    if (!tokens) return;
+    if (!tokens || tokens.uncertainFonts) return;
     const used = new Set(tokens.families);
     const faces: Array<{ families: string[]; paths: string[] }> = [];
+    const sources = tokens.inlineFonts.map((usage) => ({ path: chapterPath, usage }));
     for (const sheet of stylesheets) {
       const text = this.getText(sheet);
       if (!text) continue;
-      const usage = cssFontUsage(text);
+      sources.push({ path: sheet, usage: cssFontUsage(text) });
+    }
+    for (const { path, usage } of sources) {
       for (const rule of usage.rules) {
-        if (selectorMayMatch(rule.selector, tokens)) for (const family of rule.families) used.add(family);
+        if (!selectorMayMatch(rule.selector, tokens)) continue;
+        if (rule.uncertain) return;
+        for (const family of rule.families) used.add(family);
       }
       for (const face of usage.faces) {
         faces.push({
           families: face.families,
-          paths: face.hrefs.map((href) => resolveArchiveHref(this.book.archiveReferences, sheet, href.trim()).path),
+          paths: face.hrefs.map((href) => resolveArchiveHref(this.book.archiveReferences, path, href.trim()).path),
         });
       }
     }
