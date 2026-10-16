@@ -43,5 +43,7 @@
   "shelfFolder.modal.empty.touch": "Folder is empty. Select \"Move to Folder\" in the book's \"More\" menu.",
   "shelfFolder.modal.empty.pointer": "Folder is empty. Drag books here from the shelf or move them out.",
   "shelfFolder.filter.none": "No matching items",
-  "shelfFolder.filter.limited": "Showing first {count} items; search to narrow down"
+  "shelfFolder.filter.limited": "Showing first {count} items; search to narrow down",
+  "shelfFolder.select": "Select all books in {name}",
+  "shelfFolder.select.empty": "This folder has no books to select"
 }

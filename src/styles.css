@@ -2605,6 +2605,21 @@ select option {
   height: 13px;
 }
 
+/* 文件夹部分选中：实心底 + 横线；空文件夹不可选。 */
+.shelf-card-checkbox.mixed {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.shelf-card-checkbox-dash {
+  width: 10px;
+  height: 2px;
+  border-radius: 1px;
+  background: currentColor;
+}
+.shelf-card-checkbox.disabled {
+  opacity: 0.4;
+}
+
 /* 卡片信息排版：字体清晰有节奏 */
 .shelf-card-info {
   display: flex;
