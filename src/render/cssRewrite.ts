@@ -136,17 +136,29 @@ function cssFamilyNames(value: string): string[] {
   return value.split(",").map((name) => name.trim().replace(/^["']|["']$/g, "").trim().toLowerCase()).filter(Boolean);
 }
 
+/** Resource pruning must not mistake an unparsed font declaration for no font. */
+export function cssFontDeclarations(style: string): { families: string[]; uncertain: boolean } {
+  const text = stripCssComments(style);
+  const values = [...text.matchAll(/(?:^|;)\s*font-family\s*:\s*([^;]+)/gi)].map((m) => m[1]);
+  return {
+    families: values.flatMap((value) => cssFamilyNames(value.replace(/!important/gi, ""))),
+    // Shorthand, variables and escapes need CSS evaluation; keep candidate
+    // fonts for this chapter rather than building another CSS parser here.
+    uncertain: /(?:^|;)\s*font\s*:/i.test(text) || values.some((value) => /var\s*\(|\\/i.test(value)),
+  };
+}
+
 /**
  * E10: which @font-face files a stylesheet declares, and which selectors ask
  * for which font families. Rules inside other at-rules are read the same way.
  */
 export function cssFontUsage(css: string): {
   faces: Array<{ families: string[]; hrefs: string[] }>;
-  rules: Array<{ selector: string; families: string[] }>;
+  rules: Array<{ selector: string; families: string[]; uncertain: boolean }>;
 } {
   const text = stripCssComments(css);
   const faces: Array<{ families: string[]; hrefs: string[] }> = [];
-  const rules: Array<{ selector: string; families: string[] }> = [];
+  const rules: Array<{ selector: string; families: string[]; uncertain: boolean }> = [];
   for (const match of text.matchAll(/([^{};]*)\{([^{}]*)\}/g)) {
     const head = match[1].trim();
     const family = /(?:^|;)\s*font-family\s*:\s*([^;]+)/i.exec(match[2])?.[1];
@@ -154,16 +166,14 @@ export function cssFontUsage(css: string): {
       const hrefs: string[] = [];
       mapCssUrls(match[2], (whole, href) => { hrefs.push(href); return whole; });
       faces.push({ families: family ? cssFamilyNames(family) : [], hrefs });
-    } else if (family && head && !head.startsWith("@")) {
-      rules.push({ selector: head, families: cssFamilyNames(family.replace(/!important/i, "")) });
+    } else if (head && !head.startsWith("@")) {
+      const declarations = cssFontDeclarations(match[2]);
+      if (declarations.families.length || declarations.uncertain) {
+        rules.push({ selector: head, ...declarations });
+      }
     }
   }
   return { faces, rules };
-}
-
-export function cssInlineFontFamilies(style: string): string[] {
-  const family = /(?:^|;)\s*font-family\s*:\s*([^;]+)/i.exec(style)?.[1];
-  return family ? cssFamilyNames(family.replace(/!important/i, "")) : [];
 }
 
 export function cssResourceReferences(css: string): Array<{ href: string; stylesheet: boolean }> {
