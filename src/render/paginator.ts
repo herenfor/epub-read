@@ -4355,6 +4355,11 @@ export class ChapterPaginator {
         comfortArea = { ...comfortArea, geometry: fold.geometry, viewerBorderBoxWidth: fold.viewerBorderBoxWidth };
         spreadInsets = { left: fold.paddingLeftPx, right: fold.paddingRightPx };
         if (parent && authorInsetLeft + authorInsetRight > 0) this.foldParentHorizontalPadding(parent);
+      } else {
+        // Auto spreads require the final per-page margins to fit as well.
+        // Keeping the earlier centred pair here gives motion a shorter step
+        // than the frame and exposes neighbouring columns at some font sizes.
+        comfortArea = null;
       }
     }
     if (comfortArea) {

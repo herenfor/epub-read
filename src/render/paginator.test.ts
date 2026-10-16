@@ -2322,8 +2322,14 @@ describe("measure viewport height locking", () => {
     await promise;
   });
 
-  it("folds the comfortable spread into full-width pages (padding margins, gutter = left + right)", async () => {
-    const parent = makeFakeElement({ clientWidth: 1024, clientHeight: 768 });
+  it.each([
+    { width: 1024, font: 16, author: 0, columns: 2, padding: 51.2, columnWidth: 409.6 },
+    { width: 873, font: 20, author: 10, columns: 2, padding: 52.65, columnWidth: 331.2 },
+    // The centred pair fits, but folding two page margins needs more width.
+    { width: 873, font: 22, author: 11, columns: 1, padding: 11, columnWidth: 851 },
+    { width: 873, font: 24, author: 12, columns: 1, padding: 12, columnWidth: 849 },
+  ])("uses full-width page geometry at $width px / $font px (effective $columns columns)", async ({ width, font, author, columns, padding, columnWidth }) => {
+    const parent = makeFakeElement({ clientWidth: width, clientHeight: 768 });
     const viewer = makeFakeElement({ parentElement: parent });
     const defaultView = {
       getComputedStyle: (el: unknown) => {
@@ -2331,8 +2337,8 @@ describe("measure viewport height locking", () => {
           return {
             paddingTop: "0px",
             paddingBottom: "0px",
-            paddingLeft: "0px",
-            paddingRight: "0px",
+            paddingLeft: `${author}px`,
+            paddingRight: `${author}px`,
           };
         }
         return {
@@ -2349,8 +2355,8 @@ describe("measure viewport height locking", () => {
     };
     const doc = {
       defaultView,
-      documentElement: { clientWidth: 1024 },
-      body: { clientWidth: 1024 },
+      documentElement: { clientWidth: width },
+      body: { clientWidth: width },
       fonts: { ready: Promise.resolve() },
     };
     viewer.ownerDocument = doc;
@@ -2361,9 +2367,9 @@ describe("measure viewport height locking", () => {
       viewer,
       disposed: false,
       loadSeq: 1,
-      iframe: { clientWidth: 1024, clientHeight: 768 },
+      iframe: { clientWidth: width, clientHeight: 768 },
       settings: {
-        fontSizePx: 16,
+        fontSizePx: font,
         gapPx: 40,
         readingMode: "paginated",
         columnsPerView: 2,
@@ -2384,18 +2390,21 @@ describe("measure viewport height locking", () => {
 
     const promise = (ChapterPaginator.prototype as any).measure.call(context, 1);
 
-    expect(viewer.style.columnCount).toBe("2");
-    // 每页 [51.2 | 409.6 | 51.2] 恰好半屏；跨页步长 = 整屏宽 1024，两侧不留固定长条。
-    expect(parseFloat(viewer.style.width)).toBeCloseTo(1024, 5);
-    expect(parseFloat(viewer.style.marginLeft)).toBeCloseTo(0, 5);
-    expect(parseFloat(viewer.style.marginRight)).toBeCloseTo(0, 5);
-    expect(parseFloat(viewer.style.paddingLeft)).toBeCloseTo(51.2, 5);
-    expect(parseFloat(viewer.style.paddingRight)).toBeCloseTo(51.2, 5);
-    expect(parseFloat(viewer.style.columnGap)).toBeCloseTo(102.4, 5);
-    expect(context.spreadArea).not.toBeNull();
-    expect(context.spreadGeometry.columnWidth).toBeCloseTo(409.6, 5);
-    expect(context.step).toBeCloseTo(512, 5);
-    expect(context.spreadGeometry.spreadStep).toBeCloseTo(1024, 5);
+    expect(viewer.style.columnCount).toBe(String(columns));
+    expect(context.effectiveColumns).toBe(columns);
+    expect(context.settings.columnsPerView).toBe(2); // Saved preference stays spread.
+    expect(parseFloat(viewer.style.width)).toBeCloseTo(width, 5);
+    if (columns === 2) {
+      expect(parseFloat(viewer.style.marginLeft)).toBeCloseTo(0, 5);
+      expect(parseFloat(viewer.style.marginRight)).toBeCloseTo(0, 5);
+    }
+    expect(parseFloat(viewer.style.paddingLeft)).toBeCloseTo(padding, 5);
+    expect(parseFloat(viewer.style.paddingRight)).toBeCloseTo(padding, 5);
+    expect(parseFloat(viewer.style.columnGap)).toBeCloseTo(2 * padding, 5);
+    expect(context.spreadArea === null).toBe(columns === 1);
+    expect(context.spreadGeometry.columnWidth).toBeCloseTo(columnWidth, 5);
+    expect(context.step).toBeCloseTo(width / columns, 5);
+    expect(context.spreadGeometry.spreadStep).toBeCloseTo(width, 5);
 
     for (const c of measureControllers) c.abort();
     await promise;
