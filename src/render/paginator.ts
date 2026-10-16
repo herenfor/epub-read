@@ -4001,6 +4001,9 @@ export class ChapterPaginator {
         onTap: (tap) => this.onPlainTap?.(tap),
         isBlankImageTap: isImageBlankAtPoint,
         claimsRepeatClick: (point) => this.plainTapRepeatClaim?.(point) ?? false,
+        // The host claims taps on its turn bands; prepare the motion window on
+        // press, as the old edge overlay did, so the first turn is not cold.
+        onPress: (point) => { if (this.plainTapRepeatClaim?.(point)) this.prepareMotion(); },
         shouldIgnore: () => this.shouldIgnorePlainTap?.() ?? false,
       });
     }

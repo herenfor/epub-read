@@ -54,6 +54,7 @@ import {
   edgeTurnZoneSpecs,
   ReaderTapRoutingContext,
   ReaderTurnOwnerContext,
+  routeHostBlankTurn,
   routeReaderTap,
   useReaderTapRouting,
   type ReaderTapRegionSettings,
@@ -2374,6 +2375,20 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         ref={readerContainerRef}
         className={`reader${turnAnim ? ` has-turn-anim ${turnAnim.direction === 1 ? "turn-next" : "turn-prev"}` : ""}`}
         data-overlay-input={overlayInputActive ? "true" : undefined}
+        // 正文点击在 iframe 里由 plainTap 路由；这里只接 iframe 之外的空白（隐藏的
+        // 帧、固定版式留边）。翻页带不再接收点击，按同一几何翻页并亮反馈。
+        onPointerDown={(event) => {
+          if (event.target === event.currentTarget &&
+            routeHostBlankTurn(tapRouting, event.clientX, event.clientY)) paginatorRef.current?.prepareMotion?.();
+        }}
+        onClick={(event) => {
+          if (event.target !== event.currentTarget) return;
+          const route = routeHostBlankTurn(tapRouting, event.clientX, event.clientY);
+          if (!route || !tapRouting) return;
+          tapRouting.feedback.hold(edgeFeedbackKeyOf(route.side));
+          if (turnOwner) turnOwner(route.direction);
+          else turnPageRef.current(route.direction);
+        }}
         onWheel={(event) => {
           if (overlayInputActive) return;
           // 输入到达优先：先取消未发布的后台任务；具体翻页仍由后面路径决定。
@@ -2511,8 +2526,6 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         direction={zone.direction}
         side={zone.sideProp}
         region={zone.region}
-        onPrepare={() => paginatorRef.current?.prepareMotion?.()}
-        onTurn={(direction) => turnPageRef.current(direction)}
       />)}
       </div>
     </>
