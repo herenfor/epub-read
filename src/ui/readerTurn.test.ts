@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_SETTINGS, type ReaderSettings } from "../render/settings";
 import type { Book } from "../core/types";
 import { createReactDomHarness } from "../test/reactDomHarness";
+import { DEFAULT_READER_TAP_PREFERENCES } from "./readerTapRegions";
 
 const instances = vi.hoisted(() => [] as MockPaginator[]);
 class MockPaginator {
@@ -82,6 +83,7 @@ describe("Zen UI Packet C: 硬件加速平滑翻页与边缘翻页交互契约",
   let dom: ReturnType<typeof createReactDomHarness>;
   let props: ComponentProps<typeof ReaderView>;
   let ref: React.RefObject<ReaderHandle>;
+  let restoreLayout = () => {};
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -89,6 +91,17 @@ describe("Zen UI Packet C: 硬件加速平滑翻页与边缘翻页交互契约",
     dom = createReactDomHarness();
     // The paged dispatcher tracks its host size; linkedom has no ResizeObserver.
     vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    // Tap geometry needs a host size and position; linkedom lays nothing out.
+    const divProto = Object.getPrototypeOf(dom.container) as object;
+    Object.defineProperty(divProto, "clientWidth", { get: () => 1000, configurable: true });
+    Object.defineProperty(divProto, "getBoundingClientRect", {
+      value: () => ({ left: 0, top: 0, right: 1000, bottom: 800, width: 1000, height: 800 }),
+      configurable: true,
+    });
+    restoreLayout = () => {
+      delete (divProto as Record<string, unknown>).clientWidth;
+      delete (divProto as Record<string, unknown>).getBoundingClientRect;
+    };
     // linkedom omits this standard CSSOM method; the paged swipe surface needs it.
     const styleProto = Object.getPrototypeOf(dom.container.style);
     if (typeof styleProto.getPropertyPriority !== "function") {
@@ -125,16 +138,26 @@ describe("Zen UI Packet C: 硬件加速平滑翻页与边缘翻页交互契约",
       onExternalLink: vi.fn(),
       onFootnote: vi.fn(),
       onFootnoteClose: vi.fn(),
+      tapRegions: { device: "pc", preferences: DEFAULT_READER_TAP_PREFERENCES },
     };
   });
 
   afterEach(async () => {
     await dom.dispose();
+    restoreLayout();
     vi.unstubAllGlobals();
     vi.useRealTimers();
   });
 
   const render = () => dom.render(createElement(ReaderView, { ...props, ref }));
+  // The edge bands only draw feedback; a tap on the reading surface outside the
+  // chapter frame turns by the shared tap geometry (1000px wide host at x=0).
+  const tapEdge = async (side: "left" | "right") => {
+    const reader = dom.container.querySelector(".reader") as HTMLElement;
+    const event = new (window as unknown as { Event: typeof Event }).Event("click", { bubbles: true, cancelable: true });
+    Object.assign(event, { clientX: side === "left" ? 10 : 990, clientY: 400, button: 0 });
+    await dom.dispatch(reader, event);
+  };
   const finishActive = async () => {
     const active = instances[0];
     await act(async () => {
@@ -157,15 +180,15 @@ describe("Zen UI Packet C: 硬件加速平滑翻页与边缘翻页交互契约",
     expect(active.setMotionWindowForeground).toHaveBeenLastCalledWith(true);
   });
 
-  it("渲染左右 5% 悬停感应区与边缘翻页指示箭头", async () => {
+  it("渲染左右 5% 边缘翻页指示箭头（只做反馈，不挡住正文点击）", async () => {
     await render();
     const prevZone = dom.container.querySelector(".edge-turn-zone.edge-turn-prev");
     const nextZone = dom.container.querySelector(".edge-turn-zone.edge-turn-next");
 
     expect(prevZone).not.toBeNull();
     expect(nextZone).not.toBeNull();
-    expect(prevZone?.getAttribute("title")).toBe("上一页");
-    expect(nextZone?.getAttribute("title")).toBe("下一页");
+    expect(prevZone?.getAttribute("aria-hidden")).toBe("true");
+    expect(nextZone?.getAttribute("aria-hidden")).toBe("true");
 
     expect(prevZone?.querySelector(".edge-turn-arrow")).not.toBeNull();
     expect(nextZone?.querySelector(".edge-turn-arrow")).not.toBeNull();
@@ -175,10 +198,7 @@ describe("Zen UI Packet C: 硬件加速平滑翻页与边缘翻页交互契约",
     await render();
     const active = await finishActive();
 
-    const nextZone = dom.container.querySelector(".edge-turn-zone.edge-turn-next") as HTMLElement;
-    expect(nextZone).not.toBeNull();
-
-    await dom.click(nextZone);
+    await tapEdge("right");
 
     expect(active.setPage).toHaveBeenCalledWith(1, { userInitiated: true });
     const readerEl = dom.container.querySelector(".reader");
@@ -197,10 +217,7 @@ describe("Zen UI Packet C: 硬件加速平滑翻页与边缘翻页交互契约",
     const active = await finishActive();
     active.currentPage = 2;
 
-    const prevZone = dom.container.querySelector(".edge-turn-zone.edge-turn-prev") as HTMLElement;
-    expect(prevZone).not.toBeNull();
-
-    await dom.click(prevZone);
+    await tapEdge("left");
 
     expect(active.setPage).toHaveBeenCalledWith(1, { userInitiated: true });
     const readerEl = dom.container.querySelector(".reader");
@@ -221,8 +238,7 @@ describe("Zen UI Packet C: 硬件加速平滑翻页与边缘翻页交互契约",
     await render();
     const active = await finishActive();
 
-    const nextZone = dom.container.querySelector(".edge-turn-zone.edge-turn-next") as HTMLElement;
-    await dom.click(nextZone);
+    await tapEdge("right");
 
     expect(active.setPage).toHaveBeenCalledWith(1, { userInitiated: true });
     const readerEl = dom.container.querySelector(".reader");
@@ -265,8 +281,7 @@ describe("Zen UI Packet C: 硬件加速平滑翻页与边缘翻页交互契约",
     await render();
     const active = await finishActive();
 
-    const nextZone = dom.container.querySelector(".edge-turn-zone.edge-turn-next") as HTMLElement;
-    await dom.click(nextZone);
+    await tapEdge("right");
 
     expect(active.planPagedTurn).toHaveBeenCalledWith(1, true);
     expect(active.setPage).not.toHaveBeenCalled();
@@ -314,9 +329,8 @@ describe("Zen UI Packet C: 硬件加速平滑翻页与边缘翻页交互契约",
     await render();
     const active = await finishActive();
 
-    const nextZone = dom.container.querySelector(".edge-turn-zone.edge-turn-next") as HTMLElement;
-    await dom.click(nextZone);
-    await dom.click(nextZone);
+    await tapEdge("right");
+    await tapEdge("right");
     expect(active.setPage).toHaveBeenCalledWith(1, { userInitiated: true });
 
     await act(async () => {
@@ -336,10 +350,7 @@ describe("Zen UI Packet C: 硬件加速平滑翻页与边缘翻页交互契约",
     active.currentPage = 4;
     active.pageCount = 5;
 
-    const nextZone = dom.container.querySelector(".edge-turn-zone.edge-turn-next") as HTMLElement;
-    expect(nextZone).not.toBeNull();
-
-    await dom.click(nextZone);
+    await tapEdge("right");
 
     const readerEl = dom.container.querySelector(".reader");
     expect(readerEl?.classList.contains("has-turn-anim")).toBe(false);

@@ -5,7 +5,7 @@ import type { ChapterState } from "../render/paginator";
 import type { ReaderHandle, ReaderViewProps } from "./ReaderView";
 import type { SingleLeafSpread } from "./singleLeafSpreads";
 import { EdgeTurnZone } from "./EdgeTurnZone";
-import { edgeTurnZoneSpecs, ReaderTurnOwnerContext, useReaderTapRouting } from "./readerTapRouting";
+import { edgeFeedbackKeyOf, edgeTurnZoneSpecs, ReaderTurnOwnerContext, routeHostBlankTurn, useReaderTapRouting } from "./readerTapRouting";
 import { WheelTurnAccumulator } from "./turnIntent";
 
 interface Props extends ReaderViewProps {
@@ -177,6 +177,15 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
     </div>;
   };
   return <div className="reader-image-spread" data-image-spread-ready={ready}
+    onClick={(event) => {
+      // Leaves route their own taps; this fills the empty leaf and the gutter,
+      // which the (now visual-only) edge bands used to cover.
+      if (event.target instanceof Element && event.target.closest(".reader")) return;
+      const route = routeHostBlankTurn(tapRouting, event.clientX, event.clientY);
+      if (!route || !tapRouting) return;
+      tapRouting.feedback.hold(edgeFeedbackKeyOf(route.side));
+      turn(route.direction);
+    }}
     onWheel={(event) => {
       // A leaf's ReaderView already owns its wheel events. Only fill the
       // blank leaf, gutter and outer-band paths without counting input twice.
@@ -202,7 +211,6 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
         aria-hidden="true" />}
     </ReaderTurnOwnerContext.Provider>
     {edgeTurnZoneSpecs(tapRouting).map((zone) => <EdgeTurnZone key={zone.side}
-      direction={zone.direction} side={zone.sideProp} region={zone.region}
-      onTurn={(direction) => turn(direction)} />)}
+      direction={zone.direction} side={zone.sideProp} region={zone.region} />)}
   </div>;
 });

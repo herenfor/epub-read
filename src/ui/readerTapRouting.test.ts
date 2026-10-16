@@ -5,7 +5,8 @@ import { DEFAULT_SETTINGS, type ReaderSettings } from "../render/settings";
 import type { Book } from "../core/types";
 import { createReactDomHarness } from "../test/reactDomHarness";
 import { computeTapRegionGeometry, DEFAULT_READER_TAP_PREFERENCES, type ReaderTapPreferences } from "./readerTapRegions";
-import { edgeTurnOverlayOf, edgeTurnZoneSpecs, ReaderTurnOwnerContext, routeReaderTap } from "./readerTapRouting";
+import { edgeTurnOverlayOf, edgeTurnZoneSpecs, ReaderTurnOwnerContext, routeHostBlankTurn, routeReaderTap } from "./readerTapRouting";
+import { EdgeTurnFeedback } from "./edgeTurnFeedback";
 import { readTapRegionPreferences, TAP_REGION_PREFERENCES_KEY, writeTapRegionPreferences } from "./tapRegionPreferences";
 
 const instances = vi.hoisted(() => [] as MockPaginator[]);
@@ -91,6 +92,20 @@ describe("tap routing geometry", () => {
     expect(routeReaderTap(pc, 100, 450)).toEqual({ kind: "center" });
     expect(routeReaderTap(pc, 100, 950)).toEqual({ kind: "turn", side: "right", direction: 1 });
     expect(routeReaderTap(pc, 100, 50)).toEqual({ kind: "outside" });
+  });
+
+  it("a blank host surface only turns: centre and corners do nothing there", () => {
+    const geometry = computeTapRegionGeometry(1000, DEFAULT_READER_TAP_PREFERENCES.pc);
+    const routing = {
+      device: "touch" as const, preferences: DEFAULT_READER_TAP_PREFERENCES, geometry,
+      hostLeft: () => 100, hostTop: () => 0, feedback: new EdgeTurnFeedback(),
+    };
+    expect(routeHostBlankTurn(routing, 120, 400)).toEqual({ kind: "turn", side: "left", direction: -1 });
+    expect(routeHostBlankTurn(routing, 1090, 400)).toEqual({ kind: "turn", side: "right", direction: 1 });
+    expect(routeHostBlankTurn(routing, 600, 400)).toBeNull();
+    expect(routeHostBlankTurn(routing, 1090, 10)).toBeNull();
+    expect(routeHostBlankTurn({ ...routing, hostLeft: () => null }, 1090, 400)).toBeNull();
+    expect(routeHostBlankTurn(null, 1090, 400)).toBeNull();
   });
 
   it("A15: frees the top strip of both bands; on touch its outer top-right square is the bookmark corner", () => {

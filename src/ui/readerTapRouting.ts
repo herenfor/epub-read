@@ -19,13 +19,12 @@ import {
  *
  * Two entries share one geometry, measured on the presentation host (the
  * box every paged/image-spread host fills):
- * - the transparent EdgeTurnZone bands keep their default size (never the
- *   custom 35%), so links, notes, images and selection under a wide custom
- *   region still receive the event first;
- * - body taps that survived plainTap's filters land here and are classified
- *   by where they fell in the host.
- * A tap on a band never reaches the iframe, and a body tap never reaches a
- * band, so each tap is consumed by exactly one entry.
+ * - body taps that survived plainTap's filters (links, notes, images and
+ *   selection keep their own handling) are classified by where they fell;
+ * - taps on a host's blank surface outside the iframes (routeHostBlankTurn).
+ * The EdgeTurnZone bands only draw the feedback and take no pointer events,
+ * so a footnote under a band is still tappable. Each tap reaches one entry:
+ * iframe events never bubble to the host.
  */
 
 export interface ReaderTapRegionSettings {
@@ -86,6 +85,24 @@ export function routeReaderTap(
   }
   if (region === "center") return { kind: "center" };
   return { kind: "turn", side: region, direction: tapRegionAction(region, routing.device, routing.preferences, routing.progression) };
+}
+
+/**
+ * A tap on a host's blank surface (outside every chapter iframe: hidden frame,
+ * fixed-layout letterbox, an empty spread leaf). Only turns: the centre and
+ * bookmark corners keep their old "nothing happens there" behaviour.
+ */
+export function routeHostBlankTurn(
+  routing: ReaderTapRouting | null,
+  clientX: number,
+  clientY: number,
+): Extract<ReaderTapRoute, { kind: "turn" }> | null {
+  const hostLeft = routing?.hostLeft();
+  if (!routing || hostLeft === null || hostLeft === undefined) return null;
+  const hostTop = routing.hostTop?.();
+  const route = routeReaderTap(routing, hostLeft, clientX,
+    hostTop !== null && hostTop !== undefined ? { hostTop, clientY } : undefined);
+  return route.kind === "turn" ? route : null;
 }
 
 /** Feedback key of a physical side: the arrow belongs to the band that was tapped. */

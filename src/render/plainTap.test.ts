@@ -2,13 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 import { parseHTML } from "linkedom";
 import { installPlainTap } from "./plainTap";
 
-function setup(claimsRepeatClick?: (point: { clientX: number; clientY: number }) => boolean) {
+function setup(claimsRepeatClick?: (point: { clientX: number; clientY: number }) => boolean,
+  onPress?: (point: { clientX: number; clientY: number }) => void) {
   const { document } = parseHTML(`<html><body><p id="text">正文</p><a id="link" href="#x">链接</a><note id="footnote">脚注</note></body></html>`);
   const text = document.getElementById("text")!;
   const link = document.getElementById("link")!;
   const footnote = document.getElementById("footnote")!;
   const onTap = vi.fn();
-  const cleanup = installPlainTap(document, { onTap, claimsRepeatClick });
+  const cleanup = installPlainTap(document, { onTap, claimsRepeatClick, onPress });
   const touch = (type: "touchstart" | "touchmove" | "touchend" | "touchcancel", x: number, y: number, target: Element = text) => {
     const event = new (document.defaultView as any).Event(type, { bubbles: true, cancelable: true });
     const point = { clientX: x, clientY: y };
@@ -101,5 +102,17 @@ describe("plain mouse click", () => {
     expect(click(40, 200, { detail: 2 }).defaultPrevented).toBe(true);
     expect(click(300, 200, { detail: 2 }).defaultPrevented).toBe(false);
     expect(onTap).toHaveBeenCalledTimes(3);
+  });
+
+  it("reports a press that may become a tap, but not on links or footnotes", () => {
+    const onPress = vi.fn();
+    const { click, link, footnote } = setup(undefined, onPress);
+    click(40, 200);
+    expect(onPress).toHaveBeenCalledTimes(1);
+    expect(onPress.mock.calls[0][0]).toMatchObject({ clientX: 40, clientY: 200 });
+    click(40, 200, { target: link });
+    click(40, 200, { target: footnote });
+    click(40, 200, { button: 2 });
+    expect(onPress).toHaveBeenCalledTimes(1);
   });
 });

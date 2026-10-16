@@ -24,6 +24,8 @@ export interface PlainTapHandlers {
   isBlankImageTap?: (target: Element | null, point: PlainTapPoint) => boolean;
   /** A double/triple click here turns pages, so it must not select a word. */
   claimsRepeatClick?: (point: PlainTapPoint) => boolean;
+  /** Primary mouse press that may become a tap (e.g. prepare a page turn before the click). */
+  onPress?: (point: PlainTapPoint) => void;
 }
 
 const MOVE_TOLERANCE_PX = 10;
@@ -121,6 +123,7 @@ export function installPlainTap(doc: Document, handlers: PlainTapHandlers): () =
     mouseTracking = true;
     mouseX = event.clientX;
     mouseY = event.clientY;
+    handlers.onPress?.(event);
   };
 
   const onMouseMove = (event: MouseEvent): void => {

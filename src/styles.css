@@ -1010,7 +1010,8 @@ select option {
   }
 }
 
-/* 左右边缘命中区常驻；反馈只按最后一次操作保持/淡出。
+/* 左右边缘翻页带只做视觉反馈，不接收点击：带下的脚注/链接照常可点，翻页由正文
+   plainTap 和宿主空白点击按同一几何路由。反馈只按最后一次操作保持/淡出。
    A15：让出最上面 56px（书签丝带挂在那里），与 readerTapRegions 的 TAP_REGION_TOP_INSET_PX 一致。 */
 .edge-turn-zone {
   position: absolute;
@@ -1023,10 +1024,9 @@ select option {
   display: flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
   user-select: none;
   -webkit-user-select: none;
-  pointer-events: auto;
+  pointer-events: none;
 }
 
 .edge-turn-prev {
