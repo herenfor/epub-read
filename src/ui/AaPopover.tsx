@@ -22,6 +22,7 @@ import {
 } from "./readerIcons";
 import "./aaPopover.css";
 import { useUiText } from "./localization/UiLanguageProvider";
+import { formatFontSizePx } from "./fontSizeDisplay";
 import type { PlainMessageKey } from "./localization/core";
 
 const TURN_ANIMATION_OPTIONS: ReadonlyArray<{ value: TurnAnimation; labelKey: PlainMessageKey }> = [
@@ -506,8 +507,8 @@ export const AaPopover = React.memo(function AaPopover({
         >
           <span className="aa-stepper-text-small">{t("aa.fontSize.small")}</span>
         </button>
-        <span className="aa-stepper-val" title={t("aa.fontSize.current", { px: fontSize })}>
-          {fontSize}px
+        <span className="aa-stepper-val" title={t("aa.fontSize.current", { px: formatFontSizePx(fontSize) })}>
+          {formatFontSizePx(fontSize)}px
         </span>
         <button
           type="button"
