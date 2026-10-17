@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { emptyOrganization, type LibraryOrganization } from "./libraryOrganization";
-import { measureShelfGridGeometry, ShelfView, type ShelfViewProps } from "./ShelfView";
+import { measureShelfGridGeometry, measureShelfListGeometry, ShelfView, type ShelfViewProps } from "./ShelfView";
 import type { ShelfEntry } from "./shelf";
 import { createReactDomHarness } from "../test/reactDomHarness";
 
@@ -183,5 +183,34 @@ describe("书架最后收口：前缀所有权与缩放后字母定位", () => {
     } finally {
       await dom.dispose();
     }
+  });
+});
+
+describe("list view geometry", () => {
+  it("starts the book area after the folder rows and steps by the real row pitch", () => {
+    const dom = createReactDomHarness();
+    const doc = dom.container.ownerDocument;
+    const container = doc.createElement("div");
+    container.innerHTML = `<table><tbody>
+      <tr class="shelf-table-row folder-row" data-shelf-target="folder"></tr>
+      <tr class="shelf-table-book-start"></tr>
+      <tr class="shelf-table-row" data-shelf-target="book"></tr>
+      <tr class="shelf-table-row" data-shelf-target="book"></tr>
+    </tbody></table>`;
+    const tops = new Map<Element, number>([
+      [container, 50],
+      [container.querySelector(".shelf-table-book-start")!, 350],
+      ...[...container.querySelectorAll("tr[data-shelf-target=book]")].map((row, i) => [row, 350 + i * 60.5] as [Element, number]),
+    ]);
+    for (const [el, top] of tops) {
+      Object.defineProperty(el, "getBoundingClientRect", { value: () => rect(top, 60.5), configurable: true });
+    }
+    Object.defineProperty(container, "scrollTop", { value: 100, configurable: true });
+    try {
+      // Spacer top (350) - container top (50) + scrollTop (100); its own virtual height does not count.
+      expect(measureShelfListGeometry(container)).toEqual({ columns: 1, rowStep: 60.5, contentTop: 400 });
+      container.querySelectorAll("tr[data-shelf-target=book]").forEach((row) => row.remove());
+      expect(measureShelfListGeometry(container)).toBeNull();
+    } finally { void dom.dispose(); }
   });
 });
