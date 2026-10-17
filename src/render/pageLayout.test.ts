@@ -4,6 +4,7 @@ import {
   autoPageMarginsPx,
   computePagedGeometry,
   normalizePageOptions,
+  wideAutoSideMarginPx,
 } from "./pageLayout";
 
 describe("normalizePageOptions", () => {
@@ -64,6 +65,17 @@ describe("normalizePageOptions", () => {
     expect(autoPageMarginsPx(16, true)).toEqual({ top: 42, bottom: 34, left: 20, right: 20 });
     expect(autoPageMarginsPx(12, true).left).toBe(16);
     expect(autoPageMarginsPx(30, true).left).toBe(28);
+  });
+
+  it("gives wide single pages side room only when the default measure fills the page", () => {
+    // Tablet landscape at 32px: 40em = 1280px is wider than the 1194px page.
+    expect(wideAutoSideMarginPx(32, 1194)).toBe(28);
+    // The centred measure already leaves room: legacy 0, text does not move.
+    expect(wideAutoSideMarginPx(20, 1194)).toBe(0);
+    expect(wideAutoSideMarginPx(20, 1600)).toBe(0);
+    // Continuous at the switch: 25px from the edge either way.
+    expect(wideAutoSideMarginPx(20, 850)).toBe(0);
+    expect(wideAutoSideMarginPx(20, 849)).toBe(25);
   });
 });
 
