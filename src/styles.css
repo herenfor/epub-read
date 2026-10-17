@@ -6313,3 +6313,21 @@ select option {
   transition: none !important;
   will-change: transform;
 }
+
+/* A16 第二阶段：显示层。预备层保留布局但不可见、不接指针；层间联动时揭开相邻层并裁掉视口外部分。 */
+.reader-layer {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+.reader-layer[data-role="standby"] {
+  visibility: hidden;
+  pointer-events: none;
+}
+.reader-layer[data-seam-reveal] {
+  visibility: visible;
+}
+.reader-presentation-host[data-chapter-seam] { overflow: clip; }
+.reader-presentation-host[data-chapter-seam] .reader-layer { will-change: transform; }

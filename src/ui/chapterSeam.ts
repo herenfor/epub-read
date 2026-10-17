@@ -260,3 +260,16 @@ export class ChapterSeam {
     this.options.onFault(error);
   }
 }
+
+/**
+ * 外层显示层之间的联动（A16 第二阶段：普通视图与 A13 并排组之间）。由外层创建、显示
+ * 相邻层并在落定后提交换章；当前显示只用 seam 驱动拖动与命令。
+ */
+export interface ExternalSeam {
+  seam: ChapterSeam;
+  targetIndex: number;
+  /** 本次调用新建的联动；false 表示接到了已在进行的同一次联动（不能替别人取消）。 */
+  fresh: boolean;
+  /** 被显式定位、暂停或退出打断：没落定就撤平移、收回相邻层；已落定的交给外层接管。 */
+  cancel(): void;
+}

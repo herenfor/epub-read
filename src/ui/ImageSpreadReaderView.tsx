@@ -1,5 +1,5 @@
 import { effectivePageProgression } from "../render/settings";
-import { forwardRef, useImperativeHandle, useRef, useState, type ForwardRefExoticComponent, type RefAttributes } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type ForwardRefExoticComponent, type RefAttributes } from "react";
 import { nextLinearIndex } from "../core/book";
 import type { ChapterState } from "../render/paginator";
 import type { ReaderHandle, ReaderViewProps } from "./ReaderView";
@@ -7,6 +7,7 @@ import type { SingleLeafSpread } from "./singleLeafSpreads";
 import { EdgeTurnZone } from "./EdgeTurnZone";
 import { edgeFeedbackKeyOf, edgeTurnZoneSpecs, ReaderTurnOwnerContext, routeHostBlankTurn, useReaderTapRouting } from "./readerTapRouting";
 import { WheelTurnAccumulator } from "./turnIntent";
+import type { ExternalSeam } from "./chapterSeam";
 
 interface Props extends ReaderViewProps {
   spread: SingleLeafSpread;
@@ -55,12 +56,45 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
     const { book, spread } = latest.current;
     return nextLinearIndex(book, dir === 1 ? spread.right ?? spread.left : spread.left, dir);
   };
+  /** A16 第二阶段：本组发起的跨层联动（叶子里的拖动由叶子自己的视图持有）。 */
+  const pairSeam = useRef<ExternalSeam | null>(null);
+  const seamInputId = useRef(0);
+  const livePairSeam = () => pairSeam.current && !pairSeam.current.seam.done ? pairSeam.current : null;
+  const cancelPairSeam = () => {
+    const seam = livePairSeam();
+    pairSeam.current = null;
+    seam?.cancel();
+  };
   const turn = (dir: 1 | -1) => {
     const p = latest.current;
     if (p.inputPaused || displayed.current.size < (p.spread.right === null ? 1 : 2)) return;
+    // 联动进行中：命令改变目标或反向；越界的同向命令不再连跨。
+    const live = livePairSeam();
+    if (live) {
+      live.seam.turn(++seamInputId.current, dir);
+      return;
+    }
     const target = neighbor(dir);
-    if (target >= 0) p.onRequestChapter(target, dir === -1 ? { atEnd: true } : undefined);
+    if (target < 0) return;
+    // 相邻显示已在外层排好：两层一起滑过去，落定后由外层提交换章。
+    const external = p.externalSeam?.(dir) ?? null;
+    if (external) {
+      const result = external.seam.turn(++seamInputId.current, dir);
+      if (result === "moving") {
+        pairSeam.current = external;
+        return;
+      }
+      if (!external.fresh) return;
+      external.cancel();
+    }
+    p.onRequestChapter(target, dir === -1 ? { atEnd: true } : undefined);
   };
+  useEffect(() => {
+    if (props.inputPaused) cancelPairSeam();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- cancelPairSeam only touches refs.
+  }, [props.inputPaused]);
+  // 叶子里的拖动在章边接到同一个外层联动（叶子不预读，没有自己的相邻章）。
+  const leafExternalSeam = (dir: 1 | -1): ExternalSeam | null => latest.current.externalSeam?.(dir) ?? null;
   // Body taps in either leaf turn the pair, like its outer bands.
   const turnRef = useRef(turn);
   turnRef.current = turn;
@@ -74,14 +108,17 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
     },
     nextPage: () => turn(1),
     prevPage: () => turn(-1),
-    setPage: (page) => active()?.setPage(page),
+    setPage: (page) => { cancelPairSeam(); active()?.setPage(page); },
     scrollToRatio: (ratio) => active()?.scrollToRatio?.(ratio),
-    seekContentFraction: (target, token) => active()?.seekContentFraction?.(target, token),
+    seekContentFraction: (target, token) => { cancelPairSeam(); active()?.seekContentFraction?.(target, token); },
     diagnose: () => `image spread ${latest.current.spread.left}/${latest.current.spread.right ?? "blank"}\n${active()?.diagnose() ?? ""}`,
     getReadingAnchor: () => active()?.getReadingAnchor() ?? null,
     resolveBookmarkPage: (bookmark) => active()?.resolveBookmarkPage?.(bookmark) ?? null,
     // Leaf order is reading order: the first leaf is lane 0 wherever it sits.
-    pageMotionIdle: () => [leftHandle.current, rightHandle.current].every((leaf) => leaf?.pageMotionIdle?.() ?? true),
+    pageMotionIdle: () => livePairSeam() === null &&
+      [leftHandle.current, rightHandle.current].every((leaf) => leaf?.pageMotionIdle?.() ?? true),
+    // 一组只有一屏：排好并显示就绪就能作为联动的任一侧。
+    seamReady: () => readyRef.current,
     screenBookmarks: (bookmarks) => {
       const leaves = [leftHandle.current, rightHandle.current];
       const pages = leaves.flatMap((leaf, lane) => (leaf?.screenBookmarks?.(bookmarks)?.pages ?? [])
@@ -94,16 +131,16 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
       const snapshot = active()?.readPositionSnapshot(options);
       return snapshot ? { ...snapshot, state: spreadState(snapshot.state) } : null;
     },
-    jumpToAnchor: (anchor) => active()?.jumpToAnchor(anchor),
-    navigateWithinCurrentChapter: (options) => active()?.navigateWithinCurrentChapter(options) ?? false,
-    navigateToSearchTarget: (request) => active()?.navigateToSearchTarget(request) ?? "unresolved",
+    jumpToAnchor: (anchor) => { cancelPairSeam(); active()?.jumpToAnchor(anchor); },
+    navigateWithinCurrentChapter: (options) => { cancelPairSeam(); return active()?.navigateWithinCurrentChapter(options) ?? false; },
+    navigateToSearchTarget: (request) => { cancelPairSeam(); return active()?.navigateToSearchTarget(request) ?? "unresolved"; },
     getFootnoteMarkerRect: () => null,
     dismissFootnote: () => active()?.dismissFootnote(),
     pinFootnote: () => active()?.pinFootnote(),
     setFootnoteOverlayHover: (over) => active()?.setFootnoteOverlayHover(over),
     clearTextSelection: () => active()?.clearTextSelection(),
-    scrollToStart: () => active()?.scrollToStart(),
-    scrollToEnd: () => active()?.scrollToEnd(),
+    scrollToStart: () => { cancelPairSeam(); active()?.scrollToStart(); },
+    scrollToEnd: () => { cancelPairSeam(); active()?.scrollToEnd(); },
     atScrollBoundary: (direction) => active()?.atScrollBoundary(direction) ?? true,
     scrollByViewport: (direction) => active()?.scrollByViewport(direction) ?? false,
     scrollByDelta: (delta) => active()?.scrollByDelta(delta),
@@ -159,6 +196,8 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
         restoreTicket={selected ? props.restoreTicket : null}
         startAtEnd={selected ? props.startAtEnd : { nonce: 0, atEnd: false }}
         notes={selected ? props.notes : props.notesForChapter?.(index) ?? []}
+        adoptedNavigation={selected ? props.adoptedNavigation : null}
+        externalSeam={props.externalSeam ? leafExternalSeam : undefined}
         inputPaused={props.inputPaused || !ready}
         onPageState={(state) => {
           states.current.set(index, state);
