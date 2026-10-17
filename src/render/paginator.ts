@@ -2594,6 +2594,11 @@ export class ChapterPaginator {
     return this.flowProgression;
   }
 
+  /** 本章按竖排原生流排版（宿主的章边联动等按横向屏步长的功能据此避让）。 */
+  get flowsVertically(): boolean {
+    return Boolean(this.verticalMode);
+  }
+
   get spreadLayoutSnapshot(): SpreadLayout | null {
     return this.spreadLayout;
   }
