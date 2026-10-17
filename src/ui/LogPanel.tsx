@@ -5,17 +5,20 @@ export interface LogItem {
   kind: string;
   source: string;
   message: string;
+  resolved?: boolean;
 }
 
 export interface LogPanelProps {
   items: LogItem[];
   /** 渲染诊断文本（可选） */
   diagText?: string | null;
+  onRefresh?(): void;
   onClose(): void;
 }
 
 export function LogPanel(props: LogPanelProps) {
   const { t, tn } = useUiText();
+  const issueCount = props.items.filter((item) => !item.resolved).length;
   return (
     <>
       <div className="log-backdrop" onClick={props.onClose} aria-hidden="true" />
@@ -24,9 +27,10 @@ export function LogPanel(props: LogPanelProps) {
         <div className="log-head">
           <div className="drawer-title-wrap">
             <span>{t("log.title")}</span>
-            <span className={`log-badge${props.items.length > 0 ? " has-issues" : ""}`}>
-              {props.items.length > 0 ? tn("log.issues", props.items.length, { count: props.items.length }) : t("log.ok")}
+            <span className={`log-badge${issueCount > 0 ? " has-issues" : ""}`}>
+              {issueCount > 0 ? tn("log.issues", issueCount, { count: issueCount }) : t("log.ok")}
             </span>
+            {props.onRefresh && <button type="button" className="tb-btn" onClick={props.onRefresh}>{t("log.refresh")}</button>}
           </div>
           <button className="tb-btn tb-close" onClick={props.onClose} aria-label={t("log.close")} title={t("common.close")}>
             <CloseIcon size={14} />

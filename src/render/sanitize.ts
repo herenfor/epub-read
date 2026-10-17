@@ -27,8 +27,8 @@ export interface SanitizeOptions {
 export interface SanitizeResult {
   html: string;
   issues: string[];
-  /** 本章没有可用 URL 的书内资源路径（已去重）。路径即故障身份，由界面按
-   * 书会话聚合，并区分“书中不存在”与“存在但读取失败”。 */
+  /** 本章没有可用 URL 的书内资源路径（已去重），不等同读取失败；
+   * ResourceServer按本书实际请求状态区分缺失、按需未加载和失败。 */
   unresolvedResources: string[];
   /** 是否发生了解析降级（XML 失败转 HTML） */
   downgraded: boolean;

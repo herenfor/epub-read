@@ -85,6 +85,71 @@ function lazyBackgroundBook(style: string): Book {
   return b;
 }
 
+describe("ResourceServer diagnostic status", () => {
+  it("does not report deferred fonts as failures, and updates real failures after retry without reviving closed sessions", async () => {
+    const b = book();
+    const font = "OEBPS/Fonts/deferred.ttf";
+    const missing = "OEBPS/Fonts/missing.ttf";
+    const cancelled = "OEBPS/Fonts/cancelled.ttf";
+    for (const path of [font, cancelled]) b.resources.set(path, {
+      path, data: new Uint8Array(0), mediaType: "font/ttf", loaded: false,
+    });
+    const server = new ResourceServer(b, { mediaCacheMaxBytes: 4 });
+    const changed = vi.fn();
+    const unsubscribe = server.subscribeResourceIssues(changed);
+    try {
+      const rendered = await sanitizeChapter(`<html><head><style>
+        @font-face{font-family:unused;src:url('../Fonts/deferred.ttf')}
+        @font-face{font-family:absent;src:url('../Fonts/missing.ttf')}
+        </style></head><body><p>正文</p></body></html>`, {
+        basePath: "OEBPS/Text/ch1.xhtml", strictXml: true,
+        urlFor: (path) => server.urlFor(path), settings: DEFAULT_SETTINGS,
+      });
+      expect(rendered.unresolvedResources).toEqual([font, missing]);
+      server.reportUnresolvedResources(rendered.unresolvedResources);
+      expect(server.getResourceIssues()).toEqual([{ path: missing, kind: "missing", recovered: false }]);
+      const snapshot = server.getResourceIssues();
+      server.reportUnresolvedResources(rendered.unresolvedResources);
+      expect(server.getResourceIssues()).toBe(snapshot);
+      expect(changed).toHaveBeenCalledTimes(1);
+
+      b.ensureResources = async () => { throw new Error("extract failed"); };
+      await expect(server.ensureResources([font])).rejects.toThrow("extract failed");
+      expect(server.getResourceIssues()).toContainEqual({ path: font, kind: "unavailable", recovered: false, error: "extract failed" });
+      b.ensureResources = async () => {
+        const resource = b.resources.get(font)!;
+        resource.data = new Uint8Array([1, 2, 3]);
+        resource.loaded = true;
+      };
+      await server.ensureResources([font]);
+      expect(server.getResourceIssues()).toContainEqual({ path: font, kind: "unavailable", recovered: true, error: "extract failed" });
+
+      b.resources.set("pressure", { path: "pressure", data: new Uint8Array(4), mediaType: "image/png" });
+      b.ensureResources = async () => {};
+      await server.ensureResources(["pressure"]);
+      expect(b.resources.get(font)!.loaded).toBe(false);
+      const recoveredSnapshot = server.getResourceIssues();
+      server.reportUnresolvedResources([font]);
+      expect(server.getResourceIssues()).toBe(recoveredSnapshot);
+
+      b.ensureResources = async () => { throw new DOMException("cancelled", "AbortError"); };
+      await expect(server.ensureResources([cancelled])).rejects.toMatchObject({ name: "AbortError" });
+      expect(server.getResourceIssues()).toBe(recoveredSnapshot);
+
+      let rejectRead!: (error: Error) => void;
+      b.ensureResources = () => new Promise((_, reject) => { rejectRead = reject; });
+      const pending = server.ensureResources([cancelled]);
+      server.revokeAll();
+      rejectRead(new Error("late failure"));
+      await expect(pending).rejects.toThrow("late failure");
+      expect(server.getResourceIssues()).toEqual([]);
+    } finally {
+      unsubscribe();
+      server.revokeAll();
+    }
+  });
+});
+
 describe("ResourceServer authored background lifecycle", () => {
   it.each([
     `style="background-image:url('../Images/cover-bg.png');background-size:cover"`,
