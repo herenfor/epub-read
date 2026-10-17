@@ -462,6 +462,21 @@
   transform: translateX(16px);
 }
 
+/* 不可用的开关：整行文字变淡，开关不接指针（不显示可点手势、不响应点击）。 */
+.aa-switch-label:has(input:disabled) {
+  cursor: default;
+  pointer-events: none;
+}
+
+.aa-switch-label input:disabled + .aa-switch-track {
+  opacity: 0.45;
+}
+
+.aa-row-disabled .aa-toggle-text,
+.aa-row-disabled > .aa-section-label {
+  opacity: 0.45;
+}
+
 /* 高级选项折叠区 */
 .aa-advanced-container {
   margin-top: 4px;
