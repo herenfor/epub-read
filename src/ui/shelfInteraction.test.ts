@@ -252,6 +252,43 @@ describe("shelf menu and gesture lifecycle", () => {
     };
   }
 
+  it("exports the whole folder from its menu and dialog without including other books", async () => {
+    const onExportBooks = vi.fn();
+    const entries = [book("b1", "第一本"), book("b2", "第二本"), book("b3", "夹外书籍")];
+    const shelf = await mount({ entries, organization: folderOrganization(["b1", "b2"]), onExportBooks });
+    try {
+      const folder = () => shelf.dom.container.querySelector(`[data-folder-id="${FOLDER}"]`)!;
+      await shelf.dom.click(folder().querySelector(".shelf-card-more-btn")!);
+      const exportAction = () => [...shelf.menu()!.querySelectorAll<HTMLButtonElement>("button")]
+        .find((button) => button.textContent === "导出书籍")!;
+      expect(exportAction().disabled).toBe(false);
+      await shelf.rerender({ saveFileActive: true });
+      expect(exportAction().disabled).toBe(true);
+      await shelf.rerender({ lanTransferActive: true });
+      expect(exportAction().disabled).toBe(true);
+      await shelf.rerender({ busy: true });
+      expect(exportAction().disabled).toBe(true);
+      await shelf.rerender({});
+      await shelf.dom.click(exportAction());
+      expect(onExportBooks).toHaveBeenCalledTimes(1);
+      expect(onExportBooks.mock.calls[0][0].map((entry: ShelfEntry) => entry.id).sort()).toEqual(["b1", "b2"]);
+
+      await shelf.dom.run(() => { vi.advanceTimersByTime(1000); });
+      await shelf.dom.click(folder());
+      const dialogExport = () => shelf.doc.querySelector<HTMLButtonElement>(".shelf-folder-modal button[aria-label='导出书籍']")!;
+      await shelf.dom.click(dialogExport());
+      expect(onExportBooks).toHaveBeenCalledTimes(2);
+      expect(onExportBooks.mock.calls[1][0].map((entry: ShelfEntry) => entry.id).sort()).toEqual(["b1", "b2"]);
+
+      await shelf.rerender({ organization: folderOrganization([]) });
+      expect(dialogExport().disabled).toBe(true);
+      await shelf.dom.click(dialogExport());
+      expect(onExportBooks).toHaveBeenCalledTimes(2);
+    } finally {
+      await shelf.dom.dispose();
+    }
+  });
+
   it("a menu reopened while the old one closes is not unmounted by the old timer", async () => {
     let back: (() => boolean) | null = null;
     const shelf = await mount({ registerBackHandler: (handler) => { back = handler; } });

@@ -1875,6 +1875,8 @@ interface ShelfFolderModalProps {
   onOpenBook(id: string): void;
   onRename(folderId: string, currentName: string): void;
   onDissolve(folderId: string, folderName: string): void;
+  onExportBooks?(): void;
+  exportDisabled: boolean;
   onToggleFavorite(entry: ShelfEntry): void;
   onRequestMenu(target: ShelfMenuTarget, opener: ShelfMenuOpener): void;
   onLongPress(entry: ShelfEntry, kind: ShelfLongPress, point: { x: number; y: number }): void;
@@ -1924,6 +1926,18 @@ const ShelfFolderModal = memo(function ShelfFolderModal(props: ShelfFolderModalP
             <span className="shelf-folder-modal-count">{tn("shelfFolder.modal.count", books.length, { count: books.length })}</span>
           </div>
           <div className="shelf-folder-modal-actions">
+            {props.onExportBooks && (
+              <button
+                className="shelf-folder-modal-action-btn"
+                type="button"
+                title={t("bookExport.action")}
+                aria-label={t("bookExport.action")}
+                disabled={props.exportDisabled || books.length === 0}
+                onClick={props.onExportBooks}
+              >
+                <ExportIcon />
+              </button>
+            )}
             <button
               className="shelf-folder-modal-action-btn"
               type="button"
@@ -3129,6 +3143,12 @@ export function ShelfView(props: ShelfViewProps) {
     return { folderBooksMap: folderMap, unclassifiedBooks: unclassified, favoriteBooks: favorites };
   }, [organization, props.entries, activeFolders, sort]);
 
+  const bookExportDisabled = Boolean(props.busy || props.saveFileActive || props.lanTransferActive);
+  const handleExportFolderBooks = useCallback((folderId: string): void => {
+    const books = folderBooksMap.get(folderId) ?? [];
+    if (books.length > 0) props.onExportBooks?.(books);
+  }, [folderBooksMap, props.onExportBooks]);
+
   // Level 3 状态分流计数
   const { allCount, readingCount, unreadCount, finishedCount, favoriteCount } = useMemo(() => {
     const source = scope.type === "folder" ? (folderBooksMap.get(scope.folderId) ?? []) : props.entries;
@@ -3985,6 +4005,7 @@ export function ShelfView(props: ShelfViewProps) {
       if (action === "openFolder") handleOpenFolderModal(folder.id, session.trigger?.closest<HTMLElement>(".shelf-folder-card") ?? null);
       else if (action === "renameFolder") setRenameFolderTarget({ id: folder.id, name: folder.name });
       else if (action === "dissolveFolder") setDissolveFolderTarget({ id: folder.id, name: folder.name });
+      else if (action === "exportBook") handleExportFolderBooks(folder.id);
       return;
     }
     const entry = entriesByIdRef.current.get(target.id);
@@ -4039,7 +4060,7 @@ export function ShelfView(props: ShelfViewProps) {
         return;
       }
     }
-  }, [activeFolders, applyFavorite, closeMenu, handleOpenFolderModal, handleRemoveFromFolder, handleTouchLongPressSelect, props.onOpen, requestDelete]);
+  }, [activeFolders, applyFavorite, closeMenu, handleExportFolderBooks, handleOpenFolderModal, handleRemoveFromFolder, handleTouchLongPressSelect, props.onOpen, props.onExportBooks, requestDelete]);
 
   const menuView = useMemo(() => {
     if (!menu || menuTargetGone) return null;
@@ -4070,7 +4091,10 @@ export function ShelfView(props: ShelfViewProps) {
               </span>
             </div>
           : folder.name,
-        groups: toItems(shelfFolderActions()),
+        groups: toItems(shelfFolderActions({
+          canExport: Boolean(props.onExportBooks),
+          exportDisabled: bookExportDisabled || count === 0,
+        })),
       };
     }
     const entry = entriesById.get(menu.target.id);
@@ -4101,7 +4125,7 @@ export function ShelfView(props: ShelfViewProps) {
         : entry.title,
       groups: toItems(actions),
     };
-  }, [activeFolders, canOrganize, entriesById, folderBooksMap, menu, menuPending, menuTargetGone, organization, props.busy, props.importActive, selectionMode, t, thumbnailProvider, tn]);
+  }, [activeFolders, bookExportDisabled, canOrganize, entriesById, folderBooksMap, menu, menuPending, menuTargetGone, organization, props.busy, props.importActive, props.onExportBooks, props.saveFileActive, props.lanTransferActive, selectionMode, t, thumbnailProvider, tn]);
 
   const openMenuKey = menu && !menuClosing
     ? (menu.target.kind === "book" ? `${menu.target.surface}:${menu.target.id}` : `folder:${menu.target.id}`)
@@ -4683,6 +4707,20 @@ export function ShelfView(props: ShelfViewProps) {
                     </button>
                     {folderActiveMoreOpen && (
                       <div className="shelf-folder-active-menu">
+                        {props.onExportBooks && (
+                          <button
+                            className="shelf-folder-menu-item"
+                            type="button"
+                            disabled={bookExportDisabled || (folderBooksMap.get(currentFolder.id) ?? []).length === 0}
+                            onClick={() => {
+                              setFolderActiveMoreOpen(false);
+                              handleExportFolderBooks(currentFolder.id);
+                            }}
+                          >
+                            <ExportIcon />
+                            <span>{t("bookExport.action")}</span>
+                          </button>
+                        )}
                         <button
                           className="shelf-folder-menu-item"
                           type="button"
@@ -4710,6 +4748,18 @@ export function ShelfView(props: ShelfViewProps) {
                   </div>
                 ) : (
                   <>
+                    {props.onExportBooks && (
+                      <button
+                        className="shelf-folder-action-btn"
+                        type="button"
+                        disabled={bookExportDisabled || (folderBooksMap.get(currentFolder.id) ?? []).length === 0}
+                        onClick={() => handleExportFolderBooks(currentFolder.id)}
+                        title={t("bookExport.action")}
+                      >
+                        <ExportIcon />
+                        <span>{t("bookExport.action")}</span>
+                      </button>
+                    )}
                     <button
                       className="shelf-folder-action-btn"
                       type="button"
@@ -5107,6 +5157,8 @@ export function ShelfView(props: ShelfViewProps) {
             onOpenBook={props.onOpen}
             onRename={(fId, fName) => setRenameFolderTarget({ id: fId, name: fName })}
             onDissolve={(fId, fName) => setDissolveFolderTarget({ id: fId, name: fName })}
+            onExportBooks={props.onExportBooks ? () => handleExportFolderBooks(folder.id) : undefined}
+            exportDisabled={bookExportDisabled}
             onToggleFavorite={handleToggleFavorite}
             onRequestMenu={requestMenu}
             onLongPress={handleFolderModalLongPress}
