@@ -37,6 +37,7 @@ export function useReaderSettings() {
       customCss: saved.customCss,
       forceHorizontal: saved.forceHorizontal === true,
       preloadNextChapter: saved.preloadNextChapter === true,
+      seamlessChapterTurn: saved.seamlessChapterTurn === true,
       turnAnimation: normalizeTurnAnimation(saved.turnAnimation),
       pageDirection: normalizePageDirection(saved.pageDirection),
       // Normalize page options only at the saved-settings boundary.
@@ -95,6 +96,7 @@ export function useReaderSettings() {
       setForceHorizontal: (enabled: boolean) => setSettings((s2) => ({ ...s2, forceHorizontal: enabled })),
       setPageDirection: (pageDirection: PageDirectionSetting) => setSettings((s2) => ({ ...s2, pageDirection })),
       setPreloadNextChapter: (enabled: boolean) => setSettings((s2) => ({ ...s2, preloadNextChapter: enabled })),
+      setSeamlessChapterTurn: (enabled: boolean) => setSettings((s2) => ({ ...s2, seamlessChapterTurn: enabled })),
       setCustomCss: (css: string) => setSettings((s2) => ({ ...s2, customCss: css })),
       setForceFontOverride: (enabled: boolean) => setSettings((s) => ({ ...s, forceFontOverride: enabled })),
       selectSystemFont: (family: string) =>

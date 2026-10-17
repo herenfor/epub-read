@@ -71,6 +71,8 @@
   "aa.motion.hint": "Removes frosted glass and hover effects and shortens panel animations; page turns are unaffected",
   "aa.preload": "High-Performance Preloading",
   "aa.preload.warning": "Higher hardware requirements",
+  "aa.seamlessTurn": "Slide Between Chapters",
+  "aa.seamlessTurn.hint": "At the end of a chapter, the next one slides in like any page turn. Needs High-Performance Preloading and the Slide animation",
   "aa.css": "Custom CSS",
   "aa.css.placeholder": "/* Custom injected CSS */",
   "aa.css.save": "Save & Apply CSS",

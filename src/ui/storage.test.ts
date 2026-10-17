@@ -43,6 +43,7 @@ describe("saved reader settings", () => {
       wordSpacingPx: 0.3,
       forceHorizontal: true,
       preloadNextChapter: true,
+      seamlessChapterTurn: true,
       turnAnimation: "fade" as const,
       readingMode: "scroll" as const,
       pageMarginsPx: { left: 40, right: 40, top: 28, bottom: 28 },
@@ -57,7 +58,7 @@ describe("saved reader settings", () => {
       forceFontOverride: true,
       customCss: "p { text-indent: 2em; }", lineHeight: 1.7, fontWeight: 500,
       letterSpacingPx: 0.2, wordSpacingPx: 0.3,
-      forceHorizontal: true, preloadNextChapter: true, turnAnimation: "fade", pageDirection: "book",
+      forceHorizontal: true, preloadNextChapter: true, seamlessChapterTurn: true, turnAnimation: "fade", pageDirection: "book",
       readingMode: "scroll", pageMarginsPx: { left: 40, right: 40, top: 28, bottom: 28 },
       columnsPerView: 2, gapPx: 32, spreadGapMode: "manual",
     });
@@ -69,7 +70,7 @@ describe("saved reader settings", () => {
 
   it("retains the previous normalization when optional legacy fields are absent", () => {
     expect(toSavedReaderSettings({ fontSizePx: 16, theme: "light", gapPx: 24 }, 1)).toMatchObject({
-      forceHorizontal: false, preloadNextChapter: false, turnAnimation: "slide",
+      forceHorizontal: false, preloadNextChapter: false, seamlessChapterTurn: false, turnAnimation: "slide",
       readingMode: "paginated", columnsPerView: 1, spreadGapMode: "auto",
     });
   });

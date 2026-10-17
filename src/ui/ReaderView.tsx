@@ -446,7 +446,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     if (ribbonSettleTimerRef.current) clearTimeout(ribbonSettleTimerRef.current);
     ribbonSettleTimerRef.current = null;
     // 运动在途时画出来的是半路位置（会在新页某处闪一下）；保持隐藏，等落定的 ready 再画。
-    if (paginatorRef.current?.pageMotionIdle === false) {
+    if (paginatorRef.current?.pageMotionIdle === false || seamRef.current) {
       markRibbonMotion();
       return;
     }
@@ -531,6 +531,8 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     drag: { ticket: number; samples: Array<{ t: number; x: number }> } | null;
     pending: 1 | -1 | null;
   } | null>(null);
+  /** 升格后补执行的那一次同向翻页；只属于升格时的槽与导航，定位/退出即作废。 */
+  const seamReplayRef = useRef<{ timer: ReturnType<typeof setTimeout>; slot: PaginatorSlot; navigation: number } | null>(null);
   nativeSnapWantedRef.current = resolvedTurnAnimation() === "slide";
 
   /** 淡入模式的落位动画；滑动模式由 startSlideTurn / 跨章滑入自行绘制。 */
@@ -1517,7 +1519,8 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   // ---- A16 章边联动：只在高性能预读下、相邻章已在缓存槽排好时使用 ----
   /** 当前章静止在 direction 一侧的章边，且相邻章的缓存槽可以直接拼上来。 */
   const seamNeighborSlot = (direction: 1 | -1): PaginatorSlot | null => {
-    if (!preloadAllowedRef.current || resolvedTurnAnimation() !== "slide" || props.leafSlot || inputPausedRef.current) {
+    if (!preloadAllowedRef.current || latestRenderSettingsRef.current.seamlessChapterTurn !== true ||
+      resolvedTurnAnimation() !== "slide" || props.leafSlot || inputPausedRef.current) {
       return null;
     }
     const current = activeSlotRef.current;
@@ -1546,7 +1549,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     return neighborPaginator.pageProgression === p.pageProgression ? slot : null;
   };
 
-  /** 撤掉两侧平移与联动标记；借用的槽若没有升格，退回隐藏。 */
+  /** 撤掉两侧平移与联动标记；借用的槽若没有升格，退回隐藏。迟到的落定回调随会话一起作废。 */
   const abortSeam = (): void => {
     const entry = seamRef.current;
     if (!entry) return;
@@ -1561,6 +1564,14 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     }
   };
 
+  /** 外部意图（显式定位、暂停输入、退出）取消联动与待补的那一次翻页。 */
+  const cancelSeam = (): void => {
+    const replay = seamReplayRef.current;
+    seamReplayRef.current = null;
+    if (replay) clearTimeout(replay.timer);
+    abortSeam();
+  };
+
   /**
    * 联动落定。回到当前章：撤掉即可，什么都不提交。停在相邻章：与普通跨章同样的
    * 记账与提交，但没有滑出/滑入（相邻章已在屏上）；spineIndex effect 升格接管。
@@ -1570,6 +1581,10 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     if (!entry || entry.seam !== seam) return;
     if (!landed) {
       abortSeam();
+      // 弹回也是一次落定：重新发布当前状态，后台让路的安静期从真实结束算起；丝带画回来。
+      const state = paginatorRef.current?.getStateSnapshot();
+      if (state?.status === "ready") onPageStateRef.current(state);
+      refreshRibbonsRef.current();
       return;
     }
     entry.landed = true;
@@ -1601,7 +1616,10 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       progression: p.pageProgression,
       touch: prefersCoarsePointer(),
       onSettled: (landed) => { if (seam) settleSeam(seam, landed); },
-      onFault: (error) => console.warn("[reader] chapter seam fault", error),
+      onFault: (error) => {
+        console.warn("[reader] chapter seam fault", error);
+        if (seamRef.current?.seam === seam) cancelSeam();
+      },
     });
     slot.iframe.style.removeProperty("visibility");
     slot.iframe.style.zIndex = "1";
@@ -1685,7 +1703,18 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     const seam = seamRef.current;
     const seamPending = seam?.slot === next ? seam.pending : null;
     if (seam?.slot === next) abortSeam();
-    if (seamPending !== null) setTimeout(() => turnPageRef.current(seamPending, "ui"), 0);
+    if (seamPending !== null) {
+      const navigation = chapterNavigationRef.current;
+      const timer = setTimeout(() => {
+        const replay = seamReplayRef.current;
+        if (replay?.timer !== timer) return;
+        seamReplayRef.current = null;
+        if (activeSlotRef.current === next && chapterNavigationRef.current === navigation) {
+          turnPageRef.current(seamPending, "ui");
+        }
+      }, 0);
+      seamReplayRef.current = { timer, slot: next, navigation };
+    }
     const promotedState = next.paginator.getStateSnapshot();
     if (promotedState.status !== "ready") return false;
     next.state = promotedState;
@@ -1749,6 +1778,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     paginatorRef.current = p;
     setActiveFrameVisual("primary");
     return () => {
+      cancelSeam();
       layoutCoordinatorRef.current.invalidate();
       resetFullBookWarmup();
       clearPreloadTimer();
@@ -2405,7 +2435,11 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   }, [book, settings.readingMode]);
 
   useEffect(() => {
-    if (props.inputPaused) updateSwipePreviewRef.current(null);
+    if (!props.inputPaused) return;
+    updateSwipePreviewRef.current(null);
+    // 打开阻断输入的面板/图片查看：进行中的章边联动作废，不再请求相邻章。
+    cancelSeam();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- cancelSeam only touches refs.
   }, [props.inputPaused]);
 
   useEffect(() => {
@@ -2428,6 +2462,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       },
       setPage(i: number) {
         pauseBackgroundWarmupForInput();
+        cancelSeam();
         slideAnimRef.current?.finish();
         const p = paginatorRef.current;
         if (p && i !== p.currentPage) {
@@ -2470,7 +2505,8 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
           : null;
       },
       pageMotionIdle() {
-        return paginatorRef.current?.pageMotionIdle ?? true;
+        // A16 联动在外层移动两个 iframe，章内会话此时是 idle；联动到升格交接完成前都算在途。
+        return (paginatorRef.current?.pageMotionIdle ?? true) && seamRef.current === null;
       },
       spreadLeafLayout() {
         const p = paginatorRef.current;
@@ -2493,10 +2529,12 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       },
       jumpToAnchor(anchor) {
         pauseBackgroundWarmupForInput();
+        cancelSeam();
         paginatorRef.current?.jumpToAnchor(anchor);
       },
       navigateWithinCurrentChapter(options) {
         pauseBackgroundWarmupForInput();
+        cancelSeam();
         const paginator = paginatorRef.current;
         if (!paginator) return false;
         const navigated = paginator.navigateWithinCurrentChapter(options);
@@ -2505,6 +2543,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       },
       navigateToSearchTarget(request) {
         pauseBackgroundWarmupForInput();
+        cancelSeam();
         const chapterPath = request.chapterPath;
         const activePath = activeSlotRef.current?.path;
         if (chapterPath && activePath && chapterPath !== activePath) return "unresolved";
@@ -2540,9 +2579,11 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         paginatorRef.current?.clearTextSelection();
       },
       scrollToStart() {
+        cancelSeam();
         paginatorRef.current?.scrollToStart();
       },
       scrollToEnd() {
+        cancelSeam();
         paginatorRef.current?.scrollToEnd();
       },
       atScrollBoundary(direction) {
@@ -2784,10 +2825,13 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
   const pair = requestedSpread && imageGeometry.columns === 2 ? planned : null;
   // A16：会显示为 A13 并排组的相邻章换的是另一种视图，章边联动不进入；分类未知时也不进入。
   const spreadsShown = requestedSpread && imageGeometry.columns === 2;
+  // 只在章边联动可能发生时（高性能预读 + 连续滑动 + 滑动动画）才多分类前后章，普通模式不增加读取。
+  const seamPossible = props.settings.preloadNextChapter === true && props.settings.seamlessChapterTurn === true &&
+    normalizeTurnAnimation(props.settings.turnAnimation) === "slide" && !prefersReducedMotion();
   const seamTargetEligible = useCallback((index: number) => !spreadsShown || imageSpreads.peek(index) === null,
     [spreadsShown, imageSpreads]);
   useEffect(() => {
-    if (!spreadsShown) return;
+    if (!spreadsShown || !seamPossible) return;
     // 提前分类前后相邻章（只读 XHTML），让章边联动知道它们是否会并排。
     const controller = new AbortController();
     for (const direction of [1, -1] as const) {
@@ -2797,7 +2841,7 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
       }
     }
     return () => controller.abort();
-  }, [imageSpreads, props.book, props.spineIndex, spreadsShown]);
+  }, [imageSpreads, props.book, props.spineIndex, spreadsShown, seamPossible]);
   const tapGeometry = useMemo(() => createReaderTapGeometry(width, props.tapRegions), [width, props.tapRegions]);
   const bookProgression = effectivePageProgression(props.book.pageProgression, props.settings, props.book.fixedLayout);
   // 点击翻页区按本章实际方向映射（竖排书元数据没写方向时与元数据不同）。

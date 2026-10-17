@@ -107,6 +107,9 @@ export interface AaPopoverProps {
   preloadNextChapter?: boolean;
   preloadNextChapterDisabled?: boolean;
   onPreloadNextChapterChange?: (enabled: boolean) => void;
+  /** A16 章节间连续滑动；只有高性能预读开启时可以打开。 */
+  seamlessChapterTurn?: boolean;
+  onSeamlessChapterTurnChange?: (enabled: boolean) => void;
   customCss?: string;
   onCustomCssChange?: (css: string) => void;
   onResetDefaults?: () => void;
@@ -235,6 +238,8 @@ export const AaPopover = React.memo(function AaPopover({
   preloadNextChapter = false,
   preloadNextChapterDisabled = false,
   onPreloadNextChapterChange,
+  seamlessChapterTurn = false,
+  onSeamlessChapterTurnChange,
   customCss = "",
   onCustomCssChange,
   onResetDefaults,
@@ -249,6 +254,8 @@ export const AaPopover = React.memo(function AaPopover({
 }: AaPopoverProps) {
   const [activeTab, setActiveTab] = useState<"quick" | "detailed">("quick");
   const { t } = useUiText();
+  // 连续滑动依附高性能预读：预读关闭（或固定版式不可用）时这个开关也关着、不可点。
+  const seamlessAvailable = preloadNextChapter && !preloadNextChapterDisabled;
   const [uiMotion, setUiMotion] = useUiMotion();
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [cssDraft, setCssDraft] = useState(customCss);
@@ -859,6 +866,24 @@ export const AaPopover = React.memo(function AaPopover({
                       </div>
                     )}
 
+                    {onSeamlessChapterTurnChange && (
+                      <div className="aa-advanced-row">
+                        <div className="aa-toggle-text">
+                          <span>{t("aa.seamlessTurn")}</span>
+                          <span className="aa-detail-sub">{t("aa.seamlessTurn.hint")}</span>
+                        </div>
+                        <label className="aa-switch-label">
+                          <input
+                            type="checkbox"
+                            checked={seamlessChapterTurn && seamlessAvailable}
+                            disabled={!seamlessAvailable}
+                            onChange={(e) => onSeamlessChapterTurnChange(e.target.checked)}
+                          />
+                          <span className="aa-switch-track" />
+                        </label>
+                      </div>
+                    )}
+
                     {onCustomCssChange && (
                       <div className="aa-css-editor-section">
                         <span className="aa-css-label">{t("aa.css")}</span>
@@ -1414,6 +1439,25 @@ export const AaPopover = React.memo(function AaPopover({
                       checked={preloadNextChapter}
                       disabled={preloadNextChapterDisabled}
                       onChange={(e) => onPreloadNextChapterChange(e.target.checked)}
+                    />
+                    <span className="aa-switch-track" />
+                  </label>
+                </div>
+              )}
+
+              {/* A16 章节间连续滑动：依附高性能预读 */}
+              {onSeamlessChapterTurnChange && (
+                <div className="aa-section aa-control-row aa-toggle-row">
+                  <div className="aa-toggle-text">
+                    <span className="aa-section-label">{t("aa.seamlessTurn")}</span>
+                    <span className="aa-detail-sub">{t("aa.seamlessTurn.hint")}</span>
+                  </div>
+                  <label className="aa-switch-label">
+                    <input
+                      type="checkbox"
+                      checked={seamlessChapterTurn && seamlessAvailable}
+                      disabled={!seamlessAvailable}
+                      onChange={(e) => onSeamlessChapterTurnChange(e.target.checked)}
                     />
                     <span className="aa-switch-track" />
                   </label>

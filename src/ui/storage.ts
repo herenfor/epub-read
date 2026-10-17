@@ -72,6 +72,8 @@ export interface SavedSettings {
   forceHorizontal?: boolean;
   /** 是否预先准备下一章以加快顺序切换；旧设置缺省为 false */
   preloadNextChapter?: boolean;
+  /** 章节间连续滑动（需高性能预读）；旧设置缺省为 false。只存本机，不进存档。 */
+  seamlessChapterTurn?: boolean;
   /** 翻页动画；旧设置缺省为滑动 */
   turnAnimation?: "slide" | "fade" | "none";
   /** 翻页方向；旧设置缺省为跟随书籍。只存本机，不进存档。 */
@@ -105,6 +107,7 @@ export function toSavedReaderSettings(settings: ReaderSettings, uiScale: number)
     customCss: settings.customCss,
     forceHorizontal: settings.forceHorizontal === true,
     preloadNextChapter: settings.preloadNextChapter === true,
+    seamlessChapterTurn: settings.seamlessChapterTurn === true,
     turnAnimation: normalizeTurnAnimation(settings.turnAnimation),
     pageDirection: normalizePageDirection(settings.pageDirection),
     readingMode: settings.readingMode === "scroll" ? "scroll" : "paginated",

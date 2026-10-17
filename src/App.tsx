@@ -5487,6 +5487,8 @@ export default function App() {
                 preloadNextChapter={settings.preloadNextChapter === true}
                 preloadNextChapterDisabled={book?.fixedLayout === true}
                 onPreloadNextChapterChange={settingsActions.setPreloadNextChapter}
+                seamlessChapterTurn={settings.seamlessChapterTurn === true}
+                onSeamlessChapterTurnChange={settingsActions.setSeamlessChapterTurn}
                 customCss={settings.customCss}
                 onCustomCssChange={settingsActions.setCustomCss}
                 onResetDefaults={resetDefaults}
