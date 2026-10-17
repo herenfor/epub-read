@@ -8,7 +8,7 @@ import type { PlainMessageKey } from "./localization/core";
 
 export type ShelfActionGroup = "read" | "organize" | "danger";
 export type ShelfBookActionId = "open" | "select" | "favorite" | "unfavorite" | "move" | "removeFromFolder" | "exportBook" | "delete";
-export type ShelfFolderActionId = "openFolder" | "renameFolder" | "dissolveFolder";
+export type ShelfFolderActionId = "openFolder" | "renameFolder" | "exportBook" | "dissolveFolder";
 export type ShelfActionId = ShelfBookActionId | ShelfFolderActionId;
 
 export interface ShelfAction {
@@ -58,12 +58,14 @@ export function shelfBookActions(ctx: ShelfBookActionContext): ShelfAction[] {
   return actions;
 }
 
-export function shelfFolderActions(): ShelfAction[] {
-  return [
+export function shelfFolderActions(ctx: { canExport: boolean; exportDisabled: boolean }): ShelfAction[] {
+  const actions: ShelfAction[] = [
     { id: "openFolder", group: "read", label: "shelfFolder.open", disabled: false },
     { id: "renameFolder", group: "organize", label: "shelfFolder.rename", disabled: false },
-    { id: "dissolveFolder", group: "danger", label: "shelfFolder.dissolve", disabled: false },
   ];
+  if (ctx.canExport) actions.push({ id: "exportBook", group: "organize", label: "bookExport.action", disabled: ctx.exportDisabled });
+  actions.push({ id: "dissolveFolder", group: "danger", label: "shelfFolder.dissolve", disabled: false });
+  return actions;
 }
 
 const GROUP_ORDER: readonly ShelfActionGroup[] = ["read", "organize", "danger"];
