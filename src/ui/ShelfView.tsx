@@ -2242,6 +2242,33 @@ export function measureShelfGridGeometry(container: HTMLElement): ShelfGridGeome
   };
 }
 
+/**
+ * 列表视图的同一份几何（单列）：书行步长取实际相邻两行（含封面、内边距、密度和
+ * 缩放），起点取书籍区起点行的顶边——它在文件夹行与表头之后，且不含自身的
+ * 虚拟 topPadding 高度，所以虚拟化后重测不会累计偏移。
+ */
+export function measureShelfListGeometry(container: HTMLElement): ShelfGridGeometry | null {
+  const start = container.querySelector<HTMLElement>(".shelf-table-book-start");
+  if (!start) return null;
+  const rows = container.querySelectorAll<HTMLElement>("tr.shelf-table-row[data-shelf-target=\"book\"]");
+  const first = rows[0];
+  if (!first) return null;
+  const zoom = readShelfLayoutZoom(container);
+  const firstRect = first.getBoundingClientRect();
+  const rowStep = rows[1]
+    ? (rows[1].getBoundingClientRect().top - firstRect.top) / zoom
+    : firstRect.height / zoom;
+  if (!Number.isFinite(rowStep) || rowStep <= 0) return null;
+  const containerRect = container.getBoundingClientRect();
+  const contentTop = container.scrollTop + (start.getBoundingClientRect().top - containerRect.top) / zoom;
+  return {
+    columns: 1,
+    // Rows are often fractional (60.5px); rounding would drift by half a pixel a row.
+    rowStep: Math.max(1, rowStep),
+    contentTop: Math.max(0, Math.round(contentTop)),
+  };
+}
+
 /* =========================================================================
  * 60fps 轻量虚拟滚动 Hook (支持网格与列表双模式，智能阈值按需激活)
  * ========================================================================= */
@@ -2267,10 +2294,11 @@ function useShelfVirtualizer(
 
   useEffect(() => {
     const container = containerRef.current;
-    if (!container || viewMode !== "grid") {
+    if (!container) {
       setGridGeometry(null);
       return;
     }
+    const measureGeometry = viewMode === "grid" ? measureShelfGridGeometry : measureShelfListGeometry;
     let frame: number | null = null;
     const measure = () => {
       if (frame !== null) return;
@@ -2279,7 +2307,7 @@ function useShelfVirtualizer(
         : ((callback: FrameRequestCallback) => window.setTimeout(() => callback(Date.now()), 0));
       frame = schedule(() => {
         frame = null;
-        const next = measureShelfGridGeometry(container);
+        const next = measureGeometry(container);
         setGridGeometry((previous) => (
           next && previous && sameShelfGridGeometry(previous, next) ? previous : next
         ));
@@ -2288,9 +2316,9 @@ function useShelfVirtualizer(
     measure();
     const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
     observer?.observe(container);
-    const anchor = container.querySelector<HTMLElement>(".shelf-book-prefix");
+    const anchor = container.querySelector<HTMLElement>(viewMode === "grid" ? ".shelf-book-prefix" : ".shelf-table-view");
     if (anchor) observer?.observe(anchor);
-    const grid = container.querySelector<HTMLElement>(".shelf-book-grid");
+    const grid = container.querySelector<HTMLElement>(viewMode === "grid" ? ".shelf-book-grid" : ".shelf-table");
     if (grid) observer?.observe(grid);
     const scaleOwner = container.closest(".app");
     const styleObserver = typeof MutationObserver !== "undefined" && scaleOwner
@@ -2350,23 +2378,7 @@ function useShelfVirtualizer(
         topPadding: 0,
         bottomPadding: 0,
         isVirtual: false,
-        gridGeometry: viewMode === "grid" ? geometry : null,
-      };
-    }
-    if (viewMode === "list") {
-      const { scrollTop, viewportHeight } = scrollState;
-      // List rows follow the density (cover size and cell padding in shelfZen.css).
-      const rowHeight = density === "comfortable" ? 72 : density === "compact" ? 36 : 52;
-      const overscan = 5;
-      const startRow = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan);
-      const endRow = Math.min(totalCount, Math.ceil((scrollTop + viewportHeight) / rowHeight) + overscan);
-      return {
-        startIndex: startRow,
-        endIndex: endRow,
-        topPadding: startRow * rowHeight,
-        bottomPadding: Math.max(0, (totalCount - endRow) * rowHeight),
-        isVirtual: true,
-        gridGeometry: null,
+        gridGeometry: geometry,
       };
     }
 
@@ -2384,7 +2396,8 @@ function useShelfVirtualizer(
 
     const { scrollTop, viewportHeight } = scrollState;
     const relativeTop = Math.max(0, scrollTop - geometry.contentTop);
-    const overscan = 2;
+    // 列表一行一本，多留几行；网格按行留两行。
+    const overscan = geometry.columns === 1 ? 5 : 2;
     const totalRows = Math.ceil(totalCount / geometry.columns);
     const firstRow = Math.max(0, Math.floor(relativeTop / geometry.rowStep) - overscan);
     const endRow = Math.min(totalRows, Math.ceil((relativeTop + viewportHeight) / geometry.rowStep) + overscan);
@@ -2399,7 +2412,7 @@ function useShelfVirtualizer(
       isVirtual: true,
       gridGeometry: geometry,
     };
-  }, [totalCount, threshold, scrollState, viewMode, gridGeometry, density]);
+  }, [totalCount, threshold, scrollState, gridGeometry]);
 }
 
 /* =========================================================================
@@ -3284,11 +3297,6 @@ export function ShelfView(props: ShelfViewProps) {
         toastTimerRef.current = null;
       }, 350);
 
-      if (viewMode === "list") {
-        scrollShelfToOffset(targetIndex * 52);
-        return;
-      }
-
       const geometry = virtualizer.gridGeometry;
       if (!geometry) {
         // 几何未测量时延后到测量完成，不退回另一套列宽估算。
@@ -3302,12 +3310,12 @@ export function ShelfView(props: ShelfViewProps) {
         geometry.contentTop + Math.floor(targetIndex / geometry.columns) * geometry.rowStep
       );
     },
-    [scrollShelfToOffset, viewMode, virtualizer.gridGeometry, visible]
+    [scrollShelfToOffset, virtualizer.gridGeometry, visible]
   );
 
   useEffect(() => {
     const pending = pendingLetterTargetRef.current;
-    if (!pending || viewMode !== "grid" || !virtualizer.gridGeometry) return;
+    if (!pending || !virtualizer.gridGeometry) return;
     const targetIndex = pending.targetId
       ? visible.findIndex((entry) => entry.id === pending.targetId)
       : pending.targetIndex;
@@ -4898,11 +4906,10 @@ export function ShelfView(props: ShelfViewProps) {
                     onToggleSelected={toggleFolderSelected}
                   />
                 ))}
-              {virtualizer.topPadding > 0 && (
-                <tr style={{ height: `${virtualizer.topPadding}px` }} aria-hidden="true">
-                  <td colSpan={8} style={{ padding: 0, border: "none" }} />
-                </tr>
-              )}
+              {/* 书籍区起点（列表几何的 contentTop），兼作虚拟化的前置占位。 */}
+              <tr className="shelf-table-book-start" style={{ height: `${virtualizer.topPadding}px` }} aria-hidden="true">
+                <td colSpan={8} style={{ padding: 0, border: "none" }} />
+              </tr>
               {renderedBooks.map((entry, idx) => {
                 const actualIndex = virtualizer.isVirtual ? virtualizer.startIndex + idx : idx;
                 const hash = entry.contentHash ?? entry.id;
