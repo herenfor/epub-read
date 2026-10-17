@@ -97,12 +97,16 @@ export class ChapterSeamDriver implements PageMotionDriver {
       easing: desktop ? "cubic-bezier(0.3333333333, 1, 0.6666666667, 1)" : "linear",
       fill: "both",
     };
-    let animations: Animation[];
+    const animations: Animation[] = [];
     try {
       // 同一任务内创建：两段动画同帧开始，同一时长与曲线，始终严丝合缝。
-      animations = [this.lead.animate(leadFrames, timing), this.trail.animate(trailFrames, timing)];
+      animations.push(this.lead.animate(leadFrames, timing));
+      animations.push(this.trail.animate(trailFrames, timing));
     } catch (error) {
+      // 只建成一段时先收回它；宿主在 onFault 里撤销整个联动（此后 done 不再有效）。
+      for (const animation of animations) animation.cancel();
       this.onFault(error);
+      if (this.disposed || ticket !== this.generation) return;
       this.held = position;
       this.apply(position);
       done();
@@ -120,6 +124,7 @@ export class ChapterSeamDriver implements PageMotionDriver {
       // cancel 会使 finished 拒绝：只有当前这一轮的拒绝才是真故障。
       if (this.disposed || ticket !== this.generation) return;
       this.animations = [];
+      for (const animation of animations) animation.cancel();
       this.onFault(error);
     });
   }

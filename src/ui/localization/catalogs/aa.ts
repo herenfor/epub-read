@@ -77,6 +77,8 @@ export const aa = defineMessages("aa", {
   "aa.motion.hint": { zh: "去掉毛玻璃与悬停动效，面板动画更短；翻页动画不受影响", note: "Help text under the switch." },
   "aa.preload": "高性能预读",
   "aa.preload.warning": "对硬件要求较高",
+  "aa.seamlessTurn": { zh: "章节间连续滑动", note: "Switch under High-Performance Preloading: the next chapter slides in like an ordinary page turn.", max: 12 },
+  "aa.seamlessTurn.hint": { zh: "翻到章末时，下一章像翻页一样直接滑进来；需开启高性能预读，翻页动画为“滑动”", note: "Help text under the switch; it only works with High-Performance Preloading on and the Slide animation." },
   "aa.css": "自定义 CSS",
   "aa.css.placeholder": { zh: "/* 自定义注入 CSS */", note: "Placeholder inside a CSS editor; keep it a CSS comment." },
   "aa.css.save": "保存并应用 CSS",

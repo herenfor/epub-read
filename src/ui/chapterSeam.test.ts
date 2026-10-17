@@ -97,6 +97,24 @@ describe("ChapterSeam", () => {
     expect(onSettled).toHaveBeenLastCalledWith(false);
   });
 
+  it("cancels a half-built pair of animations and reports the fault instead of settling", () => {
+    const current = fakeElement();
+    const neighbor = fakeElement();
+    (neighbor.element as unknown as { animate: () => never }).animate = () => { throw new Error("no animations"); };
+    const onSettled = vi.fn();
+    let instance: ChapterSeam | null = null;
+    // The host releases ownership on a fault, as ReaderView's cancel path does.
+    const onFault = vi.fn(() => instance?.dispose());
+    instance = new ChapterSeam({ direction: 1, current: current.element, neighbor: neighbor.element, width: 800,
+      progression: "ltr", touch: true, onSettled, onFault });
+    expect(instance.turn(1, 1)).toBe("moving");
+    expect(current.runs).toHaveLength(1);
+    expect(current.runs[0].cancelled).toBe(true);
+    expect(onFault).toHaveBeenCalledTimes(1);
+    expect(onSettled).not.toHaveBeenCalled();
+    expect(current.transform()).toBeNull();
+  });
+
   it("brings the previous chapter in from its last screen when turning back", async () => {
     const { instance, current, neighbor, onSettled, finishAll } = seam(-1);
     expect(current.transform()).toBe("translate3d(0px, 0, 0)");

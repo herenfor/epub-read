@@ -46,6 +46,11 @@ export interface ReaderSettings {
   forceHorizontal?: boolean;
   /** 预先准备下一章以加快顺序切换；undefined/false = 按需加载 */
   preloadNextChapter?: boolean;
+  /**
+   * A16 章节间连续滑动：章边一屏与相邻章一起滑动。只在高性能预读开启且翻页动画为
+   * 滑动时生效；undefined/false = 原换章过渡。只影响翻页，不参与重排比较；只存本机，不进存档。
+   */
+  seamlessChapterTurn?: boolean;
   /** 分页翻页动画；undefined = 滑动。只影响绘制，不参与重排比较。 */
   turnAnimation?: TurnAnimation;
   /** 翻页方向：book 跟随书籍的 page-progression-direction；ltr 始终从左往右。undefined = book。 */
