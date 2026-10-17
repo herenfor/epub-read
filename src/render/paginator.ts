@@ -2687,7 +2687,7 @@ export class ChapterPaginator {
   private displayReadySeq = -1;
   private displayReadyResult = false;
   private displayReadyPromise: Promise<boolean> = Promise.resolve(false);
-  /** 连续滚动的重排完成通知；见 setLayoutSettledHandler。 */
+  /** 章节布局提交完成通知；见 setLayoutSettledHandler。 */
   private onLayoutSettled?: () => void;
   private resolveDisplayReady: ((ready: boolean) => void) | null = null;
   private recomputeRetries = 0;
@@ -3686,9 +3686,9 @@ export class ChapterPaginator {
   }
 
   /**
-   * 连续滚动订阅：滚动模式下每次重排（窗口尺寸变化、图片晚加载触发的
-   * scheduleReflow）完成最终测量后回调，宿主据此重测章节真实高度。
-   * 只表示“本章布局已稳定”，不重复报告首次 display-ready。
+   * 每次重排完成最终测量及位置恢复后回调：滚动宿主重测章节高度，分页配对
+   * 宿主重读已提交的页宽/栏数。首次加载也可触发，宿主仍须等待首次display-ready；
+   * 此通知不重复报告首次display-ready、不代表其他章节已完成同一次窗口重排。
    */
   setLayoutSettledHandler(handler?: () => void): void {
     this.onLayoutSettled = handler;
@@ -6848,7 +6848,9 @@ export class ChapterPaginator {
       this.metrics = { pageCount: 1, currentPage: 0 };
       this.settleRestoreReport(false);
       this.emit({ status: "ready", pageCount: 1, currentPage: 0, empty: true });
-      return true;
+      const settled = !this.disposed && loadSeq === this.loadSeq;
+      if (settled) this.onLayoutSettled?.();
+      return settled;
     }
     // 纵向裁剪检测：只有横向分栏尚未生效时才可能靠重测修复。若内容已横向
     // 溢出（scrollWidth > clientWidth），多栏已成立；此处的纵向差异重测不会
@@ -6869,7 +6871,9 @@ export class ChapterPaginator {
     // Initial loading primes only after exact navigation. Later reflows prime
     // after restoration and anchor sampling have finished on normal geometry.
     if (this.isDisplayReady) this.prepareMotion();
-    return !this.disposed && loadSeq === this.loadSeq;
+    const settled = !this.disposed && loadSeq === this.loadSeq;
+    if (settled) this.onLayoutSettled?.();
+    return settled;
   }
 
   /**
