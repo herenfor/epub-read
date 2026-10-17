@@ -131,13 +131,28 @@ export function autoPageMarginsPx(
       right: 0,
     };
   }
-  const side = Math.round(Math.min(28, Math.max(16, 1.25 * fontSizePx)));
+  const side = compactSideMarginPx(fontSizePx);
   return {
     top: Math.round(TEXT_MEASURE.compactTopEm * fontSizePx),
     bottom: Math.round(TEXT_MEASURE.compactBottomEm * fontSizePx),
     left: side,
     right: side,
   };
+}
+
+/** 窄屏“自动”左右留白：约 1.25em，限制在 16–28px。 */
+function compactSideMarginPx(fontSizePx: number): number {
+  return Math.round(Math.min(28, Math.max(16, 1.25 * fontSizePx)));
+}
+
+/**
+ * 宽屏可重排单页的“自动”左右留白。默认版心（TEXT_MEASURE.maxEm）居中后两侧已留出
+ * 不少于窄屏留白时仍为 0（旧口径，正文位置不变）；大字号或较窄的宽屏让版心占满页宽时，
+ * 补到窄屏留白，正文不再贴边。两种情况在交界处正文离边距离连续，不跳变。
+ */
+export function wideAutoSideMarginPx(fontSizePx: number, pageWidthPx: number): number {
+  const side = compactSideMarginPx(fontSizePx);
+  return (pageWidthPx - TEXT_MEASURE.maxEm * fontSizePx) / 2 >= side ? 0 : side;
 }
 
 /**

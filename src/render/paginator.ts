@@ -80,7 +80,7 @@ import {
   type ReadingMode,
   type ScrollMetrics,
 } from "./scrollLayout";
-import { autoPageMarginsPx, COMPACT_PAGE_WIDTH_PX, MIN_COLUMN_WIDTH_PX } from "./pageLayout";
+import { autoPageMarginsPx, COMPACT_PAGE_WIDTH_PX, MIN_COLUMN_WIDTH_PX, wideAutoSideMarginPx } from "./pageLayout";
 import { installPagedSwipe, type PagedSwipeHandlers } from "./pagedSwipe";
 import { installPlainTap, type PlainTapInfo, type PlainTapPoint } from "./plainTap";
 import {
@@ -4258,25 +4258,6 @@ export class ChapterPaginator {
     const gap = this.settings.gapPx;
     const h = pageH;
     const scrollMode = this.scrollMode;
-    // 旧单页/滚动语义保留：滚动左右默认 16px；分页左右无显式值时宽屏为 0，
-    // 窄屏（手机竖屏）用 autoPageMarginsPx 的紧凑口径，避免正文贴边。
-    const compactAuto = !scrollMode && !this.fixedLayout && pageW > 0 && pageW < COMPACT_PAGE_WIDTH_PX;
-    const baseAutoMargins = autoPageMarginsPx(em, compactAuto);
-    const autoMargins = this.verticalMode ? basicVerticalAutoMargins(em, baseAutoMargins) : baseAutoMargins;
-    const marginLeft = Math.max(0, margins.left ?? (scrollMode ? 16 : this.fixedLayout ? 0 : autoMargins.left));
-    const marginRight = Math.max(0, margins.right ?? (scrollMode ? 16 : this.fixedLayout ? 0 : autoMargins.right));
-    const legacyW = scrollMode ? pageW : Math.max(0, pageW - marginLeft - marginRight);
-    // 极窄/矮窗口只缩小有效留白以留出正文，不修改保存值。
-    const requestedTop = margins.top !== undefined
-      ? Math.max(0, margins.top)
-      : this.fixedLayout ? 0 : scrollMode ? 12 : compactAuto ? autoMargins.top : TEXT_MEASURE.vTopEm * em;
-    const requestedBottom = margins.bottom !== undefined
-      ? Math.max(0, margins.bottom)
-      : this.fixedLayout ? 0 : scrollMode ? 12 : this.verticalMode || compactAuto ? autoMargins.bottom : TEXT_MEASURE.vBottomEm * em;
-    const verticalBudget = Math.max(0, pageH - 2 * em);
-    const verticalScale = requestedTop + requestedBottom > verticalBudget && requestedTop + requestedBottom > 0
-      ? verticalBudget / (requestedTop + requestedBottom)
-      : 1;
     // 纯图片页（封面/插图，无文字）：不加上下留白，整页显示
     const hasText = (viewer.textContent ?? "").trim().length > 0;
     const hasImg = viewer.querySelector("img") !== null;
@@ -4293,6 +4274,32 @@ export class ChapterPaginator {
     const fullpageChild =
       typeof onlyChildClass === "string" &&
       /(?:^|\s)(?:illus|kuchie|cover|duokan-image-fullscreen)(?:\s|$)/u.test(onlyChildClass);
+    // 旧单页/滚动语义保留：滚动左右默认 16px；分页左右无显式值时，
+    // 窄屏（手机竖屏）用 autoPageMarginsPx 的紧凑口径，避免正文贴边。
+    const compactAuto = !scrollMode && !this.fixedLayout && pageW > 0 && pageW < COMPACT_PAGE_WIDTH_PX;
+    const baseAutoMargins = autoPageMarginsPx(em, compactAuto);
+    const autoMargins = this.verticalMode ? basicVerticalAutoMargins(em, baseAutoMargins) : baseAutoMargins;
+    // 宽屏横排单页（含双页预算不足的回退）：版心已居中留白时仍为 0；大字号/平板横屏让版心
+    // 占满页宽时补到窄屏留白。纯图、整页插图保持整页贴边；手动边距、固定版式不经过这里。
+    const wideAutoSide = !compactAuto && !this.verticalMode && pageW > 0 &&
+      !pureImagePage && !fullpageVisual && !fullpageChild
+      ? wideAutoSideMarginPx(em, pageW) : null;
+    const autoLeft = wideAutoSide ?? autoMargins.left;
+    const autoRight = wideAutoSide ?? autoMargins.right;
+    const marginLeft = Math.max(0, margins.left ?? (scrollMode ? 16 : this.fixedLayout ? 0 : autoLeft));
+    const marginRight = Math.max(0, margins.right ?? (scrollMode ? 16 : this.fixedLayout ? 0 : autoRight));
+    const legacyW = scrollMode ? pageW : Math.max(0, pageW - marginLeft - marginRight);
+    // 极窄/矮窗口只缩小有效留白以留出正文，不修改保存值。
+    const requestedTop = margins.top !== undefined
+      ? Math.max(0, margins.top)
+      : this.fixedLayout ? 0 : scrollMode ? 12 : compactAuto ? autoMargins.top : TEXT_MEASURE.vTopEm * em;
+    const requestedBottom = margins.bottom !== undefined
+      ? Math.max(0, margins.bottom)
+      : this.fixedLayout ? 0 : scrollMode ? 12 : this.verticalMode || compactAuto ? autoMargins.bottom : TEXT_MEASURE.vBottomEm * em;
+    const verticalBudget = Math.max(0, pageH - 2 * em);
+    const verticalScale = requestedTop + requestedBottom > verticalBudget && requestedTop + requestedBottom > 0
+      ? verticalBudget / (requestedTop + requestedBottom)
+      : 1;
     const padTop = pureImagePage ? 0 : Math.round(requestedTop * verticalScale);
     const minimumPadBottom = pureImagePage ? 0 : Math.round(requestedBottom * verticalScale);
     // An explicit character spacing preference has a different advance; keep

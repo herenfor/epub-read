@@ -2373,8 +2373,10 @@ describe("measure viewport height locking", () => {
     { width: 1024, font: 16, author: 0, columns: 2, padding: 51.2, columnWidth: 409.6 },
     { width: 873, font: 20, author: 10, columns: 2, padding: 52.65, columnWidth: 331.2 },
     // The centred pair fits, but folding two page margins needs more width.
-    { width: 873, font: 22, author: 11, columns: 1, padding: 11, columnWidth: 851 },
-    { width: 873, font: 24, author: 12, columns: 1, padding: 12, columnWidth: 849 },
+    // The single-page fallback's 40em measure fills the page, so it also gets
+    // the 28px auto side room on top of the author's body padding.
+    { width: 873, font: 22, author: 11, columns: 1, padding: 39, columnWidth: 795 },
+    { width: 873, font: 24, author: 12, columns: 1, padding: 40, columnWidth: 793 },
   ])("uses full-width page geometry at $width px / $font px (effective $columns columns)", async ({ width, font, author, columns, padding, columnWidth }) => {
     const parent = makeFakeElement({ clientWidth: width, clientHeight: 768 });
     const viewer = makeFakeElement({ parentElement: parent });
