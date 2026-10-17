@@ -120,8 +120,11 @@ export interface ReaderHandle {
     anchor: ReadingAnchor;
     text: string | null;
   } | null;
-  /** A13：已提交双页几何的栏步长（一页章并排时把第二章挪到右格用）；没有布局时为 null。 */
-  spreadColumnStep?(): number | null;
+  /**
+   * A13：本章已提交的双页几何（一页章并排时第二章按自己的栏步长挪到另一格）。
+   * pending = 当前视口还没排完（窗口刚变，等 onLayoutSettled）；null = 已排完但不是双页。
+   */
+  spreadLeafLayout?(): { columnStep: number } | "pending" | null;
   /** Q5：没有进行中的翻页运动（拖动、松手漂移、按键动画）；后台准备工作据此让路。 */
   pageMotionIdle?(): boolean;
   /** 当前锚点元素的一行文本（书签列表展示用） */
@@ -195,6 +198,8 @@ export interface ReaderViewProps {
   onPageState(s: ChapterState): void;
   /** Paginator display gate released after final anchor/page positioning. */
   onDisplayReady(ticket: RestoreReportTicket | null): void;
+  /** A13 并排叶：本章首次显示之后，每次分页重排（窗口/字号变化）提交完成时回调；不重复 display-ready。 */
+  onLayoutSettled?(): void;
   /** 请求切换到相邻章节（next/prev 或空章自动前进） */
   onRequestChapter(index: number, opts?: { atEnd?: boolean }): void;
   /** Turn target for a page-turn input; an image-spread leaf answers for its
@@ -723,6 +728,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   const onBeforeInternalNavigateRef = useRef(props.onBeforeInternalNavigate);
   const onInternalNavigationSettledRef = useRef(props.onInternalNavigationSettled);
   const onDisplayReadyRef = useRef(props.onDisplayReady);
+  const onLayoutSettledRef = useRef(props.onLayoutSettled);
   const onSelectionContextMenuRef = useRef(props.onSelectionContextMenu);
   const onPageStateRef = useRef(props.onPageState);
   const onIssuesRef = useRef(props.onIssues);
@@ -745,6 +751,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   onBeforeInternalNavigateRef.current = props.onBeforeInternalNavigate;
   onInternalNavigationSettledRef.current = props.onInternalNavigationSettled;
   onDisplayReadyRef.current = props.onDisplayReady;
+  onLayoutSettledRef.current = props.onLayoutSettled;
   onSelectionContextMenuRef.current = props.onSelectionContextMenu;
   onPageStateRef.current = props.onPageState;
   onIssuesRef.current = props.onIssues;
@@ -987,6 +994,10 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       props.textProjection ?? null,
     );
     paginator.setNativeSnapPaging?.(nativeSnapWantedRef.current);
+    paginator.setLayoutSettledHandler?.(() => {
+      // 预载/过期槽的重排不属于当前配对；首次显示仍只走 display-ready。
+      if (slot.ready && isActiveSlot(slot) && slot.spineIndex === spineIndexRef.current) onLayoutSettledRef.current?.();
+    });
     paginator.setPageMotionChapterHandler?.((direction) => {
       if (isActiveSlot(slot)) turnPageRef.current(direction, "ui");
     });
@@ -2275,9 +2286,11 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       pageMotionIdle() {
         return paginatorRef.current?.pageMotionIdle ?? true;
       },
-      spreadColumnStep() {
-        const geometry = paginatorRef.current?.spreadLayoutSnapshot?.geometry;
-        return geometry && geometry.columns === 2 ? geometry.columnStep : null;
+      spreadLeafLayout() {
+        const p = paginatorRef.current;
+        if (!p || p.isMeasuredForViewport?.() === false) return "pending";
+        const geometry = p.spreadLayoutSnapshot?.geometry;
+        return geometry && geometry.columns === 2 ? { columnStep: geometry.columnStep } : null;
       },
       captureBookmarkAnchor(lane) {
         const p = paginatorRef.current;

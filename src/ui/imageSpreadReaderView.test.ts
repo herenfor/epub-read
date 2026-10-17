@@ -1,4 +1,4 @@
-import { createElement, forwardRef, useEffect } from "react";
+import { createElement, forwardRef, useEffect, useImperativeHandle } from "react";
 import { expect, it, vi } from "vitest";
 import type { Book } from "../core/types";
 import { DEFAULT_SETTINGS } from "../render/settings";
@@ -67,6 +67,64 @@ it("turns the blank leaf, gutter and edge once while preserving leaf, pause and 
     expect(dom.container.querySelector(".is-empty")?.getAttribute("data-image-side")).toBe("left");
     await wheel(dom.container.querySelector(".is-empty")!, 120);
     expect(onRequestChapter).toHaveBeenLastCalledWith(1, undefined);
+  } finally {
+    await dom.dispose();
+  }
+});
+
+// T7: after a window resize each leaf reflows on its own; the pair is rebuilt
+// only from both leaves' committed geometry, each leaf placed by its own step.
+it("re-pairs both leaves after a relayout and places the second leaf by its own column step", async () => {
+  const dom = createReactDomHarness();
+  const layouts = new Map<number, { columnStep: number } | "pending" | null>([[0, { columnStep: 812 }], [1, { columnStep: 800 }]]);
+  const settled = new Map<number, () => void>();
+  const LayoutPage = forwardRef<ReaderHandle, ReaderViewProps>(function LayoutPage(props, ref) {
+    useImperativeHandle(ref, () => ({ spreadLeafLayout: () => layouts.get(props.spineIndex) ?? null }) as unknown as ReaderHandle, [props.spineIndex]);
+    settled.set(props.spineIndex, () => props.onLayoutSettled?.());
+    useEffect(() => {
+      props.onPageState({ status: "ready", pageCount: 1, currentPage: 0, empty: false, effectiveColumns: 2 } as ChapterState);
+      props.onDisplayReady(null);
+    }, []);
+    return createElement("div", { className: "reader" });
+  });
+  const onDisplayReady = vi.fn();
+  const onUnsupported = vi.fn();
+  const props = {
+    book: { spine: [0, 1, 2].map((id) => ({ idref: String(id), linear: true })) } as Book,
+    spineIndex: 0, spread: { left: 0, right: 1 },
+    settings: { ...DEFAULT_SETTINGS, columnsPerView: 2 as const },
+    userFonts: [], notes: [], anchorNonce: 0, startAtEnd: { nonce: 0, atEnd: false },
+    onRequestChapter: vi.fn(), onPageState: vi.fn(), onDisplayReady, onUnsupported, Page: LayoutPage,
+    server: {} as ReaderViewProps["server"], initialPage: 0,
+    onIssues: vi.fn(), onInternalLink: vi.fn(), onBeforeInternalNavigate: vi.fn(),
+    onInternalNavigationSettled: vi.fn(), onExternalLink: vi.fn(),
+    onFootnote: vi.fn(), onFootnoteClose: vi.fn(),
+  };
+  const spread = () => dom.container.querySelector(".reader-image-spread")!;
+  const secondShift = () => (dom.container.querySelector("[data-image-chapter='1'] .reader-image-leaf-shift") as HTMLElement).style.transform;
+  try {
+    await dom.render(createElement(ImageSpreadReaderView, props));
+    expect(spread().getAttribute("data-image-spread-ready")).toBe("true");
+    expect(secondShift()).toBe("translateX(800px)"); // its own step, not the first leaf's 812
+    expect(onDisplayReady).toHaveBeenCalledTimes(1);
+
+    // Window restored: the first leaf has relaid out, the second has not yet.
+    layouts.set(0, { columnStep: 512 });
+    layouts.set(1, "pending");
+    await dom.run(() => settled.get(0)!());
+    expect(spread().getAttribute("data-image-spread-ready")).toBe("false");
+
+    layouts.set(1, { columnStep: 500 });
+    await dom.run(() => settled.get(1)!());
+    expect(spread().getAttribute("data-image-spread-ready")).toBe("true");
+    expect(secondShift()).toBe("translateX(500px)");
+    expect(onDisplayReady).toHaveBeenCalledTimes(1); // a relayout is not a second display-ready
+    expect(onUnsupported).not.toHaveBeenCalled();
+
+    // Laid out but no longer a two-column spread (e.g. narrowed to one page).
+    layouts.set(1, null);
+    await dom.run(() => settled.get(1)!());
+    expect(onUnsupported).toHaveBeenCalledTimes(1);
   } finally {
     await dom.dispose();
   }

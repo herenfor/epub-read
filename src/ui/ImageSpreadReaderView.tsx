@@ -18,8 +18,9 @@ interface Props extends ReaderViewProps {
  * Two isolated original documents, one visual spread. No synthetic chapter IDs or DOM merging.
  *
  * A13 裁剪显示：两章都按原来的整开双页几何排版（栏宽、页边、CSS 都不变），各自只露出
- * 第一页；阅读顺序第二章整体挪一个栏步长到另一格。任何一章不止一页（内容伸进第二页）就
- * 不并排，退回单章显示；两章都确认前不显示。
+ * 第一页；阅读顺序第二章按它自己的栏步长整体挪到另一格。任何一章不止一页（内容伸进第二页）就
+ * 不并排，退回单章显示；两章都确认前不显示。窗口或字号变化后两章各自重排，两章都按新视口
+ * 排完才重新拼接，其间遮住，不拿一新一旧的几何拼屏。
  */
 export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function ImageSpreadReaderView(props, ref) {
   const rtl = effectivePageProgression(props.book.pageProgression, props.settings, props.book.fixedLayout) === "rtl";
@@ -29,7 +30,14 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
   const displayed = useRef(new Set<number>());
   const outerWheel = useRef(new WheelTurnAccumulator());
   const [ready, setReady] = useState(false);
-  /** 第二章挪到另一格的距离（= 已提交几何的栏步长）；确认前为 null。 */
+  const readyRef = useRef(false);
+  const show = (value: boolean) => {
+    readyRef.current = value;
+    setReady(value);
+  };
+  /** 有叶子报告了 display-ready、还没对外转发（另一叶未排完时延到拼好再报）。 */
+  const owesDisplayReady = useRef(false);
+  /** 第二章挪到另一格的距离（= 第二章自己已提交几何的栏步长）；确认前为 null。 */
   const [step, setStep] = useState<number | null>(null);
   const latest = useRef(props);
   latest.current = props;
@@ -101,21 +109,32 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
     scrollByDelta: (delta) => active()?.scrollByDelta(delta),
   }), []);
 
-  const publish = () => {
+  // 首次显示与之后每次重排共用：读两叶各自已提交的几何再拼屏。
+  const commit = () => {
     const p = latest.current;
+    const count = p.spread.right === null ? 1 : 2;
     const state = states.current.get(p.spineIndex);
-    if (displayed.current.size < (p.spread.right === null ? 1 : 2) || state?.status !== "ready") return;
-    const first = leftHandle.current;
+    if (displayed.current.size < count || state?.status !== "ready") return;
+    const leaves = count === 2 ? [leftHandle.current, rightHandle.current] : [leftHandle.current];
     // 没有这项查询的视图（测试替身）不挪动；真实分页视图没有双页几何时不并排。
-    const columnStep = first?.spreadColumnStep ? first.spreadColumnStep() : 0;
-    if (columnStep === null) {
+    const layouts = leaves.map((leaf) => leaf?.spreadLeafLayout ? leaf.spreadLeafLayout() : { columnStep: 0 });
+    // 还没排完（窗口刚变、只有一叶按新视口提交）：先遮住，等另一叶的完成回调。
+    if (layouts.includes("pending")) {
+      show(false);
+      return;
+    }
+    const second = layouts[count - 1];
+    if (layouts.includes(null) || second === null || second === "pending") {
       p.onUnsupported();
       return;
     }
-    setStep(columnStep);
-    setReady(true);
+    setStep(count === 2 ? second.columnStep : 0);
+    show(true);
     p.onPageState(spreadState(state));
-    p.onDisplayReady(p.restoreTicket ?? null);
+    if (owesDisplayReady.current) {
+      owesDisplayReady.current = false;
+      p.onDisplayReady(p.restoreTicket ?? null);
+    }
   };
   const page = (index: number, side: "left" | "right") => {
     const selected = index === props.spineIndex;
@@ -154,11 +173,16 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
           }
           if (state.status !== "ready") {
             displayed.current.delete(index);
-            setReady(false);
+            show(false);
             latest.current.onPageState(state);
-          } else if (ready && selected) latest.current.onPageState(spreadState(state));
+          } else if (readyRef.current && selected) latest.current.onPageState(spreadState(state));
         }}
-        onDisplayReady={() => { displayed.current.add(index); publish(); }}
+        onDisplayReady={() => {
+          displayed.current.add(index);
+          owesDisplayReady.current = true;
+          commit();
+        }}
+        onLayoutSettled={commit}
         chapterNeighbor={(_, dir) => neighbor(dir)}
         onRequestChapter={(target, options) => {
           // Empty/hidden authored pictures retain ordinary chapter handling.
