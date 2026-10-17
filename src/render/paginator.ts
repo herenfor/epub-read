@@ -1,4 +1,5 @@
 import { effectivePageProgression } from "./settings";
+import { canInsertLeadingColumn, canRetainLeadingColumn, chapterLeafLayout, LeadingColumnGap, type ChapterLeafLayout } from "./chapterFill";
 import { pageAxisSign, pageContentX, readPageScroll, writePageScroll, setPagedFlowDirection, type PageProgression } from "./pagedDirection";
 import { resolveArchiveHref, archiveHref } from "../core/archiveReferences";
 import { applyReaderBodyPercentageSpacing, applyReaderRootPercentageSpacing } from "./percentageSpacing";
@@ -243,6 +244,8 @@ export interface ImageActivationPayload {
 }
 
 export interface LoadOptions {
+  /** Runtime-only, frozen at entry by the host's exact layout index. Omit to keep legacy layout. */
+  chapterFill?: { readonly leadingBlankColumns: 0 | 1 };
   /** Apply current settings atomically when navigation supersedes a queued settings reload. */
   settings?: ReaderSettings;
   /** 是否有下一章（滚动模式章末卡片展示“进入下一章”或“全书完”） */
@@ -2603,6 +2606,22 @@ export class ChapterPaginator {
     return this.spreadLayout;
   }
 
+  /** Exact leaves, after display-ready. Reader blank/tail padding never count as book content. */
+  get contentLeafLayout(): (ChapterLeafLayout & { readonly joinable: boolean }) | null {
+    const layout = this.spreadLayout;
+    if (!this.isDisplayReady || !layout || this.scrollMode || this.verticalMode || this.fixedLayout) return null;
+    // A timed-out display gate is usable reading content, not an exact layout
+    // result yet. The ordinary load/layout callbacks can publish it when ready.
+    if (this.contentDoc?.fonts?.status === "loading" ||
+      Array.from(this.contentDoc?.images ?? []).some((image) => !image.complete)) return null;
+    const content = chapterLeafLayout(layout);
+    return {
+      ...content,
+      joinable: this.chapterFill != null && this.leadingColumnSupported &&
+        layout.geometry.columns === 2 && !layout.empty && content.authoredLeadingColumns === 0,
+    };
+  }
+
   private get geometry(): { columns: 1 | 2; columnWidth: number; columnStep: number; viewStep: number } | null {
     if (!this.spreadGeometry) return null;
     return {
@@ -2864,6 +2883,11 @@ export class ChapterPaginator {
   private effectiveColumns: 1 | 2 = 1;
   /** 前置空列数（page-break-before:always 等）；列→屏换算用。 */
   private leadingColumns = 0;
+  private chapterFill: LoadOptions["chapterFill"] | null = null;
+  private readonly leadingColumnGap = new LeadingColumnGap();
+  private leadingColumnApplied = false;
+  private leadingColumnSupported = false;
+  private fillViewport: { width: number; height: number } | null = null;
   /** 滚动模式下的虚拟屏数（进度口径，不用于定位）。 */
   private scrollPageCount = 1;
   /** 宿主连续滚动投影状态门，防止投影滚动事件反向触发章内导航或重置。 */
@@ -3847,6 +3871,8 @@ export class ChapterPaginator {
     this.emit({ status: "loading" });
     this.iframe.removeEventListener("load", this.onIframeLoad);
     this.cleanupDoc();
+    this.chapterFill = opts.chapterFill ? { ...opts.chapterFill } : null;
+    this.fillViewport = null;
     this.searchHighlightTarget = opts.preserveSearchHighlight
       ? {
           requestId: opts.preserveSearchHighlight.requestId,
@@ -4220,6 +4246,15 @@ export class ChapterPaginator {
     const win = doc.defaultView;
     const measuredWidth = this.iframe.clientWidth;
     const measuredHeight = this.iframe.clientHeight;
+    this.leadingColumnGap.dispose();
+    this.leadingColumnApplied = false;
+    this.leadingColumnSupported = false;
+    // A resize invalidates parity from the old geometry. Only a new entry/load
+    // can acquire a fresh plan; never move the current chapter as counts arrive.
+    if (this.fillViewport && (this.fillViewport.width !== measuredWidth || this.fillViewport.height !== measuredHeight)) {
+      this.chapterFill = null;
+    }
+    if (this.chapterFill) this.fillViewport = { width: measuredWidth, height: measuredHeight };
     this.restoreVerticalShell?.();
     this.restoreVerticalShell = null;
     this.restoreVerticalMediaBounds?.();
@@ -4590,6 +4625,12 @@ export class ChapterPaginator {
           pageWidth: this.geometry?.columnWidth ?? this.pageWidth,
           step: this.geometry?.columnStep ?? this.step,
         });
+      }
+      if (this.chapterFill && !this.fixedLayout && geometry.columns === 2) {
+        this.leadingColumnSupported = canInsertLeadingColumn(viewer);
+        if (this.chapterFill.leadingBlankColumns === 1 && this.leadingColumnSupported) {
+          this.leadingColumnApplied = this.leadingColumnGap.apply(viewer);
+        }
       }
       // 只在整轮测量与二阶段补偿完成后提交尺寸；若测量期间窗口又变化，
       // ResizeObserver 仍会发现新尺寸并发起下一轮。
@@ -7001,9 +7042,16 @@ export class ChapterPaginator {
     this.spreadGeometry = geometry;
     this.effectiveColumns = geometry.columns;
 
-    const fragments = this.collectContentFragments();
-    const occupied = occupiedColumns(fragments, geometry);
-    const layout = createSpreadLayout(geometry, occupied);
+    let occupied = occupiedColumns(this.collectContentFragments(), geometry);
+    if (this.leadingColumnApplied && occupied && !canRetainLeadingColumn(occupied)) {
+      // An authored break/layout prevented exactly one-column displacement.
+      // Preserve that chapter as an independent boundary instead of guessing.
+      this.leadingColumnGap.dispose();
+      this.leadingColumnApplied = false;
+      this.leadingColumnSupported = false;
+      occupied = occupiedColumns(this.collectContentFragments(), geometry);
+    }
+    const layout = createSpreadLayout(geometry, occupied, this.leadingColumnApplied ? 1 : 0);
     this.spreadLayout = layout;
 
     if (layout.empty) {
@@ -10014,6 +10062,11 @@ export class ChapterPaginator {
   }
 
   private cleanupDoc(): void {
+    this.leadingColumnGap.dispose();
+    this.leadingColumnApplied = false;
+    this.leadingColumnSupported = false;
+    this.chapterFill = null;
+    this.fillViewport = null;
     this.releasePageBackground();
     this.themeController?.dispose();
     this.themeController = null;

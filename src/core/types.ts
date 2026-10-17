@@ -40,6 +40,8 @@ export interface SpineItem {
   /** manifest item id */
   idref: string;
   linear: boolean;
+  /** Author page-side/rendition constraints, retained for runtime spread boundaries. */
+  properties?: string[];
 }
 
 export interface GuideRef {

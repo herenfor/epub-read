@@ -112,6 +112,8 @@ export interface SpreadLayout {
   readonly lastColumn: number;
   readonly pageCount: number;
   readonly empty: boolean;
+  /** Reader-owned blank before the first content leaf; never part of leaf numbering. */
+  readonly leadingBlankColumns?: 0 | 1;
   /** 含末屏留白的最小可滚动宽度；不是正文测量输入。 */
   readonly requiredScrollWidth: number;
 }
@@ -119,14 +121,17 @@ export interface SpreadLayout {
 export function createSpreadLayout(
   geometry: SpreadGeometry,
   occupied: OccupiedColumns | null,
+  leadingBlankColumns: 0 | 1 = 0,
 ): SpreadLayout {
-  const firstColumn = occupied?.first ?? 0;
+  const blank = occupied && geometry.columns === 2 && occupied.first >= 1 ? leadingBlankColumns : 0;
+  const firstColumn = (occupied?.first ?? 0) - blank;
   const lastColumn = occupied?.last ?? -1;
   const pageCount = occupied ? Math.ceil((lastColumn - firstColumn + 1) / geometry.columns) : 1;
   const lastIndex = firstColumn + (pageCount - 1) * geometry.columns;
   const lastStart = occupied ? geometry.pageIntervals?.[lastIndex]?.start ?? lastIndex * geometry.columnStep : 0;
   return {
     geometry, firstColumn, lastColumn, pageCount, empty: occupied === null,
+    ...(blank ? { leadingBlankColumns: blank } : {}),
     requiredScrollWidth: lastStart + geometry.viewportWidth,
   };
 }
@@ -155,7 +160,7 @@ export function visibleColumnInterval(layout: SpreadLayout, page: number, lane: 
   if (layout.empty || lane >= layout.geometry.columns) return null;
   const clamped = Math.max(0, Math.min(layout.pageCount - 1, Math.floor(page)));
   const physicalColumn = layout.firstColumn + clamped * layout.geometry.columns + lane;
-  if (physicalColumn > layout.lastColumn) return null;
+  if (physicalColumn < layout.firstColumn + (layout.leadingBlankColumns ?? 0) || physicalColumn > layout.lastColumn) return null;
   return {
     physicalColumn,
     screenLeft: lane * layout.geometry.columnStep,
@@ -170,9 +175,11 @@ export function visibleLeafRange(layout: SpreadLayout, page: number):
   { first: number; last: number; total: number } | null {
   if (layout.empty) return null;
   const clamped = Math.max(0, Math.min(layout.pageCount - 1, Math.floor(page)));
-  const total = layout.lastColumn - layout.firstColumn + 1;
-  const first = clamped * layout.geometry.columns + 1;
-  return { first, last: Math.min(total, first + layout.geometry.columns - 1), total };
+  const blank = layout.leadingBlankColumns ?? 0;
+  const total = layout.lastColumn - layout.firstColumn + 1 - blank;
+  const first = Math.max(1, clamped * layout.geometry.columns + 1 - blank);
+  const last = Math.min(total, (clamped + 1) * layout.geometry.columns - blank);
+  return { first, last, total };
 }
 
 /** 一次输入移动一整屏，不从 [1,2] 滑成 [2,3]，也不暗自跨章配对。 */

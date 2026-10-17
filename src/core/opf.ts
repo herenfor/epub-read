@@ -157,6 +157,9 @@ export function parseOpf(root: XmlNodeLike): ParsedOpf {
       spine.push({
         idref,
         linear: attr(ref, "linear") !== "no",
+        ...(attr(ref, "properties").trim()
+          ? { properties: attr(ref, "properties").trim().split(/\s+/) }
+          : {}),
       });
     }
   }
