@@ -1632,7 +1632,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       // ResourceServer 与 Book 的生命周期由 App 会话管理；ReaderView 仅负责分页器 dispose
       // 不在组件内部 cleanup 中销毁共享 server/book，避免 StrictMode 双重挂载或重绘时资源被提前释放。
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Slot lifetime follows book/server; navigation and settings have separate effects below.
   }, [book, server]);
 
   useEffect(() => {
@@ -1774,7 +1774,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       }
     })();
     return () => { abandoned = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- A navigation owns this load; settings updates are handled by the reload transaction.
   }, [book, spineIndex, props.anchorNonce, props.startAtEnd.nonce]);
 
   // 纯主题原位提交：活跃槽位与所有备用槽位换色并同步滤镜背景。effect 与
@@ -1861,7 +1861,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         },
       });
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Reload only for settings/fonts; current paginator and desired settings are read through refs.
   }, [settings, props.userFonts]);
 
   // T-1 configuration change: dispose neighboring display snapshots and
@@ -1884,7 +1884,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     if (!p) return;
     p.setTextProjectionPreferences?.(preferences, props.textProjection ?? null);
     void p.reloadWithTextProjection?.(preferences, undefined, props.textProjection ?? null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Projection changes invalidate current/spare paginator state; unrelated renders must not reload it.
   }, [props.textProjectionPreferences, props.textProjection]);
 
   const visualPreferences = props.visualPreferences ?? DEFAULT_VISUAL_PREFERENCES;
@@ -1910,7 +1910,6 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       if (paintHandleRef.current === handle) paintHandleRef.current = null;
     };
     // Reattach only when the visible active iframe changes; slider and theme updates use the second effect.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeFrame, book, settings.readingMode]);
 
   useEffect(() => {
@@ -1928,7 +1927,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       resetFullBookWarmup();
       disposeSpareSlots();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Scheduler helpers use ref-owned slots; only preload eligibility or frame changes restart preparation.
   }, [settings.preloadNextChapter, book.fixedLayout, settings.readingMode, activeFrame]);
 
   // 尺寸变化 → 重排（左右拉伸窗口等场景）。
@@ -2369,7 +2368,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         paginatorRef.current?.scrollByDelta(deltaY);
       },
     }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Keep the public handle stable within a book; methods access the live paginator through refs.
     [book]
   );
 
