@@ -1726,6 +1726,23 @@ describe("book margin layout", () => {
     ).toBeUndefined();
   });
 
+  it("ignores the reader font-only layer in layout probes while keeping author layers unknown", () => {
+    const el = {
+      getAttribute: () => null,
+      hasAttribute: () => false,
+      matches: () => false,
+    } as unknown as HTMLElement;
+    const owner = { getAttribute: (name: string) => name === "data-reader" ? "font-fallback" : null };
+    const layer = { type: 0, cssRules: [], parentStyleSheet: { ownerNode: owner } };
+    const doc = { defaultView: null, styleSheets: [{ ownerNode: owner, cssRules: [layer] }] } as unknown as Document;
+    expect(hasAuthoredSizingIntent(doc, el)).toBe(false);
+    expect(hasAuthoredHorizontalMargin(doc, el)).toBe(false);
+
+    layer.parentStyleSheet.ownerNode = { getAttribute: () => null };
+    expect(hasAuthoredSizingIntent(doc, el)).toBeUndefined();
+    expect(hasAuthoredHorizontalMargin(doc, el)).toBeUndefined();
+  });
+
   it("固定宽度的显式对称 margin 不冒充 auto 居中，解析后的 auto margin 仍保持居中", () => {
     expect(
       isAutoLikeHorizontalMargin({

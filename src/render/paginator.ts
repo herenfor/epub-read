@@ -1147,6 +1147,12 @@ function getActiveCssCondition(
   rule: CSSRule,
   win: Window | null | undefined
 ): boolean | undefined {
+  // This reader-owned sheet only supplies the default font. Its @layer must
+  // not make layout-property probes treat the author's sizing as unknown.
+  // Author layers and the overrides sheet (which can contain user CSS) retain
+  // the normal conservative handling below.
+  const owner = rule.parentStyleSheet?.ownerNode as Element | null | undefined;
+  if (owner?.getAttribute?.("data-reader") === "font-fallback") return false;
   const conditional = rule as CSSRule & {
     conditionText?: string;
     media?: { mediaText?: string };
