@@ -42,4 +42,5 @@ export const appUi = defineMessages("appUi", {
   "appUi.issue.copyOriginalFailed": "复制原文失败：{error}",
   "appUi.issue.resourceAbsent": { zh: "书中引用的文件不存在，已忽略：{path}", note: "Diagnostic log: the book's CSS/HTML references a file the EPUB does not contain (often an unused fallback font). Logged once per file." },
   "appUi.issue.resourceUnavailable": { zh: "书内资源无法加载：{path}", note: "Diagnostic log: the file exists in the EPUB but could not be read. Logged once per file." },
+  "appUi.issue.resourceRecovered": { zh: "书内资源已恢复：{path}", note: "A previously failed resource was successfully read on retry; no longer counted as an active issue." },
 });

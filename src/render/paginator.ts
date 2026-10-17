@@ -3938,6 +3938,7 @@ export class ChapterPaginator {
       this.blobUrl = nextBlobUrl;
       this.iframe.addEventListener("load", this.onIframeLoad);
       this.iframe.src = nextBlobUrl;
+      this.server.reportUnresolvedResources?.(sanitized.unresolvedResources);
       if (sanitized.issues.length > 0 || sanitized.unresolvedResources.length > 0) {
         this.onIssues?.(sanitized.issues, sanitized.unresolvedResources);
       }

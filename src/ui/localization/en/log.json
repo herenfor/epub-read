@@ -4,9 +4,12 @@
   "log.issues.one": "{count} issue",
   "log.issues.other": "{count} issues",
   "log.ok": "Normal",
-  "log.records": "Issue History",
+  "log.records": "Current Book Session History",
   "log.empty": "No issues recorded.",
   "log.diagnostics": "Render Diagnostics",
+  "log.refresh": "Refresh diagnostics",
+  "log.diagnostics.capturedAt": "Captured at: {time}",
+  "log.resourceErrorRecord": "Read error record: {error}",
   "log.diagnostics.pending": "(Collected automatically when panel opens)",
   "log.diagnostics.unavailable": "(Reader not initialized)"
 }

@@ -24,6 +24,14 @@ export interface MediaCacheStats {
   overBudget: boolean;
 }
 
+export interface ResourceIssue {
+  readonly path: string;
+  readonly kind: "missing" | "unavailable";
+  readonly recovered: boolean;
+  /** Original read failure, retained after a successful retry. */
+  readonly error?: string;
+}
+
 /**
  * 把书内资源映射为 blob URL（同源，iframe 内可自由引用字体/图片/CSS）。
  * 带缓存；书关闭时统一 revoke。
@@ -52,6 +60,9 @@ export class ResourceServer {
   private mediaEvictions = 0;
   private readonly mediaCacheMaxBytes: number;
   private dependencies: ChapterDependencies | null;
+  private resourceIssues = new Map<string, ResourceIssue>();
+  private resourceIssueSnapshot: readonly ResourceIssue[] = [];
+  private resourceIssueListeners = new Set<() => void>();
 
   constructor(
     private book: Book | null,
@@ -77,6 +88,46 @@ export class ResourceServer {
   /** The same per-book resolver used by dependency preparation and rendering. */
   get archiveReferences() {
     return this.book?.archiveReferences;
+  }
+
+  readonly getResourceIssues = (): readonly ResourceIssue[] => this.resourceIssueSnapshot;
+
+  readonly subscribeResourceIssues = (listener: () => void): (() => void) => {
+    this.resourceIssueListeners.add(listener);
+    return () => { this.resourceIssueListeners.delete(listener); };
+  };
+
+  /** A missing URL alone is not a failed read: unused/later-evicted fonts may be deferred. */
+  reportUnresolvedResources(paths: Iterable<string>): void {
+    this.updateResourceIssues(paths, false);
+  }
+
+  private updateResourceIssues(paths: Iterable<string>, readAttempted: boolean, error?: string): void {
+    const book = this.book;
+    if (!book) return;
+    let changed = false;
+    for (const path of paths) {
+      const resource = book.resources.get(path);
+      const previous = this.resourceIssues.get(path);
+      let next: ResourceIssue;
+      if (!resource) {
+        next = { path, kind: "missing", recovered: false };
+      } else if (isLoadedResource(resource)) {
+        if (!previous || previous.recovered) continue;
+        next = { ...previous, recovered: true };
+      } else if (readAttempted) {
+        next = { path, kind: "unavailable", recovered: false, error };
+      } else {
+        continue;
+      }
+      if (previous?.kind === next.kind && previous.recovered === next.recovered && previous.error === next.error) continue;
+      this.resourceIssues.set(path, next);
+      changed = true;
+    }
+    if (changed) {
+      this.resourceIssueSnapshot = [...this.resourceIssues.values()];
+      for (const listener of this.resourceIssueListeners) listener();
+    }
   }
 
   /** 返回内部路径对应的 blob URL；资源缺失或尚未解压就绪返回 undefined。 */
@@ -165,8 +216,18 @@ export class ResourceServer {
     if (!book) throw new ArchiveClosedError();
     const wanted = [...new Set(paths)];
     if (wanted.length === 0) return;
-    await book.ensureResources?.(wanted);
+    try {
+      await book.ensureResources?.(wanted);
+    } catch (error) {
+      // Closing/cancelling a session is not a resource failure in the next book.
+      if (this.book === book && !(error instanceof ArchiveClosedError) &&
+          (error as { name?: string } | null)?.name !== "AbortError") {
+        this.updateResourceIssues(wanted, true, error instanceof Error ? error.message : String(error));
+      }
+      throw error;
+    }
     if (this.book !== book) throw new ArchiveClosedError();
+    this.updateResourceIssues(wanted, true, "Resource read did not complete");
     for (const path of wanted) {
       const res = book.resources.get(path);
       if (!res || !isLoadedResource(res)) continue;
@@ -275,6 +336,9 @@ export class ResourceServer {
     this.heldDependencies.clear();
     this.dependencies = null;
     this.mediaBytes = 0;
+    this.resourceIssues.clear();
+    this.resourceIssueSnapshot = [];
+    this.resourceIssueListeners.clear();
     if (this.book) {
       disposeBook(this.book);
       this.book = null;
