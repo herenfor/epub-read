@@ -2536,6 +2536,13 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
       [V, handleExternalViewportStep, handleExternalWheelPixels, props]
     );
 
+    useLayoutEffect(() => {
+      // Auxiliary chapters render a separate iframe, but must keep the same hook order.
+      if (isLinearNoChapter) return;
+      const next = computeRibbonMarksRef.current();
+      setRibbonMarks((prev) => JSON.stringify(prev) === JSON.stringify(next) ? prev : next);
+    }, [isLinearNoChapter, layout, slotUpdateNonce, props.bookmarks, viewportWidth]);
+
     // 若当前是 linear=no 辅助章节，展示单章临时视图
     if (isLinearNoChapter) {
       return (
@@ -2590,11 +2597,6 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
         </div>
       );
     }
-
-    useLayoutEffect(() => {
-      const next = computeRibbonMarksRef.current();
-      setRibbonMarks((prev) => JSON.stringify(prev) === JSON.stringify(next) ? prev : next);
-    }, [layout, slotUpdateNonce, props.bookmarks, viewportWidth]);
 
     return (
       <div

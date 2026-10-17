@@ -3837,7 +3837,7 @@ export default function App() {
     } else {
       handleFootnoteClose(); // 文档被替换（字号变化等）：关闭弹层
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Reposition on layout changes; storing the new footnote rect must not trigger this effect again.
   }, [chapterState, uiScale, handleFootnoteClose]);
 
   useEffect(() => {

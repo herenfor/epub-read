@@ -735,7 +735,7 @@ export function useBookmarkRibbonActions({ currentShelfId, readReaderPosition, c
     cue("drop", [bookmark.id]);
     showBookmarkToast(uiText("notice.bookmark.added"), "add");
     return true;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- makeBookmark captures book (already a dependency); readerRef is a stable host handle read at click time.
   }, [currentShelfId, spineIndex, book, readReaderPosition, createAll, cue, showBookmarkToast]);
 
   /** 一次删掉这些书签（一页的全部或本屏全部）；丝带先收回，删除可撤销。 */
