@@ -2378,11 +2378,12 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         // 正文点击在 iframe 里由 plainTap 路由；这里只接 iframe 之外的空白（隐藏的
         // 帧、固定版式留边）。翻页带不再接收点击，按同一几何翻页并亮反馈。
         onPointerDown={(event) => {
-          if (event.target === event.currentTarget &&
+          if (event.target === event.currentTarget && !inputPausedRef.current &&
             routeHostBlankTurn(tapRouting, event.clientX, event.clientY)) paginatorRef.current?.prepareMotion?.();
         }}
         onClick={(event) => {
-          if (event.target !== event.currentTarget) return;
+          // 输入暂停（图片查看等）时 iframe 不接点击，点击会落到这里：同样不翻页、不亮箭头。
+          if (event.target !== event.currentTarget || inputPausedRef.current) return;
           const route = routeHostBlankTurn(tapRouting, event.clientX, event.clientY);
           if (!route || !tapRouting) return;
           tapRouting.feedback.hold(edgeFeedbackKeyOf(route.side));

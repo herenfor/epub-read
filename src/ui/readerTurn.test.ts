@@ -245,6 +245,21 @@ describe("Zen UI Packet C: 硬件加速平滑翻页与边缘翻页交互契约",
     expect(readerEl?.classList.contains("has-turn-anim")).toBe(false);
   });
 
+  it("输入暂停时宿主空白点击不翻页、不亮箭头；解除后照常翻页", async () => {
+    props = { ...props, inputPaused: true };
+    await render();
+    const active = await finishActive();
+
+    await tapEdge("right");
+    expect(active.setPage).not.toHaveBeenCalled();
+    expect(dom.container.querySelector(".edge-turn-zone.is-holding")).toBeNull();
+
+    props = { ...props, inputPaused: false };
+    await render();
+    await tapEdge("right");
+    expect(active.setPage).toHaveBeenCalledWith(1, { userInitiated: true });
+  });
+
   it("通过 ReaderHandle 接口 setPage(i) 调用正确派发动向动画", async () => {
     await render();
     const active = await finishActive();
