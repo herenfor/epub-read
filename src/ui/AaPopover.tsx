@@ -847,7 +847,8 @@ export const AaPopover = React.memo(function AaPopover({
                     </div>
 
                     {onPreloadNextChapterChange && (
-                      <div className="aa-advanced-row">
+                      <div className={`aa-advanced-row${preloadNextChapterDisabled ? " aa-row-disabled" : ""}`}
+                        aria-disabled={preloadNextChapterDisabled || undefined}>
                         <div className="aa-toggle-text">
                           <span>{t("aa.preload")}</span>
                           <span style={{ fontSize: 11, color: "var(--color-error, #e53935)", lineHeight: 1.2 }}>
@@ -867,7 +868,7 @@ export const AaPopover = React.memo(function AaPopover({
                     )}
 
                     {onSeamlessChapterTurnChange && (
-                      <div className="aa-advanced-row">
+                      <div className={`aa-advanced-row${seamlessAvailable ? "" : " aa-row-disabled"}`} aria-disabled={!seamlessAvailable || undefined}>
                         <div className="aa-toggle-text">
                           <span>{t("aa.seamlessTurn")}</span>
                           <span className="aa-detail-sub">{t("aa.seamlessTurn.hint")}</span>
@@ -1426,7 +1427,8 @@ export const AaPopover = React.memo(function AaPopover({
 
               {/* 高性能预加载 */}
               {onPreloadNextChapterChange && (
-                <div className="aa-section aa-control-row aa-toggle-row">
+                <div className={`aa-section aa-control-row aa-toggle-row${preloadNextChapterDisabled ? " aa-row-disabled" : ""}`}
+                  aria-disabled={preloadNextChapterDisabled || undefined}>
                   <div className="aa-toggle-text">
                     <span className="aa-section-label">{t("aa.preload")}</span>
                     <span style={{ fontSize: 11, color: "var(--color-error, #e53935)", lineHeight: 1.2 }}>
@@ -1447,7 +1449,8 @@ export const AaPopover = React.memo(function AaPopover({
 
               {/* A16 章节间连续滑动：依附高性能预读 */}
               {onSeamlessChapterTurnChange && (
-                <div className="aa-section aa-control-row aa-toggle-row">
+                <div className={`aa-section aa-control-row aa-toggle-row${seamlessAvailable ? "" : " aa-row-disabled"}`}
+                  aria-disabled={!seamlessAvailable || undefined}>
                   <div className="aa-toggle-text">
                     <span className="aa-section-label">{t("aa.seamlessTurn")}</span>
                     <span className="aa-detail-sub">{t("aa.seamlessTurn.hint")}</span>
