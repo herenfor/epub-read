@@ -2098,6 +2098,53 @@ describe("reflow transient lifecycle", () => {
   });
 });
 
+describe("paged layout settled notification", () => {
+  function host(empty = false) {
+    const order: string[] = [];
+    const settled = vi.fn(() => order.push("settled"));
+    const context = Object.create(ChapterPaginator.prototype) as any;
+    Object.assign(context, {
+      disposed: false, loadSeq: 1, step: 100, fixedLayout: true,
+      settings: { readingMode: "paginated" },
+      viewer: {
+        children: empty ? [] : [{}], textContent: empty ? "" : "text",
+        scrollWidth: empty ? 0 : 1000, clientWidth: 500,
+        scrollHeight: 400, clientHeight: 400,
+      },
+      disposePageMotion: vi.fn(),
+      recomputeInner: vi.fn(() => order.push("position")),
+      prepareMotion: vi.fn(() => order.push("motion")),
+      settleRestoreReport: vi.fn(),
+      emit: vi.fn(() => order.push("empty")),
+    });
+    Object.defineProperty(context, "isDisplayReady", { value: true });
+    context.setLayoutSettledHandler(settled);
+    return { context, settled, order };
+  }
+
+  it("notifies after paged position restoration and motion preparation, without replaying display-ready", async () => {
+    const { context, settled, order } = host();
+    context.onDisplayReady = vi.fn();
+    expect(await context.recompute(true, 1)).toBe(true);
+    expect(order).toEqual(["position", "motion", "settled"]);
+    expect(settled).toHaveBeenCalledTimes(1);
+    expect(context.onDisplayReady).not.toHaveBeenCalled();
+  });
+
+  it("also notifies for an empty paged chapter", async () => {
+    const { context, order } = host(true);
+    expect(await context.recompute(true, 1)).toBe(true);
+    expect(order).toEqual(["empty", "settled"]);
+  });
+
+  it("does not notify for an obsolete chapter", async () => {
+    const { context, settled } = host();
+    expect(await context.recompute(true, 0)).toBe(false);
+    expect(settled).not.toHaveBeenCalled();
+    expect(context.recomputeInner).not.toHaveBeenCalled();
+  });
+});
+
 describe("precise cross-chapter request resolution", () => {
   function contextWithAnchors(
     originalAnchor: Record<string, unknown> | null,
