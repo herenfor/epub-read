@@ -6305,3 +6305,11 @@ select option {
   color: var(--muted);
   overflow-wrap: anywhere;
 }
+
+/* A16 章边联动：两章 iframe 一起平移，视口外的部分裁掉；章边预览的 translate 不参与。 */
+.reader[data-chapter-seam] { overflow: clip; }
+.reader[data-chapter-seam] iframe {
+  translate: none !important;
+  transition: none !important;
+  will-change: transform;
+}
