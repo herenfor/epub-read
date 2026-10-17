@@ -181,6 +181,8 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
       // Leaves route their own taps; this fills the empty leaf and the gutter,
       // which the (now visual-only) edge bands used to cover.
       if (event.target instanceof Element && event.target.closest(".reader")) return;
+      // Same gate as the leaves and the wheel: no turn and no arrow while paused or not ready.
+      if (props.inputPaused || !ready) return;
       const route = routeHostBlankTurn(tapRouting, event.clientX, event.clientY);
       if (!route || !tapRouting) return;
       tapRouting.feedback.hold(edgeFeedbackKeyOf(route.side));
