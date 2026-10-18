@@ -71,6 +71,34 @@ beforeAll(() => { (globalThis as Record<string, unknown>).DOMMatrixReadOnly = Fa
 afterAll(() => { delete (globalThis as Record<string, unknown>).DOMMatrixReadOnly; });
 
 describe("transform page motion driver", () => {
+  it("moves companions with the content and holds them where the motion stops", async () => {
+    const viewer = fakeViewer();
+    const companion = fakeViewer();
+    const faults: unknown[] = [];
+    const driver = new TransformPageMotion(viewer as unknown as HTMLElement, layout, 300, error => faults.push(error));
+    // The companion sits in place while this chapter rests on 300 and slides one screen per 100px.
+    driver.setCompanions([{ element: companion as unknown as HTMLElement, origin: 300 }]);
+    expect(companion.style.getPropertyValue("transform")).toBe("translate3d(0px, 0, 0)");
+    let done = 0;
+    driver.animateTo(400, desktopSettlePlan(100, 100), () => done++);
+    const frames = companion.animations[0].frames;
+    expect(frames[0].transform).toBe("translate3d(0px, 0, 0)");
+    expect(frames[frames.length - 1].transform).toBe("translate3d(-100px, 0, 0)");
+    expect(companion.animations[0].options?.duration).toBe(viewer.animations[0].options?.duration);
+    viewer.animations[0].resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(done).toBe(1);
+    expect(companion.style.getPropertyValue("transform")).toBe("translate3d(-100px, 0, 0)");
+    expect(companion.animations[0].cancelled).toBe(true);
+    // An interruption holds the companion at the same displayed position as the content.
+    driver.animateTo(300, desktopSettlePlan(-100, 100), () => done++);
+    viewer.present(viewer.scrollLeft + 2 * 100 - 360); // visual position = window start + 2 screens - x
+    expect(driver.interrupt().sample.position).toBe(360);
+    expect(companion.style.getPropertyValue("transform")).toBe("translate3d(-60px, 0, 0)");
+    expect(companion.animations[1].cancelled).toBe(true);
+    expect(faults).toEqual([]);
+  });
   it("vertical flow keeps native columns and permits a viewport wider than a short chapter", async () => {
     const viewer = fakeViewer({ scrollWidth: () => 240 });
     viewer.style.setProperty("column-count", "auto");

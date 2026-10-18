@@ -124,8 +124,9 @@ export class ChapterFillIndex {
   }
 
   /** A real consumer may restore far-chapter measurement; never mark resource-only work measured. */
-  nextUnmeasured(): number | null {
-    return this.entries.find((entry) => !entry.isolated && !this.measurements.has(entry.chapter))?.chapter ?? null;
+  nextUnmeasured(skip?: (chapter: number) => boolean): number | null {
+    return this.entries.find((entry) => !entry.isolated && !this.measurements.has(entry.chapter) &&
+      !skip?.(entry.chapter))?.chapter ?? null;
   }
 
   private boundary(index: number): boolean {

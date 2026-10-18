@@ -6314,6 +6314,22 @@ select option {
   will-change: transform;
 }
 
+/*
+ * A13-2 章边拼接屏：另一章只露出半边（clip-path 由脚本按中缝设置），叠在当前章上，
+ * 跟着本章内容平移；穿越时接过运动的那一章在下面完整显示。都不接指针。
+ */
+.reader[data-chapter-join] { overflow: clip; }
+.reader iframe[data-join-companion],
+.reader iframe[data-join-owner] {
+  visibility: visible !important;
+  pointer-events: none !important;
+  translate: none !important;
+  transition: none !important;
+  will-change: transform;
+}
+.reader iframe[data-join-companion] { z-index: 2 !important; }
+.reader iframe[data-join-owner] { z-index: 1 !important; }
+
 /* A16 第二阶段：显示层。预备层保留布局但不可见、不接指针；层间联动时揭开相邻层并裁掉视口外部分。 */
 .reader-layer {
   position: absolute;

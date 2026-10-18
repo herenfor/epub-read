@@ -88,7 +88,9 @@ export function planPresentationLayers(
 export const STANDBY_START = Object.freeze({ nonce: -1, atEnd: false });
 const NOOP = () => {};
 /** 隐藏层仍需要的查询（不向 App 汇报，只读）。 */
-const KEPT_FUNCTIONS = new Set(["notesForChapter", "chapterNeighbor", "seamTargetEligible"]);
+const KEPT_FUNCTIONS = new Set([
+  "notesForChapter", "chapterNeighbor", "seamTargetEligible", "chapterFillKind", "resolveChapterFillKind",
+]);
 
 /**
  * 预备层的属性：停在 spineIndex，不接输入，不定位锚点，所有回调静默（进度、恢复、
