@@ -452,21 +452,39 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     const page = p.currentPage;
     const spineIndex = slot.spineIndex;
     const own = bookmarks.filter((bookmark) => bookmark.spineIndex === spineIndex);
-    return {
-      page,
-      top: placed.top,
-      columns: placed.columns,
-      pages: placed.frames.map((frame) => ({
-        lane: frame.lane,
+    const pages = placed.frames.map((frame) => ({
+      lane: frame.lane,
+      side: frame.side,
+      outerX: frame.outerX,
+      spineIndex,
+      ids: own.filter((bookmark) => {
+        const placement = p.resolveBookmarkPlacement?.(bookmark);
+        return placement?.page === page && placement.lane === frame.lane;
+      }).map((bookmark) => bookmark.id),
+    }));
+    // A13-2：拼接屏上另一半页属于另一章：按它自己的章、屏与书签计算。
+    for (const join of joinAttachRef.current) {
+      const other = join.slot.paginator;
+      const otherIndex = join.slot.spineIndex;
+      const lane = join.side === 1 ? 1 : 0;
+      if (!other || otherIndex === null || !isJoinHalf(join.slot) || pages.some((item) => item.lane === lane)) continue;
+      const frame = other.bookmarkPageFrames?.(leafSlotRef.current)?.frames.find((item) => item.lane === lane);
+      if (!frame) continue;
+      const otherPage = other.currentPage;
+      pages.push({
+        lane,
         side: frame.side,
         outerX: frame.outerX,
-        spineIndex,
-        ids: own.filter((bookmark) => {
-          const placement = p.resolveBookmarkPlacement?.(bookmark);
-          return placement?.page === page && placement.lane === frame.lane;
+        spineIndex: otherIndex,
+        ids: bookmarks.filter((bookmark) => {
+          if (bookmark.spineIndex !== otherIndex) return false;
+          const placement = other.resolveBookmarkPlacement?.(bookmark);
+          return placement?.page === otherPage && placement.lane === lane;
         }).map((bookmark) => bookmark.id),
-      })),
-    };
+      });
+    }
+    pages.sort((a, b) => a.lane - b.lane);
+    return { page, top: placed.top, columns: placed.columns, pages };
   };
   const refreshRibbonsRef = useRef<() => void>(() => {});
   refreshRibbonsRef.current = () => {
@@ -585,6 +603,12 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   } | null>(null);
   /** 穿越落定在另一章：升格时保留它当前这一屏（不回到章首/章末）。 */
   const joinLandingRef = useRef<PaginatorSlot | null>(null);
+  /** 最近一次打开脚注/选字菜单的槽（拼接屏另一半页也可以）；脚注卡片的固定/关闭交回给它。 */
+  const uiOwnerRef = useRef<PaginatorSlot | null>(null);
+  /** 这一次触摸手势从哪个槽开始：手势途中拼接屏变成运动，也由同一个槽把它收尾。 */
+  const swipeSlotRef = useRef<PaginatorSlot | null>(null);
+  const notesForChapterRef = useRef(props.notesForChapter);
+  notesForChapterRef.current = props.notesForChapter;
   nativeSnapWantedRef.current = resolvedTurnAnimation() === "slide";
 
   /** 淡入模式的落位动画；滑动模式由 startSlideTurn / 跨章滑入自行绘制。 */
@@ -854,6 +878,22 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
 
   const isActiveSlot = (slot: PaginatorSlot): boolean =>
     activeSlotRef.current === slot && paginatorRef.current === slot.paginator && slot.paginator !== null;
+  /**
+   * A13-2：静止的拼接屏上露出半页的另一章。它接收自己那半页上的点按、链接、选字、
+   * 脚注（按它自己的章身份），但不发布状态、进度或恢复结果。
+   */
+  const isJoinHalf = (slot: PaginatorSlot): boolean => {
+    const p = paginatorRef.current;
+    return slot.paginator !== null && !joinMotionRef.current && p?.pageMotionIdle !== false &&
+      joinAttachRef.current.some((join) => join.slot === slot && p?.currentPage === join.joinPage);
+  };
+  /** 接收用户输入的槽：当前章，或静止拼接屏上的另一半页。 */
+  const isInputSlot = (slot: PaginatorSlot): boolean => isActiveSlot(slot) || isJoinHalf(slot);
+  /** 脚注卡片/选字菜单属于哪个槽：拼接屏另一半页打开的交回给它，否则是当前章。 */
+  const uiSlot = (): PaginatorSlot | null => {
+    const owner = uiOwnerRef.current;
+    return owner && !isActiveSlot(owner) && isJoinHalf(owner) ? owner : null;
+  };
 
   const setActiveFrameVisual = (frame: LiveReaderFrame): void => {
     activeFrameRef.current = frame;
@@ -946,9 +986,13 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         onPageStateRef.current(state);
         // transient 是运动途中的页码预览，不是落定：丝带继续隐藏。
         if (state.status === "ready" && !state.transient) {
-          refreshRibbonsRef.current();
           syncJoin();
-        } else markRibbonMotion();
+          refreshRibbonsRef.current();
+        } else {
+          markRibbonMotion();
+          // 开始移动：拼接屏另一半页不再接输入。
+          for (const join of joinAttachRef.current) setJoinLive(join.slot, false);
+        }
         if (state.status === "ready") props.onFlowProgression?.(paginator.pageProgression);
         if (state.status !== "ready" || !state.empty || autoAdvanceRef.current) return;
         const next = nextLinearIndex(book, spineIndexRef.current, 1);
@@ -964,16 +1008,16 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       },
       fixedLayout: book.fixedLayout,
       onNavigate: (href) => {
-        if (isActiveSlot(slot)) onInternalLinkRef.current(href);
+        if (isInputSlot(slot)) onInternalLinkRef.current(href);
       },
       onBeforeInternalNavigate: (href) => {
-        if (isActiveSlot(slot)) onBeforeInternalNavigateRef.current(href);
+        if (isInputSlot(slot)) onBeforeInternalNavigateRef.current(href);
       },
       onInternalNavigationSettled: () => {
         if (isActiveSlot(slot)) onInternalNavigationSettledRef.current();
       },
       onWheelNavigate: (dir) => {
-        if (!isActiveSlot(slot)) return;
+        if (!isInputSlot(slot)) return;
         // 输入到达先于切换判断：即使处于换章静默期，也暂停未发布的后台测量。
         pauseBackgroundWarmupForInput();
         if (isWheelGestureSuppressed()) return;
@@ -981,11 +1025,12 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         turnPageRef.current(dir, "wheel");
       },
       onKeyNavigate: (dir, key) => {
-        if (!isActiveSlot(slot) || inputPausedRef.current) return;
+        if (!isInputSlot(slot) || inputPausedRef.current) return;
         turnPageRef.current(arrowKeyDirection(dir, key, progressionNow()), "key");
       },
       onFootnote: (payload) => {
-        if (!isActiveSlot(slot)) return;
+        if (!isInputSlot(slot)) return;
+        uiOwnerRef.current = slot;
         const main = slot.iframe.parentElement;
         if (!main) {
           onFootnoteRef.current(payload);
@@ -1006,10 +1051,10 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         });
       },
       onFootnoteClose: () => {
-        if (isActiveSlot(slot)) onFootnoteCloseRef.current();
+        if (isInputSlot(slot)) onFootnoteCloseRef.current();
       },
       onExternalLink: (url) => {
-        if (isActiveSlot(slot)) onExternalLinkRef.current(url);
+        if (isInputSlot(slot)) onExternalLinkRef.current(url);
       },
       onDisplayReady: () => {
         slot.ready = true;
@@ -1017,7 +1062,8 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         if (isActiveSlot(slot)) publishActiveDisplayReady();
       },
       onSelectionContextMenu: (payload) => {
-        if (!isActiveSlot(slot)) return;
+        if (!isInputSlot(slot)) return;
+        if (payload) uiOwnerRef.current = slot;
         if (!payload) {
           onSelectionContextMenuRef.current?.(null);
           return;
@@ -1037,35 +1083,36 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         if (isActiveSlot(slot)) onPreciseNavigationStatusRef.current?.(status);
       },
       onImageActivation: (image) => {
-        // 非活动槽（预加载）不得打开浮层；同时避免借用已撤销的 blob URL。
-        if (isActiveSlot(slot)) onImageActivationRef.current?.(image);
+        // 非活动槽（预加载）不得打开浮层；同时避免借用已撤销的 blob URL。拼接屏露出的半页可以。
+        if (isInputSlot(slot)) onImageActivationRef.current?.(image);
       },
       externalScroll: undefined,
       pagedSwipe: {
         onNext: () => turnPageRef.current(pageAxisSign(progressionNow()), "ui"),
         onPrev: () => turnPageRef.current((-pageAxisSign(progressionNow())) as 1 | -1, "ui"),
         shouldIgnore: () =>
-          !isActiveSlot(slot) ||
+          !(isInputSlot(slot) || swipeSlotRef.current === slot) ||
           inputPausedRef.current ||
           latestRenderSettingsRef.current.readingMode === "scroll" ||
           slot.state.status !== "ready",
         onPreview: (dx) => {
-          if (isActiveSlot(slot)) updateSwipePreviewRef.current(dx);
+          if (isInputSlot(slot) || swipeSlotRef.current === slot) updateSwipePreviewRef.current(dx);
         },
         // 原生滚动接手前先落定进行中的 JS 翻页动画，吸附点按已提交页计算。
         // 运动层模式下按下不改任何东西：横向意图成立才接手，轻点不撤回旧命令。
         onGestureStart: () => {
-          if (!isActiveSlot(slot)) return;
+          swipeSlotRef.current = isInputSlot(slot) ? slot : null;
+          if (!swipeSlotRef.current) return;
           if (!slot.paginator?.pageMotionAvailable) slideAnimRef.current?.finish();
         },
       },
       onPlainTap: (tap) => {
-        if (isActiveSlot(slot) && !inputPausedRef.current && slot.state.status === "ready") {
+        if (isInputSlot(slot) && !inputPausedRef.current && slot.state.status === "ready") {
           const rect = slot.iframe.getBoundingClientRect();
           plainTapRef.current({ ...tap, clientX: tap.clientX + rect.left, clientY: tap.clientY + rect.top });
         }
       },
-      shouldIgnorePlainTap: () => !isActiveSlot(slot) || inputPausedRef.current || slot.state.status !== "ready"
+      shouldIgnorePlainTap: () => !isInputSlot(slot) || inputPausedRef.current || slot.state.status !== "ready"
     });
     slot.paginator = paginator;
     paginator.setPlainTapRepeatClaim?.((point) => {
@@ -1977,6 +2024,11 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
           measured = true;
           return;
         }
+        // 与原后台准备同一准入：正文源超过预算（或读不到）的大章只备资源、不在后台排版，
+        // 本版式里先不测；用户真正打开它时由当前槽收录精确结果。
+        let source = server.textFor(path);
+        if (source === undefined) source = await server.readTextFor(path, controller.signal).catch(() => undefined);
+        if (superseded() || backgroundPreparation(source) !== "live-layout") return;
         disposeWarmupSlot();
         const slot: PaginatorSlot = {
           frame: "warmup",
@@ -2076,8 +2128,31 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     iframe.style.setProperty("clip-path", joinLaneClip(lane, split, width, slot.paginator?.pageProgression ?? "ltr"));
   };
 
+  /**
+   * 静止拼接屏上露出的半页接指针（裁剪外的部分仍落到当前章）；离开拼接屏或开始运动时收回，
+   * 并收起它打开的脚注、选字菜单。
+   */
+  const setJoinLive = (slot: PaginatorSlot, live: boolean): void => {
+    const iframe = slot.iframe;
+    if (live) {
+      iframe.dataset.joinLive = "true";
+      return;
+    }
+    if (!iframe.dataset.joinLive) return;
+    delete iframe.dataset.joinLive;
+    if (uiOwnerRef.current === slot) {
+      uiOwnerRef.current = null;
+      onFootnoteCloseRef.current();
+      onSelectionContextMenuRef.current?.(null);
+    }
+    slot.paginator?.closeForNavigation();
+    slot.paginator?.clearTextSelection();
+  };
+
   const releaseJoinFrame = (slot: PaginatorSlot): void => {
     const iframe = slot.iframe;
+    setJoinLive(slot, false);
+    slot.paginator?.setRouteLinksToHost?.(false);
     delete iframe.dataset.joinCompanion;
     delete iframe.dataset.joinOwner;
     iframe.style.removeProperty("clip-path");
@@ -2119,10 +2194,17 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     for (const join of wanted) {
       const neighborPaginator = join.slot.paginator;
       if (neighborPaginator && neighborPaginator.currentPage !== join.neighborPage) neighborPaginator.setPage(join.neighborPage);
+      if (neighborPaginator && !previous.some((old) => old.slot === join.slot) && join.slot.spineIndex !== null) {
+        // 新挂上的另一章：它的笔记高亮按它自己的章；书内链接交给宿主按它的章导航。
+        neighborPaginator.setNotes(notesForChapterRef.current?.(join.slot.spineIndex) ?? []);
+        neighborPaginator.setRouteLinksToHost?.(true);
+      }
       styleJoinHalf(join.slot, join.side === 1 ? 1 : 0);
+      setJoinLive(join.slot, p?.currentPage === join.joinPage);
     }
     setJoinMarker(wanted.length > 0);
     p?.setMotionCompanions?.(wanted.map((join) => ({ element: join.slot.iframe, page: join.joinPage })));
+    refreshRibbonsRef.current();
   };
 
   const dropJoinSlot = (slot: PaginatorSlot): void => {
@@ -2160,6 +2242,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       return null;
     }
     p.setMotionCompanions?.([]);
+    setJoinLive(join.slot, false);
     const ownerFrame = join.slot.iframe;
     delete ownerFrame.dataset.joinCompanion;
     ownerFrame.dataset.joinOwner = "true";
@@ -3092,6 +3175,15 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         return geometry && geometry.columns === 2 ? { columnStep: geometry.columnStep } : null;
       },
       captureBookmarkAnchor(lane) {
+        // A13-2：拼接屏上这一页属于另一章时，按那一章取位置。
+        const join = joinAttachRef.current.find((item) => (item.side === 1 ? 1 : 0) === lane && isJoinHalf(item.slot));
+        if (join) {
+          const other = join.slot.paginator;
+          const captured = other?.captureLaneAnchor?.(lane);
+          return other && captured && join.slot.spineIndex !== null
+            ? { spineIndex: join.slot.spineIndex, page: other.currentPage, ...captured }
+            : null;
+        }
         const p = paginatorRef.current;
         const slot = activeSlotRef.current;
         if (!p || !slot || slot.spineIndex === null || slot.state.status !== "ready") return null;
@@ -3127,8 +3219,9 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         return paginatorRef.current?.navigateToSearchTarget(request) ?? "unresolved";
       },
       getFootnoteMarkerRect() {
-        const p = paginatorRef.current;
-        const iframe = activeIframeRef.current;
+        const owner = uiSlot();
+        const p = owner?.paginator ?? paginatorRef.current;
+        const iframe = owner?.iframe ?? activeIframeRef.current;
         const main = iframe?.parentElement;
         const r = p?.getFootnoteMarkerRect();
         if (!p || !iframe || !main || !r) return null;
@@ -3144,16 +3237,17 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         };
       },
       dismissFootnote() {
-        paginatorRef.current?.dismissFootnote();
+        (uiSlot()?.paginator ?? paginatorRef.current)?.dismissFootnote();
       },
       pinFootnote() {
-        paginatorRef.current?.pinFootnote();
+        (uiSlot()?.paginator ?? paginatorRef.current)?.pinFootnote();
       },
       setFootnoteOverlayHover(over: boolean) {
-        paginatorRef.current?.setFootnoteOverlayHover(over);
+        (uiSlot()?.paginator ?? paginatorRef.current)?.setFootnoteOverlayHover(over);
       },
       clearTextSelection() {
         paginatorRef.current?.clearTextSelection();
+        for (const join of joinAttachRef.current) join.slot.paginator?.clearTextSelection();
       },
       scrollToStart() {
         cancelSeam();

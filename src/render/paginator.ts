@@ -2853,6 +2853,8 @@ export class ChapterPaginator {
   /** 去末屏途中又收到同向独立命令：落定后最多执行一次跨章。 */
   private pageMotionPendingChapter: MotionDirection | null = null;
   private pageMotionChapterHandler: ((direction: MotionDirection) => void) | null = null;
+  /** A13-2：本章只是拼接屏上露出半页的另一章时，书内链接一律交给宿主（不在本 iframe 里跳）。 */
+  private routeLinksToHost = false;
   /** A13-2：随本章内容移动的另一章 iframe（宿主在章边拼接屏附近设置）。 */
   private motionCompanions: readonly { element: HTMLElement; page: number }[] = [];
 
@@ -3662,6 +3664,11 @@ export class ChapterPaginator {
       element,
       origin: offsets[Math.max(0, Math.min(offsets.length - 1, page))],
     }));
+  }
+
+  /** A13-2：开启后同章锚点与同章链接也交给宿主导航（onNavigate），不在本 iframe 内移动。 */
+  setRouteLinksToHost(enabled: boolean): void {
+    this.routeLinksToHost = enabled;
   }
 
   /** 双页时两页的分界（中缝中线）在 iframe 视口里的横坐标；不是双页时为 null。 */
@@ -9833,6 +9840,18 @@ export class ChapterPaginator {
     // 带链接的普通正文图片：用实际点击目标打开图片浮层；“打开链接”沿用
     // 原书链接路由。不要用 a.querySelector('img')，否则图下文字链接会被误判。
     if (this.activateImage(target, e as MouseEvent)) return;
+    if (this.routeLinksToHost && this._currentPath) {
+      // 拼接屏上露出半页的另一章：它不是当前章，同章跳转也按“去那一章的那个位置”交给宿主。
+      const fragment = isFragmentOnly(href) ? getFragmentNavigation(href) : null;
+      const local = fragment
+        ? { path: this._currentPath, anchor: fragment.anchor }
+        : resolveArchiveHref(this.server.archiveReferences, this._currentPath, href);
+      if (!local.path) return;
+      const destination = archiveHref(this.server.archiveReferences, local.path, local.anchor);
+      this.onBeforeInternalNavigate?.(destination);
+      this.onNavigate?.(destination);
+      return;
+    }
     if (isFragmentOnly(href)) {
       // 脚注已在上方提前返回；这里只处理普通同章锚点。先通过原生 hash
       // 激活 :target，再由分页器将目标元素定位到对应分页列。

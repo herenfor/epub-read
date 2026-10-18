@@ -6328,6 +6328,8 @@ select option {
   will-change: transform;
 }
 .reader iframe[data-join-companion] { z-index: 2 !important; }
+/* 静止拼接屏上露出的半页接收自己那半边的点按、链接与选字（裁剪外仍落到当前章）。 */
+.reader iframe[data-join-companion][data-join-live] { pointer-events: auto !important; }
 .reader iframe[data-join-owner] { z-index: 1 !important; }
 
 /* A16 第二阶段：显示层。预备层保留布局但不可见、不接指针；层间联动时揭开相邻层并裁掉视口外部分。 */
