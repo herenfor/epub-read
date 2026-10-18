@@ -38,6 +38,19 @@ describe("pagedSpread core", () => {
     expect(spreadForColumn(layout, columnForContentPoint(1203.998547, geometry))).toBe(1);
     // An interval ending at the edge must still exclude the next column.
     expect(occupiedColumns([{ left: 0, right: 602 }], geometry)).toEqual({ first: 0, last: 0 });
+    // Different widths/scales can quantize the measured edge before the CSS
+    // padding is subtracted. Exercise the same conversion, without device rules.
+    for (const [physicalWidth, scale] of [[1600, 1], [1600, 1.1], [1600, 1.2],
+      [1600, 1.5], [1600, 2.625], [2560, 2.125]]) {
+      const width = Math.floor(physicalWidth / scale);
+      const padding = width * 0.05;
+      const scaled = createSpreadGeometry(width * 0.9, width * 0.1, 2);
+      const edge = Math.floor((padding + scaled.columnStep) * scale * 64) / (scale * 64) - padding;
+      expect(columnForContentPoint(edge, scaled)).toBe(1);
+      expect(columnForContentPoint(scaled.columnStep - 0.02, scaled)).toBe(0);
+      expect(occupiedColumns([{ left: edge, right: edge + 20 }], scaled)).toEqual({ first: 1, last: 1 });
+      expect(occupiedColumns([{ left: 0, right: scaled.columnStep }], scaled)).toEqual({ first: 0, last: 0 });
+    }
   });
   it("uses measured vertical leaf edges for lookup, commits and the unused last-leaf area", () => {
     const geometry = { ...createSpreadGeometry(100, 0, 1),
