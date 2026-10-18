@@ -11,10 +11,13 @@ import type { ReaderViewProps } from "./ReaderView";
 import type { SingleLeafSpread } from "./singleLeafSpreads";
 
 export type LayerRole = "main" | "standby";
-export type PagedLayerKey = "paged" | "paged-return";
+/** "paged"/"paged-return"，或前方常驻段落的 `paged-run:<首章>`（落定后可成为当前普通视图）。 */
+export type PagedLayerKey = string;
 
 export type PresentationLayer =
-  | { key: PagedLayerKey; kind: "paged"; spineIndex: number; role: LayerRole; edge: "start" | "end" }
+  | { key: PagedLayerKey; kind: "paged"; spineIndex: number; role: LayerRole; edge: "start" | "end";
+    /** 预备层也排好这一段后面的章，直到这一章（见 ReaderViewProps.standbyPrepareThrough）。 */
+    prepareThrough?: number }
   | { key: string; kind: "pair"; spread: SingleLeafSpread; spineIndex: number; role: LayerRole };
 
 export interface PresentationPlan {
@@ -39,11 +42,15 @@ export function pairLayerKey(spread: SingleLeafSpread): string {
 const PARK_SEARCH_LIMIT = 16;
 /** 当前组之后最多常驻这么多组（前置彩页/短章段通常不超过这个数）。 */
 export const RESIDENT_RUN_GROUPS = 6;
+/** 其中最多这么多段普通章各占一个预备层。 */
+export const RESIDENT_RUN_SEGMENTS = 2;
 /** 一条联动轨道在当前屏两侧最多各带这么多屏。 */
 export const SEAM_TRACK_REACH = 6;
 
 export interface SeamTrackScreen {
   key: string;
+  /** 普通层里的一章（由该层提供显示元素，层本身不移动）。 */
+  inner?: { element: unknown };
   /** 落定在这一屏时请求的章：向后为组的第一章/普通章；向前为组的最后一章（带 atEnd）。 */
   spineIndex: number;
   atEnd: boolean;
@@ -67,6 +74,7 @@ export function planSeamTrack(
   spineIndex: number,
   peek: (index: number) => SingleLeafSpread | null | undefined,
   ready: (key: string, edge: "start" | "end") => boolean,
+  inner?: (key: string, direction: 1 | -1) => Array<{ spineIndex: number; single: boolean; element: unknown }> | null,
   reach = SEAM_TRACK_REACH,
 ): SeamTrack {
   const first = current?.left ?? spineIndex;
@@ -79,8 +87,22 @@ export function planSeamTrack(
       const group = peek(at);
       if (group === undefined) break;
       if (group === null) {
-        const paged = plan.layers.find((layer) => layer.kind === "paged" && layer.spineIndex === at && layer.edge === edge);
-        if (paged && ready(paged.key, edge)) out.push({ key: paged.key, spineIndex: at, atEnd: direction === -1 });
+        const paged = plan.layers.find((layer) => layer.kind === "paged" && layer.spineIndex === at && layer.edge === edge &&
+          layer.key !== plan.mainKey);
+        if (!paged) break;
+        // 普通层能给出逐章的显示元素时，按章移过去；整章只有一屏的可以接着走到下一组。
+        const chain = inner?.(paged.key, direction) ?? null;
+        if (chain?.length && chain[0].spineIndex === at) {
+          for (const link of chain) {
+            if (out.length >= reach) break;
+            out.push({ key: paged.key, spineIndex: link.spineIndex, atEnd: direction === -1, inner: { element: link.element } });
+          }
+          const tail = chain[chain.length - 1];
+          if (!tail.single || out.length >= reach) break;
+          at = nextLinearIndex(book, tail.spineIndex, direction);
+          continue;
+        }
+        if (ready(paged.key, edge)) out.push({ key: paged.key, spineIndex: at, atEnd: direction === -1 });
         break;
       }
       const key = pairLayerKey(group);
@@ -166,18 +188,41 @@ export function planPresentationLayers(
   if (ahead && !layers.some((layer) => layer.key === pairLayerKey(ahead))) {
     layers.push({ key: pairLayerKey(ahead), kind: "pair", spread: ahead, spineIndex: lookaheadIndex, role: "standby" });
   }
-  // A16-3: the rest of a forward run of groups stays resident (bounded), so a
-  // fast run of turns moves along prepared screens instead of preparing new
-  // documents while the reader is turning. Kept groups never reload on landing.
+  // A16-3: the rest of the forward front-matter run stays resident (bounded), so
+  // a fast run of turns moves along prepared screens instead of preparing new
+  // documents while the reader is turning. Groups get their own layers; each run
+  // of ordinary chapters between groups gets one paged layer that also prepares
+  // its next chapters. Kept layers never reload on landing.
   if (direction === 1) {
     let at = nextLinearIndex(book, last, 1);
+    let segments = 0;
     for (let count = 0; at >= 0 && count < RESIDENT_RUN_GROUPS; count++) {
       const group = peek(at);
-      if (!group) break;
-      if (!layers.some((layer) => layer.key === pairLayerKey(group))) {
-        layers.push({ key: pairLayerKey(group), kind: "pair", spread: group, spineIndex: at, role: "standby" });
+      if (group === undefined) break;
+      if (group) {
+        if (!layers.some((layer) => layer.key === pairLayerKey(group))) {
+          layers.push({ key: pairLayerKey(group), kind: "pair", spread: group, spineIndex: at, role: "standby" });
+        }
+        at = nextLinearIndex(book, group.right ?? group.left, 1);
+        continue;
       }
-      at = nextLinearIndex(book, group.right ?? group.left, 1);
+      // An ordinary run: its first chapter plus at most two more, up to the next group.
+      let through = at;
+      for (let step = 0; step < 2; step++) {
+        const following = nextLinearIndex(book, through, 1);
+        if (following < 0 || peek(following) !== null) break;
+        through = following;
+      }
+      const existing = layers.find((layer) => layer.kind === "paged" && layer.spineIndex === at && layer.edge === "start" &&
+        layer.role === "standby");
+      if (existing?.kind === "paged") existing.prepareThrough = through;
+      else if (segments < RESIDENT_RUN_SEGMENTS && !(current === null && at === spineIndex)) {
+        layers.push({ key: `paged-run:${at}`, kind: "paged", spineIndex: at, role: "standby", edge: "start", prepareThrough: through });
+      } else break;
+      segments++;
+      const after = nextLinearIndex(book, through, 1);
+      if (after < 0 || !peek(after)) break;
+      at = after;
     }
   }
 
@@ -206,7 +251,8 @@ const KEPT_FUNCTIONS = new Set([
  * 预备层的属性：停在 spineIndex，不接输入，不定位锚点，所有回调静默（进度、恢复、
  * 状态、日志、脚注……都只属于当前显示）。成为当前显示时换回 App 的真实属性。
  */
-export function standbyReaderProps(props: ReaderViewProps, spineIndex: number, edge: "start" | "end" = "start"): ReaderViewProps {
+export function standbyReaderProps(props: ReaderViewProps, spineIndex: number, edge: "start" | "end" = "start",
+  prepareThrough?: number): ReaderViewProps {
   const out: Record<string, unknown> = { ...props };
   for (const [key, value] of Object.entries(props)) {
     if (typeof value === "function" && !KEPT_FUNCTIONS.has(key)) out[key] = NOOP;
@@ -221,6 +267,7 @@ export function standbyReaderProps(props: ReaderViewProps, spineIndex: number, e
     startAtEnd: edge === "end" ? STANDBY_END : STANDBY_START,
     inputPaused: true,
     presentationStandby: true,
+    standbyPrepareThrough: prepareThrough,
     notes: props.notesForChapter?.(spineIndex) ?? [],
     bookmarkCue: null,
   });
