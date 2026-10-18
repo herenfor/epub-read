@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { parseHTML } from "linkedom";
+import { LeadingColumnGap } from "./chapterFill";
 import {
   ChapterPaginator,
   getBorderBoxWidth,
@@ -2310,7 +2311,9 @@ describe("measure viewport height locking", () => {
 
     viewer.ownerDocument = doc;
     const measureControllers = new Set<AbortController>();
-    const context = Object.create(ChapterPaginator.prototype) as any;
+    const context = Object.assign(Object.create(ChapterPaginator.prototype), {
+      leadingColumnGap: new LeadingColumnGap(),
+    }) as any;
     Object.assign(context, {
       contentDoc: doc,
       viewer,
@@ -2356,7 +2359,9 @@ describe("measure viewport height locking", () => {
 
     viewer.ownerDocument = doc;
     const measureControllers = new Set<AbortController>();
-    const context = Object.create(ChapterPaginator.prototype) as any;
+    const context = Object.assign(Object.create(ChapterPaginator.prototype), {
+      leadingColumnGap: new LeadingColumnGap(),
+    }) as any;
     Object.assign(context, {
       contentDoc: doc,
       viewer,
@@ -2427,7 +2432,9 @@ describe("measure viewport height locking", () => {
     };
     viewer.ownerDocument = doc;
     const measureControllers = new Set<AbortController>();
-    const context = Object.create(ChapterPaginator.prototype) as any;
+    const context = Object.assign(Object.create(ChapterPaginator.prototype), {
+      leadingColumnGap: new LeadingColumnGap(),
+    }) as any;
     Object.assign(context, {
       contentDoc: doc,
       viewer,
@@ -2509,7 +2516,9 @@ describe("measure viewport height locking", () => {
     };
     viewer.ownerDocument = doc;
     const measureControllers = new Set<AbortController>();
-    const context = Object.create(ChapterPaginator.prototype) as any;
+    const context = Object.assign(Object.create(ChapterPaginator.prototype), {
+      leadingColumnGap: new LeadingColumnGap(),
+    }) as any;
     Object.assign(context, {
       contentDoc: doc,
       viewer,
