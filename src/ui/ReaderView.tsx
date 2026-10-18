@@ -66,7 +66,7 @@ import { installPagedSwipe, PAGED_SWIPE_THRESHOLD_PX } from "../render/pagedSwip
 import { ChapterSeam, type ExternalSeam } from "./chapterSeam";
 import { ChapterFillIndex, chapterFillEntries } from "../render/chapterFill";
 import { canJoinChapters, chapterFillLayoutKey, joinLaneClip, type JoinLeaves } from "./chapterJoin";
-import { PAGED_LAYER, planPresentationLayers, standbyReaderProps, type PresentationPlan } from "./presentationStack";
+import { PAGED_LAYER, planPresentationLayers, standbyReaderProps, type PagedLayerKey, type PresentationLayer, type PresentationPlan } from "./presentationStack";
 import {
   animateValue,
   dragScrollLeft,
@@ -261,6 +261,8 @@ export interface ReaderViewProps {
   onImageActivation?(image: ImageActivationPayload): void;
   /** 图片浮层打开时暂停正文按键/滚轮/触摸翻页输入。 */
   inputPaused?: boolean;
+  /** A hidden presentation prepares its own edge, not another five-chapter window. */
+  presentationStandby?: boolean;
   /** 手机触摸普通轻点：用于显隐阅读工具；由 App 根协调者决定动作。分页模式下只收到中间区域的轻点。 */
   onPlainTap?: () => void;
   /** 分页模式点击翻页区域：当前设备类别与本机偏好；未提供时保持原默认边缘区。 */
@@ -830,7 +832,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     outerScrollWheelRef.current.reset();
     paginatorRef.current?.resetWheelAccumulator?.();
   };
-  const lastHandledStartAtEndNonceRef = useRef(props.startAtEnd.nonce);
+  const lastHandledStartAtEndNonceRef = useRef<number | null>(props.startAtEnd.atEnd ? null : props.startAtEnd.nonce);
   const lastStateRef = useRef<string>("loading");
   const lastReadyEmptyRef = useRef(false);
   const turnIntentRef = useRef(new TurnIntentBuffer());
@@ -858,6 +860,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   // 图片浮层打开时，分页器对按键/滚轮的回调被短路，触摸翻页也由下面的
   // overlay-active 样式屏蔽；关闭后不需要重新接线。
   const inputPausedRef = useRef(props.inputPaused === true);
+  const presentationStandbyRef = useRef(props.presentationStandby === true);
 
   spineIndexRef.current = spineIndex;
   onInternalLinkRef.current = props.onInternalLink;
@@ -882,6 +885,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   onRestoreResultRef.current = props.onRestoreResult;
   onUserReadingPositionChangeRef.current = props.onUserReadingPositionChange;
   inputPausedRef.current = props.inputPaused === true;
+  presentationStandbyRef.current = props.presentationStandby === true;
   preloadAllowedRef.current =
     settings.preloadNextChapter === true &&
     !book.fixedLayout &&
@@ -910,7 +914,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     activeFrameRef.current = frame;
     // Demote cached chapters before revealing/preparing the new active owner.
     for (const slot of spareSlotsRef.current) slot.paginator?.setMotionWindowForeground?.(false);
-    activeSlotRef.current?.paginator?.setMotionWindowForeground?.(document.visibilityState !== "hidden");
+    activeSlotRef.current?.paginator?.setMotionWindowForeground?.(!presentationStandbyRef.current && document.visibilityState !== "hidden");
     const primary = primaryIframeRef.current;
     const secondary = secondaryIframeRef.current;
     const tertiary = tertiaryIframeRef.current;
@@ -1212,6 +1216,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   };
 
   const scheduleAdjacentPreloads = (): void => {
+    if (presentationStandbyRef.current) return;
     if (backgroundPausedRef.current) return;
     // 滚动模式继续使用 ContinuousReaderView，不套五章固定缓存。
     if (latestRenderSettingsRef.current.readingMode === "scroll") {
@@ -1636,7 +1641,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       }
       if (!backgroundPausedRef.current) return;
       backgroundPausedRef.current = false;
-      activeSlotRef.current?.paginator?.setMotionWindowForeground?.(true);
+      activeSlotRef.current?.paginator?.setMotionWindowForeground?.(!presentationStandbyRef.current);
       if (preloadAllowedRef.current) scheduleAdjacentPreloadsDebounced(250);
     };
     document.addEventListener("visibilitychange", syncBackgroundPreparation);
@@ -2716,13 +2721,19 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   // active chapter, but enabling it after a ready chapter should start one
   // lazy secondary paginator once the second iframe is committed.
   useEffect(() => {
+    activeSlotRef.current?.paginator?.setMotionWindowForeground?.(!presentationStandbyRef.current && document.visibilityState !== "hidden");
+    if (presentationStandbyRef.current) {
+      clearPreloadTimer();
+      resetFullBookWarmup();
+      return;
+    }
     if (preloadAllowedRef.current) scheduleAdjacentPreloads();
     else {
       resetFullBookWarmup();
       disposeSpareSlots();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Scheduler helpers use ref-owned slots; only preload eligibility or frame changes restart preparation.
-  }, [settings.preloadNextChapter, book.fixedLayout, settings.readingMode, activeFrame]);
+  }, [settings.preloadNextChapter, book.fixedLayout, settings.readingMode, activeFrame, props.presentationStandby]);
 
   // 尺寸变化 → 重排（左右拉伸窗口等场景）。
   // 用 debounce：拉伸过程中 ResizeObserver 持续触发，只重置定时器、不做重排；
@@ -3543,10 +3554,19 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
   // A16 第二阶段：连续滑动 + 双页时，外层同时保留当前显示与相邻显示层（见 presentationStack）。
   const stackOn = seamPossible && spreadsShown && props.settings.readingMode !== "scroll" && !props.book.fixedLayout;
   const [classifiedTick, setClassifiedTick] = useState(0);
+  // Keep whichever ordinary layer just landed as the resident reader. A
+  // reverse seam must not discard that prepared document and reload another.
+  const pagedLayerKey = useRef<PagedLayerKey>(PAGED_LAYER);
+  const committed = useRef<{ book: Book; anchorNonce: number; layers: Map<string, number> }>({
+    book: props.book, anchorNonce: props.anchorNonce, layers: new Map(),
+  });
   const plan: PresentationPlan | null = stackOn
-    ? planPresentationLayers(props.book, props.spineIndex, pair, (index) => imageSpreads.peek(index))
+    ? planPresentationLayers(props.book, props.spineIndex, pair, (index) => imageSpreads.peek(index), {
+      key: pagedLayerKey.current,
+      spineIndex: committed.current.book === props.book ? committed.current.layers.get(pagedLayerKey.current) ?? -1 : -1,
+    })
     : null;
-  const parkedIndex = plan?.layers.find((layer) => layer.key === PAGED_LAYER)?.spineIndex ?? -1;
+  const parkedIndex = plan?.layers.find((layer) => layer.kind === "paged")?.spineIndex ?? -1;
   useEffect(() => {
     if (!spreadsShown || !seamPossible) return;
     // 提前分类相邻显示单元（只读 XHTML），让章边联动知道它们是否会并排；分好后重新规划。
@@ -3607,18 +3627,23 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
   }), []);
 
   // 上一次提交时各预备层停在哪一章：App 换到其中一层正显示的章时由那一层直接接管。
-  const committed = useRef<{ anchorNonce: number; standby: Map<string, number> }>({ anchorNonce: props.anchorNonce, standby: new Map() });
   useLayoutEffect(() => {
     committed.current = {
+      book: props.book,
       anchorNonce: props.anchorNonce,
-      standby: new Map(plan?.layers.filter((layer) => layer.role === "standby").map((layer) => [layer.key, layer.spineIndex]) ?? []),
+      layers: new Map(plan?.layers.map((layer) => [layer.key, layer.spineIndex]) ?? []),
     };
   });
-  const adoptedFor = (key: string, spineIndex: number) => stackOn && spineIndex === props.spineIndex &&
-    committed.current.standby.get(key) === props.spineIndex && committed.current.anchorNonce === props.anchorNonce &&
-    !props.preciseTarget && (key !== PAGED_LAYER || !props.startAtEnd.atEnd)
-    ? { spineIndex: props.spineIndex, anchorNonce: props.anchorNonce, startNonce: props.startAtEnd.nonce }
-    : null;
+  const adoptedFor = (layer: PresentationLayer, layerProps: ReaderViewProps) => {
+    const previous = committed.current;
+    if (!stackOn || previous.book !== props.book || previous.anchorNonce !== props.anchorNonce ||
+      previous.layers.get(layer.key) !== layer.spineIndex || layerProps.preciseTarget) return null;
+    // Claim both main->standby and standby->main at the already displayed
+    // edge. In particular a ready chapter end must not flash its first page.
+    if (layer.kind === "paged" && !layerHandles.current.get(layer.key)?.current?.seamReady?.(
+      layerProps.startAtEnd.atEnd ? "end" : "start")) return null;
+    return { spineIndex: layer.spineIndex, anchorNonce: layerProps.anchorNonce, startNonce: layerProps.startAtEnd.nonce };
+  };
 
   // 层间联动：当前显示与相邻预备层一起移动；落定后提交换章，由预备层接管（见 adoptedFor）。
   // 记下联动当时的两个元素：清理可能发生在提交的变更阶段，那时层的 ref 已经摘下。
@@ -3664,6 +3689,8 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
           return;
         }
         entry.landed = true;
+        const targetLayer = current.layers.find((layer) => layer.key === targetKey);
+        if (targetLayer?.kind === "paged") pagedLayerKey.current = targetLayer.key;
         latestProps.current.onRequestChapter(targetIndex, direction === -1 ? { atEnd: true } : undefined);
       },
       onFault: (error) => {
@@ -3699,7 +3726,7 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
   } else if (plan) {
     content = plan.layers.map((layer) => {
       const main = layer.role === "main";
-      const layerProps = main ? props : standbyReaderProps(props, layer.spineIndex);
+      const layerProps = main ? props : standbyReaderProps(props, layer.spineIndex, layer.kind === "paged" ? layer.edge : "start");
       const node = layer.kind === "paged"
         ? <PagedReaderView {...layerProps} ref={handleRefFor(layer.key)}
           onFlowProgression={main ? onFlowProgression : undefined}
@@ -3707,11 +3734,11 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
           chapterFillKind={chapterFillKind}
           resolveChapterFillKind={resolveChapterFillKind}
           externalSeam={main ? externalSeam : undefined}
-          adoptedNavigation={adoptedFor(layer.key, layer.spineIndex)} />
+          adoptedNavigation={adoptedFor(layer, layerProps)} />
         : <ImageSpreadReaderView {...layerProps} ref={handleRefFor(layer.key)}
           spread={layer.spread} Page={PagedReaderView}
           externalSeam={main ? externalSeam : undefined}
-          adoptedNavigation={adoptedFor(layer.key, layer.spineIndex)}
+          adoptedNavigation={adoptedFor(layer, layerProps)}
           onUnsupported={() => {
             imageSpreads.reject(layer.spread);
             if (main) setImagePlan({ resolver: imageSpreads, index: props.spineIndex, spread: null });
