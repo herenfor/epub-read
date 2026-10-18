@@ -37,6 +37,66 @@ export function pairLayerKey(spread: SingleLeafSpread): string {
 
 /** 连续成段的并排组最多向后找这么多组来定普通视图的停靠章。 */
 const PARK_SEARCH_LIMIT = 16;
+/** 当前组之后最多常驻这么多组（前置彩页/短章段通常不超过这个数）。 */
+export const RESIDENT_RUN_GROUPS = 6;
+/** 一条联动轨道在当前屏两侧最多各带这么多屏。 */
+export const SEAM_TRACK_REACH = 6;
+
+export interface SeamTrackScreen {
+  key: string;
+  /** 落定在这一屏时请求的章：向后为组的第一章/普通章；向前为组的最后一章（带 atEnd）。 */
+  spineIndex: number;
+  atEnd: boolean;
+}
+
+export interface SeamTrack {
+  /** 按阅读顺序排列，含当前显示层。 */
+  screens: SeamTrackScreen[];
+  current: number;
+}
+
+/**
+ * 当前显示层两侧已排好的连续显示层，按阅读顺序连成一条轨道。只沿真实的线性相邻关系走：
+ * 并排组一屏一组；遇到普通章停在它的章首（向后）或章末（向前）那一层；未分类、没有
+ * 预备层或没就绪就停。ready(key, edge) 由宿主按层的 seamReady 回答。
+ */
+export function planSeamTrack(
+  book: Book,
+  plan: PresentationPlan,
+  current: SingleLeafSpread | null,
+  spineIndex: number,
+  peek: (index: number) => SingleLeafSpread | null | undefined,
+  ready: (key: string, edge: "start" | "end") => boolean,
+  reach = SEAM_TRACK_REACH,
+): SeamTrack {
+  const first = current?.left ?? spineIndex;
+  const last = current ? current.right ?? current.left : spineIndex;
+  const walk = (direction: 1 | -1): SeamTrackScreen[] => {
+    const out: SeamTrackScreen[] = [];
+    const edge = direction === 1 ? "start" : "end";
+    let at = nextLinearIndex(book, direction === 1 ? last : first, direction);
+    while (at >= 0 && out.length < reach) {
+      const group = peek(at);
+      if (group === undefined) break;
+      if (group === null) {
+        const paged = plan.layers.find((layer) => layer.kind === "paged" && layer.spineIndex === at && layer.edge === edge);
+        if (paged && ready(paged.key, edge)) out.push({ key: paged.key, spineIndex: at, atEnd: direction === -1 });
+        break;
+      }
+      const key = pairLayerKey(group);
+      if (!plan.layers.some((layer) => layer.key === key) || !ready(key, edge)) break;
+      out.push({ key, spineIndex: at, atEnd: direction === -1 });
+      at = nextLinearIndex(book, direction === 1 ? group.right ?? group.left : group.left, direction);
+    }
+    return out;
+  };
+  const before = walk(-1).reverse();
+  const after = walk(1);
+  return {
+    screens: [...before, { key: plan.mainKey, spineIndex, atEnd: false }, ...after],
+    current: before.length,
+  };
+}
 
 /**
  * peek(i)：i 所在的并排组；null = 确认是普通章；undefined = 尚未分类（按普通章处理）。
@@ -105,6 +165,20 @@ export function planPresentationLayers(
   const ahead = lookaheadIndex >= 0 ? peek(lookaheadIndex) : null;
   if (ahead && !layers.some((layer) => layer.key === pairLayerKey(ahead))) {
     layers.push({ key: pairLayerKey(ahead), kind: "pair", spread: ahead, spineIndex: lookaheadIndex, role: "standby" });
+  }
+  // A16-3: the rest of a forward run of groups stays resident (bounded), so a
+  // fast run of turns moves along prepared screens instead of preparing new
+  // documents while the reader is turning. Kept groups never reload on landing.
+  if (direction === 1) {
+    let at = nextLinearIndex(book, last, 1);
+    for (let count = 0; at >= 0 && count < RESIDENT_RUN_GROUPS; count++) {
+      const group = peek(at);
+      if (!group) break;
+      if (!layers.some((layer) => layer.key === pairLayerKey(group))) {
+        layers.push({ key: pairLayerKey(group), kind: "pair", spread: group, spineIndex: at, role: "standby" });
+      }
+      at = nextLinearIndex(book, group.right ?? group.left, 1);
+    }
   }
 
   const mainKey = current ? pairLayerKey(current) : pagedKey;
