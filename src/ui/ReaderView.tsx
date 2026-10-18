@@ -2983,15 +2983,17 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
     : null;
 
   // 层间联动：当前显示与相邻预备层一起移动；落定后提交换章，由预备层接管（见 adoptedFor）。
-  const layerSeam = useRef<{ seam: ChapterSeam; external: ExternalSeam; targetKey: string; landed: boolean } | null>(null);
+  // 记下联动当时的两个元素：清理可能发生在提交的变更阶段，那时层的 ref 已经摘下。
+  const layerSeam = useRef<{
+    seam: ChapterSeam; external: ExternalSeam; target: HTMLElement; host: HTMLElement; landed: boolean;
+  } | null>(null);
   const clearLayerSeam = (): void => {
     const entry = layerSeam.current;
     if (!entry) return;
     layerSeam.current = null;
     entry.seam.dispose();
-    const target = layerElements.current.get(entry.targetKey);
-    if (target) delete target.dataset.seamReveal;
-    if (host.current) delete host.current.dataset.chapterSeam;
+    delete entry.target.dataset.seamReveal;
+    delete entry.host.dataset.chapterSeam;
   };
   const externalSeam = useCallback((direction: 1 | -1): ExternalSeam | null => {
     const live = layerSeam.current;
@@ -3042,15 +3044,16 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
         if (entry?.seam === seam && !entry.landed) clearLayerSeam();
       },
     };
-    layerSeam.current = { seam, external, targetKey, landed: false };
+    layerSeam.current = { seam, external, target: targetElement, host: hostElement, landed: false };
     return external;
     // Reads only refs; stable for the life of the wrapper.
   }, []);
-  // 当前显示换层（落定接管或任何导航）：同一次提交里撤掉平移，新层已在原位，不闪。
+  // 层间联动只由这里持有：当前显示换层（落定接管）时同一次提交里撤掉平移，新层已在原位，不闪；
+  // 换书/资源、版式几何变化、App 发起的任何导航、暂停输入、卸载（退出本书）都在落定前作废它，
+  // 迟到的完成回调因 layerSeam 已清空而无权再请求章节。
   const mainKey = plan?.mainKey ?? null;
-  useLayoutEffect(() => {
-    clearLayerSeam();
-  }, [mainKey, stackOn]);
+  useLayoutEffect(() => clearLayerSeam, [mainKey, stackOn, props.book, props.server, layoutIdentity,
+    props.spineIndex, props.anchorNonce, props.startAtEnd.nonce, props.inputPaused]);
 
   let content;
   if (props.settings.readingMode === "scroll" && !props.book.fixedLayout) {

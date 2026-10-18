@@ -93,6 +93,9 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
     if (props.inputPaused) cancelPairSeam();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- cancelPairSeam only touches refs.
   }, [props.inputPaused]);
+  // 本组被卸载时交还它发起的联动（外层 owner 同样会清理，这里只是不留悬空引用）。
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- cancelPairSeam only touches refs.
+  useEffect(() => cancelPairSeam, []);
   // 叶子里的拖动在章边接到同一个外层联动（叶子不预读，没有自己的相邻章）。
   const leafExternalSeam = (dir: 1 | -1): ExternalSeam | null => latest.current.externalSeam?.(dir) ?? null;
   // Body taps in either leaf turn the pair, like its outer bands.
