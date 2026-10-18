@@ -5675,7 +5675,9 @@ export default function App() {
                       readerRef.current?.clearTextSelection();
                     }}
                     onAddNote={() => {
-                       openComposer({ mode: "create", selection: selectionContext, spineIndex });
+                      // 双页拼接屏上选的可能是另一章的半页：笔记按选中文字所在的章记。
+                      const selectedIndex = book ? spineIndexForEntryKey(book, selectionContext.chapterPath) : -1;
+                      openComposer({ mode: "create", selection: selectionContext, spineIndex: selectedIndex >= 0 ? selectedIndex : spineIndex });
                       readerRef.current?.clearTextSelection();
                     }}
                     onClose={() => {
