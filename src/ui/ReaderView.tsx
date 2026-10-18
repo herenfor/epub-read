@@ -66,8 +66,9 @@ import type { ScrubToken } from "./readerProgressAxis";
 import { installPagedSwipe, PAGED_SWIPE_THRESHOLD_PX } from "../render/pagedSwipe";
 import { ChapterSeam, type ExternalSeam } from "./chapterSeam";
 import { ChapterFillIndex, chapterFillEntries } from "../render/chapterFill";
+import { planFrontRun } from "./frontRunPlan";
 import { canJoinChapters, chapterFillLayoutKey, joinLaneClip, type JoinLeaves } from "./chapterJoin";
-import { PAGED_LAYER, planPresentationLayers, planSeamTrack, RESIDENT_RUN_GROUPS, standbyReaderProps, type PagedLayerKey, type PresentationLayer, type PresentationPlan } from "./presentationStack";
+import { PAGED_LAYER, planPresentationLayers, planSeamTrack, standbyReaderProps, type PagedLayerKey, type PresentationLayer, type PresentationPlan } from "./presentationStack";
 import {
   animateValue,
   dragScrollLeft,
@@ -280,6 +281,8 @@ export interface ReaderViewProps {
    * 直接移过去；不做全书预热。只对 presentationStandby 生效。
    */
   standbyPrepareThrough?: number;
+  /** A16-3：本视图排好某一普通章后报告它的精确叶数（供外层开书预备计划判断短章段在哪里结束）。 */
+  onChapterLeaves?(spineIndex: number, contentLeafCount: number): void;
   /** 手机触摸普通轻点：用于显隐阅读工具；由 App 根协调者决定动作。分页模式下只收到中间区域的轻点。 */
   onPlainTap?: () => void;
   /** 分页模式点击翻页区域：当前设备类别与本机偏好；未提供时保持原默认边缘区。 */
@@ -617,6 +620,8 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   /** 升格后补执行的那一次同向翻页；只属于升格时的槽与导航，定位/退出即作废。 */
   const seamReplayRef = useRef<{ timer: ReturnType<typeof setTimeout>; slot: PaginatorSlot; navigation: number } | null>(null);
   // ---- A13-2 章边拼接屏 ----
+  const onChapterLeavesRef = useRef(props.onChapterLeaves);
+  onChapterLeavesRef.current = props.onChapterLeaves;
   const chapterFillKindRef = useRef(props.chapterFillKind);
   chapterFillKindRef.current = props.chapterFillKind;
   const resolveChapterFillKindRef = useRef(props.resolveChapterFillKind);
@@ -974,6 +979,9 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     const state = paginator.getStateSnapshot();
     lastStateRef.current = state.status;
     if (state.status !== "ready") return;
+    // A16-3：当前章的精确叶数也立即报告（预备层停靠的那一章同样需要）。
+    const fill = fillIndex();
+    if (fill) recordFill(fill, slot);
     // B-151：空章是成功加载的一种终态。只有明确还有下一章且已经发起自动
     // 跳转时，旧空章不发布 active ready；末章空章必须解除 loading/turn intent。
     const hasNext = slot.spineIndex !== null && nextLinearIndex(book, slot.spineIndex, 1) >= 0;
@@ -1376,6 +1384,9 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
               }
             }
             syncJoin();
+            // 排好就记下精确叶数（预备层也报告，开书预备计划据此判断短章段在哪里结束）。
+            const fill = fillIndex();
+            if (fill) recordFill(fill, slot);
           }
           scheduleAdjacentPreloadsDebounced(150);
         })
@@ -2046,6 +2057,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     const kind = kindOf ? kindOf(slot.spineIndex) : "ordinary";
     const leaves = kind === undefined ? null : p.contentLeafLayout;
     if (!leaves) return false;
+    onChapterLeavesRef.current?.(slot.spineIndex, leaves.contentLeafCount);
     return index.record(index.layoutKey, slot.spineIndex, {
       contentLeafCount: leaves.contentLeafCount,
       joinable: leaves.joinable && kind === "ordinary",
@@ -3633,6 +3645,9 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   );
 });
 
+/** A16-3：开书预备的上限（屏数为主；图片尺寸接上前字节上限不起作用）。 */
+const FRONT_RUN_BUDGET = { maxScreens: 10, maxBytes: 160 * 1024 * 1024 };
+
 export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function ReaderView(props, ref) {
   const edgeFeedback = useEdgeTurnFeedbackOwner();
   const host = useRef<HTMLDivElement>(null);
@@ -3712,16 +3727,40 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
   const committed = useRef<{ book: Book; anchorNonce: number; layers: Map<string, number> }>({
     book: props.book, anchorNonce: props.anchorNonce, layers: new Map(),
   });
+  // A16-3：开书预备计划。普通层报告的精确叶数只属于这一本书与这一份版式。
+  const leafCounts = useRef<{ book: Book | null; layout: string; counts: Map<number, number> }>({ book: null, layout: "", counts: new Map() });
+  if (leafCounts.current.book !== props.book || leafCounts.current.layout !== layoutIdentity) {
+    leafCounts.current = { book: props.book, layout: layoutIdentity, counts: new Map() };
+  }
+  const onChapterLeaves = useCallback((index: number, leaves: number) => {
+    const store = leafCounts.current;
+    if (store.counts.get(index) === leaves) return;
+    store.counts.set(index, leaves);
+    setClassifiedTick((tick) => tick + 1);
+  }, []);
+  const runDirection = props.server.mediaCacheBudgetExceeded ? 0 : warmDirection.current;
+  const frontRun = stackOn && runDirection === 1 ? planFrontRun({
+    book: props.book,
+    current: pair?.left ?? props.spineIndex,
+    direction: 1,
+    peek: (index) => index === props.spineIndex && pair ? pair : imageSpreads.peek(index),
+    isLeafCandidate: (index) => imageSpreads.peekCandidate(index),
+    knownLeaves: (index) => leafCounts.current.counts.get(index),
+    // Image dimensions are not wired yet: the screen count bounds the run.
+    imageBytes: () => 0,
+    budget: FRONT_RUN_BUDGET,
+  }) : null;
   const plan: PresentationPlan | null = stackOn
     ? planPresentationLayers(props.book, props.spineIndex, pair, (index) => imageSpreads.peek(index), {
       key: pagedLayerKey.current,
-      warmDirection: props.server.mediaCacheBudgetExceeded ? 0 : warmDirection.current,
+      warmDirection: runDirection,
+      run: frontRun ? { units: frontRun.units, waitingFor: frontRun.waitingFor } : undefined,
       spineIndex: committed.current.book === props.book ? committed.current.layers.get(pagedLayerKey.current) ?? -1 : -1,
     })
     : null;
   const lookaheadIndex = plan?.lookaheadIndex ?? -1;
   const parkedIndex = plan?.layers.find((layer) => layer.kind === "paged")?.spineIndex ?? -1;
-  const budgetExceeded = props.server.mediaCacheBudgetExceeded;
+  const frontRunWaiting = frontRun?.waitingFor ?? -1;
   useEffect(() => {
     if (!spreadsShown || !seamPossible) return;
     // 提前分类相邻显示单元（只读 XHTML），让章边联动知道它们是否会并排；分好后重新规划。
@@ -3729,22 +3768,8 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
     const first = pair?.left ?? props.spineIndex;
     const last = pair ? pair.right ?? pair.left : props.spineIndex;
     const wanted = [nextLinearIndex(props.book, last, 1), nextLinearIndex(props.book, first, -1), parkedIndex, lookaheadIndex];
-    // Classify the forward run that stays resident (presentationStack), one known group at a time.
-    if (warmDirection.current === 1 && !budgetExceeded) {
-      // Same walk as planPresentationLayers: groups, and runs of up to three ordinary chapters between them.
-      let ordinary = 0;
-      for (let at = nextLinearIndex(props.book, last, 1), count = 0; at >= 0 && count < RESIDENT_RUN_GROUPS * 2; count++) {
-        const group = imageSpreads.peek(at);
-        if (group === undefined) { wanted.push(at); break; }
-        if (group === null) {
-          if (++ordinary > 3) break;
-          at = nextLinearIndex(props.book, at, 1);
-          continue;
-        }
-        ordinary = 0;
-        at = nextLinearIndex(props.book, group.right ?? group.left, 1);
-      }
-    }
+    // The front-run plan waits for one chapter's classification at a time.
+    if (frontRunWaiting >= 0) wanted.push(frontRunWaiting);
     for (const index of wanted) {
       if (index >= 0 && imageSpreads.peek(index) === undefined) {
         void imageSpreads.resolve(index, controller.signal).then(() => {
@@ -3753,7 +3778,7 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
       }
     }
     return () => controller.abort();
-  }, [imageSpreads, props.book, props.spineIndex, pair, parkedIndex, lookaheadIndex, spreadsShown, seamPossible, classifiedTick, budgetExceeded]);
+  }, [imageSpreads, props.book, props.spineIndex, pair, parkedIndex, lookaheadIndex, spreadsShown, seamPossible, classifiedTick, frontRunWaiting]);
   const tapGeometry = useMemo(() => createReaderTapGeometry(width, props.tapRegions), [width, props.tapRegions]);
   const bookProgression = effectivePageProgression(props.book.pageProgression, props.settings, props.book.fixedLayout);
   // 点击翻页区按本章实际方向映射（竖排书元数据没写方向时与元数据不同）。
@@ -4048,6 +4073,7 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
         layer.kind === "paged" ? layer.prepareThrough : undefined);
       const node = layer.kind === "paged"
         ? <PagedReaderView {...layerProps} ref={handleRefFor(layer.key)}
+          onChapterLeaves={onChapterLeaves}
           onFlowProgression={main ? onFlowProgression : undefined}
           seamTargetEligible={seamTargetEligible}
           chapterFillKind={chapterFillKind}

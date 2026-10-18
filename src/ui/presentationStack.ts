@@ -9,6 +9,7 @@ import { nextLinearIndex } from "../core/book";
 import type { Book } from "../core/types";
 import type { ReaderViewProps } from "./ReaderView";
 import type { SingleLeafSpread } from "./singleLeafSpreads";
+import type { FrontRunUnit } from "./frontRunPlan";
 
 export type LayerRole = "main" | "standby";
 /** "paged"/"paged-return"，或前方常驻段落的 `paged-run:<首章>`（落定后可成为当前普通视图）。 */
@@ -45,7 +46,7 @@ export const RESIDENT_RUN_GROUPS = 6;
 /** 其中最多这么多段普通章各占一个预备层。 */
 export const RESIDENT_RUN_SEGMENTS = 2;
 /** 一条联动轨道在当前屏两侧最多各带这么多屏。 */
-export const SEAM_TRACK_REACH = 6;
+export const SEAM_TRACK_REACH = 8;
 
 export interface SeamTrackScreen {
   key: string;
@@ -129,7 +130,14 @@ export function planPresentationLayers(
   spineIndex: number,
   current: SingleLeafSpread | null,
   peek: (index: number) => SingleLeafSpread | null | undefined,
-  resident?: { key: PagedLayerKey; spineIndex: number; warmDirection?: -1 | 0 | 1 },
+  resident?: {
+    key: PagedLayerKey; spineIndex: number; warmDirection?: -1 | 0 | 1;
+    /**
+     * A16-3：开书预备计划（frontRunPlan）的正向各屏，第一项是当前屏；waitingFor 是计划还在等
+     * 叶数的普通章，也排进它那一段，排好后才能知道段在哪里结束。
+     */
+    run?: { units: readonly FrontRunUnit[]; waitingFor: number | null };
+  },
 ): PresentationPlan {
   const pagedKey = resident?.key ?? PAGED_LAYER;
   const first = current?.left ?? spineIndex;
@@ -188,41 +196,45 @@ export function planPresentationLayers(
   if (ahead && !layers.some((layer) => layer.key === pairLayerKey(ahead))) {
     layers.push({ key: pairLayerKey(ahead), kind: "pair", spread: ahead, spineIndex: lookaheadIndex, role: "standby" });
   }
-  // A16-3: the rest of the forward front-matter run stays resident (bounded), so
-  // a fast run of turns moves along prepared screens instead of preparing new
-  // documents while the reader is turning. Groups get their own layers; each run
-  // of ordinary chapters between groups gets one paged layer that also prepares
-  // its next chapters. Kept layers never reload on landing.
-  if (direction === 1) {
-    let at = nextLinearIndex(book, last, 1);
+  // A16-3: the planned forward front-matter run stays resident, so a fast run of
+  // turns moves along prepared screens instead of preparing new documents while
+  // the reader is turning. Groups get their own layers; each run of ordinary
+  // chapters between groups gets one paged layer that also prepares its next
+  // chapters (at most two). Kept layers never reload on landing.
+  const run = direction === 1 ? resident?.run : undefined;
+  if (run) {
+    const ahead = run.units.slice(1).filter((unit) => unit.edge === "start");
+    const waiting = run.waitingFor;
+    const steps: Array<{ kind: "pair"; spread: SingleLeafSpread; at: number } | { kind: "paged"; at: number }> = ahead.map((unit) =>
+      unit.kind === "pair" ? { kind: "pair", spread: peek(unit.spineIndex) as SingleLeafSpread, at: unit.spineIndex }
+        : { kind: "paged", at: unit.spineIndex });
+    if (waiting !== null && waiting >= 0 && peek(waiting) === null) {
+      const lastStep = steps[steps.length - 1];
+      const lastChapter = lastStep ? (lastStep.kind === "pair" ? lastStep.spread.right ?? lastStep.spread.left : lastStep.at) : last;
+      if (nextLinearIndex(book, lastChapter, 1) === waiting) steps.push({ kind: "paged", at: waiting });
+    }
     let segments = 0;
-    for (let count = 0; at >= 0 && count < RESIDENT_RUN_GROUPS; count++) {
-      const group = peek(at);
-      if (group === undefined) break;
-      if (group) {
-        if (!layers.some((layer) => layer.key === pairLayerKey(group))) {
-          layers.push({ key: pairLayerKey(group), kind: "pair", spread: group, spineIndex: at, role: "standby" });
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
+      if (step.kind === "pair") {
+        if (!step.spread) break;
+        if (!layers.some((layer) => layer.key === pairLayerKey(step.spread))) {
+          layers.push({ key: pairLayerKey(step.spread), kind: "pair", spread: step.spread, spineIndex: step.at, role: "standby" });
         }
-        at = nextLinearIndex(book, group.right ?? group.left, 1);
         continue;
       }
-      // An ordinary run: its first chapter plus at most two more, up to the next group.
-      let through = at;
-      for (let step = 0; step < 2; step++) {
-        const following = nextLinearIndex(book, through, 1);
-        if (following < 0 || peek(following) !== null) break;
-        through = following;
+      let through = step.at;
+      while (i + 1 < steps.length && steps[i + 1].kind === "paged" && steps[i + 1].at === nextLinearIndex(book, through, 1) &&
+        through !== nextLinearIndex(book, nextLinearIndex(book, step.at, 1), 1)) {
+        through = steps[++i].at;
       }
-      const existing = layers.find((layer) => layer.kind === "paged" && layer.spineIndex === at && layer.edge === "start" &&
+      const existing = layers.find((layer) => layer.kind === "paged" && layer.spineIndex === step.at && layer.edge === "start" &&
         layer.role === "standby");
       if (existing?.kind === "paged") existing.prepareThrough = through;
-      else if (segments < RESIDENT_RUN_SEGMENTS && !(current === null && at === spineIndex)) {
-        layers.push({ key: `paged-run:${at}`, kind: "paged", spineIndex: at, role: "standby", edge: "start", prepareThrough: through });
+      else if (segments < RESIDENT_RUN_SEGMENTS) {
+        layers.push({ key: `paged-run:${step.at}`, kind: "paged", spineIndex: step.at, role: "standby", edge: "start", prepareThrough: through });
       } else break;
       segments++;
-      const after = nextLinearIndex(book, through, 1);
-      if (after < 0 || !peek(after)) break;
-      at = after;
     }
   }
 
@@ -245,6 +257,7 @@ const NOOP = () => {};
 /** 隐藏层仍需要的查询（不向 App 汇报，只读）。 */
 const KEPT_FUNCTIONS = new Set([
   "notesForChapter", "chapterNeighbor", "seamTargetEligible", "chapterFillKind", "resolveChapterFillKind",
+  "onChapterLeaves",
 ]);
 
 /**

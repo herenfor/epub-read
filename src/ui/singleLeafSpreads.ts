@@ -37,6 +37,11 @@ export class SingleLeafSpreads {
     return this.spreads.get(index);
   }
 
+  /** 便宜的一页章判断（已读过才有）；undefined = 还没判断。 */
+  peekCandidate(index: number): boolean | undefined {
+    return this.single.get(index);
+  }
+
   /** The leaf no longer fits (e.g. the window shrank): show these chapters on their own. */
   reject(spread: SingleLeafSpread): void {
     this.spreads.set(spread.left, null);
