@@ -2,7 +2,7 @@ import { effectivePageProgression } from "../render/settings";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type ForwardRefExoticComponent, type RefAttributes } from "react";
 import { nextLinearIndex } from "../core/book";
 import type { ChapterState } from "../render/paginator";
-import type { ReaderHandle, ReaderViewProps } from "./ReaderView";
+import type { BoundarySwipePreview, ReaderHandle, ReaderViewProps } from "./ReaderView";
 import type { SingleLeafSpread } from "./singleLeafSpreads";
 import { EdgeTurnZone } from "./EdgeTurnZone";
 import { edgeFeedbackKeyOf, edgeTurnZoneSpecs, ReaderTurnOwnerContext, routeHostBlankTurn, useReaderTapRouting } from "./readerTapRouting";
@@ -27,12 +27,32 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
   const rtl = effectivePageProgression(props.book.pageProgression, props.settings, props.book.fixedLayout) === "rtl";
   const leftHandle = useRef<ReaderHandle>(null);
   const rightHandle = useRef<ReaderHandle>(null);
+  const swipeSurface = useRef<HTMLDivElement>(null);
+  const swipeHint = useRef<HTMLDivElement>(null);
+  // Leaves keep the existing gesture/release controller; only the visual
+  // fallback is projected onto the whole spread, never an individual iframe.
+  const boundaryPreview = (preview: BoundarySwipePreview | null) => {
+    const surface = swipeSurface.current;
+    const hint = swipeHint.current;
+    if (surface) {
+      surface.classList.toggle("is-dragging", preview !== null);
+      if (preview) surface.style.translate = `${preview.offset}px 0`;
+      else surface.style.removeProperty("translate");
+    }
+    if (hint) {
+      hint.style.opacity = String(preview?.opacity ?? 0);
+      hint.dataset.direction = preview?.direction ?? "next";
+      hint.dataset.ready = String(preview?.ready ?? false);
+      hint.textContent = preview?.text ?? "";
+    }
+  };
   const states = useRef(new Map<number, ChapterState>());
   const displayed = useRef(new Set<number>());
   const outerWheel = useRef(new WheelTurnAccumulator());
   const [ready, setReady] = useState(false);
   const readyRef = useRef(false);
   const show = (value: boolean) => {
+    if (!value) boundaryPreview(null);
     readyRef.current = value;
     setReady(value);
   };
@@ -61,6 +81,7 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
   const seamInputId = useRef(0);
   const livePairSeam = () => pairSeam.current && !pairSeam.current.seam.done ? pairSeam.current : null;
   const cancelPairSeam = () => {
+    boundaryPreview(null);
     const seam = livePairSeam();
     pairSeam.current = null;
     seam?.cancel();
@@ -68,6 +89,7 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
   const turn = (dir: 1 | -1) => {
     const p = latest.current;
     if (p.inputPaused || displayed.current.size < (p.spread.right === null ? 1 : 2)) return;
+    boundaryPreview(null);
     // 联动进行中：命令改变目标或反向；越界的同向命令不再连跨。
     const live = livePairSeam();
     if (live) {
@@ -226,6 +248,7 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
         }}
         onLayoutSettled={commit}
         chapterNeighbor={(_, dir) => neighbor(dir)}
+        onBoundarySwipePreview={boundaryPreview}
         onRequestChapter={(target, options) => {
           // Empty/hidden authored pictures retain ordinary chapter handling.
           const state = states.current.get(index);
@@ -272,12 +295,15 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
       turn(direction);
     }}
     >
+    <div ref={swipeSurface} className="reader-image-spread-pages">
     <ReaderTurnOwnerContext.Provider value={turnOwner}>
       {page(props.spread.left, "left")}
       {props.spread.right !== null ? page(props.spread.right, "right") : <div className="reader-image-leaf is-empty"
         data-image-side={rtl ? "left" : "right"} style={{ clipPath: rtl ? "inset(0 50% 0 0)" : "inset(0 0 0 50%)" }}
         aria-hidden="true" />}
     </ReaderTurnOwnerContext.Provider>
+    </div>
+    <div ref={swipeHint} className="reader-swipe-hint reader-image-spread-hint" aria-hidden="true" />
     {edgeTurnZoneSpecs(tapRouting).map((zone) => <EdgeTurnZone key={zone.side}
       direction={zone.direction} side={zone.sideProp} region={zone.region} />)}
   </div>;

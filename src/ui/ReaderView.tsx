@@ -180,6 +180,15 @@ export interface ReaderHandle {
   applyTheme(theme: ReaderSettings["theme"]): void;
 }
 
+/** Boundary feedback belongs to the displayed screen, which may contain two documents. */
+export interface BoundarySwipePreview {
+  offset: number;
+  opacity: number;
+  direction: "next" | "prev";
+  ready: boolean;
+  text: string;
+}
+
 export interface ReaderViewProps {
   book: Book;
   server: ResourceServer;
@@ -211,6 +220,8 @@ export interface ReaderViewProps {
   /** Turn target for a page-turn input; an image-spread leaf answers for its
    * whole pair so a boundary leaf never starts a chapter exit with no target. */
   chapterNeighbor?(index: number, dir: 1 | -1): number;
+  /** A paired host moves both clipped leaves and owns the single boundary hint. */
+  onBoundarySwipePreview?(preview: BoundarySwipePreview | null): void;
   /** 章节切换请求（nonce 单调递增；atEnd=true 表示加载完成后翻到最后一页） */
   startAtEnd: { nonce: number; atEnd: boolean };
   /** unresolvedResources: book paths with no usable URL in this chapter, for session-level aggregation. */
@@ -2890,6 +2901,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     const main = readerContainerRef.current;
     if (!main) return;
     if (dx === null) {
+      props.onBoundarySwipePreview?.(null);
       main.classList.remove("reader-swipe-dragging");
       main.style.removeProperty("--reader-swipe-offset");
       main.style.removeProperty("--reader-swipe-opacity");
@@ -2979,9 +2991,9 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       return true;
     };
     // 穿过拼接屏途中（含被新手势打断）：这次拖动交给接过运动的那一章。
-    if (followJoin()) return;
+    if (followJoin()) { props.onBoundarySwipePreview?.(null); return; }
     // 联动进行中（含被新手势打断）：这次拖动属于联动。
-    if (followSeam()) return;
+    if (followSeam()) { props.onBoundarySwipePreview?.(null); return; }
     if (p && resolvedTurnAnimation() === "slide" && p.pageMotionAvailable) {
       let motionDrag = motionDragRef.current;
       if (!motionDrag) {
@@ -3027,10 +3039,16 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       delete main.dataset.swipeFollow;
     }
     // 停在拼接屏向另一章拖：另一章接过运动，当前章露出的半边跟着移出。
-    if (resolvedTurnAnimation() === "slide" && startJoinMotion(direction) && followJoin()) return;
+    if (resolvedTurnAnimation() === "slide" && startJoinMotion(direction) && followJoin()) {
+      props.onBoundarySwipePreview?.(null);
+      return;
+    }
     if (joinMotionRef.current && !joinMotionRef.current.drag) endJoinMotion();
     // 静止在章边向外拖：相邻章已排好时两章一起跟手，否则走下方的跨章预览。
-    if (resolvedTurnAnimation() === "slide" && startSeam(direction) && followSeam()) return;
+    if (resolvedTurnAnimation() === "slide" && startSeam(direction) && followSeam()) {
+      props.onBoundarySwipePreview?.(null);
+      return;
+    }
     if (liveSeam() && !seamRef.current?.drag) abortSeam();
     const canTurn = Boolean(p && (direction === 1
       ? p.currentPage < p.pageCount - 1 || neighbor(spineIndexRef.current, 1) >= 0
@@ -3039,15 +3057,21 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     const chapterEdge = Boolean(p && (direction === 1 ? p.currentPage >= p.pageCount - 1 : p.currentPage <= 0));
     const offset = resolvedTurnAnimation() === "none" ? 0
       : Math.max(-72, Math.min(72, dx * (canTurn ? 0.4 : 0.12)));
+    const text = !canTurn
+      ? uiText(direction === 1 ? "readerMisc.swipe.end" : "readerMisc.swipe.start")
+      : uiText(chapterEdge ? (direction === 1 ? "readerMisc.swipe.nextChapter" : "readerMisc.swipe.prevChapter") : (direction === 1 ? "readerMisc.swipe.nextPage" : "readerMisc.swipe.prevPage")) + (ready ? uiText("readerMisc.swipe.release") : "");
+    if (props.onBoundarySwipePreview) {
+      props.onBoundarySwipePreview({ offset, opacity: Math.min(1, Math.abs(dx) / PAGED_SWIPE_THRESHOLD_PX),
+        direction: dx < 0 ? "next" : "prev", ready, text });
+      return;
+    }
     main.classList.add("reader-swipe-dragging");
     main.dataset.swipeDirection = direction === 1 ? "next" : "prev";
     main.dataset.swipeReady = String(ready);
     main.style.setProperty("--reader-swipe-offset", `${offset}px`);
     main.style.setProperty("--reader-swipe-opacity", String(Math.min(1, Math.abs(dx) / PAGED_SWIPE_THRESHOLD_PX)));
     if (swipeHintRef.current) {
-      swipeHintRef.current.textContent = !canTurn
-        ? uiText(direction === 1 ? "readerMisc.swipe.end" : "readerMisc.swipe.start")
-        : uiText(chapterEdge ? (direction === 1 ? "readerMisc.swipe.nextChapter" : "readerMisc.swipe.prevChapter") : (direction === 1 ? "readerMisc.swipe.nextPage" : "readerMisc.swipe.prevPage")) + (ready ? uiText("readerMisc.swipe.release") : "");
+      swipeHintRef.current.textContent = text;
     }
   };
   updateSwipePreviewRef.current = (dx) => {
@@ -3438,7 +3462,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         aria-hidden="true"
       />
       {!book.fixedLayout && <BookmarkRibbonLayer marks={ribbonMarks} cue={props.bookmarkCue ?? null} motion={ribbonMotion} />}
-      <div ref={swipeHintRef} className="reader-swipe-hint" aria-hidden="true" />
+      {!props.onBoundarySwipePreview && <div ref={swipeHintRef} className="reader-swipe-hint" aria-hidden="true" />}
       {edgeTurnZoneSpecs(tapRouting).map((zone) => <EdgeTurnZone key={zone.side}
         direction={zone.direction}
         side={zone.sideProp}
