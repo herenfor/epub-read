@@ -1796,8 +1796,8 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     const main = readerContainerRef.current;
     if (main) delete main.dataset.chapterSeam;
     for (const slot of entry.track.length ? entry.track : [entry.slot]) {
-      if (slot === activeSlotRef.current) continue;
       slot.iframe.style.removeProperty("pointer-events");
+      if (slot === activeSlotRef.current) continue;
       slot.iframe.style.setProperty("visibility", "hidden", "important");
       slot.iframe.style.zIndex = "0";
     }
