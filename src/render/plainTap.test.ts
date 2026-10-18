@@ -116,3 +116,66 @@ describe("plain mouse click", () => {
     expect(onPress).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("input surface that becomes hit-testable mid-touch", () => {
+  function surface() {
+    const { document } = parseHTML(`<html><body><div id="surface"></div></body></html>`);
+    const element = document.getElementById("surface")! as unknown as HTMLElement;
+    const onTap = vi.fn();
+    const cleanup = installPlainTap(element, { onTap });
+    const fire = (type: string, x: number, options: Record<string, unknown> = {}) => {
+      const event = new (document.defaultView as any).Event(type, { bubbles: true, cancelable: true });
+      const point = { clientX: x, clientY: 300 };
+      const fields: Record<string, unknown> = { clientX: x, clientY: 300, button: 0, detail: 1, ...options };
+      if (type.startsWith("touch")) {
+        fields.touches = type === "touchend" ? [] : [point];
+        fields.changedTouches = [point];
+      }
+      for (const [key, value] of Object.entries(fields)) Object.defineProperty(event, key, { value });
+      element.dispatchEvent(event);
+    };
+    return { onTap, cleanup, fire };
+  }
+
+  it("does not turn on the compatibility click of a touch that went down in a leaf document", () => {
+    const { onTap, fire } = surface();
+    // Only the trailing mouse events of the leaf's touch reach the surface.
+    fire("mousedown", 1100, { pointerType: "touch" });
+    fire("click", 1100, { pointerType: "touch", pointerId: 7 });
+    // Even with a stale mouse type and no pointerType on the click.
+    fire("pointerdown", 40, { pointerType: "mouse", pointerId: 1 });
+    fire("mousedown", 40);
+    fire("click", 40, { pointerId: 1 });
+    fire("mousedown", 1100);
+    fire("click", 1100, { sourceCapabilities: { firesTouchEvents: true } });
+    expect(onTap).toHaveBeenCalledTimes(1);
+    expect(onTap.mock.calls[0][0]).toMatchObject({ clientX: 40, pointerType: "mouse" });
+  });
+
+  it("consumes its own touch once at touchend, never again on the trailing click", () => {
+    const { onTap, fire } = surface();
+    fire("pointerdown", 1100, { pointerType: "touch", pointerId: 9 });
+    fire("touchstart", 1100);
+    fire("touchend", 1100);
+    fire("mousedown", 1100, { pointerType: "touch" });
+    fire("click", 1100, { pointerType: "touch", pointerId: 9 });
+    expect(onTap).toHaveBeenCalledTimes(1);
+    expect(onTap.mock.calls[0][0]).toMatchObject({ clientX: 1100, pointerType: "touch" });
+  });
+
+  it("requires its own press for a mouse click", () => {
+    const { onTap, fire, cleanup } = surface();
+    fire("mousedown", 1100);
+    fire("click", 1100, { pointerId: 1 });
+    expect(onTap).not.toHaveBeenCalled();
+    fire("pointerdown", 1100, { pointerType: "pen", pointerId: 3 });
+    fire("mousedown", 1100);
+    fire("click", 1100, { pointerId: 3 });
+    expect(onTap).toHaveBeenCalledTimes(1);
+    cleanup();
+    fire("pointerdown", 1100, { pointerType: "mouse", pointerId: 1 });
+    fire("mousedown", 1100);
+    fire("click", 1100, { pointerId: 1 });
+    expect(onTap).toHaveBeenCalledTimes(1);
+  });
+});

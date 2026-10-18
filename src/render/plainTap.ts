@@ -32,6 +32,17 @@ const MOVE_TOLERANCE_PX = 10;
 /** Compatibility mouse events trail a touch; never count them as a second tap. */
 const TOUCH_MOUSE_GUARD_MS = 800;
 
+/**
+ * A click synthesized from a touch. Its hit target is computed after touchend,
+ * so it can land on a different document than the one that owned the touch.
+ */
+function isTouchCompatClick(event: MouseEvent): boolean {
+  const pointerType = (event as PointerEvent).pointerType;
+  if (pointerType === "touch") return true;
+  return (event as MouseEvent & { sourceCapabilities?: { firesTouchEvents?: boolean } | null })
+    .sourceCapabilities?.firesTouchEvents === true;
+}
+
 function isInteractiveTarget(target: EventTarget | null): boolean {
   const element = target as (Element & { closest?: (selector: string) => Element | null }) | null;
   if (!element || typeof element.closest !== "function") return false;
@@ -48,7 +59,14 @@ function hasActiveSelection(doc: Document): boolean {
   }
 }
 
-export function installPlainTap(doc: Document, handlers: PlainTapHandlers): () => void {
+/**
+ * `target` is a chapter document, or a host element that receives its own taps
+ * (e.g. an input surface over moving readers). A physical input is consumed only
+ * by the target that saw it go down: touches at their own touchend, mouse/pen at
+ * click after their own pointerdown. Compatibility clicks never count as intent.
+ */
+export function installPlainTap(target: Document | HTMLElement, handlers: PlainTapHandlers): () => void {
+  const doc = target.nodeType === 9 ? target as Document : target.ownerDocument!;
   let tracking = false;
   let startX = 0;
   let startY = 0;
@@ -57,6 +75,8 @@ export function installPlainTap(doc: Document, handlers: PlainTapHandlers): () =
   let mouseY = 0;
   let lastPointerType = "";
   let lastTouchAt = Number.NEGATIVE_INFINITY;
+  /** Mouse/pen pointer that went down on this target and has not clicked yet. */
+  let pressPointer: number | null = null;
 
   const reset = (): void => {
     tracking = false;
@@ -110,7 +130,9 @@ export function installPlainTap(doc: Document, handlers: PlainTapHandlers): () =
   };
 
   const onPointerDown = (event: Event): void => {
-    lastPointerType = (event as PointerEvent).pointerType ?? "";
+    const pointer = event as PointerEvent;
+    lastPointerType = pointer.pointerType ?? "";
+    pressPointer = lastPointerType === "mouse" || lastPointerType === "pen" ? pointer.pointerId ?? 0 : null;
   };
 
   const fromMouse = (): boolean =>
@@ -118,7 +140,7 @@ export function installPlainTap(doc: Document, handlers: PlainTapHandlers): () =
 
   const onMouseDown = (event: MouseEvent): void => {
     resetMouse();
-    if (!fromMouse() || event.button !== 0 || blocked(event.target, event)) return;
+    if (pressPointer === null || !fromMouse() || event.button !== 0 || blocked(event.target, event)) return;
     if (event.detail >= 2 && handlers.claimsRepeatClick?.(event) === true) event.preventDefault();
     mouseTracking = true;
     mouseX = event.clientX;
@@ -135,6 +157,11 @@ export function installPlainTap(doc: Document, handlers: PlainTapHandlers): () =
   const onClick = (event: MouseEvent): void => {
     if (!mouseTracking) return;
     resetMouse();
+    const press = pressPointer;
+    pressPointer = null;
+    const pointerId = (event as PointerEvent).pointerId;
+    if (isTouchCompatClick(event) || (typeof pointerId === "number" && pointerId > 0 && press !== null && press > 0 &&
+      pointerId !== press)) return;
     if (!fromMouse() || event.button !== 0 || blocked(event.target, event)) return;
     if (Math.hypot(event.clientX - mouseX, event.clientY - mouseY) > MOVE_TOLERANCE_PX) return;
     handlers.onTap({
@@ -144,29 +171,30 @@ export function installPlainTap(doc: Document, handlers: PlainTapHandlers): () =
     });
   };
 
-  doc.addEventListener("touchstart", onTouchStart, { capture: true, passive: true });
-  doc.addEventListener("touchmove", onTouchMove, { capture: true, passive: true });
-  doc.addEventListener("touchend", onTouchEnd, { capture: true, passive: true });
-  doc.addEventListener("touchcancel", onTouchCancel, { capture: true, passive: true });
+  target.addEventListener("touchstart", onTouchStart as EventListener, { capture: true, passive: true });
+  target.addEventListener("touchmove", onTouchMove as EventListener, { capture: true, passive: true });
+  target.addEventListener("touchend", onTouchEnd as EventListener, { capture: true, passive: true });
+  target.addEventListener("touchcancel", onTouchCancel, { capture: true, passive: true });
   const onPointerCancel = (event: Event): void => {
     if ((event as PointerEvent).pointerType !== "touch") reset();
     resetMouse();
+    pressPointer = null;
   };
-  doc.addEventListener("pointercancel", onPointerCancel, true);
-  doc.addEventListener("pointerdown", onPointerDown, true);
-  doc.addEventListener("mousedown", onMouseDown, true);
-  doc.addEventListener("mousemove", onMouseMove, { capture: true, passive: true });
-  doc.addEventListener("click", onClick, true);
+  target.addEventListener("pointercancel", onPointerCancel, true);
+  target.addEventListener("pointerdown", onPointerDown, true);
+  target.addEventListener("mousedown", onMouseDown as EventListener, true);
+  target.addEventListener("mousemove", onMouseMove as EventListener, { capture: true, passive: true });
+  target.addEventListener("click", onClick as EventListener, true);
 
   return () => {
-    doc.removeEventListener("touchstart", onTouchStart, true);
-    doc.removeEventListener("touchmove", onTouchMove, true);
-    doc.removeEventListener("touchend", onTouchEnd, true);
-    doc.removeEventListener("touchcancel", onTouchCancel, true);
-    doc.removeEventListener("pointercancel", onPointerCancel, true);
-    doc.removeEventListener("pointerdown", onPointerDown, true);
-    doc.removeEventListener("mousedown", onMouseDown, true);
-    doc.removeEventListener("mousemove", onMouseMove, true);
-    doc.removeEventListener("click", onClick, true);
+    target.removeEventListener("touchstart", onTouchStart as EventListener, true);
+    target.removeEventListener("touchmove", onTouchMove as EventListener, true);
+    target.removeEventListener("touchend", onTouchEnd as EventListener, true);
+    target.removeEventListener("touchcancel", onTouchCancel, true);
+    target.removeEventListener("pointercancel", onPointerCancel, true);
+    target.removeEventListener("pointerdown", onPointerDown, true);
+    target.removeEventListener("mousedown", onMouseDown as EventListener, true);
+    target.removeEventListener("mousemove", onMouseMove as EventListener, true);
+    target.removeEventListener("click", onClick as EventListener, true);
   };
 }
