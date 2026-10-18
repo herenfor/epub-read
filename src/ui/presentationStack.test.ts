@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Book } from "../core/types";
 import type { ReaderViewProps } from "./ReaderView";
 import type { SingleLeafSpread } from "./singleLeafSpreads";
-import { planPresentationLayers, standbyReaderProps, STANDBY_START } from "./presentationStack";
+import { planPresentationLayers, standbyReaderProps, STANDBY_START, STANDBY_END } from "./presentationStack";
 
 // Front matter: cover+plate, contents+credits as A13 pairs, then ordinary chapters.
 const book = { spine: Array.from({ length: 7 }, (_, i) => ({ idref: String(i), linear: true })) } as unknown as Book;
@@ -20,6 +20,33 @@ const summary = (spineIndex: number, current: SingleLeafSpread | null) => {
 };
 
 describe("planPresentationLayers", () => {
+  it("prepares both ordinary edges around a pair and preserves the returning paged identity", () => {
+    // The observed book: an ordinary page at 2, pair 3/4, then pair 5/6.
+    const first = { left: 3, right: 4 }, next = { left: 5, right: 6 };
+    const classify = (i: number) => i === 3 || i === 4 ? first : i === 5 || i === 6 ? next : null;
+    const plan = planPresentationLayers(book, 3, first, classify);
+    expect(plan.prevIndex).toBe(2);
+    expect(plan.prevKey).toBe("paged");
+    expect(plan.layers.find(layer => layer.key === plan.prevKey)).toMatchObject({ spineIndex: 2, edge: "end" });
+    expect(plan.nextKey).toBe("pair:5:6");
+    // An isolated pair needs both ordinary neighbors, not a single layer
+    // parked at the next chapter and falsely reused for the previous one.
+    const isolated = (i: number) => i === 3 || i === 4 ? first : null;
+    const between = planPresentationLayers(book, 3, first, isolated);
+    expect(between.layers).toHaveLength(3);
+    expect(between.layers.find(layer => layer.key === between.nextKey)).toMatchObject({ spineIndex: 5, edge: "start" });
+    expect(between.layers.find(layer => layer.key === between.prevKey)).toMatchObject({ spineIndex: 2, edge: "end" });
+    expect(between.nextKey).not.toBe(between.prevKey);
+    const returned = planPresentationLayers(book, 2, null, isolated, { key: "paged-return", spineIndex: 2 });
+    expect(returned.mainKey).toBe(between.prevKey);
+    expect(returned.layers.find(layer => layer.key === returned.mainKey)).toMatchObject({ spineIndex: 2, role: "main" });
+    const fromPrevious = planPresentationLayers(book, 3, first, isolated, { key: "paged", spineIndex: 2 });
+    expect(fromPrevious.prevKey).toBe("paged");
+    expect(fromPrevious.nextKey).toBe("paged-return");
+    const fromNext = planPresentationLayers(book, 3, first, isolated, { key: "paged", spineIndex: 5 });
+    expect(fromNext.nextKey).toBe("paged");
+    expect(fromNext.prevKey).toBe("paged-return");
+  });
   it("prepares the next pair and parks the paged view on the first ordinary chapter after the run", () => {
     expect(summary(0, cover)).toEqual({
       layers: ["paged@4:standby", "pair:0:1@0:main", "pair:2:3@2:standby"],
@@ -46,6 +73,17 @@ describe("planPresentationLayers", () => {
 });
 
 describe("standbyReaderProps", () => {
+  it("prepares both ordinary edges without publishing state or starting another cache window", () => {
+    const onPageState = vi.fn();
+    const props = { book, onPageState, startAtEnd: STANDBY_START } as unknown as ReaderViewProps;
+    const previous = standbyReaderProps(props, 2, "end");
+    const next = standbyReaderProps(props, 5);
+    expect(previous.startAtEnd).toBe(STANDBY_END);
+    expect(next.startAtEnd).toBe(STANDBY_START);
+    expect(previous.presentationStandby).toBe(true);
+    previous.onPageState({ status: "loading" });
+    expect(onPageState).not.toHaveBeenCalled();
+  });
   it("silences every report to the app and parks the layer without navigation intent", () => {
     const onPageState = vi.fn();
     const onUserReadingPositionChange = vi.fn();

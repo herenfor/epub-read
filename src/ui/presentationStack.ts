@@ -2,8 +2,8 @@
  * A16 第二阶段：双页时普通视图与 A13 并排组之间的显示层规划（纯计算，无 DOM）。
  *
  * 连续滑动开启时，外层同时保留当前显示和前后相邻的显示层：相邻的并排组提前排好；
- * 普通分页视图不再随进入并排组而卸载，而是隐藏、停在并排组之后的第一个普通章，
- * 等前置章节读完时直接滑过去。隐藏层不向 App 汇报任何事。
+ * 普通分页视图保留身份；前后普通章分别准备章首/章末。两侧都是普通章时最多增加
+ * 一个预备层，落定后由目标层直接接管。隐藏层不向 App 汇报任何事。
  */
 import { nextLinearIndex } from "../core/book";
 import type { Book } from "../core/types";
@@ -11,9 +11,10 @@ import type { ReaderViewProps } from "./ReaderView";
 import type { SingleLeafSpread } from "./singleLeafSpreads";
 
 export type LayerRole = "main" | "standby";
+export type PagedLayerKey = "paged" | "paged-return";
 
 export type PresentationLayer =
-  | { key: "paged"; kind: "paged"; spineIndex: number; role: LayerRole }
+  | { key: PagedLayerKey; kind: "paged"; spineIndex: number; role: LayerRole; edge: "start" | "end" }
   | { key: string; kind: "pair"; spread: SingleLeafSpread; spineIndex: number; role: LayerRole };
 
 export interface PresentationPlan {
@@ -44,7 +45,9 @@ export function planPresentationLayers(
   spineIndex: number,
   current: SingleLeafSpread | null,
   peek: (index: number) => SingleLeafSpread | null | undefined,
+  resident?: { key: PagedLayerKey; spineIndex: number },
 ): PresentationPlan {
+  const pagedKey = resident?.key ?? PAGED_LAYER;
   const first = current?.left ?? spineIndex;
   const last = current ? current.right ?? current.left : spineIndex;
   const nextIndex = nextLinearIndex(book, last, 1);
@@ -65,27 +68,45 @@ export function planPresentationLayers(
   }
 
   const layers: PresentationLayer[] = [
-    { key: PAGED_LAYER, kind: "paged", spineIndex: current ? parked : spineIndex, role: current ? "standby" : "main" },
+    { key: pagedKey, kind: "paged", spineIndex: current ? parked : spineIndex,
+      role: current ? "standby" : "main", edge: "start" },
   ];
+  let nextPagedKey: PagedLayerKey = pagedKey;
+  let prevPagedKey: PagedLayerKey | null = null;
+  if (current && prevIndex >= 0 && peek(prevIndex) === null) {
+    // Only immediate neighbors need ready screens. Reuse the resident paged
+    // view for the previous edge unless the next edge also needs it.
+    const nextNeedsPaged = !nextPair && parked === nextIndex;
+    const otherKey = pagedKey === PAGED_LAYER ? "paged-return" : PAGED_LAYER;
+    prevPagedKey = nextNeedsPaged && resident?.spineIndex !== prevIndex ? otherKey : pagedKey;
+    nextPagedKey = nextNeedsPaged && prevPagedKey === pagedKey ? otherKey : pagedKey;
+    const previous: PresentationLayer = {
+      key: prevPagedKey, kind: "paged", spineIndex: prevIndex, role: "standby", edge: "end",
+    };
+    if (nextNeedsPaged) {
+      layers[0] = { key: nextPagedKey, kind: "paged", spineIndex: nextIndex, role: "standby", edge: "start" };
+      layers.push(previous);
+    } else layers[0] = previous;
+  }
   // 往回进入并排组请求的是它的最后一章（与原换章相同，带 atEnd）。
   if (prevPair) layers.push({ key: pairLayerKey(prevPair), kind: "pair", spread: prevPair, spineIndex: prevIndex, role: "standby" });
   if (current) layers.push({ key: pairLayerKey(current), kind: "pair", spread: current, spineIndex, role: "main" });
   if (nextPair) layers.push({ key: pairLayerKey(nextPair), kind: "pair", spread: nextPair, spineIndex: nextIndex, role: "standby" });
 
-  const mainKey = current ? pairLayerKey(current) : PAGED_LAYER;
+  const mainKey = current ? pairLayerKey(current) : pagedKey;
   return {
     layers,
     mainKey,
-    nextKey: nextPair ? pairLayerKey(nextPair) : current && parked === nextIndex ? PAGED_LAYER : null,
+    nextKey: nextPair ? pairLayerKey(nextPair) : current && parked === nextIndex ? nextPagedKey : null,
     nextIndex,
-    // 普通视图只为向后读停靠，往回出前置章节仍走原换章。
-    prevKey: prevPair ? pairLayerKey(prevPair) : null,
+    prevKey: prevPair ? pairLayerKey(prevPair) : prevPagedKey,
     prevIndex,
   };
 }
 
 /** 预备层不用的导航起点；与 App 的任何 nonce 都不同。 */
 export const STANDBY_START = Object.freeze({ nonce: -1, atEnd: false });
+export const STANDBY_END = Object.freeze({ nonce: -2, atEnd: true });
 const NOOP = () => {};
 /** 隐藏层仍需要的查询（不向 App 汇报，只读）。 */
 const KEPT_FUNCTIONS = new Set([
@@ -96,7 +117,7 @@ const KEPT_FUNCTIONS = new Set([
  * 预备层的属性：停在 spineIndex，不接输入，不定位锚点，所有回调静默（进度、恢复、
  * 状态、日志、脚注……都只属于当前显示）。成为当前显示时换回 App 的真实属性。
  */
-export function standbyReaderProps(props: ReaderViewProps, spineIndex: number): ReaderViewProps {
+export function standbyReaderProps(props: ReaderViewProps, spineIndex: number, edge: "start" | "end" = "start"): ReaderViewProps {
   const out: Record<string, unknown> = { ...props };
   for (const [key, value] of Object.entries(props)) {
     if (typeof value === "function" && !KEPT_FUNCTIONS.has(key)) out[key] = NOOP;
@@ -108,8 +129,9 @@ export function standbyReaderProps(props: ReaderViewProps, spineIndex: number): 
     initialPage: 0,
     preciseTarget: null,
     restoreTicket: null,
-    startAtEnd: STANDBY_START,
+    startAtEnd: edge === "end" ? STANDBY_END : STANDBY_START,
     inputPaused: true,
+    presentationStandby: true,
     notes: props.notesForChapter?.(spineIndex) ?? [],
     bookmarkCue: null,
   });

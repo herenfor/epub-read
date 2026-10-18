@@ -18,6 +18,7 @@ class MockPaginator {
   callbacks: ChapterPaginatorOptions;
   settings: ReaderSettings;
   loadOptions: {
+    startAtEnd?: boolean;
     settings?: ReaderSettings;
     restoreTicket?: { session: number; request: number; chapterPath: string } | null;
     reportRestore?: boolean;
@@ -31,6 +32,7 @@ class MockPaginator {
     instances.push(this);
   }
   load = vi.fn(async (path: string, options: {
+    startAtEnd?: boolean;
     settings?: ReaderSettings;
     restoreTicket?: { session: number; request: number; chapterPath: string } | null;
     reportRestore?: boolean;
@@ -148,6 +150,25 @@ describe("ReaderView preload settings lifecycle", () => {
       vi.advanceTimersByTime(500);
     });
   };
+
+  it("prepares both ordinary edges: a newly mounted previous layer loads at chapter end", async () => {
+    props = { ...props, inputPaused: true, presentationStandby: true, startAtEnd: { nonce: -2, atEnd: true } };
+    await render();
+    expect(instances[0].loadOptions.startAtEnd).toBe(true);
+    await finish(instances[0]);
+    expect(instances.filter(p => !p.disposed && p.path)).toHaveLength(1);
+    const previous = instances[0];
+    previous.currentPage = previous.pageCount - 1;
+    await act(async () => { previous.finish(); });
+    previous.load.mockClear();
+    props = { ...props, inputPaused: false, presentationStandby: false,
+      startAtEnd: { nonce: 3, atEnd: true },
+      adoptedNavigation: { spineIndex: 0, anchorNonce: 0, startNonce: 3 } };
+    await render();
+    expect(previous.load).not.toHaveBeenCalled();
+    expect(previous.currentPage).toBe(previous.pageCount - 1);
+    expect(props.onPageState).toHaveBeenLastCalledWith(expect.objectContaining({ currentPage: previous.pageCount - 1 }));
+  });
 
   it("chapter navigation: cancelled B cannot promote after returning to A", async () => {
     await render();
