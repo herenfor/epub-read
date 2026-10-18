@@ -48,7 +48,7 @@ import { createLeafChapterClassifier } from "./leafChapterCandidates";
 import { ImageSpreadReaderView } from "./ImageSpreadReaderView";
 import { EdgeTurnZone } from "./EdgeTurnZone";
 import { EdgeTurnFeedbackContext, useEdgeTurnFeedbackOwner } from "./edgeTurnFeedback";
-import type { PlainTapInfo, PlainTapPoint } from "../render/plainTap";
+import { installPlainTap, type PlainTapInfo, type PlainTapPoint } from "../render/plainTap";
 import {
   createReaderTapGeometry,
   edgeFeedbackKeyOf,
@@ -3630,6 +3630,8 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
   latestProps.current = props;
   const progressionRef = useRef(progression);
   progressionRef.current = progression;
+  const tapRoutingRef = useRef(tapRouting);
+  tapRoutingRef.current = tapRouting;
   useImperativeHandle(stackOn ? ref : null, () => new Proxy({} as ReaderHandle, {
     get: (_target, property) => {
       if (layerSeam.current && (property === "nextPage" || property === "prevPage")) {
@@ -3794,13 +3796,32 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
   useEffect(() => {
     const surface = motionSurface.current;
     if (!surface) return;
-    return installPagedSwipe(surface, {
+    const removeSwipe = installPagedSwipe(surface, {
       onGestureStart: () => { motionGesture.current = Boolean(layerSeam.current) && !latestProps.current.inputPaused; },
       shouldIgnore: () => !motionGesture.current || latestProps.current.inputPaused === true,
       onPreview: (dx) => { if (motionGesture.current) seamInput.preview(dx); },
       onNext: () => seamInput.turn(pageAxisSign(progressionRef.current)),
       onPrev: () => seamInput.turn((-pageAxisSign(progressionRef.current)) as 1 | -1),
     });
+    // The surface becomes hit-testable while a touch that started in a leaf is
+    // still ending; that touch's compatibility click lands here. Only an input
+    // that went down on this surface is consumed here (see installPlainTap).
+    const removeTap = installPlainTap(surface, {
+      shouldIgnore: () => latestProps.current.inputPaused === true,
+      onTap: (tap) => {
+        if (latestProps.current.inputPaused || (!layerSeam.current && !motionGesture.current)) return;
+        const routing = tapRoutingRef.current;
+        const route = routeHostBlankTurn(routing, tap.clientX, tap.clientY);
+        if (route && routing) {
+          routing.feedback.hold(edgeFeedbackKeyOf(route.side));
+          seamInput.turn(route.direction);
+        } else latestProps.current.onPlainTap?.();
+      },
+    });
+    return () => {
+      removeTap();
+      removeSwipe();
+    };
   }, [seamInput]);
 
   let content;
@@ -3851,15 +3872,7 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
   return <EdgeTurnFeedbackContext.Provider value={edgeFeedback}>
     <ReaderTapRoutingContext.Provider value={tapRouting}>
       <div ref={host} className="reader-presentation-host">{content}
-        <div ref={motionSurface} className="reader-seam-input" aria-hidden="true"
-          onClick={(event) => {
-            if (latestProps.current.inputPaused || (!layerSeam.current && !motionGesture.current)) return;
-            const route = routeHostBlankTurn(tapRouting, event.clientX, event.clientY);
-            if (route && tapRouting) {
-              tapRouting.feedback.hold(edgeFeedbackKeyOf(route.side));
-              seamInput.turn(route.direction);
-            } else latestProps.current.onPlainTap?.();
-          }} />
+        <div ref={motionSurface} className="reader-seam-input" aria-hidden="true" />
       </div>
     </ReaderTapRoutingContext.Provider>
   </EdgeTurnFeedbackContext.Provider>;
