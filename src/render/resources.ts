@@ -2,6 +2,7 @@ import type { Book, Resource } from "../core/types";
 import { disposeBook } from "../core/book";
 import { ChapterDependencies } from "./chapterDependencies";
 import { ArchiveClosedError } from "../core/selectiveArchive";
+import { StylesheetCache, type StylesheetInputs } from "./stylesheetCache";
 
 /** 解压后保留在内存中的资源字节默认预算；可被 ResourceServer 选项覆盖。 */
 export const DEFAULT_MEDIA_CACHE_MAX_BYTES = 32 * 1024 * 1024;
@@ -63,6 +64,9 @@ export class ResourceServer {
   private resourceIssues = new Map<string, ResourceIssue>();
   private resourceIssueSnapshot: readonly ResourceIssue[] = [];
   private resourceIssueListeners = new Set<() => void>();
+  private readonly stylesheets = new StylesheetCache(
+    (path) => this.cachedTextFor(path), (path) => this.resourceUrl(path),
+  );
 
   constructor(
     private book: Book | null,
@@ -132,6 +136,10 @@ export class ResourceServer {
 
   /** 返回内部路径对应的 blob URL；资源缺失或尚未解压就绪返回 undefined。 */
   urlFor(path: string): string | undefined {
+    return this.resourceUrl(path, true);
+  }
+
+  private resourceUrl(path: string, enforceBudget = false): string | undefined {
     const cached = this.urls.get(path);
     if (cached) {
       this.touchMedia(path);
@@ -144,12 +152,16 @@ export class ResourceServer {
     );
     this.urls.set(path, url);
     this.touchMedia(path);
-    this.enforceMediaBudget(new Set([path]));
+    if (enforceBudget) this.enforceMediaBudget(new Set([path]));
     return url;
   }
 
   /** 读取资源文本（按 UTF-8；带 BOM 时尊重 BOM 编码）。未解压就绪返回 undefined。 */
   textFor(path: string): string | undefined {
+    return this.cachedTextFor(path, true);
+  }
+
+  private cachedTextFor(path: string, enforceBudget = false): string | undefined {
     const res = this.book?.resources.get(path);
     if (!res || !isLoadedResource(res)) return undefined;
     const cached = this.textCache.get(path);
@@ -178,9 +190,17 @@ export class ResourceServer {
       this.textCacheBytes += bytes;
     }
     this.touchMedia(path);
-    this.enforceMediaBudget(new Set([path]));
+    if (enforceBudget) this.enforceMediaBudget(new Set([path]));
     return text;
   }
+
+  /** Synchronous rewriting loads no new media. Budget enforcement stays at public resource/holder boundaries. */
+  acquireStylesheet(path: string, options: StylesheetInputs = {}) {
+    if (!this.book) return undefined;
+    return this.stylesheets.acquire(path, { archiveReferences: this.archiveReferences, ...options });
+  }
+
+  get stylesheetCacheStats() { return this.stylesheets.stats; }
 
   /**
    * 异步读取单个正文资源：按需解压该 XHTML 后解码。只持有这一个路径（不像
@@ -232,6 +252,7 @@ export class ResourceServer {
       const res = book.resources.get(path);
       if (!res || !isLoadedResource(res)) continue;
       if (!this.countedMediaPaths.has(path)) {
+        this.stylesheets.invalidateResource(path);
         this.countedMediaPaths.add(path);
         this.mediaBytes += res.data.byteLength;
       }
@@ -326,6 +347,7 @@ export class ResourceServer {
   }
 
   revokeAll(): void {
+    this.stylesheets.clear();
     for (const u of this.urls.values()) URL.revokeObjectURL(u);
     this.urls.clear();
     this.textCache.clear();
@@ -413,6 +435,7 @@ export class ResourceServer {
     const res = this.book?.resources.get(path);
     if (!res || !isLoadedResource(res)) return;
     const bytes = res.data.byteLength;
+    this.stylesheets.invalidateResource(path);
     const url = this.urls.get(path);
     if (url) {
       URL.revokeObjectURL(url);

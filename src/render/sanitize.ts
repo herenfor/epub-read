@@ -21,6 +21,8 @@ export interface SanitizeOptions {
   getText?: (path: string) => string | undefined;
   /** 由改写后的内容生成 URL（浏览器传 blob，测试传假实现） */
   makeUrl?: (text: string, mediaType: string) => string;
+  /** Optional per-book cache. The caller owns/releases the returned shared lease. */
+  stylesheetFor?: (path: string) => { url: string; unresolvedResources: readonly string[] } | undefined;
   settings: ReaderSettings;
 }
 
@@ -394,6 +396,12 @@ export async function sanitizeChapter(
       const href = link.getAttribute("href");
       if (href && !isExternalUrl(href)) {
         const cssPath = opts.archiveReferences ? resolveArchiveHref(opts.archiveReferences, opts.basePath, href).path : resolvePath(opts.basePath, href);
+        const shared = opts.stylesheetFor?.(cssPath);
+        if (shared) {
+          link.setAttribute("href", shared.url);
+          for (const path of shared.unresolvedResources) missingResources.add(path);
+          continue;
+        }
         // 优先：读取 CSS 内容并改写其内部引用（@font-face/background/@import 相对路径）
         const cssText = opts.getText?.(cssPath);
         if (cssText !== undefined && opts.makeUrl) {
