@@ -66,6 +66,10 @@ export function clientXToColumnX(clientX: number, originClientX: number, scrollL
   return clientX - originClientX + scrollLeft;
 }
 
+// Fractional DPR can put a measured leading edge just below its exact column
+// boundary (602px -> 601.998547px). Normalize that CSSOM noise, not the step.
+const COLUMN_EDGE_EPSILON_PX = 0.01;
+
 export function columnForContentPoint(x: number, geometry: SpreadGeometry): number {
   const pages = geometry.pageIntervals;
   if (pages?.length) {
@@ -77,7 +81,7 @@ export function columnForContentPoint(x: number, geometry: SpreadGeometry): numb
     }
     return Math.min(lo, pages.length - 1);
   }
-  return Math.max(0, Math.floor(x / geometry.columnStep));
+  return Math.max(0, Math.floor((x + COLUMN_EDGE_EPSILON_PX) / geometry.columnStep));
 }
 
 export interface OccupiedColumns {
@@ -98,8 +102,9 @@ export function occupiedColumns(
   let last = -Infinity;
   for (const fragment of fragments) {
     if (fragment.right <= fragment.left) continue;
-    // 仅避开 right 正好落下一列左缘时将其多算一列；不是像素修正/累计舍入。
-    const insideRight = fragment.right - Math.min(0.01, (fragment.right - fragment.left) / 2);
+    // Keep the interval's exclusive end outside the point lookup's edge
+    // tolerance too, so an exact right edge never invents another column.
+    const insideRight = fragment.right - Math.min(COLUMN_EDGE_EPSILON_PX * 2, (fragment.right - fragment.left) / 2);
     first = Math.min(first, columnForContentPoint(fragment.left, geometry));
     last = Math.max(last, columnForContentPoint(insideRight, geometry));
   }

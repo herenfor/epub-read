@@ -21,6 +21,24 @@ import {
 } from "./pagedSpread";
 
 describe("pagedSpread core", () => {
+  it("keeps subpixel column-edge rounding out of blank-column and anchor placement", () => {
+    // SM-X710 WebView / DPR 2.125: the 602px column edge reads as 601.998547px.
+    const geometry = createSpreadGeometry(1083.6, 120.4, 2);
+    expect(columnForContentPoint(601.998547, geometry)).toBe(1);
+    expect(columnForContentPoint(1203.998547, geometry)).toBe(2);
+    expect(columnForContentPoint(601.98, geometry)).toBe(0);
+    const occupied = occupiedColumns([1, 2, 3, 4].map(column => ({
+      left: column * 602 - 0.001453,
+      right: column * 602 + 100,
+    })), geometry);
+    expect(occupied).toEqual({ first: 1, last: 4 });
+    const layout = createSpreadLayout(geometry, occupied, 1);
+    expect(layout.leadingBlankColumns).toBe(1);
+    expect(laneForColumn(layout, columnForContentPoint(601.998547, geometry))).toBe(1);
+    expect(spreadForColumn(layout, columnForContentPoint(1203.998547, geometry))).toBe(1);
+    // An interval ending at the edge must still exclude the next column.
+    expect(occupiedColumns([{ left: 0, right: 602 }], geometry)).toEqual({ first: 0, last: 0 });
+  });
   it("uses measured vertical leaf edges for lookup, commits and the unused last-leaf area", () => {
     const geometry = { ...createSpreadGeometry(100, 0, 1),
       pageIntervals: [{ start: 0, end: 90 }, { start: 90, end: 185 }, { start: 185, end: 210 }] };
