@@ -125,4 +125,36 @@ describe("ChapterSeam", () => {
     expect(neighbor.transform()).toBe("translate3d(0px, 0, 0)");
     expect(current.transform()).toBe("translate3d(800px, 0, 0)");
   });
+
+  it("moves a prepared track like pages in one chapter: later commands retarget, one landing at the end", async () => {
+    const screens = [fakeElement(), fakeElement(), fakeElement(), fakeElement()];
+    const onSettled = vi.fn();
+    // Reading order: previous group, current, next, the one after.
+    const instance = new ChapterSeam({ direction: 1, current: screens[1].element, neighbor: screens[2].element,
+      track: screens.map((screen) => screen.element), width: 800, progression: "rtl", touch: true, onSettled, onFault: vi.fn() });
+    expect(screens.map((screen) => screen.transform())).toEqual([
+      "translate3d(800px, 0, 0)", "translate3d(0px, 0, 0)", "translate3d(-800px, 0, 0)", "translate3d(-1600px, 0, 0)"]);
+    expect(instance.turn(1, 1)).toBe("moving");
+    expect(instance.turn(2, 1)).toBe("moving");
+    expect(instance.turn(3, 1)).toBe("beyond");
+    for (const screen of screens) for (const run of screen.runs) if (!run.cancelled) run.finish();
+    await flush();
+    expect(onSettled).toHaveBeenCalledTimes(1);
+    expect(onSettled).toHaveBeenCalledWith(true);
+    expect(instance.settledScreen).toBe(3);
+    expect(screens[3].transform()).toBe("translate3d(0px, 0, 0)");
+  });
+
+  it("reports no landed screen when a track returns to where it started", async () => {
+    const screens = [fakeElement(), fakeElement(), fakeElement()];
+    const onSettled = vi.fn();
+    const instance = new ChapterSeam({ direction: -1, current: screens[1].element, neighbor: screens[0].element,
+      track: screens.map((screen) => screen.element), width: 800, progression: "ltr", touch: true, onSettled, onFault: vi.fn() });
+    instance.turn(1, -1);
+    instance.turn(2, 1);
+    for (const screen of screens) for (const run of screen.runs) if (!run.cancelled) run.finish();
+    await flush();
+    expect(onSettled).toHaveBeenCalledWith(false);
+    expect(instance.settledScreen).toBeNull();
+  });
 });

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Book } from "../core/types";
 import type { ReaderViewProps } from "./ReaderView";
 import type { SingleLeafSpread } from "./singleLeafSpreads";
-import { planPresentationLayers, standbyReaderProps, STANDBY_START, STANDBY_END } from "./presentationStack";
+import { planPresentationLayers, planSeamTrack, standbyReaderProps, STANDBY_START, STANDBY_END } from "./presentationStack";
 
 // Front matter: cover+plate, contents+credits as A13 pairs, then ordinary chapters.
 const book = { spine: Array.from({ length: 7 }, (_, i) => ({ idref: String(i), linear: true })) } as unknown as Book;
@@ -27,7 +27,8 @@ describe("planPresentationLayers", () => {
     const resident = { key: "paged" as const, spineIndex: 8, warmDirection: 1 as const };
     const before = planPresentationLayers(longer, 0, cover, classify, resident);
     expect(before.lookaheadIndex).toBe(4);
-    expect(before.layers.filter(l => l.kind === "pair").map(l => l.key)).toEqual(["pair:0:1", "pair:2:3", "pair:4:5"]);
+    // Reading forward from the cover keeps the whole bounded run of groups resident.
+    expect(before.layers.filter(l => l.kind === "pair").map(l => l.key)).toEqual(["pair:0:1", "pair:2:3", "pair:4:5", "pair:6:7"]);
     const after = planPresentationLayers(longer, 2, contents, classify, resident);
     expect(after.nextKey).toBe("pair:4:5");
     expect(after.layers.filter(l => l.kind === "pair")).toHaveLength(4);
@@ -123,5 +124,30 @@ describe("standbyReaderProps", () => {
     expect(onUserReadingPositionChange).not.toHaveBeenCalled();
     expect(standby.notesForChapter).toBe(notesForChapter);
     expect(notesForChapter).toHaveBeenCalledWith(2);
+  });
+});
+
+describe("planSeamTrack", () => {
+  const longer = { spine: Array.from({ length: 10 }, (_, i) => ({ idref: String(i), linear: true })) } as unknown as Book;
+  const groups = [cover, contents, { left: 4, right: 5 }, { left: 6, right: 7 }];
+  const classify = (i: number) => i < 8 ? groups[Math.floor(i / 2)] : null;
+  const resident = { key: "paged" as const, spineIndex: 8, warmDirection: 1 as const };
+
+  it("chains ready groups in reading order up to the first ordinary chapter's opening screen", () => {
+    const plan = planPresentationLayers(longer, 0, cover, classify, resident);
+    const track = planSeamTrack(longer, plan, cover, 0, classify, () => true);
+    expect(track.current).toBe(0);
+    expect(track.screens.map((screen) => `${screen.key}@${screen.spineIndex}${screen.atEnd ? "<" : ""}`))
+      .toEqual(["pair:0:1@0", "pair:2:3@2", "pair:4:5@4", "pair:6:7@6", "paged@8"]);
+  });
+
+  it("stops at the first unready or unclassified screen and walks back to each group's last chapter", () => {
+    const plan = planPresentationLayers(longer, 4, groups[2], classify, resident);
+    const track = planSeamTrack(longer, plan, groups[2], 4, classify, (key) => key !== "pair:6:7");
+    expect(track.screens.map((screen) => `${screen.key}@${screen.spineIndex}${screen.atEnd ? "<" : ""}`))
+      .toEqual(["pair:2:3@3<", "pair:4:5@4"]);
+    expect(track.current).toBe(1);
+    const unknown = planSeamTrack(longer, plan, groups[2], 4, (i) => i >= 6 ? undefined : classify(i), () => true);
+    expect(unknown.screens.at(-1)?.key).toBe("pair:4:5");
   });
 });

@@ -67,7 +67,7 @@ import { installPagedSwipe, PAGED_SWIPE_THRESHOLD_PX } from "../render/pagedSwip
 import { ChapterSeam, type ExternalSeam } from "./chapterSeam";
 import { ChapterFillIndex, chapterFillEntries } from "../render/chapterFill";
 import { canJoinChapters, chapterFillLayoutKey, joinLaneClip, type JoinLeaves } from "./chapterJoin";
-import { PAGED_LAYER, planPresentationLayers, standbyReaderProps, type PagedLayerKey, type PresentationLayer, type PresentationPlan } from "./presentationStack";
+import { PAGED_LAYER, planPresentationLayers, planSeamTrack, RESIDENT_RUN_GROUPS, standbyReaderProps, type PagedLayerKey, type PresentationLayer, type PresentationPlan } from "./presentationStack";
 import {
   animateValue,
   dragScrollLeft,
@@ -3580,6 +3580,7 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
     : null;
   const lookaheadIndex = plan?.lookaheadIndex ?? -1;
   const parkedIndex = plan?.layers.find((layer) => layer.kind === "paged")?.spineIndex ?? -1;
+  const budgetExceeded = props.server.mediaCacheBudgetExceeded;
   useEffect(() => {
     if (!spreadsShown || !seamPossible) return;
     // 提前分类相邻显示单元（只读 XHTML），让章边联动知道它们是否会并排；分好后重新规划。
@@ -3587,6 +3588,15 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
     const first = pair?.left ?? props.spineIndex;
     const last = pair ? pair.right ?? pair.left : props.spineIndex;
     const wanted = [nextLinearIndex(props.book, last, 1), nextLinearIndex(props.book, first, -1), parkedIndex, lookaheadIndex];
+    // Classify the forward run that stays resident (presentationStack), one known group at a time.
+    if (warmDirection.current === 1 && !budgetExceeded) {
+      for (let at = nextLinearIndex(props.book, last, 1), count = 0; at >= 0 && count < RESIDENT_RUN_GROUPS * 2; count++) {
+        const group = imageSpreads.peek(at);
+        if (group === null) break;
+        if (group === undefined) { wanted.push(at); break; }
+        at = nextLinearIndex(props.book, group.right ?? group.left, 1);
+      }
+    }
     for (const index of wanted) {
       if (index >= 0 && imageSpreads.peek(index) === undefined) {
         void imageSpreads.resolve(index, controller.signal).then(() => {
@@ -3595,7 +3605,7 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
       }
     }
     return () => controller.abort();
-  }, [imageSpreads, props.book, props.spineIndex, pair, parkedIndex, lookaheadIndex, spreadsShown, seamPossible, classifiedTick]);
+  }, [imageSpreads, props.book, props.spineIndex, pair, parkedIndex, lookaheadIndex, spreadsShown, seamPossible, classifiedTick, budgetExceeded]);
   const tapGeometry = useMemo(() => createReaderTapGeometry(width, props.tapRegions), [width, props.tapRegions]);
   const bookProgression = effectivePageProgression(props.book.pageProgression, props.settings, props.book.fixedLayout);
   // 点击翻页区按本章实际方向映射（竖排书元数据没写方向时与元数据不同）。
@@ -3626,6 +3636,8 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
   };
   const planRef = useRef(plan);
   planRef.current = plan;
+  const trackSource = useRef({ book: props.book, pair, imageSpreads });
+  trackSource.current = { book: props.book, pair, imageSpreads };
   const latestProps = useRef(props);
   latestProps.current = props;
   const progressionRef = useRef(progression);
@@ -3669,7 +3681,8 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
   layoutIdentityRef.current = layoutIdentity;
   const layerSeam = useRef<{
     book: Book; nonce: number; layout: string;
-    seam: ChapterSeam; external: ExternalSeam; target: HTMLElement; host: HTMLElement; landed: boolean; pending: 1 | -1 | null;
+    seam: ChapterSeam; external: ExternalSeam; revealed: HTMLElement[]; host: HTMLElement;
+    landed: boolean; landedIndex: number; pending: 1 | -1 | null;
   } | null>(null);
   const replay = useRef<{ book: Book; index: number; nonce: number; layout: string; direction: 1 | -1 } | null>(null);
   const [seamInput] = useState(() => new SeamGestureInput({
@@ -3697,9 +3710,9 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
     layerSeam.current = null;
     const p = latestProps.current;
     const handoff = entry.landed && entry.book === p.book && entry.nonce === p.anchorNonce &&
-      entry.layout === layoutIdentityRef.current && entry.external.targetIndex === p.spineIndex && !p.inputPaused;
+      entry.layout === layoutIdentityRef.current && entry.landedIndex === p.spineIndex && !p.inputPaused;
     replay.current = entry.pending === null || (!handoff && !allowReturnReplay) ? null : {
-      book: p.book, index: entry.landed ? entry.external.targetIndex : p.spineIndex,
+      book: p.book, index: entry.landed ? entry.landedIndex : p.spineIndex,
       nonce: p.anchorNonce, layout: entry.layout, direction: entry.pending,
     };
     if (!handoff) {
@@ -3707,7 +3720,7 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
       seamInput.cancel();
     }
     entry.seam.dispose();
-    delete entry.target.dataset.seamReveal;
+    for (const element of entry.revealed) delete element.dataset.seamReveal;
     delete entry.host.dataset.chapterSeam;
   };
   const externalSeam = useCallback((direction: 1 | -1): ExternalSeam | null => {
@@ -3729,33 +3742,66 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
       warmDirection.current = direction;
       setClassifiedTick((tick) => tick + 1);
     }
+    // A16-3: every prepared screen on this side (and, for a one-screen group, the
+    // other side) joins one track, so further turns during the motion move on
+    // like turns inside a chapter; only the screen it finally stops on is
+    // requested. A paged reader's other side is its own previous page, not a layer.
+    const source = trackSource.current;
+    const planned = planSeamTrack(source.book, current, source.pair, latestProps.current.spineIndex,
+      (index) => source.imageSpreads.peek(index),
+      (key, edge) => layerHandles.current.get(key)?.current?.seamReady?.(edge) === true);
+    const mainLayer = current.layers.find((layer) => layer.key === current.mainKey);
+    let screens = planned.screens;
+    let at = planned.current;
+    if (mainLayer?.kind === "paged") {
+      screens = direction === 1 ? screens.slice(at) : screens.slice(0, at + 1);
+      at = direction === 1 ? 0 : at;
+    }
+    // Keep the contiguous run around the current screen whose elements exist.
+    let low = at;
+    let high = at;
+    while (low > 0 && layerElements.current.get(screens[low - 1].key)) low--;
+    while (high < screens.length - 1 && layerElements.current.get(screens[high + 1].key)) high++;
+    screens = screens.slice(low, high + 1);
+    at -= low;
+    if (screens[at + direction]?.key !== targetKey) {
+      screens = direction === 1
+        ? [{ key: current.mainKey, spineIndex: latestProps.current.spineIndex, atEnd: false }, { key: targetKey, spineIndex: targetIndex, atEnd: false }]
+        : [{ key: targetKey, spineIndex: targetIndex, atEnd: true }, { key: current.mainKey, spineIndex: latestProps.current.spineIndex, atEnd: false }];
+      at = direction === 1 ? 0 : 1;
+    }
+    const trackElements = screens.map((screen) => layerElements.current.get(screen.key)!);
     let seam: ChapterSeam | null = null;
     seam = new ChapterSeam({
       direction,
       current: mainElement,
       neighbor: targetElement,
+      track: trackElements,
       width,
       progression: progressionRef.current,
       touch: prefersCoarsePointer(),
       onSettled: (landed) => {
         const entry = layerSeam.current;
         if (!entry || entry.seam !== seam) return;
-        if (!landed) {
+        const screen = landed && seam.settledScreen !== null ? screens[seam.settledScreen] : null;
+        if (!screen) {
           clearLayerSeam(true);
           queueMicrotask(promoteInput);
           return;
         }
         entry.landed = true;
-        const targetLayer = current.layers.find((layer) => layer.key === targetKey);
-        if (targetLayer?.kind === "paged") pagedLayerKey.current = targetLayer.key;
-        latestProps.current.onRequestChapter(targetIndex, direction === -1 ? { atEnd: true } : undefined);
+        entry.landedIndex = screen.spineIndex;
+        const landedLayer = current.layers.find((layer) => layer.key === screen.key);
+        if (landedLayer?.kind === "paged") pagedLayerKey.current = landedLayer.key;
+        latestProps.current.onRequestChapter(screen.spineIndex, screen.atEnd ? { atEnd: true } : undefined);
       },
       onFault: (error) => {
         console.warn("[reader] chapter layer seam fault", error);
         if (layerSeam.current?.seam === seam) clearLayerSeam();
       },
     });
-    targetElement.dataset.seamReveal = "true";
+    const revealed = trackElements.filter((element) => element !== mainElement);
+    for (const element of revealed) element.dataset.seamReveal = "true";
     hostElement.dataset.chapterSeam = direction === 1 ? "next" : "prev";
     const external: ExternalSeam = {
       seam,
@@ -3768,7 +3814,7 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
       },
     };
     layerSeam.current = { book: latestProps.current.book, nonce: latestProps.current.anchorNonce, layout: layoutIdentityRef.current,
-      seam, external, target: targetElement, host: hostElement, landed: false, pending: null };
+      seam, external, revealed, host: hostElement, landed: false, landedIndex: targetIndex, pending: null };
     return external;
     // Reads only refs; stable for the life of the wrapper.
   }, []);

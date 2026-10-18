@@ -25,7 +25,11 @@ const KEYFRAMES = 32;
 
 type SeamElement = HTMLElement;
 
-/** 两个 iframe 的同步平移；与章内 TransformPageMotion 同一套中断/收尾约定。 */
+/**
+ * 若干屏的同步平移；与章内 TransformPageMotion 同一套中断/收尾约定。屏按阅读顺序排列，
+ * 第 k 屏平移 s·(k·W − p)（s 为阅读方向，RTL 为 −1），p 为阅读偏移。两屏时即原来的
+ * lead（−s·p）与 trail（s·(W−p)）。
+ */
 export class ChapterSeamDriver implements PageMotionDriver {
   private animations: Animation[] = [];
   private held: number;
@@ -34,8 +38,7 @@ export class ChapterSeamDriver implements PageMotionDriver {
   private readonly sign: 1 | -1;
 
   constructor(
-    private readonly lead: SeamElement,
-    private readonly trail: SeamElement,
+    private readonly screens: readonly SeamElement[],
     private readonly width: number,
     progression: PageProgression,
     initialPosition: number,
@@ -48,7 +51,8 @@ export class ChapterSeamDriver implements PageMotionDriver {
 
   read(): MotionSample {
     if (this.animations.length === 0) return { position: this.held };
-    const value = this.lead.ownerDocument.defaultView?.getComputedStyle(this.lead).transform ?? "none";
+    const first = this.screens[0];
+    const value = first.ownerDocument.defaultView?.getComputedStyle(first).transform ?? "none";
     const x = value === "none" ? 0 : new DOMMatrixReadOnly(value).m41;
     return { position: -x * this.sign };
   }
@@ -82,15 +86,15 @@ export class ChapterSeamDriver implements PageMotionDriver {
       return;
     }
     const desktop = plan.curve === "ease-out-cubic";
-    const leadFrames: Keyframe[] = [];
-    const trailFrames: Keyframe[] = [];
+    const frames: Keyframe[][] = this.screens.map(() => []);
     const steps = desktop ? 1 : KEYFRAMES;
     for (let k = 0; k <= steps; k++) {
       const progress = desktop ? k : settleProgress(plan, k / KEYFRAMES);
       const at = from + (position - from) * progress;
       const offset = desktop ? undefined : k / KEYFRAMES;
-      leadFrames.push({ transform: this.leadTransform(at), ...(offset === undefined ? {} : { offset }) });
-      trailFrames.push({ transform: this.trailTransform(at), ...(offset === undefined ? {} : { offset }) });
+      this.screens.forEach((_, index) => {
+        frames[index].push({ transform: this.transform(index, at), ...(offset === undefined ? {} : { offset }) });
+      });
     }
     const timing: KeyframeAnimationOptions = {
       duration: plan.durationMs,
@@ -99,11 +103,10 @@ export class ChapterSeamDriver implements PageMotionDriver {
     };
     const animations: Animation[] = [];
     try {
-      // 同一任务内创建：两段动画同帧开始，同一时长与曲线，始终严丝合缝。
-      animations.push(this.lead.animate(leadFrames, timing));
-      animations.push(this.trail.animate(trailFrames, timing));
+      // 同一任务内创建：各段动画同帧开始，同一时长与曲线，始终严丝合缝。
+      this.screens.forEach((screen, index) => animations.push(screen.animate(frames[index], timing)));
     } catch (error) {
-      // 只建成一段时先收回它；宿主在 onFault 里撤销整个联动（此后 done 不再有效）。
+      // 只建成一部分时先收回；宿主在 onFault 里撤销整个联动（此后 done 不再有效）。
       for (const animation of animations) animation.cancel();
       this.onFault(error);
       if (this.disposed || ticket !== this.generation) return;
@@ -129,28 +132,22 @@ export class ChapterSeamDriver implements PageMotionDriver {
     });
   }
 
-  /** 撤掉两侧的平移（交还给正常的单 iframe 显示）。 */
+  /** 撤掉各屏的平移（交还给正常的单层显示）。 */
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
     ++this.generation;
     for (const animation of this.animations) animation.cancel();
     this.animations = [];
-    this.lead.style.removeProperty("transform");
-    this.trail.style.removeProperty("transform");
+    for (const screen of this.screens) screen.style.removeProperty("transform");
   }
 
-  private leadTransform(position: number): string {
-    return `translate3d(${-this.sign * position}px, 0, 0)`;
-  }
-
-  private trailTransform(position: number): string {
-    return `translate3d(${this.sign * (this.width - position)}px, 0, 0)`;
+  private transform(index: number, position: number): string {
+    return `translate3d(${this.sign * (index * this.width - position)}px, 0, 0)`;
   }
 
   private apply(position: number): void {
-    this.lead.style.setProperty("transform", this.leadTransform(position));
-    this.trail.style.setProperty("transform", this.trailTransform(position));
+    this.screens.forEach((screen, index) => screen.style.setProperty("transform", this.transform(index, position)));
   }
 }
 
@@ -159,12 +156,17 @@ export interface ChapterSeamOptions {
   direction: 1 | -1;
   current: SeamElement;
   neighbor: SeamElement;
+  /**
+   * 多屏轨道（外层显示层）：按阅读顺序排列的各屏，含 current；neighbor 是 direction 一侧
+   * 的第一屏。不给时只有 current 与 neighbor 两屏。
+   */
+  track?: readonly SeamElement[];
   /** 一屏宽（单页或双页都是整个视口宽）。 */
   width: number;
   progression: PageProgression;
   /** 触屏用松手曲线，桌面用与章内相同的缓出。 */
   touch: boolean;
-  /** 落定：landed=true 停在相邻章，false 回到当前章。 */
+  /** 落定：landed=true 停在别的屏（见 settledScreen），false 回到当前章。 */
   onSettled(landed: boolean): void;
   onFault(error: unknown): void;
 }
@@ -172,37 +174,43 @@ export interface ChapterSeamOptions {
 export type SeamTurnResult = "moving" | "beyond" | "duplicate";
 
 /**
- * 一次章边联动。会话只有两屏；拖动、点按、反向与打断全部沿用 PageMotionSession 的
- * 票据语义，一次最多跨一个章节边界。
+ * 一次章边联动。拖动、点按、反向与打断全部沿用 PageMotionSession 的票据语义。
+ * 两屏时一次最多跨一个章节边界；多屏轨道上，运动中的新命令直接改去更远的已备好屏，
+ * 与章内连续翻页相同，只在最后停下时落定一次。
  */
 export class ChapterSeam {
   readonly direction: 1 | -1;
   private readonly session: PageMotionSession;
   private readonly driver: ChapterSeamDriver;
-  private readonly currentPage: 0 | 1;
+  private readonly currentPage: number;
+  private readonly screenCount: number;
   private dragBase = 0;
   private finished = false;
+  private landedOn: number | null = null;
 
   constructor(private readonly options: ChapterSeamOptions) {
     this.direction = options.direction;
-    this.currentPage = options.direction === 1 ? 0 : 1;
-    const lead = options.direction === 1 ? options.current : options.neighbor;
-    const trail = options.direction === 1 ? options.neighbor : options.current;
     const width = options.width;
+    const screens = options.track ?? (options.direction === 1
+      ? [options.current, options.neighbor] : [options.neighbor, options.current]);
+    this.currentPage = screens.indexOf(options.current);
+    if (this.currentPage < 0 || !screens.includes(options.neighbor)) throw new Error("seam track lacks its own screens");
+    this.screenCount = screens.length;
     const start = this.currentPage * width;
-    this.driver = new ChapterSeamDriver(lead, trail, width, options.progression, start, (error) => this.fault(error));
+    this.driver = new ChapterSeamDriver(screens, width, options.progression, start, (error) => this.fault(error));
     this.session = new PageMotionSession(
       this.driver,
-      [0, width],
+      screens.map((_, index) => index * width),
       this.currentPage,
       (page) => this.settled(page),
-      (sample) => this.settled(sample.position >= width / 2 ? 1 : 0),
+      (sample) => this.settled(Math.max(0, Math.min(this.screenCount - 1, Math.round(sample.position / width)))),
       (distance, velocity) => options.touch ? settlePlan(distance, velocity) : desktopSettlePlan(distance, width),
     );
   }
 
-  get neighborPage(): 0 | 1 {
-    return this.currentPage === 0 ? 1 : 0;
+  /** 落定在哪一屏（轨道下标）；未落定或回到当前屏时为 null。 */
+  get settledScreen(): number | null {
+    return this.landedOn;
   }
 
   /** 拖动或动画进行中（idle 只在构造后、被接手前短暂出现）。 */
@@ -236,14 +244,14 @@ export class ChapterSeam {
     return this.session.releaseDrag(ticket, state.originPage + direction, velocity) !== null;
   }
 
-  /** A fresh gesture may request the screen beyond this two-screen seam. */
+  /** A fresh gesture may request the screen beyond the prepared track. */
   releaseWouldOverflow(ticket: number, direction: 1 | -1): boolean {
     const state = this.session.state;
     return state.kind === "dragging" && state.ticket === ticket &&
-      (state.originPage + direction < 0 || state.originPage + direction > 1);
+      (state.originPage + direction < 0 || state.originPage + direction > this.screenCount - 1);
   }
 
-  /** 独立翻页命令；"beyond" 表示越过了两屏范围（宿主可预约到新章里再翻一次）。 */
+  /** 独立翻页命令；"beyond" 表示越过了已备好的屏（宿主可预约到新章里再翻一次）。 */
   turn(inputId: number, direction: 1 | -1): SeamTurnResult {
     if (this.finished) return "beyond";
     const result = this.session.turn(inputId, direction);
@@ -260,7 +268,8 @@ export class ChapterSeam {
 
   private settled(page: number): void {
     if (this.finished) return;
-    this.options.onSettled(page === this.neighborPage);
+    this.landedOn = page === this.currentPage ? null : page;
+    this.options.onSettled(this.landedOn !== null);
   }
 
   private fault(error: unknown): void {

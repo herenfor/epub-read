@@ -3,7 +3,7 @@ import { releaseVelocity } from "./pagedSlide";
 import type { ChapterSeam, SeamInputPort, SeamTurnResult } from "./chapterSeam";
 
 interface Options {
-  live(): { seam: ChapterSeam; landed: boolean } | null;
+  live(): { seam: ChapterSeam; landed: boolean; pending: 1 | -1 | null } | null;
   progression(): PageProgression;
   previewCurrent(dx: number | null): void;
   turnCurrent(direction: 1 | -1): void;
@@ -66,6 +66,13 @@ export class SeamGestureInput implements SeamInputPort {
     if (!live) {
       this.options.pending(null);
       this.options.turnCurrent(direction);
+      return "moving";
+    }
+    // A→B→C then back requests B: when C could only be reserved, the opposite
+    // command withdraws that reservation instead of reversing the motion.
+    if (live.pending === -direction) {
+      this.options.pending(null);
+      if (live.landed) this.carriedPreview = null;
       return "moving";
     }
     if (live.landed) {

@@ -20,8 +20,8 @@ function setup() {
   const settled = vi.fn();
   const seam = new ChapterSeam({ direction: 1, current: element(), neighbor: element(), width: 800,
     progression: "ltr", touch: true, onSettled: settled, onFault: (error) => { throw error; } });
-  let live: { seam: ChapterSeam; landed: boolean } | null = { seam, landed: false };
-  const pending = vi.fn();
+  let live: { seam: ChapterSeam; landed: boolean; pending: 1 | -1 | null } | null = { seam, landed: false, pending: null };
+  const pending = vi.fn((direction: 1 | -1 | null) => { if (live) live.pending = direction; });
   const previewCurrent = vi.fn();
   const turnCurrent = vi.fn();
   const input = new SeamGestureInput({ live: () => live, progression: () => "ltr", pending, previewCurrent, turnCurrent });
@@ -86,5 +86,22 @@ describe("continuous seam input", () => {
     expect(h.previewCurrent).toHaveBeenLastCalledWith(90);
     expect(h.settled).not.toHaveBeenCalled();
     expect(h.turnCurrent).not.toHaveBeenCalled();
+  });
+
+  it("withdraws a reserved turn on the opposite command instead of reversing the motion (A→B→C, back = B)", async () => {
+    const h = setup();
+    expect(h.input.turn(1)).toBe("moving");
+    expect(h.input.turn(1)).toBe("moving");
+    expect(h.pending).toHaveBeenLastCalledWith(1);
+    expect(h.input.turn(-1)).toBe("moving");
+    expect(h.pending).toHaveBeenLastCalledWith(null);
+    await h.finish();
+    expect(h.settled).toHaveBeenLastCalledWith(true);
+    // A further opposite command now really reverses toward the current screen.
+    h.land();
+    h.input.turn(1);
+    expect(h.pending).toHaveBeenLastCalledWith(1);
+    h.input.turn(-1);
+    expect(h.pending).toHaveBeenLastCalledWith(null);
   });
 });
