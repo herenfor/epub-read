@@ -21,6 +21,8 @@ function resolveOrKeep(
 }
 
 export interface CssRewriteOptions {
+  /** Width rewrite input; recursive imports use the same measure. */
+  maxEm?: number;
   archiveReferences?: ArchiveReferences;
   /** 读取书内 CSS 文本（递归处理 @import 链用） */
   getText?: (path: string) => string | undefined;
@@ -294,7 +296,7 @@ function rewriteCssUrlsInternal(
   // 跳过规则：全页图块（% 相对整页有意义）、img/svg/html/body 选择器，
   // 以及带组合器（后代/子代等）的嵌套选择器——它们的 % 相对某个限宽
   // 父容器（如 .authorbox table{width:100%}），改写会破坏书布局。
-  out = rewriteWidthDeclarations(out, TEXT_MEASURE.maxEm, context);
+  out = rewriteWidthDeclarations(out, options.maxEm ?? TEXT_MEASURE.maxEm, context);
   return out;
 }
 

@@ -19,7 +19,7 @@ import {
 import { isExternalUrl, isFragmentOnly } from "../core/paths";
 import { getFootnoteHoverAnchor, isFootnoteLink, resolveFootnote, type FootnoteInfo } from "./footnotes";
 import type { ResourceServer } from "./resources";
-import { OwnedBlobUrls } from "./blobOwnership";
+import { OwnedStylesheetUrls } from "./stylesheetCache";
 import { TEXT_MEASURE, type ReaderSettings, type Theme } from "./settings";
 import { VisibilityGate } from "./displayGate";
 import { hasAuthoredCssProperty } from "./cssRewrite";
@@ -2568,10 +2568,10 @@ export interface ChapterPaginatorOptions {
 
 export class ChapterPaginator {
   private blobUrl?: string;
-  /** sanitize 本章外链 CSS 产生的局部 Blob URL；不包含 ResourceServer 共享资源。 */
-  private chapterCssUrls = new OwnedBlobUrls();
+  /** Chapter-owned fallback URLs plus leases of server-owned external CSS. */
+  private chapterCssUrls = new OwnedStylesheetUrls();
   /** 尚未提交给 iframe 的 sanitize 任务；换章时也必须取消其 URL 所有权。 */
-  private pendingCssUrls = new Set<OwnedBlobUrls>();
+  private pendingCssUrls = new Set<OwnedStylesheetUrls>();
   private viewer: HTMLElement | null = null;
   /** 卷首页居中候选；只在当前 iframe 文档内有效。 */
   private centeredTitleCandidate: CenteredTitleCandidate | null = null;
@@ -3981,9 +3981,9 @@ export class ChapterPaginator {
       return;
     }
 
-    // CSS Blob URL 的所有权只在本次 sanitize/load 内；提交 iframe 前仍属于
-    // 局部任务，任何过期/异常路径都必须在这里回收。
-    const ownedCssUrls = new OwnedBlobUrls();
+    // Shared CSS uses a server-owned lease; fallback URLs remain chapter-owned.
+    // The same cleanup handles stale loads, failures and the active document.
+    const ownedCssUrls = new OwnedStylesheetUrls();
     this.pendingCssUrls.add(ownedCssUrls);
     let sanitized;
     try {
@@ -3993,6 +3993,10 @@ export class ChapterPaginator {
         strictXml: this.strictXml,
         urlFor: (p) => this.server.urlFor(p),
         getText: (p) => this.server.textFor(p),
+        stylesheetFor: (p) => {
+          const lease = server.acquireStylesheet?.(p);
+          return lease ? ownedCssUrls.share(lease) : undefined;
+        },
         makeUrl: (text, mediaType) =>
           ownedCssUrls.add(URL.createObjectURL(new Blob([text], { type: mediaType }))),
         settings: this.settings,
@@ -4036,7 +4040,7 @@ export class ChapterPaginator {
       if (nextBlobUrl) URL.revokeObjectURL(nextBlobUrl);
       this.iframe.removeEventListener("load", this.onIframeLoad);
       if (this.blobUrl === nextBlobUrl) this.blobUrl = undefined;
-      if (this.chapterCssUrls === ownedCssUrls) this.chapterCssUrls = new OwnedBlobUrls();
+      if (this.chapterCssUrls === ownedCssUrls) this.chapterCssUrls = new OwnedStylesheetUrls();
       if (seq === this.loadSeq && !this.disposed) {
         this.emit({ status: "error", message: `章节渲染失败：${(e as Error).message}` });
         this.finishDisplayReady(seq, false);
