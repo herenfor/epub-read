@@ -151,6 +151,43 @@ describe("ReaderView preload settings lifecycle", () => {
     });
   };
 
+  it("restores pointer input on the promoted chapter after a multi-screen seam", async () => {
+    props = { ...props, settings: { ...props.settings, columnsPerView: 1, turnAnimation: "slide", seamlessChapterTurn: true } };
+    const handle = createRef<ReaderHandle>();
+    const renderReader = () => dom.render(createElement(ReaderView, { ...props, ref: handle }));
+    await renderReader();
+    const active = instances[0];
+    await finish(active);
+    const next = instances.find(p => p.path === "1.xhtml")!;
+    await finish(next);
+    const animations: Array<() => void> = [];
+    for (const p of instances) {
+      Object.assign(p, { pageMotionIdle: true, pageProgression: "ltr", flowsVertically: false });
+      Object.defineProperties(p.callbacks.iframe, {
+        clientWidth: { configurable: true, value: 800 },
+        clientHeight: { configurable: true, value: 600 },
+        animate: { configurable: true, value: () => {
+          let resolve!: () => void;
+          const finished = new Promise<void>(done => { resolve = done; });
+          animations.push(resolve);
+          return { finished, cancel: vi.fn() };
+        } },
+      });
+    }
+    active.currentPage = active.pageCount - 1;
+    await act(async () => { handle.current!.nextPage(); });
+    expect(animations.length).toBeGreaterThanOrEqual(2);
+    expect(next.callbacks.iframe.style.pointerEvents).toBe("none");
+    await act(async () => { animations.forEach(done => done()); });
+    expect(props.onRequestChapter).toHaveBeenCalledWith(1);
+    props = { ...props, spineIndex: 1 };
+    await renderReader();
+    expect(next.load).toHaveBeenCalledTimes(1); // Adopt the prepared document.
+    expect(next.callbacks.iframe.style.pointerEvents).not.toBe("none");
+    expect(next.callbacks.iframe.style.transform).toBeFalsy();
+    expect(active.callbacks.iframe.style.visibility).toBe("hidden");
+  });
+
   it("prepares both ordinary edges: a newly mounted previous layer loads at chapter end", async () => {
     props = { ...props, inputPaused: true, presentationStandby: true, startAtEnd: { nonce: -2, atEnd: true } };
     await render();
