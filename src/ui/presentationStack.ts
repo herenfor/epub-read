@@ -25,6 +25,8 @@ export interface PresentationPlan {
   nextIndex: number;
   prevKey: string | null;
   prevIndex: number;
+  /** One bounded visual group beyond the immediate neighbour to classify. */
+  lookaheadIndex: number;
 }
 
 export const PAGED_LAYER = "paged";
@@ -45,7 +47,7 @@ export function planPresentationLayers(
   spineIndex: number,
   current: SingleLeafSpread | null,
   peek: (index: number) => SingleLeafSpread | null | undefined,
-  resident?: { key: PagedLayerKey; spineIndex: number },
+  resident?: { key: PagedLayerKey; spineIndex: number; warmDirection?: -1 | 0 | 1 },
 ): PresentationPlan {
   const pagedKey = resident?.key ?? PAGED_LAYER;
   const first = current?.left ?? spineIndex;
@@ -93,6 +95,18 @@ export function planPresentationLayers(
   if (current) layers.push({ key: pairLayerKey(current), kind: "pair", spread: current, spineIndex, role: "main" });
   if (nextPair) layers.push({ key: pairLayerKey(nextPair), kind: "pair", spread: nextPair, spineIndex: nextIndex, role: "standby" });
 
+  // Short front-matter chapters can be consumed faster than a cold iframe
+  // prepares. Keep just one extra pair ahead of the recent reading direction,
+  // so it is already resident when the immediate neighbour is promoted.
+  const direction = resident?.warmDirection ?? 0;
+  const adjacentPair = direction === 1 ? nextPair : direction === -1 ? prevPair : null;
+  const lookaheadIndex = adjacentPair ? nextLinearIndex(book,
+    direction === 1 ? adjacentPair.right ?? adjacentPair.left : adjacentPair.left, direction as 1 | -1) : -1;
+  const ahead = lookaheadIndex >= 0 ? peek(lookaheadIndex) : null;
+  if (ahead && !layers.some((layer) => layer.key === pairLayerKey(ahead))) {
+    layers.push({ key: pairLayerKey(ahead), kind: "pair", spread: ahead, spineIndex: lookaheadIndex, role: "standby" });
+  }
+
   const mainKey = current ? pairLayerKey(current) : pagedKey;
   return {
     layers,
@@ -101,6 +115,7 @@ export function planPresentationLayers(
     nextIndex,
     prevKey: prevPair ? pairLayerKey(prevPair) : prevPagedKey,
     prevIndex,
+    lookaheadIndex,
   };
 }
 

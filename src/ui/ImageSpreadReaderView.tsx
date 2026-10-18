@@ -78,7 +78,6 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
   };
   /** A16 第二阶段：本组发起的跨层联动（叶子里的拖动由叶子自己的视图持有）。 */
   const pairSeam = useRef<ExternalSeam | null>(null);
-  const seamInputId = useRef(0);
   const livePairSeam = () => pairSeam.current && !pairSeam.current.seam.done ? pairSeam.current : null;
   const cancelPairSeam = () => {
     boundaryPreview(null);
@@ -93,7 +92,7 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
     // 联动进行中：命令改变目标或反向；越界的同向命令不再连跨。
     const live = livePairSeam();
     if (live) {
-      live.seam.turn(++seamInputId.current, dir);
+      live.input.turn(dir);
       return;
     }
     const target = neighbor(dir);
@@ -101,7 +100,7 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
     // 相邻显示已在外层排好：两层一起滑过去，落定后由外层提交换章。
     const external = p.externalSeam?.(dir) ?? null;
     if (external) {
-      const result = external.seam.turn(++seamInputId.current, dir);
+      const result = external.input.turn(dir);
       if (result === "moving") {
         pairSeam.current = external;
         return;
@@ -131,6 +130,7 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
       leftHandle.current?.applyTheme(theme);
       rightHandle.current?.applyTheme(theme);
     },
+    previewSwipe: (dx) => active()?.previewSwipe?.(dx),
     nextPage: () => turn(1),
     prevPage: () => turn(-1),
     setPage: (page) => { cancelPairSeam(); active()?.setPage(page); },
