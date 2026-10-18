@@ -66,9 +66,9 @@ export function clientXToColumnX(clientX: number, originClientX: number, scrollL
   return clientX - originClientX + scrollLeft;
 }
 
-// Fractional DPR can put a measured leading edge just below its exact column
-// boundary (602px -> 601.998547px). Normalize that CSSOM noise, not the step.
-const COLUMN_EDGE_EPSILON_PX = 0.01;
+// Reconcile CSSOM edges within one CSS layout subpixel. Keep this in logical
+// coordinates: neither device scale nor a rounded column step changes layout.
+const COLUMN_EDGE_EPSILON_PX = 1 / 64;
 
 export function columnForContentPoint(x: number, geometry: SpreadGeometry): number {
   const pages = geometry.pageIntervals;
