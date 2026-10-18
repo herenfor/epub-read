@@ -5,7 +5,7 @@ import { DEFAULT_SETTINGS } from "../render/settings";
 import type { ChapterState } from "../render/paginator";
 import { createReactDomHarness } from "../test/reactDomHarness";
 import { ImageSpreadReaderView } from "./ImageSpreadReaderView";
-import type { ReaderHandle, ReaderViewProps } from "./ReaderView";
+import type { BoundarySwipePreview, ReaderHandle, ReaderViewProps } from "./ReaderView";
 
 // The original chapter view owns leaf wheel input; the production spread
 // must add only the missing outer/blank paths, preserving that ownership.
@@ -16,6 +16,54 @@ const Page = forwardRef<ReaderHandle, ReaderViewProps>(function Page(props, _ref
   }, []);
   return createElement("div", { className: "reader", onWheel: () => props.onRequestChapter(props.spineIndex + 1) },
     createElement("span", { className: "leaf-content" }, "original leaf"));
+});
+
+it("projects boundary drag feedback onto both leaves and one outer hint in either preload mode", async () => {
+  const dom = createReactDomHarness();
+  const previews = new Map<number, NonNullable<ReaderViewProps["onBoundarySwipePreview"]>>();
+  const PreviewPage = forwardRef<ReaderHandle, ReaderViewProps>(function PreviewPage(props, _ref) {
+    previews.set(props.spineIndex, props.onBoundarySwipePreview!);
+    useEffect(() => {
+      props.onPageState({ status: "ready", pageCount: 1, currentPage: 0, empty: false, effectiveColumns: 2 } as ChapterState);
+      props.onDisplayReady(null);
+    }, []);
+    return createElement("div", { className: "reader" }, createElement("iframe"));
+  });
+  const props = {
+    book: { spine: [0, 1, 2].map(id => ({ idref: String(id), linear: true })) } as Book,
+    spineIndex: 1, spread: { left: 0, right: 1 },
+    settings: { ...DEFAULT_SETTINGS, columnsPerView: 2 as const },
+    userFonts: [], notes: [], anchorNonce: 0, startAtEnd: { nonce: 0, atEnd: false },
+    onRequestChapter: vi.fn(), onPageState: vi.fn(), onDisplayReady: vi.fn(),
+    onUnsupported: vi.fn(), Page: PreviewPage,
+    server: {} as ReaderViewProps["server"], initialPage: 0,
+    onIssues: vi.fn(), onInternalLink: vi.fn(), onBeforeInternalNavigate: vi.fn(),
+    onInternalNavigationSettled: vi.fn(), onExternalLink: vi.fn(),
+    onFootnote: vi.fn(), onFootnoteClose: vi.fn(),
+  };
+  const preview: BoundarySwipePreview = { offset: 48, opacity: 1, direction: "prev", ready: true, text: "previous chapter" };
+  try {
+    for (const preloadNextChapter of [false, true]) {
+      await dom.render(createElement(ImageSpreadReaderView, { ...props, settings: { ...props.settings, preloadNextChapter } }));
+      const surface = dom.container.querySelector<HTMLElement>(".reader-image-spread-pages")!;
+      const hint = dom.container.querySelector<HTMLElement>(".reader-image-spread-hint")!;
+      await dom.run(() => previews.get(1)!(preview));
+      expect(surface.querySelectorAll(".reader-image-leaf")).toHaveLength(2);
+      expect(surface.style.translate).toBe("48px 0");
+      expect(dom.container.querySelectorAll(".reader-swipe-hint")).toHaveLength(1);
+      expect(hint.closest(".reader-image-leaf")).toBeNull();
+      expect(hint.dataset.direction).toBe("prev");
+      expect(hint.style.opacity).toBe("1");
+      // Reversing and cancelling do not create a second owner or turn a page.
+      await dom.run(() => previews.get(0)!({ ...preview, offset: -48, direction: "next" }));
+      expect(surface.style.translate).toBe("-48px 0");
+      await dom.run(() => previews.get(0)!(null));
+      expect(surface.style.translate).toBe("");
+      expect(surface.classList.contains("is-dragging")).toBe(false);
+      expect(hint.style.opacity).toBe("0");
+      expect(props.onRequestChapter).not.toHaveBeenCalled();
+    }
+  } finally { await dom.dispose(); }
 });
 
 it("turns the blank leaf, gutter and edge once while preserving leaf, pause and book-boundary ownership", async () => {

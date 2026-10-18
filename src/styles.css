@@ -896,6 +896,8 @@ select option {
 .reader-image-leaf-shift { position: absolute; inset: 0; display: flex; min-width: 0; min-height: 0; }
 .reader-image-leaf .edge-turn-zone { display: none; }
 .reader-image-spread[data-image-spread-ready="false"] .reader-image-leaf { visibility: hidden; }
+.reader-image-spread-pages { position: absolute; inset: 0; transition: translate 120ms ease-out; }
+.reader-image-spread-pages.is-dragging { transition: none; }
 
 /* ---- Zen UI Packet C: 硬件加速平滑翻页与边缘触控增强 ---- */
 .reader[data-swipe-input="true"] { overflow: clip; }
@@ -932,8 +934,12 @@ select option {
 .reader[data-swipe-direction="next"] .reader-swipe-hint { right: 16px; }
 .reader[data-swipe-direction="prev"] .reader-swipe-hint { left: 16px; }
 .reader[data-swipe-ready="true"] .reader-swipe-hint { color: var(--accent); }
+.reader-image-spread-hint[data-direction="next"] { right: 16px; }
+.reader-image-spread-hint[data-direction="prev"] { left: 16px; }
+.reader-image-spread-hint[data-ready="true"] { color: var(--accent); }
 
 @media (prefers-reduced-motion: reduce) {
+  .reader-image-spread-pages { transition: none; }
   .reader[data-swipe-input="true"] iframe:not([aria-hidden="true"]) {
     translate: none;
     transition: none;
