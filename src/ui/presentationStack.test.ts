@@ -3,6 +3,14 @@ import type { Book } from "../core/types";
 import type { ReaderViewProps } from "./ReaderView";
 import type { SingleLeafSpread } from "./singleLeafSpreads";
 import { planPresentationLayers, planSeamTrack, standbyReaderProps, STANDBY_START, STANDBY_END } from "./presentationStack";
+import { planFrontRun } from "./frontRunPlan";
+
+const runOf = (book: Book, current: number, peek: (i: number) => SingleLeafSpread | null | undefined,
+  leaves: Record<number, number> = {}, candidates: Record<number, boolean> = {}) => {
+  const plan = planFrontRun({ book, current, direction: 1, peek, isLeafCandidate: (i) => candidates[i] ?? peek(i) !== null,
+    knownLeaves: (i) => leaves[i], imageBytes: () => 0, budget: { maxScreens: 10, maxBytes: 1 } });
+  return { units: plan.units, waitingFor: plan.waitingFor };
+};
 
 // Front matter: cover+plate, contents+credits as A13 pairs, then ordinary chapters.
 const book = { spine: Array.from({ length: 7 }, (_, i) => ({ idref: String(i), linear: true })) } as unknown as Book;
@@ -25,7 +33,7 @@ describe("planPresentationLayers", () => {
     const groups = [cover, contents, { left: 4, right: 5 }, { left: 6, right: 7 }];
     const classify = (i: number) => i < 8 ? groups[Math.floor(i / 2)] : null;
     const resident = { key: "paged" as const, spineIndex: 8, warmDirection: 1 as const };
-    const before = planPresentationLayers(longer, 0, cover, classify, resident);
+    const before = planPresentationLayers(longer, 0, cover, classify, { ...resident, run: runOf(longer, 0, classify, { 8: 5 }) });
     expect(before.lookaheadIndex).toBe(4);
     // Reading forward from the cover keeps the whole bounded run of groups resident.
     expect(before.layers.filter(l => l.kind === "pair").map(l => l.key)).toEqual(["pair:0:1", "pair:2:3", "pair:4:5", "pair:6:7"]);
@@ -134,7 +142,7 @@ describe("planSeamTrack", () => {
   const resident = { key: "paged" as const, spineIndex: 8, warmDirection: 1 as const };
 
   it("chains ready groups in reading order up to the first ordinary chapter's opening screen", () => {
-    const plan = planPresentationLayers(longer, 0, cover, classify, resident);
+    const plan = planPresentationLayers(longer, 0, cover, classify, { ...resident, run: runOf(longer, 0, classify, { 8: 5 }) });
     const track = planSeamTrack(longer, plan, cover, 0, classify, () => true);
     expect(track.current).toBe(0);
     expect(track.screens.map((screen) => `${screen.key}@${screen.spineIndex}${screen.atEnd ? "<" : ""}`))
@@ -149,5 +157,27 @@ describe("planSeamTrack", () => {
     expect(track.current).toBe(1);
     const unknown = planSeamTrack(longer, plan, groups[2], 4, (i) => i >= 6 ? undefined : classify(i), () => true);
     expect(unknown.screens.at(-1)?.key).toBe("pair:4:5");
+  });
+
+  it("keeps each ordinary run between groups in its own preparing layer, as on the tablet book", () => {
+    // 0/1 group, 2–3 ordinary, 4/5 and 6/7 groups, 8–9 ordinary, 10 the long prologue.
+    const tablet = { spine: Array.from({ length: 12 }, (_, i) => ({ idref: String(i), linear: true })) } as unknown as Book;
+    const spreads: Record<number, SingleLeafSpread> = { 0: cover, 1: cover, 4: { left: 4, right: 5 }, 5: { left: 4, right: 5 },
+      6: { left: 6, right: 7 }, 7: { left: 6, right: 7 } };
+    const peekTablet = (i: number) => spreads[i] ?? (i < 12 ? null : undefined);
+    const ordinary = { 2: false, 3: false, 8: true, 9: true, 10: false, 11: false };
+    // The introduction has not been measured yet: the plan waits for it, and it is prepared with its run.
+    const waiting = planPresentationLayers(tablet, 0, cover, peekTablet, { key: "paged", spineIndex: -1, warmDirection: 1,
+      run: runOf(tablet, 0, peekTablet, { 2: 2 }, ordinary) });
+    expect(waiting.layers.find((layer) => layer.key === "paged")).toMatchObject({ spineIndex: 2, prepareThrough: 3 });
+    expect(waiting.layers.some((layer) => layer.key === "pair:4:5")).toBe(false);
+    const known = planPresentationLayers(tablet, 0, cover, peekTablet, { key: "paged", spineIndex: -1, warmDirection: 1,
+      run: runOf(tablet, 0, peekTablet, { 2: 2, 3: 2, 10: 9 }, ordinary) });
+    expect(known.layers.map((layer) => `${layer.key}@${layer.spineIndex}${layer.kind === "paged" && layer.prepareThrough !== undefined ? ">" + layer.prepareThrough : ""}`))
+      .toEqual(["paged@2>3", "pair:0:1@0", "pair:4:5@4", "pair:6:7@6", "paged-run:8@8>10"]);
+    const track = planSeamTrack(tablet, known, cover, 0, peekTablet, () => true, (key) => key === "paged"
+      ? [{ spineIndex: 2, single: true, element: "f2" }, { spineIndex: 3, single: true, element: "f3" }]
+      : [{ spineIndex: 8, single: true, element: "f8" }, { spineIndex: 9, single: true, element: "f9" }, { spineIndex: 10, single: false, element: "f10" }]);
+    expect(track.screens.map((screen) => `${screen.spineIndex}${screen.inner ? "i" : ""}`)).toEqual(["0", "2i", "3i", "4", "6", "8i", "9i", "10i"]);
   });
 });
