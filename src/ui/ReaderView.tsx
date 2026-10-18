@@ -2379,9 +2379,14 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Slot lifetime follows book/server; navigation and settings have separate effects below.
   }, [book, server]);
 
+  // 笔记投影变化（新增/删除/编辑）：当前章，以及拼接屏上挂着的另一章（按它自己的章）同屏更新。
+  const notesForChapter = props.notesForChapter;
   useEffect(() => {
     paginatorRef.current?.setNotes(props.notes);
-  }, [props.notes]);
+    for (const { slot } of joinAttachRef.current) {
+      if (slot.spineIndex !== null) slot.paginator?.setNotes(notesForChapter?.(slot.spineIndex) ?? []);
+    }
+  }, [props.notes, notesForChapter]);
 
   // 章节切换 → 加载
   useEffect(() => {
