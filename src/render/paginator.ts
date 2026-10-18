@@ -6,7 +6,7 @@ import { applyReaderBodyPercentageSpacing, applyReaderRootPercentageSpacing } fr
 import { sanitizeChapter, VIEWER_ID } from "./sanitize";
 import { planCenteredTitleBody } from "./titlePageLayout";
 import { desktopSettlePlan, PageMotionSession, settlePlan, type Direction as MotionDirection } from "./pageMotion";
-import { TransformPageMotion } from "./transformPageMotion";
+import { TransformPageMotion, type MotionCompanion } from "./transformPageMotion";
 import { MotionWindowIdleLease } from "./motionWindowIdleLease";
 import {
   chooseNativeSwipeOwner,
@@ -2606,6 +2606,16 @@ export class ChapterPaginator {
     return this.spreadLayout;
   }
 
+  /** 这一次加载是否带了 chapterFill 选项（宿主据此判断能否把它的叶数记入索引）。 */
+  get chapterFillRequested(): boolean {
+    return this.chapterFill != null;
+  }
+
+  /** 当前版式实际保留的读者空栏（0 或 1）；未排好时为 0。 */
+  get readerLeadingColumns(): 0 | 1 {
+    return this.spreadLayout?.leadingBlankColumns ?? 0;
+  }
+
   /** Exact leaves, after display-ready. Reader blank/tail padding never count as book content. */
   get contentLeafLayout(): (ChapterLeafLayout & { readonly joinable: boolean }) | null {
     const layout = this.spreadLayout;
@@ -2843,6 +2853,8 @@ export class ChapterPaginator {
   /** 去末屏途中又收到同向独立命令：落定后最多执行一次跨章。 */
   private pageMotionPendingChapter: MotionDirection | null = null;
   private pageMotionChapterHandler: ((direction: MotionDirection) => void) | null = null;
+  /** A13-2：随本章内容移动的另一章 iframe（宿主在章边拼接屏附近设置）。 */
+  private motionCompanions: readonly { element: HTMLElement; page: number }[] = [];
 
   private nativeSnapLiveFrame: number | null = null;
   private readonly nativeSnapScrollEndHandler = (): void => this.commitNativeSnap();
@@ -3619,7 +3631,44 @@ export class ChapterPaginator {
       exitIdleWindow: () => this.exitIdlePageMotionWindow(),
     }, null);
     this.pageMotion = { session, driver, lease, key, viewer };
+    if (this.motionCompanions.length) driver.setCompanions(this.resolvedMotionCompanions(offsets));
     return this.pageMotion;
+  }
+
+  /**
+   * A13-2：让这些元素跟着本章内容一起移动。page 是“元素恰好在原位”时本章停的那一屏；
+   * 立即按当前视觉位置摆好，之后的拖动、动画、中断、落定都同步写它们。空数组撤销
+   * （已摆的位置由宿主收回）。
+   */
+  setMotionCompanions(companions: readonly { element: HTMLElement; page: number }[]): void {
+    this.motionCompanions = companions;
+    const offsets = this.nativeSnapOffsets();
+    const resolved = this.resolvedMotionCompanions(offsets);
+    const motion = this.pageMotion;
+    if (motion) {
+      motion.driver.setCompanions(resolved);
+      return;
+    }
+    const position = this.readPagedScroll();
+    const sign = pageAxisSign(this.flowProgression);
+    for (const companion of resolved) {
+      companion.element.style.setProperty("transform", `translate3d(${sign * (companion.origin - position)}px, 0, 0)`);
+    }
+  }
+
+  private resolvedMotionCompanions(offsets: readonly number[]): MotionCompanion[] {
+    if (!offsets.length) return [];
+    return this.motionCompanions.map(({ element, page }) => ({
+      element,
+      origin: offsets[Math.max(0, Math.min(offsets.length - 1, page))],
+    }));
+  }
+
+  /** 双页时两页的分界（中缝中线）在 iframe 视口里的横坐标；不是双页时为 null。 */
+  spreadLaneSplitX(): number | null {
+    const spread = this.visualSpreadOrigin();
+    if (!spread || spread.geometry.columns !== 2) return null;
+    return spread.contentLeft + (spread.geometry.columnWidth + spread.geometry.columnStep) / 2;
   }
 
   /** 运动真正开始：关弹注/清高亮/作废待采样；目标页先以 transient 报给底栏。 */
@@ -10062,6 +10111,7 @@ export class ChapterPaginator {
   }
 
   private cleanupDoc(): void {
+    this.motionCompanions = [];
     this.leadingColumnGap.dispose();
     this.leadingColumnApplied = false;
     this.leadingColumnSupported = false;

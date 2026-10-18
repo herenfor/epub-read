@@ -29,8 +29,20 @@ export interface TransformMotionLayout {
   readonly nativeVerticalFlow?: boolean;
 }
 
+/**
+ * 跟着本章内容一起移动的另一个元素（A13-2 章边拼接屏的另一章 iframe）：位置 origin 时
+ * 停在原位，内容每前进 1px 它也同向移动 1px。只写它的 transform，不读它。
+ */
+export interface MotionCompanion {
+  readonly element: HTMLElement;
+  /** 与 offsets 同一坐标：本章停在这里时伴随元素恰好在原位。 */
+  readonly origin: number;
+}
+
 export class TransformPageMotion implements PageMotionDriver {
   private animation: Animation | null = null;
+  private companions: readonly MotionCompanion[] = [];
+  private companionAnimations: Animation[] = [];
   private held: number;
   private generation = 0;
   private disposed = false;
@@ -76,6 +88,7 @@ export class TransformPageMotion implements PageMotionDriver {
     // 先写入同位置的底层样式，再撤掉动画呈现；同一任务内完成，不 finish 到旧目标。
     this.held = sample.position;
     if (this.windowStart !== null) this.applyTransform();
+    this.holdCompanions(sample.position);
     previous?.cancel();
     return { kind: "held", sample };
   }
@@ -126,10 +139,15 @@ export class TransformPageMotion implements PageMotionDriver {
       return;
     }
     this.animation = animation;
+    this.animateCompanions(frames.map((frame, index) => {
+      const progress = desktop ? index : settleProgress(plan, index / KEYFRAMES);
+      return { position: from + (position - from) * progress, offset: frame.offset as number | undefined };
+    }), plan.durationMs, desktop);
     void animation.finished.then(() => {
       if (this.disposed || ticket !== this.generation || this.animation !== animation) return;
       this.held = position;
       this.applyTransform();
+      this.holdCompanions(position);
       this.animation = null;
       animation.cancel();
       done();
@@ -149,6 +167,7 @@ export class TransformPageMotion implements PageMotionDriver {
     this.held = position;
     if (this.windowStart !== null) this.applyTransform();
     else writePageScroll(this.viewer, position, this.progression);
+    this.holdCompanions(position);
     previous?.cancel();
   }
 
@@ -167,7 +186,16 @@ export class TransformPageMotion implements PageMotionDriver {
       this.restoreInline = null;
     }
     writePageScroll(this.viewer, position, this.progression);
+    this.holdCompanions(position);
     previous?.cancel();
+  }
+
+  /** 换一组伴随元素：立即按当前位置摆好（旧的一组保持最后的位置，由宿主收回）。 */
+  setCompanions(companions: readonly MotionCompanion[]): void {
+    if (this.disposed) return;
+    this.cancelCompanionAnimations();
+    this.companions = companions;
+    this.holdCompanions(this.read().position);
   }
 
   dispose(): void {
@@ -175,6 +203,44 @@ export class TransformPageMotion implements PageMotionDriver {
     const position = this.read().position;
     this.settleTo(position);
     this.disposed = true;
+  }
+
+  private companionTransform(companion: MotionCompanion, position: number): string {
+    return `translate3d(${pageAxisSign(this.progression) * (companion.origin - position)}px, 0, 0)`;
+  }
+
+  private holdCompanions(position: number): void {
+    for (const companion of this.companions) {
+      companion.element.style.setProperty("transform", this.companionTransform(companion, position));
+    }
+    this.cancelCompanionAnimations();
+  }
+
+  private cancelCompanionAnimations(): void {
+    const running = this.companionAnimations;
+    this.companionAnimations = [];
+    for (const animation of running) animation.cancel();
+  }
+
+  /** 与本章内容同一时长、同一曲线；被中断或落定时随主动画一起收回。 */
+  private animateCompanions(samples: readonly { position: number; offset?: number }[], durationMs: number,
+    desktop: boolean): void {
+    this.cancelCompanionAnimations();
+    for (const companion of this.companions) {
+      try {
+        this.companionAnimations.push(companion.element.animate(samples.map((sample) => ({
+          transform: this.companionTransform(companion, sample.position),
+          ...(sample.offset === undefined ? {} : { offset: sample.offset }),
+        })), {
+          duration: durationMs,
+          easing: desktop ? "cubic-bezier(0.3333333333, 1, 0.6666666667, 1)" : "linear",
+          fill: "both",
+        }));
+      } catch {
+        // 伴随元素只是显示；动画建不起来时停在终点，主运动不受影响。
+        companion.element.style.setProperty("transform", this.companionTransform(companion, samples[samples.length - 1].position));
+      }
+    }
   }
 
   private transformFor(position: number): string {
