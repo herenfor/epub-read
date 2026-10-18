@@ -6355,3 +6355,12 @@ select option {
 }
 .reader-presentation-host[data-chapter-seam] { overflow: clip; }
 .reader-presentation-host[data-chapter-seam] .reader-layer { will-change: transform; }
+/* Only while two readers move: a stationary surface receives a new finger
+   over either leaf. It remains mounted so touchend survives promotion. */
+.reader-seam-input {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+.reader-presentation-host[data-chapter-seam] > .reader-seam-input { pointer-events: auto; }

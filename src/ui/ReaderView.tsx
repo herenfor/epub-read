@@ -1,3 +1,4 @@
+import { SeamGestureInput } from "./seamGestureInput";
 import { pageAxisSign } from "../render/pagedDirection";
 import { surfaceBackground } from "./readerSurfaceBackground";
 import { createRef, forwardRef, useCallback, useContext, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
@@ -82,6 +83,8 @@ import { BookmarkRibbonLayer } from "./BookmarkRibbonLayer";
 import { pageRibbonLeft, type RibbonBookmark, type RibbonCue, type RibbonMark, type ScreenBookmarks } from "./bookmarkRibbons";
 
 export interface ReaderHandle {
+  /** Carry an ongoing host gesture across prepared-layer promotion. */
+  previewSwipe?(dx: number | null): void;
   nextPage(): void;
   prevPage(): void;
   setPage(i: number): void;
@@ -1805,7 +1808,8 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   const startSeamTurn = (direction: 1 | -1): boolean => {
     const seam = startSeam(direction);
     if (!seam) return false;
-    if (seam.turn(++motionInputIdRef.current, direction) === "moving") return true;
+    const external = seamRef.current?.external;
+    if ((external ? external.input.turn(direction) : seam.turn(++motionInputIdRef.current, direction)) === "moving") return true;
     // 接到的是别处正在进行的同一次联动：不替它取消，只放手。
     if (seamRef.current?.external && !seamRef.current.external.fresh) seamRef.current = null;
     else abortSeam();
@@ -2849,6 +2853,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     }
     const seamEntry = liveSeam();
     if (seamEntry) {
+      if (seamEntry.external) { seamEntry.external.input.turn(immediate); return; }
       // 联动进行中：拖动松手续接同一手势；其他命令改变目标或反向，越界的同向命令
       // 预约一次，到新章后执行（不连跨两章）。
       const seamDrag = seamEntry.drag;
@@ -2920,6 +2925,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       delete main.dataset.swipeReady;
       delete main.dataset.swipeFollow;
       const seamEntry = seamRef.current;
+      if (seamEntry && !seamEntry.seam.done) seamEntry.external?.input.preview(null);
       const seamDrag = seamEntry?.drag ?? null;
       if (seamEntry && seamDrag) {
         // 联动拖动同理：没有被翻页接手就回到起点屏（当前章）。
@@ -2967,6 +2973,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     const followSeam = (): boolean => {
       const entry = liveSeam();
       if (!entry) return false;
+      if (entry.external) { entry.external.input.preview(dx); return true; }
       // 落定后到升格前的零星位移不再驱动任何东西。
       if (entry.landed) return true;
       if (!entry.drag) {
@@ -3146,6 +3153,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       applyTheme(theme) {
         applyThemeInPlaceRef.current(theme);
       },
+      previewSwipe(dx) { updateSwipePreviewRef.current(dx); },
       nextPage() {
         turnPageRef.current(1);
       },
@@ -3487,6 +3495,9 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
 export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function ReaderView(props, ref) {
   const edgeFeedback = useEdgeTurnFeedbackOwner();
   const host = useRef<HTMLDivElement>(null);
+  const motionSurface = useRef<HTMLDivElement>(null);
+  const motionGesture = useRef(false);
+  const warmDirection = useRef<1 | -1>(1);
   const [width, setWidth] = useState(0);
   // A13：整图章和短文字章（只读 XHTML 判断）连续成段，两两并排；能否并排由显示确认。
   const imageSpreads = useMemo(() => new SingleLeafSpreads(props.book,
@@ -3563,9 +3574,11 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
   const plan: PresentationPlan | null = stackOn
     ? planPresentationLayers(props.book, props.spineIndex, pair, (index) => imageSpreads.peek(index), {
       key: pagedLayerKey.current,
+      warmDirection: props.server.mediaCacheBudgetExceeded ? 0 : warmDirection.current,
       spineIndex: committed.current.book === props.book ? committed.current.layers.get(pagedLayerKey.current) ?? -1 : -1,
     })
     : null;
+  const lookaheadIndex = plan?.lookaheadIndex ?? -1;
   const parkedIndex = plan?.layers.find((layer) => layer.kind === "paged")?.spineIndex ?? -1;
   useEffect(() => {
     if (!spreadsShown || !seamPossible) return;
@@ -3573,7 +3586,7 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
     const controller = new AbortController();
     const first = pair?.left ?? props.spineIndex;
     const last = pair ? pair.right ?? pair.left : props.spineIndex;
-    const wanted = [nextLinearIndex(props.book, last, 1), nextLinearIndex(props.book, first, -1), parkedIndex];
+    const wanted = [nextLinearIndex(props.book, last, 1), nextLinearIndex(props.book, first, -1), parkedIndex, lookaheadIndex];
     for (const index of wanted) {
       if (index >= 0 && imageSpreads.peek(index) === undefined) {
         void imageSpreads.resolve(index, controller.signal).then(() => {
@@ -3582,7 +3595,7 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
       }
     }
     return () => controller.abort();
-  }, [imageSpreads, props.book, props.spineIndex, pair, parkedIndex, spreadsShown, seamPossible, classifiedTick]);
+  }, [imageSpreads, props.book, props.spineIndex, pair, parkedIndex, lookaheadIndex, spreadsShown, seamPossible, classifiedTick]);
   const tapGeometry = useMemo(() => createReaderTapGeometry(width, props.tapRegions), [width, props.tapRegions]);
   const bookProgression = effectivePageProgression(props.book.pageProgression, props.settings, props.book.fixedLayout);
   // 点击翻页区按本章实际方向映射（竖排书元数据没写方向时与元数据不同）。
@@ -3619,6 +3632,9 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
   progressionRef.current = progression;
   useImperativeHandle(stackOn ? ref : null, () => new Proxy({} as ReaderHandle, {
     get: (_target, property) => {
+      if (layerSeam.current && (property === "nextPage" || property === "prevPage")) {
+        return () => seamInput.turn(property === "nextPage" ? 1 : -1);
+      }
       const handle = layerHandles.current.get(planRef.current?.mainKey ?? PAGED_LAYER)?.current as
         unknown as Record<PropertyKey, unknown> | null | undefined;
       const value = handle?.[property];
@@ -3647,20 +3663,54 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
 
   // 层间联动：当前显示与相邻预备层一起移动；落定后提交换章，由预备层接管（见 adoptedFor）。
   // 记下联动当时的两个元素：清理可能发生在提交的变更阶段，那时层的 ref 已经摘下。
+  const layoutIdentityRef = useRef(layoutIdentity);
+  layoutIdentityRef.current = layoutIdentity;
   const layerSeam = useRef<{
-    seam: ChapterSeam; external: ExternalSeam; target: HTMLElement; host: HTMLElement; landed: boolean;
+    book: Book; nonce: number; layout: string;
+    seam: ChapterSeam; external: ExternalSeam; target: HTMLElement; host: HTMLElement; landed: boolean; pending: 1 | -1 | null;
   } | null>(null);
-  const clearLayerSeam = (): void => {
+  const replay = useRef<{ book: Book; index: number; nonce: number; layout: string; direction: 1 | -1 } | null>(null);
+  const [seamInput] = useState(() => new SeamGestureInput({
+    live: () => layerSeam.current,
+    progression: () => progressionRef.current,
+    previewCurrent: (dx) => layerHandles.current.get(planRef.current?.mainKey ?? PAGED_LAYER)?.current?.previewSwipe?.(dx),
+    turnCurrent: (direction) => {
+      const current = layerHandles.current.get(planRef.current?.mainKey ?? PAGED_LAYER)?.current;
+      if (direction === 1) current?.nextPage();
+      else current?.prevPage();
+    },
+    pending: (direction) => {
+      if (layerSeam.current) layerSeam.current.pending = direction;
+      if (direction === null) replay.current = null;
+    },
+  }));
+  const clearLayerSeam = (allowReturnReplay = false): void => {
     const entry = layerSeam.current;
-    if (!entry) return;
+    if (!entry) {
+      motionGesture.current = false;
+      replay.current = null;
+      seamInput.cancel();
+      return;
+    }
     layerSeam.current = null;
+    const p = latestProps.current;
+    const handoff = entry.landed && entry.book === p.book && entry.nonce === p.anchorNonce &&
+      entry.layout === layoutIdentityRef.current && entry.external.targetIndex === p.spineIndex && !p.inputPaused;
+    replay.current = entry.pending === null || (!handoff && !allowReturnReplay) ? null : {
+      book: p.book, index: entry.landed ? entry.external.targetIndex : p.spineIndex,
+      nonce: p.anchorNonce, layout: entry.layout, direction: entry.pending,
+    };
+    if (!handoff) {
+      motionGesture.current = false;
+      seamInput.cancel();
+    }
     entry.seam.dispose();
     delete entry.target.dataset.seamReveal;
     delete entry.host.dataset.chapterSeam;
   };
   const externalSeam = useCallback((direction: 1 | -1): ExternalSeam | null => {
     const live = layerSeam.current;
-    if (live && !live.seam.done) return live.landed ? null : { ...live.external, fresh: false };
+    if (live && !live.seam.done) return { ...live.external, fresh: false };
     const current = planRef.current;
     if (!current) return null;
     const targetKey = direction === 1 ? current.nextKey : current.prevKey;
@@ -3673,6 +3723,10 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
     const hostElement = host.current;
     const width = hostElement?.clientWidth ?? 0;
     if (!mainElement || !targetElement || !hostElement || !(width > 0)) return null;
+    if (warmDirection.current !== direction) {
+      warmDirection.current = direction;
+      setClassifiedTick((tick) => tick + 1);
+    }
     let seam: ChapterSeam | null = null;
     seam = new ChapterSeam({
       direction,
@@ -3685,7 +3739,8 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
         const entry = layerSeam.current;
         if (!entry || entry.seam !== seam) return;
         if (!landed) {
-          clearLayerSeam();
+          clearLayerSeam(true);
+          queueMicrotask(promoteInput);
           return;
         }
         entry.landed = true;
@@ -3702,6 +3757,7 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
     hostElement.dataset.chapterSeam = direction === 1 ? "next" : "prev";
     const external: ExternalSeam = {
       seam,
+      input: seamInput,
       targetIndex,
       fresh: true,
       cancel: () => {
@@ -3709,7 +3765,8 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
         if (entry?.seam === seam && !entry.landed) clearLayerSeam();
       },
     };
-    layerSeam.current = { seam, external, target: targetElement, host: hostElement, landed: false };
+    layerSeam.current = { book: latestProps.current.book, nonce: latestProps.current.anchorNonce, layout: layoutIdentityRef.current,
+      seam, external, target: targetElement, host: hostElement, landed: false, pending: null };
     return external;
     // Reads only refs; stable for the life of the wrapper.
   }, []);
@@ -3720,13 +3777,42 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
   useLayoutEffect(() => clearLayerSeam, [mainKey, stackOn, props.book, props.server, layoutIdentity,
     props.spineIndex, props.anchorNonce, props.startAtEnd.nonce, props.inputPaused]);
 
+  // A valid handoff keeps a finger already down on the stationary surface.
+  // Navigation/resize/paused input invalidates it instead. Replay only after
+  // the new reader has acknowledged display-ready (never an arbitrary timer).
+  const promoteInput = (): void => {
+    if (layerSeam.current || latestProps.current.inputPaused) return;
+    seamInput.promoted();
+    const pending = replay.current;
+    replay.current = null;
+    const p = latestProps.current;
+    if (pending?.book === p.book && pending.index === p.spineIndex && pending.nonce === p.anchorNonce &&
+      pending.layout === layoutIdentityRef.current) {
+      seamInput.turn(pending.direction);
+    }
+  };
+  useEffect(() => {
+    const surface = motionSurface.current;
+    if (!surface) return;
+    return installPagedSwipe(surface, {
+      onGestureStart: () => { motionGesture.current = Boolean(layerSeam.current) && !latestProps.current.inputPaused; },
+      shouldIgnore: () => !motionGesture.current || latestProps.current.inputPaused === true,
+      onPreview: (dx) => { if (motionGesture.current) seamInput.preview(dx); },
+      onNext: () => seamInput.turn(pageAxisSign(progressionRef.current)),
+      onPrev: () => seamInput.turn((-pageAxisSign(progressionRef.current)) as 1 | -1),
+    });
+  }, [seamInput]);
+
   let content;
   if (props.settings.readingMode === "scroll" && !props.book.fixedLayout) {
     content = <ContinuousReaderView {...props} ref={ref} />;
   } else if (plan) {
     content = plan.layers.map((layer) => {
       const main = layer.role === "main";
-      const layerProps = main ? props : standbyReaderProps(props, layer.spineIndex, layer.kind === "paged" ? layer.edge : "start");
+      const layerProps = main ? { ...props, onDisplayReady: (ticket: RestoreReportTicket | null) => {
+        props.onDisplayReady(ticket);
+        queueMicrotask(promoteInput);
+      } } : standbyReaderProps(props, layer.spineIndex, layer.kind === "paged" ? layer.edge : "start");
       const node = layer.kind === "paged"
         ? <PagedReaderView {...layerProps} ref={handleRefFor(layer.key)}
           onFlowProgression={main ? onFlowProgression : undefined}
@@ -3764,7 +3850,17 @@ export const ReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Rea
   }
   return <EdgeTurnFeedbackContext.Provider value={edgeFeedback}>
     <ReaderTapRoutingContext.Provider value={tapRouting}>
-      <div ref={host} className="reader-presentation-host">{content}</div>
+      <div ref={host} className="reader-presentation-host">{content}
+        <div ref={motionSurface} className="reader-seam-input" aria-hidden="true"
+          onClick={(event) => {
+            if (latestProps.current.inputPaused || (!layerSeam.current && !motionGesture.current)) return;
+            const route = routeHostBlankTurn(tapRouting, event.clientX, event.clientY);
+            if (route && tapRouting) {
+              tapRouting.feedback.hold(edgeFeedbackKeyOf(route.side));
+              seamInput.turn(route.direction);
+            } else latestProps.current.onPlainTap?.();
+          }} />
+      </div>
     </ReaderTapRoutingContext.Provider>
   </EdgeTurnFeedbackContext.Provider>;
 });

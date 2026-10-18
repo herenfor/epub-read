@@ -20,6 +20,24 @@ const summary = (spineIndex: number, current: SingleLeafSpread | null) => {
 };
 
 describe("planPresentationLayers", () => {
+  it("keeps one extra pair ahead for rapid turns, reuses it on promotion and respects the budget gate", () => {
+    const longer = { spine: Array.from({ length: 10 }, (_, i) => ({ idref: String(i), linear: true })) } as unknown as Book;
+    const groups = [cover, contents, { left: 4, right: 5 }, { left: 6, right: 7 }];
+    const classify = (i: number) => i < 8 ? groups[Math.floor(i / 2)] : null;
+    const resident = { key: "paged" as const, spineIndex: 8, warmDirection: 1 as const };
+    const before = planPresentationLayers(longer, 0, cover, classify, resident);
+    expect(before.lookaheadIndex).toBe(4);
+    expect(before.layers.filter(l => l.kind === "pair").map(l => l.key)).toEqual(["pair:0:1", "pair:2:3", "pair:4:5"]);
+    const after = planPresentationLayers(longer, 2, contents, classify, resident);
+    expect(after.nextKey).toBe("pair:4:5");
+    expect(after.layers.filter(l => l.kind === "pair")).toHaveLength(4);
+    const back = planPresentationLayers(longer, 6, groups[3], classify, { ...resident, warmDirection: -1 });
+    expect(back.lookaheadIndex).toBe(3);
+    expect(back.layers.some(l => l.key === "pair:2:3")).toBe(true);
+    const bounded = planPresentationLayers(longer, 2, contents, classify, { ...resident, warmDirection: 0 });
+    expect(bounded.lookaheadIndex).toBe(-1);
+    expect(bounded.layers.some(l => l.key === "pair:6:7")).toBe(false);
+  });
   it("prepares both ordinary edges around a pair and preserves the returning paged identity", () => {
     // The observed book: an ordinary page at 2, pair 3/4, then pair 5/6.
     const first = { left: 3, right: 4 }, next = { left: 5, right: 6 };

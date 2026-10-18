@@ -236,6 +236,13 @@ export class ChapterSeam {
     return this.session.releaseDrag(ticket, state.originPage + direction, velocity) !== null;
   }
 
+  /** A fresh gesture may request the screen beyond this two-screen seam. */
+  releaseWouldOverflow(ticket: number, direction: 1 | -1): boolean {
+    const state = this.session.state;
+    return state.kind === "dragging" && state.ticket === ticket &&
+      (state.originPage + direction < 0 || state.originPage + direction > 1);
+  }
+
   /** 独立翻页命令；"beyond" 表示越过了两屏范围（宿主可预约到新章里再翻一次）。 */
   turn(inputId: number, direction: 1 | -1): SeamTurnResult {
     if (this.finished) return "beyond";
@@ -267,9 +274,16 @@ export class ChapterSeam {
  */
 export interface ExternalSeam {
   seam: ChapterSeam;
+  /** One input owner across both leaves and the moving presentation surface. */
+  input: SeamInputPort;
   targetIndex: number;
   /** 本次调用新建的联动；false 表示接到了已在进行的同一次联动（不能替别人取消）。 */
   fresh: boolean;
   /** 被显式定位、暂停或退出打断：没落定就撤平移、收回相邻层；已落定的交给外层接管。 */
   cancel(): void;
+}
+
+export interface SeamInputPort {
+  preview(dx: number | null): void;
+  turn(direction: 1 | -1): SeamTurnResult;
 }
