@@ -7,6 +7,13 @@
  */
 import type { PageProgression } from "../render/pagedDirection";
 
+/** Set to 1 once the host supports joined screens touching both chapter edges. */
+export const JOIN_MIN_LEAVES: number = 2;
+
+export function joinCapable(leaves: { contentLeafCount: number; joinable: boolean }): boolean {
+  return leaves.joinable && leaves.contentLeafCount >= JOIN_MIN_LEAVES;
+}
+
 export interface JoinLeaves {
   /** 实际保留的读者空栏。 */
   readonly leading: 0 | 1;
@@ -16,13 +23,11 @@ export interface JoinLeaves {
 }
 
 /**
- * 两章能否在章边拼成一屏。两边都至少两屏：拼接屏所在的那一屏之外另有章内一屏，
- * 这样拼接屏上永远不会同时碰到另一侧的章边（那里仍是普通章边联动）。
+ * 两章是否在章边留有可拼的一叶。和前缀排布共享能力门槛，不能一边补空栏、一边拒绝拼接。
  */
 export function canJoinChapters(earlier: JoinLeaves, later: JoinLeaves): boolean {
-  return earlier.joinable && later.joinable && later.leading === 1 &&
-    (earlier.leading + earlier.contentLeafCount) % 2 === 1 &&
-    earlier.pageCount >= 2 && later.pageCount >= 2;
+  return joinCapable(earlier) && joinCapable(later) && later.leading === 1 &&
+    (earlier.leading + earlier.contentLeafCount) % 2 === 1;
 }
 
 /**

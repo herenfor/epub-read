@@ -1,5 +1,6 @@
 import type { OccupiedColumns, SpreadLayout } from "./pagedSpread";
 import type { Book } from "../core/types";
+import { joinCapable } from "../ui/chapterJoin";
 
 /** Runtime layout data only. Never serialize this into a bookmark or progress record. */
 export interface ChapterLeafLayout {
@@ -101,7 +102,7 @@ export class ChapterFillIndex {
   record(layoutKey: string, chapter: number, measurement: ChapterFillMeasurement): boolean {
     if (layoutKey !== this.layoutKey || !this.positions.has(chapter)) return false;
     if (!Number.isSafeInteger(measurement.contentLeafCount) || measurement.contentLeafCount < 0) return false;
-    this.measurements.set(chapter, { ...measurement });
+    this.measurements.set(chapter, { ...measurement, joinable: joinCapable(measurement) });
     return true;
   }
 

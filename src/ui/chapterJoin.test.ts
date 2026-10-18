@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canJoinChapters, chapterFillLayoutKey, joinLaneClip, type JoinLeaves } from "./chapterJoin";
+import { JOIN_MIN_LEAVES, canJoinChapters, chapterFillLayoutKey, joinCapable, joinLaneClip, type JoinLeaves } from "./chapterJoin";
 
 const leaves = (leading: 0 | 1, contentLeafCount: number, pageCount: number, joinable = true): JoinLeaves =>
   ({ leading, contentLeafCount, pageCount, joinable });
@@ -18,9 +18,15 @@ describe("canJoinChapters", () => {
     expect(canJoinChapters(leaves(0, 5, 3), leaves(1, 4, 3, false))).toBe(false);
   });
 
-  it("keeps one-screen chapters on their own so a joined screen never meets the other chapter edge", () => {
-    expect(canJoinChapters(leaves(0, 1, 1), leaves(1, 4, 3))).toBe(false);
-    expect(canJoinChapters(leaves(0, 5, 3), leaves(1, 1, 1))).toBe(false);
+  it("uses leaf capability rather than a second page-count threshold", () => {
+    expect(canJoinChapters(leaves(0, 3, 1), leaves(1, 2, 1))).toBe(true);
+    expect(canJoinChapters(leaves(0, 1, 1), leaves(1, 4, 3))).toBe(JOIN_MIN_LEAVES === 1);
+    expect(canJoinChapters(leaves(0, 5, 3), leaves(1, 1, 1))).toBe(JOIN_MIN_LEAVES === 1);
+  });
+
+  it.each([0, 1, 2, 3])("shares the configured minimum for %i leaves", (count) => {
+    expect(joinCapable({ contentLeafCount: count, joinable: true })).toBe(count >= JOIN_MIN_LEAVES);
+    expect(joinCapable({ contentLeafCount: count, joinable: false })).toBe(false);
   });
 });
 

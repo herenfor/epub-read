@@ -6,6 +6,7 @@ import { buildVisibleTextIndex } from "./textAnchor";
 import type { Book } from "../core/types";
 import { parseOpf } from "../core/opf";
 import { ChapterPaginator } from "./paginator";
+import { JOIN_MIN_LEAVES, canJoinChapters } from "../ui/chapterJoin";
 
 describe("cross-chapter fill core", () => {
   it("withholds exact counts while fonts or image dimensions are still pending", () => {
@@ -65,12 +66,26 @@ describe("cross-chapter fill core", () => {
     index.record("layout", 2, { contentLeafCount: 3, joinable: true });
     index.record("layout", 3, { contentLeafCount: 1, joinable: true });
     expect(index.placement(2)).toMatchObject({ known: true, leadingBlankColumns: 0 });
-    expect(index.placement(3).leadingBlankColumns).toBe(1);
+    expect(index.placement(3).leadingBlankColumns).toBe(JOIN_MIN_LEAVES === 1 ? 1 : 0);
     index.record("layout", 2, { contentLeafCount: 3, joinable: false });
     expect(index.placement(3).leadingBlankColumns).toBe(0);
     const nextLayout = new ChapterFillIndex("new-size", [{ chapter: 2 }, { chapter: 3 }]);
     expect(nextLayout.placement(3).known).toBe(false);
     expect(nextLayout.record("layout", 2, { contentLeafCount: 3, joinable: true })).toBe(false);
+  });
+
+  it.each([
+    { counts: [2, 1, 3], shifted: [0, 0, 1] },
+    { counts: [1, 1, 3], shifted: [0, 1, 0] },
+  ])("keeps prefix and join capability consistent for $counts", ({ counts, shifted }) => {
+    const index = new ChapterFillIndex("layout", counts.map((_, chapter) => ({ chapter })));
+    counts.forEach((contentLeafCount, chapter) => index.record("layout", chapter, { contentLeafCount, joinable: true }));
+    const leading = counts.map((_, chapter) => index.placement(chapter).leadingBlankColumns);
+    expect(leading).toEqual(JOIN_MIN_LEAVES === 1 ? shifted : [0, 0, 0]);
+    expect(canJoinChapters(
+      { leading: leading[1], contentLeafCount: counts[1], pageCount: 1, joinable: true },
+      { leading: leading[2], contentLeafCount: counts[2], pageCount: 2, joinable: true },
+    )).toBe(JOIN_MIN_LEAVES === 1 && leading[2] === 1);
   });
 
   it("does not insert a DOM child or shift canonical/legacy indices, and preserves an author pseudo-element", () => {
