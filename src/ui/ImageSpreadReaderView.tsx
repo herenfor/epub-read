@@ -1,11 +1,14 @@
 import { effectivePageProgression } from "../render/settings";
+import { pageAxisSign } from "../render/pagedDirection";
+import { installPagedSwipe } from "../render/pagedSwipe";
+import { installPlainTap } from "../render/plainTap";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type ForwardRefExoticComponent, type RefAttributes } from "react";
 import { nextLinearIndex } from "../core/book";
 import type { ChapterState } from "../render/paginator";
 import type { BoundarySwipePreview, ReaderHandle, ReaderViewProps } from "./ReaderView";
 import type { SingleLeafSpread } from "./singleLeafSpreads";
 import { EdgeTurnZone } from "./EdgeTurnZone";
-import { edgeFeedbackKeyOf, edgeTurnZoneSpecs, ReaderTurnOwnerContext, routeHostBlankTurn, useReaderTapRouting } from "./readerTapRouting";
+import { edgeFeedbackKeyOf, edgeTurnZoneSpecs, ReaderTurnOwnerContext, routeHostBlankTurn, routeReaderTap, useReaderTapRouting } from "./readerTapRouting";
 import { WheelTurnAccumulator } from "./turnIntent";
 import type { ExternalSeam } from "./chapterSeam";
 
@@ -28,6 +31,7 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
   const leftHandle = useRef<ReaderHandle>(null);
   const rightHandle = useRef<ReaderHandle>(null);
   const swipeSurface = useRef<HTMLDivElement>(null);
+  const blankSurface = useRef<HTMLDivElement>(null);
   const swipeHint = useRef<HTMLDivElement>(null);
   // Leaves keep the existing gesture/release controller; only the visual
   // fallback is projected onto the whole spread, never an individual iframe.
@@ -124,6 +128,48 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
   turnRef.current = turn;
   const [turnOwner] = useState(() => (dir: 1 | -1) => turnRef.current(dir));
   const tapRouting = useReaderTapRouting();
+  const tapRoutingRef = useRef(tapRouting);
+  tapRoutingRef.current = tapRouting;
+  // An empty leaf has no chapter iframe to own input. Give only this surface
+  // the same detectors and preview path as a real leaf; iframe input stays local.
+  useEffect(() => {
+    const surface = blankSurface.current;
+    if (!surface) return;
+    const paused = () => latest.current.inputPaused === true || !readyRef.current;
+    const axis = () => pageAxisSign(effectivePageProgression(latest.current.book.pageProgression,
+      latest.current.settings, latest.current.book.fixedLayout));
+    const release = (direction: 1 | -1) => {
+      // Release on the same leaf that owns preview, including an interrupted seam.
+      if (direction === 1) leftHandle.current?.nextPage();
+      else leftHandle.current?.prevPage();
+    };
+    const removeSwipe = installPagedSwipe(surface, {
+      shouldIgnore: paused,
+      onPreview: (dx) => leftHandle.current?.previewSwipe?.(dx),
+      onNext: () => release(axis()),
+      onPrev: () => release((-axis()) as 1 | -1),
+    });
+    const removeTap = installPlainTap(surface, {
+      shouldIgnore: paused,
+      onTap: (tap) => {
+        const routing = tapRoutingRef.current;
+        const left = routing?.hostLeft();
+        const top = routing?.hostTop?.();
+        const route = routing && left !== null && left !== undefined
+          ? routeReaderTap(routing, left, tap.clientX,
+            top !== null && top !== undefined ? { hostTop: top, clientY: tap.clientY } : undefined)
+          : { kind: "center" } as const;
+        if (route.kind === "turn" && routing) {
+          routing.feedback.hold(edgeFeedbackKeyOf(route.side));
+          turnRef.current(route.direction);
+        } else if (route.kind === "center" || route.kind === "bookmark") {
+          // A blank has no bookmark anchor; its corner behaves like the menu area.
+          latest.current.onPlainTap?.();
+        }
+      },
+    });
+    return () => { removeTap(); removeSwipe(); };
+  }, [props.spread.right]);
   useImperativeHandle(ref, () => ({
     // Both leaves are live body hosts: each recolors before this returns.
     applyTheme: (theme) => {
@@ -267,9 +313,9 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
   };
   return <div className="reader-image-spread" data-image-spread-ready={ready}
     onClick={(event) => {
-      // Leaves route their own taps; this fills the empty leaf and the gutter,
-      // which the (now visual-only) edge bands used to cover.
-      if (event.target instanceof Element && event.target.closest(".reader")) return;
+      // Real and empty leaves own their physical input. Only the remaining
+      // outer surface uses this click path, never their compatibility clicks.
+      if (event.target instanceof Element && event.target.closest(".reader, .reader-image-leaf.is-empty")) return;
       // Same gate as the leaves and the wheel: no turn and no arrow while paused or not ready.
       if (props.inputPaused || !ready) return;
       const route = routeHostBlankTurn(tapRouting, event.clientX, event.clientY);
@@ -298,7 +344,7 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
     <div ref={swipeSurface} className="reader-image-spread-pages">
     <ReaderTurnOwnerContext.Provider value={turnOwner}>
       {page(props.spread.left, "left")}
-      {props.spread.right !== null ? page(props.spread.right, "right") : <div className="reader-image-leaf is-empty"
+      {props.spread.right !== null ? page(props.spread.right, "right") : <div ref={blankSurface} className="reader-image-leaf is-empty"
         data-image-side={rtl ? "left" : "right"} style={{ clipPath: rtl ? "inset(0 50% 0 0)" : "inset(0 0 0 50%)" }}
         aria-hidden="true" />}
     </ReaderTurnOwnerContext.Provider>
