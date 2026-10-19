@@ -26,9 +26,7 @@ describe("opening panel preparation session", () => {
 
   it("lifts the veil at the budget even if a panel never reports, and releases on leaving", async () => {
     vi.useFakeTimers();
-    const dom = createReactDomHarness();
-    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => setTimeout(() => cb(0), 16) as unknown as number);
-    vi.stubGlobal("cancelAnimationFrame", (id: number) => clearTimeout(id));
+    const dom = createReactDomHarness({ animationFrames: true });
     let api!: ReturnType<typeof useOpeningPanelPrep>;
     const Probe = (props: { session: string | null }) => { api = useOpeningPanelPrep(props.session); return null; };
     try {
@@ -50,9 +48,7 @@ describe("opening panel preparation session", () => {
   });
   it("a late old visit cannot cancel the current visit's prepared frame, even for the same book", async () => {
     vi.useFakeTimers();
-    const dom = createReactDomHarness();
-    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => setTimeout(() => cb(0), 16) as unknown as number);
-    vi.stubGlobal("cancelAnimationFrame", (id: number) => clearTimeout(id));
+    const dom = createReactDomHarness({ animationFrames: true });
     let api!: ReturnType<typeof useOpeningPanelPrep>;
     const Probe = (props: { session: string | null }) => { api = useOpeningPanelPrep(props.session); return null; };
     try {
@@ -76,22 +72,20 @@ describe("opening panel preparation session", () => {
 
 });
 
-// linkedom has no layout observers or frames; the panels only need them to exist.
-function stubLayoutApis() {
-  vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
-  vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => setTimeout(() => cb(0), 0) as unknown as number);
-  vi.stubGlobal("cancelAnimationFrame", (id: number) => clearTimeout(id));
-  const computed = () => ({ height: "32px", boxSizing: "border-box", paddingTop: "0", paddingBottom: "0",
-    borderTopWidth: "0", borderBottomWidth: "0", transform: "none", getPropertyValue: () => "" });
-  vi.stubGlobal("getComputedStyle", computed);
-  (window as unknown as { getComputedStyle: unknown }).getComputedStyle = computed;
-  (window as unknown as { DOMMatrixReadOnly: unknown }).DOMMatrixReadOnly = class { m41 = 0; };
-  // Reduced motion: tab switches land at once (linkedom has no Web Animations).
-  (window as unknown as { matchMedia: unknown }).matchMedia = () => ({ matches: true, addEventListener() {}, removeEventListener() {} });
+// The panels only need observers and frames to exist.
+function createPanelHarness() {
+  const dom = createReactDomHarness({
+    resizeObserver: true,
+    animationFrames: 0,
+    computedStyle: () => ({ height: "32px", boxSizing: "border-box", paddingTop: "0", paddingBottom: "0",
+      borderTopWidth: "0", borderBottomWidth: "0", transform: "none" }),
+    // Reduced motion: tab switches land at once (linkedom has no Web Animations).
+    matchMedia: () => true,
+  });
+  dom.define(dom.window, "DOMMatrixReadOnly", { writable: true, value: class { m41 = 0; } });
   // A 600px-tall pane at the top of its drawer, so the TOC can center.
-  for (const [name, value] of [["clientHeight", 600], ["offsetTop", 0]] as const) {
-    Object.defineProperty(window.HTMLElement.prototype, name, { configurable: true, get: () => value });
-  }
+  dom.metrics(dom.window.HTMLElement.prototype, { clientHeight: 600, offsetTop: 0 });
+  return dom;
 }
 
 describe("prepared panels are reused by the first real opening", () => {
@@ -105,8 +99,7 @@ describe("prepared panels are reused by the first real opening", () => {
   });
 
   it("Aa: the detailed warm-up draws a real tab selection and every opening still starts at the quick tab", async () => {
-    const dom = createReactDomHarness();
-    stubLayoutApis();
+    const dom = createPanelHarness();
     const props = aaProps({ open: false });
     const selected = () => [...dom.container.querySelectorAll(".aa-tab-btn")].findIndex((b) => b.getAttribute("aria-selected") === "true");
     try {
@@ -134,8 +127,7 @@ describe("prepared panels are reused by the first real opening", () => {
   });
 
   it("Aa: a sub-page suspends it in place; returning keeps its page and skips the entrance, a real close resets", async () => {
-    const dom = createReactDomHarness();
-    stubLayoutApis();
+    const dom = createPanelHarness();
     const props = aaProps({ open: true });
     const selected = () => [...dom.container.querySelectorAll(".aa-tab-btn")].findIndex((b) => b.getAttribute("aria-selected") === "true");
     try {
@@ -163,8 +155,7 @@ describe("prepared panels are reused by the first real opening", () => {
   });
 
   it("Aa: prepared hidden without user callbacks or focus, then opened in place at the quick tab", async () => {
-    const dom = createReactDomHarness();
-    stubLayoutApis();
+    const dom = createPanelHarness();
     const onPrepared = vi.fn();
     const props = aaProps({ open: false, onPrepared });
     try {
@@ -204,8 +195,7 @@ describe("prepared panels are reused by the first real opening", () => {
   });
 
   it("TOC: prepared without centering or remembering a position; the real opening does", async () => {
-    const dom = createReactDomHarness();
-    stubLayoutApis();
+    const dom = createPanelHarness();
     const toc: TocNode[] = Array.from({ length: 200 }, (_, i) => ({ label: `Chapter ${i + 1}`, href: `c${i}.xhtml`, children: [] }));
     const memory = createSidebarNavigationMemory();
     const onPrepared = vi.fn();

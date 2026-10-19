@@ -45,11 +45,9 @@ function Host(props: { api: { current: Api | null }; reader: ReaderHandle | null
 }
 
 async function mount(options: { reader?: ReaderHandle | null; busy?: () => boolean } = {}) {
-  const dom = createReactDomHarness();
+  const dom = createReactDomHarness({ frames: true });
   const doc = dom.container.ownerDocument;
-  const win = doc.defaultView as unknown as typeof globalThis;
-  vi.stubGlobal("HTMLIFrameElement", win.HTMLIFrameElement);
-  vi.stubGlobal("MutationObserver", win.MutationObserver);
+  const win = dom.window;
   const transitions = installViewTransitions(doc);
   const api: { current: Api | null } = { current: null };
   const onError = vi.fn();

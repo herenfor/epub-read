@@ -27,7 +27,7 @@ describe("mobile visual viewport", () => {
     const viewport = new window.EventTarget() as EventTarget & { height: number; offsetTop: number };
     viewport.height = 473;
     viewport.offsetTop = 0;
-    Object.defineProperty(window, "visualViewport", { value: viewport, configurable: true });
+    dom.define(window, "visualViewport", { value: viewport });
     window.innerHeight = 832;
     function Snapshot() {
       const environment = useResponsiveEnvironment();
@@ -49,7 +49,6 @@ describe("mobile visual viewport", () => {
       });
       expect(dom.container.textContent).toBe("0/832/0");
     } finally {
-      delete (window as unknown as { visualViewport?: unknown }).visualViewport;
       await dom.dispose();
     }
   });

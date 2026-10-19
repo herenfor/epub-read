@@ -83,30 +83,16 @@ describe("Zen UI Packet C: 硬件加速平滑翻页与边缘翻页交互契约",
   let dom: ReturnType<typeof createReactDomHarness>;
   let props: ComponentProps<typeof ReaderView>;
   let ref: React.RefObject<ReaderHandle>;
-  let restoreLayout = () => {};
 
   beforeEach(() => {
     vi.useFakeTimers();
     instances.length = 0;
-    dom = createReactDomHarness();
-    // The paged dispatcher tracks its host size; linkedom has no ResizeObserver.
-    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
-    // Tap geometry needs a host size and position; linkedom lays nothing out.
+    // The paged dispatcher tracks its host size.
+    dom = createReactDomHarness({ resizeObserver: true });
+    // Tap geometry needs a host size and position.
     const divProto = Object.getPrototypeOf(dom.container) as object;
-    Object.defineProperty(divProto, "clientWidth", { get: () => 1000, configurable: true });
-    Object.defineProperty(divProto, "getBoundingClientRect", {
-      value: () => ({ left: 0, top: 0, right: 1000, bottom: 800, width: 1000, height: 800 }),
-      configurable: true,
-    });
-    restoreLayout = () => {
-      delete (divProto as Record<string, unknown>).clientWidth;
-      delete (divProto as Record<string, unknown>).getBoundingClientRect;
-    };
-    // linkedom omits this standard CSSOM method; the paged swipe surface needs it.
-    const styleProto = Object.getPrototypeOf(dom.container.style);
-    if (typeof styleProto.getPropertyPriority !== "function") {
-      Object.defineProperty(styleProto, "getPropertyPriority", { value: () => "", configurable: true });
-    }
+    dom.metrics(divProto, { clientWidth: 1000 });
+    dom.rect(divProto, { width: 1000, height: 800 });
     ref = createRef<ReaderHandle>();
     const book = {
       version: 3,
@@ -144,8 +130,6 @@ describe("Zen UI Packet C: 硬件加速平滑翻页与边缘翻页交互契约",
 
   afterEach(async () => {
     await dom.dispose();
-    restoreLayout();
-    vi.unstubAllGlobals();
     vi.useRealTimers();
   });
 
@@ -312,8 +296,7 @@ describe("Zen UI Packet C: 硬件加速平滑翻页与边缘翻页交互契约",
   });
 
   it("运动会话在创建时不可用：同一次拖动进入同章备用跟手，不显示章边提示", async () => {
-    window.requestAnimationFrame = callback => setTimeout(() => callback(performance.now()), 16) as unknown as number;
-    window.cancelAnimationFrame = handle => clearTimeout(handle);
+    dom.animationFrames();
     props = { ...props, settings: { ...props.settings, turnAnimation: "slide" } };
     await render();
     const active = await finishActive();

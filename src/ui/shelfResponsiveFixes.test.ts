@@ -186,8 +186,7 @@ describe("第三步补修：书架触摸长按与子菜单 Back", () => {
       folders: { f1: { name: { value: "轻小说", stamp: { counter: 1, deviceId: "test" } } } },
     };
     try {
-      (window as unknown as { matchMedia: (q: string) => { matches: boolean } }).matchMedia =
-        (q: string) => ({ matches: q.includes("coarse") });
+      dom.matchMedia((q) => q.includes("coarse"));
       await dom.render(createElement(ShelfView, {
         ...makeProps([makeEntry("b1", "第一本"), makeEntry("b2", "第二本")]),
         organization,

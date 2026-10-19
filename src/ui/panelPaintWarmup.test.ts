@@ -29,9 +29,7 @@ describe("panel paint warm-up", () => {
 
   it("draws veil batches back to back holding the veil, then idle batches on quiet reading, never twice in a run", async () => {
     vi.useFakeTimers();
-    const dom = createReactDomHarness();
-    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => setTimeout(() => cb(0), FRAME) as unknown as number);
-    vi.stubGlobal("cancelAnimationFrame", (id: number) => clearTimeout(id));
+    const dom = createReactDomHarness({ animationFrames: FRAME });
     let api!: ReturnType<typeof usePanelPaintWarmup>;
     const veil: PanelWarmBatch[] = [["search"]];
     const idle: PanelWarmBatch[] = [["reading"], ["fonts"]];
@@ -82,7 +80,6 @@ describe("panel paint warm-up", () => {
       expect(api.pending).toBe(false);
     } finally {
       await dom.dispose();
-      vi.unstubAllGlobals();
       vi.useRealTimers();
     }
   });
