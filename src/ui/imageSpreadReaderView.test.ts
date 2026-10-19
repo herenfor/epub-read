@@ -6,6 +6,9 @@ import type { ChapterState } from "../render/paginator";
 import { createReactDomHarness } from "../test/reactDomHarness";
 import { ImageSpreadReaderView } from "./ImageSpreadReaderView";
 import type { BoundarySwipePreview, ReaderHandle, ReaderViewProps } from "./ReaderView";
+import { createReaderTapGeometry, ReaderTapRoutingContext } from "./readerTapRouting";
+import { DEFAULT_READER_TAP_PREFERENCES } from "./readerTapRegions";
+import { EdgeTurnFeedback } from "./edgeTurnFeedback";
 
 // The original chapter view owns leaf wheel input; the production spread
 // must add only the missing outer/blank paths, preserving that ownership.
@@ -122,6 +125,107 @@ it("turns the blank leaf, gutter and edge once while preserving leaf, pause and 
 
 // T7: after a window resize each leaf reflows on its own; the pair is rebuilt
 // only from both leaves' committed geometry, each leaf placed by its own step.
+it("routes blank-leaf taps and swipes through the existing owner without consuming compatibility clicks", async () => {
+  const dom = createReactDomHarness();
+  const feedback = new EdgeTurnFeedback();
+  const previewSwipe = vi.fn();
+  const released = vi.fn();
+  const InputPage = forwardRef<ReaderHandle, ReaderViewProps>(function InputPage(props, ref) {
+    useImperativeHandle(ref, () => ({
+      previewSwipe,
+      nextPage: () => { released(1); props.onRequestChapter(props.spineIndex + 1); },
+      prevPage: () => { released(-1); props.onRequestChapter(props.spineIndex - 1, { atEnd: true }); },
+    }) as unknown as ReaderHandle, []);
+    useEffect(() => {
+      props.onPageState({ status: "ready", pageCount: 1, currentPage: 0, empty: false, effectiveColumns: 2 } as ChapterState);
+      props.onDisplayReady(null);
+    }, []);
+    return createElement("div", { className: "reader" });
+  });
+  const props = {
+    book: { spine: [0, 1, 2].map(id => ({ idref: String(id), linear: true })) } as Book,
+    spineIndex: 1, spread: { left: 1, right: null },
+    settings: { ...DEFAULT_SETTINGS, columnsPerView: 2 as const },
+    userFonts: [], notes: [], anchorNonce: 0, startAtEnd: { nonce: 0, atEnd: false },
+    onPlainTap: vi.fn(), onRequestChapter: vi.fn(), onPageState: vi.fn(), onDisplayReady: vi.fn(),
+    onUnsupported: vi.fn(), Page: InputPage,
+    server: {} as ReaderViewProps["server"], initialPage: 0,
+    onIssues: vi.fn(), onInternalLink: vi.fn(), onBeforeInternalNavigate: vi.fn(),
+    onInternalNavigationSettled: vi.fn(), onExternalLink: vi.fn(), onFootnote: vi.fn(), onFootnoteClose: vi.fn(),
+  };
+  const routing = {
+    device: "touch" as const, preferences: DEFAULT_READER_TAP_PREFERENCES,
+    geometry: createReaderTapGeometry(1000, undefined), hostLeft: () => 0, hostTop: () => 0, feedback,
+  };
+  const render = (inputPaused = false) => dom.render(createElement(ReaderTapRoutingContext.Provider,
+    { value: routing }, createElement(ImageSpreadReaderView, { ...props, inputPaused })));
+  const blank = () => dom.container.querySelector(".is-empty")!;
+  const touch = async (type: string, x: number) => {
+    const event = new window.Event(type, { bubbles: true, cancelable: true });
+    const point = { clientX: x, clientY: 200, screenX: x, screenY: 200 };
+    Object.assign(event, { touches: type === "touchend" || type === "touchcancel" ? [] : [point], changedTouches: [point] });
+    await dom.dispatch(blank(), event);
+  };
+  const compatClick = async (x: number) => {
+    const event = new window.Event("click", { bubbles: true, cancelable: true });
+    Object.assign(event, { clientX: x, clientY: 200, pointerType: "touch" });
+    await dom.dispatch(blank(), event);
+  };
+  try {
+    await render();
+    await touch("touchstart", 750);
+    await touch("touchend", 750);
+    await compatClick(750);
+    expect(props.onPlainTap).toHaveBeenCalledTimes(1);
+
+    await touch("touchstart", 980);
+    await touch("touchend", 980);
+    await compatClick(980);
+    expect(props.onRequestChapter).toHaveBeenCalledExactlyOnceWith(2, undefined);
+
+    props.onRequestChapter.mockClear();
+    await touch("touchstart", 850);
+    await touch("touchmove", 750);
+    expect(previewSwipe).toHaveBeenCalledWith(-100);
+    await touch("touchend", 750);
+    await compatClick(750);
+    expect(props.onRequestChapter).toHaveBeenCalledExactlyOnceWith(2, undefined);
+    expect(released).toHaveBeenCalledExactlyOnceWith(1);
+    expect(props.onPlainTap).toHaveBeenCalledTimes(1);
+
+    props.onRequestChapter.mockClear();
+    released.mockClear();
+    await touch("touchstart", 850);
+    await touch("touchmove", 700);
+    await touch("touchmove", 840); // catch and reverse: return to the same page
+    await touch("touchend", 840);
+    expect(previewSwipe).toHaveBeenLastCalledWith(null);
+    expect(props.onRequestChapter).not.toHaveBeenCalled();
+    expect(released).not.toHaveBeenCalled();
+
+    await render(true);
+    await touch("touchstart", 980);
+    await touch("touchend", 980);
+    await touch("touchstart", 850);
+    await touch("touchmove", 750);
+    await touch("touchend", 750);
+    expect(props.onRequestChapter).not.toHaveBeenCalled();
+    expect(props.onPlainTap).toHaveBeenCalledTimes(1);
+
+    props.book = { ...props.book, pageProgression: "rtl" };
+    await render();
+    expect(blank().getAttribute("data-image-side")).toBe("left");
+    await touch("touchstart", 150);
+    await touch("touchmove", 250);
+    await touch("touchend", 250);
+    expect(props.onRequestChapter).toHaveBeenCalledExactlyOnceWith(2, undefined);
+    expect(released).toHaveBeenCalledExactlyOnceWith(1);
+  } finally {
+    await dom.dispose();
+    feedback.dispose();
+  }
+});
+
 it("re-pairs both leaves after a relayout and places the second leaf by its own column step", async () => {
   const dom = createReactDomHarness();
   const layouts = new Map<number, { columnStep: number } | "pending" | null>([[0, { columnStep: 812 }], [1, { columnStep: 800 }]]);
