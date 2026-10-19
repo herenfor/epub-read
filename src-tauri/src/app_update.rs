@@ -4,11 +4,14 @@ mod contract;
 pub(crate) use contract::InstallKind;
 use contract::{InstallEvidence, Platform};
 
-pub(crate) fn detect(identifier: &str) -> InstallKind {
+pub(crate) fn detect(identifier: &str, product_name: Option<&str>) -> InstallKind {
     let build = crate::build_info::current();
     let test_mode = option_env!("EPUB_READER_UPDATE_TEST") == Some("1");
     #[cfg(windows)]
-    let (directory, uninstaller, registered) = windows_evidence();
+    let (directory, uninstaller, registered) =
+        contract::windows_product_name(identifier, product_name, test_mode)
+            .map(windows_evidence)
+            .unwrap_or((None, false, None));
     #[cfg(not(windows))]
     let (directory, uninstaller, registered): (Option<String>, bool, Option<String>) =
         (None, false, None);
@@ -27,6 +30,7 @@ pub(crate) fn detect(identifier: &str) -> InstallKind {
             || identifier.ends_with(".debug"),
         test_mode,
         identifier,
+        product_name,
         executable_directory: directory.as_deref(),
         uninstaller_present: uninstaller,
         registered_directory: registered.as_deref(),
@@ -34,7 +38,7 @@ pub(crate) fn detect(identifier: &str) -> InstallKind {
 }
 
 #[cfg(windows)]
-fn windows_evidence() -> (Option<String>, bool, Option<String>) {
+fn windows_evidence(product_name: &str) -> (Option<String>, bool, Option<String>) {
     use std::path::Path;
     use winreg::{
         enums::{HKEY_CURRENT_USER, KEY_READ, KEY_WOW64_64KEY},
@@ -48,17 +52,16 @@ fn windows_evidence() -> (Option<String>, bool, Option<String>) {
     let current = std::env::current_exe().ok();
     let directory = current.as_ref().and_then(|p| p.parent());
     let uninstaller = directory.is_some_and(|p| p.join("uninstall.exe").is_file());
-    // The official current-user NSIS installer uses this exact product key.
-    // Do not enumerate unrelated installed software or accept a similarly named app.
+    // The pure policy supplies only the allowed name for this build's identity.
+    // An isolated test build never reads or falls back to the real application's key.
+    let uninstall_key =
+        format!(r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{product_name}");
     let registration = RegKey::predef(HKEY_CURRENT_USER)
-        .open_subkey_with_flags(
-            r"Software\Microsoft\Windows\CurrentVersion\Uninstall\EPUB Reader",
-            KEY_READ | KEY_WOW64_64KEY,
-        )
+        .open_subkey_with_flags(uninstall_key, KEY_READ | KEY_WOW64_64KEY)
         .ok();
     let registered = registration.and_then(|key| {
         let name: String = key.get_value("DisplayName").ok()?;
-        if name != "EPUB Reader" {
+        if name != product_name {
             return None;
         }
         let location: String = key.get_value("InstallLocation").ok()?;
