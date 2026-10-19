@@ -32,9 +32,26 @@ pub(crate) struct InstallEvidence<'a> {
     pub development: bool,
     pub test_mode: bool,
     pub identifier: &'a str,
+    pub product_name: Option<&'a str>,
     pub executable_directory: Option<&'a str>,
     pub uninstaller_present: bool,
     pub registered_directory: Option<&'a str>,
+}
+
+/// Test mode selects a separate identity; it never grants access to a regular
+/// install. Returning the name here also drives the actual registry lookup.
+pub(crate) fn windows_product_name(
+    identifier: &str,
+    product_name: Option<&str>,
+    test_mode: bool,
+) -> Option<&'static str> {
+    let (expected_identifier, expected_name) = if test_mode {
+        ("dev.epubreader.updatetest", "EPUB Reader Update Test")
+    } else {
+        ("dev.epubreader.app", "EPUB Reader")
+    };
+    (identifier == expected_identifier && product_name == Some(expected_name))
+        .then_some(expected_name)
 }
 
 // NSIS quotes InstallLocation; canonicalized Windows paths can also carry the
@@ -59,7 +76,13 @@ pub(crate) fn classify(evidence: &InstallEvidence<'_>) -> InstallKind {
     }
     match evidence.platform {
         Platform::Windows => {
-            if evidence.identifier != "dev.epubreader.app" && !evidence.test_mode {
+            if windows_product_name(
+                evidence.identifier,
+                evidence.product_name,
+                evidence.test_mode,
+            )
+            .is_none()
+            {
                 return InstallKind::Unsupported;
             }
             let registered = evidence
@@ -76,9 +99,16 @@ pub(crate) fn classify(evidence: &InstallEvidence<'_>) -> InstallKind {
             }
         }
         Platform::Android => {
-            if evidence.identifier == "dev.herenfor.epubreader"
-                || (evidence.test_mode && evidence.identifier == "dev.herenfor.epubreader.debug")
-            {
+            let supported = if evidence.test_mode {
+                matches!(
+                    evidence.identifier,
+                    "dev.herenfor.epubreader.updatetest"
+                        | "dev.herenfor.epubreader.updatetest.debug"
+                )
+            } else {
+                evidence.identifier == "dev.herenfor.epubreader"
+            };
+            if supported {
                 InstallKind::Android
             } else {
                 InstallKind::Unsupported
@@ -99,6 +129,7 @@ mod tests {
             development: false,
             test_mode: false,
             identifier: "dev.epubreader.app",
+            product_name: Some("EPUB Reader"),
             executable_directory: Some(r"\\?\C:\Users\A\EPUB Reader"),
             uninstaller_present: true,
             registered_directory: Some(r#""c:\Users\A\EPUB Reader\""#),
@@ -124,6 +155,8 @@ mod tests {
         value.development = true;
         assert_eq!(classify(&value), InstallKind::Unsupported);
         value.test_mode = true;
+        value.identifier = "dev.epubreader.updatetest";
+        value.product_name = Some("EPUB Reader Update Test");
         assert_eq!(classify(&value), InstallKind::Installer);
         value.uninstaller_present = false;
         assert_eq!(classify(&value), InstallKind::Portable); // test flag never upgrades a portable copy.
@@ -140,7 +173,7 @@ mod tests {
         assert_eq!(classify(&value).as_str(), "android");
         value.development = true;
         assert_eq!(classify(&value), InstallKind::Unsupported);
-        value.identifier = "dev.herenfor.epubreader.debug";
+        value.identifier = "dev.herenfor.epubreader.updatetest.debug";
         value.test_mode = true;
         assert_eq!(classify(&value), InstallKind::Android);
         value.identifier = "another.application";
@@ -152,5 +185,61 @@ mod tests {
         let mut value = installed();
         value.platform = Platform::Other;
         assert_eq!(classify(&value), InstallKind::Unsupported);
+    }
+
+    #[test]
+    fn isolated_windows_test_build_never_borrows_the_regular_application_identity() {
+        let mut value = installed();
+        value.test_mode = true;
+        value.development = true;
+        // The test switch must not enable updates over the user's real install.
+        assert_eq!(classify(&value), InstallKind::Unsupported);
+        value.identifier = "dev.epubreader.updatetest";
+        // The selected name is used by windows_evidence, not only this predicate.
+        assert_eq!(
+            windows_product_name(value.identifier, value.product_name, true),
+            None
+        );
+        assert_eq!(classify(&value), InstallKind::Unsupported);
+        value.product_name = Some("EPUB Reader Update Test");
+        assert_eq!(
+            windows_product_name(value.identifier, value.product_name, true),
+            Some("EPUB Reader Update Test")
+        );
+        value.executable_directory = Some(r"C:\Users\A\EPUB Reader Update Test");
+        value.registered_directory = Some(r#""C:\Users\A\EPUB Reader Update Test""#);
+        assert_eq!(classify(&value), InstallKind::Installer);
+        value.uninstaller_present = false;
+        assert_eq!(classify(&value), InstallKind::Portable);
+        value.uninstaller_present = true;
+        value.registered_directory = Some(r"C:\Users\A\EPUB Reader");
+        assert_eq!(classify(&value), InstallKind::Portable);
+        value.identifier = "another.application";
+        assert_eq!(classify(&value), InstallKind::Unsupported);
+        value.identifier = "dev.epubreader.updatetest";
+        value.test_mode = false;
+        value.development = false;
+        assert_eq!(classify(&value), InstallKind::Unsupported);
+    }
+
+    #[test]
+    fn isolated_android_test_identity_is_allowed_only_in_the_explicit_test_build() {
+        let mut value = installed();
+        value.platform = Platform::Android;
+        value.identifier = "dev.herenfor.epubreader.updatetest";
+        value.development = true;
+        assert_eq!(classify(&value), InstallKind::Unsupported);
+        value.test_mode = true;
+        assert_eq!(classify(&value), InstallKind::Android);
+        value.identifier = "dev.herenfor.epubreader.updatetest.debug";
+        assert_eq!(classify(&value), InstallKind::Android);
+        for identifier in [
+            "dev.herenfor.epubreader",
+            "dev.herenfor.epubreader.debug",
+            "another.application",
+        ] {
+            value.identifier = identifier;
+            assert_eq!(classify(&value), InstallKind::Unsupported);
+        }
     }
 }

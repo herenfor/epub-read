@@ -278,7 +278,10 @@ macro_rules! configure_invoke_handler {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let context = tauri::generate_context!();
-    let install_kind = app_update::detect(&context.config().identifier);
+    let install_kind = app_update::detect(
+        &context.config().identifier,
+        context.config().product_name.as_deref(),
+    );
     let builder = tauri::Builder::default().manage(install_kind);
     #[cfg(windows)]
     let builder = if install_kind == app_update::InstallKind::Installer {
