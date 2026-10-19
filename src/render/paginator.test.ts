@@ -2982,6 +2982,110 @@ describe("reader local width core", () => {
   });
 });
 
+describe("contained table fit", () => {
+  type Inline = { value: string; priority: string };
+  type Fit = "width" | "anywhere" | "never";
+
+  // 布局由浏览器决定：这里只按“写了哪些属性”回答是否放得下，验证升级与还原。
+  function setup(fit: Fit, author: Record<string, Inline> = {}) {
+    const inline = new Map(Object.entries(author));
+    const style = {
+      getPropertyValue: (prop: string) => inline.get(prop)?.value ?? "",
+      getPropertyPriority: (prop: string) => inline.get(prop)?.priority ?? "",
+      setProperty: (prop: string, value: string, priority = "") => { inline.set(prop, { value, priority }); },
+      removeProperty: (prop: string) => { inline.delete(prop); return ""; },
+    };
+    const table = {
+      isConnected: true,
+      parentElement: { closest: () => null },
+      closest: () => null,
+      style,
+      getClientRects: () => [{ left: 0, right: 544, width: 544 }],
+    } as unknown as HTMLTableElement;
+    const viewer = {
+      classList: { contains: () => false },
+      querySelectorAll: (selector: string) => (selector === "table" ? [table] : []),
+    } as unknown as HTMLElement;
+    const tableCs = {
+      display: "table", float: "none", position: "static", transform: "none", writingMode: "horizontal-tb",
+      boxSizing: "content-box", paddingLeft: "0px", paddingRight: "0px", borderLeftWidth: "0px", borderRightWidth: "0px",
+    };
+    const layouts: string[] = [];
+    let budget = 318;
+    const context = Object.create(ChapterPaginator.prototype) as Record<string, unknown>;
+    Object.assign(context, {
+      contentDoc: { styleSheets: [], defaultView: { getComputedStyle: () => tableCs } },
+      viewer,
+      fixedLayout: false,
+      containedTableFixes: [],
+      containedMediaFixes: [],
+      axisClientRect: (rect: { left: number; right: number }) => rect,
+      contentLeafFor: () => ({ left: 0, right: budget }),
+      inlineBudgetFor: () => budget,
+      planWrapperWrites: () => {},
+      tableFitsCurrentLeaves: () => {
+        const width = inline.has("width");
+        const anywhere = inline.get("overflow-wrap")?.value === "anywhere";
+        layouts.push(`${width ? "width" : ""}${anywhere ? "+anywhere" : ""}`);
+        return fit === "width" ? width : fit === "anywhere" ? width && anywhere : false;
+      },
+    });
+    const call = <T>(name: string, ...args: unknown[]): T =>
+      (ChapterPaginator.prototype as unknown as Record<string, (...a: unknown[]) => T>)[name].call(context, ...args);
+    return {
+      inline, layouts, table, context, call,
+      widen: () => { budget = 1000; },
+      media: vi.fn(),
+    };
+  }
+
+  it("adds anywhere only to a table that width alone cannot fit, then keeps both", () => {
+    const t = setup("anywhere");
+    const unresolved = t.call<Set<HTMLTableElement>>("applyContainedTableWidth");
+    expect(unresolved.size).toBe(0);
+    expect(t.context.unresolvedTableCount).toBe(0);
+    expect(t.layouts).toEqual(["width", "width+anywhere"]);
+    expect(t.inline.get("width")).toEqual({ value: "318px", priority: "important" });
+    expect(t.inline.get("overflow-wrap")).toEqual({ value: "anywhere", priority: "important" });
+  });
+
+  it("leaves wrapping alone when narrowing the table is enough", () => {
+    const t = setup("width");
+    t.call("applyContainedTableWidth");
+    expect(t.layouts).toEqual(["width"]);
+    expect(t.inline.has("overflow-wrap")).toBe(false);
+  });
+
+  it("restores the author's exact inline values for an incompressible table and reports it", () => {
+    const t = setup("never", { "overflow-wrap": { value: "normal", priority: "" }, width: { value: "17em", priority: "" } });
+    const unresolved = t.call<Set<HTMLTableElement>>("applyContainedTableWidth");
+    expect([...unresolved]).toEqual([t.table]);
+    expect(t.context.unresolvedTableCount).toBe(1);
+    expect(t.layouts).toEqual(["width", "width+anywhere"]);
+    expect(t.inline.get("width")).toEqual({ value: "17em", priority: "" });
+    expect(t.inline.get("overflow-wrap")).toEqual({ value: "normal", priority: "" });
+  });
+
+  it("re-measures from the author layout on every pass and hands unresolved tables to the media pass", () => {
+    const t = setup("anywhere");
+    Object.assign(t.context, { applyContainedMediaMaxWidth: t.media });
+    t.call("applyContainedContentFit");
+    expect(t.inline.has("overflow-wrap")).toBe(true);
+    expect(t.media).toHaveBeenLastCalledWith(new Set());
+
+    // 字号变小/窗口变宽：上一轮的补丁不能被当成作者尺寸留下。
+    t.widen();
+    t.call("applyContainedContentFit");
+    expect(t.inline.size).toBe(0);
+    expect(t.context.containedTableFixes).toEqual([]);
+
+    const stuck = setup("never");
+    Object.assign(stuck.context, { applyContainedMediaMaxWidth: stuck.media });
+    stuck.call("applyContainedContentFit");
+    expect(stuck.media).toHaveBeenLastCalledWith(new Set([stuck.table]));
+  });
+});
+
 describe("createAutoMarginBatch", () => {
   function createMockElement(initialStyles: Record<string, { value: string; priority: string }> = {}) {
     const styles: Record<string, { value: string; priority: string }> = { ...initialStyles };
