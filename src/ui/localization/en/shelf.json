@@ -8,7 +8,7 @@
   "shelf.import.books.detail": "Choose one or more EPUB files",
   "shelf.import.folder": "Import Folder",
   "shelf.import.folder.detail": "Automatically organize into folders by directory",
-  "shelf.import.dropHint": "You can also drag EPUB files directly onto the library",
+  "shelf.import.dropHint": "You can also drag EPUB files or folders onto the library; drop on a folder card to put books straight into it",
   "shelf.cover.initialFallback": "B",
   "shelf.time.justNow": "Just now",
   "shelf.time.minutesAgo.other": "{count} minutes ago",
@@ -60,5 +60,6 @@
   "shelf.timeSegment.last7Days": "Last 7 days",
   "shelf.timeSegment.last30Days": "Last 30 days",
   "shelf.timeSegment.thisYear": "This year",
-  "shelf.timeSegment.older": "Older"
+  "shelf.timeSegment.older": "Older",
+  "shelf.import.toFolder.tip": "Import EPUB books into folder “{name}”"
 }

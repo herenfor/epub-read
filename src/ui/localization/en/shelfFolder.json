@@ -45,5 +45,21 @@
   "shelfFolder.filter.none": "No matching items",
   "shelfFolder.filter.limited": "Showing first {count} items; search to narrow down",
   "shelfFolder.select": "Select all books in {name}",
-  "shelfFolder.select.empty": "This folder has no books to select"
+  "shelfFolder.select.empty": "This folder has no books to select",
+  "shelfFolder.importHere": "Import Books",
+  "shelfFolder.importHere.tip": "Choose EPUB files to import into this folder",
+  "shelfFolder.addBooks.open": "Add from Library",
+  "shelfFolder.addBooks.open.tip": "Put books already in your library into this folder",
+  "shelfFolder.addBooks.title": "Add books to “{name}”",
+  "shelfFolder.addBooks.search": "Search title, author or file name",
+  "shelfFolder.addBooks.selectAll": "Select All",
+  "shelfFolder.addBooks.clearAll": "Clear All",
+  "shelfFolder.addBooks.none": "Every book in the library is already in this folder",
+  "shelfFolder.addBooks.noMatch": "No matching books",
+  "shelfFolder.addBooks.inFolder": "Currently in folder “{name}”",
+  "shelfFolder.addBooks.more.other": "{count} more — show more",
+  "shelfFolder.addBooks.more.one": "{count} more — show more",
+  "shelfFolder.addBooks.moveNote": "Books from other folders will be moved here.",
+  "shelfFolder.addBooks.confirm.other": "Add {count} Books",
+  "shelfFolder.addBooks.confirm.one": "Add {count} Book"
 }

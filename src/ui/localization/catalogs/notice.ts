@@ -167,4 +167,11 @@ export const notice = defineMessages("notice", {
   "notice.loading.position": "准备阅读位置…",
   "notice.loading.chapter": "正在加载章节…",
   "notice.loading.layout": "正在准备排版…",
+  "notice.importTarget.placed": { zh: "已放入文件夹“{name}”", note: "Appended to the import result when books were imported from inside a shelf folder." },
+  "notice.importTarget.keptElsewhere.other": { zh: "{count} 本已在其他文件夹，未移动", note: "Re-imported books that another shelf folder already holds stay there." },
+  "notice.importTarget.keptElsewhere.one": { zh: "{count} 本已在其他文件夹，未移动", note: "Singular form." },
+  "notice.importTarget.folderGone": "文件夹“{name}”已不存在，书留在未归类",
+  "notice.importTarget.failed": "书已导入，但放入文件夹失败：{error}",
+  "notice.drop.unsupported": "只能拖入 EPUB 文件或文件夹",
+  "notice.drop.oneFolder": "一次只能拖入一个文件夹",
 });

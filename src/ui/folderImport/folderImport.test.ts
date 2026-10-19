@@ -517,3 +517,44 @@ describe("portable repository directory placement transaction", () => {
     expect(effectiveFolderId(state, HASH_B)).toBe(FOLDER);
   });
 });
+
+describe("dropped folder source", () => {
+  it("scans the dropped folder first, then 重新选择 opens the picker", async () => {
+    const calls: Array<[string, unknown]> = [];
+    nativeInvoke.mockReset();
+    nativeInvoke.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      calls.push([command, args?.source]);
+      if (command === "directory_import_pick") return { kind: "path", path: "D:\\Picked" };
+      if (command === "directory_import_scan") {
+        return { jobId: args!.jobId, root, inputCount: 0, skippedDirectoryCount: 0, unreadableDirectoryCount: 0 };
+      }
+    });
+    const port = createNativeDirectoryImportPort({ kind: "path", path: "D:\\Dropped" });
+    await port.scan(() => {});
+    await port.scan(() => {});
+    expect(calls).toEqual([
+      ["directory_import_scan", { kind: "path", path: "D:\\Dropped" }],
+      ["directory_import_pick", undefined],
+      ["directory_import_scan", { kind: "path", path: "D:\\Picked" }],
+    ]);
+  });
+
+  it("the panel scans once on open when asked, even when remounted", async () => {
+    const { createElement, StrictMode } = await import("react");
+    const { createReactDomHarness } = await import("../../test/reactDomHarness");
+    const { FolderImportPanel } = await import("./FolderImportPanel");
+    const dom = createReactDomHarness();
+    const scan = vi.fn(async () => null);
+    const { port } = fakePort({ scan });
+    try {
+      await dom.render(createElement(StrictMode, null, createElement(FolderImportPanel, {
+        port, organization: emptyOrganization(), autoScan: true, onSettled: () => {}, onClose: () => {},
+      })));
+      await dom.run(async () => { await flushAsync(); });
+      await dom.run(async () => { await flushAsync(); });
+      expect(scan).toHaveBeenCalledTimes(1);
+    } finally {
+      await dom.dispose();
+    }
+  });
+});

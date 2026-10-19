@@ -36,10 +36,14 @@ function cursorArgs(jobId: string, cursor: string | undefined): Record<string, s
  * staging and the job slot live in the native job; this port only carries IDs,
  * light metadata pages and progress.
  */
-export function createNativeDirectoryImportPort(): DirectoryImportPort {
+export function createNativeDirectoryImportPort(initialSource?: NativeDirectorySource): DirectoryImportPort {
+  // A folder dropped on the window is scanned first; 重新选择 then opens the picker.
+  let pending = initialSource;
   return {
     async scan(onProgress): Promise<ScanResult | null> {
-      const source = await invoke<NativeDirectorySource | null>("directory_import_pick");
+      const preset = pending;
+      pending = undefined;
+      const source = preset ?? await invoke<NativeDirectorySource | null>("directory_import_pick");
       if (!source) return null;
       const jobId = newJobId();
       // Only native progress proves the job has been registered and its worker

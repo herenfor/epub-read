@@ -72,6 +72,7 @@ import {
   type SearchStatus,
 } from "./SearchPanel";
 import "./shelfZen.css";
+import { ShelfFolderAddBooksDialog } from "./ShelfFolderAddBooksDialog";
 import { uiPlural, uiText, useUiText } from "./localization/UiLanguageProvider";
 import type { PlainMessageKey } from "./localization/core";
 
@@ -172,6 +173,12 @@ export interface ShelfViewProps {
   onRetryLibraryLoad?(): void;
   onOpen(id: string): void;
   onImport(): void;
+  /** Import chosen EPUBs into an open shelf folder; absent imports to the shelf root. */
+  onImportIntoFolder?(target: { folderId: string; name: string }): void;
+  /** Open folder (sheet first, then folder view) that a window drop files into; null = shelf root. */
+  onImportContextChange?(target: { folderId: string; name: string } | null): void;
+  /** Folder under an OS file drag (Windows), highlighted like a book drag. */
+  externalDropFolderId?: string | null;
   /** Directory import entry; absent hides it. */
   onImportFolder?(): void;
   onImportArchive(): void;
@@ -342,6 +349,8 @@ interface ShelfImportButtonProps extends ShelfSubmenuBackProps {
   disabled: boolean;
   /** Drag-and-drop works only with a mouse; hide the hint on touch. */
   showDropHint: boolean;
+  /** Open folder the main action imports into; absent = shelf root. */
+  targetName?: string;
   onImport(): void;
   onImportFolder?(): void;
 }
@@ -353,6 +362,9 @@ interface ShelfImportButtonProps extends ShelfSubmenuBackProps {
  */
 function ShelfImportButton(props: ShelfImportButtonProps) {
   const { t } = useUiText();
+  const importTip = props.targetName === undefined
+    ? t("shelf.import.tip")
+    : t("shelf.import.toFolder.tip", { name: props.targetName });
   const [open, setOpen] = useState(false);
   const { present, closing } = useExitPresence(open);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -384,9 +396,9 @@ function ShelfImportButton(props: ShelfImportButtonProps) {
       <button
         className={`shelf-btn-primary${props.compact ? " shelf-mobile-import-btn" : ""}`}
         type="button"
-        onClick={props.onImport}
+        onClick={() => props.onImport()}
         disabled={props.disabled}
-        title={t("shelf.import.tip")}
+        title={importTip}
       >
         <PlusIcon />
         <span>{props.compact ? t("shelf.import.short") : t("shelf.import.books")}</span>
@@ -419,9 +431,9 @@ function ShelfImportButton(props: ShelfImportButtonProps) {
           <button
             className="shelf-btn-primary shelf-import-main"
             type="button"
-            onClick={props.onImport}
+            onClick={() => props.onImport()}
             disabled={props.disabled}
-            title={t("shelf.import.tip")}
+            title={importTip}
           >
             <PlusIcon />
             <span>{t("shelf.import.books")}</span>
@@ -1877,6 +1889,11 @@ interface ShelfFolderModalProps {
   onDissolve(folderId: string, folderName: string): void;
   onExportBooks?(): void;
   exportDisabled: boolean;
+  /** Import new EPUBs into this folder; absent hides it. */
+  onImportBooks?(): void;
+  /** Pick books already in the library; absent hides it. */
+  onAddBooks?(): void;
+  addDisabled: boolean;
   onToggleFavorite(entry: ShelfEntry): void;
   onRequestMenu(target: ShelfMenuTarget, opener: ShelfMenuOpener): void;
   onLongPress(entry: ShelfEntry, kind: ShelfLongPress, point: { x: number; y: number }): void;
@@ -2000,6 +2017,34 @@ const ShelfFolderModal = memo(function ShelfFolderModal(props: ShelfFolderModalP
             </div>
           )}
         </div>
+        {(props.onImportBooks || props.onAddBooks) && (
+          <div className="shelf-folder-modal-foot">
+            {props.onImportBooks && (
+              <button
+                className="shelf-folder-modal-foot-btn"
+                type="button"
+                disabled={props.addDisabled}
+                title={t("shelfFolder.importHere.tip")}
+                onClick={props.onImportBooks}
+              >
+                <PlusIcon />
+                <span>{t("shelfFolder.importHere")}</span>
+              </button>
+            )}
+            {props.onAddBooks && (
+              <button
+                className="shelf-folder-modal-foot-btn"
+                type="button"
+                disabled={props.addDisabled}
+                title={t("shelfFolder.addBooks.open.tip")}
+                onClick={props.onAddBooks}
+              >
+                <CheckListIcon />
+                <span>{t("shelfFolder.addBooks.open")}</span>
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -2595,6 +2640,7 @@ const ShelfFolderTableRow = memo(function ShelfFolderTableRow(props: {
   provider: ThumbnailProvider;
   selectionMode: boolean;
   selectionState: FolderSelectionState;
+  isDropTarget?: boolean;
   onOpen(id: string): void;
   onToggleSelected(id: string): void;
 }) {
@@ -2611,7 +2657,7 @@ const ShelfFolderTableRow = memo(function ShelfFolderTableRow(props: {
   };
   return (
     <tr
-      className={`shelf-table-row folder-row${props.selectionMode && props.selectionState === "all" ? " selected" : ""}`}
+      className={`shelf-table-row folder-row${props.selectionMode && props.selectionState === "all" ? " selected" : ""}${props.isDropTarget ? " is-drop-target" : ""}`}
       data-shelf-target="folder"
       data-folder-id={props.id}
       title={props.selectionMode && !selectable ? t("shelfFolder.select.empty") : undefined}
@@ -3116,6 +3162,26 @@ export function ShelfView(props: ShelfViewProps) {
 
   const currentFolder =
     scope.type === "folder" ? activeFolders.find((f) => f.id === scope.folderId) : undefined;
+
+  // Imports started inside a folder file their books there; the open sheet wins over the folder view.
+  const modalFolder = activeFolderModal ? activeFolders.find((f) => f.id === activeFolderModal.folderId) : undefined;
+  const importContextId = (modalFolder ?? currentFolder)?.id;
+  const importContextName = (modalFolder ?? currentFolder)?.name;
+  const { onImport, onImportIntoFolder, onImportContextChange } = props;
+  useEffect(() => {
+    if (!onImportContextChange) return;
+    onImportContextChange(importContextId !== undefined && importContextName !== undefined
+      ? { folderId: importContextId, name: importContextName }
+      : null);
+    return () => onImportContextChange(null);
+  }, [importContextId, importContextName, onImportContextChange]);
+  const importInto = useCallback((folder: { id: string; name: string } | undefined): void => {
+    if (folder && onImportIntoFolder) onImportIntoFolder({ folderId: folder.id, name: folder.name });
+    else onImport();
+  }, [onImport, onImportIntoFolder]);
+  const importHere = useCallback((): void => importInto(currentFolder), [currentFolder, importInto]);
+  const importTargetName = currentFolder && props.onImportIntoFolder ? currentFolder.name : undefined;
+  const [addBooksFolder, setAddBooksFolder] = useState<{ id: string; name: string } | null>(null);
 
   const { folderBooksMap, unclassifiedBooks, favoriteBooks } = useMemo(() => {
     const folderMap = new Map<string, ShelfEntry[]>();
@@ -4221,7 +4287,8 @@ export function ShelfView(props: ShelfViewProps) {
                   compact
                   disabled={Boolean(props.busy || props.importActive)}
                   showDropHint={false}
-                  onImport={props.onImport}
+                  targetName={importTargetName}
+                  onImport={importHere}
                   onImportFolder={props.onImportFolder}
                   registerSubmenuBackHandler={registerSubmenuBackHandler}
                   onSubmenuBackActiveChange={reportSubmenuBackActive}
@@ -4349,7 +4416,8 @@ export function ShelfView(props: ShelfViewProps) {
                 compact={false}
                 disabled={Boolean(props.busy || props.importActive)}
                 showDropHint={!coarsePointer}
-                onImport={props.onImport}
+                targetName={importTargetName}
+                onImport={importHere}
                 onImportFolder={props.onImportFolder ? () => {
                   if (!props.saveFileActive && !props.lanTransferActive) props.onImportFolder!();
                 } : undefined}
@@ -4707,6 +4775,20 @@ export function ShelfView(props: ShelfViewProps) {
                     </button>
                     {folderActiveMoreOpen && (
                       <div className="shelf-folder-active-menu">
+                        {canOrganize && (
+                          <button
+                            className="shelf-folder-menu-item"
+                            type="button"
+                            disabled={props.busy}
+                            onClick={() => {
+                              setFolderActiveMoreOpen(false);
+                              setAddBooksFolder(currentFolder);
+                            }}
+                          >
+                            <CheckListIcon />
+                            <span>{t("shelfFolder.addBooks.open")}</span>
+                          </button>
+                        )}
                         {props.onExportBooks && (
                           <button
                             className="shelf-folder-menu-item"
@@ -4748,6 +4830,18 @@ export function ShelfView(props: ShelfViewProps) {
                   </div>
                 ) : (
                   <>
+                    {canOrganize && (
+                      <button
+                        className="shelf-folder-action-btn"
+                        type="button"
+                        disabled={props.busy}
+                        onClick={() => setAddBooksFolder(currentFolder)}
+                        title={t("shelfFolder.addBooks.open.tip")}
+                      >
+                        <CheckListIcon />
+                        <span>{t("shelfFolder.addBooks.open")}</span>
+                      </button>
+                    )}
                     {props.onExportBooks && (
                       <button
                         className="shelf-folder-action-btn"
@@ -4877,10 +4971,24 @@ export function ShelfView(props: ShelfViewProps) {
         </ShelfEmptyState>
       ) : scope.type === "folder" && (folderBooksMap.get(scope.folderId) ?? []).length === 0 ? (
         <ShelfEmptyState icon={<FolderIcon />} title={t("shelfMain.folder.empty")} hint={t("shelfMain.folder.emptyHint")}>
-          <button className="shelf-empty-btn" onClick={() => setScope({ type: "root" })} disabled={props.busy}>
-            <BookLogoIcon />
-            <span>{t("shelfMain.folder.back")}</span>
-          </button>
+<div className="shelf-empty-actions">
+              {currentFolder && props.onImportIntoFolder && (
+              <button className="shelf-empty-btn" type="button" onClick={importHere} disabled={props.busy || props.importActive}>
+                <PlusIcon />
+                <span>{t("shelfFolder.importHere")}</span>
+              </button>
+            )}
+            {currentFolder && canOrganize && (
+              <button className="shelf-empty-btn" type="button" onClick={() => setAddBooksFolder(currentFolder)} disabled={props.busy}>
+                <CheckListIcon />
+                <span>{t("shelfFolder.addBooks.open")}</span>
+              </button>
+            )}
+            <button className="shelf-empty-btn" onClick={() => setScope({ type: "root" })} disabled={props.busy}>
+              <BookLogoIcon />
+              <span>{t("shelfMain.folder.back")}</span>
+            </button>
+          </div>
         </ShelfEmptyState>
       ) : visible.length === 0 && visibleFolders.length === 0 ? (
         // Nothing matches: name the cause and offer the way back for each active narrowing.
@@ -4952,6 +5060,7 @@ export function ShelfView(props: ShelfViewProps) {
                     provider={thumbnailProvider}
                     selectionMode={selectionMode}
                     selectionState={folderSelectionState(folderBooksMap.get(folder.id) ?? [], selectedIds)}
+                    isDropTarget={props.externalDropFolderId === folder.id}
                     onOpen={handleOpenFolderModal}
                     onToggleSelected={toggleFolderSelected}
                   />
@@ -5022,7 +5131,7 @@ export function ShelfView(props: ShelfViewProps) {
                     selectionMode={selectionMode}
                     selectionState={selectionMode ? folderSelectionState(folderBooksMap.get(folder.id) ?? [], selectedIds) : undefined}
                     onToggleSelected={toggleFolderSelected}
-                    isDropTarget={dropTarget?.type === "folder" && dropTarget.id === folder.id}
+                    isDropTarget={(dropTarget?.type === "folder" && dropTarget.id === folder.id) || props.externalDropFolderId === folder.id}
                     menuOpen={openMenuKey === `folder:${folder.id}`}
                     onOpen={handleOpenFolderModal}
                     onRequestMenu={canOrganize ? requestMenu : undefined}
@@ -5159,12 +5268,29 @@ export function ShelfView(props: ShelfViewProps) {
             onDissolve={(fId, fName) => setDissolveFolderTarget({ id: fId, name: fName })}
             onExportBooks={props.onExportBooks ? () => handleExportFolderBooks(folder.id) : undefined}
             exportDisabled={bookExportDisabled}
+            onImportBooks={props.onImportIntoFolder ? () => importInto(folder) : undefined}
+            onAddBooks={canOrganize ? () => setAddBooksFolder(folder) : undefined}
+            addDisabled={Boolean(props.busy || props.importActive)}
             onToggleFavorite={handleToggleFavorite}
             onRequestMenu={requestMenu}
             onLongPress={handleFolderModalLongPress}
           />
         );
       })()}
+
+      {addBooksFolder && activeFolders.some((f) => f.id === addBooksFolder.id) && (
+        <ShelfFolderAddBooksDialog
+          folder={addBooksFolder}
+          entries={props.entries}
+          organization={organization}
+          busy={Boolean(props.busy)}
+          onCancel={() => setAddBooksFolder(null)}
+          onAdd={async (entryIds) => {
+            await props.onApplyOrganization?.({ type: "moveBooks", contentHashes: entryIds, folderId: addBooksFolder.id });
+            setAddBooksFolder(null);
+          }}
+        />
+      )}
 
       {/* 删除确认弹层 */}
       {deleteTargets && (
