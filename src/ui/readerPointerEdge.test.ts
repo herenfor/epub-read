@@ -28,10 +28,8 @@ function chapterDocument() {
 
 describe("bottom-edge pointer: chapter documents", () => {
   it("releases a frame's old document on chapter load and on frame removal, and still reveals from the new one", async () => {
-    const dom = createReactDomHarness();
-    const win = dom.container.ownerDocument.defaultView as unknown as typeof globalThis;
-    vi.stubGlobal("HTMLIFrameElement", win.HTMLIFrameElement);
-    vi.stubGlobal("MutationObserver", win.MutationObserver);
+    const dom = createReactDomHarness({ frames: true });
+    const win = dom.window;
     const flushObservers = () => dom.run(() => new Promise((resolve) => setTimeout(resolve, 0)));
     const doc = dom.container.ownerDocument;
     const host = doc.createElement("div");

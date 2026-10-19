@@ -122,8 +122,7 @@ describe("ReaderView preload settings lifecycle", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     instances.length = 0;
-    dom = createReactDomHarness();
-    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    dom = createReactDomHarness({ resizeObserver: true });
     const book = {
       version: 3, opfPath: "book.opf", fixedLayout: false,
       spine: [0, 1, 2, 3].map((i) => ({ idref: String(i), linear: true })),

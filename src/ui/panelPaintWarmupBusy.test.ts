@@ -7,9 +7,7 @@ const FRAME = 16;
 
 it("Q5: holds after-veil batches while reading is busy and draws once it is quiet", async () => {
   vi.useFakeTimers();
-  const dom = createReactDomHarness();
-  vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => setTimeout(() => cb(0), FRAME) as unknown as number);
-  vi.stubGlobal("cancelAnimationFrame", (id: number) => clearTimeout(id));
+  const dom = createReactDomHarness({ animationFrames: FRAME });
   let api!: ReturnType<typeof usePanelPaintWarmup>;
   let busy = true;
   const idle: PanelWarmBatch[] = [["display"]];

@@ -38,15 +38,15 @@ function setup() {
   const harness = createReactDomHarness();
   activeHarnesses.push(harness);
   const doc = harness.container.ownerDocument;
-  const window = doc.defaultView as unknown as Window & typeof globalThis;
+  const window = harness.window;
   // 固定 400x300 的可用区，让 fit/原始大小/平移边界可断言。
-  window.HTMLElement.prototype.getBoundingClientRect = () =>
-    ({ left: 0, top: 0, width: 400, height: 300, right: 400, bottom: 300, x: 0, y: 0 }) as DOMRect;
+  harness.rect(window.HTMLElement.prototype, { width: 400, height: 300 });
   let active: Element | null = null;
-  Object.defineProperty(doc, "activeElement", { get: () => active, configurable: true });
-  window.HTMLElement.prototype.focus = function focus(this: HTMLElement) {
-    active = this;
-  };
+  harness.define(doc, "activeElement", { get: () => active });
+  harness.define(window.HTMLElement.prototype, "focus", {
+    writable: true,
+    value: function focus(this: HTMLElement) { active = this; },
+  });
   const onClose = vi.fn();
   const onFollowLink = vi.fn();
   return {

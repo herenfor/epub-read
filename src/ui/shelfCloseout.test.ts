@@ -81,45 +81,36 @@ describe("书架最后收口：前缀所有权与缩放后字母定位", () => {
   });
 
   it("<40 本时字母跳转使用已测得的 zoom 还原布局坐标", async () => {
-    const dom = createReactDomHarness();
-    const win = (dom.container.ownerDocument.defaultView ?? globalThis) as Window & typeof globalThis;
-    const originalRect = win.HTMLElement.prototype.getBoundingClientRect;
-    const originalScrollTop = Object.getOwnPropertyDescriptor(win.HTMLElement.prototype, "scrollTop");
-    const originalClientHeight = Object.getOwnPropertyDescriptor(win.HTMLElement.prototype, "clientHeight");
-    const originalGetComputedStyle = globalThis.getComputedStyle;
-    const originalWindowGetComputedStyle = win.getComputedStyle;
-    const originalRequestAnimationFrame = win.requestAnimationFrame;
-    Object.defineProperty(win.HTMLElement.prototype, "scrollTop", {
-      configurable: true,
+    const dom = createReactDomHarness({
+      animationFrames: 0,
+      computedStyle: (el) => {
+        if (el.classList.contains("shelf-view")) return { zoom: "1.5" };
+        if (el.classList.contains("shelf-book-grid")) {
+          return { gridTemplateColumns: "100px 100px", columnGap: "20px", rowGap: "20px", gap: "20px" };
+        }
+        return { zoom: "1", gridTemplateColumns: "", rowGap: "0px", gap: "0px" };
+      },
+    });
+    const win = dom.window;
+    dom.define(win.HTMLElement.prototype, "scrollTop", {
       get(this: HTMLElement & { __scrollTop?: number }) { return this.__scrollTop ?? 0; },
       set(this: HTMLElement & { __scrollTop?: number }, value: number) { this.__scrollTop = value; },
     });
-    Object.defineProperty(win.HTMLElement.prototype, "clientHeight", {
-      configurable: true,
-      get() { return 800; },
+    dom.metrics(win.HTMLElement.prototype, { clientHeight: 800 });
+    dom.define(win.HTMLElement.prototype, "getBoundingClientRect", {
+      writable: true,
+      value: function getRect(this: HTMLElement) {
+        if (this.classList.contains("shelf-view")) return rect(0, 800, 0, 400);
+        if (this.classList.contains("shelf-book-prefix")) return rect(390, 60, 0, 400);
+        if (this.classList.contains("shelf-card") && this.closest(".shelf-book-grid")) {
+          const cards = Array.from(this.parentElement?.querySelectorAll(".shelf-card") ?? []);
+          const index = cards.indexOf(this);
+          const row = Math.floor(index / 2);
+          return rect(450 + row * 240, 210, (index % 2) * 180, 180);
+        }
+        return rect(0, 0, 0, 0);
+      },
     });
-
-    win.HTMLElement.prototype.getBoundingClientRect = function getRect(this: HTMLElement) {
-      if (this.classList.contains("shelf-view")) return rect(0, 800, 0, 400);
-      if (this.classList.contains("shelf-book-prefix")) return rect(390, 60, 0, 400);
-      if (this.classList.contains("shelf-card") && this.closest(".shelf-book-grid")) {
-        const cards = Array.from(this.parentElement?.querySelectorAll(".shelf-card") ?? []);
-        const index = cards.indexOf(this);
-        const row = Math.floor(index / 2);
-        return rect(450 + row * 240, 210, (index % 2) * 180, 180);
-      }
-      return rect(0, 0, 0, 0);
-    };
-    const fakeComputedStyle = ((el: Element) => {
-      if (el.classList.contains("shelf-view")) return { zoom: "1.5" } as unknown as CSSStyleDeclaration;
-      if (el.classList.contains("shelf-book-grid")) {
-        return { gridTemplateColumns: "100px 100px", columnGap: "20px", rowGap: "20px", gap: "20px" } as unknown as CSSStyleDeclaration;
-      }
-      return { zoom: "1", gridTemplateColumns: "", rowGap: "0px", gap: "0px" } as unknown as CSSStyleDeclaration;
-    }) as typeof globalThis.getComputedStyle;
-    (globalThis as typeof globalThis & { getComputedStyle: typeof globalThis.getComputedStyle }).getComputedStyle = fakeComputedStyle;
-    (win as Window & { getComputedStyle: typeof globalThis.getComputedStyle }).getComputedStyle = fakeComputedStyle;
-    win.requestAnimationFrame = ((callback: FrameRequestCallback) => window.setTimeout(() => callback(Date.now()), 0)) as typeof win.requestAnimationFrame;
 
     const entries = ["A书", "B书", "C书", "D书", "E书", "F书"].map((title, index) => makeEntry(`b${index}`, title));
     try {
@@ -151,15 +142,6 @@ describe("书架最后收口：前缀所有权与缩放后字母定位", () => {
       // C 是 0 基索引 2，columns=2 -> 第二行 -> 260 + 160 = 420。
       expect(container.scrollTop).toBe(420);
     } finally {
-      win.HTMLElement.prototype.getBoundingClientRect = originalRect;
-      if (originalScrollTop) Object.defineProperty(win.HTMLElement.prototype, "scrollTop", originalScrollTop);
-      else Reflect.deleteProperty(win.HTMLElement.prototype, "scrollTop");
-      if (originalClientHeight) Object.defineProperty(win.HTMLElement.prototype, "clientHeight", originalClientHeight);
-      else Reflect.deleteProperty(win.HTMLElement.prototype, "clientHeight");
-      globalThis.getComputedStyle = originalGetComputedStyle;
-      win.getComputedStyle = originalWindowGetComputedStyle;
-      if (originalRequestAnimationFrame) win.requestAnimationFrame = originalRequestAnimationFrame;
-      else delete (win as Partial<Window>).requestAnimationFrame;
       await dom.dispose();
     }
   });

@@ -174,13 +174,11 @@ describe("body taps in the paged reader", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     instances.length = 0;
-    dom = createReactDomHarness();
-    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    dom = createReactDomHarness({ resizeObserver: true });
     // The host, the reader box and the iframe all span x 0-1000.
-    const proto = (window as unknown as { HTMLElement: { prototype: object } }).HTMLElement.prototype;
-    Object.defineProperty(proto, "clientWidth", { configurable: true, get: () => 1000 });
-    Object.defineProperty(proto, "getBoundingClientRect", { configurable: true,
-      value: () => ({ left: 0, top: 0, right: 1000, bottom: 800, width: 1000, height: 800, x: 0, y: 0 }) });
+    const proto = dom.window.HTMLElement.prototype;
+    dom.metrics(proto, { clientWidth: 1000 });
+    dom.rect(proto, { width: 1000, height: 800 });
     const book = {
       version: 3,
       opfPath: "book.opf",
