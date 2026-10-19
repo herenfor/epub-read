@@ -27,6 +27,9 @@ Each component remains subject to its respective license.
 | tauri-plugin-fs | 2.5.1 | MIT OR Apache-2.0 | https://github.com/tauri-apps/plugins-workspace |
 | tauri-plugin-opener | 2.5.4 | MIT OR Apache-2.0 | https://github.com/tauri-apps/plugins-workspace |
 | tauri-plugin-single-instance | 2.4.3 | MIT OR Apache-2.0 | https://github.com/tauri-apps/plugins-workspace |
+| tauri-plugin-updater (Windows) | 2.11.0 | MIT OR Apache-2.0 | https://github.com/tauri-apps/plugins-workspace |
+| minisign-verify (Windows updater signatures) | 0.2.5 | MIT | https://github.com/jedisct1/rust-minisign-verify |
+| winreg (Windows installation identity) | 0.55.0 | MIT | https://github.com/gentoo90/winreg-rs |
 | serde | 1.0.229 | MIT OR Apache-2.0 | https://github.com/serde-rs/serde |
 | serde_json | 1.0.151 | MIT OR Apache-2.0 | https://github.com/serde-rs/json |
 | sha2 | 0.10.9 | MIT OR Apache-2.0 | https://github.com/RustCrypto/hashes |
@@ -187,6 +190,9 @@ from their respective LICENSE files:
 - **qrcode** — Copyright (c) 2012 Ryan Day (MIT)
 - **ZXing Android Embedded / ZXing core** — Copyright (c) 2012-2024 ZXing authors (Apache-2.0)
 - **Tauri 及其官方插件** — Copyright (c) 2019-2025 Tauri Programme within The Commons Conservancy (MIT OR Apache-2.0)
+- **Tauri updater** — Copyright (c) 2017 - Present Tauri Apps Contributors (MIT OR Apache-2.0)
+- **minisign-verify** — Copyright (c) 2019-2025 Frank Denis (MIT)
+- **winreg** — Copyright (c) 2015 Igor Shaula (MIT)
 - **serde / serde_json** — Copyright (c) 2019 Serde Authors (MIT OR Apache-2.0)
 - **quick-xml** — Copyright (c) 2016 the quick-xml authors (MIT)
 - **zip** — Copyright (c) 2023 zip-rs team (MIT)
