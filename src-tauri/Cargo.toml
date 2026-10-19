@@ -50,6 +50,8 @@ tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt", "rt
 tauri-plugin-single-instance = "2.4.3"
 
 [target.'cfg(windows)'.dependencies]
+tauri-plugin-updater = { version = "=2.11.0", default-features = false, features = ["rustls-tls", "system-proxy"] }
+winreg = "0.55"
 # Official windows-rs bindings (MIT OR Apache-2.0): DirectWrite font metadata
 # plus the Win32 IpHelper/Ndis network-adapter snapshot for LAN host selection.
 windows = { version = "0.61.3", features = [

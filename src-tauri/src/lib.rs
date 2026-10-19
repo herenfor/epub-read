@@ -6,6 +6,7 @@ mod android_lan_network;
 mod android_lan_scan;
 mod android_uri_bridge;
 mod build_info;
+mod app_update;
 #[cfg(test)]
 mod build_info_contract;
 mod directory_import;
@@ -22,6 +23,7 @@ mod book_export;
 macro_rules! configure_invoke_handler {
     ($builder:expr) => {
         $builder.invoke_handler(tauri::generate_handler![
+            app_update::app_update_install_kind,
             linked_library::linked_library_import_paths,
             linked_library::linked_library_list_records,
             linked_library::linked_library_import_documents,
@@ -165,6 +167,7 @@ macro_rules! configure_invoke_handler {
 macro_rules! configure_invoke_handler {
     ($builder:expr) => {
         $builder.invoke_handler(tauri::generate_handler![
+            app_update::app_update_install_kind,
             linked_library::linked_library_import_paths,
             linked_library::linked_library_list_records,
             linked_library::linked_library_import_documents,
@@ -274,7 +277,15 @@ macro_rules! configure_invoke_handler {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let builder = tauri::Builder::default();
+    let context = tauri::generate_context!();
+    let install_kind = app_update::detect(&context.config().identifier);
+    let builder = tauri::Builder::default().manage(install_kind);
+    #[cfg(windows)]
+    let builder = if install_kind == app_update::InstallKind::Installer {
+        builder.plugin(tauri_plugin_updater::Builder::new().build())
+    } else {
+        builder
+    };
     #[cfg(desktop)]
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
         if let Some(main_window) = app.get_webview_window("main") {
@@ -350,7 +361,7 @@ pub fn run() {
     let builder = builder.manage(ai::embedding_gateway::SemanticEmbedding::default());
 
     configure_invoke_handler!(builder)
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building tauri application")
         .run(|app, event| {
             if matches!(&event, tauri::RunEvent::Exit) {
