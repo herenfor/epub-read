@@ -2264,15 +2264,22 @@ export function restoreInlineStyleProperty(
   else style.setProperty(property, original.value, original.priority);
 }
 
-/** 内容适配要写的 reader-owned 属性（px）；写前快照原 inline 值与优先级。 */
+/** 内容适配要写的 reader-owned 属性（数值按 px，字符串为 CSS 关键字）；写前快照原 inline 值与优先级。 */
 interface ContentFitWrite {
   el: HTMLElement;
-  properties: Array<[property: string, px: number]>;
+  properties: Array<[property: string, value: number | string]>;
 }
 
 interface ContentFitFix {
   el: HTMLElement;
   styles: Array<{ property: string; original: InlineStyleValue }>;
+}
+
+function isInsideAny(el: Element, ancestors: ReadonlySet<Element>): boolean {
+  for (let node = el.parentElement; node; node = node.parentElement) {
+    if (ancestors.has(node)) return true;
+  }
+  return false;
 }
 
 function horizontalPaddingBorder(cs: CSSStyleDeclaration): number {
@@ -2289,12 +2296,12 @@ function writeContentFitStyles(writes: readonly ContentFitWrite[]): ContentFitFi
       fix = { el: write.el, styles: [] };
       fixes.set(write.el, fix);
     }
-    for (const [property, px] of write.properties) {
-      if (!Number.isFinite(px) || px < 0) continue;
+    for (const [property, value] of write.properties) {
+      if (typeof value === "number" && (!Number.isFinite(value) || value < 0)) continue;
       if (!fix.styles.some((style) => style.property === property)) {
         fix.styles.push({ property, original: snapshotInlineStyleProperty(write.el.style, property) });
       }
-      write.el.style.setProperty(property, `${px}px`, "important");
+      write.el.style.setProperty(property, typeof value === "number" ? `${value}px` : value, "important");
     }
   }
   return Array.from(fixes.values());
@@ -4642,8 +4649,7 @@ export class ChapterPaginator {
         );
         this.applyFitContentFix();
         this.applyBookMargins();
-        this.applyContainedTableWidth();
-        this.applyContainedMediaMaxWidth();
+        this.applyContainedContentFit();
         void viewer.scrollHeight;
         this.pageWidth = Math.max(0, viewer.clientWidth);
         this.step = 0;
@@ -4677,8 +4683,7 @@ export class ChapterPaginator {
       this.applyFloatShrinkFix();
       this.applyTrailingFloatMarginFix();
       this.applyInlineBoxOverflowFix();
-      this.applyContainedTableWidth();
-      this.applyContainedMediaMaxWidth();
+      this.applyContainedContentFit();
       if (!this.fixedLayout) {
         this.backdropCompatibilityRestore = applyBackdropCompatibility(doc, viewer, {
           // 双栏时传单列宽与列步长，不能传整屏宽。
@@ -5448,17 +5453,28 @@ export class ChapterPaginator {
   }
 
   /**
-   * 正文图片/顶层背景图盒按当前叶适配。先恢复上一轮写过的值，量作者布局，
+   * 叶内内容适配的唯一入口：表格与媒体互相影响宽度，先一起还原上一轮写入，
+   * 再按依赖顺序处理——表格宽度定下来以后才量表内图片。
+   */
+  private applyContainedContentFit(): void {
+    this.restoreContainedMediaFixes();
+    this.restoreContainedTableFixes();
+    const unresolvedTables = this.applyContainedTableWidth();
+    this.applyContainedMediaMaxWidth(unresolvedTables);
+  }
+
+  /**
+   * 正文图片/顶层背景图盒按当前叶适配（入口已还原上一轮写入，这里量作者布局），
    * 再批量写回：图片随字号放大到叶内放得下的最大尺寸为止（宽高同比），只包着
    * 它的外框一起收窄；背景图盒只限宽。整页/固定版式/浮动/定位与明确出血
-   * 意图继续走原布局；换页交给多栏自然排版，不写 break。
+   * 意图继续走原布局；换页交给多栏自然排版，不写 break。仍越界的表格里，
+   * 单元格不在本叶内，按它算出的预算会把图片压成几像素，保留作者尺寸。
    */
-  private applyContainedMediaMaxWidth(): void {
+  private applyContainedMediaMaxWidth(unresolvedTables: ReadonlySet<Element> = new Set()): void {
     const doc = this.contentDoc;
     const viewer = this.viewer;
     const win = doc?.defaultView;
     if (!doc || !viewer || !win || this.fixedLayout) return;
-    this.restoreContainedMediaFixes();
     if (
       viewer.classList.contains("fullpage-image") ||
       viewer.classList.contains("pure-image-page")
@@ -5474,6 +5490,7 @@ export class ChapterPaginator {
     for (const element of media) {
       if (!element.isConnected || !element.parentElement) continue;
       if (element.closest(".illus, .kuchie, .cover, .duokan-image-fullscreen")) continue;
+      if (unresolvedTables.size > 0 && isInsideAny(element, unresolvedTables)) continue;
 
       const cs = win.getComputedStyle(element);
       if (cs.display === "none" || cs.visibility === "hidden") continue;
@@ -5530,21 +5547,23 @@ export class ChapterPaginator {
 
   /**
    * 普通表格越出当前叶时收窄外框：保留字号、table-layout 与列内容，让单元格
-   * 换行。写完只再量一次；仍有表格/单元格越界（不可压缩）就恢复作者布局，
-   * 不缩字、不裁列，留给以后的完整查看方式。
+   * 换行。写完再量；网址这类没有断点的长串仍把最小内容宽撑出叶外时，只给
+   * 这些表格补 overflow-wrap:anywhere（它的断点计入最小内容宽，break-word
+   * 不计），再量最后一次。仍越界（nowrap、硬性最小宽等不可压缩）就恢复作者
+   * 布局并返回这些表格，不缩字、不裁列，留给以后的完整查看方式。
    */
-  private applyContainedTableWidth(): void {
+  private applyContainedTableWidth(): Set<HTMLTableElement> {
+    const unresolved = new Set<HTMLTableElement>();
     const doc = this.contentDoc;
     const viewer = this.viewer;
     const win = doc?.defaultView;
-    if (!doc || !viewer || !win || this.fixedLayout) return;
-    this.restoreContainedTableFixes();
     this.unresolvedTableCount = 0;
+    if (!doc || !viewer || !win || this.fixedLayout) return unresolved;
     if (
       viewer.classList.contains("fullpage-image") ||
       viewer.classList.contains("pure-image-page")
     ) {
-      return;
+      return unresolved;
     }
 
     const planned: Array<{ table: HTMLTableElement; writes: ContentFitWrite[] }> = [];
@@ -5573,19 +5592,26 @@ export class ChapterPaginator {
       this.planWrapperWrites(table, leaf, win, doc, writes);
       if (writes.length > 0) planned.push({ table, writes });
     }
-    if (planned.length === 0) return;
+    if (planned.length === 0) return unresolved;
 
-    const fixes = planned.map(({ table, writes }) => ({ table, fixes: writeContentFitStyles(writes) }));
+    // 批量写、批量量：每一轮只触发一次布局。
+    const attempts = planned.map(({ table, writes }) => ({ table, fixes: writeContentFitStyles(writes) }));
+    const overflowing = attempts.filter(({ table }) => !this.tableFitsCurrentLeaves(table));
+    for (const attempt of overflowing) {
+      attempt.fixes.push(...writeContentFitStyles([{ el: attempt.table, properties: [["overflow-wrap", "anywhere"]] }]));
+    }
     const kept: ContentFitFix[] = [];
-    for (const { table, fixes: tableFixes } of fixes) {
-      if (this.tableFitsCurrentLeaves(table)) {
-        kept.push(...tableFixes);
+    for (const attempt of attempts) {
+      if (!overflowing.includes(attempt) || this.tableFitsCurrentLeaves(attempt.table)) {
+        kept.push(...attempt.fixes);
       } else {
-        restoreContentFitStyles(tableFixes);
-        this.unresolvedTableCount++;
+        restoreContentFitStyles(attempt.fixes);
+        unresolved.add(attempt.table);
       }
     }
+    this.unresolvedTableCount = unresolved.size;
     this.containedTableFixes = kept;
+    return unresolved;
   }
 
   /** 收窄后的二次检查：每个表格片段、各单元格都在自己所在的叶内，单元格无内容溢出。 */
@@ -6945,22 +6971,16 @@ export class ChapterPaginator {
       }
     }
     if (this.scrollMode) {
-      if (!this.fixedLayout) {
-        this.applyContainedTableWidth();
-        this.applyContainedMediaMaxWidth();
-      }
+      if (!this.fixedLayout) this.applyContainedContentFit();
       this.recomputeScroll();
       const settled = !this.disposed && loadSeq === this.loadSeq;
       // 只有已稳定且仍属当前代次时才通知，过期结果不得触发宿主重测
       if (settled) this.onLayoutSettled?.();
       return settled;
     }
-    // 图片晚加载后的既有 recompute 链也要套用同一叶内适配；两者都先恢复
-    // 上一轮写入再量，不把补丁当成新的作者尺寸。
-    if (!this.fixedLayout) {
-      this.applyContainedTableWidth();
-      this.applyContainedMediaMaxWidth();
-    }
+    // 图片晚加载后的既有 recompute 链也要套用同一叶内适配，入口先还原上一轮
+    // 写入再量，不把补丁当成新的作者尺寸。
+    if (!this.fixedLayout) this.applyContainedContentFit();
     const sw = viewer.scrollWidth;
     const hasContent =
       viewer.children.length > 0 || (viewer.textContent ?? "").trim().length > 0;
