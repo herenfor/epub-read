@@ -42,5 +42,16 @@
       "icons/128x128@2x.png",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEY3RDdEQjFBRjAzRTBCNEEKUldSS0N6N3dHdHZYOTZZcVhKcjlqMDh3blpBalY3eUFYaGx4emdGN0FSKzJIVDRtYnY0a1B0Z0wK",
+      "endpoints": [
+        "https://github.com/herenfor/epub-read/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }
