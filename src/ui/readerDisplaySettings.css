@@ -188,3 +188,26 @@
   height: 22px;
 }
 .app[data-touch-ui="true"] .rd-section .aa-group-title { font-size: 13px; }
+
+/* 按住滤镜滑块：外壳与其余各行隐去，只留这一行，正文的颜色变化一目了然。 */
+.font-settings-panel[data-slider-focus] {
+  visibility: hidden;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.font-settings-panel [data-slider-focused] {
+  visibility: visible;
+  border-radius: 14px;
+  background: var(--panel-bg);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.22), 0 1px 4px rgba(0, 0, 0, 0.1);
+  outline: 6px solid var(--panel-bg);
+}
+
+/* Filter sliders run sideways; a vertical drag on one is not a page scroll. */
+.aa-display-body input[type="range"] {
+  touch-action: none;
+}

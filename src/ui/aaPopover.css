@@ -93,115 +93,7 @@
   }
 }
 
-.aa-popover-header {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 10px 8px 12px;
-  border-bottom: 1px solid var(--ui-border-subtle);
-}
-
 /* ---- 双模分段 Tab 切换 ---- */
-.aa-popover-tabs {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 2px;
-  background: var(--ui-control-bg);
-  border-radius: 8px;
-  border: 1px solid var(--ui-border-subtle);
-}
-
-.aa-tab-btn {
-  border: none;
-  background: transparent;
-  padding: 4px 10px;
-  border-radius: 6px;
-  font-size: 11.5px;
-  font-weight: 500;
-  color: var(--muted);
-  cursor: pointer;
-  /* Only the visual state changes animate. With `all`, the closed (warm)
-     panel's inherited visibility change became a child transition and the
-     tabs stayed visible over the text for a moment after closing. */
-  transition: background-color var(--ui-control) var(--ui-ease),
-              color var(--ui-control) var(--ui-ease),
-              box-shadow var(--ui-control) var(--ui-ease);
-  user-select: none;
-}
-
-.aa-tab-btn.active {
-  background: var(--panel-bg, #ffffff);
-  color: var(--accent, #6366f1);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
-  font-weight: 600;
-}
-
-.aa-popover-title {
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-
-.aa-popover-close-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 6px;
-  border: none;
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-  transition: background-color var(--ui-control) var(--ui-ease), color var(--ui-control) var(--ui-ease);
-}
-
-.aa-popover-close-btn:hover {
-  background: var(--btn-tint-hover);
-  color: var(--fg);
-}
-
-.aa-popover-body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  scrollbar-width: thin;
-  scrollbar-color: transparent transparent;
-  transition: scrollbar-color var(--ui-scrollbar) var(--ui-ease);
-  padding: 12px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.aa-popover-body:hover {
-  scrollbar-color: color-mix(in srgb, var(--fg) 22%, transparent) transparent;
-}
-
-.aa-popover-body::-webkit-scrollbar {
-  width: 4px;
-}
-
-.aa-popover-body::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.aa-popover-body::-webkit-scrollbar-thumb {
-  background: transparent;
-  border-radius: 999px;
-  transition: background-color var(--ui-scrollbar) var(--ui-ease);
-}
-
-.aa-popover-body:hover::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--fg) 22%, transparent);
-}
-
-.aa-popover-body::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in srgb, var(--fg) 40%, transparent);
-}
 
 /* Row 1: 主题色块 */
 .aa-theme-section {
@@ -234,19 +126,6 @@
   box-shadow: 0 0 0 2px var(--accent, #6366f1), 0 2px 6px rgba(0, 0, 0, 0.14);
 }
 
-.aa-theme-letter {
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 1;
-  margin-bottom: 2px;
-}
-
-.aa-theme-label {
-  font-size: 10px;
-  font-weight: 500;
-  opacity: 0.75;
-}
-
 /* 控件行布局 */
 .aa-control-row {
   display: flex;
@@ -264,87 +143,8 @@
 }
 
 /* Row 2: 字号步进胶囊 */
-.aa-stepper-capsule {
-  display: inline-flex;
-  align-items: center;
-  background: var(--ui-control-bg);
-  border-radius: 8px;
-  height: 28px;
-  box-sizing: border-box;
-  padding: 2px;
-  flex: 1;
-  justify-content: space-between;
-}
-
-.aa-step-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  height: 24px;
-  padding: 0 10px;
-  border-radius: 6px;
-  border: none;
-  background: transparent;
-  color: var(--fg);
-  cursor: pointer;
-  transition: background-color var(--ui-control-quick) var(--ui-ease);
-}
-
-.aa-step-btn:hover:not(:disabled) {
-  background: var(--ui-control-hover);
-}
-
-.aa-step-btn:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-}
-
-.aa-stepper-text-small {
-  font-size: 11px;
-  font-weight: 500;
-}
-
-.aa-stepper-text-large {
-  font-size: 13.5px;
-  font-weight: 600;
-}
-
-.aa-stepper-val {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--fg);
-  min-width: 48px;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-}
 
 /* Row 3: 字体选择按钮 */
-.aa-font-trigger {
-  display: inline-flex;
-  align-items: center;
-  justify-content: space-between;
-  flex: 1;
-  height: 28px;
-  box-sizing: border-box;
-  padding: 0 10px;
-  background: var(--ui-control-bg);
-  border-radius: 8px;
-  border: none;
-  color: var(--fg);
-  font-size: 12px;
-  cursor: pointer;
-  transition: background-color var(--ui-control-quick) var(--ui-ease);
-}
-
-.aa-font-trigger:hover {
-  background: var(--ui-control-hover);
-}
-
-.aa-font-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 .aa-chevron {
   color: var(--muted);
@@ -394,9 +194,6 @@
 }
 
 /* 开关行 */
-.aa-toggle-row {
-  padding-top: 2px;
-}
 
 .aa-toggle-text {
   display: flex;
@@ -404,11 +201,6 @@
   min-width: 0;
   flex-direction: column;
   gap: 2px;
-}
-
-.aa-toggle-row > .aa-section-label {
-  flex: 1;
-  min-width: 0;
 }
 
 .aa-toggle-text .aa-detail-sub {
@@ -478,62 +270,6 @@
 }
 
 /* 高级选项折叠区 */
-.aa-advanced-container {
-  margin-top: 4px;
-  border-top: 1px solid color-mix(in srgb, var(--panel-border) 40%, transparent);
-  padding-top: 6px;
-}
-
-.aa-advanced-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  height: 28px;
-  padding: 0 8px;
-  border-radius: 6px;
-  border: none;
-  background: var(--ui-field-bg);
-  color: var(--muted);
-  font-size: 11.5px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background-color var(--ui-control-quick) var(--ui-ease),
-              color var(--ui-control-quick) var(--ui-ease);
-}
-
-.aa-advanced-toggle:hover {
-  background: color-mix(in srgb, var(--fg) 8%, transparent);
-  color: var(--fg);
-}
-
-.aa-advanced-body {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-top: 6px;
-  animation: aaAdvancedOpen var(--ui-control) var(--ui-ease-out);
-}
-
-@keyframes aaAdvancedOpen {
-  from {
-    opacity: 0;
-    transform: translateY(-4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.aa-advanced-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  font-size: 11.5px;
-  color: var(--fg);
-}
 
 .aa-css-editor-section {
   display: flex;
@@ -612,33 +348,12 @@
 }
 
 /* ---- 常用外观中自定义徽标与跳转按钮 ---- */
-.aa-custom-pill {
-  display: inline-block;
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--accent, #6366f1);
-  background: color-mix(in srgb, var(--accent, #6366f1) 12%, transparent);
-  padding: 1px 5px;
-  border-radius: 999px;
-  margin-left: 5px;
-  line-height: 1.2;
-}
 
 /* ---- 详细排版视图 (Detailed View) ---- */
-.aa-detailed-view {
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-  animation: aaPopoverFadeIn var(--ui-control) var(--ui-ease-out);
-}
 
 /* 详细视图中，中央步进值使用短文案后保持单行，避免状态切换时胶囊高度变化。 */
-.aa-detailed-view .aa-stepper-val {
-  white-space: nowrap;
-}
 
-.aa-group-title,
-.aa-detail-group-title {
+.aa-group-title {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -700,16 +415,11 @@
   left: 0;
   width: auto;
   max-width: none;
-  /* 半高：常用项一屏放下，正文仍露出、能看到实时变化；把手上拉展开全部。 */
-  max-height: min(56vh, calc(var(--visual-viewport-height, 100vh) * 0.56));
+  /* 固定高度：主页一屏放下，正文露出一半以上；子页同高、内部滚动。不再上拉展开。 */
+  height: min(var(--aa-sheet-height), calc(var(--visual-viewport-height, 100vh) * 0.9));
+  max-height: none;
   border-radius: 16px 16px 0 0;
   animation: aaMobileSheetIn var(--menu-open) var(--ease-emphasized);
-  /* No max-height transition: the height changes in one layout step and
-     useSheetDrag eases the position from the frame on screen (one motion owner). */
-}
-
-.app[data-mobile-chrome="true"][data-layout="compact"] .aa-popover.is-expanded {
-  max-height: min(88vh, calc(var(--visual-viewport-height, 100vh) * 0.88));
 }
 
 /* 底部面板把手：只在手机紧凑布局出现，可拖动展开、收起和关闭。 */
@@ -739,34 +449,14 @@
   animation: aaMobileSheetOut var(--menu-close) var(--ui-ease) forwards;
 }
 
-.app[data-mobile-chrome="true"][data-layout="compact"] .aa-popover-header {
-  padding-top: 4px;
-}
-
-.app[data-mobile-chrome="true"][data-layout="compact"] .aa-popover-body {
-  padding-bottom: 12px;
-}
-
-.app[data-mobile-chrome="true"] .aa-popover .aa-stepper-capsule,
-.app[data-mobile-chrome="true"] .aa-popover .aa-segmented-capsule,
 .app[data-mobile-chrome="true"] .aa-display-body .aa-stepper-capsule,
 .app[data-mobile-chrome="true"] .aa-display-body .aa-segmented-capsule {
   height: auto;
   min-height: 52px; /* 内部 48px 命中 + 上下各 2px padding */
 }
 
-.app[data-mobile-chrome="true"] .aa-popover .aa-step-btn,
-.app[data-mobile-chrome="true"] .aa-popover .aa-step-reset-btn,
 .app[data-mobile-chrome="true"] .aa-display-body .aa-step-btn,
 .app[data-mobile-chrome="true"] .aa-display-body .aa-step-reset-btn {
-  min-width: 48px;
-  min-height: 48px;
-  flex-shrink: 0;
-}
-
-.app[data-mobile-chrome="true"] .aa-popover .aa-popover-close-btn {
-  width: 48px;
-  height: 48px;
   min-width: 48px;
   min-height: 48px;
   flex-shrink: 0;
@@ -781,30 +471,7 @@
   justify-content: flex-end;
 }
 
-.app[data-mobile-chrome="true"] .aa-popover .aa-font-trigger {
-  height: auto;
-  min-height: 48px;
-}
-
 /* 详细排版工作台：避免子项挤出面板，数值说明保持单行不竖排，胶囊在空间不足时平滑换行 */
-.app[data-mobile-chrome="true"] .aa-detailed-view .aa-control-row {
-  flex-wrap: wrap;
-  row-gap: 6px;
-}
-
-.app[data-mobile-chrome="true"] .aa-detailed-view .aa-detail-label-wrap {
-  flex: 1 1 110px;
-  min-width: 100px;
-}
-
-.app[data-mobile-chrome="true"] .aa-detailed-view .aa-detail-label-wrap .aa-detail-sub {
-  white-space: nowrap;
-}
-
-.app[data-mobile-chrome="true"] .aa-detailed-view .aa-stepper-capsule {
-  flex: 0 0 auto;
-  margin-left: auto;
-}
 
 @media (max-height: 480px) {
   .app[data-mobile-chrome="true"][data-layout="compact"] .aa-popover {
@@ -839,88 +506,378 @@
   width: 380px;
 }
 
-.app[data-touch-ui="true"] .aa-popover-title { font-size: 15px; }
-.app[data-touch-ui="true"] .aa-theme-letter { font-size: 16px; }
-.app[data-touch-ui="true"] .aa-theme-label { font-size: 12px; }
 .app[data-touch-ui="true"] .aa-section-label { font-size: 14px; }
-.app[data-touch-ui="true"] .aa-stepper-text-small { font-size: 13px; }
-.app[data-touch-ui="true"] .aa-stepper-text-large { font-size: 16px; }
-.app[data-touch-ui="true"] .aa-stepper-val { font-size: 15px; }
-.app[data-touch-ui="true"] .aa-font-trigger { font-size: 15px; }
+
 .app[data-touch-ui="true"] .aa-segmented-btn { font-size: 14px; }
-.app[data-touch-ui="true"] .aa-advanced-toggle,
-.app[data-touch-ui="true"] .aa-advanced-row { font-size: 14px; }
+
 .app[data-touch-ui="true"] .aa-css-label,
 .app[data-touch-ui="true"] .aa-css-hint,
 .app[data-touch-ui="true"] .aa-css-textarea,
 .app[data-touch-ui="true"] .aa-btn-save-css { font-size: 13px; }
 .app[data-touch-ui="true"] .aa-mini-action-btn { font-size: 13.5px; }
-.app[data-touch-ui="true"] .aa-custom-pill { font-size: 11.5px; }
-.app[data-touch-ui="true"] .aa-detail-group-title { font-size: 13px; }
+
 .app[data-touch-ui="true"] .aa-detail-sub { font-size: 12px; }
 
 /* ---- 触摸端头部：分段 Tab 收紧一档，关闭键做成同高的方块，二者顶边底边对齐；命中区用伪元素补到 48px ---- */
-.app[data-touch-ui="true"] .aa-popover .aa-popover-tabs {
-  box-sizing: border-box;
-  height: 38px;
-}
-
-.app[data-touch-ui="true"] .aa-popover .aa-tab-btn {
-  position: relative;
-  height: 100%;
-  min-height: 0;
-  padding: 0 12px;
-  font-size: 13px;
-}
-
-.app[data-touch-ui="true"] .aa-popover .aa-tab-btn::before,
-.app[data-touch-ui="true"] .aa-popover .aa-popover-close-btn::before {
-  content: "";
-  position: absolute;
-  inset: -5px 0;
-}
-
-.app[data-touch-ui="true"] .aa-popover .aa-popover-close-btn {
-  position: relative;
-  box-sizing: border-box;
-  width: 38px;
-  height: 38px;
-  min-width: 38px;
-  min-height: 0;
-  flex-shrink: 0;
-  border-radius: 8px;
-  border: 1px solid var(--ui-border-subtle);
-  background: var(--ui-control-bg);
-}
-
-.app[data-touch-ui="true"] .aa-popover .aa-popover-close-btn::before {
-  inset: -5px;
-}
-
-.app[data-touch-ui="true"] .aa-popover .aa-popover-close-btn svg {
-  width: 18px;
-  height: 18px;
-}
 
 /* Reuse the drawer's compositor swipe; each Aa pane keeps its own scroll container. */
-.aa-tabs-viewport {
+
+/* ==== 单层紧凑面板（排版边调边看） ==== */
+.app {
+  /* Phone Aa and its sub-pages share one height (main page fits without scrolling). */
+  --aa-sheet-height: 404px;
+}
+
+.aa-pages {
   display: flex;
   flex-direction: column;
   flex: 1;
   min-height: 0;
-  overflow: hidden;
 }
 
-.aa-tabs-track {
+.aa-page {
   display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
 }
 
-.aa-tabs-track > .aa-popover-body {
-  flex: 0 0 100%;
-  min-width: 0;
-  box-sizing: border-box;
-  overscroll-behavior: none;
-  touch-action: pan-y;
+.aa-page:not([data-active]) {
+  display: none;
 }
+
+.aa-page-body {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px 12px;
+}
+
+.aa-page-body > * {
+  flex: none;
+}
+
+.aa-popover .aa-theme-section {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  align-items: center;
+  height: 48px;
+  padding: 0 4px;
+}
+
+.aa-popover .aa-theme-card {
+  flex-direction: row;
+  height: 40px;
+  border-width: 2px;
+  border-radius: 12px;
+  padding: 0;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.aa-entry-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  gap: 8px;
+  align-items: center;
+  height: 48px;
+  padding: 0 4px;
+}
+
+.aa-entry {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 42px;
+  padding: 0 6px 0 12px;
+  border: 1px solid var(--ui-border-control);
+  border-radius: 12px;
+  background: var(--ui-control-bg);
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+.aa-entry:hover {
+  border-color: color-mix(in srgb, var(--accent, #6366f1) 45%, var(--ui-border-control));
+}
+
+.aa-entry-label {
+  flex: none;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.aa-entry-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  font-size: 13.5px;
+}
+
+.aa-entry-value.is-end {
+  text-align: right;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.aa-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 48px;
+  padding: 0 8px;
+  border-radius: 14px;
+  box-sizing: border-box;
+}
+
+.aa-row-label {
+  flex: none;
+  min-width: 2.4em;
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.aa-row-value {
+  flex: none;
+  width: 3.4em;
+  text-align: right;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.aa-slider-row.is-wide-value .aa-row-value {
+  width: 6.4em;
+}
+
+.aa-slider-row.is-half .aa-row-value {
+  width: 2.6em;
+}
+
+.aa-slider {
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+  margin: 0;
+  accent-color: var(--accent, #6366f1);
+  cursor: pointer;
+  /* Sliders run sideways; a vertical drag on one is not a page scroll. */
+  touch-action: none;
+}
+
+.aa-slider:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.aa-size-btn {
+  flex: none;
+  width: 32px;
+  height: 40px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--fg);
+  font-family: var(--font-reading, serif);
+  cursor: pointer;
+}
+
+.aa-size-btn.is-small { font-size: 12px; }
+.aa-size-btn.is-large { font-size: 18px; }
+
+.aa-size-btn:hover:not(:disabled) {
+  background: var(--btn-tint-hover);
+}
+
+.aa-size-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.aa-half-rows {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.aa-half-rows > .aa-slider-row {
+  padding: 0 6px;
+}
+
+.aa-presentation-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 48px;
+  padding: 0 4px;
+}
+
+.aa-popover .aa-presentation-row .aa-segmented-capsule,
+.aa-popover .aa-control-row .aa-segmented-capsule {
+  height: 40px;
+  border-radius: 12px;
+  padding: 3px;
+}
+
+.aa-popover .aa-presentation-row .aa-segmented-btn,
+.aa-popover .aa-control-row .aa-segmented-btn {
+  height: 34px;
+  border-radius: 9px;
+  font-size: 13px;
+}
+
+.aa-more-link {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 44px;
+  padding: 0 4px 0 8px;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+
+.aa-section-note {
+  margin: -2px 6px 2px;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: right;
+}
+
+.aa-subpage-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  height: 44px;
+  padding: 0 6px;
+}
+
+.aa-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 44px;
+  padding: 0 8px;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+
+.aa-subpage-title {
+  flex: 1;
+  margin-right: 64px;
+  text-align: center;
+  font-size: 14.5px;
+  font-weight: 600;
+}
+
+.aa-more-body .aa-group-title {
+  margin: 8px 6px 2px;
+}
+
+.aa-more-body .aa-control-row {
+  min-height: 48px;
+  padding: 0 8px;
+}
+
+.aa-more-body .aa-control-row .aa-segmented-capsule {
+  flex: 0 1 220px;
+}
+
+.aa-switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 48px;
+  padding: 4px 8px;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+
+.aa-switch-name {
+  font-size: 13px;
+  color: var(--fg);
+}
+
+.aa-detail-warning {
+  font-size: 11px;
+  line-height: 1.25;
+  color: var(--color-error, #e53935);
+}
+
+.aa-more-body .aa-css-editor-section,
+.aa-more-body .aa-advanced-actions {
+  padding: 4px 8px;
+}
+
+/* ---- 按住滑块：面板让出正文，只留正在调的那一行（浮动卡片） ---- */
+.aa-popover[data-slider-focus] {
+  visibility: hidden;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.aa-popover [data-slider-focused] {
+  visibility: visible;
+  background: var(--panel-bg);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.22), 0 1px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* The reader's own bars step aside too, so the whole page shows the change. */
+.app:has(.aa-popover[data-slider-focus]) .titlebar-reader,
+.app:has(.aa-popover[data-slider-focus]) .whisper-footer,
+.app:has(.font-settings-panel[data-slider-focus]) .titlebar-reader,
+.app:has(.font-settings-panel[data-slider-focus]) .whisper-footer {
+  visibility: hidden;
+}
+
+.aa-popover .aa-theme-card.active {
+  box-shadow: none;
+}
+
+/* Bottom margin: the card moves to the top so the edge being set stays visible. */
+.app[data-mobile-chrome="true"][data-layout="compact"] .aa-popover[data-slider-focus="margin-bottom"] {
+  top: calc(env(safe-area-inset-top, 0px) + 12px);
+  bottom: auto;
+}
+
+.aa-margin-guide {
+  position: fixed;
+  z-index: calc(var(--z-ui-panel) - 5);
+  border: 1.5px dashed var(--accent, #6366f1);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--accent, #6366f1) 6%, transparent);
+  pointer-events: none;
+}
+
+.app[data-touch-ui="true"] .aa-row-label,
+.app[data-touch-ui="true"] .aa-row-value,
+.app[data-touch-ui="true"] .aa-switch-name { font-size: 14px; }
+.app[data-touch-ui="true"] .aa-entry-value { font-size: 14.5px; }

@@ -1,6 +1,8 @@
 import { useRef, type ReactNode } from "react";
 import { ArrowLeftIcon } from "./readerIcons";
 import { useSheetDrag } from "./sheetDrag";
+import { useScrollEdgeFade } from "./scrollEdgeFade";
+import { useSliderFocus } from "./sliderFocus";
 import "./aaPopover.css";
 import "./readerDisplaySettings.css";
 import { useUiText } from "./localization/UiLanguageProvider";
@@ -19,7 +21,11 @@ export interface ReaderDisplaySettingsPopoverProps {
 export function ReaderDisplaySettingsPopover({ onBack, children }: ReaderDisplaySettingsPopoverProps) {
   const { t } = useUiText();
   const panelRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
   const { dragging, grip } = useSheetDrag({ sheetRef: panelRef, onDismiss: onBack });
+  useScrollEdgeFade(bodyRef);
+  // Brightness, dim and the other filter sliders: hold one and only its row stays.
+  useSliderFocus(panelRef);
 
   return (
     <div
@@ -38,7 +44,7 @@ export function ReaderDisplaySettingsPopover({ onBack, children }: ReaderDisplay
           <span>{t("display.title")}</span>
         </div>
       </div>
-      <div className="aa-display-body">{children}</div>
+      <div className="aa-display-body scrollbar-hidden" ref={bodyRef}>{children}</div>
     </div>
   );
 }

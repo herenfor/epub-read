@@ -140,5 +140,18 @@
   "aa.uiScale": "UI Scale",
   "aa.css.inject": "Inject Custom CSS",
   "aa.css.placeholderLong": "/* Custom injected CSS, e.g.: body { text-align: justify !important; } */",
-  "aa.resetAll": "Reset All Settings"
+  "aa.resetAll": "Reset All Settings",
+  "aa.letterSpacing.short": "Spacing",
+  "aa.weight.short": "Weight",
+  "aa.display.entry": "Text & filters",
+  "aa.moreSettings": "More settings",
+  "aa.back": "Back to typography",
+  "aa.back.short": "Back",
+  "aa.group.turning": "Page turning",
+  "aa.group.display": "Display",
+  "aa.gap.spreadOnlyNote": "The gap applies only to two-page spreads",
+  "aa.display.summary.toSimplified": "→ Simp.",
+  "aa.display.summary.toTraditional": "→ Trad.",
+  "aa.display.summary.rules": "{count} rules",
+  "aa.display.summary.filter": "Filter"
 }

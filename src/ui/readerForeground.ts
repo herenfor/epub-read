@@ -4,7 +4,7 @@ import type { NoteEditContext } from "./shelf";
 
 /** Ordinary reader surfaces. Add a new member here and its renderer only. */
 export type ReaderPanelId = "menu" | "toc" | "bookmarks" | "search" | "notes" | "log" | "assistant" | "reading";
-export type MenuSubview = "main" | "fonts" | "extras";
+export type MenuSubview = "main" | "fonts" | "extras" | "more";
 
 export type NoteComposerDraft =
   | { mode: "create"; selection: SelectionContextPayload; spineIndex: number }
@@ -43,7 +43,7 @@ export function setMenuSubview(
 }
 
 /**
- * One step of Back/Esc inside Aa: a sub-page (fonts, display) returns to the
+ * One step of Back/Esc inside Aa: a sub-page (fonts, display, more) returns to the
  * Aa main page instead of closing Aa. Null means "nothing to step back to";
  * the caller closes the surface as usual.
  */

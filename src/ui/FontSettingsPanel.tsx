@@ -3,6 +3,7 @@ import type { SystemFont, UserFont } from "./fontStore";
 import { createDragDepthTracker } from "./fontDrop";
 import { ArrowLeftIcon } from "./readerIcons";
 import { useSheetDrag } from "./sheetDrag";
+import { useScrollEdgeFade } from "./scrollEdgeFade";
 import { useUiText } from "./localization/UiLanguageProvider";
 import "./aaPopover.css";
 
@@ -130,6 +131,7 @@ export function FontSettingsPanel(props: FontSettingsPanelProps) {
   // Aa 的子页：把手下拉和左上返回都回到 Aa 主页，不关闭整个 Aa。
   const panelRef = useRef<HTMLDivElement>(null);
   const { dragging, grip } = useSheetDrag({ sheetRef: panelRef, onDismiss: props.onClose });
+  useScrollEdgeFade(scrollRef);
   return <div ref={panelRef} className={`font-settings-panel${dragActive ? " font-drag-active" : ""}${dragging ? " is-dragging" : ""}`} role="dialog" aria-modal="true" aria-label={t("fonts.dialog")}
     onDragEnter={onDragEnter}
     onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = effectiveBusy ? "none" : "copy"; }}
@@ -146,23 +148,26 @@ export function FontSettingsPanel(props: FontSettingsPanelProps) {
     <div className="font-settings-current">
       {t("fonts.current", { name: (props.source === "system" || props.source === "imported" ? props.customFontName : undefined) ?? t("fonts.followBook") })}
     </div>
-    {props.onForceFontOverrideChange && <div className="font-settings-override">
-      <label className="aa-switch-label">
+    <div className="font-settings-toolbar">
+      <input className="font-search" type="search" placeholder={t("fonts.search")} aria-label={t("fonts.search")} value={query}
+        onChange={(event) => { setQuery(event.target.value); resetScroll(); }} />
+      <button type="button" className="font-import-btn" onClick={() => inputRef.current?.click()} disabled={effectiveBusy}>{effectiveBusy ? t("fonts.importing") : t("fonts.import")}</button>
+    </div>
+    <div className="font-settings-filter">
+      <div className="font-settings-tabs aa-segmented-capsule">
+        <button type="button" className={`aa-segmented-btn${tab === "system" ? " active" : ""}`} onClick={() => selectTab("system")}>{t("fonts.tab.system", { count: systems.length })}</button>
+        <button type="button" className={`aa-segmented-btn${tab === "imported" ? " active" : ""}`} onClick={() => selectTab("imported")}>{t("fonts.tab.imported", { count: imported.length })}</button>
+      </div>
+      {props.onForceFontOverrideChange && <label className="aa-switch-label font-override-switch" title={t("fonts.override.hint")}>
         <span>{t("fonts.override")}</span>
         <input type="checkbox" checked={props.forceFontOverride === true} disabled={!props.source}
           onChange={(event) => props.onForceFontOverrideChange?.(event.target.checked)} />
         <span className="aa-switch-track" />
-      </label>
-      <span className="font-settings-override-hint">{t("fonts.override.hint")}</span>
-    </div>}
-    <button className={`font-settings-row${!props.source ? " active" : ""}`} onClick={props.onSelectBook}>{t("fonts.followBook")}{!props.source ? " ✓" : ""}</button>
-    <input className="font-search" placeholder={t("fonts.search")} value={query}
-      onChange={(event) => { setQuery(event.target.value); resetScroll(); }} />
-    <div className="font-settings-tabs aa-segmented-capsule">
-      <button type="button" className={`aa-segmented-btn${tab === "system" ? " active" : ""}`} onClick={() => selectTab("system")}>{t("fonts.tab.system", { count: systems.length })}</button>
-      <button type="button" className={`aa-segmented-btn${tab === "imported" ? " active" : ""}`} onClick={() => selectTab("imported")}>{t("fonts.tab.imported", { count: imported.length })}</button>
+      </label>}
     </div>
-    <div ref={scrollRef} className="font-settings-scroll" onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}>
+    {props.onForceFontOverrideChange && <span className="font-settings-override-hint">{t("fonts.override.hint")}</span>}
+    <button className={`font-settings-row font-follow-book${!props.source ? " active" : ""}`} onClick={props.onSelectBook}>{t("fonts.followBook")}{!props.source ? " ✓" : ""}</button>
+    <div ref={scrollRef} className="font-settings-scroll scrollbar-hidden" onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}>
       {tab === "system" && props.systemFontsStatus === "loading" && <div className="font-empty">{t("fonts.system.loading")}</div>}
       {tab === "system" && props.systemFontsStatus === "error" && <div className="font-empty">{t("fonts.system.failed", { error: props.systemFontsError ?? t("fonts.unknownError") })}<br /><button className="menu-item" onClick={props.onLoadSystemFonts}>{t("fonts.retry")}</button></div>}
       {tab === "system" && props.systemFontsStatus !== "loading" && props.systemFontsStatus !== "error" && props.source === "system" && props.customFontName && props.systemFontsStatus === "ready" && !systems.some((font) => font.family === props.customFontName) && <div className="font-empty">{t("fonts.unavailable", { name: props.customFontName })}</div>}
@@ -183,7 +188,6 @@ export function FontSettingsPanel(props: FontSettingsPanelProps) {
     <div className="font-drop-zone" aria-live="polite" aria-label={t("fonts.drop")}>
       {effectiveBusy ? t("fonts.importing") : dragActive ? t("fonts.dropRelease") : t("fonts.dropHint")}
     </div>
-    <button className="menu-item" onClick={() => inputRef.current?.click()} disabled={effectiveBusy}>{t("fonts.import")}</button>
     <input ref={inputRef} type="file" accept=".ttf,.otf,.woff,.woff2" multiple hidden onChange={(event) => {
       const files = Array.from(event.target.files ?? []); void importFiles(files); event.target.value = "";
     }} />

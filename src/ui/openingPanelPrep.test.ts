@@ -98,29 +98,29 @@ describe("prepared panels are reused by the first real opening", () => {
     ...over,
   });
 
-  it("Aa: the detailed warm-up draws a real tab selection and every opening still starts at the quick tab", async () => {
+  it("Aa: the More warm-up draws that page and every opening still starts on the main page", async () => {
     const dom = createPanelHarness();
     const props = aaProps({ open: false });
-    const selected = () => [...dom.container.querySelectorAll(".aa-tab-btn")].findIndex((b) => b.getAttribute("aria-selected") === "true");
+    const shown = () => (dom.container.querySelector(".aa-popover") as HTMLElement).getAttribute("data-page");
     try {
       await dom.render(createElement(AaPopover, { ...props, paintWarm: "detailed" }));
       const dialog = dom.container.querySelector(".aa-popover") as HTMLElement;
       expect(dialog.className).toContain("is-paint-warm");
       expect(dialog.hasAttribute("inert")).toBe(true);
-      expect(selected()).toBe(1);
+      expect(shown()).toBe("more");
       for (const [name, value] of Object.entries(props)) {
         if (typeof value === "function") expect(value, name).not.toHaveBeenCalled();
       }
-      // The stage ends while closed: back to quick.
+      // The stage ends while closed: back to main.
       await dom.render(createElement(AaPopover, props));
       expect(dialog.className).not.toContain("is-paint-warm");
-      expect(selected()).toBe(0);
-      // Opened in the middle of the stage: opens at quick, not as a warm-up.
+      expect(shown()).toBe("main");
+      // Opened in the middle of the stage: opens on main, not as a warm-up.
       await dom.render(createElement(AaPopover, { ...props, paintWarm: "detailed" }));
-      expect(selected()).toBe(1);
+      expect(shown()).toBe("more");
       await dom.render(createElement(AaPopover, { ...props, open: true, paintWarm: "detailed" }));
       expect(dialog.className).not.toContain("is-paint-warm");
-      expect(selected()).toBe(0);
+      expect(shown()).toBe("main");
     } finally {
       await dom.dispose();
     }
@@ -128,33 +128,31 @@ describe("prepared panels are reused by the first real opening", () => {
 
   it("Aa: a sub-page suspends it in place; returning keeps its page and skips the entrance, a real close resets", async () => {
     const dom = createPanelHarness();
-    const props = aaProps({ open: true });
-    const selected = () => [...dom.container.querySelectorAll(".aa-tab-btn")].findIndex((b) => b.getAttribute("aria-selected") === "true");
+    const props = aaProps({ open: true, page: "more" });
     try {
       await dom.render(createElement(AaPopover, props));
-      await dom.click(dom.container.querySelectorAll(".aa-tab-btn")[1]);
-      const detailed = dom.container.querySelectorAll(".aa-popover-body")[1] as HTMLElement;
-      detailed.scrollTop = 90;
+      const more = dom.container.querySelector(".aa-more-body") as HTMLElement;
+      more.scrollTop = 90;
       // Into a sub-page and back: same page, same scroll, no entrance.
       await dom.render(createElement(AaPopover, { ...props, open: false, suspended: true }));
       await dom.render(createElement(AaPopover, { ...props, open: true }));
       const dialog = dom.container.querySelector(".aa-popover") as HTMLElement;
       expect(dialog.className).toContain("is-resumed");
-      expect(selected()).toBe(1);
-      expect(detailed.scrollTop).toBe(90);
+      expect(dialog.getAttribute("data-page")).toBe("more");
+      expect(more.scrollTop).toBe(90);
       // A sub-page closed for good (menu closed from it) resets like any close.
       await dom.render(createElement(AaPopover, { ...props, open: false, suspended: true }));
-      await dom.render(createElement(AaPopover, { ...props, open: false, suspended: false }));
-      await dom.render(createElement(AaPopover, { ...props, open: true }));
+      await dom.render(createElement(AaPopover, { ...props, page: "main", open: false, suspended: false }));
+      await dom.render(createElement(AaPopover, { ...props, page: "main", open: true }));
       expect(dialog.className).not.toContain("is-resumed");
-      expect(selected()).toBe(0);
-      expect(detailed.scrollTop).toBe(0);
+      expect(dialog.getAttribute("data-page")).toBe("main");
+      expect(more.scrollTop).toBe(0);
     } finally {
       await dom.dispose();
     }
   });
 
-  it("Aa: prepared hidden without user callbacks or focus, then opened in place at the quick tab", async () => {
+  it("Aa: prepared hidden without user callbacks or focus, then opened in place on the main page", async () => {
     const dom = createPanelHarness();
     const onPrepared = vi.fn();
     const props = aaProps({ open: false, onPrepared });
@@ -179,15 +177,14 @@ describe("prepared panels are reused by the first real opening", () => {
       expect(dom.container.querySelector(".aa-popover-backdrop")).not.toBeNull();
       expect(focus).toHaveBeenCalledTimes(1);
 
-      // Switch tabs and scroll, close: the next opening starts at the quick tab top.
-      await dom.click(dom.container.querySelectorAll(".aa-tab-btn")[1]);
-      const quick = dom.container.querySelector(".aa-popover-body") as HTMLElement;
-      quick.scrollTop = 120;
+      // Scroll, close: the next opening starts at the main page top.
+      const main = dom.container.querySelector(".aa-main-body") as HTMLElement;
+      main.scrollTop = 120;
       await dom.render(createElement(AaPopover, { ...props, open: false }));
       await dom.render(createElement(AaPopover, { ...props, open: true }));
       expect(dom.container.querySelector(".aa-popover")).toBe(dialog);
-      expect(dom.container.querySelectorAll(".aa-tab-btn")[0].getAttribute("aria-selected")).toBe("true");
-      expect(quick.scrollTop).toBe(0);
+      expect(dialog.getAttribute("data-page")).toBe("main");
+      expect(main.scrollTop).toBe(0);
       expect(onPrepared).toHaveBeenCalledTimes(1);
     } finally {
       await dom.dispose();
