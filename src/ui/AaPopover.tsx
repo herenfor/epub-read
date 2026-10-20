@@ -35,7 +35,8 @@ import {
 } from "./typographyScales";
 import { useScrollEdgeFade } from "./scrollEdgeFade";
 import { useSliderFocus } from "./sliderFocus";
-import { readerPageBox } from "./readerPageBox";
+import { readerTextBox, type ScreenBox } from "./readerPageBox";
+import { SliderDragContext, TouchSlider } from "./TouchSlider";
 
 const TURN_ANIMATION_OPTIONS: ReadonlyArray<{ value: TurnAnimation; labelKey: PlainMessageKey }> = [
   { value: "slide", labelKey: "aa.turn.slide" },
@@ -143,6 +144,11 @@ export interface AaPopoverProps {
    * relayouts at once for each value and holds its background preparation.
    */
   onLivePreviewChange?: (active: boolean) => void;
+  /**
+   * Changes each time the reader publishes a laid-out page (null while it is
+   * laying out); the margin guide re-reads the applied text box then.
+   */
+  layoutStamp?: unknown;
 
   /**
    * False keeps the panel mounted but closed: prepared while a book opens,
@@ -211,7 +217,7 @@ const MARGIN_PRESET_KEYS: Record<"narrow" | "medium" | "wide", PlainMessageKey> 
   wide: "aa.margin.wide",
 };
 
-/** A range input over a list of stops; it only ever reports values from that list. */
+/** A slider over a list of stops; it only ever reports values from that list. */
 function StopSlider({ stops, value, onChange, label, valueText, disabled }: {
   stops: SettingStops;
   value: number | undefined;
@@ -222,18 +228,16 @@ function StopSlider({ stops, value, onChange, label, valueText, disabled }: {
 }) {
   const index = stopIndex(stops, value);
   return (
-    <input
-      type="range"
+    <TouchSlider
       className="aa-slider"
       min={0}
       max={stops.length - 1}
       step={1}
       value={index}
       disabled={disabled}
-      aria-label={label}
-      aria-valuetext={valueText}
-      onChange={(event) => {
-        const next = Number(event.target.value);
+      label={label}
+      valueText={valueText}
+      onChange={(next) => {
         if (next !== index) onChange(stopValue(stops, next));
       }}
     />
@@ -317,6 +321,7 @@ export const AaPopover = React.memo(function AaPopover({
   onOpenMore,
   onBackToMain,
   onLivePreviewChange,
+  layoutStamp,
   open = true,
   onPrepared,
   paintWarm,
@@ -388,32 +393,30 @@ export const AaPopover = React.memo(function AaPopover({
   const [focusRow, setFocusRow] = useState<string | null>(null);
   const onLivePreviewChangeRef = useRef(onLivePreviewChange);
   onLivePreviewChangeRef.current = onLivePreviewChange;
-  useSliderFocus(dialogRef, (row) => {
+  // Closing Aa or covering it with a sub-page ends a drag through the same
+  // path as lifting the finger (attributes, focus state and live preview).
+  const sliderHost = useSliderFocus(dialogRef, (row) => {
     setFocusRow(row);
     onLivePreviewChangeRef.current?.(row !== null);
-  });
-  // A close or a sub-page during a drag must not leave the reader in preview.
-  useEffect(() => {
-    if (open || focusRow === null) return;
-    setFocusRow(null);
-    onLivePreviewChangeRef.current?.(false);
-  }, [open, focusRow]);
+  }, open);
 
-  // 边距参考线：只在拖边距、且边距是显式数值时画；读阅读页当前所在的方框。
+  // 边距参考线：拖边距时，画阅读器实际排出的正文框（读当前显示的已排版几何，
+  // 不在这里推算自动边距）；每次重排发布就绪后重读，拿不到就不画。
   const marginFocus = focusRow !== null && focusRow.startsWith("margin");
-  const [guideBox, setGuideBox] = useState<DOMRect | null>(null);
+  const [guideBox, setGuideBox] = useState<ScreenBox | null>(null);
   useLayoutEffect(() => {
     if (!marginFocus || readingMode === "scroll") {
       setGuideBox(null);
       return;
     }
-    setGuideBox(readerPageBox());
-  }, [marginFocus, readingMode]);
-  const guide = guideBox && pageMargins && Object.keys(pageMargins).length > 0 ? {
-    left: guideBox.left + (pageMargins.left ?? 0),
-    right: window.innerWidth - guideBox.right + (pageMargins.right ?? 0),
-    top: guideBox.top + (pageMargins.top ?? 0),
-    bottom: window.innerHeight - guideBox.bottom + (pageMargins.bottom ?? 0),
+    if (layoutStamp === null) return;
+    setGuideBox(readerTextBox());
+  }, [marginFocus, readingMode, layoutStamp]);
+  const guide = guideBox ? {
+    left: guideBox.left,
+    right: window.innerWidth - guideBox.right,
+    top: guideBox.top,
+    bottom: window.innerHeight - guideBox.bottom,
   } : null;
 
   // 打开即把焦点交给面板：Tab 从面板内开始，方向键不再落到背后的正文。
@@ -438,6 +441,15 @@ export const AaPopover = React.memo(function AaPopover({
   // opening itself is one class change. A sub-page only suspends the panel:
   // it keeps its place and returns as is.
   const [resumed, setResumed] = useState(false);
+  // The saved CSS changed under the editor (reset to defaults, another
+  // device): the draft follows it. Typing alone never changes customCss, so
+  // an unsaved draft survives ordinary re-renders.
+  const committedCssRef = useRef(customCss);
+  useLayoutEffect(() => {
+    if (committedCssRef.current === customCss) return;
+    committedCssRef.current = customCss;
+    setCssDraft(customCss);
+  }, [customCss]);
   useLayoutEffect(() => {
     if (open) {
       setCssDraft((draft) => (draft === customCss ? draft : customCss));
@@ -550,17 +562,15 @@ export const AaPopover = React.memo(function AaPopover({
         lineHeightText, { className: "is-wide-value" })}
 
       {onPageMarginsChange && sliderRow("margin-linked", t("aa.margins"),
-        <input
-          type="range"
+        <TouchSlider
           className="aa-slider"
           min={0}
           max={MARGIN_LEVEL_COUNT - 1}
           step={1}
           value={marginPosition.index}
-          aria-label={t("aa.margins")}
-          aria-valuetext={marginText}
-          onChange={(event) => {
-            const next = Number(event.target.value);
+          label={t("aa.margins")}
+          valueText={marginText}
+          onChange={(next) => {
             if (next !== marginPosition.index || !marginPosition.exact) onPageMarginsChange(marginsForLevel(next));
           }}
         />,
@@ -579,6 +589,11 @@ export const AaPopover = React.memo(function AaPopover({
           fontWeightText, { className: "is-half" })}
       </div>
 
+    </div>
+  );
+  // Fixed under the scroll area: never faded, never pushed out by the note.
+  const mainFooter = (
+    <div className="aa-main-footer">
       <div className="aa-presentation-row">
         <div className="aa-segmented-capsule" role="radiogroup" aria-label={t("aa.presentation.group")}>
           {(["single", "spread", "scroll"] as const).map((choice) => (
@@ -768,10 +783,12 @@ export const AaPopover = React.memo(function AaPopover({
         <div className="aa-sheet-grip" aria-hidden="true" {...grip}>
           <span className="aa-sheet-handle" />
         </div>
+        <SliderDragContext.Provider value={sliderHost}>
         <div className="aa-pages">
           <div className="aa-page" data-active={shownPage === "main" || undefined}
             aria-hidden={shownPage !== "main" || undefined} {...(shownPage !== "main" ? { inert: "" } : {})}>
             {mainPage}
+            {mainFooter}
           </div>
           <div className="aa-page" data-active={shownPage === "more" || undefined}
             aria-hidden={shownPage !== "more" || undefined} {...(shownPage !== "more" ? { inert: "" } : {})}>
@@ -785,6 +802,7 @@ export const AaPopover = React.memo(function AaPopover({
             {morePage}
           </div>
         </div>
+        </SliderDragContext.Provider>
       </div>
     </>
   );

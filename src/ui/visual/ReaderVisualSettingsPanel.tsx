@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState, type ChangeEvent, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import {
   resetVisualFilterPreferences,
   type ReaderVisualPreferences,
 } from "../../render/visual/readerVisualPreferences";
 import { RotateCcwIcon } from "../readerIcons";
 import "./readerVisualSettingsPanel.css";
+import { TouchSlider } from "../TouchSlider";
 import { useUiText } from "../localization/UiLanguageProvider";
 
 export function isVisualCompareKey(key: string): boolean {
@@ -34,22 +35,21 @@ interface VisualSliderProps {
 
 function VisualSlider(props: VisualSliderProps) {
   const percent = Math.round(props.value * 100);
-  const fill = ((percent - props.min) / (props.max - props.min)) * 100;
   return (
-    <label className="rd-range-row">
+    <div className="rd-range-row">
       <span className="aa-section-label">{props.label}</span>
-      <input
-        type="range"
+      <TouchSlider
         className="rd-range"
         min={props.min}
         max={props.max}
         step={props.step}
         value={percent}
-        style={{ "--fill": `${Math.min(100, Math.max(0, fill))}%` } as CSSProperties}
-        onChange={(event: ChangeEvent<HTMLInputElement>) => props.onValueChange(Number(event.currentTarget.value) / 100)}
+        label={props.label}
+        valueText={`${percent}${props.suffix}`}
+        onChange={(value) => props.onValueChange(value / 100)}
       />
       <output className="rd-range-value">{percent}{props.suffix}</output>
-    </label>
+    </div>
   );
 }
 

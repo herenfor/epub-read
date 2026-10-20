@@ -529,6 +529,7 @@
 }
 
 .aa-pages {
+  position: relative;
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -542,8 +543,14 @@
   min-height: 0;
 }
 
+/* The page not shown stays laid out (and, after the opening warm-up,
+   painted), so switching to More or back is a visibility change, not a
+   fresh layout of the whole page. */
 .aa-page:not([data-active]) {
-  display: none;
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .aa-page-body {
@@ -673,17 +680,6 @@
 .aa-slider {
   flex: 1;
   min-width: 0;
-  height: 40px;
-  margin: 0;
-  accent-color: var(--accent, #6366f1);
-  cursor: pointer;
-  /* Sliders run sideways; a vertical drag on one is not a page scroll. */
-  touch-action: none;
-}
-
-.aa-slider:disabled {
-  opacity: 0.45;
-  cursor: default;
 }
 
 .aa-size-btn {
@@ -718,6 +714,17 @@
 
 .aa-half-rows > .aa-slider-row {
   padding: 0 6px;
+}
+
+/* Reading mode and More stay put under the scrolling rows: never faded, and
+   the narrow-window note below them cannot push them out of view. */
+.aa-main-footer {
+  flex: none;
+  padding: 0 10px 10px;
+}
+
+.aa-main-footer .aa-section-note {
+  margin: -4px 6px 0;
 }
 
 .aa-presentation-row {
@@ -881,3 +888,7 @@
 .app[data-touch-ui="true"] .aa-row-value,
 .app[data-touch-ui="true"] .aa-switch-name { font-size: 14px; }
 .app[data-touch-ui="true"] .aa-entry-value { font-size: 14.5px; }
+
+.aa-main-body {
+  padding-bottom: 2px;
+}

@@ -2453,15 +2453,15 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   if (!settingsReloadDebouncerRef.current) {
     settingsReloadDebouncerRef.current = createSettingsReloadDebouncer(150);
   }
-  const previewReloadRunnerRef = useRef<ReturnType<typeof createLatestReloadRunner> | null>(null);
-  if (!previewReloadRunnerRef.current) {
-    previewReloadRunnerRef.current = createLatestReloadRunner();
+  const settingsReloadRunnerRef = useRef<ReturnType<typeof createLatestReloadRunner> | null>(null);
+  if (!settingsReloadRunnerRef.current) {
+    settingsReloadRunnerRef.current = createLatestReloadRunner();
   }
   /** A standby layer's reload held back during a drag; it runs once the drag ends. */
   const previewDeferredReloadRef = useRef<(() => Promise<void>) | null>(null);
   const cancelSettingsReloads = (): void => {
     settingsReloadDebouncerRef.current?.cancel();
-    previewReloadRunnerRef.current?.cancel();
+    settingsReloadRunnerRef.current?.cancel();
     previewDeferredReloadRef.current = null;
   };
   const latestRenderSettingsRef = useRef(renderSettings);
@@ -2785,15 +2785,17 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         },
       });
     };
+    // The debounce only decides when; every reload runs through the one runner.
+    const runReload = (): void => settingsReloadRunnerRef.current?.run(reload);
     if (!livePreviewRef.current) {
-      settingsReloadDebouncerRef.current?.schedule(reload);
+      settingsReloadDebouncerRef.current?.schedule(runReload);
       return;
     }
     // Drag preview: the visible chapter reloads now, one reload at a time with
     // the latest value; a hidden standby layer waits for the drag to end.
     settingsReloadDebouncerRef.current?.cancel();
     if (presentationStandbyRef.current) previewDeferredReloadRef.current = reload;
-    else previewReloadRunnerRef.current?.run(reload);
+    else settingsReloadRunnerRef.current?.run(reload);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Reload only for settings/fonts; current paginator and desired settings are read through refs.
   }, [settings, props.userFonts]);
 
@@ -2811,7 +2813,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     livePreviewSeenRef.current = false;
     const deferred = previewDeferredReloadRef.current;
     previewDeferredReloadRef.current = null;
-    if (deferred) settingsReloadDebouncerRef.current?.schedule(deferred);
+    if (deferred) settingsReloadDebouncerRef.current?.schedule(() => settingsReloadRunnerRef.current?.run(deferred));
     if (preloadAllowedRef.current) scheduleAdjacentPreloadsDebounced(500);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Schedulers read refs; only the drag flag drives this.
   }, [livePreview]);

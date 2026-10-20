@@ -451,6 +451,31 @@ describe("ReaderView preload settings lifecycle", () => {
     expect(active.reloadWithSettings).toHaveBeenCalledTimes(2);
   });
 
+  it("an ordinary change after a drag waits for the drag's reload instead of running beside it", async () => {
+    const settle = async () => { await act(async () => { for (let i = 0; i < 10; i += 1) await Promise.resolve(); }); };
+    await render();
+    const active = instances[0];
+    await finish(active);
+    props = { ...props, livePreview: true };
+    await render();
+    props = { ...props, settings: { ...props.settings, fontSizePx: 18 } };
+    await render();
+    await settle();
+    expect(active.reloadWithSettings).toHaveBeenCalledTimes(1);
+    // Released while that reload is still running; then a button press.
+    props = { ...props, livePreview: false };
+    await render();
+    props = { ...props, settings: { ...props.settings, fontSizePx: 24 } };
+    await render();
+    await act(async () => { vi.advanceTimersByTime(200); });
+    await settle();
+    expect(active.reloadWithSettings).toHaveBeenCalledTimes(1);
+    await act(async () => { active.finish(); });
+    await settle();
+    expect(active.reloadWithSettings).toHaveBeenCalledTimes(2);
+    expect(active.settings.fontSizePx).toBe(24);
+  });
+
   it("切章后稳固停留在新章第 0 页，决不自动向后抢跑或跳页", async () => {
     await render();
     const active = instances[0];
