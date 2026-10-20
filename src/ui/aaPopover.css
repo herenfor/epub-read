@@ -594,24 +594,21 @@
   gap: 8px;
   align-items: center;
   height: 48px;
-  margin-top: 8px;
   padding: 0 4px;
 }
 
 .aa-entry {
   display: flex;
   align-items: center;
-  justify-content: center;
   gap: 6px;
   min-width: 0;
   height: 42px;
-  padding: 0 10px;
+  padding: 0 6px 0 12px;
   border: 1px solid var(--ui-border-control);
   border-radius: 12px;
   background: var(--ui-control-bg);
   color: var(--fg);
   font: inherit;
-  text-align: center;
   cursor: pointer;
 }
 
@@ -621,32 +618,24 @@
 
 .aa-entry-label {
   flex: none;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--fg);
-  font-size: 14px;
-  font-weight: 400;
+  color: var(--muted);
+  font-size: 12.5px;
 }
 
 .aa-entry-value {
-  flex: 0 1 auto;
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   text-align: left;
+  font-size: 13.5px;
+}
+
+.aa-entry-value.is-end {
+  text-align: right;
   color: var(--muted);
-  font-size: 12px;
-}
-
-.aa-entry-value:empty {
-  display: none;
-}
-
-.aa-entry > .aa-chevron {
-  flex: none;
+  font-size: 12.5px;
 }
 
 .aa-slider-row {
@@ -917,6 +906,7 @@
 .app[data-touch-ui="true"] .aa-row-label,
 .app[data-touch-ui="true"] .aa-row-value,
 .app[data-touch-ui="true"] .aa-switch-name { font-size: 14px; }
+.app[data-touch-ui="true"] .aa-entry-value { font-size: 14.5px; }
 
 .aa-main-body {
   padding-bottom: 2px;
