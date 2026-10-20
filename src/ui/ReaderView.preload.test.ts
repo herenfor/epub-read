@@ -412,6 +412,45 @@ describe("ReaderView preload settings lifecycle", () => {
     }
   });
 
+  it("drag preview reloads at once, one at a time with the newest value, and resumes neighbors once after release", async () => {
+    const settle = async () => { await act(async () => { for (let i = 0; i < 10; i += 1) await Promise.resolve(); }); };
+    await render();
+    const active = instances[0];
+    await finish(active);
+    props = { ...props, livePreview: true };
+    await render();
+    props = { ...props, settings: { ...props.settings, fontSizePx: 18 } };
+    await render();
+    await settle();
+    // No 150ms quiet wait while a slider is held.
+    expect(active.reloadWithSettings).toHaveBeenCalledTimes(1);
+    expect(active.settings.fontSizePx).toBe(18);
+    for (const fontSizePx of [20, 22]) {
+      props = { ...props, settings: { ...props.settings, fontSizePx } };
+      await render();
+    }
+    await act(async () => { vi.advanceTimersByTime(1000); });
+    // The first reload is still running: nothing starts beside it.
+    expect(active.reloadWithSettings).toHaveBeenCalledTimes(1);
+    const count = instances.length;
+    await act(async () => { active.finish(); });
+    await settle();
+    // Then exactly one more, with the newest value; 20 is skipped.
+    expect(active.reloadWithSettings).toHaveBeenCalledTimes(2);
+    expect(active.settings.fontSizePx).toBe(22);
+    await act(async () => { active.finish(); });
+    await act(async () => { vi.advanceTimersByTime(2000); });
+    expect(instances).toHaveLength(count);
+    props = { ...props, livePreview: false };
+    await render();
+    await act(async () => { vi.advanceTimersByTime(499); });
+    expect(instances).toHaveLength(count);
+    await act(async () => { vi.advanceTimersByTime(1); });
+    expect(instances).toHaveLength(count + 1);
+    expect(instances.at(-1)!.settings.fontSizePx).toBe(22);
+    expect(active.reloadWithSettings).toHaveBeenCalledTimes(2);
+  });
+
   it("切章后稳固停留在新章第 0 页，决不自动向后抢跑或跳页", async () => {
     await render();
     const active = instances[0];

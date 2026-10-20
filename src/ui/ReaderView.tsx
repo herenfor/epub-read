@@ -39,7 +39,7 @@ import {
   samePageMargins,
 } from "../render/readerTheme";
 import { PagedLayoutTransactionCoordinator } from "./pagedLayoutTransaction";
-import { createSettingsReloadDebouncer } from "./settingsReload";
+import { createLatestReloadRunner, createSettingsReloadDebouncer } from "./settingsReload";
 import { TurnIntentBuffer, WheelTurnAccumulator } from "./turnIntent";
 import { ReadingWarmupPlan, backgroundPreparation, type WarmupTicket } from "./readerWarmup";
 import { ContinuousReaderView } from "./ContinuousReaderView";
@@ -276,6 +276,12 @@ export interface ReaderViewProps {
   inputPaused?: boolean;
   /** A hidden presentation prepares its own edge, not another five-chapter window. */
   presentationStandby?: boolean;
+  /**
+   * A typography slider is held: each layout change reloads the current
+   * chapter at once (one at a time, latest value), neighbors and warm-up wait
+   * until the drag ends, and hidden standby layers catch up afterwards.
+   */
+  livePreview?: boolean;
   /**
    * A16-3：预备层也排好自己这一段后面的章（只向后，最多到这一章、最多两章），供联动轨道
    * 直接移过去；不做全书预热。只对 presentationStandby 生效。
@@ -788,6 +794,10 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   const preloadAllowedRef = useRef(false);
   /** 后台时暂停非必要的全文/邻章预备；前台恢复仍沿用现有 scheduler。 */
   const backgroundPausedRef = useRef(typeof document !== "undefined" && document.visibilityState === "hidden");
+  const livePreviewRef = useRef(props.livePreview === true);
+  livePreviewRef.current = props.livePreview === true;
+  /** Hidden page, or a typography drag: no neighbor preload or warm-up starts. */
+  const backgroundHeld = (): boolean => backgroundPausedRef.current || livePreviewRef.current;
   /** 显式目录/搜索/书签/历史跳转必须使用自身入口锚点，不得误命中相邻缓存。 */
   const handledAnchorNonceRef = useRef(props.anchorNonce);
   const spineIndexRef = useRef(spineIndex);
@@ -1252,7 +1262,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   const scheduleAdjacentPreloads = (): void => {
     const standbyThrough = presentationStandbyRef.current ? standbyThroughRef.current : null;
     if (presentationStandbyRef.current && standbyThrough === null) return;
-    if (backgroundPausedRef.current) return;
+    if (backgroundHeld()) return;
     // 滚动模式继续使用 ContinuousReaderView，不套五章固定缓存。
     if (latestRenderSettingsRef.current.readingMode === "scroll") {
       disposeSpareSlots();
@@ -1407,7 +1417,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
 
   function scheduleAdjacentPreloadsDebounced(delayMs = 500): void {
     clearPreloadTimer();
-    if (backgroundPausedRef.current) return;
+    if (backgroundHeld()) return;
     if (!preloadAllowedRef.current || latestRenderSettingsRef.current.readingMode === "scroll") {
       disposeSpareSlots();
       return;
@@ -1567,7 +1577,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
 
   const scheduleFullBookWarmupDebounced = (delayMs = 500): void => {
     clearWarmupTimer();
-    if (backgroundPausedRef.current) return;
+    if (backgroundHeld()) return;
     if (!preloadAllowedRef.current || latestRenderSettingsRef.current.readingMode === "scroll") {
       resetFullBookWarmup();
       return;
@@ -1579,7 +1589,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   };
 
   const scheduleFullBookWarmupIdle = (): void => {
-    if (backgroundPausedRef.current) return;
+    if (backgroundHeld()) return;
     if (!preloadAllowedRef.current || latestRenderSettingsRef.current.readingMode === "scroll") {
       resetFullBookWarmup();
       return;
@@ -1589,7 +1599,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   };
 
   const runNextFullBookWarmup = (): void => {
-    if (backgroundPausedRef.current) return;
+    if (backgroundHeld()) return;
     if (!preloadAllowedRef.current || latestRenderSettingsRef.current.readingMode === "scroll") {
       resetFullBookWarmup();
       return;
@@ -2443,6 +2453,17 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
   if (!settingsReloadDebouncerRef.current) {
     settingsReloadDebouncerRef.current = createSettingsReloadDebouncer(150);
   }
+  const previewReloadRunnerRef = useRef<ReturnType<typeof createLatestReloadRunner> | null>(null);
+  if (!previewReloadRunnerRef.current) {
+    previewReloadRunnerRef.current = createLatestReloadRunner();
+  }
+  /** A standby layer's reload held back during a drag; it runs once the drag ends. */
+  const previewDeferredReloadRef = useRef<(() => Promise<void>) | null>(null);
+  const cancelSettingsReloads = (): void => {
+    settingsReloadDebouncerRef.current?.cancel();
+    previewReloadRunnerRef.current?.cancel();
+    previewDeferredReloadRef.current = null;
+  };
   const latestRenderSettingsRef = useRef(renderSettings);
   latestRenderSettingsRef.current = renderSettings;
   const settingsIdentityRef = useRef<{
@@ -2478,7 +2499,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       layoutCoordinatorRef.current.invalidate();
       resetFullBookWarmup();
       clearPreloadTimer();
-      settingsReloadDebouncerRef.current?.cancel();
+      cancelSettingsReloads();
       turnIntentRef.current.reset();
       outerWheelRef.current.reset();
       const owned = new Set<ChapterPaginator>();
@@ -2514,7 +2535,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     // the previous chapter must not start a second load after this effect.
     pauseBackgroundWarmupForInput();
     clearPreloadTimer();
-    settingsReloadDebouncerRef.current?.cancel();
+    cancelSettingsReloads();
     settingsIdentityRef.current = { settings, userFonts: props.userFonts };
     if (!paginatorRef.current) return;
     autoAdvanceRef.current = false;
@@ -2739,7 +2760,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     const targetSpineIndex = active.spineIndex;
     const targetGeneration = active.generation;
 
-    settingsReloadDebouncerRef.current?.schedule(async () => {
+    const reload = async (): Promise<void> => {
       await layoutCoordinatorRef.current.runTransaction({
         epoch,
         slot: active,
@@ -2763,9 +2784,37 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
           paintHandleRef.current?.setSurfaceBackground(surface ? readerSurfaceBackground(surface) : null);
         },
       });
-    });
+    };
+    if (!livePreviewRef.current) {
+      settingsReloadDebouncerRef.current?.schedule(reload);
+      return;
+    }
+    // Drag preview: the visible chapter reloads now, one reload at a time with
+    // the latest value; a hidden standby layer waits for the drag to end.
+    settingsReloadDebouncerRef.current?.cancel();
+    if (presentationStandbyRef.current) previewDeferredReloadRef.current = reload;
+    else previewReloadRunnerRef.current?.run(reload);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Reload only for settings/fonts; current paginator and desired settings are read through refs.
   }, [settings, props.userFonts]);
+
+  // Drag preview ends: a held standby reload runs, then neighbors and warm-up
+  // resume once (500ms quiet), instead of after every intermediate value.
+  const livePreview = props.livePreview === true;
+  const livePreviewSeenRef = useRef(false);
+  useEffect(() => {
+    if (livePreview) {
+      livePreviewSeenRef.current = true;
+      pauseBackgroundWarmupForInput();
+      return;
+    }
+    if (!livePreviewSeenRef.current) return;
+    livePreviewSeenRef.current = false;
+    const deferred = previewDeferredReloadRef.current;
+    previewDeferredReloadRef.current = null;
+    if (deferred) settingsReloadDebouncerRef.current?.schedule(deferred);
+    if (preloadAllowedRef.current) scheduleAdjacentPreloadsDebounced(500);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Schedulers read refs; only the drag flag drives this.
+  }, [livePreview]);
 
   // T-1 configuration change: dispose neighboring display snapshots and
   // reload the active chapter through the same sampled-anchor transaction.

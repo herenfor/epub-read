@@ -115,6 +115,8 @@ export interface ContinuousReaderViewProps {
   preciseTarget?: (PreciseNavigationRequest & { chapterPath: string }) | null;
   onImageActivation?(image: ImageActivationPayload): void;
   inputPaused?: boolean;
+  /** A typography slider is held: reload the shown chapters at once instead of after 150ms quiet. */
+  livePreview?: boolean;
   /** 手机普通轻点：显隐阅读工具；连续模式不在 iframe 内阻止默认行为。 */
   onPlainTap?: () => void;
   /** A15：本书书签与丝带动画提示。 */
@@ -317,6 +319,8 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
 
     const inputPausedRef = useRef(inputPaused === true);
     inputPausedRef.current = inputPaused === true;
+    const livePreviewRef = useRef(props.livePreview === true);
+    livePreviewRef.current = props.livePreview === true;
     const onPlainTapRef = useRef(props.onPlainTap);
     onPlainTapRef.current = props.onPlainTap;
     const onBookmarkCornerTapRef = useRef(props.onBookmarkCornerTap);
@@ -1962,7 +1966,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
 
       const debouncer = settingsReloadDebouncerRef.current;
       if (!debouncer) return;
-      debouncer.schedule(() => {
+      const reload = (): void => {
         const projected = new Set(projectionsRef.current.map((projection) => projection.box.key));
         // 等宽/字体重排期间若仍有旧阻尼在跑，它的目标基于旧几何，会把位置拉回。
         dampedScrollRef.current.stop();
@@ -1974,7 +1978,13 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
           if (projected.has(key)) void reloadSlotSettingsRef.current(slot);
         }
         scheduleLayoutRemeasure(pendingSpotRef.current);
-      });
+      };
+      // Drag preview: each slot already reloads one at a time and loops to the
+      // latest settings, so start now; a slot still reloading is skipped.
+      if (livePreviewRef.current) {
+        debouncer.cancel();
+        reload();
+      } else debouncer.schedule(reload);
     }, [captureReadingSpot, scheduleLayoutRemeasure, renderSettings]);
 
     // T-1 配置变化：所有存活槽位统一换版本，按同一阅读点重载并重测章节高度。
