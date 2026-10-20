@@ -14,6 +14,7 @@ import { getAppBuildSession, isAiDevelopmentActionsAllowed } from "../../../conf
 import { CloseIcon } from "../../../ui/readerIcons";
 import { useUiText, type Translate } from "../../../ui/localization/UiLanguageProvider";
 import type { PlainMessageKey } from "../../../ui/localization/core";
+import { CompanionPanel, type CompanionPanelProps } from "../companion/CompanionPanel";
 
 const CAPABILITY_LABELS: Record<AiCapability, PlainMessageKey> = {
   embedding: "ai.capability.embedding",
@@ -36,13 +37,15 @@ export interface AiFoundationPanelProps {
   onClose: () => void;
   preparation?: PreparationSectionProps;
   semantic?: SemanticSectionProps;
+  companion?: CompanionPanelProps;
 }
 
-/** AI assets and explicitly gated mock diagnostics. */
-export function AiFoundationPanel({ snapshot, onEnable, onDisable, onClose, preparation, semantic }: AiFoundationPanelProps) {
-  const { t } = useUiText();
+/** Development-only companion, AI assets and legacy mock diagnostics. */
+export function AiFoundationPanel({ snapshot, onEnable, onDisable, onClose, preparation, semantic, companion }: AiFoundationPanelProps) {
+  const { t, locale } = useUiText();
   const developmentActionsAllowed = isAiDevelopmentActionsAllowed();
   const desktopDevelopmentActionsAllowed = developmentActionsAllowed && getAppBuildSession()?.source === "desktop";
+  const companionAllowed = developmentActionsAllowed && companion && (getAppBuildSession()?.source === "browser" || getAppBuildSession()?.platform === "windows");
   const health = t(snapshot.status === "disabled"
     ? "ai.health.unchecked"
     : snapshot.health?.status === "healthy"
@@ -60,13 +63,15 @@ export function AiFoundationPanel({ snapshot, onEnable, onDisable, onClose, prep
       <div className="drawer-drag-handle" aria-hidden="true" />
       <div className="ai-foundation-head">
         <div>
-          <h2>{t("ai.panel.title")}</h2>
-          <p>{t("ai.panel.subtitle")}</p>
+          <h2>{companionAllowed ? (locale === "en" ? "Reading companion experiment" : "阅读伙伴实验") : t("ai.panel.title")}</h2>
+          <p>{companionAllowed ? (locale === "en" ? "Windows AI development edition" : "Windows AI 开发版") : t("ai.panel.subtitle")}</p>
         </div>
         <button className="tb-btn tb-close panel-close" onClick={onClose} aria-label={t("ai.panel.close")} title={t("common.close")}>
           <CloseIcon size={14} />
         </button>
       </div>
+      {companionAllowed && <CompanionPanel {...companion} />}
+      <details className="companion-settings"><summary>{t("ai.panel.title")}</summary>
       <div className="ai-foundation-note">
         {developmentActionsAllowed
           ? desktopDevelopmentActionsAllowed
@@ -102,6 +107,7 @@ export function AiFoundationPanel({ snapshot, onEnable, onDisable, onClose, prep
         )}
       </div>}
       <ModelAssetsDevelopmentSection allowDevelopmentActions={developmentActionsAllowed} />
+      </details>
     </aside>
   );
 }

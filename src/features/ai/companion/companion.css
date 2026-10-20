@@ -1,0 +1,25 @@
+.companion-panel { margin-top: 14px; font-size: 13px; line-height: 1.65; }
+.companion-panel * { box-sizing: border-box; }
+.companion-intro { display: flex; align-items: center; gap: 16px; }
+.companion-intro h3 { margin: 0; font-size: 18px; }
+.companion-intro p { margin: 6px 0; }
+.companion-avatar { flex: 0 0 160px; text-align: center; }
+.companion-avatar > div { height: 170px; width: 160px; }
+.companion-avatar canvas { display: block; width: 100%; height: 100%; }
+.companion-panel small { display: block; font-size: 11px; color: var(--muted); }
+.companion-panel label { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+.companion-panel input:not([type=checkbox]), .companion-panel select { min-width: 0; flex: 1; }
+.companion-panel input, .companion-panel select, .companion-panel textarea { color: var(--fg); background: var(--menu-surface); border: 1px solid var(--panel-border); border-radius: 6px; padding: 7px; font: inherit; }
+.companion-panel textarea { width: 100%; min-height: 80px; resize: vertical; }
+.companion-panel button { color: var(--fg); background: var(--btn-tint); border: 1px solid var(--panel-border); border-radius: 7px; padding: 6px 10px; cursor: pointer; font: inherit; }
+.companion-panel button:disabled { opacity: .5; cursor: default; }
+.companion-settings { margin: 12px 0; padding: 10px; border: 1px solid var(--panel-border); border-radius: 8px; }
+.companion-settings summary, .companion-sources summary { cursor: pointer; }
+.companion-settings fieldset { min-width: 0; padding: 0; border: 0; }
+.companion-history article { margin: 14px 0; border-bottom: 1px solid var(--panel-border); padding-bottom: 12px; }
+.companion-history p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.companion-history strong { display: block; overflow-wrap: anywhere; }
+.companion-sources { margin-top: 8px; color: var(--muted); font-size: 12px; }
+.companion-sources blockquote { max-height: 180px; overflow: auto; white-space: pre-wrap; margin: 8px 0; padding: 8px; border-left: 2px solid var(--accent); }
+.companion-actions { display: flex; justify-content: space-between; gap: 8px; margin: 8px 0; }
+.companion-error { color: var(--error, #d65c5c); overflow-wrap: anywhere; }
