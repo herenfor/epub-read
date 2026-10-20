@@ -99,6 +99,9 @@ export function TouchSlider({ min, max, step, value, onChange, label, valueText,
       if (token !== null) latest.current.host?.end(token);
     };
     const down = (event: PointerEvent): void => {
+      // Closing the panel invalidates its token even if no pointerup arrives.
+      // A newly opened panel must accept the next gesture immediately.
+      if (gesture && gesture.token !== null && latest.current.host && !latest.current.host.alive(gesture.token)) finish();
       if (latest.current.disabled || gesture) return;
       if (event.pointerType === "mouse" && event.button !== 0) return;
       const { min: lo, max: hi, step: st } = latest.current;
@@ -144,17 +147,24 @@ export function TouchSlider({ min, max, step, value, onChange, label, valueText,
     const lost = (event: PointerEvent): void => {
       if (event.target === element) up(event);
     };
+    const view = element.ownerDocument.defaultView;
+    const doc = element.ownerDocument;
+    const visibility = (): void => { if (doc.visibilityState === "hidden") finish(); };
     element.addEventListener("pointerdown", down);
     element.addEventListener("pointermove", move);
     element.addEventListener("pointerup", up);
     element.addEventListener("pointercancel", up);
     element.addEventListener("lostpointercapture", lost);
+    view?.addEventListener("blur", finish);
+    doc.addEventListener("visibilitychange", visibility);
     return () => {
       element.removeEventListener("pointerdown", down);
       element.removeEventListener("pointermove", move);
       element.removeEventListener("pointerup", up);
       element.removeEventListener("pointercancel", up);
       element.removeEventListener("lostpointercapture", lost);
+      view?.removeEventListener("blur", finish);
+      doc.removeEventListener("visibilitychange", visibility);
       finish();
     };
   }, []);

@@ -4,7 +4,7 @@ import { useMenuClose } from "./menuMotion";
 import { useSheetDrag } from "./sheetDrag";
 import { useUiMotion } from "./motionPreference";
 import type { PageDirectionSetting, Theme, TurnAnimation } from "../render/settings";
-import type { PageMarginsPx, ReadingMode, SpreadGapMode } from "../render/pageLayout";
+import type { AppliedTextInsets, PageMarginsPx, ReadingMode, SpreadGapMode } from "../render/pageLayout";
 import {
   presentationPatch,
   readingPresentation,
@@ -148,7 +148,7 @@ export interface AaPopoverProps {
    * Changes each time the reader publishes a laid-out page (null while it is
    * laying out); the margin guide re-reads the applied text box then.
    */
-  layoutStamp?: unknown;
+  layoutStamp?: { textInsets?: AppliedTextInsets } | null;
 
   /**
    * False keeps the panel mounted but closed: prepared while a book opens,
@@ -410,7 +410,7 @@ export const AaPopover = React.memo(function AaPopover({
       return;
     }
     if (layoutStamp === null) return;
-    setGuideBox(readerTextBox());
+    setGuideBox(readerTextBox(layoutStamp?.textInsets));
   }, [marginFocus, readingMode, layoutStamp]);
   const guide = guideBox ? {
     left: guideBox.left,
