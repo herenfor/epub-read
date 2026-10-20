@@ -594,21 +594,25 @@
   gap: 8px;
   align-items: center;
   height: 48px;
+  margin-top: 8px;
   padding: 0 4px;
 }
 
 .aa-entry {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: 18px 14px;
   align-items: center;
-  gap: 6px;
+  gap: 2px 6px;
   min-width: 0;
   height: 42px;
-  padding: 0 6px 0 12px;
+  padding: 3px 10px 3px 12px;
   border: 1px solid var(--ui-border-control);
   border-radius: 12px;
   background: var(--ui-control-bg);
   color: var(--fg);
   font: inherit;
+  text-align: left;
   cursor: pointer;
 }
 
@@ -617,25 +621,34 @@
 }
 
 .aa-entry-label {
-  flex: none;
-  color: var(--muted);
-  font-size: 12.5px;
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 18px;
 }
 
 .aa-entry-value {
-  flex: 1;
+  grid-column: 1;
+  grid-row: 2;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   text-align: left;
-  font-size: 13.5px;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 14px;
 }
 
-.aa-entry-value.is-end {
-  text-align: right;
-  color: var(--muted);
-  font-size: 12.5px;
+.aa-entry > .aa-chevron {
+  grid-column: 2;
+  grid-row: 1 / 3;
 }
 
 .aa-slider-row {
@@ -805,6 +818,25 @@
   margin: 8px 6px 2px;
 }
 
+/* One label/value budget keeps every track aligned, including four-character labels. */
+.aa-more-body .aa-slider-row {
+  display: grid;
+  grid-template-columns: 4.5em minmax(0, 1fr) 3.8em;
+  gap: 8px;
+  padding-inline: 12px;
+}
+
+.aa-more-body .aa-slider-row > .aa-row-label {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.2;
+}
+
+.aa-more-body .aa-slider-row > .aa-row-value {
+  width: auto;
+}
+
 .aa-more-body .aa-control-row {
   min-height: 48px;
   padding: 0 8px;
@@ -887,7 +919,6 @@
 .app[data-touch-ui="true"] .aa-row-label,
 .app[data-touch-ui="true"] .aa-row-value,
 .app[data-touch-ui="true"] .aa-switch-name { font-size: 14px; }
-.app[data-touch-ui="true"] .aa-entry-value { font-size: 14.5px; }
 
 .aa-main-body {
   padding-bottom: 2px;
