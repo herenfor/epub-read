@@ -1028,10 +1028,12 @@ export default function App() {
   foregroundRef.current = foreground;
 
   const {
-    menuOpen, fontSettingsOpen, displaySettingsOpen, tocOpen, bookmarkMenuOpen,
+    menuOpen, fontSettingsOpen, displaySettingsOpen, moreSettingsOpen, tocOpen, bookmarkMenuOpen,
     searchOpen, notesOpen, logOpen, assistantOpen, readingSettingsOpen,
     selectionContext, footnote, noteComposer,
   } = readerForegroundSurfaces(foreground);
+  // A typography slider is held in Aa: the reader relayouts per value and holds background work.
+  const [typographyPreview, setTypographyPreview] = useState(false);
 
   useEffect(() => {
     if (!displaySettingsOpen) setVisualCompareOriginal(false);
@@ -3984,6 +3986,17 @@ export default function App() {
   const prepareAaPanel = useCallback(() => openingPanels.prepared(bookKey, "aa"), [openingPanels.prepared, bookKey]);
   const openAaFonts = useCallback(() => showMenuSubview("fonts"), [showMenuSubview]);
   const openAaDisplay = useCallback(() => showMenuSubview("extras"), [showMenuSubview]);
+  const openAaMore = useCallback(() => showMenuSubview("more"), [showMenuSubview]);
+  const backToAaMain = useCallback(() => showMenuSubview("main"), [showMenuSubview]);
+  const aaDisplaySummary = useMemo(() => {
+    const parts: string[] = [];
+    if (textProjectionPreferences.mode === "simplified") parts.push(t("aa.display.summary.toSimplified"));
+    else if (textProjectionPreferences.mode === "traditional") parts.push(t("aa.display.summary.toTraditional"));
+    const rules = textProjectionPreferences.rules.filter((rule) => rule.enabled).length;
+    if (rules > 0) parts.push(t("aa.display.summary.rules", { count: rules }));
+    if (visualPreferences.enabled) parts.push(t("aa.display.summary.filter"));
+    return parts.join(" · ");
+  }, [textProjectionPreferences, visualPreferences.enabled, t]);
   const changeAaColumns = useCallback((columnsPerView: 1 | 2) => handlePresentationChange({ columnsPerView }), [handlePresentationChange]);
   const changeAaReadingMode = useCallback((readingMode: "paginated" | "scroll") => handlePresentationChange({ readingMode }), [handlePresentationChange]);
   const chooseBookFromAa = useCallback(() => {
@@ -5454,6 +5467,11 @@ export default function App() {
                 customFontName={settings.customFontName}
                 onOpenFontSettings={openAaFonts}
                 onOpenDisplaySettings={openAaDisplay}
+                displaySummary={aaDisplaySummary}
+                page={moreSettingsOpen ? "more" : "main"}
+                onOpenMore={openAaMore}
+                onBackToMain={backToAaMain}
+                onLivePreviewChange={setTypographyPreview}
                 lineHeight={settings.lineHeight}
                 onLineHeightChange={settingsActions.setLineHeight}
                 onResetLineHeight={settingsActions.resetLineHeight}
@@ -5609,6 +5627,7 @@ export default function App() {
                   onFootnoteClose={handleFootnoteClose}
                   onImageActivation={handleImageActivation}
                   inputPaused={imageRequest !== null}
+                  livePreview={typographyPreview && menuOpen}
                   onPlainTap={mobileChrome ? handleReaderPlainTap : undefined}
                   tapRegions={tapRegions}
                   bookmarks={currentBookmarks}

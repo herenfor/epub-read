@@ -28,6 +28,7 @@ export function readerForegroundSurfaces(foreground: ReaderForeground) {
   const menuOpen = foreground.kind === "panel" && foreground.panel === "menu";
   const fontSettingsOpen = foreground.kind === "panel" && foreground.panel === "menu" && foreground.view === "fonts";
   const displaySettingsOpen = foreground.kind === "panel" && foreground.panel === "menu" && foreground.view === "extras";
+  const moreSettingsOpen = foreground.kind === "panel" && foreground.panel === "menu" && foreground.view === "more";
   const tocOpen = foreground.kind === "panel" && foreground.panel === "toc";
   const bookmarkMenuOpen = foreground.kind === "panel" && foreground.panel === "bookmarks";
   const searchOpen = foreground.kind === "panel" && foreground.panel === "search";
@@ -47,7 +48,7 @@ export function readerForegroundSurfaces(foreground: ReaderForeground) {
     : null;
 
   return {
-    menuOpen, fontSettingsOpen, displaySettingsOpen, tocOpen, bookmarkMenuOpen,
+    menuOpen, fontSettingsOpen, displaySettingsOpen, moreSettingsOpen, tocOpen, bookmarkMenuOpen,
     searchOpen, notesOpen, logOpen, assistantOpen, readingSettingsOpen,
     selectionContext, footnote, noteComposer,
   };

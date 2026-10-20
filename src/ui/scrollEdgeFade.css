@@ -1,0 +1,48 @@
+/*
+ * Edge fade for scrolling menus (global menu rule): the side that still has
+ * content fades out, the side at its end does not. A mask on the scroller
+ * itself, so it follows any panel background and theme, adds no layout and
+ * never takes a click.
+ */
+@property --edge-fade-top {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --edge-fade-bottom {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+[data-edge-fade] {
+  --edge-fade-top: 0px;
+  --edge-fade-bottom: 0px;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 var(--edge-fade-top), #000 calc(100% - var(--edge-fade-bottom)), transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 var(--edge-fade-top), #000 calc(100% - var(--edge-fade-bottom)), transparent 100%);
+  transition: --edge-fade-top var(--ui-control-quick, 150ms) ease, --edge-fade-bottom var(--ui-control-quick, 150ms) ease;
+}
+
+[data-edge-fade~="top"] {
+  --edge-fade-top: 28px;
+}
+
+[data-edge-fade~="bottom"] {
+  --edge-fade-bottom: 36px;
+}
+
+/* A held slider shows only its own row; nothing around it fades. */
+[data-slider-focus] [data-edge-fade] {
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+/* Hidden scrollbar, still scrollable: the fade is the hint. */
+.scrollbar-hidden {
+  scrollbar-width: none;
+}
+
+.scrollbar-hidden::-webkit-scrollbar {
+  display: none;
+}

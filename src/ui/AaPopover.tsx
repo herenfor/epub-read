@@ -2,34 +2,48 @@ import { READER_PALETTES } from "../config/readerPalette";
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useMenuClose } from "./menuMotion";
 import { useSheetDrag } from "./sheetDrag";
-import { installSidebarSwipe, type SidebarSwipeMotion } from "./sidebarSwipe";
 import { useUiMotion } from "./motionPreference";
 import type { PageDirectionSetting, Theme, TurnAnimation } from "../render/settings";
-import { PAGE_GAP_MAX_PX, type PageMarginsPx, type ReadingMode, type SpreadGapMode } from "../render/pageLayout";
+import type { PageMarginsPx, ReadingMode, SpreadGapMode } from "../render/pageLayout";
 import {
   presentationPatch,
   readingPresentation,
   type ReadingPresentation,
 } from "../render/pagedSpread";
-import {
-  ChevronDownIcon,
-  ChevronRightIcon,
-  CloseIcon,
-  MinusIcon,
-  PlusIcon,
-  RotateCcwIcon,
-  WrenchIcon,
-} from "./readerIcons";
+import { ArrowLeftIcon, ChevronRightIcon, RotateCcwIcon, WrenchIcon } from "./readerIcons";
 import "./aaPopover.css";
 import { useUiText } from "./localization/UiLanguageProvider";
 import { formatFontSizePx } from "./fontSizeDisplay";
 import type { PlainMessageKey } from "./localization/core";
+import {
+  FONT_SIZE_STOPS,
+  FONT_WEIGHT_STOPS,
+  LETTER_SPACING_STOPS,
+  LINE_HEIGHT_STOPS,
+  MARGIN_LEVELS,
+  MARGIN_LEVEL_COUNT,
+  SIDE_MARGIN_STOPS,
+  SPREAD_GAP_STOPS,
+  WORD_SPACING_STOPS,
+  clampFontSize,
+  marginLevelPosition,
+  marginsForLevel,
+  stopIndex,
+  stopValue,
+  withMarginSide,
+  type SettingStops,
+} from "./typographyScales";
+import { useScrollEdgeFade } from "./scrollEdgeFade";
+import { useSliderFocus } from "./sliderFocus";
+import { readerPageBox } from "./readerPageBox";
 
 const TURN_ANIMATION_OPTIONS: ReadonlyArray<{ value: TurnAnimation; labelKey: PlainMessageKey }> = [
   { value: "slide", labelKey: "aa.turn.slide" },
   { value: "fade", labelKey: "aa.turn.fade" },
   { value: "none", labelKey: "aa.turn.none" },
 ];
+
+export type AaPage = "main" | "more";
 
 export interface AaPopoverProps {
   fontSize: number;
@@ -44,8 +58,10 @@ export interface AaPopoverProps {
   customFontName?: string;
   onOpenFontSettings: () => void;
   onOpenDisplaySettings?: () => void;
+  /** One-line state of the display sub-page (e.g. "繁 → 简 · 滤镜"); empty hides it. */
+  displaySummary?: string;
 
-  // 排版：行高预设 + 详细连续微调 (1.2 ~ 2.4, 步进 0.1)
+  // 行高 1.2–2.4（undefined 跟随书籍）
   lineHeight?: number;
   onLineHeightChange: (v: number) => void;
   onResetLineHeight?: () => void;
@@ -80,7 +96,7 @@ export interface AaPopoverProps {
   uiScale?: number;
   onUiScaleChange?: (scale: number) => void;
 
-  // 排版：边距预设 (窄, 适中, 宽) 与 四向独立边距微调
+  // 边距：主页一个联动滑块（自动 + 九档），更多设置里四边各自调
   pageMargins?: PageMarginsPx;
   onPageMarginsChange?: (margins: PageMarginsPx) => void;
 
@@ -98,7 +114,6 @@ export interface AaPopoverProps {
   turnAnimation?: TurnAnimation;
   onTurnAnimationChange?: (value: TurnAnimation) => void;
 
-  // 更多高级选项（折叠）
   forceHorizontal?: boolean;
   onForceHorizontalChange?: (enabled: boolean) => void;
   /** 翻页方向：跟随书籍 / 始终从左往右 */
@@ -116,18 +131,28 @@ export interface AaPopoverProps {
   onToggleLog?: () => void;
   issueCount?: number;
   onOpenFile?: () => void;
-  /** Phone bottom sheet: line height and presentation move up into the half-height first screen. */
+  /** Phone bottom sheet (fixed height, drag down to close). */
   phoneLayout?: boolean;
+
+  /** Main page, or the More settings sub-page (a menu sub-view, so Back returns to main). */
+  page?: AaPage;
+  onOpenMore?: () => void;
+  onBackToMain?: () => void;
+  /**
+   * A typography slider is held (true) or released (false). The reader then
+   * relayouts at once for each value and holds its background preparation.
+   */
+  onLivePreviewChange?: (active: boolean) => void;
 
   /**
    * False keeps the panel mounted but closed: prepared while a book opens,
    * laid out at its real size and theme, hidden, inert and without motion.
-   * Each opening then starts like a fresh one (quick tab at the top).
+   * Each opening then starts like a fresh one (scrolled to the top).
    */
   open?: boolean;
   /** Called once after the first closed (prepared) layout. */
   onPrepared?: () => void;
-  /** While closed: draw this page once, practically invisible (panelPaintWarmup). */
+  /** While closed: draw this page once, practically invisible (panelPaintWarmup). "detailed" is the More page. */
   paintWarm?: "quick" | "detailed";
   /**
    * Hidden behind one of its own sub-pages (fonts, display): keeps its page,
@@ -160,31 +185,17 @@ export const THEME_PALETTES: Array<{
   };
 });
 
-/** id is the internal preset key; labelKey is what the UI shows. */
+/** Named line heights; the slider shows the name beside the number when it lands on one. */
 export const LINE_HEIGHT_PRESETS: Array<{ id: "compact" | "standard" | "loose"; labelKey: PlainMessageKey; value: number }> = [
   { id: "compact", labelKey: "aa.lineHeight.compact", value: 1.4 },
   { id: "standard", labelKey: "aa.lineHeight.standard", value: 1.7 },
   { id: "loose", labelKey: "aa.lineHeight.loose", value: 2.0 },
 ];
 
-export const MARGIN_PRESETS: Array<{ id: "narrow" | "medium" | "wide"; labelKey: PlainMessageKey; margins: Required<PageMarginsPx> }> = [
-  { id: "narrow", labelKey: "aa.margin.narrow", margins: { left: 20, right: 20, top: 20, bottom: 20 } },
-  { id: "medium", labelKey: "aa.margin.medium", margins: { left: 40, right: 40, top: 28, bottom: 28 } },
-  { id: "wide", labelKey: "aa.margin.wide", margins: { left: 64, right: 64, top: 36, bottom: 36 } },
-];
-
-/** Preset the line height matches (unset = standard), or null for a custom value. */
+/** Preset the line height matches, or null (unset follows the book, a custom value has no name). */
 export function lineHeightPresetId(lineHeight: number | undefined): (typeof LINE_HEIGHT_PRESETS)[number]["id"] | null {
-  if (lineHeight === undefined) return "standard";
+  if (lineHeight === undefined) return null;
   return LINE_HEIGHT_PRESETS.find((preset) => Math.abs(lineHeight - preset.value) < 0.05)?.id ?? null;
-}
-
-/** Preset the margins match ("auto" when none are set), or null for custom margins. */
-export function marginPresetId(margins: PageMarginsPx | undefined): (typeof MARGIN_PRESETS)[number]["id"] | "auto" | null {
-  if (!margins || Object.keys(margins).length === 0) return "auto";
-  return MARGIN_PRESETS.find(({ margins: preset }) =>
-    margins.left === preset.left && margins.right === preset.right &&
-    margins.top === preset.top && margins.bottom === preset.bottom)?.id ?? null;
 }
 
 export const UI_SCALES: Array<{ value: number; label: string }> = [
@@ -194,17 +205,74 @@ export const UI_SCALES: Array<{ value: number; label: string }> = [
   { value: 1.3, label: "130%" },
 ];
 
+const MARGIN_PRESET_KEYS: Record<"narrow" | "medium" | "wide", PlainMessageKey> = {
+  narrow: "aa.margin.narrow",
+  medium: "aa.margin.medium",
+  wide: "aa.margin.wide",
+};
+
+/** A range input over a list of stops; it only ever reports values from that list. */
+function StopSlider({ stops, value, onChange, label, valueText, disabled }: {
+  stops: SettingStops;
+  value: number | undefined;
+  onChange: (value: number | undefined) => void;
+  label: string;
+  valueText: string;
+  disabled?: boolean;
+}) {
+  const index = stopIndex(stops, value);
+  return (
+    <input
+      type="range"
+      className="aa-slider"
+      min={0}
+      max={stops.length - 1}
+      step={1}
+      value={index}
+      disabled={disabled}
+      aria-label={label}
+      aria-valuetext={valueText}
+      onChange={(event) => {
+        const next = Number(event.target.value);
+        if (next !== index) onChange(stopValue(stops, next));
+      }}
+    />
+  );
+}
+
+function SwitchRow({ label, hint, warning, checked, disabled, onChange }: {
+  label: string;
+  hint?: string;
+  warning?: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className={`aa-switch-row${disabled ? " aa-row-disabled" : ""}`} aria-disabled={disabled || undefined}>
+      <span className="aa-toggle-text">
+        <span className="aa-switch-name">{label}</span>
+        {hint && <span className="aa-detail-sub">{hint}</span>}
+        {warning && <span className="aa-detail-warning">{warning}</span>}
+      </span>
+      <span className="aa-switch-label">
+        <input type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} />
+        <span className="aa-switch-track" />
+      </span>
+    </label>
+  );
+}
+
 export const AaPopover = React.memo(function AaPopover({
   fontSize,
-  onFontSizeChange: _onFontSizeChange,
-  onFontDec,
-  onFontInc,
+  onFontSizeChange,
   theme,
   onThemeChange,
   customFontName,
   onOpenFontSettings,
   onOpenDisplaySettings,
-  lineHeight = 1.7,
+  displaySummary,
+  lineHeight,
   onLineHeightChange,
   onResetLineHeight,
   fontWeight,
@@ -230,7 +298,6 @@ export const AaPopover = React.memo(function AaPopover({
   onPresentationChange,
   turnAnimation = "slide",
   onTurnAnimationChange,
-  phoneLayout = false,
   forceHorizontal = false,
   onForceHorizontalChange,
   pageDirection = "book",
@@ -246,21 +313,25 @@ export const AaPopover = React.memo(function AaPopover({
   onToggleLog,
   issueCount = 0,
   onOpenFile,
+  page = "main",
+  onOpenMore,
+  onBackToMain,
+  onLivePreviewChange,
   open = true,
   onPrepared,
   paintWarm,
   suspended = false,
   onClose,
 }: AaPopoverProps) {
-  const [activeTab, setActiveTab] = useState<"quick" | "detailed">("quick");
   const { t } = useUiText();
   // 连续滑动依附高性能预读：预读关闭（或固定版式不可用）时这个开关也关着、不可点。
   const seamlessAvailable = preloadNextChapter && !preloadNextChapterDisabled;
   const [uiMotion, setUiMotion] = useUiMotion();
-  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [cssDraft, setCssDraft] = useState(customCss);
   const { isClosing, requestClose } = useMenuClose(onClose, open);
   const visible = open || isClosing;
+  // Open (or only covered by a sub-page) the menu state picks the page; closed, the warm-up does.
+  const shownPage: AaPage = visible || suspended ? page : paintWarm === "detailed" ? "more" : "main";
 
   const presentation = readingPresentation({
     readingMode: readingMode ?? "paginated",
@@ -281,169 +352,91 @@ export const AaPopover = React.memo(function AaPopover({
     }
   };
 
-  // 当前边距/行高属于哪档预设（自定义数值为 null）
-  const currentMarginLevel = marginPresetId(pageMargins);
-  const currentLineHeightLevel = lineHeightPresetId(lineHeight);
-
-  // ---- 详细设置辅助调度器 ----
-  const setMarginSide = (side: keyof PageMarginsPx, next: number | undefined) => {
-    const current: PageMarginsPx = { ...(pageMargins ?? {}) };
-    if (next === undefined) {
-      delete current[side];
-    } else {
-      current[side] = next;
-    }
-    onPageMarginsChange?.(current);
+  // ---- 显示文字 ----
+  const lineHeightText = (() => {
+    if (lineHeight === undefined) return t("aa.followBook");
+    const preset = LINE_HEIGHT_PRESETS.find((item) => item.id === lineHeightPresetId(lineHeight));
+    return preset ? `${t(preset.labelKey)} ${lineHeight.toFixed(1)}` : lineHeight.toFixed(1);
+  })();
+  const marginPosition = marginLevelPosition(pageMargins);
+  const marginText = (() => {
+    if (marginPosition.index === 0) return t("aa.margin.auto");
+    if (!marginPosition.exact) return t("aa.margins.custom");
+    const level = MARGIN_LEVELS[marginPosition.index - 1];
+    return level.preset ? t(MARGIN_PRESET_KEYS[level.preset]) : `${level.side}px`;
+  })();
+  const shortDefault = t("aa.default");
+  const letterSpacingText = letterSpacingPx === undefined ? shortDefault : String(letterSpacingPx);
+  const fontWeightText = fontWeight === undefined ? shortDefault : String(fontWeight);
+  const wordSpacingText = wordSpacingPx === undefined ? t("aa.followBook") : `${wordSpacingPx}px`;
+  const autoSideText = (side: "left" | "right"): string => spreadArea
+    ? t("aa.autoPx", { px: Math.round(side === "left" ? spreadArea.baseLeftPx : spreadArea.baseRightPx) })
+    : readingMode === "scroll" ? t("aa.autoPx", { px: 16 }) : t("aa.auto");
+  const sideText = (side: keyof PageMarginsPx): string => {
+    const value = pageMargins?.[side];
+    if (value !== undefined) return `${value}px`;
+    return side === "left" || side === "right" ? autoSideText(side) : t("aa.auto");
   };
-
-  const topVal = pageMargins?.top;
-  const bottomVal = pageMargins?.bottom;
-  const leftExplicit = pageMargins?.left;
-  const rightExplicit = pageMargins?.right;
-  // 未显式设置时显示自动；已提交几何可用时用真实基础值，不写假 40px。
-  const autoLeftPx = spreadArea ? spreadArea.baseLeftPx : readingMode === "scroll" ? 16 : 0;
-  const autoRightPx = spreadArea ? spreadArea.baseRightPx : readingMode === "scroll" ? 16 : 0;
-  const leftVal = leftExplicit ?? autoLeftPx;
-  const rightVal = rightExplicit ?? autoRightPx;
-  const gapMode = spreadGapMode;
-  const effectiveGapPx = spreadArea?.gapPx;
-  const gapBasePx = gapMode === "manual" ? gapPx : effectiveGapPx ?? gapPx;
-  const gapValueText = gapMode === "manual"
+  const gapText = spreadGapMode === "manual"
     ? `${gapPx}px`
-    : effectiveGapPx !== undefined
-      ? t("aa.autoEffective", { px: Math.round(effectiveGapPx) })
+    : spreadArea?.gapPx !== undefined
+      ? t("aa.autoPx", { px: Math.round(spreadArea.gapPx) })
       : t("aa.auto");
-  const leftValueText = leftExplicit !== undefined
-    ? `${leftExplicit}px`
-    : spreadArea
-      ? t("aa.autoPx", { px: Math.round(spreadArea.baseLeftPx) })
-      : readingMode === "scroll"
-        ? t("aa.autoPx", { px: 16 })
-        : t("aa.auto");
-  const rightValueText = rightExplicit !== undefined
-    ? `${rightExplicit}px`
-    : spreadArea
-      ? t("aa.autoPx", { px: Math.round(spreadArea.baseRightPx) })
-      : readingMode === "scroll"
-        ? t("aa.autoPx", { px: 16 })
-        : t("aa.auto");
 
-  const handleLineHeightDec = () => {
-    const cur = lineHeight ?? 1.7;
-    const next = Math.max(1.2, Math.round((cur - 0.1) * 10) / 10);
-    onLineHeightChange(next);
-  };
-  const handleLineHeightInc = () => {
-    const cur = lineHeight ?? 1.7;
-    const next = Math.min(2.4, Math.round((cur + 0.1) * 10) / 10);
-    onLineHeightChange(next);
-  };
+  // ---- 拖动聚焦：按住滑块时面板隐去，正文跟着变 ----
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const [focusRow, setFocusRow] = useState<string | null>(null);
+  const onLivePreviewChangeRef = useRef(onLivePreviewChange);
+  onLivePreviewChangeRef.current = onLivePreviewChange;
+  useSliderFocus(dialogRef, (row) => {
+    setFocusRow(row);
+    onLivePreviewChangeRef.current?.(row !== null);
+  });
+  // A close or a sub-page during a drag must not leave the reader in preview.
+  useEffect(() => {
+    if (open || focusRow === null) return;
+    setFocusRow(null);
+    onLivePreviewChangeRef.current?.(false);
+  }, [open, focusRow]);
 
-  const formatFontWeight = (w?: number): string => {
-    if (w === undefined) return t("aa.followBook");
-    if (w <= 300) return t("aa.weight.light");
-    if (w <= 400) return t("aa.weight.regular");
-    if (w <= 500) return t("aa.weight.medium");
-    if (w <= 600) return t("aa.weight.semibold");
-    return t("aa.weight.bold");
-  };
-
-  const handleWeightDec = () => {
-    if (fontWeight === undefined) {
-      onFontWeightChange?.(300);
-    } else if (fontWeight <= 300) {
-      onFontWeightChange?.(undefined);
-    } else {
-      onFontWeightChange?.(Math.max(300, fontWeight - 100));
+  // 边距参考线：只在拖边距、且边距是显式数值时画；读阅读页当前所在的方框。
+  const marginFocus = focusRow !== null && focusRow.startsWith("margin");
+  const [guideBox, setGuideBox] = useState<DOMRect | null>(null);
+  useLayoutEffect(() => {
+    if (!marginFocus || readingMode === "scroll") {
+      setGuideBox(null);
+      return;
     }
-  };
-  const handleWeightInc = () => {
-    if (fontWeight === undefined) {
-      onFontWeightChange?.(400);
-    } else {
-      onFontWeightChange?.(Math.min(700, fontWeight + 100));
-    }
-  };
-
-  const handleLetterSpacingDec = () => {
-    if (letterSpacingPx === undefined || letterSpacingPx <= 0) {
-      onLetterSpacingChange?.(undefined);
-    } else {
-      onLetterSpacingChange?.(letterSpacingPx - 1);
-    }
-  };
-  const handleLetterSpacingInc = () => {
-    if (letterSpacingPx === undefined) {
-      onLetterSpacingChange?.(1);
-    } else {
-      onLetterSpacingChange?.(Math.min(8, letterSpacingPx + 1));
-    }
-  };
-
-  const handleWordSpacingDec = () => {
-    if (wordSpacingPx === undefined || wordSpacingPx <= 0) {
-      onWordSpacingChange?.(undefined);
-    } else {
-      onWordSpacingChange?.(Math.max(0, wordSpacingPx - 2));
-    }
-  };
-  const handleWordSpacingInc = () => {
-    if (wordSpacingPx === undefined) {
-      onWordSpacingChange?.(2);
-    } else {
-      onWordSpacingChange?.(Math.min(16, wordSpacingPx + 2));
-    }
-  };
+    setGuideBox(readerPageBox());
+  }, [marginFocus, readingMode]);
+  const guide = guideBox && pageMargins && Object.keys(pageMargins).length > 0 ? {
+    left: guideBox.left + (pageMargins.left ?? 0),
+    right: window.innerWidth - guideBox.right + (pageMargins.right ?? 0),
+    top: guideBox.top + (pageMargins.top ?? 0),
+    bottom: window.innerHeight - guideBox.bottom + (pageMargins.bottom ?? 0),
+  } : null;
 
   // 打开即把焦点交给面板：Tab 从面板内开始，方向键不再落到背后的正文。
-  const dialogRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (open) dialogRef.current?.focus({ preventScroll: true });
   }, [open]);
-  // 手机：半高打开，常用项一屏可见、正文仍露出；拖把手上拉展开全部，下拉收起或关闭。
-  // 头部和内容区也能拖：半高时上划先展开、内容在顶部时下划关闭；展开后内容在顶部时下划收回半高。
-  const [expanded, setExpanded] = useState(false);
-  // Keep both panes mounted: each owns its native scroll position while this Aa is open.
-  const quickBodyRef = useRef<HTMLDivElement>(null);
-  const detailedBodyRef = useRef<HTMLDivElement>(null);
-  const tabsViewportRef = useRef<HTMLDivElement>(null);
-  const tabsTrackRef = useRef<HTMLDivElement>(null);
-  const tabsMotionRef = useRef<SidebarSwipeMotion>();
-  useLayoutEffect(() => {
-    if (isClosing) return;
-    const binding = installSidebarSwipe(tabsViewportRef.current!, tabsTrackRef.current!,
-      activeTab === "quick" ? 0 : 1, index => setActiveTab(index === 0 ? "quick" : "detailed"), 2);
-    tabsMotionRef.current = binding.motion;
-    return () => { binding.dispose(); tabsMotionRef.current = undefined; };
-  }, [isClosing]);
-  useLayoutEffect(() => {
-    tabsMotionRef.current?.select(activeTab === "quick" ? 0 : 1, false, false);
-  }, [activeTab]);
-  // Warm-up draws the detailed page as a real selection (tab highlight and
-  // page state included). Whenever that ends, including an opening during
-  // the stage, the panel is back on the quick page.
-  const warmDetailed = paintWarm === "detailed" && !visible;
-  useEffect(() => {
-    setActiveTab(warmDetailed ? "detailed" : "quick");
-  }, [warmDetailed]);
-  const selectTab = (tab: "quick" | "detailed") => {
-    if (tabsMotionRef.current) tabsMotionRef.current.select(tab === "quick" ? 0 : 1, true);
-    else setActiveTab(tab);
-  };
+  const mainBodyRef = useRef<HTMLDivElement>(null);
+  const moreBodyRef = useRef<HTMLDivElement>(null);
+  useScrollEdgeFade(mainBodyRef);
+  useScrollEdgeFade(moreBodyRef);
+  // 手机：固定高度的底部面板；把手或内容在顶部时下拉关闭（不再上拉展开）。
   const { dragging, grip, reset: resetSheet } = useSheetDrag({
     sheetRef: dialogRef,
-    disabled: isClosing || !open,
+    disabled: isClosing || !open || focusRow !== null,
     onDismiss: requestClose,
-    expanded,
-    onExpandedChange: setExpanded,
-    contentRef: activeTab === "quick" ? quickBodyRef : detailedBodyRef,
+    contentRef: shownPage === "main" ? mainBodyRef : moreBodyRef,
     contentDragEnabled: () => Boolean(dialogRef.current?.closest('.app[data-mobile-chrome="true"][data-layout="compact"]')),
   });
 
-  // Closed but mounted (prepared, or after a close): return to what a fresh
-  // opening shows — quick tab at the top, half height, advanced folded —
-  // while still hidden, so the opening itself is one class change. A
-  // sub-page only suspends the panel: it keeps its place and returns as is.
+  // Closed but mounted (prepared, or after a close): back to what a fresh
+  // opening shows — both pages at the top — while still hidden, so the
+  // opening itself is one class change. A sub-page only suspends the panel:
+  // it keeps its place and returns as is.
   const [resumed, setResumed] = useState(false);
   useLayoutEffect(() => {
     if (open) {
@@ -453,13 +446,13 @@ export const AaPopover = React.memo(function AaPopover({
     setResumed(suspended);
     if (suspended) return;
     resetSheet();
-    setActiveTab("quick");
-    setExpanded(false);
-    setAdvancedOpen(false);
-    tabsMotionRef.current?.reset(0);
-    if (quickBodyRef.current) quickBodyRef.current.scrollTop = 0;
-    if (detailedBodyRef.current) detailedBodyRef.current.scrollTop = 0;
+    if (mainBodyRef.current) mainBodyRef.current.scrollTop = 0;
+    if (moreBodyRef.current) moreBodyRef.current.scrollTop = 0;
   }, [open, suspended]);
+  // Leaving More for the main page starts More at its top next time.
+  useLayoutEffect(() => {
+    if (shownPage === "main" && moreBodyRef.current) moreBodyRef.current.scrollTop = 0;
+  }, [shownPage]);
   const onPreparedRef = useRef(onPrepared);
   onPreparedRef.current = onPrepared;
   const prepared = useRef(false);
@@ -472,203 +465,280 @@ export const AaPopover = React.memo(function AaPopover({
     onPreparedRef.current?.();
   }, [open]);
 
-  // 常用设置的各行：桌面按“主题与字号 / 排版与版式”分组；手机半高一屏
-  // 先放主题、字号、行高、排版，字体和显示这类要点进下一页的往后放。
-  const themeRow = (
-    <div className="aa-section aa-theme-section" role="radiogroup" aria-label={t("aa.themes")}>
-      {THEME_PALETTES.map((palette) => {
-        const active = theme === palette.id;
-        return (
-          <button
-            key={palette.id}
-            type="button"
-            role="radio"
-            aria-checked={active}
-            className={`aa-theme-card${active ? " active" : ""}`}
-            style={{
-              backgroundColor: palette.bg,
-              color: palette.fg,
-              borderColor: active ? "var(--accent, #6366f1)" : palette.border,
-            }}
-            onClick={() => onThemeChange(palette.id)}
-            title={t("aa.theme.tip", { name: t(palette.nameKey) })}
-          >
-            <span className="aa-theme-letter">Aa</span>
-            <span className="aa-theme-label">{t(palette.nameKey)}</span>
-          </button>
-        );
-      })}
+  const sliderRow = (key: string, label: string, slider: React.ReactNode, value: string, extra?: { before?: React.ReactNode; after?: React.ReactNode; className?: string }) => (
+    <div className={`aa-slider-row${extra?.className ? ` ${extra.className}` : ""}`} data-slider-row={key}>
+      <span className="aa-row-label">{label}</span>
+      {extra?.before}
+      {slider}
+      {extra?.after}
+      <span className="aa-row-value">{value}</span>
     </div>
   );
-  const fontSizeRow = (
-    <div className="aa-section aa-control-row">
-      <span className="aa-section-label">{t("aa.fontSize")}</span>
-      <div className="aa-stepper-capsule">
-        <button
-          type="button"
-          className="aa-step-btn"
-          onClick={onFontDec}
-          disabled={fontSize <= 12}
-          title={t("aa.fontSize.dec.tip")}
-          aria-label={t("aa.fontSize.dec")}
-        >
-          <span className="aa-stepper-text-small">{t("aa.fontSize.small")}</span>
-        </button>
-        <span className="aa-stepper-val" title={t("aa.fontSize.current", { px: formatFontSizePx(fontSize) })}>
-          {formatFontSizePx(fontSize)}px
-        </span>
-        <button
-          type="button"
-          className="aa-step-btn"
-          onClick={onFontInc}
-          disabled={fontSize >= 32}
-          title={t("aa.fontSize.inc.tip")}
-          aria-label={t("aa.fontSize.inc")}
-        >
-          <span className="aa-stepper-text-large">{t("aa.fontSize.large")}</span>
-        </button>
-      </div>
-    </div>
-  );
-  const fontAndDisplayRows = (
-    <>
-      <div className="aa-section aa-control-row">
-        <span className="aa-section-label">{t("aa.font")}</span>
-        <button
-          type="button"
-          className="aa-font-trigger"
-          onClick={() => onOpenFontSettings()}
-          title={t("aa.font.tip")}
-        >
-          <span className="aa-font-name">
-            {customFontName || t("aa.font.default")}
-          </span>
-          <ChevronRightIcon size={13} className="aa-chevron" />
-        </button>
+
+  const fontSizeIndex = stopIndex(FONT_SIZE_STOPS, fontSize);
+  const stepFont = (direction: 1 | -1) => {
+    const next = stopValue(FONT_SIZE_STOPS, fontSizeIndex + direction);
+    if (next !== undefined && next !== fontSize) onFontSizeChange(clampFontSize(next));
+  };
+
+  const mainPage = (
+    <div className="aa-page-body aa-main-body scrollbar-hidden" ref={mainBodyRef}>
+      <div className="aa-theme-section" role="radiogroup" aria-label={t("aa.themes")}>
+        {THEME_PALETTES.map((palette) => {
+          const active = theme === palette.id;
+          return (
+            <button
+              key={palette.id}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              className={`aa-theme-card${active ? " active" : ""}`}
+              style={{
+                backgroundColor: palette.bg,
+                color: palette.fg,
+                borderColor: active ? "var(--accent, #6366f1)" : palette.border,
+              }}
+              onClick={() => onThemeChange(palette.id)}
+              title={t("aa.theme.tip", { name: t(palette.nameKey) })}
+            >
+              {t(palette.nameKey)}
+            </button>
+          );
+        })}
       </div>
 
-      {onOpenDisplaySettings && (
-        <div className="aa-section aa-control-row">
-          <span className="aa-section-label">{t("aa.display")}</span>
-          <button
-            type="button"
-            className="aa-font-trigger"
-            onClick={onOpenDisplaySettings}
-            title={t("aa.display.tip")}
-          >
-            <span className="aa-font-name">{t("aa.display.open")}</span>
-            <ChevronRightIcon size={13} className="aa-chevron" />
-          </button>
-        </div>
-      )}
-    </>
-  );
-  const lineHeightRow = (
-    <div className="aa-section aa-control-row">
-      <span className="aa-section-label">
-        {t("aa.lineHeight")}
-        {currentLineHeightLevel === null && lineHeight !== undefined && (
-          <span className="aa-custom-pill" title={t("aa.lineHeight.custom")}>
-            {lineHeight.toFixed(1)}
-          </span>
-        )}
-      </span>
-      <div className="aa-segmented-capsule" role="group" aria-label={t("aa.lineHeight")}>
-        {LINE_HEIGHT_PRESETS.map((preset) => (
-          <button
-            key={preset.id}
-            type="button"
-            className={`aa-segmented-btn${currentLineHeightLevel === preset.id ? " active" : ""}`}
-            onClick={() => onLineHeightChange(preset.value)}
-          >
-            {t(preset.labelKey)}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-  const marginsRow = onPageMarginsChange && (
-    <div className="aa-section aa-control-row">
-      <span className="aa-section-label">
-        {t("aa.margins")}
-        {currentMarginLevel === null && (
-          <span className="aa-custom-pill" title={t("aa.margins.custom.tip")}>
-            {t("aa.margins.custom")}
-          </span>
-        )}
-      </span>
-      <div className="aa-segmented-capsule" role="group" aria-label={t("aa.margins.group")}>
-        <button
-          type="button"
-          className={`aa-segmented-btn${currentMarginLevel === "auto" ? " active" : ""}`}
-          onClick={() => onPageMarginsChange({})}
-        >
-          {t("aa.margin.auto")}
+      <div className="aa-entry-row">
+        <button type="button" className="aa-entry" onClick={() => onOpenFontSettings()} title={t("aa.font.tip")}>
+          <span className="aa-entry-label">{t("aa.font")}</span>
+          <span className="aa-entry-value">{customFontName || t("aa.font.default")}</span>
+          <ChevronRightIcon size={14} className="aa-chevron" />
         </button>
-        {MARGIN_PRESETS.map((preset) => (
-          <button
-            key={preset.id}
-            type="button"
-            className={`aa-segmented-btn${currentMarginLevel === preset.id ? " active" : ""}`}
-            onClick={() => onPageMarginsChange(preset.margins)}
-          >
-            {t(preset.labelKey)}
+        {onOpenDisplaySettings && (
+          <button type="button" className="aa-entry" onClick={onOpenDisplaySettings} title={t("aa.display.tip")}>
+            <span className="aa-entry-label">{t("aa.display.entry")}</span>
+            <span className="aa-entry-value is-end">{displaySummary ?? ""}</span>
+            <ChevronRightIcon size={14} className="aa-chevron" />
           </button>
-        ))}
+        )}
       </div>
-    </div>
-  );
-  const presentationRows = (
-    <>
-      <div className="aa-section aa-control-row">
-        <span className="aa-section-label">{t("aa.presentation")}</span>
+
+      {sliderRow("font-size", t("aa.fontSize"),
+        <StopSlider stops={FONT_SIZE_STOPS} value={fontSize} label={t("aa.fontSize")}
+          valueText={`${formatFontSizePx(fontSize)}px`}
+          onChange={(next) => { if (next !== undefined) onFontSizeChange(clampFontSize(next)); }} />,
+        formatFontSizePx(fontSize),
+        {
+          before: (
+            <button type="button" className="aa-size-btn is-small" onClick={() => stepFont(-1)}
+              disabled={fontSizeIndex <= 0} title={t("aa.fontSize.dec.tip")} aria-label={t("aa.fontSize.dec")}>A</button>
+          ),
+          after: (
+            <button type="button" className="aa-size-btn is-large" onClick={() => stepFont(1)}
+              disabled={fontSizeIndex >= FONT_SIZE_STOPS.length - 1} title={t("aa.fontSize.inc.tip")} aria-label={t("aa.fontSize.inc")}>A</button>
+          ),
+          className: "has-steps",
+        })}
+
+      {sliderRow("line-height", t("aa.lineHeight"),
+        <StopSlider stops={LINE_HEIGHT_STOPS} value={lineHeight} label={t("aa.lineHeight")} valueText={lineHeightText}
+          onChange={(next) => {
+            if (next === undefined) {
+              if (onResetLineHeight) onResetLineHeight();
+              else onLineHeightChange(1.7);
+            } else onLineHeightChange(next);
+          }} />,
+        lineHeightText, { className: "is-wide-value" })}
+
+      {onPageMarginsChange && sliderRow("margin-linked", t("aa.margins"),
+        <input
+          type="range"
+          className="aa-slider"
+          min={0}
+          max={MARGIN_LEVEL_COUNT - 1}
+          step={1}
+          value={marginPosition.index}
+          aria-label={t("aa.margins")}
+          aria-valuetext={marginText}
+          onChange={(event) => {
+            const next = Number(event.target.value);
+            if (next !== marginPosition.index || !marginPosition.exact) onPageMarginsChange(marginsForLevel(next));
+          }}
+        />,
+        marginText, { className: "is-wide-value" })}
+
+      <div className="aa-half-rows">
+        {onLetterSpacingChange && sliderRow("letter-spacing", t("aa.letterSpacing.short"),
+          <StopSlider stops={LETTER_SPACING_STOPS} value={letterSpacingPx} label={t("aa.letterSpacing")}
+            valueText={letterSpacingPx === undefined ? t("aa.followBook") : `${letterSpacingPx}px`}
+            onChange={(next) => onLetterSpacingChange(next)} />,
+          letterSpacingText, { className: "is-half" })}
+        {onFontWeightChange && sliderRow("font-weight", t("aa.weight.short"),
+          <StopSlider stops={FONT_WEIGHT_STOPS} value={fontWeight} label={t("aa.weight")}
+            valueText={fontWeight === undefined ? t("aa.followBook") : String(fontWeight)}
+            onChange={(next) => onFontWeightChange(next)} />,
+          fontWeightText, { className: "is-half" })}
+      </div>
+
+      <div className="aa-presentation-row">
         <div className="aa-segmented-capsule" role="radiogroup" aria-label={t("aa.presentation.group")}>
-          <button
-            type="button"
-            role="radio"
-            aria-checked={presentation === "single"}
-            className={`aa-segmented-btn${presentation === "single" ? " active" : ""}`}
-            onClick={() => handlePresentationClick("single")}
-          >
-            {t("aa.presentation.single")}
-          </button>
-          <button
-            type="button"
-            role="radio"
-            aria-checked={presentation === "spread"}
-            className={`aa-segmented-btn${presentation === "spread" ? " active" : ""}`}
-            onClick={() => handlePresentationClick("spread")}
-          >
-            {t("aa.presentation.spread")}
-          </button>
-          <button
-            type="button"
-            role="radio"
-            aria-checked={presentation === "scroll"}
-            className={`aa-segmented-btn${presentation === "scroll" ? " active" : ""}`}
-            onClick={() => handlePresentationClick("scroll")}
-          >
-            {t("aa.presentation.scroll")}
-          </button>
+          {(["single", "spread", "scroll"] as const).map((choice) => (
+            <button
+              key={choice}
+              type="button"
+              role="radio"
+              aria-checked={presentation === choice}
+              className={`aa-segmented-btn${presentation === choice ? " active" : ""}`}
+              onClick={() => handlePresentationClick(choice)}
+            >
+              {t(`aa.presentation.${choice}` as PlainMessageKey)}
+            </button>
+          ))}
         </div>
+        <button type="button" className="aa-more-link" onClick={onOpenMore}>
+          {t("aa.moreSettings")}
+          <ChevronRightIcon size={14} />
+        </button>
       </div>
       {presentation === "spread" && effectiveColumns === 1 && (
-        <div
-          className="aa-section-note"
-          role="status"
-          style={{
-            fontSize: "11px",
-            color: "var(--text-secondary, #888)",
-            marginTop: "-6px",
-            marginBottom: "4px",
-            textAlign: "right",
-            paddingRight: "4px",
-          }}
-        >
-          {t("aa.presentation.narrow")}
+        <div className="aa-section-note" role="status">{t("aa.presentation.narrow")}</div>
+      )}
+    </div>
+  );
+
+  const sideRow = (side: keyof PageMarginsPx, labelKey: PlainMessageKey) => onPageMarginsChange && sliderRow(
+    `margin-${side}`, t(labelKey),
+    <StopSlider stops={SIDE_MARGIN_STOPS} value={pageMargins?.[side]} label={t(labelKey)} valueText={sideText(side)}
+      onChange={(next) => onPageMarginsChange(withMarginSide(pageMargins, side, next))} />,
+    pageMargins?.[side] !== undefined ? `${pageMargins[side]}px` : t("aa.auto"),
+  );
+
+  const morePage = (
+    <div className="aa-page-body aa-more-body scrollbar-hidden" ref={moreBodyRef}>
+      <div className="aa-group-title">{t("aa.detail.margins")}</div>
+      {sideRow("top", "aa.margin.top")}
+      {sideRow("bottom", "aa.margin.bottom")}
+      {sideRow("left", "aa.margin.left")}
+      {sideRow("right", "aa.margin.right")}
+      {onWordSpacingChange && sliderRow("word-spacing", t("aa.wordSpacing"),
+        <StopSlider stops={WORD_SPACING_STOPS} value={wordSpacingPx} label={t("aa.wordSpacing")} valueText={wordSpacingText}
+          onChange={(next) => onWordSpacingChange(next)} />,
+        wordSpacingPx === undefined ? shortDefault : `${wordSpacingPx}px`)}
+      {(onGapPxChange || onSpreadGapModeChange) && (
+        <>
+          {sliderRow("gap", t("aa.gap"),
+            <StopSlider stops={SPREAD_GAP_STOPS} value={spreadGapMode === "manual" ? gapPx : undefined}
+              label={t("aa.gap")} valueText={gapText}
+              onChange={(next) => {
+                if (next === undefined) {
+                  if (onSpreadGapModeChange) onSpreadGapModeChange("auto");
+                  else onGapPxChange?.(24);
+                } else onGapPxChange?.(next);
+              }} />,
+            spreadGapMode === "manual" ? `${gapPx}px` : t("aa.auto"))}
+          {presentation !== "spread" && <div className="aa-section-note">{t("aa.gap.spreadOnlyNote")}</div>}
+        </>
+      )}
+
+      <div className="aa-group-title">{t("aa.group.turning")}</div>
+      {onTurnAnimationChange && presentation !== "scroll" && (
+        <div className="aa-control-row">
+          <span className="aa-row-label">{t("aa.turnAnimation")}</span>
+          <div className="aa-segmented-capsule" role="radiogroup" aria-label={t("aa.turnAnimation")}>
+            {TURN_ANIMATION_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                role="radio"
+                aria-checked={turnAnimation === option.value}
+                className={`aa-segmented-btn${turnAnimation === option.value ? " active" : ""}`}
+                onClick={() => onTurnAnimationChange(option.value)}
+              >
+                {t(option.labelKey)}
+              </button>
+            ))}
+          </div>
         </div>
       )}
-    </>
+      {onPageDirectionChange && (
+        <SwitchRow label={t("aa.pageDirectionLtr")} hint={t("aa.pageDirectionLtr.hint")}
+          checked={pageDirection === "ltr"} onChange={(checked) => onPageDirectionChange(checked ? "ltr" : "book")} />
+      )}
+      {onPreloadNextChapterChange && (
+        <SwitchRow label={t("aa.preload")} warning={t("aa.preload.warning")} checked={preloadNextChapter}
+          disabled={preloadNextChapterDisabled} onChange={onPreloadNextChapterChange} />
+      )}
+      {onSeamlessChapterTurnChange && (
+        <SwitchRow label={t("aa.seamlessTurn")} hint={t("aa.seamlessTurn.hint")}
+          checked={seamlessChapterTurn && seamlessAvailable} disabled={!seamlessAvailable}
+          onChange={onSeamlessChapterTurnChange} />
+      )}
+
+      <div className="aa-group-title">{t("aa.group.display")}</div>
+      {onUiScaleChange && (
+        <div className="aa-control-row">
+          <span className="aa-row-label">{t("aa.uiScale")}</span>
+          <div className="aa-segmented-capsule" role="radiogroup" aria-label={t("aa.uiScale")}>
+            {UI_SCALES.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                role="radio"
+                aria-checked={Math.abs((uiScale ?? 1) - opt.value) < 0.05}
+                className={`aa-segmented-btn${Math.abs((uiScale ?? 1) - opt.value) < 0.05 ? " active" : ""}`}
+                onClick={() => onUiScaleChange(opt.value)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {onForceHorizontalChange && (
+        <SwitchRow label={t("aa.forceHorizontal")} hint={t("aa.forceHorizontal.hint")}
+          checked={forceHorizontal} onChange={onForceHorizontalChange} />
+      )}
+      <SwitchRow label={t("aa.motion")} hint={t("aa.motion.hint")}
+        checked={uiMotion === "reduced"} onChange={(checked) => setUiMotion(checked ? "reduced" : "full")} />
+
+      {onCustomCssChange && (
+        <div className="aa-css-editor-section">
+          <span className="aa-css-label">{t("aa.css.inject")}</span>
+          <span className="aa-css-hint">{t("aa.css.hint")}</span>
+          <textarea
+            className="aa-css-textarea"
+            rows={3}
+            placeholder={t("aa.css.placeholderLong")}
+            value={cssDraft}
+            onChange={(e) => setCssDraft(e.target.value)}
+          />
+          {cssDraft !== customCss && (
+            <button type="button" className="aa-btn-save-css" onClick={() => onCustomCssChange(cssDraft)}>
+              {t("aa.css.save")}
+            </button>
+          )}
+        </div>
+      )}
+
+      <div className="aa-advanced-actions">
+        {onOpenFile && (
+          <button type="button" className="aa-mini-action-btn" onClick={onOpenFile} title={t("aa.importBooks.tip")}>
+            <span>{t("aa.importBooks")}</span>
+          </button>
+        )}
+        {onToggleLog && (
+          <button type="button" className="aa-mini-action-btn" onClick={onToggleLog} title={t("aa.log.tip")}>
+            <WrenchIcon size={13} />
+            <span>{issueCount > 0 ? t("aa.log.count", { count: issueCount }) : t("aa.log")}</span>
+          </button>
+        )}
+        {onResetDefaults && (
+          <button type="button" className="aa-mini-action-btn" onClick={onResetDefaults} title={t("aa.reset.tip")}>
+            <RotateCcwIcon size={13} />
+            <span>{t("aa.resetAll")}</span>
+          </button>
+        )}
+      </div>
+    </div>
   );
 
   return (
@@ -680,9 +750,14 @@ export const AaPopover = React.memo(function AaPopover({
           aria-hidden="true"
         />
       )}
+      {guide && (
+        <div className="aa-margin-guide" aria-hidden="true"
+          style={{ left: guide.left, right: guide.right, top: guide.top, bottom: guide.bottom }} />
+      )}
       <div
         ref={dialogRef}
-        className={`aa-popover${visible ? "" : " is-warm"}${!visible && paintWarm ? " is-paint-warm" : ""}${visible && resumed ? " is-resumed" : ""}${isClosing ? " is-closing" : ""}${expanded ? " is-expanded" : ""}${dragging ? " is-dragging" : ""}`}
+        className={`aa-popover${visible ? "" : " is-warm"}${!visible && paintWarm ? " is-paint-warm" : ""}${visible && resumed ? " is-resumed" : ""}${isClosing ? " is-closing" : ""}${dragging ? " is-dragging" : ""}`}
+        data-page={shownPage}
         role="dialog"
         tabIndex={-1}
         aria-label={t("aa.dialog")}
@@ -693,831 +768,21 @@ export const AaPopover = React.memo(function AaPopover({
         <div className="aa-sheet-grip" aria-hidden="true" {...grip}>
           <span className="aa-sheet-handle" />
         </div>
-        {/* 头部：双模分段 Tab 切换与关闭按键 */}
-        <div className="aa-popover-header">
-          <div className="aa-popover-tabs" role="tablist" aria-label={t("aa.tabs")}>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === "quick"}
-              className={`aa-tab-btn${activeTab === "quick" ? " active" : ""}`}
-              onClick={() => selectTab("quick")}
-            >
-              {t("aa.tab.quick")}
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === "detailed"}
-              className={`aa-tab-btn${activeTab === "detailed" ? " active" : ""}`}
-              onClick={() => selectTab("detailed")}
-            >
-              {t("aa.tab.detailed")}
-            </button>
+        <div className="aa-pages">
+          <div className="aa-page" data-active={shownPage === "main" || undefined}
+            aria-hidden={shownPage !== "main" || undefined} {...(shownPage !== "main" ? { inert: "" } : {})}>
+            {mainPage}
           </div>
-          <button
-            type="button"
-            className="aa-popover-close-btn"
-            onClick={requestClose}
-            title={t("aa.close.tip")}
-            aria-label={t("aa.close")}
-          >
-            <CloseIcon size={13} />
-          </button>
-        </div>
-
-        <div className="aa-tabs-viewport" ref={tabsViewportRef}>
-          <div className="aa-tabs-track" ref={tabsTrackRef}>
-          {/* =========================================================
-           * TAB 1: 常用外观 (Quick View)
-           * ========================================================= */}
-            <div className="aa-popover-body" ref={quickBodyRef} role="tabpanel"
-              aria-label={t("aa.tab.quick")} aria-hidden={activeTab !== "quick"}
-              {...(activeTab !== "quick" ? { inert: "" } : {})}>
-              {phoneLayout ? (
-                <>
-                  <div className="aa-group-title">{t("aa.group.themeSize")}</div>
-                  {themeRow}
-                  {fontSizeRow}
-                  <div className="aa-group-title">{t("aa.group.layout")}</div>
-                  {lineHeightRow}
-                  {presentationRows}
-                  {marginsRow}
-                  <div className="aa-group-title">{t("aa.group.fontDisplay")}</div>
-                  {fontAndDisplayRows}
-                </>
-              ) : (
-                <>
-                  <div className="aa-group-title">{t("aa.group.themeSize")}</div>
-                  {themeRow}
-                  {fontSizeRow}
-                  {fontAndDisplayRows}
-                  <div className="aa-group-title">{t("aa.group.layout")}</div>
-                  {lineHeightRow}
-                  {marginsRow}
-                  {presentationRows}
-                </>
-              )}
-
-              {/* Group 3: 翻页与高级选项 */}
-              <div className="aa-group-title">{t("aa.group.advanced")}</div>
-
-              {/* 分页翻页动画；滚动模式没有翻页，不显示 */}
-              {onTurnAnimationChange && presentation !== "scroll" && (
-                <div className="aa-section aa-control-row">
-                  <span className="aa-section-label">{t("aa.turnAnimation")}</span>
-                  <div className="aa-segmented-capsule" role="radiogroup" aria-label={t("aa.turnAnimation")}>
-                    {TURN_ANIMATION_OPTIONS.map((option) => (
-                      <button
-                        key={option.value}
-                        type="button"
-                        role="radio"
-                        aria-checked={turnAnimation === option.value}
-                        className={`aa-segmented-btn${turnAnimation === option.value ? " active" : ""}`}
-                        onClick={() => onTurnAnimationChange(option.value)}
-                      >
-                        {t(option.labelKey)}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* 折叠区：更多高级设置 */}
-              <div className="aa-advanced-container">
-                <button
-                  type="button"
-                  className="aa-advanced-toggle"
-                  onClick={() => setAdvancedOpen(!advancedOpen)}
-                  aria-expanded={advancedOpen}
-                >
-                  <span>{t("aa.more")}</span>
-                  {advancedOpen ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />}
-                </button>
-
-                {advancedOpen && (
-                  <div className="aa-advanced-body">
-                    {onForceHorizontalChange && (
-                      <div className="aa-advanced-row">
-                        <div className="aa-toggle-text">
-                          <span>{t("aa.forceHorizontal")}</span>
-                          <span className="aa-detail-sub">{t("aa.forceHorizontal.hint")}</span>
-                        </div>
-                        <label className="aa-switch-label">
-                          <input
-                            type="checkbox"
-                            checked={forceHorizontal}
-                            onChange={(e) => onForceHorizontalChange(e.target.checked)}
-                          />
-                          <span className="aa-switch-track" />
-                        </label>
-                      </div>
-                    )}
-
-                    {onPageDirectionChange && (
-                      <div className="aa-advanced-row">
-                        <div className="aa-toggle-text">
-                          <span>{t("aa.pageDirectionLtr")}</span>
-                          <span className="aa-detail-sub">{t("aa.pageDirectionLtr.hint")}</span>
-                        </div>
-                        <label className="aa-switch-label">
-                          <input
-                            type="checkbox"
-                            checked={pageDirection === "ltr"}
-                            onChange={(e) => onPageDirectionChange(e.target.checked ? "ltr" : "book")}
-                          />
-                          <span className="aa-switch-track" />
-                        </label>
-                      </div>
-                    )}
-
-                    <div className="aa-advanced-row">
-                      <div className="aa-toggle-text">
-                        <span>{t("aa.motion")}</span>
-                        <span className="aa-detail-sub">{t("aa.motion.hint")}</span>
-                      </div>
-                      <label className="aa-switch-label">
-                        <input
-                          type="checkbox"
-                          checked={uiMotion === "reduced"}
-                          onChange={(e) => setUiMotion(e.target.checked ? "reduced" : "full")}
-                        />
-                        <span className="aa-switch-track" />
-                      </label>
-                    </div>
-
-                    {onPreloadNextChapterChange && (
-                      <div className={`aa-advanced-row${preloadNextChapterDisabled ? " aa-row-disabled" : ""}`}
-                        aria-disabled={preloadNextChapterDisabled || undefined}>
-                        <div className="aa-toggle-text">
-                          <span>{t("aa.preload")}</span>
-                          <span style={{ fontSize: 11, color: "var(--color-error, #e53935)", lineHeight: 1.2 }}>
-                            {t("aa.preload.warning")}
-                          </span>
-                        </div>
-                        <label className="aa-switch-label">
-                          <input
-                            type="checkbox"
-                            checked={preloadNextChapter}
-                            disabled={preloadNextChapterDisabled}
-                            onChange={(e) => onPreloadNextChapterChange(e.target.checked)}
-                          />
-                          <span className="aa-switch-track" />
-                        </label>
-                      </div>
-                    )}
-
-                    {onSeamlessChapterTurnChange && (
-                      <div className={`aa-advanced-row${seamlessAvailable ? "" : " aa-row-disabled"}`} aria-disabled={!seamlessAvailable || undefined}>
-                        <div className="aa-toggle-text">
-                          <span>{t("aa.seamlessTurn")}</span>
-                          <span className="aa-detail-sub">{t("aa.seamlessTurn.hint")}</span>
-                        </div>
-                        <label className="aa-switch-label">
-                          <input
-                            type="checkbox"
-                            checked={seamlessChapterTurn && seamlessAvailable}
-                            disabled={!seamlessAvailable}
-                            onChange={(e) => onSeamlessChapterTurnChange(e.target.checked)}
-                          />
-                          <span className="aa-switch-track" />
-                        </label>
-                      </div>
-                    )}
-
-                    {onCustomCssChange && (
-                      <div className="aa-css-editor-section">
-                        <span className="aa-css-label">{t("aa.css")}</span>
-                        <span className="aa-css-hint">{t("aa.css.hint")}</span>
-                        <textarea
-                          className="aa-css-textarea"
-                          rows={3}
-                          placeholder={t("aa.css.placeholder")}
-                          value={cssDraft}
-                          onChange={(e) => setCssDraft(e.target.value)}
-                        />
-                        {cssDraft !== customCss && (
-                          <button
-                            type="button"
-                            className="aa-btn-save-css"
-                            onClick={() => onCustomCssChange(cssDraft)}
-                          >
-                            {t("aa.css.save")}
-                          </button>
-                        )}
-                      </div>
-                    )}
-
-                    <div className="aa-advanced-actions">
-                      {onOpenFile && (
-                        <button
-                          type="button"
-                          className="aa-mini-action-btn"
-                          onClick={onOpenFile}
-                          title={t("aa.importBooks.tip")}
-                        >
-                          <span>{t("aa.importBooks")}</span>
-                        </button>
-                      )}
-                      {onToggleLog && (
-                        <button
-                          type="button"
-                          className="aa-mini-action-btn"
-                          onClick={onToggleLog}
-                          title={t("aa.log.tip")}
-                        >
-                          <WrenchIcon size={13} />
-                          <span>{issueCount > 0 ? t("aa.log.count", { count: issueCount }) : t("aa.log")}</span>
-                        </button>
-                      )}
-                      {onResetDefaults && (
-                        <button
-                          type="button"
-                          className="aa-mini-action-btn"
-                          onClick={onResetDefaults}
-                          title={t("aa.reset.tip")}
-                        >
-                          <RotateCcwIcon size={13} />
-                          <span>{t("aa.reset")}</span>
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
+          <div className="aa-page" data-active={shownPage === "more" || undefined}
+            aria-hidden={shownPage !== "more" || undefined} {...(shownPage !== "more" ? { inert: "" } : {})}>
+            <div className="aa-subpage-head">
+              <button type="button" className="aa-back-btn" onClick={onBackToMain} aria-label={t("aa.back")}>
+                <ArrowLeftIcon size={14} />
+                <span>{t("aa.back.short")}</span>
+              </button>
+              <span className="aa-subpage-title">{t("aa.moreSettings")}</span>
             </div>
-
-          {/* =========================================================
-           * TAB 2: 详细排版工作台 (Detailed Typography & Layout)
-           * ========================================================= */}
-            <div className="aa-popover-body" ref={detailedBodyRef} role="tabpanel"
-              aria-label={t("aa.detail")} aria-hidden={activeTab !== "detailed"}
-              {...(activeTab !== "detailed" ? { inert: "" } : {})}>
-            <div className="aa-detailed-view">
-              {/* 分组 1: 正文微调 */}
-              <div className="aa-detail-group-title">{t("aa.detail.text")}</div>
-
-              {/* 1. 精确行高 (0.1 步进 + 重置) */}
-              <div className="aa-section aa-control-row">
-                <div className="aa-detail-label-wrap">
-                  <span className="aa-section-label">{t("aa.lineHeight.ratio")}</span>
-                  <span className="aa-detail-sub">
-                    {lineHeight !== undefined ? t("aa.lineHeight.times", { value: lineHeight.toFixed(1) }) : t("aa.lineHeight.auto")}
-                  </span>
-                </div>
-                <div className="aa-stepper-capsule">
-                  <button
-                    type="button"
-                    className="aa-step-reset-btn"
-                    onClick={() => {
-                      if (onResetLineHeight) onResetLineHeight();
-                      else onLineHeightChange(1.7);
-                    }}
-                    title={t("aa.lineHeight.reset.tip")}
-                    aria-label={t("aa.lineHeight.reset")}
-                  >
-                    <RotateCcwIcon size={11} />
-                  </button>
-                  <button
-                    type="button"
-                    className="aa-step-btn"
-                    onClick={handleLineHeightDec}
-                    disabled={(lineHeight ?? 1.7) <= 1.2}
-                    title={t("aa.lineHeight.dec")}
-                  >
-                    <MinusIcon size={12} />
-                  </button>
-                  <span className="aa-stepper-val">
-                    {lineHeight !== undefined ? lineHeight.toFixed(1) : "1.7"}
-                  </span>
-                  <button
-                    type="button"
-                    className="aa-step-btn"
-                    onClick={handleLineHeightInc}
-                    disabled={(lineHeight ?? 1.7) >= 2.4}
-                    title={t("aa.lineHeight.inc")}
-                  >
-                    <PlusIcon size={12} />
-                  </button>
-                </div>
-              </div>
-
-              {/* 2. 字重 (300 ~ 700 或跟随书籍) */}
-              <div className="aa-section aa-control-row">
-                <div className="aa-detail-label-wrap">
-                  <span className="aa-section-label">{t("aa.weight")}</span>
-                  <span className="aa-detail-sub">{formatFontWeight(fontWeight)}</span>
-                </div>
-                <div className="aa-stepper-capsule">
-                  <button
-                    type="button"
-                    className="aa-step-reset-btn"
-                    onClick={() => onFontWeightChange?.(undefined)}
-                    title={t("aa.weight.reset.tip")}
-                    aria-label={t("aa.weight.reset")}
-                  >
-                    <RotateCcwIcon size={11} />
-                  </button>
-                  <button
-                    type="button"
-                    className="aa-step-btn"
-                    onClick={handleWeightDec}
-                    disabled={fontWeight === undefined}
-                    title={t("aa.weight.dec")}
-                  >
-                    <MinusIcon size={12} />
-                  </button>
-                  <span className="aa-stepper-val">
-                    {fontWeight ?? t("aa.default")}
-                  </span>
-                  <button
-                    type="button"
-                    className="aa-step-btn"
-                    onClick={handleWeightInc}
-                    disabled={fontWeight !== undefined && fontWeight >= 700}
-                    title={t("aa.weight.inc")}
-                  >
-                    <PlusIcon size={12} />
-                  </button>
-                </div>
-              </div>
-
-              {/* 3. 字间距 (0 ~ 8px 或跟随书籍) */}
-              <div className="aa-section aa-control-row">
-                <div className="aa-detail-label-wrap">
-                  <span className="aa-section-label">{t("aa.letterSpacing")}</span>
-                  <span className="aa-detail-sub">
-                    {letterSpacingPx !== undefined ? `${letterSpacingPx}px` : t("aa.followBook")}
-                  </span>
-                </div>
-                <div className="aa-stepper-capsule">
-                  <button
-                    type="button"
-                    className="aa-step-reset-btn"
-                    onClick={() => onLetterSpacingChange?.(undefined)}
-                    title={t("aa.letterSpacing.reset.tip")}
-                    aria-label={t("aa.letterSpacing.reset")}
-                  >
-                    <RotateCcwIcon size={11} />
-                  </button>
-                  <button
-                    type="button"
-                    className="aa-step-btn"
-                    onClick={handleLetterSpacingDec}
-                    disabled={letterSpacingPx === undefined || letterSpacingPx <= 0}
-                    title={t("aa.letterSpacing.dec")}
-                  >
-                    <MinusIcon size={12} />
-                  </button>
-                  <span className="aa-stepper-val">
-                    {letterSpacingPx !== undefined ? `${letterSpacingPx}px` : t("aa.default")}
-                  </span>
-                  <button
-                    type="button"
-                    className="aa-step-btn"
-                    onClick={handleLetterSpacingInc}
-                    disabled={letterSpacingPx !== undefined && letterSpacingPx >= 8}
-                    title={t("aa.letterSpacing.inc")}
-                  >
-                    <PlusIcon size={12} />
-                  </button>
-                </div>
-              </div>
-
-              {/* 4. 词/字符间距 (0 ~ 16px 或跟随书籍) */}
-              <div className="aa-section aa-control-row">
-                <div className="aa-detail-label-wrap">
-                  <span className="aa-section-label">{t("aa.wordSpacing")}</span>
-                  <span className="aa-detail-sub">
-                    {wordSpacingPx !== undefined ? `${wordSpacingPx}px` : t("aa.followBook")}
-                  </span>
-                </div>
-                <div className="aa-stepper-capsule">
-                  <button
-                    type="button"
-                    className="aa-step-reset-btn"
-                    onClick={() => onWordSpacingChange?.(undefined)}
-                    title={t("aa.wordSpacing.reset.tip")}
-                    aria-label={t("aa.wordSpacing.reset")}
-                  >
-                    <RotateCcwIcon size={11} />
-                  </button>
-                  <button
-                    type="button"
-                    className="aa-step-btn"
-                    onClick={handleWordSpacingDec}
-                    disabled={wordSpacingPx === undefined || wordSpacingPx <= 0}
-                    title={t("aa.wordSpacing.dec")}
-                  >
-                    <MinusIcon size={12} />
-                  </button>
-                  <span className="aa-stepper-val">
-                    {wordSpacingPx !== undefined ? `${wordSpacingPx}px` : t("aa.default")}
-                  </span>
-                  <button
-                    type="button"
-                    className="aa-step-btn"
-                    onClick={handleWordSpacingInc}
-                    disabled={wordSpacingPx !== undefined && wordSpacingPx >= 16}
-                    title={t("aa.wordSpacing.inc")}
-                  >
-                    <PlusIcon size={12} />
-                  </button>
-                </div>
-              </div>
-
-              {/* 分组 2: 版心与页边距 (四向独立精确步进) */}
-              <div className="aa-detail-group-title">{t("aa.detail.margins")}</div>
-
-              {/* 上边距 */}
-              <div className="aa-section aa-control-row">
-                <div className="aa-detail-label-wrap">
-                  <span className="aa-section-label">{t("aa.margin.top")}</span>
-                  <span className="aa-detail-sub">
-                    {topVal !== undefined ? `${topVal}px` : t("aa.margin.top.auto")}
-                  </span>
-                </div>
-                <div className="aa-stepper-capsule">
-                  <button
-                    type="button"
-                    className="aa-step-reset-btn"
-                    onClick={() => setMarginSide("top", undefined)}
-                    title={t("aa.margin.top.reset.tip")}
-                    aria-label={t("aa.margin.top.reset")}
-                  >
-                    <RotateCcwIcon size={11} />
-                  </button>
-                  <button
-                    type="button"
-                    className="aa-step-btn"
-                    onClick={() => {
-                      const cur = topVal ?? 28;
-                      setMarginSide("top", Math.max(0, cur - 4));
-                    }}
-                    disabled={(topVal ?? 28) <= 0}
-                    title={t("aa.margin.top.dec")}
-                  >
-                    <MinusIcon size={12} />
-                  </button>
-                  <span className="aa-stepper-val">
-                    {topVal !== undefined ? `${topVal}px` : t("aa.auto")}
-                  </span>
-                  <button
-                    type="button"
-                    className="aa-step-btn"
-                    onClick={() => {
-                      const cur = topVal ?? 28;
-                      setMarginSide("top", Math.min(120, cur + 4));
-                    }}
-                    disabled={(topVal ?? 28) >= 120}
-                    title={t("aa.margin.top.inc")}
-                  >
-                    <PlusIcon size={12} />
-                  </button>
-                </div>
-              </div>
-
-              {/* 下边距 */}
-              <div className="aa-section aa-control-row">
-                <div className="aa-detail-label-wrap">
-                  <span className="aa-section-label">{t("aa.margin.bottom")}</span>
-                  <span className="aa-detail-sub">
-                    {bottomVal !== undefined ? `${bottomVal}px` : t("aa.margin.bottom.auto")}
-                  </span>
-                </div>
-                <div className="aa-stepper-capsule">
-                  <button
-                    type="button"
-                    className="aa-step-reset-btn"
-                    onClick={() => setMarginSide("bottom", undefined)}
-                    title={t("aa.margin.bottom.reset.tip")}
-                    aria-label={t("aa.margin.bottom.reset")}
-                  >
-                    <RotateCcwIcon size={11} />
-                  </button>
-                  <button
-                    type="button"
-                    className="aa-step-btn"
-                    onClick={() => {
-                      const cur = bottomVal ?? 20;
-                      setMarginSide("bottom", Math.max(0, cur - 4));
-                    }}
-                    disabled={(bottomVal ?? 20) <= 0}
-                    title={t("aa.margin.bottom.dec")}
-                  >
-                    <MinusIcon size={12} />
-                  </button>
-                  <span className="aa-stepper-val">
-                    {bottomVal !== undefined ? `${bottomVal}px` : t("aa.auto")}
-                  </span>
-                  <button
-                    type="button"
-                    className="aa-step-btn"
-                    onClick={() => {
-                      const cur = bottomVal ?? 20;
-                      setMarginSide("bottom", Math.min(120, cur + 4));
-                    }}
-                    disabled={(bottomVal ?? 20) >= 120}
-                    title={t("aa.margin.bottom.inc")}
-                  >
-                    <PlusIcon size={12} />
-                  </button>
-                </div>
-              </div>
-
-              {/* 左边距 */}
-              <div className="aa-section aa-control-row">
-                <div className="aa-detail-label-wrap">
-                  <span className="aa-section-label">{t("aa.margin.left")}</span>
-                  <span className="aa-detail-sub">{leftValueText}</span>
-                </div>
-                <div className="aa-stepper-capsule">
-                  <button
-                    type="button"
-                    className="aa-step-reset-btn"
-                    onClick={() => setMarginSide("left", undefined)}
-                    title={t("aa.margin.reset.tip")}
-                    aria-label={t("aa.margin.left.reset")}
-                  >
-                    <RotateCcwIcon size={11} />
-                  </button>
-                  <button
-                    type="button"
-                    className="aa-step-btn"
-                    onClick={() => setMarginSide("left", Math.max(0, leftVal - 4))}
-                    disabled={leftVal <= 0}
-                    title={t("aa.margin.left.dec")}
-                  >
-                    <MinusIcon size={12} />
-                  </button>
-                  <span className="aa-stepper-val" title={leftValueText}>
-                    {leftExplicit !== undefined ? `${leftExplicit}px` : t("aa.auto")}
-                  </span>
-                  <button
-                    type="button"
-                    className="aa-step-btn"
-                    onClick={() => setMarginSide("left", Math.min(120, leftVal + 4))}
-                    disabled={leftVal >= 120}
-                    title={t("aa.margin.left.inc")}
-                  >
-                    <PlusIcon size={12} />
-                  </button>
-                </div>
-              </div>
-
-              {/* 右边距 */}
-              <div className="aa-section aa-control-row">
-                <div className="aa-detail-label-wrap">
-                  <span className="aa-section-label">{t("aa.margin.right")}</span>
-                  <span className="aa-detail-sub">{rightValueText}</span>
-                </div>
-                <div className="aa-stepper-capsule">
-                  <button
-                    type="button"
-                    className="aa-step-reset-btn"
-                    onClick={() => setMarginSide("right", undefined)}
-                    title={t("aa.margin.reset.tip")}
-                    aria-label={t("aa.margin.right.reset")}
-                  >
-                    <RotateCcwIcon size={11} />
-                  </button>
-                  <button
-                    type="button"
-                    className="aa-step-btn"
-                    onClick={() => setMarginSide("right", Math.max(0, rightVal - 4))}
-                    disabled={rightVal <= 0}
-                    title={t("aa.margin.right.dec")}
-                  >
-                    <MinusIcon size={12} />
-                  </button>
-                  <span className="aa-stepper-val" title={rightValueText}>
-                    {rightExplicit !== undefined ? `${rightExplicit}px` : t("aa.auto")}
-                  </span>
-                  <button
-                    type="button"
-                    className="aa-step-btn"
-                    onClick={() => setMarginSide("right", Math.min(120, rightVal + 4))}
-                    disabled={rightVal >= 120}
-                    title={t("aa.margin.right.inc")}
-                  >
-                    <PlusIcon size={12} />
-                  </button>
-                </div>
-              </div>
-
-              {/* 双栏列间距 (中缝) */}
-              <div className="aa-section aa-control-row">
-                <div className="aa-detail-label-wrap">
-                  <span className="aa-section-label">{t("aa.gap")}</span>
-                  <span className="aa-detail-sub">
-                    {presentation === "spread" ? gapValueText : t("aa.gap.spreadOnly", { value: gapValueText })}
-                  </span>
-                </div>
-                <div className="aa-stepper-capsule">
-                  <button
-                    type="button"
-                    className="aa-step-reset-btn"
-                    onClick={() =>
-                      onSpreadGapModeChange
-                        ? onSpreadGapModeChange("auto")
-                        : onGapPxChange?.(24)
-                    }
-                    title={t("aa.gap.reset.tip")}
-                    aria-label={t("aa.gap.reset")}
-                  >
-                    <RotateCcwIcon size={11} />
-                  </button>
-                  <button
-                    type="button"
-                    className="aa-step-btn"
-                    onClick={() => onGapPxChange?.(Math.max(0, gapBasePx - 4))}
-                    disabled={gapBasePx <= 0}
-                    title={t("aa.gap.dec")}
-                  >
-                    <MinusIcon size={12} />
-                  </button>
-                  <span className="aa-stepper-val" title={gapValueText}>
-                    {gapMode === "manual" ? `${gapPx}px` : t("aa.auto")}
-                  </span>
-                  <button
-                    type="button"
-                    className="aa-step-btn"
-                    onClick={() => onGapPxChange?.(Math.min(PAGE_GAP_MAX_PX, gapBasePx + 4))}
-                    disabled={gapBasePx >= PAGE_GAP_MAX_PX}
-                    title={t("aa.gap.inc")}
-                  >
-                    <PlusIcon size={12} />
-                  </button>
-                </div>
-              </div>
-
-              {/* 分组 3: 引擎与系统 */}
-              <div className="aa-detail-group-title">{t("aa.detail.engine")}</div>
-
-              {/* 界面缩放 */}
-              {onUiScaleChange && (
-                <div className="aa-section aa-control-row">
-                  <span className="aa-section-label">{t("aa.uiScale")}</span>
-                  <div className="aa-segmented-capsule" role="radiogroup" aria-label={t("aa.uiScale")}>
-                    {UI_SCALES.map((opt) => (
-                      <button
-                        key={opt.value}
-                        type="button"
-                        className={`aa-segmented-btn${Math.abs((uiScale ?? 1) - opt.value) < 0.05 ? " active" : ""}`}
-                        onClick={() => onUiScaleChange(opt.value)}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* 强制横排 */}
-              {onForceHorizontalChange && (
-                <div className="aa-section aa-control-row aa-toggle-row">
-                  <div className="aa-toggle-text">
-                    <span className="aa-section-label">{t("aa.forceHorizontal")}</span>
-                    <span className="aa-detail-sub">{t("aa.forceHorizontal.hint")}</span>
-                  </div>
-                  <label className="aa-switch-label">
-                    <input
-                      type="checkbox"
-                      checked={forceHorizontal}
-                      onChange={(e) => onForceHorizontalChange(e.target.checked)}
-                    />
-                    <span className="aa-switch-track" />
-                  </label>
-                </div>
-              )}
-
-              {/* 翻页方向：关闭时跟随书籍（台版竖排书从右往左翻） */}
-              {onPageDirectionChange && (
-                <div className="aa-section aa-control-row aa-toggle-row">
-                  <div className="aa-toggle-text">
-                    <span className="aa-section-label">{t("aa.pageDirectionLtr")}</span>
-                    <span className="aa-detail-sub">{t("aa.pageDirectionLtr.hint")}</span>
-                  </div>
-                  <label className="aa-switch-label">
-                    <input
-                      type="checkbox"
-                      checked={pageDirection === "ltr"}
-                      onChange={(e) => onPageDirectionChange(e.target.checked ? "ltr" : "book")}
-                    />
-                    <span className="aa-switch-track" />
-                  </label>
-                </div>
-              )}
-
-              {/* 简化界面动画（低特效）：与书架“界面动画”同一设置 */}
-              <div className="aa-section aa-control-row aa-toggle-row">
-                <div className="aa-toggle-text">
-                  <span className="aa-section-label">{t("aa.motion")}</span>
-                  <span className="aa-detail-sub">{t("aa.motion.hint")}</span>
-                </div>
-                <label className="aa-switch-label">
-                  <input
-                    type="checkbox"
-                    checked={uiMotion === "reduced"}
-                    onChange={(e) => setUiMotion(e.target.checked ? "reduced" : "full")}
-                  />
-                  <span className="aa-switch-track" />
-                </label>
-              </div>
-
-              {/* 高性能预加载 */}
-              {onPreloadNextChapterChange && (
-                <div className={`aa-section aa-control-row aa-toggle-row${preloadNextChapterDisabled ? " aa-row-disabled" : ""}`}
-                  aria-disabled={preloadNextChapterDisabled || undefined}>
-                  <div className="aa-toggle-text">
-                    <span className="aa-section-label">{t("aa.preload")}</span>
-                    <span style={{ fontSize: 11, color: "var(--color-error, #e53935)", lineHeight: 1.2 }}>
-                      {t("aa.preload.warning")}
-                    </span>
-                  </div>
-                  <label className="aa-switch-label">
-                    <input
-                      type="checkbox"
-                      checked={preloadNextChapter}
-                      disabled={preloadNextChapterDisabled}
-                      onChange={(e) => onPreloadNextChapterChange(e.target.checked)}
-                    />
-                    <span className="aa-switch-track" />
-                  </label>
-                </div>
-              )}
-
-              {/* A16 章节间连续滑动：依附高性能预读 */}
-              {onSeamlessChapterTurnChange && (
-                <div className={`aa-section aa-control-row aa-toggle-row${seamlessAvailable ? "" : " aa-row-disabled"}`}
-                  aria-disabled={!seamlessAvailable || undefined}>
-                  <div className="aa-toggle-text">
-                    <span className="aa-section-label">{t("aa.seamlessTurn")}</span>
-                    <span className="aa-detail-sub">{t("aa.seamlessTurn.hint")}</span>
-                  </div>
-                  <label className="aa-switch-label">
-                    <input
-                      type="checkbox"
-                      checked={seamlessChapterTurn && seamlessAvailable}
-                      disabled={!seamlessAvailable}
-                      onChange={(e) => onSeamlessChapterTurnChange(e.target.checked)}
-                    />
-                    <span className="aa-switch-track" />
-                  </label>
-                </div>
-              )}
-
-              {/* 自定义 CSS */}
-              {onCustomCssChange && (
-                <div className="aa-css-editor-section">
-                  <span className="aa-css-label">{t("aa.css.inject")}</span>
-                  <span className="aa-css-hint">{t("aa.css.hint")}</span>
-                  <textarea
-                    className="aa-css-textarea"
-                    rows={4}
-                    placeholder={t("aa.css.placeholderLong")}
-                    value={cssDraft}
-                    onChange={(e) => setCssDraft(e.target.value)}
-                  />
-                  {cssDraft !== customCss && (
-                    <button
-                      type="button"
-                      className="aa-btn-save-css"
-                      onClick={() => onCustomCssChange(cssDraft)}
-                    >
-                      {t("aa.css.save")}
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {/* 底部操作工具行 */}
-              <div className="aa-advanced-actions" style={{ marginTop: 6, borderTop: "1px solid color-mix(in srgb, var(--panel-border) 40%, transparent)", paddingTop: 8 }}>
-                {onResetDefaults && (
-                  <button
-                    type="button"
-                    className="aa-mini-action-btn"
-                    onClick={onResetDefaults}
-                    title={t("aa.reset.tip")}
-                  >
-                    <RotateCcwIcon size={13} />
-                    <span>{t("aa.resetAll")}</span>
-                  </button>
-                )}
-                {onToggleLog && (
-                  <button
-                    type="button"
-                    className="aa-mini-action-btn"
-                    onClick={onToggleLog}
-                    title={t("aa.log.tip")}
-                  >
-                    <WrenchIcon size={13} />
-                    <span>{issueCount > 0 ? t("aa.log.count", { count: issueCount }) : t("aa.log")}</span>
-                  </button>
-                )}
-              </div>
-            </div>
-            </div>
+            {morePage}
           </div>
         </div>
       </div>
