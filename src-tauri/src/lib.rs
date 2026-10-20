@@ -152,7 +152,11 @@ macro_rules! configure_invoke_handler {
             ai::embedding_gateway::ai_semantic_cancel,
             ai::embedding_gateway::ai_semantic_close,
             ai::embedding_gateway::ai_semantic_status,
-            ai::embedding_gateway::ai_semantic_probe
+            ai::embedding_gateway::ai_semantic_probe,
+            ai::companion::ai_chat_stream,
+            ai::companion::ai_chat_cancel,
+            ai::companion::ai_chat_read_chapter,
+            ai::companion::ai_chat_search
         ])
     };
 }

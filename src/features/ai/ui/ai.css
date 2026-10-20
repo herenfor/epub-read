@@ -3,7 +3,7 @@
   bottom: 20px;
   left: 50%;
   transform: translate(-50%, 0) scale(1);
-  z-index: 50;
+  z-index: var(--z-ui-drawer);
   width: min(680px, calc(100vw - 32px));
   height: min(600px, calc(100vh - 40px));
   box-sizing: border-box;

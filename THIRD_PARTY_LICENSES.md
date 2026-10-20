@@ -15,6 +15,8 @@ Each component remains subject to its respective license.
 | React | 18.3.1 | MIT | https://github.com/facebook/react |
 | React DOM | 18.3.1 | MIT | https://github.com/facebook/react |
 | fflate | 0.8.3 | MIT | https://github.com/101arrowz/fflate |
+| pixi.js (AI experimental avatar only) | 6.5.10 | MIT | https://github.com/pixijs/pixijs |
+| pixi-live2d-display (AI experimental avatar only) | 0.4.0 | MIT; bundled Cubism framework has its own license | https://github.com/guansss/pixi-live2d-display |
 | qrcode | 1.5.4 | MIT | https://github.com/soldair/node-qrcode |
 | @tauri-apps/api | 2.11.1 | MIT OR Apache-2.0 | https://github.com/tauri-apps/tauri |
 | @tauri-apps/plugin-dialog | 2.7.2 | MIT OR Apache-2.0 | https://github.com/tauri-apps/plugins-workspace |
@@ -199,6 +201,24 @@ from their respective LICENSE files:
 - **JSpecify** — Copyright (c) The JSpecify Authors (Apache-2.0)
 
 ## License texts
+
+### AI-only local Live2D experiment
+
+The experimental renderer uses PixiJS and pixi-live2d-display; their MIT notices
+are preserved in `third-party-licenses/pixi-js-MIT.txt` and
+`third-party-licenses/pixi-live2d-display-MIT.txt`. The latter includes portions
+of the Cubism Web Framework under the
+[Live2D Open Software License](https://www.live2d.com/eula/live2d-open-software-license-agreement_en.html).
+Its notice is preserved in `third-party-licenses/Live2D-Open-Software-License.md`.
+
+Hiyori FREE (the AIRI sample preset, illustrations by Kani Biimu, model by Live2D)
+and Cubism Core are **not MIT assets**. Local experiments may install them in
+`.ai-companion-local/` with the upstream ReadMe and licenses retained. This
+directory is ignored by Git, served only by the AI development server, and never
+copied into any production bundle. No character model or Cubism Core binary is
+included in this source distribution. Core builds do not include the renderer.
+See the [official sample terms](https://www.live2d.com/en/learn/sample/) and
+[SDK license](https://www.live2d.com/en/sdk/license/) before any future distribution.
 
 标准许可证全文位于 [`third-party-licenses/`](third-party-licenses/):
 

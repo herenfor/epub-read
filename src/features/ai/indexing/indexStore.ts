@@ -186,7 +186,7 @@ export async function clearAllTextIndexes(): Promise<void> {
   await invoke<void>("ai_index_clear_all");
 }
 
-function parseTextAnchor(json: string): TextAnchor {
+export function parseTextAnchor(json: string): TextAnchor {
   const value: unknown = JSON.parse(json);
   if (!value || typeof value !== "object") throw new Error("全文索引包含无效文本锚点");
   const candidate = value as Record<string, unknown>;

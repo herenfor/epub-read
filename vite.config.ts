@@ -4,6 +4,7 @@ import packageJson from "./package.json";
 import react from "@vitejs/plugin-react";
 import { normalizeAppEdition } from "./src/config/editionValue";
 import { frontendOutDir, normalizeAppPlatform, shellForPlatform } from "./src/config/platformValue";
+import { aiCompanionDevAssets } from "./scripts/ai-companion-dev-assets.mjs";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, ".", "");
@@ -27,7 +28,7 @@ export default defineConfig(({ mode }) => {
       __APP_PLATFORM__: JSON.stringify(platform),
       __APP_VERSION__: JSON.stringify(version),
     },
-    plugins: [react(), {
+    plugins: [react(), ...(edition === "ai" ? [aiCompanionDevAssets()] : []), {
       name: "edition-manifest",
       transformIndexHtml(html) {
         if (platform !== "android") return html;
@@ -45,9 +46,8 @@ export default defineConfig(({ mode }) => {
         });
       }
     }],
-    // The only current public asset is the C-57 model-download probe. It is
-    // part of the explicit AI development edition and must not leak into the
-    // Core release bundle through Vite's unconditional public-dir copy.
+    // Download probes belong only to AI. Local Live2D materials live outside
+    // public-ai and are served by AI dev middleware, never by a release build.
     publicDir: edition === "ai" ? "public-ai" : false,
     clearScreen: false,
     server: {

@@ -6,6 +6,8 @@
 mod cache_settings;
 mod cache_repair;
 #[cfg(feature = "ai")]
+pub(crate) mod companion;
+#[cfg(feature = "ai")]
 mod download;
 #[cfg(feature = "ai")]
 mod embedding;

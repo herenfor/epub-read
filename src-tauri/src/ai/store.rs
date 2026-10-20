@@ -2783,7 +2783,7 @@ fn validate_chunk_text(name: &str, value: &str, max_chars: usize) -> Result<Stri
     Ok(value.to_string())
 }
 
-fn read_search_hit(row: &rusqlite::Row<'_>) -> rusqlite::Result<AiSearchHit> {
+pub(super) fn read_search_hit(row: &rusqlite::Row<'_>) -> rusqlite::Result<AiSearchHit> {
     Ok(AiSearchHit {
         content_hash: row.get(0)?,
         title: row.get(1)?,

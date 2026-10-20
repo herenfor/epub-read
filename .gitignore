@@ -50,3 +50,6 @@ src-tauri/gen/android/app/src/main/java/**/generated/
 
 # Internal task reports belong in ignored docs, never at the repository root.
 /*-result.md
+
+# Local-only AI avatar model and proprietary Cubism Core; never ship as public assets.
+/.ai-companion-local/

@@ -25,6 +25,9 @@ const has = (needle) => text.includes(needle);
 if (edition === "core" && (has("ai_hardware_probe") || has("硬件与资源探测"))) throw new Error("Core artifact contains hardware probe");
 if (edition === "core" && has("epub-reader-model-lock-probe")) throw new Error("Core artifact contains model lock diagnostics");
 if (edition === "core") {
+  for (const needle of ["ai_chat_stream", "epub-reader-ai-companion-v1", "companion-panel", "/__ai-companion/", "hiyori_free_t08", "live2dcubismcore"]) {
+    if (has(needle) || fileNames.includes(needle)) throw new Error(`Core artifact contains experimental companion: ${needle}`);
+  }
   // `ai_semantic*` is the C-58B native embedding/index IPC surface; Core must
   // never bundle a caller, and `semantic-section` marks the real UI entry.
   for (const needle of ["c57-dev-probe", "ai_model_", "ai_preparation", "ai_semantic", "epub-reader-rag-preparation", "PreparationSection", ".preparation-citation", "semantic-section", "SemanticSection", "ModelAssetsDevelopmentSection", "AiFoundationPanel", "ai-foundation-panel", ".ai-foundation-", ".model-assets-", "dev.epubreader.ai", "EPUB Reader AI"]) if (has(needle) || fileNames.includes(needle)) throw new Error(`Core artifact contains AI marker: ${needle}`);
@@ -33,6 +36,9 @@ if (edition === "core") {
   if (!existsSync(join(outDir, "c57-dev-probe", "probe.txt"))) throw new Error("AI artifact is missing the AI development probe");
   for (const needle of ["AiFoundationPanel", "ai-foundation-panel", ".ai-foundation-", ".model-assets-", "ai_model_", "ai_semantic_open", "semantic-section"]) if (!has(needle) && !fileNames.includes(needle)) throw new Error(`AI artifact is missing marker: ${needle}`);
   if (!has("corpusWorker")) throw new Error("AI artifact is missing corpusWorker");
+}
+if (files.some(path => /\.(?:vrm|moc3)$/i.test(path) || /live2dcubismcore/i.test(path))) {
+  throw new Error("Local-only companion materials must not enter a build");
 }
 // Record the Cargo target directory that was actually used. An explicit
 // CARGO_TARGET_DIR (e.g. the Android entry point's src-tauri/target-android-core)

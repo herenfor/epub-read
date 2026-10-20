@@ -5534,6 +5534,23 @@ export default function App() {
                     <Suspense fallback={<aside className="ai-foundation-panel" role="status">{t("appUi.aiLoading")}</aside>}>
                       <LazyAiFoundationPanel
                         snapshot={aiRuntimeSnapshot}
+                        companion={book && currentShelfId ? {
+                          book,
+                          context: {
+                            bookHash: contentHashByIdRef.current.get(currentShelfId) ?? currentShelfId,
+                            title: book.metadata.title, creator: book.metadata.creator ?? "", spineIndex,
+                          },
+                          libraryBooks: shelfEntries.filter(entry => entry.available !== false && Boolean(entry.contentHash))
+                            .map(entry => ({ hash: entry.contentHash!, title: entry.title, creator: entry.creator, spineIndex: entry.spineIndex })),
+                          onNavigate: (evidence) => {
+                            if (evidence.bookHash === (contentHashByIdRef.current.get(currentShelfId) ?? currentShelfId)) {
+                              handleSearchNavigate(evidence.citation);
+                            } else {
+                              const entry = shelfEntries.find(candidate => candidate.contentHash === evidence.bookHash);
+                              if (entry) void handleShelfOpen(entry.id, evidence.hit);
+                            }
+                          },
+                        } : undefined}
                         preparation={book && currentShelfId ? {
                           book, fingerprint: contentHashByIdRef.current.get(currentShelfId) ?? currentShelfId,
                           readingBusy: readerPriorityBusyRef.current, onNavigate: handleSearchNavigate,
