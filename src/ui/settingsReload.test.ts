@@ -67,6 +67,20 @@ describe("live preview reload runner", () => {
     expect(calls).toEqual(["a", "b"]);
   });
 
+  it("after a cancel, a new reload still waits for the one in flight", async () => {
+    const runner = createLatestReloadRunner();
+    const first = deferred();
+    const calls: string[] = [];
+    runner.run(() => { calls.push("a"); return first.promise; });
+    runner.cancel();
+    expect(runner.busy).toBe(true);
+    runner.run(() => { calls.push("b"); });
+    expect(calls).toEqual(["a"]);
+    first.resolve();
+    await flush();
+    expect(calls).toEqual(["a", "b"]);
+  });
+
   it("drops the queued value on cancel", async () => {
     const runner = createLatestReloadRunner();
     const first = deferred();

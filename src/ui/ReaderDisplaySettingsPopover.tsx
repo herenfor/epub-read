@@ -3,6 +3,7 @@ import { ArrowLeftIcon } from "./readerIcons";
 import { useSheetDrag } from "./sheetDrag";
 import { useScrollEdgeFade } from "./scrollEdgeFade";
 import { useSliderFocus } from "./sliderFocus";
+import { SliderDragContext } from "./TouchSlider";
 import "./aaPopover.css";
 import "./readerDisplaySettings.css";
 import { useUiText } from "./localization/UiLanguageProvider";
@@ -25,7 +26,7 @@ export function ReaderDisplaySettingsPopover({ onBack, children }: ReaderDisplay
   const { dragging, grip } = useSheetDrag({ sheetRef: panelRef, onDismiss: onBack });
   useScrollEdgeFade(bodyRef);
   // Brightness, dim and the other filter sliders: hold one and only its row stays.
-  useSliderFocus(panelRef);
+  const sliderHost = useSliderFocus(panelRef);
 
   return (
     <div
@@ -44,7 +45,9 @@ export function ReaderDisplaySettingsPopover({ onBack, children }: ReaderDisplay
           <span>{t("display.title")}</span>
         </div>
       </div>
-      <div className="aa-display-body scrollbar-hidden" ref={bodyRef}>{children}</div>
+      <SliderDragContext.Provider value={sliderHost}>
+        <div className="aa-display-body scrollbar-hidden" ref={bodyRef}>{children}</div>
+      </SliderDragContext.Provider>
     </div>
   );
 }

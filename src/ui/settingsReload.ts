@@ -29,23 +29,25 @@ export function createSettingsReloadDebouncer(delayMs = 150): SettingsReloadDebo
 export interface LatestReloadRunner {
   /** Start now when idle; while one runs, keep only the newest task for when it settles. */
   run(task: () => Promise<unknown> | void): void;
-  /** Drop the queued task; a task still running settles without starting another. */
+  /**
+   * Drop the queued task. A task already running is not stopped here (its
+   * own epoch and slot checks make its result void); it keeps the runner
+   * busy until it really settles, so nothing new overlaps it.
+   */
   cancel(): void;
   readonly busy: boolean;
 }
 
 /**
- * Live preview while a slider is held: at most one reload at a time, and the
- * next one uses the latest value. A slow device simply refreshes less often;
- * nothing queues up behind the drag.
+ * The one place settings reloads run, for drags and ordinary changes alike:
+ * at most one at a time, and the next one uses the latest value. A slow
+ * device simply refreshes less often; nothing queues up behind it.
  */
 export function createLatestReloadRunner(): LatestReloadRunner {
   let running = false;
   let pending: (() => Promise<unknown> | void) | null = null;
-  let generation = 0;
   const start = (task: () => Promise<unknown> | void): void => {
     running = true;
-    const owner = generation;
     let result: Promise<unknown> | void;
     try {
       result = task();
@@ -53,7 +55,6 @@ export function createLatestReloadRunner(): LatestReloadRunner {
       result = undefined;
     }
     void Promise.resolve(result).catch(() => undefined).then(() => {
-      if (owner !== generation) return;
       running = false;
       const next = pending;
       pending = null;
@@ -66,8 +67,6 @@ export function createLatestReloadRunner(): LatestReloadRunner {
       else start(task);
     },
     cancel() {
-      generation += 1;
-      running = false;
       pending = null;
     },
     get busy() {

@@ -102,48 +102,9 @@
   text-align: right;
 }
 
+/* Filter sliders are TouchSlider (touchSlider.css); only their height is set here. */
 .rd-range {
-  width: 100%;
-  min-width: 0;
-  height: 4px;
-  margin: 0;
-  -webkit-appearance: none;
-  appearance: none;
-  border-radius: 2px;
-  background: linear-gradient(
-    to right,
-    var(--accent) 0%,
-    var(--accent) var(--fill, 0%),
-    color-mix(in srgb, var(--fg) 16%, transparent) var(--fill, 0%),
-    color-mix(in srgb, var(--fg) 16%, transparent) 100%
-  );
-  cursor: pointer;
-}
-
-.rd-range::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: var(--accent);
-  border: 2px solid var(--panel-bg);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
-  cursor: grab;
-}
-
-.rd-range::-moz-range-thumb {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--accent);
-  border: 2px solid var(--panel-bg);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
-  cursor: grab;
-}
-
-.rd-range:disabled {
-  cursor: default;
-  opacity: 0.4;
+  height: 32px;
 }
 
 .rd-actions {
@@ -176,16 +137,7 @@
   min-height: 48px;
 }
 .app[data-touch-ui="true"] .rd-range {
-  height: 6px;
-  border-radius: 3px;
-}
-.app[data-touch-ui="true"] .rd-range::-webkit-slider-thumb {
-  width: 24px;
-  height: 24px;
-}
-.app[data-touch-ui="true"] .rd-range::-moz-range-thumb {
-  width: 22px;
-  height: 22px;
+  height: 40px;
 }
 .app[data-touch-ui="true"] .rd-section .aa-group-title { font-size: 13px; }
 
@@ -205,9 +157,4 @@
   background: var(--panel-bg);
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.22), 0 1px 4px rgba(0, 0, 0, 0.1);
   outline: 6px solid var(--panel-bg);
-}
-
-/* Filter sliders run sideways; a vertical drag on one is not a page scroll. */
-.aa-display-body input[type="range"] {
-  touch-action: none;
 }

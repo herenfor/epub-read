@@ -1,6 +1,6 @@
-import type { CSSProperties } from "react";
 import { correctionMatrix, previewColor, type AssistKind } from "../../render/colorAssist/colorAssistCore";
 import "./colorAssistPanel.css";
+import { TouchSlider } from "../TouchSlider";
 import { useUiText } from "../localization/UiLanguageProvider";
 import type { PlainMessageKey } from "../localization/core";
 
@@ -96,22 +96,21 @@ export function ColorAssistPanel({ value, onChange }: ColorAssistPanelProps) {
           );
         })}
       </div>
-      <label className="rd-range-row">
+      <div className="rd-range-row">
         <span className="aa-section-label">{t("display.assist.strength")}</span>
-        <input
-          type="range"
+        <TouchSlider
           className="rd-range"
-          min="0"
-          max="100"
-          step="1"
-          value={strengthPercent}
+          min={0}
+          max={100}
+          step={1}
+          value={activeKind === "off" ? 0 : strengthPercent}
           disabled={activeKind === "off"}
-          aria-label={t("display.assist.strength.label")}
-          style={{ "--fill": `${activeKind === "off" ? 0 : strengthPercent}%` } as CSSProperties}
-          onChange={(event) => onChange({ kind: activeKind, strength: normalizeColorAssistStrength(Number(event.target.value) / 100) })}
+          label={t("display.assist.strength.label")}
+          valueText={activeKind === "off" ? "—" : `${strengthPercent}%`}
+          onChange={(value) => onChange({ kind: activeKind, strength: normalizeColorAssistStrength(value / 100) })}
         />
         <output className="rd-range-value">{activeKind === "off" ? "—" : `${strengthPercent}%`}</output>
-      </label>
+      </div>
       <div className="color-assist-preview" aria-label={t("display.assist.preview", { mode: activeLabel })}>
         <span className="color-assist-preview-label">{t("display.assist.original")}</span>
         <div className="color-assist-swatch-row">

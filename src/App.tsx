@@ -5472,6 +5472,7 @@ export default function App() {
                 onOpenMore={openAaMore}
                 onBackToMain={backToAaMain}
                 onLivePreviewChange={setTypographyPreview}
+                layoutStamp={chapterState.status === "ready" ? chapterState : null}
                 lineHeight={settings.lineHeight}
                 onLineHeightChange={settingsActions.setLineHeight}
                 onResetLineHeight={settingsActions.resetLineHeight}
