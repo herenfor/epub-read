@@ -10,6 +10,14 @@ import { TEXT_MEASURE } from "./settings";
 
 export type ReadingMode = "paginated" | "scroll";
 
+/** Applied, resting page insets; motion-window offsets are not page margins. */
+export interface AppliedTextInsets {
+  readonly left: number;
+  readonly right: number;
+  readonly top: number;
+  readonly bottom: number;
+}
+
 export interface PageMarginsPx {
   top?: number;
   bottom?: number;

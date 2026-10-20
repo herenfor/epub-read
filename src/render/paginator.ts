@@ -81,7 +81,7 @@ import {
   type ReadingMode,
   type ScrollMetrics,
 } from "./scrollLayout";
-import { autoPageMarginsPx, COMPACT_PAGE_WIDTH_PX, MIN_COLUMN_WIDTH_PX, wideAutoSideMarginPx } from "./pageLayout";
+import { autoPageMarginsPx, COMPACT_PAGE_WIDTH_PX, MIN_COLUMN_WIDTH_PX, wideAutoSideMarginPx, type AppliedTextInsets } from "./pageLayout";
 import { installPagedSwipe, type PagedSwipeHandlers } from "./pagedSwipe";
 import { installPlainTap, type PlainTapInfo, type PlainTapPoint } from "./plainTap";
 import {
@@ -171,6 +171,8 @@ export type ChapterState =
       leafRange?: { first: number; last: number; total: number } | null;
       /** 实际舒适双页阅读区；非双页/回退时不提供，UI 不自行猜屏宽。 */
       spreadArea?: SpreadAreaSnapshot;
+      /** Resting layout, captured before a page-motion window changes margins. */
+      textInsets?: AppliedTextInsets;
       /**
        * 原生滑动途中的页码预览：只供页码/进度条显示，阅读锚点尚未更新，
        * 宿主不得据此保存进度；滑动停下后会再发一次正式状态。
@@ -2594,6 +2596,7 @@ export class ChapterPaginator {
   private spreadLayout: SpreadLayout | null = null;
   /** 本轮实际应用的舒适双页阅读区；回退/单页/滚动为 null。 */
   private spreadArea: SpreadReadingArea | null = null;
+  private textInsets: AppliedTextInsets | undefined;
   /** 舒适双页根内联样式快照；restore 精确、仅限 reader-owned 属性。 */
   private spreadAreaStyleRestore: (() => void) | null = null;
   private tailSpacer: HTMLElement | null = null;
@@ -4306,6 +4309,7 @@ export class ChapterPaginator {
     }
     // Measurements must never read the expanded motion-window column geometry.
     this.disposePageMotion();
+    this.textInsets = undefined;
     if (this.verticalPageGaps) this.cancelPendingAnchorSample?.();
     this.verticalPageGaps?.dispose();
     this.verticalPageGaps = null;
@@ -4700,6 +4704,18 @@ export class ChapterPaginator {
       // 只在整轮测量与二阶段补偿完成后提交尺寸；若测量期间窗口又变化，
       // ResizeObserver 仍会发现新尺寸并发起下一轮。
       this.measuredViewport = { width: measuredWidth, height: measuredHeight };
+      // Publish normal geometry once per layout; the retained animation window
+      // can later replace margin-left with a negative offset for several screens.
+      if (!scrollMode && win) {
+        const style = win.getComputedStyle(viewer);
+        const px = (value: string): number => parseFloat(value) || 0;
+        this.textInsets = {
+          left: px(style.marginLeft) + px(style.paddingLeft),
+          right: px(style.marginRight) + px(style.paddingRight),
+          top: px(style.paddingTop),
+          bottom: px(style.paddingBottom),
+        };
+      }
       return isChapterMeasurementCurrent({
         disposed: this.disposed,
         loadSeq: this.loadSeq,
@@ -5066,6 +5082,7 @@ export class ChapterPaginator {
       effectiveColumns: (this.spreadGeometry?.columns ?? this.effectiveColumns) as 1 | 2,
       atEnd,
       leafRange,
+      textInsets: this.textInsets,
       ...(this.spreadArea
         ? {
             spreadArea: {

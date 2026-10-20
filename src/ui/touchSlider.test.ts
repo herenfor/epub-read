@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { classifySliderGesture, sliderDragValue } from "./TouchSlider";
-import { textBoxFromApplied } from "./readerPageBox";
+import { readerTextBox, textBoxFromApplied } from "./readerPageBox";
+import { ChapterPaginator } from "../render/paginator";
 
 describe("touch slider", () => {
   it("waits inside the slop, then a sideways move drags and a vertical one scrolls", () => {
@@ -21,6 +22,29 @@ describe("touch slider", () => {
 });
 
 describe("margin guide box", () => {
+  it("中断补修：翻页窗口负边距不污染已发布的版心，重新排版则采用新值", () => {
+    const restingInsets = { left: 20, right: 20, top: 42, bottom: 34 };
+    const motionStyle = vi.fn(() => ({ marginLeft: "-780px", paddingLeft: "20px" }));
+    const viewer = { getBoundingClientRect: () => ({ top: 0, height: 844 }) };
+    const frame = {
+      getBoundingClientRect: () => ({ left: 0, right: 390, top: 0, width: 390, height: 844 }),
+      ownerDocument: { defaultView: { getComputedStyle: () => ({ visibility: "visible" }) } },
+      contentDocument: { getElementById: () => viewer, defaultView: { getComputedStyle: motionStyle } },
+    };
+    const root = { querySelector: () => ({ querySelectorAll: () => [frame] }) } as unknown as ParentNode;
+    const paginator = Object.create(ChapterPaginator.prototype);
+    Object.assign(paginator, {
+      settings: { readingMode: "paginated" }, metrics: { pageCount: 10, currentPage: 3 },
+      textInsets: restingInsets,
+    });
+    const snapshot = () => (paginator as unknown as { readyState(empty: boolean): { textInsets: typeof restingInsets } }).readyState(false);
+    expect(readerTextBox(snapshot().textInsets, root)).toEqual({ left: 20, top: 42, right: 370, bottom: 810 });
+    expect(motionStyle).not.toHaveBeenCalled();
+    Object.assign(paginator, { textInsets: { ...restingInsets, left: 32 } });
+    expect(readerTextBox(snapshot().textInsets, root)?.left).toBe(32);
+    expect(readerTextBox(undefined, root)).toBeNull();
+  });
+
   it("comes from the applied insets, automatic sides included, never from guessed zeros", () => {
     // Only left was set (20); the paginator applied automatic top 42, bottom 34, right 20.
     const box = textBoxFromApplied({ left: 0, right: 390, top: 0 }, 0, 844, { left: 20, right: 20, top: 42, bottom: 34 })!;

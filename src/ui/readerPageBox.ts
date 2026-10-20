@@ -1,4 +1,5 @@
 import { VIEWER_ID } from "../render/sanitize";
+import type { AppliedTextInsets } from "../render/pageLayout";
 
 /** The book frame the reader shows now (the main layer's visible chapter iframe). */
 function shownChapterFrame(root: ParentNode): HTMLIFrameElement | null {
@@ -19,13 +20,6 @@ export interface ScreenBox {
   left: number;
   top: number;
   right: number;
-  bottom: number;
-}
-
-export interface AppliedTextInsets {
-  left: number;
-  right: number;
-  top: number;
   bottom: number;
 }
 
@@ -52,23 +46,17 @@ export function textBoxFromApplied(
 }
 
 /**
- * The text box the reader laid out for the chapter on screen, or null when
- * no laid-out chapter is shown. Read after the reader published its layout,
- * so the box always belongs to the layout being displayed.
+ * Use the reader's published insets, never the animated viewer's margin-left.
+ * The normal box stays valid while the compositor retains its wider window.
+ * Without a published layout, there is no guide to draw yet.
  */
-export function readerTextBox(root: ParentNode = document): ScreenBox | null {
+export function readerTextBox(insets: AppliedTextInsets | undefined, root: ParentNode = document): ScreenBox | null {
+  if (!insets) return null;
   const frame = shownChapterFrame(root);
   const doc = frame?.contentDocument;
   const viewer = doc?.getElementById(VIEWER_ID);
   const view = doc?.defaultView;
   if (!frame || !viewer || !view) return null;
-  const style = view.getComputedStyle(viewer);
-  const px = (value: string) => parseFloat(value) || 0;
   const viewerRect = viewer.getBoundingClientRect();
-  return textBoxFromApplied(frame.getBoundingClientRect(), viewerRect.top, viewerRect.height, {
-    left: px(style.marginLeft) + px(style.paddingLeft),
-    right: px(style.marginRight) + px(style.paddingRight),
-    top: px(style.paddingTop),
-    bottom: px(style.paddingBottom),
-  });
+  return textBoxFromApplied(frame.getBoundingClientRect(), viewerRect.top, viewerRect.height, insets);
 }

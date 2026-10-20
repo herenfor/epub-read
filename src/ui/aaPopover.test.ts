@@ -171,6 +171,47 @@ describe("Aa 单层紧凑面板", () => {
       onFontSizeChange.mockClear();
       await dom.dispatch(slider, pointer(dom, "pointermove", 200, 10));
       expect(onFontSizeChange).not.toHaveBeenCalled();
+      // Reopen before the interrupted pointer ever sends its up event.
+      await dom.render(createElement(AaPopover, { ...baseProps, onLivePreviewChange, onFontSizeChange, open: true }));
+      await dom.dispatch(slider, pointer(dom, "pointerdown", 100, 10));
+      await dom.dispatch(slider, pointer(dom, "pointermove", 120, 10));
+      await dom.dispatch(slider, pointer(dom, "pointermove", 180, 10));
+      expect(onFontSizeChange).toHaveBeenCalled();
+      expect(onLivePreviewChange).toHaveBeenLastCalledWith(true);
+    } finally {
+      await dom.dispose();
+    }
+  });
+
+  it.each(["blur", "hidden"])("中断补修：%s 后退出拖动，残留移动不改值，新手势可立即开始", async (reason) => {
+    const dom = createReactDomHarness({ resizeObserver: true, animationFrames: 0 });
+    const onLivePreviewChange = vi.fn();
+    const onFontSizeChange = vi.fn();
+    try {
+      await dom.render(createElement(AaPopover, { ...baseProps, onLivePreviewChange, onFontSizeChange }));
+      const slider = dom.container.querySelector('[role="slider"][aria-label="字号"]') as HTMLElement;
+      const dialog = dom.container.querySelector(".aa-popover")!;
+      dom.rect(slider, { width: 220, height: 40 });
+      await dom.dispatch(slider, pointer(dom, "pointerdown", 100, 10));
+      await dom.dispatch(slider, pointer(dom, "pointermove", 120, 10));
+      expect(onLivePreviewChange).toHaveBeenLastCalledWith(true);
+      await dom.run(() => {
+        if (reason === "blur") dom.window.dispatchEvent(new dom.window.Event("blur"));
+        else {
+          dom.define(dom.window.document, "visibilityState", { value: "hidden" });
+          dom.window.document.dispatchEvent(new dom.window.Event("visibilitychange"));
+        }
+      });
+      expect(dialog.hasAttribute("data-slider-focus")).toBe(false);
+      expect(slider.hasAttribute("data-dragging")).toBe(false);
+      expect(onLivePreviewChange).toHaveBeenLastCalledWith(false);
+      onFontSizeChange.mockClear();
+      await dom.dispatch(slider, pointer(dom, "pointermove", 200, 10));
+      expect(onFontSizeChange).not.toHaveBeenCalled();
+      await dom.dispatch(slider, pointer(dom, "pointerdown", 100, 10));
+      await dom.dispatch(slider, pointer(dom, "pointermove", 120, 10));
+      await dom.dispatch(slider, pointer(dom, "pointermove", 180, 10));
+      expect(onFontSizeChange).toHaveBeenCalled();
     } finally {
       await dom.dispose();
     }
