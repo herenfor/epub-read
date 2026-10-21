@@ -43,7 +43,9 @@ export const about = defineMessages("about", {
   "about.update.checkFailed": "检查失败，请稍后再试",
   "about.update.lastChecked": { zh: "上次检查 {time}", note: "{time} is YYYY-MM-DD HH:mm." },
   "about.update.autoCheck": "自动检查更新",
-  "about.update.autoCheck.detail": "启动时联网访问 GitHub 查询新版本，不上传任何数据。",
-  "about.update.releasesPage": "所有版本（GitHub 发布页）",
+  "about.update.autoCheck.detail": "启动时访问 GitHub 查询新版本，不上传任何数据",
+  "about.update.ready": "已下载并通过校验",
+  "about.allVersions": "所有版本",
+  "about.allVersions.detail": "GitHub 发布页",
   "about.updated": "已更新到 {version}，可在设置 › 关于查看本版更新",
 });

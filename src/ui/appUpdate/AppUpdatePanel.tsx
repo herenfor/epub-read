@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { useUiText } from "../localization/UiLanguageProvider";
 import type { PlainMessageKey } from "../localization/core";
-import { SettingsSwitch } from "../ReadingSettings";
+import { Icon, SettingsRow, SettingsSwitchRow } from "../settingsRows";
 import {
   abandonUpdate,
   checkForUpdatesNow,
@@ -12,7 +12,6 @@ import {
   skipUpdateVersion,
   startUpdateDownload,
   useAppUpdate,
-  type AppUpdateView,
   type UpdateFailure,
 } from "./appUpdateStore";
 import "./appUpdate.css";
@@ -25,107 +24,110 @@ const FAILURE_KEYS: Readonly<Record<UpdateFailure, PlainMessageKey>> = {
   install: "about.update.failed.install",
 };
 
+const ICONS = {
+  check: <Icon><path d="M20 11a8 8 0 1 0-2.3 5.7" /><path d="M20 5v6h-6" /></Icon>,
+  auto: <Icon><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></Icon>,
+};
+
 function formatCheckedAt(at: number): string {
   const date = new Date(at);
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-function Action(props: { primary?: boolean; disabled?: boolean; onClick(): void; children: ReactNode }) {
-  return <button type="button" className={`app-update-btn${props.primary ? " is-primary" : ""}`} disabled={props.disabled}
+function Action(props: { primary?: boolean; onClick(): void; children: ReactNode }) {
+  return <button type="button" className={`app-update-btn${props.primary ? " is-primary" : ""}`}
     onClick={(event) => { event.currentTarget.blur(); props.onClick(); }}>{props.children}</button>;
 }
 
-/** The "new version" card: what to press depends on how this copy was installed. */
-function UpdateCard({ update }: { update: AppUpdateView }) {
+/**
+ * The waiting version, under the app's name in the About card: one line of
+ * text, the action this copy supports, and while downloading a hairline of
+ * progress. Nothing when this copy is current.
+ */
+export function AppUpdateNotice() {
   const { t } = useUiText();
-  const release = update.release!;
+  const update = useAppUpdate();
+  const release = update.release;
+  if (!release) return null;
   const { flow } = update;
   const inApp = update.asset !== null && (update.kind === "installer" || update.kind === "android");
   const openPage = () => openExternalPage(release.htmlUrl);
   const date = release.publishedAt.slice(0, 10);
 
-  let status: ReactNode = null;
+  let line: ReactNode = t("about.releasedOn", { date });
+  let note: ReactNode = null;
   let actions: ReactNode;
+  let percent: number | null | undefined;
   if (!inApp) {
     actions = <Action primary onClick={openPage}>{t("about.update.goDownload")}</Action>;
   } else if (flow.step === "downloading") {
-    const percent = flow.total ? Math.min(100, Math.round((flow.received / flow.total) * 100)) : null;
-    status = <div className="app-update-progress" role="progressbar" aria-label={t("about.update.downloading")}
-      aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent ?? undefined}>
-      <span style={{ width: `${percent ?? 0}%` }} />
-    </div>;
-    actions = <>
-      <span className="app-update-status">{percent === null ? t("about.update.downloading") : t("about.update.downloadingPercent", { percent })}</span>
-      <Action onClick={abandonUpdate}>{t("about.update.cancel")}</Action>
-    </>;
+    percent = flow.total ? Math.min(100, Math.round((flow.received / flow.total) * 100)) : null;
+    line = percent === null ? t("about.update.downloading") : t("about.update.downloadingPercent", { percent });
+    actions = <Action onClick={abandonUpdate}>{t("about.update.cancel")}</Action>;
   } else if (flow.step === "needsPermission") {
-    status = <p className="app-update-note">{t("about.update.permission")}</p>;
-    actions = <>
-      <Action primary onClick={openInstallPermission}>{t("about.update.allow")}</Action>
-      <Action onClick={openPage}>{t("about.update.browser")}</Action>
-    </>;
+    note = t("about.update.permission");
+    actions = <Action primary onClick={openInstallPermission}>{t("about.update.allow")}</Action>;
   } else if (flow.step === "ready") {
+    line = t("about.update.ready");
     actions = <>
+      <Action onClick={abandonUpdate}>{t("about.update.cancel")}</Action>
       <Action primary onClick={() => void installUpdate()}>
         {update.kind === "installer" ? t("about.update.installRestart") : t("about.update.install")}
       </Action>
-      <Action onClick={abandonUpdate}>{t("about.update.cancel")}</Action>
     </>;
   } else if (flow.step === "installing") {
-    actions = <span className="app-update-status">{t("about.update.installing")}</span>;
+    line = t("about.update.installing");
+    actions = null;
   } else if (flow.step === "failed") {
-    status = <p className="app-update-note is-error">{t(FAILURE_KEYS[flow.reason])}</p>;
+    note = <span className="is-error">{t(FAILURE_KEYS[flow.reason])}</span>;
     actions = flow.reason === "unavailable"
       ? <Action primary onClick={openPage}>{t("about.update.goDownload")}</Action>
-      : <>
-        <Action primary onClick={() => void startUpdateDownload()}>{t("about.update.retry")}</Action>
-        <Action onClick={openPage}>{t("about.update.browser")}</Action>
-      </>;
+      : <Action primary onClick={() => void startUpdateDownload()}>{t("about.update.retry")}</Action>;
   } else {
     actions = <Action primary onClick={() => void startUpdateDownload()}>{t("about.update.download")}</Action>;
   }
 
   const busy = flow.step === "downloading" || flow.step === "installing";
-  return <div className="app-update-card" role="status">
-    <div className="app-update-head">
-      <strong>{t("about.update.available", { version: release.version })}</strong>
-      <time dateTime={date}>{t("about.releasedOn", { date })}</time>
+  // The browser stays a way out whenever the in-app path is stuck.
+  const browserFallback = inApp && (flow.step === "needsPermission" || (flow.step === "failed" && flow.reason !== "unavailable"));
+  return <div className="about-update" role="status">
+    <div className="about-update-main">
+      <div className="about-update-text">
+        <strong>{t("about.update.available", { version: release.version })}</strong>
+        <small>{line}</small>
+      </div>
+      {actions && <div className="about-update-actions">{actions}</div>}
     </div>
-    {status}
-    <div className="app-update-actions">{actions}</div>
-    <div className="app-update-links">
+    {percent !== undefined && <div className="about-update-progress" role="progressbar" aria-label={t("about.update.downloading")}
+      aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent ?? undefined}>
+      <span style={{ width: `${percent ?? 8}%` }} />
+    </div>}
+    {note && <p className="about-update-note">{note}</p>}
+    <div className="about-update-links">
       <button type="button" onClick={openPage}>{t("about.update.viewNotes")}</button>
+      {browserFallback && <button type="button" onClick={openPage}>{t("about.update.browser")}</button>}
       {!busy && <button type="button" onClick={() => skipUpdateVersion(release.version)}>{t("about.update.skip")}</button>}
     </div>
   </div>;
 }
 
-/** About section's update area: the card when a version is waiting, the manual check and the auto-check switch. */
-export function AppUpdatePanel() {
+/** "Check for updates" and the auto-check switch, as rows of the About list. */
+export function AppUpdateRows() {
   const { t } = useUiText();
   const update = useAppUpdate();
-  const line = update.checking ? t("about.update.checking")
+  const status = update.checking ? t("about.update.checking")
     : update.manualResult === "failed" ? t("about.update.checkFailed")
     : update.manualResult === "latest" ? t("about.update.latest")
     : update.lastSuccessAt ? t("about.update.lastChecked", { time: formatCheckedAt(update.lastSuccessAt) })
     : t("about.checkUpdates.detail");
-  return <div className="app-update">
-    {update.release && <UpdateCard update={update} />}
-    <button type="button" className="about-releases-link" disabled={update.checking}
-      onClick={(event) => { event.currentTarget.blur(); void checkForUpdatesNow(); }}>
-      <span>
-        <strong>{t("about.checkUpdates")}</strong>
-        <small aria-live="polite">{line}</small>
-      </span>
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6" />
-      </svg>
-    </button>
-    {update.kind !== null && update.kind !== "unsupported" && <div className="app-update-auto">
-      <SettingsSwitch label={t("about.update.autoCheck")} checked={update.autoCheck} onChange={setAutoCheckUpdates} />
-      <small>{t("about.update.autoCheck.detail")}</small>
-    </div>}
-    <button type="button" className="app-update-releases" onClick={() => openExternalPage()}>{t("about.update.releasesPage")}</button>
-  </div>;
+  return <>
+    <SettingsRow icon={ICONS.check} title={t("about.checkUpdates")} disabled={update.checking}
+      detail={<span aria-live="polite">{status}</span>}
+      trailing={update.checking ? <span className="about-spinner" aria-hidden="true" /> : <span className="about-trailing-gap" />}
+      onClick={() => void checkForUpdatesNow()} />
+    {update.kind !== null && update.kind !== "unsupported" &&
+      <SettingsSwitchRow icon={ICONS.auto} title={t("about.update.autoCheck")} detail={t("about.update.autoCheck.detail")}
+        checked={update.autoCheck} onChange={setAutoCheckUpdates} />}
+  </>;
 }

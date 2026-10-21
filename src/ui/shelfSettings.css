@@ -387,6 +387,31 @@
   outline-offset: 2px;
 }
 
+/* A list row that carries a switch (settingsRows SettingsSwitchRow). */
+.shelf-settings-row.is-switch {
+  position: relative;
+}
+
+.shelf-settings-row.is-switch input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+
+.shelf-settings-row.is-switch input:checked + .shelf-settings-switch-track {
+  background: var(--accent);
+}
+
+.shelf-settings-row.is-switch input:checked + .shelf-settings-switch-track::after {
+  transform: translateX(18px);
+}
+
+.shelf-settings-row.is-switch input:focus-visible + .shelf-settings-switch-track {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .shelf-settings-actions {
   display: flex;
   flex-wrap: wrap;
