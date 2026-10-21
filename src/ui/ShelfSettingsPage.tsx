@@ -107,10 +107,23 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
   const [indexBusy, setIndexBusy] = useState(false);
   const readingTitles = useReadingSettingsTitles(props);
   const updateDot = useAppUpdateDot();
+  // Touch: a section is a page pushed over the home page. It stays mounted
+  // while it slides back out, and only slides in when opened from home (a
+  // page that opens straight onto a section arrives with the whole sheet).
+  const pushed = useExitPresence(!dialog && section !== null);
+  const lastSectionRef = useRef(section);
+  if (section !== null) lastSectionRef.current = section;
+  const [pushAnimated, setPushAnimated] = useState(false);
+  const openSection = (id: ShelfSettingsSection): void => {
+    setPushAnimated(true);
+    setSection(id);
+  };
 
   useEffect(() => {
-    if (props.open) setSection(props.initialSection ?? (dialog ? "appearance" : null));
-    else setCacheOpen(false);
+    if (props.open) {
+      setSection(props.initialSection ?? (dialog ? "appearance" : null));
+      setPushAnimated(false);
+    } else setCacheOpen(false);
   }, [props.open, props.initialSection, dialog]);
 
   // Android back and Esc walk the same levels: cache panel → section (touch) → close.
@@ -258,20 +271,15 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
           <h2>{current?.title}</h2>
           {closeButton}
         </header>
-        <div className="shelf-settings-scroll">{current?.content}</div>
+        <div className="shelf-settings-scroll is-pane" key={current?.id}>{current?.content}</div>
       </section>
     </div>;
-  } else if (current) {
-    content = <section className="shelf-settings-sheet" role="dialog" aria-modal="true" aria-label={current.title}>
-      <header className="shelf-settings-head">
-        {backButton(() => setSection(null), t("shelfSettings.back"))}
-        <h2>{current.title}</h2>
-      </header>
-      <div className="shelf-settings-scroll">{current.content}</div>
-    </section>;
   } else {
     const appearanceSection = sections[0];
-    content = <section className="shelf-settings-sheet" role="dialog" aria-modal="true" aria-label={t("shelfSettings.title")}>
+    const pageSection = sections.find((item) => item.id === lastSectionRef.current) ?? null;
+    const covered = pushed.present && !pushed.closing;
+    const home = <section className={`shelf-settings-sheet is-home${covered ? " is-covered" : ""}`} role="dialog" aria-modal="true"
+      aria-label={t("shelfSettings.title")} aria-hidden={covered || undefined}>
       <header className="shelf-settings-head">
         {backButton(props.onClose, t("shelfSettings.back"))}
         <h2>{t("shelfSettings.title")}</h2>
@@ -282,10 +290,22 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
         <div className="shelf-settings-group-label">{t("shelfSettings.more")}</div>
         <div className="shelf-settings-card is-list">
           {sections.slice(1).map((item) => <SettingsRow key={item.id} icon={SECTION_ICONS[item.id]} title={item.title}
-            detail={item.detail} dot={item.id === "about" && updateDot} onClick={() => setSection(item.id)} />)}
+            detail={item.detail} dot={item.id === "about" && updateDot} onClick={() => openSection(item.id)} />)}
         </div>
       </div>
     </section>;
+    content = <div className="shelf-settings-stack">
+      {home}
+      {pushed.present && pageSection && <section
+        className={`shelf-settings-sheet is-pushed${pushAnimated ? " is-animated" : ""}${pushed.closing ? " is-leaving" : ""}`}
+        role="dialog" aria-modal="true" aria-label={pageSection.title}>
+        <header className="shelf-settings-head">
+          {backButton(() => setSection(null), t("shelfSettings.back"))}
+          <h2>{pageSection.title}</h2>
+        </header>
+        <div className="shelf-settings-scroll">{pageSection.content}</div>
+      </section>}
+    </div>;
   }
 
   return <div className={`shelf-settings-layer is-${props.presentation}${closing ? " is-closing" : ""}`}>
