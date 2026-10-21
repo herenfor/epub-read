@@ -73,6 +73,7 @@ import {
 } from "./SearchPanel";
 import "./shelfZen.css";
 import { ShelfFolderAddBooksDialog } from "./ShelfFolderAddBooksDialog";
+import { useAppUpdateDot } from "./appUpdate/appUpdateStore";
 import { uiPlural, uiText, useUiText } from "./localization/UiLanguageProvider";
 import type { PlainMessageKey } from "./localization/core";
 
@@ -2831,6 +2832,7 @@ export function ShelfView(props: ShelfViewProps) {
   const quickInputRef = useRef<HTMLInputElement | null>(null);
 
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const updateDot = useAppUpdateDot();
   const [settingsSection, setSettingsSection] = useState<ShelfSettingsSection | undefined>(undefined);
   const [filterOpen, setFilterOpen] = useState(false);
   const [bodySearchOpen, setBodySearchOpen] = useState(false);
@@ -4298,7 +4300,7 @@ export function ShelfView(props: ShelfViewProps) {
                   className="shelf-icon-btn-zen shelf-mobile-more-btn"
                   ref={menuButtonRef}
                   type="button"
-                  aria-label={t("shelfSettings.title")}
+                  aria-label={updateDot ? `${t("shelfSettings.title")} · ${t("about.update.dot")}` : t("shelfSettings.title")}
                   aria-expanded={settingsOpen}
                   aria-haspopup="dialog"
                   onClick={() => openSettings()}
@@ -4306,6 +4308,7 @@ export function ShelfView(props: ShelfViewProps) {
                   title={t("shelfSettings.title")}
                 >
                   <SettingsIcon />
+                  {updateDot && <span className="app-update-dot" aria-hidden="true" />}
                 </button>
               </div>
             </div>
@@ -4469,7 +4472,7 @@ export function ShelfView(props: ShelfViewProps) {
                 className="shelf-icon-btn-zen"
                 ref={menuButtonRef}
                 type="button"
-                aria-label={t("shelfSettings.title")}
+                aria-label={updateDot ? `${t("shelfSettings.title")} · ${t("about.update.dot")}` : t("shelfSettings.title")}
                 aria-expanded={settingsOpen}
                 aria-haspopup="dialog"
                 onClick={() => openSettings()}
@@ -4477,6 +4480,7 @@ export function ShelfView(props: ShelfViewProps) {
                 title={t("shelfSettings.title")}
               >
                 <SettingsIcon />
+                {updateDot && <span className="app-update-dot" aria-hidden="true" />}
               </button>
             </div>
           </div>

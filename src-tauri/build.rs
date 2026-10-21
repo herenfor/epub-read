@@ -12,6 +12,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=TARGET");
     println!("cargo:rerun-if-env-changed=DEBUG");
     println!("cargo:rerun-if-env-changed=EPUB_READER_UPDATE_TEST");
+    println!("cargo:rerun-if-env-changed=EPUB_READER_UPDATE_TEST_DOWNLOAD_BASE");
 
     let ai = env::var_os("CARGO_FEATURE_AI").is_some();
     let core = env::var_os("CARGO_FEATURE_CORE").is_some();

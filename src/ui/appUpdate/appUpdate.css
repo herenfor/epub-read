@@ -1,0 +1,186 @@
+/* App update: the About card, manual check and auto-check switch, plus the settings red dot. */
+
+.app-update {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.app-update .about-releases-link {
+  margin-top: 0;
+}
+
+.app-update .about-releases-link:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.app-update-card {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent, #2b5b9e) 45%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent, #2b5b9e) 7%, transparent);
+}
+
+.app-update-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+}
+
+.app-update-head strong {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--accent, #2b5b9e);
+}
+
+.app-update-head time {
+  color: var(--muted, #777);
+  font-size: 11px;
+}
+
+.app-update-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.app-update-btn {
+  min-height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--menu-surface-border, var(--panel-border, rgba(128, 128, 128, 0.3)));
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg, #1a1a1a);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.app-update-btn.is-primary {
+  border-color: var(--accent, #2b5b9e);
+  background: var(--accent, #2b5b9e);
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.app-update-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.app-update-btn:focus-visible,
+.app-update-links button:focus-visible,
+.app-update-releases:focus-visible {
+  outline: 2px solid var(--accent, #2b5b9e);
+  outline-offset: 2px;
+}
+
+.app-update-status {
+  flex: 1;
+  color: var(--muted, #777);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.app-update-progress {
+  height: 4px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--fg, #1a1a1a) 12%, transparent);
+  overflow: hidden;
+}
+
+.app-update-progress span {
+  display: block;
+  height: 100%;
+  background: var(--accent, #2b5b9e);
+  transition: width 200ms linear;
+}
+
+.app-update-note {
+  margin: 0;
+  color: var(--muted, #777);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.app-update-note.is-error {
+  color: var(--danger, #b3261e);
+}
+
+.app-update-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+
+.app-update-links button,
+.app-update-releases {
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--accent, #2b5b9e);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.app-update-releases {
+  justify-self: start;
+}
+
+.app-update-auto {
+  border: 1px solid var(--menu-surface-border, var(--panel-border, rgba(128, 128, 128, 0.3)));
+  border-radius: 8px;
+}
+
+.app-update-auto .shelf-settings-switch {
+  min-height: 44px;
+  padding: 2px 10px;
+  border-bottom: 0;
+  font-size: 12.5px;
+}
+
+.app-update-auto small {
+  display: block;
+  padding: 0 10px 8px;
+  color: var(--muted, #777);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* Red dot on the settings entry and the About row; never on reader layers. */
+.app-update-dot {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--danger, #d93a2f);
+  box-shadow: 0 0 0 1.5px var(--bg, #ffffff);
+  pointer-events: none;
+}
+
+.app-update-dot.is-inline {
+  position: static;
+  display: inline-block;
+  flex: none;
+  margin-left: 6px;
+  vertical-align: middle;
+  box-shadow: none;
+}
+
+.app[data-touch-ui="true"] .app-update-head strong { font-size: 15px; }
+.app[data-touch-ui="true"] .app-update-btn { min-height: 40px; font-size: 14px; }
+.app[data-touch-ui="true"] .app-update-note,
+.app[data-touch-ui="true"] .app-update-links button,
+.app[data-touch-ui="true"] .app-update-releases { font-size: 13px; }
+
+.shelf-icon-btn-zen:has(> .app-update-dot) {
+  position: relative;
+}
