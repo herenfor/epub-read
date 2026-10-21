@@ -53,6 +53,12 @@ export interface ShelfSettingsPageProps {
   /** The shelf's single back slot: the page answers Android back for its own levels. */
   registerSubmenuBackHandler?(handler: (() => boolean) | null): void;
   onClose(): void;
+  /**
+   * A copy drawn once inside PanelPaintWarmup so the first real opening is
+   * not the GPU's first draw: "home" is the page as it opens, "pages" adds
+   * every section page at once. It takes no keys and no back presses.
+   */
+  warm?: "home" | "pages";
 }
 
 const THEMES: Array<{ value: Theme; label: "shelfMenu.theme.light" | "shelfMenu.theme.sepia" | "shelfMenu.theme.gray" | "shelfMenu.theme.dark" }> = [
@@ -136,19 +142,19 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
   stepBackRef.current = stepBack;
   const register = props.registerSubmenuBackHandler;
   useEffect(() => {
-    if (!props.open || !register) return;
+    if (!props.open || !register || props.warm) return;
     register(() => stepBackRef.current());
     return () => register(null);
-  }, [props.open, register]);
+  }, [props.open, register, props.warm]);
   useEffect(() => {
-    if (!props.open) return;
+    if (!props.open || props.warm) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || cacheOpen) return;
       if (!stepBackRef.current()) props.onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [props.open, props.onClose, cacheOpen]);
+  }, [props.open, props.onClose, cacheOpen, props.warm]);
 
   if (!present) return null;
 
@@ -271,7 +277,9 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
           <h2>{current?.title}</h2>
           {closeButton}
         </header>
-        <div className="shelf-settings-scroll is-pane" key={current?.id}>{current?.content}</div>
+        {props.warm === "pages"
+          ? sections.map((item) => <div className="shelf-settings-scroll is-warm-pane" key={item.id}>{item.content}</div>)
+          : <div className="shelf-settings-scroll is-pane" key={current?.id}>{current?.content}</div>}
       </section>
     </div>;
   } else {
@@ -294,8 +302,17 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
         </div>
       </div>
     </section>;
+    const warmPages = props.warm === "pages" ? sections.slice(1).map((item) => <section key={item.id}
+      className="shelf-settings-sheet is-pushed" aria-label={item.title}>
+      <header className="shelf-settings-head">
+        {backButton(() => undefined, t("shelfSettings.back"))}
+        <h2>{item.title}</h2>
+      </header>
+      <div className="shelf-settings-scroll">{item.content}</div>
+    </section>) : null;
     content = <div className="shelf-settings-stack">
       {home}
+      {warmPages}
       {pushed.present && pageSection && <section
         className={`shelf-settings-sheet is-pushed${pushAnimated ? " is-animated" : ""}${pushed.closing ? " is-leaving" : ""}`}
         role="dialog" aria-modal="true" aria-label={pageSection.title}>
