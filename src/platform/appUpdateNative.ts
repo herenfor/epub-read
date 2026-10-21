@@ -1,6 +1,8 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import type { InstallKind } from "../config/appUpdate";
 import { getAppBuildSession } from "../config/appBuildSession";
+import { APP_UPDATE_SOURCE } from "../config/appUpdateSource";
+import { updateDownloadUrl } from "../config/appUpdateSourceValue";
 
 const INSTALL_KINDS: readonly InstallKind[] = ["installer", "portable", "android", "unsupported"];
 
@@ -99,13 +101,19 @@ export interface AndroidVerifyResult {
 
 export type AndroidInstallPermission = "granted" | "denied" | "unknown";
 
+let androidCommand: Promise<unknown> = Promise.resolve();
+
 function androidUpdate<T>(action: string, args: Record<string, unknown> = {}): Promise<T> {
-  return invoke<T>("android_app_update", { action, args });
+  // Native work is asynchronous: cancel/cleanup must finish in call order,
+  // otherwise a slow start can enqueue a new download after it was cancelled.
+  const result = androidCommand.then(() => invoke<T>("android_app_update", { action, args }));
+  androidCommand = result.catch(() => undefined);
+  return result;
 }
 
 export const androidUpdater = {
   start: (asset: { url: string; sha256: string; size: number; version: string }) =>
-    androidUpdate<void>("start", asset),
+    androidUpdate<void>("start", { ...asset, url: updateDownloadUrl(asset.url, APP_UPDATE_SOURCE) }),
   status: () => androidUpdate<AndroidDownloadStatus>("status"),
   cancel: () => androidUpdate<void>("cancel"),
   verify: () => androidUpdate<AndroidVerifyResult>("verify"),
