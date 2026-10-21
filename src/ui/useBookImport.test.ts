@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { AndroidImportBatchResult, AndroidImportProgress } from "../platform/androidNativeBridge";
 import { getRuntimeCapabilities } from "../platform/runtimeCapabilities";
 import { createReactDomHarness } from "../test/reactDomHarness";
-import { emptyOrganization } from "./libraryOrganization";
+import { emptyOrganization, type LibraryOrganization } from "./libraryOrganization";
 import type { ShelfEntry } from "./shelf";
 import { useShelfEntriesState, useShelfNoticeState, useShelfContentHashes } from "./useShelfLibrary";
 import { useBookImportState, useBookImport, useFolderImport } from "./useBookImport";
@@ -17,6 +17,20 @@ vi.mock("./folderImport", () => ({ createNativeDirectoryImportPort: ports.direct
 function entry(id: string): ShelfEntry {
   return { id, contentHash: id.repeat(64), title: id, creator: "", fileName: `${id}.epub`, fileSize: 1, coverMime: "", addedAtMs: 1, lastReadAtMs: 1, spineIndex: 1, page: 3, progressPct: 70, anchorIndex: null, anchorRatio: null, isNew: false };
 }
+const FOLDER = "11111111-1111-4111-8111-111111111111";
+const OTHER = "22222222-2222-4222-8222-222222222222";
+const stamp = { deviceId: "d", counter: 1 };
+/** Folder FOLDER ("Target") and OTHER ("Elsewhere"); book "b" is filed in OTHER. */
+function organization(options: { targetDeleted?: boolean } = {}): LibraryOrganization {
+  return {
+    schemaVersion: 1,
+    folders: {
+      [FOLDER]: { name: { value: "Target", stamp }, ...(options.targetDeleted ? { deleted: stamp } : {}) },
+      [OTHER]: { name: { value: "Elsewhere", stamp } },
+    },
+    books: { ["b".repeat(64)]: { folderId: { value: OTHER, stamp } } },
+  };
+}
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((res) => { resolve = res; });
@@ -25,7 +39,8 @@ function deferred<T>() {
 function setup() {
   const dom = createReactDomHarness();
   for (const mock of Object.values(ports)) mock.mockReset();
-  const store = { list: vi.fn().mockResolvedValue([]), importPaths: vi.fn(), importRecords: vi.fn(async (records: ShelfEntry[]) => records), getOrganization: vi.fn().mockResolvedValue(emptyOrganization()) };
+  const store = { list: vi.fn().mockResolvedValue([]), importPaths: vi.fn(), importRecords: vi.fn(async (records: ShelfEntry[]) => records), getOrganization: vi.fn().mockResolvedValue(emptyOrganization()), applyOrganization: vi.fn() };
+  const setOrganization = vi.fn();
   ports.store.mockReturnValue(store);
   ports.activate.mockResolvedValue(undefined);
   ports.directory.mockReturnValue({});
@@ -40,13 +55,13 @@ function setup() {
     entriesRef.current = entries.shelfEntries;
     const hashes = useShelfContentHashes(entries.shelfEntries);
     const fileInputRef = useRef<HTMLInputElement>(null);
-    const commands = useBookImport({ importState: imports, runtime: { ...getRuntimeCapabilities(), platform: "android" }, isTauriEnv: () => true, fileInputRef, shelfBusyRef: busy, shelfEntriesRef: entriesRef, ...hashes, setShelfEntries: entries.setShelfEntries, setShelfNotice: notices.setShelfNotice });
+    const commands = useBookImport({ importState: imports, runtime: { ...getRuntimeCapabilities(), platform: "android" }, isTauriEnv: () => true, fileInputRef, shelfBusyRef: busy, shelfEntriesRef: entriesRef, ...hashes, setShelfEntries: entries.setShelfEntries, setShelfNotice: notices.setShelfNotice, setOrganization });
     const folders = useFolderImport({ importState: imports, shelfBusyRef: busy, organizationBusyRef: organizationBusy, saveFileJobStateRef: saveState, saveFileLaunchRef: saveLaunch, lanSaveActiveRef: lanActive, isTauriEnv: () => true, setShelfNotice: notices.setShelfNotice, refreshShelfProjection: refresh });
     return { entries, notices, imports, commands, folders };
   }
   let api!: ReturnType<typeof useHost>;
   function Host() { api = useHost(); return createElement("div", {}, api.entries.shelfEntries.length); }
-  return { dom, store, busy, refresh, current: () => api, render: () => dom.render(createElement(Host)) };
+  return { dom, store, busy, refresh, setOrganization, current: () => api, render: () => dom.render(createElement(Host)) };
 }
 
 describe("book import host extraction", () => {
@@ -125,6 +140,77 @@ describe("book import host extraction", () => {
       await t.dom.run(() => t.current().folders.closeFolderImport());
       expect(t.current().imports.folderImport).toBeNull();
       expect(t.current().imports.nativeImportRef.current).toBeNull();
+    } finally { await t.dom.dispose(); }
+  });
+
+  it("files an import started in a folder there, leaving books other folders hold", async () => {
+    const t = setup();
+    const before = organization();
+    const after = { ...before };
+    t.store.getOrganization.mockResolvedValue(before);
+    t.store.applyOrganization.mockResolvedValue(after);
+    t.store.importPaths.mockResolvedValue({ results: [
+      { inputIndex: 0, status: "saved", record: entry("a") },
+      { inputIndex: 1, status: "duplicate", record: entry("b") },
+      { inputIndex: 2, status: "duplicate", record: entry("c") },
+    ] });
+    try {
+      await t.render();
+      const sources = ["a", "b", "c"].map((id) => ({ kind: "path" as const, path: `${id}.epub`, name: `${id}.epub` }));
+      await t.dom.run(() => t.current().commands.handleImportSources(sources, { folderId: FOLDER, name: "Target" }));
+      // One write: the new book and the unclassified duplicate; "b" stays in its folder.
+      expect(t.store.applyOrganization).toHaveBeenCalledTimes(1);
+      expect(t.store.applyOrganization).toHaveBeenCalledWith({ type: "moveBooks", contentHashes: ["a".repeat(64), "c".repeat(64)], folderId: FOLDER });
+      expect(t.setOrganization).toHaveBeenLastCalledWith(after);
+      const notice = t.current().notices.shelfNotice;
+      expect(notice?.kind).toBe("warn");
+      expect(notice?.text).toContain("Target");
+      expect(notice?.text).toContain("1");
+    } finally { await t.dom.dispose(); }
+  });
+
+  it("keeps the books unclassified when the target folder was dissolved meanwhile", async () => {
+    const t = setup();
+    t.store.getOrganization.mockResolvedValue(organization({ targetDeleted: true }));
+    t.store.importPaths.mockResolvedValue({ results: [{ inputIndex: 0, status: "saved", record: entry("a") }] });
+    try {
+      await t.render();
+      await t.dom.run(() => t.current().commands.handleImportSources(
+        [{ kind: "path" as const, path: "a.epub", name: "a.epub" }],
+        { folderId: FOLDER, name: "Target" },
+      ));
+      expect(t.store.applyOrganization).not.toHaveBeenCalled();
+      expect(t.current().notices.shelfNotice?.kind).toBe("warn");
+      expect(t.current().notices.shelfNotice?.text).toContain("Target");
+    } finally { await t.dom.dispose(); }
+  });
+
+  it("files an Android picker import into the folder it was started from", async () => {
+    const t = setup();
+    t.store.getOrganization.mockResolvedValue(organization());
+    t.store.applyOrganization.mockResolvedValue(organization());
+    ports.picker.mockResolvedValue(["content://doc/a.epub"]);
+    ports.native.mockResolvedValue({ results: [{ inputIndex: 0, status: "saved", record: entry("a") }] });
+    try {
+      await t.render();
+      await t.dom.run(() => t.current().commands.handleChooseBooks({ folderId: FOLDER, name: "Target" }));
+      expect(t.store.applyOrganization).toHaveBeenCalledWith({ type: "moveBooks", contentHashes: ["a".repeat(64)], folderId: FOLDER });
+      expect(t.current().notices.shelfNotice?.kind).toBe("ok");
+    } finally { await t.dom.dispose(); }
+  });
+
+  it("opens directory import on a dropped folder and scans it without a picker", async () => {
+    const t = setup();
+    try {
+      await t.render();
+      const source = { kind: "path" as const, path: "D:\\Books" };
+      await t.dom.run(() => t.current().folders.handleOpenFolderImport(source));
+      expect(ports.directory).toHaveBeenCalledWith(source);
+      expect(t.current().imports.folderImport?.autoScan).toBe(true);
+      await t.dom.run(() => t.current().folders.closeFolderImport());
+      await t.dom.run(() => t.current().folders.handleOpenFolderImport());
+      expect(ports.directory).toHaveBeenLastCalledWith(undefined);
+      expect(t.current().imports.folderImport?.autoScan).toBe(false);
     } finally { await t.dom.dispose(); }
   });
 });

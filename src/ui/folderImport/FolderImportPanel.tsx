@@ -45,6 +45,8 @@ export interface FolderImportPanelProps {
   onUseFileImport?(): void;
   /** Incremented by the host (Android Back) to request the same close as 取消/关闭; ignored while importing. */
   closeSignal?: number;
+  /** Start scanning on open: the port already knows its source (a folder dropped on the window). */
+  autoScan?: boolean;
 }
 
 export const DEFAULT_FOLDER_IMPORT_OPTIONS: ImportOptions = {
@@ -310,6 +312,15 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
 
   const closeRef = useRef(close);
   closeRef.current = close;
+  const pickAndScanRef = useRef(pickAndScan);
+  pickAndScanRef.current = pickAndScan;
+  const autoScan = props.autoScan === true;
+  useEffect(() => {
+    if (!autoScan) return;
+    // Deferred so a remounted panel (StrictMode) scans once, with its live owner.
+    const timer = window.setTimeout(() => void pickAndScanRef.current(), 0);
+    return () => window.clearTimeout(timer);
+  }, [autoScan]);
   const initialCloseSignal = useRef(props.closeSignal);
   useEffect(() => {
     if (props.closeSignal === initialCloseSignal.current) return;

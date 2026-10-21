@@ -254,7 +254,7 @@ select option {
 
 /* ---- 拖拽悬停遮罩 ---- */
 .app.drag-active::after {
-  content: "松开以导入图书或字体";
+  content: attr(data-drop-label);
   position: fixed;
   inset: 0;
   z-index: var(--z-ui-drawer);
@@ -270,6 +270,30 @@ select option {
   border: 3px dashed var(--accent);
   pointer-events: none;
   user-select: none;
+}
+
+/* EPUB 拖到文件夹卡片上：撤掉整屏遮罩，卡片自身高亮，底部只留一枚去向提示。 */
+.app.drag-active.drag-to-folder::after {
+  inset: auto auto calc(32px + env(safe-area-inset-bottom, 0px)) 50%;
+  transform: translateX(-50%);
+  max-width: calc(100vw - 48px);
+  padding: 10px 18px;
+  border: none;
+  border-radius: 999px;
+  font-size: 15px;
+  letter-spacing: 0;
+  color: var(--accent-foreground, #fff);
+  background: var(--accent);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 文件夹弹窗盖在遮罩之上：拖入时给弹窗描边，说明会导入到这里。 */
+.app.drag-active .shelf-folder-modal {
+  outline: 3px dashed var(--accent);
+  outline-offset: 4px;
 }
 
 /* ---- 阅读器矢量 SVG 图标与基础规范 ---- */

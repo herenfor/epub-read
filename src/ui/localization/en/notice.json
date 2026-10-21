@@ -159,5 +159,12 @@
   "notice.loading.empty": "No displayable content in this chapter",
   "notice.loading.position": "Preparing reading position...",
   "notice.loading.chapter": "Loading chapter...",
-  "notice.loading.layout": "Preparing layout..."
+  "notice.loading.layout": "Preparing layout...",
+  "notice.importTarget.placed": "Added to folder “{name}”",
+  "notice.importTarget.keptElsewhere.other": "{count} books are already in other folders and were not moved",
+  "notice.importTarget.keptElsewhere.one": "{count} book is already in another folder and was not moved",
+  "notice.importTarget.folderGone": "Folder “{name}” no longer exists; the books stay unclassified",
+  "notice.importTarget.failed": "Books imported, but adding them to the folder failed: {error}",
+  "notice.drop.unsupported": "Only EPUB files or folders can be dropped here",
+  "notice.drop.oneFolder": "Drop one folder at a time"
 }

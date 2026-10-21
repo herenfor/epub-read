@@ -2,10 +2,12 @@ import { useCallback, useRef, useState, type Dispatch, type MutableRefObject, ty
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { loadBook, DrmError } from "../core/book";
 import type { DirectoryImportPort } from "../core/folderImport/contract";
+import type { NativeDirectorySource } from "../platform/directoryImportBridge";
 import type { RuntimeCapabilities } from "../platform/runtimeCapabilities";
 import { cancelDocumentImport, importDocuments, type AndroidDocumentSelection, type AndroidImportBatchResult, type AndroidNativeImportError } from "../platform/androidNativeBridge";
 import { activatePortableShelfState, getShelfStore, type ShelfEntry } from "./shelf";
-import { formatImportNotice, findDuplicateEntry, mergeShelfEntries, sha256Hex } from "./importBooks";
+import { formatImportNotice, findDuplicateEntry, mergeShelfEntries, sha256Hex, type ImportNotice } from "./importBooks";
+import { liveFolderName, planImportIntoFolder, type ImportedBookRef } from "./importIntoFolder";
 import { bookOpenErrorMessage } from "./bookOpenFailure";
 import { uiText, uiPlural } from "./localization/UiLanguageProvider";
 import type { NativeImportCancelState } from "./NativeImportPanel";
@@ -17,6 +19,19 @@ import type { ShelfNotice } from "./useShelfLibrary";
 type ImportSource =
   | { kind: "file"; file: File }
   | { kind: "path"; path: string; name: string };
+
+/** Shelf folder an import files its books into; absent = shelf root. Fixed when the import starts. */
+export interface ImportFolderTarget {
+  readonly folderId: string;
+  readonly name: string;
+}
+
+const CONTENT_HASH = /^[a-f0-9]{64}$/;
+
+function importedRef(entry: ShelfEntry, isExisting: boolean): ImportedBookRef[] {
+  const contentHash = entry.contentHash ?? entry.id;
+  return CONTENT_HASH.test(contentHash) ? [{ contentHash, isExisting }] : [];
+}
 
 /** Shared by all import/delete/LAN/archive gates; reserved before any await. */
 const FOLDER_IMPORT_SLOT = "directory-import";
@@ -60,6 +75,8 @@ export function useBookImportState() {
     port: DirectoryImportPort;
     organization: LibraryOrganization;
     supported: boolean;
+    /** Scan on open: the source came with the request (a dropped folder). */
+    autoScan?: boolean;
   } | null>(null);
   const [folderImportCloseSignal, setFolderImportCloseSignal] = useState(0);
   return { shelfBusy, setShelfBusy, shelfBusyMessage, setShelfBusyMessage, nativeImport, setNativeImport, nativeImportRef, folderImport, setFolderImport, folderImportCloseSignal, setFolderImportCloseSignal };
@@ -73,7 +90,7 @@ type SetEntries = Dispatch<SetStateAction<ShelfEntry[]>>;
 export function useBookImport({
   importState: { nativeImport, setNativeImport, nativeImportRef, setShelfBusyMessage, setShelfBusy },
   runtime, isTauriEnv, fileInputRef, shelfBusyRef, shelfEntriesRef,
-  contentHashByIdRef, entryByContentHashRef, setShelfEntries, setShelfNotice,
+  contentHashByIdRef, entryByContentHashRef, setShelfEntries, setShelfNotice, setOrganization,
 }: {
   importState: ImportState;
   runtime: RuntimeCapabilities;
@@ -85,9 +102,56 @@ export function useBookImport({
   entryByContentHashRef: MutableRefObject<Map<string, ShelfEntry>>;
   setShelfEntries: SetEntries;
   setShelfNotice: SetNotice;
+  setOrganization: Dispatch<SetStateAction<LibraryOrganization>>;
 }) {
+  /**
+   * Files the accepted books into the import's target folder with ONE
+   * moveBooks write, and appends the outcome to the import notice. The books
+   * are already imported: a placement failure only leaves them at the root.
+   */
+  const placeIntoFolder = useCallback(async (
+    target: ImportFolderTarget,
+    books: readonly ImportedBookRef[],
+    notice: ImportNotice,
+  ): Promise<ImportNotice> => {
+    if (books.length === 0) return notice;
+    const sep = uiText("notice.sep");
+    const warn = (text: string): ImportNotice => ({
+      kind: notice.kind === "ok" ? "warn" : notice.kind,
+      text: notice.text + sep + text,
+    });
+    try {
+      const store = getShelfStore();
+      const state = await store.getOrganization();
+      const plan = planImportIntoFolder(state, target.folderId, books);
+      if (plan.targetMissing) {
+        setOrganization(state);
+        return warn(uiText("notice.importTarget.folderGone", { name: target.name }));
+      }
+      const next = plan.move.length > 0
+        ? await store.applyOrganization({ type: "moveBooks", contentHashes: [...plan.move], folderId: target.folderId })
+        : state;
+      setOrganization(next);
+      const name = liveFolderName(next, target.folderId) ?? target.name;
+      const parts: string[] = [];
+      if (plan.move.length + plan.alreadyHere > 0) parts.push(uiText("notice.importTarget.placed", { name }));
+      if (plan.keptElsewhere > 0) {
+        parts.push(uiPlural("notice.importTarget.keptElsewhere", plan.keptElsewhere, { count: plan.keptElsewhere }));
+      }
+      if (parts.length === 0) return notice;
+      // A lone re-import that only filed the book is a success, not "already imported".
+      const filedOnly = notice.kind === "error" && plan.move.length > 0 && books.every((book) => book.isExisting);
+      return {
+        kind: filedOnly ? "ok" : plan.keptElsewhere > 0 && notice.kind === "ok" ? "warn" : notice.kind,
+        text: notice.text + sep + parts.join(sep),
+      };
+    } catch (error) {
+      return warn(uiText("notice.importTarget.failed", { error: bookOpenErrorMessage(error) }));
+    }
+  }, [setOrganization]);
+
   // ---- 批量导入 EPUB 并入库（逐本有界处理；结束后只刷新一次书架） ----
-  const handleImportSources = useCallback(async (sources: ImportSource[]) => {
+  const handleImportSources = useCallback(async (sources: ImportSource[], target: ImportFolderTarget | null = null) => {
     const list = sources.filter((source) => {
       const name = source.kind === "file" ? source.file.name : source.name;
       return name.toLowerCase().endsWith(".epub");
@@ -113,6 +177,7 @@ export function useBookImport({
     const accepted: ShelfEntry[] = [];
     const duplicateTitles: string[] = [];
     const failed: string[] = [];
+    const placed: ImportedBookRef[] = [];
     const store = getShelfStore();
 
     try {
@@ -136,6 +201,7 @@ export function useBookImport({
           contentHashByIdRef.current.set(item.record.id, item.record.contentHash ?? item.record.id);
           entryByContentHashRef.current.set(item.record.contentHash ?? item.record.id, item.record);
           accepted.push(item.record);
+          placed.push(...importedRef(item.record, item.status === "duplicate"));
           if (item.status === "duplicate") {
             duplicateTitles.push(item.record.title || fileName.replace(/\.epub$/i, ""));
           } else {
@@ -165,6 +231,7 @@ export function useBookImport({
 
             if (duplicate && duplicate.available !== false) {
               duplicateTitles.push(duplicate.title || fileName.replace(/\.epub$/i, ""));
+              placed.push(...importedRef(duplicate, true));
               continue;
             }
 
@@ -191,6 +258,7 @@ export function useBookImport({
             });
             contentHashByIdRef.current.set(result.entry.id, contentHash);
             entryByContentHashRef.current.set(contentHash, result.entry);
+            placed.push(...importedRef(result.entry, result.status === "duplicate"));
             if (result.status === "duplicate") {
               duplicateTitles.push(result.entry.title || fileName.replace(/\.epub$/i, ""));
             } else {
@@ -228,13 +296,14 @@ export function useBookImport({
       } else if (imported.length > 0) {
         setShelfEntries((previous) => mergeShelfEntries(previous, imported));
       }
-      const notice = formatImportNotice({
+      let notice = formatImportNotice({
         sourceCount: list.length,
         importedCount: imported.length,
         duplicateTitles,
         failed,
         refreshedCount: isTauriEnv() ? duplicateTitles.length : 0,
       });
+      if (target) notice = await placeIntoFolder(target, placed, notice);
       if (refreshWarning) {
         notice.text += uiText("notice.sep") + refreshWarning;
         if (notice.kind === "ok") notice.kind = "warn";
@@ -246,7 +315,7 @@ export function useBookImport({
       shelfBusyRef.current = false;
       setShelfBusy(false);
     }
-  }, []);
+  }, [placeIntoFolder]);
 
   const runNativeDocumentImport = useCallback(async (
     documents: AndroidDocumentSelection[],
@@ -295,12 +364,17 @@ export function useBookImport({
     }
   }, []);
 
-  const applyNativeImportBatch = useCallback(async (batch: AndroidImportBatchResult, documents: AndroidDocumentSelection[]): Promise<void> => {
+  const applyNativeImportBatch = useCallback(async (
+    batch: AndroidImportBatchResult,
+    documents: AndroidDocumentSelection[],
+    target: ImportFolderTarget | null = null,
+  ): Promise<void> => {
     const imported: ShelfEntry[] = [];
     const accepted: ShelfEntry[] = [];
     const duplicateTitles: string[] = [];
     const failed: string[] = [];
     const cancelled: string[] = [];
+    const placed: ImportedBookRef[] = [];
     for (const item of batch.results) {
       const document = documents[item.inputIndex];
       const label = document ? displayNameFromContentUri(document.uri) : uiText("notice.nthBook", { n: item.inputIndex + 1 });
@@ -317,6 +391,7 @@ export function useBookImport({
         continue;
       }
       accepted.push(item.record);
+      placed.push(...importedRef(item.record, item.status === "duplicate"));
       if (item.status === "duplicate") {
         duplicateTitles.push(item.record.title || label);
       } else {
@@ -332,19 +407,20 @@ export function useBookImport({
       }
       setShelfEntries((previous) => mergeShelfEntries(previous, entries));
     }
-    const notice = formatImportNotice({
+    let notice = formatImportNotice({
       sourceCount: documents.length,
       importedCount: imported.length,
       duplicateTitles,
       failed,
       refreshedCount: duplicateTitles.length,
     });
+    if (target) notice = await placeIntoFolder(target, placed, notice);
     if (cancelled.length > 0) {
       notice.text += uiText("notice.sep") + uiPlural("notice.import.cancelledCount", cancelled.length, { count: cancelled.length });
       if (notice.kind === "ok") notice.kind = "warn";
     }
     setShelfNotice(notice);
-  }, []);
+  }, [placeIntoFolder]);
 
   const handleCancelNativeImport = useCallback(async (): Promise<void> => {
     const current = nativeImport;
@@ -420,8 +496,12 @@ export function useBookImport({
     return restored;
   }, [runNativeDocumentImport]);
 
-  const handleChooseBooks = useCallback(async () => {
+  /** Target of the browser file input, which answers through its change event. */
+  const fileInputTargetRef = useRef<ImportFolderTarget | null>(null);
+
+  const handleChooseBooks = useCallback(async (target: ImportFolderTarget | null = null) => {
     if (!isTauriEnv()) {
+      fileInputTargetRef.current = target;
       fileInputRef.current?.click();
       return;
     }
@@ -442,7 +522,7 @@ export function useBookImport({
         if (uris.length === 0) return;
         const documents: AndroidDocumentSelection[] = uris.map((uri) => ({ uri }));
         const batch = await runNativeDocumentImport(documents);
-        if (batch) await applyNativeImportBatch(batch, documents);
+        if (batch) await applyNativeImportBatch(batch, documents, target);
       } catch (error) {
         setShelfNotice({ kind: "error", text: uiText("notice.picker.failed", { error: String(error) }) });
       }
@@ -462,14 +542,22 @@ export function useBookImport({
           kind: "path" as const,
           path,
           name: path.split(/[\\/]/).pop() || "book.epub",
-        }))
+        })),
+        target,
       );
     } catch (error) {
       setShelfNotice({ kind: "error", text: uiText("notice.picker.failed", { error: String(error) }) });
     }
   }, [applyNativeImportBatch, handleImportSources, runNativeDocumentImport]);
 
-  return { handleImportSources, handleCancelNativeImport, handleToggleNativeImportCollapsed, reimportAndroidMissing, handleChooseBooks };
+  /** Browser file input result: consumes the target its picker was opened for. */
+  const handleFileInputSources = useCallback((sources: ImportSource[]): void => {
+    const target = fileInputTargetRef.current;
+    fileInputTargetRef.current = null;
+    void handleImportSources(sources, target);
+  }, [handleImportSources]);
+
+  return { handleImportSources, handleFileInputSources, handleCancelNativeImport, handleToggleNativeImportCollapsed, reimportAndroidMissing, handleChooseBooks };
 }
 
 export function useFolderImport({
@@ -487,7 +575,7 @@ export function useFolderImport({
   setShelfNotice: SetNotice;
   refreshShelfProjection(): Promise<void>;
 }) {
-  const handleOpenFolderImport = useCallback(async (): Promise<void> => {
+  const handleOpenFolderImport = useCallback(async (droppedSource?: NativeDirectorySource): Promise<void> => {
     if (shelfBusyRef.current || organizationBusyRef.current || nativeImportRef.current) {
       setShelfNotice({ kind: "warn", text: uiText("notice.import.busy") });
       return;
@@ -506,7 +594,12 @@ export function useFolderImport({
       const store = getShelfStore();
       const organizationSnapshot = await store.getOrganization();
       if (isTauriEnv()) {
-        setFolderImport({ port: createNativeDirectoryImportPort(), organization: organizationSnapshot, supported: true });
+        setFolderImport({
+          port: createNativeDirectoryImportPort(droppedSource),
+          organization: organizationSnapshot,
+          supported: true,
+          autoScan: droppedSource !== undefined,
+        });
         return;
       }
       const commit = store.commitDirectoryPlacementBatch?.bind(store);
