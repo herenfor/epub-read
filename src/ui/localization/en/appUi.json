@@ -39,5 +39,9 @@
   "appUi.issue.copyOriginalFailed": "Failed to copy original text: {error}",
   "appUi.issue.resourceAbsent": "Referenced file missing from book, ignored: {path}",
   "appUi.issue.resourceUnavailable": "Failed to load book resource: {path}",
-  "appUi.issue.resourceRecovered": "Book resource recovered: {path}"
+  "appUi.issue.resourceRecovered": "Book resource recovered: {path}",
+  "appUi.drop.books": "Drop to import books",
+  "appUi.drop.toFolder": "Drop to import into “{name}”",
+  "appUi.drop.folder": "Drop to import folder",
+  "appUi.drop.generic": "Drop to import books or fonts"
 }

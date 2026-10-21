@@ -138,7 +138,7 @@ import {
   useShelfContentHashes, useShelfLibrary, useShelfOrganizationActions,
   useShelfDeletion, useShelfNoticeLifetime,
 } from "./ui/useShelfLibrary";
-import { useBookImportState, useBookImport, useFolderImport } from "./ui/useBookImport";
+import { useBookImportState, useBookImport, useFolderImport, type ImportFolderTarget } from "./ui/useBookImport";
 import { ReaderReadingSettings, SettingsSwitch } from "./ui/ReadingSettings";
 import { ChevronRightIcon } from "./ui/readerIcons";
 import { NativeImportPanel } from "./ui/NativeImportPanel";
@@ -250,6 +250,8 @@ import {
 } from "./ui/storage";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { isPhysicalPointInsideRect, isSupportedFontFileName } from "./ui/fontDrop";
+import { folderIdAtPhysicalPoint, partitionDroppedPaths } from "./ui/shelfDrop";
+import { liveFolderName } from "./ui/importIntoFolder";
 import { createFontImportController } from "./ui/fontImport";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open as openFileDialog, save as saveFileDialog } from "@tauri-apps/plugin-dialog";
@@ -717,9 +719,20 @@ export default function App() {
   }, []);
 
   const [dragActive, setDragActive] = useState(false);
+  /** Overlay text of a native file drag; names the folder the drop would file into. */
+  const [dropLabel, setDropLabel] = useState("");
+  /** Shelf folder card under a native EPUB drag (highlighted; the drop files into it). */
+  const [dropFolderId, setDropFolderId] = useState<string | null>(null);
+  /** Folder open on the shelf (sheet or folder view): a window drop files into it. */
+  const importContextRef = useRef<ImportFolderTarget | null>(null);
+  const handleImportContextChange = useCallback((target: ImportFolderTarget | null): void => {
+    importContextRef.current = target;
+  }, []);
   const [fontNativeDragActive, setFontNativeDragActive] = useState(false);
   // ---- 书架 ----
   const [view, setView] = useState<"shelf" | "reader">("shelf");
+  const viewRef = useRef(view);
+  viewRef.current = view;
   const [readerToolsVisible, setReaderToolsVisible] = useState(true);
   // 图片激活等稳定回调需要读到当前沉浸状态。
   const readerToolsVisibleRef = useRef(readerToolsVisible);
@@ -1290,10 +1303,10 @@ export default function App() {
     []
   );
 
-  const { handleImportSources, handleCancelNativeImport, handleToggleNativeImportCollapsed, reimportAndroidMissing, handleChooseBooks } = useBookImport({
+  const { handleImportSources, handleFileInputSources, handleCancelNativeImport, handleToggleNativeImportCollapsed, reimportAndroidMissing, handleChooseBooks } = useBookImport({
     importState: bookImportState,
     runtime, isTauriEnv, fileInputRef, shelfBusyRef, shelfEntriesRef,
-    contentHashByIdRef, entryByContentHashRef, setShelfEntries, setShelfNotice,
+    contentHashByIdRef, entryByContentHashRef, setShelfEntries, setShelfNotice, setOrganization,
   });
 
   const { resolveContentHashForEntry, handleApplyOrganization } = useShelfOrganizationActions({
@@ -3865,7 +3878,10 @@ export default function App() {
           setShelfNotice({ kind: "error", text: uiText("notice.font.dropHere") });
         }
         if (epubFiles.length > 0) {
-          void handleImportSources(epubFiles.map((file) => ({ kind: "file" as const, file })));
+          void handleImportSources(
+            epubFiles.map((file) => ({ kind: "file" as const, file })),
+            viewRef.current === "shelf" ? importContextRef.current : null,
+          );
         }
       };
       window.addEventListener("dragover", prevent);
@@ -3879,57 +3895,107 @@ export default function App() {
     let cancelled = false;
     let nativeDragHasEpub = false;
     let nativeDragHasFont = false;
+    let nativeDragHasOther = false;
     const isOverFontPanel = (position: { x: number; y: number }): boolean => {
       if (!fontSettingsOpen) return false;
       const panel = document.querySelector<HTMLElement>(".font-settings-panel");
       if (!panel) return false;
       return isPhysicalPointInsideRect(position, window.devicePixelRatio, panel.getBoundingClientRect());
     };
-    const updateNativeDragVisual = (overFontPanel: boolean): void => {
+    /** Folder card under the point wins; otherwise the open folder; otherwise the shelf root. */
+    const dropTargetAt = (position: { x: number; y: number }): { target: ImportFolderTarget | null; onCard: boolean } => {
+      if (viewRef.current !== "shelf") return { target: null, onCard: false };
+      const folderId = folderIdAtPhysicalPoint(position, window.devicePixelRatio);
+      const name = folderId ? liveFolderName(organizationRef.current, folderId) : null;
+      if (folderId && name !== null) return { target: { folderId, name }, onCard: true };
+      return { target: importContextRef.current, onCard: false };
+    };
+    const clearNativeDragVisual = (): void => {
+      setDragActive(false);
+      setFontNativeDragActive(false);
+      setDropFolderId(null);
+    };
+    const updateNativeDragVisual = (position: { x: number; y: number }): void => {
+      const overFontPanel = isOverFontPanel(position);
+      const active = !overFontPanel && (nativeDragHasEpub || nativeDragHasFont || nativeDragHasOther);
       setFontNativeDragActive(overFontPanel);
-      setDragActive(!overFontPanel && (nativeDragHasEpub || nativeDragHasFont));
+      setDragActive(active);
+      const { target, onCard } = active && nativeDragHasEpub ? dropTargetAt(position) : { target: null, onCard: false };
+      setDropFolderId(onCard && target ? target.folderId : null);
+      setDropLabel(
+        target ? uiText("appUi.drop.toFolder", { name: target.name })
+          : nativeDragHasEpub ? uiText("appUi.drop.books")
+            : nativeDragHasOther ? uiText("appUi.drop.folder")
+              : uiText("appUi.drop.generic"),
+      );
+    };
+    /** A dropped non-EPUB, non-font item: one folder opens directory import on it. */
+    const openDroppedDirectory = async (paths: readonly string[]): Promise<void> => {
+      const directories: string[] = [];
+      for (const path of paths) {
+        try {
+          if ((await statFile(path)).isDirectory) directories.push(path);
+        } catch {
+          // Unreadable here: the native directory scan checks it and explains.
+          directories.push(path);
+        }
+      }
+      if (directories.length === 0) {
+        setShelfNotice({ kind: "error", text: uiText("notice.drop.unsupported") });
+      } else if (directories.length > 1) {
+        setShelfNotice({ kind: "warn", text: uiText("notice.drop.oneFolder") });
+      } else {
+        await handleOpenFolderImport({ kind: "path", path: directories[0] });
+      }
     };
     getCurrentWebview()
       .onDragDropEvent((event) => {
         const p = event.payload;
         if (p.type === "enter") {
-          nativeDragHasEpub = p.paths.some((path) => path.toLowerCase().endsWith(".epub"));
-          nativeDragHasFont = p.paths.some((path) => isSupportedFontFileName(path));
-          updateNativeDragVisual(isOverFontPanel(p.position));
+          const dropped = partitionDroppedPaths(p.paths);
+          nativeDragHasEpub = dropped.epubs.length > 0;
+          nativeDragHasFont = dropped.fonts.length > 0;
+          nativeDragHasOther = dropped.others.length > 0;
+          updateNativeDragVisual(p.position);
         } else if (p.type === "over") {
-          updateNativeDragVisual(isOverFontPanel(p.position));
+          updateNativeDragVisual(p.position);
         } else if (p.type === "leave") {
           nativeDragHasEpub = false;
           nativeDragHasFont = false;
-          setDragActive(false);
-          setFontNativeDragActive(false);
+          nativeDragHasOther = false;
+          clearNativeDragVisual();
         } else if (p.type === "drop") {
           nativeDragHasEpub = false;
           nativeDragHasFont = false;
-          setDragActive(false);
-          setFontNativeDragActive(false);
+          nativeDragHasOther = false;
+          clearNativeDragVisual();
           // 字体面板优先：面板内的落点只走字体链路，残留的 EPUB 不抢读书会话。
           const overFontPanel = isOverFontPanel(p.position);
-          const epubPaths = p.paths.filter((path) => path.toLowerCase().endsWith(".epub"));
-          const hasNonFont = p.paths.length > epubPaths.length;
+          const dropped = partitionDroppedPaths(p.paths);
           if (overFontPanel) {
             void handleImportFontPaths(p.paths);
-            if (epubPaths.length > 0) {
+            if (dropped.epubs.length > 0) {
               setShelfNotice({ kind: "error", text: uiText("notice.font.dropUnsupported") });
             }
             return;
           }
-          if (hasNonFont) {
-            setShelfNotice({ kind: "error", text: uiText("notice.font.dropHere") });
-          }
-          if (epubPaths.length > 0) {
+          if (dropped.epubs.length > 0) {
+            // Mixed with folders: only the EPUB files are imported; a folder is dropped on its own.
+            if (dropped.fonts.length > 0) {
+              setShelfNotice({ kind: "error", text: uiText("notice.font.dropHere") });
+            }
             void handleImportSources(
-              epubPaths.map((path) => ({
+              dropped.epubs.map((path) => ({
                 kind: "path" as const,
                 path,
                 name: path.split(/[\\/]/).pop() || "book.epub",
-              }))
+              })),
+              dropTargetAt(p.position).target,
             );
+          } else if (dropped.others.length > 0) {
+            void openDroppedDirectory(dropped.others);
+          } else if (dropped.fonts.length > 0) {
+            setShelfNotice({ kind: "error", text: uiText("notice.font.dropHere") });
           }
         }
       })
@@ -3946,7 +4012,7 @@ export default function App() {
       cancelled = true;
       unlisten?.();
     };
-  }, [fontSettingsOpen, handleImportFontPaths, handleImportSources]);
+  }, [fontSettingsOpen, handleImportFontPaths, handleImportSources, handleOpenFolderImport]);
 
   // ---- 派生 ----
   const shelfDisplayEntries = useMemo(
@@ -5195,7 +5261,8 @@ export default function App() {
 
   return (
     <div
-      className={`app${dragActive ? " drag-active" : ""}${isFullscreen ? " is-fullscreen" : ""}${isDockedSidebar ? ` has-docked-sidebar docked-side-${sidebarSide}` : ""}${isDockedSearch ? " has-docked-search" : ""}`}
+      data-drop-label={dragActive ? dropLabel : undefined}
+      className={`app${dragActive ? " drag-active" : ""}${dragActive && dropFolderId ? " drag-to-folder" : ""}${isFullscreen ? " is-fullscreen" : ""}${isDockedSidebar ? ` has-docked-sidebar docked-side-${sidebarSide}` : ""}${isDockedSearch ? " has-docked-search" : ""}`}
       data-platform={runtime.platform}
       data-shell={runtime.shell}
       data-layout={responsive.layout}
@@ -5340,6 +5407,9 @@ export default function App() {
               onRetryLibraryLoad={retryLibraryLoad}
               onOpen={handleShelfOpen}
               onImport={() => void handleChooseBooks()}
+              onImportIntoFolder={(target) => void handleChooseBooks(target)}
+              onImportContextChange={handleImportContextChange}
+              externalDropFolderId={dropFolderId}
               onDelete={handleShelfDelete}
               onDeleteMany={handleShelfDeleteMany}
               registerBackHandler={registerShelfBackHandler}
@@ -6008,6 +6078,7 @@ export default function App() {
           onSettled={handleFolderImportSettled}
           onClose={closeFolderImport}
           onUseFileImport={() => void handleChooseBooks()}
+          autoScan={folderImport.autoScan}
         />
       )}
       {nativeImport && (
@@ -6048,7 +6119,7 @@ export default function App() {
         onChange={(e) => {
           const files = Array.from(e.target.files ?? []);
           if (files.length > 0) {
-            void handleImportSources(files.map((file) => ({ kind: "file" as const, file })));
+            handleFileInputSources(files.map((file) => ({ kind: "file" as const, file })));
           }
           e.target.value = "";
         }}

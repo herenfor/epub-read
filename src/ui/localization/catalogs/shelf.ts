@@ -14,7 +14,7 @@ export const shelf = defineMessages("shelf", {
   "shelf.import.books.detail": "选择一本或多本 EPUB",
   "shelf.import.folder": { zh: "导入文件夹", max: 18 },
   "shelf.import.folder.detail": "按目录自动整理到书架文件夹",
-  "shelf.import.dropHint": "也可以把 EPUB 文件直接拖到书架上",
+  "shelf.import.dropHint": "也可以把 EPUB 文件或文件夹拖到书架上；拖到文件夹卡片上会直接放进该文件夹",
   "shelf.cover.initialFallback": { zh: "书", note: "One character drawn on a placeholder cover when the title is empty.", max: 1 },
   "shelf.time.justNow": "刚刚",
   "shelf.time.minutesAgo.other": "{count} 分钟前",
@@ -67,4 +67,5 @@ export const shelf = defineMessages("shelf", {
   "shelf.timeSegment.last30Days": "最近 30 天",
   "shelf.timeSegment.thisYear": "今年",
   "shelf.timeSegment.older": "更早",
+  "shelf.import.toFolder.tip": { zh: "导入 EPUB 图书到文件夹“{name}”", note: "Import button tooltip while a shelf folder is open." },
 });
