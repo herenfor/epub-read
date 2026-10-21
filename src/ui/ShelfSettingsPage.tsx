@@ -3,6 +3,7 @@ import type { Theme } from "../render/settings";
 import { READER_PALETTES } from "../config/readerPalette";
 import { getRuntimeCapabilities } from "../platform/runtimeCapabilities";
 import { AboutInfo } from "./AboutInfo";
+import { Icon, SettingsRow, UpdateDot } from "./settingsRows";
 import { useAppUpdateDot } from "./appUpdate/appUpdateStore";
 import { CacheStoragePanel } from "./CacheStoragePanel";
 import { useExitPresence } from "./menuMotion";
@@ -61,11 +62,6 @@ const THEMES: Array<{ value: Theme; label: "shelfMenu.theme.light" | "shelfMenu.
   { value: "dark", label: "shelfMenu.theme.dark" },
 ];
 
-function Icon({ children }: { children: ReactNode }) {
-  return <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
-    strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{children}</svg>;
-}
-
 const SECTION_ICONS: Record<ShelfSettingsSection, ReactNode> = {
   appearance: <Icon><circle cx="12" cy="12" r="8.5" /><path d="M12 3.5v17" /><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor" stroke="none" /></Icon>,
   reading: <Icon><path d="M3 5.5c3-1.3 6-1.3 9 .8v13c-3-2.1-6-2.1-9-.8z" /><path d="M21 5.5c-3-1.3-6-1.3-9 .8v13c3-2.1 6-2.1 9-.8z" /></Icon>,
@@ -81,23 +77,6 @@ const ROW_ICONS = {
   cache: <Icon><ellipse cx="12" cy="6" rx="7" ry="3" /><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6" /><path d="M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" /></Icon>,
   log: <Icon><path d="M7 3.5h7l4 4V20a.5.5 0 0 1-.5.5h-10A.5.5 0 0 1 7 20z" /><path d="M14 3.5V8h4M10 12.5h5M10 16h5" /></Icon>,
 };
-
-function UpdateDot() {
-  const { t } = useUiText();
-  return <span className="app-update-dot is-inline" role="img" aria-label={t("about.update.dot")} />;
-}
-
-function SettingsRow(props: { icon: ReactNode; title: string; detail?: string; dot?: boolean; disabled?: boolean; onClick(): void }) {
-  return <button type="button" className="shelf-settings-row" disabled={props.disabled}
-    onClick={(event) => { event.currentTarget.blur(); props.onClick(); }}>
-    <span className="shelf-settings-row-icon">{props.icon}</span>
-    <span className="shelf-settings-row-text">
-      <strong>{props.title}{props.dot && <UpdateDot />}</strong>
-      {props.detail && <small>{props.detail}</small>}
-    </span>
-    <svg className="shelf-settings-row-chevron" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
-  </button>;
-}
 
 function Segmented<T extends string>(props: { label: string; value: T; options: Array<{ value: T; label: string }>; onChange(value: T): void }) {
   return <div className="shelf-settings-control">
@@ -249,13 +228,11 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
       </> });
   }
   sections.push({ id: "about", title: t("shelfSettings.section.about"),
-    detail: [t("about.notes"), t("about.checkUpdates"), ...(props.onOpenDiagnostics ? [t("shelfSettings.diagnostics")] : [])].join(t("notice.listSep")),
-    content: <>
-      <div className="shelf-settings-card"><AboutInfo /></div>
-      {props.onOpenDiagnostics && <div className="shelf-settings-card is-list">
-        <SettingsRow icon={ROW_ICONS.log} title={t("shelfSettings.diagnostics")} detail={t("shelfSettings.diagnostics.detail")} onClick={props.onOpenDiagnostics} />
-      </div>}
-    </> });
+    detail: [t("about.checkUpdates"), t("about.notes"), ...(props.onOpenDiagnostics ? [t("shelfSettings.diagnostics")] : [])].join(t("notice.listSep")),
+    content: <AboutInfo>
+      {props.onOpenDiagnostics && <SettingsRow icon={ROW_ICONS.log} title={t("shelfSettings.diagnostics")}
+        detail={t("shelfSettings.diagnostics.detail")} onClick={props.onOpenDiagnostics} />}
+    </AboutInfo> });
 
   const current = sections.find((item) => item.id === section) ?? null;
   const closeButton = <button type="button" className="shelf-settings-icon-btn" onClick={props.onClose} aria-label={t("shelfSettings.close")}>

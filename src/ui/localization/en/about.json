@@ -41,6 +41,8 @@
   "about.update.lastChecked": "Last checked {time}",
   "about.update.autoCheck": "Check for Updates Automatically",
   "about.update.autoCheck.detail": "Asks GitHub for new versions at startup. Nothing is uploaded.",
-  "about.update.releasesPage": "All Versions (GitHub Releases)",
-  "about.updated": "Updated to {version}. See what's new in Settings › About."
+  "about.updated": "Updated to {version}. See what's new in Settings › About.",
+  "about.update.ready": "Downloaded and verified",
+  "about.allVersions": "All Versions",
+  "about.allVersions.detail": "GitHub Releases"
 }
