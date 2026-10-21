@@ -5,6 +5,7 @@ import react from "@vitejs/plugin-react";
 import { normalizeAppEdition } from "./src/config/editionValue";
 import { frontendOutDir, normalizeAppPlatform, shellForPlatform } from "./src/config/platformValue";
 import { aiCompanionDevAssets } from "./scripts/ai-companion-dev-assets.mjs";
+import { resolveAppUpdateSource } from "./src/config/appUpdateSourceValue";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, ".", "");
@@ -19,6 +20,9 @@ export default defineConfig(({ mode }) => {
   const identifier = platform === "android"
     ? (edition === "ai" ? "dev.herenfor.epubreader.ai" : "dev.herenfor.epubreader")
     : (edition === "ai" ? "dev.epubreader.ai" : "dev.epubreader.app");
+  // One resolved source feeds both the runtime constant and the build's
+  // declaration, so the release script judges what the app will really call.
+  const updateSource = resolveAppUpdateSource(env);
   return {
     // Keep edition and target decisions in the compiled module graph. This
     // lets a core desktop build remove AI/Android-only branches instead of
@@ -27,6 +31,7 @@ export default defineConfig(({ mode }) => {
       __APP_EDITION__: JSON.stringify(edition),
       __APP_PLATFORM__: JSON.stringify(platform),
       __APP_VERSION__: JSON.stringify(version),
+      __APP_UPDATE_SOURCE__: JSON.stringify(updateSource),
     },
     plugins: [react(), ...(edition === "ai" ? [aiCompanionDevAssets()] : []), {
       name: "edition-manifest",
@@ -43,6 +48,11 @@ export default defineConfig(({ mode }) => {
           type: "asset",
           fileName: "edition-manifest.json",
           source: JSON.stringify({ schemaVersion: 1, edition, platform, shell, version, expectedBackendFeature: edition === "ai" ? "ai" : "core", identifier }, null, 2) + "\n",
+        });
+        this.emitFile({
+          type: "asset",
+          fileName: "app-update-source.json",
+          source: JSON.stringify({ schemaVersion: 1, ...updateSource }, null, 2) + "\n",
         });
       }
     }],

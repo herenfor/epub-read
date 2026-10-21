@@ -3,6 +3,7 @@ import type { Theme } from "../render/settings";
 import { READER_PALETTES } from "../config/readerPalette";
 import { getRuntimeCapabilities } from "../platform/runtimeCapabilities";
 import { AboutInfo } from "./AboutInfo";
+import { useAppUpdateDot } from "./appUpdate/appUpdateStore";
 import { CacheStoragePanel } from "./CacheStoragePanel";
 import { useExitPresence } from "./menuMotion";
 import { useUiMotion, type UiMotion } from "./motionPreference";
@@ -81,12 +82,17 @@ const ROW_ICONS = {
   log: <Icon><path d="M7 3.5h7l4 4V20a.5.5 0 0 1-.5.5h-10A.5.5 0 0 1 7 20z" /><path d="M14 3.5V8h4M10 12.5h5M10 16h5" /></Icon>,
 };
 
-function SettingsRow(props: { icon: ReactNode; title: string; detail?: string; disabled?: boolean; onClick(): void }) {
+function UpdateDot() {
+  const { t } = useUiText();
+  return <span className="app-update-dot is-inline" role="img" aria-label={t("about.update.dot")} />;
+}
+
+function SettingsRow(props: { icon: ReactNode; title: string; detail?: string; dot?: boolean; disabled?: boolean; onClick(): void }) {
   return <button type="button" className="shelf-settings-row" disabled={props.disabled}
     onClick={(event) => { event.currentTarget.blur(); props.onClick(); }}>
     <span className="shelf-settings-row-icon">{props.icon}</span>
     <span className="shelf-settings-row-text">
-      <strong>{props.title}</strong>
+      <strong>{props.title}{props.dot && <UpdateDot />}</strong>
       {props.detail && <small>{props.detail}</small>}
     </span>
     <svg className="shelf-settings-row-chevron" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
@@ -121,6 +127,7 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
   const [cacheOpen, setCacheOpen] = useState(false);
   const [indexBusy, setIndexBusy] = useState(false);
   const readingTitles = useReadingSettingsTitles(props);
+  const updateDot = useAppUpdateDot();
 
   useEffect(() => {
     if (props.open) setSection(props.initialSection ?? (dialog ? "appearance" : null));
@@ -266,6 +273,7 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
         {sections.map((item) => <button key={item.id} type="button" aria-current={item.id === current?.id ? "page" : undefined}
           className={item.id === current?.id ? "active" : ""} onClick={() => setSection(item.id)}>
           <span className="shelf-settings-nav-icon">{SECTION_ICONS[item.id]}</span>{item.title}
+          {item.id === "about" && updateDot && <UpdateDot />}
         </button>)}
       </nav>
       <section className="shelf-settings-main">
@@ -297,7 +305,7 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
         <div className="shelf-settings-group-label">{t("shelfSettings.more")}</div>
         <div className="shelf-settings-card is-list">
           {sections.slice(1).map((item) => <SettingsRow key={item.id} icon={SECTION_ICONS[item.id]} title={item.title}
-            detail={item.detail} onClick={() => setSection(item.id)} />)}
+            detail={item.detail} dot={item.id === "about" && updateDot} onClick={() => setSection(item.id)} />)}
         </div>
       </div>
     </section>;

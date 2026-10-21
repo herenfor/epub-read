@@ -5,6 +5,8 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- CAMERA is only requested by LanScanActivity after the user taps scan. -->
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- In-app update: hands a verified APK to the system installer after the user taps Install. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!-- Camera hardware is optional; scanner entry stays hidden/unavailable on devices without it. -->
     <uses-feature android:name="android.hardware.camera" android:required="false" />

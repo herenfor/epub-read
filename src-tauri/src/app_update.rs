@@ -15,6 +15,15 @@ pub(crate) fn detect(identifier: &str, product_name: Option<&str>) -> InstallKin
     #[cfg(not(windows))]
     let (directory, uninstaller, registered): (Option<String>, bool, Option<String>) =
         (None, false, None);
+    // An Android update test build keeps the Tauri identifier (it names the
+    // Kotlin package the native side binds to); Gradle changes only the
+    // applicationId, from the same EPUB_READER_UPDATE_TEST switch.
+    #[cfg(target_os = "android")]
+    let identifier = match (test_mode, build.profile == "release" && !cfg!(debug_assertions)) {
+        (true, true) => "dev.herenfor.epubreader.updatetest",
+        (true, false) => "dev.herenfor.epubreader.updatetest.debug",
+        (false, _) => identifier,
+    };
     let platform = if cfg!(windows) {
         Platform::Windows
     } else if cfg!(target_os = "android") {

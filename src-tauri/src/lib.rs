@@ -1,4 +1,5 @@
 mod android_app_task;
+mod android_app_update;
 mod android_reader_system_bars;
 mod reader_keep_screen_on;
 mod android_battery;
@@ -42,6 +43,7 @@ macro_rules! configure_invoke_handler {
             android_lan_scan::android_lan_scan_qr,
             android_lan_scan::android_lan_open_app_settings,
             android_app_task::android_move_task_to_back,
+            android_app_update::android_app_update,
         android_reader_system_bars::android_reader_system_bars,
             android_reader_system_bars::android_status_bar_appearance,
             reader_keep_screen_on::reader_set_keep_screen_on,
@@ -186,6 +188,7 @@ macro_rules! configure_invoke_handler {
             android_lan_scan::android_lan_scan_qr,
             android_lan_scan::android_lan_open_app_settings,
             android_app_task::android_move_task_to_back,
+            android_app_update::android_app_update,
         android_reader_system_bars::android_reader_system_bars,
             android_reader_system_bars::android_status_bar_appearance,
             reader_keep_screen_on::reader_set_keep_screen_on,
@@ -353,6 +356,7 @@ pub fn run() {
     let builder = builder
         .plugin(android_uri_bridge::plugin())
         .plugin(android_app_task::plugin())
+        .plugin(android_app_update::plugin())
         .plugin(android_reader_system_bars::plugin())
         .plugin(reader_keep_screen_on::plugin())
         .plugin(android_battery::plugin())

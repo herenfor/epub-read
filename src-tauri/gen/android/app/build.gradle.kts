@@ -20,6 +20,9 @@ val releaseSigning = System.getenv("EPUB_READER_SIGNING_PROPERTIES")
     ?.let { path -> Properties().apply { file(path).inputStream().use { load(it) } } }
 
 val optimizedDev = System.getenv("EPUB_READER_OPTIMIZED_DEV") == "1"
+// Update test builds install as their own app so an in-app upgrade can be
+// tried without touching the release or everyday Dev install.
+val updateTest = System.getenv("EPUB_READER_UPDATE_TEST") == "1"
 
 android {
     compileSdk = 36
@@ -29,7 +32,7 @@ android {
     namespace = "dev.herenfor.epubreader"
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
-        applicationId = "dev.herenfor.epubreader"
+        applicationId = if (updateTest) "dev.herenfor.epubreader.updatetest" else "dev.herenfor.epubreader"
         minSdk = 24
         targetSdk = 36
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()

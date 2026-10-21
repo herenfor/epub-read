@@ -270,6 +270,7 @@ import {
 } from "./ui/useReaderForeground";
 import { createEditionAiRuntime } from "./features/ai/lifecycle/editionRuntime";
 import { IS_AI_EDITION } from "./config/edition";
+import { registerAppUpdateSaveGate, startAppUpdates } from "./ui/appUpdate/appUpdateStore";
 
 // This is intentionally a compile-time edition branch. The core build has no
 // static dependency on the AI panel or its model-asset subtree; AI builds keep
@@ -4768,6 +4769,19 @@ export default function App() {
       windowCloseRef.current = null;
       unlisten?.();
     };
+  }, []);
+
+  // App update: background check (never while reading) and the full save an install waits for.
+  useEffect(() => {
+    const updatedTo = startAppUpdates({ isReading: () => viewRef.current === "reader" });
+    if (updatedTo) setShelfNotice({ kind: "ok", text: uiText("about.updated", { version: updatedTo }) });
+    registerAppUpdateSaveGate(async () => {
+      persistShelfProgressRef.current(true);
+      persistChapterCountCache();
+      const results = await progressWriterRef.current?.flushBooks() ?? [];
+      for (const result of results) if (result.status === "failed") throw result.error;
+    });
+    return () => registerAppUpdateSaveGate(null);
   }, []);
 
   /** 章节在目录里的名字；没有目录项时为空串。 */

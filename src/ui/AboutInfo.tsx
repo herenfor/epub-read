@@ -1,5 +1,4 @@
 import { useId, useState } from "react";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { APP_EDITION } from "../config/edition";
 import type { AppEdition } from "../config/editionValue";
 import { APP_VERSION } from "../config/appVersion";
@@ -7,11 +6,11 @@ import { getAppBuildSession, type AppBuildSession } from "../config/appBuildSess
 import type { AppPlatform } from "../config/platformValue";
 import {
   findReleaseNote,
-  RELEASES_PAGE_URL,
   type ReleaseNote,
   type ReleaseNoteCategory,
 } from "../config/releaseNotes";
 import "./aboutInfo.css";
+import { AppUpdatePanel } from "./appUpdate/AppUpdatePanel";
 import { uiText, useUiText } from "./localization/UiLanguageProvider";
 import type { PlainMessageKey } from "./localization/core";
 
@@ -101,15 +100,6 @@ function ReleaseNoteItems({ note }: { note: ReleaseNote }) {
   );
 }
 
-/** Opens the GitHub releases page in the system browser (or a new tab on Web). */
-function openReleasesPage(): void {
-  if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
-    void openUrl(RELEASES_PAGE_URL).catch(() => undefined);
-  } else {
-    window.open(RELEASES_PAGE_URL, "_blank", "noopener,noreferrer");
-  }
-}
-
 export function AboutInfo() {
   const { t } = useUiText();
   const [releaseNotesOpen, setReleaseNotesOpen] = useState(false);
@@ -167,22 +157,7 @@ export function AboutInfo() {
         </div>
       )}
 
-      <button
-        type="button"
-        className="about-releases-link"
-        onClick={(event) => {
-          event.currentTarget.blur();
-          openReleasesPage();
-        }}
-      >
-        <span>
-          <strong>{t("about.checkUpdates")}</strong>
-          <small>{t("about.checkUpdates.detail")}</small>
-        </span>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M14 5h5v5M19 5l-8 8M18 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h4" />
-        </svg>
-      </button>
+      <AppUpdatePanel />
     </section>
   );
 }
