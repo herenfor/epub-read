@@ -494,7 +494,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     const pages = placed.frames.map((frame) => ({
       lane: frame.lane,
       side: frame.side,
-      outerX: frame.outerX,
+      outerX: frame.outerX + slot.iframe.offsetLeft,
       spineIndex,
       ids: own.filter((bookmark) => {
         const placement = p.resolveBookmarkPlacement?.(bookmark);
@@ -513,7 +513,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       pages.push({
         lane,
         side: frame.side,
-        outerX: frame.outerX,
+        outerX: frame.outerX + join.slot.iframe.offsetLeft,
         spineIndex: otherIndex,
         ids: bookmarks.filter((bookmark) => {
           if (bookmark.spineIndex !== otherIndex) return false;
@@ -523,20 +523,21 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       });
     }
     pages.sort((a, b) => a.lane - b.lane);
-    return { page, top: placed.top, columns: placed.columns, pages };
+    return { page, top: placed.top + slot.iframe.offsetTop, columns: placed.columns, pages };
   };
   const refreshRibbonsRef = useRef<() => void>(() => {});
   refreshRibbonsRef.current = () => {
     if (ribbonSettleTimerRef.current) clearTimeout(ribbonSettleTimerRef.current);
     ribbonSettleTimerRef.current = null;
     // 运动在途时画出来的是半路位置（会在新页某处闪一下）；保持隐藏，等落定的 ready 再画。
-    if (paginatorRef.current?.pageMotionIdle === false || liveSeam() || joinMotionRef.current) {
+    const host = readerContainerRef.current;
+    if (paginatorRef.current?.pageMotionIdle === false || liveSeam() || joinMotionRef.current ||
+      host?.dataset.turnExit || host?.dataset.turnEnter) {
       markRibbonMotion();
       return;
     }
     ribbonMotionRef.current = false;
     setRibbonMotion(false);
-    const host = readerContainerRef.current?.getBoundingClientRect();
     const screen = host ? readScreenBookmarks(bookmarksRef.current ?? []) : null;
     if (!host || !screen) {
       setRibbonMarks((marks) => marks.length === 0 ? marks : []);
@@ -546,8 +547,8 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       // 带页号：换页后是新的节点，不沿用上一页丝带的动画状态。
       key: `${page.spineIndex}:${screen.page}:${page.lane}`,
       ids: page.ids,
-      x: pageRibbonLeft(page.side, page.outerX) - host.left,
-      y: screen.top - host.top,
+      x: pageRibbonLeft(page.side, page.outerX),
+      y: screen.top,
       kind: "page",
       side: page.side,
     })));
@@ -681,8 +682,12 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     if (!main) return;
     delete main.dataset.turnExit;
     delete main.dataset.turnEnter;
-    if (phase === null) return;
+    if (phase === null) {
+      refreshRibbonsRef.current();
+      return;
+    }
     main.dataset[phase === "exit" ? "turnExit" : "turnEnter"] = dir * pageAxisSign(progressionNow()) === 1 ? "next" : "prev";
+    markRibbonMotion();
     chapterTurnTimerRef.current = setTimeout(() => {
       if (phaseTicket !== chapterTurnPhaseRef.current) return;
       // 滑出兜底：新章失败/取消时不能让正文停在滑出态。
