@@ -2753,8 +2753,17 @@ select option {
 }
 
 /* 空状态界面：精细 SVG 插画 + 温和提示 */
+.shelf-view:has(> .shelf-empty) {
+  display: flex;
+  flex-direction: column;
+}
+
+.shelf-view:has(> .shelf-empty) > :not(.shelf-empty) {
+  flex-shrink: 0;
+}
+
 .shelf-empty {
-  height: calc(100% - 90px);
+  flex: 1 0 auto;
   display: flex;
   flex-direction: column;
   align-items: center;
