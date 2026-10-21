@@ -15,7 +15,9 @@ import "./panelPaintWarmup.css";
  * is quiet, giving way to any reading input.
  */
 export type PanelWarmStage =
-  | "aa" | "aa-detailed" | "toc" | "more" | "search" | "reading" | "display" | "fonts" | "bookmark-pages";
+  | "aa" | "aa-detailed" | "toc" | "more" | "search" | "reading" | "display" | "fonts" | "bookmark-pages"
+  /** Shelf settings: its home page, then every section page (ShelfView). */
+  | "shelf-settings" | "shelf-settings-pages";
 export type PanelWarmBatch = readonly PanelWarmStage[];
 
 /**

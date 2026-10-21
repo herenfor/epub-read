@@ -56,7 +56,8 @@ import { isShelfCardActionTarget } from "./shelfCardEventScope";
 import { getRuntimeCapabilities } from "../platform/runtimeCapabilities";
 import type { ReaderTapPreferences } from "./readerTapRegions";
 import type { ReaderTapRegionSettings } from "./readerTapRouting";
-import { ShelfSettingsPage, type ShelfSettingsSection } from "./ShelfSettingsPage";
+import { ShelfSettingsPage, type ShelfSettingsPageProps, type ShelfSettingsSection } from "./ShelfSettingsPage";
+import { PanelPaintWarmup, usePanelPaintWarmup, type PanelWarmBatch } from "./panelPaintWarmup";
 import {
   EMPTY_SHELF_FILTERS,
   ShelfFilterPanel,
@@ -2776,6 +2777,9 @@ const NEXT_SHELF_DENSITY: Record<ShelfDensity, ShelfDensity> = {
   compact: "comfortable",
 };
 
+/** Drawn back to back right after the shelf's first paint (no idle wait). */
+const SETTINGS_WARM_BATCHES: readonly PanelWarmBatch[] = [["shelf-settings"], ["shelf-settings-pages"]];
+
 export function ShelfView(props: ShelfViewProps) {
   const { t, tn } = useUiText();
   const organization = props.organization ?? emptyOrganization();
@@ -2832,6 +2836,13 @@ export function ShelfView(props: ShelfViewProps) {
   const quickInputRef = useRef<HTMLInputElement | null>(null);
 
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Two frames after mount the shelf has painted; warm-ups start only then.
+  const [shelfPainted, setShelfPainted] = useState(false);
+  useEffect(() => {
+    let second = 0;
+    const first = requestAnimationFrame(() => { second = requestAnimationFrame(() => setShelfPainted(true)); });
+    return () => { cancelAnimationFrame(first); cancelAnimationFrame(second); };
+  }, []);
   const updateDot = useAppUpdateDot();
   const [settingsSection, setSettingsSection] = useState<ShelfSettingsSection | undefined>(undefined);
   const [filterOpen, setFilterOpen] = useState(false);
@@ -4237,6 +4248,46 @@ export function ShelfView(props: ShelfViewProps) {
     </button>
   );
 
+  const settingsPageProps = {
+    presentation: props.touchUi || isCompactMobile ? "page" : "dialog",
+    initialSection: settingsSection,
+    busy: Boolean(props.busy),
+    bookCount: props.entries.length,
+    theme: props.theme,
+    onThemeChange: props.onThemeChange,
+    hideReaderSystemStatusBar: props.hideReaderSystemStatusBar,
+    onHideReaderSystemStatusBarChange: props.onHideReaderSystemStatusBarChange,
+    keepScreenOnWhileReading: props.keepScreenOnWhileReading,
+    onKeepScreenOnWhileReadingChange: props.onKeepScreenOnWhileReadingChange,
+    batteryIndicatorEnabled: props.batteryIndicatorEnabled,
+    onBatteryIndicatorChange: props.onBatteryIndicatorChange,
+    tapRegions: props.tapRegions,
+    onTapRegionsChange: props.onTapRegionsChange,
+    tapRegionsScrollMode: props.tapRegionsScrollMode,
+    importArchiveDisabled: props.importActive,
+    importActive: props.importActive,
+    saveFileActive: props.saveFileActive,
+    lanTransferActive: props.lanTransferActive,
+    onOpenLanTransfer: props.onOpenLanTransfer ? () => props.onOpenLanTransfer!() : undefined,
+    onImportArchive: props.onImportArchive,
+    onExportArchive: () => props.onExportArchive(),
+    onExportAllBooks: props.onExportBooks ? () => props.onExportBooks!() : undefined,
+    onImportLegacyArchive: props.onImportLegacyArchive,
+    bodySearch,
+    onOpenDiagnostics: props.onOpenDiagnostics ? () => {
+      closeSettings();
+      props.onOpenDiagnostics!();
+    } : undefined,
+  } satisfies Omit<ShelfSettingsPageProps, "open" | "onClose">;
+  // 安卓本次运行：书架第一次画完就把设置页（首页、再各分类页）几乎不可见地各画一次，
+  // 首次打开设置或进入分类时只播动画，不再承担 GPU 首绘。打开设置时让路，关掉后补完。
+  const settingsWarmup = usePanelPaintWarmup(
+    shelfPainted && getRuntimeCapabilities().platform === "android" && !settingsOpen && !props.busy,
+    SETTINGS_WARM_BATCHES,
+    [],
+  );
+  const settingsWarm = settingsWarmup.warming("shelf-settings-pages") ? "pages"
+    : settingsWarmup.warming("shelf-settings") ? "home" : undefined;
   return (
     <div
       ref={shelfViewRef}
@@ -4488,40 +4539,10 @@ export function ShelfView(props: ShelfViewProps) {
       </header>
 
       {/* 设置页：PC 对话框，触屏全屏页 */}
-      <ShelfSettingsPage
-        open={settingsOpen}
-        presentation={props.touchUi || isCompactMobile ? "page" : "dialog"}
-        initialSection={settingsSection}
-        busy={Boolean(props.busy)}
-        bookCount={props.entries.length}
-        theme={props.theme}
-        onThemeChange={props.onThemeChange}
-        hideReaderSystemStatusBar={props.hideReaderSystemStatusBar}
-        onHideReaderSystemStatusBarChange={props.onHideReaderSystemStatusBarChange}
-        keepScreenOnWhileReading={props.keepScreenOnWhileReading}
-        onKeepScreenOnWhileReadingChange={props.onKeepScreenOnWhileReadingChange}
-        batteryIndicatorEnabled={props.batteryIndicatorEnabled}
-        onBatteryIndicatorChange={props.onBatteryIndicatorChange}
-        tapRegions={props.tapRegions}
-        onTapRegionsChange={props.onTapRegionsChange}
-        tapRegionsScrollMode={props.tapRegionsScrollMode}
-        importArchiveDisabled={props.importActive}
-        importActive={props.importActive}
-        saveFileActive={props.saveFileActive}
-        lanTransferActive={props.lanTransferActive}
-        onOpenLanTransfer={props.onOpenLanTransfer ? () => props.onOpenLanTransfer!() : undefined}
-        onImportArchive={props.onImportArchive}
-        onExportArchive={() => props.onExportArchive()}
-        onExportAllBooks={props.onExportBooks ? () => props.onExportBooks!() : undefined}
-        onImportLegacyArchive={props.onImportLegacyArchive}
-        bodySearch={bodySearch}
-        onOpenDiagnostics={props.onOpenDiagnostics ? () => {
-          closeSettings();
-          props.onOpenDiagnostics!();
-        } : undefined}
-        registerSubmenuBackHandler={registerSubmenuBackHandler}
-        onClose={closeSettings}
-      />
+      <ShelfSettingsPage {...settingsPageProps} open={settingsOpen} registerSubmenuBackHandler={registerSubmenuBackHandler} onClose={closeSettings} />
+      {settingsWarm && <PanelPaintWarmup active>
+        <ShelfSettingsPage {...settingsPageProps} initialSection={undefined} open warm={settingsWarm} onClose={closeSettings} />
+      </PanelPaintWarmup>}
 
       {/* 筛选与排序：PC 浮层，手机底部面板（手机上兼管排序、视图、密度） */}
       <ShelfFilterPanel

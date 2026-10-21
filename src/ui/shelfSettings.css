@@ -73,6 +73,16 @@
   animation: shelf-settings-pane-in var(--popover-open) ease both;
 }
 
+/* Paint warm-up only: every section pane drawn at once, stacked. */
+.shelf-settings-main {
+  position: relative;
+}
+
+.shelf-settings-scroll.is-warm-pane + .shelf-settings-scroll.is-warm-pane {
+  position: absolute;
+  inset: 56px 0 0;
+}
+
 /* 只有一节内容时不要左侧导航，窗口按内容收高。 */
 .shelf-settings-window.is-single {
   width: min(560px, 100%);
