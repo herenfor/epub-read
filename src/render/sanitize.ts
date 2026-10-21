@@ -236,12 +236,12 @@ function buildOverrideCss(s: ReaderSettings): string {
         `/* [L2] 用户上传字体 */\n@font-face { font-family: "${escapeFamily(f.family)}"; src: url("${f.url}") format("truetype"); font-display: swap; }`
     )
     .join("\n");
-  const bodyFontCss = s.customFontName
+  const bodyFontCss = s.customFontName && s.forceFontOverride === true
     ? `font-family: "${escapeFamily(s.customFontName)}" !important;`
     : "";
-  // 书常把字体写在 div/p 上，元素自身声明会压过 body 的继承值。只有用户
-  // 打开“覆盖书籍字体”才覆盖正文后代；等宽代码与 SVG/MathML 保留书的字体。
-  const descendantFontCss = s.customFontName && s.forceFontOverride === true
+  // Only explicit override mode may replace authored html/body or descendant
+  // fonts. With it off, the chosen font belongs to the fallback layer below.
+  const descendantFontCss = bodyFontCss
     ? `
 /* [L2] 用户开启覆盖书籍字体：选定字体覆盖正文后代（关闭时不输出）。 */
 :where(#${VIEWER_ID}) :not(pre, code, kbd, samp, tt, pre *, code *, kbd *, samp *, tt *, svg, svg *, math, math *) {
@@ -711,12 +711,15 @@ ${VIEWER_TAG}#${VIEWER_ID}::-webkit-scrollbar {
     head.appendChild(scrollStyle);
   }
 
-  // Establish this normal-priority layer before any author CSS layers. Both
-  // author html and body declarations must beat the reader's default font.
+  // Establish this normal-priority layer before any author CSS layers so
+  // authored html/body fonts also beat the chosen font when override is off.
   // Keep it separate from explicit font overrides and the user CSS below.
   const fontFallback = doc.createElement("style");
   fontFallback.setAttribute("data-reader", "font-fallback");
-  fontFallback.textContent = `@layer epub-reader-font-fallback { :where(html) { font-family: ${DEFAULT_FONT_FAMILY}; } }`;
+  const fallbackFamily = opts.settings.customFontName
+    ? `"${escapeCssString(opts.settings.customFontName)}", ${DEFAULT_FONT_FAMILY}`
+    : DEFAULT_FONT_FAMILY;
+  fontFallback.textContent = `@layer epub-reader-font-fallback { :where(html) { font-family: ${fallbackFamily}; } }`;
   // XML documents (including the Node parser) do not expose HTMLDocument.head.
   const fontHead = doc.getElementsByTagName("head")[0] ?? head;
   const firstStylesheet = Array.from(fontHead.childNodes)

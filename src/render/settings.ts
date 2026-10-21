@@ -11,10 +11,10 @@ export interface ReaderSettings {
   theme: Theme;
   /** 用户指定字体族；为空表示不覆盖书的字体 */
   fontFamily?: string;
-  /** 用户选择的已上传自定义字体 family（优先于 fontFamily 与书字体） */
+  /** 用户选择的系统/导入字体 family；缺省作回退，开启 forceFontOverride 才覆盖书字体。 */
   customFontName?: string;
   /** 选定字体也覆盖书在正文后代（div/p 等）上的字体声明；undefined/false =
-   * 只作缺省（body 级）字体，作者的后代声明优先。代码/SVG/MathML 始终保留。 */
+   * 只作低优先级根字体，作者的 html/body/后代声明优先。代码/SVG/MathML 始终保留。 */
   forceFontOverride?: boolean;
   /** 字体来源；缺省时兼容旧版 customFontName。 */
   fontSource?: "system" | "imported";
