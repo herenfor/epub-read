@@ -56,10 +56,10 @@ class AppUpdatePlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     /** Off the plugin's calling thread: hashing and package parsing take a moment. */
-    private fun background(invoke: Invoke, work: () -> JSObject) {
+    private fun background(invoke: Invoke, work: () -> JSObject?) {
         Thread {
             try {
-                invoke.resolve(work())
+                work()?.let { invoke.resolve(it) }
             } catch (error: Throwable) {
                 invoke.reject(error.message?.takeIf { it.isNotBlank() } ?: error.toString())
             }
@@ -235,8 +235,16 @@ class AppUpdatePlugin(private val activity: Activity) : Plugin(activity) {
             val intent = Intent(Intent.ACTION_VIEW)
                 .setDataAndType(uri, APK_MIME)
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-            activity.runOnUiThread { activity.startActivity(intent) }
-            JSObject()
+            activity.runOnUiThread {
+                try {
+                    activity.startActivity(intent)
+                    invoke.resolve(JSObject())
+                } catch (error: Exception) {
+                    invoke.reject(error.message?.takeIf { it.isNotBlank() } ?: error.toString())
+                }
+            }
+            // The UI-thread launch resolves or rejects this invocation.
+            null
         }
     }
 
