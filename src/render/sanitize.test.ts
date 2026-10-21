@@ -896,7 +896,20 @@ background-position:center center;background-size:cover;background-color:#f9ebdf
     expect(readStyleText(out, "overrides")).toMatch(/html \{[^}]*font-family: serif;/);
   });
 
-  it("用户上传字体注入 @font-face 并可在选择后强制 body 字体", async () => {
+  it("所选缺省字体在关闭覆盖时保留书籍 body 的整条字体链", async () => {
+    const source = `<html><head><style>body{font-family:main,emoji,sym;} h1{font-family:Title;}</style></head><body><h1>标题</h1><p>正文</p></body></html>`;
+    const { html: out } = await sanitizeChapter(source, {
+      ...opts(), strictXml: false,
+      settings: { ...DEFAULT_SETTINGS, fontSource: "system", customFontName: "Reader Font", forceFontOverride: false },
+    });
+    expect(out).toContain("body{font-family:main,emoji,sym;}");
+    expect(out).toContain("h1{font-family:Title;}");
+    // No body-level declaration may interrupt the book's html/body inheritance.
+    expect(readStyleText(out, "overrides")).not.toMatch(/font-family:\s*"Reader Font"/);
+    expect(readStyleText(out, "font-fallback")).toMatch(/@layer epub-reader-font-fallback\s*\{\s*:where\(html\)\s*\{\s*font-family:\s*"Reader Font",/);
+  });
+
+  it("用户上传字体注入 @font-face 并可在开启覆盖后强制 body 字体", async () => {
     const html = `<html xmlns="http://www.w3.org/1999/xhtml"><body><p>正文</p></body></html>`;
     const { html: out } = await sanitizeChapter(html, {
       ...opts(),
@@ -904,6 +917,7 @@ background-position:center center;background-size:cover;background-color:#f9ebdf
         ...DEFAULT_SETTINGS,
         customFonts: [{ family: "MyFont", url: "blob:myfont" }],
         customFontName: "MyFont",
+        forceFontOverride: true,
       },
     });
     expect(out).toContain('@font-face { font-family: "MyFont";');
@@ -917,7 +931,7 @@ background-position:center center;background-size:cover;background-color:#f9ebdf
       ...opts(),
       settings: { ...DEFAULT_SETTINGS, customFontName: "MyFont", forceFontOverride },
     })).html, "overrides").match(new RegExp(`:where\\(#${VIEWER_ID}\\) :not\\(([^)]*)\\) \\{\\s*font-family: "MyFont" !important;`));
-    // 关闭：只作缺省字体（body 级），作者后代声明优先。
+    // 关闭：只作低优先级根字体，作者 html/body/后代声明优先。
     expect(await rule(false)()).toBeNull();
     const on = await rule(true)();
     expect(on).not.toBeNull();
