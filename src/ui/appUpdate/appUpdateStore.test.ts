@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import fixture from "../../config/fixtures/appUpdate-v032.json";
 import { parseLatestRelease, recordCheck } from "../../config/appUpdate";
-import { resolveAppUpdateSource } from "../../config/appUpdateSourceValue";
+import { resolveAppUpdateSource, updateDownloadUrl } from "../../config/appUpdateSourceValue";
 import { UPDATE_CHECK_URL, UPDATE_MANIFEST_URL } from "../../config/appUpdate";
 import { readStoredUpdateState } from "./appUpdateStore";
 
@@ -48,6 +48,15 @@ describe("update source of a build", () => {
       EPUB_READER_UPDATE_TEST: "1",
       EPUB_READER_UPDATE_CHECK_URL: "https://test.local/latest",
       EPUB_READER_UPDATE_MANIFEST_URL: "https://test.local/latest.json",
-    })).toEqual({ checkUrl: "https://test.local/latest", manifestUrl: "https://test.local/latest.json", testMode: true });
+      EPUB_READER_UPDATE_TEST_DOWNLOAD_BASE: "https://test.local/assets/",
+    })).toEqual({ checkUrl: "https://test.local/latest", manifestUrl: "https://test.local/latest.json", testMode: true, downloadBase: "https://test.local/assets/" });
+  });
+
+  it("routes test APK bytes locally without weakening production release validation", () => {
+    const url = "https://github.com/herenfor/epub-read/releases/download/v0.3.99/epub-reader_0.3.99_android-arm64.apk";
+    const env = { EPUB_READER_UPDATE_CHECK_URL: "http://127.0.0.1:48731/latest", EPUB_READER_UPDATE_MANIFEST_URL: "http://127.0.0.1:48731/latest.json", EPUB_READER_UPDATE_TEST_DOWNLOAD_BASE: "http://127.0.0.1:48731/assets/" };
+    expect(updateDownloadUrl(url, resolveAppUpdateSource(env))).toBe(url);
+    expect(updateDownloadUrl(url, resolveAppUpdateSource({ ...env, EPUB_READER_UPDATE_TEST: "1" })))
+      .toBe("http://127.0.0.1:48731/assets/epub-reader_0.3.99_android-arm64.apk");
   });
 });

@@ -79,7 +79,8 @@ class AppUpdatePlugin(private val activity: Activity) : Plugin(activity) {
             val sha256 = args.sha256.lowercase()
             val existing = currentDownloadId()
             if (existing >= 0 && prefs.getString(KEY_VERSION, null) == args.version &&
-                prefs.getString(KEY_SHA256, null) == sha256 && query(existing)?.state != "failed"
+                prefs.getString(KEY_SHA256, null) == sha256 &&
+                query(existing)?.state?.let { it != "failed" } == true
             ) {
                 // The same version is already downloading or downloaded: reuse it.
                 return@background JSObject()
