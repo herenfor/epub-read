@@ -90,6 +90,25 @@ function pagerFixture() {
 }
 
 describe("paginator retained motion window", () => {
+  it("书签回翻：页边坐标不包含 iframe 滑入滑出时的屏幕位移", () => {
+    const p = Object.create(ChapterPaginator.prototype) as Pager;
+    let shift = -62;
+    const frameRect = vi.fn(() => ({ left: 80 + shift, top: 40 }));
+    Object.assign(p, {
+      contentDoc: { documentElement: { clientWidth: 390 }, defaultView: { frameElement: { getBoundingClientRect: frameRect } } },
+      viewer: { clientWidth: 390 }, fixedLayout: false,
+      lastState: { status: "ready" }, settings: { fontSizePx: 18 },
+      visualSpreadOrigin: () => ({
+        contentLeft: 20, rtl: false, present: [true, false],
+        geometry: { columns: 1, columnWidth: 350, columnStep: 390 },
+      }),
+    });
+    for (shift of [-62, 62, 0]) {
+      expect(p.bookmarkPageFrames()).toEqual({ top: 0, columns: 1, frames: [{ lane: 0, side: "right", outerX: 390 }] });
+    }
+    expect(frameRect).not.toHaveBeenCalled();
+  });
+
   it("a synchronous driver fault hands the same turn back to the fallback without a stale live page", () => {
     const p = Object.create(ChapterPaginator.prototype) as Pager;
     p.pageMotionStarted = vi.fn();

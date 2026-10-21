@@ -9160,7 +9160,8 @@ export class ChapterPaginator {
   }
 
   /**
-   * A15：当前屏各页的外缘（顶层窗口坐标）。只读已提交布局，与整开背景同一几何。
+   * A15：当前屏各页的外缘（iframe 内坐标）。只读已提交布局，与整开背景同一几何。
+   * 宿主按 iframe 的布局位置挂丝带，不能叠加 iframe 翻页动画中的屏幕位移。
    * 滚动、固定版式或尚无布局时返回 null。
    */
   bookmarkPageFrames(slot?: { side: "left" | "right"; shift: number }): { top: number; columns: 1 | 2; frames: BookmarkPageFrame[] } | null {
@@ -9168,7 +9169,6 @@ export class ChapterPaginator {
     const doc = this.contentDoc;
     const viewer = this.viewer;
     if (!spread || !doc || !viewer || this.fixedLayout || this.lastState.status !== "ready") return null;
-    const host = (doc.defaultView?.frameElement as HTMLElement | null)?.getBoundingClientRect();
     const frames = bookmarkPageFrames({
       contentLeft: spread.contentLeft,
       geometry: spread.geometry,
@@ -9179,11 +9179,10 @@ export class ChapterPaginator {
       present: spread.present,
       slot,
     });
-    const dx = host?.left ?? 0;
     return {
-      top: host?.top ?? 0,
+      top: 0,
       columns: spread.geometry.columns,
-      frames: frames.map((frame) => ({ ...frame, outerX: frame.outerX + dx })),
+      frames,
     };
   }
 

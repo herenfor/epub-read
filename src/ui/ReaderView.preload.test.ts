@@ -150,6 +150,50 @@ describe("ReaderView preload settings lifecycle", () => {
     });
   };
 
+  it("书签回翻：目录反向滑入结束后恢复丝带，并保持容器内右侧位置", async () => {
+    const handle = createRef<ReaderHandle>();
+    props = {
+      ...props, spineIndex: 1,
+      settings: { ...props.settings, preloadNextChapter: false, turnAnimation: "slide" },
+      bookmarks: [{ id: "toc-mark", spineIndex: 0, page: 0 }],
+    };
+    const renderReader = () => dom.render(createElement(ReaderView, { ...props, ref: handle }));
+    await renderReader();
+    const active = instances[0];
+    const reader = dom.container.querySelector(".reader") as HTMLElement;
+    const frame = active.callbacks.iframe;
+    dom.rect(reader, { left: 80, top: 40, width: 390, height: 844 });
+    dom.metrics(frame, { offsetLeft: 0, offsetTop: 0 });
+    dom.rect(frame, { left: 18, top: 40, width: 390, height: 844 });
+    Object.assign(active, {
+      pageMotionIdle: true,
+      bookmarkPageFrames: () => ({ top: 0, columns: 1, frames: [{ lane: 0, side: "right", outerX: 390 }] }),
+      resolveBookmarkPlacement: () => ({ page: 0, lane: 0 }),
+    });
+    await finish(active);
+    await act(async () => { handle.current!.prevPage(); });
+    expect(reader.dataset.turnExit).toBe("prev");
+    props = { ...props, spineIndex: 0, startAtEnd: { nonce: 1, atEnd: true } };
+    await renderReader();
+    active.currentPage = 0;
+    // Ready is published before the chapter's entry animation completes.
+    await act(async () => { active.finish(); });
+    expect(reader.dataset.turnEnter).toBe("prev");
+    expect(reader.querySelector(".bookmark-ribbon-layer")?.getAttribute("data-motion")).toBe("true");
+    await act(async () => { vi.advanceTimersByTime(280); });
+    const ribbon = reader.querySelector(".bookmark-ribbon") as HTMLElement;
+    expect(reader.querySelector(".bookmark-ribbon-layer")?.hasAttribute("data-motion")).toBe(false);
+    expect(ribbon.style.left).toBe("362px");
+    expect(parseFloat(ribbon.style.top)).toBe(0);
+    // Ordinary page turns away and back cannot retain the iframe's translated origin.
+    active.currentPage = 1;
+    await act(async () => { active.finish(); });
+    expect(reader.querySelector(".bookmark-ribbon")).toBeNull();
+    active.currentPage = 0;
+    await act(async () => { active.finish(); });
+    expect((reader.querySelector(".bookmark-ribbon") as HTMLElement).style.left).toBe("362px");
+  });
+
   it("restores pointer input on the promoted chapter after a multi-screen seam", async () => {
     props = { ...props, settings: { ...props.settings, columnsPerView: 1, turnAnimation: "slide", seamlessChapterTurn: true } };
     const handle = createRef<ReaderHandle>();
