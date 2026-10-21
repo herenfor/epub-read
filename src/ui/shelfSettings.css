@@ -68,6 +68,11 @@
   z-index: calc(var(--z-ui-opening) + 2);
 }
 
+/* Desktop: switching sections fades the new content in with a slight rise. */
+.shelf-settings-scroll.is-pane {
+  animation: shelf-settings-pane-in var(--popover-open) ease both;
+}
+
 /* 只有一节内容时不要左侧导航，窗口按内容收高。 */
 .shelf-settings-window.is-single {
   width: min(560px, 100%);
@@ -462,6 +467,68 @@
 
 .shelf-settings-layer.is-page.is-closing .shelf-settings-sheet {
   animation: shelf-settings-slide-out var(--menu-close) ease both;
+}
+
+/* Touch settings are a stack: home below, a section page pushed over it.
+ * The whole stack slides in and out with the page; inside it a section
+ * slides in from the right while home drifts left and dims, and back
+ * reverses both. Durations follow --menu-open/--menu-close (reduced motion). */
+.shelf-settings-stack {
+  position: relative;
+  display: flex;
+  width: 100%;
+  overflow: hidden;
+  background: var(--panel-bg);
+  animation: shelf-settings-slide-in var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.shelf-settings-layer.is-page.is-closing .shelf-settings-stack {
+  animation: shelf-settings-slide-out var(--menu-close) ease both;
+}
+
+.shelf-settings-stack > .shelf-settings-sheet {
+  animation: none;
+}
+
+.shelf-settings-sheet.is-home {
+  position: relative;
+  transition: transform var(--menu-close) ease;
+}
+
+.shelf-settings-sheet.is-home::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.16);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--menu-close) ease;
+}
+
+.shelf-settings-sheet.is-home.is-covered {
+  transform: translateX(-22%);
+  transition: transform var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.shelf-settings-sheet.is-home.is-covered::after {
+  opacity: 1;
+  transition: opacity var(--menu-open) ease;
+}
+
+.shelf-settings-stack > .shelf-settings-sheet.is-pushed {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  box-shadow: -10px 0 28px rgba(15, 23, 42, 0.12);
+}
+
+.shelf-settings-stack > .shelf-settings-sheet.is-pushed.is-animated {
+  animation: shelf-settings-slide-in var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.shelf-settings-stack > .shelf-settings-sheet.is-pushed.is-leaving {
+  animation: shelf-settings-slide-out var(--menu-close) ease both;
+  pointer-events: none;
 }
 
 .shelf-settings-sheet .shelf-settings-head {
@@ -1090,6 +1157,7 @@
 }
 
 @keyframes shelf-settings-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes shelf-settings-pane-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes shelf-settings-fade-out { from { opacity: 1; } to { opacity: 0; } }
 @keyframes shelf-settings-pop-in { from { opacity: 0; transform: translateY(8px) scale(0.98); } to { opacity: 1; transform: none; } }
 @keyframes shelf-settings-slide-in { from { transform: translateX(100%); } to { transform: none; } }
