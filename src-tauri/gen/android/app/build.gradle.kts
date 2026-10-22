@@ -90,6 +90,31 @@ rust {
     rootDirRel = "../../../"
 }
 
+// WebDAV sync checks HTTPS certificates with Android's own verifier through
+// rustls-platform-verifier. Its small Kotlin part ships inside that Rust crate
+// as a local Maven repository; cargo metadata finds the locked copy.
+val rustlsPlatformVerifierMaven: File by lazy {
+    val metadata = providers.exec {
+        workingDir = rootProject.projectDir
+        commandLine(
+            "cargo", "metadata", "--format-version", "1",
+            "--filter-platform", "aarch64-linux-android",
+            "--manifest-path", rootProject.file("../../Cargo.toml").path,
+        )
+    }.standardOutput.asText.get()
+    @Suppress("UNCHECKED_CAST")
+    val packages = (groovy.json.JsonSlurper().parseText(metadata) as Map<String, Any?>)["packages"] as List<Map<String, Any?>>
+    val manifest = packages.first { it["name"] == "rustls-platform-verifier-android" }["manifest_path"] as String
+    File(File(manifest).parentFile, "maven")
+}
+
+repositories {
+    maven {
+        url = uri(rustlsPlatformVerifierMaven)
+        metadataSources { mavenPom() }
+    }
+}
+
 dependencies {
     implementation("androidx.webkit:webkit:1.14.0")
     implementation("androidx.appcompat:appcompat:1.7.1")
@@ -97,6 +122,7 @@ dependencies {
     implementation("androidx.activity:activity-ktx:1.10.1")
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.lifecycle:lifecycle-process:2.10.0")
+    implementation("rustls:rustls-platform-verifier:0.1.1")
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.4")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.0")

@@ -21,6 +21,18 @@ import type { PortableStateV3 } from "../../core/portableState/portable-state-ty
 import type { LibraryOrganization, OrganizationCommand } from "../libraryOrganization";
 import type { PortableActivationResult, PortableLegacyImportInput, PortableLegacyImportResult, PortableMergeOptions, PortableStateDataService } from "./dataService";
 import type { ProgressRuntimeStatus } from "./progressRuntimeGate";
+import { noteCloudSyncChange } from "../cloudSync/cloudSyncStore";
+
+/** Every saved library change goes through here; cloud sync hears about it once it is stored. */
+function changed<T>(result: T, reason: "data-changed" | "progress-changed" = "data-changed"): T {
+  noteCloudSyncChange(reason);
+  return result;
+}
+
+function wrote<T extends { readonly status: string; readonly entity: EntityRef }>(result: T): T {
+  if (result.status === "unchanged") return result;
+  return changed(result, result.entity.kind === "progress" ? "progress-changed" : "data-changed");
+}
 
 const ERROR_CODES = new Set<PortableStateErrorCode>([
   "invalid-data",
@@ -79,7 +91,7 @@ export class TauriPortableStateService implements PortableStateDataService {
     readonly updatedAtMs: number;
   }): Promise<PortableWriteResult> {
     try {
-      return await invoke<PortableWriteResult>("portable_state_write", input);
+      return wrote(await invoke<PortableWriteResult>("portable_state_write", input));
     } catch (error) {
       return nativeError(error);
     }
@@ -93,7 +105,7 @@ export class TauriPortableStateService implements PortableStateDataService {
     readonly updatedAtMs: number;
   }): Promise<PortableWriteResult> {
     try {
-      return await invoke<PortableWriteResult>("portable_state_create_annotation", input);
+      return wrote(await invoke<PortableWriteResult>("portable_state_create_annotation", input));
     } catch (error) {
       return nativeError(error);
     }
@@ -101,7 +113,7 @@ export class TauriPortableStateService implements PortableStateDataService {
 
   async deleteAnnotation(input: { readonly entity: EntityRef }): Promise<PortableDeleteResult> {
     try {
-      return await invoke<PortableDeleteResult>("portable_state_delete_annotation", input);
+      return wrote(await invoke<PortableDeleteResult>("portable_state_delete_annotation", input));
     } catch (error) {
       return nativeError(error);
     }
@@ -145,7 +157,7 @@ export class TauriPortableStateService implements PortableStateDataService {
 
   async mergeValidatedState(input: unknown, options: PortableMergeOptions = {}): Promise<PortableStateV3> {
     try {
-      return await invoke<PortableStateV3>("portable_state_merge_state", { state: input, ...options });
+      return changed(await invoke<PortableStateV3>("portable_state_merge_state", { state: input, ...options }));
     } catch (error) {
       return nativeError(error);
     }
@@ -153,10 +165,10 @@ export class TauriPortableStateService implements PortableStateDataService {
 
   async mergeLegacyRecords(input: PortableLegacyImportInput): Promise<PortableLegacyImportResult> {
     try {
-      return await invoke<PortableLegacyImportResult>("portable_state_merge_legacy_records", {
+      return changed(await invoke<PortableLegacyImportResult>("portable_state_merge_legacy_records", {
         records: input.records,
         organization: input.organization ?? null,
-      });
+      }));
     } catch (error) {
       return nativeError(error);
     }
@@ -172,7 +184,7 @@ export class TauriPortableStateService implements PortableStateDataService {
 
   async setLocalVisible(hash: string, visible: boolean): Promise<void> {
     try {
-      return await invoke<void>("portable_state_set_local_visible", { hash, visible });
+      return changed(await invoke<void>("portable_state_set_local_visible", { hash, visible }));
     } catch (error) {
       return nativeError(error);
     }
@@ -188,7 +200,7 @@ export class TauriPortableStateService implements PortableStateDataService {
 
   async applyOrganization(command: OrganizationCommand): Promise<LibraryOrganization> {
     try {
-      return await invoke<LibraryOrganization>("portable_state_apply_organization", { command });
+      return changed(await invoke<LibraryOrganization>("portable_state_apply_organization", { command }));
     } catch (error) {
       return nativeError(error);
     }
@@ -196,7 +208,7 @@ export class TauriPortableStateService implements PortableStateDataService {
 
   async mergeOrganization(incoming: LibraryOrganization): Promise<LibraryOrganization> {
     try {
-      return await invoke<LibraryOrganization>("portable_state_merge_organization", { incoming });
+      return changed(await invoke<LibraryOrganization>("portable_state_merge_organization", { incoming }));
     } catch (error) {
       return nativeError(error);
     }

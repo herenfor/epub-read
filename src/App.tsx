@@ -271,6 +271,7 @@ import {
 import { createEditionAiRuntime } from "./features/ai/lifecycle/editionRuntime";
 import { IS_AI_EDITION } from "./config/edition";
 import { registerAppUpdateSaveGate, startAppUpdates } from "./ui/appUpdate/appUpdateStore";
+import { noteCloudSyncChange, startCloudSync } from "./ui/cloudSync/cloudSyncStore";
 
 // This is intentionally a compile-time edition branch. The core build has no
 // static dependency on the AI panel or its model-asset subtree; AI builds keep
@@ -1627,6 +1628,8 @@ export default function App() {
     result: SaveFileCommitResult,
     applyPreferences: boolean,
   ): Promise<void> => {
+    // Archive/LAN commits write in the backend, outside the shelf store.
+    noteCloudSyncChange("data-changed");
     let refreshFailed = false;
     try {
       await refreshShelfProjection();
@@ -1896,11 +1899,14 @@ export default function App() {
   }, [handleLegacyImportArchive, runtime.platform, startNativeImport]);
 
   // ---- 书架与组织启动加载（先完成一次 CP-I 激活，失败保持旧模式） ----
+  const [cloudSyncReady, setCloudSyncReady] = useState(false);
   useEffect(() => {
     let cancelled = false;
     void (async () => {
+      let activated = false;
       try {
         await activatePortableShelfState();
+        activated = true;
       } catch (error) {
         if (!cancelled) {
           setShelfNotice({
@@ -1915,7 +1921,9 @@ export default function App() {
       // the first real open must not reuse a pre-activation cached check.
       progressRuntimeGateRef.current?.invalidate();
       if (cancelled) return;
-      void libraryReader.load();
+      void libraryReader.load().finally(() => {
+        if (!cancelled && activated) setCloudSyncReady(true);
+      });
       void organizationReader.load();
     })();
 
@@ -1925,6 +1933,15 @@ export default function App() {
       organizationReader.invalidate();
     };
   }, [libraryReader, organizationReader]);
+
+  // ---- 云同步（A25）：书库激活、书架首次读取之后才开始；同步改动了资料只刷新书架和文件夹 ----
+  useEffect(() => {
+    if (!cloudSyncReady) return;
+    return startCloudSync({
+      // A failed refresh stays on the shelf as a refresh error with a retry.
+      onLibraryChanged: () => { void refreshShelfProjection().catch(() => undefined); },
+    });
+  }, [cloudSyncReady, refreshShelfProjection]);
 
   // ---- 字体元数据启动加载（只列元数据，绝不预读所有字体文件） ----
   useEffect(() => {
@@ -4324,6 +4341,8 @@ export default function App() {
       bookRef.current = null;
     }
     setCurrentShelfId(null);
+    // Final progress is committed above; this is the sync's "left the reader" moment.
+    noteCloudSyncChange("reader-closed");
     // 只先切换视图。下一次 React 提交会卸载 ReaderView；ReaderView cleanup
     // 先 dispose paginator、再 revoke ResourceServer，随后会话清理 effect
     // 才清空 book/server 等状态，避免 iframe 仍在读资源时提前撤销。

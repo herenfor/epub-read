@@ -9,6 +9,7 @@
  * 边屏（lead），第 1 屏是后一章的边屏（trail）。前进时当前章是 lead，后退时当前章是
  * trail。lead 平移 −s·p，trail 平移 s·(W−p)，s 为阅读方向（RTL 为 −1）。
  */
+import { holdInteractionBusy } from "../platform/cloudSyncActivity";
 import {
   desktopSettlePlan,
   PageMotionSession,
@@ -31,11 +32,26 @@ type SeamElement = HTMLElement;
  * lead（−s·p）与 trail（s·(W−p)）。
  */
 export class ChapterSeamDriver implements PageMotionDriver {
-  private animations: Animation[] = [];
+  private running: Animation[] = [];
+  private releaseBusy: (() => void) | null = null;
   private held: number;
   private generation = 0;
   private disposed = false;
   private readonly sign: 1 | -1;
+
+  /** The running seam turn; while one runs, background sync waits. */
+  private get animations(): Animation[] {
+    return this.running;
+  }
+
+  private set animations(next: Animation[]) {
+    this.running = next;
+    if (next.length > 0 && !this.releaseBusy) this.releaseBusy = holdInteractionBusy();
+    else if (next.length === 0 && this.releaseBusy) {
+      this.releaseBusy();
+      this.releaseBusy = null;
+    }
+  }
 
   constructor(
     private readonly screens: readonly SeamElement[],

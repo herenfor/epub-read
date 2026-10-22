@@ -45,6 +45,7 @@ import { appUi } from "./catalogs/appUi";
 import { readerMisc } from "./catalogs/readerMisc";
 import { tapRegions } from "./catalogs/tapRegions";
 import { log } from "./catalogs/log";
+import { cloudSync } from "./catalogs/cloudSync";
 import { ai } from "./catalogs/ai";
 import commonEn from "./en/common.json";
 import folderEn from "./en/folder.json";
@@ -78,6 +79,7 @@ import appUiEn from "./en/appUi.json";
 import readerMiscEn from "./en/readerMisc.json";
 import tapRegionsEn from "./en/tapRegions.json";
 import logEn from "./en/log.json";
+import cloudSyncEn from "./en/cloudSync.json";
 import aiEn from "./en/ai.json";
 
 declare const __APP_EDITION__: "core" | "ai";
@@ -85,7 +87,7 @@ declare const __APP_EDITION__: "core" | "ai";
 // tooling runs outside Vite and must still see every catalog.
 const includeAi = typeof __APP_EDITION__ === "undefined" || __APP_EDITION__ === "ai";
 
-export const CATALOGS = [common, folder, language, reader, startup, titlebar, footer, sidebar, notes, imageViewer, search, aa, fonts, display, about, cache, saveFile, bookExport, importProgress, lan, lanPanel, folderImport, shelf, shelfFolder, shelfMenu, shelfMain, shelfSettings, notice, appUi, readerMisc, tapRegions, log, ...(includeAi ? [ai] : [])] as const;
+export const CATALOGS = [common, folder, language, reader, startup, titlebar, footer, sidebar, notes, imageViewer, search, aa, fonts, display, about, cache, saveFile, bookExport, importProgress, lan, lanPanel, folderImport, shelf, shelfFolder, shelfMenu, shelfMain, shelfSettings, notice, appUi, readerMisc, tapRegions, log, cloudSync, ...(includeAi ? [ai] : [])] as const;
 
 export const zhCN = {
   ...common.zh,
@@ -120,6 +122,7 @@ export const zhCN = {
   ...readerMisc.zh,
   ...tapRegions.zh,
   ...log.zh,
+  ...cloudSync.zh,
   // Keep the complete key type for AI components; Core never renders them.
   ...(includeAi ? ai.zh : {} as typeof ai.zh),
 };
@@ -160,6 +163,7 @@ export const en: Partial<Record<MessageKey, string>> = {
   ...readerMiscEn,
   ...tapRegionsEn,
   ...logEn,
+  ...cloudSyncEn,
   ...(includeAi ? aiEn : {}),
 };
 
@@ -197,5 +201,6 @@ export const EN_FILES: Readonly<Record<string, Readonly<Record<string, string>>>
   readerMisc: readerMiscEn,
   tapRegions: tapRegionsEn,
   log: logEn,
+  cloudSync: cloudSyncEn,
   ...(includeAi ? { ai: aiEn } : {}),
 };

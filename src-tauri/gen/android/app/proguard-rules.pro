@@ -19,3 +19,7 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# WebDAV sync: rustls-platform-verifier reaches these classes only through JNI
+# from Rust, so the shrinker cannot see them being used.
+-keep, includedescriptorclasses class org.rustls.platformverifier.** { *; }

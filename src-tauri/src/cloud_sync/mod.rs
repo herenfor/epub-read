@@ -7,6 +7,8 @@ mod model;
 pub mod remote;
 mod scheduler;
 mod secrets;
+#[cfg(target_os = "android")]
+pub(crate) use secrets::plugin as android_plugin;
 mod storage;
 use crate::portable_state::{
     merge_portable_states, select_local_import, valid_canonical_uuid, validate_portable_state,
