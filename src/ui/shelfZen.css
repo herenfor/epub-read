@@ -973,6 +973,26 @@
   margin: 4px 0;
 }
 
+/* 书架排法两项：名称下附一行说明，选中时说明仍保持次要色。 */
+.shelf-folder-menu-mode-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.shelf-folder-menu-mode-text small {
+  color: var(--muted, #6b7280);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.shelf-folder-menu-caption {
+  padding: 6px 10px 2px;
+  color: var(--muted, #6b7280);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
 .shelf-folder-menu-new-btn {
   display: flex;
   align-items: center;
