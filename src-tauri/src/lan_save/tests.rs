@@ -20,6 +20,7 @@ use tauri::{App, AppHandle, Manager};
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::{TlsAcceptor, TlsConnector};
+mod reuse;
 
 const A: &str = "00000000-0000-4000-8000-000000000001";
 
@@ -619,9 +620,11 @@ async fn lan_close_and_dropped_invoke_do_not_cancel_accepted_commit() {
     let blocked = write_state.0.lock().unwrap();
     let commit_app = rh.clone();
     let sid = host.session_id.clone();
-    let invoking = tokio::spawn(async move { commit(&commit_app, &sid, &tid, false).await });
+    let committing_tid = tid.clone();
+    let invoking = tokio::spawn(async move { commit(&commit_app, &sid, &committing_tid, false).await });
     wait_event(&log, "committing", Duration::from_secs(5)).await;
     invoking.abort(); // The native owner must survive loss of the IPC waiter.
+    assert_eq!(super::manager::cancel_transfer(&rh, &host.session_id, &tid).await.unwrap().status, "too-late");
     assert_eq!(
         close(&rh, &host.session_id).await.unwrap().status,
         "too-late"

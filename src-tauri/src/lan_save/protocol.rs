@@ -53,6 +53,28 @@ pub(crate) enum ControlMessage {
         #[serde(rename = "transferId")]
         transfer_id: String,
     },
+    TransferDone {
+        #[serde(rename = "sessionId")]
+        session_id: String,
+        #[serde(rename = "transferId")]
+        transfer_id: String,
+    },
+    NextTransfer {
+        #[serde(rename = "sessionId")]
+        session_id: String,
+        #[serde(rename = "transferId")]
+        transfer_id: String,
+        #[serde(rename = "nextTransferId")]
+        next_transfer_id: String,
+    },
+    NextTransferAck {
+        #[serde(rename = "sessionId")]
+        session_id: String,
+        #[serde(rename = "transferId")]
+        transfer_id: String,
+        #[serde(rename = "nextTransferId")]
+        next_transfer_id: String,
+    },
     Offer {
         #[serde(rename = "sessionId")]
         session_id: String,
@@ -156,6 +178,9 @@ impl ControlMessage {
         match self {
             ControlMessage::Hello { session_id, .. }
             | ControlMessage::Paired { session_id, .. }
+            | ControlMessage::TransferDone { session_id, .. }
+            | ControlMessage::NextTransfer { session_id, .. }
+            | ControlMessage::NextTransferAck { session_id, .. }
             | ControlMessage::Offer { session_id, .. }
             | ControlMessage::InventoryQuery { session_id, .. }
             | ControlMessage::InventoryReply { session_id, .. }
@@ -173,6 +198,9 @@ impl ControlMessage {
         match self {
             ControlMessage::Hello { .. } => None,
             ControlMessage::Paired { transfer_id, .. }
+            | ControlMessage::TransferDone { transfer_id, .. }
+            | ControlMessage::NextTransfer { transfer_id, .. }
+            | ControlMessage::NextTransferAck { transfer_id, .. }
             | ControlMessage::Offer { transfer_id, .. }
             | ControlMessage::InventoryQuery { transfer_id, .. }
             | ControlMessage::InventoryReply { transfer_id, .. }

@@ -9,6 +9,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, oneshot, Notify};
+mod round;
+use round::Turnover;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -46,11 +48,13 @@ pub(crate) struct InventoryOutcome {
 
 pub(crate) enum ReceiverAction {
     Accept {
+        transfer_id: String,
         part_path: PathBuf,
         archive_bytes: u64,
         reply: oneshot::Sender<Result<(), LanSaveError>>,
     },
     InventoryDone {
+        transfer_id: String,
         query_index: u64,
         last: bool,
         presence: Result<Vec<bool>, LanSaveError>,
@@ -188,6 +192,17 @@ impl Default for SessionGate {
 }
 
 impl SessionGate {
+    pub(crate) fn finish_transfer(&self) -> Result<(), LanSaveError> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| LanSaveError::invalid_state("会话状态锁已损坏"))?;
+        if state.link_closed || state.phase == Phase::Committing {
+            return Err(LanSaveError::invalid_state("本轮尚不能结束"));
+        }
+        state.phase = Phase::Finished;
+        Ok(())
+    }
     pub(crate) fn phase(&self) -> Result<Phase, LanSaveError> {
         Ok(self
             .state
@@ -275,10 +290,12 @@ impl SessionGate {
             .state
             .lock()
             .map_err(|_| LanSaveError::invalid_state("会话状态锁已损坏"))?;
+        let already_closed = state.link_closed;
         state.link_closed = true;
         match state.phase {
             Phase::Committing => Ok(GateClose::CommitInProgress),
-            Phase::Finished | Phase::Closed => Ok(GateClose::AlreadyFinished),
+            Phase::Finished if already_closed => Ok(GateClose::AlreadyFinished),
+            Phase::Closed => Ok(GateClose::AlreadyFinished),
             _ => {
                 state.phase = Phase::Closed;
                 Ok(GateClose::Cancelled)
@@ -309,6 +326,7 @@ pub(crate) struct LanSession {
     receiver_action_tx: mpsc::Sender<ReceiverAction>,
     receiver_action_rx: Mutex<Option<mpsc::Receiver<ReceiverAction>>>,
     workers: Arc<WorkerOwner>,
+    turnover: Mutex<Turnover>,
     finalize_started: AtomicBool,
     finalize_finished: AtomicBool,
     outgoing_bytes: AtomicU64,
@@ -366,6 +384,7 @@ impl LanSession {
             receiver_action_tx,
             receiver_action_rx: Mutex::new(Some(receiver_action_rx)),
             workers: Arc::new(WorkerOwner::default()),
+            turnover: Mutex::new(Turnover::default()),
             finalize_started: AtomicBool::new(false),
             finalize_finished: AtomicBool::new(false),
             outgoing_bytes: AtomicU64::new(0),
@@ -598,11 +617,22 @@ impl LanSession {
     }
 
     pub(crate) fn request_workers_close(&self) -> bool {
-        self.workers.request_close()
+        let first = self.workers.request_close();
+        if let Ok(turn) = self.turnover.lock() {
+            turn.workers.request_close();
+        }
+        first
     }
 
     pub(crate) async fn drain_workers(&self) {
-        self.workers.drain_closed().await
+        self.workers.drain_closed().await;
+        let workers = self
+            .turnover
+            .lock()
+            .expect("transfer ownership lock")
+            .workers
+            .clone();
+        workers.drain_closed().await;
     }
 
     pub(crate) fn receiver_action_sender(&self) -> mpsc::Sender<ReceiverAction> {
@@ -698,6 +728,15 @@ impl LanSession {
                 Ordering::Acquire,
             )
             .is_ok()
+    }
+
+    pub(crate) fn release_outgoing_reservation(&self) {
+        let _ = self.role.compare_exchange(
+            ROLE_OUTGOING,
+            ROLE_IDLE,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
     }
 
     pub(crate) fn is_outgoing(&self) -> bool {
@@ -964,7 +1003,7 @@ impl PhaseHeartbeat {
         transfer_id: String,
         phase: ProcessingPhase,
     ) -> Result<Self, LanSaveError> {
-        let lease = session.enter_worker()?;
+        let lease = session.enter_transfer_worker()?;
         Ok(Self::start_owned(session, transfer_id, phase, lease))
     }
 

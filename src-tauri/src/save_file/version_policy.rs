@@ -37,13 +37,12 @@ pub(crate) fn select_archive_reader(
 
 /// Select the active LAN pairing protocol version.
 ///
-/// v1 was explicitly rejected and never had an adapter. v2 stays the only
-/// registered protocol; a real v3 requires its own implemented receiver and
-/// direction-limited compatibility mode, not just a constant bump.
+/// v3 adds transfer cleanup and next-round acknowledgements. v2 has no
+/// reusable-connection adapter; both endpoints must support the same protocol.
 pub(crate) fn select_lan_version(version: u32) -> Result<(), VersionError> {
     match version {
-        2 => Ok(()),
-        version if version > 2 => Err(VersionError::NeedsNewerApp),
+        3 => Ok(()),
+        version if version > 3 => Err(VersionError::NeedsNewerApp),
         _ => Err(VersionError::UnsupportedFormat),
     }
 }
@@ -70,8 +69,9 @@ mod tests {
             select_archive_reader(1, 2),
             Err(VersionError::UnsupportedFormat)
         );
-        assert_eq!(select_lan_version(2), Ok(()));
-        assert_eq!(select_lan_version(3), Err(VersionError::NeedsNewerApp));
+        assert_eq!(select_lan_version(3), Ok(()));
+        assert_eq!(select_lan_version(4), Err(VersionError::NeedsNewerApp));
+        assert_eq!(select_lan_version(2), Err(VersionError::UnsupportedFormat));
         assert_eq!(select_lan_version(1), Err(VersionError::UnsupportedFormat));
         assert_eq!(select_lan_version(0), Err(VersionError::UnsupportedFormat));
     }
