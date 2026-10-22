@@ -189,3 +189,15 @@ export async function commitLanSave(
 export async function closeLanSave(sessionId: string): Promise<LanCloseResult> {
   return invokeLan<LanCloseResult>("lan_save_close", { sessionId });
 }
+
+/**
+ * Cancels only the current batch on a reusable connection (an offer not yet
+ * accepted, or a received import still at preview). Resolves `cancelled` or
+ * `too-late`; the next batch may start only after the `ready` event.
+ */
+export async function cancelLanSaveTransfer(
+  sessionId: string,
+  transferId: string,
+): Promise<LanCloseResult> {
+  return invokeLan<LanCloseResult>("lan_save_cancel_transfer", { sessionId, transferId });
+}

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   acceptLanSave,
+  cancelLanSaveTransfer,
   closeLanSave,
   commitLanSave,
   hostLanSave,
@@ -9,7 +10,6 @@ import {
   lanSaveErrorMessage,
   sendLanSave,
   type LanCloseResult,
-  type LanCommitSummary,
   type LanOfferSummary,
   type LanProgress,
   type LanSaveEvent,
@@ -31,12 +31,18 @@ export type LanSaveSessionStatus =
   | "preparing"
   | "preview"
   | "committing"
-  | "sendComplete"
-  | "sendUnconfirmed"
-  | "sendCancelled"
-  | "sendFailed"
-  | "commitComplete"
+  /** A batch ended; both devices are releasing it before the next `ready`. */
+  | "settling"
   | "closed";
+
+/** Outcome of the last finished batch, shown above the connected page. */
+export type LanBatchResult =
+  | { kind: "sent"; send: LanSendResult }
+  | { kind: "sentUnconfirmed"; send: LanSendResult }
+  | { kind: "sendCancelled"; send: LanSendResult }
+  | { kind: "sendFailed"; send: LanSendResult }
+  | { kind: "imported"; commit: SaveFileCommitResult }
+  | { kind: "importCancelled" };
 
 export interface LanSaveSessionState {
   status: LanSaveSessionStatus;
@@ -51,12 +57,13 @@ export interface LanSaveSessionState {
   error: string | null;
   errorCode: string | null;
   notice: string | null;
+  /** An offer still waiting for accept (auto-accept failed or is pending). */
   offer: LanOfferSummary | null;
+  /** The offer of the batch being received, kept for the progress hint. */
+  incoming: LanOfferSummary | null;
   progress: LanProgress | null;
   preview: SaveFilePrepareResult | null;
-  sendResult: LanSendResult | null;
-  remoteCommit: LanCommitSummary | null;
-  localCommit: SaveFileCommitResult | null;
+  lastResult: LanBatchResult | null;
 }
 
 export interface UseLanSaveSessionOptions {
@@ -77,8 +84,10 @@ export interface UseLanSaveSessionResult {
   join(pairingInfo: string): Promise<void>;
   send(scopeChoice: "all" | "selected", includeBooks: boolean): Promise<void>;
   accept(): Promise<void>;
-  decline(): Promise<void>;
+  /** Drops only the current batch (pending offer or preview); the connection stays. */
+  cancelTransfer(): Promise<void>;
   commit(applyPreferences: boolean): Promise<void>;
+  /** Ends the whole connection. */
   close(): Promise<void>;
 }
 
@@ -95,11 +104,10 @@ const INITIAL_STATE: LanSaveSessionState = {
   errorCode: null,
   notice: null,
   offer: null,
+  incoming: null,
   progress: null,
   preview: null,
-  sendResult: null,
-  remoteCommit: null,
-  localCommit: null,
+  lastResult: null,
 };
 
 function parseOfferSummary(value: unknown): LanOfferSummary | null {
@@ -147,7 +155,10 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
   const closeRef = useRef<{ sessionId: string; promise: Promise<LanCloseResult> } | null>(null);
   const busyRef = useRef(false);
   const launchPendingRef = useRef(false);
-  const operationRef = useRef<"send" | "accept" | "commit" | null>(null);
+  const operationRef = useRef<"send" | "accept" | "commit" | "cancel" | null>(null);
+  /** The transferId already auto-accepted; each real offer is accepted once. */
+  const autoAcceptedRef = useRef<string | null>(null);
+  const acceptRef = useRef<() => Promise<void>>(async () => undefined);
   const closeFinishedRef = useRef(false);
   const peerEndedRef = useRef(false);
   const mountedRef = useRef(true);
@@ -166,6 +177,37 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
     if (mountedRef.current) setState(next);
   }, []);
 
+  // L1: an offer goes straight to receiving and the import preview, whose
+  // 确认导入 stays the only confirmation. Runs at most once per transferId;
+  // a failed (busy) accept leaves the offer for the manual 接收 button.
+  const scheduleAutoAccept = useCallback((): void => {
+    queueMicrotask(() => {
+      const transferId = transferIdRef.current;
+      const current = stateRef.current;
+      if (!transferId || !current.offer || current.status !== "receiving") return;
+      if (autoAcceptedRef.current === transferId) return;
+      if (busyRef.current || launchPendingRef.current || cancelWantedRef.current) return;
+      autoAcceptedRef.current = transferId;
+      void acceptRef.current();
+    });
+  }, []);
+
+  /**
+   * Status once a batch's own invoke has its result. `ready` may reach JS
+   * before that invoke returns: then the next batch is already open, and only
+   * this batch's own screen is replaced. A new offer that arrived meanwhile
+   * keeps its state.
+   */
+  const statusAfterBatch = useCallback((
+    transferId: string,
+    ownStatuses: readonly LanSaveSessionStatus[],
+  ): LanSaveSessionStatus => {
+    const current = stateRef.current.status;
+    if (peerEndedRef.current || current === "closed") return "closed";
+    if (transferIdRef.current === transferId) return "settling";
+    return ownStatuses.includes(current) ? "connected" : current;
+  }, []);
+
   const resetToIdle = useCallback((): void => {
     // A close acknowledgement does not settle an outstanding IPC result. Keep
     // this generation owned until startup/actions, especially commit, finish.
@@ -178,6 +220,7 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
     busyRef.current = false;
     closeFinishedRef.current = false;
     peerEndedRef.current = false;
+    autoAcceptedRef.current = null;
     stateRef.current = INITIAL_STATE;
     if (mountedRef.current) setState(INITIAL_STATE);
   }, []);
@@ -240,6 +283,31 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
         return;
       }
 
+      if (cancelWantedRef.current && operationRef.current !== "commit") return;
+
+      // `ready` carries the NEW id; accept it only as the successor of the
+      // batch we know, then drop every later frame of the old id.
+      if (event.event === "ready") {
+        const summary = event.summary as { previousTransferId?: unknown } | undefined;
+        if (!event.transferId || summary?.previousTransferId !== transferIdRef.current) return;
+        const nextTransferId = event.transferId;
+        transferIdRef.current = nextTransferId;
+        updateState((current) => {
+          // A batch invoke still owns its screen; it moves on when it returns.
+          if (operationRef.current || current.status === "closed") return { transferId: nextTransferId };
+          return {
+            transferId: nextTransferId,
+            status: "connected",
+            busy: false,
+            offer: null,
+            incoming: null,
+            progress: null,
+            preview: null,
+          };
+        });
+        return;
+      }
+
       if (event.transferId) {
         const knownTransferId = transferIdRef.current;
         if (!knownTransferId) {
@@ -250,9 +318,8 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
         }
       }
 
-      if (cancelWantedRef.current && operationRef.current !== "commit") return;
       const current = stateRef.current;
-      if (["sendComplete", "sendUnconfirmed", "sendCancelled", "sendFailed", "commitComplete", "closed"].includes(current.status)) return;
+      if (current.status === "closed") return;
       switch (event.event) {
         case "pairing":
           break;
@@ -272,11 +339,14 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
             updateState({
               status: "receiving",
               offer,
+              incoming: offer,
               progress: null,
+              lastResult: null,
               error: null,
               errorCode: null,
               notice: null,
             });
+            scheduleAutoAccept();
           }
           break;
         }
@@ -313,6 +383,16 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
         case "completed":
           // The send/commit promise owns the terminal result.
           break;
+        case "cancelled":
+          // Our own cancelTransfer() owns its result; otherwise the batch was
+          // dropped natively and the connection waits for `ready`.
+          if (!operationRef.current && (current.status === "receiving" || current.status === "preview")) {
+            updateState({
+              status: "settling", busy: false, offer: null, incoming: null, preview: null, progress: null,
+              lastResult: { kind: "importCancelled" },
+            });
+          }
+          break;
         case "closed":
         case "error":
           peerEndedRef.current = true;
@@ -333,7 +413,7 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
           break;
       }
     };
-  }, [requestCloseForSession, updateState]);
+  }, [requestCloseForSession, scheduleAutoAccept, updateState]);
 
   const failToIdle = useCallback((error: unknown): void => {
     const code = lanSaveErrorCode(error);
@@ -347,6 +427,7 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
     cancelWantedRef.current = false;
     closeRef.current = null;
     busyRef.current = false;
+    autoAcceptedRef.current = null;
     const next: LanSaveSessionState = {
       ...INITIAL_STATE,
       error: message,
@@ -366,6 +447,7 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
     closeRef.current = null;
     sessionIdRef.current = null;
     transferIdRef.current = null;
+    autoAcceptedRef.current = null;
     const generation = generationRef.current + 1;
     generationRef.current = generation;
     updateState({
@@ -413,9 +495,10 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
         launchPendingRef.current = false;
         busyRef.current = false;
         if (cancelWantedRef.current && (closeFinishedRef.current || !sessionIdRef.current)) resetToIdle();
+        else scheduleAutoAccept();
       }
     }
-  }, [failToIdle, makeEventHandler, requestCloseForSession, resetToIdle, updateState]);
+  }, [failToIdle, makeEventHandler, requestCloseForSession, resetToIdle, scheduleAutoAccept, updateState]);
 
   const join = useCallback(async (pairingInfo: string): Promise<void> => {
     if (busyRef.current || stateRef.current.status !== "idle") return;
@@ -433,6 +516,7 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
     closeRef.current = null;
     sessionIdRef.current = null;
     transferIdRef.current = null;
+    autoAcceptedRef.current = null;
     const generation = generationRef.current + 1;
     generationRef.current = generation;
     updateState({
@@ -479,9 +563,10 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
         launchPendingRef.current = false;
         busyRef.current = false;
         if (cancelWantedRef.current && (closeFinishedRef.current || !sessionIdRef.current)) resetToIdle();
+        else scheduleAutoAccept();
       }
     }
-  }, [failToIdle, makeEventHandler, requestCloseForSession, resetToIdle, updateState]);
+  }, [failToIdle, makeEventHandler, requestCloseForSession, resetToIdle, scheduleAutoAccept, updateState]);
 
   const send = useCallback(async (
     scopeChoice: "all" | "selected",
@@ -500,11 +585,12 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
       status: "sending",
       busy: true,
       offer: null,
+      incoming: null,
       progress: null,
       error: null,
       errorCode: null,
       notice: null,
-      sendResult: null,
+      lastResult: null,
     });
 
     let invokedNative = false;
@@ -515,18 +601,18 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
       const result = await sendLanSave(sessionId, scope, includeBooks);
       if (generationRef.current !== generation) return;
 
-      let status: LanSaveSessionStatus = "sendFailed";
+      let lastResult: LanBatchResult = { kind: "sendFailed", send: result };
       let notice: string | null = result.message ?? uiText("lan.notice.sendFailed");
       let error: string | null = null;
       let errorCode: string | null = null;
       if (result.status === "completed") {
-        status = "sendComplete";
+        lastResult = { kind: "sent", send: result };
         notice = uiText("lan.notice.peerImported");
       } else if (result.status === "unconfirmed") {
-        status = "sendUnconfirmed";
+        lastResult = { kind: "sentUnconfirmed", send: result };
         notice = uiText("lan.notice.peerUnconfirmed");
       } else if (result.status === "cancelled") {
-        status = "sendCancelled";
+        lastResult = { kind: "sendCancelled", send: result };
         notice = result.message ?? uiText("lan.notice.sendCancelled");
       } else {
         error = result.message ?? uiText("lan.notice.sendFailed");
@@ -534,10 +620,10 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
       }
 
       updateState({
-        status,
+        status: statusAfterBatch(transferId, ["sending"]),
         busy: false,
-        sendResult: result,
-        remoteCommit: result.remoteCommit,
+        progress: null,
+        lastResult,
         error,
         errorCode,
         notice,
@@ -563,9 +649,10 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
           updateState({ status: "closed", busy: false, preview: null, offer: null });
         }
         if (cancelWantedRef.current && closeFinishedRef.current) resetToIdle();
+        else scheduleAutoAccept();
       }
     }
-  }, [resetToIdle, updateState]);
+  }, [resetToIdle, scheduleAutoAccept, statusAfterBatch, updateState]);
 
   const accept = useCallback(async (): Promise<void> => {
     if (busyRef.current || launchPendingRef.current || cancelWantedRef.current) return;
@@ -576,9 +663,10 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
 
     busyRef.current = true;
     operationRef.current = "accept";
+    autoAcceptedRef.current = transferId;
     const generation = generationRef.current;
     updateState({
-      status: "preparing",
+      status: "receiving",
       busy: true,
       offer: null,
       progress: null,
@@ -626,16 +714,66 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
       }
     }
   }, [resetToIdle, updateState]);
+  acceptRef.current = accept;
 
-  const decline = useCallback(async (): Promise<void> => {
-    cancelWantedRef.current = true;
+  const cancelTransfer = useCallback(async (): Promise<void> => {
+    if (busyRef.current || launchPendingRef.current || cancelWantedRef.current) return;
+    const previous = stateRef.current;
     const sessionId = sessionIdRef.current;
-    if (!sessionId) {
-      resetToIdle();
-      return;
+    const transferId = transferIdRef.current;
+    if (!sessionId || !transferId) return;
+    if (previous.status !== "preview" && !(previous.status === "receiving" && previous.offer)) return;
+
+    busyRef.current = true;
+    operationRef.current = "cancel";
+    const generation = generationRef.current;
+    updateState({ busy: true, error: null, errorCode: null });
+
+    try {
+      const result = await cancelLanSaveTransfer(sessionId, transferId);
+      if (generationRef.current !== generation) return;
+      if (result.status === "too-late") {
+        // The commit was already accepted natively; wait for its real result.
+        updateState({
+          status: "committing",
+          busy: false,
+          offer: null,
+          preview: null,
+          cancelTooLate: true,
+          notice: uiText("lan.notice.committing"),
+        });
+        return;
+      }
+      updateState({
+        status: statusAfterBatch(transferId, ["receiving", "preview"]),
+        busy: false,
+        offer: null,
+        incoming: null,
+        preview: null,
+        progress: null,
+        lastResult: { kind: "importCancelled" },
+      });
+    } catch (error) {
+      if (generationRef.current !== generation) return;
+      const code = lanSaveErrorCode(error);
+      const ended = code === "not-found" || peerEndedRef.current;
+      updateState({
+        status: ended ? "closed" : previous.status,
+        busy: false,
+        offer: ended ? null : previous.offer,
+        preview: ended ? null : previous.preview,
+        error: lanSaveErrorMessage(error),
+        errorCode: code,
+      });
+    } finally {
+      if (generationRef.current === generation) {
+        operationRef.current = null;
+        busyRef.current = false;
+        if (cancelWantedRef.current && closeFinishedRef.current) resetToIdle();
+        else scheduleAutoAccept();
+      }
     }
-    await requestCloseForSession(sessionId).catch(() => undefined);
-  }, [requestCloseForSession, resetToIdle]);
+  }, [resetToIdle, scheduleAutoAccept, statusAfterBatch, updateState]);
 
   const commit = useCallback(async (applyPreferences: boolean): Promise<void> => {
     if (busyRef.current || launchPendingRef.current || cancelWantedRef.current) return;
@@ -667,7 +805,8 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
         // The commit result is already truthful; callers report projection refresh failures separately.
       }
       if (generationRef.current !== generation) return;
-      if (cancelWantedRef.current) {
+      const closedMeanwhile = cancelWantedRef.current;
+      if (closedMeanwhile) {
         // A too-late close left the real commit running. Once it finishes, let a
         // later close/reconnect observe the final native state instead of reusing
         // the resolved too-late promise.
@@ -676,10 +815,12 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
         closeFinishedRef.current = false;
       }
       updateState({
-        status: "commitComplete",
+        status: closedMeanwhile ? "closed" : statusAfterBatch(transferId, ["committing"]),
         busy: false,
         preview: null,
-        localCommit: result,
+        incoming: null,
+        progress: null,
+        lastResult: { kind: "imported", commit: result },
         error: null,
         errorCode: null,
         notice: uiPlural("lan.notice.imported", result.importedBooks.length, { count: result.importedBooks.length }),
@@ -700,9 +841,10 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
         operationRef.current = null;
         busyRef.current = false;
         if (cancelWantedRef.current && closeFinishedRef.current) resetToIdle();
+        else scheduleAutoAccept();
       }
     }
-  }, [resetToIdle, updateState]);
+  }, [resetToIdle, scheduleAutoAccept, statusAfterBatch, updateState]);
 
   const close = useCallback(async (): Promise<void> => {
     if (stateRef.current.status === "idle") return;
@@ -731,13 +873,13 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
     state,
     active: state.busy || state.closing || [
       "startingHost", "hostReady", "joining", "connected", "sending",
-      "receiving", "preparing", "preview", "committing",
+      "receiving", "preparing", "preview", "committing", "settling",
     ].includes(state.status),
     startHost,
     join,
     send,
     accept,
-    decline,
+    cancelTransfer,
     commit,
     close,
   };

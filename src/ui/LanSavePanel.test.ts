@@ -4,6 +4,7 @@ import { createReactDomHarness } from "../test/reactDomHarness";
 import { LanSavePanel } from "./LanSavePanel";
 import { lanErrorText } from "./lanSaveMessages";
 import type { UseLanSaveSessionResult } from "./useLanSaveSession";
+import type { LanSendResult } from "../platform/lanSaveNativeBridge";
 
 const scan = vi.hoisted(() => vi.fn());
 const openSettings = vi.hoisted(() => vi.fn(async () => undefined));
@@ -19,10 +20,10 @@ it("扫码期间禁止另建连接，关闭或卸载后不消费迟到的扫码�
     state: {
       status: "idle", role: null, sessionId: null, transferId: null, pairingInfo: null,
       busy: false, closing: false, cancelTooLate: false, error: null, errorCode: null,
-      notice: null, offer: null, progress: null, preview: null, sendResult: null, remoteCommit: null, localCommit: null,
+      notice: null, offer: null, incoming: null, progress: null, preview: null, lastResult: null,
     },
     active: false, startHost: vi.fn(), join: vi.fn(), send: vi.fn(), accept: vi.fn(),
-    decline: vi.fn(), commit: vi.fn(), close: vi.fn(),
+    cancelTransfer: vi.fn(), commit: vi.fn(), close: vi.fn(),
   };
   const onClose = vi.fn();
   const dom = createReactDomHarness();
@@ -63,11 +64,22 @@ function sessionWith(overrides: Partial<UseLanSaveSessionResult["state"]>): UseL
     state: {
       status: "idle", role: null, sessionId: null, transferId: null, pairingInfo: null,
       busy: false, closing: false, cancelTooLate: false, error: null, errorCode: null,
-      notice: null, offer: null, progress: null, preview: null, sendResult: null, remoteCommit: null, localCommit: null,
+      notice: null, offer: null, incoming: null, progress: null, preview: null, lastResult: null,
       ...overrides,
     },
     active: false, startHost: vi.fn(), join: vi.fn(), send: vi.fn(), accept: vi.fn(),
-    decline: vi.fn(), commit: vi.fn(), close: vi.fn(),
+    cancelTransfer: vi.fn(), commit: vi.fn(), close: vi.fn(),
+  };
+}
+
+function sentResult(): LanSendResult {
+  return {
+    status: "completed", transferId: "t1", archiveBytes: 2048, packageId: "pkg", writtenBooks: 2,
+    attachedBookCount: 0, skippedBooks: [], resultDelivered: true, code: null, message: null,
+    remoteCommit: {
+      importedBookCount: 2, newVisibleBookCount: 2, missingBookCount: 0,
+      progressConflictBookCount: 0, appliedPreferences: false,
+    },
   };
 }
 
@@ -78,11 +90,14 @@ it("原生报错只显示白话说明，不把技术细节展示给用户", asyn
     for (const [status, code, raw] of [
       ["idle", "secure-error", "TLS 握手失败：invalid peer certificate: UnknownIssuer"],
       ["closed", "invalid-data", "控制帧 JSON 失败：expected value at line 1 column 1"],
-      ["sendFailed", "storage-error", "文件读写失败：No such file or directory (os error 2)"],
+      ["settling", "storage-error", "文件读写失败：No such file or directory (os error 2)"],
       ["closed", "something-new", "panicked at src/lan_save/session.rs:42"],
     ] as const) {
+      const lastResult = status === "settling"
+        ? { kind: "sendFailed" as const, send: { ...sentResult(), status: "failed" as const, code, message: raw } }
+        : null;
       await dom.render(createElement(LanSavePanel, {
-        open: true, session: sessionWith({ status, error: raw, errorCode: code }),
+        open: true, session: sessionWith({ status, error: raw, errorCode: code, lastResult }),
         selectedEntries: [], isAndroid: true, onClose: vi.fn(),
       }));
       const text = dom.container.textContent ?? "";
@@ -146,4 +161,72 @@ it("协议版本问题只按机器码显示，不读后端中文", () => {
     expect(lanErrorText(code, "join")).toBe("两台设备需要更新到支持同一互传协议的版本。");
   }
   expect(lanErrorText("network", "join")).toContain("网络连接中断");
+});
+
+it("电脑打开面板直接显示二维码，只自动开一次；手机仍二选一", async () => {
+  const dom = createReactDomHarness();
+  try {
+    const desktop = sessionWith({});
+    await dom.render(createElement(LanSavePanel, {
+      open: true, session: desktop, selectedEntries: [], isAndroid: false, onClose: vi.fn(),
+    }));
+    expect(desktop.startHost).toHaveBeenCalledTimes(1);
+    // Host failed and fell back to the start page: no automatic retry loop.
+    await dom.render(createElement(LanSavePanel, {
+      open: true, session: { ...desktop, state: { ...desktop.state, error: "x", errorCode: "network" } },
+      selectedEntries: [], isAndroid: false, onClose: vi.fn(),
+    }));
+    expect(desktop.startHost).toHaveBeenCalledTimes(1);
+    await dom.render(null);
+
+    const phone = sessionWith({});
+    await dom.render(createElement(LanSavePanel, {
+      open: true, session: phone, selectedEntries: [], isAndroid: true, onClose: vi.fn(),
+    }));
+    expect(phone.startHost).not.toHaveBeenCalled();
+    expect(dom.container.textContent).toContain("扫码连接");
+  } finally {
+    await dom.dispose();
+  }
+});
+
+it("一批结束后在顶部显示结果，等下一批就绪前不能发送；预览取消只取消本批", async () => {
+  const dom = createReactDomHarness();
+  try {
+    const settling = sessionWith({
+      status: "settling", role: "join", sessionId: "s1",
+      lastResult: { kind: "sent", send: sentResult() },
+    });
+    await dom.render(createElement(LanSavePanel, {
+      open: true, session: settling, selectedEntries: [], isAndroid: true, onClose: vi.fn(),
+    }));
+    const text = dom.container.textContent ?? "";
+    expect(dom.container.querySelector(".lan-batch.tone-success")?.textContent).toContain("发送完成");
+    expect(text).toContain("正在准备下一次传送");
+    expect(text).not.toContain("完成再传一次");
+    const send = Array.from(dom.container.querySelectorAll("button"))
+      .find((item) => item.textContent?.trim() === "发送") as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
+
+    const onClose = vi.fn();
+    const preview = sessionWith({
+      status: "preview", sessionId: "s1", transferId: "t2",
+      preview: {
+        status: "prepared", jobId: "j", packageId: "p", scopeKind: "all", bookCount: 1, attachedBooks: [],
+        skippedBookCount: 0, skippedBooks: [], progressConflictCount: 0, newBookCount: 1,
+        hasPreferences: false, sourceBytes: 10, totalUncompressedBytes: 10,
+      },
+    });
+    await dom.render(createElement(LanSavePanel, {
+      open: true, session: preview, selectedEntries: [], isAndroid: true, onClose,
+    }));
+    const cancel = Array.from(dom.container.querySelectorAll("button"))
+      .find((item) => item.textContent?.trim() === "取消") as HTMLButtonElement;
+    await dom.click(cancel);
+    expect(preview.cancelTransfer).toHaveBeenCalledTimes(1);
+    expect(preview.close).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  } finally {
+    await dom.dispose();
+  }
 });
