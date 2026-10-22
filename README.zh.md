@@ -1,6 +1,6 @@
 # EPUB 阅读器
 
-[![最新版本](https://img.shields.io/github/v/release/herenfor/epub-read?include_prereleases&label=%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC)](https://github.com/herenfor/epub-read/releases)
+[![下载最新版](.github/readme/release.svg)](https://github.com/herenfor/epub-read/releases/latest)
 ![平台](https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-Windows%20%7C%20Android-informational)
 [![许可证](https://img.shields.io/badge/%E8%AE%B8%E5%8F%AF%E8%AF%81-PolyForm%20Strict%201.0.0-lightgrey)](LICENSE)
 
