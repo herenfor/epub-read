@@ -1191,6 +1191,11 @@ impl PortableStore {
         Ok(bindings)
     }
 
+    /// Cloud projection needs only identities, never device-local paths/URIs.
+    pub(crate) fn locally_bound_hashes(&self) -> PortableResult<BTreeSet<String>> {
+        load_locally_bound_hashes(&self.connection)
+    }
+
     /// Original-file export never needs progress or annotation bodies.
     pub(crate) fn book_source_metadata(&self) -> PortableResult<BTreeMap<String, BookMetadata>> {
         let mut query = self.connection.prepare("SELECT hash, json FROM book_meta")?;
