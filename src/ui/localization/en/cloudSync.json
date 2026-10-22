@@ -81,7 +81,7 @@
   "cloudSync.remote.authentication": "The account or app password is wrong.",
   "cloudSync.remote.permission-denied": "No permission to use this folder.",
   "cloudSync.remote.not-found": "The server could not find this folder or address.",
-  "cloudSync.remote.conflict": "A cloud file changed at the same time; sync will retry.",
+  "cloudSync.remote.conflict": "A cloud file conflict occurred. Test the connection again or retry manually later.",
   "cloudSync.remote.locked": "A cloud file is locked; sync will retry.",
   "cloudSync.remote.rate-limited": "Too many requests; the server asked to wait.",
   "cloudSync.remote.quota-exceeded": "The cloud storage is full.",
@@ -95,5 +95,5 @@
   "cloudSync.remote.server-error": "Server error; sync will retry.",
   "cloudSync.remote.cancelled": "Cancelled.",
   "cloudSync.remote.unsupported-sync-version": "The cloud data comes from a newer version of the app. Please update this app first.",
-  "cloudSync.remote.cleanupFailed": "A temporary test folder could not be removed; you can delete folders starting with .probe in your cloud storage."
+  "cloudSync.remote.cleanupFailed": "Some temporary files could not be cleaned up. Retry first; do not delete published sync data."
 }

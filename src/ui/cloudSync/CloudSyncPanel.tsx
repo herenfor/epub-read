@@ -351,6 +351,34 @@ function ConnectedView({ status }: { status: CloudSyncStatus & { connection: Non
   </>;
 }
 
+/** A broken sidecar has no readable connection, but can still be disconnected.
+ * Future versions must stay blocked; only known corruption can be isolated. */
+function DisconnectedProblem({ problem }: { problem: CloudSyncFailure }) {
+  const { t } = useUiText();
+  const [confirm, setConfirm] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<CloudSyncFailure | null>(null);
+  const disconnect = async (): Promise<void> => {
+    setBusy(true);
+    const result = await runCloudSyncAction(cloudSyncNative.disconnect);
+    setBusy(false);
+    if (result.ok) adoptCloudSyncStatus(result.value);
+    else setFailure(result.failure);
+  };
+  return <div className="shelf-settings-card">
+    <ErrorLine failure={failure ?? problem} />
+    {problem.code === "local-state-invalid" && <>
+      {confirm && <p className="shelf-settings-note">{t("cloudSync.disconnect.confirm")}</p>}
+      <div className="shelf-settings-actions">
+        <button type="button" disabled={busy} onClick={() => confirm ? void disconnect() : setConfirm(true)}>
+          {t("cloudSync.disconnect")}
+        </button>
+        {confirm && <button type="button" disabled={busy} onClick={() => setConfirm(false)}>{t("cloudSync.cancel")}</button>}
+      </div>
+    </>}
+  </div>;
+}
+
 /** Settings → Sync. `active` is false for the warm-up copy, which must not call native code. */
 export function CloudSyncPanel({ active }: { active: boolean }) {
   const { t } = useUiText();
@@ -367,7 +395,9 @@ export function CloudSyncPanel({ active }: { active: boolean }) {
     {status && !status.nativeReady && !status.connection && <p className="shelf-settings-error">{t("cloudSync.unavailable")}</p>}
     {status && (status.connection
       ? <ConnectedView status={status as CloudSyncStatus & { connection: NonNullable<CloudSyncStatus["connection"]> }} />
-      : <ConnectForm status={status} />)}
+      : status.phase === "error" && status.lastError
+        ? <DisconnectedProblem problem={status.lastError} />
+        : <ConnectForm status={status} />)}
   </div>;
 }
 
