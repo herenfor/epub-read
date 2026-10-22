@@ -126,11 +126,14 @@ fn pending_path(author: &Author) -> Result<RemotePath> {
     ))
 }
 
-async fn directory(remote: &impl SyncRemote, cancel: &Cancel) -> Result<Vec<FileRef>> {
+async fn directory(
+    remote: &impl SyncRemote,
+    cancel: &Cancel,
+) -> Result<(Vec<FileRef>, Vec<RemoteEntry>)> {
     let entries = remote.list(&RemotePath::new("devices")?, cancel).await?;
     let mut files = Vec::new();
     let mut ids = BTreeSet::new();
-    for entry in entries {
+    for entry in &entries {
         if entry.is_collection {
             continue;
         }
@@ -165,7 +168,7 @@ async fn directory(remote: &impl SyncRemote, cancel: &Cancel) -> Result<Vec<File
         return Err(size_limit());
     }
     files.sort_by(|a, b| a.name.cmp(&b.name));
-    Ok(files)
+    Ok((files, entries))
 }
 
 pub async fn read_space(remote: &impl SyncRemote, cancel: &Cancel) -> Result<Option<Space>> {
@@ -286,14 +289,14 @@ pub async fn preview(
     let Some(space) = read_space(remote, cancel).await? else {
         return Ok((None, 0, Vec::new(), Vec::new()));
     };
-    let files = match directory(remote, cancel).await {
+    let (files, _) = match directory(remote, cancel).await {
         Ok(files) => files,
         Err(e)
             if e.remote
                 .as_ref()
                 .is_some_and(|r| r.code == RemoteErrorCode::NotFound) =>
         {
-            Vec::new()
+            (Vec::new(), Vec::new())
         }
         Err(e) => return Err(e),
     };
@@ -449,7 +452,7 @@ pub async fn run(
     if space.space_id != session.space.space_id {
         return Err(Failure::new(FailureCode::SpaceChanged));
     }
-    let files = directory(remote, cancel).await?;
+    let (files, entries) = directory(remote, cancel).await?;
     let author = Arc::new(Author {
         space: space.space_id,
         identity,
@@ -541,10 +544,10 @@ pub async fn run(
     let changed = applied.changed;
     let writer = author.clone();
     idle(&mut activity, cancel).await?;
-    let (plan, bound) = blocking(move || {
+    let (plan, bound, event_device_id) = blocking(move || {
         let bound = applied.snapshot.bound;
         let plan = round.finish(&writer.writer(), &applied.snapshot.state, &bound)?;
-        Ok((plan, bound))
+        Ok((plan, bound, applied.snapshot.event_device_id))
     })
     .await?;
     let cloud_only_count = plan
@@ -578,6 +581,17 @@ pub async fn run(
         session.pending_upload = false;
     }
     collect_owned(remote, &mut session, &current, &author, cancel).await?;
+    idle(&mut activity, cancel).await?;
+    super::sources::sync(
+        remote,
+        entries,
+        disk,
+        &session,
+        &author.identity,
+        event_device_id.as_deref(),
+        cancel,
+    )
+    .await?;
     session.last_success_at_ms = Some(now_ms());
     session.cloud_only_book_count = cloud_only_count;
     let session = save(disk, session, cancel).await?;

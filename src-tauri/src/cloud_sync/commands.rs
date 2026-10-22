@@ -338,6 +338,7 @@ impl Repository for AppRepository {
                 Ok(LocalSnapshot {
                     state: store.snapshot()?,
                     bound: store.locally_bound_hashes()?,
+                    event_device_id: store.installation_id()?,
                 })
             })?
             .ok_or_else(|| Failure::new(FailureCode::RepositoryNotReady))
@@ -357,6 +358,7 @@ impl Repository for AppRepository {
                     snapshot: LocalSnapshot {
                         state: outcome.state,
                         bound: store.locally_bound_hashes()?,
+                        event_device_id: store.installation_id()?,
                     },
                     changed,
                 })
@@ -682,6 +684,7 @@ pub async fn cloud_sync_disconnect(app: AppHandle) -> Result<Status> {
             Ok(None) => {}
             Err(error) if error.code == FailureCode::LocalStateInvalid => {
                 store.quarantine()?;
+                store.clear_sources()?;
                 return Ok(true);
             }
             Err(error) => return Err(error),
@@ -719,6 +722,35 @@ pub async fn cloud_sync_devices(app: AppHandle) -> Result<Vec<DeviceInfo>> {
     let manager = app.state::<CloudSyncManager>();
     let result = manager.lock()?.devices.clone();
     Ok(result)
+}
+
+/// Display-only lookup. Does not contact WebDAV, merge progress, or create a
+/// library. The portable event identity is distinct from the cloud identity.
+#[tauri::command]
+pub async fn cloud_sync_progress_sources(
+    app: AppHandle,
+    event_device_ids: Vec<String>,
+) -> Result<Vec<super::sources::ProgressSource>> {
+    load_once(&app).await?;
+    let connection = app
+        .state::<CloudSyncManager>()
+        .lock()?
+        .status
+        .connection
+        .clone();
+    let store = disk(&app)?;
+    engine::blocking(move || {
+        let local =
+            crate::portable_state_commands::with_existing_store(&app, |db| db.installation_id())?
+                .ok_or_else(|| Failure::new(FailureCode::RepositoryNotReady))?;
+        super::sources::query(
+            &store,
+            connection.as_ref(),
+            local.as_deref(),
+            event_device_ids,
+        )
+    })
+    .await
 }
 
 #[tauri::command]

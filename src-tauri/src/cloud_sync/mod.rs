@@ -7,6 +7,7 @@ mod model;
 pub mod remote;
 mod scheduler;
 mod secrets;
+mod sources;
 #[cfg(target_os = "android")]
 pub(crate) use secrets::plugin as android_plugin;
 mod storage;
