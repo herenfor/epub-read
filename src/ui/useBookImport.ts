@@ -6,6 +6,7 @@ import type { NativeDirectorySource } from "../platform/directoryImportBridge";
 import type { RuntimeCapabilities } from "../platform/runtimeCapabilities";
 import { cancelDocumentImport, importDocuments, type AndroidDocumentSelection, type AndroidImportBatchResult, type AndroidNativeImportError } from "../platform/androidNativeBridge";
 import { activatePortableShelfState, getShelfStore, type ShelfEntry } from "./shelf";
+import { noteCloudSyncChange } from "./cloudSync/cloudSyncStore";
 import { formatImportNotice, findDuplicateEntry, mergeShelfEntries, sha256Hex, type ImportNotice } from "./importBooks";
 import { liveFolderName, planImportIntoFolder, type ImportedBookRef } from "./importIntoFolder";
 import { bookOpenErrorMessage } from "./bookOpenFailure";
@@ -634,6 +635,8 @@ export function useFolderImport({
 
   /** One real refresh after a started import settles (success, cancel or failure). */
   const handleFolderImportSettled = useCallback((): void => {
+    // Native folder jobs commit in the backend; whatever landed is worth syncing.
+    noteCloudSyncChange("data-changed");
     // A failed refresh stays on the shelf as a refresh error with a retry.
     void refreshShelfProjection().catch(() => undefined);
   }, [refreshShelfProjection]);

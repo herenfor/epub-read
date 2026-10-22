@@ -18,6 +18,8 @@ export interface RuntimeCapabilities {
   supportsReaderSystemStatusBar: boolean;
   /** Same native-session gate: reader-scoped keep-screen-on is Android-only. */
   supportsReaderKeepScreenOn: boolean;
+  /** WebDAV sync needs the native credential store: native Windows and Android only. */
+  supportsCloudSync: boolean;
 }
 
 export function getRuntimeCapabilities(): RuntimeCapabilities {
@@ -35,5 +37,6 @@ export function getRuntimeCapabilities(): RuntimeCapabilities {
     supportsLanTransfer: platform === "windows" || platform === "android",
     supportsReaderSystemStatusBar: androidNativeSession,
     supportsReaderKeepScreenOn: androidNativeSession,
+    supportsCloudSync: session?.source === "desktop" && (platform === "windows" || platform === "android"),
   };
 }

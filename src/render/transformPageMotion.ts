@@ -12,6 +12,7 @@
 import type { InterruptResult, MotionSample, PageMotionDriver, SettlePlan } from "./pageMotion";
 import { settleProgress } from "./pageMotion";
 import { pageAxisSign, readPageScroll, writePageScroll, type PageProgression } from "./pagedDirection";
+import { holdInteractionBusy } from "../platform/cloudSyncActivity";
 
 const WINDOW_SCREENS = 5;
 const KEYFRAMES = 32;
@@ -40,7 +41,8 @@ export interface MotionCompanion {
 }
 
 export class TransformPageMotion implements PageMotionDriver {
-  private animation: Animation | null = null;
+  private running: Animation | null = null;
+  private releaseBusy: (() => void) | null = null;
   private companions: readonly MotionCompanion[] = [];
   private companionAnimations: Animation[] = [];
   private held: number;
@@ -63,6 +65,20 @@ export class TransformPageMotion implements PageMotionDriver {
     this.progression = layout.progression ?? "ltr";
     this.windowScreens = Math.min(WINDOW_SCREENS, layout.offsets.length);
     this.windowMid = Math.floor(this.windowScreens / 2);
+  }
+
+  /** The running page turn; while one runs, background sync waits. */
+  private get animation(): Animation | null {
+    return this.running;
+  }
+
+  private set animation(next: Animation | null) {
+    this.running = next;
+    if (next && !this.releaseBusy) this.releaseBusy = holdInteractionBusy();
+    else if (!next && this.releaseBusy) {
+      this.releaseBusy();
+      this.releaseBusy = null;
+    }
   }
 
   /** 是否处于窗口模式（运动中、拖动中或短暂空闲）。 */

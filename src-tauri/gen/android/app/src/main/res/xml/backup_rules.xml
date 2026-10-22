@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 6–11 auto backup. Cloud sync identity and connection state stay on
+     this install: a restored copy would publish as the same writer as the
+     original device. The sealed WebDAV password is already in no_backup. -->
+<full-backup-content>
+    <exclude domain="root" path="cloud-sync/" />
+</full-backup-content>

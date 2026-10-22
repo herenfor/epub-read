@@ -87,6 +87,7 @@ fn disk(app: &AppHandle) -> Result<Disk> {
 
 fn status(control: &Control) -> Status {
     let mut status = control.status.clone();
+    status.native_ready = secrets::available();
     status.pending = control.schedule.pending;
     status.retry_at_ms = control.schedule.retry_at;
     status
@@ -143,6 +144,18 @@ fn install(control: &mut Control, session: Option<&Session>) {
         control.status.cloud_only_book_count = session.cloud_only_book_count;
         control.devices = session.devices.clone();
     }
+}
+
+/// Android readies its Keystore bridge and certificate verifier on first use;
+/// until that succeeds nothing may connect. Other platforms answer at once.
+async fn native_ready(app: &AppHandle) -> bool {
+    if !cfg!(target_os = "android") || secrets::available() {
+        return secrets::available();
+    }
+    let app = app.clone();
+    engine::blocking(move || Ok(secrets::prepare(&app)))
+        .await
+        .unwrap_or(false)
 }
 
 async fn load_once(app: &AppHandle) -> Result<()> {
@@ -398,6 +411,7 @@ async fn perform(
 #[tauri::command]
 pub async fn cloud_sync_get_status(app: AppHandle) -> Result<Status> {
     load_once(&app).await?;
+    native_ready(&app).await;
     let manager = app.state::<CloudSyncManager>();
     let result = status(&*manager.lock()?);
     Ok(result)
@@ -408,7 +422,7 @@ pub async fn cloud_sync_test_connection(
     app: AppHandle,
     input: ConnectionInput,
 ) -> Result<ConnectionPreview> {
-    if cfg!(target_os = "android") && !secrets::available() {
+    if cfg!(target_os = "android") && !native_ready(&app).await {
         return Err(Failure::new(FailureCode::NativeBridgeUnavailable));
     }
     load_once(&app).await?;
@@ -478,7 +492,7 @@ pub async fn cloud_sync_connect(
     merge_existing: bool,
     device_label: String,
 ) -> Result<Status> {
-    if !secrets::available() {
+    if !native_ready(&app).await {
         return Err(Failure::new(FailureCode::NativeBridgeUnavailable));
     }
     load_once(&app).await?;

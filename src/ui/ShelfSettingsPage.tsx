@@ -6,6 +6,7 @@ import { AboutInfo } from "./AboutInfo";
 import { Icon, SettingsRow, UpdateDot } from "./settingsRows";
 import { useAppUpdateDot } from "./appUpdate/appUpdateStore";
 import { CacheStoragePanel } from "./CacheStoragePanel";
+import { CloudSyncPanel, useCloudSyncRowDetail } from "./cloudSync/CloudSyncPanel";
 import { useExitPresence } from "./menuMotion";
 import { useUiMotion, type UiMotion } from "./motionPreference";
 import { useUiText } from "./localization/UiLanguageProvider";
@@ -18,7 +19,7 @@ import { SearchIndexCard } from "./SearchPanel";
 import type { ShelfBodySearchProps } from "./ShelfView";
 import "./shelfSettings.css";
 
-export type ShelfSettingsSection = "appearance" | "reading" | "data" | "storage" | "about";
+export type ShelfSettingsSection = "appearance" | "reading" | "data" | "sync" | "storage" | "about";
 
 export interface ShelfSettingsPageProps {
   open: boolean;
@@ -72,6 +73,7 @@ const SECTION_ICONS: Record<ShelfSettingsSection, ReactNode> = {
   appearance: <Icon><circle cx="12" cy="12" r="8.5" /><path d="M12 3.5v17" /><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor" stroke="none" /></Icon>,
   reading: <Icon><path d="M3 5.5c3-1.3 6-1.3 9 .8v13c-3-2.1-6-2.1-9-.8z" /><path d="M21 5.5c-3-1.3-6-1.3-9 .8v13c3-2.1 6-2.1 9-.8z" /></Icon>,
   data: <Icon><rect x="3" y="4" width="18" height="5" rx="1.5" /><path d="M5 9v9.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V9" /><path d="M10 13h4" /></Icon>,
+  sync: <Icon><path d="M7 18.5a4.5 4.5 0 0 1-.6-9 6 6 0 0 1 11.5 1.6A3.8 3.8 0 0 1 17.5 18.5z" /><path d="m10 13.5 2-2 2 2M12 11.5V16" /></Icon>,
   storage: <Icon><rect x="3" y="13" width="18" height="7" rx="2" /><path d="M5.5 13 8 5h8l2.5 8" /><path d="M7 16.5h.01M10.5 16.5h.01" /></Icon>,
   about: <Icon><circle cx="12" cy="12" r="9" /><path d="M12 11v5" /><path d="M12 7.5h.01" /></Icon>,
 };
@@ -113,6 +115,7 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
   const [indexBusy, setIndexBusy] = useState(false);
   const readingTitles = useReadingSettingsTitles(props);
   const updateDot = useAppUpdateDot();
+  const syncDetail = useCloudSyncRowDetail();
   // Touch: a section is a page pushed over the home page. It stays mounted
   // while it slides back out, and only slides in when opened from home (a
   // page that opens straight onto a section arrives with the whole sheet).
@@ -226,6 +229,10 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
   sections.push({ id: "data", title: t("shelfSettings.section.data"),
     detail: [t("shelfMenu.export"), t("shelfMenu.importArchive"), ...(capabilities.supportsLanTransfer && props.onOpenLanTransfer ? [t("shelfMenu.lan")] : [])].join(t("notice.listSep")),
     content: <div className="shelf-settings-card is-list">{dataRows}</div> });
+  if (capabilities.supportsCloudSync) {
+    sections.push({ id: "sync", title: t("cloudSync.title"), detail: syncDetail,
+      content: <CloudSyncPanel active={!props.warm && props.open} /> });
+  }
   if (capabilities.supportsCacheStorage || body) {
     sections.push({ id: "storage", title: t("shelfSettings.section.storage"),
       detail: [...(capabilities.supportsCacheStorage ? [t("shelfMenu.cache")] : []), ...(body ? [t("shelfSettings.index")] : [])].join(t("notice.listSep")),

@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useRef, type CSSProperties, type KeyboardEvent } from "react";
+import { holdInteractionBusy } from "../platform/cloudSyncActivity";
 import "./touchSlider.css";
 
 /** Horizontal travel before a touch on a slider counts as a drag (px). */
@@ -75,6 +76,7 @@ export function TouchSlider({ min, max, step, value, onChange, label, valueText,
       startValue: number;
       state: SliderGesture;
       token: number | null;
+      releaseBusy?: () => void;
     } | null = null;
     const trackWidth = (): number => element.getBoundingClientRect().width - 2 * THUMB_INSET_PX;
     const emit = (next: number): void => {
@@ -85,6 +87,7 @@ export function TouchSlider({ min, max, step, value, onChange, label, valueText,
     const startDrag = (): void => {
       if (!gesture) return;
       gesture.state = "drag";
+      gesture.releaseBusy = holdInteractionBusy();
       element.setAttribute("data-dragging", "");
       try { element.setPointerCapture(gesture.pointerId); } catch { /* pointer already gone */ }
       const row = (element.closest("[data-slider-row], .rd-range-row") as HTMLElement | null) ?? element.parentElement;
@@ -92,8 +95,9 @@ export function TouchSlider({ min, max, step, value, onChange, label, valueText,
     };
     const finish = (): void => {
       if (!gesture) return;
-      const { token, pointerId } = gesture;
+      const { token, pointerId, releaseBusy } = gesture;
       gesture = null;
+      releaseBusy?.();
       element.removeAttribute("data-dragging");
       try { if (element.hasPointerCapture?.(pointerId)) element.releasePointerCapture(pointerId); } catch { /* already released */ }
       if (token !== null) latest.current.host?.end(token);

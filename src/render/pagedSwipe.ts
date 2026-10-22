@@ -4,6 +4,8 @@
  * The controller only expresses one page/spread step to the caller. It does
  * not calculate columns, chapter boundaries or page numbers.
  */
+import { holdInteractionBusy } from "../platform/cloudSyncActivity";
+
 export interface PagedSwipeHandlers {
   onNext(): void;
   onPrev(): void;
@@ -67,6 +69,12 @@ export function installPagedSwipe(target: Document | HTMLElement, handlers: Page
   let native = false;
   /** 宿主要求忽略本手势（未就绪、浮层等）：原生横向滚动也必须拦下。 */
   let blockNative = false;
+  /** A finger is on the page: background sync waits for the hand to lift. */
+  let releaseBusy: (() => void) | null = null;
+  const endBusy = (): void => {
+    releaseBusy?.();
+    releaseBusy = null;
+  };
 
   const reset = (): void => {
     tracking = false;
@@ -86,7 +94,10 @@ export function installPagedSwipe(target: Document | HTMLElement, handlers: Page
     // suppression swallow this gesture's click.
     suppressClickUntil = 0;
     blockNative = false;
-    if (event.touches.length === 1) handlers.onGestureStart?.();
+    if (event.touches.length === 1) {
+      handlers.onGestureStart?.();
+      releaseBusy ??= holdInteractionBusy();
+    }
     if (event.touches.length !== 1 || hasActiveSelection(doc)) {
       reset();
       return;
@@ -138,7 +149,10 @@ export function installPagedSwipe(target: Document | HTMLElement, handlers: Page
   };
 
   const onTouchEnd = (event: TouchEvent): void => {
-    if (event.touches.length === 0) handlers.onGestureEnd?.();
+    if (event.touches.length === 0) {
+      handlers.onGestureEnd?.();
+      endBusy();
+    }
     if (!tracking) return;
     if (native) {
       reset();
@@ -159,6 +173,7 @@ export function installPagedSwipe(target: Document | HTMLElement, handlers: Page
 
   const onTouchCancel = (): void => {
     handlers.onGestureEnd?.();
+    endBusy();
     reset();
   };
 
@@ -186,6 +201,7 @@ export function installPagedSwipe(target: Document | HTMLElement, handlers: Page
 
   return () => {
     reset();
+    endBusy();
     if (oldTouchAction) surface.style.setProperty("touch-action", oldTouchAction, oldTouchPriority);
     else surface.style.removeProperty("touch-action");
     target.removeEventListener("touchstart", onTouchStart as EventListener, true);

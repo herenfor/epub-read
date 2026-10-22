@@ -1,0 +1,182 @@
+/* Settings → Sync: the connect form, one status card and one list, in the settings card style. */
+
+.cloud-sync {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.cloud-sync .shelf-settings-note.cloud-sync-intro,
+.cloud-sync .shelf-settings-note.cloud-sync-note {
+  margin: 0;
+}
+
+.cloud-sync-intro {
+  padding: 0 4px;
+}
+
+.cloud-sync-muted {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.cloud-sync-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.cloud-sync-field > span {
+  font-size: 13px;
+}
+
+.cloud-sync-field small {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.cloud-sync-field input {
+  min-width: 0;
+  min-height: 38px;
+  padding: 0 11px;
+  border: 1px solid var(--panel-border);
+  border-radius: 9px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 14px;
+}
+
+.cloud-sync-field input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.cloud-sync-field input:disabled {
+  opacity: 0.6;
+}
+
+.cloud-sync-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.cloud-sync-preview p {
+  margin: 0;
+}
+
+.cloud-sync .shelf-settings-actions {
+  align-items: center;
+}
+
+.cloud-sync .shelf-settings-actions button.is-primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.cloud-sync .shelf-settings-actions button.is-danger {
+  border-color: color-mix(in srgb, #b91c1c 60%, var(--panel-border));
+  color: #b91c1c;
+}
+
+.cloud-sync-confirm {
+  font-size: 13px;
+}
+
+.cloud-sync-error {
+  line-height: 1.5;
+}
+
+.cloud-sync-status-main {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 12px;
+}
+
+.cloud-sync-status-text {
+  flex: 1 1 150px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cloud-sync-status-text strong {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.cloud-sync-status-text strong.is-error {
+  color: #b91c1c;
+}
+
+.cloud-sync-status-text small {
+  font-size: 12.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Information rows are not buttons; keep them at full strength. */
+.cloud-sync-list .shelf-settings-row:disabled {
+  opacity: 1;
+  cursor: default;
+}
+
+.cloud-sync-list .shelf-settings-row-text small {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.cloud-sync-sublist {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px 16px 14px 62px;
+  border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 60%, transparent);
+}
+
+.cloud-sync-sublist:last-child {
+  border-bottom: 0;
+}
+
+.cloud-sync-sublist ul {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cloud-sync-sublist li {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.cloud-sync-sublist li small {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.app[data-touch-ui="true"] .cloud-sync-field input {
+  min-height: 44px;
+  font-size: 16px;
+}

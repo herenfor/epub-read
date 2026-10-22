@@ -385,7 +385,8 @@ pub fn run() {
         .plugin(reader_keep_screen_on::plugin())
         .plugin(android_battery::plugin())
         .plugin(android_lan_network::plugin())
-        .plugin(android_lan_scan::plugin());
+        .plugin(android_lan_scan::plugin())
+        .plugin(cloud_sync::android_plugin());
     // The embedding gateway only exists in the AI edition; Core must not link
     // or load the ONNX Runtime at all.
     #[cfg(feature = "ai")]
