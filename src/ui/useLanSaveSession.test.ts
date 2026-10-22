@@ -468,11 +468,60 @@ describe("useLanSaveSession", () => {
     await dom.run(() => {
       emit({ event: "ready", sessionId: "commit-race", transferId: "t2", summary: { previousTransferId: "t1" } });
     });
-    expect(latest!.state.status).toBe("committing");
-    await dom.run(async () => { committing.resolve(commitResult("c")); await committed; });
+    // The old screen ends with ready; the pending commit only keeps busy.
     expect(latest!.state.status).toBe("connected");
+    expect(latest!.state.busy).toBe(true);
+    bridge.acceptLanSave.mockReturnValueOnce(deferred<SaveFilePrepareResult>().promise);
+    await dom.run(async () => {
+      emit({ event: "offered", sessionId: "commit-race", transferId: "t2", summary: { ...offerSummary, bookCount: 5 } });
+      await settle();
+    });
+    expect(bridge.acceptLanSave).toHaveBeenCalledTimes(1);
+    await dom.run(async () => { committing.resolve(commitResult("c")); await committed; await settle(); });
+    // The late commit result records itself without wiping the next batch.
+    expect(latest!.state.status).toBe("receiving");
+    expect(latest!.state.incoming?.bookCount).toBe(5);
     expect(latest!.state.lastResult?.kind).toBe("imported");
+    expect(latest!.state.busy).toBe(true);
+    expect(bridge.acceptLanSave).toHaveBeenCalledTimes(2);
+    expect(bridge.acceptLanSave).toHaveBeenLastCalledWith("commit-race", "t2");
     expect(onImportCommitted).toHaveBeenCalledTimes(1);
+  });
+
+  it("旧批次取消迟到返回时保住下一批 Offer，并按当前编号自动接收", async () => {
+    const emit = await joinPaired("cancel-race");
+    bridge.acceptLanSave
+      .mockResolvedValueOnce(preview("first"))
+      .mockResolvedValueOnce(preview("second"));
+    await dom.run(async () => {
+      emit({ event: "offered", sessionId: "cancel-race", transferId: "t1", summary: offerSummary });
+      await settle();
+    });
+    expect(latest!.state.preview?.jobId).toBe("first");
+    const cancellation = deferred<{ status: "cancelled" }>();
+    bridge.cancelLanSaveTransfer.mockReturnValueOnce(cancellation.promise);
+    let cancelled!: Promise<void>;
+    await dom.run(() => { cancelled = latest!.cancelTransfer(); });
+    await dom.run(async () => {
+      emit({ event: "ready", sessionId: "cancel-race", transferId: "t2", summary: { previousTransferId: "t1" } });
+      emit({ event: "offered", sessionId: "cancel-race", transferId: "t2", summary: offerSummary });
+      await settle();
+    });
+    expect(latest!.state.offer?.bookCount).toBe(3);
+    expect(latest!.state.preview).toBeNull();
+    await dom.run(async () => {
+      cancellation.resolve({ status: "cancelled" });
+      await cancelled;
+      await settle();
+    });
+    expect({
+      status: latest!.state.status,
+      preview: latest!.state.preview?.jobId ?? null,
+      accepts: bridge.acceptLanSave.mock.calls.length,
+      transferId: latest!.state.transferId,
+      lastResult: latest!.state.lastResult?.kind,
+    }).toEqual({ status: "preview", preview: "second", accepts: 2, transferId: "t2", lastResult: "importCancelled" });
+    expect(bridge.acceptLanSave).toHaveBeenLastCalledWith("cancel-race", "t2");
   });
 
   it("预览里取消只取消本批，连接保持；提交已开始时取消显示为等待结果", async () => {

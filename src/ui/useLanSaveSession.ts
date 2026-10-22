@@ -192,21 +192,34 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
     });
   }, []);
 
+  /** Whether the batch an invoke started for still owns the screen. */
+  const ownsScreen = useCallback((transferId: string): boolean => transferIdRef.current === transferId, []);
+
   /**
-   * Status once a batch's own invoke has its result. `ready` may reach JS
-   * before that invoke returns: then the next batch is already open, and only
-   * this batch's own screen is replaced. A new offer that arrived meanwhile
-   * keeps its state.
+   * Applies a batch invoke's result. `ready` may reach JS before that invoke
+   * returns; `ready` already cleared the old screen, so a late result only
+   * records itself as the previous batch and releases busy. Ownership is the
+   * transferId, never the status name: the next batch reuses the same ones.
    */
-  const statusAfterBatch = useCallback((
+  const finishBatch = useCallback((
     transferId: string,
-    ownStatuses: readonly LanSaveSessionStatus[],
-  ): LanSaveSessionStatus => {
-    const current = stateRef.current.status;
-    if (peerEndedRef.current || current === "closed") return "closed";
-    if (transferIdRef.current === transferId) return "settling";
-    return ownStatuses.includes(current) ? "connected" : current;
-  }, []);
+    lastResult: LanBatchResult,
+    ownPatch: Partial<LanSaveSessionState>,
+  ): void => {
+    if (peerEndedRef.current || stateRef.current.status === "closed") {
+      updateState({
+        status: "closed", busy: false, offer: null, incoming: null, preview: null, progress: null, lastResult,
+      });
+    } else if (!ownsScreen(transferId)) {
+      updateState({ busy: false, lastResult });
+    } else {
+      updateState({
+        status: "settling", busy: false, offer: null, incoming: null, preview: null, progress: null,
+        ...ownPatch,
+        lastResult,
+      });
+    }
+  }, [ownsScreen, updateState]);
 
   const resetToIdle = useCallback((): void => {
     // A close acknowledgement does not settle an outstanding IPC result. Keep
@@ -293,12 +306,13 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
         const nextTransferId = event.transferId;
         transferIdRef.current = nextTransferId;
         updateState((current) => {
-          // A batch invoke still owns its screen; it moves on when it returns.
-          if (operationRef.current || current.status === "closed") return { transferId: nextTransferId };
+          if (current.status === "closed") return { transferId: nextTransferId };
+          // The old batch's screen ends here. A still-pending invoke of that
+          // batch keeps busy (one native call at a time) but owns nothing else.
           return {
             transferId: nextTransferId,
             status: "connected",
-            busy: false,
+            busy: operationRef.current !== null,
             offer: null,
             incoming: null,
             progress: null,
@@ -619,18 +633,11 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
         errorCode = result.code;
       }
 
-      updateState({
-        status: statusAfterBatch(transferId, ["sending"]),
-        busy: false,
-        progress: null,
-        lastResult,
-        error,
-        errorCode,
-        notice,
-      });
+      finishBatch(transferId, lastResult, { error, errorCode, notice });
     } catch (error) {
       if (generationRef.current !== generation) return;
       if (cancelWantedRef.current) return;
+      if (!ownsScreen(transferId)) { updateState({ busy: false }); return; }
       const retry = (!invokedNative || lanSaveErrorCode(error) === "busy") && !peerEndedRef.current;
       updateState({
         status: retry ? previous.status : "closed",
@@ -652,7 +659,7 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
         else scheduleAutoAccept();
       }
     }
-  }, [resetToIdle, scheduleAutoAccept, statusAfterBatch, updateState]);
+  }, [resetToIdle, scheduleAutoAccept, finishBatch, ownsScreen, updateState]);
 
   const accept = useCallback(async (): Promise<void> => {
     if (busyRef.current || launchPendingRef.current || cancelWantedRef.current) return;
@@ -732,7 +739,7 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
     try {
       const result = await cancelLanSaveTransfer(sessionId, transferId);
       if (generationRef.current !== generation) return;
-      if (result.status === "too-late") {
+      if (result.status === "too-late" && ownsScreen(transferId)) {
         // The commit was already accepted natively; wait for its real result.
         updateState({
           status: "committing",
@@ -744,17 +751,15 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
         });
         return;
       }
-      updateState({
-        status: statusAfterBatch(transferId, ["receiving", "preview"]),
-        busy: false,
-        offer: null,
-        incoming: null,
-        preview: null,
-        progress: null,
-        lastResult: { kind: "importCancelled" },
-      });
+      if (result.status === "too-late") {
+        // The old commit already finished natively; nothing to show for it.
+        updateState({ busy: false });
+        return;
+      }
+      finishBatch(transferId, { kind: "importCancelled" }, {});
     } catch (error) {
       if (generationRef.current !== generation) return;
+      if (!ownsScreen(transferId) && !peerEndedRef.current) { updateState({ busy: false }); return; }
       const code = lanSaveErrorCode(error);
       const ended = code === "not-found" || peerEndedRef.current;
       updateState({
@@ -773,7 +778,7 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
         else scheduleAutoAccept();
       }
     }
-  }, [resetToIdle, scheduleAutoAccept, statusAfterBatch, updateState]);
+  }, [resetToIdle, scheduleAutoAccept, finishBatch, ownsScreen, updateState]);
 
   const commit = useCallback(async (applyPreferences: boolean): Promise<void> => {
     if (busyRef.current || launchPendingRef.current || cancelWantedRef.current) return;
@@ -814,19 +819,25 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
         cancelWantedRef.current = false;
         closeFinishedRef.current = false;
       }
-      updateState({
-        status: closedMeanwhile ? "closed" : statusAfterBatch(transferId, ["committing"]),
-        busy: false,
-        preview: null,
-        incoming: null,
-        progress: null,
-        lastResult: { kind: "imported", commit: result },
-        error: null,
-        errorCode: null,
-        notice: uiPlural("lan.notice.imported", result.importedBooks.length, { count: result.importedBooks.length }),
-      });
+      const imported: LanBatchResult = { kind: "imported", commit: result };
+      if (closedMeanwhile) {
+        updateState({
+          status: "closed", busy: false, offer: null, incoming: null, preview: null, progress: null,
+          lastResult: imported,
+        });
+      } else {
+        finishBatch(transferId, imported, {
+          error: null,
+          errorCode: null,
+          notice: uiPlural("lan.notice.imported", result.importedBooks.length, { count: result.importedBooks.length }),
+        });
+      }
     } catch (error) {
       if (generationRef.current !== generation) return;
+      if (!ownsScreen(transferId) && !peerEndedRef.current && !cancelWantedRef.current) {
+        updateState({ busy: false });
+        return;
+      }
       const retry = lanSaveErrorCode(error) === "busy" && !peerEndedRef.current && !cancelWantedRef.current;
       updateState({
         status: retry ? "preview" : "closed",
@@ -844,7 +855,7 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
         else scheduleAutoAccept();
       }
     }
-  }, [resetToIdle, scheduleAutoAccept, statusAfterBatch, updateState]);
+  }, [resetToIdle, scheduleAutoAccept, finishBatch, ownsScreen, updateState]);
 
   const close = useCallback(async (): Promise<void> => {
     if (stateRef.current.status === "idle") return;
