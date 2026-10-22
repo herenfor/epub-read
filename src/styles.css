@@ -4856,22 +4856,22 @@ select option {
   min-height: 48px;
 }
 
-/* 手机端文件夹弹窗标题与三个动作分行，宽屏保持原单行结构 */
+/* 手机端文件夹弹窗：标题、本数、更多、关闭同一行；长名两行内截断，动作收进更多面板。 */
 .app[data-mobile-chrome="true"][data-layout="compact"] .shelf-folder-modal-head {
-  flex-wrap: wrap;
-}
-
-.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-folder-modal-title-box {
-  flex: 1 0 100%;
+  padding: 4px 4px 4px 20px;
+  gap: 4px;
 }
 
 .app[data-mobile-chrome="true"][data-layout="compact"] .shelf-folder-modal-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   white-space: normal;
   overflow-wrap: anywhere;
 }
 
 .app[data-mobile-chrome="true"][data-layout="compact"] .shelf-folder-modal-actions {
-  margin-left: auto;
+  gap: 0;
 }
 
 .shelf-folder-modal-body {

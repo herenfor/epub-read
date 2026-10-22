@@ -58,11 +58,10 @@ export function shelfBookActions(ctx: ShelfBookActionContext): ShelfAction[] {
   return actions;
 }
 
-export function shelfFolderActions(ctx: { canExport: boolean; exportDisabled: boolean }): ShelfAction[] {
-  const actions: ShelfAction[] = [
-    { id: "openFolder", group: "read", label: "shelfFolder.open", disabled: false },
-    { id: "renameFolder", group: "organize", label: "shelfFolder.rename", disabled: false },
-  ];
+export function shelfFolderActions(ctx: { canOpen: boolean; canExport: boolean; exportDisabled: boolean }): ShelfAction[] {
+  const actions: ShelfAction[] = [];
+  if (ctx.canOpen) actions.push({ id: "openFolder", group: "read", label: "shelfFolder.open", disabled: false });
+  actions.push({ id: "renameFolder", group: "organize", label: "shelfFolder.rename", disabled: false });
   if (ctx.canExport) actions.push({ id: "exportBook", group: "organize", label: "bookExport.action", disabled: ctx.exportDisabled });
   actions.push({ id: "dissolveFolder", group: "danger", label: "shelfFolder.dissolve", disabled: false });
   return actions;
