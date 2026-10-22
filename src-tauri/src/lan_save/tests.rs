@@ -562,8 +562,23 @@ async fn lan_busy_retries_same_offer_and_preview_disconnect_releases_slot() {
 async fn lan_close_and_dropped_invoke_do_not_cancel_accepted_commit() {
     let sender = TestApp::new("commit-sender");
     let receiver = TestApp::new("commit-receiver");
-    let hash = hex_digest(b"commit book");
-    seed_book(&sender, &hash, b"commit book");
+    // New attachments must pass EPUB inspection before their reading data is kept.
+    // Keep the receiver empty so the final assertion still proves commit completed.
+    let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    for (path, contents) in [
+        ("mimetype", b"application/epub+zip".as_slice()),
+        ("META-INF/container.xml", br#"<container><rootfiles><rootfile full-path="OPS/content.opf"/></rootfiles></container>"#.as_slice()),
+        ("OPS/content.opf", br#"<package><metadata><title>Commit test</title></metadata><manifest><item id="text" href="../Text/chapter.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="text"/></spine></package>"#.as_slice()),
+        ("Text/chapter.xhtml", b"<html><body>Commit test</body></html>".as_slice()),
+    ] {
+        zip.start_file(path, zip::write::SimpleFileOptions::default())
+            .unwrap();
+        std::io::Write::write_all(&mut zip, contents).unwrap();
+    }
+    let bytes = zip.finish().unwrap().into_inner();
+    let hash = hex_digest(&bytes);
+    seed_book(&sender, &hash, &bytes);
+    assert!(snapshot_books(&receiver).is_empty());
     let sh = sender.handle();
     let rh = receiver.handle();
     let log = EventLog::default();
@@ -644,6 +659,11 @@ async fn lan_close_and_dropped_invoke_do_not_cancel_accepted_commit() {
     .await
     .unwrap();
     assert!(snapshot_books(&receiver).contains_key(&hash));
+    let received_book = receiver
+        .root
+        .join("linked-library/books")
+        .join(format!("{hash}.epub"));
+    assert_eq!(std::fs::read(received_book).unwrap(), bytes);
     assert_eq!(
         close(&rh, &host.session_id).await.unwrap().status,
         "already-finished"
