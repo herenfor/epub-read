@@ -1994,7 +1994,8 @@ const ShelfFolderModal = memo(function ShelfFolderModal(props: ShelfFolderModalP
                 : t("shelfFolder.modal.empty.pointer")}
             </div>
           ) : (
-            <div className="shelf-folder-modal-grid">
+            // 与书架共用 .shelf-grid：列数随排布密度，触屏卡片按钮也走同一套样式。
+            <div className="shelf-grid shelf-folder-modal-grid">
               {books.map((entry) => (
                 <ShelfCard
                   key={entry.id}
