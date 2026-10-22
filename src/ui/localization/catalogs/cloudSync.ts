@@ -88,7 +88,7 @@ export const cloudSync = defineMessages("cloudSync", {
   "cloudSync.remote.authentication": "账号或应用密码不对。",
   "cloudSync.remote.permission-denied": "没有访问这个文件夹的权限。",
   "cloudSync.remote.not-found": "服务器上找不到这个文件夹或地址。",
-  "cloudSync.remote.conflict": "云端文件同时被修改，稍后会重试。",
+  "cloudSync.remote.conflict": "云端文件发生冲突，请重新测试连接或稍后手动重试。",
   "cloudSync.remote.locked": "云端文件被锁定，稍后会重试。",
   "cloudSync.remote.rate-limited": "请求太频繁，服务器要求稍后再试。",
   "cloudSync.remote.quota-exceeded": "网盘空间不足。",
@@ -102,5 +102,5 @@ export const cloudSync = defineMessages("cloudSync", {
   "cloudSync.remote.server-error": "服务器出错，稍后会重试。",
   "cloudSync.remote.cancelled": "已取消。",
   "cloudSync.remote.unsupported-sync-version": "云端资料来自更新版本的应用，请先更新本应用。",
-  "cloudSync.remote.cleanupFailed": "测试留下的临时文件没能删除，可以在网盘里手动删除以 .probe 开头的文件夹。",
+  "cloudSync.remote.cleanupFailed": "有临时文件未能清理，请先重试。不要删除正式同步资料。",
 });
