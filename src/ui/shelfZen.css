@@ -244,6 +244,13 @@
   transition: all 0.15s ease;
 }
 
+/* 密度切换是文字按钮：宽度随文字，覆盖触屏的 48px 方形宽度。 */
+.app .shelf-view .shelf-icon-btn-zen.shelf-density-btn {
+  width: auto;
+  padding: 0 12px;
+  font-size: 13px;
+}
+
 @media (hover: hover) {
   .shelf-icon-btn-zen:hover:not(:disabled) {
     background: color-mix(in srgb, var(--fg, #000) 5%, var(--shelf-card-bg, #fff));
@@ -3165,9 +3172,10 @@
 }
 
 /* =========================================================================
- * 平板（触屏、非紧凑）顶栏：搜索框、导入、视图切换、批量选择、筛选、设置
- * 统一为同一高度、圆角和字号。按钮被提到 48px 触控高度后，原先 34px 的
- * 搜索框/筛选和 54px 的视图切换组在同一行里高低不齐。
+ * 平板（触屏、非紧凑）书架控件统一为同一高度、圆角、字号：
+ * 顶栏（搜索框、导入、视图切换、批量选择、筛选、设置）、续读卡的展开/收起、
+ * 状态标签与按文件夹/排序/密度一行。按钮被提到 48px 触控高度后，原先 34px
+ * 的搜索框/筛选、54–56px 的分段组和 8/11/999px 混用的圆角在同一行里高低不齐。
  * ========================================================================= */
 .app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-normal-bar-zen {
   --shelf-topbar-h: calc(48px * var(--ui-touch-comp, 1));
@@ -3221,6 +3229,36 @@
   font-size: 14px;
 }
 
-.app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-normal-bar-zen .shelf-icon-btn-zen {
+.app[data-touch-ui="true"]:not([data-layout="compact"]) :is(.shelf-icon-btn-zen, .shelf-resume-toggle-btn) {
   border-radius: 11px;
+}
+
+.app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-capsule-tabs {
+  box-sizing: border-box;
+  height: calc(48px * var(--ui-touch-comp, 1));
+  min-height: 0;
+  padding: 3px;
+  border-radius: 11px;
+}
+
+.app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-capsule-tab {
+  height: 100%;
+  min-height: 0;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.app[data-touch-ui="true"]:not([data-layout="compact"]) :is(.shelf-folder-dropdown-btn, .shelf-select-btn, .shelf-sort-select-zen) {
+  border-radius: 11px;
+  background-color: var(--shelf-card-bg, #ffffff);
+  font-size: 14px;
+}
+
+.app[data-touch-ui="true"]:not([data-layout="compact"]) :is(.shelf-folder-dropdown-btn, .shelf-select-btn) {
+  padding-inline: 16px 14px;
+}
+
+.app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-view .shelf-icon-btn-zen.shelf-density-btn {
+  padding-inline: 16px;
+  font-size: 14px;
 }

@@ -5001,11 +5001,10 @@ export function ShelfView(props: ShelfViewProps) {
             </div>
 
             <button
-              className="shelf-icon-btn-zen"
+              className="shelf-icon-btn-zen shelf-density-btn"
               type="button"
               onClick={() => setDensity(NEXT_SHELF_DENSITY[density])}
               title={t("shelfMain.density.tip", { current: t(SHELF_DENSITY_LABEL[density]), next: t(SHELF_DENSITY_LABEL[NEXT_SHELF_DENSITY[density]]) })}
-              style={{ width: "auto", padding: "0 12px", fontSize: "13px" }}
             >
               {t(SHELF_DENSITY_LABEL[density])}
             </button>
