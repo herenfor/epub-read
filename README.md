@@ -1,6 +1,6 @@
 # EPUB Reader
 
-[![Latest release](https://img.shields.io/github/v/release/herenfor/epub-read?include_prereleases)](https://github.com/herenfor/epub-read/releases)
+[![Download latest release](.github/readme/release.svg)](https://github.com/herenfor/epub-read/releases/latest)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Android-informational)
 [![License](https://img.shields.io/badge/license-PolyForm%20Strict%201.0.0-lightgrey)](LICENSE)
 
