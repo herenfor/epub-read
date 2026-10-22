@@ -13,7 +13,7 @@ edition = "2021"
 # still pass an explicit edition feature so build.rs can reject mixed builds.
 default = []
 core = []
-ai = ["dep:reqwest", "windows/Win32_Graphics_Dxgi", "windows/Win32_Graphics_Dxgi_Common", "windows/Win32_Graphics_Direct3D", "windows/Win32_Graphics_Direct3D12"]
+ai = ["reqwest/blocking", "windows/Win32_Graphics_Dxgi", "windows/Win32_Graphics_Dxgi_Common", "windows/Win32_Graphics_Direct3D", "windows/Win32_Graphics_Direct3D12"]
 
 [lib]
 name = "epub_reader_lib"
@@ -40,7 +40,8 @@ quick-xml = "0.41"
 zip = { version = "2.4", default-features = false, features = ["deflate"] }
 rusqlite = { version = "0.32", features = ["bundled", "backup"] }
 fs2 = "0.4.3"
-reqwest = { version = "0.13.4", default-features = false, features = ["blocking", "rustls"], optional = true }
+reqwest = { version = "0.13.4", default-features = false, features = ["rustls", "system-proxy"] }
+flate2 = "1"
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }

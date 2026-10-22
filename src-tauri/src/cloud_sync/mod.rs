@@ -1,4 +1,7 @@
-//! WebDAV-independent cloud state planning. No network, database writes or credentials.
+//! Cloud state planning and remote storage. No automatic jobs or database writes.
+pub mod codec;
+mod dav_xml;
+pub mod remote;
 use crate::portable_state::{
     merge_portable_states, select_local_import, valid_canonical_uuid, validate_portable_state,
     PortableStateV3,
