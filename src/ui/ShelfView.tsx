@@ -1113,7 +1113,7 @@ const ShelfResumeStage = memo(function ShelfResumeStage({
 /** Which shelf object a menu is for; identity is the stable id, never a captured entry object. */
 export type ShelfMenuTarget =
   | { kind: "book"; id: string; surface: "grid" | "list" | "folderModal" }
-  | { kind: "folder"; id: string };
+  | { kind: "folder"; id: string; surface?: "folderModal" };
 
 /** How a card asked for its menu. */
 export interface ShelfMenuOpener {
@@ -1885,6 +1885,8 @@ interface ShelfFolderModalProps {
   organization: LibraryOrganization;
   /** Book whose action menu is open, for the trigger's expanded state. */
   menuBookId: string | null;
+  /** The folder's own action menu (phone header) is open. */
+  folderMenuOpen: boolean;
   onClose(): void;
   onOpenBook(id: string): void;
   onRename(folderId: string, currentName: string): void;
@@ -1910,6 +1912,7 @@ const ShelfFolderModal = memo(function ShelfFolderModal(props: ShelfFolderModalP
   const { folder, books, closing, modalRef } = props;
   const closeRef = useRef(props.onClose);
   closeRef.current = props.onClose;
+  const morePressedWith = useRef("");
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent): void => {
@@ -1945,7 +1948,25 @@ const ShelfFolderModal = memo(function ShelfFolderModal(props: ShelfFolderModalP
             <span className="shelf-folder-modal-count">{tn("shelfFolder.modal.count", books.length, { count: books.length })}</span>
           </div>
           <div className="shelf-folder-modal-actions">
-            {props.onExportBooks && (
+            {/* 手机标题与动作同一行：导出/重命名/解散收进与文件夹卡片相同的操作面板。 */}
+            {props.compact && (
+              <button
+                className="shelf-folder-modal-action-btn"
+                type="button"
+                title={t("shelfFolder.options.tip")}
+                aria-label={t("shelfFolder.options", { name: folder.name })}
+                aria-haspopup="menu"
+                aria-expanded={props.folderMenuOpen}
+                onPointerDown={(e) => { morePressedWith.current = e.pointerType; }}
+                onClick={(e) => props.onRequestMenu(
+                  { kind: "folder", id: folder.id, surface: "folderModal" },
+                  buttonMenuOpener(e, morePressedWith.current),
+                )}
+              >
+                <DotsVerticalIcon />
+              </button>
+            )}
+            {!props.compact && props.onExportBooks && (
               <button
                 className="shelf-folder-modal-action-btn"
                 type="button"
@@ -1957,24 +1978,28 @@ const ShelfFolderModal = memo(function ShelfFolderModal(props: ShelfFolderModalP
                 <ExportIcon />
               </button>
             )}
-            <button
-              className="shelf-folder-modal-action-btn"
-              type="button"
-              title={t("shelfFolder.modal.rename")}
-              aria-label={t("shelfFolder.modal.rename")}
-              onClick={() => props.onRename(folder.id, folder.name)}
-            >
-              <EditIcon />
-            </button>
-            <button
-              className="shelf-folder-modal-action-btn danger"
-              type="button"
-              title={t("shelfFolder.dissolve")}
-              aria-label={t("shelfFolder.dissolve")}
-              onClick={() => props.onDissolve(folder.id, folder.name)}
-            >
-              <TrashIcon />
-            </button>
+            {!props.compact && (
+              <>
+                <button
+                  className="shelf-folder-modal-action-btn"
+                  type="button"
+                  title={t("shelfFolder.modal.rename")}
+                  aria-label={t("shelfFolder.modal.rename")}
+                  onClick={() => props.onRename(folder.id, folder.name)}
+                >
+                  <EditIcon />
+                </button>
+                <button
+                  className="shelf-folder-modal-action-btn danger"
+                  type="button"
+                  title={t("shelfFolder.dissolve")}
+                  aria-label={t("shelfFolder.dissolve")}
+                  onClick={() => props.onDissolve(folder.id, folder.name)}
+                >
+                  <TrashIcon />
+                </button>
+              </>
+            )}
             <button
               className="shelf-folder-modal-action-btn"
               type="button"
@@ -4168,6 +4193,7 @@ export function ShelfView(props: ShelfViewProps) {
             </div>
           : folder.name,
         groups: toItems(shelfFolderActions({
+          canOpen: menu.target.surface !== "folderModal",
           canExport: Boolean(props.onExportBooks),
           exportDisabled: bookExportDisabled || count === 0,
         })),
@@ -4204,7 +4230,9 @@ export function ShelfView(props: ShelfViewProps) {
   }, [activeFolders, bookExportDisabled, canOrganize, entriesById, folderBooksMap, menu, menuPending, menuTargetGone, organization, props.busy, props.importActive, props.onExportBooks, props.saveFileActive, props.lanTransferActive, selectionMode, t, thumbnailProvider, tn]);
 
   const openMenuKey = menu && !menuClosing
-    ? (menu.target.kind === "book" ? `${menu.target.surface}:${menu.target.id}` : `folder:${menu.target.id}`)
+    ? (menu.target.kind === "book"
+      ? `${menu.target.surface}:${menu.target.id}`
+      : `${menu.target.surface === "folderModal" ? "folderModalHead" : "folder"}:${menu.target.id}`)
     : null;
 
   /** Hover styling follows the input actually used, so a tap on a hybrid device never leaves a lifted card. */
@@ -5284,6 +5312,7 @@ export function ShelfView(props: ShelfViewProps) {
             organization={organization}
             modalRef={folderModalRef}
             menuBookId={openMenuKey?.startsWith("folderModal:") ? openMenuKey.slice("folderModal:".length) : null}
+            folderMenuOpen={openMenuKey === `folderModalHead:${activeFolderModal.folderId}`}
             onClose={handleCloseFolderModal}
             onOpenBook={props.onOpen}
             onRename={(fId, fName) => setRenameFolderTarget({ id: fId, name: fName })}

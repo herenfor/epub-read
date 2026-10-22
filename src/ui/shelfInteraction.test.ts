@@ -397,6 +397,34 @@ describe("shelf menu and gesture lifecycle", () => {
     }
   });
 
+  it("the phone folder dialog keeps title and actions on one row, its actions in the folder menu", async () => {
+    let back: (() => boolean) | null = null;
+    const onExportBooks = vi.fn();
+    const shelf = await mount({
+      compact: true,
+      organization: folderOrganization(["b1"]),
+      onExportBooks,
+      registerBackHandler: (handler) => { back = handler; },
+    });
+    try {
+      await shelf.dom.click(shelf.dom.container.querySelector(".shelf-folder-card")!);
+      const actions = [...shelf.dom.container.querySelectorAll<HTMLButtonElement>(".shelf-folder-modal-head button")];
+      expect(actions.map((button) => button.getAttribute("aria-label"))).toEqual(["文件夹选项：资料", "关闭文件夹"]);
+      await shelf.dom.click(actions[0]);
+      const labels = [...shelf.menu()!.querySelectorAll<HTMLButtonElement>("button")].map((button) => button.textContent);
+      expect(labels).toEqual(expect.arrayContaining(["重命名", "导出书籍", "解散文件夹"]));
+      expect(labels).not.toContain("打开文件夹");
+      expect(actions[0].getAttribute("aria-expanded")).toBe("true");
+      // Back closes the menu first, then the dialog.
+      await shelf.dom.run(() => { expect(back?.()).toBe(true); });
+      await shelf.dom.run(() => { vi.advanceTimersByTime(1000); });
+      expect(shelf.menu()).toBeNull();
+      expect(shelf.dom.container.querySelector(".shelf-folder-modal")).not.toBeNull();
+    } finally {
+      await shelf.dom.dispose();
+    }
+  });
+
   it("scrolling during a press withdraws it: no selection, no open, no press state left", async () => {
     const shelf = await mount();
     try {
