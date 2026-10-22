@@ -8,6 +8,7 @@
   "shelf.import.books.detail": "Choose one or more EPUB files",
   "shelf.import.folder": "Import Folder",
   "shelf.import.folder.detail": "Automatically organize into folders by directory",
+  "shelf.import.lan.detail": "Scan a QR code to swap books and reading data with another device",
   "shelf.import.dropHint": "You can also drag EPUB files or folders onto the library; drop on a folder card to put books straight into it",
   "shelf.cover.initialFallback": "B",
   "shelf.time.justNow": "Just now",

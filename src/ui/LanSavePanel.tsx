@@ -7,6 +7,7 @@ import { openAndroidAppSettings, scanAndroidQrCode } from "../platform/androidLa
 import { listLanSaveAddresses, type LanAddressOption } from "../platform/lanSaveNativeBridge";
 import type { UseLanSaveSessionResult } from "./useLanSaveSession";
 import {
+  formatLanBytes,
   lanErrorText,
   lanOfferDetail,
   lanOfferTitle,
@@ -90,6 +91,21 @@ function ResultView(props: { tone: ResultTone; title: string; detail: string; ac
   );
 }
 
+/** Last batch's outcome, a slim strip above the connected page. */
+function BatchBanner(props: { tone: ResultTone; title: string; detail: string }) {
+  return (
+    <div className={`lan-batch tone-${props.tone}`} role="status">
+      <span className="lan-batch-icon">
+        {props.tone === "success" ? Icon.check : props.tone === "info" ? Icon.info : Icon.alert}
+      </span>
+      <div>
+        <strong>{props.title}</strong>
+        <p>{props.detail}</p>
+      </div>
+    </div>
+  );
+}
+
 function Spinner() {
   return <span className="lan-spinner" aria-hidden />;
 }
@@ -121,6 +137,15 @@ export function LanSavePanel(props: LanSavePanelProps) {
   }, [props.onClose]);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [qrFailed, setQrFailed] = useState(false);
+  // Windows cannot scan, so its only first step is showing the QR code: start
+  // hosting as soon as the panel opens on the start page (once per open).
+  const [autoHost, setAutoHost] = useState(false);
+  const openStatusRef = useRef(state.status);
+  openStatusRef.current = state.status;
+
+  useEffect(() => {
+    setAutoHost(props.open && !props.isAndroid && openStatusRef.current === "idle");
+  }, [props.open, props.isAndroid]);
 
   useEffect(() => {
     if (!props.open) return;
@@ -257,6 +282,21 @@ export function LanSavePanel(props: LanSavePanelProps) {
     void props.session.close();
   }, [clearLocalError, props.session]);
 
+  /** After the connection ended: a computer goes straight back to its QR code. */
+  const handleConnectAgain = useCallback((): void => {
+    if (!props.isAndroid) setAutoHost(true);
+    handleReconnect();
+  }, [handleReconnect, props.isAndroid]);
+
+  useEffect(() => {
+    if (!autoHost || !props.open || props.closing) return;
+    if (state.status !== "idle" || state.busy || state.closing) return;
+    setAutoHost(false);
+    clearLocalError();
+    stepRef.current = "host";
+    void props.session.startHost(bindIp.trim() || undefined);
+  }, [autoHost, bindIp, clearLocalError, props.closing, props.open, props.session, state.busy, state.closing, state.status]);
+
   if (!props.open) return null;
 
   if (state.preview) {
@@ -264,8 +304,8 @@ export function LanSavePanel(props: LanSavePanelProps) {
       <SaveFileImportPreview
         preview={state.preview}
         sourceLabel={t("lanPanel.sourceLabel")}
-        canceling={state.closing}
-        onCancel={closePanel}
+        canceling={state.closing || state.busy}
+        onCancel={() => void props.session.cancelTransfer()}
         onConfirm={(applyPreferences) => void props.session.commit(applyPreferences)}
       />
     );
@@ -402,13 +442,55 @@ export function LanSavePanel(props: LanSavePanelProps) {
         <button type="button" className="lan-secondary" disabled={!state.pairingInfo} onClick={() => void handleCopy()}>
           {copied ? t("lanPanel.copied") : t("lanPanel.copy")}
         </button>
-        <button type="button" className="lan-ghost" onClick={handleReconnect}>{t("lanPanel.cancel")}</button>
+        <button type="button" className="lan-ghost" onClick={handleReconnect}>
+          {props.isAndroid ? t("lanPanel.cancel") : t("lanPanel.otherWays")}
+        </button>
       </div>
     </div>
   );
 
+  const renderBatchResult = () => {
+    const result = state.lastResult;
+    if (!result) return null;
+    switch (result.kind) {
+      case "sent": {
+        const imported = result.send.remoteCommit?.importedBookCount;
+        const skipped = result.send.skippedBooks.length;
+        const skippedNote = skipped > 0 ? tn("lanPanel.skipped", skipped, { count: skipped }) : "";
+        return (
+          <BatchBanner
+            tone="success"
+            title={t("lanPanel.sent.title")}
+            detail={`${imported !== undefined ? tn("lanPanel.sent.imported", imported, { count: imported }) : t("lanPanel.sent.received")}${skippedNote}`}
+          />
+        );
+      }
+      case "sentUnconfirmed":
+        return <BatchBanner tone="info" title={t("lanPanel.unconfirmed.title")} detail={t("lanPanel.unconfirmed.detail")} />;
+      case "sendCancelled":
+        return <BatchBanner tone="info" title={t("lanPanel.notSent.title")} detail={t("lanPanel.notSent.detail")} />;
+      case "sendFailed":
+        return <BatchBanner tone="error" title={t("lanPanel.failed.title")} detail={lanErrorText(result.send.code, "send")} />;
+      case "imported": {
+        const imported = result.commit.importedBooks.length;
+        const skippedNote = importSkippedNotice(result.commit.skippedBookCount, result.commit.skippedBooks);
+        return (
+          <BatchBanner
+            tone="success"
+            title={t("lanPanel.imported.title")}
+            detail={(imported > 0 ? tn("lanPanel.imported.books", imported, { count: imported }) : t("lanPanel.imported.data")) + (skippedNote ? t("notice.sep") + skippedNote : "")}
+          />
+        );
+      }
+      case "importCancelled":
+        return <BatchBanner tone="info" title={t("lanPanel.importCancelled.title")} detail={t("lanPanel.importCancelled.detail")} />;
+    }
+  };
+
+  const settling = state.status === "settling";
   const renderConnected = () => (
     <>
+      {renderBatchResult()}
       {renderBanner()}
       <section className="lan-send" aria-label={t("lanPanel.send.region")}>
         <div className="lan-send-group">
@@ -463,11 +545,14 @@ export function LanSavePanel(props: LanSavePanelProps) {
         </div>
       </section>
       <div className="lan-send-footer">
-        <button type="button" className="lan-primary wide" disabled={state.busy} onClick={handleSend}>
+        <button type="button" className="lan-primary wide" disabled={state.busy || settling} onClick={handleSend}>
           {Icon.send}
           <span>{t("lanPanel.send")}</span>
         </button>
-        <p className="lan-waiting"><span className="lan-pulse" aria-hidden />{t("lanPanel.waitPeer")}</p>
+        <p className="lan-waiting">
+          <span className="lan-pulse" aria-hidden />
+          {settling ? t("lanPanel.settling") : t("lanPanel.waitPeer")}
+        </p>
       </div>
     </>
   );
@@ -481,8 +566,8 @@ export function LanSavePanel(props: LanSavePanelProps) {
         <p>{lanOfferDetail(offer)}</p>
         <p className="lan-hint">{t("lanPanel.offer.hint")}</p>
         <div className="lan-actions stacked">
-          <button type="button" className="lan-primary" onClick={handleAccept}>{t("lanPanel.accept")}</button>
-          <button type="button" className="lan-secondary" onClick={() => void props.session.decline()}>{t("lanPanel.decline")}</button>
+          <button type="button" className="lan-primary" disabled={state.busy} onClick={handleAccept}>{t("lanPanel.accept")}</button>
+          <button type="button" className="lan-secondary" disabled={state.busy} onClick={() => void props.session.cancelTransfer()}>{t("lanPanel.decline")}</button>
         </div>
       </div>
     );
@@ -494,9 +579,17 @@ export function LanSavePanel(props: LanSavePanelProps) {
       : state.status === "receiving" ? t("lanPanel.progress.receiving")
         : state.status === "preparing" ? t("lanPanel.progress.checking")
           : t("lanPanel.progress.writing");
+    const incoming = state.status === "sending" ? null : state.incoming;
     return (
       <div className="lan-progress" role="status" aria-live="polite">
         <h3>{title}</h3>
+        {incoming && (
+          <p className="lan-hint">
+            {incoming.bookCount > 0
+              ? tn("lanPanel.incoming.books", incoming.bookCount, { count: incoming.bookCount, size: formatLanBytes(incoming.archiveBytes) })
+              : t("lanPanel.incoming.settings", { size: formatLanBytes(incoming.archiveBytes) })}
+          </p>
+        )}
         <div
           className={`lan-bar${view.percent === null ? " indeterminate" : ""}`}
           role="progressbar"
@@ -519,67 +612,6 @@ export function LanSavePanel(props: LanSavePanelProps) {
     );
   };
 
-  const reconnectActions = (primary: "done" | "reconnect") => (
-    <>
-      {primary === "done" ? (
-        <>
-          <button type="button" className="lan-primary" onClick={closePanel}>{t("lanPanel.done")}</button>
-          <button type="button" className="lan-secondary" onClick={handleReconnect}>{t("lanPanel.again")}</button>
-        </>
-      ) : (
-        <>
-          <button type="button" className="lan-primary" onClick={handleReconnect}>{t("lanPanel.reconnect")}</button>
-          <button type="button" className="lan-secondary" onClick={closePanel}>{t("lanPanel.close")}</button>
-        </>
-      )}
-    </>
-  );
-
-  const renderSendResult = () => {
-    const result = state.sendResult;
-    const skipped = result?.skippedBooks.length ?? 0;
-    const skippedNote = skipped > 0 ? tn("lanPanel.skipped", skipped, { count: skipped }) : "";
-    if (state.status === "sendComplete") {
-      const imported = state.remoteCommit?.importedBookCount;
-      return (
-        <ResultView
-          tone="success"
-          title={t("lanPanel.sent.title")}
-          detail={`${imported !== undefined ? tn("lanPanel.sent.imported", imported, { count: imported }) : t("lanPanel.sent.received")}${skippedNote}`}
-          actions={reconnectActions("done")}
-        />
-      );
-    }
-    if (state.status === "sendUnconfirmed") {
-      return (
-        <ResultView
-          tone="info"
-          title={t("lanPanel.unconfirmed.title")}
-          detail={t("lanPanel.unconfirmed.detail")}
-          actions={reconnectActions("done")}
-        />
-      );
-    }
-    if (state.status === "sendCancelled") {
-      return (
-        <ResultView
-          tone="info"
-          title={t("lanPanel.notSent.title")}
-          detail={t("lanPanel.notSent.detail")}
-          actions={reconnectActions("reconnect")}
-        />
-      );
-    }
-    return (
-      <ResultView
-        tone="error"
-        title={t("lanPanel.failed.title")}
-        detail={nativeError ?? lanErrorText(null, "send")}
-        actions={reconnectActions("reconnect")}
-      />
-    );
-  };
-
   const renderBody = () => {
     if (state.status === "startingHost" || state.status === "hostReady") return renderHost();
     if (state.status === "joining") {
@@ -595,34 +627,25 @@ export function LanSavePanel(props: LanSavePanelProps) {
     if (state.status === "sending" || state.status === "receiving" || state.status === "preparing" || state.status === "committing") {
       return renderProgress();
     }
-    if (state.status === "sendComplete" || state.status === "sendUnconfirmed" || state.status === "sendCancelled" || state.status === "sendFailed") {
-      return renderSendResult();
-    }
-    if (state.status === "commitComplete") {
-      const imported = state.localCommit?.importedBooks.length ?? 0;
-      const skippedNote = state.localCommit
-        ? importSkippedNotice(state.localCommit.skippedBookCount, state.localCommit.skippedBooks)
-        : "";
-      return (
-        <ResultView
-          tone="success"
-          title={t("lanPanel.imported.title")}
-          detail={(imported > 0 ? tn("lanPanel.imported.books", imported, { count: imported }) : t("lanPanel.imported.data")) + (skippedNote ? t("notice.sep") + skippedNote : "")}
-          actions={reconnectActions("done")}
-        />
-      );
-    }
     if (state.status === "closed") {
       return (
-        <ResultView
-          tone={nativeError ? "error" : "info"}
-          title={t("lanPanel.closed.title")}
-          detail={nativeError ?? t("lanPanel.closed.detail")}
-          actions={reconnectActions("reconnect")}
-        />
+        <>
+          {renderBatchResult()}
+          <ResultView
+            tone={nativeError ? "error" : "info"}
+            title={t("lanPanel.closed.title")}
+            detail={nativeError ?? t("lanPanel.closed.detail")}
+            actions={(
+              <>
+                <button type="button" className="lan-primary" onClick={handleConnectAgain}>{t("lanPanel.reconnect")}</button>
+                <button type="button" className="lan-secondary" onClick={closePanel}>{t("lanPanel.close")}</button>
+              </>
+            )}
+          />
+        </>
       );
     }
-    if (state.status === "connected") return renderConnected();
+    if (state.status === "connected" || settling) return renderConnected();
     return renderStart();
   };
 
@@ -639,13 +662,13 @@ export function LanSavePanel(props: LanSavePanelProps) {
       <header className="lan-head">
         <div className="lan-head-text">
           <h2>{t("lanPanel.title")}</h2>
-          {state.status === "connected" ? (
+          {state.status === "connected" || settling ? (
             <p className="lan-head-status"><span className="lan-status-dot" aria-hidden="true" />{t("lanPanel.connected")}</p>
           ) : (
             <p>{subtitle}</p>
           )}
         </div>
-        {state.status === "connected" && (
+        {(state.status === "connected" || settling) && (
           <button type="button" className="lan-head-pill" onClick={handleReconnect}>{t("lanPanel.disconnect")}</button>
         )}
         <button type="button" className="lan-icon-btn lan-close" onClick={closePanel} aria-label={t("lanPanel.close.label")}>
