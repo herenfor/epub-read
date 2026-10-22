@@ -19,6 +19,9 @@ pub(crate) mod transfer_policy;
 mod portable_state_commands;
 mod save_file;
 mod book_export;
+// S1 is pure planning only; S3 will activate commands and persistence.
+#[allow(dead_code)]
+mod cloud_sync;
 
 #[cfg(feature = "ai")]
 macro_rules! configure_invoke_handler {
