@@ -243,7 +243,7 @@ impl Server {
 fn space(id: &str) -> Space {
     Space {
         format: super::super::SPACE_FORMAT.into(),
-        format_version: 1,
+        format_version: super::super::FORMAT_VERSION,
         space_id: id.into(),
         created_at_ms: 1,
     }

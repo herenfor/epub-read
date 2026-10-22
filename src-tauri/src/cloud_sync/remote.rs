@@ -1,7 +1,7 @@
 //! Provider-neutral WebDAV I/O for bounded sync metadata, not whole EPUBs.
 use super::{codec, dav_xml, parse_space, Space, SyncError};
 use reqwest::{header, Client, Method, RequestBuilder, Response, StatusCode, Url};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::time::Duration;
 use tokio::sync::watch;
@@ -102,7 +102,7 @@ impl Cancel {
         }
     }
 
-    async fn cancelled(&self) {
+    pub(super) async fn cancelled(&self) {
         let mut receiver = self.0.subscribe();
         let _ = receiver.wait_for(|value| *value).await;
     }
@@ -112,6 +112,10 @@ impl Cancel {
 pub struct RemotePath(Vec<String>);
 
 impl RemotePath {
+    pub fn as_relative(&self) -> String {
+        self.0.join("/")
+    }
+
     pub fn root() -> Self {
         Self(Vec::new())
     }
@@ -139,6 +143,7 @@ impl RemotePath {
     }
 }
 
+#[derive(Clone)]
 pub struct Credentials {
     pub username: String,
     pub app_password: String,
@@ -461,6 +466,10 @@ impl SyncRemote for WebDavRemote {
         overwrite: bool,
         cancel: &Cancel,
     ) -> Result<(), RemoteError> {
+        #[cfg(test)]
+        if std::env::var_os("EPUB_READER_WEBDAV_TEST_TRACE").is_some() {
+            println!("webdav_move_overwrite={overwrite}");
+        }
         if from.0.is_empty() || to.0.is_empty() {
             return Err(RemoteError::new(RemoteErrorCode::InvalidConfig));
         }
@@ -518,7 +527,7 @@ impl SyncRemote for WebDavRemote {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Capabilities {
     pub move_file: bool,
@@ -721,11 +730,25 @@ pub async fn publish(
     let mut parent = path.clone();
     parent.0.pop();
     let temp = parent.child(&random_name(".upload-")?)?;
+    publish_prepared(remote, &temp, path, bytes, overwrite, cancel).await
+}
+
+/// The caller owns this staging path. A fixed installation/nonce-scoped path
+/// bounds orphan space even if the application is killed during an upload.
+pub async fn publish_prepared(
+    remote: &impl SyncRemote,
+    temp: &RemotePath,
+    path: &RemotePath,
+    bytes: Vec<u8>,
+    overwrite: bool,
+    cancel: &Cancel,
+) -> Result<(), RemoteError> {
+    if temp.0.is_empty() || path.0.is_empty() || temp == path {
+        return Err(RemoteError::new(RemoteErrorCode::InvalidConfig));
+    }
     let result = async {
-        remote
-            .put(&temp, bytes, WriteCondition::Any, cancel)
-            .await?;
-        remote.move_file(&temp, path, overwrite, cancel).await
+        remote.put(temp, bytes, WriteCondition::Any, cancel).await?;
+        remote.move_file(temp, path, overwrite, cancel).await
     }
     .await;
     // Even PUT timeout can leave a partial temporary file. Only our random name
@@ -734,7 +757,7 @@ pub async fn publish(
         Ok(()) => Ok(()), // The successful MOVE already consumed our source.
         Err(mut e) => {
             e.cleanup_failed = remote
-                .delete(&temp, false, &Cancel::default())
+                .delete(temp, false, &Cancel::default())
                 .await
                 .is_err();
             Err(e)

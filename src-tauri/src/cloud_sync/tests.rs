@@ -299,9 +299,9 @@ fn corrupt_files_are_isolated_but_future_versions_and_own_identity_block_writes(
         ),
         Err(SyncError::InvalidData)
     ));
-    let mut space = json!({ "format": SPACE_FORMAT, "formatVersion": 1, "spaceId": SPACE, "createdAtMs": 1000 });
+    let mut space = json!({ "format": SPACE_FORMAT, "formatVersion": FORMAT_VERSION, "spaceId": SPACE, "createdAtMs": 1000 });
     assert!(parse_space(&serde_json::to_vec(&space).unwrap()).is_ok());
-    space["formatVersion"] = json!(2);
+    space["formatVersion"] = json!(FORMAT_VERSION + 1);
     space["newField"] = json!(true);
     assert_eq!(
         parse_space(&serde_json::to_vec(&space).unwrap()),

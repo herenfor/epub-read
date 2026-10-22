@@ -19,7 +19,7 @@ pub(crate) mod transfer_policy;
 mod portable_state_commands;
 mod save_file;
 mod book_export;
-// Planning and remote I/O are dormant until S3 activates commands/persistence.
+// Cloud service remains disconnected until the user confirms a connection.
 #[allow(dead_code)]
 mod cloud_sync;
 
@@ -28,6 +28,16 @@ macro_rules! configure_invoke_handler {
     ($builder:expr) => {
         $builder.invoke_handler(tauri::generate_handler![
             app_update::app_update_install_kind,
+            cloud_sync::commands::cloud_sync_get_status,
+            cloud_sync::commands::cloud_sync_test_connection,
+            cloud_sync::commands::cloud_sync_connect,
+            cloud_sync::commands::cloud_sync_trigger,
+            cloud_sync::commands::cloud_sync_set_context,
+            cloud_sync::commands::cloud_sync_cancel,
+            cloud_sync::commands::cloud_sync_disconnect,
+            cloud_sync::commands::cloud_sync_reset_identity,
+            cloud_sync::commands::cloud_sync_devices,
+            cloud_sync::commands::cloud_sync_cloud_books,
             linked_library::linked_library_import_paths,
             linked_library::linked_library_list_records,
             linked_library::linked_library_import_documents,
@@ -173,6 +183,16 @@ macro_rules! configure_invoke_handler {
     ($builder:expr) => {
         $builder.invoke_handler(tauri::generate_handler![
             app_update::app_update_install_kind,
+            cloud_sync::commands::cloud_sync_get_status,
+            cloud_sync::commands::cloud_sync_test_connection,
+            cloud_sync::commands::cloud_sync_connect,
+            cloud_sync::commands::cloud_sync_trigger,
+            cloud_sync::commands::cloud_sync_set_context,
+            cloud_sync::commands::cloud_sync_cancel,
+            cloud_sync::commands::cloud_sync_disconnect,
+            cloud_sync::commands::cloud_sync_reset_identity,
+            cloud_sync::commands::cloud_sync_devices,
+            cloud_sync::commands::cloud_sync_cloud_books,
             linked_library::linked_library_import_paths,
             linked_library::linked_library_list_records,
             linked_library::linked_library_import_documents,
@@ -317,6 +337,7 @@ pub fn run() {
         .manage(portable_state_commands::PortableStateManager::default())
         .manage(save_file::SaveFileManager::default())
         .manage(lan_save::LanSaveManager::default())
+        .manage(cloud_sync::commands::CloudSyncManager::default())
         .manage(ai::AiState::default())
         .setup(|app| {
             #[cfg(windows)]
@@ -376,6 +397,7 @@ pub fn run() {
         .run(|app, event| {
             if matches!(&event, tauri::RunEvent::Exit) {
                 lan_save::shutdown(app);
+                cloud_sync::commands::shutdown(app);
                 linked_library::close_all_native_archives(app);
                 return;
             }
@@ -394,6 +416,7 @@ pub fn run() {
             } = &event
             {
                 lan_save::shutdown(app);
+                cloud_sync::commands::shutdown(app);
             }
         });
 }
