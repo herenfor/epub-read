@@ -102,8 +102,11 @@ describe("第三步补修：书架触摸长按与子菜单 Back", () => {
       const row = [...dom.container.querySelectorAll(".shelf-settings-row")]
         .find((item) => item.textContent?.includes("数据与备份")) as HTMLElement;
       await dom.click(row);
-      expect(dom.container.querySelector(".shelf-settings-sheet h2")?.textContent).toBe("数据与备份");
+      // 设置首页一直在叠层底部，分类页压在其上；离场中的分类页不算当前页。
+      const topPage = () => dom.container.querySelector(".shelf-settings-sheet.is-pushed:not(.is-leaving) h2")?.textContent;
+      expect(topPage()).toBe("数据与备份");
       await dom.run(() => { expect(back?.()).toBe(true); });
+      expect(topPage()).toBeUndefined();
       expect(dom.container.querySelector(".shelf-settings-sheet h2")?.textContent).toBe("设置");
       await dom.run(() => { expect(back?.()).toBe(true); });
       expect(dom.container.querySelector(".shelf-settings-layer")?.className).toContain("is-closing");
@@ -281,18 +284,26 @@ describe("第三步补修：书架触摸长按与子菜单 Back", () => {
       const catItems = dom.container.querySelectorAll(".shelf-category-menu-item");
       expect(catItems.length).toBe(5);
 
-      // 3. 集中式文件夹单下拉作为常驻入口；消除重复常驻摘要栏，支持从菜单展开卡片
+      // 3. 文件夹下拉：默认排法“按文件夹”在最上，平铺的“全部书籍”其次，再列各文件夹
       const folderBtn = dom.container.querySelector(".shelf-folder-dropdown-btn") as HTMLButtonElement;
       expect(folderBtn).not.toBeNull();
-      expect(folderBtn.textContent).toContain("文件夹 (1)");
-      expect(dom.container.querySelector(".shelf-folder-summary-rail")).toBeNull();
-
+      expect(folderBtn.textContent).toContain("按文件夹");
       await dom.click(folderBtn);
-      const expandItem = [...dom.container.querySelectorAll(".shelf-folder-menu-item")]
-        .find((item) => item.textContent?.includes("在书架展开文件夹卡片")) as HTMLElement;
-      expect(expandItem).not.toBeNull();
-      await dom.click(expandItem);
+      const menuItems = [...dom.container.querySelectorAll(".shelf-folder-menu-item")].map((item) => item.textContent ?? "");
+      expect(menuItems[0]).toContain("按文件夹");
+      expect(menuItems[1]).toContain("全部书籍");
+      expect(menuItems[2]).toContain("名著");
+      await dom.click(folderBtn);
+
+      // 根层默认展开文件夹卡片；收起后摘要栏仍在，可再展开
       expect(dom.container.querySelector(".shelf-folder-summary-rail.expanded")).not.toBeNull();
+      expect(dom.container.querySelector(".shelf-folder-card")).not.toBeNull();
+      const toggle = dom.container.querySelector(".shelf-folder-summary-toggle-btn") as HTMLButtonElement;
+      await dom.click(toggle);
+      expect(dom.container.querySelector(".shelf-folder-card")).toBeNull();
+      expect(dom.container.querySelector(".shelf-folder-summary-rail:not(.expanded)")).not.toBeNull();
+      expect(toggle.getAttribute("aria-expanded")).toBe("false");
+      await dom.click(toggle);
       expect(dom.container.querySelector(".shelf-folder-card")).not.toBeNull();
 
       // 4. 外部右轨移除
@@ -313,6 +324,29 @@ describe("第三步补修：书架触摸长按与子菜单 Back", () => {
       expect(settings?.textContent).not.toContain("批量选择");
     } finally {
       await dom.dispose();
+    }
+  });
+
+  it("手机列表的占位行不跨列，固定布局不会凭空多出被隐去的列", async () => {
+    const store = new Map([["epub_shelf_view_mode", "list"]]);
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => { store.set(key, value); },
+      removeItem: (key: string) => { store.delete(key); },
+    });
+    const dom = createReactDomHarness();
+    try {
+      await dom.render(createElement(ShelfView, {
+        ...makeProps([makeEntry("b1", "爱丽丝漫游仙境"), makeEntry("b2", "小王子")]),
+        compact: true,
+      }));
+      const spacers = [...dom.container.querySelectorAll(".shelf-table tbody tr[aria-hidden='true'] > td")];
+      expect(spacers.length).toBeGreaterThan(0);
+      for (const cell of spacers) expect(cell.getAttribute("colspan")).toBeNull();
+      expect(dom.container.querySelectorAll(".shelf-table tbody tr[data-shelf-target='book']").length).toBe(2);
+    } finally {
+      await dom.dispose();
+      vi.unstubAllGlobals();
     }
   });
 });

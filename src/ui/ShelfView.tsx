@@ -2839,9 +2839,14 @@ export function ShelfView(props: ShelfViewProps) {
   // Two frames after mount the shelf has painted; warm-ups start only then.
   const [shelfPainted, setShelfPainted] = useState(false);
   useEffect(() => {
+    const frames = typeof window.requestAnimationFrame === "function";
+    const schedule = frames
+      ? window.requestAnimationFrame
+      : ((callback: FrameRequestCallback) => window.setTimeout(() => callback(Date.now()), 0));
+    const cancel = frames ? window.cancelAnimationFrame : window.clearTimeout;
     let second = 0;
-    const first = requestAnimationFrame(() => { second = requestAnimationFrame(() => setShelfPainted(true)); });
-    return () => { cancelAnimationFrame(first); cancelAnimationFrame(second); };
+    const first = schedule(() => { second = schedule(() => setShelfPainted(true)); });
+    return () => { cancel(first); cancel(second); };
   }, []);
   const updateDot = useAppUpdateDot();
   const [settingsSection, setSettingsSection] = useState<ShelfSettingsSection | undefined>(undefined);
@@ -2897,7 +2902,8 @@ export function ShelfView(props: ShelfViewProps) {
     : t("shelfMain.empty.hint.desktop");
   const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
   const categoryDropdownRef = useRef<HTMLDivElement | null>(null);
-  const [folderPrefixExpanded, setFolderPrefixExpanded] = useState(false);
+  // 手机网格根层默认展开文件夹卡片；收起后摘要栏仍在，可随时再展开。
+  const [folderPrefixExpanded, setFolderPrefixExpanded] = useState(true);
 
   const [folderActiveMoreOpen, setFolderActiveMoreOpen] = useState(false);
   const folderActiveMoreRef = useRef<HTMLDivElement | null>(null);
@@ -3338,23 +3344,13 @@ export function ShelfView(props: ShelfViewProps) {
     return sortShelfFolders(matched, folderBooksMap, sort);
   }, [scope, statusTab, activeFolders, query, folderBooksMap, sort]);
 
-  // 展开的文件夹卡片只是内容状态：文件夹弹窗盖在上面时它不参与返回链，返回先关弹窗。
-  useShelfSubmenuBack(
-    isCompactMobile && viewMode === "grid" && scope.type === "root" && visibleFolders.length > 0 && folderPrefixExpanded &&
-      activeFolderModal === null,
-    () => setFolderPrefixExpanded(false),
-    {
-      registerSubmenuBackHandler,
-      onSubmenuBackActiveChange: reportSubmenuBackActive,
-    },
-  );
-
   const virtualizer = useShelfVirtualizer(
     shelfViewRef,
     visible.length,
     viewMode,
     density,
-    visibleFolders.length,
+    // 收起的文件夹卡片不占位：按实际画出的张数重测书籍区起点。
+    isCompactMobile && viewMode === "grid" && !folderPrefixExpanded ? 0 : visibleFolders.length,
     40
   );
 
@@ -4689,35 +4685,46 @@ export function ShelfView(props: ShelfViewProps) {
               <span className="shelf-folder-dropdown-label" title={currentFolder?.name}>
                 {scope.type === "folder"
                   ? currentFolder?.name ?? t("shelfMain.folders.fallback")
-                  : t("shelfMain.folders.count", { count: activeFolders.length })}
+                  : scope.type === "all"
+                    ? t("shelfMain.folders.flat")
+                    : t("shelfMain.folders.byFolder")}
               </span>
               <ChevronDownIcon />
             </button>
             {folderMenuOpen && (
               <div className="shelf-folder-popover-menu">
+                {/* 两种书架排法：默认的按文件夹在上，不分文件夹的平铺在下。 */}
                 <button
-                  className={`shelf-folder-menu-item${scope.type === "all" ? " selected" : ""}`}
-                  type="button"
-                  onClick={() => {
-                    setScope({ type: "all" });
-                    setFolderMenuOpen(false);
-                  }}
-                >
-                  <span>{t("shelfMain.folders.all")}</span>
-                  <span className="shelf-capsule-count">{props.entries.length}</span>
-                </button>
-                <button
-                  className={`shelf-folder-menu-item${scope.type === "root" ? " selected" : ""}`}
+                  className={`shelf-folder-menu-item shelf-folder-menu-mode${scope.type === "root" ? " selected" : ""}`}
                   type="button"
                   onClick={() => {
                     setScope({ type: "root" });
                     setFolderMenuOpen(false);
                   }}
                 >
-                  <span>{t("shelfMain.folders.unclassified")}</span>
-                  <span className="shelf-capsule-count">{unclassifiedBooks.length}</span>
+                  <span className="shelf-folder-menu-mode-text">
+                    <span>{t("shelfMain.folders.byFolder")}</span>
+                    <small>{t("shelfMain.folders.byFolder.detail")}</small>
+                  </span>
+                </button>
+                <button
+                  className={`shelf-folder-menu-item shelf-folder-menu-mode${scope.type === "all" ? " selected" : ""}`}
+                  type="button"
+                  onClick={() => {
+                    setScope({ type: "all" });
+                    setFolderMenuOpen(false);
+                  }}
+                >
+                  <span className="shelf-folder-menu-mode-text">
+                    <span>{t("shelfMain.folders.flat")}</span>
+                    <small>{t("shelfMain.folders.flat.detail")}</small>
+                  </span>
+                  <span className="shelf-capsule-count">{props.entries.length}</span>
                 </button>
                 <div className="shelf-folder-menu-divider" />
+                {activeFolders.length > 0 && (
+                  <div className="shelf-folder-menu-caption">{t("shelfMain.folders.open")}</div>
+                )}
                 {activeFolders.map((f) => {
                   const count = (folderBooksMap.get(f.id) ?? []).length;
                   const isCurrent = scope.type === "folder" && scope.folderId === f.id;
@@ -4736,22 +4743,6 @@ export function ShelfView(props: ShelfViewProps) {
                     </button>
                   );
                 })}
-                {isCompactMobile && viewMode === "grid" && scope.type === "root" && visibleFolders.length > 0 && (
-                  <>
-                    <div className="shelf-folder-menu-divider" />
-                    <button
-                      className="shelf-folder-menu-item"
-                      type="button"
-                      onClick={() => {
-                        setFolderPrefixExpanded((prev) => !prev);
-                        setFolderMenuOpen(false);
-                      }}
-                    >
-                      <FolderIcon />
-                      <span>{folderPrefixExpanded ? t("shelfMain.folders.collapseCards") : t("shelfMain.folders.expandCards")}</span>
-                    </button>
-                  </>
-                )}
                 <div className="shelf-folder-menu-divider" />
                 <button
                   className="shelf-folder-menu-new-btn"
@@ -5090,9 +5081,11 @@ export function ShelfView(props: ShelfViewProps) {
                     onToggleSelected={toggleFolderSelected}
                   />
                 ))}
-              {/* 书籍区起点（列表几何的 contentTop），兼作虚拟化的前置占位。 */}
+              {/* 书籍区起点（列表几何的 contentTop），兼作虚拟化的前置占位。
+                  占位行只放一个不跨列的空格子：窄屏用 CSS 隐去次要列，手机表格又是固定布局，
+                  colSpan=8 会凭空撑出被隐去的列，与书名列平分余宽。 */}
               <tr className="shelf-table-book-start" style={{ height: `${virtualizer.topPadding}px` }} aria-hidden="true">
-                <td colSpan={8} style={{ padding: 0, border: "none" }} />
+                <td style={{ padding: 0, border: "none" }} />
               </tr>
               {renderedBooks.map((entry, idx) => {
                 const actualIndex = virtualizer.isVirtual ? virtualizer.startIndex + idx : idx;
@@ -5117,7 +5110,7 @@ export function ShelfView(props: ShelfViewProps) {
               })}
               {virtualizer.bottomPadding > 0 && (
                 <tr style={{ height: `${virtualizer.bottomPadding}px` }} aria-hidden="true">
-                  <td colSpan={8} style={{ padding: 0, border: "none" }} />
+                  <td style={{ padding: 0, border: "none" }} />
                 </tr>
               )}
             </tbody>
@@ -5125,10 +5118,10 @@ export function ShelfView(props: ShelfViewProps) {
         </div>
       ) : (
         <>
-          {scope.type === "root" && visibleFolders.length > 0 && (!isCompactMobile || folderPrefixExpanded) && (
+          {scope.type === "root" && visibleFolders.length > 0 && (
             <div className="shelf-folder-prefix">
-              {isCompactMobile && folderPrefixExpanded && (
-                <div className="shelf-folder-summary-rail expanded">
+              {isCompactMobile && (
+                <div className={`shelf-folder-summary-rail${folderPrefixExpanded ? " expanded" : ""}`}>
                   <div className="shelf-folder-summary-info">
                     <FolderIcon />
                     <span>{t("shelfMain.folders.summary", { count: visibleFolders.length })}</span>
@@ -5136,33 +5129,36 @@ export function ShelfView(props: ShelfViewProps) {
                   <button
                     className="shelf-folder-summary-toggle-btn"
                     type="button"
-                    onClick={() => setFolderPrefixExpanded(false)}
-                    title={t("shelfMain.folders.collapse.tip")}
-                    aria-label={t("shelfMain.folders.collapse.tip")}
+                    onClick={() => setFolderPrefixExpanded((prev) => !prev)}
+                    aria-expanded={folderPrefixExpanded}
+                    title={t(folderPrefixExpanded ? "shelfMain.folders.collapse.tip" : "shelfMain.folders.expand.tip")}
+                    aria-label={t(folderPrefixExpanded ? "shelfMain.folders.collapse.tip" : "shelfMain.folders.expand.tip")}
                   >
-                    <span>{t("shelfMain.folders.collapse")}</span>
-                    <ChevronUpIcon />
+                    <span>{t(folderPrefixExpanded ? "shelfMain.folders.collapse" : "shelfMain.folders.expand")}</span>
+                    {folderPrefixExpanded ? <ChevronUpIcon /> : <ChevronDownIcon />}
                   </button>
                 </div>
               )}
-              <div className="shelf-grid shelf-folder-grid">
-                {visibleFolders.map((folder) => (
-                  <ShelfFolderCard
-                    key={folder.id}
-                    id={folder.id}
-                    name={folder.name}
-                    books={folderBooksMap.get(folder.id) ?? []}
-                    provider={thumbnailProvider}
-                    selectionMode={selectionMode}
-                    selectionState={selectionMode ? folderSelectionState(folderBooksMap.get(folder.id) ?? [], selectedIds) : undefined}
-                    onToggleSelected={toggleFolderSelected}
-                    isDropTarget={(dropTarget?.type === "folder" && dropTarget.id === folder.id) || props.externalDropFolderId === folder.id}
-                    menuOpen={openMenuKey === `folder:${folder.id}`}
-                    onOpen={handleOpenFolderModal}
-                    onRequestMenu={canOrganize ? requestMenu : undefined}
-                  />
-                ))}
-              </div>
+              {(!isCompactMobile || folderPrefixExpanded) && (
+                <div className="shelf-grid shelf-folder-grid">
+                  {visibleFolders.map((folder) => (
+                    <ShelfFolderCard
+                      key={folder.id}
+                      id={folder.id}
+                      name={folder.name}
+                      books={folderBooksMap.get(folder.id) ?? []}
+                      provider={thumbnailProvider}
+                      selectionMode={selectionMode}
+                      selectionState={selectionMode ? folderSelectionState(folderBooksMap.get(folder.id) ?? [], selectedIds) : undefined}
+                      onToggleSelected={toggleFolderSelected}
+                      isDropTarget={(dropTarget?.type === "folder" && dropTarget.id === folder.id) || props.externalDropFolderId === folder.id}
+                      menuOpen={openMenuKey === `folder:${folder.id}`}
+                      onOpen={handleOpenFolderModal}
+                      onRequestMenu={canOrganize ? requestMenu : undefined}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           )}
           <div

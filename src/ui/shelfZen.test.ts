@@ -226,7 +226,7 @@ describe("ShelfZen Packet 1 现代书架体验", () => {
 
       const folderBtn = dom.container.querySelector(".shelf-folder-dropdown-btn");
       expect(folderBtn).not.toBeNull();
-      expect(folderBtn?.textContent).toContain("文件夹 (1)");
+      expect(folderBtn?.textContent).toContain("按文件夹");
 
       // 点击展开下拉
       await dom.click(folderBtn!);
