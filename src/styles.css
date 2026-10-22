@@ -4888,12 +4888,6 @@ select option {
   height: 0;
 }
 
-.shelf-folder-modal-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
-  gap: 16px;
-}
-
 .shelf-folder-modal-empty {
   display: flex;
   flex-direction: column;

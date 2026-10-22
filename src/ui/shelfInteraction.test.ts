@@ -383,6 +383,8 @@ describe("shelf menu and gesture lifecycle", () => {
       // The phone shelf shows its folder cards by default.
       await shelf.dom.click(shelf.dom.container.querySelector(".shelf-folder-card")!);
       expect(shelf.dom.container.querySelector(".shelf-folder-modal")).not.toBeNull();
+      // The dialog's books share the shelf grid: density columns and the touch card buttons.
+      expect(shelf.dom.container.querySelector(".shelf-folder-modal .shelf-grid .shelf-card")).not.toBeNull();
       await shelf.dom.run(() => { expect(back?.()).toBe(true); });
       await shelf.dom.run(() => { vi.advanceTimersByTime(1000); });
       expect(shelf.dom.container.querySelector(".shelf-folder-modal")).toBeNull();
