@@ -9217,8 +9217,8 @@ export class ChapterPaginator {
 
   /**
    * A15：在当前屏第 lane 页取书签锚点：这一页的第一行（书签记“这一页从哪里开始”），
-   * 取不到（页首是空白等）时退回阅读锚点同样的页中线采样。复用阅读进度的取点
-   * （captureAnchorAtPoint、插图用媒体身份）与视觉换算；不改阅读锚点。第二页没有正文时为 null。
+   * 页首留白时继续取点，只接受能按文本/媒体身份解析回所选页的位置。
+   * 复用阅读进度的取点与视觉换算；不改阅读锚点，没有可定位内容时为 null。
    */
   captureLaneAnchor(lane: 0 | 1): { anchor: ReadingAnchor; text: string | null } | null {
     const doc = this.contentDoc;
@@ -9257,7 +9257,16 @@ export class ChapterPaginator {
       .map((y) => Math.round(Math.max(2, Math.min(height - 2, y))));
     for (const y of ys) {
       const anchor = captureAnchorAtPoint(options, { x, y });
-      if (anchor) return { anchor, text: this.anchorTextFor(anchor) };
+      // 空节点只有旧元素索引，保存后会按页码回退到第一栏，右页便会被反复添加。
+      if (!anchor || (anchor.textOffset === null && !anchor.mediaAnchor)) continue;
+      const placement = this.resolveBookmarkPlacement({
+        anchorTextOffset: anchor.textOffset,
+        anchorTextSnippet: anchor.textSnippet,
+        mediaAnchor: anchor.mediaAnchor,
+      });
+      // 浏览器 caret 也可能从留白吸附到相邻页；按最终显示书签的同一解析规则校验。
+      if (placement?.page !== this.currentPage || placement.lane !== lane) continue;
+      return { anchor, text: this.anchorTextFor(anchor) };
     }
     return null;
   }
