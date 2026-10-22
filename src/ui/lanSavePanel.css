@@ -200,6 +200,52 @@
   margin-top: 1px;
 }
 
+/* ---------- last batch result ---------- */
+
+.lan-batch {
+  display: flex;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg));
+  color: var(--fg);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.lan-batch.tone-success {
+  background: color-mix(in srgb, #2e9e5b 11%, var(--bg));
+}
+
+.lan-batch.tone-error {
+  background: color-mix(in srgb, var(--error) 10%, var(--bg));
+}
+
+.lan-batch p {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.lan-batch-icon {
+  flex: none;
+  color: var(--accent);
+}
+
+.lan-batch.tone-success .lan-batch-icon {
+  color: #2e9e5b;
+}
+
+.lan-batch.tone-error .lan-batch-icon {
+  color: var(--error);
+}
+
+.lan-batch-icon svg {
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+}
+
 /* ---------- start ---------- */
 
 .lan-intro {

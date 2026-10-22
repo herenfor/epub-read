@@ -337,6 +337,16 @@ function FolderAddIcon() {
   );
 }
 
+function DeviceTransferIcon() {
+  return (
+    <svg className="shelf-svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="2.5" y="5" width="7" height="13" rx="1.5" />
+      <rect x="14.5" y="4" width="7" height="15" rx="1.5" />
+      <path d="M11 9.5h2.5M12.5 8l1.5 1.5-1.5 1.5M13 14.5h-2.5M11.5 13 10 14.5l1.5 1.5" />
+    </svg>
+  );
+}
+
 function CheckSquareIcon({ checked }: { checked: boolean }) {
   return (
     <svg className="shelf-svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -355,12 +365,15 @@ interface ShelfImportButtonProps extends ShelfSubmenuBackProps {
   targetName?: string;
   onImport(): void;
   onImportFolder?(): void;
+  /** 设备互传, also reachable from 设置 → 数据与备份. */
+  onOpenLanTransfer?(): void;
+  lanTransferDisabled?: boolean;
 }
 
 /**
- * Shelf import entry. With directory import available it is a split button
- * (main action = 导入图书, caret = menu); on phones the whole 导入 button opens
- * the menu. The menu animates in/out with the shared popover motion.
+ * Shelf import entry. With directory import or device transfer available it is
+ * a split button (main action = 导入图书, caret = menu); on phones the whole 导入
+ * button opens the menu. The menu animates in/out with the shared popover motion.
  */
 function ShelfImportButton(props: ShelfImportButtonProps) {
   const { t } = useUiText();
@@ -393,7 +406,7 @@ function ShelfImportButton(props: ShelfImportButtonProps) {
     if (props.disabled) setOpen(false);
   }, [props.disabled]);
 
-  if (!props.onImportFolder) {
+  if (!props.onImportFolder && !props.onOpenLanTransfer) {
     return (
       <button
         className={`shelf-btn-primary${props.compact ? " shelf-mobile-import-btn" : ""}`}
@@ -462,13 +475,30 @@ function ShelfImportButton(props: ShelfImportButtonProps) {
               <small>{t("shelf.import.books.detail")}</small>
             </span>
           </button>
-          <button className="shelf-import-menu-item" type="button" role="menuitem" onClick={() => choose(props.onImportFolder!)}>
-            <span className="shelf-import-menu-icon"><FolderAddIcon /></span>
-            <span className="shelf-import-menu-text">
-              <strong>{t("shelf.import.folder")}</strong>
-              <small>{t("shelf.import.folder.detail")}</small>
-            </span>
-          </button>
+          {props.onImportFolder && (
+            <button className="shelf-import-menu-item" type="button" role="menuitem" onClick={() => choose(props.onImportFolder!)}>
+              <span className="shelf-import-menu-icon"><FolderAddIcon /></span>
+              <span className="shelf-import-menu-text">
+                <strong>{t("shelf.import.folder")}</strong>
+                <small>{t("shelf.import.folder.detail")}</small>
+              </span>
+            </button>
+          )}
+          {props.onOpenLanTransfer && (
+            <button
+              className="shelf-import-menu-item"
+              type="button"
+              role="menuitem"
+              disabled={props.lanTransferDisabled}
+              onClick={() => choose(props.onOpenLanTransfer!)}
+            >
+              <span className="shelf-import-menu-icon"><DeviceTransferIcon /></span>
+              <span className="shelf-import-menu-text">
+                <strong>{t("shelfMenu.lan")}</strong>
+                <small>{t("shelf.import.lan.detail")}</small>
+              </span>
+            </button>
+          )}
           {props.showDropHint && <p className="shelf-import-menu-hint">{t("shelf.import.dropHint")}</p>}
         </div>
       )}
@@ -3226,6 +3256,13 @@ export function ShelfView(props: ShelfViewProps) {
   }, [onImport, onImportIntoFolder]);
   const importHere = useCallback((): void => importInto(currentFolder), [currentFolder, importInto]);
   const importTargetName = currentFolder && props.onImportIntoFolder ? currentFolder.name : undefined;
+  const onOpenLanTransfer = props.onOpenLanTransfer;
+  const openLanTransferFromImport = useMemo(
+    () => getRuntimeCapabilities().supportsLanTransfer && onOpenLanTransfer ? () => onOpenLanTransfer() : undefined,
+    [onOpenLanTransfer],
+  );
+  // Same rule as the 设置 → 数据与备份 row: a running transfer can always be reopened.
+  const lanTransferImportDisabled = !props.lanTransferActive && Boolean(props.saveFileActive);
   const [addBooksFolder, setAddBooksFolder] = useState<{ id: string; name: string } | null>(null);
 
   const { folderBooksMap, unclassifiedBooks, favoriteBooks } = useMemo(() => {
@@ -4368,6 +4405,8 @@ export function ShelfView(props: ShelfViewProps) {
                   targetName={importTargetName}
                   onImport={importHere}
                   onImportFolder={props.onImportFolder}
+                  onOpenLanTransfer={openLanTransferFromImport}
+                  lanTransferDisabled={lanTransferImportDisabled}
                   registerSubmenuBackHandler={registerSubmenuBackHandler}
                   onSubmenuBackActiveChange={reportSubmenuBackActive}
                 />
@@ -4500,6 +4539,8 @@ export function ShelfView(props: ShelfViewProps) {
                 onImportFolder={props.onImportFolder ? () => {
                   if (!props.saveFileActive && !props.lanTransferActive) props.onImportFolder!();
                 } : undefined}
+                onOpenLanTransfer={openLanTransferFromImport}
+                lanTransferDisabled={lanTransferImportDisabled}
                 registerSubmenuBackHandler={registerSubmenuBackHandler}
                 onSubmenuBackActiveChange={reportSubmenuBackActive}
               />
