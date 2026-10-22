@@ -68,3 +68,12 @@ pub async fn lan_save_close(
 ) -> Result<LanCloseResult, LanSaveError> {
     close(&app, &session_id).await
 }
+
+#[tauri::command]
+pub async fn lan_save_cancel_transfer(
+    app: AppHandle,
+    session_id: String,
+    transfer_id: String,
+) -> Result<LanCloseResult, LanSaveError> {
+    super::manager::cancel_transfer(&app, &session_id, &transfer_id).await
+}

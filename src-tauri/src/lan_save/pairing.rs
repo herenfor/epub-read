@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::net::{Ipv4Addr, UdpSocket};
 
 pub(crate) const PAIRING_PROTOCOL: &str = "epub-reader-lan";
-pub(crate) const PAIRING_VERSION: u32 = 2;
+pub(crate) const PAIRING_VERSION: u32 = 3;
 pub(crate) const PAIRING_MAX_BYTES: usize = 4 * 1024;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -86,8 +86,8 @@ impl LanPairing {
             Err(error) => return Err(map_lan_version_error(error)),
         }
 
-        // Only the selected v2 reader parses the complete payload strictly.
-        // Never feed v1/v0 into the v2 DTO just because fields happen to fit.
+        // Only the selected protocol parses the complete payload strictly.
+        // v2 peers cannot safely reuse a connection and are rejected explicitly.
         let pairing: Self = serde_json::from_str(raw).map_err(|error| {
             LanSaveError::invalid_request(format!("连接信息不是有效 JSON：{error}"))
         })?;
@@ -207,10 +207,10 @@ mod tests {
     const UUID: &str = "00000000-0000-4000-8000-000000000001";
     const HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
-    fn v2_json() -> String {
+    fn v3_json() -> String {
         json!({
             "protocol": PAIRING_PROTOCOL,
-            "version": 2,
+            "version": 3,
             "sessionId": UUID,
             "endpoint": { "host": "10.0.0.1", "port": 47777 },
             "certificateSha256": HASH,
@@ -220,14 +220,14 @@ mod tests {
     }
 
     #[test]
-    fn v2_pairing_still_parses_strictly() {
-        let pairing = LanPairing::parse(&v2_json()).expect("current pairing must parse");
-        assert_eq!(pairing.version, 2);
+    fn v3_pairing_still_parses_strictly() {
+        let pairing = LanPairing::parse(&v3_json()).expect("current pairing must parse");
+        assert_eq!(pairing.version, 3);
         assert_eq!(pairing.session_id, UUID);
 
         let with_unknown = json!({
             "protocol": PAIRING_PROTOCOL,
-            "version": 2,
+            "version": 3,
             "sessionId": UUID,
             "endpoint": { "host": "10.0.0.1", "port": 47777 },
             "certificateSha256": HASH,
@@ -240,8 +240,8 @@ mod tests {
     }
 
     #[test]
-    fn v1_and_v0_pairing_are_not_retried_as_v2() {
-        for version in [0, 1] {
+    fn old_pairing_versions_are_not_retried_as_v3() {
+        for version in [0, 1, 2] {
             let raw = json!({
                 "protocol": PAIRING_PROTOCOL,
                 "version": version,
@@ -270,7 +270,7 @@ mod tests {
         // current DTO is asked to decode an incomplete future payload.
         let raw = json!({
             "protocol": PAIRING_PROTOCOL,
-            "version": 3,
+            "version": 4,
             "futureField": { "nested": true }
         })
         .to_string();
@@ -281,11 +281,20 @@ mod tests {
 
     #[test]
     fn selected_pairing_validation_reports_version_difference() {
-        let mut pairing = LanPairing::new(UUID.into(), Ipv4Addr::new(10, 0, 0, 1), 47777, HASH.into(), HASH.into());
+        let mut pairing = LanPairing::new(
+            UUID.into(),
+            Ipv4Addr::new(10, 0, 0, 1),
+            47777,
+            HASH.into(),
+            HASH.into(),
+        );
         pairing.version = 1;
         let error = pairing.validate().unwrap_err();
         assert_eq!(error.code, "protocol-version-differs");
-        assert_eq!(serde_json::to_value(error).unwrap()["code"], "protocol-version-differs");
+        assert_eq!(
+            serde_json::to_value(error).unwrap()["code"],
+            "protocol-version-differs"
+        );
     }
 
     #[test]

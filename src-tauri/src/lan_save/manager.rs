@@ -31,6 +31,8 @@ use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Manager, Runtime};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::{TlsAcceptor, TlsConnector};
+mod rounds;
+pub(crate) use rounds::cancel_transfer;
 
 const PAIRING_TIMEOUT: Duration = Duration::from_secs(3 * 60);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -145,7 +147,11 @@ pub(crate) fn event_sink(channel: Channel<super::session::LanSaveEvent>) -> LanE
 
 fn progress_channel(session: &Arc<LanSession>) -> Channel<SaveFileProgress> {
     let session = session.clone();
+    let transfer = session.transfer_id().ok();
     Channel::new(move |body| {
+        if transfer != session.transfer_id().ok() {
+            return Ok(());
+        }
         if let InvokeResponseBody::Json(json) = body {
             if let Ok(value) = serde_json::from_str::<serde_json::Value>(&json) {
                 let phase = value
@@ -913,7 +919,7 @@ fn lan_library_root<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, LanSaveEr
 fn start_inventory_query<R: Runtime>(
     app: &AppHandle<R>,
     session: &Arc<LanSession>,
-    lease: &WorkerLease,
+    _lease: &WorkerLease,
     message: &ControlMessage,
     expected_index: u64,
     finished: bool,
@@ -968,13 +974,14 @@ fn start_inventory_query<R: Runtime>(
         transfer_id.clone(),
         ProcessingPhase::Checking,
     )?;
-    let worker_lease = lease.child().map_err(|_| LanSaveError::cancelled())?;
-    let completion_lease = lease.child().map_err(|_| LanSaveError::cancelled())?;
+    let worker_lease = session.enter_transfer_worker()?;
+    let completion_lease = session.enter_transfer_worker()?;
     let worker_app = app.clone();
     let worker_hashes = hashes.clone();
     let worker_session = session.clone();
     let completion_session = session.clone();
     let query_index = *query_index;
+    let transfer_id = transfer_id.clone();
     let last = *last;
     let job = tokio::task::spawn_blocking(move || -> Result<Vec<bool>, LanSaveError> {
         let _lease = worker_lease;
@@ -1015,6 +1022,7 @@ fn start_inventory_query<R: Runtime>(
             .and_then(|result| result);
         checking_heartbeat.stop().await;
         let action = ReceiverAction::InventoryDone {
+            transfer_id,
             query_index,
             last,
             presence,
@@ -1045,9 +1053,20 @@ async fn control_reader_loop<R: Runtime>(
     let mut expected_query_index = 0_u64;
     let mut inventory_finished = false;
     let mut inventory_pending = false;
+    let mut pump_transfer = session.transfer_id().ok();
     loop {
         if session.is_close_requested() {
             return;
+        }
+        let current_transfer = session.transfer_id().ok();
+        if current_transfer != pump_transfer {
+            mode = ReaderMode::Unknown;
+            stage = SenderStage::Inventory;
+            expected_query_index = 0;
+            inventory_finished = false;
+            inventory_pending = false;
+            observed_phase = None;
+            pump_transfer = current_transfer;
         }
         let phase = match session.gate().phase() {
             Ok(phase) => phase,
@@ -1086,6 +1105,17 @@ async fn control_reader_loop<R: Runtime>(
                     Ok(message) => message,
                     Err(error) => { control_terminal(app, session, error); return; }
                 };
+                if message.session_id() != session.session_id {
+                    control_terminal(app, session, LanSaveError::protocol("控制消息 sessionId 不匹配")); return;
+                }
+                if message.transfer_id().is_some_and(|id| session.is_previous_transfer(id)) {
+                    continue; // The preceding batch cannot mutate this one.
+                }
+                match rounds::control(session, connection, &message).await {
+                    Ok(true) => continue,
+                    Ok(false) => {},
+                    Err(error) => { control_terminal(app, session, error); return; }
+                }
                 if let Err(error) = validate_control(session, &message) {
                     control_terminal(app, session, error); return;
                 }
@@ -1165,7 +1195,7 @@ async fn control_reader_loop<R: Runtime>(
                     return;
                 } else {
                     match handle_sender_control(session, message, &mut stage) {
-                        Ok(true) => return, // The sender consumes the result before finalizing.
+                        Ok(true) => {}, // Keep the sole control pump for the next batch.
                         Ok(false) => mode = ReaderMode::Sender,
                         Err(error) => { control_terminal(app, session, error); return; }
                     }
@@ -1179,7 +1209,11 @@ async fn control_reader_loop<R: Runtime>(
             action = actions.recv(), if frame_buffer.is_empty() => {
                 match action {
                     Some(ReceiverAction::PhaseChanged) => {}
-                    Some(ReceiverAction::InventoryDone { query_index, last, presence })
+                    Some(ReceiverAction::InventoryDone { transfer_id, .. }) if Some(&transfer_id) != pump_transfer.as_ref() => {},
+                    Some(ReceiverAction::Accept { transfer_id, reply, .. }) if Some(&transfer_id) != pump_transfer.as_ref() => {
+                        let _ = reply.send(Err(LanSaveError::invalid_state("接收动作属于旧批次")));
+                    },
+                    Some(ReceiverAction::InventoryDone { transfer_id: _, query_index, last, presence })
                         if inventory_pending && query_index == expected_query_index && mode == ReaderMode::ReceiverChecking => {
                         let result = async {
                             let presence = presence?;
@@ -1200,7 +1234,7 @@ async fn control_reader_loop<R: Runtime>(
                             control_terminal(app, session, error); return;
                         }
                     }
-                    Some(ReceiverAction::Accept { part_path, archive_bytes, reply }) if mode == ReaderMode::Receiver => {
+                    Some(ReceiverAction::Accept { transfer_id: _, part_path, archive_bytes, reply }) if mode == ReaderMode::Receiver => {
                         if let Err(error) = handle_receiver_accept(session, connection, part_path, archive_bytes, reply).await {
                             control_terminal(app, session, error); return;
                         }
@@ -1227,7 +1261,7 @@ pub(crate) async fn send<R: Runtime>(
     }
     // This command lease covers the whole send flow. The blocking export gets
     // a separate child lease before spawn, so closing drains the actual thread.
-    let command = session.enter_worker()?;
+    let command = session.enter_transfer_worker()?;
     let transfer_id = session.transfer_id()?;
     let job_id = new_uuid()?;
     let task: Arc<FileTask> = command
@@ -1238,14 +1272,28 @@ pub(crate) async fn send<R: Runtime>(
             if session.gate().phase()? != Phase::Ready {
                 return Err(LanSaveError::new("busy", "会话阶段不允许再次发送"));
             }
-            // Reserve first. A busy F-N slot must leave role/phase untouched
-            // so this session can retry the same Offer.
-            let task = reserve_job(app, &job_id)?;
-            session.set_file_task(job_id.clone(), task.clone())?;
             if !session.claim_outgoing() {
                 return Err(LanSaveError::new("busy", "已有传输正在进行"));
             }
-            session.gate().begin_export()?;
+            // Claim the direction atomically before attaching a file task:
+            // the control pump and transfer workers have separate owners now.
+            // A busy F-N slot releases this reservation without consuming it.
+            let task = match reserve_job(app, &job_id) {
+                Ok(task) => task,
+                Err(error) => {
+                    session.release_outgoing_reservation();
+                    return Err(error.into());
+                }
+            };
+            if let Err(error) = session
+                .set_file_task(job_id.clone(), task.clone())
+                .and_then(|_| session.gate().begin_export())
+            {
+                finish_task(app, &task);
+                let _ = session.clear_file_task();
+                session.release_outgoing_reservation();
+                return Err(error);
+            }
             Ok(task)
         })
         .map_err(|_| LanSaveError::cancelled())??;
@@ -1261,7 +1309,10 @@ pub(crate) async fn send<R: Runtime>(
             include_books,
         )
         .await;
-        finalize_session(&app, &session).await;
+        let reusable = result.as_ref().is_ok_and(|r| {
+            r.result_delivered && matches!(r.status.as_str(), "completed" | "cancelled")
+        });
+        rounds::finish_or_close(&app, session, reusable);
         result
     })
     .await
@@ -1438,7 +1489,7 @@ async fn send_inner<R: Runtime>(
         ControlMessage::Accept { .. } => {}
         ControlMessage::Decline { code, message, .. } => {
             session.emit_event(
-                "closed",
+                "cancelled",
                 Some(&transfer_id),
                 Some(&code),
                 Some(&message),
@@ -1655,7 +1706,16 @@ fn finish_sender_result(
             );
             "completed"
         }
-        "cancelled" => "cancelled",
+        "cancelled" => {
+            session.emit_event(
+                "cancelled",
+                Some(&transfer_id),
+                code.as_deref(),
+                message.as_deref(),
+                None,
+            );
+            "cancelled"
+        }
         "failed" => "failed",
         _ => return Err(LanSaveError::protocol("未知 Result status")),
     };
@@ -1759,7 +1819,7 @@ pub(crate) async fn accept<R: Runtime>(
     if session.transfer_id()? != transfer_id {
         return Err(LanSaveError::invalid_state("transferId 不匹配"));
     }
-    let command = session.enter_worker()?;
+    let command = session.enter_transfer_worker()?;
     let offer = session
         .offer_snapshot()?
         .ok_or_else(|| LanSaveError::invalid_state("Offer 尚未到达，不能接受下载"))?;
@@ -1909,6 +1969,7 @@ async fn accept_inner<R: Runtime>(
         session
             .receiver_action_sender()
             .send(ReceiverAction::Accept {
+                transfer_id: transfer_id.to_owned(),
                 part_path: part_path.clone(),
                 archive_bytes: offer.archive_bytes,
                 reply,
@@ -1996,7 +2057,7 @@ pub(crate) async fn commit<R: Runtime>(
     if session.transfer_id()? != transfer_id {
         return Err(LanSaveError::invalid_state("transferId 不匹配"));
     }
-    let command = session.enter_worker()?;
+    let command = session.enter_transfer_worker()?;
     let commit_lease = command.child().map_err(|_| LanSaveError::cancelled())?;
     let heartbeat_lease = command.child().map_err(|_| LanSaveError::cancelled())?;
     let (task, prepared) = command
@@ -2031,7 +2092,7 @@ pub(crate) async fn commit<R: Runtime>(
             apply_preferences,
         )
         .await;
-        finalize_session(&app, &session).await;
+        rounds::finish_or_close(&app, session, result.is_ok());
         result
     })
     .await
@@ -2281,18 +2342,38 @@ mod c6_wire_tests {
     #[test]
     fn c6_skipped_books_preserve_v2_summary_contract() {
         let result = SaveFileCommitResult {
-            status:"committed".into(), job_id:String::new(), merged_books:1,
-            imported_books:vec!["a".repeat(64)], new_visible_books:vec![],
-            skipped_book_count:1, skipped_books:vec![crate::portable_state::SkippedImportBook {
-                content_hash:"b".repeat(64), title:"synthetic".into(), reason:"not-local".into(), message:None
-            }], progress_conflict_books:vec![], applied_preferences:false,
+            status: "committed".into(),
+            job_id: String::new(),
+            merged_books: 1,
+            imported_books: vec!["a".repeat(64)],
+            new_visible_books: vec![],
+            skipped_book_count: 1,
+            skipped_books: vec![crate::portable_state::SkippedImportBook {
+                content_hash: "b".repeat(64),
+                title: "synthetic".into(),
+                reason: "not-local".into(),
+                message: None,
+            }],
+            progress_conflict_books: vec![],
+            applied_preferences: false,
         };
         let wire = commit_summary(&result);
-        crate::transfer_policy::CompactCommit { imported_book_count:wire.imported_book_count, new_visible_book_count:wire.new_visible_book_count, missing_book_count:wire.missing_book_count, progress_conflict_book_count:wire.progress_conflict_book_count, applied_preferences:wire.applied_preferences }.validate(2, false).unwrap();
+        crate::transfer_policy::CompactCommit {
+            imported_book_count: wire.imported_book_count,
+            new_visible_book_count: wire.new_visible_book_count,
+            missing_book_count: wire.missing_book_count,
+            progress_conflict_book_count: wire.progress_conflict_book_count,
+            applied_preferences: wire.applied_preferences,
+        }
+        .validate(2, false)
+        .unwrap();
         let json = serde_json::to_value(&wire).unwrap();
         assert_eq!(json["missingBookCount"], 1);
         assert_eq!(json.as_object().unwrap().len(), 5);
-        assert_eq!(serde_json::from_value::<LanCommitSummary>(json).unwrap(), wire);
+        assert_eq!(
+            serde_json::from_value::<LanCommitSummary>(json).unwrap(),
+            wire
+        );
         let local = serde_json::to_value(&result).unwrap();
         assert_eq!(local["skippedBookCount"], 1);
         assert!(local.get("missingBooks").is_none());
