@@ -1,6 +1,7 @@
 //! Experimental AI-only transport and read-only indexed chapter access.
 use super::{AiSearchHit, AiState};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+mod retrieval;
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
@@ -10,12 +11,16 @@ use tokio::sync::oneshot;
 #[tauri::command]
 pub(crate) async fn ai_chat_search(
     app: AppHandle,
-    input: super::AiSearchInput,
-) -> Result<Vec<AiSearchHit>, String> {
+    input: retrieval::SearchInput,
+) -> Result<Vec<Vec<AiSearchHit>>, String> {
     development_only()?;
-    tauri::async_runtime::spawn_blocking(move || app.state::<AiState>().ensure(&app)?.search(input))
-        .await
-        .map_err(|error| error.to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<AiState>()
+            .ensure(&app)?
+            .with_connection(|connection| retrieval::search(connection, input))
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 static REQUESTS: LazyLock<Mutex<HashMap<String, oneshot::Sender<()>>>> =
@@ -131,68 +136,17 @@ pub(crate) fn ai_chat_cancel(request_id: String) -> Result<(), String> {
     Ok(())
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct ReadChapterInput {
-    content_hash: String,
-    chapter_path: String,
-    offset: u32,
-    parser_version: String,
-    normalizer_version: String,
-    chunker_version: String,
-    around_chunk_id: Option<String>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct ChapterPage {
-    hits: Vec<AiSearchHit>,
-    offset: u32,
-    next_offset: Option<u32>,
-}
-
 #[tauri::command]
 pub(crate) async fn ai_chat_read_chapter(
     app: AppHandle,
-    input: ReadChapterInput,
-) -> Result<ChapterPage, String> {
+    input: retrieval::ReadChapterInput,
+) -> Result<retrieval::ChapterPage, String> {
     development_only()?;
-    let hash = super::normalize_content_hash(&input.content_hash)?;
     tauri::async_runtime::spawn_blocking(move || {
-        app.state::<AiState>().ensure(&app)?.with_connection(|connection| {
-            let offset = if let Some(chunk_id) = &input.around_chunk_id {
-                let index: u32 = connection.query_row(
-                    "WITH ordered AS (
-                       SELECT c.chunk_id, ROW_NUMBER() OVER (
-                         ORDER BY CAST(json_extract(c.anchor_json, '$.start') AS INTEGER), c.chunk_id
-                       ) - 1 AS position
-                       FROM chunks c JOIN books b ON b.content_hash=c.content_hash
-                       WHERE c.content_hash=?1 AND c.chapter_path=?2
-                         AND b.parser_version=?3 AND b.normalizer_version=?4 AND b.chunker_version=?5
-                     ) SELECT position FROM ordered WHERE chunk_id=?6",
-                    rusqlite::params![hash, input.chapter_path, input.parser_version,
-                        input.normalizer_version, input.chunker_version, chunk_id],
-                    |row| row.get(0),
-                ).map_err(|_| "命中段落已失效，请重新检索".to_string())?;
-                index.saturating_sub(2)
-            } else { input.offset };
-            let mut statement = connection.prepare(
-                "SELECT c.content_hash, b.title, b.creator, b.language, c.chunk_id, c.spine_index,
-                        c.chapter_path, c.chapter_title, c.content_type, c.original_text,
-                        c.normalized_text, c.anchor_json
-                 FROM chunks c JOIN books b ON b.content_hash=c.content_hash
-                 WHERE c.content_hash=?1 AND c.chapter_path=?2
-                   AND b.parser_version=?4 AND b.normalizer_version=?5 AND b.chunker_version=?6
-                 ORDER BY CAST(json_extract(c.anchor_json, '$.start') AS INTEGER), c.chunk_id
-                 LIMIT 9 OFFSET ?3"
-            ).map_err(|error| error.to_string())?;
-            let rows = statement.query_map(rusqlite::params![hash, input.chapter_path, offset,
-                input.parser_version, input.normalizer_version, input.chunker_version],
-                super::store::read_search_hit).map_err(|error| error.to_string())?;
-            let mut hits = rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
-            let next_offset = (hits.len() > 8).then_some(offset + 8);
-            hits.truncate(8);
-            Ok(ChapterPage { hits, offset, next_offset })
-        })
-    }).await.map_err(|error| error.to_string())?
+        app.state::<AiState>()
+            .ensure(&app)?
+            .with_connection(|connection| retrieval::read(connection, input))
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
