@@ -1,6 +1,8 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { getAppBuildSession, isAiDevelopmentActionsAllowed } from "../../../config/appBuildSession";
 import type { ChatMessage, ChatSettings, ChatTransport, ToolCall } from "./types";
+import { resolveRequestPolicy } from "./requestPolicy";
+export { completionUrl } from "./requestPolicy";
 
 /** SSE framing is independent of network chunk and UTF-8 boundaries. */
 export class ChatStreamDecoder {
@@ -8,6 +10,7 @@ export class ChatStreamDecoder {
   private pending = "";
   private text = "";
   private reasoning = "";
+  private hasReasoning = false;
   private calls = new Map<number, ToolCall>();
   private finished = false;
   private finishReason = "";
@@ -40,6 +43,7 @@ export class ChatStreamDecoder {
       const delta = choice.delta;
       if (delta?.content) { this.text += delta.content; this.onText(this.text); }
       this.reasoning += delta?.reasoning_content ?? "";
+      if (typeof delta?.reasoning_content === "string") this.hasReasoning = true;
       for (const part of delta?.tool_calls ?? []) {
         const call = this.calls.get(part.index) ?? { id: "", type: "function" as const,
           function: { name: "", arguments: "" } };
@@ -58,29 +62,22 @@ export class ChatStreamDecoder {
     }
     const calls = [...this.calls.entries()].sort(([a], [b]) => a - b).map(([, call]) => call);
     return { role: "assistant", content: this.text || null,
-      ...(this.reasoning ? { reasoning_content: this.reasoning } : {}),
+      ...(this.hasReasoning ? { reasoning_content: this.reasoning } : {}),
       ...(calls.length ? { tool_calls: calls } : {}) };
   }
 }
 
-export function completionUrl(baseUrl: string): string {
-  const url = new URL(baseUrl.trim().replace(/\/+$/u, "") + "/");
-  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
-    throw new Error("请填写不含密钥和查询参数的 HTTP(S) API 地址");
-  }
-  return new URL("chat/completions", url).href;
-}
-
 export function createChatTransport(settings: ChatSettings, apiKey: string): ChatTransport {
+  const policy = resolveRequestPolicy(settings);
   return {
+    requestInfo: policy.info,
     async complete(messages, tools, signal, onText) {
       if (!isAiDevelopmentActionsAllowed()) throw new Error("阅读伙伴仅在 AI 开发版开放");
       signal.throwIfAborted();
-      const endpoint = completionUrl(settings.baseUrl);
+      const endpoint = policy.endpoint;
       const payload = {
-        model: settings.model.trim(), messages, stream: true, max_tokens: 4096,
+        ...policy.parameters, messages,
         ...(tools.length ? { tools } : {}),
-        ...(new URL(endpoint).hostname === "api.deepseek.com" ? { thinking: { type: "disabled" } } : {}),
       };
       const decoder = new ChatStreamDecoder(onText);
       if (getAppBuildSession()?.source === "desktop") {

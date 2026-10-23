@@ -21,6 +21,8 @@ API that permits CORS. No production AI actions or Android entry are enabled her
 | `retrieval/ranking.ts` | Query preparation, lexical ranking, RRF and overlap removal |
 | `retrieval/contracts.ts` | Interfaces used by the real adapters and focused tests |
 | `transport.ts` | Standard streaming chat protocol and cancellation |
+| `requestPolicy.ts` | Provider request parameters and low-thinking defaults |
+| `diagnostics.ts` | Selected request metadata, returned passages and actual evidence delivery |
 | `storage.ts` | AI-only settings, history and explicitly edited memories |
 
 The Rust counterpart is `src-tauri/src/ai/companion.rs` (commands and HTTP stream)
@@ -49,6 +51,16 @@ the active book/chapter scope. Model answers and user memories do not become boo
 evidence. Summaries, semantic retrieval and autonomous memory writes are not
 implemented by this experiment.
 
+Low thinking is enabled by default (8192 completion tokens); the checkbox turns
+it off for DeepSeek (4096 tokens). Other endpoints receive `reasoning_effort: low`
+when checked and use their own defaults when unchecked. They must support that
+parameter. Credentials are not part of request-policy or diagnostic objects.
+
+Saved exchanges are quoted as reference data in the next turn, preserving
+original passage IDs. They are not fabricated assistant protocol messages with
+missing thinking fields. Actual assistant reasoning is preserved within the
+current tool loop and is never persisted or exported in diagnostics.
+
 ## Local development
 
 `pnpm dev:ai` starts a browser preview. `scripts/dev-windows-companion.ps1` prepares
@@ -61,3 +73,14 @@ The sample model and Cubism Core stay in ignored `.ai-companion-local/`. Preserv
 their upstream licenses. They are served only by the AI dev middleware and are
 never copied into production assets. Do not add them to Git or release bundles.
 API credentials stay in application memory and are never stored with history.
+
+The AI dev server exposes `GET /__ai-companion/diagnostics` on loopback only.
+Opening the companion panel publishes the last six saved exchanges (cited
+passages only). New conversations retain the last three detailed turn records:
+tool arguments/results, uncited original passages with canonical anchors, and
+the evidence IDs supplied to each actual request. Missing historical tool
+results are explicitly marked; a citation list cannot establish input coverage.
+The frontend serially publishes snapshots to the same-origin dev middleware;
+reads never invoke a model. Snapshots stay in memory, exclude credentials and
+reasoning text, and disappear when the dev server closes. This is a development
+interface, not a public API or a Core/release/Android feature.

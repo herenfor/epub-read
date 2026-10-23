@@ -3,6 +3,9 @@ import { ChatStreamDecoder } from "./transport";
 import { answerWithBooks } from "./conversation";
 import { chapterPage, fuseHits, type ReadingLibrary } from "./retrieval";
 import { rankLexicalHits } from "./retrieval/ranking";
+import { resolveRequestPolicy } from "./requestPolicy";
+import { DEFAULT_CHAT_SETTINGS } from "./storage";
+import { companionDiagnostics, createDiagnosticRecorder } from "./diagnostics";
 import type { ChatMessage, ChatTransport } from "./types";
 import type { ResolvedCrossBookSearchHit } from "../indexing/indexStore";
 
@@ -31,6 +34,52 @@ const tool = (name: string, args: unknown): ChatMessage => ({ role: "assistant",
   tool_calls: [{ id: name, type: "function", function: { name, arguments: JSON.stringify(args) } }] });
 
 describe("experimental reading companion", () => {
+  it("low thinking sends explicit provider parameters and preserves actual tool-round reasoning", async () => {
+    const policy = resolveRequestPolicy(DEFAULT_CHAT_SETTINGS);
+    expect(policy.parameters).toMatchObject({ thinking: { type: "enabled" }, reasoning_effort: "low", max_tokens: 8192 });
+    const off = resolveRequestPolicy({ ...DEFAULT_CHAT_SETTINGS, thinkingEnabled: false });
+    expect(off.parameters).toMatchObject({ thinking: { type: "disabled" }, max_tokens: 4096 });
+    expect(off.parameters).not.toHaveProperty("reasoning_effort");
+    const uncited = { ...hit("uncited", 80), originalText: "这段经历也返回了，但没有被回答引用。" };
+    const decoder = new ChatStreamDecoder(() => {});
+    decoder.push(new TextEncoder().encode(`data: ${JSON.stringify({ choices: [{ delta: {
+      reasoning_content: "private-reasoning-marker", tool_calls: [{ index: 0, id: "search_library", function: {
+        name: "search_library", arguments: JSON.stringify({ queries: ["甲"] }) } }],
+    }, finish_reason: "tool_calls" }] })}\n\ndata: [DONE]\n\n`));
+    const call = decoder.end();
+    const f = fixture([call, { role: "assistant", content: "有原文。[E1]", reasoning_content: "private-final-marker" }], [hit("one"), uncited]);
+    const result = await answerWithBooks({ ...f, question: "请查证经历", grounded: false,
+      history: [{ id: "old", question: "旧问题", answer: "旧回答", evidence: [], createdAt: 1 }], memories: "",
+      signal: new AbortController().signal, onUpdate: () => {} });
+    expect(f.messages[0].every(message => message.role !== "assistant")).toBe(true);
+    expect(f.messages[0].some(message => message.content?.includes("旧回答"))).toBe(true);
+    expect(f.messages[1].find(message => message.tool_calls)?.reasoning_content).toBe("private-reasoning-marker");
+    expect(result.evidence).toHaveLength(1);
+    const snapshot = companionDiagnostics.snapshot();
+    const inspection = snapshot.turns[snapshot.turns.length - 1];
+    expect(inspection.requests[1].suppliedEvidenceIds).toEqual(["E1", "E2"]);
+    expect(inspection.evidence.map(source => source.originalText)).toContain(uncited.originalText);
+    expect(inspection.evidence[1]).toMatchObject({ chunkId: "uncited", textAnchor: { start: 80, end: 95 } });
+    expect(inspection.tools[0]).toMatchObject({ name: "search_library", arguments: { queries: ["甲"] } });
+    expect(inspection.requests[0].reasoningReceived).toBe(true);
+    expect(JSON.stringify(snapshot)).not.toContain("private-reasoning-marker");
+    expect(JSON.stringify(snapshot)).not.toContain("private-final-marker");
+  });
+
+  it("diagnostic snapshots whitelist request metadata and distinguish old cited-only history", () => {
+    const recorder = createDiagnosticRecorder();
+    const policy = resolveRequestPolicy(DEFAULT_CHAT_SETTINGS);
+    const inspection = recorder.begin("核对原文", fixture([]).library.context,
+      { ...policy.info, apiKey: "secret-key-marker" } as typeof policy.info);
+    inspection.request([], []);
+    inspection.tool(tool("search_library", { queries: ["甲"], authorization: "secret-header-marker" }).tool_calls![0], { evidence: [] });
+    recorder.history(fixture([]).library.context, [{ id: "old", question: "旧问题", answer: "旧回答", evidence: [], createdAt: 1 }]);
+    const snapshot = recorder.snapshot();
+    expect(JSON.stringify(snapshot)).not.toContain("secret-key-marker");
+    expect(JSON.stringify(snapshot)).not.toContain("secret-header-marker");
+    expect(snapshot.history).toEqual([expect.objectContaining({ coverage: expect.stringContaining("uncited tool results were not retained") })]);
+  });
+
   it("decodes UTF-8 and tool arguments across arbitrary SSE network chunks", () => {
     const decoder = new ChatStreamDecoder(() => {});
     const stream = [

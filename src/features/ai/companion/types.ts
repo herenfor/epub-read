@@ -7,6 +7,7 @@ export interface ChatSettings {
   allowLaterChapters: boolean;
   scope: "book" | "library";
   mode: "auto" | "reading";
+  thinkingEnabled: boolean;
 }
 export interface ToolCall {
   id: string;
@@ -64,6 +65,13 @@ export interface InvestigationStep {
 }
 export type ChatPhase = "planning" | "searching" | "reading" | "answering";
 export interface ChatTransport {
+  readonly requestInfo?: ChatRequestInfo;
   complete(messages: ChatMessage[], tools: readonly ChatTool[], signal: AbortSignal,
     onText: (text: string) => void): Promise<ChatMessage>;
+}
+export interface ChatRequestInfo {
+  providerHost: string;
+  model: string;
+  thinking: "low" | "off" | "provider-default";
+  maxTokens: number;
 }

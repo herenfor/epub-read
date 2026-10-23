@@ -2,7 +2,7 @@ import type { ChatSettings, SavedExchange } from "./types";
 
 export const DEFAULT_CHAT_SETTINGS: ChatSettings = {
   baseUrl: "https://api.deepseek.com/v1", model: "deepseek-flash", scope: "book",
-  allowLaterChapters: false, mode: "auto",
+  allowLaterChapters: false, mode: "auto", thinkingEnabled: true,
 };
 
 /** Separate from shelf/save storage. No API credentials are ever persisted here. */

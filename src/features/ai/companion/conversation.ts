@@ -2,6 +2,7 @@ import type { ReadingLibrary } from "./retrieval";
 import { EvidenceRegistry } from "./evidence";
 import { buildConversationMessages } from "./prompts";
 import { READING_TOOLS, ReadingToolSession } from "./tools";
+import { companionDiagnostics } from "./diagnostics";
 import type { ChatPhase, ChatTransport, Evidence, InvestigationStep, SavedExchange } from "./types";
 
 export interface ConversationInput {
@@ -18,38 +19,52 @@ export async function answerWithBooks(input: ConversationInput): Promise<{ answe
   const history = evidence.history(input.history);
   const messages = buildConversationMessages({ context: library.context, memories: input.memories, strict: input.grounded,
     evidence, history, question: input.question });
+  const inspection = companionDiagnostics.begin(input.question, library.context, transport.requestInfo);
   const update = (phase: ChatPhase, text = "") => input.onUpdate(phase, text, evidence.all(), [...tools.trace]);
   const tools = new ReadingToolSession(library, evidence, signal, phase => update(phase));
   update("planning");
-  for (let round = 0; round < 6; round++) {
-    signal.throwIfAborted();
-    const reply = await transport.complete(messages, READING_TOOLS, signal, text => update("answering", text));
-    messages.push(reply);
-    if (!reply.tool_calls?.length) {
-      const answer = reply.content?.trim();
-      if (!answer) throw new Error("模型未返回回答");
-      const cited = evidence.fromAnswer(answer);
-      if (input.grounded && !evidence.all().length) {
-        if (tools.attemptedLookup) return { answer: "本次未取得足够的原文依据，暂不作事实判断。可以换线索、检查建库状态或调整阅读范围。", evidence: [], trace: tools.trace };
-        messages.push({ role: "user", content: "严格查证对照需要实际原文依据，请调用工具查阅；依据不足就保留判断。" });
-        continue;
+  try {
+    for (let round = 0; round < 6; round++) {
+      signal.throwIfAborted();
+      inspection.request(messages, evidence.all());
+      const reply = await transport.complete(messages, READING_TOOLS, signal, text => update("answering", text));
+      inspection.reply(reply);
+      messages.push(reply);
+      if (!reply.tool_calls?.length) {
+        const answer = reply.content?.trim();
+        if (!answer) throw new Error("模型未返回回答");
+        const cited = evidence.fromAnswer(answer);
+        if (input.grounded && !evidence.all().length) {
+          if (tools.attemptedLookup) {
+            const answer = "本次未取得足够的原文依据，暂不作事实判断。可以换线索、检查建库状态或调整阅读范围。";
+            inspection.finish(answer, evidence.all());
+            return { answer, evidence: [], trace: tools.trace };
+          }
+          messages.push({ role: "user", content: "严格查证对照需要实际原文依据，请调用工具查阅；依据不足就保留判断。" });
+          continue;
+        }
+        if (input.grounded && !cited.length) {
+          messages.push({ role: "user", content: "请将有原文依据的判断关联已有[E编号]，区分原文明示与解释；不能补造细节。" });
+          continue;
+        }
+        // In automatic mode, casual replies do not need a tool call or a mechanical citation.
+        inspection.finish(answer, evidence.all());
+        return { answer, evidence: cited, trace: tools.trace };
       }
-      if (input.grounded && !cited.length) {
-        messages.push({ role: "user", content: "请将有原文依据的判断关联已有[E编号]，区分原文明示与解释；不能补造细节。" });
-        continue;
+      for (const call of reply.tool_calls) {
+        if (tools.trace.length >= 12) throw new Error("本轮查阅次数较多，请缩小问题后继续");
+        const result = await tools.execute(call);
+        inspection.tool(call, result);
+        messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(result) });
+        update("planning");
+        if (messages.reduce((sum, message) => sum + (message.content?.length ?? 0), 0) > 100_000) {
+          throw new Error("本轮查阅量较大，请缩小问题；已取得的出处仍可查看");
+        }
       }
-      // In automatic mode, casual replies do not need a tool call or a mechanical citation.
-      return { answer, evidence: cited, trace: tools.trace };
     }
-    for (const call of reply.tool_calls) {
-      if (tools.trace.length >= 12) throw new Error("本轮查阅次数较多，请缩小问题后继续");
-      const result = await tools.execute(call);
-      messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(result) });
-      update("planning");
-      if (messages.reduce((sum, message) => sum + (message.content?.length ?? 0), 0) > 100_000) {
-        throw new Error("本轮查阅量较大，请缩小问题；已取得的出处仍可查看");
-      }
-    }
+    throw new Error("本轮查阅次数已用完，请将问题缩小到人物、章节或事件后继续");
+  } catch (error) {
+    inspection.fail(error instanceof Error ? error.message : String(error), signal.aborted);
+    throw error;
   }
-  throw new Error("本轮查阅次数已用完，请将问题缩小到人物、章节或事件后继续");
 }
