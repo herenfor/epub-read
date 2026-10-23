@@ -1,11 +1,13 @@
 import { createReadStream, statSync } from "node:fs";
 import { resolve, sep } from "node:path";
+import { installCompanionDiagnostics } from "./ai-companion-diagnostics.mjs";
 
 /** Dev middleware only: local Live2D materials never enter Vite's public copy/build. */
 export function aiCompanionDevAssets() {
   return {
     name: "ai-companion-local-assets",
     configureServer(server) {
+      installCompanionDiagnostics(server);
       const root = resolve(server.config.root, ".ai-companion-local");
       server.middlewares.use("/__ai-companion", (request, response) => {
         try {

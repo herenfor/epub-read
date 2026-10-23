@@ -7,6 +7,7 @@ import { createReadingLibrary, type LibraryBook } from "./retrieval";
 import { loadChatSettings, loadExchanges, loadMemories, saveChatSettings, saveExchanges, saveMemories } from "./storage";
 import { createChatTransport, messageText } from "./transport";
 import { InvestigationTrace } from "./InvestigationTrace";
+import { companionDiagnostics } from "./diagnostics";
 import type { ChatPhase, Evidence, InvestigationStep, ReadingContext, SavedExchange } from "./types";
 import "./companion.css";
 
@@ -50,6 +51,10 @@ export function CompanionPanel({ book, context, libraryBooks, onNavigate }: Comp
     }).catch(cause => { if (!disposed) setError(messageText(cause)); });
     return () => { disposed = true; current.current?.abort(); current.current = null; };
   }, [historyScope, book]);
+
+  useEffect(() => {
+    if (ready) companionDiagnostics.history(context, history);
+  }, [ready, context.bookHash, history]);
 
   const updateSettings = (patch: Partial<typeof settings>) => {
     const next = { ...settings, ...patch };
@@ -124,6 +129,8 @@ export function CompanionPanel({ book, context, libraryBooks, onNavigate }: Comp
       <fieldset disabled={running}>
         <label>API Base URL<input value={settings.baseUrl} onChange={event => updateSettings({ baseUrl: event.target.value })} placeholder="https://api.deepseek.com/v1" /></label>
         <label>{label("模型", "Model")}<input value={settings.model} onChange={event => updateSettings({ model: event.target.value })} /></label>
+        <label><input type="checkbox" checked={settings.thinkingEnabled} onChange={event => updateSettings({ thinkingEnabled: event.target.checked })} />{label("低强度思考（low）", "Low reasoning effort")}</label>
+        <small>{label("默认开启。DeepSeek 官方接口可切换开关；其他接口需支持 reasoning_effort，取消勾选则沿用服务端默认。", "Enabled by default. DeepSeek supports the explicit toggle; other endpoints must support reasoning_effort, and use their default when unchecked.")}</small>
         <label>API Key<input type="password" autoComplete="off" value={apiKey} onChange={event => { sessionApiKey = event.target.value; setApiKey(sessionApiKey); }} /></label>
         <small>{label("密钥只在本次应用内存中保留，关闭应用即清除。发问时会把所需原文、最近对话与记忆发送到所填 API。", "The key stays in memory until the app closes. Questions send selected passages, recent dialogue and memories to your API.")}</small>
         <label>{label("模式", "Mode")}<select value={settings.mode} onChange={event => updateSettings({ mode: event.target.value as "reading" | "auto" })}>
