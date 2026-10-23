@@ -19,8 +19,10 @@ function Invoke-Checked([string]$File, [string[]]$Arguments) {
 
 # Dedicated source copy and the existing AI app identity; no Core install, data or processes are touched.
 New-Item -ItemType Directory -Force $TestDirectory | Out-Null
+# Vite's root and resolved modules must agree, including packaged-host path redirection.
+$TestDirectory = Invoke-Checked $node @('-e', "process.stdout.write(require('node:fs').realpathSync.native(process.argv[1]))", $TestDirectory)
 if ([IO.Path]::GetFullPath($source).TrimEnd('\') -ne [IO.Path]::GetFullPath($TestDirectory).TrimEnd('\')) {
-    foreach ($file in @('package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'index.html', 'tsconfig.json', 'vite.config.ts', 'LICENSE', 'NOTICE', 'THIRD_PARTY_LICENSES.md')) {
+    foreach ($file in @('package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'index.html', 'tsconfig.json', 'vite.config.ts', 'LICENSE', 'LICENSING.md', 'NOTICE', 'THIRD_PARTY_LICENSES.md')) {
         if (Test-Path -LiteralPath "$source\$file") { Copy-Item -LiteralPath "$source\$file" -Destination $TestDirectory -Force }
     }
     foreach ($directory in @('src', 'src-tauri', 'scripts', 'public-ai', 'third-party-licenses', '.ai-companion-local')) {
@@ -63,7 +65,8 @@ try {
     }
     if (!$ready) { throw 'AI preview did not become ready; inspect the preview logs.' }
     Write-Host 'AI development only. Enter API settings in the reading companion panel; no tests are run by this launcher.'
-    Invoke-Checked $node @('node_modules/@tauri-apps/cli/tauri.js', 'dev', '--features', 'ai', '--config', 'src-tauri/tauri.ai.conf.json', '--config', '.cache/companion-dev.json')
+    # This is a copied development snapshot; do not watch its own Cargo output.
+    Invoke-Checked $node @('node_modules/@tauri-apps/cli/tauri.js', 'dev', '--no-watch', '--features', 'ai', '--config', 'src-tauri/tauri.ai.conf.json', '--config', '.cache/companion-dev.json')
 } finally {
     if ($preview -and !$preview.HasExited) { Stop-Process -Id $preview.Id -ErrorAction SilentlyContinue }
     foreach ($name in $environmentNames) { [Environment]::SetEnvironmentVariable($name, $previousEnvironment[$name], 'Process') }

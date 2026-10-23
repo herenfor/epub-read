@@ -54,6 +54,8 @@ implemented by this experiment.
 `pnpm dev:ai` starts a browser preview. `scripts/dev-windows-companion.ps1` prepares
 a dedicated Windows source copy and starts an AI debug app; it runs no tests and
 does not install or stop Core. It requires Node, pnpm and the Rust/MSVC toolchain.
+The copied snapshot disables Rust file watching so Cargo output cannot restart
+its own build. Rerun the launcher to copy later source changes.
 
 The sample model and Cubism Core stay in ignored `.ai-companion-local/`. Preserve
 their upstream licenses. They are served only by the AI dev middleware and are
