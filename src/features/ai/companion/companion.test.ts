@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ChatStreamDecoder } from "./transport";
 import { answerWithBooks } from "./conversation";
 import { chapterPage, fuseHits, type ReadingLibrary } from "./retrieval";
+import { rankLexicalHits } from "./retrieval/ranking";
 import type { ChatMessage, ChatTransport } from "./types";
 import type { ResolvedCrossBookSearchHit } from "../indexing/indexStore";
 
@@ -15,7 +16,7 @@ function fixture(responses: ChatMessage[], hits = [hit("one")]) {
   const messages: ChatMessage[][] = [];
   const library: ReadingLibrary = {
     context: { bookHash: "a".repeat(64), title: "测试书", creator: "", spineIndex: 1 },
-    books: [], chapters: () => [{ chapterPath: "c1.xhtml", title: "第一章", spineIndex: 1 }],
+    books: [], canRead: (hash, spine) => hash === "a".repeat(64) && spine <= 1, chapters: () => [{ chapterPath: "c1.xhtml", title: "第一章", spineIndex: 1 }],
     search: async () => hits, read: async () => ({ hits, offset: 0, nextOffset: null }),
   };
   const transport: ChatTransport = { complete: async input => {
@@ -42,19 +43,32 @@ describe("experimental reading companion", () => {
     expect(JSON.parse(result.tool_calls![0].function.arguments)).toEqual({ queries: ["甲"] });
   });
 
-  it("requires a real lookup and expanded context before accepting a causal answer", async () => {
+  it("automatic mode follows selected tools and reuses verified original evidence on follow-up", async () => {
     const f = fixture([
-      { role: "assistant", content: "甲故意没有去。" },
       tool("search_library", { queries: ["甲", "离开"] }),
-      { role: "assistant", content: "甲不知道。[E1]" },
-      tool("read_chapter", { bookHash: "a".repeat(64), chapterPath: "c1.xhtml", offset: 0 }),
+      tool("read_chapter", { bookHash: "a".repeat(64), chapterPath: "c1.xhtml", offset: 0, aroundEvidenceId: "E1" }),
       { role: "assistant", content: "原文说明甲当时并不知情。[E1]" },
     ]);
-    const result = await answerWithBooks({ ...f, question: "甲为什么没有去？", grounded: true, history: [], memories: "",
+    const result = await answerWithBooks({ ...f, question: "甲为什么没有去？", grounded: false, history: [], memories: "",
       signal: new AbortController().signal, onUpdate: () => {} });
-    expect(result.answer).toContain("并不知情");
+    expect(result.trace.map(step => step.tool)).toEqual(["search_library", "read_chapter"]);
     expect(result.evidence[0].text).toBe(hit("one").originalText);
-    expect(f.messages).toHaveLength(5);
+    const followup = fixture([{ role: "assistant", content: "是的，原文说的是当时不知道。[E1]" }]);
+    const second = await answerWithBooks({ ...followup, question: "所以不是故意拒绝？", grounded: false,
+      history: [{ id: "previous", question: "甲为什么没有去？", ...result, createdAt: 1 }], memories: "",
+      signal: new AbortController().signal, onUpdate: () => {} });
+    expect(second.trace).toEqual([]);
+    expect(second.evidence[0].hit.chunkId).toBe("one");
+    expect(followup.messages[0].some(message => message.content?.includes(hit("one").originalText))).toBe(true);
+  });
+
+  it("automatic mode can discuss a supplied passage without forcing tools or citations", async () => {
+    const f = fixture([{ role: "assistant", content: "这段给人的感觉是犹豫和遗憾。" }]);
+    const result = await answerWithBooks({ ...f, question: "为什么我觉得这段很难过？我贴给你看：……", grounded: false,
+      history: [], memories: "", signal: new AbortController().signal, onUpdate: () => {} });
+    expect(result.answer).toContain("犹豫和遗憾");
+    expect(result.trace).toEqual([]);
+    expect(f.messages).toHaveLength(1);
   });
 
   it("does not publish a guessed book fact when the actual retrieval is empty", async () => {
@@ -66,7 +80,11 @@ describe("experimental reading companion", () => {
     expect(result.evidence).toEqual([]);
   });
 
-  it("fuses distinct keyword rankings without letting overlapping chunks consume the result budget", () => {
+  it("compound queries keep the right passage and fusion preserves diverse original anchors", () => {
+    const exact = { ...hit("both"), normalizedText: "甲决定离开，因为归期已到。" };
+    const nameOnly = { ...hit("name"), normalizedText: "甲留下照顾花园。" };
+    const actionOnly = { ...hit("action"), normalizedText: "乙决定离开小镇。" };
+    expect(rankLexicalHits([nameOnly, actionOnly, exact], "甲 离开").map(item => item.chunkId)).toEqual(["both"]);
     const first = hit("first");
     const overlap = hit("overlap", 1);
     const other = { ...hit("other", 30), chapterPath: "other.xhtml" };

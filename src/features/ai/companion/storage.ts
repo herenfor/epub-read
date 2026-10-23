@@ -2,13 +2,15 @@ import type { ChatSettings, SavedExchange } from "./types";
 
 export const DEFAULT_CHAT_SETTINGS: ChatSettings = {
   baseUrl: "https://api.deepseek.com/v1", model: "deepseek-flash", scope: "book",
-  allowLaterChapters: false, mode: "reading",
+  allowLaterChapters: false, mode: "auto",
 };
 
 /** Separate from shelf/save storage. No API credentials are ever persisted here. */
 export function loadChatSettings(): ChatSettings {
   try {
-    return { ...DEFAULT_CHAT_SETTINGS, ...JSON.parse(localStorage.getItem("epub-reader:ai-companion-settings:v1") || "{}") };
+    const saved = JSON.parse(localStorage.getItem("epub-reader:ai-companion-settings:v1") || "{}");
+    // Old "chat" is the automatic tool mode; explicitly chosen strict reading stays strict.
+    return { ...DEFAULT_CHAT_SETTINGS, ...saved, mode: saved.mode === "reading" ? "reading" : "auto" };
   } catch { return { ...DEFAULT_CHAT_SETTINGS }; }
 }
 export function saveChatSettings(settings: ChatSettings): void {

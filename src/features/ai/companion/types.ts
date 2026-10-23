@@ -6,7 +6,7 @@ export interface ChatSettings {
   model: string;
   allowLaterChapters: boolean;
   scope: "book" | "library";
-  mode: "reading" | "chat";
+  mode: "auto" | "reading";
 }
 export interface ToolCall {
   id: string;
@@ -26,6 +26,7 @@ export interface ChatTool {
 }
 export interface Evidence {
   id: string;
+  corpusVersion?: string;
   bookHash: string;
   bookTitle: string;
   chapterPath: string;
@@ -48,6 +49,18 @@ export interface SavedExchange {
   evidence: Evidence[];
   createdAt: number;
   interrupted?: boolean;
+  trace?: InvestigationStep[];
+}
+export interface InvestigationStep {
+  tool: string;
+  status: "running" | "ok" | "empty" | "error" | "cancelled";
+  resultCount: number;
+  elapsedMs: number;
+  queries?: string[];
+  chapterPath?: string;
+  offset?: number;
+  nextOffset?: number | null;
+  error?: string;
 }
 export type ChatPhase = "planning" | "searching" | "reading" | "answering";
 export interface ChatTransport {

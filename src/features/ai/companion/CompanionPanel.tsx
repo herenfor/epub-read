@@ -6,7 +6,8 @@ import { answerWithBooks } from "./conversation";
 import { createReadingLibrary, type LibraryBook } from "./retrieval";
 import { loadChatSettings, loadExchanges, loadMemories, saveChatSettings, saveExchanges, saveMemories } from "./storage";
 import { createChatTransport, messageText } from "./transport";
-import type { ChatPhase, Evidence, ReadingContext, SavedExchange } from "./types";
+import { InvestigationTrace } from "./InvestigationTrace";
+import type { ChatPhase, Evidence, InvestigationStep, ReadingContext, SavedExchange } from "./types";
 import "./companion.css";
 
 const Avatar = lazy(() => import("./CompanionAvatar").then(module => ({ default: module.CompanionAvatar })));
@@ -34,6 +35,7 @@ export function CompanionPanel({ book, context, libraryBooks, onNavigate }: Comp
   const [draft, setDraft] = useState("");
   const [activeQuestion, setActiveQuestion] = useState("");
   const [evidence, setEvidence] = useState<readonly Evidence[]>([]);
+  const [trace, setTrace] = useState<readonly InvestigationStep[]>([]);
   const [error, setError] = useState("");
   const [showAvatar, setShowAvatar] = useState(true);
   const current = useRef<AbortController | null>(null);
@@ -41,7 +43,7 @@ export function CompanionPanel({ book, context, libraryBooks, onNavigate }: Comp
 
   useEffect(() => {
     let disposed = false;
-    setReady(false); setRunning(false); setError(""); setDraft(""); setEvidence([]); setActiveQuestion("");
+    setReady(false); setRunning(false); setError(""); setDraft(""); setEvidence([]); setTrace([]); setActiveQuestion("");
     void Promise.all([loadExchanges(historyScope), loadMemories()]).then(([exchanges, savedMemories]) => {
       if (disposed) return;
       setHistory(exchanges); setMemoryText(savedMemories); setReady(true);
@@ -60,23 +62,25 @@ export function CompanionPanel({ book, context, libraryBooks, onNavigate }: Comp
     const controller = new AbortController();
     current.current = controller;
     const text = question.trim();
-    setQuestion(""); setActiveQuestion(text); setDraft(""); setEvidence([]); setError(""); setRunning(true);
+    setQuestion(""); setActiveQuestion(text); setDraft(""); setEvidence([]); setTrace([]); setError(""); setRunning(true);
     let visibleText = "";
     let visibleEvidence: readonly Evidence[] = [];
+    let visibleTrace: readonly InvestigationStep[] = [];
     try {
       const result = await answerWithBooks({
         question: text, history, memories, grounded: settings.mode === "reading", signal: controller.signal,
         library: createReadingLibrary(book, context, libraryBooks, settings),
         transport: createChatTransport(settings, apiKey.trim()),
-        onUpdate(nextPhase, nextText, nextEvidence) {
+        onUpdate(nextPhase, nextText, nextEvidence, nextTrace) {
           if (current.current !== controller || controller.signal.aborted) return;
           visibleText = nextText; visibleEvidence = nextEvidence;
-          setPhase(nextPhase); setDraft(nextText); setEvidence(nextEvidence);
+          visibleTrace = nextTrace;
+          setPhase(nextPhase); setDraft(nextText); setEvidence(nextEvidence); setTrace(nextTrace);
         },
       });
       controller.signal.throwIfAborted();
       const next = [...history, { id: crypto.randomUUID(), question: text, answer: result.answer,
-        evidence: result.evidence, createdAt: Date.now() }].slice(-30);
+        evidence: result.evidence, trace: result.trace, createdAt: Date.now() }].slice(-30);
       if (current.current !== controller) return;
       setHistory(next); setDraft(""); setEvidence([]); setActiveQuestion("");
       await saveExchanges(historyScope, next);
@@ -85,7 +89,7 @@ export function CompanionPanel({ book, context, libraryBooks, onNavigate }: Comp
       if (controller.signal.aborted) {
         if (visibleText) {
           const next = [...history, { id: crypto.randomUUID(), question: text, answer: visibleText,
-            evidence: [...visibleEvidence], createdAt: Date.now(), interrupted: true }].slice(-30);
+            evidence: [...visibleEvidence], trace: [...visibleTrace], createdAt: Date.now(), interrupted: true }].slice(-30);
           setHistory(next); setDraft(""); setActiveQuestion("");
           await saveExchanges(historyScope, next).catch(error => setError(messageText(error)));
         }
@@ -111,7 +115,7 @@ export function CompanionPanel({ book, context, libraryBooks, onNavigate }: Comp
       {showAvatar && <Suspense fallback={<small>{label("正在加载测试形象…", "Loading sample avatar…")}</small>}><Avatar /></Suspense>}
       <div><h3>{label("一起读书", "Read together")}</h3>
         <p>{context.title} · {label("当前第", "Chapter ")}{context.spineIndex + 1}{label("个文档", "")}</p>
-        <p>{label("查证模式会先读原文再回答，出处可以点回书中。", "Reading mode checks original passages and links back to the book.")}</p>
+        <p>{label("由模型按需查阅原文，出处可以点回书中。", "The model chooses when to read; sources link back to the book.")}</p>
         <label><input type="checkbox" checked={showAvatar} onChange={event => setShowAvatar(event.target.checked)} />{label("显示测试形象", "Show sample avatar")}</label>
       </div>
     </div>
@@ -122,8 +126,8 @@ export function CompanionPanel({ book, context, libraryBooks, onNavigate }: Comp
         <label>{label("模型", "Model")}<input value={settings.model} onChange={event => updateSettings({ model: event.target.value })} /></label>
         <label>API Key<input type="password" autoComplete="off" value={apiKey} onChange={event => { sessionApiKey = event.target.value; setApiKey(sessionApiKey); }} /></label>
         <small>{label("密钥只在本次应用内存中保留，关闭应用即清除。发问时会把所需原文、最近对话与记忆发送到所填 API。", "The key stays in memory until the app closes. Questions send selected passages, recent dialogue and memories to your API.")}</small>
-        <label>{label("模式", "Mode")}<select value={settings.mode} onChange={event => updateSettings({ mode: event.target.value as "reading" | "chat" })}>
-          <option value="reading">{label("书本查证", "Book investigation")}</option><option value="chat">{label("日常交流", "Conversation")}</option>
+        <label>{label("模式", "Mode")}<select value={settings.mode} onChange={event => updateSettings({ mode: event.target.value as "reading" | "auto" })}>
+          <option value="auto">{label("自动 · 按需查阅", "Automatic · read as needed")}</option><option value="reading">{label("严格查证 · 实验对照", "Strict evidence · comparison")}</option>
         </select></label>
         <label>{label("检索范围", "Search scope")}<select value={settings.scope} onChange={event => updateSettings({ scope: event.target.value as "book" | "library" })}>
           <option value="book">{label("当前书籍", "Current book")}</option><option value="library" disabled={!native}>{label("已建库的全部书籍", "Indexed library")}</option>
@@ -142,9 +146,10 @@ export function CompanionPanel({ book, context, libraryBooks, onNavigate }: Comp
         <strong>{exchange.question}</strong><p>{exchange.answer}</p>
         {exchange.interrupted && <small>{label("未完成", "Interrupted")}</small>}
         {sourceButtons(exchange.evidence)}
+        <InvestigationTrace steps={exchange.trace ?? []} />
       </article>)}
       {activeQuestion && <article><strong>{activeQuestion}</strong>{draft && <p>{draft}</p>}
-        {sourceButtons(evidence)}</article>}
+        {sourceButtons(evidence)}<InvestigationTrace steps={trace} /></article>}
     </div>
     {running && <p role="status">{phaseLabels[phase]}</p>}
     {error && <p role="alert" className="companion-error">{error}</p>}
