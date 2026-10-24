@@ -52,6 +52,20 @@ export function useCloudSync(): CloudSyncView {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
+/**
+ * A failure the backend will not retry on its own: the round stopped in
+ * error with no retry time. Backoff (network, rate limit, 5xx) keeps a retry
+ * time and a cancel goes back to idle, so neither asks the user for anything.
+ */
+export function cloudSyncNeedsAttention(status: CloudSyncStatus | null): boolean {
+  return status?.phase === "error" && status.lastError !== null && status.lastError.code !== "cancelled"
+    && status.retryAtMs === null;
+}
+
+export function useCloudSyncAttention(): boolean {
+  return cloudSyncNeedsAttention(useCloudSync().status);
+}
+
 export function cloudSyncSupported(): boolean {
   return getRuntimeCapabilities().supportsCloudSync;
 }

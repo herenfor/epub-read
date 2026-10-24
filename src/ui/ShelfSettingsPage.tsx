@@ -6,7 +6,8 @@ import { AboutInfo } from "./AboutInfo";
 import { Icon, SettingsRow, UpdateDot } from "./settingsRows";
 import { useAppUpdateDot } from "./appUpdate/appUpdateStore";
 import { CacheStoragePanel } from "./CacheStoragePanel";
-import { CloudSyncPanel, useCloudSyncRowDetail } from "./cloudSync/CloudSyncPanel";
+import { CloudSyncPanel, CloudSyncQuickAction, useCloudSyncRowDetail } from "./cloudSync/CloudSyncPanel";
+import { useCloudSyncAttention } from "./cloudSync/cloudSyncStore";
 import { useExitPresence } from "./menuMotion";
 import { useUiMotion, type UiMotion } from "./motionPreference";
 import { useUiText } from "./localization/UiLanguageProvider";
@@ -116,6 +117,10 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
   const readingTitles = useReadingSettingsTitles(props);
   const updateDot = useAppUpdateDot();
   const syncDetail = useCloudSyncRowDetail();
+  const syncDot = useCloudSyncAttention();
+  /** The section's red dot as its accessible label, or false. */
+  const sectionDot = (id: ShelfSettingsSection): string | false =>
+    id === "about" && updateDot ? t("about.update.dot") : id === "sync" && syncDot ? t("cloudSync.attention") : false;
   // Touch: a section is a page pushed over the home page. It stays mounted
   // while it slides back out, and only slides in when opened from home (a
   // page that opens straight onto a section arrives with the whole sheet).
@@ -276,7 +281,7 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
         {sections.map((item) => <button key={item.id} type="button" aria-current={item.id === current?.id ? "page" : undefined}
           className={item.id === current?.id ? "active" : ""} onClick={() => setSection(item.id)}>
           <span className="shelf-settings-nav-icon">{SECTION_ICONS[item.id]}</span>{item.title}
-          {item.id === "about" && updateDot && <UpdateDot />}
+          {sectionDot(item.id) && <UpdateDot label={sectionDot(item.id) || undefined} />}
         </button>)}
       </nav>
       <section className="shelf-settings-main">
@@ -305,7 +310,8 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
         <div className="shelf-settings-group-label">{t("shelfSettings.more")}</div>
         <div className="shelf-settings-card is-list">
           {sections.slice(1).map((item) => <SettingsRow key={item.id} icon={SECTION_ICONS[item.id]} title={item.title}
-            detail={item.detail} dot={item.id === "about" && updateDot} onClick={() => openSection(item.id)} />)}
+            detail={item.detail} dot={sectionDot(item.id)} action={item.id === "sync" ? <CloudSyncQuickAction /> : undefined}
+            onClick={() => openSection(item.id)} />)}
         </div>
       </div>
     </section>;

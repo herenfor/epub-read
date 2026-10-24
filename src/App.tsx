@@ -124,7 +124,7 @@ import { hasOwnField, chapterLabelForIndex, useNoteEditRef, replaceNoteEditConte
 import { BookmarkPagesPopover, WARM_BOOKMARK_PAGES_SCREEN } from "./ui/BookmarkPagesPopover";
 import { isEditableTarget } from "./ui/bookmarkRibbons";
 import { createLazyFontController } from "./ui/fontRuntime";
-import { currentUiLocale, uiPlural, uiText, useUiText } from "./ui/localization/UiLanguageProvider";
+import { uiPlural, uiText, useUiText } from "./ui/localization/UiLanguageProvider";
 import { FootnotePop } from "./ui/FootnotePop";
 import { LogPanel, type LogItem } from "./ui/LogPanel";
 import { ReaderView, type ReaderHandle } from "./ui/ReaderView";
@@ -272,6 +272,7 @@ import { createEditionAiRuntime } from "./features/ai/lifecycle/editionRuntime";
 import { IS_AI_EDITION } from "./config/edition";
 import { registerAppUpdateSaveGate, startAppUpdates } from "./ui/appUpdate/appUpdateStore";
 import { noteCloudSyncChange, startCloudSync } from "./ui/cloudSync/cloudSyncStore";
+import { ProgressSourceChoices, type ProgressSourceCandidate } from "./ui/cloudSync/ProgressSourceChoices";
 
 // This is intentionally a compile-time edition branch. The core build has no
 // static dependency on the AI panel or its model-asset subtree; AI builds keep
@@ -358,13 +359,9 @@ function toPersistedReaderAnchor(value: {
 }
 
 
-type PortableProgressChoiceCandidate = {
+type PortableProgressChoiceCandidate = ProgressSourceCandidate & {
   readonly stamp: Stamp;
   readonly version: Version<ProgressValue>;
-  readonly chapterPath: string | null;
-  readonly spineIndex: number;
-  readonly progressPct: number;
-  readonly updatedAtMs: number;
 };
 
 function portableProgressVersions(entry: ShelfEntry): readonly Version<ProgressValue>[] {
@@ -2330,10 +2327,10 @@ export default function App() {
                 .map((version): PortableProgressChoiceCandidate => {
                   const projection = projectProgressVersion(version);
                   return {
+                    key: `${version.stamp.deviceId}:${version.stamp.counter}`,
+                    deviceId: version.stamp.deviceId,
                     stamp: version.stamp,
                     version,
-                    chapterPath: projection.chapterPath,
-                    spineIndex: projection.spineIndex,
                     progressPct: projection.value?.progressPctHint ?? 0,
                     updatedAtMs: version.updatedAtMs,
                   };
@@ -6273,38 +6270,10 @@ export default function App() {
             <p style={{ margin: "0 0 14px", fontSize: 14, lineHeight: 1.5 }}>
               {uiPlural("appUi.progressChoice.body", progressChoice.candidates.length, { title: progressChoice.title, count: progressChoice.candidates.length })}
             </p>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {progressChoice.candidates.map((candidate) => (
-                <button
-                  key={`${candidate.stamp.deviceId}:${candidate.stamp.counter}`}
-                  type="button"
-                  onClick={() => resolveProgressChoice(candidate.stamp)}
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "flex-start",
-                    gap: 4,
-                    width: "100%",
-                    padding: "10px 12px",
-                    border: "1px solid var(--border, #d0d0d0)",
-                    borderRadius: 8,
-                    background: "var(--surface, #fff)",
-                    color: "inherit",
-                    textAlign: "left",
-                    cursor: "pointer",
-                  }}
-                >
-                  <strong style={{ fontSize: 14 }}>
-                    {candidate.chapterPath
-                      ? candidate.chapterPath.split("/").pop() || candidate.chapterPath
-                      : t("appUi.chapterN", { n: linearChapterNumber(spineLinear, candidate.spineIndex) ?? candidate.spineIndex + 1 })}
-                  </strong>
-                  <span style={{ fontSize: 12, opacity: 0.75 }}>
-                    {candidate.progressPct}% · {new Date(candidate.updatedAtMs).toLocaleString(currentUiLocale())}
-                  </span>
-                </button>
-              ))}
-            </div>
+            <ProgressSourceChoices
+              candidates={progressChoice.candidates}
+              onChoose={(candidate) => resolveProgressChoice(candidate.stamp)}
+            />
             <button
               type="button"
               onClick={() => resolveProgressChoice(null)}
