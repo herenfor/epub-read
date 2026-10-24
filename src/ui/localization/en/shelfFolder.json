@@ -38,6 +38,7 @@
   "shelfFolder.modal.count.other": "{count} books",
   "shelfFolder.modal.count.one": "{count} book",
   "shelfFolder.modal.rename": "Rename Folder",
+  "shelfFolder.modal.sort": "Sort inside folders (shelf unchanged)",
   "shelfFolder.modal.close.tip": "Close",
   "shelfFolder.modal.close": "Close folder",
   "shelfFolder.modal.empty.touch": "Folder is empty. Select \"Move to Folder\" in the book's \"More\" menu.",

@@ -41,6 +41,7 @@ export const shelfFolder = defineMessages("shelfFolder", {
   "shelfFolder.modal.count.other": { zh: "{count} 本", max: 10 },
   "shelfFolder.modal.count.one": { zh: "{count} 本", note: "Singular form.", max: 10 },
   "shelfFolder.modal.rename": "重命名文件夹",
+  "shelfFolder.modal.sort": "文件夹内排序（不影响书架）",
   "shelfFolder.modal.close.tip": "关闭",
   "shelfFolder.modal.close": "关闭文件夹",
   "shelfFolder.modal.empty.touch": { zh: "文件夹暂无书籍，可在书籍“更多”菜单中选择“移动到文件夹”", note: "Quoted names refer to the book card 'More' menu and its 'Move to folder' item (shelf.card.moveToFolder)." },
