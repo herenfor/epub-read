@@ -99,6 +99,7 @@ const PHASE_LABELS: Record<string, PlainMessageKey> = {
   copying: "lan.phase.copying",
   committing: "lan.phase.committing",
   receiving: "lan.phase.receiving",
+  sending: "lan.phase.sending",
 };
 
 export interface LanProgressView {

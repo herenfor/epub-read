@@ -454,6 +454,32 @@ describe("useLanSaveSession", () => {
     expect(bridge.acceptLanSave).toHaveBeenCalledWith("race", "t2");
   });
 
+  it("打包完成后显示真实发送字节，旧编号和发送结束后的迟到帧不回灌", async () => {
+    const emit = await joinPaired("bytes");
+    const sending = deferred<LanSendResult>();
+    bridge.sendLanSave.mockReturnValueOnce(sending.promise);
+    let sent!: Promise<void>;
+    await dom.run(() => { sent = latest!.send("all", false); });
+    const frame = (event: string, transferId: string, phase: string, processedBytes: number) =>
+      emit({ event, sessionId: "bytes", transferId, progress: { phase, processedBytes, totalBytes: 100 } });
+    await dom.run(() => { frame("exporting", "t1", "writing", 100); });
+    expect(latest!.state.progress).toEqual({ phase: "writing", processedBytes: 100, totalBytes: 100 });
+
+    await dom.run(() => { frame("sending", "t1", "sending", 40); });
+    expect(latest!.state.status).toBe("sending");
+    expect(latest!.state.progress).toEqual({ phase: "sending", processedBytes: 40, totalBytes: 100 });
+    await dom.run(() => { frame("sending", "old", "sending", 90); });
+    expect(latest!.state.progress?.processedBytes).toBe(40);
+    await dom.run(() => { frame("sending", "t1", "sending", 100); });
+    expect(latest!.state.progress?.processedBytes).toBe(100);
+
+    await dom.run(async () => { sending.resolve(sendResult("completed")); await sent; await settle(); });
+    expect(latest!.state.status).toBe("settling");
+    await dom.run(() => { frame("sending", "t1", "sending", 100); });
+    expect(latest!.state.status).toBe("settling");
+    expect(latest!.state.progress).toBeNull();
+  });
+
   it("ready 先于提交结果到达时回到已连接，而不是停在本批收尾", async () => {
     const emit = await joinPaired("commit-race");
     bridge.acceptLanSave.mockResolvedValueOnce(preview("c"));

@@ -36,6 +36,7 @@ export const lan = defineMessages("lan", {
   "lan.phase.copying": "正在传输",
   "lan.phase.committing": "正在写入书架",
   "lan.phase.receiving": "正在接收",
+  "lan.phase.sending": "正在发送",
   "lan.phase.working": "正在处理",
   "lan.progress.bytes": { zh: "{done} / {total}", note: "Sizes like '3.2 MB'." },
   "lan.progress.processed": "已处理 {done}",
