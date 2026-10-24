@@ -279,6 +279,7 @@ impl Repository for Local {
             Ok(LocalSnapshot {
                 state: store.snapshot()?,
                 bound: store.locally_bound_hashes()?,
+                event_device_id: store.installation_id()?,
             })
         })
         .await
@@ -296,6 +297,7 @@ impl Repository for Local {
                 snapshot: LocalSnapshot {
                     state: after,
                     bound: store.locally_bound_hashes()?,
+                    event_device_id: store.installation_id()?,
                 },
             })
         })
@@ -305,6 +307,330 @@ impl Repository for Local {
 
 fn activity() -> watch::Receiver<Activity> {
     watch::channel(Activity::default()).1
+}
+
+#[tokio::test]
+async fn progress_sources_keep_three_independent_choices_and_resolve_them() {
+    use crate::portable_state::{AdoptSelection, EntityRef, WriteIntent};
+    let temp = Temp::new();
+    let remote = Remote::new();
+    let token = Cancel::default();
+    let hash = "a".repeat(64);
+    let cloud_ids = [A, B, "00000000-0000-4000-8000-000000000003"];
+    let labels = ["Desktop", "Phone", "Tablet"];
+    let locals = [
+        Local::new(&temp, "a", empty()),
+        Local::new(&temp, "b", empty()),
+        Local::new(&temp, "c", empty()),
+    ];
+    let actors = locals
+        .iter()
+        .map(|l| l.0.lock().unwrap().installation_id().unwrap().unwrap())
+        .collect::<Vec<_>>();
+    let disks = [
+        temp.disk("sync-a"),
+        temp.disk("sync-b"),
+        temp.disk("sync-c"),
+    ];
+    let mut sessions = Vec::new();
+    // All three write independently, before receiving any other progress.
+    for i in 0..3 {
+        assert_ne!(actors[i], cloud_ids[i]);
+        locals[i].seed(book(&actors[i], &hash, 2, (i as u64 + 1) * 20));
+        let mut saved = session();
+        saved.device_label = labels[i].into();
+        sessions.push(
+            run(
+                &remote,
+                &locals[i],
+                &disks[i],
+                saved,
+                identity(cloud_ids[i]),
+                activity(),
+                &token,
+            )
+            .await
+            .unwrap()
+            .session,
+        );
+    }
+    sessions[0] = run(
+        &remote,
+        &locals[0],
+        &disks[0],
+        sessions[0].clone(),
+        identity(A),
+        activity(),
+        &token,
+    )
+    .await
+    .unwrap()
+    .session;
+    assert_eq!(
+        locals[0].snapshot().await.unwrap().state.books[&hash]
+            .progress
+            .versions
+            .len(),
+        3
+    );
+    // B's full file relays A, and C relays both: they must not steal A's name.
+    let mut requested = actors.clone();
+    requested.push(cloud_ids[0].into()); // cloud identity is NOT an event identity
+    let sources = super::super::sources::query(
+        &disks[0],
+        Some(&sessions[0].info()),
+        Some(&actors[0]),
+        requested,
+    )
+    .unwrap();
+    assert_eq!(sources[0].device_name.as_deref(), Some("Desktop"));
+    assert!(sources[0].is_local);
+    assert_eq!(sources[1].device_name.as_deref(), Some("Phone"));
+    assert!(!sources[1].is_local);
+    assert_eq!(sources[2].device_name.as_deref(), Some("Tablet"));
+    assert_eq!(sources[3].device_name, None);
+    assert!(!sources[3].is_local);
+    {
+        let mut store = locals[0].0.lock().unwrap();
+        let (read, book) = store.read(&hash).unwrap();
+        let value = book
+            .unwrap()
+            .progress
+            .versions
+            .into_iter()
+            .find(|v| v.stamp.device_id == actors[1])
+            .unwrap()
+            .value;
+        let basis = store
+            .adopt(
+                &read,
+                EntityRef::Progress {
+                    book_hash: hash.clone(),
+                },
+                AdoptSelection::ShownAll,
+            )
+            .unwrap();
+        store
+            .write_progress(&basis, WriteIntent::Resolve, value, 2000)
+            .unwrap();
+    }
+    // Choosing one shown candidate dominates all three observed branches.
+    for i in 0..3 {
+        sessions[i] = run(
+            &remote,
+            &locals[i],
+            &disks[i],
+            sessions[i].clone(),
+            identity(cloud_ids[i]),
+            activity(),
+            &token,
+        )
+        .await
+        .unwrap()
+        .session;
+        let current = locals[i].snapshot().await.unwrap().state;
+        let versions = &current.books[&hash].progress.versions;
+        assert_eq!(versions.len(), 1);
+        assert_eq!(versions[0].value.as_ref().unwrap().progress_pct_hint, 40);
+    }
+    // A display-name change needs no progress event and keeps only two owned
+    // declarations. The other two devices' declarations remain untouched.
+    let state = locals[0].snapshot().await.unwrap().state;
+    for label in ["Desktop 2", "Desktop", "Desktop 4"] {
+        sessions[0].device_label = label.into();
+        sessions[0] = run(
+            &remote,
+            &locals[0],
+            &disks[0],
+            sessions[0].clone(),
+            identity(A),
+            activity(),
+            &token,
+        )
+        .await
+        .unwrap()
+        .session;
+    }
+    assert_eq!(locals[0].snapshot().await.unwrap().state, state);
+    let current_sources =
+        super::super::sources::query(&disks[0], Some(&sessions[0].info()), None, actors.clone())
+            .unwrap();
+    assert_eq!(current_sources[0].device_name.as_deref(), Some("Desktop 4"));
+    {
+        let files = remote.0.lock().unwrap();
+        assert_eq!(
+            files
+                .files
+                .keys()
+                .filter(|name| name.starts_with(&format!("devices/{A}.source-v1.")))
+                .count(),
+            2
+        );
+        for id in &cloud_ids[1..] {
+            assert_eq!(
+                files
+                    .files
+                    .keys()
+                    .filter(|name| name.starts_with(&format!("devices/{id}.source-v1.")))
+                    .count(),
+                1
+            );
+        }
+        assert!(!files
+            .files
+            .keys()
+            .any(|name| name.ends_with("source-pending")));
+    }
+    let writes = remote.0.lock().unwrap().writes;
+    sessions[0] = run(
+        &remote,
+        &locals[0],
+        &disks[0],
+        sessions[0].clone(),
+        identity(A),
+        activity(),
+        &token,
+    )
+    .await
+    .unwrap()
+    .session;
+    assert_eq!(remote.0.lock().unwrap().writes, writes);
+    // Local cache damage is recoverable without changing library records.
+    std::fs::write(disks[0].root.join("progress-sources.json"), b"broken").unwrap();
+    sessions[0] = run(
+        &remote,
+        &locals[0],
+        &disks[0],
+        sessions[0].clone(),
+        identity(A),
+        activity(),
+        &token,
+    )
+    .await
+    .unwrap()
+    .session;
+    assert_eq!(
+        super::super::sources::query(&disks[0], Some(&sessions[0].info()), None, actors.clone())
+            .unwrap()[1]
+            .device_name
+            .as_deref(),
+        Some("Phone")
+    );
+    let mut another_connection = sessions[0].clone();
+    another_connection.connection_id = uuid().unwrap();
+    assert!(super::super::sources::query(
+        &disks[0],
+        Some(&another_connection.info()),
+        None,
+        actors
+    )
+    .unwrap()
+    .iter()
+    .all(|s| s.device_name.is_none()));
+    disks[0].disconnect().unwrap();
+    assert!(!disks[0].root.join("progress-sources.json").exists());
+}
+
+#[tokio::test]
+async fn source_failure_keeps_backups_and_cleans_only_owned_pending() {
+    let temp = Temp::new();
+    let remote = Remote::new();
+    let token = Cancel::default();
+    let local = Local::new(&temp, "a", book(A, &"a".repeat(64), 2, 20));
+    let actor = local.snapshot().await.unwrap().event_device_id.unwrap();
+    let disk = temp.disk("sync");
+    let mut saved = session();
+    for label in ["Desktop", "Desktop 2"] {
+        saved.device_label = label.into();
+        saved = run(
+            &remote,
+            &local,
+            &disk,
+            saved,
+            identity(A),
+            activity(),
+            &token,
+        )
+        .await
+        .unwrap()
+        .session;
+    }
+    let before = remote.0.lock().unwrap().files.clone();
+    saved.device_label = "Desktop 3".into();
+    remote.0.lock().unwrap().fail_publish = true;
+    let failure = run(
+        &remote,
+        &local,
+        &disk,
+        saved.clone(),
+        identity(A),
+        activity(),
+        &token,
+    )
+    .await
+    .err()
+    .unwrap();
+    assert_eq!(failure.remote.unwrap().code, RemoteErrorCode::Timeout);
+    assert_eq!(remote.0.lock().unwrap().files, before);
+    assert_eq!(
+        super::super::sources::query(&disk, Some(&saved.info()), None, vec![actor.clone()])
+            .unwrap()[0]
+            .device_name
+            .as_deref(),
+        Some("Desktop 2")
+    );
+    remote.0.lock().unwrap().fail_publish = false;
+    saved = run(
+        &remote,
+        &local,
+        &disk,
+        saved,
+        identity(A),
+        activity(),
+        &token,
+    )
+    .await
+    .unwrap()
+    .session;
+    assert_eq!(
+        super::super::sources::query(&disk, Some(&saved.info()), None, vec![actor]).unwrap()[0]
+            .device_name
+            .as_deref(),
+        Some("Desktop 3")
+    );
+    let pending = format!("devices/.{A}.{NONCE}.source-pending");
+    let foreign = format!("devices/.{B}.{NONCE}.source-pending");
+    {
+        let mut memory = remote.0.lock().unwrap();
+        assert_eq!(
+            memory
+                .files
+                .keys()
+                .filter(|name| name.contains(".source-v1."))
+                .count(),
+            2
+        );
+        // Simulate a killed process and another device's incomplete upload.
+        memory.files.insert(pending.clone(), vec![0]);
+        memory.files.insert(foreign.clone(), vec![0]);
+    }
+    run(
+        &remote,
+        &local,
+        &disk,
+        saved,
+        identity(A),
+        activity(),
+        &token,
+    )
+    .await
+    .unwrap();
+    let memory = remote.0.lock().unwrap();
+    assert!(!memory.files.contains_key(&pending));
+    assert!(memory.files.contains_key(&foreign));
+    for (name, bytes) in before.iter().filter(|(name, _)| name.contains(".v2.")) {
+        assert_eq!(memory.files.get(name), Some(bytes));
+    }
 }
 
 #[tokio::test]
@@ -954,6 +1280,7 @@ async fn live_two_device_metadata_roundtrip() {
         assert_eq!(
             directory(&remote, &token)
                 .await?
+                .0
                 .iter()
                 .filter(|file| file.id == A)
                 .count(),

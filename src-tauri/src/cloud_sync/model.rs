@@ -216,6 +216,7 @@ impl Default for Activity {
 pub struct LocalSnapshot {
     pub state: PortableStateV3,
     pub bound: BTreeSet<String>,
+    pub event_device_id: Option<String>,
 }
 
 pub struct Applied {

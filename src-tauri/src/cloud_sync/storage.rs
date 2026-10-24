@@ -76,7 +76,7 @@ fn storage() -> Failure {
     Failure::new(FailureCode::StorageError)
 }
 
-fn read(path: &Path, limit: usize) -> Result<Option<Vec<u8>>> {
+pub(super) fn read(path: &Path, limit: usize) -> Result<Option<Vec<u8>>> {
     let file = match fs::File::open(path) {
         Ok(file) => file,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -189,6 +189,7 @@ impl Disk {
     }
 
     pub fn disconnect(&self) -> Result<()> {
+        self.clear_sources()?;
         match fs::remove_file(self.root.join("connection.json.gz")) {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -206,7 +207,7 @@ impl Disk {
         fs::rename(path, recovery).map_err(|_| storage())
     }
 
-    fn atomic(&self, name: &str, bytes: &[u8]) -> Result<()> {
+    pub(super) fn atomic(&self, name: &str, bytes: &[u8]) -> Result<()> {
         let mut builder = fs::DirBuilder::new();
         builder.recursive(true);
         #[cfg(unix)]
