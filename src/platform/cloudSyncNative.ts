@@ -87,6 +87,14 @@ export interface CloudSyncPreview {
   capabilities: { moveFile: boolean; conditionalCreate: boolean; moveNoReplace: boolean };
 }
 
+/** Who wrote a progress version, keyed by its stamp's event device id; display only. */
+export interface CloudSyncProgressSource {
+  eventDeviceId: string;
+  /** Null when unknown (no declaration yet, ambiguous, or not connected). */
+  deviceName: string | null;
+  isLocal: boolean;
+}
+
 export interface CloudSyncConnectionInput {
   baseUrl: string;
   remoteRoot: string;
@@ -116,6 +124,8 @@ export const cloudSyncNative = {
   resetIdentity: () => invoke<CloudSyncStatus>("cloud_sync_reset_identity"),
   devices: () => invoke<CloudSyncDevice[]>("cloud_sync_devices"),
   cloudBooks: () => invoke<CloudSyncBook[]>("cloud_sync_cloud_books"),
+  progressSources: (eventDeviceIds: string[]) =>
+    invoke<CloudSyncProgressSource[]>("cloud_sync_progress_sources", { eventDeviceIds }),
   onStatus: (handler: (event: CloudSyncStatusEvent) => void): Promise<UnlistenFn> =>
     listen<CloudSyncStatusEvent>("cloud-sync-status", (event) => handler(event.payload)),
   onLibraryChanged: (handler: () => void): Promise<UnlistenFn> =>

@@ -15,6 +15,91 @@
   padding: 0 4px;
 }
 
+/* Opening a book with several progress versions: device and time, then where. */
+.progress-source-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.progress-source-item {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--panel-border, var(--border, #d0d0d0));
+  border-radius: 10px;
+  background: var(--panel-bg, var(--surface, #fff));
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.progress-source-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.progress-source-head strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+}
+
+.progress-source-head time {
+  flex: 0 0 auto;
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.progress-source-where {
+  font-size: 12.5px;
+  color: var(--muted, inherit);
+  opacity: 0.85;
+}
+
+.app[data-touch-ui="true"] .progress-source-item {
+  min-height: 60px;
+}
+
+/* Settings home: 立即同步 beside the 同步 row. */
+.cloud-sync-quick {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  margin-right: 14px;
+  padding: 0 12px;
+  border: 1px solid var(--panel-border);
+  border-radius: 9px;
+  background: var(--bg);
+  color: var(--accent);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.cloud-sync-quick:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+.app[data-touch-ui="true"] .cloud-sync-quick {
+  min-height: 40px;
+}
+
 .cloud-sync-muted {
   margin: 0;
   font-size: 12.5px;

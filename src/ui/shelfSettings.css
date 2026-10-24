@@ -298,6 +298,23 @@
   border-bottom: 0;
 }
 
+/* A row with a shortcut: the shortcut sits in the row's trailing slot, before the chevron's place. */
+.shelf-settings-row-wrap {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 60%, transparent);
+}
+
+.shelf-settings-row-wrap:last-child {
+  border-bottom: 0;
+}
+
+.shelf-settings-row-wrap > .shelf-settings-row {
+  flex: 1;
+  min-width: 0;
+  border-bottom: 0;
+}
+
 .shelf-settings-row:disabled {
   opacity: 0.5;
   cursor: default;

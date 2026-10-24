@@ -75,6 +75,7 @@ import {
 import "./shelfZen.css";
 import { ShelfFolderAddBooksDialog } from "./ShelfFolderAddBooksDialog";
 import { useAppUpdateDot } from "./appUpdate/appUpdateStore";
+import { useCloudSyncAttention } from "./cloudSync/cloudSyncStore";
 import { uiPlural, uiText, useUiText } from "./localization/UiLanguageProvider";
 import type { PlainMessageKey } from "./localization/core";
 
@@ -2950,7 +2951,12 @@ export function ShelfView(props: ShelfViewProps) {
     const first = schedule(() => { second = schedule(() => setShelfPainted(true)); });
     return () => { cancel(first); cancel(second); };
   }, []);
-  const updateDot = useAppUpdateDot();
+  // The gear carries both the update dot and a sync failure that needs the user.
+  const appUpdateDot = useAppUpdateDot();
+  const syncAttention = useCloudSyncAttention();
+  const updateDot = appUpdateDot || syncAttention;
+  const settingsLabel = [t("shelfSettings.title"), ...(appUpdateDot ? [t("about.update.dot")] : []),
+    ...(syncAttention ? [t("cloudSync.attention")] : [])].join(" · ");
   const [settingsSection, setSettingsSection] = useState<ShelfSettingsSection | undefined>(undefined);
   const [filterOpen, setFilterOpen] = useState(false);
   const [bodySearchOpen, setBodySearchOpen] = useState(false);
@@ -4461,7 +4467,7 @@ export function ShelfView(props: ShelfViewProps) {
                   className="shelf-icon-btn-zen shelf-mobile-more-btn"
                   ref={menuButtonRef}
                   type="button"
-                  aria-label={updateDot ? `${t("shelfSettings.title")} · ${t("about.update.dot")}` : t("shelfSettings.title")}
+                  aria-label={settingsLabel}
                   aria-expanded={settingsOpen}
                   aria-haspopup="dialog"
                   onClick={() => openSettings()}
@@ -4635,7 +4641,7 @@ export function ShelfView(props: ShelfViewProps) {
                 className="shelf-icon-btn-zen"
                 ref={menuButtonRef}
                 type="button"
-                aria-label={updateDot ? `${t("shelfSettings.title")} · ${t("about.update.dot")}` : t("shelfSettings.title")}
+                aria-label={settingsLabel}
                 aria-expanded={settingsOpen}
                 aria-haspopup="dialog"
                 onClick={() => openSettings()}

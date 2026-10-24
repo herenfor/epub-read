@@ -11,7 +11,7 @@ import {
 import { useUiText } from "../localization/UiLanguageProvider";
 import type { PlainMessageKey } from "../localization/core";
 import { CHEVRON, Icon, SettingsRow } from "../settingsRows";
-import { adoptCloudSyncStatus, refreshCloudSyncStatus, runCloudSyncAction, useCloudSync } from "./cloudSyncStore";
+import { adoptCloudSyncStatus, cloudSyncNeedsAttention, refreshCloudSyncStatus, runCloudSyncAction, useCloudSync } from "./cloudSyncStore";
 import "./cloudSync.css";
 
 type Translate = ReturnType<typeof useUiText>["t"];
@@ -401,9 +401,33 @@ export function CloudSyncPanel({ active }: { active: boolean }) {
   </div>;
 }
 
-/** The settings home row's muted line. */
+/** The settings home row's muted line: the live phase once connected. */
 export function useCloudSyncRowDetail(): string {
   const { t } = useUiText();
   const { status } = useCloudSync();
-  return status?.connection ? t("cloudSync.detail.on", { host: hostOf(status.connection.baseUrl) }) : t("cloudSync.detail.off");
+  if (status?.connection) return phaseLine(t, status);
+  return cloudSyncNeedsAttention(status) ? t("cloudSync.phase.error") : t("cloudSync.detail.off");
+}
+
+/**
+ * The settings home row's one-tap round. Shown only while connected (the row
+ * itself opens the connect form otherwise); a queued request is not a
+ * success, the row's phase line reports the real outcome.
+ */
+export function CloudSyncQuickAction() {
+  const { t } = useUiText();
+  const { status } = useCloudSync();
+  const [busy, setBusy] = useState(false);
+  if (!status?.connection) return null;
+  const running = status.phase === "syncing" || status.phase === "queued";
+  const run = async (): Promise<void> => {
+    setBusy(true);
+    const result = await runCloudSyncAction(() => cloudSyncNative.trigger("manual"));
+    setBusy(false);
+    if (result.ok) adoptCloudSyncStatus(result.value);
+  };
+  return <button type="button" className="cloud-sync-quick" disabled={busy || running} onClick={() => void run()}>
+    {running && <span className="about-spinner" aria-hidden="true" />}
+    {t("cloudSync.syncNow")}
+  </button>;
 }
