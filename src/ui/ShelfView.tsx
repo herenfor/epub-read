@@ -1905,9 +1905,13 @@ function ShelfMoveDialog(props: ShelfMoveDialogProps) {
  * 手机拟物居中文件夹弹窗组件（Folder Modal）
  * ========================================================================= */
 
-interface ShelfFolderModalProps {
+interface ShelfFolderModalProps extends ShelfSubmenuBackProps {
   folder: { id: string; name: string };
+  /** Already in the folder sort order. */
   books: ShelfEntry[];
+  sort: ShelfSort;
+  sortDisabled?: boolean;
+  onSortChange(sort: ShelfSort): void;
   provider: ThumbnailProvider;
   originRect?: DOMRect;
   closing: boolean;
@@ -1976,6 +1980,22 @@ const ShelfFolderModal = memo(function ShelfFolderModal(props: ShelfFolderModalP
             <FolderIcon />
             <span className="shelf-folder-modal-title" title={folder.name}>{folder.name}</span>
             <span className="shelf-folder-modal-count">{tn("shelfFolder.modal.count", books.length, { count: books.length })}</span>
+          </div>
+          <div className="shelf-folder-modal-sort">
+            <ShelfSelect
+              registerSubmenuBackHandler={props.registerSubmenuBackHandler}
+              onSubmenuBackActiveChange={props.onSubmenuBackActiveChange}
+              value={props.sort}
+              busy={props.sortDisabled}
+              title={t("shelfFolder.modal.sort")}
+              options={[
+                { value: "recent", label: t("shelfMain.sort.recent") },
+                { value: "added", label: t("shelfMain.sort.added") },
+                { value: "title", label: t("shelfMain.sort.title") },
+                { value: "progress", label: t("shelfMain.sort.progress") },
+              ]}
+              onChange={(val) => props.onSortChange(val as ShelfSort)}
+            />
           </div>
           <div className="shelf-folder-modal-actions">
             {/* 手机标题与动作同一行：导出/重命名/解散收进与文件夹卡片相同的操作面板。 */}
@@ -2160,14 +2180,17 @@ function ShelfSelect(props: ShelfSubmenuBackProps & {
     const onDown = (e: PointerEvent): void => {
       if (!ref.current?.contains(e.target as Node)) closeDropdown();
     };
+    // Capture and claim Escape so a dialog around the dropdown (folder modal) stays open.
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") closeDropdown();
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      closeDropdown();
     };
     window.addEventListener("pointerdown", onDown);
-    window.addEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, true);
     return () => {
       window.removeEventListener("pointerdown", onDown);
-      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keydown", onKey, true);
     };
   }, [open, closing, closeDropdown]);
 
@@ -2836,6 +2859,9 @@ const NEXT_SHELF_DENSITY: Record<ShelfDensity, ShelfDensity> = {
 /** Drawn back to back right after the shelf's first paint (no idle wait). */
 const SETTINGS_WARM_BATCHES: readonly PanelWarmBatch[] = [["shelf-settings"], ["shelf-settings-pages"]];
 
+const SHELF_SORTS: readonly ShelfSort[] = ["recent", "added", "title", "progress"];
+const FOLDER_SORT_STORAGE_KEY = "epub_shelf_folder_sort";
+
 export function ShelfView(props: ShelfViewProps) {
   const { t, tn } = useUiText();
   const organization = props.organization ?? emptyOrganization();
@@ -2851,7 +2877,27 @@ export function ShelfView(props: ShelfViewProps) {
   );
 
   const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<ShelfSort>("recent");
+  const [shelfSort, setShelfSort] = useState<ShelfSort>("recent");
+  // 文件夹内（弹窗与全页文件夹）共用一个本机排序；未选过时跟随书架排序，改它不重排根层。
+  const [folderSortChoice, setFolderSortChoice] = useState<ShelfSort | null>(() => {
+    try {
+      const stored = localStorage.getItem(FOLDER_SORT_STORAGE_KEY);
+      return SHELF_SORTS.includes(stored as ShelfSort) ? stored as ShelfSort : null;
+    } catch {
+      return null;
+    }
+  });
+  const folderSort = folderSortChoice ?? shelfSort;
+  const chooseFolderSort = useCallback((next: ShelfSort): void => {
+    setFolderSortChoice(next);
+    try {
+      localStorage.setItem(FOLDER_SORT_STORAGE_KEY, next);
+    } catch {
+      // ignore
+    }
+  }, []);
+  const sort = scope.type === "folder" ? folderSort : shelfSort;
+  const setSort = scope.type === "folder" ? chooseFolderSort : setShelfSort;
   const [density, setDensityState] = useState<ShelfDensity>(() => {
     try {
       const stored = localStorage.getItem("epub_shelf_density");
@@ -3287,9 +3333,9 @@ export function ShelfView(props: ShelfViewProps) {
       }
     }
     // Books inside a folder follow the shelf sort too; the first one represents the folder.
-    for (const [id, books] of folderMap) folderMap.set(id, sortShelfEntries(books, sort));
+    for (const [id, books] of folderMap) folderMap.set(id, sortShelfEntries(books, shelfSort));
     return { folderBooksMap: folderMap, unclassifiedBooks: unclassified, favoriteBooks: favorites };
-  }, [organization, props.entries, activeFolders, sort]);
+  }, [organization, props.entries, activeFolders, shelfSort]);
 
   const bookExportDisabled = Boolean(props.busy || props.saveFileActive || props.lanTransferActive);
   const handleExportFolderBooks = useCallback((folderId: string): void => {
@@ -3404,8 +3450,8 @@ export function ShelfView(props: ShelfViewProps) {
     if (statusTab !== "all") return [];
     const q = query.trim().toLowerCase();
     const matched = q ? activeFolders.filter((f) => f.name.toLowerCase().includes(q)) : activeFolders;
-    return sortShelfFolders(matched, folderBooksMap, sort);
-  }, [scope, statusTab, activeFolders, query, folderBooksMap, sort]);
+    return sortShelfFolders(matched, folderBooksMap, shelfSort);
+  }, [scope, statusTab, activeFolders, query, folderBooksMap, shelfSort]);
 
   const virtualizer = useShelfVirtualizer(
     shelfViewRef,
@@ -4974,7 +5020,7 @@ export function ShelfView(props: ShelfViewProps) {
                 onSubmenuBackActiveChange={reportSubmenuBackActive}
                 value={sort}
                 busy={props.busy}
-                title={t("shelfMain.sort")}
+                title={scope.type === "folder" ? t("shelfFolder.modal.sort") : t("shelfMain.sort")}
                 options={[
                   { value: "recent", label: t("shelfMain.sort.recent") },
                   { value: "added", label: t("shelfMain.sort.added") },
@@ -5339,12 +5385,17 @@ export function ShelfView(props: ShelfViewProps) {
       {activeFolderModal && (() => {
         const folder = activeFolders.find((f) => f.id === activeFolderModal.folderId);
         if (!folder) return null;
-        const books = folderBooksMap.get(folder.id) ?? [];
+        const books = sortShelfEntries(folderBooksMap.get(folder.id) ?? [], folderSort);
         return (
           <ShelfFolderModal
             compact={isCompactMobile}
             folder={folder}
             books={books}
+            sort={folderSort}
+            sortDisabled={props.busy}
+            onSortChange={chooseFolderSort}
+            registerSubmenuBackHandler={registerSubmenuBackHandler}
+            onSubmenuBackActiveChange={reportSubmenuBackActive}
             provider={thumbnailProvider}
             originRect={activeFolderModal.originRect}
             closing={folderModalClosing}

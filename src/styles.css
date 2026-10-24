@@ -4814,6 +4814,14 @@ select option {
   flex-shrink: 0;
 }
 
+.shelf-folder-modal-sort {
+  flex-shrink: 0;
+}
+
+.shelf-folder-modal-sort .shelf-select-btn {
+  min-width: 96px;
+}
+
 .shelf-folder-modal-actions {
   display: flex;
   align-items: center;
@@ -4872,6 +4880,18 @@ select option {
 
 .app[data-mobile-chrome="true"][data-layout="compact"] .shelf-folder-modal-actions {
   gap: 0;
+}
+
+/* 手机一行放不下排序：换到标题下方单独一行，标题仍占满首行。 */
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-folder-modal-head {
+  flex-wrap: wrap;
+  row-gap: 0;
+}
+
+.app[data-mobile-chrome="true"][data-layout="compact"] .shelf-folder-modal-sort {
+  order: 1;
+  flex-basis: 100%;
+  padding-bottom: 10px;
 }
 
 .shelf-folder-modal-body {
