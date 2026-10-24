@@ -373,6 +373,10 @@ export function useLanSaveSession(options: UseLanSaveSessionOptions): UseLanSave
             errorCode: null,
           });
           break;
+        case "sending":
+          // Network bytes after export; a frame racing the send result must not reopen the batch.
+          if (current.status === "sending") updateState({ progress: event.progress ?? current.progress });
+          break;
         case "receiving":
           updateState({
             status: "receiving",

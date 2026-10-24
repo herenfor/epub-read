@@ -30,6 +30,7 @@
   "lan.phase.copying": "Transferring",
   "lan.phase.committing": "Saving to library",
   "lan.phase.receiving": "Receiving",
+  "lan.phase.sending": "Sending",
   "lan.phase.working": "Processing",
   "lan.progress.bytes": "{done} / {total}",
   "lan.progress.processed": "{done} processed",
