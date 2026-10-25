@@ -1,5 +1,11 @@
 # Reader capability tools
 
+Standard agent integration is available through the optional
+[MCP stdio adapter](../../../../integrations/reader-tools/README.md). It discovers
+the same authorized schemas, preserves original data and reports structured
+tool errors. DSH and the CLI remain alternative clients; the reader API does
+not depend on a bot's persona, conversation or memory.
+
 `catalog.ts` defines discoverable JSON schemas; `service.ts` validates calls,
 filters the host's book grant and binds pagination to the source/query.
 `shelfBackend.ts` and `bookAccess.ts` reuse the existing repository, selective ZIP
@@ -72,6 +78,12 @@ On Windows the CLI discovers native client `local` automatically. Use
 select a different connection. `--input-file -` reads an argument object from
 stdin. JSON goes to stdout; errors use nonzero exit codes. Ctrl+C cancels an
 ordinary call. No model key, AIRI, DSH or memory store is needed.
+
+The CLI and optional agent adapters share `integrations/reader-tools/client.mjs`:
+it bounds bytes while receiving, rejects oversized legacy replies without
+truncating text, checks API/request identity, preserves structured reader errors,
+uses a total deadline and rereads credentials per call. The caller still owns
+admission of the complete model request.
 
 The five original read tools provide book discovery/metadata, chapter listing,
 paged original passages and single-book lexical search. Search extracts chapters

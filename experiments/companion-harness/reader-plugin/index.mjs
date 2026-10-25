@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { validateJsonSchemaValue } from '@deepseek-ai/dsh-tools';
+import { createReaderArgumentValidator } from 'epub-reader-agent-tools/validation';
 import { createReaderClient } from './client.mjs';
 import { dshSchema, selectReadTools, READING_GUIDANCE } from './policy.mjs';
 
@@ -39,9 +39,10 @@ export async function apply(ctx, config = {}) {
       clear();
       for (const tool of declarations) {
         const parameters = dshSchema(tool.inputSchema);
+        const accepts = createReaderArgumentValidator(parameters);
         const dispose = ctx.tools.register({ name: tool.name, description: tool.description, parameters, output,
           async execute(args, exec) {
-            if (validateJsonSchemaValue(parameters, args).length) throw new Error('Invalid reader tool arguments');
+            if (!accepts(args)) throw new Error('Invalid reader tool arguments');
             return createReaderClient(connectionFile, { maxResponseBytes })('/call', {
               name: tool.name, arguments: args, maxResponseBytes,
             }, signalFor(exec.signal, 125_000));
@@ -58,12 +59,13 @@ export async function apply(ctx, config = {}) {
     } finally { refreshing = false; }
     return status();
   }
+  const acceptsNoArgs = createReaderArgumentValidator(noArgs);
   for (const [toolName, description, execute] of [
     ['reader_connection_status', 'Check this optional reader connection and its currently registered read tools. Does not access conversation memory.', async () => status()],
     ['reader_refresh_tools', 'Reconnect to the local EPUB Reader after it starts or restarts; discover its authorized read-only tools. Does not open books or build indices.', (_args, exec) => refresh(exec.signal)],
   ]) ctx.tools.register({ name: toolName, description, parameters: noArgs, output,
     async execute(args, exec) {
-      if (validateJsonSchemaValue(noArgs, args).length) throw new Error('This reader control takes no arguments');
+      if (!acceptsNoArgs(args)) throw new Error('This reader control takes no arguments');
       return execute(args, exec);
     },
   });
