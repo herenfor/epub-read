@@ -23,6 +23,7 @@ API that permits CORS. No production AI actions or Android entry are enabled her
 | `transport.ts` | Standard streaming chat protocol and cancellation |
 | `requestPolicy.ts` | Provider request parameters and low-thinking defaults |
 | `diagnostics.ts` | Selected request metadata, returned passages and actual evidence delivery |
+| `eventLog.ts` | Timestamped, bounded metadata timeline in the AI database; no text or credentials |
 | `storage.ts` | AI-only settings, database upgrade and explicitly edited memories |
 | `conversationStore.ts` | Append-only conversation timeline, bounded reads and source-checked derived records |
 | `contextBudget.ts` | Replaceable token estimates, request ledger and capacity guard |
@@ -74,6 +75,14 @@ keeps tool descriptions and permission-checked execution independent of that loo
 A harness must replace the loop and have one agreed context/persistence owner;
 do not stack automatic compaction or import raw hidden-reasoning logs. No external
 harness or MCP runtime is installed or enabled by this interface.
+
+The AI-only event log retains the latest 1000 metadata events across reloads:
+conversation saves, request/tool timing, context compaction and memory job states.
+It includes IDs/counts, never prompt/answer text, API credentials or hidden
+reasoning. Writes run off the foreground path; failed logging is reported by the
+diagnostic snapshot. This is an operational timeline, not a backup of messages.
+The local diagnostic endpoint exposes it as `eventLog`; it starts collecting when
+the companion panel is opened after the AI development bootstrap succeeds.
 
 Low thinking is enabled by default (8192 completion tokens); the checkbox turns
 it off for DeepSeek (4096 tokens). Other endpoints receive `reasoning_effort: low`

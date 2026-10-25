@@ -4,6 +4,8 @@ import { COMPANION_PROMPT_VERSION } from "./prompts";
 import type { ChatMessage, ChatRequestInfo, Evidence, ReadingContext, SavedExchange, ToolCall } from "./types";
 import type { ContextLedger } from "./contextBudget";
 import type { ConversationSegment, MemoryEntry } from "./conversationStore";
+import { observeCompanionEvents, recordCompanionEvent, type CompanionEventDetails,
+  type CompanionEventType, type EventLogSnapshot } from "./eventLog";
 
 interface ContextMaterial {
   history: Array<{ id: string; revision: number; question: string; answer: string; createdAt: number; context?: ReadingContext; interrupted: boolean }>;
@@ -20,9 +22,11 @@ interface DiagnosticTurn {
   context: ReadingContext;
   requestInfo?: ChatRequestInfo;
   promptVersion: string;
+  startedAt: number;
+  finishedAt?: number;
   status: "running" | "complete" | "error" | "cancelled";
-  requests: Array<{ suppliedEvidenceIds: string[]; messageCount: number; reasoningReceived?: boolean; context?: ContextLedger }>;
-  tools: Array<{ name: string; arguments: unknown; result: unknown }>;
+  requests: Array<{ startedAt: number; finishedAt?: number; suppliedEvidenceIds: string[]; messageCount: number; reasoningReceived?: boolean; context?: ContextLedger }>;
+  tools: Array<{ startedAt: number; finishedAt: number; name: string; arguments: unknown; result: unknown }>;
   evidence: ReturnType<typeof diagnosticSource>[];
   contextMaterial?: ContextMaterial;
   answer?: string;
@@ -30,12 +34,14 @@ interface DiagnosticTurn {
 }
 
 /** Only selected diagnostic fields enter this in-memory snapshot; no HTTP request or key is accepted. */
-export function createDiagnosticRecorder(changed: () => void = () => {}) {
+export function createDiagnosticRecorder(changed: () => void = () => {},
+  event: (type: CompanionEventType, details: CompanionEventDetails) => void = () => {}) {
   const state = { schemaVersion: 1 as const, updatedAt: 0, context: null as ReadingContext | null,
-    history: [] as unknown[], turns: [] as DiagnosticTurn[] };
+    history: [] as unknown[], turns: [] as DiagnosticTurn[], eventLog: { events: [], persistence: "ready" } as EventLogSnapshot };
   const notify = () => { state.updatedAt = Date.now(); changed(); };
   return {
     snapshot: () => structuredClone(state),
+    eventLog(snapshot: EventLogSnapshot) { state.eventLog = snapshot; notify(); },
     history(context: ReadingContext, exchanges: readonly SavedExchange[]) {
       state.context = { ...context };
       state.history = exchanges.slice(-6).map(exchange => ({ question: exchange.question, answer: exchange.answer,
@@ -44,13 +50,17 @@ export function createDiagnosticRecorder(changed: () => void = () => {}) {
         coverage: "Historical citations only; uncited tool results were not retained." }));
       notify();
     },
-    begin(question: string, context: ReadingContext, requestInfo?: ChatRequestInfo) {
+    begin(question: string, context: ReadingContext, requestInfo?: ChatRequestInfo, exchangeId?: string) {
       const turn: DiagnosticTurn = { id: crypto.randomUUID(), question, context: { ...context },
+        startedAt: Date.now(),
         requestInfo: requestInfo && { providerHost: requestInfo.providerHost, model: requestInfo.model,
           thinking: requestInfo.thinking, maxTokens: requestInfo.maxTokens },
         promptVersion: COMPANION_PROMPT_VERSION, status: "running", requests: [], tools: [], evidence: [] };
       state.turns.push(turn); state.turns = state.turns.slice(-3); notify();
+      event("turn.started", { turnId: turn.id, exchangeId, bookHash: context.bookHash });
+      const toolStarts = new Map<string, number>();
       return {
+        id: turn.id,
         request(messages: readonly ChatMessage[], evidence: readonly Evidence[], context?: ContextLedger, material?: ContextMaterial) {
           turn.evidence = evidence.map(diagnosticSource);
           // One selected snapshot per turn; per-request IDs say which records
@@ -63,11 +73,20 @@ export function createDiagnosticRecorder(changed: () => void = () => {}) {
               memories: [...new Map([...(previous?.memories ?? []), ...material.memories].map(item => [item.id, item])).values()],
             });
           }
-          turn.requests.push({ suppliedEvidenceIds: evidence.map(source => source.id), messageCount: messages.length,
+          turn.requests.push({ startedAt: Date.now(), suppliedEvidenceIds: evidence.map(source => source.id), messageCount: messages.length,
             ...(context ? { context: structuredClone(context) } : {}) }); notify();
+          event("model.requested", { turnId: turn.id, request: turn.requests.length, inputTokens: context?.inputTokens,
+            softLimit: context?.softLimit, evidenceCount: evidence.length });
         },
         reply(message: ChatMessage) {
-          turn.requests[turn.requests.length - 1].reasoningReceived = Boolean(message.reasoning_content); notify();
+          const request = turn.requests[turn.requests.length - 1];
+          request.reasoningReceived = Boolean(message.reasoning_content); request.finishedAt = Date.now(); notify();
+          event("model.completed", { turnId: turn.id, request: turn.requests.length,
+            elapsedMs: request.finishedAt - request.startedAt, answerCharacters: message.content?.length ?? 0 });
+        },
+        toolStarted(call: ToolCall) {
+          toolStarts.set(call.id, Date.now());
+          event("tool.started", { turnId: turn.id, tool: call.function.name });
         },
         tool(call: ToolCall, result: unknown) {
           let args: Record<string, unknown> = {};
@@ -76,15 +95,20 @@ export function createDiagnosticRecorder(changed: () => void = () => {}) {
             if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) args = parsed as Record<string, unknown>;
           } catch { /* Execution already reports invalid JSON. */ }
           const fields = ["queries", "query", "bookHash", "chapterPath", "offset", "aroundEvidenceId"];
-          turn.tools.push({ name: call.function.name,
+          const finishedAt = Date.now();
+          turn.tools.push({ startedAt: toolStarts.get(call.id) ?? finishedAt, finishedAt, name: call.function.name,
             arguments: Object.fromEntries(fields.filter(key => Object.hasOwn(args, key)).map(key => [key, args[key]])),
             result: structuredClone(result) }); notify();
+          event("tool.completed", { turnId: turn.id, tool: call.function.name,
+            elapsedMs: finishedAt - (toolStarts.get(call.id) ?? finishedAt) });
         },
         finish(answer: string, evidence: readonly Evidence[]) {
-          turn.status = "complete"; turn.answer = answer; turn.evidence = evidence.map(diagnosticSource); notify();
+          turn.status = "complete"; turn.finishedAt = Date.now(); turn.answer = answer; turn.evidence = evidence.map(diagnosticSource); notify();
+          event("turn.completed", { turnId: turn.id, elapsedMs: turn.finishedAt - turn.startedAt, evidenceCount: evidence.length });
         },
         fail(error: string, cancelled: boolean) {
-          turn.status = cancelled ? "cancelled" : "error"; turn.error = error; notify();
+          turn.status = cancelled ? "cancelled" : "error"; turn.finishedAt = Date.now(); turn.error = error; notify();
+          event(cancelled ? "turn.cancelled" : "turn.failed", { turnId: turn.id, elapsedMs: turn.finishedAt - turn.startedAt });
         },
       };
     },
@@ -108,5 +132,11 @@ const recorder = createDiagnosticRecorder(() => {
     }
     publishing = false;
   });
-});
+}, recordCompanionEvent);
+let observingEvents = false;
+export function startCompanionEventDiagnostics(): void {
+  if (observingEvents || typeof indexedDB === "undefined" || !isAiDevelopmentActionsAllowed()) return;
+  observingEvents = true;
+  observeCompanionEvents(snapshot => recorder.eventLog(snapshot));
+}
 export const companionDiagnostics = recorder;
