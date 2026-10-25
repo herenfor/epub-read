@@ -348,6 +348,49 @@ pub fn linked_library_relink(
         .ok_or_else(|| "重新定位后无法读取书籍记录".into())
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevealSourceResult {
+    /// "revealed", or "missing" when the book's file is gone.
+    status: &'static str,
+}
+
+/// Opens File Explorer with the book's file selected (Windows). Read-only:
+/// no record, binding or sync state changes.
+#[tauri::command]
+pub async fn linked_library_reveal_source(
+    app: AppHandle,
+    content_hash: String,
+) -> Result<RevealSourceResult, LinkedLibraryError> {
+    if !valid_content_hash(&content_hash) {
+        return Err("无效的书籍内容指纹".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let target = {
+            let state = app.state::<LinkedLibraryWriteState>();
+            let _guard = state
+                .0
+                .lock()
+                .map_err(|_| "链接书库写入锁已损坏".to_string())?;
+            let records = load_records(&app)?;
+            if !records.iter().any(|record| record.content_hash == content_hash) {
+                return Err(LinkedLibraryError::from("书库中没有这本书"));
+            }
+            reveal_target(&library_root(&app)?, &load_bindings(&app)?, &content_hash)
+        };
+        match target {
+            RevealTarget::Missing => Ok(RevealSourceResult { status: "missing" }),
+            RevealTarget::File(path) => {
+                tauri_plugin_opener::reveal_item_in_dir(&path)
+                    .map_err(|error| format!("无法打开文件资源管理器：{error}"))?;
+                Ok(RevealSourceResult { status: "revealed" })
+            }
+        }
+    })
+    .await
+    .map_err(|error| format!("文件资源管理器工作线程失败：{error}"))?
+}
+
 #[tauri::command]
 pub fn linked_library_update_progress(
     app: AppHandle,

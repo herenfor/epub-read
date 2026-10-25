@@ -1657,6 +1657,32 @@
     }
 
     #[test]
+    fn reveal_points_at_the_linked_original_or_the_library_copy_and_reports_missing_files() {
+        let root = organization_temp_dir("reveal-target");
+        let snapshot = FileSnapshot { size: 1, mtime_ns: 2 };
+        let linked_hash = "3".repeat(64);
+        let managed_hash = "4".repeat(64);
+        let original = root.join("用户的书 01.epub");
+        fs::write(&original, b"x").unwrap();
+        let copy = managed_source_path(&root, &managed_hash).unwrap();
+        fs::create_dir_all(copy.parent().unwrap()).unwrap();
+        fs::write(&copy, b"x").unwrap();
+        let bindings = vec![
+            sample_linked_binding(&linked_hash, &original, snapshot.clone()),
+            sample_managed_binding(&managed_hash, snapshot.clone()),
+        ];
+
+        assert_eq!(reveal_target(&root, &bindings, &linked_hash), RevealTarget::File(original.clone()));
+        assert_eq!(reveal_target(&root, &bindings, &managed_hash), RevealTarget::File(copy.clone()));
+        assert_eq!(reveal_target(&root, &bindings, &"5".repeat(64)), RevealTarget::Missing);
+
+        fs::remove_file(&original).unwrap();
+        fs::remove_file(&copy).unwrap();
+        assert_eq!(reveal_target(&root, &bindings, &linked_hash), RevealTarget::Missing);
+        assert_eq!(reveal_target(&root, &bindings, &managed_hash), RevealTarget::Missing);
+    }
+
+    #[test]
     fn bk4_managed_delete_treats_not_found_as_complete() {
         let root = organization_temp_dir("bk4-managed-not-found");
         let hash = "2".repeat(64);

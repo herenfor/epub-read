@@ -1474,3 +1474,18 @@ export function resetShelfStoreForTest(): void {
   portableActivation = null;
   portableReadinessRecovery = null;
 }
+
+/**
+ * Opens File Explorer with the book's file selected: the user's own file for a
+ * linked book, the library copy for a managed one. Only the content hash is
+ * sent; the native side resolves the path. "missing" means the file is gone.
+ */
+export async function revealShelfSource(contentHash: string): Promise<"revealed" | "missing"> {
+  try {
+    const result = await invoke<{ status: "revealed" | "missing" }>("linked_library_reveal_source", { contentHash });
+    return result.status;
+  } catch (error) {
+    const message = (error as { message?: unknown } | null)?.message;
+    throw new Error(typeof message === "string" && message ? message : String(error));
+  }
+}
