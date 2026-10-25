@@ -8,6 +8,7 @@ const help = `EPUB Reader tools (Windows AI development)
   node scripts/reader-cli.mjs --connection-file <file> books find --query <text> --json
   node scripts/reader-cli.mjs --connection-file <file> book get --book <id> --json
   node scripts/reader-cli.mjs --connection-file <file> chapters list --book <id> --json
+  node scripts/reader-cli.mjs --connection-file <file> library search --query <text> --json
   node scripts/reader-cli.mjs --connection-file <file> text search --book <id> --query <text> --json
   node scripts/reader-cli.mjs --connection-file <file> text read --book <id> --chapter <id> --json
   node scripts/reader-cli.mjs --connection-file <file> call <tool> --input-file <json-file or -> --json
@@ -17,6 +18,7 @@ const help = `EPUB Reader tools (Windows AI development)
   node scripts/reader-cli.mjs index cancel --book <id> --task <id> --json
 Windows native default: %LOCALAPPDATA%/dev.epubreader.ai/reader-tools/<client>.json (client=local).
 Use --client <id> or --connection-file <file>. Browser development still writes .cache/reader-tools-<port>.json.
+Use --max-response-bytes <1024..262144> to bound a complete tool reply (default 32768).
 This client provides reading and optional index preparation; it does not call a model or access conversation memory.
 `;
 const fail = (code, message, retryable = false) => ({ apiVersion: '1', ok: false, error: { code, message, retryable } });
@@ -26,7 +28,7 @@ export async function runReaderCli(argv, { fetcher = fetch, stdin = process.stdi
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--json') continue;
     if (argv[i].startsWith('--')) {
-      if (!['connection-file', 'client', 'task', 'book', 'chapter', 'query', 'cursor', 'around-chunk', 'folder-id', 'limit', 'favorite', 'input-file'].includes(argv[i].slice(2))) {
+      if (!['connection-file', 'client', 'max-response-bytes', 'task', 'book', 'chapter', 'query', 'cursor', 'around-chunk', 'folder-id', 'limit', 'favorite', 'input-file'].includes(argv[i].slice(2))) {
         return { result: fail('INVALID_ARGUMENTS', `Unknown option ${argv[i]}`), exitCode: 2 };
       }
       if (!argv[i + 1] || argv[i + 1].startsWith('--')) return { result: fail('INVALID_ARGUMENTS', `${argv[i]} needs a value`), exitCode: 2 };
@@ -47,7 +49,8 @@ export async function runReaderCli(argv, { fetcher = fetch, stdin = process.stdi
   }
   let name; const args = {};
   const command = words.join(' ');
-  if (command === 'index status') name = 'reader_get_index_status';
+  if (command === 'library search') name = 'reader_search_library';
+  else if (command === 'index status') name = 'reader_get_index_status';
   else if (command === 'index prepare') name = 'reader_prepare_index';
   else if (command === 'index cancel') name = 'reader_cancel_index';
   else if (command === 'books find') name = 'reader_find_books';
@@ -68,6 +71,8 @@ export async function runReaderCli(argv, { fetcher = fetch, stdin = process.stdi
   for (const [flag, field] of Object.entries({ task: 'taskId', book: 'bookId', chapter: 'chapterId', query: 'query', cursor: 'cursor', 'around-chunk': 'aroundChunkId', 'folder-id': 'folderId' })) {
     if (flags[flag] !== undefined) args[field] = flags[flag];
   }
+  if (name === 'reader_search_library' && flags.query !== undefined) { args.queries = [flags.query]; delete args.query; }
+  if (name === 'reader_search_library' && flags.book !== undefined) { args.bookIds = [flags.book]; delete args.bookId; }
   if (flags.limit !== undefined) args.limit = Number(flags.limit);
   if (flags.favorite !== undefined) args.favorite = flags.favorite === 'true' ? true : flags.favorite === 'false' ? false : flags.favorite;
   const controller = new AbortController();
@@ -76,7 +81,8 @@ export async function runReaderCli(argv, { fetcher = fetch, stdin = process.stdi
   try {
     const response = await fetcher(`${connection.endpoint}/${name ? 'call' : command === 'status' ? 'status' : 'tools'}`, { method: name ? 'POST' : 'GET',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${connection.token}` }, signal: controller.signal, redirect: 'error',
-      ...(name ? { body: JSON.stringify({ requestId: randomUUID(), name, arguments: args }) } : {}) });
+      ...(name ? { body: JSON.stringify({ requestId: randomUUID(), name, arguments: args,
+        ...(flags['max-response-bytes'] === undefined ? {} : { maxResponseBytes: Number(flags['max-response-bytes']) }) }) } : {}) });
     const result = await response.json();
     return { result, exitCode: response.ok && result.ok ? 0 : 1 };
   } catch {

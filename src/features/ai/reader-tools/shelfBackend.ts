@@ -4,7 +4,7 @@ import { CORPUS_CHUNKER_VERSION } from "../../../core/chunking";
 import { getShelfStore } from "../../../ui/shelf";
 import { effectiveFolderId, isFavorite } from "../../../ui/libraryOrganization";
 import { currentBookReader } from "../companion/retrieval/currentBook";
-import { rankLexicalHits } from "../companion/retrieval/ranking";
+import { rankLexicalHits } from "../retrieval/lexical";
 import type { ResolvedCrossBookSearchHit } from "../indexing/indexStore";
 import { ReaderToolError, type ReaderPassage, type ReaderToolBackend } from "./contracts";
 

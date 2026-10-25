@@ -5,6 +5,7 @@ import { createReaderToolService } from "./service";
 import { createShelfToolBackend } from "./shelfBackend";
 import { createShelfBookAccess } from "./bookAccess";
 import { createReaderIndexBackend } from "./indexBackend";
+import { createIndexedSearchBackend } from "./indexedSearch";
 import type { ReaderToolGrant, ReaderToolRequest } from "./contracts";
 
 type Frame = { type: "call"; id: string; request: ReaderToolRequest; grant: ReaderToolGrant } | { type: "cancel"; id: string };
@@ -42,7 +43,7 @@ export async function startNativeReaderToolProvider(): Promise<void> {
     },
   });
   const indexes = createReaderIndexBackend(access, contentHash => invoke("reader_tools_index_acquire", { sessionId, contentHash }));
-  const backend = { ...createShelfToolBackend(access), ...indexes };
+  const backend = { ...createShelfToolBackend(access), ...indexes, ...createIndexedSearchBackend() };
   const channel = new Channel<Frame>();
   channel.onmessage = frame => {
     if (frame.type === "cancel") { jobs.get(frame.id)?.abort(); return; }

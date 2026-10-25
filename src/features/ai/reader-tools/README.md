@@ -57,6 +57,7 @@ previous provider identity. Queued calls cannot drift into a different provider.
 node scripts/reader-cli.mjs tools --json
 node scripts/reader-cli.mjs status --json
 node scripts/reader-cli.mjs books find --query "title" --json
+node scripts/reader-cli.mjs library search --query "term alternative" --limit 8 --max-response-bytes 16384 --json
 node scripts/reader-cli.mjs chapters list --book <bookId> --json
 node scripts/reader-cli.mjs text search --book <bookId> --query "term" --json
 node scripts/reader-cli.mjs text read --book <bookId> --chapter <chapterId> --json
@@ -90,7 +91,72 @@ usable index. Ordinary queries never initiate a full-library rebuild.
 
 These tasks populate the existing persistent corpus used by library/companion
 retrieval. The original `reader_search_text` contract still uses chapter
-extraction; library-wide indexed search is a separate subsequent capability.
+extraction. `reader_search_library` searches current, available, authorized
+books through the existing persistent index; it never opens EPUBs or silently
+prepares missing indices. `queries` accepts up to six alternative short clues;
+space-separated terms within a clue must occur together. Optional `bookIds`
+narrows the granted library, and an empty array searches no books.
+
+Search returns at most 20 short, exact-substring previews (eight by default),
+not full chunks. Use a hit's bookId, chapterId and chunkId with
+`reader_read_passages`/`aroundChunkId` to inspect its original context. The
+anchor identifies the source chunk; `excerpt` is only a preview and is never
+substituted into `originalText`.
+
+`coverage` counts scoped/current/missing/outdated/unavailable books. Its
+`complete` flag concerns index coverage, not whether every matching passage
+was returned or read. `truncated` and `candidateLimitReached` describe result
+limits separately. An empty result with incomplete coverage cannot establish
+that the entire library has no answer. Scope is passed to SQL before ranking
+and Top-K. The browser development provider does not advertise indexed search
+unless an implementation is attached.
+
+## Response and model-context budgets
+
+Tool calls accept optional `maxResponseBytes` on the request envelope, outside
+model-generated `arguments`: 1024–262144 bytes, default 32768. The bound covers
+the complete serialized UTF-8 reply, including identities, cursors and budget
+metadata. `responseBudget.limited` indicates that the byte cap reduced the
+requested item count. Passage text is never silently shortened; the next
+cursor advances by the number actually returned. If even one item cannot fit,
+the service reports `RESPONSE_BUDGET_EXCEEDED` rather than an empty looping page.
+The discovery/status endpoints are not tool-call response budgets.
+
+Byte limits are not token counts. An agent must also check its assembled model
+input, including history and tool definitions. The independent helper
+`scripts/reader-model-context.mjs` provides that last gate without owning a
+model, conversation, tokenizer or memory:
+
+```js
+const admitted = await admitReaderModelInput({
+  request: assembledProviderRequest,
+  countInputTokens: providerInputCounter,
+  contextTokens: configuredModelWindow,
+  reservedTokens: outputAndReasoningReserve,
+  safetyTokens: 256,
+});
+// Send admitted.body unchanged only after admission succeeds.
+```
+
+Supply a provider-aware tokenizer/counting API or a proven conservative upper
+bound; the helper supplies no character-to-token guess. It snapshots and freezes
+the complete JSON request before counting, so concurrent history changes cannot
+replace the counted payload. Overflow throws `MODEL_CONTEXT_LIMIT` before any
+model dispatch. The caller can then reduce response size or compact its own
+context. Output and reasoning reserves follow the provider's accounting rules.
+Other agents must implement the same final check; the reader cannot determine
+their private remaining context. There is no fixed per-question chapter quota.
+
+Tool descriptions recommend searching and reading relevant surrounding text
+first, with broader reading when evidence requires it. This API does not replace
+original text with generated summaries or claim that reading a preview means
+having read a chapter/book.
+
+The design follows the separation of useful tool operations, concise results
+and descriptive schemas in [Anthropic's tool design guidance](https://www.anthropic.com/research/writing-tools-for-agents)
+and the [MCP tool contract](https://modelcontextprotocol.io/specification/2025-11-25/server/tools).
+These are design references; this module does not implement an MCP server or
+adopt a separate retrieval framework.
 
 ## Browser development fallback
 
