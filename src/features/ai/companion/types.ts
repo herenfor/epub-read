@@ -11,6 +11,7 @@ export interface ChatSettings {
   contextTier: 100000 | 200000 | 400000;
   contextCapacity?: number;
   automaticMemory: boolean;
+  runtime: "direct" | "dsh";
 }
 export interface ToolCall {
   id: string;

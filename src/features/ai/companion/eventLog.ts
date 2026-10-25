@@ -11,6 +11,7 @@ export interface CompanionEventDetails {
   inputTokens?: number; softLimit?: number; removedHistory?: number;
   evidenceCount?: number; sourceCount?: number; memoryCount?: number;
   summaryCharacters?: number; answerCharacters?: number; elapsedMs?: number;
+  runtime?: "direct" | "dsh";
   status?: "complete" | "interrupted";
   reason?: "below-threshold" | "source-changed" | "exception";
 }

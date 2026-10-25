@@ -22,6 +22,7 @@ interface DiagnosticTurn {
   context: ReadingContext;
   requestInfo?: ChatRequestInfo;
   promptVersion: string;
+  runtime: "direct" | "dsh";
   startedAt: number;
   finishedAt?: number;
   status: "running" | "complete" | "error" | "cancelled";
@@ -50,14 +51,14 @@ export function createDiagnosticRecorder(changed: () => void = () => {},
         coverage: "Historical citations only; uncited tool results were not retained." }));
       notify();
     },
-    begin(question: string, context: ReadingContext, requestInfo?: ChatRequestInfo, exchangeId?: string) {
+    begin(question: string, context: ReadingContext, requestInfo?: ChatRequestInfo, exchangeId?: string, runtime: "direct" | "dsh" = "direct") {
       const turn: DiagnosticTurn = { id: crypto.randomUUID(), question, context: { ...context },
         startedAt: Date.now(),
         requestInfo: requestInfo && { providerHost: requestInfo.providerHost, model: requestInfo.model,
           thinking: requestInfo.thinking, maxTokens: requestInfo.maxTokens },
-        promptVersion: COMPANION_PROMPT_VERSION, status: "running", requests: [], tools: [], evidence: [] };
+        promptVersion: COMPANION_PROMPT_VERSION, runtime, status: "running", requests: [], tools: [], evidence: [] };
       state.turns.push(turn); state.turns = state.turns.slice(-3); notify();
-      event("turn.started", { turnId: turn.id, exchangeId, bookHash: context.bookHash });
+      event("turn.started", { turnId: turn.id, exchangeId, bookHash: context.bookHash, runtime });
       const toolStarts = new Map<string, number>();
       return {
         id: turn.id,

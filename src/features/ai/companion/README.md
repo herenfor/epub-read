@@ -11,7 +11,10 @@ API that permits CORS. No production AI actions or Android entry are enabled her
 | `CompanionPanel.tsx` | Settings, history UI and the active request lifecycle |
 | `CompanionAvatar.tsx` | Local Live2D renderer and GPU cleanup |
 | `InvestigationTrace.tsx` | Actual tool activity, not model reasoning or accuracy certification |
-| `conversation.ts` | Bounded model/tool loop and explicit strict-evidence comparison |
+| `conversation.ts` | Direct executor's bounded model/tool loop |
+| `turnSession.ts` | Shared context assembly, budget, evidence policy, tool dispatch and diagnostics |
+| `harness/runtime.ts` | DSH executor using the same app-owned turn state |
+| `harness/channel.ts` | Cancellable development-host stream and callback port |
 | `prompts.ts` | Role, reading policy, source rules and automatic message assembly |
 | `tools.ts` | Tool schemas, dispatch and per-turn activity records |
 | `evidence.ts` | Original text identity, citation binding and scoped history reuse |
@@ -29,7 +32,7 @@ API that permits CORS. No production AI actions or Android entry are enabled her
 | `contextBudget.ts` | Replaceable token estimates, request ledger and capacity guard |
 | `memoryContext.ts` | Relevant derived summaries/memories and supersession selection |
 | `memoryMaintenance.ts` | One cancellable batch summarization/candidate job and provenance validation |
-| `runtime.ts` | Runtime boundary and the currently active direct-API adapter |
+| `runtime.ts` | Replaceable runtime boundary and the direct-API adapter |
 | `avatarModel.ts` | Local avatar interface, emotion names and registered motion lookup |
 
 The Rust counterpart is `src-tauri/src/ai/companion.rs` (commands and HTTP stream)
@@ -69,12 +72,20 @@ also excludes derived context. Originals remain available through the
 semantic embedding service. Generated memory quality is not established by
 schema/provenance validation.
 
-`CompanionRuntime.runTurn` can be implemented by a future external agent harness.
-The current direct adapter uses the existing model/tool loop. `CompanionToolPort`
-keeps tool descriptions and permission-checked execution independent of that loop.
-A harness must replace the loop and have one agreed context/persistence owner;
-do not stack automatic compaction or import raw hidden-reasoning logs. No external
-harness or MCP runtime is installed or enabled by this interface.
+`CompanionRuntime.runTurn` has Direct and optional DSH adapters, selected in the
+AI settings. Direct remains the default. DSH owns its complete model/tool loop;
+it never calls `answerWithBooks`. Both use the same app-owned context assembly,
+evidence, tool execution and strict-evidence policy. `CompanionToolPort` keeps
+descriptions and permission-checked execution independent of the executor.
+
+The separate [native host](../../../../experiments/companion-harness/README.md)
+is installed only on request, outside the root dependency graph. Its transient
+per-turn protocol sessions are disposed; app history and memory remain the only
+persistent authority. It has no shell/filesystem tools, global DSH profile,
+automatic compactor, MCP server or fallback that silently repeats a model call.
+The existing API transport stays in the app, so its key never enters the host.
+The bridge is served only by the local AI development middleware; this does not
+enable a packaged production AI feature or Android entry.
 
 The AI-only event log retains the latest 1000 metadata events across reloads:
 conversation saves, request/tool timing, context compaction and memory job states.
