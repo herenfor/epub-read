@@ -11,6 +11,7 @@ pub(crate) mod activity;
 pub(crate) mod commands;
 pub(crate) mod job;
 pub(crate) mod planner;
+mod pipeline;
 pub(crate) mod policy;
 mod runner;
 pub(crate) mod scanner;
