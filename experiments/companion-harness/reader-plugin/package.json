@@ -1,0 +1,12 @@
+{
+  "name": "epub-reader-dsh-tools",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "index.mjs",
+  "exports": { ".": "./index.mjs" },
+  "files": ["index.mjs", "client.mjs", "policy.mjs", "cordis.patch.yml", "README.md"],
+  "engines": { "node": ">=22.19", "dsh": "0.2.1-rc.3" },
+  "peerDependencies": { "@deepseek-ai/dsh-tools": "0.2.1-rc.3" },
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }
+}

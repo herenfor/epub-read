@@ -1,5 +1,15 @@
 # Reading companion runtime experiment
 
+## Current direction: chat host plus optional reader tools
+
+The active next-stage entry is [reader-plugin/README.md](reader-plugin/README.md):
+a native DSH plugin mounted in a chat host's own tool registry. It is independent
+of the reading panel and AIRI. The host owns its model loop and session; the
+plugin supplies authorized reader capabilities with bounded results. It does not
+yet migrate conversation memory or provide a finished persistent-companion UI.
+The entries below remain available as earlier experiments, not required launch
+dependencies of this plugin. Do not run multiple model loops for one task.
+
 This optional AI development host composes DSH 0.2.1-rc.3's native agent,
 model and tool services. It does not install the DSH CLI or use its global
 profile. Its dependency graph and lockfile are separate from the reader.
