@@ -3,6 +3,7 @@ import { CORPUS_CHUNKER_VERSION } from "../../../core/chunking";
 import type { ResolvedCrossBookSearchHit } from "../indexing/indexStore";
 import type { ReadingLibrary } from "./retrieval";
 import type { Evidence, SavedExchange } from "./types";
+import { estimateTokens } from "./contextBudget";
 
 const corpusVersion = [CORPUS_PARSER_VERSION, CORPUS_NORMALIZER_VERSION, CORPUS_CHUNKER_VERSION].join(":");
 export function evidenceFor(hit: ResolvedCrossBookSearchHit, id: string): Evidence {
@@ -43,23 +44,28 @@ export class EvidenceRegistry {
       return source;
     });
   }
-  history(exchanges: readonly SavedExchange[]): Array<{ question: string; answer: string }> {
-    const recent = exchanges.filter(exchange => !exchange.interrupted).slice(-6);
+  history(exchanges: readonly SavedExchange[], tokenBudget = 40000): Array<{
+    id: string; revision: number; question: string; answer: string; createdAt: number; context?: SavedExchange["context"]; interrupted: boolean;
+  }> {
+    const recent = [...exchanges];
     const remapped = new Map<SavedExchange, Map<string, string>>();
-    let characters = 0;
+    let tokens = 0;
     // Prefer recent source text; old/unknown corpus versions remain readable in UI but are not reused as evidence.
     for (const exchange of [...recent].reverse()) {
       const ids = new Map<string, string>();
-      for (const source of exchange.evidence) {
+      for (const source of exchange.interrupted ? [] : exchange.evidence) {
         if (source.corpusVersion !== corpusVersion || !this.library.canRead(source.bookHash, source.spineIndex)) continue;
-        if (this.byId.size >= 12 || characters + source.text.length > 18_000) break;
+        const exists = this.byChunk.has(`${source.hit.contentHash}:${source.hit.chunkId}`);
+        const size = exists ? 0 : estimateTokens(sourcePayload(source));
+        if (tokens + size > tokenBudget) continue;
         const retained = this.retain([source.hit])[0];
-        if (retained) { ids.set(source.id, retained.id); characters += source.text.length; }
+        if (retained) { ids.set(source.id, retained.id); tokens += size; }
       }
       remapped.set(exchange, ids);
     }
-    return recent.map(exchange => ({ question: exchange.question,
-      answer: exchange.answer.replace(/\[(E\d+)\]/gu, (_, id: string) => remapped.get(exchange)?.has(id)
+    return recent.map(exchange => ({ id: exchange.id, revision: exchange.revision ?? 1, createdAt: exchange.createdAt, context: exchange.context,
+      interrupted: Boolean(exchange.interrupted), question: exchange.question,
+      answer: exchange.interrupted ? "" : exchange.answer.replace(/\[(E\d+)\]/gu, (_, id: string) => remapped.get(exchange)?.has(id)
         ? `[${remapped.get(exchange)!.get(id)}]` : "（历史出处未提供，需要时重新查阅）") }));
   }
 }
