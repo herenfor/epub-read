@@ -50,7 +50,7 @@ export function apply(ctx, config = {}) {
     const parameters = { type: 'object', properties: { action: { type: 'string', enum: ['status', 'expand_work', 'collapse_work'] } },
       required: ['action'], additionalProperties: false };
     state.disposers.push(agent.ctx.tools.register({ name: 'companion_tools',
-      description: '查看阅读伙伴预设；按需展开或收起编码、文件和工作流工具。群聊与管理工具不受此开关影响，展开不增加权限。', parameters,
+      description: '查看当前会话预设；按需展开或收起编码、文件和工作流工具。群聊与管理工具不受此开关影响，展开不增加权限。', parameters,
       output: { schema: { type: 'object', additionalProperties: true }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
       async execute(args) {
         if (!args || Object.keys(args).some(key => key !== 'action') || !['status', 'expand_work', 'collapse_work'].includes(args.action)) throw new Error('Invalid companion_tools action');
@@ -66,7 +66,7 @@ export function apply(ctx, config = {}) {
     const result = await next(); const agent = context.agent ?? context.scope;
     if (!target(agent)) return result;
     attach(agent);
-    const projected = projectChatAssembly(result, attached.get(agent.session.id).workExpanded);
+    const projected = projectChatAssembly(result, attached.get(agent.session.id).workExpanded, preset.promptProfile);
     const chars = parts => parts.reduce((count, part) => count + part.text.length, 0);
     stats.set(agent.session.id, { ...stats.get(agent.session.id), sessionId: agent.session.id,
       systemBefore: chars(result.sections), systemAfter: chars(projected.sections),
