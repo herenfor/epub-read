@@ -67,6 +67,10 @@ current tool loop and is never persisted or exported in diagnostics.
 `pnpm dev:ai` starts a browser preview. `scripts/dev-windows-companion.ps1` prepares
 a dedicated Windows source copy and starts an AI debug app; it runs no tests and
 does not install or stop Core. It requires Node, pnpm and the Rust/MSVC toolchain.
+Pass `-TestDirectory <local-Windows-build-directory>` explicitly, using a dedicated
+build copy separate from Core. There is no implicit AppData destination. Rust
+artifacts stay in `src-tauri/target-ai`, pnpm's store in `.pnpm-store`, and frontend
+caches/logs under this selected workspace; application library data is unchanged.
 The copied snapshot disables Rust file watching so Cargo output cannot restart
 its own build. Rerun the launcher to copy later source changes.
 

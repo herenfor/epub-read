@@ -1,10 +1,13 @@
 [CmdletBinding()]
 param(
-    [string]$TestDirectory = (Join-Path $env:LOCALAPPDATA 'EPUBReaderDevelopment\companion'),
+    [string]$TestDirectory,
     [ValidateRange(1024, 65535)][int]$Port = 5186,
     [switch]$InstallDependencies
 )
 $ErrorActionPreference = 'Stop'
+if (!$TestDirectory -or $TestDirectory -notmatch '^[A-Za-z]:[\\/]') {
+    throw 'Pass -TestDirectory with an explicit local Windows build directory. AppData is not a build workspace.'
+}
 $source = Split-Path $PSScriptRoot -Parent
 $node = (Get-Command node.exe -ErrorAction Stop).Source
 $pnpmCommand = Get-Command pnpm.cmd, pnpm.exe -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -42,8 +45,12 @@ try {
     $env:VITE_APP_PLATFORM = 'windows'
     $env:EPUB_READER_EXPECTED_EDITION = 'ai'
     $env:CARGO_TARGET_DIR = Join-Path $TestDirectory 'src-tauri\target-ai'
+    $pnpmStore = Join-Path $TestDirectory '.pnpm-store'
+    Write-Host "  Windows workspace: $TestDirectory"
+    Write-Host "  Cargo target     : $env:CARGO_TARGET_DIR"
+    Write-Host "  pnpm store       : $pnpmStore"
     if ($InstallDependencies -or !(Test-Path 'node_modules/@tauri-apps/cli/tauri.js')) {
-        Invoke-Checked $pnpm @('install', '--frozen-lockfile')
+        Invoke-Checked $pnpm @('install', '--frozen-lockfile', '--store-dir', $pnpmStore)
     }
     $listeners = [Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners()
     if ($listeners | Where-Object { $_.Port -eq $Port }) { throw "Port $Port is in use. Choose -Port <unused port>; do not stop another development service." }
