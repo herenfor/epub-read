@@ -7,6 +7,10 @@
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
+/// Temporary file reservations, not an in-memory EPUB cache. This admits four
+/// typical 120MiB managed books without making book size a RAM estimate.
+pub const IMPORT_STAGE_BUDGET_BYTES: u64 = 512 * 1024 * 1024;
+
 /// Admission counts BOTH running work and completed results waiting on the
 /// head.  Without this window a slow first book permits unlimited later staging.
 pub struct OrderedWindow<T> {
@@ -60,6 +64,16 @@ impl<T> OrderedWindow<T> {
     pub fn finished(&self) -> bool {
         self.consumed == self.total
     }
+
+    pub fn outstanding(&self) -> usize {
+        self.dispatched - self.consumed
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PayloadKind {
+    Linked,
+    Managed,
 }
 
 /// Reserve staging bytes before dispatch; unknown-size and oversized sources
@@ -73,6 +87,7 @@ pub struct StageBudget {
 #[derive(Clone)]
 pub struct Reservation {
     bytes: u64,
+    managed: bool,
 }
 
 impl StageBudget {
@@ -97,12 +112,30 @@ impl StageBudget {
         }
         self.used += bytes;
         self.active += 1;
-        Some(Reservation { bytes })
+        Some(Reservation {
+            bytes,
+            managed: true,
+        })
+    }
+
+    /// A linked source has no staged EPUB bytes. Its metadata is bounded by
+    /// the ordered task window and the coordinator's pending metadata limit.
+    pub fn reserve_payload(&mut self, kind: PayloadKind, size: Option<u64>) -> Option<Reservation> {
+        match kind {
+            PayloadKind::Linked => Some(Reservation {
+                bytes: 0,
+                managed: false,
+            }),
+            PayloadKind::Managed => self.reserve(size),
+        }
     }
 
     /// Release only after publish/duplicate removal/failure cleanup, NOT after
     /// hash.  The coordinator calls this on every terminal path.
     pub fn release(&mut self, reservation: Reservation) {
+        if !reservation.managed {
+            return;
+        }
         self.used -= reservation.bytes;
         self.active -= 1;
     }
@@ -175,6 +208,49 @@ impl DirectoryJobGate {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn w1_payload_admission_does_not_serialize_large_linked_books() {
+        let mut old_budget = StageBudget::new(64 * 1024 * 1024);
+        let first = old_budget.reserve(Some(120 * 1024 * 1024)).unwrap();
+        assert!(old_budget.reserve(Some(120 * 1024 * 1024)).is_none());
+        old_budget.release(first);
+        let mut budget = StageBudget::new(IMPORT_STAGE_BUDGET_BYTES);
+        let mut linked = Vec::new();
+        for _ in 0..8 {
+            linked.push(
+                budget
+                    .reserve_payload(PayloadKind::Linked, Some(200 * 1024 * 1024))
+                    .unwrap(),
+            );
+        }
+        assert_eq!(budget.used(), 0);
+        for reservation in linked {
+            budget.release(reservation);
+        }
+        let mut managed = Vec::new();
+        for _ in 0..4 {
+            managed.push(
+                budget
+                    .reserve_payload(PayloadKind::Managed, Some(120 * 1024 * 1024))
+                    .unwrap(),
+            );
+        }
+        assert!(budget
+            .reserve_payload(PayloadKind::Managed, Some(120 * 1024 * 1024))
+            .is_none());
+        for reservation in managed {
+            budget.release(reservation);
+        }
+        let big = budget
+            .reserve_payload(PayloadKind::Managed, Some(700 * 1024 * 1024))
+            .unwrap();
+        assert!(budget
+            .reserve_payload(PayloadKind::Managed, Some(1))
+            .is_none());
+        budget.release(big);
+        assert_eq!(budget.used(), 0);
+    }
 
     #[test]
     fn ordered_window_blocks_head_and_advances_on_failure() {
