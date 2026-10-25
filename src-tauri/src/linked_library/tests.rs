@@ -68,6 +68,7 @@
             content_hash: hash.into(),
             storage_kind: StorageKind::Managed,
             canonical_source_path: None,
+            managed_file_name: None,
             file_size: snapshot.size,
             source_mtime_ns: snapshot.mtime_ns,
             cover_zip_path: None,
@@ -81,6 +82,7 @@
             content_hash: hash.into(),
             storage_kind: StorageKind::Linked,
             canonical_source_path: Some(path.to_string_lossy().into_owned()),
+            managed_file_name: None,
             file_size: snapshot.size,
             source_mtime_ns: snapshot.mtime_ns,
             cover_zip_path: None,
@@ -187,6 +189,7 @@
             content_hash: hash.clone(),
             storage_kind: StorageKind::Managed,
             canonical_source_path: None,
+            managed_file_name: None,
             file_size: 1,
             source_mtime_ns: 2,
             cover_zip_path: None,
@@ -964,6 +967,7 @@
             content_hash: hash.clone(),
             storage_kind: StorageKind::Managed,
             canonical_source_path: None,
+            managed_file_name: None,
             file_size: old_snapshot.size,
             source_mtime_ns: old_snapshot.mtime_ns,
             cover_zip_path: None,
@@ -1654,6 +1658,32 @@
         delete_records_at(&root, &[hash.clone()], |_| Ok(())).unwrap();
         assert!(!source.exists());
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn reveal_points_at_the_linked_original_or_the_library_copy_and_reports_missing_files() {
+        let root = organization_temp_dir("reveal-target");
+        let snapshot = FileSnapshot { size: 1, mtime_ns: 2 };
+        let linked_hash = "3".repeat(64);
+        let managed_hash = "4".repeat(64);
+        let original = root.join("用户的书 01.epub");
+        fs::write(&original, b"x").unwrap();
+        let copy = managed_source_path(&root, &managed_hash).unwrap();
+        fs::create_dir_all(copy.parent().unwrap()).unwrap();
+        fs::write(&copy, b"x").unwrap();
+        let bindings = vec![
+            sample_linked_binding(&linked_hash, &original, snapshot.clone()),
+            sample_managed_binding(&managed_hash, snapshot.clone()),
+        ];
+
+        assert_eq!(reveal_target(&root, &bindings, &linked_hash), RevealTarget::File(original.clone()));
+        assert_eq!(reveal_target(&root, &bindings, &managed_hash), RevealTarget::File(copy.clone()));
+        assert_eq!(reveal_target(&root, &bindings, &"5".repeat(64)), RevealTarget::Missing);
+
+        fs::remove_file(&original).unwrap();
+        fs::remove_file(&copy).unwrap();
+        assert_eq!(reveal_target(&root, &bindings, &linked_hash), RevealTarget::Missing);
+        assert_eq!(reveal_target(&root, &bindings, &managed_hash), RevealTarget::Missing);
     }
 
     #[test]

@@ -95,7 +95,7 @@
   "shelfMain.delete.many.one": "Delete {count} selected book?",
   "shelfMain.delete.one": "Delete this book from library?",
   "shelfMain.delete.separator": ",",
-  "shelfMain.delete.hint": "Original files will not be deleted. This book's reading progress, bookmarks, notes, favorite status and categories on this device will be cleared and cannot be recovered.",
+  "shelfMain.delete.hint": "Your original files will not be deleted (copies in the library are removed too). This book's reading progress, bookmarks, notes, favorite status and categories on this device will be cleared and cannot be recovered.",
   "shelfMain.delete.cancel": "Cancel",
   "shelfMain.delete.confirm": "Delete",
   "shelfMain.drag.strip": "Drop here to move into folder",

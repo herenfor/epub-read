@@ -110,6 +110,25 @@ pub(crate) fn managed_source_path(library_root: &Path, content_hash: &str) -> Re
         .join(format!("{content_hash}.epub")))
 }
 
+/// A library copy with a readable name (A34). The name is a single plain file
+/// name ending in `.epub`; anything that could leave `books/` is rejected.
+pub(crate) fn managed_named_path(library_root: &Path, file_name: &str) -> Result<PathBuf, String> {
+    if !valid_library_file_name(file_name) {
+        return Err("托管副本文件名无效".into());
+    }
+    Ok(library_root.join("books").join(file_name))
+}
+
+pub(crate) fn valid_library_file_name(name: &str) -> bool {
+    let mut components = Path::new(name).components();
+    matches!(components.next(), Some(std::path::Component::Normal(part)) if part == std::ffi::OsStr::new(name))
+        && components.next().is_none()
+        && !name.contains(['/', '\\', ':'])
+        && !name.starts_with('.')
+        && name.len() > ".epub".len()
+        && name.to_ascii_lowercase().ends_with(".epub")
+}
+
 pub(super) fn records_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(records_path_at(&library_root(app)?))
 }
@@ -510,7 +529,7 @@ pub(super) fn load_bindings_at(root: &Path) -> Result<Vec<DeviceBinding>, String
     Ok(bindings)
 }
 
-pub(super) fn load_bindings(app: &AppHandle) -> Result<Vec<DeviceBinding>, String> {
+pub(crate) fn load_bindings(app: &AppHandle) -> Result<Vec<DeviceBinding>, String> {
     if let Some(bindings) = load_portable_bindings(app)? {
         return Ok(bindings);
     }

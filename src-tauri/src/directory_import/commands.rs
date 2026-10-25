@@ -123,6 +123,7 @@ pub async fn directory_import_start(
     options: ImportOptions,
     targets: Vec<FolderTarget>,
     on_progress: Channel<DirectoryProgress>,
+    copy_to_library: Option<bool>,
 ) -> Result<DirectoryImportResult, String> {
     let job = state
         .get(&job_id)?
@@ -136,7 +137,8 @@ pub async fn directory_import_start(
     let worker_job = Arc::clone(&job);
     let result = tauri::async_runtime::spawn_blocking(move || {
         let _worker = worker;
-        runner::run_import(&app, worker_job, options, targets, on_progress)
+        let copy = cfg!(target_os = "android") || copy_to_library.unwrap_or(false);
+        runner::run_import(&app, worker_job, options, targets, on_progress, copy)
     })
     .await;
     match result {

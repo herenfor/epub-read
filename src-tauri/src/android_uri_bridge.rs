@@ -160,7 +160,7 @@ pub(crate) struct RestrictedReader {
 }
 
 impl RestrictedReader {
-    fn from_file(
+    pub(crate) fn from_file(
         file: File,
         start_offset: i64,
         declared_length: i64,

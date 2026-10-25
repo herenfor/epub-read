@@ -181,7 +181,7 @@ pub(crate) fn stream_restricted_reader_to_staging(
         Err(error) => {
             return Err(PrepareError::Failed {
                 content_hash: None,
-                message: format!("无法读取 Android content URI：{error}"),
+                message: format!("无法读取源 EPUB：{error}"),
             })
         }
     }
@@ -315,6 +315,7 @@ pub(crate) fn make_managed_binding(
         content_hash,
         storage_kind: StorageKind::Managed,
         canonical_source_path: None,
+        managed_file_name: None,
         file_size: file_snapshot.size,
         source_mtime_ns: file_snapshot.mtime_ns,
         cover_zip_path: metadata.cover_zip_path.clone(),
