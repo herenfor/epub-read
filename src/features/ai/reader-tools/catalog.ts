@@ -13,10 +13,19 @@ const passage = schema({ bookId: string, contentHash: string, chapterId: string,
   corpusVersion: string, originalText: { type: "string" }, anchor: schema({ start: integer, end: integer, snippet: { type: "string" } }, ["start", "end", "snippet"]) },
   ["bookId", "contentHash", "chapterId", "spineIndex", "chunkId", "corpusVersion", "originalText", "anchor"]);
 const page = (items: Record<string, unknown>) => schema({ items: { type: "array", items }, nextCursor: { type: ["string", "null"] }, offset: integer }, ["items", "nextCursor", "offset"]);
-const tool = (name: string, description: string, inputSchema: Record<string, unknown>, outputSchema: Record<string, unknown>): ReaderToolDefinition =>
-  ({ name, description, inputSchema, outputSchema, readOnly: true });
+const tool = (name: string, description: string, inputSchema: Record<string, unknown>, outputSchema: Record<string, unknown>, readOnly = true): ReaderToolDefinition =>
+  ({ name, description, inputSchema, outputSchema, readOnly });
+
+const jobProperties = { taskId: { type: ["string", "null"] }, state: { type: "string", enum: ["queued", "running", "completed", "cancelled", "failed"] }, progress: { type: "number", minimum: 0, maximum: 1 } };
 
 export const READER_TOOL_CATALOG: readonly ReaderToolDefinition[] = [
+  tool("reader_get_index_status", "查看授权书库或指定书籍的持久正文索引覆盖情况及本机准备任务；不读取全书、不启动建库。current仅表示当前语料版本的索引已提交，不表示模型理解正确。",
+    schema({ bookId: string, limit, cursor }), page(schema({ bookId: string, state: { type: "string", enum: ["current", "missing", "outdated", "unavailable"] }, chunkCount: integer,
+      job: schema(jobProperties, ["taskId", "state", "progress"]) }, ["bookId", "state", "chunkCount"]))),
+  tool("reader_prepare_index", "显式为一本书准备持久正文索引，返回后台任务；同版本已就绪或同书任务复用。需要独立索引准备授权，不改变阅读进度。用get_index_status查询，cancel_index取消。",
+    schema({ bookId: string }, ["bookId"]), schema({ ...jobProperties, bookId: string, reused: { type: "boolean" } }, ["taskId", "state", "progress", "bookId", "reused"]), false),
+  tool("reader_cancel_index", "取消此阅读工具提供方为指定书籍创建的准备任务；等待暂存及原书释放后返回。不取消用户界面或其他提供方的任务。需要索引准备授权。",
+    schema({ bookId: string, taskId: string }, ["bookId", "taskId"]), schema({ ...jobProperties, bookId: string }, ["taskId", "state", "progress", "bookId"]), false),
   tool("reader_find_books", "分页查询已导入书籍；query匹配书名/作者，支持文件夹和收藏筛选。返回bookId，后续调用请使用此ID。无需打开书籍。",
     schema({ query: { type: "string", maxLength: 256 }, folderId: { type: ["string", "null"] }, favorite: { type: "boolean" }, limit, cursor }), page(book)),
   tool("reader_get_book", "取得指定书籍元信息与源文件可用状态；不打开阅读页面，不改变阅读进度。",

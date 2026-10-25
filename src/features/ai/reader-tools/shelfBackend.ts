@@ -1,8 +1,7 @@
-import { createArchiveClient, type ArchiveClient } from "../../../core/selectiveArchive";
-import { disposeBook, loadBookFromArchive } from "../../../core/book";
+import { createShelfBookAccess, type ReaderBookAccess } from "./bookAccess";
 import { CORPUS_NORMALIZER_VERSION, CORPUS_PARSER_VERSION } from "../../../core/corpus";
 import { CORPUS_CHUNKER_VERSION } from "../../../core/chunking";
-import { getShelfStore, isTauriEnv } from "../../../ui/shelf";
+import { getShelfStore } from "../../../ui/shelf";
 import { effectiveFolderId, isFavorite } from "../../../ui/libraryOrganization";
 import { currentBookReader } from "../companion/retrieval/currentBook";
 import { rankLexicalHits } from "../companion/retrieval/ranking";
@@ -15,34 +14,19 @@ const passage = (bookId: string, hit: ResolvedCrossBookSearchHit): ReaderPassage
   originalText: hit.originalText, anchor: hit.textAnchor });
 
 /** Separate archive ownership: no renderer, markOpened, progress write or memory access. */
-export function createShelfToolBackend(): ReaderToolBackend {
-  async function withBook<T>(bookId: string, signal: AbortSignal, work: (reader: ReturnType<typeof currentBookReader>) => Promise<T>) {
-    const store = getShelfStore();
-    const entry = (await store.list()).find(entry => entry.id === bookId);
-    if (!entry) throw new ReaderToolError("BOOK_NOT_FOUND", "书籍已经离开书架");
-    signal.throwIfAborted();
-    let archive: ArchiveClient;
-    try { archive = isTauriEnv() && store.openArchive ? await store.openArchive(bookId) : await createArchiveClient(await store.readBook(bookId)); }
-    catch { signal.throwIfAborted(); throw new ReaderToolError("SOURCE_UNAVAILABLE", "原书当前不可读取，请检查来源"); }
-    const close = () => archive.close();
-    signal.addEventListener("abort", close, { once: true });
-    let book: Awaited<ReturnType<typeof loadBookFromArchive>> | undefined;
-    try {
-      signal.throwIfAborted();
-      book = await loadBookFromArchive(archive, { preloadCover: false });
-      signal.throwIfAborted();
+export function createShelfToolBackend(access: ReaderBookAccess = createShelfBookAccess()): ReaderToolBackend {
+  function withBook<T>(id: string, signal: AbortSignal, work: (reader: ReturnType<typeof currentBookReader>) => Promise<T>) {
+    return access(id, signal, (book, entry) => {
       const reader = currentBookReader(book, { bookHash: entry.contentHash ?? entry.id, title: entry.title,
         creator: entry.creator, spineIndex: book.spine.length - 1 }, true);
-      return await work({ ...reader, async read(path, readSignal) {
+      return work({ ...reader, async read(path, readSignal) {
         try { return await reader.read(path, readSignal); }
         finally {
-          // This Book belongs only to the tool call. Release extracted chapter
-          // bytes as we scan; the existing text cache retains at most 3 chapters.
-          const resource = book?.resources.get(path);
+          const resource = book.resources.get(path);
           if (resource) { resource.data = new Uint8Array(0); resource.loaded = false; }
         }
       } });
-    } finally { signal.removeEventListener("abort", close); if (book) disposeBook(book); else close(); }
+    });
   }
   return {
     async list(signal) {

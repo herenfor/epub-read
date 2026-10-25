@@ -1,5 +1,4 @@
 import { getAppBuildSession, isAiDevelopmentActionsAllowed } from "../../../config/appBuildSession";
-import { READER_TOOL_CATALOG } from "./catalog";
 import type { ReaderToolRequest } from "./contracts";
 
 /** Opt-in development provider, started after app build validation. No panel
@@ -15,7 +14,7 @@ export async function startReaderToolDevelopmentProvider(): Promise<void> {
   const shutdown = () => { lifetime.abort(); for (const job of jobs.values()) job.abort(); };
   window.addEventListener("pagehide", shutdown, { once: true });
   const response = await fetch("/__reader-tools/provider/connect", { method: "POST", signal: lifetime.signal,
-    headers: { "Content-Type": "application/json", "X-Reader-Provider": "1" }, body: JSON.stringify({ definitions: READER_TOOL_CATALOG }) });
+    headers: { "Content-Type": "application/json", "X-Reader-Provider": "1" }, body: JSON.stringify({ definitions: service.definitions }) });
   if (!response.ok) { window.removeEventListener("pagehide", shutdown); return; }
   const reader = response.body!.getReader();
   const decoder = new TextDecoder(); let buffer = ""; let token = "";

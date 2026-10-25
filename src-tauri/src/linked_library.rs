@@ -9,6 +9,9 @@
 //! regenerable AI data, removes only application-owned managed copies, and
 //! never removes a user-owned linked source file.
 
+#[cfg(feature = "ai")]
+pub(crate) use archive::{archive_open_blocking as open_tool_archive, close_tool_archives};
+
 use crate::ai::AiState;
 use crate::linked_library_error::LinkedLibraryError;
 use crate::android_uri_bridge::{RestrictedReadError, RestrictedReader};
@@ -262,7 +265,7 @@ struct NativeArchiveSession {
 #[serde(rename_all = "camelCase")]
 pub struct ArchiveOpenView {
     protocol_version: u32,
-    session_id: String,
+    pub(crate) session_id: String,
     entry_count: usize,
     chunk_bytes: usize,
 }

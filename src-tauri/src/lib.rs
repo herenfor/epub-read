@@ -19,6 +19,8 @@ pub(crate) mod transfer_policy;
 mod portable_state_commands;
 mod save_file;
 mod book_export;
+#[cfg(feature = "ai")]
+mod reader_tools;
 // Cloud service remains disconnected until the user confirms a connection.
 #[allow(dead_code)]
 mod cloud_sync;
@@ -27,6 +29,12 @@ mod cloud_sync;
 macro_rules! configure_invoke_handler {
     ($builder:expr) => {
         $builder.invoke_handler(tauri::generate_handler![
+            reader_tools::reader_tools_connect,
+            reader_tools::reader_tools_index_acquire,
+            reader_tools::reader_tools_archive_open,
+            reader_tools::reader_tools_archive_close,
+            reader_tools::reader_tools_reply,
+            reader_tools::reader_tools_disconnect,
             app_update::app_update_install_kind,
             cloud_sync::commands::cloud_sync_get_status,
             cloud_sync::commands::cloud_sync_test_connection,
@@ -340,6 +348,9 @@ pub fn run() {
         }
     }));
 
+    #[cfg(feature = "ai")]
+    let builder = builder.manage(reader_tools::ReaderToolsState::default());
+
     let builder = builder
         .manage(FontWriteState::default())
         .manage(LinkedLibraryWriteState::default())
@@ -379,6 +390,10 @@ pub fn run() {
                     }
                 }
             }
+            #[cfg(feature = "ai")]
+            if let Err(error) = reader_tools::start(app.handle()) {
+                eprintln!("阅读工具未启动：{error}");
+            }
             let _ = save_file::cleanup_stale_staging(app.handle());
             let _ = lan_save::cleanup_stale_staging(app.handle());
             app.state::<ai::AiState>()
@@ -409,6 +424,8 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app, event| {
             if matches!(&event, tauri::RunEvent::Exit) {
+                #[cfg(feature = "ai")]
+                reader_tools::shutdown(app);
                 lan_save::shutdown(app);
                 cloud_sync::commands::shutdown(app);
                 linked_library::close_all_native_archives(app);
