@@ -21,6 +21,17 @@ test('chat projection keeps group delivery, management and exact schemas while w
   assert.ok(actual.tools.every(tool => tool.parameters === parameters));
   assert.deepEqual(projectChatAssembly(input, true).tools, input.tools);
   assert.equal(input.sections[0].text, 'coding');
+  const character = projectChatAssembly({ ...input, sections: [...input.sections,
+    { name: 'epub-reader-guidance', text: 'reading advice' }] }, false, {
+    identity: 'Independent character identity', coordination: 'Native chat delivery only',
+    omitSections: ['epub-reader-guidance'], omitTools: ['reader_find_books'],
+  });
+  assert.equal(character.sections[0].text, 'Independent character identity');
+  assert.equal(character.sections[1].text, 'Native chat delivery only');
+  assert.equal(character.sections.some(s => s.name === 'epub-reader-guidance'), false);
+  assert.equal(character.tools.some(t => t.name === 'reader_find_books'), false);
+  assert.deepEqual(character.contexts, input.contexts);
+  assert.equal(character.sections.find(s => s.name === 'botharness:reply-delivery'), input.sections[3]);
 });
 
 test('soft pressure waits for finished work, aborts maintenance for new input and does not loop below 256K', async () => {

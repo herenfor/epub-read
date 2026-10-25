@@ -35,6 +35,22 @@ This is an independent configuration preset, **not a newly installed selectable
 native AgentPreset**. Existing populated sessions retain their `deepseekbot`
 preset and history. A model-routing preset is a separate provider setting.
 
+### Separate character profiles
+
+A private preset file may supply `promptProfile.identity` and
+`promptProfile.coordination` to replace the default companion framing for only
+the configured bot IDs. `omitSections` and `omitTools` hide explicitly named
+prompt sections/tool schemas. Existing presets keep their previous behavior;
+native delivery guidance and required context are preserved. These are trusted
+host settings, not fields imported from a role card or new permissions.
+
+Keep character text in the selected bot's `SOUL.md`, separate from runtime
+delivery guidance. Tobs pins that text per session; editing the file does not
+immediately replace an existing session snapshot. Apply an approved change via
+the host's save/persona-refresh APIs, preserving the conversation. A file preview
+is not an interactive persona editor; the current experimental deployment has
+no dedicated everyday persona settings form.
+
 ## Soft context maintenance
 
 After a completed turn, measured pressure at the soft threshold may schedule
