@@ -151,6 +151,9 @@ export interface ShelfViewProps {
   saveFileActive?: boolean;
   /** LAN 会话活动期间禁用书架入口；一份会话结束并重新连接后再次开放。 */
   lanTransferActive?: boolean;
+  /** A34 (Windows): copy imports into the library; shown as a checkbox in the import menu. */
+  copyToLibrary?: boolean;
+  onCopyToLibraryChange?(copy: boolean): void;
   /** 打开共享的设备互传面板，可携带当前批量选择用于“选中书籍”范围。 */
   onOpenLanTransfer?(selectedEntries?: ShelfEntry[]): void;
   theme: Theme;
@@ -371,6 +374,9 @@ interface ShelfImportButtonProps extends ShelfSubmenuBackProps {
   /** 设备互传, also reachable from 设置 → 数据与备份. */
   onOpenLanTransfer?(): void;
   lanTransferDisabled?: boolean;
+  /** A34 (Windows): the remembered "copy into the library" choice; absent hides it. */
+  copyToLibrary?: boolean;
+  onCopyToLibraryChange?(copy: boolean): void;
 }
 
 /**
@@ -501,6 +507,19 @@ function ShelfImportButton(props: ShelfImportButtonProps) {
                 <small>{t("shelf.import.lan.detail")}</small>
               </span>
             </button>
+          )}
+          {props.copyToLibrary !== undefined && props.onCopyToLibraryChange && (
+            <label className="shelf-import-menu-check">
+              <input
+                type="checkbox"
+                checked={props.copyToLibrary}
+                onChange={(event) => props.onCopyToLibraryChange!(event.target.checked)}
+              />
+              <span className="shelf-import-menu-text">
+                <strong>{t("shelf.import.copy")}</strong>
+                <small>{t("shelf.import.copy.detail")}</small>
+              </span>
+            </label>
           )}
           {props.showDropHint && <p className="shelf-import-menu-hint">{t("shelf.import.dropHint")}</p>}
         </div>
@@ -4454,6 +4473,8 @@ export function ShelfView(props: ShelfViewProps) {
                   onImportFolder={props.onImportFolder}
                   onOpenLanTransfer={openLanTransferFromImport}
                   lanTransferDisabled={lanTransferImportDisabled}
+                  copyToLibrary={props.copyToLibrary}
+                  onCopyToLibraryChange={props.onCopyToLibraryChange}
                   registerSubmenuBackHandler={registerSubmenuBackHandler}
                   onSubmenuBackActiveChange={reportSubmenuBackActive}
                 />
@@ -4588,6 +4609,8 @@ export function ShelfView(props: ShelfViewProps) {
                 } : undefined}
                 onOpenLanTransfer={openLanTransferFromImport}
                 lanTransferDisabled={lanTransferImportDisabled}
+                copyToLibrary={props.copyToLibrary}
+                onCopyToLibraryChange={props.onCopyToLibraryChange}
                 registerSubmenuBackHandler={registerSubmenuBackHandler}
                 onSubmenuBackActiveChange={reportSubmenuBackActive}
               />

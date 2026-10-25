@@ -83,7 +83,10 @@ pub fn linked_library_import_paths(
     app: AppHandle,
     state: State<'_, LinkedLibraryWriteState>,
     paths: Vec<String>,
+    copy_to_library: Option<bool>,
 ) -> Result<ImportBatchResult, String> {
+    // A34: Windows imports copy into the library unless the user unticked it.
+    let copy_to_library = copy_to_library.unwrap_or(false);
     let _guard = state
         .0
         .lock()
@@ -94,6 +97,10 @@ pub fn linked_library_import_paths(
     let mut records = load_records(&app)?;
     let mut bindings = load_bindings(&app)?;
     let thumbnails = load_thumbnail_index(&app)?;
+    if copy_to_library {
+        let total = paths.iter().filter_map(|path| fs::metadata(path).ok()).map(|meta| meta.len()).sum();
+        ensure_library_space(&root, total)?;
+    }
     let mut results = Vec::with_capacity(paths.len());
     let mut bindings_changed = false;
     let mut records_changed = false;
@@ -115,9 +122,39 @@ pub fn linked_library_import_paths(
         })();
         match result {
             Ok((hash, metadata, path, file_snapshot)) => {
-                let binding = make_binding(hash.clone(), &path, file_snapshot, &metadata);
-                upsert_binding(&mut bindings, binding);
-                bindings_changed = true;
+                if copy_to_library {
+                    // A book already on the shelf keeps a working binding; only
+                    // a new or broken one gets a library copy.
+                    let keeps_binding = matches!(reveal_target(&root, &bindings, &hash), RevealTarget::File(_))
+                        && records.iter().any(|record| record.content_hash == hash);
+                    if !keeps_binding {
+                        let original = path.file_name().and_then(|name| name.to_str()).unwrap_or("");
+                        let wanted = library_file_name(original, &metadata.title);
+                        match copy_into_library(&root, &path, &hash, &wanted, &bindings) {
+                            Ok((name, copied)) => {
+                                upsert_binding(
+                                    &mut bindings,
+                                    make_managed_binding(hash.clone(), copied, &metadata).with_managed_file_name(name),
+                                );
+                                bindings_changed = true;
+                            }
+                            Err(error) => {
+                                results.push(ImportItemResult {
+                                    input_index,
+                                    status: "failed".into(),
+                                    content_hash: None,
+                                    record: None,
+                                    error: Some(error),
+                                });
+                                continue;
+                            }
+                        }
+                    }
+                } else {
+                    let binding = make_binding(hash.clone(), &path, file_snapshot, &metadata);
+                    upsert_binding(&mut bindings, binding);
+                    bindings_changed = true;
+                }
                 if records.iter().any(|record| record.content_hash == hash) {
                     results.push(ImportItemResult {
                         input_index,
@@ -346,6 +383,55 @@ pub fn linked_library_relink(
     let thumbnails = load_thumbnail_index(&app)?;
     view_by_hash(&records, &bindings, &thumbnails, &content_hash, &root)
         .ok_or_else(|| "重新定位后无法读取书籍记录".into())
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibrarySettingsView {
+    copy_on_import: bool,
+    /// Where library copies live (P1: always the default `books` folder).
+    library_directory: String,
+    /// A settings file this build cannot use. Copying then stays off rather
+    /// than guessing, and the settings page shows why.
+    error: Option<String>,
+}
+
+fn library_settings_view(app: &AppHandle) -> Result<LibrarySettingsView, LinkedLibraryError> {
+    let local = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|error| format!("无法取得应用本地数据目录：{error}"))?;
+    let library_directory = library_root(app)?.join("books").to_string_lossy().into_owned();
+    Ok(match load_library_settings(&local) {
+        Ok(settings) => LibrarySettingsView { copy_on_import: settings.copy_on_import, library_directory, error: None },
+        Err(error) => LibrarySettingsView { copy_on_import: false, library_directory, error: Some(error) },
+    })
+}
+
+#[tauri::command]
+pub fn linked_library_settings_get(app: AppHandle) -> Result<LibrarySettingsView, LinkedLibraryError> {
+    library_settings_view(&app)
+}
+
+#[tauri::command]
+pub fn linked_library_settings_set_copy(app: AppHandle, enabled: bool) -> Result<LibrarySettingsView, LinkedLibraryError> {
+    let local = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|error| format!("无法取得应用本地数据目录：{error}"))?;
+    let mut settings = load_library_settings(&local)?;
+    settings.copy_on_import = enabled;
+    save_library_settings(&local, &settings)?;
+    library_settings_view(&app)
+}
+
+/// Opens the library folder itself in File Explorer (created when empty).
+#[tauri::command]
+pub fn linked_library_open_folder(app: AppHandle) -> Result<(), LinkedLibraryError> {
+    let books = library_root(&app)?.join("books");
+    fs::create_dir_all(&books).map_err(|error| format!("无法创建书库目录：{error}"))?;
+    tauri_plugin_opener::open_path(&books, None::<&str>).map_err(|error| format!("无法打开文件资源管理器：{error}"))?;
+    Ok(())
 }
 
 #[derive(Debug, Serialize)]
