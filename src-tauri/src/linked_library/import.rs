@@ -111,7 +111,7 @@ pub(super) fn send_import_progress(
 }
 
 pub(super) fn cleanup_stale_staging(root: &Path) -> Result<(), String> {
-    let dir = root.join("books").join(".staging");
+    let dir = managed_books_directory(root)?.join(".staging");
     let entries = match fs::read_dir(&dir) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -135,7 +135,7 @@ pub(super) fn cleanup_stale_staging(root: &Path) -> Result<(), String> {
 }
 
 pub(crate) fn new_staging_path(root: &Path) -> Result<PathBuf, String> {
-    let dir = root.join("books").join(".staging");
+    let dir = writable_books_directory(root)?.join(".staging");
     fs::create_dir_all(&dir).map_err(|error| format!("无法创建导入临时目录：{error}"))?;
     let nonce = TEMP_FILE_NONCE.fetch_add(1, Ordering::Relaxed);
     Ok(dir.join(format!(

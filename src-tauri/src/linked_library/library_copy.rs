@@ -41,11 +41,13 @@ pub(crate) fn library_file_name(original: &str, title: &str) -> String {
             .to_string();
         if cleaned.is_empty() || cleaned.chars().all(|c| c == '_') {
             None
-        } else if RESERVED_STEMS
-            .iter()
-            .any(|reserved| reserved.eq_ignore_ascii_case(&cleaned))
-        {
-            Some(format!("{cleaned}_"))
+        } else if RESERVED_STEMS.iter().any(|reserved| {
+            reserved.eq_ignore_ascii_case(cleaned.split('.').next().unwrap_or(&cleaned))
+        }) {
+            Some(match cleaned.split_once('.') {
+                Some((stem, rest)) => format!("{stem}_.{rest}"),
+                None => format!("{cleaned}_"),
+            })
         } else {
             Some(cleaned)
         }
@@ -84,8 +86,7 @@ pub(super) fn allocate_library_file_name(
 
 /// Refuses the whole copy batch up front when the library drive cannot hold it.
 pub(crate) fn ensure_library_space(root: &Path, total_bytes: u64) -> Result<(), String> {
-    let books = root.join("books");
-    fs::create_dir_all(&books).map_err(|error| format!("无法创建书库目录：{error}"))?;
+    let books = writable_books_directory(root)?;
     let available = fs2::available_space(&books)
         .map_err(|error| format!("无法读取书库所在磁盘的可用空间：{error}"))?;
     if total_bytes.saturating_add(FREE_SPACE_MARGIN) > available {
@@ -176,7 +177,8 @@ fn publish_staged_copy_using(
     mut publish: impl FnMut(&Path, &Path) -> std::io::Result<()>,
 ) -> Result<(String, FileSnapshot), String> {
     loop {
-        let name = allocate_library_file_name(&root.join("books"), wanted_name, bindings);
+        let name =
+            allocate_library_file_name(&writable_books_directory(root)?, wanted_name, bindings);
         let target = managed_named_path(root, &name)?;
         match publish(staging, &target) {
             Ok(()) => return Ok((name, snapshot(&target)?)),
@@ -251,6 +253,7 @@ mod tests {
         );
         assert_eq!(library_file_name("  .hidden. .epub", "x"), "hidden.epub");
         assert_eq!(library_file_name("con.epub", "x"), "con_.epub");
+        assert_eq!(library_file_name("CON.notes.epub", "x"), "CON_.notes.epub");
         assert_eq!(library_file_name("???.epub", "书名"), "书名.epub");
         assert_eq!(library_file_name("", ""), "book.epub");
         let long = "长".repeat(300);
