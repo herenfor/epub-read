@@ -79,12 +79,21 @@ pub async fn linked_library_list_records(
 }
 
 #[tauri::command]
-pub fn linked_library_import_paths(
+pub async fn linked_library_import_paths(
     app: AppHandle,
-    state: State<'_, LinkedLibraryWriteState>,
     paths: Vec<String>,
     copy_to_library: Option<bool>,
 ) -> Result<ImportBatchResult, String> {
+    tauri::async_runtime::spawn_blocking(move || import_paths_blocking(app, paths, copy_to_library))
+        .await.map_err(|error| format!("书籍导入工作线程失败：{error}"))?
+}
+
+fn import_paths_blocking(
+    app: AppHandle,
+    paths: Vec<String>,
+    copy_to_library: Option<bool>,
+) -> Result<ImportBatchResult, String> {
+    let state = app.state::<LinkedLibraryWriteState>();
     // A34: Windows imports copy into the library unless the user unticked it.
     let copy_to_library = copy_to_library.unwrap_or(false);
     let _guard = state
