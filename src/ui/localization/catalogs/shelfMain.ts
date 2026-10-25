@@ -101,7 +101,7 @@ export const shelfMain = defineMessages("shelfMain", {
   "shelfMain.delete.many.one": { zh: "删除选中的 {count} 本书？", note: "Singular form." },
   "shelfMain.delete.one": "从书架删除此书？",
   "shelfMain.delete.separator": { zh: "、", note: "Separator between book titles, e.g. ', '." },
-  "shelfMain.delete.hint": "源文件不会被删除。这本书在本机的阅读进度、书签、笔记、收藏和分类会一起清除，无法恢复。",
+  "shelfMain.delete.hint": "你的原文件不会被删除（书库里的副本会一并删除）。这本书在本机的阅读进度、书签、笔记、收藏和分类会一起清除，无法恢复。",
   "shelfMain.delete.cancel": { zh: "取消", max: 10 },
   "shelfMain.delete.confirm": { zh: "确认删除", max: 12 },
   "shelfMain.drag.strip": "拖到这里移入文件夹",

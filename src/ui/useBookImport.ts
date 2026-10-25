@@ -14,6 +14,7 @@ import { uiText, uiPlural } from "./localization/UiLanguageProvider";
 import type { NativeImportCancelState } from "./NativeImportPanel";
 import { createNativeDirectoryImportPort, createWebDirectoryImportPort, supportsWebDirectoryPicker } from "./folderImport";
 import type { LibraryOrganization } from "./libraryOrganization";
+import { copyOnImportNow } from "./librarySettings";
 import type { useSaveFileJob } from "./useSaveFileJob";
 import type { ShelfNotice } from "./useShelfLibrary";
 
@@ -187,7 +188,7 @@ export function useBookImport({
         if (paths.length !== list.length) {
           throw new Error("桌面版导入必须保留用户选择的源文件路径");
         }
-        const batch = await store.importPaths(paths);
+        const batch = await store.importPaths(paths, await copyOnImportNow());
         for (const item of batch.results) {
           const source = list[item.inputIndex];
           const fileName = source?.kind === "path" ? source.name : uiText("notice.nthBook", { n: item.inputIndex + 1 });

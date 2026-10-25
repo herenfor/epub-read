@@ -439,3 +439,22 @@ pub(super) fn read_cover_raw_blocking(
     }
     Ok(tauri::ipc::Response::new(read.bytes))
 }
+
+/// What "show in File Explorer" points at: the user's own file for a linked
+/// book, the library copy for a managed one.  The path never comes from the
+/// front end; a missing binding or file is reported, not guessed.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum RevealTarget {
+    File(PathBuf),
+    Missing,
+}
+
+pub(super) fn reveal_target(root: &Path, bindings: &[DeviceBinding], content_hash: &str) -> RevealTarget {
+    let Some(binding) = bindings.iter().find(|binding| binding.content_hash == content_hash) else {
+        return RevealTarget::Missing;
+    };
+    match binding.resolve_source(root) {
+        Ok(source) if source.path().is_file() => RevealTarget::File(source.path().to_path_buf()),
+        _ => RevealTarget::Missing,
+    }
+}
