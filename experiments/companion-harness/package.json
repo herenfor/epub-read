@@ -5,7 +5,8 @@
   "scripts": {
     "start": "node host.mjs",
     "start:execution": "node execution-host.mjs",
-    "check:execution": "node --test execution.test.mjs"
+    "check:execution": "node --test execution.test.mjs",
+    "check:reader": "node --test reader-plugin.test.mjs"
   },
   "dependencies": {
     "@deepseek-ai/cordis": "4.0.5",

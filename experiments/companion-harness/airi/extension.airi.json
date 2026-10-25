@@ -1,0 +1,10 @@
+{
+  "manifestVersion": 2,
+  "kind": "manifest.extension.airi.moeru.ai",
+  "id": "epub-reader-tools",
+  "version": "0.1.0",
+  "engines": { "airi": "0.12.0", "runtimes": ["electron"] },
+  "entrypoints": { "electron": "./extension.mjs" },
+  "permissions": { "apis": [{ "key": "kit.tool", "actions": ["invoke"] }] },
+  "kits": { "uses": [{ "id": "kit.tool", "version": "^1.0.0" }] }
+}

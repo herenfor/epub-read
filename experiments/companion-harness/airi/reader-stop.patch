@@ -1,0 +1,51 @@
+--- a/apps/stage-tamagotchi/src/renderer/stores/tools/plugins.ts
++++ b/apps/stage-tamagotchi/src/renderer/stores/tools/plugins.ts
+@@ -3,11 +3,13 @@
+ import { errorMessageFrom } from '@moeru/std'
+ import { useElectronEventaInvoke } from '@proj-airi/electron-vueuse'
+ import { useLlmToolsStore } from '@proj-airi/stage-ui/stores/ai/chat-llm/tools'
++import { useChatStore } from '@proj-airi/stage-ui/stores/chat'
+ import { useLlmToolsetPromptsStore } from '@proj-airi/stage-ui/stores/ai/chat-llm/toolset-prompts'
+ import { rawTool } from '@xsai/tool'
+ import { defineStore } from 'pinia'
+
+ import { electronPluginInvokeTool, electronPluginListXsaiTools } from '../../../shared/eventa/plugin/tools'
++import { bindReaderStop } from './reader-stop-bridge.mjs'
+
+ export const useTamagotchiPluginToolsStore = defineStore('tamagotchi-plugin-tools', () => {
+   const llmToolsStore = useLlmToolsStore()
+@@ -15,6 +17,7 @@
+   const listPluginXsaiToolDefinitions = useElectronEventaInvoke(electronPluginListXsaiTools)
+   const invokePluginTool = useElectronEventaInvoke(electronPluginInvokeTool)
+   const toolIdPrefix = 'plugin:'
++  const unbindReaderStop = bindReaderStop(useChatStore(), llmToolsStore, invokePluginTool, error => console.warn('[reader-tools] Stop forwarding failed:', errorMessageFrom(error)))
+
+   function registeredToolIds() {
+     return llmToolsStore.tools
+@@ -63,6 +66,7 @@
+   }
+
+   function dispose() {
++    unbindReaderStop()
+     llmToolsStore.removeToolsByIds(...registeredToolIds())
+     llmToolsetPromptsStore.clearToolsetPrompts('plugin-tools')
+   }
+--- /dev/null
++++ b/apps/stage-tamagotchi/src/renderer/stores/tools/reader-stop-bridge.mjs
+@@ -0,0 +1,16 @@
++// AIRI 0.12's plugin tool RPC drops the model's AbortSignal. Bind this at the
++// renderer integration point, not by observing global clicks or the keyboard.
++// The app's visible chat state and the execution/memory owners stay separate.
++/**
++ * @param {{ $onAction: (callback: (action: {name: string}) => void) => (() => void) }} chat
++ * @param {{ tools: Array<{id: string}> }} tools
++ * @param {(input: {ownerExtensionId: string, name: string, input: object}) => Promise<unknown>} invoke
++ * @param {(error: unknown) => void} [onError]
++ */
++export function bindReaderStop(chat, tools, invoke, onError = () => {}) {
++  return chat.$onAction(({ name }) => {
++    if (!['cancelTurn', 'cancelPendingSends'].includes(name)) return;
++    if (!tools.tools.some(tool => tool.id === 'plugin:epub-reader-tools:reader_stop_lookup')) return;
++    void invoke({ ownerExtensionId: 'epub-reader-tools', name: 'reader_stop_lookup', input: {} }).catch(onError);
++  });
++}
