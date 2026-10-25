@@ -18,11 +18,13 @@ use super::types::{
 };
 use crate::android_uri_bridge::RestrictedReader;
 use crate::linked_library::{
-    canonical_epub_path, ensure_library_space, hash_file, inspect_epub, library_file_name,
-    library_root, load_bindings, make_binding, make_managed_binding, make_managed_record,
-    publish_staged_copy, snapshot, verify_binding_for_list_refresh, DeviceBinding, FileSnapshot,
-    ImportedMetadata, LinkedLibraryRecord,
+    canonical_epub_path, ensure_library_space, hash_file, inspect_epub, library_root,
+    load_bindings, make_binding, make_managed_binding, make_managed_record, snapshot,
+    verify_binding_for_list_refresh, DeviceBinding, FileSnapshot, ImportedMetadata,
+    LinkedLibraryRecord,
 };
+#[cfg(not(target_os = "android"))]
+use crate::linked_library::{library_file_name, publish_staged_copy};
 #[cfg(target_os = "android")]
 use crate::linked_library::{managed_source_path, replace_file_atomically};
 use crate::linked_library::{new_staging_path, stream_restricted_reader_to_staging, PrepareError};
