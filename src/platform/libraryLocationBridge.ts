@@ -31,7 +31,10 @@ export interface LibraryLocationProgress {
 
 export interface LibraryLocationResult {
   readonly jobId: string;
-  /** cleanup-pending: the new location is in use, old leftovers remain. */
+  /**
+   * cleanup-pending: leftovers remain, before or after the switch; only
+   * libraryDirectory (and a fresh settings read) says which location is in use.
+   */
   readonly status: "completed" | "cancelled" | "cleanup-pending";
   readonly libraryDirectory: string;
   readonly bookCount: number;

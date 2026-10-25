@@ -4,7 +4,7 @@ import { READER_PALETTES } from "../config/readerPalette";
 import { getRuntimeCapabilities } from "../platform/runtimeCapabilities";
 import { AboutInfo } from "./AboutInfo";
 import { Icon, SettingsRow, SettingsSwitchRow, UpdateDot } from "./settingsRows";
-import { openLibraryFolder, setCopyOnImport, useLibrarySettings } from "./librarySettings";
+import { displayPath, openLibraryFolder, setCopyOnImport, useLibrarySettings } from "./librarySettings";
 import { useAppUpdateDot } from "./appUpdate/appUpdateStore";
 import { CacheStoragePanel } from "./CacheStoragePanel";
 import { LibraryLocationPanel } from "./LibraryLocationPanel";
@@ -128,6 +128,7 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
   const library = useLibrarySettings();
   const [libraryOpenError, setLibraryOpenError] = useState<string | null>(null);
   const [locationOpen, setLocationOpen] = useState(false);
+  const locationRunningRef = useRef(false);
   /** The section's red dot as its accessible label, or false. */
   const sectionDot = (id: ShelfSettingsSection): string | false =>
     id === "about" && updateDot ? t("about.update.dot") : id === "sync" && syncDot ? t("cloudSync.attention") : false;
@@ -147,15 +148,23 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
     if (props.open) {
       setSection(props.initialSection ?? (dialog ? "appearance" : null));
       setPushAnimated(false);
-    } else setCacheOpen(false);
+    } else {
+      setCacheOpen(false);
+      setLocationOpen(false);
+    }
   }, [props.open, props.initialSection, dialog]);
 
-  // Android back and Esc walk the same levels: cache panel → section (touch) → close.
+  // Android back and Esc walk the same levels: library location (consumed
+  // while it runs) → cache panel → section (touch) → close.
   const stepBack = useCallback((): boolean => {
+    if (locationOpen) {
+      if (!locationRunningRef.current) setLocationOpen(false);
+      return true;
+    }
     if (cacheOpen) { setCacheOpen(false); return true; }
     if (!dialog && section !== null) { setSection(null); return true; }
     return false;
-  }, [cacheOpen, dialog, section]);
+  }, [cacheOpen, dialog, locationOpen, section]);
   const stepBackRef = useRef(stepBack);
   stepBackRef.current = stepBack;
   const register = props.registerSubmenuBackHandler;
@@ -259,7 +268,7 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
       content: <>
         {library && <div className="shelf-settings-card is-list">
           <SettingsRow icon={ROW_ICONS.library} title={t("shelfSettings.library")}
-            detail={library.libraryDirectory || t("shelfSettings.library.unknown")}
+            detail={displayPath(library.libraryDirectory) || t("shelfSettings.library.unknown")}
             onClick={() => { setLibraryOpenError(null); void openLibraryFolder().catch((error: unknown) => setLibraryOpenError(String((error as Error).message ?? error))); }} />
           <SettingsSwitchRow icon={ROW_ICONS.copy} title={t("shelfSettings.library.copy")} detail={t("shelfSettings.library.copy.detail")}
             checked={library.copyOnImport} onChange={(copy) => void setCopyOnImport(copy)} />
@@ -370,6 +379,7 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
     <CacheStoragePanel open={cacheOpen} onClose={() => setCacheOpen(false)} />
     {library && <LibraryLocationPanel open={locationOpen} library={library}
       blocked={busy || Boolean(props.importActive || props.saveFileActive || props.lanTransferActive)}
-      onChanged={() => props.onLibraryLocationChanged?.()} onClose={() => setLocationOpen(false)} />}
+      onChanged={() => props.onLibraryLocationChanged?.()} onRunningChange={(running) => { locationRunningRef.current = running; }}
+      onClose={() => setLocationOpen(false)} />}
   </div>;
 }
