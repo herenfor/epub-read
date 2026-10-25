@@ -1,0 +1,11 @@
+{
+  "name": "epub-local-bot-controls",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "index.mjs",
+  "exports": { ".": "./index.mjs" },
+  "files": ["index.mjs", "service.mjs", "prompts.mjs", "patch-native.mjs", "ui.html", "ui.js", "ui.css", "cordis.patch.yml", "README.md"],
+  "engines": { "node": ">=22.19", "dsh": "0.2.1-rc.3" },
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }
+}

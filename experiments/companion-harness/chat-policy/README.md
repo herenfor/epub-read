@@ -48,8 +48,10 @@ Keep character text in the selected bot's `SOUL.md`, separate from runtime
 delivery guidance. Tobs pins that text per session; editing the file does not
 immediately replace an existing session snapshot. Apply an approved change via
 the host's save/persona-refresh APIs, preserving the conversation. A file preview
-is not an interactive persona editor; the current experimental deployment has
-no dedicated everyday persona settings form.
+is not an interactive persona editor. The optional
+[local bot controls](../bot-controls/README.md) now provide a dedicated form
+using native human-save and persona-refresh APIs, plus separate main and
+post-history prompt fields. This policy remains independent of that UI.
 
 ## Soft context maintenance
 

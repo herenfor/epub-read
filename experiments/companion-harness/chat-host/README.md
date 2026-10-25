@@ -107,7 +107,11 @@ Tobs is one verification client. Prioritize the reader's discoverable schemas,
 authorization, original sources, pagination, cancellation and bounded results;
 another agent or platform must not require this bot's identity, persona, memory
 or internal session format. The generic reader CLI can exercise that contract
-without a model. Further bot UI, task delivery and proactivity tuning are paused.
+without a model. The user subsequently requested the optional
+[local bot controls](../bot-controls/README.md): selected/all chat-content purge
+and a three-field persona editor on this host's existing origin. That narrow
+client convenience does not change reader contracts or resume task delivery,
+proactivity, independent memory or AIRI work.
 
 References: [Tobs 1.5.2](https://github.com/BotHarness/DeepSeekBot/tree/v1.5.2),
 [DSH architecture](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/architecture.md),
