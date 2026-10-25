@@ -3,7 +3,8 @@ param(
     [string]$TestDirectory,
     [ValidateRange(1024, 65535)][int]$Port = 5186,
     [switch]$InstallDependencies,
-    [switch]$InstallHarness
+    [switch]$InstallHarness,
+    [switch]$EnableReaderTools
 )
 $ErrorActionPreference = 'Stop'
 if (!$TestDirectory -or $TestDirectory -notmatch '^[A-Za-z]:[\\/]') {
@@ -38,13 +39,14 @@ if ([IO.Path]::GetFullPath($source).TrimEnd('\') -ne [IO.Path]::GetFullPath($Tes
 
 Push-Location $TestDirectory
 $preview = $null
-$environmentNames = @('VITE_EDITION', 'VITE_APP_PLATFORM', 'EPUB_READER_EXPECTED_EDITION', 'CARGO_TARGET_DIR')
+$environmentNames = @('VITE_EDITION', 'VITE_APP_PLATFORM', 'EPUB_READER_EXPECTED_EDITION', 'CARGO_TARGET_DIR', 'EPUB_READER_TOOLS')
 $previousEnvironment = @{}
 foreach ($name in $environmentNames) { $previousEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
 try {
     $env:VITE_EDITION = 'ai'
     $env:VITE_APP_PLATFORM = 'windows'
     $env:EPUB_READER_EXPECTED_EDITION = 'ai'
+    if ($EnableReaderTools) { $env:EPUB_READER_TOOLS = '1' } else { $env:EPUB_READER_TOOLS = $null }
     $env:CARGO_TARGET_DIR = Join-Path $TestDirectory 'src-tauri\target-ai'
     $pnpmStore = Join-Path $TestDirectory '.pnpm-store'
     Write-Host "  Windows workspace: $TestDirectory"
