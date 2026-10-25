@@ -29,6 +29,7 @@ import { fonts } from "./catalogs/fonts";
 import { display } from "./catalogs/display";
 import { about } from "./catalogs/about";
 import { cache } from "./catalogs/cache";
+import { libraryLocation } from "./catalogs/libraryLocation";
 import { saveFile } from "./catalogs/saveFile";
 import { bookExport } from "./catalogs/bookExport";
 import { importProgress } from "./catalogs/importProgress";
@@ -63,6 +64,7 @@ import fontsEn from "./en/fonts.json";
 import displayEn from "./en/display.json";
 import aboutEn from "./en/about.json";
 import cacheEn from "./en/cache.json";
+import libraryLocationEn from "./en/libraryLocation.json";
 import saveFileEn from "./en/saveFile.json";
 import bookExportEn from "./en/bookExport.json";
 import importProgressEn from "./en/importProgress.json";
@@ -87,7 +89,7 @@ declare const __APP_EDITION__: "core" | "ai";
 // tooling runs outside Vite and must still see every catalog.
 const includeAi = typeof __APP_EDITION__ === "undefined" || __APP_EDITION__ === "ai";
 
-export const CATALOGS = [common, folder, language, reader, startup, titlebar, footer, sidebar, notes, imageViewer, search, aa, fonts, display, about, cache, saveFile, bookExport, importProgress, lan, lanPanel, folderImport, shelf, shelfFolder, shelfMenu, shelfMain, shelfSettings, notice, appUi, readerMisc, tapRegions, log, cloudSync, ...(includeAi ? [ai] : [])] as const;
+export const CATALOGS = [common, folder, language, reader, startup, titlebar, footer, sidebar, notes, imageViewer, search, aa, fonts, display, about, cache, libraryLocation, saveFile, bookExport, importProgress, lan, lanPanel, folderImport, shelf, shelfFolder, shelfMenu, shelfMain, shelfSettings, notice, appUi, readerMisc, tapRegions, log, cloudSync, ...(includeAi ? [ai] : [])] as const;
 
 export const zhCN = {
   ...common.zh,
@@ -106,6 +108,7 @@ export const zhCN = {
   ...display.zh,
   ...about.zh,
   ...cache.zh,
+  ...libraryLocation.zh,
   ...saveFile.zh,
   ...bookExport.zh,
   ...importProgress.zh,
@@ -147,6 +150,7 @@ export const en: Partial<Record<MessageKey, string>> = {
   ...displayEn,
   ...aboutEn,
   ...cacheEn,
+  ...libraryLocationEn,
   ...saveFileEn,
   ...bookExportEn,
   ...importProgressEn,
@@ -185,6 +189,7 @@ export const EN_FILES: Readonly<Record<string, Readonly<Record<string, string>>>
   display: displayEn,
   about: aboutEn,
   cache: cacheEn,
+  libraryLocation: libraryLocationEn,
   saveFile: saveFileEn,
   bookExport: bookExportEn,
   importProgress: importProgressEn,

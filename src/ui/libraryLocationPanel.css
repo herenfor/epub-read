@@ -1,0 +1,26 @@
+.library-location-recovery {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.library-location-confirm h3,
+.library-location-running h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.library-location-running progress {
+  width: 100%;
+  height: 8px;
+  accent-color: var(--accent);
+}
+
+.library-location-muted {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
