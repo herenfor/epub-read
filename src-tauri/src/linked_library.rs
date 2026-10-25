@@ -77,6 +77,7 @@ pub(crate) use store::{
     library_root,
     load_bindings,
     managed_source_path,
+    managed_named_path,
     atomic_write_bytes,
     replace_file_atomically,
 };
@@ -93,10 +94,28 @@ pub(crate) use import::{
 
 mod library_copy;
 use library_copy::*;
-pub(crate) use library_copy::{publish_staged_copy, library_file_name, ensure_library_space};
+pub(crate) use library_copy::{library_file_name, ensure_library_space};
+#[cfg(not(target_os = "android"))]
+pub(crate) use library_copy::publish_staged_copy;
 
 mod library_settings;
 use library_settings::*;
+pub(crate) use library_settings::{managed_books_directory, writable_books_directory};
+
+mod library_location;
+pub use library_location::{
+    LibraryLocationState,
+    linked_library_location_plan, linked_library_location_start,
+    linked_library_location_cancel, linked_library_location_recover,
+};
+pub(crate) use library_location::{
+    __tauri_command_name_linked_library_location_plan,
+    __tauri_command_name_linked_library_location_start,
+    __tauri_command_name_linked_library_location_cancel,
+    __tauri_command_name_linked_library_location_recover,
+    __cmd__linked_library_location_plan, __cmd__linked_library_location_start,
+    __cmd__linked_library_location_cancel, __cmd__linked_library_location_recover,
+};
 
 mod archive;
 use archive::*;

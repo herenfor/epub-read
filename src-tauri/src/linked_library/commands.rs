@@ -79,12 +79,21 @@ pub async fn linked_library_list_records(
 }
 
 #[tauri::command]
-pub fn linked_library_import_paths(
+pub async fn linked_library_import_paths(
     app: AppHandle,
-    state: State<'_, LinkedLibraryWriteState>,
     paths: Vec<String>,
     copy_to_library: Option<bool>,
 ) -> Result<ImportBatchResult, String> {
+    tauri::async_runtime::spawn_blocking(move || import_paths_blocking(app, paths, copy_to_library))
+        .await.map_err(|error| format!("书籍导入工作线程失败：{error}"))?
+}
+
+fn import_paths_blocking(
+    app: AppHandle,
+    paths: Vec<String>,
+    copy_to_library: Option<bool>,
+) -> Result<ImportBatchResult, String> {
+    let state = app.state::<LinkedLibraryWriteState>();
     // A34: Windows imports copy into the library unless the user unticked it.
     let copy_to_library = copy_to_library.unwrap_or(false);
     let _guard = state
@@ -389,10 +398,13 @@ pub fn linked_library_relink(
 #[serde(rename_all = "camelCase")]
 pub struct LibrarySettingsView {
     copy_on_import: bool,
-    /// Where library copies live (P1: always the default `books` folder).
+    /// The effective managed-book directory; metadata stays in local app data.
     library_directory: String,
-    /// A settings file this build cannot use. Copying then stays off rather
-    /// than guessing, and the settings page shows why.
+    custom_base_directory: Option<String>,
+    available: bool,
+    recovery_pending: bool,
+    /// Settings corruption or an unavailable custom drive. The latter keeps
+    /// the saved copy preference; the UI must not silently import as linked.
     error: Option<String>,
 }
 
@@ -401,10 +413,20 @@ fn library_settings_view(app: &AppHandle) -> Result<LibrarySettingsView, LinkedL
         .path()
         .app_local_data_dir()
         .map_err(|error| format!("无法取得应用本地数据目录：{error}"))?;
-    let library_directory = library_root(app)?.join("books").to_string_lossy().into_owned();
+    let root = library_root(app)?;
+    let pending = library_location::recovery_pending(&root);
+    let default = root.join("books").to_string_lossy().into_owned();
     Ok(match load_library_settings(&local) {
-        Ok(settings) => LibrarySettingsView { copy_on_import: settings.copy_on_import, library_directory, error: None },
-        Err(error) => LibrarySettingsView { copy_on_import: false, library_directory, error: Some(error) },
+        Ok(settings) => {
+            let books = managed_books_directory(&root)?;
+            let available = settings.custom_base_directory.is_none() || books.is_dir();
+            LibrarySettingsView { copy_on_import: settings.copy_on_import,
+                library_directory: books.to_string_lossy().into_owned(), custom_base_directory: settings.custom_base_directory,
+                available, recovery_pending: pending,
+                error: (!available).then(|| "自定义书库位置不可用，请重新连接书库".into()) }
+        },
+        Err(error) => LibrarySettingsView { copy_on_import: false, library_directory: default,
+            custom_base_directory: None, available: false, recovery_pending: pending, error: Some(error) },
     })
 }
 
@@ -415,6 +437,9 @@ pub fn linked_library_settings_get(app: AppHandle) -> Result<LibrarySettingsView
 
 #[tauri::command]
 pub fn linked_library_settings_set_copy(app: AppHandle, enabled: bool) -> Result<LibrarySettingsView, LinkedLibraryError> {
+    let writes = app.state::<LinkedLibraryWriteState>();
+    let _guard = writes.0.try_lock().map_err(|_| LinkedLibraryError::new("busy", "书库任务进行中，请稍后再改设置"))?;
+    ensure_import_idle(&app)?;
     let local = app
         .path()
         .app_local_data_dir()
@@ -428,8 +453,7 @@ pub fn linked_library_settings_set_copy(app: AppHandle, enabled: bool) -> Result
 /// Opens the library folder itself in File Explorer (created when empty).
 #[tauri::command]
 pub fn linked_library_open_folder(app: AppHandle) -> Result<(), LinkedLibraryError> {
-    let books = library_root(&app)?.join("books");
-    fs::create_dir_all(&books).map_err(|error| format!("无法创建书库目录：{error}"))?;
+    let books = writable_books_directory(&library_root(&app)?)?;
     tauri_plugin_opener::open_path(&books, None::<&str>).map_err(|error| format!("无法打开文件资源管理器：{error}"))?;
     Ok(())
 }

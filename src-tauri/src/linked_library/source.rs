@@ -323,6 +323,7 @@ pub(super) fn read_source_raw_blocking(
     app: AppHandle,
     content_hash: String,
 ) -> Result<tauri::ipc::Response, LinkedLibraryError> {
+    let _location_read = library_location::source_lease(&app)?;
     if !valid_content_hash(&content_hash) {
         return Err("无效的书籍内容指纹".into());
     }
@@ -374,6 +375,7 @@ pub(super) fn read_cover_raw_blocking(
     app: AppHandle,
     content_hash: String,
 ) -> Result<tauri::ipc::Response, LinkedLibraryError> {
+    let _location_read = library_location::source_lease(&app)?;
     if !valid_content_hash(&content_hash) {
         return Err("无效的书籍内容指纹".into());
     }

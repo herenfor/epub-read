@@ -309,19 +309,20 @@ pub(crate) fn valid_job_id(value: &str) -> bool {
     crate::portable_state::valid_canonical_uuid(value)
 }
 
-pub(crate) fn managed_book_path(root: &Path, content_hash: &str) -> PathBuf {
-    root.join("books").join(format!("{content_hash}.epub"))
+pub(crate) fn managed_book_path(root: &Path, content_hash: &str) -> Result<PathBuf, SaveFileError> {
+    crate::linked_library::managed_source_path(root, content_hash).map_err(SaveFileError::storage_error)
 }
 
-pub(crate) fn staging_root(root: &Path) -> PathBuf {
-    root.join("books").join(".staging")
+pub(crate) fn staging_root(root: &Path) -> Result<PathBuf, SaveFileError> {
+    crate::linked_library::writable_books_directory(root)
+        .map(|books| books.join(".staging")).map_err(SaveFileError::storage_error)
 }
 
 pub(crate) fn new_staging_dir(root: &Path, job_id: &str) -> Result<PathBuf, SaveFileError> {
     if !valid_job_id(job_id) {
         return Err(SaveFileError::invalid_request("jobId 必须是规范 UUID"));
     }
-    let dir = staging_root(root).join(format!("save-file-{job_id}"));
+    let dir = staging_root(root)?.join(format!("save-file-{job_id}"));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir)?;
     Ok(dir)
@@ -337,7 +338,7 @@ pub(crate) fn create_owned_staging_dir(
     if !valid_job_id(job_id) {
         return Err(SaveFileError::invalid_request("jobId 必须是规范 UUID"));
     }
-    let dir = staging_root(root).join(format!("save-file-{job_id}"));
+    let dir = staging_root(root)?.join(format!("save-file-{job_id}"));
     if dir.exists() {
         fs::remove_dir_all(&dir)?;
     }
@@ -374,6 +375,8 @@ pub(crate) struct LocalBinding {
     pub storage_kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub canonical_source_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub managed_file_name: Option<String>,
     #[serde(default)]
     pub file_size: u64,
     #[serde(default)]
@@ -405,6 +408,7 @@ impl LocalBinding {
             content_hash: content_hash.to_string(),
             storage_kind: "managed".to_string(),
             canonical_source_path: None,
+            managed_file_name: None,
             file_size,
             source_mtime_ns,
             cover_zip_path: None,
@@ -420,7 +424,11 @@ impl LocalBinding {
             ));
         }
         if self.storage_kind == "managed" {
-            return Ok(managed_book_path(root, &self.content_hash));
+            return match self.managed_file_name.as_deref() {
+                Some(name) => crate::linked_library::managed_named_path(root, name),
+                None => crate::linked_library::managed_source_path(root, &self.content_hash),
+            }
+            .map_err(SaveFileError::invalid_entity);
         }
         let raw = self
             .canonical_source_path
@@ -595,7 +603,9 @@ pub(crate) fn cleanup_stale_staging(app: &tauri::AppHandle) -> Result<(), SaveFi
         .map_err(|error| {
             SaveFileError::storage_error(format!("无法取得应用本地数据目录：{error}"))
         })?;
-    let dir = staging_root(&root);
+    // Startup cleanup is read-only when a configured drive is unavailable.
+    let dir = crate::linked_library::managed_books_directory(&root)
+        .map_err(SaveFileError::storage_error)?.join(".staging");
     let entries = match fs::read_dir(&dir) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),

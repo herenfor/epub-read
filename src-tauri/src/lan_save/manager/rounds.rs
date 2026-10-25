@@ -61,7 +61,7 @@ async fn recycle<R: Runtime>(
     tokio::task::spawn_blocking(move || {
         let _lease = cleanup_lease;
         if let Some(task) = cleanup_session.file_task()? {
-            let staging = crate::save_file::staging_root(&lan_library_root(&cleanup_app)?)
+            let staging = crate::save_file::staging_root(&lan_library_root(&cleanup_app)?)?
                 .join(format!("save-file-{}", task.job_id));
             finish_task(&cleanup_app, &task);
             // F-N's normal cleanup is best effort. Before advertising reusable,
