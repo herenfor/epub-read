@@ -1,0 +1,11 @@
+{
+  "name": "epub-companion-chat-policy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "index.mjs",
+  "exports": { ".": "./index.mjs" },
+  "files": ["index.mjs", "policy.mjs", "preset.json", "reading-partner.md", "cordis.patch.yml", "README.md"],
+  "engines": { "node": ">=22.19", "dsh": "0.2.1-rc.3" },
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }
+}

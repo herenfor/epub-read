@@ -6,8 +6,9 @@ conversation UI and native session log. The plugin owns only reader tool
 registration and HTTP calls. It creates no second agent, memory store, model
 request, shell tool, timer or automatic indexing task.
 
-This is the first step toward a persistent chat companion, not a completed bot
-product. AIRI is not needed. Core/Android do not import this package.
+DSH is one adapter for the reader's framework-neutral HTTP/CLI contract. Other
+clients do not need this host's bot, persona or memory. AIRI is not needed.
+Core/Android do not import this package.
 
 ## Install in a dedicated host
 
@@ -75,7 +76,7 @@ registry. The example uses a placeholder path, not a shipped user configuration.
   index coverage, and ordinary conversation without the reader. It does not
   invent a persona, publish memories or replace the host's prompt.
 
-The plugin does **not** enforce a 200K conversation policy. Byte-limited tool
+The plugin does **not** enforce a conversation token policy. Byte-limited tool
 results cannot prove the complete model request fits. The host adapter must
 admit the final assembled request, including history/tools/reasoning reserves;
 `scripts/reader-model-context.mjs` is the separate reusable gate.

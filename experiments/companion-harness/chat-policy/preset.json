@@ -1,0 +1,6 @@
+{
+  "id": "reading-companion",
+  "version": 1,
+  "softTokens": 256000,
+  "deferWorkTools": true
+}
