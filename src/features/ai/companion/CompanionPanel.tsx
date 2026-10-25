@@ -8,9 +8,10 @@ import { loadChatSettings, loadMemories, saveChatSettings, saveMemories } from "
 import { clearConversation, putExchange, readExchanges, readSegments } from "./conversationStore";
 import { cancelMemoryMaintenance, maintainConversation } from "./memoryMaintenance";
 import type { ContextLedger } from "./contextBudget";
+import { recordCompanionEvent } from "./eventLog";
 import { createChatTransport, messageText } from "./transport";
 import { InvestigationTrace } from "./InvestigationTrace";
-import { companionDiagnostics } from "./diagnostics";
+import { companionDiagnostics, startCompanionEventDiagnostics } from "./diagnostics";
 import type { ChatPhase, Evidence, InvestigationStep, ReadingContext, SavedExchange } from "./types";
 import "./companion.css";
 
@@ -49,9 +50,11 @@ export function CompanionPanel({ book, context, libraryBooks, onNavigate }: Comp
 
   useEffect(() => {
     let disposed = false;
+    startCompanionEventDiagnostics();
     setReady(false); setRunning(false); setError(""); setDraft(""); setEvidence([]); setTrace([]); setActiveQuestion("");
     void Promise.all([readExchanges({ limit: 40 }), loadMemories()]).then(([exchanges, savedMemories]) => {
       if (disposed) return;
+      recordCompanionEvent("session.opened", { bookHash: context.bookHash, count: exchanges.length });
       setHistory(exchanges); setHasOlder(exchanges.length === 40); setMemoryText(savedMemories); setReady(true);
     }).catch(cause => { if (!disposed) setError(messageText(cause)); });
     return () => { disposed = true; current.current?.abort(); current.current = null; cancelMemoryMaintenance(); };
@@ -92,6 +95,7 @@ export function CompanionPanel({ book, context, libraryBooks, onNavigate }: Comp
       const transport = createChatTransport(settings, apiKey.trim());
       const result = await createDirectRuntime(transport).runTurn({
         question: text, history: requestHistory, memories, grounded: settings.mode === "reading", signal: controller.signal,
+        exchangeId: exchange.id,
         segments: settings.automaticMemory ? segments : [],
         contextPolicy: { softLimit: settings.contextTier, capacity: settings.contextCapacity,
           outputTokens: transport.requestInfo?.maxTokens ?? 8192 }, onContext: setContextLedger,

@@ -7,12 +7,14 @@ import { assertContextCapacity, contextLedger, estimateTokens, recentWithinBudge
   type ContextLedger, type ContextPolicy } from "./contextBudget";
 import { selectMemoryContext } from "./memoryContext";
 import type { ConversationSegment } from "./conversationStore";
+import { recordCompanionEvent } from "./eventLog";
 import type { ChatPhase, ChatTransport, Evidence, InvestigationStep, SavedExchange } from "./types";
 
 export interface ConversationInput {
   question: string; history: readonly SavedExchange[]; memories: string;
   library: ReadingLibrary; transport: ChatTransport; signal: AbortSignal;
   grounded: boolean;
+  exchangeId?: string;
   contextPolicy?: ContextPolicy;
   segments?: readonly ConversationSegment[];
   onContext?(ledger: ContextLedger): void;
@@ -48,16 +50,19 @@ export async function answerWithBooks(input: ConversationInput): Promise<{ answe
     // Completed historical dialogue can be shed between tool requests; the
     // current protocol tail and its actual reasoning fields stay intact.
     if ((prepared.ledger.overSoftLimit || prepared.ledger.inputTokens > capacityInput) && history.length > 1) {
+      const previousCount = history.length;
       const target = Math.min(policy.softLimit * 0.75, capacityInput - 1000);
       let removed = 0;
       while (history.length > 1 && removed < prepared.ledger.inputTokens - target) removed += estimateTokens(history.shift()!);
       prepared = build();
+      recordCompanionEvent("context.compacted", { turnId: inspection.id, removedHistory: previousCount - history.length,
+        inputTokens: prepared.ledger.inputTokens, softLimit: policy.softLimit });
     }
     assertContextCapacity(prepared.ledger);
     input.onContext?.(prepared.ledger);
     return prepared;
   };
-  const inspection = companionDiagnostics.begin(input.question, library.context, transport.requestInfo);
+  const inspection = companionDiagnostics.begin(input.question, library.context, transport.requestInfo, input.exchangeId);
   const update = (phase: ChatPhase, text = "") => input.onUpdate(phase, text, evidence.all(), [...tools.trace]);
   const tools = new ReadingToolSession(library, evidence, signal, phase => update(phase));
   update("planning");
@@ -92,6 +97,7 @@ export async function answerWithBooks(input: ConversationInput): Promise<{ answe
       }
       for (const call of reply.tool_calls) {
         if (tools.trace.length >= 12) throw new Error("本轮查阅次数较多，请缩小问题后继续");
+        inspection.toolStarted(call);
         const result = await tools.execute(call);
         inspection.tool(call, result);
         protocol.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(result) });

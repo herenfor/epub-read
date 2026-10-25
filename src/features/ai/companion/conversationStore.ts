@@ -1,6 +1,7 @@
 import { openCompanionDatabase } from "./storage";
 import { exchangeTokens } from "./contextBudget";
 import type { SavedExchange } from "./types";
+import { recordCompanionEvent } from "./eventLog";
 
 export interface MessageSource { exchangeId: string; revision: number; role: "user" | "assistant" }
 export interface MemoryEntry {
@@ -51,6 +52,8 @@ export async function putExchange(exchange: SavedExchange): Promise<void> {
     };
   };
   await done;
+  recordCompanionEvent("conversation.saved", { exchangeId: exchange.id, revision: exchange.revision ?? 1,
+    status: exchange.interrupted ? "interrupted" : "complete" });
 }
 
 /** Each record is separate; UI pagination and request budgets never prune disk history. */
@@ -121,4 +124,5 @@ export async function clearConversation(): Promise<void> {
     entry.continue();
   };
   await done;
+  recordCompanionEvent("conversation.cleared");
 }
