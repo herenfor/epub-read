@@ -70,6 +70,10 @@ macro_rules! configure_invoke_handler {
             linked_library::linked_library_relink,
             linked_library::linked_library_reveal_source,
             linked_library::linked_library_settings_get,
+            linked_library::linked_library_location_plan,
+            linked_library::linked_library_location_start,
+            linked_library::linked_library_location_cancel,
+            linked_library::linked_library_location_recover,
             linked_library::linked_library_settings_set_copy,
             linked_library::linked_library_open_folder,
             linked_library::linked_library_delete_record,
@@ -231,6 +235,10 @@ macro_rules! configure_invoke_handler {
             linked_library::linked_library_relink,
             linked_library::linked_library_reveal_source,
             linked_library::linked_library_settings_get,
+            linked_library::linked_library_location_plan,
+            linked_library::linked_library_location_start,
+            linked_library::linked_library_location_cancel,
+            linked_library::linked_library_location_recover,
             linked_library::linked_library_settings_set_copy,
             linked_library::linked_library_open_folder,
             linked_library::linked_library_delete_record,
@@ -343,6 +351,7 @@ pub fn run() {
     let builder = builder
         .manage(FontWriteState::default())
         .manage(LinkedLibraryWriteState::default())
+        .manage(linked_library::LibraryLocationState::default())
         .manage(linked_library::NativeArchiveState::default())
         .manage(linked_library::ManagedImportState::default())
         .manage(directory_import::job::DirectoryImportState::default())

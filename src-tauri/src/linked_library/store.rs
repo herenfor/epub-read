@@ -105,9 +105,7 @@ pub(crate) fn managed_source_path(library_root: &Path, content_hash: &str) -> Re
     if !valid_content_hash(content_hash) {
         return Err("managed 设备绑定缺少规范小写内容指纹".into());
     }
-    Ok(library_root
-        .join("books")
-        .join(format!("{content_hash}.epub")))
+    Ok(managed_books_directory(library_root)?.join(format!("{content_hash}.epub")))
 }
 
 /// A library copy with a readable name (A34). The name is a single plain file
@@ -116,7 +114,7 @@ pub(crate) fn managed_named_path(library_root: &Path, file_name: &str) -> Result
     if !valid_library_file_name(file_name) {
         return Err("托管副本文件名无效".into());
     }
-    Ok(library_root.join("books").join(file_name))
+    Ok(managed_books_directory(library_root)?.join(file_name))
 }
 
 pub(crate) fn valid_library_file_name(name: &str) -> bool {
