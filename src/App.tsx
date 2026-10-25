@@ -1891,6 +1891,12 @@ export default function App() {
 
   const librarySettings = useLibrarySettings();
   const handleCopyToLibraryChange = useCallback((copy: boolean): void => { void setCopyOnImport(copy); }, []);
+  // Book paths may have switched: the next open resolves them natively again.
+  const handleLibraryLocationChanged = useCallback((): void => {
+    void refreshShelfProjection().catch((error: unknown) => {
+      setShelfError(uiText("libraryLocation.refreshFailed", { error: error instanceof Error ? error.message : String(error) }));
+    });
+  }, [refreshShelfProjection, setShelfError]);
 
   const handleRevealSource = useCallback((entry: ShelfEntry): void => {
     void revealShelfSource(entry.contentHash ?? entry.id).then((status) => {
@@ -5434,6 +5440,7 @@ export default function App() {
               lanTransferActive={lanSaveSession.active}
               copyToLibrary={libraryCopyChoice(librarySettings)}
               onCopyToLibraryChange={handleCopyToLibraryChange}
+              onLibraryLocationChanged={handleLibraryLocationChanged}
               onOpenLanTransfer={runtime.supportsLanTransfer ? handleOpenLanSave : undefined}
               theme={settings.theme}
               onThemeChange={changeTheme}

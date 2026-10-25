@@ -154,6 +154,8 @@ export interface ShelfViewProps {
   /** A34 (Windows): copy imports into the library; shown as a checkbox in the import menu. */
   copyToLibrary?: boolean;
   onCopyToLibraryChange?(copy: boolean): void;
+  /** A34 P2: the library location changed (or a change ended); re-read the shelf. */
+  onLibraryLocationChanged?(): void;
   /** 打开共享的设备互传面板，可携带当前批量选择用于“选中书籍”范围。 */
   onOpenLanTransfer?(selectedEntries?: ShelfEntry[]): void;
   theme: Theme;
@@ -4401,6 +4403,7 @@ export function ShelfView(props: ShelfViewProps) {
     onExportArchive: () => props.onExportArchive(),
     onExportAllBooks: props.onExportBooks ? () => props.onExportBooks!() : undefined,
     onImportLegacyArchive: props.onImportLegacyArchive,
+    onLibraryLocationChanged: props.onLibraryLocationChanged,
     bodySearch,
     onOpenDiagnostics: props.onOpenDiagnostics ? () => {
       closeSettings();

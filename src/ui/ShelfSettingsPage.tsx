@@ -7,6 +7,7 @@ import { Icon, SettingsRow, SettingsSwitchRow, UpdateDot } from "./settingsRows"
 import { openLibraryFolder, setCopyOnImport, useLibrarySettings } from "./librarySettings";
 import { useAppUpdateDot } from "./appUpdate/appUpdateStore";
 import { CacheStoragePanel } from "./CacheStoragePanel";
+import { LibraryLocationPanel } from "./LibraryLocationPanel";
 import { CloudSyncPanel, CloudSyncQuickAction, useCloudSyncRowDetail } from "./cloudSync/CloudSyncPanel";
 import { useCloudSyncAttention } from "./cloudSync/cloudSyncStore";
 import { useExitPresence } from "./menuMotion";
@@ -53,6 +54,8 @@ export interface ShelfSettingsPageProps {
   onImportLegacyArchive?(): void;
   bodySearch?: ShelfBodySearchProps;
   onOpenDiagnostics?(): void;
+  /** After a library location change (finished or not): the host re-reads the shelf. */
+  onLibraryLocationChanged?(): void;
   /** The shelf's single back slot: the page answers Android back for its own levels. */
   registerSubmenuBackHandler?(handler: (() => boolean) | null): void;
   onClose(): void;
@@ -88,6 +91,7 @@ const ROW_ICONS = {
   log: <Icon><path d="M7 3.5h7l4 4V20a.5.5 0 0 1-.5.5h-10A.5.5 0 0 1 7 20z" /><path d="M14 3.5V8h4M10 12.5h5M10 16h5" /></Icon>,
   library: <Icon><path d="M5 4.5h5v15H5zM10 4.5h4v15h-4z" /><path d="m15 5.5 3.5-.9 3 14-3.5.9z" /></Icon>,
   copy: <Icon><rect x="8" y="8" width="11" height="12" rx="1.5" /><path d="M5 15.5V5.5A1.5 1.5 0 0 1 6.5 4H15" /></Icon>,
+  move: <Icon><path d="M3.5 7.5v10A1.5 1.5 0 0 0 5 19h14a1.5 1.5 0 0 0 1.5-1.5V9A1.5 1.5 0 0 0 19 7.5h-7L10 5H5A1.5 1.5 0 0 0 3.5 6.5z" /><path d="M9 13h6.5M13 10.5l2.5 2.5-2.5 2.5" /></Icon>,
 };
 
 function Segmented<T extends string>(props: { label: string; value: T; options: Array<{ value: T; label: string }>; onChange(value: T): void }) {
@@ -123,6 +127,7 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
   const syncDot = useCloudSyncAttention();
   const library = useLibrarySettings();
   const [libraryOpenError, setLibraryOpenError] = useState<string | null>(null);
+  const [locationOpen, setLocationOpen] = useState(false);
   /** The section's red dot as its accessible label, or false. */
   const sectionDot = (id: ShelfSettingsSection): string | false =>
     id === "about" && updateDot ? t("about.update.dot") : id === "sync" && syncDot ? t("cloudSync.attention") : false;
@@ -172,6 +177,10 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
   if (!present) return null;
 
   const busy = props.busy;
+  /** The location row's warning, null when all is well, undefined to hide it (the settings file is unusable). */
+  const libraryLocationWarning = !library || (!library.available && library.customBaseDirectory === null) ? undefined
+    : library.recoveryPending ? t("libraryLocation.row.recovery")
+    : !library.available ? t("libraryLocation.row.unavailable") : null;
   const archiveBusy = busy || props.saveFileActive || props.lanTransferActive;
   const readingProps: ReadingSettingsProps = {
     tapRegions: props.tapRegions,
@@ -254,6 +263,9 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
             onClick={() => { setLibraryOpenError(null); void openLibraryFolder().catch((error: unknown) => setLibraryOpenError(String((error as Error).message ?? error))); }} />
           <SettingsSwitchRow icon={ROW_ICONS.copy} title={t("shelfSettings.library.copy")} detail={t("shelfSettings.library.copy.detail")}
             checked={library.copyOnImport} onChange={(copy) => void setCopyOnImport(copy)} />
+          {libraryLocationWarning !== undefined && <SettingsRow icon={ROW_ICONS.move} title={t("libraryLocation.row")}
+            detail={libraryLocationWarning ?? t("libraryLocation.row.detail")} dot={libraryLocationWarning ?? false}
+            onClick={() => setLocationOpen(true)} />}
         </div>}
         {library && (library.error || libraryOpenError) && <p className="shelf-settings-error" role="alert">{libraryOpenError ?? library.error}</p>}
         {capabilities.supportsCacheStorage && <div className="shelf-settings-card is-list">
@@ -356,5 +368,8 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
     {dialog && <div className="shelf-settings-backdrop" aria-hidden="true" onClick={props.onClose} />}
     {content}
     <CacheStoragePanel open={cacheOpen} onClose={() => setCacheOpen(false)} />
+    {library && <LibraryLocationPanel open={locationOpen} library={library}
+      blocked={busy || Boolean(props.importActive || props.saveFileActive || props.lanTransferActive)}
+      onChanged={() => props.onLibraryLocationChanged?.()} onClose={() => setLocationOpen(false)} />}
   </div>;
 }
