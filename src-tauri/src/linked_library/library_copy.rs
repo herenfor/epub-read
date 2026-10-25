@@ -64,10 +64,12 @@ pub(super) fn allocate_library_file_name(
     books_dir: &Path,
     wanted: &str,
     bindings: &[DeviceBinding],
+    skipped: &HashSet<String>,
 ) -> String {
     let stem = wanted.strip_suffix(".epub").unwrap_or(wanted);
     let taken = |candidate: &str| {
-        books_dir.join(candidate).exists()
+        skipped.contains(candidate)
+            || fs::symlink_metadata(books_dir.join(candidate)).is_ok()
             || bindings.iter().any(|binding| {
                 binding
                     .managed_file_name
@@ -176,13 +178,20 @@ fn publish_staged_copy_using(
     bindings: &[DeviceBinding],
     mut publish: impl FnMut(&Path, &Path) -> std::io::Result<()>,
 ) -> Result<(String, FileSnapshot), String> {
+    let mut skipped = HashSet::new();
     loop {
-        let name =
-            allocate_library_file_name(&writable_books_directory(root)?, wanted_name, bindings);
+        let name = allocate_library_file_name(
+            &writable_books_directory(root)?,
+            wanted_name,
+            bindings,
+            &skipped,
+        );
         let target = managed_named_path(root, &name)?;
         match publish(staging, &target) {
             Ok(()) => return Ok((name, snapshot(&target)?)),
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                skipped.insert(name);
+            }
             Err(error) => return Err(format!("无法安全发布书库副本：{error}")),
         }
     }
@@ -238,6 +247,33 @@ mod tests {
             b"our book"
         );
         assert!(!staging.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn c1_unobservable_collision_advances_to_the_next_name() {
+        let root = temp_root("hidden-collision");
+        let staging = new_staging_path(&root).unwrap();
+        fs::write(&staging, b"ours").unwrap();
+        let mut collided = false;
+        let (name, _) =
+            publish_staged_copy_using(&root, &staging, "book.epub", &[], |source, target| {
+                if !collided {
+                    collided = true;
+                    return Err(std::io::ErrorKind::AlreadyExists.into());
+                }
+                publish_without_replacing(source, target)
+            })
+            .unwrap();
+        assert_eq!(name, "book (2).epub");
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink("missing.epub", root.join("dangling.epub")).unwrap();
+            assert_eq!(
+                allocate_library_file_name(&root, "dangling.epub", &[], &HashSet::new()),
+                "dangling (2).epub"
+            );
+        }
         fs::remove_dir_all(root).unwrap();
     }
 
