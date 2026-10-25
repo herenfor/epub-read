@@ -52,7 +52,11 @@ pub struct InputPage {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", rename_all_fields = "camelCase", tag = "kind")]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "kind"
+)]
 pub enum FolderTarget {
     Reuse {
         group_key: String,
@@ -154,6 +158,34 @@ pub struct DirectoryImportResult {
     pub status: ImportJobStatus,
     pub counts: ImportCounts,
     pub issue_count: usize,
+    /// Anonymous, device-local diagnostics; never written into portable data.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub performance: Option<ImportPerformance>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportPerformance {
+    pub elapsed_micros: u64,
+    /// Summed task wall times, which overlap across workers.
+    pub hash_task_micros: u64,
+    pub copy_hash_task_micros: u64,
+    pub metadata_task_micros: u64,
+    pub observe_micros: u64,
+    /// Whole batch time, including publish; do not add publish to this again.
+    pub commit_micros: u64,
+    pub publish_micros: u64,
+    pub waiting_micros: u64,
+    /// Successful preparation only; partial reads of failed inputs are excluded.
+    pub verified_source_bytes: u64,
+    pub staged_write_bytes: u64,
+    pub prepared_books: usize,
+    pub commit_batches: usize,
+    pub budget_waits: usize,
+    pub peak_preparing: usize,
+    pub peak_outstanding: usize,
+    /// Reservation estimates, not RSS or exact temporary disk consumption.
+    pub peak_reserved_staging_bytes: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
