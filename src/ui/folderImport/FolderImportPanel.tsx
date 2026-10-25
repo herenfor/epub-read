@@ -47,6 +47,9 @@ export interface FolderImportPanelProps {
   closeSignal?: number;
   /** Start scanning on open: the port already knows its source (a folder dropped on the window). */
   autoScan?: boolean;
+  /** Windows: the shared 复制到书库 choice, sent with this import. Absent = no choice shown. */
+  copyToLibrary?: boolean;
+  onCopyToLibraryChange?(copy: boolean): void;
 }
 
 export const DEFAULT_FOLDER_IMPORT_OPTIONS: ImportOptions = {
@@ -258,7 +261,8 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
     if (!owner || !plan) return;
     const targets = buildFolderTargets(plan.groups, resolutions, choices);
     if (!targets) return;
-    const started = owner.run({ options, targets }, {
+    const { copyToLibrary } = props;
+    const started = owner.run({ options, targets, ...(copyToLibrary === undefined ? {} : { copyToLibrary }) }, {
       onProgress: (event) => {
         if (!mountedRef.current) return;
         setPhase((current) => (current.kind === "importing" ? { ...current, progress: event } : current));
@@ -446,6 +450,20 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
                     <span>{label}<span className="folder-import-hint">{hint}</span></span>
                   </label>
                 ))}
+              </fieldset>
+            )}
+
+            {props.copyToLibrary !== undefined && (
+              <fieldset className="save-file-fieldset">
+                <legend>{t("shelfSettings.library")}</legend>
+                <label className="save-file-radio folder-import-copy">
+                  <input
+                    type="checkbox"
+                    checked={props.copyToLibrary}
+                    onChange={(event) => props.onCopyToLibraryChange?.(event.target.checked)}
+                  />
+                  <span>{t("shelf.import.copy")}<span className="folder-import-hint">{t("folderImport.copy.hint")}</span></span>
+                </label>
               </fieldset>
             )}
 

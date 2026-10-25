@@ -11,9 +11,19 @@ import { getRuntimeCapabilities } from "../platform/runtimeCapabilities";
 export interface LibrarySettingsView {
   copyOnImport: boolean;
   libraryDirectory: string;
-  /** The settings file could not be used; copying stays off. */
+  /** The chosen base folder, or null for the default inside app data. */
+  customBaseDirectory: string | null;
+  /** False while a chosen location is unreachable, or the settings file is unusable. */
+  available: boolean;
+  /** A location change left work to finish or clean up. */
+  recoveryPending: boolean;
+  /** Why the settings or the location cannot be used right now. */
   error: string | null;
 }
+
+const UNREADABLE: Omit<LibrarySettingsView, "error"> = {
+  copyOnImport: false, libraryDirectory: "", customBaseDirectory: null, available: false, recoveryPending: false,
+};
 
 let view: LibrarySettingsView | null = null;
 let loading: Promise<LibrarySettingsView | null> | null = null;
@@ -40,9 +50,30 @@ export function ensureLibrarySettings(): Promise<LibrarySettingsView | null> {
   if (view) return Promise.resolve(view);
   // A failed read is remembered as an error view, so a render never re-asks in a loop.
   loading ??= invoke<LibrarySettingsView>("linked_library_settings_get")
-    .then(publish, (error: unknown) => publish({ copyOnImport: false, libraryDirectory: "", error: errorText(error) }))
+    .then(publish, (error: unknown) => publish({ ...UNREADABLE, error: errorText(error) }))
     .finally(() => { loading = null; });
   return loading;
+}
+
+/** Re-reads after something native may have changed (a location change, finished or not). */
+export async function refreshLibrarySettings(): Promise<LibrarySettingsView | null> {
+  if (!librarySettingsSupported()) return null;
+  try {
+    return publish(await invoke<LibrarySettingsView>("linked_library_settings_get"));
+  } catch (error) {
+    return publish({ ...(view ?? UNREADABLE), error: errorText(error) });
+  }
+}
+
+/**
+ * The 复制到书库 choice an import entry shows, or undefined to show none. An
+ * unreachable chosen location keeps the choice: copying is then refused with
+ * a reason, and unticking still imports by link. Only an unusable settings
+ * file (unavailable at the default location) hides it.
+ */
+export function libraryCopyChoice(current: LibrarySettingsView | null): boolean | undefined {
+  if (!current || (!current.available && current.customBaseDirectory === null)) return undefined;
+  return current.copyOnImport;
 }
 
 /** What an import should do right now: copy only when the shown setting says so. */
@@ -55,7 +86,7 @@ export async function setCopyOnImport(enabled: boolean): Promise<void> {
     publish(await invoke<LibrarySettingsView>("linked_library_settings_set_copy", { enabled }));
   } catch (error) {
     // Keep the last good values; surface why the change did not stick.
-    publish({ ...(view ?? { copyOnImport: false, libraryDirectory: "" }), error: errorText(error) });
+    publish({ ...(view ?? UNREADABLE), error: errorText(error) });
   }
 }
 

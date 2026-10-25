@@ -47,6 +47,7 @@ export const folderImport = defineMessages("folderImport", {
   "folderImport.existing.preserve.hint": "已有的书一律不移动",
   "folderImport.existing.replace": "按此次目录调整",
   "folderImport.existing.replace.hint": "已有的书也按目录移动",
+  "folderImport.copy.hint": { zh: "取消勾选则只记住原文件的位置；本次导入开始后不再改变", note: "Hint under the folder import's copy-into-library checkbox (Windows)." },
   "folderImport.folders": "文件夹",
   "folderImport.looseCount.other": "另有 {count} 本留在未分类",
   "folderImport.looseCount.one": { zh: "另有 {count} 本留在未分类", note: "Singular form." },

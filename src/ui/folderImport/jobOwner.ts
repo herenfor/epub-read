@@ -69,13 +69,13 @@ export class FolderImportJobOwner {
   }
 
   run(
-    input: { readonly options: ImportOptions; readonly targets: readonly FolderTarget[] },
+    input: { readonly options: ImportOptions; readonly targets: readonly FolderTarget[]; readonly copyToLibrary?: boolean },
     handlers: ImportRunHandlers,
   ): boolean {
     const jobId = this.jobId;
     if (!jobId || this.importing || this.closed) return false;
     this.importing = true;
-    this.runSettled = this.port.start({ jobId, options: input.options, targets: input.targets, onProgress: handlers.onProgress })
+    this.runSettled = this.port.start({ jobId, ...input, onProgress: handlers.onProgress })
       .then(handlers.onResult, handlers.onError)
       .finally(async () => {
         this.importing = false;
