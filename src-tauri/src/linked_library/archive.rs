@@ -33,7 +33,7 @@ pub(super) fn native_archive_session(
     Ok(Arc::clone(&entry.session))
 }
 
-pub(super) fn archive_open_blocking(
+pub(crate) fn archive_open_blocking(
     app: AppHandle,
     owner: String,
     content_hash: String,
@@ -130,4 +130,17 @@ pub(crate) fn close_all_native_archives(app: &AppHandle) {
     for entry in removed {
         entry.session.close();
     }
+}
+
+/// Reclaim only handles owned by this capability provider, never the active reader.
+#[cfg(feature = "ai")]
+pub(crate) fn close_tool_archives(app: &AppHandle, ids: Vec<String>) {
+    let removed = {
+        let state = app.state::<NativeArchiveState>();
+        let Ok(mut sessions) = state.0.lock() else { return };
+        ids.into_iter().filter_map(|id| {
+            if sessions.get(&id).is_some_and(|entry| entry.owner == "main") { sessions.remove(&id) } else { None }
+        }).collect::<Vec<_>>()
+    };
+    for entry in removed { entry.session.close(); }
 }

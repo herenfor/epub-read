@@ -109,8 +109,13 @@ export async function bootstrapApp(
     const appModule = await dependencies.loadApp();
     dependencies.mountApp(root, appModule.default);
     if (IS_AI_EDITION && import.meta.env.DEV) {
-      void import("./features/ai/reader-tools/developmentProvider")
-        .then(module => module.startReaderToolDevelopmentProvider()).catch(() => {});
+      if (dependencies.isNativeHost()) {
+        void import("./features/ai/reader-tools/nativeProvider")
+          .then(module => module.startNativeReaderToolProvider()).catch(() => {});
+      } else {
+        void import("./features/ai/reader-tools/developmentProvider")
+          .then(module => module.startReaderToolDevelopmentProvider()).catch(() => {});
+      }
     }
     return "mounted";
   } catch (error) {

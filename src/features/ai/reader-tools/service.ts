@@ -1,5 +1,5 @@
 import { READER_TOOL_CATALOG } from "./catalog";
-import { ReaderToolError, type ReaderToolBackend, type ReaderToolReply, type ReaderToolRequest } from "./contracts";
+import { ReaderToolError, type ReaderToolBackend, type ReaderToolReply, type ReaderToolRequest, type ReaderToolGrant } from "./contracts";
 
 function validate(args: Record<string, unknown>, definition: (typeof READER_TOOL_CATALOG)[number]) {
   const schema = definition.inputSchema as { properties: Record<string, { type: string | string[]; minimum?: number; maximum?: number; minLength?: number; maxLength?: number }>; required: string[] };
@@ -34,7 +34,14 @@ function page<T>(items: T[], args: Record<string, unknown>, binding: string, def
   return { items: selected, nextCursor: offset + selected.length < items.length ? encode({ binding, offset: offset + selected.length }) : null, offset };
 }
 
-export function createReaderToolService(backend: ReaderToolBackend) {
+export function createReaderToolService(source: ReaderToolBackend, grant?: ReaderToolGrant) {
+  const backend: ReaderToolBackend = { ...source, async list(signal) {
+    const books = await source.list(signal);
+    return grant?.bookIds ? books.filter(book => grant.bookIds!.includes(book.bookId)) : books;
+  } };
+  const extensions: Record<string, unknown> = { reader_get_index_status: backend.indexStatus,
+    reader_prepare_index: backend.prepareIndex, reader_cancel_index: backend.cancelIndex };
+  const definitions = READER_TOOL_CATALOG.filter(tool => !(tool.name in extensions) || Boolean(extensions[tool.name]));
   const bind = async (value: unknown) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",
     new TextEncoder().encode(JSON.stringify(value))))).map(byte => byte.toString(16).padStart(2, "0")).join("");
   async function bookFor(id: string, signal: AbortSignal) {
@@ -43,17 +50,22 @@ export function createReaderToolService(backend: ReaderToolBackend) {
     return book;
   }
   return {
-    definitions: READER_TOOL_CATALOG,
+    definitions,
     async call(request: ReaderToolRequest, signal: AbortSignal): Promise<ReaderToolReply> {
       const header = { apiVersion: "1" as const, requestId: request.requestId };
       try {
         signal.throwIfAborted();
-        const definition = READER_TOOL_CATALOG.find(tool => tool.name === request.name);
+        const definition = definitions.find(tool => tool.name === request.name);
         if (!definition) throw new ReaderToolError("TOOL_NOT_SUPPORTED", "此版本未提供该工具");
+        if (!definition.readOnly && grant && (!grant.prepareIndex || !["reader_prepare_index", "reader_cancel_index"].includes(request.name))) throw new ReaderToolError("ACCESS_DENIED", "此客户端未获索引准备权限");
         const args = request.arguments;
         validate(args, definition);
         let data: unknown;
-        if (request.name === "reader_find_books") {
+        if (request.name === "reader_get_index_status") {
+          const books = args.bookId ? [await bookFor(args.bookId as string, signal)] : await backend.list(signal);
+          const statuses = (await backend.indexStatus!(books, signal)).sort((a, b) => a.bookId.localeCompare(b.bookId));
+          data = page(statuses, args, await bind([request.name, args.bookId, statuses.map(status => [status.bookId, status.state, status.chunkCount])]));
+        } else if (request.name === "reader_find_books") {
           const query = String(args.query ?? "").trim().toLocaleLowerCase();
           const books = (await backend.list(signal)).filter(book => `${book.title} ${book.creator}`.toLocaleLowerCase().includes(query)
             && (args.folderId === undefined || book.folderId === args.folderId) && (args.favorite === undefined || book.favorite === args.favorite))
@@ -62,9 +74,11 @@ export function createReaderToolService(backend: ReaderToolBackend) {
         } else {
           const book = await bookFor(args.bookId as string, signal);
           if (request.name === "reader_get_book") data = book;
+          else if (request.name === "reader_cancel_index") data = await backend.cancelIndex!(book.bookId, args.taskId as string, signal);
           else {
             if (!book.available) throw new ReaderToolError("SOURCE_UNAVAILABLE", "原书来源当前不可用，请在书架重新关联来源");
-            if (request.name === "reader_list_chapters") {
+            if (request.name === "reader_prepare_index") data = await backend.prepareIndex!(book.bookId, signal);
+            else if (request.name === "reader_list_chapters") {
               const chapters = await backend.chapters(book.bookId, signal);
               data = page(chapters, args, await bind([request.name, book.bookId, book.contentHash, chapters]));
             } else if (request.name === "reader_search_text") {

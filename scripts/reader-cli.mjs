@@ -1,8 +1,9 @@
 import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
+import { join } from 'node:path';
 
-const help = `EPUB Reader tools (development)
+const help = `EPUB Reader tools (Windows AI development)
   node scripts/reader-cli.mjs --connection-file <file> tools --json
   node scripts/reader-cli.mjs --connection-file <file> books find --query <text> --json
   node scripts/reader-cli.mjs --connection-file <file> book get --book <id> --json
@@ -10,8 +11,13 @@ const help = `EPUB Reader tools (development)
   node scripts/reader-cli.mjs --connection-file <file> text search --book <id> --query <text> --json
   node scripts/reader-cli.mjs --connection-file <file> text read --book <id> --chapter <id> --json
   node scripts/reader-cli.mjs --connection-file <file> call <tool> --input-file <json-file or -> --json
-Connection files are written to .cache/reader-tools-<port>.json by the opt-in AI dev host.
-This client reads books; it does not call a model or access conversation memory.
+  node scripts/reader-cli.mjs status --json
+  node scripts/reader-cli.mjs index status --book <id> --json
+  node scripts/reader-cli.mjs index prepare --book <id> --json
+  node scripts/reader-cli.mjs index cancel --book <id> --task <id> --json
+Windows native default: %LOCALAPPDATA%/dev.epubreader.ai/reader-tools/<client>.json (client=local).
+Use --client <id> or --connection-file <file>. Browser development still writes .cache/reader-tools-<port>.json.
+This client provides reading and optional index preparation; it does not call a model or access conversation memory.
 `;
 const fail = (code, message, retryable = false) => ({ apiVersion: '1', ok: false, error: { code, message, retryable } });
 export async function runReaderCli(argv, { fetcher = fetch, stdin = process.stdin } = {}) {
@@ -20,14 +26,17 @@ export async function runReaderCli(argv, { fetcher = fetch, stdin = process.stdi
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--json') continue;
     if (argv[i].startsWith('--')) {
-      if (!['connection-file', 'book', 'chapter', 'query', 'cursor', 'around-chunk', 'folder-id', 'limit', 'favorite', 'input-file'].includes(argv[i].slice(2))) {
+      if (!['connection-file', 'client', 'task', 'book', 'chapter', 'query', 'cursor', 'around-chunk', 'folder-id', 'limit', 'favorite', 'input-file'].includes(argv[i].slice(2))) {
         return { result: fail('INVALID_ARGUMENTS', `Unknown option ${argv[i]}`), exitCode: 2 };
       }
       if (!argv[i + 1] || argv[i + 1].startsWith('--')) return { result: fail('INVALID_ARGUMENTS', `${argv[i]} needs a value`), exitCode: 2 };
       flags[argv[i].slice(2)] = argv[++i];
     } else words.push(argv[i]);
   }
-  const path = flags['connection-file'] ?? process.env.EPUB_READER_CONNECTION_FILE;
+  const client = flags.client ?? 'local';
+  if (!/^[a-zA-Z0-9_-]{1,64}$/.test(client)) return { result: fail('INVALID_ARGUMENTS', 'Invalid client ID'), exitCode: 2 };
+  const path = flags['connection-file'] ?? process.env.EPUB_READER_CONNECTION_FILE
+    ?? (process.platform === 'win32' && process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, 'dev.epubreader.ai', 'reader-tools', `${client}.json`) : undefined);
   if (!path) return { result: fail('CONNECTION_REQUIRED', 'Pass --connection-file or EPUB_READER_CONNECTION_FILE'), exitCode: 2 };
   let connection;
   try { connection = JSON.parse(await readFile(path, 'utf8')); }
@@ -38,7 +47,10 @@ export async function runReaderCli(argv, { fetcher = fetch, stdin = process.stdi
   }
   let name; const args = {};
   const command = words.join(' ');
-  if (command === 'books find') name = 'reader_find_books';
+  if (command === 'index status') name = 'reader_get_index_status';
+  else if (command === 'index prepare') name = 'reader_prepare_index';
+  else if (command === 'index cancel') name = 'reader_cancel_index';
+  else if (command === 'books find') name = 'reader_find_books';
   else if (command === 'book get') name = 'reader_get_book';
   else if (command === 'chapters list') name = 'reader_list_chapters';
   else if (command === 'text search') name = 'reader_search_text';
@@ -52,8 +64,8 @@ export async function runReaderCli(argv, { fetcher = fetch, stdin = process.stdi
     const input = JSON.parse(text);
     if (!input || typeof input !== 'object' || Array.isArray(input)) return { result: fail('INVALID_ARGUMENTS', 'Tool input must be an object'), exitCode: 2 };
     Object.assign(args, input);
-  } else if (command !== 'tools') return { result: fail('INVALID_ARGUMENTS', 'Unknown command; use --help'), exitCode: 2 };
-  for (const [flag, field] of Object.entries({ book: 'bookId', chapter: 'chapterId', query: 'query', cursor: 'cursor', 'around-chunk': 'aroundChunkId', 'folder-id': 'folderId' })) {
+  } else if (!['tools', 'status'].includes(command)) return { result: fail('INVALID_ARGUMENTS', 'Unknown command; use --help'), exitCode: 2 };
+  for (const [flag, field] of Object.entries({ task: 'taskId', book: 'bookId', chapter: 'chapterId', query: 'query', cursor: 'cursor', 'around-chunk': 'aroundChunkId', 'folder-id': 'folderId' })) {
     if (flags[flag] !== undefined) args[field] = flags[flag];
   }
   if (flags.limit !== undefined) args.limit = Number(flags.limit);
@@ -62,7 +74,7 @@ export async function runReaderCli(argv, { fetcher = fetch, stdin = process.stdi
   const interrupt = () => controller.abort(); process.once('SIGINT', interrupt);
   const timer = setTimeout(interrupt, 125000);
   try {
-    const response = await fetcher(`${connection.endpoint}/${name ? 'call' : 'tools'}`, { method: name ? 'POST' : 'GET',
+    const response = await fetcher(`${connection.endpoint}/${name ? 'call' : command === 'status' ? 'status' : 'tools'}`, { method: name ? 'POST' : 'GET',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${connection.token}` }, signal: controller.signal, redirect: 'error',
       ...(name ? { body: JSON.stringify({ requestId: randomUUID(), name, arguments: args }) } : {}) });
     const result = await response.json();

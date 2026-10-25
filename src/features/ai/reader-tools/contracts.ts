@@ -12,6 +12,9 @@ export interface ReaderPassage {
 }
 export interface ReaderToolBackend {
   list(signal: AbortSignal): Promise<ReaderBook[]>;
+  indexStatus?(books: ReaderBook[], signal: AbortSignal): Promise<ReaderIndexStatus[]>;
+  prepareIndex?(bookId: string, signal: AbortSignal): Promise<ReaderIndexJob & { bookId: string; reused: boolean }>;
+  cancelIndex?(bookId: string, taskId: string, signal: AbortSignal): Promise<ReaderIndexJob & { bookId: string }>;
   chapters(bookId: string, signal: AbortSignal): Promise<ReaderChapter[]>;
   read(bookId: string, chapterId: string, signal: AbortSignal): Promise<ReaderPassage[]>;
   search(bookId: string, query: string, limit: number, signal: AbortSignal): Promise<{
@@ -26,6 +29,12 @@ export type ReaderToolReply = { apiVersion: "1"; requestId: string } & (
   { ok: true; data: unknown } | { ok: false; error: { code: string; message: string; retryable: boolean } }
 );
 export interface ReaderToolDefinition {
-  name: string; description: string; readOnly: true; inputSchema: Record<string, unknown>;
+  name: string; description: string; readOnly: boolean; inputSchema: Record<string, unknown>;
   outputSchema: Record<string, unknown>;
 }
+
+/** Trusted host grant. Caller arguments may narrow this scope, never enlarge it. */
+export interface ReaderToolGrant { clientId: string; bookIds: string[] | null; prepareIndex: boolean }
+
+export interface ReaderIndexJob { taskId: string | null; state: "queued" | "running" | "completed" | "cancelled" | "failed"; progress: number }
+export interface ReaderIndexStatus { bookId: string; state: "current" | "missing" | "outdated" | "unavailable"; chunkCount: number; job?: ReaderIndexJob }

@@ -4,7 +4,8 @@ param(
     [ValidateRange(1024, 65535)][int]$Port = 5186,
     [switch]$InstallDependencies,
     [switch]$InstallHarness,
-    [switch]$EnableReaderTools
+    [switch]$EnableReaderTools,
+    [string]$ReaderToolConfig
 )
 $ErrorActionPreference = 'Stop'
 if (!$TestDirectory -or $TestDirectory -notmatch '^[A-Za-z]:[\\/]') {
@@ -39,7 +40,7 @@ if ([IO.Path]::GetFullPath($source).TrimEnd('\') -ne [IO.Path]::GetFullPath($Tes
 
 Push-Location $TestDirectory
 $preview = $null
-$environmentNames = @('VITE_EDITION', 'VITE_APP_PLATFORM', 'EPUB_READER_EXPECTED_EDITION', 'CARGO_TARGET_DIR', 'EPUB_READER_TOOLS')
+$environmentNames = @('VITE_EDITION', 'VITE_APP_PLATFORM', 'EPUB_READER_EXPECTED_EDITION', 'CARGO_TARGET_DIR', 'EPUB_READER_TOOLS', 'EPUB_READER_TOOLS_CONFIG')
 $previousEnvironment = @{}
 foreach ($name in $environmentNames) { $previousEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
 try {
@@ -47,6 +48,10 @@ try {
     $env:VITE_APP_PLATFORM = 'windows'
     $env:EPUB_READER_EXPECTED_EDITION = 'ai'
     if ($EnableReaderTools) { $env:EPUB_READER_TOOLS = '1' } else { $env:EPUB_READER_TOOLS = $null }
+    if ($ReaderToolConfig) {
+        if (!$EnableReaderTools -or !(Test-Path -LiteralPath $ReaderToolConfig -PathType Leaf)) { throw 'ReaderToolConfig requires EnableReaderTools and an existing local grants JSON file.' }
+        $env:EPUB_READER_TOOLS_CONFIG = (Resolve-Path -LiteralPath $ReaderToolConfig).Path
+    } else { $env:EPUB_READER_TOOLS_CONFIG = $null }
     $env:CARGO_TARGET_DIR = Join-Path $TestDirectory 'src-tauri\target-ai'
     $pnpmStore = Join-Path $TestDirectory '.pnpm-store'
     Write-Host "  Windows workspace: $TestDirectory"

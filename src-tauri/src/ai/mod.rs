@@ -217,6 +217,17 @@ impl AiState {
         *slot = Some(Arc::new(cache_repair::reset(app_data, directory)?));
         Ok(())
     }
+    #[cfg(feature = "ai")]
+    pub(crate) fn acquire_reader_index_task(&self, app: &AppHandle, hash: String) -> Result<AiJob, String> {
+        self.ensure(app)?.acquire_reader_index_task(hash)
+    }
+
+    #[cfg(feature = "ai")]
+    pub(crate) fn reclaim_reader_index_tasks(&self, app: &AppHandle, ids: Vec<String>) {
+        if ids.is_empty() { return; }
+        if let Ok(store) = self.ensure(app) { store.reclaim_reader_index_tasks(ids); }
+    }
+
     fn ensure(&self, app: &AppHandle) -> Result<Arc<AiStore>, String> {
         if let Some(store) = self.store_snapshot()? {
             return Ok(store);
@@ -895,6 +906,7 @@ pub(crate) fn ai_task_acquire_library_index(
 ) -> Result<AiJob, String> {
     state.ensure(&app)?.acquire_library_index_task()
 }
+
 
 fn transition(
     app: AppHandle,

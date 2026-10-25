@@ -2099,6 +2099,9 @@ impl AiStore {
             let transaction = connection
                 .transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(|error| format!("开始获取 AI 全库任务事务失败：{error}"))?;
+            if find_active_task(&transaction, "reader-text-index")?.is_some() {
+                return Err("阅读工具正在准备正文索引，请稍后重试".into());
+            }
             if let Some(existing) = find_active_task(&transaction, LIBRARY_TEXT_INDEX_TASK_KIND)? {
                 let id = existing.id;
                 if matches!(existing.state, TaskState::Queued | TaskState::Paused) {
@@ -2129,6 +2132,49 @@ impl AiStore {
                 .map_err(|error| format!("提交创建 AI 全库任务事务失败：{error}"))?;
             read_job(connection, &id)
         })
+    }
+
+    /// Exclusive per-book tool preparation. Never adopt a task owned by the UI.
+    #[cfg(feature = "ai")]
+    pub(crate) fn acquire_reader_index_task(&self, content_hash: String) -> Result<AiJob, String> {
+        let content_hash = normalize_content_hash(&content_hash)?;
+        self.with_connection(|connection| {
+            let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(|_| "无法获取正文索引准备任务")?;
+            if find_active_task(&transaction, LIBRARY_TEXT_INDEX_TASK_KIND)?.is_some()
+                || find_active_task(&transaction, "reader-text-index")?.is_some() {
+                return Err("已有正文索引任务，请稍后重试".into());
+            }
+            let now = now_ms();
+            let id = format!("job_{now}_{}", JOB_SEQUENCE.fetch_add(1, Ordering::Relaxed));
+            transaction.execute(
+                "INSERT INTO jobs (id, kind, content_hash, state, progress, error, cancel_requested, created_at_ms, updated_at_ms)
+                 VALUES (?1, 'reader-text-index', ?2, 'running', 0.0, NULL, 0, ?3, ?3)",
+                params![id, content_hash, now as i64],
+            ).map_err(|_| "无法创建正文索引准备任务")?;
+            transaction.commit().map_err(|_| "无法提交正文索引准备任务")?;
+            read_job(connection, &id)
+        })
+    }
+
+    /// Reclaim only active tool tasks. Published index rows remain intact.
+    #[cfg(feature = "ai")]
+    pub(crate) fn reclaim_reader_index_tasks(&self, ids: Vec<String>) {
+        let _ = self.with_connection(|connection| {
+            let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(|_| "无法回收阅读工具任务")?;
+            for id in ids {
+                let hash: Option<String> = transaction.query_row(
+                    "SELECT content_hash FROM jobs WHERE id = ?1 AND kind = 'reader-text-index' AND state IN ('queued','running','paused')",
+                    [&id], |row| row.get(0),
+                ).optional().map_err(|_| "无法读取阅读工具任务")?;
+                if let Some(hash) = hash {
+                    transaction.execute("DELETE FROM index_staging WHERE content_hash = ?1", [hash]).map_err(|_| "无法回收正文暂存")?;
+                    transaction.execute("UPDATE jobs SET state = 'cancelled', cancel_requested = 1, error = 'provider-disconnected', updated_at_ms = ?2 WHERE id = ?1", params![id, now_ms() as i64]).map_err(|_| "无法回收阅读工具任务")?;
+                }
+            }
+            transaction.commit().map_err(|_| "无法提交阅读工具任务回收".to_string())
+        });
     }
 
     pub(crate) fn transition_task(
