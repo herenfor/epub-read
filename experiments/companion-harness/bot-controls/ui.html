@@ -1,0 +1,16 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Bot 设置</title><link rel="stylesheet" href="/api/bot-controls/style.css">
+<main><header><h1>Bot 设置</h1><a href="/">返回聊天</a></header>
+<label>选择 bot <select id="bot"></select></label>
+<nav><button id="chat-tab" aria-pressed="true">聊天记录</button><button id="persona-tab" aria-pressed="false">人设与提示词</button></nav>
+<p id="status" role="status"></p>
+<section id="chat"><div class="bar"><button id="refresh">刷新记录</button><button id="select-page">选择本页</button><button id="delete-selected" disabled>删除选中</button><button id="clear" class="danger">清空此 bot 聊天</button></div>
+<p class="hint">删除不改变人设或长期记忆。聊天中可能保留“正文已清除”的记录标记；已进入模型会话的上下文也可能保留，之前形成的记忆请手动管理。</p><div id="messages"></div><button id="older" hidden>更早的记录</button></section>
+<section id="persona" hidden><div class="bar"><button id="load-persona">载入当前人设</button><button id="save-persona" disabled>保存并应用</button></div>
+<p class="hint">先载入再编辑；人设保存到此 bot 的 SOUL.md。前置和后置单独保存，下一次回复生效，不清空聊天或长期记忆。支持 {{char}}、{{user}}；其他酒馆宏暂不解释。</p>
+<label for="prefix">前置提示词 <span class="hint">放在人设之前</span></label><textarea id="prefix" disabled spellcheck="false"></textarea>
+<label for="soul">人物设定 <span class="hint" id="soul-limit"></span></label><textarea id="soul" disabled spellcheck="false"></textarea>
+<label for="suffix">后置提示词 <span class="hint">放在聊天历史之后，以用户配置的指令注入</span></label><textarea id="suffix" disabled spellcheck="false"></textarea>
+<p class="hint">这些设置不会增加工具权限。后置提示会占用上下文，建议保持简短；它不是新的聊天消息。</p></section>
+<dialog id="confirm-dialog"><h2>确认删除</h2><p id="confirmation"></p><div class="bar"><button id="cancel">取消</button><button id="confirm" class="danger">确认删除</button></div></dialog>
+</main><script type="module" src="/api/bot-controls/app.js"></script></html>
