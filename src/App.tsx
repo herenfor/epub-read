@@ -274,7 +274,7 @@ import { IS_AI_EDITION } from "./config/edition";
 import { registerAppUpdateSaveGate, startAppUpdates } from "./ui/appUpdate/appUpdateStore";
 import { noteCloudSyncChange, startCloudSync } from "./ui/cloudSync/cloudSyncStore";
 import { ProgressSourceChoices, type ProgressSourceCandidate } from "./ui/cloudSync/ProgressSourceChoices";
-import { setCopyOnImport, useLibrarySettings } from "./ui/librarySettings";
+import { libraryCopyChoice, setCopyOnImport, useLibrarySettings } from "./ui/librarySettings";
 
 // This is intentionally a compile-time edition branch. The core build has no
 // static dependency on the AI panel or its model-asset subtree; AI builds keep
@@ -5432,7 +5432,7 @@ export default function App() {
               onImportFolder={() => void handleOpenFolderImport()}
               saveFileActive={saveFileActive}
               lanTransferActive={lanSaveSession.active}
-              copyToLibrary={librarySettings && !librarySettings.error ? librarySettings.copyOnImport : undefined}
+              copyToLibrary={libraryCopyChoice(librarySettings)}
               onCopyToLibraryChange={handleCopyToLibraryChange}
               onOpenLanTransfer={runtime.supportsLanTransfer ? handleOpenLanSave : undefined}
               theme={settings.theme}
@@ -6125,6 +6125,8 @@ export default function App() {
           onClose={closeFolderImport}
           onUseFileImport={() => void handleChooseBooks()}
           autoScan={folderImport.autoScan}
+          copyToLibrary={libraryCopyChoice(librarySettings)}
+          onCopyToLibraryChange={handleCopyToLibraryChange}
         />
       )}
       {nativeImport && (

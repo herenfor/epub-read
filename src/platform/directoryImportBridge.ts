@@ -62,6 +62,7 @@ export function createNativeDirectoryImportPort(initialSource?: NativeDirectoryS
         jobId: input.jobId,
         options: input.options,
         targets: input.targets,
+        ...(input.copyToLibrary === undefined ? {} : { copyToLibrary: input.copyToLibrary }),
         onProgress: progressChannel(input.jobId, input.onProgress),
       });
     },

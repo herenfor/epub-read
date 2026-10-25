@@ -41,6 +41,7 @@
   "folderImport.existing.preserve.hint": "Never move existing books",
   "folderImport.existing.replace": "Reorganize by this directory structure",
   "folderImport.existing.replace.hint": "Move existing books to match directories",
+  "folderImport.copy.hint": "When unchecked, only the original files' locations are remembered; fixed once the import starts",
   "folderImport.folders": "Folders",
   "folderImport.looseCount.other": "{count} other books remain unclassified",
   "folderImport.looseCount.one": "{count} other book remains unclassified",

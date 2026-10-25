@@ -54,6 +54,8 @@ export interface DirectoryImportPort {
     readonly jobId: string;
     readonly options: ImportOptions;
     readonly targets: readonly FolderTarget[];
+    /** Windows paths: copy into the book library (frozen at start). Absent = link, as before. */
+    readonly copyToLibrary?: boolean;
     readonly onProgress: (event: DirectoryProgress) => void;
   }): Promise<DirectoryImportResult>;
   issues(jobId: string, cursor?: string): Promise<IssuePage>;
