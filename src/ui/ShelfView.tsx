@@ -2335,8 +2335,8 @@ interface ShelfGridGeometry {
 
 function sameShelfGridGeometry(a: ShelfGridGeometry, b: ShelfGridGeometry): boolean {
   return a.columns === b.columns &&
-    Math.abs(a.rowStep - b.rowStep) < 1 &&
-    Math.abs(a.contentTop - b.contentTop) < 1;
+    Math.abs(a.rowStep - b.rowStep) < 0.01 &&
+    Math.abs(a.contentTop - b.contentTop) < 0.01;
 }
 
 function readShelfComputedStyle(container: HTMLElement, element: Element): CSSStyleDeclaration | null {
@@ -2378,8 +2378,8 @@ export function measureShelfGridGeometry(container: HTMLElement): ShelfGridGeome
   const contentTop = container.scrollTop + (anchorRect.top - containerRect.top) / zoom;
   return {
     columns,
-    rowStep: Math.max(1, Math.round(rowStep)),
-    contentTop: Math.max(0, Math.round(contentTop)),
+    rowStep: Math.max(1, rowStep),
+    contentTop: Math.max(0, contentTop),
   };
 }
 
@@ -2406,12 +2406,12 @@ export function measureShelfListGeometry(container: HTMLElement): ShelfGridGeome
     columns: 1,
     // Rows are often fractional (60.5px); rounding would drift by half a pixel a row.
     rowStep: Math.max(1, rowStep),
-    contentTop: Math.max(0, Math.round(contentTop)),
+    contentTop: Math.max(0, contentTop),
   };
 }
 
 /* =========================================================================
- * 60fps 轻量虚拟滚动 Hook (支持网格与列表双模式，智能阈值按需激活)
+ * 书架虚拟窗口：统一布局坐标，按浏览器帧合并测量与滚动
  * ========================================================================= */
 
 interface VirtualizerResult {
@@ -2433,82 +2433,67 @@ function useShelfVirtualizer(
   const [scrollState, setScrollState] = useState({ scrollTop: 0, viewportHeight: 800 });
   const [gridGeometry, setGridGeometry] = useState<ShelfGridGeometry | null>(null);
 
-  useEffect(() => {
+  const measureRef = useRef<(() => void) | null>(null);
+
+  useLayoutEffect(() => {
     const container = containerRef.current;
-    if (!container) {
-      setGridGeometry(null);
-      return;
-    }
+    if (!container) return;
     const measureGeometry = viewMode === "grid" ? measureShelfGridGeometry : measureShelfListGeometry;
     let frame: number | null = null;
-    const measure = () => {
+    let observed = new Set<Element>();
+    const requestFrame = typeof window.requestAnimationFrame === "function"
+      ? window.requestAnimationFrame.bind(window)
+      : (callback: FrameRequestCallback) => window.setTimeout(() => callback(Date.now()), 0);
+    const cancelFrame = typeof window.cancelAnimationFrame === "function"
+      ? window.cancelAnimationFrame.bind(window) : window.clearTimeout.bind(window);
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => scheduleMeasure()) : null;
+
+    const scheduleMeasure = () => {
       if (frame !== null) return;
-      const schedule = typeof window.requestAnimationFrame === "function"
-        ? window.requestAnimationFrame
-        : ((callback: FrameRequestCallback) => window.setTimeout(() => callback(Date.now()), 0));
-      frame = schedule(() => {
+      frame = requestFrame(() => {
         frame = null;
+        // Observe current nodes, including the prefix above the books. Empty/error views
+        // may replace the whole list without changing the count or view preference.
+        const targets = new Set<Element>([container, ...container.children]);
+        const item = container.querySelector(viewMode === "grid"
+          ? ".shelf-book-grid .shelf-card"
+          : 'tr.shelf-table-row[data-shelf-target="book"]');
+        if (item) targets.add(item);
+        for (const old of observed) if (!targets.has(old)) observer?.unobserve(old);
+        for (const target of targets) if (!observed.has(target)) observer?.observe(target);
+        observed = targets;
+
         const next = measureGeometry(container);
-        setGridGeometry((previous) => (
-          next && previous && sameShelfGridGeometry(previous, next) ? previous : next
-        ));
+        setGridGeometry(previous => next && previous && sameShelfGridGeometry(previous, next) ? previous : next);
+        // Read the real position together with geometry, including native scroll clamping
+        // after a search shrinks the list. Never combine a new origin with an old offset.
+        const scrollTop = container.scrollTop;
+        const viewportHeight = container.clientHeight || 800;
+        setScrollState(previous => previous.scrollTop === scrollTop && previous.viewportHeight === viewportHeight
+          ? previous : { scrollTop, viewportHeight });
       });
     };
-    measure();
-    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
-    observer?.observe(container);
-    const anchor = container.querySelector<HTMLElement>(viewMode === "grid" ? ".shelf-book-prefix" : ".shelf-table-view");
-    if (anchor) observer?.observe(anchor);
-    const grid = container.querySelector<HTMLElement>(viewMode === "grid" ? ".shelf-book-grid" : ".shelf-table");
-    if (grid) observer?.observe(grid);
+    measureRef.current = scheduleMeasure;
+    scheduleMeasure();
     const scaleOwner = container.closest(".app");
     const styleObserver = typeof MutationObserver !== "undefined" && scaleOwner
-      ? new MutationObserver(measure)
-      : null;
-    styleObserver?.observe(scaleOwner as Element, { attributes: true, attributeFilter: ["style"] });
-    window.addEventListener("resize", measure, { passive: true });
+      ? new MutationObserver(scheduleMeasure) : null;
+    if (scaleOwner) styleObserver?.observe(scaleOwner, { attributes: true, attributeFilter: ["style"] });
+    container.addEventListener("scroll", scheduleMeasure, { passive: true });
+    window.addEventListener("resize", scheduleMeasure, { passive: true });
     return () => {
-      if (frame !== null) {
-        if (typeof window.cancelAnimationFrame === "function") window.cancelAnimationFrame(frame);
-        else window.clearTimeout(frame);
-      }
+      measureRef.current = null;
+      if (frame !== null) cancelFrame(frame);
       observer?.disconnect();
       styleObserver?.disconnect();
-      window.removeEventListener("resize", measure);
+      container.removeEventListener("scroll", scheduleMeasure);
+      window.removeEventListener("resize", scheduleMeasure);
     };
   }, [containerRef, density, folderCount, viewMode, totalCount]);
 
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container || totalCount < threshold) return;
-
-    let rafId: number | null = null;
-    const updateMetrics = () => {
-      setScrollState({
-        scrollTop: container.scrollTop,
-        viewportHeight: container.clientHeight || 800,
-      });
-    };
-
-    updateMetrics();
-
-    const onScroll = () => {
-      if (rafId !== null) return;
-      rafId = window.requestAnimationFrame(() => {
-        rafId = null;
-        updateMetrics();
-      });
-    };
-
-    container.addEventListener("scroll", onScroll, { passive: true });
-    window.addEventListener("resize", updateMetrics, { passive: true });
-
-    return () => {
-      if (rafId !== null) window.cancelAnimationFrame(rafId);
-      container.removeEventListener("scroll", onScroll);
-      window.removeEventListener("resize", updateMetrics);
-    };
-  }, [containerRef, totalCount, threshold]);
+  // Rebind after React replaces nodes or changes the content above the window;
+  // unchanged geometry returns the same state, so this cannot sustain a render loop.
+  useLayoutEffect(() => { measureRef.current?.(); });
 
   return useMemo(() => {
     const geometry = gridGeometry;
@@ -2536,10 +2521,11 @@ function useShelfVirtualizer(
     }
 
     const { scrollTop, viewportHeight } = scrollState;
-    const relativeTop = Math.max(0, scrollTop - geometry.contentTop);
+    const totalRows = Math.ceil(totalCount / geometry.columns);
+    const relativeTop = Math.min(Math.max(0, scrollTop - geometry.contentTop),
+      Math.max(0, totalRows * geometry.rowStep - viewportHeight));
     // 列表一行一本，多留几行；网格按行留两行。
     const overscan = geometry.columns === 1 ? 5 : 2;
-    const totalRows = Math.ceil(totalCount / geometry.columns);
     const firstRow = Math.max(0, Math.floor(relativeTop / geometry.rowStep) - overscan);
     const endRow = Math.min(totalRows, Math.ceil((relativeTop + viewportHeight) / geometry.rowStep) + overscan);
     const startIndex = firstRow * geometry.columns;

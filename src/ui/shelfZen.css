@@ -1254,13 +1254,24 @@
   background: var(--shelf-card-bg, #ffffff);
   border: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.08));
   border-radius: 12px;
-  overflow: hidden;
+  overflow-x: auto;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
+}
+
+/* Native scroll anchoring must not follow recycled books or their spacers. */
+.shelf-book-prefix,
+.shelf-table {
+  overflow-anchor: none;
 }
 
 .shelf-table {
   width: 100%;
-  border-collapse: collapse;
+  /* Preserve room for the title and existing metadata columns on narrow desktops.
+     Mobile has its own reduced columns and overrides this minimum. */
+  min-width: 960px;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
   text-align: left;
   font-size: 13px;
 }
@@ -1380,7 +1391,7 @@
   font-size: 11.5px;
 }
 
-/* 列表也跟随书架密度：只改行内留白和封面尺寸，文字不裁切，按钮命中区不变。 */
+/* Book rows keep one pitch at each density: titles are bounded by the cover height. */
 .shelf-view.density-comfortable .shelf-table td {
   padding-top: 12px;
   padding-bottom: 12px;
@@ -1398,13 +1409,27 @@
   height: 36px;
 }
 
+.shelf-table-title-cell > .shelf-badge,
+.shelf-table-title-cell > .shelf-capsule-count {
+  flex-shrink: 0;
+}
+
 .shelf-table-title-cell {
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 12px;
 }
 
 .shelf-table-title {
+  flex: 1;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  line-height: 18px;
   font-weight: 600;
   color: var(--fg, #111827);
   transition: color 0.12s ease;

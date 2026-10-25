@@ -61,6 +61,7 @@ export function FontSettingsPanel(props: FontSettingsPanelProps) {
   const [tab, setTab] = useState<"system" | "imported">("system");
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(520);
+  const [rowHeight, setRowHeight] = useState(FONT_ROW_HEIGHT);
   const [dropBusy, setDropBusy] = useState(false);
   const [htmlDragActive, setHtmlDragActive] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -80,15 +81,23 @@ export function FontSettingsPanel(props: FontSettingsPanelProps) {
     return `${font.family} ${font.fileName}`.toLocaleLowerCase().includes(normalized);
   }), [props.userFonts, normalized]);
   const virtual = tab === "system"
-    ? computeFontVirtualWindow(systems, scrollTop, viewportHeight)
-    : computeFontVirtualWindow(imported, scrollTop, viewportHeight);
+    ? computeFontVirtualWindow(systems, scrollTop, viewportHeight, rowHeight)
+    : computeFontVirtualWindow(imported, scrollTop, viewportHeight, rowHeight);
   useLayoutEffect(() => {
     const element = scrollRef.current;
     if (!element) return;
-    const sync = () => setViewportHeight((current) => element.clientHeight === current ? current : element.clientHeight);
+    // This persistent sibling has the same row CSS as the virtual items (36px
+    // desktop, 48px touch). CSS owns the size; the window must use that same pitch.
+    const row = element.parentElement?.querySelector<HTMLElement>(".font-follow-book");
+    const sync = () => {
+      setViewportHeight(current => element.clientHeight === current ? current : element.clientHeight);
+      const height = row ? Number.parseFloat(getComputedStyle(row).height) : 0;
+      if (height > 0) setRowHeight(current => current === height ? current : height);
+    };
     sync();
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(sync);
     observer?.observe(element);
+    if (row) observer?.observe(row);
     window.addEventListener("resize", sync);
     return () => {
       observer?.disconnect();
