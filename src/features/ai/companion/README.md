@@ -24,6 +24,7 @@ API that permits CORS. No production AI actions or Android entry are enabled her
 | `requestPolicy.ts` | Provider request parameters and low-thinking defaults |
 | `diagnostics.ts` | Selected request metadata, returned passages and actual evidence delivery |
 | `storage.ts` | AI-only settings, history and explicitly edited memories |
+| `avatarModel.ts` | Local avatar interface, emotion names and registered motion lookup |
 
 The Rust counterpart is `src-tauri/src/ai/companion.rs` (commands and HTTP stream)
 with `companion/retrieval.rs` (read-only SQL and scope before top-k). Do not expand
@@ -73,6 +74,22 @@ The sample model and Cubism Core stay in ignored `.ai-companion-local/`. Preserv
 their upstream licenses. They are served only by the AI dev middleware and are
 never copied into production assets. Do not add them to Git or release bundles.
 API credentials stay in application memory and are never stored with history.
+
+To install a local Cubism export with `airi-interface.json` version 1, run:
+
+```sh
+node scripts/install-companion-avatar.mjs <model-export-directory> <display-name>
+```
+
+The installer validates the referenced resources and emotion mappings, copies
+them into ignored `.ai-companion-local/avatar/`, and publishes `avatar.json` last.
+It leaves the source export unchanged and does not copy an accompanying ZIP.
+The Windows launcher copies this local directory into its development snapshot.
+The avatar starts with the declared default emotion and idle group; its optional
+preview lists only the contract's static emotions. Motion files are matched to
+registered groups. Without a local selection the existing Hiyori sample remains
+available. TTS, speaking variants and model-generated ACT commands are not wired
+by this installation. The model never supplies character identity or chat memory.
 
 The AI dev server exposes `GET /__ai-companion/diagnostics` on loopback only.
 Opening the companion panel publishes the last six saved exchanges (cited
