@@ -83,7 +83,7 @@ model-facing tool message. Receipt IDs and source-event IDs tie a send to its
 committed reply. On an uncertain send, use `send-status` for the original
 message ID instead of automatically resubmitting it.
 
-## Ownership and next tuning
+## Ownership and verification scope
 
 Tobs currently owns the experimental Bot identity, Channel and native sessions;
 its memory is a Git repository in the **new experiment home**. No old companion
@@ -97,12 +97,17 @@ keep this deployment as a disposable product-experience carrier. Do not patch
 private compaction methods or let two services independently write the same
 memory files.
 
-The existing reader response budget does not impose our planned 200K soft
-context policy on Tobs. Its own native context handling is in effect for this
-experiment; provider-level full-input admission and our independent memory
-policy remain separate follow-up work. Chat responsiveness, interruptions,
-background-task delivery and proactivity have not been accepted by this short
-integration check.
+The reader response budget is independent of a client's conversation budget.
+An optional [client policy](../chat-policy/README.md) now applies the approved
+reading-partner base, deferred coding tools and a 256K soft context threshold to
+one test bot. Real high-pressure compaction and independent memory portability
+remain untested. Native model-window safeguards remain in effect.
+
+Tobs is one verification client. Prioritize the reader's discoverable schemas,
+authorization, original sources, pagination, cancellation and bounded results;
+another agent or platform must not require this bot's identity, persona, memory
+or internal session format. The generic reader CLI can exercise that contract
+without a model. Further bot UI, task delivery and proactivity tuning are paused.
 
 References: [Tobs 1.5.2](https://github.com/BotHarness/DeepSeekBot/tree/v1.5.2),
 [DSH architecture](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/architecture.md),

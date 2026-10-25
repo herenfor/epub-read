@@ -1,0 +1,5 @@
+- insert:
+    - id: companion-chat-policy
+      name: epub-companion-chat-policy
+      config:
+        botIds: []
