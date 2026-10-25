@@ -15,6 +15,8 @@ export const shelf = defineMessages("shelf", {
   "shelf.import.folder": { zh: "导入文件夹", max: 18 },
   "shelf.import.folder.detail": "按目录自动整理到书架文件夹",
   "shelf.import.lan.detail": "扫码与另一台设备互传书和阅读进度",
+  "shelf.import.copy": { zh: "复制到书库", note: "Import menu checkbox (Windows): copy imported books into the app's library folder.", max: 14 },
+  "shelf.import.copy.detail": { zh: "另存一份，原文件移走也能读", note: "Under the copy checkbox: why copying helps." },
   "shelf.import.dropHint": "也可以把 EPUB 文件或文件夹拖到书架上；拖到文件夹卡片上会直接放进该文件夹",
   "shelf.cover.initialFallback": { zh: "书", note: "One character drawn on a placeholder cover when the title is empty.", max: 1 },
   "shelf.time.justNow": "刚刚",

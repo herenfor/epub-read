@@ -274,6 +274,7 @@ import { IS_AI_EDITION } from "./config/edition";
 import { registerAppUpdateSaveGate, startAppUpdates } from "./ui/appUpdate/appUpdateStore";
 import { noteCloudSyncChange, startCloudSync } from "./ui/cloudSync/cloudSyncStore";
 import { ProgressSourceChoices, type ProgressSourceCandidate } from "./ui/cloudSync/ProgressSourceChoices";
+import { setCopyOnImport, useLibrarySettings } from "./ui/librarySettings";
 
 // This is intentionally a compile-time edition branch. The core build has no
 // static dependency on the AI panel or its model-asset subtree; AI builds keep
@@ -1887,6 +1888,9 @@ export default function App() {
     }
     setSaveFileExportSetup({ selectedEntries: selectedEntries ?? [] });
   }, [handleLegacyExportArchive, runtime.platform, saveFileJob.active]);
+
+  const librarySettings = useLibrarySettings();
+  const handleCopyToLibraryChange = useCallback((copy: boolean): void => { void setCopyOnImport(copy); }, []);
 
   const handleRevealSource = useCallback((entry: ShelfEntry): void => {
     void revealShelfSource(entry.contentHash ?? entry.id).then((status) => {
@@ -5428,6 +5432,8 @@ export default function App() {
               onImportFolder={() => void handleOpenFolderImport()}
               saveFileActive={saveFileActive}
               lanTransferActive={lanSaveSession.active}
+              copyToLibrary={librarySettings && !librarySettings.error ? librarySettings.copyOnImport : undefined}
+              onCopyToLibraryChange={handleCopyToLibraryChange}
               onOpenLanTransfer={runtime.supportsLanTransfer ? handleOpenLanSave : undefined}
               theme={settings.theme}
               onThemeChange={changeTheme}

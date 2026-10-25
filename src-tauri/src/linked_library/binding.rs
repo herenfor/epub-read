@@ -89,6 +89,7 @@ pub(crate) fn make_binding(
         content_hash: hash,
         storage_kind: StorageKind::Linked,
         canonical_source_path: Some(path.to_string_lossy().into_owned()),
+        managed_file_name: None,
         file_size: snapshot.size,
         source_mtime_ns: snapshot.mtime_ns,
         cover_zip_path: metadata.cover_zip_path.clone(),
