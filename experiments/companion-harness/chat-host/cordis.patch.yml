@@ -1,0 +1,23 @@
+# Optional text-chat experiment. This is a profile override, not a new runtime.
+# Mount it after the Tobs and reader-tool bundles.
+- id: botharness-core
+  name: '@botharness/core'
+  config:
+    agentPreset: deepseekbot
+    telemetry: false
+- id: botharness-browser
+  name: '@botharness/browser'
+  disabled: true
+- id: botharness-computer
+  name: '@botharness/computer'
+  disabled: true
+- id: xmanrui-dsh-im
+  name: '@botharness/im-provider'
+  disabled: true
+- id: desktop-product-telemetry
+  name: '@deepseek-ai/dsh-host-product-telemetry-otel'
+  disabled: true
+- id: epub-reader-tools
+  name: epub-reader-dsh-tools
+  config:
+    maxResponseBytes: 16384
