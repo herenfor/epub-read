@@ -176,6 +176,7 @@ mod tests {
         let path = library_settings_path(&dir);
         fs::write(&path, b"{not json").unwrap();
         assert!(load_library_settings(&dir).unwrap_err().contains("损坏"));
+        assert!(managed_books_directory(&dir.join("linked-library")).is_err());
         fs::write(&path, br#"{"schemaVersion":2,"copyOnImport":false}"#).unwrap();
         assert!(load_library_settings(&dir).unwrap_err().contains("更新"));
         fs::write(
