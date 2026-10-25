@@ -7,6 +7,8 @@
   "exports": { ".": "./index.mjs" },
   "files": ["index.mjs", "client.mjs", "policy.mjs", "cordis.patch.yml", "README.md"],
   "engines": { "node": ">=22.19", "dsh": "0.2.1-rc.3" },
-  "peerDependencies": { "@deepseek-ai/dsh-tools": "0.2.1-rc.3" },
+  "dependencies": {
+    "epub-reader-agent-tools": "file:../../../integrations/reader-tools"
+  },
   "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }
 }

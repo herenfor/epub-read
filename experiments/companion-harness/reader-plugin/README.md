@@ -6,6 +6,16 @@ conversation UI and native session log. The plugin owns only reader tool
 registration and HTTP calls. It creates no second agent, memory store, model
 request, shell tool, timer or automatic indexing task.
 
+The shared Node transport and retrieval guidance now live in
+`integrations/reader-tools/`; this package declares that local dependency.
+Install from the full checkout using `file:` rather than copying this folder
+alone. It has no static DSH module import: argument validation uses the shared
+SDK schema validator, so peer pruning in a host profile cannot remove a required
+DSH helper. The pinned DSH engine requirement remains authoritative.
+
+For a host that supports standard MCP instead of native DSH plugins, use
+[the MCP adapter](../../../integrations/reader-tools/README.md).
+
 DSH is one adapter for the reader's framework-neutral HTTP/CLI contract. Other
 clients do not need this host's bot, persona or memory. AIRI is not needed.
 Core/Android do not import this package.

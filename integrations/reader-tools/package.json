@@ -1,0 +1,12 @@
+{
+  "name": "epub-reader-agent-tools",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { "./client": "./client.mjs", "./policy": "./policy.mjs", "./validation": "./validation.mjs" },
+  "bin": { "epub-reader-mcp": "./main.mjs" },
+  "scripts": { "start": "node main.mjs", "test": "node --import ../../node_modules/tsx/dist/loader.mjs --test adapter.test.mjs" },
+  "files": ["client.mjs", "policy.mjs", "validation.mjs", "server.mjs", "main.mjs", "README.md"],
+  "engines": { "node": ">=22.19" },
+  "dependencies": { "@modelcontextprotocol/sdk": "1.32.2" }
+}

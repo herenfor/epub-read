@@ -1,7 +1,6 @@
 import { readFile } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
-import { join } from 'node:path';
+import { createReaderClient, readerConnectionFile, readerFailure as fail } from '../integrations/reader-tools/client.mjs';
 
 const help = `EPUB Reader tools (Windows AI development)
   node scripts/reader-cli.mjs --connection-file <file> tools --json
@@ -21,8 +20,7 @@ Use --client <id> or --connection-file <file>. Browser development still writes 
 Use --max-response-bytes <1024..262144> to bound a complete tool reply (default 32768).
 This client provides reading and optional index preparation; it does not call a model or access conversation memory.
 `;
-const fail = (code, message, retryable = false) => ({ apiVersion: '1', ok: false, error: { code, message, retryable } });
-export async function runReaderCli(argv, { fetcher = fetch, stdin = process.stdin } = {}) {
+export async function runReaderCli(argv, { stdin = process.stdin } = {}) {
   if (argv.includes('--help') || argv.length === 0) return { help, exitCode: 0 };
   const flags = {}; const words = [];
   for (let i = 0; i < argv.length; i++) {
@@ -37,16 +35,10 @@ export async function runReaderCli(argv, { fetcher = fetch, stdin = process.stdi
   }
   const client = flags.client ?? 'local';
   if (!/^[a-zA-Z0-9_-]{1,64}$/.test(client)) return { result: fail('INVALID_ARGUMENTS', 'Invalid client ID'), exitCode: 2 };
-  const path = flags['connection-file'] ?? process.env.EPUB_READER_CONNECTION_FILE
-    ?? (process.platform === 'win32' && process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, 'dev.epubreader.ai', 'reader-tools', `${client}.json`) : undefined);
-  if (!path) return { result: fail('CONNECTION_REQUIRED', 'Pass --connection-file or EPUB_READER_CONNECTION_FILE'), exitCode: 2 };
-  let connection;
-  try { connection = JSON.parse(await readFile(path, 'utf8')); }
-  catch { return { result: fail('CONNECTION_UNAVAILABLE', 'The local reader connection file is unavailable'), exitCode: 2 }; }
-  const endpoint = new URL(connection.endpoint);
-  if (endpoint.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(endpoint.hostname) || !connection.token) {
-    return { result: fail('INVALID_CONNECTION', 'Expected an authenticated loopback reader endpoint'), exitCode: 2 };
-  }
+  const path = flags['connection-file'] ?? readerConnectionFile(client);
+  const maxResponseBytes = flags['max-response-bytes'] === undefined ? 32768 : Number(flags['max-response-bytes']);
+  if (!Number.isSafeInteger(maxResponseBytes) || maxResponseBytes < 1024 || maxResponseBytes > 262144)
+    return { result: fail('INVALID_ARGUMENTS', 'Response budget must be an integer from 1024 to 262144 bytes'), exitCode: 2 };
   let name; const args = {};
   const command = words.join(' ');
   if (command === 'library search') name = 'reader_search_library';
@@ -77,18 +69,14 @@ export async function runReaderCli(argv, { fetcher = fetch, stdin = process.stdi
   if (flags.favorite !== undefined) args.favorite = flags.favorite === 'true' ? true : flags.favorite === 'false' ? false : flags.favorite;
   const controller = new AbortController();
   const interrupt = () => controller.abort(); process.once('SIGINT', interrupt);
-  const timer = setTimeout(interrupt, 125000);
   try {
-    const response = await fetcher(`${connection.endpoint}/${name ? 'call' : command === 'status' ? 'status' : 'tools'}`, { method: name ? 'POST' : 'GET',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${connection.token}` }, signal: controller.signal, redirect: 'error',
-      ...(name ? { body: JSON.stringify({ requestId: randomUUID(), name, arguments: args,
-        ...(flags['max-response-bytes'] === undefined ? {} : { maxResponseBytes: Number(flags['max-response-bytes']) }) }) } : {}) });
-    const result = await response.json();
-    return { result, exitCode: response.ok && result.ok ? 0 : 1 };
-  } catch {
-    return { result: fail(controller.signal.aborted ? 'CANCELLED' : 'APP_NOT_RUNNING',
-      controller.signal.aborted ? 'Reader call cancelled' : 'The AI reader host is not reachable', !controller.signal.aborted), exitCode: 1 };
-  } finally { clearTimeout(timer); process.removeListener('SIGINT', interrupt); }
+    const route = name ? '/call' : command === 'status' ? '/status' : '/tools';
+    const call = createReaderClient(path, { maxResponseBytes: name ? maxResponseBytes : 262144 });
+    const result = await call(route, name ? { name, arguments: args } : undefined, controller.signal);
+    return { result, exitCode: result.ok ? 0 : 1 };
+  } catch (error) {
+    return { result: fail(error.code ?? 'READER_UNAVAILABLE', error.message, error.retryable ?? false), exitCode: 1 };
+  } finally { process.removeListener('SIGINT', interrupt); }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {

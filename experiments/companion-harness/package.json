@@ -10,6 +10,7 @@
     "check:reader-native": "node --import tsx --test reader-native-plugin.test.mjs"
   },
   "dependencies": {
+    "epub-reader-agent-tools": "file:../../integrations/reader-tools",
     "@deepseek-ai/cordis": "4.0.5",
     "@deepseek-ai/dsh-agent": "0.2.1-rc.3",
     "@deepseek-ai/dsh-agent-loop": "0.2.1-rc.3",
