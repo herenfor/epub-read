@@ -314,7 +314,9 @@ fn hash_checked(path: &Path, file: &BookFile, gate: &ImportGate) -> Result<()> {
             format!("副本大小不一致：{}", file.name),
         ));
     }
-    let mut source = File::open(path).map_err(|e| io_error(e.to_string()))?;
+    let mut source = File::open(path)
+        .map_err(|e| io_error(e.to_string()))?
+        .take(file.size.saturating_add(1));
     let mut buffer = [0u8; 64 * 1024];
     let mut digest = Sha256::new();
     loop {
@@ -376,7 +378,15 @@ fn copy_one(
     progress: &mut Progress<'_>,
 ) -> Result<()> {
     let before = snapshot(source)?;
-    let mut input = File::open(source).map_err(|e| io_error(e.to_string()))?;
+    if before.size != file.size {
+        return Err(Error::new(
+            "library-verification-failed",
+            "源书大小已变化，未开始复制",
+        ));
+    }
+    let mut input = File::open(source)
+        .map_err(|e| io_error(e.to_string()))?
+        .take(file.size.saturating_add(1));
     let mut output = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -415,8 +425,10 @@ fn owned(directory: &Path, journal: &Journal) -> bool {
     fs::read_to_string(directory.join(OWNER)).is_ok_and(|id| id == journal.job_id)
 }
 fn clean_prepared(directory: &Path, journal: &Journal, partial: bool) -> usize {
-    if !directory.exists() {
-        return 0;
+    match directory.try_exists() {
+        Ok(false) => return 0,
+        Err(_) => return 1,
+        Ok(true) => {}
     }
     if !owned(directory, journal) {
         return usize::from(fs::remove_dir(directory).is_err());
@@ -455,8 +467,13 @@ fn clean_old(source: &Path, target: &Path, journal: &Journal) -> usize {
     let mut pending = 0;
     for file in &journal.files {
         let old = source.join(&file.name);
-        if !old.exists() {
-            continue;
+        match old.try_exists() {
+            Ok(false) => continue,
+            Err(_) => {
+                pending += 1;
+                continue;
+            }
+            Ok(true) => {}
         }
         let gate = ImportGate::default();
         // Verify the *new* copy before deleting the old one, including recovery
@@ -652,6 +669,26 @@ fn recover_at(root: &Path) -> Result<LocationResult> {
         .map_err(|e| io_error(format!("迁移日志损坏，未删除文件：{e}")))?;
     let (source, target, stage) = journal.paths(root)?;
     let current = load_library_settings(local(root)?)?;
+    // A disconnected drive is not proof that its temporary/old files are
+    // gone. Retain the journal until both participating locations return.
+    if [
+        journal.source_base.as_deref(),
+        journal.target_base.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .any(|base| !Path::new(base).is_dir())
+    {
+        return Ok(LocationResult {
+            job_id: journal.job_id,
+            status: "cleanup-pending",
+            library_directory: managed_books_directory(root)?
+                .to_string_lossy()
+                .into_owned(),
+            book_count: journal.files.len(),
+            cleanup_pending_count: 1,
+        });
+    }
     let pending = if current.custom_base_directory == journal.target_base {
         clean_old(&source, &target, &journal)
     } else if current.custom_base_directory == journal.source_base {
@@ -1107,6 +1144,11 @@ mod tests {
         )
         .unwrap();
         publish_directory(&stage, &f.target()).unwrap();
+        let offline = f.dir.join("offline-drive");
+        fs::rename(&f.base, &offline).unwrap();
+        assert_eq!(recover_at(&f.root).unwrap().status, "cleanup-pending");
+        assert!(recovery_pending(&f.root));
+        fs::rename(&offline, &f.base).unwrap();
         fs::write(f.target().join("foreign.txt"), b"keep").unwrap();
         assert_eq!(recover_at(&f.root).unwrap().status, "cleanup-pending");
         assert_eq!(fs::read(f.target().join("foreign.txt")).unwrap(), b"keep");
