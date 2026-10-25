@@ -16,13 +16,15 @@ use super::types::{
     DirectoryProgress, EntrySource, ExistingPlacement, FolderTarget, ImportCounts, ImportIssue,
     ImportIssueKind, ImportJobStatus, ImportOptions, ImportPerformance, ScannedEntry, ScannedEpub,
 };
+use crate::android_uri_bridge::RestrictedReader;
 use crate::linked_library::{
-    canonical_epub_path, hash_file, inspect_epub, library_root, make_binding, make_managed_binding,
-    make_managed_record, managed_source_path, replace_file_atomically, snapshot,
-    verify_binding_for_list_refresh, DeviceBinding, FileSnapshot, ImportedMetadata,
-    LinkedLibraryRecord,
+    canonical_epub_path, ensure_library_space, hash_file, inspect_epub, library_file_name,
+    library_root, load_bindings, make_binding, make_managed_binding, make_managed_record,
+    publish_staged_copy, snapshot, verify_binding_for_list_refresh, DeviceBinding, FileSnapshot,
+    ImportedMetadata, LinkedLibraryRecord,
 };
 #[cfg(target_os = "android")]
+use crate::linked_library::{managed_source_path, replace_file_atomically};
 use crate::linked_library::{new_staging_path, stream_restricted_reader_to_staging, PrepareError};
 use crate::portable_state::{
     DirectoryBindingWrite, DirectoryFolderCreate, DirectoryImportBatchOutcome,
@@ -53,9 +55,10 @@ struct PreparationTiming {
 
 /// The one source-to-payload hook for A34. Path does not inherently mean
 /// linked: its copy option will select Managed here when that entry is wired.
-fn select_payload_kind(source: &EntrySource) -> PayloadKind {
+fn select_payload_kind(source: &EntrySource, copy: bool) -> PayloadKind {
     match source {
-        EntrySource::Path(_) => PayloadKind::Linked,
+        EntrySource::Path(_) if !copy => PayloadKind::Linked,
+        EntrySource::Path(_) => PayloadKind::Managed,
         EntrySource::TreeUri(_) => PayloadKind::Managed,
     }
 }
@@ -112,13 +115,14 @@ fn admit_preparations(
     budget: &mut StageBudget,
     gate: &super::policy::DirectoryJobGate,
     performance: &mut ImportPerformance,
+    copy: bool,
 ) -> Result<bool, String> {
     if gate.cancelled() {
         return Ok(false);
     }
     while let Some(index) = window.next_to_dispatch() {
         let (planned, entry) = &ordered[index];
-        let kind = select_payload_kind(&entry.source);
+        let kind = select_payload_kind(&entry.source, copy);
         let Some(reservation) = budget.reserve_payload(kind, entry.epub.size_hint) else {
             performance.budget_waits += 1;
             return Ok(true);
@@ -295,6 +299,7 @@ impl RunnerState {
     fn publish(
         &self,
         item: &mut PreparedSuccess,
+        known_bindings: &[DeviceBinding],
     ) -> Result<(LinkedLibraryRecord, DeviceBinding), String> {
         match &mut item.payload {
             PreparedPayload::Linked { path, snapshot } => {
@@ -312,14 +317,29 @@ impl RunnerState {
                 Ok((record, binding))
             }
             PreparedPayload::Managed { staging } => {
-                let target = managed_source_path(&self.root, &item.content_hash)?;
                 let staging_path = staging.path().to_path_buf();
-                replace_file_atomically(&staging_path, &target)
-                    .map_err(|error| format!("无法发布托管副本：{error}"))?;
-                staging.published();
-                let snapshot = snapshot(&target)?;
-                let binding =
-                    make_managed_binding(item.content_hash.clone(), snapshot, &item.metadata);
+                #[cfg(not(target_os = "android"))]
+                let binding = {
+                    let wanted = library_file_name(&item.file_name, &item.metadata.title);
+                    let (name, file_snapshot) =
+                        publish_staged_copy(&self.root, &staging_path, &wanted, known_bindings)?;
+                    staging.published();
+                    make_managed_binding(item.content_hash.clone(), file_snapshot, &item.metadata)
+                        .with_managed_file_name(name)
+                };
+                #[cfg(target_os = "android")]
+                let binding = {
+                    let _ = known_bindings;
+                    let target = managed_source_path(&self.root, &item.content_hash)?;
+                    replace_file_atomically(&staging_path, &target)
+                        .map_err(|error| format!("无法发布托管副本：{error}"))?;
+                    staging.published();
+                    make_managed_binding(
+                        item.content_hash.clone(),
+                        snapshot(&target)?,
+                        &item.metadata,
+                    )
+                };
                 let record = make_managed_record(
                     item.content_hash.clone(),
                     item.file_name.clone(),
@@ -352,6 +372,14 @@ impl RunnerState {
         if pending.is_empty() {
             return Ok(());
         }
+        let mut known_bindings = if pending
+            .iter()
+            .any(|item| matches!(item.payload, PreparedPayload::Managed { .. }))
+        {
+            load_bindings(&self.app)?
+        } else {
+            Vec::new()
+        };
         let batch = std::mem::take(pending);
         if !self.gate.begin_batch() {
             for item in batch {
@@ -386,7 +414,7 @@ impl RunnerState {
                 if existing_available {
                     Ok(None)
                 } else {
-                    self.publish(&mut item).map(Some)
+                    self.publish(&mut item, &known_bindings).map(Some)
                 };
             self.performance.publish_micros += elapsed_micros(publish_started);
             match published {
@@ -396,6 +424,7 @@ impl RunnerState {
                             record.is_new = false;
                         }
                         records.push(record);
+                        known_bindings.push(binding.clone());
                         bindings.push(binding);
                     } else {
                         // Existing healthy source: do not republish bytes or
@@ -763,9 +792,61 @@ fn prepare_managed(
     reservation: Reservation,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<PreparedSuccess, (bool, String)> {
-    let staging = OwnedStaging::new(new_staging_path(root).map_err(|error| (false, error))?);
-    let mut reader = crate::android_uri_bridge::open_content_uri(app, uri)
+    let reader = crate::android_uri_bridge::open_content_uri(app, uri)
         .map_err(|error| (false, format!("无法打开 Android content URI：{error}")))?;
+    prepare_managed_reader(
+        root,
+        reader,
+        ordinal,
+        entry,
+        group_key,
+        reservation,
+        cancelled,
+    )
+}
+
+fn prepare_managed_path(
+    root: &PathBuf,
+    ordinal: usize,
+    entry: &ScannedEntry,
+    group_key: Option<String>,
+    reservation: Reservation,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<PreparedSuccess, (bool, String)> {
+    let EntrySource::Path(source) = &entry.source else {
+        return Err((false, "来源不是文件路径".into()));
+    };
+    let path = canonical_epub_path(&source.to_string_lossy()).map_err(|error| (false, error))?;
+    let before = snapshot(&path).map_err(|error| (false, error))?;
+    let file =
+        std::fs::File::open(&path).map_err(|error| (false, format!("无法打开原书：{error}")))?;
+    let reader = RestrictedReader::from_file(file, 0, -1)
+        .map_err(|error| (false, format!("无法读取原书：{error}")))?;
+    let item = prepare_managed_reader(
+        root,
+        reader,
+        ordinal,
+        entry,
+        group_key,
+        reservation,
+        cancelled,
+    )?;
+    if before != snapshot(&path).map_err(|error| (false, error))? {
+        return Err((false, "源 EPUB 在复制期间发生了变化，请重新导入".into()));
+    }
+    Ok(item)
+}
+
+fn prepare_managed_reader(
+    root: &PathBuf,
+    mut reader: RestrictedReader,
+    ordinal: usize,
+    entry: &ScannedEntry,
+    group_key: Option<String>,
+    reservation: Reservation,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<PreparedSuccess, (bool, String)> {
+    let staging = OwnedStaging::new(new_staging_path(root).map_err(|error| (false, error))?);
     let started = Instant::now();
     let staged = match stream_restricted_reader_to_staging(&mut reader, staging.path(), cancelled) {
         Ok(staged) => staged,
@@ -839,6 +920,7 @@ pub fn run_import(
     options: ImportOptions,
     targets: Vec<FolderTarget>,
     on_progress: Channel<DirectoryProgress>,
+    copy: bool,
 ) -> Result<super::types::DirectoryImportResult, String> {
     let import_started = Instant::now();
     let root = job.root().ok_or_else(|| "目录扫描尚未完成".to_string())?;
@@ -847,6 +929,17 @@ pub fn run_import(
     let plan = plan_directory_import(&root, &public_entries, &options);
     let target_specs = target_specs(&plan, &targets)?;
     let root_path = library_root(app)?;
+    if copy
+        && entries
+            .iter()
+            .all(|entry| matches!(entry.source, EntrySource::Path(_)))
+    {
+        let total = public_entries.iter().try_fold(0u64, |sum, entry| {
+            sum.checked_add(entry.size_hint.unwrap_or(0))
+                .ok_or("导入总大小溢出")
+        })?;
+        ensure_library_space(&root_path, total)?;
+    }
 
     let by_input: HashMap<String, ScannedEntry> = entries
         .into_iter()
@@ -910,6 +1003,7 @@ pub fn run_import(
                     &mut budget,
                     &state.gate,
                     &mut state.performance,
+                    copy,
                 )?;
                 // Flush before waiting for a byte reservation held by pending
                 // files. Workers already admitted keep preparing during this call.
@@ -989,6 +1083,7 @@ pub fn run_import(
                                     &mut budget,
                                     &state.gate,
                                     &mut state.performance,
+                                    copy,
                                 )?;
                                 state.flush_pending(&mut budget, &mut pending)?;
                                 pending_bytes = 0;
@@ -1005,6 +1100,7 @@ pub fn run_import(
                                     &mut budget,
                                     &state.gate,
                                     &mut state.performance,
+                                    copy,
                                 )?;
                                 state.flush_pending(&mut budget, &mut pending)?;
                                 pending_bytes = 0;
@@ -1081,6 +1177,113 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ))
+    }
+
+    fn c2_fixture(root: &Path) -> ScannedEntry {
+        let path = root.join("原书.epub");
+        let file = std::fs::File::create(&path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default();
+        for (name, bytes) in [
+            ("META-INF/container.xml", br#"<container><rootfiles><rootfile full-path="OPS/content.opf"/></rootfiles></container>"#.as_slice()),
+            ("OPS/content.opf", br#"<package><metadata><title>Copy fixture</title></metadata><manifest><item id="c" href="text.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c"/></spine></package>"#.as_slice()),
+            ("OPS/text.xhtml", b"<html><body>synthetic</body></html>".as_slice()),
+        ] {
+            zip.start_file(name, options).unwrap(); zip.write_all(bytes).unwrap();
+        }
+        zip.finish().unwrap();
+        ScannedEntry {
+            epub: ScannedEpub {
+                input_id: "c2-fixture".into(),
+                relative_parent_segments: Vec::new(),
+                file_name: "原书.epub".into(),
+                size_hint: Some(std::fs::metadata(&path).unwrap().len()),
+            },
+            source: EntrySource::Path(path),
+        }
+    }
+
+    #[test]
+    fn c2_path_copy_streams_verified_bytes_and_publishes_a_readable_name() {
+        let root = temp_file("c2-copy");
+        std::fs::create_dir_all(&root).unwrap();
+        let entry = c2_fixture(&root);
+        assert_eq!(
+            select_payload_kind(&entry.source, false),
+            PayloadKind::Linked
+        );
+        assert_eq!(
+            select_payload_kind(&entry.source, true),
+            PayloadKind::Managed
+        );
+        assert_eq!(
+            select_payload_kind(&EntrySource::TreeUri("content://fixture".into()), false),
+            PayloadKind::Managed
+        );
+        let EntrySource::Path(ref source) = entry.source else {
+            unreachable!()
+        };
+        let original = std::fs::read(source).unwrap();
+        let expected = hash_file(source).unwrap().0;
+        let mut budget = StageBudget::new(IMPORT_STAGE_BUDGET_BYTES);
+        let reservation = budget
+            .reserve_payload(PayloadKind::Managed, entry.epub.size_hint)
+            .unwrap();
+        let mut item = prepare_managed_path(&root, 0, &entry, None, reservation, &|| false)
+            .unwrap_or_else(|error| panic!("{}", error.1));
+        assert_eq!(item.content_hash, expected);
+        assert_eq!(item.timing.staged_bytes, original.len() as u64);
+        let PreparedPayload::Managed { ref mut staging } = item.payload else {
+            unreachable!()
+        };
+        let (name, file_snapshot) =
+            publish_staged_copy(&root, staging.path(), &entry.epub.file_name, &[]).unwrap();
+        staging.published();
+        assert_eq!(name, "原书.epub");
+        let _binding = make_managed_binding(expected, file_snapshot, &item.metadata)
+            .with_managed_file_name(name.clone());
+        assert_eq!(
+            std::fs::read(root.join("books").join(name)).unwrap(),
+            original
+        );
+        assert_eq!(std::fs::read(source).unwrap(), original);
+        budget.release(item.reservation);
+        assert_eq!(budget.used(), 0);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn c2_cancel_or_invalid_metadata_leaves_no_partial_copy() {
+        let root = temp_file("c2-failure");
+        std::fs::create_dir_all(&root).unwrap();
+        let entry = c2_fixture(&root);
+        let mut budget = StageBudget::new(IMPORT_STAGE_BUDGET_BYTES);
+        let reservation = budget
+            .reserve_payload(PayloadKind::Managed, entry.epub.size_hint)
+            .unwrap();
+        assert!(
+            prepare_managed_path(&root, 0, &entry, None, reservation.clone(), &|| true).is_err()
+        );
+        budget.release(reservation);
+        let EntrySource::Path(ref source) = entry.source else {
+            unreachable!()
+        };
+        std::fs::write(source, b"invalid zip").unwrap();
+        let reservation = budget
+            .reserve_payload(PayloadKind::Managed, entry.epub.size_hint)
+            .unwrap();
+        assert!(
+            prepare_managed_path(&root, 0, &entry, None, reservation.clone(), &|| false).is_err()
+        );
+        budget.release(reservation);
+        assert_eq!(std::fs::read(source).unwrap(), b"invalid zip");
+        assert_eq!(
+            std::fs::read_dir(root.join("books/.staging"))
+                .unwrap()
+                .count(),
+            0
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

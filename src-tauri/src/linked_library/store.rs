@@ -529,7 +529,7 @@ pub(super) fn load_bindings_at(root: &Path) -> Result<Vec<DeviceBinding>, String
     Ok(bindings)
 }
 
-pub(super) fn load_bindings(app: &AppHandle) -> Result<Vec<DeviceBinding>, String> {
+pub(crate) fn load_bindings(app: &AppHandle) -> Result<Vec<DeviceBinding>, String> {
     if let Some(bindings) = load_portable_bindings(app)? {
         return Ok(bindings);
     }
