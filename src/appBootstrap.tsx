@@ -1,6 +1,6 @@
 import { createRoot } from "react-dom/client";
 import { StrictMode, type ComponentType } from "react";
-import { APP_EDITION } from "./config/edition";
+import { APP_EDITION, IS_AI_EDITION } from "./config/edition";
 import { APP_PLATFORM } from "./config/appPlatform";
 import { platformFromTarget } from "./config/platformValue";
 import type { AppBuildInfo } from "./config/appBuildInfo";
@@ -108,6 +108,10 @@ export async function bootstrapApp(
     }
     const appModule = await dependencies.loadApp();
     dependencies.mountApp(root, appModule.default);
+    if (IS_AI_EDITION && import.meta.env.DEV) {
+      void import("./features/ai/reader-tools/developmentProvider")
+        .then(module => module.startReaderToolDevelopmentProvider()).catch(() => {});
+    }
     return "mounted";
   } catch (error) {
     clearAppBuildSession();
