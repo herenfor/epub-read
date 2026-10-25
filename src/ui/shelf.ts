@@ -171,7 +171,8 @@ export interface ShelfStore {
   readProgressEntryForOpen?(id: string): Promise<ShelfEntry>;
   save(input: ShelfSaveInput): Promise<ShelfSaveResult>;
   /** Tauri 链接式批量导入；浏览器后端不支持本地持久路径。 */
-  importPaths(paths: string[]): Promise<LinkedImportBatchResult>;
+  /** `copyToLibrary` (Windows, A34): copy each book into the app's library instead of linking it. */
+  importPaths(paths: string[], copyToLibrary?: boolean): Promise<LinkedImportBatchResult>;
   /** 原生导入结果进入仓储后，返回含进度版本和注释的完整书架投影。 */
   importRecords?(records: ShelfEntry[]): Promise<ShelfEntry[]>;
   readBook(id: string): Promise<Uint8Array>;
@@ -1202,8 +1203,8 @@ class TauriShelfStore implements ShelfStore {
     throw new Error("桌面版必须通过源文件路径导入，不能复制 EPUB 到应用目录");
   }
 
-  async importPaths(paths: string[]): Promise<LinkedImportBatchResult> {
-    return invoke<LinkedImportBatchResult>("linked_library_import_paths", { paths });
+  async importPaths(paths: string[], copyToLibrary = false): Promise<LinkedImportBatchResult> {
+    return invoke<LinkedImportBatchResult>("linked_library_import_paths", { paths, copyToLibrary });
   }
 
   async readBook(id: string): Promise<Uint8Array> {
@@ -1473,4 +1474,19 @@ export function resetShelfStoreForTest(): void {
   portableDataService = null;
   portableActivation = null;
   portableReadinessRecovery = null;
+}
+
+/**
+ * Opens File Explorer with the book's file selected: the user's own file for a
+ * linked book, the library copy for a managed one. Only the content hash is
+ * sent; the native side resolves the path. "missing" means the file is gone.
+ */
+export async function revealShelfSource(contentHash: string): Promise<"revealed" | "missing"> {
+  try {
+    const result = await invoke<{ status: "revealed" | "missing" }>("linked_library_reveal_source", { contentHash });
+    return result.status;
+  } catch (error) {
+    const message = (error as { message?: unknown } | null)?.message;
+    throw new Error(typeof message === "string" && message ? message : String(error));
+  }
 }

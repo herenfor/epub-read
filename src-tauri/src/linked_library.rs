@@ -87,6 +87,12 @@ pub(crate) use import::{
     make_managed_record,
 };
 
+mod library_copy;
+use library_copy::*;
+
+mod library_settings;
+use library_settings::*;
+
 mod archive;
 use archive::*;
 pub(crate) use archive::{
@@ -110,6 +116,10 @@ pub(crate) use commands::{
     __tauri_command_name_linked_library_archive_read,
     __tauri_command_name_linked_library_archive_close,
     __tauri_command_name_linked_library_relink,
+    __tauri_command_name_linked_library_reveal_source,
+    __tauri_command_name_linked_library_settings_get,
+    __tauri_command_name_linked_library_settings_set_copy,
+    __tauri_command_name_linked_library_open_folder,
     __tauri_command_name_linked_library_update_progress,
     __tauri_command_name_linked_library_mark_opened,
     __tauri_command_name_linked_library_update_bookmarks,
@@ -136,6 +146,10 @@ pub use commands::{
     linked_library_archive_read,
     linked_library_archive_close,
     linked_library_relink,
+    linked_library_reveal_source,
+    linked_library_settings_get,
+    linked_library_settings_set_copy,
+    linked_library_open_folder,
     linked_library_update_progress,
     linked_library_mark_opened,
     linked_library_update_bookmarks,
@@ -162,6 +176,10 @@ pub(crate) use commands::{
     __cmd__linked_library_archive_read,
     __cmd__linked_library_archive_close,
     __cmd__linked_library_relink,
+    __cmd__linked_library_reveal_source,
+    __cmd__linked_library_settings_get,
+    __cmd__linked_library_settings_set_copy,
+    __cmd__linked_library_open_folder,
     __cmd__linked_library_update_progress,
     __cmd__linked_library_mark_opened,
     __cmd__linked_library_update_bookmarks,
@@ -434,6 +452,10 @@ pub(crate) struct DeviceBinding {
     storage_kind: StorageKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     canonical_source_path: Option<String>,
+    /// A library copy's readable file name inside `books/` (A34). Absent on
+    /// older managed bindings, whose copy is `<hash>.epub`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    managed_file_name: Option<String>,
     file_size: u64,
     source_mtime_ns: u64,
     cover_zip_path: Option<String>,
@@ -460,6 +482,12 @@ impl BindingSource {
 }
 
 impl DeviceBinding {
+    /// Gives a managed binding its readable library file name (A34).
+    pub(crate) fn with_managed_file_name(mut self, file_name: String) -> Self {
+        self.managed_file_name = Some(file_name);
+        self
+    }
+
     fn resolve_source(&self, library_root: &Path) -> Result<BindingSource, String> {
         match self.storage_kind {
             StorageKind::Linked => {
@@ -478,10 +506,10 @@ impl DeviceBinding {
                 if self.canonical_source_path.is_some() {
                     return Err("managed 设备绑定不能携带 canonicalSourcePath".into());
                 }
-                Ok(BindingSource::Managed(managed_source_path(
-                    library_root,
-                    &self.content_hash,
-                )?))
+                Ok(BindingSource::Managed(match self.managed_file_name.as_deref() {
+                    Some(name) => managed_named_path(library_root, name)?,
+                    None => managed_source_path(library_root, &self.content_hash)?,
+                }))
             }
         }
     }

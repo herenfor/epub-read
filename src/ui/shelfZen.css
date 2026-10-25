@@ -2389,6 +2389,31 @@
   line-height: 1.4;
 }
 
+/* 复制到书库（Windows）：与菜单项同节奏的一行勾选，分隔线把它和导入动作分开。 */
+.shelf-import-menu-check {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+  padding: 10px 10px 8px;
+  border-top: 1px solid color-mix(in srgb, var(--panel-border) 70%, transparent);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.shelf-import-menu-check input {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: 0 8px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.shelf-import-menu-check + .shelf-import-menu-hint {
+  margin-top: 0;
+}
+
 .shelf-import-menu-hint {
   margin: 4px 10px 6px;
   padding-top: 8px;
