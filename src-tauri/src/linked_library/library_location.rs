@@ -235,6 +235,29 @@ fn selected_settings(root: &Path, base: Option<String>) -> Result<LibrarySetting
         .transpose()?;
     Ok(settings)
 }
+
+/// A previous import may leave the reader's empty staging directory behind.
+/// It is not book content. Never accept a symlink or nonempty staging folder.
+fn empty_library_target(target: &Path) -> Result<bool> {
+    let entries = fs::read_dir(target).map_err(|e| io_error(e.to_string()))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| io_error(e.to_string()))?;
+        if entry.file_name() != ".staging"
+            || !entry
+                .file_type()
+                .map_err(|e| io_error(e.to_string()))?
+                .is_dir()
+            || fs::read_dir(entry.path())
+                .map_err(|e| io_error(e.to_string()))?
+                .next()
+                .is_some()
+        {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 fn plan_at(
     root: &Path,
     bindings: &[DeviceBinding],
@@ -263,13 +286,7 @@ fn plan_at(
                     "当前书库不可用，请重新连接",
                 ));
             }
-            if target.exists()
-                && (!target.is_dir()
-                    || fs::read_dir(&target)
-                        .map_err(|e| io_error(e.to_string()))?
-                        .next()
-                        .is_some())
-            {
+            if target.exists() && (!target.is_dir() || !empty_library_target(&target)?) {
                 return Err(Error::new(
                     "library-target-not-empty",
                     "目标书库不为空，请选择重新连接或另一个目录",
@@ -488,6 +505,11 @@ fn clean_old(source: &Path, target: &Path, journal: &Journal) -> usize {
     if owned(target, journal) {
         let _ = fs::remove_file(target.join(OWNER));
     }
+    if pending == 0 {
+        // Only remove empty reader directories. Other contents are preserved.
+        let _ = fs::remove_dir(source.join(".staging"));
+        let _ = fs::remove_dir(source);
+    }
     pending
 }
 fn remove_journal(root: &Path) -> Result<()> {
@@ -639,6 +661,17 @@ fn run_at(
     };
     progress.emit("committing", true);
     if target.exists() {
+        if !empty_library_target(&target)? {
+            return Err(Error::new(
+                "library-target-not-empty",
+                "目标不再为空，旧位置保留",
+            ));
+        }
+        match fs::remove_dir(target.join(".staging")) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(io_error(format!("无法移除空暂存目录，旧位置保留：{error}"))),
+        }
         fs::remove_dir(&target).map_err(|e| io_error(format!("目标不再为空：{e}")))?;
     }
     publish_directory(&stage, &target)
@@ -1075,6 +1108,52 @@ mod tests {
         assert_eq!(
             fs::read(f.target().join("foreign.txt")).unwrap(),
             b"untouched"
+        );
+    }
+
+    #[test]
+    fn location_restore_default_accepts_only_empty_reader_staging() {
+        let f = Fixture::new();
+        fs::create_dir_all(f.root.join("books/.staging")).unwrap();
+        assert_eq!(
+            f.run(LocationMode::Move, &ImportGate::default(), &mut |_| {})
+                .unwrap()
+                .status,
+            "completed"
+        );
+        // A previous move/import may have left this empty reader directory.
+        fs::create_dir_all(f.root.join("books/.staging")).unwrap();
+        let restore = run_at(
+            &f.root,
+            &f.bindings,
+            &random_uuid_v4().unwrap(),
+            None,
+            LocationMode::Move,
+            &ImportGate::default(),
+            &mut |_| {},
+        )
+        .unwrap();
+        assert_eq!(restore.status, "completed");
+        assert_eq!(
+            managed_books_directory(&f.root).unwrap(),
+            f.root.join("books")
+        );
+        for binding in &f.bindings {
+            let path = binding.resolve_source(&f.root).unwrap().path().to_owned();
+            assert_eq!(hash_file(&path).unwrap().0, binding.content_hash);
+        }
+        // Unknown or nonempty staging content must not be removed.
+        fs::create_dir_all(f.target().join(".staging")).unwrap();
+        fs::write(f.target().join(".staging/keep.part"), b"foreign").unwrap();
+        assert_eq!(
+            f.run(LocationMode::Move, &ImportGate::default(), &mut |_| {})
+                .unwrap_err()
+                .code,
+            "library-target-not-empty"
+        );
+        assert_eq!(
+            fs::read(f.target().join(".staging/keep.part")).unwrap(),
+            b"foreign"
         );
     }
 
