@@ -7,7 +7,7 @@ import type { PlainMessageKey } from "./localization/core";
  */
 
 export type ShelfActionGroup = "read" | "organize" | "danger";
-export type ShelfBookActionId = "open" | "select" | "favorite" | "unfavorite" | "move" | "removeFromFolder" | "exportBook" | "delete";
+export type ShelfBookActionId = "open" | "select" | "favorite" | "unfavorite" | "move" | "removeFromFolder" | "exportBook" | "revealSource" | "delete";
 export type ShelfFolderActionId = "openFolder" | "renameFolder" | "exportBook" | "dissolveFolder";
 export type ShelfActionId = ShelfBookActionId | ShelfFolderActionId;
 
@@ -36,6 +36,10 @@ export interface ShelfBookActionContext {
   canExport?: boolean;
   /** Another export/import or a LAN transfer holds the save-file slot. */
   exportDisabled?: boolean;
+  /** Windows: show the book's file in File Explorer. */
+  canReveal?: boolean;
+  /** The book's file is unavailable (moved or deleted). */
+  revealDisabled?: boolean;
 }
 
 export function shelfBookActions(ctx: ShelfBookActionContext): ShelfAction[] {
@@ -53,6 +57,7 @@ export function shelfBookActions(ctx: ShelfBookActionContext): ShelfAction[] {
     });
   }
   if (ctx.canExport) actions.push({ id: "exportBook", group: "organize", label: "bookExport.action", disabled: ctx.busy || Boolean(ctx.exportDisabled) });
+  if (ctx.canReveal) actions.push({ id: "revealSource", group: "organize", label: "shelf.card.reveal", disabled: Boolean(ctx.revealDisabled) });
   if (ctx.canSelect) actions.push({ id: "select", group: "organize", label: "shelf.card.select", disabled: false });
   actions.push({ id: "delete", group: "danger", label: "shelf.card.delete", disabled: ctx.busy || ctx.deleteDisabled });
   return actions;

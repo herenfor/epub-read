@@ -174,6 +174,7 @@ import {
   markShelfEntryOpened,
   readPortablePreferencesSnapshot,
   readingAnchorFromShelfEntry,
+  revealShelfSource,
   shelfThumbnailProvider,
   portableShelfStateActive,
   type PortableProgressSelection,
@@ -1886,6 +1887,14 @@ export default function App() {
     }
     setSaveFileExportSetup({ selectedEntries: selectedEntries ?? [] });
   }, [handleLegacyExportArchive, runtime.platform, saveFileJob.active]);
+
+  const handleRevealSource = useCallback((entry: ShelfEntry): void => {
+    void revealShelfSource(entry.contentHash ?? entry.id).then((status) => {
+      if (status === "missing") setShelfNotice({ kind: "warn", text: uiText("shelf.card.reveal.missing") });
+    }, (error: unknown) => {
+      setShelfNotice({ kind: "error", text: uiText("shelf.card.reveal.failed", { error: error instanceof Error ? error.message : String(error) }) });
+    });
+  }, [setShelfNotice]);
 
   const handleImportArchive = useCallback((): void => {
     if (runtime.platform === "web" || !isTauriEnv()) {
@@ -5450,6 +5459,7 @@ export default function App() {
                   ? undefined
                   : (entries?: ShelfEntry[]) => void startBookSourceExport(entries)
               }
+              onRevealSource={runtime.supportsRevealSource ? handleRevealSource : undefined}
               onImportArchive={handleImportArchive}
               onImportLegacyArchive={
                 runtime.platform === "web" || !isTauriEnv()

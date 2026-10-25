@@ -189,6 +189,8 @@ export interface ShelfViewProps {
   onExportArchive(selectedEntries?: ShelfEntry[]): void;
   /** SBE-U: save original EPUB files; no entries means the whole shelf. */
   onExportBooks?(selectedEntries?: ShelfEntry[]): void;
+  /** Windows: show the book's file in File Explorer; absent hides the action. */
+  onRevealSource?(entry: ShelfEntry): void;
   /** Legacy v1/v2 JSON import stays secondary on native; Web can leave this undefined and use its existing entry. */
   onImportLegacyArchive?(): void;
   onDelete(id: string): void;
@@ -643,6 +645,7 @@ function shelfActionIcon(id: ShelfActionId): ReactNode {
     case "favorite": return <StarIcon />;
     case "unfavorite": return <StarIcon filled />;
     case "exportBook": return <ExportIcon />;
+    case "revealSource":
     case "move":
     case "removeFromFolder":
     case "openFolder": return <FolderIcon />;
@@ -4215,6 +4218,10 @@ export function ShelfView(props: ShelfViewProps) {
         closeMenu({ restoreFocus: false });
         props.onExportBooks?.([entry]);
         return;
+      case "revealSource":
+        closeMenu();
+        props.onRevealSource?.(entry);
+        return;
       case "removeFromFolder": {
         // 同一次菜单内在途时不重复提交；仍可正常返回/关闭。
         if (menuPendingRef.current?.token === token) return;
@@ -4236,7 +4243,7 @@ export function ShelfView(props: ShelfViewProps) {
         return;
       }
     }
-  }, [activeFolders, applyFavorite, closeMenu, handleExportFolderBooks, handleOpenFolderModal, handleRemoveFromFolder, handleTouchLongPressSelect, props.onOpen, props.onExportBooks, requestDelete]);
+  }, [activeFolders, applyFavorite, closeMenu, handleExportFolderBooks, handleOpenFolderModal, handleRemoveFromFolder, handleTouchLongPressSelect, props.onOpen, props.onExportBooks, props.onRevealSource, requestDelete]);
 
   const menuView = useMemo(() => {
     if (!menu || menuTargetGone) return null;
@@ -4288,6 +4295,8 @@ export function ShelfView(props: ShelfViewProps) {
       canRemoveFromFolder: canOrganize,
       canExport: Boolean(props.onExportBooks),
       exportDisabled: Boolean(props.saveFileActive || props.lanTransferActive),
+      canReveal: Boolean(props.onRevealSource),
+      revealDisabled: entry.available === false,
     });
     return {
       label: t("shelf.card.more", { title: entry.title }),
@@ -4302,7 +4311,7 @@ export function ShelfView(props: ShelfViewProps) {
         : entry.title,
       groups: toItems(actions),
     };
-  }, [activeFolders, bookExportDisabled, canOrganize, entriesById, folderBooksMap, menu, menuPending, menuTargetGone, organization, props.busy, props.importActive, props.onExportBooks, props.saveFileActive, props.lanTransferActive, selectionMode, t, thumbnailProvider, tn]);
+  }, [activeFolders, bookExportDisabled, canOrganize, entriesById, folderBooksMap, menu, menuPending, menuTargetGone, organization, props.busy, props.importActive, props.onExportBooks, props.onRevealSource, props.saveFileActive, props.lanTransferActive, selectionMode, t, thumbnailProvider, tn]);
 
   const openMenuKey = menu && !menuClosing
     ? (menu.target.kind === "book"
