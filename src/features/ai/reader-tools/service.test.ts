@@ -35,6 +35,7 @@ it("keeps library and index results inside the host grant and requires separate 
     prepareIndex: async bookId => ({ bookId, taskId: "task", state: "running", progress: 0, reused: false }),
   };
   const service = createReaderToolService(backend, { clientId: "fixture", bookIds: ["allowed"], prepareIndex: false });
+  expect(service.definitions.some(tool => tool.name === "reader_cancel_index")).toBe(false);
   const call = (name: string, args = {}) => service.call({ requestId: "grant", name, arguments: args }, new AbortController().signal);
   expect(await call("reader_find_books")).toMatchObject({ ok: true, data: { items: [{ bookId: "allowed" }] } });
   expect(await call("reader_get_index_status")).toMatchObject({ ok: true, data: { items: [{ bookId: "allowed", state: "missing" }] } });
