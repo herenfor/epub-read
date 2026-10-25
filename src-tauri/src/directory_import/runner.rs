@@ -694,11 +694,17 @@ fn prepare_one(
     if cancelled() {
         return PrepareOutcome::Cancelled { reservation };
     }
-    let result: Result<PreparedSuccess, (bool, String)> = match (kind, &entry.source) {
-        (PayloadKind::Linked, EntrySource::Path(_)) => {
-            prepare_linked(entry, ordinal, group_key, reservation.clone())
-        }
-        (PayloadKind::Managed, EntrySource::TreeUri(uri)) => prepare_managed(
+    let result: Result<PreparedSuccess, (bool, String)> = match &entry.source {
+        EntrySource::Path(_) => prepare_path_payload(
+            root,
+            ordinal,
+            entry,
+            group_key,
+            kind,
+            reservation.clone(),
+            &cancelled,
+        ),
+        EntrySource::TreeUri(uri) if kind == PayloadKind::Managed => prepare_managed(
             app,
             root,
             uri,
@@ -725,6 +731,23 @@ fn prepare_one(
                     reservation,
                 }
             }
+        }
+    }
+}
+
+fn prepare_path_payload(
+    root: &PathBuf,
+    ordinal: usize,
+    entry: &ScannedEntry,
+    group_key: Option<String>,
+    kind: PayloadKind,
+    reservation: Reservation,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<PreparedSuccess, (bool, String)> {
+    match kind {
+        PayloadKind::Linked => prepare_linked(entry, ordinal, group_key, reservation),
+        PayloadKind::Managed => {
+            prepare_managed_path(root, ordinal, entry, group_key, reservation, cancelled)
         }
     }
 }
@@ -1231,8 +1254,16 @@ mod tests {
         let reservation = budget
             .reserve_payload(PayloadKind::Managed, entry.epub.size_hint)
             .unwrap();
-        let mut item = prepare_managed_path(&root, 0, &entry, None, reservation, &|| false)
-            .unwrap_or_else(|error| panic!("{}", error.1));
+        let mut item = prepare_path_payload(
+            &root,
+            0,
+            &entry,
+            None,
+            select_payload_kind(&entry.source, true),
+            reservation,
+            &|| false,
+        )
+        .unwrap_or_else(|error| panic!("{}", error.1));
         assert_eq!(item.content_hash, expected);
         assert_eq!(item.timing.staged_bytes, original.len() as u64);
         let PreparedPayload::Managed { ref mut staging } = item.payload else {
