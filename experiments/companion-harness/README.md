@@ -110,3 +110,14 @@ inside write, outside denial, rejected policy override, cancellation of a
 started descendant, no delayed write, and reuse/shutdown. It requires a real
 usable local sandbox and does not skip or substitute a fake runner. It does
 not call a model, start AIRI, or run the reader regression suite.
+
+## AIRI reader extension
+
+[airi/README.md](airi/README.md) describes the opt-in AIRI 0.12 extension and its
+independent DSH reader port. It uses the same DSH tool registry but exposes only
+the reader's six read tools, not this package's shell execution port. AIRI owns
+the experimental dialogue loop; neither the port nor the extension creates a
+second model loop or stores memory. The reader's native service keeps book
+authorization and archive ownership. The stock AIRI stop button needs the
+small source bridge documented there; plugin cancellation and unload already
+have their own execution lifecycle.
