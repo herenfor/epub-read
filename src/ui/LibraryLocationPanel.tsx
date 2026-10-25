@@ -12,7 +12,7 @@ import {
   type LibraryLocationResult,
 } from "../platform/libraryLocationBridge";
 import { formatBytes } from "./CacheStoragePanel";
-import { refreshLibrarySettings, type LibrarySettingsView } from "./librarySettings";
+import { displayPath, refreshLibrarySettings, type LibrarySettingsView } from "./librarySettings";
 import { uiText, useUiText } from "./localization/UiLanguageProvider";
 import type { PlainMessageKey } from "./localization/core";
 import "./cacheStoragePanel.css";
@@ -25,6 +25,8 @@ export interface LibraryLocationPanelProps {
   blocked: boolean;
   /** After anything that may have moved books: the host re-reads the shelf. */
   onChanged(): void;
+  /** True while a change runs: the host's Esc/back then does nothing (and never closes this). */
+  onRunningChange?(running: boolean): void;
   onClose(): void;
 }
 
@@ -65,7 +67,7 @@ function errorText(error: unknown): string {
 }
 
 function resultText(target: Target | null, result: LibraryLocationResult): string {
-  const dir = result.libraryDirectory;
+  const dir = displayPath(result.libraryDirectory);
   if (result.status === "cancelled") return uiText("libraryLocation.done.cancelled");
   if (result.status === "cleanup-pending") return uiText("libraryLocation.done.cleanup", { dir });
   if (!target) return uiText("libraryLocation.done.recover");
@@ -105,14 +107,10 @@ export function LibraryLocationPanel(props: LibraryLocationPanelProps) {
       setError(null);
     }
   }, [props.open]);
+  // Esc and Android back come from the host's level dispatch, which asks this first.
   useEffect(() => {
-    if (!props.open || running) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") callbacksRef.current.onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [props.open, running]);
+    callbacksRef.current.onRunningChange?.(running);
+  }, [running]);
 
   const settle = () => {
     void refreshLibrarySettings();
@@ -205,7 +203,7 @@ export function LibraryLocationPanel(props: LibraryLocationPanelProps) {
         <dl className="cache-storage-paths">
           <div>
             <dt>{t("libraryLocation.current")}</dt>
-            <dd className="cache-storage-path" title={library.libraryDirectory}>{library.libraryDirectory || "—"}</dd>
+            <dd className="cache-storage-path" title={displayPath(library.libraryDirectory)}>{displayPath(library.libraryDirectory) || "—"}</dd>
           </div>
         </dl>
         {library.customBaseDirectory === null && <p className="cache-storage-hint">{t("libraryLocation.default")}</p>}
@@ -228,8 +226,8 @@ export function LibraryLocationPanel(props: LibraryLocationPanelProps) {
           <div className="cache-storage-category library-location-confirm">
             <h3>{confirmTitle(step.target)}</h3>
             <dl className="cache-storage-paths">
-              <div><dt>{t("libraryLocation.from")}</dt><dd className="cache-storage-path" title={step.plan.sourceDirectory}>{step.plan.sourceDirectory}</dd></div>
-              <div><dt>{t("libraryLocation.to")}</dt><dd className="cache-storage-path" title={step.plan.targetDirectory}>{step.plan.targetDirectory}</dd></div>
+              <div><dt>{t("libraryLocation.from")}</dt><dd className="cache-storage-path" title={displayPath(step.plan.sourceDirectory)}>{displayPath(step.plan.sourceDirectory)}</dd></div>
+              <div><dt>{t("libraryLocation.to")}</dt><dd className="cache-storage-path" title={displayPath(step.plan.targetDirectory)}>{displayPath(step.plan.targetDirectory)}</dd></div>
               <div><dt>{t("libraryLocation.books")}</dt><dd>{tn("libraryLocation.books.count", step.plan.bookCount, { count: step.plan.bookCount })}</dd></div>
               <div><dt>{t("libraryLocation.size")}</dt><dd>{formatBytes(step.plan.totalBytes)}</dd></div>
               {step.target.mode === "move" && (

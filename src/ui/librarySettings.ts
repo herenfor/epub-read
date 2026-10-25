@@ -40,6 +40,17 @@ function errorText(error: unknown): string {
   return typeof message === "string" && message ? message : String(error);
 }
 
+/**
+ * A path as Windows shows it: without the extended-length prefix
+ * (\\?\D:\… → D:\…, \\?\UNC\server\share → \\server\share). Display only;
+ * native calls keep the real path.
+ */
+export function displayPath(path: string): string {
+  if (path.startsWith("\\\\?\\UNC\\")) return `\\\\${path.slice(8)}`;
+  if (path.startsWith("\\\\?\\")) return path.slice(4);
+  return path;
+}
+
 export function librarySettingsSupported(): boolean {
   return getRuntimeCapabilities().supportsLibraryFolder;
 }

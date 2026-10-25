@@ -3,7 +3,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 import { createReactDomHarness } from "../test/reactDomHarness";
 import type { LibraryLocationProgress } from "../platform/libraryLocationBridge";
 import { LibraryLocationPanel, type LibraryLocationPanelProps } from "./LibraryLocationPanel";
-import { resetLibrarySettingsForTest, type LibrarySettingsView } from "./librarySettings";
+import { displayPath, resetLibrarySettingsForTest, type LibrarySettingsView } from "./librarySettings";
 import { ShelfSettingsPage } from "./ShelfSettingsPage";
 
 const { invoke, pickFolder, channels, capabilities } = vi.hoisted(() => ({
@@ -33,7 +33,7 @@ const library: LibrarySettingsView = {
   customBaseDirectory: null, available: true, recoveryPending: false, error: null,
 };
 const plan = {
-  sourceDirectory: library.libraryDirectory, targetDirectory: "E:\\书\\app\\books-v1",
+  sourceDirectory: library.libraryDirectory, targetDirectory: "\\\\?\\E:\\书\\app\\books-v1",
   bookCount: 2, totalBytes: 3 * 1024 * 1024, availableBytes: 50 * 1024 * 1024 * 1024, recoveryPending: false,
 };
 
@@ -60,7 +60,7 @@ async function panel(overrides: Partial<LibraryLocationPanelProps> = {}) {
   return { dom, onChanged, button, settle };
 }
 
-it("搬到其他文件夹：选目录 → 预检显示目标和空间 → 开始后显示进度 → 完成后重读设置和书架", async () => {
+it("移动到其他文件夹：选目录 → 预检显示目标和空间 → 开始后显示进度 → 完成后重读设置和书架", async () => {
   const run = deferred<unknown>();
   pickFolder.mockResolvedValue("E:\\书");
   invoke.mockImplementation(async (command: string) => {
@@ -70,10 +70,11 @@ it("搬到其他文件夹：选目录 → 预检显示目标和空间 → 开始
   });
   const { dom, onChanged, button, settle } = await panel();
   try {
-    await dom.click(button("搬到其他文件夹…")!);
+    await dom.click(button("移动到其他文件夹…")!);
     await settle();
     expect(invoke).toHaveBeenCalledWith("linked_library_location_plan", { baseDirectory: "E:\\书", mode: "move" });
-    expect(dom.container.textContent).toContain(plan.targetDirectory);
+    expect(dom.container.textContent).toContain("E:\\书\\app\\books-v1");
+    expect(dom.container.textContent).not.toContain("\\\\?\\");
     expect(dom.container.textContent).toContain("2 本");
     expect(dom.container.textContent).toContain("50.00 GB");
 
@@ -91,7 +92,7 @@ it("搬到其他文件夹：选目录 → 预检显示目标和空间 → 开始
 
     run.resolve({ jobId: args.jobId, status: "completed", libraryDirectory: plan.targetDirectory, bookCount: 2, cleanupPendingCount: 0 });
     await settle();
-    expect(dom.container.textContent).toContain(`书库已搬到：${plan.targetDirectory}`);
+    expect(dom.container.textContent).toContain("书库已移动到：E:\\书\\app\\books-v1");
     expect(invoke).toHaveBeenCalledWith("linked_library_settings_get");
     expect(onChanged).toHaveBeenCalledTimes(1);
   } finally {
@@ -134,14 +135,15 @@ it("有书打开或任务进行时不能开始；未完成的更换可处理，�
   const blocked = await panel({ blocked: true });
   try {
     expect(blocked.dom.container.textContent).toContain("请先关闭正在阅读的书");
-    for (const text of ["搬到其他文件夹…", "连接已有书库…", "恢复默认位置"]) expect(blocked.button(text)!.disabled).toBe(true);
+    for (const text of ["移动到其他文件夹…", "连接已有书库…", "恢复默认位置"]) expect(blocked.button(text)!.disabled).toBe(true);
   } finally {
     await blocked.dom.dispose();
   }
 
   const pending = { ...library, customBaseDirectory: "E:\\书", recoveryPending: true };
   invoke.mockImplementation(async (command: string) => {
-    if (command === "linked_library_location_recover") return { jobId: "r", status: "cleanup-pending", libraryDirectory: "E:\\书\\app\\books-v1", bookCount: 2, cleanupPendingCount: 1 };
+    // Cut short before the switch: the old location is still in use.
+    if (command === "linked_library_location_recover") return { jobId: "r", status: "cleanup-pending", libraryDirectory: library.libraryDirectory, bookCount: 2, cleanupPendingCount: 1 };
     if (command === "linked_library_settings_get") return pending;
   });
   const { dom, onChanged, button, settle } = await panel({ library: pending });
@@ -150,7 +152,8 @@ it("有书打开或任务进行时不能开始；未完成的更换可处理，�
     await dom.click(button("处理未完成的更换")!);
     await settle();
     expect(invoke).toHaveBeenCalledWith("linked_library_location_recover", undefined);
-    expect(dom.container.textContent).toContain("旧位置还有文件没清理掉");
+    expect(dom.container.textContent).toContain(`当前书库位置：${library.libraryDirectory}。上次更换还有残留待处理`);
+    expect(dom.container.textContent).not.toContain("已切换");
     expect(button("继续清理")).toBeDefined();
     expect(onChanged).toHaveBeenCalledTimes(1);
   } finally {
@@ -158,21 +161,50 @@ it("有书打开或任务进行时不能开始；未完成的更换可处理，�
   }
 });
 
-it("设置 → 存储：自选位置断开时，“更改书库位置”一行带提示，点开就是书库位置面板", async () => {
-  const offline = { ...library, customBaseDirectory: "E:\\书", available: false, error: "自定义书库位置不可用，请重新连接书库" };
-  invoke.mockImplementation(async (command: string) => command === "linked_library_settings_get" ? offline : null);
+it("设置 → 存储：断开时一行带提示；面板显示常见 Windows 路径；Esc 只关最上层，进行中 Esc 不关任何一层", async () => {
+  const offline = {
+    ...library, libraryDirectory: "\\\\?\\E:\\书\\app\\books-v1", customBaseDirectory: "E:\\书", available: false,
+    error: "自定义书库位置不可用，请重新连接书库",
+  };
+  invoke.mockImplementation(async (command: string) => command === "linked_library_location_plan" ? plan
+    : command === "linked_library_location_start" ? new Promise(() => {})
+    : command === "linked_library_settings_get" ? offline : null);
+  const onClose = vi.fn();
   const dom = createReactDomHarness();
   try {
     await dom.render(createElement(ShelfSettingsPage, {
       open: true, presentation: "dialog", initialSection: "storage", busy: false, bookCount: 0, theme: "light",
-      onThemeChange: () => {}, onImportArchive: () => {}, onExportArchive: () => {}, onClose: () => {},
+      onThemeChange: () => {}, onImportArchive: () => {}, onExportArchive: () => {}, onClose,
     }));
     await dom.run(async () => { await new Promise((r) => setTimeout(r, 0)); });
     const row = [...dom.container.querySelectorAll("button")].find((candidate) => candidate.textContent?.includes("更改书库位置"))!;
     expect(row.textContent).toContain("书库位置不可用，点此重新连接或恢复默认");
     await dom.click(row);
-    expect(dom.container.querySelector("[role=dialog][aria-label='书库位置']")!.textContent).toContain("书库位置现在不可用");
+    const location = () => dom.container.querySelector("[role=dialog][aria-label='书库位置']");
+    expect(location()!.textContent).toContain("书库位置现在不可用");
+    expect(location()!.textContent).toContain("E:\\书\\app\\books-v1");
+
+    // Esc closes only the topmost layer: the location panel, then (next press) settings.
+    const escape = () => dom.run(() => { window.dispatchEvent(Object.assign(new window.Event("keydown"), { key: "Escape" })); });
+    await escape();
+    expect(location()).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+
+    // While a change runs, Esc is swallowed: neither the panel nor settings closes.
+    await dom.click(row);
+    await dom.click([...dom.container.querySelectorAll("button")].find((candidate) => candidate.textContent === "恢复默认位置")!);
+    await dom.run(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    await dom.click([...dom.container.querySelectorAll("button")].find((candidate) => candidate.textContent === "开始")!);
+    await escape();
+    expect(location()!.textContent).toContain("请不要关闭应用");
+    expect(onClose).not.toHaveBeenCalled();
   } finally {
     await dom.dispose();
   }
+});
+
+it("显示路径去掉扩展前缀，传给原生的路径不变", () => {
+  expect(displayPath("\\\\?\\D:\\书库\\app\\books-v1")).toBe("D:\\书库\\app\\books-v1");
+  expect(displayPath("\\\\?\\UNC\\server\\share\\书")).toBe("\\\\server\\share\\书");
+  expect(displayPath("C:\\Users\\me")).toBe("C:\\Users\\me");
 });
