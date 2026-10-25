@@ -23,7 +23,12 @@ API that permits CORS. No production AI actions or Android entry are enabled her
 | `transport.ts` | Standard streaming chat protocol and cancellation |
 | `requestPolicy.ts` | Provider request parameters and low-thinking defaults |
 | `diagnostics.ts` | Selected request metadata, returned passages and actual evidence delivery |
-| `storage.ts` | AI-only settings, history and explicitly edited memories |
+| `storage.ts` | AI-only settings, database upgrade and explicitly edited memories |
+| `conversationStore.ts` | Append-only conversation timeline, bounded reads and source-checked derived records |
+| `contextBudget.ts` | Replaceable token estimates, request ledger and capacity guard |
+| `memoryContext.ts` | Relevant derived summaries/memories and supersession selection |
+| `memoryMaintenance.ts` | One cancellable batch summarization/candidate job and provenance validation |
+| `runtime.ts` | Runtime boundary and the currently active direct-API adapter |
 | `avatarModel.ts` | Local avatar interface, emotion names and registered motion lookup |
 
 The Rust counterpart is `src-tauri/src/ai/companion.rs` (commands and HTTP stream)
@@ -49,8 +54,26 @@ a page reaching the chapter end does not imply the chapter was read from the sta
 
 Recent, version-matching original evidence can be reused if it is still inside
 the active book/chapter scope. Model answers and user memories do not become book
-evidence. Summaries, semantic retrieval and autonomous memory writes are not
-implemented by this experiment.
+evidence. One persistent timeline survives book/scope changes. Existing scoped
+histories migrate into individual records; UI pagination never deletes originals.
+Context tiers are 100K/200K/400K estimated input tokens, with 200K the default.
+Unknown provider capacity is not assumed to be 1M. Protocol reasoning is included
+in request accounting, never in diagnostics or persistent conversation records.
+
+After about 24 exchanges or 16K new dialogue tokens, one background request can
+produce a sourced segment and memory candidates. Foreground input cancels it;
+publication verifies source revisions transactionally. Disabling automatic memory
+also excludes derived context. Originals remain available through the
+`recall_conversation` keyword tool. Memory retrieval is currently lexical, not a
+semantic embedding service. Generated memory quality is not established by
+schema/provenance validation.
+
+`CompanionRuntime.runTurn` can be implemented by a future external agent harness.
+The current direct adapter uses the existing model/tool loop. `CompanionToolPort`
+keeps tool descriptions and permission-checked execution independent of that loop.
+A harness must replace the loop and have one agreed context/persistence owner;
+do not stack automatic compaction or import raw hidden-reasoning logs. No external
+harness or MCP runtime is installed or enabled by this interface.
 
 Low thinking is enabled by default (8192 completion tokens); the checkbox turns
 it off for DeepSeek (4096 tokens). Other endpoints receive `reasoning_effort: low`

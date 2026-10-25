@@ -2,9 +2,12 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { Book } from "../../../core/types";
 import { getAppBuildSession } from "../../../config/appBuildSession";
 import { useUiText } from "../../../ui/localization/UiLanguageProvider";
-import { answerWithBooks } from "./conversation";
+import { createDirectRuntime } from "./runtime";
 import { createReadingLibrary, type LibraryBook } from "./retrieval";
-import { loadChatSettings, loadExchanges, loadMemories, saveChatSettings, saveExchanges, saveMemories } from "./storage";
+import { loadChatSettings, loadMemories, saveChatSettings, saveMemories } from "./storage";
+import { clearConversation, putExchange, readExchanges, readSegments } from "./conversationStore";
+import { cancelMemoryMaintenance, maintainConversation } from "./memoryMaintenance";
+import type { ContextLedger } from "./contextBudget";
 import { createChatTransport, messageText } from "./transport";
 import { InvestigationTrace } from "./InvestigationTrace";
 import { companionDiagnostics } from "./diagnostics";
@@ -39,18 +42,20 @@ export function CompanionPanel({ book, context, libraryBooks, onNavigate }: Comp
   const [trace, setTrace] = useState<readonly InvestigationStep[]>([]);
   const [error, setError] = useState("");
   const [showAvatar, setShowAvatar] = useState(true);
+  const [contextLedger, setContextLedger] = useState<ContextLedger>();
+  const [memoryStatus, setMemoryStatus] = useState("");
+  const [hasOlder, setHasOlder] = useState(false);
   const current = useRef<AbortController | null>(null);
-  const historyScope = `${settings.scope}:${settings.scope === "book" ? context.bookHash : "library"}`;
 
   useEffect(() => {
     let disposed = false;
     setReady(false); setRunning(false); setError(""); setDraft(""); setEvidence([]); setTrace([]); setActiveQuestion("");
-    void Promise.all([loadExchanges(historyScope), loadMemories()]).then(([exchanges, savedMemories]) => {
+    void Promise.all([readExchanges({ limit: 40 }), loadMemories()]).then(([exchanges, savedMemories]) => {
       if (disposed) return;
-      setHistory(exchanges); setMemoryText(savedMemories); setReady(true);
+      setHistory(exchanges); setHasOlder(exchanges.length === 40); setMemoryText(savedMemories); setReady(true);
     }).catch(cause => { if (!disposed) setError(messageText(cause)); });
-    return () => { disposed = true; current.current?.abort(); current.current = null; };
-  }, [historyScope, book]);
+    return () => { disposed = true; current.current?.abort(); current.current = null; cancelMemoryMaintenance(); };
+  }, [book]);
 
   useEffect(() => {
     if (ready) companionDiagnostics.history(context, history);
@@ -62,20 +67,35 @@ export function CompanionPanel({ book, context, libraryBooks, onNavigate }: Comp
     try { saveChatSettings(next); } catch (cause) { setError(messageText(cause)); }
   };
   const send = async () => {
-    if (running || !ready || !question.trim()) return;
+    if (current.current || running || !ready || !question.trim()) return;
     if (!apiKey.trim() || !settings.model.trim()) { setError(label("请先填写 API 密钥和模型名称", "Enter an API key and model first")); return; }
     const controller = new AbortController();
+    cancelMemoryMaintenance(); setMemoryStatus("");
     current.current = controller;
     const text = question.trim();
+    const exchange: SavedExchange = { id: crypto.randomUUID(), question: text, answer: "", evidence: [],
+      context: { ...context }, createdAt: Date.now(), revision: 1, interrupted: true };
     setQuestion(""); setActiveQuestion(text); setDraft(""); setEvidence([]); setTrace([]); setError(""); setRunning(true);
     let visibleText = "";
     let visibleEvidence: readonly Evidence[] = [];
     let visibleTrace: readonly InvestigationStep[] = [];
+    let completed = false;
+    let stored = false;
     try {
-      const result = await answerWithBooks({
-        question: text, history, memories, grounded: settings.mode === "reading", signal: controller.signal,
+      // Persist the question before inference; a close/crash retains its words.
+      await putExchange(exchange);
+      stored = true;
+      const [requestHistory, segments] = await Promise.all([
+        readExchanges({ before: [exchange.createdAt, exchange.id], tokenBudget: settings.contextTier * 1.2 }), readSegments(),
+      ]);
+      controller.signal.throwIfAborted();
+      const transport = createChatTransport(settings, apiKey.trim());
+      const result = await createDirectRuntime(transport).runTurn({
+        question: text, history: requestHistory, memories, grounded: settings.mode === "reading", signal: controller.signal,
+        segments: settings.automaticMemory ? segments : [],
+        contextPolicy: { softLimit: settings.contextTier, capacity: settings.contextCapacity,
+          outputTokens: transport.requestInfo?.maxTokens ?? 8192 }, onContext: setContextLedger,
         library: createReadingLibrary(book, context, libraryBooks, settings),
-        transport: createChatTransport(settings, apiKey.trim()),
         onUpdate(nextPhase, nextText, nextEvidence, nextTrace) {
           if (current.current !== controller || controller.signal.aborted) return;
           visibleText = nextText; visibleEvidence = nextEvidence;
@@ -84,24 +104,31 @@ export function CompanionPanel({ book, context, libraryBooks, onNavigate }: Comp
         },
       });
       controller.signal.throwIfAborted();
-      const next = [...history, { id: crypto.randomUUID(), question: text, answer: result.answer,
-        evidence: result.evidence, trace: result.trace, createdAt: Date.now() }].slice(-30);
+      const finished: SavedExchange = { ...exchange, answer: result.answer, evidence: result.evidence,
+        trace: result.trace, revision: 2, interrupted: false };
       if (current.current !== controller) return;
-      setHistory(next); setDraft(""); setEvidence([]); setActiveQuestion("");
-      await saveExchanges(historyScope, next);
+      await putExchange(finished);
+      setHistory(previous => [...previous, finished].slice(-Math.max(40, previous.length)));
+      setDraft(""); setEvidence([]); setActiveQuestion("");
+      completed = true;
     } catch (cause) {
       if (current.current !== controller) return;
+      const stopped = { ...exchange, answer: visibleText, evidence: [...visibleEvidence], trace: [...visibleTrace], revision: 2 };
+      if (stored && visibleText) await putExchange(stopped).catch(error => setError(messageText(error)));
+      if (stored) setHistory(previous => [...previous, visibleText ? stopped : exchange].slice(-Math.max(40, previous.length)));
+      setDraft(""); setActiveQuestion("");
       if (controller.signal.aborted) {
-        if (visibleText) {
-          const next = [...history, { id: crypto.randomUUID(), question: text, answer: visibleText,
-            evidence: [...visibleEvidence], trace: [...visibleTrace], createdAt: Date.now(), interrupted: true }].slice(-30);
-          setHistory(next); setDraft(""); setActiveQuestion("");
-          await saveExchanges(historyScope, next).catch(error => setError(messageText(error)));
-        }
         setError(label("已停止；未完成的回答不会用于后续事实判断", "Stopped. The unfinished answer will not be reused as factual context."));
       } else { setError(messageText(cause)); setQuestion(text); }
     } finally {
-      if (current.current === controller) { current.current = null; setRunning(false); }
+      if (current.current === controller) {
+        current.current = null; setRunning(false);
+        if (completed && settings.automaticMemory) {
+          void maintainConversation(createChatTransport(settings, apiKey.trim())).then(status => {
+            if (status === "published") setMemoryStatus(label("已整理一段对话，原话完整保留。", "A segment was organized; originals are preserved."));
+          }).catch(cause => setMemoryStatus(messageText(cause)));
+        }
+      }
     }
   };
   const sourceButtons = (items: readonly Evidence[]) => <div className="companion-sources">{items.map(source =>
@@ -129,6 +156,15 @@ export function CompanionPanel({ book, context, libraryBooks, onNavigate }: Comp
       <fieldset disabled={running}>
         <label>API Base URL<input value={settings.baseUrl} onChange={event => updateSettings({ baseUrl: event.target.value })} placeholder="https://api.deepseek.com/v1" /></label>
         <label>{label("模型", "Model")}<input value={settings.model} onChange={event => updateSettings({ model: event.target.value })} /></label>
+        <label>{label("对话上下文", "Conversation context")}<select value={settings.contextTier}
+          onChange={event => updateSettings({ contextTier: Number(event.target.value) as typeof settings.contextTier })}>
+          <option value={100000}>100K</option><option value={200000}>200K</option><option value={400000}>400K</option>
+        </select></label>
+        <label>{label("接口上下文容量（token，可选）", "Provider context capacity (tokens, optional)")}<input type="number"
+          min={32768} step={1024} value={settings.contextCapacity ?? ""} onChange={event => updateSettings({
+            contextCapacity: event.target.value ? Math.max(32768, Number(event.target.value)) : undefined,
+          })} /></label>
+        <small>{label("软上限用于整理资料，不必填满；容量留空时不假设接口支持 1M。用量为估算。", "The soft limit organizes context, not a fill target. Unknown API capacity is not assumed to be 1M. Usage is estimated.")}</small>
         <label><input type="checkbox" checked={settings.thinkingEnabled} onChange={event => updateSettings({ thinkingEnabled: event.target.checked })} />{label("低强度思考（low）", "Low reasoning effort")}</label>
         <small>{label("默认开启。DeepSeek 官方接口可切换开关；其他接口需支持 reasoning_effort，取消勾选则沿用服务端默认。", "Enabled by default. DeepSeek supports the explicit toggle; other endpoints must support reasoning_effort, and use their default when unchecked.")}</small>
         <label>API Key<input type="password" autoComplete="off" value={apiKey} onChange={event => { sessionApiKey = event.target.value; setApiKey(sessionApiKey); }} /></label>
@@ -144,11 +180,23 @@ export function CompanionPanel({ book, context, libraryBooks, onNavigate }: Comp
       </fieldset>
     </details>
     <details className="companion-settings"><summary>{label("共同阅读记忆", "Reading memories")}</summary>
+      <label><input type="checkbox" checked={settings.automaticMemory} disabled={running} onChange={event => {
+        if (!event.target.checked) cancelMemoryMaintenance();
+        updateSettings({ automaticMemory: event.target.checked });
+      }} />{label("自动整理对话与记忆", "Automatically organize conversation and memory")}</label>
+      <small>{label("约24轮或16K新对话后用当前API批量整理一次；不覆盖原话，提问时让出。关闭后不整理、不注入派生记忆。", "Organize via the current API after about 24 exchanges or 16K new dialogue tokens. Originals remain; user questions take priority. Disabling also excludes derived memories.")}</small>
       <p>{label("记录偏好、讨论过的观点与未完话题。它们不会自动成为书中事实。", "Keep preferences, interpretations and unfinished topics. These are not book facts.")}</p>
       <textarea value={memories} maxLength={6000} onChange={event => setMemoryText(event.target.value)} aria-label={label("共同阅读记忆", "Reading memories")} />
       <button disabled={!ready || running} onClick={() => { void saveMemories(memories).then(() => setError("")).catch(cause => setError(messageText(cause))); }}>{label("保存记忆", "Save memories")}</button>
     </details>
     <div className="companion-history" aria-label={label("对话记录", "Conversation history")}>
+      {hasOlder && <button type="button" disabled={running || !ready} onClick={() => {
+        const first = history[0];
+        if (!first) return;
+        void readExchanges({ before: [first.createdAt, first.id], limit: 40 }).then(older => {
+          setHistory(previous => [...older, ...previous]); setHasOlder(older.length === 40);
+        }).catch(cause => setError(messageText(cause)));
+      }}>{label("查看更早对话", "Load earlier conversation")}</button>}
       {history.map(exchange => <article key={exchange.id}>
         <strong>{exchange.question}</strong><p>{exchange.answer}</p>
         {exchange.interrupted && <small>{label("未完成", "Interrupted")}</small>}
@@ -159,13 +207,18 @@ export function CompanionPanel({ book, context, libraryBooks, onNavigate }: Comp
         {sourceButtons(evidence)}<InvestigationTrace steps={trace} /></article>}
     </div>
     {running && <p role="status">{phaseLabels[phase]}</p>}
+    {contextLedger && <small>{label("本次输入估算", "Estimated input")}: {contextLedger.inputTokens.toLocaleString()} token · {settings.contextTier / 1000}K
+      {contextLedger.overSoftLimit && label(" · 本轮必要资料暂超软线", " · Necessary current material exceeds the soft limit")}</small>}
+    {memoryStatus && <small role="status">{memoryStatus}</small>}
     {error && <p role="alert" className="companion-error">{error}</p>}
     <form onSubmit={event => { event.preventDefault(); void send(); }}>
       <textarea value={question} disabled={running || !ready} maxLength={6000} onChange={event => setQuestion(event.target.value)}
         placeholder={label("聊聊这本书，或提出一个需要核实的问题…", "Discuss the book or ask a question to investigate…")} aria-label={label("向阅读伙伴提问", "Ask your reading companion")} />
       <div className="companion-actions">
         <button type="button" disabled={running || !ready} onClick={() => {
-          void saveExchanges(historyScope, []).then(() => { setHistory([]); setError(""); setDraft(""); setActiveQuestion(""); setEvidence([]); })
+          cancelMemoryMaintenance();
+          void clearConversation().then(() => { setHistory([]); setHasOlder(false); setContextLedger(undefined);
+            setMemoryStatus(""); setError(""); setDraft(""); setActiveQuestion(""); setEvidence([]); })
             .catch(cause => setError(messageText(cause)));
         }}>{label("清空当前对话", "Clear conversation")}</button>
         {running ? <button type="button" onClick={() => current.current?.abort()}>{label("停止", "Stop")}</button>

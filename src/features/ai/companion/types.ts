@@ -8,6 +8,9 @@ export interface ChatSettings {
   scope: "book" | "library";
   mode: "auto" | "reading";
   thinkingEnabled: boolean;
+  contextTier: 100000 | 200000 | 400000;
+  contextCapacity?: number;
+  automaticMemory: boolean;
 }
 export interface ToolCall {
   id: string;
@@ -51,6 +54,8 @@ export interface SavedExchange {
   createdAt: number;
   interrupted?: boolean;
   trace?: InvestigationStep[];
+  context?: ReadingContext;
+  revision?: number;
 }
 export interface InvestigationStep {
   tool: string;
