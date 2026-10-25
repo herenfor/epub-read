@@ -20,6 +20,10 @@ export interface RuntimeCapabilities {
   supportsReaderKeepScreenOn: boolean;
   /** WebDAV sync needs the native credential store: native Windows and Android only. */
   supportsCloudSync: boolean;
+  /** "Show in File Explorer" for a book's file: native Windows only. */
+  supportsRevealSource: boolean;
+  /** A34 book library folder (copy on import, location): native Windows only. */
+  supportsLibraryFolder: boolean;
 }
 
 export function getRuntimeCapabilities(): RuntimeCapabilities {
@@ -38,5 +42,7 @@ export function getRuntimeCapabilities(): RuntimeCapabilities {
     supportsReaderSystemStatusBar: androidNativeSession,
     supportsReaderKeepScreenOn: androidNativeSession,
     supportsCloudSync: session?.source === "desktop" && (platform === "windows" || platform === "android"),
+    supportsRevealSource: session?.source === "desktop" && platform === "windows",
+    supportsLibraryFolder: session?.source === "desktop" && platform === "windows",
   };
 }

@@ -8,8 +8,11 @@ use std::path::Path;
 // 1: stamped schema allowing hidden/unbound sync records. -> 2: Backup API,
 //    purge unbound books in one transaction, write user_version=2 last.
 // 2: local-owned book data; deletion purges all book state. Reopen is read-only
-//    with respect to conversion. Future versions require a new explicit arm.
-const SCHEMA_VERSION: i64 = 2;
+//    with respect to conversion.
+// 3: local reader compatibility gate for readable managed filenames and a
+//    selectable books root. 2 -> 3 backs up and changes only user_version;
+//    it MUST NOT rerun the old purge. No portable/LAN/WebDAV version changes.
+const SCHEMA_VERSION: i64 = 3;
 const DIRECTORY_TABLE: &str = "directory_bindings";
 const TABLES: &[(&str, &str)] = &[
     (
@@ -100,7 +103,7 @@ pub(super) fn initialize(connection: &mut Connection) -> PortableResult<()> {
     if !fresh
         && (!known
             || (objects.len() == TABLES.len() - 1 && has_directory)
-            || !matches!(version, 0 | 1 | SCHEMA_VERSION))
+            || !matches!(version, 0 | 1 | 2 | SCHEMA_VERSION))
     {
         return Err(PortableError::unrecognized_database_format(
             "本机资料库结构无法识别，原资料已保留",
@@ -108,7 +111,11 @@ pub(super) fn initialize(connection: &mut Connection) -> PortableResult<()> {
     }
     if !fresh && version < SCHEMA_VERSION {
         if let Some(path) = database_path {
-            backup_before_v2(Path::new(&path))?;
+            if version < 2 {
+                backup_before_v2(Path::new(&path))?;
+            } else {
+                backup_before_version(Path::new(&path), 3)?;
+            }
         }
     }
     for (name, ddl) in TABLES {
@@ -116,7 +123,7 @@ pub(super) fn initialize(connection: &mut Connection) -> PortableResult<()> {
             transaction.execute_batch(ddl)?;
         }
     }
-    if !fresh && version < SCHEMA_VERSION {
+    if !fresh && version < 2 {
         super::local_books::purge_unbound(&transaction)?;
     }
     if version < SCHEMA_VERSION {
@@ -127,13 +134,17 @@ pub(super) fn initialize(connection: &mut Connection) -> PortableResult<()> {
 }
 
 fn backup_before_v2(path: &Path) -> PortableResult<()> {
+    backup_before_version(path, 2)
+}
+
+fn backup_before_version(path: &Path, target: i64) -> PortableResult<()> {
     // The caller holds BEGIN IMMEDIATE: other writers cannot change the source.
     // A separate read connection sees the last committed DB including WAL;
     // backing up the caller's write transaction itself would be SQLITE_LOCKED.
     let source = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     let mut name = path.as_os_str().to_os_string();
     name.push(format!(
-        ".before-v2-{}.sqlite",
+        ".before-v{target}-{}.sqlite",
         super::legacy::random_uuid_v4()?
     ));
     let destination = std::path::PathBuf::from(name);
@@ -192,6 +203,76 @@ mod schema_version_tests {
                     .starts_with(&prefix)
             })
             .collect()
+    }
+
+    #[test]
+    fn c3_version_two_is_backed_up_and_marked_without_purging_records() {
+        let db = TestDb::new();
+        let connection = Connection::open(&db.0).unwrap();
+        connection
+            .execute_batch(include_str!("testdata/local-schema-v1.sql"))
+            .unwrap();
+        connection.execute_batch("PRAGMA user_version=2").unwrap();
+        let before: String = connection
+            .query_row("SELECT json FROM organization", [], |row| row.get(0))
+            .unwrap();
+        drop(PortableStore::open(&db.0).unwrap());
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            3
+        );
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM book_meta", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            3
+        );
+        assert_eq!(
+            connection
+                .query_row("SELECT json FROM organization", [], |row| row
+                    .get::<_, String>(0))
+                .unwrap(),
+            before
+        );
+        let prefix = format!("{}.before-v3-", db.0.file_name().unwrap().to_string_lossy());
+        let copies: Vec<_> = std::fs::read_dir(db.0.parent().unwrap())
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with(&prefix)
+            })
+            .collect();
+        assert_eq!(copies.len(), 1);
+        let backup = Connection::open(&copies[0]).unwrap();
+        assert_eq!(
+            backup
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
+        drop(PortableStore::open(&db.0).unwrap());
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM book_meta", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            3
+        );
+        let copies_after = std::fs::read_dir(db.0.parent().unwrap())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().starts_with(&prefix))
+            .count();
+        assert_eq!(copies_after, 1);
+        drop(backup);
+        std::fs::remove_file(&copies[0]).unwrap();
     }
 
     #[test]
@@ -265,7 +346,7 @@ mod schema_version_tests {
             connection
                 .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
                 .unwrap(),
-            2
+            SCHEMA_VERSION
         );
     }
 
@@ -321,7 +402,7 @@ mod schema_version_tests {
             connection
                 .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
                 .unwrap(),
-            2
+            SCHEMA_VERSION
         );
     }
 
@@ -417,7 +498,7 @@ mod schema_version_tests {
     fn newer_database_is_rejected_without_changes() {
         let db = TestDb::new();
         let connection = Connection::open(&db.0).unwrap();
-        connection.execute_batch("PRAGMA user_version=3; CREATE TABLE future_data (value TEXT); INSERT INTO future_data VALUES ('keep');").unwrap();
+        connection.execute_batch("PRAGMA user_version=4; CREATE TABLE future_data (value TEXT); INSERT INTO future_data VALUES ('keep');").unwrap();
         assert_eq!(
             PortableStore::open(&db.0).err().unwrap().code,
             "unsupported-database-version"
@@ -426,7 +507,7 @@ mod schema_version_tests {
             connection
                 .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
                 .unwrap(),
-            3
+            4
         );
         assert_eq!(
             connection

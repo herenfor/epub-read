@@ -3,7 +3,8 @@ import type { Theme } from "../render/settings";
 import { READER_PALETTES } from "../config/readerPalette";
 import { getRuntimeCapabilities } from "../platform/runtimeCapabilities";
 import { AboutInfo } from "./AboutInfo";
-import { Icon, SettingsRow, UpdateDot } from "./settingsRows";
+import { Icon, SettingsRow, SettingsSwitchRow, UpdateDot } from "./settingsRows";
+import { openLibraryFolder, setCopyOnImport, useLibrarySettings } from "./librarySettings";
 import { useAppUpdateDot } from "./appUpdate/appUpdateStore";
 import { CacheStoragePanel } from "./CacheStoragePanel";
 import { CloudSyncPanel, CloudSyncQuickAction, useCloudSyncRowDetail } from "./cloudSync/CloudSyncPanel";
@@ -85,6 +86,8 @@ const ROW_ICONS = {
   lan: <Icon><rect x="3" y="4" width="8" height="12" rx="1.5" /><rect x="13" y="8" width="8" height="12" rx="1.5" /><path d="M9 19h2M14.5 10.5h5" /></Icon>,
   cache: <Icon><ellipse cx="12" cy="6" rx="7" ry="3" /><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6" /><path d="M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" /></Icon>,
   log: <Icon><path d="M7 3.5h7l4 4V20a.5.5 0 0 1-.5.5h-10A.5.5 0 0 1 7 20z" /><path d="M14 3.5V8h4M10 12.5h5M10 16h5" /></Icon>,
+  library: <Icon><path d="M5 4.5h5v15H5zM10 4.5h4v15h-4z" /><path d="m15 5.5 3.5-.9 3 14-3.5.9z" /></Icon>,
+  copy: <Icon><rect x="8" y="8" width="11" height="12" rx="1.5" /><path d="M5 15.5V5.5A1.5 1.5 0 0 1 6.5 4H15" /></Icon>,
 };
 
 function Segmented<T extends string>(props: { label: string; value: T; options: Array<{ value: T; label: string }>; onChange(value: T): void }) {
@@ -118,6 +121,8 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
   const updateDot = useAppUpdateDot();
   const syncDetail = useCloudSyncRowDetail();
   const syncDot = useCloudSyncAttention();
+  const library = useLibrarySettings();
+  const [libraryOpenError, setLibraryOpenError] = useState<string | null>(null);
   /** The section's red dot as its accessible label, or false. */
   const sectionDot = (id: ShelfSettingsSection): string | false =>
     id === "about" && updateDot ? t("about.update.dot") : id === "sync" && syncDot ? t("cloudSync.attention") : false;
@@ -240,8 +245,17 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
   }
   if (capabilities.supportsCacheStorage || body) {
     sections.push({ id: "storage", title: t("shelfSettings.section.storage"),
-      detail: [...(capabilities.supportsCacheStorage ? [t("shelfMenu.cache")] : []), ...(body ? [t("shelfSettings.index")] : [])].join(t("notice.listSep")),
+      detail: [...(library ? [t("shelfSettings.library")] : []), ...(capabilities.supportsCacheStorage ? [t("shelfMenu.cache")] : []),
+        ...(body ? [t("shelfSettings.index")] : [])].join(t("notice.listSep")),
       content: <>
+        {library && <div className="shelf-settings-card is-list">
+          <SettingsRow icon={ROW_ICONS.library} title={t("shelfSettings.library")}
+            detail={library.libraryDirectory || t("shelfSettings.library.unknown")}
+            onClick={() => { setLibraryOpenError(null); void openLibraryFolder().catch((error: unknown) => setLibraryOpenError(String((error as Error).message ?? error))); }} />
+          <SettingsSwitchRow icon={ROW_ICONS.copy} title={t("shelfSettings.library.copy")} detail={t("shelfSettings.library.copy.detail")}
+            checked={library.copyOnImport} onChange={(copy) => void setCopyOnImport(copy)} />
+        </div>}
+        {library && (library.error || libraryOpenError) && <p className="shelf-settings-error" role="alert">{libraryOpenError ?? library.error}</p>}
         {capabilities.supportsCacheStorage && <div className="shelf-settings-card is-list">
           <SettingsRow icon={ROW_ICONS.cache} title={t("shelfMenu.cache")} detail={t("shelfMenu.cache.detail")} disabled={busy} onClick={() => setCacheOpen(true)} />
         </div>}

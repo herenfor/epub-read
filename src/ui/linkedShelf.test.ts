@@ -50,6 +50,13 @@ describe("Tauri linked ShelfStore IPC", () => {
     expect(invokeMock).toHaveBeenNthCalledWith(1, "linked_library_list_records");
     expect(invokeMock).toHaveBeenNthCalledWith(2, "linked_library_import_paths", {
       paths: ["C:\\Books\\a.epub"],
+      copyToLibrary: false,
+    });
+    // A34: the caller's copy choice is passed through, still with paths only.
+    await store.importPaths(["C:\\Books\\a.epub"], true);
+    expect(invokeMock).toHaveBeenNthCalledWith(3, "linked_library_import_paths", {
+      paths: ["C:\\Books\\a.epub"],
+      copyToLibrary: true,
     });
   });
 
