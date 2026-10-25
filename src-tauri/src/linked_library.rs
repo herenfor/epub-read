@@ -72,6 +72,7 @@ use store::*;
 pub(crate) use store::{
     valid_content_hash,
     library_root,
+    load_bindings,
     managed_source_path,
     atomic_write_bytes,
     replace_file_atomically,

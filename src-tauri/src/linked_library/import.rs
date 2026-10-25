@@ -181,7 +181,7 @@ pub(crate) fn stream_restricted_reader_to_staging(
         Err(error) => {
             return Err(PrepareError::Failed {
                 content_hash: None,
-                message: format!("无法读取 Android content URI：{error}"),
+                message: format!("无法读取源 EPUB：{error}"),
             })
         }
     }
