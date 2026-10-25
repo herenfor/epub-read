@@ -89,6 +89,7 @@ pub(crate) use import::{
 
 mod library_copy;
 use library_copy::*;
+pub(crate) use library_copy::{publish_staged_copy, library_file_name, ensure_library_space};
 
 mod library_settings;
 use library_settings::*;
