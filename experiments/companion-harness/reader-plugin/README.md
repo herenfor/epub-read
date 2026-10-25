@@ -19,12 +19,14 @@ experiment so model, persona and plugin settings do not affect ordinary work.
 From the trusted DSH executable for that installation:
 
 ```sh
-dsh plugin --profile web add /absolute/path/to/reader-plugin
+dsh plugin --profile web add file:/absolute/path/to/reader-plugin
 ```
 
-The package's bundle registers `epub-reader-tools`. These are installation
-instructions; package-manager installation and the live Web chat have not yet
-been accepted by this experiment's native-registry check.
+The package's bundle registers `epub-reader-tools`. Use `file:` so pnpm installs
+the package with its peer dependencies in the target profile; a plain directory
+can become a link that instead resolves peers from the source workspace.
+The native-registry check below is independent of the live-host acceptance
+described in `../chat-host/README.md`.
 
 On Windows the plugin discovers the reader's private `local` connection file
 automatically. The AI reader service must be explicitly enabled as described in

@@ -10,6 +10,10 @@ yet migrate conversation memory or provide a finished persistent-companion UI.
 The entries below remain available as earlier experiments, not required launch
 dependencies of this plugin. Do not run multiple model loops for one task.
 
+[chat-host/README.md](chat-host/README.md) records the isolated Tobs chat-host
+deployment, its native CLI inspection path, and the remaining memory/context
+boundaries. It is an optional experiment, not a Core release feature.
+
 This optional AI development host composes DSH 0.2.1-rc.3's native agent,
 model and tool services. It does not install the DSH CLI or use its global
 profile. Its dependency graph and lockfile are separate from the reader.
