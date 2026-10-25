@@ -872,7 +872,8 @@ fn publish_attachment_binding(
 ) -> Result<(String, Option<PathBuf>), SaveFileError> {
     let cover = crate::linked_library::inspect_epub(&attachment.staging_path)
         .map_err(SaveFileError::invalid_data)?;
-    let target = managed_book_path(root, &attachment.content_hash);
+    crate::linked_library::writable_books_directory(root).map_err(SaveFileError::storage_error)?;
+    let target = managed_book_path(root, &attachment.content_hash)?;
     if let Some(parent) = target.parent() { fs::create_dir_all(parent)?; }
     let created = publish_attachment(attachment, &target)?;
     let result = (|| {
@@ -1171,6 +1172,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn readable_managed_binding_keeps_its_name_across_save_and_export() {
+        let root = std::env::temp_dir().join(format!("named-binding-{}", super::new_uuid().unwrap()));
+        let hash = "a".repeat(64);
+        let raw = serde_json::json!({
+            "contentHash": hash, "storageKind": "managed", "managedFileName": "原书 (2).epub"
+        });
+        let binding: LocalBinding = serde_json::from_value(raw).unwrap();
+        assert_eq!(binding.source_path(&root).unwrap(), root.join("books/原书 (2).epub"));
+        assert_eq!(serde_json::to_value(&binding).unwrap()["managedFileName"], "原书 (2).epub");
+        let mut invalid = binding.clone();
+        invalid.managed_file_name = Some("../escape.epub".into());
+        assert!(invalid.source_path(&root).is_err());
+        let legacy = LocalBinding::new_managed(&hash, 1, 2);
+        assert_eq!(legacy.source_path(&root).unwrap(), root.join("books").join(format!("{hash}.epub")));
+        assert!(serde_json::to_value(&legacy).unwrap().get("managedFileName").is_none());
+    }
+
+    #[test]
     fn c6_attachment_validation_precedes_publication() {
         use std::io::Write;
         let dir = std::env::temp_dir().join(format!("epub-c6-{}", new_uuid().unwrap()));
@@ -1179,7 +1198,7 @@ mod tests {
         fs::write(&source, b"not an EPUB").unwrap();
         let mut attachment = super::super::PreparedAttachment { content_hash:super::super::hex_digest(b"not an EPUB"), staging_path:source.clone(), bytes:11, sha256:String::new() };
         assert!(publish_attachment_binding(&attachment, &dir).is_err());
-        assert!(!managed_book_path(&dir, &attachment.content_hash).exists());
+        assert!(!managed_book_path(&dir, &attachment.content_hash).unwrap().exists());
         let mut zip = zip::ZipWriter::new(fs::File::create(&source).unwrap());
         for (name, text) in [
             ("META-INF/container.xml", "<container><rootfiles><rootfile full-path=\"OPS/book.opf\"/></rootfiles></container>"),

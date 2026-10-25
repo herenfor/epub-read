@@ -38,6 +38,7 @@ pub(super) fn archive_open_blocking(
     owner: String,
     content_hash: String,
 ) -> Result<ArchiveOpenView, LinkedLibraryError> {
+    let _location_read = library_location::source_lease(&app)?;
     if !valid_content_hash(&content_hash) {
         return Err("无效的书籍内容指纹".into());
     }
