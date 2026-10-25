@@ -5,6 +5,7 @@ export const DEFAULT_CHAT_SETTINGS: ChatSettings = {
   allowLaterChapters: false, mode: "auto", thinkingEnabled: true,
   contextTier: 200000,
   automaticMemory: true,
+  runtime: "direct",
 };
 
 /** Separate from shelf/save storage. No API credentials are ever persisted here. */
@@ -13,7 +14,8 @@ export function loadChatSettings(): ChatSettings {
     const saved = JSON.parse(localStorage.getItem("epub-reader:ai-companion-settings:v1") || "{}");
     // Old "chat" is the automatic tool mode; explicitly chosen strict reading stays strict.
     return { ...DEFAULT_CHAT_SETTINGS, ...saved, mode: saved.mode === "reading" ? "reading" : "auto",
-      contextTier: [100000, 200000, 400000].includes(saved.contextTier) ? saved.contextTier : 200000 };
+      contextTier: [100000, 200000, 400000].includes(saved.contextTier) ? saved.contextTier : 200000,
+      runtime: saved.runtime === "dsh" ? "dsh" : "direct" };
   } catch { return { ...DEFAULT_CHAT_SETTINGS }; }
 }
 export function saveChatSettings(settings: ChatSettings): void {

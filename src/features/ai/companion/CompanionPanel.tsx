@@ -3,6 +3,7 @@ import type { Book } from "../../../core/types";
 import { getAppBuildSession } from "../../../config/appBuildSession";
 import { useUiText } from "../../../ui/localization/UiLanguageProvider";
 import { createDirectRuntime } from "./runtime";
+import { createHarnessRuntime } from "./harness/runtime";
 import { createReadingLibrary, type LibraryBook } from "./retrieval";
 import { loadChatSettings, loadMemories, saveChatSettings, saveMemories } from "./storage";
 import { clearConversation, putExchange, readExchanges, readSegments } from "./conversationStore";
@@ -45,8 +46,19 @@ export function CompanionPanel({ book, context, libraryBooks, onNavigate }: Comp
   const [showAvatar, setShowAvatar] = useState(true);
   const [contextLedger, setContextLedger] = useState<ContextLedger>();
   const [memoryStatus, setMemoryStatus] = useState("");
+  const [harnessStatus, setHarnessStatus] = useState<"checking" | "ready" | "missing" | "unavailable">("checking");
   const [hasOlder, setHasOlder] = useState(false);
   const current = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (settings.runtime !== "dsh") return;
+    const controller = new AbortController();
+    setHarnessStatus("checking");
+    void fetch("/__ai-companion/harness/status", { signal: controller.signal }).then(response => response.json())
+      .then(status => { if (!controller.signal.aborted) setHarnessStatus(status.installed ? "ready" : "missing"); })
+      .catch(() => { if (!controller.signal.aborted) setHarnessStatus("unavailable"); });
+    return () => controller.abort();
+  }, [settings.runtime]);
 
   useEffect(() => {
     let disposed = false;
@@ -93,7 +105,8 @@ export function CompanionPanel({ book, context, libraryBooks, onNavigate }: Comp
       ]);
       controller.signal.throwIfAborted();
       const transport = createChatTransport(settings, apiKey.trim());
-      const result = await createDirectRuntime(transport).runTurn({
+      const runtime = settings.runtime === "dsh" ? createHarnessRuntime(transport) : createDirectRuntime(transport);
+      const result = await runtime.runTurn({
         question: text, history: requestHistory, memories, grounded: settings.mode === "reading", signal: controller.signal,
         exchangeId: exchange.id,
         segments: settings.automaticMemory ? segments : [],
@@ -158,6 +171,17 @@ export function CompanionPanel({ book, context, libraryBooks, onNavigate }: Comp
     <details className="companion-settings" open={!apiKey}>
       <summary>{label("API 与阅读范围", "API and reading scope")}</summary>
       <fieldset disabled={running}>
+        <label>{label("执行器（实验）", "Runtime (experimental)")}<select value={settings.runtime}
+          onChange={event => updateSettings({ runtime: event.target.value as "direct" | "dsh" })}>
+          <option value="direct">{label("Direct · 当前实现", "Direct · existing runtime")}</option>
+          <option value="dsh">{label("DSH · 原生工具循环", "DSH · native tool loop")}</option>
+        </select></label>
+        <small>{label("DSH需先安装独立实验宿主，通过本地AI开发入口运行；失败不会自动重发。", "DSH requires the separate experimental host and the local AI dev entry. Failures are not automatically retried.")}</small>
+        {settings.runtime === "dsh" && <small role="status">{harnessStatus === "ready"
+          ? label("DSH 0.2.1-rc.3 · 宿主依赖已安装", "DSH 0.2.1-rc.3 · host dependencies installed")
+          : harnessStatus === "checking" ? label("正在检查宿主…", "Checking the host…")
+          : harnessStatus === "missing" ? label("DSH宿主尚未安装", "DSH host is not installed")
+          : label("当前入口没有DSH开发宿主", "DSH dev host is unavailable at this entry")}</small>}
         <label>API Base URL<input value={settings.baseUrl} onChange={event => updateSettings({ baseUrl: event.target.value })} placeholder="https://api.deepseek.com/v1" /></label>
         <label>{label("模型", "Model")}<input value={settings.model} onChange={event => updateSettings({ model: event.target.value })} /></label>
         <label>{label("对话上下文", "Conversation context")}<select value={settings.contextTier}

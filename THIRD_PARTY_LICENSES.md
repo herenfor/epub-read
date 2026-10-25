@@ -226,6 +226,13 @@ included in this source distribution. Core builds do not include the renderer.
 See the [official sample terms](https://www.live2d.com/en/learn/sample/) and
 [SDK license](https://www.live2d.com/en/sdk/license/) before any future distribution.
 
+### Optional AI development runtime
+
+`experiments/companion-harness` has a separate, opt-in dependency graph using
+DSH 0.2.1-rc.3 and `@deepseek-ai/cordis` 4.0.5 under MIT. Package copyright and
+license notices are retained by the package manager. These Node development
+dependencies are not included in Core, Android or the reader's release bundle.
+
 标准许可证全文位于 [`third-party-licenses/`](third-party-licenses/):
 
 - [Apache-2.0.txt](third-party-licenses/Apache-2.0.txt)

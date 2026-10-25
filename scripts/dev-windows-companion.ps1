@@ -2,7 +2,8 @@
 param(
     [string]$TestDirectory,
     [ValidateRange(1024, 65535)][int]$Port = 5186,
-    [switch]$InstallDependencies
+    [switch]$InstallDependencies,
+    [switch]$InstallHarness
 )
 $ErrorActionPreference = 'Stop'
 if (!$TestDirectory -or $TestDirectory -notmatch '^[A-Za-z]:[\\/]') {
@@ -28,7 +29,7 @@ if ([IO.Path]::GetFullPath($source).TrimEnd('\') -ne [IO.Path]::GetFullPath($Tes
     foreach ($file in @('package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'index.html', 'tsconfig.json', 'vite.config.ts', 'LICENSE', 'LICENSING.md', 'NOTICE', 'THIRD_PARTY_LICENSES.md')) {
         if (Test-Path -LiteralPath "$source\$file") { Copy-Item -LiteralPath "$source\$file" -Destination $TestDirectory -Force }
     }
-    foreach ($directory in @('src', 'src-tauri', 'scripts', 'public-ai', 'third-party-licenses', '.ai-companion-local')) {
+    foreach ($directory in @('src', 'src-tauri', 'scripts', 'public-ai', 'third-party-licenses', '.ai-companion-local', 'experiments/companion-harness')) {
         if (!(Test-Path -LiteralPath "$source\$directory")) { continue }
         & "$env:SystemRoot\System32\robocopy.exe" "$source\$directory" "$TestDirectory\$directory" /E /XD node_modules target target-ai target-core target2 target-android-core target-android-ai gen .cache /NFL /NDL /NJH /NJS /NP
         if ($LASTEXITCODE -gt 7) { throw "Source copy failed for $directory (robocopy $LASTEXITCODE). Close only an existing AI development window and retry." }
@@ -51,6 +52,11 @@ try {
     Write-Host "  pnpm store       : $pnpmStore"
     if ($InstallDependencies -or !(Test-Path 'node_modules/@tauri-apps/cli/tauri.js')) {
         Invoke-Checked $pnpm @('install', '--frozen-lockfile', '--store-dir', $pnpmStore)
+    }
+    if ($InstallHarness) {
+        Push-Location 'experiments/companion-harness'
+        try { Invoke-Checked $pnpm @('install', '--frozen-lockfile', '--ignore-scripts', '--store-dir', $pnpmStore) }
+        finally { Pop-Location }
     }
     $listeners = [Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners()
     if ($listeners | Where-Object { $_.Port -eq $Port }) { throw "Port $Port is in use. Choose -Port <unused port>; do not stop another development service." }
