@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "main": "index.mjs",
-  "exports": { ".": "./index.mjs" },
-  "files": ["index.mjs", "service.mjs", "prompts.mjs", "patch-native.mjs", "ui.html", "ui.js", "ui.css", "cordis.patch.yml", "README.md"],
+  "exports": { ".": "./index.mjs", "./client": { "default": "./client.js" } },
+  "files": ["index.mjs", "client.js", "service.mjs", "prompts.mjs", "runtime-tools.mjs", "patch-native.mjs", "ui.html", "ui.js", "ui.css", "cordis.patch.yml", "README.md"],
   "engines": { "node": ">=22.19", "dsh": "0.2.1-rc.3" },
-  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }
+  "dsh": { "manifestVersion": 1, "client": { "platform": "web", "inject": [] }, "bundle": { "patch": "./cordis.patch.yml" } }
 }
