@@ -2,8 +2,31 @@
 
 This entry uses **DSH 0.2.1-rc.3 + Tobs 1.5.2** with the optional native reader
 plugin. It does not create another chat UI or model loop. It is an experimental
-deployment, separate from the reader's Core/Android builds and the user's daily
-DSH home. AIRI is not a dependency.
+deployment, separate from the reader's Core/Android builds. Its existing data
+home can be selected by the normal daily DSH launcher. AIRI is not a dependency.
+
+## Daily startup
+
+The current local deployment uses **3080**, selected through the existing
+`dsh-web` launcher:
+
+```sh
+dsh-web &
+dsh-web stop
+```
+
+Keep the selected bot data home in place when changing ports; a different port
+does not require copying personas, conversations, memory or credentials. An
+older daily DSH home can remain untouched rather than merging two databases.
+The local launcher retains terminal detachment, managed stop, authenticated
+browser opening and strict-RC discovery. A configured host can defer a candidate
+runtime it does not yet support, before the updater replaces working files.
+
+The host starts independently of the reader. Reader tools report their actual
+connection/authorization state; starting chat does not require opening the
+reader's shelf UI. A standalone headless reader service and tools to navigate
+or create highlights remain future work, not capabilities supplied by this
+launcher.
 
 ## Reproduce the deployment
 
@@ -16,7 +39,7 @@ this experiment can also run in WSL with its Web UI opened on Windows.
 ```sh
 dsh plugin --profile web add @botharness/tobs@1.5.2
 dsh plugin --profile web add file:/absolute/path/to/reader-plugin
-dsh --profile web --port 3092 --no-open
+dsh --profile web --port 3080 --no-open
 ```
 
 These commands assume that the selected `dsh` executable and process-local
@@ -26,8 +49,11 @@ resolve from the installed profile, rather than a linked source workspace.
 Before launch, put this directory's `cordis.patch.yml` into the experiment's
 profile override (merge deliberately if that profile already has settings).
 It selects Tobs' preset and keeps this text-chat experiment free of browser,
-computer and external-messaging modules. Use another free loopback port if
-3092 is occupied; do not stop a daily DSH listener to take its port.
+computer and external-messaging modules. For a separate experiment, select a
+free loopback port and its own data home. A daily host should use its selected
+launcher, including any compatibility preload described by
+[bot controls](../bot-controls/README.md). Never reuse another data home's
+listener merely because its port matches.
 
 For WSL hosting a Windows reader connection, set the host's
 `EPUB_READER_CONNECTION_FILE` to the Windows reader's private discovery file
