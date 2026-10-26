@@ -18,7 +18,10 @@ node /absolute/private/profile/node_modules/epub-local-bot-controls/patch-native
 Use the same deliberately selected `DSH_HOME` for installation and startup.
 Run the patch helper before each cold start, after checking that the host is
 stopped. It is idempotent. Then restart that host and visit **`/bot-controls`**
-on its existing web address. The page uses the host's normal owner login and
+on its existing web address. The native Tobs and DSH settings menus also have
+**人设与聊天 → 打开 Bot 设置**, opening the editor in another tab while preserving
+the chat page. Reload an already-open host tab after installing the plugin.
+The page uses the host's normal owner login and
 same-origin authenticated routes. It is not an unauthenticated public panel.
 
 Tobs normally offers selected-message purge only for ended groups. The helper
@@ -29,6 +32,24 @@ replaces the private profile file atomically rather than modifying a shared
 pnpm hard link. Upgrading Tobs requires reviewing this small patch again.
 Reinstalling the private Tobs package restores upstream code; disable this UI
 and its startup hook when removing the feature.
+
+### DSH tool-runtime identity
+
+DSH 0.2.1-rc.3's tools scheduler uses a module-local symbol. If the host loads
+multiple pnpm peer copies of that SDK package, a loop can see the tool service
+but fail on `undefined.prepare` when executing a call. The isolated deployment
+uses this process-local preload, selecting the actual installed loop entry:
+
+```sh
+export BOT_CONTROLS_LOOP_ENTRY=/absolute/selected/dsh-agent-loop/lib/index.js
+node --import /absolute/private/profile/node_modules/epub-local-bot-controls/runtime-tools.mjs /absolute/dsh/lib/bin.js --profile web --port 3092 --no-open
+```
+
+It redirects only same-version `dsh-tools` root imports to the loop's one copy,
+including file-URL imports. It does not mutate the global SDK, alias arbitrary
+symbols, bypass tool execution, or affect another DSH process. The launcher
+retains its existing private `DSH_HOME` and applies the purge patch before this
+command. Review the selected loop path and compatibility when upgrading DSH.
 
 ## Chat records
 
