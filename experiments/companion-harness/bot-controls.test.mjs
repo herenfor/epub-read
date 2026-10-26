@@ -24,7 +24,7 @@ test('persona prefix precedes the role; post-history follows user and tool resul
     for (const service of [Projections, Session, Llm, Prompt, Tools, Agent, AgentLoop]) fibers.push(await ctx.plugin(service));
     const directory = join(root, 'persona-prompts');
     await mkdir(directory);
-    await writeFile(join(directory, 'fixture-bot.json'), JSON.stringify({ revision: 'fixture-1', prefix: 'SYNTHETIC PREFIX', suffix: 'SYNTHETIC SUFFIX' }));
+    await writeFile(join(directory, 'fixture-bot.json'), JSON.stringify({ revision: 'fixture-1', prefix: 'SYNTHETIC PREFIX {{user}}', suffix: 'SYNTHETIC SUFFIX {{char}}' }));
     ctx.provide('botharness', {
       rootDir: join(root, 'bots'),
       registry: { get: id => id === 'fixture-bot' ? { slug: id, displayName: 'Fixture Character' } : undefined },
@@ -45,7 +45,9 @@ test('persona prefix precedes the role; post-history follows user and tool resul
     unregister = ctx.llm.registerAdapter(['bot-controls-fixture'], new FixtureAdapter());
     handle = await ctx.agents.create({ sessionId: 'fixture-session', meta: { cwd: root },
       agentOptions: { provider: 'bot-controls-fixture', model: 'fixture' }, setup(agentCtx) {
-        agentCtx.systemPrompt.section({ name: 'fixture-role', order: 0, interpolate: false, text: 'SYNTHETIC SOUL' });
+        // Match Tobs' registration: persona interpolation is enabled by default.
+        agentCtx.systemPrompt.section({ name: 'botharness:persona', order: 0,
+          text: 'SYNTHETIC SOUL {{user}} with {{char}}; literal {{unsupported_card_macro}}' });
         agentCtx.tools.register({ name: 'fixture_lookup', description: 'Synthetic lookup', parameters: { type: 'object', properties: {} },
           output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
           async execute() { return 'SYNTHETIC TOOL RESULT'; } });
@@ -59,9 +61,11 @@ test('persona prefix precedes the role; post-history follows user and tool resul
       const system = messages.filter(m => m.role === 'system').map(text).join('\n');
       assert.ok(system.includes('SYNTHETIC PREFIX'));
       assert.ok(system.indexOf('SYNTHETIC PREFIX') < system.indexOf('SYNTHETIC SOUL'));
+      assert.match(system, /SYNTHETIC PREFIX Fixture User/);
+      assert.match(system, /SYNTHETIC SOUL Fixture User with Fixture Character; literal \{\{unsupported_card_macro\}\}/);
       assert.equal(messages.at(-1).role, 'user');
       assert.equal(messages.at(-1).source.kind, 'runtime-context');
-      assert.match(text(messages.at(-1)), /SYNTHETIC SUFFIX/);
+      assert.match(text(messages.at(-1)), /SYNTHETIC SUFFIX Fixture Character/);
     }
     assert.ok(requests[1].some(m => m.role === 'tool' && text(m).includes('SYNTHETIC TOOL RESULT')));
     assert.notEqual(text(requests[0].at(-1)), text(requests[1].at(-1)));

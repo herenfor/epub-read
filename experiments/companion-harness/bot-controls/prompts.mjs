@@ -20,7 +20,9 @@ export function createPersonaControls(core, directory) {
     expand(id, value) {
       const bot = botFor(id); const dm = core.channels.getOrCreateDm(id);
       const user = core.channels.humanNickname(dm.id) ?? core.channels.humanIdentity().displayName ?? '用户';
-      return value.replaceAll('{{char}}', bot.displayName).replaceAll('{{user}}', user);
+      // One pass, with literal replacement values: names may themselves contain
+      // dollar signs or braces and must not become another macro/template pass.
+      return value.replace(/\{\{(char|user)\}\}/g, (_macro, name) => name === 'char' ? bot.displayName : user);
     },
     load(id) {
       const bot = botFor(id); const file = core.memory.readAccepted(id, 'SOUL.md');
@@ -68,6 +70,10 @@ export function createPersonaControls(core, directory) {
  * in SOUL.md or an unlogged provider mutation. */
 export function addMainPrompt(assembly, text) {
   return text ? { ...assembly, sections: [{ name: 'bot-controls:main-prompt', text, interpolate: false }, ...assembly.sections] } : assembly;
+}
+export function expandPersonaPrompt(assembly, expand) {
+  return { ...assembly, sections: assembly.sections.map(section => section.name === 'botharness:persona'
+    ? { ...section, text: expand(section.text), interpolate: false } : section) };
 }
 export function postHistoryText(text, revision, turn = 0, step = 0) {
   if (!text) return '';
