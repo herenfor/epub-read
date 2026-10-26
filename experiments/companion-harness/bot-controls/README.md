@@ -1,7 +1,8 @@
 # Local bot settings
 
-Optional UI for an isolated **DSH 0.2.1-rc.3 / Tobs 1.5.2** host. This package
-does not enter the reader, Core/Android bundles, or another DSH profile. It adds
+Optional UI for an explicitly selected **DSH / Tobs 1.5.2** host. The current
+daily profile also retains native tasks. This package does not enter the reader
+or Core/Android bundles, or modify another DSH profile. It adds
 no dependencies, model loop, telemetry or separate listening port.
 
 It borrows SillyTavern's separation of **main prompt, character, post-history
@@ -38,10 +39,10 @@ and its startup hook when removing the feature.
 DSH 0.2.1-rc.3's tools scheduler uses a module-local symbol. If the host loads
 multiple pnpm peer copies of that SDK package, a loop can see the tool service
 but fail on `undefined.prepare` when executing a call. The isolated deployment
-uses this process-local preload, selecting the actual installed loop entry:
+uses this process-local preload, resolving the loop from the active runtime:
 
 ```sh
-export BOT_CONTROLS_LOOP_ENTRY=/absolute/selected/dsh-agent-loop/lib/index.js
+export DSH_RUNTIME_ENTRY=/absolute/selected/dsh/lib/bin.js
 node --import /absolute/private/profile/node_modules/epub-local-bot-controls/runtime-tools.mjs /absolute/dsh/lib/bin.js --profile web --port 3080 --no-open
 ```
 
@@ -49,7 +50,11 @@ It redirects only same-version `dsh-tools` root imports to the loop's one copy,
 including file-URL imports. It does not mutate the global SDK, alias arbitrary
 symbols, bypass tool execution, or affect another DSH process. The launcher
 retains its existing private `DSH_HOME` and applies the purge patch before this
-command. Review the selected loop path and compatibility when upgrading DSH.
+command. The legacy `BOT_CONTROLS_LOOP_ENTRY` option remains available. There is
+no fixed DSH-release rejection: an unrecognized runtime uses its native loader
+with a warning. Same-version package identity is still checked before aliasing.
+One synthetic native prompt/tool case also passed against the installed rc.4
+graph; no real persona, chat or model request was used.
 
 ## Chat records
 

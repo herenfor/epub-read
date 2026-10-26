@@ -5,8 +5,10 @@ requirement**: the reader HTTP service and CLI work without this package, Tobs,
 a persona, a model key or a conversation database. Further work prioritizes
 portable reading tools rather than expanding this bot deployment.
 
-The tested adapter targets DSH **0.2.1-rc.3** and Tobs **1.5.2**. Install only in
-an isolated host, after deliberately selecting those compatible versions:
+The original adapter acceptance used DSH **0.2.1-rc.3** and Tobs **1.5.2**. It now
+also loads in the unified daily rc.4 profile. The owner removed the exact DSH
+engine gate; future compatibility is not implied. Install in an explicitly
+selected profile and retain its ordinary task defaults:
 
 ```sh
 dsh plugin --profile web add file:/absolute/path/to/chat-policy

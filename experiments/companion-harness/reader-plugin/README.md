@@ -11,7 +11,8 @@ The shared Node transport and retrieval guidance now live in
 Install from the full checkout using `file:` rather than copying this folder
 alone. It has no static DSH module import: argument validation uses the shared
 SDK schema validator, so peer pruning in a host profile cannot remove a required
-DSH helper. The pinned DSH engine requirement remains authoritative.
+DSH helper. The owner's exact DSH engine gate has been removed; host API
+compatibility remains an implementation concern, not a fixed release lock.
 
 For a host that supports standard MCP instead of native DSH plugins, use
 [the MCP adapter](../../../integrations/reader-tools/README.md).
@@ -22,10 +23,11 @@ Core/Android do not import this package.
 
 ## Install in a dedicated host
 
-The tested native registry API is DSH **0.2.1-rc.3**. The package intentionally
-declares that exact engine/peer range; do not bypass a compatibility refusal or
-silently upgrade a daily DSH installation. Use a separate DSH home for this
-experiment so model, persona and plugin settings do not affect ordinary work.
+The original native registry acceptance used DSH **0.2.1-rc.3**; the plugin also
+loads in the daily **0.2.1-rc.4** profile. The owner removed the exact DSH engine
+gate and enabled normal RC updates. This does not certify every future runtime
+or repeat native-reader acceptance. Select the intended home/profile explicitly,
+preserving ordinary task models, personas and permissions when adding tools.
 
 From the trusted DSH executable for that installation:
 
