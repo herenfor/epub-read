@@ -69,6 +69,13 @@ native preset; clearing a configured field supersedes its previous snapshot.
 Each prefix/post-history field allows 16,000 UTF-16 units. Native permissions
 and tools are unchanged.
 
+The same card macros also expand in Tobs' native `botharness:persona` section
+(the SOUL/MEMORY snapshot), including already-existing sessions. Expansion is
+one pass at prompt assembly; the original files and snapshots are not rewritten.
+Native DSH variable interpolation is disabled only for that persona section,
+so unsupported card macros stay literal rather than stopping a reply with
+`unknown prompt variable`. Framework/tool sections keep their normal rendering.
+
 To keep post-history last across tool steps, its step identity causes the
 native runtime-context snapshot to refresh for each generation when nonempty.
 That snapshot is recorded and counted by the normal admission/compaction

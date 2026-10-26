@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createConversationControls, ControlError } from './service.mjs';
-import { createPersonaControls, addMainPrompt, postHistoryText } from './prompts.mjs';
+import { createPersonaControls, addMainPrompt, expandPersonaPrompt, postHistoryText } from './prompts.mjs';
 
 export const name = 'epub-local-bot-controls';
 export const inject = ['connection', 'webServer', 'botharness', 'systemPrompt'];
@@ -12,19 +12,24 @@ export function apply(ctx) {
   const owner = context => {
     const agent = context.agent ?? context.scope;
     const row = agent?.session?.id && ctx.botharness.ownership.resolve(agent.session.id);
-    return row?.rootRole === 'orchestrator' && !row.parentSessionId ? { id: row.botSlug, session: agent.session.id } : undefined;
+    return row ? { id: row.botSlug, session: agent.session.id,
+      orchestrator: row.rootRole === 'orchestrator' && !row.parentSessionId } : undefined;
   };
   ctx.on('system-prompt/assemble', async (_assembly, context, next) => {
     const result = await next(); const bot = owner(context); if (!bot) return result;
+    // Tobs defaults its SOUL/MEMORY section to native DSH interpolation. Card
+    // macros belong to this adapter instead; leave other card syntax literal.
+    const projected = expandPersonaPrompt(result, text => personas.expand(bot.id, text));
+    if (!bot.orchestrator) return projected;
     const config = personas.settings(bot.id);
-    return addMainPrompt(result, personas.expand(bot.id, config.prefix));
+    return addMainPrompt(projected, personas.expand(bot.id, config.prefix));
   }, { global: true });
   // Native runtime context is committed after the admitted user batch. Refresh
   // the step stamp so post-history remains last on tool-loop generations too;
   // this is logged and included in the engine's normal context admission.
   ctx.effect(() => ctx.systemPrompt.context({ name: 'bot-controls:post-history', order: 100000,
     required: true, interpolate: false, text(context) {
-      const bot = owner(context); if (!bot) return '';
+      const bot = owner(context); if (!bot?.orchestrator) return '';
       const config = personas.settings(bot.id); const phase = steps.get(bot.session);
       return postHistoryText(personas.expand(bot.id, config.suffix), config.revision, phase?.turn, phase?.step);
     } }));
