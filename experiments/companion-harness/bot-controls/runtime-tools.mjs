@@ -1,25 +1,35 @@
-/** Private-host preload for DSH 0.2.1-rc.3. Its scheduler key uses Symbol(),
- * so pnpm peer copies of dsh-tools cannot exchange tools with one another.
- * Resolve them to the loop's one module instance without editing installed SDK
- * files or changing another host/process. */
-import { registerHooks, createRequire } from 'node:module';
+// Resolve the active runtime's tools scheduler, including profile peer copies.
+// This adapter does not pin or reject DSH releases. Only copies of the same
+// tools version are unified; unrelated runtime versions keep their own loader.
+import * as modules from 'node:module';
 import { readFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const loopEntry = process.env.BOT_CONTROLS_LOOP_ENTRY;
-if (!loopEntry) throw new Error('Bot controls preload requires BOT_CONTROLS_LOOP_ENTRY from the selected private host');
 const versionOf = entry => JSON.parse(readFileSync(join(dirname(entry), '..', 'package.json'), 'utf8')).version;
-if (versionOf(loopEntry) !== '0.2.1-rc.3') throw new Error('Review the tools preload before upgrading the selected DSH loop');
-const toolsEntry = realpathSync(createRequire(loopEntry).resolve('@deepseek-ai/dsh-tools'));
-if (versionOf(toolsEntry) !== '0.2.1-rc.3') throw new Error('The selected loop and tools versions must match');
-const canonical = pathToFileURL(toolsEntry).href;
-
-registerHooks({ resolve(specifier, context, next) {
-  const result = next(specifier, context);
-  if (!result.url.startsWith('file:')) return result;
-  const file = fileURLToPath(result.url);
-  if (!file.replaceAll('\\', '/').endsWith('/@deepseek-ai/dsh-tools/lib/index.js')) return result;
-  if (versionOf(file) !== '0.2.1-rc.3') throw new Error('Mixed DSH tools versions are not supported by this private host');
-  return { ...result, url: canonical };
-} });
+try {
+  let loop;
+  if (process.env.DSH_RUNTIME_ENTRY) {
+    const runtime = realpathSync(process.env.DSH_RUNTIME_ENTRY);
+    const sdk = modules.createRequire(runtime).resolve('@deepseek-ai/dsh-sdk-app');
+    loop = modules.createRequire(sdk).resolve('@deepseek-ai/dsh-agent-loop');
+  } else {
+    loop = realpathSync(process.env.BOT_CONTROLS_LOOP_ENTRY);
+  }
+  const tools = realpathSync(modules.createRequire(loop).resolve('@deepseek-ai/dsh-tools'));
+  const version = versionOf(tools);
+  if (version !== versionOf(loop) || typeof modules.registerHooks !== 'function') {
+    process.emitWarning('DSH tools adapter is unavailable; using the native loader.');
+  } else {
+    const canonical = pathToFileURL(tools).href;
+    modules.registerHooks({ resolve(specifier, context, next) {
+      const result = next(specifier, context);
+      if (!result.url.startsWith('file:')) return result;
+      const file = fileURLToPath(result.url);
+      if (!file.replaceAll('\\', '/').endsWith('/@deepseek-ai/dsh-tools/lib/index.js')) return result;
+      return versionOf(file) === version ? { ...result, url: canonical } : result;
+    } });
+  }
+} catch {
+  process.emitWarning('DSH tools adapter could not resolve this runtime; using the native loader.');
+}

@@ -6,6 +6,6 @@
   "main": "index.mjs",
   "exports": { ".": "./index.mjs", "./client": { "default": "./client.js" } },
   "files": ["index.mjs", "client.js", "service.mjs", "prompts.mjs", "runtime-tools.mjs", "patch-native.mjs", "ui.html", "ui.js", "ui.css", "cordis.patch.yml", "README.md"],
-  "engines": { "node": ">=22.19", "dsh": "0.2.1-rc.3" },
+  "engines": { "node": ">=22.19" },
   "dsh": { "manifestVersion": 1, "client": { "platform": "web", "inject": [] }, "bundle": { "patch": "./cordis.patch.yml" } }
 }

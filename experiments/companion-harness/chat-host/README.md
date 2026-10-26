@@ -1,6 +1,6 @@
 # Persistent chat-host experiment
 
-This entry uses **DSH 0.2.1-rc.3 + Tobs 1.5.2** with the optional native reader
+The current daily deployment uses **DSH 0.2.1-rc.4 + Tobs 1.5.2** with the optional native reader
 plugin. It does not create another chat UI or model loop. It is an experimental
 deployment, separate from the reader's Core/Android builds. Its existing data
 home can be selected by the normal daily DSH launcher. AIRI is not a dependency.
@@ -15,12 +15,17 @@ dsh-web &
 dsh-web stop
 ```
 
-Keep the selected bot data home in place when changing ports; a different port
-does not require copying personas, conversations, memory or credentials. An
-older daily DSH home can remain untouched rather than merging two databases.
+The selected home is the original daily DSH home. Native task workspaces and
+Bot mode coexist in one process; the sidebar's Bot mode button switches views.
+The bot store can remain mounted from its existing location, preserving stored
+absolute paths. Do not overwrite a daily workspace index, persona store or
+credential file with an experiment's copy. A port change alone needs no data
+migration.
 The local launcher retains terminal detachment, managed stop, authenticated
-browser opening and strict-RC discovery. A configured host can defer a candidate
-runtime it does not yet support, before the updater replaces working files.
+browser opening and strict-RC updates. The owner's custom runtime compatibility
+lock is disabled. These three local adapters no longer declare an exact DSH
+engine version; upstream third-party plugin declarations remain separate. This
+does not establish compatibility with every future release.
 
 The host starts independently of the reader. Reader tools report their actual
 connection/authorization state; starting chat does not require opening the
@@ -30,7 +35,7 @@ launcher.
 
 ## Reproduce the deployment
 
-Use a trusted, explicitly selected DSH 0.2.1-rc.3 installation. Set `DSH_HOME`
+Use a trusted, explicitly selected DSH installation. Set `DSH_HOME`
 to a new absolute experiment directory **for these commands only**. Do not copy
 the daily host's credential store, settings or conversation database. Keep
 Windows workspaces and compilation caches in the chosen D-drive directory;
@@ -73,6 +78,11 @@ page; a 401 without credentials does not mean the server failed.
 
 ## What was accepted
 
+The reading/model acceptance below was recorded on DSH 0.2.1-rc.3. The later
+0.2.1-rc.4 unification checked preserved task files, native workspace and bot
+metadata, authenticated settings access, and one synthetic native prompt/tool
+loop. It did not repeat real model, private-reader or long-context acceptance.
+
 The isolated WSL host and Windows browser were used with a user-configured real
 DeepSeek route. Tobs' native trace confirmed `reader_connection_status`, followed
 by refresh/discovery and real Windows reader calls to find the EPUB guide, list
@@ -112,8 +122,10 @@ message ID instead of automatically resubmitting it.
 ## Ownership and verification scope
 
 Tobs currently owns the experimental Bot identity, Channel and native sessions;
-its memory is a Git repository in the **new experiment home**. No old companion
-history or memory has been migrated. The reader plugin never writes that memory.
+its memory remains in the existing mounted bot store. Native daily task files
+coexist in the selected home without becoming bot conversations. No old reader
+companion history or memory has been migrated. The reader plugin never writes
+that memory.
 
 Tobs 1.5.2's exported memory helpers and plain files support inspection/export,
 but its mounted core does not expose a configurable external MemoryService in

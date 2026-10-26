@@ -6,7 +6,7 @@
   "main": "index.mjs",
   "exports": { ".": "./index.mjs" },
   "files": ["index.mjs", "client.mjs", "policy.mjs", "cordis.patch.yml", "README.md"],
-  "engines": { "node": ">=22.19", "dsh": "0.2.1-rc.3" },
+  "engines": { "node": ">=22.19" },
   "dependencies": {
     "epub-reader-agent-tools": "file:../../../integrations/reader-tools"
   },
