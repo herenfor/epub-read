@@ -42,7 +42,7 @@ uses this process-local preload, selecting the actual installed loop entry:
 
 ```sh
 export BOT_CONTROLS_LOOP_ENTRY=/absolute/selected/dsh-agent-loop/lib/index.js
-node --import /absolute/private/profile/node_modules/epub-local-bot-controls/runtime-tools.mjs /absolute/dsh/lib/bin.js --profile web --port 3092 --no-open
+node --import /absolute/private/profile/node_modules/epub-local-bot-controls/runtime-tools.mjs /absolute/dsh/lib/bin.js --profile web --port 3080 --no-open
 ```
 
 It redirects only same-version `dsh-tools` root imports to the loop's one copy,
