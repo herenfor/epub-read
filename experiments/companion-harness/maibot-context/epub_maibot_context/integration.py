@@ -13,7 +13,8 @@ _runtimes = weakref.WeakValueDictionary()
 
 
 def install_runtime(cls):
-    if load() is None or getattr(cls, "_epub_context_installed", False):
+    settings = load()
+    if settings is None or settings.context_mode != "managed" or getattr(cls, "_epub_context_installed", False):
         return
     restore_native = cls._restore_recent_context_from_db
     restore_limit_native = cls._get_context_restore_limit
@@ -61,7 +62,8 @@ def install_runtime(cls):
 
 
 def install_engine(cls):
-    if load() is None or getattr(cls, "_epub_context_installed", False):
+    settings = load()
+    if settings is None or settings.context_mode != "managed" or getattr(cls, "_epub_context_installed", False):
         return
     native = cls._post_process_chat_history_after_cycle
 
@@ -118,6 +120,14 @@ def _assemble(items, settings):
     return cleaned
 
 
+def _tool_snapshot(tools):
+    from src.llm_models.payload_content.tool_option import normalize_tool_options
+    from src.llm_models.request_snapshot import serialize_tool_options_snapshot
+    # The service facade accepts raw function dictionaries; ResponseRequest
+    # snapshots contain ToolOption objects. Normalize only this projection.
+    return serialize_tool_options_snapshot(normalize_tool_options(tools))
+
+
 def install_service(cls):
     if load() is None or getattr(cls, "_epub_context_installed", False):
         return
@@ -126,19 +136,21 @@ def install_service(cls):
 
     async def generate(service, context_factory, options=None, *, session_id=""):
         sid = session_id or service.session_id
-        policy = _policies.get(sid)
-        if policy is None or service.task_name not in {"planner", "replyer"}:
+        settings = load()
+        policy = _policies.get(sid) if settings.context_mode == "managed" else None
+        if service.task_name not in {"planner", "replyer"}:
             return await native_context(service, context_factory, options, session_id=session_id)
         from src.llm_models.payload_content.context_snapshot import serialize_context_items_snapshot
-        from src.llm_models.request_snapshot import serialize_tool_options_snapshot
         measured = {}
 
         async def factory(client, model_info=None):
             value = context_factory(client, model_info) if len(inspect.signature(context_factory).parameters) >= 2 else context_factory(client)
             items = await value if inspect.isawaitable(value) else value
-            prepared = _assemble(list(items), policy.settings)
+            prepared = _assemble(list(items), settings)
+            if policy is None:
+                return prepared
             projection = {"items": serialize_context_items_snapshot(prepared),
-                          "tools": serialize_tool_options_snapshot(getattr(options, "tool_options", None))}
+                          "tools": _tool_snapshot(getattr(options, "tool_options", None))}
             estimate = await asyncio.to_thread(policy.budget.estimate, projection)
             policy.budget.guard(estimate, getattr(options, "max_tokens", None))
             measured["estimate"] = estimate
@@ -150,21 +162,21 @@ def install_service(cls):
             return prepared
 
         result = await native_context(service, factory, options, session_id=session_id)
-        policy.budget.observe(measured.get("estimate", 0), getattr(result, "prompt_tokens", 0))
+        if policy is not None:
+            policy.budget.observe(measured.get("estimate", 0), getattr(result, "prompt_tokens", 0))
         return result
 
     async def snapshot(service, request):
         policy = _policies.get(service.session_id)
-        if policy is not None:
-            if service.request_type == "maisaka.context_compaction":
-                request = request.detached_snapshot()
-                request.context_items = [item for item in request.context_items
-                                        if item.meta.item_id not in {"epub:prefix", "epub:suffix"}]
+        if service.request_type == "maisaka.context_compaction":
+            request = request.detached_snapshot()
+            request.context_items = [item for item in request.context_items
+                                    if item.meta.item_id not in {"epub:prefix", "epub:suffix"}]
+        if load().context_mode == "managed" and policy is not None:
             from src.llm_models.payload_content.context_snapshot import serialize_context_items_snapshot
-            from src.llm_models.request_snapshot import serialize_tool_options_snapshot
             estimate = await asyncio.to_thread(policy.budget.estimate,
                 {"items": serialize_context_items_snapshot(request.context_items),
-                 "tools": serialize_tool_options_snapshot(request.tool_options)})
+                 "tools": _tool_snapshot(request.tool_options)})
             policy.budget.guard(estimate, getattr(request, "max_tokens", None))
         # Native compaction reuses an already assembled snapshot: do not inject
         # the character twice or turn private reasoning into a memory prompt.
