@@ -144,6 +144,10 @@ pnpm test                # 运行测试
 
 遇到问题或有建议，请在 [Issues](https://github.com/herenfor/epub-read/issues) 中提出——每一条反馈都会被认真读完。报告问题时请写明所用平台与版本号（可在"关于"中查看）；如果问题只出现在某本书上，也请说明书名。
 
+## 贡献与致谢
+
+- [mcss1314](https://github.com/mcss1314)：主要测试人员，感谢持续承担版本测试、复现问题，并提供详细反馈与改进建议。
+
 ## 许可
 
 Copyright © 2026 HeRenFor。
