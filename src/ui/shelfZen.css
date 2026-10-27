@@ -1258,6 +1258,44 @@
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
 }
 
+/* Long lists: the table's own scrollbar is under the last book, so a bar that
+   sticks to the shelf viewport's bottom takes over (ShelfTableScroller). Same
+   1px side borders as the table view, so both have the same scroll range. */
+.shelf-table-view.has-hscroll {
+  scrollbar-width: none;
+}
+
+.shelf-table-view.has-hscroll::-webkit-scrollbar {
+  display: none;
+}
+
+.shelf-table-hscroll {
+  position: sticky;
+  /* Sticky stops at the shelf's bottom padding; reach the viewport edge instead. */
+  bottom: calc(-1 * var(--shelf-view-pad-bottom, 0px));
+  z-index: 5;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-block: 4px;
+  border: solid transparent;
+  border-width: 0 1px;
+  background: color-mix(in srgb, var(--bg, #ffffff) 88%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  scrollbar-width: auto;
+}
+
+.shelf-table-hscroll::-webkit-scrollbar {
+  height: 10px;
+}
+
+/* Cover column: the largest thumbnail (comfortable, 40px) or the header
+   label, plus the cells' 14px sides; the label never wraps. */
+.shelf-table .shelf-table-cover-col {
+  width: calc(40px + 28px);
+  white-space: nowrap;
+}
+
 /* Native scroll anchoring must not follow recycled books or their spacers. */
 .shelf-book-prefix,
 .shelf-table {
