@@ -208,6 +208,19 @@ async function beginLatestProgress(
 }
 
 describe("CP-I portable ShelfStore facade", () => {
+  test("forwards the copy-on-import choice through the portable facade", async () => {
+    const legacy = new FakeLegacyStore();
+    const imported = vi.spyOn(legacy, "importPaths");
+    const service = new PortableStateService(new MemoryPortableStateStorage());
+    const store: ShelfStore = new PortableShelfStore(legacy, service);
+    const paths = ["C:\\books\\synthetic.epub"];
+
+    for (const copyToLibrary of [true, false, undefined]) {
+      await store.importPaths(paths, copyToLibrary);
+      expect(imported).toHaveBeenLastCalledWith(paths, copyToLibrary);
+    }
+  });
+
   test("native import returns the reset progress basis and current annotations", async () => {
     const legacy = new FakeLegacyStore([entry()]);
     const service = new PortableStateService(new MemoryPortableStateStorage());

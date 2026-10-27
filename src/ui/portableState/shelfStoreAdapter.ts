@@ -390,8 +390,8 @@ export class PortableShelfStore implements ShelfStore {
     return { ...result, entry: await this.currentProjectedEntry(hash) };
   }
 
-  async importPaths(paths: string[]): Promise<LinkedImportBatchResult> {
-    const batch = await this.legacy.importPaths(paths);
+  async importPaths(paths: string[], copyToLibrary?: boolean): Promise<LinkedImportBatchResult> {
+    const batch = await this.legacy.importPaths(paths, copyToLibrary);
     const records = batch.results
       .filter((item) => item.record && (item.status === "saved" || item.status === "duplicate"))
       .map((item) => item.record!);
