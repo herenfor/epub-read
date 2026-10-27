@@ -22,6 +22,7 @@ EPUB Reader opens EPUB 2.0.1 and EPUB 3.x books as their authors designed them: 
 - [Building from source](#building-from-source)
 - [Roadmap](#roadmap)
 - [Feedback](#feedback)
+- [Contributors and thanks](#contributors-and-thanks)
 - [License](#license)
 
 ## Platforms
@@ -146,7 +147,7 @@ Bugs and suggestions are welcome in [Issues](https://github.com/herenfor/epub-re
 
 ## Contributors and thanks
 
-- [mcss1314](https://github.com/mcss1314) — our primary tester, for ongoing release testing, reproducing bugs, and providing detailed feedback and suggestions.
+- [mcss1314](https://github.com/mcss1314) — **Primary tester**, for ongoing release testing, reproducing bugs, and providing detailed feedback and suggestions.
 
 ## License
 
