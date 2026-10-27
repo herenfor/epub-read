@@ -4,6 +4,11 @@ Optional local experiment. MaiBot owns QQ routing, persona, conversation and
 memory; DSH owns one isolated execution task at a time. Nothing here is imported
 by the reader's Core/Android bundles or changes Tobs conversations.
 
+MaiBot also has a built-in ACP Agent connection, including DSH CLI/Desktop.
+Check that first before extending this prototype; this bridge and native ACP
+should not compete to execute the same task. Native permission handling, model
+configuration and result delivery still require instance-specific acceptance.
+
 The plugin registers three QQ-private tools: `dsh_submit_task`,
 `dsh_task_status`, and `dsh_cancel_task`. Submission immediately returns a job
 ID. Completed, failed and cancelled results enter MaiBot's native proactive
@@ -15,6 +20,13 @@ arbitrary groups/users. WebUI chat is a different platform and is not silently
 granted these QQ tools or merged with the QQ conversation.
 
 ## Deployment
+
+For a Windows shell installation, copy `windows/start-bot-background.vbs` next
+to an existing `start-bot.cmd` launcher and double-click the VBS entry. It sets
+a local working directory, starts the command hidden, and reuses an already
+running launcher from that installation. The command should exit after its QQ
+process ends; remove a diagnostic trailing `pause` when using it in background.
+This is background startup, not an auto-start service or a watchdog.
 
 Install MaiBot and its official unified QQ adapter separately, then copy
 `plugin.py`, `jobs.py`, `driver.py`, and `_manifest.json` into one plugin folder.
