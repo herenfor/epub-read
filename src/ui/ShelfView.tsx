@@ -2585,6 +2585,61 @@ interface ShelfTableRowProps {
   onLongPress?(entry: ShelfEntry, kind: ShelfLongPress, point: { x: number; y: number }): void;
 }
 
+/**
+ * The list's horizontal scroller. The table grows with the virtual list, so
+ * its own scrollbar sits under the last book; a second bar after it sticks to
+ * the bottom of the shelf's viewport and shares scrollLeft with the table.
+ * Trackpad and Shift+wheel still scroll the table itself. One observer on the
+ * table (width and virtual height changes), no per-row listeners or polling.
+ */
+export function ShelfTableScroller({ children }: { children: ReactNode }) {
+  const viewRef = useRef<HTMLDivElement>(null);
+  const barRef = useRef<HTMLDivElement>(null);
+  const [scrollWidth, setScrollWidth] = useState<number | null>(null);
+
+  useLayoutEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    const measure = () => {
+      // Null while everything fits: no second bar.
+      const next = view.scrollWidth > view.clientWidth + 1 ? view.scrollWidth : null;
+      setScrollWidth((previous) => (previous === next ? previous : next));
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(view);
+    if (view.firstElementChild) observer.observe(view.firstElementChild);
+    return () => observer.disconnect();
+  }, []);
+
+  useLayoutEffect(() => {
+    if (barRef.current && viewRef.current) barRef.current.scrollLeft = viewRef.current.scrollLeft;
+  }, [scrollWidth]);
+
+  // Setting an equal scrollLeft fires no scroll event, so the two never ping-pong.
+  const follow = (from: HTMLDivElement | null, to: HTMLDivElement | null) => {
+    if (from && to && to.scrollLeft !== from.scrollLeft) to.scrollLeft = from.scrollLeft;
+  };
+
+  return (
+    <>
+      <div
+        ref={viewRef}
+        className={`shelf-table-view${scrollWidth !== null ? " has-hscroll" : ""}`}
+        onScroll={() => follow(viewRef.current, barRef.current)}
+      >
+        {children}
+      </div>
+      {scrollWidth !== null && (
+        <div ref={barRef} className="shelf-table-hscroll" aria-hidden="true" onScroll={() => follow(barRef.current, viewRef.current)}>
+          <div style={{ width: scrollWidth, height: 1 }} />
+        </div>
+      )}
+    </>
+  );
+}
+
 const ShelfTableRow = memo(function ShelfTableRow({
   entry,
   index,
@@ -2644,7 +2699,7 @@ const ShelfTableRow = memo(function ShelfTableRow({
           <span style={{ fontSize: 11, color: "var(--muted)" }}>{index + 1}</span>
         )}
       </td>
-      <td style={{ width: 48 }}>
+      <td className="shelf-table-cover-col">
         <div className="shelf-table-thumb-box">
           <Cover entry={entry} provider={provider} />
         </div>
@@ -2770,7 +2825,7 @@ const ShelfFolderTableRow = memo(function ShelfFolderTableRow(props: {
           <FolderIcon />
         )}
       </td>
-      <td>
+      <td className="shelf-table-cover-col">
         {first ? (
           <div className="shelf-table-thumb-box shelf-table-folder-thumb">
             <Cover entry={first} provider={props.provider} />
@@ -5171,14 +5226,14 @@ export function ShelfView(props: ShelfViewProps) {
           )}
         </ShelfEmptyState>
       ) : viewMode === "list" ? (
-        <div className="shelf-table-view">
+        <ShelfTableScroller>
           <table className="shelf-table">
             <thead>
               <tr>
                 <th style={{ width: 44, textAlign: "center" }}>
                   {selectionMode ? t("shelfMain.table.select") : "#"}
                 </th>
-                <th style={{ width: 48 }}>{t("shelfMain.table.cover")}</th>
+                <th className="shelf-table-cover-col">{t("shelfMain.table.cover")}</th>
                 <th
                   className={`sortable${sort === "title" ? " active" : ""}`}
                   onClick={() => setSort("title")}
@@ -5257,7 +5312,7 @@ export function ShelfView(props: ShelfViewProps) {
               )}
             </tbody>
           </table>
-        </div>
+        </ShelfTableScroller>
       ) : (
         <>
           {scope.type === "root" && visibleFolders.length > 0 && (
