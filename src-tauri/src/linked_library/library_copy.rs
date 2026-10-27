@@ -113,6 +113,20 @@ pub(super) fn copy_into_library(
     let staging = new_staging_path(root)?;
     let staged = (|| {
         fs::copy(source, &staging).map_err(|error| format!("无法复制到书库：{error}"))?;
+        #[cfg(windows)]
+        {
+            // CopyFile preserves the source's read-only attribute. This is our
+            // private staging file; leave the original untouched and make only
+            // the copy writable for syncing, publishing and later deletion.
+            let mut permissions = fs::metadata(&staging)
+                .map_err(|error| format!("无法读取书库临时副本属性：{error}"))?
+                .permissions();
+            if permissions.readonly() {
+                permissions.set_readonly(false);
+                fs::set_permissions(&staging, permissions)
+                    .map_err(|error| format!("无法准备书库临时副本属性：{error}"))?;
+            }
+        }
         let (copied_hash, _) = hash_file(&staging)?;
         if copied_hash != content_hash {
             return Err("复制到书库的内容与原文件不一致，未导入".to_string());
@@ -320,6 +334,12 @@ mod tests {
         let root = temp_root("copy");
         let source = root.join("原书.epub");
         fs::write(&source, b"epub bytes").unwrap();
+        #[cfg(windows)]
+        {
+            let mut permissions = fs::metadata(&source).unwrap().permissions();
+            permissions.set_readonly(true);
+            fs::set_permissions(&source, permissions).unwrap();
+        }
         let (hash, _) = hash_file(&source).unwrap();
 
         let (first, snapshot) = copy_into_library(&root, &source, &hash, "原书.epub", &[]).unwrap();
@@ -329,6 +349,14 @@ mod tests {
             fs::read(root.join("books").join(&first)).unwrap(),
             b"epub bytes"
         );
+        #[cfg(windows)]
+        {
+            assert!(fs::metadata(&source).unwrap().permissions().readonly());
+            assert!(!fs::metadata(root.join("books").join(&first))
+                .unwrap()
+                .permissions()
+                .readonly());
+        }
 
         // Another binding already claims the name (case-insensitively): the next copy is numbered.
         let claimed = make_managed_binding("f".repeat(64), snapshot.clone(), &meta())
@@ -349,6 +377,13 @@ mod tests {
                 .unwrap_or(0),
             0
         );
+        #[cfg(windows)]
+        {
+            let mut permissions = fs::metadata(&source).unwrap().permissions();
+            permissions.set_readonly(false);
+            fs::set_permissions(&source, permissions).unwrap();
+        }
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
