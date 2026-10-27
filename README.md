@@ -144,6 +144,10 @@ pnpm test                # run the test suite
 
 Bugs and suggestions are welcome in [Issues](https://github.com/herenfor/epub-read/issues) — every one of them gets read. Please include your platform and the app version (shown under About), and the book title if the problem only happens with one book.
 
+## Contributors and thanks
+
+- [mcss1314](https://github.com/mcss1314) — our primary tester, for ongoing release testing, reproducing bugs, and providing detailed feedback and suggestions.
+
 ## License
 
 Copyright © 2026 HeRenFor.
