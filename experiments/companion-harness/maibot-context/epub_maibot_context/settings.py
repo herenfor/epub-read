@@ -9,6 +9,7 @@ class Settings:
     state_dir: str
     prefix_file: str
     suffix_file: str
+    context_mode: str = "native"
     soft_tokens: int = 256000
     target_tokens: int = 192000
     request_limit_tokens: int = 320000
@@ -17,7 +18,9 @@ class Settings:
     tokenizer: str = "o200k_base"
 
     def __post_init__(self):
-        if not 0 < self.target_tokens < self.soft_tokens < self.request_limit_tokens:
+        if self.context_mode not in {"native", "managed"}:
+            raise ValueError("context_mode must be native or managed")
+        if self.context_mode == "managed" and not 0 < self.target_tokens < self.soft_tokens < self.request_limit_tokens:
             raise ValueError("Context budgets must satisfy target < soft < request limit")
 
     def prompts(self):

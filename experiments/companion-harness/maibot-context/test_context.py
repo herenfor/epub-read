@@ -43,7 +43,8 @@ class ContextCases(unittest.IsolatedAsyncioTestCase):
         self.prefix.write_text("")
         self.suffix.write_text("")
         self.cfg = Settings(str(self.root / "state"), str(self.prefix), str(self.suffix),
-                            soft_tokens=2000, target_tokens=1000, request_limit_tokens=5000, output_reserve_tokens=100)
+                            context_mode="managed", soft_tokens=2000, target_tokens=1000,
+                            request_limit_tokens=5000, output_reserve_tokens=100)
 
     def tearDown(self):
         self.temp.cleanup()
@@ -99,6 +100,9 @@ class ContextCases(unittest.IsolatedAsyncioTestCase):
         from dataclasses import asdict
         settings.write_text(json.dumps(asdict(self.cfg)))
         calls = []
+        tool = {"type": "function", "function": {"name": "synthetic_tool", "description": "synthetic only",
+                "parameters": {"type": "object", "properties": {}, "required": []}}}
+        options = SimpleNamespace(tool_options=[tool], max_tokens=100)
 
         class Service:
             async def generate_response_with_context(self, factory, options=None, *, session_id=""):
@@ -119,13 +123,13 @@ class ContextCases(unittest.IsolatedAsyncioTestCase):
                 service.task_name, service.session_id, service.request_type = task, "synthetic-session", "maisaka.chat"
                 async def factory(client):
                     return [ContextItemBuilder().set_role(RoleType.User).add_text_content("synthetic question").build()]
-                await service.generate_response_with_context(factory)
+                await service.generate_response_with_context(factory, options)
                 self.assertEqual(calls[-1][0].parts[0].text, self.prefix.read_text())
                 self.assertEqual(calls[-1][-1].parts[0].text, self.suffix.read_text())
             async def oversized(client):
                 return [ContextItemBuilder().set_role(RoleType.User).add_text_content("oversize-token " * 20000).build()]
             with self.assertRaises(BudgetExceeded):
-                await service.generate_response_with_context(oversized)
+                await service.generate_response_with_context(oversized, options)
             prepared = list(calls[0])
             service.request_type = "maisaka.context_compaction"
             request = SimpleNamespace(context_items=prepared, tool_options=None, max_tokens=100)
@@ -135,3 +139,46 @@ class ContextCases(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(prepared[0].meta.item_id, "epub:prefix")
         self.assertEqual(len(calls), 3)
         integration._policies.pop("synthetic-session", None)
+
+    async def test_native_context_keeps_native_hooks_and_plain_prompts_with_tools(self):
+        from dataclasses import asdict, replace
+        native = replace(self.cfg, context_mode="native")
+        settings = self.root / "native.json"
+        settings.write_text(json.dumps(asdict(native)))
+        self.prefix.write_text("synthetic native prefix")
+        self.suffix.write_text("synthetic native suffix")
+        options = SimpleNamespace(tool_options=[{"type": "function", "function": {
+            "name": "synthetic_tool", "parameters": {"type": "object", "properties": {}}}}])
+        requests = []
+
+        class Service:
+            async def generate_response_with_context(self, factory, passed_options=None, *, session_id=""):
+                requests.append((await factory(None), passed_options))
+                return SimpleNamespace(prompt_tokens=100)
+
+            async def generate_response_from_snapshot(self, request):
+                raise AssertionError("No background summary request in this fixture")
+
+        with patch.dict(os.environ, {"EPUB_MAIBOT_CONTEXT_SETTINGS": str(settings)}):
+            from src.maisaka.runtime import MaisakaHeartFlowChatting
+            from src.maisaka.reasoning_engine import MaisakaReasoningEngine
+            for cls, install, method in [
+                (MaisakaHeartFlowChatting, integration.install_runtime, "_restore_recent_context_from_db"),
+                (MaisakaReasoningEngine, integration.install_engine, "_post_process_chat_history_after_cycle"),
+            ]:
+                original = getattr(cls, method)
+                install(cls)
+                self.assertIs(getattr(cls, method), original)
+            integration.install_service(Service)
+            async def factory(client):
+                return [ContextItemBuilder().set_role(RoleType.User).add_text_content("synthetic question").build()]
+            with patch.object(integration, "_tool_snapshot", side_effect=AssertionError("Native mode must not budget tools")):
+                for task in ["planner", "replyer"]:
+                    service = Service()
+                    service.task_name, service.session_id = task, "native-session"
+                    await service.generate_response_with_context(factory, options)
+        self.assertEqual(len(requests), 2)
+        for items, passed_options in requests:
+            self.assertIs(passed_options, options)
+            self.assertEqual(items[0].parts[0].text, self.prefix.read_text())
+            self.assertEqual(items[-1].parts[0].text, self.suffix.read_text())

@@ -1,10 +1,31 @@
-# Local MaiBot context continuity and plain prompts
+# Local MaiBot plain prompts and optional context continuity
 
 Optional adapter for the standalone MaiBot instance. It does not change the
 reader, Core/Android, daily DSH/Tobs, their prompts, or their memory. Long-term
 memory and embedding are separate features and are not enabled by this module.
 
-## Context contract
+## Current default: native context
+
+`context_mode` defaults to `native`. Runtime history selection, compaction and
+restart recovery are MaiBot's original implementations. No local token counter,
+request ceiling or custom checkpoint restoration runs in this mode. The plain
+prefix/suffix and private failure diagnostics remain active. Existing custom
+checkpoints/source archives are preserved, but not imported by native mode.
+
+Use MaiBot's own `chat.max_private_context_size` (private messages),
+`chat.max_context_size` (groups), and `chat.context_compaction_summary_max_chars`
+settings. These are message counts and summary characters, not token limits.
+In the currently inspected native release, compaction starts at 1.2 times the
+message setting and targets 0.2 times; restart recovery uses 0.5 times. Complete
+tool spans and minimum recent messages can change the actual retained count.
+Native summaries are not persisted by this adapter in native mode.
+
+Changing context mode requires a process restart. It does not rewrite native
+history, role text or long-term memory. Switching back to `managed` requires an
+explicit decision about potentially stale checkpoints; do not silently re-enable
+it after newer native-only conversation.
+
+## Optional managed context contract (currently disabled)
 
 The native 60-message trimming/slicing rule is bypassed for this instance. The
 adapter uses the assembled planner/replyer input, tools, and output reservation:
@@ -82,7 +103,8 @@ python install.py --site-packages /absolute/private/site-packages --backup /abso
 
 Create private JSON settings and set `EPUB_MAIBOT_CONTEXT_SETTINGS` only for that
 MaiBot process. Required fields are `state_dir`, `prefix_file`, and `suffix_file`;
-the budget defaults above may be overridden. Set `TIKTOKEN_CACHE_DIR` to the
+set `context_mode` to `managed` only to opt into the budget contract above.
+The budget defaults above may be overridden. Set `TIKTOKEN_CACHE_DIR` to the
 selected local cache directory. Restart after editing budget settings; the two
 text files themselves can be edited without restarting.
 
@@ -108,10 +130,13 @@ does not automatically import its summaries; do not call that a lossless rollbac
 
 ## Verification limits
 
-The three targeted native-object fixtures cover restart beyond 30 messages with
+The original three targeted native-object fixtures cover restart beyond 30 messages with
 summary/tool identity, summary failure preservation and source-linked success,
 both prompt routes, and pre-send refusal without a backend call. They use only
 synthetic data and mocked summary generation. No real private prompt, chat,
 memory, paid 256K request, QQ message, full reader tests or platform build is
 needed. Real long-dialogue compression quality and live QQ continuity still
 need user acceptance; a loaded hook or health endpoint is not that proof.
+The native-mode fixture additionally checks that runtime/cycle hooks remain
+original while both prompt routes preserve raw function-tool definitions. It
+does not send a real message or make a paid model request.
