@@ -4,18 +4,21 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from maibot_sdk.context import PluginContext
 
 from .jobs import Jobs
 from .plugin import DshBridgePlugin
 
 
 class PluginBoundary(unittest.IsolatedAsyncioTestCase):
-    async def test_owner_envelope_and_result_handoff_keep_original_session(self):
+    async def test_sdk_unwrapped_owner_and_handoff_keep_original_session(self):
         calls = []
         handed_off = asyncio.Event()
 
         async def lookup(*args, **kwargs):
-            return {"success": True, "stream": {"session_id": "original-session"}}
+            return PluginContext._normalize_capability_result(
+                "chat.get_stream_by_user_id",
+                {"success": True, "stream": {"session_id": "original-session"}})
 
         async def trigger(stream, intent, **kwargs):
             calls.append((stream, intent, kwargs))
@@ -36,6 +39,9 @@ class PluginBoundary(unittest.IsolatedAsyncioTestCase):
             context = {"platform": "qq", "user_id": "synthetic-owner", "stream_id": "original-session"}
             denied = await plugin.submit("do nothing", **{**context, "user_id": "someone-else"})
             self.assertFalse(denied["success"])
+            wrong_session = await plugin.submit("do nothing", **{**context, "stream_id": "another-session"})
+            self.assertFalse(wrong_session["success"])
+            self.assertEqual(len(plugin.jobs.rows), 0)
             accepted = await plugin.submit("synthetic task", **context)
             self.assertTrue(accepted["success"])
             job_id = accepted["job"]["id"]

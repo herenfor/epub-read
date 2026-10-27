@@ -8,7 +8,8 @@ The plugin registers three QQ-private tools: `dsh_submit_task`,
 `dsh_task_status`, and `dsh_cancel_task`. Submission immediately returns a job
 ID. Completed, failed and cancelled results enter MaiBot's native proactive
 queue for the initiating stream, so ordinary chat can continue during a task.
-The owner stream is checked against the SDK's actual nested lookup response.
+The owner stream is checked against the SDK's returned stream object. The SDK
+already unwraps the host's `{success, stream}` RPC envelope; do not unwrap twice.
 Deploy an owner-only inbound QQ policy as well; do not expose computer tools to
 arbitrary groups/users. WebUI chat is a different platform and is not silently
 granted these QQ tools or merged with the QQ conversation.
