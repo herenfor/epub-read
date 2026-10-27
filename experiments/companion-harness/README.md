@@ -137,3 +137,10 @@ second model loop or stores memory. The reader's native service keeps book
 authorization and archive ownership. The stock AIRI stop button needs the
 small source bridge documented there; plugin cancellation and unload already
 have their own execution lifecycle.
+
+## Optional local MaiBot embeddings
+
+The independent [local embedding service](maibot-local-embedding/README.md)
+registers two downloaded embedding models with native MaiBot memory. It uses
+an on-demand Windows CUDA worker and stays separate from reader RAG assets.
+Weights, runtime binaries and private configuration are not included.
