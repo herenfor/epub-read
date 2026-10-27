@@ -196,13 +196,15 @@ export class LibrarySearchRuntime {
       let taskUpdates = Promise.resolve();
       let lastPersistedCompleted = -1;
       try {
-        taskId = (await this.dependencies.createTask()).id;
         if (this.cancelRequested) throw abortError("用户取消书库建库");
         if (rebuild) {
           await this.dependencies.clear();
           this.patch({ results: [], indexSummary: this.summarize([], false) });
           if (this.cancelRequested) throw abortError("用户取消书库建库");
         }
+        // Cleanup rejects active native tasks, including the rebuild's own task.
+        taskId = (await this.dependencies.createTask()).id;
+        if (this.cancelRequested) throw abortError("用户取消书库建库");
         indexer = this.dependencies.createIndexer({
           books: entries,
           concurrency: this.concurrency,

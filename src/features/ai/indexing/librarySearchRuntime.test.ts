@@ -79,6 +79,29 @@ describe("LibrarySearchRuntime", () => {
     await vi.waitFor(() => expect(deps.completeTask).toHaveBeenCalledTimes(1));
   });
 
+  it("clears a rebuild before creating the native task that blocks cleanup", async () => {
+    let activeTask = false;
+    const deps = dependencies({
+      clear: vi.fn(async () => {
+        // Match AiStore::clear_all_indexes: queued/running tasks forbid clearing.
+        if (activeTask) throw new Error("正在建立全文索引，请完成或取消后再清理");
+      }),
+      createTask: vi.fn(async () => {
+        activeTask = true;
+        return task();
+      }),
+    });
+    const runtime = new LibrarySearchRuntime(deps);
+    runtime.setBooks([book]);
+    await runtime.checkIndex();
+    runtime.requestRebuild();
+    runtime.startIndex();
+    await vi.waitFor(() => expect(deps.completeTask).toHaveBeenCalledTimes(1));
+    expect(deps.clear).toHaveBeenCalledTimes(1);
+    expect(deps.failTask).not.toHaveBeenCalled();
+    expect(deps.clear).toHaveBeenCalledBefore(vi.mocked(deps.createTask));
+  });
+
   it("shares one query/result snapshot for every subscriber", async () => {
     const hit = { contentHash: book.contentHash } as ResolvedCrossBookSearchHit;
     const deps = dependencies({
