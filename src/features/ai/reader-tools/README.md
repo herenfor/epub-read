@@ -16,9 +16,11 @@ content hashes; legacy local IDs remain device-local.
 ## Windows native development host
 
 The Windows AI debug application owns the authenticated loopback listener and
-its lifetime. Enable it explicitly with `-EnableReaderTools` in
-`scripts/dev-windows-companion.ps1`, alongside the required local
-`-TestDirectory`. Core and release builds do not expose the service. The app
+its lifetime, including packaged debug builds with a production-built frontend.
+`-EnableReaderTools` in `scripts/dev-windows-companion.ps1` sets its initial
+process-local switch, alongside the required local `-TestDirectory`.
+The main window may also control it through the management commands below.
+Core and release builds do not expose the service. The app
 may remain at the shelf or minimized; no book or companion panel must be open.
 The main application WebView still performs canonical extraction through IPC;
 this is not a standalone headless daemon or an independently packaged service.
@@ -46,10 +48,35 @@ restrict books, pass `-ReaderToolConfig <local-json-file>` with, for example:
 ```
 
 `bookIds: null` grants the current visible library; `[]` grants no books.
-Permissions are frozen for this process; restart after editing the config.
+Permissions are frozen for each running service instance; stop and enable the
+service after editing the config. No grant editor or persistent switch is added.
 Each client gets its own credential. Request filters cannot enlarge its grant;
 book discovery, metadata and index coverage are filtered as well as original
 text. Cache mutation tools are absent from read-only clients' discovery.
+
+### Process-local management
+
+`reader_tools_status` returns the credential-free `ReaderToolsStatus` projection
+in `controlTypes.ts`. `reader_tools_set_enabled({enabled})` returns a stable
+snapshot; a service startup failure is represented by `service: "failed"` and
+an error code. `reader_tools_retry_provider` explicitly retries a failed provider.
+The `reader-tools-status` event carries the same snapshot. Consumers ignore
+revisions older than their latest observation. Except status, management is
+restricted to the main window of the supported Windows AI debug application.
+
+Snapshots show each client's scope as `all` or `listed` with a count, not a full
+book list. They include connection-file paths, but no token, endpoint or port.
+`serviceInstance` is a public instance identity used to reject stale lifecycle
+requests; it is not an authentication credential. Provider errors are machine
+codes suitable for localization, never raw JavaScript/IPC exceptions.
+
+One app-owned provider controller subscribes before reading initial state.
+It waits for retiring extraction/index work before registering the next provider.
+Closing a panel or book does not own this lifecycle. Ordinary structured tool
+failures do not disconnect the provider. Transport failures stop it until an
+explicit retry or service restart; no polling, watchdog, or request replay occurs.
+Application exit closes its listener, revokes its sessions and deletes only its
+own discovery files, preserving the active reader and unrelated indexing work.
 
 The native process serializes foreground calls. A cancelled/timed-out client
 keeps its slot until the provider acknowledges source teardown. Capability ZIP

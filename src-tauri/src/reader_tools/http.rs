@@ -16,6 +16,10 @@ pub(super) async fn serve(listener: std::net::TcpListener, host: Arc<Host>) {
     };
     let mut stopped = host.stopped.subscribe();
     loop {
+        // A fast Off may arrive before this task subscribes to the watch channel.
+        if *stopped.borrow_and_update() {
+            break;
+        }
         tokio::select! {
             _ = stopped.changed() => break,
             accepted = listener.accept() => {

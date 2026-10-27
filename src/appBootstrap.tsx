@@ -5,7 +5,8 @@ import { APP_PLATFORM } from "./config/appPlatform";
 import { platformFromTarget } from "./config/platformValue";
 import type { AppBuildInfo } from "./config/appBuildInfo";
 import { AppBuildMismatchError, validateAppBuildInfo } from "./config/appBuildInfo";
-import { clearAppBuildSession, setAppBuildSession } from "./config/appBuildSession";
+import { clearAppBuildSession, getAppBuildSession, setAppBuildSession } from "./config/appBuildSession";
+import { canUseNativeReaderTools } from "./config/readerToolsSupport";
 import { createAppUiLanguageStore, UiLanguageProvider, useUiText } from "./ui/localization/UiLanguageProvider";
 
 type AppModule = { default: ComponentType };
@@ -108,14 +109,24 @@ export async function bootstrapApp(
     }
     const appModule = await dependencies.loadApp();
     dependencies.mountApp(root, appModule.default);
-    if (IS_AI_EDITION && import.meta.env.DEV) {
-      if (dependencies.isNativeHost()) {
-        void import("./features/ai/reader-tools/nativeProvider")
-          .then(module => module.startNativeReaderToolProvider()).catch(() => {});
-      } else {
-        void import("./features/ai/reader-tools/developmentProvider")
-          .then(module => module.startReaderToolDevelopmentProvider()).catch(() => {});
-      }
+    if (IS_AI_EDITION && canUseNativeReaderTools(getAppBuildSession())) {
+      void import("./features/ai/reader-tools/nativeProvider")
+        .then(module => module.startNativeReaderToolProvider()).catch(async () => {
+          console.error("阅读工具提供方初始化失败");
+          // Preserve a visible, credential-free failure even if the controller
+          // module itself could not initialize. Never expose the raw exception.
+          try {
+            const { invoke } = await import("@tauri-apps/api/core");
+            const status = await invoke<{ serviceInstance: string | null }>("reader_tools_status");
+            if (status.serviceInstance) await invoke("reader_tools_report_provider_error", {
+              serviceInstance: status.serviceInstance, message: "provider-connect-failed",
+            });
+          } catch { console.error("无法提交阅读工具初始化状态"); }
+        });
+    } else if (IS_AI_EDITION && import.meta.env.DEV && !dependencies.isNativeHost()) {
+      void import("./features/ai/reader-tools/developmentProvider")
+        .then(module => module.startReaderToolDevelopmentProvider())
+        .catch(() => { console.error("浏览器阅读工具初始化失败"); });
     }
     return "mounted";
   } catch (error) {
