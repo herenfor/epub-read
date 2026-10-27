@@ -11,7 +11,7 @@ describe("corpus concurrency preference", () => {
   it("defaults to automatic and resolves from logical cores", () => {
     const preference = normalizeCorpusConcurrencyPreference(undefined, 16);
     expect(preference.mode).toBe("automatic");
-    expect(resolveCorpusConcurrency(preference, 16)).toBe(6);
+    expect(resolveCorpusConcurrency(preference, 16)).toBe(2);
   });
 
   it("clamps a manual device setting below reserved cores and the hard cap", () => {

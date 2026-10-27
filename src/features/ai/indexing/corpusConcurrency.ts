@@ -19,15 +19,9 @@ export function calculateCorpusConcurrency(options: CorpusConcurrencyOptions = {
   const logicalCores = positiveInteger(options.logicalCores, detectLogicalCores());
   const manualCap = Math.min(16, Math.max(1, logicalCores - 1));
   const hardCap = positiveInteger(options.hardCap, 16);
-  const automatic = logicalCores <= 4
-    ? 1
-    : logicalCores <= 8
-    ? 2
-    : logicalCores <= 12
-    ? 4
-    : logicalCores <= 16
-    ? 6
-    : 8;
+  // CPU count does not measure EPUB decompression memory. Keep automatic
+  // indexing conservative; higher budgets remain an explicit manual choice.
+  const automatic = logicalCores <= 4 ? 1 : 2;
   if (options.mode === "manual") {
     return Math.min(hardCap, manualCap, positiveInteger(options.maxConcurrency, 1));
   }
