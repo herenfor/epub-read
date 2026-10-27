@@ -36,8 +36,8 @@ class DshBridgePlugin(MaiBotPlugin):
         if (context.get("platform") != "qq" or context.get("group_id")
                 or str(context.get("user_id", "")) != self.settings["owner_qq"]):
             raise ValueError("DSH 工具仅对主人 QQ 私聊开放。")
-        lookup = await self.ctx.chat.get_stream_by_user_id(self.settings["owner_qq"], platform="qq")
-        actual = (lookup or {}).get("stream") or {}
+        # The SDK unwraps the host's {success, stream} RPC envelope.
+        actual = await self.ctx.chat.get_stream_by_user_id(self.settings["owner_qq"], platform="qq") or {}
         actual_id = str(actual.get("session_id") or actual.get("stream_id") or "")
         stream = str(context.get("stream_id") or context.get("chat_id") or "")
         if not stream or stream != actual_id:
