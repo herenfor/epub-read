@@ -35,45 +35,33 @@ export const RELEASES_PAGE_URL = "https://github.com/herenfor/epub-read/releases
  */
 export const RELEASE_NOTES: readonly ReleaseNote[] = [
   {
-    version: "0.3.6",
+    version: "0.3.7",
     status: "released",
-    releasedOn: "2026-10-25",
+    releasedOn: "2026-10-27",
     items: [
       {
-        category: "new",
-        text: "Windows 导入时可复制到书库：单本、多本和文件夹导入都能选择复制到应用书库，也可以取消勾选继续使用原文件，选择会被记住。",
-      },
-      {
-        category: "new",
-        text: "自定义 Windows 书库位置：在设置的存储页面可以更改书库位置、恢复默认位置，或重新连接已有书库。搬迁时显示进度并核对文件，中断后可继续处理。",
-      },
-      {
-        category: "new",
-        text: "在文件资源管理器中打开：书籍菜单可直接定位 EPUB 文件，复制导入的书定位到书库副本，链接导入的书定位到原文件。",
-      },
-      {
-        category: "new",
-        text: "更容易辨认的书库文件名：新复制导入的 EPUB 使用可读文件名，重名时自动编号，不覆盖已有文件。",
-      },
-      {
-        category: "improved",
-        text: "优化文件夹批量导入的任务调度，让文件准备与书架写入衔接更紧密。",
-      },
-      {
-        category: "improved",
-        text: "本版会升级本机数据库格式：先自动备份再转换，现有书架和阅读资料保留；升级后请勿让旧版程序打开同一份应用资料。",
-      },
-      {
-        category: "improved",
-        text: "改善书库位置不可用、搬迁中断和残留文件的处理与提示。",
+        category: "fixed",
+        text: "修复 Windows 导入时勾选“复制到书库”后，实际仍链接原文件的问题。",
       },
       {
         category: "fixed",
-        text: "修复书架列表在部分宽度、长书名和滚动位置下出现行高变化、跳动的问题，并改善网格滚动位置的稳定性。",
+        text: "修复 Windows 复制导入只读 EPUB 文件时失败的问题。",
       },
       {
         category: "fixed",
-        text: "修复触摸设备字体列表行高与滚动占位不一致的问题。",
+        text: "修复清除全文索引后，第一次重建索引失败的问题。",
+      },
+      {
+        category: "fixed",
+        text: "修复书架列表“封面”表头换行、封面列空间不足的问题。",
+      },
+      {
+        category: "improved",
+        text: "书架列表的横向滚动条调整到更容易操作的位置，长列表中也能方便使用。",
+      },
+      {
+        category: "improved",
+        text: "调整全文索引的自动并发策略，减少同时处理多本书时的资源压力；已有的手动并发设置保持不变。",
       },
     ],
   },
