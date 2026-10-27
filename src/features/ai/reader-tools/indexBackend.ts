@@ -39,6 +39,10 @@ export function createReaderIndexBackend(access: ReaderBookAccess, acquire: (con
     let task;
     try { task = await acquire(entry.contentHash); }
     catch { throw new ReaderToolError("INDEX_BUSY", "书库索引任务已被占用或暂不可用，请稍后重试", true); }
+    if (disposed || signal.aborted) {
+      await cancelLibraryIndexTask(task.id).catch(() => {});
+      throw new ReaderToolError("CANCELLED", "调用已取消");
+    }
     const abort = new AbortController();
     const job: Job = { bookId, abort, done: Promise.resolve(), view: { taskId: task.id, state: "running", progress: 0 } };
     latest = job;
@@ -99,5 +103,5 @@ export function createReaderIndexBackend(access: ReaderBookAccess, acquire: (con
     await latest.done;
     return { ...latest.view, bookId };
   };
-  return { indexStatus, prepareIndex, cancelIndex, dispose() { disposed = true; latest?.abort.abort(); } };
+  return { indexStatus, prepareIndex, cancelIndex, async dispose() { disposed = true; latest?.abort.abort(); await latest?.done; } };
 }

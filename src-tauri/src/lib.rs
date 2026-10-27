@@ -29,6 +29,10 @@ mod cloud_sync;
 macro_rules! configure_invoke_handler {
     ($builder:expr) => {
         $builder.invoke_handler(tauri::generate_handler![
+            reader_tools::reader_tools_status,
+            reader_tools::reader_tools_set_enabled,
+            reader_tools::reader_tools_retry_provider,
+            reader_tools::reader_tools_report_provider_error,
             reader_tools::reader_tools_connect,
             reader_tools::reader_tools_index_acquire,
             reader_tools::reader_tools_archive_open,
@@ -400,9 +404,7 @@ pub fn run() {
                 }
             }
             #[cfg(feature = "ai")]
-            if let Err(error) = reader_tools::start(app.handle()) {
-                eprintln!("阅读工具未启动：{error}");
-            }
+            reader_tools::start(app.handle());
             let _ = save_file::cleanup_stale_staging(app.handle());
             let _ = lan_save::cleanup_stale_staging(app.handle());
             app.state::<ai::AiState>()

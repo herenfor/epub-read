@@ -2,10 +2,10 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use tokio::sync::{oneshot, watch, Semaphore};
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct Grant {
     pub client_id: String,
@@ -53,6 +53,7 @@ struct Pending {
 #[derive(Default)]
 struct State {
     provider: Option<Provider>,
+    provider_error: Option<String>,
     pending: HashMap<String, Pending>,
 }
 
@@ -63,7 +64,9 @@ pub(super) struct Host {
     pub connections: Arc<Semaphore>,
     pub stopped: watch::Sender<bool>,
     state: Mutex<State>,
+    sources: RwLock<()>,
     cleanup: Box<dyn Fn(Vec<String>, Vec<String>) + Send + Sync>,
+    changed: Box<dyn Fn(&str) + Send + Sync>,
 }
 
 pub(super) fn random_id() -> Result<String, String> {
@@ -81,6 +84,7 @@ impl Host {
     pub fn new(
         grants: Vec<Grant>,
         cleanup: Box<dyn Fn(Vec<String>, Vec<String>) + Send + Sync>,
+        changed: Box<dyn Fn(&str) + Send + Sync>,
     ) -> Result<Arc<Self>, String> {
         let clients = grants
             .into_iter()
@@ -98,12 +102,17 @@ impl Host {
             connections: Arc::new(Semaphore::new(16)),
             stopped: watch::channel(false).0,
             state: Mutex::new(State::default()),
+            sources: RwLock::new(()),
             cleanup,
+            changed,
         }))
     }
 
     pub fn connect(&self, send: SendFrame, definitions: Vec<Value>) -> Result<String, String> {
         let mut state = self.state.lock().map_err(|_| "阅读工具状态不可用")?;
+        if *self.stopped.borrow() || state.provider_error.is_some() {
+            return Err("阅读工具提供方需要显式重试".into());
+        }
         // Reload must explicitly disconnect the old provider first. Never let a
         // second WebView silently take over work admitted to another provider.
         if state.provider.is_some() {
@@ -117,10 +126,15 @@ impl Host {
             archives: Vec::new(),
             tasks: Vec::new(),
         });
+        drop(state);
+        (self.changed)(&self.instance);
         Ok(id)
     }
 
-    pub fn disconnect(&self, id: &str) {
+    pub fn disconnect(&self, id: &str, reason: Option<&str>) {
+        let Ok(_sources) = self.sources.write() else {
+            return;
+        };
         let Ok(mut state) = self.state.lock() else {
             return;
         };
@@ -135,6 +149,52 @@ impl Host {
         // Close only this provider's native sessions before releasing admitted calls.
         (self.cleanup)(archives, tasks);
         state.pending.clear();
+        state.provider_error = reason.map(provider_error);
+        drop(state);
+        (self.changed)(&self.instance);
+    }
+
+    pub fn provider_status(&self) -> (&'static str, Option<String>) {
+        let state = self.state.lock().expect("reader provider state");
+        if state.provider.is_some() {
+            ("ready", None)
+        } else if let Some(error) = &state.provider_error {
+            ("failed", Some(error.clone()))
+        } else {
+            ("waiting", None)
+        }
+    }
+
+    pub fn report_error(&self, reason: &str) {
+        let mut state = self.state.lock().expect("reader provider state");
+        if state.provider.is_some() || state.provider_error.is_some() || *self.stopped.borrow() {
+            return;
+        }
+        state.provider_error = Some(provider_error(reason));
+        drop(state);
+        (self.changed)(&self.instance);
+    }
+
+    pub fn retry_provider(&self) {
+        let mut state = self.state.lock().expect("reader provider state");
+        if state.provider_error.take().is_none() {
+            return;
+        }
+        drop(state);
+        (self.changed)(&self.instance);
+    }
+
+    /// Stop/reload waits for in-flight native acquisitions, including late opens.
+    pub fn source_operation<T>(
+        &self,
+        owner: &str,
+        work: impl FnOnce() -> Result<T, String>,
+    ) -> Result<T, String> {
+        let _sources = self.sources.read().map_err(|_| "阅读工具状态不可用")?;
+        if *self.stopped.borrow() || !self.owns_session(owner) {
+            return Err("阅读工具会话已失效".into());
+        }
+        work()
     }
 
     pub fn owns_session(&self, id: &str) -> bool {
@@ -266,6 +326,9 @@ impl Host {
                 .unwrap_or_default();
             (self.cleanup)(archives, tasks);
             state.pending.clear();
+            state.provider_error = Some(provider_error("provider-channel-failed"));
+            drop(state);
+            (self.changed)(&self.instance);
             return Err(failure(
                 request_id,
                 "READER_DISCONNECTED",
@@ -306,7 +369,21 @@ impl Host {
     pub fn stop(&self) {
         self.stopped.send_replace(true);
         if let Some(id) = self.provider_id() {
-            self.disconnect(&id);
+            self.disconnect(&id, None);
+        } else {
+            // A failed channel may already have removed the provider, while a
+            // source acquisition admitted to it is still finishing.
+            drop(self.sources.write());
         }
     }
+}
+
+fn provider_error(reason: &str) -> String {
+    // IPC/JS errors may embed private input. Publish only recognized categories.
+    match reason {
+        "provider-connect-failed" => "provider-connect-failed",
+        "provider-reply-failed" => "provider-reply-failed",
+        _ => "provider-channel-failed",
+    }
+    .into()
 }
