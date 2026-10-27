@@ -144,3 +144,9 @@ The independent [local embedding service](maibot-local-embedding/README.md)
 registers two downloaded embedding models with native MaiBot memory. It uses
 an on-demand Windows CUDA worker and stays separate from reader RAG assets.
 Weights, runtime binaries and private configuration are not included.
+
+## Native MaiBot Agent connection
+
+The [native ACP worker](maibot-native-agent/README.md) uses MaiBot's built-in
+Agent connection with a dedicated DSH profile. It replaces the legacy local
+task-queue plugin while keeping persona and memory in MaiBot.
