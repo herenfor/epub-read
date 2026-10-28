@@ -139,6 +139,34 @@ export class ResourceServer {
     return this.resourceUrl(path, true);
   }
 
+  /** Metadata only: checking playback support must not extract media. */
+  resourceMediaType(path: string): string | undefined {
+    return this.book?.resources.get(path)?.mediaType;
+  }
+
+  /** One user-requested media entry, pinned until its decoder is detached. */
+  async acquireResource(path: string): Promise<{ url: string; release(): void }> {
+    const book = this.book;
+    if (!book) throw new ArchiveClosedError();
+    if (!book.resources.has(path)) {
+      this.reportUnresolvedResources([path]);
+      throw new Error("书内资源不存在");
+    }
+    const holderId = this.nextHolderId++;
+    this.heldDependencies.set(holderId, []);
+    this.pinPaths(holderId, [path]);
+    try {
+      await this.ensureResources([path]);
+      if (this.book !== book) throw new ArchiveClosedError();
+      const url = this.urlFor(path);
+      if (!url) throw new Error("书内资源读取未完成");
+      return { url, release: () => this.releaseHolder(holderId) };
+    } catch (error) {
+      this.releaseHolder(holderId);
+      throw error;
+    }
+  }
+
   private resourceUrl(path: string, enforceBudget = false): string | undefined {
     const cached = this.urls.get(path);
     if (cached) {
