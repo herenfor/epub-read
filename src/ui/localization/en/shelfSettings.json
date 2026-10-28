@@ -8,7 +8,7 @@
   "shelfSettings.section.data": "Data & Backup",
   "shelfSettings.section.storage": "Storage",
   "shelfSettings.section.about": "About",
-  "shelfSettings.more": "More Settings",
+  "shelfSettings.group.readingUi": "While reading",
   "shelfSettings.index": "Full-Text Search Index",
   "shelfSettings.library": "Library Folder",
   "shelfSettings.library.unknown": "Couldn't read the location",

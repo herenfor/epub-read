@@ -88,7 +88,7 @@ describe("第三步补修：书架触摸长按与子菜单 Back", () => {
     }
   });
 
-  it("触屏设置页：Back 先回到设置首页，再次 Back 才关闭设置", async () => {
+  it("触屏设置页：所有分组摊在一页上，Back 直接关闭设置", async () => {
     const dom = createReactDomHarness();
     let back: (() => boolean) | null = null;
     try {
@@ -99,15 +99,12 @@ describe("第三步补修：书架触摸长按与子菜单 Back", () => {
         registerBackHandler: (handler: (() => boolean) | null) => { back = handler; },
       }));
       await dom.click(dom.container.querySelector('.shelf-normal-bar-mobile [aria-label="设置"]') as HTMLElement);
-      const row = [...dom.container.querySelectorAll(".shelf-settings-row")]
-        .find((item) => item.textContent?.includes("数据与备份")) as HTMLElement;
-      await dom.click(row);
-      // 设置首页一直在叠层底部，分类页压在其上；离场中的分类页不算当前页。
-      const topPage = () => dom.container.querySelector(".shelf-settings-sheet.is-pushed:not(.is-leaving) h2")?.textContent;
-      expect(topPage()).toBe("数据与备份");
-      await dom.run(() => { expect(back?.()).toBe(true); });
-      expect(topPage()).toBeUndefined();
-      expect(dom.container.querySelector(".shelf-settings-sheet h2")?.textContent).toBe("设置");
+      // One page, no section pages pushed over it.
+      expect(dom.container.querySelectorAll(".shelf-settings-sheet")).toHaveLength(1);
+      const groups = [...dom.container.querySelectorAll(".shelf-settings-section")].map((item) => item.getAttribute("data-section"));
+      expect(groups).toEqual(expect.arrayContaining(["appearance", "data", "about"]));
+      const labels = [...dom.container.querySelectorAll(".shelf-settings-group-label")].map((item) => item.textContent);
+      expect(labels).toEqual(expect.arrayContaining(["外观", "数据与备份", "关于"]));
       await dom.run(() => { expect(back?.()).toBe(true); });
       expect(dom.container.querySelector(".shelf-settings-layer")?.className).toContain("is-closing");
       await dom.run(() => new Promise<void>((resolve) => setTimeout(resolve, MENU_CLOSE_MS + 20)));

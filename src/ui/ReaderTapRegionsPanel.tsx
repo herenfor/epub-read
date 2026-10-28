@@ -43,7 +43,6 @@ export interface ReaderTapRegionsLabels {
   rightForward: string;
   tapHint: string;
   tapHintHint: string;
-  reset: string;
 }
 
 export interface ReaderTapRegionsPanelProps {
@@ -209,11 +208,12 @@ export function ReaderTapRegionsPanel(props: ReaderTapRegionsPanelProps) {
       <Switch inRow checked={value.showTapHint}
         onChange={(checked) => props.onChange({ ...value, showTapHint: checked })} />
     </label>
-
-    <button type="button" className="ui-btn tap-regions-reset"
-      disabled={profile.mode === "default" && profile.custom === undefined}
-      onClick={() => update(DEFAULT_TAP_REGION_PROFILE)}>
-      {labels.reset}
-    </button>
   </div>;
+}
+
+/** The current device's profile back to the default, or null when it already is (Settings puts this beside the group title). */
+export function tapRegionsReset(value: ReaderTapPreferences, device: TapRegionDevice): ReaderTapPreferences | null {
+  const profile = tapRegionProfileFor(value, device);
+  if (profile.mode === "default" && profile.custom === undefined) return null;
+  return withTapRegionProfile(value, device, DEFAULT_TAP_REGION_PROFILE);
 }
