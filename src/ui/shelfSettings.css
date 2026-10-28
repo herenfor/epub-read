@@ -622,11 +622,12 @@
   width: 380px;
   max-width: calc(100vw - 16px);
   max-height: min(620px, calc(100vh - 96px));
-  border: 1px solid var(--panel-border);
+  /* Popover shell shared with Aa and the shelf menus. */
+  border: 1px solid var(--ui-border-control);
   border-radius: 14px;
-  background: var(--bg);
+  background: var(--panel-surface);
   color: var(--fg);
-  box-shadow: 0 18px 40px rgba(20, 20, 30, 0.16), 0 2px 6px rgba(20, 20, 30, 0.06);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18), 0 3px 10px rgba(0, 0, 0, 0.06);
   overflow: hidden;
   animation: shelf-filter-drop-in var(--popover-open) cubic-bezier(0.16, 1, 0.3, 1) both;
 }
@@ -643,7 +644,7 @@
   width: auto;
   max-width: none;
   max-height: 86vh;
-  border-radius: 18px 18px 0 0;
+  border-radius: 20px 20px 0 0;
   border-bottom: 0;
   padding-bottom: env(safe-area-inset-bottom, 0px);
   animation: shelf-filter-sheet-up var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1) both;
