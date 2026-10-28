@@ -128,12 +128,14 @@ export interface EdgeTurnZoneSpec {
   /** Only when it differs from the original layout; omitted keeps the old markup. */
   sideProp?: TapRegionSide;
   region?: EdgeTurnRegion;
+  /** Show the arrow while a tap holds the feedback; off unless the reader opted in. */
+  hint: boolean;
 }
 
 /** EdgeTurnZone props for both physical sides; without routing this is the original prev/next pair. */
 export function edgeTurnZoneSpecs(routing: ReaderTapRouting | null): EdgeTurnZoneSpec[] {
   return (["left", "right"] as const).map((side) => {
-    if (!routing) return { side, direction: side === "left" ? -1 : 1 };
+    if (!routing) return { side, direction: side === "left" ? -1 : 1, hint: false };
     const direction = tapRegionAction(side, routing.device, routing.preferences, routing.progression);
     const natural = (side === "left") === (direction === -1);
     return {
@@ -141,6 +143,7 @@ export function edgeTurnZoneSpecs(routing: ReaderTapRouting | null): EdgeTurnZon
       direction,
       sideProp: natural ? undefined : side,
       region: edgeTurnOverlayOf(routing.geometry, side),
+      hint: routing.preferences.showTapHint,
     };
   });
 }

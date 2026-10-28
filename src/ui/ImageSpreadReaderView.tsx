@@ -351,6 +351,6 @@ export const ImageSpreadReaderView = forwardRef<ReaderHandle, Props>(function Im
     </div>
     <div ref={swipeHint} className="reader-swipe-hint reader-image-spread-hint" aria-hidden="true" />
     {edgeTurnZoneSpecs(tapRouting).map((zone) => <EdgeTurnZone key={zone.side}
-      direction={zone.direction} side={zone.sideProp} region={zone.region} />)}
+      direction={zone.direction} side={zone.sideProp} region={zone.region} hint={zone.hint} />)}
   </div>;
 });

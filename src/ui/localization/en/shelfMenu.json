@@ -25,6 +25,8 @@
   "shelfMenu.motion.reduced": "Reduced",
   "shelfMenu.battery": "Battery",
   "shelfMenu.battery.tip": "Show battery level in reading bar",
+  "shelfMenu.titlebarAutoHide": "Auto-Hide Top Bar",
+  "shelfMenu.titlebarAutoHide.tip": "Hide the top bar while reading; it shows when the pointer reaches the top",
   "shelfMenu.statusBar": "Status Bar",
   "shelfMenu.statusBar.tip": "Hide system status bar while reading",
   "shelfMenu.keepScreenOn": "Keep Screen On",

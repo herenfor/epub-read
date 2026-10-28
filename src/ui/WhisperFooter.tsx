@@ -32,6 +32,8 @@ export interface WhisperFooterProps {
   totalChapters: number;
   /** Per spine item: linear or not. Labels number linear chapters only; seeking keeps spine indices. */
   linearSpine?: readonly boolean[];
+  /** The top bar already names this chapter from the contents: leave out the "Ch. N/M" count, which counts files, not chapters. */
+  chapterNamed?: boolean;
   /** Right-to-left book: the bar fills from the right and dragging left moves forward. */
   rtl?: boolean;
 
@@ -185,6 +187,7 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
   chapterIndex,
   totalChapters,
   linearSpine,
+  chapterNamed = false,
   rtl = false,
   bookProgressPct,
   onSeekPage,
@@ -536,7 +539,7 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
           ? t("footer.mobile.page", { page: leafRange.first, total: leafRange.total })
           : t("footer.mobile.pageRange", { first: leafRange.first, last: leafRange.last, total: leafRange.total }));
       } else parts.push(t("footer.mobile.page", { page: currentPage + 1, total: pageCount || 1 }));
-      if (chapterNumber !== null && chapterCount > 1) parts.push(t("footer.mobile.chapters", { current: chapterNumber, total: chapterCount }));
+      if (!chapterNamed && chapterNumber !== null && chapterCount > 1) parts.push(t("footer.mobile.chapters", { current: chapterNumber, total: chapterCount }));
       parts.push(t("footer.book", { progress: wholeBookLabel() }));
       return parts.join(" · ");
     }
@@ -553,7 +556,7 @@ export const WhisperFooter: React.FC<WhisperFooterProps> = ({
       parts.push(t("footer.page", { page: currentPage + 1, total: pageCount || 1 }));
     }
 
-    if (chapterNumber !== null && chapterCount > 1) {
+    if (!chapterNamed && chapterNumber !== null && chapterCount > 1) {
       parts.push(t("footer.chapters", { current: chapterNumber, total: chapterCount }));
     }
 

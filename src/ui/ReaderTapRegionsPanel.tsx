@@ -39,6 +39,8 @@ export interface ReaderTapRegionsLabels {
   leftForward: string;
   leftForwardHint: string;
   rightForward: string;
+  tapHint: string;
+  tapHintHint: string;
   reset: string;
 }
 
@@ -200,6 +202,18 @@ export function ReaderTapRegionsPanel(props: ReaderTapRegionsPanelProps) {
         <span className="aa-switch-track" />
       </label>
     </div>}
+
+    <div className="tap-regions-switch-row">
+      <div className="tap-regions-switch-text">
+        <span>{labels.tapHint}</span>
+        <span className="tap-regions-note">{labels.tapHintHint}</span>
+      </div>
+      <label className="aa-switch-label">
+        <input type="checkbox" checked={value.showTapHint} aria-label={labels.tapHint}
+          onChange={(event) => props.onChange({ ...value, showTapHint: event.target.checked })} />
+        <span className="aa-switch-track" />
+      </label>
+    </div>
 
     <button type="button" className="tap-regions-reset"
       disabled={profile.mode === "default" && profile.custom === undefined}

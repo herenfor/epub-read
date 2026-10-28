@@ -756,6 +756,31 @@ export function linearChapterTotal(linear: readonly boolean[]): number {
 }
 
 /**
+ * Contents name for every spine item: the first TOC entry that points into
+ * it, else the nearest earlier one (illustrations, split chapter files).
+ * "" before the first entry, e.g. the cover and title page.
+ */
+export function tocLabelsBySpine(book: Book): string[] {
+  const indexByPath = new Map<string, number>();
+  book.spine.forEach((_item, i) => {
+    const path = spineItemPath(book, i);
+    if (path !== undefined && !indexByPath.has(path)) indexByPath.set(path, i);
+  });
+  const own: string[] = new Array(book.spine.length).fill("");
+  const walk = (nodes: TocNode[]) => {
+    for (const node of nodes) {
+      const path = book.archiveReferences ? book.archiveReferences.resolve(book.opfPath, node.href).path : splitHref(node.href).path;
+      const index = node.label && path ? indexByPath.get(path) : undefined;
+      if (index !== undefined && !own[index]) own[index] = node.label;
+      walk(node.children);
+    }
+  };
+  walk(book.toc);
+  let last = "";
+  return own.map((label) => (last = label || last));
+}
+
+/**
  * 释放整本书籍的解析资源（主要为解压的原始字节资源），
  * 彻底切断 Uint8Array / ArrayBuffer 引用，避免关书后在长期运行中被意外闭包持有。
  */

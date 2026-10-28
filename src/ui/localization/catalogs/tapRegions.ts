@@ -24,6 +24,8 @@ export const tapRegions = defineMessages("tapRegions", {
   "tapRegions.leftForward": { zh: "左侧点击也下一页", note: "Touch-only switch: a tap on the left area also turns forward.", max: 28 },
   "tapRegions.leftForward.hint": { zh: "开启后左右两侧都翻到下一页；滑动、键盘和其他返回方式不变" },
   "tapRegions.rightForward": { zh: "右侧点击也下一页", note: "Same switch as tapRegions.leftForward, shown while reading a right-to-left book, where the back side is the right.", max: 28 },
+  "tapRegions.tapHint": { zh: "点击时显示提示", note: "Switch: briefly show a faint arrow on the side that was tapped to turn the page.", max: 28 },
+  "tapRegions.tapHint.hint": { zh: "翻页时在点按的一侧短暂显示箭头" },
   "tapRegions.reset": { zh: "恢复默认", max: 12 },
 });
 
@@ -46,5 +48,7 @@ export const TAP_REGION_LABEL_KEYS = {
   leftForward: "tapRegions.leftForward",
   leftForwardHint: "tapRegions.leftForward.hint",
   rightForward: "tapRegions.rightForward",
+  tapHint: "tapRegions.tapHint",
+  tapHintHint: "tapRegions.tapHint.hint",
   reset: "tapRegions.reset",
 } as const satisfies Record<string, keyof typeof tapRegions.zh>;

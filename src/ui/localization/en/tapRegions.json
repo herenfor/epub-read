@@ -17,5 +17,7 @@
   "tapRegions.leftForward": "Left Tap Also Goes Forward",
   "tapRegions.leftForward.hint": "Both sides turn to the next page; swiping, keys and other ways back are unchanged",
   "tapRegions.rightForward": "Right Tap Also Goes Forward",
+  "tapRegions.tapHint": "Show Arrow on Tap",
+  "tapRegions.tapHint.hint": "Briefly shows an arrow on the side you tapped to turn the page",
   "tapRegions.reset": "Reset"
 }

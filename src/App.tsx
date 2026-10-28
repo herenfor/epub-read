@@ -16,7 +16,7 @@ import {
 } from "./platform/androidReaderKeepScreenOn";
 import { resolveArchiveHref, archiveHref } from "./core/archiveReferences";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
-import { loadBook, loadBookFromArchive, spineIndexForPath, spineIndexForEntryKey, spineItemPath, spineItemHref, disposeBook, nextLinearIndex, linearChapterNumber, linearChapterTotal } from "./core/book";
+import { loadBook, loadBookFromArchive, spineIndexForPath, spineIndexForEntryKey, spineItemPath, spineItemHref, disposeBook, nextLinearIndex, linearChapterNumber, linearChapterTotal, tocLabelsBySpine } from "./core/book";
 import type { Book } from "./core/types";
 import type { ArchiveClient } from "./core/selectiveArchive";
 import type { Stamp, Version } from "./core/portableState/portable-register-core";
@@ -69,6 +69,7 @@ import { WhisperFooter, type WhisperFooterChapterTick } from "./ui/WhisperFooter
 import { BatteryIndicator } from "./ui/BatteryIndicator";
 import { ReaderOpening } from "./ui/ReaderOpening";
 import { readBatteryIndicatorEnabled, writeBatteryIndicatorEnabled } from "./ui/batteryPreferences";
+import { readTitlebarAutoHide, writeTitlebarAutoHide } from "./ui/titlebarPreferences";
 import { readTapRegionPreferences, writeTapRegionPreferences } from "./ui/tapRegionPreferences";
 import type { ReaderTapPreferences } from "./ui/readerTapRegions";
 import { useResponsiveEnvironment } from "./ui/responsiveEnvironment";
@@ -4819,27 +4820,14 @@ export default function App() {
     return () => registerAppUpdateSaveGate(null);
   }, []);
 
-  /** 章节在目录里的名字；没有目录项时为空串。 */
-  const tocLabelForPath = (chapterPath: string): string => {
-    if (!book) return "";
-    const path = book.archiveReferences ? chapterPath : splitHref(chapterPath).path;
-    const walk = (nodes: import("./core/types").TocNode[]): string => {
-      for (const n of nodes) {
-        if ((book.archiveReferences ? book.archiveReferences.resolve(book.opfPath, n.href).path : splitHref(n.href).path) === path && n.label) return n.label;
-        const c = walk(n.children);
-        if (c) return c;
-      }
-      return "";
-    };
-    return walk(book.toc);
-  };
-  const currentChapterLabel = ready && currentPath ? tocLabelForPath(currentPath) : "";
+  /** 每个 spine 项在目录里的名字：插图页、拆开的章节文件沿用上一个目录项；封面等目录之前的为空串。 */
+  const tocSpineLabels = useMemo(() => book ? tocLabelsBySpine(book) : [], [book]);
+  const currentChapterLabel = ready ? tocSpineLabels[spineIndex] ?? "" : "";
   /** 跳转历史目标的位置名：本章为空串，其他章用目录名或“第 N 章”；无目标为 null。 */
   const historyPlaceLabel = (position: ReaderNavigationPosition | undefined): string | null => {
     if (!position || !book || !ready) return null;
     if (position.spineIndex === spineIndex) return "";
-    const path = spineItemPath(book, position.spineIndex);
-    return (path && tocLabelForPath(path)) ||
+    return tocSpineLabels[position.spineIndex] ||
       t("footer.chapterN", { n: linearChapterNumber(spineLinear, position.spineIndex) ?? position.spineIndex + 1 });
   };
 
@@ -4890,7 +4878,12 @@ export default function App() {
   // ---- 全屏 / 沉浸禅模式（Zen Mode） ----
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [fullscreenBusy, setFullscreenBusy] = useState(false);
-  const [readerZenMode, setReaderZenMode] = useState(true);
+  // 顶栏自动隐藏：本机偏好，在 设置 › 阅读 里切换（原标题栏图钉）。
+  const [readerZenMode, setReaderZenMode] = useState(readTitlebarAutoHide);
+  const changeReaderZenMode = useCallback((enabled: boolean) => {
+    setReaderZenMode(enabled);
+    writeTitlebarAutoHide(enabled);
+  }, []);
 
   const fullscreenControllerRef = useRef<NativeFullscreenController | null>(null);
   if (!fullscreenControllerRef.current && runtime.hasDesktopWindowChrome) {
@@ -4947,10 +4940,6 @@ export default function App() {
     }
     await toggleWebFullscreen();
   }, [toggleWebFullscreen]);
-
-  const toggleZenMode = useCallback(() => {
-    setReaderZenMode((prev) => !prev);
-  }, []);
 
   useEffect(() => {
     if (!isTauriEnv()) {
@@ -5332,6 +5321,7 @@ export default function App() {
       <TitleBar
         view={view}
         title={view === "reader" ? (ready ? book!.metadata.title : (book?.metadata.title ?? "")) : t("appUi.appName")}
+        author={view === "reader" && ready ? book!.metadata.creator : undefined}
         chapterTitle={view === "reader" && ready ? currentChapterLabel : undefined}
         onBackToShelf={view === "reader" ? handleBackToShelf : undefined}
         readerTabs={view === "reader" ? readerTabStrip : undefined}
@@ -5354,10 +5344,7 @@ export default function App() {
         bookmarkSpread={view === "reader" && chapterState.status === "ready" && chapterState.mode !== "scroll" &&
           chapterState.effectiveColumns === 2}
         bookmarkPagesOpen={view === "reader" && bookmarkPagesOpen}
-        bookmarksOpen={view === "reader" && isSidebarOpen && activeSidebarTab === "bookmarks"}
-        onOpenBookmarks={view === "reader" ? handleToggleBookmarks : undefined}
         zenMode={view === "reader" && !mobileChrome && readerZenMode}
-        onToggleZenMode={view === "reader" ? toggleZenMode : undefined}
         progressPct={view === "reader" && ready ? progressPct : undefined}
         chapterIndex={view === "reader" && ready && linearChapter !== null ? linearChapter - 1 : undefined}
         totalChapters={view === "reader" && ready ? linearChapterTotal(spineLinear) : undefined}
@@ -5450,6 +5437,8 @@ export default function App() {
               onKeepScreenOnWhileReadingChange={changeKeepScreenOnWhileReading}
               batteryIndicatorEnabled={runtime.platform === "android" ? batteryIndicatorEnabled : undefined}
               onBatteryIndicatorChange={runtime.platform === "android" ? changeBatteryIndicatorEnabled : undefined}
+              titlebarAutoHide={mobileChrome ? undefined : readerZenMode}
+              onTitlebarAutoHideChange={changeReaderZenMode}
               tapRegions={tapRegions}
               onTapRegionsChange={changeTapRegionPreferences}
               tapRegionsScrollMode={settings.readingMode === "scroll"}
@@ -5906,6 +5895,7 @@ export default function App() {
           chapterIndex={spineIndex}
           totalChapters={book!.spine.length}
           linearSpine={spineLinear}
+          chapterNamed={currentChapterLabel !== ""}
           rtl={pageProgression === "rtl"}
           bookProgressPct={progressPct}
           onSeekPage={(targetPage) => {
@@ -6026,6 +6016,8 @@ export default function App() {
             onHideReaderSystemStatusBarChange={changeHideReaderSystemStatusBar}
             batteryIndicatorEnabled={runtime.platform === "android" ? batteryIndicatorEnabled : undefined}
             onBatteryIndicatorChange={runtime.platform === "android" ? changeBatteryIndicatorEnabled : undefined}
+            titlebarAutoHide={mobileChrome ? undefined : readerZenMode}
+            onTitlebarAutoHideChange={changeReaderZenMode}
           />
         </PanelPaintWarmup>
       )}

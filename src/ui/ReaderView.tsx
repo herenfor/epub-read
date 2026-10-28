@@ -3697,6 +3697,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         direction={zone.direction}
         side={zone.sideProp}
         region={zone.region}
+        hint={zone.hint}
       />)}
       </div>
     </>

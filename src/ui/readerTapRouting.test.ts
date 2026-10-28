@@ -78,6 +78,7 @@ const custom = (left: number, right: number, touchLeftTapForward = false): Reade
   pc: { mode: "custom", custom: { left, right } },
   touch: { mode: "custom", custom: { left, right } },
   touchLeftTapForward,
+  showTapHint: false,
 });
 
 describe("tap routing geometry", () => {
@@ -134,14 +135,14 @@ describe("tap routing geometry", () => {
     expect(edgeTurnOverlayOf(computeTapRegionGeometry(1000, custom(0, 10).pc), "left")?.width).toBe(0);
     expect(edgeTurnOverlayOf(computeTapRegionGeometry(1000, { mode: "default" }), "left")).toBeUndefined();
 
-    expect(edgeTurnZoneSpecs(null)).toEqual([{ side: "left", direction: -1 }, { side: "right", direction: 1 }]);
+    expect(edgeTurnZoneSpecs(null)).toEqual([{ side: "left", direction: -1, hint: false }, { side: "right", direction: 1, hint: false }]);
     const geometry = computeTapRegionGeometry(1000, { mode: "default" });
     const feedback = { hold: vi.fn() } as never;
     const specs = edgeTurnZoneSpecs({ device: "touch", preferences: { ...DEFAULT_READER_TAP_PREFERENCES, touchLeftTapForward: true },
       geometry, hostLeft: () => 0, feedback });
     // The left band moves nowhere; only what it executes changes.
-    expect(specs[0]).toEqual({ side: "left", direction: 1, sideProp: "left", region: undefined });
-    expect(specs[1]).toEqual({ side: "right", direction: 1, sideProp: undefined, region: undefined });
+    expect(specs[0]).toEqual({ side: "left", direction: 1, sideProp: "left", region: undefined, hint: false });
+    expect(specs[1]).toEqual({ side: "right", direction: 1, sideProp: undefined, region: undefined, hint: false });
   });
 });
 

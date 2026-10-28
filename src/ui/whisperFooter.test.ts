@@ -38,6 +38,12 @@ describe("Zen UI WhisperFooter 微提示状态栏与跳页器契约（Packet B�
       createElement(WhisperFooter, { ...baseProps, chapterIndex: 2, totalChapters: 5, linearSpine }),
     );
     expect(html).toContain("第 2/3 章");
+    // 目录有章名时顶栏已写章名，底栏不再给按文件数的章号。
+    const named = renderToStaticMarkup(
+      createElement(WhisperFooter, { ...baseProps, chapterIndex: 2, totalChapters: 5, linearSpine, chapterNamed: true }),
+    );
+    expect(named).not.toContain("/3 章");
+    expect(named).toContain("全书 18%");
     const onNav = renderToStaticMarkup(
       createElement(WhisperFooter, { ...baseProps, chapterIndex: 4, totalChapters: 5, linearSpine }),
     );

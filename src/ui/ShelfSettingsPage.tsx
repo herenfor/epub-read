@@ -36,6 +36,8 @@ export interface ShelfSettingsPageProps {
   onThemeChange(theme: Theme): void;
   batteryIndicatorEnabled?: boolean;
   onBatteryIndicatorChange?(enabled: boolean): void;
+  titlebarAutoHide?: boolean;
+  onTitlebarAutoHideChange?(enabled: boolean): void;
   hideReaderSystemStatusBar?: boolean;
   onHideReaderSystemStatusBarChange?(hidden: boolean): void;
   keepScreenOnWhileReading?: boolean;
@@ -201,6 +203,8 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
     onHideReaderSystemStatusBarChange: props.onHideReaderSystemStatusBarChange,
     batteryIndicatorEnabled: props.batteryIndicatorEnabled,
     onBatteryIndicatorChange: props.onBatteryIndicatorChange,
+    titlebarAutoHide: props.titlebarAutoHide,
+    onTitlebarAutoHideChange: props.onTitlebarAutoHideChange,
   };
 
   const dataRows = [

@@ -163,6 +163,8 @@ export interface ShelfViewProps {
   /** Android 阅读栏电量显示（本机偏好）；未提供时不显示该设置。 */
   batteryIndicatorEnabled?: boolean;
   onBatteryIndicatorChange?(enabled: boolean): void;
+  titlebarAutoHide?: boolean;
+  onTitlebarAutoHideChange?(enabled: boolean): void;
   hideReaderSystemStatusBar?: boolean;
   onHideReaderSystemStatusBarChange?(hidden: boolean): void;
   keepScreenOnWhileReading?: boolean;
@@ -4446,6 +4448,8 @@ export function ShelfView(props: ShelfViewProps) {
     onKeepScreenOnWhileReadingChange: props.onKeepScreenOnWhileReadingChange,
     batteryIndicatorEnabled: props.batteryIndicatorEnabled,
     onBatteryIndicatorChange: props.onBatteryIndicatorChange,
+    titlebarAutoHide: props.titlebarAutoHide,
+    onTitlebarAutoHideChange: props.onTitlebarAutoHideChange,
     tapRegions: props.tapRegions,
     onTapRegionsChange: props.onTapRegionsChange,
     tapRegionsScrollMode: props.tapRegionsScrollMode,

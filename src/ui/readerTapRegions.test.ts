@@ -78,8 +78,10 @@ describe("tap region geometry", () => {
       pc: { mode: "custom", custom: { left: 12, right: 35 } },
       touch: { mode: "default" },
       touchLeftTapForward: false,
+      showTapHint: false,
     });
     expect(parseReaderTapPreferences(serializeReaderTapPreferences(prefs))).toEqual(prefs);
+    expect(parseReaderTapPreferences(JSON.stringify({ showTapHint: true })).showTapHint).toBe(true);
   });
 });
 
@@ -113,6 +115,7 @@ describe("tap region panel", () => {
       pc: { mode: "default" },
       touch: { mode: "custom", custom: { left: 0, right: 20 } },
       touchLeftTapForward: true,
+      showTapHint: false,
     };
     const render = (device: "pc" | "touch", width: number) => dom.render(createElement(ReaderTapRegionsPanel, {
       device, value, onChange, availableWidth: width, availableHeight: 800, labels,

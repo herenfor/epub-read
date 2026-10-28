@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { strToU8, zipSync } from "fflate";
 import { buildEpub } from "./fixtures";
-import { loadBook, resolveTocHrefs, spineIndexForPath, spineItemPath, DrmError } from "../core/book";
+import { loadBook, resolveTocHrefs, spineIndexForPath, spineItemPath, tocLabelsBySpine, DrmError } from "../core/book";
 import { SelectiveEpubArchive } from "../core/selectiveArchive";
 
 const CH1 = `<html xmlns="http://www.w3.org/1999/xhtml"><head><title>1</title></head><body><h1>第一章</h1><p>正文内容。</p></body></html>`;
@@ -55,6 +55,24 @@ describe("loadBook: EPUB 2", () => {
     expect(book.toc[1].children[0].href).toBe("OEBPS/ch2.xhtml#sec");
     expect(spineItemPath(book, 0)).toBe("OEBPS/ch1.xhtml");
     expect(spineIndexForPath(book, "OEBPS/ch2.xhtml")).toBe(1);
+  });
+
+  it("每个 spine 项的目录名：没有目录项的沿用上一个，目录之前的为空", async () => {
+    const bytes = await buildEpub({
+      version: 2,
+      chapters: [
+        { id: "cover", href: "cover.xhtml", content: CH1 },
+        { id: "c1", href: "ch1.xhtml", content: CH1 },
+        { id: "pic", href: "pic.xhtml", content: CH2 },
+        { id: "c2", href: "ch2.xhtml", content: CH2 },
+      ],
+      toc: [
+        { label: "第一章 诡异的住家", href: "ch1.xhtml" },
+        { label: "第二章", href: "ch2.xhtml#top", children: [{ label: "小节", href: "ch2.xhtml#sec" }] },
+      ],
+    });
+    const book = await loadBook(bytes);
+    expect(tocLabelsBySpine(book)).toEqual(["", "第一章 诡异的住家", "第一章 诡异的住家", "第二章"]);
   });
 
   it("linear=no 的旁置章节", async () => {
