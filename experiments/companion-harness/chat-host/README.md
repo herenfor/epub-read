@@ -1,29 +1,28 @@
 # Persistent chat-host experiment
 
-The current daily deployment uses **DSH 0.2.1-rc.4 + Tobs 1.5.2** with the optional native reader
+The isolated Bot deployment uses **DSH 0.2.1-rc.4 + Tobs 1.5.2** with the optional native reader
 plugin. It does not create another chat UI or model loop. It is an experimental
 deployment, separate from the reader's Core/Android builds. Its existing data
-home can be selected by the normal daily DSH launcher. AIRI is not a dependency.
+home and runtime installation are separate from the daily task host. AIRI is not a dependency.
 
 ## Daily startup
 
-The current local deployment uses **3080**, selected through the existing
-`dsh-web` launcher:
+The local Bot deployment uses **3092**, selected through its own
+`dsh-bot` launcher. The original `dsh-web` continues to serve daily tasks on 3080:
 
 ```sh
-dsh-web &
-dsh-web stop
+dsh-bot &
+dsh-bot stop
 ```
 
-The selected home is the original daily DSH home. Native task workspaces and
-Bot mode coexist in one process; the sidebar's Bot mode button switches views.
-The bot store can remain mounted from its existing location, preserving stored
-absolute paths. Do not overwrite a daily workspace index, persona store or
-credential file with an experiment's copy. A port change alone needs no data
-migration.
+Each host has its own runtime installation, data home, profile, session files,
+workspace index, logs and process ownership. A different port alone does not
+isolate sessions. Preserve existing Bot identities and private files when
+moving an established installation; do not restore an old snapshot over newer
+tasks. Do not mount the same writable Bot store in both hosts.
 The local launcher retains terminal detachment, managed stop, authenticated
 browser opening and strict-RC updates. The owner's custom runtime compatibility
-lock is disabled. These three local adapters no longer declare an exact DSH
+lock remains disabled. These three local adapters no longer declare an exact DSH
 engine version; upstream third-party plugin declarations remain separate. This
 does not establish compatibility with every future release.
 
@@ -44,7 +43,7 @@ this experiment can also run in WSL with its Web UI opened on Windows.
 ```sh
 dsh plugin --profile web add @botharness/tobs@1.5.2
 dsh plugin --profile web add file:/absolute/path/to/reader-plugin
-dsh --profile web --port 3080 --no-open
+dsh --profile web --port 3092 --no-open
 ```
 
 These commands assume that the selected `dsh` executable and process-local
@@ -55,10 +54,14 @@ Before launch, put this directory's `cordis.patch.yml` into the experiment's
 profile override (merge deliberately if that profile already has settings).
 It selects Tobs' preset and keeps this text-chat experiment free of browser,
 computer and external-messaging modules. For a separate experiment, select a
-free loopback port and its own data home. A daily host should use its selected
-launcher, including any compatibility preload described by
+free loopback port and its own data home. Only the Bot host uses its selected
+launcher and any compatibility preload described by
 [bot controls](../bot-controls/README.md). Never reuse another data home's
 listener merely because its port matches.
+
+MaiBot's ACP worker may use the Bot-side DSH installation while keeping its
+own data home and sessions. ACP does not pass through the Web port and does
+not require the Tobs Web server to be running.
 
 For WSL hosting a Windows reader connection, set the host's
 `EPUB_READER_CONNECTION_FILE` to the Windows reader's private discovery file
@@ -79,7 +82,7 @@ page; a 401 without credentials does not mean the server failed.
 ## What was accepted
 
 The reading/model acceptance below was recorded on DSH 0.2.1-rc.3. The later
-0.2.1-rc.4 unification checked preserved task files, native workspace and bot
+0.2.1-rc.4 unification (since superseded by separate hosts) checked preserved task files, native workspace and bot
 metadata, authenticated settings access, and one synthetic native prompt/tool
 loop. It did not repeat real model, private-reader or long-context acceptance.
 
@@ -122,8 +125,8 @@ message ID instead of automatically resubmitting it.
 ## Ownership and verification scope
 
 Tobs currently owns the experimental Bot identity, Channel and native sessions;
-its memory remains in the existing mounted bot store. Native daily task files
-coexist in the selected home without becoming bot conversations. No old reader
+its memory remains in its original private Bot store. Native daily task files
+belong to the separate daily home. No old reader
 companion history or memory has been migrated. The reader plugin never writes
 that memory.
 

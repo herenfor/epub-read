@@ -1,7 +1,8 @@
 # Local bot settings
 
 Optional UI for an explicitly selected **DSH / Tobs 1.5.2** host. The current
-daily profile also retains native tasks. This package does not enter the reader
+Bot profile uses its own data home and runtime installation; the daily task
+host does not load these extensions. This package does not enter the reader
 or Core/Android bundles, or modify another DSH profile. It adds
 no dependencies, model loop, telemetry or separate listening port.
 
@@ -43,7 +44,7 @@ uses this process-local preload, resolving the loop from the active runtime:
 
 ```sh
 export DSH_RUNTIME_ENTRY=/absolute/selected/dsh/lib/bin.js
-node --import /absolute/private/profile/node_modules/epub-local-bot-controls/runtime-tools.mjs /absolute/dsh/lib/bin.js --profile web --port 3080 --no-open
+node --import /absolute/private/profile/node_modules/epub-local-bot-controls/runtime-tools.mjs /absolute/dsh/lib/bin.js --profile web --port 3092 --no-open
 ```
 
 It redirects only same-version `dsh-tools` root imports to the loop's one copy,
