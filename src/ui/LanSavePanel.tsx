@@ -17,6 +17,7 @@ import {
 } from "./lanSaveMessages";
 import "./lanSavePanel.css";
 import { uiText, useUiText } from "./localization/UiLanguageProvider";
+import { Switch } from "./controls/Switch";
 
 export interface LanSavePanelProps {
   open: boolean;
@@ -530,13 +531,7 @@ export function LanSavePanel(props: LanSavePanelProps) {
                   : t("lanPanel.send.includeBooks.off")}
               </small>
             </span>
-            <input
-              type="checkbox"
-              role="switch"
-              className="lan-switch"
-              checked={includeBooks}
-              onChange={(event) => setIncludeBooks(event.target.checked)}
-            />
+            <Switch inRow checked={includeBooks} onChange={setIncludeBooks} />
           </label>
           <p className="lan-send-note">
             <span aria-hidden="true">{Icon.info}</span>

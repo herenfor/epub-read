@@ -52,3 +52,14 @@ describe("margin guide box", () => {
     expect(textBoxFromApplied({ left: 0, right: 30, top: 0 }, 0, 100, { left: 20, right: 20, top: 0, bottom: 0 })).toBeNull();
   });
 });
+
+describe("touch slider look", () => {
+  it("marks the unset follow-the-book stop, so it never reads as the minimum", async () => {
+    const { createElement } = await import("react");
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const { TouchSlider } = await import("./TouchSlider");
+    const props = { min: 0, max: 5, step: 1, value: 0, onChange: vi.fn(), label: "字重", valueText: "跟随书籍" };
+    expect(renderToStaticMarkup(createElement(TouchSlider, { ...props, auto: true }))).toContain("data-auto");
+    expect(renderToStaticMarkup(createElement(TouchSlider, props))).not.toContain("data-auto");
+  });
+});

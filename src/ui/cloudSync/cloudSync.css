@@ -164,18 +164,6 @@
   align-items: center;
 }
 
-.cloud-sync .shelf-settings-actions button.is-primary {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: #ffffff;
-  font-weight: 600;
-}
-
-.cloud-sync .shelf-settings-actions button.is-danger {
-  border-color: color-mix(in srgb, #b91c1c 60%, var(--panel-border));
-  color: #b91c1c;
-}
-
 .cloud-sync-confirm {
   font-size: 13px;
 }

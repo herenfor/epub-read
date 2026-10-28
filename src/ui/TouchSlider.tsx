@@ -4,8 +4,8 @@ import "./touchSlider.css";
 
 /** Horizontal travel before a touch on a slider counts as a drag (px). */
 export const SLIDER_DRAG_SLOP_PX = 8;
-/** The thumb's centre stays this far inside each end (matches touchSlider.css). */
-const THUMB_INSET_PX = 10;
+/** The thumb's centre stays this far inside each end: half the 28px track (matches touchSlider.css). */
+const THUMB_INSET_PX = 14;
 
 export type SliderGesture = "pending" | "drag" | "scroll";
 
@@ -52,6 +52,11 @@ export interface TouchSliderProps {
   valueText: string;
   disabled?: boolean;
   className?: string;
+  /**
+   * The value is the unset "follow the book / automatic" stop: drawn without
+   * a fill and with a hollow thumb, so it does not read as the minimum.
+   */
+  auto?: boolean;
 }
 
 /**
@@ -61,7 +66,7 @@ export interface TouchSliderProps {
  * nothing (the row's buttons step). Mouse: press on the track jumps there and
  * drags, as desktop users expect. Keys: arrows, Home and End.
  */
-export function TouchSlider({ min, max, step, value, onChange, label, valueText, disabled, className }: TouchSliderProps) {
+export function TouchSlider({ min, max, step, value, onChange, label, valueText, disabled, className, auto }: TouchSliderProps) {
   const ref = useRef<HTMLDivElement>(null);
   const host = useContext(SliderDragContext);
   const latest = useRef({ value, onChange, host, min, max, step, disabled });
@@ -199,6 +204,7 @@ export function TouchSlider({ min, max, step, value, onChange, label, valueText,
       aria-valuenow={value}
       aria-valuetext={valueText}
       aria-disabled={disabled || undefined}
+      data-auto={auto || undefined}
       style={{ "--slider-pos": fraction } as CSSProperties}
       onKeyDown={onKeyDown}
     >

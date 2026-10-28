@@ -152,45 +152,15 @@
 }
 
 /* 分段按钮胶囊 */
+/* Look: controls/controls.css. */
 .aa-segmented-capsule {
   display: inline-flex;
-  align-items: center;
-  background: var(--ui-control-bg);
-  border-radius: 8px;
-  height: 28px;
-  box-sizing: border-box;
-  padding: 2px;
+  align-items: stretch;
   flex: 1;
-  gap: 2px;
 }
 
 .aa-segmented-btn {
   flex: 1;
-  height: 24px;
-  border-radius: 6px;
-  border: none;
-  background: transparent;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background-color var(--ui-control-quick) var(--ui-ease), color var(--ui-control-quick) var(--ui-ease);
-}
-
-.aa-segmented-btn:hover {
-  color: var(--fg);
-}
-
-.aa-segmented-btn.active {
-  background: var(--ui-control-selected);
-  color: var(--fg);
-  font-weight: 600;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-}
-
-[data-theme="dark"] .aa-segmented-btn.active,
-[data-theme="gray"] .aa-segmented-btn.active {
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
 }
 
 /* 开关行 */
@@ -206,62 +176,6 @@
 .aa-toggle-text .aa-detail-sub {
   white-space: normal;
   overflow-wrap: anywhere;
-}
-
-.aa-switch-label {
-  position: relative;
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  cursor: pointer;
-}
-
-.aa-switch-label input {
-  position: absolute;
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-
-.aa-switch-track {
-  flex: none;
-  width: 34px;
-  height: 18px;
-  background: color-mix(in srgb, var(--fg) 18%, transparent);
-  border-radius: 12px;
-  position: relative;
-  transition: background-color var(--ui-toggle) var(--ui-ease);
-}
-
-.aa-switch-track::after {
-  content: "";
-  position: absolute;
-  left: 2px;
-  top: 2px;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--ui-switch-knob);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
-  transition: transform var(--ui-toggle) var(--ease-emphasized);
-}
-
-.aa-switch-label input:checked + .aa-switch-track {
-  background: var(--accent, #6366f1);
-}
-
-.aa-switch-label input:checked + .aa-switch-track::after {
-  transform: translateX(16px);
-}
-
-/* 不可用的开关：整行文字变淡，开关不接指针（不显示可点手势、不响应点击）。 */
-.aa-switch-label:has(input:disabled) {
-  cursor: default;
-  pointer-events: none;
-}
-
-.aa-switch-label input:disabled + .aa-switch-track {
-  opacity: 0.45;
 }
 
 .aa-row-disabled .aa-toggle-text,
@@ -449,26 +363,12 @@
   animation: aaMobileSheetOut var(--menu-close) var(--ui-ease) forwards;
 }
 
-.app[data-mobile-chrome="true"] .aa-display-body .aa-stepper-capsule,
-.app[data-mobile-chrome="true"] .aa-display-body .aa-segmented-capsule {
-  height: auto;
-  min-height: 52px; /* 内部 48px 命中 + 上下各 2px padding */
-}
 
 .app[data-mobile-chrome="true"] .aa-display-body .aa-step-btn,
 .app[data-mobile-chrome="true"] .aa-display-body .aa-step-reset-btn {
   min-width: 48px;
   min-height: 48px;
   flex-shrink: 0;
-}
-
-.app[data-mobile-chrome="true"] .aa-popover .aa-switch-label,
-.app[data-mobile-chrome="true"] .aa-display-body .aa-switch-label {
-  display: inline-flex;
-  align-items: center;
-  min-width: 48px;
-  min-height: 48px;
-  justify-content: flex-end;
 }
 
 /* 详细排版工作台：避免子项挤出面板，数值说明保持单行不竖排，胶囊在空间不足时平滑换行 */
@@ -508,7 +408,6 @@
 
 .app[data-touch-ui="true"] .aa-section-label { font-size: 14px; }
 
-.app[data-touch-ui="true"] .aa-segmented-btn { font-size: 14px; }
 
 .app[data-touch-ui="true"] .aa-css-label,
 .app[data-touch-ui="true"] .aa-css-hint,
@@ -733,20 +632,6 @@
   gap: 8px;
   height: 48px;
   padding: 0 4px;
-}
-
-.aa-popover .aa-presentation-row .aa-segmented-capsule,
-.aa-popover .aa-control-row .aa-segmented-capsule {
-  height: 40px;
-  border-radius: 12px;
-  padding: 3px;
-}
-
-.aa-popover .aa-presentation-row .aa-segmented-btn,
-.aa-popover .aa-control-row .aa-segmented-btn {
-  height: 34px;
-  border-radius: 9px;
-  font-size: 13px;
 }
 
 .aa-more-link {

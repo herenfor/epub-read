@@ -1,6 +1,8 @@
 import type { CSSProperties } from "react";
 import "./aaPopover.css";
 import "./readerTapRegions.css";
+import { Switch } from "./controls/Switch";
+import { TouchSlider } from "./TouchSlider";
 import {
   computeTapRegionGeometry,
   DEFAULT_TAP_REGION_PROFILE,
@@ -134,13 +136,13 @@ export function ReaderTapRegionsPanel(props: ReaderTapRegionsPanelProps) {
   const slider = (side: TapRegionSide) => {
     const percent = split[side];
     const name = side === "left" ? labels.left : labels.right;
-    return <label className="tap-regions-slider-row">
+    return <div className="tap-regions-slider-row" data-slider-row={`tap-${side}`}>
       <span className="aa-section-label">{name}</span>
-      <input type="range" min={0} max={TAP_REGION_MAX_PERCENT} step={1} value={percent}
-        aria-label={name} aria-valuetext={percent === 0 ? labels.off : `${percent}%`}
-        onChange={(event) => update(setTapRegionPercent(profile, side, Number(event.target.value), geometry))} />
+      <TouchSlider min={0} max={TAP_REGION_MAX_PERCENT} step={1} value={percent}
+        label={name} valueText={percent === 0 ? labels.off : `${percent}%`}
+        onChange={(next) => update(setTapRegionPercent(profile, side, next, geometry))} />
       <span className="tap-regions-slider-value">{percent === 0 ? labels.off : `${percent}%`}</span>
-    </label>;
+    </div>;
   };
 
   return <div className="tap-regions-panel" data-tap-device={device}>
@@ -190,32 +192,25 @@ export function ReaderTapRegionsPanel(props: ReaderTapRegionsPanelProps) {
       <span className="tap-regions-note">{labels.rangeHint}</span>
     </>}
 
-    {device === "touch" && <div className="tap-regions-switch-row">
-      <div className="tap-regions-switch-text">
+    {device === "touch" && <label className="tap-regions-switch-row">
+      <span className="tap-regions-switch-text">
         <span>{props.progression === "rtl" ? labels.rightForward : labels.leftForward}</span>
         <span className="tap-regions-note">{labels.leftForwardHint}</span>
-      </div>
-      <label className="aa-switch-label">
-        <input type="checkbox" checked={value.touchLeftTapForward}
-          aria-label={props.progression === "rtl" ? labels.rightForward : labels.leftForward}
-          onChange={(event) => props.onChange({ ...value, touchLeftTapForward: event.target.checked })} />
-        <span className="aa-switch-track" />
-      </label>
-    </div>}
+      </span>
+      <Switch inRow checked={value.touchLeftTapForward}
+        onChange={(checked) => props.onChange({ ...value, touchLeftTapForward: checked })} />
+    </label>}
 
-    <div className="tap-regions-switch-row">
-      <div className="tap-regions-switch-text">
+    <label className="tap-regions-switch-row">
+      <span className="tap-regions-switch-text">
         <span>{labels.tapHint}</span>
         <span className="tap-regions-note">{labels.tapHintHint}</span>
-      </div>
-      <label className="aa-switch-label">
-        <input type="checkbox" checked={value.showTapHint} aria-label={labels.tapHint}
-          onChange={(event) => props.onChange({ ...value, showTapHint: event.target.checked })} />
-        <span className="aa-switch-track" />
-      </label>
-    </div>
+      </span>
+      <Switch inRow checked={value.showTapHint}
+        onChange={(checked) => props.onChange({ ...value, showTapHint: checked })} />
+    </label>
 
-    <button type="button" className="tap-regions-reset"
+    <button type="button" className="ui-btn tap-regions-reset"
       disabled={profile.mode === "default" && profile.custom === undefined}
       onClick={() => update(DEFAULT_TAP_REGION_PROFILE)}>
       {labels.reset}

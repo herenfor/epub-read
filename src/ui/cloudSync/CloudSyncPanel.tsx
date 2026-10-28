@@ -216,10 +216,10 @@ function ConnectForm({ status }: { status: CloudSyncStatus }) {
     </div>}
     <div className="shelf-settings-actions">
       {preview
-        ? <button type="button" className="is-primary" disabled={disabled || deviceLabel.trim() === ""} onClick={() => void connect()}>
+        ? <button type="button" className="ui-btn is-primary" disabled={disabled || deviceLabel.trim() === ""} onClick={() => void connect()}>
           {busy === "connect" ? t("cloudSync.connecting") : t(preview.existingSpaceId ? "cloudSync.connectMerge" : "cloudSync.connectNew")}
         </button>
-        : <button type="button" className="is-primary" disabled={disabled || !ready} onClick={() => void test()}>
+        : <button type="button" className="ui-btn is-primary" disabled={disabled || !ready} onClick={() => void test()}>
           {busy === "test" ? t("cloudSync.testing") : t("cloudSync.test")}
         </button>}
     </div>
@@ -286,8 +286,8 @@ function ConnectedView({ status }: { status: CloudSyncStatus & { connection: Non
         {status.phase === "syncing" && <span className="about-spinner" aria-hidden="true" />}
         <div className="shelf-settings-actions">
           {running
-            ? <button type="button" disabled={busy} onClick={() => void act(cloudSyncNative.cancel)}>{t("cloudSync.stop")}</button>
-            : <button type="button" className="is-primary" disabled={busy} onClick={() => void act(() => cloudSyncNative.trigger("manual"))}>{t("cloudSync.syncNow")}</button>}
+            ? <button type="button" className="ui-btn" disabled={busy} onClick={() => void act(cloudSyncNative.cancel)}>{t("cloudSync.stop")}</button>
+            : <button type="button" className="ui-btn is-primary" disabled={busy} onClick={() => void act(() => cloudSyncNative.trigger("manual"))}>{t("cloudSync.syncNow")}</button>}
         </div>
       </div>
       {status.lastError && status.phase !== "syncing" && <ErrorLine failure={status.lastError} />}
@@ -303,10 +303,10 @@ function ConnectedView({ status }: { status: CloudSyncStatus & { connection: Non
         {confirm === "identity"
           ? <>
             <span className="cloud-sync-confirm">{t("cloudSync.identity.confirm")}</span>
-            <button type="button" className="is-danger" disabled={busy} onClick={() => void act(cloudSyncNative.resetIdentity)}>{t("cloudSync.identity.reset")}</button>
-            <button type="button" disabled={busy} onClick={() => setConfirm(null)}>{t("cloudSync.cancel")}</button>
+            <button type="button" className="ui-btn is-danger" disabled={busy} onClick={() => void act(cloudSyncNative.resetIdentity)}>{t("cloudSync.identity.reset")}</button>
+            <button type="button" className="ui-btn" disabled={busy} onClick={() => setConfirm(null)}>{t("cloudSync.cancel")}</button>
           </>
-          : <button type="button" disabled={busy} onClick={() => setConfirm("identity")}>{t("cloudSync.identity.reset")}</button>}
+          : <button type="button" className="ui-btn" disabled={busy} onClick={() => setConfirm("identity")}>{t("cloudSync.identity.reset")}</button>}
       </div>
     </div>}
 
@@ -342,10 +342,10 @@ function ConnectedView({ status }: { status: CloudSyncStatus & { connection: Non
       <div className="shelf-settings-actions">
         {confirm === "disconnect"
           ? <>
-            <button type="button" className="is-danger" disabled={busy} onClick={() => void act(cloudSyncNative.disconnect)}>{t("cloudSync.disconnect")}</button>
-            <button type="button" disabled={busy} onClick={() => setConfirm(null)}>{t("cloudSync.cancel")}</button>
+            <button type="button" className="ui-btn is-danger" disabled={busy} onClick={() => void act(cloudSyncNative.disconnect)}>{t("cloudSync.disconnect")}</button>
+            <button type="button" className="ui-btn" disabled={busy} onClick={() => setConfirm(null)}>{t("cloudSync.cancel")}</button>
           </>
-          : <button type="button" disabled={busy} onClick={() => setConfirm("disconnect")}>{t("cloudSync.disconnect")}</button>}
+          : <button type="button" className="ui-btn" disabled={busy} onClick={() => setConfirm("disconnect")}>{t("cloudSync.disconnect")}</button>}
       </div>
     </div>
   </>;
@@ -370,10 +370,10 @@ function DisconnectedProblem({ problem }: { problem: CloudSyncFailure }) {
     {problem.code === "local-state-invalid" && <>
       {confirm && <p className="shelf-settings-note">{t("cloudSync.disconnect.confirm")}</p>}
       <div className="shelf-settings-actions">
-        <button type="button" disabled={busy} onClick={() => confirm ? void disconnect() : setConfirm(true)}>
+        <button type="button" className="ui-btn" disabled={busy} onClick={() => confirm ? void disconnect() : setConfirm(true)}>
           {t("cloudSync.disconnect")}
         </button>
-        {confirm && <button type="button" disabled={busy} onClick={() => setConfirm(false)}>{t("cloudSync.cancel")}</button>}
+        {confirm && <button type="button" className="ui-btn" disabled={busy} onClick={() => setConfirm(false)}>{t("cloudSync.cancel")}</button>}
       </div>
     </>}
   </div>;

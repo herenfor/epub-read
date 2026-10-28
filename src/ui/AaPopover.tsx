@@ -37,6 +37,7 @@ import { useScrollEdgeFade } from "./scrollEdgeFade";
 import { useSliderFocus } from "./sliderFocus";
 import { readerTextBox, type ScreenBox } from "./readerPageBox";
 import { SliderDragContext, TouchSlider } from "./TouchSlider";
+import { Switch } from "./controls/Switch";
 
 const TURN_ANIMATION_OPTIONS: ReadonlyArray<{ value: TurnAnimation; labelKey: PlainMessageKey }> = [
   { value: "slide", labelKey: "aa.turn.slide" },
@@ -234,6 +235,7 @@ function StopSlider({ stops, value, onChange, label, valueText, disabled }: {
       max={stops.length - 1}
       step={1}
       value={index}
+      auto={stopValue(stops, index) === undefined}
       disabled={disabled}
       label={label}
       valueText={valueText}
@@ -259,10 +261,7 @@ function SwitchRow({ label, hint, warning, checked, disabled, onChange }: {
         {hint && <span className="aa-detail-sub">{hint}</span>}
         {warning && <span className="aa-detail-warning">{warning}</span>}
       </span>
-      <span className="aa-switch-label">
-        <input type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} />
-        <span className="aa-switch-track" />
-      </span>
+      <Switch inRow checked={checked} disabled={disabled} onChange={onChange} />
     </label>
   );
 }
@@ -568,6 +567,7 @@ export const AaPopover = React.memo(function AaPopover({
           max={MARGIN_LEVEL_COUNT - 1}
           step={1}
           value={marginPosition.index}
+          auto={marginPosition.index === 0}
           label={t("aa.margins")}
           valueText={marginText}
           onChange={(next) => {

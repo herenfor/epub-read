@@ -1,7 +1,12 @@
 import type { ReactNode } from "react";
 import { useUiText } from "./localization/UiLanguageProvider";
+import { Switch } from "./controls/Switch";
 
-/* Shared rows of the shelf settings page: icon tile, title, one muted line, trailing mark. */
+/*
+ * Shared rows of the settings page: title (14px, touch 15), one optional
+ * muted line, then the control, value or chevron. Only rows that open a
+ * page carry an icon tile.
+ */
 
 export function Icon({ children }: { children: ReactNode }) {
   return <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
@@ -45,14 +50,12 @@ export function SettingsRow(props: {
 }
 
 /** A row whose trailing control is a switch; the whole row toggles it. */
-export function SettingsSwitchRow(props: { icon: ReactNode; title: string; detail?: string; checked: boolean; onChange(checked: boolean): void }) {
-  return <label className="shelf-settings-row is-switch">
-    <span className="shelf-settings-row-icon">{props.icon}</span>
+export function SettingsSwitchRow(props: { title: string; detail?: string; checked: boolean; disabled?: boolean; onChange(checked: boolean): void }) {
+  return <label className={`shelf-settings-row is-switch${props.disabled ? " is-disabled" : ""}`}>
     <span className="shelf-settings-row-text">
       <strong>{props.title}</strong>
       {props.detail && <small>{props.detail}</small>}
     </span>
-    <input type="checkbox" role="switch" checked={props.checked} onChange={(event) => props.onChange(event.target.checked)} />
-    <span className="shelf-settings-switch-track" aria-hidden="true" />
+    <Switch inRow checked={props.checked} disabled={props.disabled} onChange={props.onChange} />
   </label>;
 }

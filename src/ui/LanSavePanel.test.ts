@@ -145,7 +145,7 @@ it("已连接且未选书时默认发送全部书籍、不附带书籍文件", a
     const button = (text: string) => Array.from(dom.container.querySelectorAll("button"))
       .find((item) => item.textContent?.trim() === text) as HTMLButtonElement;
     expect(button("已选的书").disabled).toBe(true);
-    expect((dom.container.querySelector("input.lan-switch") as HTMLInputElement).checked).toBe(false);
+    expect((dom.container.querySelector(".lan-switch-row input[role=switch]") as HTMLInputElement).checked).toBe(false);
     await dom.click(button("发送"));
     expect(session.send).toHaveBeenCalledWith("all", false);
   } finally {

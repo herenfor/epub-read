@@ -26,7 +26,6 @@ const FAILURE_KEYS: Readonly<Record<UpdateFailure, PlainMessageKey>> = {
 
 const ICONS = {
   check: <Icon><path d="M20 11a8 8 0 1 0-2.3 5.7" /><path d="M20 5v6h-6" /></Icon>,
-  auto: <Icon><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></Icon>,
 };
 
 function formatCheckedAt(at: number): string {
@@ -127,7 +126,7 @@ export function AppUpdateRows() {
       trailing={update.checking ? <span className="about-spinner" aria-hidden="true" /> : <span className="about-trailing-gap" />}
       onClick={() => void checkForUpdatesNow()} />
     {update.kind !== null && update.kind !== "unsupported" &&
-      <SettingsSwitchRow icon={ICONS.auto} title={t("about.update.autoCheck")} detail={t("about.update.autoCheck.detail")}
+      <SettingsSwitchRow title={t("about.update.autoCheck")} detail={t("about.update.autoCheck.detail")}
         checked={update.autoCheck} onChange={setAutoCheckUpdates} />}
   </>;
 }

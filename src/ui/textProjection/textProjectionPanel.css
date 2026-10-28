@@ -123,9 +123,6 @@
   height: 44px;
   min-height: 44px;
 }
-.app[data-touch-ui="true"] .text-projection-rule-actions .aa-switch-label {
-  min-height: 44px;
-}
 .app[data-touch-ui="true"] .text-projection-output {
   min-height: 44px;
   padding: 11px 12px;
