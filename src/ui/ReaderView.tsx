@@ -20,6 +20,7 @@ import {
   type RestoreReportTicket,
 } from "../render/paginator";
 import type { ResourceServer } from "../render/resources";
+import { readerMediaPlaybackText } from "./mediaPlaybackText";
 import { arrowKeyDirection, effectivePageProgression, normalizeTurnAnimation, type ReaderSettings, type TurnAnimation } from "../render/settings";
 import { textProjectionVersion, type CompiledTextProjection } from "../render/textProjection/compile";
 import {
@@ -1022,6 +1023,7 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
     // Display-ready callbacks can outlive the render that created them.
     slot.renderSettings = latestRenderSettingsRef.current;
     const paginator = new ChapterPaginator({
+      mediaText: readerMediaPlaybackText,
       iframe: slot.iframe,
       server: server,
       settings: slot.renderSettings,

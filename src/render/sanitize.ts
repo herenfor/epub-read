@@ -8,6 +8,7 @@ import { childElements } from "../core/xml";
 import { imageLayoutPolicy, scrollMediaDefaultsCss } from "./imageLayoutPolicy";
 import { buildThemeCss } from "./readerTheme";
 import { TEXT_MEASURE, type ReaderSettings } from "./settings";
+import { deferPlaybackSource, isPlaybackSource, MEDIA_PLAYER_CSS } from "./mediaMarkup";
 
 export interface SanitizeOptions {
   archiveReferences?: ArchiveReferences;
@@ -320,6 +321,7 @@ export async function sanitizeChapter(
   if (!root) {
     throw new Error("章节内容为空，无法渲染");
   }
+  let hasMedia = false;
 
   // 1) 移除危险标签
   for (const el of Array.from(doc.getElementsByTagName("*"))) {
@@ -351,13 +353,25 @@ export async function sanitizeChapter(
     if (!el.hasAttribute("lang") && el.hasAttribute("xml:lang")) {
       el.setAttribute("lang", el.getAttribute("xml:lang") ?? "");
     }
+    let playbackHref: string | undefined;
     for (const attr of Array.from(el.attributes)) {
       const name = attr.name.toLowerCase();
+      // Strip authored copies before creating trusted references below. Reuse
+      // the existing attribute pass, including in chapters with no media.
+      if (name.startsWith("data-reader-media-")) {
+        el.removeAttribute(attr.name);
+        continue;
+      }
       if (name.startsWith("on")) {
         el.removeAttribute(attr.name);
         continue;
       }
       if (name === "src" || name === "poster" || name === "data" || name === "xlink:href" || (opts.archiveReferences && name === "href" && (tag === "image" || tag === "use"))) {
+        if (name === "src" && isPlaybackSource(el)) {
+          playbackHref = attr.value;
+          el.removeAttribute(attr.name);
+          continue;
+        }
         const value = attr.value.trim();
         if (!value) continue;
         if (/^\s*javascript:/i.test(value)) {
@@ -379,6 +393,22 @@ export async function sanitizeChapter(
       } else if (name === "href" && el.tagName.toLowerCase() === "a") {
         const value = attr.value.trim();
         if (/^\s*javascript:/i.test(value)) el.removeAttribute(attr.name);
+      }
+    }
+    if (playbackHref !== undefined) deferPlaybackSource(el, playbackHref, opts.basePath, opts.archiveReferences);
+
+    if (tag === "audio" || tag === "video") {
+      hasMedia = true;
+      el.removeAttribute("autoplay");
+      el.setAttribute("controls", "");
+      el.setAttribute("preload", "none");
+      // Wry 0.55 Android immediately rejects custom fullscreen views. Keep
+      // this first player inline rather than exposing a non-working action.
+      el.setAttribute("controlslist", "nofullscreen noremoteplayback nodownload");
+      el.setAttribute("disableremoteplayback", "");
+      if (tag === "video") {
+        el.setAttribute("playsinline", "");
+        el.setAttribute("disablepictureinpicture", "");
       }
     }
 
@@ -614,9 +644,15 @@ export async function sanitizeChapter(
   csp.setAttribute("http-equiv", "Content-Security-Policy");
   csp.setAttribute(
     "content",
-    "default-src 'none'; style-src 'unsafe-inline' blob:; img-src blob: data: https: http:; font-src blob: data:; script-src 'none'; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'"
+    "default-src 'none'; style-src 'unsafe-inline' blob:; img-src blob: data: https: http:; font-src blob: data:; media-src blob:; script-src 'none'; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'"
   );
   head.appendChild(csp);
+  if (hasMedia) {
+    const mediaStyle = doc.createElement("style");
+    mediaStyle.setAttribute("data-reader", "media-playback");
+    mediaStyle.textContent = MEDIA_PLAYER_CSS;
+    head.appendChild(mediaStyle);
+  }
 
   // 滚动模式：viewer 是唯一纵向滚动容器；分页的固定页高/整页图 100% 高度
   // 只属于分页图页。放在所有书样式之后，只在本次加载生效。

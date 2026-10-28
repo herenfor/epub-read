@@ -112,6 +112,7 @@ import {
 } from "./spreadReadingArea";
 import { applyBasicVerticalShell, applyBasicVerticalMediaBounds, basicVerticalAutoMargins, basicVerticalGridBottom, basicVerticalMode, verticalProgression, type VerticalWritingMode } from "./basicVertical";
 import { VerticalPageGaps } from "./vertical/pageGaps";
+import { installChapterMediaPlayback, type ChapterMediaPlayback, type MediaPlaybackText } from "./mediaPlayback";
 
 /** 滚动模式全书末尾提示的文案；由界面层按当前界面语言注入，分页核心不依赖语言模块。 */
 export interface ReaderEndText {
@@ -2531,6 +2532,7 @@ export interface ChapterPaginatorOptions {
   server: ResourceServer;
   settings: ReaderSettings;
   strictXml: boolean;
+  mediaText?: () => MediaPlaybackText;
   onState: (s: ChapterState) => void;
   onIssues?: (issues: string[], unresolvedResources: readonly string[]) => void;
   /** 固定版式书：不做行宽自适应，整页显示 */
@@ -2923,6 +2925,8 @@ export class ChapterPaginator {
   private server: ResourceServer;
   private settings: ReaderSettings;
   private strictXml: boolean;
+  private mediaText?: () => MediaPlaybackText;
+  private mediaPlayback: ChapterMediaPlayback | null = null;
   private onState: (s: ChapterState) => void;
   private onIssues?: (issues: string[], unresolvedResources: readonly string[]) => void;
   private fixedLayout: boolean;
@@ -3011,6 +3015,7 @@ export class ChapterPaginator {
     server,
     settings,
     strictXml,
+    mediaText,
     onState,
     onIssues,
     fixedLayout = false,
@@ -3038,6 +3043,7 @@ export class ChapterPaginator {
     this.strictXml = strictXml;
     this.onState = onState;
     this.onIssues = onIssues;
+    this.mediaText = mediaText;
     this.fixedLayout = fixedLayout;
     this.bookPageProgression = pageProgression;
     this.onNavigate = onNavigate;
@@ -3203,6 +3209,7 @@ export class ChapterPaginator {
   /** Only the visible foreground chapter retains a bounded compositor window. */
   setMotionWindowForeground(foreground: boolean): void {
     this.motionWindowForeground = foreground;
+    if (!foreground) this.mediaPlayback?.stop();
     if (!foreground) this.disposePageMotion();
     else if (this.isDisplayReady) this.prepareMotion();
   }
@@ -4083,6 +4090,10 @@ export class ChapterPaginator {
       return;
     }
     this.viewer = viewer;
+    this.mediaPlayback = installChapterMediaPlayback(doc, this.server, {
+      text: this.mediaText,
+      onMetadata: () => this.scheduleReflow(),
+    });
     this.identifyCenteredTitleCandidate();
     this.applyExternalScrollOwnership();
     if (this.pagedSwipe && !this.scrollMode) {
@@ -9665,6 +9676,7 @@ export class ChapterPaginator {
 
   /** 键盘翻页（书页内焦点）。 */
   private handleKey(e: KeyboardEvent): void {
+    if ((e.target as Element | null)?.closest?.("audio,video,[data-reader-media-player]")) return;
     if (isSelectAllShortcut(e)) {
       e.preventDefault();
       clearDocumentSelection(this.contentDoc);
@@ -9711,6 +9723,7 @@ export class ChapterPaginator {
 
   /** 滚轮翻页：分页模式累积翻页；滚动模式到章首/章末边界时累积切换上一章/下一章。 */
   private handleWheel(e: WheelEvent): void {
+    if ((e.target as Element | null)?.closest?.("audio,video,[data-reader-media-player]")) return;
     if (this.externalScroll) {
       if (!this.viewer || e.deltaY === 0) return;
       const deltaY = continuousWheelPixels(
@@ -9849,6 +9862,12 @@ export class ChapterPaginator {
   private handleLinkClick(e: Event): void {
     const target = e.target as Element | null;
     if (!target || typeof target.closest !== "function") return;
+    if (target.closest("audio,video,[data-reader-media-player]")) {
+      // Interactive media wins over a book's wrapping link, without leaving
+      // the anchor's native navigation free to unload the chapter iframe.
+      if (target.closest("a[href]")) e.preventDefault();
+      return;
+    }
     const a = target.closest<HTMLAnchorElement>("a");
     if (!a) return;
     const href = (a.getAttribute("href") ?? "").trim();
@@ -10179,6 +10198,8 @@ export class ChapterPaginator {
   }
 
   private cleanupDoc(): void {
+    this.mediaPlayback?.dispose();
+    this.mediaPlayback = null;
     this.motionCompanions = [];
     this.leadingColumnGap.dispose();
     this.leadingColumnApplied = false;
@@ -10335,6 +10356,7 @@ export class ChapterPaginator {
   }
 
   private emit(s: ChapterState): void {
+    this.mediaPlayback?.stopIfOutsideViewport();
     try {
       this.syncPageBackground();
     } catch {

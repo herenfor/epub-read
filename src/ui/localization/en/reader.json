@@ -2,5 +2,12 @@
   "reader.toc": "Contents",
   "reader.bookmarks": "Bookmarks",
   "reader.notes": "Notes",
-  "reader.hideSystemStatusBar": "Hide system status bar while reading"
+  "reader.hideSystemStatusBar": "Hide system status bar while reading",
+  "reader.media.audio": "Load and play audio",
+  "reader.media.video": "Load and play video",
+  "reader.media.loading": "Loading media…",
+  "reader.media.retry": "Media could not be loaded. Tap to retry",
+  "reader.media.unavailable": "No embedded media file found (external media links are not supported yet)",
+  "reader.media.unsupported": "This device cannot play this media format",
+  "reader.media.play": "Tap to play"
 }

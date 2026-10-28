@@ -35,6 +35,7 @@ import {
   type RestoreReportTicket,
 } from "../render/paginator";
 import type { ResourceServer } from "../render/resources";
+import { readerMediaPlaybackText } from "./mediaPlaybackText";
 import type { ReaderSettings } from "../render/settings";
 import { textProjectionVersion, type CompiledTextProjection } from "../render/textProjection/compile";
 import {
@@ -1496,6 +1497,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
         let slot: ActiveSlot;
 
         const paginator = new ChapterPaginator({
+          mediaText: readerMediaPlaybackText,
           iframe: iframe,
           server: server,
           settings: renderSettings,
@@ -2570,6 +2572,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
               // 设置变更会让 key 变化并重建 iframe，这里显式销毁上一份 paginator
               auxPaginatorRef.current?.dispose();
               const paginator = new ChapterPaginator({
+                mediaText: readerMediaPlaybackText,
                 iframe: node,
                 server: server,
                 settings: renderSettings,
