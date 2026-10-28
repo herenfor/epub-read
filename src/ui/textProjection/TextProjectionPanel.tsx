@@ -133,7 +133,7 @@ export function TextProjectionPanel(props: TextProjectionPanelProps) {
           <span className="aa-section-label">{t("display.text.rules")}</span>
           <span className="aa-detail-sub">{t("display.text.rules.order")}</span>
         </div>
-        <button type="button" className="aa-mini-action-btn" onClick={addRule} disabled={props.disabled}>
+        <button type="button" className="ui-btn" onClick={addRule} disabled={props.disabled}>
           <PlusIcon size={12} />
           {t("display.text.rules.add")}
         </button>
@@ -204,7 +204,7 @@ export function TextProjectionPanel(props: TextProjectionPanelProps) {
       </div>
 
       <div className="rd-actions">
-        <button type="button" className="aa-mini-action-btn" onClick={restoreOriginal} disabled={props.disabled}>
+        <button type="button" className="ui-btn" onClick={restoreOriginal} disabled={props.disabled}>
           <RotateCcwIcon size={12} />
           {t("display.text.restore")}
         </button>

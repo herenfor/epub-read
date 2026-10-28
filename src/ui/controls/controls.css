@@ -139,3 +139,47 @@
 .ui-text-btn.is-muted:hover:not(:disabled) {
   color: var(--fg);
 }
+
+/* ---- Theme cards (Settings › Appearance and Aa) ---- */
+.ui-theme-cards {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.ui-theme-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 0 7px;
+  border: 1px solid var(--swatch-border);
+  border-radius: 12px;
+  background: var(--swatch-bg);
+  color: var(--swatch-fg);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ui-theme-card.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.ui-theme-card:disabled {
+  cursor: default;
+}
+
+.ui-theme-card-sample {
+  font-family: var(--font-reading, serif);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.app[data-touch-ui="true"] .ui-theme-card {
+  font-size: 13px;
+}
