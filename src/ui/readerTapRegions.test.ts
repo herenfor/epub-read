@@ -128,12 +128,12 @@ describe("tap region panel", () => {
       expect(band("right")?.style.left).toBe("80%");
       expect(band("right")?.style.width).toBe("20%");
       expect(dom.container.textContent).toContain("左侧点击也下一页");
-      expect(dom.container.querySelectorAll('input[type="range"]')).toHaveLength(2);
+      expect(dom.container.querySelectorAll('[role="slider"]')).toHaveLength(2);
 
       await render("pc", 1200);
       expect(band("left")?.style.width).toBe("5%");
       expect(dom.container.textContent).not.toContain("左侧点击也下一页");
-      expect(dom.container.querySelector('input[type="range"]')).toBeNull();
+      expect(dom.container.querySelector('[role="slider"]')).toBeNull();
       const customButton = [...dom.container.querySelectorAll(".aa-segmented-btn")]
         .find((button) => button.textContent === "自定义")!;
       await dom.click(customButton);

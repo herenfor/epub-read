@@ -7,6 +7,7 @@ import type { ReaderTapPreferences } from "./readerTapRegions";
 import type { ReaderTapRegionSettings } from "./readerTapRouting";
 import "./readerTapRegions.css";
 import "./shelfSettings.css";
+import { Switch } from "./controls/Switch";
 
 /** Reading preferences shared by Settings › Reading on the shelf and the in-reader layer. */
 export interface ReadingSettingsProps {
@@ -28,8 +29,7 @@ export interface ReadingSettingsProps {
 export function SettingsSwitch(props: { label: string; checked: boolean; onChange(checked: boolean): void }) {
   return <label className="shelf-settings-switch">
     <span className="shelf-settings-switch-label">{props.label}</span>
-    <input type="checkbox" role="switch" checked={props.checked} onChange={(event) => props.onChange(event.target.checked)} />
-    <span className="shelf-settings-switch-track" aria-hidden="true" />
+    <Switch inRow checked={props.checked} onChange={props.onChange} />
   </label>;
 }
 

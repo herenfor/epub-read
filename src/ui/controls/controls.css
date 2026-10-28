@@ -1,0 +1,141 @@
+/*
+ * Shared control styles: one segmented control and one set of buttons for
+ * the whole app. The older class names (aa-segmented-capsule,
+ * shelf-segmented, lan-segmented) keep only their layout locally and take
+ * their look from here.
+ */
+
+/* ---- Segmented control: gray track, white selected block; 32 tall (touch 36). ---- */
+:is(.ui-segmented, .aa-segmented-capsule, .shelf-segmented, .lan-segmented) {
+  box-sizing: border-box;
+  height: auto;
+  min-height: 32px;
+  padding: 2px;
+  gap: 2px;
+  border-radius: 9px;
+  background: var(--ui-segment-bg);
+}
+
+:is(.ui-segmented, .aa-segmented-capsule, .shelf-segmented, .lan-segmented) > button {
+  height: auto;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color var(--ui-control-quick) var(--ui-ease), color var(--ui-control-quick) var(--ui-ease);
+}
+
+:is(.ui-segmented, .aa-segmented-capsule, .shelf-segmented, .lan-segmented) > button:hover:not(:disabled) {
+  color: var(--fg);
+}
+
+:is(.ui-segmented, .aa-segmented-capsule, .shelf-segmented, .lan-segmented) > button:is(.active, [aria-checked="true"], [aria-pressed="true"]) {
+  background: var(--panel-card);
+  color: var(--fg);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.app:is([data-theme="dark"], [data-theme="gray"]) :is(.ui-segmented, .aa-segmented-capsule, .shelf-segmented, .lan-segmented) > button:is(.active, [aria-checked="true"], [aria-pressed="true"]) {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+
+:is(.ui-segmented, .aa-segmented-capsule, .shelf-segmented, .lan-segmented) > button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.app[data-touch-ui="true"] :is(.ui-segmented, .aa-segmented-capsule, .shelf-segmented, .lan-segmented) {
+  min-height: 36px;
+}
+
+.app[data-touch-ui="true"] :is(.ui-segmented, .aa-segmented-capsule, .shelf-segmented, .lan-segmented) > button {
+  min-height: 32px;
+  font-size: 14px;
+}
+
+/* ---- Buttons: primary (solid), secondary (outline), danger (red outline). 32 tall (touch 36). ---- */
+.ui-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  box-sizing: border-box;
+  min-height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--ui-border-control);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--ui-control-quick) var(--ui-ease), border-color var(--ui-control-quick) var(--ui-ease);
+}
+
+.ui-btn:hover:not(:disabled) {
+  background: var(--ui-control-hover);
+}
+
+.ui-btn.is-primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--ui-on-solid-accent);
+}
+
+.ui-btn.is-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 88%, #000);
+}
+
+.ui-btn.is-danger {
+  border-color: color-mix(in srgb, var(--ui-danger) 45%, transparent);
+  color: var(--ui-danger);
+}
+
+.ui-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.ui-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.app[data-touch-ui="true"] .ui-btn {
+  min-height: 36px;
+  font-size: 14px;
+}
+
+/* A quiet text button (group-title actions, footer links). */
+.ui-text-btn {
+  padding: 4px 2px;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.ui-text-btn:disabled {
+  color: var(--muted);
+  opacity: 0.6;
+  cursor: default;
+}
+
+.ui-text-btn.is-muted {
+  color: var(--muted);
+}
+
+.ui-text-btn.is-muted:hover:not(:disabled) {
+  color: var(--fg);
+}

@@ -92,7 +92,6 @@ const ROW_ICONS = {
   cache: <Icon><ellipse cx="12" cy="6" rx="7" ry="3" /><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6" /><path d="M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" /></Icon>,
   log: <Icon><path d="M7 3.5h7l4 4V20a.5.5 0 0 1-.5.5h-10A.5.5 0 0 1 7 20z" /><path d="M14 3.5V8h4M10 12.5h5M10 16h5" /></Icon>,
   library: <Icon><path d="M5 4.5h5v15H5zM10 4.5h4v15h-4z" /><path d="m15 5.5 3.5-.9 3 14-3.5.9z" /></Icon>,
-  copy: <Icon><rect x="8" y="8" width="11" height="12" rx="1.5" /><path d="M5 15.5V5.5A1.5 1.5 0 0 1 6.5 4H15" /></Icon>,
   move: <Icon><path d="M3.5 7.5v10A1.5 1.5 0 0 0 5 19h14a1.5 1.5 0 0 0 1.5-1.5V9A1.5 1.5 0 0 0 19 7.5h-7L10 5H5A1.5 1.5 0 0 0 3.5 6.5z" /><path d="M9 13h6.5M13 10.5l2.5 2.5-2.5 2.5" /></Icon>,
 };
 
@@ -274,7 +273,7 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
           <SettingsRow icon={ROW_ICONS.library} title={t("shelfSettings.library")}
             detail={displayPath(library.libraryDirectory) || t("shelfSettings.library.unknown")}
             onClick={() => { setLibraryOpenError(null); void openLibraryFolder().catch((error: unknown) => setLibraryOpenError(String((error as Error).message ?? error))); }} />
-          <SettingsSwitchRow icon={ROW_ICONS.copy} title={t("shelfSettings.library.copy")} detail={t("shelfSettings.library.copy.detail")}
+          <SettingsSwitchRow title={t("shelfSettings.library.copy")} detail={t("shelfSettings.library.copy.detail")}
             checked={library.copyOnImport} onChange={(copy) => void setCopyOnImport(copy)} />
           {libraryLocationWarning !== undefined && <SettingsRow icon={ROW_ICONS.move} title={t("libraryLocation.row")}
             detail={libraryLocationWarning ?? t("libraryLocation.row.detail")} dot={libraryLocationWarning ?? false}
@@ -289,9 +288,9 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
           <p className="shelf-settings-note">{t("shelfSettings.index.detail")}</p>
           {body.indexStatus && <SearchIndexCard props={{ ...body, onClose: () => undefined}} />}
           {(body.onRebuildIndex || body.onClearIndex) && <div className="shelf-settings-actions">
-            {body.onRebuildIndex && <button type="button" disabled={body.status === "searching" || indexing || indexBusy}
+            {body.onRebuildIndex && <button type="button" className="ui-btn" disabled={body.status === "searching" || indexing || indexBusy}
               onClick={() => runIndex(body.onRebuildIndex)}>{t("search.rebuild")}</button>}
-            {body.onClearIndex && <button type="button" disabled={body.status === "searching" || indexing || indexBusy}
+            {body.onClearIndex && <button type="button" className="ui-btn is-danger" disabled={body.status === "searching" || indexing || indexBusy}
               onClick={() => runIndex(body.onClearIndex)}>{t("search.clearIndex")}</button>}
           </div>}
         </div>}

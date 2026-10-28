@@ -6,6 +6,7 @@ import { useSheetDrag } from "./sheetDrag";
 import { useScrollEdgeFade } from "./scrollEdgeFade";
 import { useUiText } from "./localization/UiLanguageProvider";
 import "./aaPopover.css";
+import { Switch } from "./controls/Switch";
 
 export interface FontSettingsPanelProps {
   source?: "system" | "imported";
@@ -167,11 +168,10 @@ export function FontSettingsPanel(props: FontSettingsPanelProps) {
         <button type="button" className={`aa-segmented-btn${tab === "system" ? " active" : ""}`} onClick={() => selectTab("system")}>{t("fonts.tab.system", { count: systems.length })}</button>
         <button type="button" className={`aa-segmented-btn${tab === "imported" ? " active" : ""}`} onClick={() => selectTab("imported")}>{t("fonts.tab.imported", { count: imported.length })}</button>
       </div>
-      {props.onForceFontOverrideChange && <label className="aa-switch-label font-override-switch" title={t("fonts.override.hint")}>
+      {props.onForceFontOverrideChange && <label className="font-override-switch" title={t("fonts.override.hint")}>
         <span>{t("fonts.override")}</span>
-        <input type="checkbox" checked={props.forceFontOverride === true} disabled={!props.source}
-          onChange={(event) => props.onForceFontOverrideChange?.(event.target.checked)} />
-        <span className="aa-switch-track" />
+        <Switch inRow checked={props.forceFontOverride === true} disabled={!props.source}
+          onChange={(checked) => props.onForceFontOverrideChange?.(checked)} />
       </label>}
     </div>
     {props.onForceFontOverrideChange && <span className="font-settings-override-hint">{t("fonts.override.hint")}</span>}

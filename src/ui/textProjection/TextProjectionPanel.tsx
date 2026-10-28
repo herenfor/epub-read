@@ -11,6 +11,7 @@ import { ChevronDownIcon, CloseIcon, PlusIcon, RotateCcwIcon } from "../readerIc
 import "./textProjectionPanel.css";
 import { uiText, useUiText } from "../localization/UiLanguageProvider";
 import type { PlainMessageKey } from "../localization/core";
+import { Switch } from "../controls/Switch";
 
 export interface TextProjectionPanelProps {
   /** Fully controlled preference snapshot. */
@@ -164,16 +165,13 @@ export function TextProjectionPanel(props: TextProjectionPanelProps) {
                 />
               </div>
               <div className="text-projection-rule-actions">
-                <label className="aa-switch-label" title={rule.enabled ? t("display.text.rule.disable") : t("display.text.rule.enable")}>
-                  <input
-                    type="checkbox"
-                    checked={rule.enabled}
-                    disabled={props.disabled}
-                    aria-label={t("display.text.rule.enableN", { n: index + 1 })}
-                    onChange={(event) => updateRule(rule.id, { enabled: event.target.checked })}
-                  />
-                  <span className="aa-switch-track" />
-                </label>
+                <Switch
+                  title={rule.enabled ? t("display.text.rule.disable") : t("display.text.rule.enable")}
+                  checked={rule.enabled}
+                  disabled={props.disabled}
+                  label={t("display.text.rule.enableN", { n: index + 1 })}
+                  onChange={(checked) => updateRule(rule.id, { enabled: checked })}
+                />
                 <span className="text-projection-rule-state">{rule.enabled ? t("display.text.rule.on") : t("display.text.rule.off")}</span>
                 <span className="text-projection-rule-spacer" />
                 <button type="button" className="aa-step-reset-btn" onClick={() => props.onChange({ ...props.preferences, rules: moveRule(props.preferences.rules, index, -1) })} disabled={props.disabled || index === 0} title={t("display.text.rule.up")} aria-label={t("display.text.rule.up")}>

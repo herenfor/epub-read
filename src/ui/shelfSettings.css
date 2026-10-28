@@ -2,32 +2,10 @@
    层级与旧书架抽屉相同（80）：导出进度、局域网面板、日志与提示仍在其上。 */
 
 /* ---- 通用控件 ---- */
+/* Look: controls/controls.css. */
 .shelf-segmented {
   display: inline-flex;
   flex-wrap: wrap;
-  gap: 2px;
-  padding: 3px;
-  border-radius: 10px;
-  background: var(--ui-control-bg, color-mix(in srgb, var(--fg) 6%, transparent));
-}
-
-.shelf-segmented button {
-  min-height: 32px;
-  padding: 0 12px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--muted);
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.shelf-segmented button.active {
-  background: var(--bg);
-  color: var(--fg);
-  font-weight: 600;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
 }
 
 /* ---- 设置页 ---- */
@@ -341,11 +319,16 @@
 }
 
 .shelf-settings-row-text strong {
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.app[data-touch-ui="true"] .shelf-settings-row-text strong {
+  font-size: 15px;
 }
 
 .shelf-settings-row-text small {
-  font-size: 12.5px;
+  font-size: 12px;
   color: var(--muted);
   white-space: nowrap;
   overflow: hidden;
@@ -376,72 +359,18 @@
   flex: 1;
 }
 
-.shelf-settings-switch input {
-  position: absolute;
-  opacity: 0;
-  width: 1px;
-  height: 1px;
-}
-
-.shelf-settings-switch-track {
-  position: relative;
-  flex: 0 0 auto;
-  width: 46px;
-  height: 28px;
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--fg) 18%, transparent);
-  transition: background-color var(--ui-toggle, 160ms) ease;
-}
-
-.shelf-settings-switch-track::after {
-  content: "";
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 22px;
-  height: 22px;
-  border-radius: 11px;
-  background: #ffffff;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
-  transition: transform var(--ui-toggle, 160ms) ease;
-}
-
-.shelf-settings-switch input:checked + .shelf-settings-switch-track {
-  background: var(--accent);
-}
-
-.shelf-settings-switch input:checked + .shelf-settings-switch-track::after {
-  transform: translateX(18px);
-}
-
-.shelf-settings-switch input:focus-visible + .shelf-settings-switch-track {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
 /* A list row that carries a switch (settingsRows SettingsSwitchRow). */
 .shelf-settings-row.is-switch {
   position: relative;
+  min-height: 52px;
 }
 
-.shelf-settings-row.is-switch input {
-  position: absolute;
-  opacity: 0;
-  width: 1px;
-  height: 1px;
+.shelf-settings-row.is-switch.is-disabled {
+  cursor: default;
 }
 
-.shelf-settings-row.is-switch input:checked + .shelf-settings-switch-track {
-  background: var(--accent);
-}
-
-.shelf-settings-row.is-switch input:checked + .shelf-settings-switch-track::after {
-  transform: translateX(18px);
-}
-
-.shelf-settings-row.is-switch input:focus-visible + .shelf-settings-switch-track {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+.shelf-settings-row.is-switch.is-disabled .shelf-settings-row-text {
+  opacity: 0.45;
 }
 
 .shelf-settings-actions {
@@ -450,22 +379,6 @@
   gap: 8px;
 }
 
-.shelf-settings-actions button {
-  min-height: 34px;
-  padding: 0 14px;
-  border: 1px solid var(--panel-border);
-  border-radius: 9px;
-  background: var(--bg);
-  color: var(--fg);
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.shelf-settings-actions button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
 
 .shelf-settings-group-label {
   margin: 4px 4px -6px;

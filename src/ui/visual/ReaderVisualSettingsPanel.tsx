@@ -6,6 +6,7 @@ import {
 import { RotateCcwIcon } from "../readerIcons";
 import "./readerVisualSettingsPanel.css";
 import { TouchSlider } from "../TouchSlider";
+import { Switch } from "../controls/Switch";
 import { useUiText } from "../localization/UiLanguageProvider";
 
 export function isVisualCompareKey(key: string): boolean {
@@ -90,29 +91,15 @@ export function ReaderVisualSettingsPanel(props: ReaderVisualSettingsPanelProps)
             <span className="aa-section-label">{t("display.visual.enable")}</span>
             <span className="aa-detail-sub">{t("display.visual.enable.note")}</span>
           </div>
-          <label className="aa-switch-label">
-            <input
-              type="checkbox"
-              checked={props.value.enabled}
-              aria-label={t("display.visual.enable.label")}
-              onChange={(event) => commit({ enabled: event.currentTarget.checked })}
-            />
-            <span className="aa-switch-track" />
-          </label>
+          <Switch checked={props.value.enabled} label={t("display.visual.enable.label")}
+            onChange={(checked) => commit({ enabled: checked })} />
         </div>
 
         <div className={`rd-controls${props.value.enabled ? "" : " rd-disabled"}`} aria-disabled={!props.value.enabled}>
           <div className="aa-control-row">
             <span className="aa-section-label">{t("display.visual.invert")}</span>
-            <label className="aa-switch-label">
-              <input
-                type="checkbox"
-                checked={props.value.invert}
-                aria-label={t("display.visual.invert.label")}
-                onChange={(event) => commit({ invert: event.currentTarget.checked })}
-              />
-              <span className="aa-switch-track" />
-            </label>
+            <Switch checked={props.value.invert} label={t("display.visual.invert.label")}
+              onChange={(checked) => commit({ invert: checked })} />
           </div>
           <VisualSlider
             label={t("display.visual.grayscale")}
