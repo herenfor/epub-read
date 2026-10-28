@@ -5289,10 +5289,10 @@ select option {
   flex-direction: column;
   gap: 4px;
   padding: 12px 12px 12px;
-  background: color-mix(in srgb, var(--panel-bg) 96%, transparent);
+  background: color-mix(in srgb, var(--panel-surface) 96%, transparent);
   color: var(--fg);
   border-top: 1px solid color-mix(in srgb, var(--panel-border) 60%, transparent);
-  border-radius: 16px 16px 0 0;
+  border-radius: 20px 20px 0 0;
   box-shadow: 0 -16px 40px rgba(0, 0, 0, 0.2);
   /* 同搜索面板：底色 96% 不透明，不用毛玻璃（切后台回来首开会丢 9～16 帧）。 */
   animation: aaMobileSheetIn var(--menu-open) var(--ease-emphasized);
@@ -5316,18 +5316,12 @@ select option {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--panel-border) 70%, transparent);
-  border-radius: 14px;
-  background: var(--bg);
+  border-radius: 12px;
+  background: var(--panel-card);
 }
 
 .mobile-more-list .shelf-settings-row {
   min-height: 56px;
-}
-
-/* 与同卡片里的开关标签同一字重。 */
-.mobile-more-list .shelf-settings-row-text strong {
-  font-weight: 400;
 }
 
 .mobile-more-list .shelf-settings-row:hover,
@@ -5833,7 +5827,7 @@ select option {
   /* 与 Aa 主面板同高：上方正文照样露出，选字体时就能看到效果；列表在面板内滚动。 */
   height: min(var(--aa-sheet-height, 404px), calc(var(--visual-viewport-height, 100vh) * 0.9)) !important;
   max-height: none !important;
-  border-radius: 16px 16px 0 0 !important;
+  border-radius: 20px 20px 0 0 !important;
   transform: none !important;
   animation: aaMobileSheetIn var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1) !important;
   gap: 6px;

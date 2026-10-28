@@ -50,5 +50,4 @@ export const TAP_REGION_LABEL_KEYS = {
   rightForward: "tapRegions.rightForward",
   tapHint: "tapRegions.tapHint",
   tapHintHint: "tapRegions.tapHint.hint",
-  reset: "tapRegions.reset",
 } as const satisfies Record<string, keyof typeof tapRegions.zh>;

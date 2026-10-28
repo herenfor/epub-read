@@ -2,12 +2,11 @@ import { useMemo, type ReactNode } from "react";
 import { useExitPresence } from "./menuMotion";
 import { useUiText } from "./localization/UiLanguageProvider";
 import { TAP_REGION_LABEL_KEYS } from "./localization/catalogs/tapRegions";
-import { ReaderTapRegionsPanel, type ReaderTapRegionsLabels } from "./ReaderTapRegionsPanel";
+import { ReaderTapRegionsPanel, tapRegionsReset, type ReaderTapRegionsLabels } from "./ReaderTapRegionsPanel";
 import type { ReaderTapPreferences } from "./readerTapRegions";
 import type { ReaderTapRegionSettings } from "./readerTapRouting";
 import "./readerTapRegions.css";
 import "./shelfSettings.css";
-import { Switch } from "./controls/Switch";
 import { SettingsSwitchRow } from "./settingsRows";
 
 /** Reading preferences shared by Settings › Reading on the shelf and the in-reader layer. */
@@ -35,11 +34,9 @@ export interface ReadingSettingsProps {
   onSeamlessChapterTurnChange?(enabled: boolean): void;
 }
 
+/** A one-line switch row (the reader's phone "More" sheet). */
 export function SettingsSwitch(props: { label: string; checked: boolean; onChange(checked: boolean): void }) {
-  return <label className="shelf-settings-switch">
-    <span className="shelf-settings-switch-label">{props.label}</span>
-    <Switch inRow checked={props.checked} onChange={props.onChange} />
-  </label>;
+  return <SettingsSwitchRow title={props.label} checked={props.checked} onChange={props.onChange} />;
 }
 
 /** Titles of the reading items present on this runtime, in display order (for a section's summary line). */
@@ -82,15 +79,28 @@ export function ReadingSettingsContent(props: ReadingSettingsProps) {
   if (props.batteryIndicatorEnabled !== undefined && props.onBatteryIndicatorChange) {
     switches.push(<SettingsSwitchRow key="battery" title={t("shelfMenu.battery.tip")} checked={props.batteryIndicatorEnabled} onChange={props.onBatteryIndicatorChange} />);
   }
+  const tapReset = props.tapRegions ? tapRegionsReset(props.tapRegions.preferences, props.tapRegions.device) : null;
+  // Groups: label outside, one card each; the tap preview sits directly in its card.
   return <>
-    {props.tapRegions && props.onTapRegionsChange && <div className="shelf-settings-card">
-      <div className="shelf-settings-card-title">{t("tapRegions.title")}</div>
-      <ReaderTapRegionsPanel device={props.tapRegions.device} value={props.tapRegions.preferences}
-        onChange={props.onTapRegionsChange} availableWidth={window.innerWidth} availableHeight={window.innerHeight}
-        scrollMode={props.tapRegionsScrollMode} schematic labels={tapLabels}
-        progression={props.tapRegions.progression} />
-    </div>}
-    {switches.length > 0 && <div className="shelf-settings-card is-list">{switches}</div>}
+    {props.tapRegions && props.onTapRegionsChange && <section className="shelf-settings-group">
+      <div className="shelf-settings-group-head">
+        <span className="shelf-settings-group-label">{t("tapRegions.title")}</span>
+        <button type="button" className="ui-text-btn" disabled={!tapReset}
+          onClick={() => { if (tapReset) props.onTapRegionsChange!(tapReset); }}>{t("tapRegions.reset")}</button>
+      </div>
+      <div className="shelf-settings-card">
+        <ReaderTapRegionsPanel device={props.tapRegions.device} value={props.tapRegions.preferences}
+          onChange={props.onTapRegionsChange} availableWidth={window.innerWidth} availableHeight={window.innerHeight}
+          scrollMode={props.tapRegionsScrollMode} schematic labels={tapLabels}
+          progression={props.tapRegions.progression} />
+      </div>
+    </section>}
+    {switches.length > 0 && <section className="shelf-settings-group">
+      <div className="shelf-settings-group-head">
+        <span className="shelf-settings-group-label">{t("shelfSettings.group.readingUi")}</span>
+      </div>
+      <div className="shelf-settings-card is-list">{switches}</div>
+    </section>}
   </>;
 }
 

@@ -15,7 +15,7 @@ export const shelfSettings = defineMessages("shelfSettings", {
   "shelfSettings.section.data": { zh: "数据与备份", max: 14 },
   "shelfSettings.section.storage": { zh: "存储", max: 12 },
   "shelfSettings.section.about": { zh: "关于", max: 12 },
-  "shelfSettings.more": { zh: "更多设置", note: "Touch settings home: heading above the section rows.", max: 16 },
+  "shelfSettings.group.readingUi": { zh: "阅读界面", note: "Settings > Reading: group of switches for the reader's bars, preloading and screen.", max: 16 },
   "shelfSettings.index": { zh: "正文搜索索引", max: 20 },
   "shelfSettings.library": { zh: "书库文件夹", note: "Storage settings row (Windows): where library copies of books live; tapping opens it.", max: 20 },
   "shelfSettings.library.unknown": { zh: "位置读取失败", note: "Library folder row when its path could not be read." },

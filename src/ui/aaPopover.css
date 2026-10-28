@@ -248,7 +248,7 @@
   /* 固定高度：主页一屏放下，正文露出一半以上；子页同高、内部滚动。不再上拉展开。 */
   height: min(var(--aa-sheet-height), calc(var(--visual-viewport-height, 100vh) * 0.9));
   max-height: none;
-  border-radius: 16px 16px 0 0;
+  border-radius: 20px 20px 0 0;
   animation: aaMobileSheetIn var(--menu-open) var(--ease-emphasized);
 }
 

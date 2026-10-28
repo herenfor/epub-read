@@ -33,8 +33,8 @@
   width: min(800px, 100%);
   height: min(600px, calc(100vh - 48px));
   border: 1px solid var(--panel-border);
-  border-radius: 16px;
-  background: var(--bg);
+  border-radius: 14px;
+  background: var(--panel-surface);
   color: var(--fg);
   box-shadow: 0 24px 60px rgba(20, 20, 30, 0.22);
   overflow: hidden;
@@ -107,7 +107,7 @@
 }
 
 .shelf-settings-nav button.active {
-  background: var(--bg);
+  background: var(--panel-card);
   color: var(--fg);
   font-weight: 600;
 }
@@ -182,9 +182,9 @@
   flex-direction: column;
   gap: 14px;
   padding: 14px 16px;
-  border: 1px solid color-mix(in srgb, var(--panel-border) 80%, transparent);
-  border-radius: 14px;
-  background: var(--bg);
+  border: 0;
+  border-radius: 12px;
+  background: var(--panel-card);
 }
 
 .shelf-settings-card.is-list {
@@ -194,7 +194,12 @@
 }
 
 .shelf-settings-card-title {
+  font-size: 14px;
   font-weight: 600;
+}
+
+.app[data-touch-ui="true"] .shelf-settings-card-title {
+  font-size: 15px;
 }
 
 .shelf-settings-note {
@@ -308,29 +313,15 @@
   color: var(--muted);
 }
 
-.shelf-settings-switch {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-height: 52px;
-  padding: 4px 14px;
-  border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 60%, transparent);
-  cursor: pointer;
-}
-
-.shelf-settings-switch:last-child {
-  border-bottom: 0;
-}
-
-.shelf-settings-switch-label {
-  flex: 1;
-}
-
 /* A list row that carries a switch (settingsRows SettingsSwitchRow). */
 .shelf-settings-row.is-switch {
   position: relative;
   min-height: 52px;
+}
+
+/* A switch row's note explains the switch: it wraps instead of being cut. */
+.shelf-settings-row.is-switch .shelf-settings-row-text small {
+  white-space: normal;
 }
 
 .shelf-settings-row.is-switch.is-disabled {
@@ -348,13 +339,45 @@
 }
 
 
+/* A group: its label (and an optional text action) outside one card. */
+.shelf-settings-section,
+.shelf-settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.shelf-settings-section {
+  gap: 14px;
+}
+
+.shelf-settings-section > .shelf-settings-card + .shelf-settings-card,
+.shelf-settings-section > .shelf-settings-card + p {
+  margin-top: -6px;
+}
+
+.shelf-settings-group-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 20px;
+  margin: 0 4px -8px;
+}
+
+.shelf-settings-section > .shelf-settings-group-head {
+  margin-bottom: -8px;
+}
+
 .shelf-settings-group-label {
-  margin: 4px 4px -6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 13px;
   color: var(--muted);
 }
 
-/* 触屏：全屏页，一级是外观和分类列表，二级是分类内容 */
+/* 触屏：一整页，各分类都是页上的一组 */
 .shelf-settings-layer.is-page {
   padding: 0;
   align-items: stretch;
@@ -368,75 +391,13 @@
   padding-top: env(safe-area-inset-top, 0px);
   padding-bottom: env(safe-area-inset-bottom, 0px);
   box-sizing: border-box;
-  background: var(--panel-bg);
+  background: var(--panel-surface);
   color: var(--fg);
   animation: shelf-settings-slide-in var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .shelf-settings-layer.is-page.is-closing .shelf-settings-sheet {
   animation: shelf-settings-slide-out var(--menu-close) ease both;
-}
-
-/* Touch settings are a stack: home below, a section page pushed over it.
- * The whole stack slides in and out with the page; inside it a section
- * slides in from the right while home drifts left and dims, and back
- * reverses both. Durations follow --menu-open/--menu-close (reduced motion). */
-.shelf-settings-stack {
-  position: relative;
-  display: flex;
-  width: 100%;
-  overflow: hidden;
-  background: var(--panel-bg);
-  animation: shelf-settings-slide-in var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-.shelf-settings-layer.is-page.is-closing .shelf-settings-stack {
-  animation: shelf-settings-slide-out var(--menu-close) ease both;
-}
-
-.shelf-settings-stack > .shelf-settings-sheet {
-  animation: none;
-}
-
-.shelf-settings-sheet.is-home {
-  position: relative;
-  transition: transform var(--menu-close) ease;
-}
-
-.shelf-settings-sheet.is-home::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.16);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--menu-close) ease;
-}
-
-.shelf-settings-sheet.is-home.is-covered {
-  transform: translateX(-22%);
-  transition: transform var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.shelf-settings-sheet.is-home.is-covered::after {
-  opacity: 1;
-  transition: opacity var(--menu-open) ease;
-}
-
-.shelf-settings-stack > .shelf-settings-sheet.is-pushed {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  box-shadow: -10px 0 28px rgba(15, 23, 42, 0.12);
-}
-
-.shelf-settings-stack > .shelf-settings-sheet.is-pushed.is-animated {
-  animation: shelf-settings-slide-in var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-.shelf-settings-stack > .shelf-settings-sheet.is-pushed.is-leaving {
-  animation: shelf-settings-slide-out var(--menu-close) ease both;
-  pointer-events: none;
 }
 
 .shelf-settings-sheet .shelf-settings-head {
