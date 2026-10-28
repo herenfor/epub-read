@@ -27,14 +27,14 @@ describe("Reader Integrated HeaderBar & Desktop Flow (Packet 3)", () => {
         })
       );
 
-      // 左侧返回书架与书名·章节名
+      // 左侧返回书架与书名；章节名在中央胶囊里
       expect(html).toContain("titlebar-back-btn");
       expect(html).toContain("三体");
-      expect(html).toContain("科学边界");
 
-      // 中央进度指示胶囊
+      // 中央进度指示胶囊：目录章名代替“第 N/M 章”
       expect(html).toContain("titlebar-progress-pill");
-      expect(html).toContain("第 3/36 章");
+      expect(html).toContain("titlebar-chapter-badge is-name\">科学边界");
+      expect(html).not.toContain("第 3/36 章");
       expect(html).toContain("titlebar-progress-track");
       expect(html).toContain("titlebar-progress-fill");
       expect(html).toContain("43%"); // 四舍五入为 43%
@@ -111,7 +111,7 @@ describe("Reader Integrated HeaderBar & Desktop Flow (Packet 3)", () => {
     }
   });
 
-  it("书签列表下拉按键提供快捷键提示 (Ctrl+Shift+B)", () => {
+  it("书签按钮只切换当前页书签，不再带列表下拉", () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
     try {
       const html = renderToStaticMarkup(
@@ -119,12 +119,12 @@ describe("Reader Integrated HeaderBar & Desktop Flow (Packet 3)", () => {
           view: "reader",
           title: "追忆似水年华",
           chapterTitle: "在斯万家那边",
-          onOpenBookmarks: () => {},
+          onToggleBookmark: () => {},
         })
       );
 
-      expect(html).toContain("titlebar-bookmark-list-btn");
-      expect(html).toContain("Ctrl+Shift+B");
+      expect(html).toContain("titlebar-bookmark-btn");
+      expect(html).not.toContain("titlebar-bookmark-list-btn");
     } finally {
       vi.unstubAllGlobals();
     }

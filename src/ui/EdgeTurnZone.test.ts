@@ -68,6 +68,16 @@ describe("edge turn feedback", () => {
     } finally { await dom.dispose(); }
   });
 
+  it("shows the arrow only when the reader opted in", async () => {
+    const dom = createReactDomHarness();
+    try {
+      await dom.render(createElement(EdgeTurnZone, { direction: 1, hint: true }));
+      expect(dom.container.firstElementChild!.classList.contains("shows-hint")).toBe(true);
+      await dom.render(createElement(EdgeTurnZone, { direction: 1 }));
+      expect(dom.container.firstElementChild!.classList.contains("shows-hint")).toBe(false);
+    } finally { await dom.dispose(); }
+  });
+
   it("left band turning forward keeps its side and feedback, while the action is marked on the band", async () => {
     const dom = createReactDomHarness();
     const feedback = new EdgeTurnFeedback();

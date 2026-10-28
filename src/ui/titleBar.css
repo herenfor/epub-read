@@ -223,9 +223,13 @@
   pointer-events: auto;
 }
 
+/* 中间区域按自身宽度收放胶囊（界面缩放、窄窗口都按实际可用宽度算），
+   overflow 兜底：无论如何不压到左边书名和右边按钮上。 */
 .titlebar-middle {
   justify-content: center;
   padding: 0 12px;
+  container-type: inline-size;
+  overflow: hidden;
 }
 
 /* 沉浸式阅读进度指示胶囊 */
@@ -245,6 +249,17 @@
   user-select: none;
   cursor: default;
   transition: background-color 140ms ease, border-color 140ms ease, transform 120ms ease;
+  min-width: 0;
+  max-width: min(100%, 440px);
+  box-sizing: border-box;
+}
+
+@container (max-width: 200px) {
+  .titlebar-progress-track { display: none; }
+}
+
+@container (max-width: 96px) {
+  .titlebar-progress-pill { display: none; }
 }
 
 .titlebar-chapter-badge {
@@ -253,6 +268,14 @@
   color: var(--muted);
   letter-spacing: 0.1px;
   white-space: nowrap;
+}
+
+/* 目录章名：胶囊随中间区域收缩，章名先省略；进度条与百分比不收缩。 */
+.titlebar-chapter-badge.is-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: color-mix(in srgb, var(--fg) 78%, var(--muted));
 }
 
 .titlebar-progress-track {
@@ -274,6 +297,7 @@
 }
 
 .titlebar-progress-text {
+  flex-shrink: 0;
   font-size: 11px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
@@ -318,6 +342,21 @@
   color: var(--muted);
   letter-spacing: 0.15px;
   max-width: min(260px, calc(30vw - 80px));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.88;
+}
+
+/* 位置不够时作者先让出宽度，书名尽量保住。 */
+.titlebar-author {
+  flex: 0 8 auto;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 450;
+  color: var(--muted);
+  letter-spacing: 0.15px;
+  max-width: min(200px, calc(22vw - 40px));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -496,6 +535,7 @@
 
 @media (max-width: 680px) {
   .titlebar-chapter-title,
+  .titlebar-author,
   .titlebar-title-sep,
   .titlebar-progress-pill {
     display: none;
@@ -546,8 +586,12 @@
   transform: none;
 }
 
-.titlebar.is-mobile-compact .titlebar-book-meta {
-  gap: 5px;
+.titlebar.is-mobile-compact .titlebar-book-meta.is-stacked {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 1px;
+  line-height: 1.25;
 }
 
 .titlebar.is-mobile-compact .titlebar-book-title {
@@ -555,9 +599,11 @@
   max-width: min(62vw, 360px);
 }
 
+/* 章名在书名下一行，窄屏也显示（覆盖上面 680px 以下隐藏桌面章名的规则）。 */
 .titlebar.is-mobile-compact .titlebar-chapter-title {
-  font-size: 12px;
-  max-width: min(40vw, 220px);
+  display: block;
+  font-size: 11.5px;
+  max-width: min(62vw, 360px);
 }
 
 .titlebar.is-mobile-compact .titlebar-actions {

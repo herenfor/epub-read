@@ -32,6 +32,8 @@ export const shelfMenu = defineMessages("shelfMenu", {
   "shelfMenu.motion.reduced": { zh: "简化", max: 10 },
   "shelfMenu.battery": "阅读电量",
   "shelfMenu.battery.tip": "阅读栏显示电量",
+  "shelfMenu.titlebarAutoHide": "顶栏自动隐藏",
+  "shelfMenu.titlebarAutoHide.tip": "阅读时顶栏自动隐藏，鼠标移到顶部时出现",
   "shelfMenu.statusBar": "阅读时系统状态栏",
   "shelfMenu.statusBar.tip": "阅读时隐藏系统状态栏",
   "shelfMenu.keepScreenOn": "阅读时屏幕常亮",

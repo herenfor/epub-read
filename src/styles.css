@@ -1083,7 +1083,7 @@ select option {
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
 }
 
-.edge-turn-zone.is-holding .edge-turn-arrow {
+.edge-turn-zone.shows-hint.is-holding .edge-turn-arrow {
   opacity: 0.45;
   /* Reverse the fade from its current opacity instead of jumping or scaling. */
   transition-duration: 90ms, 140ms;

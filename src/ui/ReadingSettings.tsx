@@ -20,6 +20,9 @@ export interface ReadingSettingsProps {
   onHideReaderSystemStatusBarChange?(hidden: boolean): void;
   batteryIndicatorEnabled?: boolean;
   onBatteryIndicatorChange?(enabled: boolean): void;
+  /** Desktop only: the reader's top bar hides until the pointer reaches it. */
+  titlebarAutoHide?: boolean;
+  onTitlebarAutoHideChange?(enabled: boolean): void;
 }
 
 export function SettingsSwitch(props: { label: string; checked: boolean; onChange(checked: boolean): void }) {
@@ -38,6 +41,7 @@ export function useReadingSettingsTitles(props: ReadingSettingsProps): string[] 
   if (props.keepScreenOnWhileReading !== undefined && props.onKeepScreenOnWhileReadingChange) titles.push(t("shelfMenu.keepScreenOn"));
   if (props.hideReaderSystemStatusBar !== undefined && props.onHideReaderSystemStatusBarChange) titles.push(t("shelfMenu.statusBar"));
   if (props.batteryIndicatorEnabled !== undefined && props.onBatteryIndicatorChange) titles.push(t("shelfMenu.battery"));
+  if (props.titlebarAutoHide !== undefined && props.onTitlebarAutoHideChange) titles.push(t("shelfMenu.titlebarAutoHide"));
   return titles;
 }
 
@@ -54,6 +58,9 @@ export function ReadingSettingsContent(props: ReadingSettingsProps) {
   }
   if (props.batteryIndicatorEnabled !== undefined && props.onBatteryIndicatorChange) {
     switches.push(<SettingsSwitch key="battery" label={t("shelfMenu.battery.tip")} checked={props.batteryIndicatorEnabled} onChange={props.onBatteryIndicatorChange} />);
+  }
+  if (props.titlebarAutoHide !== undefined && props.onTitlebarAutoHideChange) {
+    switches.push(<SettingsSwitch key="titlebar" label={t("shelfMenu.titlebarAutoHide.tip")} checked={props.titlebarAutoHide} onChange={props.onTitlebarAutoHideChange} />);
   }
   return <>
     {props.tapRegions && props.onTapRegionsChange && <div className="shelf-settings-card">

@@ -51,6 +51,8 @@ export interface ReaderTapPreferences {
   touch: TapRegionProfile;
   /** Touch only: a tap in the left region also turns forward. */
   touchLeftTapForward: boolean;
+  /** Both devices: briefly show the side arrow after a tap turns the page. Off by default. */
+  showTapHint: boolean;
 }
 
 export const DEFAULT_TAP_REGION_PROFILE: TapRegionProfile = { mode: "default" };
@@ -58,6 +60,7 @@ export const DEFAULT_READER_TAP_PREFERENCES: ReaderTapPreferences = {
   pc: DEFAULT_TAP_REGION_PROFILE,
   touch: DEFAULT_TAP_REGION_PROFILE,
   touchLeftTapForward: false,
+  showTapHint: false,
 };
 
 export interface TapRegionBand {
@@ -223,6 +226,7 @@ export function normalizeReaderTapPreferences(raw: unknown): ReaderTapPreference
     pc: normalizeProfile(source.pc),
     touch: normalizeProfile(source.touch),
     touchLeftTapForward: source.touchLeftTapForward === true,
+    showTapHint: source.showTapHint === true,
   };
 }
 

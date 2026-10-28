@@ -88,16 +88,14 @@ describe("CSD TitleBar 组件与样式契约（Zen UI Packet A）", () => {
       expect(html).not.toContain("titlebar-maximize");
       expect(html).not.toContain("titlebar-close");
       expect(html).not.toContain("data-tauri-drag-region");
-      const zenHtml = renderToStaticMarkup(createElement(TitleBar, { view: "reader", zenMode: true, onToggleZenMode: () => {}, onToggleFullscreen: () => {} }));
+      const zenHtml = renderToStaticMarkup(createElement(TitleBar, { view: "reader", zenMode: true, onToggleFullscreen: () => {} }));
       expect(zenHtml).not.toContain("zen-hidden");
       expect(zenHtml).not.toContain("is-floating");
-      expect(zenHtml).not.toContain("titlebar-pin-btn");
       // Browser fullscreen/Zen tools remain available without native window chrome.
       setAppBuildSession({ source: "browser", edition: "core", debug: true });
       vi.stubGlobal("window", {});
-      const webHtml = renderToStaticMarkup(createElement(TitleBar, { view: "reader", onToggleFullscreen: () => {}, onToggleZenMode: () => {} }));
+      const webHtml = renderToStaticMarkup(createElement(TitleBar, { view: "reader", onToggleFullscreen: () => {} }));
       expect(webHtml).toContain("titlebar-fullscreen-btn");
-      expect(webHtml).toContain("titlebar-pin-btn");
       expect(webHtml).not.toContain("titlebar-controls");
     } finally {
       clearAppBuildSession();
@@ -132,7 +130,7 @@ describe("CSD TitleBar 组件与样式契约（Zen UI Packet A）", () => {
     }
   });
 
-  it("左侧提供显著的 [目录] 按键与常驻固定 Pin 按钮", () => {
+  it("左侧提供显著的 [目录] 按键；顶栏自动隐藏改在设置里，标题栏不再有图钉", () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
     try {
       const html = renderToStaticMarkup(createElement(TitleBar, {
@@ -140,14 +138,13 @@ describe("CSD TitleBar 组件与样式契约（Zen UI Packet A）", () => {
         title: "Test Book",
         onBackToShelf: () => {},
         onToggleSidebar: () => {},
-        onToggleZenMode: () => {},
         progressPct: 42,
         chapterIndex: 0,
         totalChapters: 10,
       }));
       expect(html).toContain("titlebar-toc-btn");
       expect(html).toContain("目录");
-      expect(html).toContain("titlebar-pin-btn");
+      expect(html).not.toContain("titlebar-pin-btn");
       expect(html).toContain("titlebar-progress-pill");
       expect(html).not.toContain("is-clickable");
     } finally {
@@ -172,6 +169,61 @@ describe("CSD TitleBar 组件与样式契约（Zen UI Packet A）", () => {
       expect(pill).not.toBeNull();
       expect(pill![0]).toContain("data-tauri-drag-region");
       expect(html).toContain('titlebar-drag-area titlebar-middle" data-tauri-drag-region');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("进度胶囊写目录章名；单本书显示书名 · 作者；两本以上才显示标签条", () => {
+    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+    try {
+      const tabs = (n: number) => ({
+        tabs: Array.from({ length: n }, (_, i) => ({ id: `b${i}`, title: `书${i}` })),
+        activeId: "b0", onSelect: () => {}, onClose: () => {},
+      });
+      const props = {
+        view: "reader" as const,
+        title: "诡屋 01",
+        author: "雨穴",
+        chapterTitle: "第三章 记忆中的平面图",
+        progressPct: 48,
+        chapterIndex: 8,
+        totalChapters: 10,
+      };
+      const single = renderToStaticMarkup(createElement(TitleBar, { ...props, readerTabs: tabs(1) }));
+      expect(single).not.toContain("titlebar-reader-tabs");
+      expect(single).toContain("titlebar-author");
+      expect(single).toContain("雨穴");
+      expect(single).toMatch(/titlebar-chapter-badge is-name[^>]*>第三章 记忆中的平面图</);
+      expect(single).not.toContain("第 9/10 章");
+      expect(single).toContain("48%");
+
+      const many = renderToStaticMarkup(createElement(TitleBar, { ...props, readerTabs: tabs(2) }));
+      expect(many).toContain("titlebar-reader-tabs");
+
+      // Without a contents name the capsule keeps the chapter count.
+      const unnamed = renderToStaticMarkup(createElement(TitleBar, { ...props, chapterTitle: "" }));
+      expect(unnamed).toContain("第 9/10 章");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("触屏顶栏：书名下一行写章名，不写作者", () => {
+    vi.stubGlobal("window", {});
+    try {
+      const html = renderToStaticMarkup(createElement(TitleBar, {
+        view: "reader",
+        mobileCompact: true,
+        title: "诡屋 01",
+        author: "雨穴",
+        chapterTitle: "第一章 诡异的住家",
+        progressPct: 10,
+      }));
+      expect(html).toContain("titlebar-book-meta is-stacked");
+      expect(html).toContain("第一章 诡异的住家");
+      expect(html).not.toContain("雨穴");
+      expect(html).not.toContain("titlebar-progress-pill");
     } finally {
       vi.unstubAllGlobals();
     }

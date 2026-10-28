@@ -10,6 +10,8 @@ interface Props {
   side?: TapRegionSide;
   /** Measured band from readerTapRegions; omitted keeps the stylesheet size, width 0 removes the zone. */
   region?: EdgeTurnRegion;
+  /** Show the arrow while feedback holds. Default off: the tap itself is the feedback. */
+  hint?: boolean;
 }
 
 /**
@@ -18,7 +20,7 @@ interface Props {
  * chapter) or by the host's blank-area handler (outside it), which also hold
  * this feedback. Feedback survives host replacement, independent of motion readiness.
  */
-export function EdgeTurnZone({ direction, side, region }: Props) {
+export function EdgeTurnZone({ direction, side, region, hint = false }: Props) {
   const shared = useContext(EdgeTurnFeedbackContext);
   const own = useEdgeTurnFeedbackOwner();
   const feedback = shared ?? own;
@@ -34,7 +36,8 @@ export function EdgeTurnZone({ direction, side, region }: Props) {
   const className = ["edge-turn-zone",
     natural ? (direction === -1 ? "edge-turn-prev" : "edge-turn-next") : null,
     extended ? `edge-turn-${physical}` : null,
-    holding ? "is-holding" : null].filter(Boolean).join(" ");
+    holding ? "is-holding" : null,
+    hint ? "shows-hint" : null].filter(Boolean).join(" ");
   const style = region ? {
     width: region.width, minWidth: 0, maxWidth: "none",
     "--edge-turn-arrow-center": `${region.arrowCenter}px`,

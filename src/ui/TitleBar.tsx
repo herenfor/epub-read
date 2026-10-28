@@ -1,7 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getRuntimeCapabilities } from "../platform/runtimeCapabilities";
-import { PinIcon } from "./readerIcons";
 import "./titleBar.css";
 import { useUiText } from "./localization/UiLanguageProvider";
 
@@ -12,6 +11,9 @@ function isTauriEnv(): boolean {
 export interface TitleBarProps {
   view: "shelf" | "reader";
   title?: string;
+  /** Desktop: shown after the book title (the chapter lives in the progress capsule). */
+  author?: string;
+  /** Contents name of the current place; the capsule shows it, the phone bar shows it after the title. */
   chapterTitle?: string;
   onBackToShelf?: () => void;
   /** 侧边栏开关（综合目录/书签/笔记抽屉） */
@@ -23,19 +25,14 @@ export interface TitleBarProps {
   /** 正文搜索开关（🔍） */
   onOpenSearch?: () => void;
   searchOpen?: boolean;
-  /** 书签：切换当前页书签 */
+  /** 书签：切换当前页书签；书签列表在侧栏“书签”页。 */
   isBookmarked?: boolean;
   onToggleBookmark?: () => void;
   /** A15：双页时书签按钮弹出缩略书页（左页 / 右页）。 */
   bookmarkSpread?: boolean;
   bookmarkPagesOpen?: boolean;
-  /** 书签浮层是否已展开 */
-  bookmarksOpen?: boolean;
-  /** 收到实际点击的按钮，供 App 决定浮层定位 */
-  onOpenBookmarks?: (button: HTMLButtonElement) => void;
-  /** 沉浸模式 / 自动隐藏开关 */
+  /** 顶栏自动隐藏（沉浸）；开关在 设置 › 阅读。 */
   zenMode?: boolean;
-  onToggleZenMode?: () => void;
   /** 手机/平板触摸顶部条：只保留返回、标题、书签，其余放到共享 toolsVisible 底部栏。 */
   mobileCompact?: boolean;
   /** 手机/平板上下工具栏共享的显隐状态。 */
@@ -74,6 +71,7 @@ export interface TitleBarProps {
 export const TitleBar: React.FC<TitleBarProps> = ({
   view,
   title,
+  author,
   chapterTitle,
   onBackToShelf,
   onToggleSidebar,
@@ -86,10 +84,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   onToggleBookmark,
   bookmarkSpread,
   bookmarkPagesOpen,
-  bookmarksOpen,
-  onOpenBookmarks,
   zenMode = false,
-  onToggleZenMode,
   mobileCompact = false,
   toolsVisible = true,
   onToggleTools,
@@ -158,7 +153,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
 
   // 当有子菜单/抽屉打开时，必须保持顶栏可见，不触发沉浸收起
   const isAnyMenuOpen = Boolean(
-    sidebarOpen || appearanceOpen || searchOpen || bookmarksOpen || assistantOpen || logOpen
+    sidebarOpen || appearanceOpen || searchOpen || assistantOpen || logOpen
   );
 
   // 沉浸模式快捷键（Alt 键呼出/收起）与鼠标顶部感应监听 + 翻页/滚动自动滑隐
@@ -387,7 +382,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({
             </div>
           )}
 
-          {view === "reader" && readerTabs && readerTabs.tabs.length > 0 && !mobileCompact ? (
+          {/* 只开一本书时不需要标签条，显示书名即可。 */}
+          {view === "reader" && readerTabs && readerTabs.tabs.length > 1 && !mobileCompact ? (
             <div className="titlebar-reader-tabs" role="tablist" aria-label={t("titlebar.tabs")}>
               {readerTabs.tabs.map((tab) => {
                 const active = tab.id === readerTabs.activeId;
@@ -425,7 +421,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({
               })}
             </div>
           ) : view === "reader" ? (
-            <div className="titlebar-book-meta" {...dragProps}>
+            // 桌面：书名 · 作者（章名在中间的进度胶囊）；触屏顶栏没有胶囊：书名下面一行写章名。
+            <div className={`titlebar-book-meta${mobileCompact ? " is-stacked" : ""}`} {...dragProps}>
               <span
                 className="titlebar-app-title titlebar-book-title"
                 {...dragProps}
@@ -433,11 +430,15 @@ export const TitleBar: React.FC<TitleBarProps> = ({
               >
                 {title || t("titlebar.appName")}
               </span>
-              {chapterTitle && (
+              {mobileCompact ? chapterTitle && (
+                <span className="titlebar-chapter-title" {...dragProps} title={chapterTitle}>
+                  {chapterTitle}
+                </span>
+              ) : author && (
                 <>
                   <span className="titlebar-title-sep" {...dragProps}>·</span>
-                  <span className="titlebar-chapter-title" {...dragProps} title={chapterTitle}>
-                    {chapterTitle}
+                  <span className="titlebar-author" {...dragProps} title={author}>
+                    {author}
                   </span>
                 </>
               )}
@@ -451,9 +452,10 @@ export const TitleBar: React.FC<TitleBarProps> = ({
 
         {/* 中央：拖拽区域 + 沉浸进度指示胶囊 */}
         <div className="titlebar-drag-area titlebar-middle" {...dragProps}>
-          {view === "reader" && !mobileCompact && (progressPct !== undefined || (chapterIndex !== undefined && totalChapters !== undefined && totalChapters > 0)) && (
+          {view === "reader" && !mobileCompact && (progressPct !== undefined || chapterTitle || (chapterIndex !== undefined && totalChapters !== undefined && totalChapters > 0)) && (
             <ReaderProgressCapsule
               progressPct={progressPct}
+              chapterTitle={chapterTitle}
               chapterIndex={chapterIndex}
               totalChapters={totalChapters}
               dragProps={dragProps}
@@ -514,22 +516,6 @@ export const TitleBar: React.FC<TitleBarProps> = ({
                 </button>
               )}
 
-              {/* 书签列表下拉浮层：手机从更多层进入。 */}
-              {!mobileCompact && onOpenBookmarks && (
-                <button
-                  type="button"
-                  className={`titlebar-action-btn titlebar-bookmark-list-btn${bookmarksOpen ? " active" : ""}`}
-                  onClick={(event) => onOpenBookmarks(event.currentTarget)}
-                  title={t("titlebar.bookmarks.all.tip")}
-                  aria-label={t("titlebar.bookmarks.all")}
-                  aria-expanded={bookmarksOpen === true}
-                >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M6 9l6 6 6-6" />
-                  </svg>
-                </button>
-              )}
-
               {/* 全屏沉浸模式切换 */}
               {desktopTools && onToggleFullscreen && (
                 <button
@@ -549,20 +535,6 @@ export const TitleBar: React.FC<TitleBarProps> = ({
                       <path d="M15 3h6v6m-6 5l6 6M9 21H3v-6m0 0l6-6" />
                     </svg>
                   )}
-                </button>
-              )}
-
-              {/* 沉浸/锁定常驻切换：手机靠轻点显隐工具栏，不用桌面的自动隐藏。 */}
-              {desktopTools && !mobileCompact && onToggleZenMode && (
-                <button
-                  type="button"
-                  className={`titlebar-action-btn titlebar-pin-btn${!zenMode ? " active" : ""}`}
-                  onClick={onToggleZenMode}
-                  title={zenMode ? t("titlebar.zen.on.tip") : t("titlebar.zen.off.tip")}
-                  aria-label={zenMode ? t("titlebar.zen.pin") : t("titlebar.zen.autoHide")}
-                  aria-pressed={!zenMode}
-                >
-                  <PinIcon size={14} pinned={!zenMode} />
                 </button>
               )}
 
@@ -656,6 +628,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({
 
 interface ReaderProgressCapsuleProps {
   progressPct?: number;
+  /** Contents name; without one the capsule falls back to "Ch. N/M". */
+  chapterTitle?: string;
   chapterIndex?: number;
   totalChapters?: number;
   /** The capsule only shows progress; dragging it moves the window like the area around it. */
@@ -665,6 +639,7 @@ interface ReaderProgressCapsuleProps {
 /** Display only: the "目录" button is the one entry to the sidebar. */
 function ReaderProgressCapsule({
   progressPct,
+  chapterTitle,
   chapterIndex,
   totalChapters,
   dragProps,
@@ -674,9 +649,13 @@ function ReaderProgressCapsule({
     <div
       className="titlebar-progress-pill"
       {...dragProps}
-      title={t("titlebar.progress.tip", { percent: Math.round(progressPct ?? 0) })}
+      title={chapterTitle
+        ? `${chapterTitle} · ${t("titlebar.progress.tip", { percent: Math.round(progressPct ?? 0) })}`
+        : t("titlebar.progress.tip", { percent: Math.round(progressPct ?? 0) })}
     >
-      {chapterIndex !== undefined && totalChapters !== undefined && totalChapters > 0 && (
+      {chapterTitle ? (
+        <span className="titlebar-chapter-badge is-name">{chapterTitle}</span>
+      ) : chapterIndex !== undefined && totalChapters !== undefined && totalChapters > 0 && (
         <span className="titlebar-chapter-badge">
           {t("titlebar.progress.chapter", { current: chapterIndex + 1, total: totalChapters })}
         </span>
