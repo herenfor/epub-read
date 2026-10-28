@@ -28,7 +28,7 @@
   max-height: calc(100vh - 60px);
   z-index: var(--z-ui-panel);
   box-sizing: border-box;
-  background: color-mix(in srgb, var(--panel-bg, #ffffff) 96%, transparent);
+  background: color-mix(in srgb, var(--panel-surface) 96%, transparent);
   color: var(--fg);
   border: 1px solid var(--ui-border-control);
   border-radius: 14px;
@@ -91,39 +91,6 @@
     opacity: 0;
     transform: translateY(-6px) scale(0.98);
   }
-}
-
-/* ---- 双模分段 Tab 切换 ---- */
-
-/* Row 1: 主题色块 */
-.aa-theme-section {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
-}
-
-.aa-theme-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 48px;
-  border-radius: 9px;
-  border: 1.5px solid transparent;
-  cursor: pointer;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-  transition: transform var(--ui-control-quick) var(--ui-ease), box-shadow var(--ui-control-quick) var(--ui-ease), border-color var(--ui-control-quick) var(--ui-ease);
-  position: relative;
-  padding: 4px;
-}
-
-.aa-theme-card:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.12);
-}
-
-.aa-theme-card.active {
-  box-shadow: 0 0 0 2px var(--accent, #6366f1), 0 2px 6px rgba(0, 0, 0, 0.14);
 }
 
 /* 控件行布局 */
@@ -191,11 +158,6 @@
   gap: 4px;
 }
 
-.aa-css-label {
-  font-size: 11px;
-  color: var(--muted);
-}
-
 /* 书本用了更具体的选择器或内联样式时，普通规则覆盖不了，只能加 !important。 */
 .aa-css-hint {
   font-size: 11px;
@@ -217,65 +179,19 @@
   resize: vertical;
 }
 
-.aa-btn-save-css {
-  align-self: flex-end;
-  font-size: 11px;
-  font-weight: 500;
-  padding: 3px 8px;
-  border-radius: 4px;
-  border: none;
-  background: var(--accent, #6366f1);
-  color: var(--ui-on-solid-accent);
-  cursor: pointer;
-}
-
-.aa-advanced-actions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding-top: 4px;
-}
-
-.aa-mini-action-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  height: 28px;
-  padding: 0 8px;
-  border-radius: 6px;
-  border: 1px solid color-mix(in srgb, var(--panel-border) 40%, transparent);
-  background: var(--ui-field-bg);
-  color: var(--fg);
-  font-size: 11.5px;
-  cursor: pointer;
-  transition: background-color var(--ui-control-quick) var(--ui-ease),
-              border-color var(--ui-control-quick) var(--ui-ease),
-              color var(--ui-control-quick) var(--ui-ease);
-}
-
-.aa-mini-action-btn:hover {
-  background: var(--btn-tint-hover);
-  border-color: color-mix(in srgb, var(--accent, #6366f1) 40%, transparent);
-  color: var(--accent, #6366f1);
-}
-
 /* ---- 常用外观中自定义徽标与跳转按钮 ---- */
 
 /* ---- 详细排版视图 (Detailed View) ---- */
 
 /* 详细视图中，中央步进值使用短文案后保持单行，避免状态切换时胶囊高度变化。 */
 
+/* Group label outside its card. */
 .aa-group-title {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
   color: var(--muted);
-  text-transform: uppercase;
-  margin: 8px 0 2px 2px;
-  padding-bottom: 3px;
-  border-bottom: 1px solid var(--ui-border-subtle);
+  margin: 10px 0 0 8px;
 }
 
 .aa-detail-label-wrap {
@@ -395,8 +311,8 @@
 
 /* ---- 触摸端：面板本体已近不透明，去掉其自身模糊（与遮罩毛玻璃叠算无可见差别）；文字放大一档 ---- */
 .app[data-touch-ui="true"] .aa-popover {
-  /* Opaque panel surface; only selected controls use --ui-control-selected. No blur on touch. */
-  background: var(--panel-bg);
+  /* Opaque panel surface; cards sit on it. No blur on touch. */
+  background: var(--panel-surface);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
   will-change: transform, opacity;
@@ -409,11 +325,8 @@
 .app[data-touch-ui="true"] .aa-section-label { font-size: 14px; }
 
 
-.app[data-touch-ui="true"] .aa-css-label,
 .app[data-touch-ui="true"] .aa-css-hint,
-.app[data-touch-ui="true"] .aa-css-textarea,
-.app[data-touch-ui="true"] .aa-btn-save-css { font-size: 13px; }
-.app[data-touch-ui="true"] .aa-mini-action-btn { font-size: 13.5px; }
+.app[data-touch-ui="true"] .aa-css-textarea { font-size: 13px; }
 
 .app[data-touch-ui="true"] .aa-detail-sub { font-size: 12px; }
 
@@ -427,31 +340,6 @@
   --aa-sheet-height: 404px;
 }
 
-.aa-pages {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-}
-
-.aa-page {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-}
-
-/* The page not shown stays laid out (and, after the opening warm-up,
-   painted), so switching to More or back is a visibility change, not a
-   fresh layout of the whole page. */
-.aa-page:not([data-active]) {
-  position: absolute;
-  inset: 0;
-  visibility: hidden;
-  pointer-events: none;
-}
-
 .aa-page-body {
   flex: 1;
   min-height: 0;
@@ -460,105 +348,137 @@
   overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 8px 10px 12px;
+  gap: 6px;
+  padding: 12px 12px 10px;
 }
 
 .aa-page-body > * {
   flex: none;
 }
 
-.aa-popover .aa-theme-section {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
-  align-items: center;
-  height: 48px;
-  padding: 0 4px;
-}
-
-.aa-popover .aa-theme-card {
-  flex-direction: row;
-  height: 40px;
-  border-width: 2px;
+/* One layer of white cards on the gray panel; rows inside are separated by hairlines. */
+.aa-card {
+  display: flex;
+  flex-direction: column;
+  padding: 2px 0;
   border-radius: 12px;
+  background: var(--panel-card);
+}
+
+.aa-card[hidden] {
+  display: none;
+}
+
+.aa-card.is-list {
   padding: 0;
-  font-size: 13px;
-  font-weight: 500;
 }
 
-.aa-entry-row {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
-  gap: 8px;
-  align-items: center;
-  height: 48px;
-  padding: 0 4px;
+.aa-card > * + * {
+  border-top: 1px solid var(--ui-border-subtle);
 }
 
-.aa-entry {
+.aa-nav-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
-  height: 42px;
-  padding: 0 6px 0 12px;
-  border: 1px solid var(--ui-border-control);
-  border-radius: 12px;
-  background: var(--ui-control-bg);
+  min-height: 44px;
+  padding: 0 10px 0 12px;
+  border: 0;
+  background: transparent;
   color: var(--fg);
   font: inherit;
+  text-align: left;
   cursor: pointer;
 }
 
-.aa-entry:hover {
-  border-color: color-mix(in srgb, var(--accent, #6366f1) 45%, var(--ui-border-control));
-}
-
-.aa-entry-label {
+.aa-nav-label {
   flex: none;
-  color: var(--muted);
-  font-size: 12.5px;
+  font-size: 13.5px;
 }
 
-.aa-entry-value {
+.aa-nav-value {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  text-align: left;
-  font-size: 13.5px;
-}
-
-.aa-entry-value.is-end {
   text-align: right;
   color: var(--muted);
   font-size: 12.5px;
 }
 
+.aa-nav-row.is-disclosure[aria-expanded="true"] .aa-chevron,
+.aa-group-toggle[aria-expanded="true"] .aa-chevron {
+  transform: rotate(90deg);
+}
+
+.aa-chevron {
+  transition: transform var(--ui-control-quick) var(--ui-ease);
+}
+
+/* The Advanced group label: a disclosure in the place of a group title. */
+.aa-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  margin: 6px 0 0;
+  padding: 6px 8px 2px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.aa-group-toggle:hover {
+  color: var(--fg);
+}
+
+.aa-reset-btn {
+  align-self: center;
+  margin-top: 10px;
+}
+
+.aa-footer-links {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* Every slider row shares one label/value budget, so the tracks line up. */
 .aa-slider-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
   height: 48px;
-  padding: 0 8px;
-  border-radius: 14px;
+  padding: 0 12px;
   box-sizing: border-box;
 }
 
 .aa-row-label {
   flex: none;
-  min-width: 2.4em;
-  color: var(--muted);
+  width: 3.6em;
+  color: var(--fg);
   font-size: 13px;
   white-space: nowrap;
 }
 
+.aa-slider-row.has-steps .aa-row-label {
+  width: auto;
+}
+
 .aa-row-value {
   flex: none;
-  width: 3.4em;
+  width: 4.6em;
   text-align: right;
   font-size: 13px;
   font-weight: 600;
@@ -566,14 +486,6 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.aa-slider-row.is-wide-value .aa-row-value {
-  width: 6.4em;
-}
-
-.aa-slider-row.is-half .aa-row-value {
-  width: 2.6em;
 }
 
 .aa-slider {
@@ -605,52 +517,9 @@
   cursor: default;
 }
 
-.aa-half-rows {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
-}
-
-.aa-half-rows > .aa-slider-row {
-  padding: 0 6px;
-}
-
-/* Reading mode and More stay put under the scrolling rows: never faded, and
-   the narrow-window note below them cannot push them out of view. */
-.aa-main-footer {
-  flex: none;
-  padding: 0 10px 10px;
-}
-
-.aa-main-footer .aa-section-note {
-  margin: -4px 6px 0;
-}
-
-.aa-presentation-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 48px;
-  padding: 0 4px;
-}
-
-.aa-more-link {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  height: 44px;
-  padding: 0 4px 0 8px;
-  border: none;
-  background: transparent;
-  color: var(--fg);
-  font: inherit;
-  font-size: 13.5px;
-  cursor: pointer;
-}
-
 .aa-section-note {
-  margin: -2px 6px 2px;
+  padding: 0 12px 6px;
+  border-top: 0 !important;
   color: var(--muted);
   font-size: 11px;
   text-align: right;
@@ -686,45 +555,13 @@
   font-weight: 600;
 }
 
-.aa-more-body .aa-group-title {
-  margin: 8px 6px 2px;
-}
-
-/* One label/value budget keeps every track aligned, including four-character labels. */
-.aa-more-body .aa-slider-row {
-  display: grid;
-  grid-template-columns: 4.5em minmax(0, 1fr) 3.8em;
-  gap: 8px;
-  padding-inline: 12px;
-}
-
-.aa-more-body .aa-slider-row > .aa-row-label {
-  min-width: 0;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  line-height: 1.2;
-}
-
-.aa-more-body .aa-slider-row > .aa-row-value {
-  width: auto;
-}
-
-.aa-more-body .aa-control-row {
-  min-height: 48px;
-  padding: 0 8px;
-}
-
-.aa-more-body .aa-control-row .aa-segmented-capsule {
-  flex: 0 1 220px;
-}
-
 .aa-switch-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   min-height: 48px;
-  padding: 4px 8px;
+  padding: 4px 12px;
   box-sizing: border-box;
   cursor: pointer;
 }
@@ -740,9 +577,14 @@
   color: var(--color-error, #e53935);
 }
 
-.aa-more-body .aa-css-editor-section,
-.aa-more-body .aa-advanced-actions {
-  padding: 4px 8px;
+.aa-card > .aa-control-row {
+  min-height: 48px;
+  padding: 0 12px;
+}
+
+.aa-card > .aa-css-editor-section {
+  padding: 4px 12px 10px;
+  border-top: 0;
 }
 
 /* ---- 按住滑块：面板让出正文，只留正在调的那一行（浮动卡片） ---- */
@@ -769,10 +611,6 @@
   visibility: hidden;
 }
 
-.aa-popover .aa-theme-card.active {
-  box-shadow: none;
-}
-
 /* Bottom margin: the card moves to the top so the edge being set stays visible. */
 .app[data-mobile-chrome="true"][data-layout="compact"] .aa-popover[data-slider-focus="margin-bottom"] {
   top: calc(env(safe-area-inset-top, 0px) + 12px);
@@ -791,8 +629,5 @@
 .app[data-touch-ui="true"] .aa-row-label,
 .app[data-touch-ui="true"] .aa-row-value,
 .app[data-touch-ui="true"] .aa-switch-name { font-size: 14px; }
-.app[data-touch-ui="true"] .aa-entry-value { font-size: 14.5px; }
-
-.aa-main-body {
-  padding-bottom: 2px;
-}
+.app[data-touch-ui="true"] .aa-nav-label { font-size: 14.5px; }
+.app[data-touch-ui="true"] .aa-nav-value { font-size: 13.5px; }

@@ -142,7 +142,7 @@ export function ReaderVisualSettingsPanel(props: ReaderVisualSettingsPanelProps)
         <div className="rd-actions">
           <button
             type="button"
-            className="aa-mini-action-btn"
+            className="ui-btn"
             onClick={() => props.onChange(resetVisualFilterPreferences(props.value))}
           >
             <RotateCcwIcon size={12} />
@@ -150,7 +150,7 @@ export function ReaderVisualSettingsPanel(props: ReaderVisualSettingsPanelProps)
           </button>
           <button
             type="button"
-            className={`aa-mini-action-btn reader-visual-compare${compareOriginal ? " is-active" : ""}`}
+            className={`ui-btn reader-visual-compare${compareOriginal ? " is-active" : ""}`}
             aria-pressed={compareOriginal}
             title={t("display.visual.compare.tip")}
             onPointerDown={beginCompare}

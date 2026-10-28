@@ -37,13 +37,12 @@ export function ReaderDisplaySettingsPopover({ onBack, children }: ReaderDisplay
       aria-label={t("display.dialog")}
     >
       <div className="drawer-drag-handle font-settings-grip" aria-hidden="true" {...grip} />
-      <div className="menu-head font-settings-head">
-        <button className="tb-btn tb-close" onClick={onBack} title={t("display.back.tip")} aria-label={t("display.back")}>
+      <div className="aa-subpage-head font-settings-head">
+        <button type="button" className="aa-back-btn" onClick={onBack} title={t("display.back.tip")} aria-label={t("display.back")}>
           <ArrowLeftIcon size={14} />
+          <span>{t("aa.back.short")}</span>
         </button>
-        <div className="drawer-title-wrap">
-          <span>{t("display.title")}</span>
-        </div>
+        <span className="aa-subpage-title">{t("display.title")}</span>
       </div>
       <SliderDragContext.Provider value={sliderHost}>
         <div className="aa-display-body scrollbar-hidden" ref={bodyRef}>{children}</div>

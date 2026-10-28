@@ -25,7 +25,6 @@ describe("Aa 单层紧凑面板", () => {
     onWordSpacingChange: vi.fn(),
     onGapPxChange: vi.fn(),
     onSpreadGapModeChange: vi.fn(),
-    onUiScaleChange: vi.fn(),
     pageMargins: { left: 40, right: 40, top: 28, bottom: 28 },
     onPageMarginsChange: vi.fn(),
     columnsPerView: 2,
@@ -37,9 +36,6 @@ describe("Aa 单层紧凑面板", () => {
     forceHorizontal: false,
     onForceHorizontalChange: vi.fn(),
     onPageDirectionChange: vi.fn(),
-    preloadNextChapter: true,
-    onPreloadNextChapterChange: vi.fn(),
-    onSeamlessChapterTurnChange: vi.fn(),
     customCss: "",
     onCustomCssChange: vi.fn(),
     onResetDefaults: vi.fn(),
@@ -49,54 +45,60 @@ describe("Aa 单层紧凑面板", () => {
     onClose: vi.fn(),
   };
   const html = (props: Partial<AaPopoverProps> = {}) => renderToStaticMarkup(createElement(AaPopover, { ...baseProps, ...props }));
-  const page = (markup: string, which: "main" | "more") => {
-    const pages = markup.split('class="aa-page"').slice(1);
-    return pages[which === "main" ? 0 : 1];
-  };
+  /** The Advanced group: everything after its toggle up to the reset button. */
+  const advanced = (markup: string) => markup.slice(markup.indexOf("aa-group-toggle"), markup.indexOf("aa-reset-btn"));
 
-  it("主页一层放下常用项：主题、字体与字符滤镜入口、五个滑块、阅读方式", () => {
-    const main = page(html(), "main");
+  it("一页放下全部排版：主题、字体与字符滤镜、文字五条各占一行、版式与翻页，没有“更多设置”", () => {
+    const main = html();
     THEME_PALETTES.forEach((palette) => expect(main).toContain(palette.name));
-    expect(main).toMatch(/aria-checked="true"[^>]*>羊皮纸</);
+    expect(main).toMatch(/aria-checked="true"[^>]*>(?:<span[^>]*>Aa<\/span>)?<span>羊皮纸</);
     expect(main).toContain("思源宋体");
     expect(main).toContain("字符与滤镜");
     for (const label of ["字号", "行高", "边距", "字间距", "正文字重"]) {
       expect(main).toMatch(new RegExp(`role="slider"[^>]*aria-label="${label}"`));
     }
+    // Letter spacing and weight no longer share a row.
+    expect(main).not.toContain("aa-half-rows");
     expect(main).toMatch(/aa-segmented-btn active[^>]*>双页</);
-    expect(main).toContain("更多设置");
-    // No tabs and no steppers any more.
-    expect(main).not.toContain("aa-tab-btn");
-    expect(main).not.toContain("aa-stepper-capsule");
-    expect(main).not.toContain("界面语言");
+    for (const text of ["文字", "版式与翻页", "翻页动画", "始终从左往右翻页", "高级排版", "恢复默认设置", "导入书籍", "诊断日志 (2)"]) {
+      expect(main).toContain(text);
+    }
+    expect(main).toMatch(/aria-checked="true"[^>]*>无</);
+    // Moved to Settings, or the same setting already there.
+    for (const text of ["更多设置", "界面缩放", "高性能预读", "章节间连续滑动", "简化界面动画", "界面语言"]) {
+      expect(main).not.toContain(text);
+    }
   });
 
-  it("滑块显示档位名和数值，未设置显示跟随书籍或默认", () => {
-    const main = page(html(), "main");
+  it("滑块显示档位名和数值，未设置显示跟随书籍或默认，并画成空心", () => {
+    const main = html();
     expect(main).toContain("标准 1.7");
     expect(main).toContain("适中");
-    expect(main).toMatch(/aria-label="字间距"[^>]*aria-valuetext="跟随书籍"/);
-    expect(page(html({ lineHeight: undefined }), "main")).toMatch(/aria-label="行高"[^>]*aria-valuetext="跟随书籍"/);
-    expect(page(html({ lineHeight: 1.9 }), "main")).toContain(">1.9<");
-    expect(page(html({ pageMargins: {} }), "main")).toMatch(/aria-label="边距"[^>]*aria-valuetext="自动"/);
+    expect(main).toMatch(/aria-label="字间距"[^>]*aria-valuetext="跟随书籍"[^>]*data-auto/);
+    expect(main).not.toMatch(/aria-label="行高"[^>]*data-auto/);
+    expect(html({ lineHeight: undefined })).toMatch(/aria-label="行高"[^>]*aria-valuetext="跟随书籍"/);
+    expect(html({ lineHeight: 1.9 })).toContain(">1.9<");
+    expect(html({ pageMargins: {} })).toMatch(/aria-label="边距"[^>]*aria-valuetext="自动"/);
     // Fine-tuned sides keep their values and read as fine-tuned.
-    expect(page(html({ pageMargins: { left: 52, right: 30, top: 12 } }), "main")).toContain("微调");
+    expect(html({ pageMargins: { left: 52, right: 30, top: 12 } })).toContain("微调");
   });
 
-  it("更多设置收齐其余功能：四边距、词间距、中缝、翻页、显示、自定义 CSS、导入与日志", () => {
-    const more = page(html(), "more");
+  it("高级排版就地展开：四边距、词间距、中缝、竖排转横排、自定义 CSS，默认收起", () => {
+    const markup = html();
+    const group = advanced(markup);
+    expect(group).toContain('aria-expanded="false"');
+    expect(group).toMatch(/<div class="aa-card" hidden="">/);
     for (const label of ["上边距", "下边距", "左边距", "右边距", "词间距", "双栏中缝"]) {
-      expect(more).toMatch(new RegExp(`role="slider"[^>]*aria-label="${label}"`));
+      expect(group).toMatch(new RegExp(`role="slider"[^>]*aria-label="${label}"`));
     }
-    for (const text of ["翻页动画", "始终从左往右翻页", "高性能预读", "章节间连续滑动", "界面缩放", "强制竖排转横排", "简化界面动画", "自定义 CSS 样式注入", "导入书籍", "诊断日志 (2)", "恢复默认设置"]) {
-      expect(more).toContain(text);
-    }
-    expect(more).toMatch(/aria-checked="true"[^>]*>无</);
+    for (const text of ["强制竖排转横排", "自定义 CSS 样式注入"]) expect(group).toContain(text);
+    // The closed "detailed" warm-up draws it open.
+    expect(advanced(html({ open: false, paintWarm: "detailed" }))).toContain('aria-expanded="true"');
   });
 
   it("双页回退单页时提示；中缝在非双页时注明只在双页生效", () => {
     expect(html({ effectiveColumns: 1 })).toContain("窗口较窄，暂以单页显示");
-    expect(page(html({ columnsPerView: 1 }), "more")).toContain("双栏中缝只在双页时生效");
+    expect(advanced(html({ columnsPerView: 1 }))).toContain("双栏中缝只在双页时生效");
   });
 
   it("档位按内部 id 识别，不依赖界面文字", () => {
@@ -220,24 +222,17 @@ describe("Aa 单层紧凑面板", () => {
   it("恢复默认后自定义 CSS 草稿跟着清空，不会再被一键写回", async () => {
     const dom = createReactDomHarness({ resizeObserver: true, animationFrames: 0 });
     try {
-      await dom.render(createElement(AaPopover, { ...baseProps, page: "more", customCss: "body{color:red;}" }));
+      await dom.render(createElement(AaPopover, { ...baseProps, customCss: "body{color:red;}" }));
+      await dom.click(dom.container.querySelector(".aa-group-toggle")!);
+      expect(dom.container.querySelector(".aa-group-toggle")?.getAttribute("aria-expanded")).toBe("true");
+      await dom.click(dom.container.querySelector(".aa-nav-row.is-disclosure")!);
       const textarea = () => dom.container.querySelector(".aa-css-textarea") as HTMLTextAreaElement;
       expect(textarea().value).toBe("body{color:red;}");
-      await dom.render(createElement(AaPopover, { ...baseProps, page: "more", customCss: "" }));
+      await dom.render(createElement(AaPopover, { ...baseProps, customCss: "" }));
       expect(textarea().value).toBe("");
       expect(dom.container.querySelector(".aa-btn-save-css")).toBeNull();
     } finally {
       await dom.dispose();
     }
-  });
-
-  it("窄屏双页回退提示和阅读方式行固定在滚动区外，不会被挤出或淡化", () => {
-    const markup = html({ effectiveColumns: 1 });
-    const main = page(markup, "main");
-    const body = main.slice(main.indexOf("aa-main-body"), main.indexOf("aa-main-footer"));
-    const footer = main.slice(main.indexOf("aa-main-footer"));
-    expect(body).not.toContain("aa-presentation-row");
-    expect(footer).toContain("aa-presentation-row");
-    expect(footer).toContain("窗口较窄，暂以单页显示");
   });
 });

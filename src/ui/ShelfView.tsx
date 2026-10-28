@@ -165,6 +165,12 @@ export interface ShelfViewProps {
   onBatteryIndicatorChange?(enabled: boolean): void;
   titlebarAutoHide?: boolean;
   onTitlebarAutoHideChange?(enabled: boolean): void;
+  preloadNextChapter?: boolean;
+  onPreloadNextChapterChange?(enabled: boolean): void;
+  seamlessChapterTurn?: boolean;
+  onSeamlessChapterTurnChange?(enabled: boolean): void;
+  uiScale?: number;
+  onUiScaleChange?(scale: number): void;
   hideReaderSystemStatusBar?: boolean;
   onHideReaderSystemStatusBarChange?(hidden: boolean): void;
   keepScreenOnWhileReading?: boolean;
@@ -4450,6 +4456,12 @@ export function ShelfView(props: ShelfViewProps) {
     onBatteryIndicatorChange: props.onBatteryIndicatorChange,
     titlebarAutoHide: props.titlebarAutoHide,
     onTitlebarAutoHideChange: props.onTitlebarAutoHideChange,
+    preloadNextChapter: props.preloadNextChapter,
+    onPreloadNextChapterChange: props.onPreloadNextChapterChange,
+    seamlessChapterTurn: props.seamlessChapterTurn,
+    onSeamlessChapterTurnChange: props.onSeamlessChapterTurnChange,
+    uiScale: props.uiScale,
+    onUiScaleChange: props.onUiScaleChange,
     tapRegions: props.tapRegions,
     onTapRegionsChange: props.onTapRegionsChange,
     tapRegionsScrollMode: props.tapRegionsScrollMode,

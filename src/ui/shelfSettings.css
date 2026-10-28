@@ -223,38 +223,6 @@
   align-items: stretch;
 }
 
-.shelf-theme-swatches {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.shelf-theme-swatch {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 10px 0 8px;
-  border: 1px solid var(--swatch-border);
-  border-radius: 12px;
-  background: var(--swatch-bg);
-  color: var(--swatch-fg);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.shelf-theme-swatch.active {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
-}
-
-.shelf-theme-swatch-sample {
-  font-size: 16px;
-  font-weight: 700;
-}
-
-/* Swatch colours come from READER_PALETTES, the same data as the themes. */
 
 .shelf-settings-row {
   display: flex;

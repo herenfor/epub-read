@@ -8,6 +8,7 @@ import type { ReaderTapRegionSettings } from "./readerTapRouting";
 import "./readerTapRegions.css";
 import "./shelfSettings.css";
 import { Switch } from "./controls/Switch";
+import { SettingsSwitchRow } from "./settingsRows";
 
 /** Reading preferences shared by Settings › Reading on the shelf and the in-reader layer. */
 export interface ReadingSettingsProps {
@@ -24,6 +25,14 @@ export interface ReadingSettingsProps {
   /** Desktop only: the reader's top bar hides until the pointer reaches it. */
   titlebarAutoHide?: boolean;
   onTitlebarAutoHideChange?(enabled: boolean): void;
+  /** High-performance preloading (formerly in Aa › More). */
+  preloadNextChapter?: boolean;
+  /** The open book cannot preload (fixed layout); only the in-reader layer knows. */
+  preloadNextChapterDisabled?: boolean;
+  onPreloadNextChapterChange?(enabled: boolean): void;
+  /** Seamless chapter turn; only with preloading on. */
+  seamlessChapterTurn?: boolean;
+  onSeamlessChapterTurnChange?(enabled: boolean): void;
 }
 
 export function SettingsSwitch(props: { label: string; checked: boolean; onChange(checked: boolean): void }) {
@@ -38,6 +47,7 @@ export function useReadingSettingsTitles(props: ReadingSettingsProps): string[] 
   const { t } = useUiText();
   const titles: string[] = [];
   if (props.tapRegions && props.onTapRegionsChange) titles.push(t("tapRegions.title"));
+  if (props.preloadNextChapter !== undefined && props.onPreloadNextChapterChange) titles.push(t("aa.preload"));
   if (props.keepScreenOnWhileReading !== undefined && props.onKeepScreenOnWhileReadingChange) titles.push(t("shelfMenu.keepScreenOn"));
   if (props.hideReaderSystemStatusBar !== undefined && props.onHideReaderSystemStatusBarChange) titles.push(t("shelfMenu.statusBar"));
   if (props.batteryIndicatorEnabled !== undefined && props.onBatteryIndicatorChange) titles.push(t("shelfMenu.battery"));
@@ -50,17 +60,27 @@ export function ReadingSettingsContent(props: ReadingSettingsProps) {
   const tapLabels = useMemo(() => Object.fromEntries(Object.entries(TAP_REGION_LABEL_KEYS)
     .map(([field, key]) => [field, t(key)])) as unknown as ReaderTapRegionsLabels, [t]);
   const switches: ReactNode[] = [];
+  if (props.titlebarAutoHide !== undefined && props.onTitlebarAutoHideChange) {
+    switches.push(<SettingsSwitchRow key="titlebar" title={t("shelfMenu.titlebarAutoHide.tip")} checked={props.titlebarAutoHide} onChange={props.onTitlebarAutoHideChange} />);
+  }
+  if (props.preloadNextChapter !== undefined && props.onPreloadNextChapterChange) {
+    const preloadOn = props.preloadNextChapter && !props.preloadNextChapterDisabled;
+    switches.push(<SettingsSwitchRow key="preload" title={t("aa.preload")} detail={t("aa.preload.warning")}
+      checked={props.preloadNextChapter} disabled={props.preloadNextChapterDisabled} onChange={props.onPreloadNextChapterChange} />);
+    if (props.seamlessChapterTurn !== undefined && props.onSeamlessChapterTurnChange) {
+      // 连续滑动依附高性能预读：预读关闭（或固定版式不可用）时这个开关也关着、不可点。
+      switches.push(<SettingsSwitchRow key="seamless" title={t("aa.seamlessTurn")} detail={t("aa.seamlessTurn.hint")}
+        checked={props.seamlessChapterTurn && preloadOn} disabled={!preloadOn} onChange={props.onSeamlessChapterTurnChange} />);
+    }
+  }
   if (props.keepScreenOnWhileReading !== undefined && props.onKeepScreenOnWhileReadingChange) {
-    switches.push(<SettingsSwitch key="screen" label={t("shelfMenu.keepScreenOn")} checked={props.keepScreenOnWhileReading} onChange={props.onKeepScreenOnWhileReadingChange} />);
+    switches.push(<SettingsSwitchRow key="screen" title={t("shelfMenu.keepScreenOn")} checked={props.keepScreenOnWhileReading} onChange={props.onKeepScreenOnWhileReadingChange} />);
   }
   if (props.hideReaderSystemStatusBar !== undefined && props.onHideReaderSystemStatusBarChange) {
-    switches.push(<SettingsSwitch key="status" label={t("shelfMenu.statusBar.tip")} checked={props.hideReaderSystemStatusBar} onChange={props.onHideReaderSystemStatusBarChange} />);
+    switches.push(<SettingsSwitchRow key="status" title={t("shelfMenu.statusBar.tip")} checked={props.hideReaderSystemStatusBar} onChange={props.onHideReaderSystemStatusBarChange} />);
   }
   if (props.batteryIndicatorEnabled !== undefined && props.onBatteryIndicatorChange) {
-    switches.push(<SettingsSwitch key="battery" label={t("shelfMenu.battery.tip")} checked={props.batteryIndicatorEnabled} onChange={props.onBatteryIndicatorChange} />);
-  }
-  if (props.titlebarAutoHide !== undefined && props.onTitlebarAutoHideChange) {
-    switches.push(<SettingsSwitch key="titlebar" label={t("shelfMenu.titlebarAutoHide.tip")} checked={props.titlebarAutoHide} onChange={props.onTitlebarAutoHideChange} />);
+    switches.push(<SettingsSwitchRow key="battery" title={t("shelfMenu.battery.tip")} checked={props.batteryIndicatorEnabled} onChange={props.onBatteryIndicatorChange} />);
   }
   return <>
     {props.tapRegions && props.onTapRegionsChange && <div className="shelf-settings-card">

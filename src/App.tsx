@@ -1043,7 +1043,7 @@ export default function App() {
   foregroundRef.current = foreground;
 
   const {
-    menuOpen, fontSettingsOpen, displaySettingsOpen, moreSettingsOpen, tocOpen, bookmarkMenuOpen,
+    menuOpen, fontSettingsOpen, displaySettingsOpen, tocOpen, bookmarkMenuOpen,
     searchOpen, notesOpen, logOpen, assistantOpen, readingSettingsOpen,
     selectionContext, footnote, noteComposer,
   } = readerForegroundSurfaces(foreground);
@@ -4087,8 +4087,6 @@ export default function App() {
   const prepareAaPanel = useCallback(() => openingPanels.prepared(bookKey, "aa"), [openingPanels.prepared, bookKey]);
   const openAaFonts = useCallback(() => showMenuSubview("fonts"), [showMenuSubview]);
   const openAaDisplay = useCallback(() => showMenuSubview("extras"), [showMenuSubview]);
-  const openAaMore = useCallback(() => showMenuSubview("more"), [showMenuSubview]);
-  const backToAaMain = useCallback(() => showMenuSubview("main"), [showMenuSubview]);
   const aaDisplaySummary = useMemo(() => {
     const parts: string[] = [];
     if (textProjectionPreferences.mode === "simplified") parts.push(t("aa.display.summary.toSimplified"));
@@ -5439,6 +5437,12 @@ export default function App() {
               onBatteryIndicatorChange={runtime.platform === "android" ? changeBatteryIndicatorEnabled : undefined}
               titlebarAutoHide={mobileChrome ? undefined : readerZenMode}
               onTitlebarAutoHideChange={changeReaderZenMode}
+              preloadNextChapter={settings.preloadNextChapter === true}
+              onPreloadNextChapterChange={settingsActions.setPreloadNextChapter}
+              seamlessChapterTurn={settings.seamlessChapterTurn === true}
+              onSeamlessChapterTurnChange={settingsActions.setSeamlessChapterTurn}
+              uiScale={uiScale}
+              onUiScaleChange={settingsActions.setUiScale}
               tapRegions={tapRegions}
               onTapRegionsChange={changeTapRegionPreferences}
               tapRegionsScrollMode={settings.readingMode === "scroll"}
@@ -5580,9 +5584,6 @@ export default function App() {
                 onOpenFontSettings={openAaFonts}
                 onOpenDisplaySettings={openAaDisplay}
                 displaySummary={aaDisplaySummary}
-                page={moreSettingsOpen ? "more" : "main"}
-                onOpenMore={openAaMore}
-                onBackToMain={backToAaMain}
                 onLivePreviewChange={setTypographyPreview}
                 layoutStamp={chapterState.status === "ready" ? chapterState : null}
                 lineHeight={settings.lineHeight}
@@ -5599,8 +5600,6 @@ export default function App() {
                 onGapPxChange={settingsActions.setGap}
                 onSpreadGapModeChange={settingsActions.setSpreadGapMode}
                 spreadArea={chapterState.status === "ready" ? chapterState.spreadArea : undefined}
-                uiScale={uiScale}
-                onUiScaleChange={settingsActions.setUiScale}
                 pageMargins={settings.pageMarginsPx}
                 onPageMarginsChange={settingsActions.setPageMargins}
                 columnsPerView={settings.columnsPerView === 2 ? 2 : 1}
@@ -5615,11 +5614,6 @@ export default function App() {
                 onForceHorizontalChange={settingsActions.setForceHorizontal}
                 pageDirection={settings.pageDirection}
                 onPageDirectionChange={settingsActions.setPageDirection}
-                preloadNextChapter={settings.preloadNextChapter === true}
-                preloadNextChapterDisabled={book?.fixedLayout === true}
-                onPreloadNextChapterChange={settingsActions.setPreloadNextChapter}
-                seamlessChapterTurn={settings.seamlessChapterTurn === true}
-                onSeamlessChapterTurnChange={settingsActions.setSeamlessChapterTurn}
                 customCss={settings.customCss}
                 onCustomCssChange={settingsActions.setCustomCss}
                 onResetDefaults={resetDefaults}
@@ -6018,6 +6012,11 @@ export default function App() {
             onBatteryIndicatorChange={runtime.platform === "android" ? changeBatteryIndicatorEnabled : undefined}
             titlebarAutoHide={mobileChrome ? undefined : readerZenMode}
             onTitlebarAutoHideChange={changeReaderZenMode}
+            preloadNextChapter={settings.preloadNextChapter === true}
+            preloadNextChapterDisabled={book?.fixedLayout === true}
+            onPreloadNextChapterChange={settingsActions.setPreloadNextChapter}
+            seamlessChapterTurn={settings.seamlessChapterTurn === true}
+            onSeamlessChapterTurnChange={settingsActions.setSeamlessChapterTurn}
           />
         </PanelPaintWarmup>
       )}

@@ -147,13 +147,12 @@ export function FontSettingsPanel(props: FontSettingsPanelProps) {
     onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = effectiveBusy ? "none" : "copy"; }}
     onDragLeave={onDragLeave} onDrop={onDrop}>
     <div className="drawer-drag-handle font-settings-grip" aria-hidden="true" {...grip} />
-    <div className="menu-head font-settings-head">
-      <button className="tb-btn tb-close" onClick={props.onClose} title={t("fonts.back")} aria-label={t("fonts.back")}>
+    <div className="aa-subpage-head font-settings-head">
+      <button type="button" className="aa-back-btn" onClick={props.onClose} title={t("fonts.back")} aria-label={t("fonts.back")}>
         <ArrowLeftIcon size={14} />
+        <span>{t("aa.back.short")}</span>
       </button>
-      <div className="drawer-title-wrap">
-        <span>{t("fonts.title")}</span>
-      </div>
+      <span className="aa-subpage-title">{t("fonts.title")}</span>
     </div>
     <div className="font-settings-current">
       {t("fonts.current", { name: (props.source === "system" || props.source === "imported" ? props.customFontName : undefined) ?? t("fonts.followBook") })}

@@ -3204,10 +3204,9 @@ select option {
   margin-bottom: 6px;
 }
 
-/* 字体页是 Aa 的子页：返回箭头在左，标题紧随；把手可下拉返回 Aa 主页。 */
+/* 字体页是 Aa 的子页：“‹ 排版”在左，标题居中；把手可下拉返回 Aa 主页。 */
 .font-settings-panel .font-settings-head {
-  justify-content: flex-start;
-  gap: 6px;
+  margin: 0 -6px -4px;
 }
 
 .font-settings-panel .font-settings-grip {
@@ -3215,28 +3214,29 @@ select option {
   cursor: grab;
 }
 
+/* Aa's sub-pages (fonts, characters and filters) open in Aa's own place and
+   size, so going in and back is a page change inside one panel. */
 .font-settings-panel {
   position: fixed;
-  bottom: 20px;
-  left: 50%;
-  transform: translate(-50%, 0) scale(1);
+  top: 44px;
+  right: 20px;
   /* 需高于阅读面板遮罩(190)与阅读工具栏(100)，否则桌面端同样被模糊遮罩盖住且无法点选。 */
   z-index: calc(var(--z-ui-panel) + 10);
-  width: min(600px, calc(100vw - 32px));
-  height: min(580px, calc(100vh - 40px));
+  width: 324px;
+  height: min(580px, calc(100vh - 60px));
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 0 16px 16px;
-  border: 1px solid var(--panel-border);
-  border-radius: 20px;
-  background: var(--panel-bg);
+  padding: 0 12px 12px;
+  border: 1px solid var(--ui-border-control);
+  border-radius: 14px;
+  background: var(--panel-surface);
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
   color: var(--fg);
-  box-shadow: 0 24px 54px rgba(0, 0, 0, 0.35), 0 6px 18px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18), 0 3px 10px rgba(0, 0, 0, 0.06);
   opacity: 1;
-  animation: panel-float-from-bottom var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
+  animation: aaPopoverFadeIn var(--menu-open) var(--ease-emphasized);
   pointer-events: auto;
   overflow: hidden;
   box-sizing: border-box;
@@ -3278,7 +3278,9 @@ select option {
 .font-import-btn { flex: none; padding: 0 12px; border: 1px solid var(--panel-border); border-radius: 5px; background: transparent; color: var(--fg); font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap; }
 .font-import-btn:disabled { opacity: 0.55; cursor: default; }
 .font-settings-filter { display: flex; flex: none; align-items: center; gap: 12px; }
-.font-settings-panel .font-settings-filter .font-settings-tabs { flex: 1 1 auto; min-width: 0; }
+.font-settings-panel .font-settings-filter { flex-wrap: wrap; row-gap: 6px; }
+.font-settings-panel .font-settings-filter .font-settings-tabs { flex: 1 1 100%; min-width: 0; }
+.font-settings-panel .font-settings-filter .font-override-switch { margin-left: auto; }
 .font-settings-filter .aa-segmented-btn { flex: 1 1 auto; min-width: 0; padding: 0 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .font-override-switch > span:first-child { white-space: nowrap; }
 .font-override-switch { display: inline-flex; flex: none; align-items: center; gap: 8px; color: var(--fg); font-size: 13px; cursor: pointer; }
@@ -3835,7 +3837,6 @@ select option {
   }
 
   .app:not([data-mobile-chrome="true"]) .search-panel,
-  .font-settings-panel,
   .app:not([data-mobile-chrome="true"]) .log-panel {
     top: auto !important;
     bottom: 12px !important;
@@ -5814,8 +5815,12 @@ select option {
   zoom: 1;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
-  bottom: calc(20px + var(--ime-bottom, 0px));
-  height: min(580px, calc(var(--visual-viewport-height, 100vh) - 40px));
+  height: min(580px, calc(var(--visual-viewport-height, 100vh) - 60px - var(--ime-bottom, 0px)));
+}
+
+/* Touch, not a phone: as wide as Aa there. */
+.app[data-touch-ui="true"]:not([data-layout="compact"]) .font-settings-panel {
+  width: 380px;
 }
 
 /* 手机：与排版面板同一种贴底整宽面板，固定高度让字体列表可滚动，不再被窄屏规则缩成浮条。 */
@@ -5842,8 +5847,8 @@ select option {
   display: none;
 }
 
-.app[data-touch-ui="true"] .font-settings-panel .menu-head {
-  font-size: 15px; /* 与“字符与滤镜”子页标题一致 */
+.app[data-touch-ui="true"] .font-settings-panel .aa-subpage-title {
+  font-size: 15px;
 }
 
 .app[data-touch-ui="true"] .font-settings-current {

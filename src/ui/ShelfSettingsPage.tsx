@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Theme } from "../render/settings";
-import { READER_PALETTES } from "../config/readerPalette";
 import { getRuntimeCapabilities } from "../platform/runtimeCapabilities";
 import { AboutInfo } from "./AboutInfo";
 import { Icon, SettingsRow, SettingsSwitchRow, UpdateDot } from "./settingsRows";
@@ -20,6 +19,7 @@ import type { ReaderTapRegionSettings } from "./readerTapRouting";
 import { ReadingSettingsContent, useReadingSettingsTitles, type ReadingSettingsProps } from "./ReadingSettings";
 import { SearchIndexCard } from "./SearchPanel";
 import type { ShelfBodySearchProps } from "./ShelfView";
+import { ThemeCards } from "./controls/ThemeCards";
 import "./shelfSettings.css";
 
 export type ShelfSettingsSection = "appearance" | "reading" | "data" | "sync" | "storage" | "about";
@@ -38,6 +38,13 @@ export interface ShelfSettingsPageProps {
   onBatteryIndicatorChange?(enabled: boolean): void;
   titlebarAutoHide?: boolean;
   onTitlebarAutoHideChange?(enabled: boolean): void;
+  preloadNextChapter?: boolean;
+  onPreloadNextChapterChange?(enabled: boolean): void;
+  seamlessChapterTurn?: boolean;
+  onSeamlessChapterTurnChange?(enabled: boolean): void;
+  /** Interface scale (formerly in Aa › More). */
+  uiScale?: number;
+  onUiScaleChange?(scale: number): void;
   hideReaderSystemStatusBar?: boolean;
   onHideReaderSystemStatusBarChange?(hidden: boolean): void;
   keepScreenOnWhileReading?: boolean;
@@ -69,11 +76,11 @@ export interface ShelfSettingsPageProps {
   warm?: "home" | "pages";
 }
 
-const THEMES: Array<{ value: Theme; label: "shelfMenu.theme.light" | "shelfMenu.theme.sepia" | "shelfMenu.theme.gray" | "shelfMenu.theme.dark" }> = [
-  { value: "light", label: "shelfMenu.theme.light" },
-  { value: "sepia", label: "shelfMenu.theme.sepia" },
-  { value: "gray", label: "shelfMenu.theme.gray" },
-  { value: "dark", label: "shelfMenu.theme.dark" },
+const UI_SCALES: Array<{ value: string; label: string }> = [
+  { value: "0.85", label: "85%" },
+  { value: "1", label: "100%" },
+  { value: "1.15", label: "115%" },
+  { value: "1.3", label: "130%" },
 ];
 
 const SECTION_ICONS: Record<ShelfSettingsSection, ReactNode> = {
@@ -204,6 +211,10 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
     onBatteryIndicatorChange: props.onBatteryIndicatorChange,
     titlebarAutoHide: props.titlebarAutoHide,
     onTitlebarAutoHideChange: props.onTitlebarAutoHideChange,
+    preloadNextChapter: props.preloadNextChapter,
+    onPreloadNextChapterChange: props.onPreloadNextChapterChange,
+    seamlessChapterTurn: props.seamlessChapterTurn,
+    onSeamlessChapterTurnChange: props.onSeamlessChapterTurnChange,
   };
 
   const dataRows = [
@@ -232,24 +243,15 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
   const appearance = <div className="shelf-settings-card">
     <div className="shelf-settings-control is-stacked">
       <span>{t("shelfMenu.theme")}</span>
-      <div className="shelf-theme-swatches" role="radiogroup" aria-label={t("shelfMenu.theme")}>
-        {THEMES.map((theme) => <button key={theme.value} type="button" role="radio" aria-checked={props.theme === theme.value}
-          className={`shelf-theme-swatch${props.theme === theme.value ? " active" : ""}`}
-          style={{
-            "--swatch-bg": READER_PALETTES[theme.value].background,
-            "--swatch-fg": READER_PALETTES[theme.value].uiForeground,
-            "--swatch-border": READER_PALETTES[theme.value].previewBorder,
-          } as CSSProperties}
-          disabled={busy} onClick={() => props.onThemeChange(theme.value)}>
-          <span className="shelf-theme-swatch-sample" aria-hidden="true">Aa</span>
-          <span>{t(theme.label)}</span>
-        </button>)}
-      </div>
+      <ThemeCards value={props.theme} onChange={props.onThemeChange} label={t("shelfMenu.theme")} disabled={busy} />
     </div>
     <Segmented label={t("shelfMenu.motion")} value={uiMotion} onChange={(value: UiMotion) => setUiMotion(value)}
       options={[{ value: "full", label: t("shelfMenu.motion.full") }, { value: "reduced", label: t("shelfMenu.motion.reduced") }]} />
     <Segmented label={language.label} value={language.preference} onChange={(value) => language.choose(value as UiLanguagePreference)}
       options={language.options} />
+    {props.onUiScaleChange && <Segmented label={t("aa.uiScale")}
+      value={UI_SCALES.find((option) => Math.abs(Number(option.value) - (props.uiScale ?? 1)) < 0.05)?.value ?? "1"}
+      onChange={(value) => props.onUiScaleChange!(Number(value))} options={UI_SCALES} />}
     {language.error && <p className="shelf-settings-error" role="alert">{language.error}</p>}
   </div>;
   sections.push({ id: "appearance", title: t("shelfSettings.section.appearance"), detail: "", content: appearance });

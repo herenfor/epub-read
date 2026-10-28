@@ -98,55 +98,55 @@ describe("prepared panels are reused by the first real opening", () => {
     ...over,
   });
 
-  it("Aa: the More warm-up draws that page and every opening still starts on the main page", async () => {
+  it("Aa: the detailed warm-up draws Advanced open and every opening starts as the reader left it", async () => {
     const dom = createPanelHarness();
     const props = aaProps({ open: false });
-    const shown = () => (dom.container.querySelector(".aa-popover") as HTMLElement).getAttribute("data-page");
+    const expanded = () => dom.container.querySelector(".aa-group-toggle")?.getAttribute("aria-expanded");
     try {
       await dom.render(createElement(AaPopover, { ...props, paintWarm: "detailed" }));
       const dialog = dom.container.querySelector(".aa-popover") as HTMLElement;
+      const body = dom.container.querySelector(".aa-main-body") as HTMLElement;
       expect(dialog.className).toContain("is-paint-warm");
       expect(dialog.hasAttribute("inert")).toBe(true);
-      expect(shown()).toBe("more");
+      expect(expanded()).toBe("true");
       for (const [name, value] of Object.entries(props)) {
         if (typeof value === "function") expect(value, name).not.toHaveBeenCalled();
       }
-      // The stage ends while closed: back to main.
+      // The stage ends while closed: Advanced folds back, the page is at its top.
       await dom.render(createElement(AaPopover, props));
       expect(dialog.className).not.toContain("is-paint-warm");
-      expect(shown()).toBe("main");
-      // Opened in the middle of the stage: opens on main, not as a warm-up.
+      expect(expanded()).toBe("false");
+      expect(body.scrollTop).toBe(0);
+      // Opened in the middle of the stage: opens as itself, not as a warm-up.
       await dom.render(createElement(AaPopover, { ...props, paintWarm: "detailed" }));
-      expect(shown()).toBe("more");
+      expect(expanded()).toBe("true");
       await dom.render(createElement(AaPopover, { ...props, open: true, paintWarm: "detailed" }));
       expect(dialog.className).not.toContain("is-paint-warm");
-      expect(shown()).toBe("main");
+      expect(expanded()).toBe("false");
     } finally {
       await dom.dispose();
     }
   });
 
-  it("Aa: a sub-page suspends it in place; returning keeps its page and skips the entrance, a real close resets", async () => {
+  it("Aa: a sub-page suspends it in place; returning keeps its scroll and skips the entrance, a real close resets", async () => {
     const dom = createPanelHarness();
-    const props = aaProps({ open: true, page: "more" });
+    const props = aaProps({ open: true });
     try {
       await dom.render(createElement(AaPopover, props));
-      const more = dom.container.querySelector(".aa-more-body") as HTMLElement;
-      more.scrollTop = 90;
-      // Into a sub-page and back: same page, same scroll, no entrance.
+      const body = dom.container.querySelector(".aa-main-body") as HTMLElement;
+      body.scrollTop = 90;
+      // Into a sub-page and back: same scroll, no entrance.
       await dom.render(createElement(AaPopover, { ...props, open: false, suspended: true }));
       await dom.render(createElement(AaPopover, { ...props, open: true }));
       const dialog = dom.container.querySelector(".aa-popover") as HTMLElement;
       expect(dialog.className).toContain("is-resumed");
-      expect(dialog.getAttribute("data-page")).toBe("more");
-      expect(more.scrollTop).toBe(90);
+      expect(body.scrollTop).toBe(90);
       // A sub-page closed for good (menu closed from it) resets like any close.
       await dom.render(createElement(AaPopover, { ...props, open: false, suspended: true }));
-      await dom.render(createElement(AaPopover, { ...props, page: "main", open: false, suspended: false }));
-      await dom.render(createElement(AaPopover, { ...props, page: "main", open: true }));
+      await dom.render(createElement(AaPopover, { ...props, open: false, suspended: false }));
+      await dom.render(createElement(AaPopover, { ...props, open: true }));
       expect(dialog.className).not.toContain("is-resumed");
-      expect(dialog.getAttribute("data-page")).toBe("main");
-      expect(more.scrollTop).toBe(0);
+      expect(body.scrollTop).toBe(0);
     } finally {
       await dom.dispose();
     }
@@ -183,7 +183,6 @@ describe("prepared panels are reused by the first real opening", () => {
       await dom.render(createElement(AaPopover, { ...props, open: false }));
       await dom.render(createElement(AaPopover, { ...props, open: true }));
       expect(dom.container.querySelector(".aa-popover")).toBe(dialog);
-      expect(dialog.getAttribute("data-page")).toBe("main");
       expect(main.scrollTop).toBe(0);
       expect(onPrepared).toHaveBeenCalledTimes(1);
     } finally {
