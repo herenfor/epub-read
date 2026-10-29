@@ -3,6 +3,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { TitleBar } from "./TitleBar";
 import { clearAppBuildSession, setAppBuildSession } from "../config/appBuildSession";
+import { createReactDomHarness } from "../test/reactDomHarness";
 
 beforeEach(() => {
   setAppBuildSession({
@@ -14,6 +15,29 @@ beforeEach(() => {
 afterEach(() => clearAppBuildSession());
 
 describe("CSD TitleBar 组件与样式契约（Zen UI Packet A）", () => {
+  it("顶栏右键只阻止浏览器菜单，不影响正文和输入框", async () => {
+    const dom = createReactDomHarness();
+    try {
+      await dom.render(createElement("div", null,
+        createElement(TitleBar, { view: "reader", title: "A book", zenMode: true }),
+        createElement("main", null, createElement("input"))));
+      for (const selector of [".titlebar-book-title", ".titlebar-controls", ".titlebar-zen-sensor"]) {
+        const target = dom.container.querySelector(selector);
+        expect(target, selector).not.toBeNull();
+        const event = new dom.window.Event("contextmenu", { bubbles: true, cancelable: true });
+        await dom.dispatch(target!, event);
+        expect(event.defaultPrevented, selector).toBe(true);
+      }
+      for (const selector of ["main", "input"]) {
+        const event = new dom.window.Event("contextmenu", { bubbles: true, cancelable: true });
+        await dom.dispatch(dom.container.querySelector(selector)!, event);
+        expect(event.defaultPrevented, selector).toBe(false);
+      }
+    } finally {
+      await dom.dispose();
+    }
+  });
+
   it("非 Tauri 桌面环境书架视图静默不渲染", () => {
     vi.stubGlobal("window", {});
     try {
