@@ -37,11 +37,11 @@ export const RELEASE_NOTES: readonly ReleaseNote[] = [
   {
     version: "0.3.8",
     status: "released",
-    releasedOn: "2026-10-30",
+    releasedOn: "2026-10-29",
     items: [
       {
         category: "new",
-        text: "多书标签：可在书架选择“在新标签中打开”，在多本书之间切换，最多保留 5 个标签。",
+        text: "多书标签：可在书架选择“在新标签中打开”，在多本书之间切换，最多保留 5 个标签；只打开一本书时，顶栏也会显示“＋”入口，方便直接发现。",
       },
       {
         category: "new",
