@@ -3000,6 +3000,7 @@ const SETTINGS_WARM_BATCHES: readonly PanelWarmBatch[] = [["shelf-settings"], ["
 
 const SHELF_SORTS: readonly ShelfSort[] = ["recent", "added", "title", "progress"];
 const FOLDER_SORT_STORAGE_KEY = "epub_shelf_folder_sort";
+const FOLDER_PREFIX_EXPANDED_STORAGE_KEY = "epub_shelf_folders_expanded";
 
 export function ShelfView(props: ShelfViewProps) {
   const { t, tn } = useUiText();
@@ -3148,8 +3149,21 @@ export function ShelfView(props: ShelfViewProps) {
     : t("shelfMain.empty.hint.desktop");
   const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
   const categoryDropdownRef = useRef<HTMLDivElement | null>(null);
-  // 手机网格根层默认展开文件夹卡片；收起后摘要栏仍在，可随时再展开。
-  const [folderPrefixExpanded, setFolderPrefixExpanded] = useState(true);
+  // 默认展开；沿用本机选择，避免开书后返回时因书架重建而重置。
+  const [folderPrefixExpanded, setFolderPrefixExpanded] = useState(() => {
+    try {
+      return localStorage.getItem(FOLDER_PREFIX_EXPANDED_STORAGE_KEY) !== "false";
+    } catch {
+      return true;
+    }
+  });
+  const toggleFolderPrefix = () => {
+    const next = !folderPrefixExpanded;
+    setFolderPrefixExpanded(next);
+    try {
+      localStorage.setItem(FOLDER_PREFIX_EXPANDED_STORAGE_KEY, String(next));
+    } catch {}
+  };
 
   const [folderActiveMoreOpen, setFolderActiveMoreOpen] = useState(false);
   const folderActiveMoreRef = useRef<HTMLDivElement | null>(null);
@@ -5451,7 +5465,7 @@ export function ShelfView(props: ShelfViewProps) {
                   <button
                     className="shelf-folder-summary-toggle-btn"
                     type="button"
-                    onClick={() => setFolderPrefixExpanded((prev) => !prev)}
+                    onClick={toggleFolderPrefix}
                     aria-expanded={folderPrefixExpanded}
                     title={t(folderPrefixExpanded ? "shelfMain.folders.collapse.tip" : "shelfMain.folders.expand.tip")}
                     aria-label={t(folderPrefixExpanded ? "shelfMain.folders.collapse.tip" : "shelfMain.folders.expand.tip")}
