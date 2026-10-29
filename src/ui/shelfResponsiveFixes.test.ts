@@ -324,6 +324,44 @@ describe("第三步补修：书架触摸长按与子菜单 Back", () => {
     }
   });
 
+  it("文件夹收起或展开后，离开再重建书架仍保留选择", async () => {
+    const store = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => { store.set(key, value); },
+      removeItem: (key: string) => { store.delete(key); },
+    });
+    const dom = createReactDomHarness();
+    const shelf = () => createElement(ShelfView, {
+      ...makeProps([makeEntry("b1", "爱丽丝漫游仙境")]),
+      compact: true,
+      organization: {
+        ...emptyOrganization(),
+        folders: { f1: { name: { value: "名著", stamp: { counter: 1, deviceId: "test" } } } },
+      },
+    });
+    const toggle = () => dom.container.querySelector(".shelf-folder-summary-toggle-btn") as HTMLButtonElement;
+    try {
+      await dom.render(shelf());
+      expect(toggle().getAttribute("aria-expanded")).toBe("true");
+      await dom.click(toggle());
+      // Opening a book unmounts ShelfView; returning creates a new instance.
+      await dom.render(null);
+      await dom.render(shelf());
+      expect(toggle().getAttribute("aria-expanded")).toBe("false");
+      expect(dom.container.querySelector(".shelf-folder-card")).toBeNull();
+
+      await dom.click(toggle());
+      await dom.render(null);
+      await dom.render(shelf());
+      expect(toggle().getAttribute("aria-expanded")).toBe("true");
+      expect(dom.container.querySelector(".shelf-folder-card")).not.toBeNull();
+    } finally {
+      await dom.dispose();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("手机列表的占位行不跨列，固定布局不会凭空多出被隐去的列", async () => {
     const store = new Map([["epub_shelf_view_mode", "list"]]);
     vi.stubGlobal("localStorage", {
