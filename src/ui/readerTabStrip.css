@@ -1,4 +1,12 @@
 /* A11 标签条的“+N”“＋”与两个面板（ReaderTabStrip.tsx）。标签本身的样式在 titleBar.css。 */
+/* 只开一本：书名 · 作者后面跟“＋”，书名先省略，“＋”不被挤掉。 */
+.titlebar-reader-single {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
 .titlebar-reader-tabs-more,
 .titlebar-reader-tabs-new {
   flex: none;

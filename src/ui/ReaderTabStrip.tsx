@@ -32,6 +32,8 @@ export interface ReaderTabStripProps {
   warm?: boolean;
   /** 面板开着时顶栏不能自动收起。 */
   onMenuOpenChange?(open: boolean): void;
+  /** 只开一本时代替标签显示的书名，“＋”跟在它后面。 */
+  children?: ReactNode;
 }
 
 const PLUS_PX = 28;
@@ -45,7 +47,7 @@ const TABS_SHARE = 0.6;
 type MenuKind = "new" | "list";
 
 /**
- * 两本以上时的顶栏标签条：标签先变窄，再从离当前最远的开始收进“+N”列表，
+ * 只开一本时显示书名加“＋”；两本以上时是顶栏标签条：标签先变窄，再从离当前最远的开始收进“+N”列表，
  * 给中间的进度胶囊留出位置。“＋”列出最近读过的书，也能回书架挑。
  */
 export function ReaderTabStrip(props: ReaderTabStripProps) {
@@ -54,8 +56,10 @@ export function ReaderTabStrip(props: ReaderTabStripProps) {
   const [budget, setBudget] = useState(0);
   const [menu, setMenu] = useState<{ kind: MenuKind; anchor: HTMLElement } | null>(null);
   const onMenuOpenChange = props.onMenuOpenChange;
+  const single = props.tabs.length < 2;
 
   useLayoutEffect(() => {
+    if (single) return;
     const strip = stripRef.current;
     const header = strip?.closest<HTMLElement>(".titlebar");
     const left = strip?.parentElement;
@@ -78,7 +82,7 @@ export function ReaderTabStrip(props: ReaderTabStripProps) {
     const observer = new ResizeObserver(measure);
     observer.observe(header);
     return () => observer.disconnect();
-  }, []);
+  }, [single]);
 
   useEffect(() => {
     onMenuOpenChange?.(menu !== null);
@@ -96,9 +100,10 @@ export function ReaderTabStrip(props: ReaderTabStripProps) {
 
   return (
     <>
-      <div ref={stripRef} className="titlebar-reader-tabs" role="tablist" aria-label={t("titlebar.tabs")}
-        style={budget > 0 ? { maxWidth: budget } : undefined}>
-        {fit.visible.map((id) => {
+      <div ref={stripRef} className={single ? "titlebar-reader-single" : "titlebar-reader-tabs"}
+        role={single ? undefined : "tablist"} aria-label={single ? undefined : t("titlebar.tabs")}
+        style={!single && budget > 0 ? { maxWidth: budget } : undefined}>
+        {single ? props.children : fit.visible.map((id) => {
           const tab = byId.get(id)!;
           const active = id === props.activeId;
           const name = splitTabTitle(tab.title);
@@ -133,7 +138,7 @@ export function ReaderTabStrip(props: ReaderTabStripProps) {
             </div>
           );
         })}
-        {fit.hidden.length > 0 && (
+        {!single && fit.hidden.length > 0 && (
           <button
             type="button"
             className={`titlebar-reader-tabs-more${menu?.kind === "list" ? " is-open" : ""}`}
@@ -175,7 +180,7 @@ export function ReaderTabStrip(props: ReaderTabStripProps) {
         <TabMenuPortal anchor={null} host={stripRef.current}>
           <PanelPaintWarmup active>
             <NewTabPanel {...props} onDone={noop} anchor={null} warm />
-            <TabListPanel {...props} hidden={fit.hidden} onDone={noop} anchor={null} warm />
+            {!single && <TabListPanel {...props} hidden={fit.hidden} onDone={noop} anchor={null} warm />}
           </PanelPaintWarmup>
         </TabMenuPortal>
       )}

@@ -4123,8 +4123,8 @@ export default function App() {
       return parseReaderTabs(null);
     }
   });
-  // 两本以上时标签条的“＋”和“+N”面板也在阅读安静时画一次（电脑和安卓都画）。
-  const readerTabsWarm = readerTabsVisible && view === "reader" && activeReaderTabs(readerTabs).tabs.length > 1;
+  // 标签条的“＋”（只开一本时也有）和“+N”面板也在阅读安静时画一次（电脑和安卓都画）。
+  const readerTabsWarm = readerTabsVisible && view === "reader";
   // 安卓本次运行：Aa 与目录在首次开书过渡仍遮住时各画一次，其余面板在阅读安静时逐个画一次
   // （几乎不可见、不可交互），之后的首次打开不再承担 GPU 首绘。
   const androidRuntime = runtime.platform === "android";

@@ -282,6 +282,31 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   const isZenHidden = desktopTools && view === "reader" && zenMode && !isAnyMenuOpen && !isZenRevealed;
   const isMobileToolsHidden = mobileCompact && !toolsVisible;
 
+  // 桌面：书名 · 作者（章名在中间的进度胶囊）；触屏顶栏没有胶囊：书名下面一行写章名。
+  const bookMeta = (
+    <div className={`titlebar-book-meta${mobileCompact ? " is-stacked" : ""}`} {...dragProps}>
+      <span
+        className="titlebar-app-title titlebar-book-title"
+        {...dragProps}
+        title={title}
+      >
+        {title || t("titlebar.appName")}
+      </span>
+      {mobileCompact ? chapterTitle && (
+        <span className="titlebar-chapter-title" {...dragProps} title={chapterTitle}>
+          {chapterTitle}
+        </span>
+      ) : author && (
+        <>
+          <span className="titlebar-title-sep" {...dragProps}>·</span>
+          <span className="titlebar-author" {...dragProps} title={author}>
+            {author}
+          </span>
+        </>
+      )}
+    </div>
+  );
+
   return (
     <>
       {/* 沉浸隐藏时的顶部微感应区（0~40px） */}
@@ -382,32 +407,11 @@ export const TitleBar: React.FC<TitleBarProps> = ({
             </div>
           )}
 
-          {/* 只开一本书时不需要标签条，显示书名即可。 */}
-          {view === "reader" && readerTabs && readerTabs.tabs.length > 1 ? (
-            <ReaderTabStrip {...readerTabs} onMenuOpenChange={setTabMenuOpen} />
+          {/* 只开一本时显示书名 · 作者，后面跟“＋”；两本以上换成标签条。 */}
+          {view === "reader" && readerTabs ? (
+            <ReaderTabStrip {...readerTabs} onMenuOpenChange={setTabMenuOpen}>{bookMeta}</ReaderTabStrip>
           ) : view === "reader" ? (
-            // 桌面：书名 · 作者（章名在中间的进度胶囊）；触屏顶栏没有胶囊：书名下面一行写章名。
-            <div className={`titlebar-book-meta${mobileCompact ? " is-stacked" : ""}`} {...dragProps}>
-              <span
-                className="titlebar-app-title titlebar-book-title"
-                {...dragProps}
-                title={title}
-              >
-                {title || t("titlebar.appName")}
-              </span>
-              {mobileCompact ? chapterTitle && (
-                <span className="titlebar-chapter-title" {...dragProps} title={chapterTitle}>
-                  {chapterTitle}
-                </span>
-              ) : author && (
-                <>
-                  <span className="titlebar-title-sep" {...dragProps}>·</span>
-                  <span className="titlebar-author" {...dragProps} title={author}>
-                    {author}
-                  </span>
-                </>
-              )}
-            </div>
+            bookMeta
           ) : (
             <span className="titlebar-app-title" {...dragProps} title={title}>
               {title || t("titlebar.appName")}
