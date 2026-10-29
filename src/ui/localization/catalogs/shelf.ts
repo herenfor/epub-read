@@ -26,6 +26,7 @@ export const shelf = defineMessages("shelf", {
   "shelf.time.hoursAgo.one": { zh: "{count} 小时前", note: "Singular form." },
   "shelf.time.yesterday": "昨天",
   "shelf.resume.chapter": { zh: "第 {n} 章 · {progress}", note: "Collapsed 'continue' card: chapter number and progress like '34%'.", max: 22 },
+  "shelf.resume.place": { zh: "{chapter} · {progress}", note: "Continue card: the table-of-contents chapter name and progress like '34%'." },
   "shelf.resume.open": { zh: "打开《{title}》", note: "Tooltip; 《》 marks a book title — use the target language's convention." },
   "shelf.resume.continue": { zh: "继续", note: "Compact continue-reading button.", max: 8 },
   "shelf.resume.expand.tip": "展开 (显示封面与详细进度)",

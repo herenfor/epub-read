@@ -214,6 +214,7 @@ import {
 } from "./ui/chapterCounts";
 import { createChapterCountJob } from "./ui/chapterCountJob";
 import { readCachedChapterCounts, readKnownChapterProgressKeys, writeChapterCountCache } from "./ui/chapterCountCache";
+import { writeShelfPlaceLabel } from "./ui/shelfPlaceCache";
 import { projectShelfProgressReadiness } from "./ui/shelfProgressDisplay";
 import {
   archiveRecordsForBackend,
@@ -4821,6 +4822,10 @@ export default function App() {
   /** 每个 spine 项在目录里的名字：插图页、拆开的章节文件沿用上一个目录项；封面等目录之前的为空串。 */
   const tocSpineLabels = useMemo(() => book ? tocLabelsBySpine(book) : [], [book]);
   const currentChapterLabel = ready ? tocSpineLabels[spineIndex] ?? "" : "";
+  // The shelf's "continue" card shows this name for the saved position.
+  useEffect(() => {
+    if (ready) writeShelfPlaceLabel(activeSessionRef.current?.countCacheKey ?? null, spineIndex, currentChapterLabel);
+  }, [ready, spineIndex, currentChapterLabel]);
   /** 跳转历史目标的位置名：本章为空串，其他章用目录名或“第 N 章”；无目标为 null。 */
   const historyPlaceLabel = (position: ReaderNavigationPosition | undefined): string | null => {
     if (!position || !book || !ready) return null;

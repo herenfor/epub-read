@@ -407,6 +407,13 @@
   white-space: nowrap;
 }
 
+/* A long chapter name gives way before the progress track does. */
+.shelf-resume-compact-meta > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .shelf-resume-mini-track {
   flex: 0 1 120px;
   min-width: 36px;
@@ -625,9 +632,13 @@
 }
 
 .shelf-resume-anchor-text {
+  min-width: 0;
+  overflow: hidden;
   font-size: 12px;
   font-weight: 500;
   color: color-mix(in srgb, var(--fg, #111827) 85%, transparent);
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .shelf-resume-progress-track {

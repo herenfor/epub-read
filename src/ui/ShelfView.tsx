@@ -51,6 +51,7 @@ import {
 import { hasReadPosition } from "./readEvidence";
 import { isShelfProgressPending, shelfProgressLabel } from "./shelfProgressDisplay";
 import { readCachedLinearMask } from "./chapterCountCache";
+import { readShelfPlaceLabel } from "./shelfPlaceCache";
 import { linearChapterNumber } from "../core/book";
 import { isShelfCardActionTarget } from "./shelfCardEventScope";
 import { getRuntimeCapabilities } from "../platform/runtimeCapabilities";
@@ -997,7 +998,11 @@ const ShelfResumeStage = memo(function ShelfResumeStage({
   const spineIndex = activeBook.spineIndex ?? 0;
   // Same numbering as the reader footer; books never opened since this cache existed keep the raw position.
   const chapterNumber = (linearMask ? linearChapterNumber(linearMask, spineIndex) : null) ?? spineIndex + 1;
-  const chapterLabel = t("shelf.resume.chapter", { n: chapterNumber, progress: shelfProgressLabel(activeBook) });
+  // Prefer the table-of-contents name the reader saved for this position.
+  const placeName = readShelfPlaceLabel(activeKey, spineIndex);
+  const chapterLabel = placeName
+    ? t("shelf.resume.place", { chapter: placeName, progress: shelfProgressLabel(activeBook) })
+    : t("shelf.resume.chapter", { n: chapterNumber, progress: shelfProgressLabel(activeBook) });
 
   // Both states stay mounted; the stage animates its grid rows between them so
   // expanding/collapsing is one short height + cross-fade, not a remount jump.
