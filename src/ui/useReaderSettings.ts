@@ -12,7 +12,7 @@ import {
   type TurnAnimation,
 } from "../render/settings";
 import type { UserFont } from "./fontStore";
-import { readSavedSettings, toSavedReaderSettings, writeSavedSettings } from "./storage";
+import { readSavedSettings, savedTheme, toSavedReaderSettings, writeSavedSettings } from "./storage";
 
 function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
@@ -25,7 +25,7 @@ export function useReaderSettings() {
     return {
       ...DEFAULT_SETTINGS,
       fontSizePx: saved.fontSizePx ?? DEFAULT_SETTINGS.fontSizePx,
-      theme: saved.theme ?? DEFAULT_SETTINGS.theme,
+      theme: savedTheme(saved) ?? DEFAULT_SETTINGS.theme,
       lineHeight: saved.lineHeight,
       fontWeight: saved.fontWeight,
       letterSpacingPx: saved.letterSpacingPx,

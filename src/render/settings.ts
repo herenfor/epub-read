@@ -4,7 +4,12 @@ import type { PageMarginsPx, ReadingMode, SpreadGapMode } from "./pageLayout";
 
 export type { PageMarginsPx, ReadingMode, SpreadGapMode };
 
-export type Theme = "light" | "dark" | "sepia" | "gray";
+import type { CustomThemeKey } from "../config/customThemes";
+
+/** The four built-in themes. */
+export type BuiltinTheme = "light" | "dark" | "sepia" | "gray";
+/** A built-in theme, or a user theme carried as its colors (config/customThemes). */
+export type Theme = BuiltinTheme | CustomThemeKey;
 
 export interface ReaderSettings {
   fontSizePx: number;

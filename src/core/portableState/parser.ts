@@ -41,7 +41,7 @@ import type {
   PortableStateV3,
   ProgressValue,
 } from "./portable-state-types";
-import type { Theme } from "../../render/settings";
+import type { BuiltinTheme as Theme } from "../../render/settings";
 
 export const PORTABLE_STATE_SCHEMA_VERSION = 3 as const;
 

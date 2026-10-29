@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { readSavedSettings, toSavedReaderSettings, writeSavedSettings } from "./storage";
+import { readSavedSettings, savedTheme, toSavedReaderSettings, writeSavedSettings } from "./storage";
 import { DEFAULT_SETTINGS } from "../render/settings";
 
 const originalStorage = globalThis.localStorage;
@@ -91,5 +91,16 @@ describe("saved reader settings", () => {
 
     writeSavedSettings({ theme: "dark", preloadNextChapter: true });
     expect(readSavedSettings()).toMatchObject({ theme: "dark", preloadNextChapter: true });
+  });
+
+  it("saves a user theme as its colors plus a built-in fallback for older versions", () => {
+    const dark = toSavedReaderSettings({ ...DEFAULT_SETTINGS, theme: "c:141b26a9b8c96ea8dc" }, 1);
+    expect(dark).toMatchObject({ theme: "dark", themeColors: "c:141b26a9b8c96ea8dc" });
+    const light = toSavedReaderSettings({ ...DEFAULT_SETTINGS, theme: "c:c7edcc2b3a2e3f7d4e" }, 1);
+    expect(light).toMatchObject({ theme: "light", themeColors: "c:c7edcc2b3a2e3f7d4e" });
+    expect(toSavedReaderSettings({ ...DEFAULT_SETTINGS, theme: "sepia" }, 1).themeColors).toBeUndefined();
+    expect(savedTheme(dark)).toBe("c:141b26a9b8c96ea8dc");
+    expect(savedTheme({ theme: "gray" })).toBe("gray");
+    expect(savedTheme({ theme: "solarized" as never, themeColors: "c:bad" as never })).toBeUndefined();
   });
 });

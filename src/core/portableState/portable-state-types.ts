@@ -1,6 +1,6 @@
 /** Frozen design DTOs; these modules are not yet wired into the application. */
 import type { LibraryOrganization, Register } from "../../ui/libraryOrganization";
-import type { Theme } from "../../render/settings";
+import type { BuiltinTheme as Theme } from "../../render/settings";
 import type { Annotation, Version } from "./portable-register-core";
 
 export type ModernLocator = {

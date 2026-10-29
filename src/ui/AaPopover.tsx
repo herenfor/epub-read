@@ -9,7 +9,9 @@ import {
   readingPresentation,
   type ReadingPresentation,
 } from "../render/pagedSpread";
-import { ChevronRightIcon, RotateCcwIcon } from "./readerIcons";
+import { ArrowLeftIcon, ChevronRightIcon, RotateCcwIcon } from "./readerIcons";
+import { CustomThemeEditor } from "./controls/CustomThemeEditor";
+import type { CustomThemeControls } from "./useCustomThemes";
 import "./aaPopover.css";
 import { useUiText } from "./localization/UiLanguageProvider";
 import { formatFontSizePx } from "./fontSizeDisplay";
@@ -64,6 +66,8 @@ export interface AaPopoverProps {
 
   theme: Theme;
   onThemeChange: (theme: Theme) => void;
+  /** Custom themes: shown after the built-in ones; their editor opens in this panel. */
+  customThemes?: CustomThemeControls;
 
   // 字体设置
   customFontName?: string;
@@ -262,6 +266,7 @@ export const AaPopover = React.memo(function AaPopover({
   onFontSizeChange,
   theme,
   onThemeChange,
+  customThemes,
   customFontName,
   onOpenFontSettings,
   onOpenDisplaySettings,
@@ -312,6 +317,13 @@ export const AaPopover = React.memo(function AaPopover({
   const [cssDraft, setCssDraft] = useState(customCss);
   const [cssOpen, setCssOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(readAdvancedOpen);
+  // The theme editor replaces the page in place, like the font sub-page.
+  const [editingThemeId, setEditingThemeId] = useState<string | null>(null);
+  const editingIndex = editingThemeId && customThemes ? customThemes.themes.findIndex((item) => item.id === editingThemeId) : -1;
+  const editingTheme = editingIndex >= 0 ? customThemes!.themes[editingIndex] : null;
+  useEffect(() => {
+    if (!open) setEditingThemeId(null);
+  }, [open]);
   const { isClosing, requestClose } = useMenuClose(onClose, open);
   const visible = open || isClosing;
   // The closed "detailed" warm-up draws Advanced open; it is not a choice the reader made.
@@ -500,7 +512,8 @@ export const AaPopover = React.memo(function AaPopover({
   // Advanced (expands in place), reset, and two quiet links.
   const body = (
     <div className="aa-page-body aa-main-body scrollbar-hidden" ref={bodyRef}>
-      <ThemeCards value={theme} onChange={onThemeChange} label={t("aa.themes")} />
+      <ThemeCards value={theme} onChange={onThemeChange} label={t("aa.themes")}
+        custom={customThemes} onEditCustom={setEditingThemeId} />
 
       <div className="aa-card is-list">
         <button type="button" className="aa-nav-row" onClick={() => onOpenFontSettings()} title={t("aa.font.tip")}>
@@ -707,7 +720,21 @@ export const AaPopover = React.memo(function AaPopover({
           <span className="aa-sheet-handle" />
         </div>
         <SliderDragContext.Provider value={sliderHost}>
-          {body}
+          {editingTheme && customThemes ? (
+            <div className="aa-page-body aa-theme-editor-body scrollbar-hidden">
+              <CustomThemeEditor theme={editingTheme} index={editingIndex} controls={customThemes}
+                onDone={() => setEditingThemeId(null)}
+                head={(
+                  <div className="aa-subpage-head">
+                    <button type="button" className="aa-back-btn" onClick={() => setEditingThemeId(null)} title={t("aa.back")} aria-label={t("aa.back")}>
+                      <ArrowLeftIcon size={14} />
+                      <span>{t("aa.back.short")}</span>
+                    </button>
+                    <span className="aa-subpage-title">{t("aa.customTheme.edit")}</span>
+                  </div>
+                )} />
+            </div>
+          ) : body}
         </SliderDragContext.Provider>
       </div>
     </>

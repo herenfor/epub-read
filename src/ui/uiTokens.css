@@ -53,8 +53,7 @@
   --ui-backdrop-light: rgba(0, 0, 0, 0.28);
 }
 
-.app[data-theme="dark"],
-.app[data-theme="gray"] {
+.app[data-tone="dark"] {
   /* Each color-mix percentage must be 0–100%; an invalid mix leaves the variable unusable (transparent background). */
   --ui-control-selected: color-mix(in srgb, var(--panel-bg) 92%, #fff 8%);
 }

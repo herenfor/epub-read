@@ -17,8 +17,7 @@
   animation: bookmarkPagesIn 0.16s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-[data-theme="dark"] .bookmark-pages-popover,
-[data-theme="gray"] .bookmark-pages-popover {
+[data-tone="dark"] .bookmark-pages-popover {
   --bookmark-ribbon: #e0645c;
 }
 

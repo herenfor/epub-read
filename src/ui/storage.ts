@@ -1,6 +1,8 @@
 import { sanitizePersistedTextAnchor } from "../render/textAnchor";
 import type { MediaReadingAnchor } from "../render/paginator";
-import { normalizePageDirection, normalizeTurnAnimation, type PageMarginsPx, type ReadingMode, type ReaderSettings, type SpreadGapMode } from "../render/settings";
+import { normalizePageDirection, normalizeTurnAnimation, type BuiltinTheme, type PageMarginsPx, type ReadingMode, type ReaderSettings, type SpreadGapMode, type Theme } from "../render/settings";
+import { isBuiltinTheme, isDarkReaderTheme } from "../config/readerPalette";
+import { isCustomThemeKey, type CustomThemeKey } from "../config/customThemes";
 
 const PREFIX = "epub-reader:";
 
@@ -53,7 +55,10 @@ export function writeProgress(key: string, p: SavedProgress): void {
 
 export interface SavedSettings {
   fontSizePx?: number;
-  theme?: "light" | "dark" | "sepia" | "gray";
+  /** Always a built-in theme, so an older version reading these settings still gets a valid one. */
+  theme?: BuiltinTheme;
+  /** A user theme's colors ("c:…"); wins over theme when valid. */
+  themeColors?: CustomThemeKey;
   /** UI 界面缩放（0.75–1.5），与正文字号相互独立 */
   uiScale?: number;
   lineHeight?: number;
@@ -94,7 +99,8 @@ export interface SavedSettings {
 export function toSavedReaderSettings(settings: ReaderSettings, uiScale: number): SavedSettings {
   return {
     fontSizePx: settings.fontSizePx,
-    theme: settings.theme,
+    theme: isCustomThemeKey(settings.theme) ? (isDarkReaderTheme(settings.theme) ? "dark" : "light") : settings.theme,
+    themeColors: isCustomThemeKey(settings.theme) ? settings.theme : undefined,
     uiScale,
     lineHeight: settings.lineHeight,
     fontWeight: settings.fontWeight,
@@ -116,6 +122,12 @@ export function toSavedReaderSettings(settings: ReaderSettings, uiScale: number)
     gapPx: settings.gapPx,
     spreadGapMode: settings.spreadGapMode ?? "auto",
   };
+}
+
+/** The theme saved settings describe; unknown values fall back to undefined (the default). */
+export function savedTheme(saved: SavedSettings): Theme | undefined {
+  if (isCustomThemeKey(saved.themeColors)) return saved.themeColors;
+  return isBuiltinTheme(saved.theme) ? saved.theme : undefined;
 }
 
 export function readSavedSettings(): SavedSettings {

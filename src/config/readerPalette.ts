@@ -1,4 +1,5 @@
-import type { Theme } from "../render/settings";
+import type { BuiltinTheme, Theme } from "../render/settings";
+import { customReaderPalette, isDarkPaper, parseCustomThemeKey } from "./customThemes";
 
 interface ReaderPalette {
   background: string;
@@ -53,4 +54,23 @@ export const READER_PALETTES = {
     searchBackground: "rgba(255, 213, 79, 0.45)",
     searchForeground: "#111111",
   },
-} as const satisfies Readonly<Record<Theme, ReaderPalette>>;
+} as const satisfies Readonly<Record<BuiltinTheme, ReaderPalette>>;
+
+export function isBuiltinTheme(theme: unknown): theme is BuiltinTheme {
+  return typeof theme === "string" && Object.prototype.hasOwnProperty.call(READER_PALETTES, theme);
+}
+
+/** Reader colors of any theme; an unreadable user theme falls back to white. */
+export function resolveReaderPalette(theme: Theme): ReaderPalette {
+  if (isBuiltinTheme(theme)) return READER_PALETTES[theme];
+  const colors = parseCustomThemeKey(theme);
+  return colors ? customReaderPalette(colors) : READER_PALETTES.light;
+}
+
+/** Dark themes get the dark-paper repairs (emphasis marks, TOC links, contrast fixes). */
+export function isDarkReaderTheme(theme: Theme): boolean {
+  if (theme === "dark" || theme === "gray") return true;
+  if (isBuiltinTheme(theme)) return false;
+  const colors = parseCustomThemeKey(theme);
+  return colors ? isDarkPaper(colors.background) : false;
+}

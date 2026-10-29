@@ -1,0 +1,210 @@
+/* Custom theme editor (controls/CustomThemeEditor.tsx): Aa sub-page and Settings › Appearance. */
+.cte {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.cte-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.cte-field-label {
+  padding-left: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.cte-name,
+.cte-hex {
+  box-sizing: border-box;
+  min-width: 0;
+  border: 1px solid var(--panel-border);
+  background: var(--panel-card);
+  color: var(--fg);
+  font: inherit;
+  outline: none;
+}
+
+.cte-name {
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 9px;
+  font-size: 14px;
+}
+
+.cte-name:focus-visible,
+.cte-hex:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.cte-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cte-preset {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 9px 0 5px;
+  border: 1px solid var(--panel-border);
+  border-radius: 14px;
+  background: var(--panel-card);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.cte-preset.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+/* Paper with a ring of its ink: the two colors that make the preset. */
+.cte-preset-dot {
+  width: 18px;
+  height: 18px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  background: var(--cte-paper);
+  border: 4px solid var(--cte-paper);
+  box-shadow: inset 0 0 0 4px var(--cte-ink), 0 0 0 1px rgba(0, 0, 0, 0.14);
+}
+
+.cte-card {
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  background: var(--panel-card);
+}
+
+.cte-color-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+.cte-color-row + .cte-color-row {
+  border-top: 1px solid var(--panel-border);
+}
+
+.cte-color-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cte-color-label {
+  flex: 1;
+  font-size: 14px;
+}
+
+.cte-color-chip {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--fg) 18%, transparent);
+}
+
+.cte-hex {
+  width: 84px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 7px;
+  background: var(--panel-surface);
+  font-family: ui-monospace, "Cascadia Mono", Menlo, monospace;
+  font-size: 12.5px;
+}
+
+.cte-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.cte-swatch {
+  position: relative;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  box-sizing: border-box;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--cte-swatch);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 16%, transparent);
+  cursor: pointer;
+}
+
+.cte-swatch.active {
+  box-shadow: 0 0 0 2px var(--panel-card), 0 0 0 4px var(--accent);
+}
+
+.cte-swatch.is-picker {
+  overflow: hidden;
+  background: conic-gradient(#f43f5e, #f59e0b, #84cc16, #06b6d4, #6366f1, #d946ef, #f43f5e);
+  box-shadow: inset 0 0 0 3px var(--panel-card), 0 0 0 1px var(--panel-border);
+}
+
+.cte-swatch.is-picker input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.cte-contrast {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel-card));
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cte-contrast span {
+  color: var(--muted);
+}
+
+.cte-contrast.is-low {
+  background: color-mix(in srgb, var(--ui-warning, #f59e0b) 22%, var(--panel-card));
+}
+
+.cte-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cte-delete {
+  color: var(--ui-danger, var(--error));
+  font-size: 13px;
+}
+
+/* Touch: larger rows and targets, same order. */
+.app[data-touch-ui="true"] .cte-name { height: 44px; font-size: 15px; }
+.app[data-touch-ui="true"] .cte-hex { height: 34px; font-size: 13.5px; }
+.app[data-touch-ui="true"] .cte-color-label { font-size: 15px; }
+.app[data-touch-ui="true"] .cte-preset { height: 34px; font-size: 13px; }
+.app[data-touch-ui="true"] .cte-swatches { gap: 9px; }
+/* Round targets keep their size against the global touch minimum. */
+.app[data-touch-ui="true"] .cte .cte-swatch { width: 32px; height: 32px; min-width: 0; min-height: 0; }
+.app[data-touch-ui="true"] .cte-delete { min-height: 44px; font-size: 14px; }

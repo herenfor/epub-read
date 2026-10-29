@@ -78,7 +78,7 @@ import {
   rebasePosition,
   type ReadingPositionSnapshot,
 } from "./bookmarkReadingPosition";
-import { READER_PALETTES } from "../config/readerPalette";
+import { resolveReaderPalette } from "../config/readerPalette";
 import {
   classifySettingsChange,
   effectiveReaderSettings,
@@ -1932,7 +1932,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
       for (const [iframe, handle] of paintHandlesRef.current.entries()) {
         handle.setSurfaceBackground(continuousSurfaceBackground(iframe));
       }
-      backdropPaintRef.current?.setSurfaceBackground(READER_PALETTES[theme].background);
+      backdropPaintRef.current?.setSurfaceBackground(resolveReaderPalette(theme).background);
     };
 
     /**
@@ -2054,7 +2054,7 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
       for (const [iframe, handle] of paintHandlesRef.current.entries()) {
         handle.setSurfaceBackground(continuousSurfaceBackground(iframe));
       }
-      backdropPaintRef.current?.setSurfaceBackground(READER_PALETTES[settings.theme].background);
+      backdropPaintRef.current?.setSurfaceBackground(resolveReaderPalette(settings.theme).background);
     }, [settings.theme]);
 
     // 显式导航响应（TOC / 搜索 / 笔记 / 书签 / 历史返回 / 打开书）

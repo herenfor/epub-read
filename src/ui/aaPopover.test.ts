@@ -51,7 +51,7 @@ describe("Aa 单层紧凑面板", () => {
   it("一页放下全部排版：主题、字体与字符滤镜、文字五条各占一行、版式与翻页，没有“更多设置”", () => {
     const main = html();
     THEME_PALETTES.forEach((palette) => expect(main).toContain(palette.name));
-    expect(main).toMatch(/aria-checked="true"[^>]*>(?:<span[^>]*>Aa<\/span>)?<span>羊皮纸</);
+    expect(main).toMatch(/aria-checked="true"[^>]*>(?:<span[^>]*>Aa<\/span>)?<span[^>]*>羊皮纸</);
     expect(main).toContain("思源宋体");
     expect(main).toContain("字符与滤镜");
     for (const label of ["字号", "行高", "边距", "字间距", "正文字重"]) {
@@ -231,6 +231,66 @@ describe("Aa 单层紧凑面板", () => {
       await dom.render(createElement(AaPopover, { ...baseProps, customCss: "" }));
       expect(textarea().value).toBe("");
       expect(dom.container.querySelector(".aa-btn-save-css")).toBeNull();
+    } finally {
+      await dom.dispose();
+    }
+  });
+});
+
+describe("Aa 自定义主题", () => {
+  const base: AaPopoverProps = {
+    fontSize: 18, onFontSizeChange: vi.fn(), onFontDec: vi.fn(), onFontInc: vi.fn(),
+    theme: "c:c7edcc2b3a2e3f7d4e", onThemeChange: vi.fn(),
+    onOpenFontSettings: vi.fn(), onLineHeightChange: vi.fn(), onClose: vi.fn(),
+  };
+  const controls = (count: number) => ({
+    themes: Array.from({ length: count }, (_, i) => ({ id: `t${i}`, name: i === 0 ? "护眼绿" : "", background: "#c7edcc", foreground: "#2b3a2e", accent: "#3f7d4e" })),
+    activeId: "t0",
+    canCreate: count < 6,
+    select: vi.fn(), create: vi.fn(() => "new"), setColors: vi.fn(), rename: vi.fn(), remove: vi.fn(),
+  });
+
+  it("自定义主题排在内置主题后面；选中的带编辑笔；满 6 个时“新建”不可点", () => {
+    const full = renderToStaticMarkup(createElement(AaPopover, { ...base, customThemes: controls(6) }));
+    expect(full).toContain("ui-theme-cards is-row");
+    expect(full.match(/class="ui-theme-card-edit"/g)).toHaveLength(1);
+    expect(full).toContain("护眼绿");
+    expect(full).toContain("我的主题 2");
+    expect(full).toMatch(/<button type="button" class="ui-theme-card is-new" disabled=""[^>]*title="最多 6 个自定义主题"/);
+    const roomy = renderToStaticMarkup(createElement(AaPopover, { ...base, customThemes: controls(2) }));
+    expect(roomy).not.toMatch(/ui-theme-card is-new" disabled/);
+  });
+
+  it("点编辑笔在面板里换成编辑页，改色立即提交，返回回到主页", async () => {
+    const dom = createReactDomHarness({ resizeObserver: true, animationFrames: 0 });
+    const custom = controls(2);
+    try {
+      await dom.render(createElement(AaPopover, { ...base, customThemes: custom }));
+      await dom.click(dom.container.querySelector(".ui-theme-card-edit")!);
+      expect(dom.container.querySelector(".aa-main-body")).toBeNull();
+      expect(dom.container.querySelector(".aa-subpage-title")?.textContent).toBe("编辑主题");
+      expect((dom.container.querySelector(".cte-name") as HTMLInputElement).value).toBe("护眼绿");
+      await dom.click(dom.container.querySelector('.cte-swatch[aria-label="#141b26"]')!);
+      expect(custom.setColors).toHaveBeenCalledWith("t0", { background: "#141b26", foreground: "#2b3a2e", accent: "#3f7d4e" });
+      await dom.click(dom.container.querySelector(".aa-back-btn")!);
+      expect(dom.container.querySelector(".aa-main-body")).not.toBeNull();
+    } finally {
+      await dom.dispose();
+    }
+  });
+
+  it("删除要点两次", async () => {
+    const dom = createReactDomHarness({ resizeObserver: true, animationFrames: 0 });
+    const custom = controls(1);
+    try {
+      await dom.render(createElement(AaPopover, { ...base, customThemes: custom }));
+      await dom.click(dom.container.querySelector(".ui-theme-card-edit")!);
+      const remove = dom.container.querySelector(".cte-delete")!;
+      await dom.click(remove);
+      expect(custom.remove).not.toHaveBeenCalled();
+      expect(remove.textContent).toBe("再点一次删除");
+      await dom.click(remove);
+      expect(custom.remove).toHaveBeenCalledWith("t0");
     } finally {
       await dom.dispose();
     }
