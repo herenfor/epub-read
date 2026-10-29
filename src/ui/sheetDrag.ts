@@ -363,10 +363,12 @@ export function useSheetDrag(options: SheetDragOptions) {
           if (Math.abs(dy) >= CONTENT_DRAG_SLOP_PX || Math.abs(dx) >= CONTENT_DRAG_SLOP_PX) {
             // Native scrolling owns this touch to its end.
             gesture.claim = "scroll";
-          } else if (claimContentDrag(dx, Math.sign(dy) * CONTENT_DRAG_SLOP_PX, sheetState) !== null) {
+          } else if (Math.abs(dy) > Math.abs(dx) && claimContentDrag(dx, Math.sign(dy) * CONTENT_DRAG_SLOP_PX, sheetState) !== null) {
             // Still inside the slop but heading the claimable way: hold the
             // native scroll now, since the browser stops letting us cancel it
-            // once it has started.
+            // once it has started. Only a mostly vertical start: holding a
+            // sideways one would also stop a horizontal row (theme cards) from
+            // scrolling for the whole touch.
             event.preventDefault();
           }
           return;

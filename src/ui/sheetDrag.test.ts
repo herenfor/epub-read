@@ -72,12 +72,15 @@ describe("content drag lifecycle (real hook)", () => {
     const content = doc.getElementById("content") as HTMLElement;
     Object.defineProperty(content, "scrollTop", { configurable: true, value: 0 });
     let at = 0;
-    const touchOn = (target: Element, type: string, y?: number) => {
+    let last: Event | null = null;
+    const touchOn = (target: Element, type: string, y?: number, x = 10) => {
       const event = new (doc.defaultView as unknown as typeof globalThis).Event(type, { bubbles: true, cancelable: true });
-      Object.defineProperty(event, "touches", { value: y === undefined ? [] : [{ clientX: 10, clientY: y }] });
+      Object.defineProperty(event, "touches", { value: y === undefined ? [] : [{ clientX: x, clientY: y }] });
       Object.defineProperty(event, "timeStamp", { value: (at += 16) });
+      last = event;
       return dom.dispatch(target, event);
     };
+    const lastPrevented = () => last?.defaultPrevented ?? false;
     const touch = (type: string, y?: number) => touchOn(row, type, y);
     const downSwipe = async (target: Element = row) => {
       await touchOn(target, "touchstart", 100);
@@ -97,7 +100,7 @@ describe("content drag lifecycle (real hook)", () => {
       await touch("touchmove", 100);
       await touch("touchend");
     };
-    return { dom, onExpandedChange, onDismiss, render, sheet, content, doc, touch, downSwipe, setVisibility, upSwipe };
+    return { dom, onExpandedChange, onDismiss, render, sheet, content, doc, touch, touchOn, row, lastPrevented, downSwipe, setVisibility, upSwipe };
   }
 
   it("closes a half-height sheet on a downward drag from the content top or the header", async () => {
@@ -116,6 +119,27 @@ describe("content drag lifecycle (real hook)", () => {
       await h.downSwipe(h.doc.getElementById("header")!);
       expect(h.onDismiss).toHaveBeenCalledTimes(1);
     } finally { await h.dom.dispose(); }
+  });
+
+  it("leaves a sideways swipe to the browser even when it starts with a little vertical jitter", async () => {
+    const t = await setup();
+    try {
+      await t.touchOn(t.row, "touchstart", 200, 100);
+      // Inside the slop, mostly sideways with a pixel up: a horizontal row must keep scrolling.
+      await t.touchOn(t.row, "touchmove", 199, 104);
+      expect(t.lastPrevented()).toBe(false);
+      await t.touchOn(t.row, "touchmove", 197, 160);
+      expect(t.lastPrevented()).toBe(false);
+      await t.touchOn(t.row, "touchmove", 170, 200);
+      expect(t.lastPrevented()).toBe(false);
+      await t.touchOn(t.row, "touchend");
+      expect(t.onExpandedChange).not.toHaveBeenCalled();
+      // A mostly vertical start inside the slop is still held for the sheet.
+      await t.touchOn(t.row, "touchstart", 200, 100);
+      await t.touchOn(t.row, "touchmove", 196, 101);
+      expect(t.lastPrevented()).toBe(true);
+      await t.touchOn(t.row, "touchend");
+    } finally { await t.dom.dispose(); }
   });
 
   it("expands on an ordinary upward content drag", async () => {
