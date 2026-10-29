@@ -450,6 +450,19 @@ describe("sanitizeChapter", () => {
     expect(out).toContain("height: 100% !important");
   });
 
+  it("只包一张图的 SVG 写了 preserveAspectRatio=none 时改为等比，不在细长页框里拉伸封面", async () => {
+    const page = (inner: string) => `<html xmlns="http://www.w3.org/1999/xhtml"><head><title>封面</title></head>
+<body><div><svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1"
+  width="100%" height="100%" viewBox="0 0 798 1140" preserveAspectRatio="none">${inner}</svg></div></body></html>`;
+    const cover = await sanitizeChapter(page(`<title>cover</title><image width="798" height="1140" xlink:href="../Images/cover.jpg"/>`), opts("OEBPS/Text/cover.xhtml"));
+    expect(cover.html).toContain('preserveAspectRatio="xMidYMid meet"');
+    expect(cover.html).not.toContain('preserveAspectRatio="none"');
+    expect(cover.html).toContain('viewBox="0 0 798 1140"');
+    // Drawn shapes beside the picture: the book's own geometry stays.
+    const drawing = await sanitizeChapter(page(`<image width="798" height="1140" xlink:href="../Images/a.jpg"/><rect width="10" height="10"/>`), opts("OEBPS/Text/map.xhtml"));
+    expect(drawing.html).toContain('preserveAspectRatio="none"');
+  });
+
   it("带图注的 duokan-image-single 是普通正文图，不能仅凭类名被强制为全页 flex 图", async () => {
     const html = `<html xmlns="http://www.w3.org/1999/xhtml"><head>
 <style>.duokan-image-single { width:100%; margin:1em 0; padding:5px; }
