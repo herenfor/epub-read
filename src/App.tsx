@@ -4886,7 +4886,7 @@ export default function App() {
   // ---- 全屏 / 沉浸禅模式（Zen Mode） ----
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [fullscreenBusy, setFullscreenBusy] = useState(false);
-  // 顶栏自动隐藏：本机偏好，在 设置 › 阅读 里切换（原标题栏图钉）。
+  // 顶栏自动隐藏：本机偏好；顶栏图钉和 设置 › 阅读 都切换它。
   const [readerZenMode, setReaderZenMode] = useState(readTitlebarAutoHide);
   const changeReaderZenMode = useCallback((enabled: boolean) => {
     setReaderZenMode(enabled);
@@ -5354,6 +5354,7 @@ export default function App() {
           chapterState.effectiveColumns === 2}
         bookmarkPagesOpen={view === "reader" && bookmarkPagesOpen}
         zenMode={view === "reader" && !mobileChrome && readerZenMode}
+        onToggleZenMode={view === "reader" && !mobileChrome ? () => changeReaderZenMode(!readerZenMode) : undefined}
         progressPct={view === "reader" && ready ? progressPct : undefined}
         chapterIndex={view === "reader" && ready && linearChapter !== null ? linearChapter - 1 : undefined}
         totalChapters={view === "reader" && ready ? linearChapterTotal(spineLinear) : undefined}
