@@ -210,7 +210,7 @@ describe("CSD TitleBar 组件与样式契约（Zen UI Packet A）", () => {
     }
   });
 
-  it("进度胶囊写目录章名；单本书显示书名 · 作者；两本以上才显示标签条", () => {
+  it("进度胶囊写目录章名；单本书显示书名 · 作者和“＋”；两本以上才显示标签条", () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
     try {
       const tabs = (n: number) => ({
@@ -227,7 +227,8 @@ describe("CSD TitleBar 组件与样式契约（Zen UI Packet A）", () => {
         totalChapters: 10,
       };
       const single = renderToStaticMarkup(createElement(TitleBar, { ...props, readerTabs: tabs(1) }));
-      expect(single).not.toContain("titlebar-reader-tabs");
+      expect(single).not.toContain('class="titlebar-reader-tabs"');
+      expect(single).toMatch(/titlebar-reader-single[\s\S]*titlebar-author[\s\S]*titlebar-reader-tabs-new"[^>]*aria-label="新开一本"/);
       expect(single).toContain("titlebar-author");
       expect(single).toContain("雨穴");
       expect(single).toMatch(/titlebar-chapter-badge is-name[^>]*>第三章 记忆中的平面图</);
@@ -235,7 +236,8 @@ describe("CSD TitleBar 组件与样式契约（Zen UI Packet A）", () => {
       expect(single).toContain("48%");
 
       const many = renderToStaticMarkup(createElement(TitleBar, { ...props, readerTabs: tabs(2) }));
-      expect(many).toContain("titlebar-reader-tabs");
+      expect(many).toContain('class="titlebar-reader-tabs"');
+      expect(many).not.toContain("titlebar-author");
       expect(many).toContain('aria-label="新开一本"');
       // At the limit the + button is off and says why.
       const full = renderToStaticMarkup(createElement(TitleBar, { ...props, readerTabs: tabs(5) }));
