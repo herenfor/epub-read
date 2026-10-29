@@ -17,6 +17,7 @@ import {
   type SnapPosition,
 } from "./nativeSnapPosition";
 import { isExternalUrl, isFragmentOnly } from "../core/paths";
+import { applyBrowserContextMenuPolicy } from "../platform/browserContextMenu";
 import { getFootnoteHoverAnchor, isFootnoteLink, resolveFootnote, type FootnoteInfo } from "./footnotes";
 import type { ResourceServer } from "./resources";
 import { OwnedStylesheetUrls } from "./stylesheetCache";
@@ -4157,7 +4158,7 @@ export class ChapterPaginator {
     doc.addEventListener("scroll", this.scrollHandler, true);
     doc.addEventListener("scrollend", this.scrollEndHandler, true);
     doc.addEventListener("pointerdown", this.pointerDownHandler, true);
-    // 阅读器内始终屏蔽浏览器原生右键菜单；只有有效正文选区才回调 UI。
+    // 原生菜单只放行文本编辑区域；只有有效正文选区才回调阅读器 UI。
     doc.addEventListener("contextmenu", this.contextMenuHandler);
     doc.addEventListener("selectionchange", this.selectionChangeHandler);
     void this.prepareChapterForDisplay(seq, atEnd)
@@ -7438,10 +7439,10 @@ export class ChapterPaginator {
   }
 
   private handleContextMenu(e: MouseEvent): void {
+    if (applyBrowserContextMenuPolicy(e)) return;
     const doc = this.contentDoc;
     const viewer = this.viewer;
     if (!doc || !viewer || !viewer.contains(e.target as Node | null)) return;
-    e.preventDefault();
     const index = this.textIndex ?? this.buildTextIndex(doc, viewer);
     this.textIndex = index;
     const payload = captureTextSelection(doc, viewer, index);
