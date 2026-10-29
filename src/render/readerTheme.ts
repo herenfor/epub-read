@@ -1,4 +1,4 @@
-import { READER_PALETTES } from "../config/readerPalette";
+import { isBuiltinTheme, isDarkReaderTheme, resolveReaderPalette } from "../config/readerPalette";
 import {
   applyDarkThemeContrast,
   revertDarkThemeContrast,
@@ -6,6 +6,7 @@ import {
   type DarkThemeStyleAdapter,
 } from "./darkThemeContrast";
 import { VIEWER_ID } from "./sanitize";
+import { isCustomThemeKey } from "../config/customThemes";
 import type { ReaderSettings, Theme } from "./settings";
 
 export type ReaderThemeKind = Theme;
@@ -13,7 +14,7 @@ export type ReaderThemeKind = Theme;
 export const READER_THEMES: readonly ReaderThemeKind[] = ["light", "dark", "sepia", "gray"] as const;
 
 export function isReaderTheme(value: unknown): value is ReaderThemeKind {
-  return typeof value === "string" && (READER_THEMES as readonly string[]).includes(value);
+  return isBuiltinTheme(value) || isCustomThemeKey(value);
 }
 
 /**
@@ -24,18 +25,19 @@ export function isReaderTheme(value: unknown): value is ReaderThemeKind {
  * 作者安全 bgcolor 仅在 light 主题作为默认值合入；用户 CSS 仍在本表之后。
  */
 export function buildThemeCss(theme: ReaderThemeKind, authorBgColor?: string | null): string {
-  const palette = READER_PALETTES[theme];
+  const palette = resolveReaderPalette(theme);
   const {
     background: bg,
     foreground: fg,
     noteUnderline,
     searchBackground,
     searchForeground,
+    tocLink,
   } = palette;
   const effectiveBg = theme === "light" && authorBgColor ? authorBgColor : bg;
 
   const darkRules =
-    theme === "dark" || theme === "gray"
+    isDarkReaderTheme(theme)
       ? `/* [L2] 深色主题下着重号（text-emphasis）随前景色换色；
    书常写 text-emphasis:circle #000，深色背景上看不见。 */
 #${VIEWER_ID} * { -webkit-text-emphasis-color: ${fg}; text-emphasis-color: ${fg}; }
@@ -44,7 +46,7 @@ export function buildThemeCss(theme: ReaderThemeKind, authorBgColor?: string | n
 #${VIEWER_ID} { text-shadow: 1px 1px 1px ${bg}; }
 /* [L2] 深色主题目录链接换色：书常写 .toc a{color:#000}。
    与 Sigil 深色预览一致的浅蓝。 */
-#${VIEWER_ID} .toc a { color: ${READER_PALETTES[theme === "gray" ? "gray" : "dark"].tocLink}; }
+#${VIEWER_ID} .toc a { color: ${tocLink ?? resolveReaderPalette("dark").tocLink}; }
 /* [L2] 深色主题下清除图片投影，避免在深色背景上形成白色光晕 */
 #${VIEWER_ID} img { box-shadow: none !important; }`
       : "";
@@ -71,6 +73,12 @@ body { color: ${fg}; background-color: ${effectiveBg}; }
 /* [L2] ruby 注音 rt 随主题换色（书常固定 ruby>rt{color:#333}）。 */
 #${VIEWER_ID} rt { color: ${fg}; }
 ${darkRules}`.trim();
+}
+
+/** Dark-paper repairs aim at the theme's own text color; a user theme is repaired like "dark". */
+function darkContrastTheme(theme: ReaderThemeKind): { theme: "dark" | "gray"; foreground?: string } {
+  if (theme === "gray") return { theme: "gray" };
+  return isBuiltinTheme(theme) ? { theme: "dark" } : { theme: "dark", foreground: resolveReaderPalette(theme).foreground };
 }
 
 /**
@@ -260,9 +268,9 @@ export function createReaderTheme(options: ReaderThemeOptions): ReaderThemeContr
       if (styleEl) {
         styleEl.textContent = buildThemeCss(currentTheme, authorBgColor);
       }
-      if (currentTheme === "dark" || currentTheme === "gray") {
+      if (isDarkReaderTheme(currentTheme)) {
         applyDarkThemeContrast(doc, {
-          theme: currentTheme,
+          ...darkContrastTheme(currentTheme),
           adapter,
           userOwnsColor,
           records: contrastRecords,
@@ -304,9 +312,9 @@ export function createReaderTheme(options: ReaderThemeOptions): ReaderThemeContr
       styleEl.textContent = buildThemeCss(theme, authorBgColor);
 
       // 3. 进入深色/灰色时应用新修补
-      if (theme === "dark" || theme === "gray") {
+      if (isDarkReaderTheme(theme)) {
         applyDarkThemeContrast(doc, {
-          theme,
+          ...darkContrastTheme(theme),
           adapter,
           userOwnsColor,
           records: contrastRecords,

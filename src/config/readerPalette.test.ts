@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseHTML } from "linkedom";
 import { READER_PALETTES } from "./readerPalette";
-import { DEFAULT_SETTINGS, type Theme } from "../render/settings";
+import { DEFAULT_SETTINGS, type BuiltinTheme as Theme } from "../render/settings";
 import { sanitizeChapter } from "../render/sanitize";
 import { THEME_PALETTES } from "../ui/AaPopover";
 

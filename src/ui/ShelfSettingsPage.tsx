@@ -20,6 +20,8 @@ import { ReadingSettingsContent, useReadingSettingsTitles, type ReadingSettingsP
 import { SearchIndexCard } from "./SearchPanel";
 import type { ShelfBodySearchProps } from "./ShelfView";
 import { ThemeCards } from "./controls/ThemeCards";
+import { CustomThemeEditor } from "./controls/CustomThemeEditor";
+import type { CustomThemeControls } from "./useCustomThemes";
 import "./shelfSettings.css";
 
 export type ShelfSettingsSection = "appearance" | "reading" | "data" | "sync" | "storage" | "about";
@@ -34,6 +36,7 @@ export interface ShelfSettingsPageProps {
   bookCount: number;
   theme: Theme;
   onThemeChange(theme: Theme): void;
+  customThemes?: CustomThemeControls;
   batteryIndicatorEnabled?: boolean;
   onBatteryIndicatorChange?(enabled: boolean): void;
   titlebarAutoHide?: boolean;
@@ -129,6 +132,12 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
   const dialog = props.presentation === "dialog";
   const [section, setSection] = useState<ShelfSettingsSection | null>(props.initialSection ?? (dialog ? "appearance" : null));
   const [cacheOpen, setCacheOpen] = useState(false);
+  // A custom theme opens its editor in place, under the cards.
+  const [editingThemeId, setEditingThemeId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!props.open) setEditingThemeId(null);
+  }, [props.open]);
+  const editingIndex = editingThemeId && props.customThemes ? props.customThemes.themes.findIndex((item) => item.id === editingThemeId) : -1;
   const [indexBusy, setIndexBusy] = useState(false);
   const readingTitles = useReadingSettingsTitles(props);
   const updateDot = useAppUpdateDot();
@@ -237,7 +246,12 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
   const appearance = <div className="shelf-settings-card">
     <div className="shelf-settings-control is-stacked">
       <span>{t("shelfMenu.theme")}</span>
-      <ThemeCards value={props.theme} onChange={props.onThemeChange} label={t("shelfMenu.theme")} disabled={busy} />
+      <ThemeCards value={props.theme} onChange={props.onThemeChange} label={t("shelfMenu.theme")} disabled={busy}
+        custom={props.customThemes} onEditCustom={setEditingThemeId} layout="grid" />
+      {editingIndex >= 0 && props.customThemes && (
+        <CustomThemeEditor theme={props.customThemes.themes[editingIndex]} index={editingIndex} controls={props.customThemes}
+          onDone={() => setEditingThemeId(null)} />
+      )}
     </div>
     <Segmented label={t("shelfMenu.motion")} value={uiMotion} onChange={(value: UiMotion) => setUiMotion(value)}
       options={[{ value: "full", label: t("shelfMenu.motion.full") }, { value: "reduced", label: t("shelfMenu.motion.reduced") }]} />

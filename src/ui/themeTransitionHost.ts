@@ -3,14 +3,49 @@ import { flushSync } from "react-dom";
 import type { ReaderSettings, Theme } from "../render/settings";
 import type { ReaderHandle } from "./ReaderView";
 import { createThemeTransitionController, type ThemeTransitionController, type ThemeTransitionHost } from "./themeTransition";
+import { isDarkReaderTheme } from "../config/readerPalette";
+import { customThemeTokens, isCustomThemeKey, parseCustomThemeKey } from "../config/customThemes";
+
+/**
+ * data-theme names the token block in styles.css ("custom" for a user theme,
+ * none for light); data-tone="dark" marks every dark theme for the few rules
+ * that only depend on darkness.
+ */
+export function documentThemeAttributes(theme: Theme): { theme?: string; tone?: "dark" } {
+  const tone = isDarkReaderTheme(theme) ? "dark" as const : undefined;
+  if (isCustomThemeKey(theme)) return { theme: "custom", tone };
+  return { theme: theme !== "light" ? theme : undefined, tone };
+}
+
+const CUSTOM_THEME_STYLE_ID = "custom-theme-tokens";
+
+/** The token block of a user theme, generated like the built-in ones in styles.css. */
+export function customThemeCss(theme: Theme): string {
+  const colors = isCustomThemeKey(theme) ? parseCustomThemeKey(theme) : null;
+  if (!colors) return "";
+  const tokens = customThemeTokens(colors);
+  const block = (vars: Record<string, string>) => Object.entries(vars).map(([name, value]) => `  ${name}: ${value};`).join("\n");
+  return `[data-theme="custom"] {\n${block(tokens.root)}\n}\n.app[data-theme="custom"] {\n${block(tokens.app)}\n}`;
+}
 
 /** html/body carry the theme so the whole window background follows it (light has no attribute). */
 export function applyDocumentTheme(doc: Document, theme: Theme): void {
-  const value = theme !== "light" ? theme : null;
+  const attributes = documentThemeAttributes(theme);
+  // The user theme's variables are in place before its attribute selects them.
+  const css = customThemeCss(theme);
+  let style = doc.getElementById(CUSTOM_THEME_STYLE_ID);
+  if (css && !style && doc.head) {
+    style = doc.createElement("style");
+    style.id = CUSTOM_THEME_STYLE_ID;
+    doc.head.appendChild(style);
+  }
+  if (style && style.textContent !== css) style.textContent = css;
   for (const element of [doc.documentElement, doc.body]) {
     if (!element) continue;
-    if (value) element.setAttribute("data-theme", value);
+    if (attributes.theme) element.setAttribute("data-theme", attributes.theme);
     else element.removeAttribute("data-theme");
+    if (attributes.tone) element.setAttribute("data-tone", attributes.tone);
+    else element.removeAttribute("data-tone");
   }
 }
 
@@ -73,11 +108,12 @@ export function useThemeTransition(wiring: ThemeTransitionWiring) {
     }
   }, []);
 
-  const changeTheme = useCallback((theme: Theme) => {
+  /** animate: false for live edits (a theme being designed), which must follow each change at once. */
+  const changeTheme = useCallback((theme: Theme, options?: { animate?: boolean }) => {
     guarded((controller) => {
       const current = wiringRef.current;
       controller.request({
-        animate: current.committedTheme() !== theme && !current.busy(),
+        animate: options?.animate !== false && current.committedTheme() !== theme && !current.busy(),
         commit: () => {
           const latest = wiringRef.current;
           flushSync(() => latest.setSettings((s) => (s.theme === theme ? s : { ...s, theme })));

@@ -340,10 +340,8 @@ select option {
 .tb-pin .reader-svg-icon { color: #8b5cf6; }
 .tb-diagnostics .reader-svg-icon { color: #64748b; }
 
-[data-theme="dark"] .tb-pin .reader-svg-icon,
-[data-theme="gray"] .tb-pin .reader-svg-icon { color: #a78bfa; }
-[data-theme="dark"] .tb-diagnostics .reader-svg-icon,
-[data-theme="gray"] .tb-diagnostics .reader-svg-icon { color: #94a3b8; }
+[data-tone="dark"] .tb-pin .reader-svg-icon { color: #a78bfa; }
+[data-tone="dark"] .tb-diagnostics .reader-svg-icon { color: #94a3b8; }
 
 /* 悬停与激活对应柔和微光底色 */
 .tb-pin:hover:not(:disabled) {
@@ -357,8 +355,7 @@ select option {
 .tb-pin.active .reader-svg-icon {
   color: #8b5cf6;
 }
-[data-theme="dark"] .tb-pin.active .reader-svg-icon,
-[data-theme="gray"] .tb-pin.active .reader-svg-icon {
+[data-tone="dark"] .tb-pin.active .reader-svg-icon {
   color: #c084fc;
 }
 

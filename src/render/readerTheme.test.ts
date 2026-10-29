@@ -8,7 +8,6 @@ import {
   createReaderTheme,
   getAuthorSafeBackgroundColor,
   isReaderTheme,
-  type ReaderThemeKind,
 } from "./readerTheme";
 import { sanitizeChapter, type SanitizeOptions } from "./sanitize";
 import { DEFAULT_SETTINGS } from "./settings";
@@ -139,7 +138,7 @@ describe("readerTheme: 纯颜色与在位更新核心", () => {
       authorBgColor: sanitized.authorBgColor,
     });
 
-    const themes: ReaderThemeKind[] = ["dark", "sepia", "gray", "light", "dark", "light"];
+    const themes: Array<"light" | "dark" | "sepia" | "gray"> = ["dark", "sepia", "gray", "light", "dark", "light"];
     for (const t of themes) {
       controller.update(t);
       expect(controller.currentTheme).toBe(t);

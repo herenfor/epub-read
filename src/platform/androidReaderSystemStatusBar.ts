@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { Theme } from "../render/settings";
 import { createReaderStatusBarCoordinator } from "./readerSystemStatusBar";
+import { isDarkReaderTheme } from "../config/readerPalette";
 
 const PREFERENCE_KEY = "epub-reader:hide-system-status-bar";
 
@@ -24,6 +25,6 @@ export function createStatusBarAppearanceCoordinator(
 ) {
   const driver = createReaderStatusBarCoordinator(apply);
   return {
-    requestTheme: (theme: Theme) => driver.requestHidden(theme === "light" || theme === "sepia"),
+    requestTheme: (theme: Theme) => driver.requestHidden(!isDarkReaderTheme(theme)),
   };
 }

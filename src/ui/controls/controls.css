@@ -42,7 +42,7 @@
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
-.app:is([data-theme="dark"], [data-theme="gray"]) :is(.ui-segmented, .aa-segmented-capsule, .shelf-segmented, .lan-segmented) > button:is(.active, [aria-checked="true"], [aria-pressed="true"]) {
+.app[data-tone="dark"] :is(.ui-segmented, .aa-segmented-capsule, .shelf-segmented, .lan-segmented) > button:is(.active, [aria-checked="true"], [aria-pressed="true"]) {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
 }
 
@@ -145,6 +145,88 @@
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
+}
+
+/* Each card sits in a slot so the selected custom card can carry its pencil. */
+.ui-theme-slot {
+  position: relative;
+  display: flex;
+  min-width: 0;
+}
+
+.ui-theme-slot > .ui-theme-card {
+  flex: 1;
+}
+
+/* With custom themes, Aa's row shows four cards and scrolls sideways (edge fade on the hidden side). */
+.ui-theme-cards.is-row {
+  display: flex;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  /* Room for the selected card's ring, which the scroller would clip. */
+  padding: 2px;
+  margin: -2px;
+  /* Bringing the selected card into view keeps it clear of the edge fades. */
+  scroll-padding-inline: 24px 28px;
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 var(--hfade-left, 0px), #000 calc(100% - var(--hfade-right, 0px)), transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0, #000 var(--hfade-left, 0px), #000 calc(100% - var(--hfade-right, 0px)), transparent 100%);
+}
+
+.ui-theme-cards.is-row::-webkit-scrollbar {
+  display: none;
+}
+
+.ui-theme-cards.is-row[data-hfade~="left"] { --hfade-left: 24px; }
+.ui-theme-cards.is-row[data-hfade~="right"] { --hfade-right: 28px; }
+
+.ui-theme-cards.is-row > .ui-theme-slot {
+  flex: 0 0 calc((100% - 24px) / 4);
+}
+
+.ui-theme-card-name {
+  max-width: 100%;
+  padding: 0 4px;
+  box-sizing: border-box;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ui-theme-card.is-new {
+  --swatch-bg: transparent;
+  --swatch-fg: var(--muted);
+  border: 1.5px dashed color-mix(in srgb, var(--fg) 24%, transparent);
+}
+
+.ui-theme-card.is-new:disabled {
+  opacity: 0.45;
+}
+
+/* Inside the card's corner, so neither the row's clipping nor its edge fade reaches it. */
+.ui-theme-card-edit {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-foreground, #fff);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+}
+
+.app[data-touch-ui="true"] .ui-theme-slot .ui-theme-card-edit {
+  width: 24px;
+  height: 24px;
+  min-width: 0;
+  min-height: 0;
 }
 
 .ui-theme-card {

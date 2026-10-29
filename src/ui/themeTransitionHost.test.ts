@@ -5,7 +5,7 @@ import { DEFAULT_SETTINGS, type ReaderSettings, type Theme } from "../render/set
 import { createReactDomHarness } from "../test/reactDomHarness";
 import { useReadingInputStart } from "./readerPointerEdge";
 import type { ReaderHandle } from "./ReaderView";
-import { useThemeTransition } from "./themeTransitionHost";
+import { applyDocumentTheme, useThemeTransition } from "./themeTransitionHost";
 
 /** startViewTransition whose update callbacks the test runs by hand, like a browser after the snapshot. */
 function installViewTransitions(doc: Document) {
@@ -171,5 +171,25 @@ describe("theme transition wired into the app", () => {
     } finally {
       await t.dom.dispose();
     }
+  });
+});
+
+describe("document theme", () => {
+  it("marks dark themes by tone and writes a user theme's variables before selecting them", () => {
+    const { document } = parseHTML("<html><head></head><body></body></html>");
+    applyDocumentTheme(document, "gray");
+    expect(document.documentElement.getAttribute("data-theme")).toBe("gray");
+    expect(document.body.getAttribute("data-tone")).toBe("dark");
+    applyDocumentTheme(document, "c:141b26a9b8c96ea8dc");
+    expect(document.documentElement.getAttribute("data-theme")).toBe("custom");
+    expect(document.documentElement.getAttribute("data-tone")).toBe("dark");
+    const css = document.getElementById("custom-theme-tokens")?.textContent ?? "";
+    expect(css).toContain('[data-theme="custom"] {');
+    expect(css).toContain("--bg: #141b26;");
+    expect(css).toContain('.app[data-theme="custom"] {');
+    applyDocumentTheme(document, "light");
+    expect(document.documentElement.hasAttribute("data-theme")).toBe(false);
+    expect(document.documentElement.hasAttribute("data-tone")).toBe(false);
+    expect(document.getElementById("custom-theme-tokens")?.textContent).toBe("");
   });
 });

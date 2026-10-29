@@ -15,7 +15,7 @@ import {
   writeReaderKeepScreenOn,
 } from "./platform/androidReaderKeepScreenOn";
 import { resolveArchiveHref, archiveHref } from "./core/archiveReferences";
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { loadBook, loadBookFromArchive, spineIndexForPath, spineIndexForEntryKey, spineItemPath, spineItemHref, disposeBook, nextLinearIndex, linearChapterNumber, linearChapterTotal, tocLabelsBySpine } from "./core/book";
 import type { Book } from "./core/types";
 import type { ArchiveClient } from "./core/selectiveArchive";
@@ -131,7 +131,7 @@ import { LogPanel, type LogItem } from "./ui/LogPanel";
 import { ReaderView, type ReaderHandle } from "./ui/ReaderView";
 import { ShelfView } from "./ui/ShelfView";
 import { ReaderReturnControl } from "./ui/ReaderReturnControl";
-import { applyDocumentTheme, useThemeTransition } from "./ui/themeTransitionHost";
+import { applyDocumentTheme, documentThemeAttributes, useThemeTransition } from "./ui/themeTransitionHost";
 import { useReadingInputStart } from "./ui/readerPointerEdge";
 import { shelfLibraryView } from "./ui/libraryLoad";
 import {
@@ -215,6 +215,7 @@ import {
 import { createChapterCountJob } from "./ui/chapterCountJob";
 import { readCachedChapterCounts, readKnownChapterProgressKeys, writeChapterCountCache } from "./ui/chapterCountCache";
 import { writeShelfPlaceLabel } from "./ui/shelfPlaceCache";
+import { useCustomThemes } from "./ui/useCustomThemes";
 import { projectShelfProgressReadiness } from "./ui/shelfProgressDisplay";
 import {
   archiveRecordsForBackend,
@@ -3863,11 +3864,15 @@ export default function App() {
   // 书架设置与阅读 Aa 共用的主题入口：仅主题变化走约 200ms 整屏淡入，更新回调内
   // 同步提交 React 外层、html/body 与全部在用正文宿主（见 ui/themeTransitionHost）。
   const changeTheme = themeTransition.changeTheme;
+  const customThemeName = useCallback((n: number) => t("aa.customTheme.defaultName", { n }), [t]);
+  const customThemes = useCustomThemes(settings.theme, changeTheme, customThemeName);
 
-  // 同步主题至 html 与 body，保证全屏与全端窗口背景无死角对齐（过渡提交已先行同步，这里幂等）
-  useEffect(() => {
+  // 同步主题至 html 与 body，保证全屏与全端窗口背景无死角对齐（过渡提交已先行同步，这里幂等）。
+  // Layout effect: a user theme's variables must exist before the first paint that selects them.
+  useLayoutEffect(() => {
     applyDocumentTheme(document, settings.theme);
   }, [settings.theme]);
+  const appThemeAttributes = useMemo(() => documentThemeAttributes(settings.theme), [settings.theme]);
 
   // 恢复默认同时改几何：经同一控制器直接提交（取代未提交的主题请求），排版走原有事务。
   const resetDefaults = useCallback((): void => {
@@ -5311,7 +5316,8 @@ export default function App() {
       data-mobile-chrome={mobileChrome ? "true" : undefined}
       data-mobile-reader={mobileChrome && view === "reader" ? "true" : undefined}
       data-tools-visible={mobileChrome && view === "reader" ? String(readerToolsVisible) : undefined}
-      data-theme={settings.theme === "dark" ? "dark" : settings.theme === "sepia" ? "sepia" : settings.theme === "gray" ? "gray" : undefined}
+      data-theme={appThemeAttributes.theme}
+      data-tone={appThemeAttributes.tone}
       style={{
         "--ui-scale": uiScale,
         // UI 缩放下的触摸命中区补偿；只用于触摸入口，不改用户存储的 uiScale。
@@ -5434,6 +5440,7 @@ export default function App() {
               onOpenLanTransfer={runtime.supportsLanTransfer ? handleOpenLanSave : undefined}
               theme={settings.theme}
               onThemeChange={changeTheme}
+              customThemes={customThemes}
               hideReaderSystemStatusBar={runtime.supportsReaderSystemStatusBar ? hideReaderSystemStatusBar : undefined}
               onHideReaderSystemStatusBarChange={changeHideReaderSystemStatusBar}
               keepScreenOnWhileReading={runtime.supportsReaderKeepScreenOn ? keepScreenOnWhileReading : undefined}
@@ -5585,6 +5592,7 @@ export default function App() {
                 onFontInc={settingsActions.increaseFont}
                 theme={settings.theme}
                 onThemeChange={changeTheme}
+                customThemes={customThemes}
                 customFontName={settings.customFontName}
                 onOpenFontSettings={openAaFonts}
                 onOpenDisplaySettings={openAaDisplay}

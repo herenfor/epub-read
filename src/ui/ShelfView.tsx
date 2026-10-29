@@ -52,6 +52,7 @@ import { hasReadPosition } from "./readEvidence";
 import { isShelfProgressPending, shelfProgressLabel } from "./shelfProgressDisplay";
 import { readCachedLinearMask } from "./chapterCountCache";
 import { readShelfPlaceLabel } from "./shelfPlaceCache";
+import type { CustomThemeControls } from "./useCustomThemes";
 import { linearChapterNumber } from "../core/book";
 import { isShelfCardActionTarget } from "./shelfCardEventScope";
 import { getRuntimeCapabilities } from "../platform/runtimeCapabilities";
@@ -161,6 +162,7 @@ export interface ShelfViewProps {
   onOpenLanTransfer?(selectedEntries?: ShelfEntry[]): void;
   theme: Theme;
   onThemeChange(theme: Theme): void;
+  customThemes?: CustomThemeControls;
   /** Android 阅读栏电量显示（本机偏好）；未提供时不显示该设置。 */
   batteryIndicatorEnabled?: boolean;
   onBatteryIndicatorChange?(enabled: boolean): void;
@@ -4453,6 +4455,7 @@ export function ShelfView(props: ShelfViewProps) {
     bookCount: props.entries.length,
     theme: props.theme,
     onThemeChange: props.onThemeChange,
+    customThemes: props.customThemes,
     hideReaderSystemStatusBar: props.hideReaderSystemStatusBar,
     onHideReaderSystemStatusBarChange: props.onHideReaderSystemStatusBarChange,
     keepScreenOnWhileReading: props.keepScreenOnWhileReading,

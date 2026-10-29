@@ -35,6 +35,8 @@ export interface DarkThemeContrastRecord {
 
 export interface DarkThemeContrastOptions {
   theme: "dark" | "light" | "sepia" | "gray";
+  /** The theme's text color ("#rrggbb") when it is not the built-in one (user themes). */
+  foreground?: string;
   adapter?: DarkThemeStyleAdapter;
   /**
    * 本轮用户自定义 CSS 是否明确声明了该元素的 color。
@@ -184,8 +186,7 @@ function defaultAdapter(doc: Document): DarkThemeStyleAdapter | null {
 
 export const GRAY_THEME_FOREGROUND = { r: 212, g: 212, b: 216, a: 1 } as const;
 
-function nearThemeForeground(color: Rgba, theme: "dark" | "gray" = "dark"): boolean {
-  const target = theme === "gray" ? GRAY_THEME_FOREGROUND : DARK_THEME_FOREGROUND;
+function nearThemeForeground(color: Rgba, target: Rgba): boolean {
   return Math.max(
     Math.abs(color.r - target.r),
     Math.abs(color.g - target.g),
@@ -196,17 +197,17 @@ function nearThemeForeground(color: Rgba, theme: "dark" | "gray" = "dark"): bool
 function chooseDarkThemeTextRepair(input: {
   foreground: Rgba;
   background: Rgba;
-  theme: "dark" | "gray";
+  themeForeground: string;
   userOwnsColor: boolean;
 }): string | null {
-  const { foreground, background, theme, userOwnsColor } = input;
+  const { foreground, background, themeForeground, userOwnsColor } = input;
   if (userOwnsColor) return null;
 
   const current = contrastRatio(compositeRgba(foreground, background), background);
   if (current >= 4.5) return null;
 
   let candidate: string;
-  if (nearThemeForeground(foreground, theme)) {
+  if (nearThemeForeground(foreground, parseRgba(themeForeground)!)) {
     // 保留已有方向：主题浅字落在作者浅色底上。
     candidate = DARK_THEME_CANDIDATE;
   } else {
@@ -214,7 +215,7 @@ function chooseDarkThemeTextRepair(input: {
     const channels = [foreground.r, foreground.g, foreground.b];
     const neutral = Math.max(...channels) - Math.min(...channels) <= 12;
     if (!neutral || foreground.a < 1 || Math.max(...channels) > 128) return null;
-    candidate = theme === "gray" ? "#d4d4d8" : "#d4d4d4";
+    candidate = themeForeground;
   }
 
   const repaired = contrastRatio(parseRgba(candidate)!, background);
@@ -246,7 +247,8 @@ function extendBackground(parent: BackgroundState, style: DarkThemeComputedStyle
 /** Apply conservative dark-theme contrast fixes once to one loaded chapter. */
 export function applyDarkThemeContrast(doc: Document, options: DarkThemeContrastOptions): number {
   if (options.theme !== "dark" && options.theme !== "gray") return 0;
-  const theme = options.theme;
+  const themeForeground = options.foreground ?? (options.theme === "gray" ? "#d4d4d8" : "#d4d4d4");
+  if (!parseRgba(themeForeground)) return 0;
   const adapter = options.adapter ?? defaultAdapter(doc);
   if (!adapter || !doc.body) return 0;
   let fixed = 0;
@@ -279,7 +281,7 @@ export function applyDarkThemeContrast(doc: Document, options: DarkThemeContrast
       const repaired = chooseDarkThemeTextRepair({
         foreground,
         background: background.color,
-        theme,
+        themeForeground,
         userOwnsColor: options.userOwnsColor?.(element) ?? false,
       });
       if (repaired !== null) {

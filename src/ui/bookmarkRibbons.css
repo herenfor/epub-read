@@ -13,8 +13,7 @@
   transition: opacity 120ms ease-out;
 }
 
-[data-theme="dark"] .bookmark-ribbon-layer,
-[data-theme="gray"] .bookmark-ribbon-layer {
+[data-tone="dark"] .bookmark-ribbon-layer {
   --bookmark-ribbon: #e0645c;
 }
 
