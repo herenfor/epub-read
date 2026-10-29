@@ -3473,10 +3473,12 @@ export function ShelfView(props: ShelfViewProps) {
     favorites: favoriteCount,
   }), [allCount, readingCount, unreadCount, finishedCount, favoriteCount]);
 
+  const searching = query.trim() !== "";
   const scopedCandidateBooks = useMemo(() => {
     switch (scope.type) {
       case "root":
-        return unclassifiedBooks;
+        // By folder: the root lists unfiled books, but a search covers the books inside folders too.
+        return searching ? props.entries : unclassifiedBooks;
       case "all":
         return props.entries;
       case "favorites":
@@ -3484,7 +3486,7 @@ export function ShelfView(props: ShelfViewProps) {
       case "folder":
         return folderBooksMap.get(scope.folderId) ?? [];
     }
-  }, [scope, unclassifiedBooks, props.entries, favoriteBooks, folderBooksMap]);
+  }, [scope, searching, unclassifiedBooks, props.entries, favoriteBooks, folderBooksMap]);
 
   // 结合 Level 3 状态胶囊的分流筛选
   const statusFilteredBooks = useMemo(() => {
