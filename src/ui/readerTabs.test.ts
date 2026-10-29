@@ -4,6 +4,7 @@ import {
   MAX_READER_TABS,
   activeReaderTabs,
   closeReaderTab,
+  closeReaderTabAfterLeave,
   cycleReaderTab,
   fitReaderTabs,
   openReaderTab,
@@ -16,6 +17,39 @@ import {
 } from "./readerTabs";
 
 const open = (...ids: string[]) => ids.reduce(openReaderTab, EMPTY_READER_TABS);
+
+describe("closing a reader tab after saving", () => {
+  it("keeps the active tab and does not switch when leaving fails", async () => {
+    let state = open("a", "b");
+    const original = state;
+    let next: string | null = null;
+    let finish!: (saved: boolean) => void;
+    const task = closeReaderTabAfterLeave(state, "b", () => new Promise<boolean>((resolve) => { finish = resolve; }), (result) => {
+      state = result.state;
+      next = result.next;
+    });
+    expect(state).toBe(original);
+    finish(false);
+    await task;
+    expect(state).toBe(original);
+    expect(next).toBeNull();
+  });
+
+  it("removes the active tab and selects its neighbour only after a successful leave", async () => {
+    let state = open("a", "b");
+    let next: string | null = null;
+    let finish!: (saved: boolean) => void;
+    const task = closeReaderTabAfterLeave(state, "b", () => new Promise<boolean>((resolve) => { finish = resolve; }), (result) => {
+      state = result.state;
+      next = result.next;
+    });
+    expect(activeReaderTabs(state).active).toBe("b");
+    finish(true);
+    await task;
+    expect(activeReaderTabs(state)).toEqual({ tabs: ["a"], active: "a" });
+    expect(next).toBe("a");
+  });
+});
 
 describe("reader tabs (A11 V1)", () => {
   it("opens new books to the right of the current tab and focuses existing ones", () => {

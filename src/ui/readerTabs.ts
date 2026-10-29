@@ -63,6 +63,16 @@ export function closeReaderTab(state: ReaderTabsState, id: string): { state: Rea
   return { state: withGroup(state, { tabs, active }), next: active };
 }
 
+/** Closing the book on screen must not remove its tab until leaving has succeeded. */
+export async function closeReaderTabAfterLeave(
+  state: ReaderTabsState,
+  id: string,
+  leave: () => Promise<boolean>,
+  commit: (result: ReturnType<typeof closeReaderTab>) => void,
+): Promise<void> {
+  if (await leave()) commit(closeReaderTab(state, id));
+}
+
 /** 相对当前标签循环移动（Ctrl+Tab / Ctrl+Shift+Tab）。 */
 export function cycleReaderTab(state: ReaderTabsState, step: 1 | -1): string | null {
   const group = currentGroup(state);

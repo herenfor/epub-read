@@ -49,12 +49,14 @@ import {
   READER_TABS_STORAGE_KEY,
   activeReaderTabs,
   closeReaderTab,
+  closeReaderTabAfterLeave,
   cycleReaderTab,
   parseReaderTabs,
   placeReaderTab,
   pruneReaderTabs,
   serializeReaderTabs,
 } from "./ui/readerTabs";
+import { useReaderTabsVisible } from "./ui/readerTabLayout";
 import { checkThenRecoverProgressRuntime, planFreshProgressOpen } from "./ui/progressOpenOrder";
 import { useAndroidBack } from "./platform/useAndroidBack";
 import { moveAndroidTaskToBack } from "./platform/androidAppTask";
@@ -4113,7 +4115,7 @@ export default function App() {
   // A11：多本书标签页。只挂一个阅读器：切标签 = 走现有“返回书架”保存并释放当前书，
   // 等会话清理 effect 提交后再走现有“从书架打开”。阅读层与分页器不感知标签。
   // 标签条只在电脑和平板横屏显示；手机和平板竖屏宽度不够，照旧只显示书名。
-  const readerTabsVisible = !mobileChrome || responsive.layout === "wide";
+  const readerTabsVisible = useReaderTabsVisible(mobileChrome);
   const [readerTabs, setReaderTabs] = useState(() => {
     try {
       return parseReaderTabs(localStorage.getItem(READER_TABS_STORAGE_KEY));
@@ -4425,10 +4427,15 @@ export default function App() {
   }, [leaveReader]);
   const closeReaderTabById = useCallback((id: string): void => {
     if (shelfBusyRef.current) return;
-    const { state, next } = closeReaderTab(readerTabsRef.current, id);
-    setReaderTabs(state);
-    if (id === currentShelfIdRef.current) void switchReaderTab(next);
-  }, [switchReaderTab]);
+    if (id !== currentShelfIdRef.current) {
+      setReaderTabs((state) => closeReaderTab(state, id).state);
+      return;
+    }
+    void closeReaderTabAfterLeave(readerTabsRef.current, id, () => leaveReader(false), ({ next }) => {
+      setReaderTabs((state) => closeReaderTab(state, id).state);
+      pendingTabOpenRef.current = next;
+    });
+  }, [leaveReader]);
   const openReaderTabFromReader = useCallback((id: string): void => {
     if (activeReaderTabs(readerTabsRef.current).tabs.length >= MAX_READER_TABS) return;
     pendingNewTabRef.current = id;
