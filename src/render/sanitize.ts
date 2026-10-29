@@ -4,7 +4,7 @@ import { parseChapterDocument, STRIPPED_CHAPTER_TAGS } from "./chapterDocument";
 import { resolvePath, isExternalUrl, isFragmentOnly } from "../core/paths";
 import { hasAuthoredCssProperty, rewriteCssInlineWidths, rewriteCssUrls } from "./cssRewrite";
 import { isFullPageImage, linkedImagePage } from "./fullPageImage";
-import { childElements } from "../core/xml";
+import { childElements, localNameOf } from "../core/xml";
 import { imageLayoutPolicy, scrollMediaDefaultsCss } from "./imageLayoutPolicy";
 import { buildThemeCss } from "./readerTheme";
 import { TEXT_MEASURE, type ReaderSettings } from "./settings";
@@ -296,6 +296,13 @@ ${VIEWER_TAG}#${VIEWER_ID} { display: block; height: 100%; overflow: hidden; mar
   ].join("\n");
 }
 
+/** SVG 里除标题/说明/定义外只有一张 `<image>`：常见的封面和插图页包装。 */
+function isSingleImageSvg(svg: Element): boolean {
+  const drawn = childElements(svg as unknown as Parameters<typeof childElements>[0])
+    .filter((child) => !["title", "desc", "metadata", "defs"].includes(localNameOf(child)));
+  return drawn.length === 1 && localNameOf(drawn[0]) === "image";
+}
+
 /**
  * 消毒并改写章节 HTML：
  * 1. 按版本选择 XML/HTML 解析（XML 失败自动降级 HTML）
@@ -396,6 +403,12 @@ export async function sanitizeChapter(
       }
     }
     if (playbackHref !== undefined) deferPlaybackSource(el, playbackHref, opts.basePath, opts.archiveReferences);
+
+    // 只包一张图的 SVG 写了 preserveAspectRatio="none"：页框和图片比例不同（手机竖屏）
+    // 时图会被拉伸。改成居中等比缩放，与其他阅读器一致；画了别的图形的 SVG 照书。
+    if (tag === "svg" && /^\s*none\b/i.test(el.getAttribute("preserveAspectRatio") ?? "") && isSingleImageSvg(el)) {
+      el.setAttribute("preserveAspectRatio", "xMidYMid meet");
+    }
 
     if (tag === "audio" || tag === "video") {
       hasMedia = true;
