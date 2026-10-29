@@ -30,6 +30,15 @@
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.07);
 }
 
+/* 侧栏钉住时顶栏一直显示（侧栏从它下方开始），所以按固定顶栏参与布局，不压住正文顶部。 */
+.app.has-docked-sidebar .titlebar-reader.is-floating {
+  position: relative;
+  background: var(--bg);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
+}
+
 /* PC 浮层侧栏打开时，标题栏留在遮罩之上：点 Aa 或搜索直接换成那个面板，不必先关侧栏。 */
 .app:has(.sidebar-drawer.is-overlay.is-open:not(.is-compact)) .titlebar-reader,
 .app:has(.search-panel.is-docked) .titlebar-reader {
