@@ -85,6 +85,11 @@
   pointer-events: auto;
 }
 
+/* 标签条自己按中间进度胶囊留位（ReaderTabStrip），不再受左侧 45% 的限制。 */
+.titlebar-left:has(> .titlebar-reader-tabs) {
+  max-width: none;
+}
+
 /* 书籍信息包裹区 */
 .titlebar-book-meta {
   display: flex;
@@ -94,7 +99,7 @@
   overflow: hidden;
 }
 
-/* A11 V1（仅 Dev 构建）：已打开的书作为标签，替代单本书名。 */
+/* A11：开着两本以上时，已打开的书作为标签替代书名；宽度规则见 ReaderTabStrip。 */
 .titlebar-reader-tabs {
   display: flex;
   align-items: center;
@@ -108,9 +113,9 @@
 .titlebar-reader-tab {
   display: inline-flex;
   align-items: center;
-  flex: 0 1 auto;
-  min-width: 72px;
-  max-width: 200px;
+  flex: 0 1 160px;
+  min-width: 96px;
+  max-width: 160px;
   height: 26px;
   border-radius: 7px;
   color: var(--fg);
@@ -118,11 +123,14 @@
 }
 .titlebar-reader-tab:hover { opacity: 0.9; background: color-mix(in srgb, var(--btn-tint) 45%, transparent); }
 .titlebar-reader-tab.is-active {
+  min-width: 128px;
   opacity: 1;
   background: color-mix(in srgb, var(--btn-tint) 80%, transparent);
 }
 
 .titlebar-reader-tab-label {
+  display: flex;
+  align-items: center;
   flex: 1 1 auto;
   min-width: 0;
   height: 100%;
@@ -136,6 +144,18 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* 书名主体按实际宽度省略，末尾卷号一直露在外面，同一系列的几卷也能分清。 */
+.titlebar-reader-tab-head {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.titlebar-reader-tab-tail {
+  flex: none;
+  padding-left: 3px;
 }
 
 .titlebar-reader-tab-close {

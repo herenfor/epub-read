@@ -7,7 +7,7 @@ import type { PlainMessageKey } from "./localization/core";
  */
 
 export type ShelfActionGroup = "read" | "organize" | "danger";
-export type ShelfBookActionId = "open" | "select" | "favorite" | "unfavorite" | "move" | "removeFromFolder" | "exportBook" | "revealSource" | "delete";
+export type ShelfBookActionId = "open" | "openInNewTab" | "select" | "favorite" | "unfavorite" | "move" | "removeFromFolder" | "exportBook" | "revealSource" | "delete";
 export type ShelfFolderActionId = "openFolder" | "renameFolder" | "exportBook" | "dissolveFolder";
 export type ShelfActionId = ShelfBookActionId | ShelfFolderActionId;
 
@@ -40,10 +40,17 @@ export interface ShelfBookActionContext {
   canReveal?: boolean;
   /** The book's file is unavailable (moved or deleted). */
   revealDisabled?: boolean;
+  /** A11: where reader tabs show, the book can open in a new tab. */
+  tabs?: { open: boolean; full: boolean };
 }
 
 export function shelfBookActions(ctx: ShelfBookActionContext): ShelfAction[] {
   const actions: ShelfAction[] = [{ id: "open", group: "read", label: "shelf.card.open", disabled: false }];
+  if (ctx.tabs) {
+    actions.push(ctx.tabs.open
+      ? { id: "openInNewTab", group: "read", label: "shelf.card.switchToTab", disabled: ctx.busy }
+      : { id: "openInNewTab", group: "read", label: ctx.tabs.full ? "shelf.card.openInNewTab.full" : "shelf.card.openInNewTab", disabled: ctx.busy || ctx.tabs.full });
+  }
   if (ctx.canFavorite) {
     actions.push(ctx.favorite
       ? { id: "unfavorite", group: "organize", label: "shelf.card.unfavorite", disabled: ctx.busy }
