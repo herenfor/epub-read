@@ -45,13 +45,13 @@ import {
 import { getRuntimeCapabilities } from "./platform/runtimeCapabilities";
 import { getAppBuildSession } from "./config/appBuildSession";
 import {
-  EMPTY_READER_TABS,
+  MAX_READER_TABS,
   READER_TABS_STORAGE_KEY,
   activeReaderTabs,
   closeReaderTab,
   cycleReaderTab,
-  openReaderTab,
   parseReaderTabs,
+  placeReaderTab,
   pruneReaderTabs,
   serializeReaderTabs,
 } from "./ui/readerTabs";
@@ -214,7 +214,8 @@ import {
 } from "./ui/chapterCounts";
 import { createChapterCountJob } from "./ui/chapterCountJob";
 import { readCachedChapterCounts, readKnownChapterProgressKeys, writeChapterCountCache } from "./ui/chapterCountCache";
-import { writeShelfPlaceLabel } from "./ui/shelfPlaceCache";
+import { readShelfPlaceLabel, writeShelfPlaceLabel } from "./ui/shelfPlaceCache";
+import { shelfProgressLabel } from "./ui/shelfProgressDisplay";
 import { useCustomThemes } from "./ui/useCustomThemes";
 import { projectShelfProgressReadiness } from "./ui/shelfProgressDisplay";
 import {
@@ -600,6 +601,7 @@ const READER_SETTLE_QUIET_MS = 500;
 const BOOKMARK_JUMP_GUARD_AFTER_LANDING_MS = 1300;
 /** 跳转迟迟不落定（失败、被别的导航取代）时，保护最多持续这么久。 */
 const BOOKMARK_JUMP_GUARD_MAX_MS = 8000;
+const PANEL_WARM_TAB_BATCHES: readonly PanelWarmBatch[] = [["reader-tabs"]];
 const PANEL_WARM_IDLE_BATCHES_MOBILE: readonly PanelWarmBatch[] = [["more"], ...PANEL_WARM_IDLE_BATCHES];
 const EMPTY_RESOURCE_ISSUES: readonly ResourceIssue[] = [];
 const getNoResourceIssues = () => EMPTY_RESOURCE_ISSUES;
@@ -4108,6 +4110,19 @@ export default function App() {
     void handleChooseBooks();
     closeForeground();
   }, [handleChooseBooks, closeForeground]);
+  // A11：多本书标签页。只挂一个阅读器：切标签 = 走现有“返回书架”保存并释放当前书，
+  // 等会话清理 effect 提交后再走现有“从书架打开”。阅读层与分页器不感知标签。
+  // 标签条只在电脑和平板横屏显示；手机和平板竖屏宽度不够，照旧只显示书名。
+  const readerTabsVisible = !mobileChrome || responsive.layout === "wide";
+  const [readerTabs, setReaderTabs] = useState(() => {
+    try {
+      return parseReaderTabs(localStorage.getItem(READER_TABS_STORAGE_KEY));
+    } catch {
+      return parseReaderTabs(null);
+    }
+  });
+  // 两本以上时标签条的“＋”和“+N”面板也在阅读安静时画一次（电脑和安卓都画）。
+  const readerTabsWarm = readerTabsVisible && view === "reader" && activeReaderTabs(readerTabs).tabs.length > 1;
   // 安卓本次运行：Aa 与目录在首次开书过渡仍遮住时各画一次，其余面板在阅读安静时逐个画一次
   // （几乎不可见、不可交互），之后的首次打开不再承担 GPU 首绘。
   const androidRuntime = runtime.platform === "android";
@@ -4115,7 +4130,10 @@ export default function App() {
     view === "reader" && ready && readerDisplayReady && openingPanels.aa && openingPanels.toc &&
       !openingPanels.pending && foreground.kind === "none" && !mobileMoreOpen && !assistantOpen,
     androidRuntime ? PANEL_WARM_VEIL_BATCHES : [],
-    !androidRuntime ? [] : mobileChrome ? PANEL_WARM_IDLE_BATCHES_MOBILE : PANEL_WARM_IDLE_BATCHES,
+    [
+      ...(!androidRuntime ? [] : mobileChrome ? PANEL_WARM_IDLE_BATCHES_MOBILE : PANEL_WARM_IDLE_BATCHES),
+      ...(readerTabsWarm ? PANEL_WARM_TAB_BATCHES : []),
+    ],
     readerBusy,
   );
   useReadingInputStart(view === "reader", panelWarmup.interrupt);
@@ -4374,68 +4392,114 @@ export default function App() {
   }, [persistShelfProgress, persistChapterCountCache, closeForeground, closeImageOverlay, retainUnsavedSample]);
   const handleBackToShelf = useCallback(() => leaveReader(false), [leaveReader]);
 
-  // A11 V1：多本书标签页，只在非正式构建启用（浏览器开发模式、调试包和 optimized-dev
-  // 测试包；后者 Rust profile 仍是 dev 但 debug 标志关闭），正式发布构建不渲染也不读写。
-  // 只挂一个阅读器：切标签 = 走现有“返回书架”保存并释放当前书，等会话清理
-  // effect 提交后再走现有“从书架打开”。阅读层与分页器不感知标签。
-  const readerTabsEnabled = useMemo(() => {
-    const session = getAppBuildSession();
-    if (!session) return import.meta.env.DEV;
-    return session.buildInfo ? session.buildInfo.profile !== "release" : session.debug;
-  }, []);
-  const [readerTabs, setReaderTabs] = useState(() => {
-    if (!readerTabsEnabled) return EMPTY_READER_TABS;
-    try {
-      return parseReaderTabs(localStorage.getItem(READER_TABS_STORAGE_KEY));
-    } catch {
-      return EMPTY_READER_TABS;
-    }
-  });
   const readerTabsRef = useRef(readerTabs);
   readerTabsRef.current = readerTabs;
   const pendingTabOpenRef = useRef<string | null>(null);
+  /** 下一本进阅读器的书要新开一个标签（其余打开都替换当前这本）。 */
+  const pendingNewTabRef = useRef<string | null>(null);
+  /** 从“＋”回书架挑书：挑中的书新开标签，取消就回到原来那本。 */
+  const [tabPick, setTabPick] = useState<{ returnId: string | null } | null>(null);
   useEffect(() => {
-    if (!readerTabsEnabled) return;
     try {
       localStorage.setItem(READER_TABS_STORAGE_KEY, serializeReaderTabs(readerTabs));
     } catch {
       // 本机便利功能：写不进存储只影响重启后恢复标签。
     }
-  }, [readerTabs, readerTabsEnabled]);
+  }, [readerTabs]);
   useEffect(() => {
-    if (!readerTabsEnabled || view !== "reader" || !currentShelfId) return;
-    setReaderTabs((state) => openReaderTab(state, currentShelfId));
-  }, [currentShelfId, readerTabsEnabled, view]);
+    if (view !== "reader" || !currentShelfId) return;
+    const mode = pendingNewTabRef.current === currentShelfId ? "new" : "replace";
+    pendingNewTabRef.current = null;
+    setTabPick(null);
+    setReaderTabs((state) => placeReaderTab(state, currentShelfId, mode));
+  }, [currentShelfId, view]);
   useEffect(() => {
-    if (!readerTabsEnabled || libraryLoad.status !== "ready") return;
+    if (libraryLoad.status !== "ready") return;
     const ids = new Set(shelfEntries.map((entry) => entry.id));
     setReaderTabs((state) => pruneReaderTabs(state, (id) => ids.has(id)));
-  }, [libraryLoad.status, readerTabsEnabled, shelfEntries]);
+  }, [libraryLoad.status, shelfEntries]);
   const switchReaderTab = useCallback(async (id: string | null): Promise<void> => {
-    if (!readerTabsEnabled || id === currentShelfIdRef.current || shelfBusyRef.current) return;
+    if (id === currentShelfIdRef.current || shelfBusyRef.current) return;
     if (!(await leaveReader(false))) return;
     pendingTabOpenRef.current = id;
-  }, [leaveReader, readerTabsEnabled]);
+  }, [leaveReader]);
   const closeReaderTabById = useCallback((id: string): void => {
-    if (!readerTabsEnabled || shelfBusyRef.current) return;
+    if (shelfBusyRef.current) return;
     const { state, next } = closeReaderTab(readerTabsRef.current, id);
     setReaderTabs(state);
     if (id === currentShelfIdRef.current) void switchReaderTab(next);
-  }, [readerTabsEnabled, switchReaderTab]);
-  const readerTabStrip = useMemo(() => {
-    if (!readerTabsEnabled) return undefined;
-    const titles = new Map(shelfEntries.map((entry) => [entry.id, entry.title] as const));
+  }, [switchReaderTab]);
+  const openReaderTabFromReader = useCallback((id: string): void => {
+    if (activeReaderTabs(readerTabsRef.current).tabs.length >= MAX_READER_TABS) return;
+    pendingNewTabRef.current = id;
+    void switchReaderTab(id);
+  }, [switchReaderTab]);
+  const pickReaderTabFromShelf = useCallback(async (): Promise<void> => {
+    if (shelfBusyRef.current) return;
+    const returnId = currentShelfIdRef.current;
+    if (!(await leaveReader(false))) return;
+    setTabPick({ returnId });
+  }, [leaveReader]);
+  const openFromShelf = useCallback((id: string): void => {
+    if (tabPick) pendingNewTabRef.current = id;
+    void handleShelfOpen(id);
+  }, [handleShelfOpen, tabPick]);
+  const shelfReaderTabs = useMemo(() => {
+    if (!readerTabsVisible) return undefined;
+    const group = activeReaderTabs(readerTabs);
+    const returnEntry = tabPick?.returnId ? shelfEntries.find((entry) => entry.id === tabPick.returnId) : undefined;
     return {
-      tabs: activeReaderTabs(readerTabs).tabs
-        .filter((id) => titles.has(id))
-        .map((id) => ({ id, title: titles.get(id) || id })),
+      openIds: new Set(group.tabs) as ReadonlySet<string>,
+      full: group.tabs.length >= MAX_READER_TABS,
+      max: MAX_READER_TABS,
+      onOpenInNewTab: (id: string) => {
+        if (group.tabs.length >= MAX_READER_TABS && !group.tabs.includes(id)) return;
+        pendingNewTabRef.current = id;
+        void handleShelfOpen(id);
+      },
+      pick: tabPick
+        ? {
+            count: group.tabs.length,
+            returnTitle: returnEntry?.title ?? null,
+            onCancel: () => {
+              setTabPick(null);
+              if (returnEntry) void handleShelfOpen(returnEntry.id);
+            },
+          }
+        : null,
+    };
+  }, [handleShelfOpen, readerTabs, readerTabsVisible, shelfEntries, tabPick]);
+  const readerTabStrip = useMemo(() => {
+    if (!readerTabsVisible) return undefined;
+    const entries = new Map(shelfEntries.map((entry) => [entry.id, entry] as const));
+    const detail = (entry: ShelfEntry): string => {
+      const place = readShelfPlaceLabel(entry.contentHash ?? entry.id, entry.spineIndex ?? 0);
+      const progress = shelfProgressLabel(entry);
+      return place ? uiText("shelf.resume.place", { chapter: place, progress }) : progress;
+    };
+    const group = activeReaderTabs(readerTabs);
+    const open = new Set(group.tabs);
+    return {
+      tabs: group.tabs
+        .filter((id) => entries.has(id))
+        .map((id) => ({ id, title: entries.get(id)!.title || id, detail: detail(entries.get(id)!) })),
       activeId: currentShelfId,
+      max: MAX_READER_TABS,
+      recent: shelfEntries
+        .filter((entry) => !open.has(entry.id) && entry.lastReadAtMs > 0 && entry.available !== false)
+        .sort((a, b) => b.lastReadAtMs - a.lastReadAtMs)
+        .slice(0, MAX_READER_TABS)
+        .map((entry) => ({ id: entry.id, title: entry.title || entry.id, detail: detail(entry) })),
       onSelect: (id: string) => void switchReaderTab(id),
       onClose: closeReaderTabById,
+      onOpenNew: openReaderTabFromReader,
+      onPickFromShelf: () => void pickReaderTabFromShelf(),
+      warm: warming("reader-tabs"),
     };
-  }, [closeReaderTabById, currentShelfId, readerTabs, readerTabsEnabled, shelfEntries, switchReaderTab]);
+  }, [closeReaderTabById, currentShelfId, openReaderTabFromReader, pickReaderTabFromShelf, readerTabs,
+    readerTabsVisible, shelfEntries, switchReaderTab, warming]);
   useEffect(() => {
-    if (!readerTabsEnabled || view !== "reader") return;
+    if (!readerTabsVisible || view !== "reader") return;
     const onKeyDown = (event: KeyboardEvent): void => {
       if (!event.ctrlKey || event.altKey || event.metaKey) return;
       if (event.key === "Tab") {
@@ -4451,7 +4515,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [closeReaderTabById, readerTabsEnabled, switchReaderTab, view]);
+  }, [closeReaderTabById, readerTabsVisible, switchReaderTab, view]);
   const resolveSaveFailurePrompt = useCallback((leaveUnsaved: boolean): void => {
     const prompt = saveFailurePrompt;
     if (!prompt) return;
@@ -5463,7 +5527,8 @@ export default function App() {
               onOpenDiagnostics={() => openPanel("log")}
               libraryState={shelfLibraryView(libraryLoad, shelfEntries.length > 0, organizationSettled)}
               onRetryLibraryLoad={retryLibraryLoad}
-              onOpen={handleShelfOpen}
+              onOpen={openFromShelf}
+              readerTabs={shelfReaderTabs}
               onImport={() => void handleChooseBooks()}
               onImportIntoFolder={(target) => void handleChooseBooks(target)}
               onImportContextChange={handleImportContextChange}

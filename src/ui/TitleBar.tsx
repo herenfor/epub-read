@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getRuntimeCapabilities } from "../platform/runtimeCapabilities";
 import { PinIcon } from "./readerIcons";
+import { ReaderTabStrip, type ReaderTabStripProps } from "./ReaderTabStrip";
 import "./titleBar.css";
 import { useUiText } from "./localization/UiLanguageProvider";
 
@@ -61,13 +62,8 @@ export interface TitleBarProps {
   onHistoryForward?: () => void;
   historyBackLabel?: string;
   historyForwardLabel?: string;
-  /** A11 V1 (dev builds only): open books as tabs in place of the single book title. */
-  readerTabs?: {
-    tabs: ReadonlyArray<{ id: string; title: string }>;
-    activeId: string | null;
-    onSelect(id: string): void;
-    onClose(id: string): void;
-  };
+  /** A11: open books as tabs in place of the single book title (two or more; the caller decides where tabs show). */
+  readerTabs?: Omit<ReaderTabStripProps, "onMenuOpenChange">;
 }
 
 export const TitleBar: React.FC<TitleBarProps> = ({
@@ -110,6 +106,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   const { t } = useUiText();
   const [isMaximized, setIsMaximized] = useState(false);
   const [isZenRevealed, setIsZenRevealed] = useState(false);
+  const [tabMenuOpen, setTabMenuOpen] = useState(false);
   const isZenRevealedRef = useRef(isZenRevealed);
   isZenRevealedRef.current = isZenRevealed;
   const zenHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -156,7 +153,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
 
   // 当有子菜单/抽屉打开时，必须保持顶栏可见，不触发沉浸收起
   const isAnyMenuOpen = Boolean(
-    sidebarOpen || appearanceOpen || searchOpen || assistantOpen || logOpen
+    sidebarOpen || appearanceOpen || searchOpen || assistantOpen || logOpen || tabMenuOpen
   );
 
   // 沉浸模式快捷键（Alt 键呼出/收起）与鼠标顶部感应监听 + 翻页/滚动自动滑隐
@@ -386,43 +383,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({
           )}
 
           {/* 只开一本书时不需要标签条，显示书名即可。 */}
-          {view === "reader" && readerTabs && readerTabs.tabs.length > 1 && !mobileCompact ? (
-            <div className="titlebar-reader-tabs" role="tablist" aria-label={t("titlebar.tabs")}>
-              {readerTabs.tabs.map((tab) => {
-                const active = tab.id === readerTabs.activeId;
-                return (
-                  <div
-                    key={tab.id}
-                    className={`titlebar-reader-tab${active ? " is-active" : ""}`}
-                    onAuxClick={(event) => {
-                      if (event.button === 1) readerTabs.onClose(tab.id);
-                    }}
-                  >
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={active}
-                      className="titlebar-reader-tab-label"
-                      title={t("titlebar.tabs.tip", { title: tab.title })}
-                      onClick={() => readerTabs.onSelect(tab.id)}
-                    >
-                      {tab.title}
-                    </button>
-                    <button
-                      type="button"
-                      className="titlebar-reader-tab-close"
-                      aria-label={t("titlebar.tabs.close", { title: tab.title })}
-                      title={t("titlebar.tabs.close", { title: tab.title })}
-                      onClick={() => readerTabs.onClose(tab.id)}
-                    >
-                      <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
-                        <path d="M2 2l6 6M8 2l-6 6" />
-                      </svg>
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
+          {view === "reader" && readerTabs && readerTabs.tabs.length > 1 ? (
+            <ReaderTabStrip {...readerTabs} onMenuOpenChange={setTabMenuOpen} />
           ) : view === "reader" ? (
             // 桌面：书名 · 作者（章名在中间的进度胶囊）；触屏顶栏没有胶囊：书名下面一行写章名。
             <div className={`titlebar-book-meta${mobileCompact ? " is-stacked" : ""}`} {...dragProps}>

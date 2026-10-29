@@ -188,7 +188,7 @@ describe("CSD TitleBar 组件与样式契约（Zen UI Packet A）", () => {
     try {
       const tabs = (n: number) => ({
         tabs: Array.from({ length: n }, (_, i) => ({ id: `b${i}`, title: `书${i}` })),
-        activeId: "b0", onSelect: () => {}, onClose: () => {},
+        activeId: "b0", max: 5, recent: [], onSelect: () => {}, onClose: () => {}, onOpenNew: () => {}, onPickFromShelf: () => {},
       });
       const props = {
         view: "reader" as const,
@@ -209,6 +209,10 @@ describe("CSD TitleBar 组件与样式契约（Zen UI Packet A）", () => {
 
       const many = renderToStaticMarkup(createElement(TitleBar, { ...props, readerTabs: tabs(2) }));
       expect(many).toContain("titlebar-reader-tabs");
+      expect(many).toContain('aria-label="新开一本"');
+      // At the limit the + button is off and says why.
+      const full = renderToStaticMarkup(createElement(TitleBar, { ...props, readerTabs: tabs(5) }));
+      expect(full).toMatch(/titlebar-reader-tabs-new"[^>]*aria-label="最多同时开 5 本，先关掉一本"[^>]*disabled/);
 
       // Without a contents name the capsule keeps the chapter count.
       const unnamed = renderToStaticMarkup(createElement(TitleBar, { ...props, chapterTitle: "" }));

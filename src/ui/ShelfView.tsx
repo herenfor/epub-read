@@ -52,6 +52,7 @@ import { hasReadPosition } from "./readEvidence";
 import { isShelfProgressPending, shelfProgressLabel } from "./shelfProgressDisplay";
 import { readCachedLinearMask } from "./chapterCountCache";
 import { readShelfPlaceLabel } from "./shelfPlaceCache";
+import { shortTabTitle } from "./readerTabs";
 import type { CustomThemeControls } from "./useCustomThemes";
 import { linearChapterNumber } from "../core/book";
 import { isShelfCardActionTarget } from "./shelfCardEventScope";
@@ -191,6 +192,18 @@ export interface ShelfViewProps {
   libraryState?: ShelfLibraryView;
   onRetryLibraryLoad?(): void;
   onOpen(id: string): void;
+  /**
+   * A11: present where reader tabs show. Books open in a new tab from the menu,
+   * with Ctrl+click or a middle click; `pick` is the “choose a book for a new
+   * tab” step started from the reader's + panel.
+   */
+  readerTabs?: {
+    openIds: ReadonlySet<string>;
+    full: boolean;
+    max: number;
+    onOpenInNewTab(id: string): void;
+    pick: { count: number; returnTitle: string | null; onCancel(): void } | null;
+  };
   onImport(): void;
   /** Import chosen EPUBs into an open shelf folder; absent imports to the shelf root. */
   onImportIntoFolder?(target: { folderId: string; name: string }): void;
@@ -670,9 +683,54 @@ const MORANDI_PALETTES = [
   { bg: "#48524B", fg: "#EDF5EF", border: "rgba(237, 245, 239, 0.25)", accent: "rgba(237, 245, 239, 0.18)" }, // 艾绿
 ];
 
+/**
+ * A11: “choose a book for a new tab”, started from the reader's + panel. Esc or
+ * Cancel goes back to the book the reader came from; open books carry a badge.
+ */
+function ShelfTabPickBar(props: {
+  pick: { count: number; returnTitle: string | null; onCancel(): void };
+  max: number;
+  openIds: ReadonlySet<string>;
+}) {
+  const { t } = useUiText();
+  const { onCancel } = props.pick;
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      event.preventDefault();
+      onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+  const escape = (id: string) => (typeof CSS !== "undefined" && CSS.escape ? CSS.escape(id) : id.replace(/["\\]/g, "\\$&"));
+  const badge = [...props.openIds].map((id) => `.shelf-view.is-tab-pick [data-book-id="${escape(id)}"]`).join(",");
+  return <>
+    {badge && <style>{`${badge} { --shelf-tab-open-badge: ${JSON.stringify(t("shelf.tabPick.open"))}; }`}</style>}
+    <div className="shelf-tab-pick" role="status">
+      <NewTabIcon />
+      <span className="shelf-tab-pick-title">{t("shelf.tabPick.title")}</span>
+      <span className="shelf-tab-pick-count">{t("shelf.tabPick.count", { count: props.pick.count, max: props.max })}</span>
+      <button type="button" className="ui-btn shelf-tab-pick-cancel" onClick={onCancel}>
+        {props.pick.returnTitle ? t("shelf.tabPick.cancel", { title: shortTabTitle(props.pick.returnTitle, 12) }) : t("shelf.tabPick.cancelPlain")}
+      </button>
+    </div>
+  </>;
+}
+
+function NewTabIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="2" y="5" width="9" height="9" rx="1.5" />
+      <path d="M5 2.5h7a1.5 1.5 0 0 1 1.5 1.5v7" />
+    </svg>
+  );
+}
+
 function shelfActionIcon(id: ShelfActionId): ReactNode {
   switch (id) {
     case "open": return <BookLogoIcon />;
+    case "openInNewTab": return <NewTabIcon />;
     case "select": return <CheckListIcon />;
     case "favorite": return <StarIcon />;
     case "unfavorite": return <StarIcon filled />;
@@ -4290,6 +4348,10 @@ export function ShelfView(props: ShelfViewProps) {
         closeMenu({ restoreFocus: false });
         props.onOpen(entry.id);
         return;
+      case "openInNewTab":
+        closeMenu({ restoreFocus: false });
+        props.readerTabs?.onOpenInNewTab(entry.id);
+        return;
       case "select":
         closeMenu({ restoreFocus: false });
         handleTouchLongPressSelect(entry.id);
@@ -4390,6 +4452,7 @@ export function ShelfView(props: ShelfViewProps) {
       exportDisabled: Boolean(props.saveFileActive || props.lanTransferActive),
       canReveal: Boolean(props.onRevealSource),
       revealDisabled: entry.available === false,
+      tabs: props.readerTabs ? { open: props.readerTabs.openIds.has(entry.id), full: props.readerTabs.full } : undefined,
     });
     return {
       label: t("shelf.card.more", { title: entry.title }),
@@ -4404,7 +4467,7 @@ export function ShelfView(props: ShelfViewProps) {
         : entry.title,
       groups: toItems(actions),
     };
-  }, [activeFolders, bookExportDisabled, canOrganize, entriesById, folderBooksMap, menu, menuPending, menuTargetGone, organization, props.busy, props.importActive, props.onExportBooks, props.onRevealSource, props.saveFileActive, props.lanTransferActive, selectionMode, t, thumbnailProvider, tn]);
+  }, [activeFolders, bookExportDisabled, canOrganize, entriesById, folderBooksMap, menu, menuPending, menuTargetGone, organization, props.busy, props.importActive, props.onExportBooks, props.onRevealSource, props.readerTabs, props.saveFileActive, props.lanTransferActive, selectionMode, t, thumbnailProvider, tn]);
 
   const openMenuKey = menu && !menuClosing
     ? (menu.target.kind === "book"
@@ -4500,14 +4563,47 @@ export function ShelfView(props: ShelfViewProps) {
   );
   const settingsWarm = settingsWarmup.warming("shelf-settings-pages") ? "pages"
     : settingsWarmup.warming("shelf-settings") ? "home" : undefined;
+  /**
+   * A11: the book a Ctrl+click or middle click opens in a new tab. null leaves
+   * the click alone; "" swallows it (the tab limit is reached).
+   */
+  const newTabTarget = (target: EventTarget | null): string | null => {
+    const tabs = props.readerTabs;
+    if (!tabs || selectionMode || props.busy || typeof Element === "undefined" || !(target instanceof Element)) return null;
+    const card = target.closest<HTMLElement>('[data-shelf-target="book"][data-book-id]');
+    const id = card?.dataset.bookId;
+    if (!card || !id || isShelfCardActionTarget(target, card)) return null;
+    return tabs.full && !tabs.openIds.has(id) ? "" : id;
+  };
+  const tabPick = props.readerTabs?.pick ?? null;
+
   return (
     <div
       ref={shelfViewRef}
-      className={`shelf-view density-${density}${selectionMode ? " selection-mode" : ""} view-${viewMode}${props.busy ? " busy" : ""}${props.importActive ? " import-active" : ""}`}
+      className={`shelf-view density-${density}${tabPick ? " is-tab-pick" : ""}${selectionMode ? " selection-mode" : ""} view-${viewMode}${props.busy ? " busy" : ""}${props.importActive ? " import-active" : ""}`}
       aria-busy={props.busy || props.importActive}
       data-input={initialShelfInput}
       onPointerDownCapture={(e) => noteShelfInput(e.pointerType)}
       onPointerMove={(e) => { if (e.pointerType === "mouse") noteShelfInput("mouse"); }}
+      onClickCapture={(e) => {
+        if (!(e.ctrlKey || e.metaKey)) return;
+        const id = newTabTarget(e.target);
+        if (id === null) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (id) props.readerTabs!.onOpenInNewTab(id);
+      }}
+      onMouseDown={(e) => {
+        // 中键点书：不进入系统的自动滚动。
+        if (e.button === 1 && newTabTarget(e.target) !== null) e.preventDefault();
+      }}
+      onAuxClick={(e) => {
+        if (e.button !== 1) return;
+        const id = newTabTarget(e.target);
+        if (id === null) return;
+        e.preventDefault();
+        if (id) props.readerTabs!.onOpenInNewTab(id);
+      }}
     >
       {/* 现代极简顶部操作栏 (Level 1) */}
       <header className="shelf-head shelf-head-zen">
@@ -4757,6 +4853,9 @@ export function ShelfView(props: ShelfViewProps) {
           </div>
         )}
       </header>
+      {tabPick && props.readerTabs && (
+        <ShelfTabPickBar pick={tabPick} max={props.readerTabs.max} openIds={props.readerTabs.openIds} />
+      )}
 
       {/* 设置页：PC 对话框，触屏全屏页 */}
       <ShelfSettingsPage {...settingsPageProps} open={settingsOpen} registerSubmenuBackHandler={registerSubmenuBackHandler} onClose={closeSettings} />

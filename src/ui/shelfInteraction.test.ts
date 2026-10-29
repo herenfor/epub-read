@@ -177,6 +177,12 @@ describe("shelf action descriptors", () => {
     expect(shelfBookActions({ ...base, deleteDisabled: true }).find((a) => a.id === "delete")?.disabled).toBe(true);
     expect(ids({ ...base, canExport: true } as typeof base)).toEqual(["read:open", "organize:favorite,move,removeFromFolder,exportBook,select", "danger:delete"]);
     expect(shelfBookActions({ ...base, canExport: true, exportDisabled: true }).find((a) => a.id === "exportBook")?.disabled).toBe(true);
+    // A11: where tabs show, “open in a new tab” follows “open”; an open book switches, a full strip refuses.
+    const tab = (open: boolean, full: boolean) => shelfBookActions({ ...base, tabs: { open, full } }).find((a) => a.id === "openInNewTab");
+    expect(ids({ ...base, tabs: { open: false, full: false } } as typeof base)[0]).toBe("read:open,openInNewTab");
+    expect(tab(false, false)).toMatchObject({ label: "shelf.card.openInNewTab", disabled: false });
+    expect(tab(false, true)).toMatchObject({ label: "shelf.card.openInNewTab.full", disabled: true });
+    expect(tab(true, true)).toMatchObject({ label: "shelf.card.switchToTab", disabled: false });
     expect(shelfMenuPresentation("touch", false)).toBe("sheet");
     expect(shelfMenuPresentation("mouse", true)).toBe("popover");
     expect(shelfMenuPresentation("", true)).toBe("sheet");

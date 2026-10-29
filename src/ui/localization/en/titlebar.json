@@ -46,5 +46,14 @@
   "titlebar.progress.chapter": "Ch. {current}/{total}",
   "titlebar.tabs": "Open books",
   "titlebar.tabs.close": "Close {title}",
-  "titlebar.tabs.tip": "{title} (Ctrl+Tab to switch, Ctrl+W to close)"
+  "titlebar.tabs.tip": "{title} (Ctrl+Tab to switch, Ctrl+W to close)",
+  "titlebar.tabs.more": "{count} more — show all open books",
+  "titlebar.tabs.new": "Open another book",
+  "titlebar.tabs.full": "Up to {max} books at once — close one first",
+  "titlebar.tabs.recent": "Recently read",
+  "titlebar.tabs.pickFromShelf": "Choose from the shelf…",
+  "titlebar.tabs.count": "{count} of {max} open",
+  "titlebar.tabs.overflow": "Not shown in the bar",
+  "titlebar.tabs.reading": "Reading · {detail}",
+  "titlebar.tabs.readingNow": "Reading"
 }

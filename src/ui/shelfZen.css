@@ -3367,3 +3367,75 @@
   padding-inline: 16px;
   font-size: 14px;
 }
+
+/* A11：从阅读器“＋”回书架挑书，挑中的书新开标签；开着的书标“已打开”。 */
+.shelf-tab-pick {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  margin: 12px 20px 0;
+  padding: 0 6px 0 16px;
+  box-sizing: border-box;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--fg);
+}
+
+.shelf-tab-pick > svg {
+  flex: none;
+  color: var(--accent);
+}
+
+.shelf-tab-pick-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.shelf-tab-pick-count {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.shelf-tab-pick-cancel {
+  flex: none;
+  white-space: nowrap;
+}
+
+/* 封面盒的 ::before/::after 是书脊和切口，角标挂在卡片上。 */
+.shelf-view.is-tab-pick .shelf-card::after {
+  content: var(--shelf-tab-open-badge, none);
+  position: absolute;
+  top: 8px;
+  left: 10px;
+  z-index: 3;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  pointer-events: none;
+}
+
+.shelf-view.is-tab-pick .shelf-table-title::after {
+  content: var(--shelf-tab-open-badge, none);
+  margin-left: 8px;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.app[data-touch-ui="true"] .shelf-tab-pick {
+  min-height: 52px;
+  margin: 8px 16px 0;
+}
+
+.app[data-touch-ui="true"] .shelf-tab-pick-title {
+  font-size: 14px;
+}

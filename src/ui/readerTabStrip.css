@@ -1,0 +1,245 @@
+/* A11 标签条的“+N”“＋”与两个面板（ReaderTabStrip.tsx）。标签本身的样式在 titleBar.css。 */
+.titlebar-reader-tabs-more,
+.titlebar-reader-tabs-new {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.titlebar-reader-tabs-more {
+  gap: 2px;
+  min-width: 44px;
+  padding: 0 6px 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  background: color-mix(in srgb, var(--btn-tint) 60%, transparent);
+}
+
+.titlebar-reader-tabs-new {
+  width: 26px;
+  padding: 0;
+  opacity: 0.75;
+}
+
+.titlebar-reader-tabs-more:hover,
+.titlebar-reader-tabs-more.is-open,
+.titlebar-reader-tabs-new:hover:not(:disabled),
+.titlebar-reader-tabs-new.is-open {
+  opacity: 1;
+  background: var(--btn-tint-hover);
+}
+
+.titlebar-reader-tabs-new:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* 面板：与 Aa、书架菜单同一个外壳（灰底、14px 圆角、一条边一层阴影、白卡片）。 */
+.reader-tab-panel {
+  position: fixed;
+  z-index: var(--z-ui-popover);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: calc(100vh - 60px);
+  overflow-y: auto;
+  padding: 8px;
+  box-sizing: border-box;
+  border-radius: 14px;
+  border: 1px solid var(--ui-border-control);
+  background: var(--panel-surface);
+  color: var(--fg);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18), 0 3px 10px rgba(0, 0, 0, 0.06);
+  transform-origin: top left;
+  /* 先挂上再动：第一帧几乎透明但会被画出来，下一帧加 is-shown 开始过渡。 */
+  opacity: 0.01;
+  transform: translateY(-4px) scale(0.98);
+  transition: opacity var(--popover-open) var(--ease-emphasized), transform var(--popover-open) var(--ease-emphasized);
+}
+
+.reader-tab-panel.is-shown {
+  opacity: 1;
+  transform: none;
+}
+
+.reader-tab-panel-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.reader-tab-panel-label,
+.reader-tab-panel-foot {
+  padding: 2px 8px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.reader-tab-panel-foot {
+  padding: 0 8px 2px;
+  font-size: 11.5px;
+}
+
+.reader-tab-panel-card {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--panel-card);
+}
+
+.reader-tab-panel-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  padding: 0 6px 0 0;
+  border: none;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.reader-tab-panel-row + .reader-tab-panel-row {
+  border-top: 1px solid var(--panel-border);
+}
+
+.reader-tab-panel-row.is-active {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.reader-tab-panel-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 0 7px 12px;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.reader-tab-panel-title {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reader-tab-panel-row.is-active .reader-tab-panel-title {
+  font-weight: 700;
+}
+
+.reader-tab-panel-detail {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.reader-tab-panel-close {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.reader-tab-panel-shelf {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 12px;
+  border: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .reader-tab-panel-row:not(.is-active):hover,
+  .reader-tab-panel-shelf:hover {
+    background: var(--btn-hover);
+  }
+
+  .reader-tab-panel-close:hover {
+    background: color-mix(in srgb, var(--fg) 10%, transparent);
+    color: var(--fg);
+  }
+}
+
+:root[data-motion="reduced"] .reader-tab-panel {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reader-tab-panel {
+    transition: none;
+  }
+}
+
+/* 平板横屏（触屏顶栏）：标签和按钮放大到手指好点，× 一直显示。 */
+.titlebar.is-mobile-compact .titlebar-reader-tabs {
+  gap: 4px;
+}
+
+.titlebar.is-mobile-compact .titlebar-reader-tab {
+  height: 38px;
+  border-radius: 10px;
+}
+
+.titlebar.is-mobile-compact .titlebar-reader-tab-label {
+  padding-left: 14px;
+  font-size: 14px;
+}
+
+.titlebar.is-mobile-compact .titlebar-reader-tab-close {
+  width: 32px;
+  height: 32px;
+  opacity: 0.75;
+}
+
+.titlebar.is-mobile-compact .titlebar-reader-tabs-more,
+.titlebar.is-mobile-compact .titlebar-reader-tabs-new {
+  height: 38px;
+  min-width: 44px;
+  border-radius: 10px;
+}
+
+.app[data-touch-ui="true"] .reader-tab-panel-row {
+  min-height: 52px;
+}
+
+.app[data-touch-ui="true"] .reader-tab-panel-close {
+  width: 40px;
+  height: 40px;
+}
+
+.app[data-touch-ui="true"] .reader-tab-panel-shelf {
+  min-height: 48px;
+}

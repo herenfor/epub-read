@@ -17,7 +17,9 @@ import "./panelPaintWarmup.css";
 export type PanelWarmStage =
   | "aa" | "aa-detailed" | "toc" | "more" | "search" | "reading" | "display" | "fonts" | "bookmark-pages"
   /** Shelf settings: its home page, then every section page (ShelfView). */
-  | "shelf-settings" | "shelf-settings-pages";
+  | "shelf-settings" | "shelf-settings-pages"
+  /** Reader tab strip: its “＋” and “+N” panels, once two books are open. */
+  | "reader-tabs";
 export type PanelWarmBatch = readonly PanelWarmStage[];
 
 /**
