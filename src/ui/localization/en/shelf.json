@@ -20,6 +20,7 @@
   "shelf.time.hoursAgo.one": "{count} hour ago",
   "shelf.time.yesterday": "Yesterday",
   "shelf.resume.chapter": "Ch. {n} · {progress}",
+  "shelf.resume.place": "{chapter} · {progress}",
   "shelf.resume.open": "Open \"{title}\"",
   "shelf.resume.continue": "Continue",
   "shelf.resume.expand.tip": "Expand (show cover and detailed progress)",
