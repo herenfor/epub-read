@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { TitleBar } from "./TitleBar";
 import { clearAppBuildSession, setAppBuildSession } from "../config/appBuildSession";
 import { createReactDomHarness } from "../test/reactDomHarness";
+import { installBrowserContextMenuPolicy } from "../platform/browserContextMenu";
 
 beforeEach(() => {
   setAppBuildSession({
@@ -15,25 +16,27 @@ beforeEach(() => {
 afterEach(() => clearAppBuildSession());
 
 describe("CSD TitleBar 组件与样式契约（Zen UI Packet A）", () => {
-  it("顶栏右键只阻止浏览器菜单，不影响正文和输入框", async () => {
+  it("统一白名单拦截顶栏与空白处菜单，保留输入框编辑菜单", async () => {
     const dom = createReactDomHarness();
+    const uninstall = installBrowserContextMenuPolicy(dom.window.document);
     try {
       await dom.render(createElement("div", null,
         createElement(TitleBar, { view: "reader", title: "A book", zenMode: true }),
         createElement("main", null, createElement("input"))));
-      for (const selector of [".titlebar-book-title", ".titlebar-controls", ".titlebar-zen-sensor"]) {
+      for (const selector of [".titlebar-book-title", ".titlebar-controls", ".titlebar-zen-sensor", "main"]) {
         const target = dom.container.querySelector(selector);
         expect(target, selector).not.toBeNull();
         const event = new dom.window.Event("contextmenu", { bubbles: true, cancelable: true });
         await dom.dispatch(target!, event);
         expect(event.defaultPrevented, selector).toBe(true);
       }
-      for (const selector of ["main", "input"]) {
+      for (const selector of ["input"]) {
         const event = new dom.window.Event("contextmenu", { bubbles: true, cancelable: true });
         await dom.dispatch(dom.container.querySelector(selector)!, event);
         expect(event.defaultPrevented, selector).toBe(false);
       }
     } finally {
+      uninstall();
       await dom.dispose();
     }
   });

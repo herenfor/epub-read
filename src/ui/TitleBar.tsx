@@ -288,7 +288,6 @@ export const TitleBar: React.FC<TitleBarProps> = ({
       {isZenHidden && (
         <div
           className="titlebar-zen-sensor"
-          onContextMenu={(event) => event.preventDefault()}
           onMouseEnter={() => {
             clearZenTimer();
             setIsZenRevealed(true);
@@ -299,7 +298,6 @@ export const TitleBar: React.FC<TitleBarProps> = ({
       <header
         className={`titlebar titlebar-${view}${isZenHidden ? " zen-hidden" : ""}${isMobileToolsHidden ? " tools-hidden" : ""}${mobileCompact ? " is-mobile-compact" : ""}${desktopTools && zenMode ? " is-floating" : ""}`}
         {...dragProps}
-        onContextMenu={(event) => event.preventDefault()}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
       >
