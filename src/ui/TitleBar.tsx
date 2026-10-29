@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getRuntimeCapabilities } from "../platform/runtimeCapabilities";
+import { PinIcon } from "./readerIcons";
 import "./titleBar.css";
 import { useUiText } from "./localization/UiLanguageProvider";
 
@@ -31,8 +32,9 @@ export interface TitleBarProps {
   /** A15：双页时书签按钮弹出缩略书页（左页 / 右页）。 */
   bookmarkSpread?: boolean;
   bookmarkPagesOpen?: boolean;
-  /** 顶栏自动隐藏（沉浸）；开关在 设置 › 阅读。 */
+  /** 顶栏自动隐藏（沉浸）；顶栏图钉与 设置 › 阅读 是同一个开关。 */
   zenMode?: boolean;
+  onToggleZenMode?: () => void;
   /** 手机/平板触摸顶部条：只保留返回、标题、书签，其余放到共享 toolsVisible 底部栏。 */
   mobileCompact?: boolean;
   /** 手机/平板上下工具栏共享的显隐状态。 */
@@ -85,6 +87,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   bookmarkSpread,
   bookmarkPagesOpen,
   zenMode = false,
+  onToggleZenMode,
   mobileCompact = false,
   toolsVisible = true,
   onToggleTools,
@@ -535,6 +538,20 @@ export const TitleBar: React.FC<TitleBarProps> = ({
                       <path d="M15 3h6v6m-6 5l6 6M9 21H3v-6m0 0l6-6" />
                     </svg>
                   )}
+                </button>
+              )}
+
+              {/* 顶栏图钉：固定常驻 / 自动隐藏（与 设置 › 阅读 同步）。 */}
+              {desktopTools && !mobileCompact && onToggleZenMode && (
+                <button
+                  type="button"
+                  className={`titlebar-action-btn titlebar-pin-btn${!zenMode ? " active" : ""}`}
+                  onClick={onToggleZenMode}
+                  title={zenMode ? t("titlebar.zen.on.tip") : t("titlebar.zen.off.tip")}
+                  aria-label={zenMode ? t("titlebar.zen.pin") : t("titlebar.zen.autoHide")}
+                  aria-pressed={!zenMode}
+                >
+                  <PinIcon size={14} pinned={!zenMode} />
                 </button>
               )}
 

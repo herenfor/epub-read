@@ -130,7 +130,7 @@ describe("CSD TitleBar 组件与样式契约（Zen UI Packet A）", () => {
     }
   });
 
-  it("左侧提供显著的 [目录] 按键；顶栏自动隐藏改在设置里，标题栏不再有图钉", () => {
+  it("左侧提供显著的 [目录] 按键；顶栏图钉与设置里的“自动隐藏”是同一个开关", () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
     try {
       const html = renderToStaticMarkup(createElement(TitleBar, {
@@ -144,9 +144,18 @@ describe("CSD TitleBar 组件与样式契约（Zen UI Packet A）", () => {
       }));
       expect(html).toContain("titlebar-toc-btn");
       expect(html).toContain("目录");
+      // Without the toggle wired (phones) there is no pin.
       expect(html).not.toContain("titlebar-pin-btn");
       expect(html).toContain("titlebar-progress-pill");
       expect(html).not.toContain("is-clickable");
+      const pinned = renderToStaticMarkup(createElement(TitleBar, {
+        view: "reader", title: "Test Book", onBackToShelf: () => {}, zenMode: false, onToggleZenMode: () => {},
+      }));
+      expect(pinned).toMatch(/titlebar-pin-btn active"[^>]*aria-pressed="true"/);
+      const autoHide = renderToStaticMarkup(createElement(TitleBar, {
+        view: "reader", title: "Test Book", onBackToShelf: () => {}, zenMode: true, onToggleZenMode: () => {},
+      }));
+      expect(autoHide).toMatch(/titlebar-pin-btn"[^>]*aria-pressed="false"/);
     } finally {
       vi.unstubAllGlobals();
     }
