@@ -1,5 +1,6 @@
 package dev.herenfor.epubreader
 
+import android.content.Intent
 import android.content.res.Configuration
 import android.os.Bundle
 import androidx.activity.enableEdgeToEdge
@@ -15,6 +16,14 @@ class MainActivity : TauriActivity() {
     super.onCreate(savedInstanceState)
     readerSystemBars = ReaderSystemBarsController(window)
     readerKeepScreenOn = ReaderKeepScreenOnController(window)
+    // A restored Activity must not replay an old, already handled VIEW intent.
+    if (savedInstanceState == null) ExternalOpenInbox.capture(intent)
+  }
+
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    setIntent(intent)
+    ExternalOpenInbox.capture(intent)
   }
 
   override fun onResume() {
@@ -41,6 +50,7 @@ class MainActivity : TauriActivity() {
   }
 
   override fun onDestroy() {
+    if (isFinishing) ExternalOpenInbox.clear()
     if (::readerKeepScreenOn.isInitialized) readerKeepScreenOn.destroy()
     if (::readerSystemBars.isInitialized) readerSystemBars.destroy()
     super.onDestroy()

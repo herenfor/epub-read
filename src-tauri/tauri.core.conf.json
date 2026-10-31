@@ -3,5 +3,12 @@
     "beforeDevCommand": "pnpm dev:core",
     "beforeBuildCommand": "pnpm build:core",
     "frontendDist": "../dist/core"
+  },
+  "bundle": {
+    "windows": {
+      "nsis": {
+        "installerHooks": "windows/epub-associations.nsh"
+      }
+    }
   }
 }

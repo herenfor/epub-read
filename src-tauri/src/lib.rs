@@ -8,6 +8,7 @@ mod android_lan_scan;
 mod android_uri_bridge;
 mod build_info;
 mod app_update;
+mod external_open;
 #[cfg(test)]
 mod build_info_contract;
 mod directory_import;
@@ -62,6 +63,8 @@ macro_rules! configure_invoke_handler {
             directory_import::commands::directory_import_cancel,
             directory_import::commands::directory_import_dispose,
             linked_library::linked_library_cancel_document_import,
+            external_open::external_open_peek,
+            external_open::external_open_ack,
             android_uri_bridge::android_read_content_uri,
             android_uri_bridge::android_write_text_content_uri,
             android_battery::android_battery_subscribe,
@@ -227,6 +230,8 @@ macro_rules! configure_invoke_handler {
             directory_import::commands::directory_import_cancel,
             directory_import::commands::directory_import_dispose,
             linked_library::linked_library_cancel_document_import,
+            external_open::external_open_peek,
+            external_open::external_open_ack,
             android_uri_bridge::android_read_content_uri,
             android_uri_bridge::android_write_text_content_uri,
             android_battery::android_battery_subscribe,
@@ -341,6 +346,8 @@ pub fn run() {
         context.config().product_name.as_deref(),
     );
     let builder = tauri::Builder::default().manage(install_kind);
+    #[cfg(not(target_os = "android"))]
+    let builder = builder.manage(external_open::ExternalOpenState::default());
     #[cfg(windows)]
     let builder = if install_kind == app_update::InstallKind::Installer {
         builder.plugin(tauri_plugin_updater::Builder::new().build())
@@ -348,7 +355,12 @@ pub fn run() {
         builder
     };
     #[cfg(desktop)]
-    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+        external_open::capture_arguments(
+            app,
+            args.into_iter().map(std::ffi::OsString::from),
+            std::path::Path::new(&cwd),
+        );
         if let Some(main_window) = app.get_webview_window("main") {
             for action in second_instance_activation_steps() {
                 let _ = match action {
@@ -376,6 +388,12 @@ pub fn run() {
         .manage(cloud_sync::commands::CloudSyncManager::default())
         .manage(ai::AiState::default())
         .setup(|app| {
+            #[cfg(desktop)]
+            external_open::capture_arguments(
+                app.handle(),
+                std::env::args_os(),
+                &std::env::current_dir().unwrap_or_default(),
+            );
             #[cfg(windows)]
             if let Some(window) = app.get_webview_window("main") {
                 use windows::Win32::Foundation::{LPARAM, WPARAM};
@@ -416,6 +434,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init());
     #[cfg(target_os = "android")]
     let builder = builder
+        .plugin(external_open::plugin())
         .plugin(android_uri_bridge::plugin())
         .plugin(android_app_task::plugin())
         .plugin(android_app_update::plugin())
