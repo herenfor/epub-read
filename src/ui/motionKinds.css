@@ -59,19 +59,15 @@
   }
 }
 
-/* Sheet: slides in from a screen edge. At the reduced level it only fades. */
+/* Sheet: slides in from a screen edge (the reduced level swaps in the fades).
+   Transform only: even a constant opacity track makes the GPU draw the whole
+   sheet offscreen every frame (phone TOC: 9-11 dropped frames, 3-6 without). */
 @keyframes sheet-in {
-  from {
-    opacity: var(--sheet-travel); /* 1: no fade; 0 at the reduced level: fade only */
-    transform: translate(calc(var(--sheet-x, 0px) * var(--sheet-travel)), calc(var(--sheet-y, 100%) * var(--sheet-travel)));
-  }
+  from { transform: translate(var(--sheet-x, 0px), var(--sheet-y, 100%)); }
 }
 
 @keyframes sheet-out {
-  to {
-    opacity: var(--sheet-travel); /* 1: no fade; 0 at the reduced level: fade only */
-    transform: translate(calc(var(--sheet-x, 0px) * var(--sheet-travel)), calc(var(--sheet-y, 100%) * var(--sheet-travel)));
-  }
+  to { transform: translate(var(--sheet-x, 0px), var(--sheet-y, 100%)); }
 }
 
 /* Toast: short notice that rises into place. */

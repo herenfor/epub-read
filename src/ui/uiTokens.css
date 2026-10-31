@@ -71,7 +71,6 @@
   --popover-travel: 4px;
   --sheet-in: var(--menu-open);
   --sheet-out: var(--menu-close);
-  --sheet-travel: 1;
   --toast-in: 200ms;
   --toast-out: 160ms;
   --toast-travel: 8px;

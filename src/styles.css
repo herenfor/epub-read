@@ -5623,7 +5623,8 @@ select option {
   --popover-from: 1;
   --popover-travel: 0px;
   --sheet-in: 120ms;
-  --sheet-travel: 0;
+  --sheet-enter: motion-fade-in var(--sheet-in) var(--ease-standard) var(--motion-defer) both;
+  --sheet-exit: motion-fade-out var(--sheet-out) var(--ease-exit) forwards;
   --toast-in: 120ms;
   --toast-out: 120ms;
   --toast-travel: 0px;
