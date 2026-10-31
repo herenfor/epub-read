@@ -13,7 +13,7 @@
   justify-content: center;
   width: 44px;
   height: 44px;
-  border-radius: 12px;
+  border-radius: var(--r-md);
   background: color-mix(in srgb, var(--accent) 12%, transparent);
   color: var(--accent);
 }
@@ -26,14 +26,14 @@
 }
 
 .about-product {
-  font-size: 16px;
+  font-size: var(--fs-title);
   font-weight: 650;
   letter-spacing: 0.01em;
 }
 
 .about-meta {
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: var(--fs-caption);
 }
 
 /* List rows may wrap their muted line here (dates, the auto-check note). */
@@ -67,7 +67,7 @@
 .about-release-empty {
   margin: 0;
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: var(--fs-caption);
 }
 
 .about-release-group + .about-release-group {
@@ -75,14 +75,14 @@
 }
 
 .about-release-group-title {
-  font-size: 12.5px;
+  font-size: var(--fs-caption);
   font-weight: 600;
 }
 
 .about-release-list {
   margin: 3px 0 0;
   padding-left: 17px;
-  font-size: 12.5px;
+  font-size: var(--fs-caption);
   line-height: 1.6;
 }
 

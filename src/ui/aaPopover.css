@@ -31,7 +31,7 @@
   background: color-mix(in srgb, var(--panel-surface) 96%, transparent);
   color: var(--fg);
   border: 1px solid var(--ui-border-control);
-  border-radius: 14px;
+  border-radius: var(--r-lg);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18), 0 3px 10px rgba(0, 0, 0, 0.06);
   backdrop-filter: blur(28px) saturate(180%);
   -webkit-backdrop-filter: blur(28px) saturate(180%);
@@ -102,7 +102,7 @@
 }
 
 .aa-section-label {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--muted);
   font-weight: 500;
   flex-shrink: 0;
@@ -160,7 +160,7 @@
 
 /* 书本用了更具体的选择器或内联样式时，普通规则覆盖不了，只能加 !important。 */
 .aa-css-hint {
-  font-size: 11px;
+  font-size: var(--fs-caption);
   line-height: 1.4;
   color: var(--muted);
   opacity: 0.8;
@@ -170,8 +170,8 @@
   width: 100%;
   box-sizing: border-box;
   font-family: monospace;
-  font-size: 11px;
-  border-radius: 6px;
+  font-size: var(--fs-caption);
+  border-radius: var(--r-sm);
   padding: 6px 8px;
   border: 1px solid var(--ui-border-control);
   background: var(--ui-field-bg);
@@ -187,7 +187,7 @@
 
 /* Group label outside its card. */
 .aa-group-title {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 500;
   letter-spacing: 0.02em;
   color: var(--muted);
@@ -203,7 +203,7 @@
 }
 
 .aa-detail-sub {
-  font-size: 10.5px;
+  font-size: var(--fs-caption);
   color: var(--muted);
   white-space: nowrap;
   overflow: hidden;
@@ -217,7 +217,7 @@
   justify-content: center;
   width: 24px;
   height: 24px;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   border: none;
   background: transparent;
   color: var(--muted);
@@ -248,7 +248,7 @@
   /* 固定高度：主页一屏放下，正文露出一半以上；子页同高、内部滚动。不再上拉展开。 */
   height: min(var(--aa-sheet-height), calc(var(--visual-viewport-height, 100vh) * 0.9));
   max-height: none;
-  border-radius: 20px 20px 0 0;
+  border-radius: var(--r-xl) var(--r-xl) 0 0;
   animation: aaMobileSheetIn var(--menu-open) var(--ease-emphasized);
 }
 
@@ -271,7 +271,7 @@
 .aa-sheet-handle {
   width: 36px;
   height: 5px;
-  border-radius: 3px;
+  border-radius: var(--r-xs);
   background: color-mix(in srgb, var(--fg) 22%, transparent);
 }
 
@@ -322,13 +322,13 @@
   width: 380px;
 }
 
-.app[data-touch-ui="true"] .aa-section-label { font-size: 14px; }
+.app[data-touch-ui="true"] .aa-section-label { font-size: var(--fs-emph); }
 
 
 .app[data-touch-ui="true"] .aa-css-hint,
-.app[data-touch-ui="true"] .aa-css-textarea { font-size: 13px; }
+.app[data-touch-ui="true"] .aa-css-textarea { font-size: var(--fs-body); }
 
-.app[data-touch-ui="true"] .aa-detail-sub { font-size: 12px; }
+.app[data-touch-ui="true"] .aa-detail-sub { font-size: var(--fs-caption); }
 
 /* ---- 触摸端头部：分段 Tab 收紧一档，关闭键做成同高的方块，二者顶边底边对齐；命中区用伪元素补到 48px ---- */
 
@@ -349,7 +349,8 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 12px 12px 10px;
+  /* Concentric with the panel: card radius (sm) = panel radius (lg) - this inset. */
+  padding: 8px;
 }
 
 .aa-page-body > * {
@@ -361,7 +362,7 @@
   display: flex;
   flex-direction: column;
   padding: 2px 0;
-  border-radius: 12px;
+  border-radius: var(--r-sm);
   background: var(--panel-card);
 }
 
@@ -394,7 +395,7 @@
 
 .aa-nav-label {
   flex: none;
-  font-size: 13.5px;
+  font-size: var(--fs-body);
 }
 
 .aa-nav-value {
@@ -405,7 +406,7 @@
   white-space: nowrap;
   text-align: right;
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: var(--fs-caption);
 }
 
 .aa-nav-row.is-disclosure[aria-expanded="true"] .aa-chevron,
@@ -429,7 +430,7 @@
   background: transparent;
   color: var(--muted);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 500;
   letter-spacing: 0.02em;
   cursor: pointer;
@@ -450,7 +451,7 @@
   justify-content: center;
   gap: 6px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 
 /* Every slider row shares one label/value budget, so the tracks line up. */
@@ -468,7 +469,7 @@
   flex: none;
   width: 3.6em;
   color: var(--fg);
-  font-size: 13px;
+  font-size: var(--fs-body);
   white-space: nowrap;
 }
 
@@ -480,7 +481,7 @@
   flex: none;
   width: 4.6em;
   text-align: right;
-  font-size: 13px;
+  font-size: var(--fs-body);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -498,15 +499,15 @@
   width: 32px;
   height: 40px;
   border: none;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: transparent;
   color: var(--fg);
   font-family: var(--font-reading, serif);
   cursor: pointer;
 }
 
-.aa-size-btn.is-small { font-size: 12px; }
-.aa-size-btn.is-large { font-size: 18px; }
+.aa-size-btn.is-small { font-size: var(--fs-caption); }
+.aa-size-btn.is-large { font-size: var(--fs-title); }
 
 .aa-size-btn:hover:not(:disabled) {
   background: var(--btn-tint-hover);
@@ -521,7 +522,7 @@
   padding: 0 12px 6px;
   border-top: 0 !important;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-caption);
   text-align: right;
 }
 
@@ -543,7 +544,7 @@
   background: transparent;
   color: var(--fg);
   font: inherit;
-  font-size: 13.5px;
+  font-size: var(--fs-body);
   cursor: pointer;
 }
 
@@ -551,7 +552,7 @@
   flex: 1;
   margin-right: 64px;
   text-align: center;
-  font-size: 14.5px;
+  font-size: var(--fs-emph);
   font-weight: 600;
 }
 
@@ -567,12 +568,12 @@
 }
 
 .aa-switch-name {
-  font-size: 13px;
+  font-size: var(--fs-body);
   color: var(--fg);
 }
 
 .aa-detail-warning {
-  font-size: 11px;
+  font-size: var(--fs-caption);
   line-height: 1.25;
   color: var(--color-error, #e53935);
 }
@@ -621,13 +622,13 @@
   position: fixed;
   z-index: calc(var(--z-ui-panel) - 5);
   border: 1.5px dashed var(--accent, #6366f1);
-  border-radius: 2px;
+  border-radius: var(--r-xs);
   background: color-mix(in srgb, var(--accent, #6366f1) 6%, transparent);
   pointer-events: none;
 }
 
 .app[data-touch-ui="true"] .aa-row-label,
 .app[data-touch-ui="true"] .aa-row-value,
-.app[data-touch-ui="true"] .aa-switch-name { font-size: 14px; }
-.app[data-touch-ui="true"] .aa-nav-label { font-size: 14.5px; }
-.app[data-touch-ui="true"] .aa-nav-value { font-size: 13.5px; }
+.app[data-touch-ui="true"] .aa-switch-name { font-size: var(--fs-emph); }
+.app[data-touch-ui="true"] .aa-nav-label { font-size: var(--fs-emph); }
+.app[data-touch-ui="true"] .aa-nav-value { font-size: var(--fs-body); }

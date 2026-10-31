@@ -16,7 +16,7 @@
 .cte-field-label {
   padding-left: 4px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 
 .cte-name,
@@ -33,8 +33,8 @@
 .cte-name {
   height: 34px;
   padding: 0 10px;
-  border-radius: 9px;
-  font-size: 14px;
+  border-radius: var(--r-sm);
+  font-size: var(--fs-emph);
 }
 
 .cte-name:focus-visible,
@@ -56,11 +56,11 @@
   height: 28px;
   padding: 0 9px 0 5px;
   border: 1px solid var(--panel-border);
-  border-radius: 14px;
+  border-radius: var(--r-lg);
   background: var(--panel-card);
   color: var(--fg);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   cursor: pointer;
 }
 
@@ -83,7 +83,7 @@
 .cte-card {
   display: flex;
   flex-direction: column;
-  border-radius: 12px;
+  border-radius: var(--r-md);
   background: var(--panel-card);
 }
 
@@ -106,13 +106,13 @@
 
 .cte-color-label {
   flex: 1;
-  font-size: 14px;
+  font-size: var(--fs-emph);
 }
 
 .cte-color-chip {
   width: 20px;
   height: 20px;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--fg) 18%, transparent);
 }
 
@@ -120,10 +120,10 @@
   width: 84px;
   height: 28px;
   padding: 0 8px;
-  border-radius: 7px;
+  border-radius: var(--r-sm);
   background: var(--panel-surface);
   font-family: ui-monospace, "Cascadia Mono", Menlo, monospace;
-  font-size: 12.5px;
+  font-size: var(--fs-caption);
 }
 
 .cte-swatches {
@@ -173,9 +173,9 @@
   align-items: baseline;
   gap: 4px 8px;
   padding: 8px 10px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: color-mix(in srgb, var(--accent) 8%, var(--panel-card));
-  font-size: 12.5px;
+  font-size: var(--fs-caption);
   font-variant-numeric: tabular-nums;
 }
 
@@ -196,15 +196,15 @@
 
 .cte-delete {
   color: var(--ui-danger, var(--error));
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 
 /* Touch: larger rows and targets, same order. */
-.app[data-touch-ui="true"] .cte-name { height: 44px; font-size: 15px; }
-.app[data-touch-ui="true"] .cte-hex { height: 34px; font-size: 13.5px; }
-.app[data-touch-ui="true"] .cte-color-label { font-size: 15px; }
-.app[data-touch-ui="true"] .cte-preset { height: 34px; font-size: 13px; }
+.app[data-touch-ui="true"] .cte-name { height: 44px; font-size: var(--fs-emph); }
+.app[data-touch-ui="true"] .cte-hex { height: 34px; font-size: var(--fs-body); }
+.app[data-touch-ui="true"] .cte-color-label { font-size: var(--fs-emph); }
+.app[data-touch-ui="true"] .cte-preset { height: 34px; font-size: var(--fs-body); }
 .app[data-touch-ui="true"] .cte-swatches { gap: 9px; }
 /* Round targets keep their size against the global touch minimum. */
 .app[data-touch-ui="true"] .cte .cte-swatch { width: 32px; height: 32px; min-width: 0; min-height: 0; }
-.app[data-touch-ui="true"] .cte-delete { min-height: 44px; font-size: 14px; }
+.app[data-touch-ui="true"] .cte-delete { min-height: 44px; font-size: var(--fs-emph); }

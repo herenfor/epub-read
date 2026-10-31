@@ -15,7 +15,7 @@
 
 .native-import-panel {
   width: min(92vw, 360px);
-  border-radius: 14px;
+  border-radius: var(--r-lg);
   padding: 12px 14px;
   display: flex;
   flex-direction: column;
@@ -39,7 +39,7 @@
 .native-import-title {
   min-width: 0;
   gap: 8px;
-  font-size: 13px;
+  font-size: var(--fs-body);
   font-weight: 600;
 }
 
@@ -49,7 +49,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 400;
 }
 
@@ -58,10 +58,10 @@
   width: 32px;
   height: 32px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: transparent;
   color: var(--muted);
-  font-size: 20px;
+  font-size: var(--fs-title);
   line-height: 1;
   cursor: pointer;
 }
@@ -70,12 +70,12 @@
   flex-direction: column;
   align-items: flex-start;
   gap: 4px;
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 
 .native-import-cancel-state {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 
 .native-import-actions {
@@ -86,10 +86,10 @@
   min-height: 40px;
   padding: 0 16px;
   border: 1px solid color-mix(in srgb, var(--panel-border) 80%, transparent);
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: var(--btn-tint);
   color: var(--fg);
-  font-size: 13px;
+  font-size: var(--fs-body);
   cursor: pointer;
 }
 
@@ -105,8 +105,8 @@
   min-height: 40px;
   max-width: min(92vw, 320px);
   padding: 0 14px;
-  border-radius: 999px;
-  font-size: 13px;
+  border-radius: var(--r-full);
+  font-size: var(--fs-body);
   cursor: pointer;
 }
 

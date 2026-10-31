@@ -30,7 +30,7 @@
   width: 100%;
   padding: 10px 12px;
   border: 1px solid var(--panel-border, var(--border, #d0d0d0));
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: var(--panel-bg, var(--surface, #fff));
   color: inherit;
   font: inherit;
@@ -51,18 +51,18 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 15px;
+  font-size: var(--fs-emph);
 }
 
 .progress-source-head time {
   flex: 0 0 auto;
-  font-size: 14px;
+  font-size: var(--fs-emph);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
 .progress-source-where {
-  font-size: 12.5px;
+  font-size: var(--fs-caption);
   color: var(--muted, inherit);
   opacity: 0.85;
 }
@@ -81,11 +81,11 @@
   margin-right: 14px;
   padding: 0 12px;
   border: 1px solid var(--panel-border);
-  border-radius: 9px;
+  border-radius: var(--r-sm);
   background: var(--bg);
   color: var(--accent);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--fs-body);
   font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
@@ -102,7 +102,7 @@
 
 .cloud-sync-muted {
   margin: 0;
-  font-size: 12.5px;
+  font-size: var(--fs-caption);
   line-height: 1.5;
   color: var(--muted);
 }
@@ -115,11 +115,11 @@
 }
 
 .cloud-sync-field > span {
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 
 .cloud-sync-field small {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   line-height: 1.5;
   color: var(--muted);
 }
@@ -129,11 +129,11 @@
   min-height: 38px;
   padding: 0 11px;
   border: 1px solid var(--panel-border);
-  border-radius: 9px;
+  border-radius: var(--r-sm);
   background: var(--bg);
   color: var(--fg);
   font: inherit;
-  font-size: 14px;
+  font-size: var(--fs-emph);
 }
 
 .cloud-sync-field input:focus-visible {
@@ -150,9 +150,9 @@
   flex-direction: column;
   gap: 4px;
   padding: 10px 12px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: color-mix(in srgb, var(--accent) 9%, transparent);
-  font-size: 13px;
+  font-size: var(--fs-body);
   line-height: 1.55;
 }
 
@@ -165,7 +165,7 @@
 }
 
 .cloud-sync-confirm {
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 
 .cloud-sync-error {
@@ -188,7 +188,7 @@
 }
 
 .cloud-sync-status-text strong {
-  font-size: 15px;
+  font-size: var(--fs-emph);
   font-weight: 600;
 }
 
@@ -197,7 +197,7 @@
 }
 
 .cloud-sync-status-text small {
-  font-size: 12.5px;
+  font-size: var(--fs-caption);
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
@@ -239,17 +239,17 @@
   flex-direction: column;
   gap: 1px;
   min-width: 0;
-  font-size: 13px;
+  font-size: var(--fs-body);
   overflow-wrap: anywhere;
 }
 
 .cloud-sync-sublist li small {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
 
 .app[data-touch-ui="true"] .cloud-sync-field input {
   min-height: 44px;
-  font-size: 16px;
+  font-size: var(--fs-title);
 }

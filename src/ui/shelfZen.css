@@ -34,14 +34,14 @@
   justify-content: center;
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   background: color-mix(in srgb, var(--accent, #3b82f6) 12%, transparent);
   color: var(--accent, #3b82f6);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
 .shelf-brand-title {
-  font-size: 17px;
+  font-size: var(--fs-title);
   font-weight: 700;
   letter-spacing: -0.02em;
   color: var(--fg, #1f2937);
@@ -51,10 +51,10 @@
   display: inline-flex;
   align-items: center;
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: color-mix(in srgb, var(--fg, #1f2937) 6%, transparent);
   color: var(--muted, #6b7280);
-  font-size: 11px;
+  font-size: var(--fs-caption);
   font-weight: 500;
   letter-spacing: 0.02em;
 }
@@ -67,7 +67,7 @@
   width: 320px;
   max-width: 40vw;
   height: 34px;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: var(--shelf-input-bg, rgba(0, 0, 0, 0.04));
   border: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.08));
   padding: 0 10px 0 32px;
@@ -96,13 +96,13 @@
   border: none;
   background: transparent;
   color: var(--fg, #111827);
-  font-size: 13px;
+  font-size: var(--fs-body);
   outline: none;
 }
 
 .shelf-quick-filter-input::placeholder {
   color: var(--muted, #9ca3af);
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 
 .shelf-quick-filter-clear {
@@ -143,10 +143,10 @@
   height: 32px;
   padding: 0 14px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   background: var(--accent, #2563eb);
   color: #ffffff;
-  font-size: 13px;
+  font-size: var(--fs-body);
   font-weight: 500;
   cursor: pointer;
   transition: transform 0.12s ease, background-color 0.15s ease, box-shadow 0.15s ease;
@@ -178,10 +178,10 @@
   height: 32px;
   padding: 0 12px;
   border: 1px solid var(--panel-border, rgba(0, 0, 0, 0.1));
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   background: var(--shelf-input-bg, rgba(0, 0, 0, 0.05));
   color: inherit;
-  font-size: 13px;
+  font-size: var(--fs-body);
   font-weight: 500;
   white-space: nowrap;
   cursor: pointer;
@@ -204,7 +204,7 @@
   align-items: center;
   height: 32px;
   padding: 2px;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   background: var(--shelf-input-bg, rgba(0, 0, 0, 0.05));
   border: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.08));
 }
@@ -216,7 +216,7 @@
   width: 28px;
   height: 26px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   background: transparent;
   color: var(--muted, #6b7280);
   cursor: pointer;
@@ -236,7 +236,7 @@
   justify-content: center;
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   border: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.08));
   background: var(--shelf-card-bg, #ffffff);
   color: var(--fg, #374151);
@@ -248,7 +248,7 @@
 .app .shelf-view .shelf-icon-btn-zen.shelf-density-btn {
   width: auto;
   padding: 0 12px;
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 
 @media (hover: hover) {
@@ -265,11 +265,11 @@
   gap: 5px;
   height: 32px;
   padding: 0 10px;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   border: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.08));
   background: var(--shelf-card-bg, #ffffff);
   color: var(--fg, #374151);
-  font-size: 13px;
+  font-size: var(--fs-body);
   cursor: pointer;
   transition: all 0.15s ease;
 }
@@ -294,7 +294,7 @@
   --resume-motion: 280ms;
   position: relative;
   margin-bottom: 20px;
-  border-radius: 12px;
+  border-radius: var(--r-md);
   background: color-mix(in srgb, var(--shelf-card-bg, #ffffff) 92%, var(--accent, #3b82f6) 8%);
   border: 1px solid color-mix(in srgb, var(--shelf-card-border, rgba(0, 0, 0, 0.08)) 80%, var(--accent, #3b82f6) 20%);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.03);
@@ -360,7 +360,7 @@
   width: 30px;
   height: 42px;
   overflow: hidden;
-  border-radius: 3px;
+  border-radius: var(--r-xs);
   box-shadow: 1px 2px 6px rgba(0, 0, 0, 0.14);
 }
 
@@ -386,7 +386,7 @@
   -webkit-line-clamp: 2;
   overflow: hidden;
   overflow-wrap: anywhere;
-  font-size: 14px;
+  font-size: var(--fs-emph);
   font-weight: 600;
   line-height: 1.35;
   color: var(--fg, #111827);
@@ -402,7 +402,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--muted, #6b7280);
   white-space: nowrap;
 }
@@ -418,7 +418,7 @@
   flex: 0 1 120px;
   min-width: 36px;
   height: 3px;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: color-mix(in srgb, var(--fg, #000) 9%, transparent);
   overflow: hidden;
 }
@@ -446,12 +446,12 @@
   height: 34px;
   padding: 0 14px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   background: var(--accent, #2563eb);
   /* 与展开态“继续阅读”同色：深色主题的 accent-foreground 是深色，会让收起态文字变黑。 */
   color: #ffffff;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--fs-body);
   font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
@@ -483,11 +483,11 @@
   height: 30px;
   padding: 0 12px;
   border: 1px solid color-mix(in srgb, var(--accent, #2563eb) 35%, transparent);
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   background: color-mix(in srgb, var(--accent, #2563eb) 10%, transparent);
   color: var(--accent, #2563eb);
   font: inherit;
-  font-size: 12.5px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   cursor: pointer;
 }
@@ -525,7 +525,7 @@
   background: none;
   width: 58px;
   height: 80px;
-  border-radius: 5px;
+  border-radius: var(--r-xs);
   flex-shrink: 0;
   cursor: pointer;
   overflow: hidden;
@@ -573,7 +573,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 11px;
+  font-size: var(--fs-caption);
 }
 
 .shelf-resume-tag {
@@ -581,7 +581,7 @@
   align-items: center;
   gap: 3px;
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   background: color-mix(in srgb, var(--accent, #2563eb) 14%, transparent);
   color: var(--accent, #2563eb);
   font-weight: 600;
@@ -602,7 +602,7 @@
   border: 0;
   background: none;
   font: inherit;
-  font-size: 16px;
+  font-size: var(--fs-title);
   font-weight: 700;
   color: var(--fg, #111827);
   text-align: left;
@@ -617,7 +617,7 @@
 }
 
 .shelf-resume-author {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--muted, #6b7280);
   white-space: nowrap;
   overflow: hidden;
@@ -634,7 +634,7 @@
 .shelf-resume-anchor-text {
   min-width: 0;
   overflow: hidden;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 500;
   color: color-mix(in srgb, var(--fg, #111827) 85%, transparent);
   white-space: nowrap;
@@ -645,14 +645,14 @@
   width: 140px;
   max-width: 30%;
   height: 4px;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: color-mix(in srgb, var(--fg, #000) 8%, transparent);
   overflow: hidden;
 }
 
 .shelf-resume-progress-bar {
   height: 100%;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: linear-gradient(90deg, var(--accent, #3b82f6), color-mix(in srgb, var(--accent, #3b82f6) 80%, #60a5fa));
   transition: width 0.3s ease;
 }
@@ -672,10 +672,10 @@
   height: 34px;
   padding: 0 16px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   background: var(--accent, #2563eb);
   color: #ffffff;
-  font-size: 13px;
+  font-size: var(--fs-body);
   font-weight: 600;
   cursor: pointer;
   box-shadow: 0 2px 6px color-mix(in srgb, var(--accent, #2563eb) 35%, transparent);
@@ -695,11 +695,11 @@
 }
 
 .shelf-resume-key-hint {
-  font-size: 11px;
+  font-size: var(--fs-caption);
   font-weight: 400;
   opacity: 0.8;
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   background: rgba(255, 255, 255, 0.2);
   margin-left: 2px;
 }
@@ -715,11 +715,11 @@
   gap: 5px;
   height: 34px;
   padding: 0 12px;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   border: 1px solid color-mix(in srgb, var(--accent, #2563eb) 25%, var(--shelf-card-border));
   background: var(--shelf-card-bg, #ffffff);
   color: var(--accent, #2563eb);
-  font-size: 13px;
+  font-size: var(--fs-body);
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s ease;
@@ -739,7 +739,7 @@
   width: 320px;
   max-height: 280px;
   overflow-y: auto;
-  border-radius: 12px;
+  border-radius: var(--r-md);
   background: var(--shelf-card-bg, #ffffff);
   /* 底色不透明，毛玻璃没有可见效果，只增加绘制开销。 */
   border: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.12));
@@ -757,7 +757,7 @@
 
 .shelf-more-reading-popover::-webkit-scrollbar-thumb {
   background: var(--scroll-thumb, rgba(128, 128, 128, 0.3));
-  border-radius: 999px;
+  border-radius: var(--r-full);
 }
 
 .shelf-more-reading-item {
@@ -765,7 +765,7 @@
   align-items: center;
   gap: 10px;
   padding: 8px 10px;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   cursor: pointer;
   transition: background-color 0.15s ease;
 }
@@ -781,7 +781,7 @@
 }
 
 .shelf-more-reading-item-title {
-  font-size: 13px;
+  font-size: var(--fs-body);
   font-weight: 600;
   color: var(--fg, #111827);
   white-space: nowrap;
@@ -790,7 +790,7 @@
 }
 
 .shelf-more-reading-item-meta {
-  font-size: 11px;
+  font-size: var(--fs-caption);
   color: var(--muted, #6b7280);
 }
 
@@ -800,7 +800,7 @@
   justify-content: center;
   width: 34px;
   height: 34px;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   border: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.08));
   background: var(--shelf-card-bg, #ffffff);
   color: var(--muted, #6b7280);
@@ -845,7 +845,7 @@
   align-items: center;
   gap: 4px;
   padding: 3px;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: var(--shelf-input-bg, rgba(0, 0, 0, 0.04));
   border: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.06));
 }
@@ -857,10 +857,10 @@
   height: 28px;
   padding: 0 12px;
   border: none;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: transparent;
   color: var(--muted, #6b7280);
-  font-size: 13px;
+  font-size: var(--fs-body);
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s ease;
@@ -882,10 +882,10 @@
 }
 
 .shelf-capsule-count {
-  font-size: 11px;
+  font-size: var(--fs-caption);
   opacity: 0.8;
   padding: 1px 5px;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: color-mix(in srgb, var(--fg, #000) 6%, transparent);
 }
 
@@ -906,11 +906,11 @@
   gap: 6px;
   height: 32px;
   padding: 0 12px;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   border: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.1));
   background: var(--shelf-card-bg, #ffffff);
   color: var(--fg, #374151);
-  font-size: 13px;
+  font-size: var(--fs-body);
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s ease;
@@ -936,7 +936,7 @@
   width: 240px;
   max-height: 360px;
   overflow-y: auto;
-  border-radius: 12px;
+  border-radius: var(--r-md);
   background: color-mix(in srgb, var(--shelf-card-bg, #ffffff) 94%, transparent);
   border: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.12));
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.06);
@@ -953,7 +953,7 @@
 
 .shelf-folder-popover-menu::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--fg, #000) 20%, transparent);
-  border-radius: 3px;
+  border-radius: var(--r-xs);
 }
 
 .shelf-folder-menu-item {
@@ -964,10 +964,10 @@
   width: 100%;
   padding: 7px 10px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   background: transparent;
   color: var(--fg, #1f2937);
-  font-size: 13px;
+  font-size: var(--fs-body);
   text-align: left;
   cursor: pointer;
   transition: background-color 0.15s ease;
@@ -1000,14 +1000,14 @@
 
 .shelf-folder-menu-mode-text small {
   color: var(--muted, #6b7280);
-  font-size: 11px;
+  font-size: var(--fs-caption);
   font-weight: 400;
 }
 
 .shelf-folder-menu-caption {
   padding: 6px 10px 2px;
   color: var(--muted, #6b7280);
-  font-size: 11px;
+  font-size: var(--fs-caption);
   letter-spacing: 0.04em;
 }
 
@@ -1018,10 +1018,10 @@
   width: 100%;
   padding: 7px 10px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   background: transparent;
   color: var(--accent, #2563eb);
-  font-size: 13px;
+  font-size: var(--fs-body);
   font-weight: 500;
   cursor: pointer;
   transition: background-color 0.15s ease;
@@ -1041,7 +1041,7 @@
   align-items: center;
   gap: 10px;
   padding: 4px 12px;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   background: color-mix(in srgb, var(--accent, #2563eb) 8%, var(--shelf-card-bg, #fff));
   border: 1px solid color-mix(in srgb, var(--accent, #2563eb) 20%, var(--shelf-card-border));
 }
@@ -1052,14 +1052,14 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
+  font-size: var(--fs-body);
   font-weight: 600;
   color: var(--accent, #2563eb);
 }
 
 .shelf-folder-active-count {
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 400;
   color: var(--muted, #6b7280);
 }
@@ -1070,7 +1070,7 @@
   justify-content: center;
   width: 20px;
   height: 20px;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   border: none;
   background: transparent;
   color: var(--muted, #6b7280);
@@ -1095,11 +1095,11 @@
 .shelf-sort-select-zen {
   height: 32px;
   padding: 0 28px 0 10px;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   border: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.1));
   background: var(--shelf-card-bg, #ffffff);
   color: var(--fg, #374151);
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 500;
   cursor: pointer;
   outline: none;
@@ -1147,7 +1147,7 @@
   position: relative;
   width: 100%;
   height: 100%;
-  border-radius: 5px;
+  border-radius: var(--r-xs);
   overflow: hidden;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
   display: flex !important;
@@ -1175,7 +1175,7 @@
   width: 100%;
   height: 100%;
   border: 1px solid;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1196,7 +1196,7 @@
 }
 
 .morandi-title {
-  font-size: 13px !important;
+  font-size: var(--fs-body) !important;
   font-weight: 700 !important;
   line-height: 1.35 !important;
   margin-bottom: 4px;
@@ -1209,7 +1209,7 @@
 }
 
 .morandi-creator {
-  font-size: 10px;
+  font-size: var(--fs-caption);
   opacity: 0.75;
   white-space: nowrap;
   overflow: hidden;
@@ -1264,7 +1264,7 @@
   width: 100%;
   background: var(--shelf-card-bg, #ffffff);
   border: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.08));
-  border-radius: 12px;
+  border-radius: var(--r-md);
   overflow-x: auto;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
 }
@@ -1322,7 +1322,7 @@
   border-collapse: separate;
   border-spacing: 0;
   text-align: left;
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 
 .shelf-table th {
@@ -1330,7 +1330,7 @@
   background: color-mix(in srgb, var(--fg, #000) 3%, var(--shelf-card-bg, #fff));
   border-bottom: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.08));
   color: var(--muted, #6b7280);
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   user-select: none;
 }
@@ -1379,7 +1379,7 @@
 .shelf-table-thumb-box {
   width: 32px;
   height: 44px;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   overflow: hidden;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
   flex-shrink: 0;
@@ -1400,7 +1400,7 @@
 }
 .shelf-table-folder-thumb > .shelf-cover,
 .shelf-table-folder-thumb > img {
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   overflow: hidden;
 }
 .shelf-table-folder-thumb.is-empty {
@@ -1437,7 +1437,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--muted, #6b7280);
-  font-size: 11.5px;
+  font-size: var(--fs-caption);
 }
 
 /* Book rows keep one pitch at each density: titles are bounded by the cover height. */
@@ -1500,19 +1500,19 @@
 .shelf-table-progress-track {
   flex: 1;
   height: 4px;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: color-mix(in srgb, var(--fg, #000) 8%, transparent);
   overflow: hidden;
 }
 
 .shelf-table-progress-bar {
   height: 100%;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: var(--accent, #2563eb);
 }
 
 .shelf-table-progress-text {
-  font-size: 11px;
+  font-size: var(--fs-caption);
   color: var(--muted, #6b7280);
   min-width: 30px;
   text-align: right;
@@ -1532,7 +1532,7 @@
   align-items: center;
   gap: 1px;
   padding: 6px 3px;
-  border-radius: 12px;
+  border-radius: var(--r-md);
   background: color-mix(in srgb, var(--bg, #fff) 85%, transparent);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
@@ -1548,11 +1548,11 @@
   justify-content: center;
   width: 18px;
   height: 18px;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   border: none;
   background: transparent;
   color: var(--muted, #6b7280);
-  font-size: 10px;
+  font-size: var(--fs-micro);
   font-weight: 700;
   cursor: pointer;
   padding: 0;
@@ -1584,7 +1584,7 @@
   transform: translate(-50%, -50%);
   width: 64px;
   height: 64px;
-  border-radius: 16px;
+  border-radius: var(--r-lg);
   background: rgba(0, 0, 0, 0.75);
   color: #ffffff;
   display: flex;
@@ -1630,7 +1630,7 @@
   align-items: center;
   gap: 16px;
   padding: 8px 18px;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: color-mix(in srgb, var(--shelf-card-bg, #ffffff) 92%, transparent);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
@@ -1648,7 +1648,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: var(--fs-body);
   font-weight: 600;
   color: var(--fg, #111827);
   white-space: nowrap;
@@ -1656,10 +1656,10 @@
 
 .shelf-floating-batch-badge {
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: var(--accent, #2563eb);
   color: #ffffff;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 700;
 }
 
@@ -1675,11 +1675,11 @@
   gap: 6px;
   height: 32px;
   padding: 0 12px;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   border: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.1));
   background: var(--shelf-card-bg, #ffffff);
   color: var(--fg, #374151);
-  font-size: 13px;
+  font-size: var(--fs-body);
   font-weight: 500;
   cursor: pointer;
   transition: all 0.12s ease;
@@ -1844,8 +1844,8 @@
   height: 36px;
   min-width: 48px;
   padding: 0 14px;
-  border-radius: 8px;
-  font-size: 13px;
+  border-radius: var(--r-sm);
+  font-size: var(--fs-body);
   font-weight: 500;
 }
 
@@ -1855,7 +1855,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
 }
 
 .shelf-search-row {
@@ -1867,7 +1867,7 @@
   max-width: 100% !important;
   height: 48px !important;
   min-height: 48px !important;
-  border-radius: 10px !important;
+  border-radius: var(--r-md) !important;
   padding: 0 52px 0 36px !important;
   box-sizing: border-box !important;
   position: relative !important;
@@ -1882,7 +1882,7 @@
   height: 48px !important;
   min-width: 48px !important;
   min-height: 48px !important;
-  border-radius: 8px !important;
+  border-radius: var(--r-sm) !important;
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
@@ -1912,11 +1912,11 @@
   height: 48px;
   box-sizing: border-box;
   padding: 0 14px;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   border: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.1));
   background: var(--shelf-input-bg, rgba(0, 0, 0, 0.04));
   color: var(--fg, #111827);
-  font-size: 13px;
+  font-size: var(--fs-body);
   font-weight: 600;
   cursor: pointer;
   transition: all 0.15s ease;
@@ -1934,7 +1934,7 @@
   top: calc(100% + 6px);
   left: 0;
   min-width: 160px;
-  border-radius: 14px;
+  border-radius: var(--r-lg);
   background: color-mix(in srgb, var(--panel-surface) 96%, transparent);
   border: 1px solid var(--ui-border-control);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18), 0 3px 10px rgba(0, 0, 0, 0.06);
@@ -1955,10 +1955,10 @@
   min-height: 36px;
   padding: 0 10px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   background: transparent;
   color: var(--fg, #111827);
-  font-size: 14px;
+  font-size: var(--fs-emph);
   font-weight: 500;
   cursor: pointer;
   transition: background-color 0.12s ease;
@@ -2007,7 +2007,7 @@
   box-sizing: border-box;
   padding: 0 14px;
   margin-bottom: 0;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: color-mix(in srgb, var(--accent, #2563eb) 6%, var(--shelf-card-bg, #ffffff));
   border: 1px solid color-mix(in srgb, var(--accent, #2563eb) 18%, var(--shelf-card-border, rgba(0, 0, 0, 0.08)));
 }
@@ -2022,7 +2022,7 @@
   align-items: center;
   gap: 8px;
   color: var(--fg, #1f2937);
-  font-size: 13px;
+  font-size: var(--fs-body);
   font-weight: 600;
 }
 
@@ -2036,10 +2036,10 @@
   box-sizing: border-box;
   padding: 0 10px;
   border: 1px solid color-mix(in srgb, var(--accent, #2563eb) 20%, transparent);
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   background: var(--shelf-card-bg, #ffffff);
   color: var(--accent, #2563eb);
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   cursor: pointer;
 }
@@ -2069,7 +2069,7 @@
   align-items: center;
   justify-content: center;
   padding: 0;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
 }
 
 .shelf-folder-active-menu {
@@ -2077,7 +2077,7 @@
   top: calc(100% + 4px);
   right: 0;
   min-width: 120px;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   background: var(--panel-bg, #ffffff);
   border: 1px solid var(--panel-border, rgba(0, 0, 0, 0.1));
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
@@ -2168,7 +2168,7 @@
   transform: none;
   padding: 6px;
   gap: 0;
-  border-radius: 20px;
+  border-radius: var(--r-xl);
   animation-name: shelf-batch-rise;
 }
 
@@ -2197,9 +2197,9 @@
   min-height: 58px;
   padding: 6px 2px;
   border: none;
-  border-radius: 14px;
+  border-radius: var(--r-lg);
   background: transparent;
-  font-size: 11.5px;
+  font-size: var(--fs-caption);
   line-height: 1.2;
   text-align: center;
   transition: background-color var(--motion-fast, 140ms) ease, opacity var(--motion-fast, 140ms) ease, transform 0.12s ease;
@@ -2254,7 +2254,7 @@
   align-items: center;
   gap: 10px;
   padding: 8px 10px;
-  border-radius: 18px;
+  border-radius: var(--r-xl);
   background: color-mix(in srgb, var(--shelf-card-bg, #ffffff) 94%, transparent);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
@@ -2265,7 +2265,7 @@
 
 .shelf-drag-folder-strip-label {
   flex: 0 0 auto;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--muted);
   white-space: nowrap;
 }
@@ -2287,10 +2287,10 @@
   min-height: 44px;
   max-width: 200px;
   padding: 0 14px;
-  border-radius: 12px;
+  border-radius: var(--r-md);
   border: 1.5px dashed color-mix(in srgb, var(--accent, #2563eb) 45%, transparent);
   color: var(--fg);
-  font-size: 14px;
+  font-size: var(--fs-emph);
   white-space: nowrap;
   transition: background-color var(--motion-fast, 140ms) ease, border-color var(--motion-fast, 140ms) ease;
 }
@@ -2363,7 +2363,7 @@
   gap: 2px;
   width: 288px;
   padding: 6px;
-  border-radius: 14px;
+  border-radius: var(--r-lg);
   border: 1px solid var(--ui-border-control);
   background: var(--panel-surface);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18), 0 3px 10px rgba(0, 0, 0, 0.06);
@@ -2382,7 +2382,7 @@
   gap: 12px;
   padding: 9px 10px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: transparent;
   color: var(--fg);
   font: inherit;
@@ -2415,7 +2415,7 @@
   flex: none;
   width: 34px;
   height: 34px;
-  border-radius: 9px;
+  border-radius: var(--r-sm);
   background: color-mix(in srgb, var(--accent) 13%, transparent);
   color: var(--accent);
 }
@@ -2433,13 +2433,13 @@
 }
 
 .shelf-import-menu-text strong {
-  font-size: 14px;
+  font-size: var(--fs-emph);
   font-weight: 600;
 }
 
 .shelf-import-menu-text small {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-caption);
   line-height: 1.4;
 }
 
@@ -2473,7 +2473,7 @@
   padding-top: 8px;
   border-top: 1px solid color-mix(in srgb, var(--panel-border) 70%, transparent);
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 
 /* 手机：菜单从右上角的“导入”按钮弹出，宽度不超过屏幕。 */
@@ -2516,9 +2516,9 @@
   min-height: 58px;
   padding: 6px 8px;
   border: 0;
-  border-radius: 14px;
+  border-radius: var(--r-lg);
   background: transparent;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   line-height: 1.2;
 }
 
@@ -2558,8 +2558,8 @@
   .shelf-btn-resume, .shelf-resume-continue, .shelf-confirm-primary) {
   gap: 8px;
   padding-inline: 18px;
-  border-radius: 11px;
-  font-size: 14px;
+  border-radius: var(--r-md);
+  font-size: var(--fs-emph);
 }
 
 /* Dialog actions: the primary button gets the same touch height as Cancel beside it. */
@@ -2589,7 +2589,7 @@
 .app[data-touch-ui="true"] .shelf-more-reading-open {
   height: calc(40px * var(--ui-touch-comp, 1));
   padding: 0 14px;
-  font-size: 13.5px;
+  font-size: var(--fs-body);
 }
 
 .app[data-touch-ui="true"] .shelf-more-reading-item {
@@ -2606,7 +2606,7 @@
 }
 
 .app[data-touch-ui="true"] .shelf-resume-compact-title {
-  font-size: 15px;
+  font-size: var(--fs-emph);
 }
 
 /* =========================================================================
@@ -2692,7 +2692,7 @@
   width: 100%;
   box-sizing: border-box;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   background: transparent;
   color: var(--fg);
   font: inherit;
@@ -2760,8 +2760,8 @@
 .shelf-action-error {
   margin: 4px 6px 6px;
   padding: 6px 8px;
-  border-radius: 6px;
-  font-size: 12px;
+  border-radius: var(--r-sm);
+  font-size: var(--fs-caption);
   line-height: 1.4;
   color: var(--error);
   background: color-mix(in srgb, var(--error) 10%, transparent);
@@ -2788,7 +2788,7 @@
   overflow-y: auto;
   overscroll-behavior: none;
   padding: 6px;
-  border-radius: 14px;
+  border-radius: var(--r-lg);
   border: 1px solid var(--ui-border-control);
   background: var(--panel-surface);
   color: var(--fg);
@@ -2812,7 +2812,7 @@
   padding: 6px 10px 8px;
   margin-bottom: 4px;
   border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 60%, transparent);
-  font-size: 13px;
+  font-size: var(--fs-body);
   font-weight: 600;
   line-height: 1.4;
   overflow-wrap: anywhere;
@@ -2822,7 +2822,7 @@
 .shelf-action-popover .shelf-action-item {
   min-height: 36px;
   padding: 6px 10px;
-  font-size: 13.5px;
+  font-size: var(--fs-body);
 }
 
 @media (hover: hover) {
@@ -2876,7 +2876,7 @@
   flex-direction: column;
   box-sizing: border-box;
   padding: 0 8px calc(10px + env(safe-area-inset-bottom, 0px));
-  border-radius: 16px 16px 0 0;
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
   background: var(--panel-bg);
   color: var(--fg);
   box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.18);
@@ -2909,7 +2909,7 @@
 .shelf-action-sheet-handle {
   width: 36px;
   height: 4px;
-  border-radius: 2px;
+  border-radius: var(--r-xs);
   background: color-mix(in srgb, var(--fg) 22%, transparent);
 }
 
@@ -2932,7 +2932,7 @@
   width: 40px;
   aspect-ratio: 128 / 188;
   overflow: hidden;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   background: var(--shelf-card-bg);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.16);
 }
@@ -2958,7 +2958,7 @@
   flex: 0 0 auto;
   width: 40px;
   height: 40px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: color-mix(in srgb, var(--accent) 12%, transparent);
   color: var(--accent);
 }
@@ -2975,7 +2975,7 @@
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  font-size: 15px;
+  font-size: var(--fs-emph);
   font-weight: 600;
   line-height: 1.35;
   overflow-wrap: anywhere;
@@ -2983,7 +2983,7 @@
 
 .shelf-action-head-sub {
   overflow: hidden;
-  font-size: 12.5px;
+  font-size: var(--fs-caption);
   color: var(--muted);
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -3000,8 +3000,8 @@
   min-height: 52px;
   padding: 0 14px;
   gap: 14px;
-  border-radius: 10px;
-  font-size: 15px;
+  border-radius: var(--r-md);
+  font-size: var(--fs-emph);
 }
 
 .shelf-action-sheet .shelf-action-item:active:not(:disabled) {
@@ -3106,11 +3106,11 @@
   gap: 6px;
   min-height: 34px;
   padding: 0 14px;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   border: 1px solid var(--panel-border, rgba(0, 0, 0, 0.12));
   background: transparent;
   color: var(--fg);
-  font-size: 13.5px;
+  font-size: var(--fs-body);
   font-weight: 500;
   cursor: pointer;
   transition: background 0.12s ease;
@@ -3161,12 +3161,12 @@
   min-width: 0;
   height: 34px;
   padding: 0 10px;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   border: 1px solid var(--panel-border);
   background: var(--bg);
   color: var(--fg);
   font: inherit;
-  font-size: 13.5px;
+  font-size: var(--fs-body);
 }
 
 .shelf-add-books-search:focus-visible {
@@ -3178,11 +3178,11 @@
   flex-shrink: 0;
   height: 34px;
   padding: 0 12px;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   border: 1px solid var(--panel-border);
   background: transparent;
   color: var(--fg);
-  font-size: 13px;
+  font-size: var(--fs-body);
   cursor: pointer;
 }
 
@@ -3203,7 +3203,7 @@
   gap: 10px;
   min-height: 44px;
   padding: 6px 10px;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   cursor: pointer;
 }
 
@@ -3237,12 +3237,12 @@
 }
 
 .shelf-add-books-name {
-  font-size: 13.5px;
+  font-size: var(--fs-body);
   font-weight: 500;
 }
 
 .shelf-add-books-author {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--muted);
 }
 
@@ -3252,10 +3252,10 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11.5px;
+  font-size: var(--fs-caption);
   color: var(--muted);
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: var(--btn-hover, rgba(128, 128, 128, 0.12));
 }
 
@@ -3265,14 +3265,14 @@
   border: none;
   background: transparent;
   color: var(--accent);
-  font-size: 13px;
+  font-size: var(--fs-body);
   cursor: pointer;
 }
 
 .shelf-add-books-empty,
 .shelf-add-books-note {
   margin: 10px 0 0;
-  font-size: 13px;
+  font-size: var(--fs-body);
   color: var(--muted);
 }
 
@@ -3288,7 +3288,7 @@
 
 .app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-normal-bar-zen .shelf-quick-filter-box {
   height: var(--shelf-topbar-h);
-  border-radius: 11px;
+  border-radius: var(--r-md);
   padding: 0 7px 0 40px;
 }
 
@@ -3297,7 +3297,7 @@
 }
 
 .app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-normal-bar-zen .shelf-quick-filter-input {
-  font-size: 14px;
+  font-size: var(--fs-emph);
 }
 
 .app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-normal-bar-zen .shelf-search-scope {
@@ -3307,7 +3307,7 @@
 .app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-normal-bar-zen .shelf-search-scope button {
   min-height: 32px;
   padding: 0 12px;
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 
 .app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-normal-bar-zen .shelf-view-toggle-group {
@@ -3315,7 +3315,7 @@
   height: var(--shelf-topbar-h);
   min-height: 0;
   padding: 3px;
-  border-radius: 11px;
+  border-radius: var(--r-md);
 }
 
 .app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-normal-bar-zen .shelf-view-toggle-btn {
@@ -3323,19 +3323,19 @@
   min-width: 46px;
   height: 100%;
   min-height: 0;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
 }
 
 .app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-normal-bar-zen .shelf-filter-btn {
   height: var(--shelf-topbar-h);
   gap: 8px;
   padding-inline: 18px;
-  border-radius: 11px;
-  font-size: 14px;
+  border-radius: var(--r-md);
+  font-size: var(--fs-emph);
 }
 
 .app[data-touch-ui="true"]:not([data-layout="compact"]) :is(.shelf-icon-btn-zen, .shelf-resume-toggle-btn) {
-  border-radius: 11px;
+  border-radius: var(--r-md);
 }
 
 .app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-capsule-tabs {
@@ -3343,20 +3343,20 @@
   height: calc(48px * var(--ui-touch-comp, 1));
   min-height: 0;
   padding: 3px;
-  border-radius: 11px;
+  border-radius: var(--r-md);
 }
 
 .app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-capsule-tab {
   height: 100%;
   min-height: 0;
-  border-radius: 8px;
-  font-size: 14px;
+  border-radius: var(--r-sm);
+  font-size: var(--fs-emph);
 }
 
 .app[data-touch-ui="true"]:not([data-layout="compact"]) :is(.shelf-folder-dropdown-btn, .shelf-select-btn, .shelf-sort-select-zen) {
-  border-radius: 11px;
+  border-radius: var(--r-md);
   background-color: var(--shelf-card-bg, #ffffff);
-  font-size: 14px;
+  font-size: var(--fs-emph);
 }
 
 .app[data-touch-ui="true"]:not([data-layout="compact"]) :is(.shelf-folder-dropdown-btn, .shelf-select-btn) {
@@ -3365,7 +3365,7 @@
 
 .app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-view .shelf-icon-btn-zen.shelf-density-btn {
   padding-inline: 16px;
-  font-size: 14px;
+  font-size: var(--fs-emph);
 }
 
 /* A11：从阅读器“＋”回书架挑书，挑中的书新开标签；开着的书标“已打开”。 */
@@ -3377,7 +3377,7 @@
   margin: 12px 20px 0;
   padding: 0 6px 0 16px;
   box-sizing: border-box;
-  border-radius: 12px;
+  border-radius: var(--r-md);
   background: color-mix(in srgb, var(--accent) 10%, transparent);
   color: var(--fg);
 }
@@ -3390,13 +3390,13 @@
 .shelf-tab-pick-title {
   flex: 1;
   min-width: 0;
-  font-size: 13px;
+  font-size: var(--fs-body);
   font-weight: 600;
 }
 
 .shelf-tab-pick-count {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -3414,10 +3414,10 @@
   left: 10px;
   z-index: 3;
   padding: 2px 8px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: color-mix(in srgb, var(--bg) 92%, transparent);
   color: var(--accent);
-  font-size: 11px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   line-height: 16px;
   pointer-events: none;
@@ -3427,7 +3427,7 @@
   content: var(--shelf-tab-open-badge, none);
   margin-left: 8px;
   color: var(--accent);
-  font-size: 11px;
+  font-size: var(--fs-caption);
   font-weight: 600;
 }
 
@@ -3437,5 +3437,5 @@
 }
 
 .app[data-touch-ui="true"] .shelf-tab-pick-title {
-  font-size: 14px;
+  font-size: var(--fs-emph);
 }

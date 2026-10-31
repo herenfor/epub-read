@@ -22,7 +22,7 @@
   overflow: auto;
   padding: 20px;
   border: 1px solid var(--panel-border);
-  border-radius: 16px;
+  border-radius: var(--r-lg);
   background: var(--panel-bg);
   color: var(--fg);
   box-shadow: 0 24px 64px rgba(15, 23, 42, 0.28);
@@ -38,20 +38,20 @@
 
 .cache-storage-head h2 {
   margin: 0 0 4px;
-  font-size: 18px;
+  font-size: var(--fs-title);
 }
 
 .cache-storage-head p {
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 
 .cache-storage-alert {
   margin: 10px 0;
   padding: 8px 10px;
-  border-radius: 8px;
-  font-size: 13px;
+  border-radius: var(--r-sm);
+  font-size: var(--fs-body);
   line-height: 1.5;
 }
 
@@ -73,7 +73,7 @@
 .cache-storage-loading {
   padding: 16px 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 
 .cache-storage-paths {
@@ -91,7 +91,7 @@
 
 .cache-storage-paths dt {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 
 .cache-storage-paths dd {
@@ -101,17 +101,17 @@
 .cache-storage-path {
   word-break: break-all;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   line-height: 1.5;
 }
 
 .cache-storage-restart {
   margin: 8px 0 12px;
   padding: 8px 10px;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   background: rgba(37, 99, 235, 0.08);
   color: #1d4ed8;
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 
 .cache-storage-actions {
@@ -128,24 +128,24 @@
   gap: 12px;
   margin: 16px 0 10px;
   padding: 12px;
-  border-radius: 12px;
+  border-radius: var(--r-md);
   background: rgba(148, 163, 184, 0.12);
 }
 
 .cache-storage-total span {
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 
 .cache-storage-total strong {
-  font-size: 18px;
+  font-size: var(--fs-title);
 }
 
 .cache-storage-category {
   margin-top: 12px;
   padding: 12px;
   border: 1px solid var(--panel-border);
-  border-radius: 12px;
+  border-radius: var(--r-md);
 }
 
 .cache-storage-category-head {
@@ -157,7 +157,7 @@
 
 .cache-storage-category-head h3 {
   margin: 0;
-  font-size: 15px;
+  font-size: var(--fs-emph);
 }
 
 .cache-storage-category-grid {
@@ -169,15 +169,15 @@
 
 .cache-storage-category-grid > div {
   padding: 8px;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   background: rgba(148, 163, 184, 0.1);
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 
 .cache-storage-hint {
   margin: 10px 0 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-caption);
   line-height: 1.6;
 }
 
@@ -194,6 +194,6 @@
   .cache-storage-panel {
     width: 100%;
     max-height: 88vh;
-    border-radius: 16px 16px 0 0;
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
   }
 }
