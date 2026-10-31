@@ -72,13 +72,17 @@ describe("book import host extraction", () => {
     t.store.list.mockRejectedValue(new Error("refresh unavailable"));
     try {
       await t.render();
-      let work!: Promise<void>;
+      let work!: Promise<unknown>;
       const sources = [{ kind: "path" as const, path: "a.epub", name: "a.epub" }];
       await t.dom.run(() => { work = t.current().commands.handleImportSources(sources); });
       expect(t.busy.current).toBe(true);
-      await t.dom.run(() => t.current().commands.handleImportSources(sources));
+      // A second batch while the gate is held reports that it never started.
+      await t.dom.run(async () => { expect(await t.current().commands.handleImportSources(sources)).toBeNull(); });
       expect(t.store.importPaths).toHaveBeenCalledTimes(1);
-      await t.dom.run(async () => { result.resolve({ results: [{ inputIndex: 0, status: "duplicate", record: entry("a") }] }); await work; });
+      await t.dom.run(async () => {
+        result.resolve({ results: [{ inputIndex: 0, status: "duplicate", record: entry("a") }] });
+        expect(await work).toEqual([entry("a")]);
+      });
       expect(t.current().entries.shelfEntries).toEqual([entry("a")]);
       expect(t.current().notices.shelfNotice?.kind).toBe("warn");
       expect(t.current().notices.shelfNotice?.text).toContain("refresh unavailable");
@@ -157,7 +161,7 @@ describe("book import host extraction", () => {
     try {
       await t.render();
       const sources = ["a", "b", "c"].map((id) => ({ kind: "path" as const, path: `${id}.epub`, name: `${id}.epub` }));
-      await t.dom.run(() => t.current().commands.handleImportSources(sources, { folderId: FOLDER, name: "Target" }));
+      await t.dom.run(async () => { await t.current().commands.handleImportSources(sources, { folderId: FOLDER, name: "Target" }); });
       // One write: the new book and the unclassified duplicate; "b" stays in its folder.
       expect(t.store.applyOrganization).toHaveBeenCalledTimes(1);
       expect(t.store.applyOrganization).toHaveBeenCalledWith({ type: "moveBooks", contentHashes: ["a".repeat(64), "c".repeat(64)], folderId: FOLDER });
@@ -175,10 +179,12 @@ describe("book import host extraction", () => {
     t.store.importPaths.mockResolvedValue({ results: [{ inputIndex: 0, status: "saved", record: entry("a") }] });
     try {
       await t.render();
-      await t.dom.run(() => t.current().commands.handleImportSources(
-        [{ kind: "path" as const, path: "a.epub", name: "a.epub" }],
-        { folderId: FOLDER, name: "Target" },
-      ));
+      await t.dom.run(async () => {
+        await t.current().commands.handleImportSources(
+          [{ kind: "path" as const, path: "a.epub", name: "a.epub" }],
+          { folderId: FOLDER, name: "Target" },
+        );
+      });
       expect(t.store.applyOrganization).not.toHaveBeenCalled();
       expect(t.current().notices.shelfNotice?.kind).toBe("warn");
       expect(t.current().notices.shelfNotice?.text).toContain("Target");
