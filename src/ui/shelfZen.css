@@ -17,7 +17,7 @@
   background: color-mix(in srgb, var(--bg, #ffffff) 88%, transparent);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border-bottom: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.08));
+  border-bottom: var(--hairline) solid var(--shelf-card-border, rgba(0, 0, 0, 0.08));
   transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 
@@ -37,7 +37,6 @@
   border-radius: var(--r-sm);
   background: color-mix(in srgb, var(--accent, #3b82f6) 12%, transparent);
   color: var(--accent, #3b82f6);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
 .shelf-brand-title {
@@ -150,14 +149,11 @@
   font-weight: 500;
   cursor: pointer;
   transition: transform 0.12s ease, background-color 0.15s ease, box-shadow 0.15s ease;
-  box-shadow: 0 1px 3px color-mix(in srgb, var(--accent, #2563eb) 30%, transparent);
 }
 
 @media (hover: hover) {
   .shelf-btn-primary:hover:not(:disabled) {
-    transform: translateY(-1px);
     filter: brightness(1.06);
-    box-shadow: 0 3px 8px color-mix(in srgb, var(--accent, #2563eb) 35%, transparent);
   }
 }
 
@@ -297,7 +293,6 @@
   border-radius: var(--r-md);
   background: color-mix(in srgb, var(--shelf-card-bg, #ffffff) 92%, var(--accent, #3b82f6) 8%);
   border: 1px solid color-mix(in srgb, var(--shelf-card-border, rgba(0, 0, 0, 0.08)) 80%, var(--accent, #3b82f6) 20%);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.03);
   overflow: visible;
   z-index: 10;
 }
@@ -678,15 +673,12 @@
   font-size: var(--fs-body);
   font-weight: 600;
   cursor: pointer;
-  box-shadow: 0 2px 6px color-mix(in srgb, var(--accent, #2563eb) 35%, transparent);
   transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @media (hover: hover) {
   .shelf-btn-resume:hover {
-    transform: translateY(-1px) scale(1.02);
     filter: brightness(1.08);
-    box-shadow: 0 4px 12px color-mix(in srgb, var(--accent, #2563eb) 45%, transparent);
   }
 }
 
@@ -742,7 +734,7 @@
   border-radius: var(--r-md);
   background: var(--shelf-card-bg, #ffffff);
   /* 底色不透明，毛玻璃没有可见效果，只增加绘制开销。 */
-  border: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.12));
+  border: var(--hairline) solid var(--shelf-card-border, rgba(0, 0, 0, 0.12));
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18), 0 2px 6px rgba(0, 0, 0, 0.08);
   padding: 6px;
   z-index: var(--z-ui-mobile-bar);
@@ -938,7 +930,7 @@
   overflow-y: auto;
   border-radius: var(--r-md);
   background: color-mix(in srgb, var(--shelf-card-bg, #ffffff) 94%, transparent);
-  border: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.12));
+  border: var(--hairline) solid var(--shelf-card-border, rgba(0, 0, 0, 0.12));
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.06);
   /* 底色 94% 不透明，不用毛玻璃（安卓首开省 0～2 帧）。 */
   padding: 6px;
@@ -1263,10 +1255,9 @@
 .shelf-table-view {
   width: 100%;
   background: var(--shelf-card-bg, #ffffff);
-  border: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.08));
+  border: var(--hairline) solid var(--shelf-card-border, rgba(0, 0, 0, 0.08));
   border-radius: var(--r-md);
   overflow-x: auto;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
 }
 
 /* Long lists: the table's own scrollbar is under the last book, so a bar that
@@ -1328,7 +1319,7 @@
 .shelf-table th {
   padding: 10px 14px;
   background: color-mix(in srgb, var(--fg, #000) 3%, var(--shelf-card-bg, #fff));
-  border-bottom: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.08));
+  border-bottom: var(--hairline) solid var(--shelf-card-border, rgba(0, 0, 0, 0.08));
   color: var(--muted, #6b7280);
   font-size: var(--fs-caption);
   font-weight: 600;
@@ -1352,7 +1343,7 @@
 
 .shelf-table td {
   padding: 8px 14px;
-  border-bottom: 1px solid color-mix(in srgb, var(--shelf-card-border, rgba(0, 0, 0, 0.06)) 60%, transparent);
+  border-bottom: var(--hairline) solid color-mix(in srgb, var(--shelf-card-border, rgba(0, 0, 0, 0.06)) 60%, transparent);
   color: var(--fg, #111827);
   vertical-align: middle;
 }
@@ -1536,7 +1527,7 @@
   background: color-mix(in srgb, var(--bg, #fff) 85%, transparent);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  border: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.08));
+  border: var(--hairline) solid var(--shelf-card-border, rgba(0, 0, 0, 0.08));
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
   z-index: 30;
   user-select: none;
@@ -1634,7 +1625,7 @@
   background: color-mix(in srgb, var(--shelf-card-bg, #ffffff) 92%, transparent);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.12));
+  border: var(--hairline) solid var(--shelf-card-border, rgba(0, 0, 0, 0.12));
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.08);
   z-index: var(--z-ui-mobile-bar);
   animation: shelf-batch-slide-up 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
@@ -1936,7 +1927,7 @@
   min-width: 160px;
   border-radius: var(--r-lg);
   background: color-mix(in srgb, var(--panel-surface) 96%, transparent);
-  border: 1px solid var(--ui-border-control);
+  border: var(--hairline) solid var(--ui-border-control);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18), 0 3px 10px rgba(0, 0, 0, 0.06);
   /* 底色 96% 不透明，不用毛玻璃（安卓冷启动首开会丢 7～11 帧）。 */
   z-index: var(--z-ui-popover);
@@ -2079,7 +2070,7 @@
   min-width: 120px;
   border-radius: var(--r-sm);
   background: var(--panel-bg, #ffffff);
-  border: 1px solid var(--panel-border, rgba(0, 0, 0, 0.1));
+  border: var(--hairline) solid var(--panel-border, rgba(0, 0, 0, 0.1));
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
   z-index: var(--z-ui-popover);
   padding: 4px;
@@ -2364,7 +2355,7 @@
   width: 288px;
   padding: 6px;
   border-radius: var(--r-lg);
-  border: 1px solid var(--ui-border-control);
+  border: var(--hairline) solid var(--ui-border-control);
   background: var(--panel-surface);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18), 0 3px 10px rgba(0, 0, 0, 0.06);
   transform-origin: top right;
@@ -2450,7 +2441,7 @@
   gap: 12px;
   margin-top: 4px;
   padding: 10px 10px 8px;
-  border-top: 1px solid color-mix(in srgb, var(--panel-border) 70%, transparent);
+  border-top: var(--hairline) solid color-mix(in srgb, var(--panel-border) 70%, transparent);
   color: var(--fg);
   cursor: pointer;
 }
@@ -2471,7 +2462,7 @@
 .shelf-import-menu-hint {
   margin: 4px 10px 6px;
   padding-top: 8px;
-  border-top: 1px solid color-mix(in srgb, var(--panel-border) 70%, transparent);
+  border-top: var(--hairline) solid color-mix(in srgb, var(--panel-border) 70%, transparent);
   color: var(--muted);
   font-size: var(--fs-caption);
 }
@@ -2789,7 +2780,7 @@
   overscroll-behavior: none;
   padding: 6px;
   border-radius: var(--r-lg);
-  border: 1px solid var(--ui-border-control);
+  border: var(--hairline) solid var(--ui-border-control);
   background: var(--panel-surface);
   color: var(--fg);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18), 0 3px 10px rgba(0, 0, 0, 0.06);
@@ -2811,7 +2802,7 @@
 .shelf-action-popover-title {
   padding: 6px 10px 8px;
   margin-bottom: 4px;
-  border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 60%, transparent);
+  border-bottom: var(--hairline) solid color-mix(in srgb, var(--panel-border) 60%, transparent);
   font-size: var(--fs-body);
   font-weight: 600;
   line-height: 1.4;
@@ -2916,7 +2907,7 @@
 .shelf-action-sheet-head {
   flex-shrink: 0;
   padding: 2px 10px 12px;
-  border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 60%, transparent);
+  border-bottom: var(--hairline) solid color-mix(in srgb, var(--panel-border) 60%, transparent);
   touch-action: none;
 }
 
@@ -3097,7 +3088,7 @@
   justify-content: flex-end;
   gap: 8px;
   padding: 12px 20px 16px;
-  border-top: 1px solid var(--panel-border, rgba(0, 0, 0, 0.08));
+  border-top: var(--hairline) solid var(--panel-border, rgba(0, 0, 0, 0.08));
 }
 
 .shelf-folder-modal-foot-btn {

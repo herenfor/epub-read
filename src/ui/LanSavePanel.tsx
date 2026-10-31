@@ -66,7 +66,7 @@ const Icon = {
   help: <svg {...svgProps}><circle cx="12" cy="12" r="9" /><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6M12 17h.01" /></svg>,
   send: <svg {...svgProps}><path d="M4 12 20 4l-6 16-3-7z" /></svg>,
   devices: (
-    <svg viewBox="0 0 96 48" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <svg viewBox="0 0 96 48" fill="none" stroke="currentColor" data-icon-stroke="own" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <rect x="6" y="8" width="26" height="34" rx="4" />
       <path d="M16 36h6" />
       <rect x="62" y="6" width="28" height="38" rx="4" />

@@ -8,7 +8,7 @@
   padding: 8px;
   box-sizing: border-box;
   border-radius: var(--r-md);
-  border: 1px solid var(--panel-border);
+  border: var(--hairline) solid var(--panel-border);
   background: color-mix(in srgb, var(--panel-bg, #ffffff) 94%, transparent);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);

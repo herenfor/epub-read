@@ -13,7 +13,7 @@
   z-index: var(--z-ui-bar);
   background: var(--bg);
   color: var(--fg);
-  border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 40%, transparent);
+  border-bottom: var(--hairline) solid color-mix(in srgb, var(--panel-border) 40%, transparent);
   transition: transform var(--chrome-motion) var(--ease-emphasized), opacity var(--chrome-motion) var(--ease-emphasized);
 }
 
@@ -592,7 +592,7 @@
   background: color-mix(in srgb, var(--bg) 94%, transparent);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
-  border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 45%, transparent);
+  border-bottom: var(--hairline) solid color-mix(in srgb, var(--panel-border) 45%, transparent);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
 }
 

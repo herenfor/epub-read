@@ -237,7 +237,7 @@
   gap: 2px;
   min-width: 0;
   padding: 8px 0 7px;
-  border: 1px solid var(--swatch-border);
+  border: var(--hairline) solid var(--swatch-border);
   border-radius: var(--r-sm);
   background: var(--swatch-bg);
   color: var(--swatch-fg);
@@ -264,4 +264,11 @@
 
 .app[data-touch-ui="true"] .ui-theme-card {
   font-size: var(--fs-body);
+}
+
+/* One weight for every line icon. Window glyphs, illustrations and the page-turn
+   arrow opt out with data-icon-stroke="own". */
+svg[stroke]:not([data-icon-stroke="own"]) :is(path, line, polyline, polygon, circle, rect, ellipse) {
+  vector-effect: non-scaling-stroke;
+  stroke-width: var(--icon-stroke);
 }

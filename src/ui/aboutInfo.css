@@ -56,7 +56,7 @@
 /* This version's notes open under their row, aligned with the row text. */
 .about-release-panel {
   padding: 2px 16px 14px 62px;
-  border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 60%, transparent);
+  border-bottom: var(--hairline) solid color-mix(in srgb, var(--panel-border) 60%, transparent);
   overflow-wrap: anywhere;
 }
 

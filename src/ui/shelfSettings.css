@@ -32,7 +32,7 @@
   display: flex;
   width: min(800px, 100%);
   height: min(600px, calc(100vh - 48px));
-  border: 1px solid var(--panel-border);
+  border: var(--hairline) solid var(--panel-border);
   border-radius: var(--r-lg);
   background: var(--panel-surface);
   color: var(--fg);
@@ -81,7 +81,7 @@
   padding: 18px 10px;
   box-sizing: border-box;
   background: var(--panel-bg);
-  border-right: 1px solid var(--panel-border);
+  border-right: var(--hairline) solid var(--panel-border);
 }
 
 .shelf-settings-nav-title {
@@ -237,7 +237,7 @@
   min-height: 60px;
   padding: 10px 14px;
   border: 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 60%, transparent);
+  border-bottom: var(--hairline) solid color-mix(in srgb, var(--panel-border) 60%, transparent);
   background: transparent;
   color: var(--fg);
   font: inherit;
@@ -253,7 +253,7 @@
 .shelf-settings-row-wrap {
   display: flex;
   align-items: center;
-  border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 60%, transparent);
+  border-bottom: var(--hairline) solid color-mix(in srgb, var(--panel-border) 60%, transparent);
 }
 
 .shelf-settings-row-wrap:last-child {
@@ -623,7 +623,7 @@
   max-width: calc(100vw - 16px);
   max-height: min(620px, calc(100vh - 96px));
   /* Popover shell shared with Aa and the shelf menus. */
-  border: 1px solid var(--ui-border-control);
+  border: var(--hairline) solid var(--ui-border-control);
   border-radius: var(--r-lg);
   background: var(--panel-surface);
   color: var(--fg);
@@ -815,7 +815,7 @@
 
 .shelf-filter-value-list.is-picked {
   padding-bottom: 6px;
-  border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 70%, transparent);
+  border-bottom: var(--hairline) solid color-mix(in srgb, var(--panel-border) 70%, transparent);
 }
 
 .shelf-filter-value {
@@ -899,7 +899,7 @@
   justify-content: space-between;
   gap: 10px;
   padding: 10px 16px 14px;
-  border-top: 1px solid color-mix(in srgb, var(--panel-border) 70%, transparent);
+  border-top: var(--hairline) solid color-mix(in srgb, var(--panel-border) 70%, transparent);
 }
 
 .shelf-filter-foot button {

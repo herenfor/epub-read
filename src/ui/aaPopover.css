@@ -30,7 +30,7 @@
   box-sizing: border-box;
   background: color-mix(in srgb, var(--panel-surface) 96%, transparent);
   color: var(--fg);
-  border: 1px solid var(--ui-border-control);
+  border: var(--hairline) solid var(--ui-border-control);
   border-radius: var(--r-lg);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18), 0 3px 10px rgba(0, 0, 0, 0.06);
   backdrop-filter: blur(28px) saturate(180%);
@@ -375,7 +375,7 @@
 }
 
 .aa-card > * + * {
-  border-top: 1px solid var(--ui-border-subtle);
+  border-top: var(--hairline) solid var(--ui-border-subtle);
 }
 
 .aa-nav-row {

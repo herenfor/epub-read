@@ -52,7 +52,7 @@ export function EdgeTurnZone({ direction, side, region, hint = false }: Props) {
     {/* The chevron points at its own edge; what the tap does (next / previous,
         right-to-left books, "left also forward") is in data-edge-action, not the glyph. */}
     <span className="edge-turn-arrow">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" data-icon-stroke="own" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
         <polyline points={physical === "left" ? "15 18 9 12 15 6" : "9 18 15 12 9 6"} />
       </svg>
     </span>

@@ -25,7 +25,7 @@
   width: min(440px, 100%);
   max-height: min(720px, calc(var(--visual-viewport-height, 100vh) - 48px));
   overflow: hidden;
-  border: 1px solid var(--panel-border);
+  border: var(--hairline) solid var(--panel-border);
   border-radius: var(--r-xl);
   background: var(--panel-bg);
   color: var(--fg);
@@ -44,7 +44,7 @@
   justify-content: space-between;
   gap: 12px;
   padding: 18px 16px 14px 20px;
-  border-bottom: 1px solid var(--panel-border);
+  border-bottom: var(--hairline) solid var(--panel-border);
 }
 
 .lan-head h2 {
@@ -373,7 +373,6 @@
   border-color: var(--accent);
   background: var(--accent);
   color: var(--accent-foreground);
-  box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 28%, transparent);
 }
 
 .lan-tiles.is-single .lan-tile {
@@ -434,7 +433,7 @@
 
 .lan-rows > .lan-row + .lan-help,
 .lan-rows > .lan-paste + .lan-help {
-  border-top: 1px solid color-mix(in srgb, var(--panel-border) 70%, transparent);
+  border-top: var(--hairline) solid color-mix(in srgb, var(--panel-border) 70%, transparent);
 }
 
 .lan-row {
@@ -569,7 +568,7 @@
   gap: 10px;
   margin: 0;
   padding: 12px 14px;
-  border-top: 1px solid color-mix(in srgb, var(--panel-border) 70%, transparent);
+  border-top: var(--hairline) solid color-mix(in srgb, var(--panel-border) 70%, transparent);
   background: color-mix(in srgb, var(--fg) 2.5%, transparent);
   color: var(--muted);
   font-size: var(--fs-caption);
@@ -591,7 +590,7 @@
   gap: 10px;
   margin: 2px -20px -20px;
   padding: 14px 20px 20px;
-  border-top: 1px solid color-mix(in srgb, var(--panel-border) 70%, transparent);
+  border-top: var(--hairline) solid color-mix(in srgb, var(--panel-border) 70%, transparent);
   background: var(--panel-bg);
 }
 
@@ -627,7 +626,7 @@
   padding: 14px;
   border-radius: var(--r-xl);
   background: #ffffff;
-  box-shadow: 0 0 0 1px var(--panel-border), 0 10px 30px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 0 0 1px var(--panel-border);
 }
 
 .lan-qr {
@@ -870,7 +869,7 @@
   }
 
   .lan-tile:hover:not(:disabled) {
-    box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 22%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--panel-border));
   }
 
   .lan-head-pill:hover {
