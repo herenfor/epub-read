@@ -463,31 +463,11 @@ select option {
   z-index: calc(var(--z-ui-drawer) - 10);
   /* 只压暗、不模糊：边看边调，也省一层整屏合成。 */
   background: rgba(0, 0, 0, 0.38);
-  animation: reader-panel-fade-in var(--menu-open) ease forwards;
+  animation: var(--scrim-enter);
   pointer-events: auto;
 }
 
-@keyframes reader-panel-fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-@keyframes reader-panel-fade-out {
-  from { opacity: 1; }
-  to { opacity: 0; }
-}
-
 /* ---- 面板入场方向动画（左侧、右侧、底部居中） ---- */
-@keyframes panel-float-from-bottom {
-  from {
-    opacity: 0;
-    transform: translate(-50%, 20px) scale(0.96);
-  }
-  to {
-    opacity: 1;
-    transform: translate(-50%, 0) scale(1);
-  }
-}
 
 /* 抽屉拖拽把手（移动端专属） */
 .drawer-drag-handle {
@@ -1300,9 +1280,10 @@ select option {
   -webkit-backdrop-filter: blur(24px);
   color: var(--fg);
   box-shadow: 0 24px 54px rgba(0, 0, 0, 0.35), 0 6px 18px rgba(0, 0, 0, 0.12);
-  transform: translate(-50%, 0) scale(1);
+  transform: translate(-50%, 0);
+  transform-origin: 0 50%; /* the visual center under the centering transform */
   opacity: 1;
-  animation: panel-float-from-bottom var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
+  animation: var(--dialog-enter);
   pointer-events: auto;
   overflow: hidden;
   box-sizing: border-box;
@@ -2151,12 +2132,12 @@ select option {
   -webkit-backdrop-filter: blur(20px);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22);
   transform-origin: top center;
-  animation: shelf-pop-in var(--popover-open) cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: var(--popover-enter);
   will-change: transform, opacity;
 }
 
 .shelf-select-pop.closing {
-  animation: shelf-pop-out var(--popover-close) cubic-bezier(0.4, 0, 1, 1) forwards;
+  animation: var(--popover-exit);
   pointer-events: none;
 }
 
@@ -2849,7 +2830,7 @@ select option {
   box-shadow: 0 14px 36px rgba(0, 0, 0, 0.22), 0 3px 10px rgba(0, 0, 0, 0.08);
   pointer-events: none;
   user-select: none;
-  animation: bookmark-toast-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: var(--toast-enter);
   will-change: transform, opacity;
 }
 
@@ -2886,10 +2867,10 @@ select option {
   outline: none;
 }
 
-/* A17：缩回与进场对称（往下收、缩小、淡出），时长同 BOOKMARK_TOAST_EXIT_MS。 */
+/* 提示类退场：淡出，短于 BOOKMARK_TOAST_EXIT_MS。 */
 .reader-bookmark-toast.is-closing {
   pointer-events: none;
-  animation: bookmark-toast-out 0.22s cubic-bezier(0.4, 0, 1, 1) forwards;
+  animation: var(--toast-exit);
 }
 
 .reader-bookmark-toast .bookmark-toast-icon {
@@ -2907,28 +2888,6 @@ select option {
 
 .reader-bookmark-toast.remove .bookmark-toast-icon {
   color: var(--muted);
-}
-
-@keyframes bookmark-toast-in {
-  from {
-    opacity: 0;
-    transform: translate(-50%, 14px) scale(0.94);
-  }
-  to {
-    opacity: 1;
-    transform: translate(-50%, 0) scale(1);
-  }
-}
-
-@keyframes bookmark-toast-out {
-  from {
-    opacity: 1;
-    transform: translate(-50%, 0) scale(1);
-  }
-  to {
-    opacity: 0;
-    transform: translate(-50%, 14px) scale(0.9);
-  }
 }
 
 /* 弹窗在输入法以上的可见区内居中：触摸端输入法覆盖页面而不缩小布局视口，
@@ -3220,7 +3179,7 @@ select option {
   color: var(--fg);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18), 0 3px 10px rgba(0, 0, 0, 0.06);
   opacity: 1;
-  animation: aaPopoverFadeIn var(--menu-open) var(--ease-emphasized);
+  animation: var(--popover-enter);
   pointer-events: auto;
   overflow: hidden;
   box-sizing: border-box;
@@ -3281,6 +3240,7 @@ select option {
   position: fixed;
   top: 50%;
   left: 50%;
+  transform-origin: 0 0; /* the visual center under translate(-50%, -50%) */
   transform: translate(-50%, -50%);
   z-index: calc(var(--z-ui-panel) + 10);
   width: min(680px, calc(100vw - 32px));
@@ -3296,7 +3256,7 @@ select option {
   color: var(--fg);
   box-shadow: 0 28px 72px rgba(0, 0, 0, 0.38), 0 8px 24px rgba(0, 0, 0, 0.16);
   opacity: 1;
-  animation: spotlight-zoom-in var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
+  animation: var(--dialog-enter);
   pointer-events: auto;
   overflow: hidden;
   box-sizing: border-box;
@@ -3304,17 +3264,6 @@ select option {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   zoom: var(--ui-scale, 1);
-}
-
-@keyframes spotlight-zoom-in {
-  from {
-    opacity: 0;
-    transform: translate(-50%, calc(-50% - 16px)) scale(0.96);
-  }
-  to {
-    opacity: 1;
-    transform: translate(-50%, -50%) scale(1);
-  }
 }
 
 .search-head {
@@ -3710,7 +3659,7 @@ select option {
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   zoom: var(--ui-scale, 1);
-  animation: aaPopoverFadeIn var(--popover-open) cubic-bezier(0.16, 1, 0.3, 1);
+  animation: var(--popover-enter);
 }
 .reader-context-menu button {
   border: 0;
@@ -3823,21 +3772,11 @@ select option {
     max-height: 82vh !important;
     height: auto !important;
     border-radius: var(--r-xl) !important;
-    transform: translateY(24px) scale(0.96) !important;
-    animation: panel-sheet-up var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+    transform: none !important;
+    transform-origin: 50% 50%;
+    animation: var(--dialog-enter) !important;
   }
   .note-composer { width: calc(100vw - 20px); }
-}
-
-@keyframes panel-sheet-up {
-  from {
-    opacity: 0;
-    transform: translateY(24px) scale(0.96);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
 }
 
 .font-empty {
@@ -4611,11 +4550,11 @@ select option {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  animation: shelf-folder-backdrop-fade-in var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
+  animation: var(--scrim-enter);
 }
 
 .shelf-folder-modal-backdrop.closing {
-  animation: shelf-folder-backdrop-fade-out var(--menu-close) cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: var(--scrim-exit);
   pointer-events: none;
 }
 
@@ -4633,7 +4572,7 @@ select option {
   overflow: hidden;
   scrollbar-width: none;
   -ms-overflow-style: none;
-  animation: shelf-folder-modal-expand var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
+  animation: var(--dialog-enter);
   transform-origin: center center;
 }
 
@@ -4644,7 +4583,7 @@ select option {
 }
 
 .shelf-folder-modal-backdrop.closing .shelf-folder-modal {
-  animation: shelf-folder-modal-shrink var(--menu-close) cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: var(--dialog-exit);
 }
 
 .shelf-folder-modal-head {
@@ -4796,38 +4735,6 @@ select option {
   color: var(--muted);
   font-size: var(--fs-body);
   text-align: center;
-}
-
-@keyframes shelf-folder-backdrop-fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-@keyframes shelf-folder-backdrop-fade-out {
-  from { opacity: 1; }
-  to { opacity: 0; }
-}
-
-@keyframes shelf-folder-modal-expand {
-  from {
-    opacity: 0;
-    transform: scale(0.72) translateY(14px);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-  }
-}
-
-@keyframes shelf-folder-modal-shrink {
-  from {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-  }
-  to {
-    opacity: 0;
-    transform: scale(0.72) translateY(14px);
-  }
 }
 
 /* ---- 第三步：手机/平板外壳安全区只扣一次；覆盖工具栏不进入 EPUB 几何 ---- */
@@ -5272,7 +5179,7 @@ select option {
   border-radius: var(--r-xl) var(--r-xl) 0 0;
   box-shadow: 0 -16px 40px rgba(0, 0, 0, 0.2);
   /* 同搜索面板：底色 96% 不透明，不用毛玻璃（切后台回来首开会丢 9～16 帧）。 */
-  animation: aaMobileSheetIn var(--menu-open) var(--ease-emphasized);
+  animation: var(--sheet-enter);
 }
 
 /* 平板等宽屏：底部弹层不横贯整屏，居中限宽。 */
@@ -5591,12 +5498,8 @@ select option {
   height: auto;
   border-radius: var(--r-xl);
   transform: none;
-  animation: mobile-log-sheet-up var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-
-@keyframes mobile-log-sheet-up {
-  from { transform: translateY(100%); }
-  to { transform: none; }
+  --sheet-y: calc(100% + 12px + env(safe-area-inset-bottom, 0px));
+  animation: var(--sheet-enter);
 }
 
 .app[data-mobile-chrome="true"] .log-panel .tb-close {
@@ -5708,11 +5611,23 @@ select option {
   --ui-toggle: 80ms;
   --ui-scrollbar: 120ms;
   --ui-dock: 0ms;
-  /* Pages only fade: no scale either way. */
+  /* Every kind only fades, in 120ms: no scale, no travel. */
   --page-in: 120ms;
   --page-out: 120ms;
   --page-lift: 1;
   --page-under: 1;
+  --dialog-in: 120ms;
+  --dialog-out: 120ms;
+  --dialog-from: 1;
+  --dialog-to: 1;
+  --popover-from: 1;
+  --popover-travel: 0px;
+  --sheet-in: 120ms;
+  --sheet-travel: 0;
+  --toast-in: 120ms;
+  --toast-out: 120ms;
+  --toast-travel: 0px;
+  --scrim-in: 120ms;
 }
 
 /* [F5] 低特效（界面动画→简化）：界面毛玻璃一律改用面板自身底色（各面板底色
@@ -5768,6 +5683,13 @@ select option {
     --page-out: 0ms;
     --page-lift: 1;
     --page-under: 1;
+    --motion-defer: 0ms;
+    --dialog-in: 0ms;
+    --dialog-out: 0ms;
+    --sheet-in: 0ms;
+    --toast-in: 0ms;
+    --toast-out: 0ms;
+    --scrim-in: 0ms;
   }
 }
 
@@ -5781,13 +5703,8 @@ select option {
   -webkit-backdrop-filter: none;
 }
 
-.menu-backdrop {
-  animation-duration: var(--menu-open);
-  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
-}
-
 .app:has(.aa-popover.is-closing) .menu-backdrop {
-  animation: reader-panel-fade-out var(--menu-close) ease forwards;
+  animation: var(--scrim-exit);
   pointer-events: none;
 }
 
@@ -5814,8 +5731,8 @@ select option {
   height: min(var(--aa-sheet-height, 404px), calc(var(--visual-viewport-height, 100vh) * 0.9)) !important;
   max-height: none !important;
   border-radius: var(--r-xl) var(--r-xl) 0 0 !important;
-  transform: none !important;
-  animation: aaMobileSheetIn var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1) !important;
+  transform: none; /* drag-to-close moves it inline */
+  animation: var(--sheet-enter) !important;
   gap: 6px;
   padding-bottom: 12px;
 }
@@ -6160,10 +6077,10 @@ select option {
   max-height: none;
   border-radius: var(--r-xl) var(--r-xl) 0 0;
   border-bottom: none;
-  /* 不再居中；桌面自由移动在手机不接（SearchPanel 按布局分流），transform 只归底部面板把手
-     （useSheetDrag 内联位移），进出场用独立的 translate 属性，两者不抢同一属性。 */
+  /* 不再居中；桌面自由移动在手机不接（SearchPanel 按布局分流）。进出场是抽屉类，动 transform；
+     拖动把手时 useSheetDrag 读出当前位置、取消入场动画再接管内联位移。 */
   transform: none;
-  animation: menuSheetIn var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
+  animation: var(--sheet-enter);
 }
 
 .app[data-mobile-chrome="true"] .search-panel {
@@ -6174,35 +6091,19 @@ select option {
   display: none;
 }
 
-/* ---- 搜索与“更多”退场：与其他菜单同为 --menu-close ---- */
-@keyframes menuSheetIn {
-  from { translate: 0 100%; }
-  to { translate: 0 0; }
-}
-
-@keyframes menuSheetOut {
-  from { translate: 0 0; }
-  to { translate: 0 100%; }
-}
-
-@keyframes spotlight-zoom-out {
-  from { opacity: 1; scale: 1; }
-  to { opacity: 0; scale: 0.96; }
-}
-
 .search-backdrop.is-closing,
 .mobile-more-backdrop.is-closing {
   pointer-events: none;
-  animation: reader-panel-fade-out var(--menu-close) ease forwards;
+  animation: var(--scrim-exit);
 }
 
 .search-panel.is-closing {
   pointer-events: none;
-  animation: spotlight-zoom-out var(--menu-close) var(--ease-exit) forwards !important;
+  animation: var(--dialog-exit) !important;
 }
 
 .app[data-mobile-chrome="true"][data-layout="compact"] .search-panel.is-closing {
-  animation: menuSheetOut var(--menu-close) ease forwards !important;
+  animation: var(--sheet-exit) !important;
 }
 
 /* PC：搜索停靠在右侧，边看结果边看正文；不居中、不可拖动，内容留出左右边距。 */
@@ -6216,7 +6117,9 @@ select option {
   height: auto;
   padding: 0 16px 16px;
   border-radius: var(--r-xl);
-  animation: panel-float-from-right var(--menu-open) var(--ease-emphasized);
+  --sheet-x: calc(100% + 24px);
+  --sheet-y: 0px;
+  animation: var(--sheet-enter);
 }
 
 .search-panel.is-docked .search-head {
@@ -6230,7 +6133,7 @@ select option {
 }
 
 .search-panel.is-docked.is-closing {
-  animation: panel-float-out-right var(--menu-close) var(--ease-exit) forwards !important;
+  animation: var(--sheet-exit) !important;
 }
 
 /* 停靠时遮罩不压暗正文，只负责点外关闭。 */
@@ -6242,11 +6145,11 @@ select option {
 
 .mobile-more-sheet.is-closing {
   pointer-events: none;
-  animation: aaMobileSheetOut var(--menu-close) ease forwards;
+  animation: var(--sheet-exit);
 }
 
 .mobile-more-backdrop {
-  animation: reader-panel-fade-in var(--menu-open) ease;
+  animation: var(--scrim-enter);
 }
 
 .shelf-folder-name-hint {

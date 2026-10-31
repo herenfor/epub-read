@@ -6,13 +6,13 @@
   gap: 6px;
   max-width: calc(100vw - 24px);
   pointer-events: none;
-  animation: reader-return-in var(--motion-base, 200ms) var(--ease-emphasized, ease-out);
+  animation: var(--toast-enter);
 }
 
 .reader-return.is-phone {
   left: 50%;
   bottom: calc(env(safe-area-inset-bottom, 0px) + 20px);
-  translate: -50% 0;
+  transform: translateX(-50%); /* the toast's rise animates translate */
 }
 
 .reader-return.is-phone.is-raised {
@@ -66,15 +66,3 @@
   outline-offset: 2px;
 }
 
-@keyframes reader-return-in {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: none; }
-}
-
-:root[data-motion="reduced"] .reader-return {
-  animation: none;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .reader-return { animation: none; }
-}

@@ -3,6 +3,83 @@
  * way in and out come from the kind. Tokens live in uiTokens.css, and the
  * reduced level (:root[data-motion="reduced"]) rewrites them in styles.css.
  *
+ * A component attaches a kind with `animation: var(--dialog-enter)` and, in
+ * its closing state, `animation: var(--dialog-exit)`; it never writes its own
+ * keyframes. Direction is the only per-component setting:
+ *   popover  --popover-side: -1 opens below its button (default), 1 above.
+ *   sheet    --sheet-x / --sheet-y: where it rests off screen (default 0px 100%).
+ *   toast    --toast-side: 1 rises from below (default), -1 drops from above.
+ *
+ * Every entrance waits --motion-defer: the panel's first frame is drawn (still
+ * transparent) before it starts to move, so the expensive first paint does not
+ * eat the opening frames. panelPaintWarmup still draws panels ahead of time.
+ *
+ * Dialogs, popovers and toasts animate the individual opacity / scale /
+ * translate properties, so a component's own centering transform is untouched.
+ * Sheets animate transform, which drag-to-close (sheetDrag.ts) reads and takes over.
+ */
+
+:root {
+  --dialog-enter: dialog-in var(--dialog-in) var(--ease-emphasized) var(--motion-defer) both;
+  --dialog-exit: dialog-out var(--dialog-out) var(--ease-exit) forwards;
+  --popover-enter: popover-in var(--popover-in) var(--ease-emphasized) var(--motion-defer) both;
+  --popover-exit: motion-fade-out var(--popover-out) var(--ease-exit) forwards;
+  --sheet-enter: sheet-in var(--sheet-in) var(--ease-emphasized) var(--motion-defer) both;
+  --sheet-exit: sheet-out var(--sheet-out) var(--ease-exit) forwards;
+  --toast-enter: toast-in var(--toast-in) var(--ease-emphasized) var(--motion-defer) both;
+  --toast-exit: motion-fade-out var(--toast-out) var(--ease-exit) forwards;
+  /* The dimmed layer behind a dialog or sheet. */
+  --scrim-enter: motion-fade-in var(--scrim-in) var(--ease-standard) var(--motion-defer) both;
+  --scrim-exit: motion-fade-out var(--scrim-out) var(--ease-exit) forwards;
+}
+
+@keyframes motion-fade-in {
+  from { opacity: 0; }
+}
+
+@keyframes motion-fade-out {
+  to { opacity: 0; }
+}
+
+/* Dialog: centered or free-floating panel, not tied to a button. */
+@keyframes dialog-in {
+  from { opacity: 0; scale: var(--dialog-from); }
+}
+
+@keyframes dialog-out {
+  to { opacity: 0; scale: var(--dialog-to); }
+}
+
+/* Popover: grows out of its button (each popover sets transform-origin there). */
+@keyframes popover-in {
+  from {
+    opacity: 0;
+    translate: 0 calc(var(--popover-side, -1) * var(--popover-travel));
+    scale: var(--popover-from);
+  }
+}
+
+/* Sheet: slides in from a screen edge. At the reduced level it only fades. */
+@keyframes sheet-in {
+  from {
+    opacity: var(--sheet-travel); /* 1: no fade; 0 at the reduced level: fade only */
+    transform: translate(calc(var(--sheet-x, 0px) * var(--sheet-travel)), calc(var(--sheet-y, 100%) * var(--sheet-travel)));
+  }
+}
+
+@keyframes sheet-out {
+  to {
+    opacity: var(--sheet-travel); /* 1: no fade; 0 at the reduced level: fade only */
+    transform: translate(calc(var(--sheet-x, 0px) * var(--sheet-travel)), calc(var(--sheet-y, 100%) * var(--sheet-travel)));
+  }
+}
+
+/* Toast: short notice that rises into place. */
+@keyframes toast-in {
+  from { opacity: 0; translate: 0 calc(var(--toast-side, 1) * var(--toast-travel)); }
+}
+
+/*
  * Full-screen page: forward, the new page arrives from slightly larger while
  * the one beneath steps back; back, the top page lifts away and the one
  * beneath returns. Used by the reader opening veil, back to the library

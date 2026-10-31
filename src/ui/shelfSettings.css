@@ -19,7 +19,7 @@
   position: absolute;
   inset: 0;
   background: rgba(15, 23, 42, 0.42);
-  animation: shelf-settings-fade-in var(--menu-open) ease both;
+  animation: var(--scrim-enter);
 }
 
 .shelf-settings-window {
@@ -33,7 +33,7 @@
   color: var(--fg);
   box-shadow: 0 24px 60px rgba(20, 20, 30, 0.22);
   overflow: hidden;
-  animation: shelf-settings-pop-in var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: var(--dialog-enter);
 }
 
 /* 阅读器内的“阅读设置”：盖在阅读工具栏和“更多”弹层之上。 */
@@ -63,9 +63,12 @@
   max-height: min(720px, calc(100vh - 48px));
 }
 
-.shelf-settings-layer.is-closing .shelf-settings-backdrop,
+.shelf-settings-layer.is-closing .shelf-settings-backdrop {
+  animation: var(--scrim-exit);
+}
+
 .shelf-settings-layer.is-closing .shelf-settings-window {
-  animation: shelf-settings-fade-out var(--menu-close) ease both;
+  animation: var(--dialog-exit);
 }
 
 .shelf-settings-nav {
@@ -223,7 +226,6 @@
   align-items: stretch;
 }
 
-
 .shelf-settings-row {
   display: flex;
   align-items: center;
@@ -332,7 +334,6 @@
   flex-wrap: wrap;
   gap: 8px;
 }
-
 
 /* A group: its label (and an optional text action) outside one card. */
 .shelf-settings-section,
@@ -609,7 +610,7 @@
 
 .shelf-filter-layer.is-sheet .shelf-filter-backdrop {
   background: rgba(15, 23, 42, 0.42);
-  animation: shelf-settings-fade-in var(--menu-open) ease both;
+  animation: var(--scrim-enter);
 }
 
 .shelf-filter-panel {
@@ -626,12 +627,15 @@
   color: var(--fg);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18), 0 3px 10px rgba(0, 0, 0, 0.06);
   overflow: hidden;
-  animation: shelf-filter-drop-in var(--popover-open) cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: var(--popover-enter);
 }
 
-.shelf-filter-layer.is-closing .shelf-filter-panel,
+.shelf-filter-layer.is-closing .shelf-filter-panel {
+  animation: var(--popover-exit);
+}
+
 .shelf-filter-layer.is-closing .shelf-filter-backdrop {
-  animation: shelf-settings-fade-out var(--menu-close) ease both;
+  animation: var(--scrim-exit);
 }
 
 .shelf-filter-layer.is-sheet .shelf-filter-panel {
@@ -644,11 +648,11 @@
   border-radius: var(--r-xl) var(--r-xl) 0 0;
   border-bottom: 0;
   padding-bottom: env(safe-area-inset-bottom, 0px);
-  animation: shelf-filter-sheet-up var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: var(--sheet-enter);
 }
 
 .shelf-filter-layer.is-sheet.is-closing .shelf-filter-panel {
-  animation: shelf-filter-sheet-down var(--menu-close) ease both;
+  animation: var(--sheet-exit);
 }
 
 .shelf-filter-grip {
@@ -944,7 +948,7 @@
   background: var(--bg);
   color: var(--fg);
   box-shadow: 0 18px 40px rgba(20, 20, 30, 0.16), 0 2px 6px rgba(20, 20, 30, 0.06);
-  animation: shelf-filter-drop-in var(--popover-open) cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: var(--popover-enter);
 }
 
 .shelf-body-search-status {
@@ -1023,10 +1027,4 @@
   padding: 4px 16px 20px;
 }
 
-@keyframes shelf-settings-fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes shelf-settings-pane-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-@keyframes shelf-settings-fade-out { from { opacity: 1; } to { opacity: 0; } }
-@keyframes shelf-settings-pop-in { from { opacity: 0; transform: translateY(8px) scale(0.98); } to { opacity: 1; transform: none; } }
-@keyframes shelf-filter-drop-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
-@keyframes shelf-filter-sheet-up { from { transform: translateY(100%); } to { transform: none; } }
-@keyframes shelf-filter-sheet-down { from { transform: none; } to { transform: translateY(100%); } }

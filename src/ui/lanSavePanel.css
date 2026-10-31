@@ -11,11 +11,11 @@
   background: rgba(15, 23, 42, 0.42);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  animation: lan-fade-in var(--menu-open, 440ms) cubic-bezier(0.16, 1, 0.3, 1);
+  animation: var(--scrim-enter);
 }
 
 .lan-backdrop.is-closing {
-  animation: lan-fade-out var(--menu-close, 200ms) cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  animation: var(--scrim-exit);
   pointer-events: none;
 }
 
@@ -31,11 +31,11 @@
   color: var(--fg);
   font-family: var(--font-ui);
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.28);
-  animation: lan-pop-in var(--menu-open, 440ms) cubic-bezier(0.16, 1, 0.3, 1);
+  animation: var(--dialog-enter);
 }
 
 .lan-backdrop.is-closing .lan-panel {
-  animation: lan-pop-out var(--menu-close, 200ms) cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  animation: var(--dialog-exit);
 }
 
 .lan-head {
@@ -326,7 +326,7 @@
   padding: 2px 4px 12px 44px;
   color: var(--muted);
   font-size: var(--fs-body);
-  animation: lan-fade-in var(--motion-base, 220ms) ease;
+  animation: motion-fade-in var(--motion-base) var(--ease-standard);
 }
 
 .lan-help ul {
@@ -494,7 +494,7 @@
 
 .lan-rows .lan-paste {
   margin: 0 0 10px;
-  animation: lan-fade-in var(--motion-base, 220ms) ease;
+  animation: motion-fade-in var(--motion-base) var(--ease-standard);
 }
 
 /* ---------- header status (connected) ---------- */
@@ -856,7 +856,6 @@
     background: var(--btn-tint);
   }
 
-
   .lan-row:hover:not(:disabled),
   .lan-help summary.lan-row:hover {
     background: var(--menu-surface);
@@ -886,11 +885,11 @@
     border-width: 1px 0 0;
     border-radius: var(--r-xl) var(--r-xl) 0 0;
     padding-bottom: env(safe-area-inset-bottom, 0px);
-    animation-name: lan-sheet-in;
+    animation: var(--sheet-enter);
   }
 
   .lan-backdrop.is-closing .lan-panel {
-    animation-name: lan-sheet-out;
+    animation: var(--sheet-exit);
   }
 
   .lan-head {
@@ -919,12 +918,6 @@
   }
 }
 
-@keyframes lan-fade-in { from { opacity: 0; } to { opacity: 1; } }
-@keyframes lan-fade-out { from { opacity: 1; } to { opacity: 0; } }
-@keyframes lan-pop-in { from { opacity: 0; transform: scale(0.96) translateY(8px); } to { opacity: 1; transform: none; } }
-@keyframes lan-pop-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: scale(0.97) translateY(6px); } }
-@keyframes lan-sheet-in { from { transform: translateY(100%); } to { transform: none; } }
-@keyframes lan-sheet-out { from { transform: none; } to { transform: translateY(100%); } }
 @keyframes lan-spin { to { transform: rotate(360deg); } }
 @keyframes lan-pulse { 0%, 100% { opacity: 0.35; transform: scale(0.85); } 50% { opacity: 1; transform: scale(1); } }
 @keyframes lan-indeterminate { from { transform: translateX(-100%); } to { transform: translateX(280%); } }
