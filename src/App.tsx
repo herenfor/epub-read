@@ -141,7 +141,11 @@ import {
   useShelfContentHashes, useShelfLibrary, useShelfOrganizationActions,
   useShelfDeletion, useShelfNoticeLifetime,
 } from "./ui/useShelfLibrary";
-import { useBookImportState, useBookImport, useFolderImport, type ImportFolderTarget } from "./ui/useBookImport";
+import { displayNameFromContentUri, useBookImportState, useBookImport, useFolderImport, type ImportFolderTarget } from "./ui/useBookImport";
+import { useExternalOpen } from "./ui/useExternalOpen";
+import type { ExternalOpenOutcome } from "./ui/externalOpenPump";
+import type { ExternalOpenRequest } from "./platform/externalOpenBridge";
+import { ExternalOpenFailureDialog } from "./ui/ExternalOpenFailureDialog";
 import { ReaderReadingSettings, SettingsSwitch } from "./ui/ReadingSettings";
 import { ChevronRightIcon } from "./ui/readerIcons";
 import { NativeImportPanel } from "./ui/NativeImportPanel";
@@ -1311,7 +1315,7 @@ export default function App() {
     []
   );
 
-  const { handleImportSources, handleFileInputSources, handleCancelNativeImport, handleToggleNativeImportCollapsed, reimportAndroidMissing, handleChooseBooks } = useBookImport({
+  const { handleImportSources, handleFileInputSources, handleCancelNativeImport, handleToggleNativeImportCollapsed, reimportAndroidMissing, handleChooseBooks, importExternalSource } = useBookImport({
     importState: bookImportState,
     runtime, isTauriEnv, fileInputRef, shelfBusyRef, shelfEntriesRef,
     contentHashByIdRef, entryByContentHashRef, setShelfEntries, setShelfNotice, setOrganization,
@@ -4451,6 +4455,49 @@ export default function App() {
     if (tabPick) pendingNewTabRef.current = id;
     void handleShelfOpen(id);
   }, [handleShelfOpen, tabPick]);
+
+  // ---- 系统“打开方式”/文件关联交来的书：一次一本，导入后按普通开书打开 ----
+  /** The request's imported book, kept until the shelf has rendered it. */
+  const externalOpenTargetRef = useRef<{ requestId: string; entryId: string } | null>(null);
+  const processExternalOpen = useCallback(async (request: ExternalOpenRequest): Promise<ExternalOpenOutcome> => {
+    if (libraryLoad.status !== "ready" || shelfBusyRef.current || nativeImportRef.current || saveFailurePromptRef.current) {
+      return "wait";
+    }
+    if (viewRef.current === "reader") {
+      // The usual save guard. If it blocks and the user stays, they decide on the
+      // request afterwards instead of being pulled out of the book again.
+      return (await leaveReader(false)) ? "wait" : "failed";
+    }
+    const stashed = externalOpenTargetRef.current;
+    let entryId = stashed?.requestId === request.requestId ? stashed.entryId : null;
+    if (entryId === null) {
+      const entries = await importExternalSource(request.source);
+      if (entries === null) return "wait";
+      const [entry] = entries;
+      if (!entry) return "failed";
+      externalOpenTargetRef.current = { requestId: request.requestId, entryId: entry.id };
+      entryId = entry.id;
+    }
+    // handleShelfOpen finds the book in the rendered shelf: the import's render
+    // has not landed yet, so open on the pass its state change kicks.
+    if (!shelfEntriesRef.current.some((item) => item.id === entryId)) return "wait";
+    externalOpenTargetRef.current = null;
+    const before = activeSessionRef.current;
+    await handleShelfOpen(entryId);
+    return activeSessionRef.current !== null && activeSessionRef.current !== before ? "opened" : "failed";
+  }, [handleShelfOpen, importExternalSource, leaveReader, libraryLoad.status, nativeImportRef]);
+  const externalOpen = useExternalOpen({
+    platform: !isTauriEnv() ? null
+      : runtime.platform === "android" ? "android"
+        : runtime.platform === "windows" || runtime.platform === "macos" || runtime.platform === "linux" ? "desktop"
+          : null,
+    process: processExternalOpen,
+    onError: (error) => setShelfNotice({ kind: "error", text: uiText("notice.externalOpen.failed", { error: String(error) }) }),
+  });
+  const kickExternalOpen = externalOpen.kick;
+  useEffect(() => {
+    kickExternalOpen();
+  }, [kickExternalOpen, libraryLoad.status, shelfBusy, nativeImport, view, saveFailurePrompt, shelfEntries]);
   const shelfReaderTabs = useMemo(() => {
     if (!readerTabsVisible) return undefined;
     const group = activeReaderTabs(readerTabs);
@@ -6394,6 +6441,16 @@ export default function App() {
             </button>
           </div>
         </div>
+      )}
+      {externalOpen.failed && !saveFailurePrompt && (
+        <ExternalOpenFailureDialog
+          fileName={externalOpen.failed.fileName
+            ?? (externalOpen.failed.source.kind === "path"
+              ? externalOpen.failed.source.path.split(/[\\/]/).pop() || externalOpen.failed.source.path
+              : displayNameFromContentUri(externalOpen.failed.source.uri))}
+          onRetry={externalOpen.retry}
+          onClose={externalOpen.dismiss}
+        />
       )}
       {saveFailurePrompt && (
         <SaveFailureDialog

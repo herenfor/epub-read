@@ -5,6 +5,7 @@ import type { DirectoryImportPort } from "../core/folderImport/contract";
 import type { NativeDirectorySource } from "../platform/directoryImportBridge";
 import type { RuntimeCapabilities } from "../platform/runtimeCapabilities";
 import { cancelDocumentImport, importDocuments, type AndroidDocumentSelection, type AndroidImportBatchResult, type AndroidNativeImportError } from "../platform/androidNativeBridge";
+import type { ExternalOpenSource } from "../platform/externalOpenBridge";
 import { activatePortableShelfState, getShelfStore, type ShelfEntry } from "./shelf";
 import { noteCloudSyncChange } from "./cloudSync/cloudSyncStore";
 import { formatImportNotice, findDuplicateEntry, mergeShelfEntries, sha256Hex, type ImportNotice } from "./importBooks";
@@ -38,7 +39,7 @@ function importedRef(entry: ShelfEntry, isExisting: boolean): ImportedBookRef[] 
 /** Shared by all import/delete/LAN/archive gates; reserved before any await. */
 const FOLDER_IMPORT_SLOT = "directory-import";
 
-function displayNameFromContentUri(uri: string): string {
+export function displayNameFromContentUri(uri: string): string {
   try {
     const last = decodeURIComponent(uri.split("/").filter(Boolean).pop() ?? "");
     const base = last.split(/[\\/]/).pop() ?? "";
@@ -153,15 +154,17 @@ export function useBookImport({
   }, [setOrganization]);
 
   // ---- 批量导入 EPUB 并入库（逐本有界处理；结束后只刷新一次书架） ----
-  const handleImportSources = useCallback(async (sources: ImportSource[], target: ImportFolderTarget | null = null) => {
+  /** Resolves the accepted records (new and already-shelved), or null when another job held the shelf. */
+  const handleImportSources = useCallback(async (sources: ImportSource[], target: ImportFolderTarget | null = null): Promise<ShelfEntry[] | null> => {
     const list = sources.filter((source) => {
       const name = source.kind === "file" ? source.file.name : source.name;
       return name.toLowerCase().endsWith(".epub");
     });
-    if (list.length === 0 || shelfBusyRef.current) return;
+    if (list.length === 0) return [];
+    if (shelfBusyRef.current) return null;
     if (nativeImportRef.current) {
       setShelfNotice({ kind: "warn", text: uiText("notice.import.busy") });
-      return;
+      return null;
     }
     shelfBusyRef.current = true;
     // Do not let a fast first import land in the legacy store before the
@@ -232,6 +235,7 @@ export function useBookImport({
             });
 
             if (duplicate && duplicate.available !== false) {
+              accepted.push(duplicate);
               duplicateTitles.push(duplicate.title || fileName.replace(/\.epub$/i, ""));
               placed.push(...importedRef(duplicate, true));
               continue;
@@ -260,6 +264,7 @@ export function useBookImport({
             });
             contentHashByIdRef.current.set(result.entry.id, contentHash);
             entryByContentHashRef.current.set(contentHash, result.entry);
+            accepted.push(result.entry);
             placed.push(...importedRef(result.entry, result.status === "duplicate"));
             if (result.status === "duplicate") {
               duplicateTitles.push(result.entry.title || fileName.replace(/\.epub$/i, ""));
@@ -311,8 +316,10 @@ export function useBookImport({
         if (notice.kind === "ok") notice.kind = "warn";
       }
       setShelfNotice(notice);
+      return accepted;
     } catch (error) {
       setShelfNotice({ kind: "error", text: uiText("notice.import.failed", { error: String(error) }) });
+      return [];
     } finally {
       shelfBusyRef.current = false;
       setShelfBusy(false);
@@ -370,7 +377,7 @@ export function useBookImport({
     batch: AndroidImportBatchResult,
     documents: AndroidDocumentSelection[],
     target: ImportFolderTarget | null = null,
-  ): Promise<void> => {
+  ): Promise<ShelfEntry[]> => {
     const imported: ShelfEntry[] = [];
     const accepted: ShelfEntry[] = [];
     const duplicateTitles: string[] = [];
@@ -400,9 +407,10 @@ export function useBookImport({
         imported.push(item.record);
       }
     }
+    let entries: ShelfEntry[] = [];
     if (accepted.length > 0) {
       const store = getShelfStore();
-      const entries = store.importRecords ? await store.importRecords(accepted) : accepted;
+      entries = store.importRecords ? await store.importRecords(accepted) : accepted;
       for (const entry of entries) {
         contentHashByIdRef.current.set(entry.id, entry.contentHash ?? entry.id);
         entryByContentHashRef.current.set(entry.contentHash ?? entry.id, entry);
@@ -422,6 +430,7 @@ export function useBookImport({
       if (notice.kind === "ok") notice.kind = "warn";
     }
     setShelfNotice(notice);
+    return entries;
   }, [placeIntoFolder]);
 
   const handleCancelNativeImport = useCallback(async (): Promise<void> => {
@@ -552,6 +561,20 @@ export function useBookImport({
     }
   }, [applyNativeImportBatch, handleImportSources, runNativeDocumentImport]);
 
+  /**
+   * One file handed over by the system (open-with / file association), through
+   * the same importers as the picker. Null: another import holds the slot.
+   */
+  const importExternalSource = useCallback(async (source: ExternalOpenSource): Promise<ShelfEntry[] | null> => {
+    if (source.kind === "path") {
+      return handleImportSources([{ kind: "path", path: source.path, name: source.path.split(/[\\/]/).pop() || "book.epub" }]);
+    }
+    if (nativeImportRef.current || shelfBusyRef.current) return null;
+    const documents: AndroidDocumentSelection[] = [{ uri: source.uri }];
+    const batch = await runNativeDocumentImport(documents);
+    return batch ? applyNativeImportBatch(batch, documents) : [];
+  }, [applyNativeImportBatch, handleImportSources, runNativeDocumentImport]);
+
   /** Browser file input result: consumes the target its picker was opened for. */
   const handleFileInputSources = useCallback((sources: ImportSource[]): void => {
     const target = fileInputTargetRef.current;
@@ -559,7 +582,7 @@ export function useBookImport({
     void handleImportSources(sources, target);
   }, [handleImportSources]);
 
-  return { handleImportSources, handleFileInputSources, handleCancelNativeImport, handleToggleNativeImportCollapsed, reimportAndroidMissing, handleChooseBooks };
+  return { handleImportSources, handleFileInputSources, handleCancelNativeImport, handleToggleNativeImportCollapsed, reimportAndroidMissing, handleChooseBooks, importExternalSource };
 }
 
 export function useFolderImport({
