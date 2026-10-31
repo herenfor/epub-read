@@ -1,0 +1,7 @@
+{
+  "identifier": "android-external-open",
+  "description": "Android-only external EPUB open notifications for the main window",
+  "platforms": ["android"],
+  "windows": ["main"],
+  "permissions": ["externalOpen:default"]
+}

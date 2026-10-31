@@ -47,11 +47,20 @@ fn main() {
     // The webview subscribes through `addPluginListener`, which invokes these
     // plugin commands; without an ACL manifest they are rejected at runtime as
     // "Plugin not found". Start/stop stay app commands invoked from Rust.
-    let attributes = tauri_build::Attributes::new().plugin(
-        "androidBattery",
-        tauri_build::InlinedPlugin::new()
-            .commands(&["registerListener", "remove_listener"])
-            .default_permission(tauri_build::DefaultPermissionRule::AllowAllCommands),
-    );
+    let attributes = tauri_build::Attributes::new()
+        .plugin(
+            "androidBattery",
+            tauri_build::InlinedPlugin::new()
+                .commands(&["registerListener", "remove_listener"])
+                .default_permission(tauri_build::DefaultPermissionRule::AllowAllCommands),
+        )
+        // External EPUB opens use the same mobile listener lifecycle. Peek/ack
+        // remain app commands; only listener registration/removal is exposed here.
+        .plugin(
+            "externalOpen",
+            tauri_build::InlinedPlugin::new()
+                .commands(&["registerListener", "remove_listener"])
+                .default_permission(tauri_build::DefaultPermissionRule::AllowAllCommands),
+        );
     tauri_build::try_build(attributes).expect("failed to run tauri-build");
 }
