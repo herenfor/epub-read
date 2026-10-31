@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createReactDomHarness } from "../test/reactDomHarness";
-import { MENU_CLOSE_MS, menuCloseMs, useExitPresence, useMenuClose } from "./menuMotion";
+import { MENU_CLOSE_MS, PAGE_CLOSE_MS, menuCloseMs, pageCloseMs, useExitPresence, useMenuClose } from "./menuMotion";
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
@@ -19,8 +19,8 @@ function ClosePanel({ onClose, open = true }: { onClose: () => void; open?: bool
     createElement("button", { onClick: cancelClose, "data-cancel": true }, "cancel"));
 }
 
-function PresencePanel({ open }: { open: boolean }) {
-  const { present, closing } = useExitPresence(open);
+function PresencePanel({ open, page = false }: { open: boolean; page?: boolean }) {
+  const { present, closing } = useExitPresence(open, page ? pageCloseMs : undefined);
   return present ? createElement("div", {}, closing ? "closing" : "open") : null;
 }
 
@@ -114,6 +114,24 @@ describe("menu exit lifetime", () => {
       mockDuration("0ms");
       await dom.render(createElement(PresencePanel, { open: false }));
       await dom.run(() => { vi.advanceTimersByTime(0); });
+      expect(dom.container.textContent).toBe("");
+    } finally { await dom.dispose(); }
+  });
+
+  it("a full-screen page stays mounted for the page exit, read when it closes", async () => {
+    expect(pageCloseMs()).toBe(PAGE_CLOSE_MS);
+    vi.useFakeTimers();
+    const dom = createReactDomHarness();
+    try {
+      Object.defineProperty(window, "getComputedStyle", {
+        configurable: true,
+        value: () => ({ getPropertyValue: (name: string) => (name === "--page-out" ? "240ms" : "200ms") }),
+      });
+      await dom.render(createElement(PresencePanel, { open: true, page: true }));
+      await dom.render(createElement(PresencePanel, { open: false, page: true }));
+      await dom.run(() => { vi.advanceTimersByTime(200); });
+      expect(dom.container.textContent).toBe("closing");
+      await dom.run(() => { vi.advanceTimersByTime(40); });
       expect(dom.container.textContent).toBe("");
     } finally { await dom.dispose(); }
   });

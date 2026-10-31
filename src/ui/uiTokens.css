@@ -51,6 +51,13 @@
   /* Panel outlines and separators: one device pixel on high-density screens.
      Controls keep 1px borders; their selected states draw on them. */
   --hairline: 1px;
+
+  /* Full-screen pages (motionKinds.css): forward, a page arrives from
+     --page-lift and the one beneath steps back to --page-under; back reverses. */
+  --page-in: 320ms;
+  --page-out: 240ms;
+  --page-lift: 1.04;
+  --page-under: 0.98;
 }
 
 @media (min-resolution: 2dppx) {

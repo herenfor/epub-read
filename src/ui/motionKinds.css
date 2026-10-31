@@ -1,0 +1,55 @@
+/*
+ * Motion kinds. A component says which kind it is; duration, curve and the
+ * way in and out come from the kind. Tokens live in uiTokens.css, and the
+ * reduced level (:root[data-motion="reduced"]) rewrites them in styles.css.
+ *
+ * Full-screen page: forward, the new page arrives from slightly larger while
+ * the one beneath steps back; back, the top page lifts away and the one
+ * beneath returns. Used by the reader opening veil, back to the library
+ * (a view transition, see pageTransition.ts) and the phone settings page.
+ */
+
+@keyframes page-arrive {
+  from { opacity: 0; transform: scale(var(--page-lift)); }
+}
+
+@keyframes page-depart {
+  to { opacity: 0; transform: scale(var(--page-lift)); }
+}
+
+@keyframes page-step-back {
+  to { transform: scale(var(--page-under)); filter: brightness(0.9); }
+}
+
+@keyframes page-step-forward {
+  from { transform: scale(var(--page-under)); filter: brightness(0.9); }
+}
+
+/* View transitions snapshot the whole window; the title bar keeps its place
+   and only crossfades instead of scaling with the page. */
+:root[data-page-transition] .titlebar:not(.is-mobile-compact) {
+  view-transition-name: app-titlebar;
+}
+
+:root[data-page-transition]::view-transition-old(root),
+:root[data-page-transition]::view-transition-new(root) {
+  mix-blend-mode: normal;
+}
+
+:root[data-page-transition="forward"]::view-transition-old(root) {
+  animation: page-step-back var(--page-in) var(--ease-emphasized) both;
+}
+
+:root[data-page-transition="forward"]::view-transition-new(root) {
+  animation: page-arrive var(--page-in) var(--ease-emphasized) both;
+}
+
+/* Back: the leaving page stays on top while it lifts away. */
+:root[data-page-transition="back"]::view-transition-old(root) {
+  z-index: 1;
+  animation: page-depart var(--page-out) var(--ease-standard) both;
+}
+
+:root[data-page-transition="back"]::view-transition-new(root) {
+  animation: page-step-forward var(--page-out) var(--ease-standard) both;
+}

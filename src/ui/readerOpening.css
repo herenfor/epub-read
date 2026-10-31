@@ -9,7 +9,9 @@
   padding: 24px;
   background: var(--bg);
   color: var(--fg);
-  animation: readerOpeningIn var(--motion-base) var(--ease-standard) both;
+  /* Full-screen page, forward (motionKinds.css): the veil arrives over the
+     library, which steps back underneath. */
+  animation: page-arrive var(--page-in) var(--ease-emphasized) both;
   pointer-events: auto;
   user-select: none;
 }
@@ -26,7 +28,10 @@
   gap: 10px;
   width: min(360px, 100%);
   text-align: center;
-  animation: readerOpeningCardIn var(--motion-slow) var(--ease-emphasized) both;
+}
+
+.app:has(.reader-opening:not(.is-leaving)) .shelf-view {
+  animation: page-step-back var(--page-in) var(--ease-emphasized) both;
 }
 
 .reader-opening-mark {
@@ -89,16 +94,8 @@
   font-size: var(--fs-caption);
 }
 
-@keyframes readerOpeningIn {
-  from { opacity: 0; }
-}
-
 @keyframes readerOpeningOut {
   to { opacity: 0; }
-}
-
-@keyframes readerOpeningCardIn {
-  from { opacity: 0; transform: translateY(8px) scale(0.98); }
 }
 
 @keyframes readerOpeningSweep {
