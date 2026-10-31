@@ -10,6 +10,13 @@
   pointer-events: none;
 }
 
+/* Full-screen pages float in from --page-lift, so the GPU first draws their
+   text at that scale; drawing it at 1 leaves a ~95 ms stall on the first
+   opening (phone trace, settings after a cold start). */
+.panel-paint-warmup :is(.shelf-settings-sheet, .shelf-body-search-page) {
+  transform: scale(var(--page-lift));
+}
+
 .panel-paint-warmup * {
   animation: none !important;
   transition: none !important;
