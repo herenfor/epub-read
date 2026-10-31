@@ -14,15 +14,11 @@
   -webkit-backdrop-filter: blur(20px);
   box-shadow: 0 14px 36px rgba(0, 0, 0, 0.18), 0 3px 10px rgba(0, 0, 0, 0.06);
   transform-origin: top right;
-  animation: bookmarkPagesIn 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: var(--popover-enter);
 }
 
 [data-tone="dark"] .bookmark-pages-popover {
   --bookmark-ribbon: #e0645c;
-}
-
-@keyframes bookmarkPagesIn {
-  from { opacity: 0; transform: translateY(-4px) scale(0.96); }
 }
 
 .bookmark-page-tile {
@@ -122,6 +118,3 @@
   .bookmark-page-tile.has .tile-mark.is-remove { opacity: 0.7; }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .bookmark-pages-popover { animation: none; }
-}

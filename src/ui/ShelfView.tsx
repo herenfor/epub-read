@@ -3741,7 +3741,7 @@ export function ShelfView(props: ShelfViewProps) {
       setSelectionMode(false);
       setDockClosing(false);
       setSelectedIds(new Set());
-    }, 150);
+    }, menuCloseMs());
   }, []);
 
   const closeSettings = useCallback((): void => {

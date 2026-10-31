@@ -7,12 +7,12 @@
 }
 
 .aa-popover-backdrop {
-  animation: reader-panel-fade-in var(--menu-open) var(--ease-emphasized);
+  animation: var(--scrim-enter);
 }
 
 .aa-popover-backdrop.is-closing {
   pointer-events: none;
-  animation: reader-panel-fade-out var(--menu-close) var(--ui-ease) forwards;
+  animation: var(--scrim-exit);
 }
 
 /* The panel itself takes focus on open; only its controls show a focus ring. */
@@ -37,14 +37,15 @@
   -webkit-backdrop-filter: blur(28px) saturate(180%);
   user-select: none;
   -webkit-user-select: none;
-  animation: aaPopoverFadeIn var(--menu-open) var(--ease-emphasized);
+  transform-origin: top right; /* under the Aa button */
+  animation: var(--popover-enter);
   overflow: hidden;
   display: flex;
   flex-direction: column;
 }
 
 .aa-popover.is-closing {
-  animation: aaPopoverFadeOut var(--menu-close) var(--ui-ease) forwards;
+  animation: var(--popover-exit);
   pointer-events: none;
 }
 
@@ -69,28 +70,6 @@
 .aa-popover.is-resumed,
 .aa-popover-backdrop.is-resumed {
   animation: none !important;
-}
-
-@keyframes aaPopoverFadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(-8px) scale(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-@keyframes aaPopoverFadeOut {
-  from {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-  to {
-    opacity: 0;
-    transform: translateY(-6px) scale(0.98);
-  }
 }
 
 /* 控件行布局 */
@@ -239,7 +218,7 @@
   height: min(var(--aa-sheet-height), calc(var(--visual-viewport-height, 100vh) * 0.9));
   max-height: none;
   border-radius: var(--r-xl) var(--r-xl) 0 0;
-  animation: aaMobileSheetIn var(--menu-open) var(--ease-emphasized);
+  animation: var(--sheet-enter);
 }
 
 /* 底部面板把手：只在手机紧凑布局出现，可拖动展开、收起和关闭。 */
@@ -266,9 +245,8 @@
 }
 
 .app[data-mobile-chrome="true"][data-layout="compact"] .aa-popover.is-closing {
-  animation: aaMobileSheetOut var(--menu-close) var(--ui-ease) forwards;
+  animation: var(--sheet-exit);
 }
-
 
 .app[data-mobile-chrome="true"] .aa-display-body .aa-step-btn,
 .app[data-mobile-chrome="true"] .aa-display-body .aa-step-reset-btn {
@@ -289,16 +267,6 @@
   }
 }
 
-@keyframes aaMobileSheetIn {
-  from { transform: translateY(100%); }
-  to { transform: translateY(0); }
-}
-
-@keyframes aaMobileSheetOut {
-  from { transform: translateY(0); }
-  to { transform: translateY(100%); }
-}
-
 /* ---- 触摸端：面板本体已近不透明，去掉其自身模糊（与遮罩毛玻璃叠算无可见差别）；文字放大一档 ---- */
 .app[data-touch-ui="true"] .aa-popover {
   /* Opaque panel surface; cards sit on it. No blur on touch. */
@@ -313,7 +281,6 @@
 }
 
 .app[data-touch-ui="true"] .aa-section-label { font-size: var(--fs-emph); }
-
 
 .app[data-touch-ui="true"] .aa-css-hint,
 .app[data-touch-ui="true"] .aa-css-textarea { font-size: var(--fs-body); }

@@ -2,7 +2,8 @@
   position: fixed;
   bottom: 20px;
   left: 50%;
-  transform: translate(-50%, 0) scale(1);
+  transform: translate(-50%, 0);
+  transform-origin: 0 50%; /* the visual center under the centering transform */
   z-index: var(--z-ui-drawer);
   width: min(680px, calc(100vw - 32px));
   height: min(600px, calc(100vh - 40px));
@@ -18,7 +19,7 @@
   color: var(--fg);
   box-shadow: 0 24px 54px rgba(0, 0, 0, 0.35), 0 6px 18px rgba(0, 0, 0, 0.12);
   opacity: 1;
-  animation: panel-float-from-bottom var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
+  animation: var(--dialog-enter);
 }
 
 @media (max-width: 640px) {
@@ -30,8 +31,9 @@
     max-height: 82vh !important;
     height: auto !important;
     border-radius: 20px !important;
-    transform: translateY(24px) scale(0.96) !important;
-    animation: panel-sheet-up var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+    transform: none !important;
+    transform-origin: 50% 50%;
+    animation: var(--dialog-enter) !important;
   }
 }
 

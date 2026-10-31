@@ -738,7 +738,7 @@
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18), 0 2px 6px rgba(0, 0, 0, 0.08);
   padding: 6px;
   z-index: var(--z-ui-mobile-bar);
-  animation: shelf-pop-in var(--popover-open) cubic-bezier(0.16, 1, 0.3, 1);
+  animation: var(--popover-enter);
   scrollbar-width: thin;
   scrollbar-color: var(--scroll-thumb, rgba(128, 128, 128, 0.3)) transparent;
 }
@@ -936,7 +936,7 @@
   padding: 6px;
   z-index: var(--z-ui-bar);
   scrollbar-width: thin;
-  animation: shelf-pop-in var(--popover-open) cubic-bezier(0.16, 1, 0.3, 1);
+  animation: var(--popover-enter);
 }
 
 .shelf-folder-popover-menu::-webkit-scrollbar {
@@ -1106,28 +1106,6 @@
 @media (hover: hover) {
   .shelf-sort-select-zen:hover {
     border-color: var(--accent, #2563eb);
-  }
-}
-
-@keyframes shelf-pop-in {
-  from {
-    opacity: 0;
-    transform: translateY(-4px) scale(0.97);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-@keyframes shelf-pop-out {
-  from {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-  to {
-    opacity: 0;
-    transform: translateY(-4px) scale(0.97);
   }
 }
 
@@ -1628,11 +1606,11 @@
   border: var(--hairline) solid var(--shelf-card-border, rgba(0, 0, 0, 0.12));
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.08);
   z-index: var(--z-ui-mobile-bar);
-  animation: shelf-batch-slide-up 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: var(--toast-enter);
 }
 
 .shelf-floating-batch-dock.is-closing {
-  animation: shelf-batch-slide-down 0.15s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: var(--toast-exit);
 }
 
 .shelf-floating-batch-info {
@@ -1715,78 +1693,24 @@
   }
 }
 
-@keyframes shelf-batch-slide-up {
-  from {
-    opacity: 0;
-    transform: translate(-50%, 20px) scale(0.96);
-  }
-  to {
-    opacity: 1;
-    transform: translate(-50%, 0) scale(1);
-  }
-}
-
-@keyframes shelf-batch-slide-down {
-  from {
-    opacity: 1;
-    transform: translate(-50%, 0) scale(1);
-  }
-  to {
-    opacity: 0;
-    transform: translate(-50%, 20px) scale(0.96);
-  }
-}
-
 /* =========================================================================
  * Packet 2: 150ms 进出场动效与改良弹窗
  * ========================================================================= */
 
 .shelf-confirm-backdrop {
-  animation: shelf-modal-backdrop-in var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
+  animation: var(--scrim-enter);
 }
 
 .shelf-confirm-backdrop.is-closing {
-  animation: shelf-modal-backdrop-out var(--menu-close) cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: var(--scrim-exit);
 }
 
 .shelf-confirm {
-  animation: shelf-modal-dialog-in var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1);
+  animation: var(--dialog-enter);
 }
 
 .shelf-confirm-backdrop.is-closing .shelf-confirm {
-  animation: shelf-modal-dialog-out var(--menu-close) cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-
-@keyframes shelf-modal-backdrop-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-@keyframes shelf-modal-backdrop-out {
-  from { opacity: 1; }
-  to { opacity: 0; }
-}
-
-@keyframes shelf-modal-dialog-in {
-  from {
-    opacity: 0;
-    transform: translateY(12px) scale(0.96);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-@keyframes shelf-modal-dialog-out {
-  from {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-  to {
-    opacity: 0;
-    transform: translateY(8px) scale(0.96);
-  }
+  animation: var(--dialog-exit);
 }
 
 /* =========================================================================
@@ -1935,7 +1859,7 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  animation: shelf-pop-in var(--popover-open) cubic-bezier(0.16, 1, 0.3, 1);
+  animation: var(--popover-enter);
 }
 
 .shelf-category-menu-item {
@@ -2160,11 +2084,12 @@
   padding: 6px;
   gap: 0;
   border-radius: var(--r-xl);
-  animation-name: shelf-batch-rise;
+  --sheet-y: calc(100% + 12px + env(safe-area-inset-bottom, 0px));
+  animation: var(--sheet-enter);
 }
 
 .app[data-mobile-chrome="true"][data-layout="compact"] .shelf-floating-batch-dock.is-closing {
-  animation-name: shelf-batch-sink;
+  animation: var(--sheet-exit);
 }
 
 .app[data-mobile-chrome="true"][data-layout="compact"] .shelf-floating-batch-info,
@@ -2212,28 +2137,6 @@
   transform: scale(0.96);
 }
 
-@keyframes shelf-batch-rise {
-  from {
-    opacity: 0;
-    transform: translateY(24px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes shelf-batch-sink {
-  from {
-    opacity: 1;
-    transform: translateY(0);
-  }
-  to {
-    opacity: 0;
-    transform: translateY(24px);
-  }
-}
-
 /* 触摸拖书时的文件夹落点条：贴顶浮出，横向可滚，悬停的文件夹高亮。 */
 .shelf-drag-folder-strip {
   position: fixed;
@@ -2251,7 +2154,8 @@
   -webkit-backdrop-filter: blur(20px);
   border: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.12));
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.16);
-  animation: shelf-drag-strip-in var(--motion-base, 220ms) var(--ease-emphasized, ease) both;
+  --toast-side: -1;
+  animation: var(--toast-enter);
 }
 
 .shelf-drag-folder-strip-label {
@@ -2304,17 +2208,6 @@
   color: var(--accent, #2563eb);
 }
 
-@keyframes shelf-drag-strip-in {
-  from {
-    opacity: 0;
-    transform: translateY(-16px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
 /* =========================================================================
  * 导入入口：主按钮 + 下拉（宽屏），手机整颗“导入”打开同一菜单
  * ========================================================================= */
@@ -2359,12 +2252,12 @@
   background: var(--panel-surface);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18), 0 3px 10px rgba(0, 0, 0, 0.06);
   transform-origin: top right;
-  animation: shelf-pop-in var(--popover-open) var(--ease-emphasized);
+  animation: var(--popover-enter);
 }
 
 .shelf-import-menu.is-closing {
   pointer-events: none;
-  animation: shelf-pop-out var(--popover-close) var(--ease-exit) forwards;
+  animation: var(--popover-exit);
 }
 
 .shelf-import-menu-item {
@@ -2670,11 +2563,6 @@
   transition: background-color 300ms linear;
 }
 
-.shelf-menu-portal-host {
-  --shelf-sheet-in: var(--menu-open);
-  --shelf-popover-in: var(--popover-open);
-}
-
 /* ---- 共用菜单行 ---- */
 .shelf-action-item {
   display: flex;
@@ -2787,16 +2675,17 @@
   pointer-events: auto;
   outline: none;
   transform-origin: top right;
-  animation: shelf-action-pop-in var(--shelf-popover-in) cubic-bezier(0.16, 1, 0.3, 1);
+  animation: var(--popover-enter);
 }
 
 .shelf-action-popover.placement-up {
+  --popover-side: 1;
   transform-origin: bottom right;
 }
 
 .shelf-action-popover.is-closing {
   pointer-events: none;
-  animation: shelf-action-pop-out var(--popover-close) ease forwards;
+  animation: var(--popover-exit);
 }
 
 .shelf-action-popover-title {
@@ -2826,16 +2715,6 @@
   }
 }
 
-@keyframes shelf-action-pop-in {
-  from { opacity: 0; transform: scale(0.96); }
-  to { opacity: 1; transform: none; }
-}
-
-@keyframes shelf-action-pop-out {
-  from { opacity: 1; transform: none; }
-  to { opacity: 0; transform: scale(0.98); }
-}
-
 /* ---- 触屏底部操作面板 ---- */
 .shelf-action-sheet-backdrop {
   position: fixed;
@@ -2844,7 +2723,7 @@
   background: rgba(15, 23, 42, 0.38);
   /* 遮罩上的手势只用来关闭，不滚动下面的书架。 */
   touch-action: none;
-  animation: shelf-action-fade-in var(--shelf-sheet-in) ease-out;
+  animation: var(--scrim-enter);
   transition: opacity var(--menu-close) ease;
 }
 
@@ -2873,7 +2752,7 @@
   box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.18);
   pointer-events: auto;
   outline: none;
-  animation: shelf-action-sheet-in var(--shelf-sheet-in) cubic-bezier(0.16, 1, 0.3, 1);
+  animation: var(--sheet-enter);
   transition: transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -3008,16 +2887,6 @@
   margin: 6px 8px;
 }
 
-@keyframes shelf-action-sheet-in {
-  from { transform: translateY(100%); }
-  to { transform: translateY(0); }
-}
-
-@keyframes shelf-action-fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
 /* 减少动效：按压改为静态变暗，不缩放；菜单与面板直接出现/消失。 */
 :root[data-motion="reduced"] .shelf-view .shelf-card[data-press] .shelf-cover-box {
   transform: none;
@@ -3027,10 +2896,6 @@
 
 :root[data-motion="reduced"] .shelf-view .shelf-table-row[data-press] {
   transition: none;
-}
-
-:root[data-motion="reduced"] :is(.shelf-action-popover, .shelf-action-sheet, .shelf-action-sheet-backdrop) {
-  animation: none;
 }
 
 :root[data-motion="reduced"] .shelf-action-sheet,
@@ -3051,10 +2916,6 @@
 
   .shelf-view .shelf-table-row[data-press] {
     transition: none;
-  }
-
-  :is(.shelf-action-popover, .shelf-action-sheet, .shelf-action-sheet-backdrop) {
-    animation: none;
   }
 
   .shelf-action-sheet,

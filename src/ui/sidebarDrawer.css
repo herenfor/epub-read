@@ -4,42 +4,31 @@
   inset: 0;
   z-index: calc(var(--z-ui-drawer) - 10);
   background: var(--ui-backdrop);
-  animation: reader-panel-fade-in var(--menu-open) var(--ui-ease) forwards;
+  animation: var(--scrim-enter);
   pointer-events: auto;
 }
 
-/* ---- 面板入场方向动画（左侧、右侧） ---- */
-@keyframes panel-float-from-left {
-  from { transform: translateX(calc(-100% - 24px)); }
-  to { transform: none; }
+/* 抽屉类：停在屏幕左右边缘之外，并多让出 24px 阴影。 */
+.sidebar-drawer.side-left {
+  --sheet-x: calc(-100% - 24px);
+  --sheet-y: 0px;
 }
 
-@keyframes panel-float-from-right {
-  from { transform: translateX(calc(100% + 24px)); }
-  to { transform: none; }
-}
-
-/* 退场时长由 --menu-close 决定，与挂载生命周期一致。 */
-@keyframes panel-float-out-left {
-  from { transform: none; }
-  to { transform: translateX(calc(-100% - 24px)); }
-}
-
-@keyframes panel-float-out-right {
-  from { transform: none; }
-  to { transform: translateX(calc(100% + 24px)); }
+.sidebar-drawer.side-right {
+  --sheet-x: calc(100% + 24px);
+  --sheet-y: 0px;
 }
 
 .sidebar-backdrop.is-closing {
-  animation: reader-panel-fade-out var(--menu-close) var(--ui-ease) forwards;
+  animation: var(--scrim-exit);
 }
 
 .sidebar-drawer.side-left.is-closing {
-  animation: panel-float-out-left var(--menu-close) var(--ui-ease-panel-exit) forwards;
+  animation: var(--sheet-exit);
 }
 
 .sidebar-drawer.side-right.is-closing {
-  animation: panel-float-out-right var(--menu-close) var(--ui-ease-panel-exit) forwards;
+  animation: var(--sheet-exit);
 }
 
 .sidebar-drawer:focus {
@@ -86,13 +75,13 @@
 .sidebar-drawer.is-overlay.side-left {
   left: 14px;
   right: auto;
-  animation: panel-float-from-left var(--menu-open) var(--ease-emphasized);
+  animation: var(--sheet-enter);
 }
 
 .sidebar-drawer.is-overlay.side-right {
   right: 14px;
   left: auto;
-  animation: panel-float-from-right var(--menu-open) var(--ease-emphasized);
+  animation: var(--sheet-enter);
 }
 
 .sidebar-drawer.is-overlay.is-closed {
@@ -133,7 +122,7 @@
   border-top: none;
   border-bottom: none;
   border-radius: 0 var(--r-lg) var(--r-lg) 0;
-  animation: panel-float-from-left var(--menu-open) var(--ease-emphasized);
+  animation: var(--sheet-enter);
 }
 
 .sidebar-drawer.is-docked.side-right {
@@ -144,7 +133,7 @@
   border-top: none;
   border-bottom: none;
   border-radius: var(--r-lg) 0 0 var(--r-lg);
-  animation: panel-float-from-right var(--menu-open) var(--ease-emphasized);
+  animation: var(--sheet-enter);
 }
 
 .sidebar-drawer.is-docked.is-closed {
@@ -672,10 +661,10 @@
 /* 退场规则须晚于且不低于入场规则的优先级，否则 is-closing 时仍播放入场动画、直接消失。 */
 .sidebar-drawer.is-overlay.side-left.is-closing,
 .sidebar-drawer.is-docked.side-left.is-closing {
-  animation: panel-float-out-left var(--menu-close) var(--ui-ease-panel-exit) forwards;
+  animation: var(--sheet-exit);
 }
 
 .sidebar-drawer.is-overlay.side-right.is-closing,
 .sidebar-drawer.is-docked.side-right.is-closing {
-  animation: panel-float-out-right var(--menu-close) var(--ui-ease-panel-exit) forwards;
+  animation: var(--sheet-exit);
 }

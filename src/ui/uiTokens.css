@@ -25,7 +25,6 @@
   --ui-dock: 200ms;
   --ui-ease: ease;
   --ui-ease-out: ease-out;
-  --ui-ease-panel-exit: cubic-bezier(0.4, 0, 0.2, 1);
 
   /* Four text sizes; hierarchy comes from weight and color, not more sizes.
      Micro is for counters, badges and index letters only, never sentences.
@@ -58,6 +57,26 @@
   --page-out: 240ms;
   --page-lift: 1.04;
   --page-under: 0.98;
+
+  /* The other kinds (motionKinds.css). Entrances start --motion-defer late,
+     after the panel's first frame is drawn. */
+  --motion-defer: 16ms;
+  --dialog-in: 240ms;
+  --dialog-out: 160ms;
+  --dialog-from: 0.96;
+  --dialog-to: 0.98;
+  --popover-in: var(--popover-open);
+  --popover-out: var(--popover-close);
+  --popover-from: 0.98;
+  --popover-travel: 4px;
+  --sheet-in: var(--menu-open);
+  --sheet-out: var(--menu-close);
+  --sheet-travel: 1;
+  --toast-in: 200ms;
+  --toast-out: 160ms;
+  --toast-travel: 8px;
+  --scrim-in: var(--menu-open);
+  --scrim-out: var(--menu-close);
 }
 
 @media (min-resolution: 2dppx) {

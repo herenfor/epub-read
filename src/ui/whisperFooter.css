@@ -188,18 +188,8 @@
   white-space: nowrap;
   pointer-events: none;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  animation: whisperTooltipIn 120ms ease;
-}
-
-@keyframes whisperTooltipIn {
-  from {
-    opacity: 0;
-    transform: translate(-50%, 4px);
-  }
-  to {
-    opacity: 1;
-    transform: translate(-50%, 0);
-  }
+  --popover-side: 1; /* above the bar */
+  animation: var(--popover-enter);
 }
 
 /* 底部克制文本行 */
