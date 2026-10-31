@@ -2519,18 +2519,43 @@ interface VirtualizerResult {
   isVirtual: boolean;
 }
 
+/**
+ * The shelf unmounts while a book is open. Its last position, with the
+ * geometry it was measured against, lets it come back where it was: the
+ * first render already has the full height, so the scroll lands before the
+ * page transition takes its snapshot. Only an identical shelf restores.
+ */
+let lastShelfScroll: {
+  key: string;
+  scrollTop: number;
+  viewportHeight: number;
+  geometry: ShelfGridGeometry | null;
+} | null = null;
+
 function useShelfVirtualizer(
   containerRef: React.RefObject<HTMLDivElement | null>,
   totalCount: number,
   viewMode: "grid" | "list",
   density: ShelfDensity,
   folderCount = 0,
-  threshold = 40
+  threshold = 40,
+  scopeKey = ""
 ): VirtualizerResult & { gridGeometry: ShelfGridGeometry | null } {
-  const [scrollState, setScrollState] = useState({ scrollTop: 0, viewportHeight: 800 });
-  const [gridGeometry, setGridGeometry] = useState<ShelfGridGeometry | null>(null);
+  const restoreKey = `${scopeKey}|${viewMode}|${density}|${folderCount}|${totalCount}`;
+  const [restored] = useState(() => (lastShelfScroll?.key === restoreKey ? lastShelfScroll : null));
+  const [scrollState, setScrollState] = useState(() => restored
+    ? { scrollTop: restored.scrollTop, viewportHeight: restored.viewportHeight }
+    : { scrollTop: 0, viewportHeight: 800 });
+  const [gridGeometry, setGridGeometry] = useState<ShelfGridGeometry | null>(restored?.geometry ?? null);
 
   const measureRef = useRef<(() => void) | null>(null);
+
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (restored && container) container.scrollTop = restored.scrollTop;
+    // Mount only: later key changes are a different shelf, which starts where it is.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useLayoutEffect(() => {
     const container = containerRef.current;
@@ -2568,6 +2593,7 @@ function useShelfVirtualizer(
         const viewportHeight = container.clientHeight || 800;
         setScrollState(previous => previous.scrollTop === scrollTop && previous.viewportHeight === viewportHeight
           ? previous : { scrollTop, viewportHeight });
+        lastShelfScroll = { key: restoreKey, scrollTop, viewportHeight, geometry: next };
       });
     };
     measureRef.current = scheduleMeasure;
@@ -2586,7 +2612,7 @@ function useShelfVirtualizer(
       container.removeEventListener("scroll", scheduleMeasure);
       window.removeEventListener("resize", scheduleMeasure);
     };
-  }, [containerRef, density, folderCount, viewMode, totalCount]);
+  }, [containerRef, density, folderCount, viewMode, totalCount, restoreKey]);
 
   // Rebind after React replaces nodes or changes the content above the window;
   // unchanged geometry returns the same state, so this cannot sustain a render loop.
@@ -3620,7 +3646,8 @@ export function ShelfView(props: ShelfViewProps) {
     density,
     // 收起的文件夹卡片不占位：按实际画出的张数重测书籍区起点。
     isCompactMobile && viewMode === "grid" && !folderPrefixExpanded ? 0 : visibleFolders.length,
-    40
+    40,
+    `${scope.type === "folder" ? scope.folderId : "root"}|${statusTab}|${query}`
   );
 
   const renderedBooks = useMemo(() => {

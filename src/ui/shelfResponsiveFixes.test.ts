@@ -362,6 +362,30 @@ describe("第三步补修：书架触摸长按与子菜单 Back", () => {
     }
   });
 
+  it("开书后回到书架，停在离开时的滚动位置", async () => {
+    const dom = createReactDomHarness();
+    const entries = [makeEntry("b1", "爱丽丝漫游仙境"), makeEntry("b2", "小王子")];
+    const scroller = () => dom.container.querySelector(".shelf-view") as HTMLElement;
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+    try {
+      await dom.render(createElement(ShelfView, makeProps(entries)));
+      scroller().scrollTop = 320;
+      scroller().dispatchEvent(new (dom.window as unknown as { Event: typeof Event }).Event("scroll"));
+      await settle();
+      // Opening a book unmounts ShelfView; returning creates a new instance.
+      await dom.render(null);
+      await dom.render(createElement(ShelfView, makeProps(entries)));
+      expect(scroller().scrollTop).toBe(320);
+
+      // A different shelf (here one more book) starts from the top.
+      await dom.render(null);
+      await dom.render(createElement(ShelfView, makeProps([...entries, makeEntry("b3", "海底两万里")])));
+      expect(scroller().scrollTop || 0).toBe(0);
+    } finally {
+      await dom.dispose();
+    }
+  });
+
   it("手机列表的占位行不跨列，固定布局不会凭空多出被隐去的列", async () => {
     const store = new Map([["epub_shelf_view_mode", "list"]]);
     vi.stubGlobal("localStorage", {
