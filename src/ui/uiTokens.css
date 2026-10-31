@@ -26,6 +26,24 @@
   --ui-ease: ease;
   --ui-ease-out: ease-out;
   --ui-ease-panel-exit: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Four text sizes; hierarchy comes from weight and color, not more sizes.
+     Micro is for counters, badges and index letters only, never sentences.
+     Display sizes (about page, empty states) stay literal. */
+  --fs-micro: 10px;
+  --fs-caption: 12px;
+  --fs-body: 13px;
+  --fs-emph: 15px;
+  --fs-title: 18px;
+
+  /* Radii on a 4px grid. Nested surfaces are concentric:
+     inner radius = outer radius - the padding between them. */
+  --r-xs: 4px;
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 20px;
+  --r-full: 999px;
 }
 
 /* Resolve theme-dependent mixes on .app, where the theme variables are defined.

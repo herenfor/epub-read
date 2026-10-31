@@ -26,7 +26,7 @@
   max-height: min(720px, calc(var(--visual-viewport-height, 100vh) - 48px));
   overflow: hidden;
   border: 1px solid var(--panel-border);
-  border-radius: 22px;
+  border-radius: var(--r-xl);
   background: var(--panel-bg);
   color: var(--fg);
   font-family: var(--font-ui);
@@ -49,14 +49,14 @@
 
 .lan-head h2 {
   margin: 0;
-  font-size: 18px;
+  font-size: var(--fs-title);
   font-weight: 700;
 }
 
 .lan-head p {
   margin: 3px 0 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 
 .lan-icon-btn {
@@ -66,7 +66,7 @@
   width: 40px;
   height: 40px;
   border: 0;
-  border-radius: 12px;
+  border-radius: var(--r-md);
   background: transparent;
   color: var(--muted);
   cursor: pointer;
@@ -92,7 +92,7 @@
 
 .lan-body h3 {
   margin: 0;
-  font-size: 16px;
+  font-size: var(--fs-title);
   font-weight: 700;
 }
 
@@ -103,9 +103,9 @@
 .lan-ghost {
   min-height: 44px;
   padding: 10px 18px;
-  border-radius: 12px;
+  border-radius: var(--r-md);
   font: inherit;
-  font-size: 15px;
+  font-size: var(--fs-emph);
   font-weight: 600;
   cursor: pointer;
   transition: background var(--motion-fast, 120ms) ease, opacity var(--motion-fast, 120ms) ease;
@@ -147,7 +147,7 @@
   background: transparent;
   color: var(--muted);
   font: inherit;
-  font-size: 14px;
+  font-size: var(--fs-emph);
   cursor: pointer;
 }
 
@@ -178,10 +178,10 @@
   display: flex;
   gap: 10px;
   padding: 12px 14px;
-  border-radius: 14px;
+  border-radius: var(--r-lg);
   background: color-mix(in srgb, var(--error) 10%, var(--bg));
   color: var(--fg);
-  font-size: 14px;
+  font-size: var(--fs-emph);
   line-height: 1.55;
 }
 
@@ -206,10 +206,10 @@
   display: flex;
   gap: 10px;
   padding: 10px 14px;
-  border-radius: 14px;
+  border-radius: var(--r-lg);
   background: color-mix(in srgb, var(--accent) 9%, var(--bg));
   color: var(--fg);
-  font-size: 14px;
+  font-size: var(--fs-emph);
   line-height: 1.5;
 }
 
@@ -224,7 +224,7 @@
 .lan-batch p {
   margin: 2px 0 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 
 .lan-batch-icon {
@@ -268,7 +268,7 @@
 .lan-intro p {
   margin: 0;
   color: var(--muted);
-  font-size: 14px;
+  font-size: var(--fs-emph);
   line-height: 1.6;
 }
 
@@ -278,7 +278,7 @@
   margin-top: -2px;
   padding: 12px;
   border: 1px solid var(--panel-border);
-  border-radius: 16px;
+  border-radius: var(--r-lg);
   background: var(--bg);
 }
 
@@ -289,11 +289,11 @@
   width: 100%;
   padding: 10px 12px;
   border: 1px solid var(--panel-border);
-  border-radius: 12px;
+  border-radius: var(--r-md);
   background: var(--shelf-input-bg);
   color: var(--fg);
   font: inherit;
-  font-size: 14px;
+  font-size: var(--fs-emph);
   outline: none;
 }
 
@@ -325,7 +325,7 @@
   gap: 10px;
   padding: 2px 4px 12px 44px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-body);
   animation: lan-fade-in var(--motion-base, 220ms) ease;
 }
 
@@ -360,7 +360,7 @@
   min-height: 124px;
   padding: 16px;
   border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--panel-border));
-  border-radius: 18px;
+  border-radius: var(--r-xl);
   background: color-mix(in srgb, var(--accent) 6%, var(--bg));
   color: var(--fg);
   font: inherit;
@@ -414,13 +414,13 @@
 }
 
 .lan-tile strong {
-  font-size: 16px;
+  font-size: var(--fs-title);
   font-weight: 650;
 }
 
 .lan-tile small {
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: var(--fs-caption);
   line-height: 1.4;
 }
 
@@ -448,7 +448,7 @@
   background: transparent;
   color: var(--fg);
   font: inherit;
-  font-size: 14px;
+  font-size: var(--fs-emph);
   text-align: left;
   cursor: pointer;
 }
@@ -522,11 +522,11 @@
   margin-left: auto;
   padding: 0 14px;
   border: 1px solid var(--panel-border);
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: transparent;
   color: var(--fg);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--fs-body);
   cursor: pointer;
 }
 
@@ -548,14 +548,14 @@
 
 .lan-send-group h3 {
   color: var(--muted);
-  font-size: 13px !important;
+  font-size: var(--fs-body) !important;
   font-weight: 600 !important;
 }
 
 .lan-send-options {
   overflow: hidden;
   border: 1px solid var(--panel-border);
-  border-radius: 16px;
+  border-radius: var(--r-lg);
   background: var(--bg);
 }
 
@@ -572,7 +572,7 @@
   border-top: 1px solid color-mix(in srgb, var(--panel-border) 70%, transparent);
   background: color-mix(in srgb, var(--fg) 2.5%, transparent);
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: var(--fs-caption);
   line-height: 1.55;
 }
 
@@ -601,8 +601,8 @@
   justify-content: center;
   gap: 8px;
   min-height: 50px;
-  border-radius: 14px;
-  font-size: 16px;
+  border-radius: var(--r-lg);
+  font-size: var(--fs-title);
 }
 
 .lan-send-footer .lan-primary svg {
@@ -625,7 +625,7 @@
   width: min(248px, 72vw);
   aspect-ratio: 1;
   padding: 14px;
-  border-radius: 20px;
+  border-radius: var(--r-xl);
   background: #ffffff;
   box-shadow: 0 0 0 1px var(--panel-border), 0 10px 30px rgba(0, 0, 0, 0.08);
 }
@@ -642,7 +642,7 @@
   margin: 0;
   padding: 0 8px;
   color: #555;
-  font-size: 13px;
+  font-size: var(--fs-body);
   line-height: 1.6;
 }
 
@@ -657,7 +657,7 @@
   margin: 0;
   padding: 0;
   color: var(--muted);
-  font-size: 14px;
+  font-size: var(--fs-emph);
   line-height: 1.55;
   list-style: none;
   counter-reset: lan-step;
@@ -680,7 +680,7 @@
   gap: 8px;
   margin: 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 
 .lan-pulse {
@@ -702,7 +702,7 @@
 .lan-hint {
   margin: 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-body);
   line-height: 1.55;
 }
 
@@ -720,13 +720,13 @@
 }
 
 .lan-switch-text strong {
-  font-size: 15px;
+  font-size: var(--fs-emph);
   font-weight: 600;
 }
 
 .lan-switch-text small {
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-body);
   line-height: 1.5;
 }
 
@@ -746,7 +746,7 @@
 .lan-result p {
   margin: 0;
   color: var(--muted);
-  font-size: 14px;
+  font-size: var(--fs-emph);
   line-height: 1.6;
 }
 
@@ -797,7 +797,7 @@
   position: relative;
   height: 8px;
   overflow: hidden;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: var(--shelf-input-bg);
 }
 
@@ -821,7 +821,7 @@
   gap: 12px;
   margin: 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-body);
   font-variant-numeric: tabular-nums;
 }
 
@@ -866,7 +866,7 @@
   .lan-row:hover:not(:disabled),
   .lan-help summary.lan-row:hover {
     background: var(--menu-surface);
-    border-radius: 10px;
+    border-radius: var(--r-md);
   }
 
   .lan-tile:hover:not(:disabled) {
@@ -890,7 +890,7 @@
     width: 100%;
     max-height: calc(var(--visual-viewport-height, 100vh) - 24px);
     border-width: 1px 0 0;
-    border-radius: 22px 22px 0 0;
+    border-radius: var(--r-xl) var(--r-xl) 0 0;
     padding-bottom: env(safe-area-inset-bottom, 0px);
     animation-name: lan-sheet-in;
   }
@@ -912,7 +912,7 @@
     width: 36px;
     height: 4px;
     margin-left: -18px;
-    border-radius: 999px;
+    border-radius: var(--r-full);
     background: var(--panel-border);
   }
 }

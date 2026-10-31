@@ -13,7 +13,7 @@
   max-height: min(680px, calc(100vh - 32px));
   overflow: auto;
   border: 1px solid var(--panel-border);
-  border-radius: 22px;
+  border-radius: var(--r-xl);
   background: var(--panel-bg);
   color: var(--fg);
   font-family: var(--font-ui);
@@ -26,14 +26,14 @@
 
 .save-file-dialog-head h2 {
   margin: 0 0 6px;
-  font-size: 18px;
+  font-size: var(--fs-title);
 }
 
 .save-file-dialog-head p,
 .save-file-muted {
   margin: 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-body);
   line-height: 1.55;
 }
 
@@ -49,13 +49,13 @@
   margin: 0;
   padding: 12px 14px;
   border: 1px solid var(--panel-border);
-  border-radius: 10px;
+  border-radius: var(--r-md);
 }
 
 .save-file-fieldset legend {
   padding: 0 4px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 
 .save-file-radio,
@@ -63,7 +63,7 @@
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  font-size: 14px;
+  font-size: var(--fs-emph);
   line-height: 1.45;
   cursor: pointer;
 }
@@ -87,18 +87,18 @@
 
 .save-file-summary > div {
   padding: 9px 10px;
-  border-radius: 9px;
+  border-radius: var(--r-sm);
   background: var(--shelf-input-bg);
 }
 
 .save-file-summary dt {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 
 .save-file-summary dd {
   margin: 3px 0 0;
-  font-size: 16px;
+  font-size: var(--fs-title);
   font-weight: 650;
 }
 
@@ -115,7 +115,7 @@
   min-height: 42px;
   padding: 8px 18px;
   border: 1px solid var(--panel-border);
-  border-radius: 12px;
+  border-radius: var(--r-md);
   background: var(--bg);
   color: inherit;
   font: inherit;
@@ -144,24 +144,24 @@
   width: min(340px, calc(100vw - 32px));
   padding: 14px 16px;
   border: 1px solid var(--panel-border);
-  border-radius: 12px;
+  border-radius: var(--r-md);
   background: var(--panel-bg);
   color: var(--fg);
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.2);
 }
 
 .save-file-progress-title {
-  font-size: 14px;
+  font-size: var(--fs-emph);
   font-weight: 650;
 }
 
 .save-file-progress-text {
-  font-size: 13px;
+  font-size: var(--fs-body);
   color: var(--muted);
 }
 
 .save-file-progress-note {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: #a66300;
 }
 

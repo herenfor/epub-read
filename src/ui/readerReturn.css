@@ -32,11 +32,11 @@
   min-height: 36px;
   padding: 0 14px;
   border: 1px solid color-mix(in srgb, var(--panel-border) 70%, transparent);
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: var(--panel-bg);
   color: var(--fg);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--fs-body);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
   cursor: pointer;
   pointer-events: auto;
@@ -45,7 +45,7 @@
 
 .reader-return.is-phone .reader-return-btn {
   min-height: 44px;
-  font-size: 14px;
+  font-size: var(--fs-emph);
 }
 
 .reader-return-label {

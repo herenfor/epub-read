@@ -8,7 +8,7 @@
   padding: 0 4px;
   box-sizing: border-box;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-caption);
   line-height: 1;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;

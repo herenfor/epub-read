@@ -35,7 +35,7 @@
 }
 
 .tap-regions-note {
-  font-size: 11px;
+  font-size: var(--fs-caption);
   line-height: 1.45;
   color: var(--muted);
 }
@@ -45,7 +45,7 @@
   width: 100%;
   max-height: 220px;
   margin-inline: auto;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   overflow: hidden;
   background: var(--bg, #fff);
   border: 1px solid color-mix(in srgb, var(--panel-border, #ccc) 70%, transparent);
@@ -133,10 +133,10 @@
 }
 
 .tap-regions-band-center-label {
-  font-size: 10.5px;
+  font-size: var(--fs-caption);
   color: var(--muted);
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   background: color-mix(in srgb, var(--bg, #fff) 80%, transparent);
   white-space: nowrap;
   overflow: hidden;
@@ -148,10 +148,10 @@
 .tap-regions-off-tag {
   position: absolute;
   top: 6px;
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--muted);
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   border: 1px dashed color-mix(in srgb, var(--muted) 60%, transparent);
   background: color-mix(in srgb, var(--bg, #fff) 85%, transparent);
 }
@@ -163,7 +163,7 @@
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
-  font-size: 11px;
+  font-size: var(--fs-caption);
 }
 
 .tap-regions-legend-item {
@@ -198,7 +198,7 @@
 }
 
 .tap-regions-slider-value {
-  font-size: 11px;
+  font-size: var(--fs-caption);
   color: var(--muted);
   text-align: right;
   font-variant-numeric: tabular-nums;
@@ -218,7 +218,7 @@
   flex-direction: column;
   gap: 2px;
   min-width: 0;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--fg);
 }
 

@@ -12,7 +12,7 @@
   min-height: 32px;
   padding: 2px;
   gap: 2px;
-  border-radius: 9px;
+  border-radius: var(--r-sm);
   background: var(--ui-segment-bg);
 }
 
@@ -21,11 +21,11 @@
   min-height: 28px;
   padding: 0 10px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--r-sm);
   background: transparent;
   color: var(--muted);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--fs-body);
   font-weight: 500;
   cursor: pointer;
   transition: background-color var(--ui-control-quick) var(--ui-ease), color var(--ui-control-quick) var(--ui-ease);
@@ -57,7 +57,7 @@
 
 .app[data-touch-ui="true"] :is(.ui-segmented, .aa-segmented-capsule, .shelf-segmented, .lan-segmented) > button {
   min-height: 32px;
-  font-size: 14px;
+  font-size: var(--fs-emph);
 }
 
 /* ---- Buttons: primary (solid), secondary (outline), danger (red outline). 32 tall (touch 36). ---- */
@@ -70,11 +70,11 @@
   min-height: 32px;
   padding: 0 14px;
   border: 1px solid var(--ui-border-control);
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   background: transparent;
   color: var(--fg);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--fs-body);
   font-weight: 500;
   white-space: nowrap;
   cursor: pointer;
@@ -112,7 +112,7 @@
 
 .app[data-touch-ui="true"] .ui-btn {
   min-height: 36px;
-  font-size: 14px;
+  font-size: var(--fs-emph);
 }
 
 /* A quiet text button (group-title actions, footer links). */
@@ -122,7 +122,7 @@
   background: transparent;
   color: var(--accent);
   font: inherit;
-  font-size: 12.5px;
+  font-size: var(--fs-caption);
   cursor: pointer;
 }
 
@@ -238,11 +238,11 @@
   min-width: 0;
   padding: 8px 0 7px;
   border: 1px solid var(--swatch-border);
-  border-radius: 12px;
+  border-radius: var(--r-sm);
   background: var(--swatch-bg);
   color: var(--swatch-fg);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   cursor: pointer;
 }
 
@@ -257,11 +257,11 @@
 
 .ui-theme-card-sample {
   font-family: var(--font-reading, serif);
-  font-size: 16px;
+  font-size: var(--fs-title);
   font-weight: 700;
   line-height: 1.1;
 }
 
 .app[data-touch-ui="true"] .ui-theme-card {
-  font-size: 13px;
+  font-size: var(--fs-body);
 }

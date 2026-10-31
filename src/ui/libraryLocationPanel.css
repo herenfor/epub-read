@@ -9,7 +9,7 @@
 .library-location-confirm h3,
 .library-location-running h3 {
   margin: 0 0 8px;
-  font-size: 14px;
+  font-size: var(--fs-emph);
 }
 
 .library-location-running progress {
@@ -21,6 +21,6 @@
 .library-location-muted {
   margin: 6px 0 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-variant-numeric: tabular-nums;
 }

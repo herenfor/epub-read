@@ -78,7 +78,7 @@
   bottom: 18px;
   z-index: var(--z-ui-drawer);
   border: 1px solid var(--panel-border);
-  border-radius: 18px;
+  border-radius: var(--r-xl);
   box-shadow: 0 20px 48px rgba(0, 0, 0, 0.3), 0 4px 14px rgba(0, 0, 0, 0.12);
   pointer-events: auto;
 }
@@ -132,7 +132,7 @@
   border-left: none;
   border-top: none;
   border-bottom: none;
-  border-radius: 0 16px 16px 0;
+  border-radius: 0 var(--r-lg) var(--r-lg) 0;
   animation: panel-float-from-left var(--menu-open) var(--ease-emphasized);
 }
 
@@ -143,7 +143,7 @@
   border-right: none;
   border-top: none;
   border-bottom: none;
-  border-radius: 16px 0 0 16px;
+  border-radius: var(--r-lg) 0 0 var(--r-lg);
   animation: panel-float-from-right var(--menu-open) var(--ease-emphasized);
 }
 
@@ -169,7 +169,7 @@
   align-items: center;
   background: var(--ui-control-bg);
   padding: 2px;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   gap: 2px;
   flex: 1;
 }
@@ -180,9 +180,9 @@
   border: none;
   background: transparent;
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: var(--fs-caption);
   font-weight: 500;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -220,7 +220,7 @@
   justify-content: center;
   width: 26px;
   height: 26px;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   border: none;
   background: transparent;
   color: var(--fg);
@@ -254,7 +254,7 @@
 
 .sidebar-pane::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--fg) 18%, transparent);
-  border-radius: 3px;
+  border-radius: var(--r-xs);
 }
 
 .sidebar-track {
@@ -289,13 +289,13 @@
   justify-content: center;
   padding: 48px 16px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-body);
   gap: 6px;
   text-align: center;
 }
 
 .sidebar-empty-tip {
-  font-size: 11.5px;
+  font-size: var(--fs-caption);
   opacity: 0.7;
 }
 
@@ -311,11 +311,11 @@
   width: 100%;
   height: 28px;
   box-sizing: border-box;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   border: 1px solid var(--ui-border-control);
   background: var(--ui-field-bg);
   color: var(--fg);
-  font-size: 12px;
+  font-size: var(--fs-caption);
   padding: 0 24px 0 8px;
   outline: none;
   transition: border-color var(--ui-control) var(--ui-ease), background-color var(--ui-control) var(--ui-ease);
@@ -352,7 +352,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 7px 12px 7px 14px;
-  font-size: 12.5px;
+  font-size: var(--fs-caption);
   line-height: 1.4;
   color: color-mix(in srgb, var(--fg) 85%, transparent);
   cursor: pointer;
@@ -379,12 +379,12 @@
 }
 
 .sidebar-toc-item.level-1 {
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 
 .sidebar-toc-item.level-2,
 .sidebar-toc-item.level-3 {
-  font-size: 11.5px;
+  font-size: var(--fs-caption);
   opacity: 0.88;
 }
 
@@ -403,7 +403,7 @@
   justify-content: center;
   padding: 0;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   background: transparent;
   color: var(--muted);
   cursor: pointer;
@@ -460,7 +460,7 @@
   align-items: flex-start;
   gap: 8px;
   padding: 8px 30px 8px 10px;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   border: 1px solid transparent;
   background: var(--ui-card-bg);
   color: var(--fg);
@@ -484,7 +484,7 @@
   transform: translateY(-50%);
   width: 22px;
   height: 22px;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   border: none;
   background: transparent;
   color: var(--muted);
@@ -521,7 +521,7 @@
 }
 
 .sidebar-bookmark-text {
-  font-size: 12.5px;
+  font-size: var(--fs-caption);
   line-height: 1.35;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -530,7 +530,7 @@
 }
 
 .sidebar-bookmark-chapter {
-  font-size: 11px;
+  font-size: var(--fs-caption);
   color: var(--muted);
   line-height: 1.4;
   word-break: break-word;
@@ -548,7 +548,7 @@
   display: flex;
   flex-direction: column;
   padding: 9px 10px;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   background: var(--ui-card-bg);
   border: 1px solid color-mix(in srgb, var(--panel-border) 40%, transparent);
   gap: 6px;
@@ -567,19 +567,19 @@
 }
 
 .sidebar-note-content {
-  font-size: 13px;
+  font-size: var(--fs-body);
   font-weight: 500;
   line-height: 1.4;
   word-break: break-word;
 }
 
 .sidebar-note-meta {
-  font-size: 11px;
+  font-size: var(--fs-caption);
   color: var(--muted);
 }
 
 .sidebar-note-selection {
-  font-size: 11.5px;
+  font-size: var(--fs-caption);
   color: color-mix(in srgb, var(--fg) 68%, transparent);
   font-style: italic;
   line-height: 1.35;
@@ -589,7 +589,7 @@
   overflow: hidden;
   background: color-mix(in srgb, var(--fg) 5%, transparent);
   padding: 3px 6px;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   border-left: 2px solid var(--ui-note-quote);
 }
 
@@ -603,9 +603,9 @@
 }
 
 .sidebar-note-act {
-  font-size: 11px;
+  font-size: var(--fs-caption);
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   border: none;
   background: transparent;
   color: var(--muted);
@@ -624,7 +624,7 @@
 }
 
 .sidebar-note-confirm {
-  font-size: 11px;
+  font-size: var(--fs-caption);
   color: var(--ui-danger);
 }
 

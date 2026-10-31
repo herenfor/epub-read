@@ -5,7 +5,7 @@
 
 .folder-import-status {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--fs-emph);
   line-height: 1.55;
 }
 
@@ -13,7 +13,7 @@
   display: block;
   margin-top: 2px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-caption);
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
@@ -21,7 +21,7 @@
 .folder-import-warning {
   margin: 0;
   color: #a66300;
-  font-size: 13px;
+  font-size: var(--fs-body);
   line-height: 1.5;
 }
 
@@ -36,7 +36,7 @@
   justify-content: space-between;
   gap: 8px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 
 .folder-import-groups-head .folder-import-hint {
@@ -58,7 +58,7 @@
   align-items: center;
   gap: 10px;
   padding: 9px 10px;
-  border-radius: 9px;
+  border-radius: var(--r-sm);
   background: var(--shelf-input-bg);
 }
 
@@ -69,7 +69,7 @@
 
 .folder-import-group-name {
   min-width: 0;
-  font-size: 14px;
+  font-size: var(--fs-emph);
 }
 
 .folder-import-group-name strong {
@@ -86,11 +86,11 @@
   min-height: 36px;
   padding: 6px 8px;
   border: 1px solid var(--panel-border);
-  border-radius: 9px;
+  border-radius: var(--r-sm);
   background: var(--bg);
   color: var(--fg);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 
 .folder-import-more {
@@ -98,11 +98,11 @@
   min-height: 36px;
   padding: 6px 14px;
   border: 1px solid var(--panel-border);
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: var(--bg);
   color: inherit;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--fs-body);
   cursor: pointer;
 }
 
@@ -120,9 +120,9 @@
 
 .folder-import-issues li {
   padding: 7px 10px;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   background: var(--shelf-input-bg);
-  font-size: 13px;
+  font-size: var(--fs-body);
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
@@ -135,7 +135,7 @@
 .folder-import-bar {
   height: 6px;
   overflow: hidden;
-  border-radius: 3px;
+  border-radius: var(--r-xs);
   background: color-mix(in srgb, var(--fg) 12%, transparent);
 }
 
@@ -156,5 +156,5 @@
 .app[data-touch-ui="true"] .folder-import-groups select,
 .app[data-touch-ui="true"] .folder-import-more {
   min-height: 44px;
-  font-size: 15px;
+  font-size: var(--fs-emph);
 }

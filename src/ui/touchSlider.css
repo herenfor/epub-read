@@ -29,7 +29,7 @@
   top: 50%;
   height: 28px;
   margin-top: -14px;
-  border-radius: 14px;
+  border-radius: var(--r-lg);
   background: color-mix(in srgb, var(--fg) 10%, transparent);
   overflow: hidden;
 }
@@ -39,7 +39,7 @@
   position: absolute;
   inset: 0 auto 0 0;
   width: calc(28px + (100% - 28px) * var(--slider-pos));
-  border-radius: 14px;
+  border-radius: var(--r-lg);
   background: var(--accent, #6366f1);
 }
 

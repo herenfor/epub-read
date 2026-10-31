@@ -7,7 +7,7 @@
   gap: 2px;
   padding: 8px;
   box-sizing: border-box;
-  border-radius: 12px;
+  border-radius: var(--r-md);
   border: 1px solid var(--panel-border);
   background: color-mix(in srgb, var(--panel-bg, #ffffff) 94%, transparent);
   backdrop-filter: blur(20px);
@@ -42,8 +42,8 @@
   font: inherit;
 }
 
-.bookmark-page-tile.is-left { border-radius: 4px 1px 1px 4px; }
-.bookmark-page-tile.is-right { border-radius: 1px 4px 4px 1px; }
+.bookmark-page-tile.is-left { border-radius: var(--r-xs) 1px 1px var(--r-xs); }
+.bookmark-page-tile.is-right { border-radius: 1px var(--r-xs) var(--r-xs) 1px; }
 .bookmark-page-tile:hover,
 .bookmark-page-tile:focus-visible {
   border-color: var(--accent);
@@ -88,10 +88,10 @@
   height: 13px;
   padding: 0 3px;
   box-sizing: border-box;
-  border-radius: 7px;
+  border-radius: var(--r-sm);
   background: var(--bookmark-ribbon);
   color: #fff;
-  font-size: 9px;
+  font-size: var(--fs-micro);
   line-height: 13px;
   text-align: center;
   font-variant-numeric: tabular-nums;
@@ -105,7 +105,7 @@
   right: 0;
   bottom: 6px;
   text-align: center;
-  font-size: 13px;
+  font-size: var(--fs-body);
   line-height: 1;
 }
 .bookmark-page-tile .tile-mark.is-add { color: var(--accent); }
