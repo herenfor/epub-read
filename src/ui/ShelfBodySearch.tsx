@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { useExitPresence } from "./menuMotion";
+import { pageCloseMs, useExitPresence } from "./menuMotion";
 import { useUiText } from "./localization/UiLanguageProvider";
 import { getSearchStatusLabel, SearchIndexCard, SearchResultList } from "./SearchPanel";
 import type { ShelfBodySearchProps } from "./ShelfView";
@@ -71,7 +71,7 @@ export function ShelfBodySearchPage(props: {
   onManageIndex?(): void;
 }) {
   const { t } = useUiText();
-  const { present, closing } = useExitPresence(props.open);
+  const { present, closing } = useExitPresence(props.open, pageCloseMs);
   const inputRef = useRef<HTMLInputElement | null>(null);
   useEffect(() => {
     if (props.open) inputRef.current?.focus();

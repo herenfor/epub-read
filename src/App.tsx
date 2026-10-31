@@ -70,6 +70,7 @@ import { resolveReaderLoadFeedback } from "./ui/loadingFeedback";
 import { WhisperFooter, type WhisperFooterChapterTick } from "./ui/WhisperFooter";
 import { BatteryIndicator } from "./ui/BatteryIndicator";
 import { ReaderOpening } from "./ui/ReaderOpening";
+import { runPageTransition } from "./ui/pageTransition";
 import { readBatteryIndicatorEnabled, writeBatteryIndicatorEnabled } from "./ui/batteryPreferences";
 import { readTitlebarAutoHide, writeTitlebarAutoHide } from "./ui/titlebarPreferences";
 import { readTapRegionPreferences, writeTapRegionPreferences } from "./ui/tapRegionPreferences";
@@ -4330,7 +4331,8 @@ export default function App() {
     if (countSummary.complete) persistChapterCountCache();
   }, [countProgressSignature, countSummary.complete, persistChapterCountCache]);
 
-  const leaveReader = useCallback(async (leaveUnsaved: boolean): Promise<boolean> => {
+  /** `animate`: the user is going back to the library, not switching books through it. */
+  const leaveReader = useCallback(async (leaveUnsaved: boolean, animate = false): Promise<boolean> => {
     // 返回书架前先关浮层，再释放整本书的 ResourceServer。
     closeImageOverlay();
     persistShelfProgress(true);
@@ -4374,29 +4376,35 @@ export default function App() {
       setShelfBusy(false);
       return false;
     }
-    closeForeground();
-    setSearchQuery("");
-    setDiagText(null);
-    chapterCountJobRef.current?.cancel();
-    chapterCountJobRef.current = null;
-    sessionGenerationRef.current++;
-    activeSessionRef.current = null;
-    if (bookRef.current) {
-      disposeBook(bookRef.current);
-      bookRef.current = null;
-    }
-    setCurrentShelfId(null);
-    // Final progress is committed above; this is the sync's "left the reader" moment.
-    noteCloudSyncChange("reader-closed");
-    // 只先切换视图。下一次 React 提交会卸载 ReaderView；ReaderView cleanup
-    // 先 dispose paginator、再 revoke ResourceServer，随后会话清理 effect
-    // 才清空 book/server 等状态，避免 iframe 仍在读资源时提前撤销。
-    setView("shelf");
-    shelfBusyRef.current = false;
-    setShelfBusy(false);
+    const switchToShelf = (): void => {
+      closeForeground();
+      setSearchQuery("");
+      setDiagText(null);
+      chapterCountJobRef.current?.cancel();
+      chapterCountJobRef.current = null;
+      sessionGenerationRef.current++;
+      activeSessionRef.current = null;
+      if (bookRef.current) {
+        disposeBook(bookRef.current);
+        bookRef.current = null;
+      }
+      setCurrentShelfId(null);
+      // Final progress is committed above; this is the sync's "left the reader" moment.
+      noteCloudSyncChange("reader-closed");
+      // 只先切换视图。下一次 React 提交会卸载 ReaderView；ReaderView cleanup
+      // 先 dispose paginator、再 revoke ResourceServer，随后会话清理 effect
+      // 才清空 book/server 等状态，避免 iframe 仍在读资源时提前撤销。
+      setView("shelf");
+      shelfBusyRef.current = false;
+      setShelfBusy(false);
+    };
+    // The reader page lifts away over the library. The snapshot is taken before
+    // switchToShelf tears anything down, so the old page is the one the user saw.
+    if (animate) await runPageTransition("back", switchToShelf);
+    else switchToShelf();
     return true;
   }, [persistShelfProgress, persistChapterCountCache, closeForeground, closeImageOverlay, retainUnsavedSample]);
-  const handleBackToShelf = useCallback(() => leaveReader(false), [leaveReader]);
+  const handleBackToShelf = useCallback(() => leaveReader(false, true), [leaveReader]);
 
   const readerTabsRef = useRef(readerTabs);
   readerTabsRef.current = readerTabs;
@@ -4575,7 +4583,7 @@ export default function App() {
     if (!prompt) return;
     setSaveFailurePrompt(null);
     if (prompt.kind === "window") void windowCloseRef.current?.(leaveUnsaved);
-    else void leaveReader(leaveUnsaved);
+    else void leaveReader(leaveUnsaved, true);
   }, [leaveReader, saveFailurePrompt]);
   const dismissSaveFailurePrompt = useCallback((): void => setSaveFailurePrompt(null), []);
 

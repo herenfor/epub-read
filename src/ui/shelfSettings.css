@@ -388,11 +388,13 @@
   box-sizing: border-box;
   background: var(--panel-surface);
   color: var(--fg);
-  animation: shelf-settings-slide-in var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1) both;
+  /* Full-screen page (motionKinds.css). The library is this layer's parent,
+     so it stays put instead of stepping back. */
+  animation: page-arrive var(--page-in) var(--ease-emphasized) both;
 }
 
 .shelf-settings-layer.is-page.is-closing .shelf-settings-sheet {
-  animation: shelf-settings-slide-out var(--menu-close) ease both;
+  animation: page-depart var(--page-out) var(--ease-standard) both;
 }
 
 .shelf-settings-sheet .shelf-settings-head {
@@ -979,11 +981,11 @@
   box-sizing: border-box;
   background: var(--bg);
   color: var(--fg);
-  animation: shelf-settings-slide-in var(--menu-open) cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: page-arrive var(--page-in) var(--ease-emphasized) both;
 }
 
 .shelf-body-search-page.is-closing {
-  animation: shelf-settings-slide-out var(--menu-close) ease both;
+  animation: page-depart var(--page-out) var(--ease-standard) both;
 }
 
 .shelf-body-search-page-head {
@@ -1025,8 +1027,6 @@
 @keyframes shelf-settings-pane-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes shelf-settings-fade-out { from { opacity: 1; } to { opacity: 0; } }
 @keyframes shelf-settings-pop-in { from { opacity: 0; transform: translateY(8px) scale(0.98); } to { opacity: 1; transform: none; } }
-@keyframes shelf-settings-slide-in { from { transform: translateX(100%); } to { transform: none; } }
-@keyframes shelf-settings-slide-out { from { transform: none; } to { transform: translateX(100%); } }
 @keyframes shelf-filter-drop-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
 @keyframes shelf-filter-sheet-up { from { transform: translateY(100%); } to { transform: none; } }
 @keyframes shelf-filter-sheet-down { from { transform: none; } to { transform: translateY(100%); } }

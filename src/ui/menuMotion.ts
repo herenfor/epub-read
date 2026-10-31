@@ -4,12 +4,24 @@ import { useCallback, useEffect, useRef, useState } from "react";
 export const MENU_OPEN_MS = 300;
 export const MENU_CLOSE_MS = 200;
 
+/** Full-screen page exit (motionKinds.css), full-motion default. */
+export const PAGE_CLOSE_MS = 240;
+
+function cssDurationMs(name: string, fallback: number): number {
+  if (typeof window === "undefined" || typeof window.getComputedStyle !== "function") return fallback;
+  const duration = window.getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  if (!/^\d+(?:\.\d+)?m?s$/.test(duration)) return fallback;
+  return parseFloat(duration) * (duration.endsWith("ms") ? 1 : 1000);
+}
+
 /** CSS is authoritative, including app/system reduced motion. Read only on exit. */
 export function menuCloseMs(): number {
-  if (typeof window === "undefined" || typeof window.getComputedStyle !== "function") return MENU_CLOSE_MS;
-  const duration = window.getComputedStyle(document.documentElement).getPropertyValue("--menu-close").trim();
-  if (!/^\d+(?:\.\d+)?m?s$/.test(duration)) return MENU_CLOSE_MS;
-  return parseFloat(duration) * (duration.endsWith("ms") ? 1 : 1000);
+  return cssDurationMs("--menu-close", MENU_CLOSE_MS);
+}
+
+/** How long a full-screen page stays mounted while it lifts away. */
+export function pageCloseMs(): number {
+  return cssDurationMs("--page-out", PAGE_CLOSE_MS);
 }
 
 /** Locally closed panels: one exit, canceled on external dismissal or unmount. */
@@ -43,7 +55,7 @@ export function useMenuClose(onClose: () => void, open = true) {
  * 关闭时按当前 CSS 时长保留挂载，让退场动画（.is-closing）播完再卸载。
  * 关闭期间重新打开会立即取消退场。
  */
-export function useExitPresence(open: boolean, closeMs?: number): { present: boolean; closing: boolean } {
+export function useExitPresence(open: boolean, closeMs?: number | (() => number)): { present: boolean; closing: boolean } {
   const [present, setPresent] = useState(open);
   useEffect(() => {
     if (open) {
@@ -51,7 +63,8 @@ export function useExitPresence(open: boolean, closeMs?: number): { present: boo
       return;
     }
     if (!present) return;
-    const timer = setTimeout(() => setPresent(false), closeMs ?? menuCloseMs());
+    const ms = typeof closeMs === "function" ? closeMs() : closeMs ?? menuCloseMs();
+    const timer = setTimeout(() => setPresent(false), ms);
     return () => clearTimeout(timer);
   }, [open, present, closeMs]);
   return { present: open || present, closing: !open && present };

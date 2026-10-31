@@ -9,7 +9,7 @@ import { CacheStoragePanel } from "./CacheStoragePanel";
 import { LibraryLocationPanel } from "./LibraryLocationPanel";
 import { CloudSyncPanel } from "./cloudSync/CloudSyncPanel";
 import { useCloudSyncAttention } from "./cloudSync/cloudSyncStore";
-import { useExitPresence } from "./menuMotion";
+import { menuCloseMs, pageCloseMs, useExitPresence } from "./menuMotion";
 import { useUiMotion, type UiMotion } from "./motionPreference";
 import { useUiText } from "./localization/UiLanguageProvider";
 import { useUiLanguageChoice } from "./localization/useUiLanguageChoice";
@@ -128,7 +128,7 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
   const language = useUiLanguageChoice();
   const [uiMotion, setUiMotion] = useUiMotion();
   const capabilities = getRuntimeCapabilities();
-  const { present, closing } = useExitPresence(props.open);
+  const { present, closing } = useExitPresence(props.open, props.presentation === "page" ? pageCloseMs : menuCloseMs);
   const dialog = props.presentation === "dialog";
   const [section, setSection] = useState<ShelfSettingsSection | null>(props.initialSection ?? (dialog ? "appearance" : null));
   const [cacheOpen, setCacheOpen] = useState(false);

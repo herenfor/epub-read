@@ -1,4 +1,5 @@
 @import "./ui/uiTokens.css";
+@import "./ui/motionKinds.css";
 @import "./ui/controls/controls.css";
 
 /* Theme bg/fg mirror config/readerPalette.ts; readerPalette.test.ts checks them. */
@@ -5707,6 +5708,11 @@ select option {
   --ui-toggle: 80ms;
   --ui-scrollbar: 120ms;
   --ui-dock: 0ms;
+  /* Pages only fade: no scale either way. */
+  --page-in: 120ms;
+  --page-out: 120ms;
+  --page-lift: 1;
+  --page-under: 1;
 }
 
 /* [F5] 低特效（界面动画→简化）：界面毛玻璃一律改用面板自身底色（各面板底色
@@ -5758,6 +5764,10 @@ select option {
     --ui-toggle: 0ms;
     --ui-scrollbar: 0ms;
     --ui-dock: 0ms;
+    --page-in: 0ms;
+    --page-out: 0ms;
+    --page-lift: 1;
+    --page-under: 1;
   }
 }
 
