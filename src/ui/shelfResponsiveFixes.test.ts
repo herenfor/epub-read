@@ -4,7 +4,7 @@ import { emptyOrganization } from "./libraryOrganization";
 import { ShelfView, type ShelfViewProps } from "./ShelfView";
 import type { ShelfEntry } from "./shelf";
 import { createReactDomHarness } from "../test/reactDomHarness";
-import { MENU_CLOSE_MS } from "./menuMotion";
+import { MENU_CLOSE_MS, PAGE_CLOSE_MS } from "./menuMotion";
 
 function makeEntry(id: string, title: string): ShelfEntry {
   return {
@@ -107,7 +107,8 @@ describe("第三步补修：书架触摸长按与子菜单 Back", () => {
       expect(labels).toEqual(expect.arrayContaining(["外观", "数据与备份", "关于"]));
       await dom.run(() => { expect(back?.()).toBe(true); });
       expect(dom.container.querySelector(".shelf-settings-layer")?.className).toContain("is-closing");
-      await dom.run(() => new Promise<void>((resolve) => setTimeout(resolve, MENU_CLOSE_MS + 20)));
+      // The phone settings page leaves as a page, on the page exit time.
+      await dom.run(() => new Promise<void>((resolve) => setTimeout(resolve, PAGE_CLOSE_MS + 20)));
       expect(dom.container.querySelector(".shelf-settings-layer")).toBeNull();
       await dom.run(() => { expect(back?.()).toBe(false); });
     } finally {
