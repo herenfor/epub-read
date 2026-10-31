@@ -32,6 +32,28 @@
   --edge-fade-bottom: 36px;
 }
 
+/*
+ * No fade while the panel arrives: a masked scroller makes the GPU draw the
+ * moving panel offscreen every frame (phone TOC drawer: 3 dropped frames,
+ * 1 without). The mask comes on once a sheet entrance would be over.
+ * Zero specificity, so a scroller's own animation wins.
+ */
+@keyframes edge-fade-hold {
+  from, to {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+}
+
+:where([data-edge-fade]) {
+  animation: edge-fade-hold calc(var(--sheet-in) + var(--motion-defer)) step-end;
+}
+
+/* Panels kept mounted while closed hold again on every opening. */
+:is(.sidebar-drawer.is-closed, .aa-popover.is-warm) [data-edge-fade] {
+  animation: none;
+}
+
 /* A held slider shows only its own row; nothing around it fades. */
 [data-slider-focus] [data-edge-fade] {
   -webkit-mask-image: none;
