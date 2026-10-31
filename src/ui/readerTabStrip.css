@@ -122,7 +122,7 @@
 }
 
 .reader-tab-panel-row + .reader-tab-panel-row {
-  border-top: 1px solid var(--panel-border);
+  border-top: var(--hairline) solid var(--panel-border);
 }
 
 .reader-tab-panel-row.is-active {

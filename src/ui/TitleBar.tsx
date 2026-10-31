@@ -580,12 +580,12 @@ export const TitleBar: React.FC<TitleBarProps> = ({
                 aria-label={isMaximized ? t("titlebar.restore") : t("titlebar.maximize")}
               >
                 {isMaximized ? (
-                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor">
+                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" data-icon-stroke="own">
                     <path d="M2.5 7.5H1.5V1.5H7.5V2.5" strokeWidth="1" />
                     <rect x="2.5" y="2.5" width="6" height="6" strokeWidth="1" />
                   </svg>
                 ) : (
-                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor">
+                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" data-icon-stroke="own">
                     <rect x="0.5" y="0.5" width="9" height="9" strokeWidth="1" />
                   </svg>
                 )}
@@ -597,7 +597,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
                 title={t("titlebar.close")}
                 aria-label={t("titlebar.close")}
               >
-                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor">
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" data-icon-stroke="own">
                   <path d="M1 1L9 9M9 1L1 9" strokeWidth="1.2" strokeLinecap="round" />
                 </svg>
               </button>

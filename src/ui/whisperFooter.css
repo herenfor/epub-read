@@ -45,7 +45,7 @@
   background: color-mix(in srgb, var(--bg, #ffffff) 92%, transparent);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border-top: 1px solid color-mix(in srgb, var(--panel-border) 25%, transparent);
+  border-top: var(--hairline) solid color-mix(in srgb, var(--panel-border) 25%, transparent);
   box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.04);
 }
 
@@ -239,7 +239,7 @@
   background: color-mix(in srgb, var(--bg) 94%, transparent);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
-  border-top: 1px solid color-mix(in srgb, var(--panel-border) 42%, transparent);
+  border-top: var(--hairline) solid color-mix(in srgb, var(--panel-border) 42%, transparent);
   box-shadow: 0 -5px 18px rgba(0, 0, 0, 0.07);
 }
 

@@ -44,6 +44,19 @@
   --r-lg: 16px;
   --r-xl: 20px;
   --r-full: 999px;
+
+  /* Line icons draw at this many screen pixels whatever their viewBox or size. */
+  --icon-stroke: 1.5px;
+
+  /* Panel outlines and separators: one device pixel on high-density screens.
+     Controls keep 1px borders; their selected states draw on them. */
+  --hairline: 1px;
+}
+
+@media (min-resolution: 2dppx) {
+  :root {
+    --hairline: 0.5px;
+  }
 }
 
 /* Resolve theme-dependent mixes on .app, where the theme variables are defined.

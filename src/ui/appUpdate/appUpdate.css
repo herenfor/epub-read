@@ -5,7 +5,7 @@
   flex-direction: column;
   gap: 10px;
   padding-top: 14px;
-  border-top: 1px solid color-mix(in srgb, var(--panel-border) 60%, transparent);
+  border-top: var(--hairline) solid color-mix(in srgb, var(--panel-border) 60%, transparent);
 }
 
 .about-update-main {

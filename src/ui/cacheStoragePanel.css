@@ -21,7 +21,7 @@
   max-height: min(760px, calc(100vh - 48px));
   overflow: auto;
   padding: 20px;
-  border: 1px solid var(--panel-border);
+  border: var(--hairline) solid var(--panel-border);
   border-radius: var(--r-lg);
   background: var(--panel-bg);
   color: var(--fg);

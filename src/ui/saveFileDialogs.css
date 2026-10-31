@@ -12,7 +12,7 @@
   width: min(520px, 100%);
   max-height: min(680px, calc(100vh - 32px));
   overflow: auto;
-  border: 1px solid var(--panel-border);
+  border: var(--hairline) solid var(--panel-border);
   border-radius: var(--r-xl);
   background: var(--panel-bg);
   color: var(--fg);
@@ -107,7 +107,7 @@
   justify-content: flex-end;
   gap: 10px;
   padding: 12px 20px 18px;
-  border-top: 1px solid var(--panel-border);
+  border-top: var(--hairline) solid var(--panel-border);
 }
 
 .save-file-dialog-actions button,

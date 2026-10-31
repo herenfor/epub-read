@@ -95,7 +95,7 @@
 }
 
 .cte-color-row + .cte-color-row {
-  border-top: 1px solid var(--panel-border);
+  border-top: var(--hairline) solid var(--panel-border);
 }
 
 .cte-color-head {
