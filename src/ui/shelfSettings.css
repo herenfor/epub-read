@@ -3,11 +3,6 @@
 
 /* ---- 通用控件 ---- */
 /* Look: controls/controls.css. */
-.shelf-segmented {
-  display: inline-flex;
-  flex-wrap: wrap;
-}
-
 /* ---- 设置页 ---- */
 .shelf-settings-layer {
   position: fixed;

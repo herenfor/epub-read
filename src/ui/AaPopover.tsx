@@ -587,6 +587,7 @@ export const AaPopover = React.memo(function AaPopover({
       <div className="aa-group-title">{t("aa.group.layoutTurning")}</div>
       <div className="aa-card">
         <div className="aa-control-row">
+          <span className="aa-row-label">{t("aa.presentation.group")}</span>
           {segmented(t("aa.presentation.group"), presentation,
             (["single", "spread", "scroll"] as const).map((choice) => ({ value: choice, label: t(`aa.presentation.${choice}` as PlainMessageKey) })),
             handlePresentationClick)}

@@ -118,17 +118,7 @@
   flex-shrink: 0;
 }
 
-/* 分段按钮胶囊 */
-/* Look: controls/controls.css. */
-.aa-segmented-capsule {
-  display: inline-flex;
-  align-items: stretch;
-  flex: 1;
-}
-
-.aa-segmented-btn {
-  flex: 1;
-}
+/* 分段按钮胶囊：外观与尺寸见 controls/controls.css。 */
 
 /* 开关行 */
 

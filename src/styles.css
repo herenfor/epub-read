@@ -3262,14 +3262,11 @@ select option {
 .font-import-btn:disabled { opacity: 0.55; cursor: default; }
 .font-settings-filter { display: flex; flex: none; align-items: center; gap: 12px; }
 .font-settings-panel .font-settings-filter { flex-wrap: wrap; row-gap: 6px; }
-.font-settings-panel .font-settings-filter .font-settings-tabs { flex: 1 1 100%; min-width: 0; }
 .font-settings-panel .font-settings-filter .font-override-switch { margin-left: auto; }
-.font-settings-filter .aa-segmented-btn { flex: 1 1 auto; min-width: 0; padding: 0 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.font-settings-filter .aa-segmented-btn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .font-override-switch > span:first-child { white-space: nowrap; }
 .font-override-switch { display: inline-flex; flex: none; align-items: center; gap: 8px; color: var(--fg); font-size: var(--fs-body); cursor: pointer; }
 .font-override-switch:has(input:disabled) { opacity: 0.5; cursor: default; }
-/* 系统/已导入：与 Aa 里的分段胶囊同款（aa-segmented-capsule），占满一行。 */
-.font-settings-panel .font-settings-tabs { display: flex; flex: none; }
 .font-settings-scroll { min-height: 0; flex: 1; overflow: auto; }
 .font-settings-section { padding: 10px 4px 5px; color: var(--muted); font-size: var(--fs-caption); font-weight: 700; }
 .font-settings-row-wrap { display: flex; align-items: center; min-height: 36px; }
@@ -5371,11 +5368,11 @@ select option {
   max-height: calc(var(--visual-viewport-height, 100vh) - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 24px);
 }
 
-/* 触摸面板内关键动作至少 44px 命中区。 */
+/* 触摸面板内关键动作至少 44px 命中区；分段按钮在 controls.css 里用伪元素补命中区。 */
 .app[data-touch-ui="true"] .search-panel button,
 .app[data-touch-ui="true"] .sidebar-drawer button,
-.app[data-touch-ui="true"] .aa-popover button,
-.app[data-touch-ui="true"] .aa-display-body button,
+.app[data-touch-ui="true"] .aa-popover button:not(:is(.ui-segmented, .aa-segmented-capsule, .shelf-segmented, .lan-segmented) > button),
+.app[data-touch-ui="true"] .aa-display-body button:not(:is(.ui-segmented, .aa-segmented-capsule, .shelf-segmented, .lan-segmented) > button),
 .app[data-touch-ui="true"] .note-composer button {
   min-height: 44px;
 }
@@ -5641,8 +5638,8 @@ select option {
 
 .app[data-touch-ui="true"] .search-panel button,
 .app[data-touch-ui="true"] .sidebar-drawer button,
-.app[data-touch-ui="true"] .aa-popover button,
-.app[data-touch-ui="true"] .aa-display-body button,
+.app[data-touch-ui="true"] .aa-popover button:not(:is(.ui-segmented, .aa-segmented-capsule, .shelf-segmented, .lan-segmented) > button),
+.app[data-touch-ui="true"] .aa-display-body button:not(:is(.ui-segmented, .aa-segmented-capsule, .shelf-segmented, .lan-segmented) > button),
 .app[data-touch-ui="true"] .note-composer button {
   min-height: 48px;
 }

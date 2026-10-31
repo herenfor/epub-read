@@ -693,11 +693,6 @@
 /* ---------- connected ---------- */
 
 /* Look: controls/controls.css. */
-.lan-segmented {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-}
-
 .lan-hint {
   margin: 0;
   color: var(--muted);

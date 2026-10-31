@@ -5,23 +5,34 @@
  * their look from here.
  */
 
-/* ---- Segmented control: gray track, white selected block; 32 tall (touch 36). ---- */
+/* ---- Segmented control: gray track, white selected block; 32 tall (touch 36). ----
+   Sized by its labels, never stretched across the row: every segment takes the
+   width of the longest label, so controls with the same options line up.
+   The selected block sits 4px inside the track and is concentric with it. */
 :is(.ui-segmented, .aa-segmented-capsule, .shelf-segmented, .lan-segmented) {
+  display: inline-grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  align-items: stretch;
+  flex: none;
   box-sizing: border-box;
+  width: max-content;
+  max-width: 100%;
   height: auto;
   min-height: 32px;
-  padding: 2px;
-  gap: 2px;
+  padding: 4px;
+  gap: 0;
   border-radius: var(--r-sm);
   background: var(--ui-segment-bg);
 }
 
 :is(.ui-segmented, .aa-segmented-capsule, .shelf-segmented, .lan-segmented) > button {
+  min-width: 0;
   height: auto;
-  min-height: 28px;
-  padding: 0 10px;
+  min-height: 24px;
+  padding: 0 14px;
   border: 0;
-  border-radius: var(--r-sm);
+  border-radius: var(--r-xs);
   background: transparent;
   color: var(--muted);
   font: inherit;
@@ -39,11 +50,6 @@
   background: var(--panel-card);
   color: var(--fg);
   font-weight: 600;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-}
-
-.app[data-tone="dark"] :is(.ui-segmented, .aa-segmented-capsule, .shelf-segmented, .lan-segmented) > button:is(.active, [aria-checked="true"], [aria-pressed="true"]) {
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
 }
 
 :is(.ui-segmented, .aa-segmented-capsule, .shelf-segmented, .lan-segmented) > button:disabled {
@@ -56,8 +62,16 @@
 }
 
 .app[data-touch-ui="true"] :is(.ui-segmented, .aa-segmented-capsule, .shelf-segmented, .lan-segmented) > button {
-  min-height: 32px;
+  position: relative;
+  min-height: 28px;
   font-size: var(--fs-emph);
+}
+
+/* The visible block stays 28 tall; the touch target extends 10px above and below it, 48 in all. */
+.app[data-touch-ui="true"] :is(.ui-segmented, .aa-segmented-capsule, .shelf-segmented, .lan-segmented) > button::after {
+  content: "";
+  position: absolute;
+  inset: -10px 0;
 }
 
 /* ---- Buttons: primary (solid), secondary (outline), danger (red outline). 32 tall (touch 36). ---- */
