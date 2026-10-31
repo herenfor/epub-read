@@ -28,11 +28,14 @@ export class ExternalOpenPump {
   private stale = true;
   private failed: ExternalOpenRequest | null = null;
   private stopped = false;
+  /** Bumped by every native notice, so an empty read that raced one is not trusted. */
+  private notices = 0;
 
   constructor(private readonly deps: ExternalOpenPumpDeps) {}
 
   /** A native "pending" notice: the queue changed. */
   notify(): void {
+    this.notices++;
     this.stale = true;
     this.kick();
   }
@@ -75,16 +78,30 @@ export class ExternalOpenPump {
 
   private async run(): Promise<void> {
     this.running = true;
+    let seen = this.notices;
     try {
       do {
         this.again = false;
         while (!this.stopped && !this.failed) {
+          seen = this.notices;
           const request = await this.deps.peek();
+          // The host may have gone away while the native read was pending.
+          if (this.stopped) return;
           if (!request) {
+            // A notice during the read may name a request it did not see yet.
+            if (this.notices !== seen) continue;
             this.stale = false;
             break;
           }
-          const outcome = await this.deps.process(request);
+          let outcome: ExternalOpenOutcome;
+          try {
+            outcome = await this.deps.process(request);
+          } catch (error) {
+            // An import or open that throws is this request's failure: show the
+            // reason and hold it for retry or close like any other failure.
+            this.deps.onError(error);
+            outcome = "failed";
+          }
           if (this.stopped) return;
           if (outcome === "wait") break;
           if (outcome === "failed") {
@@ -97,11 +114,14 @@ export class ExternalOpenPump {
         }
       } while (this.again && this.stale && !this.failed && !this.stopped);
     } catch (error) {
-      // Native state unreadable: report once and wait for the next notice.
-      this.stale = false;
+      // Native state unreadable: report once and wait for the next notice,
+      // unless one already arrived during the failed call.
+      if (this.notices === seen) this.stale = false;
       this.deps.onError(error);
     } finally {
       this.running = false;
     }
+    // Only an error exit can leave a folded kick behind; kick() rechecks the state.
+    if (this.again) this.kick();
   }
 }
