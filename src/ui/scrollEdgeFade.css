@@ -33,11 +33,11 @@
 }
 
 /*
- * No fade while the panel arrives: a masked scroller makes the GPU draw the
- * moving panel offscreen every frame (phone TOC drawer: 3 dropped frames,
- * 1 without). The mask comes on once a sheet entrance would be over.
- * Touch panels that use the bars below never hold.
- * Zero specificity, so a scroller's own animation wins.
+ * No fade on touch while the panel arrives: a masked scroller makes the GPU
+ * draw the moving panel offscreen every frame (phone TOC drawer: 3 dropped
+ * frames, 1 without). The mask comes on once a sheet entrance would be over.
+ * Touch panels that use the bars below never hold; desktop draws the mask
+ * from the first frame. Zero specificity, so a scroller's own animation wins.
  */
 @keyframes edge-fade-hold {
   from, to {
@@ -46,7 +46,7 @@
   }
 }
 
-:where([data-edge-fade]) {
+:where(.app[data-touch-ui="true"] [data-edge-fade]) {
   animation: edge-fade-hold calc(var(--sheet-in) + var(--motion-defer)) step-end;
 }
 
