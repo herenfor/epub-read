@@ -261,6 +261,60 @@ describe("Aa 自定义主题", () => {
     expect(roomy).not.toMatch(/ui-theme-card is-new" disabled/);
   });
 
+  it("鼠标：滚轮先横滚主题行、到头交还面板；按住拖动平移且松手不选中", async () => {
+    const dom = createReactDomHarness({ resizeObserver: true, animationFrames: 0 });
+    const custom = controls(6);
+    const onThemeChange = vi.fn();
+    try {
+      await dom.render(createElement(AaPopover, { ...base, theme: "light", onThemeChange, customThemes: { ...custom, activeId: null } }));
+      const row = dom.container.querySelector(".ui-theme-cards.is-row") as HTMLElement;
+      Object.defineProperty(row, "scrollWidth", { configurable: true, value: 800 });
+      Object.defineProperty(row, "clientWidth", { configurable: true, value: 300 });
+      Object.defineProperty(row, "scrollBy", { configurable: true, value: ({ left }: { left: number }) => { row.scrollLeft += left; } });
+      row.scrollLeft = 0;
+      const pointer = (type: string, x: number) =>
+        Object.assign(new dom.window.Event(type, { bubbles: true, cancelable: true }), { pointerId: 3, pointerType: "mouse", button: 0, clientX: x, clientY: 20 });
+      const wheel = (deltaY: number, deltaX = 0) =>
+        Object.assign(new dom.window.Event("wheel", { bubbles: true, cancelable: true }), { deltaX, deltaY, deltaMode: 0, ctrlKey: false });
+
+      const down = wheel(100);
+      await dom.dispatch(row, down);
+      expect(row.scrollLeft).toBe(100);
+      expect(down.defaultPrevented).toBe(true);
+      // A sideways touchpad swipe is the browser's own.
+      const sideways = wheel(5, 40);
+      await dom.dispatch(row, sideways);
+      expect(sideways.defaultPrevented).toBe(false);
+      row.scrollLeft = 500;
+      const atEnd = wheel(100);
+      await dom.dispatch(row, atEnd);
+      expect(atEnd.defaultPrevented).toBe(false);
+
+      row.scrollLeft = 200;
+      const card = row.querySelectorAll(".ui-theme-card")[1] as HTMLElement;
+      await dom.dispatch(card, pointer("pointerdown", 150));
+      await dom.dispatch(row, pointer("pointermove", 152));
+      expect(row.scrollLeft).toBe(200);
+      await dom.dispatch(row, pointer("pointermove", 90));
+      expect(row.scrollLeft).toBe(260);
+      expect(row.classList.contains("is-dragging")).toBe(true);
+      // The release and its click arrive together, as a browser sends them.
+      await dom.dispatch(row, pointer("pointerup", 90));
+      card.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+      expect(onThemeChange).not.toHaveBeenCalled();
+      expect(row.classList.contains("is-dragging")).toBe(false);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      // A plain click right after still chooses.
+      await dom.dispatch(card, pointer("pointerdown", 150));
+      await dom.dispatch(card, pointer("pointerup", 150));
+      await dom.click(card);
+      expect(onThemeChange).toHaveBeenCalledTimes(1);
+      expect(onThemeChange).toHaveBeenCalledWith("sepia");
+    } finally {
+      await dom.dispose();
+    }
+  });
+
   it("点编辑笔在面板里换成编辑页，改色立即提交，返回回到主页", async () => {
     const dom = createReactDomHarness({ resizeObserver: true, animationFrames: 0 });
     const custom = controls(2);

@@ -187,6 +187,12 @@
   mask-image: linear-gradient(to right, transparent 0, #000 var(--hfade-left, 0px), #000 calc(100% - var(--hfade-right, 0px)), transparent 100%);
 }
 
+/* A mouse drag pans the row; no text gets selected on the way. */
+.ui-theme-cards.is-row.is-dragging {
+  cursor: grabbing;
+  user-select: none;
+}
+
 .ui-theme-cards.is-row::-webkit-scrollbar {
   display: none;
 }

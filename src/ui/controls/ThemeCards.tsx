@@ -48,6 +48,80 @@ function useHorizontalEdgeFade(enabled: boolean) {
   return ref;
 }
 
+/** A press that moves this far is a drag of the row, not a click on a card. */
+const ROW_DRAG_THRESHOLD_PX = 5;
+
+/**
+ * A mouse reaches the cards a sideways row hides: the wheel scrolls the row
+ * until its end, then the page around it scrolls on; a press-and-drag pans it
+ * and the card under the release is not chosen. Touch keeps native scrolling.
+ */
+function useRowMouseScroll(ref: { current: HTMLDivElement | null }, enabled: boolean) {
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element || !enabled) return;
+    const onWheel = (event: WheelEvent) => {
+      if (event.ctrlKey || Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return;
+      const delta = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
+      const room = delta > 0
+        ? element.scrollWidth - element.clientWidth - element.scrollLeft
+        : element.scrollLeft;
+      if (room <= 1) return;
+      event.preventDefault();
+      // A wheel notch glides; a touchpad's small steps follow the fingers.
+      element.scrollBy({ left: delta, behavior: Math.abs(delta) >= 50 ? "smooth" : "auto" });
+    };
+    let press: { pointerId: number; x: number; scrollLeft: number; dragging: boolean } | null = null;
+    let swallowClick = false;
+    const onPointerDown = (event: PointerEvent) => {
+      swallowClick = false;
+      if (event.pointerType !== "mouse" || event.button !== 0) return;
+      if (element.scrollWidth <= element.clientWidth + 1) return;
+      press = { pointerId: event.pointerId, x: event.clientX, scrollLeft: element.scrollLeft, dragging: false };
+    };
+    const onPointerMove = (event: PointerEvent) => {
+      if (!press || event.pointerId !== press.pointerId) return;
+      const dx = event.clientX - press.x;
+      if (!press.dragging) {
+        if (Math.abs(dx) < ROW_DRAG_THRESHOLD_PX) return;
+        press.dragging = true;
+        element.setPointerCapture?.(event.pointerId);
+        element.classList.add("is-dragging");
+      }
+      element.scrollLeft = press.scrollLeft - dx;
+    };
+    const onPointerEnd = (event: PointerEvent) => {
+      if (!press || event.pointerId !== press.pointerId) return;
+      swallowClick = press.dragging;
+      press = null;
+      // The click, if any, follows the release at once; a later one is real.
+      if (swallowClick) setTimeout(() => { swallowClick = false; }, 0);
+      element.classList.remove("is-dragging");
+    };
+    const onClickCapture = (event: MouseEvent) => {
+      if (!swallowClick) return;
+      swallowClick = false;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    element.addEventListener("wheel", onWheel, { passive: false });
+    element.addEventListener("pointerdown", onPointerDown);
+    element.addEventListener("pointermove", onPointerMove);
+    element.addEventListener("pointerup", onPointerEnd);
+    element.addEventListener("pointercancel", onPointerEnd);
+    element.addEventListener("click", onClickCapture, true);
+    return () => {
+      element.removeEventListener("wheel", onWheel);
+      element.removeEventListener("pointerdown", onPointerDown);
+      element.removeEventListener("pointermove", onPointerMove);
+      element.removeEventListener("pointerup", onPointerEnd);
+      element.removeEventListener("pointercancel", onPointerEnd);
+      element.removeEventListener("click", onClickCapture, true);
+      element.classList.remove("is-dragging");
+    };
+  }, [ref, enabled]);
+}
+
 /**
  * One theme picker for Settings › Appearance and Aa: an "Aa" sample on each
  * paper, with its name. With custom themes the row ("row") scrolls sideways
@@ -68,6 +142,7 @@ export function ThemeCards(props: {
   const custom = props.custom;
   const scrolls = Boolean(custom) && props.layout !== "grid";
   const rowRef = useHorizontalEdgeFade(scrolls);
+  useRowMouseScroll(rowRef, scrolls);
   const activeId = custom?.activeId ?? null;
   // Keep the selected card in view when the row opens or the selection moves.
   useLayoutEffect(() => {
