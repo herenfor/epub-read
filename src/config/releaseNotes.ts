@@ -35,37 +35,24 @@ export const RELEASES_PAGE_URL = "https://github.com/herenfor/epub-read/releases
  */
 export const RELEASE_NOTES: readonly ReleaseNote[] = [
   {
-    version: "0.3.9",
-    status: "released",
-    releasedOn: "2026-11-01",
+    version: "0.3.10",
+    status: "development",
     items: [
       {
         category: "new",
-        text: "系统打开 EPUB：可在文件管理器的“打开方式”中选择 EPUB Reader，导入并打开电子书。",
+        text: "音量键翻页：Android 阅读时，音量下键下一页、音量上键上一页，长按可连续翻页。",
+      },
+      {
+        category: "new",
+        text: "音量键反向：阅读设置中可单独交换两个音量键的翻页方向，不影响点击和滑动翻页。",
       },
       {
         category: "improved",
-        text: "统一界面的字号、圆角、图标和菜单样式，调整全屏页面及弹层动效。",
-      },
-      {
-        category: "improved",
-        text: "优化目录、设置等面板的预绘制和入场过程，减少首次打开时的卡顿。",
-      },
-      {
-        category: "improved",
-        text: "电脑端 Aa 主题行支持鼠标滚轮横向浏览和按住拖动，方便访问更多主题。",
-      },
-      {
-        category: "improved",
-        text: "调整手机书架文件夹的布局，将展开和收起入口放到筛选行。",
+        text: "音量键翻页只在阅读正文时生效；打开设置、目录等浮层或切到后台时恢复系统音量调节。",
       },
       {
         category: "fixed",
-        text: "修复阅读后返回书架时滚动位置回到顶部、文件夹展开状态丢失的问题。",
-      },
-      {
-        category: "fixed",
-        text: "减少返回书架时封面重新加载产生的闪烁。",
+        text: "修复关闭音量键翻页后，旧的翻页状态可能重新接管音量键的问题。",
       },
     ],
   },
