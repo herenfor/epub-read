@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 下载最新版本 / Latest release
+    url: https://github.com/herenfor/epub-read/releases/latest
+    about: 反馈前请先确认用的是最新版本。Please check the latest release before reporting.
+  - name: 想贡献代码？先看许可说明 / Contributing code
+    url: https://github.com/herenfor/epub-read/blob/main/LICENSING.md#contributions
+    about: 本项目不是 OSI 开源许可，提交代码前请先开 Issue 联系维护者。Please open an issue before contributing code.

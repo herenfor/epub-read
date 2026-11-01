@@ -1,0 +1,99 @@
+name: 问题反馈 / Bug report
+description: 应用出错、卡住、闪退或功能不按预期工作。Something in the app is broken or behaves unexpectedly.
+title: "[问题] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！写得越具体，越快能复现和修好。如果是**某本书排版或显示不对**，请改用“书籍显示异常”模板。
+        Thanks for reporting! If one book looks wrong, please use the "Book display problem" form instead.
+
+  - type: input
+    id: version
+    attributes:
+      label: 版本号 / App version
+      description: 书架设置 → 关于 里可以看到。Shown under shelf settings → About.
+      placeholder: 例如 0.3.8
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 平台 / Platform
+      options:
+        - Windows（安装版 / installer）
+        - Windows（便携版 / portable）
+        - Android 手机 / phone
+        - Android 平板 / tablet
+    validations:
+      required: true
+
+  - type: input
+    id: system
+    attributes:
+      label: 系统与设备 / System and device
+      description: 选填。Optional.
+      placeholder: 例如 Windows 11 23H2；三星 S24，Android 15
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 发生了什么 / What happened
+      description: 看到了什么现象？有报错提示的话请原样贴出。Describe what you saw, including any error message.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤 / Steps to reproduce
+      placeholder: |
+        1. 打开书架，点开某本书
+        2. 打开 Aa 面板，把字号调到最大
+        3. 翻到下一章……
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望的结果 / Expected behavior
+    validations:
+      required: true
+
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: 出现频率 / How often
+      options:
+        - 每次都会 / Every time
+        - 有时会 / Sometimes
+        - 只出现过一次 / Only once
+    validations:
+      required: true
+
+  - type: input
+    id: book
+    attributes:
+      label: 相关书籍 / Book
+      description: 如果只在某本书上出现，请写书名（方便的话附上书的来源）。If it only happens with one book, name it.
+
+  - type: textarea
+    id: media
+    attributes:
+      label: 截图、录屏或诊断日志 / Screenshots, recordings or diagnostic log
+      description: |
+        可直接拖入图片或视频。诊断日志在 书架设置 → 诊断日志，或阅读时 Aa 面板底部，截图即可。
+        Drag files in. The diagnostic log is under shelf settings, or at the bottom of the Aa panel.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 确认 / Checklist
+      options:
+        - label: 我搜过已有的 Issue，没有重复。I searched existing issues.
+          required: true
+        - label: 我用的是最新版本，或已写明还没升级的原因。I am on the latest release, or said why not.
+          required: true
