@@ -5140,6 +5140,21 @@ export function ShelfView(props: ShelfViewProps) {
             )}
           </div>
 
+          {/* 手机根层网格：文件夹卡片的展开/收起放在筛选行最右，不再单占一行。 */}
+          {isCompactMobile && scope.type === "root" && viewMode === "grid" && visibleFolders.length > 0 && (
+            <button
+              className={`shelf-folder-toggle-btn${folderPrefixExpanded ? " expanded" : ""}`}
+              type="button"
+              onClick={toggleFolderPrefix}
+              aria-expanded={folderPrefixExpanded}
+              title={t(folderPrefixExpanded ? "shelfMain.folders.collapse.tip" : "shelfMain.folders.expand.tip")}
+              aria-label={t(folderPrefixExpanded ? "shelfMain.folders.collapse.tip" : "shelfMain.folders.expand.tip")}
+            >
+              <span>{t("shelfMain.folders.summary", { count: visibleFolders.length })}</span>
+              {folderPrefixExpanded ? <ChevronUpIcon /> : <ChevronDownIcon />}
+            </button>
+          )}
+
           {/* 当处于特定文件夹时，显示专属状态与退出/管理操作 */}
           {scope.type === "folder" && (
             <div className="shelf-folder-active-bar">
@@ -5498,47 +5513,26 @@ export function ShelfView(props: ShelfViewProps) {
         </ShelfTableScroller>
       ) : (
         <>
-          {scope.type === "root" && visibleFolders.length > 0 && (
+          {scope.type === "root" && visibleFolders.length > 0 && (!isCompactMobile || folderPrefixExpanded) && (
             <div className="shelf-folder-prefix">
-              {isCompactMobile && (
-                <div className={`shelf-folder-summary-rail${folderPrefixExpanded ? " expanded" : ""}`}>
-                  <div className="shelf-folder-summary-info">
-                    <FolderIcon />
-                    <span>{t("shelfMain.folders.summary", { count: visibleFolders.length })}</span>
-                  </div>
-                  <button
-                    className="shelf-folder-summary-toggle-btn"
-                    type="button"
-                    onClick={toggleFolderPrefix}
-                    aria-expanded={folderPrefixExpanded}
-                    title={t(folderPrefixExpanded ? "shelfMain.folders.collapse.tip" : "shelfMain.folders.expand.tip")}
-                    aria-label={t(folderPrefixExpanded ? "shelfMain.folders.collapse.tip" : "shelfMain.folders.expand.tip")}
-                  >
-                    <span>{t(folderPrefixExpanded ? "shelfMain.folders.collapse" : "shelfMain.folders.expand")}</span>
-                    {folderPrefixExpanded ? <ChevronUpIcon /> : <ChevronDownIcon />}
-                  </button>
-                </div>
-              )}
-              {(!isCompactMobile || folderPrefixExpanded) && (
-                <div className="shelf-grid shelf-folder-grid">
-                  {visibleFolders.map((folder) => (
-                    <ShelfFolderCard
-                      key={folder.id}
-                      id={folder.id}
-                      name={folder.name}
-                      books={folderBooksMap.get(folder.id) ?? []}
-                      provider={thumbnailProvider}
-                      selectionMode={selectionMode}
-                      selectionState={selectionMode ? folderSelectionState(folderBooksMap.get(folder.id) ?? [], selectedIds) : undefined}
-                      onToggleSelected={toggleFolderSelected}
-                      isDropTarget={(dropTarget?.type === "folder" && dropTarget.id === folder.id) || props.externalDropFolderId === folder.id}
-                      menuOpen={openMenuKey === `folder:${folder.id}`}
-                      onOpen={handleOpenFolderModal}
-                      onRequestMenu={canOrganize ? requestMenu : undefined}
-                    />
-                  ))}
-                </div>
-              )}
+              <div className="shelf-grid shelf-folder-grid">
+                {visibleFolders.map((folder) => (
+                  <ShelfFolderCard
+                    key={folder.id}
+                    id={folder.id}
+                    name={folder.name}
+                    books={folderBooksMap.get(folder.id) ?? []}
+                    provider={thumbnailProvider}
+                    selectionMode={selectionMode}
+                    selectionState={selectionMode ? folderSelectionState(folderBooksMap.get(folder.id) ?? [], selectedIds) : undefined}
+                    onToggleSelected={toggleFolderSelected}
+                    isDropTarget={(dropTarget?.type === "folder" && dropTarget.id === folder.id) || props.externalDropFolderId === folder.id}
+                    menuOpen={openMenuKey === `folder:${folder.id}`}
+                    onOpen={handleOpenFolderModal}
+                    onRequestMenu={canOrganize ? requestMenu : undefined}
+                  />
+                ))}
+              </div>
             </div>
           )}
           <div
