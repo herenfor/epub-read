@@ -1,0 +1,13 @@
+body:
+  - type: markdown
+    attributes:
+      value: |
+        阅读习惯、使用心得、和这个阅读器有关的其他话题都欢迎。请不要分享或索要书籍文件。
+        Reading habits, tips and anything else about the reader are welcome. Please do not share or request book files.
+
+  - type: textarea
+    id: content
+    attributes:
+      label: 内容 / What's on your mind
+    validations:
+      required: true

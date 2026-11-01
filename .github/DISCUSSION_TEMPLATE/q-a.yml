@@ -1,0 +1,41 @@
+title: "[提问] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        使用中遇到疑问可以在这里问，比如某个功能在哪、怎么设置、为什么是这样。确定是程序出错的话，请改开“问题反馈” Issue。
+        Ask how to do something here. If something is broken, please open a bug report issue instead.
+
+  - type: input
+    id: version
+    attributes:
+      label: 版本号 / App version
+      description: 书架设置 → 关于。Shown under shelf settings → About.
+      placeholder: 例如 0.3.8
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 平台 / Platform
+      multiple: true
+      options:
+        - Windows
+        - Android 手机 / phone
+        - Android 平板 / tablet
+    validations:
+      required: true
+
+  - type: textarea
+    id: question
+    attributes:
+      label: 想问什么 / Your question
+    validations:
+      required: true
+
+  - type: textarea
+    id: tried
+    attributes:
+      label: 已经试过的办法 / What you have tried
+      description: 选填，可附截图。Optional; screenshots welcome.
