@@ -1,0 +1,88 @@
+name: 书籍显示异常 / Book display problem
+description: 某本书的排版、图片、字体、目录或注释显示不对。One book's layout, images, fonts, contents or notes look wrong.
+title: "[书籍显示] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        EPUB Reader 会尽量按书本身的排版显示。排版问题往往只在某本书上出现，书名和截图最关键。
+        The reader follows each book's own layout, so the book and a screenshot matter most.
+
+  - type: input
+    id: version
+    attributes:
+      label: 版本号 / App version
+      description: 书架设置 → 关于。Shown under shelf settings → About.
+      placeholder: 例如 0.3.8
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 平台 / Platform
+      multiple: true
+      options:
+        - Windows
+        - Android 手机 / phone
+        - Android 平板 / tablet
+    validations:
+      required: true
+
+  - type: input
+    id: book
+    attributes:
+      label: 书名 / Book title
+      description: 书的名称、出版方或来源。Title, publisher or source.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: 问题类型 / Kind of problem
+      multiple: true
+      options:
+        - 版面、边距或分栏 / Page layout, margins or columns
+        - 图片或插画 / Images or illustrations
+        - 字体或字号 / Fonts or text size
+        - 竖排或从右往左 / Vertical or right-to-left text
+        - 目录或跳转 / Contents or links
+        - 注释或弹注 / Footnotes or pop-up notes
+        - 打开失败或很慢 / Fails to open or very slow
+        - 其他 / Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: where
+    attributes:
+      label: 出现位置与现象 / Where and what
+      description: 第几章或哪一页，看到了什么。Which chapter or page, and what you see.
+    validations:
+      required: true
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: 截图 / Screenshots
+      description: 有条件的话，附一张其他阅读器里同一页的截图作对比。A screenshot of the same page in another reader helps a lot.
+    validations:
+      required: true
+
+  - type: textarea
+    id: settings
+    attributes:
+      label: 调整过的排版设置 / Layout settings you changed
+      description: 选填。比如字号、行高、自定义字体、自定义 CSS、单页/双页/滚动。Optional.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 确认 / Checklist
+      options:
+        - label: 我搜过已有的 Issue，没有重复。I searched existing issues.
+          required: true
+        - label: 我不会在这里上传受版权保护的整本书文件。I will not upload copyrighted book files here.
+          required: true
