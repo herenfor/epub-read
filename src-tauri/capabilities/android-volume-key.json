@@ -1,0 +1,7 @@
+{
+  "identifier": "android-volume-key",
+  "description": "Android-only volume-key plugin event listener used while reading",
+  "platforms": ["android"],
+  "windows": ["main"],
+  "permissions": ["androidVolumeKey:default"]
+}

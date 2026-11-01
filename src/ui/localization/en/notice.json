@@ -9,6 +9,7 @@
   "notice.keepScreenOn.failed": "Failed to set keep screen on: {error}",
   "notice.volumeKeys.saveFailed": "Failed to save volume-key paging setting: {error}",
   "notice.volumeKeys.failed": "Failed to apply volume-key paging: {error}",
+  "notice.volumeKeys.unavailable": "Volume-key paging is unavailable; volume keys still adjust volume",
   "notice.theme.applyFailed": "Failed to switch theme: {error}",
   "notice.busy": "Processing...",
   "notice.discardNote": "Discard unsaved note?",

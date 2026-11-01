@@ -6,6 +6,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke, addPluginListener }));
 
 import {
   createVolumeKeyModeCoordinator,
+  createVolumeKeyModeGate,
   readVolumeKeyReverse,
   readVolumeKeyTurn,
   setNativeVolumeKeyMode,
@@ -81,6 +82,51 @@ describe("Android volume-key paging boundary", () => {
     releaseFirst();
     await first;
     expect(applied).toEqual(["on", "off"]);
+  });
+
+  it("keeps system volume when the native subscription fails", async () => {
+    const apply = vi.fn().mockResolvedValue(undefined);
+    const onFailure = vi.fn();
+    const gate = createVolumeKeyModeGate({
+      ensureSubscription: () => Promise.reject(new Error("ACL denied")),
+      apply,
+      onSubscriptionFailure: onFailure,
+    });
+
+    await gate.request({ readerActive: true, enabled: true, reverse: false, visible: true });
+    expect(apply.mock.calls).toEqual([["off", true]]);
+    expect(onFailure).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not re-arm when a late subscription succeeds after leaving the reader", async () => {
+    let settle!: (value: undefined) => void;
+    const subscription = new Promise<void>((resolve) => { settle = resolve; });
+    const apply = vi.fn().mockResolvedValue(undefined);
+    const gate = createVolumeKeyModeGate({
+      ensureSubscription: () => subscription,
+      apply,
+      onSubscriptionFailure: vi.fn(),
+    });
+
+    const arming = gate.request({ readerActive: true, enabled: true, reverse: false, visible: true });
+    const leaving = gate.request({ readerActive: false, enabled: true, reverse: false, visible: true });
+    settle(undefined);
+    await Promise.all([arming, leaving]);
+    expect(apply.mock.calls).toEqual([["off", true]]);
+  });
+
+  it("turns native off for a blocking overlay without requiring the listener", async () => {
+    const apply = vi.fn().mockResolvedValue(undefined);
+    const ensureSubscription = vi.fn();
+    const gate = createVolumeKeyModeGate({
+      ensureSubscription,
+      apply,
+      onSubscriptionFailure: vi.fn(),
+    });
+
+    await gate.request({ readerActive: false, enabled: true, reverse: false, visible: true });
+    expect(ensureSubscription).not.toHaveBeenCalled();
+    expect(apply.mock.calls).toEqual([["off", true]]);
   });
 
   it("forwards only valid directions and stops after unsubscribe", async () => {

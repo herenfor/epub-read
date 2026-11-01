@@ -86,6 +86,46 @@ export function createVolumeKeyModeCoordinator(apply: (mode: VolumeKeyMode) => P
   };
 }
 
+/**
+ * Arms native only after the JS listener exists. A failed or superseded request
+ * keeps the system volume behavior and reports the failure once per request;
+ * there is no polling or automatic retry loop.
+ */
+export function createVolumeKeyModeGate(options: {
+  ensureSubscription(): Promise<void>;
+  apply(mode: VolumeKeyMode, force?: boolean): Promise<void>;
+  onSubscriptionFailure(error: unknown): void;
+}) {
+  let revision = 0;
+
+  return {
+    request(intent: VolumeKeyIntent): Promise<void> {
+      const current = ++revision;
+      const mode = volumeKeyModeFor(intent);
+      if (mode === "off") return options.apply("off", true);
+
+      return options.ensureSubscription().then(
+        () => {
+          // A newer intent (leaving the reader, opening a panel, hiding the
+          // app) already won while this subscription was settling.
+          if (current !== revision) return;
+          return options.apply(mode, true);
+        },
+        (error: unknown) => {
+          if (current !== revision) return;
+          return options.apply("off", true).catch(() => {}).then(() => {
+            if (current !== revision) return;
+            options.onSubscriptionFailure(error);
+          });
+        },
+      );
+    },
+    cancel(): void {
+      revision += 1;
+    },
+  };
+}
+
 export type VolumeKeyTurnListener = (direction: 1 | -1) => void;
 
 const listeners = new Set<VolumeKeyTurnListener>();
@@ -97,19 +137,24 @@ function normalizeDirection(payload: unknown): 1 | -1 | null {
   return direction === 1 || direction === -1 ? direction : null;
 }
 
-function ensureEventSubscription(): void {
-  eventSubscription ??= addPluginListener<unknown>("androidVolumeKey", "volume-key", (payload) => {
-    const direction = normalizeDirection(payload);
-    if (direction === null) return;
-    // A released listener must not receive a frame that was already queued.
-    for (const listener of Array.from(listeners)) listener(direction);
-  }).catch((error) => {
-    eventSubscription = null;
-    throw error;
-  });
-  void eventSubscription.catch((error) => {
-    console.warn("Volume-key subscription failed", error);
-  });
+function requestEventSubscription(): Promise<PluginListener> {
+  if (!eventSubscription) {
+    eventSubscription = addPluginListener<unknown>("androidVolumeKey", "volume-key", (payload) => {
+      const direction = normalizeDirection(payload);
+      if (direction === null) return;
+      // A released listener must not receive a frame that was already queued.
+      for (const listener of Array.from(listeners)) listener(direction);
+    }).catch((error) => {
+      eventSubscription = null;
+      throw error;
+    });
+  }
+  return eventSubscription;
+}
+
+/** Resolves once the native event listener is registered; rejects on ACL/plugin failure. */
+export function ensureVolumeKeySubscription(): Promise<void> {
+  return requestEventSubscription().then(() => undefined);
 }
 
 /**
@@ -118,7 +163,9 @@ function ensureEventSubscription(): void {
  */
 export function subscribeVolumeKeyTurn(listener: VolumeKeyTurnListener): () => void {
   listeners.add(listener);
-  ensureEventSubscription();
+  void requestEventSubscription().catch((error) => {
+    console.warn("Volume-key subscription failed", error);
+  });
   let active = true;
   return () => {
     if (!active) return;

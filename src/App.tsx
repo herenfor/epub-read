@@ -16,10 +16,11 @@ import {
 } from "./platform/androidReaderKeepScreenOn";
 import {
   createVolumeKeyModeCoordinator,
+  createVolumeKeyModeGate,
+  ensureVolumeKeySubscription,
   readVolumeKeyReverse,
   readVolumeKeyTurn,
   subscribeVolumeKeyTurn,
-  volumeKeyModeFor,
   writeVolumeKeyReverse,
   writeVolumeKeyTurn,
 } from "./platform/androidVolumeKeys";
@@ -2175,6 +2176,18 @@ export default function App() {
     setReaderNotice({ kind, text });
   }, []);
 
+  // Native may take the volume keys only after the event listener is really
+  // registered. A failed subscription stays off and keeps the system volume.
+  const [volumeKeyGate] = useState(() => createVolumeKeyModeGate({
+    ensureSubscription: ensureVolumeKeySubscription,
+    apply: (mode, force) => volumeKeyModes.requestMode(mode, force),
+    onSubscriptionFailure: () => {
+      const message = uiText("notice.volumeKeys.unavailable");
+      if (viewRef.current === "reader") showReaderNotice(message, "warn");
+      else setShelfNotice({ kind: "warn", text: message });
+    },
+  }));
+
   useEffect(() => {
     if (!runtime.supportsReaderSystemStatusBar) return;
     void readerSystemBars.requestHidden(shouldHideReaderSystemStatusBar({
@@ -2224,28 +2237,12 @@ export default function App() {
 
   useEffect(() => {
     if (!runtime.supportsVolumeKeyTurn) return;
-    const submit = (force: boolean) => {
-      void volumeKeyModes.requestMode(volumeKeyModeFor({
-        readerActive: view === "reader",
-        enabled: volumeKeyTurn,
-        reverse: volumeKeyReverse,
-        visible: document.visibilityState !== "hidden",
-      }), force).catch((error) => {
-        const message = uiText("notice.volumeKeys.failed", { error: String(error) });
-        if (view === "reader") showReaderNotice(message, "warn");
-        else setShelfNotice({ kind: "warn", text: message });
-      });
-    };
-    submit(false);
-    const onVisibilityChange = () => submit(true);
-    document.addEventListener("visibilitychange", onVisibilityChange);
-    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
-  }, [view, volumeKeyTurn, volumeKeyReverse, runtime.supportsVolumeKeyTurn, volumeKeyModes, showReaderNotice]);
-  useEffect(() => {
-    if (!runtime.supportsVolumeKeyTurn) return;
     // Leaving the app must never leave volume keys swallowing the system volume.
-    return () => { void volumeKeyModes.requestMode("off").catch(() => {}); };
-  }, [runtime.supportsVolumeKeyTurn, volumeKeyModes]);
+    return () => {
+      volumeKeyGate.cancel();
+      void volumeKeyModes.requestMode("off").catch(() => {});
+    };
+  }, [runtime.supportsVolumeKeyTurn, volumeKeyModes, volumeKeyGate]);
 
   /** 语义锚点失败：解除显示门，但守住进度，直到读者真实移动后再写。 */
   const handleReaderNavigationUnresolved = useCallback((reported: boolean, ticket?: RestoreTicket | null): void => {
@@ -5302,6 +5299,7 @@ export default function App() {
 
   // Android volume keys share the keyboard page-turn guards: panels, the
   // bookmark menu and the image viewer own input while they are open.
+  const volumeKeyInputBlocked = isReaderPanelOpen || bookmarkMenuOpen || imageRequest !== null;
   useEffect(() => {
     if (!runtime.supportsVolumeKeyTurn) return;
     return subscribeVolumeKeyTurn((direction) => {
@@ -5312,6 +5310,31 @@ export default function App() {
       else readerRef.current?.prevPage();
     });
   }, [runtime.supportsVolumeKeyTurn]);
+
+  useEffect(() => {
+    if (!runtime.supportsVolumeKeyTurn) return;
+    const submit = () => {
+      void volumeKeyGate.request({
+        // A blocking overlay, the bookmark menu or the image viewer hands the
+        // volume keys back to the system and cancels any native repeat.
+        readerActive: view === "reader" && !volumeKeyInputBlocked,
+        enabled: volumeKeyTurn,
+        reverse: volumeKeyReverse,
+        visible: document.visibilityState !== "hidden",
+      }).catch((error) => {
+        const message = uiText("notice.volumeKeys.failed", { error: String(error) });
+        if (viewRef.current === "reader") showReaderNotice(message, "warn");
+        else setShelfNotice({ kind: "warn", text: message });
+      });
+    };
+    submit();
+    const onVisibilityChange = () => submit();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      volumeKeyGate.cancel();
+    };
+  }, [view, volumeKeyInputBlocked, volumeKeyTurn, volumeKeyReverse, runtime.supportsVolumeKeyTurn, volumeKeyGate, showReaderNotice]);
 
   // ---- 桌面全局快捷键集中分发与键盘翻页（Zen UI Packet 3 键盘流） ----
   useEffect(() => {

@@ -29,6 +29,8 @@ private class FakeScheduler {
 class ReaderVolumeKeyControllerTest {
   private fun controller(scheduler: FakeScheduler): ReaderVolumeKeyController {
     val controller = ReaderVolumeKeyController(scheduler::postDelayed, scheduler::removeCallbacks)
+    controller.onResume()
+    controller.onWindowFocusChanged(true)
     controller.setMode(ReaderVolumeKeyMode.ON)
     return controller
   }
@@ -89,6 +91,65 @@ class ReaderVolumeKeyControllerTest {
     controller.handleKeyEvent(ReaderVolumeKeyController.KEYCODE_VOLUME_UP, ReaderVolumeKeyController.ACTION_DOWN, 0)
     controller.handleKeyEvent(ReaderVolumeKeyController.KEYCODE_VOLUME_UP, ReaderVolumeKeyController.ACTION_UP, 0)
     assertEquals(listOf(-1, 1), turns)
+  }
+
+  @Test
+  fun pauseAndFocusLossStopInterceptionAndCancelAQueuedRepeat() {
+    val scheduler = FakeScheduler()
+    val turns = mutableListOf<Int>()
+    val controller = controller(scheduler)
+    controller.onTurn = { turns.add(it) }
+
+    controller.handleKeyEvent(ReaderVolumeKeyController.KEYCODE_VOLUME_DOWN, ReaderVolumeKeyController.ACTION_DOWN, 0)
+    controller.onPause()
+    assertEquals(0, scheduler.pending)
+    assertFalse(controller.handleKeyEvent(ReaderVolumeKeyController.KEYCODE_VOLUME_DOWN, ReaderVolumeKeyController.ACTION_DOWN, 0))
+
+    controller.onResume()
+    controller.handleKeyEvent(ReaderVolumeKeyController.KEYCODE_VOLUME_DOWN, ReaderVolumeKeyController.ACTION_DOWN, 0)
+    controller.onWindowFocusChanged(false)
+    assertEquals(0, scheduler.pending)
+    assertFalse(controller.handleKeyEvent(ReaderVolumeKeyController.KEYCODE_VOLUME_DOWN, ReaderVolumeKeyController.ACTION_DOWN, 0))
+
+    controller.onWindowFocusChanged(true)
+    assertTrue(controller.handleKeyEvent(ReaderVolumeKeyController.KEYCODE_VOLUME_DOWN, ReaderVolumeKeyController.ACTION_DOWN, 0))
+    assertEquals(listOf(1, 1, 1), turns)
+  }
+
+  @Test
+  fun lateModeChangeWhilePausedCannotBypassForegroundGate() {
+    val scheduler = FakeScheduler()
+    val turns = mutableListOf<Int>()
+    val controller = controller(scheduler)
+    controller.onTurn = { turns.add(it) }
+
+    controller.onPause()
+    controller.setMode(ReaderVolumeKeyMode.REVERSE)
+    assertEquals(0, scheduler.pending)
+    assertFalse(controller.handleKeyEvent(ReaderVolumeKeyController.KEYCODE_VOLUME_DOWN, ReaderVolumeKeyController.ACTION_DOWN, 0))
+    assertEquals(emptyList<Int>(), turns)
+
+    controller.onResume()
+    assertTrue(controller.handleKeyEvent(ReaderVolumeKeyController.KEYCODE_VOLUME_DOWN, ReaderVolumeKeyController.ACTION_DOWN, 0))
+    assertEquals(listOf(-1), turns)
+  }
+
+  @Test
+  fun reopeningTheOverlayRequiresAFreshPress() {
+    val scheduler = FakeScheduler()
+    val turns = mutableListOf<Int>()
+    val controller = controller(scheduler)
+    controller.onTurn = { turns.add(it) }
+
+    controller.handleKeyEvent(ReaderVolumeKeyController.KEYCODE_VOLUME_DOWN, ReaderVolumeKeyController.ACTION_DOWN, 0)
+    controller.setMode(ReaderVolumeKeyMode.OFF)
+    assertEquals(0, scheduler.pending)
+    controller.setMode(ReaderVolumeKeyMode.ON)
+    assertEquals(0, scheduler.pending)
+    assertEquals(listOf(1), turns)
+
+    assertTrue(controller.handleKeyEvent(ReaderVolumeKeyController.KEYCODE_VOLUME_DOWN, ReaderVolumeKeyController.ACTION_DOWN, 0))
+    assertEquals(listOf(1, 1), turns)
   }
 
   @Test

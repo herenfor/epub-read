@@ -61,6 +61,14 @@ fn main() {
             tauri_build::InlinedPlugin::new()
                 .commands(&["registerListener", "remove_listener"])
                 .default_permission(tauri_build::DefaultPermissionRule::AllowAllCommands),
+        )
+        // Volume keys use the same listener lifecycle. The notification command
+        // stays an app command; only listener registration/removal is exposed.
+        .plugin(
+            "androidVolumeKey",
+            tauri_build::InlinedPlugin::new()
+                .commands(&["registerListener", "remove_listener"])
+                .default_permission(tauri_build::DefaultPermissionRule::AllowAllCommands),
         );
     tauri_build::try_build(attributes).expect("failed to run tauri-build");
 }
