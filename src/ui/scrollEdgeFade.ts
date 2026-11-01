@@ -8,6 +8,29 @@ export function scrollEdgeState(element: Pick<HTMLElement, "scrollTop" | "client
   return [top ? "top" : "", bottom ? "bottom" : ""].filter(Boolean).join(" ");
 }
 
+const EDGE_FADE_LAYOUT_PROPS = {
+  "--edge-fade-gap": (style: CSSStyleDeclaration) => style.display.includes("flex") || style.display.includes("grid") ? style.rowGap : "",
+  "--edge-fade-pad-top": (style: CSSStyleDeclaration) => style.paddingTop,
+  "--edge-fade-pad-bottom": (style: CSSStyleDeclaration) => style.paddingBottom,
+  "--edge-fade-pad-left": (style: CSSStyleDeclaration) => style.paddingLeft,
+  "--edge-fade-pad-right": (style: CSSStyleDeclaration) => style.paddingRight,
+} as const;
+
+/**
+ * The scroller's gap and padding, for the touch fade bars that sit in its
+ * flow (scrollEdgeFade.css). Read on attach and resize, never while scrolling.
+ */
+function writeEdgeFadeLayout(element: HTMLElement): void {
+  const view = element.ownerDocument.defaultView;
+  if (typeof view?.getComputedStyle !== "function") return;
+  const style = view.getComputedStyle(element);
+  for (const [name, read] of Object.entries(EDGE_FADE_LAYOUT_PROPS)) {
+    const value = read(style);
+    const length = value && value !== "normal" ? value : "0px";
+    if (element.style.getPropertyValue(name) !== length) element.style.setProperty(name, length);
+  }
+}
+
 /**
  * Keeps `data-edge-fade` on a scroller in step with its scroll position,
  * size and content (see scrollEdgeFade.css). The attribute is written
@@ -16,17 +39,26 @@ export function scrollEdgeState(element: Pick<HTMLElement, "scrollTop" | "client
  */
 export function attachScrollEdgeFade(element: HTMLElement): () => void {
   let frame = 0;
+  let layoutDirty = true;
   const update = (): void => {
     frame = 0;
+    if (layoutDirty) {
+      layoutDirty = false;
+      writeEdgeFadeLayout(element);
+    }
     const state = scrollEdgeState(element);
     if (element.getAttribute("data-edge-fade") !== state) element.setAttribute("data-edge-fade", state);
   };
   const schedule = (): void => {
     if (frame === 0) frame = requestAnimationFrame(update);
   };
+  const scheduleLayout = (): void => {
+    layoutDirty = true;
+    schedule();
+  };
   update();
   element.addEventListener("scroll", schedule, { passive: true });
-  const resize = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(schedule);
+  const resize = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(scheduleLayout);
   const observeChildren = (): void => {
     if (!resize) return;
     resize.disconnect();
@@ -45,6 +77,7 @@ export function attachScrollEdgeFade(element: HTMLElement): () => void {
     resize?.disconnect();
     mutation?.disconnect();
     element.removeAttribute("data-edge-fade");
+    for (const name of Object.keys(EDGE_FADE_LAYOUT_PROPS)) element.style.removeProperty(name);
   };
 }
 
