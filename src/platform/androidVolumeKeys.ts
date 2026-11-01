@@ -45,26 +45,31 @@ export async function setNativeVolumeKeyMode(mode: VolumeKeyMode): Promise<void>
 
 /**
  * One app-root owner. Serial native writes coalesce to the latest route intent,
- * so a slow "on" cannot land after the reader already asked for "off".
+ * but a requested stop must reach native before a later intent can re-arm it.
  */
 export function createVolumeKeyModeCoordinator(apply: (mode: VolumeKeyMode) => Promise<void> = setNativeVolumeKeyMode) {
   let desired: VolumeKeyMode | undefined;
   let revision = 0;
   let acknowledgedRevision = 0;
   let pending: Promise<void> | undefined;
+  let stopPending = false;
 
   async function drain(): Promise<void> {
     try {
       while (acknowledgedRevision !== revision) {
         const applyingRevision = revision;
-        const mode = desired!;
+        const mode = stopPending ? "off" : desired!;
         try {
           await apply(mode);
         } catch (error) {
+          // A failed stop cannot be skipped in favour of a newer "on".
+          if (mode === "off") throw error;
           if (applyingRevision !== revision) continue;
           throw error;
         }
-        acknowledgedRevision = applyingRevision;
+        if (mode === "off") stopPending = false;
+        // An intermediate stop does not acknowledge the later re-arm intent.
+        if (mode === desired) acknowledgedRevision = applyingRevision;
       }
     } finally {
       pending = undefined;
@@ -77,6 +82,7 @@ export function createVolumeKeyModeCoordinator(apply: (mode: VolumeKeyMode) => P
       if (desired !== mode || force) {
         desired = mode;
         revision += 1;
+        if (mode === "off") stopPending = true;
       }
       if (pending) return pending;
       if (acknowledgedRevision === revision) return Promise.resolve();
