@@ -35,45 +35,36 @@ export const RELEASES_PAGE_URL = "https://github.com/herenfor/epub-read/releases
  */
 export const RELEASE_NOTES: readonly ReleaseNote[] = [
   {
-    version: "0.3.8",
-    status: "released",
-    releasedOn: "2026-10-29",
+    version: "0.3.9",
+    status: "development",
     items: [
       {
         category: "new",
-        text: "多书标签：可在书架选择“在新标签中打开”，在多本书之间切换，最多保留 5 个标签；只打开一本书时，顶栏也会显示“＋”入口，方便直接发现。",
-      },
-      {
-        category: "new",
-        text: "自定义阅读主题：自选纸张、文字与强调色，最多保存 6 套主题。",
-      },
-      {
-        category: "new",
-        text: "书内音视频播放：可直接在阅读页面播放 EPUB 内嵌的音频和视频，使用系统播放控件。",
+        text: "系统打开 EPUB：可在文件管理器的“打开方式”中选择 EPUB Reader，导入并打开电子书。",
       },
       {
         category: "improved",
-        text: "统一阅读器、设置和书架菜单的面板、开关与滑块样式，并重新整理 Aa 排版面板与设置分组，让常用设置更集中。",
+        text: "统一界面的字号、圆角、图标和菜单样式，调整全屏页面及弹层动效。",
       },
       {
         category: "improved",
-        text: "完善书架文件夹视图中的书名、作者搜索；书架“继续阅读”优先显示目录中的章节名称。",
+        text: "优化目录、设置等面板的预绘制和入场过程，减少首次打开时的卡顿。",
+      },
+      {
+        category: "improved",
+        text: "电脑端 Aa 主题行支持鼠标滚轮横向浏览和按住拖动，方便访问更多主题。",
+      },
+      {
+        category: "improved",
+        text: "调整手机书架文件夹的布局，将展开和收起入口放到筛选行。",
       },
       {
         category: "fixed",
-        text: "修复部分单图 SVG 封面或插图被拉伸的问题。",
+        text: "修复阅读后返回书架时滚动位置回到顶部、文件夹展开状态丢失的问题。",
       },
       {
         category: "fixed",
-        text: "修复标题栏和正文空白区域弹出非预期浏览器右键菜单的问题；恢复顶栏固定按钮，并修复固定侧栏时顶栏遮挡正文。",
-      },
-      {
-        category: "fixed",
-        text: "修复手机 Aa 面板中主题行横向滑动容易被拦截的问题。",
-      },
-      {
-        category: "fixed",
-        text: "修复保存失败时关闭书本仍可能丢失当前标签的问题。",
+        text: "减少返回书架时封面重新加载产生的闪烁。",
       },
     ],
   },
