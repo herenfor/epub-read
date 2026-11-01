@@ -52,6 +52,10 @@ export const RELEASE_NOTES: readonly ReleaseNote[] = [
         text: "音量键翻页只在阅读正文时生效；打开设置、目录等浮层或切到后台时恢复系统音量调节。",
       },
       {
+        category: "improved",
+        text: "优化目录、设置等面板的滚动边缘渐隐，面板打开时从首帧显示，减少入场延迟。",
+      },
+      {
         category: "fixed",
         text: "修复关闭音量键翻页后，旧的翻页状态可能重新接管音量键的问题。",
       },
