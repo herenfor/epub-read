@@ -48,6 +48,7 @@ import {
   thumbnailTaskQueue,
   type ThumbnailProvider,
 } from "./thumbnail";
+import { acquireCoverUrl, peekCoverUrl, storeCoverUrl, type HeldCoverUrl } from "./coverUrlCache";
 import { hasReadPosition } from "./readEvidence";
 import { isShelfProgressPending, shelfProgressLabel } from "./shelfProgressDisplay";
 import { readCachedLinearMask } from "./chapterCountCache";
@@ -778,6 +779,10 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function coverCacheKey(entry: ShelfEntry): string {
+  return `${entry.id}|${entry.contentHash}|${entry.thumbnailMime ?? ""}|${entry.coverMime ?? ""}`;
+}
+
 const Cover = memo(function Cover({
   entry,
   provider,
@@ -785,14 +790,17 @@ const Cover = memo(function Cover({
   entry: ShelfEntry;
   provider: ThumbnailProvider;
 }) {
-  const [url, setUrl] = useState<string | null>(null);
-  const loadedFor = useRef<string>("");
+  const cacheKey = coverCacheKey(entry);
+  // A cover seen before shows on the first frame, so coming back from a book
+  // does not flash the fallback.
+  const [url, setUrl] = useState<string | null>(() => peekCoverUrl(cacheKey));
+  const loadedFor = useRef<string>(url ? entry.id : "");
   const nodeRef = useRef<HTMLDivElement | null>(null);
-  const [nearViewport, setNearViewport] = useState(false);
+  const [nearViewport, setNearViewport] = useState(() => url !== null);
 
   useEffect(() => {
     const node = nodeRef.current;
-    if (!node) return;
+    if (!node || nearViewport) return;
     if (typeof IntersectionObserver === "undefined") {
       setNearViewport(true);
       return;
@@ -807,11 +815,19 @@ const Cover = memo(function Cover({
     );
     observer.observe(node);
     return () => observer.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- observes the first node once
   }, []);
 
   useEffect(() => {
-    if (!nearViewport || entry.available === false) return;
-    let objectUrl: string | null = null;
+    if (entry.available === false) return;
+    const cached = acquireCoverUrl(cacheKey);
+    if (cached) {
+      loadedFor.current = entry.id;
+      setUrl(cached.url);
+      return cached.release;
+    }
+    if (!nearViewport) return;
+    let held: HeldCoverUrl | null = null;
     const controller = new AbortController();
     loadedFor.current = entry.id;
     setUrl(null);
@@ -831,8 +847,8 @@ const Cover = memo(function Cover({
           URL.revokeObjectURL(nextUrl);
           return;
         }
-        objectUrl = nextUrl;
-        setUrl(nextUrl);
+        held = storeCoverUrl(cacheKey, nextUrl, asset.bytes.byteLength);
+        setUrl(held.url);
       })
       .catch((error: unknown) => {
         if (!isAbortError(error)) {
@@ -841,9 +857,10 @@ const Cover = memo(function Cover({
       });
     return () => {
       controller.abort();
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      held?.release();
     };
-  }, [entry.id, entry.contentHash, entry.coverMime, entry.thumbnailMime, entry.available, nearViewport, provider]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- cacheKey covers the cover fields
+  }, [cacheKey, entry.id, entry.available, nearViewport, provider]);
 
   if (!url || loadedFor.current !== entry.id) {
     const palette = getMorandiPalette(entry.title, entry.id);
