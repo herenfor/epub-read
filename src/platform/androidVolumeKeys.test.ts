@@ -84,6 +84,42 @@ describe("Android volume-key paging boundary", () => {
     expect(applied).toEqual(["on", "off"]);
   });
 
+  it.each([false, true])("preserves native hold interruption across a quick overlay reopen (stop fails: %s)", async (stopFails) => {
+    let releaseFirst!: () => void;
+    let reportFirstWrite!: () => void;
+    const firstWriteStarted = new Promise<void>((resolve) => { reportFirstWrite = resolve; });
+    invoke.mockImplementationOnce(() => {
+      reportFirstWrite();
+      return new Promise<void>((resolve) => { releaseFirst = resolve; });
+    });
+    const stopError = new Error("native stop failed");
+    if (stopFails) invoke.mockRejectedValueOnce(stopError);
+
+    const coordinator = createVolumeKeyModeCoordinator();
+    const gate = createVolumeKeyModeGate({
+      ensureSubscription: () => Promise.resolve(),
+      apply: (mode, force) => coordinator.requestMode(mode, force),
+      onSubscriptionFailure: vi.fn(),
+    });
+    const reading = { readerActive: true, enabled: true, reverse: false, visible: true };
+    const entering = gate.request(reading);
+    await firstWriteStarted;
+    const openingOverlay = gate.request({ ...reading, readerActive: false });
+    const closingOverlay = gate.request(reading);
+    // Let the new "on" reach the coordinator before the old native call finishes.
+    await Promise.resolve();
+    const completed = Promise.allSettled([entering, openingOverlay, closingOverlay]);
+    releaseFirst();
+    const results = await completed;
+
+    expect(invoke.mock.calls).toEqual((stopFails ? ["on", "off"] : ["on", "off", "on"]).map((mode) => [
+      "android_volume_key_set_mode", { mode },
+    ]));
+    expect(results).toEqual(stopFails
+      ? Array.from({ length: 3 }, () => ({ status: "rejected", reason: stopError }))
+      : Array.from({ length: 3 }, () => ({ status: "fulfilled", value: undefined })));
+  });
+
   it("keeps system volume when the native subscription fails", async () => {
     const apply = vi.fn().mockResolvedValue(undefined);
     const onFailure = vi.fn();
