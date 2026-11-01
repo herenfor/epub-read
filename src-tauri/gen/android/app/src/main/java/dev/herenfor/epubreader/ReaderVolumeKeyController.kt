@@ -60,23 +60,48 @@ class ReaderVolumeKeyController(
   var mode: ReaderVolumeKeyMode = ReaderVolumeKeyMode.OFF
     private set
 
+  private var resumed = false
+  private var focused = false
+  private var destroyed = false
   private var pressedKey = 0
   private var repeatDirection = 0
   private var repeatAction: Runnable? = null
 
   fun setMode(next: ReaderVolumeKeyMode) {
-    if (next == mode) return
+    if (destroyed || next == mode) return
     mode = next
     // A mode change during a hold must not keep the old direction repeating.
     cancelRepeat()
   }
+
+  fun onResume() {
+    resumed = true
+  }
+
+  fun onPause() {
+    resumed = false
+    pressedKey = 0
+    cancelRepeat()
+  }
+
+  fun onWindowFocusChanged(hasFocus: Boolean) {
+    focused = hasFocus
+    if (!hasFocus) {
+      pressedKey = 0
+      cancelRepeat()
+    }
+  }
+
+  /** The requested mode only intercepts while this window is foreground and focused. */
+  private fun activeMode(): ReaderVolumeKeyMode =
+    if (!destroyed && resumed && focused) mode else ReaderVolumeKeyMode.OFF
 
   /**
    * Returns true when this controller owns the event. Owned events are not
    * passed to the system, so the volume stream does not change while paging.
    */
   fun handleKeyEvent(keyCode: Int, action: Int, repeatCount: Int): Boolean {
-    val direction = direction(keyCode, mode) ?: return false
+    val direction = direction(keyCode, activeMode()) ?: return false
 
     when (action) {
       ACTION_DOWN -> {
@@ -100,13 +125,8 @@ class ReaderVolumeKeyController(
     return false
   }
 
-  /** Backgrounding the app must not leave a queued repeat behind. */
-  fun onPause() {
-    pressedKey = 0
-    cancelRepeat()
-  }
-
   fun destroy() {
+    destroyed = true
     onTurn = null
     onPause()
     mode = ReaderVolumeKeyMode.OFF
@@ -117,7 +137,7 @@ class ReaderVolumeKeyController(
     repeatDirection = direction
     val action = object : Runnable {
       override fun run() {
-        if (mode == ReaderVolumeKeyMode.OFF || repeatDirection == 0) return
+        if (activeMode() == ReaderVolumeKeyMode.OFF || repeatDirection == 0) return
         onTurn?.invoke(repeatDirection)
         postDelayed(REPEAT_INTERVAL_MS, this)
       }

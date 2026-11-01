@@ -40,6 +40,7 @@ class MainActivity : TauriActivity() {
     super.onResume()
     readerSystemBars.onResume()
     readerKeepScreenOn.onResume()
+    if (::readerVolumeKeys.isInitialized) readerVolumeKeys.onResume()
   }
 
   override fun onPause() {
@@ -62,6 +63,7 @@ class MainActivity : TauriActivity() {
     super.onWindowFocusChanged(hasFocus)
     if (::readerSystemBars.isInitialized) readerSystemBars.onWindowFocusChanged(hasFocus)
     if (::readerKeepScreenOn.isInitialized) readerKeepScreenOn.onWindowFocusChanged(hasFocus)
+    if (::readerVolumeKeys.isInitialized) readerVolumeKeys.onWindowFocusChanged(hasFocus)
   }
 
   override fun onConfigurationChanged(newConfig: Configuration) {

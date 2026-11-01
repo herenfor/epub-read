@@ -16,6 +16,7 @@ export const notice = defineMessages("notice", {
   "notice.keepScreenOn.failed": "屏幕常亮设置失败：{error}",
   "notice.volumeKeys.saveFailed": "音量键翻页设置保存失败：{error}",
   "notice.volumeKeys.failed": "音量键翻页设置失败：{error}",
+  "notice.volumeKeys.unavailable": "音量键翻页不可用，音量键仍可调节音量",
   "notice.theme.applyFailed": "主题切换失败：{error}",
   "notice.busy": "正在处理…",
   "notice.discardNote": "放弃未保存的笔记？",
