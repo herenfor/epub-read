@@ -180,6 +180,10 @@ export interface ShelfViewProps {
   onHideReaderSystemStatusBarChange?(hidden: boolean): void;
   keepScreenOnWhileReading?: boolean;
   onKeepScreenOnWhileReadingChange?(enabled: boolean): void;
+  volumeKeyTurn?: boolean;
+  onVolumeKeyTurnChange?(enabled: boolean): void;
+  volumeKeyReverse?: boolean;
+  onVolumeKeyReverseChange?(reverse: boolean): void;
   /** 点击翻页区域（本机偏好，编辑当前设备类别那一份）；未提供时不显示入口。 */
   tapRegions?: ReaderTapRegionSettings;
   onTapRegionsChange?(next: ReaderTapPreferences): void;
@@ -4583,6 +4587,10 @@ export function ShelfView(props: ShelfViewProps) {
     onHideReaderSystemStatusBarChange: props.onHideReaderSystemStatusBarChange,
     keepScreenOnWhileReading: props.keepScreenOnWhileReading,
     onKeepScreenOnWhileReadingChange: props.onKeepScreenOnWhileReadingChange,
+    volumeKeyTurn: props.volumeKeyTurn,
+    onVolumeKeyTurnChange: props.onVolumeKeyTurnChange,
+    volumeKeyReverse: props.volumeKeyReverse,
+    onVolumeKeyReverseChange: props.onVolumeKeyReverseChange,
     batteryIndicatorEnabled: props.batteryIndicatorEnabled,
     onBatteryIndicatorChange: props.onBatteryIndicatorChange,
     titlebarAutoHide: props.titlebarAutoHide,

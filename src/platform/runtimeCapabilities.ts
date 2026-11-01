@@ -18,6 +18,8 @@ export interface RuntimeCapabilities {
   supportsReaderSystemStatusBar: boolean;
   /** Same native-session gate: reader-scoped keep-screen-on is Android-only. */
   supportsReaderKeepScreenOn: boolean;
+  /** Volume-key paging is delivered by the same Android native session. */
+  supportsVolumeKeyTurn: boolean;
   /** WebDAV sync needs the native credential store: native Windows and Android only. */
   supportsCloudSync: boolean;
   /** "Show in File Explorer" for a book's file: native Windows only. */
@@ -41,6 +43,7 @@ export function getRuntimeCapabilities(): RuntimeCapabilities {
     supportsLanTransfer: platform === "windows" || platform === "android",
     supportsReaderSystemStatusBar: androidNativeSession,
     supportsReaderKeepScreenOn: androidNativeSession,
+    supportsVolumeKeyTurn: androidNativeSession,
     supportsCloudSync: session?.source === "desktop" && (platform === "windows" || platform === "android"),
     supportsRevealSource: session?.source === "desktop" && platform === "windows",
     supportsLibraryFolder: session?.source === "desktop" && platform === "windows",

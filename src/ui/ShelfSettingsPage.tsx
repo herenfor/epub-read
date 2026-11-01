@@ -52,6 +52,10 @@ export interface ShelfSettingsPageProps {
   onHideReaderSystemStatusBarChange?(hidden: boolean): void;
   keepScreenOnWhileReading?: boolean;
   onKeepScreenOnWhileReadingChange?(enabled: boolean): void;
+  volumeKeyTurn?: boolean;
+  onVolumeKeyTurnChange?(enabled: boolean): void;
+  volumeKeyReverse?: boolean;
+  onVolumeKeyReverseChange?(reverse: boolean): void;
   tapRegions?: ReaderTapRegionSettings;
   onTapRegionsChange?(next: ReaderTapPreferences): void;
   tapRegionsScrollMode?: boolean;
@@ -207,6 +211,10 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
     tapRegionsScrollMode: props.tapRegionsScrollMode,
     keepScreenOnWhileReading: props.keepScreenOnWhileReading,
     onKeepScreenOnWhileReadingChange: props.onKeepScreenOnWhileReadingChange,
+    volumeKeyTurn: props.volumeKeyTurn,
+    onVolumeKeyTurnChange: props.onVolumeKeyTurnChange,
+    volumeKeyReverse: props.volumeKeyReverse,
+    onVolumeKeyReverseChange: props.onVolumeKeyReverseChange,
     hideReaderSystemStatusBar: props.hideReaderSystemStatusBar,
     onHideReaderSystemStatusBarChange: props.onHideReaderSystemStatusBarChange,
     batteryIndicatorEnabled: props.batteryIndicatorEnabled,

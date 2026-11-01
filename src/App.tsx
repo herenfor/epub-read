@@ -14,6 +14,15 @@ import {
   shouldKeepReaderScreenOn,
   writeReaderKeepScreenOn,
 } from "./platform/androidReaderKeepScreenOn";
+import {
+  createVolumeKeyModeCoordinator,
+  readVolumeKeyReverse,
+  readVolumeKeyTurn,
+  subscribeVolumeKeyTurn,
+  volumeKeyModeFor,
+  writeVolumeKeyReverse,
+  writeVolumeKeyTurn,
+} from "./platform/androidVolumeKeys";
 import { resolveArchiveHref, archiveHref } from "./core/archiveReferences";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { loadBook, loadBookFromArchive, spineIndexForPath, spineIndexForEntryKey, spineItemPath, spineItemHref, disposeBook, nextLinearIndex, linearChapterNumber, linearChapterTotal, tocLabelsBySpine } from "./core/book";
@@ -799,6 +808,25 @@ export default function App() {
       setKeepScreenOnWhileReading(enabled);
     } catch (error) {
       setShelfNotice({ kind: "error", text: uiText("notice.keepScreenOn.saveFailed", { error: String(error) }) });
+    }
+  }, []);
+  const [volumeKeyTurn, setVolumeKeyTurn] = useState(readVolumeKeyTurn);
+  const [volumeKeyReverse, setVolumeKeyReverse] = useState(readVolumeKeyReverse);
+  const [volumeKeyModes] = useState(() => createVolumeKeyModeCoordinator());
+  const changeVolumeKeyTurn = useCallback((enabled: boolean) => {
+    try {
+      writeVolumeKeyTurn(enabled);
+      setVolumeKeyTurn(enabled);
+    } catch (error) {
+      setShelfNotice({ kind: "error", text: uiText("notice.volumeKeys.saveFailed", { error: String(error) }) });
+    }
+  }, []);
+  const changeVolumeKeyReverse = useCallback((reverse: boolean) => {
+    try {
+      writeVolumeKeyReverse(reverse);
+      setVolumeKeyReverse(reverse);
+    } catch (error) {
+      setShelfNotice({ kind: "error", text: uiText("notice.volumeKeys.saveFailed", { error: String(error) }) });
     }
   }, []);
 
@@ -2193,6 +2221,31 @@ export default function App() {
     // Root teardown goes through the same serializer; no second invoke chain.
     return () => { void readerScreenOn.requestEnabled(false).catch(() => {}); };
   }, [runtime.supportsReaderKeepScreenOn, readerScreenOn]);
+
+  useEffect(() => {
+    if (!runtime.supportsVolumeKeyTurn) return;
+    const submit = (force: boolean) => {
+      void volumeKeyModes.requestMode(volumeKeyModeFor({
+        readerActive: view === "reader",
+        enabled: volumeKeyTurn,
+        reverse: volumeKeyReverse,
+        visible: document.visibilityState !== "hidden",
+      }), force).catch((error) => {
+        const message = uiText("notice.volumeKeys.failed", { error: String(error) });
+        if (view === "reader") showReaderNotice(message, "warn");
+        else setShelfNotice({ kind: "warn", text: message });
+      });
+    };
+    submit(false);
+    const onVisibilityChange = () => submit(true);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, [view, volumeKeyTurn, volumeKeyReverse, runtime.supportsVolumeKeyTurn, volumeKeyModes, showReaderNotice]);
+  useEffect(() => {
+    if (!runtime.supportsVolumeKeyTurn) return;
+    // Leaving the app must never leave volume keys swallowing the system volume.
+    return () => { void volumeKeyModes.requestMode("off").catch(() => {}); };
+  }, [runtime.supportsVolumeKeyTurn, volumeKeyModes]);
 
   /** 语义锚点失败：解除显示门，但守住进度，直到读者真实移动后再写。 */
   const handleReaderNavigationUnresolved = useCallback((reported: boolean, ticket?: RestoreTicket | null): void => {
@@ -5224,6 +5277,7 @@ export default function App() {
     readerHistory,
     readerDisplayReady,
     isReaderPanelOpen,
+    imageViewerOpen: imageRequest !== null,
     navigationPending: navigationPendingRef.current,
   });
 
@@ -5242,8 +5296,22 @@ export default function App() {
     readerHistory,
     readerDisplayReady,
     isReaderPanelOpen,
+    imageViewerOpen: imageRequest !== null,
     navigationPending: navigationPendingRef.current,
   };
+
+  // Android volume keys share the keyboard page-turn guards: panels, the
+  // bookmark menu and the image viewer own input while they are open.
+  useEffect(() => {
+    if (!runtime.supportsVolumeKeyTurn) return;
+    return subscribeVolumeKeyTurn((direction) => {
+      const st = latestShortcutStateRef.current;
+      if (st.view !== "reader" || st.isReaderPanelOpen || st.bookmarkMenuOpen ||
+        st.noteComposer !== null || st.imageViewerOpen) return;
+      if (direction === 1) readerRef.current?.nextPage();
+      else readerRef.current?.prevPage();
+    });
+  }, [runtime.supportsVolumeKeyTurn]);
 
   // ---- 桌面全局快捷键集中分发与键盘翻页（Zen UI Packet 3 键盘流） ----
   useEffect(() => {
@@ -5572,6 +5640,10 @@ export default function App() {
               onHideReaderSystemStatusBarChange={changeHideReaderSystemStatusBar}
               keepScreenOnWhileReading={runtime.supportsReaderKeepScreenOn ? keepScreenOnWhileReading : undefined}
               onKeepScreenOnWhileReadingChange={changeKeepScreenOnWhileReading}
+              volumeKeyTurn={runtime.supportsVolumeKeyTurn ? volumeKeyTurn : undefined}
+              onVolumeKeyTurnChange={changeVolumeKeyTurn}
+              volumeKeyReverse={runtime.supportsVolumeKeyTurn ? volumeKeyReverse : undefined}
+              onVolumeKeyReverseChange={changeVolumeKeyReverse}
               batteryIndicatorEnabled={runtime.platform === "android" ? batteryIndicatorEnabled : undefined}
               onBatteryIndicatorChange={runtime.platform === "android" ? changeBatteryIndicatorEnabled : undefined}
               titlebarAutoHide={mobileChrome ? undefined : readerZenMode}
@@ -6147,6 +6219,10 @@ export default function App() {
             tapRegionsScrollMode={settings.readingMode === "scroll"}
             keepScreenOnWhileReading={runtime.supportsReaderKeepScreenOn ? keepScreenOnWhileReading : undefined}
             onKeepScreenOnWhileReadingChange={changeKeepScreenOnWhileReading}
+            volumeKeyTurn={runtime.supportsVolumeKeyTurn ? volumeKeyTurn : undefined}
+            onVolumeKeyTurnChange={changeVolumeKeyTurn}
+            volumeKeyReverse={runtime.supportsVolumeKeyTurn ? volumeKeyReverse : undefined}
+            onVolumeKeyReverseChange={changeVolumeKeyReverse}
             hideReaderSystemStatusBar={runtime.supportsReaderSystemStatusBar ? hideReaderSystemStatusBar : undefined}
             onHideReaderSystemStatusBarChange={changeHideReaderSystemStatusBar}
             batteryIndicatorEnabled={runtime.platform === "android" ? batteryIndicatorEnabled : undefined}
