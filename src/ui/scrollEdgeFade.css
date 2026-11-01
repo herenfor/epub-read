@@ -36,6 +36,7 @@
  * No fade while the panel arrives: a masked scroller makes the GPU draw the
  * moving panel offscreen every frame (phone TOC drawer: 3 dropped frames,
  * 1 without). The mask comes on once a sheet entrance would be over.
+ * Touch panels that use the bars below never hold.
  * Zero specificity, so a scroller's own animation wins.
  */
 @keyframes edge-fade-hold {
@@ -54,10 +55,71 @@
   animation: none;
 }
 
+/*
+ * Touch panels with an opaque surface draw the fade as two bars of that
+ * surface over the list instead. Painted like any other content, they move
+ * with the panel at no extra cost, so they show from the first frame. Each
+ * panel names its surface here; the script sets --edge-fade-gap and
+ * --edge-fade-pad-* so the bars cover the padding and add no height.
+ */
+:is(.sidebar-drawer, .shelf-action-sheet) {
+  --edge-fade-color: var(--panel-bg);
+}
+
+:is(.aa-popover, .shelf-settings-sheet) {
+  --edge-fade-color: var(--panel-surface);
+}
+
+.app[data-touch-ui="true"] :is(.sidebar-drawer, .shelf-action-sheet, .aa-popover, .shelf-settings-sheet) [data-edge-fade] {
+  -webkit-mask-image: none;
+  mask-image: none;
+  animation: none;
+}
+
+.app[data-touch-ui="true"] :is(.sidebar-drawer, .shelf-action-sheet, .aa-popover, .shelf-settings-sheet) [data-edge-fade]::before,
+.app[data-touch-ui="true"] :is(.sidebar-drawer, .shelf-action-sheet, .aa-popover, .shelf-settings-sheet) [data-edge-fade]::after {
+  content: "";
+  position: sticky;
+  z-index: 2;
+  display: block;
+  flex: none;
+  align-self: stretch;
+  margin-inline: calc(-1 * var(--edge-fade-pad-left, 0px)) calc(-1 * var(--edge-fade-pad-right, 0px));
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--ui-control-quick, 150ms) ease;
+}
+
+.app[data-touch-ui="true"] :is(.sidebar-drawer, .shelf-action-sheet, .aa-popover, .shelf-settings-sheet) [data-edge-fade]::before {
+  top: calc(-1 * var(--edge-fade-pad-top, 0px));
+  height: 28px;
+  margin-top: calc(-1 * var(--edge-fade-pad-top, 0px));
+  margin-bottom: calc(var(--edge-fade-pad-top, 0px) - 28px - var(--edge-fade-gap, 0px));
+  background: linear-gradient(to bottom, var(--edge-fade-color), transparent);
+}
+
+.app[data-touch-ui="true"] :is(.sidebar-drawer, .shelf-action-sheet, .aa-popover, .shelf-settings-sheet) [data-edge-fade]::after {
+  bottom: calc(-1 * var(--edge-fade-pad-bottom, 0px));
+  height: 36px;
+  margin-top: calc(var(--edge-fade-pad-bottom, 0px) - 36px - var(--edge-fade-gap, 0px));
+  margin-bottom: calc(-1 * var(--edge-fade-pad-bottom, 0px));
+  background: linear-gradient(to top, var(--edge-fade-color), transparent);
+}
+
+.app[data-touch-ui="true"] :is(.sidebar-drawer, .shelf-action-sheet, .aa-popover, .shelf-settings-sheet) [data-edge-fade~="top"]::before,
+.app[data-touch-ui="true"] :is(.sidebar-drawer, .shelf-action-sheet, .aa-popover, .shelf-settings-sheet) [data-edge-fade~="bottom"]::after {
+  opacity: 1;
+}
+
 /* A held slider shows only its own row; nothing around it fades. */
 [data-slider-focus] [data-edge-fade] {
   -webkit-mask-image: none;
   mask-image: none;
+}
+
+.app[data-touch-ui="true"] [data-slider-focus] [data-edge-fade]::before,
+.app[data-touch-ui="true"] [data-slider-focus] [data-edge-fade]::after {
+  opacity: 0;
 }
 
 /* Hidden scrollbar, still scrollable: the fade is the hint. */
