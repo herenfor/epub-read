@@ -293,13 +293,15 @@ describe("第三步补修：书架触摸长按与子菜单 Back", () => {
       expect(menuItems[2]).toContain("名著");
       await dom.click(folderBtn);
 
-      // 根层默认展开文件夹卡片；收起后摘要栏仍在，可再展开
-      expect(dom.container.querySelector(".shelf-folder-summary-rail.expanded")).not.toBeNull();
+      // 根层默认展开文件夹卡片；开关在筛选行，不再单占一行；收起后开关仍在，可再展开
+      expect(dom.container.querySelector(".shelf-folder-summary-rail")).toBeNull();
+      const toggle = dom.container.querySelector(".shelf-nav-rail-left .shelf-folder-toggle-btn") as HTMLButtonElement;
+      expect(toggle.getAttribute("aria-expanded")).toBe("true");
+      expect(toggle.textContent).toContain("文件夹 (1)");
       expect(dom.container.querySelector(".shelf-folder-card")).not.toBeNull();
-      const toggle = dom.container.querySelector(".shelf-folder-summary-toggle-btn") as HTMLButtonElement;
       await dom.click(toggle);
       expect(dom.container.querySelector(".shelf-folder-card")).toBeNull();
-      expect(dom.container.querySelector(".shelf-folder-summary-rail:not(.expanded)")).not.toBeNull();
+      expect(dom.container.querySelector(".shelf-folder-prefix")).toBeNull();
       expect(toggle.getAttribute("aria-expanded")).toBe("false");
       await dom.click(toggle);
       expect(dom.container.querySelector(".shelf-folder-card")).not.toBeNull();
@@ -341,7 +343,7 @@ describe("第三步补修：书架触摸长按与子菜单 Back", () => {
         folders: { f1: { name: { value: "名著", stamp: { counter: 1, deviceId: "test" } } } },
       },
     });
-    const toggle = () => dom.container.querySelector(".shelf-folder-summary-toggle-btn") as HTMLButtonElement;
+    const toggle = () => dom.container.querySelector(".shelf-folder-toggle-btn") as HTMLButtonElement;
     try {
       await dom.render(shelf());
       expect(toggle().getAttribute("aria-expanded")).toBe("true");
