@@ -1,0 +1,33 @@
+title: "[想法] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        还没想清楚的点子、想听听别人意见的方向，都可以在这里聊。想法已经具体到可以直接做的，请开“功能建议” Issue。
+        Share rough ideas here. Concrete, ready-to-build requests belong in a feature request issue.
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: 想法 / The idea
+    validations:
+      required: true
+
+  - type: textarea
+    id: scenario
+    attributes:
+      label: 使用场景 / When it would help
+      description: 在什么情况下会用到？Describe the situation.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 相关平台 / Platforms
+      multiple: true
+      options:
+        - Windows
+        - Android 手机 / phone
+        - Android 平板 / tablet
+        - 都有 / All
