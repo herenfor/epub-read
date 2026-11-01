@@ -7,6 +7,8 @@
   "notice.statusBar.failed": "Failed to adjust system status bar: {error}",
   "notice.keepScreenOn.saveFailed": "Failed to save keep-screen-on setting: {error}",
   "notice.keepScreenOn.failed": "Failed to set keep screen on: {error}",
+  "notice.volumeKeys.saveFailed": "Failed to save volume-key paging setting: {error}",
+  "notice.volumeKeys.failed": "Failed to apply volume-key paging: {error}",
   "notice.theme.applyFailed": "Failed to switch theme: {error}",
   "notice.busy": "Processing...",
   "notice.discardNote": "Discard unsaved note?",

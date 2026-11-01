@@ -17,6 +17,12 @@ export interface ReadingSettingsProps {
   /** Each switch below appears only when its value is defined (runtime support). */
   keepScreenOnWhileReading?: boolean;
   onKeepScreenOnWhileReadingChange?(enabled: boolean): void;
+  /** Android only: volume keys turn pages while the reader is foreground. */
+  volumeKeyTurn?: boolean;
+  onVolumeKeyTurnChange?(enabled: boolean): void;
+  /** Independent of touch direction: swaps only the two volume keys. */
+  volumeKeyReverse?: boolean;
+  onVolumeKeyReverseChange?(reverse: boolean): void;
   hideReaderSystemStatusBar?: boolean;
   onHideReaderSystemStatusBarChange?(hidden: boolean): void;
   batteryIndicatorEnabled?: boolean;
@@ -46,6 +52,10 @@ export function useReadingSettingsTitles(props: ReadingSettingsProps): string[] 
   if (props.tapRegions && props.onTapRegionsChange) titles.push(t("tapRegions.title"));
   if (props.preloadNextChapter !== undefined && props.onPreloadNextChapterChange) titles.push(t("aa.preload"));
   if (props.keepScreenOnWhileReading !== undefined && props.onKeepScreenOnWhileReadingChange) titles.push(t("shelfMenu.keepScreenOn"));
+  if (props.volumeKeyTurn !== undefined && props.onVolumeKeyTurnChange) {
+    titles.push(t("shelfMenu.volumeKeys"));
+    if (props.volumeKeyTurn && props.volumeKeyReverse && props.onVolumeKeyReverseChange) titles.push(t("shelfMenu.volumeKeys.reverse"));
+  }
   if (props.hideReaderSystemStatusBar !== undefined && props.onHideReaderSystemStatusBarChange) titles.push(t("shelfMenu.statusBar"));
   if (props.batteryIndicatorEnabled !== undefined && props.onBatteryIndicatorChange) titles.push(t("shelfMenu.battery"));
   if (props.titlebarAutoHide !== undefined && props.onTitlebarAutoHideChange) titles.push(t("shelfMenu.titlebarAutoHide"));
@@ -72,6 +82,14 @@ export function ReadingSettingsContent(props: ReadingSettingsProps) {
   }
   if (props.keepScreenOnWhileReading !== undefined && props.onKeepScreenOnWhileReadingChange) {
     switches.push(<SettingsSwitchRow key="screen" title={t("shelfMenu.keepScreenOn")} checked={props.keepScreenOnWhileReading} onChange={props.onKeepScreenOnWhileReadingChange} />);
+  }
+  if (props.volumeKeyTurn !== undefined && props.onVolumeKeyTurnChange) {
+    switches.push(<SettingsSwitchRow key="volume" title={t("shelfMenu.volumeKeys")} detail={t("shelfMenu.volumeKeys.tip")}
+      checked={props.volumeKeyTurn} onChange={props.onVolumeKeyTurnChange} />);
+    if (props.volumeKeyReverse !== undefined && props.onVolumeKeyReverseChange) {
+      switches.push(<SettingsSwitchRow key="volumeReverse" title={t("shelfMenu.volumeKeys.reverse")} detail={t("shelfMenu.volumeKeys.reverse.tip")}
+        checked={props.volumeKeyReverse} disabled={!props.volumeKeyTurn} onChange={props.onVolumeKeyReverseChange} />);
+    }
   }
   if (props.hideReaderSystemStatusBar !== undefined && props.onHideReaderSystemStatusBarChange) {
     switches.push(<SettingsSwitchRow key="status" title={t("shelfMenu.statusBar.tip")} checked={props.hideReaderSystemStatusBar} onChange={props.onHideReaderSystemStatusBarChange} />);
