@@ -105,6 +105,9 @@ export function ReaderTapRegionsPanel(props: ReaderTapRegionsPanelProps) {
   const update = (next: typeof profile) => props.onChange(withTapRegionProfile(value, device, next));
   const actionLabel = (side: TapRegionSide) =>
     tapRegionAction(side, device, value, props.progression) === 1 ? labels.next : labels.prev;
+  // The back side's arrow turns over when that side turns forward too.
+  const backSide: TapRegionSide = props.progression === "rtl" ? "right" : "left";
+  const arrowFlipped = (side: TapRegionSide) => side === backSide && tapRegionAction(side, device, value, props.progression) === 1;
 
   const previewStyle = {
     aspectRatio: `${width} / ${height}`,
@@ -121,6 +124,7 @@ export function ReaderTapRegionsPanel(props: ReaderTapRegionsPanelProps) {
       <div key={side} className={`tap-regions-band is-side is-${side}`}
         style={{ left: percentOf(geometry, band.start), width: percentOf(geometry, band.width), top: topInset }} />,
       <span key={`${side}-arrow`} className={`tap-regions-band-arrow is-${side}`}
+        data-flipped={arrowFlipped(side) || undefined}
         style={{ [side]: percentOf(geometry, band.arrowCenter) }}>
         <Chevron side={side} />
       </span>,

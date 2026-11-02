@@ -108,6 +108,26 @@ describe("tap region actions", () => {
 });
 
 describe("tap region panel", () => {
+  it("turns the back side's preview arrow over when that side turns forward too", async () => {
+    const dom = createReactDomHarness();
+    const base: ReaderTapPreferences = { pc: { mode: "default" }, touch: { mode: "default" }, touchLeftTapForward: false, showTapHint: false };
+    const arrows = async (touchLeftTapForward: boolean, progression?: "ltr" | "rtl") => {
+      await dom.render(createElement(ReaderTapRegionsPanel, {
+        device: "touch", value: { ...base, touchLeftTapForward }, onChange: vi.fn(), availableWidth: 400, availableHeight: 800, labels, progression,
+      }));
+      const flipped = (side: string) => dom.container.querySelector(`.tap-regions-band-arrow.is-${side}`)?.hasAttribute("data-flipped");
+      return [flipped("left"), flipped("right")];
+    };
+    try {
+      expect(await arrows(false)).toEqual([false, false]);
+      expect(await arrows(true)).toEqual([true, false]);
+      expect(await arrows(false, "rtl")).toEqual([false, false]);
+      expect(await arrows(true, "rtl")).toEqual([false, true]);
+    } finally {
+      await dom.dispose();
+    }
+  });
+
   it("draws the preview from the reader geometry and edits only the current device", async () => {
     const dom = createReactDomHarness();
     const onChange = vi.fn();
