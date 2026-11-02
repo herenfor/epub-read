@@ -10,7 +10,7 @@ import { LibraryLocationPanel } from "./LibraryLocationPanel";
 import { CloudSyncPanel } from "./cloudSync/CloudSyncPanel";
 import { useCloudSyncAttention } from "./cloudSync/cloudSyncStore";
 import { menuCloseMs, pageCloseMs, useExitPresence } from "./menuMotion";
-import { useUiMotion, type UiMotion } from "./motionPreference";
+import { useUiMotion } from "./motionPreference";
 import { useUiText } from "./localization/UiLanguageProvider";
 import { useUiLanguageChoice } from "./localization/useUiLanguageChoice";
 import type { UiLanguagePreference } from "./localization/core";
@@ -259,8 +259,8 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
           onDone={() => setEditingThemeId(null)} />
       )}
     </div>
-    <Segmented label={t("shelfMenu.motion")} value={uiMotion} onChange={(value: UiMotion) => setUiMotion(value)}
-      options={[{ value: "full", label: t("shelfMenu.motion.full") }, { value: "reduced", label: t("shelfMenu.motion.reduced") }]} />
+    <SettingsSwitchRow title={t("shelfMenu.motion.reduce")} detail={t("shelfMenu.motion.reduce.detail")}
+      checked={uiMotion === "reduced"} onChange={(reduce) => setUiMotion(reduce ? "reduced" : "full")} />
     <Segmented label={language.label} value={language.preference} onChange={(value) => language.choose(value as UiLanguagePreference)}
       options={language.options} />
     {props.onUiScaleChange && <Segmented label={t("aa.uiScale")}

@@ -17,7 +17,6 @@ import {
 } from "./lanSaveMessages";
 import "./lanSavePanel.css";
 import { uiText, useUiText } from "./localization/UiLanguageProvider";
-import { Switch } from "./controls/Switch";
 import { Segmented } from "./controls/Segmented";
 
 export interface LanSavePanelProps {
@@ -512,8 +511,10 @@ export function LanSavePanel(props: LanSavePanelProps) {
           )}
         </div>
         <div className="lan-send-options">
-          <label className="lan-switch-row">
-            <span className="lan-switch-text">
+          {/* Takes effect only with 发送, so a checkbox, not a switch. */}
+          <label className="lan-check-row">
+            <input type="checkbox" checked={includeBooks} onChange={(event) => setIncludeBooks(event.target.checked)} />
+            <span className="lan-check-text">
               <strong>{t("lanPanel.send.includeBooks")}</strong>
               <small>
                 {includeBooks
@@ -521,7 +522,6 @@ export function LanSavePanel(props: LanSavePanelProps) {
                   : t("lanPanel.send.includeBooks.off")}
               </small>
             </span>
-            <Switch inRow checked={includeBooks} onChange={setIncludeBooks} />
           </label>
           <p className="lan-send-note">
             <span aria-hidden="true">{Icon.info}</span>
