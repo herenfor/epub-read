@@ -22,15 +22,15 @@ import {
   LETTER_SPACING_STOPS,
   LINE_HEIGHT_STOPS,
   MARGIN_LEVELS,
-  MARGIN_LEVEL_COUNT,
   SIDE_MARGIN_STOPS,
   SPREAD_GAP_STOPS,
   WORD_SPACING_STOPS,
+  autoMarginEstimate,
   clampFontSize,
   marginLevelPosition,
   marginsForLevel,
+  nearestMarginLevel,
   stopIndex,
-  stopValue,
   withMarginSide,
   type SettingStops,
 } from "./typographyScales";
@@ -40,6 +40,7 @@ import { readerTextBox, type ScreenBox } from "./readerPageBox";
 import { SliderDragContext, TouchSlider } from "./TouchSlider";
 import { Switch } from "./controls/Switch";
 import { ThemeCards } from "./controls/ThemeCards";
+import { readBookTypography, type BookTypography } from "./bookTypographyProbe";
 
 const TURN_ANIMATION_OPTIONS: ReadonlyArray<{ value: TurnAnimation; labelKey: PlainMessageKey }> = [
   { value: "slide", labelKey: "aa.turn.slide" },
@@ -213,29 +214,40 @@ const MARGIN_PRESET_KEYS: Record<"narrow" | "medium" | "wide", PlainMessageKey> 
   wide: "aa.margin.wide",
 };
 
-/** A slider over a list of stops; it only ever reports values from that list. */
-function StopSlider({ stops, value, onChange, label, valueText, disabled }: {
+/** Where unset type sliders sit until the book's own values are read. */
+const BOOK_TYPE_FALLBACK = { lineHeight: 1.6, fontWeight: 400, letterSpacingPx: 0, wordSpacingPx: 0 } as const;
+
+/**
+ * A slider over the numbers in a list of stops; it only ever reports values
+ * from that list. Unset ("follow the book" / "auto") is drawn hollow at
+ * `autoAt`, the value the page already shows, so smaller values stay to its
+ * left; the row's value button clears it again.
+ */
+function StopSlider({ stops, value, autoAt, onChange, label, valueText, disabled }: {
   stops: SettingStops;
   value: number | undefined;
-  onChange: (value: number | undefined) => void;
+  autoAt?: number;
+  onChange: (value: number) => void;
   label: string;
   valueText: string;
   disabled?: boolean;
 }) {
-  const index = stopIndex(stops, value);
+  const numbers = stops.filter((stop): stop is number => stop !== undefined);
+  const auto = value === undefined;
+  const index = stopIndex(numbers, auto ? autoAt ?? numbers[0] : value);
   return (
     <TouchSlider
       className="aa-slider"
       min={0}
-      max={stops.length - 1}
+      max={numbers.length - 1}
       step={1}
       value={index}
-      auto={stopValue(stops, index) === undefined}
+      auto={auto}
       disabled={disabled}
       label={label}
       valueText={valueText}
       onChange={(next) => {
-        if (next !== index) onChange(stopValue(stops, next));
+        if (next !== index) onChange(numbers[next]);
       }}
     />
   );
@@ -355,9 +367,41 @@ export const AaPopover = React.memo(function AaPopover({
     }
   };
 
+  // ---- 书本身的值：未设置的滑块停在这里 ----
+  // Read from the text on screen while Aa is open. A value the reader
+  // overrides reads as the override, so only unset fields are taken.
+  const [bookType, setBookType] = useState<BookTypography>({});
+  const unsetKey = [lineHeight, fontWeight, letterSpacingPx, wordSpacingPx].map((value) => value === undefined ? "u" : "s").join("");
+  useEffect(() => {
+    if (!open) return;
+    const doc = dialogRef.current?.ownerDocument ?? (typeof document === "undefined" ? null : document);
+    if (!doc) return;
+    // A cleared value reaches the page after its re-layout.
+    const timer = setTimeout(() => {
+      const read = readBookTypography(doc);
+      if (!read) return;
+      const unset = unsetKey.split("").map((flag) => flag === "u");
+      setBookType((previous) => ({
+        lineHeight: unset[0] && read.lineHeight !== undefined ? read.lineHeight : previous.lineHeight,
+        fontWeight: unset[1] && read.fontWeight !== undefined ? read.fontWeight : previous.fontWeight,
+        letterSpacingPx: unset[2] && read.letterSpacingPx !== undefined ? read.letterSpacingPx : previous.letterSpacingPx,
+        wordSpacingPx: unset[3] && read.wordSpacingPx !== undefined ? read.wordSpacingPx : previous.wordSpacingPx,
+      }));
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [open, unsetKey]);
+  const autoMargins = autoMarginEstimate({
+    fontSizePx: fontSize,
+    scroll: readingMode === "scroll",
+    viewportWidth: typeof window === "undefined" ? 0 : window.innerWidth,
+    spread: spreadArea,
+  });
+  const followText = (book: number | undefined, unknown: string): string =>
+    book === undefined ? unknown : t("aa.followValue", { value: String(book) });
+
   // ---- 显示文字 ----
   const lineHeightText = (() => {
-    if (lineHeight === undefined) return t("aa.followBook");
+    if (lineHeight === undefined) return followText(bookType.lineHeight === undefined ? undefined : Number(bookType.lineHeight.toFixed(1)), t("aa.followBook"));
     const preset = LINE_HEIGHT_PRESETS.find((item) => item.id === lineHeightPresetId(lineHeight));
     return preset ? `${t(preset.labelKey)} ${lineHeight.toFixed(1)}` : lineHeight.toFixed(1);
   })();
@@ -369,8 +413,8 @@ export const AaPopover = React.memo(function AaPopover({
     return level.preset ? t(MARGIN_PRESET_KEYS[level.preset]) : `${level.side}px`;
   })();
   const shortDefault = t("aa.default");
-  const letterSpacingText = letterSpacingPx === undefined ? shortDefault : String(letterSpacingPx);
-  const fontWeightText = fontWeight === undefined ? shortDefault : String(fontWeight);
+  const letterSpacingText = letterSpacingPx === undefined ? followText(bookType.letterSpacingPx, shortDefault) : String(letterSpacingPx);
+  const fontWeightText = fontWeight === undefined ? followText(bookType.fontWeight, shortDefault) : String(fontWeight);
   const wordSpacingText = wordSpacingPx === undefined ? t("aa.followBook") : `${wordSpacingPx}px`;
   const autoSideText = (side: "left" | "right"): string => spreadArea
     ? t("aa.autoPx", { px: Math.round(side === "left" ? spreadArea.baseLeftPx : spreadArea.baseRightPx) })
@@ -473,27 +517,27 @@ export const AaPopover = React.memo(function AaPopover({
     onPreparedRef.current?.();
   }, [open]);
 
-  const sliderRow = (key: string, label: string, slider: React.ReactNode, value: string, extra?: { before?: React.ReactNode; after?: React.ReactNode; className?: string }) => (
-    <div className={`aa-slider-row${extra?.className ? ` ${extra.className}` : ""}`} data-slider-row={key}>
+  /** A set value turns the value into a button that clears it (`reset`). */
+  const sliderRow = (key: string, label: string, slider: React.ReactNode, value: string, reset?: { label: string; onReset(): void }) => (
+    <div className="aa-slider-row" data-slider-row={key}>
       <span className="aa-row-label">{label}</span>
-      {extra?.before}
       {slider}
-      {extra?.after}
-      <span className="aa-row-value">{value}</span>
+      {reset
+        ? <button type="button" className="aa-row-value aa-row-reset" title={reset.label} aria-label={reset.label} onClick={reset.onReset}>
+            <span className="aa-row-reset-text">{value}</span>
+            <RotateCcwIcon size={12} />
+          </button>
+        : <span className="aa-row-value">{value}</span>}
     </div>
   );
-
-  const fontSizeIndex = stopIndex(FONT_SIZE_STOPS, fontSize);
-  const stepFont = (direction: 1 | -1) => {
-    const next = stopValue(FONT_SIZE_STOPS, fontSizeIndex + direction);
-    if (next !== undefined && next !== fontSize) onFontSizeChange(clampFontSize(next));
-  };
+  const resetTo = (labelKey: PlainMessageKey, set: boolean, onReset: () => void) => set ? { label: t(labelKey), onReset } : undefined;
 
   const sideRow = (side: keyof PageMarginsPx, labelKey: PlainMessageKey) => onPageMarginsChange && sliderRow(
     `margin-${side}`, t(labelKey),
-    <StopSlider stops={SIDE_MARGIN_STOPS} value={pageMargins?.[side]} label={t(labelKey)} valueText={sideText(side)}
+    <StopSlider stops={SIDE_MARGIN_STOPS} value={pageMargins?.[side]} autoAt={autoMargins[side]} label={t(labelKey)} valueText={sideText(side)}
       onChange={(next) => onPageMarginsChange(withMarginSide(pageMargins, side, next))} />,
     pageMargins?.[side] !== undefined ? `${pageMargins[side]}px` : t("aa.auto"),
+    resetTo("aa.resetAuto", pageMargins?.[side] !== undefined, () => onPageMarginsChange(withMarginSide(pageMargins, side, undefined))),
   );
 
   const segmented = <T extends string>(label: string, value: T, options: ReadonlyArray<{ value: T; label: string }>, onChange: (value: T) => void) => (
@@ -535,53 +579,47 @@ export const AaPopover = React.memo(function AaPopover({
         {sliderRow("font-size", t("aa.fontSize"),
           <StopSlider stops={FONT_SIZE_STOPS} value={fontSize} label={t("aa.fontSize")}
             valueText={`${formatFontSizePx(fontSize)}px`}
-            onChange={(next) => { if (next !== undefined) onFontSizeChange(clampFontSize(next)); }} />,
-          formatFontSizePx(fontSize),
-          {
-            before: (
-              <button type="button" className="aa-size-btn is-small" onClick={() => stepFont(-1)}
-                disabled={fontSizeIndex <= 0} title={t("aa.fontSize.dec.tip")} aria-label={t("aa.fontSize.dec")}>A</button>
-            ),
-            after: (
-              <button type="button" className="aa-size-btn is-large" onClick={() => stepFont(1)}
-                disabled={fontSizeIndex >= FONT_SIZE_STOPS.length - 1} title={t("aa.fontSize.inc.tip")} aria-label={t("aa.fontSize.inc")}>A</button>
-            ),
-            className: "has-steps",
-          })}
+            onChange={(next) => onFontSizeChange(clampFontSize(next))} />,
+          formatFontSizePx(fontSize))}
         {sliderRow("line-height", t("aa.lineHeight"),
-          <StopSlider stops={LINE_HEIGHT_STOPS} value={lineHeight} label={t("aa.lineHeight")} valueText={lineHeightText}
-            onChange={(next) => {
-              if (next === undefined) {
-                if (onResetLineHeight) onResetLineHeight();
-                else onLineHeightChange(1.7);
-              } else onLineHeightChange(next);
-            }} />,
-          lineHeightText)}
+          <StopSlider stops={LINE_HEIGHT_STOPS} value={lineHeight} autoAt={bookType.lineHeight ?? BOOK_TYPE_FALLBACK.lineHeight}
+            label={t("aa.lineHeight")} valueText={lineHeightText}
+            onChange={(next) => onLineHeightChange(next)} />,
+          lineHeightText,
+          resetTo("aa.resetFollowBook", lineHeight !== undefined, () => {
+            if (onResetLineHeight) onResetLineHeight();
+            else onLineHeightChange(1.7);
+          }))}
         {onPageMarginsChange && sliderRow("margin-linked", t("aa.margins"),
           <TouchSlider
             className="aa-slider"
             min={0}
-            max={MARGIN_LEVEL_COUNT - 1}
+            max={MARGIN_LEVELS.length - 1}
             step={1}
-            value={marginPosition.index}
+            value={(marginPosition.index === 0 ? nearestMarginLevel((autoMargins.left + autoMargins.right) / 2) : marginPosition.index) - 1}
             auto={marginPosition.index === 0}
             label={t("aa.margins")}
             valueText={marginText}
             onChange={(next) => {
-              if (next !== marginPosition.index || !marginPosition.exact) onPageMarginsChange(marginsForLevel(next));
+              if (next + 1 !== marginPosition.index || !marginPosition.exact) onPageMarginsChange(marginsForLevel(next + 1));
             }}
           />,
-          marginText)}
+          marginText,
+          resetTo("aa.resetAuto", marginPosition.index !== 0, () => onPageMarginsChange(marginsForLevel(0))))}
         {onLetterSpacingChange && sliderRow("letter-spacing", t("aa.letterSpacing.short"),
-          <StopSlider stops={LETTER_SPACING_STOPS} value={letterSpacingPx} label={t("aa.letterSpacing")}
-            valueText={letterSpacingPx === undefined ? t("aa.followBook") : `${letterSpacingPx}px`}
+          <StopSlider stops={LETTER_SPACING_STOPS} value={letterSpacingPx} autoAt={bookType.letterSpacingPx ?? BOOK_TYPE_FALLBACK.letterSpacingPx}
+            label={t("aa.letterSpacing")}
+            valueText={letterSpacingPx === undefined ? followText(bookType.letterSpacingPx, t("aa.followBook")) : `${letterSpacingPx}px`}
             onChange={(next) => onLetterSpacingChange(next)} />,
-          letterSpacingText)}
+          letterSpacingText,
+          resetTo("aa.resetFollowBook", letterSpacingPx !== undefined, () => onLetterSpacingChange(undefined)))}
         {onFontWeightChange && sliderRow("font-weight", t("aa.weight.short"),
-          <StopSlider stops={FONT_WEIGHT_STOPS} value={fontWeight} label={t("aa.weight")}
-            valueText={fontWeight === undefined ? t("aa.followBook") : String(fontWeight)}
+          <StopSlider stops={FONT_WEIGHT_STOPS} value={fontWeight} autoAt={bookType.fontWeight ?? BOOK_TYPE_FALLBACK.fontWeight}
+            label={t("aa.weight")}
+            valueText={fontWeight === undefined ? followText(bookType.fontWeight, t("aa.followBook")) : String(fontWeight)}
             onChange={(next) => onFontWeightChange(next)} />,
-          fontWeightText)}
+          fontWeightText,
+          resetTo("aa.resetFollowBook", fontWeight !== undefined, () => onFontWeightChange(undefined)))}
       </div>
 
       <div className="aa-group-title">{t("aa.group.layoutTurning")}</div>
@@ -619,21 +657,23 @@ export const AaPopover = React.memo(function AaPopover({
         {sideRow("left", "aa.margin.left")}
         {sideRow("right", "aa.margin.right")}
         {onWordSpacingChange && sliderRow("word-spacing", t("aa.wordSpacing"),
-          <StopSlider stops={WORD_SPACING_STOPS} value={wordSpacingPx} label={t("aa.wordSpacing")} valueText={wordSpacingText}
+          <StopSlider stops={WORD_SPACING_STOPS} value={wordSpacingPx} autoAt={bookType.wordSpacingPx ?? BOOK_TYPE_FALLBACK.wordSpacingPx}
+            label={t("aa.wordSpacing")} valueText={wordSpacingText}
             onChange={(next) => onWordSpacingChange(next)} />,
-          wordSpacingPx === undefined ? shortDefault : `${wordSpacingPx}px`)}
+          wordSpacingPx === undefined ? followText(bookType.wordSpacingPx, shortDefault) : `${wordSpacingPx}px`,
+          resetTo("aa.resetFollowBook", wordSpacingPx !== undefined, () => onWordSpacingChange(undefined)))}
         {(onGapPxChange || onSpreadGapModeChange) && (
           <>
             {sliderRow("gap", t("aa.gap"),
               <StopSlider stops={SPREAD_GAP_STOPS} value={spreadGapMode === "manual" ? gapPx : undefined}
+                autoAt={spreadArea?.gapPx ?? gapPx}
                 label={t("aa.gap")} valueText={gapText}
-                onChange={(next) => {
-                  if (next === undefined) {
-                    if (onSpreadGapModeChange) onSpreadGapModeChange("auto");
-                    else onGapPxChange?.(24);
-                  } else onGapPxChange?.(next);
-                }} />,
-              spreadGapMode === "manual" ? `${gapPx}px` : t("aa.auto"))}
+                onChange={(next) => onGapPxChange?.(next)} />,
+              spreadGapMode === "manual" ? `${gapPx}px` : t("aa.auto"),
+              resetTo("aa.resetAuto", spreadGapMode === "manual", () => {
+                if (onSpreadGapModeChange) onSpreadGapModeChange("auto");
+                else onGapPxChange?.(24);
+              }))}
             {presentation !== "spread" && <div className="aa-section-note">{t("aa.gap.spreadOnlyNote")}</div>}
           </>
         )}

@@ -1,11 +1,11 @@
-import { PAGE_GAP_MAX_PX, type PageMarginsPx } from "../render/pageLayout";
+import { COMPACT_PAGE_WIDTH_PX, PAGE_GAP_MAX_PX, autoPageMarginsPx, type PageMarginsPx } from "../render/pageLayout";
 
 /**
  * Slider stops for each typography setting, left to right. A slider moves
  * by index, so every position is a value the old steppers could also reach.
  * `undefined` is the unset state: "follow the book" for type settings,
- * "auto" for margins and the spread gap. It sits at the far left, so a
- * slider can always return to it and never writes it as a number.
+ * "auto" for margins and the spread gap. A slider draws it where the book
+ * or layout already is (see autoAt in AaPopover), never as a stop of its own.
  */
 export type SettingStops = readonly (number | undefined)[];
 
@@ -92,11 +92,33 @@ export function marginLevelPosition(margins: PageMarginsPx | undefined): MarginL
   const reference = horizontal.length > 0
     ? horizontal.reduce((sum, value) => sum + value, 0) / horizontal.length
     : MARGIN_LEVELS[0].side;
+  return { index: nearestMarginLevel(reference), exact: false };
+}
+
+/** The level (1-based, as in marginLevelPosition) whose side is nearest `sidePx`. */
+export function nearestMarginLevel(sidePx: number): number {
   let nearest = 0;
   MARGIN_LEVELS.forEach((level, index) => {
-    if (Math.abs(level.side - reference) < Math.abs(MARGIN_LEVELS[nearest].side - reference)) nearest = index;
+    if (Math.abs(level.side - sidePx) < Math.abs(MARGIN_LEVELS[nearest].side - sidePx)) nearest = index;
   });
-  return { index: nearest + 1, exact: false };
+  return nearest + 1;
+}
+
+/**
+ * About where automatic margins land, so their slider can sit there: the
+ * spread's measured sides, scroll's fixed 16px, else the paginated defaults
+ * (narrow screens get side margins, wide ones centre the text instead).
+ */
+export function autoMarginEstimate(input: {
+  fontSizePx: number;
+  scroll: boolean;
+  viewportWidth: number;
+  spread?: { baseLeftPx: number; baseRightPx: number };
+}): Required<PageMarginsPx> {
+  const paged = autoPageMarginsPx(input.fontSizePx, input.viewportWidth > 0 && input.viewportWidth < COMPACT_PAGE_WIDTH_PX);
+  if (input.spread) return { ...paged, left: Math.round(input.spread.baseLeftPx), right: Math.round(input.spread.baseRightPx) };
+  if (input.scroll) return { ...paged, left: 16, right: 16 };
+  return paged;
 }
 
 export function marginsForLevel(index: number): PageMarginsPx {
