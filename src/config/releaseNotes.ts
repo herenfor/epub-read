@@ -35,29 +35,28 @@ export const RELEASES_PAGE_URL = "https://github.com/herenfor/epub-read/releases
  */
 export const RELEASE_NOTES: readonly ReleaseNote[] = [
   {
-    version: "0.3.10",
-    status: "released",
-    releasedOn: "2026-11-02",
+    version: "0.3.11",
+    status: "development",
     items: [
       {
         category: "new",
-        text: "音量键翻页：Android 阅读时，音量下键下一页、音量上键上一页，长按可连续翻页。",
+        text: "Aa 阅读设置：行高、字重、字距、词距等滑杆未设置时停在书籍自身的值，改过后可一键恢复跟随书籍或自动；字号行与其他设置对齐。",
       },
       {
         category: "new",
-        text: "音量键反向：阅读设置中可单独交换两个音量键的翻页方向，不影响点击和滑动翻页。",
+        text: "点击预览：开启“左侧点击也下一页”后，左侧箭头的预览箭头会翻转为朝前，提示与实际翻页方向一致。",
       },
       {
         category: "improved",
-        text: "音量键翻页只在阅读正文时生效；打开设置、目录等浮层或切到后台时恢复系统音量调节。",
+        text: "设置中的“界面动画”改为“减少动效”开关，开启后只使用更短的淡入淡出。",
       },
       {
         category: "improved",
-        text: "优化目录、设置等面板的滚动边缘渐隐，面板打开时从首帧显示，减少入场延迟。",
+        text: "统一书架筛选、搜索范围、字体来源等处的分段选择控件，外观和操作保持一致。",
       },
       {
-        category: "fixed",
-        text: "修复关闭音量键翻页后，旧的翻页状态可能重新接管音量键的问题。",
+        category: "improved",
+        text: "局域网发送的“附带书籍”改为发送表单中的复选框，位置与生效时机一致。",
       },
     ],
   },
