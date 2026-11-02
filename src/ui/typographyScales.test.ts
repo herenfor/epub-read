@@ -6,15 +6,17 @@ import {
   LINE_HEIGHT_STOPS,
   MARGIN_LEVEL_COUNT,
   SIDE_MARGIN_STOPS,
+  autoMarginEstimate,
   marginLevelPosition,
   marginsForLevel,
+  nearestMarginLevel,
   stopIndex,
   stopValue,
   withMarginSide,
 } from "./typographyScales";
 
 describe("typography slider stops", () => {
-  it("keeps the old stepper values and puts the unset state at the far left", () => {
+  it("keeps the old stepper values; the unset state is listed first", () => {
     expect(LINE_HEIGHT_STOPS[0]).toBeUndefined();
     expect(LINE_HEIGHT_STOPS.slice(1)).toEqual([1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2, 2.1, 2.2, 2.3, 2.4]);
     expect(FONT_WEIGHT_STOPS).toEqual([undefined, 300, 400, 500, 600, 700]);
@@ -58,5 +60,17 @@ describe("linked margin levels", () => {
   it("sets or clears one side and keeps the others", () => {
     expect(withMarginSide({ left: 20, top: 8 }, "top", undefined)).toEqual({ left: 20 });
     expect(withMarginSide(undefined, "bottom", 12)).toEqual({ bottom: 12 });
+  });
+
+  it("finds where automatic margins land, so the slider can sit there", () => {
+    expect(nearestMarginLevel(0)).toBe(1);
+    expect(nearestMarginLevel(22)).toBe(3);
+    expect(nearestMarginLevel(500)).toBe(9);
+    // A phone page gets side margins, a wide one centres the text.
+    expect(autoMarginEstimate({ fontSizePx: 18, scroll: false, viewportWidth: 390 }).left).toBeGreaterThan(0);
+    expect(autoMarginEstimate({ fontSizePx: 18, scroll: false, viewportWidth: 1400 }).left).toBe(0);
+    expect(autoMarginEstimate({ fontSizePx: 18, scroll: true, viewportWidth: 1400 }).right).toBe(16);
+    expect(autoMarginEstimate({ fontSizePx: 18, scroll: false, viewportWidth: 1400, spread: { baseLeftPx: 61.6, baseRightPx: 70 } }))
+      .toMatchObject({ left: 62, right: 70 });
   });
 });

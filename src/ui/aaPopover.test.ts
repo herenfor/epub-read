@@ -83,6 +83,43 @@ describe("Aa 单层紧凑面板", () => {
     expect(html({ pageMargins: { left: 52, right: 30, top: 12 } })).toContain("微调");
   });
 
+  it("未设置的滑块停在书本身的值上，不占最左端；改过的值点一下恢复", () => {
+    // No book on screen here: the usual values stand in (line height 1.6, weight 400).
+    const main = html({ lineHeight: undefined, fontWeight: undefined });
+    expect(main).toMatch(/aria-label="行高"[^>]*aria-valuenow="4"[^>]*data-auto/);
+    expect(main).toMatch(/aria-label="正文字重"[^>]*aria-valuenow="1"[^>]*data-auto/);
+    expect(main).not.toContain("恢复跟随书籍");
+    // Set values carry the button back, and the slider covers only numbers.
+    const set = html({ lineHeight: 1.2, fontWeight: 300 });
+    expect(set).toMatch(/aria-label="行高"[^>]*aria-valuenow="0"/);
+    expect(set).toMatch(/aria-label="正文字重"[^>]*aria-valuenow="0"/);
+    expect(set.match(/aria-label="恢复跟随书籍"/g)).toHaveLength(2);
+    expect(set).toContain('aria-label="恢复自动"');
+    // Font size is a plain row like the others.
+    expect(set).not.toContain("减小字号");
+    expect(set).not.toContain("增大字号");
+  });
+
+  it("点恢复把行高、字重和联动边距清回未设置", async () => {
+    const onResetLineHeight = vi.fn();
+    const onFontWeightChange = vi.fn();
+    const onPageMarginsChange = vi.fn();
+    const dom = createReactDomHarness({ resizeObserver: true });
+    try {
+      await dom.render(createElement(AaPopover, { ...baseProps, lineHeight: 1.9, onResetLineHeight, fontWeight: 600, onFontWeightChange, onPageMarginsChange }));
+      const reset = (label: string, row: string) =>
+        dom.click(dom.container.querySelector(`[data-slider-row="${row}"] .aa-row-reset[aria-label="${label}"]`)!);
+      await reset("恢复跟随书籍", "line-height");
+      expect(onResetLineHeight).toHaveBeenCalledTimes(1);
+      await reset("恢复跟随书籍", "font-weight");
+      expect(onFontWeightChange).toHaveBeenCalledWith(undefined);
+      await reset("恢复自动", "margin-linked");
+      expect(onPageMarginsChange).toHaveBeenCalledWith({});
+    } finally {
+      await dom.dispose();
+    }
+  });
+
   it("高级排版就地展开：四边距、词间距、中缝、竖排转横排、自定义 CSS，默认收起", () => {
     const markup = html();
     const group = advanced(markup);

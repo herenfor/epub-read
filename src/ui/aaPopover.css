@@ -430,13 +430,9 @@
   white-space: nowrap;
 }
 
-.aa-slider-row.has-steps .aa-row-label {
-  width: auto;
-}
-
 .aa-row-value {
   flex: none;
-  width: 4.6em;
+  width: 5em;
   text-align: right;
   font-size: var(--fs-body);
   font-weight: 600;
@@ -451,28 +447,38 @@
   min-width: 0;
 }
 
-.aa-size-btn {
-  flex: none;
-  width: 32px;
-  height: 40px;
-  border: none;
-  border-radius: var(--r-md);
+/* A changed value: tap it to go back to the book's value (or automatic). */
+.aa-row-reset {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  box-sizing: border-box;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-xs);
   background: transparent;
   color: var(--fg);
-  font-family: var(--font-reading, serif);
+  font-family: inherit;
   cursor: pointer;
 }
 
-.aa-size-btn.is-small { font-size: var(--fs-caption); }
-.aa-size-btn.is-large { font-size: var(--fs-title); }
-
-.aa-size-btn:hover:not(:disabled) {
-  background: var(--btn-tint-hover);
+.aa-row-reset-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.aa-size-btn:disabled {
-  opacity: 0.35;
-  cursor: default;
+.aa-row-reset svg {
+  flex: none;
+  color: var(--accent);
+}
+
+@media (hover: hover) {
+  .aa-row-reset:hover {
+    background: var(--btn-tint-hover);
+  }
 }
 
 .aa-section-note {
