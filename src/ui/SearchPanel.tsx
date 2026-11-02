@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Segmented } from "./controls/Segmented";
 import { MENU_CLOSE_MS } from "./menuMotion";
 import { useSheetDrag } from "./sheetDrag";
 import type { KeyboardEvent } from "react";
@@ -583,20 +584,12 @@ export function SearchPanel(props: SearchPanelProps) {
           </button>
         </div>
         {props.onSearchViewChange && (
-          <div className="search-scope search-view-toggle" role="group" aria-label={t("search.view")}>
-            <button
-              type="button"
-              className={(props.searchView ?? "display") === "display" ? "active" : ""}
-              aria-pressed={(props.searchView ?? "display") === "display"}
-              onClick={() => props.onSearchViewChange?.("display")}
-            >{t("search.view.display")}</button>
-            <button
-              type="button"
-              className={props.searchView === "original" ? "active" : ""}
-              aria-pressed={props.searchView === "original"}
-              onClick={() => props.onSearchViewChange?.("original")}
-            >{t("search.view.original")}</button>
-          </div>
+          <Segmented label={t("search.view")} value={props.searchView ?? "display"} variant="fill" className="search-view-toggle"
+            options={[
+              { value: "display", label: t("search.view.display") },
+              { value: "original", label: t("search.view.original") },
+            ]}
+            onChange={(view) => props.onSearchViewChange?.(view)} />
         )}
         <div className="search-input-wrap">
           <input

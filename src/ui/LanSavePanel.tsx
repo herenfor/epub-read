@@ -18,6 +18,7 @@ import {
 import "./lanSavePanel.css";
 import { uiText, useUiText } from "./localization/UiLanguageProvider";
 import { Switch } from "./controls/Switch";
+import { Segmented } from "./controls/Segmented";
 
 export interface LanSavePanelProps {
   open: boolean;
@@ -496,27 +497,16 @@ export function LanSavePanel(props: LanSavePanelProps) {
       <section className="lan-send" aria-label={t("lanPanel.send.region")}>
         <div className="lan-send-group">
           <h3>{t("lanPanel.send.what")}</h3>
-          <div className="lan-segmented" role="radiogroup" aria-label={t("lanPanel.send.scope")}>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={scopeChoice === "all"}
-              className={scopeChoice === "all" ? "active" : ""}
-              onClick={() => setScopeChoice("all")}
-            >
-              {t("lanPanel.send.all")}
-            </button>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={scopeChoice === "selected"}
-              className={scopeChoice === "selected" ? "active" : ""}
-              disabled={selectedCount === 0}
-              onClick={() => setScopeChoice("selected")}
-            >
-              {selectedCount > 0 ? tn("lanPanel.send.selected", selectedCount, { count: selectedCount }) : t("lanPanel.send.selectedNone")}
-            </button>
-          </div>
+          <Segmented label={t("lanPanel.send.scope")} value={scopeChoice} className="lan-segmented"
+            options={[
+              { value: "all", label: t("lanPanel.send.all") },
+              {
+                value: "selected",
+                label: selectedCount > 0 ? tn("lanPanel.send.selected", selectedCount, { count: selectedCount }) : t("lanPanel.send.selectedNone"),
+                disabled: selectedCount === 0,
+              },
+            ]}
+            onChange={setScopeChoice} />
           {selectedCount === 0 && (
             <p className="lan-hint">{t("lanPanel.send.selectHint")}</p>
           )}

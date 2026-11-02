@@ -12,6 +12,7 @@ export const fonts = defineMessages("fonts", {
   "fonts.search": "搜索字体名称",
   "fonts.tab.system": { zh: "系统字体（{count}）", max: 18 },
   "fonts.tab.imported": { zh: "已导入（{count}）", max: 18 },
+  "fonts.tabs": { zh: "字体来源", note: "Accessible name of the system/imported font switch." },
   "fonts.system.loading": "正在读取系统字体…",
   "fonts.system.failed": { zh: "系统字体读取失败：{error}", note: "{error} is a technical detail." },
   "fonts.unknownError": "未知错误",

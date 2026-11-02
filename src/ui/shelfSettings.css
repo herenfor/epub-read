@@ -464,33 +464,6 @@
   line-height: 14px;
 }
 
-.shelf-search-scope {
-  flex: 0 0 auto;
-  display: inline-flex;
-  padding: 2px;
-  border-radius: var(--r-sm);
-  background: color-mix(in srgb, var(--fg) 8%, transparent);
-}
-
-.shelf-search-scope button {
-  min-height: 26px;
-  padding: 0 9px;
-  border: 0;
-  border-radius: var(--r-sm);
-  background: transparent;
-  color: var(--muted);
-  font: inherit;
-  font-size: var(--fs-caption);
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.shelf-search-scope button.active {
-  background: var(--bg);
-  color: var(--fg);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
-}
-
 .shelf-quick-filter-anchor {
   position: relative;
   display: flex;

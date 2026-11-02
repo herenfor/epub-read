@@ -2,6 +2,7 @@ import type { CSSProperties } from "react";
 import "./aaPopover.css";
 import "./readerTapRegions.css";
 import { Switch } from "./controls/Switch";
+import { Segmented } from "./controls/Segmented";
 import { TouchSlider } from "./TouchSlider";
 import {
   computeTapRegionGeometry,
@@ -176,14 +177,9 @@ export function ReaderTapRegionsPanel(props: ReaderTapRegionsPanelProps) {
 
     <div className="aa-control-row">
       <span className="aa-section-label">{labels.size}</span>
-      <div className="aa-segmented-capsule" role="radiogroup" aria-label={labels.size}>
-        {(["default", "custom"] as const).map((mode) => <button key={mode} type="button" role="radio"
-          aria-checked={geometry.mode === mode}
-          className={`aa-segmented-btn${geometry.mode === mode ? " active" : ""}`}
-          onClick={() => { if (geometry.mode !== mode) update(setTapRegionMode(profile, mode, geometry)); }}>
-          {mode === "default" ? labels.modeDefault : labels.modeCustom}
-        </button>)}
-      </div>
+      <Segmented label={labels.size} value={geometry.mode}
+        options={[{ value: "default", label: labels.modeDefault }, { value: "custom", label: labels.modeCustom }]}
+        onChange={(mode) => { if (geometry.mode !== mode) update(setTapRegionMode(profile, mode, geometry)); }} />
     </div>
     {custom && <>
       {slider("left")}

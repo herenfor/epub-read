@@ -134,7 +134,7 @@ describe("tap region panel", () => {
       expect(band("left")?.style.width).toBe("5%");
       expect(dom.container.textContent).not.toContain("左侧点击也下一页");
       expect(dom.container.querySelector('[role="slider"]')).toBeNull();
-      const customButton = [...dom.container.querySelectorAll(".aa-segmented-btn")]
+      const customButton = [...dom.container.querySelectorAll(".ui-segmented > button")]
         .find((button) => button.textContent === "自定义")!;
       await dom.click(customButton);
       expect(onChange).toHaveBeenLastCalledWith({ ...value, pc: { mode: "custom", custom: { left: 5, right: 5 } } });

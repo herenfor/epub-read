@@ -20,6 +20,7 @@ import { ReadingSettingsContent, useReadingSettingsTitles, type ReadingSettingsP
 import { SearchIndexCard } from "./SearchPanel";
 import type { ShelfBodySearchProps } from "./ShelfView";
 import { ThemeCards } from "./controls/ThemeCards";
+import { Segmented as SegmentedControl } from "./controls/Segmented";
 import { CustomThemeEditor } from "./controls/CustomThemeEditor";
 import type { CustomThemeControls } from "./useCustomThemes";
 import "./shelfSettings.css";
@@ -112,10 +113,7 @@ const ROW_ICONS = {
 function Segmented<T extends string>(props: { label: string; value: T; options: Array<{ value: T; label: string }>; onChange(value: T): void }) {
   return <div className="shelf-settings-control">
     <span>{props.label}</span>
-    <div className="shelf-segmented" role="group" aria-label={props.label}>
-      {props.options.map((option) => <button key={option.value} type="button" aria-pressed={props.value === option.value}
-        className={props.value === option.value ? "active" : ""} onClick={() => props.onChange(option.value)}>{option.label}</button>)}
-    </div>
+    <SegmentedControl label={props.label} value={props.value} options={props.options} onChange={props.onChange} />
   </div>;
 }
 

@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { Segmented as SegmentedControl } from "./controls/Segmented";
 import { useExitPresence } from "./menuMotion";
 import { useSheetDrag } from "./sheetDrag";
 import { useUiText, type Translate } from "./localization/UiLanguageProvider";
@@ -195,10 +196,7 @@ function FacetValues(props: {
 function Segmented<T extends string>(props: { label: string; value: T; options: Array<{ value: T; label: string }>; onChange(value: T): void }) {
   return <div className="shelf-filter-control">
     <span className="shelf-filter-control-label">{props.label}</span>
-    <div className="shelf-segmented" role="group" aria-label={props.label}>
-      {props.options.map((option) => <button key={option.value} type="button" aria-pressed={props.value === option.value}
-        className={props.value === option.value ? "active" : ""} onClick={() => props.onChange(option.value)}>{option.label}</button>)}
-    </div>
+    <SegmentedControl label={props.label} value={props.value} options={props.options} onChange={props.onChange} />
   </div>;
 }
 
