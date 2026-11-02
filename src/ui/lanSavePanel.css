@@ -558,9 +558,23 @@
   background: var(--bg);
 }
 
-.lan-send-options .lan-switch-row {
+.lan-check-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  box-sizing: border-box;
   min-height: 60px;
   padding: 10px 14px;
+  cursor: pointer;
+}
+
+.lan-check-row input {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin: 1px 0 0;
+  accent-color: var(--accent);
+  cursor: pointer;
 }
 
 .lan-send-note {
@@ -700,25 +714,18 @@
   line-height: 1.55;
 }
 
-.lan-switch-row {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  cursor: pointer;
-}
-
-.lan-switch-text {
+.lan-check-text {
   display: grid;
   flex: 1;
   gap: 2px;
 }
 
-.lan-switch-text strong {
+.lan-check-text strong {
   font-size: var(--fs-emph);
   font-weight: 600;
 }
 
-.lan-switch-text small {
+.lan-check-text small {
   color: var(--muted);
   font-size: var(--fs-body);
   line-height: 1.5;
