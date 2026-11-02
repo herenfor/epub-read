@@ -1,4 +1,5 @@
 import { FolderNameField } from "./FolderNameField";
+import { Segmented } from "./controls/Segmented";
 import type { ShelfLibraryView } from "./libraryLoad";
 import { validateFolderNameDraft, folderNameDraftError } from "./folderNameDraft";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -4545,14 +4546,13 @@ export function ShelfView(props: ShelfViewProps) {
   }, []);
 
   const searchScopeSwitch = (
-    <div className="shelf-search-scope" role="group" aria-label={t("shelfSettings.search.scope")}>
-      <button type="button" aria-pressed={searchMode === "metadata"} className={searchMode === "metadata" ? "active" : ""}
-        disabled={props.busy} onClick={() => changeSearchMode("metadata")}>
-        {isCompactMobile ? t("shelfSettings.search.scope.titleShort") : t("shelfMenu.searchMode.metadata")}
-      </button>
-      <button type="button" aria-pressed={searchMode === "body"} className={searchMode === "body" ? "active" : ""}
-        disabled={props.busy} onClick={() => changeSearchMode("body")}>{t("shelfMenu.searchMode.body")}</button>
-    </div>
+    <Segmented label={t("shelfSettings.search.scope")} value={searchMode} variant="compact" className="shelf-search-scope"
+      disabled={props.busy}
+      options={[
+        { value: "metadata", label: isCompactMobile ? t("shelfSettings.search.scope.titleShort") : t("shelfMenu.searchMode.metadata") },
+        { value: "body", label: t("shelfMenu.searchMode.body") },
+      ]}
+      onChange={changeSearchMode} />
   );
   const filterButton = (
     <button

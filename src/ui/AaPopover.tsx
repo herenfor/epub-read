@@ -39,6 +39,7 @@ import { useSliderFocus } from "./sliderFocus";
 import { readerTextBox, type ScreenBox } from "./readerPageBox";
 import { SliderDragContext, TouchSlider } from "./TouchSlider";
 import { Switch } from "./controls/Switch";
+import { Segmented } from "./controls/Segmented";
 import { ThemeCards } from "./controls/ThemeCards";
 import { readBookTypography, type BookTypography } from "./bookTypographyProbe";
 
@@ -541,15 +542,7 @@ export const AaPopover = React.memo(function AaPopover({
   );
 
   const segmented = <T extends string>(label: string, value: T, options: ReadonlyArray<{ value: T; label: string }>, onChange: (value: T) => void) => (
-    <div className="aa-segmented-capsule" role="radiogroup" aria-label={label}>
-      {options.map((option) => (
-        <button key={option.value} type="button" role="radio" aria-checked={value === option.value}
-          className={`aa-segmented-btn${value === option.value ? " active" : ""}`}
-          onClick={() => onChange(option.value)}>
-          {option.label}
-        </button>
-      ))}
-    </div>
+    <Segmented label={label} value={value} options={options} onChange={onChange} />
   );
 
   // One scrolling page: themes, the two sub-pages, text, layout and turning,

@@ -12,6 +12,7 @@ import "./textProjectionPanel.css";
 import { uiText, useUiText } from "../localization/UiLanguageProvider";
 import type { PlainMessageKey } from "../localization/core";
 import { Switch } from "../controls/Switch";
+import { Segmented } from "../controls/Segmented";
 
 export interface TextProjectionPanelProps {
   /** Fully controlled preference snapshot. */
@@ -111,21 +112,9 @@ export function TextProjectionPanel(props: TextProjectionPanelProps) {
 
       <div className="aa-control-row">
         <span className="aa-section-label">{t("display.text.script")}</span>
-        <div className="aa-segmented-capsule" role="radiogroup" aria-label={t("display.text.mode")}>
-          {(Object.keys(MODE_LABELS) as TextProjectionMode[]).map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              role="radio"
-              aria-checked={props.preferences.mode === mode}
-              className={`aa-segmented-btn${props.preferences.mode === mode ? " active" : ""}`}
-              disabled={props.disabled}
-              onClick={() => updateMode(mode)}
-            >
-              {t(MODE_LABELS[mode])}
-            </button>
-          ))}
-        </div>
+        <Segmented label={t("display.text.mode")} value={props.preferences.mode} disabled={props.disabled}
+          options={(Object.keys(MODE_LABELS) as TextProjectionMode[]).map((mode) => ({ value: mode, label: t(MODE_LABELS[mode]) }))}
+          onChange={updateMode} />
       </div>
 
       <div className="aa-control-row">

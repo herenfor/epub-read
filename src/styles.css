@@ -3223,7 +3223,7 @@ select option {
 .font-settings-filter { display: flex; flex: none; align-items: center; gap: 12px; }
 .font-settings-panel .font-settings-filter { flex-wrap: wrap; row-gap: 6px; }
 .font-settings-panel .font-settings-filter .font-override-switch { margin-left: auto; }
-.font-settings-filter .aa-segmented-btn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.font-settings-tabs > button { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .font-override-switch > span:first-child { white-space: nowrap; }
 .font-override-switch { display: inline-flex; flex: none; align-items: center; gap: 8px; color: var(--fg); font-size: var(--fs-body); cursor: pointer; }
 .font-override-switch:has(input:disabled) { opacity: 0.5; cursor: default; }
@@ -3314,43 +3314,9 @@ select option {
   color: var(--muted);
   background: color-mix(in srgb, var(--fg) 6%, transparent);
 }
-.search-scope {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 4px;
-  padding: 3px;
-  border-radius: var(--r-md);
-  background: color-mix(in srgb, var(--accent) 10%, var(--panel-bg));
-}
-.search-scope button {
-  min-width: 0;
-  border: 0;
-  border-radius: var(--r-sm);
-  padding: 7px 10px;
-  color: inherit;
-  background: transparent;
-  cursor: pointer;
-}
-.search-scope button.active {
-  color: #fff;
-  background: var(--accent);
-  box-shadow: 0 1px 4px color-mix(in srgb, var(--accent) 28%, transparent);
-}
-/* 显示/原文是范围之下的次级切换：同一分段结构，选中态用面板底+强调色字，不与范围抢主色。 */
-.search-scope.search-view-toggle {
+/* 显示/原文：范围之下的次级切换，共用分段控件。 */
+.search-view-toggle {
   margin-top: 6px;
-  background: color-mix(in srgb, var(--fg) 6%, transparent);
-}
-.search-scope.search-view-toggle button {
-  padding: 5px 10px;
-  color: var(--muted);
-  font-size: var(--fs-caption);
-}
-.search-scope.search-view-toggle button.active {
-  color: var(--accent);
-  background: var(--panel-bg);
-  font-weight: 600;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 .search-index-card {
   flex: none;
@@ -5947,19 +5913,6 @@ select option {
 .app[data-mobile-chrome="true"] .search-panel .search-head .tb-close {
   width: 44px;
   height: 44px;
-}
-
-.app[data-mobile-chrome="true"] .search-panel .search-scope {
-  flex: none;
-  padding: 3px;
-  border-radius: var(--r-md);
-}
-
-.app[data-mobile-chrome="true"] .search-panel .search-scope button {
-  min-height: 44px;
-  padding: 0 10px;
-  border-radius: var(--r-sm);
-  font-size: var(--fs-emph);
 }
 
 .app[data-mobile-chrome="true"] .search-panel .search-index-card {

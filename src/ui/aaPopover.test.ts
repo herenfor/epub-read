@@ -59,7 +59,7 @@ describe("Aa 单层紧凑面板", () => {
     }
     // Letter spacing and weight no longer share a row.
     expect(main).not.toContain("aa-half-rows");
-    expect(main).toMatch(/aa-segmented-btn active[^>]*>双页</);
+    expect(main).toMatch(/role="radio" aria-checked="true" class="active"[^>]*>双页</);
     for (const text of ["文字", "版式与翻页", "翻页动画", "始终从左往右翻页", "高级排版", "恢复默认设置", "导入书籍", "诊断日志 (2)"]) {
       expect(main).toContain(text);
     }

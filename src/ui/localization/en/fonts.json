@@ -9,6 +9,7 @@
   "fonts.search": "Search font names",
   "fonts.tab.system": "System ({count})",
   "fonts.tab.imported": "Imported ({count})",
+  "fonts.tabs": "Font source",
   "fonts.system.loading": "Loading system fonts...",
   "fonts.system.failed": "Failed to load system fonts: {error}",
   "fonts.unknownError": "Unknown error",

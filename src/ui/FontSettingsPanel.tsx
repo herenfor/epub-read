@@ -7,6 +7,7 @@ import { useScrollEdgeFade } from "./scrollEdgeFade";
 import { useUiText } from "./localization/UiLanguageProvider";
 import "./aaPopover.css";
 import { Switch } from "./controls/Switch";
+import { Segmented } from "./controls/Segmented";
 
 export interface FontSettingsPanelProps {
   source?: "system" | "imported";
@@ -163,10 +164,12 @@ export function FontSettingsPanel(props: FontSettingsPanelProps) {
       <button type="button" className="font-import-btn" onClick={() => inputRef.current?.click()} disabled={effectiveBusy}>{effectiveBusy ? t("fonts.importing") : t("fonts.import")}</button>
     </div>
     <div className="font-settings-filter">
-      <div className="font-settings-tabs aa-segmented-capsule">
-        <button type="button" className={`aa-segmented-btn${tab === "system" ? " active" : ""}`} onClick={() => selectTab("system")}>{t("fonts.tab.system", { count: systems.length })}</button>
-        <button type="button" className={`aa-segmented-btn${tab === "imported" ? " active" : ""}`} onClick={() => selectTab("imported")}>{t("fonts.tab.imported", { count: imported.length })}</button>
-      </div>
+      <Segmented label={t("fonts.tabs")} value={tab} className="font-settings-tabs"
+        options={[
+          { value: "system", label: t("fonts.tab.system", { count: systems.length }) },
+          { value: "imported", label: t("fonts.tab.imported", { count: imported.length }) },
+        ]}
+        onChange={selectTab} />
       {props.onForceFontOverrideChange && <label className="font-override-switch" title={t("fonts.override.hint")}>
         <span>{t("fonts.override")}</span>
         <Switch inRow checked={props.forceFontOverride === true} disabled={!props.source}

@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { Segmented } from "../controls/Segmented";
 import { getRuntimeCapabilities } from "../../platform/runtimeCapabilities";
 import {
   cloudSyncNative,
@@ -178,11 +179,12 @@ function ConnectForm({ status }: { status: CloudSyncStatus }) {
   return <div className="shelf-settings-card cloud-sync-form">
     <div className="shelf-settings-control">
       <span>{t("cloudSync.service")}</span>
-      <div className="shelf-segmented" role="group" aria-label={t("cloudSync.service")}>
-        {(["jianguoyun", "custom"] as const).map((value) => <button key={value} type="button" aria-pressed={service === value}
-          className={service === value ? "active" : ""} disabled={disabled}
-          onClick={() => edit(() => setService(value))("")}>{t(value === "jianguoyun" ? "cloudSync.service.jianguoyun" : "cloudSync.service.custom")}</button>)}
-      </div>
+      <Segmented label={t("cloudSync.service")} value={service} disabled={disabled}
+        options={[
+          { value: "jianguoyun", label: t("cloudSync.service.jianguoyun") },
+          { value: "custom", label: t("cloudSync.service.custom") },
+        ]}
+        onChange={(value) => edit(() => setService(value))("")} />
     </div>
     {service === "custom" && <Field label={t("cloudSync.field.baseUrl")}>
       <input type="url" inputMode="url" autoComplete="url" spellCheck={false} placeholder="https://example.com/dav/"
