@@ -132,6 +132,20 @@
   translate: 50% -50%;
 }
 
+/* A back side that turns forward too: its arrow turns over to point forward. */
+.tap-regions-band-arrow svg {
+  transform: perspective(60px) rotateY(0deg);
+  transition: transform 320ms var(--ease-emphasized, ease);
+}
+
+.tap-regions-band-arrow[data-flipped] svg {
+  transform: perspective(60px) rotateY(180deg);
+}
+
+:root[data-motion="reduced"] .tap-regions-band-arrow svg {
+  transition: none;
+}
+
 .tap-regions-band-center-label {
   font-size: var(--fs-caption);
   color: var(--muted);
