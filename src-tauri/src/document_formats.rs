@@ -294,7 +294,7 @@ fn write_part(
 /// Anonymous temporary ZIP is a reading-resource container, not an EPUB or a permanent converted copy.
 /// File ownership passes to the existing window-owned ZIP session; close/failure removes it automatically.
 pub fn text_archive(
-    mut source: File,
+    mut source: impl Read + Seek,
     requested: Option<&str>,
     title: &str,
 ) -> Result<File, String> {

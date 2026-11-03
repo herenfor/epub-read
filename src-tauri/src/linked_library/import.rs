@@ -22,7 +22,7 @@ pub(super) fn acquire_import_activity(
 /// Reject conflicting library mutations while a managed/path import or a
 /// directory import is active. Callers already hold the library write lock,
 /// giving the fixed order library write lock -> active import slot.
-pub(super) fn ensure_import_idle(app: &AppHandle) -> Result<(), String> {
+pub(crate) fn ensure_import_idle<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<(), String> {
     let active = app.state::<ManagedImportState>();
     let slot = active
         .0
@@ -309,7 +309,6 @@ pub(super) fn prepare_document(
 /// Prepared without staging or changing the shelf. The eventual binding
 /// transaction owns the permission and commits it only after the row exists.
 #[cfg(target_os = "android")]
-#[allow(dead_code)]
 pub(super) struct PreparedOriginalDocument {
     pub(super) grant: crate::android_uri_bridge::PendingDocumentGrant<tauri::Wry>,
     pub(super) content_hash: String,
@@ -319,7 +318,6 @@ pub(super) struct PreparedOriginalDocument {
 }
 
 #[cfg(target_os = "android")]
-#[allow(dead_code)]
 pub(super) fn prepare_original_document(
     app: &AppHandle,
     gate: &ImportGate,
@@ -377,6 +375,7 @@ pub(crate) fn make_managed_binding(
         content_hash,
         storage_kind: StorageKind::Managed,
         canonical_source_path: None,
+        document_uri: None,
         managed_file_name: None,
         file_size: file_snapshot.size,
         source_mtime_ns: file_snapshot.mtime_ns,
@@ -788,13 +787,117 @@ pub(super) fn run_import_documents_blocking(
     };
 
     send_import_progress(&on_progress, &request_id, "committing", total, total);
+    let retired = bindings.iter()
+        .filter_map(|binding| binding.document_uri().map(|uri| (binding.content_hash.clone(), uri.to_owned())))
+        .collect::<Vec<_>>();
     let outcome = publish_prepared_documents(&root, &mut records, &mut bindings, &prepared)?;
 
     persist_import_indexes_for_app(&app, &root, &outcome, &records, &bindings)?;
 
+    document_source::release_unreferenced_documents(&app, &bindings,
+        retired.into_iter().filter_map(|(hash, uri)| {
+            (outcome.statuses.contains_key(&hash) && !outcome.failures.contains_key(&hash)).then_some(uri)
+        }));
     let results =
         build_committed_results(prepared, outcome, &records, &bindings, &thumbnails, &root);
     drop(permit);
     drop(_guard);
     Ok(results)
+}
+
+#[cfg(target_os = "android")]
+pub(super) fn run_import_originals(
+    app: AppHandle, request_id: String, documents: Vec<DocumentSelection>,
+    on_progress: Channel<ImportProgress>, task_guard: ImportTaskGuard, relink_hash: Option<String>,
+) -> Result<ImportBatchResult, NativeImportError> {
+    if !portable_store_active(&app).map_err(NativeImportError::storage_error)? {
+        return Err(NativeImportError::storage_error("书库资料尚未就绪"));
+    }
+    let gate = &task_guard.job.gate;
+    let total = documents.len();
+    let mut prepared = Vec::with_capacity(total);
+    let mut uris = HashSet::new();
+    for (index, document) in documents.iter().enumerate() {
+        let result = if !uris.insert(document.uri.as_str()) {
+            Err(PrepareError::Failed { content_hash: None, message: "同一文件已在本批选择".into() })
+        } else {
+            prepare_original_document(&app, gate, document)
+        };
+        prepared.push(result);
+        send_import_progress(&on_progress, &request_id, "preparing", index + 1, total);
+    }
+
+    let state = app.state::<LinkedLibraryWriteState>();
+    let _guard = state.0.lock()
+        .map_err(|_| NativeImportError::internal_error("链接书库写入锁已损坏", false))?;
+    let root = library_root(&app).map_err(NativeImportError::storage_error)?;
+    let mut records = load_records(&app).map_err(NativeImportError::storage_error)?;
+    let mut bindings = load_bindings(&app).map_err(NativeImportError::storage_error)?;
+    let thumbnails = load_thumbnail_index(&app).map_err(NativeImportError::storage_error)?;
+    let permit = gate.begin_commit();
+    if permit.is_none() { gate.finish_preparing(); }
+    else { send_import_progress(&on_progress, &request_id, "committing", total, total); }
+
+    let mut grants = Vec::new();
+    let mut retired_uris = Vec::new();
+    let mut results = Vec::with_capacity(total);
+    for (input_index, result) in prepared.into_iter().enumerate() {
+        let mut item = ImportItemResult {
+            input_index, status: "cancelled".into(), content_hash: None, record: None, error: None,
+        };
+        match result {
+            Err(PrepareError::Failed { content_hash, message }) => {
+                item.status = "failed".into();
+                item.content_hash = content_hash;
+                item.error = Some(message);
+            }
+            Err(PrepareError::Cancelled { content_hash }) => item.content_hash = content_hash,
+            Ok(document) => {
+                let hash = &document.content_hash;
+                item.content_hash = Some(hash.clone());
+                if permit.is_some() {
+                    let existing = records.iter().any(|r| &r.content_hash == hash);
+                    let old = bindings.iter().find(|binding| &binding.content_hash == hash);
+                    if relink_hash.as_ref().is_some_and(|expected|
+                        expected != hash || !existing || old.is_some_and(|binding| binding.storage_kind != StorageKind::AndroidDocument)
+                    ) {
+                        item.status = "failed".into();
+                        item.error = Some("所选文件与原书内容不一致，未更改书架".into());
+                    } else {
+                        if old.is_none() || relink_hash.is_some() {
+                            let uri = &documents[input_index].uri;
+                            if let Some(old_uri) = old.and_then(DeviceBinding::document_uri).filter(|old_uri| *old_uri != uri) {
+                                retired_uris.push(old_uri.to_owned());
+                            }
+                            let binding = DeviceBinding {
+                                content_hash: hash.clone(), storage_kind: StorageKind::AndroidDocument,
+                                canonical_source_path: None, document_uri: Some(uri.clone()), managed_file_name: None,
+                                file_size: document.file_size, source_mtime_ns: 0,
+                                cover_zip_path: document.metadata.cover_zip_path.clone(),
+                                cover_mime: document.metadata.cover_mime.clone(), last_verified_at_ms: now_ms(),
+                            };
+                            upsert_binding(&mut bindings, binding);
+                            grants.push(document.grant);
+                        } else if old.and_then(DeviceBinding::document_uri) == Some(documents[input_index].uri.as_str()) {
+                            document.grant.commit();
+                        }
+                        if !existing {
+                            records.push(make_managed_record(hash.clone(), document.file_name, &document.metadata));
+                        }
+                        item.status = if existing && relink_hash.is_none() { "duplicate" } else { "saved" }.into();
+                        item.record = view_by_hash(&records, &bindings, &thumbnails, hash, &root);
+                    }
+                }
+            }
+        }
+        results.push(item);
+    }
+    if !grants.is_empty() {
+        if save_portable_import(&app, &records, &bindings).map_err(NativeImportError::commit_failed)?.is_none() {
+            return Err(NativeImportError::commit_failed("书库资料尚未就绪"));
+        }
+        for grant in grants { grant.commit(); }
+        document_source::release_unreferenced_documents(&app, &bindings, retired_uris);
+    }
+    Ok(ImportBatchResult { results })
 }

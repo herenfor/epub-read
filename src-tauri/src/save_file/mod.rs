@@ -376,6 +376,8 @@ pub(crate) struct LocalBinding {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub canonical_source_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub document_uri: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub managed_file_name: Option<String>,
     #[serde(default)]
     pub file_size: u64,
@@ -408,6 +410,7 @@ impl LocalBinding {
             content_hash: content_hash.to_string(),
             storage_kind: "managed".to_string(),
             canonical_source_path: None,
+            document_uri: None,
             managed_file_name: None,
             file_size,
             source_mtime_ns,
@@ -415,6 +418,16 @@ impl LocalBinding {
             cover_mime: String::new(),
             last_verified_at_ms: now_ms(),
         }
+    }
+
+    pub(crate) fn book_source(&self, root: &Path) -> Result<crate::linked_library::document_source::BookSource, SaveFileError> {
+        use crate::linked_library::document_source::{is_document_uri, BookSource};
+        if self.storage_kind == "android-document" {
+            return self.document_uri.as_deref().filter(|uri| is_document_uri(uri))
+                .map(|uri| BookSource::Document(uri.to_owned()))
+                .ok_or_else(|| SaveFileError::invalid_entity("原书文档绑定无效"));
+        }
+        self.source_path(root).map(BookSource::Path)
     }
 
     pub(crate) fn source_path(&self, root: &Path) -> Result<PathBuf, SaveFileError> {
@@ -446,6 +459,24 @@ impl LocalBinding {
         Ok(path)
     }
 
+    pub(crate) fn is_valid_on<R: tauri::Runtime>(
+        &self, app: Option<&tauri::AppHandle<R>>, root: &Path, cancelled: impl Fn() -> bool,
+    ) -> Result<bool, SaveFileError> {
+        if self.storage_kind != "android-document" {
+            return self.is_valid_cancellable(root, cancelled);
+        }
+        if cancelled() { return Err(SaveFileError::cancelled()); }
+        let Ok(source) = self.book_source(root) else { return Ok(false) };
+        let Ok((mut reader, size)) = source.open(app) else { return Ok(false) };
+        if size == 0 || size != self.file_size { return Ok(false); }
+        match crate::linked_library::document_source::hash_original_document(&mut reader, &cancelled) {
+            Ok((hash, bytes)) => Ok(bytes == size && hash == self.content_hash),
+            Err(_) if cancelled() => Err(SaveFileError::cancelled()),
+            Err(_) => Ok(false),
+        }
+    }
+
+    #[cfg(test)]
     pub(crate) fn is_valid(&self, root: &Path) -> bool {
         self.is_valid_cancellable(root, || false).unwrap_or(false)
     }
@@ -495,8 +526,11 @@ pub(crate) fn parse_bindings(
             return Err(SaveFileError::storage_error("设备绑定内容指纹无效"));
         }
         match binding.storage_kind.as_str() {
-            "managed" => {}
-            "linked" => {
+            "android-document" if binding.canonical_source_path.is_none() && binding.managed_file_name.is_none() => {
+                binding.book_source(Path::new(""))?;
+            }
+            "managed" if binding.document_uri.is_none() => {}
+            "linked" if binding.document_uri.is_none() => {
                 binding.source_path(Path::new(""))?;
             }
             _ => return Err(SaveFileError::storage_error("设备绑定 storageKind 未知")),
