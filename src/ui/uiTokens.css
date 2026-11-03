@@ -36,7 +36,9 @@
   --fs-title: 18px;
 
   /* Radii on a 4px grid. Nested surfaces are concentric:
-     inner radius = outer radius - the padding between them. */
+     inner radius = outer radius - the padding between them. Pick the padding
+     so both land on the grid; where it cannot, derive the inner one,
+     calc(var(--r-sm) - 2px), never a new literal. */
   --r-xs: 4px;
   --r-sm: 8px;
   --r-md: 12px;

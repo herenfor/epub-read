@@ -29,9 +29,9 @@
   gap: 4px;
   width: 100%;
   padding: 10px 12px;
-  border: 1px solid var(--panel-border, var(--border, #d0d0d0));
+  border: 1px solid var(--panel-border);
   border-radius: var(--r-md);
-  background: var(--panel-bg, var(--surface, #fff));
+  background: var(--panel-bg);
   color: inherit;
   font: inherit;
   text-align: left;

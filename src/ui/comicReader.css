@@ -1,4 +1,4 @@
-.comic-reader{position:absolute;inset:0;overflow:hidden;background:var(--reader-bg,var(--bg,#202020))}
+.comic-reader{position:absolute;inset:0;overflow:hidden;background:var(--bg)}
 .comic-track{position:absolute;inset:0;display:flex;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;scrollbar-width:none;touch-action:pan-x pinch-zoom;overscroll-behavior:contain}
 .comic-track::-webkit-scrollbar{display:none}
 .comic-screen{flex:0 0 100%;min-width:0;height:100%;display:flex;align-items:center;justify-content:center;gap:clamp(12px,3vw,52px);padding:clamp(12px,3vh,30px) clamp(16px,4vw,64px);box-sizing:border-box;scroll-snap-align:start;scroll-snap-stop:always}

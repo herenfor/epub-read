@@ -538,7 +538,7 @@
 .aa-detail-warning {
   font-size: var(--fs-caption);
   line-height: 1.25;
-  color: var(--color-error, #e53935);
+  color: var(--error);
 }
 
 .aa-card > .aa-control-row {

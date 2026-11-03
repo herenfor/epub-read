@@ -8,7 +8,8 @@
 /* ---- Segmented control: gray track, white selected block; 32 tall (touch 36). ----
    Sized by its labels, never stretched across the row: every segment takes the
    width of the longest label, so controls with the same options line up.
-   The selected block sits 4px inside the track and is concentric with it. */
+   The selected block sits --ui-seg-inset inside the track and is concentric
+   with it: set the inset or the track radius, and the block's radius follows. */
 :is(.ui-segmented, .aa-segmented-capsule, .shelf-segmented, .lan-segmented) {
   display: inline-grid;
   grid-auto-flow: column;
@@ -20,9 +21,11 @@
   max-width: 100%;
   height: auto;
   min-height: 32px;
-  padding: 4px;
+  --ui-seg-radius: var(--r-sm);
+  --ui-seg-inset: 4px;
+  padding: var(--ui-seg-inset);
   gap: 0;
-  border-radius: var(--r-sm);
+  border-radius: var(--ui-seg-radius);
   background: var(--ui-segment-bg);
 }
 
@@ -32,7 +35,7 @@
   min-height: 24px;
   padding: 0 14px;
   border: 0;
-  border-radius: var(--r-xs);
+  border-radius: calc(var(--ui-seg-radius) - var(--ui-seg-inset));
   background: transparent;
   color: var(--muted);
   font: inherit;
@@ -83,7 +86,7 @@
 /* Beside a toolbar's search field: the same control, one size down. */
 .ui-segmented.is-compact {
   min-height: 0;
-  padding: 2px;
+  --ui-seg-inset: 2px;
 }
 
 .ui-segmented.is-compact > button {

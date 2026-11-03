@@ -73,6 +73,16 @@
   transition: width 0.2s ease, border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
 }
 
+/* The scope switch at the end of the pill field is a pill too, as far from
+   the end as from the top and bottom, so both ends share a centre. */
+.app:not([data-touch-ui="true"]) .shelf-quick-filter-box:has(> .ui-segmented) {
+  padding-right: 1px;
+}
+
+.app:not([data-touch-ui="true"]) .shelf-quick-filter-box > .ui-segmented {
+  --ui-seg-radius: var(--r-full);
+}
+
 .shelf-quick-filter-box:focus-within {
   width: 380px;
   border-color: var(--accent, #3b82f6);
@@ -3142,7 +3152,7 @@
 }
 
 .app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-normal-bar-zen .ui-segmented.is-compact {
-  padding: 3px;
+  --ui-seg-inset: 3px;
 }
 
 .app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-normal-bar-zen .ui-segmented.is-compact > button {

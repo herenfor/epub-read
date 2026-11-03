@@ -6461,138 +6461,40 @@ export default function App() {
       />
       <div id="shelf-menu-portal-host" className="shelf-menu-portal-host" />
       {localCheckpointConflict && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label={t("appUi.checkpoint.dialog")}
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 10000,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 16,
-            background: "rgba(0, 0, 0, 0.45)",
-          }}
-        >
-          <div
-            style={{
-              width: "min(520px, 100%)",
-              background: "var(--surface, #fff)",
-              color: "var(--text, #222)",
-              borderRadius: 12,
-              padding: 20,
-              boxShadow: "0 12px 40px rgba(0, 0, 0, 0.3)",
-            }}
-          >
-            <h3 style={{ margin: "0 0 8px", fontSize: 18 }}>{t("appUi.checkpoint.title")}</h3>
-            <p style={{ margin: "0 0 14px", fontSize: 14, lineHeight: 1.5 }}>
+        <div className="shelf-confirm-backdrop" role="dialog" aria-modal="true" aria-label={t("appUi.checkpoint.dialog")}>
+          <div className="shelf-confirm is-wide">
+            <h3 className="shelf-confirm-title">{t("appUi.checkpoint.title")}</h3>
+            <p className="shelf-confirm-body">
               {t("appUi.checkpoint.body", { title: localCheckpointConflict.title, synced: localCheckpointConflict.hasSynced ? t("appUi.checkpoint.syncedAvailable") : "" })}
             </p>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <button
-                type="button"
-                onClick={() => resolveLocalCheckpointConflict("local")}
-                style={{
-                  width: "100%",
-                  padding: "10px 12px",
-                  border: "1px solid var(--border, #d0d0d0)",
-                  borderRadius: 8,
-                  background: "var(--surface, #fff)",
-                  color: "inherit",
-                  cursor: "pointer",
-                }}
-              >
+            <div className="shelf-confirm-choices">
+              <button type="button" className="ui-btn" onClick={() => resolveLocalCheckpointConflict("local")}>
                 {t("appUi.checkpoint.useLocal")}
               </button>
               {localCheckpointConflict.hasSynced && (
-                <button
-                  type="button"
-                  onClick={() => resolveLocalCheckpointConflict("synced")}
-                  style={{
-                    width: "100%",
-                    padding: "10px 12px",
-                    border: "1px solid var(--border, #d0d0d0)",
-                    borderRadius: 8,
-                    background: "transparent",
-                    color: "inherit",
-                    cursor: "pointer",
-                  }}
-                >
+                <button type="button" className="ui-btn" onClick={() => resolveLocalCheckpointConflict("synced")}>
                   {t("appUi.checkpoint.useSynced")}
                 </button>
               )}
             </div>
-            <button
-              type="button"
-              onClick={() => resolveLocalCheckpointConflict(null)}
-              style={{
-                marginTop: 14,
-                width: "100%",
-                padding: "9px 12px",
-                border: "1px solid var(--border, #d0d0d0)",
-                borderRadius: 8,
-                background: "transparent",
-                color: "inherit",
-                cursor: "pointer",
-              }}
-            >
+            <button type="button" className="ui-btn shelf-confirm-dismiss" onClick={() => resolveLocalCheckpointConflict(null)}>
               {t("appUi.cancel")}
             </button>
           </div>
         </div>
       )}
       {progressChoice && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label={t("appUi.progressChoice.dialog")}
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 10000,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 16,
-            background: "rgba(0, 0, 0, 0.45)",
-          }}
-        >
-          <div
-            style={{
-              width: "min(520px, 100%)",
-              maxHeight: "80vh",
-              overflow: "auto",
-              background: "var(--surface, #fff)",
-              color: "var(--text, #222)",
-              borderRadius: 12,
-              padding: 20,
-              boxShadow: "0 12px 40px rgba(0, 0, 0, 0.3)",
-            }}
-          >
-            <h3 style={{ margin: "0 0 8px", fontSize: 18 }}>{t("appUi.progressChoice.title")}</h3>
-            <p style={{ margin: "0 0 14px", fontSize: 14, lineHeight: 1.5 }}>
+        <div className="shelf-confirm-backdrop" role="dialog" aria-modal="true" aria-label={t("appUi.progressChoice.dialog")}>
+          <div className="shelf-confirm is-wide">
+            <h3 className="shelf-confirm-title">{t("appUi.progressChoice.title")}</h3>
+            <p className="shelf-confirm-body">
               {uiPlural("appUi.progressChoice.body", progressChoice.candidates.length, { title: progressChoice.title, count: progressChoice.candidates.length })}
             </p>
             <ProgressSourceChoices
               candidates={progressChoice.candidates}
               onChoose={(candidate) => resolveProgressChoice(candidate.stamp)}
             />
-            <button
-              type="button"
-              onClick={() => resolveProgressChoice(null)}
-              style={{
-                marginTop: 14,
-                width: "100%",
-                padding: "9px 12px",
-                border: "1px solid var(--border, #d0d0d0)",
-                borderRadius: 8,
-                background: "transparent",
-                color: "inherit",
-                cursor: "pointer",
-              }}
-            >
+            <button type="button" className="ui-btn shelf-confirm-dismiss" onClick={() => resolveProgressChoice(null)}>
               {t("appUi.cancel")}
             </button>
           </div>
