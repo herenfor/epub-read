@@ -16,6 +16,7 @@ import { DEFAULT_VISUAL_PREFERENCES } from "../render/visual/readerVisualPrefere
 import { uiText } from "./localization/UiLanguageProvider";
 import { getAppBuildSession } from "../config/appBuildSession";
 import { watchAndroidForeground } from "../platform/androidAppTask";
+import { ComicPageRaster } from "./ComicPageRaster";
 import "./comicReader.css";
 
 const CHAPTER = "__reader__/comic.xhtml";
@@ -57,7 +58,8 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
   const position = useRef<Position>({ page: initial ?? 0, ratio: props.initialAnchor?.mediaAnchor?.ratio ?? 0 });
   const [page, setPage] = useState(position.current.page);
   const [intersectingScreen, setIntersectingScreen] = useState<number | null>(null);
-  const [width, setWidth] = useState(0), [moving, setMoving] = useState(false);
+  const [{ width, height }, setViewport] = useState({ width: 0, height: 0 });
+  const [moving, setMoving] = useState(false);
   const command = useRef(false), lastDirection = useRef<1 | -1 | null>(null);
   const motion = useRef(false), goal = useRef(page), [warmPage, setWarmPage] = useState(page);
   const heading = useRef<{ page: number; sign: 1 | -1 }>({ page, sign: 1 });
@@ -358,7 +360,10 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
   actions.current = { report, sample, turn, beginZoom, paintZoom, settleZoom, stripAnchor, zoomStrip, settleStrip };
   useLayoutEffect(() => {
     const el = root.current!;
-    const resize = () => setWidth(el.getBoundingClientRect().width);
+    const resize = () => {
+      const { width, height } = el.getBoundingClientRect();
+      setViewport(previous => previous.width === width && previous.height === height ? previous : { width, height });
+    };
     const observer = new ResizeObserver(resize);
     observer.observe(el); resize();
     return () => observer.disconnect();
@@ -695,12 +700,26 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
   }));
   const marks: RibbonMark[] = bookmarkPages(props.bookmarks ?? []).filter(p => p.ids.length > 0)
     .map(p => ({ key: `${page}:${p.lane}`, ids: p.ids, x: pageRibbonLeft(p.side, p.side === "right" ? width : 0), y: p.y, kind: "page", side: p.side }));
-  const image = useCallback((i: number) => <div className="comic-page" key={pages[i].path} data-comic-page={scroll ? i : undefined} style={scroll ? { aspectRatio: dimensions.current.has(i) ? `${dimensions.current.get(i)!.width}/${dimensions.current.get(i)!.height}` : "3/4" } : undefined}>
-    {urls[i] ? <img src={urls[i]} alt={`${i + 1}`} draggable={false} decoding="async" onLoad={event => {
-      dimensions.current.set(i, { width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight });
-      decoded.current.add(i); redraw(n => n + 1);
-    }} onError={() => { errors.current.set(i, uiText("readerMisc.comic.decodeFailed")); redraw(n => n + 1); }}/> : <div className="comic-placeholder"/>}
-  </div>, [pages, scroll, urls]);
+  const image = useCallback((i: number) => {
+    const url = urls[i];
+    const size = url && !scroll ? props.server.resourceRasterSize(pages[i].path) : undefined;
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    const scale = size && width && height ? Math.min(width / columns * dpr / size.width, height * dpr / size.height) : 1;
+    const target = size && scale < .8 && typeof createImageBitmap === "function"
+      ? { width: Math.max(1, Math.round(size.width * scale)), height: Math.max(1, Math.round(size.height * scale)) }
+      : undefined;
+    return <div className="comic-page" key={pages[i].path} data-comic-page={scroll ? i : undefined}
+      style={scroll ? { aspectRatio: dimensions.current.has(i) ? `${dimensions.current.get(i)!.width}/${dimensions.current.get(i)!.height}` : "3/4" } : undefined}>
+      {url ? <ComicPageRaster key={url} url={url} alt={`${i + 1}`} target={target} zoomed={zoomed && !scroll && groupForPage[i] === groupForPage[page]}
+        onReady={size => {
+          dimensions.current.set(i, size);
+          decoded.current.add(i);
+          redraw(n => n + 1);
+        }}
+        onError={() => { errors.current.set(i, uiText("readerMisc.comic.decodeFailed")); redraw(n => n + 1); }}/>
+        : <div className="comic-placeholder"/>}
+    </div>;
+  }, [pages, scroll, urls, props.server, width, height, columns, zoomed, groupForPage, page]);
   const strip = useMemo(() => scroll ? pages.slice(firstStripPage, stripEnd).map((_, i) => image(firstStripPage + i))
     : groups.slice(screenStart, screenEnd).map((group, i) => (
       <div className="comic-screen" key={screenStart + i} data-comic-screen={screenStart + i}>{group.map(image)}</div>
