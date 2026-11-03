@@ -72,7 +72,7 @@ import { useReaderTabsVisible } from "./ui/readerTabLayout";
 import { checkThenRecoverProgressRuntime, planFreshProgressOpen } from "./ui/progressOpenOrder";
 import { useAndroidBack } from "./platform/useAndroidBack";
 import { moveAndroidTaskToBack } from "./platform/androidAppTask";
-import { useExitPresence } from "./ui/menuMotion";
+import { pageOpenMs, useExitPresence } from "./ui/menuMotion";
 import { useReaderCursorIdle } from "./ui/readerCursorIdle";
 import { SidebarDrawer } from "./ui/SidebarDrawer";
 import { AaPopover } from "./ui/AaPopover";
@@ -4193,6 +4193,11 @@ export default function App() {
       return parseReaderTabs(null);
     }
   });
+  /** 切标签时目标书的开书画面先浮在旧书上，书架不在“离开 → 开书”之间露出来；开书进入解析或中途作罢即撤。 */
+  const [tabSwitchOpening, setTabSwitchOpening] = useState<{ title: string; creator: string } | null>(null);
+  useEffect(() => {
+    if (phase.phase === "loading") setTabSwitchOpening(null);
+  }, [phase.phase]);
   // 标签条的“＋”（只开一本时也有）和“+N”面板也在阅读安静时画一次（电脑和安卓都画）。
   const readerTabsWarm = readerTabsVisible && view === "reader";
   // 安卓本次运行：Aa 与目录在首次开书过渡仍遮住时各画一次，其余面板在阅读安静时逐个画一次
@@ -4213,13 +4218,14 @@ export default function App() {
   // 开书过渡覆盖“解析书籍”、首次“准备阅读位置”与有限的面板准备；之后的换章只用顶部细进度线。
   const readerOpeningVisible =
     phase.phase === "loading" ||
+    tabSwitchOpening !== null ||
     (readerLoadFeedback?.kind === "loading" && !displayedOnce) ||
     openingPanels.pending ||
     panelWarmup.pending;
   const readerOpeningTitle = phase.phase === "loading"
     ? phase.title || phase.fileName
-    : book?.metadata.title ?? "";
-  const readerOpeningCreator = phase.phase === "loading" ? phase.creator : book?.metadata.creator;
+    : tabSwitchOpening?.title ?? book?.metadata.title ?? "";
+  const readerOpeningCreator = phase.phase === "loading" ? phase.creator : tabSwitchOpening?.creator ?? book?.metadata.creator;
   const reading = chapterState.status === "ready" && !chapterState.empty;
   const currentPath = ready ? spineItemPath(book!, spineIndex) : undefined;
   const activeHref = currentPath
@@ -4399,7 +4405,7 @@ export default function App() {
   }, [countProgressSignature, countSummary.complete, persistChapterCountCache]);
 
   /** `animate`: the user is going back to the library, not switching books through it. */
-  const leaveReader = useCallback(async (leaveUnsaved: boolean, animate = false): Promise<boolean> => {
+  const leaveReader = useCallback(async (leaveUnsaved: boolean, animate = false, covered?: Promise<void>): Promise<boolean> => {
     // 返回书架前先关浮层，再释放整本书的 ResourceServer。
     closeImageOverlay();
     persistShelfProgress(true);
@@ -4467,6 +4473,8 @@ export default function App() {
     };
     // The reader page lifts away over the library. The snapshot is taken before
     // switchToShelf tears anything down, so the old page is the one the user saw.
+    // 切标签：等下一本的开书画面完全浮出再换下面的视图。
+    if (covered) await covered;
     if (animate) await runPageTransition("back", switchToShelf);
     else switchToShelf();
     return true;
@@ -4499,22 +4507,38 @@ export default function App() {
     const ids = new Set(shelfEntries.map((entry) => entry.id));
     setReaderTabs((state) => pruneReaderTabs(state, (id) => ids.has(id)));
   }, [libraryLoad.status, shelfEntries]);
+  /** 开书画面在旧书上浮入；返回它完全盖住的时刻（没有目标书就不等）。 */
+  const coverTabSwitch = useCallback((id: string | null): Promise<void> => {
+    const entry = id ? shelfEntriesRef.current.find((item) => item.id === id) : undefined;
+    setTabSwitchOpening(entry ? { title: entry.title || entry.fileName, creator: entry.creator } : null);
+    if (!entry) return Promise.resolve();
+    // 画面在下一帧挂上才开始浮入，多留一帧。
+    return new Promise((resolve) => window.setTimeout(resolve, pageOpenMs() + 16));
+  }, []);
   const switchReaderTab = useCallback(async (id: string | null): Promise<void> => {
     if (id === currentShelfIdRef.current || shelfBusyRef.current) return;
-    if (!(await leaveReader(false))) return;
+    if (!(await leaveReader(false, false, coverTabSwitch(id)))) {
+      setTabSwitchOpening(null);
+      return;
+    }
     pendingTabOpenRef.current = id;
-  }, [leaveReader]);
+  }, [coverTabSwitch, leaveReader]);
   const closeReaderTabById = useCallback((id: string): void => {
     if (shelfBusyRef.current) return;
     if (id !== currentShelfIdRef.current) {
       setReaderTabs((state) => closeReaderTab(state, id).state);
       return;
     }
-    void closeReaderTabAfterLeave(readerTabsRef.current, id, () => leaveReader(false), ({ next }) => {
+    const covered = coverTabSwitch(closeReaderTab(readerTabsRef.current, id).next);
+    void closeReaderTabAfterLeave(readerTabsRef.current, id, async () => {
+      const left = await leaveReader(false, false, covered);
+      if (!left) setTabSwitchOpening(null);
+      return left;
+    }, ({ next }) => {
       setReaderTabs((state) => closeReaderTab(state, id).state);
       pendingTabOpenRef.current = next;
     });
-  }, [leaveReader]);
+  }, [coverTabSwitch, leaveReader]);
   const openReaderTabFromReader = useCallback((id: string): void => {
     if (activeReaderTabs(readerTabsRef.current).tabs.length >= MAX_READER_TABS) return;
     pendingNewTabRef.current = id;
@@ -4890,7 +4914,7 @@ export default function App() {
     if (view !== "shelf") return;
     const id = pendingTabOpenRef.current;
     pendingTabOpenRef.current = null;
-    if (id) void handleShelfOpen(id);
+    if (id) void handleShelfOpen(id).finally(() => setTabSwitchOpening(null));
   }, [handleShelfOpen, view]);
 
   useEffect(() => {

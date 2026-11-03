@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 export const MENU_OPEN_MS = 300;
 export const MENU_CLOSE_MS = 200;
 
-/** Full-screen page exit (motionKinds.css), full-motion default. */
+/** Full-screen page entrance and exit (motionKinds.css), full-motion defaults. */
+export const PAGE_OPEN_MS = 320;
 export const PAGE_CLOSE_MS = 240;
 
 function cssDurationMs(name: string, fallback: number): number {
@@ -17,6 +18,11 @@ function cssDurationMs(name: string, fallback: number): number {
 /** CSS is authoritative, including app/system reduced motion. Read only on exit. */
 export function menuCloseMs(): number {
   return cssDurationMs("--menu-close", MENU_CLOSE_MS);
+}
+
+/** How long a full-screen page takes to float in. */
+export function pageOpenMs(): number {
+  return cssDurationMs("--page-in", PAGE_OPEN_MS);
 }
 
 /** How long a full-screen page stays mounted while it lifts away. */
