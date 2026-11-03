@@ -1,6 +1,7 @@
 //! Device-local linked library archive operations.
 
 use super::*;
+use super::archive_stamp::{read_receipt, receipt_path, ArchiveStamp};
 
 pub(super) fn archive_fault_error(fault: Fault) -> LinkedLibraryError {
     match fault {
@@ -53,20 +54,37 @@ pub(crate) fn archive_open_blocking(
         mut file,
     } = pending;
     let verify_started = std::time::Instant::now();
-    let (actual_hash, verified_snapshot) = hash_opened_file(&file)?;
-    let verify_ms = verify_started.elapsed().as_millis() as u64;
-    if !actual_hash.eq_ignore_ascii_case(&content_hash) {
-        return Err(LinkedLibraryError::changed("源 EPUB 在打开期间发生了变化；未将旧进度应用到新内容"));
+    // Only the default app-owned book directory qualifies. User-controlled
+    // paths and custom locations retain whole-source verification.
+    let managed_comic = identity.storage_kind == StorageKind::Managed
+        && identity.path.starts_with(root.join("books"))
+        && matches!(crate::document_formats::extension(&file_name).to_ascii_lowercase().as_str(), "zip" | "cbz");
+    let receipt = receipt_path(&root, &content_hash);
+    let stamp = if managed_comic { ArchiveStamp::read(&file) } else { None };
+    let hit = stamp.as_ref().is_some_and(|stamp| read_receipt(&receipt).as_ref() == Some(stamp));
+    let verified_snapshot = if hit {
+        snapshot_file(&file)?
+    } else {
+        let (actual_hash, verified_snapshot) = hash_opened_file(&file)?;
+        if !actual_hash.eq_ignore_ascii_case(&content_hash) {
+            return Err(LinkedLibraryError::changed("源 EPUB 在打开期间发生了变化；未将旧进度应用到新内容"));
+        }
+        verified_snapshot
+    };
+    if stamp.as_ref().is_some_and(|stamp| ArchiveStamp::read(&file).as_ref() != Some(stamp)) {
+        return Err(archive_fault_error(Fault::SourceChanged));
     }
+    let verify_ms = verify_started.elapsed().as_millis() as u64;
     file.seek(SeekFrom::Start(0))
         .map_err(|error| format!("无法重新定位源 EPUB：{error}"))?;
     let stat_file = file
         .try_clone()
         .map_err(|error| format!("无法复制源 EPUB 句柄：{error}"))?;
     let expected_snapshot = verified_snapshot.clone();
+    let guard_stamp = stamp.clone();
     let guard = move || {
         let current = snapshot_file(&stat_file).map_err(|_| Fault::Io)?;
-        if current == expected_snapshot {
+        if current == expected_snapshot && guard_stamp.as_ref().is_none_or(|stamp| ArchiveStamp::read(&stat_file).as_ref() == Some(stamp)) {
             Ok(())
         } else {
             Err(Fault::SourceChanged)
@@ -83,6 +101,12 @@ pub(crate) fn archive_open_blocking(
     let directory_ms = directory_started.elapsed().as_millis() as u64;
     let entry_count = session.entry_count;
     finalize_library_source_read(&app, &root, &identity, &old_snapshot, &verified_snapshot)?;
+
+    if !hit {
+        if let Some(stamp) = stamp {
+            let _ = atomic_write_json(&receipt, &stamp);
+        }
+    }
 
     if app.get_webview_window(&owner).is_none() {
         session.close();

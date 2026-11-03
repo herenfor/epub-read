@@ -336,6 +336,9 @@ impl RunnerState {
                     replace_file_atomically(&staging_path, &target)
                         .map_err(|error| format!("无法发布托管副本：{error}"))?;
                     staging.published();
+                    crate::linked_library::remember_imported_archive(
+                        &self.root, &target, &item.content_hash, &item.file_name,
+                    );
                     make_managed_binding(
                         item.content_hash.clone(),
                         snapshot(&target)?,

@@ -53,6 +53,9 @@ pub(crate) use epub_meta::{
 use epub_meta::read_zip_entry_bounded;
 
 mod source;
+mod archive_stamp;
+#[cfg(target_os = "android")]
+pub(crate) use archive_stamp::remember_imported_archive;
 use source::*;
 pub(crate) use source::{hash_opened_file, snapshot_file};
 pub(crate) use source::{
