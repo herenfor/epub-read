@@ -218,6 +218,27 @@ impl RestrictedReader {
         self.display_name.as_deref()
     }
 
+    /// Open a random-access view for an original document. Copy imports keep
+    /// accepting stream-only providers through `copy_limited_to`.
+    pub(crate) fn into_seekable(mut self) -> Result<SeekableDocument, RestrictedReadError> {
+        if self.prepared || self.finished {
+            return Err(RestrictedReadError::InvalidInput("document descriptor already consumed"));
+        }
+        let metadata = self.file.metadata().map_err(RestrictedReadError::Io)?;
+        if !metadata.is_file() {
+            return Err(RestrictedReadError::InvalidInput("provider does not expose a regular file"));
+        }
+        let available = metadata.len().checked_sub(self.start_offset).ok_or(
+            RestrictedReadError::InvalidInput("document offset exceeds file size"),
+        )?;
+        let length = self.declared_length.unwrap_or(available);
+        if length > available {
+            return Err(RestrictedReadError::InvalidInput("document range exceeds file size"));
+        }
+        self.file.seek(SeekFrom::Start(self.start_offset)).map_err(RestrictedReadError::Io)?;
+        Ok(SeekableDocument { file: self.file, base: self.start_offset, length, position: 0 })
+    }
+
     /// Copies exactly the declared range (or the remainder of the provider
     /// stream when `declaredLength == -1`) into `output`.
     ///
@@ -270,6 +291,44 @@ impl RestrictedReader {
 
         self.prepared = true;
         Ok(())
+    }
+}
+
+/// ZIP reads use document-relative offsets, even if the provider exports a
+/// slice of a larger file. This reader exclusively owns the detached handle.
+pub(crate) struct SeekableDocument {
+    file: File,
+    base: u64,
+    length: u64,
+    position: u64,
+}
+
+impl Read for SeekableDocument {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        let limit = self.length.saturating_sub(self.position).min(buffer.len() as u64) as usize;
+        if limit == 0 {
+            return Ok(0);
+        }
+        let count = self.file.read(&mut buffer[..limit])?;
+        if count == 0 {
+            return Err(io::ErrorKind::UnexpectedEof.into());
+        }
+        self.position += count as u64;
+        Ok(count)
+    }
+}
+
+impl Seek for SeekableDocument {
+    fn seek(&mut self, from: SeekFrom) -> io::Result<u64> {
+        let position = match from {
+            SeekFrom::Start(value) => Some(value),
+            SeekFrom::Current(delta) => self.position.checked_add_signed(delta),
+            SeekFrom::End(delta) => self.length.checked_add_signed(delta),
+        }.ok_or(io::ErrorKind::InvalidInput)?;
+        let physical = self.base.checked_add(position).ok_or(io::ErrorKind::InvalidInput)?;
+        self.file.seek(SeekFrom::Start(physical))?;
+        self.position = position;
+        Ok(position)
     }
 }
 
