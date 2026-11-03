@@ -318,6 +318,18 @@ mod tests {
     }
 
     #[test]
+    fn new_target_replaces_a_partially_read_entry() {
+        let (file, path, data) = fixture(zip::CompressionMethod::Deflated);
+        let session = NativeZipSession::from_verified_file(file, || Ok(())).unwrap();
+        session.read_chunk(0, 0).unwrap();
+        assert!(session.read_chunk(1, 0).unwrap().is_empty());
+        assert_eq!(session.read_chunk(0, CHUNK_BYTES as u64), Err(Fault::InvalidRequest));
+        assert_eq!(session.read_chunk(0, 0).unwrap(), data[..CHUNK_BYTES]);
+        session.close();
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn last_chunk_checks_crc_and_never_reports_a_corrupt_entry_as_success() {
         let (file, path, _) = fixture(zip::CompressionMethod::Stored);
         let mut raw = std::fs::read(&path).unwrap();

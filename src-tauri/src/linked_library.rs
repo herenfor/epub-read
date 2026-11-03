@@ -287,6 +287,8 @@ pub struct ArchiveOpenView {
     pub(crate) session_id: String,
     entry_count: usize,
     chunk_bytes: usize,
+    verify_ms: u64,
+    directory_ms: u64,
 }
 
 /// One in-process managed import task. `request_id` is unique per frontend
@@ -737,6 +739,8 @@ impl SourceIdentity {
 }
 
 struct PendingSourceRead {
+    file_name: String,
+    title: String,
     identity: SourceIdentity,
     old_snapshot: FileSnapshot,
     file: File,
