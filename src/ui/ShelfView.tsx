@@ -564,7 +564,7 @@ function ShelfImportButton(props: ShelfImportButtonProps) {
               </span>
             </label>
           )}
-          {props.showDropHint && <p className="shelf-import-menu-hint">{t("shelf.import.dropHint")}</p>}
+          {props.showDropHint && <p className="shelf-import-menu-hint">{t(props.onImportFolder ? "shelf.import.dropHint" : "shelf.import.dropHint.booksOnly")}</p>}
         </div>
       )}
     </div>

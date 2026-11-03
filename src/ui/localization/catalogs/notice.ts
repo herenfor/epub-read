@@ -179,6 +179,7 @@ export const notice = defineMessages("notice", {
   "notice.importTarget.keptElsewhere.one": { zh: "{count} 本已在其他文件夹，未移动", note: "Singular form." },
   "notice.importTarget.folderGone": "文件夹“{name}”已不存在，书留在未归类",
   "notice.importTarget.failed": "书已导入，但放入文件夹失败：{error}",
-  "notice.drop.unsupported": "只能拖入 EPUB 文件或文件夹",
+  "notice.drop.unsupported": "可拖入 EPUB、TXT、CBZ、漫画 ZIP 或文件夹",
+  "notice.drop.booksOnly": "可拖入 EPUB、TXT、CBZ 或漫画 ZIP 文件",
   "notice.drop.oneFolder": "一次只能拖入一个文件夹",
 });

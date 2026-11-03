@@ -4031,14 +4031,17 @@ export default function App() {
         // 字体面板内部拖放由面板自己处理（onDrop 已 stopPropagation），
         // 这里只覆盖面板外的窗口拖放，行为与原生入口一致。
         const files = Array.from(e.dataTransfer?.files ?? []);
-        const epubFiles = files.filter((f) => supportedBookName(f.name));
+        const bookFiles = files.filter((f) => supportedBookName(f.name));
         const fontFiles = files.filter((f) => isSupportedFontFileName(f.name));
         if (fontFiles.length > 0 && !fontSettingsOpen) {
           setShelfNotice({ kind: "error", text: uiText("notice.font.dropHere") });
         }
-        if (epubFiles.length > 0) {
+        if (files.length > 0 && bookFiles.length === 0 && fontFiles.length === 0) {
+          setShelfNotice({ kind: "error", text: uiText("notice.drop.booksOnly") });
+        }
+        if (bookFiles.length > 0) {
           void handleImportSources(
-            epubFiles.map((file) => ({ kind: "file" as const, file })),
+            bookFiles.map((file) => ({ kind: "file" as const, file })),
             viewRef.current === "shelf" ? importContextRef.current : null,
           );
         }
@@ -4052,7 +4055,7 @@ export default function App() {
     }
     let unlisten: (() => void) | undefined;
     let cancelled = false;
-    let nativeDragHasEpub = false;
+    let nativeDragHasBook = false;
     let nativeDragHasFont = false;
     let nativeDragHasOther = false;
     const isOverFontPanel = (position: { x: number; y: number }): boolean => {
@@ -4076,19 +4079,19 @@ export default function App() {
     };
     const updateNativeDragVisual = (position: { x: number; y: number }): void => {
       const overFontPanel = isOverFontPanel(position);
-      const active = !overFontPanel && (nativeDragHasEpub || nativeDragHasFont || nativeDragHasOther);
+      const active = !overFontPanel && (nativeDragHasBook || nativeDragHasFont || nativeDragHasOther);
       setFontNativeDragActive(overFontPanel);
       setDragActive(active);
-      const { target, onCard } = active && nativeDragHasEpub ? dropTargetAt(position) : { target: null, onCard: false };
+      const { target, onCard } = active && nativeDragHasBook ? dropTargetAt(position) : { target: null, onCard: false };
       setDropFolderId(onCard && target ? target.folderId : null);
       setDropLabel(
         target ? uiText("appUi.drop.toFolder", { name: target.name })
-          : nativeDragHasEpub ? uiText("appUi.drop.books")
-            : nativeDragHasOther ? uiText("appUi.drop.folder")
-              : uiText("appUi.drop.generic"),
+          : nativeDragHasBook ? uiText("appUi.drop.books")
+            : nativeDragHasOther ? uiText("appUi.drop.generic")
+              : uiText("notice.font.dropHere"),
       );
     };
-    /** A dropped non-EPUB, non-font item: one folder opens directory import on it. */
+    /** A dropped non-book, non-font item: one folder opens directory import on it. */
     const openDroppedDirectory = async (paths: readonly string[]): Promise<void> => {
       const directories: string[] = [];
       for (const path of paths) {
@@ -4101,7 +4104,10 @@ export default function App() {
       }
       if (directories.length === 0 || !activeShelfSpace().policy.libraryServices) {
         // Directory import fills the library; another shelf takes books one by one.
-        setShelfNotice({ kind: "error", text: uiText("notice.drop.unsupported") });
+        setShelfNotice({
+          kind: "error",
+          text: uiText(activeShelfSpace().policy.libraryServices ? "notice.drop.unsupported" : "notice.drop.booksOnly"),
+        });
       } else if (directories.length > 1) {
         setShelfNotice({ kind: "warn", text: uiText("notice.drop.oneFolder") });
       } else {
@@ -4113,39 +4119,39 @@ export default function App() {
         const p = event.payload;
         if (p.type === "enter") {
           const dropped = partitionDroppedPaths(p.paths);
-          nativeDragHasEpub = dropped.epubs.length > 0;
+          nativeDragHasBook = dropped.books.length > 0;
           nativeDragHasFont = dropped.fonts.length > 0;
           nativeDragHasOther = dropped.others.length > 0;
           updateNativeDragVisual(p.position);
         } else if (p.type === "over") {
           updateNativeDragVisual(p.position);
         } else if (p.type === "leave") {
-          nativeDragHasEpub = false;
+          nativeDragHasBook = false;
           nativeDragHasFont = false;
           nativeDragHasOther = false;
           clearNativeDragVisual();
         } else if (p.type === "drop") {
-          nativeDragHasEpub = false;
+          nativeDragHasBook = false;
           nativeDragHasFont = false;
           nativeDragHasOther = false;
           clearNativeDragVisual();
-          // 字体面板优先：面板内的落点只走字体链路，残留的 EPUB 不抢读书会话。
+          // 字体面板优先：面板内的落点只走字体链路，拖入的图书不抢读书会话。
           const overFontPanel = isOverFontPanel(p.position);
           const dropped = partitionDroppedPaths(p.paths);
           if (overFontPanel) {
             void handleImportFontPaths(p.paths);
-            if (dropped.epubs.length > 0) {
+            if (dropped.books.length > 0) {
               setShelfNotice({ kind: "error", text: uiText("notice.font.dropUnsupported") });
             }
             return;
           }
-          if (dropped.epubs.length > 0) {
-            // Mixed with folders: only the EPUB files are imported; a folder is dropped on its own.
+          if (dropped.books.length > 0) {
+            // Mixed with folders: only the book files are imported; a folder is dropped on its own.
             if (dropped.fonts.length > 0) {
               setShelfNotice({ kind: "error", text: uiText("notice.font.dropHere") });
             }
             void handleImportSources(
-              dropped.epubs.map((path) => ({
+              dropped.books.map((path) => ({
                 kind: "path" as const,
                 path,
                 name: path.split(/[\\/]/).pop() || "book.epub",

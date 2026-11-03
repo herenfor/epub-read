@@ -77,9 +77,9 @@ describe("add existing books candidates", () => {
 });
 
 describe("native window drops", () => {
-  it("splits EPUBs, fonts and other items (folders)", () => {
-    expect(partitionDroppedPaths(["C:\\a.EPUB", "C:\\f.ttf", "C:\\Books", "C:\\x.txt"])).toEqual({
-      epubs: ["C:\\a.EPUB"], fonts: ["C:\\f.ttf"], others: ["C:\\Books", "C:\\x.txt"],
+  it("splits supported books, fonts, and other items", () => {
+    expect(partitionDroppedPaths(["C:\\a.EPUB", "C:\\f.ttf", "C:\\Books", "C:\\x.txt", "C:\\comic.CBZ", "C:\\comic.zip", "C:\\a.pdf"])).toEqual({
+      books: ["C:\\a.EPUB", "C:\\x.txt", "C:\\comic.CBZ", "C:\\comic.zip"], fonts: ["C:\\f.ttf"], others: ["C:\\Books", "C:\\a.pdf"],
     });
   });
 

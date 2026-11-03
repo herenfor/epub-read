@@ -1,23 +1,23 @@
 import { supportedBookName } from "../core/documentFormats";
 import { isSupportedFontFileName } from "./fontDrop";
 
-/** What a native window drop carried: EPUBs, fonts, and anything else (folders are found among the rest). */
+/** What a native window drop carried: books, fonts, and anything else (folders are found among the rest). */
 export interface DroppedPaths {
-  readonly epubs: string[];
+  readonly books: string[];
   readonly fonts: string[];
   readonly others: string[];
 }
 
 export function partitionDroppedPaths(paths: readonly string[]): DroppedPaths {
-  const epubs: string[] = [];
+  const books: string[] = [];
   const fonts: string[] = [];
   const others: string[] = [];
   for (const path of paths) {
-    if (supportedBookName(path)) epubs.push(path);
+    if (supportedBookName(path)) books.push(path);
     else if (isSupportedFontFileName(path)) fonts.push(path);
     else others.push(path);
   }
-  return { epubs, fonts, others };
+  return { books, fonts, others };
 }
 
 /**
