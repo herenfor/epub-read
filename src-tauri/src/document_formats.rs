@@ -193,7 +193,7 @@ fn write_part(
         }
         offset += line.chars().count();
     }
-    write!(zip,"<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><meta charset=\"utf-8\"/><style>body{{padding-inline:clamp(16px,3vw,40px)}}p{{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%;break-inside:auto}}</style></head><body>{}</body></html>",html).map_err(|e|e.to_string())?;
+    write!(zip,"<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><meta charset=\"utf-8\"/><style>p{{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;break-inside:auto}}</style></head><body>{}</body></html>",html).map_err(|e|e.to_string())?;
     parts.push(Part {
         path,
         start,
