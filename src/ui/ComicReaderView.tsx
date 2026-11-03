@@ -19,6 +19,12 @@ import { watchAndroidForeground } from "../platform/androidAppTask";
 import "./comicReader.css";
 
 const CHAPTER = "__reader__/comic.xhtml";
+const STRIP_WINDOW_PAGES = 96;
+const STRIP_EDGE_PAGES = 12;
+
+function stripWindowStart(page: number, count: number): number {
+  return Math.max(0, Math.min(count - STRIP_WINDOW_PAGES, page - STRIP_WINDOW_PAGES / 2));
+}
 type Position = { page: number; ratio: number };
 type Lease = { url: string; release(): void; pixels: number | undefined };
 const ANDROID_DECODE_PIXELS = 18_000_000;
@@ -72,6 +78,17 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
   const stripGesture = useRef<{ distance: number; scale: number; anchor: StripAnchor } | null>(null);
   const scroll = props.settings.readingMode === "scroll";
   const [stripViewport, setStripViewport] = useState("");
+  const windowedStrip = scroll && pages.length > STRIP_WINDOW_PAGES;
+  const [stripStart, setStripStart] = useState(() => stripWindowStart(page, pages.length));
+  const stripEnd = windowedStrip ? Math.min(pages.length, stripStart + STRIP_WINDOW_PAGES) : pages.length;
+  const stripShift = useRef<{ start: number; page: number; offset: number } | null>(null);
+  const firstStripPage = windowedStrip ? stripStart : 0;
+  const stripChild = (index: number) => {
+    const el = track.current;
+    const first = el?.firstElementChild as HTMLElement | null;
+    if (!first || first.dataset.comicPage === undefined) return undefined;
+    return el?.children[index - Number(first.dataset.comicPage)] as HTMLElement | undefined;
+  };
   const columns: 1 | 2 = !scroll && props.settings.columnsPerView === 2 && width >= 600 ? 2 : 1;
   const groups = useMemo(() => comicSpreads(pages, columns), [pages, columns]);
   const groupForPage = useMemo(() => {
@@ -87,14 +104,14 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
   const pitch = () => zoom.current?.box.width ?? track.current?.firstElementChild?.getBoundingClientRect().width ?? width;
   const fraction = () => (position.current.page + position.current.ratio) / pages.length;
   const atEnd = () => scroll
-    ? !!track.current && track.current.scrollTop + track.current.clientHeight >= track.current.scrollHeight - 1
+    ? stripEnd === pages.length && !!track.current && track.current.scrollTop + track.current.clientHeight >= track.current.scrollHeight - 1
     : groupForPage[position.current.page] === groups.length - 1;
-  const atStart = () => scroll ? (track.current?.scrollTop ?? 0) <= 1 : groupForPage[position.current.page] === 0;
+  const atStart = () => scroll ? firstStripPage === 0 && (track.current?.scrollTop ?? 0) <= 1 : groupForPage[position.current.page] === 0;
   const state = (): ChapterState => {
     const shown = visible();
     const failed = shown.map(i => errors.current.get(i)).find(Boolean);
     if (failed) return { status: "error", message: failed };
-    if (shown.some(i => !urls[i] || !decoded.current.has(i))) return { status: "loading" };
+    if ((scroll && !stripChild(position.current.page)) || shown.some(i => !urls[i] || !decoded.current.has(i))) return { status: "loading" };
     return {
       status: "ready", empty: false, mode: scroll ? "scroll" : "paginated", effectiveColumns: columns,
       pageCount: scroll ? pages.length : groups.length,
@@ -144,13 +161,18 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
   };
   const align = (p: Position, behavior: ScrollBehavior = "auto") => {
     const el = track.current;
-    if (!el) return;
+    if (!el) return false;
     if (scroll) {
-      const child = el.children[p.page] as HTMLElement | undefined;
-      if (child) el.scrollTo({ top: child.offsetTop + p.ratio * Math.max(0, child.offsetHeight - el.clientHeight), behavior });
+      const child = stripChild(p.page);
+      if (!child) {
+        if (windowedStrip) setStripStart(stripWindowStart(p.page, pages.length));
+        return false;
+      }
+      el.scrollTo({ top: child.offsetTop + p.ratio * Math.max(0, child.offsetHeight - el.clientHeight), behavior });
     } else {
       el.scrollTo({ left: (rtl ? -1 : 1) * groupForPage[p.page] * pitch(), behavior });
     }
+    return true;
   };
   const paintZoom = () => {
     const z = zoom.current;
@@ -181,17 +203,17 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
   /** The strip page whose top is at or above `y` (track content px). */
   const stripPageAt = (y: number) => {
     const el = track.current!;
-    let low = 0, high = pages.length - 1, p = 0;
+    let low = 0, high = el.children.length - 1, p = 0;
     while (low <= high) {
       const mid = (low + high) >>> 1;
       if ((el.children[mid] as HTMLElement).offsetTop <= y) { p = mid; low = mid + 1; }
       else high = mid - 1;
     }
-    return p;
+    return p + firstStripPage;
   };
   /** The strip point under (x, y), relative to the track's box. */
   const stripAnchor = (x: number, y: number): StripAnchor => {
-    const el = track.current!, page = stripPageAt(el.scrollTop + y), child = el.children[page] as HTMLElement;
+    const el = track.current!, page = stripPageAt(el.scrollTop + y), child = stripChild(page)!;
     return { page, down: (el.scrollTop + y - child.offsetTop) / Math.max(1, child.offsetHeight), across: (el.scrollLeft + x) / Math.max(1, el.clientWidth * stripZoom.current) };
   };
   /** Widens the strip to `scale` and puts `anchor` back under (x, y). */
@@ -203,7 +225,7 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
     if (scale === 1) el.style.removeProperty("--comic-strip-zoom");
     else el.style.setProperty("--comic-strip-zoom", String(scale));
     setZoomed(scale > 1);
-    const child = el.children[anchor.page] as HTMLElement | undefined;
+    const child = stripChild(anchor.page);
     if (child) el.scrollTop = child.offsetTop + anchor.down * child.offsetHeight - y;
     el.scrollLeft = anchor.across * el.clientWidth * scale - x;
   };
@@ -214,6 +236,7 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
   };
   const locate = (p: number, ratio = 0, behavior: ScrollBehavior = "auto") => {
     endZoom();
+    stripShift.current = null;
     p = Math.max(0, Math.min(pages.length - 1, p));
     goal.current = p;
     setWarmPage(p);
@@ -254,14 +277,28 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
     const el = track.current;
     if (!el || owner.current?.closed) return;
     if (alignment.current) {
-      if (visible().some(i => !decoded.current.has(i))) return;
-      align(alignment.current);
+      if (visible().some(i => !decoded.current.has(i)) || !align(alignment.current)) return;
       alignment.current = null;
     }
     if (scroll) {
-      setStripViewport(`${stripPageAt(el.scrollTop)}:${stripPageAt(el.scrollTop + el.clientHeight - 1)}`);
-      const p = stripPageAt(el.scrollTop + el.clientHeight * .2);
-      const child = el.children[p] as HTMLElement;
+      const first = stripPageAt(el.scrollTop);
+      const last = stripPageAt(el.scrollTop + el.clientHeight - 1);
+      setStripViewport(`${first}:${last}`);
+      const p = stripEnd === pages.length && el.scrollHeight > el.clientHeight && atEnd()
+        ? pages.length - 1
+        : stripPageAt(el.scrollTop + el.clientHeight * .2);
+      const child = stripChild(p);
+      if (!child) return;
+      if (windowedStrip && !stripShift.current &&
+          ((firstStripPage > 0 && first - firstStripPage < STRIP_EDGE_PAGES) ||
+           (stripEnd < pages.length && stripEnd - last <= STRIP_EDGE_PAGES))) {
+        const start = stripWindowStart(p, pages.length);
+        const top = stripChild(first);
+        if (start !== firstStripPage && top && first >= start) {
+          stripShift.current = { start, page: first, offset: el.scrollTop - top.offsetTop };
+          setStripStart(start);
+        }
+      }
       position.current = { page: p, ratio: Math.max(0, Math.min(1, (el.scrollTop - child.offsetTop) / Math.max(1, child.offsetHeight - el.clientHeight))) };
       setWarmPage(p);
     } else {
@@ -301,14 +338,20 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
       setZoomed(false);
     }
     alignment.current = { ...position.current };
-    align(alignment.current);
-    if (visible().every(i => decoded.current.has(i))) alignment.current = null;
+    if (align(alignment.current) && visible().every(i => decoded.current.has(i))) alignment.current = null;
   }, [width, columns, scroll, rtl]);
   useLayoutEffect(() => {
-    if (!alignment.current) return;
-    align(alignment.current);
-    if (visible().every(i => decoded.current.has(i))) alignment.current = null;
-  }, [revision, urls]);
+    const shift = stripShift.current;
+    const el = track.current;
+    if (scroll && shift?.start === stripStart && el) {
+      stripShift.current = null;
+      const child = stripChild(shift.page);
+      if (child) el.scrollTop = child.offsetTop + shift.offset;
+    }
+    if (alignment.current && align(alignment.current) && visible().every(i => decoded.current.has(i))) {
+      alignment.current = null;
+    }
+  }, [revision, urls, stripStart]);
   useEffect(() => {
     const server = props.server;
     const session = getAppBuildSession();
@@ -387,7 +430,7 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
     const el = track.current;
     const adjacent = intersectingScreen !== null && Math.abs(intersectingScreen - groupForPage[page]) === 1
       ? groups[intersectingScreen]?.[0] : undefined;
-    const shown = scroll && el && el.children.length === pages.length
+    const shown = scroll && el && stripChild(page)
       ? [stripPageAt(el.scrollTop), stripPageAt(el.scrollTop + el.clientHeight - 1)]
       : adjacent === undefined ? [page] : [page, adjacent];
     const plan = comicReadOrder(groups, groupForPage, shown, warmPage, heading.current.sign);
@@ -401,7 +444,7 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
       lease.release(); resources.held.delete(i); decoded.current.delete(i);
     }
     resources.pump();
-  }, [page, warmPage, intersectingScreen, groups, scroll, stripViewport, revision, props.server, pages, groupForPage]);
+  }, [page, warmPage, intersectingScreen, groups, scroll, stripViewport, stripStart, revision, props.server, pages, groupForPage]);
   useEffect(() => { report(); }, [page, moving, urls, revision, width, columns, scroll]);
   useEffect(() => {
     const el = track.current!;
@@ -561,7 +604,7 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
 
   const bookmarkPages = (bookmarks: readonly RibbonBookmark[]) => visible().map((p, lane) => {
     const side = columns === 1 || (rtl ? lane === 0 : lane === 1) ? "right" as const : "left" as const;
-    const child = track.current?.children[p] as HTMLElement | undefined;
+    const child = scroll ? stripChild(p) : undefined;
     const y = (mark: RibbonBookmark) => scroll && child && track.current
       ? child.offsetTop + (mark.mediaAnchor?.ratio ?? 0) * Math.max(0, child.offsetHeight - track.current.clientHeight) - track.current.scrollTop : 0;
     const own = bookmarks.filter(mark => mark.mediaAnchor?.signature === pages[p].path && (!scroll || (y(mark) >= -1 && y(mark) < (track.current?.clientHeight ?? 0))));
@@ -612,15 +655,15 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
   }));
   const marks: RibbonMark[] = bookmarkPages(props.bookmarks ?? []).filter(p => p.ids.length > 0)
     .map(p => ({ key: `${page}:${p.lane}`, ids: p.ids, x: pageRibbonLeft(p.side, p.side === "right" ? width : 0), y: p.y, kind: "page", side: p.side }));
-  const image = useCallback((i: number) => <div className="comic-page" key={pages[i].path} style={scroll ? { aspectRatio: dimensions.current.has(i) ? `${dimensions.current.get(i)!.width}/${dimensions.current.get(i)!.height}` : "3/4" } : undefined}>
+  const image = useCallback((i: number) => <div className="comic-page" key={pages[i].path} data-comic-page={scroll ? i : undefined} style={scroll ? { aspectRatio: dimensions.current.has(i) ? `${dimensions.current.get(i)!.width}/${dimensions.current.get(i)!.height}` : "3/4" } : undefined}>
     {urls[i] ? <img src={urls[i]} alt={`${i + 1}`} draggable={false} decoding="async" onLoad={event => {
       dimensions.current.set(i, { width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight });
       decoded.current.add(i); redraw(n => n + 1);
     }} onError={() => { errors.current.set(i, uiText("readerMisc.comic.decodeFailed")); redraw(n => n + 1); }}/> : <div className="comic-placeholder"/>}
   </div>, [pages, scroll, urls]);
-  const strip = useMemo(() => scroll ? pages.map((_, i) => image(i))
+  const strip = useMemo(() => scroll ? pages.slice(firstStripPage, stripEnd).map((_, i) => image(firstStripPage + i))
     : groups.map((group, i) => <div className="comic-screen" key={i}>{group.map(image)}</div>),
-  [scroll, pages, groups, image, revision]);
+  [scroll, pages, groups, image, revision, firstStripPage, stripEnd]);
   return <div ref={root} className={`comic-reader${scroll ? " is-scroll" : ""}`} style={{ backgroundColor: paper.background, color: paper.foreground }}>
     <div className={`comic-track${zoomed ? " is-zoomed" : ""}`} ref={track} dir={!scroll && rtl ? "rtl" : "ltr"} style={props.inputPaused ? { touchAction: "none" } : undefined}
       onScroll={() => { if (frame.current === null) frame.current = requestAnimationFrame(() => actions.current.sample()); }}
