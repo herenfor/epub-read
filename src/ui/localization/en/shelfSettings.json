@@ -34,7 +34,6 @@
   "shelfSettings.watch.disable.detail": "Books already imported stay on the shelf",
   "shelfSettings.watch.notice.other": "Added {count} new books from the auto-import folder",
   "shelfSettings.watch.notice.one": "Added {count} new book from the auto-import folder",
-  "shelfSettings.watch.notice.failed": "{added}; {failed}",
   "shelfSettings.watch.refreshFailed": "New books were imported, but the shelf could not refresh: {error}",
   "shelfSettings.watch.notice.error": "Auto-import folder scan failed: {error}",
   "shelfSettings.index.detail": "Searching the text of all books uses this index; rebuilding reads every book again",

@@ -647,7 +647,7 @@ function ShelfBrand(props: { switcher?: ShelfSwitchProps; disabled: boolean } & 
       : switcher.privateConfigured ? t("shelfMain.space.private.locked") : t("shelfMain.space.private.setup");
     return (
       <button key={kind} className="shelf-import-menu-item" type="button" role="menuitemradio"
-        aria-checked={kind === switcher.active} onClick={() => choose(kind)}>
+        aria-checked={kind === switcher.active} disabled={props.disabled} onClick={() => choose(kind)}>
         <span className="shelf-import-menu-icon">{library ? <BookLogoIcon /> : <LockIcon />}</span>
         <span className="shelf-import-menu-text">
           <strong>{library ? t("shelfMain.brand") : t("shelfMain.space.private")}</strong>
