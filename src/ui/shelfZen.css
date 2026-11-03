@@ -121,6 +121,15 @@
   height: 15px;
 }
 
+/* 手机顶栏放不下箭头和“锁定”两样：私密时只留“锁定”，点标题照样开菜单。 */
+.shelf-normal-bar-mobile .shelf-space-zone:has(.shelf-space-lock) .shelf-space-switch > .shelf-svg-icon {
+  display: none;
+}
+
+.shelf-normal-bar-mobile .shelf-space-zone:has(.shelf-space-lock) .shelf-space-switch {
+  padding-right: 4px;
+}
+
 .shelf-space-menu {
   right: auto;
   left: -4px;

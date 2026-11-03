@@ -33,6 +33,8 @@ interface PrivateProjection {
   readonly books: ReadonlyArray<{
     readonly bookHash: string;
     readonly metadata: { readonly title: string; readonly creator: string; readonly language?: string; readonly fileName: string; readonly addedAtMs: number };
+    /** No displayed progress yet: the book was never opened (shown as 新, like the library). */
+    readonly progress?: { readonly display?: unknown };
   }>;
   readonly organization: LibraryOrganization;
 }
@@ -204,7 +206,7 @@ function entryFromProjection(book: PrivateProjection["books"][number]): ShelfEnt
     progressPct: 0,
     anchorIndex: null,
     anchorRatio: null,
-    isNew: false,
+    isNew: book.progress?.display == null,
     available: true,
   };
 }
@@ -292,7 +294,7 @@ export class PrivateLocalStore implements ShelfStore {
   async markOpened(id: string): Promise<ShelfEntry> {
     const entry = await this.entry(id);
     if (!entry) throw new Error("隐私书架中没有这本书");
-    return entry;
+    return { ...entry, isNew: false };
   }
 
   async readThumbnail(contentHash: string): Promise<ThumbnailAsset | null> {

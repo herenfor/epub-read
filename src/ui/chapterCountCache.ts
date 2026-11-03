@@ -1,5 +1,5 @@
 import { summarizeLinearCounts, type ChapterCountCollection } from "./chapterCounts";
-import { activeShelfSpace } from "./shelfSpaces";
+import { activeShelfSpace, shelfSpaceStorage } from "./shelfSpaces";
 
 const CACHE_KEY = "epub-reader-chapter-counts-v1";
 /**
@@ -25,9 +25,9 @@ interface CacheState {
   entries: Record<string, CacheRecord>;
 }
 
-function storage(): Storage | null {
-  // A shelf that must not persist (the private shelf) gets no cache at all.
-  if (!activeShelfSpace().policy.persistsBrowserState) return null;
+function storage(): Pick<Storage, "getItem" | "setItem" | "removeItem"> | null {
+  // A shelf that must not persist (the private shelf) keeps this in memory.
+  if (!activeShelfSpace().policy.persistsBrowserState) return shelfSpaceStorage;
   try {
     return typeof localStorage === "undefined" ? null : localStorage;
   } catch {
