@@ -1,6 +1,6 @@
 import type { LibraryOrganization, OrganizationCommand } from "../libraryOrganization";
 import type { LibraryRecord } from "../libraryArchive";
-import type { PortableStateV3 } from "../../core/portableState/portable-state-types";
+import type { PortableBook, PortableStateV3 } from "../../core/portableState/portable-state-types";
 import type { Stamp } from "../../core/portableState/portable-register-core";
 import type { PortableStateCommandService } from "./service";
 import type { ProgressRuntimeStatus } from "./progressRuntimeGate";
@@ -38,6 +38,8 @@ export type PortableLegacyImportResult = PortableStateV3 & {
  */
 export interface PortableStateDataService extends PortableStateCommandService {
   snapshot(): Promise<PortableStateV3>;
+  /** Optional single-book read for repositories where a whole snapshot costs one read per book. */
+  bookSnapshot?(bookHash: string): Promise<PortableBook | undefined>;
   mergeValidatedState(input: unknown, options?: PortableMergeOptions): Promise<PortableStateV3>;
   /** R3: merge old archive records and organization in one repository transaction. */
   mergeLegacyRecords(input: PortableLegacyImportInput): Promise<PortableLegacyImportResult>;

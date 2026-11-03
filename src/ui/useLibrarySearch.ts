@@ -8,6 +8,7 @@ import { detectedLogicalCores, loadCorpusConcurrencyPreference, normalizeCorpusC
 import { serveArchivePort } from "../platform/archiveWorkerBridge";
 import type { RuntimeCapabilities } from "../platform/runtimeCapabilities";
 import { getShelfStore, isTauriEnv, type ShelfEntry } from "./shelf";
+import { activeShelfSpace } from "./shelfSpaces";
 import { presentCrossBookHit, type CrossBookPanelResult } from "./crossBookSearch";
 import { uiText } from "./localization/UiLanguageProvider";
 
@@ -48,8 +49,9 @@ export function useLibrarySearchRuntime(isTauriEnv: () => boolean, readerPriorit
   const librarySearchRuntimeRef = useRef<ReturnType<typeof createDefaultLibrarySearchRuntime> | null>(null);
   if (!librarySearchRuntimeRef.current) {
     librarySearchRuntimeRef.current = createDefaultLibrarySearchRuntime(isTauriEnv(), {
+      // Index work also waits while a shelf without library services is open.
       waitUntilRunnable: async (signal) => {
-        while (readerPriorityBusyRef.current && !signal.aborted) {
+        while ((readerPriorityBusyRef.current || !activeShelfSpace().policy.libraryServices) && !signal.aborted) {
           await new Promise<void>((resolve) => window.setTimeout(resolve, 50));
         }
       },
@@ -87,6 +89,8 @@ export function useLibrarySearchBooks({ runtime, librarySearchRuntime, shelfEntr
   // 全库搜索属于应用级运行时：两个 UI 入口只订阅，不以面板生命周期
   // 启停任务。书架变化只更新候选，下次状态检查/续建会精确补齐。
   useEffect(() => {
+    // Another shelf's books are never index candidates; the library's set stays as it was.
+    if (!activeShelfSpace().policy.libraryServices) return;
     const nativeArchive = isTauriEnv() && Boolean(getShelfStore().openArchive);
     librarySearchRuntime.setBooks(shelfEntries
       .filter((entry): entry is ShelfEntry & { contentHash: string } => Boolean(entry.contentHash) && !/\.(?:cbz|zip)$/i.test(entry.fileName))

@@ -72,6 +72,8 @@ export interface ShelfSettingsPageProps {
   onImportLegacyArchive?(): void;
   bodySearch?: ShelfBodySearchProps;
   onOpenDiagnostics?(): void;
+  /** False on a shelf that keeps to itself: no data, sync, library, import-folder, index or diagnostics rows. */
+  libraryServices?: boolean;
   /** After a library location change (finished or not): the host re-reads the shelf. */
   onLibraryLocationChanged?(): void;
   /** The shelf's single back slot: the page answers Android back for its own levels. */
@@ -198,7 +200,9 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
   const updateDot = useAppUpdateDot();
   const syncDot = useCloudSyncAttention();
   const library = useLibrarySettings();
-  const watch = useFolderWatchView();
+  const libraryServices = props.libraryServices !== false;
+  const watchView = useFolderWatchView();
+  const watch = libraryServices ? watchView : null;
   const [libraryOpenError, setLibraryOpenError] = useState<string | null>(null);
   const [locationOpen, setLocationOpen] = useState(false);
   const locationRunningRef = useRef(false);
@@ -292,7 +296,7 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
       disabled={archiveBusy || props.importArchiveDisabled} onClick={props.onImportLegacyArchive} /> : null,
   ].filter(Boolean);
 
-  const body = props.bodySearch;
+  const body = libraryServices ? props.bodySearch : undefined;
   const indexing = body?.indexStatus === "indexing" || body?.indexStatus === "cancelling";
   const runIndex = (action?: () => void) => {
     if (!action || indexBusy) return;
@@ -327,16 +331,18 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
     sections.push({ id: "reading", title: t("shelfSettings.section.reading"), grouped: true,
       content: <ReadingSettingsContent {...readingProps} /> });
   }
-  sections.push({ id: "data", title: t("shelfSettings.section.data"),
-    content: <div className="shelf-settings-card is-list">{dataRows}</div> });
-  if (capabilities.supportsCloudSync) {
+  if (libraryServices) {
+    sections.push({ id: "data", title: t("shelfSettings.section.data"),
+      content: <div className="shelf-settings-card is-list">{dataRows}</div> });
+  }
+  if (capabilities.supportsCloudSync && libraryServices) {
     sections.push({ id: "sync", title: t("cloudSync.title"),
       content: <CloudSyncPanel active={!props.warm && props.open} /> });
   }
   if (capabilities.supportsCacheStorage || body) {
     sections.push({ id: "storage", title: t("shelfSettings.section.storage"),
       content: <>
-        {library && <div className="shelf-settings-card is-list">
+        {library && libraryServices && <div className="shelf-settings-card is-list">
           <SettingsRow icon={ROW_ICONS.library} title={t("shelfSettings.library")}
             detail={displayPath(library.libraryDirectory) || t("shelfSettings.library.unknown")}
             onClick={() => { setLibraryOpenError(null); void openLibraryFolder().catch((error: unknown) => setLibraryOpenError(String((error as Error).message ?? error))); }} />
@@ -346,7 +352,7 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
             detail={libraryLocationWarning ?? t("libraryLocation.row.detail")} dot={libraryLocationWarning ?? false}
             onClick={() => setLocationOpen(true)} />}
         </div>}
-        {library && (library.error || libraryOpenError) && <p className="shelf-settings-error" role="alert">{libraryOpenError ?? library.error}</p>}
+        {library && libraryServices && (library.error || libraryOpenError) && <p className="shelf-settings-error" role="alert">{libraryOpenError ?? library.error}</p>}
         {watch && <FolderWatchCard view={watch} windows={capabilities.platform === "windows"}
           onAction={(action) => { if (action === "scan") folderWatch().trigger(true); else void folderWatch().configure(action); }} />}
         {capabilities.supportsCacheStorage && <div className="shelf-settings-card is-list">
@@ -367,7 +373,7 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
   }
   sections.push({ id: "about", title: t("shelfSettings.section.about"),
     content: <AboutInfo>
-      {props.onOpenDiagnostics && <SettingsRow icon={ROW_ICONS.log} title={t("shelfSettings.diagnostics")}
+      {props.onOpenDiagnostics && libraryServices && <SettingsRow icon={ROW_ICONS.log} title={t("shelfSettings.diagnostics")}
         detail={t("shelfSettings.diagnostics.detail")} onClick={props.onOpenDiagnostics} />}
     </AboutInfo> });
 

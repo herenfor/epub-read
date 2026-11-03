@@ -80,6 +80,16 @@ export function storeCoverUrl(key: string, url: string, bytes: number): HeldCove
   return held;
 }
 
+/** Drops every cover no mounted card shows, e.g. after leaving another shelf. */
+export function clearUnheldCoverUrls(): void {
+  for (const [key, entry] of entries) {
+    if (entry.users > 0) continue;
+    entries.delete(key);
+    totalBytes -= entry.bytes;
+    URL.revokeObjectURL(entry.url);
+  }
+}
+
 export function coverUrlCacheSize(): { count: number; bytes: number } {
   return { count: entries.size, bytes: totalBytes };
 }
