@@ -71,6 +71,7 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
   const stripZoom = useRef(1);
   const stripGesture = useRef<{ distance: number; scale: number; anchor: StripAnchor } | null>(null);
   const scroll = props.settings.readingMode === "scroll";
+  const [stripViewport, setStripViewport] = useState("");
   const columns: 1 | 2 = !scroll && props.settings.columnsPerView === 2 && width >= 600 ? 2 : 1;
   const groups = useMemo(() => comicSpreads(pages, columns), [pages, columns]);
   const groupForPage = useMemo(() => {
@@ -258,6 +259,7 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
       alignment.current = null;
     }
     if (scroll) {
+      setStripViewport(`${stripPageAt(el.scrollTop)}:${stripPageAt(el.scrollTop + el.clientHeight - 1)}`);
       const p = stripPageAt(el.scrollTop + el.clientHeight * .2);
       const child = el.children[p] as HTMLElement;
       position.current = { page: p, ratio: Math.max(0, Math.min(1, (el.scrollTop - child.offsetTop) / Math.max(1, child.offsetHeight - el.clientHeight))) };
@@ -386,7 +388,7 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
     const adjacent = intersectingScreen !== null && Math.abs(intersectingScreen - groupForPage[page]) === 1
       ? groups[intersectingScreen]?.[0] : undefined;
     const shown = scroll && el && el.children.length === pages.length
-      ? [stripPageAt(el.scrollTop), Math.min(stripPageAt(el.scrollTop + el.clientHeight - 1), stripPageAt(el.scrollTop) + 3)]
+      ? [stripPageAt(el.scrollTop), stripPageAt(el.scrollTop + el.clientHeight - 1)]
       : adjacent === undefined ? [page] : [page, adjacent];
     const plan = comicReadOrder(groups, groupForPage, shown, warmPage, heading.current.sign);
     resources.urgent = new Set(plan.urgent);
@@ -399,7 +401,7 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
       lease.release(); resources.held.delete(i); decoded.current.delete(i);
     }
     resources.pump();
-  }, [page, warmPage, intersectingScreen, groups, scroll, props.server, pages, groupForPage]);
+  }, [page, warmPage, intersectingScreen, groups, scroll, stripViewport, revision, props.server, pages, groupForPage]);
   useEffect(() => { report(); }, [page, moving, urls, revision, width, columns, scroll]);
   useEffect(() => {
     const el = track.current!;
