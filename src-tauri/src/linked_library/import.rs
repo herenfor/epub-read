@@ -342,13 +342,16 @@ pub(super) fn prepare_original_document(
         return Err(failed("原书为空".into()));
     }
     let revision = reader.revision().map_err(|e| failed(e.to_string()))?;
-    let mut digest = Sha256::new();
-    let mut buffer = [0; 64 * 1024];
-    loop {
-        if gate.is_cancelled() { return Err(cancelled()); }
-        let count = reader.read(&mut buffer).map_err(|e| failed(e.to_string()))?;
-        if count == 0 { break; }
-        digest.update(&buffer[..count]);
+    let (content_hash, hashed_bytes) = hash_original_document(&mut reader, || gate.is_cancelled())
+        .map_err(|error| {
+            if error.kind() == std::io::ErrorKind::Interrupted && gate.is_cancelled() {
+                cancelled()
+            } else {
+                failed(error.to_string())
+            }
+        })?;
+    if hashed_bytes != file_size {
+        return Err(failed("导入期间原文件长度发生变化".into()));
     }
     reader.rewind().map_err(|e| failed(e.to_string()))?;
     let metadata = crate::document_formats::inspect_reader(&mut reader, &file_name)
@@ -361,7 +364,7 @@ pub(super) fn prepare_original_document(
     }
     if gate.is_cancelled() { return Err(cancelled()); }
     Ok(PreparedOriginalDocument {
-        grant, content_hash: format!("{:x}", digest.finalize()), file_name, file_size, metadata,
+        grant, content_hash, file_name, file_size, metadata,
     })
 }
 
