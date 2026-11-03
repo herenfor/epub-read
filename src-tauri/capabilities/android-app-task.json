@@ -1,0 +1,7 @@
+{
+  "identifier": "android-app-task",
+  "description": "Android Activity foreground notifications for reader prefetch",
+  "platforms": ["android"],
+  "windows": ["main"],
+  "permissions": ["androidAppTask:default"]
+}
