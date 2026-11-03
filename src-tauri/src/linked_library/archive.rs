@@ -97,7 +97,8 @@ pub(crate) fn archive_open_blocking(
         guard().map_err(archive_fault_error)?;
     }
     let directory_started = std::time::Instant::now();
-    let session = NativeZipSession::from_verified_file(file, guard).map_err(archive_fault_error)?;
+    let index = stamp.as_ref().map(|_| (receipt.with_extension("zip-index-v1"), hit));
+    let session = NativeZipSession::from_verified_file_indexed(file, guard, index).map_err(archive_fault_error)?;
     let directory_ms = directory_started.elapsed().as_millis() as u64;
     let entry_count = session.entry_count;
     finalize_library_source_read(&app, &root, &identity, &old_snapshot, &verified_snapshot)?;

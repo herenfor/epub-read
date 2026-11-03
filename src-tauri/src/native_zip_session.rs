@@ -2,9 +2,11 @@
 //! Caller verifies the opened source and supplies the existing snapshot guard.
 //! Use the project's zip 2.4.2, serde and serde_json; no new ZIP decoder/unsafe.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::fs::File;
-use std::io::Read;
+use std::io::{self, Read, Seek, SeekFrom, Take};
+use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc::{self, Receiver, Sender, SyncSender},
@@ -27,7 +29,7 @@ pub enum Fault {
     Io,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Entry {
     pub entry_index: usize,
@@ -52,6 +54,92 @@ enum Command {
     Close,
 }
 
+const MAX_STORED_INDEX_BYTES: usize = 8 * 1024 * 1024;
+
+#[derive(Deserialize, Serialize)]
+struct StoredEntry {
+    entry: Entry,
+    data_offset: u64,
+    crc: u32,
+}
+
+fn load_stored_index(path: &Path, archive_size: u64) -> Option<Vec<StoredEntry>> {
+    let mut bytes = Vec::new();
+    File::open(path).ok()?.take((MAX_STORED_INDEX_BYTES + 1) as u64)
+        .read_to_end(&mut bytes).ok()?;
+    if bytes.len() <= 32 || bytes.len() > MAX_STORED_INDEX_BYTES {
+        return None;
+    }
+    let (checksum, json) = bytes.split_at(32);
+    if Sha256::digest(json).as_slice() != checksum {
+        return None;
+    }
+    let entries: Vec<StoredEntry> = serde_json::from_slice(json).ok()?;
+    if entries.is_empty()
+        || entries.windows(2).any(|w| w[0].entry.entry_index >= w[1].entry.entry_index)
+        || entries.iter().any(|item| item.entry.compressed_bytes != item.entry.expanded_bytes
+            || item.data_offset.checked_add(item.entry.expanded_bytes).is_none_or(|end| end > archive_size))
+    {
+        return None;
+    }
+    Some(entries)
+}
+
+fn encode_stored_index(rows: &[StoredEntry]) -> Option<Vec<u8>> {
+    let json = serde_json::to_vec(rows).ok()?;
+    if json.len() + 32 > MAX_STORED_INDEX_BYTES {
+        return None;
+    }
+    let mut bytes = Sha256::digest(&json).to_vec();
+    bytes.extend(json);
+    Some(bytes)
+}
+
+enum ArchiveEntries {
+    Zip(ZipArchive<File>),
+    Stored { file: File, entries: Vec<StoredEntry> },
+}
+
+struct StoredRead<'a> {
+    file: Take<&'a mut File>,
+    crc: flate2::Crc,
+    expected_crc: u32,
+}
+
+impl Read for StoredRead<'_> {
+    fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+        let n = self.file.read(bytes)?;
+        self.crc.update(&bytes[..n]);
+        if n == 0 && self.file.limit() == 0 && self.crc.sum() != self.expected_crc {
+            return Err(io::ErrorKind::InvalidData.into());
+        }
+        Ok(n)
+    }
+}
+
+impl ArchiveEntries {
+    fn open(&mut self, index: usize) -> Result<(u64, Box<dyn Read + '_>), Fault> {
+        match self {
+            Self::Zip(zip) => {
+                let entry = zip.by_index(index).map_err(|_| Fault::InvalidArchive)?;
+                if entry.is_dir() {
+                    return Err(Fault::InvalidArchive);
+                }
+                Ok((entry.size(), Box::new(entry)))
+            }
+            Self::Stored { file, entries } => {
+                let row = entries.binary_search_by_key(&index, |row| row.entry.entry_index)
+                    .ok().and_then(|i| entries.get(i)).ok_or(Fault::InvalidArchive)?;
+                let size = row.entry.expanded_bytes;
+                file.seek(SeekFrom::Start(row.data_offset)).map_err(|_| Fault::Io)?;
+                Ok((size, Box::new(StoredRead {
+                    file: file.take(size), crc: flate2::Crc::new(), expected_crc: row.crc,
+                })))
+            }
+        }
+    }
+}
+
 /// Registry stores Arc<NativeZipSession> under an opaque, window-owned ID.
 /// request_gate limits this session to one outstanding native request.
 pub struct NativeZipSession {
@@ -69,22 +157,51 @@ impl NativeZipSession {
         file: File,
         unchanged: impl Fn() -> Result<(), Fault> + Send + 'static,
     ) -> Result<Self, Fault> {
+        Self::from_verified_file_indexed(file, unchanged, None)
+    }
+
+    /// Only a caller with a strong source receipt may reuse the stored index.
+    pub(crate) fn from_verified_file_indexed(
+        file: File,
+        unchanged: impl Fn() -> Result<(), Fault> + Send + 'static,
+        index: Option<(PathBuf, bool)>,
+    ) -> Result<Self, Fault> {
         unchanged()?;
-        let mut zip = ZipArchive::new(file).map_err(|_| Fault::InvalidArchive)?;
-        let mut entries = Vec::new();
-        for index in 0..zip.len() {
-            // Raw directory access MUST NOT instantiate/inflate a decoder.
-            let entry = zip.by_index_raw(index).map_err(|_| Fault::InvalidArchive)?;
-            if entry.is_dir() {
-                continue;
+        let cached = index.as_ref().filter(|(_, reuse)| *reuse)
+            .and_then(|(path, _)| load_stored_index(path, file.metadata().ok()?.len()));
+        let mut publish = None;
+        let (archive, entries) = if let Some(rows) = cached {
+            let entries = rows.iter().map(|row| row.entry.clone()).collect::<Vec<_>>();
+            (ArchiveEntries::Stored { file, entries: rows }, entries)
+        } else {
+            let mut zip = ZipArchive::new(file).map_err(|_| Fault::InvalidArchive)?;
+            let mut entries = Vec::new();
+            let mut stored = index.is_some() && zip.len() >= 512;
+            let mut rows = Vec::new();
+            for i in 0..zip.len() {
+                let entry = zip.by_index_raw(i).map_err(|_| Fault::InvalidArchive)?;
+                if entry.is_dir() {
+                    continue;
+                }
+                let row = Entry {
+                    entry_index: i,
+                    name: entry.name().to_owned(),
+                    compressed_bytes: entry.compressed_size(),
+                    expanded_bytes: entry.size(),
+                };
+                stored &= entry.compression() == zip::CompressionMethod::Stored
+                    && !entry.encrypted() && row.compressed_bytes == row.expanded_bytes
+                    && row.name != "META-INF/container.xml";
+                if stored {
+                    rows.push(StoredEntry { entry: row.clone(), data_offset: entry.data_start(), crc: entry.crc32() });
+                }
+                entries.push(row);
             }
-            entries.push(Entry {
-                entry_index: index,
-                name: entry.name().to_owned(),
-                compressed_bytes: entry.compressed_size(),
-                expanded_bytes: entry.size(),
-            });
-        }
+            if let Some((path, _)) = index.filter(|_| stored && !rows.is_empty()) {
+                publish = Some((path, rows));
+            }
+            (ArchiveEntries::Zip(zip), entries)
+        };
         unchanged()?;
         let entry_count = entries.len();
         let (tx, rx) = mpsc::channel();
@@ -93,10 +210,18 @@ impl NativeZipSession {
         std::thread::Builder::new()
             .name("epub-zip".into())
             .spawn(move || {
-                serve(zip, entries, Box::new(unchanged), rx, &worker_cancel);
+                serve(archive, entries, Box::new(unchanged), rx, &worker_cancel);
                 worker_cancel.store(true, Ordering::Release);
             })
             .map_err(|_| Fault::Io)?;
+        if let Some((path, rows)) = publish {
+            // This derived data never gates a reader open.
+            let _ = std::thread::Builder::new().name("comic-index-save".into()).spawn(move || {
+                if let Some(bytes) = encode_stored_index(&rows) {
+                    let _ = crate::linked_library::atomic_write_bytes(&path, &bytes);
+                }
+            });
+        }
         Ok(Self { tx, cancelled, request_gate: Mutex::new(()), entry_count })
     }
 
@@ -200,7 +325,7 @@ fn verified_chunk(
 }
 
 fn serve(
-    mut zip: ZipArchive<File>,
+    mut archive: ArchiveEntries,
     entries: Vec<Entry>,
     guard: Guard,
     rx: Receiver<Command>,
@@ -227,14 +352,13 @@ fn serve(
                 continue;
             }
         };
-        let mut entry = match zip.by_index(index) {
-            Ok(entry) if !entry.is_dir() => entry,
-            _ => {
-                let _ = reply.send(Err(Fault::InvalidArchive));
+        let (size, mut entry) = match archive.open(index) {
+            Ok(entry) => entry,
+            Err(error) => {
+                let _ = reply.send(Err(error));
                 return;
             }
         };
-        let size = entry.size();
         let mut offset = 0;
         let mut current_reply = Some(reply);
         // Borrowed ZipFile lives on this stack, not in a self-referential struct.
@@ -295,6 +419,39 @@ mod tests {
         writer.start_file("empty", SimpleFileOptions::default()).unwrap();
         writer.finish().unwrap();
         (File::open(&path).unwrap(), path, data)
+    }
+
+    #[test]
+    fn stored_index_hit_checks_crc_and_invalid_index_falls_back() {
+        let (file, path, data) = fixture(zip::CompressionMethod::Stored);
+        let scratch = tempfile::tempdir().unwrap();
+        let index = scratch.path().join("index");
+        let mut zip = ZipArchive::new(file).unwrap();
+        let entry = zip.by_index_raw(0).unwrap();
+        let row = StoredEntry {
+            entry: Entry { entry_index: 0, name: entry.name().to_owned(),
+                compressed_bytes: entry.compressed_size(), expanded_bytes: entry.size() },
+            data_offset: entry.data_start(),
+            crc: entry.crc32(),
+        };
+        drop(entry);
+        std::fs::write(&index, encode_stored_index(&[row]).unwrap()).unwrap();
+        let session = NativeZipSession::from_verified_file_indexed(
+            File::open(&path).unwrap(), || Ok(()), Some((index.clone(), true)),
+        ).unwrap();
+        assert_eq!(session.entry_count, 1);
+        assert_eq!(session.read_chunk(0, 0).unwrap(), data[..CHUNK_BYTES]);
+        session.close();
+
+        let mut bad = std::fs::read(&index).unwrap();
+        bad[0] ^= 1;
+        std::fs::write(&index, bad).unwrap();
+        let session = NativeZipSession::from_verified_file_indexed(
+            File::open(&path).unwrap(), || Ok(()), Some((index, true)),
+        ).unwrap();
+        assert_eq!(session.entry_count, 2);
+        session.close();
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]

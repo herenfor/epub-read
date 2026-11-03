@@ -896,7 +896,9 @@ pub(super) fn delete_records(app: &AppHandle, content_hashes: Vec<String>) -> Re
         })?;
     }
     for hash in &content_hashes {
-        let _ = fs::remove_file(super::archive_stamp::receipt_path(&root, hash));
+        let receipt = super::archive_stamp::receipt_path(&root, hash);
+        let _ = fs::remove_file(receipt.with_extension("zip-index-v1"));
+        let _ = fs::remove_file(receipt);
     }
     Ok(())
 }
