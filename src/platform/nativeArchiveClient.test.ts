@@ -36,6 +36,28 @@ describe("native Android archive client", () => {
     expect(invoke).toHaveBeenCalledWith("linked_library_archive_close", { sessionId: "session-1" });
   });
 
+  it.each([true, false])("opens bounded compact directories with paged fallback (%s)", async packed => {
+    const rows = [[0, "巻/1.jpg", 10, 10], [2, "巻/2.jpg", 17, 17]];
+    const invoke = vi.fn(async (command: string) => {
+      switch (command) {
+        case "linked_library_archive_open":
+          return { protocolVersion: 1, sessionId: "packed", entryCount: rows.length, chunkBytes: CHUNK, compactDirectory: true };
+        case "linked_library_archive_compact_directory":
+          return packed
+            ? new Response(new Blob([JSON.stringify(rows)]).stream().pipeThrough(new CompressionStream("deflate"))).arrayBuffer()
+            : new ArrayBuffer(0);
+        case "linked_library_archive_directory":
+          return { entries: rows.map(([entryIndex, name, compressedBytes, expandedBytes]) => ({
+            entryIndex, name, compressedBytes, expandedBytes,
+          })), next: null };
+        default: throw new Error(command);
+      }
+    });
+    const archive = await createNativeArchiveClient(HASH, invoke as unknown as ArchiveInvoke);
+    expect([...archive.directory.keys()]).toEqual(["巻/1.jpg", "巻/2.jpg"]);
+    expect(invoke.mock.calls.some(([command]) => command === "linked_library_archive_directory")).toBe(!packed);
+  });
+
   it("abandons stale reads at a chunk boundary without closing the session", async () => {
     const active = new AbortController();
     const queued = new AbortController();

@@ -296,6 +296,20 @@ pub async fn linked_library_archive_directory(
 }
 
 #[tauri::command]
+pub async fn linked_library_archive_compact_directory(
+    app: AppHandle,
+    window: tauri::Window,
+    session_id: String,
+) -> Result<tauri::ipc::Response, LinkedLibraryError> {
+    let session = native_archive_session(&app, window.label(), &session_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        session.compact_directory().map(tauri::ipc::Response::new).map_err(archive_fault_error)
+    })
+    .await
+    .map_err(|error| format!("原生归档目录工作线程失败：{error}"))?
+}
+
+#[tauri::command]
 pub async fn linked_library_archive_read(
     app: AppHandle,
     window: tauri::Window,

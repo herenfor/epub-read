@@ -142,6 +142,7 @@ pub(crate) use commands::{
     __tauri_command_name_linked_library_read_cover_raw,
     __tauri_command_name_linked_library_archive_open,
     __tauri_command_name_linked_library_archive_directory,
+    __tauri_command_name_linked_library_archive_compact_directory,
     __tauri_command_name_linked_library_archive_read,
     __tauri_command_name_linked_library_archive_close,
     __tauri_command_name_linked_library_relink,
@@ -172,6 +173,7 @@ pub use commands::{
     linked_library_read_cover_raw,
     linked_library_archive_open,
     linked_library_archive_directory,
+    linked_library_archive_compact_directory,
     linked_library_archive_read,
     linked_library_archive_close,
     linked_library_relink,
@@ -202,6 +204,7 @@ pub(crate) use commands::{
     __cmd__linked_library_read_cover_raw,
     __cmd__linked_library_archive_open,
     __cmd__linked_library_archive_directory,
+    __cmd__linked_library_archive_compact_directory,
     __cmd__linked_library_archive_read,
     __cmd__linked_library_archive_close,
     __cmd__linked_library_relink,
@@ -294,6 +297,7 @@ pub struct ArchiveOpenView {
     chunk_bytes: usize,
     verify_ms: u64,
     directory_ms: u64,
+    compact_directory: bool,
 }
 
 /// One in-process managed import task. `request_id` is unique per frontend
