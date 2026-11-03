@@ -66,7 +66,57 @@ class AndroidUriBridgePlugin(private val activity: Activity) : Plugin(activity) 
     }
     private val cancelledWrites = ConcurrentHashMap<String, Boolean>()
     private var pendingTreePick: Invoke? = null
+    private var pendingDocumentPick = false
     private var persistTreePick = false
+
+    @Command
+    fun pickLinkDocuments(invoke: Invoke) {
+        activity.runOnUiThread {
+            if (pendingDocumentPick || pendingTreePick != null) {
+                invoke.reject("document picker is already active")
+                return@runOnUiThread
+            }
+            pendingDocumentPick = true
+            try {
+                val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "*/*"
+                    putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+                }
+                startActivityForResult(invoke, intent, "linkDocumentsResult")
+            } catch (error: Exception) {
+                pendingDocumentPick = false
+                invoke.reject(error.message ?: "unable to open document picker")
+            }
+        }
+    }
+
+    @ActivityCallback
+    fun linkDocumentsResult(invoke: Invoke, result: ActivityResult) {
+        pendingDocumentPick = false
+        val intent = result.data
+        val uris = linkedSetOf<Uri>()
+        if (result.resultCode == Activity.RESULT_OK && intent != null) {
+            intent.data?.let { uris.add(it) }
+            intent.clipData?.let { clips ->
+                for (i in 0 until clips.itemCount) clips.getItemAt(i).uri?.let { uris.add(it) }
+            }
+        }
+        // The import job will retain a grant only when it owns a successful
+        // binding. Returning from the picker alone never persists permission.
+        ioExecutor.execute {
+            val documents = JSONArray()
+            for (uri in uris) {
+                if (uri.scheme != "content") continue
+                documents.put(JSObject().apply {
+                    put("uri", uri.toString())
+                    queryDisplayName(uri)?.let { put("fileName", it) }
+                })
+            }
+            postResponse { invoke.resolve(JSObject().apply { put("documents", documents) }) }
+        }
+    }
 
     @Command
     fun pickDirectoryTree(invoke: Invoke) = startTreePicker(invoke, false)
@@ -88,7 +138,7 @@ class AndroidUriBridgePlugin(private val activity: Activity) : Plugin(activity) 
 
     private fun startTreePicker(invoke: Invoke, persist: Boolean) {
         activity.runOnUiThread {
-            if (pendingTreePick != null) {
+            if (pendingTreePick != null || pendingDocumentPick) {
                 invoke.reject("directory picker is already active")
                 return@runOnUiThread
             }
