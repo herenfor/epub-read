@@ -5,7 +5,7 @@ import type { RibbonBookmark, RibbonMark } from "./bookmarkRibbons";
 import { pageRibbonLeft } from "./bookmarkRibbons";
 import { BookmarkRibbonLayer } from "./BookmarkRibbonLayer";
 import { comicSpreads, comicPageForAnchor, comicTurnTarget } from "./comicPages";
-import { COMIC_ZOOM_NONE, COMIC_ZOOM_RELEASE, panComicZoom, pinchComicZoom, zoomComicAt, type ComicZoomView, type ZoomPoint } from "./comicZoom";
+import { COMIC_ZOOM_MAX, COMIC_ZOOM_NONE, COMIC_ZOOM_RELEASE, panComicZoom, pinchComicZoom, zoomComicAt, type ComicZoomView, type ZoomPoint } from "./comicZoom";
 import { createReaderTapGeometry, routeReaderTap } from "./readerTapRouting";
 import { resolveReaderPalette } from "../config/readerPalette";
 import { effectivePageProgression } from "../render/settings";
@@ -20,6 +20,8 @@ type Position = { page: number; ratio: number };
 type Lease = { url: string; release(): void };
 type Resources = { closed: boolean; wanted: Set<number>; held: Map<number, Lease>; pending: Set<number> };
 type Seek = Parameters<NonNullable<ReaderHandle["seekContentFraction"]>>;
+/** A strip point: a page, how far down it, and how far across the strip. */
+type StripAnchor = { page: number; down: number; across: number };
 
 /** One native scrolling surface. Display spreads never become source-page identities. */
 export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function ComicReaderView(props, ref) {
@@ -46,6 +48,9 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
   const zoom = useRef<{ el: HTMLElement; box: DOMRect; view: ComicZoomView } | null>(null);
   const gesture = useRef<{ kind: "pinch"; mid: ZoomPoint; distance: number; start: ComicZoomView } | { kind: "pan"; x: number; y: number } | null>(null);
   const [zoomed, setZoomed] = useState(false);
+  // Scroll mode zooms the whole strip instead: pages widen, and native scrolling pans both ways.
+  const stripZoom = useRef(1);
+  const stripGesture = useRef<{ distance: number; scale: number; anchor: StripAnchor } | null>(null);
   const scroll = props.settings.readingMode === "scroll";
   const columns: 1 | 2 = !scroll && props.settings.columnsPerView === 2 && width >= 600 ? 2 : 1;
   const groups = useMemo(() => comicSpreads(pages, columns), [pages, columns]);
@@ -145,6 +150,40 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
     setZoomed(false);
   };
   const settleZoom = () => { if (zoom.current && zoom.current.view.scale <= COMIC_ZOOM_RELEASE) endZoom(true); };
+  /** The strip page whose top is at or above `y` (track content px). */
+  const stripPageAt = (y: number) => {
+    const el = track.current!;
+    let low = 0, high = pages.length - 1, p = 0;
+    while (low <= high) {
+      const mid = (low + high) >>> 1;
+      if ((el.children[mid] as HTMLElement).offsetTop <= y) { p = mid; low = mid + 1; }
+      else high = mid - 1;
+    }
+    return p;
+  };
+  /** The strip point under (x, y), relative to the track's box. */
+  const stripAnchor = (x: number, y: number): StripAnchor => {
+    const el = track.current!, page = stripPageAt(el.scrollTop + y), child = el.children[page] as HTMLElement;
+    return { page, down: (el.scrollTop + y - child.offsetTop) / Math.max(1, child.offsetHeight), across: (el.scrollLeft + x) / Math.max(1, el.clientWidth * stripZoom.current) };
+  };
+  /** Widens the strip to `scale` and puts `anchor` back under (x, y). */
+  const zoomStrip = (scale: number, anchor: StripAnchor, x: number, y: number) => {
+    const el = track.current;
+    if (!el) return;
+    scale = Math.min(COMIC_ZOOM_MAX, Math.max(1, scale));
+    stripZoom.current = scale;
+    if (scale === 1) el.style.removeProperty("--comic-strip-zoom");
+    else el.style.setProperty("--comic-strip-zoom", String(scale));
+    setZoomed(scale > 1);
+    const child = el.children[anchor.page] as HTMLElement | undefined;
+    if (child) el.scrollTop = child.offsetTop + anchor.down * child.offsetHeight - y;
+    el.scrollLeft = anchor.across * el.clientWidth * scale - x;
+  };
+  const settleStrip = () => {
+    const el = track.current;
+    if (!el || stripZoom.current === 1 || stripZoom.current > COMIC_ZOOM_RELEASE) return;
+    zoomStrip(1, stripAnchor(el.clientWidth / 2, el.clientHeight / 2), el.clientWidth / 2, el.clientHeight / 2);
+  };
   const locate = (p: number, ratio = 0, behavior: ScrollBehavior = "auto") => {
     endZoom();
     p = Math.max(0, Math.min(pages.length - 1, p));
@@ -191,13 +230,7 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
       alignment.current = null;
     }
     if (scroll) {
-      const line = el.scrollTop + el.clientHeight * .2;
-      let low = 0, high = pages.length - 1, p = 0;
-      while (low <= high) {
-        const mid = (low + high) >>> 1;
-        if ((el.children[mid] as HTMLElement).offsetTop <= line) { p = mid; low = mid + 1; }
-        else high = mid - 1;
-      }
+      const p = stripPageAt(el.scrollTop + el.clientHeight * .2);
       const child = el.children[p] as HTMLElement;
       position.current = { page: p, ratio: Math.max(0, Math.min(1, (el.scrollTop - child.offsetTop) / Math.max(1, child.offsetHeight - el.clientHeight))) };
       setWarmPage(p);
@@ -217,8 +250,8 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
     report();
   };
   // Native listeners read the current layout/actions, never a previous mode's closure.
-  const actions = useRef({ report, sample, turn, beginZoom, paintZoom, settleZoom });
-  actions.current = { report, sample, turn, beginZoom, paintZoom, settleZoom };
+  const actions = useRef({ report, sample, turn, beginZoom, paintZoom, settleZoom, stripAnchor, zoomStrip, settleStrip });
+  actions.current = { report, sample, turn, beginZoom, paintZoom, settleZoom, stripAnchor, zoomStrip, settleStrip };
   useLayoutEffect(() => {
     const el = root.current!;
     const resize = () => setWidth(el.getBoundingClientRect().width);
@@ -228,6 +261,11 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
   }, []);
   useLayoutEffect(() => {
     endZoom();
+    if (!scroll && stripZoom.current !== 1) {
+      stripZoom.current = 1; stripGesture.current = null;
+      track.current?.style.removeProperty("--comic-strip-zoom");
+      setZoomed(false);
+    }
     alignment.current = { ...position.current };
     align(alignment.current);
     if (visible().every(i => decoded.current.has(i))) alignment.current = null;
@@ -276,8 +314,17 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
   useEffect(() => {
     const el = track.current!;
     const onWheel = (event: WheelEvent) => {
-      if (scroll) return;
       const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? el.clientHeight : 1;
+      if (scroll) {
+        // The wheel scrolls the strip natively; Ctrl+wheel (and a trackpad pinch) widens it at the pointer.
+        if (!event.ctrlKey) return;
+        event.preventDefault();
+        if (latest.current.inputPaused) return;
+        const box = el.getBoundingClientRect(), x = event.clientX - box.left, y = event.clientY - box.top;
+        actions.current.zoomStrip(stripZoom.current * Math.exp(-event.deltaY * unit * 0.002), actions.current.stripAnchor(x, y), x, y);
+        actions.current.settleStrip();
+        return;
+      }
       // Ctrl+wheel (and a trackpad pinch) zooms at the pointer; a zoomed screen pans with the wheel.
       if (event.ctrlKey || zoom.current) {
         event.preventDefault();
@@ -299,6 +346,52 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
+  }, [scroll]);
+  useEffect(() => {
+    if (!scroll) return;
+    const el = track.current!;
+    const spread = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    const mid = (t: TouchList) => {
+      const box = el.getBoundingClientRect();
+      return { x: (t[0].clientX + t[1].clientX) / 2 - box.left, y: (t[0].clientY + t[1].clientY) / 2 - box.top };
+    };
+    // Layout follows the fingers once per frame; the strip re-lays out at every scale.
+    let pending: { scale: number; x: number; y: number } | null = null, raf: number | null = null;
+    const flush = () => {
+      raf = null;
+      const g = stripGesture.current;
+      if (g && pending) actions.current.zoomStrip(pending.scale, g.anchor, pending.x, pending.y);
+      pending = null;
+    };
+    const start = (event: TouchEvent) => {
+      if (event.touches.length !== 2 || latest.current.inputPaused) return;
+      const m = mid(event.touches);
+      stripGesture.current = { distance: spread(event.touches), scale: stripZoom.current, anchor: actions.current.stripAnchor(m.x, m.y) };
+    };
+    const move = (event: TouchEvent) => {
+      const g = stripGesture.current;
+      if (!g || event.touches.length !== 2) return;
+      event.preventDefault();
+      pending = { scale: g.scale * spread(event.touches) / Math.max(1, g.distance), ...mid(event.touches) };
+      if (raf === null) raf = requestAnimationFrame(flush);
+    };
+    const end = (event: TouchEvent) => {
+      if (!stripGesture.current || event.touches.length >= 2) return;
+      if (raf !== null) { cancelAnimationFrame(raf); flush(); }
+      stripGesture.current = null;
+      actions.current.settleStrip();
+    };
+    el.addEventListener("touchstart", start, { passive: true });
+    el.addEventListener("touchmove", move, { passive: false });
+    el.addEventListener("touchend", end, { passive: true });
+    el.addEventListener("touchcancel", end, { passive: true });
+    return () => {
+      if (raf !== null) cancelAnimationFrame(raf);
+      el.removeEventListener("touchstart", start);
+      el.removeEventListener("touchmove", move);
+      el.removeEventListener("touchend", end);
+      el.removeEventListener("touchcancel", end);
+    };
   }, [scroll]);
   useEffect(() => {
     if (scroll) return;
@@ -441,8 +534,10 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
         alignment.current = null; fade.current?.cancel();
         pointer.current = { id: event.pointerId, x: event.clientX, y: event.clientY }; userMoved.current = true;
       }} onPointerMove={event => {
+        if (event.pointerType !== "mouse" || event.buttons !== 1) return;
+        if (scroll) { if (stripZoom.current > 1) track.current?.scrollBy(-event.movementX, -event.movementY); return; }
         const z = zoom.current;
-        if (!z || event.pointerType !== "mouse" || event.buttons !== 1) return;
+        if (!z) return;
         z.view = panComicZoom(z.view, event.movementX, event.movementY, z.box.width, z.box.height);
         paintZoom();
       }} onPointerCancel={() => { pointer.current = null; command.current = false; lastDirection.current = null; }} onPointerUp={event => {
