@@ -866,6 +866,13 @@ where
     save_records_at(root, &remaining_records)
 }
 
+pub(crate) fn clear_shelf_move_cache(app: &AppHandle, hash: &str) -> Result<(), String> {
+    app.state::<AiState>().cleanup_books_if_present(app, &[hash.to_owned()])?;
+    let mut thumbnails = load_thumbnail_index(app)?;
+    remove_thumbnail(app, &mut thumbnails, hash)?;
+    save_thumbnail_index(app, &thumbnails)
+}
+
 pub(super) fn delete_records(app: &AppHandle, content_hashes: Vec<String>) -> Result<(), String> {
     if content_hashes.iter().any(|hash| !valid_content_hash(hash)) {
         return Err("无效的书籍内容指纹".into());

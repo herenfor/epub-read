@@ -547,9 +547,207 @@ pub async fn private_shelf_cover(
     .await
 }
 
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MoveDirection {
+    ToPrivate,
+    ToLibrary,
+}
+
+#[tauri::command]
+pub async fn private_shelf_move(
+    window: WebviewWindow,
+    session_id: String,
+    book_hash: String,
+    direction: MoveDirection,
+) -> Result<(), ShelfError> {
+    use tauri::Manager;
+
+    if !linked_library::valid_content_hash(&book_hash) {
+        return Err(ShelfError::new("invalid-book", "无效的书籍内容指纹"));
+    }
+    let epoch = super::main_state(&window)?
+        .lock_epoch
+        .load(Ordering::Acquire);
+    let app = window.app_handle().clone();
+    run(window, move |shelf, _, state| {
+        use crate::portable_state::PortableError;
+        let current = || state.lock_epoch.load(Ordering::Acquire) == epoch;
+        let private = shelf
+            .unlocked
+            .as_mut()
+            .filter(|session| session.owns(&session_id, epoch) && current())
+            .ok_or_else(locked)?;
+        let writes = app.state::<linked_library::LinkedLibraryWriteState>();
+        let _guard = writes
+            .0
+            .try_lock()
+            .map_err(|_| ShelfError::new("busy", "书库正在写入，请稍后重试"))?;
+        let _activity = app
+            .state::<crate::directory_import::job::DirectoryImportState>()
+            .try_acquire_import_activity("private-shelf-move".into())
+            .map_err(|err| ShelfError::new("busy", err))?;
+        let root = linked_library::library_root(&app).map_err(ShelfError::storage)?;
+        crate::portable_state_commands::with_existing_store(&app, |library| {
+            let (source, destination) = match direction {
+                MoveDirection::ToPrivate => (library, &mut private.store),
+                MoveDirection::ToLibrary => (&mut private.store, library),
+            };
+            if destination.binding_raw(&book_hash)?.is_some() {
+                return Err(PortableError::invalid_entity(
+                    "目标书架已有同一本书，未移动",
+                ));
+            }
+            let raw = source
+                .binding_raw(&book_hash)?
+                .ok_or_else(|| PortableError::invalid_entity("源书架没有这本书的原书绑定"))?;
+            let binding: DeviceBinding = serde_json::from_str(&raw)
+                .map_err(|error| PortableError::storage_error(error.to_string()))?;
+            if binding.content_hash != book_hash {
+                return Err(PortableError::invalid_data("原书绑定与书籍身份不一致"));
+            }
+            let binding = binding
+                .into_shelf_move_binding(&root)
+                .map_err(PortableError::storage_error)?;
+            let raw = serde_json::to_string(&binding)
+                .map_err(|error| PortableError::storage_error(error.to_string()))?;
+            if matches!(direction, MoveDirection::ToPrivate) {
+                linked_library::clear_shelf_move_cache(&app, &book_hash)
+                    .map_err(PortableError::storage_error)?;
+            }
+            source.move_local_book(destination, &book_hash, &raw, current)
+        })
+        .map_err(|err| ShelfError::new(err.code, err.message))?
+        .ok_or_else(|| ShelfError::new("library-unavailable", "普通书架资料尚未就绪"))?;
+        if matches!(direction, MoveDirection::ToLibrary) {
+            private.archives.clear();
+        }
+        Ok(())
+    })
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn moving_a_book_is_atomic_and_keeps_the_original_bytes() {
+        let sandbox = tempfile::tempdir().unwrap();
+        let root = sandbox.path();
+        let mut normal = PortableStore::open(&root.join("normal.sqlite3")).unwrap();
+        let mut private = PortableStore::open(&root.join("private.sqlite3")).unwrap();
+        let path = root.join("book.txt");
+        let original = "第一章 原书";
+        std::fs::write(&path, original).unwrap();
+        let (hash, _) = linked_library::hash_file(&path).unwrap();
+        let meta = linked_library::epub_meta::inspect_book(&path, "book.txt").unwrap();
+        publish_import(
+            &mut normal,
+            &path,
+            "book.txt".into(),
+            hash.clone(),
+            &meta,
+            &|| true,
+        )
+        .unwrap();
+        normal
+            .apply_organization_command(&OrganizationCommand::SetFavorite {
+                content_hashes: vec![hash.clone()],
+                value: true,
+            })
+            .unwrap();
+        let locator =
+            crate::portable_state::Locator::Legacy(crate::portable_state::LegacyLocator {
+                locator_version: 0,
+                spine_index: 0,
+                page_hint: 2,
+                anchor_index: None,
+                anchor_ratio: None,
+                anchor_text_offset: None,
+                anchor_text_snippet: None,
+                media_anchor: None,
+            });
+        normal
+            .create_bookmark(
+                &hash,
+                &new_id().unwrap(),
+                BookmarkValue {
+                    locator: locator.clone(),
+                    text: "原来的书签".into(),
+                    created_at_ms: 10,
+                },
+                10,
+            )
+            .unwrap();
+        let (read_id, snapshot) = normal.read(&hash).unwrap();
+        let stamp = snapshot
+            .unwrap()
+            .progress
+            .versions
+            .last()
+            .unwrap()
+            .stamp
+            .clone();
+        let basis = normal
+            .adopt(
+                &read_id,
+                EntityRef::Progress {
+                    book_hash: hash.clone(),
+                },
+                AdoptSelection::Chosen { stamp },
+            )
+            .unwrap();
+        normal
+            .write_progress(
+                &basis,
+                WriteIntent::Auto,
+                Some(crate::portable_state::Progress {
+                    locator,
+                    progress_pct_hint: 20,
+                }),
+                12,
+            )
+            .unwrap();
+        let binding = normal.binding_raw(&hash).unwrap().unwrap();
+        let book = normal.snapshot().unwrap().books[&hash].clone();
+
+        assert!(normal
+            .move_local_book(&mut private, &hash, &binding, || false)
+            .is_err());
+        assert!(private.snapshot().unwrap().books.is_empty());
+        assert_eq!(normal.snapshot().unwrap().books[&hash], book);
+
+        normal
+            .move_local_book(&mut private, &hash, &binding, || true)
+            .unwrap();
+        assert!(normal.snapshot().unwrap().books.is_empty());
+        assert!(normal.binding_raw(&hash).unwrap().is_none());
+        assert_eq!(private.snapshot().unwrap().books[&hash], book);
+        assert!(private.project_shelf().unwrap().books[0].favorite);
+        assert!(private.local_is_new_hashes().unwrap().contains(&hash));
+
+        publish_import(
+            &mut normal,
+            &path,
+            "book.txt".into(),
+            hash.clone(),
+            &meta,
+            &|| true,
+        )
+        .unwrap();
+        assert!(private
+            .move_local_book(&mut normal, &hash, &binding, || true)
+            .is_err());
+        assert_eq!(private.snapshot().unwrap().books[&hash], book);
+        normal.hide_linked_record(&hash).unwrap();
+        private
+            .move_local_book(&mut normal, &hash, &binding, || true)
+            .unwrap();
+        assert!(private.snapshot().unwrap().books.is_empty());
+        assert_eq!(normal.snapshot().unwrap().books[&hash], book);
+        assert_eq!(std::fs::read_to_string(path).unwrap(), original);
+    }
 
     #[test]
     fn isolated_import_and_archive_never_publish_to_normal_repository() {

@@ -4,6 +4,8 @@
 //! The integration package is expected to register the frozen wire on top of
 //! this module, after independently checking IPC and migration activation.
 
+mod shelf_move;
+
 use super::dto::{
     self, Annotation, BookMetadata, BookmarkValue, NoteValue, PortableBook, PortableStateV3,
     ProgressState, ProgressValue, Register, Stamp, Version,
