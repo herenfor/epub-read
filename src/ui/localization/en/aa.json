@@ -62,6 +62,8 @@
   "aa.group.advanced": "Page Turning & Advanced",
   "aa.turnAnimation": "Page Turn",
   "aa.more": "More Advanced Settings",
+  "aa.txtIndent": "Indent Paragraphs",
+  "aa.txtIndent.hint": "Indent each TXT paragraph by two characters",
   "aa.forceHorizontal": "Convert Vertical Text to Horizontal",
   "aa.forceHorizontal.hint": "Vertical layout is experimental; turn this on to read such books horizontally",
   "aa.pageDirectionLtr": "Always Turn Pages Left to Right",

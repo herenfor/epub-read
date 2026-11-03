@@ -388,6 +388,7 @@ export function sameLayoutSettings(a: ReaderSettings, b: ReaderSettings): boolea
     a.letterSpacingPx === b.letterSpacingPx &&
     a.wordSpacingPx === b.wordSpacingPx &&
     a.forceHorizontal === b.forceHorizontal &&
+    (a.txtIndent === true) === (b.txtIndent === true) &&
     (a.pageDirection ?? "book") === (b.pageDirection ?? "book")
   );
 }

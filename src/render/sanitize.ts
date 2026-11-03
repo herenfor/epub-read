@@ -261,6 +261,10 @@ html, body, #${VIEWER_ID},
   text-orientation: mixed !important;
 }`
     : "";
+  // TXT 生成资源用 p[data-txt-indent] 消费这个变量；其他书没有该标记，不受影响。
+  const txtIndentCss = s.txtIndent === true
+    ? `/* [L2] TXT 段首缩进（见 core/documentFormats）。 */\n#${VIEWER_ID} { --reader-txt-indent: 2em; }`
+    : "";
   const typographyCss = [
     `html { font-size: ${s.fontSizePx}px !important;${s.fontFamily ? ` font-family: ${s.fontFamily};` : ""} }`,
     fontFaceCss,
@@ -270,6 +274,7 @@ html, body, #${VIEWER_ID},
    （见 ui/readerCursorIdle.ts）；移动鼠标即移除。 */`,
     `:root[data-reader-cursor-idle], :root[data-reader-cursor-idle] * { cursor: none !important; }`,
     writingModeCss,
+    txtIndentCss,
   ]
     .filter(Boolean)
     .join("\n");

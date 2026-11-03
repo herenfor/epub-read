@@ -5919,6 +5919,8 @@ export default function App() {
                 onTurnAnimationChange={settingsActions.setTurnAnimation}
                 forceHorizontal={settings.forceHorizontal === true}
                 onForceHorizontalChange={settingsActions.setForceHorizontal}
+                txtIndent={settings.txtIndent === true}
+                onTxtIndentChange={book?.sourceFormat === "txt" ? settingsActions.setTxtIndent : undefined}
                 pageDirection={settings.pageDirection}
                 onPageDirectionChange={settingsActions.setPageDirection}
                 customCss={settings.customCss}
