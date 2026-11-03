@@ -41,6 +41,7 @@ function fakeNative() {
     const o = op as unknown as Record<string, never>;
     try {
       switch (op.kind) {
+        case "import": return { bookHash: HASH, duplicate: false };
         case "list": return { books: [{ bookHash: HASH, metadata: metadata.value }], organization: await service.getOrganization() };
         case "read": return service.read({ bookHash: o.bookHash });
         case "adopt": return service.adopt({ readId: o.readId, entity: o.entity, selection: o.selection });
@@ -98,6 +99,19 @@ describe("private shelf store", () => {
     const read = await service.read({ bookHash: HASH });
     expect(read.book?.progress.versions.some((version) => version.value?.progressPctHint === 40)).toBe(true);
     await store.closeProgressLease(lease);
+  });
+
+  test("cancels remaining private document imports after the current file", async () => {
+    const { native, ops } = fakeNative();
+    const store = createPrivateShelfStore(native, SESSION, () => undefined);
+    const controller = new AbortController();
+    const result = await store.importDocuments(
+      [{ uri: "content://test/first" }, { uri: "content://test/second" }],
+      () => controller.abort(),
+      controller.signal,
+    );
+    expect(result.results.map(item => item.status)).toEqual(["saved", "cancelled"]);
+    expect(ops.filter(op => op.kind === "import")).toHaveLength(1);
   });
 
   test("bookmarks go through the private create route", async () => {

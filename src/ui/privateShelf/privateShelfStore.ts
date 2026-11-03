@@ -248,9 +248,13 @@ export class PrivateLocalStore implements ShelfStore {
     return { results };
   }
 
-  async importDocuments(documents: AndroidDocumentSelection[], onProgress: (completed: number, total: number) => void): Promise<AndroidImportBatchResult> {
+  async importDocuments(documents: AndroidDocumentSelection[], onProgress: (completed: number, total: number) => void, signal?: AbortSignal): Promise<AndroidImportBatchResult> {
     const results: AndroidImportItemResult[] = [];
     for (const [inputIndex, document] of documents.entries()) {
+      if (signal?.aborted) {
+        results.push({ inputIndex, status: "cancelled", contentHash: null, record: null, error: null });
+        continue;
+      }
       try {
         const { bookHash, duplicate, record } = await this.importOne({ kind: "document", uri: document.uri });
         results.push({ inputIndex, status: duplicate ? "duplicate" : "saved", contentHash: bookHash, record: record ?? null, error: null });
@@ -352,8 +356,8 @@ export class PrivateShelfStore extends PortableShelfStore {
     super(local, data);
   }
 
-  importDocuments(documents: AndroidDocumentSelection[], onProgress: (completed: number, total: number) => void): Promise<AndroidImportBatchResult> {
-    return this.local.importDocuments(documents, onProgress);
+  importDocuments(documents: AndroidDocumentSelection[], onProgress: (completed: number, total: number) => void, signal?: AbortSignal): Promise<AndroidImportBatchResult> {
+    return this.local.importDocuments(documents, onProgress, signal);
   }
 
   clear(): void {

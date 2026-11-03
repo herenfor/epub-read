@@ -41,7 +41,6 @@ export const shelfSettings = defineMessages("shelfSettings", {
   "shelfSettings.watch.disable.detail": "已导入的书仍留在书架上",
   "shelfSettings.watch.notice.other": { zh: "已从自动导入文件夹加入 {count} 本新书", note: "Shelf notice after an automatic scan added books." },
   "shelfSettings.watch.notice.one": { zh: "已从自动导入文件夹加入 {count} 本新书", note: "Singular form." },
-  "shelfSettings.watch.notice.failed": { zh: "{added}，{failed}", note: "Notice when some files also failed: {added} is the added sentence, {failed} the failed count text." },
   "shelfSettings.watch.refreshFailed": { zh: "自动导入了新书，但刷新书架失败：{error}", note: "Shelf error when re-reading the shelf after an automatic scan failed." },
   "shelfSettings.watch.notice.error": { zh: "自动导入文件夹扫描失败：{error}", note: "Shelf notice; shown once per distinct reason." },
   "shelfSettings.index.detail": "全部书籍的正文搜索依赖这份索引；重建会重新读取每本书",

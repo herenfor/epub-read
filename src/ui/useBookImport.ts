@@ -8,6 +8,7 @@ import type { RuntimeCapabilities } from "../platform/runtimeCapabilities";
 import { cancelDocumentImport, importDocuments, type AndroidDocumentSelection, type AndroidImportBatchResult, type AndroidNativeImportError } from "../platform/androidNativeBridge";
 import type { ExternalOpenSource } from "../platform/externalOpenBridge";
 import { activatePortableShelfState, getShelfStore, type ShelfEntry } from "./shelf";
+import { activeShelfSpaceToken } from "./shelfSpaces";
 import { noteCloudSyncChange } from "./cloudSync/cloudSyncStore";
 import { formatImportNotice, findDuplicateEntry, mergeShelfEntries, sha256Hex, type ImportNotice } from "./importBooks";
 import { liveFolderName, planImportIntoFolder, type ImportedBookRef } from "./importIntoFolder";
@@ -66,6 +67,7 @@ export function useBookImportState() {
     completed: number;
     total: number;
     cancelState: NativeImportCancelState;
+    canCancel?: boolean;
     collapsed: boolean;
     fileNameSummary: string;
   } | null>(null);
@@ -108,6 +110,7 @@ export function useBookImport({
   setShelfNotice: SetNotice;
   setOrganization: Dispatch<SetStateAction<LibraryOrganization>>;
 }) {
+  const scopedImportCancelRef = useRef<{ requestId: string; controller: AbortController } | null>(null);
   /**
    * Files the accepted books into the import's target folder with ONE
    * moveBooks write, and appends the outcome to the import notice. The books
@@ -127,6 +130,7 @@ export function useBookImport({
     try {
       const store = getShelfStore();
       const state = await store.getOrganization();
+      if (getShelfStore() !== store) return notice;
       const plan = planImportIntoFolder(state, target.folderId, books);
       if (plan.targetMissing) {
         setOrganization(state);
@@ -135,6 +139,7 @@ export function useBookImport({
       const next = plan.move.length > 0
         ? await store.applyOrganization({ type: "moveBooks", contentHashes: [...plan.move], folderId: target.folderId })
         : state;
+      if (getShelfStore() !== store) return notice;
       setOrganization(next);
       const name = liveFolderName(next, target.folderId) ?? target.name;
       const parts: string[] = [];
@@ -167,6 +172,7 @@ export function useBookImport({
       setShelfNotice({ kind: "warn", text: uiText("notice.import.busy") });
       return null;
     }
+    const origin = activeShelfSpaceToken();
     shelfBusyRef.current = true;
     // Do not let a fast first import land in the legacy store before the
     // portable activation effect has committed its one-time switch.
@@ -175,6 +181,10 @@ export function useBookImport({
     } catch {
       // Activation failure keeps the complete legacy mode, or blocks the shelf
       // for a database this build cannot read; its effect reports the error.
+    }
+    if (activeShelfSpaceToken() !== origin) {
+      shelfBusyRef.current = false;
+      return [];
     }
     setShelfBusyMessage(uiText("notice.import.running"));
     setShelfBusy(true);
@@ -193,6 +203,7 @@ export function useBookImport({
           throw new Error("桌面版导入必须保留用户选择的源文件路径");
         }
         const batch = await store.importPaths(paths, await copyOnImportNow());
+        if (getShelfStore() !== store) return [];
         for (const item of batch.results) {
           const source = list[item.inputIndex];
           const fileName = source?.kind === "path" ? source.name : uiText("notice.nthBook", { n: item.inputIndex + 1 });
@@ -291,6 +302,7 @@ export function useBookImport({
         setShelfEntries((previous) => mergeShelfEntries(previous, accepted));
         try {
           const entries = await store.list();
+          if (getShelfStore() !== store) return [];
           const existingIds = new Set(shelfEntriesRef.current.map((entry) => entry.id));
           const unavailable = entries.filter((entry) => existingIds.has(entry.id) && entry.available === false);
           setShelfEntries(entries);
@@ -315,6 +327,7 @@ export function useBookImport({
         refreshedCount: isTauriEnv() ? duplicateTitles.length : 0,
       });
       if (target) notice = await placeIntoFolder(target, placed, notice);
+      if (getShelfStore() !== store) return [];
       if (refreshWarning) {
         notice.text += uiText("notice.sep") + refreshWarning;
         if (notice.kind === "ok") notice.kind = "warn";
@@ -322,7 +335,9 @@ export function useBookImport({
       setShelfNotice(notice);
       return accepted;
     } catch (error) {
-      setShelfNotice({ kind: "error", text: uiText("notice.import.failed", { error: String(error) }) });
+      if (getShelfStore() === store) {
+        setShelfNotice({ kind: "error", text: uiText("notice.import.failed", { error: String(error) }) });
+      }
       return [];
     } finally {
       shelfBusyRef.current = false;
@@ -349,24 +364,32 @@ export function useBookImport({
       collapsed: false,
       fileNameSummary: documents.length === 1 ? uiText("notice.import.oneEpub") : uiPlural("notice.import.files", documents.length, { count: documents.length }),
     });
+    const store = getShelfStore();
     try {
       // A shelf with its own import route (the private shelf) never reaches the library command.
-      const store = getShelfStore();
       if (store.importDocuments) {
-        return await store.importDocuments(documents, (completed, total) => {
+        const controller = new AbortController();
+        scopedImportCancelRef.current = { requestId, controller };
+        setNativeImport((previous) => previous?.requestId === requestId
+          ? { ...previous, phase: "preparing", canCancel: documents.length > 1 } : previous);
+        const batch = await store.importDocuments(documents, (completed, total) => {
           setNativeImport((previous) => (
-            previous && previous.requestId === requestId ? { ...previous, phase: "preparing", completed, total } : previous
+            previous && previous.requestId === requestId
+              ? { ...previous, phase: "preparing", completed, total, canCancel: completed + 1 < total } : previous
           ));
-        });
+        }, controller.signal);
+        return getShelfStore() === store ? batch : null;
       }
-      return await importDocuments(requestId, documents, (progress) => {
+      const batch = await importDocuments(requestId, documents, (progress) => {
         setNativeImport((previous) => (
           previous && previous.requestId === progress.requestId
             ? { ...previous, phase: progress.phase, completed: progress.completed, total: progress.total }
             : previous
         ));
       });
+      return getShelfStore() === store ? batch : null;
     } catch (error) {
+      if (getShelfStore() !== store) return null;
       const nativeError = error as AndroidNativeImportError;
       if (nativeError.requiresReload) {
         try {
@@ -381,6 +404,7 @@ export function useBookImport({
       }
       return null;
     } finally {
+      if (scopedImportCancelRef.current?.requestId === requestId) scopedImportCancelRef.current = null;
       nativeImportRef.current = null;
       setNativeImport(null);
     }
@@ -391,6 +415,7 @@ export function useBookImport({
     documents: AndroidDocumentSelection[],
     target: ImportFolderTarget | null = null,
   ): Promise<ShelfEntry[]> => {
+    const store = getShelfStore();
     const imported: ShelfEntry[] = [];
     const accepted: ShelfEntry[] = [];
     const duplicateTitles: string[] = [];
@@ -422,8 +447,8 @@ export function useBookImport({
     }
     let entries: ShelfEntry[] = [];
     if (accepted.length > 0) {
-      const store = getShelfStore();
       entries = store.importRecords ? await store.importRecords(accepted) : accepted;
+      if (getShelfStore() !== store) return [];
       for (const entry of entries) {
         contentHashByIdRef.current.set(entry.id, entry.contentHash ?? entry.id);
         entryByContentHashRef.current.set(entry.contentHash ?? entry.id, entry);
@@ -438,6 +463,7 @@ export function useBookImport({
       refreshedCount: duplicateTitles.length,
     });
     if (target) notice = await placeIntoFolder(target, placed, notice);
+    if (getShelfStore() !== store) return [];
     if (cancelled.length > 0) {
       notice.text += uiText("notice.sep") + uiPlural("notice.import.cancelledCount", cancelled.length, { count: cancelled.length });
       if (notice.kind === "ok") notice.kind = "warn";
@@ -448,12 +474,17 @@ export function useBookImport({
 
   const handleCancelNativeImport = useCallback(async (): Promise<void> => {
     const current = nativeImport;
-    if (!current || current.phase !== "preparing" || current.cancelState !== "idle") return;
+    if (!current || current.canCancel === false || current.phase !== "preparing" || current.cancelState !== "idle") return;
     setNativeImport((previous) => (
       previous && previous.requestId === current.requestId
         ? { ...previous, cancelState: "requesting" }
         : previous
     ));
+    const scoped = scopedImportCancelRef.current;
+    if (scoped?.requestId === current.requestId) {
+      scoped.controller.abort();
+      return;
+    }
     try {
       const status = await cancelDocumentImport(current.requestId);
       setNativeImport((previous) => (
@@ -529,6 +560,7 @@ export function useBookImport({
       fileInputRef.current?.click();
       return;
     }
+    const pickerStore = getShelfStore();
     if (runtime.platform === "android") {
       if (nativeImportRef.current) {
         setShelfNotice({ kind: "warn", text: uiText("notice.import.busy") });
@@ -543,10 +575,10 @@ export function useBookImport({
         const uris = (Array.isArray(selected) ? selected : selected ? [selected] : []).filter(
           (value): value is string => typeof value === "string" && value.length > 0
         );
-        if (uris.length === 0) return;
+        if (uris.length === 0 || getShelfStore() !== pickerStore) return;
         const documents: AndroidDocumentSelection[] = uris.map((uri) => ({ uri }));
         const batch = await runNativeDocumentImport(documents);
-        if (batch) await applyNativeImportBatch(batch, documents, target);
+        if (batch && getShelfStore() === pickerStore) await applyNativeImportBatch(batch, documents, target);
       } catch (error) {
         setShelfNotice({ kind: "error", text: uiText("notice.picker.failed", { error: String(error) }) });
       }
@@ -560,7 +592,7 @@ export function useBookImport({
         filters: [{ name: uiText("notice.picker.epubFilter"), extensions: ["epub", "txt", "cbz", "zip"] }],
       });
       const paths = Array.isArray(selected) ? selected : selected ? [selected] : [];
-      if (paths.length === 0) return;
+      if (paths.length === 0 || getShelfStore() !== pickerStore) return;
       await handleImportSources(
         paths.map((path) => ({
           kind: "path" as const,

@@ -10,6 +10,7 @@ export interface NativeImportPanelProps {
   total: number;
   fileNameSummary: string;
   cancelState: NativeImportCancelState;
+  canCancel?: boolean;
   collapsed: boolean;
   onToggleCollapsed(): void;
   onCancel(): void;
@@ -24,7 +25,7 @@ function phaseText(phase: NativeImportPanelProps["phase"], completed: number, to
 export function NativeImportPanel(props: NativeImportPanelProps) {
   const { t } = useUiText();
   const status = phaseText(props.phase, props.completed, props.total);
-  const cancelDisabled = props.phase !== "preparing" || props.cancelState !== "idle";
+  const cancelDisabled = props.canCancel === false || props.phase !== "preparing" || props.cancelState !== "idle";
 
   if (props.collapsed) {
     return (

@@ -70,8 +70,10 @@ export function useShelfSpaces(deps: {
     switchingRef.current = true;
     try {
       if (depsRef.current.viewRef.current === "reader" && !(await depsRef.current.leaveReader(revoked))) return;
-      await leaveShelfSpace();
+      const closing = leaveShelfSpace();
       depsRef.current.resetShelfView("library");
+      depsRef.current.setShelfNotice(null);
+      await closing;
       refresh();
       if (revoked) depsRef.current.setShelfNotice({ kind: "warn", text: uiText("shelfMain.private.closed") });
     } finally {
@@ -96,13 +98,16 @@ export function useShelfSpaces(deps: {
       },
     });
     depsRef.current.resetShelfView("private");
+    depsRef.current.setShelfNotice(null);
     refresh();
   }, [leave, refresh]);
 
   const select = useCallback(async (kind: ShelfSpaceKind) => {
     if (kind === "library") { await leave(); return; }
+    if (switchingRef.current) return;
     try {
       const status = await privateShelfNative.status();
+      if (switchingRef.current || activeShelfSpaceToken() !== null) return;
       setPrivateConfigured(status !== "unconfigured");
       setDialog({ mode: status === "unconfigured" ? "setup" : "unlock" });
     } catch (error) {

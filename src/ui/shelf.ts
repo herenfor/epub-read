@@ -190,7 +190,7 @@ export interface ShelfStore {
    * Android document import into this store instead of the native library
    * command; the hook then publishes the records through importRecords.
    */
-  importDocuments?(documents: AndroidDocumentSelection[], onProgress: (completed: number, total: number) => void): Promise<AndroidImportBatchResult>;
+  importDocuments?(documents: AndroidDocumentSelection[], onProgress: (completed: number, total: number) => void, signal?: AbortSignal): Promise<AndroidImportBatchResult>;
   readCover(id: string): Promise<Uint8Array | null>;
   /** 只为旧条目补录内容指纹，不得改动阅读进度或其他元数据。 */
   setContentHash(id: string, contentHash: string): Promise<ShelfEntry>;

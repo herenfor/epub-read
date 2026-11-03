@@ -166,11 +166,12 @@ export function useFolderWatchTriggers(active: boolean, onOutcome: FolderWatchLi
     const android = getRuntimeCapabilities().platform === "android";
     // Android waits for the Activity's own answer; desktop windows only have page visibility.
     let foreground = !android;
-    controller.setGate(() => foreground && !document.hidden);
+    controller.setGate(() => foreground && !document.hidden && (android || document.hasFocus()));
     const kick = () => controller.trigger();
     void controller.ensure().then(kick);
     const onVisibility = () => { if (!document.hidden) kick(); };
-    document.addEventListener("visibilitychange", onVisibility);
+    if (android) document.addEventListener("visibilitychange", onVisibility);
+    else window.addEventListener("focus", kick);
     const unwatch = android ? watchAndroidForeground((next) => {
       const returned = next && !foreground;
       foreground = next;
@@ -179,7 +180,8 @@ export function useFolderWatchTriggers(active: boolean, onOutcome: FolderWatchLi
     const timer = window.setInterval(kick, FOLDER_WATCH_INTERVAL_MS);
     return () => {
       controller.setGate(() => false);
-      document.removeEventListener("visibilitychange", onVisibility);
+      if (android) document.removeEventListener("visibilitychange", onVisibility);
+      else window.removeEventListener("focus", kick);
       unwatch?.();
       window.clearInterval(timer);
     };

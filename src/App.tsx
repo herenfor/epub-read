@@ -1959,6 +1959,7 @@ export default function App() {
     view === "shelf" && libraryLoad.status === "ready" && !shelfBusy && nativeImport === null && !folderImport && !saveFailurePrompt
       && activeShelfSpace().policy.libraryServices,
     (outcome, manual) => {
+      if (!activeShelfSpace().policy.libraryServices) return;
       if (outcome.kind === "error") {
         // The settings show the reason; the shelf says it once per reason.
         if (manual || lastFolderWatchErrorRef.current === outcome.message) return;
@@ -1967,16 +1968,24 @@ export default function App() {
         return;
       }
       if (outcome.kind !== "result") return;
-      lastFolderWatchErrorRef.current = null;
       const { imported, failed } = outcome.result.counts;
-      if (imported === 0) return;
-      void refreshShelfProjection().catch((error: unknown) => {
-        setShelfError(uiText("shelfSettings.watch.refreshFailed", { error: error instanceof Error ? error.message : String(error) }));
-      });
-      const added = uiPlural("shelfSettings.watch.notice", imported, { count: imported });
-      setShelfNotice(failed > 0
-        ? { kind: "warn", text: uiText("shelfSettings.watch.notice.failed", { added, failed: uiPlural("shelfSettings.watch.failed", failed, { count: failed }) }) }
-        : { kind: "ok", text: added });
+      const { unreadableDirectories } = outcome.result;
+      const issueKey = failed || unreadableDirectories ? `result:${failed}:${unreadableDirectories}` : null;
+      const repeated = issueKey === lastFolderWatchErrorRef.current;
+      lastFolderWatchErrorRef.current = issueKey;
+      if (imported > 0) {
+        void refreshShelfProjection().catch((error: unknown) => {
+          setShelfError(uiText("shelfSettings.watch.refreshFailed", { error: error instanceof Error ? error.message : String(error) }));
+        });
+      } else if (manual || !issueKey || repeated) {
+        return;
+      }
+      const details = [
+        imported > 0 && uiPlural("shelfSettings.watch.notice", imported, { count: imported }),
+        failed > 0 && uiPlural("shelfSettings.watch.failed", failed, { count: failed }),
+        unreadableDirectories > 0 && uiPlural("shelfSettings.watch.unreadable", unreadableDirectories, { count: unreadableDirectories }),
+      ].filter(Boolean);
+      setShelfNotice({ kind: issueKey ? "warn" : "ok", text: details.join(uiText("notice.sep")) });
     },
   );
 
@@ -6506,6 +6515,7 @@ export default function App() {
           total={nativeImport.total}
           fileNameSummary={nativeImport.fileNameSummary}
           cancelState={nativeImport.cancelState}
+          canCancel={nativeImport.canCancel}
           collapsed={nativeImport.collapsed}
           onToggleCollapsed={handleToggleNativeImportCollapsed}
           onCancel={() => void handleCancelNativeImport()}
