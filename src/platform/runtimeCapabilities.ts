@@ -26,6 +26,8 @@ export interface RuntimeCapabilities {
   supportsRevealSource: boolean;
   /** A34 book library folder (copy on import, location): native Windows only. */
   supportsLibraryFolder: boolean;
+  /** ER-0042 automatic import folder: native Windows and Android. */
+  supportsFolderWatch: boolean;
 }
 
 export function getRuntimeCapabilities(): RuntimeCapabilities {
@@ -47,5 +49,6 @@ export function getRuntimeCapabilities(): RuntimeCapabilities {
     supportsCloudSync: session?.source === "desktop" && (platform === "windows" || platform === "android"),
     supportsRevealSource: session?.source === "desktop" && platform === "windows",
     supportsLibraryFolder: session?.source === "desktop" && platform === "windows",
+    supportsFolderWatch: session?.source === "desktop" && (platform === "windows" || platform === "android"),
   };
 }
