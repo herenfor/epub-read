@@ -145,7 +145,7 @@ export class ResourceServer {
   }
 
   /** One user-requested media entry, pinned until its decoder is detached. */
-  async acquireResource(path: string): Promise<{ url: string; release(): void }> {
+  async acquireResource(path: string, signal?: AbortSignal): Promise<{ url: string; release(): void }> {
     const book = this.book;
     if (!book) throw new ArchiveClosedError();
     if (!book.resources.has(path)) {
@@ -156,7 +156,8 @@ export class ResourceServer {
     this.heldDependencies.set(holderId, []);
     this.pinPaths(holderId, [path]);
     try {
-      await this.ensureResources([path]);
+      await this.ensureResources([path], signal);
+      signal?.throwIfAborted();
       if (this.book !== book) throw new ArchiveClosedError();
       const url = this.urlFor(path);
       if (!url) throw new Error("书内资源读取未完成");
@@ -259,13 +260,14 @@ export class ResourceServer {
   }
 
   /** 按需确保指定资源已解压加载。会话关闭后以统一关闭错误结束。 */
-  async ensureResources(paths: Iterable<string>): Promise<void> {
+  async ensureResources(paths: Iterable<string>, signal?: AbortSignal): Promise<void> {
     const book = this.book;
     if (!book) throw new ArchiveClosedError();
     const wanted = [...new Set(paths)];
     if (wanted.length === 0) return;
     try {
-      await book.ensureResources?.(wanted);
+      signal?.throwIfAborted();
+      await book.ensureResources?.(wanted, signal);
     } catch (error) {
       // Closing/cancelling a session is not a resource failure in the next book.
       if (this.book === book && !(error instanceof ArchiveClosedError) &&
@@ -442,8 +444,7 @@ export class ResourceServer {
     if (!this.book || this.mediaCacheMaxBytes <= 0) return;
     if (this.mediaBytes <= this.mediaCacheMaxBytes) return;
     const candidates: string[] = [];
-    for (const [path, res] of this.book.resources) {
-      if (!isLoadedResource(res) || !this.countedMediaPaths.has(path)) continue;
+    for (const path of this.countedMediaPaths) {
       if (protectedPaths.has(path)) continue;
       const set = this.holders.get(path);
       if (set && set.size > 0) continue;

@@ -36,6 +36,46 @@ describe("native Android archive client", () => {
     expect(invoke).toHaveBeenCalledWith("linked_library_archive_close", { sessionId: "session-1" });
   });
 
+  it("abandons stale reads at a chunk boundary without closing the session", async () => {
+    const active = new AbortController();
+    const queued = new AbortController();
+    const invoke = vi.fn(async (command: string, args: Record<string, unknown>) => {
+      switch (command) {
+        case "linked_library_archive_open":
+          return { protocolVersion: 1, sessionId: "session-3", entryCount: 3, chunkBytes: CHUNK };
+        case "linked_library_archive_directory":
+          return {
+            entries: ["old", "queued", "visible"].map((name, entryIndex) => ({
+              entryIndex, name, compressedBytes: CHUNK + 1, expandedBytes: CHUNK + 1,
+            })),
+            next: null,
+          };
+        case "linked_library_archive_read":
+          if (args.entryIndex === 0) {
+            active.abort();
+            queued.abort();
+          }
+          return new ArrayBuffer(args.offset === 0 ? CHUNK : 1);
+        default:
+          throw new Error(`unexpected command ${command}`);
+      }
+    });
+    const archive = await createNativeArchiveClient(HASH, invoke as unknown as ArchiveInvoke);
+    const results = await Promise.allSettled([
+      archive.extract(["old"], active.signal),
+      archive.extract(["queued"], queued.signal),
+      archive.extract(["visible"]),
+    ]);
+    expect(results.slice(0, 2)).toMatchObject([
+      { status: "rejected", reason: { name: "AbortError" } },
+      { status: "rejected", reason: { name: "AbortError" } },
+    ]);
+    expect(results[2]).toMatchObject({ status: "fulfilled" });
+    expect(invoke.mock.calls.filter(([command]) => command === "linked_library_archive_read")
+      .map(([, args]) => [args.entryIndex, args.offset])).toEqual([[0, 0], [2, 0], [2, CHUNK]]);
+    expect(invoke.mock.calls.some(([command]) => command === "linked_library_archive_close")).toBe(false);
+  });
+
   it("rejects when the directory cursor does not match", async () => {
     const invoke = vi.fn(async (command: string) => {
       if (command === "linked_library_archive_open") {

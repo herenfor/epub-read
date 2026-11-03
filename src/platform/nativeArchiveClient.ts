@@ -12,6 +12,8 @@ interface OpenInfo {
   sessionId: string;
   entryCount: number;
   chunkBytes: number;
+  verifyMs?: number;
+  directoryMs?: number;
 }
 
 interface NativeEntry extends ArchiveEntry {
@@ -21,6 +23,14 @@ interface NativeEntry extends ArchiveEntry {
 interface DirectoryPage {
   entries: NativeEntry[];
   next: number | null;
+}
+
+class EntryReadAborted extends Error {
+  override name = "AbortError";
+}
+
+function checkEntryRead(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new EntryReadAborted("归档条目读取已取消");
 }
 
 const CHUNK_BYTES = 512 * 1024;
@@ -48,6 +58,7 @@ export async function createNativeArchiveClient(
 
 class NativeArchiveClient implements ArchiveClient {
   readonly directory = new Map<string, NativeEntry>();
+  openTimings?: ArchiveClient["openTimings"];
 
   private closed = false;
   private tail: Promise<void> = Promise.resolve();
@@ -74,6 +85,7 @@ class NativeArchiveClient implements ArchiveClient {
   }
 
   async initialize(): Promise<void> {
+    const started = performance.now();
     let start = 0;
     do {
       this.requireOpen();
@@ -95,6 +107,10 @@ class NativeArchiveClient implements ArchiveClient {
       const end = start + page.entries.length;
       if (page.next === null) {
         if (end !== this.info.entryCount) throw new Error("归档目录不完整");
+        const { verifyMs, directoryMs } = this.info;
+        if (verifyMs !== undefined && directoryMs !== undefined) {
+          this.openTimings = { verifyMs, directoryMs, directoryTransferMs: performance.now() - started };
+        }
         return;
       }
       if (page.next !== end || end <= start || end >= this.info.entryCount) {
@@ -104,11 +120,12 @@ class NativeArchiveClient implements ArchiveClient {
     } while (true);
   }
 
-  private readEntry(path: string): Promise<Uint8Array> {
+  private readEntry(path: string, signal?: AbortSignal): Promise<Uint8Array> {
     // Queue one entry, not an entire preload batch. Another request can run at
     // the resource boundary without interleaving two deflate cursors.
     const task = this.tail.then(async () => {
       this.requireOpen();
+      checkEntryRead(signal);
       const entry = this.directory.get(path);
       if (!entry) throw new Error("EPUB 资源不存在");
       // One destination per entry. No chunk array, concat or repeated copies.
@@ -125,6 +142,7 @@ class NativeArchiveClient implements ArchiveClient {
         const chunk = new Uint8Array(buffer);
         const expected = Math.min(CHUNK_BYTES, entry.expandedBytes - offset);
         if (chunk.byteLength !== expected) throw new Error("归档资源分块长度错误");
+        checkEntryRead(signal);
         bytes.set(chunk, offset);
         offset += chunk.byteLength;
         // Even an empty entry requires one native read for EOF/CRC validation.
@@ -132,7 +150,7 @@ class NativeArchiveClient implements ArchiveClient {
       return bytes;
     });
     const checked = task.catch((error: unknown) => {
-      this.close();
+      if (!(error instanceof EntryReadAborted)) this.close();
       throw error;
     });
     this.tail = checked.then(() => undefined, () => undefined);
@@ -140,10 +158,10 @@ class NativeArchiveClient implements ArchiveClient {
     return Promise.race([checked, this.shutdown]);
   }
 
-  async extract(paths: readonly string[]): Promise<Map<string, Uint8Array>> {
+  async extract(paths: readonly string[], signal?: AbortSignal): Promise<Map<string, Uint8Array>> {
     this.requireOpen();
     const result = new Map<string, Uint8Array>();
-    for (const path of new Set(paths)) result.set(path, await this.readEntry(path));
+    for (const path of new Set(paths)) result.set(path, await this.readEntry(path, signal));
     this.requireOpen();
     return result;
   }

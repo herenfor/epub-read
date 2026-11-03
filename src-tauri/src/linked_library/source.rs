@@ -92,13 +92,9 @@ pub(super) fn prepare_source_read(
     bindings: &[DeviceBinding],
     content_hash: &str,
 ) -> Result<PendingSourceRead, LinkedLibraryError> {
-    let found = records
-        .iter()
-        .any(|record| record.content_hash == content_hash);
-    observe_record_target(found);
-    if !found {
-        return Err("书库中没有这本书".into());
-    }
+    let record = records.iter().find(|record| record.content_hash == content_hash);
+    observe_record_target(record.is_some());
+    let record = record.ok_or("书库中没有这本书")?;
     let binding = bindings
         .iter()
         .find(|binding| binding.content_hash == content_hash)
@@ -106,6 +102,8 @@ pub(super) fn prepare_source_read(
     let identity = SourceIdentity::from_binding(binding, library_root)?;
     let file = File::open(&identity.path).map_err(source_open_error)?;
     Ok(PendingSourceRead {
+        file_name: record.file_name.clone(),
+        title: record.title.clone(),
         identity,
         old_snapshot: FileSnapshot {
             size: binding.file_size,

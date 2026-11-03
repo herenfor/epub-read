@@ -79,24 +79,35 @@ function installArchiveResources(book: Book, archive: ArchiveClient): void {
     book.archive = { close() { if (closed)
             return; closed = true; archive.close(); } };
     const pending = new Map<string, Promise<void>>();
-    book.ensureResources = async (paths) => {
+    book.ensureResources = async (paths, signal) => {
         for (const path of new Set(paths)) {
-            if (closed)
-                throw new Error("阅读资源已关闭");
+            signal?.throwIfAborted();
+            if (closed) throw new Error("阅读资源已关闭");
             const res = book.resources.get(path);
-            if (!res || res.loaded !== false)
+            if (!res || res.loaded !== false) continue;
+            const read = async () => {
+                const files = await archive.extract([path], signal);
+                signal?.throwIfAborted();
+                if (closed) return;
+                const bytes = files.get(path);
+                if (!bytes) throw new Error("阅读资源缺失");
+                res.data = bytes;
+                res.loaded = true;
+            };
+            // A cancellable caller owns its read. Cancelling it must not reject
+            // a separate consumer waiting for this entry.
+            if (signal) {
+                await read();
                 continue;
+            }
             let task = pending.get(path);
             if (!task) {
-                task = archive.extract([path]).then(files => { if (closed)
-                    return; const bytes = files.get(path); if (!bytes)
-                    throw new Error("阅读资源缺失"); res.data = bytes; res.loaded = true; }).finally(() => pending.delete(path));
+                task = read().finally(() => pending.delete(path));
                 pending.set(path, task);
             }
             await task;
         }
-        if (closed)
-            throw new Error("阅读资源已关闭");
+        if (closed) throw new Error("阅读资源已关闭");
     };
     book.readResource = async (path) => { await book.ensureResources!([path]); return book.resources.get(path)?.data; };
 }

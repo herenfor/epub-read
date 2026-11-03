@@ -200,7 +200,7 @@ pub(crate) async fn reader_tools_archive_open(
     tauri::async_runtime::spawn_blocking(move || {
         host.source_operation(&session_id, || {
             let info =
-                crate::linked_library::open_tool_archive(app.clone(), "main".into(), content_hash)
+                crate::linked_library::open_tool_archive(app.clone(), "main".into(), content_hash, None)
                     .map_err(|_| "原书当前不可读取，请检查来源".to_string())?;
             if !host.own_archive(&session_id, info.session_id.clone()) {
                 crate::linked_library::close_tool_archives(&app, vec![info.session_id]);

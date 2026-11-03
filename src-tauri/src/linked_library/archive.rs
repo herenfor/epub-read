@@ -46,11 +46,15 @@ pub(crate) fn archive_open_blocking(
 
     let (root, pending) = prepare_library_source_read(&app, &content_hash)?;
     let PendingSourceRead {
+        file_name,
+        title,
         identity,
         old_snapshot,
         mut file,
     } = pending;
+    let verify_started = std::time::Instant::now();
     let (actual_hash, verified_snapshot) = hash_opened_file(&file)?;
+    let verify_ms = verify_started.elapsed().as_millis() as u64;
     if !actual_hash.eq_ignore_ascii_case(&content_hash) {
         return Err(LinkedLibraryError::changed("源 EPUB 在打开期间发生了变化；未将旧进度应用到新内容"));
     }
@@ -69,14 +73,14 @@ pub(crate) fn archive_open_blocking(
         }
     };
 
-    let (file_name,title) = load_records(&app)?.iter().find(|r| r.content_hash == content_hash)
-        .map(|r| (r.file_name.clone(),r.title.clone())).ok_or("书架中没有这本书")?;
     if crate::document_formats::text(&file_name) {
         guard().map_err(archive_fault_error)?;
         file = crate::document_formats::text_archive(file, text_encoding.as_deref(), &title)?;
         guard().map_err(archive_fault_error)?;
     }
+    let directory_started = std::time::Instant::now();
     let session = NativeZipSession::from_verified_file(file, guard).map_err(archive_fault_error)?;
+    let directory_ms = directory_started.elapsed().as_millis() as u64;
     let entry_count = session.entry_count;
     finalize_library_source_read(&app, &root, &identity, &old_snapshot, &verified_snapshot)?;
 
@@ -105,6 +109,8 @@ pub(crate) fn archive_open_blocking(
         session_id,
         entry_count,
         chunk_bytes: CHUNK_BYTES,
+        verify_ms,
+        directory_ms,
     })
 }
 

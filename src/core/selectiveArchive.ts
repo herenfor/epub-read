@@ -87,8 +87,9 @@ export function takeArchiveBatch(
 }
 
 export interface ArchiveClient {
+  readonly openTimings?: { verifyMs: number; directoryMs: number; directoryTransferMs: number };
   readonly directory: ReadonlyMap<string, ArchiveEntry>;
-  extract(paths: readonly string[]): Promise<Map<string, Uint8Array>>;
+  extract(paths: readonly string[], signal?: AbortSignal): Promise<Map<string, Uint8Array>>;
   close(): void;
 }
 
