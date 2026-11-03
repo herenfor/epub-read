@@ -886,14 +886,19 @@ pub(super) fn delete_records(app: &AppHandle, content_hashes: Vec<String>) -> Re
         .lock()
         .map_err(|_| "链接书库写入锁已损坏".to_string())?;
     ensure_import_idle(app)?;
-    if portable_store_active(app)? {
-        return delete_records_portable(app, &content_hashes);
-    }
     let root = library_root(app)?;
-    delete_records_at(&root, &content_hashes, |target_hashes| {
-        app.state::<AiState>()
-            .cleanup_books_if_present(app, target_hashes)
-    })
+    if portable_store_active(app)? {
+        delete_records_portable(app, &content_hashes)?;
+    } else {
+        delete_records_at(&root, &content_hashes, |target_hashes| {
+            app.state::<AiState>()
+                .cleanup_books_if_present(app, target_hashes)
+        })?;
+    }
+    for hash in &content_hashes {
+        let _ = fs::remove_file(super::archive_stamp::receipt_path(&root, hash));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

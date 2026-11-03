@@ -409,6 +409,8 @@ pub(super) fn publish_prepared_documents(
                 )))
             }
         };
+        #[cfg(target_os = "android")]
+        remember_imported_archive(root, &target, &document.content_hash, &document.file_name);
         upsert_binding(
             bindings,
             make_managed_binding(

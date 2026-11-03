@@ -14,7 +14,7 @@ use zip::ZipArchive;
 
 pub const CHUNK_BYTES: usize = 512 * 1024;
 pub const DIRECTORY_PAGE_BYTES: usize = 64 * 1024;
-const DIRECTORY_PAGE_ENTRIES: usize = 128;
+const DIRECTORY_PAGE_ENTRIES: usize = 512;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Fault {

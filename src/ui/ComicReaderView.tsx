@@ -19,6 +19,8 @@ import { watchAndroidForeground } from "../platform/androidAppTask";
 import "./comicReader.css";
 
 const CHAPTER = "__reader__/comic.xhtml";
+const PAGED_WINDOW_SCREENS = 24;
+const PAGED_EDGE_SCREENS = 5;
 const STRIP_WINDOW_PAGES = 96;
 const STRIP_EDGE_PAGES = 12;
 
@@ -96,6 +98,15 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
     groups.forEach((group, i) => group.forEach(p => { indexes[p] = i; }));
     return indexes;
   }, [groups]);
+  const screenWindowStart = (screen: number) => Math.max(0, Math.min(screen - Math.floor(PAGED_WINDOW_SCREENS / 2), groups.length - PAGED_WINDOW_SCREENS));
+  const [screenStart, setScreenStart] = useState(() => screenWindowStart(groupForPage[page]));
+  const screenEnd = Math.min(groups.length, screenStart + PAGED_WINDOW_SCREENS);
+  const screenShift = useRef<{ start: number; screen: number } | null>(null);
+  const screenChild = (screen: number) => {
+    const el = track.current;
+    const first = (el?.firstElementChild as HTMLElement | null)?.dataset.comicScreen;
+    return first === undefined ? undefined : el?.children[screen - Number(first)] as HTMLElement | undefined;
+  };
   const rtl = effectivePageProgression(props.book.pageProgression, props.settings, true) === "rtl";
   const paper = resolveReaderPalette(props.settings.theme);
   const visible = () => scroll ? [position.current.page] : groups[groupForPage[position.current.page]];
@@ -111,7 +122,7 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
     const shown = visible();
     const failed = shown.map(i => errors.current.get(i)).find(Boolean);
     if (failed) return { status: "error", message: failed };
-    if ((scroll && !stripChild(position.current.page)) || shown.some(i => !urls[i] || !decoded.current.has(i))) return { status: "loading" };
+    if ((scroll ? !stripChild(position.current.page) : !screenChild(groupForPage[position.current.page])) || shown.some(i => !urls[i] || !decoded.current.has(i))) return { status: "loading" };
     return {
       status: "ready", empty: false, mode: scroll ? "scroll" : "paginated", effectiveColumns: columns,
       pageCount: scroll ? pages.length : groups.length,
@@ -170,7 +181,12 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
       }
       el.scrollTo({ top: child.offsetTop + p.ratio * Math.max(0, child.offsetHeight - el.clientHeight), behavior });
     } else {
-      el.scrollTo({ left: (rtl ? -1 : 1) * groupForPage[p.page] * pitch(), behavior });
+      const screen = groupForPage[p.page];
+      if (!screenChild(screen)) {
+        setScreenStart(screenWindowStart(screen));
+        return false;
+      }
+      el.scrollTo({ left: (rtl ? -1 : 1) * (screen - screenStart) * pitch(), behavior });
     }
     return true;
   };
@@ -183,7 +199,7 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
   const beginZoom = (): boolean => {
     if (zoom.current) return true;
     if (scroll || latest.current.inputPaused || motion.current) return false;
-    const el = track.current?.children[groupForPage[position.current.page]] as HTMLElement | undefined;
+    const el = screenChild(groupForPage[position.current.page]);
     if (!el) return false;
     zoom.current = { el, box: el.getBoundingClientRect(), view: COMIC_ZOOM_NONE };
     setZoomed(true);
@@ -237,7 +253,9 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
   const locate = (p: number, ratio = 0, behavior: ScrollBehavior = "auto") => {
     endZoom();
     stripShift.current = null;
+    screenShift.current = null;
     p = Math.max(0, Math.min(pages.length - 1, p));
+    if (!scroll && !screenChild(groupForPage[p])) behavior = "auto";
     goal.current = p;
     setWarmPage(p);
     command.current = behavior === "smooth";
@@ -257,16 +275,17 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
     if (latest.current.inputPaused) return;
     endZoom();
     userMoved.current = true;
-    alignment.current = null;
     fade.current?.cancel();
     if (scroll) {
+      alignment.current = null;
       track.current?.scrollBy({ top: direction * track.current.clientHeight * .9, behavior: "smooth" });
       return;
     }
-    const visual = Math.abs(track.current?.scrollLeft ?? 0) / Math.max(1, pitch());
+    const visual = alignment.current ? groupForPage[goal.current] : screenStart + Math.abs(track.current?.scrollLeft ?? 0) / Math.max(1, pitch());
     const target = comicTurnTarget(visual, groupForPage[goal.current], direction, lastDirection.current);
     const next = groups[target];
     if (!next) return;
+    alignment.current = null;
     lastDirection.current = direction;
     const animation = latest.current.settings.turnAnimation;
     if (animation === "fade") fade.current = track.current?.animate([{ opacity: .45 }, { opacity: 1 }], { duration: 160, easing: "ease-out" }) ?? null;
@@ -302,8 +321,10 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
       position.current = { page: p, ratio: Math.max(0, Math.min(1, (el.scrollTop - child.offsetTop) / Math.max(1, child.offsetHeight - el.clientHeight))) };
       setWarmPage(p);
     } else {
-      const distance = Math.abs(el.scrollLeft), step = Math.max(1, pitch());
-      const screen = Math.max(0, Math.min(groups.length - 1, Math.round(distance / step)));
+      if (screenShift.current) return;
+      const step = Math.max(1, pitch());
+      const distance = screenStart * step + Math.abs(el.scrollLeft);
+      const screen = Math.max(screenStart, Math.min(screenEnd - 1, Math.round(distance / step)));
       // Native gestures can expose the next spread before it becomes the current page.
       const otherScreen = distance < screen * step ? screen - 1 : screen + 1;
       setIntersectingScreen(Math.abs(distance - screen * step) > .75 && groups[otherScreen] ? otherScreen : null);
@@ -312,9 +333,22 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
       motion.current = Math.abs(distance - screen * step) > .75 || command.current;
       setMoving(motion.current);
       const shown = groups[screen];
-      if (zoom.current && zoom.current.el !== el.children[screen]) endZoom();
+      if (zoom.current && zoom.current.el !== screenChild(screen)) endZoom();
       if (!shown.includes(position.current.page)) position.current = { page: shown[0], ratio: 0 };
-      if (!motion.current) { goal.current = position.current.page; setWarmPage(position.current.page); lastDirection.current = null; }
+      if (!motion.current) {
+        goal.current = position.current.page;
+        setWarmPage(position.current.page);
+        lastDirection.current = null;
+        if (!pointer.current && !zoom.current &&
+            ((screenStart > 0 && screen - screenStart < PAGED_EDGE_SCREENS) ||
+             (screenEnd < groups.length && screenEnd - screen <= PAGED_EDGE_SCREENS))) {
+          const start = screenWindowStart(screen);
+          if (start !== screenStart) {
+            screenShift.current = { start, screen };
+            setScreenStart(start);
+          }
+        }
+      }
     }
     setPage(position.current.page);
     report();
@@ -331,6 +365,7 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
   }, []);
   useLayoutEffect(() => {
     endZoom();
+    screenShift.current = null;
     setIntersectingScreen(null);
     if (!scroll && stripZoom.current !== 1) {
       stripZoom.current = 1; stripGesture.current = null;
@@ -348,10 +383,15 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
       const child = stripChild(shift.page);
       if (child) el.scrollTop = child.offsetTop + shift.offset;
     }
+    const horizontalShift = screenShift.current;
+    if (!scroll && el && horizontalShift?.start === screenStart) {
+      screenShift.current = null;
+      el.scrollTo({ left: (rtl ? -1 : 1) * (horizontalShift.screen - screenStart) * pitch(), behavior: "instant" });
+    }
     if (alignment.current && align(alignment.current) && visible().every(i => decoded.current.has(i))) {
       alignment.current = null;
     }
-  }, [revision, urls, stripStart]);
+  }, [revision, urls, stripStart, screenStart]);
   useEffect(() => {
     const server = props.server;
     const session = getAppBuildSession();
@@ -662,8 +702,9 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
     }} onError={() => { errors.current.set(i, uiText("readerMisc.comic.decodeFailed")); redraw(n => n + 1); }}/> : <div className="comic-placeholder"/>}
   </div>, [pages, scroll, urls]);
   const strip = useMemo(() => scroll ? pages.slice(firstStripPage, stripEnd).map((_, i) => image(firstStripPage + i))
-    : groups.map((group, i) => <div className="comic-screen" key={i}>{group.map(image)}</div>),
-  [scroll, pages, groups, image, revision, firstStripPage, stripEnd]);
+    : groups.slice(screenStart, screenEnd).map((group, i) => (
+      <div className="comic-screen" key={screenStart + i} data-comic-screen={screenStart + i}>{group.map(image)}</div>
+    )), [scroll, pages, groups, image, revision, firstStripPage, stripEnd, screenStart, screenEnd]);
   return <div ref={root} className={`comic-reader${scroll ? " is-scroll" : ""}`} style={{ backgroundColor: paper.background, color: paper.foreground }}>
     <div className={`comic-track${zoomed ? " is-zoomed" : ""}`} ref={track} dir={!scroll && rtl ? "rtl" : "ltr"} style={props.inputPaused ? { touchAction: "none" } : undefined}
       onScroll={() => { if (frame.current === null) frame.current = requestAnimationFrame(() => actions.current.sample()); }}
