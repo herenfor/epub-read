@@ -194,7 +194,32 @@ export async function loadComicArchive(archive: ArchiveClient, title: string): P
         throw error;
     }
 }
-function heading(s: string): boolean { return /^(?:第[^\n]{1,20}[章节回卷部][^\n]{0,60}|chapter\s+[\divxlc]+.*|序章|序言|前言|楔子|尾声|尾聲|后记|後記|终章|終章|prologue|epilogue)$/i.test(s.trim()); }
+// Keep these title rules in sync with the native TXT generator.
+const textNumber = "[0-9０-９〇零一二三四五六七八九十百千万萬两兩壹贰貳叁參肆伍陆陸柒捌玖拾佰仟]";
+const chineseChapter = new RegExp(`^第\\s*${textNumber}+\\s*[章节節回卷部話话]`);
+const extraChapter = new RegExp(`^番外(?:篇)?(?:[\\s:：.．、—-]|${textNumber})`);
+
+function textHeading(line: string): string | undefined {
+    const label = line.trim();
+    if (Array.from(label).length > 80) return;
+    if (/^(?:序章|序言|前言|楔子|尾声|尾聲|后记|後記|终章|終章|番外|番外篇|附录|附錄|prologue|epilogue)$/i.test(label)
+        || chineseChapter.test(label) || extraChapter.test(label)
+        || /^chapter\s+(?:[0-9]+|[ivxlcdm]+)(?:$|[\s:：.．、—-])/i.test(label)) return label;
+}
+
+/** A split title stays anchored at its original start in the previous part. */
+function splitTextHeading(text: string, next: string): string | undefined {
+    // UTF-16 precheck avoids walking a large paragraph just to reject it.
+    if (text.length > 240) return;
+    let joined = text;
+    let count = Array.from(text).length;
+    for (const ch of next) {
+        if (ch === "\n") break;
+        if (++count > 120) return;
+        joined += ch;
+    }
+    return count <= 120 ? textHeading(joined) : undefined;
+}
 /** Browser fallback. Native apps perform this decoding in Rust with a bounded stream. */
 export async function loadTextBytes(bytes: Uint8Array, title: string, requested?: string): Promise<Book> {
     let encoding = requested && requested !== "auto" ? requested : undefined;
@@ -215,16 +240,35 @@ export async function loadTextBytes(bytes: Uint8Array, title: string, requested?
     }
     const decoder = new TextDecoder(encoding), files = new Map<string, Uint8Array>(), parts: TextPart[] = [];
     let part = "", count = 0, start = 0, cr = false;
-    const flush = () => {
-        const path = `__reader__/txt/${decoder.encoding}/s${start}.xhtml`, headings: NonNullable<TextPart['headings']> = [];
+    let pending: string | undefined;
+    let continuation = false;
+    const flush = (content: string, chars: number, next?: string) => {
+        const path = `__reader__/txt/${decoder.encoding}/s${start}.xhtml`;
+        const headings: NonNullable<TextPart["headings"]> = [];
         let offset = 0;
-        const html = part.split(/(?<=\n)/).map(line => { const match = heading(line); if (match)
-            headings.push({ label: line.trim(), offset }); const value = line.replace(/\n$/, ""); const content = value.trim() ? escape(value) : "<br/>"; const text = match ? `<p id="t${offset}">${content}</p>` : `<p>${content}</p>`; offset += Array.from(line).length; return text; }).join("");
-        files.set(path, encode.encode(`<html xmlns="http://www.w3.org/1999/xhtml"><head><meta charset="utf-8"/><style>p{margin:0;text-align:justify;white-space:pre-wrap;overflow-wrap:anywhere;break-inside:auto}</style></head><body>${html}</body></html>`));
-        parts.push({ path, start, chars: count, headings });
-        start += count;
-        part = "";
-        count = 0;
+        let hasText = false;
+        const html = content.split(/(?<=\n)/).map(line => {
+            const value = line.replace(/\n$/, "");
+            const startsLine = offset !== 0 || !continuation;
+            const label = !startsLine ? undefined : line.endsWith("\n") || next === undefined
+                ? textHeading(value) : splitTextHeading(value, next);
+            const blank = !value.trim();
+            const body = blank ? "<br/>" : escape(value);
+            let attributes = "";
+            if (label) {
+                headings.push({ label, offset });
+                attributes = ` id="t${offset}"` + (hasText ? ' data-txt-chapter-break="true"' : "");
+            } else if (startsLine && !blank && !/^[ \t\u3000\u00a0]/.test(value)) {
+                attributes = ' data-txt-indent="true"';
+            }
+            hasText ||= !blank;
+            offset += Array.from(line).length;
+            return `<p${attributes}>${body}</p>`;
+        }).join("");
+        files.set(path, encode.encode(`<html xmlns="http://www.w3.org/1999/xhtml"><head><meta charset="utf-8"/><style>p{margin:0;text-align:justify;white-space:pre-wrap;overflow-wrap:anywhere;break-inside:auto}p[data-txt-indent]{text-indent:var(--reader-txt-indent,0em)}p[data-txt-chapter-break]{break-before:column}</style></head><body>${html}</body></html>`));
+        parts.push({ path, start, chars, headings });
+        start += chars;
+        continuation = !content.endsWith("\n");
     };
     for (let offset = 0; offset < bytes.length; offset += 65536) {
         const value = decoder.decode(bytes.subarray(offset, offset + 65536), { stream: offset + 65536 < bytes.length });
@@ -237,12 +281,16 @@ export async function loadTextBytes(bytes: Uint8Array, title: string, requested?
             if (cr)
                 ch = "\n";
             part += ch;
-            if (++count === TEXT_PART_CHARS)
-                flush();
+            if (++count === TEXT_PART_CHARS) {
+                if (pending !== undefined) flush(pending, TEXT_PART_CHARS, part);
+                pending = part;
+                part = "";
+                count = 0;
+            }
         }
     }
-    if (count || !parts.length)
-        flush();
+    if (pending !== undefined) flush(pending, TEXT_PART_CHARS, count ? part : undefined);
+    if (count || !parts.length) flush(part, count);
     files.set("__reader__/document.json", encode.encode(JSON.stringify({ format: "txt", encoding: decoder.encoding, title, parts })));
     let closed = false;
     const archive: ArchiveClient = { directory: new Map([...files].map(([name, data]) => [name, { name, compressedBytes: data.length, expandedBytes: data.length }])), async extract(paths) { if (closed)

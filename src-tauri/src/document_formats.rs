@@ -137,6 +137,76 @@ struct Part {
     chars: usize,
     headings: Vec<Heading>,
 }
+// Keep these title rules in sync with the Web TXT generator.
+fn text_heading(line: &str) -> Option<&str> {
+    let label = line.trim();
+    if label.chars().take(81).count() > 80 {
+        return None;
+    }
+    let lower = label.to_ascii_lowercase();
+    if matches!(lower.as_str(), "prologue" | "epilogue")
+        || matches!(
+            label,
+            "序章"
+                | "序言"
+                | "前言"
+                | "楔子"
+                | "尾声"
+                | "尾聲"
+                | "后记"
+                | "後記"
+                | "终章"
+                | "終章"
+                | "番外"
+                | "番外篇"
+                | "附录"
+                | "附錄"
+        )
+    {
+        return Some(label);
+    }
+    let number = |c: char| {
+        c.is_ascii_digit() || "０１２３４５６７８９〇零一二三四五六七八九十百千万萬两兩壹贰貳叁參肆伍陆陸柒捌玖拾佰仟".contains(c)
+    };
+    let separator = |c: char| c.is_whitespace() || ":：.．、-—".contains(c);
+    if let Some(rest) = label.strip_prefix('第') {
+        let rest = rest.trim_start();
+        let rest_after_number = rest.trim_start_matches(number);
+        if rest.len() != rest_after_number.len()
+            && rest_after_number
+                .trim_start()
+                .starts_with(['章', '节', '節', '回', '卷', '部', '話', '话'])
+        {
+            return Some(label);
+        }
+    }
+    if let Some(rest) = lower
+        .strip_prefix("chapter")
+        .and_then(|rest| rest.starts_with(char::is_whitespace).then_some(rest))
+    {
+        let token = rest
+            .trim_start()
+            .split(separator)
+            .next()
+            .unwrap_or_default();
+        if !token.is_empty()
+            && (token.bytes().all(|c| c.is_ascii_digit())
+                || token.bytes().all(|c| b"ivxlcdm".contains(&c)))
+        {
+            return Some(label);
+        }
+    }
+    if let Some(rest) = label
+        .strip_prefix("番外篇")
+        .or_else(|| label.strip_prefix("番外"))
+    {
+        if rest.starts_with(separator) || rest.starts_with(number) {
+            return Some(label);
+        }
+    }
+    None
+}
+
 fn write_part(
     zip: &mut ZipWriter<File>,
     encoding: &str,
@@ -144,6 +214,8 @@ fn write_part(
     content: &str,
     count: usize,
     parts: &mut Vec<Part>,
+    continuation: bool,
+    next: Option<&str>,
 ) -> Result<(), String> {
     let path = format!("__reader__/txt/{encoding}/s{start}.xhtml");
     zip.start_file(
@@ -154,46 +226,54 @@ fn write_part(
     let mut headings = Vec::new();
     let mut html = String::new();
     let mut offset = 0;
+    let mut has_text = false;
     for line in content.split_inclusive('\n') {
-        let label = line.trim();
-        let chinese =
-            label.starts_with('第') && label.chars().take(22).any(|c| "章节回卷部".contains(c));
-        let heading = label.chars().count() <= 80
-            && (chinese
-                || label.to_ascii_lowercase().starts_with("chapter ")
-                || matches!(
-                    label,
-                    "序章"
-                        | "序言"
-                        | "前言"
-                        | "楔子"
-                        | "尾声"
-                        | "尾聲"
-                        | "后记"
-                        | "後記"
-                        | "终章"
-                        | "終章"
-                        | "Prologue"
-                        | "Epilogue"
-                ));
         let text = line.strip_suffix('\n').unwrap_or(line);
-        let content = if text.trim().is_empty() {
+        let starts_line = offset != 0 || !continuation;
+        let mut joined = String::new();
+        let heading = if !starts_line {
+            None
+        } else if line.ends_with('\n') || next.is_none() {
+            text_heading(text)
+        } else {
+            // A bounded look-ahead only for a possible heading split by a technical boundary.
+            joined.extend(
+                text.chars()
+                    .chain(next.unwrap_or_default().chars().take_while(|c| *c != '\n'))
+                    .take(121),
+            );
+            if joined.chars().count() <= 120 {
+                text_heading(&joined)
+            } else {
+                None
+            }
+        };
+        let blank = text.trim().is_empty();
+        let content = if blank {
             "<br/>".to_owned()
         } else {
             escape(text)
         };
-        if heading {
-            html.push_str(&format!("<p id=\"t{offset}\">{content}</p>"));
+        if let Some(label) = heading {
+            let page_break = if has_text {
+                " data-txt-chapter-break=\"true\""
+            } else {
+                ""
+            };
+            html.push_str(&format!("<p id=\"t{offset}\"{page_break}>{content}</p>"));
             headings.push(Heading {
                 label: label.to_owned(),
                 offset,
             });
+        } else if starts_line && !blank && !text.starts_with([' ', '\t', '\u{3000}', '\u{a0}']) {
+            html.push_str(&format!("<p data-txt-indent=\"true\">{content}</p>"));
         } else {
             html.push_str(&format!("<p>{content}</p>"));
         }
+        has_text |= !blank;
         offset += line.chars().count();
     }
-    write!(zip,"<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><meta charset=\"utf-8\"/><style>p{{margin:0;text-align:justify;white-space:pre-wrap;overflow-wrap:anywhere;break-inside:auto}}</style></head><body>{}</body></html>",html).map_err(|e|e.to_string())?;
+    write!(zip,"<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><meta charset=\"utf-8\"/><style>p{{margin:0;text-align:justify;white-space:pre-wrap;overflow-wrap:anywhere;break-inside:auto}}p[data-txt-indent]{{text-indent:var(--reader-txt-indent,0em)}}p[data-txt-chapter-break]{{break-before:column}}</style></head><body>{}</body></html>",html).map_err(|e|e.to_string())?;
     parts.push(Part {
         path,
         start,
@@ -249,6 +329,8 @@ pub fn text_archive(
     let mut content = String::new();
     let (mut count, mut start, mut cr) = (0, 0, false);
     let mut parts = Vec::new();
+    let mut pending = None::<String>;
+    let mut continuation = false;
     let mut replacements = false;
     loop {
         let n = source.read(&mut input).map_err(|e| e.to_string())?;
@@ -270,10 +352,23 @@ pub fn text_archive(
                 content.push(ch);
                 count += 1;
                 if count == TEXT_PART_CHARS {
-                    write_part(&mut zip, &label, start, &content, count, &mut parts)?;
-                    start += count;
+                    if let Some(previous) = pending.replace(std::mem::take(&mut content)) {
+                        write_part(
+                            &mut zip,
+                            &label,
+                            start,
+                            &previous,
+                            TEXT_PART_CHARS,
+                            &mut parts,
+                            continuation,
+                            pending.as_deref(),
+                        )?;
+                        start += TEXT_PART_CHARS;
+                        continuation = !previous.ends_with('\n');
+                        content = previous;
+                        content.clear();
+                    }
                     count = 0;
-                    content.clear();
                 }
             }
             if result == encoding_rs::CoderResult::InputEmpty {
@@ -284,8 +379,31 @@ pub fn text_archive(
             break;
         }
     }
+    if let Some(previous) = pending {
+        write_part(
+            &mut zip,
+            &label,
+            start,
+            &previous,
+            TEXT_PART_CHARS,
+            &mut parts,
+            continuation,
+            (count > 0).then_some(content.as_str()),
+        )?;
+        start += TEXT_PART_CHARS;
+        continuation = !previous.ends_with('\n');
+    }
     if count > 0 || parts.is_empty() {
-        write_part(&mut zip, &label, start, &content, count, &mut parts)?
+        write_part(
+            &mut zip,
+            &label,
+            start,
+            &content,
+            count,
+            &mut parts,
+            continuation,
+            None,
+        )?;
     }
     zip.start_file(
         "__reader__/document.json",
@@ -377,6 +495,47 @@ mod tests {
             assert_eq!(meta["replacements"], false);
         }
     }
+    #[test]
+    fn text_indent_and_toc_keep_split_heading_on_original_part() {
+        let first = "正文\n　已有缩进\n\nChapter IV: Start\n第一个人回到家\n番外：之后\n";
+        let text = format!(
+            "{first}{}\n第十二章 远方\n下一段",
+            "x".repeat(TEXT_PART_CHARS - first.chars().count() - 3)
+        );
+        let mut source = tempfile::tempfile().unwrap();
+        source.write_all(text.as_bytes()).unwrap();
+        source.rewind().unwrap();
+        let mut archive =
+            ZipArchive::new(text_archive(source, Some("utf-8"), "Test").unwrap()).unwrap();
+        let manifest: serde_json::Value =
+            serde_json::from_reader(archive.by_name("__reader__/document.json").unwrap()).unwrap();
+        let first = &manifest["parts"][0];
+        let second = &manifest["parts"][1];
+        let headings = first["headings"].as_array().unwrap();
+        assert_eq!(
+            headings
+                .iter()
+                .map(|h| h["label"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            ["Chapter IV: Start", "番外：之后", "第十二章 远方"]
+        );
+        assert_eq!(headings[2]["offset"], TEXT_PART_CHARS - 2);
+        assert_eq!(second["start"], TEXT_PART_CHARS);
+        assert_eq!(second["headings"], serde_json::json!([]));
+        let mut read = |part: &serde_json::Value| {
+            let mut html = String::new();
+            archive
+                .by_name(part["path"].as_str().unwrap())
+                .unwrap()
+                .read_to_string(&mut html)
+                .unwrap();
+            html
+        };
+        assert!(read(first)
+            .contains(r#"<p data-txt-indent="true">正文</p><p>　已有缩进</p><p><br/></p>"#));
+        assert!(read(second).contains(r#"<p>二章 远方</p><p data-txt-indent="true">下一段</p>"#));
+    }
+
     #[test]
     fn natural_page_order_and_source_suffixes() {
         let mut pages = vec![

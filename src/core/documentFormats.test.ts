@@ -26,6 +26,25 @@ describe("original document formats", () => {
         disposeBook(book);
         await expect(book.readResource!(path)).rejects.toThrow();
     });
+    it("marks only unindented body starts and anchors a heading split across parts", async () => {
+        const first = "正文\n　已有缩进\n\nChapter IV: Start\n第一个人回到家\n番外：之后\n";
+        const text = first + "x".repeat(TEXT_PART_CHARS - Array.from(first).length - 3) + "\n第十" + "二章 远方\n下一段";
+        const book = await loadSourceBook(strToU8(text), "test.txt");
+        try {
+            const firstPath = spineItemPath(book, 0)!;
+            const secondPath = spineItemPath(book, 1)!;
+            const read = async (path: string) => new TextDecoder().decode(await book.readResource!(path));
+            expect(book.toc.map(entry => entry.label)).toEqual(["Chapter IV: Start", "番外：之后", "第十二章 远方"]);
+            expect(book.toc[2].href).toBe(`${firstPath}#t${TEXT_PART_CHARS - 2}`);
+            expect(secondPath).toBe(`__reader__/txt/utf-8/s${TEXT_PART_CHARS}.xhtml`);
+            const firstHtml = await read(firstPath);
+            expect(firstHtml).toContain(`id="t${TEXT_PART_CHARS - 2}" data-txt-chapter-break="true"`);
+            expect(firstHtml).toContain('<p data-txt-indent="true">正文</p><p>　已有缩进</p><p><br/></p>');
+            expect(await read(secondPath)).toContain('<p>二章 远方</p><p data-txt-indent="true">下一段</p>');
+        } finally {
+            disposeBook(book);
+        }
+    });
     it("reads explicit UTF16BE and Windows Chinese text without a BOM", async () => {
         for (const [bytes, encoding, expected] of [[new Uint8Array([0, 65, 0x4e, 0x2d]), "utf-16be", "A中"], [new Uint8Array([0xd6, 0xd0, 0xce, 0xc4]), "gb18030", "中文"]] as const) {
             const book = await loadSourceBook(bytes, "test.txt", {}, encoding);
