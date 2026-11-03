@@ -14,6 +14,8 @@ import { WheelTurnAccumulator } from "./turnIntent";
 import { attachReaderPaint } from "../render/visual/readerVisualPaint";
 import { DEFAULT_VISUAL_PREFERENCES } from "../render/visual/readerVisualPreferences";
 import { uiText } from "./localization/UiLanguageProvider";
+import { getAppBuildSession } from "../config/appBuildSession";
+import { watchAndroidForeground } from "../platform/androidAppTask";
 import "./comicReader.css";
 
 const CHAPTER = "__reader__/comic.xhtml";
@@ -289,8 +291,11 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
   }, [revision, urls]);
   useEffect(() => {
     const server = props.server;
+    const session = getAppBuildSession();
+    const android = session?.source === "desktop" && session.platform === "android";
+    let nativeForeground = !android;
     const resources: Resources = {
-      closed: false, hidden: document.hidden,
+      closed: false, hidden: document.hidden || !nativeForeground,
       urgent: new Set(), order: [], wanted: new Set(), held: new Map(), pending: new Map(),
       pump() {
         if (resources.closed) return;
@@ -322,11 +327,19 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
     };
     owner.current = resources;
     decoded.current.clear(); errors.current.clear(); setUrls({});
-    const onVisibility = () => { resources.hidden = document.hidden; resources.pump(); };
+    const onVisibility = () => {
+      resources.hidden = document.hidden || !nativeForeground;
+      resources.pump();
+    };
+    const unwatch = android ? watchAndroidForeground(foreground => {
+      nativeForeground = foreground;
+      onVisibility();
+    }) : undefined;
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
       resources.closed = true;
       document.removeEventListener("visibilitychange", onVisibility);
+      unwatch?.();
       for (const controller of resources.pending.values()) controller.abort();
       resources.pending.clear();
       for (const lease of resources.held.values()) lease.release();

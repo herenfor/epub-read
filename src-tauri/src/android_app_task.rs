@@ -20,6 +20,21 @@ pub async fn android_move_task_to_back(app: tauri::AppHandle) -> Result<(), Stri
     }
 }
 
+#[tauri::command]
+pub async fn android_app_foreground(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    #[cfg(target_os = "android")]
+    {
+        tauri::async_runtime::spawn_blocking(move || android::foreground(&app))
+            .await
+            .map_err(|error| format!("Android foreground worker join failed: {error}"))?
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        Err("android_app_foreground: unsupported platform".into())
+    }
+}
+
 #[cfg(target_os = "android")]
 mod android {
     use tauri::plugin::{Builder as PluginBuilder, PluginHandle, TauriPlugin};
@@ -39,6 +54,13 @@ mod android {
                 Ok(())
             })
             .build()
+    }
+
+    pub(crate) fn foreground<R: Runtime>(app: &AppHandle<R>) -> Result<serde_json::Value, String> {
+        app.state::<AndroidAppTask<R>>()
+            .0
+            .run_mobile_plugin("getForeground", ())
+            .map_err(|error| error.to_string())
     }
 
     pub(crate) fn move_task_to_back<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {

@@ -69,6 +69,12 @@ fn main() {
             tauri_build::InlinedPlugin::new()
                 .commands(&["registerListener", "remove_listener"])
                 .default_permission(tauri_build::DefaultPermissionRule::AllowAllCommands),
+        )
+        .plugin(
+            "androidAppTask",
+            tauri_build::InlinedPlugin::new()
+                .commands(&["registerListener", "remove_listener"])
+                .default_permission(tauri_build::DefaultPermissionRule::AllowAllCommands),
         );
     tauri_build::try_build(attributes).expect("failed to run tauri-build");
 }
