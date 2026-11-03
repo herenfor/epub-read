@@ -42,6 +42,5 @@
   "appUi.issue.resourceRecovered": "Book resource recovered: {path}",
   "appUi.drop.books": "Drop to import books",
   "appUi.drop.toFolder": "Drop to import into “{name}”",
-  "appUi.drop.folder": "Drop to import folder",
-  "appUi.drop.generic": "Drop to import books or fonts"
+  "appUi.drop.generic": "Drop to check these items"
 }
