@@ -209,7 +209,7 @@ export async function loadTextBytes(bytes: Uint8Array, title: string, requested?
         let offset = 0;
         const html = part.split(/(?<=\n)/).map(line => { const match = heading(line); if (match)
             headings.push({ label: line.trim(), offset }); const value = line.replace(/\n$/, ""); const content = value.trim() ? escape(value) : "<br/>"; const text = match ? `<p id="t${offset}">${content}</p>` : `<p>${content}</p>`; offset += Array.from(line).length; return text; }).join("");
-        files.set(path, encode.encode(`<html xmlns="http://www.w3.org/1999/xhtml"><head><meta charset="utf-8"/><style>body{padding-inline:clamp(16px,3vw,40px)}p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%;break-inside:auto}</style></head><body>${html}</body></html>`));
+        files.set(path, encode.encode(`<html xmlns="http://www.w3.org/1999/xhtml"><head><meta charset="utf-8"/><style>p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;break-inside:auto}</style></head><body>${html}</body></html>`));
         parts.push({ path, start, chars: count, headings });
         start += count;
         part = "";
