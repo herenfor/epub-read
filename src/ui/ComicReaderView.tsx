@@ -5,6 +5,7 @@ import type { RibbonBookmark, RibbonMark } from "./bookmarkRibbons";
 import { pageRibbonLeft } from "./bookmarkRibbons";
 import { BookmarkRibbonLayer } from "./BookmarkRibbonLayer";
 import { comicSpreads, comicPageForAnchor, comicTurnTarget } from "./comicPages";
+import { comicReadOrder } from "./comicReadOrder";
 import { COMIC_ZOOM_MAX, COMIC_ZOOM_NONE, COMIC_ZOOM_RELEASE, panComicZoom, pinchComicZoom, zoomComicAt, type ComicZoomView, type ZoomPoint } from "./comicZoom";
 import { createReaderTapGeometry, routeReaderTap } from "./readerTapRouting";
 import { resolveReaderPalette } from "../config/readerPalette";
@@ -18,7 +19,17 @@ import "./comicReader.css";
 const CHAPTER = "__reader__/comic.xhtml";
 type Position = { page: number; ratio: number };
 type Lease = { url: string; release(): void };
-type Resources = { closed: boolean; wanted: Set<number>; held: Map<number, Lease>; pending: Set<number> };
+/**
+ * One book's page reads. The visible pages and the goal (`urgent`) never queue
+ * behind a preload; each read in flight has its own controller, so a stale one
+ * stops at the next native chunk instead of holding up the page on screen.
+ */
+type Resources = {
+  closed: boolean; hidden: boolean;
+  urgent: Set<number>; order: number[]; wanted: Set<number>;
+  held: Map<number, Lease>; pending: Map<number, AbortController>;
+  pump(): void;
+};
 type Seek = Parameters<NonNullable<ReaderHandle["seekContentFraction"]>>;
 /** A strip point: a page, how far down it, and how far across the strip. */
 type StripAnchor = { page: number; down: number; across: number };
@@ -35,6 +46,7 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
   const [width, setWidth] = useState(0), [moving, setMoving] = useState(false);
   const command = useRef(false), lastDirection = useRef<1 | -1 | null>(null);
   const motion = useRef(false), goal = useRef(page), [warmPage, setWarmPage] = useState(page);
+  const heading = useRef<{ page: number; sign: 1 | -1 }>({ page, sign: 1 });
   const [urls, setUrls] = useState<Record<number, string>>({}), [revision, redraw] = useState(0);
   const decoded = useRef(new Set<number>()), errors = useRef(new Map<number, string>());
   const dimensions = useRef(new Map<number, { width: number; height: number }>());
@@ -276,11 +288,47 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
     if (visible().every(i => decoded.current.has(i))) alignment.current = null;
   }, [revision, urls]);
   useEffect(() => {
-    const resources: Resources = { closed: false, wanted: new Set(), held: new Map(), pending: new Set() };
+    const server = props.server;
+    const resources: Resources = {
+      closed: false, hidden: document.hidden,
+      urgent: new Set(), order: [], wanted: new Set(), held: new Map(), pending: new Map(),
+      pump() {
+        if (resources.closed) return;
+        const urgentReady = [...resources.urgent].every(i => resources.held.has(i) || errors.current.has(i));
+        // Preloads give way until the visible pages arrive, and wait while in the background.
+        const preload = urgentReady && !resources.hidden;
+        if (!preload) for (const [i, controller] of resources.pending) if (!resources.urgent.has(i)) {
+          controller.abort(); resources.pending.delete(i);
+        }
+        for (const i of resources.order) {
+          if (!preload && !resources.urgent.has(i)) break;
+          if (resources.held.has(i) || resources.pending.has(i) || errors.current.has(i)) continue;
+          const controller = new AbortController();
+          resources.pending.set(i, controller);
+          void server.acquireResource(pages[i].path, controller.signal).then(lease => {
+            if (resources.closed || controller.signal.aborted || !resources.wanted.has(i)) { lease.release(); return; }
+            resources.held.set(i, lease);
+            setUrls(old => ({ ...old, [i]: lease.url }));
+          }).catch(error => {
+            if (!resources.closed && !controller.signal.aborted) { errors.current.set(i, String(error)); redraw(n => n + 1); }
+          }).finally(() => {
+            // A newer read of the same page owns the slot now.
+            if (resources.pending.get(i) !== controller) return;
+            resources.pending.delete(i);
+            resources.pump();
+          });
+        }
+      },
+    };
     owner.current = resources;
     decoded.current.clear(); errors.current.clear(); setUrls({});
+    const onVisibility = () => { resources.hidden = document.hidden; resources.pump(); };
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
       resources.closed = true;
+      document.removeEventListener("visibilitychange", onVisibility);
+      for (const controller of resources.pending.values()) controller.abort();
+      resources.pending.clear();
       for (const lease of resources.held.values()) lease.release();
       resources.held.clear();
       if (frame.current !== null) cancelAnimationFrame(frame.current);
@@ -289,26 +337,24 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
   }, [props.server]);
   useEffect(() => {
     const resources = owner.current!;
-    const screen = groupForPage[page];
-    const wanted = scroll ? [page - 1, page, page + 1, warmPage] : [
-      ...groups.slice(Math.max(0, screen - 1), screen + 2).flat(), ...groups[groupForPage[warmPage]],
-    ];
-    resources.wanted = new Set(wanted.filter(i => i >= 0 && i < pages.length));
+    if (page !== heading.current.page) heading.current = { page, sign: page > heading.current.page ? 1 : -1 };
+    // Scroll mode may show more than one page; the strip's top and bottom edges name them.
+    const el = track.current;
+    const shown = scroll && el && el.children.length === pages.length
+      ? [stripPageAt(el.scrollTop), Math.min(stripPageAt(el.scrollTop + el.clientHeight - 1), stripPageAt(el.scrollTop) + 3)]
+      : [page];
+    const plan = comicReadOrder(groups, groupForPage, shown, warmPage, heading.current.sign);
+    resources.urgent = new Set(plan.urgent);
+    resources.order = plan.order;
+    resources.wanted = new Set(plan.order);
+    for (const [i, controller] of resources.pending) if (!resources.wanted.has(i)) {
+      controller.abort(); resources.pending.delete(i);
+    }
     for (const [i, lease] of resources.held) if (!resources.wanted.has(i)) {
       lease.release(); resources.held.delete(i); decoded.current.delete(i);
     }
     setUrls(Object.fromEntries([...resources.held].map(([i, lease]) => [i, lease.url])));
-    for (const i of resources.wanted) {
-      if (resources.held.has(i) || resources.pending.has(i) || errors.current.has(i)) continue;
-      resources.pending.add(i);
-      void props.server.acquireResource(pages[i].path).then(lease => {
-        if (resources.closed || !resources.wanted.has(i)) { lease.release(); return; }
-        resources.held.set(i, lease);
-        setUrls(old => ({ ...old, [i]: lease.url }));
-      }).catch(error => {
-        if (!resources.closed) { errors.current.set(i, String(error)); redraw(n => n + 1); }
-      }).finally(() => resources.pending.delete(i));
-    }
+    resources.pump();
   }, [page, warmPage, groups, scroll, props.server, pages, groupForPage]);
   useEffect(() => { report(); }, [page, moving, urls, revision, width, columns, scroll]);
   useEffect(() => {
