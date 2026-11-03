@@ -136,6 +136,7 @@ pub(crate) fn archive_open_blocking(
         chunk_bytes: CHUNK_BYTES,
         verify_ms,
         directory_ms,
+        compact_directory: managed_comic && entry_count >= 2048,
     })
 }
 

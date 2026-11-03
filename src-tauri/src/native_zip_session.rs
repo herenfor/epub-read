@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs::File;
-use std::io::{self, Read, Seek, SeekFrom, Take};
+use std::io::{self, Read, Seek, SeekFrom, Take, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -50,8 +50,38 @@ type Guard = Box<dyn Fn() -> Result<(), Fault> + Send>;
 
 enum Command {
     Directory { start: usize, reply: Reply<DirectoryPage> },
+    CompactDirectory { reply: Reply<Vec<u8>> },
     Read { index: usize, offset: u64, reply: Reply<Vec<u8>> },
     Close,
+}
+
+const COMPACT_DIRECTORY_JSON_MAX: usize = 4 * 1024 * 1024;
+
+// An optional transport optimization. Each tuple has the same semantics as
+// one paged row, without repeating field names on the wire.
+fn compact_directory(entries: &[Entry]) -> Vec<u8> {
+    let mut json = vec![b'['];
+    for (i, row) in entries.iter().enumerate() {
+        if i != 0 { json.push(b','); }
+        if serde_json::to_writer(&mut json, &(row.entry_index, &row.name, row.compressed_bytes, row.expanded_bytes)).is_err()
+            || json.len() >= COMPACT_DIRECTORY_JSON_MAX
+        {
+            return Vec::new();
+        }
+    }
+    json.push(b']');
+    let mut writer = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+    if writer.write_all(&json).is_err() { return Vec::new(); }
+    writer.finish().ok().filter(|bytes| bytes.len() <= CHUNK_BYTES).unwrap_or_default()
+}
+
+fn send_compact_directory(entries: &[Entry], guard: &Guard, reply: Reply<Vec<u8>>) {
+    let result = guard().and_then(|_| {
+        let bytes = compact_directory(entries);
+        guard()?;
+        Ok(bytes)
+    });
+    let _ = reply.send(result);
 }
 
 const MAX_STORED_INDEX_BYTES: usize = 8 * 1024 * 1024;
@@ -239,6 +269,10 @@ impl NativeZipSession {
         self.request(|reply| Command::Directory { start, reply })
     }
 
+    pub fn compact_directory(&self) -> Result<Vec<u8>, Fault> {
+        self.request(|reply| Command::CompactDirectory { reply })
+    }
+
     /// Offset 0 starts/restarts an entry; subsequent calls must be sequential.
     /// Raw response contains exactly min(CHUNK_BYTES, declared_size - offset).
     /// The last chunk is returned ONLY after EOF/CRC and snapshot validation.
@@ -346,6 +380,10 @@ fn serve(
                 if !send_directory(&entries, start, reply, &guard) { return; }
                 continue;
             }
+            Command::CompactDirectory { reply } => {
+                send_compact_directory(&entries, &guard, reply);
+                continue;
+            }
             Command::Read { index, offset: 0, reply } => (index, reply),
             Command::Read { reply, .. } => {
                 let _ = reply.send(Err(Fault::InvalidRequest));
@@ -384,6 +422,7 @@ fn serve(
                 Command::Directory { start, reply } => {
                     if !send_directory(&entries, start, reply, &guard) { return; }
                 }
+                Command::CompactDirectory { reply } => send_compact_directory(&entries, &guard, reply),
                 Command::Read { index: next_index, offset: 0, reply } => {
                     // A cancelled caller can begin another resource without
                     // exhausting the abandoned entry or writing a temp file.
@@ -472,6 +511,13 @@ mod tests {
         assert_eq!(session.entry_count, 2);
         let page = session.directory_page(0).unwrap();
         assert!(serde_json::to_vec(&page).unwrap().len() <= DIRECTORY_PAGE_BYTES);
+        let compact = session.compact_directory().unwrap();
+        let mut decoder = flate2::read::ZlibDecoder::new(compact.as_slice());
+        let mut json = String::new();
+        decoder.read_to_string(&mut json).unwrap();
+        let rows: Vec<(usize, String, u64, u64)> = serde_json::from_str(&json).unwrap();
+        assert_eq!(rows[0], (page.entries[0].entry_index, page.entries[0].name.clone(),
+            page.entries[0].compressed_bytes, page.entries[0].expanded_bytes));
         let mut actual = Vec::new();
         while actual.len() < data.len() {
             let chunk = session.read_chunk(0, actual.len() as u64).unwrap();

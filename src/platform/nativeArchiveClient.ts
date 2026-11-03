@@ -14,6 +14,7 @@ interface OpenInfo {
   chunkBytes: number;
   verifyMs?: number;
   directoryMs?: number;
+  compactDirectory?: boolean;
 }
 
 interface NativeEntry extends ArchiveEntry {
@@ -84,8 +85,55 @@ class NativeArchiveClient implements ArchiveClient {
     if (this.closed) throw new ArchiveClosedError();
   }
 
+  private async loadCompactDirectory(): Promise<boolean> {
+    const bytes = await Promise.race([
+      this.invoke<ArrayBuffer>("linked_library_archive_compact_directory", { sessionId: this.info.sessionId }),
+      this.shutdown,
+    ]);
+    this.requireOpen();
+    if (bytes.byteLength === 0) return false;
+    if (bytes.byteLength > CHUNK_BYTES) throw new Error("原生归档压缩目录过大");
+    const reader = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate")).getReader();
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    let text = "", length = 0;
+    try {
+      for (;;) {
+        const { value, done } = await Promise.race([reader.read(), this.shutdown]);
+        if (done) break;
+        length += value.byteLength;
+        if (length > 4 * 1024 * 1024) throw new Error("原生归档目录过大");
+        text += decoder.decode(value, { stream: true });
+      }
+    } finally {
+      void reader.cancel().catch(() => undefined);
+    }
+    this.requireOpen();
+    const rows: unknown = JSON.parse(text + decoder.decode());
+    if (!Array.isArray(rows) || rows.length !== this.info.entryCount) throw new Error("归档目录不完整");
+    for (const row of rows) {
+      if (!Array.isArray(row) || row.length !== 4 || typeof row[1] !== "string" ||
+          [row[0], row[2], row[3]].some(value => !Number.isSafeInteger(value) || value < 0)) {
+        throw new Error("原生归档压缩目录格式错误");
+      }
+      const [entryIndex, name, compressedBytes, expandedBytes] = row;
+      this.directory.set(name, { entryIndex, name, compressedBytes, expandedBytes });
+    }
+    return true;
+  }
+
+  private noteDirectoryTime(started: number): void {
+    const { verifyMs, directoryMs } = this.info;
+    if (verifyMs !== undefined && directoryMs !== undefined) {
+      this.openTimings = { verifyMs, directoryMs, directoryTransferMs: performance.now() - started };
+    }
+  }
+
   async initialize(): Promise<void> {
     const started = performance.now();
+    if (this.info.compactDirectory && typeof DecompressionStream === "function" && await this.loadCompactDirectory()) {
+      this.noteDirectoryTime(started);
+      return;
+    }
     let start = 0;
     do {
       this.requireOpen();
@@ -107,10 +155,7 @@ class NativeArchiveClient implements ArchiveClient {
       const end = start + page.entries.length;
       if (page.next === null) {
         if (end !== this.info.entryCount) throw new Error("归档目录不完整");
-        const { verifyMs, directoryMs } = this.info;
-        if (verifyMs !== undefined && directoryMs !== undefined) {
-          this.openTimings = { verifyMs, directoryMs, directoryTransferMs: performance.now() - started };
-        }
+        this.noteDirectoryTime(started);
         return;
       }
       if (page.next !== end || end <= start || end >= this.info.entryCount) {
