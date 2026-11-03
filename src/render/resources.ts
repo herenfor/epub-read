@@ -2,6 +2,7 @@ import type { Book, Resource } from "../core/types";
 import { disposeBook } from "../core/book";
 import { ChapterDependencies } from "./chapterDependencies";
 import { ArchiveClosedError } from "../core/selectiveArchive";
+import { rasterHeaderPixels } from "./rasterHeader";
 import { StylesheetCache, type StylesheetInputs } from "./stylesheetCache";
 
 /** 解压后保留在内存中的资源字节默认预算；可被 ResourceServer 选项覆盖。 */
@@ -142,6 +143,12 @@ export class ResourceServer {
   /** Metadata only: checking playback support must not extract media. */
   resourceMediaType(path: string): string | undefined {
     return this.book?.resources.get(path)?.mediaType;
+  }
+
+  /** Inspect already loaded bytes without fetching or decoding another image. */
+  resourceRasterPixels(path: string): number | undefined {
+    const resource = this.book?.resources.get(path);
+    if (resource && isLoadedResource(resource)) return rasterHeaderPixels(resource.data);
   }
 
   /** One user-requested media entry, pinned until its decoder is detached. */

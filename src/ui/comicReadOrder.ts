@@ -20,3 +20,24 @@ export function comicReadOrder(groups: readonly (readonly number[])[], groupForP
   }
   return { urgent: [...urgent], order: [...order] };
 }
+
+/** Visible pages may exceed the budget. Unknown sizes get no speculative decode. */
+export function comicDecodeOrder(
+  order: readonly number[],
+  urgent: ReadonlySet<number>,
+  pixelsFor: (page: number) => number | undefined,
+  budget: number,
+): number[] {
+  const visible = order.filter(page => urgent.has(page));
+  let remaining = budget;
+  for (const page of visible) remaining -= pixelsFor(page) ?? budget;
+  const result = [...visible];
+  for (const page of order) {
+    if (urgent.has(page)) continue;
+    const pixels = pixelsFor(page);
+    if (pixels === undefined || pixels > remaining) break;
+    result.push(page);
+    remaining -= pixels;
+  }
+  return result;
+}
