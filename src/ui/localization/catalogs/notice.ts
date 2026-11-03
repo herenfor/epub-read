@@ -38,6 +38,7 @@ export const notice = defineMessages("notice", {
   "notice.reimport.cancelled": "《{title}》重新导入已取消",
   "notice.reimport.mismatch": "选择的文件与《{title}》内容不一致，无法恢复",
   "notice.reimport.onlyOne": "重新连接《{title}》时只能选择一本书",
+  "notice.reimport.relinkFailed": "无法重新连接《{title}》：{error}",
   "notice.import.copySettingUnread": "无法读取导入方式设置，本次已复制到书库",
   "notice.originalRetry.title": { zh: "这些书无法保留在原位置", max: 24 },
   "notice.originalRetry.hint": "可以改为复制到书库导入，原文件不受影响。",

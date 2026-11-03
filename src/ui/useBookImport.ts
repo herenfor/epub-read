@@ -574,7 +574,9 @@ export function useBookImport({
         kind: cancelled ? "warn" : "error",
         text: cancelled
           ? uiText("notice.reimport.cancelled", { title: entry.title })
-          : uiText("notice.reimport.mismatch", { title: entry.title }) + (relink && reason ? uiText("notice.sep") + reason : ""),
+          // A reconnect names the native reason (mismatch, lost permission, …) instead of assuming a mismatch.
+          : relink && reason ? uiText("notice.reimport.relinkFailed", { title: entry.title, error: reason })
+          : uiText("notice.reimport.mismatch", { title: entry.title }),
       });
       return null;
     }
