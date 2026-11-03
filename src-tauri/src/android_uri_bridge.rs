@@ -303,6 +303,17 @@ pub(crate) struct SeekableDocument {
     position: u64,
 }
 
+#[cfg(target_os = "android")]
+impl SeekableDocument {
+    pub(crate) fn len(&self) -> u64 { self.length }
+
+    pub(crate) fn revision(&self) -> io::Result<(u64, u64, u64, i64, i64)> {
+        use std::os::unix::fs::MetadataExt;
+        let metadata = self.file.metadata()?;
+        Ok((metadata.dev(), metadata.ino(), metadata.len(), metadata.ctime(), metadata.ctime_nsec()))
+    }
+}
+
 impl Read for SeekableDocument {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         let limit = self.length.saturating_sub(self.position).min(buffer.len() as u64) as usize;
@@ -553,6 +564,65 @@ mod android {
         restricted_reader_from_response(response)
     }
 
+    /// Owned by the serialized import job. Dropping a failed preparation
+    /// only releases a grant that this job introduced. Existing grants may
+    /// be referenced by another book or shelf.
+    pub(crate) struct PendingDocumentGrant<R: Runtime> {
+        app: AppHandle<R>,
+        uri: String,
+        rollback: bool,
+    }
+
+    impl<R: Runtime> PendingDocumentGrant<R> {
+        pub(crate) fn retain(app: &AppHandle<R>, uri: &str) -> Result<Self, RestrictedReadError> {
+            if !uri.starts_with("content://") {
+                return Err(RestrictedReadError::InvalidInput("only content:// URIs are accepted"));
+            }
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct Reply {
+                newly_retained: bool,
+            }
+            let bridge = app.state::<AndroidUriBridge<R>>();
+            let reply = bridge.0.run_mobile_plugin::<Reply>("retainDocumentRead", OpenReadOnlyRequest { uri })
+                .map_err(|error| RestrictedReadError::AndroidBridge(error.to_string()))?;
+            Ok(Self { app: app.clone(), uri: uri.to_owned(), rollback: reply.newly_retained })
+        }
+
+        pub(crate) fn open(&self) -> Result<SeekableDocument, RestrictedReadError> {
+            open_persisted_document(&self.app, &self.uri)
+        }
+
+        pub(crate) fn commit(mut self) {
+            self.rollback = false;
+        }
+    }
+
+    impl<R: Runtime> Drop for PendingDocumentGrant<R> {
+        fn drop(&mut self) {
+            if self.rollback {
+                let bridge = self.app.state::<AndroidUriBridge<R>>();
+                let _ = bridge.0.run_mobile_plugin::<EmptyPluginResponse>(
+                    "releaseDocumentRead", OpenReadOnlyRequest { uri: &self.uri },
+                );
+            }
+        }
+    }
+
+    pub(crate) fn open_persisted_document<R: Runtime>(
+        app: &AppHandle<R>,
+        uri: &str,
+    ) -> Result<SeekableDocument, RestrictedReadError> {
+        if !uri.starts_with("content://") {
+            return Err(RestrictedReadError::InvalidInput("only content:// URIs are accepted"));
+        }
+        let bridge = app.state::<AndroidUriBridge<R>>();
+        let response = bridge.0.run_mobile_plugin::<OpenReadOnlyResponse>(
+            "openPersistedDocumentRead", OpenReadOnlyRequest { uri },
+        ).map_err(|error| RestrictedReadError::AndroidBridge(error.to_string()))?;
+        restricted_reader_from_response(response)?.into_seekable()
+    }
+
     pub(crate) fn read_content_uri_blocking<R: Runtime>(
         app: &AppHandle<R>,
         uri: String,
@@ -701,6 +771,7 @@ mod android {
 pub(crate) use android::{
     cancel_write_blocking, delete_created_document_blocking, open_content_uri, pick_directory_tree, pick_watched_directory, release_watched_directory, plugin,
     query_tree_directory, read_content_uri_blocking, write_staged_file_blocking,
+    PendingDocumentGrant, open_persisted_document,
     write_text_content_uri_blocking,
 };
 

@@ -306,6 +306,65 @@ pub(super) fn prepare_document(
     )
 }
 
+/// Prepared without staging or changing the shelf. The eventual binding
+/// transaction owns the permission and commits it only after the row exists.
+#[cfg(target_os = "android")]
+#[allow(dead_code)]
+pub(super) struct PreparedOriginalDocument {
+    pub(super) grant: crate::android_uri_bridge::PendingDocumentGrant<tauri::Wry>,
+    pub(super) content_hash: String,
+    pub(super) file_name: String,
+    pub(super) file_size: u64,
+    pub(super) metadata: ImportedMetadata,
+}
+
+#[cfg(target_os = "android")]
+#[allow(dead_code)]
+pub(super) fn prepare_original_document(
+    app: &AppHandle,
+    gate: &ImportGate,
+    document: &DocumentSelection,
+) -> Result<PreparedOriginalDocument, PrepareError> {
+    use crate::android_uri_bridge::PendingDocumentGrant;
+
+    let failed = |message: String| PrepareError::Failed { content_hash: None, message };
+    let cancelled = || PrepareError::Cancelled { content_hash: None };
+    if gate.is_cancelled() { return Err(cancelled()); }
+    let file_name = document.file_name.as_ref()
+        .filter(|name| crate::document_formats::supported(name))
+        .ok_or_else(|| failed("无法确定原书格式，请使用复制导入".into()))?.clone();
+    let grant = PendingDocumentGrant::retain(app, &document.uri)
+        .map_err(|error| failed(format!("无法保留原书读取授权：{error}")))?;
+    let mut reader = grant.open()
+        .map_err(|error| failed(format!("原文件不能随机读取，请使用复制导入：{error}")))?;
+    let file_size = reader.len();
+    if file_size == 0 {
+        return Err(failed("原书为空".into()));
+    }
+    let revision = reader.revision().map_err(|e| failed(e.to_string()))?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0; 64 * 1024];
+    loop {
+        if gate.is_cancelled() { return Err(cancelled()); }
+        let count = reader.read(&mut buffer).map_err(|e| failed(e.to_string()))?;
+        if count == 0 { break; }
+        digest.update(&buffer[..count]);
+    }
+    reader.rewind().map_err(|e| failed(e.to_string()))?;
+    let metadata = crate::document_formats::inspect_reader(&mut reader, &file_name)
+        .map_err(failed)?;
+    if reader.revision().map_err(|e| failed(e.to_string()))? != revision {
+        return Err(failed("导入期间原文件发生变化".into()));
+    }
+    if metadata.spine.is_empty() {
+        return Err(failed("书中没有可阅读的内容".into()));
+    }
+    if gate.is_cancelled() { return Err(cancelled()); }
+    Ok(PreparedOriginalDocument {
+        grant, content_hash: format!("{:x}", digest.finalize()), file_name, file_size, metadata,
+    })
+}
+
 pub(crate) fn make_managed_binding(
     content_hash: String,
     file_snapshot: FileSnapshot,
