@@ -735,6 +735,12 @@ export default function App() {
     token: ScrubToken;
   } | null>(null);
   const [scrubUiState, setScrubUiState] = useState<ScrubUiState>(() => initialScrubUi(0));
+  /** Latest progress-bar jump; only its real landing moves the TOC to the landed entry. */
+  const tocFollowSeekRef = useRef<{ token: ScrubToken; fromHref?: string } | null>(null);
+  const tocFollowGenerationRef = useRef(0);
+  // The pending target lives in the book's sidebar memory; this only re-renders the drawer.
+  const [, setTocFollowRequest] = useState(0);
+  const activeHrefRef = useRef<string | undefined>(undefined);
   const scrubUiStateRef = useRef(scrubUiState);
 
   const dispatchScrub = useCallback((event: ScrubUiEvent) => {
@@ -1133,6 +1139,18 @@ export default function App() {
     sidebarBookKey,
     openPanel, closeForeground, requestCloseForeground,
   });
+  const sidebarNavigationMemoryRef = useRef(sidebarNavigationMemory);
+  sidebarNavigationMemoryRef.current = sidebarNavigationMemory;
+  const followTocAfterSeek = useCallback((token: ScrubToken) => {
+    const seek = tocFollowSeekRef.current;
+    if (!seek || seek.token.session !== token.session || seek.token.request !== token.request) return;
+    tocFollowSeekRef.current = null;
+    const memory = sidebarNavigationMemoryRef.current;
+    const generation = ++tocFollowGenerationRef.current;
+    // An unconsumed earlier jump keeps its origin: A→B→B still follows to B.
+    memory.tocFollow = { generation, fromHref: memory.tocFollow ? memory.tocFollow.fromHref : seek.fromHref };
+    setTocFollowRequest(generation);
+  }, []);
 
   /** 关闭正文图片浮层；不改变页码/滚动位置，也不记入阅读历史。 */
   const closeImageOverlay = useCallback((): void => {
@@ -3048,6 +3066,7 @@ export default function App() {
     if (matchingSeek) {
       // setPage 同步发布页态，下面读到的就是定位后的状态。
       readerRef.current?.seekContentFraction?.(matchingSeek.target, matchingSeek.token);
+      followTocAfterSeek(matchingSeek.token);
     }
     const state = chapterStateRef.current;
     const readingAnchor = readerRef.current?.getReadingAnchor();
@@ -3418,6 +3437,8 @@ export default function App() {
     dispatchReaderSession({ type: "begin-scrub" });
     releaseRestoreForExplicitNavigation();
     dispatchScrub({ type: "begin", token, ratio: r });
+    // No axis means no reported landing to follow; scrollToRatio keeps the TOC as it is.
+    tocFollowSeekRef.current = axis ? { token, fromHref: activeHrefRef.current } : null;
 
     if (settings.readingMode === "scroll") {
       if (axis) {
@@ -3489,6 +3510,8 @@ export default function App() {
     token: ScrubToken,
     location: { key: string; spineIndex: number; fraction: number; atEnd: boolean }
   ) => {
+    // A paged comic settles the bar optimistically first; its later real landing still moves the TOC.
+    followTocAfterSeek(token);
     if (!acceptsScrubResult(token)) return;
     dispatchReaderSession({ type: "scrub-reader-settled" });
     const axis = contentAxisRef.current;
@@ -3499,7 +3522,7 @@ export default function App() {
       token,
       actual: { ratio: actualRatio, atEnd: location.atEnd },
     });
-  }, [acceptsScrubResult, dispatchScrub, dispatchReaderSession]);
+  }, [acceptsScrubResult, dispatchScrub, dispatchReaderSession, followTocAfterSeek]);
 
   const handleContentFractionCancelled = useCallback((token: ScrubToken) => {
     if (!acceptsScrubResult(token)) return;
@@ -4287,6 +4310,7 @@ export default function App() {
   const activeHref = currentPath
     ? archiveHref(book?.archiveReferences, currentPath, book?.sourceFormat === "comic-zip" && chapterState.status === "ready" ? `page-${(chapterState.leafRange?.first ?? 1) - 1}` : anchor ?? "")
     : undefined;
+  activeHrefRef.current = activeHref;
   // 阅读进度：以"标准页 = 1000 字"为尺度，按锚点所在字数位置推算
   // （标题页等短章节只占零点几个百分点，长章节按字数占大头）
   const linearIndices = book
