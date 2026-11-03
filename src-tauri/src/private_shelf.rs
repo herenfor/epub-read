@@ -15,6 +15,8 @@ use std::{
 };
 use tauri::{Manager, WebviewWindow};
 
+pub(crate) mod operations;
+
 const ITERATIONS: NonZeroU32 = NonZeroU32::new(600_000).unwrap();
 const AUTH: &str = "auth.json";
 // Owned exclusively by this module. Original files must never enter this tree.
@@ -60,14 +62,14 @@ impl Verifier {
 
 #[derive(Debug, Serialize)]
 pub struct ShelfError {
-    code: &'static str,
+    code: String,
     message: String,
 }
 
 impl ShelfError {
-    fn new(code: &'static str, message: impl Into<String>) -> Self {
+    fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
-            code,
+            code: code.into(),
             message: message.into(),
         }
     }
@@ -87,7 +89,7 @@ pub enum PrivateShelfStatus {
 
 #[derive(Default)]
 struct Shelf {
-    unlocked: Option<PortableStore>,
+    unlocked: Option<operations::Session>,
 }
 
 fn load_verifier(root: &Path) -> Result<Option<Verifier>, ShelfError> {
@@ -168,7 +170,7 @@ impl Shelf {
             return Err(ShelfError::new("wrong-password", "密码不正确"));
         }
         if self.unlocked.is_none() {
-            self.unlocked = Some(open_store(root)?);
+            self.unlocked = Some(operations::Session::new(open_store(root)?)?);
         }
         Ok(PrivateShelfStatus::Unlocked)
     }
@@ -254,18 +256,29 @@ pub async fn private_shelf_setup(
 pub async fn private_shelf_unlock(
     window: WebviewWindow,
     password: String,
-) -> Result<PrivateShelfStatus, ShelfError> {
+) -> Result<operations::UnlockReply, ShelfError> {
     let epoch = main_state(&window)?.lock_epoch.load(Ordering::Acquire);
     run(window, move |shelf, root, state| {
         if state.lock_epoch.load(Ordering::Acquire) != epoch {
             return Err(ShelfError::new("unlock-cancelled", "解锁请求已取消"));
+        }
+        if shelf
+            .unlocked
+            .as_ref()
+            .is_some_and(|session| session.epoch != epoch)
+        {
+            shelf.lock();
         }
         let result = shelf.unlock(root, &password);
         if state.lock_epoch.load(Ordering::Acquire) != epoch {
             shelf.lock();
             return Err(ShelfError::new("unlock-cancelled", "解锁请求已取消"));
         }
-        result
+        let status = result?;
+        let session = shelf.unlocked.as_mut().ok_or_else(operations::locked)?;
+        session.epoch = epoch;
+        let session_id = session.id.clone();
+        Ok(operations::UnlockReply { status, session_id })
     })
     .await
 }
