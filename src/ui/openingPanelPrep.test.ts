@@ -222,4 +222,45 @@ describe("prepared panels are reused by the first real opening", () => {
       await dom.dispose();
     }
   });
+
+  it("TOC: a landed progress jump centers its entry once; a jump inside one entry keeps the user's scroll", async () => {
+    const dom = createPanelHarness();
+    const toc: TocNode[] = Array.from({ length: 200 }, (_, i) => ({ label: `Chapter ${i + 1}`, href: `c${i}.xhtml`, children: [] }));
+    const memory = createSidebarNavigationMemory();
+    const props: SidebarDrawerProps = {
+      open: true, warm: true, navigationMemory: memory, activeTab: "toc", onTabChange: vi.fn(),
+      mode: "overlay", onModeChange: vi.fn(), onClose: vi.fn(), toc, activeHref: "c150.xhtml", onNavigateToc: vi.fn(),
+      bookmarks: [], onSelectBookmark: vi.fn(), notes: [], onNavigateNote: vi.fn(),
+    };
+    const userScrollsToTop = () => {
+      const pane = dom.container.querySelector(".sidebar-toc-pane") as HTMLElement;
+      pane.scrollTop = 0;
+      memory.scrollTop.toc = 0;
+      return pane;
+    };
+    try {
+      await dom.render(createElement(SidebarDrawer, props));
+      userScrollsToTop();
+      await dom.render(createElement(SidebarDrawer, { ...props, open: false }));
+      // Landed while closed: kept until the TOC opens again.
+      memory.tocFollow = { generation: 1, fromHref: "c150.xhtml" };
+      await dom.render(createElement(SidebarDrawer, { ...props, open: false, activeHref: "c120.xhtml" }));
+      expect(memory.tocFollow).toBeDefined();
+      await dom.render(createElement(SidebarDrawer, { ...props, activeHref: "c120.xhtml" }));
+      const pane = dom.container.querySelector(".sidebar-toc-pane") as HTMLElement;
+      expect(memory.tocFollow).toBeUndefined();
+      expect(pane.scrollTop).toBeGreaterThan(100 * 32);
+      expect(memory.scrollTop.toc).toBe(pane.scrollTop);
+      expect(dom.container.querySelector('[aria-current="location"]')?.textContent).toContain("Chapter 121");
+
+      // Open drawer, jump that stays inside Chapter 121: no scroll back.
+      userScrollsToTop();
+      memory.tocFollow = { generation: 2, fromHref: "c120.xhtml" };
+      await dom.render(createElement(SidebarDrawer, { ...props, activeHref: "c120.xhtml" }));
+      expect(memory.tocFollow).toBeUndefined();
+      expect(pane.scrollTop).toBe(0);
+    } finally {
+      await dom.dispose();
+    }
+  });
 });
