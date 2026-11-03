@@ -60,6 +60,7 @@ export const shelfMain = defineMessages("shelfMain", {
   "shelfMain.move.out.done": "《{title}》已移回普通书架",
   "shelfMain.move.localNote": { zh: "只在这台设备上移动。已经同步到其他设备或导出过的副本不会跟着变。", note: "Moving between shelves is local; synced copies and exported archives keep their own copy." },
   "shelfMain.move.running": { zh: "正在移动…", max: 10 },
+  "shelfMain.move.pendingProgress": "这本书还有待恢复的阅读进度，请重新打开并保存后再移动。",
   "shelfMain.move.failed": "移动没有完成：{error}",
   "shelfMain.move.noHash": "这本书还没有内容指纹",
   "shelfMain.move.unavailable": "书架正忙，请稍后再试",

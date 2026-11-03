@@ -22,6 +22,7 @@ export interface ShelfMoveTarget {
   entry: ShelfEntry;
   hash: string;
   direction: PrivateShelfMoveDirection;
+  originToken: string | null;
 }
 
 export interface ShelfSpacesDialog {
@@ -48,6 +49,7 @@ export function useShelfSpaces(deps: {
   /** Held while a move runs, so other shelf writes wait. */
   shelfBusyRef: MutableRefObject<boolean>;
   /** The move landed: drop the book's tab and the browser state kept for it on this shelf. */
+  beforeBookMove(target: ShelfMoveTarget): Promise<void>;
   onBookMoved(target: ShelfMoveTarget): void;
 }) {
   const snapshot = useActiveShelfSpace();
@@ -89,6 +91,7 @@ export function useShelfSpaces(deps: {
     switchingRef.current = true;
     try {
       if (depsRef.current.viewRef.current === "reader" && !(await depsRef.current.leaveReader(revoked))) return;
+      setDialog(null);
       const closing = leaveShelfSpace();
       depsRef.current.resetShelfView("library");
       depsRef.current.setShelfNotice(null);
@@ -142,15 +145,16 @@ export function useShelfSpaces(deps: {
       depsRef.current.setShelfNotice({ kind: "error", text: uiText("shelfMain.move.failed", { error: uiText("shelfMain.move.noHash") }) });
       return;
     }
-    if (activeShelfSpaceToken() !== null) {
-      setDialog({ mode: "moveOut", move: { entry, hash, direction: "toLibrary" } });
+    const originToken = activeShelfSpaceToken();
+    if (originToken !== null) {
+      setDialog({ mode: "moveOut", move: { entry, hash, direction: "toLibrary", originToken } });
       return;
     }
     try {
       const status = await privateShelfNative.status();
       if (switchingRef.current || activeShelfSpaceToken() !== null) return;
       setPrivateConfigured(status !== "unconfigured");
-      setDialog({ mode: status === "unconfigured" ? "setup" : "unlock", move: { entry, hash, direction: "toPrivate" } });
+      setDialog({ mode: status === "unconfigured" ? "setup" : "unlock", move: { entry, hash, direction: "toPrivate", originToken } });
     } catch (error) {
       depsRef.current.setShelfNotice({ kind: "error", text: uiText("shelfMain.move.failed", { error: privateShelfError(error).message }) });
     }
@@ -166,12 +170,14 @@ export function useShelfSpaces(deps: {
     const token = activeShelfSpaceToken();
     const session = toPrivate ? sessionId : token;
     if (toPrivate) setPrivateConfigured(true);
-    if (!session || (toPrivate ? token !== null : token === null) || depsRef.current.shelfBusyRef.current) {
+    if (!session || token !== target.originToken || switchingRef.current || depsRef.current.shelfBusyRef.current) {
       if (toPrivate && sessionId) await privateShelfNative.lock().catch(() => undefined);
       throw new PrivateShelfError("busy", uiText("shelfMain.move.unavailable"));
     }
     depsRef.current.shelfBusyRef.current = true;
     try {
+      await depsRef.current.beforeBookMove(target);
+      if (activeShelfSpaceToken() !== token) throw new PrivateShelfError("locked", uiText("shelfMain.move.unavailable"));
       await privateShelfNative.move(session, target.hash, target.direction);
     } catch (error) {
       const failure = privateShelfError(error);
@@ -185,6 +191,7 @@ export function useShelfSpaces(deps: {
       if (toPrivate) await privateShelfNative.lock().catch(() => undefined);
       depsRef.current.shelfBusyRef.current = false;
     }
+    if (activeShelfSpaceToken() !== token) return;
     setDialog(null);
     depsRef.current.onBookMoved(target);
     // Back in the library, the book takes part in sync again.

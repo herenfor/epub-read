@@ -54,6 +54,7 @@
   "shelfMain.move.out.done": "\"{title}\" moved back to the library",
   "shelfMain.move.localNote": "This only moves it on this device. Copies already synced to other devices or exported stay as they are.",
   "shelfMain.move.running": "Moving…",
+  "shelfMain.move.pendingProgress": "This book has reading progress to recover. Reopen it and save before moving it.",
   "shelfMain.move.failed": "Couldn't move: {error}",
   "shelfMain.move.noHash": "This book has no content fingerprint yet",
   "shelfMain.move.unavailable": "The shelf is busy. Try again in a moment.",

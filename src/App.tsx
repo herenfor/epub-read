@@ -4633,6 +4633,12 @@ export default function App() {
     refreshShelf: refreshShelfProjection,
     setShelfNotice,
     shelfBusyRef,
+    beforeBookMove: async ({ entry, hash }) => {
+      const results = await progressWriterRef.current?.flushBooks([entry.id]) ?? [];
+      const failed = results.find((result) => result.status === "failed");
+      if (failed?.status === "failed") throw failed.error;
+      if (localCheckpointsRef.current?.peek(hash)) throw new Error(uiText("shelfMain.move.pendingProgress"));
+    },
     onBookMoved: ({ entry, hash, direction }) => {
       setReaderTabs((state) => closeReaderTab(state, entry.id).state);
       setCurrentShelfId((current) => (current === entry.id ? null : current));
