@@ -243,7 +243,7 @@ fn corrupt_files_are_isolated_but_future_versions_and_own_identity_block_writes(
     for path in ["formatVersion", "stateSchemaVersion", "nestedStateVersion"] {
         let mut value: serde_json::Value = serde_json::from_slice(&good).unwrap();
         if path == "nestedStateVersion" {
-            value["state"]["schemaVersion"] = json!(4);
+            value["state"]["schemaVersion"] = json!(5);
         } else {
             value[path] = json!(99);
         }
@@ -378,4 +378,21 @@ fn conflicting_remote_event_does_not_discard_other_devices() {
     assert_eq!(against_local.issues, plan.issues);
     assert_eq!(against_local.full, plan.full);
     assert_eq!(against_local.accepted_devices, [C]);
+}
+
+#[test]
+fn source_formats_cloud_preserves_state_four_and_reads_old_three() {
+    let hash = "a".repeat(64);
+    let old = file(A, book(A, &hash, 20));
+    assert_eq!(parse_device(&old, SPACE, A).unwrap().state_schema_version, 3);
+    let mut state = book(A, &hash, 40);
+    state.schema_version = 4;
+    state.books.get_mut(&hash).unwrap().metadata.value.file_name = "原始编码.txt".into();
+    let bytes = file(A, state.clone());
+    let parsed = parse_device(&bytes, SPACE, A).unwrap();
+    assert_eq!(parsed.state_schema_version,4);
+    assert_eq!(parsed.state,state);
+    let mut future:serde_json::Value=serde_json::from_slice(&bytes).unwrap();
+    future["state"]["schemaVersion"]=json!(5);
+    assert_eq!(parse_device(&serde_json::to_vec(&future).unwrap(),SPACE,A).unwrap_err(),SyncError::UnsupportedSyncVersion);
 }

@@ -6,14 +6,15 @@ import { uiText } from "./localization/UiLanguageProvider";
 /** A safe default save name for one book: its shelf file name, else its title. */
 export function bookExportFileName(fileName: string | undefined, title: string): string {
   const original = fileName?.trim();
+  const extension = /\.(epub|txt|cbz|zip)$/i.exec(original ?? "")?.[1]?.toLowerCase() ?? "epub";
   // Older Android imports stored this placeholder, without provenance.
   // Only the suggested export name changes; the shelf record stays intact.
   const raw = ((original && original.toLowerCase() !== "book.epub" ? original : title.trim()) || "book")
     .replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_");
-  const stem = Array.from(raw.replace(/\.epub$/i, "")).slice(0, 80).join("").replace(/[. ]+$/, "");
+  const stem = Array.from(raw.replace(/\.(epub|txt|cbz|zip)$/i, "")).slice(0, 80).join("").replace(/[. ]+$/, "");
   const device = stem.split(".")[0];
   const reserved = /^(CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³])$/i.test(device);
-  return `${!stem || reserved ? "book" : stem}.epub`;
+  return `${!stem || reserved ? "book" : stem}.${extension}`;
 }
 
 /** The saved file's name for notices; content URIs carry it as the last decoded path segment. */
@@ -23,7 +24,7 @@ export function bookExportTargetLabel(destination: SaveFileLocation): string {
   try { decoded = decodeURIComponent(destination.uri); } catch { /* keep the raw URI */ }
   const name = decoded.split(/[/:]/).pop();
   // A DocumentsProvider may return an opaque ID, not a display name.
-  return name && /\.(epub|zip)$/i.test(name) ? name : uiText("bookExport.target.selected");
+  return name && /\.(epub|txt|cbz|zip)$/i.test(name) ? name : uiText("bookExport.target.selected");
 }
 
 function skippedReason(reason: string): string {

@@ -732,11 +732,18 @@ pub fn validate_portable_book(book: &PortableBook) -> PortableResult<()> {
     Ok(())
 }
 
+pub(super) fn source_schema_version(books: &std::collections::BTreeMap<String, PortableBook>) -> u64 {
+    if books.values().any(|book| matches!(crate::document_formats::extension(&book.metadata.value.file_name).to_ascii_lowercase().as_str(), "txt" | "cbz" | "zip")) { 4 } else { 3 }
+}
+
 pub fn validate_portable_state(state: &PortableStateV3) -> PortableResult<()> {
-    if state.schema_version != 3 {
+    if !matches!(state.schema_version, 3 | 4) {
         return Err(PortableError::invalid_data(
             "invalid-data：不支持的 portable schemaVersion",
         ));
+    }
+    if state.schema_version < source_schema_version(&state.books) {
+        return Err(PortableError::invalid_data("新原书格式需要 portable schemaVersion 4"));
     }
     for (book_hash, book) in &state.books {
         if !valid_content_hash(book_hash) {

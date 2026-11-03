@@ -17,7 +17,7 @@ export class SelectiveEpubArchive {
   readonly directory = new Map<string, ArchiveEntry>();
   private bytes: Uint8Array;
 
-  constructor(bytes: Uint8Array) {
+  constructor(bytes: Uint8Array, validateEpub = true) {
     this.bytes = bytes;
     // filter false 读取目录但不 inflate；不能把“尚未取出”误报为资源不存在。
     unzipSync(bytes, {
@@ -32,6 +32,7 @@ export class SelectiveEpubArchive {
         return false;
       },
     });
+    if (!validateEpub) return;
     const required = this.extract(["mimetype", "META-INF/container.xml"]);
     const mimeBytes = required.get("mimetype");
     if (!mimeBytes || strFromU8(mimeBytes).trim() !== "application/epub+zip") {
@@ -94,8 +95,8 @@ export interface ArchiveClient {
 export class SyncArchiveClient implements ArchiveClient {
   private archive: SelectiveEpubArchive | null;
 
-  constructor(bytes: Uint8Array) {
-    this.archive = new SelectiveEpubArchive(bytes);
+  constructor(bytes: Uint8Array, validateEpub = true) {
+    this.archive = new SelectiveEpubArchive(bytes, validateEpub);
   }
 
   get directory(): ReadonlyMap<string, ArchiveEntry> {
@@ -170,6 +171,10 @@ export class WorkerArchiveClient implements ArchiveClient {
 }
 
 export async function createArchiveClient(bytes: Uint8Array): Promise<ArchiveClient> {
+  return createZipArchiveClient(bytes, true);
+}
+
+export async function createZipArchiveClient(bytes: Uint8Array, validateEpub = false): Promise<ArchiveClient> {
   if (typeof Worker !== "undefined") {
     try {
       const worker = new Worker(new URL("./archiveWorker.ts", import.meta.url), { type: "module" });
@@ -192,12 +197,12 @@ export async function createArchiveClient(bytes: Uint8Array): Promise<ArchiveCli
           worker.terminate();
           reject(new Error(e.message || "Worker 创建错误"));
         };
-        worker.postMessage({ id: 0, type: "init", bytes });
+        worker.postMessage({ id: 0, type: "init", bytes, validateEpub });
       });
       return await initPromise;
     } catch {
       // Fallback to sync
     }
   }
-  return new SyncArchiveClient(bytes);
+  return new SyncArchiveClient(bytes, validateEpub);
 }

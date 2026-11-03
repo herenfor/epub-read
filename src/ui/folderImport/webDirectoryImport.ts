@@ -1,3 +1,4 @@
+import { loadSourceBook, supportedBookName } from "../../core/documentFormats";
 import type {
   DirectoryImportPort,
   DirectoryImportResult,
@@ -16,7 +17,7 @@ import {
   type ImportRoot,
   type ScannedEpub,
 } from "../../core/folderImport/planner";
-import { disposeBook, DrmError, loadBook } from "../../core/book";
+import { disposeBook, DrmError } from "../../core/book";
 import { findDuplicateEntry, sha256Hex } from "../importBooks";
 import type { ShelfEntry, ShelfStore } from "../shelf";
 import {
@@ -102,7 +103,7 @@ export function scanWebDirectoryFiles(
     if (segments.length === 0) return;
     if (!rootName && segments.length > 1) rootName = segments[0];
     const fileName = segments[segments.length - 1];
-    if (!fileName.toLowerCase().endsWith(".epub")) return;
+    if (!supportedBookName(fileName)) return;
     const inputId = `w${index}`;
     items.push({
       inputId,
@@ -281,7 +282,7 @@ export function createWebDirectoryImportPort(options: WebDirectoryImportOptions)
           // Existing canonical data is never re-saved: no fabricated 0% record.
           counts.duplicates++;
         } else {
-          const book = await loadBook(bytes, { selective: true });
+          const book = await loadSourceBook(bytes, file.name, { selective: true });
           try {
             // Last check before the store write: past this point the book is accepted.
             checkCancel();

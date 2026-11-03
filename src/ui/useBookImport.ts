@@ -1,6 +1,7 @@
+import { loadSourceBook, supportedBookName } from "../core/documentFormats";
 import { useCallback, useRef, useState, type Dispatch, type MutableRefObject, type RefObject, type SetStateAction } from "react";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
-import { loadBook, DrmError } from "../core/book";
+import { disposeBook, DrmError } from "../core/book";
 import type { DirectoryImportPort } from "../core/folderImport/contract";
 import type { NativeDirectorySource } from "../platform/directoryImportBridge";
 import type { RuntimeCapabilities } from "../platform/runtimeCapabilities";
@@ -158,7 +159,7 @@ export function useBookImport({
   const handleImportSources = useCallback(async (sources: ImportSource[], target: ImportFolderTarget | null = null): Promise<ShelfEntry[] | null> => {
     const list = sources.filter((source) => {
       const name = source.kind === "file" ? source.file.name : source.name;
-      return name.toLowerCase().endsWith(".epub");
+      return supportedBookName(name);
     });
     if (list.length === 0) return [];
     if (shelfBusyRef.current) return null;
@@ -241,36 +242,39 @@ export function useBookImport({
               continue;
             }
 
-            const b = await loadBook(buf, { selective: true });
-            if (b.spine.length === 0) {
-              throw new Error("书中没有可阅读的内容（spine 为空）");
-            }
-            const cover = b.coverHref ? b.resources.get(b.coverHref) : undefined;
-            const result = await store.save({
-              entry: {
-                id: contentHash,
-                title: b.metadata.title || fileName.replace(/\.epub$/i, ""),
-                creator: b.metadata.creator ?? "",
-                language: b.metadata.language || undefined,
-                fileName,
-                fileSize: buf.byteLength,
-                coverMime: cover?.mediaType ?? "",
-                contentHash,
-                addedAtMs: Date.now(),
-              },
-              bytes: buf,
-              coverBytes: cover?.data,
-              coverMime: cover?.mediaType,
-            });
-            contentHashByIdRef.current.set(result.entry.id, contentHash);
-            entryByContentHashRef.current.set(contentHash, result.entry);
-            accepted.push(result.entry);
-            placed.push(...importedRef(result.entry, result.status === "duplicate"));
-            if (result.status === "duplicate") {
-              duplicateTitles.push(result.entry.title || fileName.replace(/\.epub$/i, ""));
-            } else {
-              imported.push(result.entry);
-            }
+            const b = await loadSourceBook(buf, fileName, { selective: true });
+            try {
+              if (b.spine.length === 0) {
+                throw new Error("书中没有可阅读的内容（spine 为空）");
+              }
+              if (b.coverHref) await b.ensureResources?.([b.coverHref]);
+              const cover = b.coverHref ? b.resources.get(b.coverHref) : undefined;
+              const result = await store.save({
+                entry: {
+                  id: contentHash,
+                  title: b.metadata.title || fileName.replace(/\.epub$/i, ""),
+                  creator: b.metadata.creator ?? "",
+                  language: b.metadata.language || undefined,
+                  fileName,
+                  fileSize: buf.byteLength,
+                  coverMime: cover?.mediaType ?? "",
+                  contentHash,
+                  addedAtMs: Date.now(),
+                },
+                bytes: buf,
+                coverBytes: cover?.data,
+                coverMime: cover?.mediaType,
+              });
+              contentHashByIdRef.current.set(result.entry.id, contentHash);
+              entryByContentHashRef.current.set(contentHash, result.entry);
+              accepted.push(result.entry);
+              placed.push(...importedRef(result.entry, result.status === "duplicate"));
+              if (result.status === "duplicate") {
+                duplicateTitles.push(result.entry.title || fileName.replace(/\.epub$/i, ""));
+              } else {
+                imported.push(result.entry);
+              }
+            } finally { disposeBook(b); }
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             failed.push(
@@ -544,7 +548,7 @@ export function useBookImport({
         multiple: true,
         directory: false,
         title: uiText("notice.picker.chooseEpub"),
-        filters: [{ name: uiText("notice.picker.epubFilter"), extensions: ["epub"] }],
+        filters: [{ name: uiText("notice.picker.epubFilter"), extensions: ["epub", "txt", "cbz", "zip"] }],
       });
       const paths = Array.isArray(selected) ? selected : selected ? [selected] : [];
       if (paths.length === 0) return;

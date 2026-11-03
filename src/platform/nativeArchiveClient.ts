@@ -29,9 +29,10 @@ export async function createNativeArchiveClient(
   contentHash: string,
   invoke: ArchiveInvoke,
   signal?: AbortSignal,
+  textEncoding?: string,
 ): Promise<ArchiveClient> {
   if (signal?.aborted) throw new ArchiveClosedError();
-  const info = await invoke<OpenInfo>("linked_library_archive_open", { contentHash });
+  const info = await invoke<OpenInfo>("linked_library_archive_open", { contentHash, ...(textEncoding ? { textEncoding } : {}) });
   const client = new NativeArchiveClient(info, invoke, signal);
   try {
     if (info.protocolVersion !== 1 || info.chunkBytes !== CHUNK_BYTES) {

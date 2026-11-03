@@ -1,0 +1,251 @@
+/** Adapters from original TXT / image ZIP sources to the shared reading model. */
+import type { ArchiveClient } from "./selectiveArchive";
+import { createZipArchiveClient } from "./selectiveArchive";
+import { loadBook, loadBookFromArchive } from "./book";
+import { detectArchiveReferences } from "./archiveReferences";
+import { guessMediaType } from "./mime";
+import type { Book, BookOptions } from "./types";
+export type SourceFormat = "epub" | "txt" | "comic-zip";
+// Persisted source-scalar boundaries: keep in step with the native adapter.
+export const TEXT_PART_CHARS = 32768;
+export function sourceFormat(name: string): SourceFormat {
+    return /\.txt$/i.test(name) ? "txt" : /\.(?:cbz|zip)$/i.test(name) ? "comic-zip" : "epub";
+}
+export function supportedBookName(name: string): boolean { return /\.(?:epub|txt|cbz|zip)$/i.test(name); }
+export const TEXT_ENCODINGS = ["auto", "utf-8", "utf-16le", "utf-16be", "gb18030", "gbk", "big5", "shift_jis", "euc-jp", "iso-2022-jp", "euc-kr", ...Array.from({ length: 9 }, (_, i) => `windows-${1250 + i}`), "windows-874", "ibm866", "koi8-r", "koi8-u", "macintosh", ...[2, 3, 4, 5, 6, 7, 8, 10, 13, 14, 15, 16].map(n => `iso-8859-${n}`)] as const;
+export function textEncodingFromPath(path: string | null | undefined): string | undefined {
+    const encoding = /^__reader__\/txt\/([^/]+)\/s\d+\.xhtml$/.exec(path ?? "")?.[1];
+    if (!encoding)
+        return;
+    try {
+        return new TextDecoder(encoding).encoding;
+    }
+    catch {
+        return;
+    }
+}
+export function naturalCompare(a: string, b: string): number {
+    const aa = Array.from(a), bb = Array.from(b);
+    let i = 0, j = 0;
+    while (i < aa.length && j < bb.length) {
+        if (/[0-9]/.test(aa[i]) && /[0-9]/.test(bb[j])) {
+            const si = i, sj = j;
+            while (i < aa.length && /[0-9]/.test(aa[i]))
+                i++;
+            while (j < bb.length && /[0-9]/.test(bb[j]))
+                j++;
+            const x = aa.slice(si, i).join("").replace(/^0+/, ""), y = bb.slice(sj, j).join("").replace(/^0+/, "");
+            if (x.length !== y.length)
+                return x.length - y.length;
+            if (x !== y)
+                return x < y ? -1 : 1;
+        }
+        else {
+            const d = aa[i].codePointAt(0)! - bb[j].codePointAt(0)!;
+            if (d)
+                return d;
+            i++;
+            j++;
+        }
+    }
+    return (aa.length - i) - (bb.length - j) || (a === b ? 0 : a < b ? -1 : 1);
+}
+export function comicImageName(path: string): boolean {
+    return !path.split("/").some(s => s.startsWith(".") || s === "__MACOSX") && /\.(?:jpe?g|png|webp|avif|gif)$/i.test(path);
+}
+const encode = new TextEncoder();
+function escape(s: string): string { return s.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]/g, "\ufffd").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+interface TextPart {
+    path: string;
+    start: number;
+    chars: number;
+    headings?: Array<{
+        label: string;
+        offset: number;
+    }>;
+}
+interface TextDocument {
+    format: "txt";
+    encoding: string;
+    title: string;
+    parts: TextPart[];
+    replacements?: boolean;
+}
+function baseBook(title: string): Book {
+    return { version: 3, opfPath: "reader-document", metadata: { title, creator: "", language: "", identifier: "" }, manifest: new Map(), spine: [], guide: [], toc: [], resources: new Map(), fixedLayout: false, issues: [], drmProtected: false };
+}
+function installArchiveResources(book: Book, archive: ArchiveClient): void {
+    let closed = false;
+    book.archive = { close() { if (closed)
+            return; closed = true; archive.close(); } };
+    const pending = new Map<string, Promise<void>>();
+    book.ensureResources = async (paths) => {
+        for (const path of new Set(paths)) {
+            if (closed)
+                throw new Error("阅读资源已关闭");
+            const res = book.resources.get(path);
+            if (!res || res.loaded !== false)
+                continue;
+            let task = pending.get(path);
+            if (!task) {
+                task = archive.extract([path]).then(files => { if (closed)
+                    return; const bytes = files.get(path); if (!bytes)
+                    throw new Error("阅读资源缺失"); res.data = bytes; res.loaded = true; }).finally(() => pending.delete(path));
+                pending.set(path, task);
+            }
+            await task;
+        }
+        if (closed)
+            throw new Error("阅读资源已关闭");
+    };
+    book.readResource = async (path) => { await book.ensureResources!([path]); return book.resources.get(path)?.data; };
+}
+export async function loadTextArchive(archive: ArchiveClient): Promise<Book> {
+    try {
+        const raw = (await archive.extract(["__reader__/document.json"])).get("__reader__/document.json");
+        const doc = JSON.parse(new TextDecoder().decode(raw)) as TextDocument;
+        if (doc.format !== "txt" || !Array.isArray(doc.parts) || !doc.parts.length)
+            throw new Error("文本阅读资源无效");
+        const book = baseBook(doc.title);
+        book.sourceFormat = "txt";
+        book.textEncoding = doc.encoding;
+        for (const [i, p] of doc.parts.entries()) {
+            if (!archive.directory.has(p.path) || textEncodingFromPath(p.path) !== new TextDecoder(doc.encoding).encoding)
+                throw new Error("文本片段身份无效");
+            const id = `text-${i}`;
+            book.manifest.set(id, { id, href: p.path, mediaType: "application/xhtml+xml", properties: [] });
+            book.spine.push({ idref: id, linear: true });
+            book.resources.set(p.path, { path: p.path, data: new Uint8Array(), mediaType: "application/xhtml+xml", loaded: false });
+            for (const h of p.headings ?? [])
+                book.toc.push({ label: h.label, href: `${p.path}#t${h.offset}`, children: [] });
+        }
+        if (!book.toc.length)
+            book.toc = [{ label: doc.title, href: doc.parts[0].path, children: [] }];
+        if (doc.replacements)
+            book.issues.push({ kind: "book_error", source: "txt", message: "文本含有无法按当前编码读取的字节，可在阅读设置中切换TXT编码。" });
+        installArchiveResources(book, archive);
+        return book;
+    }
+    catch (error) {
+        archive.close();
+        throw error;
+    }
+}
+export async function loadComicArchive(archive: ArchiveClient, title: string): Promise<Book> {
+    // A ZIP carrying an EPUB package remains an EPUB even if its suffix was .zip.
+    if (archive.directory.has("META-INF/container.xml"))
+        return loadBookFromArchive(archive);
+    try {
+        const paths = [...archive.directory.keys()].filter(comicImageName).sort(naturalCompare);
+        if (!paths.length)
+            throw new Error("压缩包内没有支持的漫画图片");
+        const book = baseBook(title);
+        book.sourceFormat = "comic-zip";
+        book.fixedLayout = true;
+        book.coverHref = paths[0];
+        book.comicPages = paths.map(path => ({ path, doublePage: false }));
+        const references = detectArchiveReferences(archive.directory);
+        book.archiveReferences = references;
+        for (const path of paths)
+            book.resources.set(path, { path, data: new Uint8Array(), mediaType: guessMediaType(path), loaded: false });
+        const meta = [...archive.directory.keys()].find(p => /(?:^|\/)ComicInfo\.xml$/i.test(p));
+        if (meta && archive.directory.get(meta)!.expandedBytes <= 1024 * 1024) {
+            try {
+                const xml = new TextDecoder().decode((await archive.extract([meta])).get(meta));
+                const { parseXmlText } = await import("./parseXml");
+                const doc = await parseXmlText(xml);
+                const value = (tag: string) => doc.getElementsByTagName(tag)[0]?.textContent?.trim();
+                book.metadata.title = value("Title") || title;
+                book.metadata.creator = value("Writer") || value("Penciller") || "";
+                if (value("Manga") === "YesAndRightToLeft")
+                    book.pageProgression = "rtl";
+                for (const page of Array.from(doc.getElementsByTagName("Page"))) {
+                    const n = Number(page.getAttribute("Image"));
+                    if (!Number.isInteger(n) || n < 0 || n >= paths.length)
+                        continue;
+                    book.comicPages[n].doublePage = /^(?:true|1)$/i.test(page.getAttribute("DoublePage") ?? "");
+                    if (page.getAttribute("Type") === "FrontCover")
+                        book.coverHref = paths[n];
+                }
+            }
+            catch { /* Optional metadata never makes otherwise readable image pages unusable. */ }
+        }
+        const path = "__reader__/comic.xhtml";
+        book.manifest.set("comic", { id: "comic", href: path, mediaType: "application/xhtml+xml", properties: [] });
+        book.spine = [{ idref: "comic", linear: true }];
+        book.resources.set(path, { path, data: encode.encode(`<html xmlns="http://www.w3.org/1999/xhtml"><head/><body>${paths.map(p => `<img src="${escape(p)}"/>`).join("")}</body></html>`), mediaType: "application/xhtml+xml", loaded: true });
+        book.toc = paths.map((p, i) => ({ label: `${i + 1} · ${p.split('/').pop()}`, href: `${path}#page-${i}`, children: [] }));
+        installArchiveResources(book, archive);
+        return book;
+    }
+    catch (error) {
+        archive.close();
+        throw error;
+    }
+}
+function heading(s: string): boolean { return /^(?:第[^\n]{1,20}[章节回卷部][^\n]{0,60}|chapter\s+[\divxlc]+.*|序章|序言|前言|楔子|尾声|尾聲|后记|後記|终章|終章|prologue|epilogue)$/i.test(s.trim()); }
+/** Browser fallback. Native apps perform this decoding in Rust with a bounded stream. */
+export async function loadTextBytes(bytes: Uint8Array, title: string, requested?: string): Promise<Book> {
+    let encoding = requested && requested !== "auto" ? requested : undefined;
+    if (!encoding) {
+        if (bytes[0] === 0xff && bytes[1] === 0xfe)
+            encoding = "utf-16le";
+        else if (bytes[0] === 0xfe && bytes[1] === 0xff)
+            encoding = "utf-16be";
+        else {
+            try {
+                new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+                encoding = "utf-8";
+            }
+            catch {
+                encoding = "gb18030";
+            }
+        }
+    }
+    const decoder = new TextDecoder(encoding), files = new Map<string, Uint8Array>(), parts: TextPart[] = [];
+    let part = "", count = 0, start = 0, cr = false;
+    const flush = () => {
+        const path = `__reader__/txt/${decoder.encoding}/s${start}.xhtml`, headings: NonNullable<TextPart['headings']> = [];
+        let offset = 0;
+        const html = part.split(/(?<=\n)/).map(line => { const match = heading(line); if (match)
+            headings.push({ label: line.trim(), offset }); const value = line.replace(/\n$/, ""); const content = value.trim() ? escape(value) : "<br/>"; const text = match ? `<p id="t${offset}">${content}</p>` : `<p>${content}</p>`; offset += Array.from(line).length; return text; }).join("");
+        files.set(path, encode.encode(`<html xmlns="http://www.w3.org/1999/xhtml"><head><meta charset="utf-8"/><style>body{padding-inline:clamp(16px,3vw,40px)}p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%;break-inside:auto}</style></head><body>${html}</body></html>`));
+        parts.push({ path, start, chars: count, headings });
+        start += count;
+        part = "";
+        count = 0;
+    };
+    for (let offset = 0; offset < bytes.length; offset += 65536) {
+        const value = decoder.decode(bytes.subarray(offset, offset + 65536), { stream: offset + 65536 < bytes.length });
+        for (let ch of value) {
+            if (cr && ch === "\n") {
+                cr = false;
+                continue;
+            }
+            cr = ch === "\r";
+            if (cr)
+                ch = "\n";
+            part += ch;
+            if (++count === TEXT_PART_CHARS)
+                flush();
+        }
+    }
+    if (count || !parts.length)
+        flush();
+    files.set("__reader__/document.json", encode.encode(JSON.stringify({ format: "txt", encoding: decoder.encoding, title, parts })));
+    let closed = false;
+    const archive: ArchiveClient = { directory: new Map([...files].map(([name, data]) => [name, { name, compressedBytes: data.length, expandedBytes: data.length }])), async extract(paths) { if (closed)
+            throw new Error("阅读资源已关闭"); return new Map(paths.map(p => [p, files.get(p)!])); }, close() { closed = true; files.clear(); } };
+    return loadTextArchive(archive);
+}
+export async function loadSourceBook(bytes: Uint8Array, fileName: string, options: BookOptions = {}, encoding?: string): Promise<Book> {
+    const format = sourceFormat(fileName);
+    if (format === "txt")
+        return loadTextBytes(bytes, fileName.replace(/\.txt$/i, ""), encoding);
+    if (format === "comic-zip")
+        return loadComicArchive(await createZipArchiveClient(bytes), fileName.replace(/\.(?:cbz|zip)$/i, ""));
+    return loadBook(bytes, options);
+}
+export async function loadSourceArchive(archive: ArchiveClient, fileName: string, options: BookOptions = {}): Promise<Book> {
+    return sourceFormat(fileName) === "txt" ? loadTextArchive(archive) : sourceFormat(fileName) === "comic-zip" ? loadComicArchive(archive, fileName.replace(/\.(?:cbz|zip)$/i, "")) : loadBookFromArchive(archive, options);
+}

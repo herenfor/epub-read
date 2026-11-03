@@ -36,14 +36,14 @@ pub(super) fn file_snapshot_from_metadata(metadata: &std::fs::Metadata) -> FileS
 pub(super) fn is_epub(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
-        .map(|extension| extension.eq_ignore_ascii_case("epub"))
+        .map(|_| crate::document_formats::supported(&path.to_string_lossy()))
         .unwrap_or(false)
 }
 
 pub(crate) fn canonical_epub_path(raw: &str) -> Result<PathBuf, String> {
     let path = PathBuf::from(raw);
     if !is_epub(&path) {
-        return Err("只能导入 EPUB 文件".into());
+        return Err("支持 EPUB、TXT、CBZ 和图片 ZIP 文件".into());
     }
     fs::canonicalize(&path).map_err(|error| format!("无法规范化源 EPUB 路径：{error}"))
 }

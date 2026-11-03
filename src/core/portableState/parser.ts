@@ -1,3 +1,4 @@
+import { portableSchemaVersion } from "./portable-state-types";
 import { validArchiveEntryKey } from "../archiveReferences";
 /**
  * Strict parser for the frozen portable-state v3 wire.
@@ -749,14 +750,18 @@ function parsePortableStateObject(raw: unknown, failures: PortableStateIssue[], 
   }
   checkFields(raw, "", ["schemaVersion", "books", "organization", "preferences"], failures, options);
   const schemaVersion = readOptional(raw, "schemaVersion");
-  if (schemaVersion !== PORTABLE_STATE_SCHEMA_VERSION) {
-    fail(failures, "schemaVersion", "unsupported-schema-version", "only portable state schemaVersion 3 is supported");
+  if (schemaVersion !== PORTABLE_STATE_SCHEMA_VERSION && schemaVersion !== 4) {
+    fail(failures, "schemaVersion", "unsupported-schema-version", "portable state schemaVersion 3 or 4 is required");
     return null;
   }
   const rawBooks = readOptional(raw, "books");
   if (rawBooks === undefined) return fail(failures, "books", "missing-field", "required field is missing"), null;
   const books = parseBooks(rawBooks, "books", failures, options);
   if (isBad(books)) return null;
+  if (schemaVersion < portableSchemaVersion(books)) {
+    fail(failures, "schemaVersion", "unsupported-schema-version", "TXT/comic sources require schemaVersion 4");
+    return null;
+  }
 
   const rawOrganization = readOptional(raw, "organization");
   if (rawOrganization === undefined) return fail(failures, "organization", "missing-field", "required field is missing"), null;
@@ -778,11 +783,11 @@ function parsePortableStateObject(raw: unknown, failures: PortableStateIssue[], 
   }
 
   const result: {
-    schemaVersion: 3;
+    schemaVersion: 3 | 4;
     books: Record<string, PortableBook>;
     organization: typeof organization;
     preferences?: PortablePreferences;
-  } = { schemaVersion: PORTABLE_STATE_SCHEMA_VERSION, books, organization };
+  } = { schemaVersion: schemaVersion === 4 ? 4 : portableSchemaVersion(books), books, organization };
   if (preferences !== undefined) result.preferences = preferences;
   return result;
 }

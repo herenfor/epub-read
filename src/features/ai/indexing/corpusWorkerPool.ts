@@ -15,6 +15,8 @@ const DEFAULT_MAX_CHARACTERS_PER_BATCH = 128_000;
 
 export interface CorpusWorkerJob {
   jobId: string;
+  fileName?: string;
+  textEncoding?: string;
   book: CorpusBookMetadata;
   /** Eager bytes are useful for tests; production can read just before dispatch. */
   bytes?: ArrayBuffer;
@@ -281,7 +283,7 @@ export function createCorpusWorkerPool(options: CorpusWorkerPoolOptions): Corpus
           type: "start",
           jobId: job.jobId,
           book: job.book,
-          input: { kind: "archive", port: archiveInput.port },
+          input: { kind: "archive", port: archiveInput.port, ...(job.fileName ? { fileName: job.fileName } : {}) },
           maxChunksPerBatch: maxChunks,
           maxCharactersPerBatch: maxCharacters,
         };
@@ -296,7 +298,7 @@ export function createCorpusWorkerPool(options: CorpusWorkerPoolOptions): Corpus
           type: "start",
           jobId: job.jobId,
           book: job.book,
-          input: { kind: "bytes", bytes: payload },
+          input: { kind: "bytes", bytes: payload, ...(job.fileName ? { fileName: job.fileName } : {}), ...(job.textEncoding ? { textEncoding: job.textEncoding } : {}) },
           maxChunksPerBatch: maxChunks,
           maxCharactersPerBatch: maxCharacters,
         };

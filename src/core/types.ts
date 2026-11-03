@@ -70,6 +70,10 @@ export interface Resource {
 }
 
 export interface Book {
+  /** Original source kind; absent means EPUB for existing books. */
+  sourceFormat?: "epub" | "txt" | "comic-zip";
+  textEncoding?: string;
+  comicPages?: Array<{ path: string; doublePage: boolean }>;
   version: 2 | 3;
   /** OPF 的已解析 ZIP 内部键 */
   opfPath: string;

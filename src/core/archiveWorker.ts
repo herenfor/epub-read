@@ -6,7 +6,7 @@ self.onmessage = (e: MessageEvent) => {
   const { id, type, bytes, paths } = e.data;
   try {
     if (type === "init") {
-      archive = new SelectiveEpubArchive(bytes);
+      archive = new SelectiveEpubArchive(bytes, e.data.validateEpub !== false);
       self.postMessage({
         id,
         type: "init:ok",

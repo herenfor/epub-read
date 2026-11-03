@@ -1,8 +1,8 @@
-import { disposeBook, loadBook, loadBookFromArchive } from "../../../core/book";
+import { loadSourceBook, loadSourceArchive } from "../../../core/documentFormats";
+import { disposeBook, loadBook } from "../../../core/book";
 import {
   iterateBookChunkBatches,
   readBookResourceText,
-  textForBookResource,
 } from "../../../core/bookCorpusIndex";
 import { createArchivePortInvoke } from "../../../platform/archiveWorkerBridge";
 import { createNativeArchiveClient } from "../../../platform/nativeArchiveClient";
@@ -52,24 +52,22 @@ async function build(request: CorpusWorkerStartMessage): Promise<void> {
   try {
     const nativeArchive = request.input.kind === "archive";
     if (request.input.kind === "bytes") {
-      book = await loadBook(new Uint8Array(request.input.bytes));
+      book = await loadSourceBook(new Uint8Array(request.input.bytes), request.input.fileName ?? "book.epub", {}, request.input.textEncoding);
     } else {
       archiveTransport = createArchivePortInvoke(request.input.port);
       const archive = await createNativeArchiveClient(request.book.contentHash, archiveTransport.invoke);
-      book = await loadBookFromArchive(archive);
+      book = await loadSourceArchive(archive, request.input.fileName ?? "book.epub");
     }
 
     const currentBook = book;
     if (!currentBook) throw new Error("正文语料建库缺少书籍");
-    if (currentBook.fixedLayout) throw new Error("固定版式书籍不支持正文语料建库");
+    if (currentBook.fixedLayout || currentBook.sourceFormat === "comic-zip") throw new Error("固定版式书籍不支持正文语料建库");
     const signal = { get aborted() { return cancelled.has(request.jobId); } } as AbortSignal;
     let sequence = 0;
     for await (const batch of iterateBookChunkBatches(currentBook, {
       bookFingerprint: request.book.contentHash,
       signal,
-      textFor: (path) => nativeArchive
-        ? readBookResourceText(currentBook, path, signal)
-        : textForBookResource(currentBook, path),
+      textFor: (path) => readBookResourceText(currentBook, path, signal),
     })) {
       if (cancelled.has(request.jobId)) return;
       for (const chunks of splitCorpusWorkerBatches(batch.chunks, request.maxChunksPerBatch, request.maxCharactersPerBatch)) {

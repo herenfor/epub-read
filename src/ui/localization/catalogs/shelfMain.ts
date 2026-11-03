@@ -5,8 +5,8 @@ import { defineMessages } from "../defineMessages";
  * empty states, list-view table, delete confirmation and the batch toolbar.
  */
 export const shelfMain = defineMessages("shelfMain", {
-  "shelfMain.empty.hint.android": "导入 EPUB 后会出现在这里，点击上方“导入”从设备文件中选择",
-  "shelfMain.empty.hint.desktop": "导入 EPUB 后会出现在这里，点击上方“导入”或直接将文件拖拽到窗口",
+  "shelfMain.empty.hint.android": "导入 EPUB、TXT 或漫画压缩包后会出现在这里，点击上方“导入”从设备文件中选择",
+  "shelfMain.empty.hint.desktop": "导入 EPUB、TXT 或漫画压缩包后会出现在这里，点击上方“导入”或直接将文件拖拽到窗口",
   "shelfMain.category.all": { zh: "全部", max: 10 },
   "shelfMain.category.reading": { zh: "正在读", max: 10 },
   "shelfMain.category.unread": { zh: "未读", max: 10 },

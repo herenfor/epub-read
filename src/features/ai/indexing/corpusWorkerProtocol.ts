@@ -4,8 +4,8 @@ import type { CorpusBookMetadata } from "./corpusSink";
 export const CORPUS_WORKER_PROTOCOL_VERSION = 1;
 
 export type CorpusWorkerInput =
-  | { kind: "bytes"; bytes: ArrayBuffer }
-  | { kind: "archive"; port: MessagePort };
+  | { kind: "bytes"; bytes: ArrayBuffer; fileName?: string; textEncoding?: string }
+  | { kind: "archive"; port: MessagePort; fileName?: string };
 
 export interface CorpusWorkerStartMessage {
   protocol: typeof CORPUS_WORKER_PROTOCOL_VERSION;

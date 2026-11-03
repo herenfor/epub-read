@@ -334,7 +334,7 @@ pub fn merge_portable_states(
         }
     }
     Ok(PortableStateV3 {
-        schema_version: 3,
+        schema_version: super::dto::source_schema_version(&books),
         books,
         organization: crate::library_organization::merge_organization(
             &left.organization,

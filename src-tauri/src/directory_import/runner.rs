@@ -884,7 +884,7 @@ fn prepare_managed_reader(
         .len();
     let content_hash = staged.content_hash;
     let started = Instant::now();
-    let metadata = inspect_epub(staging.path()).map_err(|error| (false, error))?;
+    let metadata = crate::linked_library::epub_meta::inspect_book(staging.path(), &entry.epub.file_name).map_err(|error| (false, error))?;
     let metadata_micros = elapsed_micros(started);
     if metadata.spine.is_empty() {
         return Err((false, "EPUB OPF 没有可阅读的 spine 条目".to_string()));

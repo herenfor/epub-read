@@ -1,3 +1,4 @@
+import { portableSchemaVersion } from "../../core/portableState/portable-state-types";
 /**
  * Web portable-state service.
  *
@@ -355,7 +356,7 @@ function buildLegacyImportState(
     };
   }
   return {
-    state: { schemaVersion: 3, books, organization },
+    state: { schemaVersion: portableSchemaVersion(books), books, organization },
     nextCounter: counter,
     importedHashes,
   };
@@ -451,7 +452,7 @@ export class PortableStateService implements PortableStateCommandService {
     const rawPreferences = await tx.getMeta(META_PREFERENCES);
     const preferences = rawPreferences === undefined ? undefined : parsePortablePreferences(rawPreferences);
     const state: PortableStateV3 = {
-      schemaVersion: 3,
+      schemaVersion: portableSchemaVersion(books),
       books,
       organization: envelope?.state ?? emptyOrganization(),
       ...(preferences === undefined ? {} : { preferences }),

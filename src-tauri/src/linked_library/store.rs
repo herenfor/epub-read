@@ -109,7 +109,7 @@ pub(crate) fn managed_source_path(library_root: &Path, content_hash: &str) -> Re
 }
 
 /// A library copy with a readable name (A34). The name is a single plain file
-/// name ending in `.epub`; anything that could leave `books/` is rejected.
+/// name with a supported source suffix; anything that could leave `books/` is rejected.
 pub(crate) fn managed_named_path(library_root: &Path, file_name: &str) -> Result<PathBuf, String> {
     if !valid_library_file_name(file_name) {
         return Err("托管副本文件名无效".into());
@@ -123,8 +123,8 @@ pub(crate) fn valid_library_file_name(name: &str) -> bool {
         && components.next().is_none()
         && !name.contains(['/', '\\', ':'])
         && !name.starts_with('.')
-        && name.len() > ".epub".len()
-        && name.to_ascii_lowercase().ends_with(".epub")
+        && crate::document_formats::supported(name)
+        && name.rsplit_once('.').is_some_and(|(stem, _)| !stem.is_empty())
 }
 
 pub(super) fn records_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -887,4 +887,17 @@ pub(super) fn delete_records(app: &AppHandle, content_hashes: Vec<String>) -> Re
         app.state::<AiState>()
             .cleanup_books_if_present(app, target_hashes)
     })
+}
+
+#[cfg(test)]
+mod source_format_tests {
+    #[test]
+    fn source_formats_managed_names_preserve_the_path_boundary() {
+        for name in ["a.txt","书.CBZ","c.zip","d.epub"] {
+            assert!(super::valid_library_file_name(name));
+        }
+        for name in ["../a.txt","a/b.cbz","a.exe",".txt"] {
+            assert!(!super::valid_library_file_name(name));
+        }
+    }
 }

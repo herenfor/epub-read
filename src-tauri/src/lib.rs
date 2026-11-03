@@ -1,3 +1,4 @@
+mod document_formats;
 mod android_app_task;
 mod android_app_update;
 mod android_reader_system_bars;

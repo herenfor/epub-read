@@ -505,7 +505,7 @@ pub(crate) fn build_migration_plan(root: &Path) -> PortableResult<MigrationPlan>
 
     Ok(MigrationPlan {
         state: PortableStateV3 {
-            schema_version: 3,
+            schema_version: super::dto::source_schema_version(&books),
             books,
             organization: organization.state,
             preferences: None,
@@ -571,7 +571,7 @@ pub(crate) fn build_import_state(
         }
     }
     Ok(PortableStateV3 {
-        schema_version: 3,
+        schema_version: super::dto::source_schema_version(&books),
         books,
         organization: organization.clone(),
         preferences: None,

@@ -7,7 +7,7 @@
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ArchiveReader {
-    /// zipped `.epubsave` container 1 with portable state schema 3.
+    /// zipped `.epubsave` container 1; schemas 3 and 4 share the causal-state layout.
     Container1State3,
 }
 
@@ -21,7 +21,7 @@ pub(crate) enum VersionError {
 
 /// Select a ZIP archive reader by the exact container/state pair.
 ///
-/// A future schema4 reader must be added as a new arm here. Do not turn this
+/// Schema 4 additionally permits TXT/comic source identities. Do not turn this
 /// into a range check: old values can be invalid and must not be silently
 /// decoded by the current v3 reader.
 pub(crate) fn select_archive_reader(
@@ -29,8 +29,8 @@ pub(crate) fn select_archive_reader(
     schema: u64,
 ) -> Result<ArchiveReader, VersionError> {
     match (container, schema) {
-        (1, 3) => Ok(ArchiveReader::Container1State3),
-        (container, schema) if container > 1 || schema > 3 => Err(VersionError::NeedsNewerApp),
+        (1, 3 | 4) => Ok(ArchiveReader::Container1State3),
+        (container, schema) if container > 1 || schema > 4 => Err(VersionError::NeedsNewerApp),
         _ => Err(VersionError::UnsupportedFormat),
     }
 }
@@ -62,7 +62,7 @@ mod tests {
             Err(VersionError::NeedsNewerApp)
         );
         assert_eq!(
-            select_archive_reader(1, 4),
+            select_archive_reader(1, 5),
             Err(VersionError::NeedsNewerApp)
         );
         assert_eq!(

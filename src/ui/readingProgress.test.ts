@@ -13,4 +13,10 @@ describe("current chapter progress numerator", () => {
       currentChapterCharsRead({ textOffset: 0, page: 4, pageCount: 10, chapterChars: 1_000 })
     ).toBe(0);
   });
+  it("uses a long image's source fraction across single, double and scroll displays", () => {
+    for (const pageCount of [1, 3, 6]) {
+      expect(currentChapterCharsRead({ textOffset: null, page: 1, pageCount, chapterChars: 6000, chapterFraction: 0.75 })).toBe(4500);
+    }
+  });
+
 });

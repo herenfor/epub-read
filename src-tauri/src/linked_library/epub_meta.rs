@@ -372,6 +372,17 @@ pub(super) fn read_zip_entry_bounded<R: Read>(
 }
 
 pub(crate) fn inspect_epub(path: &Path) -> Result<ImportedMetadata, String> {
+    inspect_book(path, path.file_name().and_then(|s| s.to_str()).unwrap_or("book.epub"))
+}
+
+pub(crate) fn inspect_book(path: &Path, file_name: &str) -> Result<ImportedMetadata, String> {
+    if !crate::document_formats::extension(file_name).eq_ignore_ascii_case("epub") {
+        return crate::document_formats::inspect(path, file_name);
+    }
+    inspect_epub_package(path)
+}
+
+pub(crate) fn inspect_epub_package(path: &Path) -> Result<ImportedMetadata, String> {
     let file = File::open(path).map_err(|error| format!("无法打开 EPUB ZIP：{error}"))?;
     let mut archive =
         ZipArchive::new(file).map_err(|error| format!("EPUB 不是有效 ZIP：{error}"))?;

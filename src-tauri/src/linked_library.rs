@@ -45,7 +45,7 @@ use tauri::{
 use zip::ZipArchive;
 use crate::native_zip_session::{Fault, NativeZipSession, CHUNK_BYTES};
 
-mod epub_meta;
+pub(crate) mod epub_meta;
 pub(crate) use epub_meta::{
     inspect_epub,
     inspect_epub_cover,

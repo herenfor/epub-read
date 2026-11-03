@@ -1,5 +1,5 @@
 {
-  "shelf.import.tip": "Import EPUB books to library",
+  "shelf.import.tip": "Import books (EPUB, TXT, CBZ, ZIP) to library",
   "shelf.import.short": "Import",
   "shelf.import.books": "Import Books",
   "shelf.import.menu.tip": "Import books or folder",
@@ -76,5 +76,5 @@
   "shelf.timeSegment.last30Days": "Last 30 days",
   "shelf.timeSegment.thisYear": "This year",
   "shelf.timeSegment.older": "Older",
-  "shelf.import.toFolder.tip": "Import EPUB books into folder “{name}”"
+  "shelf.import.toFolder.tip": "Import books (EPUB, TXT, CBZ, ZIP) into folder “{name}”"
 }

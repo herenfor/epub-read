@@ -37,4 +37,9 @@ export const readerMisc = defineMessages("readerMisc", {
   "readerMisc.chapter.retry": { zh: "重试", max: 8 },
   "readerMisc.bookEnd": { zh: "全书完", note: "Shown after the last chapter: 'The End'." },
   "readerMisc.bookEnd.hint": "已读完全部章节",
+  "readerMisc.comic.decodeFailed": "漫画图片无法解码",
+  "readerMisc.comic.zoom": "放大图片",
+  "readerMisc.txt.encodingHelp": "切换编码会从开头重新排版；已有全文索引需重建。",
+  "readerMisc.txt.encoding": "TXT 文本编码",
+  "readerMisc.txt.auto": "自动识别",
 });
