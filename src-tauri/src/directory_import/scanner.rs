@@ -11,6 +11,7 @@ use std::path::Path;
 pub struct ScanOutput {
     pub root: ImportRoot,
     pub entries: Vec<ScannedEntry>,
+    pub modified: std::collections::HashMap<String, u64>,
     pub skipped_directory_count: usize,
     pub unreadable_directory_count: usize,
     pub cancelled: bool,
@@ -21,6 +22,7 @@ impl ScanOutput {
         Self {
             root,
             entries: Vec::new(),
+            modified: Default::default(),
             skipped_directory_count: 0,
             unreadable_directory_count: 0,
             cancelled: false,
@@ -117,9 +119,20 @@ fn scan_directory(
                 continue;
             }
         };
+        let input_id = canonical.to_string_lossy().into_owned();
+        if let Some(modified) = metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        {
+            output.modified.insert(
+                input_id.clone(),
+                modified.as_nanos().min(u64::MAX as u128) as u64,
+            );
+        }
         output.entries.push(ScannedEntry {
             epub: ScannedEpub {
-                input_id: canonical.to_string_lossy().to_string(),
+                input_id,
                 relative_parent_segments: relative_segments.to_vec(),
                 file_name,
                 size_hint: Some(metadata.len()),
@@ -163,6 +176,7 @@ pub struct AndroidEntry {
     pub display_name: String,
     pub mime_type: String,
     pub size: Option<u64>,
+    pub modified: Option<u64>,
     pub is_directory: bool,
 }
 
@@ -261,6 +275,9 @@ fn scan_android_children(
             && !is_candidate_epub(&child.display_name)
         {
             continue;
+        }
+        if let Some(modified) = child.modified {
+            output.modified.insert(child.uri.clone(), modified);
         }
         output.entries.push(ScannedEntry {
             epub: ScannedEpub {

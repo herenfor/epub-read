@@ -16,3 +16,4 @@ pub(crate) mod policy;
 mod runner;
 pub(crate) mod scanner;
 pub(crate) mod types;
+pub(crate) mod watch;
