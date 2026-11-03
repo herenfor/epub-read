@@ -5,7 +5,7 @@ import type { RibbonBookmark, RibbonMark } from "./bookmarkRibbons";
 import { pageRibbonLeft } from "./bookmarkRibbons";
 import { BookmarkRibbonLayer } from "./BookmarkRibbonLayer";
 import { comicSpreads, comicPageForAnchor, comicTurnTarget } from "./comicPages";
-import { comicDecodeOrder, comicReadOrder } from "./comicReadOrder";
+import { comicDecodeOrder, comicReadOrder, comicSpeculativeBusy } from "./comicReadOrder";
 import { COMIC_ZOOM_MAX, COMIC_ZOOM_NONE, COMIC_ZOOM_RELEASE, panComicZoom, pinchComicZoom, zoomComicAt, type ComicZoomView, type ZoomPoint } from "./comicZoom";
 import { createReaderTapGeometry, routeReaderTap } from "./readerTapRouting";
 import { resolveReaderPalette } from "../config/readerPalette";
@@ -413,10 +413,6 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
         const next = new Set(comicDecodeOrder(order, resources.urgent, i => resources.held.get(i)?.pixels, budget)
           .filter(i => resources.held.has(i)));
         if (next.size === displayed.size && [...next].every(i => displayed.has(i))) return;
-        for (const i of displayed) if (!next.has(i)) {
-          decoded.current.delete(i);
-          resources.painted.delete(i);
-        }
         displayed = next;
         setUrls(Object.fromEntries([...next].map(i => [i, resources.held.get(i)!.url])));
       },
@@ -429,8 +425,8 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
         if (!preload) for (const [i, controller] of resources.pending) if (!resources.urgent.has(i)) {
           controller.abort(); resources.pending.delete(i);
         }
-        let speculativeBusy = resources.order.some(i => !resources.urgent.has(i) &&
-          (resources.pending.has(i) || (resources.held.has(i) && !resources.painted.has(i))));
+        let speculativeBusy = comicSpeculativeBusy(resources.order, resources.urgent, resources.pending, displayed,
+          i => resources.painted.has(i) || errors.current.has(i));
         for (const i of resources.order) {
           const urgent = resources.urgent.has(i);
           if (!urgent && (!preload || speculativeBusy)) break;
@@ -494,7 +490,7 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
       controller.abort(); resources.pending.delete(i);
     }
     for (const [i, lease] of resources.held) if (!resources.wanted.has(i)) {
-      lease.release(); resources.held.delete(i); decoded.current.delete(i); resources.painted.delete(i);
+      lease.release(); resources.held.delete(i);
     }
     resources.pump();
   }, [page, warmPage, intersectingScreen, groups, scroll, stripViewport, stripStart, revision, props.server, pages, groupForPage]);
@@ -742,7 +738,14 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
           decoded.current.add(i);
           redraw(n => n + 1);
         }}
-        onError={() => { errors.current.set(i, uiText("readerMisc.comic.decodeFailed")); redraw(n => n + 1); }}/>
+        onError={() => { errors.current.set(i, uiText("readerMisc.comic.decodeFailed")); redraw(n => n + 1); }}
+        onGone={() => {
+          // Decoded means "this page's element on screen has drawn". Releases and
+          // re-reads that React folds into one render keep the element, so only
+          // its removal may clear the mark.
+          decoded.current.delete(i);
+          owner.current?.painted.delete(i);
+        }}/>
         : <div className="comic-placeholder"/>}
     </div>;
   }, [pages, scroll, urls, props.server, width, height, columns, zoomed, groupForPage, page]);

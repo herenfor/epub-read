@@ -10,9 +10,11 @@ export const COMIC_ZOOM_RELEASE = 1.03;
 
 export const COMIC_ZOOM_NONE: ComicZoomView = { scale: 1, x: 0, y: 0 };
 
+const clampScale = (scale: number) => Math.min(COMIC_ZOOM_MAX, Math.max(SQUEEZE_MIN, scale));
+
 /** Keeps the zoomed screen covering its box, so no empty edge shows. */
 export function clampComicZoom(view: ComicZoomView, width: number, height: number): ComicZoomView {
-  const scale = Math.min(COMIC_ZOOM_MAX, Math.max(SQUEEZE_MIN, view.scale));
+  const scale = clampScale(view.scale);
   if (scale < 1) return { scale, x: width * (1 - scale) / 2, y: height * (1 - scale) / 2 };
   return {
     scale,
@@ -27,7 +29,8 @@ export function clampComicZoom(view: ComicZoomView, width: number, height: numbe
  */
 export function pinchComicZoom(start: ComicZoomView, startMid: ZoomPoint, startDistance: number,
   mid: ZoomPoint, distance: number, width: number, height: number): ComicZoomView {
-  const scale = start.scale * distance / Math.max(1, startDistance);
+  // Capped first: a pinch past the limit keeps the point under the fingers where it is.
+  const scale = clampScale(start.scale * distance / Math.max(1, startDistance));
   const contentX = (startMid.x - start.x) / start.scale, contentY = (startMid.y - start.y) / start.scale;
   return clampComicZoom({ scale, x: mid.x - contentX * scale, y: mid.y - contentY * scale }, width, height);
 }

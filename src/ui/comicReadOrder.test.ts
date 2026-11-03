@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { comicDecodeOrder, comicReadOrder } from "./comicReadOrder";
+import { comicDecodeOrder, comicReadOrder, comicSpeculativeBusy } from "./comicReadOrder";
 
 const spreads = [[0], [1, 2], [3, 4], [5], [6, 7]];
 const spreadOf = [0, 1, 1, 2, 2, 3, 4, 4];
@@ -36,4 +36,13 @@ it("keeps directional predecode for small pages and defers unknown image sizes",
     .toEqual([3, 4, 1, 2]);
   expect(comicDecodeOrder([3, 5, 1], new Set([3, 5]), pixels, 18_000_000))
     .toEqual([3, 5]);
+});
+
+it("does not let a held page the decode order skips block the preload slot", () => {
+  // Turned back (page 3 read), then forward: 5 comes first and is unread, so 3 stays unshown.
+  const order = [4, 5, 3], urgent = new Set([4]);
+  expect(comicSpeculativeBusy(order, urgent, new Set(), new Set([4]), page => page === 4)).toBe(false);
+  expect(comicSpeculativeBusy(order, urgent, new Set([5]), new Set([4]), page => page === 4)).toBe(true);
+  expect(comicSpeculativeBusy(order, urgent, new Set(), new Set([4, 5]), page => page === 4)).toBe(true);
+  expect(comicSpeculativeBusy(order, urgent, new Set(), new Set([4, 5]), () => true)).toBe(false);
 });

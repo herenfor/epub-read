@@ -41,3 +41,19 @@ export function comicDecodeOrder(
   }
   return result;
 }
+
+/**
+ * A speculative page holds the single preload slot while it is being read, or
+ * while it is shown but not yet painted. A held page the decode order leaves
+ * out (an unread page ahead of it) is neither, so it must not hold the slot:
+ * that page ahead could then never be read.
+ */
+export function comicSpeculativeBusy(
+  order: readonly number[],
+  urgent: ReadonlySet<number>,
+  reading: ReadonlySet<number> | ReadonlyMap<number, unknown>,
+  shown: ReadonlySet<number>,
+  settled: (page: number) => boolean,
+): boolean {
+  return order.some(page => !urgent.has(page) && (reading.has(page) || (shown.has(page) && !settled(page))));
+}
