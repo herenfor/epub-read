@@ -221,6 +221,15 @@ describe("CP-I portable ShelfStore facade", () => {
     }
   });
 
+  test("keeps the device-only original-location mark through the portable projection", async () => {
+    const legacy = new FakeLegacyStore([entry({ originalLocation: true })]);
+    const service = new PortableStateService(new MemoryPortableStateStorage());
+    await activatePortableShelfStore(legacy, service);
+    const store = new PortableShelfStore(legacy, service);
+    expect((await store.readProgressEntryForOpen(LOCAL_ID)).originalLocation).toBe(true);
+    expect((await store.list()).find((item) => item.contentHash === HASH)?.originalLocation).toBe(true);
+  });
+
   test("native import returns the reset progress basis and current annotations", async () => {
     const legacy = new FakeLegacyStore([entry()]);
     const service = new PortableStateService(new MemoryPortableStateStorage());

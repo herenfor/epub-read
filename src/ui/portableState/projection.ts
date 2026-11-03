@@ -194,6 +194,8 @@ export function projectShelfEntry(
     bookmarks,
     notes,
     ...(local?.available === undefined ? {} : { available: local.available }),
+    // Device-only: the book is read where it is (Android document link), never part of portable state.
+    ...(local?.originalLocation ? { originalLocation: true } : {}),
     ...(local?.thumbnailMime ? { thumbnailMime: local.thumbnailMime } : {}),
     chapterPath: fields.reading.chapterPath,
     portableLocator: fields.reading.portableLocator,
