@@ -43,7 +43,7 @@ export interface ResourceIssue {
  * 淘汰时同时撤销 blob URL、清空原始字节并置回 loaded=false。
  */
 export class ResourceServer {
-  private urls = new Map<string, string>();
+  private urls = new Map<string, { url: string; blob: Blob }>();
   private textCache = new Map<string, { text: string; bytes: number }>();
   private textCacheBytes = 0;
   private textCacheHits = 0;
@@ -157,7 +157,7 @@ export class ResourceServer {
   }
 
   /** One user-requested media entry, pinned until its decoder is detached. */
-  async acquireResource(path: string, signal?: AbortSignal): Promise<{ url: string; release(): void }> {
+  async acquireResource(path: string, signal?: AbortSignal): Promise<{ url: string; blob: Blob; release(): void }> {
     const book = this.book;
     if (!book) throw new ArchiveClosedError();
     if (!book.resources.has(path)) {
@@ -172,8 +172,9 @@ export class ResourceServer {
       signal?.throwIfAborted();
       if (this.book !== book) throw new ArchiveClosedError();
       const url = this.urlFor(path);
-      if (!url) throw new Error("书内资源读取未完成");
-      return { url, release: () => this.releaseHolder(holderId) };
+      const entry = this.urls.get(path);
+      if (!url || !entry) throw new Error("书内资源读取未完成");
+      return { ...entry, release: () => this.releaseHolder(holderId) };
     } catch (error) {
       this.releaseHolder(holderId);
       throw error;
@@ -184,14 +185,13 @@ export class ResourceServer {
     const cached = this.urls.get(path);
     if (cached) {
       this.touchMedia(path);
-      return cached;
+      return cached.url;
     }
     const res = this.book?.resources.get(path);
     if (!res || !isLoadedResource(res)) return undefined;
-    const url = URL.createObjectURL(
-      new Blob([res.data as BlobPart], { type: res.mediaType || "application/octet-stream" })
-    );
-    this.urls.set(path, url);
+    const blob = new Blob([res.data as BlobPart], { type: res.mediaType || "application/octet-stream" });
+    const url = URL.createObjectURL(blob);
+    this.urls.set(path, { url, blob });
     this.touchMedia(path);
     if (enforceBudget) this.enforceMediaBudget(new Set([path]));
     return url;
@@ -390,7 +390,7 @@ export class ResourceServer {
 
   revokeAll(): void {
     this.stylesheets.clear();
-    for (const u of this.urls.values()) URL.revokeObjectURL(u);
+    for (const { url } of this.urls.values()) URL.revokeObjectURL(url);
     this.urls.clear();
     this.textCache.clear();
     this.textCacheBytes = 0;
@@ -479,7 +479,7 @@ export class ResourceServer {
     this.stylesheets.invalidateResource(path);
     const url = this.urls.get(path);
     if (url) {
-      URL.revokeObjectURL(url);
+      URL.revokeObjectURL(url.url);
       this.urls.delete(path);
     }
     this.dropTextCache(path);

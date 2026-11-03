@@ -29,7 +29,7 @@ function stripWindowStart(page: number, count: number): number {
   return Math.max(0, Math.min(count - STRIP_WINDOW_PAGES, page - STRIP_WINDOW_PAGES / 2));
 }
 type Position = { page: number; ratio: number };
-type Lease = { url: string; release(): void; pixels: number | undefined };
+type Lease = { url: string; blob: Blob; release(): void; pixels: number | undefined };
 const ANDROID_DECODE_PIXELS = 18_000_000;
 const DESKTOP_DECODE_PIXELS = 32_000_000;
 /**
@@ -41,6 +41,7 @@ type Resources = {
   closed: boolean; hidden: boolean;
   urgent: Set<number>; order: number[]; wanted: Set<number>;
   held: Map<number, Lease>; pending: Map<number, AbortController>;
+  painted: Set<number>;
   publishImages(): void;
   pump(): void;
 };
@@ -406,29 +407,36 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
     const budget = android ? ANDROID_DECODE_PIXELS : DESKTOP_DECODE_PIXELS;
     const resources: Resources = {
       closed: false, hidden: document.hidden || !nativeForeground,
-      urgent: new Set(), order: [], wanted: new Set(), held: new Map(), pending: new Map(),
+      urgent: new Set(), order: [], wanted: new Set(), held: new Map(), pending: new Map(), painted: new Set(),
       publishImages() {
         const order = resources.hidden ? resources.order.filter(i => resources.urgent.has(i)) : resources.order;
         const next = new Set(comicDecodeOrder(order, resources.urgent, i => resources.held.get(i)?.pixels, budget)
           .filter(i => resources.held.has(i)));
         if (next.size === displayed.size && [...next].every(i => displayed.has(i))) return;
-        for (const i of displayed) if (!next.has(i)) decoded.current.delete(i);
+        for (const i of displayed) if (!next.has(i)) {
+          decoded.current.delete(i);
+          resources.painted.delete(i);
+        }
         displayed = next;
         setUrls(Object.fromEntries([...next].map(i => [i, resources.held.get(i)!.url])));
       },
       pump() {
         if (resources.closed) return;
         resources.publishImages();
-        const urgentReady = [...resources.urgent].every(i => resources.held.has(i) || errors.current.has(i));
+        const urgentReady = [...resources.urgent].every(i => resources.painted.has(i) || errors.current.has(i));
         // Preloads give way until the visible pages arrive, and wait while in the background.
         const preload = urgentReady && !resources.hidden;
         if (!preload) for (const [i, controller] of resources.pending) if (!resources.urgent.has(i)) {
           controller.abort(); resources.pending.delete(i);
         }
+        let speculativeBusy = resources.order.some(i => !resources.urgent.has(i) &&
+          (resources.pending.has(i) || (resources.held.has(i) && !resources.painted.has(i))));
         for (const i of resources.order) {
-          if (!preload && !resources.urgent.has(i)) break;
+          const urgent = resources.urgent.has(i);
+          if (!urgent && (!preload || speculativeBusy)) break;
           if (resources.held.has(i) || resources.pending.has(i) || errors.current.has(i)) continue;
           const controller = new AbortController();
+          if (!urgent) speculativeBusy = true;
           resources.pending.set(i, controller);
           void server.acquireResource(pages[i].path, controller.signal).then(lease => {
             if (resources.closed || controller.signal.aborted || !resources.wanted.has(i)) { lease.release(); return; }
@@ -486,10 +494,26 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
       controller.abort(); resources.pending.delete(i);
     }
     for (const [i, lease] of resources.held) if (!resources.wanted.has(i)) {
-      lease.release(); resources.held.delete(i); decoded.current.delete(i);
+      lease.release(); resources.held.delete(i); decoded.current.delete(i); resources.painted.delete(i);
     }
     resources.pump();
   }, [page, warmPage, intersectingScreen, groups, scroll, stripViewport, stripStart, revision, props.server, pages, groupForPage]);
+  useEffect(() => {
+    const resources = owner.current;
+    if (!resources) return;
+    let paintedFrame = 0;
+    const frame = requestAnimationFrame(() => {
+      paintedFrame = requestAnimationFrame(() => {
+        if (resources.closed) return;
+        for (const i of decoded.current) resources.painted.add(i);
+        resources.pump();
+      });
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      cancelAnimationFrame(paintedFrame);
+    };
+  }, [revision, props.server]);
   useEffect(() => { report(); }, [page, moving, urls, revision, width, columns, scroll]);
   useEffect(() => {
     const el = track.current!;
@@ -702,15 +726,17 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
     .map(p => ({ key: `${page}:${p.lane}`, ids: p.ids, x: pageRibbonLeft(p.side, p.side === "right" ? width : 0), y: p.y, kind: "page", side: p.side }));
   const image = useCallback((i: number) => {
     const url = urls[i];
+    const lease = owner.current?.held.get(i);
     const size = url && !scroll ? props.server.resourceRasterSize(pages[i].path) : undefined;
     const dpr = Math.max(1, window.devicePixelRatio || 1);
     const scale = size && width && height ? Math.min(width / columns * dpr / size.width, height * dpr / size.height) : 1;
-    const target = size && scale < .8 && typeof createImageBitmap === "function"
-      ? { width: Math.max(1, Math.round(size.width * scale)), height: Math.max(1, Math.round(size.height * scale)) }
+    // Small chrome/viewport changes should not schedule a fresh decode.
+    const targetHeight = size && scale < .8 && typeof createImageBitmap === "function"
+      ? Math.min(size.height, Math.ceil(size.height * scale / 32) * 32)
       : undefined;
     return <div className="comic-page" key={pages[i].path} data-comic-page={scroll ? i : undefined}
       style={scroll ? { aspectRatio: dimensions.current.has(i) ? `${dimensions.current.get(i)!.width}/${dimensions.current.get(i)!.height}` : "3/4" } : undefined}>
-      {url ? <ComicPageRaster key={url} url={url} alt={`${i + 1}`} target={target} zoomed={zoomed && !scroll && groupForPage[i] === groupForPage[page]}
+      {url && lease ? <ComicPageRaster key={url} url={url} blob={lease.blob} alt={`${i + 1}`} targetHeight={targetHeight} zoomed={zoomed && !scroll && groupForPage[i] === groupForPage[page]}
         onReady={size => {
           dimensions.current.set(i, size);
           decoded.current.add(i);
