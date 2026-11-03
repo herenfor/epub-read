@@ -53,7 +53,8 @@ function isErrorPayload(value: unknown): value is { code: PortableStateErrorCode
     typeof candidate.message === "string";
 }
 
-function nativeError(error: unknown): never {
+/** Converts a native repository error payload; other errors are rethrown unchanged. */
+export function nativeError(error: unknown): never {
   if (isErrorPayload(error)) {
     const converted = new PortableStateError(error.code, error.message);
     const allowed = (error as { legacyFallbackAllowed?: unknown }).legacyFallbackAllowed;

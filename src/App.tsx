@@ -157,6 +157,11 @@ import {
 } from "./ui/useShelfLibrary";
 import { displayNameFromContentUri, useBookImportState, useBookImport, useFolderImport, type ImportFolderTarget } from "./ui/useBookImport";
 import { useExternalOpen } from "./ui/useExternalOpen";
+import { activeShelfSpace, shelfSpaceStorage } from "./ui/shelfSpaces";
+import { useShelfSpaces } from "./ui/privateShelf/useShelfSpaces";
+import { PrivateShelfDialog } from "./ui/privateShelf/PrivateShelfDialog";
+import { privateShelfNative } from "./platform/privateShelf";
+import { emptyOrganization } from "./ui/libraryOrganization";
 import type { ExternalOpenOutcome } from "./ui/externalOpenPump";
 import type { ExternalOpenRequest } from "./platform/externalOpenBridge";
 import { ExternalOpenFailureDialog } from "./ui/ExternalOpenFailureDialog";
@@ -998,8 +1003,9 @@ export default function App() {
   }, []);
   const localCheckpointsRef = useRef<LocalProgressCheckpoints<ShelfProgressPatch> | null>(null);
   if (!localCheckpointsRef.current) {
+    // A shelf that must not persist (the private shelf) keeps these in memory.
     localCheckpointsRef.current = new LocalProgressCheckpoints(
-      window.localStorage,
+      shelfSpaceStorage,
       parseLocalProgressCheckpoint,
       () => (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function")
         ? crypto.randomUUID()
@@ -1950,7 +1956,8 @@ export default function App() {
   // A scan that adds nothing refreshes nothing; it is not a sync event either.
   const lastFolderWatchErrorRef = useRef<string | null>(null);
   useFolderWatchTriggers(
-    view === "shelf" && libraryLoad.status === "ready" && !shelfBusy && nativeImport === null && !folderImport && !saveFailurePrompt,
+    view === "shelf" && libraryLoad.status === "ready" && !shelfBusy && nativeImport === null && !folderImport && !saveFailurePrompt
+      && activeShelfSpace().policy.libraryServices,
     (outcome, manual) => {
       if (outcome.kind === "error") {
         // The settings show the reason; the shelf says it once per reason.
@@ -2550,7 +2557,7 @@ export default function App() {
             );
           }
         }
-        const openArchive = isTauriEnv() && (runtime.platform === "android" || sourceFormat(entry.fileName) !== "epub")
+        const openArchive = isTauriEnv() && (store.archiveOnly || runtime.platform === "android" || sourceFormat(entry.fileName) !== "epub")
           ? store.openArchive?.bind(store)
           : undefined;
         const chosenProjection = chosenProgressVersion
@@ -2563,7 +2570,7 @@ export default function App() {
         if (openArchive) {
           openStage = "openArchive";
           const sourceEncoding = sourceFormat(entry.fileName) === "txt"
-            ? textEncodingOverride || textEncodingFromPath((chosenProgressVersion ? projectProgressVersion(chosenProgressVersion).chapterPath : (entry as { chapterPath?: string }).chapterPath)) || localStorage.getItem(`epub-reader:txt-encoding:${id}`)
+            ? textEncodingOverride || textEncodingFromPath((chosenProgressVersion ? projectProgressVersion(chosenProgressVersion).chapterPath : (entry as { chapterPath?: string }).chapterPath)) || shelfSpaceStorage.getItem(`epub-reader:txt-encoding:${id}`)
             : undefined;
           const archive = await openArchive(id, sourceEncoding || undefined).catch((error) => {
             if (describeBookOpenFailure(error).sourceUnavailable) {
@@ -2612,7 +2619,7 @@ export default function App() {
             await store.beginProgressSession(id, progressSelection);
           }
           openStage = "parse";
-          b = await loadSourceBook(buf, entry.fileName, { selective: true, initialSpineIndex }, textEncodingOverride || textEncodingFromPath(chosenProgressVersion ? projectProgressVersion(chosenProgressVersion).chapterPath : (entry as {chapterPath?: string}).chapterPath) || localStorage.getItem(`epub-reader:txt-encoding:${id}`) || undefined);
+          b = await loadSourceBook(buf, entry.fileName, { selective: true, initialSpineIndex }, textEncodingOverride || textEncodingFromPath(chosenProgressVersion ? projectProgressVersion(chosenProgressVersion).chapterPath : (entry as {chapterPath?: string}).chapterPath) || shelfSpaceStorage.getItem(`epub-reader:txt-encoding:${id}`) || undefined);
         }
         // 在 openParsedBook 正式接管前，Book 仍由本函数负责释放；
         // 后面的空 spine / 进度解析 / 目标校验等任何失败路径都不能漏掉。
@@ -4083,7 +4090,8 @@ export default function App() {
           directories.push(path);
         }
       }
-      if (directories.length === 0) {
+      if (directories.length === 0 || !activeShelfSpace().policy.libraryServices) {
+        // Directory import fills the library; another shelf takes books one by one.
         setShelfNotice({ kind: "error", text: uiText("notice.drop.unsupported") });
       } else if (directories.length > 1) {
         setShelfNotice({ kind: "warn", text: uiText("notice.drop.oneFolder") });
@@ -4517,6 +4525,8 @@ export default function App() {
   /** 从“＋”回书架挑书：挑中的书新开标签，取消就回到原来那本。 */
   const [tabPick, setTabPick] = useState<{ returnId: string | null } | null>(null);
   useEffect(() => {
+    // Another shelf's tabs never reach browser storage; the library's stay as saved.
+    if (!activeShelfSpace().policy.persistsBrowserState) return;
     try {
       localStorage.setItem(READER_TABS_STORAGE_KEY, serializeReaderTabs(readerTabs));
     } catch {
@@ -4583,6 +4593,35 @@ export default function App() {
     void handleShelfOpen(id);
   }, [handleShelfOpen, tabPick]);
 
+  // ---- ER-0044 书架切换：普通书架与隐私书架（以后的多书架走同一入口） ----
+  /** The library's tabs while another shelf is open; restored when it closes. */
+  const libraryReaderTabsRef = useRef<typeof readerTabs | null>(null);
+  const shelfSpaces = useShelfSpaces({
+    supported: runtime.supportsPrivateShelf,
+    viewRef,
+    leaveReader: (leaveUnsaved) => leaveReader(leaveUnsaved),
+    resetShelfView: (entering) => {
+      closeForeground();
+      setTabPick(null);
+      if (entering === "library") {
+        setReaderTabs(libraryReaderTabsRef.current ?? parseReaderTabs(null));
+        libraryReaderTabsRef.current = null;
+      } else {
+        libraryReaderTabsRef.current ??= readerTabsRef.current;
+        setReaderTabs(parseReaderTabs(null));
+      }
+      setShelfEntries([]);
+      setOrganization(emptyOrganization);
+      setShelfScope({ type: "root" });
+      setShelfSearchMode("metadata");
+    },
+    refreshShelf: refreshShelfProjection,
+    setShelfNotice,
+  });
+  const libraryServices = shelfSpaces.space.policy.libraryServices;
+  const shelfSpacesLeaveRef = useRef(shelfSpaces.leave);
+  shelfSpacesLeaveRef.current = shelfSpaces.leave;
+
   // ---- 系统“打开方式”/文件关联交来的书：一次一本，导入后按普通开书打开 ----
   /** The request's imported book, kept until the shelf has rendered it. */
   const externalOpenTargetRef = useRef<{ requestId: string; entryId: string } | null>(null);
@@ -4594,6 +4633,11 @@ export default function App() {
       // The usual save guard. If it blocks and the user stays, they decide on the
       // request afterwards instead of being pulled out of the book again.
       return (await leaveReader(false)) ? "wait" : "failed";
+    }
+    // External open always lands in the library: another open shelf locks first.
+    if (activeShelfSpace().kind !== "library") {
+      await shelfSpacesLeaveRef.current();
+      return "wait";
     }
     const stashed = externalOpenTargetRef.current;
     let entryId = stashed?.requestId === request.requestId ? stashed.entryId : null;
@@ -5654,7 +5698,7 @@ export default function App() {
         historyBackLabel={historyBackPlace ?? undefined}
         historyForwardLabel={historyForwardPlace ?? undefined}
         onToggleAssistant={
-          view === "reader" && IS_AI_EDITION
+          view === "reader" && IS_AI_EDITION && libraryServices
             ? () => {
                 if (assistantOpen) closePanel("assistant");
                 else openPanel("assistant");
@@ -5712,6 +5756,15 @@ export default function App() {
               </div>
             )}
             <ShelfView
+              key={shelfSpaces.token ?? "library"}
+              shelfSwitch={runtime.supportsPrivateShelf ? {
+                active: shelfSpaces.space.kind,
+                spaces: ["private"],
+                privateConfigured: shelfSpaces.privateConfigured,
+                onSelect: (kind) => void shelfSpaces.select(kind),
+                onLock: shelfSpaces.lock,
+              } : undefined}
+              libraryServices={libraryServices}
               compact={phoneChrome}
               entries={shelfDisplayEntries}
               organization={organization}
@@ -5720,13 +5773,13 @@ export default function App() {
               onApplyOrganization={handleApplyOrganization}
               busy={shelfBusy}
               importActive={nativeImport !== null || folderImport !== null}
-              onImportFolder={() => void handleOpenFolderImport()}
+              onImportFolder={libraryServices ? () => void handleOpenFolderImport() : undefined}
               saveFileActive={saveFileActive}
               lanTransferActive={lanSaveSession.active}
-              copyToLibrary={libraryCopyChoice(librarySettings)}
+              copyToLibrary={libraryServices ? libraryCopyChoice(librarySettings) : undefined}
               onCopyToLibraryChange={handleCopyToLibraryChange}
               onLibraryLocationChanged={handleLibraryLocationChanged}
-              onOpenLanTransfer={runtime.supportsLanTransfer ? handleOpenLanSave : undefined}
+              onOpenLanTransfer={runtime.supportsLanTransfer && libraryServices ? handleOpenLanSave : undefined}
               theme={settings.theme}
               onThemeChange={changeTheme}
               customThemes={customThemes}
@@ -5752,7 +5805,7 @@ export default function App() {
               onTapRegionsChange={changeTapRegionPreferences}
               tapRegionsScrollMode={settings.readingMode === "scroll"}
               touchUi={mobileChrome}
-              onOpenDiagnostics={() => openPanel("log")}
+              onOpenDiagnostics={libraryServices ? () => openPanel("log") : undefined}
               libraryState={shelfLibraryView(libraryLoad, shelfEntries.length > 0, organizationSettled)}
               onRetryLibraryLoad={retryLibraryLoad}
               onOpen={openFromShelf}
@@ -5765,23 +5818,23 @@ export default function App() {
               onDeleteMany={handleShelfDeleteMany}
               registerBackHandler={registerShelfBackHandler}
               onBackAvailabilityChange={reportShelfBackActive}
-              onExportArchive={handleExportArchive}
+              onExportArchive={libraryServices ? handleExportArchive : undefined}
               onExportBooks={
-                runtime.platform === "web" || !isTauriEnv()
+                runtime.platform === "web" || !isTauriEnv() || !libraryServices
                   ? undefined
                   : (entries?: ShelfEntry[]) => void startBookSourceExport(entries)
               }
-              onRevealSource={runtime.supportsRevealSource ? handleRevealSource : undefined}
+              onRevealSource={runtime.supportsRevealSource && libraryServices ? handleRevealSource : undefined}
               onImportArchive={handleImportArchive}
               onImportLegacyArchive={
-                runtime.platform === "web" || !isTauriEnv()
+                runtime.platform === "web" || !isTauriEnv() || !libraryServices
                   ? undefined
                   : () => void handleLegacyImportArchive()
               }
               thumbnailProvider={shelfThumbnailProvider}
-              searchMode={shelfSearchMode}
-              onSearchModeChange={handleShelfSearchModeChange}
-              bodySearch={{
+              searchMode={libraryServices ? shelfSearchMode : "metadata"}
+              onSearchModeChange={libraryServices ? handleShelfSearchModeChange : undefined}
+              bodySearch={!libraryServices ? undefined : {
                 query: librarySearchSnapshot.query,
                 onQueryChange: handleLibrarySearchQueryChange,
                 results: crossBookPanelResults,
@@ -6285,7 +6338,7 @@ export default function App() {
                 </span>
                 <ChevronRightIcon size={15} className="shelf-settings-row-chevron" />
               </button>
-              {IS_AI_EDITION && (
+              {IS_AI_EDITION && libraryServices && (
                 <button
                   type="button"
                   className="shelf-settings-row"
@@ -6310,7 +6363,7 @@ export default function App() {
             textEncoding={book?.sourceFormat === "txt" ? book.textEncoding || "auto" : undefined}
             onTextEncodingChange={encoding => {
               if (!currentShelfId) return;
-              try { localStorage.setItem(`epub-reader:txt-encoding:${currentShelfId}`, encoding); closePanel("reading"); void handleShelfOpen(currentShelfId, undefined, undefined, undefined, encoding); }
+              try { shelfSpaceStorage.setItem(`epub-reader:txt-encoding:${currentShelfId}`, encoding); closePanel("reading"); void handleShelfOpen(currentShelfId, undefined, undefined, undefined, encoding); }
               catch (error) { showReaderNotice(String(error), "warn"); }
             }}
             open={readingSettingsOpen || warming("reading")}
@@ -6512,6 +6565,17 @@ export default function App() {
             </button>
           </div>
         </div>
+      )}
+      {shelfSpaces.dialog && (
+        <PrivateShelfDialog
+          mode={shelfSpaces.dialog.mode}
+          leftover={shelfSpaces.dialog.leftover}
+          native={privateShelfNative}
+          onModeChange={(mode, leftover) => shelfSpaces.setDialog({ mode, leftover })}
+          onUnlocked={shelfSpaces.openPrivate}
+          onReset={shelfSpaces.onReset}
+          onClose={() => shelfSpaces.setDialog(null)}
+        />
       )}
       {progressChoice && (
         <div className="shelf-confirm-backdrop" role="dialog" aria-modal="true" aria-label={t("appUi.progressChoice.dialog")}>

@@ -1,3 +1,5 @@
+import { activeShelfSpace } from "./shelfSpaces";
+
 const CACHE_KEY = "epub-reader-shelf-place-v1";
 const MAX_ENTRIES = 256;
 const MAX_LABEL = 120;
@@ -10,6 +12,8 @@ interface PlaceRecord {
 }
 
 function storage(): Storage | null {
+  // A shelf that must not persist (the private shelf) gets no cache at all.
+  if (!activeShelfSpace().policy.persistsBrowserState) return null;
   try {
     return typeof localStorage === "undefined" ? null : localStorage;
   } catch {

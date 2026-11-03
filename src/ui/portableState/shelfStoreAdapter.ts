@@ -334,10 +334,15 @@ export class PortableShelfStore implements ShelfStore {
     return Object.keys(built.books).length;
   }
 
+  /** One book's state; a repository without a cheap whole snapshot reads just this book. */
+  private async bookState(hash: string): Promise<PortableBook | undefined> {
+    if (this.data.bookSnapshot) return this.data.bookSnapshot(hash);
+    return (await this.data.snapshot()).books[hash];
+  }
+
   private async currentProjectedEntry(hash: string): Promise<ShelfEntry> {
-    const state = await this.data.snapshot();
     const local = await this.localEntryFor(hash);
-    const book = state.books[hash];
+    const book = await this.bookState(hash);
     if (!book) {
       if (!local) throw new Error("资料库与本地绑定中都不存在这本书");
       return local;
@@ -448,11 +453,11 @@ export class PortableShelfStore implements ShelfStore {
     return this.legacy.readBook(id);
   }
 
-  async openArchive(id: string): Promise<ArchiveClient> {
+  async openArchive(id: string, textEncoding?: string): Promise<ArchiveClient> {
     await this.observeBookAnnotations(id);
     const create = this.legacy.openArchive?.bind(this.legacy);
     if (!create) throw new Error("当前书库后端不支持按需归档读取");
-    return create(id);
+    return create(id, textEncoding);
   }
 
   async readCover(id: string): Promise<Uint8Array | null> {
@@ -714,8 +719,7 @@ export class PortableShelfStore implements ShelfStore {
     readonly kind: "bookmark" | "note";
     readonly id: string;
   }): Promise<readonly Version<BookmarkValue | NoteValue>[]> {
-    const state = await this.data.snapshot();
-    const book = state.books[entity.bookHash];
+    const book = await this.bookState(entity.bookHash);
     if (!book) return [];
     if (entity.kind === "bookmark") {
       return (book.bookmarks[entity.id]?.versions ?? []) as readonly Version<BookmarkValue>[];

@@ -18,6 +18,7 @@ import type { PortablePreferences } from "../core/portableState/portable-state-t
 import type { LibraryRecord } from "./libraryArchive";
 import type { ThumbnailAsset, ThumbnailProvider } from "./thumbnail";
 import type { ImportSkippedBook } from "../platform/saveFileNativeBridge";
+import type { AndroidDocumentSelection, AndroidImportBatchResult } from "../platform/androidNativeBridge";
 import {
   applyDirectoryPlacementBatch,
   type DirectoryPlacementBatch,
@@ -183,6 +184,13 @@ export interface ShelfStore {
    * 经 Java/WebView IPC 堆内分配；未实现的后端继续用 readBook。
    */
   openArchive?(id: string, textEncoding?: string): Promise<ArchiveClient>;
+  /** Every format, EPUB included, is read through openArchive (no whole-file readBook). */
+  readonly archiveOnly?: boolean;
+  /**
+   * Android document import into this store instead of the native library
+   * command; the hook then publishes the records through importRecords.
+   */
+  importDocuments?(documents: AndroidDocumentSelection[], onProgress: (completed: number, total: number) => void): Promise<AndroidImportBatchResult>;
   readCover(id: string): Promise<Uint8Array | null>;
   /** 只为旧条目补录内容指纹，不得改动阅读进度或其他元数据。 */
   setContentHash(id: string, contentHash: string): Promise<ShelfEntry>;
@@ -1370,7 +1378,20 @@ function legacyShelfStore(): ShelfStore {
   return cachedLegacyStore;
 }
 
+let scopedStore: ShelfStore | null = null;
+
+/**
+ * A shelf other than the library (see shelfSpaces) replaces the store while
+ * it is open, so the shelf, reader and annotations use it unchanged. Null
+ * returns to the library. Services that must stay library-wide check the
+ * active space's policy instead of reading this store.
+ */
+export function setScopedShelfStore(store: ShelfStore | null): void {
+  scopedStore = store;
+}
+
 export function getShelfStore(): ShelfStore {
+  if (scopedStore) return scopedStore;
   if (!cachedStore) cachedStore = legacyShelfStore();
   return cachedStore;
 }
@@ -1470,6 +1491,7 @@ export const shelfThumbnailProvider: ThumbnailProvider = {
 
 /** 测试用：重置缓存的 store。 */
 export function resetShelfStoreForTest(): void {
+  scopedStore = null;
   cachedStore = null;
   cachedLegacyStore = null;
   cachedPortableStore = null;

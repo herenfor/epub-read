@@ -350,6 +350,15 @@ export function useBookImport({
       fileNameSummary: documents.length === 1 ? uiText("notice.import.oneEpub") : uiPlural("notice.import.files", documents.length, { count: documents.length }),
     });
     try {
+      // A shelf with its own import route (the private shelf) never reaches the library command.
+      const store = getShelfStore();
+      if (store.importDocuments) {
+        return await store.importDocuments(documents, (completed, total) => {
+          setNativeImport((previous) => (
+            previous && previous.requestId === requestId ? { ...previous, phase: "preparing", completed, total } : previous
+          ));
+        });
+      }
       return await importDocuments(requestId, documents, (progress) => {
         setNativeImport((previous) => (
           previous && previous.requestId === progress.requestId

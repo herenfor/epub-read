@@ -59,6 +59,7 @@ import type { CustomThemeControls } from "./useCustomThemes";
 import { linearChapterNumber } from "../core/book";
 import { isShelfCardActionTarget } from "./shelfCardEventScope";
 import { getRuntimeCapabilities } from "../platform/runtimeCapabilities";
+import type { ShelfSpaceKind } from "./shelfSpaces";
 import type { ReaderTapPreferences } from "./readerTapRegions";
 import type { ReaderTapRegionSettings } from "./readerTapRouting";
 import { ShelfSettingsPage, type ShelfSettingsPageProps, type ShelfSettingsSection } from "./ShelfSettingsPage";
@@ -220,8 +221,18 @@ export interface ShelfViewProps {
   /** Directory import entry; absent hides it. */
   onImportFolder?(): void;
   onImportArchive(): void;
-  /** `selectedEntries` is handled by App and resolved to 64-bit content hashes before any native job is created. */
-  onExportArchive(selectedEntries?: ShelfEntry[]): void;
+  /**
+   * `selectedEntries` is handled by App and resolved to 64-bit content hashes
+   * before any native job is created. Absent on a shelf without library services.
+   */
+  onExportArchive?(selectedEntries?: ShelfEntry[]): void;
+  /** The title switcher between the library and other shelves; absent shows a plain title. */
+  shelfSwitch?: ShelfSwitchProps;
+  /**
+   * False on a shelf that keeps to itself (the private shelf): settings drop
+   * data, sync, library location, the import folder, the index and diagnostics.
+   */
+  libraryServices?: boolean;
   /** SBE-U: save original EPUB files; no entries means the whole shelf. */
   onExportBooks?(selectedEntries?: ShelfEntry[]): void;
   /** Windows: show the book's file in File Explorer; absent hides the action. */
@@ -554,6 +565,117 @@ function ShelfImportButton(props: ShelfImportButtonProps) {
             </label>
           )}
           {props.showDropHint && <p className="shelf-import-menu-hint">{t("shelf.import.dropHint")}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export interface ShelfSwitchProps {
+  active: ShelfSpaceKind;
+  /** Shelves offered besides the library, in menu order. */
+  spaces: readonly ShelfSpaceKind[];
+  /** A configured password: the private row reads “needs password” instead of “set a password”. */
+  privateConfigured: boolean;
+  onSelect(kind: ShelfSpaceKind): void;
+  /** Leaves a locked shelf for the library. */
+  onLock(): void;
+}
+
+function LockIcon({ logo = false }: { logo?: boolean }) {
+  return (
+    <svg className={`shelf-svg-icon${logo ? " shelf-logo-svg" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="5" y="11" width="14" height="10" rx="2" />
+      <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+    </svg>
+  );
+}
+
+/**
+ * The shelf title. With other shelves available it is a switcher: the menu
+ * lists the library and each other shelf, and a locked shelf adds a 锁定
+ * button beside the title that returns to the library.
+ */
+function ShelfBrand(props: { switcher?: ShelfSwitchProps; disabled: boolean } & ShelfSubmenuBackProps) {
+  const { t } = useUiText();
+  const switcher = props.switcher;
+  const [open, setOpen] = useState(false);
+  const { present, closing } = useExitPresence(open);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  useShelfSubmenuBack(open, () => setOpen(false), props);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (event: PointerEvent) => {
+      if (!wrapRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("pointerdown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+  useEffect(() => {
+    if (props.disabled) setOpen(false);
+  }, [props.disabled]);
+
+  const isPrivate = switcher?.active === "private";
+  const title = isPrivate ? t("shelfMain.space.private") : t("shelfMain.brand");
+  const badge = (
+    <div className="shelf-logo-badge" aria-hidden="true">
+      {isPrivate ? <LockIcon logo /> : <BookLogoIcon />}
+    </div>
+  );
+  if (!switcher || switcher.spaces.length === 0) {
+    return (
+      <div className="shelf-brand-zone-zen">
+        {badge}
+        <span className="shelf-brand-title">{title}</span>
+      </div>
+    );
+  }
+  const choose = (kind: ShelfSpaceKind) => {
+    setOpen(false);
+    if (kind !== switcher.active) switcher.onSelect(kind);
+  };
+  const row = (kind: ShelfSpaceKind) => {
+    const library = kind === "library";
+    const detail = library || kind === switcher.active ? null
+      : switcher.privateConfigured ? t("shelfMain.space.private.locked") : t("shelfMain.space.private.setup");
+    return (
+      <button key={kind} className="shelf-import-menu-item" type="button" role="menuitemradio"
+        aria-checked={kind === switcher.active} onClick={() => choose(kind)}>
+        <span className="shelf-import-menu-icon">{library ? <BookLogoIcon /> : <LockIcon />}</span>
+        <span className="shelf-import-menu-text">
+          <strong>{library ? t("shelfMain.brand") : t("shelfMain.space.private")}</strong>
+          {detail && <small>{detail}</small>}
+        </span>
+        {kind === switcher.active && <span className="shelf-space-check"><CheckIcon /></span>}
+      </button>
+    );
+  };
+  return (
+    <div className="shelf-brand-zone-zen shelf-space-zone" ref={wrapRef}>
+      <button className="shelf-space-switch" type="button" aria-haspopup="menu" aria-expanded={open}
+        aria-label={t("shelfMain.space.switch")} title={t("shelfMain.space.switch")}
+        disabled={props.disabled} onClick={() => setOpen((value) => !value)}>
+        {badge}
+        <span className="shelf-brand-title">{title}</span>
+        <ChevronDownIcon />
+      </button>
+      {isPrivate && (
+        <button className="shelf-space-lock" type="button" onClick={switcher.onLock}
+          title={t("shelfMain.space.lock.tip")} disabled={props.disabled}>
+          <LockIcon />
+          <span>{t("shelfMain.space.lock")}</span>
+        </button>
+      )}
+      {present && (
+        <div className={`shelf-import-menu shelf-space-menu${closing ? " is-closing" : ""}`} role="menu" aria-label={t("shelfMain.space.switch")}>
+          {(["library", ...switcher.spaces] as ShelfSpaceKind[]).map(row)}
         </div>
       )}
     </div>
@@ -4610,7 +4732,8 @@ export function ShelfView(props: ShelfViewProps) {
     lanTransferActive: props.lanTransferActive,
     onOpenLanTransfer: props.onOpenLanTransfer ? () => props.onOpenLanTransfer!() : undefined,
     onImportArchive: props.onImportArchive,
-    onExportArchive: () => props.onExportArchive(),
+    onExportArchive: () => props.onExportArchive?.(),
+    libraryServices: props.libraryServices !== false,
     onExportAllBooks: props.onExportBooks ? () => props.onExportBooks!() : undefined,
     onImportLegacyArchive: props.onImportLegacyArchive,
     onLibraryLocationChanged: props.onLibraryLocationChanged,
@@ -4701,12 +4824,8 @@ export function ShelfView(props: ShelfViewProps) {
           <div className="shelf-normal-bar-mobile-wrap">
             <div className="shelf-normal-bar-mobile">
               {/* Level 1 左侧：应用 LOGO；总数已在“全部 N”筛选上显示，不再重复 */}
-              <div className="shelf-brand-zone-zen">
-                <div className="shelf-logo-badge" aria-hidden="true">
-                  <BookLogoIcon />
-                </div>
-                <span className="shelf-brand-title">{t("shelfMain.brand")}</span>
-              </div>
+              <ShelfBrand switcher={props.shelfSwitch} disabled={Boolean(props.busy || props.importActive || props.saveFileActive || props.lanTransferActive)}
+                registerSubmenuBackHandler={registerSubmenuBackHandler} onSubmenuBackActiveChange={reportSubmenuBackActive} />
 
               {/* Level 1 右侧：导入图书主按钮、设置/更多 */}
               <div className="shelf-actions-zone-zen shelf-actions-zone-mobile">
@@ -4778,12 +4897,8 @@ export function ShelfView(props: ShelfViewProps) {
           /* 常态操作栏：Level 1 全局顶栏极净化 */
           <div className="shelf-normal-bar shelf-normal-bar-zen">
             {/* Level 1 左侧：应用 LOGO；总数已在“全部 N”筛选上显示，不再重复 */}
-            <div className="shelf-brand-zone-zen">
-              <div className="shelf-logo-badge" aria-hidden="true">
-                <BookLogoIcon />
-              </div>
-              <span className="shelf-brand-title">{t("shelfMain.brand")}</span>
-            </div>
+            <ShelfBrand switcher={props.shelfSwitch} disabled={Boolean(props.busy || props.importActive || props.saveFileActive || props.lanTransferActive)}
+              registerSubmenuBackHandler={registerSubmenuBackHandler} onSubmenuBackActiveChange={reportSubmenuBackActive} />
 
             {/* Level 1 中间：书架搜索框，范围切换“书名作者 | 正文”；正文结果在框下展开 */}
             <div className="shelf-quick-filter-anchor" ref={searchBoxRef}>
@@ -5845,20 +5960,22 @@ export function ShelfView(props: ShelfViewProps) {
               <FolderIcon />
               <span>{t("shelfMain.dock.move")}</span>
             </button>
-            <span className="shelf-batch-divider" aria-hidden="true" />
-            <button
-              className="shelf-batch-action-btn"
-              type="button"
-              disabled={noneSelected || props.busy || props.saveFileActive || props.lanTransferActive}
-              onClick={() => {
-                const targets = props.entries.filter((e) => selectedIds.has(e.id));
-                if (targets.length > 0) props.onExportArchive(targets);
-              }}
-              title={t("shelfMain.dock.export.tip")}
-            >
-              <ExportIcon />
-              <span>{t("shelfMain.dock.export")}</span>
-            </button>
+            {(props.onExportArchive || props.onExportBooks || (getRuntimeCapabilities().supportsLanTransfer && props.onOpenLanTransfer)) && <span className="shelf-batch-divider" aria-hidden="true" />}
+            {props.onExportArchive && (
+              <button
+                className="shelf-batch-action-btn"
+                type="button"
+                disabled={noneSelected || props.busy || props.saveFileActive || props.lanTransferActive}
+                onClick={() => {
+                  const targets = props.entries.filter((e) => selectedIds.has(e.id));
+                  if (targets.length > 0) props.onExportArchive!(targets);
+                }}
+                title={t("shelfMain.dock.export.tip")}
+              >
+                <ExportIcon />
+                <span>{t("shelfMain.dock.export")}</span>
+              </button>
+            )}
             {props.onExportBooks && (
               <button
                 className="shelf-batch-action-btn"

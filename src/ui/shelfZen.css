@@ -46,6 +46,126 @@
   color: var(--fg, #1f2937);
 }
 
+/* 书架切换器（ER-0044，日后多书架共用）：标题本身是按钮，菜单左对齐展开。
+   按钮内距 4px 包住 32px 徽标，徽标圆角 = 按钮圆角 − 4px，保持同心。 */
+.shelf-space-zone {
+  position: relative;
+  gap: 6px;
+}
+
+.shelf-space-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: -4px;
+  padding: 4px 8px 4px 4px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: background-color var(--motion-fast, 140ms) ease;
+}
+
+.shelf-space-switch .shelf-logo-badge {
+  border-radius: calc(var(--r-md) - 4px);
+}
+
+.shelf-space-switch > .shelf-svg-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--muted);
+  transition: transform var(--motion-base, 220ms) var(--ease-emphasized);
+}
+
+.shelf-space-switch[aria-expanded="true"] {
+  background: var(--btn-hover);
+}
+
+.shelf-space-switch[aria-expanded="true"] > .shelf-svg-icon {
+  transform: rotate(180deg);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .shelf-space-switch:hover:not(:disabled),
+  .shelf-space-lock:hover:not(:disabled) {
+    background: var(--btn-hover);
+  }
+}
+
+.shelf-space-switch:disabled,
+.shelf-space-lock:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.shelf-space-lock {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: var(--hairline) solid var(--ui-border-control);
+  border-radius: var(--r-full);
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--fs-caption);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.shelf-space-lock .shelf-svg-icon {
+  width: 15px;
+  height: 15px;
+}
+
+.shelf-space-menu {
+  right: auto;
+  left: -4px;
+  width: 240px;
+  transform-origin: top left;
+}
+
+.shelf-space-check {
+  display: inline-flex;
+  margin-left: auto;
+  color: var(--accent);
+}
+
+.shelf-space-check .shelf-svg-icon {
+  width: 16px;
+  height: 16px;
+}
+
+/* 隐私书架密码弹窗：沿用 shelf-confirm，只补标题图标、输入组与左侧“忘记密码”。 */
+.private-shelf-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.private-shelf-title .shelf-svg-icon {
+  width: 18px;
+  height: 18px;
+  color: var(--accent);
+}
+
+.private-shelf-fields {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.private-shelf-error {
+  margin-top: 6px;
+}
+
+.private-shelf-forgot {
+  margin-right: auto;
+}
+
 .shelf-total-badge {
   display: inline-flex;
   align-items: center;
