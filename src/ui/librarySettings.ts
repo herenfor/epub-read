@@ -3,9 +3,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { getRuntimeCapabilities } from "../platform/runtimeCapabilities";
 
 /**
- * A34 library folder (Windows): whether imports copy the EPUB into the app's
- * book library, and where that library is. The native settings file is the
- * source of truth; every import passes the value it shows explicitly.
+ * A34 library folder: whether imports copy the EPUB into the app's book
+ * library (Windows and Android), and where that library is (Windows). The
+ * native settings file is the source of truth; every import passes the value
+ * it shows explicitly.
  */
 
 export interface LibrarySettingsView {
@@ -52,7 +53,7 @@ export function displayPath(path: string): string {
 }
 
 export function librarySettingsSupported(): boolean {
-  return getRuntimeCapabilities().supportsLibraryFolder;
+  return getRuntimeCapabilities().supportsImportCopyChoice;
 }
 
 /** Loads once; later calls return the current view. Null where unsupported. */
@@ -90,6 +91,17 @@ export function libraryCopyChoice(current: LibrarySettingsView | null): boolean 
 /** What an import should do right now: copy only when the shown setting says so. */
 export async function copyOnImportNow(): Promise<boolean> {
   return (await ensureLibrarySettings())?.copyOnImport ?? false;
+}
+
+/**
+ * Android file import: true keeps the original document, false copies (also
+ * where the choice is unsupported), null when the settings could not be read. An error view's copyOnImport is not a
+ * user choice, so it never turns into "keep the original".
+ */
+export async function keepOriginalOnImportNow(): Promise<boolean | null> {
+  const current = await ensureLibrarySettings();
+  if (!current) return false;
+  return current.error ? null : !current.copyOnImport;
 }
 
 export async function setCopyOnImport(enabled: boolean): Promise<void> {

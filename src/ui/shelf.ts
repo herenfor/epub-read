@@ -94,6 +94,8 @@ export interface ShelfEntry {
   notes?: ReaderNote[];
   /** 链接式书库的源文件当前是否可用；浏览器旧后端缺省视为可用。 */
   available?: boolean;
+  /** Android：书留在原位置（本机文档绑定），不在书库里；旧条目缺省为否。 */
+  originalLocation?: boolean;
   /** 设备缩略图缓存的实际媒体类型；不进入可移植存档。 */
   thumbnailMime?: string;
 }

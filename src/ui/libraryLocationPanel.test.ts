@@ -24,7 +24,7 @@ vi.mock("../platform/runtimeCapabilities", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../platform/runtimeCapabilities")>();
   return {
     ...actual,
-    getRuntimeCapabilities: () => ({ ...actual.getRuntimeCapabilities(), supportsCacheStorage: true, supportsLibraryFolder: capabilities.supportsLibraryFolder }),
+    getRuntimeCapabilities: () => ({ ...actual.getRuntimeCapabilities(), supportsCacheStorage: true, supportsLibraryFolder: capabilities.supportsLibraryFolder, supportsImportCopyChoice: capabilities.supportsLibraryFolder }),
   };
 });
 
