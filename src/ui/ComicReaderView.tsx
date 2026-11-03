@@ -5,6 +5,7 @@ import type { RibbonBookmark, RibbonMark } from "./bookmarkRibbons";
 import { pageRibbonLeft } from "./bookmarkRibbons";
 import { BookmarkRibbonLayer } from "./BookmarkRibbonLayer";
 import { comicSpreads, comicPageForAnchor, comicTurnTarget } from "./comicPages";
+import { COMIC_ZOOM_NONE, COMIC_ZOOM_RELEASE, panComicZoom, pinchComicZoom, zoomComicAt, type ComicZoomView, type ZoomPoint } from "./comicZoom";
 import { createReaderTapGeometry, routeReaderTap } from "./readerTapRouting";
 import { resolveReaderPalette } from "../config/readerPalette";
 import { effectivePageProgression } from "../render/settings";
@@ -41,6 +42,10 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
   const userMoved = useRef(false), pointer = useRef<{ id: number; x: number; y: number } | null>(null);
   const frame = useRef<number | null>(null), fade = useRef<Animation | null>(null);
   const wheel = useRef(new WheelTurnAccumulator());
+  // In-place zoom of the visible screen (paged modes only). Any turn or layout change leaves it.
+  const zoom = useRef<{ el: HTMLElement; box: DOMRect; view: ComicZoomView } | null>(null);
+  const gesture = useRef<{ kind: "pinch"; mid: ZoomPoint; distance: number; start: ComicZoomView } | { kind: "pan"; x: number; y: number } | null>(null);
+  const [zoomed, setZoomed] = useState(false);
   const scroll = props.settings.readingMode === "scroll";
   const columns: 1 | 2 = !scroll && props.settings.columnsPerView === 2 && width >= 600 ? 2 : 1;
   const groups = useMemo(() => comicSpreads(pages, columns), [pages, columns]);
@@ -53,7 +58,8 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
   const paper = resolveReaderPalette(props.settings.theme);
   const visible = () => scroll ? [position.current.page] : groups[groupForPage[position.current.page]];
   // CSS pixels may be fractional at OS/WebView zoom; clientWidth rounds and drifts over many pages.
-  const pitch = () => track.current?.firstElementChild?.getBoundingClientRect().width ?? width;
+  // A zoomed screen's rect includes its scale; every screen shares the unzoomed width.
+  const pitch = () => zoom.current?.box.width ?? track.current?.firstElementChild?.getBoundingClientRect().width ?? width;
   const fraction = () => (position.current.page + position.current.ratio) / pages.length;
   const atEnd = () => scroll
     ? !!track.current && track.current.scrollTop + track.current.clientHeight >= track.current.scrollHeight - 1
@@ -113,7 +119,34 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
       el.scrollTo({ left: (rtl ? -1 : 1) * groupForPage[p.page] * pitch(), behavior });
     }
   };
+  const paintZoom = () => {
+    const z = zoom.current;
+    if (!z) return;
+    z.el.style.transformOrigin = "0 0";
+    z.el.style.transform = `translate(${z.view.x}px, ${z.view.y}px) scale(${z.view.scale})`;
+  };
+  const beginZoom = (): boolean => {
+    if (zoom.current) return true;
+    if (scroll || latest.current.inputPaused || motion.current) return false;
+    const el = track.current?.children[groupForPage[position.current.page]] as HTMLElement | undefined;
+    if (!el) return false;
+    zoom.current = { el, box: el.getBoundingClientRect(), view: COMIC_ZOOM_NONE };
+    setZoomed(true);
+    return true;
+  };
+  const endZoom = (springBack = false) => {
+    const z = zoom.current;
+    zoom.current = null; gesture.current = null;
+    if (!z) return;
+    const from = z.el.style.transform;
+    z.el.style.transform = ""; z.el.style.transformOrigin = ""; z.el.classList.remove("is-zooming");
+    if (springBack && from && document.documentElement.dataset.motion !== "reduced")
+      z.el.animate([{ transform: from, transformOrigin: "0 0" }, { transform: "none", transformOrigin: "0 0" }], { duration: 180, easing: "ease-out" });
+    setZoomed(false);
+  };
+  const settleZoom = () => { if (zoom.current && zoom.current.view.scale <= COMIC_ZOOM_RELEASE) endZoom(true); };
   const locate = (p: number, ratio = 0, behavior: ScrollBehavior = "auto") => {
+    endZoom();
     p = Math.max(0, Math.min(pages.length - 1, p));
     goal.current = p;
     setWarmPage(p);
@@ -131,6 +164,7 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
   };
   const turn = (direction: 1 | -1) => {
     if (latest.current.inputPaused) return;
+    endZoom();
     userMoved.current = true;
     alignment.current = null;
     fade.current?.cancel();
@@ -175,6 +209,7 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
       motion.current = Math.abs(distance - screen * step) > .75 || command.current;
       setMoving(motion.current);
       const shown = groups[screen];
+      if (zoom.current && zoom.current.el !== el.children[screen]) endZoom();
       if (!shown.includes(position.current.page)) position.current = { page: shown[0], ratio: 0 };
       if (!motion.current) { goal.current = position.current.page; setWarmPage(position.current.page); lastDirection.current = null; }
     }
@@ -182,8 +217,8 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
     report();
   };
   // Native listeners read the current layout/actions, never a previous mode's closure.
-  const actions = useRef({ report, sample, turn });
-  actions.current = { report, sample, turn };
+  const actions = useRef({ report, sample, turn, beginZoom, paintZoom, settleZoom });
+  actions.current = { report, sample, turn, beginZoom, paintZoom, settleZoom };
   useLayoutEffect(() => {
     const el = root.current!;
     const resize = () => setWidth(el.getBoundingClientRect().width);
@@ -192,6 +227,7 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
     return () => observer.disconnect();
   }, []);
   useLayoutEffect(() => {
+    endZoom();
     alignment.current = { ...position.current };
     align(alignment.current);
     if (visible().every(i => decoded.current.has(i))) alignment.current = null;
@@ -240,15 +276,85 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
   useEffect(() => {
     const el = track.current!;
     const onWheel = (event: WheelEvent) => {
-      if (scroll || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
+      if (scroll) return;
+      const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? el.clientHeight : 1;
+      // Ctrl+wheel (and a trackpad pinch) zooms at the pointer; a zoomed screen pans with the wheel.
+      if (event.ctrlKey || zoom.current) {
+        event.preventDefault();
+        if (latest.current.inputPaused || !actions.current.beginZoom()) return;
+        const z = zoom.current!;
+        z.view = event.ctrlKey
+          ? zoomComicAt(z.view, { x: event.clientX - z.box.left, y: event.clientY - z.box.top }, Math.exp(-event.deltaY * unit * 0.002), z.box.width, z.box.height)
+          : panComicZoom(z.view, -event.deltaX * unit, -event.deltaY * unit, z.box.width, z.box.height);
+        actions.current.paintZoom();
+        actions.current.settleZoom();
+        return;
+      }
+      if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
       event.preventDefault();
       if (latest.current.inputPaused) return;
-      const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? el.clientHeight : 1);
+      const delta = event.deltaY * unit;
       const direction = wheel.current.push(delta);
       if (direction) actions.current.turn(direction);
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
+  }, [scroll]);
+  useEffect(() => {
+    if (scroll) return;
+    const el = track.current!;
+    const spread = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    const mid = (t: TouchList): ZoomPoint => {
+      const box = zoom.current!.box;
+      return { x: (t[0].clientX + t[1].clientX) / 2 - box.left, y: (t[0].clientY + t[1].clientY) / 2 - box.top };
+    };
+    const start = (event: TouchEvent) => {
+      if (event.touches.length === 2 && actions.current.beginZoom()) {
+        const z = zoom.current!;
+        z.el.classList.add("is-zooming");
+        gesture.current = { kind: "pinch", mid: mid(event.touches), distance: spread(event.touches), start: z.view };
+      } else if (event.touches.length === 1 && zoom.current) {
+        zoom.current.el.classList.add("is-zooming");
+        gesture.current = { kind: "pan", x: event.touches[0].clientX, y: event.touches[0].clientY };
+      }
+    };
+    const move = (event: TouchEvent) => {
+      const z = zoom.current, g = gesture.current;
+      if (!z || !g) return;
+      // Neither the pinch nor a zoomed pan may scroll the track to another screen.
+      event.preventDefault();
+      if (g.kind === "pinch" && event.touches.length === 2) {
+        z.view = pinchComicZoom(g.start, g.mid, g.distance, mid(event.touches), spread(event.touches), z.box.width, z.box.height);
+      } else if (g.kind === "pan" && event.touches.length === 1) {
+        const t = event.touches[0];
+        z.view = panComicZoom(z.view, t.clientX - g.x, t.clientY - g.y, z.box.width, z.box.height);
+        gesture.current = { kind: "pan", x: t.clientX, y: t.clientY };
+      }
+      actions.current.paintZoom();
+    };
+    const end = (event: TouchEvent) => {
+      const z = zoom.current;
+      if (!z) return;
+      // The finger left on the glass after a pinch keeps panning.
+      if (event.touches.length === 1 && z.view.scale > COMIC_ZOOM_RELEASE) {
+        gesture.current = { kind: "pan", x: event.touches[0].clientX, y: event.touches[0].clientY };
+        return;
+      }
+      if (event.touches.length > 0) return;
+      gesture.current = null;
+      z.el.classList.remove("is-zooming");
+      actions.current.settleZoom();
+    };
+    el.addEventListener("touchstart", start, { passive: true });
+    el.addEventListener("touchmove", move, { passive: false });
+    el.addEventListener("touchend", end, { passive: true });
+    el.addEventListener("touchcancel", end, { passive: true });
+    return () => {
+      el.removeEventListener("touchstart", start);
+      el.removeEventListener("touchmove", move);
+      el.removeEventListener("touchend", end);
+      el.removeEventListener("touchcancel", end);
+    };
   }, [scroll]);
   useEffect(() => {
     if (!props.inputPaused) return;
@@ -328,12 +434,17 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
     }} onError={() => { errors.current.set(i, uiText("readerMisc.comic.decodeFailed")); redraw(n => n + 1); }}/> : <div className="comic-placeholder"/>}
   </div>;
   return <div ref={root} className={`comic-reader${scroll ? " is-scroll" : ""}`} style={{ backgroundColor: paper.background, color: paper.foreground }}>
-    <div className="comic-track" ref={track} dir={!scroll && rtl ? "rtl" : "ltr"} style={props.inputPaused ? { touchAction: "none" } : undefined}
+    <div className={`comic-track${zoomed ? " is-zoomed" : ""}`} ref={track} dir={!scroll && rtl ? "rtl" : "ltr"} style={props.inputPaused ? { touchAction: "none" } : undefined}
       onScroll={() => { if (frame.current === null) frame.current = requestAnimationFrame(() => actions.current.sample()); }}
       onPointerDown={event => {
         if (latest.current.inputPaused) return;
         alignment.current = null; fade.current?.cancel();
         pointer.current = { id: event.pointerId, x: event.clientX, y: event.clientY }; userMoved.current = true;
+      }} onPointerMove={event => {
+        const z = zoom.current;
+        if (!z || event.pointerType !== "mouse" || event.buttons !== 1) return;
+        z.view = panComicZoom(z.view, event.movementX, event.movementY, z.box.width, z.box.height);
+        paintZoom();
       }} onPointerCancel={() => { pointer.current = null; command.current = false; lastDirection.current = null; }} onPointerUp={event => {
         const start = pointer.current; pointer.current = null;
         if (!start || start.id !== event.pointerId || Math.hypot(event.clientX - start.x, event.clientY - start.y) > 8 || latest.current.inputPaused) return;
@@ -344,9 +455,5 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
         else if (route.kind === "center" || (scroll && route.kind === "turn")) latest.current.onPlainTap?.();
       }}>{scroll ? pages.map((_, i) => image(i)) : groups.map((group, i) => <div className="comic-screen" key={i}>{group.map(image)}</div>)}</div>
     <BookmarkRibbonLayer marks={marks} cue={props.bookmarkCue ?? null} motion={moving}/>
-    <button type="button" className="comic-zoom-reset" disabled={state().status !== "ready"} aria-label={uiText("readerMisc.comic.zoom")} onClick={() => {
-      const p = position.current.page, dim = dimensions.current.get(p), url = urls[p];
-      if (url && dim) latest.current.onImageActivation?.({ src: url, alt: pages[p].path.split('/').pop() ?? "", naturalWidth: dim.width, naturalHeight: dim.height, chapterPath: CHAPTER });
-    }}>＋</button>
   </div>;
 });
