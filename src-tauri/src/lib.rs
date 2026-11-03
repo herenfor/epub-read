@@ -20,6 +20,7 @@ mod lan_save;
 pub(crate) mod native_zip_session;
 pub(crate) mod transfer_policy;
 mod portable_state_commands;
+mod private_shelf;
 mod save_file;
 mod book_export;
 #[cfg(feature = "ai")]
@@ -67,6 +68,11 @@ macro_rules! configure_invoke_handler {
             directory_import::watch::library_folder_watch_get,
             directory_import::watch::library_folder_watch_configure,
             directory_import::watch::library_folder_watch_scan,
+            private_shelf::private_shelf_status,
+            private_shelf::private_shelf_setup,
+            private_shelf::private_shelf_unlock,
+            private_shelf::private_shelf_lock,
+            private_shelf::private_shelf_reset,
             linked_library::linked_library_cancel_document_import,
             external_open::external_open_peek,
             external_open::external_open_ack,
@@ -239,6 +245,11 @@ macro_rules! configure_invoke_handler {
             directory_import::watch::library_folder_watch_get,
             directory_import::watch::library_folder_watch_configure,
             directory_import::watch::library_folder_watch_scan,
+            private_shelf::private_shelf_status,
+            private_shelf::private_shelf_setup,
+            private_shelf::private_shelf_unlock,
+            private_shelf::private_shelf_lock,
+            private_shelf::private_shelf_reset,
             linked_library::linked_library_cancel_document_import,
             external_open::external_open_peek,
             external_open::external_open_ack,
@@ -395,6 +406,7 @@ pub fn run() {
         .manage(linked_library::ManagedImportState::default())
         .manage(directory_import::job::DirectoryImportState::default())
         .manage(portable_state_commands::PortableStateManager::default())
+        .manage(private_shelf::PrivateShelfState::default())
         .manage(save_file::SaveFileManager::default())
         .manage(lan_save::LanSaveManager::default())
         .manage(cloud_sync::commands::CloudSyncManager::default())
