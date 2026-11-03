@@ -10,7 +10,7 @@ pub(crate) fn snapshot(path: &Path) -> Result<FileSnapshot, String> {
     Ok(file_snapshot_from_metadata(&metadata))
 }
 
-pub(super) fn snapshot_file(file: &File) -> Result<FileSnapshot, String> {
+pub(crate) fn snapshot_file(file: &File) -> Result<FileSnapshot, String> {
     let metadata = file
         .metadata()
         .map_err(|error| format!("无法读取源 EPUB 属性：{error}"))?;
@@ -141,7 +141,7 @@ pub(super) fn read_source_bytes_and_hash(
 /// caller must have opened the handle at offset 0.  This is only used by the
 /// cover slow path after the cheap binding signature no longer matches; it
 /// never materializes the book in a `Vec` and never reopens by path.
-pub(super) fn hash_opened_file(file: &File) -> Result<(String, FileSnapshot), LinkedLibraryError> {
+pub(crate) fn hash_opened_file(file: &File) -> Result<(String, FileSnapshot), LinkedLibraryError> {
     let before = snapshot_file(file)?;
     let mut reader = BufReader::with_capacity(64 * 1024, file);
     let mut digest = Sha256::new();

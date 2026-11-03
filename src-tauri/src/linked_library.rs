@@ -54,6 +54,7 @@ use epub_meta::read_zip_entry_bounded;
 
 mod source;
 use source::*;
+pub(crate) use source::{hash_opened_file, snapshot_file};
 pub(crate) use source::{
     snapshot,
     canonical_epub_path,
@@ -508,6 +509,26 @@ impl BindingSource {
 }
 
 impl DeviceBinding {
+    pub(crate) fn linked_path(&self) -> Option<&std::path::Path> {
+        let path = std::path::Path::new(self.canonical_source_path.as_deref()?);
+        (self.storage_kind == StorageKind::Linked && path.is_absolute()).then_some(path)
+    }
+
+
+    pub(crate) fn read_linked_cover(&self) -> Result<Vec<u8>, LinkedLibraryError> {
+        let Some(entry) = self.cover_zip_path.as_deref() else {
+            return Ok(Vec::new());
+        };
+        let path = self.linked_path().ok_or("缺少原书路径")?;
+        let file = std::fs::File::open(path).map_err(|error| error.to_string())?;
+        let snapshot = FileSnapshot {
+            size: self.file_size,
+            mtime_ns: self.source_mtime_ns,
+        };
+        read_cover_from_opened_file(&file, entry, MAX_COVER_BYTES, &self.content_hash, &snapshot)
+            .map(|cover| cover.bytes)
+    }
+
     /// Gives a managed binding its readable library file name (A34).
     pub(crate) fn with_managed_file_name(mut self, file_name: String) -> Self {
         self.managed_file_name = Some(file_name);
