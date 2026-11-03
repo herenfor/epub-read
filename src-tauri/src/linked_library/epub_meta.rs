@@ -384,8 +384,14 @@ pub(crate) fn inspect_book(path: &Path, file_name: &str) -> Result<ImportedMetad
 
 pub(crate) fn inspect_epub_package(path: &Path) -> Result<ImportedMetadata, String> {
     let file = File::open(path).map_err(|error| format!("无法打开 EPUB ZIP：{error}"))?;
-    let mut archive =
+    let archive =
         ZipArchive::new(file).map_err(|error| format!("EPUB 不是有效 ZIP：{error}"))?;
+    inspect_epub_archive(archive)
+}
+
+pub(crate) fn inspect_epub_archive<R: std::io::Read + std::io::Seek>(
+    mut archive: ZipArchive<R>,
+) -> Result<ImportedMetadata, String> {
     let mut container_entry = archive
         .by_name("META-INF/container.xml")
         .map_err(|_| "EPUB 缺少 META-INF/container.xml".to_string())?;

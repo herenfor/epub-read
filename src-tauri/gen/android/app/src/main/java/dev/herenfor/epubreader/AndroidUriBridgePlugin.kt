@@ -190,6 +190,50 @@ class AndroidUriBridgePlugin(private val activity: Activity) : Plugin(activity) 
         }
     }
 
+    private fun hasPersistedDocumentRead(uri: Uri): Boolean =
+        activity.contentResolver.persistedUriPermissions.any { it.uri == uri && it.isReadPermission }
+
+    @Command
+    fun retainDocumentRead(invoke: Invoke) {
+        val uri = Uri.parse(invoke.parseArgs(OpenReadOnlyArgs::class.java).uri)
+        ioExecutor.execute {
+            try {
+                val existed = hasPersistedDocumentRead(uri)
+                if (!existed) {
+                    activity.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                postResponse { invoke.resolve(JSObject().apply { put("newlyRetained", !existed) }) }
+            } catch (error: SecurityException) {
+                postResponse { invoke.reject(error.message ?: "unable to retain document permission") }
+            }
+        }
+    }
+
+    @Command
+    fun releaseDocumentRead(invoke: Invoke) {
+        val uri = Uri.parse(invoke.parseArgs(OpenReadOnlyArgs::class.java).uri)
+        ioExecutor.execute {
+            try {
+                activity.contentResolver.releasePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            } catch (_: SecurityException) {
+                // Revoked outside the app.
+            }
+            postResponse { invoke.resolve(JSObject()) }
+        }
+    }
+
+    @Command
+    fun openPersistedDocumentRead(invoke: Invoke) {
+        val args = invoke.parseArgs(OpenReadOnlyArgs::class.java)
+        ioExecutor.execute {
+            if (!hasPersistedDocumentRead(Uri.parse(args.uri))) {
+                postResponse { invoke.reject("persisted document permission is missing") }
+            } else {
+                openReadOnlyOnWorker(invoke, args.uri)
+            }
+        }
+    }
+
     @Command
     fun openReadOnly(invoke: Invoke) {
         val args = invoke.parseArgs(OpenReadOnlyArgs::class.java)
