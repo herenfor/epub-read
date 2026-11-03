@@ -9,13 +9,17 @@ type Props = {
   zoomed: boolean;
   onReady(size: Size): void;
   onError(): void;
+  /** The element left the page; its decode no longer counts. */
+  onGone(): void;
 };
 
 /** The display raster and the on-demand original share the same page box. */
-export function ComicPageRaster({ url, blob, alt, targetHeight, zoomed, onReady, onError }: Props) {
+export function ComicPageRaster({ url, blob, alt, targetHeight, zoomed, onReady, onError, onGone }: Props) {
   const canvas = useRef<HTMLCanvasElement>(null);
-  const ready = useRef(onReady);
+  const ready = useRef(onReady), gone = useRef(onGone);
   ready.current = onReady;
+  gone.current = onGone;
+  useEffect(() => () => gone.current(), []);
   const [fallback, setFallback] = useState(false);
   const [originalReady, setOriginalReady] = useState(false);
   useEffect(() => {

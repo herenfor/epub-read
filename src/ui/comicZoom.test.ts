@@ -9,6 +9,13 @@ describe("comic in-place zoom", () => {
     expect(view).toEqual({ scale: 3, x: -600, y: -400 });
   });
 
+  it("keeps the content under the fingers when the pinch goes past the cap", () => {
+    // 80 px apart to 580 px asks for 7.25x; at the 4x cap (602, 540) still stays put.
+    const view = pinchComicZoom(COMIC_ZOOM_NONE, { x: 602, y: 540 }, 80, { x: 602, y: 540 }, 580, 1204, 753);
+    expect(view).toEqual({ scale: COMIC_ZOOM_MAX, x: 602 - 602 * COMIC_ZOOM_MAX, y: 540 - 540 * COMIC_ZOOM_MAX });
+    expect(zoomComicAt(COMIC_ZOOM_NONE, { x: 550, y: 560 }, 4.2, 1100, 780)).toEqual({ scale: COMIC_ZOOM_MAX, x: -1650, y: -1680 });
+  });
+
   it("never shows an empty edge and caps the scale", () => {
     expect(panComicZoom({ scale: 2, x: -100, y: -100 }, 500, 500, 1000, 800)).toEqual({ scale: 2, x: 0, y: 0 });
     expect(panComicZoom({ scale: 2, x: -100, y: -100 }, -5000, -5000, 1000, 800)).toEqual({ scale: 2, x: -1000, y: -800 });
