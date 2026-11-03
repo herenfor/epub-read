@@ -199,7 +199,8 @@
   display: inline-flex;
   align-items: center;
   height: 32px;
-  padding: 2px;
+  /* With the 1px border, the buttons sit 4px inside: r-sm around r-xs. */
+  padding: 3px;
   border-radius: var(--r-sm);
   background: var(--shelf-input-bg, rgba(0, 0, 0, 0.05));
   border: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.08));
@@ -210,9 +211,9 @@
   align-items: center;
   justify-content: center;
   width: 28px;
-  height: 26px;
+  height: 24px;
   border: none;
-  border-radius: var(--r-sm);
+  border-radius: var(--r-xs);
   background: transparent;
   color: var(--muted, #6b7280);
   cursor: pointer;
@@ -1598,8 +1599,9 @@
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 8px 18px;
-  border-radius: var(--r-full);
+  padding: 8px 8px 8px 18px;
+  /* Concentric with the r-sm buttons 8px inside it. */
+  border-radius: var(--r-lg);
   background: color-mix(in srgb, var(--shelf-card-bg, #ffffff) 92%, transparent);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
@@ -2064,7 +2066,8 @@
   right: 12px;
   bottom: calc(12px + env(safe-area-inset-bottom, 0px));
   transform: none;
-  padding: 6px;
+  /* r-lg buttons 4px inside an r-xl bar: concentric. */
+  padding: 4px;
   gap: 0;
   border-radius: var(--r-xl);
   --sheet-y: calc(100% + 12px + env(safe-area-inset-bottom, 0px));
@@ -2367,7 +2370,9 @@
 }
 
 .app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-floating-batch-dock {
-  padding: 6px 10px 6px 18px;
+  /* r-lg buttons 4px inside an r-xl bar, as on phones. */
+  padding: 4px 4px 4px 18px;
+  border-radius: var(--r-xl);
 }
 
 .app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-floating-batch-actions {
@@ -3124,7 +3129,8 @@
 .app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-normal-bar-zen .shelf-quick-filter-box {
   height: var(--shelf-topbar-h);
   border-radius: var(--r-md);
-  padding: 0 7px 0 40px;
+  /* The segmented control at the end sits 4px in, as it does top and bottom. */
+  padding: 0 4px 0 40px;
 }
 
 .app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-normal-bar-zen .shelf-quick-filter-icon {
