@@ -80,6 +80,7 @@ pub(crate) use store::{
     managed_source_path,
     managed_named_path,
     atomic_write_bytes,
+    clear_shelf_move_cache,
     replace_file_atomically,
 };
 
@@ -514,6 +515,17 @@ impl DeviceBinding {
         (self.storage_kind == StorageKind::Linked && path.is_absolute()).then_some(path)
     }
 
+
+    pub(crate) fn into_shelf_move_binding(mut self, library_root: &Path) -> Result<Self, String> {
+        let path = self.resolve_source(library_root)?.path().to_path_buf();
+        if !path.is_file() {
+            return Err("原书暂不可用，请重新连接原书后再移动".into());
+        }
+        self.storage_kind = StorageKind::Linked;
+        self.canonical_source_path = Some(path.to_string_lossy().into_owned());
+        self.managed_file_name = None;
+        Ok(self)
+    }
 
     pub(crate) fn read_linked_cover(&self) -> Result<Vec<u8>, LinkedLibraryError> {
         let Some(entry) = self.cover_zip_path.as_deref() else {
