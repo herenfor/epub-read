@@ -171,7 +171,8 @@
   color: var(--muted);
   font-size: var(--fs-caption);
   font-weight: 500;
-  border-radius: var(--r-sm);
+  /* 2px inside the r-sm track. */
+  border-radius: calc(var(--r-sm) - 2px);
   cursor: pointer;
   display: inline-flex;
   align-items: center;

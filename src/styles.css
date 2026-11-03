@@ -1031,8 +1031,8 @@ select option {
   margin-top: 8px;
   padding: 4px 14px;
   border-radius: var(--r-xs);
-  border: 1px solid var(--border);
-  background: var(--bg-card);
+  border: 1px solid var(--ui-border-control);
+  background: transparent;
   color: var(--fg);
   cursor: pointer;
   font-size: var(--fs-body);
@@ -2918,6 +2918,7 @@ select option {
 }
 
 .shelf-confirm-title {
+  margin: 0;
   overflow-wrap: anywhere;
   font-size: var(--fs-title);
   font-weight: 700;
@@ -2949,6 +2950,34 @@ select option {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+/* Opening a book with more than one saved position: a longer message and
+   stacked full-width choices. */
+.shelf-confirm.is-wide {
+  width: min(520px, calc(100vw - 40px));
+}
+
+.shelf-confirm-body {
+  margin: 8px 0 14px;
+  font-size: var(--fs-body);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.shelf-confirm-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.shelf-confirm-choices > .ui-btn,
+.shelf-confirm-dismiss {
+  width: 100%;
+}
+
+.shelf-confirm-dismiss {
+  margin-top: 14px;
 }
 
 .tb-btn.danger {
@@ -3591,7 +3620,7 @@ select option {
 }
 .search-result-disabled {
   display: block;
-  color: var(--danger, #c44);
+  color: var(--error);
   font-size: var(--fs-caption);
   line-height: 1.35;
 }
@@ -5759,10 +5788,12 @@ select option {
 
 /* ---- 触摸端目录抽屉：分段标签不溢出头部，正文字号放大；手机改为左侧浮岛不占满全屏 ---- */
 /* 通用触摸按钮 48px 下限会把 24px 分段标签撑出 40/52px 固定头部，头部改为随内容增高。 */
+/* The header's controls sit 6px inside the r-xl drawer on every side, so the
+   r-md tabs and close button share its corners; the tabs sit 3px inside their track. */
 .app[data-touch-ui="true"] .sidebar-drawer .sidebar-header {
   height: auto;
   min-height: 56px;
-  padding: 6px 6px 6px 12px;
+  padding: 6px;
 }
 
 .app[data-touch-ui="true"] .sidebar-drawer .sidebar-tabs {
@@ -5770,10 +5801,14 @@ select option {
   border-radius: var(--r-md);
 }
 
+.app[data-touch-ui="true"] .sidebar-drawer .sidebar-icon-btn {
+  border-radius: var(--r-md);
+}
+
 .app[data-touch-ui="true"] .sidebar-drawer .sidebar-tab {
   height: 40px;
   min-height: 40px;
-  border-radius: var(--r-sm);
+  border-radius: calc(var(--r-md) - 3px);
   font-size: var(--fs-emph);
 }
 

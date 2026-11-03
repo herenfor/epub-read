@@ -90,7 +90,7 @@
 }
 
 .about-update-note .is-error {
-  color: var(--danger, #b3261e);
+  color: var(--error);
 }
 
 .about-update-links {
@@ -123,7 +123,7 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--danger, #d93a2f);
+  background: var(--error);
   box-shadow: 0 0 0 1.5px var(--bg, #ffffff);
   pointer-events: none;
 }

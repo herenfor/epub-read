@@ -7,7 +7,7 @@
   z-index: calc(var(--z-ui-system) + 200);
   box-sizing: border-box;
   color: var(--fg);
-  background: color-mix(in srgb, var(--panel, var(--bg)) 94%, transparent);
+  background: color-mix(in srgb, var(--panel-bg) 94%, transparent);
   border: var(--hairline) solid color-mix(in srgb, var(--panel-border) 70%, transparent);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.24);
   backdrop-filter: blur(8px);
