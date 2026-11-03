@@ -8,12 +8,18 @@ pub async fn linked_library_import_documents(
     request_id: String,
     documents: Vec<DocumentSelection>,
     on_progress: Channel<ImportProgress>,
+    keep_original: Option<bool>,
+    relink_hash: Option<String>,
 ) -> Result<ImportBatchResult, NativeImportError> {
     validate_document_request(&request_id, &documents)?;
+    let original = keep_original.unwrap_or(false);
+    if relink_hash.as_ref().is_some_and(|hash| !original || documents.len() != 1 || !valid_content_hash(hash)) {
+        return Err(NativeImportError::invalid_request("重新连接需要选择一本原书"));
+    }
 
     #[cfg(not(target_os = "android"))]
     {
-        let _ = (app, request_id, documents, on_progress);
+        let _ = (app, request_id, documents, on_progress, original, relink_hash);
         Err(NativeImportError::unsupported_platform())
     }
 
@@ -23,7 +29,11 @@ pub async fn linked_library_import_documents(
         let task_guard = ImportTaskGuard::new(app.clone(), job);
         send_import_progress(&on_progress, &request_id, "preparing", 0, documents.len());
         let join = tauri::async_runtime::spawn_blocking(move || {
-            run_import_documents_blocking(app, request_id, documents, on_progress, task_guard)
+            if original {
+                run_import_originals(app, request_id, documents, on_progress, task_guard, relink_hash)
+            } else {
+                run_import_documents_blocking(app, request_id, documents, on_progress, task_guard)
+            }
         })
         .await;
         match join {
@@ -397,8 +407,8 @@ pub fn linked_library_relink(
         .iter()
         .find(|binding| binding.content_hash == content_hash)
     {
-        if existing.storage_kind == StorageKind::Managed {
-            return Err("managed 来源不能重新定位；请在 Android 上重新导入书籍".into());
+        if existing.storage_kind != StorageKind::Linked {
+            return Err("请通过 Android 系统选择器重新连接或导入原书".into());
         }
     }
     upsert_binding(

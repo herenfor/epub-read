@@ -1006,7 +1006,7 @@ fn start_inventory_query<R: Runtime>(
             }
             let present = match bindings.get(&hash) {
                 Some(binding) => {
-                    binding.is_valid_cancellable(&root, || worker_session.is_close_requested())?
+                    binding.is_valid_on(Some(&worker_app), &root, || worker_session.is_close_requested())?
                 }
                 None => false,
             };

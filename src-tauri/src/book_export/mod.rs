@@ -77,7 +77,7 @@ fn prevent_source_overwrite(
         let target = target.canonicalize()?;
         if plans
             .iter()
-            .any(|book| book.path.canonicalize().ok().as_ref() == Some(&target))
+            .any(|book| book.source.path().and_then(|path| path.canonicalize().ok()).as_ref() == Some(&target))
         {
             return Err(SaveFileError::invalid_request(
                 "导出目标不能覆盖书架正在使用的源文件",
@@ -152,28 +152,18 @@ fn run_export(
         };
         let prepared = (|| -> Result<SourceBook, &'static str> {
             let binding = bindings.get(&hash).ok_or("source-unbound")?;
-            let path = binding
-                .source_path(&root)
-                .map_err(|_| "source-unreadable")?;
-            let stat = fs::metadata(&path).map_err(|e| {
-                if e.kind() == std::io::ErrorKind::NotFound {
-                    "source-missing"
-                } else {
-                    "source-unreadable"
-                }
+            let source = binding.book_source(&root).map_err(|_| "source-unreadable")?;
+            let (_, bytes) = source.open(Some(&app)).map_err(|error| {
+                if error.kind() == std::io::ErrorKind::NotFound { "source-missing" } else { "source-unreadable" }
             })?;
-            if !stat.is_file() || stat.len() == 0 {
-                return Err("source-unreadable");
-            }
-            if binding.file_size != 0 && stat.len() != binding.file_size {
-                return Err("source-changed");
-            }
+            if bytes == 0 { return Err("source-unreadable"); }
+            if binding.file_size != 0 && bytes != binding.file_size { return Err("source-changed"); }
             Ok(SourceBook {
                 hash: hash.clone(),
                 title: meta.title.clone(),
                 file_name: meta.file_name.clone(),
-                path,
-                bytes: stat.len(),
+                source,
+                bytes,
             })
         })();
         match prepared {
@@ -214,7 +204,7 @@ fn run_export(
         .open(&temp)?;
     let _owned = OwnedOutput(temp.clone());
     let mut progress = ProgressReporter::new(on_progress, "writing", Some(book_total));
-    let written = match write_output(file, &plans, zip, &task.cancelled, |n| progress.add(n)) {
+    let written = match write_output(Some(&app), file, &plans, zip, &task.cancelled, |n| progress.add(n)) {
         Ok(written) => written,
         Err(error) if error.code == "cancelled" => {
             result.status = "cancelled".into();
@@ -400,7 +390,7 @@ mod tests {
             hash: "a".repeat(64),
             title: String::new(),
             file_name: "a.epub".into(),
-            path: source.clone(),
+            source: crate::linked_library::document_source::BookSource::Path(source.clone()),
             bytes: 11,
         };
         assert!(prevent_source_overwrite(&source, &root, &[plan]).is_err());
@@ -419,10 +409,10 @@ mod tests {
                 hash: "b".repeat(64),
                 title: String::new(),
                 file_name: "a.epub".into(),
-                path: source.clone(),
+                source: crate::linked_library::document_source::BookSource::Path(source.clone()),
                 bytes: 11,
             };
-            assert!(write_output(file, &[plan], false, &AtomicBool::new(false), |_| {}).is_err());
+            assert!(write_output(None, file, &[plan], false, &AtomicBool::new(false), |_| {}).is_err());
         }
         assert!(!temporary.exists());
         assert_eq!(fs::read(&source).unwrap(), b"keep source");

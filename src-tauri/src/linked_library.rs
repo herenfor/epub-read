@@ -52,8 +52,7 @@ pub(crate) use epub_meta::{
 };
 use epub_meta::read_zip_entry_bounded;
 
-#[cfg(target_os = "android")]
-mod document_source;
+pub(crate) mod document_source;
 #[cfg(target_os = "android")]
 use document_source::hash_original_document;
 mod source;
@@ -92,7 +91,19 @@ pub(crate) use store::{
 };
 
 mod import;
+#[cfg(target_os = "android")]
+pub(crate) fn with_document_binding_lock<T>(
+    app: &AppHandle, run: impl FnOnce() -> T,
+) -> Result<T, String> {
+    let state = app.state::<LinkedLibraryWriteState>();
+    let _guard = state.0.lock().map_err(|_| "链接书库写入锁已损坏")?;
+    ensure_import_idle(app)?;
+    Ok(run())
+}
+
 use import::*;
+#[cfg(target_os = "android")]
+pub(crate) use import::ensure_import_idle;
 #[allow(unused_imports)]
 pub(crate) use import::{
     new_staging_path,
@@ -441,6 +452,8 @@ enum StorageKind {
     #[default]
     Linked,
     Managed,
+    #[serde(rename = "android-document")]
+    AndroidDocument,
 }
 
 impl<'de> Deserialize<'de> for StorageKind {
@@ -464,7 +477,8 @@ impl<'de> Deserialize<'de> for StorageKind {
                 match value {
                     "linked" => Ok(StorageKind::Linked),
                     "managed" => Ok(StorageKind::Managed),
-                    other => Err(E::unknown_variant(other, &["linked", "managed"])),
+                    "android-document" => Ok(StorageKind::AndroidDocument),
+                    other => Err(E::unknown_variant(other, &["linked", "managed", "android-document"])),
                 }
             }
 
@@ -491,6 +505,8 @@ pub(crate) struct DeviceBinding {
     storage_kind: StorageKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     canonical_source_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    document_uri: Option<String>,
     /// A library copy's readable file name inside `books/` (A34). Absent on
     /// older managed bindings, whose copy is `<hash>.epub`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -521,6 +537,10 @@ impl BindingSource {
 }
 
 impl DeviceBinding {
+    pub(crate) fn document_uri(&self) -> Option<&str> {
+        (self.storage_kind == StorageKind::AndroidDocument).then_some(self.document_uri.as_deref()).flatten()
+    }
+
     pub(crate) fn linked_path(&self) -> Option<&std::path::Path> {
         let path = std::path::Path::new(self.canonical_source_path.as_deref()?);
         (self.storage_kind == StorageKind::Linked && path.is_absolute()).then_some(path)
@@ -528,6 +548,7 @@ impl DeviceBinding {
 
 
     pub(crate) fn into_shelf_move_binding(mut self, library_root: &Path) -> Result<Self, String> {
+        if self.document_uri().is_some() { return Ok(self); }
         let path = self.resolve_source(library_root)?.path().to_path_buf();
         if !path.is_file() {
             return Err("原书暂不可用，请重新连接原书后再移动".into());
@@ -560,6 +581,7 @@ impl DeviceBinding {
 
     fn resolve_source(&self, library_root: &Path) -> Result<BindingSource, String> {
         match self.storage_kind {
+            StorageKind::AndroidDocument => Err("Android 原书需要文档读取器".into()),
             StorageKind::Linked => {
                 let raw = self
                     .canonical_source_path
@@ -609,6 +631,7 @@ pub struct LinkedLibraryRecordView {
     notes: Vec<LinkedLibraryNote>,
     is_new: bool,
     available: bool,
+    original_location: bool,
     file_size: u64,
     cover_mime: String,
     thumbnail_mime: String,

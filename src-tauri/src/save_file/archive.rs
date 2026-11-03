@@ -15,7 +15,7 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
@@ -66,7 +66,7 @@ pub(crate) struct SaveManifestEntry {
 #[derive(Debug, Clone)]
 pub(crate) struct ExportBookPlan {
     pub content_hash: String,
-    pub source_path: PathBuf,
+    pub source: crate::linked_library::document_source::BookSource,
     pub bytes: u64,
 }
 
@@ -226,7 +226,8 @@ pub(crate) fn select_export_state(
     ))
 }
 
-pub(crate) fn plan_export_books(
+pub(crate) fn plan_export_books<R: tauri::Runtime>(
+    app: Option<&tauri::AppHandle<R>>,
     root: &Path,
     state: &PortableStateV3,
     bindings: &BTreeMap<String, LocalBinding>,
@@ -247,19 +248,9 @@ pub(crate) fn plan_export_books(
             });
             continue;
         };
-        let path = match binding.source_path(root) {
-            Ok(path) => path,
-            Err(error) => {
-                skipped.push(SkippedBook {
-                    content_hash: content_hash.clone(),
-                    title,
-                    reason: error.message,
-                });
-                continue;
-            }
-        };
-        let metadata = match fs::metadata(&path) {
-            Ok(metadata) => metadata,
+        let (source, bytes) = match binding.book_source(root)
+            .and_then(|source| source.open(app).map(|(_, size)| (source, size)).map_err(SaveFileError::from)) {
+            Ok(value) => value,
             Err(_) => {
                 skipped.push(SkippedBook {
                     content_hash: content_hash.clone(),
@@ -269,24 +260,17 @@ pub(crate) fn plan_export_books(
                 continue;
             }
         };
-        if !metadata.is_file() {
-            skipped.push(SkippedBook {
-                content_hash: content_hash.clone(),
-                title,
-                reason: "本机书籍源不是普通文件".to_string(),
-            });
-            continue;
-        }
         plans.push(ExportBookPlan {
             content_hash: content_hash.clone(),
-            source_path: path,
-            bytes: metadata.len(),
+            source,
+            bytes,
         });
     }
     (plans, skipped)
 }
 
-pub(crate) fn plan_export_books_for_missing(
+pub(crate) fn plan_export_books_for_missing<R: tauri::Runtime>(
+    app: Option<&tauri::AppHandle<R>>,
     root: &Path,
     state: &PortableStateV3,
     bindings: &BTreeMap<String, LocalBinding>,
@@ -315,7 +299,7 @@ pub(crate) fn plan_export_books_for_missing(
             });
             continue;
         };
-        if !binding.is_valid(root) {
+        if !binding.is_valid_on(app, root, || false).unwrap_or(false) {
             skipped.push(SkippedBook {
                 content_hash: content_hash.clone(),
                 title,
@@ -323,19 +307,9 @@ pub(crate) fn plan_export_books_for_missing(
             });
             continue;
         }
-        let path = match binding.source_path(root) {
-            Ok(path) => path,
-            Err(error) => {
-                skipped.push(SkippedBook {
-                    content_hash: content_hash.clone(),
-                    title,
-                    reason: error.message,
-                });
-                continue;
-            }
-        };
-        let metadata = match fs::metadata(&path) {
-            Ok(metadata) => metadata,
+        let (source, bytes) = match binding.book_source(root)
+            .and_then(|source| source.open(app).map(|(_, size)| (source, size)).map_err(SaveFileError::from)) {
+            Ok(value) => value,
             Err(_) => {
                 skipped.push(SkippedBook {
                     content_hash: content_hash.clone(),
@@ -345,18 +319,10 @@ pub(crate) fn plan_export_books_for_missing(
                 continue;
             }
         };
-        if !metadata.is_file() {
-            skipped.push(SkippedBook {
-                content_hash: content_hash.clone(),
-                title,
-                reason: "本机书籍源不是普通文件".to_string(),
-            });
-            continue;
-        }
         plans.push(ExportBookPlan {
             content_hash: content_hash.clone(),
-            source_path: path,
-            bytes: metadata.len(),
+            source,
+            bytes,
         });
     }
     (plans, skipped, reused)
@@ -370,7 +336,8 @@ fn zip_file_options(compression: CompressionMethod, large_file: bool) -> SimpleF
     options
 }
 
-pub(crate) fn write_export_archive(
+pub(crate) fn write_export_archive<R: tauri::Runtime>(
+    app: Option<&tauri::AppHandle<R>>,
     archive_path: &Path,
     package_id: &str,
     state: &PortableStateV3,
@@ -466,7 +433,7 @@ pub(crate) fn write_export_archive(
         }
         let options = zip_file_options(CompressionMethod::Stored, plan.bytes >= u32::MAX as u64);
         archive.start_file(source_entry_path(state, &plan.content_hash), options)?;
-        let mut source = File::open(&plan.source_path)?;
+        let (mut source, _) = plan.source.open(app)?;
         let mut hasher = Sha256::new();
         let mut copied = 0_u64;
         let mut buffer = [0_u8; COPY_BUFFER_BYTES];
@@ -477,6 +444,9 @@ pub(crate) fn write_export_archive(
             let read = source.read(&mut buffer)?;
             if read == 0 {
                 break;
+            }
+            if read as u64 > plan.bytes.saturating_sub(copied) {
+                return Err(SaveFileError::invalid_data("原书在导出期间长度发生变化"));
             }
             archive.write_all(&buffer[..read])?;
             hasher.update(&buffer[..read]);
@@ -1093,6 +1063,7 @@ mod tests {
         let cancelled = AtomicBool::new(false);
         let mut reporter = ProgressReporter::new(channel(), "test", None);
         write_export_archive(
+            None::<&tauri::AppHandle>,
             &archive_path,
             A,
             &state,
@@ -1144,12 +1115,13 @@ mod tests {
         let cancelled = AtomicBool::new(false);
         let mut reporter = ProgressReporter::new(channel(), "test", None);
         write_export_archive(
+            None::<&tauri::AppHandle>,
             &archive_path,
             A,
             &state,
             &[ExportBookPlan {
                 content_hash: content_hash.clone(),
-                source_path: source,
+                source: crate::linked_library::document_source::BookSource::Path(source),
                 bytes: bytes.len() as u64,
             }],
             "all",
@@ -1186,7 +1158,7 @@ mod tests {
             let target = dir.path().join("source.epubsave");
             let mut reporter = ProgressReporter::new(channel(), "formats", None);
             let cancel = AtomicBool::new(false);
-            write_export_archive(&target,A,&state,&[ExportBookPlan {content_hash:hash,source_path:source,bytes:bytes.len() as u64}],"all",&[],&mut reporter,&cancel).unwrap();
+            write_export_archive(None::<&tauri::AppHandle>,&target,A,&state,&[ExportBookPlan {content_hash:hash,source:crate::linked_library::document_source::BookSource::Path(source),bytes:bytes.len() as u64}],"all",&[],&mut reporter,&cancel).unwrap();
             let parsed = validate_and_extract(&target,&dir.path().join("staging"),&mut reporter,&cancel).unwrap();
             assert_eq!(parsed.incoming,state);
             assert_eq!(parsed.attachments[0].staging_path.extension().unwrap(),extension);
@@ -1204,6 +1176,7 @@ mod tests {
         let cancelled = AtomicBool::new(true);
         let mut reporter = ProgressReporter::new(channel(), "test", None);
         let error = write_export_archive(
+            None::<&tauri::AppHandle>,
             &archive_path,
             A,
             &state,

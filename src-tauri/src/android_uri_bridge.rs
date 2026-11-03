@@ -308,10 +308,19 @@ impl SeekableDocument {
     pub(crate) fn len(&self) -> u64 { self.length }
 
     pub(crate) fn revision(&self) -> io::Result<(u64, u64, u64, i64, i64)> {
-        use std::os::unix::fs::MetadataExt;
-        let metadata = self.file.metadata()?;
-        Ok((metadata.dev(), metadata.ino(), metadata.len(), metadata.ctime(), metadata.ctime_nsec()))
+        document_revision(&self.file)
     }
+
+    pub(crate) fn metadata_handle(&self) -> io::Result<File> {
+        self.file.try_clone()
+    }
+}
+
+#[cfg(target_os = "android")]
+pub(crate) fn document_revision(file: &File) -> io::Result<(u64, u64, u64, i64, i64)> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = file.metadata()?;
+    Ok((metadata.dev(), metadata.ino(), metadata.len(), metadata.ctime(), metadata.ctime_nsec()))
 }
 
 impl Read for SeekableDocument {
@@ -609,6 +618,13 @@ mod android {
         }
     }
 
+    pub(crate) fn release_document_read<R: Runtime>(app: &AppHandle<R>, uri: &str) {
+        let bridge = app.state::<AndroidUriBridge<R>>();
+        let _ = bridge.0.run_mobile_plugin::<EmptyPluginResponse>(
+            "releaseDocumentRead", OpenReadOnlyRequest { uri },
+        );
+    }
+
     pub(crate) fn open_persisted_document<R: Runtime>(
         app: &AppHandle<R>,
         uri: &str,
@@ -771,7 +787,7 @@ mod android {
 pub(crate) use android::{
     cancel_write_blocking, delete_created_document_blocking, open_content_uri, pick_directory_tree, pick_watched_directory, release_watched_directory, plugin,
     query_tree_directory, read_content_uri_blocking, write_staged_file_blocking,
-    PendingDocumentGrant, open_persisted_document,
+    PendingDocumentGrant, open_persisted_document, release_document_read,
     write_text_content_uri_blocking,
 };
 
