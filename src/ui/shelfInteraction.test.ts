@@ -177,6 +177,13 @@ describe("shelf action descriptors", () => {
     expect(shelfBookActions({ ...base, deleteDisabled: true }).find((a) => a.id === "delete")?.disabled).toBe(true);
     expect(ids({ ...base, canExport: true } as typeof base)).toEqual(["read:open", "organize:favorite,move,removeFromFolder,exportBook,select", "danger:delete"]);
     expect(shelfBookActions({ ...base, canExport: true, exportDisabled: true }).find((a) => a.id === "exportBook")?.disabled).toBe(true);
+    // ER-0045: the shelf move sits after the folder actions and waits for busy work and an available file.
+    expect(ids({ ...base, shelfMove: { direction: "toPrivate", disabled: false } } as typeof base)[1]).toBe("organize:favorite,move,removeFromFolder,moveToPrivate,select");
+    const shelfMove = (direction: "toPrivate" | "toLibrary", disabled: boolean, busy = false) =>
+      shelfBookActions({ ...base, busy, shelfMove: { direction, disabled } }).find((a) => a.id === (direction === "toPrivate" ? "moveToPrivate" : "moveToLibrary"));
+    expect(shelfMove("toLibrary", false)).toMatchObject({ label: "shelf.card.moveToLibrary", disabled: false });
+    expect(shelfMove("toPrivate", true)?.disabled).toBe(true);
+    expect(shelfMove("toPrivate", false, true)?.disabled).toBe(true);
     // A11: where tabs show, “open in a new tab” follows “open”; an open book switches, a full strip refuses.
     const tab = (open: boolean, full: boolean) => shelfBookActions({ ...base, tabs: { open, full } }).find((a) => a.id === "openInNewTab");
     expect(ids({ ...base, tabs: { open: false, full: false } } as typeof base)[0]).toBe("read:open,openInNewTab");

@@ -90,6 +90,16 @@ export function clearUnheldCoverUrls(): void {
   }
 }
 
+/** Drops the covers of one book no mounted card shows, e.g. after it left this shelf. */
+export function forgetCoverUrls(keyPrefix: string): void {
+  for (const [key, entry] of entries) {
+    if (entry.users > 0 || !key.startsWith(keyPrefix)) continue;
+    entries.delete(key);
+    totalBytes -= entry.bytes;
+    URL.revokeObjectURL(entry.url);
+  }
+}
+
 export function coverUrlCacheSize(): { count: number; bytes: number } {
   return { count: entries.size, bytes: totalBytes };
 }

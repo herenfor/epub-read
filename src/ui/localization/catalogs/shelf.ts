@@ -67,6 +67,8 @@ export const shelf = defineMessages("shelf", {
   "shelf.card.moveToFolder": "移至文件夹",
   "shelf.card.removing": "正在移出…",
   "shelf.card.removeFromFolder": "从文件夹移除",
+  "shelf.card.moveToPrivate": { zh: "移入隐私书架", note: "Book menu: move the book, with its progress and notes, into the password-protected private shelf." },
+  "shelf.card.moveToLibrary": { zh: "移出隐私书架", note: "Book menu on the private shelf: move the book back to the ordinary library." },
   "shelf.card.removeFailed": { zh: "移出失败：{error}", note: "Shown inside the book's menu when removing it from its folder failed." },
   "shelf.card.select": { zh: "多选", note: "Menu action: start multi-select with this book already selected.", max: 12 },
   "shelf.card.reveal": { zh: "在文件资源管理器中打开", note: "Book menu (Windows): open File Explorer with the book's EPUB file selected." },

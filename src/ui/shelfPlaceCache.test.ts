@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { readShelfPlaceLabel, writeShelfPlaceLabel } from "./shelfPlaceCache";
+import { forgetShelfPlaceLabel, readShelfPlaceLabel, writeShelfPlaceLabel } from "./shelfPlaceCache";
 
 describe("shelf place cache", () => {
   const memory = new Map<string, string>();
@@ -35,5 +35,13 @@ describe("shelf place cache", () => {
     expect(readShelfPlaceLabel("book", 0)).toBeNull();
     memory.set("epub-reader-shelf-place-v1", JSON.stringify({ book: { spineIndex: -1, label: "x" } }));
     expect(readShelfPlaceLabel("book", -1)).toBeNull();
+  });
+
+  it("forgets one book when it moves to another shelf", () => {
+    writeShelfPlaceLabel("book", 6, "第一章");
+    writeShelfPlaceLabel("other", 2, "第二章");
+    forgetShelfPlaceLabel("book");
+    expect(readShelfPlaceLabel("book", 6)).toBeNull();
+    expect(readShelfPlaceLabel("other", 2)).toBe("第二章");
   });
 });

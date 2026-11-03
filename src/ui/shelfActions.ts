@@ -7,7 +7,7 @@ import type { PlainMessageKey } from "./localization/core";
  */
 
 export type ShelfActionGroup = "read" | "organize" | "danger";
-export type ShelfBookActionId = "open" | "openInNewTab" | "select" | "favorite" | "unfavorite" | "move" | "removeFromFolder" | "exportBook" | "revealSource" | "delete";
+export type ShelfBookActionId = "open" | "openInNewTab" | "select" | "favorite" | "unfavorite" | "move" | "removeFromFolder" | "moveToPrivate" | "moveToLibrary" | "exportBook" | "revealSource" | "delete";
 export type ShelfFolderActionId = "openFolder" | "renameFolder" | "exportBook" | "dissolveFolder";
 export type ShelfActionId = ShelfBookActionId | ShelfFolderActionId;
 
@@ -40,6 +40,8 @@ export interface ShelfBookActionContext {
   canReveal?: boolean;
   /** The book's file is unavailable (moved or deleted). */
   revealDisabled?: boolean;
+  /** ER-0045: the book can move to the other shelf (into or out of the private shelf). */
+  shelfMove?: { direction: "toPrivate" | "toLibrary"; disabled: boolean };
   /** A11: where reader tabs show, the book can open in a new tab. */
   tabs?: { open: boolean; full: boolean };
 }
@@ -62,6 +64,11 @@ export function shelfBookActions(ctx: ShelfBookActionContext): ShelfAction[] {
       id: "removeFromFolder", group: "organize", label: "shelf.card.removeFromFolder",
       pendingLabel: "shelf.card.removing", disabled: ctx.busy,
     });
+  }
+  if (ctx.shelfMove) {
+    actions.push(ctx.shelfMove.direction === "toPrivate"
+      ? { id: "moveToPrivate", group: "organize", label: "shelf.card.moveToPrivate", disabled: ctx.busy || ctx.shelfMove.disabled }
+      : { id: "moveToLibrary", group: "organize", label: "shelf.card.moveToLibrary", disabled: ctx.busy || ctx.shelfMove.disabled });
   }
   if (ctx.canExport) actions.push({ id: "exportBook", group: "organize", label: "bookExport.action", disabled: ctx.busy || Boolean(ctx.exportDisabled) });
   if (ctx.canReveal) actions.push({ id: "revealSource", group: "organize", label: "shelf.card.reveal", disabled: Boolean(ctx.revealDisabled) });
