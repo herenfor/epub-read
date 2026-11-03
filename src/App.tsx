@@ -149,6 +149,7 @@ import { ReaderReturnControl } from "./ui/ReaderReturnControl";
 import { applyDocumentTheme, documentThemeAttributes, useThemeTransition } from "./ui/themeTransitionHost";
 import { useReadingInputStart } from "./ui/readerPointerEdge";
 import { shelfLibraryView } from "./ui/libraryLoad";
+import { useFolderWatchTriggers } from "./ui/folderWatch";
 import {
   useShelfEntriesState, useShelfNoticeState, useShelfOrganizationState,
   useShelfContentHashes, useShelfLibrary, useShelfOrganizationActions,
@@ -1944,6 +1945,33 @@ export default function App() {
       setShelfError(uiText("libraryLocation.refreshFailed", { error: error instanceof Error ? error.message : String(error) }));
     });
   }, [refreshShelfProjection, setShelfError]);
+
+  // ER-0042: the automatic import folder scans only from an idle shelf in the foreground.
+  // A scan that adds nothing refreshes nothing; it is not a sync event either.
+  const lastFolderWatchErrorRef = useRef<string | null>(null);
+  useFolderWatchTriggers(
+    view === "shelf" && libraryLoad.status === "ready" && !shelfBusy && nativeImport === null && !folderImport && !saveFailurePrompt,
+    (outcome, manual) => {
+      if (outcome.kind === "error") {
+        // The settings show the reason; the shelf says it once per reason.
+        if (manual || lastFolderWatchErrorRef.current === outcome.message) return;
+        lastFolderWatchErrorRef.current = outcome.message;
+        setShelfNotice({ kind: "error", text: uiText("shelfSettings.watch.notice.error", { error: outcome.message }) });
+        return;
+      }
+      if (outcome.kind !== "result") return;
+      lastFolderWatchErrorRef.current = null;
+      const { imported, failed } = outcome.result.counts;
+      if (imported === 0) return;
+      void refreshShelfProjection().catch((error: unknown) => {
+        setShelfError(uiText("shelfSettings.watch.refreshFailed", { error: error instanceof Error ? error.message : String(error) }));
+      });
+      const added = uiPlural("shelfSettings.watch.notice", imported, { count: imported });
+      setShelfNotice(failed > 0
+        ? { kind: "warn", text: uiText("shelfSettings.watch.notice.failed", { added, failed: uiPlural("shelfSettings.watch.failed", failed, { count: failed }) }) }
+        : { kind: "ok", text: added });
+    },
+  );
 
   const handleRevealSource = useCallback((entry: ShelfEntry): void => {
     void revealShelfSource(entry.contentHash ?? entry.id).then((status) => {

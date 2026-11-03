@@ -4,6 +4,7 @@ import { getRuntimeCapabilities } from "../platform/runtimeCapabilities";
 import { AboutInfo } from "./AboutInfo";
 import { Icon, SettingsRow, SettingsSwitchRow, UpdateDot } from "./settingsRows";
 import { displayPath, openLibraryFolder, setCopyOnImport, useLibrarySettings } from "./librarySettings";
+import { folderWatch, useFolderWatchView, type FolderWatchView } from "./folderWatch";
 import { useAppUpdateDot } from "./appUpdate/appUpdateStore";
 import { CacheStoragePanel } from "./CacheStoragePanel";
 import { LibraryLocationPanel } from "./LibraryLocationPanel";
@@ -11,7 +12,7 @@ import { CloudSyncPanel } from "./cloudSync/CloudSyncPanel";
 import { useCloudSyncAttention } from "./cloudSync/cloudSyncStore";
 import { menuCloseMs, pageCloseMs, useExitPresence } from "./menuMotion";
 import { useUiMotion } from "./motionPreference";
-import { useUiText } from "./localization/UiLanguageProvider";
+import { uiPlural, useUiText } from "./localization/UiLanguageProvider";
 import { useUiLanguageChoice } from "./localization/useUiLanguageChoice";
 import type { UiLanguagePreference } from "./localization/core";
 import type { ReaderTapPreferences } from "./readerTapRegions";
@@ -108,7 +109,59 @@ const ROW_ICONS = {
   log: <Icon><path d="M7 3.5h7l4 4V20a.5.5 0 0 1-.5.5h-10A.5.5 0 0 1 7 20z" /><path d="M14 3.5V8h4M10 12.5h5M10 16h5" /></Icon>,
   library: <Icon><path d="M5 4.5h5v15H5zM10 4.5h4v15h-4z" /><path d="m15 5.5 3.5-.9 3 14-3.5.9z" /></Icon>,
   move: <Icon><path d="M3.5 7.5v10A1.5 1.5 0 0 0 5 19h14a1.5 1.5 0 0 0 1.5-1.5V9A1.5 1.5 0 0 0 19 7.5h-7L10 5H5A1.5 1.5 0 0 0 3.5 6.5z" /><path d="M9 13h6.5M13 10.5l2.5 2.5-2.5 2.5" /></Icon>,
+  watch: <Icon><path d="M3.5 7.5v10A1.5 1.5 0 0 0 5 19h14a1.5 1.5 0 0 0 1.5-1.5V9A1.5 1.5 0 0 0 19 7.5h-7L10 5H5A1.5 1.5 0 0 0 3.5 6.5z" /><path d="M12 10.5v6M9.5 14l2.5 2.5 2.5-2.5" /></Icon>,
+  inbox: <Icon><path d="M4 13.5 6.5 5h11l2.5 8.5V19a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z" /><path d="M4 13.5h4.5l1 2h5l1-2H20" /></Icon>,
+  scan: <Icon><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3" /><path d="M19.5 4.5v4h-4" /></Icon>,
+  off: <Icon><circle cx="12" cy="12" r="8" /><path d="m6.5 17.5 11-11" /></Icon>,
 };
+
+/** The Windows library's own Inbox: the watched path ends in it. */
+function isLibraryInbox(directory: string | null): boolean {
+  return directory !== null && /[\\/]Inbox[\\/]?$/i.test(directory);
+}
+
+/** What the last scan found, or what is happening now. */
+function folderWatchStatus(view: FolderWatchView, t: ReturnType<typeof useUiText>["t"]): string {
+  if (view.scanning) return t("shelfSettings.watch.scanning");
+  const last = view.last;
+  if (!last || last.kind === "error") return t("shelfSettings.watch.idle");
+  if (last.kind === "busy") return t("shelfSettings.watch.busy");
+  const { counts, unreadableDirectories } = last.result;
+  const parts = [counts.imported > 0
+    ? uiPlural("shelfSettings.watch.added", counts.imported, { count: counts.imported })
+    : t("shelfSettings.watch.none")];
+  if (counts.failed > 0) parts.push(uiPlural("shelfSettings.watch.failed", counts.failed, { count: counts.failed }));
+  if (unreadableDirectories > 0) parts.push(uiPlural("shelfSettings.watch.unreadable", unreadableDirectories, { count: unreadableDirectories }));
+  return parts.join(" · ");
+}
+
+/**
+ * ER-0042: the folder whose new books join the shelf by themselves. Tapping
+ * the folder row picks or changes it (also how a revoked Android permission
+ * is restored); Windows can use the library's Inbox instead.
+ */
+export function FolderWatchCard(props: { view: FolderWatchView; windows: boolean; onAction(action: "pick" | "libraryInbox" | "disable" | "scan"): void }) {
+  const { t } = useUiText();
+  const { view } = props;
+  const enabled = view.settings?.enabled === true;
+  const busy = view.configuring || view.scanning || view.settings === null;
+  const none = <></>;
+  return <>
+    <div className="shelf-settings-card is-list">
+      <SettingsRow icon={ROW_ICONS.watch} title={t("shelfSettings.watch")} disabled={busy}
+        detail={enabled && view.settings?.directory ? displayPath(view.settings.directory) : t("shelfSettings.watch.off")}
+        onClick={() => props.onAction("pick")} />
+      {props.windows && !(enabled && isLibraryInbox(view.settings?.directory ?? null)) && <SettingsRow icon={ROW_ICONS.inbox}
+        title={t("shelfSettings.watch.inbox")} detail={t("shelfSettings.watch.inbox.detail")} disabled={busy}
+        onClick={() => props.onAction("libraryInbox")} />}
+      {enabled && <SettingsRow icon={ROW_ICONS.scan} title={t("shelfSettings.watch.scan")} detail={folderWatchStatus(view, t)}
+        disabled={busy} trailing={none} onClick={() => props.onAction("scan")} />}
+      {enabled && <SettingsRow icon={ROW_ICONS.off} title={t("shelfSettings.watch.disable")} detail={t("shelfSettings.watch.disable.detail")}
+        disabled={busy} trailing={none} onClick={() => props.onAction("disable")} />}
+    </div>
+    {view.last?.kind === "error" && <p className="shelf-settings-error" role="alert">{t("shelfSettings.watch.error", { error: view.last.message })}</p>}
+  </>;
+}
 
 function Segmented<T extends string>(props: { label: string; value: T; options: Array<{ value: T; label: string }>; onChange(value: T): void }) {
   return <div className="shelf-settings-control">
@@ -145,6 +198,7 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
   const updateDot = useAppUpdateDot();
   const syncDot = useCloudSyncAttention();
   const library = useLibrarySettings();
+  const watch = useFolderWatchView();
   const [libraryOpenError, setLibraryOpenError] = useState<string | null>(null);
   const [locationOpen, setLocationOpen] = useState(false);
   const locationRunningRef = useRef(false);
@@ -293,6 +347,8 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
             onClick={() => setLocationOpen(true)} />}
         </div>}
         {library && (library.error || libraryOpenError) && <p className="shelf-settings-error" role="alert">{libraryOpenError ?? library.error}</p>}
+        {watch && <FolderWatchCard view={watch} windows={capabilities.platform === "windows"}
+          onAction={(action) => { if (action === "scan") folderWatch().trigger(true); else void folderWatch().configure(action); }} />}
         {capabilities.supportsCacheStorage && <div className="shelf-settings-card is-list">
           <SettingsRow icon={ROW_ICONS.cache} title={t("shelfMenu.cache")} detail={t("shelfMenu.cache.detail")} disabled={busy} onClick={() => setCacheOpen(true)} />
         </div>}
