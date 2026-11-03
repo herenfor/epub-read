@@ -626,7 +626,7 @@ pub struct ImportBatchResult {
     results: Vec<ImportItemResult>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DocumentSelection {
     pub uri: String,

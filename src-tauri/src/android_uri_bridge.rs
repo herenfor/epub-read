@@ -632,6 +632,19 @@ mod android {
             .map_err(|error| super::command_error("cancel_failed", error.to_string()))
     }
 
+    pub(crate) fn pick_link_documents<R: Runtime>(
+        app: &AppHandle<R>,
+    ) -> Result<Vec<crate::linked_library::DocumentSelection>, String> {
+        #[derive(Deserialize)]
+        struct Reply {
+            documents: Vec<crate::linked_library::DocumentSelection>,
+        }
+        app.state::<AndroidUriBridge<R>>().0
+            .run_mobile_plugin::<Reply>("pickLinkDocuments", EmptyPluginResponse {})
+            .map(|reply| reply.documents)
+            .map_err(|error| super::command_error("pick_failed", error.to_string()))
+    }
+
     pub(crate) fn pick_directory_tree<R: Runtime>(
         app: &AppHandle<R>,
     ) -> Result<Option<String>, String> {
@@ -690,6 +703,23 @@ pub(crate) use android::{
     query_tree_directory, read_content_uri_blocking, write_staged_file_blocking,
     write_text_content_uri_blocking,
 };
+
+#[tauri::command]
+pub async fn android_pick_link_documents(
+    app: tauri::AppHandle,
+) -> Result<Vec<crate::linked_library::DocumentSelection>, String> {
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        Err(command_error("unsupported_platform", "document picker is only available on Android"))
+    }
+    #[cfg(target_os = "android")]
+    {
+        tauri::async_runtime::spawn_blocking(move || android::pick_link_documents(&app))
+            .await
+            .map_err(|error| command_error("pick_failed", error))?
+    }
+}
 
 #[tauri::command]
 pub async fn android_read_content_uri(
