@@ -92,15 +92,18 @@ pub fn inspect(path: &Path, file_name: &str) -> Result<ImportedMetadata, String>
     ) {
         return Err("不是有效的 EPUB 文件".into());
     }
-    let mut names = Vec::new();
+    // The shelf only needs a cover and proof of a readable image. The reader
+    // builds its own ordered catalog when opened.
+    let mut cover: Option<String> = None;
     for i in 0..zip.len() {
-        let f = zip.by_index_raw(i).map_err(|e| e.to_string())?;
-        if !f.is_dir() && image(f.name()) {
-            names.push(f.name().to_owned())
+        let file = zip.by_index_raw(i).map_err(|error| error.to_string())?;
+        if !file.is_dir() && image(file.name())
+            && cover.as_ref().is_none_or(|first| natural_cmp(file.name(), first).is_lt())
+        {
+            cover = Some(file.name().to_owned());
         }
     }
-    names.sort_by(|a, b| natural_cmp(a, b));
-    let cover = names.first().ok_or("漫画压缩包内没有支持的图片")?.clone();
+    let cover = cover.ok_or("漫画压缩包内没有支持的图片")?;
     let mime = match extension(&cover).to_ascii_lowercase().as_str() {
         "jpg" | "jpeg" => "image/jpeg",
         "webp" => "image/webp",
@@ -113,7 +116,7 @@ pub fn inspect(path: &Path, file_name: &str) -> Result<ImportedMetadata, String>
         title,
         creator: String::new(),
         language: String::new(),
-        spine: names,
+        spine: vec![cover.clone()],
         cover_zip_path: Some(cover),
         cover_mime: mime,
     })
