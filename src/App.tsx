@@ -2536,7 +2536,11 @@ export default function App() {
           }
         }
         let entry = originalEntry;
-        if (entry.available === false) {
+        // A document link is only found missing by opening it: the record stays
+        // "available", so the shelf's own mark from the failed open decides.
+        const originalMissing = runtime.platform === "android" && entry.originalLocation === true &&
+          shelfEntriesRef.current.find((item) => item.id === id)?.available === false;
+        if (entry.available === false || originalMissing) {
           if (runtime.platform === "android") {
             const restored = await reimportAndroidMissing(entry);
             if (!restored) {
