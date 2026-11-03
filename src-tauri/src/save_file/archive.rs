@@ -22,7 +22,7 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 pub(crate) const SAVE_FORMAT: &str = "epub-reader-save";
 pub(crate) const CONTAINER_VERSION: u32 = 1;
-pub(crate) const STATE_SCHEMA_VERSION: u64 = 3;
+
 
 /// Minimal header used only to choose a reader. It intentionally ignores all
 /// other fields; a future writer may add fields to this object. The strict
@@ -389,7 +389,7 @@ pub(crate) fn write_export_archive(
     });
     for plan in plans {
         entries.push(SaveManifestEntry {
-            path: format!("books/{}.epub", plan.content_hash),
+            path: source_entry_path(state, &plan.content_hash),
             bytes: plan.bytes,
             sha256: plan.content_hash.clone(),
         });
@@ -397,7 +397,7 @@ pub(crate) fn write_export_archive(
     let manifest = SaveManifest {
         format: SAVE_FORMAT.to_string(),
         container_version: CONTAINER_VERSION,
-        state_schema_version: STATE_SCHEMA_VERSION,
+        state_schema_version: state.schema_version,
         package_id: package_id.to_string(),
         created_at_ms: now_ms(),
         scope: SaveManifestScope {
@@ -465,7 +465,7 @@ pub(crate) fn write_export_archive(
             return Err(SaveFileError::cancelled());
         }
         let options = zip_file_options(CompressionMethod::Stored, plan.bytes >= u32::MAX as u64);
-        archive.start_file(format!("books/{}.epub", plan.content_hash), options)?;
+        archive.start_file(source_entry_path(state, &plan.content_hash), options)?;
         let mut source = File::open(&plan.source_path)?;
         let mut hasher = Sha256::new();
         let mut copied = 0_u64;
@@ -547,24 +547,16 @@ fn read_entry_bytes(
     Ok(output)
 }
 
-fn allowed_entry_path(name: &str) -> bool {
-    if name == "manifest.json" || name == "state.json" {
-        return true;
-    }
-    let Some(hash) = name
-        .strip_prefix("books/")
-        .and_then(|rest| rest.strip_suffix(".epub"))
-    else {
-        return false;
-    };
-    valid_hash(hash)
+fn source_entry_path(state: &PortableStateV3, hash: &str) -> String {
+    let extension=state.books.get(hash).map(|b| crate::document_formats::extension(&b.metadata.value.file_name).to_ascii_lowercase()).filter(|e| matches!(e.as_str(),"epub"|"txt"|"cbz"|"zip")).unwrap_or_else(||"epub".into());
+    format!("books/{hash}.{extension}")
 }
-
 fn book_hash_from_path(name: &str) -> Option<String> {
-    name.strip_prefix("books/")
-        .and_then(|rest| rest.strip_suffix(".epub"))
-        .filter(|hash| valid_hash(hash))
-        .map(str::to_string)
+    let (hash, extension)=name.strip_prefix("books/")?.rsplit_once('.')?;
+    (valid_hash(hash) && matches!(extension,"epub"|"txt"|"cbz"|"zip")).then(||hash.to_owned())
+}
+fn allowed_entry_path(name: &str) -> bool {
+    name=="manifest.json" || name=="state.json" || book_hash_from_path(name).is_some()
 }
 
 pub(crate) fn validate_and_extract(
@@ -659,7 +651,7 @@ pub(crate) fn validate_and_extract_with_expectation(
     if manifest.container_version != CONTAINER_VERSION {
         return Err(SaveFileError::invalid_data("未知容器主版本"));
     }
-    if manifest.state_schema_version != STATE_SCHEMA_VERSION {
+    if !matches!(manifest.state_schema_version, 3 | 4) {
         return Err(SaveFileError::invalid_data("未知状态主版本"));
     }
     if !super::valid_job_id(&manifest.package_id) {
@@ -838,6 +830,14 @@ pub(crate) fn validate_and_extract_with_expectation(
         }
     }
 
+    for entry in &manifest.entries {
+        if let Some(hash) = book_hash_from_path(&entry.path) {
+            if entry.path != source_entry_path(&incoming, &hash) {
+                return Err(SaveFileError::invalid_data("附带原书格式与资料中的文件名不一致"));
+            }
+        }
+    }
+
     let book_bytes = manifest
         .entries
         .iter()
@@ -888,7 +888,7 @@ pub(crate) fn validate_and_extract_with_expectation(
                 entry.path
             )));
         }
-        let target_path = staging_dir.join(format!("{content_hash}.epub"));
+        let target_path = staging_dir.join(entry.path.strip_prefix("books/").ok_or_else(|| SaveFileError::invalid_data("书籍条目路径无效"))?);
         let mut target = OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -1168,6 +1168,32 @@ mod tests {
             fs::read(&parsed.attachments[0].staging_path).unwrap(),
             bytes
         );
+    }
+
+    #[test]
+    fn source_formats_archive_keeps_original_suffix_bytes_and_version() {
+        for extension in ["txt", "cbz", "zip"] {
+            let dir = TempDir::new(extension);
+            let source = dir.path().join(format!("source.{extension}"));
+            let bytes = b"original source bytes including any original encoding";
+            fs::write(&source, bytes).unwrap();
+            let hash = crate::save_file::hex_digest(bytes);
+            let mut state = test_state();
+            let mut book = state.books.remove(HASH).unwrap();
+            book.metadata.value.file_name = format!("source.{extension}");
+            state.books.insert(hash.clone(), book);
+            state.schema_version = 4;
+            let target = dir.path().join("source.epubsave");
+            let mut reporter = ProgressReporter::new(channel(), "formats", None);
+            let cancel = AtomicBool::new(false);
+            write_export_archive(&target,A,&state,&[ExportBookPlan {content_hash:hash,source_path:source,bytes:bytes.len() as u64}],"all",&[],&mut reporter,&cancel).unwrap();
+            let parsed = validate_and_extract(&target,&dir.path().join("staging"),&mut reporter,&cancel).unwrap();
+            assert_eq!(parsed.incoming,state);
+            assert_eq!(parsed.attachments[0].staging_path.extension().unwrap(),extension);
+            assert_eq!(fs::read(&parsed.attachments[0].staging_path).unwrap(),bytes);
+            state.schema_version = 3;
+            assert!(validate_portable_state(&state).is_err());
+        }
     }
 
     #[test]

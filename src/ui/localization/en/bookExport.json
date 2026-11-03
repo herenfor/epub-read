@@ -1,10 +1,10 @@
 {
   "bookExport.action": "Export Book",
-  "bookExport.action.tip": "Export original files: EPUB for one book, ZIP for several",
+  "bookExport.action.tip": "Export original files: original format for one book, ZIP for several",
   "bookExport.all": "Export All Books",
-  "bookExport.all.detail": "Pack every book's original EPUB file into one ZIP for backup or other readers. Reading progress and notes are not included.",
+  "bookExport.all.detail": "Pack every book's original file into one ZIP for backup or other readers. Reading progress and notes are not included.",
   "bookExport.dialogTitle": "Export Original Book Files",
-  "bookExport.filter.epub": "EPUB book",
+  "bookExport.filter.epub": "Original book file",
   "bookExport.filter.zip": "ZIP archive",
   "bookExport.target.selected": "selected file",
   "bookExport.progress": "Exporting original book files",

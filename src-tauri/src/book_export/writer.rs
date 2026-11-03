@@ -36,9 +36,10 @@ pub(super) fn safe_epub_name(
     hash: &str,
     used: &mut BTreeSet<String>,
 ) -> String {
+    let extension = if crate::document_formats::supported(raw) { crate::document_formats::extension(raw).to_ascii_lowercase() } else { "epub".into() };
     let raw = if raw.trim().is_empty() { title } else { raw };
-    let raw = if raw.to_ascii_lowercase().ends_with(".epub") {
-        &raw[..raw.len() - 5]
+    let raw = if crate::document_formats::supported(raw) {
+        raw.rsplit_once('.').map(|(stem, _)| stem).unwrap_or(raw)
     } else {
         raw
     };
@@ -70,11 +71,11 @@ pub(super) fn safe_epub_name(
     } else {
         stem.to_string()
     };
-    let mut name = format!("{stem}.epub");
+    let mut name = format!("{stem}.{extension}");
     let mut suffix = 0;
     while !used.insert(name.to_lowercase()) {
         suffix += 1;
-        name = format!("{stem}-{}-{suffix}.epub", &hash[..12]);
+        name = format!("{stem}-{}-{suffix}.{extension}", &hash[..12]);
     }
     name
 }

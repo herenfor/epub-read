@@ -127,12 +127,12 @@ fn run_export(
             book_hashes.into_iter().collect()
         }
     };
-    // Explicit selected single book is EPUB; all/multi is ZIP.
+    // Explicit selected single book keeps its original format; all/multi is ZIP.
     let zip = all || selected.len() != 1;
     let mut result = BookExportResult {
         status: "no-books".into(),
         job_id: task.job_id.clone(),
-        output_format: if zip { "zip" } else { "epub" }.into(),
+        output_format: if zip { "zip".into() } else { selected.iter().next().and_then(|hash| metadata.get(hash)).map(|m| crate::document_formats::extension(&m.file_name).to_ascii_lowercase()).filter(|e| matches!(e.as_str(), "epub"|"txt"|"cbz"|"zip")).unwrap_or_else(|| "epub".into()) },
         requested_books: selected.len(),
         written_books: 0,
         book_bytes: 0,

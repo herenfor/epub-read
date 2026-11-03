@@ -1001,3 +1001,6 @@
 }
 
 @keyframes shelf-settings-pane-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+.reader-text-encoding .shelf-settings-row-text small { white-space: normal; }
+.reader-text-encoding select { flex: 0 1 auto; min-width: 0; max-width: 42%; }

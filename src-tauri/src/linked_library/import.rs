@@ -249,7 +249,7 @@ pub(super) fn prepare_document_from_reader(
             content_hash: Some(content_hash),
         });
     }
-    let metadata = match inspect_epub(staging_path) {
+    let metadata = match epub_meta::inspect_book(staging_path, &file_name) {
         Ok(metadata) => metadata,
         Err(message) => {
             return Err(PrepareError::Failed {

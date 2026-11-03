@@ -1,3 +1,4 @@
+import { TEXT_ENCODINGS } from "../core/documentFormats";
 import { useMemo, type ReactNode } from "react";
 import { useExitPresence } from "./menuMotion";
 import { useUiText } from "./localization/UiLanguageProvider";
@@ -11,6 +12,8 @@ import { SettingsSwitchRow } from "./settingsRows";
 
 /** Reading preferences shared by Settings › Reading on the shelf and the in-reader layer. */
 export interface ReadingSettingsProps {
+  textEncoding?: string;
+  onTextEncodingChange?(encoding: string): void;
   tapRegions?: ReaderTapRegionSettings;
   onTapRegionsChange?(next: ReaderTapPreferences): void;
   tapRegionsScrollMode?: boolean;
@@ -67,6 +70,12 @@ export function ReadingSettingsContent(props: ReadingSettingsProps) {
   const tapLabels = useMemo(() => Object.fromEntries(Object.entries(TAP_REGION_LABEL_KEYS)
     .map(([field, key]) => [field, t(key)])) as unknown as ReaderTapRegionsLabels, [t]);
   const switches: ReactNode[] = [];
+  if (props.textEncoding !== undefined && props.onTextEncodingChange) switches.push(
+    <label className="shelf-settings-row reader-text-encoding" key="txtEncoding"><span className="shelf-settings-row-text"><strong>{t("readerMisc.txt.encoding")}</strong><small>{t("readerMisc.txt.encodingHelp")}</small></span>
+      <select aria-label={t("readerMisc.txt.encoding")} value={props.textEncoding} onChange={e => props.onTextEncodingChange?.(e.target.value)}>
+        {TEXT_ENCODINGS.map(encoding => <option value={encoding} key={encoding}>{encoding === "auto" ? t("readerMisc.txt.auto") : encoding.toUpperCase()}</option>)}
+      </select></label>);
+
   if (props.titlebarAutoHide !== undefined && props.onTitlebarAutoHideChange) {
     switches.push(<SettingsSwitchRow key="titlebar" title={t("shelfMenu.titlebarAutoHide.tip")} checked={props.titlebarAutoHide} onChange={props.onTitlebarAutoHideChange} />);
   }

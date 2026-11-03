@@ -1,3 +1,4 @@
+import { supportedBookName } from "../core/documentFormats";
 import { isSupportedFontFileName } from "./fontDrop";
 
 /** What a native window drop carried: EPUBs, fonts, and anything else (folders are found among the rest). */
@@ -12,7 +13,7 @@ export function partitionDroppedPaths(paths: readonly string[]): DroppedPaths {
   const fonts: string[] = [];
   const others: string[] = [];
   for (const path of paths) {
-    if (path.toLowerCase().endsWith(".epub")) epubs.push(path);
+    if (supportedBookName(path)) epubs.push(path);
     else if (isSupportedFontFileName(path)) fonts.push(path);
     else others.push(path);
   }

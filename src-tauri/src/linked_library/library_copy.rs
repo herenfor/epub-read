@@ -17,9 +17,10 @@ const RESERVED_STEMS: [&str; 22] = [
 /// A Windows-safe `<stem>.epub` from the original file name, or the title
 /// when the name has nothing usable left.
 pub(crate) fn library_file_name(original: &str, title: &str) -> String {
+    let extension = if crate::document_formats::supported(original) { crate::document_formats::extension(original).to_ascii_lowercase() } else { "epub".into() };
     let stem_of = |raw: &str| {
-        let raw = if raw.to_ascii_lowercase().ends_with(".epub") {
-            &raw[..raw.len() - 5]
+        let raw = if crate::document_formats::supported(raw) {
+            raw.rsplit_once('.').map(|(stem, _)| stem).unwrap_or(raw)
         } else {
             raw
         };
@@ -55,7 +56,7 @@ pub(crate) fn library_file_name(original: &str, title: &str) -> String {
     let stem = stem_of(original)
         .or_else(|| stem_of(title))
         .unwrap_or_else(|| "book".to_string());
-    format!("{stem}.epub")
+    format!("{stem}.{extension}")
 }
 
 /// `name`, or `name (2)`, `name (3)`…: free on disk and not claimed by another
@@ -66,7 +67,7 @@ pub(super) fn allocate_library_file_name(
     bindings: &[DeviceBinding],
     skipped: &HashSet<String>,
 ) -> String {
-    let stem = wanted.strip_suffix(".epub").unwrap_or(wanted);
+    let (stem, extension) = wanted.rsplit_once('.').unwrap_or((wanted, "epub"));
     let taken = |candidate: &str| {
         skipped.contains(candidate)
             || fs::symlink_metadata(books_dir.join(candidate)).is_ok()
@@ -77,10 +78,10 @@ pub(super) fn allocate_library_file_name(
                     .is_some_and(|name| name.eq_ignore_ascii_case(candidate))
             })
     };
-    let mut candidate = format!("{stem}.epub");
+    let mut candidate = format!("{stem}.{extension}");
     let mut index = 2;
     while taken(&candidate) {
-        candidate = format!("{stem} ({index}).epub");
+        candidate = format!("{stem} ({index}).{extension}");
         index += 1;
     }
     candidate

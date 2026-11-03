@@ -1,5 +1,6 @@
-import { loadBook } from "../../../core/book";
-import { iterateBookChunkBatches, textForBookResource } from "../../../core/bookCorpusIndex";
+import { disposeBook } from "../../../core/book";
+import { loadSourceBook } from "../../../core/documentFormats";
+import { iterateBookChunkBatches, readBookResourceText } from "../../../core/bookCorpusIndex";
 import { CORPUS_CHUNKER_VERSION } from "../../../core/chunking";
 import { CORPUS_NORMALIZER_VERSION, CORPUS_PARSER_VERSION } from "../../../core/corpus";
 import type { Book } from "../../../core/types";
@@ -13,6 +14,8 @@ export interface LibraryIndexArchiveInput {
 
 export interface LibraryIndexBook {
   contentHash: string;
+  fileName?: string;
+  textEncoding?: string;
   title: string;
   creator: string;
   language?: string;
@@ -115,10 +118,11 @@ export function createLibraryIndexer(options: LibraryIndexerOptions): LibraryInd
           await options.yieldToReader?.();
           continue;
         }
+        let ownedBook: Book | undefined;
         try {
           const bytes = await item.read();
           throwIfAborted(abort.signal);
-          const book = await (options.parseBook ?? loadBook)(bytes);
+          const book = ownedBook = await (options.parseBook ? options.parseBook(bytes) : loadSourceBook(bytes, item.fileName ?? "book.epub", {}, item.textEncoding));
           throwIfAborted(abort.signal);
           if (book.fixedLayout) {
             result.unavailableBooks++;
@@ -140,7 +144,7 @@ export function createLibraryIndexer(options: LibraryIndexerOptions): LibraryInd
               for await (const batch of iterateBookChunkBatches(book, {
                 bookFingerprint: item.contentHash,
                 signal,
-                textFor: (path) => textForBookResource(book, path),
+                textFor: (path) => readBookResourceText(book, path),
               })) yield batch.chunks;
             },
             onProgress: (current) => options.onProgress?.({
@@ -160,6 +164,8 @@ export function createLibraryIndexer(options: LibraryIndexerOptions): LibraryInd
             title: item.title,
             error: error instanceof Error ? error.message : String(error),
           });
+        } finally {
+          if (ownedBook) disposeBook(ownedBook);
         }
         options.onProgress?.({
           completedBooks: index + 1,

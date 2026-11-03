@@ -267,11 +267,14 @@ pub async fn linked_library_archive_open(
     app: AppHandle,
     window: tauri::Window,
     content_hash: String,
+    text_encoding: Option<String>,
 ) -> Result<ArchiveOpenView, LinkedLibraryError> {
     let owner = window.label().to_string();
-    tauri::async_runtime::spawn_blocking(move || archive_open_blocking(app, owner, content_hash))
-        .await
-        .map_err(|error| format!("原生归档打开工作线程失败：{error}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        archive::archive_open_blocking(app, owner, content_hash, text_encoding)
+    })
+    .await
+    .map_err(|error| format!("原生归档打开工作线程失败：{error}"))?
 }
 
 #[tauri::command]

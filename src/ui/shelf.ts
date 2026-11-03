@@ -62,6 +62,8 @@ export interface Bookmark {
 
 /** 书架条目（与 Rust ShelfEntry 字段一致，camelCase 序列化）。 */
 export interface ShelfEntry {
+  /** Canonical source chapter identity projected by the portable repository. */
+  chapterPath?: string | null;
   id: string;
   title: string;
   creator: string;
@@ -180,7 +182,7 @@ export interface ShelfStore {
    * Android 链接式路径可选：按需访问原生 ZIP 目录与条目，避免整本 EPUB
    * 经 Java/WebView IPC 堆内分配；未实现的后端继续用 readBook。
    */
-  openArchive?(id: string): Promise<ArchiveClient>;
+  openArchive?(id: string, textEncoding?: string): Promise<ArchiveClient>;
   readCover(id: string): Promise<Uint8Array | null>;
   /** 只为旧条目补录内容指纹，不得改动阅读进度或其他元数据。 */
   setContentHash(id: string, contentHash: string): Promise<ShelfEntry>;
@@ -1214,8 +1216,8 @@ class TauriShelfStore implements ShelfStore {
     return new Uint8Array(buf);
   }
 
-  async openArchive(id: string): Promise<ArchiveClient> {
-    return createNativeLinkedArchiveClient(id, invoke);
+  async openArchive(id: string, textEncoding?: string): Promise<ArchiveClient> {
+    return createNativeLinkedArchiveClient(id, invoke, undefined, textEncoding);
   }
 
   async readCover(id: string): Promise<Uint8Array | null> {

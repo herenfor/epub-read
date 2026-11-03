@@ -1,3 +1,5 @@
+import { ComicReaderView } from "./ui/ComicReaderView";
+import { supportedBookName, sourceFormat, loadSourceBook, loadSourceArchive, textEncodingFromPath } from "./core/documentFormats";
 import {
   createReaderStatusBarCoordinator,
   shouldHideReaderSystemStatusBar,
@@ -26,7 +28,7 @@ import {
 } from "./platform/androidVolumeKeys";
 import { resolveArchiveHref, archiveHref } from "./core/archiveReferences";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
-import { loadBook, loadBookFromArchive, spineIndexForPath, spineIndexForEntryKey, spineItemPath, spineItemHref, disposeBook, nextLinearIndex, linearChapterNumber, linearChapterTotal, tocLabelsBySpine } from "./core/book";
+import { spineIndexForPath, spineIndexForEntryKey, spineItemPath, spineItemHref, disposeBook, nextLinearIndex, linearChapterNumber, linearChapterTotal, tocLabelsBySpine } from "./core/book";
 import type { Book } from "./core/types";
 import type { ArchiveClient } from "./core/selectiveArchive";
 import type { Stamp, Version } from "./core/portableState/portable-register-core";
@@ -1277,7 +1279,8 @@ export default function App() {
       savedOverride: SavedProgress | null,
       shelfId: string | null,
       countCacheKey: string | null,
-      baselineProgressPct: number
+      baselineProgressPct: number,
+      freshTextProfile = false
     ) => {
       if (activeSessionRef.current && activeSessionRef.current.server !== srv) {
         activeSessionRef.current.server.revokeAll();
@@ -1299,9 +1302,12 @@ export default function App() {
         generation,
         linearMask
       );
-      const cached = readCachedChapterCounts(countCacheKey, linearMask);
+      const cached = freshTextProfile ? [] : readCachedChapterCounts(countCacheKey, linearMask);
       for (const [index, value] of cached) {
         counts = applyChapterCount(counts, generation, index, value, "estimated").collection;
+      }
+      if (b.sourceFormat === "comic-zip") {
+        counts = applyChapterCount(counts, generation, 0, (b.comicPages?.length ?? 0) * 1000, "estimated").collection;
       }
       activeSessionRef.current.structuralCounts = counts;
       chapterCountsRef.current = counts;
@@ -1596,7 +1602,7 @@ export default function App() {
           defaultPath,
           filters: [zip
             ? { name: uiText("bookExport.filter.zip"), extensions: [runtime.platform === "android" ? "application/zip" : "zip"] }
-            : { name: uiText("bookExport.filter.epub"), extensions: [runtime.platform === "android" ? "application/epub+zip" : "epub"] }],
+            : { name: uiText("bookExport.filter.epub"), extensions: [runtime.platform === "android" ? (/\.txt$/i.test(defaultPath) ? "text/plain" : /\.(cbz|zip)$/i.test(defaultPath) ? "application/zip" : "application/epub+zip") : defaultPath.split(".").pop()!] }],
         });
         if (typeof selected === "string" && selected.length > 0) {
           destination = runtime.platform === "android" ? { kind: "uri", uri: selected } : { kind: "path", path: selected };
@@ -2294,6 +2300,8 @@ export default function App() {
     }
   }, [showReaderNotice]);
 
+  const SourceReaderView = book?.sourceFormat === "comic-zip" ? ComicReaderView : ReaderView;
+
   // ---- 从书架打开 ----
   const handleShelfOpen = useCallback(
     async (
@@ -2301,6 +2309,7 @@ export default function App() {
       searchTarget?: ResolvedCrossBookSearchHit,
       searchTextHits?: ExactTextHit[],
       searchOccurrence?: SearchOccurrence,
+      textEncodingOverride?: string,
     ) => {
       if (shelfBusyRef.current) return;
       const cardEntry = shelfEntriesRef.current.find((e) => e.id === id);
@@ -2498,7 +2507,7 @@ export default function App() {
               multiple: false,
               directory: false,
               title: uiText("notice.open.relocateTitle", { title: entry.title }),
-              filters: [{ name: uiText("notice.picker.epubFilter"), extensions: ["epub"] }],
+              filters: [{ name: uiText("notice.picker.epubFilter"), extensions: ["epub", "txt", "cbz", "zip"] }],
             });
             if (!selected || Array.isArray(selected)) {
               shelfBusyRef.current = false;
@@ -2513,7 +2522,7 @@ export default function App() {
             );
           }
         }
-        const openArchive = runtime.platform === "android"
+        const openArchive = isTauriEnv() && (runtime.platform === "android" || sourceFormat(entry.fileName) !== "epub")
           ? store.openArchive?.bind(store)
           : undefined;
         const chosenProjection = chosenProgressVersion
@@ -2525,7 +2534,10 @@ export default function App() {
         let b: Book;
         if (openArchive) {
           openStage = "openArchive";
-          const archive = await openArchive(id).catch((error) => {
+          const sourceEncoding = sourceFormat(entry.fileName) === "txt"
+            ? textEncodingOverride || textEncodingFromPath((chosenProgressVersion ? projectProgressVersion(chosenProgressVersion).chapterPath : (entry as { chapterPath?: string }).chapterPath)) || localStorage.getItem(`epub-reader:txt-encoding:${id}`)
+            : undefined;
+          const archive = await openArchive(id, sourceEncoding || undefined).catch((error) => {
             if (describeBookOpenFailure(error).sourceUnavailable) {
               setShelfEntries((prev) =>
                 prev.map((item) => (item.id === id ? { ...item, available: false } : item))
@@ -2542,7 +2554,7 @@ export default function App() {
           if (!candidateLease && store.beginProgressSession) {
             await store.beginProgressSession(id, progressSelection);
           }
-          b = await loadBookFromArchive(archive, { initialSpineIndex });
+          b = await loadSourceArchive(archive, entry.fileName, { initialSpineIndex });
           unownedArchive = null;
           openStage = "parse";
         } else {
@@ -2572,7 +2584,7 @@ export default function App() {
             await store.beginProgressSession(id, progressSelection);
           }
           openStage = "parse";
-          b = await loadBook(buf, { selective: true, initialSpineIndex });
+          b = await loadSourceBook(buf, entry.fileName, { selective: true, initialSpineIndex }, textEncodingOverride || textEncodingFromPath(chosenProgressVersion ? projectProgressVersion(chosenProgressVersion).chapterPath : (entry as {chapterPath?: string}).chapterPath) || localStorage.getItem(`epub-reader:txt-encoding:${id}`) || undefined);
         }
         // 在 openParsedBook 正式接管前，Book 仍由本函数负责释放；
         // 后面的空 spine / 进度解析 / 目标校验等任何失败路径都不能漏掉。
@@ -2582,7 +2594,9 @@ export default function App() {
         }
         const srv = new ResourceServer(b);
         let saved: SavedProgress;
-        if (searchTarget) {
+        if (textEncodingOverride !== undefined) {
+          saved = { spineIndex: 0, page: 0, anchor: null };
+        } else if (searchTarget) {
           let targetIndex = searchTarget.spineIndex;
           if (spineItemPath(b, targetIndex) !== searchTarget.chapterPath) {
             targetIndex = spineIndexForEntryKey(b, searchTarget.chapterPath);
@@ -2715,6 +2729,7 @@ export default function App() {
             chosenProgressVersion !== null,
             entry.progressPct,
           ),
+          textEncodingOverride !== undefined,
         );
         if (candidateLease) {
           activeProgressLeaseRef.current = candidateLease;
@@ -2935,7 +2950,7 @@ export default function App() {
         if (axis) {
           const seg = axis.segments.find((item) => item.spineIndex === spineIndexRef.current);
           if (seg) {
-            const intra = s.pageCount > 1 ? s.currentPage / (s.pageCount - 1) : 1;
+            const intra = currentBook.sourceFormat === "comic-zip" ? s.totalScrollProgress ?? 0 : s.pageCount > 1 ? s.currentPage / (s.pageCount - 1) : 1;
             const ratio = atEnd ? 1 : axis.ratioAt({ key: seg.key, fraction: intra });
             if (ratio !== null) {
               dispatchScrub({
@@ -2997,7 +3012,7 @@ export default function App() {
       if (axis) {
         const seg = axis.segments.find((item) => item.spineIndex === currentIndex);
         if (seg) {
-          const intra = state.pageCount > 1 ? state.currentPage / (state.pageCount - 1) : 1;
+          const intra = currentBook.sourceFormat === "comic-zip" ? state.totalScrollProgress ?? 0 : state.pageCount > 1 ? state.currentPage / (state.pageCount - 1) : 1;
           const ratio = atEnd ? 1 : axis.ratioAt({ key: seg.key, fraction: intra });
           if (ratio !== null) {
             dispatchScrub(matchingSeek
@@ -3972,7 +3987,7 @@ export default function App() {
         // 字体面板内部拖放由面板自己处理（onDrop 已 stopPropagation），
         // 这里只覆盖面板外的窗口拖放，行为与原生入口一致。
         const files = Array.from(e.dataTransfer?.files ?? []);
-        const epubFiles = files.filter((f) => f.name.toLowerCase().endsWith(".epub"));
+        const epubFiles = files.filter((f) => supportedBookName(f.name));
         const fontFiles = files.filter((f) => isSupportedFontFileName(f.name));
         if (fontFiles.length > 0 && !fontSettingsOpen) {
           setShelfNotice({ kind: "error", text: uiText("notice.font.dropHere") });
@@ -4208,7 +4223,7 @@ export default function App() {
   const reading = chapterState.status === "ready" && !chapterState.empty;
   const currentPath = ready ? spineItemPath(book!, spineIndex) : undefined;
   const activeHref = currentPath
-    ? archiveHref(book?.archiveReferences, currentPath, anchor ?? "")
+    ? archiveHref(book?.archiveReferences, currentPath, book?.sourceFormat === "comic-zip" && chapterState.status === "ready" ? `page-${(chapterState.leafRange?.first ?? 1) - 1}` : anchor ?? "")
     : undefined;
   // 阅读进度：以"标准页 = 1000 字"为尺度，按锚点所在字数位置推算
   // （标题页等短章节只占零点几个百分点，长章节按字数占大头）
@@ -4223,6 +4238,7 @@ export default function App() {
     const a = readerRef.current?.getReadingAnchor();
     return currentChapterCharsRead({
       textOffset: a?.textOffset,
+      chapterFraction: book?.sourceFormat === "comic-zip" && chapterState.status === "ready" ? chapterState.totalScrollProgress : undefined,
       page: chapterState.currentPage,
       pageCount: chapterState.pageCount,
       chapterChars: countSummary.current ?? 0,
@@ -4296,6 +4312,7 @@ export default function App() {
     const currentSummary = summarizeLinearCounts(chapterCountsRef.current, spineIndex);
     const exactChars = currentChapterCharsRead({
       textOffset: a?.textOffset,
+      chapterFraction: book?.sourceFormat === "comic-zip" ? state.totalScrollProgress : undefined,
       page: state.currentPage,
       pageCount: state.pageCount,
       chapterChars: currentSummary.current ?? 0,
@@ -5002,7 +5019,9 @@ export default function App() {
 
   /** 每个 spine 项在目录里的名字：插图页、拆开的章节文件沿用上一个目录项；封面等目录之前的为空串。 */
   const tocSpineLabels = useMemo(() => book ? tocLabelsBySpine(book) : [], [book]);
-  const currentChapterLabel = ready ? tocSpineLabels[spineIndex] ?? "" : "";
+  const currentChapterLabel = ready ? book?.sourceFormat === "comic-zip" && chapterState.status === "ready"
+    ? book.toc[(chapterState.leafRange?.first ?? 1) - 1]?.label ?? ""
+    : tocSpineLabels[spineIndex] ?? "" : "";
   // The shelf's "continue" card shows this name for the saved position.
   useEffect(() => {
     if (ready) writeShelfPlaceLabel(activeSessionRef.current?.countCacheKey ?? null, spineIndex, currentChapterLabel);
@@ -5927,7 +5946,7 @@ export default function App() {
                     </Suspense>
                   </>
                 )}
-                <ReaderView
+                <SourceReaderView
                   key={bookKey}
                   ref={readerRef}
                   book={book!}
@@ -6234,6 +6253,12 @@ export default function App() {
       {view === "reader" && (
         <PanelPaintWarmup active={warming("reading") && !readingSettingsOpen}>
           <ReaderReadingSettings
+            textEncoding={book?.sourceFormat === "txt" ? book.textEncoding || "auto" : undefined}
+            onTextEncodingChange={encoding => {
+              if (!currentShelfId) return;
+              try { localStorage.setItem(`epub-reader:txt-encoding:${currentShelfId}`, encoding); closePanel("reading"); void handleShelfOpen(currentShelfId, undefined, undefined, undefined, encoding); }
+              catch (error) { showReaderNotice(String(error), "warn"); }
+            }}
             open={readingSettingsOpen || warming("reading")}
             presentation={mobileChrome ? "page" : "dialog"}
             onClose={() => closePanel("reading")}
@@ -6399,7 +6424,7 @@ export default function App() {
       <input
         ref={fileInputRef}
         type="file"
-        accept=".epub,application/epub+zip"
+        accept=".epub,.txt,.cbz,.zip,application/epub+zip,text/plain,application/zip"
         multiple
         style={{ display: "none" }}
         onChange={(e) => {

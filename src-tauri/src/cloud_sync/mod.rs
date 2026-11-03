@@ -23,7 +23,7 @@ pub const DEVICE_FORMAT: &str = "epub-reader-sync-device";
 // v1 was an unpublished single-file prototype. Immutable generations are the
 // first usable transport, so old experimental writers must refuse this space.
 pub const FORMAT_VERSION: u64 = 2;
-pub const STATE_VERSION: u64 = 3;
+pub const STATE_VERSION: u64 = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -144,7 +144,8 @@ pub fn parse_device(
     }
     let mut file: DeviceFile = serde_json::from_value(value).map_err(|_| SyncError::InvalidData)?;
     if file.format_version != FORMAT_VERSION
-        || file.state_schema_version != STATE_VERSION
+        || !matches!(file.state_schema_version, 3 | 4)
+        || file.state_schema_version != file.state.schema_version
         || !valid_canonical_uuid(&file.space_id)
         || !valid_canonical_uuid(&file.installation_id)
         || !valid_canonical_uuid(&file.writer_nonce)
@@ -417,7 +418,7 @@ impl Accumulator {
             let file = DeviceFile {
                 format: DEVICE_FORMAT.to_string(),
                 format_version: FORMAT_VERSION,
-                state_schema_version: STATE_VERSION,
+                state_schema_version: full.schema_version,
                 space_id: writer.space_id.to_string(),
                 installation_id: writer.installation_id.to_string(),
                 writer_nonce: writer.nonce.to_string(),

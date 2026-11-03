@@ -37,6 +37,7 @@ pub(crate) fn archive_open_blocking(
     app: AppHandle,
     owner: String,
     content_hash: String,
+    text_encoding: Option<String>,
 ) -> Result<ArchiveOpenView, LinkedLibraryError> {
     let _location_read = library_location::source_lease(&app)?;
     if !valid_content_hash(&content_hash) {
@@ -68,6 +69,13 @@ pub(crate) fn archive_open_blocking(
         }
     };
 
+    let (file_name,title) = load_records(&app)?.iter().find(|r| r.content_hash == content_hash)
+        .map(|r| (r.file_name.clone(),r.title.clone())).ok_or("书架中没有这本书")?;
+    if crate::document_formats::text(&file_name) {
+        guard().map_err(archive_fault_error)?;
+        file = crate::document_formats::text_archive(file, text_encoding.as_deref(), &title)?;
+        guard().map_err(archive_fault_error)?;
+    }
     let session = NativeZipSession::from_verified_file(file, guard).map_err(archive_fault_error)?;
     let entry_count = session.entry_count;
     finalize_library_source_read(&app, &root, &identity, &old_snapshot, &verified_snapshot)?;

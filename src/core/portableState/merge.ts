@@ -1,3 +1,4 @@
+import { portableSchemaVersion } from "./portable-state-types";
 /**
  * Shared v3 merge helpers.
  *
@@ -116,7 +117,7 @@ export function mergePortableState(
     ? mergePreferences(local.preferences, incoming.preferences)
     : local.preferences;
   return {
-    schemaVersion: 3,
+    schemaVersion: portableSchemaVersion(books),
     books,
     organization,
     ...(preferences === undefined ? {} : { preferences }),

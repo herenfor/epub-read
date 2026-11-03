@@ -556,7 +556,7 @@ fn load_state_at_connection(connection: &Connection) -> PortableResult<PortableS
         }
     }
     let state = PortableStateV3 {
-        schema_version: 3,
+        schema_version: super::dto::source_schema_version(&books),
         books,
         organization: load_organization(connection)?,
         preferences: load_meta_json(connection, KEY_PREFERENCES)?,

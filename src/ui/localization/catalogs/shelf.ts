@@ -5,7 +5,7 @@ import { defineMessages } from "../defineMessages";
  * cards. Book titles and authors are user data and never go through this catalog.
  */
 export const shelf = defineMessages("shelf", {
-  "shelf.import.tip": "导入 EPUB 图书到书架",
+  "shelf.import.tip": "导入图书（EPUB、TXT、CBZ、ZIP）到书架",
   "shelf.import.short": { zh: "导入", note: "Phone import button.", max: 8 },
   "shelf.import.books": { zh: "导入图书", note: "Main import button; other texts refer to it by this name.", max: 14 },
   "shelf.import.menu.tip": "导入图书或文件夹",
@@ -82,5 +82,5 @@ export const shelf = defineMessages("shelf", {
   "shelf.timeSegment.last30Days": "最近 30 天",
   "shelf.timeSegment.thisYear": "今年",
   "shelf.timeSegment.older": "更早",
-  "shelf.import.toFolder.tip": { zh: "导入 EPUB 图书到文件夹“{name}”", note: "Import button tooltip while a shelf folder is open." },
+  "shelf.import.toFolder.tip": { zh: "导入图书（EPUB、TXT、CBZ、ZIP）到文件夹“{name}”", note: "Import button tooltip while a shelf folder is open." },
 });

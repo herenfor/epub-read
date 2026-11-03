@@ -61,6 +61,8 @@ export function createWorkerLibraryIndexer(
       .filter((book) => book.available && !indexStatusIsCurrent(statuses.get(book.contentHash)))
       .map((book) => ({
         jobId: book.contentHash,
+        fileName: book.fileName,
+        textEncoding: book.textEncoding,
         book: { contentHash: book.contentHash, title: book.title, creator: book.creator, language: book.language },
         sizeBytes: book.fileSize,
         ...(book.openArchiveInput

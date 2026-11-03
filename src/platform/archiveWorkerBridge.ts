@@ -13,6 +13,7 @@ export function serveArchivePort(
   port: MessagePort,
   contentHash: string,
   nativeInvoke: ArchiveInvoke,
+  textEncoding?: string,
 ): { dispose(): void } {
   let disposed = false;
   let sessionId: string | undefined;
@@ -35,7 +36,7 @@ export function serveArchivePort(
         opening = true;
         try {
           // Worker cannot select a different book or a filesystem path.
-          const info = await nativeInvoke<{ sessionId: string }>(OPEN, { contentHash });
+          const info = await nativeInvoke<{ sessionId: string }>(OPEN, { contentHash, ...(textEncoding ? { textEncoding } : {}) });
           if (disposed) {
             release(info.sessionId);
             return;

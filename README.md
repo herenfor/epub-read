@@ -71,6 +71,9 @@ To check for a new version, open the shelf settings, scroll to About and tap *æ£
 
 ## Features
 
+- **TXT text books:** UTF-8, UTF-16 and common legacy encodings (including Chinese GB18030/GBK and Big5), with a manual encoding selector in Reading settings. Uses the existing typography, search, bookmarks and notes; original files remain unchanged.
+- **Image comics:** open CBZ or image ZIP archives, with natural page ordering, single/double pages, continuous scrolling, right-to-left ComicInfo support and image zoom. RAR/CBR, 7z and PDF are not included.
+
 ### Library
 
 - Import books from a file picker, including batch import; on desktop, drag & drop works too

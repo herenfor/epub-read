@@ -33,5 +33,10 @@
   "readerMisc.chapter.failed": "Failed to load chapter",
   "readerMisc.chapter.retry": "Retry",
   "readerMisc.bookEnd": "The End",
-  "readerMisc.bookEnd.hint": "Finished reading all chapters"
+  "readerMisc.bookEnd.hint": "Finished reading all chapters",
+  "readerMisc.comic.decodeFailed": "The comic image could not be decoded",
+  "readerMisc.comic.zoom": "Zoom image",
+  "readerMisc.txt.encodingHelp": "Changing encoding restarts the text layout from the beginning. Rebuild any existing full-text index afterward.",
+  "readerMisc.txt.encoding": "TXT Encoding",
+  "readerMisc.txt.auto": "Auto-detect"
 }

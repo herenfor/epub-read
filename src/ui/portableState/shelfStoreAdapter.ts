@@ -1,3 +1,4 @@
+import { portableSchemaVersion } from "../../core/portableState/portable-state-types";
 /**
  * CP-I ShelfStore facade over the portable v3 repository.
  *
@@ -207,7 +208,7 @@ function stateWithBooks(
   books: Record<string, PortableBook>,
   organization: LibraryOrganization,
 ): PortableStateV3 {
-  return { schemaVersion: 3, books, organization };
+  return { schemaVersion: portableSchemaVersion(books), books, organization };
 }
 
 function hasBook(state: PortableStateV3, hash: string | null): boolean {

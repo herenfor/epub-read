@@ -40,6 +40,9 @@ Each component remains subject to its respective license.
 | subtle | 2.6.1 | BSD-3-Clause | https://github.com/dalek-cryptography/subtle |
 | getrandom | 0.3.4 | MIT OR Apache-2.0 | https://github.com/rust-random/getrandom |
 | quick-xml | 0.41.0 | MIT | https://github.com/tafia/quick-xml |
+| encoding_rs (TXT decoding) | 0.8.44 | Apache-2.0 OR MIT OR BSD-3-Clause | https://github.com/hsivonen/encoding_rs |
+| chardetng (TXT encoding detection) | 0.1.17 | Apache-2.0 OR MIT | https://github.com/hsivonen/chardetng |
+| tempfile (anonymous TXT reading resources) | 3.27.0 | MIT OR Apache-2.0 | https://github.com/Stebalien/tempfile |
 | zip | 2.4.2 | MIT | https://github.com/zip-rs/zip2 |
 | rusqlite | 0.32.1 | MIT | https://github.com/rusqlite/rusqlite |
 | libsqlite3-sys | 0.30.1 | MIT | https://github.com/rusqlite/rusqlite/tree/master/libsqlite3-sys |
@@ -244,3 +247,8 @@ dependencies are not included in Core, Android or the reader's release bundle.
 - [Zlib.txt](third-party-licenses/Zlib.txt)
 - [Unicode-3.0.txt](third-party-licenses/Unicode-3.0.txt)
 - [CC-BY-4.0.txt](third-party-licenses/CC-BY-4.0.txt)
+
+TXT decoding uses encoding_rs and chardetng, copyright Mozilla Foundation.
+Their MIT notices, including the encoding table BSD attribution, are retained
+in `third-party-licenses/txt-encoding-notices.txt`. The temporary resource file
+uses tempfile under its MIT option (notice in the same file).
