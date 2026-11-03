@@ -11,13 +11,15 @@ const WINDOW_THRESHOLD = 80;
  * While not `live` (drawer closed or only prepared) it keeps its rows but does
  * not scroll, center, measure or write the remembered position.
  */
-export function SidebarTocList({ rows, activeKey, nested, filtering, memory, live = true, onToggle, onNavigate }: {
+export function SidebarTocList({ rows, activeKey, nested, filtering, memory, live = true, follow, onToggle, onNavigate }: {
   rows: readonly TocRow[];
   activeKey?: string;
   nested: boolean;
   filtering: boolean;
   memory: SidebarNavigationMemory;
   live?: boolean;
+  /** Generation of memory.tocFollow to center on activeKey once; kept pending while a filter hides it. */
+  follow?: number;
   onToggle(key: string, expand: boolean): void;
   onNavigate(href: string): void;
 }) {
@@ -77,9 +79,15 @@ export function SidebarTocList({ rows, activeKey, nested, filtering, memory, liv
     if (!live) return;
     const list = root.current!, pane = list.closest<HTMLDivElement>(".sidebar-toc-pane")!;
     const old = previousOffsets.current;
+    // A landed progress jump re-centers like a first open, including after re-measurement.
+    if (follow !== undefined && memory.tocFollow?.generation === follow && rowByKey.has(activeKey ?? "")) {
+      memory.tocFollow = undefined;
+      centerOnFirstOpen.current = true;
+    }
     // A newly measured height must not move the visible row under the user's finger.
     if (centerOnFirstOpen.current) {
       const active = rowByKey.get(activeKey ?? "");
+      // The pane itself clamps the first and last entries to its scroll range.
       if (active !== undefined) pane.scrollTop = Math.max(0, list.offsetTop + offsets[active]
         - (pane.clientHeight - (offsets[active + 1] - offsets[active])) / 2);
       memory.scrollTop.toc = pane.scrollTop;
@@ -120,7 +128,7 @@ export function SidebarTocList({ rows, activeKey, nested, filtering, memory, liv
       if (!observed.has(row.dataset.tocLevel!)) { observed.add(row.dataset.tocLevel!); observer.observe(row); }
     }
     return () => observer.disconnect();
-  }, [offsets, rendered.start, rendered.end, heights, memory, live]);
+  }, [offsets, rendered.start, rendered.end, heights, memory, live, follow, activeKey, rowByKey]);
 
   const focusRow = (at: number) => {
     const list = root.current!, pane = list.closest<HTMLDivElement>(".sidebar-toc-pane")!;

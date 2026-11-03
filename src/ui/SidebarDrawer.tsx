@@ -182,6 +182,14 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
   // A kept drawer reopens like a remounted one: no half-confirmed delete.
   if (!visible && deletingNoteId !== null) setDeletingNoteId(null);
 
+  // Follow once on the TOC tab; a jump that stayed inside one entry keeps the user's scroll.
+  // Without a matching entry nothing is guessed from the ratio.
+  let tocFollow: number | undefined;
+  if (memory.tocFollow && visible && activeTab === "toc") {
+    if (!activeEntry || activeTocEntry(tocIndex, memory.tocFollow.fromHref)?.key === activeEntry.key) memory.tocFollow = undefined;
+    else tocFollow = memory.tocFollow.generation;
+  }
+
   const tocRows = useMemo(() => visibleTocRows(tocIndex, tocExpanded, tocFilter), [tocIndex, tocExpanded, tocFilter]);
   const sortedNotes = useMemo(() => limitNotes(notes, 200).items, [notes]);
 
@@ -307,6 +315,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
                   filtering={Boolean(tocFilter.trim())}
                   memory={memory}
                   live={visible}
+                  follow={tocFollow}
                   onToggle={toggleTocBranch}
                   onNavigate={(href) => {
                     onNavigateToc(href);
