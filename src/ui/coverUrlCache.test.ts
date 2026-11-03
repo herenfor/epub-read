@@ -4,6 +4,7 @@ import {
   acquireCoverUrl,
   clearCoverUrlCacheForTests,
   coverUrlCacheSize,
+  forgetCoverUrls,
   peekCoverUrl,
   storeCoverUrl,
 } from "./coverUrlCache";
@@ -53,5 +54,16 @@ describe("coverUrlCache", () => {
     second.release();
     second.release();
     expect(coverUrlCacheSize()).toEqual({ count: 1, bytes: 100 });
+  });
+
+  it("移走的书只丢它自己没在显示的封面", () => {
+    storeCoverUrl("book-a|hash|image/jpeg|", "blob:a", 100).release();
+    const shown = storeCoverUrl("book-a|hash|image/png|", "blob:a-shown", 100);
+    storeCoverUrl("book-b|hash|image/jpeg|", "blob:b", 100).release();
+    forgetCoverUrls("book-a|");
+    expect(revoked).toEqual(["blob:a"]);
+    expect(peekCoverUrl("book-a|hash|image/png|")).toBe("blob:a-shown");
+    expect(peekCoverUrl("book-b|hash|image/jpeg|")).toBe("blob:b");
+    shown.release();
   });
 });

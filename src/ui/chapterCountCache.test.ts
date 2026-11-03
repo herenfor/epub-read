@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { applyChapterCount, createChapterCountCollection } from "./chapterCounts";
-import { readCachedChapterCounts, readCachedLinearMask, readKnownChapterProgressKeys, writeChapterCountCache } from "./chapterCountCache";
+import { forgetChapterCounts, readCachedChapterCounts, readCachedLinearMask, readKnownChapterProgressKeys, writeChapterCountCache } from "./chapterCountCache";
 import { linearChapterNumber, linearChapterTotal } from "../core/book";
 
 describe("chapter count cache", () => {
@@ -96,5 +96,15 @@ describe("chapter count cache", () => {
     expect(stored.version).toBe(2);
     expect(stored.entries.hash.counts).toEqual([451, 20]);
     expect(readKnownChapterProgressKeys().has("hash")).toBe(true);
+  });
+
+  it("forgets one book when it moves to another shelf", () => {
+    let collection = createChapterCountCollection(1, [true]);
+    collection = applyChapterCount(collection, 1, 0, 12, "estimated").collection;
+    writeChapterCountCache("book", collection);
+    writeChapterCountCache("other", collection);
+    forgetChapterCounts("book");
+    expect(readCachedLinearMask("book")).toBeNull();
+    expect(readCachedChapterCounts("other", [true])).toEqual(new Map([[0, 12]]));
   });
 });

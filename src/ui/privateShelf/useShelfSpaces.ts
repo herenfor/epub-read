@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
-import { privateShelfNative } from "../../platform/privateShelf";
-import { clearUnheldCoverUrls } from "../coverUrlCache";
+import { PrivateShelfError, privateShelfError, privateShelfNative, type PrivateShelfMoveDirection } from "../../platform/privateShelf";
+import { noteCloudSyncChange } from "../cloudSync/cloudSyncStore";
+import { clearUnheldCoverUrls, forgetCoverUrls } from "../coverUrlCache";
+import type { ShelfEntry } from "../shelf";
 import { uiText } from "../localization/UiLanguageProvider";
 import {
   SHELF_SPACES,
@@ -14,6 +16,19 @@ import { createPrivateShelfStore } from "./privateShelfStore";
 import type { PrivateShelfDialogMode } from "./PrivateShelfDialog";
 
 type Notice = { kind: "ok" | "warn" | "error"; text: string } | null;
+
+/** ER-0045: one book on its way into or out of the private shelf. */
+export interface ShelfMoveTarget {
+  entry: ShelfEntry;
+  hash: string;
+  direction: PrivateShelfMoveDirection;
+}
+
+export interface ShelfSpacesDialog {
+  mode: PrivateShelfDialogMode;
+  leftover?: boolean;
+  move?: ShelfMoveTarget;
+}
 
 /**
  * The title switcher's state and transitions (ER-0044). Switching always
@@ -30,10 +45,14 @@ export function useShelfSpaces(deps: {
   resetShelfView(entering: ShelfSpaceKind): void;
   refreshShelf(): Promise<void>;
   setShelfNotice(notice: Notice): void;
+  /** Held while a move runs, so other shelf writes wait. */
+  shelfBusyRef: MutableRefObject<boolean>;
+  /** The move landed: drop the book's tab and the browser state kept for it on this shelf. */
+  onBookMoved(target: ShelfMoveTarget): void;
 }) {
   const snapshot = useActiveShelfSpace();
   const [privateConfigured, setPrivateConfigured] = useState(false);
-  const [dialog, setDialog] = useState<{ mode: PrivateShelfDialogMode; leftover?: boolean } | null>(null);
+  const [dialog, setDialog] = useState<ShelfSpacesDialog | null>(null);
   const depsRef = useRef(deps);
   depsRef.current = deps;
   const switchingRef = useRef(false);
@@ -115,6 +134,70 @@ export function useShelfSpaces(deps: {
     }
   }, [leave]);
 
+  /** Book menu: the library asks for the password first, the private shelf only confirms. */
+  const requestMove = useCallback(async (entry: ShelfEntry) => {
+    if (switchingRef.current || depsRef.current.shelfBusyRef.current) return;
+    const hash = entry.contentHash ?? entry.id;
+    if (!/^[a-f0-9]{64}$/.test(hash)) {
+      depsRef.current.setShelfNotice({ kind: "error", text: uiText("shelfMain.move.failed", { error: uiText("shelfMain.move.noHash") }) });
+      return;
+    }
+    if (activeShelfSpaceToken() !== null) {
+      setDialog({ mode: "moveOut", move: { entry, hash, direction: "toLibrary" } });
+      return;
+    }
+    try {
+      const status = await privateShelfNative.status();
+      if (switchingRef.current || activeShelfSpaceToken() !== null) return;
+      setPrivateConfigured(status !== "unconfigured");
+      setDialog({ mode: status === "unconfigured" ? "setup" : "unlock", move: { entry, hash, direction: "toPrivate" } });
+    } catch (error) {
+      depsRef.current.setShelfNotice({ kind: "error", text: uiText("shelfMain.move.failed", { error: privateShelfError(error).message }) });
+    }
+  }, []);
+
+  /**
+   * Runs the move the dialog confirmed; a failure rejects so the dialog shows
+   * it. Into the private shelf the session exists only for this call and is
+   * locked again whatever happens; the view stays on the shelf it was on.
+   */
+  const runMove = useCallback(async (target: ShelfMoveTarget, sessionId?: string): Promise<void> => {
+    const toPrivate = target.direction === "toPrivate";
+    const token = activeShelfSpaceToken();
+    const session = toPrivate ? sessionId : token;
+    if (toPrivate) setPrivateConfigured(true);
+    if (!session || (toPrivate ? token !== null : token === null) || depsRef.current.shelfBusyRef.current) {
+      if (toPrivate && sessionId) await privateShelfNative.lock().catch(() => undefined);
+      throw new PrivateShelfError("busy", uiText("shelfMain.move.unavailable"));
+    }
+    depsRef.current.shelfBusyRef.current = true;
+    try {
+      await privateShelfNative.move(session, target.hash, target.direction);
+    } catch (error) {
+      const failure = privateShelfError(error);
+      if (!toPrivate && failure.code === "locked") {
+        setDialog(null);
+        void leave(true);
+        return;
+      }
+      throw failure;
+    } finally {
+      if (toPrivate) await privateShelfNative.lock().catch(() => undefined);
+      depsRef.current.shelfBusyRef.current = false;
+    }
+    setDialog(null);
+    depsRef.current.onBookMoved(target);
+    // Back in the library, the book takes part in sync again.
+    if (!toPrivate) noteCloudSyncChange("data-changed");
+    depsRef.current.setShelfNotice({ kind: "ok", text: uiText(toPrivate ? "shelfMain.move.in.done" : "shelfMain.move.out.done", { title: target.entry.title }) });
+    void depsRef.current.refreshShelf().then(() => {
+      // The card is gone after this render; its cover URL goes with it.
+      requestAnimationFrame(() => forgetCoverUrls(`${target.entry.id}|`));
+    }, (error: unknown) => {
+      depsRef.current.setShelfNotice({ kind: "error", text: uiText("shelfMain.private.failed", { error: error instanceof Error ? error.message : String(error) }) });
+    });
+  }, [leave]);
+
   const onReset = useCallback(() => {
     setDialog(null);
     setPrivateConfigured(false);
@@ -132,5 +215,7 @@ export function useShelfSpaces(deps: {
     leave,
     openPrivate,
     onReset,
+    requestMove,
+    runMove,
   };
 }

@@ -70,3 +70,15 @@ export function writeShelfPlaceLabel(key: string | null, spineIndex: number, lab
     // An optimization only: quota or security errors must never block reading.
   }
 }
+
+/** Drops a book's entry, e.g. when it moves to another shelf. */
+export function forgetShelfPlaceLabel(key: string): void {
+  const entries = readEntries();
+  if (!entries[key]) return;
+  delete entries[key];
+  try {
+    storage()?.setItem(CACHE_KEY, JSON.stringify(entries));
+  } catch {
+    // An optimization only.
+  }
+}

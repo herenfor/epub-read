@@ -71,6 +71,7 @@ function fakeNative() {
     library: library as PrivateShelfNative["library"],
     archiveRead: vi.fn(async () => new Uint8Array([104, 105]).buffer),
     cover: vi.fn(async () => new ArrayBuffer(0)),
+    move: vi.fn(async () => undefined),
   };
   return { native, ops, service, lock: () => { locked = true; } };
 }

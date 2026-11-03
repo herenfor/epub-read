@@ -238,8 +238,8 @@ import {
   type ChapterCountCollection,
 } from "./ui/chapterCounts";
 import { createChapterCountJob } from "./ui/chapterCountJob";
-import { readCachedChapterCounts, readKnownChapterProgressKeys, writeChapterCountCache } from "./ui/chapterCountCache";
-import { readShelfPlaceLabel, writeShelfPlaceLabel } from "./ui/shelfPlaceCache";
+import { forgetChapterCounts, readCachedChapterCounts, readKnownChapterProgressKeys, writeChapterCountCache } from "./ui/chapterCountCache";
+import { forgetShelfPlaceLabel, readShelfPlaceLabel, writeShelfPlaceLabel } from "./ui/shelfPlaceCache";
 import { shelfProgressLabel } from "./ui/shelfProgressDisplay";
 import { useCustomThemes } from "./ui/useCustomThemes";
 import { projectShelfProgressReadiness } from "./ui/shelfProgressDisplay";
@@ -4632,6 +4632,25 @@ export default function App() {
     },
     refreshShelf: refreshShelfProjection,
     setShelfNotice,
+    shelfBusyRef,
+    onBookMoved: ({ entry, hash, direction }) => {
+      setReaderTabs((state) => closeReaderTab(state, entry.id).state);
+      setCurrentShelfId((current) => (current === entry.id ? null : current));
+      setShelfEntries((previous) => previous.filter((item) => item.id !== entry.id));
+      // What this shelf kept in the browser for the book must not stay behind.
+      localCheckpointsRef.current?.remove(hash);
+      forgetShelfPlaceLabel(hash);
+      forgetChapterCounts(hash);
+      const encodingKey = `epub-reader:txt-encoding:${entry.id}`;
+      try {
+        const encoding = shelfSpaceStorage.getItem(encodingKey);
+        shelfSpaceStorage.removeItem(encodingKey);
+        // A manual TXT encoding is needed to read the book, so it follows it back to the library.
+        if (encoding && direction === "toLibrary") localStorage.setItem(encodingKey, encoding);
+      } catch {
+        /* Browser storage is best effort. */
+      }
+    },
   });
   const libraryServices = shelfSpaces.space.policy.libraryServices;
   const shelfSpacesLeaveRef = useRef(shelfSpaces.leave);
@@ -5840,6 +5859,10 @@ export default function App() {
                   : (entries?: ShelfEntry[]) => void startBookSourceExport(entries)
               }
               onRevealSource={runtime.supportsRevealSource && libraryServices ? handleRevealSource : undefined}
+              shelfMove={runtime.supportsPrivateShelf ? {
+                direction: shelfSpaces.space.kind === "private" ? "toLibrary" : "toPrivate",
+                onMove: (entry) => void shelfSpaces.requestMove(entry),
+              } : undefined}
               onImportArchive={handleImportArchive}
               onImportLegacyArchive={
                 runtime.platform === "web" || !isTauriEnv() || !libraryServices
@@ -6586,8 +6609,13 @@ export default function App() {
         <PrivateShelfDialog
           mode={shelfSpaces.dialog.mode}
           leftover={shelfSpaces.dialog.leftover}
+          move={shelfSpaces.dialog.move && {
+            title: shelfSpaces.dialog.move.entry.title || shelfSpaces.dialog.move.entry.fileName,
+            run: (sessionId) => shelfSpaces.runMove(shelfSpaces.dialog!.move!, sessionId),
+          }}
           native={privateShelfNative}
-          onModeChange={(mode, leftover) => shelfSpaces.setDialog({ mode, leftover })}
+          // Clearing a forgotten password ends the move; the book stays where it is.
+          onModeChange={(mode, leftover) => shelfSpaces.setDialog((current) => ({ mode, leftover, move: mode === "reset" ? undefined : current?.move }))}
           onUnlocked={shelfSpaces.openPrivate}
           onReset={shelfSpaces.onReset}
           onClose={() => shelfSpaces.setDialog(null)}

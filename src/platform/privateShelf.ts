@@ -32,6 +32,8 @@ export function privateShelfError(error: unknown): PrivateShelfError {
   return new PrivateShelfError("storage-error", String(error));
 }
 
+export type PrivateShelfMoveDirection = "toPrivate" | "toLibrary";
+
 /** `operation.kind` is camelCase on the wire; see private_shelf/operations.rs. */
 export type PrivateShelfOperation = { readonly kind: string } & Record<string, unknown>;
 
@@ -47,6 +49,8 @@ export interface PrivateShelfNative {
   archiveRead(sessionId: string, archiveId: string, entryIndex: number, offset: number): Promise<ArrayBuffer>;
   /** Raw cover bytes; empty when the book has none. */
   cover(sessionId: string, bookHash: string): Promise<ArrayBuffer>;
+  /** ER-0045: hands one book, with its progress, notes and favorite, to the other shelf. */
+  move(sessionId: string, bookHash: string, direction: PrivateShelfMoveDirection): Promise<void>;
 }
 
 async function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
@@ -67,4 +71,5 @@ export const privateShelfNative: PrivateShelfNative = {
   archiveRead: (sessionId, archiveId, entryIndex, offset) =>
     call("private_shelf_archive_read", { sessionId, archiveId, entryIndex, offset }),
   cover: (sessionId, bookHash) => call("private_shelf_cover", { sessionId, bookHash }),
+  move: (sessionId, bookHash, direction) => call("private_shelf_move", { sessionId, bookHash, direction }),
 };

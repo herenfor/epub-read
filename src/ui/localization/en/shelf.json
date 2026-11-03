@@ -61,6 +61,8 @@
   "shelf.card.moveToFolder": "Move to Folder",
   "shelf.card.removing": "Removing...",
   "shelf.card.removeFromFolder": "Remove from Folder",
+  "shelf.card.moveToPrivate": "Move to Private Shelf",
+  "shelf.card.moveToLibrary": "Move out of Private Shelf",
   "shelf.card.removeFailed": "Couldn't remove it from the folder: {error}",
   "shelf.card.select": "Select",
   "shelf.card.reveal": "Show in File Explorer",

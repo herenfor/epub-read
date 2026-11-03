@@ -158,4 +158,12 @@ export function writeChapterCountCache(
   writeState(state);
 }
 
+/** Drops a book's estimates, e.g. when it moves to another shelf. */
+export function forgetChapterCounts(key: string): void {
+  const state = readState();
+  if (!state.entries[key]) return;
+  delete state.entries[key];
+  writeState(state);
+}
+
 export const chapterCountCacheLimits = { maxEntries: MAX_ENTRIES, maxTotalCounts: MAX_TOTAL_COUNTS } as const;
