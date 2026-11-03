@@ -343,12 +343,13 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
     sections.push({ id: "storage", title: t("shelfSettings.section.storage"),
       content: <>
         {library && libraryServices && <div className="shelf-settings-card is-list">
-          <SettingsRow icon={ROW_ICONS.library} title={t("shelfSettings.library")}
+          {capabilities.supportsLibraryFolder && <SettingsRow icon={ROW_ICONS.library} title={t("shelfSettings.library")}
             detail={displayPath(library.libraryDirectory) || t("shelfSettings.library.unknown")}
-            onClick={() => { setLibraryOpenError(null); void openLibraryFolder().catch((error: unknown) => setLibraryOpenError(String((error as Error).message ?? error))); }} />
-          <SettingsSwitchRow title={t("shelfSettings.library.copy")} detail={t("shelfSettings.library.copy.detail")}
+            onClick={() => { setLibraryOpenError(null); void openLibraryFolder().catch((error: unknown) => setLibraryOpenError(String((error as Error).message ?? error))); }} />}
+          <SettingsSwitchRow title={t("shelfSettings.library.copy")}
+            detail={t(capabilities.supportsLibraryFolder ? "shelfSettings.library.copy.detail" : "shelfSettings.library.copy.detail.files")}
             checked={library.copyOnImport} onChange={(copy) => void setCopyOnImport(copy)} />
-          {libraryLocationWarning !== undefined && <SettingsRow icon={ROW_ICONS.move} title={t("libraryLocation.row")}
+          {capabilities.supportsLibraryFolder && libraryLocationWarning !== undefined && <SettingsRow icon={ROW_ICONS.move} title={t("libraryLocation.row")}
             detail={libraryLocationWarning ?? t("libraryLocation.row.detail")} dot={libraryLocationWarning ?? false}
             onClick={() => setLocationOpen(true)} />}
         </div>}

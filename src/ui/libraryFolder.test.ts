@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { createReactDomHarness } from "../test/reactDomHarness";
 import { emptyOrganization } from "./libraryOrganization";
-import { copyOnImportNow, ensureLibrarySettings, resetLibrarySettingsForTest, setCopyOnImport } from "./librarySettings";
+import { copyOnImportNow, ensureLibrarySettings, keepOriginalOnImportNow, resetLibrarySettingsForTest, setCopyOnImport } from "./librarySettings";
 import { ShelfView, type ShelfViewProps } from "./ShelfView";
 
 const { invoke, capabilities } = vi.hoisted(() => ({ invoke: vi.fn(), capabilities: { supportsLibraryFolder: true } }));
@@ -11,7 +11,7 @@ vi.mock("../platform/runtimeCapabilities", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../platform/runtimeCapabilities")>();
   return {
     ...actual,
-    getRuntimeCapabilities: () => ({ ...actual.getRuntimeCapabilities(), supportsLibraryFolder: capabilities.supportsLibraryFolder }),
+    getRuntimeCapabilities: () => ({ ...actual.getRuntimeCapabilities(), supportsLibraryFolder: capabilities.supportsLibraryFolder, supportsImportCopyChoice: capabilities.supportsLibraryFolder }),
   };
 });
 
@@ -45,6 +45,22 @@ it("导入按显示的设置复制：只读一次；读不到设置或不支持�
   invoke.mockClear();
   await expect(copyOnImportNow()).resolves.toBe(false);
   expect(invoke).not.toHaveBeenCalled();
+});
+
+it("Android keeps the original only on a readable \u201c不复制\u201d; an unreadable setting is not a choice", async () => {
+  invoke.mockResolvedValueOnce(shown);
+  await expect(keepOriginalOnImportNow()).resolves.toBe(false);
+  invoke.mockResolvedValueOnce({ ...shown, copyOnImport: false });
+  await setCopyOnImport(false);
+  await expect(keepOriginalOnImportNow()).resolves.toBe(true);
+
+  resetLibrarySettingsForTest();
+  invoke.mockRejectedValueOnce({ code: "storage", message: "书库设置文件已损坏" });
+  await expect(keepOriginalOnImportNow()).resolves.toBeNull();
+
+  resetLibrarySettingsForTest();
+  capabilities.supportsLibraryFolder = false;
+  await expect(keepOriginalOnImportNow()).resolves.toBe(false);
 });
 
 function props(overrides: Partial<ShelfViewProps>): ShelfViewProps {

@@ -5,7 +5,7 @@ import { disposeBook, DrmError } from "../core/book";
 import type { DirectoryImportPort } from "../core/folderImport/contract";
 import type { NativeDirectorySource } from "../platform/directoryImportBridge";
 import type { RuntimeCapabilities } from "../platform/runtimeCapabilities";
-import { cancelDocumentImport, importDocuments, type AndroidDocumentSelection, type AndroidImportBatchResult, type AndroidNativeImportError } from "../platform/androidNativeBridge";
+import { cancelDocumentImport, importDocuments, pickLinkDocuments, type AndroidDocumentSelection, type AndroidImportBatchResult, type AndroidImportOptions, type AndroidNativeImportError } from "../platform/androidNativeBridge";
 import type { ExternalOpenSource } from "../platform/externalOpenBridge";
 import { activatePortableShelfState, getShelfStore, type ShelfEntry } from "./shelf";
 import { activeShelfSpaceToken } from "./shelfSpaces";
@@ -17,7 +17,7 @@ import { uiText, uiPlural } from "./localization/UiLanguageProvider";
 import type { NativeImportCancelState } from "./NativeImportPanel";
 import { createNativeDirectoryImportPort, createWebDirectoryImportPort, supportsWebDirectoryPicker } from "./folderImport";
 import type { LibraryOrganization } from "./libraryOrganization";
-import { copyOnImportNow } from "./librarySettings";
+import { copyOnImportNow, keepOriginalOnImportNow } from "./librarySettings";
 import type { useSaveFileJob } from "./useSaveFileJob";
 import type { ShelfNotice } from "./useShelfLibrary";
 
@@ -49,6 +49,17 @@ export function displayNameFromContentUri(uri: string): string {
   } catch {
     return uiText("notice.selectedFile");
   }
+}
+
+function documentLabel(document: AndroidDocumentSelection): string {
+  return document.fileName || displayNameFromContentUri(document.uri);
+}
+
+/** Books that could not stay at their original place; the user may import them as copies instead. */
+export interface OriginalImportRetry {
+  documents: AndroidDocumentSelection[];
+  reasons: string[];
+  target: ImportFolderTarget | null;
 }
 
 function createNativeImportRequestId(): string {
@@ -85,7 +96,8 @@ export function useBookImportState() {
     autoScan?: boolean;
   } | null>(null);
   const [folderImportCloseSignal, setFolderImportCloseSignal] = useState(0);
-  return { shelfBusy, setShelfBusy, shelfBusyMessage, setShelfBusyMessage, nativeImport, setNativeImport, nativeImportRef, folderImport, setFolderImport, folderImportCloseSignal, setFolderImportCloseSignal };
+  const [originalRetry, setOriginalRetry] = useState<OriginalImportRetry | null>(null);
+  return { shelfBusy, setShelfBusy, shelfBusyMessage, setShelfBusyMessage, nativeImport, setNativeImport, nativeImportRef, folderImport, setFolderImport, folderImportCloseSignal, setFolderImportCloseSignal, originalRetry, setOriginalRetry };
 }
 
 type ImportState = ReturnType<typeof useBookImportState>;
@@ -94,7 +106,7 @@ type SetEntries = Dispatch<SetStateAction<ShelfEntry[]>>;
 
 /** Commands keep the original dependencies; ref-backed shared gates stay with App. */
 export function useBookImport({
-  importState: { nativeImport, setNativeImport, nativeImportRef, setShelfBusyMessage, setShelfBusy },
+  importState: { nativeImport, setNativeImport, nativeImportRef, setShelfBusyMessage, setShelfBusy, originalRetry, setOriginalRetry },
   runtime, isTauriEnv, fileInputRef, shelfBusyRef, shelfEntriesRef,
   contentHashByIdRef, entryByContentHashRef, setShelfEntries, setShelfNotice, setOrganization,
 }: {
@@ -347,7 +359,7 @@ export function useBookImport({
 
   const runNativeDocumentImport = useCallback(async (
     documents: AndroidDocumentSelection[],
-    options: { silentError?: boolean } = {}
+    options: { silentError?: boolean; native?: AndroidImportOptions } = {}
   ): Promise<AndroidImportBatchResult | null> => {
     if (nativeImportRef.current) {
       setShelfNotice({ kind: "warn", text: uiText("notice.import.busy") });
@@ -386,7 +398,7 @@ export function useBookImport({
             ? { ...previous, phase: progress.phase, completed: progress.completed, total: progress.total }
             : previous
         ));
-      });
+      }, options.native);
       return getShelfStore() === store ? batch : null;
     } catch (error) {
       if (getShelfStore() !== store) return null;
@@ -414,8 +426,10 @@ export function useBookImport({
     batch: AndroidImportBatchResult,
     documents: AndroidDocumentSelection[],
     target: ImportFolderTarget | null = null,
+    options: { keptOriginal?: boolean; note?: string } = {},
   ): Promise<ShelfEntry[]> => {
     const store = getShelfStore();
+    const retry: OriginalImportRetry = { documents: [], reasons: [], target };
     const imported: ShelfEntry[] = [];
     const accepted: ShelfEntry[] = [];
     const duplicateTitles: string[] = [];
@@ -424,9 +438,11 @@ export function useBookImport({
     const placed: ImportedBookRef[] = [];
     for (const item of batch.results) {
       const document = documents[item.inputIndex];
-      const label = document ? displayNameFromContentUri(document.uri) : uiText("notice.nthBook", { n: item.inputIndex + 1 });
+      const label = document ? documentLabel(document) : uiText("notice.nthBook", { n: item.inputIndex + 1 });
       if (item.status === "failed") {
-        failed.push(uiText("notice.import.itemFailed", { name: label, error: item.error || uiText("notice.import.failedShort") }));
+        const reason = uiText("notice.import.itemFailed", { name: label, error: item.error || uiText("notice.import.failedShort") });
+        failed.push(reason);
+        if (options.keptOriginal && document) { retry.documents.push(document); retry.reasons.push(reason); }
         continue;
       }
       if (item.status === "cancelled") {
@@ -468,7 +484,13 @@ export function useBookImport({
       notice.text += uiText("notice.sep") + uiPlural("notice.import.cancelledCount", cancelled.length, { count: cancelled.length });
       if (notice.kind === "ok") notice.kind = "warn";
     }
+    if (options.note) {
+      notice.text += uiText("notice.sep") + options.note;
+      if (notice.kind === "ok") notice.kind = "warn";
+    }
     setShelfNotice(notice);
+    // Never a silent copy: only the user's explicit choice imports these as copies.
+    if (retry.documents.length > 0) setOriginalRetry(retry);
     return entries;
   }, [placeIntoFolder]);
 
@@ -513,33 +535,46 @@ export function useBookImport({
       setShelfNotice({ kind: "warn", text: uiText("notice.import.busy") });
       return null;
     }
-    const selected = await openFileDialog({
-      multiple: false,
-      directory: false,
-      title: uiText("notice.reimport.title", { title: entry.title }),
-    });
-    const uri = Array.isArray(selected) ? selected[0] : selected;
-    if (!uri) return null;
-    const documents: AndroidDocumentSelection[] = [{ uri }];
-    const batch = await runNativeDocumentImport(documents);
-    if (!batch) return null;
     const wanted = entry.contentHash && /^[a-f0-9]{64}$/.test(entry.contentHash)
       ? entry.contentHash
       : /^[a-f0-9]{64}$/.test(entry.id)
         ? entry.id
         : null;
+    // A book kept at its original place reconnects to the same content only; the URI stays native.
+    const relink = entry.originalLocation === true && wanted !== null && !getShelfStore().importDocuments;
+    let documents: AndroidDocumentSelection[];
+    if (relink) {
+      documents = await pickLinkDocuments();
+      if (documents.length === 0) return null;
+      if (documents.length > 1) {
+        setShelfNotice({ kind: "warn", text: uiText("notice.reimport.onlyOne", { title: entry.title }) });
+        return null;
+      }
+    } else {
+      const selected = await openFileDialog({
+        multiple: false,
+        directory: false,
+        title: uiText("notice.reimport.title", { title: entry.title }),
+      });
+      const uri = Array.isArray(selected) ? selected[0] : selected;
+      if (!uri) return null;
+      documents = [{ uri }];
+    }
+    const batch = await runNativeDocumentImport(documents, relink ? { native: { keepOriginal: true, relinkHash: wanted } } : {});
+    if (!batch) return null;
     const match = batch.results.find((item) =>
-      (item.status === "saved" || item.status === "duplicate") &&
+      (relink ? item.status === "saved" : item.status === "saved" || item.status === "duplicate") &&
       item.record &&
       (wanted ? item.record.contentHash === wanted : true)
     );
     if (!match?.record) {
       const cancelled = batch.results.some((item) => item.status === "cancelled");
+      const reason = batch.results.find((item) => item.status === "failed")?.error;
       setShelfNotice({
         kind: cancelled ? "warn" : "error",
         text: cancelled
           ? uiText("notice.reimport.cancelled", { title: entry.title })
-          : uiText("notice.reimport.mismatch", { title: entry.title }),
+          : uiText("notice.reimport.mismatch", { title: entry.title }) + (relink && reason ? uiText("notice.sep") + reason : ""),
       });
       return null;
     }
@@ -567,18 +602,30 @@ export function useBookImport({
         return;
       }
       try {
-        const selected = await openFileDialog({
-          multiple: true,
-          directory: false,
-          title: uiText("notice.picker.chooseEpub"),
-        });
-        const uris = (Array.isArray(selected) ? selected : selected ? [selected] : []).filter(
-          (value): value is string => typeof value === "string" && value.length > 0
-        );
-        if (uris.length === 0 || getShelfStore() !== pickerStore) return;
-        const documents: AndroidDocumentSelection[] = uris.map((uri) => ({ uri }));
-        const batch = await runNativeDocumentImport(documents);
-        if (batch && getShelfStore() === pickerStore) await applyNativeImportBatch(batch, documents, target);
+        // Only the normal shelf's own picker can keep originals; the private shelf imports its own copies.
+        const keepOriginal = pickerStore.importDocuments ? false : await keepOriginalOnImportNow();
+        let documents: AndroidDocumentSelection[];
+        if (keepOriginal) {
+          documents = await pickLinkDocuments();
+        } else {
+          const selected = await openFileDialog({
+            multiple: true,
+            directory: false,
+            title: uiText("notice.picker.chooseEpub"),
+          });
+          const uris = (Array.isArray(selected) ? selected : selected ? [selected] : []).filter(
+            (value): value is string => typeof value === "string" && value.length > 0
+          );
+          documents = uris.map((uri) => ({ uri }));
+        }
+        if (documents.length === 0 || getShelfStore() !== pickerStore) return;
+        const batch = await runNativeDocumentImport(documents, keepOriginal ? { native: { keepOriginal: true } } : {});
+        if (batch && getShelfStore() === pickerStore) {
+          await applyNativeImportBatch(batch, documents, target, {
+            keptOriginal: keepOriginal === true,
+            note: keepOriginal === null ? uiText("notice.import.copySettingUnread") : undefined,
+          });
+        }
       } catch (error) {
         setShelfNotice({ kind: "error", text: uiText("notice.picker.failed", { error: String(error) }) });
       }
@@ -620,6 +667,17 @@ export function useBookImport({
     return batch ? applyNativeImportBatch(batch, documents) : [];
   }, [applyNativeImportBatch, handleImportSources, runNativeDocumentImport]);
 
+  /** The user chose to copy books that could not stay where they are. */
+  const retryOriginalAsCopy = useCallback(async (): Promise<void> => {
+    const retry = originalRetry;
+    setOriginalRetry(null);
+    if (!retry) return;
+    const store = getShelfStore();
+    const batch = await runNativeDocumentImport(retry.documents);
+    if (batch && getShelfStore() === store) await applyNativeImportBatch(batch, retry.documents, retry.target);
+  }, [applyNativeImportBatch, originalRetry, runNativeDocumentImport]);
+  const dismissOriginalRetry = useCallback((): void => setOriginalRetry(null), []);
+
   /** Browser file input result: consumes the target its picker was opened for. */
   const handleFileInputSources = useCallback((sources: ImportSource[]): void => {
     const target = fileInputTargetRef.current;
@@ -627,7 +685,7 @@ export function useBookImport({
     void handleImportSources(sources, target);
   }, [handleImportSources]);
 
-  return { handleImportSources, handleFileInputSources, handleCancelNativeImport, handleToggleNativeImportCollapsed, reimportAndroidMissing, handleChooseBooks, importExternalSource };
+  return { handleImportSources, handleFileInputSources, handleCancelNativeImport, handleToggleNativeImportCollapsed, reimportAndroidMissing, handleChooseBooks, importExternalSource, retryOriginalAsCopy, dismissOriginalRetry };
 }
 
 export function useFolderImport({

@@ -165,6 +165,7 @@ import { emptyOrganization } from "./ui/libraryOrganization";
 import type { ExternalOpenOutcome } from "./ui/externalOpenPump";
 import type { ExternalOpenRequest } from "./platform/externalOpenBridge";
 import { ExternalOpenFailureDialog } from "./ui/ExternalOpenFailureDialog";
+import { OriginalImportRetryDialog } from "./ui/OriginalImportRetryDialog";
 import { ReaderReadingSettings, SettingsSwitch } from "./ui/ReadingSettings";
 import { ChevronRightIcon } from "./ui/readerIcons";
 import { NativeImportPanel } from "./ui/NativeImportPanel";
@@ -1358,7 +1359,7 @@ export default function App() {
     []
   );
 
-  const { handleImportSources, handleFileInputSources, handleCancelNativeImport, handleToggleNativeImportCollapsed, reimportAndroidMissing, handleChooseBooks, importExternalSource } = useBookImport({
+  const { handleImportSources, handleFileInputSources, handleCancelNativeImport, handleToggleNativeImportCollapsed, reimportAndroidMissing, handleChooseBooks, importExternalSource, retryOriginalAsCopy, dismissOriginalRetry } = useBookImport({
     importState: bookImportState,
     runtime, isTauriEnv, fileInputRef, shelfBusyRef, shelfEntriesRef,
     contentHashByIdRef, entryByContentHashRef, setShelfEntries, setShelfNotice, setOrganization,
@@ -5816,7 +5817,8 @@ export default function App() {
               onImportFolder={libraryServices ? () => void handleOpenFolderImport() : undefined}
               saveFileActive={saveFileActive}
               lanTransferActive={lanSaveSession.active}
-              copyToLibrary={libraryServices ? libraryCopyChoice(librarySettings) : undefined}
+              // Android keeps originals only for 导入书, so its one switch lives in settings.
+              copyToLibrary={libraryServices && runtime.supportsLibraryFolder ? libraryCopyChoice(librarySettings) : undefined}
               onCopyToLibraryChange={handleCopyToLibraryChange}
               onLibraryLocationChanged={handleLibraryLocationChanged}
               onOpenLanTransfer={runtime.supportsLanTransfer && libraryServices ? handleOpenLanSave : undefined}
@@ -6539,7 +6541,7 @@ export default function App() {
           onClose={closeFolderImport}
           onUseFileImport={() => void handleChooseBooks()}
           autoScan={folderImport.autoScan}
-          copyToLibrary={libraryCopyChoice(librarySettings)}
+          copyToLibrary={runtime.supportsLibraryFolder ? libraryCopyChoice(librarySettings) : undefined}
           onCopyToLibraryChange={handleCopyToLibraryChange}
         />
       )}
@@ -6643,6 +6645,13 @@ export default function App() {
             </button>
           </div>
         </div>
+      )}
+      {bookImportState.originalRetry && !saveFailurePrompt && (
+        <OriginalImportRetryDialog
+          reasons={bookImportState.originalRetry.reasons}
+          onCopy={() => void retryOriginalAsCopy()}
+          onClose={dismissOriginalRetry}
+        />
       )}
       {externalOpen.failed && !saveFailurePrompt && (
         <ExternalOpenFailureDialog

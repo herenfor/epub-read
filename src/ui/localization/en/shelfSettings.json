@@ -14,6 +14,7 @@
   "shelfSettings.library.unknown": "Couldn't read the location",
   "shelfSettings.library.copy": "Copy books into library on import",
   "shelfSettings.library.copy.detail": "When off, only the original file's location is remembered; moving it means relocating the book",
+  "shelfSettings.library.copy.detail.files": "When off, files chosen with Import books are read where they are and must stay there; folder import, auto import and the private shelf still copy",
   "shelfSettings.watch": "Auto-import Folder",
   "shelfSettings.watch.off": "Off · Books you put in this folder join the shelf by themselves",
   "shelfSettings.watch.inbox": "Use Library Inbox",
