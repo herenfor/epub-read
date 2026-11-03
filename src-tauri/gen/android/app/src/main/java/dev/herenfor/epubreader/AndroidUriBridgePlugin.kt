@@ -66,15 +66,34 @@ class AndroidUriBridgePlugin(private val activity: Activity) : Plugin(activity) 
     }
     private val cancelledWrites = ConcurrentHashMap<String, Boolean>()
     private var pendingTreePick: Invoke? = null
+    private var persistTreePick = false
 
     @Command
-    fun pickDirectoryTree(invoke: Invoke) {
-        if (pendingTreePick != null) {
-            invoke.reject("directory picker is already active")
-            return
+    fun pickDirectoryTree(invoke: Invoke) = startTreePicker(invoke, false)
+
+    @Command
+    fun pickWatchedDirectory(invoke: Invoke) = startTreePicker(invoke, true)
+
+    @Command
+    fun releaseWatchedDirectory(invoke: Invoke) {
+        val uri = Uri.parse(invoke.parseArgs(OpenReadOnlyArgs::class.java).uri)
+        try {
+            activity.contentResolver.releasePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            invoke.resolve(JSObject())
+        } catch (_: SecurityException) {
+            // Already revoked.
+            invoke.resolve(JSObject())
         }
-        pendingTreePick = invoke
+    }
+
+    private fun startTreePicker(invoke: Invoke, persist: Boolean) {
         activity.runOnUiThread {
+            if (pendingTreePick != null) {
+                invoke.reject("directory picker is already active")
+                return@runOnUiThread
+            }
+            pendingTreePick = invoke
+            persistTreePick = persist
             try {
                 // Plugins load after Activity.onStart: use Tauri's existing
                 // activity-result registry instead of registering a launcher here.
@@ -96,7 +115,19 @@ class AndroidUriBridgePlugin(private val activity: Activity) : Plugin(activity) 
         pendingTreePick = null
         val response = JSObject()
         if (result.resultCode == Activity.RESULT_OK) {
-            result.data?.data?.let { response.put("uri", it.toString()) }
+            result.data?.data?.let { uri ->
+                if (persistTreePick) {
+                    try {
+                        activity.contentResolver.takePersistableUriPermission(
+                            uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                        )
+                    } catch (error: SecurityException) {
+                        invoke.reject(error.message ?: "unable to retain directory permission")
+                        return
+                    }
+                }
+                response.put("uri", uri.toString())
+            }
         }
         invoke.resolve(response)
     }
@@ -299,7 +330,8 @@ class AndroidUriBridgePlugin(private val activity: Activity) : Plugin(activity) 
                 DocumentsContract.Document.COLUMN_DOCUMENT_ID,
                 DocumentsContract.Document.COLUMN_DISPLAY_NAME,
                 DocumentsContract.Document.COLUMN_MIME_TYPE,
-                DocumentsContract.Document.COLUMN_SIZE
+                DocumentsContract.Document.COLUMN_SIZE,
+                DocumentsContract.Document.COLUMN_LAST_MODIFIED
             )
             val entries = JSONArray()
             val cursor = activity.contentResolver.query(
@@ -320,6 +352,7 @@ class AndroidUriBridgePlugin(private val activity: Activity) : Plugin(activity) 
                     DocumentsContract.Document.COLUMN_MIME_TYPE
                 )
                 val sizeIndex = it.getColumnIndex(DocumentsContract.Document.COLUMN_SIZE)
+                val modifiedIndex = it.getColumnIndex(DocumentsContract.Document.COLUMN_LAST_MODIFIED)
                 while (it.moveToNext()) {
                     val documentId = it.getString(idIndex) ?: continue
                     val mimeType = it.getString(mimeIndex) ?: ""
@@ -337,6 +370,10 @@ class AndroidUriBridgePlugin(private val activity: Activity) : Plugin(activity) 
                             "isDirectory",
                             mimeType == DocumentsContract.Document.MIME_TYPE_DIR
                         )
+                        if (modifiedIndex >= 0 && !it.isNull(modifiedIndex)) {
+                            val modified = it.getLong(modifiedIndex)
+                            if (modified > 0) put("lastModified", modified)
+                        }
                         if (sizeIndex >= 0 && !it.isNull(sizeIndex)) {
                             val size = it.getLong(sizeIndex)
                             if (size >= 0) put("size", size)

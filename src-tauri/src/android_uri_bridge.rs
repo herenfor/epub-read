@@ -449,6 +449,7 @@ mod android {
         pub mime_type: String,
         #[serde(default)]
         pub size: Option<u64>,
+        pub last_modified: Option<u64>,
         pub is_directory: bool,
     }
 
@@ -575,10 +576,25 @@ mod android {
     pub(crate) fn pick_directory_tree<R: Runtime>(
         app: &AppHandle<R>,
     ) -> Result<Option<String>, String> {
+        pick_tree(app, "pickDirectoryTree")
+    }
+
+    pub(crate) fn pick_watched_directory<R: Runtime>(app: &AppHandle<R>) -> Result<Option<String>, String> {
+        pick_tree(app, "pickWatchedDirectory")
+    }
+
+    pub(crate) fn release_watched_directory<R: Runtime>(app: &AppHandle<R>, uri: &str) {
+        let bridge = app.state::<AndroidUriBridge<R>>();
+        let _ = bridge.0.run_mobile_plugin::<EmptyPluginResponse>(
+            "releaseWatchedDirectory", OpenReadOnlyRequest { uri }
+        );
+    }
+
+    fn pick_tree<R: Runtime>(app: &AppHandle<R>, command: &str) -> Result<Option<String>, String> {
         let bridge = app.state::<AndroidUriBridge<R>>();
         let response = bridge
             .0
-            .run_mobile_plugin::<PickTreeResponse>("pickDirectoryTree", EmptyPluginResponse {})
+            .run_mobile_plugin::<PickTreeResponse>(command, EmptyPluginResponse {})
             .map_err(|error| super::command_error("pick_failed", error.to_string()))?;
         Ok(response.uri)
     }
@@ -611,7 +627,7 @@ mod android {
 #[cfg(target_os = "android")]
 #[allow(unused_imports)]
 pub(crate) use android::{
-    cancel_write_blocking, delete_created_document_blocking, open_content_uri, pick_directory_tree, plugin,
+    cancel_write_blocking, delete_created_document_blocking, open_content_uri, pick_directory_tree, pick_watched_directory, release_watched_directory, plugin,
     query_tree_directory, read_content_uri_blocking, write_staged_file_blocking,
     write_text_content_uri_blocking,
 };

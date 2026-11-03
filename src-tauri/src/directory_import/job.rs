@@ -160,6 +160,13 @@ impl DirectoryImportJob {
         self.issues.lock().unwrap().push(issue);
     }
 
+    pub(super) fn failed_sources(&self) -> std::collections::HashSet<String> {
+        use super::types::ImportIssueKind;
+        self.issues.lock().unwrap().iter()
+            .filter(|issue| issue.kind == ImportIssueKind::SourceFailed)
+            .map(|issue| issue.input_id.clone()).collect()
+    }
+
     pub fn page(&self, cursor: Option<&str>, app: &AppHandle) -> Result<InputPage, String> {
         let root = self.root().ok_or_else(|| "目录扫描尚未完成".to_string())?;
         let entries = self.entries.lock().unwrap();
@@ -307,6 +314,15 @@ impl DirectoryImportState {
         Ok(job)
     }
 
+    pub(super) fn automatic_job(
+        &self,
+        source: impl FnOnce() -> Result<DirectorySource, String>,
+    ) -> Result<Arc<DirectoryImportJob>, String> {
+        let id = "folder-watch".to_owned();
+        let activity = self.activity.try_acquire(id.clone())?;
+        Ok(Arc::new(DirectoryImportJob::new(id, source()?, activity)))
+    }
+
     pub fn get(&self, job_id: &str) -> Result<Option<Arc<DirectoryImportJob>>, String> {
         let jobs = self.jobs.lock().map_err(|_| "目录导入作业表已损坏")?;
         Ok(jobs.get(job_id).cloned())
@@ -358,6 +374,7 @@ impl AndroidTreeBridge for AppAndroidTreeBridge<'_> {
                     display_name: entry.display_name,
                     mime_type: entry.mime_type,
                     size: entry.size,
+                    modified: entry.last_modified,
                     is_directory: entry.is_directory,
                 })
                 .collect(),
@@ -370,7 +387,6 @@ pub fn scan_job(
     job: &DirectoryImportJob,
     on_progress: &tauri::ipc::Channel<super::types::DirectoryProgress>,
 ) -> Result<ScanResult, String> {
-    let _ = app;
     let progress = |scanned: usize| {
         let _ = on_progress.send(super::types::DirectoryProgress {
             job_id: job.id().to_string(),
@@ -382,7 +398,22 @@ pub fn scan_job(
     };
     progress(0);
     let cancelled = || job.gate().cancelled();
-    let output = match job.source() {
+    let output = scan_source(app, job.source(), &cancelled)?;
+    if output.cancelled {
+        return Err("目录扫描已取消".to_string());
+    }
+    let result = job.set_scan(output);
+    progress(result.input_count);
+    Ok(result)
+}
+
+pub(super) fn scan_source(
+    app: &AppHandle,
+    source: &DirectorySource,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<ScanOutput, String> {
+    let _ = app;
+    match source {
         DirectorySource::Path { path } => {
             let path = PathBuf::from(path);
             let name = path
@@ -391,13 +422,13 @@ pub fn scan_job(
                 .filter(|name| !name.trim().is_empty())
                 .unwrap_or("所选文件夹")
                 .to_string();
-            scan_path_root_cancellable(&path, name, &cancelled)?
+            scan_path_root_cancellable(&path, name, cancelled)
         }
         DirectorySource::TreeUri { uri } => {
             #[cfg(target_os = "android")]
             {
                 let bridge = AppAndroidTreeBridge { app };
-                scan_android_tree_cancellable(&bridge, uri, &cancelled)?
+                scan_android_tree_cancellable(&bridge, uri, cancelled)
             }
             #[cfg(not(target_os = "android"))]
             {
@@ -405,13 +436,7 @@ pub fn scan_job(
                 return Err("Android 树 URI 扫描仅可在 Android 上运行".to_string());
             }
         }
-    };
-    if output.cancelled {
-        return Err("目录扫描已取消".to_string());
     }
-    let result = job.set_scan(output);
-    progress(result.input_count);
-    Ok(result)
 }
 
 #[cfg(test)]
