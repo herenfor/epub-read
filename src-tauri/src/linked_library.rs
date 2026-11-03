@@ -52,6 +52,10 @@ pub(crate) use epub_meta::{
 };
 use epub_meta::read_zip_entry_bounded;
 
+#[cfg(target_os = "android")]
+mod document_source;
+#[cfg(target_os = "android")]
+use document_source::hash_original_document;
 mod source;
 mod archive_stamp;
 #[cfg(target_os = "android")]
