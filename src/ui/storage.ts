@@ -75,6 +75,8 @@ export interface SavedSettings {
   customCss?: string;
   /** 可重排章节是否强制覆盖为横排；旧设置缺省为 false */
   forceHorizontal?: boolean;
+  /** TXT 段首缩进；旧设置缺省为 false。只存本机，不进存档。 */
+  txtIndent?: boolean;
   /** 是否预先准备下一章以加快顺序切换；旧设置缺省为 false */
   preloadNextChapter?: boolean;
   /** 章节间连续滑动（需高性能预读）；旧设置缺省为 false。只存本机，不进存档。 */
@@ -112,6 +114,7 @@ export function toSavedReaderSettings(settings: ReaderSettings, uiScale: number)
     forceFontOverride: settings.forceFontOverride === true,
     customCss: settings.customCss,
     forceHorizontal: settings.forceHorizontal === true,
+    txtIndent: settings.txtIndent === true,
     preloadNextChapter: settings.preloadNextChapter === true,
     seamlessChapterTurn: settings.seamlessChapterTurn === true,
     turnAnimation: normalizeTurnAnimation(settings.turnAnimation),

@@ -91,6 +91,8 @@ export const aa = defineMessages("aa", {
   "aa.group.advanced": "翻页与进阶",
   "aa.turnAnimation": { zh: "翻页动画", max: 14 },
   "aa.more": "更多高级设置",
+  "aa.txtIndent": "段首缩进",
+  "aa.txtIndent.hint": { zh: "TXT 段落开头空两格", note: "Help text under the TXT-only switch: indent each paragraph by two characters." },
   "aa.forceHorizontal": "强制竖排转横排",
   "aa.forceHorizontal.hint": { zh: "竖排显示是实验性功能；排版不理想时打开此开关，改为横排阅读", note: "Help text under the switch: vertical layout is experimental; turn this on to read horizontally." },
   "aa.pageDirectionLtr": "始终从左往右翻页",

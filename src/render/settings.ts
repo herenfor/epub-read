@@ -49,6 +49,8 @@ export interface ReaderSettings {
   wordSpacingPx?: number;
   /** 将可重排章节中的竖排书写模式强制转换为横排；undefined/false = 跟随书 */
   forceHorizontal?: boolean;
+  /** TXT 段首缩进两字；只作用于生成资源里原文段首无空白的段落。undefined/false = 不缩进 */
+  txtIndent?: boolean;
   /** 预先准备下一章以加快顺序切换；undefined/false = 按需加载 */
   preloadNextChapter?: boolean;
   /**
@@ -105,6 +107,7 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
   columnsPerView: 1,
   spreadGapMode: "auto",
   forceHorizontal: false,
+  txtIndent: false,
   forceFontOverride: false,
   preloadNextChapter: false,
   turnAnimation: "slide",

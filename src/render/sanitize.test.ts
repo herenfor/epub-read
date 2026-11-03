@@ -816,6 +816,17 @@ describe("sanitizeChapter", () => {
     expect(normal.html).not.toContain("-webkit-writing-mode: horizontal-tb !important;");
   });
 
+  it("TXT 段首缩进只写变量，由生成资源的标记段落消费", async () => {
+    const html = `<html xmlns="http://www.w3.org/1999/xhtml"><head><style>p[data-txt-indent]{text-indent:var(--reader-txt-indent,0em)}</style></head>
+<body><p id="t0">第一章</p><p data-txt-indent="true">正文</p><p>　原文已缩进</p></body></html>`;
+    const on = await sanitizeChapter(html, { ...opts(), settings: { ...DEFAULT_SETTINGS, txtIndent: true } });
+    expect(readStyleText(on.html, "overrides")).toContain("#epub-viewer { --reader-txt-indent: 2em; }");
+    expect(on.html).toContain('data-txt-indent="true"');
+    expect(on.html).toMatch(/\[data-txt-indent\][^{]*\{[^}]*text-indent:\s*var\(--reader-txt-indent/);
+    const off = await sanitizeChapter(html, opts());
+    expect(off.html).not.toContain("--reader-txt-indent: 2em");
+  });
+
   it("脚注标记图标用 middle 垂直对齐（书里的 top 会顶到上一行）", async () => {
     const html = `<html xmlns="http://www.w3.org/1999/xhtml"><body>
 <p>正文<sup><a class="duokan-footnote" href="#n1"><img class="zhangyue-footnote" alt="note" src="note.png"/></a></sup></p>

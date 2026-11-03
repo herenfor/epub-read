@@ -17,5 +17,6 @@ describe("reader effective settings", () => {
     const normal = { ...DEFAULT_SETTINGS, fontSizePx: 18, preloadNextChapter: false };
     expect(sameRenderingSettings(normal, { ...normal, preloadNextChapter: true })).toBe(true);
     expect(sameRenderingSettings(normal, { ...normal, fontSizePx: 19 })).toBe(false);
+    expect(sameRenderingSettings(normal, { ...normal, txtIndent: true })).toBe(false);
   });
 });

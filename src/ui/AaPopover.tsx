@@ -129,6 +129,9 @@ export interface AaPopoverProps {
 
   forceHorizontal?: boolean;
   onForceHorizontalChange?: (enabled: boolean) => void;
+  /** TXT only: the row appears when the open book is plain text. */
+  txtIndent?: boolean;
+  onTxtIndentChange?: (enabled: boolean) => void;
   /** 翻页方向：跟随书籍 / 始终从左往右 */
   pageDirection?: PageDirectionSetting;
   onPageDirectionChange?: (value: PageDirectionSetting) => void;
@@ -310,6 +313,8 @@ export const AaPopover = React.memo(function AaPopover({
   onTurnAnimationChange,
   forceHorizontal = false,
   onForceHorizontalChange,
+  txtIndent = false,
+  onTxtIndentChange,
   pageDirection = "book",
   onPageDirectionChange,
   customCss = "",
@@ -613,6 +618,10 @@ export const AaPopover = React.memo(function AaPopover({
             onChange={(next) => onFontWeightChange(next)} />,
           fontWeightText,
           resetTo("aa.resetFollowBook", fontWeight !== undefined, () => onFontWeightChange(undefined)))}
+        {onTxtIndentChange && (
+          <SwitchRow label={t("aa.txtIndent")} hint={t("aa.txtIndent.hint")}
+            checked={txtIndent} onChange={onTxtIndentChange} />
+        )}
       </div>
 
       <div className="aa-group-title">{t("aa.group.layoutTurning")}</div>
