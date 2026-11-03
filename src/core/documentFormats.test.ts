@@ -20,6 +20,8 @@ describe("original document formats", () => {
         const html = new TextDecoder().decode(await book.readResource!(path));
         expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
         expect(html).not.toContain("\r");
+        // Even right edge like a typical EPUB; ragged CJK lines read as off-center.
+        expect(html).toContain("text-align:justify");
         expect(book.toc[0].label).toBe("第一章 开始");
         disposeBook(book);
         await expect(book.readResource!(path)).rejects.toThrow();

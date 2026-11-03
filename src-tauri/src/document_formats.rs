@@ -193,7 +193,7 @@ fn write_part(
         }
         offset += line.chars().count();
     }
-    write!(zip,"<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><meta charset=\"utf-8\"/><style>p{{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;break-inside:auto}}</style></head><body>{}</body></html>",html).map_err(|e|e.to_string())?;
+    write!(zip,"<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><meta charset=\"utf-8\"/><style>p{{margin:0;text-align:justify;white-space:pre-wrap;overflow-wrap:anywhere;break-inside:auto}}</style></head><body>{}</body></html>",html).map_err(|e|e.to_string())?;
     parts.push(Part {
         path,
         start,
@@ -335,6 +335,7 @@ mod tests {
                 assert!(html.contains(&escape(line)), "{label}");
             }
             assert!(!html.contains("<script>"));
+            assert!(html.contains("text-align:justify"), "{label}");
         }
         let original = format!(
             "{}\r\n𠮷{}",
