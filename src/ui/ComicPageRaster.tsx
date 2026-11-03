@@ -23,7 +23,8 @@ export function ComicPageRaster({ url, alt, target, zoomed, onReady, onError }: 
     const controller = new AbortController();
     void (async () => {
       const blob = await (await fetch(url, { signal: controller.signal })).blob();
-      const bitmap = await createImageBitmap(blob, { resizeWidth: w, resizeHeight: h, resizeQuality: "medium" });
+      // A single resize dimension preserves the decoder's orientation-aware aspect ratio.
+      const bitmap = await createImageBitmap(blob, { resizeHeight: h, resizeQuality: "medium" });
       try {
         if (controller.signal.aborted || !canvas.current) return;
         const element = canvas.current;

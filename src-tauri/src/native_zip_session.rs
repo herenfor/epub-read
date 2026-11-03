@@ -434,6 +434,7 @@ mod tests {
             data_offset: entry.data_start(),
             crc: entry.crc32(),
         };
+        let offset = row.data_offset;
         drop(entry);
         std::fs::write(&index, encode_stored_index(&[row]).unwrap()).unwrap();
         let session = NativeZipSession::from_verified_file_indexed(
@@ -442,6 +443,16 @@ mod tests {
         assert_eq!(session.entry_count, 1);
         assert_eq!(session.read_chunk(0, 0).unwrap(), data[..CHUNK_BYTES]);
         session.close();
+
+        let mut raw = std::fs::read(&path).unwrap();
+        raw[offset as usize] ^= 1;
+        std::fs::write(&path, raw).unwrap();
+        let session = NativeZipSession::from_verified_file_indexed(
+            File::open(&path).unwrap(), || Ok(()), Some((index.clone(), true)),
+        ).unwrap();
+        session.read_chunk(0, 0).unwrap();
+        session.read_chunk(0, CHUNK_BYTES as u64).unwrap();
+        assert_eq!(session.read_chunk(0, (CHUNK_BYTES * 2) as u64), Err(Fault::CorruptEntry));
 
         let mut bad = std::fs::read(&index).unwrap();
         bad[0] ^= 1;
