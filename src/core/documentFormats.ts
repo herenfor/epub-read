@@ -25,30 +25,30 @@ export function textEncodingFromPath(path: string | null | undefined): string | 
     }
 }
 export function naturalCompare(a: string, b: string): number {
-    const aa = Array.from(a), bb = Array.from(b);
     let i = 0, j = 0;
-    while (i < aa.length && j < bb.length) {
-        if (/[0-9]/.test(aa[i]) && /[0-9]/.test(bb[j])) {
-            const si = i, sj = j;
-            while (i < aa.length && /[0-9]/.test(aa[i]))
-                i++;
-            while (j < bb.length && /[0-9]/.test(bb[j]))
-                j++;
-            const x = aa.slice(si, i).join("").replace(/^0+/, ""), y = bb.slice(sj, j).join("").replace(/^0+/, "");
-            if (x.length !== y.length)
-                return x.length - y.length;
-            if (x !== y)
-                return x < y ? -1 : 1;
-        }
-        else {
-            const d = aa[i].codePointAt(0)! - bb[j].codePointAt(0)!;
-            if (d)
-                return d;
-            i++;
-            j++;
+    while (i < a.length && j < b.length) {
+        const left = a.codePointAt(i)!, right = b.codePointAt(j)!;
+        if (left >= 48 && left <= 57 && right >= 48 && right <= 57) {
+            while (a.charCodeAt(i) === 48) i++;
+            while (b.charCodeAt(j) === 48) j++;
+            const startA = i, startB = j;
+            while (a.charCodeAt(i) >= 48 && a.charCodeAt(i) <= 57) i++;
+            while (b.charCodeAt(j) >= 48 && b.charCodeAt(j) <= 57) j++;
+            const length = i - startA;
+            if (length !== j - startB) return length - (j - startB);
+            for (let digit = 0; digit < length; digit++) {
+                const difference = a.charCodeAt(startA + digit) - b.charCodeAt(startB + digit);
+                if (difference) return difference;
+            }
+        } else {
+            if (left !== right) return left - right;
+            i += left > 0xffff ? 2 : 1;
+            j += right > 0xffff ? 2 : 1;
         }
     }
-    return (aa.length - i) - (bb.length - j) || (a === b ? 0 : a < b ? -1 : 1);
+    if (i < a.length) return 1;
+    if (j < b.length) return -1;
+    return a === b ? 0 : a < b ? -1 : 1;
 }
 export function comicImageName(path: string): boolean {
     return !path.split("/").some(s => s.startsWith(".") || s === "__MACOSX") && /\.(?:jpe?g|png|webp|avif|gif)$/i.test(path);

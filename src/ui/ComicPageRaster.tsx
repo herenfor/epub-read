@@ -3,50 +3,55 @@ import { useEffect, useRef, useState } from "react";
 type Size = { width: number; height: number };
 type Props = {
   url: string;
+  blob: Blob;
   alt: string;
-  target?: Size;
+  targetHeight?: number;
   zoomed: boolean;
   onReady(size: Size): void;
   onError(): void;
 };
 
 /** The display raster and the on-demand original share the same page box. */
-export function ComicPageRaster({ url, alt, target, zoomed, onReady, onError }: Props) {
+export function ComicPageRaster({ url, blob, alt, targetHeight, zoomed, onReady, onError }: Props) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const ready = useRef(onReady);
   ready.current = onReady;
   const [fallback, setFallback] = useState(false);
   const [originalReady, setOriginalReady] = useState(false);
-  const w = target?.width, h = target?.height;
   useEffect(() => {
-    if (!w || !h) return;
+    if (!targetHeight) return;
     const controller = new AbortController();
     void (async () => {
-      const blob = await (await fetch(url, { signal: controller.signal })).blob();
       // A single resize dimension preserves the decoder's orientation-aware aspect ratio.
-      const bitmap = await createImageBitmap(blob, { resizeHeight: h, resizeQuality: "medium" });
+      const bitmap = await createImageBitmap(blob, { resizeHeight: targetHeight, resizeQuality: "medium" });
       try {
         if (controller.signal.aborted || !canvas.current) return;
         const element = canvas.current;
-        const context = element.getContext("2d");
-        if (!context) throw new Error("Comic display canvas unavailable");
-        element.width = bitmap.width;
-        element.height = bitmap.height;
-        context.drawImage(bitmap, 0, 0);
-        ready.current({ width: bitmap.width, height: bitmap.height });
+        const size = { width: bitmap.width, height: bitmap.height };
+        element.width = size.width;
+        element.height = size.height;
+        const transfer = element.getContext("bitmaprenderer");
+        if (transfer) {
+          transfer.transferFromImageBitmap(bitmap);
+        } else {
+          const context = element.getContext("2d");
+          if (!context) throw new Error("Comic display canvas unavailable");
+          context.drawImage(bitmap, 0, 0);
+        }
+        ready.current(size);
       } finally {
         bitmap.close();
       }
     })().catch(() => { if (!controller.signal.aborted) setFallback(true); });
     return () => controller.abort();
-  }, [url, w, h]);
+  }, [blob, targetHeight]);
   useEffect(() => {
     if (!zoomed) setOriginalReady(false);
   }, [zoomed]);
 
-  const useDisplayRaster = !!target && !fallback;
+  const useDisplayRaster = !!targetHeight && !fallback;
   return <>
-    {useDisplayRaster && <canvas ref={canvas} width={w} height={h} role="img" aria-label={alt} hidden={zoomed && originalReady}/>}
+    {useDisplayRaster && <canvas ref={canvas} role="img" aria-label={alt} hidden={zoomed && originalReady}/>}
     {(!useDisplayRaster || zoomed) && <img src={url} alt={alt} draggable={false} decoding="async"
       hidden={useDisplayRaster && !originalReady}
       onLoad={event => {
