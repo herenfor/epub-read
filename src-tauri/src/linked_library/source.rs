@@ -317,6 +317,26 @@ pub(super) fn finalize_source_read(
     }
 }
 
+#[cfg(target_os = "android")]
+pub(super) fn find_document_binding(
+    app: &AppHandle, hash: &str,
+) -> Result<Option<(DeviceBinding, LinkedLibraryRecord)>, LinkedLibraryError> {
+    let state = app.state::<LinkedLibraryWriteState>();
+    let _guard = state.0.lock().map_err(|_| "链接书库写入锁已损坏")?;
+    let raw = crate::portable_state_commands::with_existing_store(app, |store| store.binding_raw(hash))
+        .map_err(|error| error.to_string())?.flatten();
+    let Some(raw) = raw else { return Ok(None) };
+    let binding: DeviceBinding = serde_json::from_str(&raw).map_err(|error| error.to_string())?;
+    if binding.document_uri().is_none() { return Ok(None); }
+    if binding.content_hash != hash {
+        return Err("设备绑定与书籍身份不一致".into());
+    }
+    validate_binding_sources(std::slice::from_ref(&binding), &library_root(app)?)?;
+    let record = load_records(app)?.into_iter().find(|record| record.content_hash == hash)
+        .ok_or("书库中没有这本书")?;
+    Ok(Some((binding, record)))
+}
+
 pub(super) fn read_source_raw_blocking(
     app: AppHandle,
     content_hash: String,
@@ -324,6 +344,11 @@ pub(super) fn read_source_raw_blocking(
     let _location_read = library_location::source_lease(&app)?;
     if !valid_content_hash(&content_hash) {
         return Err("无效的书籍内容指纹".into());
+    }
+
+    #[cfg(target_os = "android")]
+    if find_document_binding(&app, &content_hash)?.is_some() {
+        return Err("Android 原位书籍请使用原生归档读取".into());
     }
 
     // Short lock: capture identity, open the source handle and remember the
@@ -376,6 +401,15 @@ pub(super) fn read_cover_raw_blocking(
     let _location_read = library_location::source_lease(&app)?;
     if !valid_content_hash(&content_hash) {
         return Err("无效的书籍内容指纹".into());
+    }
+
+    #[cfg(target_os = "android")]
+    if let Some((binding, _)) = find_document_binding(&app, &content_hash)? {
+        let bytes = document_source::document_cover(&app, &binding)?;
+        if !find_document_binding(&app, &content_hash)?.is_some_and(|(current, _)| current == binding) {
+            return Err(LinkedLibraryError::changed("原书绑定已变化"));
+        }
+        return Ok(tauri::ipc::Response::new(bytes));
     }
 
     // Short lock: record/binding identity plus the exact ZIP entry path.  The

@@ -65,6 +65,13 @@ pub fn natural_cmp(a: &str, b: &str) -> Ordering {
     (aa.len() - i).cmp(&(bb.len() - j)).then_with(|| a.cmp(b))
 }
 pub fn inspect(path: &Path, file_name: &str) -> Result<ImportedMetadata, String> {
+    if text(file_name) {
+        return inspect_reader(std::io::Cursor::new([]), file_name);
+    }
+    inspect_reader(File::open(path).map_err(|e| e.to_string())?, file_name)
+}
+
+pub(crate) fn inspect_reader<R: Read + Seek>(reader: R, file_name: &str) -> Result<ImportedMetadata, String> {
     let title = Path::new(file_name)
         .file_stem()
         .and_then(|s| s.to_str())
@@ -81,10 +88,9 @@ pub fn inspect(path: &Path, file_name: &str) -> Result<ImportedMetadata, String>
             cover_mime: String::new(),
         });
     }
-    let mut zip =
-        ZipArchive::new(File::open(path).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    let mut zip = ZipArchive::new(reader).map_err(|e| e.to_string())?;
     if zip.by_name("META-INF/container.xml").is_ok() {
-        return crate::linked_library::epub_meta::inspect_epub_package(path);
+        return crate::linked_library::epub_meta::inspect_epub_archive(zip);
     }
     if !matches!(
         extension(file_name).to_ascii_lowercase().as_str(),
@@ -288,7 +294,7 @@ fn write_part(
 /// Anonymous temporary ZIP is a reading-resource container, not an EPUB or a permanent converted copy.
 /// File ownership passes to the existing window-owned ZIP session; close/failure removes it automatically.
 pub fn text_archive(
-    mut source: File,
+    mut source: impl Read + Seek,
     requested: Option<&str>,
     title: &str,
 ) -> Result<File, String> {

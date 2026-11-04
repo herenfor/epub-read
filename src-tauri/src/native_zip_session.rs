@@ -125,18 +125,18 @@ fn encode_stored_index(rows: &[StoredEntry]) -> Option<Vec<u8>> {
     Some(bytes)
 }
 
-enum ArchiveEntries {
-    Zip(ZipArchive<File>),
-    Stored { file: File, entries: Vec<StoredEntry> },
+enum ArchiveEntries<R> {
+    Zip(ZipArchive<R>),
+    Stored { file: R, entries: Vec<StoredEntry> },
 }
 
-struct StoredRead<'a> {
-    file: Take<&'a mut File>,
+struct StoredRead<'a, R> {
+    file: Take<&'a mut R>,
     crc: flate2::Crc,
     expected_crc: u32,
 }
 
-impl Read for StoredRead<'_> {
+impl<R: Read> Read for StoredRead<'_, R> {
     fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
         let n = self.file.read(bytes)?;
         self.crc.update(&bytes[..n]);
@@ -147,7 +147,7 @@ impl Read for StoredRead<'_> {
     }
 }
 
-impl ArchiveEntries {
+impl<R: Read + Seek> ArchiveEntries<R> {
     fn open(&mut self, index: usize) -> Result<(u64, Box<dyn Read + '_>), Fault> {
         match self {
             Self::Zip(zip) => {
@@ -196,9 +196,26 @@ impl NativeZipSession {
         unchanged: impl Fn() -> Result<(), Fault> + Send + 'static,
         index: Option<(PathBuf, bool)>,
     ) -> Result<Self, Fault> {
+        let length = file.metadata().ok().map(|metadata| metadata.len());
+        Self::open(file, unchanged, index, length)
+    }
+
+    pub(crate) fn from_verified_reader<R: Read + Seek + Send + 'static>(
+        reader: R,
+        unchanged: impl Fn() -> Result<(), Fault> + Send + 'static,
+    ) -> Result<Self, Fault> {
+        Self::open(reader, unchanged, None, None)
+    }
+
+    fn open<R: Read + Seek + Send + 'static>(
+        file: R,
+        unchanged: impl Fn() -> Result<(), Fault> + Send + 'static,
+        index: Option<(PathBuf, bool)>,
+        length: Option<u64>,
+    ) -> Result<Self, Fault> {
         unchanged()?;
         let cached = index.as_ref().filter(|(_, reuse)| *reuse)
-            .and_then(|(path, _)| load_stored_index(path, file.metadata().ok()?.len()));
+            .and_then(|(path, _)| load_stored_index(path, length?));
         let mut publish = None;
         let (archive, entries) = if let Some(rows) = cached {
             let entries = rows.iter().map(|row| row.entry.clone()).collect::<Vec<_>>();
@@ -358,8 +375,8 @@ fn verified_chunk(
     Ok(bytes)
 }
 
-fn serve(
-    mut archive: ArchiveEntries,
+fn serve<R: Read + Seek>(
+    mut archive: ArchiveEntries<R>,
     entries: Vec<Entry>,
     guard: Guard,
     rx: Receiver<Command>,
@@ -501,6 +518,32 @@ mod tests {
         ).unwrap();
         assert_eq!(session.entry_count, 2);
         session.close();
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn document_slice_is_a_zip_without_copying_its_surroundings() {
+        use crate::android_uri_bridge::RestrictedReader;
+        use std::io::SeekFrom;
+
+        let (_source, path, data) = fixture(zip::CompressionMethod::Deflated);
+        let zip = std::fs::read(&path).unwrap();
+        let mut backing = tempfile::tempfile().unwrap();
+        backing.write_all(b"prefix").unwrap();
+        backing.write_all(&zip).unwrap();
+        backing.write_all(b"suffix").unwrap();
+        let mut reader = RestrictedReader::from_file(backing, 6, zip.len() as i64)
+            .unwrap().into_seekable().unwrap();
+        reader.seek(SeekFrom::End(-1)).unwrap();
+        let mut tail = Vec::new();
+        reader.read_to_end(&mut tail).unwrap();
+        assert_eq!(tail, zip[zip.len() - 1..]);
+        assert!(reader.seek(SeekFrom::Start(0)).is_ok());
+        assert!(reader.seek(SeekFrom::Current(-1)).is_err());
+
+        let session = NativeZipSession::from_verified_reader(reader, || Ok(())).unwrap();
+        assert_eq!(session.entry_count, 2);
+        assert_eq!(session.read_chunk(0, 0).unwrap(), data[..CHUNK_BYTES]);
         std::fs::remove_file(path).unwrap();
     }
 

@@ -24,8 +24,10 @@ export interface RuntimeCapabilities {
   supportsCloudSync: boolean;
   /** "Show in File Explorer" for a book's file: native Windows only. */
   supportsRevealSource: boolean;
-  /** A34 book library folder (copy on import, location): native Windows only. */
+  /** A34 book library folder (open it, choose its location): native Windows only. */
   supportsLibraryFolder: boolean;
+  /** 复制到书库 on import: native Windows (path links) and Android (document links). */
+  supportsImportCopyChoice: boolean;
   /** ER-0042 automatic import folder: native Windows and Android. */
   supportsFolderWatch: boolean;
   /** ER-0044 password-gated private shelf: native Windows and Android. */
@@ -51,6 +53,7 @@ export function getRuntimeCapabilities(): RuntimeCapabilities {
     supportsCloudSync: session?.source === "desktop" && (platform === "windows" || platform === "android"),
     supportsRevealSource: session?.source === "desktop" && platform === "windows",
     supportsLibraryFolder: session?.source === "desktop" && platform === "windows",
+    supportsImportCopyChoice: session?.source === "desktop" && (platform === "windows" || platform === "android"),
     supportsFolderWatch: session?.source === "desktop" && (platform === "windows" || platform === "android"),
     supportsPrivateShelf: session?.source === "desktop" && (platform === "windows" || platform === "android"),
   };

@@ -218,6 +218,27 @@ impl RestrictedReader {
         self.display_name.as_deref()
     }
 
+    /// Open a random-access view for an original document. Copy imports keep
+    /// accepting stream-only providers through `copy_limited_to`.
+    pub(crate) fn into_seekable(mut self) -> Result<SeekableDocument, RestrictedReadError> {
+        if self.prepared || self.finished {
+            return Err(RestrictedReadError::InvalidInput("document descriptor already consumed"));
+        }
+        let metadata = self.file.metadata().map_err(RestrictedReadError::Io)?;
+        if !metadata.is_file() {
+            return Err(RestrictedReadError::InvalidInput("provider does not expose a regular file"));
+        }
+        let available = metadata.len().checked_sub(self.start_offset).ok_or(
+            RestrictedReadError::InvalidInput("document offset exceeds file size"),
+        )?;
+        let length = self.declared_length.unwrap_or(available);
+        if length > available {
+            return Err(RestrictedReadError::InvalidInput("document range exceeds file size"));
+        }
+        self.file.seek(SeekFrom::Start(self.start_offset)).map_err(RestrictedReadError::Io)?;
+        Ok(SeekableDocument { file: self.file, base: self.start_offset, length, position: 0 })
+    }
+
     /// Copies exactly the declared range (or the remainder of the provider
     /// stream when `declaredLength == -1`) into `output`.
     ///
@@ -270,6 +291,76 @@ impl RestrictedReader {
 
         self.prepared = true;
         Ok(())
+    }
+}
+
+/// ZIP reads use document-relative offsets, even if the provider exports a
+/// slice of a larger file. This reader exclusively owns the detached handle.
+pub(crate) struct SeekableDocument {
+    file: File,
+    base: u64,
+    length: u64,
+    position: u64,
+}
+
+#[cfg(target_os = "android")]
+impl SeekableDocument {
+    pub(crate) fn len(&self) -> u64 { self.length }
+
+    pub(crate) fn revision(&self) -> io::Result<DocumentRevision> {
+        document_revision(&self.file)
+    }
+
+    pub(crate) fn metadata_handle(&self) -> io::Result<File> {
+        self.file.try_clone()
+    }
+}
+
+#[cfg(any(target_os = "android", test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct DocumentRevision {
+    pub(crate) file: (u64, u64, u64),
+    pub(crate) modified: (i64, i64),
+    pub(crate) changed: (i64, i64),
+}
+
+#[cfg(target_os = "android")]
+pub(crate) fn document_revision(file: &File) -> io::Result<DocumentRevision> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = file.metadata()?;
+    Ok(DocumentRevision {
+        file: (metadata.dev(), metadata.ino(), metadata.len()),
+        modified: (metadata.mtime(), metadata.mtime_nsec()),
+        changed: (metadata.ctime(), metadata.ctime_nsec()),
+    })
+}
+
+impl Read for SeekableDocument {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        let limit = self.length.saturating_sub(self.position).min(buffer.len() as u64) as usize;
+        if limit == 0 {
+            return Ok(0);
+        }
+        let count = self.file.read(&mut buffer[..limit])?;
+        if count == 0 {
+            return Err(io::ErrorKind::UnexpectedEof.into());
+        }
+        self.position += count as u64;
+        Ok(count)
+    }
+}
+
+impl Seek for SeekableDocument {
+    fn seek(&mut self, from: SeekFrom) -> io::Result<u64> {
+        let position = match from {
+            SeekFrom::Start(value) => Some(value),
+            SeekFrom::Current(delta) => self.position.checked_add_signed(delta),
+            SeekFrom::End(delta) => self.length.checked_add_signed(delta),
+        }.ok_or(io::ErrorKind::InvalidInput)?;
+        let physical = self.base.checked_add(position).ok_or(io::ErrorKind::InvalidInput)?;
+        self.file.seek(SeekFrom::Start(physical))?;
+        self.position = position;
+        Ok(position)
     }
 }
 
@@ -494,6 +585,72 @@ mod android {
         restricted_reader_from_response(response)
     }
 
+    /// Owned by the serialized import job. Dropping a failed preparation
+    /// only releases a grant that this job introduced. Existing grants may
+    /// be referenced by another book or shelf.
+    pub(crate) struct PendingDocumentGrant<R: Runtime> {
+        app: AppHandle<R>,
+        uri: String,
+        rollback: bool,
+    }
+
+    impl<R: Runtime> PendingDocumentGrant<R> {
+        pub(crate) fn retain(app: &AppHandle<R>, uri: &str) -> Result<Self, RestrictedReadError> {
+            if !uri.starts_with("content://") {
+                return Err(RestrictedReadError::InvalidInput("only content:// URIs are accepted"));
+            }
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct Reply {
+                newly_retained: bool,
+            }
+            let bridge = app.state::<AndroidUriBridge<R>>();
+            let reply = bridge.0.run_mobile_plugin::<Reply>("retainDocumentRead", OpenReadOnlyRequest { uri })
+                .map_err(|error| RestrictedReadError::AndroidBridge(error.to_string()))?;
+            Ok(Self { app: app.clone(), uri: uri.to_owned(), rollback: reply.newly_retained })
+        }
+
+        pub(crate) fn open(&self) -> Result<SeekableDocument, RestrictedReadError> {
+            open_persisted_document(&self.app, &self.uri)
+        }
+
+        pub(crate) fn commit(mut self) {
+            self.rollback = false;
+        }
+    }
+
+    impl<R: Runtime> Drop for PendingDocumentGrant<R> {
+        fn drop(&mut self) {
+            if self.rollback {
+                let bridge = self.app.state::<AndroidUriBridge<R>>();
+                let _ = bridge.0.run_mobile_plugin::<EmptyPluginResponse>(
+                    "releaseDocumentRead", OpenReadOnlyRequest { uri: &self.uri },
+                );
+            }
+        }
+    }
+
+    pub(crate) fn release_document_read<R: Runtime>(app: &AppHandle<R>, uri: &str) {
+        let bridge = app.state::<AndroidUriBridge<R>>();
+        let _ = bridge.0.run_mobile_plugin::<EmptyPluginResponse>(
+            "releaseDocumentRead", OpenReadOnlyRequest { uri },
+        );
+    }
+
+    pub(crate) fn open_persisted_document<R: Runtime>(
+        app: &AppHandle<R>,
+        uri: &str,
+    ) -> Result<SeekableDocument, RestrictedReadError> {
+        if !uri.starts_with("content://") {
+            return Err(RestrictedReadError::InvalidInput("only content:// URIs are accepted"));
+        }
+        let bridge = app.state::<AndroidUriBridge<R>>();
+        let response = bridge.0.run_mobile_plugin::<OpenReadOnlyResponse>(
+            "openPersistedDocumentRead", OpenReadOnlyRequest { uri },
+        ).map_err(|error| RestrictedReadError::AndroidBridge(error.to_string()))?;
+        restricted_reader_from_response(response)?.into_seekable()
+    }
+
     pub(crate) fn read_content_uri_blocking<R: Runtime>(
         app: &AppHandle<R>,
         uri: String,
@@ -573,6 +730,19 @@ mod android {
             .map_err(|error| super::command_error("cancel_failed", error.to_string()))
     }
 
+    pub(crate) fn pick_link_documents<R: Runtime>(
+        app: &AppHandle<R>,
+    ) -> Result<Vec<crate::linked_library::DocumentSelection>, String> {
+        #[derive(Deserialize)]
+        struct Reply {
+            documents: Vec<crate::linked_library::DocumentSelection>,
+        }
+        app.state::<AndroidUriBridge<R>>().0
+            .run_mobile_plugin::<Reply>("pickLinkDocuments", EmptyPluginResponse {})
+            .map(|reply| reply.documents)
+            .map_err(|error| super::command_error("pick_failed", error.to_string()))
+    }
+
     pub(crate) fn pick_directory_tree<R: Runtime>(
         app: &AppHandle<R>,
     ) -> Result<Option<String>, String> {
@@ -629,8 +799,26 @@ mod android {
 pub(crate) use android::{
     cancel_write_blocking, delete_created_document_blocking, open_content_uri, pick_directory_tree, pick_watched_directory, release_watched_directory, plugin,
     query_tree_directory, read_content_uri_blocking, write_staged_file_blocking,
+    PendingDocumentGrant, open_persisted_document, release_document_read,
     write_text_content_uri_blocking,
 };
+
+#[tauri::command]
+pub async fn android_pick_link_documents(
+    app: tauri::AppHandle,
+) -> Result<Vec<crate::linked_library::DocumentSelection>, String> {
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        Err(command_error("unsupported_platform", "document picker is only available on Android"))
+    }
+    #[cfg(target_os = "android")]
+    {
+        tauri::async_runtime::spawn_blocking(move || android::pick_link_documents(&app))
+            .await
+            .map_err(|error| command_error("pick_failed", error))?
+    }
+}
 
 #[tauri::command]
 pub async fn android_read_content_uri(

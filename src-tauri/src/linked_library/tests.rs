@@ -68,6 +68,7 @@
             content_hash: hash.into(),
             storage_kind: StorageKind::Managed,
             canonical_source_path: None,
+            document_uri: None,
             managed_file_name: None,
             file_size: snapshot.size,
             source_mtime_ns: snapshot.mtime_ns,
@@ -82,6 +83,7 @@
             content_hash: hash.into(),
             storage_kind: StorageKind::Linked,
             canonical_source_path: Some(path.to_string_lossy().into_owned()),
+            document_uri: None,
             managed_file_name: None,
             file_size: snapshot.size,
             source_mtime_ns: snapshot.mtime_ns,
@@ -189,6 +191,7 @@
             content_hash: hash.clone(),
             storage_kind: StorageKind::Managed,
             canonical_source_path: None,
+            document_uri: None,
             managed_file_name: None,
             file_size: 1,
             source_mtime_ns: 2,
@@ -967,6 +970,7 @@
             content_hash: hash.clone(),
             storage_kind: StorageKind::Managed,
             canonical_source_path: None,
+            document_uri: None,
             managed_file_name: None,
             file_size: old_snapshot.size,
             source_mtime_ns: old_snapshot.mtime_ns,
@@ -1884,3 +1888,36 @@
         );
         let _ = fs::remove_dir_all(&root);
     }
+
+#[test]
+fn android_document_binding_is_local_and_never_resolves_as_a_path() {
+    let root = tempfile::tempdir().unwrap();
+    let hash = "a".repeat(64);
+    let uri = "content://com.example.documents/document/123";
+    let raw = serde_json::json!({
+        "contentHash": hash, "storageKind": "android-document", "documentUri": uri,
+        "fileSize": 9, "sourceMtimeNs": 0, "coverZipPath": null, "coverMime": "",
+        "lastVerifiedAtMs": 0
+    });
+    let binding: DeviceBinding = serde_json::from_value(raw.clone()).unwrap();
+    validate_binding_sources(std::slice::from_ref(&binding), root.path()).unwrap();
+    assert!(binding.resolve_source(root.path()).is_err());
+    assert_eq!(binding.clone().into_shelf_move_binding(root.path()).unwrap(), binding);
+    let bindings = crate::save_file::parse_bindings(
+        [(hash.clone(), serde_json::to_string(&binding).unwrap())].into(),
+    ).unwrap();
+    assert!(bindings[&hash].book_source(root.path()).unwrap().path().is_none());
+
+    let mut invalid = raw.clone();
+    invalid["canonicalSourcePath"] = serde_json::json!("/fake.epub");
+    let invalid_binding = serde_json::from_value(invalid.clone()).unwrap();
+    assert!(validate_binding_sources(&[invalid_binding], root.path()).is_err());
+    assert!(crate::save_file::parse_bindings([(hash.clone(), invalid.to_string())].into()).is_err());
+
+    let mut store = crate::portable_state::PortableStore::open_in_memory().unwrap();
+    store.publish_linked_imports(
+        vec![serde_json::to_value(bk2_record(&hash, 77)).unwrap()],
+        vec![(hash.clone(), raw.to_string())], vec![hash], Vec::new(),
+    ).unwrap();
+    assert!(!serde_json::to_string(&store.snapshot().unwrap()).unwrap().contains(uri));
+}

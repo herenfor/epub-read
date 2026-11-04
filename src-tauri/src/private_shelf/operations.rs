@@ -20,7 +20,7 @@ use std::{
     sync::atomic::Ordering,
     time::Instant,
 };
-use tauri::WebviewWindow;
+use tauri::{Manager, WebviewWindow};
 
 pub(super) struct Session {
     pub(super) id: String,
@@ -216,7 +216,6 @@ fn import_book(
         ImportSource::Document { uri } => {
             #[cfg(target_os = "android")]
             {
-                use tauri::Manager;
                 let mut reader =
                     crate::android_uri_bridge::open_content_uri(window.app_handle(), &uri)
                         .map_err(ShelfError::storage)?;
@@ -260,6 +259,13 @@ fn import_book(
     }
     if !current() {
         return Err(locked());
+    }
+    #[cfg(target_os = "android")]
+    if let Some(raw) = store.binding_raw(&hash).map_err(ShelfError::storage)? {
+        let binding: DeviceBinding = serde_json::from_str(&raw).map_err(ShelfError::storage)?;
+        if binding.document_uri().is_some() {
+            return Ok(json!({ "bookHash": hash, "duplicate": true }));
+        }
     }
     #[cfg(target_os = "android")]
     let path = {
@@ -321,6 +327,7 @@ fn open_archive(
     hash: &str,
     encoding: Option<&str>,
     current: &dyn Fn() -> bool,
+    app: Option<&tauri::AppHandle>,
 ) -> Result<Value, ShelfError> {
     let raw = session
         .store
@@ -328,6 +335,25 @@ fn open_archive(
         .map_err(ShelfError::storage)?
         .ok_or_else(|| ShelfError::new("missing-source", "隐私书架没有此书的本机来源"))?;
     let binding: DeviceBinding = serde_json::from_str(&raw).map_err(ShelfError::storage)?;
+    #[cfg(target_os = "android")]
+    if let (Some(app), Some(uri)) = (app, binding.document_uri()) {
+        let (read_id, book) = session.store.read(hash).map_err(ShelfError::storage)?;
+        session.store.release(ReleaseTarget::ReadId(read_id)).map_err(ShelfError::storage)?;
+        let book = book.ok_or_else(|| ShelfError::new("missing-source", "隐私书架中没有这本书"))?;
+        let (archive, verify_ms, directory_ms) = linked_library::document_source::document_archive(
+            app, uri, hash, &book.metadata.value.file_name, &book.metadata.value.title, encoding,
+        ).map_err(|error| ShelfError::new(error.code, error.message))?;
+        if !current() { return Err(locked()); }
+        let id = new_id()?;
+        let entry_count = archive.entry_count;
+        session.archives.insert(id.clone(), archive);
+        return Ok(json!({
+            "protocolVersion": 1, "sessionId": id, "entryCount": entry_count, "chunkBytes": CHUNK_BYTES,
+            "verifyMs": verify_ms, "directoryMs": directory_ms
+        }));
+    }
+    #[cfg(not(target_os = "android"))]
+    let _ = app;
     let source = binding
         .linked_path()
         .ok_or_else(|| ShelfError::new("missing-source", "隐私书籍没有有效来源"))?;
@@ -399,6 +425,19 @@ pub async fn private_shelf_library(
                 import_book(store, source, root, &invoking_window, &current)
             }
             LibraryOperation::Delete { book_hash } => {
+                #[cfg(target_os = "android")]
+                if let Some(raw) = store.binding_raw(&book_hash).map_err(ShelfError::storage)? {
+                    let binding: DeviceBinding = serde_json::from_str(&raw).map_err(ShelfError::storage)?;
+                    if let Some(uri) = binding.document_uri() {
+                        let app = invoking_window.app_handle();
+                        return linked_library::with_document_binding_lock(app, || {
+                            let bindings = linked_library::load_bindings(app).map_err(ShelfError::storage)?;
+                            let result = repository(store.hide_linked_record(&book_hash))?;
+                            linked_library::document_source::release_unreferenced_documents(app, &bindings, [uri.to_owned()]);
+                            Ok(result)
+                        }).map_err(ShelfError::storage)?;
+                    }
+                }
                 repository(store.hide_linked_record(&book_hash))
             }
             LibraryOperation::Organize { command } => {
@@ -466,7 +505,7 @@ pub async fn private_shelf_library(
             LibraryOperation::ArchiveOpen {
                 book_hash,
                 text_encoding,
-            } => open_archive(session, &book_hash, text_encoding.as_deref(), &current),
+            } => open_archive(session, &book_hash, text_encoding.as_deref(), &current, Some(invoking_window.app_handle())),
             LibraryOperation::ArchiveDirectory { archive_id, start } => encode(
                 session
                     .archive(&archive_id)?
@@ -525,6 +564,8 @@ pub async fn private_shelf_cover(
     let epoch = super::main_state(&window)?
         .lock_epoch
         .load(Ordering::Acquire);
+    #[cfg(target_os = "android")]
+    let app = window.app_handle().clone();
     run(window, move |shelf, _, state| {
         let current = || state.lock_epoch.load(Ordering::Acquire) == epoch;
         let session = shelf
@@ -538,7 +579,14 @@ pub async fn private_shelf_cover(
             .map_err(ShelfError::storage)?
             .ok_or_else(|| ShelfError::new("missing-source", "隐私书架没有此书的本机来源"))?;
         let binding: DeviceBinding = serde_json::from_str(&raw).map_err(ShelfError::storage)?;
-        let bytes = binding.read_linked_cover().map_err(ShelfError::storage)?;
+        let read = || {
+            #[cfg(target_os = "android")]
+            if binding.document_uri().is_some() {
+                return linked_library::document_source::document_cover(&app, &binding);
+            }
+            binding.read_linked_cover()
+        };
+        let bytes = read().map_err(ShelfError::storage)?;
         if !current() {
             return Err(locked());
         }
@@ -561,7 +609,6 @@ pub async fn private_shelf_move(
     book_hash: String,
     direction: MoveDirection,
 ) -> Result<(), ShelfError> {
-    use tauri::Manager;
 
     if !linked_library::valid_content_hash(&book_hash) {
         return Err(ShelfError::new("invalid-book", "无效的书籍内容指纹"));
@@ -834,7 +881,7 @@ mod tests {
             .is_some());
         assert!(normal.project_shelf().unwrap().books.is_empty());
 
-        let opened = open_archive(&mut private, &hash, Some("utf-8"), &|| true).unwrap();
+        let opened = open_archive(&mut private, &hash, Some("utf-8"), &|| true, None).unwrap();
         let session_id = opened["sessionId"].as_str().unwrap();
         let archive = private.archive(session_id).unwrap();
         let page = archive.directory_page(0).unwrap();

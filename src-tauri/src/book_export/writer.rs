@@ -5,7 +5,8 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::fs::File;
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use crate::linked_library::document_source::BookSource;
+use tauri::AppHandle;
 use std::sync::atomic::{AtomicBool, Ordering};
 use zip::{write::SimpleFileOptions, CompressionMethod, ZipWriter};
 
@@ -13,7 +14,7 @@ pub(super) struct SourceBook {
     pub hash: String,
     pub title: String,
     pub file_name: String,
-    pub path: PathBuf,
+    pub source: BookSource,
     pub bytes: u64,
 }
 
@@ -81,7 +82,7 @@ pub(super) fn safe_epub_name(
 }
 
 fn copy_verified(
-    source: &mut File,
+    source: &mut dyn Read,
     destination: &mut impl Write,
     book: &SourceBook,
     cancelled: &AtomicBool,
@@ -123,6 +124,7 @@ fn copy_verified(
 }
 
 pub(super) fn write_output(
+    app: Option<&AppHandle>,
     file: File,
     plans: &[SourceBook],
     zip: bool,
@@ -146,8 +148,8 @@ pub(super) fn write_output(
             return Err(SaveFileError::cancelled());
         }
         // Open only one source at a time, including thousand-book batches.
-        let mut source = match File::open(&book.path) {
-            Ok(source) => source,
+        let mut source = match book.source.open(app) {
+            Ok((source, _)) => source,
             Err(error) => {
                 output.skipped.push(SkippedBook {
                     content_hash: book.hash.clone(),
@@ -172,9 +174,9 @@ pub(super) fn write_output(
             )?;
             // Once an entry has started, failure aborts the WHOLE unpublished
             // output: no corrupt partial entry is presented as a good ZIP.
-            copy_verified(&mut source, archive, book, cancelled, &mut progress)?
+            copy_verified(source.as_mut(), archive, book, cancelled, &mut progress)?
         } else {
-            copy_verified(&mut source, &mut raw, book, cancelled, &mut progress)?
+            copy_verified(source.as_mut(), &mut raw, book, cancelled, &mut progress)?
         };
         output.book_bytes += count;
         output.books.push(ExportedBook {
@@ -197,6 +199,8 @@ pub(super) fn write_output(
 mod tests {
     use super::*;
     use std::io::Read;
+    use std::path::PathBuf;
+
     struct Temp(PathBuf);
     impl Temp {
         fn new() -> Self {
@@ -213,7 +217,7 @@ mod tests {
             std::fs::write(&path, bytes).unwrap();
             SourceBook {
                 hash,
-                path,
+                source: BookSource::Path(path),
                 title: "synthetic".into(),
                 file_name: name.into(),
                 bytes: bytes.len() as u64,
@@ -233,6 +237,7 @@ mod tests {
         let b = temp.book("book.epub", b"original byte stream B");
         let raw = temp.0.join("raw.epub");
         let written = write_output(
+            None,
             File::create(&raw).unwrap(),
             &[a],
             false,
@@ -245,6 +250,7 @@ mod tests {
         let a = temp.book("BOOK.epub", b"original byte stream A");
         let output = temp.0.join("many.zip");
         let written = write_output(
+            None,
             File::create(&output).unwrap(),
             &[a, b],
             true,
@@ -299,8 +305,9 @@ mod tests {
     fn missing_sources_are_skipped_but_changed_or_cancelled_stream_aborts() {
         let temp = Temp::new();
         let a = temp.book("a.epub", b"original");
-        std::fs::remove_file(&a.path).unwrap();
+        std::fs::remove_file(a.source.path().unwrap()).unwrap();
         let written = write_output(
+            None,
             File::create(temp.0.join("empty.zip")).unwrap(),
             &[a],
             true,
@@ -314,6 +321,7 @@ mod tests {
         a.hash = "a".repeat(64);
         assert_eq!(
             write_output(
+            None,
                 File::create(temp.0.join("bad.zip")).unwrap(),
                 &[a],
                 true,
@@ -328,6 +336,7 @@ mod tests {
         let a = temp.book("a.epub", b"original");
         let cancelled = AtomicBool::new(false);
         let error = write_output(
+            None,
             File::create(temp.0.join("cancel.zip")).unwrap(),
             &[a],
             true,

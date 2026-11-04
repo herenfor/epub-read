@@ -21,6 +21,7 @@ export const shelfSettings = defineMessages("shelfSettings", {
   "shelfSettings.library.unknown": { zh: "位置读取失败", note: "Library folder row when its path could not be read." },
   "shelfSettings.library.copy": { zh: "导入时复制到书库", note: "Storage settings switch (Windows); same choice as the import menu checkbox.", max: 24 },
   "shelfSettings.library.copy.detail": { zh: "关闭后只记住原文件的位置，原文件移走后需要重新定位", note: "Detail under the copy-on-import switch." },
+  "shelfSettings.library.copy.detail.files": { zh: "关闭后，「导入书」选的文件留在原位置读取，原文件需保留在原处；导入文件夹、自动导入和隐私书架仍会复制", note: "Android detail under the copy-on-import switch: only the shelf's own file picker keeps originals." },
   "shelfSettings.watch": { zh: "自动导入文件夹", note: "Storage settings row (Windows, Android): a folder whose new books join the shelf by themselves; tapping picks or changes it.", max: 20 },
   "shelfSettings.watch.off": "未开启 · 放进这个文件夹的书会自动加入书架",
   "shelfSettings.watch.inbox": { zh: "使用书库 Inbox", note: "Windows only: watch the Inbox folder inside the library folder.", max: 20 },

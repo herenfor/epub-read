@@ -60,10 +60,27 @@ function normalizeImportError(error: unknown): AndroidNativeImportError {
   return { code: "internal_error", message, requiresReload: false };
 }
 
+export interface AndroidImportOptions {
+  /** Bind the picked documents where they are instead of copying them into the library. */
+  keepOriginal?: boolean;
+  /** Reconnect one original book; the picked document must have exactly this SHA-256. */
+  relinkHash?: string;
+}
+
+/**
+ * ACTION_OPEN_DOCUMENT multi-select for imports that keep the original. Only
+ * candidates: the import job takes and owns the persistent permission. Empty = cancelled.
+ */
+export async function pickLinkDocuments(): Promise<AndroidDocumentSelection[]> {
+  const picked = await invoke<Array<{ uri: string; fileName: string | null }>>("android_pick_link_documents");
+  return picked.map(({ uri, fileName }) => fileName ? { uri, fileName } : { uri });
+}
+
 export async function importDocuments(
   requestId: string,
   documents: AndroidDocumentSelection[],
   onProgress: (progress: AndroidImportProgress) => void,
+  options: AndroidImportOptions = {},
 ): Promise<AndroidImportBatchResult> {
   const channel = new Channel<AndroidImportProgress>(onProgress);
   try {
@@ -71,6 +88,7 @@ export async function importDocuments(
       requestId,
       documents,
       onProgress: channel,
+      ...options,
     });
   } catch (error) {
     throw normalizeImportError(error);
