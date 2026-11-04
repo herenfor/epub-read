@@ -40,6 +40,22 @@ describe("application update policy", () => {
     expect(pickUpdateAsset(noDigest, "installer")).not.toBeNull(); // Windows verifies the updater signature.
   });
 
+  it("accepts renamed release URLs without mixing repositories", () => {
+    const rename = (url: string) => url.replace("/herenfor/epub-read/", "/herenfor/selis/");
+    const renamed = {
+      ...fixture,
+      html_url: rename(fixture.html_url),
+      assets: fixture.assets.map(asset => ({ ...asset, browser_download_url: rename(asset.browser_download_url) })),
+    };
+    const release = parseLatestRelease(renamed)!;
+    expect(release.htmlUrl).toBe(renamed.html_url);
+    for (const kind of ["installer", "portable", "android"] as const) {
+      expect(pickUpdateAsset(release, kind)?.url).toContain("/herenfor/selis/releases/download/");
+    }
+    expect(parseLatestRelease({ ...renamed, assets: [...renamed.assets, fixture.assets[0]] })).toBeNull();
+    expect(pickUpdateAsset({ ...release, assets: parseLatestRelease(fixture)!.assets }, "android")).toBeNull();
+  });
+
   it("rejects draft, prerelease, malformed metadata and foreign download origins", () => {
     for (const input of [null, {}, { ...fixture, draft: true }, { ...fixture, prerelease: true },
       { ...fixture, tag_name: "v0.3.2-beta.1" }, { ...fixture, published_at: "invalid" },
