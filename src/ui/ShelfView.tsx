@@ -5865,7 +5865,7 @@ export function ShelfView(props: ShelfViewProps) {
                 : deleteTargets[0].title}
             </div>
             <div className="shelf-confirm-hint">
-              {t("shelfMain.delete.hint")}
+              {t(deleteTargets.every((target) => target.originalLocation) ? "shelfMain.delete.hintOriginal" : "shelfMain.delete.hint")}
             </div>
             <div className="shelf-confirm-actions">
               <button className="shelf-selection-cancel" type="button" onClick={handleCancelDelete}>
