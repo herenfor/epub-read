@@ -57,7 +57,7 @@ export const RELEASE_NOTES: readonly ReleaseNote[] = [
       },
       {
         category: "new",
-        text: "SeLis 显示名：应用在系统中的名称改为 SeLis，安装身份、签名、数据目录与更新地址保持不变。",
+        text: "SeLis 品牌：应用名称、窗口标题、关于页与中英文 README 统一为 SeLis；原创代码采用 GPL-3.0-only，安装身份、数据目录与更新地址保持不变。",
       },
       {
         category: "improved",
