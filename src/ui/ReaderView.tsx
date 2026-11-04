@@ -3349,14 +3349,10 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
         pauseBackgroundWarmupForInput();
         const p = paginatorRef.current;
         if (!p) return false;
-        const pageCount = p.pageCount;
-        if (pageCount <= 1) {
-          this.setPage(0);
-          return true;
-        }
-        const targetPage = Math.min(pageCount - 1, Math.max(0, Math.round(target.fraction * (pageCount - 1))));
+        const lastPage = Math.max(0, p.pageCount - 1);
+        const targetPage = Math.min(lastPage, Math.max(0, Math.round(target.fraction * lastPage)));
         this.setPage(targetPage);
-        return true;
+        return p.currentPage === targetPage;
       },
       diagnose() {
         return paginatorRef.current?.diagnose() ?? uiText("log.diagnostics.unavailable");
