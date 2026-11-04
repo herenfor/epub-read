@@ -26,7 +26,7 @@ use crate::linked_library::{
 #[cfg(not(target_os = "android"))]
 use crate::linked_library::{library_file_name, publish_staged_copy};
 #[cfg(target_os = "android")]
-use crate::linked_library::{managed_source_path, replace_file_atomically};
+use crate::linked_library::publish_android_managed_copy;
 use crate::linked_library::{new_staging_path, stream_restricted_reader_to_staging, PrepareError};
 use crate::portable_state::{
     DirectoryBindingWrite, DirectoryFolderCreate, DirectoryImportBatchOutcome,
@@ -307,6 +307,7 @@ impl RunnerState {
         &self,
         item: &mut PreparedSuccess,
         known_bindings: &[DeviceBinding],
+        _private_copies: &[DeviceBinding],
     ) -> Result<(LinkedLibraryRecord, DeviceBinding), String> {
         match &mut item.payload {
             PreparedPayload::Linked { path, snapshot } => {
@@ -336,19 +337,18 @@ impl RunnerState {
                 };
                 #[cfg(target_os = "android")]
                 let binding = {
-                    let _ = known_bindings;
-                    let target = managed_source_path(&self.root, &item.content_hash)?;
-                    replace_file_atomically(&staging_path, &target)
-                        .map_err(|error| format!("无法发布托管副本：{error}"))?;
+                    let (target, name, file_snapshot) = publish_android_managed_copy(
+                        &self.root, &staging_path, &item.content_hash, known_bindings, _private_copies,
+                    )?;
                     staging.published();
                     crate::linked_library::remember_imported_archive(
                         &self.root, &target, &item.content_hash, &item.file_name,
                     );
-                    make_managed_binding(
-                        item.content_hash.clone(),
-                        snapshot(&target)?,
-                        &item.metadata,
-                    )
+                    let binding = make_managed_binding(item.content_hash.clone(), file_snapshot, &item.metadata);
+                    match name {
+                        Some(name) => binding.with_managed_file_name(name),
+                        None => binding,
+                    }
                 };
                 let record = make_managed_record(
                     item.content_hash.clone(),
@@ -382,14 +382,16 @@ impl RunnerState {
         if pending.is_empty() {
             return Ok(());
         }
-        let mut known_bindings = if pending
+        let (mut known_bindings, private_copies) = if pending
             .iter()
             .any(|item| matches!(item.payload, PreparedPayload::Managed { .. }))
         {
-            load_bindings(&self.app)?
+            (load_bindings(&self.app)?, crate::private_shelf::managed_library_copies(&self.root)?)
         } else {
-            Vec::new()
+            (Vec::new(), Vec::new())
         };
+        #[cfg(not(target_os = "android"))]
+        known_bindings.extend(private_copies.iter().cloned());
         let batch = std::mem::take(pending);
         if !self.gate.begin_batch() {
             for item in batch {
@@ -424,7 +426,7 @@ impl RunnerState {
                 if existing_available {
                     Ok(None)
                 } else {
-                    self.publish(&mut item, &known_bindings).map(Some)
+                    self.publish(&mut item, &known_bindings, &private_copies).map(Some)
                 };
             self.performance.publish_micros += elapsed_micros(publish_started);
             match published {

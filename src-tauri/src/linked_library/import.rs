@@ -448,41 +448,27 @@ pub(super) fn publish_prepared_documents(
         records_changed: false,
     };
 
+    let reservations = crate::private_shelf::managed_library_copies(root)
+        .map_err(NativeImportError::storage_error)?;
     for document in unique_documents {
-        let target = match managed_source_path(root, &document.content_hash) {
-            Ok(target) => target,
+        let (_target, name, final_snapshot) = match publish_android_managed_copy(
+            root, &document.staging_path, &document.content_hash, bindings, &reservations,
+        ) {
+            Ok(published) => published,
             Err(message) => {
-                return Err(NativeImportError::internal_error(
-                    format!("无法为导入书籍推导正式路径：{message}"),
-                    true,
-                ))
-            }
-        };
-        if let Err(error) = replace_file_atomically(&document.staging_path, &target) {
-            outcome.failures.insert(
-                document.content_hash.clone(),
-                format!("无法发布正式副本：{error}"),
-            );
-            continue;
-        }
-        let final_snapshot = match snapshot(&target) {
-            Ok(snapshot) => snapshot,
-            Err(message) => {
-                return Err(NativeImportError::commit_failed(format!(
-                    "正式副本已发布但无法读取属性：{message}；可能已部分写入，请刷新后重试"
-                )))
+                outcome.failures.insert(document.content_hash.clone(), message);
+                continue;
             }
         };
         #[cfg(target_os = "android")]
-        remember_imported_archive(root, &target, &document.content_hash, &document.file_name);
-        upsert_binding(
-            bindings,
-            make_managed_binding(
+        remember_imported_archive(root, &_target, &document.content_hash, &document.file_name);
+        let mut binding = make_managed_binding(
                 document.content_hash.clone(),
                 final_snapshot,
                 &document.metadata,
-            ),
         );
+        binding.managed_file_name = name;
+        upsert_binding(bindings, binding);
         outcome.bindings_changed = true;
 
         if preexisting_hashes.contains(&document.content_hash) {

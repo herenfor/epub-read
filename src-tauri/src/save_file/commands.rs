@@ -871,11 +871,17 @@ fn cleanup_published_targets(targets: &[PathBuf]) -> Result<(), SaveFileError> {
 fn publish_attachment_binding(
     attachment: &super::PreparedAttachment,
     root: &Path,
+    reservations: &[crate::linked_library::DeviceBinding],
 ) -> Result<(String, Option<PathBuf>), SaveFileError> {
     let cover = crate::linked_library::inspect_epub(&attachment.staging_path)
         .map_err(SaveFileError::invalid_data)?;
     crate::linked_library::writable_books_directory(root).map_err(SaveFileError::storage_error)?;
-    let target = managed_book_path(root, &attachment.content_hash)?;
+    let name = crate::linked_library::managed_publish_name(root, &attachment.content_hash, reservations)
+        .map_err(SaveFileError::storage_error)?;
+    let target = match name.as_deref() {
+        Some(name) => crate::linked_library::managed_named_path(root, name).map_err(SaveFileError::storage_error)?,
+        None => managed_book_path(root, &attachment.content_hash)?,
+    };
     if let Some(parent) = target.parent() { fs::create_dir_all(parent)?; }
     let created = publish_attachment(attachment, &target)?;
     let result = (|| {
@@ -883,6 +889,7 @@ fn publish_attachment_binding(
         let mut binding = LocalBinding::new_managed(
             &attachment.content_hash, metadata.len(), metadata_mtime_ns(&metadata),
         );
+        binding.managed_file_name = name;
         binding.cover_zip_path = cover.cover_zip_path;
         binding.cover_mime = cover.cover_mime;
         serde_json::to_string(&binding)
@@ -942,6 +949,11 @@ pub(crate) fn run_commit<R: Runtime>(
         .map_err(SaveFileError::from)?
         .ok_or_else(|| SaveFileError::storage_error("可移植资料仓储尚未激活"))?;
     let local_bindings = parse_bindings(raw_bindings)?;
+    let reservations = if prepared.attachments.is_empty() {
+        Vec::new()
+    } else {
+        crate::private_shelf::managed_library_copies(&root).map_err(SaveFileError::storage_error)?
+    };
 
     let mut published_targets: Vec<PathBuf> = Vec::new();
     let result: Result<SaveFileCommitResult, SaveFileError> = (|| {
@@ -963,7 +975,7 @@ pub(crate) fn run_commit<R: Runtime>(
                 continue;
             }
             if task.cancelled.load(Ordering::Acquire) { return Err(SaveFileError::cancelled()); }
-            match publish_attachment_binding(attachment, &root) {
+            match publish_attachment_binding(attachment, &root, &reservations) {
                 Ok((raw, created)) => {
                     if let Some(target) = created { published_targets.push(target); }
                     binding_rows.push((attachment.content_hash.clone(), raw));
@@ -1217,7 +1229,7 @@ mod tests {
         let source = dir.join("incoming.epub");
         fs::write(&source, b"not an EPUB").unwrap();
         let mut attachment = super::super::PreparedAttachment { content_hash:super::super::hex_digest(b"not an EPUB"), staging_path:source.clone(), bytes:11, sha256:String::new() };
-        assert!(publish_attachment_binding(&attachment, &dir).is_err());
+        assert!(publish_attachment_binding(&attachment, &dir, &[]).is_err());
         assert!(!managed_book_path(&dir, &attachment.content_hash).unwrap().exists());
         let mut zip = zip::ZipWriter::new(fs::File::create(&source).unwrap());
         for (name, text) in [
@@ -1227,7 +1239,7 @@ mod tests {
         ] { zip.start_file(name, zip::write::SimpleFileOptions::default()).unwrap(); zip.write_all(text.as_bytes()).unwrap(); }
         zip.finish().unwrap();
         attachment.content_hash = super::super::hex_digest(&fs::read(&source).unwrap());
-        let (raw, created) = publish_attachment_binding(&attachment, &dir).unwrap();
+        let (raw, created) = publish_attachment_binding(&attachment, &dir, &[]).unwrap();
         assert!(created.unwrap().exists());
         assert_eq!(serde_json::from_str::<LocalBinding>(&raw).unwrap().content_hash, attachment.content_hash);
         fs::remove_dir_all(dir).unwrap();

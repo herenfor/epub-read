@@ -93,6 +93,94 @@
         }
     }
 
+    #[test]
+    fn shelf_move_keeps_copy_ownership_and_external_files() {
+        use crate::portable_state::PortableStore;
+        use crate::private_shelf::operations::move_android_private_copy;
+        let sandbox = tempfile::tempdir().unwrap();
+        let root = sandbox.path().join("linked-library");
+        fs::create_dir_all(root.join("books")).unwrap();
+        let normal_path = root.join("library.sqlite3");
+        let mut normal = PortableStore::open(&normal_path).unwrap();
+        let mut private = PortableStore::open(&sandbox.path().join("private.sqlite3")).unwrap();
+        for kind in ["managed", "linked", "private-copy"] {
+            let hash = hash_bytes(kind.as_bytes());
+            let source = match kind {
+                "managed" => root.join("books/kept-name.epub"),
+                "linked" => sandbox.path().join("original.epub"),
+                _ => private_copy_path(&root, &hash).unwrap(),
+            };
+            fs::create_dir_all(source.parent().unwrap()).unwrap();
+            fs::write(&source, kind).unwrap();
+            let stamp = snapshot(&source).unwrap();
+            let binding = if kind == "managed" {
+                sample_managed_binding(&hash, stamp).with_managed_file_name("kept-name.epub".into())
+            } else {
+                sample_linked_binding(&hash, &source, stamp)
+            };
+            let raw = serde_json::to_string(&binding.clone().into_shelf_move_binding(&root).unwrap()).unwrap();
+            let record = bk2_record(&hash, 23);
+            normal.publish_linked_imports(
+                vec![serde_json::to_value(&record).unwrap()],
+                vec![(hash.clone(), raw.clone())],
+                vec![hash.clone()],
+                vec![],
+            ).unwrap();
+            normal.move_local_book(&mut private, &hash, &raw, || true).unwrap();
+            if kind == "private-copy" {
+                assert!(move_android_private_copy(&mut private, &mut normal, binding.clone(), &root, || false).is_err());
+                assert!(source.exists());
+                assert!(!managed_source_path(&root, &hash).unwrap().exists());
+                move_android_private_copy(&mut private, &mut normal, binding, &root, || true).unwrap();
+                assert!(!source.exists());
+            } else {
+                private.move_local_book(&mut normal, &hash, &raw, || true).unwrap();
+            }
+            drop(normal);
+            normal = PortableStore::open(&normal_path).unwrap();
+            let moved: DeviceBinding = serde_json::from_str(&normal.binding_raw(&hash).unwrap().unwrap()).unwrap();
+            let path = moved.local_file(&root).unwrap();
+            assert_eq!(fs::read_to_string(&path).unwrap(), kind);
+            assert_eq!(moved.is_managed_library_copy(), kind != "linked");
+            if kind == "managed" { assert_eq!(path, source); }
+            save_records_at(&root, &[record]).unwrap();
+            save_bindings_at(&root, &[moved]).unwrap();
+            delete_records_at(&root, &[hash], |_| Ok(())).unwrap();
+            assert_eq!(path.exists(), kind == "linked");
+        }
+    }
+
+    #[test]
+    fn shelf_move_reservation_keeps_same_content_imports_separate() {
+        let sandbox = tempfile::tempdir().unwrap();
+        let root = sandbox.path().join("linked-library");
+        let hash = hash_bytes(b"synthetic");
+        fs::create_dir_all(root.join("books")).unwrap();
+        let reserved_path = managed_source_path(&root, &hash).unwrap();
+        fs::write(&reserved_path, b"synthetic").unwrap();
+        let reservation = sample_managed_binding(&hash, snapshot(&reserved_path).unwrap());
+        let private = sandbox.path().join("private-shelf/metadata/library.sqlite3");
+        fs::create_dir_all(private.parent().unwrap()).unwrap();
+        let mut store = crate::portable_state::PortableStore::open(&private).unwrap();
+        store.publish_linked_imports(
+            vec![serde_json::to_value(bk2_record(&hash, 0)).unwrap()],
+            vec![(hash.clone(), serde_json::to_string(&reservation).unwrap())],
+            vec![hash.clone()], vec![],
+        ).unwrap();
+        let reservations = crate::private_shelf::managed_library_copies(&root).unwrap();
+        assert_eq!(reservations, vec![reservation]);
+        fs::remove_file(&reserved_path).unwrap();
+        assert!(managed_publish_name(&root, &hash, &reservations).unwrap().is_some());
+        fs::write(&reserved_path, b"synthetic").unwrap();
+        let staging = root.join("books/staged.part");
+        fs::write(&staging, b"synthetic").unwrap();
+        let (target, name, _) = publish_android_managed_copy(&root, &staging, &hash, &[], &reservations).unwrap();
+        assert!(name.is_some());
+        assert_ne!(target, reserved_path);
+        fs::remove_file(target).unwrap();
+        assert_eq!(fs::read(reserved_path).unwrap(), b"synthetic");
+    }
+
     fn write_test_cover_zip(path: &Path, cover: &[u8]) {
         use std::io::Write as _;
 

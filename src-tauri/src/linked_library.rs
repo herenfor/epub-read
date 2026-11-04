@@ -89,6 +89,8 @@ pub(crate) use store::{
     clear_shelf_move_cache,
     replace_file_atomically,
 };
+#[cfg(any(target_os = "android", test))]
+pub(crate) use store::private_copy_path;
 
 mod import;
 #[cfg(target_os = "android")]
@@ -114,7 +116,9 @@ pub(crate) use import::{
 
 mod library_copy;
 use library_copy::*;
-pub(crate) use library_copy::{library_file_name, ensure_library_space};
+pub(crate) use library_copy::{library_file_name, ensure_library_space, managed_publish_name};
+#[cfg(target_os = "android")]
+pub(crate) use library_copy::publish_android_managed_copy;
 #[cfg(not(target_os = "android"))]
 pub(crate) use library_copy::publish_staged_copy;
 
@@ -541,29 +545,36 @@ impl DeviceBinding {
         (self.storage_kind == StorageKind::AndroidDocument).then_some(self.document_uri.as_deref()).flatten()
     }
 
-    pub(crate) fn linked_path(&self) -> Option<&std::path::Path> {
-        let path = std::path::Path::new(self.canonical_source_path.as_deref()?);
-        (self.storage_kind == StorageKind::Linked && path.is_absolute()).then_some(path)
+    pub(crate) fn local_file(&self, library_root: &Path) -> Result<PathBuf, String> {
+        self.resolve_source(library_root).map(|source| source.path().to_owned())
     }
 
+    pub(crate) fn is_managed_library_copy(&self) -> bool {
+        self.storage_kind == StorageKind::Managed
+    }
 
-    pub(crate) fn into_shelf_move_binding(mut self, library_root: &Path) -> Result<Self, String> {
+    #[cfg(any(target_os = "android", test))]
+    pub(crate) fn into_managed_library_copy(mut self, name: Option<String>) -> Self {
+        self.storage_kind = StorageKind::Managed;
+        self.canonical_source_path = None;
+        self.managed_file_name = name;
+        self
+    }
+
+    pub(crate) fn into_shelf_move_binding(self, library_root: &Path) -> Result<Self, String> {
         if self.document_uri().is_some() { return Ok(self); }
-        let path = self.resolve_source(library_root)?.path().to_path_buf();
+        let path = self.local_file(library_root)?;
         if !path.is_file() {
             return Err("原书暂不可用，请重新连接原书后再移动".into());
         }
-        self.storage_kind = StorageKind::Linked;
-        self.canonical_source_path = Some(path.to_string_lossy().into_owned());
-        self.managed_file_name = None;
         Ok(self)
     }
 
-    pub(crate) fn read_linked_cover(&self) -> Result<Vec<u8>, LinkedLibraryError> {
+    pub(crate) fn read_local_cover(&self, library_root: &Path) -> Result<Vec<u8>, LinkedLibraryError> {
         let Some(entry) = self.cover_zip_path.as_deref() else {
             return Ok(Vec::new());
         };
-        let path = self.linked_path().ok_or("缺少原书路径")?;
+        let path = self.local_file(library_root)?;
         let file = std::fs::File::open(path).map_err(|error| error.to_string())?;
         let snapshot = FileSnapshot {
             size: self.file_size,

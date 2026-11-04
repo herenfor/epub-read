@@ -108,6 +108,15 @@ pub(crate) fn managed_source_path(library_root: &Path, content_hash: &str) -> Re
     Ok(managed_books_directory(library_root)?.join(format!("{content_hash}.epub")))
 }
 
+#[cfg(any(target_os = "android", test))]
+pub(crate) fn private_copy_path(library_root: &Path, content_hash: &str) -> Result<PathBuf, String> {
+    if !valid_content_hash(content_hash) {
+        return Err("私密托管绑定缺少规范小写内容指纹".into());
+    }
+    let local = library_root.parent().ok_or("书库根目录无效")?;
+    Ok(local.join("private-shelf").join("sources").join(format!("{content_hash}.book")))
+}
+
 /// A library copy with a readable name (A34). The name is a single plain file
 /// name with a supported source suffix; anything that could leave `books/` is rejected.
 pub(crate) fn managed_named_path(library_root: &Path, file_name: &str) -> Result<PathBuf, String> {

@@ -116,6 +116,13 @@ fn import_paths_blocking(
     let mut records = load_records(&app)?;
     let mut bindings = load_bindings(&app)?;
     let thumbnails = load_thumbnail_index(&app)?;
+    let mut copy_names = if copy_to_library {
+        let mut reserved = bindings.clone();
+        reserved.extend(crate::private_shelf::managed_library_copies(&root)?);
+        reserved
+    } else {
+        Vec::new()
+    };
     if copy_to_library {
         let total = paths.iter().filter_map(|path| fs::metadata(path).ok()).map(|meta| meta.len()).sum();
         ensure_library_space(&root, total)?;
@@ -149,12 +156,11 @@ fn import_paths_blocking(
                     if !keeps_binding {
                         let original = path.file_name().and_then(|name| name.to_str()).unwrap_or("");
                         let wanted = library_file_name(original, &metadata.title);
-                        match copy_into_library(&root, &path, &hash, &wanted, &bindings) {
+                        match copy_into_library(&root, &path, &hash, &wanted, &copy_names) {
                             Ok((name, copied)) => {
-                                upsert_binding(
-                                    &mut bindings,
-                                    make_managed_binding(hash.clone(), copied, &metadata).with_managed_file_name(name),
-                                );
+                                let binding = make_managed_binding(hash.clone(), copied, &metadata).with_managed_file_name(name);
+                                copy_names.push(binding.clone());
+                                upsert_binding(&mut bindings, binding);
                                 bindings_changed = true;
                             }
                             Err(error) => {

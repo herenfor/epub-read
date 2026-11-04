@@ -69,13 +69,16 @@ pub(super) fn allocate_library_file_name(
 ) -> String {
     let (stem, extension) = wanted.rsplit_once('.').unwrap_or((wanted, "epub"));
     let taken = |candidate: &str| {
+        let legacy_hash = candidate.rsplit_once('.')
+            .filter(|(_, extension)| extension.eq_ignore_ascii_case("epub"))
+            .map(|(stem, _)| stem);
         skipped.contains(candidate)
             || fs::symlink_metadata(books_dir.join(candidate)).is_ok()
             || bindings.iter().any(|binding| {
-                binding
-                    .managed_file_name
-                    .as_deref()
-                    .is_some_and(|name| name.eq_ignore_ascii_case(candidate))
+                binding.is_managed_library_copy() && match binding.managed_file_name.as_deref() {
+                    Some(name) => name.eq_ignore_ascii_case(candidate),
+                    None => legacy_hash.is_some_and(|hash| hash.eq_ignore_ascii_case(&binding.content_hash)),
+                }
             })
     };
     let mut candidate = format!("{stem}.{extension}");
@@ -85,6 +88,41 @@ pub(super) fn allocate_library_file_name(
         index += 1;
     }
     candidate
+}
+
+pub(crate) fn managed_publish_name(
+    root: &Path,
+    hash: &str,
+    reservations: &[DeviceBinding],
+) -> Result<Option<String>, String> {
+    let wanted = format!("{hash}.epub");
+    let name = allocate_library_file_name(
+        &writable_books_directory(root)?, &wanted, reservations, &HashSet::new(),
+    );
+    Ok((name != wanted).then_some(name))
+}
+
+#[cfg(any(target_os = "android", test))]
+pub(crate) fn publish_android_managed_copy(
+    root: &Path,
+    staging: &Path,
+    hash: &str,
+    bindings: &[DeviceBinding],
+    reservations: &[DeviceBinding],
+) -> Result<(PathBuf, Option<String>, FileSnapshot), String> {
+    if let Some(binding) = bindings.iter().find(|binding| {
+        binding.content_hash == hash && binding.is_managed_library_copy()
+    }) {
+        let target = binding.local_file(root)?;
+        replace_file_atomically(staging, &target)
+            .map_err(|error| format!("无法发布托管副本：{error}"))?;
+        let verified = snapshot(&target)?;
+        return Ok((target, binding.managed_file_name.clone(), verified));
+    }
+    let wanted = format!("{hash}.epub");
+    let (name, verified) = publish_staged_copy(root, staging, &wanted, reservations)?;
+    let target = managed_named_path(root, &name)?;
+    Ok((target, (name != wanted).then_some(name), verified))
 }
 
 /// Refuses the whole copy batch up front when the library drive cannot hold it.

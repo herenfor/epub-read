@@ -22,6 +22,30 @@ const AUTH: &str = "auth.json";
 // Owned exclusively by this module. Original files must never enter this tree.
 const METADATA: &str = "metadata";
 
+/// Read only the private bindings that reserve names in the shared books directory.
+pub(crate) fn managed_library_copies(
+    library_root: &Path,
+) -> Result<Vec<crate::linked_library::DeviceBinding>, String> {
+    let root = library_root.parent().ok_or("书库根目录无效")?;
+    let path = root.join("private-shelf").join(METADATA).join("library.sqlite3");
+    if !path.try_exists().map_err(|error| error.to_string())? {
+        return Ok(Vec::new());
+    }
+    let db = rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(|error| error.to_string())?;
+    let mut query = db
+        .prepare("SELECT json FROM device_bindings WHERE json_extract(json, '$.storageKind') = 'managed'")
+        .map_err(|error| error.to_string())?;
+    let rows = query
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|error| error.to_string())?;
+    rows.map(|row| {
+        let raw = row.map_err(|error| error.to_string())?;
+        serde_json::from_str(&raw).map_err(|error| error.to_string())
+    })
+    .collect()
+}
+
 #[derive(Serialize, Deserialize)]
 struct Verifier {
     version: u8,

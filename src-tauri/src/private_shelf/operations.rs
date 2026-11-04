@@ -6,7 +6,7 @@ use crate::{
     linked_library::{self, DeviceBinding},
     native_zip_session::{Fault, NativeZipSession, CHUNK_BYTES},
     portable_state::{
-        AdoptSelection, BookmarkValue, EntityRef, NoteValue, PortableStore, ProgressValue,
+        AdoptSelection, BookmarkValue, EntityRef, NoteValue, PortableError, PortableStore, ProgressValue,
         ReleaseTarget, WriteIntent,
     },
 };
@@ -262,8 +262,14 @@ fn import_book(
     }
     #[cfg(target_os = "android")]
     if let Some(raw) = store.binding_raw(&hash).map_err(ShelfError::storage)? {
-        let binding: DeviceBinding = serde_json::from_str(&raw).map_err(ShelfError::storage)?;
-        if binding.document_uri().is_some() {
+        let mut binding: DeviceBinding = serde_json::from_str(&raw).map_err(ShelfError::storage)?;
+        let library_root =
+            linked_library::library_root(window.app_handle()).map_err(ShelfError::storage)?;
+        if binding.document_uri().is_some()
+            || (binding.is_managed_library_copy()
+                && linked_library::verify_binding_for_list_refresh(&mut binding, &library_root)
+                    .map_err(ShelfError::storage)?.available)
+        {
             return Ok(json!({ "bookHash": hash, "duplicate": true }));
         }
     }
@@ -324,6 +330,7 @@ fn publish_import(
 
 fn open_archive(
     session: &mut Session,
+    library_root: &Path,
     hash: &str,
     encoding: Option<&str>,
     current: &dyn Fn() -> bool,
@@ -355,8 +362,8 @@ fn open_archive(
     #[cfg(not(target_os = "android"))]
     let _ = app;
     let source = binding
-        .linked_path()
-        .ok_or_else(|| ShelfError::new("missing-source", "隐私书籍没有有效来源"))?;
+        .local_file(library_root)
+        .map_err(|error| ShelfError::new("missing-source", error))?;
     let start = Instant::now();
     let mut file = File::open(source).map_err(ShelfError::storage)?;
     let (actual_hash, snapshot) =
@@ -505,7 +512,11 @@ pub async fn private_shelf_library(
             LibraryOperation::ArchiveOpen {
                 book_hash,
                 text_encoding,
-            } => open_archive(session, &book_hash, text_encoding.as_deref(), &current, Some(invoking_window.app_handle())),
+            } => {
+                let app = invoking_window.app_handle();
+                let library_root = linked_library::library_root(app).map_err(ShelfError::storage)?;
+                open_archive(session, &library_root, &book_hash, text_encoding.as_deref(), &current, Some(app))
+            }
             LibraryOperation::ArchiveDirectory { archive_id, start } => encode(
                 session
                     .archive(&archive_id)?
@@ -564,7 +575,6 @@ pub async fn private_shelf_cover(
     let epoch = super::main_state(&window)?
         .lock_epoch
         .load(Ordering::Acquire);
-    #[cfg(target_os = "android")]
     let app = window.app_handle().clone();
     run(window, move |shelf, _, state| {
         let current = || state.lock_epoch.load(Ordering::Acquire) == epoch;
@@ -584,7 +594,7 @@ pub async fn private_shelf_cover(
             if binding.document_uri().is_some() {
                 return linked_library::document_source::document_cover(&app, &binding);
             }
-            binding.read_linked_cover()
+            binding.read_local_cover(&linked_library::library_root(&app)?)
         };
         let bytes = read().map_err(ShelfError::storage)?;
         if !current() {
@@ -600,6 +610,35 @@ pub async fn private_shelf_cover(
 pub enum MoveDirection {
     ToPrivate,
     ToLibrary,
+}
+
+#[cfg(any(target_os = "android", test))]
+pub(crate) fn move_android_private_copy(
+    source: &mut PortableStore,
+    destination: &mut PortableStore,
+    binding: DeviceBinding,
+    root: &Path,
+    current: impl FnOnce() -> bool,
+) -> crate::portable_state::PortableResult<()> {
+    let hash = binding.content_hash.clone();
+    let private_file =
+        linked_library::private_copy_path(root, &hash).map_err(PortableError::storage_error)?;
+    let name = linked_library::managed_publish_name(root, &hash, &[])
+        .map_err(PortableError::storage_error)?;
+    let binding = binding.into_managed_library_copy(name);
+    let target = binding.local_file(root).map_err(PortableError::storage_error)?;
+    let raw = serde_json::to_string(&binding)
+        .map_err(|error| PortableError::storage_error(error.to_string()))?;
+    // Both paths are on Android's app-data filesystem. Keep the old link
+    // until the two SQLite databases have committed the ownership change.
+    std::fs::hard_link(&private_file, &target)
+        .map_err(|error| PortableError::storage_error(error.to_string()))?;
+    let moved = source.move_local_book(destination, &hash, &raw, current);
+    let obsolete = if moved.is_ok() { private_file } else { target };
+    if std::fs::remove_file(obsolete).is_err() {
+        eprintln!("Could not remove the obsolete link after a private shelf move");
+    }
+    moved
 }
 
 #[tauri::command]
@@ -618,7 +657,6 @@ pub async fn private_shelf_move(
         .load(Ordering::Acquire);
     let app = window.app_handle().clone();
     run(window, move |shelf, _, state| {
-        use crate::portable_state::PortableError;
         let current = || state.lock_epoch.load(Ordering::Acquire) == epoch;
         let private = shelf
             .unlocked
@@ -656,12 +694,20 @@ pub async fn private_shelf_move(
             let binding = binding
                 .into_shelf_move_binding(&root)
                 .map_err(PortableError::storage_error)?;
-            let raw = serde_json::to_string(&binding)
-                .map_err(|error| PortableError::storage_error(error.to_string()))?;
             if matches!(direction, MoveDirection::ToPrivate) {
                 linked_library::clear_shelf_move_cache(&app, &book_hash)
                     .map_err(PortableError::storage_error)?;
             }
+            #[cfg(target_os = "android")]
+            if matches!(direction, MoveDirection::ToLibrary) && binding.document_uri().is_none() {
+                let private_copy = linked_library::private_copy_path(&root, &book_hash)
+                    .map_err(PortableError::storage_error)?;
+                if binding.local_file(&root).map_err(PortableError::storage_error)? == private_copy {
+                    return move_android_private_copy(source, destination, binding, &root, current);
+                }
+            }
+            let raw = serde_json::to_string(&binding)
+                .map_err(|error| PortableError::storage_error(error.to_string()))?;
             source.move_local_book(destination, &book_hash, &raw, current)
         })
         .map_err(|err| ShelfError::new(err.code, err.message))?
@@ -881,7 +927,7 @@ mod tests {
             .is_some());
         assert!(normal.project_shelf().unwrap().books.is_empty());
 
-        let opened = open_archive(&mut private, &hash, Some("utf-8"), &|| true, None).unwrap();
+        let opened = open_archive(&mut private, &sandbox.path().join("linked-library"), &hash, Some("utf-8"), &|| true, None).unwrap();
         let session_id = opened["sessionId"].as_str().unwrap();
         let archive = private.archive(session_id).unwrap();
         let page = archive.directory_page(0).unwrap();
