@@ -92,6 +92,31 @@ pub(crate) fn is_document_uri(uri: &str) -> bool {
     })
 }
 
+/// A provider can refresh ctime during the first read of an opened descriptor.
+/// Confirm a ctime-only change with one new stable pass and the same digest.
+#[cfg(any(target_os = "android", test))]
+pub(super) fn read_stable_document<T, E>(
+    before: crate::android_uri_bridge::DocumentRevision,
+    mut pass: impl FnMut() -> Result<(T, String, crate::android_uri_bridge::DocumentRevision), E>,
+) -> Result<Option<(T, String, crate::android_uri_bridge::DocumentRevision)>, E> {
+    let (value, hash, after) = pass()?;
+    if before == after {
+        return Ok(Some((value, hash, after)));
+    }
+    if before.file != after.file || before.modified != after.modified {
+        return Ok(None);
+    }
+    drop(value);
+    let (value, confirmed_hash, confirmed_revision) = pass()?;
+    Ok(
+        (after == confirmed_revision && hash == confirmed_hash).then_some((
+            value,
+            confirmed_hash,
+            confirmed_revision,
+        )),
+    )
+}
+
 #[cfg(target_os = "android")]
 pub(crate) fn verified_document(
     app: &AppHandle,
@@ -110,10 +135,20 @@ pub(crate) fn verified_document(
         crate::android_uri_bridge::open_persisted_document(app, uri).map_err(|_| {
             super::LinkedLibraryError::new("source-unavailable", "无法读取原书，请重新连接")
         })?;
-    let expected = reader.revision().map_err(|e| e.to_string())?;
+    let before = reader.revision().map_err(|e| e.to_string())?;
+    let changed = || super::LinkedLibraryError::changed("原书内容已变化，请重新连接");
+    let (_, _, expected) = read_stable_document(before, || {
+        reader.rewind().map_err(|e| e.to_string())?;
+        let (actual, bytes) =
+            hash_original_document(&mut reader, || false).map_err(|e| e.to_string())?;
+        if bytes != reader.len() || actual != hash {
+            return Err(changed());
+        }
+        let after = reader.revision().map_err(|e| e.to_string())?;
+        Ok(((), actual, after))
+    })?
+    .ok_or_else(changed)?;
     let stat = reader.metadata_handle().map_err(|e| e.to_string())?;
-    let (actual, bytes) =
-        hash_original_document(&mut reader, || false).map_err(|e| e.to_string())?;
     let guard = move || {
         let current = crate::android_uri_bridge::document_revision(&stat).map_err(|_| Fault::Io)?;
         if current == expected {
@@ -122,11 +157,6 @@ pub(crate) fn verified_document(
             Err(Fault::SourceChanged)
         }
     };
-    if bytes != reader.len() || actual != hash || guard().is_err() {
-        return Err(super::LinkedLibraryError::changed(
-            "原书内容已变化，请重新连接",
-        ));
-    }
     reader.rewind().map_err(|e| e.to_string())?;
     Ok((reader, guard))
 }
@@ -242,6 +272,67 @@ pub(crate) fn release_documents_except<'a, R: Runtime>(
     for uri in candidates.collect::<std::collections::HashSet<_>>() {
         if !private_uris.contains(&uri) && !retained.contains(uri.as_str()) {
             crate::android_uri_bridge::release_document_read(app, &uri);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::read_stable_document;
+    use crate::android_uri_bridge::DocumentRevision;
+
+    const FIRST: DocumentRevision = DocumentRevision {
+        file: (1, 2, 4096),
+        modified: (3, 4),
+        changed: (5, 6),
+    };
+    const REFRESHED: DocumentRevision = DocumentRevision {
+        changed: (5, 7),
+        ..FIRST
+    };
+
+    #[test]
+    fn saf_revision_confirmation_requires_stable_metadata_and_identical_bytes() {
+        for (after, second, expected_passes, accepted) in [
+            (FIRST, None, 1, true),
+            (REFRESHED, Some(("same", REFRESHED)), 2, true),
+            (REFRESHED, Some(("edited", REFRESHED)), 2, false),
+            (REFRESHED, Some(("same", FIRST)), 2, false),
+            (
+                DocumentRevision {
+                    modified: (3, 5),
+                    ..FIRST
+                },
+                None,
+                1,
+                false,
+            ),
+            (
+                DocumentRevision {
+                    file: (1, 2, 8192),
+                    ..FIRST
+                },
+                None,
+                1,
+                false,
+            ),
+        ] {
+            let mut passes = 0;
+            let outcome = read_stable_document(FIRST, || {
+                passes += 1;
+                let (hash, stamp) = if passes == 1 {
+                    ("same", after)
+                } else {
+                    second.unwrap()
+                };
+                Ok::<_, ()>((passes, hash.to_owned(), stamp))
+            })
+            .unwrap();
+            assert_eq!(passes, expected_passes);
+            assert_eq!(
+                outcome.map(|(pass, _, _)| pass),
+                accepted.then_some(expected_passes)
+            );
         }
     }
 }

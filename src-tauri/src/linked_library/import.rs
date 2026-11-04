@@ -340,23 +340,26 @@ pub(super) fn prepare_original_document(
         return Err(failed("原书为空".into()));
     }
     let revision = reader.revision().map_err(|e| failed(e.to_string()))?;
-    let (content_hash, hashed_bytes) = hash_original_document(&mut reader, || gate.is_cancelled())
-        .map_err(|error| {
-            if error.kind() == std::io::ErrorKind::Interrupted && gate.is_cancelled() {
-                cancelled()
-            } else {
-                failed(error.to_string())
-            }
-        })?;
-    if hashed_bytes != file_size {
-        return Err(failed("导入期间原文件长度发生变化".into()));
-    }
-    reader.rewind().map_err(|e| failed(e.to_string()))?;
-    let metadata = crate::document_formats::inspect_reader(&mut reader, &file_name)
-        .map_err(failed)?;
-    if reader.revision().map_err(|e| failed(e.to_string()))? != revision {
-        return Err(failed("导入期间原文件发生变化".into()));
-    }
+    let (metadata, content_hash, _) = document_source::read_stable_document(revision, || {
+        if gate.is_cancelled() { return Err(cancelled()); }
+        reader.rewind().map_err(|e| failed(e.to_string()))?;
+        let (content_hash, hashed_bytes) = hash_original_document(&mut reader, || gate.is_cancelled())
+            .map_err(|error| {
+                if error.kind() == std::io::ErrorKind::Interrupted && gate.is_cancelled() {
+                    cancelled()
+                } else {
+                    failed(error.to_string())
+                }
+            })?;
+        if hashed_bytes != file_size {
+            return Err(failed("导入期间原文件长度发生变化".into()));
+        }
+        reader.rewind().map_err(|e| failed(e.to_string()))?;
+        let metadata = crate::document_formats::inspect_reader(&mut reader, &file_name)
+            .map_err(failed)?;
+        let after = reader.revision().map_err(|e| failed(e.to_string()))?;
+        Ok((metadata, content_hash, after))
+    })?.ok_or_else(|| failed("导入期间原文件发生变化".into()))?;
     if metadata.spine.is_empty() {
         return Err(failed("书中没有可阅读的内容".into()));
     }

@@ -307,7 +307,7 @@ pub(crate) struct SeekableDocument {
 impl SeekableDocument {
     pub(crate) fn len(&self) -> u64 { self.length }
 
-    pub(crate) fn revision(&self) -> io::Result<(u64, u64, u64, i64, i64)> {
+    pub(crate) fn revision(&self) -> io::Result<DocumentRevision> {
         document_revision(&self.file)
     }
 
@@ -316,11 +316,23 @@ impl SeekableDocument {
     }
 }
 
+#[cfg(any(target_os = "android", test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct DocumentRevision {
+    pub(crate) file: (u64, u64, u64),
+    pub(crate) modified: (i64, i64),
+    pub(crate) changed: (i64, i64),
+}
+
 #[cfg(target_os = "android")]
-pub(crate) fn document_revision(file: &File) -> io::Result<(u64, u64, u64, i64, i64)> {
+pub(crate) fn document_revision(file: &File) -> io::Result<DocumentRevision> {
     use std::os::unix::fs::MetadataExt;
     let metadata = file.metadata()?;
-    Ok((metadata.dev(), metadata.ino(), metadata.len(), metadata.ctime(), metadata.ctime_nsec()))
+    Ok(DocumentRevision {
+        file: (metadata.dev(), metadata.ino(), metadata.len()),
+        modified: (metadata.mtime(), metadata.mtime_nsec()),
+        changed: (metadata.ctime(), metadata.ctime_nsec()),
+    })
 }
 
 impl Read for SeekableDocument {
