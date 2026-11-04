@@ -117,6 +117,8 @@ pub(crate) use import::{
 mod library_copy;
 use library_copy::*;
 pub(crate) use library_copy::{library_file_name, ensure_library_space, managed_publish_name};
+#[cfg(any(target_os = "android", test))]
+pub(crate) use library_copy::copy_into_library;
 #[cfg(target_os = "android")]
 pub(crate) use library_copy::publish_android_managed_copy;
 #[cfg(not(target_os = "android"))]
@@ -554,10 +556,13 @@ impl DeviceBinding {
     }
 
     #[cfg(any(target_os = "android", test))]
-    pub(crate) fn into_managed_library_copy(mut self, name: Option<String>) -> Self {
+    pub(crate) fn into_managed_library_copy(mut self, name: String, snapshot: FileSnapshot) -> Self {
         self.storage_kind = StorageKind::Managed;
         self.canonical_source_path = None;
-        self.managed_file_name = name;
+        self.managed_file_name = Some(name);
+        self.file_size = snapshot.size;
+        self.source_mtime_ns = snapshot.mtime_ns;
+        self.last_verified_at_ms = now_ms();
         self
     }
 
