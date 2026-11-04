@@ -70,7 +70,7 @@ fn windows_evidence(product_name: &str) -> (Option<String>, bool, Option<String>
         .ok();
     let registered = registration.and_then(|key| {
         let name: String = key.get_value("DisplayName").ok()?;
-        if name != product_name {
+        if !contract::windows_display_name_matches(product_name, &name) {
             return None;
         }
         let location: String = key.get_value("InstallLocation").ok()?;
