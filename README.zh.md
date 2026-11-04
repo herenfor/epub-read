@@ -1,12 +1,14 @@
-# EPUB 阅读器
+# SeLis
 
 [![下载最新版](.github/readme/release.svg)](https://github.com/herenfor/epub-read/releases/latest)
 ![平台](https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-Windows%20%7C%20Android-informational)
 [![许可证](https://img.shields.io/badge/%E8%AE%B8%E5%8F%AF%E8%AF%81-PolyForm%20Strict%201.0.0-lightgrey)](LICENSE)
 
-一款轻量的 EPUB 阅读器，尊重每本书自己的排版，支持 Windows 与 Android。
+SeLis 是一款安静的多格式阅读器，支持 Windows 与 Android，可打开 EPUB 图书、TXT 文本书和 CBZ／图片 ZIP 漫画，并尊重每本书自己的排版。
 
-EPUB 阅读器支持 EPUB 2.0.1 与 EPUB 3.x，尽量按作者的意图呈现书籍：版心、边距、浮动、插图和脚注都保留书内本身的排版，阅读器只在书籍缺少声明时提供合理的默认值。
+SeLis 支持 EPUB 2.0.1 与 EPUB 3.x、TXT 和图片漫画；版心、边距、浮动、插图和脚注都保留书内本身的排版，阅读器只在书籍缺少声明时提供合理的默认值。
+
+SeLis 取自古希腊语 selis，指书卷的分栏版心与页边留白；S、L 大写。核心版显示 SeLis，AI 版显示 SeLis AI。
 
 <p align="center"><img src=".github/readme/reading.svg" width="860" alt="Windows 上打开目录抽屉的阅读界面，以及在 Android 手机上翻页"></p>
 
@@ -44,7 +46,7 @@ EPUB 阅读器支持 EPUB 2.0.1 与 EPUB 3.x，尽量按作者的意图呈现书
 
 1. 在手机上下载 `.apk` 文件。
 2. 打开它，系统会提示"允许安装未知来源应用"，为你使用的浏览器或文件管理器开启这一权限。
-3. 安装完成后即可在桌面找到"EPUB Reader"。
+3. 安装完成后即可在桌面找到"SeLis"。
 
 应用没有通过 Google Play 分发，首次安装时 Play 保护机制可能提示"无法识别的应用"，选择"更多详情 → 仍然安装"即可。
 
@@ -120,7 +122,7 @@ EPUB 文件的实现差异很大，阅读器为此做了容错：
 
 ## 隐私
 
-EPUB 阅读器不需要账号，不收集任何使用数据，也不会把你的书籍、笔记或阅读进度上传到任何服务器。所有数据都只保存在你的设备上。
+SeLis 默认不需要账号，不收集任何使用数据；书籍、笔记和阅读进度都只保存在你的设备上。只有你主动连接 WebDAV 时，阅读进度、书签、笔记、收藏和分类才会同步到你自己的网盘空间，书籍文件不会上传。
 
 设备互传通过一次性的加密配对，在你的两台设备之间直接连接，不经过任何服务器。Android 上只在你扫描配对二维码时才使用相机，并在第一次扫码时请求权限。
 

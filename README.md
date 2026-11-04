@@ -1,12 +1,14 @@
-# EPUB Reader
+# SeLis
 
 [![Download latest release](.github/readme/release.svg)](https://github.com/herenfor/epub-read/releases/latest)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Android-informational)
 [![License](https://img.shields.io/badge/license-PolyForm%20Strict%201.0.0-lightgrey)](LICENSE)
 
-A lightweight EPUB reader for Windows and Android that respects each book's own typography.
+SeLis is a quiet, multi-format reader for Windows and Android. It opens EPUB books, TXT text books and CBZ or image-ZIP comics, and respects the typography each book was made with.
 
-EPUB Reader opens EPUB 2.0.1 and EPUB 3.x books as their authors designed them: page width, margins, floats, illustrations and footnotes keep the book's own layout, while the reader only supplies sensible defaults where they are missing.
+SeLis supports EPUB 2.0.1 and EPUB 3.x, TXT books and image comics. Page width, margins, floats, illustrations and footnotes keep the book's own layout, while the reader only supplies sensible defaults where they are missing.
+
+SeLis comes from the ancient Greek *selis*, the columned text block and margins of a book roll; the S and L are capitalised. The core app is SeLis and the AI edition is SeLis AI.
 
 <p align="center"><img src=".github/readme/reading.svg" width="860" alt="The reader on Windows with the contents drawer open, and a page turn on an Android phone"></p>
 
@@ -44,7 +46,7 @@ Download the installer or the portable build. Windows 10 and 11 already include 
 
 1. Download the `.apk` file on your phone or tablet.
 2. Open it. Android asks you to allow installing unknown apps — allow it for the browser or file manager you are using.
-3. Once installed, EPUB Reader appears on your home screen.
+3. Once installed, SeLis appears on your home screen.
 
 The app is not distributed through Google Play, so Play Protect may warn about an unrecognised app the first time; choose *More details → Install anyway*.
 
@@ -120,7 +122,7 @@ EPUB files vary a great deal, and the reader is built to tolerate that:
 
 ## Privacy
 
-EPUB Reader needs no account, collects no usage data, and never uploads your books, notes or reading progress anywhere. Everything stays on your device.
+SeLis needs no account by default and collects no usage data; your books, notes and reading progress stay on your device. Only if you choose to connect WebDAV are reading progress, bookmarks, notes, favourites and categories synced to your own WebDAV space — book files are never uploaded.
 
 Device transfer connects your two devices directly over your local network with an encrypted, one-time pairing; nothing passes through a server. On Android the camera is used only while you scan a pairing QR code, and is requested the first time you do so.
 
@@ -156,7 +158,7 @@ Bugs and suggestions are welcome in [Issues](https://github.com/herenfor/epub-re
 
 Copyright © 2026 HeRenFor.
 
-Original code in EPUB Reader is made available under the [PolyForm Strict License 1.0.0](LICENSE) — a source-available license, not an OSI-approved open-source license.
+Original code in SeLis is made available under the [PolyForm Strict License 1.0.0](LICENSE) — a source-available license, not an OSI-approved open-source license.
 
 The default license permits certain non-commercial use, but does not grant permission to modify, create derivative works from, or distribute the software.
 

@@ -1,5 +1,5 @@
 import { useId, useState, type ReactNode } from "react";
-import { APP_EDITION } from "../config/edition";
+import { APP_EDITION, appNameForEdition } from "../config/edition";
 import type { AppEdition } from "../config/editionValue";
 import { APP_VERSION } from "../config/appVersion";
 import { getAppBuildSession, type AppBuildSession } from "../config/appBuildSession";
@@ -17,7 +17,7 @@ import { uiText, useUiText } from "./localization/UiLanguageProvider";
 import type { PlainMessageKey } from "./localization/core";
 
 export interface AboutProjection {
-  productName: "EPUB Reader";
+  productName: "SeLis" | "SeLis AI";
   version: string;
   edition: "Core" | "AI";
   /** Narrow runtime label, e.g. Android 原生 / Web 预览. */
@@ -61,7 +61,7 @@ export function projectAboutInfo(
     if (!buildInfo) return null;
     const platform = PLATFORM_LABELS[session.platform];
     return {
-      productName: "EPUB Reader",
+      productName: appNameForEdition(session.edition),
       version: buildInfo.version,
       edition,
       channel: session.platform === "web" ? uiText("about.webPreview") : uiText("about.native", { platform }),
@@ -69,7 +69,7 @@ export function projectAboutInfo(
   }
 
   return {
-    productName: "EPUB Reader",
+    productName: appNameForEdition(compiled.edition),
     version: compiled.version,
     edition: editionLabel(compiled.edition),
     channel: uiText("about.webPreview"),
@@ -137,7 +137,7 @@ export function AboutInfo({ children }: { children?: ReactNode }) {
           </svg>
         </span>
         <div className="about-identity-text">
-          <div className="about-product">EPUB Reader</div>
+          <div className="about-product">{projection?.productName ?? appNameForEdition(APP_EDITION)}</div>
           <div className="about-meta">{projection ? meta.join(" · ") : t("about.unavailable")}</div>
         </div>
       </div>

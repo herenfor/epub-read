@@ -10,7 +10,7 @@ export const titlebar = defineMessages("titlebar", {
   "titlebar.sidebar.tip": { zh: "切换目录与书签侧边栏 (Ctrl+T)", note: "Tooltip; keep the shortcut." },
   "titlebar.sidebar": "切换侧边栏",
   "titlebar.toc": { zh: "目录", note: "Short button text.", max: 8 },
-  "titlebar.appName": { zh: "EPUB 阅读器", note: "Shown when a book has no title." },
+  "titlebar.appName": { zh: "SeLis", note: "Shown when a book has no title." },
   "titlebar.appearance": "外观与排版设置",
   "titlebar.search.tip": { zh: "搜索正文 (Ctrl+F)", note: "Tooltip; keep the shortcut." },
   "titlebar.search": "搜索正文",

@@ -31,7 +31,7 @@ describe("about info projection", () => {
   it("uses handshake buildInfo for native sessions", () => {
     const result = projectAboutInfo(nativeSession, { version: "0.0.0", edition: "ai" });
     expect(result).toMatchObject({
-      productName: "EPUB Reader",
+      productName: "SeLis",
       version: "0.2.8",
       edition: "Core",
       channel: "Android 原生",
@@ -41,6 +41,7 @@ describe("about info projection", () => {
   it("uses the Vite compile-time version for browser previews", () => {
     const result = projectAboutInfo(browserSession, { version: "0.2.8", edition: "ai" });
     expect(result).toMatchObject({
+      productName: "SeLis AI",
       version: "0.2.8",
       edition: "AI",
       channel: "Web 预览",
