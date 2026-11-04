@@ -10,7 +10,7 @@ pub(super) fn binding_view(
 ) -> LinkedLibraryRecordView {
     let (available, file_size, cover_mime) = binding
         .map(|binding| {
-            let available = binding
+            let available = binding.document_uri().is_some() || binding
                 .resolve_source(library_root)
                 .ok()
                 .and_then(|source| snapshot(source.path()).ok())
@@ -42,6 +42,7 @@ pub(super) fn binding_view(
         notes: record.notes,
         is_new: record.is_new,
         available,
+        original_location: binding.is_some_and(|binding| binding.document_uri().is_some()),
         file_size,
         cover_mime,
         thumbnail_mime,
@@ -89,6 +90,7 @@ pub(crate) fn make_binding(
         content_hash: hash,
         storage_kind: StorageKind::Linked,
         canonical_source_path: Some(path.to_string_lossy().into_owned()),
+        document_uri: None,
         managed_file_name: None,
         file_size: snapshot.size,
         source_mtime_ns: snapshot.mtime_ns,

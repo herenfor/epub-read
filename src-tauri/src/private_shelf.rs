@@ -305,6 +305,23 @@ pub async fn private_shelf_reset(
             .lock_epoch
             .fetch_add(1, Ordering::AcqRel);
     }
+    #[cfg(target_os = "android")]
+    {
+        let app = window.app_handle().clone();
+        return run(window, move |shelf, root, _| {
+            if !confirm { return shelf.reset(root, false); }
+            crate::linked_library::with_document_binding_lock(&app, || {
+                // Reset must still work when private metadata is corrupt.
+                let uris = crate::linked_library::document_source::private_document_uris(root).ok();
+                let status = shelf.reset(root, true)?;
+                if let (Some(uris), Ok(bindings)) = (uris, crate::linked_library::load_bindings(&app)) {
+                    crate::linked_library::document_source::release_unreferenced_documents(&app, &bindings, uris);
+                }
+                Ok(status)
+            }).map_err(ShelfError::storage)?
+        }).await;
+    }
+    #[cfg(not(target_os = "android"))]
     run(window, move |shelf, root, _| shelf.reset(root, confirm)).await
 }
 

@@ -284,6 +284,11 @@ impl RunnerState {
         };
         let mut binding: DeviceBinding =
             serde_json::from_str(&raw).map_err(|error| format!("设备绑定损坏：{error}"))?;
+        if binding.document_uri().is_some() {
+            // Folder imports still copy new books; a duplicate must not
+            // silently replace an existing original-location binding.
+            return Ok(true);
+        }
         let verification = verify_binding_for_list_refresh(&mut binding, &self.root)?;
         Ok(verification.available)
     }

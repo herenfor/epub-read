@@ -45,6 +45,20 @@ pub(crate) fn archive_open_blocking(
         return Err("无效的书籍内容指纹".into());
     }
 
+    #[cfg(target_os = "android")]
+    if let Some((binding, record)) = find_document_binding(&app, &content_hash)? {
+        let (session, verify_ms, directory_ms) = document_source::document_archive(
+            &app, binding.document_uri().unwrap(), &content_hash, &record.file_name, &record.title,
+            text_encoding.as_deref(),
+        )?;
+        // Recheck owner/binding after the blocking read; a removed or relinked
+        // record must not publish a late session.
+        if !find_document_binding(&app, &content_hash)?.is_some_and(|(current, _)| current == binding) {
+            return Err(LinkedLibraryError::changed("原书绑定已变化"));
+        }
+        return register_archive(&app, owner, session, verify_ms, directory_ms, true);
+    }
+
     let (root, pending) = prepare_library_source_read(&app, &content_hash)?;
     let PendingSourceRead {
         file_name,
@@ -109,6 +123,14 @@ pub(crate) fn archive_open_blocking(
         }
     }
 
+    register_archive(&app, owner, session, verify_ms, directory_ms, managed_comic && entry_count >= 2048)
+}
+
+fn register_archive(
+    app: &AppHandle, owner: String, session: NativeZipSession,
+    verify_ms: u64, directory_ms: u64, compact_directory: bool,
+) -> Result<ArchiveOpenView, LinkedLibraryError> {
+    let entry_count = session.entry_count;
     if app.get_webview_window(&owner).is_none() {
         session.close();
         return Err("打开原生归档的窗口已关闭".into());
@@ -136,7 +158,7 @@ pub(crate) fn archive_open_blocking(
         chunk_bytes: CHUNK_BYTES,
         verify_ms,
         directory_ms,
-        compact_directory: managed_comic && entry_count >= 2048,
+        compact_directory: compact_directory && entry_count >= 2048,
     })
 }
 

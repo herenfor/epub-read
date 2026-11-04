@@ -364,7 +364,8 @@ pub(super) fn delete_records_portable(app: &AppHandle, content_hashes: &[String]
             .iter()
             .filter(|binding| &binding.content_hash == hash)
         {
-            if let BindingSource::Managed(path) = binding.resolve_source(&root)? {
+            if binding.storage_kind == StorageKind::Managed {
+                let path = binding.resolve_source(&root)?.path().to_owned();
                 managed_paths.push(path);
             }
         }
@@ -390,7 +391,15 @@ pub(super) fn delete_records_portable(app: &AppHandle, content_hashes: &[String]
         store.hide_linked_records(&target_hashes)
     })
     .map_err(|error| error.to_string())?
-    .ok_or_else(|| "可移植资料仓储未激活".to_string())
+    .ok_or_else(|| "可移植资料仓储未激活".to_string())?;
+    #[cfg(target_os = "android")]
+    {
+        let (removed, remaining): (Vec<_>, Vec<_>) = bindings.into_iter()
+            .partition(|binding| target_hashes.contains(&binding.content_hash));
+        document_source::release_unreferenced_documents(app, &remaining,
+            removed.into_iter().filter_map(|binding| binding.document_uri().map(str::to_owned)));
+    }
+    Ok(())
 }
 
 pub(super) fn load_portable_records(app: &AppHandle) -> Result<Option<Vec<LinkedLibraryRecord>>, String> {
@@ -543,6 +552,14 @@ pub(crate) fn load_bindings(app: &AppHandle) -> Result<Vec<DeviceBinding>, Strin
 /// kind-specific so a malformed binding can never be silently downgraded.
 pub(super) fn validate_binding_sources(bindings: &[DeviceBinding], library_root: &Path) -> Result<(), String> {
     for binding in bindings {
+        if binding.storage_kind == StorageKind::AndroidDocument {
+            if binding.canonical_source_path.is_none() && binding.managed_file_name.is_none()
+                && binding.document_uri().is_some_and(document_source::is_document_uri) {
+                continue;
+            }
+            return Err("Android 原书文档绑定无效".into());
+        }
+        if binding.document_uri.is_some() { return Err("路径绑定不能携带 Android 文档 URI".into()); }
         binding
             .resolve_source(library_root)
             .map_err(|error| format!("设备绑定损坏：{error}"))?;
@@ -825,7 +842,8 @@ where
             .iter()
             .filter(|binding| &binding.content_hash == hash)
         {
-            if let BindingSource::Managed(path) = binding.resolve_source(root)? {
+            if binding.storage_kind == StorageKind::Managed {
+                let path = binding.resolve_source(root)?.path().to_owned();
                 managed_paths.push(path);
             }
         }

@@ -356,7 +356,7 @@ fn run_export(
     let bindings = parse_bindings(raw_bindings)?;
     let (state, selected_hashes) = select_export_state(&snapshot, &scope)?;
     let scope_kind = scope_kind(&scope).to_string();
-    let (plans, skipped_books) = plan_export_books(&root, &state, &bindings, include_books);
+    let (plans, skipped_books) = plan_export_books(Some(&app), &root, &state, &bindings, include_books);
     if task.cancelled.load(Ordering::Acquire) {
         return Ok(SaveFileExportResult {
             status: "cancelled".to_string(),
@@ -375,6 +375,7 @@ fn run_export(
     let total_archive_bytes: Option<u64> = None;
     let mut reporter = ProgressReporter::new(on_progress.clone(), "preparing", None);
     let stats = match write_export_archive(
+        Some(&app),
         &temp_path,
         &package_id,
         &state,
@@ -528,10 +529,10 @@ pub(crate) fn run_lan_export<R: Runtime>(
     let has_preferences = state.preferences.is_some();
     let (plans, skipped_books, reused_book_count) = match receiver_missing {
         Some(missing) if include_books => {
-            plan_export_books_for_missing(&root, &state, &bindings, true, &missing)
+            plan_export_books_for_missing(Some(&app), &root, &state, &bindings, true, &missing)
         }
         _ => {
-            let (plans, skipped) = plan_export_books(&root, &state, &bindings, include_books);
+            let (plans, skipped) = plan_export_books(Some(&app), &root, &state, &bindings, include_books);
             (plans, skipped, 0)
         }
     };
@@ -546,6 +547,7 @@ pub(crate) fn run_lan_export<R: Runtime>(
     let package_id = new_uuid()?;
     let mut reporter = ProgressReporter::new(on_progress, "preparing", None);
     let stats = write_export_archive(
+        Some(&app),
         &target,
         &package_id,
         &state,
@@ -903,6 +905,7 @@ fn cover_repair_row(
         return Ok(None);
     }
     let mut binding = existing.clone();
+    if binding.storage_kind == "android-document" { return Ok(None); }
     binding.fill_cover_from_epub(&binding.source_path(root)?);
     if binding.cover_zip_path.is_none() {
         return Ok(None);
@@ -926,6 +929,10 @@ pub(crate) fn run_commit<R: Runtime>(
         .lock()
         .map_err(|_| SaveFileError::storage_error("链接书库写入锁已损坏"))?;
 
+    #[cfg(target_os = "android")]
+    crate::linked_library::ensure_import_idle(&app)
+        .map_err(|message| SaveFileError::new("busy", message))?;
+
     let mut reporter = ProgressReporter::new(
         on_progress.clone(),
         "committing",
@@ -946,7 +953,7 @@ pub(crate) fn run_commit<R: Runtime>(
             }
             if let Some(existing) = local_bindings
                 .get(&attachment.content_hash)
-                .filter(|binding| binding.is_valid(&root))
+                .filter(|binding| binding.is_valid_on(Some(&app), &root, || task.cancelled.load(Ordering::Acquire)).unwrap_or(false))
             {
                 // Re-importing an attachment repairs older coverless bindings
                 // without replacing the EPUB or recreating progress/annotations.
@@ -955,6 +962,7 @@ pub(crate) fn run_commit<R: Runtime>(
                 }
                 continue;
             }
+            if task.cancelled.load(Ordering::Acquire) { return Err(SaveFileError::cancelled()); }
             match publish_attachment_binding(attachment, &root) {
                 Ok((raw, created)) => {
                     if let Some(target) = created { published_targets.push(target); }
@@ -978,7 +986,7 @@ pub(crate) fn run_commit<R: Runtime>(
             }
             if let Some(existing) = local_bindings
                 .get(hash)
-                .filter(|binding| binding.is_valid(&root))
+                .filter(|binding| binding.is_valid_on(Some(&app), &root, || task.cancelled.load(Ordering::Acquire)).unwrap_or(false))
             {
                 if let Some(row) = cover_repair_row(existing, &root)? {
                     binding_rows.push(row);
@@ -986,6 +994,9 @@ pub(crate) fn run_commit<R: Runtime>(
             }
         }
 
+        if task.cancelled.load(Ordering::Acquire) { return Err(SaveFileError::cancelled()); }
+        #[cfg(target_os = "android")]
+        let replacements: BTreeSet<_> = binding_rows.iter().map(|(hash, _)| hash.clone()).collect();
         let failed_hashes = attachment_failures.keys().cloned().collect();
         let (outcome, visible_before) = with_existing_store(&app, |store| {
             let visible_before = store.local_shelf_hashes()?;
@@ -998,6 +1009,15 @@ pub(crate) fn run_commit<R: Runtime>(
         .and_then(|result| {
             result.ok_or_else(|| SaveFileError::storage_error("可移植资料仓储尚未激活"))
         })?;
+        #[cfg(target_os = "android")]
+        {
+            let replaced = |hash: &str| replacements.contains(hash) && outcome.imported_books.iter().any(|book| book == hash);
+            crate::linked_library::document_source::release_documents_except(
+                &app,
+                local_bindings.iter().filter_map(|(hash, binding)| (!replaced(hash)).then_some(binding.document_uri.as_deref()).flatten()),
+                local_bindings.iter().filter_map(|(hash, binding)| replaced(hash).then(|| binding.document_uri.clone()).flatten()),
+            );
+        }
         let mut skipped_books = outcome.skipped_books;
         for book in &mut skipped_books {
             book.message = attachment_failures.remove(&book.content_hash);
