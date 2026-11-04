@@ -1,6 +1,6 @@
 [package]
 name = "epub-reader"
-version = "0.4.0"
+version = "0.4.1"
 description = "EPUB 阅读器（EPUB 2/3）"
 license = "GPL-3.0-only"
 authors = ["HeRenFor"]

@@ -17,10 +17,16 @@ const ACTIONS: &[&str] = &[
     "cleanup",
 ];
 
-const RELEASE_DOWNLOAD_PREFIX: &str = "https://github.com/herenfor/epub-read/releases/download/";
+const RELEASE_DOWNLOAD_PREFIXES: [&str; 2] = [
+    "https://github.com/herenfor/epub-read/releases/download/",
+    "https://github.com/herenfor/selis/releases/download/",
+];
 
 fn allowed_download(url: &str, test_base: Option<&str>) -> bool {
-    if url.starts_with(RELEASE_DOWNLOAD_PREFIX) && !url.contains("..") {
+    let from_release = RELEASE_DOWNLOAD_PREFIXES
+        .iter()
+        .any(|&prefix| url.starts_with(prefix));
+    if from_release && !url.contains("..") {
         return true;
     }
     test_base.is_some_and(|base| !base.is_empty() && url.starts_with(base))
@@ -112,6 +118,10 @@ mod tests {
     fn downloads_only_from_release_assets() {
         let asset = "https://github.com/herenfor/epub-read/releases/download/v0.3.4/epub-reader_0.3.4_android-arm64.apk";
         assert!(allowed_download(asset, None));
+        let renamed_asset = asset.replace("/epub-read/", "/selis/");
+        assert!(allowed_download(&renamed_asset, None));
+        let fork_asset = asset.replace("/epub-read/", "/selis-fork/");
+        assert!(!allowed_download(&fork_asset, None));
         assert!(!allowed_download("https://example.com/epub-reader.apk", None));
         assert!(!allowed_download("https://github.com/someone/else/releases/download/v1/a.apk", None));
         assert!(!allowed_download("https://github.com/herenfor/epub-read/releases/download/../../x.apk", None));

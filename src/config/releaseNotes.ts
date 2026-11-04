@@ -35,37 +35,12 @@ export const RELEASES_PAGE_URL = "https://github.com/herenfor/epub-read/releases
  */
 export const RELEASE_NOTES: readonly ReleaseNote[] = [
   {
-    version: "0.4.0",
-    status: "released",
-    releasedOn: "2026-11-04",
+    version: "0.4.1",
+    status: "development",
     items: [
       {
-        category: "new",
-        text: "隐私书架：书架标题可切换，首次进入设置密码；书目、进度、笔记和收藏单独存放，不参与全库搜索、互传和云同步。书籍菜单可移入或移出，原书文件留在原处。",
-      },
-      {
-        category: "new",
-        text: "TXT 与漫画：支持打开 TXT 和 ZIP/CBZ；TXT 识别章节并提供段落缩进开关与两端对齐，漫画支持双指缩放和滚动模式整条缩放。",
-      },
-      {
-        category: "new",
-        text: "Android 原文件：关闭“导入时复制到书库”后，可直接读取原位置的文件；文件失效时可重新连接，删除书时提示原文件仍保留。",
-      },
-      {
-        category: "new",
-        text: "自动导入文件夹：在设置 > 存储中选择文件夹，应用在前台且书架空闲时自动扫描导入，也可立即扫描或关闭。",
-      },
-      {
-        category: "new",
-        text: "SeLis 品牌：应用名称、窗口标题、关于页与中英文 README 统一为 SeLis；原创代码采用 GPL-3.0-only，安装身份、数据目录与更新地址保持不变。",
-      },
-      {
         category: "improved",
-        text: "漫画大目录与大压缩包读取更顺畅，优先读取可见页面并复用缓存；TXT 排版和漫画拼接比例得到修复。",
-      },
-      {
-        category: "improved",
-        text: "移动书籍前保存进度；切换标签、目录跳转和阅读手势互不干扰，文件夹扫描失败会明确提示。",
+        text: "应用更新已为 GitHub 仓库迁移做好准备。建议先升级到本版，便于仓库改名后继续使用应用内更新。",
       },
     ],
   },

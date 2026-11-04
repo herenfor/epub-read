@@ -1,7 +1,10 @@
 /** Shared release policy. Networking, scheduling, persistence and UI live outside this module. */
 export const UPDATE_CHECK_URL = "https://api.github.com/repos/herenfor/epub-read/releases/latest";
 export const UPDATE_MANIFEST_URL = "https://github.com/herenfor/epub-read/releases/latest/download/latest.json";
-const RELEASE_ROOT = "https://github.com/herenfor/epub-read/releases";
+const RELEASE_ROOTS = [
+  "https://github.com/herenfor/epub-read/releases",
+  "https://github.com/herenfor/selis/releases",
+] as const;
 const HOUR = 60 * 60 * 1000;
 
 export type InstallKind = "installer" | "portable" | "android" | "unsupported";
@@ -79,7 +82,11 @@ function object(value: unknown): Record<string, unknown> | null {
     ? value as Record<string, unknown> : null;
 }
 
-/** Only stable releases and download links belonging to this repository are eligible. */
+function releaseRootFor(htmlUrl: unknown, tag: string) {
+  return RELEASE_ROOTS.find(root => htmlUrl === `${root}/tag/${tag}`);
+}
+
+/** Trust only the two official repository names and keep all links on the same one. */
 export function parseLatestRelease(json: unknown): LatestRelease | null {
   const input = object(json);
   if (!input || input.draft !== false || input.prerelease !== false ||
@@ -90,13 +97,14 @@ export function parseLatestRelease(json: unknown): LatestRelease | null {
   if (!parsed || parsed.pre.length || input.tag_name.includes("+")) return null;
   const tag = input.tag_name;
   const normalized = tag.startsWith("v") ? tag.slice(1) : tag;
-  if (input.html_url !== `${RELEASE_ROOT}/tag/${tag}`) return null;
+  const releaseRoot = releaseRootFor(input.html_url, tag);
+  if (!releaseRoot) return null;
   const assets: UpdateAsset[] = [];
   for (const raw of input.assets) {
     const asset = object(raw);
     if (!asset || typeof asset.name !== "string" || !asset.name || /[\\/]/u.test(asset.name) ||
         typeof asset.size !== "number" || !Number.isSafeInteger(asset.size) || asset.size <= 0 ||
-        asset.browser_download_url !== `${RELEASE_ROOT}/download/${tag}/${asset.name}`) return null;
+        asset.browser_download_url !== `${releaseRoot}/download/${tag}/${asset.name}`) return null;
     const digest = typeof asset.digest === "string" && /^sha256:[a-f\d]{64}$/iu.test(asset.digest)
       ? asset.digest.slice(7).toLowerCase() : null;
     assets.push({ name: asset.name, url: asset.browser_download_url as string, size: asset.size, sha256: digest });
@@ -114,8 +122,10 @@ export function pickUpdateAsset(release: LatestRelease, kind: InstallKind): Upda
     : kind === "android" ? `epub-reader_${release.version}_android-arm64.apk`
     : kind === "portable" ? `epub-reader_${release.version}_portable.exe` : null;
   if (!name) return null;
+  const releaseRoot = releaseRootFor(release.htmlUrl, release.tag);
+  if (!releaseRoot) return null;
   const matches = release.assets.filter(asset => asset.name === name &&
-    asset.url === `${RELEASE_ROOT}/download/${release.tag}/${name}`);
+    asset.url === `${releaseRoot}/download/${release.tag}/${name}`);
   if (matches.length !== 1) return null;
   const asset = matches[0];
   return kind === "android" && !asset.sha256 ? null : asset;
