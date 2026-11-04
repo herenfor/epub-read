@@ -2,11 +2,11 @@
 
 [![Download latest release](.github/readme/release.svg)](https://github.com/herenfor/epub-read/releases/latest)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Android-informational)
-[![License](https://img.shields.io/badge/license-PolyForm%20Strict%201.0.0-lightgrey)](LICENSE)
+[![License](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
 
-SeLis is a quiet, multi-format reader for Windows and Android. It opens EPUB books, TXT text books and CBZ or image-ZIP comics, and respects the typography each book was made with.
+SeLis is a quiet, multi-format reader for Windows and Android. It opens **EPUB** books, **TXT** plain-text books and **CBZ / ZIP** image comics, and stays out of the way while you read.
 
-SeLis supports EPUB 2.0.1 and EPUB 3.x, TXT books and image comics. Page width, margins, floats, illustrations and footnotes keep the book's own layout, while the reader only supplies sensible defaults where they are missing.
+Books are presented as their creators designed them: page width, asymmetric margins, floats, embedded fonts, illustrations and footnotes keep their own layout, while SeLis supplies sensible defaults only where a book leaves them unspecified.
 
 <p align="center"><img src=".github/readme/reading.svg" width="860" alt="The reader on Windows with the contents drawer open, and a page turn on an Android phone"></p>
 
@@ -43,27 +43,33 @@ Download the installer or the portable build. Windows 10 and 11 already include 
 ### Android
 
 1. Download the `.apk` file on your phone or tablet.
-2. Open it. Android asks you to allow installing unknown apps — allow it for the browser or file manager you are using.
-3. Once installed, SeLis appears on your home screen.
+2. Open it. Android asks you to allow installing unknown apps — enable it for the browser or file manager you used.
+3. Once installed, **SeLis** appears on your home screen.
 
 The app is not distributed through Google Play, so Play Protect may warn about an unrecognised app the first time; choose *More details → Install anyway*.
 
-To update, download the newer `.apk` and install it over the existing app. Your library and reading progress are kept.
+### Updating
 
-To check for a new version, open the shelf settings, scroll to About and tap *检查更新* (Check for updates); it takes you straight to the releases page.
+Open *Settings → About* to check for updates and view release notes directly inside the app:
+
+- **Windows installer** downloads and verifies the update, then restarts into the installer.
+- **Android** downloads and verifies the new `.apk`, then hands it to the system package installer.
+- **Windows portable** links directly to the new build on the releases page.
+
+Updating over an existing installation always keeps your library, reading progress, bookmarks and notes.
 
 ## Highlights
 
-- **Read the way you prefer** — turn one page or a two-page spread, or scroll continuously from one chapter straight into the next, and switch between them at any time without losing your place
-- **A quiet reading interface** — contents, bookmarks and notes share one drawer, and the rest of the reader stays out of the way
-- **Layout you adjust as you read** — page colour, font, size, line height, spacing, margins and columns, changed from a small panel over the page
-- **Kind to every pair of eyes** — Traditional/Simplified Chinese conversion and custom character replacement, grayscale/invert/dim filters, and assistance for red, green and blue colour weakness; all of them change only how the page is shown, never the book
-- **Made for touch too** — swipe to turn pages on phones and tablets, with a slide animation that follows your finger and a library and menus rearranged for small screens
-- **Illustrations at full size** — tap or click an image in the text to open it in an overlay, then zoom, pan or view it at its original size; closing returns you exactly where you were
-- **Faithful to the book** — percentages, asymmetric margins, floats, full-page illustrations and inline footnote markers keep their intended proportions
-- **Bring in a whole folder at once** — pick the folder where you keep your books, and they land on the shelf sorted into folders that follow your own directories, with duplicates recognised
-- **Hand over to another device on your Wi‑Fi** — show a QR code on one device and scan it with the other to send books, progress, bookmarks and notes directly between them, without any cloud
-- **Local by design** — no account and no upload; your books stay on your device
+- **One reader for books and comics** — read EPUB 2 & 3 books, TXT novels and CBZ/ZIP comics with consistent navigation, progress tracking and shelf organisation
+- **Read the way you prefer** — turn one page or a two-page spread, or scroll continuously from one chapter straight into the next, and switch at any time without losing your place
+- **A quiet reading interface** — contents, bookmarks and notes share one drawer, up to five books stay open in tabs, and the rest of the interface stays out of sight until needed
+- **Live typography that respects the book** — adjust themes, custom colours, font, size, line height, spacing, margins and columns from a compact `Aa` panel; sliders reflect the book's own defaults and reset to follow the book with one tap
+- **Kind to every pair of eyes** — Traditional/Simplified Chinese conversion and custom character replacement, grayscale/invert/dim/saturation/sharpen filters, and assistance for red, green and blue colour weakness; all of them change only what is drawn on screen, never the file
+- **Made for touch and desktop alike** — finger-following page turns, corner-tap bookmark ribbons and volume-key page turning on Android; a custom theme-matched title bar, multi-book tabs and keyboard/wheel navigation on Windows
+- **Illustrations and footnotes in place** — click or tap an image to inspect, zoom and pan in an overlay; preview footnotes on hover or pin them to scroll without leaving your page
+- **Organise without moving your files** — import individual files or entire directory trees into matching shelf folders, watch a folder for automatic imports, and choose whether books are read directly from their original location or copied into the library
+- **A private shelf when you need one** — switch to a password-protected shelf whose books, progress, bookmarks and notes are stored separately and excluded from global search, LAN transfer and cloud sync
+- **Local by default, connected when you choose** — transfer books and reading records directly between devices over local Wi‑Fi via QR code, or sync reading data (never book files) through your own WebDAV storage
 
 <p align="center"><img src=".github/readme/layout.svg" width="860" alt="The layout panel switching between the Light, Sepia, Gray and Night themes while line height and margins change the page"></p>
 
@@ -71,58 +77,61 @@ To check for a new version, open the shelf settings, scroll to About and tap *�
 
 ## Features
 
-- **TXT text books:** UTF-8, UTF-16 and common legacy encodings (including Chinese GB18030/GBK and Big5), with a manual encoding selector in Reading settings. Uses the existing typography, search, bookmarks and notes; original files remain unchanged.
-- **Image comics:** open CBZ or image ZIP archives, with natural page ordering, single/double pages, continuous scrolling, right-to-left ComicInfo support and image zoom. RAR/CBR, 7z and PDF are not included.
+### Formats
 
-### Library
+- **EPUB 2.0.1 and EPUB 3.x** — reflowable and fixed-layout (`pre-paginated`) books, embedded audio and video playback, right-to-left page progression, experimental vertical writing mode (with a force-horizontal toggle), consecutive single-image chapters paired into two-page spreads, and DRM detection notices
+- **TXT text books** — automatic detection and manual selection for UTF-8, UTF-16 and common legacy encodings (including GB18030/GBK and Big5), automatic chapter recognition, paragraph indent switch and full justification, plus full support for typography, search, bookmarks and notes without modifying the source file
+- **Image comics (`CBZ` / `ZIP`)** — natural page ordering, single-page or two-page spreads, continuous vertical scrolling that joins pages at their natural aspect ratio, `ComicInfo` right-to-left metadata support, pinch-to-zoom and whole-strip zoom in scroll mode, and windowed loading for large archives *(RAR/CBR, 7z and PDF are not included)*
 
-- Import books from a file picker, including batch import; on desktop, drag & drop works too
-- Folder import: scan a whole directory and turn its sub-folders into shelf folders; preview the grouping first, stop at any time, and keep whatever was already imported
-- Automatic duplicate detection — the same book is never added twice
-- Cover grid with generated placeholder covers and a "new" badge
-- Folders and favourites to organise the shelf — grouping a book never moves or copies the file
-- Search, sort, layout density, theme and interface motion (full or reduced) managed from a single menu
-- Reading progress and recently-read tracking; open a book right where you left it
-- Portable reading archives to carry progress, bookmarks and safe settings between devices
-- Device transfer: on the same Wi‑Fi, pair two devices with a QR code (or by pasting the connection info) and send progress, bookmarks and notes, optionally with the book files — both devices need version 0.2.8 or later, and a version mismatch now says plainly that an update is needed
+### Library and storage
+
+- **Flexible importing** — import from the file picker (single or batch), drag and drop onto the window on desktop, or open books directly from your system file manager with *Open with SeLis*
+- **Folder & auto-import** — scan an entire directory and turn its sub-folders into shelf folders with a pre-import preview and cancellable progress; or set a watched folder in *Settings → Storage* to import new books automatically when the shelf is idle
+- **Original files or library copies** — on both Windows and Android, choose whether to read books directly from their original paths or copy them into the app library; reconnect moved files when needed, relocate the Windows library folder, or export original book files from the shelf or any folder
+- **Automatic duplicate detection** — the same book is recognised and never added twice
+- **Shelf organisation** — cover grid and detailed list views, folders and favourites, per-folder independent sorting, whole-folder batch selection, generated placeholder covers and "new" badges
+- **Private shelf** — unlock a separate, password-protected shelf from the shelf header; move books between the normal and private shelves at any time while keeping original files in place
+- **Interface customisation** — switch interface language between Simplified Chinese, English and system default without restarting; choose light/dark appearance and full or reduced motion
 
 ### Reading
 
-- EPUB 2 and EPUB 3 support, with contents, bookmarks and notes in a single drawer
-- Page turning one page or two at a time, or continuous scrolling that carries on from one chapter into the next, chosen per book and remembered
-- Layout controls: single or two-page spread, four page colours, font, size, line height, spacing, margins and columns
-- Page-turn animation: slide, fade or none; touch page turns can be interrupted and dragged back and forth
-- Character display: Traditional/Simplified conversion and custom replacement rules that change only what you see; search and "copy original" still follow the book's own text
-- Visual filters: grayscale, invert, dim, saturation and sharpen, with a press-and-hold button to compare against the original
-- Colour-weakness assistance for red, green and blue, with adjustable strength
-- Long chapters are prepared in the background, so opening a book or reaching a heavy chapter does not hold up what you are reading
-- A progress bar for the whole book, with chapter marks you can drag
-- Illustrations open in an overlay with zoom, pan, fit-to-window and original-size views
-- Footnotes in an overlay: hover to preview on desktop, click to pin and scroll
-- Reading position is remembered by content anchor, so font, window and layout changes return you to the same passage
-- Search inside the current book, or across the whole library
-- Select text to copy it or attach a note; notes can be edited, deleted and jumped back from
-- Fixed-layout (pre-paginated) books render as full pages
-- A clear notice when a book is protected by DRM
+- **Paged and continuous modes** — turn one page or a two-page spread at a time, or scroll continuously across chapters, remembered per book; in two-page mode, half-empty chapter endings can pair with the opening page of the next chapter, and page turns slide smoothly across chapter boundaries
+- **Multi-book tabs** — keep up to five books open in tabs and switch between them without losing your reading position
+- **Live `Aa` typography panel** — four built-in page themes (Light, Sepia, Gray, Night) plus up to six custom colour themes (paper, text and accent); live sliders for font size, line height, font weight, letter/word/paragraph spacing, margins and columns that default to the book's own styles and reset with one tap; optional override for book-declared fonts
+- **Interruptible page-turn motion** — slide, fade or instant page turns; touch drags follow your finger and can be reversed mid-turn, and tap zones can be customised with a visual preview (including left-side tap for next page)
+- **Visual bookmark ribbons** — hang a ribbon on the current page from the toolbar or by tapping the top page corner on touch screens (left and right corners manage their respective pages in two-page mode), with quick undo on removal
+- **Navigation and jump history** — contents, bookmarks and notes share a single drawer with collapsible branches; jumping via the progress bar, table of contents, links, search results, bookmarks or notes records a history you can step back and forth through
+- **Notes and search** — select text to copy or attach a note; edit, delete or jump back to notes at any time; search inside the current book or across the entire library (with a rebuildable full-text index)
+- **Illustrations and footnotes** — open any in-text illustration in an overlay to zoom, pan, fit to window or view at original size; preview footnotes on hover on desktop or pin them in a scrollable popover
+- **Character display and visual filters** — Traditional/Simplified Chinese conversion and custom replacement rules (while search and *Copy original* still use the book's underlying text); grayscale, invert, dim, saturation and sharpen filters with a press-and-hold original comparison button; adjustable red, green and blue colour-weakness assistance
+
+### Sync, transfer and backup
+
+- **LAN device transfer** — pair two devices on the same Wi‑Fi by scanning a QR code or pasting a connection code; send reading progress, bookmarks and notes (optionally with the book files), transfer multiple batches in one session, and switch sending direction on the fly
+- **WebDAV cloud sync** — optionally connect Nutstore (坚果云) or any compatible WebDAV service to sync reading progress, bookmarks, notes, favourites and folder assignments across devices; book files are never uploaded, and when multiple devices have progress for the same book you can choose which device's position to continue from
+- **Portable reading archives** — export and import `.epubsave` archives to carry progress, bookmarks, notes and safe settings between devices
 
 ### Per platform
 
-- **Windows** — the system title bar is replaced by a slim frame that follows the app theme, keeps the book title and the window controls in the same bar, and lets you drag the window from it; EPUB files stay where they are, and the library links to them instead of copying
-- **Android** — edge-to-edge immersive reading, swipe page turns, a battery indicator while reading, a built-in QR scanner for device transfer, and the system back gesture steps back one layer at a time
+- **Windows** — custom theme-aware title bar housing book tabs and window controls; reveal book files directly in File Explorer; configurable library directory with guided migration; in-app update download and installation
+- **Android** — edge-to-edge immersive reading with optional system status bar hiding, keep-screen-on toggle, battery indicator, volume-key page turning (with long-press continuous turning and direction swap), built-in QR scanner for device transfer, and step-by-step system back gesture support
 
 ### Compatibility
 
-EPUB files vary a great deal, and the reader is built to tolerate that:
+Book files in the wild vary widely, and SeLis is built to handle them gracefully:
 
-- Percentages, asymmetric margins and floats keep their intended proportions
-- Full-page illustrations, divider images and inline footnote markers render correctly
-- Books that do not follow the specification closely still open and read as well as possible
+- Percentages, asymmetric margins, floats and book-embedded fonts keep their intended proportions and faces
+- Wide text tables wrap cleanly without overflowing the column, while pre-formatted tables stay intact
+- Full-page illustrations, single-image SVG covers, divider graphics and inline footnote markers render at their proper aspect ratios
+- Long chapters are prepared in the background so opening a book or entering a heavy chapter never blocks the page you are reading
 
 ## Privacy
 
-SeLis needs no account by default and collects no usage data; your books, notes and reading progress stay on your device. Only if you choose to connect WebDAV are reading progress, bookmarks, notes, favourites and categories synced to your own WebDAV space — book files are never uploaded.
+SeLis requires no account by default and collects no analytics or telemetry. Your books, notes and reading progress stay on your device.
 
-Device transfer connects your two devices directly over your local network with an encrypted, one-time pairing; nothing passes through a server. On Android the camera is used only while you scan a pairing QR code, and is requested the first time you do so.
+- **Private shelf** data is stored in an isolated local repository protected by your password and is never included in library-wide search, LAN transfer or WebDAV sync.
+- **WebDAV sync** is strictly opt-in and only syncs reading metadata (progress, bookmarks, notes, favourites and folders) to the WebDAV server you configure — book files are never uploaded.
+- **Device transfer** connects your two devices directly over your local network using an encrypted, one-time pairing; nothing passes through an external server. On Android, camera permission is requested only when you scan a pairing QR code.
 
 ## Building from source
 
@@ -146,7 +155,7 @@ pnpm test                # run the test suite
 
 ## Feedback
 
-Bugs and suggestions are welcome in [Issues](https://github.com/herenfor/epub-read/issues) — every one of them gets read. Please include your platform and the app version (shown under About), and the book title if the problem only happens with one book.
+Bugs and suggestions are welcome in [Issues](https://github.com/herenfor/epub-read/issues) — every one of them gets read. Please include your platform and the app version (shown under *Settings → About*), and the book title if the problem only happens with one book.
 
 ## Contributors and thanks
 
@@ -156,16 +165,10 @@ Bugs and suggestions are welcome in [Issues](https://github.com/herenfor/epub-re
 
 Copyright © 2026 HeRenFor.
 
-Original code in SeLis is made available under the [PolyForm Strict License 1.0.0](LICENSE) — a source-available license, not an OSI-approved open-source license.
+Original code in SeLis is licensed under the [GNU General Public License v3.0 (`GPL-3.0-only`)](LICENSE).
 
-The default license permits certain non-commercial use, but does not grant permission to modify, create derivative works from, or distribute the software.
+- You are free to run, study, modify, and redistribute the software under the terms of the GPL-3.0. Any distributed modified versions or derivative works incorporating SeLis code must also be distributed as a whole under the GPL-3.0 with complete corresponding source code.
+- The license does **not** grant rights to use the **SeLis** name, application icons, or official application identifiers (`dev.epubreader.app`, `dev.epubreader.ai`, `dev.herenfor.epubreader`) to endorse or impersonate official releases; redistributed modified builds must use distinct branding and identifiers.
+- Third-party components remain subject to their respective licenses (MIT, Apache-2.0, MPL-2.0, BSD, ISC, Zlib, Unicode-3.0, and others); full lists, copyright notices, license texts, and source locations are in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
 
-Commercial use and other uses outside the scope of the PolyForm Strict License require a separate written license from the copyright holder.
-
-For licensing inquiries, contact the repository owner through GitHub.
-
-This repository is public, and GitHub's own Terms of Service allow public repositories to be viewed and forked. Beyond those platform terms and your rights under applicable law, the PolyForm Strict License grants no additional right to modify, create derivative works from, or redistribute the software.
-
-Third-party components remain subject to their respective licenses. The project includes third-party components under MIT, Apache-2.0, MPL-2.0, BSD, ISC, Zlib, Unicode-3.0 and other licenses. Full lists, copyright notices, license texts and source locations are in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md), and the project license does not change them.
-
-For additional licensing information, see [LICENSING.md](LICENSING.md). Contributions are handled separately — please get in touch first.
+For brand rules, contribution terms, alternative licensing inquiries, and historical release license boundaries (`v0.2.2` and earlier under Apache-2.0; `v0.2.3`–`v0.3.11` under PolyForm Strict 1.0.0), see [LICENSING.md](LICENSING.md).

@@ -1,9 +1,9 @@
 # Third-Party Software Notices
 
-EPUB Reader includes third-party open-source software.
+SeLis includes third-party open-source software.
 Each component remains subject to its respective license.
 
-本项目的原创代码采用 [PolyForm Strict License 1.0.0](LICENSE) 提供，授权说明见
+本项目的原创代码自 `v0.4.0` 起采用 [GNU General Public License v3.0 (GPL-3.0-only)](LICENSE) 提供，授权说明见
 [LICENSING.md](LICENSING.md)。本文件不改变任何第三方组件自身的许可证与版权归属；
 下表与 `third-party-licenses/` 中的 Apache-2.0、MIT、MPL-2.0 等许可证文本均属于
 第三方组件，仍按其原始条款适用。

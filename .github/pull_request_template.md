@@ -1,7 +1,7 @@
 <!--
-外部贡献者：本项目使用 PolyForm Strict 许可，提交代码前请先开 Issue 联系维护者，
+外部贡献者：本项目采用 GPL-3.0-only 许可，提交较大代码改动前建议先开 Issue 与维护者沟通方案，
 详见 LICENSING.md 的 Contributions 一节。
-External contributors: please open an issue first; see LICENSING.md › Contributions.
+External contributors: please open an issue first to align on scope; see LICENSING.md › Contributions.
 -->
 
 ## 改了什么 / What changed
