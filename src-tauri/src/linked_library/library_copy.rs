@@ -142,7 +142,7 @@ pub(crate) fn ensure_library_space(root: &Path, total_bytes: u64) -> Result<(), 
 
 /// Copies `source` into the library under a readable name after checking the
 /// staged bytes still hash to `content_hash`. Returns the name and snapshot.
-pub(super) fn copy_into_library(
+pub(crate) fn copy_into_library(
     root: &Path,
     source: &Path,
     content_hash: &str,
@@ -200,13 +200,24 @@ fn publish_without_replacing(source: &Path, target: &Path) -> std::io::Result<()
     Ok(())
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "android")))]
 fn publish_without_replacing(source: &Path, target: &Path) -> std::io::Result<()> {
     // link is atomic and cannot overwrite. Both names must be on the same
     // filesystem; unsupported filesystems fail rather than fall back to replace.
     fs::hard_link(source, target)?;
     let _ = fs::remove_file(source);
     Ok(())
+}
+
+#[cfg(target_os = "android")]
+fn publish_without_replacing(source: &Path, target: &Path) -> std::io::Result<()> {
+    // App-private Android storage rejects hard links. The library write
+    // lock and import reservation serialize writers to this directory.
+    match fs::symlink_metadata(target) {
+        Ok(_) => Err(std::io::ErrorKind::AlreadyExists.into()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => fs::rename(source, target),
+        Err(error) => Err(error),
+    }
 }
 
 pub(crate) fn publish_staged_copy(

@@ -623,20 +623,21 @@ pub(crate) fn move_android_private_copy(
     let hash = binding.content_hash.clone();
     let private_file =
         linked_library::private_copy_path(root, &hash).map_err(PortableError::storage_error)?;
-    let name = linked_library::managed_publish_name(root, &hash, &[])
-        .map_err(PortableError::storage_error)?;
-    let binding = binding.into_managed_library_copy(name);
-    let target = binding.local_file(root).map_err(PortableError::storage_error)?;
-    let raw = serde_json::to_string(&binding)
-        .map_err(|error| PortableError::storage_error(error.to_string()))?;
-    // Both paths are on Android's app-data filesystem. Keep the old link
-    // until the two SQLite databases have committed the ownership change.
-    std::fs::hard_link(&private_file, &target)
-        .map_err(|error| PortableError::storage_error(error.to_string()))?;
-    let moved = source.move_local_book(destination, &hash, &raw, current);
+    let reservations =
+        super::managed_library_copies(root).map_err(PortableError::storage_error)?;
+    // Keep the private source until the two databases commit. Android does
+    // not allow the app to hard-link files in its own data directory.
+    let (name, snapshot) = linked_library::copy_into_library(
+        root, &private_file, &hash, &format!("{hash}.epub"), &reservations,
+    ).map_err(PortableError::storage_error)?;
+    let target = linked_library::managed_named_path(root, &name).map_err(PortableError::storage_error)?;
+    let binding = binding.into_managed_library_copy(name, snapshot);
+    let moved = serde_json::to_string(&binding)
+        .map_err(|error| PortableError::storage_error(error.to_string()))
+        .and_then(|raw| source.move_local_book(destination, &hash, &raw, current));
     let obsolete = if moved.is_ok() { private_file } else { target };
     if std::fs::remove_file(obsolete).is_err() {
-        eprintln!("Could not remove the obsolete link after a private shelf move");
+        eprintln!("Could not remove the obsolete copy after a private shelf move");
     }
     moved
 }
