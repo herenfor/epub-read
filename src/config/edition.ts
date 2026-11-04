@@ -6,14 +6,9 @@
 import type { AppEdition } from "./editionValue";
 
 export type { AppEdition } from "./editionValue";
-export { normalizeAppEdition } from "./editionValue";
+export { appNameForEdition, normalizeAppEdition } from "./editionValue";
 
 declare const __APP_EDITION__: AppEdition;
 
 export const APP_EDITION: AppEdition = __APP_EDITION__;
 export const IS_AI_EDITION = APP_EDITION === "ai";
-
-/** User-facing product name: Core is SeLis, the AI edition is SeLis AI. */
-export function appNameForEdition(edition: AppEdition): "SeLis" | "SeLis AI" {
-  return edition === "ai" ? "SeLis AI" : "SeLis";
-}
