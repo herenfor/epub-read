@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getRuntimeCapabilities } from "../platform/runtimeCapabilities";
+import { IS_AI_EDITION } from "../config/edition";
 import { PinIcon } from "./readerIcons";
 import { ReaderTabStrip, type ReaderTabStripProps } from "./ReaderTabStrip";
 import "./titleBar.css";
@@ -104,6 +105,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   readerTabs,
 }) => {
   const { t } = useUiText();
+  const appName = `${t("titlebar.appName")}${IS_AI_EDITION ? " AI" : ""}`;
   const [isMaximized, setIsMaximized] = useState(false);
   const [isZenRevealed, setIsZenRevealed] = useState(false);
   const [tabMenuOpen, setTabMenuOpen] = useState(false);
@@ -273,7 +275,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
     }
   }, [desktopChrome]);
 
-  // 非 Tauri 桌面环境或手机端书架视图：由 ShelfView 渲染单行顶栏并承担安全区，移除重复的 "EPUB 阅读器" 标题栏
+  // 非 Tauri 桌面环境或手机端书架视图：由 ShelfView 渲染单行顶栏并承担安全区，移除重复的 SeLis 标题栏
   if ((!isTauriEnv() || mobileCompact) && view === "shelf") {
     return null;
   }
@@ -290,7 +292,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
         {...dragProps}
         title={title}
       >
-        {title || t("titlebar.appName")}
+        {title || appName}
       </span>
       {mobileCompact ? chapterTitle && (
         <span className="titlebar-chapter-title" {...dragProps} title={chapterTitle}>
@@ -414,7 +416,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
             bookMeta
           ) : (
             <span className="titlebar-app-title" {...dragProps} title={title}>
-              {title || t("titlebar.appName")}
+              {title || appName}
             </span>
           )}
         </div>

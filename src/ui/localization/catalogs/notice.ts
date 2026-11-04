@@ -56,7 +56,7 @@ export const notice = defineMessages("notice", {
   "notice.shelf.refreshFailedShort": { zh: "书架刷新失败", note: "A clause appended to a summary notice." },
   "notice.archive.exportTitle": { zh: "导出存档", note: "System save dialog title." },
   "notice.archive.importTitle": { zh: "导入存档", note: "System open dialog title." },
-  "notice.archive.filter": { zh: "EPUB Reader 存档", note: "File type name in the system picker; keep the product name." },
+  "notice.archive.filter": { zh: "SeLis 存档", note: "File type name in the system picker; keep the product name." },
   "notice.archive.androidDocument": "Android 文档",
   "notice.archive.rangeSelected.other": "选中的 {count} 本资料",
   "notice.archive.rangeSelected.one": { zh: "选中的 {count} 本资料", note: "Singular form." },

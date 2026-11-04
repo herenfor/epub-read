@@ -49,7 +49,7 @@
   "notice.shelf.refreshFailedShort": "Failed to refresh library",
   "notice.archive.exportTitle": "Export Archive",
   "notice.archive.importTitle": "Import Archive",
-  "notice.archive.filter": "EPUB Reader Archive",
+  "notice.archive.filter": "SeLis Archive",
   "notice.archive.androidDocument": "Android Document",
   "notice.archive.rangeSelected.other": "{count} selected books' data",
   "notice.archive.rangeSelected.one": "{count} selected book's data",

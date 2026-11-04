@@ -1449,7 +1449,7 @@ export default function App() {
   });
 
   const chooseSaveFileDestination = useCallback(async (): Promise<SaveFileLocation | null> => {
-    const defaultName = `epub-reader-${new Date().toISOString().slice(0, 10)}.epubsave`;
+    const defaultName = `SeLis-${new Date().toISOString().slice(0, 10)}.epubsave`;
     if (runtime.platform === "android") {
       const selected = await saveFileDialog({
         title: uiText("notice.archive.exportTitle"),
@@ -1627,7 +1627,7 @@ export default function App() {
       }
       const zip = single === null;
       const defaultPath = zip
-        ? `epub-reader-books-${new Date().toISOString().slice(0, 10)}.zip`
+        ? `SeLis-books-${new Date().toISOString().slice(0, 10)}.zip`
         : bookExportFileName(single!.fileName, single!.title);
       let destination: SaveFileLocation | null = null;
       try {
@@ -1828,7 +1828,7 @@ export default function App() {
       if (runtime.platform === "android") {
         const uri = await saveFileDialog({
           title: uiText("notice.legacy.exportTitle"),
-          defaultPath: `epub-reader-${new Date().toISOString().slice(0, 10)}.json`,
+          defaultPath: `SeLis-${new Date().toISOString().slice(0, 10)}.json`,
           filters: [{ name: uiText("notice.archive.filter"), extensions: ["application/json", "json"] }],
         });
         if (!uri || Array.isArray(uri)) return;
@@ -1836,7 +1836,7 @@ export default function App() {
       } else if (isTauriEnv()) {
         const path = await saveFileDialog({
           title: uiText("notice.legacy.exportTitle"),
-          defaultPath: `epub-reader-${new Date().toISOString().slice(0, 10)}.json`,
+          defaultPath: `SeLis-${new Date().toISOString().slice(0, 10)}.json`,
           filters: [{ name: uiText("notice.archive.filter"), extensions: ["json"] }],
         });
         if (!path) return;
@@ -1845,7 +1845,7 @@ export default function App() {
         const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
         const link = document.createElement("a");
         link.href = url;
-        link.download = `epub-reader-${new Date().toISOString().slice(0, 10)}.json`;
+        link.download = `SeLis-${new Date().toISOString().slice(0, 10)}.json`;
         link.click();
         window.setTimeout(() => URL.revokeObjectURL(url), 0);
       }
@@ -5755,7 +5755,7 @@ export default function App() {
     >
       <TitleBar
         view={view}
-        title={view === "reader" ? (ready ? book!.metadata.title : (book?.metadata.title ?? "")) : t("appUi.appName")}
+        title={view === "reader" ? (ready ? book!.metadata.title : (book?.metadata.title ?? "")) : `${t("appUi.appName")}${IS_AI_EDITION ? " AI" : ""}`}
         author={view === "reader" && ready ? book!.metadata.creator : undefined}
         chapterTitle={view === "reader" && ready ? currentChapterLabel : undefined}
         onBackToShelf={view === "reader" ? handleBackToShelf : undefined}

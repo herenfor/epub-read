@@ -2,7 +2,7 @@ import { defineMessages } from "../defineMessages";
 
 /** App frame pieces outside the panels: placeholders, the phone "more" sheet, in-reader reading settings and progress-choice dialogs. */
 export const appUi = defineMessages("appUi", {
-  "appUi.appName": { zh: "EPUB 阅读器", note: "Window/top bar title on the shelf." },
+  "appUi.appName": { zh: "SeLis", note: "Window/top bar title on the shelf." },
   "appUi.showTools": "显示阅读工具",
   "appUi.preparingShelf": "正在准备书架…",
   "appUi.openingFile": { zh: "正在打开《{name}》…", note: "{name} is a file name." },

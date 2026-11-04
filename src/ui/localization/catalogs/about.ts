@@ -31,7 +31,7 @@ export const about = defineMessages("about", {
   "about.update.retry": { zh: "重试", max: 8 },
   "about.update.viewNotes": "查看更新内容",
   "about.update.skip": "跳过此版本",
-  "about.update.permission": "需要在系统设置里允许 EPUB Reader 安装应用，允许后回到这里继续。",
+  "about.update.permission": "需要在系统设置里允许此应用安装应用，允许后回到这里继续。",
   "about.update.allow": { zh: "去允许", max: 10 },
   "about.update.failed.unavailable": "这一版还不能在应用内更新，请前往下载。",
   "about.update.failed.download": "下载失败，请检查网络后重试。",

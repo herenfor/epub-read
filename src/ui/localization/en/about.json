@@ -28,7 +28,7 @@
   "about.update.retry": "Retry",
   "about.update.viewNotes": "What's New",
   "about.update.skip": "Skip This Version",
-  "about.update.permission": "Allow EPUB Reader to install apps in system settings, then come back here to continue.",
+  "about.update.permission": "Allow this app to install apps in system settings, then come back here to continue.",
   "about.update.allow": "Allow",
   "about.update.failed.unavailable": "This version can't be installed from the app yet. Please download it instead.",
   "about.update.failed.download": "Download failed. Check your connection and try again.",
