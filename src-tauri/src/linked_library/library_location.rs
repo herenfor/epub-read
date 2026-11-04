@@ -217,6 +217,13 @@ fn book_files(bindings: &[DeviceBinding]) -> Result<Vec<BookFile>> {
         })
         .collect()
 }
+
+fn location_bindings(app: &AppHandle, root: &Path) -> Result<Vec<DeviceBinding>> {
+    if !crate::private_shelf::managed_library_copies(root).map_err(io_error)?.is_empty() {
+        return Err(invalid("有托管书籍仍在隐私书架，请移回普通书架后再更换书库位置"));
+    }
+    Ok(load_bindings(app)?)
+}
 fn selected_settings(root: &Path, base: Option<String>) -> Result<LibrarySettings> {
     let mut settings = load_library_settings(local(root)?)?;
     settings.custom_base_directory = base
@@ -819,9 +826,10 @@ pub async fn linked_library_location_plan(
     tauri::async_runtime::spawn_blocking(move || {
         let writes = app.state::<LinkedLibraryWriteState>();
         let _guard = writes.0.try_lock().map_err(|_| busy())?;
+        let root = library_root(&app)?;
         Ok(plan_at(
-            &library_root(&app)?,
-            &load_bindings(&app)?,
+            &root,
+            &location_bindings(&app, &root)?,
             base_directory,
             mode,
         )?
@@ -849,7 +857,7 @@ pub async fn linked_library_location_start(
         let root = library_root(&app)?;
         let result = run_at(
             &root,
-            &load_bindings(&app)?,
+            &location_bindings(&app, &root)?,
             &job_id,
             base_directory,
             mode,
