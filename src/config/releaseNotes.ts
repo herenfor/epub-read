@@ -35,29 +35,36 @@ export const RELEASES_PAGE_URL = "https://github.com/herenfor/epub-read/releases
  */
 export const RELEASE_NOTES: readonly ReleaseNote[] = [
   {
-    version: "0.3.11",
-    status: "released",
-    releasedOn: "2026-11-03",
+    version: "0.4.0",
+    status: "development",
     items: [
       {
         category: "new",
-        text: "Aa 阅读设置：行高、字重、字距、词距等滑杆未设置时停在书籍自身的值，改过后可一键恢复跟随书籍或自动；字号行与其他设置对齐。",
+        text: "隐私书架：书架标题可切换，首次进入设置密码；书目、进度、笔记和收藏单独存放，不参与全库搜索、互传和云同步。书籍菜单可移入或移出，原书文件留在原处。",
       },
       {
         category: "new",
-        text: "点击预览：开启“左侧点击也下一页”后，左侧箭头的预览箭头会翻转为朝前，提示与实际翻页方向一致。",
+        text: "TXT 与漫画：支持打开 TXT 和 ZIP/CBZ；TXT 识别章节并提供段落缩进开关与两端对齐，漫画支持双指缩放和滚动模式整条缩放。",
+      },
+      {
+        category: "new",
+        text: "Android 原文件：关闭“导入时复制到书库”后，可直接读取原位置的文件；文件失效时可重新连接，删除书时提示原文件仍保留。",
+      },
+      {
+        category: "new",
+        text: "自动导入文件夹：在设置 > 存储中选择文件夹，应用在前台且书架空闲时自动扫描导入，也可立即扫描或关闭。",
+      },
+      {
+        category: "new",
+        text: "SeLis 显示名：应用在系统中的名称改为 SeLis，安装身份、签名、数据目录与更新地址保持不变。",
       },
       {
         category: "improved",
-        text: "设置中的“界面动画”改为“减少动效”开关，开启后只使用更短的淡入淡出。",
+        text: "漫画大目录与大压缩包读取更顺畅，优先读取可见页面并复用缓存；TXT 排版和漫画拼接比例得到修复。",
       },
       {
         category: "improved",
-        text: "统一书架筛选、搜索范围、字体来源等处的分段选择控件，外观和操作保持一致。",
-      },
-      {
-        category: "improved",
-        text: "局域网发送的“附带书籍”改为发送表单中的复选框，位置与生效时机一致。",
+        text: "移动书籍前保存进度；切换标签、目录跳转和阅读手势互不干扰，文件夹扫描失败会明确提示。",
       },
     ],
   },
