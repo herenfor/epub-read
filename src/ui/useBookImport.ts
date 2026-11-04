@@ -1,5 +1,5 @@
 import { loadSourceBook, supportedBookName } from "../core/documentFormats";
-import { useCallback, useRef, useState, type Dispatch, type MutableRefObject, type RefObject, type SetStateAction } from "react";
+import { useCallback, useEffect, useRef, useState, type Dispatch, type MutableRefObject, type RefObject, type SetStateAction } from "react";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { disposeBook, DrmError } from "../core/book";
 import type { DirectoryImportPort } from "../core/folderImport/contract";
@@ -7,8 +7,8 @@ import type { NativeDirectorySource } from "../platform/directoryImportBridge";
 import type { RuntimeCapabilities } from "../platform/runtimeCapabilities";
 import { cancelDocumentImport, importDocuments, pickLinkDocuments, type AndroidDocumentSelection, type AndroidImportBatchResult, type AndroidImportOptions, type AndroidNativeImportError } from "../platform/androidNativeBridge";
 import type { ExternalOpenSource } from "../platform/externalOpenBridge";
-import { activatePortableShelfState, getShelfStore, type ShelfEntry } from "./shelf";
-import { activeShelfSpaceToken } from "./shelfSpaces";
+import { activatePortableShelfState, getShelfStore, type ShelfEntry, type ShelfStore } from "./shelf";
+import { activeShelfSpaceToken, subscribeShelfSpace } from "./shelfSpaces";
 import { noteCloudSyncChange } from "./cloudSync/cloudSyncStore";
 import { formatImportNotice, findDuplicateEntry, mergeShelfEntries, sha256Hex, type ImportNotice } from "./importBooks";
 import { liveFolderName, planImportIntoFolder, type ImportedBookRef } from "./importIntoFolder";
@@ -60,6 +60,8 @@ export interface OriginalImportRetry {
   documents: AndroidDocumentSelection[];
   reasons: string[];
   target: ImportFolderTarget | null;
+  /** The shelf the books failed on; a copy only ever lands there. */
+  store: ShelfStore;
 }
 
 function createNativeImportRequestId(): string {
@@ -429,7 +431,7 @@ export function useBookImport({
     options: { keptOriginal?: boolean; note?: string } = {},
   ): Promise<ShelfEntry[]> => {
     const store = getShelfStore();
-    const retry: OriginalImportRetry = { documents: [], reasons: [], target };
+    const retry: OriginalImportRetry = { documents: [], reasons: [], target, store };
     const imported: ShelfEntry[] = [];
     const accepted: ShelfEntry[] = [];
     const duplicateTitles: string[] = [];
@@ -541,7 +543,8 @@ export function useBookImport({
         ? entry.id
         : null;
     // A book kept at its original place reconnects to the same content only; the URI stays native.
-    const relink = entry.originalLocation === true && wanted !== null && !getShelfStore().importDocuments;
+    const pickerStore = getShelfStore();
+    const relink = entry.originalLocation === true && wanted !== null && !pickerStore.importDocuments;
     let documents: AndroidDocumentSelection[];
     if (relink) {
       documents = await pickLinkDocuments();
@@ -560,8 +563,10 @@ export function useBookImport({
       if (!uri) return null;
       documents = [{ uri }];
     }
+    // The picker can outlive a shelf switch; never import into the shelf that replaced the book's own.
+    if (getShelfStore() !== pickerStore) return null;
     const batch = await runNativeDocumentImport(documents, relink ? { native: { keepOriginal: true, relinkHash: wanted } } : {});
-    if (!batch) return null;
+    if (!batch || getShelfStore() !== pickerStore) return null;
     const match = batch.results.find((item) =>
       (relink ? item.status === "saved" : item.status === "saved" || item.status === "duplicate") &&
       item.record &&
@@ -580,8 +585,8 @@ export function useBookImport({
       });
       return null;
     }
-    const store = getShelfStore();
-    const [restored] = store.importRecords ? await store.importRecords([match.record]) : [match.record];
+    const [restored] = pickerStore.importRecords ? await pickerStore.importRecords([match.record]) : [match.record];
+    if (getShelfStore() !== pickerStore) return null;
     contentHashByIdRef.current.set(restored.id, restored.contentHash ?? restored.id);
     entryByContentHashRef.current.set(restored.contentHash ?? restored.id, restored);
     setShelfEntries((previous) => mergeShelfEntries(previous, [restored]));
@@ -673,12 +678,13 @@ export function useBookImport({
   const retryOriginalAsCopy = useCallback(async (): Promise<void> => {
     const retry = originalRetry;
     setOriginalRetry(null);
-    if (!retry) return;
-    const store = getShelfStore();
+    if (!retry || getShelfStore() !== retry.store) return;
     const batch = await runNativeDocumentImport(retry.documents);
-    if (batch && getShelfStore() === store) await applyNativeImportBatch(batch, retry.documents, retry.target);
+    if (batch && getShelfStore() === retry.store) await applyNativeImportBatch(batch, retry.documents, retry.target);
   }, [applyNativeImportBatch, originalRetry, runNativeDocumentImport]);
   const dismissOriginalRetry = useCallback((): void => setOriginalRetry(null), []);
+  // The offer belongs to the shelf the books failed on; switching shelves withdraws it.
+  useEffect(() => subscribeShelfSpace(() => setOriginalRetry(null)), [setOriginalRetry]);
 
   /** Browser file input result: consumes the target its picker was opened for. */
   const handleFileInputSources = useCallback((sources: ImportSource[]): void => {
