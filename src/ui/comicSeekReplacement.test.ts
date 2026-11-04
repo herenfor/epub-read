@@ -35,7 +35,12 @@ describe("comic progress jump ownership", () => {
       expect(cancelled).toHaveBeenLastCalledWith(first);
       await dom.run(() => { ref.current!.setPage(2); });
       expect(cancelled).toHaveBeenLastCalledWith(second);
-      expect(cancelled).toHaveBeenCalledTimes(2);
+      const third = { session: 1, request: 3 };
+      await dom.run(() => { ref.current!.seekContentFraction!({ key: "comic", spineIndex: 0, fraction: 0.7 }, third); });
+      const track = dom.container.querySelector(".comic-track")!;
+      await dom.dispatch(track, new dom.window.Event("pointerdown", { bubbles: true }));
+      expect(cancelled).toHaveBeenLastCalledWith(third);
+      expect(cancelled).toHaveBeenCalledTimes(3);
       expect(settled).not.toHaveBeenCalled();
     } finally {
       await dom.dispose();

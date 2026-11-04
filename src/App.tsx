@@ -1359,6 +1359,7 @@ export default function App() {
       setContentAxis(null);
       scrubSessionRef.current += 1;
       tocFollowSeekRef.current = null;
+      sidebarNavigationMemoryRef.current.tocFollow = undefined;
       dispatchScrub({ type: "reset", session: scrubSessionRef.current });
       const start = clamp(saved?.spineIndex ?? firstLinear(b), 0, b.spine.length - 1);
       setBook(b);
@@ -5056,6 +5057,8 @@ export default function App() {
     contentAxisRef.current = null;
     setContentAxis(null);
     scrubSessionRef.current += 1;
+    tocFollowSeekRef.current = null;
+    sidebarNavigationMemoryRef.current.tocFollow = undefined;
     dispatchScrub({ type: "reset", session: scrubSessionRef.current });
     setChapterState({ status: "loading" });
     setReaderHistory(emptyReaderNavigationHistory());

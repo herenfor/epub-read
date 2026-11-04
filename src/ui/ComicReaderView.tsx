@@ -767,6 +767,7 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
       onScroll={() => { if (frame.current === null) frame.current = requestAnimationFrame(() => actions.current.sample()); }}
       onPointerDown={event => {
         if (latest.current.inputPaused) return;
+        replaceSeek();
         alignment.current = null; fade.current?.cancel();
         pointer.current = { id: event.pointerId, x: event.clientX, y: event.clientY }; userMoved.current = true;
       }} onPointerMove={event => {
