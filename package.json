@@ -2,7 +2,7 @@
   "name": "epub-reader",
   "private": true,
   "version": "0.4.0",
-  "license": "SEE LICENSE IN LICENSE",
+  "license": "GPL-3.0-only",
   "type": "module",
   "scripts": {
     "dev": "node scripts/build-frontend.mjs dev core",

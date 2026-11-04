@@ -28,7 +28,7 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
-    "license": "PolyForm Strict License 1.0.0",
+    "license": "GPL-3.0-only",
     "resources": [
       "../LICENSE",
       "../LICENSING.md",
