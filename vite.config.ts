@@ -2,7 +2,7 @@ import { defineConfig } from "vitest/config";
 import { loadEnv } from "vite";
 import packageJson from "./package.json";
 import react from "@vitejs/plugin-react";
-import { normalizeAppEdition } from "./src/config/editionValue";
+import { appNameForEdition, normalizeAppEdition } from "./src/config/editionValue";
 import { frontendOutDir, normalizeAppPlatform, shellForPlatform } from "./src/config/platformValue";
 import { aiCompanionDevAssets } from "./scripts/ai-companion-dev-assets.mjs";
 import { resolveAppUpdateSource } from "./src/config/appUpdateSourceValue";
@@ -15,6 +15,7 @@ export default defineConfig(({ mode }) => {
   const platform = normalizeAppPlatform(env.VITE_APP_PLATFORM ?? "windows");
   const shell = shellForPlatform(platform);
   const version = packageJson.version;
+  const appTitle = appNameForEdition(edition);
   // Android ships under its own application ID; Windows keeps the original
   // identifier because it names the existing app data directory.
   const identifier = platform === "android"
@@ -36,9 +37,12 @@ export default defineConfig(({ mode }) => {
     plugins: [react(), ...(edition === "ai" ? [aiCompanionDevAssets()] : []), {
       name: "edition-manifest",
       transformIndexHtml(html) {
-        if (platform !== "android") return html;
+        // The browser tab follows the edition brand; native windows keep the
+        // title configured by their Tauri config.
+        const withTitle = html.replace(/<title>[^<]*<\/title>/, `<title>${appTitle}</title>`);
+        if (platform !== "android") return withTitle;
         // App settings own text/UI sizing; ImageViewer owns image pinch.
-        return html.replace(
+        return withTitle.replace(
           "width=device-width, initial-scale=1.0",
           "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no",
         );
