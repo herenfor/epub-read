@@ -421,6 +421,7 @@ pub(crate) fn make_managed_record(
 
 /// Publishes prepared staging files under the already-held library write lock.
 /// The caller owns the commit permit and saves the indexes after this returns.
+#[cfg(any(target_os = "android", test))]
 pub(super) fn publish_prepared_documents(
     root: &Path,
     records: &mut Vec<LinkedLibraryRecord>,
