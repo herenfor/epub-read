@@ -9,7 +9,7 @@
   "app": {
     "windows": [
       {
-        "title": "EPUB 阅读器 AI（开发）",
+        "title": "SeLis AI",
         "width": 1080,
         "height": 760,
         "minWidth": 640,

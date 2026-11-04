@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "EPUB 阅读器",
+        "title": "SeLis",
         "width": 1080,
         "height": 760,
         "minWidth": 640,

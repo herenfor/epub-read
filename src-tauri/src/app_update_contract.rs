@@ -54,6 +54,11 @@ pub(crate) fn windows_product_name(
         .then_some(expected_name)
 }
 
+#[cfg(any(windows, test))]
+pub(crate) fn windows_display_name_matches(product_name: &str, display_name: &str) -> bool {
+    display_name == product_name || (product_name == "EPUB Reader" && display_name == "SeLis")
+}
+
 // NSIS quotes InstallLocation; canonicalized Windows paths can also carry the
 // extended-length prefix. The IO boundary resolves aliases before this policy.
 fn windows_directory(value: &str) -> String {
@@ -121,6 +126,14 @@ pub(crate) fn classify(evidence: &InstallEvidence<'_>) -> InstallKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_display_name_supports_rebranding_only_for_the_production_install() {
+        assert!(windows_display_name_matches("EPUB Reader", "EPUB Reader"));
+        assert!(windows_display_name_matches("EPUB Reader", "SeLis"));
+        assert!(!windows_display_name_matches("EPUB Reader", "SeLis AI"));
+        assert!(!windows_display_name_matches("EPUB Reader Update Test", "SeLis"));
+    }
 
     fn installed() -> InstallEvidence<'static> {
         InstallEvidence {
