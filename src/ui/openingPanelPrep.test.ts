@@ -263,4 +263,40 @@ describe("prepared panels are reused by the first real opening", () => {
       await dom.dispose();
     }
   });
+
+  it("TOC: a landed jump the reader has since left is not followed when the TOC opens", async () => {
+    const dom = createPanelHarness();
+    const toc: TocNode[] = Array.from({ length: 200 }, (_, i) => ({ label: `Chapter ${i + 1}`, href: `c${i}.xhtml`, children: [] }));
+    const memory = createSidebarNavigationMemory();
+    const props: SidebarDrawerProps = {
+      open: false, warm: true, navigationMemory: memory, activeTab: "toc", onTabChange: vi.fn(),
+      mode: "overlay", onModeChange: vi.fn(), onClose: vi.fn(), toc, activeHref: "c10.xhtml", onNavigateToc: vi.fn(),
+      bookmarks: [], onSelectBookmark: vi.fn(), notes: [], onNavigateNote: vi.fn(),
+    };
+    try {
+      // The first real opening centers by itself; the user then scrolls to the top and closes.
+      await dom.render(createElement(SidebarDrawer, { ...props, open: true }));
+      const pane = dom.container.querySelector(".sidebar-toc-pane") as HTMLElement;
+      pane.scrollTop = 0;
+      memory.scrollTop.toc = 0;
+      await dom.render(createElement(SidebarDrawer, props));
+      // A (Chapter 11) jumped to B (Chapter 151) while closed; then a normal navigation went on to C (Chapter 41).
+      memory.tocFollow = { generation: 1, fromHref: "c10.xhtml", toHref: "c150.xhtml" };
+      await dom.render(createElement(SidebarDrawer, { ...props, activeHref: "c150.xhtml" }));
+      await dom.render(createElement(SidebarDrawer, { ...props, activeHref: "c40.xhtml" }));
+      await dom.render(createElement(SidebarDrawer, { ...props, open: true, activeHref: "c40.xhtml" }));
+      expect(memory.tocFollow).toBeUndefined();
+      expect(pane.scrollTop).toBe(0);
+
+      // Still on the landed entry: the same pending jump is followed.
+      await dom.render(createElement(SidebarDrawer, { ...props, activeHref: "c150.xhtml" }));
+      expect(pane.scrollTop).toBe(0);
+      memory.tocFollow = { generation: 2, fromHref: "c10.xhtml", toHref: "c150.xhtml" };
+      await dom.render(createElement(SidebarDrawer, { ...props, open: true, activeHref: "c150.xhtml" }));
+      expect(memory.tocFollow).toBeUndefined();
+      expect(pane.scrollTop).toBeGreaterThan(100 * 32);
+    } finally {
+      await dom.dispose();
+    }
+  });
 });

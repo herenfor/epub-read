@@ -183,11 +183,14 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
   if (!visible && deletingNoteId !== null) setDeletingNoteId(null);
 
   // Follow once on the TOC tab; a jump that stayed inside one entry keeps the user's scroll.
-  // Without a matching entry nothing is guessed from the ratio.
+  // Without a matching entry nothing is guessed from the ratio, and once the reader has moved
+  // off the landed entry (a page turn, bookmark or TOC tap) the old jump is not followed.
   let tocFollow: number | undefined;
   if (memory.tocFollow && visible && activeTab === "toc") {
-    if (!activeEntry || activeTocEntry(tocIndex, memory.tocFollow.fromHref)?.key === activeEntry.key) memory.tocFollow = undefined;
-    else tocFollow = memory.tocFollow.generation;
+    const { generation, fromHref, toHref } = memory.tocFollow;
+    if (!activeEntry || activeTocEntry(tocIndex, fromHref)?.key === activeEntry.key
+      || (toHref !== undefined && activeTocEntry(tocIndex, toHref)?.key !== activeEntry.key)) memory.tocFollow = undefined;
+    else tocFollow = generation;
   }
 
   const tocRows = useMemo(() => visibleTocRows(tocIndex, tocExpanded, tocFilter), [tocIndex, tocExpanded, tocFilter]);

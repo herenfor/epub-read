@@ -92,11 +92,14 @@ export interface ReaderHandle {
   setPage(i: number): void;
   /** 按比例 (0..1) 滚动或跳转 */
   scrollToRatio?(ratio: number): void;
-  /** 统一内容轴章内比例跳转与会话票据 */
+  /**
+   * 统一内容轴章内比例跳转与会话票据。分页视图同步落位，返回是否已落位；
+   * 稍后才落位的视图不返回值，改由 onContentFractionSettled 回报。
+   */
   seekContentFraction?(
     target: { key: string; spineIndex: number; fraction: number },
     token: ScrubToken,
-  ): void;
+  ): boolean | void;
   /** 渲染诊断文本（浏览器内调试） */
   diagnose(): string;
   /** 当前阅读锚点（进度持久化与内容进度） */
@@ -3345,14 +3348,15 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       seekContentFraction(target, _token) {
         pauseBackgroundWarmupForInput();
         const p = paginatorRef.current;
-        if (!p) return;
+        if (!p) return false;
         const pageCount = p.pageCount;
         if (pageCount <= 1) {
           this.setPage(0);
-          return;
+          return true;
         }
         const targetPage = Math.min(pageCount - 1, Math.max(0, Math.round(target.fraction * (pageCount - 1))));
         this.setPage(targetPage);
+        return true;
       },
       diagnose() {
         return paginatorRef.current?.diagnose() ?? uiText("log.diagnostics.unavailable");
