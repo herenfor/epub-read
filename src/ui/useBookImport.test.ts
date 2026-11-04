@@ -4,9 +4,10 @@ import type { AndroidImportBatchResult, AndroidImportProgress } from "../platfor
 import { getRuntimeCapabilities } from "../platform/runtimeCapabilities";
 import { createReactDomHarness } from "../test/reactDomHarness";
 import { emptyOrganization, type LibraryOrganization } from "./libraryOrganization";
-import type { ShelfEntry } from "./shelf";
+import type { ShelfEntry, ShelfStore } from "./shelf";
 import { useShelfEntriesState, useShelfNoticeState, useShelfContentHashes } from "./useShelfLibrary";
 import { useBookImportState, useBookImport, useFolderImport } from "./useBookImport";
+import { enterShelfSpace, leaveShelfSpace, SHELF_SPACES } from "./shelfSpaces";
 
 const ports = vi.hoisted(() => ({ store: vi.fn(), activate: vi.fn(), picker: vi.fn(), native: vi.fn(), cancel: vi.fn(), directory: vi.fn(), linkPicker: vi.fn(), keep: vi.fn() }));
 vi.mock("./shelf", async (original) => ({ ...await original<typeof import("./shelf")>(), getShelfStore: ports.store, activatePortableShelfState: ports.activate }));
@@ -284,6 +285,49 @@ describe("book import host extraction", () => {
       await t.dom.run(async () => { restored = await t.current().commands.reimportAndroidMissing(book); });
       expect(restored).toMatchObject({ id: "c", available: true, originalLocation: true });
       expect(ports.picker).not.toHaveBeenCalled();
+    } finally { await t.dom.dispose(); }
+  });
+
+  it("never lands a copy retry or a reconnect on a shelf other than the one it started on", async () => {
+    const t = setup();
+    const other = { ...t.store, importRecords: vi.fn(async (records: ShelfEntry[]) => records) };
+    const doc = { uri: "content://doc/b.epub", fileName: "b.epub" };
+    ports.keep.mockResolvedValue(true);
+    ports.linkPicker.mockResolvedValue([doc]);
+    ports.native.mockResolvedValueOnce({ results: [{ inputIndex: 0, status: "failed", record: null, error: "无法保留读取权限" }] });
+    try {
+      await t.render();
+      await t.dom.run(() => t.current().commands.handleChooseBooks());
+      expect(t.current().imports.originalRetry?.store).toBe(t.store);
+      // A retry confirmed after the shelf changed underneath it imports nothing.
+      ports.store.mockReturnValue(other);
+      await t.dom.run(() => t.current().commands.retryOriginalAsCopy());
+      expect(ports.native).toHaveBeenCalledTimes(1);
+      expect(t.current().imports.originalRetry).toBeNull();
+
+      // Switching shelves withdraws a pending offer.
+      ports.store.mockReturnValue(t.store);
+      ports.native.mockResolvedValueOnce({ results: [{ inputIndex: 0, status: "failed", record: null, error: "无法保留读取权限" }] });
+      await t.dom.run(() => t.current().commands.handleChooseBooks());
+      expect(t.current().imports.originalRetry).not.toBeNull();
+      await t.dom.run(() => enterShelfSpace({ space: SHELF_SPACES.private, store: other as unknown as ShelfStore, token: "p", close: async () => {} }));
+      expect(t.current().imports.originalRetry).toBeNull();
+      await t.dom.run(() => leaveShelfSpace());
+
+      // A reconnect picker that returns after a switch does not import.
+      const book = { ...entry("c"), available: false, originalLocation: true };
+      const picked = deferred<typeof doc[]>();
+      ports.linkPicker.mockReturnValueOnce(picked.promise);
+      let restored: ShelfEntry | null = book;
+      await t.dom.run(async () => {
+        const pending = t.current().commands.reimportAndroidMissing(book);
+        ports.store.mockReturnValue(other);
+        picked.resolve([{ uri: "content://doc/c.epub", fileName: "c.epub" }]);
+        restored = await pending;
+      });
+      expect(restored).toBeNull();
+      expect(ports.native).toHaveBeenCalledTimes(2);
+      expect(other.importRecords).not.toHaveBeenCalled();
     } finally { await t.dom.dispose(); }
   });
 });
