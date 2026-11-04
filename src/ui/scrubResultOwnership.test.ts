@@ -47,6 +47,8 @@ async function fixture() {
       dispatchReaderSession: session.dispatchReaderSession,
       contentAxisRef: { current: { ratioAt } },
       setReaderNotice: notice, uiText: (key: string) => key,
+      // TOC follow bookkeeping is covered by the drawer tests; here it only has to exist.
+      followTocAfterSeek: vi.fn(), dropTocFollowSeek: vi.fn(),
     };
     const dispatch = bind<(event: ScrubUiEvent) => void>("dispatchScrub", bindings);
     bindings.dispatchScrub = dispatch;

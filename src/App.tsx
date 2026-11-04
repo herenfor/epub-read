@@ -75,6 +75,7 @@ import { moveAndroidTaskToBack } from "./platform/androidAppTask";
 import { pageOpenMs, useExitPresence } from "./ui/menuMotion";
 import { useReaderCursorIdle } from "./ui/readerCursorIdle";
 import { SidebarDrawer } from "./ui/SidebarDrawer";
+import type { SidebarNavigationMemory } from "./ui/sidebarSwipe";
 import { AaPopover } from "./ui/AaPopover";
 import { useOpeningPanelPrep } from "./ui/openingPanelPrep";
 import { PanelPaintWarmup, usePanelPaintWarmup, type PanelWarmBatch } from "./ui/panelPaintWarmup";
@@ -734,11 +735,11 @@ export default function App() {
     token: ScrubToken;
   } | null>(null);
   const [scrubUiState, setScrubUiState] = useState<ScrubUiState>(() => initialScrubUi(0));
-  /** Latest progress-bar jump; only its real landing moves the TOC to the landed entry. */
-  const tocFollowSeekRef = useRef<{ token: ScrubToken; fromHref?: string } | null>(null);
+  /** Latest progress-bar jump and the book's sidebar memory it was made in; only its real landing moves the TOC. */
+  const tocFollowSeekRef = useRef<{ token: ScrubToken; fromHref?: string; memory: SidebarNavigationMemory } | null>(null);
   const tocFollowGenerationRef = useRef(0);
   // The pending target lives in the book's sidebar memory; this only re-renders the drawer.
-  const [, setTocFollowRequest] = useState(0);
+  const [tocFollowRequest, setTocFollowRequest] = useState(0);
   const activeHrefRef = useRef<string | undefined>(undefined);
   const scrubUiStateRef = useRef(scrubUiState);
 
@@ -1144,12 +1145,24 @@ export default function App() {
     const seek = tocFollowSeekRef.current;
     if (!seek || seek.token.session !== token.session || seek.token.request !== token.request) return;
     tocFollowSeekRef.current = null;
-    const memory = sidebarNavigationMemoryRef.current;
+    // A landing from a book session that has since been replaced belongs to no open TOC.
+    const memory = seek.memory;
+    if (token.session !== scrubSessionRef.current || memory !== sidebarNavigationMemoryRef.current) return;
     const generation = ++tocFollowGenerationRef.current;
     // An unconsumed earlier jump keeps its origin: A→B→B still follows to B.
     memory.tocFollow = { generation, fromHref: memory.tocFollow ? memory.tocFollow.fromHref : seek.fromHref };
     setTocFollowRequest(generation);
   }, []);
+  /** A cancelled, failed or replaced jump drops only its own pending follow. */
+  const dropTocFollowSeek = useCallback((token: ScrubToken) => {
+    const seek = tocFollowSeekRef.current;
+    if (seek && seek.token.session === token.session && seek.token.request === token.request) tocFollowSeekRef.current = null;
+  }, []);
+  useEffect(() => {
+    // The render that carried the landing names the landed entry; the drawer drops the follow once the reader leaves it.
+    const follow = sidebarNavigationMemoryRef.current.tocFollow;
+    if (follow?.generation === tocFollowRequest && follow.toHref === undefined) follow.toHref = activeHrefRef.current;
+  }, [tocFollowRequest]);
 
   /** 关闭正文图片浮层；不改变页码/滚动位置，也不记入阅读历史。 */
   const closeImageOverlay = useCallback((): void => {
@@ -1345,6 +1358,7 @@ export default function App() {
       contentAxisRef.current = null;
       setContentAxis(null);
       scrubSessionRef.current += 1;
+      tocFollowSeekRef.current = null;
       dispatchScrub({ type: "reset", session: scrubSessionRef.current });
       const start = clamp(saved?.spineIndex ?? firstLinear(b), 0, b.spine.length - 1);
       setBook(b);
@@ -3057,11 +3071,16 @@ export default function App() {
     const matchingSeek = pendingSeek && pendingSeek.target.spineIndex === spineIndexRef.current &&
       pendingSeek.token.session === scrubPending?.session && pendingSeek.token.request === scrubPending?.request
       ? pendingSeek : null;
-    if (pendingSeek && !matchingSeek) dispatchScrub({ type: "cancelled", token: pendingSeek.token });
+    if (pendingSeek && !matchingSeek) {
+      dropTocFollowSeek(pendingSeek.token);
+      dispatchScrub({ type: "cancelled", token: pendingSeek.token });
+    }
     if (matchingSeek) {
-      // setPage 同步发布页态，下面读到的就是定位后的状态。
-      readerRef.current?.seekContentFraction?.(matchingSeek.target, matchingSeek.token);
-      followTocAfterSeek(matchingSeek.token);
+      // setPage 同步发布页态，下面读到的就是定位后的状态。只有分页同步落位才在此跟随目录；
+      // 稍后落位的视图（漫画）由 onContentFractionSettled 回报。
+      if (readerRef.current?.seekContentFraction?.(matchingSeek.target, matchingSeek.token) === true) {
+        followTocAfterSeek(matchingSeek.token);
+      }
     }
     const state = chapterStateRef.current;
     const readingAnchor = readerRef.current?.getReadingAnchor();
@@ -3433,7 +3452,7 @@ export default function App() {
     releaseRestoreForExplicitNavigation();
     dispatchScrub({ type: "begin", token, ratio: r });
     // No axis means no reported landing to follow; scrollToRatio keeps the TOC as it is.
-    tocFollowSeekRef.current = axis ? { token, fromHref: activeHrefRef.current } : null;
+    tocFollowSeekRef.current = axis ? { token, fromHref: activeHrefRef.current, memory: sidebarNavigationMemoryRef.current } : null;
 
     if (settings.readingMode === "scroll") {
       if (axis) {
@@ -3469,6 +3488,7 @@ export default function App() {
               if (handleTocNavigate(href)) return; // Settle only after the target chapter and page are ready.
             }
             pendingChapterSeekRef.current = null;
+            dropTocFollowSeek(token);
             dispatchScrub({ type: "failed", token });
             dispatchReaderSession({ type: "scrub-local-settled" });
             setReaderNotice({ kind: "warn", text: uiText("notice.reader.progressNotFound") });
@@ -3491,7 +3511,7 @@ export default function App() {
       });
       dispatchReaderSession({ type: "scrub-local-settled" });
     }
-  }, [settings.readingMode, handleTocNavigate, dispatchScrub, dispatchReaderSession, releaseRestoreForExplicitNavigation]);
+  }, [settings.readingMode, handleTocNavigate, dispatchScrub, dispatchReaderSession, releaseRestoreForExplicitNavigation, dropTocFollowSeek]);
 
   const handleScrubPreviewChange = useCallback((ratio: number | null) => {
     dispatchScrub({
@@ -3520,17 +3540,19 @@ export default function App() {
   }, [acceptsScrubResult, dispatchScrub, dispatchReaderSession, followTocAfterSeek]);
 
   const handleContentFractionCancelled = useCallback((token: ScrubToken) => {
+    dropTocFollowSeek(token);
     if (!acceptsScrubResult(token)) return;
     dispatchReaderSession({ type: "scrub-reader-aborted" });
     dispatchScrub({ type: "cancelled", token });
-  }, [acceptsScrubResult, dispatchScrub, dispatchReaderSession]);
+  }, [acceptsScrubResult, dispatchScrub, dispatchReaderSession, dropTocFollowSeek]);
 
   const handleContentFractionFailed = useCallback((token: ScrubToken) => {
+    dropTocFollowSeek(token);
     if (!acceptsScrubResult(token)) return;
     dispatchReaderSession({ type: "scrub-reader-aborted" });
     dispatchScrub({ type: "failed", token });
     setReaderNotice({ kind: "warn", text: uiText("notice.reader.progressNotFound") });
-  }, [acceptsScrubResult, dispatchScrub, dispatchReaderSession]);
+  }, [acceptsScrubResult, dispatchScrub, dispatchReaderSession, dropTocFollowSeek]);
 
   const handleUserProgressSample = useCallback((
     location: { key: string; spineIndex: number; fraction: number; atEnd: boolean }

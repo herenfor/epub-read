@@ -253,7 +253,14 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
     if (!el || stripZoom.current === 1 || stripZoom.current > COMIC_ZOOM_RELEASE) return;
     zoomStrip(1, stripAnchor(el.clientWidth / 2, el.clientHeight / 2), el.clientWidth / 2, el.clientHeight / 2);
   };
+  /** Another navigation replaces an unlanded progress jump; its token never reports success. */
+  const replaceSeek = () => {
+    const token = seek.current;
+    seek.current = null;
+    if (token) latest.current.onContentFractionCancelled?.(token);
+  };
   const locate = (p: number, ratio = 0, behavior: ScrollBehavior = "auto") => {
+    replaceSeek();
     endZoom();
     stripShift.current = null;
     screenShift.current = null;
@@ -276,6 +283,7 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
   };
   const turn = (direction: 1 | -1) => {
     if (latest.current.inputPaused) return;
+    replaceSeek();
     endZoom();
     userMoved.current = true;
     fade.current?.cancel();
@@ -682,7 +690,8 @@ export const ComicReaderView = forwardRef<ReaderHandle, ReaderViewProps>(functio
     seekContentFraction(target, token) {
       const units = Math.max(0, Math.min(1, target.fraction)) * pages.length;
       const p = Math.min(pages.length - 1, Math.floor(units));
-      seek.current = token; locate(p, units - p);
+      // The landing reports from a microtask, so the token set after locate still settles it.
+      locate(p, units - p); seek.current = token;
     },
     diagnose: () => `comic ${position.current.page + 1}/${pages.length}; columns=${columns}; phase=${state().status}`,
     getReadingAnchor: () => state().status === "ready" ? { path: CHAPTER, ...anchor(), mediaUnits: pages.length } : null,
