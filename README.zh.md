@@ -8,8 +8,6 @@ SeLis 是一款安静的多格式阅读器，支持 Windows 与 Android，可打
 
 SeLis 支持 EPUB 2.0.1 与 EPUB 3.x、TXT 和图片漫画；版心、边距、浮动、插图和脚注都保留书内本身的排版，阅读器只在书籍缺少声明时提供合理的默认值。
 
-SeLis 取自古希腊语 selis，指书卷的分栏版心与页边留白；S、L 大写。核心版显示 SeLis，AI 版显示 SeLis AI。
-
 <p align="center"><img src=".github/readme/reading.svg" width="860" alt="Windows 上打开目录抽屉的阅读界面，以及在 Android 手机上翻页"></p>
 
 **语言：** [English](README.md) | 中文

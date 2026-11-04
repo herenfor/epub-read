@@ -8,8 +8,6 @@ SeLis is a quiet, multi-format reader for Windows and Android. It opens EPUB boo
 
 SeLis supports EPUB 2.0.1 and EPUB 3.x, TXT books and image comics. Page width, margins, floats, illustrations and footnotes keep the book's own layout, while the reader only supplies sensible defaults where they are missing.
 
-SeLis comes from the ancient Greek *selis*, the columned text block and margins of a book roll; the S and L are capitalised. The core app is SeLis and the AI edition is SeLis AI.
-
 <p align="center"><img src=".github/readme/reading.svg" width="860" alt="The reader on Windows with the contents drawer open, and a page turn on an Android phone"></p>
 
 **Languages:** English | [中文](README.zh.md)
