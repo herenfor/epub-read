@@ -26,7 +26,7 @@ export interface RuntimeCapabilities {
   supportsRevealSource: boolean;
   /** A34 book library folder (open it, choose its location): native Windows only. */
   supportsLibraryFolder: boolean;
-  /** 复制到书库 on import: native Windows (path links) and Android (document links). */
+  /** 复制到书库 on import: native Windows and Linux (path links) and Android (document links). */
   supportsImportCopyChoice: boolean;
   /** ER-0042 automatic import folder: native Windows and Android. */
   supportsFolderWatch: boolean;
@@ -53,7 +53,7 @@ export function getRuntimeCapabilities(): RuntimeCapabilities {
     supportsCloudSync: session?.source === "desktop" && (platform === "windows" || platform === "android"),
     supportsRevealSource: session?.source === "desktop" && platform === "windows",
     supportsLibraryFolder: session?.source === "desktop" && platform === "windows",
-    supportsImportCopyChoice: session?.source === "desktop" && (platform === "windows" || platform === "android"),
+    supportsImportCopyChoice: session?.source === "desktop" && (platform === "windows" || platform === "android" || platform === "linux"),
     supportsFolderWatch: session?.source === "desktop" && (platform === "windows" || platform === "android"),
     supportsPrivateShelf: session?.source === "desktop" && (platform === "windows" || platform === "android"),
   };

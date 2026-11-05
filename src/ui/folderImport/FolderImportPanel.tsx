@@ -47,7 +47,7 @@ export interface FolderImportPanelProps {
   closeSignal?: number;
   /** Start scanning on open: the port already knows its source (a folder dropped on the window). */
   autoScan?: boolean;
-  /** Windows: the shared 复制到书库 choice, sent with this import. Absent = no choice shown. */
+  /** Windows and Linux: the shared 复制到书库 choice, sent with this import. Absent = no choice shown. */
   copyToLibrary?: boolean;
   onCopyToLibraryChange?(copy: boolean): void;
 }

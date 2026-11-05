@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { createReactDomHarness } from "../test/reactDomHarness";
 import { emptyOrganization } from "./libraryOrganization";
-import { copyOnImportNow, ensureLibrarySettings, keepOriginalOnImportNow, resetLibrarySettingsForTest, setCopyOnImport } from "./librarySettings";
+import { copyOnImportNow, ensureLibrarySettings, folderImportCopyChoice, keepOriginalOnImportNow, resetLibrarySettingsForTest, setCopyOnImport } from "./librarySettings";
 import { ShelfView, type ShelfViewProps } from "./ShelfView";
 
 const { invoke, capabilities } = vi.hoisted(() => ({ invoke: vi.fn(), capabilities: { supportsLibraryFolder: true } }));
@@ -23,7 +23,7 @@ beforeEach(() => {
 
 const shown = { copyOnImport: true, libraryDirectory: "C:\\Users\\me\\AppData\\Local\\app\\linked-library\\books", error: null };
 
-it("导入按显示的设置复制：只读一次；读不到设置或不支持的平台都不复制", async () => {
+it("导入按显示的设置复制：只读一次；读不到设置不当作“不复制”，不支持的平台不复制", async () => {
   invoke.mockResolvedValueOnce(shown);
   await expect(copyOnImportNow()).resolves.toBe(true);
   await expect(copyOnImportNow()).resolves.toBe(true);
@@ -37,13 +37,22 @@ it("导入按显示的设置复制：只读一次；读不到设置或不支持�
 
   resetLibrarySettingsForTest();
   invoke.mockRejectedValueOnce({ code: "storage", message: "书库设置文件已损坏" });
-  await expect(ensureLibrarySettings()).resolves.toMatchObject({ copyOnImport: false, error: "书库设置文件已损坏" });
+  const unreadable = await ensureLibrarySettings();
+  expect(unreadable).toMatchObject({ copyOnImport: false, error: "书库设置文件已损坏" });
+  await expect(copyOnImportNow()).resolves.toBeNull();
+  expect(folderImportCopyChoice(unreadable)).toBe(true);
+  expect(folderImportCopyChoice(null)).toBe(true);
+
+  // A readable setting whose chosen location is unreachable keeps the user's choice.
+  resetLibrarySettingsForTest();
+  invoke.mockResolvedValueOnce({ ...shown, copyOnImport: false, available: false, customBaseDirectory: "E:\\books", error: "自定义书库位置不可用" });
   await expect(copyOnImportNow()).resolves.toBe(false);
 
   resetLibrarySettingsForTest();
   capabilities.supportsLibraryFolder = false;
   invoke.mockClear();
   await expect(copyOnImportNow()).resolves.toBe(false);
+  expect(folderImportCopyChoice(null)).toBeUndefined();
   expect(invoke).not.toHaveBeenCalled();
 });
 
