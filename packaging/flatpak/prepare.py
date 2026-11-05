@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Prepare exact local source/dependency inputs; compile them in the Flatpak SDK."""
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import shutil
@@ -11,6 +12,11 @@ import tempfile
 
 def run(args, cwd, **kwargs):
     return subprocess.run(args, cwd=cwd, check=True, **kwargs)
+
+
+def archive_digest(path):
+    with path.open("rb") as source:
+        return hashlib.file_digest(source, "sha256").hexdigest()
 
 
 def main():
@@ -28,8 +34,8 @@ def main():
     ).strip()
     inputs = output / "inputs"
     inputs.mkdir(parents=True, exist_ok=True)
-    # A fixed local archive path can hit Flatpak's old module cache even when
-    # its bytes change. Give each committed input set immutable paths.
+    # Keep inputs traceable to their commit. Their digests below are also
+    # required: a local path alone does not invalidate Flatpak's module cache.
     archive_names = {name: f"{name}-{commit}.tar.gz" for name in
                      ("source", "node-dependencies", "cargo-vendor")}
     run(["git", "archive", "--format=tar.gz", "--prefix=source/",
@@ -57,6 +63,7 @@ def main():
         manifest = json.loads((flatpak / "dev.epubreader.app.json").read_text())
         for entry, name in zip(manifest["modules"][0]["sources"], archive_names):
             entry["path"] = "inputs/" + archive_names[name]
+            entry["sha256"] = archive_digest(inputs / archive_names[name])
         (output / "dev.epubreader.app.json").write_text(json.dumps(manifest, indent=2) + "\n")
         shutil.copy2(flatpak / "cargo-config.toml", output / "cargo-config.toml")
         version = json.loads((source / "package.json").read_text())["version"]
