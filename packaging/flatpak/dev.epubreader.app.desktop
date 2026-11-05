@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=SeLis
+Comment=Read EPUB books, text files and comics
+Exec=epub-reader %U
+Icon=dev.epubreader.app
+Terminal=false
+Categories=Office;
+MimeType=application/epub+zip;
