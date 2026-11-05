@@ -1,9 +1,15 @@
+# Maintainer: HeRenFor
 # Candidate AUR source package for SeLis (Linux Core).
 #
 # This is not ready for AUR upload. Upstream has no release tag that contains
 # the Linux support yet, so the source below is a local archive generated from
 # commit 7081619dfae5a12b0ec8b29425d2d5d2f5175548. See README.md for the exact
-# archive command, checksum and the steps that still require an Arch host.
+# archive command, checksum and the release steps that remain.
+#
+# The package is named "selis", while the binary, desktop entry and icons keep
+# the names produced by the existing Tauri Linux bundle (epub-reader,
+# SeLis.desktop). This keeps the desktop entry and GTK window class consistent
+# with the observed bundle output.
 
 pkgname=selis
 pkgver=0.4.1
@@ -18,6 +24,7 @@ license=('GPL-3.0-only')
 depends=(
   'cairo'
   'dbus'
+  'desktop-file-utils'
   'fontconfig'
   'gcc-libs'
   'gdk-pixbuf2'
@@ -25,20 +32,18 @@ depends=(
   'gtk3'
   'hicolor-icon-theme'
   'libsoup3'
+  'shared-mime-info'
   'webkit2gtk-4.1'
   'xdg-utils'
 )
 
-# Arch's rust package provides cargo. The three -dev-style pkg-config modules
-# are checked by scripts/build-linux.sh.
+# The runtime libraries below are also present while building (makepkg treats
+# depends as installed), so only the separate build tools are listed here.
 makedepends=(
-  'fontconfig'
-  'gtk3'
   'nodejs'
   'pkgconf'
   'pnpm'
   'rust'
-  'webkit2gtk-4.1'
 )
 
 options=('!strip' '!debug')
@@ -61,14 +66,17 @@ build() {
 package() {
   cd "$pkgname-$pkgver"
 
-  install -Dm755 "$srcdir/target/release/epub-reader" "$pkgdir/usr/bin/$pkgname"
+  # The upstream binary is named after the Cargo package. Installing it under
+  # this name keeps the existing desktop entry and GTK window class coherent.
+  install -Dm755 "$srcdir/target/release/epub-reader" \
+    "$pkgdir/usr/bin/epub-reader"
 
   install -Dm644 src-tauri/icons/32x32.png \
-    "$pkgdir/usr/share/icons/hicolor/32x32/apps/$pkgname.png"
+    "$pkgdir/usr/share/icons/hicolor/32x32/apps/epub-reader.png"
   install -Dm644 src-tauri/icons/128x128.png \
-    "$pkgdir/usr/share/icons/hicolor/128x128/apps/$pkgname.png"
+    "$pkgdir/usr/share/icons/hicolor/128x128/apps/epub-reader.png"
   install -Dm644 src-tauri/icons/128x128@2x.png \
-    "$pkgdir/usr/share/icons/hicolor/256x256/apps/$pkgname.png"
+    "$pkgdir/usr/share/icons/hicolor/256x256/apps/epub-reader.png"
 
   install -d "$pkgdir/usr/share/licenses/$pkgname/third-party-licenses"
   install -m644 LICENSE LICENSING.md NOTICE THIRD_PARTY_LICENSES.md \
@@ -77,20 +85,17 @@ package() {
     "$pkgdir/usr/share/licenses/$pkgname/third-party-licenses/"
 
   install -d "$pkgdir/usr/share/applications"
-  cat > "$pkgdir/usr/share/applications/$pkgname.desktop" <<EOF
+  cat > "$pkgdir/usr/share/applications/SeLis.desktop" <<EOF
 [Desktop Entry]
-Type=Application
-Name=SeLis
-GenericName=E-book reader
+Categories=Education;
 Comment=An EPUB, TXT and comic reader
-Exec=$pkgname %U
-TryExec=$pkgname
-Icon=$pkgname
+Exec=epub-reader %U
+StartupWMClass=epub-reader
+Icon=epub-reader
+Name=SeLis
 Terminal=false
-Categories=Office;Viewer;
+Type=Application
 MimeType=application/epub+zip;
-Keywords=ebook;epub;reader;txt;comic;
-StartupWMClass=$pkgname
 EOF
-  chmod 644 "$pkgdir/usr/share/applications/$pkgname.desktop"
+  chmod 644 "$pkgdir/usr/share/applications/SeLis.desktop"
 }
