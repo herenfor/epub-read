@@ -4568,7 +4568,9 @@ export class ChapterPaginator {
       viewer.style.columnFill = "auto";
     } else {
       viewer.style.columnCount = String(geometry.columns);
-      viewer.style.columnWidth = "auto";
+      // WebKitGTK treats count:1 + width:auto as an unfragmented block.
+      // Use the measured leaf width so long single-page chapters form columns.
+      viewer.style.columnWidth = geometry.columns === 1 ? `${geometry.columnWidth}px` : "auto";
       viewer.style.columnGap = `${geometry.gap}px`;
       viewer.style.columnFill = "auto";
     }

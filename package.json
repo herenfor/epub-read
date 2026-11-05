@@ -14,6 +14,7 @@
     "build:windows": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows.ps1 -Edition Core",
     "build:windows:core": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows.ps1 -Edition Core",
     "build:windows:ai": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows.ps1 -Edition AI",
+    "build:linux": "bash scripts/build-linux.sh",
     "tauri:dev:core": "node scripts/build-frontend.mjs tauri-dev core",
     "tauri:dev:ai": "node scripts/build-frontend.mjs tauri-dev ai",
     "verify:edition:core": "node scripts/verify-edition-artifacts.mjs core",

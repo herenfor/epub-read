@@ -2338,7 +2338,8 @@ describe("measure viewport height locking", () => {
 
     // Height should be 600 - 25 - 35 = 540px
     expect(viewer.style.height).toBe("540px");
-    expect(viewer.style.columnWidth).toBe("auto");
+    // The 800px parent contributes 10px of padding on each side.
+    expect(viewer.style.columnWidth).toBe("780px");
     expect(viewer.style.columnCount).toBe("1");
 
     // Abort so promise resolves without waiting
