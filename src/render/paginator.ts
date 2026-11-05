@@ -2678,6 +2678,8 @@ export class ChapterPaginator {
   private measuredViewport = { width: -1, height: -1 };
   private metrics = { pageCount: 1, currentPage: 0 };
   private loadSeq = 0;
+  /** loadSeq whose dropped Blob navigation was already requested again. */
+  private renavigatedLoadSeq = -1;
   private disposed = false;
   /** 当前章节登记在 ResourceServer 的资源持有者；换章/销毁时释放。 */
   private resourceHolderId: number | null = null;
@@ -4078,6 +4080,14 @@ export class ChapterPaginator {
       this.emit({ status: "error", message: "无法访问章节内容" });
       this.finishDisplayReady(seq, false);
       this.displayGate.release(seq);
+      return;
+    }
+    // WebKitGTK can deliver the load of the about:blank unload step after src
+    // already names this chapter's Blob, and then never commit that Blob.
+    // That load is stale: request the Blob once more; a repeat falls through.
+    if (doc.URL.split("#", 1)[0] !== this.blobUrl && this.renavigatedLoadSeq !== seq) {
+      this.renavigatedLoadSeq = seq;
+      this.iframe.src = this.blobUrl;
       return;
     }
     this.contentDoc = doc;

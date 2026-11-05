@@ -42,7 +42,13 @@ function fakeIframe(): HTMLIFrameElement {
       if (listeners.get(name) === listener) listeners.delete(name);
     },
     contentDocument: null,
+    listeners,
   } as unknown as HTMLIFrameElement;
+}
+
+function fireLoad(iframe: HTMLIFrameElement, doc: unknown): void {
+  (iframe as unknown as { contentDocument: unknown }).contentDocument = doc;
+  (iframe as unknown as { listeners: Map<string, EventListener> }).listeners.get("load")?.(new Event("load"));
 }
 
 function deferred<T>() {
@@ -87,14 +93,15 @@ describe("ChapterPaginator CSS Blob URL lifecycle", () => {
       ...serverOverrides,
     };
     const iframe = fakeIframe();
+    const onState = vi.fn();
     const paginator = new ChapterPaginator({
       iframe: iframe,
       server: server as never,
       settings: DEFAULT_SETTINGS,
       strictXml: true,
-      onState: vi.fn()
+      onState,
     });
-    return { paginator, server, iframe };
+    return { paginator, server, iframe, onState };
   }
 
   it("成功换章和 dispose 分别撤销当前/上一章 CSS URL，且不调用 ResourceServer revokeAll", async () => {
@@ -158,6 +165,33 @@ describe("ChapterPaginator CSS Blob URL lifecycle", () => {
     gate.resolve(1);
     await staleLoad;
     expect(releaseHolder).toHaveBeenCalledWith(1);
+    paginator.dispose();
+  });
+
+  it("about:blank 的迟到 load 不当作新章节：重新请求一次 Blob，再次迟到才报错", async () => {
+    const { paginator, iframe, onState } = makePaginator();
+    await paginator.load("chapter-a.xhtml");
+    const blob = iframe.src;
+    expect(blob).toBe("blob:test/2");
+    const assigned: string[] = [];
+    let current = blob;
+    Object.defineProperty(iframe, "src", {
+      configurable: true,
+      get: () => current,
+      set: (value: string) => { assigned.push(value); current = value; },
+    });
+    const blank = {
+      URL: "about:blank", getElementById: () => null, querySelectorAll: () => [],
+      addEventListener: () => {}, removeEventListener: () => {},
+    };
+
+    fireLoad(iframe, blank);
+    expect(assigned).toEqual([blob]);
+    expect(onState).not.toHaveBeenCalledWith(expect.objectContaining({ status: "error" }));
+
+    fireLoad(iframe, blank);
+    expect(assigned).toEqual([blob]);
+    expect(onState).toHaveBeenCalledWith(expect.objectContaining({ status: "error", message: "章节缺少阅读器容器" }));
     paginator.dispose();
   });
 
