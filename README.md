@@ -57,7 +57,7 @@ Linux is not part of the current released packages yet. The packaging candidates
 - **Flatpak (candidate)**: a source-built sandbox package, not submitted to Flathub. See [`packaging/flatpak/README.md`](packaging/flatpak/README.md). It opens books through the system file chooser/document portal and does not receive access to the whole home directory.
 - **Arch Linux (AUR candidate)**: the `PKGBUILD` and build notes are in [`packaging/aur/`](packaging/aur/README.md), but the package has not been uploaded to the AUR. Build it only on Arch Linux from the pinned local source archive.
 
-The first Linux scope is local reading. WebDAV sync and LAN transfer are not part of it. The current build/install evidence is from Debian 13 with software rendering; file-manager association, native GPU/Wayland behavior and minimum older distributions are not yet verified. Do not install a Linux package from a third party claiming to be an official SeLis release.
+The first Linux scope is local reading. WebDAV sync and LAN transfer are not part of it. The deb was built on Ubuntu 26.04 and tested on Debian 13 with software rendering; file-manager association, native GPU/Wayland behavior and minimum older distributions are not yet verified. Do not install a Linux package from a third party claiming to be an official SeLis release.
 
 ### Updating
 

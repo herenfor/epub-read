@@ -116,15 +116,12 @@ that `%U` passes the path to the app.
   `makepkg` validated it against `sha256sums`.
 - The package metadata passed `namcap PKGBUILD`, and dependency resolution
   reached the build stage in the isolated Arch x86-64 environment.
-- **The full `makepkg` build is currently blocked by the Arch Rust toolchain,
-  not by this PKGBUILD.** With `rust 1:1.99.1-1` / `cargo 1.99.1`, the final
-  link does not receive the `cargo:rustc-link-lib` directives emitted by
-  transitive build scripts. The build stops with
-  `undefined symbol: aws_lc_0_44_0_*` (the bundled SQLite and Ring archives
-  would be missing as well). A minimal Cargo project with a transitive build
-  script reproduces the missing `-l` flag; the same source builds with rustc
-  1.97.1 on Debian 13. No package was produced and `pacman -U`/file checks
-  were not run.
+- **The full `makepkg` build has not succeeded.** With `rust 1:1.99.1-1` /
+  `cargo 1.99.1`, the recorded attempt stopped at the final link with
+  `undefined symbol: aws_lc_0_44_0_*`. The cause is still under investigation;
+  a missing visible `-l` flag alone does not prove a compiler regression,
+  because static native objects may be bundled in Rust libraries. No package
+  was produced and `pacman -U`/file checks were not run.
 - Not verified: full Arch build and package installation, launching the native
   window on a physical Arch desktop, file-manager association,
   upgrade/removal, the minimum supported Arch snapshot, and any AUR
@@ -139,8 +136,8 @@ Rust toolchain.
 
 1. Use the official release tag archive as `source` and update
    `sha256sums`; regenerate `.SRCINFO`.
-2. Re-run `makepkg --printsrcinfo` and `makepkg` on Arch once the toolchain
-   link-propagation issue is resolved.
+2. Resolve the recorded native-link failure, then re-run `makepkg --printsrcinfo`
+   and `makepkg` on Arch.
 3. Verify the desktop entry, icon, EPUB MIME association and install/removal
    behavior on a target Arch desktop.
 4. Get explicit authorization before registering or uploading to the AUR; do

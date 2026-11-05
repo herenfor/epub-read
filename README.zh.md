@@ -53,11 +53,11 @@ SeLis 尊重每本书原有的排版设计：版心宽度、不对称边距、�
 
 Linux 尚未列入当前正式发布的安装包。以下渠道都是本地源码构建的候选包，不是官方下载：
 
-- **Debian/Ubuntu `.deb`（候选）**：已在 Debian 13、软件渲染和 WebKitGTK 2.54 环境下完成本地构建与打开验证；没有正式 `.deb` 下载，最低发行版支持范围尚未确定。可按下方源码构建说明自行生成。
+- **Debian/Ubuntu `.deb`（候选）**：在 Ubuntu 26.04 构建，已在 Debian 13、软件渲染和 WebKitGTK 2.54 环境下完成安装与打开验证；没有正式 `.deb` 下载，最低发行版支持范围尚未确定。可按下方源码构建说明自行生成。
 - **Flatpak（候选）**：本地源码构建的沙箱包，未提交 Flathub。见 [`packaging/flatpak/README.md`](packaging/flatpak/README.md)。它通过系统文件选择器／文档门户读取书籍，不获得整个主目录的访问权限。
 - **Arch Linux（AUR 候选）**：`PKGBUILD` 与构建说明在 [`packaging/aur/`](packaging/aur/README.md)，但尚未上传到 AUR。只应在 Arch Linux 上用固定的本地源码归档构建。
 
-首个 Linux 范围以本地阅读为主；WebDAV 同步与局域网互传不在其中。现有构建/安装证据来自 Debian 13 的软件渲染环境；文件管理器关联、真实 GPU/Wayland 行为以及更旧发行版的最低要求尚未验证。不要安装第三方声称是 SeLis 官方的 Linux 包。
+首个 Linux 范围以本地阅读为主；WebDAV 同步与局域网互传不在其中。现有 deb 构建环境为 Ubuntu 26.04，安装验证环境为 Debian 13 软件渲染桌面；文件管理器关联、真实 GPU/Wayland 行为以及更旧发行版的最低要求尚未验证。不要安装第三方声称是 SeLis 官方的 Linux 包。
 
 ### 检查与安装更新
 

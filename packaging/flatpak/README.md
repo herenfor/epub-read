@@ -49,12 +49,11 @@ this local recipe does not claim store acceptance.
 - No `host`/`home` filesystem grant or unrestricted session/system bus is
   requested. File selection is through GTK's native file chooser and its
   document portal integration; the sandbox cannot simply read the host library.
-- This candidate targets local reading. The existing Linux import UI currently
-  links selected documents; it does not expose the copy-on-import choice yet.
-  Portal-selected linked import and reopening were checked locally, but copied
-  import is still an acceptance gap. Do not describe this as a completed copied
-  library workflow. Revoked document access, watched folders and persistence
-  across a desktop-session restart must be verified separately. Network
+- This candidate targets local reading. Linux exposes the existing copy-on-import
+  choice and defaults to copying selected books into its own library. Turning
+  the choice off keeps a document-portal link to the source file. Revoked
+  document access, watched folders and persistence across a desktop-session
+  restart must be verified separately. Network
   access is not granted yet, so LAN transfer/WebDAV are outside this first
   sandbox package's acceptance scope.
 - Native/deb data is not moved into the sandbox automatically. Never run a
