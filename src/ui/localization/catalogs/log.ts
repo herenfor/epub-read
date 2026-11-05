@@ -15,4 +15,10 @@ export const log = defineMessages("log", {
   "log.resourceErrorRecord": { zh: "读取错误记录：{error}", note: "Preserves the original technical read error even after the resource has recovered." },
   "log.diagnostics.pending": { zh: "（打开面板时自动采集）", note: "Placeholder before the diagnostic dump is collected." },
   "log.diagnostics.unavailable": { zh: "（阅读器未初始化）", note: "Diagnostic dump when no book page is loaded yet." },
+  "log.copyDiagnostics": { zh: "复制诊断信息", note: "Button that copies app version, platform and runtime facts for an issue report. Not the log.", max: 16 },
+  "log.copyDiagnostics.hint": { zh: "仅含版本、平台与运行环境，不含书籍与日志。复制后可贴进问题反馈。", note: "Explains what the copy button includes, shown next to it." },
+  "log.copyDiagnostics.copied": { zh: "已复制诊断信息", max: 20 },
+  "log.copyDiagnostics.unavailable": { zh: "当前环境不支持读取诊断信息。", note: "Shown in the browser build, which has no native backend." },
+  "log.copyDiagnostics.collectFailed": "没能读取诊断信息，请稍后再试。",
+  "log.copyDiagnostics.clipboardFailed": "没能复制到剪贴板，请再试一次。",
 });
