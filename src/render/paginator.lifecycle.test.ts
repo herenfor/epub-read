@@ -195,6 +195,21 @@ describe("ChapterPaginator CSS Blob URL lifecycle", () => {
     paginator.dispose();
   });
 
+  it("重复迟到的旧章节即使有阅读器容器，也不能提交成新章节", async () => {
+    const { paginator, iframe, onState } = makePaginator();
+    await paginator.load("chapter-a.xhtml");
+    const oldViewerLookup = vi.fn(() => ({}));
+    const oldDoc = { URL: "blob:test/old-chapter", getElementById: oldViewerLookup };
+
+    fireLoad(iframe, oldDoc);
+    fireLoad(iframe, oldDoc);
+
+    expect(oldViewerLookup).not.toHaveBeenCalled();
+    expect(onState).toHaveBeenCalledWith(expect.objectContaining({ status: "error" }));
+    expect(onState).not.toHaveBeenCalledWith(expect.objectContaining({ status: "measuring" }));
+    paginator.dispose();
+  });
+
   it("loadSeq 过期时撤销旧任务的局部 CSS URL，并保留新章 URL 到 dispose", async () => {
     const first = deferred<{ html: string; issues: string[]; unresolvedResources: string[]; downgraded: boolean }>();
     sanitizeMock.mockImplementationOnce(async (_html: string, opts: { makeUrl?: (text: string, mediaType: string) => string }) => {
