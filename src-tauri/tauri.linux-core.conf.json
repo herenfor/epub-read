@@ -8,6 +8,21 @@
     "targets": ["deb"],
     "category": "Office",
     "shortDescription": "An EPUB, TXT and comic reader",
+    "homepage": "https://github.com/herenfor/epub-read",
+    "linux": {
+      "deb": {
+        "section": "text",
+        "desktopTemplate": "linux/SeLis.desktop.hbs",
+        "files": {
+          "/usr/share/doc/se-lis/copyright": "linux/copyright",
+          "/usr/share/doc/se-lis/LICENSE": "../LICENSE",
+          "/usr/share/doc/se-lis/LICENSING.md": "../LICENSING.md",
+          "/usr/share/doc/se-lis/NOTICE": "../NOTICE",
+          "/usr/share/doc/se-lis/THIRD_PARTY_LICENSES.md": "../THIRD_PARTY_LICENSES.md",
+          "/usr/share/doc/se-lis/third-party-licenses": "../third-party-licenses"
+        }
+      }
+    },
     "fileAssociations": [
       {
         "ext": ["epub"],
