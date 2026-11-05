@@ -9,6 +9,7 @@ mod android_lan_network;
 mod android_lan_scan;
 mod android_uri_bridge;
 mod build_info;
+mod app_diagnostics;
 mod app_update;
 #[cfg(target_os = "linux")]
 mod linux_webview_recovery;
@@ -162,6 +163,7 @@ macro_rules! configure_invoke_handler {
             fonts_delete,
             system_fonts::system_fonts_list,
             build_info::app_build_info,
+            app_diagnostics::app_diagnostics,
             ai::ai_initialize,
             ai::ai_cleanup_book,
             ai::ai_cleanup_all,
@@ -345,6 +347,7 @@ macro_rules! configure_invoke_handler {
             fonts_delete,
             system_fonts::system_fonts_list,
             build_info::app_build_info,
+            app_diagnostics::app_diagnostics,
             ai::ai_initialize,
             ai::ai_cleanup_book,
             ai::ai_cleanup_all,
