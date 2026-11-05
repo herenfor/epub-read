@@ -46,7 +46,9 @@ makedepends=(
   'rust'
 )
 
-options=('!strip' '!debug')
+# Rust keeps its own release LTO. makepkg's GCC LTO would also affect bundled
+# C libraries, whose GCC-only bitcode cannot be consumed by Rust's lld.
+options=('!strip' '!debug' '!lto')
 
 # Local review-only archive, not an upstream release URL. The checksum is for
 # the exact archive produced by the command in README.md. Replace this source

@@ -120,8 +120,10 @@ that `%U` passes the path to the app.
   `cargo 1.99.1`, the recorded attempt stopped at the final link with
   `undefined symbol: aws_lc_0_44_0_*`. The cause is still under investigation;
   a missing visible `-l` flag alone does not prove a compiler regression,
-  because static native objects may be bundled in Rust libraries. No package
-  was produced and `pacman -U`/file checks were not run.
+  because static native objects may be bundled in Rust libraries. The recorded
+  C objects contain GCC LTO bitcode: the recipe now disables makepkg's LTO
+  (`!lto`) while retaining the application's own Rust release LTO. Full package
+  validation is still required before publication.
 - Not verified: full Arch build and package installation, launching the native
   window on a physical Arch desktop, file-manager association,
   upgrade/removal, the minimum supported Arch snapshot, and any AUR

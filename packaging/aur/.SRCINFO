@@ -24,6 +24,7 @@ pkgbase = selis
 	depends = xdg-utils
 	options = !strip
 	options = !debug
+	options = !lto
 	source = selis-0.4.1.tar.gz
 	sha256sums = 3fe07603ade4b3928a579e5e4a9a3ce7000afdb1d1da7052ee27b63a78d3a1c8
 
