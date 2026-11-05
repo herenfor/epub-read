@@ -6,7 +6,7 @@
   },
   "bundle": {
     "targets": ["deb"],
-    "category": "Office",
+    "category": "Reference",
     "shortDescription": "An EPUB, TXT and comic reader",
     "homepage": "https://github.com/herenfor/epub-read",
     "linux": {
