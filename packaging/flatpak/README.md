@@ -36,6 +36,8 @@ Both the frontend (including its normal type check) and Rust are compiled
 offline inside the SDK. The helper uses an exact Git commit; uncommitted
 changes are not included. It creates inputs only in the explicitly supplied
 directory. Normal source-integrity checking by pnpm and Cargo is retained.
+Generated archive paths include the source commit so a later candidate cannot
+silently reuse a module compiled from an older local archive at the same path.
 
 The local input archives preserve the product source and lock files, but are
 not yet a public Flathub source manifest. A Flathub submission must provide
