@@ -3,7 +3,7 @@ import type { Theme } from "../render/settings";
 import { getRuntimeCapabilities } from "../platform/runtimeCapabilities";
 import { AboutInfo } from "./AboutInfo";
 import { Icon, SettingsRow, SettingsSwitchRow, UpdateDot } from "./settingsRows";
-import { displayPath, openLibraryFolder, setCopyOnImport, useLibrarySettings } from "./librarySettings";
+import { displayPath, libraryCopyChoice, openLibraryFolder, setCopyOnImport, useLibrarySettings } from "./librarySettings";
 import { folderWatch, useFolderWatchView, type FolderWatchView } from "./folderWatch";
 import { useAppUpdateDot } from "./appUpdate/appUpdateStore";
 import { CacheStoragePanel } from "./CacheStoragePanel";
@@ -347,8 +347,8 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
             detail={displayPath(library.libraryDirectory) || t("shelfSettings.library.unknown")}
             onClick={() => { setLibraryOpenError(null); void openLibraryFolder().catch((error: unknown) => setLibraryOpenError(String((error as Error).message ?? error))); }} />}
           <SettingsSwitchRow title={t("shelfSettings.library.copy")}
-            detail={t(capabilities.supportsLibraryFolder ? "shelfSettings.library.copy.detail" : "shelfSettings.library.copy.detail.files")}
-            checked={library.copyOnImport} onChange={(copy) => void setCopyOnImport(copy)} />
+            detail={t(capabilities.platform === "android" ? "shelfSettings.library.copy.detail.files" : "shelfSettings.library.copy.detail")}
+            checked={libraryCopyChoice(library) ?? true} onChange={(copy) => void setCopyOnImport(copy)} />
           {capabilities.supportsLibraryFolder && libraryLocationWarning !== undefined && <SettingsRow icon={ROW_ICONS.move} title={t("libraryLocation.row")}
             detail={libraryLocationWarning ?? t("libraryLocation.row.detail")} dot={libraryLocationWarning ?? false}
             onClick={() => setLocationOpen(true)} />}
