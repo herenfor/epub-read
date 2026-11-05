@@ -97,6 +97,15 @@
   animation: none !important;
 }
 
+/* A kept drawer at rest has nothing to blur. WebKitGTK 2.54 (Debian 13,
+   X11, llvmpipe) still composited this backdrop under visibility: hidden,
+   leaving a blurred, rounded patch over the left page after the TOC closed.
+   The paint warm-up below keeps the filter so its first draw still counts. */
+.sidebar-drawer.is-overlay.is-closed.is-warm:not(.is-paint-warm) {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
 /* Drawn once while warm (panelPaintWarmup): 0.1% opacity still rasterizes it. */
 .sidebar-drawer.is-overlay.is-closed.is-warm.is-paint-warm {
   visibility: visible;
