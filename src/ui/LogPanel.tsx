@@ -1,3 +1,5 @@
+import { useEffect, useRef, useState } from "react";
+import { copyAppDiagnostics, type CopyAppDiagnosticsOutcome } from "../platform/appDiagnostics";
 import { CloseIcon } from "./readerIcons";
 import { useUiText } from "./localization/UiLanguageProvider";
 
@@ -14,11 +16,42 @@ export interface LogPanelProps {
   diagText?: string | null;
   onRefresh?(): void;
   onClose(): void;
+  /** Collects and copies the whitelisted environment facts; injectable for tests. */
+  copyDiagnostics?(): Promise<CopyAppDiagnosticsOutcome>;
 }
+
+const COPY_FEEDBACK_KEY = {
+  copied: "log.copyDiagnostics.copied",
+  unavailable: "log.copyDiagnostics.unavailable",
+  "collect-failed": "log.copyDiagnostics.collectFailed",
+  "clipboard-failed": "log.copyDiagnostics.clipboardFailed",
+} as const;
 
 export function LogPanel(props: LogPanelProps) {
   const { t, tn } = useUiText();
   const issueCount = props.items.filter((item) => !item.resolved).length;
+  const copyDiagnostics = props.copyDiagnostics ?? copyAppDiagnostics;
+  const [copyState, setCopyState] = useState<"busy" | CopyAppDiagnosticsOutcome | null>(null);
+  const copyingRef = useRef(false);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  const handleCopyDiagnostics = async (): Promise<void> => {
+    if (copyingRef.current) return;
+    copyingRef.current = true;
+    setCopyState("busy");
+    let outcome: CopyAppDiagnosticsOutcome;
+    try {
+      outcome = await copyDiagnostics();
+    } catch {
+      outcome = "collect-failed";
+    }
+    copyingRef.current = false;
+    if (mountedRef.current) setCopyState(outcome);
+  };
   return (
     <>
       <div className="log-backdrop" onClick={props.onClose} aria-hidden="true" />
@@ -37,6 +70,25 @@ export function LogPanel(props: LogPanelProps) {
           </button>
         </div>
         <div className="log-body">
+          <div className="log-copy-diag">
+            <div className="log-copy-diag-text">
+              <span className="log-copy-diag-hint">{t("log.copyDiagnostics.hint")}</span>
+              {copyState && copyState !== "busy" && (
+                <span className={`log-copy-diag-status${copyState === "copied" ? "" : " is-error"}`} role="status">
+                  {t(COPY_FEEDBACK_KEY[copyState])}
+                </span>
+              )}
+            </div>
+            <button
+              type="button"
+              className="tb-btn log-copy-diag-btn"
+              disabled={copyState === "busy"}
+              aria-busy={copyState === "busy"}
+              onClick={() => void handleCopyDiagnostics()}
+            >
+              {t("log.copyDiagnostics")}
+            </button>
+          </div>
           <div className="log-section-title">{t("log.records")}</div>
           {props.items.length === 0 ? (
             <div className="log-empty">{t("log.empty")}</div>
