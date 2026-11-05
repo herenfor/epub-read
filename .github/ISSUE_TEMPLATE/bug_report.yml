@@ -9,11 +9,14 @@ body:
         感谢反馈！写得越具体，越快能复现和修好。如果是**某本书排版或显示不对**，请改用“书籍显示异常”模板。
         Thanks for reporting! If one book looks wrong, please use the "Book display problem" form instead.
 
+        如果你的版本有「复制诊断信息」按钮，可在「日志与诊断」里复制；旧版本没有这个按钮时，直接按下面的版本和平台字段手填即可。
+        If your version has a Copy diagnostics button, copy it from Logs & Diagnostics. Older versions without that button can just fill in the version and platform fields below.
+
   - type: input
     id: version
     attributes:
       label: 版本号 / App version
-      description: 书架设置 → 关于 里可以看到。Shown under shelf settings → About.
+      description: 书架 › 设置 › 关于 里可以看到。Shown under Shelf › Settings › About.
       placeholder: 例如 0.3.8
     validations:
       required: true
@@ -27,6 +30,7 @@ body:
         - Windows（便携版 / portable）
         - Android 手机 / phone
         - Android 平板 / tablet
+        - Linux（桌面版 / desktop）
     validations:
       required: true
 
@@ -34,8 +38,33 @@ body:
     id: system
     attributes:
       label: 系统与设备 / System and device
-      description: 选填。Optional.
-      placeholder: 例如 Windows 11 23H2；三星 S24，Android 15
+      description: 选填。Linux 可写发行版和桌面环境。Optional; on Linux include the distribution and desktop.
+      placeholder: 例如 Windows 11 23H2；三星 S24，Android 15；Ubuntu 24.04，GNOME
+
+  - type: dropdown
+    id: install-source
+    attributes:
+      label: Linux 安装渠道 / Linux package channel
+      description: 选填，仅 Linux 用户。按本机实际安装方式选择；不确定可留空。列出这些方式不代表对应渠道已经发行。Optional; Linux only. Listing a channel does not mean it has been released.
+      options:
+        - deb 包 / deb package
+        - Flatpak
+        - AUR
+        - 自行构建 / built from source
+        - 其他 / other
+        - 不确定 / not sure
+
+  - type: dropdown
+    id: linux-session
+    attributes:
+      label: 图形会话（Linux） / Graphics session (Linux)
+      description: 选填，仅 Linux 用户。不确定可留空。Optional; Linux only.
+      options:
+        - Wayland
+        - X11
+        - WSLg / WSL
+        - 其他 / other
+        - 不确定 / not sure
 
   - type: textarea
     id: what-happened
@@ -81,12 +110,23 @@ body:
       description: 如果只在某本书上出现，请写书名（方便的话附上书的来源）。If it only happens with one book, name it.
 
   - type: textarea
+    id: diagnostics
+    attributes:
+      label: 诊断信息（选填） / Diagnostics (optional)
+      description: |
+        如果你的版本有「复制诊断信息」按钮，可在 书架 › 设置 › 关于 › 诊断日志 打开的「日志与诊断」面板里点击复制，再把复制到的 JSON 粘贴到这里。旧版本没有这个按钮时，不用找，直接按上面的版本、平台等字段手填即可。
+        粘贴前请检查这段诊断文本，不要让它包含书名、文件路径、设备标识、账号密钥或其他隐私；也不要上传数据库、整个书库目录或整本书。
+        If your version has a Copy diagnostics button, open Logs & Diagnostics from Shelf › Settings › About › Diagnostic Log, copy, and paste the JSON here. Older versions without the button can skip this and fill in the fields above instead.
+        Before posting, check the pasted diagnostics: they should not contain book titles, file paths, device identifiers, credentials or other private data. Please also do not upload your database, whole library folder, or complete book files.
+      placeholder: 粘贴「复制诊断信息」得到的 JSON；没有按钮可留空。 / Paste the copied JSON, or leave empty.
+
+  - type: textarea
     id: media
     attributes:
-      label: 截图、录屏或诊断日志 / Screenshots, recordings or diagnostic log
+      label: 截图或录屏 / Screenshots or recordings
       description: |
-        可直接拖入图片或视频。诊断日志在 书架设置 → 诊断日志，或阅读时 Aa 面板底部，截图即可。
-        Drag files in. The diagnostic log is under shelf settings, or at the bottom of the Aa panel.
+        选填。可直接拖入图片或视频。旧版本没有「复制诊断信息」按钮时，也可以把 书架 › 设置 › 关于 › 诊断日志 里的记录截图附上。
+        Optional. Drag files in. If your version has no Copy diagnostics button, a screenshot of Shelf › Settings › About › Diagnostic Log also helps.
 
   - type: checkboxes
     id: checks
