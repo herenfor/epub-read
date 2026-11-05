@@ -10,6 +10,8 @@ mod android_lan_scan;
 mod android_uri_bridge;
 mod build_info;
 mod app_update;
+#[cfg(target_os = "linux")]
+mod linux_webview_recovery;
 mod external_open;
 #[cfg(test)]
 mod build_info_contract;
@@ -381,6 +383,8 @@ pub fn run() {
         context.config().product_name.as_deref(),
     );
     let builder = tauri::Builder::default().manage(install_kind);
+    #[cfg(target_os = "linux")]
+    let builder = builder.plugin(linux_webview_recovery::init());
     #[cfg(not(target_os = "android"))]
     let builder = builder.manage(external_open::ExternalOpenState::default());
     #[cfg(windows)]

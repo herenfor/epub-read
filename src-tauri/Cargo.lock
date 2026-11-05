@@ -1301,6 +1301,7 @@ dependencies = [
  "tokenizers",
  "tokio",
  "tokio-rustls",
+ "webkit2gtk",
  "windows",
  "winreg",
  "zip",
