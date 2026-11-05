@@ -1395,6 +1395,39 @@ select option {
   user-select: none;
 }
 
+.log-panel .log-copy-diag {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 18px;
+}
+
+.log-panel .log-copy-diag-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--fs-caption);
+  line-height: 1.4;
+}
+
+.log-panel .log-copy-diag-hint {
+  color: var(--muted);
+}
+
+.log-panel .log-copy-diag-status {
+  color: var(--accent);
+}
+
+.log-panel .log-copy-diag-status.is-error {
+  color: var(--error);
+}
+
+.log-panel .log-copy-diag-btn {
+  flex-shrink: 0;
+}
+
 .log-panel .log-section-title {
   padding: 6px 12px 2px;
   font-weight: 600;

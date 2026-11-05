@@ -11,5 +11,11 @@
   "log.diagnostics.capturedAt": "Captured at: {time}",
   "log.resourceErrorRecord": "Read error record: {error}",
   "log.diagnostics.pending": "(Collected automatically when panel opens)",
-  "log.diagnostics.unavailable": "(Reader not initialized)"
+  "log.diagnostics.unavailable": "(Reader not initialized)",
+  "log.copyDiagnostics": "Copy diagnostics",
+  "log.copyDiagnostics.hint": "Version, platform and runtime only, no books or logs. Paste it into an issue report.",
+  "log.copyDiagnostics.copied": "Diagnostics copied",
+  "log.copyDiagnostics.unavailable": "Diagnostics aren't available in this environment.",
+  "log.copyDiagnostics.collectFailed": "Couldn't read diagnostics. Please try again later.",
+  "log.copyDiagnostics.clipboardFailed": "Couldn't copy to the clipboard. Please try again."
 }
