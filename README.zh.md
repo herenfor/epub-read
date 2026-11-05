@@ -20,6 +20,7 @@ SeLis 尊重每本书原有的排版设计：版心宽度、不对称边距、�
 - [功能](#功能)
 - [隐私](#隐私)
 - [从源码构建](#从源码构建)
+- [Linux 排障](#linux-排障)
 - [路线图](#路线图)
 - [反馈](#反馈)
 - [贡献与致谢](#贡献与致谢)
@@ -47,6 +48,16 @@ SeLis 尊重每本书原有的排版设计：版心宽度、不对称边距、�
 3. 安装完成后即可在桌面找到 **SeLis**。
 
 应用未通过 Google Play 分发，首次安装时 Play 保护机制可能提示「无法识别的应用」，选择「更多详情 → 仍然安装」即可。
+
+### Linux（实验性）
+
+Linux 尚未列入当前正式发布的安装包。以下渠道都是本地源码构建的候选包，不是官方下载：
+
+- **Debian/Ubuntu `.deb`（候选）**：已在 Debian 13、软件渲染和 WebKitGTK 2.54 环境下完成本地构建与打开验证；没有正式 `.deb` 下载，最低发行版支持范围尚未确定。可按下方源码构建说明自行生成。
+- **Flatpak（候选）**：本地源码构建的沙箱包，未提交 Flathub。见 [`packaging/flatpak/README.md`](packaging/flatpak/README.md)。它通过系统文件选择器／文档门户读取书籍，不获得整个主目录的访问权限。
+- **Arch Linux（AUR 候选）**：`PKGBUILD` 与构建说明在 [`packaging/aur/`](packaging/aur/README.md)，但尚未上传到 AUR。只应在 Arch Linux 上用固定的本地源码归档构建。
+
+首个 Linux 范围以本地阅读为主；WebDAV 同步与局域网互传不在其中。现有构建/安装证据来自 Debian 13 的软件渲染环境；文件管理器关联、真实 GPU/Wayland 行为以及更旧发行版的最低要求尚未验证。不要安装第三方声称是 SeLis 官方的 Linux 包。
 
 ### 检查与安装更新
 
@@ -145,6 +156,26 @@ pnpm test                # 运行测试套件
 
 - Windows 安装包：在 PowerShell 中运行 `pnpm build:windows`
 - Android 安装包：在 Linux 或 WSL 中运行 `scripts/build-android.sh build`，需要配置 Android SDK、NDK 与 JDK（脚本开头列出了可配置的环境变量）
+
+### Linux
+
+安装 GTK 3、WebKitGTK 4.1 与 Fontconfig 开发包（Debian/Ubuntu 例如 `libgtk-3-dev`、`libwebkit2gtk-4.1-dev`，以及对应的 Fontconfig 开发包——`libfontconfig1-dev` 或 `libfontconfig-dev`；Arch 为 `gtk3`、`webkit2gtk-4.1`、`fontconfig`），并准备 [Node.js](https://nodejs.org/)、[pnpm](https://pnpm.io/) 与 [Rust](https://www.rust-lang.org/)。
+
+```bash
+pnpm install --frozen-lockfile
+bash scripts/build-linux.sh --no-bundle      # 独立二进制
+bash scripts/build-linux.sh --bundles deb    # 本地 Debian 安装包
+```
+
+入口会设置 `VITE_APP_PLATFORM=linux`，前端输出到 `dist/core-linux`，二进制位于 `src-tauri/target/linux-core/release/`。deb 打包配置在 [`src-tauri/tauri.linux-core.conf.json`](src-tauri/tauri.linux-core.conf.json)，desktop 模板在 [`src-tauri/linux/`](src-tauri/linux/)；Flatpak 与 AUR 候选分别见 [`packaging/flatpak/README.md`](packaging/flatpak/README.md) 和 [`packaging/aur/README.md`](packaging/aur/README.md)。
+
+## Linux 排障
+
+- **GTK/WebKitGTK 开发包**：若构建以 `Install the GTK 3, WebKitGTK 4.1 and Fontconfig development packages for your distribution.` 停止，安装上面的开发包，并用 `pkg-config --modversion webkit2gtk-4.1` 检查。不要强行安装为其他发行版构建的包。
+- **中文字体**：若中文显示为空白方框，安装系统 CJK 字体（Debian/Ubuntu 为 `fonts-noto-cjk`，Arch 为 `noto-fonts-cjk`）后重启应用。SeLis 使用系统字体，不随包携带 Windows 字体。
+- **空白窗口或 Web 进程终止**：保留终端输出，并从「书架 → 设置 → 关于 → 诊断日志」进入「日志与诊断」，点击「复制诊断信息」。复制内容只含应用版本与 edition、平台、架构、包渠道、WebKitGTK 版本、Linux 会话类型和兼容模式，不含书籍、路径、凭据或日志正文。反馈时附上发行版、桌面会话（X11/Wayland）、WebKitGTK 版本和 GPU 信息。不要把禁用 WebKit 沙箱、关闭硬件加速或清空书库当作首选处理；这些都不是已确认的修复。
+- **Flatpak 文件访问**：若宿主路径被拒绝，请通过文件选择器／文档门户选书，不要为此放开整个主目录；报告中保留门户返回的原始错误。
+- **下载或构建失败**：对同一条 `pnpm install` 或 Cargo 命令正常重试，复用已有本地缓存或工具中配置的可信镜像／代理；不要用来源不明的预编译包替代构建。AUR 只支持在 Arch 上构建。
 
 ## 路线图
 
