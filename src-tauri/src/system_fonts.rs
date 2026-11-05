@@ -1,6 +1,13 @@
 use serde::Serialize;
-#[cfg(any(windows, test))]
+#[cfg(any(windows, target_os = "linux", test))]
 use std::collections::BTreeMap;
+
+#[cfg(any(target_os = "android", test))]
+mod android;
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(target_os = "macos")]
+mod macos;
 
 /// One localized name exposed by the operating system for a font family.
 ///
@@ -26,12 +33,13 @@ pub struct SystemFontFamily {
 
 /// Lists the installed system font *families*.
 ///
-/// Windows uses DirectWrite's system collection. Other platforms deliberately
-/// return an empty list until their platform-specific implementation is added.
-/// The command only returns names and never reads or copies font files.
+/// Each platform returns CSS-addressable family names, not font filenames.
+/// Enumeration runs off the webview thread and does not copy font binaries.
 #[tauri::command]
-pub fn system_fonts_list() -> Result<Vec<SystemFontFamily>, String> {
-    list_system_fonts()
+pub async fn system_fonts_list() -> Result<Vec<SystemFontFamily>, String> {
+    tauri::async_runtime::spawn_blocking(list_system_fonts)
+        .await
+        .map_err(|error| format!("系统字体读取任务失败：{error}"))?
 }
 
 #[cfg(windows)]
@@ -94,12 +102,32 @@ unsafe fn directwrite_localized_names(
     result
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+fn list_system_fonts() -> Result<Vec<SystemFontFamily>, String> {
+    linux::list()
+}
+
+#[cfg(target_os = "macos")]
+fn list_system_fonts() -> Result<Vec<SystemFontFamily>, String> {
+    macos::list()
+}
+
+#[cfg(target_os = "android")]
+fn list_system_fonts() -> Result<Vec<SystemFontFamily>, String> {
+    Ok(android::list())
+}
+
+#[cfg(not(any(
+    windows,
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "android"
+)))]
 fn list_system_fonts() -> Result<Vec<SystemFontFamily>, String> {
     Ok(Vec::new())
 }
 
-#[cfg(any(windows, test))]
+#[cfg(any(windows, target_os = "linux", test))]
 fn system_font_family_from_localized_names(
     names: Vec<LocalizedFontName>,
 ) -> Option<SystemFontFamily> {
@@ -117,7 +145,7 @@ fn system_font_family_from_localized_names(
     })
 }
 
-#[cfg(any(windows, test))]
+#[cfg(any(windows, target_os = "linux", test))]
 fn normalize_localized_names(names: Vec<LocalizedFontName>) -> Vec<LocalizedFontName> {
     let mut unique = BTreeMap::new();
     for name in names {
@@ -127,7 +155,7 @@ fn normalize_localized_names(names: Vec<LocalizedFontName>) -> Vec<LocalizedFont
             continue;
         }
         // BTreeMap provides deterministic sorting as well as case-insensitive
-        // de-duplication for data returned by different Windows font providers.
+        // de-duplication for data returned by different platform font providers.
         unique
             .entry((locale.clone(), display_name.to_lowercase()))
             .or_insert_with(|| LocalizedFontName {
@@ -138,7 +166,6 @@ fn normalize_localized_names(names: Vec<LocalizedFontName>) -> Vec<LocalizedFont
     unique.into_values().collect()
 }
 
-#[cfg(any(windows, test))]
 fn sort_and_deduplicate_system_fonts(mut fonts: Vec<SystemFontFamily>) -> Vec<SystemFontFamily> {
     fonts.sort_by(|left, right| {
         left.family

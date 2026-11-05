@@ -4,6 +4,13 @@ mod build_info_contract;
 use std::env;
 
 fn main() {
+    // This is the application target, not the build-script host: an Android
+    // build running on Linux must never link the host's Fontconfig library.
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
+        pkg_config::Config::new()
+            .probe("fontconfig")
+            .expect("Install the Fontconfig development package to enumerate Linux system fonts");
+    }
     println!("cargo:rerun-if-changed=src/build_info_contract.rs");
     println!("cargo:rerun-if-env-changed=EPUB_READER_EXPECTED_EDITION");
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_AI");

@@ -9,8 +9,8 @@ if [[ "$(uname -s)" != Linux ]]; then
   exit 1
 fi
 cd "$project_root"
-if ! pkg-config --exists gtk+-3.0 webkit2gtk-4.1; then
-  echo 'Install the GTK 3 and WebKitGTK 4.1 development packages for your distribution.' >&2
+if ! pkg-config --exists gtk+-3.0 webkit2gtk-4.1 fontconfig; then
+  echo 'Install the GTK 3, WebKitGTK 4.1 and Fontconfig development packages for your distribution.' >&2
   exit 1
 fi
 export VITE_EDITION=core
