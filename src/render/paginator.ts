@@ -4084,10 +4084,17 @@ export class ChapterPaginator {
     }
     // WebKitGTK can deliver the load of the about:blank unload step after src
     // already names this chapter's Blob, and then never commit that Blob.
-    // That load is stale: request the Blob once more; a repeat falls through.
-    if (doc.URL.split("#", 1)[0] !== this.blobUrl && this.renavigatedLoadSeq !== seq) {
-      this.renavigatedLoadSeq = seq;
-      this.iframe.src = this.blobUrl;
+    // Request the Blob once more, but never accept an old document as this
+    // chapter even if it happens to contain its own reader container.
+    if (doc.URL.split("#", 1)[0] !== this.blobUrl) {
+      if (this.renavigatedLoadSeq !== seq) {
+        this.renavigatedLoadSeq = seq;
+        this.iframe.src = this.blobUrl;
+        return;
+      }
+      this.emit({ status: "error", message: "章节缺少阅读器容器" });
+      this.finishDisplayReady(seq, false);
+      this.displayGate.release(seq);
       return;
     }
     this.contentDoc = doc;
