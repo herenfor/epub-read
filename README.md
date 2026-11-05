@@ -20,6 +20,7 @@ Books are presented as their creators designed them: page width, asymmetric marg
 - [Features](#features)
 - [Privacy](#privacy)
 - [Building from source](#building-from-source)
+- [Linux troubleshooting](#linux-troubleshooting)
 - [Roadmap](#roadmap)
 - [Feedback](#feedback)
 - [Contributors and thanks](#contributors-and-thanks)
@@ -47,6 +48,16 @@ Download the installer or the portable build. Windows 10 and 11 already include 
 3. Once installed, **SeLis** appears on your home screen.
 
 The app is not distributed through Google Play, so Play Protect may warn about an unrecognised app the first time; choose *More details → Install anyway*.
+
+### Linux (experimental)
+
+Linux is not part of the current released packages yet. The packaging candidates below build from source and are not official downloads:
+
+- **Debian/Ubuntu `.deb` (candidate)**: a local test package has been built and opened on Debian 13 with software rendering and WebKitGTK 2.54. No official `.deb` is published, and the minimum distribution support is not established. Build it from source with the instructions below.
+- **Flatpak (candidate)**: a source-built sandbox package, not submitted to Flathub. See [`packaging/flatpak/README.md`](packaging/flatpak/README.md). It opens books through the system file chooser/document portal and does not receive access to the whole home directory.
+- **Arch Linux (AUR candidate)**: the `PKGBUILD` and build notes are in [`packaging/aur/`](packaging/aur/README.md), but the package has not been uploaded to the AUR. Build it only on Arch Linux from the pinned local source archive.
+
+The first Linux scope is local reading. WebDAV sync and LAN transfer are not part of it. The current build/install evidence is from Debian 13 with software rendering; file-manager association, native GPU/Wayland behavior and minimum older distributions are not yet verified. Do not install a Linux package from a third party claiming to be an official SeLis release.
 
 ### Updating
 
@@ -145,6 +156,26 @@ pnpm test                # run the test suite
 
 - Windows installer: run `pnpm build:windows` in PowerShell
 - Android package: run `scripts/build-android.sh build` on Linux or WSL with the Android SDK, NDK and a JDK installed (the environment variables it reads are listed at the top of the script)
+
+### Linux
+
+Install the GTK 3, WebKitGTK 4.1 and Fontconfig development packages (for example `libgtk-3-dev`, `libwebkit2gtk-4.1-dev` and the matching Fontconfig development package — `libfontconfig1-dev` or `libfontconfig-dev` — on Debian/Ubuntu; `gtk3`, `webkit2gtk-4.1` and `fontconfig` on Arch), plus [Node.js](https://nodejs.org/), [pnpm](https://pnpm.io/) and [Rust](https://www.rust-lang.org/).
+
+```bash
+pnpm install --frozen-lockfile
+bash scripts/build-linux.sh --no-bundle      # standalone binary
+bash scripts/build-linux.sh --bundles deb    # local Debian package
+```
+
+The entry sets `VITE_APP_PLATFORM=linux`, writes the frontend to `dist/core-linux`, and puts the binary under `src-tauri/target/linux-core/release/`. The deb packaging lives in [`src-tauri/tauri.linux-core.conf.json`](src-tauri/tauri.linux-core.conf.json) with the desktop template in [`src-tauri/linux/`](src-tauri/linux/); the Flatpak and AUR candidates are documented in [`packaging/flatpak/README.md`](packaging/flatpak/README.md) and [`packaging/aur/README.md`](packaging/aur/README.md).
+
+## Linux troubleshooting
+
+- **GTK/WebKitGTK development packages**: if the build stops with `Install the GTK 3, WebKitGTK 4.1 and Fontconfig development packages for your distribution.`, install the packages above and check `pkg-config --modversion webkit2gtk-4.1`. Do not force-install packages built for another distribution.
+- **CJK fonts**: if Chinese text appears as empty boxes, install a system CJK font (`fonts-noto-cjk` on Debian/Ubuntu, `noto-fonts-cjk` on Arch) and restart the app. SeLis uses system fonts and does not bundle Windows fonts.
+- **Blank window or stopped web process**: keep the terminal output and copy diagnostics from *Shelf → Settings → About → Diagnostic Log* → *Copy diagnostics*. The copy contains the app version and edition, platform, architecture, package channel, WebKitGTK version, Linux session type and compatibility mode; it does not contain books, paths, credentials or log text. Include the distribution, desktop session (X11/Wayland), WebKitGTK version and GPU details. Do not disable the WebKit sandbox, turn off hardware acceleration or delete the library as a first workaround; these are not established fixes.
+- **Flatpak file access**: if a host path is rejected, choose the book through the file chooser/document portal. Do not grant whole-home access to work around it. Keep the original portal error in the report.
+- **Downloads/build failures**: retry the same `pnpm install` or Cargo command. Reuse the existing local cache or a trusted mirror/proxy configured in the tool; do not replace the build with an unknown prebuilt package. AUR builds are supported on Arch only.
 
 ## Roadmap
 
