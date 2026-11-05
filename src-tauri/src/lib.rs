@@ -397,22 +397,38 @@ pub fn run() {
         builder
     };
     #[cfg(desktop)]
-    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
-        external_open::capture_arguments(
-            app,
-            args.into_iter().map(std::ffi::OsString::from),
-            std::path::Path::new(&cwd),
-        );
-        if let Some(main_window) = app.get_webview_window("main") {
-            for action in second_instance_activation_steps() {
-                let _ = match action {
-                    ExistingWindowActivation::Unminimize => main_window.unminimize(),
-                    ExistingWindowActivation::Show => main_window.show(),
-                    ExistingWindowActivation::Focus => main_window.set_focus(),
-                };
-            }
-        }
-    }));
+    let single_instance = tauri_plugin_single_instance::Builder::new();
+    // A Flatpak has its own library. Do not forward its file opens to a deb
+    // instance (or vice versa) through the host's shared session bus.
+    #[cfg(target_os = "linux")]
+    let single_instance = if std::env::var("FLATPAK_ID").ok().as_deref()
+        == Some(context.config().identifier.as_str())
+    {
+        single_instance.dbus_id(format!("{}.Flatpak", context.config().identifier))
+    } else {
+        single_instance
+    };
+    #[cfg(desktop)]
+    let builder = builder.plugin(
+        single_instance
+            .callback(|app, args, cwd| {
+                external_open::capture_arguments(
+                    app,
+                    args.into_iter().map(std::ffi::OsString::from),
+                    std::path::Path::new(&cwd),
+                );
+                if let Some(main_window) = app.get_webview_window("main") {
+                    for action in second_instance_activation_steps() {
+                        let _ = match action {
+                            ExistingWindowActivation::Unminimize => main_window.unminimize(),
+                            ExistingWindowActivation::Show => main_window.show(),
+                            ExistingWindowActivation::Focus => main_window.set_focus(),
+                        };
+                    }
+                }
+            })
+            .build(),
+    );
 
     #[cfg(feature = "ai")]
     let builder = builder.manage(reader_tools::ReaderToolsState::default());

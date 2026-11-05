@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Descriptive AppStream metadata: CC0-1.0. Application code: GPL-3.0-only. -->
+<component type="desktop-application">
+  <id>dev.epubreader.app</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+  <name>SeLis</name>
+  <summary>Read EPUB books, text files and comics</summary>
+  <description>
+    <p>Read local books with configurable typography, page layouts, bookmarks and notes.</p>
+  </description>
+  <launchable type="desktop-id">dev.epubreader.app.desktop</launchable>
+  <url type="homepage">https://github.com/herenfor/epub-read</url>
+  <url type="bugtracker">https://github.com/herenfor/epub-read/issues</url>
+  <developer id="io.github.herenfor"><name>HeRenFor</name></developer>
+  <content_rating type="oars-1.1" />
+</component>
