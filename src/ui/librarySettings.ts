@@ -88,9 +88,31 @@ export function libraryCopyChoice(current: LibrarySettingsView | null): boolean 
   return current.copyOnImport;
 }
 
-/** What an import should do right now: copy only when the shown setting says so. */
-export async function copyOnImportNow(): Promise<boolean> {
-  return (await ensureLibrarySettings())?.copyOnImport ?? false;
+/** Windows and Linux offer the choice at the import entries; Android keeps it in settings only. */
+export function importEntryCopyChoiceSupported(): boolean {
+  const capabilities = getRuntimeCapabilities();
+  return capabilities.supportsImportCopyChoice && capabilities.platform !== "android";
+}
+
+/**
+ * The choice a folder import sends: the shown setting, or a copy (the native
+ * default) while the setting is unread or unreadable. An error view's false
+ * is not the user's choice, so it never turns into a link import.
+ */
+export function folderImportCopyChoice(current: LibrarySettingsView | null): boolean | undefined {
+  if (!importEntryCopyChoiceSupported()) return undefined;
+  return libraryCopyChoice(current) ?? true;
+}
+
+/**
+ * What a path import should do right now: copy only when the shown setting
+ * says so. False where the choice is unsupported; null when the setting could
+ * not be read, which the caller imports as a copy and reports.
+ */
+export async function copyOnImportNow(): Promise<boolean | null> {
+  const current = await ensureLibrarySettings();
+  if (!current) return false;
+  return libraryCopyChoice(current) ?? null;
 }
 
 /**

@@ -209,6 +209,7 @@ export function useBookImport({
     const failed: string[] = [];
     const placed: ImportedBookRef[] = [];
     const store = getShelfStore();
+    let copySettingUnread = false;
 
     try {
       if (isTauriEnv()) {
@@ -216,7 +217,10 @@ export function useBookImport({
         if (paths.length !== list.length) {
           throw new Error("桌面版导入必须保留用户选择的源文件路径");
         }
-        const batch = await store.importPaths(paths, await copyOnImportNow());
+        // The private shelf copies on its own route; an unreadable setting copies and says so.
+        const copySetting = store.importDocuments ? true : await copyOnImportNow();
+        copySettingUnread = copySetting === null;
+        const batch = await store.importPaths(paths, copySetting ?? true);
         if (getShelfStore() !== store) return [];
         for (const item of batch.results) {
           const source = list[item.inputIndex];
@@ -340,6 +344,10 @@ export function useBookImport({
         failed,
         refreshedCount: isTauriEnv() ? duplicateTitles.length : 0,
       });
+      if (copySettingUnread && accepted.length > 0) {
+        notice.text += uiText("notice.sep") + uiText("notice.import.copySettingUnread");
+        if (notice.kind === "ok") notice.kind = "warn";
+      }
       if (target) notice = await placeIntoFolder(target, placed, notice);
       if (getShelfStore() !== store) return [];
       if (refreshWarning) {

@@ -305,7 +305,7 @@ import { IS_AI_EDITION } from "./config/edition";
 import { registerAppUpdateSaveGate, startAppUpdates } from "./ui/appUpdate/appUpdateStore";
 import { noteCloudSyncChange, startCloudSync } from "./ui/cloudSync/cloudSyncStore";
 import { ProgressSourceChoices, type ProgressSourceCandidate } from "./ui/cloudSync/ProgressSourceChoices";
-import { libraryCopyChoice, setCopyOnImport, useLibrarySettings } from "./ui/librarySettings";
+import { folderImportCopyChoice, importEntryCopyChoiceSupported, libraryCopyChoice, setCopyOnImport, useLibrarySettings } from "./ui/librarySettings";
 
 // This is intentionally a compile-time edition branch. The core build has no
 // static dependency on the AI panel or its model-asset subtree; AI builds keep
@@ -5871,7 +5871,7 @@ export default function App() {
               saveFileActive={saveFileActive}
               lanTransferActive={lanSaveSession.active}
               // Android keeps originals only for 导入书, so its one switch lives in settings.
-              copyToLibrary={libraryServices && runtime.supportsLibraryFolder ? libraryCopyChoice(librarySettings) : undefined}
+              copyToLibrary={libraryServices && importEntryCopyChoiceSupported() ? libraryCopyChoice(librarySettings) : undefined}
               onCopyToLibraryChange={handleCopyToLibraryChange}
               onLibraryLocationChanged={handleLibraryLocationChanged}
               onOpenLanTransfer={runtime.supportsLanTransfer && libraryServices ? handleOpenLanSave : undefined}
@@ -6594,7 +6594,7 @@ export default function App() {
           onClose={closeFolderImport}
           onUseFileImport={() => void handleChooseBooks()}
           autoScan={folderImport.autoScan}
-          copyToLibrary={runtime.supportsLibraryFolder ? libraryCopyChoice(librarySettings) : undefined}
+          copyToLibrary={folderImportCopyChoice(librarySettings)}
           onCopyToLibraryChange={handleCopyToLibraryChange}
         />
       )}

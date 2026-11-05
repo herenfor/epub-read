@@ -9,11 +9,11 @@ import { useShelfEntriesState, useShelfNoticeState, useShelfContentHashes } from
 import { useBookImportState, useBookImport, useFolderImport } from "./useBookImport";
 import { enterShelfSpace, leaveShelfSpace, SHELF_SPACES } from "./shelfSpaces";
 
-const ports = vi.hoisted(() => ({ store: vi.fn(), activate: vi.fn(), picker: vi.fn(), native: vi.fn(), cancel: vi.fn(), directory: vi.fn(), linkPicker: vi.fn(), keep: vi.fn() }));
+const ports = vi.hoisted(() => ({ store: vi.fn(), activate: vi.fn(), picker: vi.fn(), native: vi.fn(), cancel: vi.fn(), directory: vi.fn(), linkPicker: vi.fn(), keep: vi.fn(), copy: vi.fn() }));
 vi.mock("./shelf", async (original) => ({ ...await original<typeof import("./shelf")>(), getShelfStore: ports.store, activatePortableShelfState: ports.activate }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: ports.picker }));
 vi.mock("../platform/androidNativeBridge", () => ({ importDocuments: ports.native, cancelDocumentImport: ports.cancel, pickLinkDocuments: ports.linkPicker }));
-vi.mock("./librarySettings", async (original) => ({ ...await original<typeof import("./librarySettings")>(), keepOriginalOnImportNow: ports.keep }));
+vi.mock("./librarySettings", async (original) => ({ ...await original<typeof import("./librarySettings")>(), keepOriginalOnImportNow: ports.keep, copyOnImportNow: ports.copy }));
 vi.mock("./folderImport", () => ({ createNativeDirectoryImportPort: ports.directory, createWebDirectoryImportPort: vi.fn(), supportsWebDirectoryPicker: () => false }));
 
 function entry(id: string): ShelfEntry {
@@ -47,6 +47,7 @@ function setup() {
   ports.activate.mockResolvedValue(undefined);
   ports.directory.mockReturnValue({});
   ports.keep.mockResolvedValue(false);
+  ports.copy.mockResolvedValue(false);
   const busy = { current: false }, organizationBusy = { current: false };
   const saveState = { current: { kind: "idle" as const } }, saveLaunch = { current: false }, lanActive = { current: false };
   const refresh = vi.fn().mockResolvedValue(undefined);
@@ -248,6 +249,25 @@ describe("book import host extraction", () => {
       expect(ports.native).toHaveBeenLastCalledWith(expect.any(String), [docs[1]], expect.any(Function), undefined);
       expect(t.current().imports.originalRetry).toBeNull();
       expect(t.current().entries.shelfEntries.map((item) => item.id).sort()).toEqual(["a", "b"]);
+    } finally { await t.dom.dispose(); }
+  });
+
+  it("desktop path import sends the shown copy choice; an unreadable setting copies and says so", async () => {
+    const t = setup();
+    const sources = [{ kind: "path" as const, path: "/books/a.epub", name: "a.epub" }];
+    t.store.list.mockResolvedValue([entry("a")]);
+    t.store.importPaths.mockResolvedValue({ results: [{ inputIndex: 0, status: "saved", record: entry("a") }] });
+    try {
+      await t.render();
+      await t.dom.run(async () => { await t.current().commands.handleImportSources(sources); });
+      expect(t.store.importPaths).toHaveBeenLastCalledWith(["/books/a.epub"], false);
+      expect(t.current().notices.shelfNotice?.text).not.toContain("无法读取导入方式设置");
+
+      ports.copy.mockResolvedValue(null);
+      await t.dom.run(async () => { await t.current().commands.handleImportSources(sources); });
+      expect(t.store.importPaths).toHaveBeenLastCalledWith(["/books/a.epub"], true);
+      expect(t.current().notices.shelfNotice?.kind).toBe("warn");
+      expect(t.current().notices.shelfNotice?.text).toContain("无法读取导入方式设置");
     } finally { await t.dom.dispose(); }
   });
 
