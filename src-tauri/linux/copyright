@@ -1,0 +1,13 @@
+SeLis
+Copyright (c) 2026 HeRenFor
+Source: https://github.com/herenfor/epub-read
+
+Original project code is licensed under the GNU General Public License,
+version 3 only (GPL-3.0-only). The full license text is installed alongside
+this file as LICENSE, and is also available on Debian systems at
+/usr/share/common-licenses/GPL-3.
+
+Third-party components retain their respective copyrights and licenses.
+Their notices, license texts and source locations are installed alongside
+this file in THIRD_PARTY_LICENSES.md and third-party-licenses/.
+See NOTICE and LICENSING.md for the project's additional notices.
