@@ -6,7 +6,7 @@ GTK 3 and the WebKitGTK 4.1 API. The application ID remains
 `dev.epubreader.app`; the Flatpak uses its own sandbox data directory and a
 `.Flatpak` single-instance bus name, separate from a native deb instance.
 
-Install Flatpak and flatpak-builder using the distribution's package manager,
+Install Flatpak, flatpak-builder and desktop-file-utils using the distribution's package manager,
 then install the build runtimes in a user installation:
 
 ```sh
@@ -26,7 +26,8 @@ if needed. Existing worktree dependencies and targets are not overwritten.
 python3 packaging/flatpak/prepare.py --output /path/to/selis-flatpak-build
 cd /path/to/selis-flatpak-build
 flatpak-builder --user --force-clean --repo=repo build dev.epubreader.app.json
-flatpak build-bundle repo SeLis.flatpak dev.epubreader.app
+flatpak build-bundle --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo \
+  repo SeLis.flatpak dev.epubreader.app
 flatpak install --user ./SeLis.flatpak
 flatpak run dev.epubreader.app
 ```
@@ -48,8 +49,12 @@ this local recipe does not claim store acceptance.
 - No `host`/`home` filesystem grant or unrestricted session/system bus is
   requested. File selection is through GTK's native file chooser and its
   document portal integration; the sandbox cannot simply read the host library.
-- The first package targets local, copied books. Persistent document access
-  for linked books and watched folders must be verified separately. Network
+- This candidate targets local reading. The existing Linux import UI currently
+  links selected documents; it does not expose the copy-on-import choice yet.
+  Portal-selected linked import and reopening were checked locally, but copied
+  import is still an acceptance gap. Do not describe this as a completed copied
+  library workflow. Revoked document access, watched folders and persistence
+  across a desktop-session restart must be verified separately. Network
   access is not granted yet, so LAN transfer/WebDAV are outside this first
   sandbox package's acceptance scope.
 - Native/deb data is not moved into the sandbox automatically. Never run a
@@ -57,6 +62,9 @@ this local recipe does not claim store acceptance.
 - A rendering check under WSLg or software graphics is not a native GPU-driver
   compatibility result. Upgrade and revoked-portal permissions need their own
   direct checks; they are not implied by a successful build.
+- Install the distribution's CJK font package when reading CJK books without
+  embedded fonts. Flatpak can use the host's read-only font installation; a
+  Latin-only test system is not a representative font fallback baseline.
 
 The program remains GPL-3.0-only. Its notices and third-party license texts
 are installed under `/app/share/licenses/selis`. The newly authored descriptive
