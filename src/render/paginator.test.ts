@@ -2177,6 +2177,82 @@ describe("reflow transient lifecycle", () => {
   });
 });
 
+// ER-0090 native trace: a stylesheet/image load event scheduled the 200ms
+// content reflow before the opening restore pass.  Its non-anchored
+// recomputeInner sampled the chapter-start page centre into this.anchor, so the
+// restore then resolved that start and settled as located.
+describe("content reflow during the opening restore", () => {
+  function contentReflowContext() {
+    let settle!: (ready: boolean) => void;
+    const displayReady = new Promise<boolean>((resolve) => { settle = resolve; });
+    const recompute = vi.fn(async () => true);
+    const waitForDisplayReady = vi.fn(() => displayReady);
+    const context = Object.create(ChapterPaginator.prototype) as Record<string, unknown>;
+    Object.assign(context, {
+      disposed: false,
+      loadSeq: 1,
+      displayReadySeq: -1,
+      deferredContentReflowLoadSeq: -1,
+      reflowTimer: undefined,
+      recompute,
+      waitForDisplayReady,
+    });
+    const schedule = () => (ChapterPaginator.prototype as unknown as { scheduleReflow(): void }).scheduleReflow.call(context);
+    return { context, recompute, waitForDisplayReady, schedule, settle };
+  }
+
+  function withTimers(run: () => Promise<void>) {
+    return async () => {
+      vi.useFakeTimers();
+      vi.stubGlobal("window", {
+        setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms),
+        clearTimeout: (id: number) => clearTimeout(id),
+      });
+      try {
+        await run();
+      } finally {
+        vi.unstubAllGlobals();
+        vi.useRealTimers();
+      }
+    };
+  }
+
+  it("does not run a non-anchored recompute before display-ready; runs it once afterwards", withTimers(async () => {
+    const { context, recompute, waitForDisplayReady, schedule, settle } = contentReflowContext();
+    schedule();
+    await vi.advanceTimersByTimeAsync(200);
+    schedule();
+    await vi.advanceTimersByTimeAsync(200);
+    expect(recompute).not.toHaveBeenCalled();
+    expect(waitForDisplayReady).toHaveBeenCalledTimes(1);
+
+    context.displayReadySeq = 1;
+    settle(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(recompute).toHaveBeenCalledTimes(1);
+    expect(recompute).toHaveBeenCalledWith(false, 1);
+  }));
+
+  it("keeps the ordinary 200ms content reflow once the chapter is displayed", withTimers(async () => {
+    const { context, recompute, waitForDisplayReady, schedule } = contentReflowContext();
+    context.displayReadySeq = 1;
+    schedule();
+    await vi.advanceTimersByTimeAsync(200);
+    expect(waitForDisplayReady).not.toHaveBeenCalled();
+    expect(recompute).toHaveBeenCalledWith(false, 1);
+  }));
+
+  it("drops the deferred content reflow when a newer load replaces the chapter", withTimers(async () => {
+    const { context, recompute, schedule, settle } = contentReflowContext();
+    schedule();
+    await vi.advanceTimersByTimeAsync(200);
+    context.loadSeq = 2;
+    settle(false);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(recompute).not.toHaveBeenCalled();
+  }));
+});
+
 describe("paged layout settled notification", () => {
   function host(empty = false) {
     const order: string[] = [];
