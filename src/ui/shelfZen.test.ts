@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { ShelfEntry } from "./shelf";
 import { emptyOrganization, type LibraryOrganization } from "./libraryOrganization";
-import { ShelfView, type ShelfViewProps } from "./ShelfView";
+import { createShelfSessionMemory, ShelfView, type ShelfViewProps } from "./ShelfView";
 import { createReactDomHarness } from "../test/reactDomHarness";
 
 function makeEntry(id: string, title: string, creator: string, progressPct: number, lastReadAtMs = 0): ShelfEntry {
@@ -568,4 +568,55 @@ describe("书架计数与最近在读补修", () => {
       expect(dom.container.querySelector('[data-book-id="recent-11"]')).not.toBeNull();
     } finally { await dom.dispose(); }
   });
+
+  it("ER-0085：0% 但已保存图页位置的书，卡片、筛选与继续阅读区同判在读", async () => {
+    const dom = createReactDomHarness();
+    prefs();
+    const imagePage = { ...makeEntry("image", "图页书", "作者", 0, 9000), isNew: false, spineIndex: 0, page: 0, anchorIndex: 0, anchorRatio: 0.5 };
+    const unread = { ...makeEntry("unread", "真正未读", "作者", 0), isNew: true, spineIndex: 0, page: 0 };
+    try {
+      await dom.render(createElement(ShelfView, props([imagePage, unread])));
+      expect(dom.container.querySelector(".shelf-resume-title")?.textContent).toBe("图页书");
+      const counts = [...dom.container.querySelectorAll(".shelf-capsule-tab")].map(tab => tab.querySelector(".shelf-capsule-count")?.textContent);
+      expect(counts.slice(0, 3)).toEqual(["2", "1", "1"]);
+      const card = dom.container.querySelector('.shelf-card[data-book-id="image"]')!;
+      expect(card.querySelector(".shelf-read-stat.unread")).toBeNull();
+      expect(card.querySelector(".shelf-read-stat")?.textContent).toContain("0%");
+    } finally { await dom.dispose(); }
+  });
+
+  it("ER-0085：开书后重新挂载书架，保留搜索词、书名排序与状态页签", async () => {
+    const dom = createReactDomHarness();
+    prefs();
+    const memory = createShelfSessionMemory();
+    const entries = [makeEntry("a", "Alpha 书", "作者", 30, 5000), makeEntry("b", "Beta 书", "作者", 30, 6000), makeEntry("c", "Gamma", "作者", 30, 7000), makeEntry("d", "Delta 书", "作者", 0)];
+    const view = () => createElement(ShelfView, { ...props(entries), sessionMemory: memory });
+    // Same recipe as shelfFolderSearch.test.ts: React reads the value on focus + key events under linkedom.
+    const search = async (text: string) => {
+      const input = dom.container.querySelector(".shelf-quick-filter-input") as HTMLInputElement;
+      Object.assign(input, { attachEvent() {}, detachEvent() {} });
+      await dom.dispatch(input, new dom.window.Event("focusin", { bubbles: true }));
+      Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), "value")!.set!.call(input, text);
+      await dom.dispatch(input, new dom.window.Event("keyup", { bubbles: true }));
+    };
+    try {
+      await dom.render(view());
+      await search("书");
+      await dom.click(dom.container.querySelector(".shelf-sort-select-container .shelf-select-btn")!);
+      await dom.click([...dom.container.querySelectorAll(".shelf-select-option")].find(o => o.textContent?.includes("书名"))!);
+      await dom.click(dom.container.querySelectorAll(".shelf-capsule-tab")[1]);
+      const settle = () => dom.run(() => new Promise<void>((resolve) => setTimeout(resolve, 80)));
+      await settle();
+      const ids = () => [...dom.container.querySelectorAll(".shelf-card")].map(e => e.getAttribute("data-book-id"));
+      expect(ids()).toEqual(["a", "b"]);
+      await dom.render(createElement("div"));
+      await dom.render(view());
+      await settle();
+      // Query keeps Gamma out, the Reading tab keeps unread Delta out, title sort puts Alpha first.
+      expect(ids()).toEqual(["a", "b"]);
+      expect(memory).toEqual({ query: "书", sort: "title", statusTab: "reading" });
+      expect(dom.container.querySelector(".shelf-select-btn")?.textContent).toContain("书名");
+    } finally { await dom.dispose(); }
+  });
 });
+

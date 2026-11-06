@@ -75,9 +75,21 @@
 /* 控件行布局 */
 .aa-control-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 6px 12px;
+}
+
+/* A label plus a segmented control that do not fit side by side (English
+   "Layout Mode", "Original / Simplified / Traditional") put the control on its
+   own line, still right-aligned, instead of overlapping or clipping it. */
+.aa-control-row > .ui-segmented {
+  margin-left: auto;
+}
+
+.aa-control-row > .aa-row-label {
+  width: auto;
 }
 
 .aa-section-label {
@@ -427,7 +439,16 @@
   width: 3.6em;
   color: var(--fg);
   font-size: var(--fs-body);
+  line-height: 1.2;
   white-space: nowrap;
+}
+
+/* Two-word labels outside Chinese ("Line Spacing", "Bottom Margin") take two
+   lines in a slightly wider column; every row keeps the same width so the
+   tracks still line up. */
+:root:not(:lang(zh)) .aa-slider-row > .aa-row-label {
+  width: 4.8em;
+  white-space: normal;
 }
 
 .aa-row-value {
@@ -543,7 +564,8 @@
 
 .aa-card > .aa-control-row {
   min-height: 48px;
-  padding: 0 12px;
+  padding: 6px 12px;
+  box-sizing: border-box;
 }
 
 .aa-card > .aa-css-editor-section {

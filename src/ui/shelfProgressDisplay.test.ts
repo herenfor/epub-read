@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ShelfEntry } from "./shelf";
-import { projectShelfProgressReadiness, shelfProgressLabel } from "./shelfProgressDisplay";
+import { projectShelfProgressReadiness, shelfProgressLabel, shelfReadingStatus } from "./shelfProgressDisplay";
 
 function entry(patch: Partial<ShelfEntry> = {}): ShelfEntry {
   return {
@@ -36,5 +36,19 @@ describe("shelf progress readiness", () => {
     const [shown] = projectShelfProgressReadiness([original], new Set());
     expect(shown).toBe(original);
     expect(shelfProgressLabel(shown)).toBe("0%");
+  });
+});
+
+describe("shelf reading status", () => {
+  it("counts a saved 0% position (image page locator) as reading, not unread", () => {
+    const imagePage = entry({ spineIndex: 0, page: 0, anchorIndex: 0, anchorRatio: 0.5, anchorTextOffset: null, lastReadAtMs: 5000 });
+    expect(shelfReadingStatus(imagePage)).toBe("reading");
+    expect(imagePage.progressPct).toBe(0);
+  });
+
+  it("keeps opened-without-saved-progress and new books unread, and 100% finished", () => {
+    expect(shelfReadingStatus(entry({ spineIndex: 0, page: 0, anchorTextOffset: null, lastReadAtMs: 0 }))).toBe("unread");
+    expect(shelfReadingStatus(entry({ isNew: true, spineIndex: 0, page: 0, anchorTextOffset: null, lastReadAtMs: 0 }))).toBe("unread");
+    expect(shelfReadingStatus(entry({ progressPct: 100 }))).toBe("finished");
   });
 });
