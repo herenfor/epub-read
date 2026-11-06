@@ -2101,6 +2101,7 @@ describe("reflow transient lifecycle", () => {
       measuredViewport: { width: 800, height: 600 },
       reflowSeq: 0,
       loadSeq: 1,
+      displayReadySeq: 1,
       closeFootnoteForNavigation: close,
       measure,
     });
@@ -2113,6 +2114,66 @@ describe("reflow transient lifecycle", () => {
     expect(close).toHaveBeenCalledTimes(1);
     await Promise.resolve();
     expect(measure).toHaveBeenCalledWith(1);
+  });
+
+  // ER-0090: the mount-time ResizeObserver callback or a window-manager
+  // resize can arrive while the first restore is still measuring.  A second
+  // measure/recompute on the same loadSeq used to resolve the saved text
+  // target at the chapter start and let that start be written back.
+  function pendingLoadContext() {
+    let settle!: (ready: boolean) => void;
+    const displayReady = new Promise<boolean>((resolve) => { settle = resolve; });
+    const measure = vi.fn(async () => false);
+    const waitForDisplayReady = vi.fn(() => displayReady);
+    const context = Object.create(ChapterPaginator.prototype) as Record<string, unknown>;
+    Object.assign(context, {
+      disposed: false,
+      iframe: { clientWidth: 1000, clientHeight: 760 },
+      measuredViewport: { width: 1080, height: 760 },
+      reflowSeq: 0,
+      loadSeq: 1,
+      displayReadySeq: -1,
+      deferredReflowLoadSeq: -1,
+      closeFootnoteForNavigation: vi.fn(),
+      measure,
+      waitForDisplayReady,
+    });
+    const reflow = () => ChapterPaginator.prototype.reflow.call(context as never);
+    return { context, measure, waitForDisplayReady, reflow, settle };
+  }
+
+  it("waits for the current load's display-ready instead of measuring in parallel, then reflows once", async () => {
+    const { context, measure, waitForDisplayReady, reflow, settle } = pendingLoadContext();
+    reflow();
+    reflow();
+    await Promise.resolve();
+    expect(measure).not.toHaveBeenCalled();
+    expect(waitForDisplayReady).toHaveBeenCalledTimes(1);
+    expect(waitForDisplayReady).toHaveBeenCalledWith(1);
+
+    context.displayReadySeq = 1;
+    settle(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(measure).toHaveBeenCalledTimes(1);
+    expect(measure).toHaveBeenCalledWith(1);
+  });
+
+  it("drops the deferred reflow when a newer load supersedes the pending one", async () => {
+    const { context, measure, reflow, settle } = pendingLoadContext();
+    reflow();
+    context.loadSeq = 2;
+    settle(false);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(measure).not.toHaveBeenCalled();
+  });
+
+  it("still reflows after a failed first layout so a real size can recover it", async () => {
+    const { context, measure, reflow, settle } = pendingLoadContext();
+    reflow();
+    context.displayReadySeq = 1;
+    settle(false);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(measure).toHaveBeenCalledTimes(1);
   });
 });
 
