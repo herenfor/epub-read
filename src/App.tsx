@@ -24,11 +24,6 @@ import { sanitizeTextProjectionPreferences } from "./render/textProjection/prefe
 import type { ImageViewRequest } from "./render/imageActivation";
 import { ImageViewer } from "./ui/ImageViewer";
 import { TitleBar } from "./ui/TitleBar";
-import {
-  createNativeFullscreenController,
-  type NativeFullscreenController,
-  type NativeFullscreenPort,
-} from "./ui/windowFullscreen";
 import { getRuntimeCapabilities } from "./platform/runtimeCapabilities";
 import { getAppBuildSession } from "./config/appBuildSession";
 import {
@@ -59,8 +54,8 @@ import { WhisperFooter, type WhisperFooterChapterTick } from "./ui/WhisperFooter
 import { BatteryIndicator } from "./ui/BatteryIndicator";
 import { ReaderOpening } from "./ui/ReaderOpening";
 import { runPageTransition } from "./ui/pageTransition";
-import { readTitlebarAutoHide, writeTitlebarAutoHide } from "./ui/titlebarPreferences";
 import { useReaderPlatformPreferences } from "./ui/useReaderPlatformPreferences";
+import { useFullscreenControls } from "./ui/useFullscreenControls";
 import { useResponsiveEnvironment } from "./ui/responsiveEnvironment";
 import {
   createContentAxis,
@@ -4959,95 +4954,13 @@ export default function App() {
     })),
   ];
 
-  // ---- 全屏 / 沉浸禅模式（Zen Mode） ----
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [fullscreenBusy, setFullscreenBusy] = useState(false);
-  // 顶栏自动隐藏：本机偏好；顶栏图钉和 设置 › 阅读 都切换它。
-  const [readerZenMode, setReaderZenMode] = useState(readTitlebarAutoHide);
-  const changeReaderZenMode = useCallback((enabled: boolean) => {
-    setReaderZenMode(enabled);
-    writeTitlebarAutoHide(enabled);
-  }, []);
-
-  const fullscreenControllerRef = useRef<NativeFullscreenController | null>(null);
-  if (!fullscreenControllerRef.current && runtime.hasDesktopWindowChrome) {
-    try {
-      const win = getCurrentWindow();
-      const port: NativeFullscreenPort = {
-        isFullscreen: () => win.isFullscreen(),
-        isMaximized: () => win.isMaximized(),
-        unmaximize: () => win.unmaximize(),
-        maximize: () => win.maximize(),
-        setFullscreen: (v) => win.setFullscreen(v),
-      };
-      const isWindows = runtime.platform === "windows";
-      fullscreenControllerRef.current = createNativeFullscreenController(
-        port,
-        isWindows,
-        (fs) => setIsFullscreen(fs),
-        (busy) => setFullscreenBusy(busy)
-      );
-    } catch {}
-  }
-
-  const toggleWebFullscreen = useCallback(async () => {
-    if (typeof document === "undefined") return;
-    try {
-      if (!document.fullscreenElement) {
-        if (document.documentElement.requestFullscreen) {
-          await document.documentElement.requestFullscreen();
-        } else {
-          throw new Error("当前环境不支持全屏 API");
-        }
-      } else {
-        if (document.exitFullscreen) {
-          await document.exitFullscreen();
-        }
-      }
-    } catch (err) {
-      setRuntimeIssues((issues) => [...issues, uiText("appUi.issue.fullscreenFailed", { error: String(err) })]);
-    }
-  }, []);
-
-  const toggleFullscreen = useCallback(async () => {
-    if (isTauriEnv()) {
-      const controller = fullscreenControllerRef.current;
-      if (controller) {
-        try {
-          await controller.toggle();
-        } catch (err) {
-          console.warn("Tauri setFullscreen failed", err);
-          setRuntimeIssues((issues) => [...issues, uiText("appUi.issue.windowFullscreenFailed", { error: String(err) })]);
-        }
-      }
-      return;
-    }
-    await toggleWebFullscreen();
-  }, [toggleWebFullscreen]);
-
-  useEffect(() => {
-    if (!isTauriEnv()) {
-      const handleFullscreenChange = () => {
-        setIsFullscreen(Boolean(document.fullscreenElement));
-      };
-      document.addEventListener("fullscreenchange", handleFullscreenChange);
-      return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
-    }
-    if (!runtime.hasDesktopWindowChrome) return;
-    try {
-      const controller = fullscreenControllerRef.current;
-      if (controller) {
-        void controller.refresh();
-        const win = getCurrentWindow();
-        const unlistenPromise = win.onResized(() => {
-          void controller.refresh();
-        });
-        return () => {
-          void unlistenPromise.then((unlisten) => unlisten()).catch(() => {});
-        };
-      }
-    } catch {}
-  }, []);
+  const {
+    isFullscreen,
+    fullscreenBusy,
+    readerZenMode,
+    changeReaderZenMode,
+    toggleFullscreen,
+  } = useFullscreenControls({ runtime, isTauriEnv, setRuntimeIssues });
 
   // 跨 iframe 键盘事件穿透代理：解决阅读器焦点落入正文 iframe 时桌面全局快捷键失效的问题
   useEffect(() => {
