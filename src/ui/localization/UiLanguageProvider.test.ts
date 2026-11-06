@@ -14,7 +14,7 @@ function Probe() {
 describe("UI language provider", () => {
   it("switches text in place without remounting and mirrors the app lang", async () => {
     const dom = createReactDomHarness();
-    const store = createUiLanguageStore({ read: () => null, write: () => {}, systemLanguages: () => [] });
+    const store = createUiLanguageStore({ read: () => "zh-CN", write: () => {}, systemLanguages: () => ["en-US"] });
     try {
       await dom.render(createElement(UiLanguageProvider, { store, children: createElement(Probe) }));
       const button = dom.container.querySelector("button")!;

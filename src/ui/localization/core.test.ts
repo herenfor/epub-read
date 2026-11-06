@@ -3,12 +3,17 @@ import { createUiLanguageStore, readUiLanguagePreference, resolveUiLocale, trans
 import { en } from "./catalog";
 
 describe("UI language core", () => {
-  it("preserves Chinese on upgrade and follows the primary system language only when requested", () => {
-    expect(readUiLanguagePreference(null)).toBe("zh-CN");
-    expect(readUiLanguagePreference("future-language")).toBe("zh-CN");
+  it("follows the system without a stored choice and keeps an explicit one", () => {
+    expect(readUiLanguagePreference(null)).toBe("system");
+    expect(readUiLanguagePreference("future-language")).toBe("system");
+    expect(readUiLanguagePreference("zh-CN")).toBe("zh-CN");
+    expect(readUiLanguagePreference("en")).toBe("en");
     expect(resolveUiLocale("zh-CN", ["en-US"])).toBe("zh-CN");
     expect(resolveUiLocale("system", ["en-US", "zh-CN"])).toBe("en");
     expect(resolveUiLocale("system", ["zh-TW", "en-US"])).toBe("zh-CN");
+    // Unsupported or unknown system languages fall back to English.
+    expect(resolveUiLocale("system", ["fr-FR", "zh-CN"])).toBe("en");
+    expect(resolveUiLocale("system", [])).toBe("en");
   });
 
   it("returns readable text and interpolates 0 without treating user text as HTML", () => {
@@ -29,33 +34,44 @@ describe("UI language core", () => {
     let languages = ["en-US"];
     const store = createUiLanguageStore({ read: () => "future-language", write, systemLanguages: () => languages });
     const first = store.getSnapshot();
+    expect(first).toEqual({ preference: "system", locale: "en" });
     store.refreshSystemLanguages();
     expect(store.getSnapshot()).toBe(first);
-    expect(write).not.toHaveBeenCalled();
     const listener = vi.fn();
     const unsubscribe = store.subscribe(listener);
-    store.setPreference("system");
-    expect(store.getSnapshot()).toEqual({ preference: "system", locale: "en" });
     languages = ["zh-CN"];
     store.refreshSystemLanguages();
-    expect(store.getSnapshot().locale).toBe("zh-CN");
+    expect(store.getSnapshot()).toEqual({ preference: "system", locale: "zh-CN" });
+    store.setPreference("en");
+    expect(store.getSnapshot()).toEqual({ preference: "en", locale: "en" });
     expect(listener).toHaveBeenCalledTimes(2);
     unsubscribe();
-    store.setPreference("en");
+    store.setPreference("system");
     expect(listener).toHaveBeenCalledTimes(2);
-    expect(write.mock.calls).toEqual([["system"], ["en"]]);
+    expect(write.mock.calls).toEqual([["en"], ["system"]]);
+  });
+
+  it("keeps a stored Chinese choice when the system language is English or changes", () => {
+    const write = vi.fn();
+    let languages = ["en-US"];
+    const store = createUiLanguageStore({ read: () => "zh-CN", write, systemLanguages: () => languages });
+    expect(store.getSnapshot()).toEqual({ preference: "zh-CN", locale: "zh-CN" });
+    languages = ["fr-FR"];
+    store.refreshSystemLanguages();
+    expect(store.getSnapshot()).toEqual({ preference: "zh-CN", locale: "zh-CN" });
+    expect(write).not.toHaveBeenCalled();
   });
 
   it("does not announce a saved choice when preference persistence fails", () => {
     const store = createUiLanguageStore({
       read: () => null,
       write: () => { throw new Error("storage blocked"); },
-      systemLanguages: () => ["en"],
+      systemLanguages: () => ["zh-CN"],
     });
     const listener = vi.fn();
     store.subscribe(listener);
     expect(() => store.setPreference("en")).toThrow("storage blocked");
-    expect(store.getSnapshot()).toEqual({ preference: "zh-CN", locale: "zh-CN" });
+    expect(store.getSnapshot()).toEqual({ preference: "system", locale: "zh-CN" });
     expect(listener).not.toHaveBeenCalled();
   });
 });

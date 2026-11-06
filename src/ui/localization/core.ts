@@ -4,11 +4,15 @@ export type UiLocale = "zh-CN" | "en";
 export type UiLanguagePreference = UiLocale | "system";
 export const UI_LANGUAGE_STORAGE_KEY = "epub-reader:ui-language";
 
-/** Existing installations stay Chinese until the user explicitly chooses a language. */
+/**
+ * Without an explicit choice the UI follows the system. A stored language,
+ * including "zh-CN", is the user's choice and is never replaced on start.
+ */
 export function readUiLanguagePreference(value: unknown): UiLanguagePreference {
-  return value === "en" || value === "system" ? value : "zh-CN";
+  return value === "zh-CN" || value === "en" ? value : "system";
 }
 
+/** The primary system language picks a supported locale; anything else falls back to English. */
 export function resolveUiLocale(preference: UiLanguagePreference, systemLanguages: readonly string[]): UiLocale {
   if (preference !== "system") return preference;
   const primary = systemLanguages.find((value) => value.trim().length > 0);

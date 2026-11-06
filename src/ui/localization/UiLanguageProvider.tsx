@@ -22,7 +22,7 @@ function systemLanguages(): readonly string[] {
 /** The app's one store: device-local storage, independent of reader settings and saves. */
 export function createAppUiLanguageStore(): UiLanguageStore {
   return createUiLanguageStore({
-    // A host that refuses storage still gets a usable Chinese UI; writes then fail visibly.
+    // A host that refuses storage follows the system language; writes then fail visibly.
     read: () => {
       try { return localStorage.getItem(UI_LANGUAGE_STORAGE_KEY); } catch { return null; }
     },
@@ -32,7 +32,7 @@ export function createAppUiLanguageStore(): UiLanguageStore {
 }
 
 /** Chinese, in memory: used when nothing mounted a provider (tests, isolated renders). */
-const fallbackStore = createUiLanguageStore({ read: () => null, write: () => {}, systemLanguages: () => [] });
+const fallbackStore = createUiLanguageStore({ read: () => "zh-CN", write: () => {}, systemLanguages: () => [] });
 let activeStore: UiLanguageStore | null = null;
 
 const UiLanguageContext = createContext<UiLanguageStore | null>(null);
