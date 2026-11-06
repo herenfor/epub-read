@@ -2678,6 +2678,8 @@ export class ChapterPaginator {
   private measuredViewport = { width: -1, height: -1 };
   /** 首次显示准备期间收到的重排请求所属 loadSeq；同一轮只排一次补做。 */
   private deferredReflowLoadSeq = -1;
+  /** 同上，针对图片/样式表 load 触发的内容重排。 */
+  private deferredContentReflowLoadSeq = -1;
   private metrics = { pageCount: 1, currentPage: 0 };
   private loadSeq = 0;
   /** loadSeq whose dropped Blob navigation was already requested again. */
@@ -9665,7 +9667,20 @@ export class ChapterPaginator {
     const seq = this.loadSeq;
     this.reflowTimer = window.setTimeout(() => {
       this.reflowTimer = undefined;
-      if (!this.disposed && seq === this.loadSeq) void this.recompute(false, seq);
+      if (this.disposed || seq !== this.loadSeq) return;
+      // 本章首次显示还未结算：样式表/图片的 load 事件早于入口恢复时，非锚点
+      // 重排会在 recomputeInner 里把待恢复目标换成章首页心采样，随后恢复只能
+      // 解析到章首并当作成功写回（ER-0090）。等这一轮结算后再按当时内容重排。
+      if (this.displayReadySeq !== seq) {
+        if (this.deferredContentReflowLoadSeq === seq) return;
+        this.deferredContentReflowLoadSeq = seq;
+        void this.waitForDisplayReady(seq).then(() => {
+          if (this.deferredContentReflowLoadSeq === seq) this.deferredContentReflowLoadSeq = -1;
+          if (!this.disposed && seq === this.loadSeq) void this.recompute(false, seq);
+        });
+        return;
+      }
+      void this.recompute(false, seq);
     }, 200);
   }
 
