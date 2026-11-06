@@ -113,7 +113,7 @@ describe("virtual list geometry stays stable", () => {
   });
 
   it("uses the touch font row's actual 48px pitch for both spacers and the final item", async () => {
-    const dom = createReactDomHarness({ resizeObserver: true, animationFrames: 0, computedStyle: () => ({ height: "48px" }) });
+    const dom = createReactDomHarness({ resizeObserver: true, animationFrames: 0, computedStyle: () => ({ display: "block", height: "48px" }) });
     dom.metrics(dom.window.HTMLElement.prototype, { clientHeight: 480 });
     try {
       await dom.render(createElement(FontSettingsPanel, {

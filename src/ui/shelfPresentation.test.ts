@@ -47,7 +47,7 @@ describe("shelf presentation", () => {
     const shelf = await mount([
       book("done", { progressPct: 100, lastReadAtMs: recent, spineIndex: 9 }),
       book("half", { progressPct: 40, lastReadAtMs: recent, spineIndex: 3 }),
-      // Opened (not new) but no progress yet: the filters call it unread.
+      // Opened with a read timestamp but still at 0%: a saved position is reading.
       book("zero", { lastReadAtMs: recent }),
     ]);
     try {
@@ -57,8 +57,9 @@ describe("shelf presentation", () => {
       expect(stat("done")?.textContent).toMatch(/^100%/);
       expect(badge("half")).not.toBeNull();
       expect(stat("half")?.textContent).toMatch(/^40%/);
-      expect(badge("zero")).toBeNull();
-      expect(stat("zero")?.classList.contains("unread")).toBe(true);
+      expect(badge("zero")).not.toBeNull();
+      expect(stat("zero")?.textContent).toMatch(/^0%/);
+      expect(stat("zero")?.classList.contains("unread")).toBe(false);
     } finally {
       await shelf.dom.dispose();
     }
