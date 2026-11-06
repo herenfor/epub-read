@@ -145,7 +145,7 @@ import { uiPlural, uiText, useUiText } from "./ui/localization/UiLanguageProvide
 import { FootnotePop } from "./ui/FootnotePop";
 import { LogPanel, type LogItem } from "./ui/LogPanel";
 import { ReaderView, type ReaderHandle } from "./ui/ReaderView";
-import { ShelfView } from "./ui/ShelfView";
+import { createShelfSessionMemory, ShelfView } from "./ui/ShelfView";
 import { ReaderReturnControl } from "./ui/ReaderReturnControl";
 import { applyDocumentTheme, documentThemeAttributes, useThemeTransition } from "./ui/themeTransitionHost";
 import { useReadingInputStart } from "./ui/readerPointerEdge";
@@ -4663,6 +4663,8 @@ export default function App() {
   // ---- ER-0044 书架切换：普通书架与隐私书架（以后的多书架走同一入口） ----
   /** The library's tabs while another shelf is open; restored when it closes. */
   const libraryReaderTabsRef = useRef<typeof readerTabs | null>(null);
+  /** Search/sort/status the shelf had before opening a book; one per shelf space. */
+  const [shelfSessionMemory, setShelfSessionMemory] = useState(createShelfSessionMemory);
   const shelfSpaces = useShelfSpaces({
     supported: runtime.supportsPrivateShelf,
     viewRef,
@@ -4680,6 +4682,7 @@ export default function App() {
       setShelfEntries([]);
       setOrganization(emptyOrganization);
       setShelfScope({ type: "root" });
+      setShelfSessionMemory(createShelfSessionMemory());
       setShelfSearchMode("metadata");
     },
     refreshShelf: refreshShelfProjection,
@@ -5864,6 +5867,7 @@ export default function App() {
               organization={organization}
               scope={shelfScope}
               onScopeChange={setShelfScope}
+              sessionMemory={shelfSessionMemory}
               onApplyOrganization={handleApplyOrganization}
               busy={shelfBusy}
               importActive={nativeImport !== null || folderImport !== null}

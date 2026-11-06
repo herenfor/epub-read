@@ -61,7 +61,7 @@
   "shelfMain.search.mobile": "Search title or author",
   "shelfMain.search.clear": "Clear search",
   "shelfMain.search.clear.tip": "Clear search query",
-  "shelfMain.search.quick": "Search books... (press / to focus)",
+  "shelfMain.search.quick": "Search books (press /)",
   "shelfMain.search.quick.label": "Quick search books",
   "shelfMain.viewToggle": "Toggle view mode",
   "shelfMain.view.grid": "Grid View",

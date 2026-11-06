@@ -50,8 +50,7 @@ import {
   type ThumbnailProvider,
 } from "./thumbnail";
 import { acquireCoverUrl, peekCoverUrl, storeCoverUrl, type HeldCoverUrl } from "./coverUrlCache";
-import { hasReadPosition } from "./readEvidence";
-import { isShelfProgressPending, shelfProgressLabel } from "./shelfProgressDisplay";
+import { isShelfProgressPending, shelfProgressLabel, shelfReadingStatus } from "./shelfProgressDisplay";
 import { readCachedLinearMask } from "./chapterCountCache";
 import { readShelfPlaceLabel } from "./shelfPlaceCache";
 import { shortTabTitle } from "./readerTabs";
@@ -135,10 +134,20 @@ export interface ShelfBodySearchProps {
 export type ShelfViewMode = "grid" | "list";
 export type ShelfStatusTab = "all" | "reading" | "unread" | "finished" | "favorites";
 
-function shelfReadingStatus(entry: ShelfEntry): "reading" | "unread" | "finished" {
-  if (entry.progressPct >= 100) return "finished";
-  if (hasReadPosition(entry) && (entry.progressPct > 0 || isShelfProgressPending(entry))) return "reading";
-  return "unread";
+/**
+ * What the shelf was showing when it unmounted for the reader. The owner keeps
+ * one per shelf space for the app session and replaces it when the space
+ * changes; ShelfView reads it on mount and writes it back without re-rendering
+ * the owner on every keystroke.
+ */
+export interface ShelfSessionMemory {
+  query: string;
+  sort: ShelfSort;
+  statusTab: ShelfStatusTab;
+}
+
+export function createShelfSessionMemory(): ShelfSessionMemory {
+  return { query: "", sort: "recent", statusTab: "all" };
 }
 
 export interface ShelfViewProps {
@@ -148,6 +157,8 @@ export interface ShelfViewProps {
   organization?: LibraryOrganization;
   scope?: ShelfScope;
   onScopeChange?(scope: ShelfScope): void;
+  /** Keeps search, root sort and status tab across reader round trips (see ShelfSessionMemory). */
+  sessionMemory?: ShelfSessionMemory;
   onApplyOrganization?(command: OrganizationCommand): Promise<void>;
   /** 全局忙（打开/删除等短操作），书架禁用交互防止重复操作 */
   busy: boolean;
@@ -1074,12 +1085,9 @@ const ShelfResumeStage = memo(function ShelfResumeStage({
   const { t } = useUiText();
   const readingBooks = useMemo(() => {
     return entries
-      .filter(
-        (e) =>
-          hasReadPosition(e) &&
-          (e.progressPct ?? 0) < 100 &&
-          e.lastReadAtMs > 0
-      )
+      // Same judgement as the cards and filters; the stage additionally needs a
+      // timestamp to order books and show "last read".
+      .filter((e) => shelfReadingStatus(e) === "reading" && e.lastReadAtMs > 0)
       .sort((a, b) => b.lastReadAtMs - a.lastReadAtMs)
       .slice(0, 10);
   }, [entries]);
@@ -3199,8 +3207,9 @@ export function ShelfView(props: ShelfViewProps) {
     [props.onScopeChange]
   );
 
-  const [query, setQuery] = useState("");
-  const [shelfSort, setShelfSort] = useState<ShelfSort>("recent");
+  const sessionMemory = props.sessionMemory;
+  const [query, setQuery] = useState(() => sessionMemory?.query ?? "");
+  const [shelfSort, setShelfSort] = useState<ShelfSort>(() => sessionMemory?.sort ?? "recent");
   // 文件夹内（弹窗与全页文件夹）共用一个本机排序；未选过时跟随书架排序，改它不重排根层。
   const [folderSortChoice, setFolderSortChoice] = useState<ShelfSort | null>(() => {
     try {
@@ -3236,7 +3245,13 @@ export function ShelfView(props: ShelfViewProps) {
       return "grid";
     }
   });
-  const [statusTab, setStatusTab] = useState<"all" | "reading" | "unread" | "finished" | "favorites">("all");
+  const [statusTab, setStatusTab] = useState<ShelfStatusTab>(() => sessionMemory?.statusTab ?? "all");
+  useEffect(() => {
+    if (!sessionMemory) return;
+    sessionMemory.query = query;
+    sessionMemory.sort = shelfSort;
+    sessionMemory.statusTab = statusTab;
+  }, [sessionMemory, query, shelfSort, statusTab]);
   const [folderMenuOpen, setFolderMenuOpen] = useState(false);
   const folderDropdownRef = useRef<HTMLDivElement | null>(null);
 
