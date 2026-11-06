@@ -64,6 +64,10 @@ this local recipe does not claim store acceptance.
 - A rendering check under WSLg or software graphics is not a native GPU-driver
   compatibility result. Upgrade and revoked-portal permissions need their own
   direct checks; they are not implied by a successful build.
+- If DMA-BUF/GBM errors leave a blank window, fully quit the app and try
+  `flatpak run dev.epubreader.app --graphics-compatibility`, or the desktop
+  launcher's Graphics Compatibility Mode action. This changes only that
+  launch's presentation path, not sandbox permissions or the library.
 - Install the distribution's CJK font package when reading CJK books without
   embedded fonts. Flatpak can use the host's read-only font installation; a
   Latin-only test system is not a representative font fallback baseline.

@@ -174,6 +174,7 @@ bash scripts/build-linux.sh --bundles deb    # 本地 Debian 安装包
 - **GTK/WebKitGTK 开发包**：若构建以 `Install the GTK 3, WebKitGTK 4.1 and Fontconfig development packages for your distribution.` 停止，安装上面的开发包，并用 `pkg-config --modversion webkit2gtk-4.1` 检查。不要强行安装为其他发行版构建的包。
 - **中文字体**：若中文显示为空白方框，安装系统 CJK 字体（Debian/Ubuntu 为 `fonts-noto-cjk`，Arch 为 `noto-fonts-cjk`）后重启应用。SeLis 使用系统字体，不随包携带 Windows 字体。
 - **空白窗口或 Web 进程终止**：保留终端输出，并从「书架 → 设置 → 关于 → 诊断日志」进入「日志与诊断」，点击「复制诊断信息」。复制内容只含应用版本与 edition、平台、架构、包渠道、WebKitGTK 版本、Linux 会话类型和兼容模式，不含书籍、路径、凭据或日志正文。反馈时附上发行版、桌面会话（X11/Wayland）、WebKitGTK 版本和 GPU 信息。不要把禁用 WebKit 沙箱、关闭硬件加速或清空书库当作首选处理；这些都不是已确认的修复。
+- **DMA-BUF／GBM 报错导致白屏**：先完全退出，再从启动器选择「图形兼容模式」，或运行 `epub-reader --graphics-compatibility`；Flatpak 使用 `flatpak run dev.epubreader.app --graphics-compatibility`。它只为本次启动避开 DMA-BUF 呈现路径，不禁用 WebKit 沙箱，也不整体关闭合成。兼容路径可能损失性能，普通启动保持默认路径；诊断中的 `enabled` 只表示已配置兼容路径，不表示实际 GPU 使用或帧率已验证。原进程还在运行时会提示先退出，不会假装已切换它的渲染模式。
 - **Flatpak 文件访问**：若宿主路径被拒绝，请通过文件选择器／文档门户选书，不要为此放开整个主目录；报告中保留门户返回的原始错误。
 - **下载或构建失败**：对同一条 `pnpm install` 或 Cargo 命令正常重试，复用已有本地缓存或工具中配置的可信镜像／代理；不要用来源不明的预编译包替代构建。AUR 只支持在 Arch 上构建。
 

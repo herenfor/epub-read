@@ -9,6 +9,12 @@ Icon={{icon}}
 Name={{name}}
 Terminal=false
 Type=Application
+Actions=GraphicsCompatibility;
 {{#if mime_type}}
 MimeType={{mime_type}};
 {{/if}}
+
+[Desktop Action GraphicsCompatibility]
+Name=Graphics Compatibility Mode
+Name[zh_CN]=图形兼容模式
+Exec={{exec}} --graphics-compatibility

@@ -68,8 +68,12 @@ fn current(kind: InstallKind) -> AppDiagnostics {
             version,
         },
         linux_session: None,
-        // No built-in graphics compatibility setting currently exists.
-        compatibility_mode: "unavailable",
+        compatibility_mode: {
+            #[cfg(target_os = "linux")]
+            { crate::linux_graphics::compatibility_mode() }
+            #[cfg(not(target_os = "linux"))]
+            { "unavailable" }
+        },
     }
 }
 
@@ -153,6 +157,9 @@ mod tests {
             serde_json::to_value(build_info::current()).unwrap()
         );
         assert_eq!(value["distributionChannel"], "unknown");
+        #[cfg(target_os = "linux")]
+        assert_eq!(value["compatibilityMode"], crate::linux_graphics::compatibility_mode());
+        #[cfg(not(target_os = "linux"))]
         assert_eq!(value["compatibilityMode"], "unavailable");
     }
 
