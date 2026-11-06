@@ -23,7 +23,6 @@ import type { ImageViewRequest } from "./render/imageActivation";
 import { ImageViewer } from "./ui/ImageViewer";
 import { TitleBar } from "./ui/TitleBar";
 import { getRuntimeCapabilities } from "./platform/runtimeCapabilities";
-import { getAppBuildSession } from "./config/appBuildSession";
 import {
   closeReaderTab,
   cycleReaderTab,
@@ -31,9 +30,11 @@ import {
 } from "./ui/readerTabs";
 import { useReaderTabsVisible } from "./ui/readerTabLayout";
 import { useReaderNavigation } from "./ui/useReaderNavigation";
+import { useProgressRuntime } from "./ui/useProgressRuntime";
 import { useScrubState } from "./ui/useScrubState";
+import { useShelfProgressCommit } from "./ui/useShelfProgressCommit";
 import { useReaderTabActions, useReaderTabsState } from "./ui/useReaderTabs";
-import { checkThenRecoverProgressRuntime, planFreshProgressOpen } from "./ui/progressOpenOrder";
+import { planFreshProgressOpen } from "./ui/progressOpenOrder";
 import { useAndroidBack } from "./platform/useAndroidBack";
 import { useExitPresence } from "./ui/menuMotion";
 import { useReaderCursorIdle } from "./ui/readerCursorIdle";
@@ -135,8 +136,6 @@ import { SaveFailureDialog } from "./ui/SaveFailureDialog";
 import { releaseUnsavedLane, type SaveFailurePrompt } from "./ui/saveFailureExit";
 import { useSaveFileJob } from "./ui/useSaveFileJob";
 import {
-  applyShelfProgressPatch,
-  ensurePortableRepositoryReady,
   getShelfStore,
   markShelfEntryOpened,
   readingAnchorFromShelfEntry,
@@ -151,16 +150,13 @@ import {
   sha256Hex,
 } from "./ui/importBooks";
 import { bookOpenErrorMessage, describeBookOpenFailure } from "./ui/bookOpenFailure";
-import { ScopedProgressWriter } from "./ui/progressWriter";
-import { ProgressRuntimeGate, type ProgressRuntimeStatus } from "./ui/portableState/progressRuntimeGate";
-import { LocalProgressCheckpoints, type LocalProgressCheckpoint } from "./ui/localProgressCheckpoint";
+import type { LocalProgressCheckpoint } from "./ui/localProgressCheckpoint";
 import {
   openingBaselinePct,
   planCheckpointOpen,
   sameCheckpointValue,
   stageCheckpointSample,
   persistCheckpointSample,
-  type CheckpointedSample,
 } from "./ui/checkpointProgressRepair";
 import { progressValueFromPatch } from "./ui/portableState/shelfStoreAdapter";
 import { mayCommitRestoredProgress, type RestoreTicket } from "./ui/restoreCommitGate";
@@ -320,28 +316,6 @@ function portableLocatorOf(entry: ShelfEntry): Locator | null {
   return (entry as unknown as { readonly portableLocator?: Locator | null }).portableLocator ?? null;
 }
 
-const DIAGNOSTIC_ERROR_CODES = new Set([
-  "invalid-data",
-  "invalid-entity",
-  "invalid-choice",
-  "invalid-intent",
-  "stale-basis",
-  "stale-choice",
-  "deleted-entity",
-  "clock-exhausted",
-  "storage-error",
-  "progress-needs-choice",
-  "progress-write-interrupted",
-  "runtime-not-ready",
-  "runtime-check-timeout",
-  "runtime-check-interrupted",
-  "shelf-record-missing",
-]);
-
-function diagnosticErrorCode(value: unknown): string | null {
-  if (value === undefined || value === null) return null;
-  return typeof value === "string" && DIAGNOSTIC_ERROR_CODES.has(value) ? value : "unknown";
-}
 
 
 function mergeProgressProjection(entry: ShelfEntry, written: ShelfEntry): ShelfEntry {
@@ -371,69 +345,6 @@ function mergeProgressProjection(entry: ShelfEntry, written: ShelfEntry): ShelfE
         }
       : {}),
   } as ShelfEntry;
-}
-
-function parseLocalProgressCheckpoint(value: unknown): LocalProgressCheckpoint<ShelfProgressPatch> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error("本机进度恢复记录格式无效");
-  }
-  const candidate = value as Record<string, unknown>;
-  if (
-    candidate.schemaVersion !== 1 ||
-    typeof candidate.checkpointId !== "string" ||
-    candidate.checkpointId.length === 0 ||
-    typeof candidate.bookHash !== "string" ||
-    candidate.bookHash.length === 0 ||
-    !Object.prototype.hasOwnProperty.call(candidate, "shownStamp") ||
-    !Object.prototype.hasOwnProperty.call(candidate, "patch")
-  ) {
-    throw new Error("本机进度恢复记录字段不完整");
-  }
-  const shown = candidate.shownStamp;
-  let shownStamp: LocalProgressCheckpoint<ShelfProgressPatch>["shownStamp"] = null;
-  if (shown !== null) {
-    if (
-      typeof shown !== "object" ||
-      typeof (shown as { deviceId?: unknown }).deviceId !== "string" ||
-      typeof (shown as { counter?: unknown }).counter !== "number" ||
-      !Number.isSafeInteger((shown as { counter: number }).counter)
-    ) {
-      throw new Error("本机进度恢复记录的选择戳无效");
-    }
-    shownStamp = {
-      deviceId: (shown as { deviceId: string }).deviceId,
-      counter: (shown as { counter: number }).counter,
-    };
-  }
-  const rawPatch = candidate.patch;
-  if (typeof rawPatch !== "object" || rawPatch === null || Array.isArray(rawPatch)) {
-    throw new Error("本机进度恢复记录的阅读位置无效");
-  }
-  const patch = rawPatch as Partial<ShelfProgressPatch>;
-  if (
-    typeof patch.lastReadAtMs !== "number" ||
-    !Number.isSafeInteger(patch.lastReadAtMs) ||
-    patch.lastReadAtMs < 0 ||
-    typeof patch.spineIndex !== "number" ||
-    !Number.isSafeInteger(patch.spineIndex) ||
-    typeof patch.page !== "number" ||
-    !Number.isSafeInteger(patch.page) ||
-    typeof patch.progressPct !== "number" ||
-    !Number.isFinite(patch.progressPct) ||
-    (patch.anchorIndex !== null && typeof patch.anchorIndex !== "number") ||
-    (patch.anchorRatio !== null && typeof patch.anchorRatio !== "number") ||
-    (patch.anchorTextOffset !== null && typeof patch.anchorTextOffset !== "number") ||
-    (patch.anchorTextSnippet !== null && typeof patch.anchorTextSnippet !== "string")
-  ) {
-    throw new Error("本机进度恢复记录的位置字段无效");
-  }
-  return {
-    schemaVersion: 1,
-    checkpointId: candidate.checkpointId,
-    bookHash: candidate.bookHash,
-    shownStamp,
-    patch: patch as ShelfProgressPatch,
-  };
 }
 
 function sameCheckpointPatchValue(
@@ -801,117 +712,11 @@ export default function App() {
   const libraryIndexSignature = shelfEntries
     .map((entry) => `${entry.id}:${entry.contentHash ?? ""}:${entry.available === false ? 0 : 1}`)
     .join("|");
-  const progressWriterRef = useRef<ScopedProgressWriter<CheckpointedSample<ShelfProgressPatch>> | null>(null);
-  if (!progressWriterRef.current) {
-    // Exact-session lanes are registered per open; no book ID alone may flush
-    // or retire another book's unsaved sample. Each lane owns a staged local
-    // checkpoint ID captured before native IPC can start.
-    progressWriterRef.current = new ScopedProgressWriter<CheckpointedSample<ShelfProgressPatch>>();
-  }
-  const activeProgressLeaseRef = useRef<ProgressLease | null>(null);
-  const progressRuntimeGateRef = useRef<ProgressRuntimeGate | null>(null);
-  if (!progressRuntimeGateRef.current) {
-    progressRuntimeGateRef.current = new ProgressRuntimeGate(async () => {
-      const store = getShelfStore();
-      // Health checks stay read-only. Explicit first activation/recovery is
-      // performed outside the 5s race by ensureProgressRuntimeReady.
-      if (store.runtimeStatus) return store.runtimeStatus();
-      return { repositoryGeneration: "legacy", repositoryReady: true };
-    });
-  }
-  const ensureProgressRuntimeReady = useCallback(async () => {
-    const status = await checkThenRecoverProgressRuntime(
-      progressRuntimeGateRef.current!, ensurePortableRepositoryReady,
-    );
-    lastNativeRecordsReadRef.current = status.lastRecordsRead ?? null;
-    if (status.repositoryGeneration) lastRepositoryGenerationRef.current = status.repositoryGeneration;
-    return status;
-  }, []);
-  const localCheckpointsRef = useRef<LocalProgressCheckpoints<ShelfProgressPatch> | null>(null);
-  if (!localCheckpointsRef.current) {
-    // A shelf that must not persist (the private shelf) keeps these in memory.
-    localCheckpointsRef.current = new LocalProgressCheckpoints(
-      shelfSpaceStorage,
-      parseLocalProgressCheckpoint,
-      () => (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function")
-        ? crypto.randomUUID()
-        : `progress-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-    );
-  }
-  // Re-stage a lane's latest sample as the book's local recovery record before
-  // the lane is dropped; throws (keeping the lane) when that is impossible.
-  const retainUnsavedSample = useCallback((lease: ProgressLease) => (sample: CheckpointedSample<ShelfProgressPatch>): void => {
-    const checkpoints = localCheckpointsRef.current;
-    const store = getShelfStore();
-    const bookHash = store.progressSessionBookHash?.(lease) ?? contentHashByIdRef.current.get(lease.bookId);
-    if (!checkpoints || !bookHash) throw new Error("本机进度检查点不可用");
-    stageCheckpointSample(checkpoints, bookHash, store.progressSessionChosenStamp?.(lease) ?? null, sample.patch);
-  }, []);
-  const lifecycleDiagnosticsRef = useRef<string[]>([]);
-  const firstSampleFailureRecordedRef = useRef(false);
-  const jsBootIdRef = useRef<string | null>(null);
-  if (!jsBootIdRef.current) {
-    jsBootIdRef.current = (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function")
-      ? crypto.randomUUID()
-      : `js-boot-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  }
-  const lastRepositoryGenerationRef = useRef<string>("unknown");
-  const lastNativeRecordsReadRef = useRef<ProgressRuntimeStatus["lastRecordsRead"] | null>(null);
-  const recordLifecycleDiagnostic = useCallback((
-    event: string,
-    detail: {
-      readonly stage?: string;
-      readonly result?: string;
-      readonly candidate?: boolean;
-      readonly repositoryGeneration?: string;
-      readonly errorCode?: string;
-      readonly backend?: string;
-      readonly count?: number;
-      readonly targetFound?: boolean;
-    } = {},
-  ): void => {
-    if (!(getAppBuildSession()?.debug ?? import.meta.env.DEV)) return;
-    const lease = activeProgressLeaseRef.current;
-    const store = getShelfStore();
-    const repositoryGeneration = detail.repositoryGeneration
-      ?? (lease ? store.progressSessionRepositoryGeneration?.(lease) : undefined)
-      ?? lastRepositoryGenerationRef.current;
-    if (repositoryGeneration && repositoryGeneration !== "unknown") {
-      lastRepositoryGenerationRef.current = repositoryGeneration;
-    }
-    const line = JSON.stringify({
-      at: new Date().toISOString(),
-      event,
-      stage: detail.stage ?? null,
-      result: detail.result ?? null,
-      candidate: detail.candidate ?? false,
-      errorCode: diagnosticErrorCode(detail.errorCode),
-      repositoryGeneration,
-      jsBoot: jsBootIdRef.current,
-      backend: detail.backend ?? null,
-      count: detail.count ?? null,
-      targetFound: detail.targetFound ?? null,
-      lastNativeRecordsRead: lastNativeRecordsReadRef.current,
-      portableFacade: portableShelfStateActive(),
-      jsSession: sessionGenerationRef.current,
-      activeLease: Boolean(activeProgressLeaseRef.current),
-      shelfCount: shelfEntriesRef.current.length,
-    });
-    const lines = lifecycleDiagnosticsRef.current;
-    lines.push(line);
-    if (lines.length > 20) lines.splice(0, lines.length - 20);
-    if (event === "open_failed") {
-      // Read only the cached native diagnostic, through the bounded health
-      // gate. Do not delay the failed operation or read/migrate shelf data.
-      void progressRuntimeGateRef.current?.check().then((status) => {
-        lastNativeRecordsReadRef.current = status.lastRecordsRead ?? null;
-        recordLifecycleDiagnostic("native_after_failure", {
-          stage: detail.stage, result: "sampled",
-          repositoryGeneration: status.repositoryGeneration,
-        });
-      }).catch(() => undefined);
-    }
-  }, []);
+  const {
+    progressWriterRef, activeProgressLeaseRef, progressRuntimeGateRef, ensureProgressRuntimeReady,
+    localCheckpointsRef, retainUnsavedSample, lifecycleDiagnosticsRef, recordLifecycleDiagnostic,
+    firstSampleFailureRecordedRef, lastRepositoryGenerationRef, lastNativeRecordsReadRef,
+  } = useProgressRuntime({ contentHashByIdRef, shelfEntriesRef, sessionGenerationRef });
   /** 指针是否悬停在交互式浮层（脚注弹窗等）上：此时不响应翻页键/后续可扩展书签等 */
   const overlayHoverRef = useRef(false);
   const foregroundRef = useRef<ReaderForeground>({ kind: "none" });
@@ -2969,118 +2774,14 @@ export default function App() {
   }, [book, contentAxis]);
 
   // ---- 书架进度回写（阅读器状态→书架索引，不修改阅读器本体） ----
-  /**
-   * explicit=false 是随页态变化的自动保存：跳过原生滑动途中的 transient 预览。
-   * 返回书架/切后台/关窗/导出/换书是显式保存：用同一次读数的视觉屏与锚点。
-   */
-  const persistShelfProgress = useCallback((explicit = false) => {
-    // 自动与显式（返回书架/后台/关窗）入口同样受恢复门约束：未结算或失败的
-    // 恢复不能用当前（可能是章首）位置覆盖原进度与本机检查点。
-    if (restoreGateRef.current && !mayCommitRestoredProgress(restoreGateRef.current)) return;
-    if (
-      suppressShelfProgressRef.current ||
-      navigationPendingRef.current ||
-      !readerDisplayReady ||
-      view !== "reader" ||
-      !currentShelfId
-    ) return;
-    // 自动保存不会消费运动预览；先跳过，避免为了丢弃它而强制同步采样正文。
-    // 显式退出/后台/书签仍读取同一次真实视觉位置。
-    if (!explicit && chapterStateRef.current.status === "ready" && chapterStateRef.current.transient === true) return;
-    const position = readReaderPosition();
-    const state = position.state;
-    if (state.status !== "ready") return;
-    if (state.transient === true && !explicit) return;
-    if (position.chapterPath !== null && book && position.chapterPath !== spineItemPath(book, spineIndex)) return;
-    const a = position.readingAnchor;
-    const currentSummary = summarizeLinearCounts(chapterCountsRef.current, spineIndex);
-    const exactChars = currentChapterCharsRead({
-      textOffset: a?.textOffset,
-      chapterFraction: book?.sourceFormat === "comic-zip" ? state.totalScrollProgress : undefined,
-      page: state.currentPage,
-      pageCount: state.pageCount,
-      chapterChars: currentSummary.current ?? 0,
-    });
-    const lastLinear = linearIndices.at(-1);
-    const isLastLinear = lastLinear === spineIndex || (book ? nextLinearIndex(book, spineIndex, 1) === -1 : false);
-    const atBookEnd =
-      settings.readingMode === "scroll"
-        ? state.status === "ready" && state.atEnd === true
-        : state.status === "ready" && (state.atEnd === true || (isLastLinear && state.currentPage >= state.pageCount - 1));
-    const exactProgressPct = atBookEnd
-      ? 100
-      : (() => {
-          const pct = computeProgressPct(currentSummary, exactChars);
-          return pct === null ? null : Math.min(99, pct);
-        })();
-    if (exactProgressPct !== null) {
-      baselineProgressPctRef.current = resolveProgressPct(
-        exactProgressPct,
-        baselineProgressPctRef.current
-      );
-    }
-    const patch: ShelfProgressPatch = {
-      lastReadAtMs: Date.now(),
-      spineIndex,
-      page: state.currentPage,
-      progressPct: resolveProgressPct(exactProgressPct, baselineProgressPctRef.current),
-      // -1 is an internal text-only anchor sentinel, never persisted.
-      anchorIndex: a && a.index >= 0 ? a.index : null,
-      anchorRatio: a && a.index >= 0 ? a.ratio : null,
-      anchorTextOffset: a?.textOffset ?? null,
-      anchorTextSnippet: a?.textSnippet ?? null,
-      mediaAnchor: a?.mediaAnchor ?? null,
-      // R5: this is an actually displayed chapter, so a modern locator can be
-      // built even for image-only/media and chapter-start positions.
-      chapterPath: book ? spineItemPath(book, spineIndex) ?? null : null,
-    };
-    // 先更新内存态：即使用户立刻返回并重新打开，也不会读到旧位置。
-    setShelfEntries((prev) =>
-      applyShelfProgressPatch(prev, currentShelfId, patch)
-    );
-    const lease = activeProgressLeaseRef.current;
-    if (lease) {
-      const store = getShelfStore();
-      const bookHash = store.progressSessionBookHash?.(lease);
-      const shownStamp = store.progressSessionChosenStamp?.(lease) ?? null;
-      const checkpoints = localCheckpointsRef.current;
-      if (bookHash && checkpoints) {
-        try {
-          // Stage the local recovery record before enqueueing any native IPC.
-          const sample = stageCheckpointSample(checkpoints, bookHash, shownStamp, patch);
-          progressWriterRef.current?.enqueue(lease, sample);
-        } catch (error) {
-          showReaderNotice(uiText("notice.progress.localWriteFailed"), "error");
-        }
-      }
-    }
-  // page/anchor 变化必须触发写入；不能只依赖取整后的 progressPct，
-  // 否则长书连续数页保持同一百分比时会漏掉最新位置。
-  }, [view, currentShelfId, spineIndex, readerDisplayReady, chapterState, showReaderNotice, readReaderPosition]);
-  persistShelfProgressRef.current = persistShelfProgress;
-
-  useEffect(() => {
-    persistShelfProgress(false);
-  }, [persistShelfProgress]);
-
-  // 未完成的扫描始终保持同一个 pending 状态；只有完成/可计算摘要变化时
-  // 才补写一次进度，避免每章 estimated 回调反复 enqueue 相同 baseline。
-  const countProgressSignature = !book
-    ? "none"
-    : countSummary.complete
-      ? `${countSummary.total}:${countSummary.before}:${countSummary.current ?? ""}`
-      : "pending";
-  const persistChapterCountCache = useCallback(() => {
-    const active = activeSessionRef.current;
-    if (!active?.countCacheKey) return;
-    writeChapterCountCache(active.countCacheKey, chapterCountsRef.current, active.structuralCounts);
-  }, []);
-  useEffect(() => {
-    if (lastCountProgressSignatureRef.current === countProgressSignature) return;
-    lastCountProgressSignatureRef.current = countProgressSignature;
-    persistShelfProgressRef.current(false);
-    if (countSummary.complete) persistChapterCountCache();
-  }, [countProgressSignature, countSummary.complete, persistChapterCountCache]);
+  const { persistShelfProgress, persistChapterCountCache } = useShelfProgressCommit({
+    view, currentShelfId, spineIndex, book, chapterState, chapterStateRef, settings,
+    linearIndices, countSummary, readerDisplayReady, readReaderPosition,
+    restoreGateRef, suppressShelfProgressRef, navigationPendingRef,
+    setShelfEntries, showReaderNotice,
+    activeSessionRef, chapterCountsRef, baselineProgressPctRef, lastCountProgressSignatureRef,
+    persistShelfProgressRef, progressWriterRef, activeProgressLeaseRef, localCheckpointsRef,
+  });
 
   /** `animate`: the user is going back to the library, not switching books through it. */
   const leaveReader = useCallback(async (leaveUnsaved: boolean, animate = false, covered?: Promise<void>): Promise<boolean> => {
