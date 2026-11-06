@@ -26,21 +26,15 @@ import { TitleBar } from "./ui/TitleBar";
 import { getRuntimeCapabilities } from "./platform/runtimeCapabilities";
 import { getAppBuildSession } from "./config/appBuildSession";
 import {
-  MAX_READER_TABS,
-  READER_TABS_STORAGE_KEY,
-  activeReaderTabs,
   closeReaderTab,
-  closeReaderTabAfterLeave,
   cycleReaderTab,
   parseReaderTabs,
-  placeReaderTab,
-  pruneReaderTabs,
-  serializeReaderTabs,
 } from "./ui/readerTabs";
 import { useReaderTabsVisible } from "./ui/readerTabLayout";
+import { useReaderTabActions, useReaderTabsState } from "./ui/useReaderTabs";
 import { checkThenRecoverProgressRuntime, planFreshProgressOpen } from "./ui/progressOpenOrder";
 import { useAndroidBack } from "./platform/useAndroidBack";
-import { pageOpenMs, useExitPresence } from "./ui/menuMotion";
+import { useExitPresence } from "./ui/menuMotion";
 import { useReaderCursorIdle } from "./ui/readerCursorIdle";
 import { SidebarDrawer } from "./ui/SidebarDrawer";
 import type { SidebarNavigationMemory } from "./ui/sidebarSwipe";
@@ -190,8 +184,7 @@ import {
 } from "./ui/chapterCounts";
 import { createChapterCountJob } from "./ui/chapterCountJob";
 import { forgetChapterCounts, readCachedChapterCounts, readKnownChapterProgressKeys, writeChapterCountCache } from "./ui/chapterCountCache";
-import { forgetShelfPlaceLabel, readShelfPlaceLabel, writeShelfPlaceLabel } from "./ui/shelfPlaceCache";
-import { shelfProgressLabel } from "./ui/shelfProgressDisplay";
+import { forgetShelfPlaceLabel, writeShelfPlaceLabel } from "./ui/shelfPlaceCache";
 import { useCustomThemes } from "./ui/useCustomThemes";
 import { projectShelfProgressReadiness } from "./ui/shelfProgressDisplay";
 import {
@@ -3407,15 +3400,7 @@ export default function App() {
   // 等会话清理 effect 提交后再走现有“从书架打开”。阅读层与分页器不感知标签。
   // 标签条只在电脑和平板横屏显示；手机和平板竖屏宽度不够，照旧只显示书名。
   const readerTabsVisible = useReaderTabsVisible(mobileChrome);
-  const [readerTabs, setReaderTabs] = useState(() => {
-    try {
-      return parseReaderTabs(localStorage.getItem(READER_TABS_STORAGE_KEY));
-    } catch {
-      return parseReaderTabs(null);
-    }
-  });
-  /** 切标签时目标书的开书画面先浮在旧书上，书架不在“离开 → 开书”之间露出来；开书进入解析或中途作罢即撤。 */
-  const [tabSwitchOpening, setTabSwitchOpening] = useState<{ title: string; creator: string } | null>(null);
+  const { readerTabs, setReaderTabs, tabSwitchOpening, setTabSwitchOpening } = useReaderTabsState();
   useEffect(() => {
     if (phase.phase === "loading") setTabSwitchOpening(null);
   }, [phase.phase]);
@@ -3703,81 +3688,13 @@ export default function App() {
   }, [persistShelfProgress, persistChapterCountCache, closeForeground, closeImageOverlay, retainUnsavedSample]);
   const handleBackToShelf = useCallback(() => leaveReader(false, true), [leaveReader]);
 
-  const readerTabsRef = useRef(readerTabs);
-  readerTabsRef.current = readerTabs;
-  const pendingTabOpenRef = useRef<string | null>(null);
-  /** 下一本进阅读器的书要新开一个标签（其余打开都替换当前这本）。 */
-  const pendingNewTabRef = useRef<string | null>(null);
-  /** 从“＋”回书架挑书：挑中的书新开标签，取消就回到原来那本。 */
-  const [tabPick, setTabPick] = useState<{ returnId: string | null } | null>(null);
-  useEffect(() => {
-    // Another shelf's tabs never reach browser storage; the library's stay as saved.
-    if (!activeShelfSpace().policy.persistsBrowserState) return;
-    try {
-      localStorage.setItem(READER_TABS_STORAGE_KEY, serializeReaderTabs(readerTabs));
-    } catch {
-      // 本机便利功能：写不进存储只影响重启后恢复标签。
-    }
-  }, [readerTabs]);
-  useEffect(() => {
-    if (view !== "reader" || !currentShelfId) return;
-    const mode = pendingNewTabRef.current === currentShelfId ? "new" : "replace";
-    pendingNewTabRef.current = null;
-    setTabPick(null);
-    setReaderTabs((state) => placeReaderTab(state, currentShelfId, mode));
-  }, [currentShelfId, view]);
-  useEffect(() => {
-    if (libraryLoad.status !== "ready") return;
-    const ids = new Set(shelfEntries.map((entry) => entry.id));
-    setReaderTabs((state) => pruneReaderTabs(state, (id) => ids.has(id)));
-  }, [libraryLoad.status, shelfEntries]);
-  /** 开书画面在旧书上浮入；返回它完全盖住的时刻（没有目标书就不等）。 */
-  const coverTabSwitch = useCallback((id: string | null): Promise<void> => {
-    const entry = id ? shelfEntriesRef.current.find((item) => item.id === id) : undefined;
-    setTabSwitchOpening(entry ? { title: entry.title || entry.fileName, creator: entry.creator } : null);
-    if (!entry) return Promise.resolve();
-    // 画面在下一帧挂上才开始浮入，多留一帧。
-    return new Promise((resolve) => window.setTimeout(resolve, pageOpenMs() + 16));
-  }, []);
-  const switchReaderTab = useCallback(async (id: string | null): Promise<void> => {
-    if (id === currentShelfIdRef.current || shelfBusyRef.current) return;
-    if (!(await leaveReader(false, false, coverTabSwitch(id)))) {
-      setTabSwitchOpening(null);
-      return;
-    }
-    pendingTabOpenRef.current = id;
-  }, [coverTabSwitch, leaveReader]);
-  const closeReaderTabById = useCallback((id: string): void => {
-    if (shelfBusyRef.current) return;
-    if (id !== currentShelfIdRef.current) {
-      setReaderTabs((state) => closeReaderTab(state, id).state);
-      return;
-    }
-    const covered = coverTabSwitch(closeReaderTab(readerTabsRef.current, id).next);
-    void closeReaderTabAfterLeave(readerTabsRef.current, id, async () => {
-      const left = await leaveReader(false, false, covered);
-      if (!left) setTabSwitchOpening(null);
-      return left;
-    }, ({ next }) => {
-      setReaderTabs((state) => closeReaderTab(state, id).state);
-      pendingTabOpenRef.current = next;
-    });
-  }, [coverTabSwitch, leaveReader]);
-  const openReaderTabFromReader = useCallback((id: string): void => {
-    if (activeReaderTabs(readerTabsRef.current).tabs.length >= MAX_READER_TABS) return;
-    pendingNewTabRef.current = id;
-    void switchReaderTab(id);
-  }, [switchReaderTab]);
-  const pickReaderTabFromShelf = useCallback(async (): Promise<void> => {
-    if (shelfBusyRef.current) return;
-    const returnId = currentShelfIdRef.current;
-    if (!(await leaveReader(false))) return;
-    setTabPick({ returnId });
-  }, [leaveReader]);
-  const openFromShelf = useCallback((id: string): void => {
-    if (tabPick) pendingNewTabRef.current = id;
-    void handleShelfOpen(id);
-  }, [handleShelfOpen, tabPick]);
+  const {
+    readerTabsRef, setTabPick, switchReaderTab, closeReaderTabById,
+    openFromShelf, shelfReaderTabs, readerTabStrip, takePendingOpen,
+  } = useReaderTabActions({
+    view, currentShelfId, libraryLoad, shelfEntries, readerTabsVisible, readerTabs, setReaderTabs,
+    setTabSwitchOpening, shelfEntriesRef, shelfBusyRef, currentShelfIdRef, leaveReader, handleShelfOpen, warming,
+  });
 
   // ---- ER-0044 书架切换：普通书架与隐私书架（以后的多书架走同一入口） ----
   /** The library's tabs while another shelf is open; restored when it closes. */
@@ -3883,60 +3800,6 @@ export default function App() {
   useEffect(() => {
     kickExternalOpen();
   }, [kickExternalOpen, libraryLoad.status, shelfBusy, nativeImport, view, saveFailurePrompt, shelfEntries]);
-  const shelfReaderTabs = useMemo(() => {
-    if (!readerTabsVisible) return undefined;
-    const group = activeReaderTabs(readerTabs);
-    const returnEntry = tabPick?.returnId ? shelfEntries.find((entry) => entry.id === tabPick.returnId) : undefined;
-    return {
-      openIds: new Set(group.tabs) as ReadonlySet<string>,
-      full: group.tabs.length >= MAX_READER_TABS,
-      max: MAX_READER_TABS,
-      onOpenInNewTab: (id: string) => {
-        if (group.tabs.length >= MAX_READER_TABS && !group.tabs.includes(id)) return;
-        pendingNewTabRef.current = id;
-        void handleShelfOpen(id);
-      },
-      pick: tabPick
-        ? {
-            count: group.tabs.length,
-            returnTitle: returnEntry?.title ?? null,
-            onCancel: () => {
-              setTabPick(null);
-              if (returnEntry) void handleShelfOpen(returnEntry.id);
-            },
-          }
-        : null,
-    };
-  }, [handleShelfOpen, readerTabs, readerTabsVisible, shelfEntries, tabPick]);
-  const readerTabStrip = useMemo(() => {
-    if (!readerTabsVisible) return undefined;
-    const entries = new Map(shelfEntries.map((entry) => [entry.id, entry] as const));
-    const detail = (entry: ShelfEntry): string => {
-      const place = readShelfPlaceLabel(entry.contentHash ?? entry.id, entry.spineIndex ?? 0);
-      const progress = shelfProgressLabel(entry);
-      return place ? uiText("shelf.resume.place", { chapter: place, progress }) : progress;
-    };
-    const group = activeReaderTabs(readerTabs);
-    const open = new Set(group.tabs);
-    return {
-      tabs: group.tabs
-        .filter((id) => entries.has(id))
-        .map((id) => ({ id, title: entries.get(id)!.title || id, detail: detail(entries.get(id)!) })),
-      activeId: currentShelfId,
-      max: MAX_READER_TABS,
-      recent: shelfEntries
-        .filter((entry) => !open.has(entry.id) && entry.lastReadAtMs > 0 && entry.available !== false)
-        .sort((a, b) => b.lastReadAtMs - a.lastReadAtMs)
-        .slice(0, MAX_READER_TABS)
-        .map((entry) => ({ id: entry.id, title: entry.title || entry.id, detail: detail(entry) })),
-      onSelect: (id: string) => void switchReaderTab(id),
-      onClose: closeReaderTabById,
-      onOpenNew: openReaderTabFromReader,
-      onPickFromShelf: () => void pickReaderTabFromShelf(),
-      warm: warming("reader-tabs"),
-    };
-  }, [closeReaderTabById, currentShelfId, openReaderTabFromReader, pickReaderTabFromShelf, readerTabs,
-    readerTabsVisible, shelfEntries, switchReaderTab, warming]);
   useEffect(() => {
     if (!readerTabsVisible || view !== "reader") return;
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -4175,8 +4038,7 @@ export default function App() {
   // A11：上一个会话的清理 effect（同一次提交、声明在前）跑完后，才打开目标标签。
   useEffect(() => {
     if (view !== "shelf") return;
-    const id = pendingTabOpenRef.current;
-    pendingTabOpenRef.current = null;
+    const id = takePendingOpen();
     if (id) void handleShelfOpen(id).finally(() => setTabSwitchOpening(null));
   }, [handleShelfOpen, view]);
 
