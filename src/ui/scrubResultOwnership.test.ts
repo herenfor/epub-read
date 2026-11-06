@@ -1,13 +1,15 @@
 import { createElement, useRef, useState } from "react";
 import { expect, it, vi } from "vitest";
 import ts from "typescript";
-import appSource from "../App.tsx?raw";
+import scrubSource from "./useScrubState.ts?raw";
+import navigationSource from "./useReaderNavigation.ts?raw";
 import { createReactDomHarness } from "../test/reactDomHarness";
 import { useReaderSession, type ReaderSessionHost } from "./useReaderSession";
 import { initialScrubUi, reduceScrubUi, type ScrubToken, type ScrubUiEvent, type ScrubUiState } from "./readerProgressAxis";
 
-// Exercise App's actual callbacks without mounting its unrelated library/native UI.
-const tree = ts.createSourceFile("App.tsx", appSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+// Exercise the C3 hooks' actual callbacks without mounting the app's library/native UI.
+const appSource = `${scrubSource}\n${navigationSource}`;
+const tree = ts.createSourceFile("C3 hooks", appSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const factories = new Map<string, (bindings: Record<string, unknown>) => unknown>();
 for (const name of ["dispatchScrub", "acceptsScrubResult", "handleContentFractionSettled", "handleContentFractionCancelled", "handleContentFractionFailed"]) {
   let body = "";
