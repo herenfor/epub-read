@@ -2,15 +2,14 @@ import { ComicReaderView } from "./ui/ComicReaderView";
 import { supportedBookName, sourceFormat, loadSourceBook, loadSourceArchive, textEncodingFromPath } from "./core/documentFormats";
 import { resolveArchiveHref, archiveHref } from "./core/archiveReferences";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
-import { spineIndexForPath, spineIndexForEntryKey, spineItemPath, spineItemHref, disposeBook, nextLinearIndex, linearChapterNumber, linearChapterTotal, tocLabelsBySpine } from "./core/book";
+import { spineIndexForEntryKey, spineItemPath, spineItemHref, disposeBook, nextLinearIndex, linearChapterNumber, linearChapterTotal, tocLabelsBySpine } from "./core/book";
 import type { Book } from "./core/types";
 import type { ArchiveClient } from "./core/selectiveArchive";
 import type { Stamp, Version } from "./core/portableState/portable-register-core";
 import { compareStamp } from "./core/portableState/portable-register-core";
 import { latestVersion, projectProgressVersion, versionForStamp } from "./core/portableState/projection";
 import type { Locator, PortablePreferences, ProgressValue } from "./core/portableState/portable-state-types";
-import { isExternalUrl, isFragmentOnly, splitHref } from "./core/paths";
-import type { SearchResult } from "./core/search";
+import { isExternalUrl, isFragmentOnly } from "./core/paths";
 import type { ExactTextHit } from "./core/exactTextHits";
 import type { SearchOccurrence } from "./core/searchOccurrence";
 import { ResourceServer, type ResourceIssue } from "./render/resources";
@@ -31,13 +30,14 @@ import {
   parseReaderTabs,
 } from "./ui/readerTabs";
 import { useReaderTabsVisible } from "./ui/readerTabLayout";
+import { useReaderNavigation } from "./ui/useReaderNavigation";
+import { useScrubState } from "./ui/useScrubState";
 import { useReaderTabActions, useReaderTabsState } from "./ui/useReaderTabs";
 import { checkThenRecoverProgressRuntime, planFreshProgressOpen } from "./ui/progressOpenOrder";
 import { useAndroidBack } from "./platform/useAndroidBack";
 import { useExitPresence } from "./ui/menuMotion";
 import { useReaderCursorIdle } from "./ui/readerCursorIdle";
 import { SidebarDrawer } from "./ui/SidebarDrawer";
-import type { SidebarNavigationMemory } from "./ui/sidebarSwipe";
 import { AaPopover } from "./ui/AaPopover";
 import { useOpeningPanelPrep } from "./ui/openingPanelPrep";
 import { PanelPaintWarmup, usePanelPaintWarmup, type PanelWarmBatch } from "./ui/panelPaintWarmup";
@@ -54,12 +54,7 @@ import { useSaveFileFlows } from "./ui/useSaveFileFlows";
 import { useResponsiveEnvironment } from "./ui/responsiveEnvironment";
 import {
   createContentAxis,
-  reduceScrubUi,
-  initialScrubUi,
   type ContentAxis,
-  type ScrubUiState,
-  type ScrubUiEvent,
-  type ScrubToken,
   type AxisInput,
 } from "./ui/readerProgressAxis";
 import { FontSettingsPanel } from "./ui/FontSettingsPanel";
@@ -189,17 +184,10 @@ import { useCustomThemes } from "./ui/useCustomThemes";
 import { projectShelfProgressReadiness } from "./ui/shelfProgressDisplay";
 import {
   emptyReaderNavigationHistory,
-  readerHistoryBack,
-  readerHistoryForward,
-  recordReaderNavigation,
   type ReaderNavigationHistory,
   type ReaderNavigationPosition,
 } from "./ui/readerNavigationHistory";
-import {
-  commitDirectHistory,
-  commitHistoryTransition,
-  sameChapterRoute,
-} from "./ui/sameChapterNavigation";
+import { sameChapterRoute } from "./ui/sameChapterNavigation";
 import {
   readProgress,
   writeProgress,
@@ -648,37 +636,11 @@ export default function App() {
   /** 统一固定内容轴：全书结构统计完成后冻结，跨模式、跨字号保持映射稳定 */
   const [contentAxis, setContentAxis] = useState<ContentAxis | null>(null);
   const contentAxisRef = useRef<ContentAxis | null>(null);
-  const scrubSessionRef = useRef(0);
-  const scrubRequestIdRef = useRef(0);
-  /**
-   * 分页模式进度条跨章：先换章，目标章显示就绪后再按章内比例定位一次。
-   * 一次性；就绪的不是目标章（期间又跳到别处）则丢弃。
-   */
-  const pendingChapterSeekRef = useRef<{
-    target: { key: string; spineIndex: number; fraction: number };
-    token: ScrubToken;
-  } | null>(null);
-  const [scrubUiState, setScrubUiState] = useState<ScrubUiState>(() => initialScrubUi(0));
-  /** Latest progress-bar jump and the book's sidebar memory it was made in; only its real landing moves the TOC. */
-  const tocFollowSeekRef = useRef<{ token: ScrubToken; fromHref?: string; memory: SidebarNavigationMemory } | null>(null);
-  const tocFollowGenerationRef = useRef(0);
-  // The pending target lives in the book's sidebar memory; this only re-renders the drawer.
-  const [tocFollowRequest, setTocFollowRequest] = useState(0);
-  const activeHrefRef = useRef<string | undefined>(undefined);
-  const scrubUiStateRef = useRef(scrubUiState);
-
-  const dispatchScrub = useCallback((event: ScrubUiEvent) => {
-    // Navigation may report synchronously before React renders a begin/reset.
-    const next = reduceScrubUi(scrubUiStateRef.current, event);
-    scrubUiStateRef.current = next;
-    setScrubUiState(next);
-  }, []);
-
-  const acceptsScrubResult = useCallback((token: ScrubToken): boolean => {
-    const state = scrubUiStateRef.current;
-    return state.session === token.session &&
-      state.pending?.session === token.session && state.pending.request === token.request;
-  }, []);
+  const {
+    scrubSessionRef, scrubRequestIdRef, pendingChapterSeekRef, scrubUiState,
+    tocFollowSeekRef, tocFollowGenerationRef, tocFollowRequest, setTocFollowRequest,
+    activeHrefRef, scrubUiStateRef, dispatchScrub, acceptsScrubResult,
+  } = useScrubState();
 
   const [dragActive, setDragActive] = useState(false);
   /** Overlay text of a native file drag; names the folder the drop would file into. */
@@ -998,28 +960,6 @@ export default function App() {
   });
   const sidebarNavigationMemoryRef = useRef(sidebarNavigationMemory);
   sidebarNavigationMemoryRef.current = sidebarNavigationMemory;
-  const followTocAfterSeek = useCallback((token: ScrubToken) => {
-    const seek = tocFollowSeekRef.current;
-    if (!seek || seek.token.session !== token.session || seek.token.request !== token.request) return;
-    tocFollowSeekRef.current = null;
-    // A landing from a book session that has since been replaced belongs to no open TOC.
-    const memory = seek.memory;
-    if (token.session !== scrubSessionRef.current || memory !== sidebarNavigationMemoryRef.current) return;
-    const generation = ++tocFollowGenerationRef.current;
-    // An unconsumed earlier jump keeps its origin: A→B→B still follows to B.
-    memory.tocFollow = { generation, fromHref: memory.tocFollow ? memory.tocFollow.fromHref : seek.fromHref };
-    setTocFollowRequest(generation);
-  }, []);
-  /** A cancelled, failed or replaced jump drops only its own pending follow. */
-  const dropTocFollowSeek = useCallback((token: ScrubToken) => {
-    const seek = tocFollowSeekRef.current;
-    if (seek && seek.token.session === token.session && seek.token.request === token.request) tocFollowSeekRef.current = null;
-  }, []);
-  useEffect(() => {
-    // The render that carried the landing names the landed entry; the drawer drops the follow once the reader leaves it.
-    const follow = sidebarNavigationMemoryRef.current.tocFollow;
-    if (follow?.generation === tocFollowRequest && follow.toHref === undefined) follow.toHref = activeHrefRef.current;
-  }, [tocFollowRequest]);
 
   /** 关闭正文图片浮层；不改变页码/滚动位置，也不记入阅读历史。 */
   const closeImageOverlay = useCallback((): void => {
@@ -2394,496 +2334,27 @@ export default function App() {
   }, []);
 
   // ---- 目录/书内链接跳转 ----
-  /** 当前稳定阅读位置；同步 ref 避免 ready 更新尚未完成 React render 的竞态。 */
-  const currentReaderPosition = useCallback((): ReaderHistoryPosition => {
-    const { state, readingAnchor } = readReaderPosition();
-    const currentBook = bookRef.current;
-    let targetSpineIndex = spineIndex;
-    if (readingAnchor?.path && currentBook) {
-      const resolved = spineIndexForEntryKey(currentBook, readingAnchor.path);
-      if (resolved >= 0) {
-        targetSpineIndex = resolved;
-      }
-    }
-    return {
-      spineIndex: targetSpineIndex,
-      page: state.status === "ready" ? state.currentPage : lastStablePositionRef.current.page,
-      anchor: toPersistedReaderAnchor(
-        readingAnchor
-          ? {
-              index: readingAnchor.index,
-              ratio: readingAnchor.ratio,
-              anchorTextOffset: readingAnchor.textOffset,
-              anchorTextSnippet: readingAnchor.textSnippet,
-              mediaAnchor: readingAnchor.mediaAnchor ?? null,
-            }
-          : null
-      ) ?? lastStablePositionRef.current.anchor,
-    };
-  }, [spineIndex, readReaderPosition]);
-
-  const handlePresentationChange = useCallback(
-    (patch: { readingMode?: "paginated" | "scroll"; columnsPerView?: 1 | 2 }) => {
-      const isModeChange = patch.readingMode !== undefined && patch.readingMode !== settings.readingMode;
-      const isColChange = patch.columnsPerView !== undefined && patch.columnsPerView !== settings.columnsPerView;
-      if (!isModeChange && !isColChange) return;
-
-      const pos = currentReaderPosition();
-      if (pos) {
-        lastStablePositionRef.current = pos;
-        if (isModeChange) {
-          if (pos.anchor) setInitialAnchor(toPersistedReaderAnchor(pos.anchor));
-          if (typeof pos.page === "number") setInitialPage(pos.page);
-          if (typeof pos.spineIndex === "number") {
-            spineIndexRef.current = pos.spineIndex;
-            setSpineIndex(pos.spineIndex);
-          }
-          setAnchorNonce((n) => n + 1);
-        }
-      }
-      settingsActions.setPresentation(patch);
-    },
-    [currentReaderPosition, settings.columnsPerView, settings.readingMode]
-  );
-
-  /** 捕获当前位置供一次普通书内跳转撤销；调用方负责保证一次点击只调用一次。 */
-  const captureReaderHistory = useCallback((href: string): void => {
-    const state = chapterStateRef.current;
-    if (!book || view !== "reader" || !historyCaptureAllowedRef.current) return;
-    if (state.status === "ready" && state.empty) return;
-    // 跨章链接必须确实命中 spine；纯 fragment 则必须属于当前有效章节。
-    // 这样 paginator 的通用 before 通知不会把无效 href 变成假历史。
-    if (
-      isFragmentOnly(href)
-        ? spineIndex < 0 || spineIndex >= book.spine.length
-        : spineIndexForPath(book, href) < 0
-    ) {
-      return;
-    }
-    const snapshot =
-      !navigationPendingRef.current && state.status === "ready"
-        ? currentReaderPosition()
-        : {
-            spineIndex: lastStablePositionRef.current.spineIndex,
-            page: lastStablePositionRef.current.page,
-            anchor: lastStablePositionRef.current.anchor
-              ? { ...lastStablePositionRef.current.anchor }
-              : null,
-          };
-    lastStablePositionRef.current = snapshot;
-    dispatchReaderSession({ type: "history-captured" });
-    setReaderHistory((prev) => recordReaderNavigation(prev, snapshot));
-  }, [book, view, spineIndex, currentReaderPosition]);
-
-  /** Commit a previously captured snapshot only after direct navigation succeeds. */
-  const commitReaderHistorySnapshot = useCallback((snapshot: ReaderHistoryPosition): void => {
-    setReaderHistory((prev) => commitDirectHistory(prev, snapshot, true));
-    // Same-chapter navigation never enters the display gate. The paginator
-    // settles synchronously, so the next explicit jump may be captured now.
-    dispatchReaderSession({ type: "direct-settled" });
-  }, [dispatchReaderSession]);
-
-  /**
-   * 弹注里的本章锚点：与其他书内跳转一样可以返回。只有确实换了页才记历史；
-   * 很多书整段注释就是指回引用处的链接，点它常常还在同一页。
-   */
-  const handleFootnoteAnchor = useCallback((anchor: string) => {
-    const snapshot = currentReaderPosition();
-    if (readerRef.current?.navigateWithinCurrentChapter({ fragment: anchor })) {
-      const landed = currentReaderPosition();
-      if (landed.spineIndex !== snapshot.spineIndex || landed.page !== snapshot.page) commitReaderHistorySnapshot(snapshot);
-    } else {
-      readerRef.current?.jumpToAnchor(anchor);
-    }
-    handleFootnoteClose();
-  }, [commitReaderHistorySnapshot, currentReaderPosition, handleFootnoteClose]);
-
-  /** 只执行 href 跳转，不记录历史；UI 入口和 paginator 通知入口共用。 */
-  const navigateReaderHref = useCallback((href: string): boolean => {
-    if (!book) return false;
-    setPreciseTarget(null);
-    latestPreciseRequestRef.current = null;
-    const idx = spineIndexForPath(book, href);
-    const a = book.archiveReferences ? book.archiveReferences.resolve(book.opfPath, href).anchor : splitHref(href).anchor;
-    if (idx < 0) return false;
-    if (
-      sameChapterRoute({
-        currentSpineIndex: spineIndex,
-        targetSpineIndex: idx,
-        readerDisplayReady: readerDisplayReadyRef.current,
-        navigationPending: navigationPendingRef.current,
-      }) === "direct"
-    ) {
-      const direct = readerRef.current?.navigateWithinCurrentChapter(
-        a ? { fragment: a } : { toStart: true }
-      );
-      if (direct) {
-        setAnchor(a || undefined);
-        closePanel("bookmarks");
-        return true;
-      }
-      return false;
-    }
-    if (idx >= 0) {
-      beginExplicitNavigation();
-      closePanel("bookmarks");
-      setSpineIndex(idx);
-      setAnchor(a || undefined);
-      setAnchorNonce((n) => n + 1);
-      // 保持目录展开：方便连续选择章节；用 ✕/遮罩/Esc 关闭
-      return true;
-    }
-    return false;
-  }, [book, spineIndex]);
-
-  /** 侧边目录入口：先记录一次，再执行跳转。 */
-  const handleTocNavigate = useCallback((href: string): boolean => {
-    if (!book) return false;
-    const target = spineIndexForPath(book, href);
-    if (target < 0) return false;
-    if (
-      sameChapterRoute({
-        currentSpineIndex: spineIndex,
-        targetSpineIndex: target,
-        readerDisplayReady: readerDisplayReadyRef.current,
-        navigationPending: navigationPendingRef.current,
-      }) === "direct"
-    ) {
-      const snapshot = currentReaderPosition();
-      if (!navigateReaderHref(href)) return false;
-      commitReaderHistorySnapshot(snapshot);
-      return true;
-    }
-    captureReaderHistory(href);
-    return navigateReaderHref(href);
-  }, [book, captureReaderHistory, navigateReaderHref, spineIndex, currentReaderPosition, commitReaderHistorySnapshot]);
-
-  const handleCommitSeek = useCallback((ratio: number) => {
-    const r = Math.max(0, Math.min(1, ratio));
-    const axis = contentAxisRef.current;
-    scrubRequestIdRef.current += 1;
-    const token: ScrubToken = {
-      session: scrubSessionRef.current,
-      request: scrubRequestIdRef.current,
-    };
-    dispatchReaderSession({ type: "begin-scrub" });
-    releaseRestoreForExplicitNavigation();
-    dispatchScrub({ type: "begin", token, ratio: r });
-    // No axis means no reported landing to follow; scrollToRatio keeps the TOC as it is.
-    tocFollowSeekRef.current = axis ? { token, fromHref: activeHrefRef.current, memory: sidebarNavigationMemoryRef.current } : null;
-
-    if (settings.readingMode === "scroll") {
-      if (axis) {
-        const target = axis.locate(r);
-        if (target) {
-          readerRef.current?.seekContentFraction?.(
-            { key: target.key, spineIndex: target.spineIndex, fraction: target.fraction },
-            token
-          );
-          return;
-        }
-      }
-      readerRef.current?.scrollToRatio?.(r);
-    } else {
-      if (axis) {
-        const target = axis.locate(r);
-        if (target) {
-          // Requested chapter index can change before its paginator is ready.
-          // Keep a later fraction queued instead of applying it to the old document.
-          if (target.spineIndex === spineIndexRef.current && readerDisplayReadyRef.current) {
-            readerRef.current?.seekContentFraction?.(
-              { key: target.key, spineIndex: target.spineIndex, fraction: target.fraction },
-              token
-            );
-          } else {
-            const currentBook = bookRef.current;
-            const href = currentBook ? spineItemHref(currentBook, target.spineIndex) : undefined;
-            if (href) {
-              pendingChapterSeekRef.current = {
-                target: { key: target.key, spineIndex: target.spineIndex, fraction: target.fraction },
-                token,
-              };
-              if (handleTocNavigate(href)) return; // Settle only after the target chapter and page are ready.
-            }
-            pendingChapterSeekRef.current = null;
-            dropTocFollowSeek(token);
-            dispatchScrub({ type: "failed", token });
-            dispatchReaderSession({ type: "scrub-local-settled" });
-            setReaderNotice({ kind: "warn", text: uiText("notice.reader.progressNotFound") });
-            return;
-          }
-          dispatchScrub({
-            type: "settled",
-            token,
-            actual: { ratio: r, atEnd: r >= 1 },
-          });
-          dispatchReaderSession({ type: "scrub-local-settled" });
-          return;
-        }
-      }
-      readerRef.current?.scrollToRatio?.(r);
-      dispatchScrub({
-        type: "settled",
-        token,
-        actual: { ratio: r, atEnd: r >= 1 },
-      });
-      dispatchReaderSession({ type: "scrub-local-settled" });
-    }
-  }, [settings.readingMode, handleTocNavigate, dispatchScrub, dispatchReaderSession, releaseRestoreForExplicitNavigation, dropTocFollowSeek]);
-
-  const handleScrubPreviewChange = useCallback((ratio: number | null) => {
-    dispatchScrub({
-      type: "preview",
-      session: scrubSessionRef.current,
-      ratio,
-    });
-  }, [dispatchScrub]);
-
-  const handleContentFractionSettled = useCallback((
-    token: ScrubToken,
-    location: { key: string; spineIndex: number; fraction: number; atEnd: boolean }
-  ) => {
-    // A paged comic settles the bar optimistically first; its later real landing still moves the TOC.
-    followTocAfterSeek(token);
-    if (!acceptsScrubResult(token)) return;
-    dispatchReaderSession({ type: "scrub-reader-settled" });
-    const axis = contentAxisRef.current;
-    const ratio = axis ? axis.ratioAt({ key: location.key, fraction: location.fraction }) : null;
-    const actualRatio = ratio !== null ? ratio : (scrubUiStateRef.current.pending?.ratio ?? 0);
-    dispatchScrub({
-      type: "settled",
-      token,
-      actual: { ratio: actualRatio, atEnd: location.atEnd },
-    });
-  }, [acceptsScrubResult, dispatchScrub, dispatchReaderSession, followTocAfterSeek]);
-
-  const handleContentFractionCancelled = useCallback((token: ScrubToken) => {
-    dropTocFollowSeek(token);
-    if (!acceptsScrubResult(token)) return;
-    dispatchReaderSession({ type: "scrub-reader-aborted" });
-    dispatchScrub({ type: "cancelled", token });
-  }, [acceptsScrubResult, dispatchScrub, dispatchReaderSession, dropTocFollowSeek]);
-
-  const handleContentFractionFailed = useCallback((token: ScrubToken) => {
-    dropTocFollowSeek(token);
-    if (!acceptsScrubResult(token)) return;
-    dispatchReaderSession({ type: "scrub-reader-aborted" });
-    dispatchScrub({ type: "failed", token });
-    setReaderNotice({ kind: "warn", text: uiText("notice.reader.progressNotFound") });
-  }, [acceptsScrubResult, dispatchScrub, dispatchReaderSession, dropTocFollowSeek]);
-
-  const handleUserProgressSample = useCallback((
-    location: { key: string; spineIndex: number; fraction: number; atEnd: boolean }
-  ) => {
-    const axis = contentAxisRef.current;
-    if (!axis) return;
-    const ratio = axis.ratioAt({ key: location.key, fraction: location.fraction });
-    if (ratio !== null) {
-      dispatchScrub({
-        type: "sample",
-        session: scrubSessionRef.current,
-        actual: { ratio, atEnd: location.atEnd },
-      });
-    }
-  }, [dispatchScrub]);
-
-  /** 搜索结果使用文本锚点定位；预览不写进度，只有用户点击才进入历史。 */
-  const handleSearchNavigate = useCallback((result: SearchResult): void => {
-    if (!book || searchNavigationBusy || result.spineIndex < 0 || result.spineIndex >= book.spine.length) return;
-    const targetAnchor: PersistedReaderAnchor = {
-      index: -1,
-      ratio: 0,
-      anchorTextOffset: result.textOffset,
-      anchorTextSnippet: result.textSnippet,
-    };
-    const requestId = ++preciseRequestRef.current;
-    const textHits = result.textHits ?? [];
-    const occurrence = result.occurrence;
-    const displayTarget = result.display
-      ? {
-          projectionVersion: result.display.projectionVersion,
-          textHits: result.display.textHits,
-          occurrence: result.display.occurrence,
-        }
-      : undefined;
-    if (
-      sameChapterRoute({
-        currentSpineIndex: spineIndex,
-        targetSpineIndex: result.spineIndex,
-        readerDisplayReady: readerDisplayReadyRef.current,
-        navigationPending: navigationPendingRef.current,
-      }) === "direct"
-    ) {
-      const snapshot = currentReaderPosition();
-      if (textHits.length > 0 || occurrence) {
-        const status = readerRef.current?.navigateToSearchTarget({
-          requestId,
-          kind: "search",
-          textHits,
-          occurrence,
-          displayTarget,
-          chapterPath: result.chapterPath,
-        });
-        if (status === "located" || status === "unsupported-highlight") {
-          setAnchor(undefined);
-          commitReaderHistorySnapshot(snapshot);
-          if (status === "unsupported-highlight") {
-            showReaderNotice(uiText("notice.reader.noHighlight"), "warn");
-          }
-          handleFootnoteClose();
-          closeForeground();
-          return;
-        }
-        showReaderNotice(uiText("notice.reader.sourceNotFound"), "warn");
-        return;
-      }
-      const direct = readerRef.current?.navigateWithinCurrentChapter({
-        readingAnchor: targetAnchor,
-        fallbackPage: null,
-      });
-      if (direct) {
-        setAnchor(undefined);
-        commitReaderHistorySnapshot(snapshot);
-        showReaderNotice(uiText("notice.reader.paragraphOnly"), "warn");
-        handleFootnoteClose();
-        closeForeground();
-        return;
-      }
-      showReaderNotice(uiText("notice.reader.sourceNotFound"), "warn");
-      return;
-    }
-
-    // 跨章先进入目标章节；精确范围/高亮在显示门内解析，失败不冒充命中。
-    captureReaderHistory(archiveHref(book.archiveReferences, result.chapterPath));
-    beginExplicitNavigation();
-    setSearchNavigationBusy(true);
-    setInitialPage(null);
-    setInitialAnchor(targetAnchor);
-    setInitialAlignment("context");
-    latestPreciseRequestRef.current = requestId;
-    setPreciseTarget({
-      requestId,
-      kind: "search",
-      chapterPath: result.chapterPath,
-      textHits: textHits.length > 0 ? textHits : undefined,
-      occurrence,
-      displayTarget,
-    });
-    setSpineIndex(result.spineIndex);
-    setAnchor(undefined);
-    setAnchorNonce((nonce) => nonce + 1);
-    handleFootnoteClose();
-    closeForeground();
-  }, [
-    book,
-    searchNavigationBusy,
-    spineIndex,
-    currentReaderPosition,
-    commitReaderHistorySnapshot,
-    captureReaderHistory,
-    handleFootnoteClose,
-    showReaderNotice,
-  ]);
-
-  /** iframe 普通书内链接：历史由 paginator 的 before 通知记录一次。 */
-  const handleInternalNavigate = useCallback((href: string): void => {
-    navigateReaderHref(href);
-  }, [navigateReaderHref]);
-
-
-  const handleHistoryBack = useCallback(() => {    setPreciseTarget(null);
-    latestPreciseRequestRef.current = null;
-    const current = currentReaderPosition();
-    const transition = readerHistoryBack(readerHistory, current);
-    if (!transition.target) return;
-    const pos = transition.target;
-    if (
-      sameChapterRoute({
-        currentSpineIndex: spineIndex,
-        targetSpineIndex: pos.spineIndex,
-        readerDisplayReady: readerDisplayReadyRef.current,
-        navigationPending: navigationPendingRef.current,
-      }) === "direct"
-    ) {
-      const direct = readerRef.current?.navigateWithinCurrentChapter({
-        readingAnchor: pos.anchor
-          ? {
-              index: pos.anchor.index,
-              ratio: pos.anchor.ratio,
-              anchorTextOffset: pos.anchor.anchorTextOffset ?? null,
-              anchorTextSnippet: pos.anchor.anchorTextSnippet ?? null,
-            }
-          : null,
-        mediaAnchor: pos.anchor?.mediaAnchor ?? null,
-        fallbackPage: pos.page,
-      });
-      if (direct) {
-        setAnchor(undefined);
-        setReaderHistory(commitHistoryTransition(readerHistory, transition, true));
-        dispatchReaderSession({ type: "direct-settled" });
-        return;
-      }
-    }
-    lastStablePositionRef.current = transition.target;
-    beginExplicitNavigation();
-    setReaderHistory(transition.history);
-    // 恢复跳转前位置：章节 + 页码 + 内容锚点
-    setSpineIndex(pos.spineIndex);
-    setAnchor(undefined);
-    setAnchorNonce((n) => n + 1);
-    setInitialPage(pos.page ?? 0);
-    setInitialAnchor(toPersistedReaderAnchor(pos.anchor));
-    setInitialAlignment("context");
-    handleFootnoteClose();
-    closeForeground();
-  }, [readerHistory, currentReaderPosition, spineIndex, handleFootnoteClose]);
-
-  const handleHistoryForward = useCallback(() => {
-    setPreciseTarget(null);
-    latestPreciseRequestRef.current = null;
-    const current = currentReaderPosition();
-    const transition = readerHistoryForward(readerHistory, current);
-    if (!transition.target) return;
-    const pos = transition.target;
-    if (
-      sameChapterRoute({
-        currentSpineIndex: spineIndex,
-        targetSpineIndex: pos.spineIndex,
-        readerDisplayReady: readerDisplayReadyRef.current,
-        navigationPending: navigationPendingRef.current,
-      }) === "direct"
-    ) {
-      const direct = readerRef.current?.navigateWithinCurrentChapter({
-        readingAnchor: pos.anchor
-          ? {
-              index: pos.anchor.index,
-              ratio: pos.anchor.ratio,
-              anchorTextOffset: pos.anchor.anchorTextOffset ?? null,
-              anchorTextSnippet: pos.anchor.anchorTextSnippet ?? null,
-            }
-          : null,
-        mediaAnchor: pos.anchor?.mediaAnchor ?? null,
-        fallbackPage: pos.page,
-      });
-      if (direct) {
-        setAnchor(undefined);
-        setReaderHistory(commitHistoryTransition(readerHistory, transition, true));
-        dispatchReaderSession({ type: "direct-settled" });
-        return;
-      }
-    }
-    lastStablePositionRef.current = transition.target;
-    beginExplicitNavigation();
-    setReaderHistory(transition.history);
-    setSpineIndex(pos.spineIndex);
-    setAnchor(undefined);
-    setAnchorNonce((n) => n + 1);
-    setInitialPage(pos.page);
-    setInitialAnchor(toPersistedReaderAnchor(pos.anchor));
-    setInitialAlignment("context");
-    handleFootnoteClose();
-    closeForeground();
-  }, [readerHistory, currentReaderPosition, spineIndex, handleFootnoteClose]);
+  const {
+    currentReaderPosition, handlePresentationChange, captureReaderHistory, commitReaderHistorySnapshot,
+    handleFootnoteAnchor, handleTocNavigate, handleCommitSeek, handleScrubPreviewChange,
+    handleContentFractionSettled, handleContentFractionCancelled, handleContentFractionFailed,
+    handleUserProgressSample, handleSearchNavigate, handleInternalNavigate,
+    handleHistoryBack, handleHistoryForward, followTocAfterSeek, dropTocFollowSeek,
+  } = useReaderNavigation({
+    readReaderPosition, readerRef, bookRef, spineIndexRef, lastStablePositionRef,
+    navigationPendingRef, readerDisplayReadyRef, historyCaptureAllowedRef,
+    latestPreciseRequestRef, preciseRequestRef, contentAxisRef, chapterStateRef,
+    sidebarNavigationMemoryRef,
+    scrubSessionRef, scrubRequestIdRef, pendingChapterSeekRef, tocFollowSeekRef,
+    tocFollowGenerationRef, tocFollowRequest, setTocFollowRequest, activeHrefRef,
+    scrubUiStateRef, dispatchScrub, acceptsScrubResult,
+    book, spineIndex, view, settings, settingsActions, readerHistory, setReaderHistory,
+    searchNavigationBusy, setSearchNavigationBusy, setPreciseTarget, setAnchor, setAnchorNonce,
+    setSpineIndex, setInitialPage, setInitialAnchor, setInitialAlignment, setReaderNotice,
+    showReaderNotice, closePanel, closeForeground, handleFootnoteClose,
+    beginExplicitNavigation, releaseRestoreForExplicitNavigation, dispatchReaderSession,
+    toPersistedReaderAnchor,
+  });
 
   // ---- 正文笔记 ----
   const { currentNotes, currentChapterNotes, notesForChapter, noteViewModels } = useNoteProjection(shelfEntries, currentShelfId, book, spineIndex);
