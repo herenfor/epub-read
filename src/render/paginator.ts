@@ -2676,6 +2676,8 @@ export class ChapterPaginator {
   }
   /** 最近一次完整 measure 使用的 iframe 视口；过滤 ResizeObserver 空转。 */
   private measuredViewport = { width: -1, height: -1 };
+  /** 首次显示准备期间收到的重排请求所属 loadSeq；同一轮只排一次补做。 */
+  private deferredReflowLoadSeq = -1;
   private metrics = { pageCount: 1, currentPage: 0 };
   private loadSeq = 0;
   /** loadSeq whose dropped Blob navigation was already requested again. */
@@ -9671,6 +9673,21 @@ export class ChapterPaginator {
    *  不捕获锚点：直接使用上一次稳定状态存下的锚点（缩放前的位置）。 */
   reflow(): void {
     if (this.disposed) return;
+    // 本次加载还在首次显示准备中（测量→入口恢复）：不并行另起一轮 measure。
+    // 两轮共用同一 loadSeq，互相还原/改写几何与文本索引，会把保存位置
+    // 解析到章首并被当作恢复结果写回（ER-0090）。等这一轮结算后再按当时
+    // 尺寸补一次；尺寸未变时下面的过滤会直接返回。
+    if (this.loadSeq > 0 && this.displayReadySeq !== this.loadSeq) {
+      const loadSeq = this.loadSeq;
+      if (this.deferredReflowLoadSeq === loadSeq) return;
+      this.deferredReflowLoadSeq = loadSeq;
+      void this.waitForDisplayReady(loadSeq).then(() => {
+        if (this.deferredReflowLoadSeq === loadSeq) this.deferredReflowLoadSeq = -1;
+        // 失败结算也补一次：零尺寸等失败加载仍要靠真实尺寸重排恢复。
+        if (!this.disposed && loadSeq === this.loadSeq) this.reflow();
+      });
+      return;
+    }
     // ResizeObserver 在组件挂载和章节切换时也可能回调，即使 iframe 尺寸
     // 完全没变。重复 measure 会先恢复二阶段补偿，造成已稳定盒子短暂跳位。
     if (
