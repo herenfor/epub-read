@@ -6,6 +6,8 @@ import { createReactDomHarness } from "../test/reactDomHarness";
 import { useReadingInputStart } from "./readerPointerEdge";
 import type { ReaderHandle } from "./ReaderView";
 import { applyDocumentTheme, useThemeTransition } from "./themeTransitionHost";
+import { clearAppBuildSession, setAppBuildSession } from "../config/appBuildSession";
+import { getRuntimeCapabilities } from "../platform/runtimeCapabilities";
 
 /** startViewTransition whose update callbacks the test runs by hand, like a browser after the snapshot. */
 function installViewTransitions(doc: Document) {
@@ -58,6 +60,36 @@ async function mount(options: { reader?: ReaderHandle | null; busy?: () => boole
 }
 
 describe("theme transition wired into the app", () => {
+  it.each([
+    ["x86_64-unknown-linux-gnu", false],
+    ["x86_64-pc-windows-msvc", true],
+    ["aarch64-linux-android", true],
+    ["aarch64-apple-darwin", true],
+  ] as const)("uses the native platform policy for %s without changing theme commits", async (target, animated) => {
+    setAppBuildSession({ source: "desktop", buildInfo: {
+      version: "0.4.1", edition: "core", protocolVersion: 1, target, profile: "release", debug: false,
+    } });
+    const reader = { applyTheme: vi.fn() } as unknown as ReaderHandle;
+    const t = await mount({ reader });
+    try {
+      expect(getRuntimeCapabilities().supportsThemeViewTransition).toBe(animated);
+      await t.dom.run(() => t.api().transition.changeTheme("dark"));
+      expect(t.transitions).toHaveLength(animated ? 1 : 0);
+      if (animated) {
+        await t.dom.run(() => { t.transitions[0].update(); t.transitions[0].finish(); });
+      }
+      expect(t.app().getAttribute("data-theme")).toBe("dark");
+      expect(t.doc.documentElement.getAttribute("data-theme")).toBe("dark");
+      expect(t.doc.body.getAttribute("data-theme")).toBe("dark");
+      expect(reader.applyTheme).toHaveBeenCalledExactlyOnceWith("dark");
+      expect(t.doc.documentElement.hasAttribute("data-theme-transitioning")).toBe(false);
+      expect(t.onError).not.toHaveBeenCalled();
+    } finally {
+      await t.dom.dispose();
+      clearAppBuildSession();
+    }
+  });
+
   it("leaves the React root, html/body and every live body host on the new theme when the update callback returns, writing only the theme leaf", async () => {
     const seen: Array<{ theme: Theme; app: string | null }> = [];
     let doc!: Document;

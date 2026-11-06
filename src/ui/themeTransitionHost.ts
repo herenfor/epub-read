@@ -5,6 +5,7 @@ import type { ReaderHandle } from "./ReaderView";
 import { createThemeTransitionController, type ThemeTransitionController, type ThemeTransitionHost } from "./themeTransition";
 import { isDarkReaderTheme } from "../config/readerPalette";
 import { customThemeTokens, isCustomThemeKey, parseCustomThemeKey } from "../config/customThemes";
+import { getRuntimeCapabilities } from "../platform/runtimeCapabilities";
 
 /**
  * data-theme names the token block in styles.css ("custom" for a user theme,
@@ -72,7 +73,7 @@ export interface ThemeTransitionWiring {
  *   written onto the latest settings. Inside the transition's update callback
  *   the commit is synchronous: React (app root, panels) is flushed, html/body
  *   are set, and every live body host is recolored through ReaderHandle.applyTheme.
- *   No change, busy reading, reduced motion, background or no API → direct commit.
+ *   No change, busy reading, reduced motion, background or unsupported snapshots → direct commit.
  * - commitSettings: writes that also move geometry (restore defaults, imported
  *   preferences) commit directly through the same controller, so a pending
  *   theme request is superseded instead of landing after them; their layout
@@ -113,7 +114,8 @@ export function useThemeTransition(wiring: ThemeTransitionWiring) {
     guarded((controller) => {
       const current = wiringRef.current;
       controller.request({
-        animate: options?.animate !== false && current.committedTheme() !== theme && !current.busy(),
+        animate: options?.animate !== false && getRuntimeCapabilities().supportsThemeViewTransition &&
+          current.committedTheme() !== theme && !current.busy(),
         commit: () => {
           const latest = wiringRef.current;
           flushSync(() => latest.setSettings((s) => (s.theme === theme ? s : { ...s, theme })));

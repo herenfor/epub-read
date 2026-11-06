@@ -6,6 +6,8 @@ export interface RuntimeCapabilities {
   shell: AppShell;
   /** True only for native desktop shells that own window chrome. */
   hasDesktopWindowChrome: boolean;
+  /** WebKitGTK theme snapshots can crash the native host; direct theme commits remain supported. */
+  supportsThemeViewTransition: boolean;
   /** True when system Back should be coordinated by the app root. */
   usesAndroidBack: boolean;
   /** Cache panel is available on Windows desktop and Android. */
@@ -43,6 +45,7 @@ export function getRuntimeCapabilities(): RuntimeCapabilities {
     platform,
     shell,
     hasDesktopWindowChrome: shell === "desktop",
+    supportsThemeViewTransition: !(session?.source === "desktop" && platform === "linux"),
     usesAndroidBack: platform === "android",
     supportsCacheStorage: platform === "windows" || platform === "android",
     supportsCustomCacheDirectory: platform === "windows",
