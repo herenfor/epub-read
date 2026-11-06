@@ -7,3 +7,9 @@ Icon=dev.epubreader.app
 Terminal=false
 Categories=Office;
 MimeType=application/epub+zip;
+Actions=GraphicsCompatibility;
+
+[Desktop Action GraphicsCompatibility]
+Name=Graphics Compatibility Mode
+Name[zh_CN]=图形兼容模式
+Exec=epub-reader --graphics-compatibility

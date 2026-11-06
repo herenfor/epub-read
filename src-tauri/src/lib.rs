@@ -13,6 +13,8 @@ mod app_diagnostics;
 mod app_update;
 #[cfg(target_os = "linux")]
 mod linux_webview_recovery;
+#[cfg(target_os = "linux")]
+mod linux_graphics;
 mod external_open;
 #[cfg(test)]
 mod build_info_contract;
@@ -380,6 +382,8 @@ macro_rules! configure_invoke_handler {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "linux")]
+    linux_graphics::prepare();
     let context = tauri::generate_context!();
     let install_kind = app_update::detect(
         &context.config().identifier,
@@ -412,6 +416,19 @@ pub fn run() {
     let builder = builder.plugin(
         single_instance
             .callback(|app, args, cwd| {
+                #[cfg(target_os = "linux")]
+                if linux_graphics::requested(&args)
+                    && linux_graphics::compatibility_mode() != "enabled"
+                {
+                    use tauri_plugin_dialog::DialogExt;
+                    // The running host has already initialized WebKit. Never
+                    // pretend a second process can change its rendering mode.
+                    app.dialog()
+                        .message("SeLis is already running. Quit it first, then start Graphics Compatibility Mode. Your saved books and reading progress will be kept.\n\nSeLis 已在运行。请先完全退出，再选择图形兼容模式启动；已保存的书籍和阅读进度会保留。")
+                        .title("SeLis")
+                        .show(|_| {});
+                    return;
+                }
                 external_open::capture_arguments(
                     app,
                     args.into_iter().map(std::ffi::OsString::from),
