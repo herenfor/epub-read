@@ -146,8 +146,6 @@ import { SaveFailureDialog } from "./ui/SaveFailureDialog";
 import { releaseUnsavedLane, type SaveFailurePrompt } from "./ui/saveFailureExit";
 import { useSaveFileJob } from "./ui/useSaveFileJob";
 import {
-  activatePortableShelfState,
-  LibraryDatabaseBlockedError,
   applyShelfProgressPatch,
   ensurePortableRepositoryReady,
   getShelfStore,
@@ -219,6 +217,7 @@ import { isPhysicalPointInsideRect, isSupportedFontFileName } from "./ui/fontDro
 import { folderIdAtPhysicalPoint, partitionDroppedPaths } from "./ui/shelfDrop";
 import { liveFolderName } from "./ui/importIntoFolder";
 import { useFontLibrary } from "./ui/useFontLibrary";
+import { useLibraryActivation } from "./ui/useLibraryActivation";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { stat as statFile } from "@tauri-apps/plugin-fs";
@@ -237,7 +236,7 @@ import {
 import { createEditionAiRuntime } from "./features/ai/lifecycle/editionRuntime";
 import { IS_AI_EDITION } from "./config/edition";
 import { registerAppUpdateSaveGate, startAppUpdates } from "./ui/appUpdate/appUpdateStore";
-import { noteCloudSyncChange, startCloudSync } from "./ui/cloudSync/cloudSyncStore";
+import { noteCloudSyncChange } from "./ui/cloudSync/cloudSyncStore";
 import { ProgressSourceChoices, type ProgressSourceCandidate } from "./ui/cloudSync/ProgressSourceChoices";
 import { folderImportCopyChoice, importEntryCopyChoiceSupported, libraryCopyChoice, setCopyOnImport, useLibrarySettings } from "./ui/librarySettings";
 
@@ -1387,50 +1386,9 @@ export default function App() {
     });
   }, [setShelfNotice]);
 
-  // ---- 书架与组织启动加载（先完成一次 CP-I 激活，失败保持旧模式） ----
-  const [cloudSyncReady, setCloudSyncReady] = useState(false);
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      let activated = false;
-      try {
-        await activatePortableShelfState();
-        activated = true;
-      } catch (error) {
-        if (!cancelled) {
-          setShelfNotice({
-            kind: "error",
-            text: error instanceof LibraryDatabaseBlockedError
-              ? error.message
-              : uiText("notice.portable.inactive", { error: String(error) }),
-          });
-        }
-      }
-      // Activation may change the repository instance behind the facade, so
-      // the first real open must not reuse a pre-activation cached check.
-      progressRuntimeGateRef.current?.invalidate();
-      if (cancelled) return;
-      void libraryReader.load().finally(() => {
-        if (!cancelled && activated) setCloudSyncReady(true);
-      });
-      void organizationReader.load();
-    })();
-
-    return () => {
-      cancelled = true;
-      libraryReader.invalidate();
-      organizationReader.invalidate();
-    };
-  }, [libraryReader, organizationReader]);
-
-  // ---- 云同步（A25）：书库激活、书架首次读取之后才开始；同步改动了资料只刷新书架和文件夹 ----
-  useEffect(() => {
-    if (!cloudSyncReady) return;
-    return startCloudSync({
-      // A failed refresh stays on the shelf as a refresh error with a retry.
-      onLibraryChanged: () => { void refreshShelfProjection().catch(() => undefined); },
-    });
-  }, [cloudSyncReady, refreshShelfProjection]);
+  useLibraryActivation({
+    libraryReader, organizationReader, progressRuntimeGateRef, refreshShelfProjection, setShelfNotice,
+  });
 
   const {
     userFonts,
