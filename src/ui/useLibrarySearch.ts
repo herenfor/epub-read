@@ -1,4 +1,4 @@
-import { textEncodingFromPath } from "../core/documentFormats";
+import { sourceFormat, textEncodingFromPath } from "../core/documentFormats";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore,
   type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -105,7 +105,9 @@ export function useLibrarySearchBooks({ runtime, librarySearchRuntime, shelfEntr
         available: entry.available !== false,
         fileSize: entry.fileSize,
         read: createShelfBookReader(entry.id),
-        ...(nativeArchive && (runtime.platform === "android" || /\.txt$/i.test(entry.fileName))
+        // Android reads every book through the archive channel; desktop needs it for
+        // non-EPUB sources (TXT, FB2) whose raw bytes the worker cannot parse.
+        ...(nativeArchive && (runtime.platform === "android" || sourceFormat(entry.fileName) !== "epub")
           ? { openArchiveInput: () => createShelfBookArchiveInput(entry.contentHash!, textEncodingFromPath(entry.chapterPath) || localStorage.getItem(`epub-reader:txt-encoding:${entry.id}`) || undefined) }
           : {}),
       })));
