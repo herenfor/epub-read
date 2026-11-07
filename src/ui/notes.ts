@@ -9,6 +9,34 @@ export const MAX_NOTE_SELECTED_CODE_POINTS = 4096;
 /** Maximum size of user-authored note content kept in a portable note. */
 export const MAX_NOTE_CONTENT_CODE_POINTS = 10000;
 
+/** The three highlight styles; a missing style keeps today's theme underline. */
+export const NOTE_STYLES = ["highlight", "underline", "squiggly"] as const;
+export type NoteStyle = (typeof NOTE_STYLES)[number];
+/** The five palette colors. Custom colors are stored as `#rrggbb`. */
+export const NOTE_COLOR_NAMES = ["red", "yellow", "green", "blue", "violet"] as const;
+export type NoteColorName = (typeof NOTE_COLOR_NAMES)[number];
+export type NoteColor = NoteColorName | `#${string}`;
+const NOTE_HEX_COLOR = /^#[0-9a-f]{6}$/i;
+
+export function isNoteStyle(value: unknown): value is NoteStyle {
+  return typeof value === "string" && (NOTE_STYLES as readonly string[]).includes(value);
+}
+
+export function isNoteColor(value: unknown): value is NoteColor {
+  return typeof value === "string" &&
+    ((NOTE_COLOR_NAMES as readonly string[]).includes(value) || NOTE_HEX_COLOR.test(value));
+}
+
+/** Hex colors are accepted in any case but stored lowercase. */
+export function normalizeNoteColor(value: string): string {
+  return value.toLowerCase();
+}
+
+/** Content that is only whitespace is stored as an empty (= pure highlight). */
+export function normalizeNoteContent(value: string): string {
+  return value.trim().length === 0 ? "" : value;
+}
+
 /**
  * A note is anchored to normalized Unicode text, not to a page or percentage.
  * Offsets are code-point offsets in the chapter's whitespace-normalized text.
@@ -23,6 +51,9 @@ export interface ReaderNote {
   endTextSnippet: string;
   selectedText: string;
   content: string;
+  /** Missing on notes created before the highlight data contract. */
+  style?: NoteStyle;
+  color?: NoteColor;
   createdAtMs: number;
   updatedAtMs: number;
 }
@@ -99,8 +130,14 @@ export function validateReaderNote(value: unknown): ReaderNoteValidation {
   ) {
     return { valid: false, field: "selectedText", reason: `must be non-empty and at most ${MAX_NOTE_SELECTED_CODE_POINTS} code points` };
   }
-  if (!requiredString(note.content) || codePointLength(note.content as string) > MAX_NOTE_CONTENT_CODE_POINTS) {
-    return { valid: false, field: "content", reason: `must be non-empty and at most ${MAX_NOTE_CONTENT_CODE_POINTS} code points` };
+  if (typeof note.content !== "string" || codePointLength(note.content) > MAX_NOTE_CONTENT_CODE_POINTS) {
+    return { valid: false, field: "content", reason: `must be at most ${MAX_NOTE_CONTENT_CODE_POINTS} code points` };
+  }
+  if (note.style !== undefined && !isNoteStyle(note.style)) {
+    return { valid: false, field: "style", reason: "must be highlight, underline, or squiggly" };
+  }
+  if (note.color !== undefined && !isNoteColor(note.color)) {
+    return { valid: false, field: "color", reason: "must be one of the five note colors or #rrggbb" };
   }
   if (!validTime(note.createdAtMs)) {
     return { valid: false, field: "createdAtMs", reason: "must be a non-negative safe integer" };
@@ -117,7 +154,13 @@ export function validateReaderNote(value: unknown): ReaderNoteValidation {
 export function normalizeReaderNote(value: unknown): ReaderNote | null {
   if (!validateReaderNote(value).valid) return null;
   const note = value as ReaderNote;
-  return { ...note };
+  return {
+    ...note,
+    content: normalizeNoteContent(note.content),
+    ...(note.color === undefined
+      ? {}
+      : { color: normalizeNoteColor(note.color) as NoteColor }),
+  };
 }
 
 export function normalizeReaderNotes(values: unknown): ReaderNote[] {

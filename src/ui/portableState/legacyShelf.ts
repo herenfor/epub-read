@@ -117,6 +117,8 @@ export function legacyShelfEntryToCandidate(
       endTextSnippet: note.endTextSnippet,
       selectedText: note.selectedText,
       content: note.content,
+      ...(note.style === undefined ? {} : { style: note.style }),
+      ...(note.color === undefined ? {} : { color: note.color }),
       createdAtMs: note.createdAtMs,
       updatedAtMs: note.updatedAtMs,
     })),

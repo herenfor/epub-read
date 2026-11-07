@@ -7,6 +7,12 @@
  * reader's normal navigation callback and then create a modern locator.
  */
 import { PortableStateParseError, parseLocator, type PortableStateIssue } from "./parser";
+import {
+  normalizeNoteColor,
+  normalizeNoteContent,
+  type NoteColor,
+  type NoteStyle,
+} from "../../ui/notes";
 import type { Annotation, Json, Stamp, Version } from "./portable-register-core";
 import type {
   BookmarkValue,
@@ -48,6 +54,9 @@ export interface LegacyNoteInput {
   readonly endTextSnippet: string;
   readonly selectedText: string;
   readonly content: string;
+  /** Present only when the legacy row already carried the highlight fields. */
+  readonly style?: NoteStyle;
+  readonly color?: NoteColor;
   readonly createdAtMs: number;
   readonly updatedAtMs: number;
 }
@@ -149,7 +158,11 @@ export function noteValueFromLegacy(input: LegacyNoteInput): NoteValue {
     startTextSnippet: input.startTextSnippet,
     endTextSnippet: input.endTextSnippet,
     selectedText: input.selectedText,
-    content: input.content,
+    content: normalizeNoteContent(input.content),
+    ...(input.style === undefined ? {} : { style: input.style }),
+    ...(input.color === undefined
+      ? {}
+      : { color: normalizeNoteColor(input.color) as NoteColor }),
     createdAtMs: input.createdAtMs,
   };
 }

@@ -1,5 +1,6 @@
 /** Frozen design DTOs; these modules are not yet wired into the application. */
 import type { LibraryOrganization, Register } from "../../ui/libraryOrganization";
+import type { NoteColor, NoteStyle } from "../../ui/notes";
 import type { BuiltinTheme as Theme } from "../../render/settings";
 import type { Annotation, Version } from "./portable-register-core";
 
@@ -39,7 +40,12 @@ export type NoteValue = {
   readonly startTextSnippet: string;
   readonly endTextSnippet: string;
   readonly selectedText: string;
+  /** Empty content is a pure highlight; only whitespace is stored as empty. */
   readonly content: string;
+  /** Missing style/color means a pre-highlight note (theme underline). */
+  readonly style?: NoteStyle;
+  /** Five palette names or a lowercase `#rrggbb`; uppercase input is normalized on read. */
+  readonly color?: NoteColor;
   readonly createdAtMs: number;
 };
 export type BookMetadata = { readonly title: string; readonly creator: string;

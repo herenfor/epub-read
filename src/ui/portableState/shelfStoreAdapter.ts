@@ -20,7 +20,12 @@ import type {
   ShelfSaveResult,
   ShelfStore,
 } from "../shelf";
-import type { ReaderNote } from "../notes";
+import {
+  normalizeNoteColor,
+  normalizeNoteContent,
+  type NoteColor,
+  type ReaderNote,
+} from "../notes";
 import type { LibraryRecord } from "../libraryArchive";
 import type { LibraryOrganization } from "../libraryOrganization";
 import type { DirectoryPlacementBatch, DirectoryPlacementBatchResult } from "../folderImport/placementBatch";
@@ -162,7 +167,11 @@ function noteValueFromNote(input: ReaderNote): NoteValue {
     startTextSnippet: input.startTextSnippet,
     endTextSnippet: input.endTextSnippet,
     selectedText: input.selectedText,
-    content: input.content,
+    content: normalizeNoteContent(input.content),
+    ...(input.style === undefined ? {} : { style: input.style }),
+    ...(input.color === undefined
+      ? {}
+      : { color: normalizeNoteColor(input.color) as NoteColor }),
     createdAtMs: input.createdAtMs,
   };
 }

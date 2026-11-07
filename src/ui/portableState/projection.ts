@@ -114,6 +114,8 @@ export function projectNoteAnnotation(
     endTextSnippet: value.endTextSnippet,
     selectedText: value.selectedText,
     content: value.content,
+    ...(value.style === undefined ? {} : { style: value.style }),
+    ...(value.color === undefined ? {} : { color: value.color }),
     createdAtMs: value.createdAtMs,
     updatedAtMs: version.updatedAtMs,
   };

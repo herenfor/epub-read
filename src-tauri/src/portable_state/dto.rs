@@ -44,6 +44,58 @@ where
     T::deserialize(deserializer)
 }
 
+/// Content that contains only whitespace is stored as an empty string, i.e. a
+/// pure highlight. Other content keeps its bytes.
+pub(crate) fn normalize_note_content(content: String) -> String {
+    if content.trim().is_empty() {
+        String::new()
+    } else {
+        content
+    }
+}
+
+fn deserialize_note_content<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let content = String::deserialize(deserializer)?;
+    if code_point_count(&content) > MAX_NOTE_CONTENT_CODE_POINTS {
+        return Err(serde::de::Error::custom(
+            "note content exceeds the code-point limit",
+        ));
+    }
+    Ok(normalize_note_content(content))
+}
+
+const NOTE_COLOR_NAMES: [&str; 5] = ["red", "yellow", "green", "blue", "violet"];
+
+/// Five palette names or `#rrggbb`. Hex input is accepted in any case and
+/// returned lowercase; color names are canonical lowercase.
+pub(crate) fn normalize_note_color(value: &str) -> Option<String> {
+    if NOTE_COLOR_NAMES.contains(&value) {
+        return Some(value.to_string());
+    }
+    let bytes = value.as_bytes();
+    if bytes.len() == 7
+        && bytes[0] == b'#'
+        && bytes[1..].iter().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Some(value.to_ascii_lowercase());
+    }
+    None
+}
+
+fn deserialize_optional_note_color<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let raw = String::deserialize(deserializer)?;
+    match normalize_note_color(&raw) {
+        Some(color) => Ok(Some(color)),
+        None => Err(serde::de::Error::custom("invalid note color")),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(
     rename_all = "camelCase",
@@ -222,6 +274,14 @@ pub struct BookmarkValue {
     pub created_at_ms: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NoteStyle {
+    Highlight,
+    Underline,
+    Squiggly,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NoteValue {
@@ -233,7 +293,22 @@ pub struct NoteValue {
     pub start_text_snippet: String,
     pub end_text_snippet: String,
     pub selected_text: String,
+    /// Empty means a pure highlight; whitespace-only becomes empty.
+    #[serde(deserialize_with = "deserialize_note_content")]
     pub content: String,
+    /// Missing style/color is a pre-highlight note drawn with the theme default.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_present"
+    )]
+    pub style: Option<NoteStyle>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_note_color"
+    )]
+    pub color: Option<String>,
     pub created_at_ms: u64,
 }
 
@@ -632,10 +707,13 @@ pub fn validate_note(value: &NoteValue) -> PortableResult<()> {
             "invalid-data：selectedText 与文本范围不一致",
         ));
     }
-    if value.content.trim().is_empty()
-        || code_point_count(&value.content) > MAX_NOTE_CONTENT_CODE_POINTS
-    {
+    if code_point_count(&value.content) > MAX_NOTE_CONTENT_CODE_POINTS {
         return Err(PortableError::invalid_data("invalid-data：content 不合法"));
+    }
+    if let Some(color) = &value.color {
+        if normalize_note_color(color).is_none() {
+            return Err(PortableError::invalid_data("invalid-data：笔记颜色不合法"));
+        }
     }
     if !safe_time(value.created_at_ms) {
         return Err(PortableError::invalid_data(
@@ -1218,5 +1296,124 @@ mod archive_identity_tests {
         for key in ["", "/a", "C:/a", "a\\b", "a/../b", "a//b", "a/./b", "a/\0b"] {
             assert!(!valid_chapter_path(key));
         }
+    }
+}
+
+#[cfg(test)]
+mod note_highlight_contract_tests {
+    use super::*;
+    use serde_json::{json, Value};
+
+    fn note_json(overrides: Value) -> Value {
+        let mut base = json!({
+            "chapterPath": "OEBPS/Text/chapter.xhtml",
+            "spineIndexHint": 0,
+            "textProfile": TEXT_PROFILE,
+            "startTextOffset": 0,
+            "endTextOffset": 2,
+            "startTextSnippet": "正文",
+            "endTextSnippet": "正文",
+            "selectedText": "正文",
+            "content": "note",
+            "createdAtMs": 1
+        });
+        let object = base.as_object_mut().unwrap();
+        for (key, value) in overrides.as_object().unwrap() {
+            object.insert(key.clone(), value.clone());
+        }
+        base
+    }
+
+    fn parse(value: Value) -> NoteValue {
+        serde_json::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn old_notes_without_style_or_color_roundtrip_unchanged() {
+        let raw = note_json(json!({}));
+        let note = parse(raw.clone());
+        assert_eq!(note.style, None);
+        assert_eq!(note.color, None);
+        validate_note(&note).unwrap();
+        assert_eq!(serde_json::to_value(note).unwrap(), raw);
+    }
+
+    #[test]
+    fn style_and_color_roundtrip_with_lowercase_hex_and_empty_content() {
+        let note = parse(note_json(json!({
+            "content": "   ",
+            "style": "squiggly",
+            "color": "#AABBCC"
+        })));
+        assert_eq!(note.content, "");
+        assert_eq!(note.style, Some(NoteStyle::Squiggly));
+        assert_eq!(note.color.as_deref(), Some("#aabbcc"));
+        validate_note(&note).unwrap();
+        let stored = serde_json::to_value(&note).unwrap();
+        assert_eq!(stored["content"], json!(""));
+        assert_eq!(stored["style"], json!("squiggly"));
+        assert_eq!(stored["color"], json!("#aabbcc"));
+
+        for (style, color) in [
+            ("highlight", "red"),
+            ("underline", "yellow"),
+            ("squiggly", "green"),
+            ("highlight", "blue"),
+            ("underline", "violet"),
+            ("squiggly", "#010203"),
+        ] {
+            let value = parse(note_json(json!({ "style": style, "color": color })));
+            validate_note(&value).unwrap();
+            assert_eq!(value.style, Some(serde_json::from_value::<NoteStyle>(json!(style)).unwrap()));
+            assert_eq!(value.color.as_deref(), Some(color));
+        }
+    }
+
+    #[test]
+    fn style_only_and_color_only_are_allowed() {
+        let style_only = parse(note_json(json!({ "style": "underline", "content": "" })));
+        assert_eq!(style_only.style, Some(NoteStyle::Underline));
+        assert_eq!(style_only.color, None);
+        validate_note(&style_only).unwrap();
+        let color_only = parse(note_json(json!({ "color": "blue", "content": "" })));
+        assert_eq!(color_only.style, None);
+        assert_eq!(color_only.color.as_deref(), Some("blue"));
+        validate_note(&color_only).unwrap();
+    }
+
+    #[test]
+    fn empty_content_is_allowed_but_whitespace_is_normalized() {
+        let empty = NoteValue {
+            content: String::new(),
+            ..parse(note_json(json!({})))
+        };
+        validate_note(&empty).unwrap();
+        let whitespace = parse(note_json(json!({ "content": " \n\t " })));
+        assert_eq!(whitespace.content, "");
+        validate_note(&whitespace).unwrap();
+        let too_long = NoteValue {
+            content: "x".repeat(MAX_NOTE_CONTENT_CODE_POINTS + 1),
+            ..parse(note_json(json!({})))
+        };
+        assert!(validate_note(&too_long).is_err());
+        assert!(serde_json::from_value::<NoteValue>(note_json(json!({
+            "content": " ".repeat(MAX_NOTE_CONTENT_CODE_POINTS + 1)
+        })))
+        .is_err());
+    }
+
+    #[test]
+    fn invalid_style_or_color_is_rejected() {
+        for style in ["wavy", "HIGHLIGHT", "", "highlight "] {
+            assert!(serde_json::from_value::<NoteValue>(note_json(json!({ "style": style }))).is_err());
+        }
+        for color in ["pink", "RED", "#12345", "#1234567", "123456", "#gggggg", ""] {
+            assert!(serde_json::from_value::<NoteValue>(note_json(json!({ "color": color }))).is_err());
+        }
+        let mut direct = parse(note_json(json!({ "color": "red" })));
+        direct.color = Some("pink".into());
+        assert!(validate_note(&direct).is_err());
+        assert!(serde_json::from_value::<NoteValue>(note_json(json!({ "style": null }))).is_err());
+        assert!(serde_json::from_value::<NoteValue>(note_json(json!({ "color": null }))).is_err());
     }
 }

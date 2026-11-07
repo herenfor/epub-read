@@ -269,7 +269,9 @@ fn convert_note(note: &LegacyNote) -> PortableResult<NoteValue> {
         start_text_snippet: note.start_text_snippet.clone(),
         end_text_snippet: note.end_text_snippet.clone(),
         selected_text: note.selected_text.clone(),
-        content: note.content.clone(),
+        content: dto::normalize_note_content(note.content.clone()),
+        style: None,
+        color: None,
         created_at_ms: note.created_at_ms,
     };
     // v3 deliberately allows updatedAtMs older than createdAtMs, so the old

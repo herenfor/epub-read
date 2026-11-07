@@ -22,6 +22,12 @@ import {
 import {
   MAX_NOTE_CONTENT_CODE_POINTS,
   MAX_NOTE_SELECTED_CODE_POINTS,
+  isNoteColor,
+  isNoteStyle,
+  normalizeNoteColor,
+  normalizeNoteContent,
+  type NoteColor,
+  type NoteStyle,
 } from "../../ui/notes";
 import {
   mergeVersions,
@@ -598,7 +604,7 @@ function parseNoteValueInput(raw: unknown, path: string, failures: PortableState
   if (!objectLike(raw)) return fail(failures, path, "invalid-note", "expected a note object");
   checkFields(raw, path, [
     "chapterPath", "spineIndexHint", "textProfile", "startTextOffset", "endTextOffset",
-    "startTextSnippet", "endTextSnippet", "selectedText", "content", "createdAtMs",
+    "startTextSnippet", "endTextSnippet", "selectedText", "content", "style", "color", "createdAtMs",
   ], failures, {});
   const chapterPath = parseChapterPath(readOptional(raw, "chapterPath"), `${path}.chapterPath`, failures);
   if (isBad(chapterPath)) return BAD;
@@ -632,10 +638,26 @@ function parseNoteValueInput(raw: unknown, path: string, failures: PortableState
       codePointCount(normalizeAnchorText(selectedText)) !== endTextOffset - startTextOffset) {
     return fail(failures, `${path}.selectedText`, "invalid-note", "selectedText does not match the code-point range");
   }
-  const content = stringField(raw, "content", path, failures, true, true);
+  const content = stringField(raw, "content", path, failures, true);
   if (isBad(content)) return BAD;
   if (codePointCount(content) > MAX_NOTE_CONTENT_CODE_POINTS) {
     return fail(failures, `${path}.content`, "invalid-note", "content exceeds the code-point limit");
+  }
+  const rawStyle = readOptional(raw, "style");
+  let style: NoteStyle | undefined;
+  if (rawStyle !== undefined) {
+    if (!isNoteStyle(rawStyle)) {
+      return fail(failures, `${path}.style`, "invalid-note", "unsupported note style");
+    }
+    style = rawStyle;
+  }
+  const rawColor = readOptional(raw, "color");
+  let color: NoteColor | undefined;
+  if (rawColor !== undefined) {
+    if (!isNoteColor(rawColor)) {
+      return fail(failures, `${path}.color`, "invalid-note", "invalid note color");
+    }
+    color = normalizeNoteColor(rawColor) as NoteColor;
   }
   const createdAtMs = safeIntegerField(raw, "createdAtMs", path, failures, true);
   if (isBad(createdAtMs)) return BAD;
@@ -648,7 +670,9 @@ function parseNoteValueInput(raw: unknown, path: string, failures: PortableState
     startTextSnippet,
     endTextSnippet,
     selectedText,
-    content,
+    content: normalizeNoteContent(content),
+    ...(style === undefined ? {} : { style }),
+    ...(color === undefined ? {} : { color }),
     createdAtMs,
   };
 }
