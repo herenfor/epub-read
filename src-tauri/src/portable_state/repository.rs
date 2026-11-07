@@ -5,6 +5,8 @@
 //! this module, after independently checking IPC and migration activation.
 
 mod shelf_move;
+mod readest;
+pub(crate) use readest::{ReadestAnnotation, ReadestBookImport, ReadestImportOutcome, ReadestTarget};
 
 use super::dto::{
     self, Annotation, BookMetadata, BookmarkValue, NoteValue, PortableBook, PortableStateV3,

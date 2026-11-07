@@ -79,6 +79,36 @@ fn repository<T: Serialize>(
     encode(value.map_err(|err| ShelfError::new(err.code, err.message))?)
 }
 
+/// Blocking callers can reuse the unlocked repository without selecting a
+/// private data path themselves. The epoch also observes a pending lock.
+pub(crate) fn with_import_store<T>(
+    window: &WebviewWindow,
+    session_id: &str,
+    work: impl FnOnce(&mut PortableStore, &dyn Fn() -> bool) -> crate::portable_state::PortableResult<T>,
+) -> crate::portable_state::PortableResult<T> {
+    let locked = || PortableError {
+        code: "locked".into(),
+        message: "隐私书架已锁定或会话失效".into(),
+        legacy_fallback_allowed: None,
+    };
+    if window.label() != "main" {
+        return Err(locked());
+    }
+    let state = window.state::<super::PrivateShelfState>();
+    let epoch = state.lock_epoch.load(Ordering::Acquire);
+    let mut shelf = state.shelf.lock().map_err(|_| locked())?;
+    let session = shelf
+        .unlocked
+        .as_mut()
+        .filter(|s| s.owns(session_id, epoch))
+        .ok_or_else(locked)?;
+    let current = || state.lock_epoch.load(Ordering::Acquire) == epoch;
+    if !current() {
+        return Err(locked());
+    }
+    work(&mut session.store, &current)
+}
+
 #[derive(Deserialize)]
 #[serde(
     tag = "kind",

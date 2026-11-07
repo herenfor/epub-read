@@ -27,6 +27,7 @@ pub(crate) mod transfer_policy;
 mod portable_state_commands;
 mod private_shelf;
 mod save_file;
+mod readest_import;
 mod book_export;
 #[cfg(feature = "ai")]
 mod reader_tools;
@@ -145,6 +146,12 @@ macro_rules! configure_invoke_handler {
             portable_state_commands::portable_state_apply_organization,
             portable_state_commands::portable_state_merge_organization,
             portable_state_commands::portable_state_reserve_stamps,
+            readest_import::readest_backup_open,
+            readest_import::readest_backup_config,
+            readest_import::readest_backup_read,
+            readest_import::readest_import_targets,
+            readest_import::readest_import_commit,
+            readest_import::readest_backup_close,
             save_file::commands::save_file_export,
             book_export::book_source_export,
             save_file::commands::save_file_prepare_import,
@@ -329,6 +336,12 @@ macro_rules! configure_invoke_handler {
             portable_state_commands::portable_state_apply_organization,
             portable_state_commands::portable_state_merge_organization,
             portable_state_commands::portable_state_reserve_stamps,
+            readest_import::readest_backup_open,
+            readest_import::readest_backup_config,
+            readest_import::readest_backup_read,
+            readest_import::readest_import_targets,
+            readest_import::readest_import_commit,
+            readest_import::readest_backup_close,
             save_file::commands::save_file_export,
             book_export::book_source_export,
             save_file::commands::save_file_prepare_import,
@@ -460,6 +473,7 @@ pub fn run() {
         .manage(portable_state_commands::PortableStateManager::default())
         .manage(private_shelf::PrivateShelfState::default())
         .manage(save_file::SaveFileManager::default())
+        .manage(readest_import::ReadestImportState::default())
         .manage(lan_save::LanSaveManager::default())
         .manage(cloud_sync::commands::CloudSyncManager::default())
         .manage(ai::AiState::default())
@@ -535,6 +549,7 @@ pub fn run() {
                 reader_tools::shutdown(app);
                 lan_save::shutdown(app);
                 cloud_sync::commands::shutdown(app);
+                readest_import::shutdown(app);
                 linked_library::close_all_native_archives(app);
                 return;
             }
@@ -544,6 +559,9 @@ pub fn run() {
                 ..
             } = &event
             {
+                if label == "main" {
+                    readest_import::shutdown(app);
+                }
                 linked_library::close_native_archive_window(app, label);
             }
             #[cfg(mobile)]
@@ -554,6 +572,7 @@ pub fn run() {
             {
                 lan_save::shutdown(app);
                 cloud_sync::commands::shutdown(app);
+                readest_import::shutdown(app);
             }
         });
 }

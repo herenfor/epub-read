@@ -127,6 +127,7 @@ use library_settings::*;
 pub(crate) use library_settings::{managed_books_directory, writable_books_directory};
 
 mod library_location;
+pub(crate) use library_location::source_lease;
 pub use library_location::{
     LibraryLocationState,
     linked_library_location_plan, linked_library_location_start,
