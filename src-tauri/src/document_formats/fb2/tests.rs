@@ -12,7 +12,9 @@ fn sample(encoding: &str) -> String {
 }
 #[test]
 fn fb2_archive_preserves_sections_notes_images_and_original_bytes() {
-    let bytes = sample("UTF-8").into_bytes();
+    let bytes = sample("UTF-8")
+        .replace("<poem>", "<poem><title><p>Poem title</p></title>")
+        .into_bytes();
     let before = bytes.clone();
     let metadata = inspect(Cursor::new(&bytes), "Fallback").unwrap();
     assert_eq!(metadata.title, "Test & Книга");
@@ -47,6 +49,8 @@ fn fb2_archive_preserves_sections_notes_images_and_original_bytes() {
     assert!(read(&format!("{ROOT}c1.xhtml")).contains("colspan=\"2\""));
     let nav = read(&format!("{ROOT}nav.xhtml"));
     assert!(nav.contains("One</a><ol><li>"));
+    assert!(nav.contains(">Nested</a>"));
+    assert!(!nav.contains("Poem title"));
     assert!(read(&format!("{ROOT}package.opf")).contains("idref=\"c2\" linear=\"no\""));
     let mut image = Vec::new();
     zip.by_name(&binary_path("cover"))

@@ -199,7 +199,15 @@ impl Visitor for Catalog {
         if tag == "id" && self.stack.iter().any(|(s, _)| s == "document-info") {
             self.identifier.push_str(text);
         }
-        if self.body.is_some() && self.stack.iter().any(|(s, _)| s == "title") {
+        // A poem/citation can have its own title inside a section. Only the
+        // section's direct title contributes to that section's TOC label.
+        let section_title = self
+            .stack
+            .windows(2)
+            .rev()
+            .find(|pair| pair[1].0 == "title")
+            .is_some_and(|pair| pair[0].0 == "section");
+        if self.body.is_some() && section_title {
             if let Some(index) = self.section_stack.last() {
                 let label = &mut self.sections[*index].label;
                 if label.len() < 4096 {
