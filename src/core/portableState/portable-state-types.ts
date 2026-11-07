@@ -54,13 +54,14 @@ export type PortablePreferences = { readonly theme?: Theme; readonly fontSizePx?
   readonly lineHeight?: number; readonly fontWeight?: number;
   readonly letterSpacingPx?: number; readonly wordSpacingPx?: number };
 export type PortableStateV3 = {
-  readonly schemaVersion: 3 | 4;
+  readonly schemaVersion: 3 | 4 | 5;
   readonly books: Readonly<Record<string, PortableBook>>;
   readonly organization: LibraryOrganization;
   readonly preferences?: PortablePreferences;
 };
 
-/** v4 marks source formats whose locators old EPUB-only readers cannot interpret. */
-export function portableSchemaVersion(books: Readonly<Record<string, PortableBook>>): 3 | 4 {
+/** v4 admits TXT/comics; v5 admits FB2 and its stable generated chapter identities. */
+export function portableSchemaVersion(books: Readonly<Record<string, PortableBook>>): 3 | 4 | 5 {
+  if (Object.values(books).some(book => /\.fb2$/i.test(book.metadata.value.fileName))) return 5;
   return Object.values(books).some(book => /\.(?:txt|cbz|zip)$/i.test(book.metadata.value.fileName)) ? 4 : 3;
 }

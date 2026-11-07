@@ -1271,6 +1271,7 @@ dependencies = [
 name = "epub-reader"
 version = "0.4.1"
 dependencies = [
+ "base64 0.22.1",
  "chardetng",
  "encoding_rs",
  "flate2",

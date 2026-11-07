@@ -191,14 +191,7 @@ pub(super) fn read_cover_from_opened_file(
     if before_zip != trusted_snapshot {
         return Err(LinkedLibraryError::changed("源 EPUB 在读取封面期间发生了变化"));
     }
-    let bytes = {
-        let mut archive =
-            ZipArchive::new(file).map_err(|error| format!("EPUB 不是有效 ZIP：{error}"))?;
-        let mut cover_entry = archive
-            .by_name(cover_zip_path)
-            .map_err(|_| "EPUB 中找不到封面条目".to_string())?;
-        read_zip_entry_bounded(&mut cover_entry, limit, "封面")?
-    };
+    let bytes = crate::document_formats::read_cover(file, cover_zip_path, limit)?;
     let after_zip = snapshot_file(file)?;
     if after_zip != trusted_snapshot {
         return Err(LinkedLibraryError::changed("源 EPUB 在读取封面期间发生了变化"));

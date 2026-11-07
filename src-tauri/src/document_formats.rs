@@ -1,4 +1,5 @@
-//! Source-format inspection and ephemeral TXT reading resources. Original bytes are never rewritten.
+//! Source-format inspection and ephemeral reading resources. Original bytes are never rewritten.
+mod fb2;
 use crate::linked_library::ImportedMetadata;
 use serde::Serialize;
 use std::{
@@ -17,11 +18,42 @@ pub fn extension(name: &str) -> &str {
 pub fn supported(name: &str) -> bool {
     matches!(
         extension(name).to_ascii_lowercase().as_str(),
-        "epub" | "txt" | "cbz" | "zip"
+        "epub" | "txt" | "cbz" | "zip" | "fb2"
     )
 }
 pub fn text(name: &str) -> bool {
     extension(name).eq_ignore_ascii_case("txt")
+}
+pub fn fictionbook(name: &str) -> bool {
+    extension(name).eq_ignore_ascii_case("fb2")
+}
+pub fn virtual_archive(name: &str) -> bool {
+    text(name) || fictionbook(name)
+}
+/// Source guards remain owned by the caller and cover the whole conversion.
+pub fn reading_archive(
+    source: impl Read + Seek, name: &str, encoding: Option<&str>, title: &str,
+) -> Result<File, String> {
+    if fictionbook(name) {
+        fb2::archive(source, title)
+    } else {
+        text_archive(source, encoding, title)
+    }
+}
+/// FB2 cover paths name generated binary resources; detect the source container
+/// rather than reserving those paths in genuine EPUBs.
+pub(crate) fn read_cover(mut source: impl Read + Seek, path: &str, limit: u64) -> Result<Vec<u8>, String> {
+    source.rewind().map_err(|e| e.to_string())?;
+    let mut magic = [0; 2];
+    let n = source.read(&mut magic).map_err(|e| e.to_string())?;
+    source.rewind().map_err(|e| e.to_string())?;
+    if n == 2 && magic == *b"PK" {
+        let mut zip = ZipArchive::new(source).map_err(|e| format!("EPUB 不是有效 ZIP：{e}"))?;
+        let mut entry = zip.by_name(path).map_err(|_| "EPUB 中找不到封面条目".to_string())?;
+        crate::linked_library::epub_meta::read_zip_entry_bounded(&mut entry, limit, "封面")
+    } else {
+        fb2::cover(source, path, limit)
+    }
 }
 pub fn image(name: &str) -> bool {
     !name
@@ -77,6 +109,7 @@ pub(crate) fn inspect_reader<R: Read + Seek>(reader: R, file_name: &str) -> Resu
         .and_then(|s| s.to_str())
         .unwrap_or("Book")
         .to_owned();
+    if fictionbook(file_name) { return fb2::inspect(reader, &title); }
     if text(file_name) {
         // Import never decodes or duplicates a whole text book. The reader builds its resources on demand.
         return Ok(ImportedMetadata {

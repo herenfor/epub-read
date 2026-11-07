@@ -243,7 +243,7 @@ fn corrupt_files_are_isolated_but_future_versions_and_own_identity_block_writes(
     for path in ["formatVersion", "stateSchemaVersion", "nestedStateVersion"] {
         let mut value: serde_json::Value = serde_json::from_slice(&good).unwrap();
         if path == "nestedStateVersion" {
-            value["state"]["schemaVersion"] = json!(5);
+            value["state"]["schemaVersion"] = json!(6);
         } else {
             value[path] = json!(99);
         }
@@ -393,6 +393,23 @@ fn source_formats_cloud_preserves_state_four_and_reads_old_three() {
     assert_eq!(parsed.state_schema_version,4);
     assert_eq!(parsed.state,state);
     let mut future:serde_json::Value=serde_json::from_slice(&bytes).unwrap();
-    future["state"]["schemaVersion"]=json!(5);
+    future["state"]["schemaVersion"]=json!(6);
     assert_eq!(parse_device(&serde_json::to_vec(&future).unwrap(),SPACE,A).unwrap_err(),SyncError::UnsupportedSyncVersion);
+}
+
+#[test]
+fn fb2_cloud_uses_state_five_without_changing_the_outer_format() {
+    let hash = "a".repeat(64);
+    let mut state = book(A, &hash, 40);
+    state.schema_version = 5;
+    state.books.get_mut(&hash).unwrap().metadata.value.file_name = "original.fb2".into();
+    let bytes = file(A, state.clone());
+    let parsed = parse_device(&bytes, SPACE, A).unwrap();
+    assert_eq!(parsed.format_version, 2);
+    assert_eq!(parsed.state_schema_version, 5);
+    assert_eq!(parsed.state, state);
+    let mut wrong: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    wrong["stateSchemaVersion"] = json!(4);
+    wrong["state"]["schemaVersion"] = json!(4);
+    assert_eq!(parse_device(&serde_json::to_vec(&wrong).unwrap(), SPACE, A).unwrap_err(), SyncError::InvalidData);
 }

@@ -39,7 +39,7 @@ pub fn path_source_root_key(canonical_root: &Path) -> String {
 fn is_candidate_epub(file_name: &str) -> bool {
     file_name
         .rsplit_once('.')
-        .map(|(_, extension)| matches!(extension.to_ascii_lowercase().as_str(), "epub" | "txt" | "cbz" | "zip"))
+        .map(|(_, extension)| matches!(extension.to_ascii_lowercase().as_str(), "epub" | "txt" | "cbz" | "zip" | "fb2"))
         .unwrap_or(false)
 }
 

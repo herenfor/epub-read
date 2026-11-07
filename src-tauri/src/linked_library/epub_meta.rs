@@ -127,7 +127,8 @@ fn parse_container(xml: &[u8]) -> Result<String, String> {
 
 fn parse_opf(xml: &[u8], opf_path: &str) -> Result<ParsedOpfMetadata, String> {
     let mut reader = Reader::from_reader(xml);
-    reader.config_mut().trim_text(true);
+    // Preserve spaces across entity/Text event boundaries; trim the completed
+    // field below, rather than replacing it with the final XML text event.
     let mut buffer = Vec::new();
     let base = opf_path
         .rsplit_once('/')
@@ -213,18 +214,20 @@ fn parse_opf(xml: &[u8], opf_path: &str) -> Result<ParsedOpfMetadata, String> {
                     epub2_cover_id = xml_attr(&reader, &event, "content");
                 }
             }
-            Ok(Event::Text(text)) => {
+            Ok(event @ (Event::Text(_) | Event::CData(_) | Event::GeneralRef(_))) => {
                 if let Some(kind) = capture {
-                    let value = text
-                        .decode()
-                        .map_err(|error| format!("无法解码 OPF 元数据：{error}"))?;
-                    if kind == "title" {
-                        title = value.trim().to_string();
-                    } else if kind == "creator" {
-                        creator = value.trim().to_string();
-                    } else {
-                        language = value.trim().to_string();
-                    }
+                    let value = match event {
+                        Event::Text(text) => text.decode().map_err(|e| e.to_string())?.into_owned(),
+                        Event::CData(text) => text.decode().map_err(|e| e.to_string())?.into_owned(),
+                        Event::GeneralRef(reference) => match reference.resolve_char_ref().ok().flatten() {
+                            Some(ch) => ch.to_string(),
+                            // Preserve the existing treatment of unsupported
+                            // custom entities; don't add a new admission error.
+                            None => quick_xml::escape::resolve_xml_entity(&reference.decode().map_err(|e| e.to_string())?).unwrap_or("").to_owned(),
+                        },
+                        _ => unreachable!(),
+                    };
+                    match kind { "title" => &mut title, "creator" => &mut creator, _ => &mut language }.push_str(&value);
                 }
             }
             Ok(Event::End(_)) => capture = None,
@@ -244,9 +247,9 @@ fn parse_opf(xml: &[u8], opf_path: &str) -> Result<ParsedOpfMetadata, String> {
         .filter_map(|item| zip_path_from_relative(base, &item.href))
         .collect();
     Ok(ParsedOpfMetadata {
-        title,
-        creator,
-        language,
+        title: title.trim().to_owned(),
+        creator: creator.trim().to_owned(),
+        language: language.trim().to_owned(),
         spine,
         manifest,
         epub2_cover_id,
@@ -355,7 +358,7 @@ where
     (None, String::new())
 }
 
-pub(super) fn read_zip_entry_bounded<R: Read>(
+pub(crate) fn read_zip_entry_bounded<R: Read>(
     entry: &mut R,
     limit: u64,
     label: &str,

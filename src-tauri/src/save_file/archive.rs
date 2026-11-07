@@ -518,12 +518,12 @@ fn read_entry_bytes(
 }
 
 fn source_entry_path(state: &PortableStateV3, hash: &str) -> String {
-    let extension=state.books.get(hash).map(|b| crate::document_formats::extension(&b.metadata.value.file_name).to_ascii_lowercase()).filter(|e| matches!(e.as_str(),"epub"|"txt"|"cbz"|"zip")).unwrap_or_else(||"epub".into());
+    let extension=state.books.get(hash).map(|b| crate::document_formats::extension(&b.metadata.value.file_name).to_ascii_lowercase()).filter(|e| matches!(e.as_str(),"epub"|"txt"|"cbz"|"zip"|"fb2")).unwrap_or_else(||"epub".into());
     format!("books/{hash}.{extension}")
 }
 fn book_hash_from_path(name: &str) -> Option<String> {
     let (hash, extension)=name.strip_prefix("books/")?.rsplit_once('.')?;
-    (valid_hash(hash) && matches!(extension,"epub"|"txt"|"cbz"|"zip")).then(||hash.to_owned())
+    (valid_hash(hash) && matches!(extension,"epub"|"txt"|"cbz"|"zip"|"fb2")).then(||hash.to_owned())
 }
 fn allowed_entry_path(name: &str) -> bool {
     name=="manifest.json" || name=="state.json" || book_hash_from_path(name).is_some()
@@ -621,7 +621,7 @@ pub(crate) fn validate_and_extract_with_expectation(
     if manifest.container_version != CONTAINER_VERSION {
         return Err(SaveFileError::invalid_data("未知容器主版本"));
     }
-    if !matches!(manifest.state_schema_version, 3 | 4) {
+    if !matches!(manifest.state_schema_version, 3 | 4 | 5) {
         return Err(SaveFileError::invalid_data("未知状态主版本"));
     }
     if !super::valid_job_id(&manifest.package_id) {
@@ -1143,18 +1143,26 @@ mod tests {
     }
 
     #[test]
-    fn source_formats_archive_keeps_original_suffix_bytes_and_version() {
-        for extension in ["txt", "cbz", "zip"] {
+    fn fb2_and_prior_source_archives_keep_original_suffix_bytes_and_version() {
+        for extension in ["txt", "cbz", "zip", "fb2"] {
             let dir = TempDir::new(extension);
             let source = dir.path().join(format!("source.{extension}"));
-            let bytes = b"original source bytes including any original encoding";
+            let bytes: &[u8] = if extension == "fb2" {
+                br#"<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0"><body><section><p>Original text</p></section></body></FictionBook>"#
+            } else { b"original source bytes including any original encoding" };
             fs::write(&source, bytes).unwrap();
             let hash = crate::save_file::hex_digest(bytes);
             let mut state = test_state();
             let mut book = state.books.remove(HASH).unwrap();
             book.metadata.value.file_name = format!("source.{extension}");
+            if extension == "fb2" {
+                for version in &mut book.progress.versions {
+                    let crate::portable_state::Locator::Modern(locator) = &mut version.value.as_mut().unwrap().locator else { panic!("expected a modern fixture locator") };
+                    locator.chapter_path = "__reader__/fb2/c0.xhtml".into();
+                }
+            }
             state.books.insert(hash.clone(), book);
-            state.schema_version = 4;
+            state.schema_version = if extension == "fb2" { 5 } else { 4 };
             let target = dir.path().join("source.epubsave");
             let mut reporter = ProgressReporter::new(channel(), "formats", None);
             let cancel = AtomicBool::new(false);
@@ -1163,6 +1171,11 @@ mod tests {
             assert_eq!(parsed.incoming,state);
             assert_eq!(parsed.attachments[0].staging_path.extension().unwrap(),extension);
             assert_eq!(fs::read(&parsed.attachments[0].staging_path).unwrap(),bytes);
+            if extension == "fb2" {
+                assert_eq!(crate::linked_library::inspect_epub(&parsed.attachments[0].staging_path).unwrap().spine, ["__reader__/fb2/c0.xhtml"]);
+                state.schema_version = 4;
+                assert!(validate_portable_state(&state).is_err());
+            }
             state.schema_version = 3;
             assert!(validate_portable_state(&state).is_err());
         }

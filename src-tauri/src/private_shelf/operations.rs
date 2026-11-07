@@ -390,9 +390,11 @@ fn open_archive(
         .release(ReleaseTarget::ReadId(read_id))
         .map_err(ShelfError::storage)?;
     let book = book.ok_or_else(|| ShelfError::new("missing-source", "隐私书架中没有这本书"))?;
-    if crate::document_formats::text(&book.metadata.value.file_name) {
-        file = crate::document_formats::text_archive(file, encoding, &book.metadata.value.title)
+    if crate::document_formats::virtual_archive(&book.metadata.value.file_name) {
+        guard().map_err(archive_error)?;
+        file = crate::document_formats::reading_archive(file, &book.metadata.value.file_name, encoding, &book.metadata.value.title)
             .map_err(ShelfError::storage)?;
+        guard().map_err(archive_error)?;
     }
     let start = Instant::now();
     let archive = NativeZipSession::from_verified_file(file, guard).map_err(archive_error)?;
