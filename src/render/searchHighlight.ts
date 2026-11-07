@@ -1,3 +1,5 @@
+import { SEARCH_HIGHLIGHT_PRIORITY } from "./noteHighlights";
+
 export const SEARCH_HIGHLIGHT_NAME = "reader-search-hit";
 
 type HighlightRegistryLike = {
@@ -32,7 +34,10 @@ export function applySearchHighlight(
   if (!support) return "unsupported";
   support.registry.delete(SEARCH_HIGHLIGHT_NAME);
   if (ranges.length > 0) {
-    support.registry.set(SEARCH_HIGHLIGHT_NAME, new support.HighlightCtor(...ranges));
+    const highlight = new support.HighlightCtor(...ranges) as { priority?: number };
+    // Above every note group, so a hit inside a highlight keeps its own look.
+    highlight.priority = SEARCH_HIGHLIGHT_PRIORITY;
+    support.registry.set(SEARCH_HIGHLIGHT_NAME, highlight);
   }
   return "applied";
 }

@@ -4,6 +4,7 @@ import {
   clearSearchHighlight,
   SEARCH_HIGHLIGHT_NAME,
 } from "./searchHighlight";
+import { SEARCH_HIGHLIGHT_PRIORITY } from "./noteHighlights";
 
 function fakeDocument() {
   const set = vi.fn();
@@ -31,6 +32,7 @@ describe("search highlight registry", () => {
     expect(set).toHaveBeenCalledTimes(1);
     expect(set.mock.calls[0][0]).toBe(SEARCH_HIGHLIGHT_NAME);
     expect(set.mock.calls[0][1]).toBeInstanceOf(Highlight);
+    expect(set.mock.calls[0][1].priority).toBe(SEARCH_HIGHLIGHT_PRIORITY);
 
     clearSearchHighlight(doc);
     expect(remove).toHaveBeenCalledWith(SEARCH_HIGHLIGHT_NAME);
