@@ -95,6 +95,7 @@ import { hasOwnField, chapterLabelForIndex, useNoteEditRef, replaceNoteEditConte
   useBookmarkToast, useBookmarkToastCleanup, useNoteBusyState, useNoteProjection, useNoteActions,
   useBookmarkProjection, useBookmarkSidebarToggle, useBookmarkActions, useBookmarkRibbonActions,
   useNoteEditRelease } from "./ui/useBookmarksAndNotes";
+import { usePendingNoteDelete, useVisibleChapterNotes } from "./ui/pendingNoteDelete";
 import { BookmarkPagesPopover, WARM_BOOKMARK_PAGES_SCREEN } from "./ui/BookmarkPagesPopover";
 import { uiPlural, uiText, useUiText } from "./ui/localization/UiLanguageProvider";
 import { FootnotePop } from "./ui/FootnotePop";
@@ -1254,10 +1255,14 @@ export default function App() {
 
   // ---- 正文笔记 ----
   const { currentNotes, currentChapterNotes, notesForChapter, noteViewModels } = useNoteProjection(shelfEntries, currentShelfId, book, spineIndex);
-  const { handleSaveNote, handleDeleteNote, handleEditNote } = useNoteActions({
+  const { handleSaveNote, deleteNoteIn, handleEditNote } = useNoteActions({
     ...noteBusyState, currentShelfId, currentNotes, setShelfEntries, setRuntimeIssues,
     noteComposer, book, setForeground, shelfEntriesRef, openComposer,
   });
+  const { pendingNoteId, hiddenNoteIds, requestDelete: requestNoteDelete, undoDelete: undoNoteDelete } =
+    usePendingNoteDelete({ currentShelfId, commitDelete: deleteNoteIn });
+  const { visibleChapterNotes, visibleNotesForChapter } =
+    useVisibleChapterNotes(currentChapterNotes, notesForChapter, hiddenNoteIds);
 
   const handleNoteNavigate = useCallback((note: ReaderNote): void => {
     if (!book || noteBusy) return;
@@ -2542,7 +2547,9 @@ export default function App() {
             if (note) handleNoteNavigate(note);
           }}
           onEditNote={(viewNote) => void handleEditNote(viewNote.id)}
-          onDeleteNote={(viewNote) => void handleDeleteNote(viewNote.id)}
+          onDeleteNote={(viewNote) => requestNoteDelete(viewNote.id)}
+          pendingDeleteNoteId={pendingNoteId}
+          onUndoDeleteNote={undoNoteDelete}
         />
       )}
       <div className="main">
@@ -2871,8 +2878,8 @@ export default function App() {
                   visualPreferences={visualPreferences}
                   compareOriginal={visualCompareOriginal}
                   userFonts={renderUserFonts}
-                  notes={currentChapterNotes}
-                  notesForChapter={notesForChapter}
+                  notes={visibleChapterNotes}
+                  notesForChapter={visibleNotesForChapter}
                   onSelectionContextMenu={(payload) => {
                     if (!payload) {
                       setForeground((current) =>

@@ -8,6 +8,8 @@ import { SidebarTocList } from "./SidebarTocList";
 import type { Bookmark } from "./shelf";
 import { BookmarkIcon, CloseIcon, PinIcon } from "./readerIcons";
 import "./sidebarDrawer.css";
+import { UndoPill, undoDetail } from "./controls/UndoPill";
+import { NOTE_UNDO_MS } from "./pendingNoteDelete";
 import { currentUiLocale, uiText, useUiText } from "./localization/UiLanguageProvider";
 
 export type SidebarTab = "toc" | "bookmarks" | "notes";
@@ -51,6 +53,9 @@ export interface SidebarDrawerProps {
   onNavigateNote: (note: NoteViewModel) => void;
   onEditNote?: (note: NoteViewModel) => void;
   onDeleteNote?: (note: NoteViewModel) => void;
+  /** A note deleted a moment ago: its card shows the undo pill in place. */
+  pendingDeleteNoteId?: string | null;
+  onUndoDeleteNote?: () => void;
 }
 
 function formatDate(timestamp: number): string {
@@ -81,11 +86,12 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
   onNavigateNote,
   onEditNote,
   onDeleteNote,
+  pendingDeleteNoteId = null,
+  onUndoDeleteNote,
 }) => {
   const { t } = useUiText();
   const tocIndex = useMemo(() => indexToc(toc), [toc]);
   const activeEntry = useMemo(() => activeTocEntry(tocIndex, activeHref), [tocIndex, activeHref]);
-  const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
   const [tocFilter, setTocFilter] = useState(navigationMemory?.tocFilter ?? "");
   const { isClosing, requestClose, cancelClose } = useMenuClose(onClose, open);
   // 浮层模式打开时焦点进入抽屉；停靠模式是阅读的一部分，不抢焦点。
@@ -179,8 +185,6 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
     drawerRef.current?.getBoundingClientRect();
     onPreparedRef.current?.();
   }, [visible, warm]);
-  // A kept drawer reopens like a remounted one: no half-confirmed delete.
-  if (!visible && deletingNoteId !== null) setDeletingNoteId(null);
 
   // Follow once on the TOC tab; a jump that stayed inside one entry keeps the user's scroll.
   // Without a matching entry nothing is guessed from the ratio, and once the reader has moved
@@ -195,6 +199,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
 
   const tocRows = useMemo(() => visibleTocRows(tocIndex, tocExpanded, tocFilter), [tocIndex, tocExpanded, tocFilter]);
   const sortedNotes = useMemo(() => limitNotes(notes, 200).items, [notes]);
+  const shownNoteCount = notes.length - (pendingDeleteNoteId && notes.some((note) => note.id === pendingDeleteNoteId) ? 1 : 0);
 
   if (!open && mode === "overlay" && !isClosing && !warm) {
     return null;
@@ -250,7 +255,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
               className={`sidebar-tab${activeTab === "notes" ? " active" : ""}`}
               onClick={() => selectTab("notes")}
             >
-              {notes.length > 0 ? t("sidebar.tab.count", { label: t("sidebar.tab.notes"), count: notes.length }) : t("sidebar.tab.notes")}
+              {shownNoteCount > 0 ? t("sidebar.tab.count", { label: t("sidebar.tab.notes"), count: shownNoteCount }) : t("sidebar.tab.notes")}
             </button>
           </div>
 
@@ -390,7 +395,18 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
                 </div>
               ) : (
                 <div className="sidebar-notes-list">
-                  {sortedNotes.map((note) => (
+                  {sortedNotes.map((note) => note.id === pendingDeleteNoteId ? (
+                    <UndoPill
+                      key={note.id}
+                      className="sidebar-note-undo"
+                      message={t("sidebar.note.deleted")}
+                      detail={undoDetail(note.content || note.selectedText)}
+                      undoLabel={t("sidebar.note.undo")}
+                      onUndo={() => onUndoDeleteNote?.()}
+                      durationMs={NOTE_UNDO_MS}
+                      autoFocus
+                    />
+                  ) : (
                     <article className="sidebar-note-card" key={note.id}>
                       <button
                         type="button"
@@ -418,37 +434,15 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
                             {t("sidebar.note.edit")}
                           </button>
                         )}
-                        {onDeleteNote &&
-                          (deletingNoteId === note.id ? (
-                            <>
-                              <span className="sidebar-note-confirm">{t("sidebar.note.confirmDelete")}</span>
-                              <button
-                                type="button"
-                                className="sidebar-note-act danger"
-                                onClick={() => {
-                                  onDeleteNote(note);
-                                  setDeletingNoteId(null);
-                                }}
-                              >
-                                {t("sidebar.note.delete")}
-                              </button>
-                              <button
-                                type="button"
-                                className="sidebar-note-act"
-                                onClick={() => setDeletingNoteId(null)}
-                              >
-                                {t("sidebar.note.cancel")}
-                              </button>
-                            </>
-                          ) : (
-                            <button
-                              type="button"
-                              className="sidebar-note-act danger"
-                              onClick={() => setDeletingNoteId(note.id)}
-                            >
-                              {t("sidebar.note.delete")}
-                            </button>
-                          ))}
+                        {onDeleteNote && (
+                          <button
+                            type="button"
+                            className="sidebar-note-act danger"
+                            onClick={() => onDeleteNote(note)}
+                          >
+                            {t("sidebar.note.delete")}
+                          </button>
+                        )}
                       </div>
                     </article>
                   ))}

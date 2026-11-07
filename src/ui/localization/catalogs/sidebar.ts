@@ -33,7 +33,7 @@ export const sidebar = defineMessages("sidebar", {
   "sidebar.notes.emptyTip": "在正文选中文本即可添加笔记",
   "sidebar.note.quote": { zh: "“{text}”", note: "Quotes around the user's highlighted text; use the target language's quote marks." },
   "sidebar.note.edit": "编辑",
-  "sidebar.note.confirmDelete": "确认删除？",
   "sidebar.note.delete": "删除",
-  "sidebar.note.cancel": "取消",
+  "sidebar.note.deleted": { zh: "已删除笔记", note: "Undo pill that replaces a deleted note card for a few seconds.", max: 16 },
+  "sidebar.note.undo": { zh: "撤销", note: "Button in the deleted-note pill; restores the note.", max: 8 },
 });

@@ -17,6 +17,7 @@ import { closeReaderForeground, type NoteComposerDraft, type ReaderForeground } 
 import { uiText } from "./localization/UiLanguageProvider";
 import { bookmarkButtonAction, bookmarkCornerAction, RIBBON_LIFT_MS, screenBookmarkIds, type RibbonCue } from "./bookmarkRibbons";
 import { prefersReducedMotion } from "./pagedSlide";
+import type { NoteDeleteResult } from "./pendingNoteDelete";
 
 const EMPTY_NOTES: ReaderNote[] = [];
 /** 删除提示（带撤销）停留时长；Ctrl+Z 也只在这段时间内有效。 */
@@ -264,25 +265,26 @@ export function useNoteActions({ currentShelfId, currentNotes, noteBusyRef, setN
   openComposer(draft: NoteComposerDraft): void;
 }) {
   const saveNoteChange = useCallback(async (
+    shelfId: string | null,
+    previous: ReaderNote[],
     next: ReaderNote[],
     commit: () => Promise<ShelfEntry>,
   ): Promise<boolean> => {
-    if (!currentShelfId || noteBusyRef.current) return false;
-    const previous = currentNotes;
+    if (!shelfId || noteBusyRef.current) return false;
     noteBusyRef.current = true;
     setNoteBusy(true);
     setShelfEntries((entries) => entries.map((entry) =>
-      entry.id === currentShelfId ? { ...entry, notes: next } : entry
+      entry.id === shelfId ? { ...entry, notes: next } : entry
     ));
     try {
       const written = await commit();
       setShelfEntries((entries) => entries.map((entry) =>
-        entry.id === currentShelfId ? mergeNoteProjection(entry, written, next) : entry
+        entry.id === shelfId ? mergeNoteProjection(entry, written, next) : entry
       ));
       return true;
     } catch (error) {
       setShelfEntries((entries) => entries.map((entry) =>
-        entry.id === currentShelfId ? { ...entry, notes: previous } : entry
+        entry.id === shelfId ? { ...entry, notes: previous } : entry
       ));
       setRuntimeIssues((issues) => [...issues, uiText("appUi.issue.noteSaveFailed", { error: String(error) })]);
       return false;
@@ -290,7 +292,7 @@ export function useNoteActions({ currentShelfId, currentNotes, noteBusyRef, setN
       noteBusyRef.current = false;
       setNoteBusy(false);
     }
-  }, [currentShelfId, currentNotes]);
+  }, []);
 
   const handleSaveNote = useCallback(async (content: string): Promise<void> => {
     const draft = noteComposer;
@@ -344,20 +346,27 @@ export function useNoteActions({ currentShelfId, currentNotes, noteBusyRef, setN
         commit = () => store.setNotes(currentShelfId, next);
       }
     }
-    if (await saveNoteChange(next, commit)) setForeground(closeReaderForeground());
+    if (await saveNoteChange(currentShelfId, currentNotes, next, commit)) setForeground(closeReaderForeground());
   }, [noteComposer, book, currentShelfId, noteBusy, currentNotes, saveNoteChange]);
 
-  const handleDeleteNote = useCallback(async (noteId: string): Promise<void> => {
-    if (noteBusy || !currentShelfId) return;
-    const next = currentNotes.filter((note) => note.id !== noteId);
+  /**
+   * Writes one note delete for any shelf entry: the undo window can end after
+   * the reader moved to another book. "busy" means another note write holds
+   * the gate and the caller may retry.
+   */
+  const deleteNoteIn = useCallback(async (shelfId: string, noteId: string): Promise<NoteDeleteResult> => {
+    if (noteBusyRef.current) return "busy";
+    const previous = shelfEntriesRef.current.find((entry) => entry.id === shelfId)?.notes ?? EMPTY_NOTES;
+    if (!previous.some((note) => note.id === noteId)) return "done";
+    const next = previous.filter((note) => note.id !== noteId);
     const commit = () => {
       const store = getShelfStore();
       return store.deleteNote
-        ? store.deleteNote(currentShelfId, noteId)
-        : store.setNotes(currentShelfId, next);
+        ? store.deleteNote(shelfId, noteId)
+        : store.setNotes(shelfId, next);
     };
-    await saveNoteChange(next, commit);
-  }, [noteBusy, currentShelfId, currentNotes, saveNoteChange]);
+    return await saveNoteChange(shelfId, previous, next, commit) ? "done" : "failed";
+  }, [saveNoteChange]);
 
   const handleEditNote = useCallback(async (noteId: string): Promise<void> => {
     const note = currentNotes.find((item) => item.id === noteId);
@@ -384,7 +393,7 @@ export function useNoteActions({ currentShelfId, currentNotes, noteBusyRef, setN
     }
   }, [currentNotes, currentShelfId, openComposer]);
 
-  return { handleSaveNote, handleDeleteNote, handleEditNote };
+  return { handleSaveNote, deleteNoteIn, handleEditNote };
 }
 
 export function useBookmarkProjection({ currentShelfId, shelfEntries, chapterState, readerRef, spineIndex, book }: {

@@ -5935,14 +5935,18 @@ select option {
   font-size: var(--fs-body);
 }
 
-.app[data-touch-ui="true"] .sidebar-drawer .sidebar-note-act,
-.app[data-touch-ui="true"] .sidebar-drawer .sidebar-note-confirm {
+.app[data-touch-ui="true"] .sidebar-drawer .sidebar-note-act {
   font-size: var(--fs-body);
 }
 
-.app[data-touch-ui="true"] .sidebar-drawer .sidebar-note-act {
+.app[data-touch-ui="true"] .sidebar-drawer .sidebar-note-act,
+.app[data-touch-ui="true"] .sidebar-drawer .ui-undo-pill-button {
   min-height: 40px;
   padding: 0 12px;
+}
+
+.app[data-touch-ui="true"] .sidebar-drawer .ui-undo-pill {
+  min-height: 48px;
 }
 
 /* 手机：与平板同一左侧浮岛语言，右侧留出遮罩可点关闭。 */

@@ -1,0 +1,74 @@
+/* "Deleted · Undo" pill (ER-0105): inverted against its panel so it reads as
+   a passing state, not as another card. The drain line shows the time left. */
+.ui-undo-pill {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-sizing: border-box;
+  min-height: 38px;
+  padding: 0 6px 0 12px;
+  overflow: hidden;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--fg) 86%, var(--panel-bg));
+  color: var(--panel-bg);
+  font-size: var(--fs-body);
+  animation: ui-undo-pill-in var(--ui-control) var(--ui-ease);
+}
+
+.ui-undo-pill-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-undo-pill-detail {
+  opacity: 0.72;
+}
+
+.ui-undo-pill-button {
+  flex-shrink: 0;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: calc(var(--r-sm) - 2px);
+  background: transparent;
+  color: color-mix(in srgb, var(--accent) 55%, var(--panel-bg));
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color var(--ui-control-quick) var(--ui-ease);
+}
+
+.ui-undo-pill-button:hover,
+.ui-undo-pill-button:focus-visible {
+  background: color-mix(in srgb, var(--panel-bg) 18%, transparent);
+  outline: none;
+}
+
+.ui-undo-pill-drain {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: currentColor;
+  opacity: 0.35;
+  transform-origin: left center;
+  animation: ui-undo-pill-drain var(--ui-undo-ms, 5000ms) linear forwards;
+}
+
+@keyframes ui-undo-pill-drain {
+  to { transform: scaleX(0); }
+}
+
+@keyframes ui-undo-pill-in {
+  from { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-undo-pill { animation: none; }
+  .ui-undo-pill-drain { animation: none; opacity: 0.2; }
+}

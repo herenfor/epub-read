@@ -622,10 +622,6 @@
   color: var(--ui-danger);
 }
 
-.sidebar-note-confirm {
-  font-size: var(--fs-caption);
-  color: var(--ui-danger);
-}
 
 /* 驻留模式对正文容器的影响：正文版心自适应收缩 */
 .app.has-docked-sidebar.docked-side-left .main,

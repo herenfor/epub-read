@@ -30,7 +30,7 @@
   "sidebar.notes.emptyTip": "Select text in the book to add notes",
   "sidebar.note.quote": "\"{text}\"",
   "sidebar.note.edit": "Edit",
-  "sidebar.note.confirmDelete": "Delete this note?",
   "sidebar.note.delete": "Delete",
-  "sidebar.note.cancel": "Cancel"
+  "sidebar.note.deleted": "Note deleted",
+  "sidebar.note.undo": "Undo"
 }
