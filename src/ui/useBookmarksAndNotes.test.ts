@@ -301,6 +301,36 @@ describe("annotation responsibilities extracted from App", () => {
     } finally { await t.dispose(); }
   });
 
+  it("forwards saved highlight appearance to both chapter projections", async () => {
+    const t = setup();
+    try {
+      await t.render();
+      await t.dom.run(() => t.current().setShelfEntries([{ ...entry, notes: [{ ...note, style: "squiggly", color: "green" }] }]));
+      expect(t.current().currentChapterNotes[0]).toMatchObject({ style: "squiggly", color: "green" });
+      expect(t.current().notesForChapter(0)[0]).toMatchObject({ style: "squiggly", color: "green" });
+    } finally { await t.dispose(); }
+  });
+
+  it("retains a second style choice while the preceding color write is pending", async () => {
+    const t = setup();
+    try {
+      await t.render();
+      const styled: ReaderNote = { ...note, style: "highlight", color: "red" };
+      await t.dom.run(() => t.current().setShelfEntries([{ ...entry, notes: [styled] }]));
+      ports.store.mockReturnValue({ setNotes: t.store.setNotes });
+      const write = deferred<ShelfEntry>();
+      t.store.setNotes.mockReturnValueOnce(write.promise);
+      let first!: Promise<boolean>;
+      await t.dom.run(() => { first = t.current().restyleNote("n", { color: "green" }); });
+      await t.dom.run(async () => { await t.current().restyleNote("n", { style: "squiggly" }); });
+      await t.dom.run(async () => {
+        write.resolve({ ...entry, notes: [{ ...styled, color: "green" }] });
+        await first;
+      });
+      expect(t.current().currentNotes[0]).toMatchObject({ style: "squiggly", color: "green" });
+    } finally { await t.dispose(); }
+  });
+
   it("restarts bookmark feedback during exit and keeps the sidebar toggle tied to its live open state", async () => {
     const t = setup();
     try {

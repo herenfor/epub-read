@@ -27,7 +27,26 @@ const BOOKMARK_UNDO_MS = 5000;
 const BOOKMARK_TOAST_MS = 2000;
 /** 与 styles.css 的 bookmark-toast-out 时长一致：播完才卸载。 */
 const BOOKMARK_TOAST_EXIT_MS = 220;
-const EMPTY_CHAPTER_NOTES: ReaderNoteForPaginator[] = [];
+/**
+ * A note as the reader draws it: the paginator's anchor fields plus the
+ * ER-0106 look. Assignable to ReaderNoteForPaginator on both sides of the
+ * ER-0108 type change (there style/color are plain optional strings).
+ */
+export type ProjectedReaderNote = ReaderNoteForPaginator & { style?: NoteStyle; color?: NoteColor };
+const EMPTY_CHAPTER_NOTES: ProjectedReaderNote[] = [];
+
+function projectNote(note: ReaderNote): ProjectedReaderNote {
+  return {
+    id: note.id,
+    startTextOffset: note.startTextOffset,
+    endTextOffset: note.endTextOffset,
+    startTextSnippet: note.startTextSnippet,
+    endTextSnippet: note.endTextSnippet,
+    selectedText: note.selectedText,
+    ...(note.style ? { style: note.style } : {}),
+    ...(note.color ? { color: note.color } : {}),
+  };
+}
 
 function portableNoteAnnotations(entry: ShelfEntry): Readonly<Record<string, Annotation<NoteValue>>> {
   return (entry as unknown as {
@@ -203,30 +222,16 @@ export function useNoteProjection(shelfEntries: ShelfEntry[], currentShelfId: st
       (note) => note.spineIndex === spineIndex && note.chapterPath === currentChapterPath
     );
     if (filtered.length === 0) return EMPTY_CHAPTER_NOTES;
-    return filtered.map((note) => ({
-      id: note.id,
-      startTextOffset: note.startTextOffset,
-      endTextOffset: note.endTextOffset,
-      startTextSnippet: note.startTextSnippet,
-      endTextSnippet: note.endTextSnippet,
-      selectedText: note.selectedText,
-    }));
+    return filtered.map(projectNote);
   }, [currentNotes, spineIndex, currentChapterPath]);
   // A13：一页章并排时另一章也显示笔记；按章缓存，引用稳定，只在笔记变化时重建。
   const notesByChapter = useMemo(() => {
-    const map = new Map<number, ReaderNoteForPaginator[]>();
+    const map = new Map<number, ProjectedReaderNote[]>();
     if (!book) return map;
     for (const note of currentNotes) {
       if (note.chapterPath !== spineItemPath(book, note.spineIndex)) continue;
       const list = map.get(note.spineIndex) ?? [];
-      list.push({
-        id: note.id,
-        startTextOffset: note.startTextOffset,
-        endTextOffset: note.endTextOffset,
-        startTextSnippet: note.startTextSnippet,
-        endTextSnippet: note.endTextSnippet,
-        selectedText: note.selectedText,
-      });
+      list.push(projectNote(note));
       map.set(note.spineIndex, list);
     }
     return map;
@@ -253,6 +258,8 @@ export function useNoteProjection(shelfEntries: ShelfEntry[], currentShelfId: st
 }
 
 type NoteBusyState = ReturnType<typeof useNoteBusyState>;
+type NotePatch = { style?: NoteStyle; color?: NoteColor };
+
 /** Style and color a new highlight or note is created with. */
 export interface NewHighlight {
   style: NoteStyle;
@@ -398,23 +405,27 @@ export function useNoteActions({ currentShelfId, currentNotes, noteBusyRef, setN
   }, [book, currentShelfId, currentNotes, saveNoteChange, setRuntimeIssues]);
 
   /**
-   * Change a highlight's color and/or style. Portable stores write through the
+   * Restyle choices made while another note write holds the gate. Each note
+   * keeps the merge of its choices, so the last tap wins; they are written
+   * once the gate opens (after that render, so the stamp read is current).
+   */
+  const queuedRestylesRef = useRef(new Map<string, { shelfId: string; patch: NotePatch }>());
+
+  /**
+   * Write a color and/or style change. Portable stores write through the
    * displayed version like an edit and release the basis right after.
    */
-  const restyleNote = useCallback(async (
-    noteId: string,
-    patch: { style?: NoteStyle; color?: NoteColor },
-  ): Promise<boolean> => {
-    const note = currentNotes.find((item) => item.id === noteId);
-    if (!note || !currentShelfId) return false;
+  const writeRestyle = useCallback(async (shelfId: string, noteId: string, patch: NotePatch): Promise<boolean> => {
+    const entry = shelfEntriesRef.current.find((item) => item.id === shelfId);
+    const notes = entry?.notes ?? EMPTY_NOTES;
+    const note = notes.find((item) => item.id === noteId);
+    if (!note) return false;
     if ((patch.style ?? note.style) === note.style && (patch.color ?? note.color) === note.color) return true;
     const updated: ReaderNote = { ...note, ...patch, updatedAtMs: Math.max(Date.now(), note.updatedAtMs + 1) };
-    const next = currentNotes.map((item) => item.id === noteId ? updated : item);
-    const shelfId = currentShelfId;
-    const entry = shelfEntriesRef.current.find((item) => item.id === shelfId);
+    const next = notes.map((item) => item.id === noteId ? updated : item);
     const annotation = entry ? portableNoteAnnotations(entry)[noteId] : undefined;
     const displayed = annotation && !annotation.deleted ? latestVersion(annotation.versions) : null;
-    return saveNoteChange(shelfId, currentNotes, next, async () => {
+    return saveNoteChange(shelfId, notes, next, async () => {
       const store = getShelfStore();
       if (!store.beginNoteEdit || !store.writeNoteEdit || !displayed) return store.setNotes(shelfId, next);
       const context = await store.beginNoteEdit(shelfId, noteId, displayed.stamp);
@@ -425,7 +436,31 @@ export function useNoteActions({ currentShelfId, currentNotes, noteBusyRef, setN
         await store.endNoteEdit?.(context);
       }
     });
-  }, [currentShelfId, currentNotes, saveNoteChange, shelfEntriesRef]);
+  }, [saveNoteChange, shelfEntriesRef]);
+
+  /** Change a highlight's color and/or style; a choice made while busy is kept, not dropped. */
+  const restyleNote = useCallback(async (noteId: string, patch: NotePatch): Promise<boolean> => {
+    if (!currentShelfId) return false;
+    if (noteBusyRef.current) {
+      const queued = queuedRestylesRef.current.get(noteId);
+      queuedRestylesRef.current.set(noteId, {
+        shelfId: queued?.shelfId ?? currentShelfId,
+        patch: { ...queued?.patch, ...patch },
+      });
+      return true;
+    }
+    return writeRestyle(currentShelfId, noteId, patch);
+  }, [currentShelfId, noteBusyRef, writeRestyle]);
+
+  useEffect(() => {
+    if (noteBusy) return;
+    const first = queuedRestylesRef.current.entries().next();
+    if (first.done) return;
+    const [noteId, { shelfId, patch }] = first.value;
+    queuedRestylesRef.current.delete(noteId);
+    // Writing sets the gate again; the next queued note follows when it opens.
+    void writeRestyle(shelfId, noteId, patch);
+  }, [noteBusy, writeRestyle]);
 
   /**
    * Writes one note delete for any shelf entry: the undo window can end after

@@ -18,9 +18,10 @@ interface AnchoredNote extends HighlightTarget {
 
 /**
  * The highlight a selection lies entirely inside (ER-0106), compared by the
- * chapter text offsets the selection already carries; no hit testing. Partial
- * or multi-highlight selections return null and act as plain text. When
- * several highlights contain it, the narrowest one wins.
+ * chapter text offsets the selection already carries; no hit testing. When
+ * the selection also crosses the edge of any other highlight (partial or
+ * multi-highlight), it is plain text and this returns null. Nested
+ * highlights that all contain the selection: the narrowest one wins.
  */
 export function highlightAtSelection<T extends AnchoredNote>(
   notes: readonly T[],
@@ -30,7 +31,10 @@ export function highlightAtSelection<T extends AnchoredNote>(
   let best: T | null = null;
   for (const note of notes) {
     if (note.chapterPath !== selection.chapterPath || note.spineIndex !== spineIndex) continue;
-    if (note.startTextOffset > selection.startTextOffset || note.endTextOffset < selection.endTextOffset) continue;
+    const overlaps = note.startTextOffset < selection.endTextOffset && note.endTextOffset > selection.startTextOffset;
+    if (!overlaps) continue;
+    const contains = note.startTextOffset <= selection.startTextOffset && note.endTextOffset >= selection.endTextOffset;
+    if (!contains) return null;
     if (!best || note.endTextOffset - note.startTextOffset < best.endTextOffset - best.startTextOffset) best = note;
   }
   return best;
