@@ -6,9 +6,9 @@ import { splitHref } from "../core/paths";
 import type { Annotation } from "../core/portableState/portable-register-core";
 import type { BookmarkValue, NoteValue } from "../core/portableState/portable-state-types";
 import { latestVersion } from "../core/portableState/projection";
-import type { ChapterState, MediaReadingAnchor, ReadingAnchor, ReaderNoteForPaginator } from "../render/paginator";
+import type { ChapterState, MediaReadingAnchor, ReadingAnchor, ReaderNoteForPaginator, SelectionContextPayload } from "../render/paginator";
 import { getShelfStore, type Bookmark, type NoteEditContext, type ShelfEntry } from "./shelf";
-import type { ReaderNote } from "./notes";
+import type { NoteColor, NoteStyle, ReaderNote } from "./notes";
 import type { NoteViewModel } from "./sidebarModel";
 import type { ReaderHandle } from "./ReaderView";
 import type { SidebarTab } from "./SidebarDrawer";
@@ -244,6 +244,8 @@ export function useNoteProjection(shelfEntries: ShelfEntry[], currentShelfId: st
         chapterPath: note.chapterPath,
         createdAtMs: note.createdAtMs,
         updatedAtMs: note.updatedAtMs,
+        ...(note.style ? { style: note.style } : {}),
+        ...(note.color ? { color: note.color } : {}),
       }))
     : [];
 
@@ -251,8 +253,50 @@ export function useNoteProjection(shelfEntries: ShelfEntry[], currentShelfId: st
 }
 
 type NoteBusyState = ReturnType<typeof useNoteBusyState>;
+/** Style and color a new highlight or note is created with. */
+export interface NewHighlight {
+  style: NoteStyle;
+  color: NoteColor;
+}
+
+/**
+ * A new note at the selected text, or null when the selection no longer
+ * matches the chapter it claims (the user must select again).
+ */
+function noteFromSelection(
+  book: Book,
+  spineIndex: number,
+  selection: SelectionContextPayload,
+  content: string,
+  now: number,
+  highlight: NewHighlight | undefined,
+): ReaderNote | null {
+  const expectedPath = spineItemPath(book, spineIndex);
+  if (
+    !expectedPath ||
+    expectedPath !== selection.chapterPath ||
+    !selection.startTextSnippet ||
+    !selection.endTextSnippet
+  ) return null;
+  return {
+    id: generateFolderId(),
+    spineIndex,
+    chapterPath: expectedPath,
+    startTextOffset: selection.startTextOffset,
+    endTextOffset: selection.endTextOffset,
+    startTextSnippet: selection.startTextSnippet,
+    endTextSnippet: selection.endTextSnippet,
+    selectedText: selection.originalSelectedText ?? selection.selectedText,
+    content,
+    ...(highlight ? { style: highlight.style, color: highlight.color } : {}),
+    createdAtMs: now,
+    updatedAtMs: now,
+  };
+}
+
 export function useNoteActions({ currentShelfId, currentNotes, noteBusyRef, setNoteBusy, noteBusy,
   setShelfEntries, setRuntimeIssues, noteComposer, book, setForeground, shelfEntriesRef, openComposer,
+  newHighlight,
 }: NoteBusyState & {
   currentShelfId: string | null;
   currentNotes: ReaderNote[];
@@ -263,6 +307,8 @@ export function useNoteActions({ currentShelfId, currentNotes, noteBusyRef, setN
   setForeground: Dispatch<SetStateAction<ReaderForeground>>;
   shelfEntriesRef: MutableRefObject<ShelfEntry[]>;
   openComposer(draft: NoteComposerDraft): void;
+  /** Style and color for notes created now; absent keeps the legacy theme underline. */
+  newHighlight?: () => NewHighlight;
 }) {
   const saveNoteChange = useCallback(async (
     shelfId: string | null,
@@ -301,29 +347,11 @@ export function useNoteActions({ currentShelfId, currentNotes, noteBusyRef, setN
     let next: ReaderNote[];
     let commit: () => Promise<ShelfEntry>;
     if (draft.mode === "create") {
-      const expectedPath = spineItemPath(book, draft.spineIndex);
-      if (
-        !expectedPath ||
-        expectedPath !== draft.selection.chapterPath ||
-        !draft.selection.startTextSnippet ||
-        !draft.selection.endTextSnippet
-      ) {
+      const created = noteFromSelection(book, draft.spineIndex, draft.selection, content.trim(), now, newHighlight?.());
+      if (!created) {
         setRuntimeIssues((issues) => [...issues, uiText("appUi.issue.selectionGone")]);
         return;
       }
-      const created: ReaderNote = {
-        id: generateFolderId(),
-        spineIndex: draft.spineIndex,
-        chapterPath: expectedPath,
-        startTextOffset: draft.selection.startTextOffset,
-        endTextOffset: draft.selection.endTextOffset,
-        startTextSnippet: draft.selection.startTextSnippet,
-        endTextSnippet: draft.selection.endTextSnippet,
-        selectedText: draft.selection.originalSelectedText ?? draft.selection.selectedText,
-        content: content.trim(),
-        createdAtMs: now,
-        updatedAtMs: now,
-      };
       next = [...currentNotes, created];
       commit = () => {
         const store = getShelfStore();
@@ -347,7 +375,57 @@ export function useNoteActions({ currentShelfId, currentNotes, noteBusyRef, setN
       }
     }
     if (await saveNoteChange(currentShelfId, currentNotes, next, commit)) setForeground(closeReaderForeground());
-  }, [noteComposer, book, currentShelfId, noteBusy, currentNotes, saveNoteChange]);
+  }, [noteComposer, book, currentShelfId, noteBusy, currentNotes, saveNoteChange, newHighlight]);
+
+  /** One tap on "Highlight": a note without content at the selection. */
+  const createHighlight = useCallback(async (
+    selection: SelectionContextPayload,
+    spineIndex: number,
+    highlight: NewHighlight,
+  ): Promise<boolean> => {
+    if (!book || !currentShelfId) return false;
+    const created = noteFromSelection(book, spineIndex, selection, "", Date.now(), highlight);
+    if (!created) {
+      setRuntimeIssues((issues) => [...issues, uiText("appUi.issue.selectionGone")]);
+      return false;
+    }
+    const next = [...currentNotes, created];
+    const shelfId = currentShelfId;
+    return saveNoteChange(shelfId, currentNotes, next, () => {
+      const store = getShelfStore();
+      return store.createNote ? store.createNote(shelfId, created) : store.setNotes(shelfId, next);
+    });
+  }, [book, currentShelfId, currentNotes, saveNoteChange, setRuntimeIssues]);
+
+  /**
+   * Change a highlight's color and/or style. Portable stores write through the
+   * displayed version like an edit and release the basis right after.
+   */
+  const restyleNote = useCallback(async (
+    noteId: string,
+    patch: { style?: NoteStyle; color?: NoteColor },
+  ): Promise<boolean> => {
+    const note = currentNotes.find((item) => item.id === noteId);
+    if (!note || !currentShelfId) return false;
+    if ((patch.style ?? note.style) === note.style && (patch.color ?? note.color) === note.color) return true;
+    const updated: ReaderNote = { ...note, ...patch, updatedAtMs: Math.max(Date.now(), note.updatedAtMs + 1) };
+    const next = currentNotes.map((item) => item.id === noteId ? updated : item);
+    const shelfId = currentShelfId;
+    const entry = shelfEntriesRef.current.find((item) => item.id === shelfId);
+    const annotation = entry ? portableNoteAnnotations(entry)[noteId] : undefined;
+    const displayed = annotation && !annotation.deleted ? latestVersion(annotation.versions) : null;
+    return saveNoteChange(shelfId, currentNotes, next, async () => {
+      const store = getShelfStore();
+      if (!store.beginNoteEdit || !store.writeNoteEdit || !displayed) return store.setNotes(shelfId, next);
+      const context = await store.beginNoteEdit(shelfId, noteId, displayed.stamp);
+      if (!context) return store.setNotes(shelfId, next);
+      try {
+        return await store.writeNoteEdit(shelfId, updated, context);
+      } finally {
+        await store.endNoteEdit?.(context);
+      }
+    });
+  }, [currentShelfId, currentNotes, saveNoteChange, shelfEntriesRef]);
 
   /**
    * Writes one note delete for any shelf entry: the undo window can end after
@@ -366,7 +444,7 @@ export function useNoteActions({ currentShelfId, currentNotes, noteBusyRef, setN
         : store.setNotes(shelfId, next);
     };
     return await saveNoteChange(shelfId, previous, next, commit) ? "done" : "failed";
-  }, [saveNoteChange]);
+  }, [saveNoteChange, noteBusyRef, shelfEntriesRef]);
 
   const handleEditNote = useCallback(async (noteId: string): Promise<void> => {
     const note = currentNotes.find((item) => item.id === noteId);
@@ -393,7 +471,7 @@ export function useNoteActions({ currentShelfId, currentNotes, noteBusyRef, setN
     }
   }, [currentNotes, currentShelfId, openComposer]);
 
-  return { handleSaveNote, deleteNoteIn, handleEditNote };
+  return { handleSaveNote, createHighlight, restyleNote, deleteNoteIn, handleEditNote };
 }
 
 export function useBookmarkProjection({ currentShelfId, shelfEntries, chapterState, readerRef, spineIndex, book }: {

@@ -9,6 +9,8 @@ import type { Bookmark } from "./shelf";
 import { BookmarkIcon, CloseIcon, PinIcon } from "./readerIcons";
 import "./sidebarDrawer.css";
 import { UndoPill, undoDetail } from "./controls/UndoPill";
+import { highlightColorProps } from "./highlightModel";
+import "./highlightMenu.css";
 import { NOTE_UNDO_MS } from "./pendingNoteDelete";
 import { currentUiLocale, uiText, useUiText } from "./localization/UiLanguageProvider";
 
@@ -399,15 +401,18 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
                     <UndoPill
                       key={note.id}
                       className="sidebar-note-undo"
-                      message={t("sidebar.note.deleted")}
+                      message={note.content ? t("sidebar.note.deleted") : t("sidebar.highlight.deleted")}
                       detail={undoDetail(note.content || note.selectedText)}
                       undoLabel={t("sidebar.note.undo")}
                       onUndo={() => onUndoDeleteNote?.()}
                       durationMs={NOTE_UNDO_MS}
                       autoFocus
                     />
-                  ) : (
-                    <article className="sidebar-note-card" key={note.id}>
+                  ) : (() => {
+                    const tone = highlightColorProps(note.color);
+                    return (
+                    <article className={`sidebar-note-card ${tone.className}`} style={tone.style} key={note.id}>
+                      <span className="sidebar-note-bar" aria-hidden="true" />
                       <button
                         type="button"
                         className="sidebar-note-main"
@@ -416,13 +421,21 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
                           if (mode === "overlay") requestClose();
                         }}
                       >
-                        <span className="sidebar-note-content">{note.content}</span>
+                        {note.content ? (
+                          <span className="sidebar-note-content">{note.content}</span>
+                        ) : (
+                          <span className="sidebar-note-content is-quote" title={note.selectedText}>
+                            {t("sidebar.note.quote", { text: note.selectedText })}
+                          </span>
+                        )}
                         <span className="sidebar-note-meta">
                           {note.chapterTitle} · {formatDate(note.createdAtMs)}
                         </span>
-                        <span className="sidebar-note-selection" title={note.selectedText}>
-                          {t("sidebar.note.quote", { text: note.selectedText })}
-                        </span>
+                        {note.content && (
+                          <span className="sidebar-note-selection" title={note.selectedText}>
+                            {t("sidebar.note.quote", { text: note.selectedText })}
+                          </span>
+                        )}
                       </button>
                       <div className="sidebar-note-actions">
                         {onEditNote && (
@@ -431,7 +444,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
                             className="sidebar-note-act"
                             onClick={() => onEditNote(note)}
                           >
-                            {t("sidebar.note.edit")}
+                            {note.content ? t("sidebar.note.edit") : t("sidebar.note.add")}
                           </button>
                         )}
                         {onDeleteNote && (
@@ -445,7 +458,8 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
                         )}
                       </div>
                     </article>
-                  ))}
+                    );
+                  })())}
                 </div>
               )}
             </div>

@@ -1,3 +1,4 @@
+import type { NoteColor, NoteStyle } from "./notes";
 import type { TocNode } from "../core/types";
 import { splitHref } from "../core/paths";
 
@@ -80,6 +81,9 @@ export interface NoteViewModel {
   chapterPath?: string;
   createdAtMs: number;
   updatedAtMs?: number;
+  /** Highlight look; both missing on notes made before highlights. */
+  style?: NoteStyle;
+  color?: NoteColor;
 }
 
 export function sortNotesNewestFirst(notes: readonly NoteViewModel[]): NoteViewModel[] {

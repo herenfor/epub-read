@@ -276,6 +276,31 @@ describe("annotation responsibilities extracted from App", () => {
     } finally { await t.dispose(); }
   });
 
+  it("highlights a selection in one step and restyles through the displayed version", async () => {
+    const t = setup();
+    try {
+      await t.render();
+      await t.dom.run(() => t.current().setShelfEntries([entry]));
+      await t.dom.run(async () => { await t.current().createHighlight(selection, 0, { style: "underline", color: "#d9691f" }); });
+      expect(t.store.createNote.mock.calls[0][1]).toMatchObject({ content: "", style: "underline", color: "#d9691f", selectedText: "original" });
+
+      const stamp = { deviceId: "device", counter: 2 };
+      const annotations = { n: { versions: [{ stamp, clock: { device: 2 }, value: {}, updatedAtMs: 2 }] } };
+      await t.dom.run(() => t.current().setShelfEntries([{ ...entry, notes: [note], portableNoteAnnotations: annotations } as ShelfEntry]));
+      await t.dom.run(async () => { await t.current().restyleNote("n", { color: "green", style: "highlight" }); });
+      expect(t.store.beginNoteEdit).toHaveBeenCalledExactlyOnceWith("book", "n", stamp);
+      expect(t.store.writeNoteEdit.mock.calls[0][1]).toMatchObject({ id: "n", content: "old", color: "green", style: "highlight" });
+      expect(t.store.endNoteEdit).toHaveBeenCalledExactlyOnceWith({ readId: "read", basisId: "basis" });
+      expect(t.current().noteViewModels[0]).toMatchObject({ color: "green", style: "highlight" });
+
+      ports.store.mockReturnValue({ setNotes: t.store.setNotes });
+      await t.dom.run(() => t.current().setShelfEntries([{ ...entry, notes: [note] }]));
+      await t.dom.run(async () => { await t.current().restyleNote("n", { style: "squiggly" }); });
+      expect(t.store.setNotes.mock.calls.at(-1)?.[1][0]).toMatchObject({ id: "n", style: "squiggly" });
+      expect(t.store.setNotes.mock.calls.at(-1)?.[1][0].color).toBeUndefined();
+    } finally { await t.dispose(); }
+  });
+
   it("restarts bookmark feedback during exit and keeps the sidebar toggle tied to its live open state", async () => {
     const t = setup();
     try {

@@ -9,9 +9,13 @@ const BUSY_RETRIES = 20;
 
 export type NoteDeleteResult = "done" | "busy" | "failed";
 
+/** Where the delete was made: the sidebar shows its undo in place, the reader floats it. */
+export type NoteDeleteOrigin = "sidebar" | "reader";
+
 interface PendingNoteDelete {
   shelfId: string;
   noteId: string;
+  origin: NoteDeleteOrigin;
 }
 
 const NO_IDS: readonly string[] = [];
@@ -57,11 +61,11 @@ export function usePendingNoteDelete({ currentShelfId, commitDelete }: {
     attempt(0);
   }, []);
 
-  const requestDelete = useCallback((noteId: string) => {
+  const requestDelete = useCallback((noteId: string, origin: NoteDeleteOrigin = "sidebar") => {
     if (!currentShelfId) return;
     if (pendingRef.current?.noteId === noteId) return;
     flush();
-    const item = { shelfId: currentShelfId, noteId };
+    const item = { shelfId: currentShelfId, noteId, origin };
     pendingRef.current = item;
     setPending(item);
     timerRef.current = setTimeout(flush, NOTE_UNDO_MS);
@@ -82,12 +86,14 @@ export function usePendingNoteDelete({ currentShelfId, commitDelete }: {
   // Unmount means the app is going away: drop the timer, keep the note.
   useEffect(() => () => clearTimeout(timerRef.current), []);
 
-  const pendingNoteId = pending && pending.shelfId === currentShelfId ? pending.noteId : null;
+  const live = pending && pending.shelfId === currentShelfId ? pending : null;
+  const pendingNoteId = live?.noteId ?? null;
+  const pendingOrigin = live?.origin ?? null;
   const hiddenNoteIds = useMemo(
     () => (pendingNoteId ? [...committing, pendingNoteId] : committing),
     [committing, pendingNoteId],
   );
-  return { pendingNoteId, hiddenNoteIds, requestDelete, undoDelete };
+  return { pendingNoteId, pendingOrigin, hiddenNoteIds, requestDelete, undoDelete };
 }
 
 /**
