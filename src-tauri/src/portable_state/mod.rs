@@ -1,9 +1,6 @@
-//! Preparation-only portable save foundation (`CP-N`).
-//!
-//! No command is registered and no startup path opens this module yet.  The
-//! module contains the frozen v3 DTO/parser, the Rust causal merge, the
-//! trusted local read-basis surface, the SQLite repository and the one-shot
-//! migration reader for the legacy JSON files.
+//! Portable reading data: strict DTOs, causal merge, trusted read bases,
+//! SQLite storage and the one-shot legacy JSON migration. Book, save-file,
+//! LAN and cloud commands use this shared data boundary.
 
 #![allow(dead_code)]
 #![allow(unused_imports)]

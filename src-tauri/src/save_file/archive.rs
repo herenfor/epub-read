@@ -621,9 +621,7 @@ pub(crate) fn validate_and_extract_with_expectation(
     if manifest.container_version != CONTAINER_VERSION {
         return Err(SaveFileError::invalid_data("未知容器主版本"));
     }
-    if !matches!(manifest.state_schema_version, 3 | 4 | 5) {
-        return Err(SaveFileError::invalid_data("未知状态主版本"));
-    }
+    // State/container support was selected above; do not keep a second schema list.
     if !super::valid_job_id(&manifest.package_id) {
         return Err(SaveFileError::invalid_data("packageId 不是规范 UUID"));
     }
@@ -1182,6 +1180,26 @@ mod tests {
     }
 
     #[test]
+    fn highlight_archive_roundtrip_uses_state_six() {
+        let dir = TempDir::new("highlight");
+        let mut state = test_state();
+        state.schema_version = 6;
+        state.books.get_mut(HASH).unwrap().notes.insert(B.into(), serde_json::from_value(json!({
+            "versions":[{"stamp":{"deviceId":A,"counter":4},"clock":{A:4},"updatedAtMs":1000,"value":{
+                "chapterPath":"Text/chapter.xhtml","spineIndexHint":0,"textProfile":"visible-codepoints-no-whitespace-v1",
+                "startTextOffset":0,"endTextOffset":2,"startTextSnippet":"正文","endTextSnippet":"正文",
+                "selectedText":"正文","content":"","style":"highlight","color":"#aabbcc","createdAtMs":1000
+            }}]
+        })).unwrap());
+        let path = dir.path().join("highlight.epubsave");
+        let cancelled = AtomicBool::new(false);
+        let mut reporter = ProgressReporter::new(channel(), "highlight", None);
+        write_export_archive(None::<&tauri::AppHandle>, &path, A, &state, &[], "all", &[], &mut reporter, &cancelled).unwrap();
+        let parsed = validate_and_extract(&path, &dir.path().join("staging"), &mut reporter, &cancelled).unwrap();
+        assert_eq!(parsed.incoming, state);
+    }
+
+    #[test]
     fn archive_export_observes_cancel_before_delivery() {
         let dir = TempDir::new("cancel");
         let archive_path = dir.path().join("cancelled.epubsave");
@@ -1244,7 +1262,7 @@ mod tests {
             (
                 "new-schema",
                 1_u32,
-                4_u64,
+                7_u64,
                 true,
                 "需要较新版本",
                 Some("不支持此存档格式"),

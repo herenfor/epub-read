@@ -7,7 +7,7 @@
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ArchiveReader {
-    /// zipped `.epubsave` container 1; schemas 3/4/5 share the causal-state layout.
+    /// zipped `.epubsave` container 1; schemas 3/4/5/6 share the causal-state layout.
     Container1State3,
 }
 
@@ -21,7 +21,7 @@ pub(crate) enum VersionError {
 
 /// Select a ZIP archive reader by the exact container/state pair.
 ///
-/// Schema 4 permits TXT/comics, schema 5 additionally permits FB2 identities. Do not turn this
+/// Schema 4 permits TXT/comics, 5 adds FB2 identities, 6 adds highlight data. Do not turn this
 /// into a range check: old values can be invalid and must not be silently
 /// decoded by the current v3 reader.
 pub(crate) fn select_archive_reader(
@@ -29,8 +29,8 @@ pub(crate) fn select_archive_reader(
     schema: u64,
 ) -> Result<ArchiveReader, VersionError> {
     match (container, schema) {
-        (1, 3 | 4 | 5) => Ok(ArchiveReader::Container1State3),
-        (container, schema) if container > 1 || schema > 5 => Err(VersionError::NeedsNewerApp),
+        (1, 3 | 4 | 5 | 6) => Ok(ArchiveReader::Container1State3),
+        (container, schema) if container > 1 || schema > 6 => Err(VersionError::NeedsNewerApp),
         _ => Err(VersionError::UnsupportedFormat),
     }
 }
@@ -52,7 +52,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn selectors_use_exact_registered_versions() {
+    fn selectors_use_exact_registered_versions_for_highlights() {
         assert_eq!(
             select_archive_reader(1, 3),
             Ok(ArchiveReader::Container1State3)
@@ -63,6 +63,10 @@ mod tests {
         );
         assert_eq!(
             select_archive_reader(1, 6),
+            Ok(ArchiveReader::Container1State3)
+        );
+        assert_eq!(
+            select_archive_reader(1, 7),
             Err(VersionError::NeedsNewerApp)
         );
         assert_eq!(

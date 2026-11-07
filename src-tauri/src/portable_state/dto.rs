@@ -811,18 +811,29 @@ pub fn validate_portable_book(book: &PortableBook) -> PortableResult<()> {
 }
 
 pub(super) fn source_schema_version(books: &std::collections::BTreeMap<String, PortableBook>) -> u64 {
+    // Include every concurrent version, not just the visible winner. Valid
+    // tombstones have no versions and do not carry highlight capabilities.
+    if books.values().any(|book| book.notes.values().any(|annotation| {
+        annotation.versions.iter().any(|version| {
+            version.value.content.trim().is_empty()
+                || version.value.style.is_some()
+                || version.value.color.is_some()
+        })
+    })) {
+        return 6;
+    }
     if books.values().any(|book| crate::document_formats::fictionbook(&book.metadata.value.file_name)) { return 5; }
     if books.values().any(|book| matches!(crate::document_formats::extension(&book.metadata.value.file_name).to_ascii_lowercase().as_str(), "txt" | "cbz" | "zip")) { 4 } else { 3 }
 }
 
 pub fn validate_portable_state(state: &PortableStateV3) -> PortableResult<()> {
-    if !matches!(state.schema_version, 3 | 4 | 5) {
+    if !matches!(state.schema_version, 3 | 4 | 5 | 6) {
         return Err(PortableError::invalid_data(
             "invalid-data：不支持的 portable schemaVersion",
         ));
     }
     if state.schema_version < source_schema_version(&state.books) {
-        return Err(PortableError::invalid_data("原书格式需要较新的 portable schemaVersion"));
+        return Err(PortableError::invalid_data("原书格式或笔记数据需要较新的 portable schemaVersion"));
     }
     for (book_hash, book) in &state.books {
         if !valid_content_hash(book_hash) {
@@ -1326,6 +1337,44 @@ mod note_highlight_contract_tests {
 
     fn parse(value: Value) -> NoteValue {
         serde_json::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn highlight_data_requires_v6_across_concurrent_versions() {
+        let hash = "a".repeat(64);
+        let device = "00000000-0000-4000-8000-000000000001";
+        let id = "00000000-0000-4000-8000-000000000002";
+        for overrides in [json!({"content":""}), json!({"style":"underline"}), json!({"color":"#aabbcc"})] {
+            let mut state = parse_portable_state_value(json!({
+                "schemaVersion":6,
+                "books":{hash.clone():{
+                    "metadata":{"stamp":{"deviceId":device,"counter":1},"value":{"title":"Book","creator":"","fileName":"book.epub","addedAtMs":1}},
+                    "progress":{"versions":[]},"bookmarks":{},
+                    "notes":{id:{"versions":[{"stamp":{"deviceId":device,"counter":1},"clock":{device:1},"value":note_json(overrides),"updatedAtMs":1}]}}
+                }},
+                "organization":{"schemaVersion":1,"books":{},"folders":{}}
+            })).unwrap();
+            assert_eq!(source_schema_version(&state.books), 6);
+            for old in [3, 4, 5] {
+                state.schema_version = old;
+                assert!(validate_portable_state(&state).is_err());
+            }
+            state.schema_version = 6;
+            let annotation = state.books.get_mut(&hash).unwrap().notes.get_mut(id).unwrap();
+            annotation.versions.push(Version {
+                stamp: Stamp { device_id: id.into(), counter: 1 },
+                clock: std::collections::BTreeMap::from([(id.into(), 1)]),
+                value: parse(note_json(json!({}))), updated_at_ms: 1,
+            });
+            assert_eq!(source_schema_version(&state.books), 6);
+            let encoded = serde_json::to_value(&state).unwrap();
+            assert_eq!(parse_portable_state_value(encoded).unwrap(), state);
+            let annotation = state.books.get_mut(&hash).unwrap().notes.get_mut(id).unwrap();
+            annotation.deleted = Some(Stamp { device_id: device.into(), counter: 2 });
+            annotation.versions.clear();
+            assert_eq!(source_schema_version(&state.books), 3);
+            validate_portable_state(&state).unwrap();
+        }
     }
 
     #[test]

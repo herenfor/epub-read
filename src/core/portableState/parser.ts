@@ -774,8 +774,8 @@ function parsePortableStateObject(raw: unknown, failures: PortableStateIssue[], 
   }
   checkFields(raw, "", ["schemaVersion", "books", "organization", "preferences"], failures, options);
   const schemaVersion = readOptional(raw, "schemaVersion");
-  if (schemaVersion !== PORTABLE_STATE_SCHEMA_VERSION && schemaVersion !== 4 && schemaVersion !== 5) {
-    fail(failures, "schemaVersion", "unsupported-schema-version", "portable state schemaVersion 3, 4 or 5 is required");
+  if (schemaVersion !== PORTABLE_STATE_SCHEMA_VERSION && schemaVersion !== 4 && schemaVersion !== 5 && schemaVersion !== 6) {
+    fail(failures, "schemaVersion", "unsupported-schema-version", "portable state schemaVersion 3, 4, 5 or 6 is required");
     return null;
   }
   const rawBooks = readOptional(raw, "books");
@@ -783,7 +783,7 @@ function parsePortableStateObject(raw: unknown, failures: PortableStateIssue[], 
   const books = parseBooks(rawBooks, "books", failures, options);
   if (isBad(books)) return null;
   if (schemaVersion < portableSchemaVersion(books)) {
-    fail(failures, "schemaVersion", "unsupported-schema-version", "source format requires a newer portable schemaVersion");
+    fail(failures, "schemaVersion", "unsupported-schema-version", "source format or note data requires a newer portable schemaVersion");
     return null;
   }
 
@@ -807,7 +807,7 @@ function parsePortableStateObject(raw: unknown, failures: PortableStateIssue[], 
   }
 
   const result: {
-    schemaVersion: 3 | 4 | 5;
+    schemaVersion: 3 | 4 | 5 | 6;
     books: Record<string, PortableBook>;
     organization: typeof organization;
     preferences?: PortablePreferences;
