@@ -39,6 +39,8 @@ import type { UseSaveFileJobResult } from "./useSaveFileJob";
 import type { useShelfLibrary, useShelfOrganizationActions, ShelfNotice } from "./useShelfLibrary";
 
 export interface SaveFileFlowsDeps {
+  /** Offered the picked file first; "not-readest" continues with the SeLis archive import. */
+  tryReadestImport?: (source: SaveFileLocation, label: string) => Promise<"handled" | "not-readest">;
   runtime: RuntimeCapabilities;
   isTauriEnv: () => boolean;
   settings: ReaderSettings;
@@ -71,6 +73,7 @@ export interface SaveFileFlowsDeps {
 }
 
 export function useSaveFileFlows({
+  tryReadestImport,
   runtime,
   isTauriEnv,
   settings,
@@ -140,12 +143,14 @@ export function useSaveFileFlows({
       multiple: false,
       directory: false,
       title: uiText("notice.archive.importTitle"),
-      filters: [{ name: uiText("notice.archive.filter"), extensions: ["epubsave"] }],
+      filters: [tryReadestImport
+        ? { name: uiText("notice.archive.filterWithReadest"), extensions: ["epubsave", "zip"] }
+        : { name: uiText("notice.archive.filter"), extensions: ["epubsave"] }],
     });
     const path = Array.isArray(selected) ? selected[0] : selected;
     if (typeof path !== "string" || path.length === 0) return null;
     return { source: { kind: "path", path }, label: path.split(/[\\/]/).pop() || path };
-  }, [runtime.platform]);
+  }, [runtime.platform, tryReadestImport]);
 
   const resolveNativeExportScope = useCallback(async (
     selectedEntries: ShelfEntry[],
@@ -336,6 +341,8 @@ export function useSaveFileFlows({
     if (!selected) return;
     try {
       await activatePortableShelfState();
+      // A Readest backup gets its own preview; the native open tells the formats apart.
+      if (tryReadestImport && await tryReadestImport(selected.source, selected.label) === "handled") return;
       await saveFileJob.beginPrepare({ source: selected.source, sourceLabel: selected.label });
     } catch (error) {
       const code = saveFileErrorCode(error);
@@ -348,7 +355,7 @@ export function useSaveFileFlows({
     } finally {
       saveFileLaunchRef.current = false;
     }
-  }, [chooseSaveFileSource, saveFileJob]);
+  }, [chooseSaveFileSource, saveFileJob, tryReadestImport]);
 
   const prepareLanSaveSend = useCallback(async (
     scopeChoice: "all" | "selected",

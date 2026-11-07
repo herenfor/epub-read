@@ -145,6 +145,16 @@ describe("Readest → SeLis preview", () => {
     ]);
   });
 
+  it("lists highlights without a written note as unsupported instead of committing empty notes", async () => {
+    const preview = await convertReadestBook(HASH, config({
+      location: "epubcfi(/6/2!/4/4,/3:7,/3:10)",
+      progress: [1, 3],
+      booknotes: [note("plain", "epubcfi(/6/2!/4/4,/3:7,/3:10)", "重复词", { note: "  " })],
+    }), target(), NOW);
+    expect(preview.notes).toEqual([expect.objectContaining({ grade: "unsupported", reasons: ["highlight-only"], value: null })]);
+    expect(preview.progress?.value?.progressPctHint).toBe(33);
+  });
+
   it("cuts long bookmark labels by code point, not inside a surrogate pair", async () => {
     // 79 BMP chars then 😀 straddles UTF-16 index 79/80.
     const text = `${"字".repeat(79)}😀尾`;

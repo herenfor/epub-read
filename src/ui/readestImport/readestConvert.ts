@@ -37,7 +37,8 @@ export interface ReadestImportTarget {
   loadChapter(spineIndex: number): Promise<Document | null>;
 }
 
-export type ImportGrade = "exact" | "approximate" | "unresolved";
+/** "unsupported": a record kind this release does not import (never committed). */
+export type ImportGrade = "exact" | "approximate" | "unresolved" | "unsupported";
 
 export type ImportReason =
   /** Position found, but through a fallback the user should know about. */
@@ -52,14 +53,16 @@ export type ImportReason =
   | "outside-text"
   | "text-mismatch"
   | "text-ambiguous"
-  | "too-long";
+  | "too-long"
+  /** Not imported in this release. */
+  | "highlight-only";
 
 export interface ImportCandidate<T> {
   /** Stable per source record, so importing the same backup twice adds nothing. */
   sourceKey: string;
   grade: ImportGrade;
   reasons: ImportReason[];
-  /** Null exactly when grade is "unresolved". */
+  /** Null exactly when grade is "unresolved" or "unsupported". */
   value: T | null;
   source: { cfi: string; text: string | null };
 }
@@ -166,7 +169,8 @@ async function convertProgress(
     sourceKey,
     grade: gradeOf(placed.reasons),
     reasons: placed.reasons,
-    value: { locator: locatorAt(placed), progressPctHint: Math.max(0, Math.min(100, pct)) },
+    // The native progress hint is an integer percentage.
+    value: { locator: locatorAt(placed), progressPctHint: Math.round(Math.max(0, Math.min(100, pct))) },
     source,
   };
 }
@@ -210,6 +214,11 @@ async function convertNote(
   chapters: ChapterCache,
   nowMs: number,
 ): Promise<ImportCandidate<NoteValue>> {
+  // A highlight or excerpt without a written note has no SeLis counterpart:
+  // notes require content, and an invented body would misrepresent the record.
+  if (!record.note.trim()) {
+    return { sourceKey, grade: "unsupported", reasons: ["highlight-only"], value: null, source: { cfi: record.cfi, text: record.text } };
+  }
   const selected = record.text ?? "";
   const needle = normalizeAnchorText(selected);
   const needleLength = Array.from(needle).length;

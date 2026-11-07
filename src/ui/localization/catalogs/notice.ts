@@ -57,6 +57,7 @@ export const notice = defineMessages("notice", {
   "notice.archive.exportTitle": { zh: "导出存档", note: "System save dialog title." },
   "notice.archive.importTitle": { zh: "导入存档", note: "System open dialog title." },
   "notice.archive.filter": { zh: "SeLis 存档", note: "File type name in the system picker; keep the product name." },
+  "notice.archive.filterWithReadest": { zh: "SeLis 存档或 Readest 备份", note: "File type name in the system picker; keep both product names." },
   "notice.archive.androidDocument": "Android 文档",
   "notice.archive.rangeSelected.other": "选中的 {count} 本资料",
   "notice.archive.rangeSelected.one": { zh: "选中的 {count} 本资料", note: "Singular form." },

@@ -127,6 +127,8 @@ import {
 } from "./ui/folderImport";
 import { LanSavePanel } from "./ui/LanSavePanel";
 import { SaveFileExportDialog, SaveFileImportPreview, SaveFileProgressPanel } from "./ui/SaveFileDialogs";
+import { ReadestImportDialog } from "./ui/readestImport/ReadestImportDialog";
+import { useReadestImport } from "./ui/readestImport/useReadestImport";
 import { SaveFailureDialog } from "./ui/SaveFailureDialog";
 import { releaseUnsavedLane, type SaveFailurePrompt } from "./ui/saveFailureExit";
 import { useSaveFileJob } from "./ui/useSaveFileJob";
@@ -922,6 +924,7 @@ export default function App() {
     isTauriEnv, setShelfNotice, refreshShelfProjection,
   });
 
+  const readestImport = useReadestImport({ shelfEntriesRef, refreshShelfProjection, setShelfNotice });
   const {
     startBookSourceExport,
     handleOpenLanSave,
@@ -934,6 +937,7 @@ export default function App() {
     handleImportArchive,
     lanSaveSession,
   } = useSaveFileFlows({
+    tryReadestImport: readestImport.tryStart,
     runtime, isTauriEnv, settings, uiScale, saveFileJob, saveFileJobStateRef,
     saveFileExportSetup, setSaveFileExportSetup, saveFileLaunchRef,
     setLanSaveOpen, setLanSaveSelection, lanSaveSelectionRef, lanSaveActiveRef,
@@ -3275,6 +3279,15 @@ export default function App() {
         />
       )}
       <SaveFileProgressPanel state={saveFileJob.state} onCancel={() => void closeSaveFileUi()} />
+      <ReadestImportDialog
+        state={readestImport.state}
+        updateRows={readestImport.updateRows}
+        updateReviews={readestImport.updateReviews}
+        onNext={() => void readestImport.next()}
+        onBack={readestImport.back}
+        onCommit={() => void readestImport.commit()}
+        onCancel={readestImport.cancel}
+      />
       {lanSavePresence.present && (
         <LanSavePanel
           open
