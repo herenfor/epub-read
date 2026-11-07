@@ -19,7 +19,16 @@ import {
   type CfiPath,
 } from "../../render/interop/epubCfi";
 import { normalizeAnchorText } from "../../render/textAnchor";
-import { MAX_NOTE_CONTENT_CODE_POINTS, MAX_NOTE_SELECTED_CODE_POINTS } from "../notes";
+import {
+  isNoteColor,
+  isNoteStyle,
+  MAX_NOTE_CONTENT_CODE_POINTS,
+  MAX_NOTE_SELECTED_CODE_POINTS,
+  normalizeNoteColor,
+  normalizeNoteContent,
+  type NoteColor,
+  type NoteStyle,
+} from "../notes";
 import type { ReadestBookConfig, ReadestRecord } from "./readestBackup";
 
 const TEXT_PROFILE = "visible-codepoints-no-whitespace-v1" as const;
@@ -53,9 +62,7 @@ export type ImportReason =
   | "outside-text"
   | "text-mismatch"
   | "text-ambiguous"
-  | "too-long"
-  /** Not imported in this release. */
-  | "highlight-only";
+  | "too-long";
 
 export interface ImportCandidate<T> {
   /** Stable per source record, so importing the same backup twice adds nothing. */
@@ -214,17 +221,13 @@ async function convertNote(
   chapters: ChapterCache,
   nowMs: number,
 ): Promise<ImportCandidate<NoteValue>> {
-  // A highlight or excerpt without a written note has no SeLis counterpart:
-  // notes require content, and an invented body would misrepresent the record.
-  if (!record.note.trim()) {
-    return { sourceKey, grade: "unsupported", reasons: ["highlight-only"], value: null, source: { cfi: record.cfi, text: record.text } };
-  }
+  const content = record.type === "excerpt" ? "" : normalizeNoteContent(record.note);
   const selected = record.text ?? "";
   const needle = normalizeAnchorText(selected);
   const needleLength = Array.from(needle).length;
   if (!needleLength) return unresolved(sourceKey, record, "text-mismatch");
   if (Array.from(selected).length > MAX_NOTE_SELECTED_CODE_POINTS
-    || Array.from(record.note).length > MAX_NOTE_CONTENT_CODE_POINTS) {
+    || Array.from(content).length > MAX_NOTE_CONTENT_CODE_POINTS) {
     return unresolved(sourceKey, record, "too-long");
   }
   const parsed = parseEpubCfi(record.cfi);
@@ -248,6 +251,16 @@ async function convertNote(
     reasons.push("text-relocated");
   }
   const end = start + needleLength;
+
+  let color: NoteColor | undefined;
+  if (record.color) {
+    const normalized = normalizeNoteColor(record.color);
+    if (isNoteColor(normalized)) {
+      color = normalized as NoteColor;
+    }
+  }
+  const style: NoteStyle | undefined = record.style && isNoteStyle(record.style) ? record.style : undefined;
+
   return {
     sourceKey,
     grade: gradeOf(reasons),
@@ -261,7 +274,9 @@ async function convertNote(
       startTextSnippet: chapter.index.snippetAt(start)!,
       endTextSnippet: chapter.index.snippetBefore(end)!,
       selectedText: selected,
-      content: record.note,
+      content,
+      ...(style !== undefined ? { style } : {}),
+      ...(color !== undefined ? { color } : {}),
       createdAtMs: createdAt(record, nowMs),
     },
     source: { cfi: record.cfi, text: record.text },

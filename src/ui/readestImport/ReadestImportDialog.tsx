@@ -212,7 +212,6 @@ function ReviewStep(props: ReadestImportDialogProps & { state: Extract<ReadestIm
   const { reviews } = props.state;
   const plan = commitPlan(reviews);
   const count = plan.ok ? plan.records : 0;
-  const styles = reviews.some((review) => review.notes.length > 0);
   return (
     <Shell
       wide
@@ -224,7 +223,6 @@ function ReviewStep(props: ReadestImportDialogProps & { state: Extract<ReadestIm
       </>}
     >
       {reviews.map((review, index) => <ReviewBook key={review.readestHash} review={review} index={index} update={props.updateReviews} />)}
-      {styles && <p className="save-file-muted">{t("readestImport.review.styles")}</p>}
       <p className="save-file-muted">{t("readestImport.review.footer")}</p>
     </Shell>
   );

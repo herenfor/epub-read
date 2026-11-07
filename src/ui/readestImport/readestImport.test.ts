@@ -77,7 +77,7 @@ describe("Readest backup records", () => {
     expect(parsed.skipped.map((s) => s.reason).sort()).toEqual(
       ["deleted", "handwriting", "invalid-record", "missing-text", "notebook"],
     );
-    expect(parsed.droppedStyles).toBe(2);
+    expect(parsed.records[0]).toMatchObject({ style: "highlight", color: "yellow" });
   });
 });
 
@@ -145,13 +145,24 @@ describe("Readest → SeLis preview", () => {
     ]);
   });
 
-  it("lists highlights without a written note as unsupported instead of committing empty notes", async () => {
+  it("converts highlights without a written note as pure highlights with empty content", async () => {
     const preview = await convertReadestBook(HASH, config({
       location: "epubcfi(/6/2!/4/4,/3:7,/3:10)",
       progress: [1, 3],
-      booknotes: [note("plain", "epubcfi(/6/2!/4/4,/3:7,/3:10)", "重复词", { note: "  " })],
+      booknotes: [note("plain", "epubcfi(/6/2!/4/4,/3:7,/3:10)", "重复词", { note: "  ", style: "squiggly", color: "red" })],
     }), target(), NOW);
-    expect(preview.notes).toEqual([expect.objectContaining({ grade: "unsupported", reasons: ["highlight-only"], value: null })]);
+    expect(preview.notes).toEqual([
+      expect.objectContaining({
+        grade: "exact",
+        reasons: [],
+        value: expect.objectContaining({
+          content: "",
+          selectedText: "重复词",
+          style: "squiggly",
+          color: "red",
+        }),
+      }),
+    ]);
     expect(preview.progress?.value?.progressPctHint).toBe(33);
   });
 
@@ -194,5 +205,81 @@ describe("Readest → SeLis preview", () => {
     });
     // Future timestamps from another device's clock fall back to import time.
     expect(preview.bookmarks[0]).toMatchObject({ grade: "approximate", reasons: ["spine-guessed", "text-differs"], value: { createdAtMs: NOW } });
+  });
+});
+
+describe("ER-0110: Readest highlight migration (style, color, pure highlight, excerpt)", () => {
+  it("imports pure highlights, annotated highlights, all five palette colors, custom hex, and excerpts as valid NoteValues", async () => {
+    const t = target();
+    const preview = await convertReadestBook(HASH, config({
+      booknotes: [
+        // 1. 纯高亮: 空白 note 成为 content: ""
+        note("pure", "epubcfi(/6/2!/4/4,/3:7,/3:10)", "重复词", { note: "   ", style: "highlight", color: "yellow" }),
+        // 2. 带笔记高亮: 保留 note 正文、样式与颜色
+        note("annotated", "epubcfi(/6/4[ref-c2]!/4/8[p2],/1:11,/1:15)", "同一句话", { note: "重要批注", style: "underline", color: "blue" }),
+        // 3. 五色: red, yellow, green, blue, violet
+        note("c_red", "epubcfi(/6/2!/4/4,/3:7,/3:10)", "重复词", { color: "red", style: "highlight" }),
+        note("c_yellow", "epubcfi(/6/2!/4/4,/3:7,/3:10)", "重复词", { color: "yellow", style: "highlight" }),
+        note("c_green", "epubcfi(/6/2!/4/4,/3:7,/3:10)", "重复词", { color: "green", style: "highlight" }),
+        note("c_blue", "epubcfi(/6/2!/4/4,/3:7,/3:10)", "重复词", { color: "blue", style: "highlight" }),
+        note("c_violet", "epubcfi(/6/2!/4/4,/3:7,/3:10)", "重复词", { color: "violet", style: "highlight" }),
+        // 4. 自定义 hex: 大写 #AABBCC 归一化为小写 #aabbcc
+        note("hex", "epubcfi(/6/2!/4/4,/3:7,/3:10)", "重复词", { style: "squiggly", color: "#AABBCC" }),
+        // 5. excerpt: 无论 note 是否存在，均按纯高亮迁入（content: ""）
+        {
+          id: "ex1",
+          type: "excerpt",
+          cfi: "epubcfi(/6/4[ref-c2]!/4/8[p2],/1:11,/1:15)",
+          text: "同一句话",
+          note: "摘录自带文字",
+          style: "highlight",
+          color: "green",
+          createdAt: 1_700_000_000_000,
+          updatedAt: 1_700_000_000_000,
+        },
+        // 6. 非法颜色: 按丢弃颜色处理（保留笔记正文与样式，color 为 undefined，使用主题默认色）
+        note("bad_color", "epubcfi(/6/2!/4/4,/3:7,/3:10)", "重复词", { note: "合法批注", style: "underline", color: "purple" }),
+        // 7. global 高亮只标原位置，不全章扩散
+        note("global_hl", "epubcfi(/6/2!/4/4,/3:7,/3:10)", "重复词", { global: true, style: "highlight", color: "yellow" }),
+      ],
+    }), t, NOW);
+
+    // 纯高亮
+    const pure = preview.notes.find((n) => n.sourceKey.endsWith(":pure"));
+    expect(pure?.grade).toBe("exact");
+    expect(pure?.value).toMatchObject({ content: "", selectedText: "重复词", style: "highlight", color: "yellow" });
+
+    // 带笔记高亮
+    const annotated = preview.notes.find((n) => n.sourceKey.endsWith(":annotated"));
+    expect(annotated?.grade).toBe("exact");
+    expect(annotated?.value).toMatchObject({ content: "重要批注", selectedText: "同一句话", style: "underline", color: "blue" });
+
+    // 五色
+    for (const name of ["red", "yellow", "green", "blue", "violet"]) {
+      const entry = preview.notes.find((n) => n.sourceKey.endsWith(`:c_${name}`));
+      expect(entry?.value?.color).toBe(name);
+    }
+
+    // 自定义 hex 小写归一化
+    const hex = preview.notes.find((n) => n.sourceKey.endsWith(":hex"));
+    expect(hex?.value).toMatchObject({ style: "squiggly", color: "#aabbcc" });
+
+    // excerpt 迁入为纯高亮
+    const excerpt = preview.notes.find((n) => n.sourceKey.endsWith(":ex1"));
+    expect(excerpt?.grade).toBe("exact");
+    expect(excerpt?.value).toMatchObject({ content: "", selectedText: "同一句话", style: "highlight", color: "green" });
+
+    // 非法颜色被丢弃，笔记保留
+    const badColor = preview.notes.find((n) => n.sourceKey.endsWith(":bad_color"));
+    expect(badColor?.grade).toBe("exact");
+    expect(badColor?.value?.content).toBe("合法批注");
+    expect(badColor?.value?.style).toBe("underline");
+    expect(badColor?.value?.color).toBeUndefined();
+
+    // global 只产生 1 个 note，不扩散
+    const globals = preview.notes.filter((n) => n.sourceKey.endsWith(":global_hl"));
+    expect(globals).toHaveLength(1);
+    expect(globals[0].grade).toBe("exact");
+    expect(globals[0].value?.startTextOffset).toBe(17);
   });
 });

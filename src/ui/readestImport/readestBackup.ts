@@ -7,6 +7,8 @@
  * Shapes follow readest/apps/readest-app/src/types/book.ts at v0.12.20.
  */
 
+import { isNoteStyle, type NoteStyle } from "../notes";
+
 export const READEST_LIBRARY_ENTRY = "library.json";
 export const readestConfigEntry = (hash: string): string => `${hash}/config.json`;
 
@@ -88,12 +90,18 @@ export type ReadestRecordKind = "bookmark" | "note";
 export interface ReadestRecord {
   id: string;
   kind: ReadestRecordKind;
+  /** Raw record type from Readest (bookmark, annotation, excerpt). */
+  type?: "bookmark" | "annotation" | "excerpt";
   /** Readest `cfi`: a point for bookmarks, a range for highlights/notes. */
   cfi: string;
   /** Text Readest captured at the location (selection or page excerpt). */
   text: string | null;
   /** User-written note body; empty for plain highlights/excerpts. */
   note: string;
+  /** Highlight style: highlight, underline, squiggly. */
+  style?: NoteStyle;
+  /** Highlight color: palette name or #rrggbb hex. */
+  color?: string;
   createdAtMs: number | null;
   updatedAtMs: number | null;
 }
@@ -119,8 +127,6 @@ export interface ReadestBookConfig {
   pages: [number, number] | null;
   records: ReadestRecord[];
   skipped: ReadestSkippedRecord[];
-  /** Highlight colours/styles exist in Readest but have no field here. */
-  droppedStyles: number;
 }
 
 function pages(value: unknown): [number, number] | null {
@@ -140,7 +146,6 @@ export function parseReadestBookConfig(text: string): ReadestParseResult<Readest
   if (notes.length > MAX_RECORDS) return { ok: false, reason: "too-large" };
   const latest = new Map<string, ReadestRecord>();
   const skipped: ReadestSkippedRecord[] = [];
-  let droppedStyles = 0;
   for (const item of notes) {
     const id = isObject(item) && typeof item.id === "string" && RECORD_ID.test(item.id) ? item.id : null;
     if (!isObject(item) || !id) {
@@ -176,13 +181,17 @@ export function parseReadestBookConfig(text: string): ReadestParseResult<Readest
       skipped.push({ id, reason: "missing-text" });
       continue;
     }
-    if (kind === "note" && (item.color !== undefined || item.style !== undefined)) droppedStyles++;
+    const style = typeof item.style === "string" && isNoteStyle(item.style) ? item.style : undefined;
+    const color = typeof item.color === "string" && item.color.trim() ? item.color.trim() : undefined;
     const record: ReadestRecord = {
       id,
       kind,
+      type,
       cfi,
       text: selected,
       note: typeof item.note === "string" ? item.note : "",
+      ...(style !== undefined ? { style } : {}),
+      ...(color !== undefined ? { color } : {}),
       createdAtMs: timestamp(item.createdAt),
       updatedAtMs: timestamp(item.updatedAt),
     };
@@ -196,7 +205,6 @@ export function parseReadestBookConfig(text: string): ReadestParseResult<Readest
       pages: pages(raw.progress),
       records: [...latest.values()],
       skipped,
-      droppedStyles,
     },
   };
 }
