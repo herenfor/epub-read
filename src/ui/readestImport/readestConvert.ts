@@ -133,11 +133,13 @@ function createdAt(record: ReadestRecord, nowMs: number): number {
   return at !== null && at <= nowMs + ONE_DAY_MS ? at : nowMs;
 }
 
-/** Choose among text occurrences: the one nearest the CFI, never just the first. */
+/** Choose among text occurrences: the unique one nearest the CFI, never just the first. */
 function pickOccurrence(hits: readonly number[], near: number | null): number | null {
   if (hits.length === 1) return hits[0];
   if (!hits.length || near === null) return null;
-  return hits.reduce((best, hit) => (Math.abs(hit - near) < Math.abs(best - near) ? hit : best));
+  const distance = Math.min(...hits.map((hit) => Math.abs(hit - near)));
+  const nearest = hits.filter((hit) => Math.abs(hit - near) === distance);
+  return nearest.length === 1 ? nearest[0] : null;
 }
 
 const unresolved = <T>(sourceKey: string, record: { cfi: string; text: string | null }, reason: ImportReason): ImportCandidate<T> =>
@@ -195,7 +197,8 @@ async function convertBookmark(
     sourceKey,
     grade: gradeOf(reasons),
     reasons,
-    value: { locator, text: label.slice(0, BOOKMARK_TEXT_CHARS), createdAtMs: createdAt(record, nowMs) },
+    // Cut by code point: a UTF-16 cut can leave a lone surrogate that fails JSON round trips.
+    value: { locator, text: Array.from(label).slice(0, BOOKMARK_TEXT_CHARS).join(""), createdAtMs: createdAt(record, nowMs) },
     source: { cfi: record.cfi, text: record.text },
   };
 }

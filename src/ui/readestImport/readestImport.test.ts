@@ -132,6 +132,8 @@ describe("Readest → SeLis preview", () => {
         note("ambiguous", "epubcfi(/6/4!/4/40,/1:0,/1:4)", "同一句话"),
         // Text absent from the chapter: a different edition.
         note("edition", "epubcfi(/6/2!/4/4,/3:7,/3:10)", "完全不同"),
+        // CFI lands at 15, exactly between 重复词 at 13 and 17: no unique nearest, refuse.
+        note("tie", "epubcfi(/6/2!/4/4,/3:5,/3:8)", "重复词"),
       ],
     }), target(), NOW);
     expect(preview.notes.map((n) => [n.sourceKey.split(":").at(-1), n.grade, n.reasons, n.value?.startTextOffset ?? null])).toEqual([
@@ -139,7 +141,19 @@ describe("Readest → SeLis preview", () => {
       ["gone", "approximate", ["text-relocated"], 24],
       ["ambiguous", "unresolved", ["text-ambiguous"], null],
       ["edition", "unresolved", ["text-mismatch"], null],
+      ["tie", "unresolved", ["text-ambiguous"], null],
     ]);
+  });
+
+  it("cuts long bookmark labels by code point, not inside a surrogate pair", async () => {
+    // 79 BMP chars then 😀 straddles UTF-16 index 79/80.
+    const text = `${"字".repeat(79)}😀尾`;
+    const preview = await convertReadestBook(HASH, config({
+      booknotes: [{ id: "long", type: "bookmark", cfi: "epubcfi(/6/2!/4/2[head-1]/1:0)", text, note: "", createdAt: 1, updatedAt: 1 }],
+    }), target(), NOW);
+    const label = preview.bookmarks[0].value!.text;
+    expect(label).toBe(`${"字".repeat(79)}😀`);
+    expect(label).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
   });
 
   it("never invents a position for missing chapters, bad CFIs or offsets past the text", async () => {

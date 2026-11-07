@@ -54,7 +54,9 @@ describe("parseEpubCfi", () => {
 
   it("rejects malformed or oversized input instead of guessing", () => {
     for (const bad of ["", "epubcfi()", "epubcfi(4/2)", "epubcfi(/6/2!/4/x)", "epubcfi(/6/2!/4[unclosed)",
-      "epubcfi(/6/2!/4,/1:1)", "epubcfi(/6/2!/4/1:1:2)", `epubcfi(/6/2!${"/4".repeat(3000)})`]) {
+      "epubcfi(/6/2!/4,/1:1)", "epubcfi(/6/2!/4/1:1:2)", `epubcfi(/6/2!${"/4".repeat(3000)})`,
+      // Media offsets are not text positions; dropping them would fake an exact point.
+      "epubcfi(/6/2!/4/4/2/1:2~3.5)", "epubcfi(/6/2!/4/4/2@10:20)", "epubcfi(/6/2!/4/4,/3:7@1:2,/3:10)"]) {
       expect(parseEpubCfi(bad), bad).toBeNull();
     }
   });

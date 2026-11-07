@@ -42,36 +42,31 @@ type Token =
   | { type: ":"; value: number }
   | { type: "["; value: string }
   | { type: "!" }
-  | { type: "," }
-  | { type: "skip" };
+  | { type: "," };
 
+/**
+ * Temporal/spatial offsets (`~`, `@`) address media, not text; they fall to the
+ * final branch and reject the whole CFI rather than being dropped and the rest
+ * read as an exact text position.
+ */
 function tokenize(input: string): Token[] | null {
   const tokens: Token[] = [];
   const chars = Array.from(input);
   let i = 0;
-  const readNumber = (allowDot: boolean): string => {
+  const readNumber = (): string => {
     let value = "";
-    while (i < chars.length && (/\d/.test(chars[i]) || (allowDot && chars[i] === "."))) value += chars[i++];
+    while (i < chars.length && /\d/.test(chars[i])) value += chars[i++];
     return value;
   };
   while (i < chars.length) {
     const char = chars[i];
     if (char === "/" || char === ":") {
       i++;
-      const digits = readNumber(false);
+      const digits = readNumber();
       if (!digits) return null;
       const value = Number(digits);
       if (!Number.isSafeInteger(value) || value > MAX_STEP_INDEX * 1000) return null;
       tokens.push({ type: char, value });
-    } else if (char === "~" || char === "@") {
-      // Temporal/spatial offsets (audio/video/images) carry no text position.
-      i++;
-      readNumber(true);
-      while (char === "@" && chars[i] === ":") {
-        i++;
-        readNumber(true);
-      }
-      tokens.push({ type: "skip" });
     } else if (char === "[") {
       i++;
       let value = "";
@@ -126,8 +121,6 @@ function parsePath(tokens: Token[]): CfiPath | null {
     } else if (token.type === "!") {
       if (!group.length) return null;
       groups.push([]);
-    } else if (token.type === "skip") {
-      if (!last) return null;
     } else {
       return null;
     }
