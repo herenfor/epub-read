@@ -83,7 +83,6 @@ export function useReadestImport({ shelfEntriesRef, refreshShelfProjection, setS
   const [state, setState] = useState<ReadestImportState>({ kind: "idle" });
   const sessionRef = useRef<Session | null>(null);
   const generationRef = useRef(0);
-  const notChosenRef = useRef(0);
 
   const release = useCallback((session: Session | null): void => {
     if (!session) return;
@@ -129,6 +128,7 @@ export function useReadestImport({ shelfEntriesRef, refreshShelfProjection, setS
       try {
         info = await openReadestBackup({ sessionId: session.id, source, scope });
       } catch (error) {
+        if (!current(session)) return "handled";
         const code = saveFileErrorCode(error);
         // A non-ZIP SeLis save is not a Readest backup either; let its own import report on it.
         if (code === "not-readest" || (code === "invalid-backup" && !/\.zip$/i.test(sourceLabel))) {
@@ -142,7 +142,9 @@ export function useReadestImport({ shelfEntriesRef, refreshShelfProjection, setS
         void closeReadestBackup(info.sessionId).catch(() => undefined);
         return "handled";
       }
-      const library = parseReadestLibrary(await readReadestEntryText(session.id, info.library));
+      const libraryText = await readReadestEntryText(session.id, info.library);
+      if (!current(session)) return "handled";
+      const library = parseReadestLibrary(libraryText);
       if (!library.ok) throw Object.assign(new Error(library.reason), { code: library.reason === "too-large" ? "too-large" : "invalid-backup" });
       session.library = library.value.books;
 
@@ -202,6 +204,7 @@ export function useReadestImport({ shelfEntriesRef, refreshShelfProjection, setS
         if (config) {
           const opened = await openReadestTarget(store, local);
           try {
+            if (!current(session)) return;
             preview = await convertReadestBook(row.readestHash, config, opened.target, Date.now());
           } finally {
             opened.close();
@@ -230,19 +233,22 @@ export function useReadestImport({ shelfEntriesRef, refreshShelfProjection, setS
       setShelfNotice({ kind: "warn", text: uiText(`readestImport.plan.${plan.reason}`, { count: plan.records }) });
       return;
     }
-    notChosenRef.current = plan.notChosen;
     const isPublic = activeShelfSpace().kind !== "private";
     setState({ kind: "working", step: "committing", sourceLabel: state.sourceLabel, done: 0, total: plan.records });
     try {
       const outcome = await commitReadestImport(session.id, plan.books);
       if (isPublic && (outcome.bookmarksAdded || outcome.notesAdded || outcome.progressWritten)) noteCloudSyncChange("data-changed");
-      const summary = outcomeSummary(outcome, notChosenRef.current);
+      // A committed public import still marks sync dirty, but its abandoned UI
+      // cannot refresh another shelf or end a newer import session.
+      if (!current(session)) return;
+      const summary = outcomeSummary(outcome, plan.notChosen);
       let refreshFailed = false;
       try {
         await refreshShelfProjection();
       } catch {
         refreshFailed = true;
       }
+      if (!current(session)) return;
       const parts = [uiText("readestImport.done", { added: summary.added, progress: summary.progressWritten })];
       if (summary.skippedExisting) parts.push(uiText("readestImport.done.skipped", { count: summary.skippedExisting }));
       if (summary.progressUnchanged) parts.push(uiText("readestImport.done.unchanged", { count: summary.progressUnchanged }));
