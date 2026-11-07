@@ -45,7 +45,7 @@ export const notice = defineMessages("notice", {
   "notice.originalRetry.copy": { zh: "复制导入", note: "Button: import the listed books as library copies instead.", max: 8 },
   "notice.originalRetry.close": { zh: "不用了", max: 8 },
   "notice.picker.chooseEpub": { zh: "选择书籍", note: "System file picker title." },
-  "notice.picker.epubFilter": { zh: "图书（EPUB、TXT、CBZ、ZIP）", note: "File type name in the system picker." },
+  "notice.picker.epubFilter": { zh: "图书（EPUB、FB2、TXT、CBZ、ZIP）", note: "File type name in the system picker." },
   "notice.picker.failed": "无法打开文件选择器：{error}",
   "notice.organization.readFailedLocked": "收藏与文件夹读取失败，已禁用修改以防止覆盖现有数据",
   "notice.operationFailed": "操作失败：{error}",
@@ -186,7 +186,7 @@ export const notice = defineMessages("notice", {
   "notice.importTarget.keptElsewhere.one": { zh: "{count} 本已在其他文件夹，未移动", note: "Singular form." },
   "notice.importTarget.folderGone": "文件夹“{name}”已不存在，书留在未归类",
   "notice.importTarget.failed": "书已导入，但放入文件夹失败：{error}",
-  "notice.drop.unsupported": "可拖入 EPUB、TXT、CBZ、漫画 ZIP 或文件夹",
-  "notice.drop.booksOnly": "可拖入 EPUB、TXT、CBZ 或漫画 ZIP 文件",
+  "notice.drop.unsupported": "可拖入 EPUB、FB2、TXT、CBZ、漫画 ZIP 或文件夹",
+  "notice.drop.booksOnly": "可拖入 EPUB、FB2、TXT、CBZ 或漫画 ZIP 文件",
   "notice.drop.oneFolder": "一次只能拖入一个文件夹",
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BookSourceExportError, BookSourceExportResult } from "../platform/bookExportNativeBridge";
-import { bookExportErrorNotice, bookExportFileName, bookExportResultNotice, bookExportTargetLabel } from "./bookExportText";
+import { bookExportErrorNotice, bookExportFileName, bookExportMimeType, bookExportResultNotice, bookExportTargetLabel } from "./bookExportText";
 
 function result(patch: Partial<BookSourceExportResult>): BookSourceExportResult {
   return {
@@ -42,5 +42,13 @@ describe("book export text", () => {
     expect(bookExportTargetLabel({ kind: "path", path: "C:\\Users\\me\\books.zip" })).toBe("books.zip");
     expect(bookExportTargetLabel({ kind: "uri", uri: "content://com.android.externalstorage.documents/document/primary%3ADownload%2Fa.epub" })).toBe("a.epub");
     expect(bookExportTargetLabel({ kind: "uri", uri: "content://com.android.providers.downloads.documents/document/314" })).toBe("所选文件");
+  });
+
+  it("keeps an FB2 original's suffix and MIME type", () => {
+    expect(bookExportFileName("小说.FB2", "x")).toBe("小说.fb2");
+    expect(bookExportMimeType("小说.fb2")).toBe("application/x-fictionbook+xml");
+    expect(["a.epub", "a.txt", "a.cbz", "a.zip"].map(bookExportMimeType))
+      .toEqual(["application/epub+zip", "text/plain", "application/zip", "application/zip"]);
+    expect(bookExportTargetLabel({ kind: "uri", uri: "content://x/document/primary%3ADownload%2F%E5%B0%8F%E8%AF%B4.fb2" })).toBe("小说.fb2");
   });
 });

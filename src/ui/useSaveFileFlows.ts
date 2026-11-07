@@ -18,7 +18,7 @@ import {
 } from "../platform/saveFileNativeBridge";
 import type { RuntimeCapabilities } from "../platform/runtimeCapabilities";
 import type { ReaderSettings } from "../render/settings";
-import { bookExportErrorNotice, bookExportFileName, bookExportResultNotice, bookExportTargetLabel } from "./bookExportText";
+import { bookExportErrorNotice, bookExportFileName, bookExportMimeType, bookExportResultNotice, bookExportTargetLabel } from "./bookExportText";
 import type { CheckpointedSample } from "./checkpointProgressRepair";
 import { noteCloudSyncChange } from "./cloudSync/cloudSyncStore";
 import { importSkippedNotice } from "./importSkippedText";
@@ -296,7 +296,7 @@ export function useSaveFileFlows({
           defaultPath,
           filters: [zip
             ? { name: uiText("bookExport.filter.zip"), extensions: [runtime.platform === "android" ? "application/zip" : "zip"] }
-            : { name: uiText("bookExport.filter.epub"), extensions: [runtime.platform === "android" ? (/\.txt$/i.test(defaultPath) ? "text/plain" : /\.(cbz|zip)$/i.test(defaultPath) ? "application/zip" : "application/epub+zip") : defaultPath.split(".").pop()!] }],
+            : { name: uiText("bookExport.filter.epub"), extensions: [runtime.platform === "android" ? bookExportMimeType(defaultPath) : defaultPath.split(".").pop()!] }],
         });
         if (typeof selected === "string" && selected.length > 0) {
           destination = runtime.platform === "android" ? { kind: "uri", uri: selected } : { kind: "path", path: selected };
