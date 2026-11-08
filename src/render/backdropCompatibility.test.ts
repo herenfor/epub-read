@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyBackdropCompatibility, type BackdropCompatibilityGeometry } from "./backdropCompatibility";
+import { applyBackdropCompatibility, createBackdropCompatibilitySession, type BackdropCompatibilityGeometry } from "./backdropCompatibility";
 
 function rect(left: number, top: number, right: number, bottom: number) {
   return { left, top, right, bottom, width: right - left, height: bottom - top } as DOMRect;
@@ -167,5 +167,44 @@ describe("backdrop compatibility", () => {
     });
     expect(applyBackdropCompatibility(doc, viewer, geometry)).toBeNull();
     expect(element.getAttribute("data-reader-backdrop-break")).toBeNull();
+  });
+
+  it("session restores after apply and tolerates repeated restore", () => {
+    const { doc, viewer, element, attributes } = fakeContext();
+    const session = createBackdropCompatibilitySession();
+    session.apply(doc, viewer, geometry);
+    expect(attributes.get("style")).toContain("break-inside: avoid-column !important");
+    expect(element.getAttribute("data-reader-backdrop-break")).toBe("applied");
+
+    session.restore();
+    expect(attributes.get("style")).toBe(
+      "background-color:red;-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(25px)"
+    );
+    expect(element.getAttribute("data-reader-backdrop-break")).toBeNull();
+
+    session.restore();
+    expect(attributes.get("style")).toBe(
+      "background-color:red;-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(25px)"
+    );
+    expect(element.getAttribute("data-reader-backdrop-break")).toBeNull();
+  });
+
+  it("a later apply replaces the previous handle without restoring it first", () => {
+    const first = fakeContext();
+    const second = fakeContext();
+    const session = createBackdropCompatibilitySession();
+    session.apply(first.doc, first.viewer, geometry);
+    const firstAppliedStyle = first.attributes.get("style");
+    expect(firstAppliedStyle).toContain("break-inside: avoid-column !important");
+
+    session.apply(second.doc, second.viewer, geometry);
+    expect(first.attributes.get("style")).toBe(firstAppliedStyle);
+
+    session.restore();
+    expect(second.attributes.get("style")).toBe(
+      "background-color:red;-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(25px)"
+    );
+    expect(second.element.getAttribute("data-reader-backdrop-break")).toBeNull();
+    expect(first.attributes.get("style")).toBe(firstAppliedStyle);
   });
 });

@@ -279,3 +279,32 @@ export function applyBackdropCompatibility(
     for (const snapshot of accepted) restoreSnapshot(snapshot);
   };
 }
+
+export interface BackdropCompatibilitySession {
+  /** Apply one transaction; an existing restore handle is replaced as-is. */
+  apply(
+    doc: Document | null | undefined,
+    viewer: HTMLElement | null | undefined,
+    geometry: BackdropCompatibilityGeometry,
+  ): void;
+  /** Restore the last transaction, if any.  Safe to call repeatedly. */
+  restore(): void;
+}
+
+/**
+ * Stateful wrapper around one paginator's backdrop pass.  The session owns the
+ * restore handle; `apply` overwrites a previous handle without restoring it
+ * first, preserving the paginator's existing measure ordering.
+ */
+export function createBackdropCompatibilitySession(): BackdropCompatibilitySession {
+  let restoreHandle: (() => void) | null = null;
+  return {
+    apply(doc, viewer, geometry) {
+      restoreHandle = applyBackdropCompatibility(doc, viewer, geometry);
+    },
+    restore() {
+      restoreHandle?.();
+      restoreHandle = null;
+    },
+  };
+}

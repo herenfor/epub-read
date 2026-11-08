@@ -33,7 +33,7 @@ import {
   writeNoteHighlightStyle,
   type NoteHighlightGroup,
 } from "./noteHighlights";
-import { applyBackdropCompatibility } from "./backdropCompatibility";
+import { createBackdropCompatibilitySession } from "./backdropCompatibility";
 import {
   mediaFitCssSize,
   planMediaFit,
@@ -2816,8 +2816,8 @@ export class ChapterPaginator {
   }> = [];
   /** 首次布局显示门；token 与 loadSeq 一致，旧章不能揭示新章。 */
   private displayGate: VisibilityGate;
-  /** L5 backdrop-filter 分片补偿的完整恢复函数；下一轮测量前必须恢复。 */
-  private backdropCompatibilityRestore: (() => void) | null = null;
+  /** L5 backdrop-filter 分片补偿会话；下一轮测量前必须恢复。 */
+  private backdropCompatibilitySession = createBackdropCompatibilitySession();
 
   /** 滚动模式：viewer 是唯一正文 scroller；分页专用补偿在滚动下不执行。 */
   private scrollStyleRestore: (() => void) | null = null;
@@ -4673,7 +4673,7 @@ export class ChapterPaginator {
       if (this.verticalMode) {
         // Physical-width and float compensation below assumes horizontal
         // multicol. Applying it to vertical paragraphs can force max-width:0.
-        this.restoreBackdropCompatibility();
+        this.backdropCompatibilitySession.restore();
         this.measuredViewport = { width: measuredWidth, height: measuredHeight };
         return true;
       }
@@ -4706,7 +4706,7 @@ export class ChapterPaginator {
         void viewer.scrollHeight;
         this.pageWidth = Math.max(0, viewer.clientWidth);
         this.step = 0;
-        this.restoreBackdropCompatibility();
+        this.backdropCompatibilitySession.restore();
         this.measuredViewport = { width: measuredWidth, height: measuredHeight };
         return isChapterMeasurementCurrent({
           disposed: this.disposed,
@@ -4738,7 +4738,7 @@ export class ChapterPaginator {
       this.applyInlineBoxOverflowFix();
       this.applyContainedContentFit();
       if (!this.fixedLayout) {
-        this.backdropCompatibilityRestore = applyBackdropCompatibility(doc, viewer, {
+        this.backdropCompatibilitySession.apply(doc, viewer, {
           // 双栏时传单列宽与列步长，不能传整屏宽。
           pageWidth: this.geometry?.columnWidth ?? this.pageWidth,
           step: this.geometry?.columnStep ?? this.step,
@@ -7839,11 +7839,6 @@ export class ChapterPaginator {
     this.applyResolvedPosition(page, candidate, options);
   }
 
-  private restoreBackdropCompatibility(): void {
-    this.backdropCompatibilityRestore?.();
-    this.backdropCompatibilityRestore = null;
-  }
-
   /** Any real navigation/structure change closes the transient footnote. */
   private closeFootnoteForNavigation(): void {
     this.resetFootnote({ notify: true });
@@ -10290,7 +10285,7 @@ export class ChapterPaginator {
     this.themeController?.dispose();
     this.themeController = null;
     this.abortMeasureWaits();
-    this.restoreBackdropCompatibility();
+    this.backdropCompatibilitySession.restore();
     this.resetFootnote({ notify: true });
     this.wheelAcc = 0;
     this.scrollWheelAcc = 0;
