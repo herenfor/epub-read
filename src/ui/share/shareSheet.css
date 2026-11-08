@@ -314,11 +314,15 @@
 .app[data-mobile-chrome="true"] .share-actions {
   display: grid;
   grid-template-columns: repeat(var(--share-action-count, 3), minmax(0, 1fr));
-  padding: 12px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+  gap: 10px;
+  padding: 10px 16px calc(14px + env(safe-area-inset-bottom, 0px));
   border-top: 0;
 }
 
+/* Phone: thumb-sized but not slabs; the label grows instead of the box. */
 .app[data-mobile-chrome="true"] .share-action {
-  min-height: 52px;
+  min-height: 46px;
+  padding: 0 10px;
   border-radius: var(--r-md);
+  font-size: var(--fs-emph);
 }
