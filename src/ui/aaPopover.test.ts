@@ -65,7 +65,7 @@ describe("Aa 单层紧凑面板", () => {
     }
     expect(main).toMatch(/aria-checked="true"[^>]*>无</);
     // Moved to Settings, or the same setting already there.
-    for (const text of ["更多设置", "界面缩放", "高性能预读", "章节间连续滑动", "简化界面动画", "界面语言"]) {
+    for (const text of ["更多设置", "界面文字大小", "高性能预读", "章节间连续滑动", "简化界面动画", "界面语言"]) {
       expect(main).not.toContain(text);
     }
   });

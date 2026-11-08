@@ -167,7 +167,7 @@ export const aa = defineMessages("aa", {
   "aa.gap.dec": "减小双栏中缝",
   "aa.gap.inc": "增大双栏中缝",
   "aa.detail.engine": "界面与引擎",
-  "aa.uiScale": "界面缩放",
+  "aa.uiScale": "界面文字大小",
   "aa.css.inject": "自定义 CSS 样式注入",
   "aa.css.placeholderLong": { zh: "/* 自定义注入 CSS，例：body { text-align: justify !important; } */", note: "Placeholder; keep the CSS example unchanged." },
   "aa.resetAll": "恢复默认设置",

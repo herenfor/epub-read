@@ -59,7 +59,7 @@ export interface SavedSettings {
   theme?: BuiltinTheme;
   /** A user theme's colors ("c:…"); wins over theme when valid. */
   themeColors?: CustomThemeKey;
-  /** UI 界面缩放（0.75–1.5），与正文字号相互独立 */
+  /** 界面文字大小（uiScale，0.75–1.5），只缩放界面文字与图标，与正文字号相互独立 */
   uiScale?: number;
   lineHeight?: number;
   fontWeight?: number;

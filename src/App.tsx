@@ -1505,7 +1505,7 @@ export default function App() {
 
   // ---- 设置持久化 ----
   useReaderSettingsPersistence(settings, uiScale);
-  // 界面缩放写在根节点上：字号变量与图标都由它派生，弹层/portal 一并跟随（ER-0127）。
+  // 界面文字大小（uiScale）写在根节点上：字号变量与图标都由它派生，弹层/portal 一并跟随（ER-0127）。
   useUiScaleRoot(uiScale);
 
   // 书架设置与阅读 Aa 共用的主题入口：仅主题变化走约 200ms 整屏淡入，更新回调内

@@ -138,7 +138,7 @@
   "aa.gap.dec": "Decrease column gap",
   "aa.gap.inc": "Increase column gap",
   "aa.detail.engine": "Interface & Engine",
-  "aa.uiScale": "UI Scale",
+  "aa.uiScale": "Interface text size",
   "aa.css.inject": "Inject Custom CSS",
   "aa.css.placeholderLong": "/* Custom injected CSS, e.g.: body { text-align: justify !important; } */",
   "aa.resetAll": "Reset All Settings",
