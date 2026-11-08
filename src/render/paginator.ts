@@ -2,7 +2,7 @@ import { effectivePageProgression } from "./settings";
 import { canInsertLeadingColumn, canRetainLeadingColumn, chapterLeafLayout, LeadingColumnGap, type ChapterLeafLayout } from "./chapterFill";
 import { pageAxisSign, pageContentX, readPageScroll, writePageScroll, setPagedFlowDirection, type PageProgression } from "./pagedDirection";
 import { resolveArchiveHref, archiveHref } from "../core/archiveReferences";
-import { applyReaderBodyPercentageSpacing, applyReaderRootPercentageSpacing } from "./percentageSpacing";
+import { createPercentageSpacingSession } from "./percentageSpacing";
 import { sanitizeChapter, VIEWER_ID } from "./sanitize";
 import { planCenteredTitleBody } from "./titlePageLayout";
 import { desktopSettlePlan, PageMotionSession, settlePlan, type Direction as MotionDirection } from "./pageMotion";
@@ -2788,8 +2788,8 @@ export class ChapterPaginator {
   private containedTableFixes: ContentFitFix[] = [];
   /** 本轮收窄后仍越界、已恢复作者布局的表格数（不可压缩的宽表）。 */
   unresolvedTableCount = 0;
-  /** 页面级百分比间距在重排/换章前完整恢复。 */
-  private restorePercentageSpacing: () => void = () => {};
+  /** 页面级百分比间距的根+正文恢复会话；重排/换章前完整恢复。 */
+  private percentageSpacingSession = createPercentageSpacingSession();
   private inlineClipFixes: Array<{ el: HTMLElement; overflowX: InlineStyleValue }> = [];
   /** fit-content 补偿写回过的元素与原始 inline max-width（下次测量前恢复） */
   private fitContentFixes: Array<{ el: HTMLElement; maxWidth: string }> = [];
@@ -4392,14 +4392,15 @@ export class ChapterPaginator {
     this.restoreFitContentFix();
     this.restoreFloatWidths();
     this.restoreTrailingFloatFixes();
-    this.restorePercentageSpacing();
+    this.percentageSpacingSession.restore();
     this.verticalMode = basicVerticalMode(win?.getComputedStyle(viewer).writingMode ?? "", this.fixedLayout, this.scrollMode);
     this.configurePageProgression(viewer, measuredWidth, measuredHeight);
     if (this.verticalMode) this.restoreVerticalShell = applyBasicVerticalShell(viewer, this.verticalMode);
-    this.restorePercentageSpacing = this.verticalMode ? () => {} : applyReaderRootPercentageSpacing(
+    this.percentageSpacingSession.applyRoot(
       doc,
       viewer,
       TEXT_MEASURE.maxEm * this.settings.fontSizePx,
+      !this.verticalMode,
     );
     const parent = viewer.parentElement;
     const parentCs = parent && doc.defaultView ? doc.defaultView.getComputedStyle(parent) : null;
@@ -4692,7 +4693,7 @@ export class ChapterPaginator {
         this.applyOrUpdateCenteredTitleLayout(
           Math.max(0, viewer.clientHeight - padTop - padBottom)
         );
-        this.applyReaderBodyPercentageSpacingForMeasure(
+        this.percentageSpacingSession.applyBody(
           doc,
           viewer,
           Math.max(
@@ -4701,6 +4702,7 @@ export class ChapterPaginator {
               (parseFloat(win?.getComputedStyle(viewer).paddingLeft ?? "") || 0) -
               (parseFloat(win?.getComputedStyle(viewer).paddingRight ?? "") || 0),
           ),
+          TEXT_MEASURE.maxEm * this.settings.fontSizePx,
         );
         this.applyFitContentFix();
         this.applyBookMargins();
@@ -4731,7 +4733,7 @@ export class ChapterPaginator {
           )
         : Math.max(0, h - padTop - padBottom);
       this.applyOrUpdateCenteredTitleLayout(titleContentHeight);
-      this.applyReaderBodyPercentageSpacingForMeasure(doc, viewer, this.effectiveColumnWidth);
+      this.percentageSpacingSession.applyBody(doc, viewer, this.effectiveColumnWidth, TEXT_MEASURE.maxEm * this.settings.fontSizePx);
       this.applyFitContentFix();
       this.applyBookMargins();
       this.applyFloatShrinkFix();
@@ -5056,29 +5058,6 @@ export class ChapterPaginator {
   private restoreScrollView(): void {
     this.scrollStyleRestore?.();
     this.scrollStyleRestore = null;
-  }
-
-  /**
-   * 正文直接子的百分比 spacing 在本轮单栏/局部内容宽确定后处理。
-   * 调用时 restorePercentageSpacing 仍是根盒 padding 的恢复函数，事务式合并，
-   * 重测/换章/清理一次恢复两阶段。
-   */
-  private applyReaderBodyPercentageSpacingForMeasure(
-    doc: Document,
-    viewer: HTMLElement,
-    containingWidth: number,
-  ): void {
-    const resolveBody = applyReaderBodyPercentageSpacing(
-      doc,
-      viewer,
-      containingWidth,
-      TEXT_MEASURE.maxEm * this.settings.fontSizePx,
-    );
-    const restoreRoot = this.restorePercentageSpacing;
-    this.restorePercentageSpacing = () => {
-      resolveBody();
-      restoreRoot();
-    };
   }
 
   private applyScrollViewerStyles(viewportHeight: number, marginLeft = 0, marginRight = marginLeft): void {
@@ -10301,8 +10280,7 @@ export class ChapterPaginator {
     this.restoreContainedMediaFixes();
     this.restoreContainedTableFixes();
     this.restoreTrailingFloatFixes();
-    this.restorePercentageSpacing();
-    this.restorePercentageSpacing = () => {};
+    this.percentageSpacingSession.restore();
     this.restoreCenteredTitleLayout();
     this.centeredTitleCandidate = null;
     this.contentDoc?.removeEventListener("load", this.imgHandler, true);

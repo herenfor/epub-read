@@ -127,6 +127,46 @@ export function applyReaderBodyPercentageSpacing(
   return () => restorePercentageSpacingFixes(fixes);
 }
 
+export interface PercentageSpacingSession {
+  /**
+   * Install the root-padding pass for the current measure.  A previous handle is
+   * replaced without being restored first, matching the paginator's existing
+   * measure ordering.  `enabled` false installs a no-op handle, preserving the
+   * vertical-mode guard that skipped the root pass.
+   */
+  applyRoot(doc: Document, viewer: HTMLElement, measure: number, enabled?: boolean): void;
+  /** Append the direct-child pass to the current root handle. */
+  applyBody(doc: Document, viewer: HTMLElement, containingWidth: number, measure: number): void;
+  /** Restore both passes, if any.  Safe to call repeatedly. */
+  restore(): void;
+}
+
+/**
+ * Holds the two-phase percentage-spacing transaction so the paginator only owns
+ * one field.  `applyRoot` and `applyBody` run at their existing fixed measure
+ * positions; `restore` unwinds body first, then root.
+ */
+export function createPercentageSpacingSession(): PercentageSpacingSession {
+  let restoreHandle: () => void = () => {};
+  return {
+    applyRoot(doc, viewer, measure, enabled = true) {
+      restoreHandle = enabled ? applyReaderRootPercentageSpacing(doc, viewer, measure) : () => {};
+    },
+    applyBody(doc, viewer, containingWidth, measure) {
+      const restoreBody = applyReaderBodyPercentageSpacing(doc, viewer, containingWidth, measure);
+      const restoreRoot = restoreHandle;
+      restoreHandle = () => {
+        restoreBody();
+        restoreRoot();
+      };
+    },
+    restore() {
+      restoreHandle();
+      restoreHandle = () => {};
+    },
+  };
+}
+
 /**
  * 兼容旧调用的一步式入口。产品测量必须使用上面两个分阶段函数，避免在
  * 本轮 SpreadGeometry 建立前用整屏/body 宽处理正文直接子。

@@ -2466,7 +2466,7 @@ describe("measure viewport height locking", () => {
       restoreFitContentFix: vi.fn(),
       restoreFloatWidths: vi.fn(),
       restoreTrailingFloatFixes: vi.fn(),
-      restorePercentageSpacing: vi.fn(),
+      percentageSpacingSession: { applyRoot: vi.fn(), applyBody: vi.fn(), restore: vi.fn() },
       measureControllers,
       fixedLayout: false,
     });
@@ -2477,6 +2477,10 @@ describe("measure viewport height locking", () => {
     expect(viewer.style.height).toBe("540px");
     // ER-0126: the previous backdrop transaction is undone before measuring.
     expect(context.backdropCompatibilitySession.restore).toHaveBeenCalledTimes(1);
+    // ER-0133: the previous percentage-spacing transaction is undone, then the
+    // root pass is installed before the first await.
+    expect(context.percentageSpacingSession.restore).toHaveBeenCalledTimes(1);
+    expect(context.percentageSpacingSession.applyRoot).toHaveBeenCalledTimes(1);
     // The 800px parent contributes 10px of padding on each side.
     expect(viewer.style.columnWidth).toBe("780px");
     expect(viewer.style.columnCount).toBe("1");
@@ -2517,7 +2521,7 @@ describe("measure viewport height locking", () => {
       restoreFitContentFix: vi.fn(),
       restoreFloatWidths: vi.fn(),
       restoreTrailingFloatFixes: vi.fn(),
-      restorePercentageSpacing: vi.fn(),
+      percentageSpacingSession: { applyRoot: vi.fn(), applyBody: vi.fn(), restore: vi.fn() },
       measureControllers,
       fixedLayout: false,
     });
@@ -2596,7 +2600,7 @@ describe("measure viewport height locking", () => {
       restoreFitContentFix: vi.fn(),
       restoreFloatWidths: vi.fn(),
       restoreTrailingFloatFixes: vi.fn(),
-      restorePercentageSpacing: vi.fn(),
+      percentageSpacingSession: { applyRoot: vi.fn(), applyBody: vi.fn(), restore: vi.fn() },
       measureControllers,
       fixedLayout: false,
     });
@@ -2680,7 +2684,7 @@ describe("measure viewport height locking", () => {
       restoreFitContentFix: vi.fn(),
       restoreFloatWidths: vi.fn(),
       restoreTrailingFloatFixes: vi.fn(),
-      restorePercentageSpacing: vi.fn(),
+      percentageSpacingSession: { applyRoot: vi.fn(), applyBody: vi.fn(), restore: vi.fn() },
       measureControllers,
       fixedLayout: false,
     });

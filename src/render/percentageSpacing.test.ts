@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyReaderBodyPercentageSpacing, projectPercentageSpacing, projectPercentageSpacingToLocalWidth } from "./percentageSpacing";
+import { applyReaderBodyPercentageSpacing, createPercentageSpacingSession, projectPercentageSpacing, projectPercentageSpacingToLocalWidth } from "./percentageSpacing";
 
 describe("percentage spacing uses the reader measure", () => {
   it("projects vertical margin and padding without treating them as height percentages", () => {
@@ -74,5 +74,98 @@ describe("page-level percentage spacing uses the current physical column", () =>
     expect(priorities.get("padding-left")).toBe("important");
     restore();
     expect(values.get("padding-left")).toBeUndefined();
+  });
+});
+
+describe("percentage spacing session", () => {
+  function spacingElement(properties: Record<string, string>) {
+    const values = new Map<string, string>();
+    const priorities = new Map<string, string>();
+    const style = {
+      getPropertyValue: (property: string) => values.get(property) ?? "",
+      getPropertyPriority: (property: string) => priorities.get(property) ?? "",
+      setProperty: (property: string, value: string, priority = "") => {
+        values.set(property, value);
+        if (priority) priorities.set(property, priority);
+        else priorities.delete(property);
+      },
+      removeProperty: (property: string) => {
+        values.delete(property);
+        priorities.delete(property);
+        return "";
+      },
+    } as unknown as CSSStyleDeclaration;
+    const el = {
+      style,
+      clientWidth: 1000,
+      classList: { contains: () => false },
+      matches: () => false,
+      computedStyleMap: () =>
+        new Map(Object.entries(properties).map(([property, value]) => [property, { toString: () => value }])),
+    };
+    return { el: el as unknown as HTMLElement, values, priorities };
+  }
+
+  function sessionDoc(
+    root: ReturnType<typeof spacingElement>,
+    body: ReturnType<typeof spacingElement>,
+  ): Document {
+    return {
+      defaultView: {
+        getComputedStyle: () => ({ writingMode: "horizontal-tb", position: "static", float: "none", width: "200px" }),
+        CSS: { supports: () => true },
+      },
+      documentElement: root.el,
+      body: body.el,
+    } as unknown as Document;
+  }
+
+  it("restores root then body spacing and tolerates repeated restore", () => {
+    const root = spacingElement({ "padding-left": "10%" });
+    const body = spacingElement({ "padding-top": "10%" });
+    const readerTop = spacingElement({ "padding-left": "10%" });
+    (readerTop.el as unknown as { classList: { contains(name: string): boolean } }).classList = {
+      contains: (name: string) => name === "reader-top",
+    };
+    const viewer = { children: [readerTop.el] } as unknown as HTMLElement;
+    const doc = sessionDoc(root, body);
+    const session = createPercentageSpacingSession();
+
+    session.applyRoot(doc, viewer, 640);
+    session.applyBody(doc, viewer, 588, 640);
+    expect(root.values.get("padding-left")).toBe("64px");
+    expect(body.values.get("padding-top")).toBe("64px");
+    expect(readerTop.values.get("padding-left")).toBe("58.8px");
+
+    session.restore();
+    expect(root.values.size).toBe(0);
+    expect(body.values.size).toBe(0);
+    expect(readerTop.values.size).toBe(0);
+
+    session.restore();
+    expect(root.values.size).toBe(0);
+    expect(body.values.size).toBe(0);
+    expect(readerTop.values.size).toBe(0);
+
+    session.applyRoot(doc, viewer, 640, false);
+    expect(root.values.size).toBe(0);
+    session.restore();
+    expect(root.values.size).toBe(0);
+  });
+
+  it("a later root apply replaces the previous handle without restoring it first", () => {
+    const firstRoot = spacingElement({ "padding-left": "10%" });
+    const secondRoot = spacingElement({ "padding-left": "10%" });
+    const session = createPercentageSpacingSession();
+    const emptyViewer = { children: [] } as unknown as HTMLElement;
+
+    session.applyRoot(sessionDoc(firstRoot, spacingElement({})), emptyViewer, 640);
+    session.applyRoot(sessionDoc(secondRoot, spacingElement({})), emptyViewer, 640);
+    expect(firstRoot.values.get("padding-left")).toBe("64px");
+    expect(secondRoot.values.get("padding-left")).toBe("64px");
+
+    session.restore();
+    expect(firstRoot.values.get("padding-left")).toBe("64px");
+    expect(secondRoot.values.size).toBe(0);
   });
 });
