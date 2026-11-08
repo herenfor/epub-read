@@ -33,4 +33,28 @@ describe("ReaderNote validation", () => {
     expect(validateReaderNote(note({ content: "x".repeat(10001) })).valid).toBe(false);
     expect(validateReaderNote(note({ createdAtMs: 3, updatedAtMs: 2 }))).toEqual({ valid: true });
   });
+
+  it("accepts highlight style and palette/hex colors while keeping old notes valid", () => {
+    expect(validateReaderNote(note())).toEqual({ valid: true });
+    expect(validateReaderNote(note({ style: "squiggly", color: "violet" }))).toEqual({ valid: true });
+    expect(validateReaderNote(note({ style: "highlight", color: "#AABBCC" }))).toEqual({ valid: true });
+    expect(validateReaderNote(note({ style: "underline" }))).toEqual({ valid: true });
+    expect(validateReaderNote(note({ color: "blue" }))).toEqual({ valid: true });
+    expect(normalizeReaderNotes([
+      note({ color: "#AABBCC" }),
+      note({ style: "squiggly", color: "violet", content: "   " }),
+    ])).toEqual([
+      note({ color: "#aabbcc" }),
+      note({ style: "squiggly", color: "violet", content: "" }),
+    ]);
+  });
+
+  it("accepts empty content for pure highlights and still rejects invalid fields", () => {
+    expect(validateReaderNote(note({ content: "" }))).toEqual({ valid: true });
+    expect(normalizeReaderNotes([note({ content: "\n\t " })])).toEqual([note({ content: "" })]);
+    expect(validateReaderNote({ ...note(), style: "wavy" }).valid).toBe(false);
+    expect(validateReaderNote({ ...note(), color: "pink" }).valid).toBe(false);
+    expect(validateReaderNote({ ...note(), color: "#12345" }).valid).toBe(false);
+    expect(validateReaderNote({ ...note(), color: "RED" }).valid).toBe(false);
+  });
 });

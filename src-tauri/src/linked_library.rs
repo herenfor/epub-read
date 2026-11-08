@@ -42,7 +42,6 @@ use tauri::{
     Manager,
     State,
 };
-use zip::ZipArchive;
 use crate::native_zip_session::{Fault, NativeZipSession, CHUNK_BYTES};
 
 pub(crate) mod epub_meta;
@@ -50,7 +49,6 @@ pub(crate) use epub_meta::{
     inspect_epub,
     inspect_epub_cover,
 };
-use epub_meta::read_zip_entry_bounded;
 
 pub(crate) mod document_source;
 #[cfg(target_os = "android")]
@@ -129,6 +127,7 @@ use library_settings::*;
 pub(crate) use library_settings::{managed_books_directory, writable_books_directory};
 
 mod library_location;
+pub(crate) use library_location::source_lease;
 pub use library_location::{
     LibraryLocationState,
     linked_library_location_plan, linked_library_location_start,

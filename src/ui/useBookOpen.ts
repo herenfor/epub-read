@@ -508,7 +508,7 @@ export function useBookOpen({
               multiple: false,
               directory: false,
               title: uiText("notice.open.relocateTitle", { title: entry.title }),
-              filters: [{ name: uiText("notice.picker.epubFilter"), extensions: ["epub", "txt", "cbz", "zip"] }],
+              filters: [{ name: uiText("notice.picker.epubFilter"), extensions: ["epub", "fb2", "txt", "cbz", "zip"] }],
             });
             if (!selected || Array.isArray(selected)) {
               shelfBusyRef.current = false;

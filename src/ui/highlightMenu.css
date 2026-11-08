@@ -1,0 +1,189 @@
+/*
+ * Highlight colors and the selection menu's highlight rows (ER-0106/ER-0109).
+ * --hl-line is the swatch/underline color, --hl-fill the background tint.
+ * Light paper values first; dark themes (data-tone="dark") use the dark set.
+ * A hex color derives both: light = hex / 28%, dark = hex+white 65:35 / 30%.
+ */
+.hl-c-red { --hl-line: #d64545; --hl-fill: rgba(239, 68, 68, 0.26); }
+.hl-c-yellow { --hl-line: #c29200; --hl-fill: rgba(250, 204, 21, 0.4); }
+.hl-c-green { --hl-line: #2f9e5b; --hl-fill: rgba(34, 197, 94, 0.26); }
+.hl-c-blue { --hl-line: #2f6fd6; --hl-fill: rgba(59, 130, 246, 0.24); }
+.hl-c-violet { --hl-line: #8b4fd6; --hl-fill: rgba(168, 85, 247, 0.24); }
+.hl-c-hex { --hl-line: var(--hl-hex); --hl-fill: color-mix(in srgb, var(--hl-hex) 28%, transparent); }
+.hl-c-default { --hl-line: var(--ui-note-quote); --hl-fill: transparent; }
+
+:is([data-tone="dark"], .hl-paper-dark) .hl-c-red { --hl-line: #f28b8b; --hl-fill: rgba(248, 113, 113, 0.3); }
+:is([data-tone="dark"], .hl-paper-dark) .hl-c-yellow { --hl-line: #e3c04a; --hl-fill: rgba(250, 204, 21, 0.26); }
+:is([data-tone="dark"], .hl-paper-dark) .hl-c-green { --hl-line: #6fd49a; --hl-fill: rgba(74, 222, 128, 0.22); }
+:is([data-tone="dark"], .hl-paper-dark) .hl-c-blue { --hl-line: #8ab8ff; --hl-fill: rgba(96, 165, 250, 0.28); }
+:is([data-tone="dark"], .hl-paper-dark) .hl-c-violet { --hl-line: #c59bff; --hl-fill: rgba(192, 132, 252, 0.28); }
+:is([data-tone="dark"], .hl-paper-dark) .hl-c-hex {
+  --hl-line: color-mix(in srgb, var(--hl-hex) 65%, white);
+  --hl-fill: color-mix(in srgb, color-mix(in srgb, var(--hl-hex) 65%, white) 30%, transparent);
+}
+/* The picker's light-paper sample stays light inside a dark app. */
+.hl-paper-light .hl-c-hex { --hl-line: var(--hl-hex); --hl-fill: color-mix(in srgb, var(--hl-hex) 28%, transparent); }
+
+.hl-s-highlight { background: var(--hl-fill); border-radius: 2px; }
+.hl-s-underline { text-decoration: underline 2px var(--hl-line); text-underline-offset: 0.18em; }
+.hl-s-squiggly { text-decoration: underline wavy 1.5px var(--hl-line); text-underline-offset: 0.2em; text-decoration-skip-ink: none; }
+
+/* ---- menu layout: rows stacked; each row wraps on a narrow screen ---- */
+.reader-context-menu.has-highlight {
+  flex-direction: column;
+  max-width: min(360px, calc(100vw - 16px));
+}
+
+.hl-menu-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.hl-menu-rule {
+  height: var(--hairline);
+  margin: 0 4px;
+  background: var(--panel-border);
+}
+
+.hl-menu-sep {
+  align-self: stretch;
+  width: var(--hairline);
+  margin: 4px 2px;
+  background: var(--panel-border);
+}
+
+.reader-context-menu.has-highlight button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.reader-context-menu button.is-on { background: var(--btn-tint-hover); }
+.reader-context-menu button.is-danger { color: var(--ui-danger); }
+.reader-context-menu .hl-menu-chevron { padding-inline: 8px; color: var(--muted); font-size: var(--fs-caption); }
+
+.hl-dot {
+  display: inline-block;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--hl-line);
+}
+
+.hl-dot-empty {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  background: conic-gradient(#ef4444, #f59e0b, #22c55e, #3b82f6, #a855f7, #ef4444);
+  color: #fff;
+  font: 600 13px/1 var(--font-ui, sans-serif);
+  text-shadow: 0 0 2px rgba(0, 0, 0, 0.6);
+}
+
+.reader-context-menu button.hl-swatch,
+.hl-picker button.hl-swatch {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 50%;
+}
+
+.hl-swatch.is-current .hl-dot {
+  box-shadow: 0 0 0 2px var(--panel-bg), 0 0 0 4px var(--fg);
+}
+
+.hl-style-sample {
+  font-family: var(--font-book, serif);
+  padding: 0 2px;
+}
+
+/* ---- custom color panel ---- */
+.hl-picker {
+  display: grid;
+  gap: 10px;
+  padding: 6px;
+  width: min(300px, calc(100vw - 32px));
+}
+
+.hl-picker-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.hl-picker-hex {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-caption);
+  color: var(--muted);
+}
+
+.hl-picker-hex input {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 0 10px;
+  border: var(--hairline) solid var(--panel-border);
+  border-radius: var(--r-sm);
+  background: var(--ui-control-bg, transparent);
+  color: var(--fg);
+  font: 13px ui-monospace, Consolas, monospace;
+}
+
+.hl-picker-hex input[aria-invalid="true"] { border-color: var(--ui-danger); }
+
+.hl-picker-preview {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.hl-picker-preview > span {
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  font-family: var(--font-book, serif);
+  font-size: 14px;
+}
+
+.hl-picker-preview .hl-paper-light { background: #ffffff; color: #1a1a1a; }
+.hl-picker-preview .hl-paper-dark { background: #1e1e1e; color: #d4d4d4; }
+
+.hl-picker-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.reader-context-menu .hl-picker-actions button.is-primary {
+  background: var(--accent);
+  color: var(--accent-foreground, #fff);
+}
+
+.reader-context-menu .hl-picker-actions button:disabled { opacity: 0.45; cursor: default; }
+
+/* Touch: 48px targets everywhere, swatches included (styles.css sets buttons). */
+.app[data-touch-ui="true"] .reader-context-menu button.hl-swatch,
+.app[data-touch-ui="true"] .hl-picker button.hl-swatch {
+  width: 48px;
+  height: 48px;
+  min-width: 48px;
+  padding: 0;
+}
+
+.app[data-touch-ui="true"] .hl-picker-hex input { height: 44px; }
+
+/* Floating undo for a delete from the highlight menu (same pill as the sidebar). */
+.reader-undo-pill {
+  position: fixed;
+  left: 50%;
+  bottom: 56px;
+  z-index: calc(var(--z-ui-opening) + 20);
+  width: min(340px, calc(100vw - 32px));
+  transform: translateX(-50%);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
+}

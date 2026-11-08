@@ -352,7 +352,12 @@ export class PrivateLocalStore implements ShelfStore {
 export class PrivateShelfStore extends PortableShelfStore {
   readonly archiveOnly = true;
 
-  constructor(private readonly local: PrivateLocalStore, data: PrivatePortableData) {
+  constructor(
+    private readonly local: PrivateLocalStore,
+    data: PrivatePortableData,
+    /** The unlock session native import commands bind their scope to. */
+    readonly privateSessionId: string,
+  ) {
     super(local, data);
   }
 
@@ -368,5 +373,5 @@ export class PrivateShelfStore extends PortableShelfStore {
 export function createPrivateShelfStore(native: PrivateShelfNative, sessionId: string, onLocked: () => void): PrivateShelfStore {
   const route = new PrivateShelfRoute(native, sessionId, onLocked);
   const data = new PrivatePortableData(route);
-  return new PrivateShelfStore(new PrivateLocalStore(route, data), data);
+  return new PrivateShelfStore(new PrivateLocalStore(route, data), data, sessionId);
 }

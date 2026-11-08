@@ -83,7 +83,7 @@ describe("original document formats", () => {
         expect(portableSchemaVersion(books)).toBe(4);
         expect(parsePortableStateV3(state).schemaVersion).toBe(4);
         expect(()=>parsePortableStateV3({...state,schemaVersion:3})).toThrow();
-        expect(()=>parsePortableStateV3({...state,schemaVersion:5})).toThrow();
+        expect(()=>parsePortableStateV3({...state,schemaVersion:7})).toThrow();
         expect(parsePortableStateV3({...state,schemaVersion:3,books:{}}).schemaVersion).toBe(3);
     });
 

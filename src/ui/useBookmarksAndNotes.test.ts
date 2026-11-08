@@ -11,6 +11,7 @@ import { readerForegroundSurfaces, useReaderForeground, useReaderForegroundState
 import { useNoteEditRef, replaceNoteEditContext, useBookmarkToast, useBookmarkToastCleanup,
   useNoteBusyState, useNoteProjection, useNoteActions, useBookmarkProjection,
   useBookmarkSidebarToggle, useBookmarkActions, useNoteEditRelease } from "./useBookmarksAndNotes";
+import { NOTE_UNDO_MS, usePendingNoteDelete, useVisibleChapterNotes } from "./pendingNoteDelete";
 
 const ports = vi.hoisted(() => ({ store: vi.fn() }));
 vi.mock("./shelf", async (original) => ({ ...await original<typeof import("./shelf")>(), getShelfStore: ports.store }));
@@ -99,8 +100,10 @@ function setup() {
       ...bookmarks, spineIndex: 0, book, readerRef, showBookmarkToast: toast.showBookmarkToast,
       setShelfEntries: shelf.setShelfEntries, setShelfError: shelf.setShelfError });
     useNoteEditRelease({ noteComposer, noteComposerDirtyRef: dirty, activeNoteEditContextRef: editRef });
+    const pendingDelete = usePendingNoteDelete({ currentShelfId: "book", commitDelete: noteActions.deleteNoteIn });
+    const visible = useVisibleChapterNotes(notes.currentChapterNotes, notes.notesForChapter, pendingDelete.hiddenNoteIds);
     return { ...shelf, ...toast, ...busy, ...notes, ...noteActions, ...bookmarks, ...bookmarkActions,
-      editRef, foreground, commands, issues, toggleSidebar };
+      ...pendingDelete, ...visible, editRef, foreground, commands, issues, toggleSidebar };
   }
   let api!: ReturnType<typeof useHost>;
   function Host() { api = useHost(); return createElement("div", {}, api.currentBookmarks.length); }
@@ -232,12 +235,99 @@ describe("annotation responsibilities extracted from App", () => {
       expect(t.current().foreground.kind).toBe("modal");
       await t.dom.run(() => t.current().handleSaveNote(" legacy "));
       expect(t.store.setNotes.mock.calls[0][1][0]).toMatchObject({ content: "legacy", createdAtMs: 1 });
-      await t.dom.run(() => t.current().handleDeleteNote("n"));
+      await t.dom.run(async () => { await t.current().deleteNoteIn("book", "n"); });
       expect(t.store.setNotes).toHaveBeenLastCalledWith("book", []);
       ports.store.mockReturnValue(t.store);
       await t.dom.run(() => t.current().setShelfEntries([{ ...entry, notes: [note], portableNoteAnnotations: { n: { deleted: { deviceId: "device", counter: 1 }, versions: [] } } } as ShelfEntry]));
       await t.dom.run(() => t.current().handleEditNote("n"));
       expect(t.store.beginNoteEdit).not.toHaveBeenCalled();
+    } finally { await t.dispose(); }
+  });
+
+  it("deletes a note in one step, writes nothing on undo and commits when the undo window ends", async () => {
+    const t = setup();
+    try {
+      await t.render();
+      const other = { ...note, id: "m", content: "other" };
+      await t.dom.run(() => t.current().setShelfEntries([{ ...entry, notes: [note, other] }]));
+      const chapter = t.current().visibleChapterNotes;
+      expect(chapter.map((item) => item.id)).toEqual(["n", "m"]);
+      await t.dom.run(() => t.current().requestDelete("n"));
+      expect(t.current().pendingNoteId).toBe("n");
+      expect(t.current().visibleChapterNotes.map((item) => item.id)).toEqual(["m"]);
+      expect(t.current().visibleNotesForChapter(0)).toBe(t.current().visibleNotesForChapter(0));
+      expect(t.current().noteViewModels.map((item) => item.id)).toEqual(["n", "m"]);
+      await t.dom.run(() => t.current().undoDelete());
+      await t.advance(NOTE_UNDO_MS);
+      expect(t.store.deleteNote).not.toHaveBeenCalled();
+      expect(t.current().pendingNoteId).toBeNull();
+      expect(t.current().visibleChapterNotes).toBe(t.current().currentChapterNotes);
+
+      await t.dom.run(() => t.current().requestDelete("n"));
+      await t.dom.run(() => t.current().requestDelete("m"));
+      expect(t.store.deleteNote).toHaveBeenCalledTimes(1);
+      expect(t.store.deleteNote).toHaveBeenLastCalledWith("book", "n");
+      expect(t.current().pendingNoteId).toBe("m");
+      await t.advance(NOTE_UNDO_MS - 1);
+      expect(t.store.deleteNote).toHaveBeenCalledTimes(1);
+      await t.advance(1);
+      expect(t.store.deleteNote).toHaveBeenLastCalledWith("book", "m");
+      expect(t.current().pendingNoteId).toBeNull();
+    } finally { await t.dispose(); }
+  });
+
+  it("highlights a selection in one step and restyles through the displayed version", async () => {
+    const t = setup();
+    try {
+      await t.render();
+      await t.dom.run(() => t.current().setShelfEntries([entry]));
+      await t.dom.run(async () => { await t.current().createHighlight(selection, 0, { style: "underline", color: "#d9691f" }); });
+      expect(t.store.createNote.mock.calls[0][1]).toMatchObject({ content: "", style: "underline", color: "#d9691f", selectedText: "original" });
+
+      const stamp = { deviceId: "device", counter: 2 };
+      const annotations = { n: { versions: [{ stamp, clock: { device: 2 }, value: {}, updatedAtMs: 2 }] } };
+      await t.dom.run(() => t.current().setShelfEntries([{ ...entry, notes: [note], portableNoteAnnotations: annotations } as ShelfEntry]));
+      await t.dom.run(async () => { await t.current().restyleNote("n", { color: "green", style: "highlight" }); });
+      expect(t.store.beginNoteEdit).toHaveBeenCalledExactlyOnceWith("book", "n", stamp);
+      expect(t.store.writeNoteEdit.mock.calls[0][1]).toMatchObject({ id: "n", content: "old", color: "green", style: "highlight" });
+      expect(t.store.endNoteEdit).toHaveBeenCalledExactlyOnceWith({ readId: "read", basisId: "basis" });
+      expect(t.current().noteViewModels[0]).toMatchObject({ color: "green", style: "highlight" });
+
+      ports.store.mockReturnValue({ setNotes: t.store.setNotes });
+      await t.dom.run(() => t.current().setShelfEntries([{ ...entry, notes: [note] }]));
+      await t.dom.run(async () => { await t.current().restyleNote("n", { style: "squiggly" }); });
+      expect(t.store.setNotes.mock.calls.at(-1)?.[1][0]).toMatchObject({ id: "n", style: "squiggly" });
+      expect(t.store.setNotes.mock.calls.at(-1)?.[1][0].color).toBeUndefined();
+    } finally { await t.dispose(); }
+  });
+
+  it("forwards saved highlight appearance to both chapter projections", async () => {
+    const t = setup();
+    try {
+      await t.render();
+      await t.dom.run(() => t.current().setShelfEntries([{ ...entry, notes: [{ ...note, style: "squiggly", color: "green" }] }]));
+      expect(t.current().currentChapterNotes[0]).toMatchObject({ style: "squiggly", color: "green" });
+      expect(t.current().notesForChapter(0)[0]).toMatchObject({ style: "squiggly", color: "green" });
+    } finally { await t.dispose(); }
+  });
+
+  it("retains a second style choice while the preceding color write is pending", async () => {
+    const t = setup();
+    try {
+      await t.render();
+      const styled: ReaderNote = { ...note, style: "highlight", color: "red" };
+      await t.dom.run(() => t.current().setShelfEntries([{ ...entry, notes: [styled] }]));
+      ports.store.mockReturnValue({ setNotes: t.store.setNotes });
+      const write = deferred<ShelfEntry>();
+      t.store.setNotes.mockReturnValueOnce(write.promise);
+      let first!: Promise<boolean>;
+      await t.dom.run(() => { first = t.current().restyleNote("n", { color: "green" }); });
+      await t.dom.run(async () => { await t.current().restyleNote("n", { style: "squiggly" }); });
+      await t.dom.run(async () => {
+        write.resolve({ ...entry, notes: [{ ...styled, color: "green" }] });
+        await first;
+      });
+      expect(t.current().currentNotes[0]).toMatchObject({ style: "squiggly", color: "green" });
     } finally { await t.dispose(); }
   });
 

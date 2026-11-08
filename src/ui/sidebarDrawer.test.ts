@@ -153,6 +153,42 @@ describe("Zen UI SidebarDrawer 组件与交互契约（Packet B）", () => {
     expect(html).toContain("第一章 起航");
   });
 
+  it("刚删除的笔记在原位显示撤销条，删除按钮一步、不再出现二次确认", () => {
+    const notes = [...sampleNotes, { ...sampleNotes[0], id: "note2", content: "第二条笔记" }];
+    const live = renderToStaticMarkup(
+      createElement(SidebarDrawer, { ...baseProps, activeTab: "notes", notes, onDeleteNote: vi.fn() })
+    );
+    expect(live).not.toContain("确认删除");
+    expect(live).toContain("笔记 (2)");
+    const html = renderToStaticMarkup(
+      createElement(SidebarDrawer, { ...baseProps, activeTab: "notes", notes, onDeleteNote: vi.fn(),
+        pendingDeleteNoteId: "note1", onUndoDeleteNote: vi.fn() })
+    );
+    expect(html.match(/sidebar-note-card/g)).toHaveLength(1);
+    expect(html).toContain("ui-undo-pill");
+    expect(html).toContain("已删除笔记");
+    expect(html).toContain("我的读书笔记");
+    expect(html).toContain("撤销");
+    expect(html).toContain("笔记 (1)");
+  });
+
+  it("笔记条目带颜色条；纯高亮以原文为正文、按钮为添加笔记", () => {
+    const notes = [
+      { ...sampleNotes[0], id: "pure", content: "", selectedText: "只划不写的句子", style: "highlight" as const, color: "green" as const },
+      { ...sampleNotes[0], id: "hex", color: "#d9691f" as const, style: "squiggly" as const },
+    ];
+    const html = renderToStaticMarkup(
+      createElement(SidebarDrawer, { ...baseProps, activeTab: "notes", notes, onEditNote: vi.fn(), onDeleteNote: vi.fn() })
+    );
+    expect(html).toContain("sidebar-note-card hl-c-green");
+    expect(html).toContain("--hl-hex:#d9691f");
+    expect(html).toContain("sidebar-note-content is-quote");
+    expect(html).toContain("只划不写的句子");
+    expect(html.match(/sidebar-note-selection/g)).toHaveLength(1);
+    expect(html).toContain("添加笔记");
+    expect(html).toContain("编辑");
+  });
+
   it("固定驻留（Docked）模式渲染 is-docked 标识且不渲染 backdrop 遮罩", () => {
     const html = renderToStaticMarkup(
       createElement(SidebarDrawer, { ...baseProps, mode: "docked" })

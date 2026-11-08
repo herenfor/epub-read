@@ -13,7 +13,11 @@ use std::path::Path;
 //    selectable books root. 2 -> 3 backs up and changes only user_version;
 //    it MUST NOT rerun the old purge. No portable/LAN/WebDAV version changes.
 // 4: TXT/comic source and encoded virtual chapter identities. Back up then mark; no row rewrite.
-const SCHEMA_VERSION: i64 = 4;
+// 5: FB2 sources and deterministic virtual chapter/resource identities.
+//    4 -> 5 backs up then marks only; never repeats the historical row purge.
+// 6: pure highlights and note style/color. 5 -> 6 backs up then marks only;
+//    older clients must refuse these annotation values, never purge/rewrite them.
+const SCHEMA_VERSION: i64 = 6;
 const DIRECTORY_TABLE: &str = "directory_bindings";
 const TABLES: &[(&str, &str)] = &[
     (
@@ -104,7 +108,7 @@ pub(super) fn initialize(connection: &mut Connection) -> PortableResult<()> {
     if !fresh
         && (!known
             || (objects.len() == TABLES.len() - 1 && has_directory)
-            || !matches!(version, 0 | 1 | 2 | 3 | SCHEMA_VERSION))
+            || !matches!(version, 0 | 1 | 2 | 3 | 4 | 5 | SCHEMA_VERSION))
     {
         return Err(PortableError::unrecognized_database_format(
             "本机资料库结构无法识别，原资料已保留",
@@ -207,8 +211,8 @@ mod schema_version_tests {
     }
 
     #[test]
-    fn source_formats_prior_versions_are_backed_up_without_purging_records() {
-        for prior_version in [2, 3] {
+    fn highlight_prior_versions_are_backed_up_without_purging_records() {
+        for prior_version in [2, 3, 4, 5] {
         let db = TestDb::new();
         let connection = Connection::open(&db.0).unwrap();
         connection
@@ -239,7 +243,7 @@ mod schema_version_tests {
                 .unwrap(),
             before
         );
-        let prefix = format!("{}.before-v4-", db.0.file_name().unwrap().to_string_lossy());
+        let prefix = format!("{}.before-v{SCHEMA_VERSION}-", db.0.file_name().unwrap().to_string_lossy());
         let copies: Vec<_> = std::fs::read_dir(db.0.parent().unwrap())
             .unwrap()
             .filter_map(Result::ok)
@@ -470,7 +474,7 @@ mod schema_version_tests {
     }
 
     #[test]
-    fn marked_database_reopens_idempotently() {
+    fn marked_highlight_database_reopens_idempotently() {
         let db = TestDb::new();
         drop(PortableStore::open(&db.0).unwrap());
         let connection = Connection::open(&db.0).unwrap();
@@ -498,10 +502,10 @@ mod schema_version_tests {
     }
 
     #[test]
-    fn newer_database_is_rejected_without_changes() {
+    fn highlight_newer_database_is_rejected_without_changes() {
         let db = TestDb::new();
         let connection = Connection::open(&db.0).unwrap();
-        connection.execute_batch("PRAGMA user_version=5; CREATE TABLE future_data (value TEXT); INSERT INTO future_data VALUES ('keep');").unwrap();
+        connection.execute_batch(&format!("PRAGMA user_version={}; CREATE TABLE future_data (value TEXT); INSERT INTO future_data VALUES ('keep');", SCHEMA_VERSION + 1)).unwrap();
         assert_eq!(
             PortableStore::open(&db.0).err().unwrap().code,
             "unsupported-database-version"
@@ -510,7 +514,7 @@ mod schema_version_tests {
             connection
                 .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
                 .unwrap(),
-            5
+            SCHEMA_VERSION + 1
         );
         assert_eq!(
             connection

@@ -18,7 +18,7 @@ import {
 } from "../platform/saveFileNativeBridge";
 import type { RuntimeCapabilities } from "../platform/runtimeCapabilities";
 import type { ReaderSettings } from "../render/settings";
-import { bookExportErrorNotice, bookExportFileName, bookExportResultNotice, bookExportTargetLabel } from "./bookExportText";
+import { bookExportErrorNotice, bookExportFileName, bookExportMimeType, bookExportResultNotice, bookExportTargetLabel } from "./bookExportText";
 import type { CheckpointedSample } from "./checkpointProgressRepair";
 import { noteCloudSyncChange } from "./cloudSync/cloudSyncStore";
 import { importSkippedNotice } from "./importSkippedText";
@@ -39,6 +39,8 @@ import type { UseSaveFileJobResult } from "./useSaveFileJob";
 import type { useShelfLibrary, useShelfOrganizationActions, ShelfNotice } from "./useShelfLibrary";
 
 export interface SaveFileFlowsDeps {
+  /** Offered the picked file first; "not-readest" continues with the SeLis archive import. */
+  tryReadestImport?: (source: SaveFileLocation, label: string) => Promise<"handled" | "not-readest">;
   runtime: RuntimeCapabilities;
   isTauriEnv: () => boolean;
   settings: ReaderSettings;
@@ -71,6 +73,7 @@ export interface SaveFileFlowsDeps {
 }
 
 export function useSaveFileFlows({
+  tryReadestImport,
   runtime,
   isTauriEnv,
   settings,
@@ -140,12 +143,14 @@ export function useSaveFileFlows({
       multiple: false,
       directory: false,
       title: uiText("notice.archive.importTitle"),
-      filters: [{ name: uiText("notice.archive.filter"), extensions: ["epubsave"] }],
+      filters: [tryReadestImport
+        ? { name: uiText("notice.archive.filterWithReadest"), extensions: ["epubsave", "zip"] }
+        : { name: uiText("notice.archive.filter"), extensions: ["epubsave"] }],
     });
     const path = Array.isArray(selected) ? selected[0] : selected;
     if (typeof path !== "string" || path.length === 0) return null;
     return { source: { kind: "path", path }, label: path.split(/[\\/]/).pop() || path };
-  }, [runtime.platform]);
+  }, [runtime.platform, tryReadestImport]);
 
   const resolveNativeExportScope = useCallback(async (
     selectedEntries: ShelfEntry[],
@@ -296,7 +301,7 @@ export function useSaveFileFlows({
           defaultPath,
           filters: [zip
             ? { name: uiText("bookExport.filter.zip"), extensions: [runtime.platform === "android" ? "application/zip" : "zip"] }
-            : { name: uiText("bookExport.filter.epub"), extensions: [runtime.platform === "android" ? (/\.txt$/i.test(defaultPath) ? "text/plain" : /\.(cbz|zip)$/i.test(defaultPath) ? "application/zip" : "application/epub+zip") : defaultPath.split(".").pop()!] }],
+            : { name: uiText("bookExport.filter.epub"), extensions: [runtime.platform === "android" ? bookExportMimeType(defaultPath) : defaultPath.split(".").pop()!] }],
         });
         if (typeof selected === "string" && selected.length > 0) {
           destination = runtime.platform === "android" ? { kind: "uri", uri: selected } : { kind: "path", path: selected };
@@ -336,6 +341,8 @@ export function useSaveFileFlows({
     if (!selected) return;
     try {
       await activatePortableShelfState();
+      // A Readest backup gets its own preview; the native open tells the formats apart.
+      if (tryReadestImport && await tryReadestImport(selected.source, selected.label) === "handled") return;
       await saveFileJob.beginPrepare({ source: selected.source, sourceLabel: selected.label });
     } catch (error) {
       const code = saveFileErrorCode(error);
@@ -348,7 +355,7 @@ export function useSaveFileFlows({
     } finally {
       saveFileLaunchRef.current = false;
     }
-  }, [chooseSaveFileSource, saveFileJob]);
+  }, [chooseSaveFileSource, saveFileJob, tryReadestImport]);
 
   const prepareLanSaveSend = useCallback(async (
     scopeChoice: "all" | "selected",

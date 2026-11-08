@@ -105,9 +105,9 @@ pub(crate) fn archive_open_blocking(
         }
     };
 
-    if crate::document_formats::text(&file_name) {
+    if crate::document_formats::virtual_archive(&file_name) {
         guard().map_err(archive_fault_error)?;
-        file = crate::document_formats::text_archive(file, text_encoding.as_deref(), &title)?;
+        file = crate::document_formats::reading_archive(file, &file_name, text_encoding.as_deref(), &title)?;
         guard().map_err(archive_fault_error)?;
     }
     let directory_started = std::time::Instant::now();

@@ -10,7 +10,8 @@ import { useShelfSearchMode, useLibrarySearchRuntime, useLibrarySearchBooks,
 
 const ports = vi.hoisted(() => ({ create: vi.fn(), store: vi.fn(), bridge: vi.fn() }));
 vi.mock("../features/ai/indexing/librarySearchRuntime", () => ({ createDefaultLibrarySearchRuntime: ports.create }));
-vi.mock("./shelf", async (original) => ({ ...await original<typeof import("./shelf")>(), getShelfStore: ports.store }));
+// Native archive channels exist only inside Tauri.
+vi.mock("./shelf", async (original) => ({ ...await original<typeof import("./shelf")>(), getShelfStore: ports.store, isTauriEnv: () => true }));
 vi.mock("../platform/archiveWorkerBridge", () => ({ serveArchivePort: ports.bridge }));
 
 function entry(id: string): ShelfEntry {
@@ -122,6 +123,22 @@ describe("library search host extraction", () => {
       input.dispose();
       expect(t.owner.dispose).toHaveBeenCalledTimes(1);
       // The mocked native owner has no port cleanup; close its input here.
+      ports.bridge.mock.calls[0][0].close();
+    } finally { await t.dispose(); }
+  });
+
+  it("gives desktop FB2 and TXT books the native archive input and keeps EPUB on raw bytes", async () => {
+    const t = setup();
+    try {
+      await t.render();
+      await t.dom.run(() => t.current().setShelfEntries([
+        entry("a"), { ...entry("b"), fileName: "b.FB2" }, { ...entry("c"), fileName: "c.txt" },
+      ]));
+      const books = t.runtime.setBooks.mock.calls.at(-1)![0] as LibrarySearchBook[];
+      expect(books.map((b) => [b.id, Boolean(b.openArchiveInput)])).toEqual([["a", false], ["b", true], ["c", true]]);
+      const input = books[1].openArchiveInput!();
+      expect(ports.bridge.mock.calls[0][1]).toBe("b".repeat(64));
+      input.dispose();
       ports.bridge.mock.calls[0][0].close();
     } finally { await t.dispose(); }
   });

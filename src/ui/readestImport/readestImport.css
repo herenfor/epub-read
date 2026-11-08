@@ -1,0 +1,138 @@
+/* Readest import: rows and grading on top of the shared save-file dialog. */
+.save-file-dialog.readest-import.wide {
+  width: min(600px, 100%);
+}
+
+.readest-group {
+  display: grid;
+  gap: 6px;
+}
+
+.readest-group-label {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-caption);
+}
+
+.readest-row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 9px 10px;
+  border-radius: var(--r-sm);
+  background: var(--shelf-input-bg);
+}
+
+.readest-row.disabled {
+  opacity: 0.55;
+}
+
+.readest-row-text {
+  display: grid;
+  min-width: 0;
+}
+
+.readest-row-text b,
+.readest-book-top b {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.readest-row-text span,
+.readest-progress small,
+.readest-item small {
+  display: block;
+  color: var(--muted);
+  font-size: var(--fs-caption);
+}
+
+.readest-choose {
+  max-width: 180px;
+  min-height: 32px;
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--fs-caption);
+}
+
+.readest-book {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: var(--shelf-input-bg);
+}
+
+.readest-book-top {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.readest-link {
+  padding: 2px 6px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--fs-caption);
+  cursor: pointer;
+}
+
+.readest-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: var(--fs-caption);
+}
+
+.readest-ok { color: color-mix(in srgb, #1f9d55 72%, var(--fg)); }
+.readest-warn { color: color-mix(in srgb, #b8860b 78%, var(--fg)); }
+.readest-bad { color: var(--error); }
+.readest-muted { color: var(--muted); }
+
+.readest-progress {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px dashed var(--panel-border);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-caption);
+  cursor: pointer;
+}
+
+.readest-detail {
+  display: grid;
+  gap: 6px;
+  padding-left: 30px;
+}
+
+.readest-item {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  font-size: var(--fs-caption);
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.readest-item.off {
+  cursor: default;
+}
+
+.readest-item.off q {
+  color: var(--muted);
+}
+
+.readest-progress input,
+.readest-item input {
+  margin-top: 2px;
+}

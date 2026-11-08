@@ -1,9 +1,6 @@
-//! Preparation-only portable save foundation (`CP-N`).
-//!
-//! No command is registered and no startup path opens this module yet.  The
-//! module contains the frozen v3 DTO/parser, the Rust causal merge, the
-//! trusted local read-basis surface, the SQLite repository and the one-shot
-//! migration reader for the legacy JSON files.
+//! Portable reading data: strict DTOs, causal merge, trusted read bases,
+//! SQLite storage and the one-shot legacy JSON migration. Book, save-file,
+//! LAN and cloud commands use this shared data boundary.
 
 #![allow(dead_code)]
 #![allow(unused_imports)]
@@ -27,7 +24,8 @@ pub use dto::{
     validate_locator, validate_note, validate_note_version, validate_portable_book,
     validate_portable_state, validate_preferences, validate_progress, validate_progress_version,
     validate_stamp, validate_version_shape, Annotation, BookMetadata, BookmarkValue, LegacyLocator,
-    LegacyMediaAnchor, Locator, LocatorTarget, MediaTag, ModernLocator, NoteValue, PortableBook,
+    LegacyMediaAnchor, Locator, LocatorTarget, MediaTag, ModernLocator, NoteStyle, NoteValue,
+    PortableBook,
     PortablePreferences, PortableStateV3, Progress, ProgressState, ProgressValue, Register, Stamp,
     Theme, Version, MAX_ANCHOR_SNIPPET_CODE_POINTS, MAX_NOTE_CONTENT_CODE_POINTS,
     MAX_NOTE_SELECTED_CODE_POINTS, MAX_SAFE_COUNTER, TEXT_PROFILE,
@@ -48,6 +46,7 @@ pub use repository::{
     DirectoryPlacementSnapshot, LocalImportOutcome, MigrationOutcome, PortableStore, ProgressProjection, ReleaseTarget,
     ShelfBookProjection, ShelfProjection, WriteOutcome, WriteStatus,
 };
+pub(crate) use repository::{ReadestAnnotation, ReadestBookImport, ReadestImportOutcome, ReadestTarget};
 
 #[cfg(test)]
 mod tests {

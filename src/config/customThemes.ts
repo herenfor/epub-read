@@ -118,7 +118,7 @@ export function isDarkPaper(background: string): boolean {
   return relativeLuminance(background) < 0.179;
 }
 
-function rgba(hex: string, alpha: number): string {
+export function rgba(hex: string, alpha: number): string {
   return `rgba(${channels(hex).join(", ")}, ${alpha})`;
 }
 

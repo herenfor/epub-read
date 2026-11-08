@@ -176,8 +176,9 @@ pub(crate) fn document_archive(
     let (reader, guard) = verified_document(app, uri, hash)?;
     let verify_ms = started.elapsed().as_millis() as u64;
     let started = std::time::Instant::now();
-    let archive = if crate::document_formats::text(file_name) {
-        let file = crate::document_formats::text_archive(reader, encoding, title)?;
+    let archive = if crate::document_formats::virtual_archive(file_name) {
+        let file = crate::document_formats::reading_archive(reader, file_name, encoding, title)?;
+        guard().map_err(archive_fault_error)?;
         NativeZipSession::from_verified_file(file, guard)
     } else {
         NativeZipSession::from_verified_reader(reader, guard)
@@ -196,9 +197,7 @@ pub(crate) fn document_cover(
     };
     let uri = binding.document_uri().ok_or("缺少文档绑定")?;
     let (reader, guard) = verified_document(app, uri, &binding.content_hash)?;
-    let mut zip = zip::ZipArchive::new(reader).map_err(|_| "原书不是有效 ZIP")?;
-    let mut entry = zip.by_name(path).map_err(|_| "找不到封面")?;
-    let bytes = super::read_zip_entry_bounded(&mut entry, super::MAX_COVER_BYTES, "封面")?;
+    let bytes = crate::document_formats::read_cover(reader, path, super::MAX_COVER_BYTES)?;
     guard().map_err(super::archive::archive_fault_error)?;
     Ok(bytes)
 }

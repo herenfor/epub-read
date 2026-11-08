@@ -65,10 +65,16 @@ body { color: ${fg}; background-color: ${effectiveBg}; }
   text-decoration-color: ${noteUnderline};
 }
 /* [L2] 搜索正文命中：只使用 CSS Custom Highlight 支持的绘制属性；
-   背景色保证作者白字/彩字可读，笔记下划线仍可与搜索背景共存。 */
+   背景色保证作者白字/彩字可读。ER-0108：命中的 priority 高于所有高亮组，
+   并加一道与命中文字同色的实线下划线，落在黄色底色高亮上也能分辨。 */
 ::highlight(reader-search-hit) {
   background-color: ${searchBackground};
   color: ${searchForeground};
+  text-decoration-line: underline;
+  text-decoration-style: solid;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.15em;
+  text-decoration-color: ${searchForeground};
 }
 /* [L2] ruby 注音 rt 随主题换色（书常固定 ruby>rt{color:#333}）。 */
 #${VIEWER_ID} rt { color: ${fg}; }

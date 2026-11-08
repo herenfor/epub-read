@@ -17,7 +17,7 @@ struct Slot {
     readers: usize,
 }
 
-pub(super) struct SourceLease(Arc<Mutex<Slot>>);
+pub(crate) struct SourceLease(Arc<Mutex<Slot>>);
 impl Drop for SourceLease {
     fn drop(&mut self) {
         if let Ok(mut slot) = self.0.lock() {
@@ -25,7 +25,7 @@ impl Drop for SourceLease {
         }
     }
 }
-pub(super) fn source_lease(app: &AppHandle) -> Result<Option<SourceLease>> {
+pub(crate) fn source_lease(app: &AppHandle) -> Result<Option<SourceLease>> {
     let Some(state) = app.try_state::<LibraryLocationState>() else {
         return Ok(None);
     };

@@ -188,6 +188,40 @@ describe("portable state parser", () => {
     })).toThrow(/selectedText/);
   });
 
+  test("note highlight style, color and empty content follow the frozen contract", () => {
+    const base = {
+      chapterPath: "OEBPS/ch1.xhtml",
+      spineIndexHint: 1,
+      textProfile: "visible-codepoints-no-whitespace-v1" as const,
+      startTextOffset: 2,
+      endTextOffset: 7,
+      startTextSnippet: "hello",
+      endTextSnippet: "world",
+      selectedText: "hello",
+      content: "note body",
+      createdAtMs: 10,
+    };
+    const old = parseNoteValue(base);
+    expect(old).toEqual(base);
+    expect("style" in old).toBe(false);
+    expect("color" in old).toBe(false);
+
+    expect(parseNoteValue({ ...base, content: "  \n ", style: "squiggly", color: "#AABBCC" }))
+      .toMatchObject({ content: "", style: "squiggly", color: "#aabbcc" });
+    expect(parseNoteValue({ ...base, content: "", style: "highlight" }))
+      .toMatchObject({ content: "", style: "highlight" });
+    expect(parseNoteValue({ ...base, content: "", color: "violet" }))
+      .toMatchObject({ content: "", color: "violet" });
+    for (const color of ["red", "yellow", "green", "blue", "violet", "#010203"]) {
+      expect(parseNoteValue({ ...base, style: "underline", color }).color).toBe(color);
+    }
+
+    expect(() => parseNoteValue({ ...base, style: "wavy" })).toThrow(/style/);
+    expect(() => parseNoteValue({ ...base, color: "pink" })).toThrow(/color/);
+    expect(() => parseNoteValue({ ...base, color: "#12345" })).toThrow(/color/);
+    expect(() => parseNoteValue({ ...base, content: "x".repeat(10001) })).toThrow(/content/);
+  });
+
   test("bookmark conversion preserves old id, created time and locator fields", () => {
     const sourceVersion = annotationFromInitialStamp<BookmarkValue>(stamp(A, 7), {
       locator: legacyLocatorFromReadingFields({ spineIndex: 3, page: 4, anchorIndex: null, anchorRatio: null, anchorTextOffset: 5, anchorTextSnippet: "ab" }),

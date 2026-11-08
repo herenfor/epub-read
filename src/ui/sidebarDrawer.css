@@ -544,13 +544,32 @@
 }
 
 .sidebar-note-card {
+  position: relative;
   display: flex;
   flex-direction: column;
-  padding: 9px 10px;
+  padding: 9px 10px 9px 17px;
   border-radius: var(--r-sm);
   background: var(--ui-card-bg);
   border: var(--hairline) solid color-mix(in srgb, var(--panel-border) 40%, transparent);
   gap: 6px;
+}
+
+/* Highlight color bar (ER-0109); legacy notes take the theme note tone. */
+.sidebar-note-bar {
+  position: absolute;
+  left: 7px;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--hl-line);
+}
+
+.sidebar-note-content.is-quote {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .sidebar-note-main {
@@ -622,10 +641,6 @@
   color: var(--ui-danger);
 }
 
-.sidebar-note-confirm {
-  font-size: var(--fs-caption);
-  color: var(--ui-danger);
-}
 
 /* 驻留模式对正文容器的影响：正文版心自适应收缩 */
 .app.has-docked-sidebar.docked-side-left .main,

@@ -1,5 +1,6 @@
-/** Frozen design DTOs; these modules are not yet wired into the application. */
+/** Shared reading-state DTOs; decode untrusted data with the strict parser. */
 import type { LibraryOrganization, Register } from "../../ui/libraryOrganization";
+import type { NoteColor, NoteStyle } from "../../ui/notes";
 import type { BuiltinTheme as Theme } from "../../render/settings";
 import type { Annotation, Version } from "./portable-register-core";
 
@@ -39,7 +40,12 @@ export type NoteValue = {
   readonly startTextSnippet: string;
   readonly endTextSnippet: string;
   readonly selectedText: string;
+  /** Empty content is a pure highlight; only whitespace is stored as empty. */
   readonly content: string;
+  /** Missing style/color means a pre-highlight note (theme underline). */
+  readonly style?: NoteStyle;
+  /** Five palette names or a lowercase `#rrggbb`; uppercase input is normalized on read. */
+  readonly color?: NoteColor;
   readonly createdAtMs: number;
 };
 export type BookMetadata = { readonly title: string; readonly creator: string;
@@ -54,13 +60,16 @@ export type PortablePreferences = { readonly theme?: Theme; readonly fontSizePx?
   readonly lineHeight?: number; readonly fontWeight?: number;
   readonly letterSpacingPx?: number; readonly wordSpacingPx?: number };
 export type PortableStateV3 = {
-  readonly schemaVersion: 3 | 4;
+  readonly schemaVersion: 3 | 4 | 5 | 6;
   readonly books: Readonly<Record<string, PortableBook>>;
   readonly organization: LibraryOrganization;
   readonly preferences?: PortablePreferences;
 };
 
-/** v4 marks source formats whose locators old EPUB-only readers cannot interpret. */
-export function portableSchemaVersion(books: Readonly<Record<string, PortableBook>>): 3 | 4 {
+/** v4: TXT/comics; v5: FB2; v6: pure highlights and note style/color. */
+export function portableSchemaVersion(books: Readonly<Record<string, PortableBook>>): 3 | 4 | 5 | 6 {
+  if (Object.values(books).some(book => Object.values(book.notes).some(annotation =>
+    annotation.versions.some(({ value }) => value.content.trim() === "" || value.style !== undefined || value.color !== undefined)))) return 6;
+  if (Object.values(books).some(book => /\.fb2$/i.test(book.metadata.value.fileName))) return 5;
   return Object.values(books).some(book => /\.(?:txt|cbz|zip)$/i.test(book.metadata.value.fileName)) ? 4 : 3;
 }

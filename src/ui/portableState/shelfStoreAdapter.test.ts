@@ -296,6 +296,36 @@ describe("CP-I portable ShelfStore facade", () => {
     expect(entries[0].notes?.[0].id).toBe("note_legacy");
   });
 
+  test("note highlight style/color and empty content survive write, read and projection", async () => {
+    const legacy = new FakeLegacyStore([entry()]);
+    const service = new PortableStateService(new MemoryPortableStateStorage());
+    await activatePortableShelfStore(legacy, service);
+    const store = new PortableShelfStore(legacy, service);
+    const highlightId = generateFolderId();
+    const legacyId = generateFolderId();
+    await store.createNote(LOCAL_ID, {
+      ...readerNote(highlightId, ""),
+      content: "",
+      style: "squiggly",
+      color: "#AABBCC",
+    });
+    await store.createNote(LOCAL_ID, { ...readerNote(legacyId, "old note"), content: "old note" });
+
+    const notes = (await store.list()).find((item) => item.contentHash === HASH)?.notes ?? [];
+    const highlight = notes.find((note) => note.id === highlightId);
+    expect(highlight).toMatchObject({ content: "", style: "squiggly", color: "#aabbcc" });
+    const old = notes.find((note) => note.id === legacyId);
+    expect(old).toMatchObject({ content: "old note" });
+    expect(old).not.toHaveProperty("style");
+    expect(old).not.toHaveProperty("color");
+
+    const stored = await service.snapshot();
+    const values = Object.values(stored.books[HASH].notes)
+      .flatMap((annotation) => annotation.versions.map((version) => version.value));
+    expect(values.find((value) => value.selectedText === "hello" && value.style === "squiggly"))
+      .toMatchObject({ content: "", color: "#aabbcc" });
+  });
+
   test("progress writes use a trusted basis and are visible after restart projection", async () => {
     const legacy = new FakeLegacyStore([entry()]);
     const service = new PortableStateService(new MemoryPortableStateStorage());

@@ -27,10 +27,12 @@
   "sidebar.bookmark.delete.tip": "Delete this bookmark",
   "sidebar.bookmark.delete": "Delete Bookmark",
   "sidebar.notes.empty": "No highlights or notes",
-  "sidebar.notes.emptyTip": "Select text in the book to add notes",
+  "sidebar.notes.emptyTip": "Select text in the book to highlight it or add a note",
   "sidebar.note.quote": "\"{text}\"",
   "sidebar.note.edit": "Edit",
-  "sidebar.note.confirmDelete": "Delete this note?",
+  "sidebar.note.add": "Add note",
   "sidebar.note.delete": "Delete",
-  "sidebar.note.cancel": "Cancel"
+  "sidebar.note.deleted": "Note deleted",
+  "sidebar.highlight.deleted": "Highlight deleted",
+  "sidebar.note.undo": "Undo"
 }

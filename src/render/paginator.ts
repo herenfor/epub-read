@@ -26,6 +26,13 @@ import { VisibilityGate } from "./displayGate";
 import { hasAuthoredCssProperty } from "./cssRewrite";
 import { clearDocumentSelection, isSelectAllShortcut } from "./selectionGuard";
 import { applySearchHighlight, clearSearchHighlight } from "./searchHighlight";
+import {
+  buildNoteHighlightCss,
+  groupNoteHighlights,
+  LEGACY_NOTE_HIGHLIGHT_NAME,
+  writeNoteHighlightStyle,
+  type NoteHighlightGroup,
+} from "./noteHighlights";
 import { applyBackdropCompatibility } from "./backdropCompatibility";
 import {
   mediaFitCssSize,
@@ -229,6 +236,9 @@ export interface FootnotePayload {  text: string;
 export interface ReaderNoteForPaginator extends TextRangeAnchorData {
   id: string;
   selectedText?: string;
+  /** ER-0106 look; both missing = legacy theme underline. */
+  style?: string;
+  color?: string;
 }
 
 export interface SelectionContextPayload extends TextSelectionPayload {
@@ -2735,6 +2745,8 @@ export class ChapterPaginator {
   /** Compiled snapshot actually applied to the current document (null = identity). */
   private activeCompiledTextProjection: CompiledTextProjection | null = null;
   private notes: ReaderNoteForPaginator[] = [];
+  /** Note groups currently registered, for clearing and theme switches. */
+  private noteHighlightGroups: NoteHighlightGroup<ReaderNoteForPaginator>[] = [];
   private selectionContextMenuHandler?: (payload: SelectionContextPayload | null) => void;
   private contextMenuHandler = (e: MouseEvent): void => this.handleContextMenu(e);
   private selectionChangeHandler = (): void => this.handleSelectionChange();
@@ -3882,7 +3894,9 @@ export class ChapterPaginator {
         (n, i) =>
           n.id === notes[i].id &&
           n.startTextOffset === notes[i].startTextOffset &&
-          n.endTextOffset === notes[i].endTextOffset
+          n.endTextOffset === notes[i].endTextOffset &&
+          n.style === notes[i].style &&
+          n.color === notes[i].color
       );
     this.notes = notes.slice();
     if (!this.contentDoc || !this.viewer || !this.textIndex) return "deferred";
@@ -7851,10 +7865,13 @@ export class ChapterPaginator {
       | (typeof CSS & { highlights?: { delete(name: string): boolean } })
       | undefined;
     const highlights = css?.highlights;
+    const groups = this.noteHighlightGroups;
+    this.noteHighlightGroups = [];
     if (!highlights) {
       return;
     }
-    highlights.delete("reader-notes");
+    highlights.delete(LEGACY_NOTE_HIGHLIGHT_NAME);
+    for (const group of groups) highlights.delete(group.name);
   }
 
   private applyNoteHighlights(): "applied" | "unsupported" | "deferred" {
@@ -7872,16 +7889,24 @@ export class ChapterPaginator {
       return "unsupported";
     }
     this.clearNoteHighlights();
-    const ranges: Range[] = [];
-    for (const note of this.notes) {
-      const resolved = resolveTextRangeOffsets(index, note, note.selectedText);
-      if (!resolved) continue;
-      const range = index.rangeForOffsets(doc, resolved.start, resolved.end);
-      if (range) ranges.push(range);
+    // ER-0108: one Custom Highlight per style × color, fixed priorities.
+    const registered: NoteHighlightGroup<ReaderNoteForPaginator>[] = [];
+    for (const group of groupNoteHighlights(this.notes)) {
+      const ranges: Range[] = [];
+      for (const note of group.items) {
+        const resolved = resolveTextRangeOffsets(index, note, note.selectedText);
+        if (!resolved) continue;
+        const range = index.rangeForOffsets(doc, resolved.start, resolved.end);
+        if (range) ranges.push(range);
+      }
+      if (ranges.length === 0) continue;
+      const highlight = new HighlightCtor(...ranges);
+      highlight.priority = group.priority;
+      highlights.set(group.name, highlight);
+      registered.push(group);
     }
-    if (ranges.length > 0) {
-      highlights.set("reader-notes", new HighlightCtor(...ranges));
-    }
+    this.noteHighlightGroups = registered;
+    writeNoteHighlightStyle(doc, buildNoteHighlightCss(registered, this.settings.theme));
     return "applied";
   }
 
@@ -9559,6 +9584,9 @@ export class ChapterPaginator {
     if (this.themeController) {
       try {
         this.themeController.update(theme);
+        if (this.contentDoc && this.noteHighlightGroups.length > 0) {
+          writeNoteHighlightStyle(this.contentDoc, buildNoteHighlightCss(this.noteHighlightGroups, theme));
+        }
         return true;
       } catch {
         return false;

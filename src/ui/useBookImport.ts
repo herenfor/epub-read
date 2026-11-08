@@ -651,7 +651,7 @@ export function useBookImport({
         multiple: true,
         directory: false,
         title: uiText("notice.picker.chooseEpub"),
-        filters: [{ name: uiText("notice.picker.epubFilter"), extensions: ["epub", "txt", "cbz", "zip"] }],
+        filters: [{ name: uiText("notice.picker.epubFilter"), extensions: ["epub", "fb2", "txt", "cbz", "zip"] }],
       });
       const paths = Array.isArray(selected) ? selected : selected ? [selected] : [];
       if (paths.length === 0 || getShelfStore() !== pickerStore) return;

@@ -38,7 +38,7 @@
   "notice.originalRetry.copy": "Copy them",
   "notice.originalRetry.close": "Not now",
   "notice.picker.chooseEpub": "Select Books",
-  "notice.picker.epubFilter": "Books (EPUB, TXT, CBZ, ZIP)",
+  "notice.picker.epubFilter": "Books (EPUB, FB2, TXT, CBZ, ZIP)",
   "notice.picker.failed": "Failed to open file picker: {error}",
   "notice.organization.readFailedLocked": "Failed to read favorites and folders; editing disabled to prevent overwriting existing data",
   "notice.operationFailed": "Operation failed: {error}",
@@ -50,6 +50,7 @@
   "notice.archive.exportTitle": "Export Archive",
   "notice.archive.importTitle": "Import Archive",
   "notice.archive.filter": "SeLis Archive",
+  "notice.archive.filterWithReadest": "SeLis Archive or Readest Backup",
   "notice.archive.androidDocument": "Android Document",
   "notice.archive.rangeSelected.other": "{count} selected books' data",
   "notice.archive.rangeSelected.one": "{count} selected book's data",
@@ -179,7 +180,7 @@
   "notice.importTarget.keptElsewhere.one": "{count} book is already in another folder and was not moved",
   "notice.importTarget.folderGone": "Folder “{name}” no longer exists; the books stay unclassified",
   "notice.importTarget.failed": "Books imported, but adding them to the folder failed: {error}",
-  "notice.drop.unsupported": "Drop EPUB, TXT, CBZ, comic ZIP files, or a folder",
-  "notice.drop.booksOnly": "Drop EPUB, TXT, CBZ, or comic ZIP files",
+  "notice.drop.unsupported": "Drop EPUB, FB2, TXT, CBZ, comic ZIP files, or a folder",
+  "notice.drop.booksOnly": "Drop EPUB, FB2, TXT, CBZ, or comic ZIP files",
   "notice.drop.oneFolder": "Drop one folder at a time"
 }

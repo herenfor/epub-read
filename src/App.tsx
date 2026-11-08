@@ -95,6 +95,10 @@ import { hasOwnField, chapterLabelForIndex, useNoteEditRef, replaceNoteEditConte
   useBookmarkToast, useBookmarkToastCleanup, useNoteBusyState, useNoteProjection, useNoteActions,
   useBookmarkProjection, useBookmarkSidebarToggle, useBookmarkActions, useBookmarkRibbonActions,
   useNoteEditRelease } from "./ui/useBookmarksAndNotes";
+import { NOTE_UNDO_MS, usePendingNoteDelete, useVisibleChapterNotes } from "./ui/pendingNoteDelete";
+import { useHighlightPreferences } from "./ui/highlightPreferences";
+import { highlightAtSelection } from "./ui/highlightModel";
+import { UndoPill, undoDetail } from "./ui/controls/UndoPill";
 import { BookmarkPagesPopover, WARM_BOOKMARK_PAGES_SCREEN } from "./ui/BookmarkPagesPopover";
 import { uiPlural, uiText, useUiText } from "./ui/localization/UiLanguageProvider";
 import { FootnotePop } from "./ui/FootnotePop";
@@ -127,6 +131,8 @@ import {
 } from "./ui/folderImport";
 import { LanSavePanel } from "./ui/LanSavePanel";
 import { SaveFileExportDialog, SaveFileImportPreview, SaveFileProgressPanel } from "./ui/SaveFileDialogs";
+import { ReadestImportDialog } from "./ui/readestImport/ReadestImportDialog";
+import { useReadestImport } from "./ui/readestImport/useReadestImport";
 import { SaveFailureDialog } from "./ui/SaveFailureDialog";
 import { releaseUnsavedLane, type SaveFailurePrompt } from "./ui/saveFailureExit";
 import { useSaveFileJob } from "./ui/useSaveFileJob";
@@ -923,6 +929,7 @@ export default function App() {
     isTauriEnv, setShelfNotice, refreshShelfProjection,
   });
 
+  const readestImport = useReadestImport({ shelfEntriesRef, refreshShelfProjection, setShelfNotice });
   const {
     startBookSourceExport,
     handleOpenLanSave,
@@ -935,6 +942,7 @@ export default function App() {
     handleImportArchive,
     lanSaveSession,
   } = useSaveFileFlows({
+    tryReadestImport: readestImport.tryStart,
     runtime, isTauriEnv, settings, uiScale, saveFileJob, saveFileJobStateRef,
     saveFileExportSetup, setSaveFileExportSetup, saveFileLaunchRef,
     setLanSaveOpen, setLanSaveSelection, lanSaveSelectionRef, lanSaveActiveRef,
@@ -1251,10 +1259,27 @@ export default function App() {
 
   // ---- 正文笔记 ----
   const { currentNotes, currentChapterNotes, notesForChapter, noteViewModels } = useNoteProjection(shelfEntries, currentShelfId, book, spineIndex);
-  const { handleSaveNote, handleDeleteNote, handleEditNote } = useNoteActions({
+  const { highlightPreferences, updateHighlightPreferences } = useHighlightPreferences();
+  const newHighlight = useCallback(
+    () => ({ style: highlightPreferences.style, color: highlightPreferences.color }),
+    [highlightPreferences.style, highlightPreferences.color],
+  );
+  const { handleSaveNote, createHighlight, restyleNote, deleteNoteIn, handleEditNote } = useNoteActions({
     ...noteBusyState, currentShelfId, currentNotes, setShelfEntries, setRuntimeIssues,
-    noteComposer, book, setForeground, shelfEntriesRef, openComposer,
+    noteComposer, book, setForeground, shelfEntriesRef, openComposer, newHighlight,
   });
+  const { pendingNoteId, pendingOrigin, hiddenNoteIds, requestDelete: requestNoteDelete, undoDelete: undoNoteDelete } =
+    usePendingNoteDelete({ currentShelfId, commitDelete: deleteNoteIn });
+  const { visibleChapterNotes, visibleNotesForChapter } =
+    useVisibleChapterNotes(currentChapterNotes, notesForChapter, hiddenNoteIds);
+  const pendingDeletedNote = pendingNoteId ? currentNotes.find((note) => note.id === pendingNoteId) ?? null : null;
+  // A delete from the highlight menu floats its undo; the sidebar just leaves the card out.
+  const sidebarNotes = useMemo(
+    () => pendingOrigin === "reader" && pendingNoteId
+      ? noteViewModels.filter((note) => note.id !== pendingNoteId)
+      : noteViewModels,
+    [noteViewModels, pendingOrigin, pendingNoteId],
+  );
 
   const handleNoteNavigate = useCallback((note: ReaderNote): void => {
     if (!book || noteBusy) return;
@@ -2532,13 +2557,15 @@ export default function App() {
           bookmarks={sortedBookmarks}
           onSelectBookmark={handleSelectBookmark}
           onDeleteBookmark={handleDeleteBookmark}
-          notes={noteViewModels}
+          notes={sidebarNotes}
           onNavigateNote={(viewNote) => {
             const note = currentNotes.find((candidate) => candidate.id === viewNote.id);
             if (note) handleNoteNavigate(note);
           }}
           onEditNote={(viewNote) => void handleEditNote(viewNote.id)}
-          onDeleteNote={(viewNote) => void handleDeleteNote(viewNote.id)}
+          onDeleteNote={(viewNote) => requestNoteDelete(viewNote.id)}
+          pendingDeleteNoteId={pendingNoteId}
+          onUndoDeleteNote={undoNoteDelete}
         />
       )}
       <div className="main">
@@ -2867,8 +2894,8 @@ export default function App() {
                   visualPreferences={visualPreferences}
                   compareOriginal={visualCompareOriginal}
                   userFonts={renderUserFonts}
-                  notes={currentChapterNotes}
-                  notesForChapter={notesForChapter}
+                  notes={visibleChapterNotes}
+                  notesForChapter={visibleNotesForChapter}
                   onSelectionContextMenu={(payload) => {
                     if (!payload) {
                       setForeground((current) =>
@@ -2957,8 +2984,41 @@ export default function App() {
                     if (resolved) handleTocNavigate(archiveHref(book?.archiveReferences, resolved, anchor));
                   }}
                 />
-                {selectionContext && (
+                {selectionContext && (() => {
+                  // 双页拼接屏上选的可能是另一章的半页：笔记按选中文字所在的章记。
+                  const selectedEntry = book ? spineIndexForEntryKey(book, selectionContext.chapterPath) : -1;
+                  const selectedIndex = selectedEntry >= 0 ? selectedEntry : spineIndex;
+                  const hidden = new Set(hiddenNoteIds);
+                  const target = highlightAtSelection(
+                    currentNotes.filter((note) => !hidden.has(note.id)), selectionContext, selectedIndex);
+                  const endSelection = () => {
+                    setForeground(closeReaderForeground());
+                    readerRef.current?.clearTextSelection();
+                  };
+                  return (
                   <ReaderContextMenu
+                    highlight={{
+                      target,
+                      preferences: highlightPreferences,
+                      onHighlight: (style, color) => {
+                        updateHighlightPreferences({ style, color });
+                        void createHighlight(selectionContext, selectedIndex, { style, color });
+                        endSelection();
+                      },
+                      onRestyle: (note, patch) => {
+                        updateHighlightPreferences(patch);
+                        void restyleNote(note.id, patch);
+                      },
+                      onSetCustomColor: (hex) => updateHighlightPreferences({ custom: hex }),
+                      onEditNote: (note) => {
+                        void handleEditNote(note.id);
+                        readerRef.current?.clearTextSelection();
+                      },
+                      onDelete: (note) => {
+                        requestNoteDelete(note.id, "reader");
+                        endSelection();
+                      },
+                    }}
                     selection={{
                       ...selectionContext,
                       text: selectionContext.selectedText,
@@ -2980,17 +3040,13 @@ export default function App() {
                       readerRef.current?.clearTextSelection();
                     }}
                     onAddNote={() => {
-                      // 双页拼接屏上选的可能是另一章的半页：笔记按选中文字所在的章记。
-                      const selectedIndex = book ? spineIndexForEntryKey(book, selectionContext.chapterPath) : -1;
-                      openComposer({ mode: "create", selection: selectionContext, spineIndex: selectedIndex >= 0 ? selectedIndex : spineIndex });
+                      openComposer({ mode: "create", selection: selectionContext, spineIndex: selectedIndex });
                       readerRef.current?.clearTextSelection();
                     }}
-                    onClose={() => {
-                      setForeground(closeReaderForeground());
-                      readerRef.current?.clearTextSelection();
-                    }}
+                    onClose={endSelection}
                   />
-                )}
+                  );
+                })()}
                 {noteComposer && (
                   <>
                     <div className="note-composer-backdrop" aria-hidden="true" />
@@ -3216,6 +3272,17 @@ export default function App() {
           <span className="bookmark-toast-text">{t("appUi.exitHint")}</span>
         </div>
       )}
+      {pendingOrigin === "reader" && pendingDeletedNote && (
+        <UndoPill
+          key={pendingDeletedNote.id}
+          className="reader-undo-pill"
+          message={pendingDeletedNote.content ? t("sidebar.note.deleted") : t("sidebar.highlight.deleted")}
+          detail={undoDetail(pendingDeletedNote.content || pendingDeletedNote.selectedText)}
+          undoLabel={t("sidebar.note.undo")}
+          onUndo={undoNoteDelete}
+          durationMs={NOTE_UNDO_MS}
+        />
+      )}
       {bookmarkToast && (
         <div
           key={bookmarkToast.id}
@@ -3275,6 +3342,15 @@ export default function App() {
         />
       )}
       <SaveFileProgressPanel state={saveFileJob.state} onCancel={() => void closeSaveFileUi()} />
+      <ReadestImportDialog
+        state={readestImport.state}
+        updateRows={readestImport.updateRows}
+        updateReviews={readestImport.updateReviews}
+        onNext={() => void readestImport.next()}
+        onBack={readestImport.back}
+        onCommit={() => void readestImport.commit()}
+        onCancel={readestImport.cancel}
+      />
       {lanSavePresence.present && (
         <LanSavePanel
           open

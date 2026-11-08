@@ -49,6 +49,12 @@ pub(super) fn purge(connection: &Connection, hashes: &[String]) -> PortableResul
             delete.execute([hash])?;
         }
     }
+    for hash in hashes {
+        connection.execute(
+            "DELETE FROM local_meta WHERE key GLOB ?1",
+            [format!("readest-import:{hash}:*")],
+        )?;
+    }
     Ok(())
 }
 
