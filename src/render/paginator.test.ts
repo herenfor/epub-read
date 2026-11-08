@@ -27,14 +27,12 @@ import {
   isPercentageMarginLayout,
   getReaderTopUaSymmetricInsetMaxWidth,
   isSymmetricHorizontalMargin,
-  restoreInlineStyleProperty,
   shouldKeepSymmetricMarginsCentered,
   shouldKeepContainingBlockMarginsWhenBaseWouldOverflow,
   planColumnIndentMargins,
   shouldApplyInlineBoxOverflowFix,
   shouldApplyBookMarginCompensation,
   shouldProbeAuthoredHorizontalMargin,
-  shouldApplyTrailingFloatMarginFix,
   syncFragmentHash,
   isChapterMeasurementCurrent,
   resolveRestoredPage,
@@ -44,7 +42,13 @@ import {
   planAutoBlockBox,
   readComputedHorizontalMarginSpecifiedValues,
 } from "./paginator";
-import { hasAuthoredInlineWidth, isMediaOnlyFloatContent, isMediaOnlyFloatSubtree } from "./floatCompensation";
+import {
+  hasAuthoredInlineWidth,
+  isMediaOnlyFloatContent,
+  isMediaOnlyFloatSubtree,
+  restoreInlineStyleProperty,
+  shouldApplyTrailingFloatMarginFix,
+} from "./floatCompensation";
 
 const textNode = (text: string): Node =>
   ({ nodeType: 3, textContent: text }) as Node;
@@ -2463,7 +2467,7 @@ describe("measure viewport height locking", () => {
       restoreContainedMediaFixes: vi.fn(),
       restoreFitContentFix: vi.fn(),
       floatWidthSession: { apply: vi.fn(), restore: vi.fn() },
-      restoreTrailingFloatFixes: vi.fn(),
+      trailingFloatSession: { apply: vi.fn(), restore: vi.fn() },
       percentageSpacingSession: { applyRoot: vi.fn(), applyBody: vi.fn(), restore: vi.fn() },
       measureControllers,
       fixedLayout: false,
@@ -2481,6 +2485,8 @@ describe("measure viewport height locking", () => {
     expect(context.percentageSpacingSession.applyRoot).toHaveBeenCalledTimes(1);
     // ER-0134: the previous float-width transaction is undone before measuring.
     expect(context.floatWidthSession.restore).toHaveBeenCalledTimes(1);
+    // ER-0135: the previous trailing-float transaction is undone before measuring.
+    expect(context.trailingFloatSession.restore).toHaveBeenCalledTimes(1);
     // The 800px parent contributes 10px of padding on each side.
     expect(viewer.style.columnWidth).toBe("780px");
     expect(viewer.style.columnCount).toBe("1");
@@ -2520,7 +2526,7 @@ describe("measure viewport height locking", () => {
       restoreContainedMediaFixes: vi.fn(),
       restoreFitContentFix: vi.fn(),
       floatWidthSession: { apply: vi.fn(), restore: vi.fn() },
-      restoreTrailingFloatFixes: vi.fn(),
+      trailingFloatSession: { apply: vi.fn(), restore: vi.fn() },
       percentageSpacingSession: { applyRoot: vi.fn(), applyBody: vi.fn(), restore: vi.fn() },
       measureControllers,
       fixedLayout: false,
@@ -2599,7 +2605,7 @@ describe("measure viewport height locking", () => {
       restoreContainedMediaFixes: vi.fn(),
       restoreFitContentFix: vi.fn(),
       floatWidthSession: { apply: vi.fn(), restore: vi.fn() },
-      restoreTrailingFloatFixes: vi.fn(),
+      trailingFloatSession: { apply: vi.fn(), restore: vi.fn() },
       percentageSpacingSession: { applyRoot: vi.fn(), applyBody: vi.fn(), restore: vi.fn() },
       measureControllers,
       fixedLayout: false,
@@ -2683,7 +2689,7 @@ describe("measure viewport height locking", () => {
       restoreContainedMediaFixes: vi.fn(),
       restoreFitContentFix: vi.fn(),
       floatWidthSession: { apply: vi.fn(), restore: vi.fn() },
-      restoreTrailingFloatFixes: vi.fn(),
+      trailingFloatSession: { apply: vi.fn(), restore: vi.fn() },
       percentageSpacingSession: { applyRoot: vi.fn(), applyBody: vi.fn(), restore: vi.fn() },
       measureControllers,
       fixedLayout: false,

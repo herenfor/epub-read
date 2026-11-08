@@ -3,7 +3,16 @@ import { canInsertLeadingColumn, canRetainLeadingColumn, chapterLeafLayout, Lead
 import { pageAxisSign, pageContentX, readPageScroll, writePageScroll, setPagedFlowDirection, type PageProgression } from "./pagedDirection";
 import { resolveArchiveHref, archiveHref } from "../core/archiveReferences";
 import { createPercentageSpacingSession } from "./percentageSpacing";
-import { createFloatWidthSession, isMediaOnlyFloatSubtree } from "./floatCompensation";
+import {
+  axisClientRect as resolveAxisClientRect,
+  axisContentOrigin as resolveAxisContentOrigin,
+  contentClientOrigin as resolveContentClientOrigin,
+  createFloatWidthSession,
+  createTrailingFloatSession,
+  restoreInlineStyleProperty,
+  snapshotInlineStyleProperty,
+  type InlineStyleValue,
+} from "./floatCompensation";
 import { sanitizeChapter, VIEWER_ID } from "./sanitize";
 import { planCenteredTitleBody } from "./titlePageLayout";
 import { desktopSettlePlan, PageMotionSession, settlePlan, type Direction as MotionDirection } from "./pageMotion";
@@ -2249,31 +2258,6 @@ function hasAuthorMediaBreakoutIntent(doc: Document, el: HTMLElement): boolean {
   return hasAuthoredFullWidthIntentInRules(doc, el, isMediaBreakoutValue) !== false;
 }
 
-interface InlineStyleValue {
-  value: string;
-  priority: string;
-}
-
-function snapshotInlineStyleProperty(
-  style: CSSStyleDeclaration,
-  property: string
-): InlineStyleValue {
-  return {
-    value: style.getPropertyValue(property),
-    priority: style.getPropertyPriority(property),
-  };
-}
-
-/** 恢复 inline 属性时同时恢复 !important，空值则彻底移除 longhand。 */
-export function restoreInlineStyleProperty(
-  style: CSSStyleDeclaration,
-  property: string,
-  original: InlineStyleValue
-): void {
-  if (original.value === "") style.removeProperty(property);
-  else style.setProperty(property, original.value, original.priority);
-}
-
 /** 内容适配要写的 reader-owned 属性（数值按 px，字符串为 CSS 关键字）；写前快照原 inline 值与优先级。 */
 interface ContentFitWrite {
   el: HTMLElement;
@@ -2323,76 +2307,6 @@ function restoreContentFitStyles(fixes: readonly ContentFitFix[]): void {
       restoreInlineStyleProperty(fix.el.style, property, original);
     }
   }
-}
-
-export interface FloatFixRect {
-  left: number;
-  right: number;
-  top: number;
-  bottom: number;
-  width: number;
-  height: number;
-}
-
-export interface TrailingFloatFixGeometry {
-  float: string;
-  position: string;
-  mediaOnly: boolean;
-  beforeColumns: readonly number[];
-  afterColumns: readonly number[];
-  afterRects: readonly FloatFixRect[];
-  afterVisualRects: readonly FloatFixRect[];
-  previousVisualRects: readonly FloatFixRect[];
-  estimatedBeforeBottom: number;
-  contentBottom: number;
-  viewerLeft: number;
-  scrollLeft: number;
-  step: number;
-  pageWidth: number;
-  epsilon?: number;
-}
-
-/** Conservative, DOM-independent decision gate for the trailing media float. */
-export function shouldApplyTrailingFloatMarginFix(g: TrailingFloatFixGeometry): boolean {
-  const epsilon = g.epsilon ?? 0.5;
-  if (!/^(?:left|right)$/u.test(g.float) || !/^(?:static|relative)$/u.test(g.position)) return false;
-  if (!g.mediaOnly || g.beforeColumns.length < 2 || g.afterColumns.length !== 1) return false;
-  if (!Number.isFinite(g.step) || g.step <= 0 || !Number.isFinite(g.pageWidth) || g.pageWidth <= 0) {
-    return false;
-  }
-  if (!g.afterRects.length || !g.afterVisualRects.length) return false;
-  if (
-    !Number.isFinite(g.estimatedBeforeBottom) ||
-    g.estimatedBeforeBottom <= g.contentBottom + epsilon
-  ) {
-    return false;
-  }
-  const columnFor = (x: number): number =>
-    Math.floor((x + g.scrollLeft - g.viewerLeft + epsilon) / g.step);
-  const afterColumn = g.afterColumns[0];
-  const columnLeft = g.viewerLeft + afterColumn * g.step - g.scrollLeft;
-  const columnRight = columnLeft + g.pageWidth;
-  for (const rect of g.afterVisualRects) {
-    if (
-      rect.width <= epsilon ||
-      rect.height <= epsilon ||
-      columnFor(rect.left) !== afterColumn ||
-      rect.left < columnLeft - epsilon ||
-      rect.right > columnRight + epsilon
-    ) {
-      return false;
-    }
-  }
-  const visualBottom = Math.max(...g.afterVisualRects.map((rect) => rect.bottom));
-  if (visualBottom > g.contentBottom + epsilon) return false;
-  for (const candidate of g.afterVisualRects) {
-    for (const previous of g.previousVisualRects) {
-      const overlapW = Math.min(candidate.right, previous.right) - Math.max(candidate.left, previous.left);
-      const overlapH = Math.min(candidate.bottom, previous.bottom) - Math.max(candidate.top, previous.top);
-      if (overlapW > epsilon && overlapH > epsilon) return false;
-    }
-  }
-  return true;
 }
 
 /** 书籍常用全角空格/NBSP 把行内色块补到指定视觉列，不应继续参与行尾悬挂空白。 */
@@ -2757,8 +2671,8 @@ export class ChapterPaginator {
     width: InlineStyleValue;
     maxWidth: InlineStyleValue;
   }> = [];
-  /** 末尾媒体 float 的临时负 margin-top 写回（每轮测量前恢复）。 */
-  private trailingFloatFixes: Array<{ el: HTMLElement; marginTop: InlineStyleValue }> = [];
+  /** 末尾媒体 float 的 margin-top 收缩会话；每轮测量前恢复。 */
+  private trailingFloatSession = createTrailingFloatSession();
   /** 行尾悬挂空白导致越过 computed-right 包含块的可见行内盒写回。 */
   private inlineBoxFixes: Array<{
     el: HTMLElement;
@@ -2939,26 +2853,15 @@ export class ChapterPaginator {
   }
 
   private contentClientOrigin(): number {
-    const viewer = this.viewer;
-    if (!viewer) return 0;
-    const rect = viewer.getBoundingClientRect();
-    const style = this.contentDoc?.defaultView?.getComputedStyle(viewer);
-    return this.flowProgression === "rtl"
-      ? (rect.right ?? rect.left + rect.width) - (parseFloat(style?.borderRightWidth ?? "") || 0) - (parseFloat(style?.paddingRight ?? "") || 0)
-      : rect.left + (viewer.clientLeft || 0) + (parseFloat(style?.paddingLeft ?? "") || 0);
+    return resolveContentClientOrigin(this.viewer, this.contentDoc, this.flowProgression);
   }
 
   private axisClientRect(rect: { left: number; right: number }): { left: number; right: number } {
-    if (this.flowProgression !== "rtl" || !this.viewer) return rect;
-    const viewer = this.viewer.getBoundingClientRect();
-    const sum = viewer.left + viewer.right;
-    return { left: sum - rect.right, right: sum - rect.left };
+    return resolveAxisClientRect(this.viewer, this.flowProgression, rect);
   }
 
   private axisContentOrigin(): number {
-    if (this.flowProgression !== "rtl" || !this.viewer) return this.contentClientOrigin();
-    const viewer = this.viewer.getBoundingClientRect();
-    return viewer.left + viewer.right - this.contentClientOrigin();
+    return resolveAxisContentOrigin(this.viewer, this.contentDoc, this.flowProgression);
   }
 
   private leadingClientX(rect: { left: number; right?: number; width?: number }): number {
@@ -4342,7 +4245,7 @@ export class ChapterPaginator {
     this.restoreContainedTableFixes();
     this.restoreFitContentFix();
     this.floatWidthSession.restore();
-    this.restoreTrailingFloatFixes();
+    this.trailingFloatSession.restore();
     this.percentageSpacingSession.restore();
     this.verticalMode = basicVerticalMode(win?.getComputedStyle(viewer).writingMode ?? "", this.fixedLayout, this.scrollMode);
     this.configurePageProgression(viewer, measuredWidth, measuredHeight);
@@ -4688,7 +4591,11 @@ export class ChapterPaginator {
       this.applyFitContentFix();
       this.applyBookMargins();
       this.floatWidthSession.apply(doc, viewer);
-      this.applyTrailingFloatMarginFix();
+      this.trailingFloatSession.apply(doc, viewer, {
+        step: this.step,
+        pageWidth: this.pageWidth,
+        flowProgression: this.flowProgression,
+      });
       this.applyInlineBoxOverflowFix();
       this.applyContainedContentFit();
       if (!this.fixedLayout) {
@@ -6498,13 +6405,6 @@ export class ChapterPaginator {
     this.floatLayoutFixes = [];
   }
 
-  private restoreTrailingFloatFixes(): void {
-    for (const fix of this.trailingFloatFixes) {
-      restoreInlineStyleProperty(fix.el.style, "margin-top", fix.marginTop);
-    }
-    this.trailingFloatFixes = [];
-  }
-
   private restoreInlineBoxFixes(): void {
     for (const fix of this.inlineClipFixes ?? []) {
       restoreInlineStyleProperty(fix.el.style, "overflow-x", fix.overflowX);
@@ -6722,100 +6622,6 @@ export class ChapterPaginator {
       el.setAttribute("data-reader-inline-box-fixed", "1");
       this.inlineBoxFixes.push({ el, ...original });
     }
-  }
-
-  private applyTrailingFloatMarginFix(): void {
-    const doc = this.contentDoc;
-    const viewer = this.viewer;
-    if (!doc || !viewer || !doc.defaultView || this.step <= 0 || this.pageWidth <= 0) return;
-    const children = Array.from(viewer.children) as HTMLElement[];
-    const candidate = children.at(-1);
-    if (!candidate) return;
-    const win = doc.defaultView;
-    const cs = win.getComputedStyle(candidate);
-    if (!/^(?:left|right)$/u.test(cs.float) || !/^(?:static|relative)$/u.test(cs.position)) return;
-    if (!isMediaOnlyFloatSubtree(candidate.childNodes)) return;
-
-    const viewerRect = viewer.getBoundingClientRect();
-    const viewerCs = win.getComputedStyle(viewer);
-    const paddingBottom = parseFloat(viewerCs.paddingBottom) || 0;
-    const contentBottom = viewerRect.bottom - paddingBottom;
-    // 列坐标原点是 viewer 内容盒左缘（单页边距写在 viewer 的左右 padding 里）。
-    const viewerContentLeft = this.flowProgression === "rtl" ? this.axisContentOrigin() : viewerRect.left + (viewer.clientLeft || 0) + (parseFloat(viewerCs.paddingLeft) || 0);
-    const epsilon = 0.5;
-    const toRect = (r: DOMRect): FloatFixRect => ({
-      left: this.axisClientRect(r).left,
-      right: this.axisClientRect(r).right,
-      top: r.top,
-      bottom: r.bottom,
-      width: r.width,
-      height: r.height,
-    });
-    const rectsOf = (el: Element): FloatFixRect[] =>
-      Array.from(el.getClientRects()).map(toRect).filter((r) => r.width > 0 && r.height > 0);
-    const beforeRects = rectsOf(candidate);
-    if (!beforeRects.length) return;
-    const columnFor = (x: number): number =>
-      Math.floor((x + this.readPagedScroll() - viewerContentLeft + epsilon) / this.step);
-    const columnsFor = (rects: FloatFixRect[]): number[] =>
-      Array.from(
-        new Set(
-          rects.flatMap((r) => [columnFor(r.left), columnFor(Math.max(r.left, r.right - epsilon))])
-        )
-      );
-    const beforeColumns = columnsFor(beforeRects);
-    if (beforeColumns.length < 2) return;
-    const firstColumn = Math.min(...beforeColumns);
-    const firstColumnTop = Math.min(
-      ...beforeRects
-        .filter((rect) => columnFor(rect.left) === firstColumn)
-        .map((rect) => rect.top)
-    );
-    const scrollHeight = candidate.scrollHeight;
-    if (!Number.isFinite(scrollHeight) || scrollHeight <= 0 || !Number.isFinite(firstColumnTop)) {
-      return;
-    }
-    const estimatedBeforeBottom = firstColumnTop + scrollHeight;
-    if (estimatedBeforeBottom <= contentBottom + epsilon) return;
-
-    const originalMarginTop = snapshotInlineStyleProperty(candidate.style, "margin-top");
-    const computedMarginTop = parseFloat(cs.marginTop);
-    const shift = estimatedBeforeBottom - contentBottom + 1;
-    if (!Number.isFinite(shift) || shift <= 0) return;
-    const baseMargin = Number.isFinite(computedMarginTop) ? computedMarginTop : 0;
-    candidate.style.setProperty("margin-top", `${baseMargin - shift}px`, "important");
-    void viewer.offsetWidth;
-    const afterRects = rectsOf(candidate);
-    const visualRectsOf = (root: HTMLElement): FloatFixRect[] =>
-      [root, ...Array.from(root.querySelectorAll("*")) as HTMLElement[]]
-        .flatMap((el) => rectsOf(el));
-    const afterVisualRects = visualRectsOf(candidate);
-    const previousVisualRects = children
-      .slice(0, -1)
-      .flatMap((el) => visualRectsOf(el));
-    const afterColumns = columnsFor(afterRects);
-    const accepted = shouldApplyTrailingFloatMarginFix({
-      float: cs.float,
-      position: cs.position,
-      mediaOnly: true,
-      beforeColumns,
-      afterColumns,
-      afterRects,
-      afterVisualRects,
-      previousVisualRects,
-      estimatedBeforeBottom,
-      contentBottom,
-      viewerLeft: viewerContentLeft,
-      scrollLeft: this.readPagedScroll(),
-      step: this.step,
-      pageWidth: this.pageWidth,
-      epsilon,
-    });
-    if (!accepted) {
-      restoreInlineStyleProperty(candidate.style, "margin-top", originalMarginTop);
-      return;
-    }
-    this.trailingFloatFixes.push({ el: candidate, marginTop: originalMarginTop });
   }
 
   private async recompute(
@@ -10119,7 +9925,7 @@ export class ChapterPaginator {
     this.restoreFloatLayoutFixes();
     this.restoreContainedMediaFixes();
     this.restoreContainedTableFixes();
-    this.restoreTrailingFloatFixes();
+    this.trailingFloatSession.restore();
     this.percentageSpacingSession.restore();
     this.restoreCenteredTitleLayout();
     this.centeredTitleCandidate = null;
