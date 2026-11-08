@@ -435,7 +435,13 @@ export function useBookOpen({
                 return null;
               }
               explicitPositionChoice = true;
-              progressSelection = { kind: "chosen", stamp: selectedStamp };
+              // ER-0139: settle the choice so the other shown versions stop
+              // reappearing. On any mismatch or failure, open once as before.
+              const resolved = await store.resolveProgressChoice?.(
+                id, chosenProgressVersion, candidates.map((candidate) => candidate.stamp),
+              ).catch(() => null) ?? null;
+              if (resolved) chosenProgressVersion = resolved;
+              progressSelection = { kind: "chosen", stamp: chosenProgressVersion.stamp };
             } else if (progressVersions.length === 1) {
               chosenProgressVersion = progressVersions[0];
               progressSelection = { kind: "chosen", stamp: progressVersions[0].stamp };

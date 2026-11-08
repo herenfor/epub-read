@@ -9,12 +9,12 @@ import { TauriPortableStateService } from "./portableState/tauriService";
 import type { PortableActivationResult, PortableStateDataService } from "./portableState/dataService";
 import { sanitizePersistedTextAnchor } from "../render/textAnchor";
 import type { MediaReadingAnchor } from "../render/paginator";
-import type { Stamp } from "../core/portableState/portable-register-core";
+import type { Stamp, Version } from "../core/portableState/portable-register-core";
 import type { ProgressLease } from "./portableState/ownedProgressSessions";
 import type { ProgressRuntimeStatus } from "./portableState/progressRuntimeGate";
 import type { ConfirmedProgressWrite } from "./checkpointProgressRepair";
 import { createRepositoryReadinessRecovery } from "./portableState/repositoryReadinessRepair";
-import type { PortablePreferences } from "../core/portableState/portable-state-types";
+import type { PortablePreferences, ProgressValue } from "../core/portableState/portable-state-types";
 import type { LibraryRecord } from "./libraryArchive";
 import type { ThumbnailAsset, ThumbnailProvider } from "./thumbnail";
 import type { ImportSkippedBook } from "../platform/saveFileNativeBridge";
@@ -174,6 +174,12 @@ export interface ShelfStore {
   list(): Promise<ShelfEntry[]>;
   /** Fresh single-book progress projection, before choosing an open position. */
   readProgressEntryForOpen?(id: string): Promise<ShelfEntry>;
+  /**
+   * ER-0139: after the reader picks one of several shown progress versions,
+   * supersede all of them with that value. Null when the repository changed
+   * since it was shown, or the store has no portable progress.
+   */
+  resolveProgressChoice?(id: string, chosen: Version<ProgressValue>, shown: readonly Stamp[]): Promise<Version<ProgressValue> | null>;
   save(input: ShelfSaveInput): Promise<ShelfSaveResult>;
   /** Tauri 链接式批量导入；浏览器后端不支持本地持久路径。 */
   /** `copyToLibrary` (Windows, A34): copy each book into the app's library instead of linking it. */

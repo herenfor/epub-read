@@ -965,4 +965,56 @@ describe("CP-I portable ShelfStore facade", () => {
     expect(projected.find((mark) => mark.id === elementOnly)).toMatchObject({ page: 3, anchorIndex: 41 });
   });
 
+
+  async function storeWithConcurrentRemote(remoteIds: readonly string[]) {
+    const legacy = new FakeLegacyStore([entry()]);
+    const service = new PortableStateService(new MemoryPortableStateStorage());
+    await activatePortableShelfStore(legacy, service);
+    const store = new PortableShelfStore(legacy, service);
+    const local = latestVersion((await service.snapshot()).books[HASH].progress.versions)!;
+    for (const [index, remoteId] of remoteIds.entries()) {
+      const incoming = JSON.parse(JSON.stringify(await service.snapshot()));
+      incoming.books[HASH].progress.versions = [{
+        stamp: { deviceId: remoteId, counter: 900 + index },
+        clock: { [remoteId]: 900 + index },
+        value: { ...local.value, progressPctHint: 11 + index },
+        updatedAtMs: 5 + index,
+      }];
+      await service.mergeValidatedState(incoming);
+    }
+    return { service, store, local };
+  }
+
+  test("ER-0139 a picked progress version supersedes every shown version, so the choice is not asked again", async () => {
+    const remote = "00000000-0000-4000-8000-0000000000c1";
+    const { service, store, local } = await storeWithConcurrentRemote([remote]);
+    const shown = (await service.snapshot()).books[HASH].progress.versions;
+    expect(shown).toHaveLength(2);
+
+    const resolved = await store.resolveProgressChoice(LOCAL_ID, local, shown.map((version) => version.stamp));
+    expect(resolved?.value).toEqual(local.value);
+    let versions = (await service.snapshot()).books[HASH].progress.versions;
+    expect(versions).toHaveLength(1);
+    expect(versions[0].stamp).toEqual(resolved!.stamp);
+
+    // The open continues on the resolved version; reading keeps a single version.
+    await store.beginProgressSession(LOCAL_ID, { kind: "chosen", stamp: resolved!.stamp });
+    await store.updateProgress(LOCAL_ID, { ...progressPatch(), page: 8, anchorTextOffset: 8 });
+    await store.closeProgressSession(LOCAL_ID);
+    versions = (await service.snapshot()).books[HASH].progress.versions;
+    expect(versions).toHaveLength(1);
+    expect(versions[0].stamp.deviceId).toBe(local.stamp.deviceId);
+  });
+
+  test("ER-0139 a version that arrived after the dialog is never discarded by the choice", async () => {
+    const seen = "00000000-0000-4000-8000-0000000000c2";
+    const unseen = "00000000-0000-4000-8000-0000000000c3";
+    const { service, store, local } = await storeWithConcurrentRemote([seen, unseen]);
+    const before = (await service.snapshot()).books[HASH].progress.versions;
+    expect(before).toHaveLength(3);
+    const shownStamps = before.filter((version) => version.stamp.deviceId !== unseen).map((version) => version.stamp);
+
+    expect(await store.resolveProgressChoice(LOCAL_ID, local, shownStamps)).toBeNull();
+    expect((await service.snapshot()).books[HASH].progress.versions).toEqual(before);
+  });
 });

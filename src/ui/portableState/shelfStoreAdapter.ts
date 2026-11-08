@@ -539,6 +539,53 @@ export class PortableShelfStore implements ShelfStore {
     }, (value) => this.releaseProgressValue(value));
   }
 
+  /**
+   * ER-0139: the reader picked one of several concurrent progress versions.
+   * Supersede exactly the versions that were shown with the picked value, so
+   * the same choice is not asked on every open. Returns the single resulting
+   * version, or null when the repository no longer holds exactly the shown
+   * versions (an unseen version arrived); the caller then opens with a
+   * one-off "chosen" basis as before and nothing unseen is discarded.
+   */
+  async resolveProgressChoice(
+    id: string,
+    chosen: Version<ProgressValue>,
+    shown: readonly Stamp[],
+  ): Promise<Version<ProgressValue> | null> {
+    const entry = await this.localEntryFor(id);
+    const hash = entry ? hashForLocalEntry(entry) : null;
+    if (!hash) return null;
+    const read = await this.data.read({ bookHash: hash });
+    try {
+      const current = read.book?.progress.versions ?? [];
+      const key = (stamp: Stamp) => `${stamp.deviceId}:${stamp.counter}`;
+      const shownKeys = new Set(shown.map(key));
+      if (current.length !== shownKeys.size || !current.every((version) => shownKeys.has(key(version.stamp)))
+          || !shownKeys.has(key(chosen.stamp))) {
+        return null;
+      }
+      const adopted = await this.data.adopt({
+        readId: read.readId,
+        entity: { bookHash: hash, kind: "progress" },
+        selection: { kind: "shown-all" },
+      });
+      try {
+        const result = await this.data.write({
+          basisId: adopted.basisId,
+          intent: "resolve",
+          value: chosen.value,
+          updatedAtMs: Math.max(Date.now(), chosen.updatedAtMs),
+        });
+        const versions = (result.state as { readonly versions: readonly Version<ProgressValue>[] }).versions;
+        return versions.length === 1 ? versions[0] : null;
+      } finally {
+        await this.data.release({ basisId: adopted.basisId }).catch(() => undefined);
+      }
+    } finally {
+      await this.data.release({ readId: read.readId }).catch(() => undefined);
+    }
+  }
+
   activateProgressSession(lease: ProgressLease): void {
     this.progressSessions.activate(lease);
   }
