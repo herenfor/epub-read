@@ -12,8 +12,8 @@ import { ChapterTextIndex } from "./epubCfi";
 import type { ModernLocator } from "../../core/portableState/portable-state-types";
 
 export const KOR_SIDECAR_BYTE_LIMIT = 8 * 1024 * 1024;
-export const KOR_DOM_VERSION_MIN = 20240114;
-export const KOR_DOM_VERSION_MAX = 20260812;
+/** The only cre_dom_version with an external engine landing (ER-0113). */
+export const KOR_SUPPORTED_DOM_VERSION = 20240114;
 
 const MAX_TABLE_DEPTH = 16;
 const MAX_XPOINTER_LENGTH = 4096;
@@ -211,9 +211,9 @@ function parseReturnTable(source: string): { ok: true; root: Record<string, LuaV
     return { ok: false, errorCode: "not-lua-return-table", detail: "Sidecar must start with 'return {...}'" };
   }
   let pos = 1;
-  const fail = (detail: string): never => {
+  function fail(detail: string): never {
     throw new Error(detail);
-  };
+  }
   const parseValue = (depth: number): LuaValue => {
     if (depth > MAX_TABLE_DEPTH) fail("MAX_DEPTH");
     const token = tokens[pos];
@@ -372,7 +372,12 @@ function parseXPointer(input: string | number | null | undefined):
   }
   if (steps.length < 2 || steps[0].tag !== "body") return { ok: false, reason: "unsupported-format" };
   if (steps[1].tag !== "docfragment") return { ok: false, reason: "unsupported-format" };
-  const bodyAt = steps[2]?.kind === "element" && steps[2].tag === "body" ? 3 : 2;
+  // EPUB has one package body and one chapter body. An omitted index means [1];
+  // any other index is a path that does not exist, not a nearby landing.
+  if (steps[0].index !== 1) return { ok: false, reason: "node-missing" };
+  const innerBody = steps[2]?.kind === "element" && steps[2].tag === "body" ? steps[2] : null;
+  if (innerBody && innerBody.index !== 1) return { ok: false, reason: "node-missing" };
+  const bodyAt = innerBody ? 3 : 2;
   return { ok: true, fragment: steps[1].index, steps: steps.slice(bodyAt), offset };
 }
 
@@ -460,8 +465,7 @@ export function resolveKoreaderProgressPoint(
     const grade = parsed.reason === "unsupported-format" ? "unsupported" : "unresolved";
     return failed(grade, parsed.reason);
   }
-  const version = source.creDomVersion;
-  if (typeof version !== "number" || !Number.isInteger(version) || version < KOR_DOM_VERSION_MIN || version > KOR_DOM_VERSION_MAX) {
+  if (source.creDomVersion !== KOR_SUPPORTED_DOM_VERSION) {
     return failed("unsupported", "crengine-dom-version-unsupported");
   }
   const spineIndex = parsed.fragment - 1;
