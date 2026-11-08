@@ -3,6 +3,7 @@ import { canInsertLeadingColumn, canRetainLeadingColumn, chapterLeafLayout, Lead
 import { pageAxisSign, pageContentX, readPageScroll, writePageScroll, setPagedFlowDirection, type PageProgression } from "./pagedDirection";
 import { resolveArchiveHref, archiveHref } from "../core/archiveReferences";
 import { createPercentageSpacingSession } from "./percentageSpacing";
+import { createFloatWidthSession, isMediaOnlyFloatSubtree } from "./floatCompensation";
 import { sanitizeChapter, VIEWER_ID } from "./sanitize";
 import { planCenteredTitleBody } from "./titlePageLayout";
 import { desktopSettlePlan, PageMotionSession, settlePlan, type Direction as MotionDirection } from "./pageMotion";
@@ -216,11 +217,6 @@ export function isChapterMeasurementCurrent(token: ChapterMeasurementToken): boo
     token.contentDoc === token.expectedDoc &&
     token.viewer === token.expectedViewer
   );
-}
-
-/** True only for an authored inline width declaration (comments are inert). */
-export function hasAuthoredInlineWidth(styleText: string): boolean {
-  return hasAuthoredCssProperty(styleText, "width");
 }
 
 /** 脚注弹层数据（由分页器发往 UI 层）。 */
@@ -2329,51 +2325,6 @@ function restoreContentFitStyles(fixes: readonly ContentFitFix[]): void {
   }
 }
 
-/**
- * 只有直接 img/svg 与源码格式化空白的 float 是正常的媒体浮动，不属于
- * C-08 要修复的文字 shrink-to-fit。注释等非渲染节点不影响判断。
- */
-export function isMediaOnlyFloatContent(nodes: Iterable<Node>): boolean {
-  let hasMedia = false;
-  for (const node of nodes) {
-    if (node.nodeType === 3) {
-      if ((node.textContent ?? "").trim() !== "") return false;
-      continue;
-    }
-    if (node.nodeType !== 1) continue;
-    const tag = (node as Element).tagName.toLowerCase();
-    if (tag !== "img" && tag !== "svg") return false;
-    hasMedia = true;
-  }
-  return hasMedia;
-}
-
-const MEDIA_ONLY_TAGS = new Set(["img", "svg", "image", "video", "audio", "canvas"]);
-
-/**
- * Recursive variant used only for the trailing decorative-float guard. Wrapper
- * elements and comments are allowed, while any non-whitespace text vetoes the
- * media-only classification. A media element itself counts as the payload;
- * SVG descendants are still visited so embedded visible text is not hidden.
- */
-export function isMediaOnlyFloatSubtree(nodes: Iterable<Node>): boolean {
-  let hasMedia = false;
-  const visit = (node: Node): boolean => {
-    if (node.nodeType === 3) return (node.textContent ?? "").trim() === "";
-    if (node.nodeType === 8) return true;
-    if (node.nodeType !== 1) return true;
-    const el = node as Element;
-    const tag = el.tagName.toLowerCase();
-    if (MEDIA_ONLY_TAGS.has(tag)) hasMedia = true;
-    const children = (el as unknown as { childNodes?: Iterable<Node> }).childNodes;
-    if (!children) return true;
-    for (const child of children) if (!visit(child)) return false;
-    return true;
-  };
-  for (const node of nodes) if (!visit(node)) return false;
-  return hasMedia;
-}
-
 export interface FloatFixRect {
   left: number;
   right: number;
@@ -2793,8 +2744,8 @@ export class ChapterPaginator {
   private inlineClipFixes: Array<{ el: HTMLElement; overflowX: InlineStyleValue }> = [];
   /** fit-content 补偿写回过的元素与原始 inline max-width（下次测量前恢复） */
   private fitContentFixes: Array<{ el: HTMLElement; maxWidth: string }> = [];
-  /** float 收缩补偿写回过的元素（下次测量前清除 width） */
-  private floatFixes: HTMLElement[] = [];
+  /** 文本 float 宽度收缩会话；下次测量前清除 width。 */
+  private floatWidthSession = createFloatWidthSession();
   /**
    * 顶层浮动布局单元的完整事务快照。与 C-08 的 width 补偿分离，确保
    * margin/max-width/priority 和 marker 在重排、换章、异常路径都可恢复。
@@ -4390,7 +4341,7 @@ export class ChapterPaginator {
     this.restoreContainedMediaFixes();
     this.restoreContainedTableFixes();
     this.restoreFitContentFix();
-    this.restoreFloatWidths();
+    this.floatWidthSession.restore();
     this.restoreTrailingFloatFixes();
     this.percentageSpacingSession.restore();
     this.verticalMode = basicVerticalMode(win?.getComputedStyle(viewer).writingMode ?? "", this.fixedLayout, this.scrollMode);
@@ -4736,7 +4687,7 @@ export class ChapterPaginator {
       this.percentageSpacingSession.applyBody(doc, viewer, this.effectiveColumnWidth, TEXT_MEASURE.maxEm * this.settings.fontSizePx);
       this.applyFitContentFix();
       this.applyBookMargins();
-      this.applyFloatShrinkFix();
+      this.floatWidthSession.apply(doc, viewer);
       this.applyTrailingFloatMarginFix();
       this.applyInlineBoxOverflowFix();
       this.applyContainedContentFit();
@@ -6536,11 +6487,6 @@ export class ChapterPaginator {
     }
   }
 
-  private restoreFloatWidths(): void {
-    for (const el of this.floatFixes) el.style.removeProperty("width");
-    this.floatFixes = [];
-  }
-
   private restoreFloatLayoutFixes(): void {
     for (const fix of this.floatLayoutFixes) {
       fix.el.removeAttribute("data-reader-float-layout-fixed");
@@ -6775,112 +6721,6 @@ export class ChapterPaginator {
       }
       el.setAttribute("data-reader-inline-box-fixed", "1");
       this.inlineBoxFixes.push({ el, ...original });
-    }
-  }
-
-  private applyFloatShrinkFix(): void {
-    const doc = this.contentDoc;
-    const viewer = this.viewer;
-    if (!doc || !viewer || !doc.defaultView) return;
-    const win = doc.defaultView;
-    const canvas = doc.createElement("canvas");
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    const familiesOf = (fontFamily: string): string[] =>
-      fontFamily
-        .split(",")
-        .map((f) => f.trim().replace(/^["']|["']$/g, ""))
-        .filter(Boolean);
-
-    const textWidth = (text: string, parent: Element | null): number => {
-      if (!text) return 0;
-      const cs = parent ? win.getComputedStyle(parent) : null;
-      const families = cs ? familiesOf(cs.fontFamily) : ["sans-serif"];
-      const style = cs
-        ? `${cs.fontWeight} ${cs.fontSize}`
-        : "400 16px";
-      for (const family of families) {
-        ctx.font = `${style} ${family}`;
-        const w = ctx.measureText(text).width;
-        if (w > 0) return w;
-      }
-      return 0;
-    };
-
-    const measureNode = (node: Node): number => {
-      if (node.nodeType === 3) {
-        return textWidth(node.textContent ?? "", node.parentElement);
-      }
-      if (node.nodeType !== 1) return 0;
-      const el = node as HTMLElement;
-      if (el.tagName.toLowerCase() === "br") return 0;
-      const cs = win.getComputedStyle(el);
-      const tag = el.tagName.toLowerCase();
-      if (tag !== "img" && tag !== "svg" && cs.display !== "inline") return 0;
-      const r = el.getBoundingClientRect();
-      if (r.width > 0) return r.width;
-      const img = el as HTMLImageElement;
-      if (img.naturalWidth) return img.naturalWidth;
-      return 0;
-    };
-
-    for (const el of Array.from(viewer.querySelectorAll("*")) as HTMLElement[]) {
-      const cs = win.getComputedStyle(el);
-      if (cs.float === "none") continue;
-      // C-08 measures horizontal inline advance. An orthogonal paragraph's
-      // narrow physical width is the intended line thickness, not collapse.
-      if (cs.writingMode !== "horizontal-tb") continue;
-      if (hasAuthoredInlineWidth(el.getAttribute("style") ?? "")) continue;
-      // 只修复“塌缩成逐字宽”的浮动元素；已有明确宽度且正常布局
-      // （如目录标题 width:100% + float:left）不处理。
-      const currentWidth = parseFloat(cs.width);
-      if (!Number.isFinite(currentWidth) || currentWidth > 48) continue;
-      // [L5-C23] 小头像等媒体本来就可能窄于 48px；源码缩进空白不是内容，
-      // 不能由 Canvas 累加后反向撑宽其 float 容器。
-      if (isMediaOnlyFloatContent(el.childNodes)) continue;
-      if (
-        Array.from(el.children).some((c) => {
-          const d = win.getComputedStyle(c as Element).display;
-          return (
-            d.startsWith("block") ||
-            d.startsWith("list-item") ||
-            d === "table" ||
-            d === "flex"
-          );
-        })
-      ) {
-        continue;
-      }
-      let maxContent = 0;
-      let lineWidth = 0;
-      for (const n of Array.from(el.childNodes)) {
-        if (n.nodeType === 1 && (n as HTMLElement).tagName.toLowerCase() === "br") {
-          maxContent = Math.max(maxContent, lineWidth);
-          lineWidth = 0;
-          continue;
-        }
-        lineWidth += measureNode(n);
-      }
-      maxContent = Math.max(maxContent, lineWidth);
-      if (maxContent <= 0) continue;
-      const padding =
-        (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
-      const border =
-        (parseFloat(cs.borderLeftWidth) || 0) +
-        (parseFloat(cs.borderRightWidth) || 0);
-      const parent = el.parentElement;
-      const parentCs =
-        parent && doc.defaultView ? doc.defaultView.getComputedStyle(parent) : null;
-      const avail =
-        (parent ? parent.clientWidth : viewer.clientWidth) -
-        (parseFloat(parentCs?.paddingLeft ?? "") || 0) -
-        (parseFloat(parentCs?.paddingRight ?? "") || 0) -
-        (parseFloat(cs.marginLeft) || 0) -
-        (parseFloat(cs.marginRight) || 0);
-      const target = Math.max(0, Math.min(maxContent + padding + border, avail));
-      el.style.setProperty("width", `${target}px`);
-      this.floatFixes.push(el);
     }
   }
 
