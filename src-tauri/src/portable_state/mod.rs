@@ -46,7 +46,10 @@ pub use repository::{
     DirectoryPlacementSnapshot, LocalImportOutcome, MigrationOutcome, PortableStore, ProgressProjection, ReleaseTarget,
     ShelfBookProjection, ShelfProjection, WriteOutcome, WriteStatus,
 };
-pub(crate) use repository::{ReadestAnnotation, ReadestBookImport, ReadestImportOutcome, ReadestTarget};
+pub(crate) use repository::{
+    KoreaderProgressImport, KoreaderProgressOutcome, ReadestAnnotation, ReadestBookImport,
+    ReadestImportOutcome, ReadestTarget,
+};
 
 #[cfg(test)]
 mod tests {

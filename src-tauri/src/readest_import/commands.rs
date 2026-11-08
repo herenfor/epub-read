@@ -18,7 +18,7 @@ fn main_window(window: &WebviewWindow) -> PortableResult<()> {
         Err(error("unavailable", "请在主窗口迁入 Readest 资料"))
     }
 }
-fn scoped<T>(
+pub(crate) fn scoped<T>(
     window: &WebviewWindow,
     scope: &ImportScope,
     work: impl FnOnce(&mut PortableStore, &dyn Fn() -> bool) -> PortableResult<T>,
