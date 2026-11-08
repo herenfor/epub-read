@@ -19,7 +19,8 @@ describe("share panel model", () => {
     expect(shareActions("desktop", { clipboardImage: false })).toEqual(["copyText", "saveImage"]);
     expect(shareActions("browser", { clipboardImage: true })).toEqual(["copyText", "copyImage", "saveImage"]);
     expect(shareActions("android", { clipboardImage: true, androidNative: true })).toEqual(["copyText", "saveGallery", "share"]);
-    // Until the native commands land, Android never shows a button that cannot work.
+    expect(shareActions("android", { clipboardImage: false })).toEqual(["copyText", "saveGallery", "share"]);
+    // A caller can still explicitly disable the native actions.
     expect(shareActions("android", { clipboardImage: true, androidNative: false })).toEqual(["copyText"]);
   });
 

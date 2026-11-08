@@ -18,7 +18,7 @@ export type ShareActionId = "copyText" | "copyImage" | "saveImage" | "saveGaller
  * percent-encoded headers `x-share-filename` and, for sharing, optional
  * `x-share-text`; `save_image_to_gallery` resolves to `{ uri }`.
  */
-export const ANDROID_IMAGE_SHARE_READY = false;
+export const ANDROID_IMAGE_SHARE_READY = true;
 
 /** The buttons of the panel, left to right; the last one is the main action. */
 export function shareActions(surface: ShareSurface, options: { clipboardImage: boolean; androidNative?: boolean }): ShareActionId[] {
