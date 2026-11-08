@@ -173,4 +173,55 @@ describe("KOReader import session", () => {
       expect(ports.dirty).toHaveBeenCalledWith("data-changed");
     } finally { await t.dom.dispose(); }
   });
+
+  it("blocks a book with conflicting local progress before anything can be confirmed, and maps a late native conflict", async () => {
+    const display = { stamp: { deviceId: "d1", counter: 1 }, clock: {}, updatedAtMs: 100, value: { locator: { locatorVersion: 1, chapterPath: "OEBPS/Text/c2.xhtml", spineIndexHint: 1, target: { kind: "text", textProfile: "visible-codepoints-no-whitespace-v1", offset: 2, snippet: "一句话。" } }, progressPctHint: 10 } };
+    const other = { ...display, stamp: { deviceId: "d2", counter: 1 }, value: { ...display.value, progressPctHint: 20 } };
+    ports.target.mockResolvedValueOnce({ bookHash: HASH, partialMd5: MD5, targetToken: "token", progress: { versions: [display, other], display, conflict: true } });
+    const t = await setup();
+    try {
+      await t.dom.run(async () => { await t.current().start(); });
+      await t.dom.run(async () => { await t.current().next(); });
+      expect(t.current().state).toMatchObject({ kind: "preview", preview: { status: { kind: "blocked", reason: "local-conflict" }, target: null } });
+      await t.dom.run(async () => { await t.current().confirm(); });
+      expect(ports.commit).not.toHaveBeenCalled();
+
+      // A conflict that appears after the preview is reported by native and named, not shown as a raw message.
+      ports.commit.mockRejectedValueOnce({ code: "progress-conflict", message: "conflict" });
+      await t.dom.run(() => t.current().cancel());
+      await t.dom.run(async () => { await t.current().start(); });
+      await t.dom.run(async () => { await t.current().next(); });
+      await t.dom.run(async () => { await t.current().confirm(); });
+      expect(ports.notice).toHaveBeenLastCalledWith({ kind: "error", text: "koreaderImport.block.local-conflict" });
+    } finally { await t.dom.dispose(); }
+  });
+
+  it.each(["shelf switch", "unmount"] as const)("drops a picker answer that arrives after a %s", async (cause) => {
+    const gate = deferred<{ source: { kind: string; path: string }; label: string }>();
+    ports.pick.mockReturnValueOnce(gate.promise);
+    const t = await setup();
+    let pending!: Promise<void>;
+    try {
+      await t.dom.run(() => { pending = t.current().start(); });
+      if (cause === "shelf switch") await t.dom.run(() => { ports.shelfChanged!(); });
+      else await t.dom.render(null);
+      await t.dom.run(async () => { gate.resolve({ source: { kind: "path", path: "/m.lua" }, label: "metadata.epub.lua" }); await pending; });
+      expect(ports.open).not.toHaveBeenCalled();
+      expect(ports.notice).not.toHaveBeenCalled();
+      if (cause === "shelf switch") expect(t.current().state.kind).toBe("idle");
+    } finally { await t.dom.dispose(); }
+  });
+
+  it("drops a picker failure that arrives after a shelf switch", async () => {
+    let fail!: (error: unknown) => void;
+    ports.pick.mockReturnValueOnce(new Promise((_, no) => { fail = no; }));
+    const t = await setup();
+    let pending!: Promise<void>;
+    try {
+      await t.dom.run(() => { pending = t.current().start(); });
+      await t.dom.run(() => { ports.shelfChanged!(); });
+      await t.dom.run(async () => { fail(new Error("picker")); await pending; });
+      expect(ports.notice).not.toHaveBeenCalled();
+    } finally { await t.dom.dispose(); }
+  });
 });

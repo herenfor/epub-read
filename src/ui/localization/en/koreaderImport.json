@@ -45,7 +45,6 @@
   "koreaderImport.working.committing": "Saving…",
   "koreaderImport.target.part": "Part {n}",
   "koreaderImport.block.node-missing": "The position KOReader recorded is not in this chapter of the local book; it may be a different edition, so it cannot be imported.",
-  "koreaderImport.preview.conflict": "This book has conflicting progress records here. Importing adds one more; it does not choose between them for you.",
   "koreaderImport.working.matchingCount": "Looking for the local book ({done}/{total})…",
   "koreaderImport.entry": "Import progress from KOReader",
   "koreaderImport.entry.detail": "Pick one book's metadata.epub.lua and import its reading position",
@@ -62,5 +61,6 @@
   "koreaderImport.error.closed": "The import ended (shelf switched, locked or cancelled). Nothing was written",
   "koreaderImport.error.busy": "Another import or shelf task is running. Try again later",
   "koreaderImport.error.randomAccess": "This file cannot be read in place. Copy it to this device first, then import from there",
-  "koreaderImport.error.other": "KOReader import failed: {error}"
+  "koreaderImport.error.other": "KOReader import failed: {error}",
+  "koreaderImport.block.local-conflict": "This book has conflicting reading progress here. Open the book and choose one first, then import."
 }

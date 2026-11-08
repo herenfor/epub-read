@@ -83,6 +83,7 @@ export function koreaderErrorText(error: unknown): string {
     case "too-large": return uiText("koreaderImport.error.tooLarge");
     case "source-changed": case "stale-basis": return uiText("koreaderImport.error.changed");
     case "reader-busy": return uiText("koreaderImport.error.readerBusy");
+    case "progress-conflict": return uiText("koreaderImport.block.local-conflict");
     case "source-unbound": return uiText("koreaderImport.error.unbound");
     case "locked": case "session-closed": case "cancelled": return uiText("koreaderImport.error.closed");
     case "busy": case "repository-unavailable": return uiText("koreaderImport.error.busy");
@@ -119,7 +120,7 @@ export function useKoreaderImport({ shelfEntriesRef, refreshShelfProjection, set
     sessionRef.current === session && generationRef.current === session.generation;
 
   // Switching or locking a shelf ends the import bound to it; so does unmounting.
-  useEffect(() => subscribeShelfSpace(() => { if (sessionRef.current) end(); }), [end]);
+  useEffect(() => subscribeShelfSpace(() => { if (sessionRef.current || launchingRef.current) end(); }), [end]);
   useEffect(() => () => {
     generationRef.current += 1;
     release(sessionRef.current);
@@ -130,19 +131,21 @@ export function useKoreaderImport({ shelfEntriesRef, refreshShelfProjection, set
       setShelfNotice({ kind: "warn", text: uiText("koreaderImport.error.busy") });
       return;
     }
+    // The picker already belongs to this attempt: a shelf switch, cancel or unmount
+    // while it is open bumps the generation, and its late answer is dropped.
+    const generation = ++generationRef.current;
     launchingRef.current = true;
     let picked: { source: SaveFileLocation; label: string } | null;
     try {
       picked = await pickSidecar();
     } catch (error) {
-      setShelfNotice({ kind: "error", text: koreaderErrorText(error) });
+      if (generationRef.current === generation) setShelfNotice({ kind: "error", text: koreaderErrorText(error) });
       return;
     } finally {
       launchingRef.current = false;
     }
-    if (!picked || sessionRef.current) return;
+    if (!picked || sessionRef.current || generationRef.current !== generation) return;
     const { source, label: sourceLabel } = picked;
-    const generation = ++generationRef.current;
     const session: Session = { id: crypto.randomUUID(), generation, sourceLabel, sidecar: null, rows: new Map(), prepared: null };
     sessionRef.current = session;
     setState({ kind: "working", step: "opening", sourceLabel, done: 0, total: 0 });
@@ -245,7 +248,16 @@ export function useKoreaderImport({ shelfEntriesRef, refreshShelfProjection, set
           });
         }
         const local = { progressPct: row.display?.value ? row.display.value.progressPctHint : null, updatedAtMs: row.display?.value ? row.display.updatedAtMs : null };
-        if (result.ok && result.locator.target.kind === "text" && doc) {
+        if (row.conflict) {
+          // Native refuses to write over conflicting local versions (progress-conflict); the user resolves them first.
+          preview = {
+            bookId: chosen,
+            koreader: { progressPct: null, updatedAtMs: null },
+            local,
+            target: null,
+            status: { kind: "blocked", reason: "local-conflict" },
+          };
+        } else if (result.ok && result.locator.target.kind === "text" && doc) {
           const { locator } = result;
           const offset = result.locator.target.offset;
           const pct = koreaderProgressHint(locator.spineIndexHint, spinePaths.length, offset, new ChapterTextIndex(doc).totalChars);
@@ -254,7 +266,6 @@ export function useKoreaderImport({ shelfEntriesRef, refreshShelfProjection, set
             bookId: chosen,
             koreader: { progressPct: pct, updatedAtMs: null },
             local,
-            localConflict: row.conflict,
             target: { spineIndex: locator.spineIndexHint, chapterTitle: chapterTitleOf(doc), excerpt: locator.target.kind === "text" ? locator.target.snippet : null },
             status: same ? { kind: "same" } : { kind: "ready" },
           };
@@ -265,7 +276,6 @@ export function useKoreaderImport({ shelfEntriesRef, refreshShelfProjection, set
             bookId: chosen,
             koreader: { progressPct: null, updatedAtMs: null },
             local,
-            localConflict: row.conflict,
             target: null,
             status: { kind: "blocked", ...blocked },
           };

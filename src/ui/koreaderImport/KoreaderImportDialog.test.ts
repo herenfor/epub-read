@@ -12,7 +12,6 @@ const preview = (patch: Partial<KoreaderPreview> = {}): KoreaderPreview => ({
   bookId: "b",
   koreader: { progressPct: 62, updatedAtMs: null },
   local: { progressPct: 30, updatedAtMs: null },
-  localConflict: false,
   target: { spineIndex: 2, chapterTitle: "第三章", excerpt: "原文片段" },
   status: { kind: "ready" },
   ...patch,

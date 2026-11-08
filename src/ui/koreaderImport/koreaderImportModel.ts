@@ -37,6 +37,8 @@ export interface KoreaderSidecarSummary {
  */
 export type KoreaderBlockReason =
   | "no-progress"
+  /** The local book holds conflicting progress versions; native refuses to write until they are resolved. */
+  | "local-conflict"
   | "chapter-missing"
   | "node-missing"
   | "offset-out-of-range"
@@ -55,8 +57,6 @@ export interface KoreaderPreview {
   readonly bookId: string;
   readonly koreader: KoreaderPosition;
   readonly local: KoreaderPosition;
-  /** The local book holds conflicting progress versions; importing adds one more, it does not pick. */
-  readonly localConflict: boolean;
   /** Where the imported position lands in the local book, when it can be placed. */
   readonly target: { readonly spineIndex: number; readonly chapterTitle: string | null; readonly excerpt: string | null } | null;
   readonly status:

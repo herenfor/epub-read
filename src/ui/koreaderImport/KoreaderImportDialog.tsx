@@ -168,7 +168,6 @@ function PreviewStep(props: KoreaderImportDialogProps & { state: Extract<Koreade
       {status.kind === "blocked" && <p className="readest-bad" role="alert">{blockText(t, status.reason, status.code)}</p>}
       {status.kind === "same" && <p className="save-file-muted" role="status">{t("koreaderImport.preview.same")}</p>}
       {ready && preview.local.progressPct !== null && <p className="save-file-muted">{t("koreaderImport.preview.replaceHint")}</p>}
-      {ready && preview.localConflict && <p className="readest-warn">{t("koreaderImport.preview.conflict")}</p>}
       <p className="save-file-muted">{t("koreaderImport.preview.footer")}</p>
     </Shell>
   );
