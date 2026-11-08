@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyUiScale, isValidUiScale, UI_SCALE_PROPERTY } from "./uiScale";
+import { applyUiScale, isValidUiScale, UI_ICON_SCALE_PROPERTY, UI_SCALE_PROPERTY } from "./uiScale";
 
 // Every stylesheet and UI source as text (see cssTokens.test.ts for why they are read from disk).
 const fs: { readFileSync(path: URL, encoding: "utf8"): string } = await import("node:" + "fs");
@@ -29,14 +29,14 @@ describe("UI scale (ER-0127)", () => {
     expect([...literals, ...inline]).toEqual([]);
   });
 
-  it("never scales a container with zoom", () => {
+  it("never uses zoom, and scales icons around their centre", () => {
     const zooms = Object.entries(styles).flatMap(([path, css]) =>
-      [...css.matchAll(/(?<![\w-])zoom\s*:\s*([^;}]+)/g)]
-        .filter(() => path !== TOKENS)
-        .map((m) => `${path}: zoom: ${m[1].trim()}`));
+      [...css.matchAll(/(?<![\w-])zoom\s*:\s*([^;}]+)/g)].map((m) => `${path}: zoom: ${m[1].trim()}`));
     expect(zooms).toEqual([]);
-    // The one zoom left is the inline icon rule, and it reads the scale.
-    expect([...styles[TOKENS].matchAll(/(?<![\w-])zoom\s*:\s*([^;}]+)/g)].map((m) => m[1].trim())).toEqual(["var(--ui-scale, 1)"]);
+    // zoom also scaled an icon's margins and widened its layout box, which moved
+    // off-centre icons (touch shelf-card dots) off their disc; scale does neither.
+    expect(styles[TOKENS]).toMatch(/:where\(svg:not\(svg svg\)\)\s*\{\s*scale:\s*var\(--ui-icon-scale, none\);\s*\}/);
+    expect(styles[TOKENS]).toMatch(/\[data-ui-scale="fixed"\]\s*\{[^}]*--ui-icon-scale:\s*none;/);
   });
 
   it("sets the scale in one place", () => {
@@ -57,8 +57,10 @@ describe("UI scale (ER-0127)", () => {
     const root = { style: { values: new Map<string, string>(), setProperty(name: string, value: string) { this.values.set(name, value); } } };
     applyUiScale(1.3, root as unknown as HTMLElement);
     expect(root.style.values.get(UI_SCALE_PROPERTY)).toBe("1.3");
+    expect(root.style.values.get(UI_ICON_SCALE_PROPERTY)).toBe("1.3");
     applyUiScale(Number.NaN, root as unknown as HTMLElement);
     expect(root.style.values.get(UI_SCALE_PROPERTY)).toBe("1");
+    expect(root.style.values.get(UI_ICON_SCALE_PROPERTY)).toBe("none");
     applyUiScale(3, root as unknown as HTMLElement);
     expect(root.style.values.get(UI_SCALE_PROPERTY)).toBe("1");
     expect(isValidUiScale(0.75)).toBe(true);

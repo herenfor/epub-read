@@ -1,7 +1,7 @@
 /* UI scale (ER-0127). The setting writes --ui-scale on the root element
    (src/ui/uiScale.ts), so every surface follows it, portals included. Text
    and icons grow; touch targets, spacing, borders and book covers stay put.
-   Containers never use zoom for it.
+   Nothing uses zoom for it.
    A new panel follows the setting just by using the --fs-* tokens and inline
    <svg> icons. Any other text size is calc(Npx * var(--ui-scale));
    uiScale.test.ts rejects literal px font sizes.
@@ -9,9 +9,11 @@
    data-ui-scale="fixed": inside it the scale is 1 for text and icons alike. */
 :root {
   --ui-scale: 1;
+  --ui-icon-scale: none;
 }
 [data-ui-scale="fixed"] {
   --ui-scale: 1;
+  --ui-icon-scale: none;
 }
 :root,
 [data-ui-scale="fixed"] {
@@ -146,8 +148,13 @@ body {
 }
 
 /* UI scale for icons (ER-0127): every outermost inline <svg> grows with the
-   setting, whatever sets its size (attributes or CSS). Zero specificity, so a
-   rule that means otherwise wins. Inside data-ui-scale="fixed" it stays 1. */
+   setting, whatever sets its size (attributes or CSS). It is a visual scale
+   around the icon's centre, not zoom: the icon keeps its layout box, so an
+   icon placed off-centre (the touch shelf-card dots sit top-right on a fixed
+   26px disc) stays on its anchor, and a column holding icons never widens.
+   uiScale.ts writes --ui-icon-scale as none at 100%, so the default look adds
+   no stacking context. Zero specificity, so a rule that means otherwise wins.
+   Inside data-ui-scale="fixed" it stays none. */
 :where(svg:not(svg svg)) {
-  zoom: var(--ui-scale, 1);
+  scale: var(--ui-icon-scale, none);
 }
