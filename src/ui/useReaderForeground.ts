@@ -4,6 +4,7 @@ import { shouldConfirmNoteDiscard } from "./readerCloseGuards";
 import {
   closeReaderForeground,
   openNoteComposer,
+  openShareSheet,
   openReaderPanel,
   openReaderTransient,
   setMenuSubview,
@@ -12,6 +13,7 @@ import {
   type NoteComposerDraft,
   type ReaderForeground,
   type ReaderPanelId,
+  type ShareDraft,
 } from "./readerForeground";
 import type { ReaderHandle } from "./ReaderView";
 import type { SidebarMode, SidebarTab } from "./SidebarDrawer";
@@ -46,11 +48,14 @@ export function readerForegroundSurfaces(foreground: ReaderForeground) {
   const noteComposer = foreground.kind === "modal" && foreground.modal === "note-composer"
     ? foreground.draft
     : null;
+  const shareDraft = foreground.kind === "modal" && foreground.modal === "share"
+    ? foreground.draft
+    : null;
 
   return {
     menuOpen, fontSettingsOpen, displaySettingsOpen, moreSettingsOpen, tocOpen, bookmarkMenuOpen,
     searchOpen, notesOpen, logOpen, assistantOpen, readingSettingsOpen,
-    selectionContext, footnote, noteComposer,
+    selectionContext, footnote, noteComposer, shareDraft,
   };
 }
 
@@ -105,6 +110,17 @@ export function useReaderForeground({
     }
     setForeground((state) => openNoteComposer(state, draft));
   }, []);
+  const openShare = useCallback((draft: ShareDraft): void => {
+    const current = foregroundRef.current;
+    if (current.kind === "transient" && current.transient === "footnote") {
+      overlayHoverRef.current = false;
+      reader()?.dismissFootnote();
+    } else if (current.kind === "transient" && current.transient === "selection") {
+      reader()?.clearTextSelection();
+    }
+    setForeground((state) => openShareSheet(state, draft));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-stable refs, same contract as openComposer
+  }, []);
   const closePanel = useCallback((panel: ReaderPanelId): void => {
     setForeground((current) =>
       current.kind === "panel" && current.panel === panel ? closeReaderForeground() : current
@@ -129,7 +145,7 @@ export function useReaderForeground({
     setForeground((current) => setMenuSubview(current, view));
   }, []);
 
-  return { openPanel, openTransient, openComposer, closePanel, closeForeground, requestCloseForeground, showMenuSubview };
+  return { openPanel, openTransient, openComposer, openShare, closePanel, closeForeground, requestCloseForeground, showMenuSubview };
 }
 
 interface SidebarWiring {
@@ -216,10 +232,10 @@ export function useReaderSidebar({
     closeForeground();
   }, [closeForeground, phoneChrome, sidebarMode]);
 
-  /** 键盘/返回键关闭当前可见层；笔记模态先走统一 dirty 确认。 */
+  /** 键盘/返回键关闭当前可见层；模态（笔记、分享）先关，笔记先走统一 dirty 确认。 */
   const requestCloseCurrentSurface = useCallback((): void => {
     const current = foregroundRef.current;
-    if (current.kind === "modal" && current.modal === "note-composer") {
+    if (current.kind === "modal") {
       requestCloseForeground();
       return;
     }

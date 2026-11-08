@@ -10,13 +10,23 @@ export type NoteComposerDraft =
   | { mode: "create"; selection: SelectionContextPayload; spineIndex: number }
   | { mode: "edit"; note: ReaderNote; editContext?: NoteEditContext };
 
+/** What the share panel shows: a passage with its book place, note and highlight colour. */
+export interface ShareDraft {
+  quote: string;
+  note: string;
+  /** Highlight colour name or #rrggbb; absent for plain text. */
+  accent?: string;
+  spineIndex: number;
+}
+
 export type ReaderForeground =
   | { kind: "none" }
   | ({ kind: "panel"; panel: "menu"; view: MenuSubview })
   | { kind: "panel"; panel: Exclude<ReaderPanelId, "menu"> }
   | { kind: "transient"; transient: "selection"; payload: SelectionContextPayload }
   | { kind: "transient"; transient: "footnote"; payload: FootnotePayload }
-  | { kind: "modal"; modal: "note-composer"; draft: NoteComposerDraft };
+  | { kind: "modal"; modal: "note-composer"; draft: NoteComposerDraft }
+  | { kind: "modal"; modal: "share"; draft: ShareDraft };
 
 export const noneForeground = (): ReaderForeground => ({ kind: "none" });
 
@@ -78,6 +88,13 @@ export function openNoteComposer(
   draft: NoteComposerDraft,
 ): ReaderForeground {
   return { kind: "modal", modal: "note-composer", draft };
+}
+
+export function openShareSheet(
+  _current: ReaderForeground,
+  draft: ShareDraft,
+): ReaderForeground {
+  return { kind: "modal", modal: "share", draft };
 }
 
 export function closeReaderForeground(): ReaderForeground {

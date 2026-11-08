@@ -621,6 +621,9 @@
 }
 
 .sidebar-note-act {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: var(--fs-caption);
   padding: 2px 6px;
   border-radius: var(--r-xs);
@@ -634,6 +637,10 @@
 .sidebar-note-act:hover {
   background: var(--btn-tint-hover);
   color: var(--fg);
+}
+
+.sidebar-note-act > svg {
+  flex: none;
 }
 
 .sidebar-note-act.danger:hover {

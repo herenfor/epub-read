@@ -118,5 +118,32 @@ describe("selection menu handoff", () => {
         expect(filled.dom.container.querySelector("input")).toBeNull();
       } finally { await filled.dom.dispose(); }
     });
+
+    it("offers sharing in every state and passes the highlight it sits on", async () => {
+      const onShare = vi.fn();
+      const plain = createReactDomHarness();
+      const labels = () => [...plain.container.querySelectorAll("button")].map((button) => button.textContent);
+      try {
+        await plain.render(createElement(ReaderContextMenu, {
+          selection: { text: "原文片段" }, position: { x: 50, y: 50 }, onClose: () => undefined, onAddNote: () => undefined,
+        }));
+        expect(labels()).not.toContain("分享");
+        await plain.render(createElement(ReaderContextMenu, {
+          selection: { text: "原文片段" }, position: { x: 50, y: 50 }, onClose: () => undefined, onAddNote: () => undefined, onShare,
+        }));
+        expect(labels()).toContain("分享");
+      } finally { await plain.dispose(); }
+
+      const target = { id: "n", content: "笔记", style: "underline" as const, color: "green" as const };
+      const t = setup(target);
+      try {
+        await t.dom.render(createElement(ReaderContextMenu, {
+          selection: { text: "原文片段" }, position: { x: 50, y: 50 }, onClose: t.onClose, onAddNote: () => undefined, highlight: t.highlight, onShare,
+        }));
+        await t.dom.click(t.button("分享"));
+        expect(t.onClose).toHaveBeenCalled();
+        expect(onShare).toHaveBeenLastCalledWith(expect.objectContaining({ text: "原文片段" }), target);
+      } finally { await t.dom.dispose(); }
+    });
   });
 });

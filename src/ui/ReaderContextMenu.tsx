@@ -85,6 +85,8 @@ export interface ReaderContextMenuProps {
   onCopy?(text: string): void;
   onCopyOriginal?(text: string): void;
   onAddNote(selection: ReaderSelectionPayload): void;
+  /** Opens the share card for the selection; on a highlight, with its note and colour (ER-0119). */
+  onShare?(selection: ReaderSelectionPayload, target: HighlightTarget | null): void;
   onClose(): void;
   highlight?: ReaderHighlightMenu;
 }
@@ -157,6 +159,9 @@ export function ReaderContextMenu(props: ReaderContextMenuProps) {
     : null;
   const copyButton = <button type="button" role="menuitem" onClick={copy}>{t("readerMisc.copy")}</button>;
   const addNote = <button type="button" role="menuitem" onClick={() => { props.onClose(); props.onAddNote(selection); }}>{t("readerMisc.addNote")}</button>;
+  const shareButton = (target: HighlightTarget | null) => props.onShare
+    ? <button type="button" role="menuitem" onClick={() => { props.onClose(); props.onShare?.(selection, target); }}>{t("share.menu")}</button>
+    : null;
 
   const highlight = props.highlight;
   if (!highlight) {
@@ -173,6 +178,7 @@ export function ReaderContextMenu(props: ReaderContextMenuProps) {
         {/* Only when the shown text differs from the book (e.g. after character conversion). */}
         {copyOriginal}
         {addNote}
+        {shareButton(null)}
       </div>
     );
   }
@@ -259,6 +265,7 @@ export function ReaderContextMenu(props: ReaderContextMenuProps) {
           </button>
           {copyButton}
           {copyOriginal}
+          {shareButton(target)}
           <span className="hl-menu-sep" />
           <button type="button" role="menuitem" className="is-danger" onClick={() => { props.onClose(); highlight.onDelete(target); }}>
             {t("readerMisc.highlight.delete")}
@@ -277,6 +284,7 @@ export function ReaderContextMenu(props: ReaderContextMenuProps) {
           {addNote}
           {copyButton}
           {copyOriginal}
+          {shareButton(null)}
         </div>
       </>
     );
@@ -295,6 +303,7 @@ export function ReaderContextMenu(props: ReaderContextMenuProps) {
         {addNote}
         {copyButton}
         {copyOriginal}
+        {shareButton(null)}
       </div>
     );
   }

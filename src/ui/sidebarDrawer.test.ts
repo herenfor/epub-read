@@ -187,6 +187,12 @@ describe("Zen UI SidebarDrawer 组件与交互契约（Packet B）", () => {
     expect(html.match(/sidebar-note-selection/g)).toHaveLength(1);
     expect(html).toContain("添加笔记");
     expect(html).toContain("编辑");
+    expect(html).not.toContain("icon-share");
+    const shared = renderToStaticMarkup(
+      createElement(SidebarDrawer, { ...baseProps, activeTab: "notes", notes, onEditNote: vi.fn(), onShareNote: vi.fn(), onDeleteNote: vi.fn() })
+    );
+    expect(shared.match(/icon-share/g)).toHaveLength(2);
+    expect(shared).toContain("分享");
   });
 
   it("固定驻留（Docked）模式渲染 is-docked 标识且不渲染 backdrop 遮罩", () => {

@@ -89,6 +89,8 @@ import { ReaderDisplaySettingsPopover } from "./ui/ReaderDisplaySettingsPopover"
 import "./ui/readerDisplaySettings.css";
 import "./ui/themeTransition.css";
 import { ReaderContextMenu } from "./ui/ReaderContextMenu";
+import { ShareSheet } from "./ui/share/ShareSheet";
+import { shareCoverUrl } from "./ui/shelfView/cards";
 import { NoteComposer } from "./ui/NoteComposer";
 import type { ReaderNote } from "./ui/notes";
 import { hasOwnField, chapterLabelForIndex, useNoteEditRef, replaceNoteEditContext,
@@ -693,7 +695,7 @@ export default function App() {
   const {
     menuOpen, fontSettingsOpen, displaySettingsOpen, tocOpen, bookmarkMenuOpen,
     searchOpen, notesOpen, logOpen, assistantOpen, readingSettingsOpen,
-    selectionContext, footnote, noteComposer,
+    selectionContext, footnote, noteComposer, shareDraft,
   } = readerForegroundSurfaces(foreground);
   // A typography slider is held in Aa: the reader relayouts per value and holds background work.
   const [typographyPreview, setTypographyPreview] = useState(false);
@@ -709,7 +711,7 @@ export default function App() {
   useEffect(() => {
     if (imageRequest === null) setVisualCompareOriginal(false);
   }, [imageRequest]);
-  const { openPanel, openTransient, openComposer, closePanel, closeForeground, requestCloseForeground, showMenuSubview } = useReaderForeground({
+  const { openPanel, openTransient, openComposer, openShare, closePanel, closeForeground, requestCloseForeground, showMenuSubview } = useReaderForeground({
     foregroundRef,
     setForeground,
     overlayHoverRef,
@@ -2411,7 +2413,8 @@ export default function App() {
     logOpen ||
     assistantOpen ||
     readingSettingsOpen ||
-    noteComposer !== null
+    noteComposer !== null ||
+    shareDraft !== null
   );
 
   // 跳转返回 / 前进入口（与 Alt+← / Alt+→ 同一历史、同一就绪条件）。
@@ -2564,6 +2567,10 @@ export default function App() {
           }}
           onEditNote={(viewNote) => void handleEditNote(viewNote.id)}
           onDeleteNote={(viewNote) => requestNoteDelete(viewNote.id)}
+          onShareNote={(viewNote) => {
+            const note = currentNotes.find((candidate) => candidate.id === viewNote.id);
+            if (note) openShare({ quote: note.selectedText, note: note.content, accent: note.color, spineIndex: note.spineIndex });
+          }}
           pendingDeleteNoteId={pendingNoteId}
           onUndoDeleteNote={undoNoteDelete}
         />
@@ -3043,10 +3050,36 @@ export default function App() {
                       openComposer({ mode: "create", selection: selectionContext, spineIndex: selectedIndex });
                       readerRef.current?.clearTextSelection();
                     }}
+                    onShare={(selection, onHighlight) => {
+                      // On a highlight the card shows the whole highlight with its note and colour.
+                      const note = onHighlight ? currentNotes.find((candidate) => candidate.id === onHighlight.id) : undefined;
+                      openShare({
+                        quote: note?.selectedText ?? selection.text,
+                        note: note?.content ?? "",
+                        accent: note?.color,
+                        spineIndex: note?.spineIndex ?? selectedIndex,
+                      });
+                      readerRef.current?.clearTextSelection();
+                    }}
                     onClose={endSelection}
                   />
                   );
                 })()}
+                {shareDraft && book && (
+                  <ShareSheet
+                    key={`${shareDraft.spineIndex}:${shareDraft.quote}`}
+                    draft={shareDraft}
+                    book={{
+                      title: book.metadata.title,
+                      author: book.metadata.creator,
+                      chapter: chapterLabelForIndex(book, shareDraft.spineIndex) || undefined,
+                      coverUrl: shareCoverUrl(shelfEntries.find((entry) => entry.id === currentShelfId)),
+                    }}
+                    surface={runtime.platform === "android" ? "android" : isTauriEnv() ? "desktop" : "browser"}
+                    onClose={requestCloseForeground}
+                    onNotice={showReaderNotice}
+                  />
+                )}
                 {noteComposer && (
                   <>
                     <div className="note-composer-backdrop" aria-hidden="true" />
