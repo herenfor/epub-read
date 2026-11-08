@@ -166,6 +166,20 @@ pub(crate) fn copy_into_library(
                     .map_err(|error| format!("无法准备书库临时副本属性：{error}"))?;
             }
         }
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            // fs::copy also preserves Unix mode bits. Grant owner-write only
+            // on our private staging copy; never relax the source or group/other bits.
+            let mut permissions = fs::metadata(&staging)
+                .map_err(|error| format!("无法读取书库临时副本属性：{error}"))?
+                .permissions();
+            if permissions.mode() & 0o200 == 0 {
+                permissions.set_mode(permissions.mode() | 0o200);
+                fs::set_permissions(&staging, permissions)
+                    .map_err(|error| format!("无法准备书库临时副本属性：{error}"))?;
+            }
+        }
         let (copied_hash, _) = hash_file(&staging)?;
         if copied_hash != content_hash {
             return Err("复制到书库的内容与原文件不一致，未导入".to_string());
@@ -384,7 +398,7 @@ mod tests {
         let root = temp_root("copy");
         let source = root.join("原书.epub");
         fs::write(&source, b"epub bytes").unwrap();
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
         {
             let mut permissions = fs::metadata(&source).unwrap().permissions();
             permissions.set_readonly(true);
@@ -399,7 +413,7 @@ mod tests {
             fs::read(root.join("books").join(&first)).unwrap(),
             b"epub bytes"
         );
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
         {
             assert!(fs::metadata(&source).unwrap().permissions().readonly());
             assert!(!fs::metadata(root.join("books").join(&first))
@@ -427,7 +441,7 @@ mod tests {
                 .unwrap_or(0),
             0
         );
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
         {
             let mut permissions = fs::metadata(&source).unwrap().permissions();
             permissions.set_readonly(false);
