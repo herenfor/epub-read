@@ -1,6 +1,7 @@
 @import "./ui/uiTokens.css";
 @import "./ui/motionKinds.css";
 @import "./ui/controls/controls.css";
+@import "./ui/controls/quietButton.css";
 
 /* Theme bg/fg mirror config/readerPalette.ts; readerPalette.test.ts checks them. */
 :root {
@@ -5910,12 +5911,9 @@ select option {
   font-size: var(--fs-body);
 }
 
-/* 触摸无 hover，删除键常显。 */
+/* 触摸无 hover，删除键常显；外观与 44px 命中区见 controls/quietButton.css。 */
 .app[data-touch-ui="true"] .sidebar-drawer .sidebar-bookmark-del-btn {
-  width: 44px;
-  height: 44px;
-  right: 4px;
-  opacity: 0.7;
+  right: 8px;
 }
 
 .app[data-touch-ui="true"] .sidebar-drawer .sidebar-note-card {
@@ -5938,11 +5936,6 @@ select option {
 .app[data-touch-ui="true"] .sidebar-drawer .sidebar-note-act,
 .app[data-touch-ui="true"] .sidebar-drawer .sidebar-note-confirm {
   font-size: var(--fs-body);
-}
-
-.app[data-touch-ui="true"] .sidebar-drawer .sidebar-note-act {
-  min-height: 40px;
-  padding: 0 12px;
 }
 
 /* 手机：与平板同一左侧浮岛语言，右侧留出遮罩可点关闭。 */

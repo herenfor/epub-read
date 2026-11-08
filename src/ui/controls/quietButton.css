@@ -1,0 +1,135 @@
+/*
+ * Quiet buttons: text or icon actions with no resting frame (edit / delete
+ * on a note card, a bookmark's remove button, secondary actions in a panel).
+ * On desktop they stay transparent until hovered. Touch has no hover, so
+ * there they get a faint resting fill, a press state that appears the moment
+ * the finger lands, and a 44px hit area without growing on screen. The press
+ * mark (data-pressed) is set by pressFeedback.ts; keep its selector in sync.
+ * Delete stays quiet too: red text at rest, red fill only while pressed.
+ */
+:is(.ui-quiet-btn, .sidebar-note-act, .sidebar-bookmark-del-btn) {
+  -webkit-tap-highlight-color: transparent;
+  --ui-quiet-press: color-mix(in srgb, var(--fg) 15%, transparent);
+}
+
+:is(.ui-quiet-btn, .sidebar-note-act) {
+  position: relative;
+}
+
+:is(.ui-quiet-btn.is-danger, .sidebar-note-act.danger, .sidebar-bookmark-del-btn) {
+  --ui-quiet-press: color-mix(in srgb, var(--ui-danger) 18%, transparent);
+}
+
+.ui-quiet-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--fs-caption);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--ui-control-quick) var(--ui-ease), color var(--ui-control-quick) var(--ui-ease);
+}
+
+.ui-quiet-btn > svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+
+.ui-quiet-btn:hover:not(:disabled) {
+  background: var(--btn-tint-hover);
+  color: var(--fg);
+}
+
+.ui-quiet-btn.is-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ui-danger) 15%, transparent);
+  color: var(--ui-danger);
+}
+
+.ui-quiet-btn.is-primary {
+  color: var(--accent);
+}
+
+.ui-quiet-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.ui-quiet-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ---- Touch: visible at rest, compact on screen, 44px to the finger. ----
+   `.app.app` outranks the generic touch rule that makes every sidebar or
+   panel button 44px tall; quiet buttons get that height from ::before. */
+.app.app[data-touch-ui="true"] :is(.ui-quiet-btn, .sidebar-note-act, .sidebar-bookmark-del-btn) {
+  min-height: 30px;
+  background: var(--ui-quiet-rest);
+  color: color-mix(in srgb, var(--fg) 78%, var(--panel-bg));
+  --ui-quiet-rest: color-mix(in srgb, var(--fg) 6%, transparent);
+}
+
+.app.app[data-touch-ui="true"] :is(.ui-quiet-btn, .sidebar-note-act) {
+  padding: 0 10px;
+}
+
+.app.app[data-touch-ui="true"] :is(.ui-quiet-btn.is-danger, .sidebar-note-act.danger, .sidebar-bookmark-del-btn) {
+  color: var(--ui-danger);
+}
+
+.app.app[data-touch-ui="true"] .ui-quiet-btn.is-primary {
+  --ui-quiet-rest: color-mix(in srgb, var(--accent) 13%, transparent);
+  color: var(--accent);
+  --ui-quiet-press: color-mix(in srgb, var(--accent) 26%, transparent);
+}
+
+.app.app[data-touch-ui="true"] .sidebar-bookmark-del-btn {
+  width: 30px;
+  height: 30px;
+  opacity: 1;
+}
+
+.app[data-touch-ui="true"] :is(.ui-quiet-btn, .sidebar-note-act, .sidebar-bookmark-del-btn)::before {
+  content: "";
+  position: absolute;
+  inset: -7px -3px;
+}
+
+/* ---- Pressed (every pointer): darker fill, a slight sink, no delay in. ----
+   `.app.app` keeps the press above both hover and the touch resting fill.
+   `scale` rather than `transform`, so buttons positioned with a transform
+   keep it. */
+.app.app :is(.ui-quiet-btn, .sidebar-note-act, .sidebar-bookmark-del-btn)[data-pressed] {
+  background: var(--ui-quiet-press);
+  transition-duration: 0s;
+}
+
+:is(.ui-quiet-btn, .sidebar-note-act, .sidebar-bookmark-del-btn)[data-pressed] {
+  scale: 0.95;
+}
+
+/* On touch the press fades out slowly enough to be seen after a quick tap. */
+.app[data-touch-ui="true"] :is(.ui-quiet-btn, .sidebar-note-act, .sidebar-bookmark-del-btn):not([data-pressed]) {
+  transition-property: background-color, color, opacity, scale;
+  transition-duration: 180ms;
+  transition-timing-function: var(--ui-ease);
+}
+
+:root[data-motion="reduced"] :is(.ui-quiet-btn, .sidebar-note-act, .sidebar-bookmark-del-btn)[data-pressed] {
+  scale: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :is(.ui-quiet-btn, .sidebar-note-act, .sidebar-bookmark-del-btn)[data-pressed] {
+    scale: none;
+  }
+}
