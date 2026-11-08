@@ -567,28 +567,17 @@ fn stage_for_command(
 ) -> Result<(StagedImage, ActiveGuard), &'static str> {
     let share_root = cache_dir.join(IMAGE_SHARE_DIR);
     fs::create_dir_all(&share_root).map_err(|_| CODE_IO)?;
-    let mut staged = Err(CODE_IO);
-    let mut guard = None;
-    for _ in 0..8 {
-        let id = new_request_id()?;
-        let registered = ActiveGuard::register(&id);
-        let active = active_snapshot();
-        match stage_image(&share_root, &id, bytes, &meta.filename, &active) {
-            Ok(image) => {
-                staged = Ok(image);
-                guard = Some(registered);
-                break;
-            }
-            Err(code) => {
-                drop(registered);
-                if code != CODE_IO {
-                    return Err(code);
-                }
-                staged = Err(code);
-            }
+    // One id. A collision, disk-full write, sync, or path error is not retried.
+    let id = new_request_id()?;
+    let registered = ActiveGuard::register(&id);
+    let active = active_snapshot();
+    match stage_image(&share_root, &id, bytes, &meta.filename, &active) {
+        Ok(image) => Ok((image, registered)),
+        Err(code) => {
+            drop(registered);
+            Err(code)
         }
     }
-    Ok((staged?, guard.ok_or(CODE_IO)?))
 }
 
 #[cfg(target_os = "android")]
@@ -651,6 +640,9 @@ fn perform(
 
     let cache_dir = app.path().app_cache_dir().map_err(|_| CODE_IO)?;
     let (staged, _active) = stage_for_command(&cache_dir, &meta, &bytes)?;
+    // The staged file holds the bytes. Drop the buffer before the plugin wait,
+    // which includes a legacy permission dialog.
+    drop(bytes);
     let call = match android::invoke(app, op, &staged, &meta) {
         Ok(body) => interpret(op, Ok(body)),
         Err(()) => PluginCall::Ambiguous,
@@ -1013,6 +1005,87 @@ mod image_share_contract {
             assert!(remove_owned_request(&share_root, "../library").is_err());
             assert_eq!(fs::read(&outside).unwrap(), b"book");
         }
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn stage_io_failure_does_not_retry_or_touch_preexisting_bytes() {
+        let root =
+            std::env::temp_dir().join(format!("image-share-stage-fail-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let share_root = root.join("image-share");
+        fs::create_dir_all(&share_root).unwrap();
+
+        let occupied_id = hex_id(0x71);
+        let occupied = share_root.join(&occupied_id);
+        fs::write(&occupied, b"preexisting-file").unwrap();
+        assert_eq!(
+            stage_image(
+                &share_root,
+                &occupied_id,
+                b"new-bytes",
+                "a.png",
+                &HashSet::new(),
+            )
+            .unwrap_err(),
+            CODE_IO
+        );
+        assert_eq!(fs::read(&occupied).unwrap(), b"preexisting-file");
+
+        let preexisting_id = hex_id(0x72);
+        let preexisting = share_root.join(&preexisting_id);
+        fs::create_dir(&preexisting).unwrap();
+        fs::write(preexisting.join("keep.png"), b"keep-me").unwrap();
+        assert_eq!(
+            stage_image(
+                &share_root,
+                &preexisting_id,
+                b"replacement",
+                "keep.png",
+                &HashSet::new(),
+            )
+            .unwrap_err(),
+            CODE_IO
+        );
+        assert_eq!(fs::read(preexisting.join("keep.png")).unwrap(), b"keep-me");
+
+        let sibling_id = hex_id(0x73);
+        let sibling = share_root.join(&sibling_id);
+        fs::create_dir(&sibling).unwrap();
+        fs::write(sibling.join("sibling.png"), b"sibling").unwrap();
+        let failed_id = hex_id(0x74);
+        let long_name = format!("{}.png", "n".repeat(252));
+        assert_eq!(long_name.len(), 256);
+        assert_eq!(
+            stage_image(
+                &share_root,
+                &failed_id,
+                b"partial",
+                &long_name,
+                &HashSet::new(),
+            )
+            .unwrap_err(),
+            CODE_IO
+        );
+        assert!(
+            !share_root.join(&failed_id).exists(),
+            "a failed write must remove only the new request"
+        );
+        assert_eq!(fs::read(sibling.join("sibling.png")).unwrap(), b"sibling");
+        assert_eq!(fs::read(&occupied).unwrap(), b"preexisting-file");
+        assert_eq!(fs::read(preexisting.join("keep.png")).unwrap(), b"keep-me");
+
+        let mut names = fs::read_dir(&share_root)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        names.sort();
+        assert_eq!(
+            names,
+            vec![occupied_id, preexisting_id, sibling_id],
+            "one failed attempt must not leave another request directory"
+        );
 
         let _ = fs::remove_dir_all(&root);
     }

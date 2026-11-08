@@ -11,6 +11,7 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.system.ErrnoException
 import android.system.Os
+import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
 import app.tauri.PermissionState
 import app.tauri.annotation.Command
@@ -59,33 +60,48 @@ class ImageSharePlugin(private val activity: Activity) : Plugin(activity) {
     private val io = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "image-share").apply { isDaemon = true }
     }
-    private val permissionWait = AtomicReference<Invoke?>(null)
+    private val closed = AtomicBoolean(false)
+    private val permissionWait = AtomicReference<PendingPermission?>(null)
+
+    private class PendingPermission(
+        val invoke: Invoke,
+        val once: AtomicBoolean,
+        val args: ImageRequestArgs,
+    )
+
+    /**
+     * Tauri 2.11.5 calls this from PluginManager.onDestroy after the activity's
+     * own onDestroy. Showing the system chooser only stops the activity, so
+     * onStop must keep the share alive.
+     */
+    override fun onDestroy(activity: AppCompatActivity) {
+        if (activity !== this.activity) return
+        closeOwner()
+    }
 
     @Command
     fun share(invoke: Invoke) {
         val once = AtomicBoolean(false)
+        if (closed.get()) {
+            resolve(invoke, once, false, "io", null)
+            return
+        }
         val args = try {
             invoke.parseArgs(ImageRequestArgs::class.java)
         } catch (error: Throwable) {
             resolve(invoke, once, false, errorCode(error), null)
             return
         }
-        try {
-            io.execute {
-                try {
-                    shareOnIo(invoke, once, args)
-                } catch (error: Throwable) {
-                    resolve(invoke, once, false, errorCode(error), null)
-                }
-            }
-        } catch (error: RejectedExecutionException) {
-            resolve(invoke, once, false, "io", null)
-        }
+        enqueue(invoke, once) { shareOnIo(invoke, once, args) }
     }
 
     @Command
     fun save(invoke: Invoke) {
         val once = AtomicBoolean(false)
+        if (closed.get()) {
+            resolve(invoke, once, false, "io", null)
+            return
+        }
         val args = try {
             invoke.parseArgs(ImageRequestArgs::class.java)
         } catch (error: Throwable) {
@@ -95,20 +111,29 @@ class ImageSharePlugin(private val activity: Activity) : Plugin(activity) {
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P &&
             getPermissionState(GALLERY_PERMISSION) != PermissionState.GRANTED
         ) {
-            if (!permissionWait.compareAndSet(null, invoke)) {
+            val pending = PendingPermission(invoke, once, args)
+            if (!permissionWait.compareAndSet(null, pending)) {
                 resolve(invoke, once, false, "io", null)
+                return
+            }
+            if (closed.get()) {
+                if (permissionWait.compareAndSet(pending, null)) {
+                    resolve(invoke, once, false, "io", null)
+                }
                 return
             }
             try {
                 if (!isPermissionDeclared(GALLERY_PERMISSION)) {
-                    permissionWait.compareAndSet(invoke, null)
-                    resolve(invoke, once, false, "io", null)
+                    if (permissionWait.compareAndSet(pending, null)) {
+                        resolve(invoke, once, false, "io", null)
+                    }
                     return
                 }
                 requestPermissionForAlias(GALLERY_PERMISSION, invoke, "galleryPermissionResult")
             } catch (error: Throwable) {
-                permissionWait.compareAndSet(invoke, null)
-                resolve(invoke, once, false, errorCode(error), null)
+                if (permissionWait.compareAndSet(pending, null)) {
+                    resolve(invoke, once, false, errorCode(error), null)
+                }
             }
             return
         }
@@ -117,21 +142,60 @@ class ImageSharePlugin(private val activity: Activity) : Plugin(activity) {
 
     @PermissionCallback
     fun galleryPermissionResult(invoke: Invoke) {
-        if (!permissionWait.compareAndSet(invoke, null)) {
+        val pending = permissionWait.get() ?: return
+        if (pending.invoke !== invoke) return
+        if (!permissionWait.compareAndSet(pending, null)) return
+        if (!ownerCanLaunch()) {
+            resolve(pending.invoke, pending.once, false, "io", null)
             return
         }
-        val once = AtomicBoolean(false)
         try {
             if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P ||
                 getPermissionState(GALLERY_PERMISSION) != PermissionState.GRANTED
             ) {
                 val code = if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) "io" else "permission"
-                resolve(invoke, once, false, code, null)
+                resolve(pending.invoke, pending.once, false, code, null)
                 return
             }
-            publishOnIo(invoke, once, invoke.parseArgs(ImageRequestArgs::class.java))
+            publishOnIo(pending.invoke, pending.once, pending.args)
         } catch (error: Throwable) {
-            resolve(invoke, once, false, errorCode(error), null)
+            resolve(pending.invoke, pending.once, false, errorCode(error), null)
+        }
+    }
+
+    private fun closeOwner() {
+        if (!closed.compareAndSet(false, true)) return
+        val pending = permissionWait.getAndSet(null)
+        if (pending != null) {
+            resolve(pending.invoke, pending.once, false, "io", null)
+        }
+        // Queued tasks still run and stop at the closed gate. Do not wait here.
+        io.shutdown()
+    }
+
+    private fun ownerCanLaunch(): Boolean {
+        return !closed.get() && !activity.isFinishing && !activity.isDestroyed
+    }
+
+    private fun enqueue(invoke: Invoke, once: AtomicBoolean, job: () -> Unit) {
+        if (closed.get()) {
+            resolve(invoke, once, false, "io", null)
+            return
+        }
+        try {
+            io.execute {
+                if (closed.get()) {
+                    resolve(invoke, once, false, "io", null)
+                    return@execute
+                }
+                try {
+                    job()
+                } catch (error: Throwable) {
+                    resolve(invoke, once, false, errorCode(error), null)
+                }
+            }
+        } catch (_: RejectedExecutionException) {
+            resolve(invoke, once, false, "io", null)
         }
     }
 
@@ -152,28 +216,28 @@ class ImageSharePlugin(private val activity: Activity) : Plugin(activity) {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             clipData = send.clipData
         }
-        activity.runOnUiThread {
-            try {
-                activity.startActivity(chooser)
-            } catch (error: Throwable) {
-                resolve(invoke, once, false, errorCode(error), null)
-                return@runOnUiThread
+        try {
+            activity.runOnUiThread {
+                if (!ownerCanLaunch()) {
+                    resolve(invoke, once, false, "io", null)
+                    return@runOnUiThread
+                }
+                try {
+                    activity.startActivity(chooser)
+                } catch (error: Throwable) {
+                    resolve(invoke, once, false, errorCode(error), null)
+                    return@runOnUiThread
+                }
+                resolve(invoke, once, true, null, null)
             }
-            resolve(invoke, once, true, null, null)
+        } catch (error: Throwable) {
+            resolve(invoke, once, false, errorCode(error), null)
         }
     }
 
     private fun publishOnIo(invoke: Invoke, once: AtomicBoolean, args: ImageRequestArgs) {
-        try {
-            io.execute {
-                try {
-                    resolve(invoke, once, true, null, publish(args))
-                } catch (error: Throwable) {
-                    resolve(invoke, once, false, errorCode(error), null)
-                }
-            }
-        } catch (error: RejectedExecutionException) {
-            resolve(invoke, once, false, "io", null)
+        enqueue(invoke, once) {
+            resolve(invoke, once, true, null, publish(args))
         }
     }
 
