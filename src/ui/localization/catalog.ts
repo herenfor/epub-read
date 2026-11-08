@@ -33,6 +33,7 @@ import { libraryLocation } from "./catalogs/libraryLocation";
 import { saveFile } from "./catalogs/saveFile";
 import { bookExport } from "./catalogs/bookExport";
 import { readestImport } from "./catalogs/readestImport";
+import { share } from "./catalogs/share";
 import { importProgress } from "./catalogs/importProgress";
 import { lan } from "./catalogs/lan";
 import { lanPanel } from "./catalogs/lanPanel";
@@ -69,6 +70,7 @@ import libraryLocationEn from "./en/libraryLocation.json";
 import saveFileEn from "./en/saveFile.json";
 import bookExportEn from "./en/bookExport.json";
 import readestImportEn from "./en/readestImport.json";
+import shareEn from "./en/share.json";
 import importProgressEn from "./en/importProgress.json";
 import lanEn from "./en/lan.json";
 import lanPanelEn from "./en/lanPanel.json";
@@ -91,7 +93,7 @@ declare const __APP_EDITION__: "core" | "ai";
 // tooling runs outside Vite and must still see every catalog.
 const includeAi = typeof __APP_EDITION__ === "undefined" || __APP_EDITION__ === "ai";
 
-export const CATALOGS = [common, folder, language, reader, startup, titlebar, footer, sidebar, notes, imageViewer, search, aa, fonts, display, about, cache, libraryLocation, saveFile, bookExport, readestImport, importProgress, lan, lanPanel, folderImport, shelf, shelfFolder, shelfMenu, shelfMain, shelfSettings, notice, appUi, readerMisc, tapRegions, log, cloudSync, ...(includeAi ? [ai] : [])] as const;
+export const CATALOGS = [common, folder, language, reader, startup, titlebar, footer, sidebar, notes, imageViewer, search, aa, fonts, display, about, cache, libraryLocation, saveFile, bookExport, readestImport, share, importProgress, lan, lanPanel, folderImport, shelf, shelfFolder, shelfMenu, shelfMain, shelfSettings, notice, appUi, readerMisc, tapRegions, log, cloudSync, ...(includeAi ? [ai] : [])] as const;
 
 export const zhCN = {
   ...common.zh,
@@ -114,6 +116,7 @@ export const zhCN = {
   ...saveFile.zh,
   ...bookExport.zh,
   ...readestImport.zh,
+  ...share.zh,
   ...importProgress.zh,
   ...lan.zh,
   ...lanPanel.zh,
@@ -157,6 +160,7 @@ export const en: Partial<Record<MessageKey, string>> = {
   ...saveFileEn,
   ...bookExportEn,
   ...readestImportEn,
+  ...shareEn,
   ...importProgressEn,
   ...lanEn,
   ...lanPanelEn,
@@ -197,6 +201,7 @@ export const EN_FILES: Readonly<Record<string, Readonly<Record<string, string>>>
   saveFile: saveFileEn,
   bookExport: bookExportEn,
   readestImport: readestImportEn,
+  share: shareEn,
   importProgress: importProgressEn,
   lan: lanEn,
   lanPanel: lanPanelEn,

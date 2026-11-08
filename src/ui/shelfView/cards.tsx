@@ -60,6 +60,11 @@ function coverCacheKey(entry: ShelfEntry): string {
   return `${entry.id}|${entry.contentHash}|${entry.thumbnailMime ?? ""}|${entry.coverMime ?? ""}`;
 }
 
+/** The cover thumbnail already loaded for a shelf entry, if the shelf has shown it (share cards). */
+export function shareCoverUrl(entry: ShelfEntry | undefined): string | null {
+  return entry ? peekCoverUrl(coverCacheKey(entry)) : null;
+}
+
 export const Cover = memo(function Cover({
   entry,
   provider,

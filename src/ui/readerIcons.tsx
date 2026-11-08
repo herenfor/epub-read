@@ -400,3 +400,43 @@ export function WarningCircleIcon({ size = 14, className = "", ...props }: IconP
     </svg>
   );
 }
+
+export function ShareIcon({ size = 14, className = "", ...props }: IconProps) {
+  return (
+    <svg
+      className={`reader-svg-icon icon-share ${className}`.trim()}
+      viewBox="0 0 20 20"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      {...props}
+    >
+      <path d="M10 12.5V3M6.5 6.5L10 3l3.5 3.5M4.5 10.5v6h11v-6" />
+    </svg>
+  );
+}
+
+export function TrashIcon({ size = 14, className = "", ...props }: IconProps) {
+  return (
+    <svg
+      className={`reader-svg-icon icon-trash ${className}`.trim()}
+      viewBox="0 0 20 20"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      {...props}
+    >
+      <path d="M3.5 5.5h13M8 5.5V3.5h4v2M5.5 5.5l.8 11h7.4l.8-11" />
+    </svg>
+  );
+}

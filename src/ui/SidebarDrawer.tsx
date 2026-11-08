@@ -6,7 +6,7 @@ import { limitNotes, TOC_EXPAND_ALL_LIMIT, type NoteViewModel } from "./sidebarM
 import { activeTocEntry, indexToc, visibleTocRows, type IndexedTocNode } from "./sidebarToc";
 import { SidebarTocList } from "./SidebarTocList";
 import type { Bookmark } from "./shelf";
-import { BookmarkIcon, CloseIcon, PinIcon } from "./readerIcons";
+import { BookmarkIcon, CloseIcon, PencilIcon, PinIcon, ShareIcon, TrashIcon } from "./readerIcons";
 import "./sidebarDrawer.css";
 import { UndoPill, undoDetail } from "./controls/UndoPill";
 import { highlightColorProps } from "./highlightModel";
@@ -55,6 +55,8 @@ export interface SidebarDrawerProps {
   onNavigateNote: (note: NoteViewModel) => void;
   onEditNote?: (note: NoteViewModel) => void;
   onDeleteNote?: (note: NoteViewModel) => void;
+  /** Opens the share card for this note (ER-0119). */
+  onShareNote?: (note: NoteViewModel) => void;
   /** A note deleted a moment ago: its card shows the undo pill in place. */
   pendingDeleteNoteId?: string | null;
   onUndoDeleteNote?: () => void;
@@ -88,6 +90,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
   onNavigateNote,
   onEditNote,
   onDeleteNote,
+  onShareNote,
   pendingDeleteNoteId = null,
   onUndoDeleteNote,
 }) => {
@@ -444,7 +447,18 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
                             className="sidebar-note-act"
                             onClick={() => onEditNote(note)}
                           >
+                            <PencilIcon size={14} />
                             {note.content ? t("sidebar.note.edit") : t("sidebar.note.add")}
+                          </button>
+                        )}
+                        {onShareNote && (
+                          <button
+                            type="button"
+                            className="sidebar-note-act"
+                            onClick={() => onShareNote(note)}
+                          >
+                            <ShareIcon size={14} />
+                            {t("share.menu")}
                           </button>
                         )}
                         {onDeleteNote && (
@@ -453,6 +467,7 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
                             className="sidebar-note-act danger"
                             onClick={() => onDeleteNote(note)}
                           >
+                            <TrashIcon size={14} />
                             {t("sidebar.note.delete")}
                           </button>
                         )}
