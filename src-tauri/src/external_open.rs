@@ -1,4 +1,4 @@
-//! External EPUB launch inbox. Notifications are hints; peek + explicit ack owns delivery.
+//! External book launch inbox. Notifications are hints; peek + explicit ack owns delivery.
 use serde::{Deserialize, Serialize};
 #[cfg(not(target_os = "android"))]
 use std::collections::VecDeque;
@@ -79,9 +79,11 @@ impl Inbox {
 pub struct ExternalOpenState(Mutex<Inbox>);
 
 /// Both initial argv and single-instance argv include argv[0]. Paths need not exist
-/// here: the existing import pipeline reports unreadable/changed/invalid EPUBs.
+/// here: the existing import pipeline reports unreadable/changed/invalid books.
+/// OS file-association registration is unchanged; this only accepts a source
+/// the platform already handed to the process.
 #[cfg(not(target_os = "android"))]
-fn epub_arguments(args: impl IntoIterator<Item = OsString>, cwd: &Path) -> Vec<PathBuf> {
+fn book_arguments(args: impl IntoIterator<Item = OsString>, cwd: &Path) -> Vec<PathBuf> {
     args.into_iter()
         .skip(1)
         .filter_map(|arg| {
@@ -96,10 +98,12 @@ fn epub_arguments(args: impl IntoIterator<Item = OsString>, cwd: &Path) -> Vec<P
             } else {
                 PathBuf::from(&arg)
             };
-            if !path
-                .extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("epub"))
-            {
+            if !path.extension().is_some_and(|ext| {
+                matches!(
+                    ext.to_string_lossy().to_ascii_lowercase().as_str(),
+                    "epub" | "mobi" | "azw3"
+                )
+            }) {
                 return None;
             }
             Some(if path.is_absolute() {
@@ -118,7 +122,7 @@ pub fn capture_arguments(
     args: impl IntoIterator<Item = OsString>,
     cwd: &Path,
 ) {
-    let paths = epub_arguments(args, cwd);
+    let paths = book_arguments(args, cwd);
     let state = app.state::<ExternalOpenState>();
     let changed = if let Ok(mut inbox) = state.0.lock() {
         paths
@@ -235,13 +239,20 @@ mod external_open_tests {
             "file.txt",
             "https://host/book.epub",
             "../next.epub",
+            "../next.mobi",
+            "../next.azw3",
             &url,
         ]
         .into_iter()
         .map(OsString::from);
         assert_eq!(
-            epub_arguments(args, &cwd),
-            vec![cwd.join("../next.epub"), absolute]
+            book_arguments(args, &cwd),
+            vec![
+                cwd.join("../next.epub"),
+                cwd.join("../next.mobi"),
+                cwd.join("../next.azw3"),
+                absolute,
+            ]
         );
     }
 

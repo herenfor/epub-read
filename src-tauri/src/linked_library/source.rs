@@ -43,7 +43,7 @@ pub(super) fn is_epub(path: &Path) -> bool {
 pub(crate) fn canonical_epub_path(raw: &str) -> Result<PathBuf, String> {
     let path = PathBuf::from(raw);
     if !is_epub(&path) {
-        return Err("支持 EPUB、TXT、CBZ 和图片 ZIP 文件".into());
+        return Err("支持 EPUB、TXT、CBZ、FB2、MOBI 和 AZW3 文件".into());
     }
     fs::canonicalize(&path).map_err(|error| format!("无法规范化源 EPUB 路径：{error}"))
 }
@@ -191,7 +191,12 @@ pub(super) fn read_cover_from_opened_file(
     if before_zip != trusted_snapshot {
         return Err(LinkedLibraryError::changed("源 EPUB 在读取封面期间发生了变化"));
     }
-    let bytes = crate::document_formats::read_cover(file, cover_zip_path, limit)?;
+    let bytes = if cover_zip_path == crate::document_formats::kindle::COVER_PATH {
+        crate::document_formats::kindle::cover_file(file, limit)
+            .map_err(super::archive::kindle_open_error)?
+    } else {
+        crate::document_formats::read_cover(file, cover_zip_path, limit)?
+    };
     let after_zip = snapshot_file(file)?;
     if after_zip != trusted_snapshot {
         return Err(LinkedLibraryError::changed("源 EPUB 在读取封面期间发生了变化"));

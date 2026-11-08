@@ -80,6 +80,7 @@ use store::*;
 pub(crate) use store::{
     valid_content_hash,
     library_root,
+    kindle_temp_root,
     load_bindings,
     managed_source_path,
     managed_named_path,

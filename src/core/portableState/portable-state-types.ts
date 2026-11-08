@@ -60,14 +60,15 @@ export type PortablePreferences = { readonly theme?: Theme; readonly fontSizePx?
   readonly lineHeight?: number; readonly fontWeight?: number;
   readonly letterSpacingPx?: number; readonly wordSpacingPx?: number };
 export type PortableStateV3 = {
-  readonly schemaVersion: 3 | 4 | 5 | 6;
+  readonly schemaVersion: 3 | 4 | 5 | 6 | 7;
   readonly books: Readonly<Record<string, PortableBook>>;
   readonly organization: LibraryOrganization;
   readonly preferences?: PortablePreferences;
 };
 
-/** v4: TXT/comics; v5: FB2; v6: pure highlights and note style/color. */
-export function portableSchemaVersion(books: Readonly<Record<string, PortableBook>>): 3 | 4 | 5 | 6 {
+/** v4: TXT/comics; v5: FB2; v6: pure highlights and note style/color; v7: MOBI/AZW3. */
+export function portableSchemaVersion(books: Readonly<Record<string, PortableBook>>): 3 | 4 | 5 | 6 | 7 {
+  if (Object.values(books).some(book => /\.(?:mobi|azw3)$/i.test(book.metadata.value.fileName))) return 7;
   if (Object.values(books).some(book => Object.values(book.notes).some(annotation =>
     annotation.versions.some(({ value }) => value.content.trim() === "" || value.style !== undefined || value.color !== undefined)))) return 6;
   if (Object.values(books).some(book => /\.fb2$/i.test(book.metadata.value.fileName))) return 5;

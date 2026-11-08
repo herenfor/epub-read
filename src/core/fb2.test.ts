@@ -38,7 +38,7 @@ it("requires state five for FB2 while keeping prior sources readable and rejecti
   const state = {schemaVersion:5,books,organization:{schemaVersion:1,books:{},folders:{}}};
   expect(portableSchemaVersion(books)).toBe(5);
   expect(parsePortableStateV3(state)).toEqual(state);
-  for (const schemaVersion of [3,4,7]) expect(() => parsePortableStateV3({...state,schemaVersion})).toThrow();
+  for (const schemaVersion of [3,4,8]) expect(() => parsePortableStateV3({...state,schemaVersion})).toThrow();
   books[hash].metadata.value.fileName = "original.txt";
   expect(portableSchemaVersion(books)).toBe(4);
   expect(parsePortableStateV3({...state,schemaVersion:4}).schemaVersion).toBe(4);

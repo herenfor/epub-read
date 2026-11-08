@@ -98,6 +98,16 @@ pub(crate) fn library_root(app: &AppHandle) -> Result<PathBuf, String> {
         .map_err(|error| format!("无法取得应用本地数据目录：{error}"))
 }
 
+/// Temporary reading archives live in the app cache, never in the library or
+/// a user-visible permanent conversion directory. The per-open directory is
+/// removed with its window-owned ZIP session.
+pub(crate) fn kindle_temp_root(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_cache_dir()
+        .map(|path| path.join("mobi-reading"))
+        .map_err(|error| format!("无法取得应用缓存目录：{error}"))
+}
+
 /// The sole authoritative location for an application-owned EPUB.  A managed
 /// binding never stores this path; callers derive it from the library root and
 /// the already validated canonical hash.
@@ -934,7 +944,7 @@ pub(super) fn delete_records(app: &AppHandle, content_hashes: Vec<String>) -> Re
 mod source_format_tests {
     #[test]
     fn source_formats_managed_names_preserve_the_path_boundary() {
-        for name in ["a.txt","书.CBZ","c.zip","d.epub"] {
+        for name in ["a.txt","书.CBZ","c.zip","d.epub","e.mobi","f.AZW3"] {
             assert!(super::valid_library_file_name(name));
         }
         for name in ["../a.txt","a/b.cbz","a.exe",".txt"] {

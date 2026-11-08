@@ -1280,6 +1280,7 @@ dependencies = [
  "gtk",
  "jni 0.22.4",
  "md-5",
+ "mobi-adapter",
  "ort",
  "pkg-config",
  "quick-xml",
@@ -2699,6 +2700,15 @@ dependencies = [
  "libc",
  "wasi",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "mobi-adapter"
+version = "0.1.0"
+dependencies = [
+ "cc",
+ "tempfile",
+ "zip",
 ]
 
 [[package]]

@@ -5,13 +5,13 @@ import { loadBook, loadBookFromArchive } from "./book";
 import { detectArchiveReferences } from "./archiveReferences";
 import { guessMediaType } from "./mime";
 import type { Book, BookOptions } from "./types";
-export type SourceFormat = "epub" | "txt" | "comic-zip" | "fb2";
+export type SourceFormat = "epub" | "txt" | "comic-zip" | "fb2" | "mobi" | "azw3";
 // Persisted source-scalar boundaries: keep in step with the native adapter.
 export const TEXT_PART_CHARS = 32768;
 export function sourceFormat(name: string): SourceFormat {
-    return /\.txt$/i.test(name) ? "txt" : /\.(?:cbz|zip)$/i.test(name) ? "comic-zip" : /\.fb2$/i.test(name) ? "fb2" : "epub";
+    return /\.txt$/i.test(name) ? "txt" : /\.(?:cbz|zip)$/i.test(name) ? "comic-zip" : /\.fb2$/i.test(name) ? "fb2" : /\.mobi$/i.test(name) ? "mobi" : /\.azw3$/i.test(name) ? "azw3" : "epub";
 }
-export function supportedBookName(name: string): boolean { return /\.(?:epub|txt|cbz|zip|fb2)$/i.test(name); }
+export function supportedBookName(name: string): boolean { return /\.(?:epub|txt|cbz|zip|fb2|mobi|azw3)$/i.test(name); }
 export const TEXT_ENCODINGS = ["auto", "utf-8", "utf-16le", "utf-16be", "gb18030", "gbk", "big5", "shift_jis", "euc-jp", "iso-2022-jp", "euc-kr", ...Array.from({ length: 9 }, (_, i) => `windows-${1250 + i}`), "windows-874", "ibm866", "koi8-r", "koi8-u", "macintosh", ...[2, 3, 4, 5, 6, 7, 8, 10, 13, 14, 15, 16].map(n => `iso-8859-${n}`)] as const;
 export function textEncodingFromPath(path: string | null | undefined): string | undefined {
     const encoding = /^__reader__\/txt\/([^/]+)\/s\d+\.xhtml$/.exec(path ?? "")?.[1];
@@ -301,6 +301,8 @@ export async function loadSourceBook(bytes: Uint8Array, fileName: string, option
     const format = sourceFormat(fileName);
     if (format === "fb2")
         throw new Error("FB2 请通过原生书库导入并打开；浏览器暂不支持读取 FB2 原文件");
+    if (format === "mobi" || format === "azw3")
+        throw new Error("MOBI/AZW3 请通过原生书库导入并打开；浏览器暂不支持读取 Kindle 原文件");
     if (format === "txt")
         return loadTextBytes(bytes, fileName.replace(/\.txt$/i, ""), encoding);
     if (format === "comic-zip")
@@ -308,10 +310,18 @@ export async function loadSourceBook(bytes: Uint8Array, fileName: string, option
     return loadBook(bytes, options);
 }
 export async function loadSourceArchive(archive: ArchiveClient, fileName: string, options: BookOptions = {}): Promise<Book> {
-    if (sourceFormat(fileName) === "fb2") {
+    const format = sourceFormat(fileName);
+    if (format === "fb2") {
         const book = await loadBookFromArchive(archive, options);
         book.sourceFormat = "fb2";
         return book;
     }
-    return sourceFormat(fileName) === "txt" ? loadTextArchive(archive) : sourceFormat(fileName) === "comic-zip" ? loadComicArchive(archive, fileName.replace(/\.(?:cbz|zip)$/i, "")) : loadBookFromArchive(archive, options);
+    if (format === "mobi" || format === "azw3") {
+        // The native adapter already produced the deterministic reading EPUB;
+        // keep the original Kindle identity for progress/export decisions.
+        const book = await loadBookFromArchive(archive, options);
+        book.sourceFormat = format;
+        return book;
+    }
+    return format === "txt" ? loadTextArchive(archive) : format === "comic-zip" ? loadComicArchive(archive, fileName.replace(/\.(?:cbz|zip)$/i, "")) : loadBookFromArchive(archive, options);
 }

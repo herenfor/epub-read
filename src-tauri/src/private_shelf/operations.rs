@@ -69,6 +69,13 @@ fn archive_error(fault: Fault) -> ShelfError {
     ShelfError::new("archive-error", format!("隐私书籍归档读取失败：{fault:?}"))
 }
 
+fn kindle_error(failure: crate::document_formats::kindle::Failure) -> ShelfError {
+    ShelfError::new(
+        failure.code(),
+        format!("MOBI/AZW3：{}", failure.detail()),
+    )
+}
+
 fn encode<T: Serialize>(value: T) -> Result<Value, ShelfError> {
     serde_json::to_value(value).map_err(ShelfError::storage)
 }
@@ -420,6 +427,27 @@ fn open_archive(
         .release(ReleaseTarget::ReadId(read_id))
         .map_err(ShelfError::storage)?;
     let book = book.ok_or_else(|| ShelfError::new("missing-source", "隐私书架中没有这本书"))?;
+    if crate::document_formats::kindle(&book.metadata.value.file_name) {
+        guard().map_err(archive_error)?;
+        let app = app.ok_or_else(|| ShelfError::new("missing-source", "隐私书架缺少应用上下文"))?;
+        let temp_root = linked_library::kindle_temp_root(app).map_err(ShelfError::storage)?;
+        let reading = crate::document_formats::kindle::reading_archive_file(file, &temp_root)
+            .map_err(kindle_error)?;
+        guard().map_err(archive_error)?;
+        let start = Instant::now();
+        let archive = NativeZipSession::from_verified_reader(reading, guard)
+            .map_err(archive_error)?;
+        if !current() {
+            return Err(locked());
+        }
+        let id = new_id()?;
+        let entry_count = archive.entry_count;
+        session.archives.insert(id.clone(), archive);
+        return Ok(json!({
+            "protocolVersion": 1, "sessionId": id, "entryCount": entry_count, "chunkBytes": CHUNK_BYTES,
+            "verifyMs": verify_ms, "directoryMs": start.elapsed().as_millis() as u64
+        }));
+    }
     if crate::document_formats::virtual_archive(&book.metadata.value.file_name) {
         guard().map_err(archive_error)?;
         file = crate::document_formats::reading_archive(file, &book.metadata.value.file_name, encoding, &book.metadata.value.title)

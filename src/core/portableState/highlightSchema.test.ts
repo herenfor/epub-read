@@ -30,7 +30,7 @@ describe("highlight schema compatibility", () => {
       for (const old of [3, 4, 5]) expect(() => parsePortableStateV3({ ...input, schemaVersion: old })).toThrow();
       expect(parsePortableStateV3(JSON.parse(JSON.stringify(input))).books[hash].notes[noteId].versions[0].value).toEqual(value);
     }
-    expect(() => parsePortableStateV3({ ...state(), schemaVersion: 7 })).toThrow();
+    expect(() => parsePortableStateV3({ ...state(), schemaVersion: 8 })).toThrow();
   });
 
   it("keeps v6 for concurrent values and drops the portable requirement after a valid deletion", () => {
@@ -53,7 +53,7 @@ describe("highlight schema compatibility", () => {
 
   it("preserves the existing source-only version floors for ordinary notes", () => {
     const input = state();
-    for (const [fileName, expected] of [["book.epub", 3], ["book.txt", 4], ["book.fb2", 5]] as const) {
+    for (const [fileName, expected] of [["book.epub", 3], ["book.txt", 4], ["book.fb2", 5], ["book.mobi", 7], ["book.azw3", 7]] as const) {
       const books = { [hash]: { ...input.books[hash], metadata: { ...input.books[hash].metadata,
         value: { ...input.books[hash].metadata.value, fileName } } } };
       expect(portableSchemaVersion(books)).toBe(expected);

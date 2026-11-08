@@ -3,6 +3,13 @@
 use super::*;
 use super::archive_stamp::{read_receipt, receipt_path, ArchiveStamp};
 
+pub(super) fn kindle_open_error(failure: crate::document_formats::kindle::Failure) -> LinkedLibraryError {
+    LinkedLibraryError::new(
+        failure.code(),
+        format!("MOBI/AZW3：{}", failure.detail()),
+    )
+}
+
 pub(super) fn archive_fault_error(fault: Fault) -> LinkedLibraryError {
     match fault {
         Fault::Closed => "原生归档会话已关闭".into(),
@@ -105,6 +112,19 @@ pub(crate) fn archive_open_blocking(
         }
     };
 
+    if crate::document_formats::kindle(&file_name) {
+        guard().map_err(archive_fault_error)?;
+        let temp_root = kindle_temp_root(&app)?;
+        let reading = crate::document_formats::kindle::reading_archive_file(file, &temp_root)
+            .map_err(kindle_open_error)?;
+        guard().map_err(archive_fault_error)?;
+        let directory_started = std::time::Instant::now();
+        let session = NativeZipSession::from_verified_reader(reading, guard)
+            .map_err(archive_fault_error)?;
+        let directory_ms = directory_started.elapsed().as_millis() as u64;
+        finalize_library_source_read(&app, &root, &identity, &old_snapshot, &verified_snapshot)?;
+        return register_archive(&app, owner, session, verify_ms, directory_ms, false);
+    }
     if crate::document_formats::virtual_archive(&file_name) {
         guard().map_err(archive_fault_error)?;
         file = crate::document_formats::reading_archive(file, &file_name, text_encoding.as_deref(), &title)?;

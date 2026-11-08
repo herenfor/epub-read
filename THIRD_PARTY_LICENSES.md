@@ -141,6 +141,27 @@ not a runtime dependency. Its full license text is the shared
 `src/render/textProjection/OPENCC_DATA_LICENSE.txt`. The pinned OpenCC revision
 has no standalone NOTICE file, so no additional upstream NOTICE is attached.
 
+### Bundled source: libmobi (MOBI/AZW3 reading)
+
+The native MOBI/AZW3 adapter vendors libmobi 0.12 at commit
+`906274205c11944b628da1c553b255acb1af7c55`, licensed under
+**LGPL-3.0-or-later**. The complete upstream license text is in
+`third-party-licenses/LGPL-3.0.txt`; the source tree, attribution, local
+patches and build script are kept at `src-tauri/crates/mobi-adapter/` so the
+library can be rebuilt and relinked. The adapter's own Rust/C bridge code is
+original SeLis code under GPL-3.0-only. The vendored source is compiled into
+the application as a static library; no system libmobi or separate runtime
+installation is required.
+
+| Component | Version | License | Source |
+|---|---:|---|---|
+| libmobi (vendored) | 0.12 / `9062742` | LGPL-3.0-or-later | https://github.com/bfabiszewski/libmobi |
+| mobi-adapter bridge (SeLis) | 0.1.0 | GPL-3.0-only | `src-tauri/crates/mobi-adapter/` |
+
+The libmobi source archive is included in the release source attachment. Its
+local modifications (64-bit stream offsets, zero-length PDB records) are
+documented in `src-tauri/crates/mobi-adapter/vendor/libmobi/PATCHES.md`.
+
 ## Development dependencies
 
 | Component | Version | License | Source |
@@ -198,6 +219,7 @@ from their respective LICENSE files:
 - **winreg** — Copyright (c) 2015 Igor Shaula (MIT)
 - **serde / serde_json** — Copyright (c) 2019 Serde Authors (MIT OR Apache-2.0)
 - **quick-xml** — Copyright (c) 2016 the quick-xml authors (MIT)
+- **libmobi** — Copyright (c) 2011-2024 Bartlomiej Fabiszewski and contributors (LGPL-3.0-or-later)
 - **zip** — Copyright (c) 2023 zip-rs team (MIT)
 - **rusqlite / libsqlite3-sys** — Copyright (c) 2014 The rusqlite developers (MIT)
 - **rustls / tokio-rustls / rcgen** — Copyright (c) 2016-2026 the rustls and rcgen contributors (Apache-2.0 OR ISC OR MIT / MIT OR Apache-2.0)

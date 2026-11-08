@@ -813,6 +813,11 @@ pub fn validate_portable_book(book: &PortableBook) -> PortableResult<()> {
 pub(super) fn source_schema_version(books: &std::collections::BTreeMap<String, PortableBook>) -> u64 {
     // Include every concurrent version, not just the visible winner. Valid
     // tombstones have no versions and do not carry highlight capabilities.
+    // A newer capability wins: a library mixing Kindle sources and highlight
+    // data needs 7, and only 7 aware readers may interpret the Kindle locations.
+    if books.values().any(|book| crate::document_formats::kindle(&book.metadata.value.file_name)) {
+        return 7;
+    }
     if books.values().any(|book| book.notes.values().any(|annotation| {
         annotation.versions.iter().any(|version| {
             version.value.content.trim().is_empty()
@@ -827,7 +832,7 @@ pub(super) fn source_schema_version(books: &std::collections::BTreeMap<String, P
 }
 
 pub fn validate_portable_state(state: &PortableStateV3) -> PortableResult<()> {
-    if !matches!(state.schema_version, 3 | 4 | 5 | 6) {
+    if !matches!(state.schema_version, 3 | 4 | 5 | 6 | 7) {
         return Err(PortableError::invalid_data(
             "invalid-data：不支持的 portable schemaVersion",
         ));
@@ -1375,6 +1380,28 @@ mod note_highlight_contract_tests {
             assert_eq!(source_schema_version(&state.books), 3);
             validate_portable_state(&state).unwrap();
         }
+    }
+
+    #[test]
+    fn kindle_source_requires_v7_and_rejects_older_capabilities() {
+        let hash = "a".repeat(64);
+        let mut state = parse_portable_state_value(json!({
+            "schemaVersion":7,
+            "books":{hash.clone():{
+                "metadata":{"stamp":{"deviceId":"00000000-0000-4000-8000-000000000001","counter":1},"value":{"title":"Book","creator":"","fileName":"book.azw3","addedAtMs":1}},
+                "progress":{"versions":[]},"bookmarks":{},"notes":{}
+            }},
+            "organization":{"schemaVersion":1,"books":{},"folders":{}}
+        })).unwrap();
+        assert_eq!(source_schema_version(&state.books), 7);
+        for old in [3, 4, 5, 6] {
+            state.schema_version = old;
+            assert!(validate_portable_state(&state).is_err());
+        }
+        state.schema_version = 7;
+        validate_portable_state(&state).unwrap();
+        state.books.get_mut(&hash).unwrap().metadata.value.file_name = "book.mobi".into();
+        assert_eq!(source_schema_version(&state.books), 7);
     }
 
     #[test]

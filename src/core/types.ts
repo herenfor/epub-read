@@ -71,7 +71,7 @@ export interface Resource {
 
 export interface Book {
   /** Original source kind; absent means EPUB for existing books. */
-  sourceFormat?: "epub" | "txt" | "comic-zip" | "fb2";
+  sourceFormat?: "epub" | "txt" | "comic-zip" | "fb2" | "mobi" | "azw3";
   textEncoding?: string;
   comicPages?: Array<{ path: string; doublePage: boolean }>;
   version: 2 | 3;

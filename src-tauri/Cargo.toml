@@ -47,6 +47,9 @@ encoding_rs = "0.8"
 base64 = "0.22"
 chardetng = "0.1"
 tempfile = "3"
+# Vendored libmobi 0.12 (LGPL-3.0-or-later) behind an opaque Rust adapter.
+# The crate is a nested package with its own Cargo.lock; see THIRD_PARTY.md.
+mobi-adapter = { path = "crates/mobi-adapter" }
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }

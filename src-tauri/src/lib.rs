@@ -495,6 +495,18 @@ pub fn run() {
         .manage(cloud_sync::commands::CloudSyncManager::default())
         .manage(ai::AiState::default())
         .setup(|app| {
+            #[cfg(target_os = "android")]
+            {
+                // Rust's std temp dir falls back to /data/local/tmp on Android,
+                // which an app process cannot write. Point TMPDIR at the app
+                // cache before any FB2/TXT/kindle temporary stream is created.
+                if let Ok(cache) = app.path().app_cache_dir() {
+                    let temporary = cache.join("tmp");
+                    if std::fs::create_dir_all(&temporary).is_ok() {
+                        std::env::set_var("TMPDIR", &temporary);
+                    }
+                }
+            }
             #[cfg(desktop)]
             external_open::capture_arguments(
                 app.handle(),

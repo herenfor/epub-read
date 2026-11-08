@@ -1,5 +1,6 @@
 //! Source-format inspection and ephemeral reading resources. Original bytes are never rewritten.
 mod fb2;
+pub(crate) mod kindle;
 use crate::linked_library::ImportedMetadata;
 use serde::Serialize;
 use std::{
@@ -18,7 +19,7 @@ pub fn extension(name: &str) -> &str {
 pub fn supported(name: &str) -> bool {
     matches!(
         extension(name).to_ascii_lowercase().as_str(),
-        "epub" | "txt" | "cbz" | "zip" | "fb2"
+        "epub" | "txt" | "cbz" | "zip" | "fb2" | "mobi" | "azw3"
     )
 }
 pub fn text(name: &str) -> bool {
@@ -27,6 +28,12 @@ pub fn text(name: &str) -> bool {
 pub fn fictionbook(name: &str) -> bool {
     extension(name).eq_ignore_ascii_case("fb2")
 }
+pub fn kindle(name: &str) -> bool {
+    matches!(
+        extension(name).to_ascii_lowercase().as_str(),
+        "mobi" | "azw3"
+    )
+}
 pub fn virtual_archive(name: &str) -> bool {
     text(name) || fictionbook(name)
 }
@@ -34,6 +41,11 @@ pub fn virtual_archive(name: &str) -> bool {
 pub fn reading_archive(
     source: impl Read + Seek, name: &str, encoding: Option<&str>, title: &str,
 ) -> Result<File, String> {
+    if kindle(name) {
+        // MOBI/AZW3 needs the opaque libmobi adapter, not a Rust text/XML
+        // reimplementation. Callers own the conversion and its temp file.
+        return Err("MOBI/AZW3 需要原生转换路径".into());
+    }
     if fictionbook(name) {
         fb2::archive(source, title)
     } else {
@@ -42,7 +54,17 @@ pub fn reading_archive(
 }
 /// FB2 cover paths name generated binary resources; detect the source container
 /// rather than reserving those paths in genuine EPUBs.
-pub(crate) fn read_cover(mut source: impl Read + Seek, path: &str, limit: u64) -> Result<Vec<u8>, String> {
+pub(crate) fn read_cover(
+    mut source: impl Read + Seek,
+    path: &str,
+    limit: u64,
+) -> Result<Vec<u8>, String> {
+    if path == kindle::COVER_PATH {
+        let length = source.seek(SeekFrom::End(0)).map_err(|e| e.to_string())?;
+        source.rewind().map_err(|e| e.to_string())?;
+        return kindle::cover_reader(source, length, limit)
+            .map_err(|error| error.import_message());
+    }
     source.rewind().map_err(|e| e.to_string())?;
     let mut magic = [0; 2];
     let n = source.read(&mut magic).map_err(|e| e.to_string())?;
@@ -100,15 +122,28 @@ pub fn inspect(path: &Path, file_name: &str) -> Result<ImportedMetadata, String>
     if text(file_name) {
         return inspect_reader(std::io::Cursor::new([]), file_name);
     }
+    if kindle(file_name) {
+        let title = Path::new(file_name)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("Book");
+        return kindle::inspect_path(path, title).map_err(|error| error.import_message());
+    }
     inspect_reader(File::open(path).map_err(|e| e.to_string())?, file_name)
 }
 
-pub(crate) fn inspect_reader<R: Read + Seek>(reader: R, file_name: &str) -> Result<ImportedMetadata, String> {
+pub(crate) fn inspect_reader<R: Read + Seek + Send>(
+    reader: R,
+    file_name: &str,
+) -> Result<ImportedMetadata, String> {
     let title = Path::new(file_name)
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("Book")
         .to_owned();
+    if kindle(file_name) {
+        return kindle::inspect_reader(reader, &title).map_err(|error| error.import_message());
+    }
     if fictionbook(file_name) { return fb2::inspect(reader, &title); }
     if text(file_name) {
         // Import never decodes or duplicates a whole text book. The reader builds its resources on demand.

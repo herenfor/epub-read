@@ -132,7 +132,7 @@ fn run_export(
     let mut result = BookExportResult {
         status: "no-books".into(),
         job_id: task.job_id.clone(),
-        output_format: if zip { "zip".into() } else { selected.iter().next().and_then(|hash| metadata.get(hash)).map(|m| crate::document_formats::extension(&m.file_name).to_ascii_lowercase()).filter(|e| matches!(e.as_str(), "epub"|"txt"|"cbz"|"zip"|"fb2")).unwrap_or_else(|| "epub".into()) },
+        output_format: if zip { "zip".into() } else { selected.iter().next().and_then(|hash| metadata.get(hash)).map(|m| crate::document_formats::extension(&m.file_name).to_ascii_lowercase()).filter(|e| matches!(e.as_str(), "epub"|"txt"|"cbz"|"zip"|"fb2"|"mobi"|"azw3")).unwrap_or_else(|| "epub".into()) },
         requested_books: selected.len(),
         written_books: 0,
         book_bytes: 0,

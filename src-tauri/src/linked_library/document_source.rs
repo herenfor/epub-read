@@ -6,6 +6,8 @@ use std::{
     io::{self, Read},
     path::{Path, PathBuf},
 };
+#[cfg(target_os = "android")]
+use std::io::Seek;
 use tauri::{AppHandle, Runtime};
 
 /// Hash the same bounded reader the caller will parse or stream. The caller
@@ -173,10 +175,21 @@ pub(crate) fn document_archive(
     use super::archive::archive_fault_error;
     use crate::native_zip_session::NativeZipSession;
     let started = std::time::Instant::now();
-    let (reader, guard) = verified_document(app, uri, hash)?;
+    let (mut reader, guard) = verified_document(app, uri, hash)?;
     let verify_ms = started.elapsed().as_millis() as u64;
     let started = std::time::Instant::now();
-    let archive = if crate::document_formats::virtual_archive(file_name) {
+    let archive = if crate::document_formats::kindle(file_name) {
+        let length = reader.len();
+        reader
+            .rewind()
+            .map_err(|error| format!("无法回到原书开头：{error}"))?;
+        let temp_root = crate::linked_library::kindle_temp_root(app)?;
+        let reading =
+            crate::document_formats::kindle::reading_archive_reader(reader, length, &temp_root)
+                .map_err(super::archive::kindle_open_error)?;
+        guard().map_err(archive_fault_error)?;
+        NativeZipSession::from_verified_reader(reading, guard)
+    } else if crate::document_formats::virtual_archive(file_name) {
         let file = crate::document_formats::reading_archive(reader, file_name, encoding, title)?;
         guard().map_err(archive_fault_error)?;
         NativeZipSession::from_verified_file(file, guard)
@@ -197,7 +210,13 @@ pub(crate) fn document_cover(
     };
     let uri = binding.document_uri().ok_or("缺少文档绑定")?;
     let (reader, guard) = verified_document(app, uri, &binding.content_hash)?;
-    let bytes = crate::document_formats::read_cover(reader, path, super::MAX_COVER_BYTES)?;
+    let bytes = if path == crate::document_formats::kindle::COVER_PATH {
+        let length = reader.len();
+        crate::document_formats::kindle::cover_reader(reader, length, super::MAX_COVER_BYTES)
+            .map_err(super::archive::kindle_open_error)?
+    } else {
+        crate::document_formats::read_cover(reader, path, super::MAX_COVER_BYTES)?
+    };
     guard().map_err(super::archive::archive_fault_error)?;
     Ok(bytes)
 }

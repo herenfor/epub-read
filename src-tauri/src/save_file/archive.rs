@@ -518,12 +518,12 @@ fn read_entry_bytes(
 }
 
 fn source_entry_path(state: &PortableStateV3, hash: &str) -> String {
-    let extension=state.books.get(hash).map(|b| crate::document_formats::extension(&b.metadata.value.file_name).to_ascii_lowercase()).filter(|e| matches!(e.as_str(),"epub"|"txt"|"cbz"|"zip"|"fb2")).unwrap_or_else(||"epub".into());
+    let extension=state.books.get(hash).map(|b| crate::document_formats::extension(&b.metadata.value.file_name).to_ascii_lowercase()).filter(|e| matches!(e.as_str(),"epub"|"txt"|"cbz"|"zip"|"fb2"|"mobi"|"azw3")).unwrap_or_else(||"epub".into());
     format!("books/{hash}.{extension}")
 }
 fn book_hash_from_path(name: &str) -> Option<String> {
     let (hash, extension)=name.strip_prefix("books/")?.rsplit_once('.')?;
-    (valid_hash(hash) && matches!(extension,"epub"|"txt"|"cbz"|"zip"|"fb2")).then(||hash.to_owned())
+    (valid_hash(hash) && matches!(extension,"epub"|"txt"|"cbz"|"zip"|"fb2"|"mobi"|"azw3")).then(||hash.to_owned())
 }
 fn allowed_entry_path(name: &str) -> bool {
     name=="manifest.json" || name=="state.json" || book_hash_from_path(name).is_some()
@@ -1141,8 +1141,8 @@ mod tests {
     }
 
     #[test]
-    fn fb2_and_prior_source_archives_keep_original_suffix_bytes_and_version() {
-        for extension in ["txt", "cbz", "zip", "fb2"] {
+    fn source_archives_keep_original_suffix_bytes_and_version() {
+        for extension in ["txt", "cbz", "zip", "fb2", "mobi", "azw3"] {
             let dir = TempDir::new(extension);
             let source = dir.path().join(format!("source.{extension}"));
             let bytes: &[u8] = if extension == "fb2" {
@@ -1160,7 +1160,11 @@ mod tests {
                 }
             }
             state.books.insert(hash.clone(), book);
-            state.schema_version = if extension == "fb2" { 5 } else { 4 };
+            state.schema_version = match extension {
+                "fb2" => 5,
+                "mobi" | "azw3" => 7,
+                _ => 4,
+            };
             let target = dir.path().join("source.epubsave");
             let mut reporter = ProgressReporter::new(channel(), "formats", None);
             let cancel = AtomicBool::new(false);
@@ -1172,6 +1176,10 @@ mod tests {
             if extension == "fb2" {
                 assert_eq!(crate::linked_library::inspect_epub(&parsed.attachments[0].staging_path).unwrap().spine, ["__reader__/fb2/c0.xhtml"]);
                 state.schema_version = 4;
+                assert!(validate_portable_state(&state).is_err());
+            }
+            if matches!(extension, "mobi" | "azw3") {
+                state.schema_version = 6;
                 assert!(validate_portable_state(&state).is_err());
             }
             state.schema_version = 3;
@@ -1262,7 +1270,7 @@ mod tests {
             (
                 "new-schema",
                 1_u32,
-                7_u64,
+                8_u64,
                 true,
                 "需要较新版本",
                 Some("不支持此存档格式"),
