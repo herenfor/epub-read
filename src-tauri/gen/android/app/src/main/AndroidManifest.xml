@@ -7,6 +7,8 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <!-- In-app update: hands a verified APK to the system installer after the user taps Install. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Gallery save on API 24–28 only. API 29+ publishes through MediaStore. -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
 
     <!-- Camera hardware is optional; scanner entry stays hidden/unavailable on devices without it. -->
     <uses-feature android:name="android.hardware.camera" android:required="false" />

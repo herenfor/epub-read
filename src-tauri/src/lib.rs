@@ -1,6 +1,7 @@
 mod document_formats;
 mod android_app_task;
 mod android_app_update;
+mod android_image_share;
 mod android_reader_system_bars;
 mod android_volume_key;
 mod reader_keep_screen_on;
@@ -96,6 +97,8 @@ macro_rules! configure_invoke_handler {
             android_app_task::android_move_task_to_back,
             android_app_task::android_app_foreground,
             android_app_update::android_app_update,
+            android_image_share::share_image,
+            android_image_share::save_image_to_gallery,
         android_reader_system_bars::android_reader_system_bars,
             android_reader_system_bars::android_status_bar_appearance,
             reader_keep_screen_on::reader_set_keep_screen_on,
@@ -286,6 +289,8 @@ macro_rules! configure_invoke_handler {
             android_app_task::android_move_task_to_back,
             android_app_task::android_app_foreground,
             android_app_update::android_app_update,
+            android_image_share::share_image,
+            android_image_share::save_image_to_gallery,
         android_reader_system_bars::android_reader_system_bars,
             android_reader_system_bars::android_status_bar_appearance,
             reader_keep_screen_on::reader_set_keep_screen_on,
@@ -528,6 +533,7 @@ pub fn run() {
         .plugin(android_uri_bridge::plugin())
         .plugin(android_app_task::plugin())
         .plugin(android_app_update::plugin())
+        .plugin(android_image_share::plugin())
         .plugin(android_reader_system_bars::plugin())
         .plugin(reader_keep_screen_on::plugin())
         .plugin(android_volume_key::plugin())
