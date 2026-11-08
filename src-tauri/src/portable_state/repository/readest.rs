@@ -47,6 +47,21 @@ pub(crate) struct ReadestImportOutcome {
     pub progress_unchanged: usize,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KoreaderProgressImport {
+    pub book_hash: String,
+    pub target_token: String,
+    pub progress: Progress,
+}
+
+#[derive(Debug, Default, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct KoreaderProgressOutcome {
+    pub progress_written: usize,
+    pub progress_unchanged: usize,
+}
+
 pub(crate) fn import_error(code: &'static str, message: &str) -> PortableError {
     PortableError {
         code: code.into(),
@@ -93,6 +108,83 @@ fn annotation_id(book: &str, hash: &str, kind: &str, key: &str) -> PortableResul
 }
 fn receipt_key(book: &str, hash: &str) -> String {
     format!("readest-import:{book}:{hash}:progress-v1")
+}
+
+fn koreader_receipt_key(book: &str) -> String {
+    format!("koreader-import:{book}:sidecar-progress-v1")
+}
+
+/// `true` when a new local progress event was written. The receipt is the locator
+/// only; a different percentage hint does not create or replace a position.
+fn apply_confirmed_progress(
+    transaction: &rusqlite::Transaction<'_>,
+    device_id: &str,
+    counter: &mut u64,
+    target: &ReadestTarget,
+    book_hash: &str,
+    value: &Progress,
+    receipt_key: &str,
+    now: u64,
+) -> PortableResult<bool> {
+    dto::validate_progress(&Some(value.clone()))?;
+    let (current, revision) = load_progress_row(transaction, book_hash)?
+        .unwrap_or((ProgressState { versions: vec![] }, 0));
+    if revision != target.progress_revision {
+        return Err(PortableError::stale_basis("本机进度已变化，请重新预览"));
+    }
+    let fingerprint = format!(
+        "{:x}",
+        Sha256::digest(serialize_json(&value.locator)?.as_bytes())
+    );
+    let prior: Option<String> = load_meta_json(transaction, receipt_key)?;
+    let unchanged = prior.as_ref() == Some(&fingerprint)
+        || (current.versions.len() == 1
+            && current.versions[0]
+                .value
+                .as_ref()
+                .is_some_and(|progress| progress.locator == value.locator));
+    if !unchanged {
+        *counter = next_local_counter(
+            (*counter).max(maximum_received_counter(&current.versions, &[], &[])?),
+            0,
+        )?;
+        let stamp = Stamp {
+            device_id: device_id.to_owned(),
+            counter: *counter,
+        };
+        let versions = super::super::merge::write_observed(
+            &current.versions,
+            &current.versions,
+            stamp,
+            Some(value.clone()),
+            now,
+        )?;
+        save_progress_row(
+            transaction,
+            book_hash,
+            &ProgressState { versions },
+            *counter,
+        )?;
+    }
+    put_meta_json(transaction, receipt_key, &fingerprint)?;
+    Ok(!unchanged)
+}
+
+fn canonical_text_locator(progress: &Progress) -> PortableResult<()> {
+    match &progress.locator {
+        crate::portable_state::Locator::Modern(locator) => match &locator.target {
+            crate::portable_state::LocatorTarget::ChapterStart
+            | crate::portable_state::LocatorTarget::Text { .. } => Ok(()),
+            crate::portable_state::LocatorTarget::Media { .. } => Err(import_error(
+                "unsupported-locator",
+                "侧车进度不能落到媒体锚点",
+            )),
+        },
+        crate::portable_state::Locator::Legacy(_) => Err(import_error(
+            "unsupported-locator",
+            "侧车进度不能使用页码定位",
+        )),
+    }
 }
 
 impl PortableStore {
@@ -187,54 +279,23 @@ impl PortableStore {
             }
             let mut book_changed = false;
             if let Some(value) = &book.progress {
-                dto::validate_progress(&Some(value.clone()))?;
-                let (current, revision) = load_progress_row(&transaction, &book.book_hash)?
-                    .unwrap_or((ProgressState { versions: vec![] }, 0));
-                if revision != target.progress_revision {
-                    return Err(PortableError::stale_basis("本机进度已变化，请重新预览"));
-                }
                 let key = receipt_key(&book.book_hash, &book.readest_hash);
-                // Pagination-derived percentage is not the identity of a position.
-                let fingerprint = format!(
-                    "{:x}",
-                    Sha256::digest(serialize_json(&value.locator)?.as_bytes())
-                );
-                let prior: Option<String> = load_meta_json(&transaction, &key)?;
-                let unchanged = prior.as_ref() == Some(&fingerprint)
-                    || (current.versions.len() == 1
-                        && current.versions[0]
-                            .value
-                            .as_ref()
-                            .is_some_and(|p| p.locator == value.locator));
-                if unchanged {
-                    outcome.progress_unchanged += 1;
-                } else {
-                    counter = next_local_counter(
-                        counter.max(maximum_received_counter(&current.versions, &[], &[])?),
-                        0,
-                    )?;
-                    let stamp = Stamp {
-                        device_id: device_id.clone(),
-                        counter,
-                    };
-                    let versions = super::super::merge::write_observed(
-                        &current.versions,
-                        &current.versions,
-                        stamp,
-                        Some(value.clone()),
-                        now,
-                    )?;
-                    save_progress_row(
-                        &transaction,
-                        &book.book_hash,
-                        &ProgressState { versions },
-                        counter,
-                    )?;
+                if apply_confirmed_progress(
+                    &transaction,
+                    &device_id,
+                    &mut counter,
+                    target,
+                    &book.book_hash,
+                    value,
+                    &key,
+                    now,
+                )? {
                     outcome.progress_written += 1;
                     progress_changed.insert(book.book_hash.clone());
                     book_changed = true;
+                } else {
+                    outcome.progress_unchanged += 1;
                 }
-                put_meta_json(&transaction, &key, &fingerprint)?;
             }
             macro_rules! append {
                 ($items:expr, $kind:literal, $validate:path, $load:path, $save:path, $count:ident) => {
@@ -311,5 +372,88 @@ impl PortableStore {
         self.reads
             .retain(|_, snapshot| !progress_changed.contains(&snapshot.book_hash));
         Ok(outcome)
+    }
+
+    /// One confirmed KOReader reading position. Existing multi-version conflicts
+    /// stay for the user; percentage is never compared.
+    pub(crate) fn import_koreader_progress(
+        &mut self,
+        target: &ReadestTarget,
+        book: &KoreaderProgressImport,
+        now: u64,
+        cancelled: &dyn Fn() -> bool,
+        finish: impl FnOnce(rusqlite::Transaction<'_>) -> PortableResult<()>,
+    ) -> PortableResult<KoreaderProgressOutcome> {
+        if target.book_hash != book.book_hash || !dto::safe_time(now) {
+            return Err(PortableError::invalid_data("无效的侧车进度"));
+        }
+        canonical_text_locator(&book.progress)?;
+        if target.progress.conflict {
+            return Err(import_error(
+                "progress-conflict",
+                "本机进度存在冲突，请先选择保留的版本",
+            ));
+        }
+        if self.bases.values().any(|basis| {
+            matches!(basis, StoredBasis::Progress(base) if base.entity.book_hash() == book.book_hash)
+        }) {
+            return Err(import_error(
+                "reader-busy",
+                "请先退出这本书的所有阅读会话，再迁入进度",
+            ));
+        }
+        if cancelled() {
+            return Err(import_error("cancelled", "迁入已取消"));
+        }
+        let transaction = self.connection.unchecked_transaction()?;
+        let device_id = ensure_installation_id(&transaction)?;
+        let mut counter = load_counter(&transaction)?;
+        let current = load_book_meta_row(&transaction, &book.book_hash)?;
+        let binding: Option<String> = transaction
+            .query_row(
+                "SELECT json FROM device_bindings WHERE hash=?1",
+                [&book.book_hash],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if target.generation != self.runtime_generation
+            || current.as_ref().map(|row| &row.stamp) != Some(&target.metadata_stamp)
+            || binding.as_ref() != Some(&target.binding)
+        {
+            return Err(PortableError::stale_basis(
+                "书籍或原书绑定已变化，请重新预览",
+            ));
+        }
+        let (progress, _) = load_progress_row(&transaction, &book.book_hash)?
+            .unwrap_or((ProgressState { versions: vec![] }, 0));
+        if super::super::merge::merge_versions(&[&progress.versions])?.len() > 1 {
+            return Err(import_error(
+                "progress-conflict",
+                "本机进度存在冲突，请先选择保留的版本",
+            ));
+        }
+        let written = apply_confirmed_progress(
+            &transaction,
+            &device_id,
+            &mut counter,
+            target,
+            &book.book_hash,
+            &book.progress,
+            &koreader_receipt_key(&book.book_hash),
+            now,
+        )?;
+        store_counter(&transaction, counter)?;
+        if cancelled() {
+            return Err(import_error("cancelled", "迁入已取消"));
+        }
+        finish(transaction)?;
+        if written {
+            self.reads
+                .retain(|_, snapshot| snapshot.book_hash != book.book_hash);
+        }
+        Ok(KoreaderProgressOutcome {
+            progress_written: usize::from(written),
+            progress_unchanged: usize::from(!written),
+        })
     }
 }

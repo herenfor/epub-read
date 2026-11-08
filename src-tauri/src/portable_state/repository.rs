@@ -6,7 +6,10 @@
 
 mod shelf_move;
 mod readest;
-pub(crate) use readest::{ReadestAnnotation, ReadestBookImport, ReadestImportOutcome, ReadestTarget};
+pub(crate) use readest::{
+    KoreaderProgressImport, KoreaderProgressOutcome, ReadestAnnotation, ReadestBookImport,
+    ReadestImportOutcome, ReadestTarget,
+};
 
 use super::dto::{
     self, Annotation, BookMetadata, BookmarkValue, NoteValue, PortableBook, PortableStateV3,
