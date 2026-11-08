@@ -219,7 +219,7 @@ from their respective LICENSE files:
 - **winreg** — Copyright (c) 2015 Igor Shaula (MIT)
 - **serde / serde_json** — Copyright (c) 2019 Serde Authors (MIT OR Apache-2.0)
 - **quick-xml** — Copyright (c) 2016 the quick-xml authors (MIT)
-- **libmobi** — Copyright (c) 2011-2024 Bartlomiej Fabiszewski and contributors (LGPL-3.0-or-later)
+- **libmobi** — Copyright (c) Bartek Fabiszewski and contributors (LGPL-3.0-or-later)
 - **zip** — Copyright (c) 2023 zip-rs team (MIT)
 - **rusqlite / libsqlite3-sys** — Copyright (c) 2014 The rusqlite developers (MIT)
 - **rustls / tokio-rustls / rcgen** — Copyright (c) 2016-2026 the rustls and rcgen contributors (Apache-2.0 OR ISC OR MIT / MIT OR Apache-2.0)
