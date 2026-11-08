@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { isValidUiScale } from "./uiScale";
 import type { PortablePreferences } from "../core/portableState/portable-state-types";
 import { normalizePageOptions } from "../render/pageLayout";
 import {
@@ -54,11 +55,7 @@ export function useReaderSettings() {
   // UI scale is independent of the book's font size.
   const [uiScale, setUiScale] = useState<number>(() => {
     const saved = readSavedSettings();
-    return saved.uiScale !== undefined &&
-      saved.uiScale >= 0.75 &&
-      saved.uiScale <= 1.5
-      ? saved.uiScale
-      : 1;
+    return isValidUiScale(saved.uiScale) ? saved.uiScale : 1;
   });
 
   const settingsActions = useMemo(() => {

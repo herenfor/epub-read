@@ -1,3 +1,30 @@
+/* UI scale (ER-0127). The setting writes --ui-scale on the root element
+   (src/ui/uiScale.ts), so every surface follows it, portals included. Text
+   and icons grow; touch targets, spacing, borders and book covers stay put.
+   Containers never use zoom for it.
+   A new panel follows the setting just by using the --fs-* tokens and inline
+   <svg> icons. Any other text size is calc(Npx * var(--ui-scale));
+   uiScale.test.ts rejects literal px font sizes.
+   A region whose size is content rather than UI (a generated cover) takes
+   data-ui-scale="fixed": inside it the scale is 1 for text and icons alike. */
+:root {
+  --ui-scale: 1;
+}
+[data-ui-scale="fixed"] {
+  --ui-scale: 1;
+}
+:root,
+[data-ui-scale="fixed"] {
+  /* Four text sizes; hierarchy comes from weight and color, not more sizes.
+     Micro is for counters, badges and index letters only, never sentences.
+     Display sizes (about page, empty states) are calc(Npx * var(--ui-scale)). */
+  --fs-micro: calc(10px * var(--ui-scale));
+  --fs-caption: calc(12px * var(--ui-scale));
+  --fs-body: calc(13px * var(--ui-scale));
+  --fs-emph: calc(15px * var(--ui-scale));
+  --fs-title: calc(18px * var(--ui-scale));
+}
+
 /* Ordinary UI controls only. Reader page motion and swipe physics own their timing. */
 :root {
   /* Cross-component layers keep their historical computed values.
@@ -26,14 +53,6 @@
   --ui-ease: ease;
   --ui-ease-out: ease-out;
 
-  /* Four text sizes; hierarchy comes from weight and color, not more sizes.
-     Micro is for counters, badges and index letters only, never sentences.
-     Display sizes (about page, empty states) stay literal. */
-  --fs-micro: 10px;
-  --fs-caption: 12px;
-  --fs-body: 13px;
-  --fs-emph: 15px;
-  --fs-title: 18px;
 
   /* Radii on a 4px grid. Nested surfaces are concentric:
      inner radius = outer radius - the padding between them. Pick the padding
@@ -114,4 +133,21 @@
 .app[data-tone="dark"] {
   /* Each color-mix percentage must be 0–100%; an invalid mix leaves the variable unusable (transparent background). */
   --ui-control-selected: color-mix(in srgb, var(--panel-bg) 92%, #fff 8%);
+}
+
+/* UI scale safety nets (ER-0127): text that never sets a size still follows
+   the setting. Body text otherwise inherits a fixed 16px, and form controls
+   a fixed 13.33px from the browser. Zero specificity: any class rule wins. */
+body {
+  font-size: calc(16px * var(--ui-scale));
+}
+:where(button, input, textarea, select) {
+  font-size: var(--fs-body);
+}
+
+/* UI scale for icons (ER-0127): every outermost inline <svg> grows with the
+   setting, whatever sets its size (attributes or CSS). Zero specificity, so a
+   rule that means otherwise wins. Inside data-ui-scale="fixed" it stays 1. */
+:where(svg:not(svg svg)) {
+  zoom: var(--ui-scale, 1);
 }

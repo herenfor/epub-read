@@ -70,7 +70,7 @@ export function ShelfCreateFolderDialog(props: ShelfCreateFolderDialogProps) {
         <form onSubmit={handleSubmit}>
           <div className="shelf-confirm-title">{t("shelfFolder.create.title")}</div>
           {props.subtitle && (
-            <div style={{ fontSize: 13, color: "var(--muted)", margin: "4px 0 10px" }}>
+            <div style={{ fontSize: "var(--fs-body)", color: "var(--muted)", margin: "4px 0 10px" }}>
               {props.subtitle}
             </div>
           )}

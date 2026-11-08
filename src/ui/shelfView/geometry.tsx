@@ -389,7 +389,7 @@ export const ShelfTableRow = memo(function ShelfTableRow({
             aria-label={t("shelf.table.select", { title: entry.title })}
           />
         ) : (
-          <span style={{ fontSize: 11, color: "var(--muted)" }}>{index + 1}</span>
+          <span style={{ fontSize: "calc(11px * var(--ui-scale))", color: "var(--muted)" }}>{index + 1}</span>
         )}
       </td>
       <td className="shelf-table-cover-col">
@@ -421,10 +421,10 @@ export const ShelfTableRow = memo(function ShelfTableRow({
           <span className="shelf-table-progress-text">{shelfProgressLabel(entry)}</span>
         </div>
       </td>
-      <td style={{ color: "var(--muted)", fontSize: 12, whiteSpace: "nowrap" }}>
+      <td style={{ color: "var(--muted)", fontSize: "var(--fs-caption)", whiteSpace: "nowrap" }}>
         {formatFileSize(entry.fileSize)}
       </td>
-      <td style={{ color: "var(--muted)", fontSize: 12, whiteSpace: "nowrap" }}>
+      <td style={{ color: "var(--muted)", fontSize: "var(--fs-caption)", whiteSpace: "nowrap" }}>
         {formatRelativeTime(entry.lastReadAtMs) || formatShelfTime(entry.addedAtMs) || t("shelf.time.justNow")}
       </td>
       <td className="shelf-table-action-cell" style={{ whiteSpace: "nowrap" }}>
@@ -558,10 +558,10 @@ export const ShelfFolderTableRow = memo(function ShelfFolderTableRow(props: {
               <span className="shelf-table-progress-text">{shelfProgressLabel(first)}</span>
             </div>
           </td>
-          <td style={{ color: "var(--muted)", fontSize: 12, whiteSpace: "nowrap" }}>
+          <td style={{ color: "var(--muted)", fontSize: "var(--fs-caption)", whiteSpace: "nowrap" }}>
             {formatFileSize(first.fileSize)}
           </td>
-          <td style={{ color: "var(--muted)", fontSize: 12, whiteSpace: "nowrap" }}>
+          <td style={{ color: "var(--muted)", fontSize: "var(--fs-caption)", whiteSpace: "nowrap" }}>
             {formatRelativeTime(first.lastReadAtMs) || formatShelfTime(first.addedAtMs) || t("shelf.time.justNow")}
           </td>
         </>

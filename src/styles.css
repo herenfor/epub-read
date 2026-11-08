@@ -273,7 +273,7 @@ select option {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 22px;
+  font-size: calc(22px * var(--ui-scale));
   font-weight: 600;
   letter-spacing: 2px;
   color: var(--fg);
@@ -1058,7 +1058,7 @@ select option {
 }
 
 .placeholder .big {
-  font-size: 22px;
+  font-size: calc(22px * var(--ui-scale));
   color: var(--fg);
   margin-bottom: 4px;
 }
@@ -1376,19 +1376,6 @@ select option {
   line-height: 1.5;
 }
 
-/* ---- UI 界面缩放（只作用于界面组件，不影响书页 iframe 的分页测量） ---- */
-.titlebar {
-  zoom: var(--ui-scale, 1);
-}
-
-.log-panel {
-  zoom: var(--ui-scale, 1);
-}
-
-.placeholder {
-  zoom: var(--ui-scale, 1);
-}
-
 .group-label {
   font-size: var(--fs-caption);
   color: var(--muted);
@@ -1453,7 +1440,6 @@ select option {
   --shelf-view-pad-bottom: 32px;
   padding: 0 20px var(--shelf-view-pad-bottom);
   scrollbar-width: none; /* 书架隐藏滚动条：滚动区域用渐变/边界提示 */
-  zoom: var(--ui-scale, 1);
 }
 
 .shelf-view::-webkit-scrollbar {
@@ -2372,7 +2358,7 @@ select option {
 }
 
 .shelf-cover.fallback .fallback-mark {
-  font-size: 26px;
+  font-size: calc(26px * var(--ui-scale));
   font-weight: 600;
   color: var(--accent);
   line-height: 1;
@@ -3249,7 +3235,6 @@ select option {
   font-family: var(--font-ui);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  zoom: var(--ui-scale, 1);
 }
 .font-settings-panel.font-drag-active {
   outline: 2px dashed var(--accent);
@@ -3326,7 +3311,6 @@ select option {
   font-family: var(--font-ui);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  zoom: var(--ui-scale, 1);
 }
 
 .search-head {
@@ -3687,7 +3671,6 @@ select option {
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22), 0 2px 6px rgba(0, 0, 0, 0.08);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  zoom: var(--ui-scale, 1);
   animation: var(--popover-enter);
 }
 .reader-context-menu button {
@@ -3719,7 +3702,6 @@ select option {
   background: var(--panel-bg);
   box-shadow: 0 12px 36px rgba(0, 0, 0, .28);
   transform: translate(-50%, -50%);
-  zoom: var(--ui-scale, 1);
 }
 .note-composer-backdrop {
   /* A note editor owns the whole foreground. Cover the toolbar/status bar as
@@ -3772,7 +3754,7 @@ select option {
   background: var(--bg);
   font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
 }
-.startup-failure h1 { margin: 0 0 12px; font-size: 22px; }
+.startup-failure h1 { margin: 0 0 12px; font-size: calc(22px * var(--ui-scale)); }
 .startup-failure p { margin: 0 0 16px; color: var(--muted); line-height: 1.6; }
 .startup-failure code { display: block; max-width: 720px; padding: 10px 12px; overflow-wrap: anywhere; color: var(--error); background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: var(--r-sm); white-space: pre-wrap; }
 
@@ -5314,20 +5296,9 @@ select option {
   min-height: 44px;
 }
 
-/* ---- R7：触摸固定操作层/输入面板不随桌面 zoom 缩放，命中区保持真实 48px ---- */
-.app[data-mobile-reader="true"] .titlebar.is-mobile-compact,
-.app[data-mobile-reader="true"] .whisper-footer.is-mobile,
-.app[data-mobile-chrome="true"] .note-composer,
-.app[data-mobile-chrome="true"] .search-panel,
-.app[data-mobile-chrome="true"] .aa-popover,
-.app[data-mobile-chrome="true"] .sidebar-drawer,
-.app[data-mobile-chrome="true"] .log-panel {
-  zoom: 1;
-}
-
 .app[data-touch-ui="true"] .shelf-card-more-btn {
-  width: calc(48px * var(--ui-touch-comp, 1));
-  height: calc(48px * var(--ui-touch-comp, 1));
+  width: 48px;
+  height: 48px;
 }
 
 /* 网格三点按钮：贴封面右上角，44px 命中区不变，可见圆点 26px、图标 16px 落在命中区右上。 */
@@ -5338,8 +5309,8 @@ select option {
 
 .app[data-touch-ui="true"] .shelf-grid .shelf-card-more-btn {
   position: relative;
-  width: calc(44px * var(--ui-touch-comp, 1));
-  height: calc(44px * var(--ui-touch-comp, 1));
+  width: 44px;
+  height: 44px;
   align-items: flex-start;
   justify-content: flex-end;
   padding: 5px;
@@ -5385,8 +5356,8 @@ select option {
 }
 
 .app[data-touch-ui="true"] .shelf-card-star-btn {
-  width: calc(48px * var(--ui-touch-comp, 1));
-  height: calc(48px * var(--ui-touch-comp, 1));
+  width: 48px;
+  height: 48px;
 }
 
 /* 长按勾选是装饰 div：24px 外圆 / 15px 对号，pointer-events: none，整卡仍可选 */
@@ -5411,43 +5382,43 @@ select option {
 .app[data-touch-ui="true"] .shelf-selection-toggle-all,
 .app[data-touch-ui="true"] .shelf-action-fav,
 .app[data-touch-ui="true"] .shelf-action-folder {
-  min-height: calc(48px * var(--ui-touch-comp, 1));
+  min-height: 48px;
 }
 
 .app[data-touch-ui="true"] .shelf-action-fav,
 .app[data-touch-ui="true"] .shelf-action-folder {
-  height: calc(48px * var(--ui-touch-comp, 1));
+  height: 48px;
   box-sizing: border-box;
 }
 
 .app[data-touch-ui="true"] .shelf-view-toggle-group {
   height: auto;
-  min-height: calc(48px * var(--ui-touch-comp, 1));
+  min-height: 48px;
   padding: 2px;
 }
 
 .app[data-touch-ui="true"] .shelf-view-toggle-btn {
-  width: calc(48px * var(--ui-touch-comp, 1));
-  height: calc(48px * var(--ui-touch-comp, 1));
-  min-width: calc(48px * var(--ui-touch-comp, 1));
-  min-height: calc(48px * var(--ui-touch-comp, 1));
+  width: 48px;
+  height: 48px;
+  min-width: 48px;
+  min-height: 48px;
 }
 
 .app[data-touch-ui="true"] .shelf-icon-btn-zen {
-  width: calc(48px * var(--ui-touch-comp, 1));
-  height: calc(48px * var(--ui-touch-comp, 1));
-  min-width: calc(48px * var(--ui-touch-comp, 1));
-  min-height: calc(48px * var(--ui-touch-comp, 1));
+  width: 48px;
+  height: 48px;
+  min-width: 48px;
+  min-height: 48px;
 }
 
 .app[data-touch-ui="true"] .shelf-capsule-tabs {
   height: auto;
-  min-height: calc(48px * var(--ui-touch-comp, 1));
+  min-height: 48px;
 }
 
 .app[data-touch-ui="true"] .shelf-capsule-tab {
   height: auto;
-  min-height: calc(48px * var(--ui-touch-comp, 1));
+  min-height: 48px;
   padding: 0 14px;
 }
 
@@ -5457,55 +5428,55 @@ select option {
 }
 
 .app[data-touch-ui="true"] .shelf-select-wrap {
-  min-height: calc(48px * var(--ui-touch-comp, 1));
+  min-height: 48px;
 }
 
 .app[data-touch-ui="true"] .shelf-select-btn {
   height: auto;
-  min-height: calc(48px * var(--ui-touch-comp, 1));
+  min-height: 48px;
 }
 
 .app[data-touch-ui="true"] .shelf-resume-toggle-btn {
-  width: calc(48px * var(--ui-touch-comp, 1));
-  height: calc(48px * var(--ui-touch-comp, 1));
-  min-width: calc(48px * var(--ui-touch-comp, 1));
-  min-height: calc(48px * var(--ui-touch-comp, 1));
+  width: 48px;
+  height: 48px;
+  min-width: 48px;
+  min-height: 48px;
 }
 
 .app[data-touch-ui="true"] .shelf-folder-dropdown-btn {
   height: auto;
-  min-height: calc(48px * var(--ui-touch-comp, 1));
+  min-height: 48px;
 }
 
 .app[data-touch-ui="true"] .shelf-folder-menu-item,
 .app[data-touch-ui="true"] .shelf-folder-menu-new-btn {
-  min-height: calc(48px * var(--ui-touch-comp, 1));
+  min-height: 48px;
   box-sizing: border-box;
   padding: 10px 14px;
 }
 
 .app[data-touch-ui="true"] .shelf-sort-select-zen {
   height: auto;
-  min-height: calc(48px * var(--ui-touch-comp, 1));
+  min-height: 48px;
 }
 
 .app[data-touch-ui="true"] .shelf-folder-action-btn {
-  min-height: calc(48px * var(--ui-touch-comp, 1));
+  min-height: 48px;
   height: auto;
 }
 
 .app[data-touch-ui="true"] .shelf-folder-active-exit {
-  width: calc(48px * var(--ui-touch-comp, 1));
-  height: calc(48px * var(--ui-touch-comp, 1));
-  min-width: calc(48px * var(--ui-touch-comp, 1));
-  min-height: calc(48px * var(--ui-touch-comp, 1));
+  width: 48px;
+  height: 48px;
+  min-width: 48px;
+  min-height: 48px;
 }
 
 /* 平板宽屏模式限制 drawer 宽度，避免在宽屏下拉伸铺满整个屏幕 */
 
 /* 抽屉搜索模式、数据与管理动作及全选折叠按钮补齐 48px 触摸尺寸 */
 
-/* 共享书架菜单宿主：放在 .app 内，继承主题与移动选择器，zoom 1 */
+/* 共享书架菜单宿主：放在 .app 内，继承主题与移动选择器 */
 .shelf-menu-portal-host {
   position: absolute;
   top: 0;
@@ -5513,7 +5484,6 @@ select option {
   width: 0;
   height: 0;
   z-index: calc(var(--z-ui-system) + 100);
-  zoom: 1;
   pointer-events: none;
 }
 
@@ -5612,10 +5582,9 @@ select option {
   position: relative;
 }
 
-/* ---- C2：移动阅读选区菜单高于工具层、低于笔记模态；固定外框不随 uiScale 缩放 ---- */
+/* ---- C2：移动阅读选区菜单高于工具层、低于笔记模态 ---- */
 .app[data-mobile-reader="true"] .reader-context-menu {
   z-index: var(--z-ui-drawer);
-  zoom: 1;
   max-width: calc(100vw - 16px);
 }
 
@@ -5739,7 +5708,6 @@ select option {
 }
 
 .app[data-mobile-chrome="true"] .font-settings-panel {
-  zoom: 1;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
   height: min(580px, calc(var(--visual-viewport-height, 100vh) - 60px - var(--ime-bottom, 0px)));

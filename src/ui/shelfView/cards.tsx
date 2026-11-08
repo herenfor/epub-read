@@ -147,6 +147,7 @@ export const Cover = memo(function Cover({
         className="shelf-cover fallback morandi-cover"
         style={{ backgroundColor: palette.bg, color: palette.fg }}
         aria-hidden="true"
+        data-ui-scale="fixed"
       >
         <div className="morandi-spine-shadow" />
         <div className="morandi-inner-frame" style={{ borderColor: palette.border }}>

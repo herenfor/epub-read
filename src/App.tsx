@@ -191,6 +191,7 @@ import {
 } from "./ui/useReaderForeground";
 import { createEditionAiRuntime } from "./features/ai/lifecycle/editionRuntime";
 import { IS_AI_EDITION } from "./config/edition";
+import { useUiScaleRoot } from "./ui/uiScale";
 import { registerAppUpdateSaveGate, startAppUpdates } from "./ui/appUpdate/appUpdateStore";
 import { ProgressSourceChoices, type ProgressSourceCandidate } from "./ui/cloudSync/ProgressSourceChoices";
 import { folderImportCopyChoice, importEntryCopyChoiceSupported, libraryCopyChoice, setCopyOnImport, useLibrarySettings } from "./ui/librarySettings";
@@ -1504,6 +1505,8 @@ export default function App() {
 
   // ---- 设置持久化 ----
   useReaderSettingsPersistence(settings, uiScale);
+  // 界面缩放写在根节点上：字号变量与图标都由它派生，弹层/portal 一并跟随（ER-0127）。
+  useUiScaleRoot(uiScale);
 
   // 书架设置与阅读 Aa 共用的主题入口：仅主题变化走约 200ms 整屏淡入，更新回调内
   // 同步提交 React 外层、html/body 与全部在用正文宿主（见 ui/themeTransitionHost）。
@@ -2445,9 +2448,6 @@ export default function App() {
       data-theme={appThemeAttributes.theme}
       data-tone={appThemeAttributes.tone}
       style={{
-        "--ui-scale": uiScale,
-        // UI 缩放下的触摸命中区补偿；只用于触摸入口，不改用户存储的 uiScale。
-        "--ui-touch-comp": `${1 / uiScale}`,
         "--visual-viewport-height": `${responsive.visualViewportHeight}px`,
         "--visual-viewport-top": `${responsive.visualViewportOffsetTop}px`,
         "--ime-bottom": `${responsive.imeBottom}px`,

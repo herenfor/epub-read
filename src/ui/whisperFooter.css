@@ -357,7 +357,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 19px;
+  height: calc(19px * var(--ui-scale)); /* the icons beside it are 19px and scale */
   font-size: var(--fs-title);
   font-weight: 700;
   letter-spacing: -0.5px;
