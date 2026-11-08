@@ -14,7 +14,7 @@ use tauri::AppHandle;
 
 trait SourceReader: Read + Seek + Send {}
 impl<T: Read + Seek + Send> SourceReader for T {}
-pub(super) type Guard = Arc<dyn Fn() -> Result<(), Fault> + Send + Sync>;
+pub(crate) type Guard = Arc<dyn Fn() -> Result<(), Fault> + Send + Sync>;
 struct Source {
     reader: Box<dyn SourceReader>,
     guard: Guard,
@@ -98,43 +98,110 @@ fn book(app: &AppHandle, binding: &DeviceBinding) -> PortableResult<Source> {
         .map_err(|_| error("source-unavailable", "原书暂不可用"))?;
     opened_file(File::open(path).map_err(|_| error("source-unavailable", "原书暂不可用"))?)
 }
-pub(super) fn backup(
+fn open_location(
     app: &AppHandle,
     location: SaveFileLocation,
-) -> PortableResult<NativeZipSession> {
-    #[cfg(not(target_os = "android"))]
-    let _ = app;
-    let source = match location {
+    unavailable: &'static str,
+    random_access: &'static str,
+) -> PortableResult<Source> {
+    match location {
         SaveFileLocation::Path { path } => opened_file(
-            File::open(path).map_err(|_| error("source-unavailable", "无法读取选中的备份"))?,
-        )?,
+            File::open(path).map_err(|_| error("source-unavailable", unavailable))?,
+        ),
         SaveFileLocation::Uri { uri } => {
             #[cfg(target_os = "android")]
             {
                 opened_document(
                     crate::android_uri_bridge::open_content_uri(app, &uri)
-                        .map_err(|_| error("source-unavailable", "无法读取选中的备份"))?
+                        .map_err(|_| error("source-unavailable", unavailable))?
                         .into_seekable()
-                        .map_err(|_| {
-                            error(
-                                "random-access-required",
-                                "请将备份保存到可随机读取的本地文件后重试",
-                            )
-                        })?,
-                )?
+                        .map_err(|_| error("random-access-required", random_access))?,
+                )
             }
             #[cfg(not(target_os = "android"))]
             {
-                let _ = uri;
+                let _ = (app, uri, random_access);
                 return Err(error(
                     "unsupported-platform",
                     "content URI 仅在 Android 可用",
                 ));
             }
         }
-    };
+    }
+}
+
+pub(super) fn backup(
+    app: &AppHandle,
+    location: SaveFileLocation,
+) -> PortableResult<NativeZipSession> {
+    let source = open_location(
+        app,
+        location,
+        "无法读取选中的备份",
+        "请将备份保存到可随机读取的本地文件后重试",
+    )?;
     let guard = source.guard;
     NativeZipSession::from_verified_reader(source.reader, move || guard()).map_err(fault)
+}
+
+fn take_bounded(
+    mut source: Source,
+    limit: u64,
+    cancelled: &dyn Fn() -> bool,
+) -> PortableResult<(Vec<u8>, Guard)> {
+    if source.bytes > limit {
+        return Err(error("too-large", "侧车超出读取上限"));
+    }
+    if cancelled() {
+        return Err(error("cancelled", "迁入已取消"));
+    }
+    let mut buffer = vec![0_u8; source.bytes as usize];
+    let mut filled = 0;
+    while filled < buffer.len() {
+        if cancelled() {
+            return Err(error("cancelled", "迁入已取消"));
+        }
+        let count = source
+            .reader
+            .read(&mut buffer[filled..])
+            .map_err(|_| error("source-changed", "侧车读取不完整"))?;
+        if count == 0 {
+            return Err(error("source-changed", "侧车读取不完整"));
+        }
+        filled += count;
+    }
+    (source.guard)().map_err(fault)?;
+    Ok((buffer, source.guard))
+}
+
+pub(crate) fn read_bounded(
+    app: &AppHandle,
+    location: SaveFileLocation,
+    limit: u64,
+    cancelled: &dyn Fn() -> bool,
+) -> PortableResult<(Vec<u8>, Guard)> {
+    take_bounded(
+        open_location(
+            app,
+            location,
+            "无法读取选中的侧车",
+            "请将侧车保存到可随机读取的本地文件后重试",
+        )?,
+        limit,
+        cancelled,
+    )
+}
+
+pub(crate) fn read_bounded_file(
+    path: &std::path::Path,
+    limit: u64,
+    cancelled: &dyn Fn() -> bool,
+) -> PortableResult<(Vec<u8>, Guard)> {
+    take_bounded(
+        opened_file(File::open(path).map_err(|_| error("source-unavailable", "无法读取选中的侧车"))?)?,
+        limit,
+        cancelled,
+    )
 }
 
 /// Readest v0.12.20/KOReader ranges. MD5 is only an interoperability candidate
@@ -164,7 +231,7 @@ pub(super) fn partial(
     }
     Ok(format!("{:x}", digest.finalize()))
 }
-pub(super) fn candidate(
+pub(crate) fn candidate(
     app: &AppHandle,
     binding: &str,
     cancelled: &dyn Fn() -> bool,
@@ -176,7 +243,7 @@ pub(super) fn candidate(
     (source.guard)().map_err(fault)?;
     Ok(md5)
 }
-pub(super) fn verify(
+pub(crate) fn verify(
     app: &AppHandle,
     binding: &str,
     hash: &str,

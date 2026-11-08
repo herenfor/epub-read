@@ -294,6 +294,8 @@ export interface ShelfViewProps {
   shelfMove?: { direction: "toPrivate" | "toLibrary"; onMove(entry: ShelfEntry): void };
   /** Legacy v1/v2 JSON import stays secondary on native; Web can leave this undefined and use its existing entry. */
   onImportLegacyArchive?(): void;
+  /** ER-0138: single-book KOReader progress import; absent hides the row. */
+  onImportKoreader?(): void;
   onDelete(id: string): void;
   /** 批量删除（选中多本时由确认弹窗调用） */
   onDeleteMany(ids: string[]): void;
@@ -1926,6 +1928,7 @@ export function ShelfView(props: ShelfViewProps) {
     libraryServices: props.libraryServices !== false,
     onExportAllBooks: props.onExportBooks ? () => props.onExportBooks!() : undefined,
     onImportLegacyArchive: props.onImportLegacyArchive,
+    onImportKoreader: props.onImportKoreader,
     onLibraryLocationChanged: props.onLibraryLocationChanged,
     bodySearch,
     onOpenDiagnostics: props.onOpenDiagnostics ? () => {

@@ -135,6 +135,9 @@ import { LanSavePanel } from "./ui/LanSavePanel";
 import { SaveFileExportDialog, SaveFileImportPreview, SaveFileProgressPanel } from "./ui/SaveFileDialogs";
 import { ReadestImportDialog } from "./ui/readestImport/ReadestImportDialog";
 import { useReadestImport } from "./ui/readestImport/useReadestImport";
+import { KoreaderImportDialog } from "./ui/koreaderImport/KoreaderImportDialog";
+import { pickKoreaderSidecar } from "./ui/koreaderImport/koreaderSidecarPicker";
+import { useKoreaderImport } from "./ui/koreaderImport/useKoreaderImport";
 import { SaveFailureDialog } from "./ui/SaveFailureDialog";
 import { releaseUnsavedLane, type SaveFailurePrompt } from "./ui/saveFailureExit";
 import { useSaveFileJob } from "./ui/useSaveFileJob";
@@ -932,6 +935,17 @@ export default function App() {
   });
 
   const readestImport = useReadestImport({ shelfEntriesRef, refreshShelfProjection, setShelfNotice });
+  const pickKoreader = useCallback(() => pickKoreaderSidecar(runtime.platform), [runtime.platform]);
+  // The same save barrier as moving a book: flush its progress lane, refuse a pending local checkpoint.
+  const beforeKoreaderCommit = useCallback(async ({ id, bookHash }: { id: string; bookHash: string }) => {
+    const results = await progressWriterRef.current?.flushBooks([id]) ?? [];
+    const failed = results.find((result) => result.status === "failed");
+    if (failed?.status === "failed") throw failed.error;
+    if (localCheckpointsRef.current?.peek(bookHash)) throw new Error(uiText("koreaderImport.error.pendingProgress"));
+  }, [localCheckpointsRef, progressWriterRef]);
+  const koreaderImport = useKoreaderImport({
+    shelfEntriesRef, refreshShelfProjection, setShelfNotice, pickSidecar: pickKoreader, beforeCommit: beforeKoreaderCommit,
+  });
   const {
     startBookSourceExport,
     handleOpenLanSave,
@@ -2660,6 +2674,11 @@ export default function App() {
                 onMove: (entry) => void shelfSpaces.requestMove(entry),
               } : undefined}
               onImportArchive={handleImportArchive}
+              onImportKoreader={
+                runtime.platform === "web" || !isTauriEnv()
+                  ? undefined
+                  : () => void koreaderImport.start()
+              }
               onImportLegacyArchive={
                 runtime.platform === "web" || !isTauriEnv() || !libraryServices
                   ? undefined
@@ -3383,6 +3402,14 @@ export default function App() {
         onBack={readestImport.back}
         onCommit={() => void readestImport.commit()}
         onCancel={readestImport.cancel}
+      />
+      <KoreaderImportDialog
+        state={koreaderImport.state}
+        onChoose={koreaderImport.choose}
+        onNext={() => void koreaderImport.next()}
+        onBack={koreaderImport.back}
+        onConfirm={() => void koreaderImport.confirm()}
+        onCancel={koreaderImport.cancel}
       />
       {lanSavePresence.present && (
         <LanSavePanel

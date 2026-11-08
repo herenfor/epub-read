@@ -1,12 +1,12 @@
 //! Read-only Readest backup sessions and confirmed local record migration.
 //! No source books, settings, external clocks or foreign tombstones are imported.
 mod commands;
-mod source;
+pub(crate) mod source;
 mod state;
 
 use crate::portable_state::{PortableError, PortableResult};
 pub(crate) use commands::*;
-pub(crate) use state::ReadestImportState;
+pub(crate) use state::{ImportScope, ReadestImportState};
 
 fn error(code: &'static str, message: &str) -> PortableError {
     PortableError {

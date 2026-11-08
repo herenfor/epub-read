@@ -70,6 +70,8 @@ export interface ShelfSettingsPageProps {
   onExportArchive(): void;
   onExportAllBooks?(): void;
   onImportLegacyArchive?(): void;
+  /** Single-book KOReader progress import; absent hides the row. */
+  onImportKoreader?(): void;
   bodySearch?: ShelfBodySearchProps;
   onOpenDiagnostics?(): void;
   /** False on a shelf that keeps to itself: no data, sync, library, import-folder, index or diagnostics rows. */
@@ -297,6 +299,8 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
       disabled={archiveBusy || props.importArchiveDisabled} onClick={props.onImportArchive} />,
     props.onImportLegacyArchive ? <SettingsRow key="legacy" icon={ROW_ICONS.import} title={t("shelfMenu.importLegacy")} detail={t("shelfMenu.importLegacy.detail")}
       disabled={archiveBusy || props.importArchiveDisabled} onClick={props.onImportLegacyArchive} /> : null,
+    props.onImportKoreader ? <SettingsRow key="koreader" icon={ROW_ICONS.import} title={t("koreaderImport.entry")} detail={t("koreaderImport.entry.detail")}
+      disabled={archiveBusy || props.importArchiveDisabled} onClick={props.onImportKoreader} /> : null,
   ].filter(Boolean);
 
   const body = libraryServices ? props.bodySearch : undefined;
