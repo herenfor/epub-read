@@ -6,6 +6,8 @@
  * fails or before the next measure.
  */
 
+import { splitBackdropBox } from "./backdropFragmentSplit";
+
 const BREAK_MARKER = "data-reader-backdrop-break";
 
 interface RestoreSnapshot {
@@ -229,6 +231,9 @@ export function applyBackdropCompatibility(
   if (!content || content.bottom <= content.top || content.right <= content.left) return null;
   const maxElements = Math.max(1, Math.floor(options.maxElements ?? 2000));
   const accepted: RestoreSnapshot[] = [];
+  // Boxes too tall for one column (or that still split after avoid-column) are
+  // split per column after the avoid transaction settles (ER-0126).
+  const tooTall: HTMLElement[] = [];
 
   for (const el of Array.from(viewer.querySelectorAll<HTMLElement>("*")).slice(0, maxElements)) {
     const cs = doc.defaultView?.getComputedStyle(el);
@@ -242,7 +247,11 @@ export function applyBackdropCompatibility(
     if (currentRects.length <= 1) continue;
 
     const usedHeight = Number.parseFloat(cs.height);
-    if (!Number.isFinite(usedHeight) || usedHeight <= 0 || usedHeight > content.bottom - content.top) continue;
+    if (!Number.isFinite(usedHeight) || usedHeight <= 0) continue;
+    if (usedHeight > content.bottom - content.top) {
+      tooTall.push(el);
+      continue;
+    }
 
     const snapshot = snapshotElement(el);
     if (!snapshot) continue;
@@ -262,6 +271,7 @@ export function applyBackdropCompatibility(
       accepted.push(snapshot);
     } else {
       restoreSnapshot(snapshot);
+      tooTall.push(el);
     }
   }
 
@@ -274,10 +284,34 @@ export function applyBackdropCompatibility(
     }
   }
 
-  if (accepted.length === 0) return null;
+  const splits = splitTallBoxes(tooTall);
+  // A split shifts later content; keep the avoid set only if it still holds.
+  if (splits.length && !accepted.every((snapshot) => validateCandidate(snapshot.element, viewer, doc, content, geometry))) {
+    for (const undo of splits.reverse()) undo();
+    splits.length = 0;
+  }
+
+  if (accepted.length === 0 && splits.length === 0) return null;
   return () => {
+    for (const undo of [...splits].reverse()) undo();
     for (const snapshot of accepted) restoreSnapshot(snapshot);
   };
+}
+
+function splitTallBoxes(boxes: readonly HTMLElement[]): Array<() => void> {
+  const undo: Array<() => void> = [];
+  for (const el of boxes) {
+    const snapshot = snapshotElement(el);
+    if (!snapshot) continue;
+    const result = splitBackdropBox(el);
+    if (result.kind !== "applied") continue;
+    el.setAttribute(BREAK_MARKER, "split");
+    undo.push(() => {
+      result.restore();
+      restoreSnapshot(snapshot);
+    });
+  }
+  return undo;
 }
 
 export interface BackdropCompatibilitySession {
