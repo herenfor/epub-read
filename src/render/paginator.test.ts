@@ -46,9 +46,9 @@ import {
   hasAuthoredInlineWidth,
   isMediaOnlyFloatContent,
   isMediaOnlyFloatSubtree,
-  restoreInlineStyleProperty,
   shouldApplyTrailingFloatMarginFix,
 } from "./floatCompensation";
+import { restoreInlineStyleProperty } from "./inlineStyleSnapshot";
 
 const textNode = (text: string): Node =>
   ({ nodeType: 3, textContent: text }) as Node;

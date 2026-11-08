@@ -15,6 +15,41 @@ export function pageContentX(clientX: number, origin: number, scroll: number, pr
   return (clientX - origin) * pageAxisSign(progression) + scroll;
 }
 
+/** Physical-axis helpers: in RTL progression the viewer's x axis is mirrored. */
+export function contentClientOrigin(
+  viewer: HTMLElement | null,
+  doc: Document | null,
+  progression: PageProgression,
+): number {
+  if (!viewer) return 0;
+  const rect = viewer.getBoundingClientRect();
+  const style = doc?.defaultView?.getComputedStyle(viewer);
+  return progression === "rtl"
+    ? (rect.right ?? rect.left + rect.width) - (parseFloat(style?.borderRightWidth ?? "") || 0) - (parseFloat(style?.paddingRight ?? "") || 0)
+    : rect.left + (viewer.clientLeft || 0) + (parseFloat(style?.paddingLeft ?? "") || 0);
+}
+
+export function axisClientRect(
+  viewer: HTMLElement | null,
+  progression: PageProgression,
+  rect: { left: number; right: number },
+): { left: number; right: number } {
+  if (progression !== "rtl" || !viewer) return rect;
+  const viewerRect = viewer.getBoundingClientRect();
+  const sum = viewerRect.left + viewerRect.right;
+  return { left: sum - rect.right, right: sum - rect.left };
+}
+
+export function axisContentOrigin(
+  viewer: HTMLElement | null,
+  doc: Document | null,
+  progression: PageProgression,
+): number {
+  if (progression !== "rtl" || !viewer) return contentClientOrigin(viewer, doc, progression);
+  const viewerRect = viewer.getBoundingClientRect();
+  return viewerRect.left + viewerRect.right - contentClientOrigin(viewer, doc, progression);
+}
+
 /** Change column progression, preserving the authored text direction. No
  * mirror transforms, cloned chapter DOM or changed text/anchor identities. */
 export function setPagedFlowDirection(viewer: HTMLElement, progression: PageProgression): () => void {

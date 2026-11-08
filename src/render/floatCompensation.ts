@@ -1,30 +1,6 @@
 import { hasAuthoredCssProperty } from "./cssRewrite";
-import { readPageScroll, type PageProgression } from "./pagedDirection";
-
-export interface InlineStyleValue {
-  value: string;
-  priority: string;
-}
-
-export function snapshotInlineStyleProperty(
-  style: CSSStyleDeclaration,
-  property: string
-): InlineStyleValue {
-  return {
-    value: style.getPropertyValue(property),
-    priority: style.getPropertyPriority(property),
-  };
-}
-
-/** 恢复 inline 属性时同时恢复 !important，空值则彻底移除 longhand。 */
-export function restoreInlineStyleProperty(
-  style: CSSStyleDeclaration,
-  property: string,
-  original: InlineStyleValue
-): void {
-  if (original.value === "") style.removeProperty(property);
-  else style.setProperty(property, original.value, original.priority);
-}
+import { axisClientRect, axisContentOrigin, readPageScroll, type PageProgression } from "./pagedDirection";
+import { restoreInlineStyleProperty, snapshotInlineStyleProperty, type InlineStyleValue } from "./inlineStyleSnapshot";
 
 /** True only for an authored inline width declaration (comments are inert). */
 export function hasAuthoredInlineWidth(styleText: string): boolean {
@@ -203,40 +179,6 @@ function applyFloatWidthFixes(win: Window, doc: Document, viewer: HTMLElement, f
     el.style.setProperty("width", `${target}px`);
     fixes.push(el);
   }
-}
-
-export function contentClientOrigin(
-  viewer: HTMLElement | null,
-  doc: Document | null,
-  progression: PageProgression,
-): number {
-  if (!viewer) return 0;
-  const rect = viewer.getBoundingClientRect();
-  const style = doc?.defaultView?.getComputedStyle(viewer);
-  return progression === "rtl"
-    ? (rect.right ?? rect.left + rect.width) - (parseFloat(style?.borderRightWidth ?? "") || 0) - (parseFloat(style?.paddingRight ?? "") || 0)
-    : rect.left + (viewer.clientLeft || 0) + (parseFloat(style?.paddingLeft ?? "") || 0);
-}
-
-export function axisClientRect(
-  viewer: HTMLElement | null,
-  progression: PageProgression,
-  rect: { left: number; right: number },
-): { left: number; right: number } {
-  if (progression !== "rtl" || !viewer) return rect;
-  const viewerRect = viewer.getBoundingClientRect();
-  const sum = viewerRect.left + viewerRect.right;
-  return { left: sum - rect.right, right: sum - rect.left };
-}
-
-export function axisContentOrigin(
-  viewer: HTMLElement | null,
-  doc: Document | null,
-  progression: PageProgression,
-): number {
-  if (progression !== "rtl" || !viewer) return contentClientOrigin(viewer, doc, progression);
-  const viewerRect = viewer.getBoundingClientRect();
-  return viewerRect.left + viewerRect.right - contentClientOrigin(viewer, doc, progression);
 }
 
 export interface FloatFixRect {

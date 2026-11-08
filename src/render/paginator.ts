@@ -1,18 +1,20 @@
 import { effectivePageProgression } from "./settings";
 import { canInsertLeadingColumn, canRetainLeadingColumn, chapterLeafLayout, LeadingColumnGap, type ChapterLeafLayout } from "./chapterFill";
-import { pageAxisSign, pageContentX, readPageScroll, writePageScroll, setPagedFlowDirection, type PageProgression } from "./pagedDirection";
-import { resolveArchiveHref, archiveHref } from "../core/archiveReferences";
-import { createPercentageSpacingSession } from "./percentageSpacing";
 import {
   axisClientRect as resolveAxisClientRect,
   axisContentOrigin as resolveAxisContentOrigin,
   contentClientOrigin as resolveContentClientOrigin,
-  createFloatWidthSession,
-  createTrailingFloatSession,
-  restoreInlineStyleProperty,
-  snapshotInlineStyleProperty,
-  type InlineStyleValue,
-} from "./floatCompensation";
+  pageAxisSign,
+  pageContentX,
+  readPageScroll,
+  writePageScroll,
+  setPagedFlowDirection,
+  type PageProgression,
+} from "./pagedDirection";
+import { resolveArchiveHref, archiveHref } from "../core/archiveReferences";
+import { createPercentageSpacingSession } from "./percentageSpacing";
+import { createFloatWidthSession, createTrailingFloatSession } from "./floatCompensation";
+import { restoreInlineStyleProperty, snapshotInlineStyleProperty, type InlineStyleValue } from "./inlineStyleSnapshot";
 import { sanitizeChapter, VIEWER_ID } from "./sanitize";
 import { planCenteredTitleBody } from "./titlePageLayout";
 import { desktopSettlePlan, PageMotionSession, settlePlan, type Direction as MotionDirection } from "./pageMotion";
