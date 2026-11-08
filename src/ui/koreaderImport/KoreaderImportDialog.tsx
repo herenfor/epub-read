@@ -161,13 +161,14 @@ function PreviewStep(props: KoreaderImportDialogProps & { state: Extract<Koreade
       {target && status.kind !== "blocked" && (
         <div className="readest-book koreader-target">
           <p className="readest-group-label">{t("koreaderImport.target.label")}</p>
-          <b>{target.chapterTitle ?? t("koreaderImport.target.untitled")}</b>
+          <b>{target.chapterTitle ?? t("koreaderImport.target.part", { n: target.spineIndex + 1 })}</b>
           {target.excerpt && <q>{target.excerpt}</q>}
         </div>
       )}
       {status.kind === "blocked" && <p className="readest-bad" role="alert">{blockText(t, status.reason, status.code)}</p>}
       {status.kind === "same" && <p className="save-file-muted" role="status">{t("koreaderImport.preview.same")}</p>}
       {ready && preview.local.progressPct !== null && <p className="save-file-muted">{t("koreaderImport.preview.replaceHint")}</p>}
+      {ready && preview.localConflict && <p className="readest-warn">{t("koreaderImport.preview.conflict")}</p>}
       <p className="save-file-muted">{t("koreaderImport.preview.footer")}</p>
     </Shell>
   );
@@ -175,14 +176,17 @@ function PreviewStep(props: KoreaderImportDialogProps & { state: Extract<Koreade
 
 function WorkingStep(props: KoreaderImportDialogProps & { state: Extract<KoreaderImportState, { kind: "working" }> }) {
   const { t } = useUiText();
-  const { step, sourceLabel } = props.state;
+  const { step, sourceLabel, done, total } = props.state;
+  const text = step === "matching" && total > 0
+    ? t("koreaderImport.working.matchingCount", { done, total })
+    : t(`koreaderImport.working.${step}`);
   return (
     <Shell
       title={t("koreaderImport.title")}
       subtitle={sourceLabel}
       actions={<button type="button" disabled={step === "committing"} onClick={props.onCancel}>{t("koreaderImport.cancel")}</button>}
     >
-      <p className="save-file-muted" role="status" aria-live="polite">{t(`koreaderImport.working.${step}`)}</p>
+      <p className="save-file-muted" role="status" aria-live="polite">{text}</p>
     </Shell>
   );
 }

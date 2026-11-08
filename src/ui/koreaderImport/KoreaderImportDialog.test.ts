@@ -12,7 +12,8 @@ const preview = (patch: Partial<KoreaderPreview> = {}): KoreaderPreview => ({
   bookId: "b",
   koreader: { progressPct: 62, updatedAtMs: null },
   local: { progressPct: 30, updatedAtMs: null },
-  target: { chapterTitle: "第三章", excerpt: "原文片段" },
+  localConflict: false,
+  target: { spineIndex: 2, chapterTitle: "第三章", excerpt: "原文片段" },
   status: { kind: "ready" },
   ...patch,
 });
@@ -39,7 +40,7 @@ describe("KOReader import model", () => {
     expect(canConfirmKoreader({ ...base, preview: preview() })).toBe(true);
     expect(canConfirmKoreader({ ...base, chosen: "c", preview: preview() })).toBe(false);
     expect(canConfirmKoreader({ ...base, preview: preview({ status: { kind: "same" } }) })).toBe(false);
-    expect(canConfirmKoreader({ ...base, preview: preview({ status: { kind: "blocked", reason: "ambiguous" } }) })).toBe(false);
+    expect(canConfirmKoreader({ ...base, preview: preview({ status: { kind: "blocked", reason: "node-missing" } }) })).toBe(false);
   });
 });
 
@@ -88,7 +89,7 @@ describe("KoreaderImportDialog", () => {
   });
 
   it("cannot cancel while committing", async () => {
-    const { dom, button } = await mount({ kind: "working", step: "committing", sourceLabel: "metadata.epub.lua" });
+    const { dom, button } = await mount({ kind: "working", step: "committing", sourceLabel: "metadata.epub.lua", done: 0, total: 0 });
     try {
       expect(button("取消")!.disabled).toBe(true);
     } finally {
