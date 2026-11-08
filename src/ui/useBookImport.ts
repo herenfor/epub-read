@@ -1,4 +1,5 @@
 import { loadSourceBook, supportedBookName } from "../core/documentFormats";
+import { bookPickerExtensions } from "./bookFileTypes";
 import { useCallback, useEffect, useRef, useState, type Dispatch, type MutableRefObject, type RefObject, type SetStateAction } from "react";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { disposeBook, DrmError } from "../core/book";
@@ -651,7 +652,7 @@ export function useBookImport({
         multiple: true,
         directory: false,
         title: uiText("notice.picker.chooseEpub"),
-        filters: [{ name: uiText("notice.picker.epubFilter"), extensions: ["epub", "fb2", "txt", "cbz", "zip"] }],
+        filters: [{ name: uiText("notice.picker.epubFilter"), extensions: bookPickerExtensions() }],
       });
       const paths = Array.isArray(selected) ? selected : selected ? [selected] : [];
       if (paths.length === 0 || getShelfStore() !== pickerStore) return;

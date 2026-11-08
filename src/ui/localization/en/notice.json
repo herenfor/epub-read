@@ -182,5 +182,12 @@
   "notice.importTarget.failed": "Books imported, but adding them to the folder failed: {error}",
   "notice.drop.unsupported": "Drop EPUB, FB2, TXT, CBZ, comic ZIP files, or a folder",
   "notice.drop.booksOnly": "Drop EPUB, FB2, TXT, CBZ, or comic ZIP files",
-  "notice.drop.oneFolder": "Drop one folder at a time"
+  "notice.drop.oneFolder": "Drop one folder at a time",
+  "notice.kindle.encrypted": "This Kindle book is encrypted (DRM) and can't be opened",
+  "notice.kindle.unsupportedVariant": "This Kindle format isn't supported yet. Only unencrypted MOBI and AZW3 books can be opened",
+  "notice.kindle.corrupt": "The file is damaged or isn't a valid MOBI/AZW3 book",
+  "notice.kindle.sourceUnavailable": "Can't read the original file. Make sure it's still there and access is allowed",
+  "notice.kindle.cancelled": "Cancelled. The library wasn't changed",
+  "notice.kindle.budget": "This book is too large to process right now. Try again later, or close other books first",
+  "notice.kindle.webUnsupported": "The web version can't read MOBI/AZW3. Import it in the desktop or Android app"
 }

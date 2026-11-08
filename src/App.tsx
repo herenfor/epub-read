@@ -1,5 +1,6 @@
 import { ComicReaderView } from "./ui/ComicReaderView";
 import { supportedBookName } from "./core/documentFormats";
+import { webBookAccept } from "./ui/bookFileTypes";
 import { resolveArchiveHref, archiveHref } from "./core/archiveReferences";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { spineIndexForEntryKey, spineItemPath, spineItemHref, disposeBook, nextLinearIndex, linearChapterNumber, linearChapterTotal, tocLabelsBySpine } from "./core/book";
@@ -3468,7 +3469,7 @@ export default function App() {
       <input
         ref={fileInputRef}
         type="file"
-        accept=".epub,.txt,.cbz,.zip,application/epub+zip,text/plain,application/zip"
+        accept={webBookAccept()}
         multiple
         style={{ display: "none" }}
         onChange={(e) => {

@@ -2,6 +2,7 @@ import { useCallback, type Dispatch, type MutableRefObject, type SetStateAction 
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { disposeBook, spineIndexForEntryKey, spineItemPath } from "../core/book";
 import { loadSourceArchive, loadSourceBook, sourceFormat, textEncodingFromPath } from "../core/documentFormats";
+import { bookPickerExtensions } from "./bookFileTypes";
 import type { ExactTextHit } from "../core/exactTextHits";
 import { compareStamp, type Stamp, type Version } from "../core/portableState/portable-register-core";
 import { latestVersion, projectProgressVersion, versionForStamp } from "../core/portableState/projection";
@@ -514,7 +515,7 @@ export function useBookOpen({
               multiple: false,
               directory: false,
               title: uiText("notice.open.relocateTitle", { title: entry.title }),
-              filters: [{ name: uiText("notice.picker.epubFilter"), extensions: ["epub", "fb2", "txt", "cbz", "zip"] }],
+              filters: [{ name: uiText("notice.picker.epubFilter"), extensions: bookPickerExtensions() }],
             });
             if (!selected || Array.isArray(selected)) {
               shelfBusyRef.current = false;

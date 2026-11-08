@@ -190,4 +190,11 @@ export const notice = defineMessages("notice", {
   "notice.drop.unsupported": "可拖入 EPUB、FB2、TXT、CBZ、漫画 ZIP 或文件夹",
   "notice.drop.booksOnly": "可拖入 EPUB、FB2、TXT、CBZ 或漫画 ZIP 文件",
   "notice.drop.oneFolder": "一次只能拖入一个文件夹",
+  "notice.kindle.encrypted": { zh: "这本 Kindle 书有加密（DRM），无法打开", note: "MOBI/AZW3 failure. Encrypted books are refused; never suggest removing DRM." },
+  "notice.kindle.unsupportedVariant": { zh: "暂不支持这种 Kindle 格式，目前只能打开未加密的 MOBI 和 AZW3 书", note: "MOBI/AZW3 failure: KFX, print replica (AZW4), dictionaries and similar variants." },
+  "notice.kindle.corrupt": { zh: "文件已损坏或不是有效的 MOBI/AZW3 书", note: "MOBI/AZW3 failure: the file could not be parsed." },
+  "notice.kindle.sourceUnavailable": { zh: "无法读取原文件，请确认文件仍在原处并允许访问", note: "MOBI/AZW3 failure: the original file is missing or access was lost." },
+  "notice.kindle.cancelled": { zh: "已取消，书架没有改动", note: "MOBI/AZW3 conversion cancelled by the user." },
+  "notice.kindle.budget": { zh: "这本书太大，当前无法处理；请稍后重试，或先关闭其他书", note: "MOBI/AZW3 failure: the app's memory/work budget refused the conversion." },
+  "notice.kindle.webUnsupported": { zh: "网页版无法读取 MOBI/AZW3，请在桌面或安卓应用中导入", note: "The browser preview has no Kindle converter." },
 });
