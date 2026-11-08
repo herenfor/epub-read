@@ -4865,6 +4865,17 @@ select option {
   text-align: right;
 }
 
+/* Action column: star + more side by side plus the 14px cell padding. Desktop
+   buttons are 32px; touch hit areas are 48px each (102px with the gap), so a
+   fixed 104px column overflowed the table on tablets and phones. */
+.shelf-table-action-th {
+  width: 104px;
+}
+
+.app[data-touch-ui="true"] .shelf-table-action-th {
+  width: 130px;
+}
+
 .folder-row .shelf-capsule-count {
   margin-left: 6px;
   white-space: nowrap;

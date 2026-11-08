@@ -2770,7 +2770,7 @@ export function ShelfView(props: ShelfViewProps) {
                 >
                   {t("shelfMain.table.time")} {sort === "recent" ? "▾" : ""}
                 </th>
-                <th className="shelf-table-action-th" style={{ width: 104 }}>{t("shelfMain.table.actions")}</th>
+                <th className="shelf-table-action-th">{t("shelfMain.table.actions")}</th>
               </tr>
             </thead>
             <tbody>
