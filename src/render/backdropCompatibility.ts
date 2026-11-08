@@ -281,7 +281,7 @@ export function applyBackdropCompatibility(
 }
 
 export interface BackdropCompatibilitySession {
-  /** Apply one transaction; an existing restore handle is replaced as-is. */
+  /** Apply one transaction, first undoing the previous one so its handle is never lost. */
   apply(
     doc: Document | null | undefined,
     viewer: HTMLElement | null | undefined,
@@ -292,14 +292,15 @@ export interface BackdropCompatibilitySession {
 }
 
 /**
- * Stateful wrapper around one paginator's backdrop pass.  The session owns the
- * restore handle; `apply` overwrites a previous handle without restoring it
- * first, preserving the paginator's existing measure ordering.
+ * Owns one paginator's backdrop transaction.  The paginator restores it at the
+ * start of every measure; `apply` restores again so an overlapping measure can
+ * never snapshot already-compensated styles or drop the previous handle.
  */
 export function createBackdropCompatibilitySession(): BackdropCompatibilitySession {
   let restoreHandle: (() => void) | null = null;
   return {
     apply(doc, viewer, geometry) {
+      restoreHandle?.();
       restoreHandle = applyBackdropCompatibility(doc, viewer, geometry);
     },
     restore() {

@@ -189,22 +189,33 @@ describe("backdrop compatibility", () => {
     expect(element.getAttribute("data-reader-backdrop-break")).toBeNull();
   });
 
-  it("a later apply replaces the previous handle without restoring it first", () => {
+  it("a later apply undoes the previous transaction before applying", () => {
+    const original = "background-color:red;-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(25px)";
     const first = fakeContext();
     const second = fakeContext();
     const session = createBackdropCompatibilitySession();
     session.apply(first.doc, first.viewer, geometry);
-    const firstAppliedStyle = first.attributes.get("style");
-    expect(firstAppliedStyle).toContain("break-inside: avoid-column !important");
+    expect(first.attributes.get("style")).toContain("break-inside: avoid-column !important");
 
     session.apply(second.doc, second.viewer, geometry);
-    expect(first.attributes.get("style")).toBe(firstAppliedStyle);
+    expect(first.attributes.get("style")).toBe(original);
+    expect(first.element.getAttribute("data-reader-backdrop-break")).toBeNull();
+    expect(second.attributes.get("style")).toContain("break-inside: avoid-column !important");
 
     session.restore();
-    expect(second.attributes.get("style")).toBe(
-      "background-color:red;-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(25px)"
-    );
+    expect(second.attributes.get("style")).toBe(original);
     expect(second.element.getAttribute("data-reader-backdrop-break")).toBeNull();
-    expect(first.attributes.get("style")).toBe(firstAppliedStyle);
+  });
+
+  it("re-applying on the same box snapshots the author style, not the compensated one", () => {
+    const original = "background-color:red;-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(25px)";
+    const { doc, viewer, element, attributes } = fakeContext();
+    const session = createBackdropCompatibilitySession();
+    session.apply(doc, viewer, geometry);
+    session.apply(doc, viewer, geometry);
+    expect(element.getAttribute("data-reader-backdrop-break")).toBe("applied");
+    session.restore();
+    expect(attributes.get("style")).toBe(original);
+    expect(element.getAttribute("data-reader-backdrop-break")).toBeNull();
   });
 });

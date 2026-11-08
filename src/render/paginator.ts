@@ -4373,6 +4373,9 @@ export class ChapterPaginator {
       this.chapterFill = null;
     }
     if (this.chapterFill) this.fillViewport = { width: measuredWidth, height: measuredHeight };
+    // Backdrop compensation is applied last, so it is undone first: a stale
+    // avoid-column box must not take part in the new layout (ER-0126).
+    this.backdropCompatibilitySession.restore();
     this.restoreVerticalShell?.();
     this.restoreVerticalShell = null;
     this.restoreVerticalMediaBounds?.();
@@ -4673,7 +4676,6 @@ export class ChapterPaginator {
       if (this.verticalMode) {
         // Physical-width and float compensation below assumes horizontal
         // multicol. Applying it to vertical paragraphs can force max-width:0.
-        this.backdropCompatibilitySession.restore();
         this.measuredViewport = { width: measuredWidth, height: measuredHeight };
         return true;
       }
@@ -4706,7 +4708,6 @@ export class ChapterPaginator {
         void viewer.scrollHeight;
         this.pageWidth = Math.max(0, viewer.clientWidth);
         this.step = 0;
-        this.backdropCompatibilitySession.restore();
         this.measuredViewport = { width: measuredWidth, height: measuredHeight };
         return isChapterMeasurementCurrent({
           disposed: this.disposed,

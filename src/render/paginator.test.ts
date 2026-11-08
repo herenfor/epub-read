@@ -2458,7 +2458,7 @@ describe("measure viewport height locking", () => {
       loadSeq: 1,
       iframe: { clientWidth: 800, clientHeight: 600 },
       settings: { fontSizePx: 16, gapPx: 40, readingMode: "paginated" },
-      restoreBackdropCompatibility: vi.fn(),
+      backdropCompatibilitySession: { apply: vi.fn(), restore: vi.fn() },
       restoreInlineBoxFixes: vi.fn(),
       restoreFloatLayoutFixes: vi.fn(),
       restoreBookMargins: vi.fn(),
@@ -2475,6 +2475,8 @@ describe("measure viewport height locking", () => {
 
     // Height should be 600 - 25 - 35 = 540px
     expect(viewer.style.height).toBe("540px");
+    // ER-0126: the previous backdrop transaction is undone before measuring.
+    expect(context.backdropCompatibilitySession.restore).toHaveBeenCalledTimes(1);
     // The 800px parent contributes 10px of padding on each side.
     expect(viewer.style.columnWidth).toBe("780px");
     expect(viewer.style.columnCount).toBe("1");
@@ -2507,7 +2509,7 @@ describe("measure viewport height locking", () => {
       loadSeq: 1,
       iframe: { clientWidth: 0, clientHeight: 0 },
       settings: { fontSizePx: 16, gapPx: 40, readingMode: "paginated" },
-      restoreBackdropCompatibility: vi.fn(),
+      backdropCompatibilitySession: { apply: vi.fn(), restore: vi.fn() },
       restoreInlineBoxFixes: vi.fn(),
       restoreFloatLayoutFixes: vi.fn(),
       restoreBookMargins: vi.fn(),
@@ -2586,7 +2588,7 @@ describe("measure viewport height locking", () => {
         columnsPerView: 2,
         spreadGapMode: "auto",
       },
-      restoreBackdropCompatibility: vi.fn(),
+      backdropCompatibilitySession: { apply: vi.fn(), restore: vi.fn() },
       restoreInlineBoxFixes: vi.fn(),
       restoreFloatLayoutFixes: vi.fn(),
       restoreBookMargins: vi.fn(),
@@ -2670,7 +2672,7 @@ describe("measure viewport height locking", () => {
         columnsPerView: 2,
         spreadGapMode: "auto",
       },
-      restoreBackdropCompatibility: vi.fn(),
+      backdropCompatibilitySession: { apply: vi.fn(), restore: vi.fn() },
       restoreInlineBoxFixes: vi.fn(),
       restoreFloatLayoutFixes: vi.fn(),
       restoreBookMargins: vi.fn(),
