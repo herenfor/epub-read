@@ -5,6 +5,7 @@ import {
   type ProjectionReloadSnapshot,
   type ProjectionReloadTarget,
 } from "./continuousProjectionReload";
+import { nextHostViewportHeight, nextHostViewportWidth } from "./ContinuousReaderView";
 
 describe("ContinuousReaderView layout and projection integration", () => {
   it("projects single host scroll position across multiple linear chapters without chapter reload", () => {
@@ -208,5 +209,16 @@ describe("ContinuousReaderView layout and projection integration", () => {
     expect(calls).toContain("reload:1:B");
     expect(calls).toContain("finished:B");
     expect(coordinator.current()?.version).toBe("B");
+  });
+
+  it("ER-0125: forwards a 1px host width change so the paginator re-measures", () => {
+    // 停靠目录让正文从 865 收到 864：分页器按 865 测过，必须收到 864 才会 reflow。
+    expect(nextHostViewportWidth(865, 864)).toBe(864);
+    expect(nextHostViewportWidth(1601, 1600)).toBe(1600);
+    expect(nextHostViewportWidth(864, 864)).toBe(864);
+    expect(nextHostViewportWidth(864, 0)).toBe(864);
+    // 高度仍保留 1px 容差（iframe 高由 V 推出）。
+    expect(nextHostViewportHeight(600, 601)).toBe(600);
+    expect(nextHostViewportHeight(600, 640)).toBe(640);
   });
 });

@@ -190,6 +190,20 @@ interface LinearSpineItem {
 /** 测量未就绪（容器尚未布局）时的按帧重测上限，避免极端情况下无限重试。 */
 const MEASURE_RETRY_LIMIT = 180;
 
+/** 宿主高度：1px 抖动不重排（iframe 高由 V 推出，分页器测量与之同源）。 */
+export function nextHostViewportHeight(prev: number, observed: number): number {
+  return observed > 0 && Math.abs(observed - prev) > 1 ? observed : prev;
+}
+
+/**
+ * 宿主宽度：不能留 1px 容差。iframe 宽 100% 跟随容器，分页器 isMeasuredForViewport()
+ * 按精确宽度判断；固定目录的停靠栏让正文最终只窄 1px 时若被过滤掉，就不会再触发
+ * reflow，章节停在“已显示就绪但未按当前视口测量”，开书永久卡在准备阅读位置（ER-0125）。
+ */
+export function nextHostViewportWidth(prev: number, observed: number): number {
+  return observed > 0 && observed !== prev ? observed : prev;
+}
+
 /** 视口上方 20% 是连续阅读的“阅读线”，锚点采样与状态展示共用同一位置。 */
 const READING_LINE_RATIO = 0.2;
 
@@ -523,8 +537,8 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
         if (!rect) return;
         const h = Math.round(rect.height);
         const w = Math.round(rect.width);
-        setViewportHeight((prev) => (h > 0 && Math.abs(h - prev) > 1 ? h : prev));
-        setViewportWidth((prev) => (w > 0 && Math.abs(w - prev) > 1 ? w : prev));
+        setViewportHeight((prev) => nextHostViewportHeight(prev, h));
+        setViewportWidth((prev) => nextHostViewportWidth(prev, w));
       });
       ro.observe(el);
       return () => ro.disconnect();
