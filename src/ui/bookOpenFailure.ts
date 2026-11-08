@@ -1,3 +1,4 @@
+import { kindleFailureNotice, kindleOpenFailureKind } from "./kindleFormatNotice";
 import { uiText } from "./localization/UiLanguageProvider";
 
 /** Native commands may reject with a string rather than an Error. */
@@ -37,6 +38,9 @@ export function describeBookOpenFailure(error: unknown): {
     const failure = SOURCE_FAILURES[code];
     return { message: uiText(failure.key), sourceUnavailable: failure.sourceUnavailable };
   }
+  // A Kindle read failure is not a lost binding: never offer relink for it.
+  const kindle = kindleOpenFailureKind(error);
+  if (kindle) return { message: kindleFailureNotice(kindle).text, sourceUnavailable: false };
   // `failed`, unknown codes, repository, permission and transient IPC errors
   // are not proof of a lost source.
   return { message: bookOpenErrorMessage(error), sourceUnavailable: false };

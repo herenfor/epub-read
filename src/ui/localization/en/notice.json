@@ -38,7 +38,7 @@
   "notice.originalRetry.copy": "Copy them",
   "notice.originalRetry.close": "Not now",
   "notice.picker.chooseEpub": "Select Books",
-  "notice.picker.epubFilter": "Books (EPUB, FB2, TXT, CBZ, ZIP)",
+  "notice.picker.epubFilter": "Books (EPUB, FB2, MOBI, AZW3, TXT, CBZ, ZIP)",
   "notice.picker.failed": "Failed to open file picker: {error}",
   "notice.organization.readFailedLocked": "Failed to read favorites and folders; editing disabled to prevent overwriting existing data",
   "notice.operationFailed": "Operation failed: {error}",
@@ -180,14 +180,14 @@
   "notice.importTarget.keptElsewhere.one": "{count} book is already in another folder and was not moved",
   "notice.importTarget.folderGone": "Folder “{name}” no longer exists; the books stay unclassified",
   "notice.importTarget.failed": "Books imported, but adding them to the folder failed: {error}",
-  "notice.drop.unsupported": "Drop EPUB, FB2, TXT, CBZ, comic ZIP files, or a folder",
-  "notice.drop.booksOnly": "Drop EPUB, FB2, TXT, CBZ, or comic ZIP files",
+  "notice.drop.unsupported": "Drop EPUB, FB2, MOBI, AZW3, TXT, CBZ, comic ZIP files, or a folder",
+  "notice.drop.booksOnly": "Drop EPUB, FB2, MOBI, AZW3, TXT, CBZ, or comic ZIP files",
   "notice.drop.oneFolder": "Drop one folder at a time",
   "notice.kindle.encrypted": "This Kindle book is encrypted (DRM) and can't be opened",
   "notice.kindle.unsupportedVariant": "This Kindle format isn't supported yet. Only unencrypted MOBI and AZW3 books can be opened",
   "notice.kindle.corrupt": "The file is damaged or isn't a valid MOBI/AZW3 book",
   "notice.kindle.sourceUnavailable": "Can't read the original file. Make sure it's still there and access is allowed",
-  "notice.kindle.cancelled": "Cancelled. The library wasn't changed",
+  "notice.kindle.cancelled": "Cancelled",
   "notice.kindle.budget": "This book is too large to process right now. Try again later, or close other books first",
-  "notice.kindle.webUnsupported": "The web version can't read MOBI/AZW3. Import it in the desktop or Android app"
+  "notice.webUnsupported": "The web version can't read {format} files. Import them in the desktop or Android app"
 }

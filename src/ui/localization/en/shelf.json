@@ -1,18 +1,18 @@
 {
-  "shelf.import.tip": "Import books (EPUB, FB2, TXT, CBZ, ZIP) to library",
+  "shelf.import.tip": "Import books (EPUB, FB2, MOBI, AZW3, TXT, CBZ, ZIP) to library",
   "shelf.import.short": "Import",
   "shelf.import.books": "Import Books",
   "shelf.import.menu.tip": "Import books or folder",
   "shelf.import.more": "More import options",
   "shelf.import.menu": "Import options",
-  "shelf.import.books.detail": "Choose EPUB, FB2, TXT, CBZ, or comic ZIP files",
+  "shelf.import.books.detail": "Choose EPUB, FB2, MOBI, AZW3, TXT, CBZ, or comic ZIP files",
   "shelf.import.folder": "Import Folder",
   "shelf.import.folder.detail": "Automatically organize into folders by directory",
   "shelf.import.lan.detail": "Scan a QR code to swap books and reading data with another device",
   "shelf.import.copy": "Copy into library",
   "shelf.import.copy.detail": "Keeps its own copy, so moving the original won't break it",
-  "shelf.import.dropHint": "Drop EPUB, FB2, TXT, CBZ, comic ZIP files, or a folder. Drop books onto a folder card to put them in that folder.",
-  "shelf.import.dropHint.booksOnly": "Drop EPUB, FB2, TXT, CBZ, or comic ZIP files. Drop books onto a folder card to put them in that folder.",
+  "shelf.import.dropHint": "Drop EPUB, FB2, MOBI, AZW3, TXT, CBZ, comic ZIP files, or a folder. Drop books onto a folder card to put them in that folder.",
+  "shelf.import.dropHint.booksOnly": "Drop EPUB, FB2, MOBI, AZW3, TXT, CBZ, or comic ZIP files. Drop books onto a folder card to put them in that folder.",
   "shelf.cover.initialFallback": "B",
   "shelf.time.justNow": "Just now",
   "shelf.time.minutesAgo.other": "{count} minutes ago",
@@ -79,5 +79,5 @@
   "shelf.timeSegment.last30Days": "Last 30 days",
   "shelf.timeSegment.thisYear": "This year",
   "shelf.timeSegment.older": "Older",
-  "shelf.import.toFolder.tip": "Import books (EPUB, FB2, TXT, CBZ, ZIP) into folder “{name}”"
+  "shelf.import.toFolder.tip": "Import books (EPUB, FB2, MOBI, AZW3, TXT, CBZ, ZIP) into folder “{name}”"
 }

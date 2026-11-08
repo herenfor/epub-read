@@ -36,3 +36,10 @@ it("开书保护拒绝把另一版本重绑到旧书，并给出独立导入的�
   expect(failure.message).toContain("导入为另一版本");
   expect(failure.sourceUnavailable).toBe(false);
 });
+
+it("Kindle 开书失败按 mobi.* 机器码投影，不提供重新定位；内部失败显示原文", () => {
+  const encrypted = describeBookOpenFailure({ code: "mobi.encrypted", message: "后端原文" });
+  expect(encrypted).toEqual({ message: expect.stringContaining("DRM"), sourceUnavailable: false });
+  expect(describeBookOpenFailure({ code: "mobi.source", message: "x" }).sourceUnavailable).toBe(false);
+  expect(describeBookOpenFailure({ code: "mobi.internal", message: "内部原文" }).message).toBe("内部原文");
+});

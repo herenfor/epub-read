@@ -1,5 +1,6 @@
 import { loadSourceBook, supportedBookName } from "../core/documentFormats";
-import { bookPickerExtensions } from "./bookFileTypes";
+import { bookFileExtension, bookPickerExtensions, nativeOnlyBookName } from "./bookFileTypes";
+import { kindleFailureIsFileProblem, kindleFailureNotice, kindleImportFailureKind } from "./kindleFormatNotice";
 import { useCallback, useEffect, useRef, useState, type Dispatch, type MutableRefObject, type RefObject, type SetStateAction } from "react";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { disposeBook, DrmError } from "../core/book";
@@ -208,6 +209,7 @@ export function useBookImport({
     const accepted: ShelfEntry[] = [];
     const duplicateTitles: string[] = [];
     const failed: string[] = [];
+    let cancelledCount = 0;
     const placed: ImportedBookRef[] = [];
     const store = getShelfStore();
     let copySettingUnread = false;
@@ -227,7 +229,13 @@ export function useBookImport({
           const source = list[item.inputIndex];
           const fileName = source?.kind === "path" ? source.name : uiText("notice.nthBook", { n: item.inputIndex + 1 });
           if (item.status === "failed") {
-            failed.push(uiText("notice.import.itemFailed", { name: fileName, error: item.error || uiText("notice.import.failedShort") }));
+            const kindle = kindleImportFailureKind(item.error);
+            if (kindle === "cancelled") {
+              cancelledCount += 1;
+              continue;
+            }
+            const error = kindle ? kindleFailureNotice(kindle).text : item.error || uiText("notice.import.failedShort");
+            failed.push(uiText("notice.import.itemFailed", { name: fileName, error }));
             continue;
           }
           if (!item.record) {
@@ -250,6 +258,14 @@ export function useBookImport({
           try {
             if (source.kind !== "file") {
               throw new Error("浏览器预览无法读取原生文件路径");
+            }
+            // No converter in the browser: refuse before reading, never parse as ZIP/EPUB.
+            if (nativeOnlyBookName(fileName)) {
+              failed.push(uiText("notice.import.itemFailed", {
+                name: fileName,
+                error: uiText("notice.webUnsupported", { format: bookFileExtension(fileName)!.toUpperCase() }),
+              }));
+              continue;
             }
             const arrayBuffer = await source.file.arrayBuffer();
             const buf = new Uint8Array(arrayBuffer);
@@ -345,6 +361,10 @@ export function useBookImport({
         failed,
         refreshedCount: isTauriEnv() ? duplicateTitles.length : 0,
       });
+      if (cancelledCount > 0) {
+        notice.text += uiText("notice.sep") + uiPlural("notice.import.cancelledCount", cancelledCount, { count: cancelledCount });
+        if (notice.kind === "ok") notice.kind = "warn";
+      }
       if (copySettingUnread && accepted.length > 0) {
         notice.text += uiText("notice.sep") + uiText("notice.import.copySettingUnread");
         if (notice.kind === "ok") notice.kind = "warn";
@@ -450,13 +470,17 @@ export function useBookImport({
     for (const item of batch.results) {
       const document = documents[item.inputIndex];
       const label = document ? documentLabel(document) : uiText("notice.nthBook", { n: item.inputIndex + 1 });
-      if (item.status === "failed") {
-        const reason = uiText("notice.import.itemFailed", { name: label, error: item.error || uiText("notice.import.failedShort") });
+      const kindle = item.status === "failed" ? kindleImportFailureKind(item.error) : null;
+      if (item.status === "failed" && kindle !== "cancelled") {
+        const error = kindle ? kindleFailureNotice(kindle).text : item.error || uiText("notice.import.failedShort");
+        const reason = uiText("notice.import.itemFailed", { name: label, error });
         failed.push(reason);
-        if (options.keptOriginal && document) { retry.documents.push(document); retry.reasons.push(reason); }
+        // Copying cannot fix an encrypted, unsupported, damaged or oversized book.
+        const retryable = !kindle || !kindleFailureIsFileProblem(kindle);
+        if (options.keptOriginal && document && retryable) { retry.documents.push(document); retry.reasons.push(reason); }
         continue;
       }
-      if (item.status === "cancelled") {
+      if (item.status === "cancelled" || kindle === "cancelled") {
         cancelled.push(label);
         continue;
       }

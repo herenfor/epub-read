@@ -1,10 +1,9 @@
 import { uiText } from "./localization/UiLanguageProvider";
 
 /**
- * MOBI/AZW3 import and open failures that the user must be able to tell apart
- * (ER-0142). The UI projects only these kinds. The native error codes that map
- * onto them are frozen by ER-0141 and mapped at wiring time. Never infer a kind
- * from a Chinese message.
+ * MOBI/AZW3 import and open failures that the user must be able to tell apart.
+ * Only the native `mobi.*` machine codes decide the kind (plan §12.3); the
+ * backend's Chinese detail is never parsed.
  */
 export type KindleFailureKind =
   | "encrypted"
@@ -15,7 +14,7 @@ export type KindleFailureKind =
   | "budget";
 
 export interface KindleFailureNotice {
-  /** Cancelling is the user's own choice, not an error. */
+  /** Cancelling is not an error. */
   readonly kind: "warn" | "error";
   readonly text: string;
 }
@@ -29,6 +28,43 @@ const KEYS = {
   "budget": "notice.kindle.budget",
 } as const satisfies Record<KindleFailureKind, string>;
 
+// mobi.output / mobi.memory / mobi.internal stay unmapped: they keep the
+// generic failure text with the raw detail.
+const CODES: Readonly<Record<string, KindleFailureKind>> = {
+  "mobi.encrypted": "encrypted",
+  "mobi.dictionary": "unsupported-variant",
+  "mobi.replica": "unsupported-variant",
+  "mobi.unsupported": "unsupported-variant",
+  "mobi.parse": "corrupt",
+  "mobi.no_opf": "corrupt",
+  "mobi.io": "source-unavailable",
+  "mobi.source": "source-unavailable",
+  "mobi.budget": "budget",
+  "mobi.cancelled": "cancelled",
+};
+
+export function kindleFailureKind(code: unknown): KindleFailureKind | null {
+  return typeof code === "string" && Object.hasOwn(CODES, code) ? CODES[code] : null;
+}
+
+/** Open failures carry `{code, message}`; the code alone decides. */
+export function kindleOpenFailureKind(error: unknown): KindleFailureKind | null {
+  if (typeof error !== "object" || error === null || !("code" in error)) return null;
+  return kindleFailureKind(error.code);
+}
+
+/** Import items carry `"mobi.<code>: <detail>"`; classify by the prefix before the first ": ". */
+export function kindleImportFailureKind(error: string | null | undefined): KindleFailureKind | null {
+  if (!error) return null;
+  const end = error.indexOf(": ");
+  return end > 0 ? kindleFailureKind(error.slice(0, end)) : null;
+}
+
 export function kindleFailureNotice(failure: KindleFailureKind): KindleFailureNotice {
   return { kind: failure === "cancelled" ? "warn" : "error", text: uiText(KEYS[failure]) };
+}
+
+/** Copying the file cannot fix these, so an "import as copy" retry is not offered. */
+export function kindleFailureIsFileProblem(failure: KindleFailureKind): boolean {
+  return failure !== "source-unavailable" && failure !== "cancelled";
 }

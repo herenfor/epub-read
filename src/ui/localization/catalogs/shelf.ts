@@ -5,20 +5,20 @@ import { defineMessages } from "../defineMessages";
  * cards. Book titles and authors are user data and never go through this catalog.
  */
 export const shelf = defineMessages("shelf", {
-  "shelf.import.tip": "导入图书（EPUB、FB2、TXT、CBZ、ZIP）到书架",
+  "shelf.import.tip": "导入图书（EPUB、FB2、MOBI、AZW3、TXT、CBZ、ZIP）到书架",
   "shelf.import.short": { zh: "导入", note: "Phone import button.", max: 8 },
   "shelf.import.books": { zh: "导入图书", note: "Main import button; other texts refer to it by this name.", max: 14 },
   "shelf.import.menu.tip": "导入图书或文件夹",
   "shelf.import.more": "更多导入方式",
   "shelf.import.menu": "导入方式",
-  "shelf.import.books.detail": "选择 EPUB、FB2、TXT、CBZ 或漫画 ZIP",
+  "shelf.import.books.detail": "选择 EPUB、FB2、MOBI、AZW3、TXT、CBZ 或漫画 ZIP",
   "shelf.import.folder": { zh: "导入文件夹", max: 18 },
   "shelf.import.folder.detail": "按目录自动整理到书架文件夹",
   "shelf.import.lan.detail": "扫码与另一台设备互传书和阅读进度",
   "shelf.import.copy": { zh: "复制到书库", note: "Import menu checkbox (Windows): copy imported books into the app's library folder.", max: 14 },
   "shelf.import.copy.detail": { zh: "另存一份，原文件移走也能读", note: "Under the copy checkbox: why copying helps." },
-  "shelf.import.dropHint": "可拖入 EPUB、FB2、TXT、CBZ、漫画 ZIP 或文件夹。将图书拖到文件夹卡片即可直接归入。",
-  "shelf.import.dropHint.booksOnly": "可拖入 EPUB、FB2、TXT、CBZ 或漫画 ZIP。将图书拖到文件夹卡片即可直接归入。",
+  "shelf.import.dropHint": "可拖入 EPUB、FB2、MOBI、AZW3、TXT、CBZ、漫画 ZIP 或文件夹。将图书拖到文件夹卡片即可直接归入。",
+  "shelf.import.dropHint.booksOnly": "可拖入 EPUB、FB2、MOBI、AZW3、TXT、CBZ 或漫画 ZIP。将图书拖到文件夹卡片即可直接归入。",
   "shelf.cover.initialFallback": { zh: "书", note: "One character drawn on a placeholder cover when the title is empty.", max: 1 },
   "shelf.time.justNow": "刚刚",
   "shelf.time.minutesAgo.other": "{count} 分钟前",
@@ -85,5 +85,5 @@ export const shelf = defineMessages("shelf", {
   "shelf.timeSegment.last30Days": "最近 30 天",
   "shelf.timeSegment.thisYear": "今年",
   "shelf.timeSegment.older": "更早",
-  "shelf.import.toFolder.tip": { zh: "导入图书（EPUB、FB2、TXT、CBZ、ZIP）到文件夹“{name}”", note: "Import button tooltip while a shelf folder is open." },
+  "shelf.import.toFolder.tip": { zh: "导入图书（EPUB、FB2、MOBI、AZW3、TXT、CBZ、ZIP）到文件夹“{name}”", note: "Import button tooltip while a shelf folder is open." },
 });

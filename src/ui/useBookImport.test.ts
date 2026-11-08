@@ -271,6 +271,28 @@ describe("book import host extraction", () => {
     } finally { await t.dom.dispose(); }
   });
 
+  it("projects Kindle import failures by mobi.* prefix; no copy retry for a bad book, cancel is not a failure", async () => {
+    const t = setup();
+    const docs = ["a.azw3", "b.mobi", "c.mobi"].map((name) => ({ uri: `content://doc/${name}`, fileName: name }));
+    ports.keep.mockResolvedValue(true);
+    ports.linkPicker.mockResolvedValue(docs);
+    ports.native.mockResolvedValueOnce({ results: [
+      { inputIndex: 0, status: "failed", record: null, error: "mobi.encrypted: 后端原文" },
+      { inputIndex: 1, status: "failed", record: null, error: "mobi.source: 后端原文" },
+      { inputIndex: 2, status: "failed", record: null, error: "mobi.cancelled: 后端原文" },
+    ] });
+    try {
+      await t.render();
+      await t.dom.run(() => t.current().commands.handleChooseBooks());
+      const notice = t.current().notices.shelfNotice!;
+      expect(notice.text).toContain("DRM");
+      expect(notice.text).toContain("无法读取原文件");
+      expect(notice.text).not.toContain("后端原文");
+      expect(notice.text).toContain("取消");
+      expect(t.current().imports.originalRetry?.documents).toEqual([docs[1]]);
+    } finally { await t.dom.dispose(); }
+  });
+
   it("copies with the usual picker and says so when the import setting cannot be read", async () => {
     const t = setup();
     ports.keep.mockResolvedValue(null);

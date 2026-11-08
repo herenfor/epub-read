@@ -4,8 +4,7 @@
  *
  * Which files are accepted for import stays decided by core
  * `supportedBookName`. This table must list exactly those formats. Add a row
- * only when that format's native backend is complete (ER-0142): no half-wired
- * entry.
+ * only when that format's native backend is complete: no half-wired entry.
  */
 export interface BookFileType {
   readonly extension: string;
@@ -24,6 +23,8 @@ export const BOOK_FILE_TYPES: readonly BookFileType[] = [
   { extension: "txt", mime: "text/plain" },
   { extension: "cbz", mime: "application/zip" },
   { extension: "zip", mime: "application/zip" },
+  { extension: "mobi", mime: "application/x-mobipocket-ebook", nativeOnly: true },
+  { extension: "azw3", mime: "application/vnd.amazon.ebook", nativeOnly: true },
 ];
 
 /** Extensions for the native system file picker filter. */
@@ -43,6 +44,12 @@ export function bookFileExtension(name: string, types: readonly BookFileType[] =
   if (dot < 0) return undefined;
   const extension = name.slice(dot + 1).toLowerCase();
   return types.some((type) => type.extension === extension) ? extension : undefined;
+}
+
+/** True for a known book that the web preview cannot read. */
+export function nativeOnlyBookName(name: string, types: readonly BookFileType[] = BOOK_FILE_TYPES): boolean {
+  const extension = bookFileExtension(name, types);
+  return types.some((type) => type.extension === extension && type.nativeOnly === true);
 }
 
 /** MIME type matching a file name's book extension; EPUB when unknown. */
