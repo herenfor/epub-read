@@ -35,6 +35,7 @@
 mod epub;
 mod error;
 mod ffi;
+mod legacy;
 mod source;
 
 use std::path::Path;

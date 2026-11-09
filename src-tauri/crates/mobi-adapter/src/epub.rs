@@ -15,6 +15,7 @@ use zip::{CompressionMethod, ZipWriter};
 
 use crate::error::{MobiError, Result};
 use crate::ffi::{Handle, PartKind, PartView};
+use crate::legacy;
 use crate::source::CancelToken;
 use crate::{ConversionReport, Limits};
 
@@ -34,6 +35,9 @@ pub(crate) fn write_epub(
     cancel: &CancelToken,
 ) -> Result<ConversionReport> {
     let info = handle.info()?;
+    // MOBI6 rawml keeps Kindle's presentational markup. KF8/AZW3 already
+    // carries standard CSS and must be copied byte-for-byte.
+    let normalize_legacy = !info.kf8 && info.version < 8;
     let counts = [
         (PartKind::Markup, handle.part_count(PartKind::Markup)),
         (PartKind::Flow, handle.part_count(PartKind::Flow)),
@@ -78,11 +82,14 @@ pub(crate) fn write_epub(
             for index in 0..count {
                 cancel.check()?;
                 let part = handle.part(kind, index)?;
-                check_part(&part, limits)?;
                 // libmobi emits empty resource placeholders; mobitool omits them.
                 if kind == PartKind::Resource && part.data.is_empty() {
                     continue;
                 }
+                let normalized = (normalize_legacy && kind == PartKind::Markup && !part.is_opf)
+                    .then(|| legacy::normalize_markup(part.data));
+                let data = normalized.as_deref().unwrap_or(part.data);
+                check_size(&part, data.len() as u64, limits)?;
                 let name = part_name(&part)?;
                 if part.is_opf {
                     if written.opf {
@@ -92,15 +99,15 @@ pub(crate) fn write_epub(
                     }
                     written.opf = true;
                 }
-                write_part(&mut zip, &name, part.data, CompressionMethod::Deflated)?;
-                written.source_bytes = written
-                    .source_bytes
-                    .checked_add(part.data.len() as u64)
+                write_part(&mut zip, &name, data, CompressionMethod::Deflated)?;
+                written.part_bytes = written
+                    .part_bytes
+                    .checked_add(data.len() as u64)
                     .ok_or_else(|| MobiError::budget("part byte total overflow"))?;
-                if written.source_bytes > limits.max_total_bytes {
+                if written.part_bytes > limits.max_total_bytes {
                     return Err(MobiError::budget(format!(
                         "reconstructed parts total {} bytes, limit is {}",
-                        written.source_bytes, limits.max_total_bytes
+                        written.part_bytes, limits.max_total_bytes
                     )));
                 }
                 match kind {
@@ -149,7 +156,7 @@ pub(crate) fn write_epub(
         markup_parts: written.markup,
         flow_parts: written.flow,
         resource_parts: written.resources,
-        uncompressed_part_bytes: written.source_bytes,
+        uncompressed_part_bytes: written.part_bytes,
         source_bytes: 0,
         epub_bytes,
     })
@@ -161,11 +168,10 @@ struct Written {
     markup: usize,
     flow: usize,
     resources: usize,
-    source_bytes: u64,
+    part_bytes: u64,
 }
 
-fn check_part(part: &PartView<'_>, limits: &Limits) -> Result<()> {
-    let size = part.data.len() as u64;
+fn check_size(part: &PartView<'_>, size: u64, limits: &Limits) -> Result<()> {
     if size > limits.max_part_bytes {
         return Err(MobiError::budget(format!(
             "{} part {} is {size} bytes, limit is {}",

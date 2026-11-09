@@ -36,6 +36,22 @@ fn read_zip_text(path: &Path, entry: &str) -> String {
     text
 }
 
+fn blockquote_margin_levels(html: &str) -> (usize, usize) {
+    let mut one_em = 0;
+    let mut flat = 0;
+    for tag in html.split('<').skip(1) {
+        if !tag.starts_with("blockquote") {
+            continue;
+        }
+        if tag.contains("style=\"margin:0 1em;\"") {
+            one_em += 1;
+        } else if tag.contains("style=\"margin:0;\"") {
+            flat += 1;
+        }
+    }
+    (one_em, flat)
+}
+
 #[test]
 fn inspect_public_mobi6_and_kf8() {
     if let Some(path) = fixture("MOBI6") {
@@ -104,6 +120,63 @@ fn convert_mobi6_to_loading_epub() {
 }
 
 #[test]
+fn mobi6_normalizes_legacy_markup_deterministically() {
+    let Some(path) = fixture("MOBI6") else {
+        eprintln!("skip: MOBI_ADAPTER_MOBI6 is not set");
+        return;
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let first_path = temp_out(dir.path(), "legacy-first.epub");
+    let second_path = temp_out(dir.path(), "legacy-second.epub");
+    let first = convert(
+        Source::from_path(&path).unwrap(),
+        &first_path,
+        &Limits::default(),
+        &CancelToken::new(),
+    )
+    .unwrap();
+    convert(
+        Source::from_path(&path).unwrap(),
+        &second_path,
+        &Limits::default(),
+        &CancelToken::new(),
+    )
+    .unwrap();
+    assert_eq!(first.markup_parts, 1);
+
+    let first_html = read_zip_text(&first_path, "OEBPS/part00000.html");
+    let second_html = read_zip_text(&second_path, "OEBPS/part00000.html");
+    assert_eq!(
+        first_html, second_html,
+        "markup normalization must be deterministic"
+    );
+
+    assert!(!first_html.contains("<mbp:pagebreak"));
+    assert!(!first_html.contains("</mbp:pagebreak>"));
+    assert!(first_html.contains("class=\"mobi6-pagebreak\""));
+    assert!(first_html.contains("break-before:column"));
+    assert!(first_html.contains("margin-top:3pt;text-indent:1em;"));
+    assert!(first_html.contains("margin-top:1em;text-indent:-24pt;"));
+    assert!(!first_html.contains("<p height=\""));
+    assert!(!first_html.contains("<p width=\""));
+    assert!(first_html.contains("<font size=\"7\">"));
+
+    // Depth 1-2 keep one em; deeper levels keep the element and its anchor but
+    // add no margin. The 11-level separator therefore stays at two em total.
+    let (one_em, flat) = blockquote_margin_levels(&first_html);
+    assert!(one_em >= 2, "expected two retained indent levels");
+    assert!(
+        flat >= 9,
+        "expected the deep separator levels to be flattened"
+    );
+
+    // The full part name and spine identity are unchanged.
+    let opf = read_zip_text(&first_path, "OEBPS/content.opf");
+    assert!(opf.contains("part00000.html"));
+    assert_eq!(opf.matches("<itemref").count(), 1);
+}
+
+#[test]
 fn convert_kf8_spine_and_resources() {
     let Some(path) = fixture("KF8") else {
         eprintln!("skip: MOBI_ADAPTER_KF8 is not set");
@@ -130,6 +203,10 @@ fn convert_kf8_spine_and_resources() {
     // manifest/spine metadata instead of a second parser.
     assert!(opf.contains("part00000.html"));
     assert!(opf.contains("part00064.html"));
+    // MOBI6 normalization is gated off for KF8; no generated legacy marker may
+    // leak into an AZW3 conversion.
+    let html = read_zip_text(&out, "OEBPS/part00000.html");
+    assert!(!html.contains("mobi6-pagebreak"));
 }
 
 #[test]

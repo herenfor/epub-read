@@ -53,6 +53,14 @@ from libmobi's fixed `partNNNNN`, `flowNNNNN` and `resourceNNNNN` ids, not from
 temporary paths, random ids, font size or pagination. Combo files always use
 KF8; a KF8 failure is returned as an error, never a silent MOBI6 fallback.
 
+For MOBI6 only, the temporary reading EPUB normalizes Kindle's legacy
+presentational markup in place: nested `<blockquote>` margins are capped at two
+indent levels without dropping elements or ids, `<p height>`/`<p width>`
+become `margin-top` (with the UA bottom margin cleared) and `text-indent` CSS,
+and `<mbp:pagebreak>` becomes a multicolumn break. Tag-only rewriting keeps
+every text node, part name and anchor unchanged. KF8/AZW3 parts are copied
+byte-for-byte.
+
 ## Stable error codes
 
 | `MobiErrorCode::as_str()` | Meaning |
