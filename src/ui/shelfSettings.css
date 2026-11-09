@@ -384,7 +384,7 @@
   color: var(--muted);
 }
 
-/* 触屏：一整页，各分类都是页上的一组 */
+/* 触屏：首页放外观、阅读，其余分类是推进来的下一层页面 */
 .shelf-settings-layer.is-page {
   padding: 0;
   align-items: stretch;
@@ -403,6 +403,33 @@
   /* Full-screen page (motionKinds.css). The library is this layer's parent,
      so it stays put instead of stepping back. */
   animation: page-arrive var(--page-in) var(--ease-emphasized) both;
+}
+
+/* A section page pushed over the home (sync, data, storage, about). The home
+   steps back beneath it and keeps its scroll position; once a page has been
+   pushed, the home settles with the returning motion so its arrival does not
+   replay. Closing the whole layer (below) wins over both. */
+.shelf-settings-sheet.is-sub {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+
+.shelf-settings-sheet.is-sub.is-leaving {
+  animation: page-depart var(--page-out) var(--ease-standard) both;
+  pointer-events: none;
+}
+
+.shelf-settings-sheet.is-sub.is-warm {
+  animation: none;
+}
+
+.shelf-settings-sheet.is-home.is-covered {
+  animation: page-step-back var(--page-in) var(--ease-emphasized) both;
+}
+
+.shelf-settings-sheet.is-home.is-returned {
+  animation: page-step-forward var(--page-out) var(--ease-standard) both;
 }
 
 .shelf-settings-layer.is-page.is-closing .shelf-settings-sheet {

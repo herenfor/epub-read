@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Theme } from "../render/settings";
 import { getRuntimeCapabilities } from "../platform/runtimeCapabilities";
-import { AboutInfo } from "./AboutInfo";
+import { AboutInfo, aboutVersion } from "./AboutInfo";
 import { Icon, SettingsRow, SettingsSwitchRow, UpdateDot } from "./settingsRows";
 import { displayPath, libraryCopyChoice, openLibraryFolder, setCopyOnImport, useLibrarySettings } from "./librarySettings";
 import { folderWatch, useFolderWatchView, type FolderWatchView } from "./folderWatch";
 import { useAppUpdateDot } from "./appUpdate/appUpdateStore";
 import { CacheStoragePanel } from "./CacheStoragePanel";
 import { LibraryLocationPanel } from "./LibraryLocationPanel";
-import { CloudSyncPanel } from "./cloudSync/CloudSyncPanel";
-import { useCloudSyncAttention } from "./cloudSync/cloudSyncStore";
+import { CloudSyncPanel, CloudSyncQuickAction, useCloudSyncRowDetail } from "./cloudSync/CloudSyncPanel";
+import { refreshCloudSyncStatus, useCloudSyncAttention } from "./cloudSync/cloudSyncStore";
 import { menuCloseMs, pageCloseMs, useExitPresence } from "./menuMotion";
 import { useUiMotion } from "./motionPreference";
 import { uiPlural, useUiText } from "./localization/UiLanguageProvider";
@@ -30,7 +30,11 @@ export type ShelfSettingsSection = "appearance" | "reading" | "data" | "sync" | 
 
 export interface ShelfSettingsPageProps {
   open: boolean;
-  /** "dialog": desktop window with a section list; "page": touch full-screen page with every section as a group. */
+  /**
+   * "dialog": desktop window with a section list; "page": touch full-screen
+   * page whose home holds appearance and reading, with the other sections
+   * one level down.
+   */
   presentation: "dialog" | "page";
   /** Section to show when opening (e.g. storage from the search box's "manage index"). */
   initialSection?: ShelfSettingsSection;
@@ -87,6 +91,16 @@ export interface ShelfSettingsPageProps {
    * every section page at once. It takes no keys and no back presses.
    */
   warm?: "home" | "pages";
+}
+
+/** Touch: sections that live a level down, behind a row on the home page. */
+const SUB_ORDER: readonly ShelfSettingsSection[] = ["sync", "data", "storage", "about"];
+const SUB_SECTIONS: ReadonlySet<ShelfSettingsSection> = new Set(SUB_ORDER);
+
+/** The section open when the settings open: the dialog always shows one; the touch page only a sub page. */
+function openingSection(dialog: boolean, initial: ShelfSettingsSection | undefined): ShelfSettingsSection | null {
+  if (dialog) return initial ?? "appearance";
+  return initial && SUB_SECTIONS.has(initial) ? initial : null;
 }
 
 const UI_SCALES: Array<{ value: string; label: string }> = [
@@ -179,11 +193,12 @@ function Segmented<T extends string>(props: { label: string; icon?: ReactNode; v
 
 /**
  * Application settings opened from the shelf's gear: a desktop dialog with
- * a section list, or a full-screen touch page that lays every section out
- * as a group on one page. Only pages of their own (cache, library location,
- * release notes, diagnostics) go a level down. Everything here is an
- * app-level preference or maintenance; view tools (search, filter, sort)
- * stay on the shelf itself.
+ * a section list, or a full-screen touch page. The touch home lays out the
+ * often changed groups (appearance, reading) in place; sync, data, storage
+ * and about are rows that push their section as a page over it, so the home
+ * keeps its scroll position underneath. Everything here is an app-level
+ * preference or maintenance; view tools (search, filter, sort) stay on the
+ * shelf itself.
  */
 export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
   const { t } = useUiText();
@@ -192,7 +207,18 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
   const capabilities = getRuntimeCapabilities();
   const { present, closing } = useExitPresence(props.open, props.presentation === "page" ? pageCloseMs : menuCloseMs);
   const dialog = props.presentation === "dialog";
-  const [section, setSection] = useState<ShelfSettingsSection | null>(props.initialSection ?? (dialog ? "appearance" : null));
+  const [section, setSection] = useState<ShelfSettingsSection | null>(() => openingSection(dialog, props.initialSection));
+  // Touch: the sub page stays mounted while it lifts away; once one has been
+  // pushed, the home settles with the "returned" motion instead of replaying
+  // its arrival.
+  const pushed = useExitPresence(!dialog && section !== null, pageCloseMs);
+  const lastSectionRef = useRef(section);
+  if (section !== null) lastSectionRef.current = section;
+  const [stacked, setStacked] = useState(false);
+  const openSection = (id: ShelfSettingsSection): void => {
+    setStacked(true);
+    setSection(id);
+  };
   const [cacheOpen, setCacheOpen] = useState(false);
   // A custom theme opens its editor in place, under the cards.
   const [editingThemeId, setEditingThemeId] = useState<string | null>(null);
@@ -214,32 +240,40 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
   /** The section's red dot as its accessible label, or false. */
   const sectionDot = (id: ShelfSettingsSection): string | false =>
     id === "about" && updateDot ? t("about.update.dot") : id === "sync" && syncDot ? t("cloudSync.attention") : false;
-  // Touch: one page; opening onto a section scrolls its group into view.
+  const syncDetail = useCloudSyncRowDetail();
+  // Touch home: opening onto appearance or reading scrolls its group into view.
   const pageScrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (props.open) {
-      setSection(props.initialSection ?? (dialog ? "appearance" : null));
+      setSection(openingSection(dialog, props.initialSection));
+      setStacked(false);
     } else {
       setCacheOpen(false);
       setLocationOpen(false);
     }
   }, [props.open, props.initialSection, dialog]);
   useEffect(() => {
-    if (!props.open || dialog || props.warm || !props.initialSection) return;
+    if (!props.open || dialog || props.warm || !props.initialSection || SUB_SECTIONS.has(props.initialSection)) return;
     pageScrollRef.current?.querySelector(`[data-section="${props.initialSection}"]`)?.scrollIntoView({ block: "start" });
   }, [props.open, props.initialSection, dialog, props.warm]);
+  // The touch home's sync row shows the last round before its page is opened.
+  const syncRow = capabilities.supportsCloudSync && libraryServices;
+  useEffect(() => {
+    if (props.open && !dialog && !props.warm && syncRow) void refreshCloudSyncStatus();
+  }, [props.open, dialog, props.warm, syncRow]);
 
   // Android back and Esc walk the same levels: library location (consumed
-  // while it runs) → cache panel → close.
+  // while it runs) → cache panel → sub page (touch) → close.
   const stepBack = useCallback((): boolean => {
     if (locationOpen) {
       if (!locationRunningRef.current) setLocationOpen(false);
       return true;
     }
     if (cacheOpen) { setCacheOpen(false); return true; }
+    if (!dialog && section !== null) { setSection(null); return true; }
     return false;
-  }, [cacheOpen, locationOpen]);
+  }, [cacheOpen, dialog, locationOpen, section]);
   const stepBackRef = useRef(stepBack);
   stepBackRef.current = stepBack;
   const register = props.registerSubmenuBackHandler;
@@ -342,7 +376,7 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
     sections.push({ id: "data", title: t("shelfSettings.section.data"),
       content: <div className="shelf-settings-card is-list">{dataRows}</div> });
   }
-  if (capabilities.supportsCloudSync && libraryServices) {
+  if (syncRow) {
     sections.push({ id: "sync", title: t("cloudSync.title"),
       content: <CloudSyncPanel active={!props.warm && props.open} /> });
   }
@@ -415,20 +449,76 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
       </section>
     </div>;
   } else {
-    content = <section className="shelf-settings-sheet is-home" role="dialog" aria-modal="true" aria-label={t("shelfSettings.title")}>
-      <header className="shelf-settings-head">
-        {backButton(props.onClose, t("shelfSettings.back"))}
-        <h2>{t("shelfSettings.title")}</h2>
-      </header>
-      <div className="shelf-settings-scroll" ref={pageScrollRef}>
-        {sections.map((item) => <section key={item.id} className="shelf-settings-section" data-section={item.id} aria-label={item.title}>
-          {!item.grouped && <div className="shelf-settings-group-head">
-            <span className="shelf-settings-group-label">{item.title}{sectionDot(item.id) && <UpdateDot label={sectionDot(item.id) || undefined} />}</span>
-          </div>}
-          {item.content}
-        </section>)}
-      </div>
-    </section>;
+    const homeSections = sections.filter((item) => !SUB_SECTIONS.has(item.id));
+    // The home lists sync first: its row carries the one-tap round.
+    const subSections = SUB_ORDER.flatMap((id) => sections.filter((item) => item.id === id));
+    const covered = pushed.present && !pushed.closing;
+    const entryDetail = (id: ShelfSettingsSection): ReactNode => {
+      const sep = t("notice.listSep");
+      switch (id) {
+        case "sync": return syncDetail;
+        case "data": return [
+          capabilities.supportsLanTransfer && props.onOpenLanTransfer ? t("shelfSettings.entry.lan") : null,
+          t("shelfSettings.entry.archive"),
+          props.onImportKoreader ? t("shelfSettings.entry.koreader") : null,
+        ].filter(Boolean).join(sep);
+        case "storage": return [
+          library && libraryServices ? t("shelfSettings.entry.library") : null,
+          watch ? t("shelfSettings.entry.watch") : null,
+          capabilities.supportsCacheStorage ? t("shelfSettings.entry.cache") : null,
+          body ? t("shelfSettings.entry.index") : null,
+        ].filter(Boolean).join(sep);
+        case "about": {
+          const version = aboutVersion();
+          return version ? t("about.version", { version }) : undefined;
+        }
+        default: return undefined;
+      }
+    };
+    const entryDot = (id: ShelfSettingsSection): boolean | string =>
+      id === "storage" && capabilities.supportsLibraryFolder && libraryServices && libraryLocationWarning ? libraryLocationWarning : sectionDot(id);
+    const subPage = (item: (typeof sections)[number], className: string, onBack: () => void, live: boolean) =>
+      <section key={item.id} className={`shelf-settings-sheet is-sub${className}`} role={live ? "dialog" : undefined}
+        aria-modal={live ? true : undefined} aria-label={item.title}>
+        <header className="shelf-settings-head">
+          {backButton(onBack, t("shelfSettings.back"))}
+          <h2>{item.title}</h2>
+        </header>
+        <div className="shelf-settings-scroll"><section className="shelf-settings-section">{item.content}</section></div>
+      </section>;
+    const pageSection = subSections.find((item) => item.id === lastSectionRef.current) ?? null;
+    const homeMotion = covered ? " is-covered" : stacked ? " is-returned" : "";
+    content = <>
+      <section className={`shelf-settings-sheet is-home${homeMotion}`} role="dialog" aria-modal="true" aria-label={t("shelfSettings.title")}
+        aria-hidden={covered || undefined}>
+        <header className="shelf-settings-head">
+          {backButton(props.onClose, t("shelfSettings.back"))}
+          <h2>{t("shelfSettings.title")}</h2>
+        </header>
+        <div className="shelf-settings-scroll" ref={pageScrollRef}>
+          {homeSections.map((item) => <section key={item.id} className="shelf-settings-section" data-section={item.id} aria-label={item.title}>
+            {!item.grouped && <div className="shelf-settings-group-head">
+              <span className="shelf-settings-group-label">{item.title}{sectionDot(item.id) && <UpdateDot label={sectionDot(item.id) || undefined} />}</span>
+            </div>}
+            {item.content}
+          </section>)}
+          {subSections.length > 0 && <section className="shelf-settings-section" data-section="more" aria-label={t("shelfSettings.group.more")}>
+            <div className="shelf-settings-group-head">
+              <span className="shelf-settings-group-label">{t("shelfSettings.group.more")}</span>
+            </div>
+            <div className="shelf-settings-card is-list">
+              {subSections.map((item) => <SettingsRow key={item.id} icon={SECTION_ICONS[item.id]} title={item.title}
+                detail={entryDetail(item.id)} dot={entryDot(item.id)}
+                action={item.id === "sync" && !props.warm ? <CloudSyncQuickAction /> : undefined}
+                onClick={() => openSection(item.id)} />)}
+            </div>
+          </section>}
+        </div>
+      </section>
+      {props.warm === "pages"
+        ? subSections.map((item) => subPage(item, " is-warm", () => undefined, false))
+        : pushed.present && pageSection && subPage(pageSection, pushed.closing ? " is-leaving" : "", () => setSection(null), true)}
+    </>;
   }
 
   return <div className={`shelf-settings-layer is-${props.presentation}${closing ? " is-closing" : ""}`}>
