@@ -64,6 +64,7 @@ import { ShelfFolderAddBooksDialog } from "./ShelfFolderAddBooksDialog";
 import { useAppUpdateDot } from "./appUpdate/appUpdateStore";
 import { useCloudSyncAttention } from "./cloudSync/cloudSyncStore";
 import { CloudBookUploadLayer } from "./cloudSync/CloudBookUploadPanel";
+import { useBatchDockFit } from "./batchDockFit";
 import { cloudBookUploadBusy, closeCloudBookUpload, requestCloudBookUpload, useCloudBookUpload } from "./cloudSync/cloudBookUploadStore";
 import { uiText, useUiText } from "./localization/UiLanguageProvider";
 import type { PlainMessageKey } from "./localization/core";
@@ -489,6 +490,17 @@ export function ShelfView(props: ShelfViewProps) {
   }, []);
 
   const isCompactMobile = !!props.compact;
+  // ER-0158: the desktop dock steps down (no count, then compact buttons) instead of running off a narrow window.
+  const batchDockRef = useRef<HTMLDivElement | null>(null);
+  const batchDockKey = [
+    t("shelfMain.dock.hint"),
+    selectedIds.size,
+    Boolean(props.onExportArchive),
+    Boolean(props.onExportBooks),
+    Boolean(getRuntimeCapabilities().supportsLanTransfer && props.onOpenLanTransfer),
+    Boolean(props.cloudUpload),
+  ].join("|");
+  useBatchDockFit(batchDockRef, (selectionMode || dockClosing) && !isCompactMobile, batchDockKey);
   const [coarsePointer] = useState(() => {
     try {
       return window.matchMedia?.("(pointer: coarse)").matches === true;
@@ -3135,7 +3147,7 @@ export function ShelfView(props: ShelfViewProps) {
 
       {/* 底部悬浮批量操作底坞 (Floating Batch Bar) */}
       {(selectionMode || dockClosing) && (
-        <div className={`shelf-floating-batch-dock${dockClosing ? " is-closing" : ""}`} role="toolbar" aria-label={t("shelfMain.dock")}>
+        <div ref={batchDockRef} className={`shelf-floating-batch-dock${dockClosing ? " is-closing" : ""}`} role="toolbar" aria-label={t("shelfMain.dock")}>
           <div className="shelf-floating-batch-info">
             <span className="shelf-floating-batch-badge">{selectedIds.size}</span>
             <span>{selectedIds.size > 0 ? tn("shelfMain.dock.selected", selectedIds.size, { count: selectedIds.size }) : t("shelfMain.dock.hint")}</span>

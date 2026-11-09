@@ -2508,17 +2508,20 @@
   display: none;
 }
 
-.app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-floating-batch-dock {
+.app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-floating-batch-dock,
+.shelf-floating-batch-dock[data-fit="compact"] {
   /* r-lg buttons 4px inside an r-xl bar, as on phones. */
   padding: 4px 4px 4px 18px;
   border-radius: var(--r-xl);
 }
 
-.app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-floating-batch-actions {
+.app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-floating-batch-actions,
+.shelf-floating-batch-dock[data-fit="compact"] .shelf-floating-batch-actions {
   gap: 2px;
 }
 
-.app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-batch-action-btn {
+.app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-batch-action-btn,
+.shelf-floating-batch-dock[data-fit="compact"] .shelf-batch-action-btn {
   flex-direction: column;
   justify-content: center;
   gap: 4px;
@@ -2533,18 +2536,52 @@
   line-height: 1.2;
 }
 
-.app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-batch-action-btn .shelf-svg-icon {
+.app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-batch-action-btn .shelf-svg-icon,
+.shelf-floating-batch-dock[data-fit="compact"] .shelf-batch-action-btn .shelf-svg-icon {
   width: 21px;
   height: 21px;
 }
 
-.app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-batch-action-btn:active:not(:disabled) {
+.app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-batch-action-btn:active:not(:disabled),
+.shelf-floating-batch-dock[data-fit="compact"] .shelf-batch-action-btn:active:not(:disabled) {
   background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
-.app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-batch-action-btn.cancel {
+.app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-batch-action-btn.cancel,
+.shelf-floating-batch-dock[data-fit="compact"] .shelf-batch-action-btn.cancel {
   margin-left: 6px;
   background: color-mix(in srgb, var(--fg) 6%, transparent);
+}
+
+/*
+ * 窄窗口（ER-0158）：batchDockFit.ts 实测后写 data-fit。no-info 去掉与顶栏
+ * 重复的“已选 N 本”；compact 再沿用上面平板的“图标在上、短字在下”，电脑上
+ * 按钮收窄一些、长标签可换两行，9 个动作在 640 最小宽度仍放得下。
+ */
+.shelf-floating-batch-dock:is([data-fit="no-info"], [data-fit="compact"]) .shelf-floating-batch-info {
+  display: none;
+}
+
+.shelf-floating-batch-dock[data-fit="no-info"] {
+  padding-left: 8px;
+}
+
+.app[data-touch-ui="true"]:not([data-layout="compact"]) .shelf-floating-batch-dock:is([data-fit="no-info"], [data-fit="compact"]) {
+  padding-left: 4px;
+}
+
+.shelf-floating-batch-dock[data-fit="compact"] {
+  /* left: 50% leaves only half the window to shrink into; wrapping labels would squeeze into it. */
+  width: max-content;
+  padding: 4px;
+}
+
+.shelf-floating-batch-dock[data-fit="compact"] .shelf-batch-action-btn {
+  min-width: 56px;
+  max-width: 84px;
+  padding: 6px;
+  white-space: normal;
+  text-align: center;
 }
 
 /* 全选：带勾选框图标，一眼看出是可点的开关 */
