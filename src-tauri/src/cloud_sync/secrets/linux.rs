@@ -22,6 +22,7 @@ const ATTRIBUTES_ATTRIBUTE: &str = "org.freedesktop.Secret.Item.Attributes";
 const SERVICE_ATTRIBUTE_VALUE: &str = "EPUBReader-WebDAV";
 const CONTENT_TYPE: &str = "text/plain";
 const RETRY_AFTER: Duration = Duration::from_secs(30);
+const METHOD_TIMEOUT: Duration = Duration::from_secs(3);
 
 static READY: AtomicBool = AtomicBool::new(false);
 static LAST_PROBE: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
@@ -115,10 +116,14 @@ fn mark_unavailable() {
 }
 
 fn connect() -> Result<Connection> {
-    Connection::session().map_err(|_| {
-        mark_unavailable();
-        failure()
-    })
+    // zbus defaults to no method deadline. A keyring that owns the bus name
+    // but never replies must not wedge status/connect/upload preparation.
+    zbus::blocking::connection::Builder::session()
+        .and_then(|builder| builder.method_timeout(METHOD_TIMEOUT).build())
+        .map_err(|_| {
+            mark_unavailable();
+            failure()
+        })
 }
 
 fn name_has_owner(connection: &Connection) -> bool {
@@ -134,8 +139,12 @@ fn name_has_owner(connection: &Connection) -> bool {
     matches!(reply.body().deserialize::<bool>(), Ok(true))
 }
 
-fn default_collection(connection: &Connection) -> Result<OwnedObjectPath> {
-    if !name_has_owner(connection) {
+/// Resolve the default collection. `allow_activation` is true for explicit
+/// credential operations and force preparation; status probes keep it false so
+/// a registered-but-stopped keyring is not launched just because the UI reads
+/// status. Calling `ReadAlias` itself is what lets D-Bus activate the service.
+fn default_collection(connection: &Connection, allow_activation: bool) -> Result<OwnedObjectPath> {
+    if !allow_activation && !name_has_owner(connection) {
         mark_unavailable();
         return Err(failure());
     }
@@ -148,6 +157,7 @@ fn default_collection(connection: &Connection) -> Result<OwnedObjectPath> {
         mark_unavailable();
         return Err(failure());
     }
+    READY.store(true, Ordering::Release);
     Ok(collection)
 }
 
@@ -159,7 +169,7 @@ fn collection_proxy(
 }
 
 fn open_session(connection: &Connection) -> Result<(OwnedObjectPath, OwnedObjectPath)> {
-    let collection = default_collection(connection)?;
+    let collection = default_collection(connection, true)?;
     let service = SecretServiceProxyBlocking::new(connection).map_err(|_| failure())?;
     let (_, session) = service
         .open_session("plain", &Value::from(""))
@@ -199,12 +209,12 @@ pub fn available() -> bool {
 
 /// Probe the service without unlocking it or causing an unlock prompt. A
 /// failed probe is cached briefly; explicit commands use `prepare_force` to
-/// retry immediately after the user starts/unlocks the keyring.
-fn probe() -> bool {
+/// retry immediately and may activate a registered-but-stopped service.
+fn probe(force: bool) -> bool {
     let Ok(connection) = connect() else {
         return false;
     };
-    default_collection(&connection).is_ok()
+    default_collection(&connection, force).is_ok()
 }
 
 pub fn prepare(force: bool) -> bool {
@@ -221,7 +231,7 @@ pub fn prepare(force: bool) -> bool {
             }
         }
     }
-    let ok = probe();
+    let ok = probe(force);
     *last = Some((Instant::now(), ok));
     if ok {
         READY.store(true, Ordering::Release);
@@ -299,7 +309,7 @@ pub fn delete<R: tauri::Runtime>(app: &tauri::AppHandle<R>, connection_id: &str)
     let identifier = &app.config().identifier;
     let attrs = attributes(identifier, connection_id);
     let connection = connect()?;
-    let collection_path = default_collection(&connection)?;
+    let collection_path = default_collection(&connection, true)?;
     let collection = collection_proxy(&connection, collection_path)?;
     if collection.locked().map_err(|_| failure())? {
         return Err(failure());
@@ -335,6 +345,18 @@ mod tests {
     fn labels_are_derived_from_the_connection_not_the_secret() {
         assert_eq!(label("connection-a"), "EPUBReader WebDAV (connection-a)");
         assert!(!label("connection-a").contains("secret"));
+    }
+
+    #[test]
+    fn status_probe_does_not_activate_unowned_service() {
+        let Ok(connection) = connect() else {
+            return;
+        };
+        if name_has_owner(&connection) {
+            return;
+        }
+        assert!(!prepare(false));
+        assert!(!name_has_owner(&connection));
     }
 
     #[test]
