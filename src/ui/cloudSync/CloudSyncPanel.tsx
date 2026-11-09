@@ -122,6 +122,20 @@ const REMOTE_TEXT: Readonly<Record<string, PlainMessageKey>> = {
   "unsupported-sync-version": "cloudSync.remote.unsupported-sync-version",
 };
 
+/**
+ * Linux keeps the password in the desktop keyring (Secret Service), which can
+ * be missing, stopped or locked; the fix is on the user's side and an explicit
+ * retry re-probes it at once, so its two failures say that instead.
+ */
+const LINUX_ERROR_TEXT: Readonly<Record<string, PlainMessageKey>> = {
+  "native-bridge-unavailable": "cloudSync.error.native-bridge-unavailable.linux",
+  "credential-unavailable": "cloudSync.error.credential-unavailable.linux",
+};
+
+function linuxKeyring(): boolean {
+  return getRuntimeCapabilities().platform === "linux";
+}
+
 function textKey(table: Readonly<Record<string, PlainMessageKey>>, code: string): PlainMessageKey | undefined {
   return Object.prototype.hasOwnProperty.call(table, code) ? table[code] : undefined;
 }
@@ -134,7 +148,7 @@ export function cloudSyncFailureText(t: Translate, failure: CloudSyncFailure): s
     return failure.remote.cleanupFailed ? `${text} ${t("cloudSync.remote.cleanupFailed")}` : text;
   }
   if (failure.code === "repository-error") return t("cloudSync.error.repository-error", { code: failure.repositoryCode ?? "?" });
-  const key = textKey(ERROR_TEXT, failure.code);
+  const key = (linuxKeyring() ? textKey(LINUX_ERROR_TEXT, failure.code) : undefined) ?? textKey(ERROR_TEXT, failure.code);
   return key ? t(key) : t("cloudSync.error.unknown", { code: failure.code });
 }
 
@@ -153,7 +167,11 @@ function Field(props: { label: string; children: ReactNode; note?: string }) {
 }
 
 function defaultDeviceLabel(t: Translate): string {
-  return getRuntimeCapabilities().platform === "android" ? t("cloudSync.defaultLabel.android") : t("cloudSync.defaultLabel.windows");
+  switch (getRuntimeCapabilities().platform) {
+    case "android": return t("cloudSync.defaultLabel.android");
+    case "linux": return t("cloudSync.defaultLabel.linux");
+    default: return t("cloudSync.defaultLabel.windows");
+  }
 }
 
 /**
@@ -173,7 +191,10 @@ function ConnectForm({ status }: { status: CloudSyncStatus }) {
   const [preview, setPreview] = useState<CloudSyncPreview | null>(null);
   const [busy, setBusy] = useState<"test" | "connect" | null>(null);
   const [failure, setFailure] = useState<CloudSyncFailure | null>(null);
-  const disabled = !status.nativeReady || busy !== null;
+  // A Linux keyring can come back (started or unlocked) at any time and the
+  // status read re-probes it only every 30 s, so the form stays usable and an
+  // explicit test retries it at once. Elsewhere "not ready" still blocks.
+  const disabled = (!status.nativeReady && !linuxKeyring()) || busy !== null;
   const address = service === "jianguoyun" ? JIANGUOYUN_DAV_URL : baseUrl.trim();
 
   // Any change to what was tested invalidates the preview: it must be tested again.
@@ -189,8 +210,13 @@ function ConnectForm({ status }: { status: CloudSyncStatus }) {
     setPreview(null);
     const result = await runCloudSyncAction(() => cloudSyncNative.testConnection({ baseUrl: address, remoteRoot, username, appPassword: password }));
     setBusy(null);
-    if (result.ok) setPreview(result.value);
-    else setFailure(result.failure);
+    if (!result.ok) {
+      setFailure(result.failure); // a failure has already re-read the status
+      return;
+    }
+    setPreview(result.value);
+    // The test re-probed a not-ready keyring and reached it: drop the warning.
+    if (!status.nativeReady) void refreshCloudSyncStatus();
   };
 
   const connect = async (): Promise<void> => {
@@ -430,7 +456,8 @@ export function CloudSyncPanel({ active }: { active: boolean }) {
     {readError && !status && <p className="shelf-settings-error" role="alert">
       {t("cloudSync.readFailed", { error: cloudSyncFailureText(t, readError) })}</p>}
     {status?.localRecoverySaved && !status.connection && <p className="cloud-sync-muted">{t("cloudSync.recoverySaved")}</p>}
-    {status && !status.nativeReady && !status.connection && <p className="shelf-settings-error">{t("cloudSync.unavailable")}</p>}
+    {status && !status.nativeReady && !status.connection && <p className="shelf-settings-error">
+      {t(linuxKeyring() ? "cloudSync.unavailable.linux" : "cloudSync.unavailable")}</p>}
     {status && (status.connection
       ? <ConnectedView status={status as CloudSyncStatus & { connection: NonNullable<CloudSyncStatus["connection"]> }} />
       : status.phase === "error" && status.lastError

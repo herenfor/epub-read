@@ -14,7 +14,7 @@ export interface RuntimeCapabilities {
   supportsCacheStorage: boolean;
   /** Native folder picking is only offered on Windows in this package. */
   supportsCustomCacheDirectory: boolean;
-  /** Shared LAN save panel is delivered on Windows and Android only in this package. */
+  /** Shared LAN save panel: Windows, Android and a native Linux session. */
   supportsLanTransfer: boolean;
   /** Only an established Android native session can control system status bars. */
   supportsReaderSystemStatusBar: boolean;
@@ -22,7 +22,7 @@ export interface RuntimeCapabilities {
   supportsReaderKeepScreenOn: boolean;
   /** Volume-key paging is delivered by the same Android native session. */
   supportsVolumeKeyTurn: boolean;
-  /** WebDAV sync needs the native credential store: native Windows and Android only. */
+  /** WebDAV sync needs the native credential store: native Windows, Android and Linux (Secret Service). */
   supportsCloudSync: boolean;
   /** "Show in File Explorer" for a book's file: native Windows only. */
   supportsRevealSource: boolean;
@@ -41,6 +41,7 @@ export function getRuntimeCapabilities(): RuntimeCapabilities {
   const platform = session?.platform ?? APP_PLATFORM;
   const shell = session?.shell ?? APP_SHELL;
   const androidNativeSession = session?.source === "desktop" && platform === "android";
+  const linuxNativeSession = session?.source === "desktop" && platform === "linux";
   return {
     platform,
     shell,
@@ -49,11 +50,11 @@ export function getRuntimeCapabilities(): RuntimeCapabilities {
     usesAndroidBack: platform === "android",
     supportsCacheStorage: platform === "windows" || platform === "android",
     supportsCustomCacheDirectory: platform === "windows",
-    supportsLanTransfer: platform === "windows" || platform === "android",
+    supportsLanTransfer: platform === "windows" || platform === "android" || linuxNativeSession,
     supportsReaderSystemStatusBar: androidNativeSession,
     supportsReaderKeepScreenOn: androidNativeSession,
     supportsVolumeKeyTurn: androidNativeSession,
-    supportsCloudSync: session?.source === "desktop" && (platform === "windows" || platform === "android"),
+    supportsCloudSync: session?.source === "desktop" && (platform === "windows" || platform === "android" || platform === "linux"),
     supportsRevealSource: session?.source === "desktop" && platform === "windows",
     supportsLibraryFolder: session?.source === "desktop" && platform === "windows",
     supportsImportCopyChoice: session?.source === "desktop" && (platform === "windows" || platform === "android" || platform === "linux"),

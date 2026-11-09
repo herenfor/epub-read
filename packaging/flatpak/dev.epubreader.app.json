@@ -13,7 +13,9 @@
     "--socket=fallback-x11",
     "--share=ipc",
     "--device=dri",
-    "--socket=pulseaudio"
+    "--socket=pulseaudio",
+    "--share=network",
+    "--talk-name=org.freedesktop.secrets"
   ],
   "build-options": {
     "append-path": "/usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/node22/bin",

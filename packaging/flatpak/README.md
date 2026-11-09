@@ -49,6 +49,12 @@ this local recipe does not claim store acceptance.
 
 - Display sockets, shared graphics IPC and render-device access are for the
   native WebKitGTK window. PulseAudio is for existing book media playback.
+- Network access is for WebDAV sync/original-book upload and LAN transfer
+  (both connecting out and listening on the local network). The only extra
+  session-bus name is `org.freedesktop.secrets`, the desktop keyring that holds
+  the WebDAV app password; there is no file or plain-text fallback, so without
+  a running, unlocked keyring the app reports that the keyring is unavailable
+  and does not connect.
 - No `host`/`home` filesystem grant or unrestricted session/system bus is
   requested. File selection is through GTK's native file chooser and its
   document portal integration; the sandbox cannot simply read the host library.
@@ -56,9 +62,7 @@ this local recipe does not claim store acceptance.
   choice and defaults to copying selected books into its own library. Turning
   the choice off keeps a document-portal link to the source file. Revoked
   document access, watched folders and persistence across a desktop-session
-  restart must be verified separately. Network
-  access is not granted yet, so LAN transfer/WebDAV are outside this first
-  sandbox package's acceptance scope.
+  restart must be verified separately.
 - Native/deb data is not moved into the sandbox automatically. Never run a
   new test against an existing sandbox library without checking ownership.
 - A rendering check under WSLg or software graphics is not a native GPU-driver
