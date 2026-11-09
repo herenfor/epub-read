@@ -46,6 +46,7 @@ export const notice = defineMessages("notice", {
   "notice.originalRetry.close": { zh: "不用了", max: 8 },
   "notice.picker.chooseEpub": { zh: "选择书籍", note: "System file picker title." },
   "notice.picker.epubFilter": { zh: "图书（EPUB、FB2、MOBI、AZW3、TXT、CBZ、ZIP）", note: "File type name in the system picker." },
+  "notice.picker.epubFilter.noMobi": { zh: "图书（EPUB、FB2、AZW3、TXT、CBZ、ZIP）", note: "Builds without MOBI (ER-0150); AZW3 stays." },
   "notice.picker.failed": "无法打开文件选择器：{error}",
   "notice.organization.readFailedLocked": "收藏与文件夹读取失败，已禁用修改以防止覆盖现有数据",
   "notice.operationFailed": "操作失败：{error}",
@@ -189,6 +190,8 @@ export const notice = defineMessages("notice", {
   "notice.importTarget.failed": "书已导入，但放入文件夹失败：{error}",
   "notice.drop.unsupported": "可拖入 EPUB、FB2、MOBI、AZW3、TXT、CBZ、漫画 ZIP 或文件夹",
   "notice.drop.booksOnly": "可拖入 EPUB、FB2、MOBI、AZW3、TXT、CBZ 或漫画 ZIP 文件",
+  "notice.drop.unsupported.noMobi": { zh: "可拖入 EPUB、FB2、AZW3、TXT、CBZ、漫画 ZIP 或文件夹", note: "Builds without MOBI (ER-0150); AZW3 stays." },
+  "notice.drop.booksOnly.noMobi": { zh: "可拖入 EPUB、FB2、AZW3、TXT、CBZ 或漫画 ZIP 文件", note: "Builds without MOBI (ER-0150); AZW3 stays." },
   "notice.drop.oneFolder": "一次只能拖入一个文件夹",
   "notice.kindle.encrypted": { zh: "这本 Kindle 书有加密（DRM），无法打开", note: "MOBI/AZW3 failure. Encrypted books are refused; never suggest removing DRM." },
   "notice.kindle.unsupportedVariant": { zh: "暂不支持这种 Kindle 格式，目前只能打开未加密的 MOBI 和 AZW3 书", note: "MOBI/AZW3 failure: KFX, print replica (AZW4), dictionaries and similar variants." },
@@ -196,5 +199,6 @@ export const notice = defineMessages("notice", {
   "notice.kindle.sourceUnavailable": { zh: "无法读取原文件，请确认文件仍在原处并允许访问", note: "MOBI/AZW3 failure: the original file is missing or access was lost." },
   "notice.kindle.cancelled": { zh: "已取消", note: "MOBI/AZW3 conversion cancelled before it finished." },
   "notice.kindle.budget": { zh: "这本书太大，当前无法处理；请稍后重试，或先关闭其他书", note: "MOBI/AZW3 failure: the app's memory/work budget refused the conversion." },
+  "notice.kindle.mobiDisabled": { zh: "这个版本暂时关闭了 MOBI 阅读，书仍保留在书架上，以后的版本会重新开放", note: "ER-0150: opening a .mobi (MOBI6) book in a build with MOBI switched off. The record is kept; AZW3 still opens." },
   "notice.webUnsupported": { zh: "网页版无法读取 {format} 文件，请在桌面或安卓应用中导入", note: "The browser preview cannot read this format (FB2, MOBI, AZW3). {format} is the uppercase extension." },
 });

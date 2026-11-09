@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { formatListKey } from "../bookFormatText";
 import { MENU_CLOSE_MS, useExitPresence } from "../menuMotion";
 import { useUiText } from "../localization/UiLanguageProvider";
 import { shortTabTitle } from "../readerTabs";
@@ -41,8 +42,8 @@ interface ShelfImportButtonProps extends ShelfSubmenuBackProps {
 export function ShelfImportButton(props: ShelfImportButtonProps) {
   const { t } = useUiText();
   const importTip = props.targetName === undefined
-    ? t("shelf.import.tip")
-    : t("shelf.import.toFolder.tip", { name: props.targetName });
+    ? t(formatListKey("shelf.import.tip"))
+    : t(formatListKey("shelf.import.toFolder.tip"), { name: props.targetName });
   const [open, setOpen] = useState(false);
   const { present, closing } = useExitPresence(open);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -135,7 +136,7 @@ export function ShelfImportButton(props: ShelfImportButtonProps) {
             <span className="shelf-import-menu-icon"><BookAddIcon /></span>
             <span className="shelf-import-menu-text">
               <strong>{t("shelf.import.books")}</strong>
-              <small>{t("shelf.import.books.detail")}</small>
+              <small>{t(formatListKey("shelf.import.books.detail"))}</small>
             </span>
           </button>
           {props.onImportFolder && (
@@ -175,7 +176,7 @@ export function ShelfImportButton(props: ShelfImportButtonProps) {
               </span>
             </label>
           )}
-          {props.showDropHint && <p className="shelf-import-menu-hint">{t(props.onImportFolder ? "shelf.import.dropHint" : "shelf.import.dropHint.booksOnly")}</p>}
+          {props.showDropHint && <p className="shelf-import-menu-hint">{t(formatListKey(props.onImportFolder ? "shelf.import.dropHint" : "shelf.import.dropHint.booksOnly"))}</p>}
         </div>
       )}
     </div>

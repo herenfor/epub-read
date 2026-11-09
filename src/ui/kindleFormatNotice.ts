@@ -1,3 +1,5 @@
+import { MOBI_FORMAT_ENABLED } from "../config/mobiFormat";
+import { mobiBookName } from "../core/documentFormats";
 import { uiText } from "./localization/UiLanguageProvider";
 
 /**
@@ -11,7 +13,9 @@ export type KindleFailureKind =
   | "corrupt"
   | "source-unavailable"
   | "cancelled"
-  | "budget";
+  | "budget"
+  /** ER-0150: this build has MOBI (MOBI6) switched off. */
+  | "disabled";
 
 export interface KindleFailureNotice {
   /** Cancelling is not an error. */
@@ -26,6 +30,7 @@ const KEYS = {
   "source-unavailable": "notice.kindle.sourceUnavailable",
   "cancelled": "notice.kindle.cancelled",
   "budget": "notice.kindle.budget",
+  "disabled": "notice.kindle.mobiDisabled",
 } as const satisfies Record<KindleFailureKind, string>;
 
 // mobi.output / mobi.memory / mobi.internal stay unmapped: they keep the
@@ -41,6 +46,7 @@ const CODES: Readonly<Record<string, KindleFailureKind>> = {
   "mobi.source": "source-unavailable",
   "mobi.budget": "budget",
   "mobi.cancelled": "cancelled",
+  "mobi.disabled": "disabled",
 };
 
 export function kindleFailureKind(code: unknown): KindleFailureKind | null {
@@ -61,10 +67,16 @@ export function kindleImportFailureKind(error: string | null | undefined): Kindl
 }
 
 export function kindleFailureNotice(failure: KindleFailureKind): KindleFailureNotice {
-  return { kind: failure === "cancelled" ? "warn" : "error", text: uiText(KEYS[failure]) };
+  return { kind: failure === "cancelled" || failure === "disabled" ? "warn" : "error", text: uiText(KEYS[failure]) };
 }
 
 /** Copying the file cannot fix these, so an "import as copy" retry is not offered. */
 export function kindleFailureIsFileProblem(failure: KindleFailureKind): boolean {
   return failure !== "source-unavailable" && failure !== "cancelled";
 }
+
+/** ER-0150: true when this build has MOBI off and the file is `.mobi`. AZW3 always opens. */
+export function mobiBookBlocked(fileName: string, mobi: boolean = MOBI_FORMAT_ENABLED): boolean {
+  return !mobi && mobiBookName(fileName);
+}
+

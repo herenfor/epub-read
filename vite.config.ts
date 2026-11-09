@@ -24,6 +24,8 @@ export default defineConfig(({ mode }) => {
   // One resolved source feeds both the runtime constant and the build's
   // declaration, so the release script judges what the app will really call.
   const updateSource = resolveAppUpdateSource(env);
+  // ER-0150: MOBI (MOBI6) stays hidden unless the build opts in; AZW3 is not gated.
+  const mobiFormat = /^(?:1|on|true)$/i.test(env.VITE_MOBI_FORMAT ?? "");
   return {
     // Keep edition and target decisions in the compiled module graph. This
     // lets a core desktop build remove AI/Android-only branches instead of
@@ -33,6 +35,7 @@ export default defineConfig(({ mode }) => {
       __APP_PLATFORM__: JSON.stringify(platform),
       __APP_VERSION__: JSON.stringify(version),
       __APP_UPDATE_SOURCE__: JSON.stringify(updateSource),
+      __MOBI_FORMAT__: JSON.stringify(mobiFormat),
     },
     plugins: [react(), ...(edition === "ai" ? [aiCompanionDevAssets()] : []), {
       name: "edition-manifest",
@@ -51,7 +54,7 @@ export default defineConfig(({ mode }) => {
         this.emitFile({
           type: "asset",
           fileName: "edition-manifest.json",
-          source: JSON.stringify({ schemaVersion: 1, edition, platform, shell, version, expectedBackendFeature: edition === "ai" ? "ai" : "core", identifier }, null, 2) + "\n",
+          source: JSON.stringify({ schemaVersion: 1, edition, platform, shell, version, expectedBackendFeature: edition === "ai" ? "ai" : "core", identifier, mobiFormat }, null, 2) + "\n",
         });
         this.emitFile({
           type: "asset",

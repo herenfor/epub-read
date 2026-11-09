@@ -1,4 +1,5 @@
 import { ComicReaderView } from "./ui/ComicReaderView";
+import { formatListKey } from "./ui/bookFormatText";
 import { supportedBookName } from "./core/documentFormats";
 import { webBookAccept } from "./ui/bookFileTypes";
 import { resolveArchiveHref, archiveHref } from "./core/archiveReferences";
@@ -1609,7 +1610,7 @@ export default function App() {
           setShelfNotice({ kind: "error", text: uiText("notice.font.dropHere") });
         }
         if (files.length > 0 && bookFiles.length === 0 && fontFiles.length === 0) {
-          setShelfNotice({ kind: "error", text: uiText("notice.drop.booksOnly") });
+          setShelfNotice({ kind: "error", text: uiText(formatListKey("notice.drop.booksOnly")) });
         }
         if (bookFiles.length > 0) {
           void handleImportSources(
@@ -1678,7 +1679,7 @@ export default function App() {
         // Directory import fills the library; another shelf takes books one by one.
         setShelfNotice({
           kind: "error",
-          text: uiText(activeShelfSpace().policy.libraryServices ? "notice.drop.unsupported" : "notice.drop.booksOnly"),
+          text: uiText(formatListKey(activeShelfSpace().policy.libraryServices ? "notice.drop.unsupported" : "notice.drop.booksOnly")),
         });
       } else if (directories.length > 1) {
         setShelfNotice({ kind: "warn", text: uiText("notice.drop.oneFolder") });

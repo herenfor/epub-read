@@ -29,8 +29,12 @@ it("keeps the Kindle source identity while reading the native temporary EPUB", a
     expect(new TextDecoder().decode(await book.readResource!("OEBPS/part00000.xhtml"))).toContain("Kindle text");
     expect(sourceFormat("original.MOBI")).toBe("mobi");
     expect(sourceFormat("original.azw3")).toBe("azw3");
-    expect(supportedBookName("original.MOBI")).toBe(true);
-    expect(supportedBookName("original.AZW3")).toBe(true);
+    // ER-0150: only .mobi follows the build switch; AZW3 always imports.
+    expect(supportedBookName("original.MOBI", true)).toBe(true);
+    expect(supportedBookName("original.mobi", false)).toBe(false);
+    expect(supportedBookName("original.AZW3", true)).toBe(true);
+    expect(supportedBookName("original.AZW3", false)).toBe(true);
+    expect(supportedBookName("original.epub", false)).toBe(true);
   } finally {
     disposeBook(book);
   }

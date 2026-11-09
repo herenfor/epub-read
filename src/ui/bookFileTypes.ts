@@ -1,10 +1,14 @@
+import { MOBI_FORMAT_ENABLED } from "../config/mobiFormat";
+
 /**
  * The book file types the UI offers in pickers, the web file input and export
  * names. One table, so enabling a format later is one row, not five lists.
  *
  * Which files are accepted for import stays decided by core
- * `supportedBookName`. This table must list exactly those formats. Add a row
- * only when that format's native backend is complete: no half-wired entry.
+ * `supportedBookName`. The importable rows must list exactly those formats.
+ * Add a row only when that format's native backend is complete: no half-wired
+ * entry. The MOBI row stays in the table so books already on the shelf keep
+ * their extension and MIME; the ER-0150 switch only drops it from import.
  */
 export interface BookFileType {
   readonly extension: string;
@@ -15,6 +19,8 @@ export interface BookFileType {
    * converter, so it never offers these and must not read them as ZIP/EPUB.
    */
   readonly nativeOnly?: boolean;
+  /** MOBI (MOBI6): importable only when the ER-0150 build switch is on. */
+  readonly behindMobiSwitch?: boolean;
 }
 
 export const BOOK_FILE_TYPES: readonly BookFileType[] = [
@@ -23,17 +29,27 @@ export const BOOK_FILE_TYPES: readonly BookFileType[] = [
   { extension: "txt", mime: "text/plain" },
   { extension: "cbz", mime: "application/zip" },
   { extension: "zip", mime: "application/zip" },
-  { extension: "mobi", mime: "application/x-mobipocket-ebook", nativeOnly: true },
+  { extension: "mobi", mime: "application/x-mobipocket-ebook", nativeOnly: true, behindMobiSwitch: true },
   { extension: "azw3", mime: "application/vnd.amazon.ebook", nativeOnly: true },
 ];
 
+/** The rows this build offers for import (pickers, web input). */
+export function importableBookFileTypes(
+  types: readonly BookFileType[] = BOOK_FILE_TYPES,
+  mobi: boolean = MOBI_FORMAT_ENABLED,
+): readonly BookFileType[] {
+  return mobi ? types : types.filter((type) => !type.behindMobiSwitch);
+}
+
+export const IMPORT_BOOK_FILE_TYPES: readonly BookFileType[] = importableBookFileTypes();
+
 /** Extensions for the native system file picker filter. */
-export function bookPickerExtensions(types: readonly BookFileType[] = BOOK_FILE_TYPES): string[] {
+export function bookPickerExtensions(types: readonly BookFileType[] = IMPORT_BOOK_FILE_TYPES): string[] {
   return types.map((type) => type.extension);
 }
 
 /** `accept` for the browser file input: native-only formats are left out. */
-export function webBookAccept(types: readonly BookFileType[] = BOOK_FILE_TYPES): string {
+export function webBookAccept(types: readonly BookFileType[] = IMPORT_BOOK_FILE_TYPES): string {
   const web = types.filter((type) => !type.nativeOnly);
   return [...web.map((type) => `.${type.extension}`), ...new Set(web.map((type) => type.mime))].join(",");
 }

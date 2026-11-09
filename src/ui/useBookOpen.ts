@@ -1,4 +1,5 @@
 import { useCallback, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
+import { formatListKey } from "./bookFormatText";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { disposeBook, spineIndexForEntryKey, spineItemPath } from "../core/book";
 import { loadSourceArchive, loadSourceBook, sourceFormat, textEncodingFromPath } from "../core/documentFormats";
@@ -16,6 +17,7 @@ import { getRuntimeCapabilities } from "../platform/runtimeCapabilities";
 import type { ChapterState, MediaReadingAnchor } from "../render/paginator";
 import { ResourceServer } from "../render/resources";
 import { bookOpenErrorMessage, describeBookOpenFailure } from "./bookOpenFailure";
+import { mobiBookBlocked } from "./kindleFormatNotice";
 import { readCachedChapterCounts } from "./chapterCountCache";
 import { applyChapterCount, createChapterCountCollection } from "./chapterCounts";
 import { openingBaselinePct, persistCheckpointSample, planCheckpointOpen, stageCheckpointSample } from "./checkpointProgressRepair";
@@ -312,6 +314,12 @@ export function useBookOpen({
       if (shelfBusyRef.current) return;
       const cardEntry = shelfEntriesRef.current.find((e) => e.id === id);
       if (!cardEntry) return;
+      // ER-0150: a build with MOBI off keeps the record but does not open it.
+      // Refuse before taking the busy guard or showing any dialog.
+      if (mobiBookBlocked(cardEntry.fileName)) {
+        setShelfNotice({ kind: "warn", text: uiText("notice.kindle.mobiDisabled") });
+        return;
+      }
       // Acquire the single-operation guard before the first await, including
       // readiness recovery and any user position-choice dialog.
       shelfBusyRef.current = true;
@@ -515,7 +523,7 @@ export function useBookOpen({
               multiple: false,
               directory: false,
               title: uiText("notice.open.relocateTitle", { title: entry.title }),
-              filters: [{ name: uiText("notice.picker.epubFilter"), extensions: bookPickerExtensions() }],
+              filters: [{ name: uiText(formatListKey("notice.picker.epubFilter")), extensions: bookPickerExtensions() }],
             });
             if (!selected || Array.isArray(selected)) {
               shelfBusyRef.current = false;

@@ -1,4 +1,5 @@
 import { loadSourceBook, supportedBookName } from "../core/documentFormats";
+import { formatListKey } from "./bookFormatText";
 import { bookFileExtension, bookPickerExtensions, nativeOnlyBookName } from "./bookFileTypes";
 import { kindleFailureIsFileProblem, kindleFailureNotice, kindleImportFailureKind } from "./kindleFormatNotice";
 import { useCallback, useEffect, useRef, useState, type Dispatch, type MutableRefObject, type RefObject, type SetStateAction } from "react";
@@ -676,7 +677,7 @@ export function useBookImport({
         multiple: true,
         directory: false,
         title: uiText("notice.picker.chooseEpub"),
-        filters: [{ name: uiText("notice.picker.epubFilter"), extensions: bookPickerExtensions() }],
+        filters: [{ name: uiText(formatListKey("notice.picker.epubFilter")), extensions: bookPickerExtensions() }],
       });
       const paths = Array.isArray(selected) ? selected : selected ? [selected] : [];
       if (paths.length === 0 || getShelfStore() !== pickerStore) return;
