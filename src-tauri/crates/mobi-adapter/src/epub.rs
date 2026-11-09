@@ -15,6 +15,7 @@ use zip::{CompressionMethod, ZipWriter};
 
 use crate::error::{MobiError, Result};
 use crate::ffi::{Handle, PartKind, PartView};
+use crate::kf8;
 use crate::legacy;
 use crate::source::CancelToken;
 use crate::{ConversionReport, Limits};
@@ -35,9 +36,11 @@ pub(crate) fn write_epub(
     cancel: &CancelToken,
 ) -> Result<ConversionReport> {
     let info = handle.info()?;
-    // MOBI6 rawml keeps Kindle's presentational markup. KF8/AZW3 already
-    // carries standard CSS and must be copied byte-for-byte.
+    // MOBI6 rawml keeps Kindle's presentational markup. KF8/AZW3 CSS is
+    // standard, but libmobi leaves the original package-relative `srcset`
+    // beside a rewritten `src`; drop that unresolved attribute.
     let normalize_legacy = !info.kf8 && info.version < 8;
+    let strip_srcset = info.kf8;
     let counts = [
         (PartKind::Markup, handle.part_count(PartKind::Markup)),
         (PartKind::Flow, handle.part_count(PartKind::Flow)),
@@ -86,8 +89,17 @@ pub(crate) fn write_epub(
                 if kind == PartKind::Resource && part.data.is_empty() {
                     continue;
                 }
-                let normalized = (normalize_legacy && kind == PartKind::Markup && !part.is_opf)
-                    .then(|| legacy::normalize_markup(part.data));
+                let normalized = if kind == PartKind::Markup && !part.is_opf {
+                    if normalize_legacy {
+                        Some(legacy::normalize_markup(part.data))
+                    } else if strip_srcset {
+                        Some(kf8::strip_srcset(part.data))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
                 let data = normalized.as_deref().unwrap_or(part.data);
                 check_size(&part, data.len() as u64, limits)?;
                 let name = part_name(&part)?;

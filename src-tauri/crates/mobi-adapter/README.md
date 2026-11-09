@@ -60,8 +60,10 @@ become `margin-top` (with the UA bottom margin cleared) and `text-indent` CSS,
 and `<mbp:pagebreak>` becomes a multicolumn break. Pagebreak id/name/class and
 other attributes are retained on the generated block, and
 style/script/title/textarea raw text is copied without scanning. Tag-only
-rewriting keeps every text node, part name and anchor unchanged. KF8/AZW3 parts
-are copied byte-for-byte.
+rewriting keeps every text node, part name and anchor unchanged. KF8/AZW3
+markup is copied byte-for-byte except that unresolved `srcset` attributes are
+removed from `img`/`source`; libmobi's rewritten `src` remains the
+authoritative packaged resource and a part without `srcset` is unchanged.
 
 ## Stable error codes
 

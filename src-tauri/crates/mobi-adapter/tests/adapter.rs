@@ -210,6 +210,55 @@ fn convert_kf8_spine_and_resources() {
 }
 
 #[test]
+fn kf8_removes_unresolved_srcset_from_every_markup_part() {
+    let Some(path) = fixture("KF8") else {
+        eprintln!("skip: MOBI_ADAPTER_KF8 is not set");
+        return;
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let out = temp_out(dir.path(), "kf8-srcset.epub");
+    let report = convert(
+        Source::from_path(&path).unwrap(),
+        &out,
+        &Limits::default(),
+        &CancelToken::new(),
+    )
+    .unwrap();
+    assert!(report.kf8);
+    assert_eq!(report.markup_parts, 65);
+
+    let mut archive = zip::ZipArchive::new(File::open(&out).unwrap()).unwrap();
+    let mut srcset_files = 0;
+    let mut checked = 0;
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index).unwrap();
+        let name = entry.name().to_string();
+        if !name.ends_with(".html") {
+            continue;
+        }
+        let mut html = String::new();
+        entry.read_to_string(&mut html).unwrap();
+        checked += 1;
+        if html.contains("srcset") {
+            srcset_files += 1;
+        }
+        if name.ends_with("part00000.html") {
+            assert!(html.contains("src=\"resource00003.png\""));
+            assert!(!html.contains("../images/"));
+        }
+        if name.ends_with("part00001.html") || name.ends_with("part00063.html") {
+            assert!(html.contains("src=\"resource00002.png\""));
+            assert!(!html.contains("../images/"));
+        }
+    }
+    assert_eq!(checked, 65);
+    assert_eq!(
+        srcset_files, 0,
+        "no markup part may keep an unresolved srcset"
+    );
+}
+
+#[test]
 fn combo_uses_kf8_and_writes_archive() {
     let Some(path) = fixture("COMBO") else {
         eprintln!("skip: MOBI_ADAPTER_COMBO is not set");

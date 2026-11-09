@@ -35,6 +35,7 @@
 mod epub;
 mod error;
 mod ffi;
+mod kf8;
 mod legacy;
 mod source;
 

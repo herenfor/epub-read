@@ -232,13 +232,13 @@ fn append_class(attrs: &mut Vec<Attr>, class: &str) {
     }
 }
 
-fn is_raw_text_element(name: &str) -> bool {
+pub(crate) fn is_raw_text_element(name: &str) -> bool {
     RAW_TEXT_ELEMENTS
         .iter()
         .any(|candidate| name.eq_ignore_ascii_case(candidate))
 }
 
-fn find_raw_text_close(text: &str, from: usize, name: &str) -> Option<usize> {
+pub(crate) fn find_raw_text_close(text: &str, from: usize, name: &str) -> Option<usize> {
     let bytes = text.as_bytes();
     let name = name.as_bytes();
     let mut cursor = from;
@@ -335,20 +335,20 @@ fn append_style<T: AsRef<str>>(attrs: &mut Vec<Attr>, declarations: &[T]) {
     }
 }
 
-struct Attr {
-    name: String,
-    value: Option<String>,
-    quote: Option<char>,
+pub(crate) struct Attr {
+    pub(crate) name: String,
+    pub(crate) value: Option<String>,
+    pub(crate) quote: Option<char>,
 }
 
-struct ParsedTag {
-    name: String,
-    attrs: Vec<Attr>,
-    self_closing: bool,
+pub(crate) struct ParsedTag {
+    pub(crate) name: String,
+    pub(crate) attrs: Vec<Attr>,
+    pub(crate) self_closing: bool,
 }
 
 impl ParsedTag {
-    fn render(self) -> String {
+    pub(crate) fn render(self) -> String {
         let mut output = String::with_capacity(32);
         output.push('<');
         output.push_str(&self.name);
@@ -378,7 +378,7 @@ impl ParsedTag {
     }
 }
 
-fn parse_tag(tag: &str) -> Option<ParsedTag> {
+pub(crate) fn parse_tag(tag: &str) -> Option<ParsedTag> {
     let inner = tag.strip_prefix('<')?.strip_suffix('>')?;
     if inner.starts_with('/') || inner.starts_with('!') || inner.starts_with('?') {
         return None;
@@ -485,7 +485,7 @@ fn parse_tag(tag: &str) -> Option<ParsedTag> {
     })
 }
 
-fn find_tag_end(text: &str, start: usize) -> Option<usize> {
+pub(crate) fn find_tag_end(text: &str, start: usize) -> Option<usize> {
     let bytes = text.as_bytes();
     let mut quote = None;
     let mut index = start + 1;
@@ -505,7 +505,7 @@ fn find_tag_end(text: &str, start: usize) -> Option<usize> {
     None
 }
 
-fn opening_tag_name(tag: &str) -> &str {
+pub(crate) fn opening_tag_name(tag: &str) -> &str {
     tag_name(tag.strip_prefix('<').unwrap_or(tag))
 }
 
@@ -519,7 +519,7 @@ fn tag_name(rest: &str) -> &str {
         .unwrap_or("")
 }
 
-fn is_self_closing(tag: &str) -> bool {
+pub(crate) fn is_self_closing(tag: &str) -> bool {
     tag.strip_suffix('>')
         .is_some_and(|body| body.trim_end().ends_with('/'))
 }
