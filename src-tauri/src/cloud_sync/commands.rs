@@ -85,6 +85,38 @@ fn disk(app: &AppHandle) -> Result<Disk> {
     })
 }
 
+/// Apply a completed metadata round only when it still belongs to the current
+/// lifecycle generation. A late round must not overwrite a newer connection,
+/// phase or schedule, and it must not clear a newer round's `running` flag.
+fn finish_round(control: &mut Control, epoch: u64, result: &Result<engine::Outcome>) -> bool {
+    if control.epoch != epoch {
+        return false;
+    }
+    match result {
+        Ok(outcome) => {
+            control.status.connection = Some(outcome.session.info());
+            control.status.last_success_at_ms = outcome.session.last_success_at_ms;
+            control.status.last_error = None;
+            control.status.issues = outcome.issues.clone();
+            control.status.local_changed = outcome.changed;
+            control.status.cloud_only_book_count = outcome.cloud_only_count;
+            control.devices = outcome.session.devices.clone();
+            control.status.device_count = control.devices.len();
+            control.status.phase = Phase::Idle;
+        }
+        Err(error) => {
+            control.status.last_error = Some(error.clone());
+            control.status.phase = if error.code == FailureCode::Cancelled {
+                Phase::Idle
+            } else {
+                Phase::Error
+            };
+        }
+    }
+    control.schedule.finish(now_ms(), result.as_ref().err());
+    true
+}
+
 fn status(control: &Control) -> Status {
     let mut status = control.status.clone();
     status.native_ready = secrets::available();
@@ -365,35 +397,14 @@ fn arm(app: &AppHandle) {
         emit(&app);
         let _gate = manager.gate.lock().await;
         let result = perform(&app, activity, &cancel).await;
-        {
+        let completed = {
             let Ok(mut control) = manager.lock() else {
                 return;
             };
-            if control.epoch != epoch {
-                return;
-            }
-            match &result {
-                Ok(outcome) => {
-                    control.status.connection = Some(outcome.session.info());
-                    control.status.last_success_at_ms = outcome.session.last_success_at_ms;
-                    control.status.last_error = None;
-                    control.status.issues = outcome.issues.clone();
-                    control.status.local_changed = outcome.changed;
-                    control.status.cloud_only_book_count = outcome.cloud_only_count;
-                    control.devices = outcome.session.devices.clone();
-                    control.status.device_count = control.devices.len();
-                    control.status.phase = Phase::Idle;
-                }
-                Err(error) => {
-                    control.status.last_error = Some(error.clone());
-                    control.status.phase = if error.code == FailureCode::Cancelled {
-                        Phase::Idle
-                    } else {
-                        Phase::Error
-                    };
-                }
-            }
-            control.schedule.finish(now_ms(), result.as_ref().err());
+            finish_round(&mut control, epoch, &result)
+        };
+        if !completed {
+            return;
         }
         drop(_gate);
         arm(&app);
@@ -720,6 +731,17 @@ fn apply_context<R: tauri::Runtime>(app: &AppHandle<R>, context: Activity) -> Re
             // generation while it was still preparing.
             control.epoch = control.epoch.wrapping_add(1);
         }
+        if control.schedule.running {
+            // The already-running metadata round will be rejected by its
+            // generation check when it finishes, so settle the shared
+            // Schedule here. Otherwise `running` would stay true and the
+            // foreground/manual request could never start another round.
+            // A new round cannot exist yet: backgrounding happens first.
+            control.schedule.cancel();
+        }
+        if control.status.phase == Phase::Syncing {
+            control.status.phase = Phase::Idle;
+        }
         control.timer_cancel.cancel();
         control.round_cancel.cancel();
     }
@@ -889,4 +911,97 @@ pub fn shutdown(app: &AppHandle) {
         control.round_cancel.cancel();
         control.ticket = None;
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn connection() -> ConnectionInfo {
+        ConnectionInfo {
+            connection_id: "00000000-0000-4000-8000-000000000301".into(),
+            settings: Settings {
+                base_url: "https://nas.invalid/dav/".into(),
+                remote_root: "test dir".into(),
+                username: "test".into(),
+            },
+            space_id: "00000000-0000-4000-8000-000000000302".into(),
+            device_label: "Test".into(),
+        }
+    }
+
+    #[test]
+    fn background_settles_old_round_and_late_completion_cannot_override_new_generation() {
+        let app = tauri::test::mock_builder()
+            .manage(CloudSyncManager::default())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let handle = app.handle().clone();
+        test_set_connection(&handle, connection());
+        let manager = handle.state::<CloudSyncManager>();
+        let old_epoch;
+        {
+            let mut control = manager.lock().unwrap();
+            control.epoch = 41;
+            old_epoch = control.epoch;
+            control.schedule.running = true;
+            control.status.phase = Phase::Syncing;
+            control.status.last_success_at_ms = Some(11);
+        }
+
+        apply_context(
+            &handle,
+            Activity {
+                foreground: false,
+                interaction_busy: false,
+            },
+        )
+        .unwrap();
+        {
+            let control = manager.lock().unwrap();
+            assert_eq!(control.epoch, old_epoch + 1);
+            assert!(!control.schedule.running);
+            assert_eq!(control.status.phase, Phase::Idle);
+        }
+
+        // A new generation may already have updated the visible state. The
+        // late old completion must not touch it or finish the new schedule.
+        {
+            let mut control = manager.lock().unwrap();
+            control.status.phase = Phase::Queued;
+            control.status.last_success_at_ms = Some(22);
+            control.status.local_changed = true;
+            control.schedule.running = true;
+        }
+        let stale: std::result::Result<engine::Outcome, Failure> =
+            Err(Failure::new(FailureCode::Cancelled));
+        {
+            let mut control = manager.lock().unwrap();
+            assert!(!finish_round(&mut control, old_epoch, &stale));
+            assert_eq!(control.status.phase, Phase::Queued);
+            assert_eq!(control.status.last_success_at_ms, Some(22));
+            assert!(control.status.local_changed);
+            assert!(control.schedule.running);
+            control.schedule.cancel();
+        }
+
+        let previous = apply_context(
+            &handle,
+            Activity {
+                foreground: true,
+                interaction_busy: false,
+            },
+        )
+        .unwrap();
+        assert!(!previous.foreground);
+        {
+            let mut control = manager.lock().unwrap();
+            let now = now_ms();
+            control.schedule.request(Trigger::Foreground, now);
+            assert!(control.schedule.start(now));
+            control.schedule.cancel();
+            control.schedule.request(Trigger::Manual, now);
+            assert!(control.schedule.start(now));
+        }
+    }
 }

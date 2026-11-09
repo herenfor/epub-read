@@ -948,36 +948,48 @@ async fn upload_stream<R: Runtime>(
             SourceState::Cancelled => BookFailure::local("cancelled"),
             _ => BookFailure::local("source-unreadable"),
         }),
-        Err(error) => {
-            // Only an explicit user/parent cancel or the no-progress watchdog
-            // may project to cancelled/timeout. A server can answer 401/403/507
-            // before consuming the whole body; closing the body channel then
-            // must not hide that known remote error and its stop semantics.
-            if cancel.check().is_err() {
-                return Err(BookFailure::local("cancelled"));
-            }
-            if stalled.load(Ordering::Acquire) {
-                return Err(BookFailure::local("timeout"));
-            }
-            if matches!(
-                error.code,
-                RemoteErrorCode::Authentication
-                    | RemoteErrorCode::PermissionDenied
-                    | RemoteErrorCode::QuotaExceeded
-                    | RemoteErrorCode::Unsupported
-            ) {
-                return Err(remote_failure(error));
-            }
-            if state == SourceState::Cancelled {
-                return Err(BookFailure::local("cancelled"));
-            }
-            match state {
-                SourceState::Missing => Err(BookFailure::local("source-missing")),
-                SourceState::Changed => Err(BookFailure::local("source-changed")),
-                SourceState::Unreadable => Err(BookFailure::local("source-unreadable")),
-                _ => Err(remote_failure(error)),
-            }
-        }
+        Err(error) => Err(upload_error_failure(
+            error,
+            state,
+            cancel.check().is_err(),
+            stalled.load(Ordering::Acquire),
+        )),
+    }
+}
+
+fn upload_error_failure(
+    error: RemoteError,
+    state: SourceState,
+    user_cancelled: bool,
+    stalled: bool,
+) -> BookFailure {
+    // Only an explicit user/parent cancel or the no-progress watchdog may
+    // project to cancelled/timeout. A server can answer 401/403/507 or a
+    // broken connection before consuming the whole body; closing the body
+    // channel then must not hide the actual remote error.
+    if user_cancelled {
+        return BookFailure::local("cancelled");
+    }
+    if stalled {
+        return BookFailure::local("timeout");
+    }
+    if matches!(
+        error.code,
+        RemoteErrorCode::Authentication
+            | RemoteErrorCode::PermissionDenied
+            | RemoteErrorCode::QuotaExceeded
+            | RemoteErrorCode::Unsupported
+    ) {
+        return remote_failure(error);
+    }
+    // No `SourceState::Cancelled` inference here. The producer may have seen
+    // the child cancel while HTTP was already failing (for example an early
+    // 500 or a broken connection); the actual remote error must win.
+    match state {
+        SourceState::Missing => BookFailure::local("source-missing"),
+        SourceState::Changed => BookFailure::local("source-changed"),
+        SourceState::Unreadable => BookFailure::local("source-unreadable"),
+        _ => remote_failure(error),
     }
 }
 
@@ -1974,6 +1986,34 @@ mod tests {
             entries.insert(format!("{}.ok", book.content_hash), None);
             assert_eq!(decide(book, &entries), Decision::AlreadyPresent);
         }
+    }
+
+    #[test]
+    fn producer_cleanup_cancel_does_not_override_a_remote_failure() {
+        let error = RemoteError {
+            code: RemoteErrorCode::ServerError,
+            http_status: Some(500),
+            retry_after_seconds: None,
+            cleanup_failed: false,
+        };
+        let failure = upload_error_failure(error, SourceState::Cancelled, false, false);
+        assert_eq!(failure.code, "server-error");
+        assert!(!failure.stop);
+        assert_eq!(
+            upload_error_failure(
+                RemoteError {
+                    code: RemoteErrorCode::ServerError,
+                    http_status: Some(500),
+                    retry_after_seconds: None,
+                    cleanup_failed: false,
+                },
+                SourceState::Cancelled,
+                true,
+                false,
+            )
+            .code,
+            "cancelled"
+        );
     }
 
     #[test]

@@ -1026,7 +1026,46 @@ async fn dav_early_quota_response_keeps_quota_and_stop_semantics() {
         result.books
     );
     assert_eq!(result.books[1].outcome, "not-attempted");
+
+    // Reuse the same early-response fixture for a non-stop 500. The body
+    // channel closes before the source is complete; that must not turn the
+    // known remote failure into a user cancellation.
+    let server_payload = b"early server error".to_vec();
+    let server_hash = crate::save_file::hex_digest(&server_payload);
+    let server_file = std::env::temp_dir().join(format!(
+        "epub-reader-early-500-{}.epub",
+        crate::save_file::new_uuid().unwrap()
+    ));
+    std::fs::write(&server_file, &server_payload).unwrap();
+    server.fail_puts_early(500);
+    let server_result = crate::cloud_sync::books::test_run_upload(
+        &handle,
+        &remote,
+        vec![(
+            server_hash,
+            server_file.clone(),
+            server_payload.len() as u64,
+        )],
+        "55555555-5555-4555-8555-555555555501",
+        &cloud_space.space_id,
+        Capabilities {
+            move_file: true,
+            move_no_replace: true,
+            conditional_create: false,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(server_result.status, "partial", "{:?}", server_result.books);
+    assert_eq!(server_result.books[0].outcome, "failed");
+    assert_eq!(
+        server_result.books[0].code.as_deref(),
+        Some("server-error"),
+        "{:?}",
+        server_result.books
+    );
     let _ = std::fs::remove_file(file);
+    let _ = std::fs::remove_file(server_file);
 }
 
 #[tokio::test]
