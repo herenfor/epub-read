@@ -162,3 +162,26 @@ describe("element start offsets (ER-0145)", () => {
     expect(index.offsetsBeforeNodes([])).toEqual([]);
   });
 });
+
+describe("element caret boundaries (ER-0146)", () => {
+  it("maps a boundary at a <br> to the next line, or the end of the last line, inside its own block only", () => {
+    const { document, viewer } = chapter('<p id="a">Lead</p><p id="poem">one<br>two<br><br><i>three</i><br></p><p id="empty"></p><p>Tail</p>');
+    const index = buildVisibleTextIndex(document, viewer);
+    expect(index.text).toBe("LeadonetwothreeTail");
+    const poem = document.getElementById("poem")!;
+    const br = (n: number) => Array.from(poem.childNodes).filter((c) => c.nodeName === "BR")[n];
+    const at = (child: Node) => Array.from(poem.childNodes).indexOf(child as ChildNode);
+    // Right of "one": the caret sits before the first <br>.
+    expect(index.offsetForElementBoundary(poem, at(br(0)))).toBe(index.text.indexOf("two"));
+    // The blank line between "two" and "three".
+    expect(index.offsetForElementBoundary(poem, at(br(2)))).toBe(index.text.indexOf("three"));
+    // After the last line: the end of "three" (normalized text is contiguous, so it equals where "Tail" starts).
+    expect(index.offsetForElementBoundary(poem, at(br(3)))).toBe(index.text.indexOf("Tail"));
+    expect(index.offsetForElementBoundary(poem, poem.childNodes.length)).toBe(index.text.indexOf("Tail"));
+    expect(index.offsetForElementBoundary(poem, 0)).toBe(index.text.indexOf("one"));
+    // An empty block borrows nothing from its neighbours; bad input is rejected.
+    expect(index.offsetForElementBoundary(document.getElementById("empty")!, 0)).toBeNull();
+    expect(index.offsetForElementBoundary(poem, poem.childNodes.length + 1)).toBeNull();
+    expect(index.offsetForElementBoundary(poem.firstChild!, 0)).toBeNull();
+  });
+});

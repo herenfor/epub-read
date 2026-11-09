@@ -550,22 +550,34 @@ function captureAnchorAtPoint(
   const caretDoc = doc as CaretDocument;
   let textNode: Text | null = null;
   let rawOffset = 0;
+  // ER-0146: right of a `<br>`-broken line (verse, lyrics) or on its blank
+  // line the caret is an element boundary such as (p, index of <br>), not a
+  // text node. It still names a text position; dropping it left the page with
+  // no text offset and progress fell back to a page-ratio estimate.
+  let boundary: { node: Element; offset: number } | null = null;
   const modern = caretDoc.caretPositionFromPoint?.(point.x, point.y);
   if (modern && modern.offsetNode.nodeType === 3) {
     textNode = modern.offsetNode as Text;
     rawOffset = modern.offset;
   } else {
+    if (modern && modern.offsetNode.nodeType === 1) boundary = { node: modern.offsetNode as Element, offset: modern.offset };
     const range = caretDoc.caretRangeFromPoint?.(point.x, point.y);
     if (range && range.startContainer.nodeType === 3) {
       textNode = range.startContainer as Text;
       rawOffset = range.startOffset;
+    } else if (!boundary && range && range.startContainer.nodeType === 1) {
+      boundary = { node: range.startContainer as Element, offset: range.startOffset };
     }
   }
-  const textOffset = textNode ? index.offsetForNode(textNode, rawOffset) : null;
+  // Only a boundary inside one content block: never the viewer, body or document.
+  if (boundary && (boundary.node === viewer || typeof viewer.contains !== "function" || !viewer.contains(boundary.node))) boundary = null;
+  const textOffset = textNode
+    ? index.offsetForNode(textNode, rawOffset)
+    : boundary ? index.offsetForElementBoundary(boundary.node, boundary.offset) : null;
   // Text first; with no text under the point (an image page) the column's
   // media gives a stable identity instead of only its element index.
   const media = textOffset === null ? options.mediaAt?.(point) ?? null : null;
-  const el = textNode?.parentElement ?? media?.element ?? visibleElementAt(doc, viewer, point);
+  const el = textNode?.parentElement ?? (textOffset !== null ? boundary?.node : null) ?? media?.element ?? visibleElementAt(doc, viewer, point);
   const idx = el ? index.elementIndex(el, viewer) : -1;
   const rect = el ? (el as HTMLElement).getBoundingClientRect() : null;
   if (textOffset === null && idx < 0 && !media) return null;

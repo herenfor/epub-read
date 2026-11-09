@@ -278,6 +278,44 @@ export class VisibleTextIndex {
     return result;
   }
 
+  /**
+   * Offset of an element-type caret boundary (`node`, child index `offset`),
+   * e.g. `(p, index of <br>)` when a point lies right of a `<br>`-broken line
+   * or on its blank line. Resolved only inside `node`: the first indexed text
+   * after the boundary, else the end of the last one before it. A block with
+   * no indexed text of its own (an empty paragraph) gives null, so a caret
+   * never borrows text from a neighbouring block or page.
+   */
+  offsetForElementBoundary(node: Node, offset: number, maxSteps = 512): number | null {
+    if (node.nodeType !== 1 || !Number.isSafeInteger(offset) || offset < 0 || offset > node.childNodes.length) return null;
+    const indexed = (candidate: Node) => candidate.nodeType === 3 ? this.nodeMap.get(candidate as Text) : undefined;
+    let steps = 0;
+    // Forward, pre-order, never leaving `node`.
+    const next = (from: Node, descend: boolean): Node | null => {
+      if (descend && from.firstChild) return from.firstChild;
+      for (let cursor: Node | null = from; cursor && cursor !== node; cursor = cursor.parentNode) {
+        if (cursor.nextSibling) return cursor.nextSibling;
+      }
+      return null;
+    };
+    for (let cursor: Node | null = node.childNodes[offset] ?? null; cursor && steps < maxSteps; steps++, cursor = next(cursor, true)) {
+      const item = indexed(cursor);
+      if (item) return item.start;
+    }
+    // Backward, reverse pre-order (deepest last descendant first), never leaving `node`.
+    const last = (from: Node): Node => { let cursor = from; while (cursor.lastChild) cursor = cursor.lastChild; return cursor; };
+    const previous = (from: Node): Node | null => {
+      if (from === node) return null;
+      if (from.previousSibling) return last(from.previousSibling);
+      return from.parentNode === node ? null : from.parentNode;
+    };
+    for (let cursor: Node | null = offset > 0 ? last(node.childNodes[offset - 1]) : null; cursor && steps < maxSteps; steps++, cursor = previous(cursor)) {
+      const item = indexed(cursor);
+      if (item) return item.end;
+    }
+    return null;
+  }
+
   positionForOffset(offset: number, bias: "start" | "end" = "start"): TextNodePosition | null {
     if (!validOffset(offset) || offset > this.totalChars || this.nodes.length === 0) return null;
     const item = this.nodes.find((candidate) => offset >= candidate.start && offset < candidate.end)
