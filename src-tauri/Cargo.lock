@@ -1272,12 +1272,14 @@ name = "epub-reader"
 version = "0.4.1"
 dependencies = [
  "base64 0.22.1",
+ "bytes",
  "chardetng",
  "encoding_rs",
  "flate2",
  "fs2",
  "getrandom 0.3.4",
  "gtk",
+ "http-body",
  "jni 0.22.4",
  "md-5",
  "mobi-adapter",

@@ -16,6 +16,7 @@ pub enum FailureCode {
     RepositoryError,
     CredentialUnavailable,
     CredentialCleanupFailed,
+    ConnectionRequired,
     NativeBridgeUnavailable,
     SpaceChanged,
     UnsupportedSyncVersion,

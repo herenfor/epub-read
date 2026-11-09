@@ -1,4 +1,5 @@
 //! Cloud state planning and remote storage. No automatic jobs or database writes.
+pub mod books;
 pub mod codec;
 pub mod commands;
 mod dav_xml;

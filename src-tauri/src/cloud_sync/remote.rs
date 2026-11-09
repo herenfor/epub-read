@@ -2,6 +2,7 @@
 use super::{codec, dav_xml, parse_space, Space, SyncError};
 use reqwest::{header, Client, Method, RequestBuilder, Response, StatusCode, Url};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::future::Future;
 use std::time::Duration;
 use tokio::sync::watch;
@@ -30,6 +31,31 @@ pub enum RemoteErrorCode {
     ServerError,
     Cancelled,
     UnsupportedSyncVersion,
+}
+
+impl RemoteErrorCode {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::InvalidConfig => "invalid-config",
+            Self::Authentication => "authentication",
+            Self::PermissionDenied => "permission-denied",
+            Self::NotFound => "not-found",
+            Self::Conflict => "conflict",
+            Self::Locked => "locked",
+            Self::RateLimited => "rate-limited",
+            Self::QuotaExceeded => "quota-exceeded",
+            Self::Unsupported => "unsupported",
+            Self::UnsafeRedirect => "unsafe-redirect",
+            Self::UnsafeCreation => "unsafe-creation",
+            Self::InvalidResponse => "invalid-response",
+            Self::SizeLimit => "size-limit",
+            Self::Timeout => "timeout",
+            Self::Network => "network",
+            Self::ServerError => "server-error",
+            Self::Cancelled => "cancelled",
+            Self::UnsupportedSyncVersion => "unsupported-sync-version",
+        }
+    }
 }
 
 /// Never carries response bodies, request URLs, credentials or raw client errors.
@@ -218,6 +244,7 @@ pub trait SyncRemote: Send + Sync {
 
 pub struct WebDavRemote {
     client: Client,
+    upload_client: Client,
     root: Url,
     credentials: Credentials,
 }
@@ -281,8 +308,26 @@ impl WebDavRemote {
             .user_agent("EPUBReader-WebDAV/1")
             .build()
             .map_err(RemoteError::transport)?;
+        // Original books are large. This client deliberately has no total
+        // request timeout; the caller supplies a 60-second no-progress
+        // watchdog and cancellation. It still never follows redirects or
+        // negotiates compression.
+        let upload_client = Client::builder()
+            .https_only(!local_test)
+            .redirect(reqwest::redirect::Policy::none())
+            .retry(reqwest::retry::never())
+            .connect_timeout(Duration::from_secs(10))
+            .read_timeout(Duration::from_secs(60))
+            .no_gzip()
+            .no_brotli()
+            .no_deflate()
+            .no_zstd()
+            .user_agent("EPUBReader-WebDAV/1")
+            .build()
+            .map_err(RemoteError::transport)?;
         Ok(Self {
             client,
+            upload_client,
             root,
             credentials,
         })
@@ -303,7 +348,17 @@ impl WebDavRemote {
     }
 
     fn request(&self, method: Method, path: &RemotePath, collection: bool) -> RequestBuilder {
-        self.client
+        self.request_with(&self.client, method, path, collection)
+    }
+
+    fn request_with(
+        &self,
+        client: &Client,
+        method: Method,
+        path: &RemotePath,
+        collection: bool,
+    ) -> RequestBuilder {
+        client
             .request(method, self.url(path, collection))
             .basic_auth(
                 &self.credentials.username,
@@ -313,6 +368,14 @@ impl WebDavRemote {
     }
 
     async fn send(
+        &self,
+        request: RequestBuilder,
+        cancel: &Cancel,
+    ) -> Result<Response, RemoteError> {
+        self.send_with(request, cancel).await
+    }
+
+    async fn send_with(
         &self,
         request: RequestBuilder,
         cancel: &Cancel,
@@ -353,6 +416,88 @@ impl WebDavRemote {
             .and_then(|v| v.parse().ok());
         error
     }
+
+    /// Upload a bounded stream with a known length. This bypasses the small
+    /// metadata `Vec` limit and the 45-second total timeout; cancellation and
+    /// the caller's no-progress watchdog remain in control.
+    pub(crate) async fn put_stream(
+        &self,
+        path: &RemotePath,
+        length: u64,
+        body: reqwest::Body,
+        cancel: &Cancel,
+    ) -> Result<(), RemoteError> {
+        if path.0.is_empty() || length == 0 {
+            return Err(RemoteError::new(RemoteErrorCode::InvalidConfig));
+        }
+        let request = self
+            .request_with(&self.upload_client, Method::PUT, path, false)
+            .header(header::CONTENT_LENGTH, length.to_string())
+            .header(header::CONTENT_TYPE, "application/octet-stream")
+            .body(body);
+        let response = self.send_with(request, cancel).await?;
+        match response.status().as_u16() {
+            200 | 201 | 204 => Ok(()),
+            _ => Err(Self::failure(&response)),
+        }
+    }
+
+    /// Stream an existing remote object through SHA-256 without buffering the
+    /// whole file. Used only to repair an object that exists without its `.ok`
+    /// marker after an ambiguous MOVE.
+    pub(crate) async fn hash_file(
+        &self,
+        path: &RemotePath,
+        expected_hash: &str,
+        expected_bytes: u64,
+        cancel: &Cancel,
+    ) -> Result<HashCheck, RemoteError> {
+        let request = self.request_with(&self.upload_client, Method::GET, path, false);
+        let mut response = self.send_with(request, cancel).await?;
+        match response.status() {
+            StatusCode::NOT_FOUND => return Ok(HashCheck::Missing),
+            StatusCode::OK => {}
+            _ => return Err(Self::failure(&response)),
+        }
+        if response
+            .content_length()
+            .is_some_and(|length| length != expected_bytes)
+        {
+            return Ok(HashCheck::Mismatch);
+        }
+        let mut hasher = Sha256::new();
+        let mut received = 0u64;
+        loop {
+            let chunk = tokio::select! {
+                biased;
+                _ = cancel.cancelled() => return Err(RemoteError::new(RemoteErrorCode::Cancelled)),
+                next = response.chunk() => next.map_err(RemoteError::transport)?,
+            };
+            let Some(chunk) = chunk else { break };
+            received = received
+                .checked_add(chunk.len() as u64)
+                .ok_or_else(|| RemoteError::new(RemoteErrorCode::SizeLimit))?;
+            if received > expected_bytes {
+                return Ok(HashCheck::Mismatch);
+            }
+            hasher.update(&chunk);
+        }
+        if received != expected_bytes {
+            return Ok(HashCheck::Mismatch);
+        }
+        Ok(if format!("{:x}", hasher.finalize()) == expected_hash {
+            HashCheck::Match
+        } else {
+            HashCheck::Mismatch
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HashCheck {
+    Missing,
+    Match,
+    Mismatch,
 }
 
 async fn bounded_body(

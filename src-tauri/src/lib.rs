@@ -63,6 +63,10 @@ macro_rules! configure_invoke_handler {
             cloud_sync::commands::cloud_sync_devices,
             cloud_sync::commands::cloud_sync_progress_sources,
             cloud_sync::commands::cloud_sync_cloud_books,
+            cloud_sync::books::cloud_book_upload_preview,
+            cloud_sync::books::cloud_book_upload,
+            cloud_sync::books::cloud_book_upload_cancel,
+            cloud_sync::books::cloud_book_upload_current,
             linked_library::linked_library_import_paths,
             linked_library::linked_library_list_records,
             linked_library::linked_library_import_documents,
@@ -260,6 +264,10 @@ macro_rules! configure_invoke_handler {
             cloud_sync::commands::cloud_sync_devices,
             cloud_sync::commands::cloud_sync_progress_sources,
             cloud_sync::commands::cloud_sync_cloud_books,
+            cloud_sync::books::cloud_book_upload_preview,
+            cloud_sync::books::cloud_book_upload,
+            cloud_sync::books::cloud_book_upload_cancel,
+            cloud_sync::books::cloud_book_upload_current,
             linked_library::linked_library_import_paths,
             linked_library::linked_library_list_records,
             linked_library::linked_library_import_documents,
@@ -493,6 +501,7 @@ pub fn run() {
         .manage(koreader_import::KoreaderImportState::default())
         .manage(lan_save::LanSaveManager::default())
         .manage(cloud_sync::commands::CloudSyncManager::default())
+        .manage(cloud_sync::books::CloudBookUploadManager::default())
         .manage(ai::AiState::default())
         .setup(|app| {
             #[cfg(target_os = "android")]

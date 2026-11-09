@@ -131,6 +131,32 @@ fn emit(app: &AppHandle) {
     }
 }
 
+pub(super) fn current_connection<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+) -> Result<Option<ConnectionInfo>> {
+    let manager = app.state::<CloudSyncManager>();
+    let result = manager.lock()?.status.connection.clone();
+    Ok(result)
+}
+
+#[cfg(test)]
+pub(crate) fn test_set_connection<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    connection: ConnectionInfo,
+) {
+    let manager = app.state::<CloudSyncManager>();
+    if let Ok(mut control) = manager.lock() {
+        control.loaded = true;
+        control.status.connection = Some(connection);
+    };
+}
+
+pub(super) fn admin_busy(app: &AppHandle) -> Result<bool> {
+    let manager = app.state::<CloudSyncManager>();
+    let result = manager.lock()?.admin_busy;
+    Ok(result)
+}
+
 fn install(control: &mut Control, session: Option<&Session>) {
     control.loaded = true;
     control.schedule = Schedule::default();
@@ -148,7 +174,7 @@ fn install(control: &mut Control, session: Option<&Session>) {
 
 /// Android readies its Keystore bridge and certificate verifier on first use;
 /// until that succeeds nothing may connect. Other platforms answer at once.
-async fn native_ready(app: &AppHandle) -> bool {
+pub(super) async fn native_ready(app: &AppHandle) -> bool {
     if !cfg!(target_os = "android") || secrets::available() {
         return secrets::available();
     }
@@ -158,7 +184,7 @@ async fn native_ready(app: &AppHandle) -> bool {
         .unwrap_or(false)
 }
 
-async fn load_once(app: &AppHandle) -> Result<()> {
+pub(super) async fn load_once(app: &AppHandle) -> Result<()> {
     let manager = app.state::<CloudSyncManager>();
     if manager.lock()?.loaded {
         return Ok(());
@@ -494,6 +520,7 @@ pub async fn cloud_sync_connect(
     merge_existing: bool,
     device_label: String,
 ) -> Result<Status> {
+    super::books::cancel_active(&app);
     if !native_ready(&app).await {
         return Err(Failure::new(FailureCode::NativeBridgeUnavailable));
     }
@@ -640,6 +667,7 @@ pub async fn cloud_sync_set_context(app: AppHandle, context: Activity) -> Result
     let manager = app.state::<CloudSyncManager>();
     let previous = manager.activity.send_replace(context);
     if !context.foreground {
+        super::books::cancel_active(&app);
         let control = manager.lock()?;
         control.timer_cancel.cancel();
         control.round_cancel.cancel();
@@ -656,6 +684,7 @@ pub async fn cloud_sync_set_context(app: AppHandle, context: Activity) -> Result
 
 #[tauri::command]
 pub async fn cloud_sync_cancel(app: AppHandle) -> Result<Status> {
+    super::books::cancel_active(&app);
     load_once(&app).await?;
     {
         let manager = app.state::<CloudSyncManager>();
@@ -674,6 +703,7 @@ pub async fn cloud_sync_cancel(app: AppHandle) -> Result<Status> {
 
 #[tauri::command]
 pub async fn cloud_sync_disconnect(app: AppHandle) -> Result<Status> {
+    super::books::cancel_active(&app);
     load_once(&app).await?;
     let _admin = administration(&app, true).await?;
     let store = disk(&app)?;
@@ -685,11 +715,13 @@ pub async fn cloud_sync_disconnect(app: AppHandle) -> Result<Status> {
             Err(error) if error.code == FailureCode::LocalStateInvalid => {
                 store.quarantine()?;
                 store.clear_sources()?;
+                super::books::clear_cleanup(&saved_app);
                 return Ok(true);
             }
             Err(error) => return Err(error),
         }
         store.disconnect()?;
+        super::books::clear_cleanup(&saved_app);
         Ok(false)
     })
     .await?;
@@ -703,6 +735,7 @@ pub async fn cloud_sync_disconnect(app: AppHandle) -> Result<Status> {
 
 #[tauri::command]
 pub async fn cloud_sync_reset_identity(app: AppHandle) -> Result<Status> {
+    super::books::cancel_active(&app);
     load_once(&app).await?;
     let admin = administration(&app, true).await?;
     let store = disk(&app)?;
@@ -775,6 +808,7 @@ pub async fn cloud_sync_cloud_books(app: AppHandle) -> Result<Vec<CloudBook>> {
 }
 
 pub fn shutdown(app: &AppHandle) {
+    super::books::cancel_active(app);
     let manager = app.state::<CloudSyncManager>();
     manager.activity.send_replace(Activity {
         foreground: false,

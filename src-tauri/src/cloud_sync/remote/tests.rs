@@ -9,6 +9,8 @@ struct Store {
     files: BTreeMap<String, Vec<u8>>,
     directories: BTreeSet<String>,
     requests: usize,
+    fail_put_status: Option<u16>,
+    slow_put: bool,
 }
 
 struct Server {
@@ -122,13 +124,19 @@ impl Server {
                                     }
                                 }
                                 "PUT" => {
-                                    // Deliberately ignores If-None-Match, like the first live service.
-                                    let existed =
-                                        store.files.insert(path.into(), body.to_vec()).is_some();
-                                    if existed {
-                                        204
+                                    if let Some(code) = store.fail_put_status {
+                                        code
                                     } else {
-                                        201
+                                        // Deliberately ignores If-None-Match, like the first live service.
+                                        let existed = store
+                                            .files
+                                            .insert(path.into(), body.to_vec())
+                                            .is_some();
+                                        if existed {
+                                            204
+                                        } else {
+                                            201
+                                        }
                                     }
                                 }
                                 "GET" => match store.files.get(path) {
@@ -209,6 +217,9 @@ impl Server {
                         };
                         (status, result, extra)
                     };
+                    if method == "PUT" && shared.lock().unwrap().slow_put {
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                    }
                     if path.ends_with("/slow") {
                         tokio::time::sleep(Duration::from_secs(2)).await;
                     }
@@ -224,6 +235,42 @@ impl Server {
             }
         });
         Self { base, store, task }
+    }
+
+    fn fail_puts(&self, status: u16) {
+        self.store.lock().unwrap().fail_put_status = Some(status);
+    }
+
+    fn allow_puts(&self) {
+        self.store.lock().unwrap().fail_put_status = None;
+    }
+
+    fn slow_puts(&self) {
+        self.store.lock().unwrap().slow_put = true;
+    }
+
+    fn seed_dir(&self, relative: &str) {
+        let mut store = self.store.lock().unwrap();
+        let prefix = store
+            .files
+            .keys()
+            .find(|name| name.ends_with("/space.json"))
+            .and_then(|name| name.strip_suffix("/space.json"))
+            .unwrap()
+            .to_string();
+        store.directories.insert(format!("{prefix}/{relative}/"));
+    }
+
+    fn seed_file(&self, relative: &str, bytes: Vec<u8>) {
+        let mut store = self.store.lock().unwrap();
+        let prefix = store
+            .files
+            .keys()
+            .find(|name| name.ends_with("/space.json"))
+            .and_then(|name| name.strip_suffix("/space.json"))
+            .unwrap()
+            .to_string();
+        store.files.insert(format!("{prefix}/{relative}"), bytes);
     }
 
     fn remote(&self) -> WebDavRemote {
@@ -499,4 +546,369 @@ async fn live_webdav_probe() {
         .await
         .expect("sanitized probe error");
     println!("webdav_probe={}", serde_json::to_string(&report).unwrap());
+}
+
+#[tokio::test]
+async fn dav_streaming_put_with_length_and_hash_check_are_bounded() {
+    let server = Server::start().await;
+    let remote = server.remote();
+    let cancel = Cancel::default();
+    let path = RemotePath::new("books/aa/streamed.bin").unwrap();
+    let payload = b"bounded streaming payload".to_vec();
+    remote
+        .put_stream(
+            &path,
+            payload.len() as u64,
+            reqwest::Body::from(payload.clone()),
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert!(server
+        .store
+        .lock()
+        .unwrap()
+        .files
+        .iter()
+        .any(
+            |(name, bytes)| name.ends_with(&format!("/{}", path.as_relative()))
+                && *bytes == payload
+        ));
+    assert_eq!(
+        remote
+            .hash_file(
+                &path,
+                &crate::save_file::hex_digest(&payload),
+                payload.len() as u64,
+                &cancel
+            )
+            .await
+            .unwrap(),
+        HashCheck::Match
+    );
+    assert_eq!(
+        remote
+            .hash_file(&path, &"0".repeat(64), payload.len() as u64, &cancel)
+            .await
+            .unwrap(),
+        HashCheck::Mismatch
+    );
+    assert_eq!(
+        remote
+            .hash_file(
+                &RemotePath::new("books/aa/missing.bin").unwrap(),
+                &"0".repeat(64),
+                1,
+                &cancel
+            )
+            .await
+            .unwrap(),
+        HashCheck::Missing
+    );
+}
+
+#[tokio::test]
+async fn dav_source_stream_aborts_before_publish_when_hash_or_length_changed() {
+    let server = Server::start().await;
+    let remote = server.remote();
+    let path = RemotePath::new("books/aa/source.epub").unwrap();
+    let payload = vec![7u8; 256 * 1024];
+    let file = std::env::temp_dir().join(format!(
+        "epub-reader-stream-{}.bin",
+        crate::save_file::new_uuid().unwrap()
+    ));
+    std::fs::write(&file, &payload).unwrap();
+    let hash = crate::save_file::hex_digest(&payload);
+    crate::cloud_sync::books::test_put_file(
+        &remote,
+        &path,
+        file.clone(),
+        hash.clone(),
+        payload.len() as u64,
+    )
+    .await
+    .unwrap();
+    assert!(server
+        .store
+        .lock()
+        .unwrap()
+        .files
+        .iter()
+        .any(
+            |(name, bytes)| name.ends_with(&format!("/{}", path.as_relative()))
+                && *bytes == payload
+        ));
+
+    let bad = "0".repeat(64);
+    let error = crate::cloud_sync::books::test_put_file(
+        &remote,
+        &RemotePath::new("books/aa/changed.epub").unwrap(),
+        file.clone(),
+        bad,
+        payload.len() as u64,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error, "source-changed");
+    let _ = std::fs::remove_file(file);
+}
+
+#[tokio::test]
+async fn dav_streaming_put_reports_quota_and_honors_cancel() {
+    let server = Server::start().await;
+    let remote = server.remote();
+    let cancel = Cancel::default();
+    let quota = remote
+        .put_stream(
+            &RemotePath::new("books/aa/error-507").unwrap(),
+            4,
+            reqwest::Body::from(b"data".to_vec()),
+            &cancel,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(quota.code, RemoteErrorCode::QuotaExceeded);
+    assert_eq!(quota.http_status, Some(507));
+
+    let in_flight = Cancel::default();
+    let slow = RemotePath::new("books/aa/slow").unwrap();
+    let request = remote.put_stream(&slow, 4, reqwest::Body::from(b"data".to_vec()), &in_flight);
+    let interrupt = async {
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        in_flight.cancel();
+    };
+    let (result, ()) = tokio::join!(request, interrupt);
+    assert_eq!(result.unwrap_err().code, RemoteErrorCode::Cancelled);
+}
+
+#[tokio::test]
+async fn dav_repairs_an_object_that_lost_its_completion_marker() {
+    let server = Server::start().await;
+    let remote = server.remote();
+    let cancel = Cancel::default();
+    let payload = b"object without marker".to_vec();
+    let hash = crate::save_file::hex_digest(&payload);
+    let plan = crate::cloud_sync::books::test_plan(hash.clone(), payload.len() as u64);
+    remote
+        .create_collection(&RemotePath::new("books").unwrap(), &cancel)
+        .await
+        .unwrap();
+    let shard = RemotePath::new("books").unwrap().child(&hash[..2]).unwrap();
+    remote.create_collection(&shard, &cancel).await.unwrap();
+    let (object_name, _) = crate::cloud_sync::books::test_paths(&plan);
+    let object = shard.child(&object_name).unwrap();
+    remote
+        .put(&object, payload.clone(), WriteCondition::Any, &cancel)
+        .await
+        .unwrap();
+    let caps = Capabilities {
+        move_file: true,
+        move_no_replace: true,
+        conditional_create: false,
+    };
+    assert!(
+        crate::cloud_sync::books::test_resolve_complete(&remote, &plan, "space-id", caps)
+            .await
+            .unwrap()
+    );
+    let (_, marker) = crate::cloud_sync::books::test_paths(&plan);
+    assert!(server
+        .store
+        .lock()
+        .unwrap()
+        .files
+        .keys()
+        .any(|name| name.ends_with(&format!("/{marker}"))));
+}
+
+#[tokio::test]
+async fn dav_original_book_batch_uploads_once_and_reports_partial_success() {
+    let server = Server::start().await;
+    let remote = server.remote();
+    let cancel = Cancel::default();
+    let cloud_space = space("33333333-3333-4333-8333-333333333333");
+    remote
+        .put(
+            &RemotePath::new("space.json").unwrap(),
+            serde_json::to_vec(&cloud_space).unwrap(),
+            WriteCondition::Any,
+            &cancel,
+        )
+        .await
+        .unwrap();
+
+    let app = tauri::test::mock_builder()
+        .manage(crate::cloud_sync::commands::CloudSyncManager::default())
+        .build(tauri::test::mock_context(tauri::test::noop_assets()))
+        .unwrap();
+    let handle = app.handle().clone();
+    crate::cloud_sync::commands::test_set_connection(
+        &handle,
+        crate::cloud_sync::model::ConnectionInfo {
+            connection_id: "44444444-4444-4444-8444-444444444444".into(),
+            settings: crate::cloud_sync::model::Settings {
+                base_url: "https://nas.invalid/dav/".into(),
+                remote_root: "test dir".into(),
+                username: "test".into(),
+            },
+            space_id: cloud_space.space_id.clone(),
+            device_label: "Test".into(),
+        },
+    );
+
+    let payload = b"original book bytes for upload".to_vec();
+    let hash = crate::save_file::hex_digest(&payload);
+    let good = std::env::temp_dir().join(format!(
+        "epub-reader-book-upload-{}.epub",
+        crate::save_file::new_uuid().unwrap()
+    ));
+    std::fs::write(&good, &payload).unwrap();
+    let missing = std::env::temp_dir().join(format!(
+        "epub-reader-book-missing-{}.epub",
+        crate::save_file::new_uuid().unwrap()
+    ));
+    let missing_hash = "b".repeat(64);
+    let caps = Capabilities {
+        move_file: true,
+        move_no_replace: true,
+        conditional_create: false,
+    };
+    let files = vec![
+        (hash.clone(), good.clone(), payload.len() as u64),
+        (missing_hash, missing, 12),
+    ];
+    let result = crate::cloud_sync::books::test_run_upload(
+        &handle,
+        &remote,
+        files,
+        "44444444-4444-4444-8444-444444444444",
+        &cloud_space.space_id,
+        caps,
+    )
+    .await
+    .unwrap();
+    assert_eq!(result.status, "partial");
+    assert_eq!(result.uploaded, 1);
+    assert_eq!(result.failed, 1);
+    let shard = &hash[..2];
+    let object = format!("/books/{shard}/{hash}.epub");
+    let marker = format!("/books/{shard}/{hash}.ok");
+    let store = server.store.lock().unwrap();
+    assert!(store.files.keys().any(|name| name.ends_with(&object)));
+    assert!(store.files.keys().any(|name| name.ends_with(&marker)));
+    assert!(!store.files.keys().any(|name| name.contains(".pending")));
+    drop(store);
+
+    let retry = crate::cloud_sync::books::test_run_upload(
+        &handle,
+        &remote,
+        vec![(hash, good.clone(), payload.len() as u64)],
+        "44444444-4444-4444-8444-444444444444",
+        &cloud_space.space_id,
+        caps,
+    )
+    .await
+    .unwrap();
+    assert_eq!(retry.status, "completed");
+    assert_eq!(retry.already_present, 1);
+    assert_eq!(retry.uploaded, 0);
+
+    let quota_payload = b"quota book one".to_vec();
+    let quota_hash = crate::save_file::hex_digest(&quota_payload);
+    let quota_file = std::env::temp_dir().join(format!(
+        "epub-reader-book-quota-{}.epub",
+        crate::save_file::new_uuid().unwrap()
+    ));
+    std::fs::write(&quota_file, &quota_payload).unwrap();
+    let quota_missing = std::env::temp_dir().join(format!(
+        "epub-reader-book-quota-missing-{}.epub",
+        crate::save_file::new_uuid().unwrap()
+    ));
+    server.fail_puts(507);
+    let stopped = crate::cloud_sync::books::test_run_upload(
+        &handle,
+        &remote,
+        vec![
+            (quota_hash, quota_file.clone(), quota_payload.len() as u64),
+            ("c".repeat(64), quota_missing, 9),
+        ],
+        "44444444-4444-4444-8444-444444444444",
+        &cloud_space.space_id,
+        caps,
+    )
+    .await
+    .unwrap();
+    assert_eq!(stopped.status, "stopped");
+    assert_eq!(stopped.failed, 1);
+    assert_eq!(stopped.not_attempted, 1);
+    assert_eq!(stopped.books[0].code.as_deref(), Some("quota-exceeded"));
+
+    // Ten thousand already-present books must not cause per-book GET/PUT.
+    server.allow_puts();
+    server.seed_dir("books");
+    let mut plans = Vec::with_capacity(10_000);
+    for index in 0..10_000u32 {
+        let hash = format!("{:02x}{:062x}", index % 256, index);
+        let shard = &hash[..2];
+        server.seed_dir(&format!("books/{shard}"));
+        server.seed_file(&format!("books/{shard}/{hash}.epub"), vec![1; 10]);
+        server.seed_file(&format!("books/{shard}/{hash}.ok"), b"{}".to_vec());
+        plans.push(crate::cloud_sync::books::test_plan(hash, 10));
+    }
+    let before = server.store.lock().unwrap().requests;
+    let scale = crate::cloud_sync::books::test_run_upload_plans(
+        &handle,
+        &remote,
+        plans,
+        "44444444-4444-4444-8444-444444444444",
+        &cloud_space.space_id,
+        caps,
+    )
+    .await
+    .unwrap();
+    let requests = server.store.lock().unwrap().requests - before;
+    assert_eq!(scale.status, "completed");
+    assert_eq!(scale.already_present, 10_000);
+    assert_eq!(scale.uploaded, 0);
+    assert_eq!(scale.failed, 0);
+    assert_eq!(requests, 257, "one space GET plus one PROPFIND per shard");
+    let _ = std::fs::remove_file(good);
+    server.slow_puts();
+    let cancel_payload = vec![9u8; 2 * 1024 * 1024];
+    let cancel_hash = crate::save_file::hex_digest(&cancel_payload);
+    let cancel_file = std::env::temp_dir().join(format!(
+        "epub-reader-book-cancel-{}.epub",
+        crate::save_file::new_uuid().unwrap()
+    ));
+    std::fs::write(&cancel_file, &cancel_payload).unwrap();
+    let cancel = Cancel::default();
+    let run = crate::cloud_sync::books::test_run_upload_plans_with_cancel(
+        &handle,
+        &remote,
+        vec![crate::cloud_sync::books::test_plan_with_file(
+            cancel_hash,
+            cancel_file.clone(),
+            cancel_payload.len() as u64,
+        )],
+        "44444444-4444-4444-8444-444444444444",
+        &cloud_space.space_id,
+        caps,
+        cancel.clone(),
+    );
+    let interrupt = async {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        cancel.cancel();
+    };
+    let (cancelled_result, ()) = tokio::join!(run, interrupt);
+    let cancelled_result = cancelled_result.unwrap();
+    assert_eq!(cancelled_result.status, "cancelled");
+    assert!(server
+        .store
+        .lock()
+        .unwrap()
+        .files
+        .keys()
+        .all(|name| !name.contains(".pending")));
+    let _ = std::fs::remove_file(cancel_file);
+    let _ = std::fs::remove_file(quota_file);
 }
