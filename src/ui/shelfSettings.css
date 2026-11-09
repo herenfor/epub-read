@@ -167,6 +167,12 @@
   flex-direction: column;
   gap: 14px;
   padding: 6px 24px 24px;
+  /* No scrollbar: the edge fade (scrollEdgeFade) shows there is more. */
+  scrollbar-width: none;
+}
+
+.shelf-settings-scroll::-webkit-scrollbar {
+  display: none;
 }
 
 /* 内容变高（如点击翻页区域展开“自定义”）时应由这一层滚动，而不是把卡片压扁：
