@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { fitBatchDock, type BatchDockFit } from "./batchDockFit";
+import { createElement, useRef } from "react";
+import { createReactDomHarness } from "../test/reactDomHarness";
+import { fitBatchDock, useBatchDockFit, type BatchDockFit } from "./batchDockFit";
 
 /** A dock whose width follows its data-fit, as the stylesheet makes it. */
 function dock(widths: Record<BatchDockFit, number>): HTMLElement {
@@ -35,5 +37,28 @@ describe("fitBatchDock", () => {
     const el = dock(ZH);
     fitBatchDock(el, 640);
     expect(fitBatchDock(el, 1280)).toBe("full");
+  });
+
+  it("releases its fit when the layout becomes inactive or unmounts", async () => {
+    function Dock({ active }: { active: boolean }) {
+      const ref = useRef<HTMLDivElement>(null);
+      useBatchDockFit(ref, active, "actions");
+      return createElement("div", { ref });
+    }
+    const dom = createReactDomHarness();
+    let element: HTMLElement | null = null;
+    try {
+      await dom.render(createElement(Dock, { active: true }));
+      element = dom.container.firstElementChild as HTMLElement;
+      expect(element.hasAttribute("data-fit")).toBe(true);
+      await dom.render(createElement(Dock, { active: false }));
+      expect(dom.container.firstElementChild).toBe(element);
+      expect(element.hasAttribute("data-fit")).toBe(false);
+      await dom.render(createElement(Dock, { active: true }));
+      expect(element.hasAttribute("data-fit")).toBe(true);
+    } finally {
+      await dom.dispose();
+    }
+    expect(element?.hasAttribute("data-fit")).toBe(false);
   });
 });

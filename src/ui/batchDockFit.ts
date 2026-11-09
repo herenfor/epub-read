@@ -45,6 +45,7 @@ export function useBatchDockFit(ref: RefObject<HTMLElement | null>, active: bool
     return () => {
       window.removeEventListener("resize", onResize);
       if (frame) cancelAnimationFrame(frame);
+      delete dock.dataset.fit;
     };
   }, [ref, active, contentKey]);
 }

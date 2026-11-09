@@ -500,7 +500,7 @@ export function ShelfView(props: ShelfViewProps) {
     Boolean(getRuntimeCapabilities().supportsLanTransfer && props.onOpenLanTransfer),
     Boolean(props.cloudUpload),
   ].join("|");
-  useBatchDockFit(batchDockRef, (selectionMode || dockClosing) && !isCompactMobile, batchDockKey);
+  useBatchDockFit(batchDockRef, (selectionMode || dockClosing) && !isCompactMobile && !props.touchUi, batchDockKey);
   const [coarsePointer] = useState(() => {
     try {
       return window.matchMedia?.("(pointer: coarse)").matches === true;
