@@ -57,9 +57,11 @@ For MOBI6 only, the temporary reading EPUB normalizes Kindle's legacy
 presentational markup in place: nested `<blockquote>` margins are capped at two
 indent levels without dropping elements or ids, `<p height>`/`<p width>`
 become `margin-top` (with the UA bottom margin cleared) and `text-indent` CSS,
-and `<mbp:pagebreak>` becomes a multicolumn break. Tag-only rewriting keeps
-every text node, part name and anchor unchanged. KF8/AZW3 parts are copied
-byte-for-byte.
+and `<mbp:pagebreak>` becomes a multicolumn break. Pagebreak id/name/class and
+other attributes are retained on the generated block, and
+style/script/title/textarea raw text is copied without scanning. Tag-only
+rewriting keeps every text node, part name and anchor unchanged. KF8/AZW3 parts
+are copied byte-for-byte.
 
 ## Stable error codes
 

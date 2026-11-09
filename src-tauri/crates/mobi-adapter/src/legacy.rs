@@ -16,14 +16,8 @@
 //! reading identity as the source.
 
 const MAX_QUOTE_INDENT_LEVELS: usize = 2;
-const PAGEBREAK: &str = concat!(
-    r#"<div class="mobi6-pagebreak" style=""#,
-    // Put the multicolumn value last: modern engines resolve the legacy page
-    // alias to `break-before`, while the prefixed form covers older WebKit.
-    "page-break-before:always;break-before:column;-webkit-column-break-before:always;",
-    "height:0;margin:0;padding:0;",
-    r#""></div>"#
-);
+const PAGEBREAK_STYLE: &str = "page-break-before:always;break-before:column;-webkit-column-break-before:always;height:0;margin:0;padding:0";
+const RAW_TEXT_ELEMENTS: &[&str] = &["style", "script", "title", "textarea"];
 
 /// Normalize one MOBI6 markup part. Invalid UTF-8 is copied unchanged rather
 /// than risk corrupting a book; libmobi normally emits UTF-8.
@@ -96,6 +90,21 @@ fn normalize_text(text: &str) -> String {
         }
 
         let name = opening_tag_name(tag);
+        if is_raw_text_element(name) && !is_self_closing(tag) {
+            // CSS/JS and escapable-raw-text contents are not markup. Copy them
+            // verbatim so a literal `<p height=...>` inside a style or script
+            // cannot be rewritten into live CSS.
+            output.push_str(tag);
+            let Some(close_start) = find_raw_text_close(text, tag_end, name) else {
+                output.push_str(&text[tag_end..]);
+                break;
+            };
+            output.push_str(&text[tag_end..close_start]);
+            let close_end = find_tag_end(text, close_start).unwrap_or(text.len());
+            output.push_str(&text[close_start..close_end]);
+            cursor = close_end;
+            continue;
+        }
         if name.eq_ignore_ascii_case("blockquote") {
             let self_closing = is_self_closing(tag);
             if !self_closing {
@@ -108,7 +117,7 @@ fn normalize_text(text: &str) -> String {
             };
             output.push_str(&rewrite_blockquote(tag, level));
         } else if name.eq_ignore_ascii_case("mbp:pagebreak") {
-            output.push_str(PAGEBREAK);
+            output.push_str(&rewrite_pagebreak(tag));
             if !is_self_closing(tag) {
                 pending_pagebreak_closes += 1;
             }
@@ -176,6 +185,81 @@ fn rewrite_paragraph(tag: &str) -> String {
     parsed.render()
 }
 
+fn rewrite_pagebreak(tag: &str) -> String {
+    let Some(mut parsed) = parse_tag(tag) else {
+        return fallback_pagebreak();
+    };
+    // `mbp:pagebreak` becomes a real block, but its id/name/class and other
+    // attributes stay on that block so a TOC or internal link to the break
+    // still resolves. The page-break declarations are merged last so authored
+    // dimensions cannot undo the forced column break.
+    parsed.name = "div".to_string();
+    parsed.self_closing = false;
+    append_class(&mut parsed.attrs, "mobi6-pagebreak");
+    append_style(&mut parsed.attrs, &[PAGEBREAK_STYLE]);
+    let mut output = parsed.render();
+    output.push_str("</div>");
+    output
+}
+
+fn fallback_pagebreak() -> String {
+    format!(r#"<div class="mobi6-pagebreak" style="{PAGEBREAK_STYLE};"></div>"#)
+}
+
+fn append_class(attrs: &mut Vec<Attr>, class: &str) {
+    if let Some(attr) = attrs
+        .iter_mut()
+        .find(|attr| attr.name.eq_ignore_ascii_case("class"))
+    {
+        let existing = attr.value.take().unwrap_or_default();
+        let mut classes = existing.split_whitespace().collect::<Vec<_>>();
+        if !classes
+            .iter()
+            .any(|candidate| candidate.eq_ignore_ascii_case(class))
+        {
+            classes.push(class);
+        }
+        attr.value = Some(classes.join(" "));
+        if attr.quote.is_none() {
+            attr.quote = Some('"');
+        }
+    } else {
+        attrs.push(Attr {
+            name: "class".to_string(),
+            value: Some(class.to_string()),
+            quote: Some('"'),
+        });
+    }
+}
+
+fn is_raw_text_element(name: &str) -> bool {
+    RAW_TEXT_ELEMENTS
+        .iter()
+        .any(|candidate| name.eq_ignore_ascii_case(candidate))
+}
+
+fn find_raw_text_close(text: &str, from: usize, name: &str) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let name = name.as_bytes();
+    let mut cursor = from;
+    while cursor < bytes.len() {
+        let relative = text[cursor..].find('<')?;
+        let start = cursor + relative;
+        let name_start = start + 2;
+        if bytes.get(start + 1) == Some(&b'/')
+            && name_start + name.len() <= bytes.len()
+            && bytes[name_start..name_start + name.len()].eq_ignore_ascii_case(name)
+            && bytes
+                .get(name_start + name.len())
+                .is_some_and(|byte| matches!(*byte, b'>' | b' ' | b'\t' | b'\r' | b'\n' | b'/'))
+        {
+            return Some(start);
+        }
+        cursor = start + 1;
+    }
+    None
+}
+
 /// Accept only the CSS lengths seen in MOBI6 paragraph attributes. This keeps
 /// arbitrary attribute text out of the generated style attribute.
 fn css_length(raw: &str) -> Option<String> {
@@ -239,6 +323,9 @@ fn append_style<T: AsRef<str>>(attrs: &mut Vec<Attr>, declarations: &[T]) {
         value.push_str(&addition);
         value.push(';');
         attr.value = Some(value);
+        if attr.quote.is_none() {
+            attr.quote = Some('"');
+        }
     } else {
         attrs.push(Attr {
             name: "style".to_string(),
@@ -508,6 +595,51 @@ mod tests {
         assert_eq!(output.matches("class=\"mobi6-pagebreak\"").count(), 2);
         assert_eq!(output.matches("break-before:column").count(), 2);
         assert_eq!(visible_text(&output), visible_text(&sample()));
+    }
+
+    #[test]
+    fn pagebreak_keeps_anchor_attributes_and_merges_style() {
+        let output = normalize_text(
+            r#"<p>A</p><mbp:pagebreak id="ch2" name="ch2" class="chapter" style="color:red"/><p>B</p>"#,
+        );
+        assert_eq!(
+            output,
+            format!(
+                r#"<p>A</p><div id="ch2" name="ch2" class="chapter mobi6-pagebreak" style="color:red;{PAGEBREAK_STYLE};"></div><p>B</p>"#
+            )
+        );
+
+        let paired = normalize_text(r#"<mbp:pagebreak id="ch3"></mbp:pagebreak><p>C</p>"#);
+        assert_eq!(
+            paired,
+            format!(
+                r#"<div id="ch3" class="mobi6-pagebreak" style="{PAGEBREAK_STYLE};"></div><p>C</p>"#
+            )
+        );
+        assert!(!paired.contains("mbp:pagebreak"));
+    }
+
+    #[test]
+    fn raw_text_contexts_are_not_rewritten() {
+        let input = concat!(
+            r#"<STYLE>p:before{content:'<p height="1em">';}</STYLE>"#,
+            r#"<p height="1em">X</p>"#,
+            r#"<script>const s = '<mbp:pagebreak id="x"/>';</script>"#,
+            r#"<title><p height="3pt"></title>"#,
+            r#"<textarea><p width="1em"></textarea>"#,
+        );
+        let output = normalize_text(input);
+        assert_eq!(
+            output,
+            concat!(
+                r#"<STYLE>p:before{content:'<p height="1em">';}</STYLE>"#,
+                r#"<p style="margin-top:1em;margin-bottom:0;">X</p>"#,
+                r#"<script>const s = '<mbp:pagebreak id="x"/>';</script>"#,
+                r#"<title><p height="3pt"></title>"#,
+                r#"<textarea><p width="1em"></textarea>"#,
+            )
+        );
+        assert!(!output.contains("mobi6-pagebreak"));
     }
 
     #[test]
