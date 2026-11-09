@@ -123,6 +123,10 @@ export interface ReaderHandle {
     mediaAnchor?: MediaReadingAnchor | null;
     page?: number;
   }): number | null;
+  /** ER-0145：章内目录锚点的规范文本偏移（与 getReadingAnchor().textOffset 同一口径）；该章未排好为 null。 */
+  fragmentTextOffsets?(path: string, fragments: readonly string[]): Array<number | null> | null;
+  /** ER-0145：该章 fragment 是否在当前屏（分页）或视口内（滚动）。 */
+  fragmentOnCurrentPage?(path: string, fragment: string): boolean;
   /** A15：当前屏上各页和挂在上面的书签（滚动模式为屏上能看到丝带的书签）。 */
   screenBookmarks?(bookmarks: readonly RibbonBookmark[]): ScreenBookmarks | null;
   /** A15：在当前屏第 lane 页取书签位置（双页补右页用）；该页没有正文时为 null。 */
@@ -3359,6 +3363,12 @@ const PagedReaderView = forwardRef<ReaderHandle, ReaderViewProps>(function Paged
       },
       getReadingAnchor() {
         return paginatorRef.current?.getReadingAnchor() ?? null;
+      },
+      fragmentTextOffsets(path, fragments) {
+        return paginatorRef.current?.fragmentTextOffsets(path, fragments) ?? null;
+      },
+      fragmentOnCurrentPage(path, fragment) {
+        return paginatorRef.current?.fragmentOnCurrentPage(path, fragment) ?? false;
       },
       resolveBookmarkPage(bookmark) {
         return paginatorRef.current?.resolveBookmarkPage?.(bookmark) ?? bookmark.page ?? null;

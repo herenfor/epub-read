@@ -39,6 +39,43 @@ export function activeTocEntry(index: TocIndex, href?: string): IndexedTocNode |
   return group && ((anchor ? group.anchors.get(anchor) : undefined) ?? group.start ?? group.first);
 }
 
+/** In-file TOC anchors of `path`, TOC order; the file's own (anchorless) entry is not listed. */
+export function tocAnchorsForPath(index: TocIndex, path: string): string[] {
+  return [...(index.paths.get(path)?.anchors.keys() ?? [])].filter(anchor => anchor !== "");
+}
+
+/** The TOC key for a navigation anchor, which may arrive decoded (archive references). */
+export function tocAnchorKey(anchors: readonly string[], anchor: string | undefined): string | undefined {
+  if (!anchor) return undefined;
+  return anchors.find(key => {
+    if (key === anchor) return true;
+    try { return decodeURIComponent(key) === anchor; } catch { return false; }
+  });
+}
+
+/**
+ * ER-0145: which in-file TOC anchor the reader is in, from canonical text
+ * offsets only. The last anchor at or before the reading position wins (ties:
+ * the later, more specific TOC entry). A navigation target still on screen
+ * wins first, so a TOC jump to a mid-page heading shows that heading. Returns
+ * undefined when nothing has been passed yet: the caller keeps its old rule.
+ */
+export function pickTocAnchor(
+  anchors: readonly string[],
+  offsets: readonly (number | null)[],
+  readingOffset: number,
+  navigation?: { anchor: string; onScreen: boolean },
+): string | undefined {
+  if (navigation?.onScreen && anchors.includes(navigation.anchor)) return navigation.anchor;
+  let best: { anchor: string; offset: number } | undefined;
+  anchors.forEach((anchor, i) => {
+    const offset = offsets[i];
+    if (offset === null || offset === undefined || offset > readingOffset) return;
+    if (!best || offset >= best.offset) best = { anchor, offset };
+  });
+  return best?.anchor;
+}
+
 export interface TocRow {
   entry: IndexedTocNode;
   parent: boolean;

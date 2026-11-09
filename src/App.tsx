@@ -8,7 +8,8 @@ import type { Book } from "./core/types";
 import type { Stamp, Version } from "./core/portableState/portable-register-core";
 import { projectProgressVersion } from "./core/portableState/projection";
 import type { Locator, PortablePreferences, ProgressValue } from "./core/portableState/portable-state-types";
-import { isExternalUrl, isFragmentOnly } from "./core/paths";
+import { isExternalUrl, isFragmentOnly, splitHref } from "./core/paths";
+import { activeTocEntry, indexToc, pickTocAnchor, tocAnchorKey, tocAnchorsForPath } from "./ui/sidebarToc";
 import type { ExactTextHit } from "./core/exactTextHits";
 import type { SearchOccurrence } from "./core/searchOccurrence";
 import type { ResourceIssue } from "./render/resources";
@@ -1842,8 +1843,36 @@ export default function App() {
   const readerOpeningCreator = phase.phase === "loading" ? phase.creator : tabSwitchOpening?.creator ?? book?.metadata.creator;
   const reading = chapterState.status === "ready" && !chapterState.empty;
   const currentPath = ready ? spineItemPath(book!, spineIndex) : undefined;
+  // One sample per render: progress and the TOC position below read the same anchor.
+  const currentReadingAnchor = reading ? readerRef.current?.getReadingAnchor() ?? null : null;
+  // ER-0145: several TOC entries in one file follow the reading position, not
+  // only the last navigation target. Display only; never written back to `anchor`.
+  const tocIndex = useMemo(() => book ? indexToc(book.toc) : null, [book]);
+  const currentFileTocPath = currentPath ? splitHref(archiveHref(book?.archiveReferences, currentPath)).path : undefined;
+  const currentFileTocAnchors = useMemo(
+    () => tocIndex && currentFileTocPath ? tocAnchorsForPath(tocIndex, currentFileTocPath) : [],
+    [tocIndex, currentFileTocPath],
+  );
+  const readingTextOffset = currentReadingAnchor?.path === currentPath ? currentReadingAnchor?.textOffset ?? null : null;
+  const navigationTocAnchor = tocAnchorKey(currentFileTocAnchors, anchor);
+  const navigationTocOnScreen = useMemo(
+    () => Boolean(currentPath && navigationTocAnchor && readingTextOffset !== null
+      && readerRef.current?.fragmentOnCurrentPage?.(currentPath, navigationTocAnchor)),
+    // The page or the reading offset changing is what can move the target off screen.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [currentPath, navigationTocAnchor, readingTextOffset, chapterState.status === "ready" ? chapterState.currentPage : -1],
+  );
+  const positionTocAnchor = book?.sourceFormat !== "comic-zip" && currentPath && readingTextOffset !== null && currentFileTocAnchors.length > 0
+    ? (() => {
+        const offsets = readerRef.current?.fragmentTextOffsets?.(currentPath, currentFileTocAnchors);
+        return offsets ? pickTocAnchor(currentFileTocAnchors, offsets, readingTextOffset,
+          navigationTocAnchor ? { anchor: navigationTocAnchor, onScreen: navigationTocOnScreen } : undefined) : undefined;
+      })()
+    : undefined;
   const activeHref = currentPath
-    ? archiveHref(book?.archiveReferences, currentPath, book?.sourceFormat === "comic-zip" && chapterState.status === "ready" ? `page-${(chapterState.leafRange?.first ?? 1) - 1}` : anchor ?? "")
+    ? positionTocAnchor !== undefined
+      ? `${currentFileTocPath}#${positionTocAnchor}`
+      : archiveHref(book?.archiveReferences, currentPath, book?.sourceFormat === "comic-zip" && chapterState.status === "ready" ? `page-${(chapterState.leafRange?.first ?? 1) - 1}` : anchor ?? "")
     : undefined;
   activeHrefRef.current = activeHref;
   // 阅读进度：以"标准页 = 1000 字"为尺度，按锚点所在字数位置推算
@@ -1856,7 +1885,7 @@ export default function App() {
     : { total: 0, before: 0, current: null, complete: false, approximate: false };
   const anchorChars = (() => {
     if (!reading) return 0;
-    const a = readerRef.current?.getReadingAnchor();
+    const a = currentReadingAnchor;
     return currentChapterCharsRead({
       textOffset: a?.textOffset,
       chapterFraction: book?.sourceFormat === "comic-zip" && chapterState.status === "ready" ? chapterState.totalScrollProgress : undefined,
@@ -2376,7 +2405,7 @@ export default function App() {
   const tocSpineLabels = useMemo(() => book ? tocLabelsBySpine(book) : [], [book]);
   const currentChapterLabel = ready ? book?.sourceFormat === "comic-zip" && chapterState.status === "ready"
     ? book.toc[(chapterState.leafRange?.first ?? 1) - 1]?.label ?? ""
-    : tocSpineLabels[spineIndex] ?? "" : "";
+    : (positionTocAnchor !== undefined && tocIndex ? activeTocEntry(tocIndex, activeHref)?.node.label : undefined) || (tocSpineLabels[spineIndex] ?? "") : "";
   // The shelf's "continue" card shows this name for the saved position.
   useEffect(() => {
     if (ready) writeShelfPlaceLabel(activeSessionRef.current?.countCacheKey ?? null, spineIndex, currentChapterLabel);

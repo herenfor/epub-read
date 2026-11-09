@@ -2328,6 +2328,13 @@ export const ContinuousReaderView = forwardRef<ReaderHandle, ContinuousReaderVie
           }
           return null;
         },
+        fragmentTextOffsets(path, fragments) {
+          // Offsets are DOM-order only; any ready slot of that chapter answers.
+          for (const slot of slotsRef.current.values()) {
+            if (slot.status === "ready" && slot.path === path) return slot.paginator.fragmentTextOffsets(path, fragments);
+          }
+          return null;
+        },
         getAnchorText() {
           const activeExplicit =
             readingPositionRef.current &&

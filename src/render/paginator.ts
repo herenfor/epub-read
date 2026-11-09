@@ -709,6 +709,9 @@ export function columnToView(
  * 5. 阅读位置用文本内容锚点保留：成功排版后以 code-point offset/snippet
  *    通过 Range 选择新列；页面中心仅作只读 caret 采样，legacy 元素/页码兜底。
  */
+/** ER-0145: fragment → text offset, valid for one chapter document's text index. */
+const fragmentOffsetCache = new WeakMap<VisibleTextIndex, Map<string, number | null>>();
+
 /** 页内 fragment 的原始 hash 与用于 getElementById 的解码锚点。 */
 export interface FragmentNavigation {
   hash: string;
@@ -8385,6 +8388,50 @@ export class ChapterPaginator {
   resolvePersistedAnchorContentY(anchor: PersistedNavigationAnchor): number | null {
     const adapted = adaptNavigationAnchor(anchor);
     return adapted ? this.resolveAnchorContentY(adapted) : null;
+  }
+
+  /**
+   * ER-0145: canonical text offsets of in-chapter fragments (TOC anchors) for
+   * `path`, in input order; null for a missing id. DOM order only, no layout,
+   * cached per text index, so page turns and re-layout never re-measure.
+   * Returns null when `path` is not the chapter laid out here.
+   */
+  fragmentTextOffsets(path: string, fragments: readonly string[]): Array<number | null> | null {
+    const doc = this.contentDoc;
+    const viewer = this.viewer;
+    if (this.disposed || !doc || !viewer || path !== this._currentPath || this.lastState.status !== "ready") return null;
+    const index = this.textIndex ?? this.buildTextIndex(doc, viewer);
+    this.textIndex = index;
+    let cache = fragmentOffsetCache.get(index);
+    if (!cache) fragmentOffsetCache.set(index, (cache = new Map()));
+    const raws = fragments.map((fragment) => fragment.startsWith("#") ? fragment.slice(1) : fragment);
+    const missing = [...new Set(raws.filter((raw) => !cache.has(raw)))];
+    if (missing.length > 0) {
+      const targets = missing.map((raw) => {
+        const parsed = raw ? getFragmentNavigation(`#${raw}`) : null;
+        return parsed ? doc.getElementById(parsed.anchor) : null;
+      });
+      const found = targets.filter((target): target is HTMLElement => target !== null);
+      const offsets = index.offsetsBeforeNodes(found);
+      missing.forEach((raw, i) => {
+        const target = targets[i];
+        cache.set(raw, target ? offsets[found.indexOf(target)] : null);
+      });
+    }
+    return raws.map((raw) => cache.get(raw) ?? null);
+  }
+
+  /**
+   * ER-0145: whether a fragment of the laid-out chapter starts on the screen
+   * now shown (paginated), or inside the viewport (scroll). One measurement;
+   * callers memoize per page.
+   */
+  fragmentOnCurrentPage(path: string, fragment: string): boolean {
+    if (this.disposed || path !== this._currentPath) return false;
+    if (!this.scrollMode) return this.getWithinChapterFragmentPage(fragment)?.page === this.metrics.currentPage;
+    const viewer = this.viewer;
+    const y = this.resolveFragmentContentY(fragment);
+    return viewer !== null && y !== null && y >= viewer.scrollTop && y < viewer.scrollTop + viewer.clientHeight;
   }
 
   /**

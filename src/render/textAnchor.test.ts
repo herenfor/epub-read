@@ -147,3 +147,18 @@ describe("visible text anchor index", () => {
     expect(index.elementIndex(document.createElement("div"))).toBe(-1);
   });
 });
+
+describe("element start offsets (ER-0145)", () => {
+  it("places empty, wrapping and trailing anchors at the text that follows, in DOM order only", () => {
+    const { document, viewer } = chapter(
+      '<p>Intro.</p><a id="c1"></a><h2>One</h2><p>Body</p><h2 id="c2"><span>Two</span></h2><p>End</p><a id="tail"></a>',
+    );
+    const index = buildVisibleTextIndex(document, viewer);
+    expect(index.text).toBe("Intro.OneBodyTwoEnd");
+    const ids = ["c2", "c1", "tail", "c1"];
+    expect(index.offsetsBeforeNodes(ids.map((id) => document.getElementById(id)!)))
+      .toEqual([index.text.indexOf("Two"), index.text.indexOf("One"), index.totalChars, index.text.indexOf("One")]);
+    expect(index.offsetsBeforeNodes([viewer])).toEqual([0]);
+    expect(index.offsetsBeforeNodes([])).toEqual([]);
+  });
+});

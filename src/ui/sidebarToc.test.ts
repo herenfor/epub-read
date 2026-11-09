@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TocNode } from "../core/types";
-import { activeTocEntry, indexToc, tocOffsets, tocWindow, visibleTocRows } from "./sidebarToc";
+import { activeTocEntry, indexToc, pickTocAnchor, tocAnchorKey, tocAnchorsForPath, tocOffsets, tocWindow, visibleTocRows } from "./sidebarToc";
 
 const node = (label: string, href: string, children: TocNode[] = []): TocNode => ({ label, href, children });
 
@@ -49,5 +49,56 @@ describe("indexed and windowed TOC", () => {
     expect(tocWindow([0], 0, 600)).toEqual({ start: 0, end: 0 });
     const depths = visibleTocRows(indexToc([node("a", "a", [node("b", "b")])]), new Set(["0"]), "");
     expect(tocOffsets(depths, [31.5, 30.8, 30.1, 30.1])).toEqual([0, 31.5, 62.3]);
+  });
+});
+
+describe("TOC position inside one file (ER-0145)", () => {
+  // MOBI6-style: one reading file, every chapter is an in-file anchor.
+  const index = indexToc([
+    node("Title", "part.html"),
+    node("Contents", "part.html#toc"),
+    node("I", "part.html#c1", [node("I.1", "part.html#c1s")]),
+    node("II", "part.html#c2"),
+    node("Other", "other.html#x"),
+  ]);
+  const anchors = tocAnchorsForPath(index, "part.html");
+  const offsets = [100, 500, 500, 2000];
+
+  it("lists the file's anchors in TOC order without the anchorless entry or other files", () => {
+    expect(anchors).toEqual(["toc", "c1", "c1s", "c2"]);
+  });
+
+  it("follows the reading position forwards and backwards", () => {
+    expect(pickTocAnchor(anchors, offsets, 50)).toBeUndefined();
+    expect(pickTocAnchor(anchors, offsets, 100)).toBe("toc");
+    expect(pickTocAnchor(anchors, offsets, 499)).toBe("toc");
+    // Same offset: the later, more specific entry.
+    expect(pickTocAnchor(anchors, offsets, 1200)).toBe("c1s");
+    expect(pickTocAnchor(anchors, offsets, 2500)).toBe("c2");
+    expect(pickTocAnchor(anchors, offsets, 1999)).toBe("c1s");
+    expect(activeTocEntry(index, `part.html#${pickTocAnchor(anchors, offsets, 2500)}`)?.node.label).toBe("II");
+  });
+
+  it("shows a TOC jump target while it is on screen, then hands back to the position", () => {
+    // Jumped to II, a heading in the middle of the page that starts at 1800.
+    expect(pickTocAnchor(anchors, offsets, 1800, { anchor: "c2", onScreen: true })).toBe("c2");
+    // Turned back a page: II is no longer on screen.
+    expect(pickTocAnchor(anchors, offsets, 1500, { anchor: "c2", onScreen: false })).toBe("c1s");
+    // Read on past it.
+    expect(pickTocAnchor(anchors, offsets, 2600, { anchor: "c2", onScreen: false })).toBe("c2");
+  });
+
+  it("skips missing ids and leaves the old rule when nothing is resolvable", () => {
+    expect(pickTocAnchor(anchors, [null, null, null, 2000], 1000)).toBeUndefined();
+    expect(pickTocAnchor(anchors, [null, 500, null, null], 1000)).toBe("c1");
+    expect(pickTocAnchor(anchors, offsets, 1000, { anchor: "missing", onScreen: true })).toBe("c1s");
+  });
+
+  it("matches a decoded navigation anchor to its encoded TOC key", () => {
+    const encoded = tocAnchorsForPath(indexToc([node("A", "p.html#ch%201"), node("B", "p.html#b")]), "p.html");
+    expect(tocAnchorKey(encoded, "ch 1")).toBe("ch%201");
+    expect(tocAnchorKey(encoded, "b")).toBe("b");
+    expect(tocAnchorKey(encoded, "nope")).toBeUndefined();
+    expect(tocAnchorKey(encoded, undefined)).toBeUndefined();
   });
 });

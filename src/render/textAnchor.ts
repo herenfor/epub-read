@@ -249,6 +249,35 @@ export class VisibleTextIndex {
     return this.offsetForOriginalRaw(item, sourceRaw);
   }
 
+  /**
+   * Normalized offsets where each target begins: the start of the first
+   * indexed text at or after it in document order (the total when none
+   * follows), so an empty `<a id>` before a heading resolves to the heading
+   * text. One document-order walk for all targets, no layout: the result does
+   * not change with font size or columns.
+   */
+  offsetsBeforeNodes(targets: readonly Node[]): number[] {
+    const result = targets.map(() => this.totalChars);
+    const wanted = new Map<Node, number[]>();
+    targets.forEach((target, i) => wanted.set(target, [...(wanted.get(target) ?? []), i]));
+    const root = targets[0]?.ownerDocument?.documentElement;
+    if (!root || this.nodes.length === 0) return result;
+    let waiting: number[] = [];
+    const stack: Node[] = [root];
+    while (stack.length > 0 && (wanted.size > 0 || waiting.length > 0)) {
+      const node = stack.pop()!;
+      const hit = wanted.get(node);
+      if (hit) { waiting.push(...hit); wanted.delete(node); }
+      const item = node.nodeType === 3 ? this.nodeMap.get(node as Text) : undefined;
+      if (item && waiting.length > 0) {
+        for (const i of waiting) result[i] = item.start;
+        waiting = [];
+      }
+      for (let child = node.lastChild; child; child = child.previousSibling) stack.push(child);
+    }
+    return result;
+  }
+
   positionForOffset(offset: number, bias: "start" | "end" = "start"): TextNodePosition | null {
     if (!validOffset(offset) || offset > this.totalChars || this.nodes.length === 0) return null;
     const item = this.nodes.find((candidate) => offset >= candidate.start && offset < candidate.end)
