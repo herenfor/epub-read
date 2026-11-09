@@ -1,10 +1,12 @@
 //! 平台只提供本机网络事实；过滤、排序和默认选择只在这里实现。
 //!
-//! Windows/Android 采集器负责把真实接口类型、端口状态和排除标志带进来；
+//! Windows/Android/Linux 采集器负责把真实接口类型、端口状态和排除标志带进来；
 //! 这里不按名称猜测 VPN/虚拟网卡，也不把 UDP route hint 当作地址来源。
 
 use super::error::LanSaveError;
 use serde::Serialize;
+#[cfg(any(target_os = "linux", test))]
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::net::Ipv4Addr;
 use tauri::{AppHandle, Runtime};
@@ -36,7 +38,8 @@ pub(crate) struct LocalAddress {
     pub label: String,
     pub kind: LinkKind,
     pub up: bool,
-    /// Windows: 非硬件/过滤接口；Android: TRANSPORT_VPN。
+    /// Windows: 非硬件/过滤接口；Android: TRANSPORT_VPN；
+    /// Linux: 无总线设备、sysfs virtual、tun/tap、回环、点对点或隧道类型。
     pub excluded: bool,
     /// Windows 可填 Ipv4Metric；这只是排序参考，不证明对端可达。
     pub interface_metric: Option<u32>,
@@ -73,6 +76,114 @@ pub(crate) fn windows_link(if_type: u32, status_flags: u8) -> (LinkKind, bool) {
     let hardware = status_flags & 0x01 != 0;
     let filter = status_flags & 0x02 != 0;
     (kind, !hardware || filter)
+}
+
+/// Linux 链路事实。调用方从 sysfs 填入；名称和 MAC 不是字段，不能用来证明物理网卡。
+#[cfg(any(target_os = "linux", test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct LinuxLinkFact {
+    pub arp_type: u32,
+    pub flags: u32,
+    pub oper_up: bool,
+    pub carrier_up: bool,
+    pub bus_device: bool,
+    pub virtual_sysfs: bool,
+    pub wireless: bool,
+    pub tun_tap: bool,
+}
+
+#[cfg(any(target_os = "linux", test))]
+const ARPHRD_ETHER: u32 = 1;
+#[cfg(any(target_os = "linux", test))]
+const ARPHRD_PPP: u32 = 512;
+#[cfg(any(target_os = "linux", test))]
+const ARPHRD_TUNNEL: u32 = 768;
+#[cfg(any(target_os = "linux", test))]
+const ARPHRD_TUNNEL6: u32 = 769;
+#[cfg(any(target_os = "linux", test))]
+const ARPHRD_LOOPBACK: u32 = 772;
+#[cfg(any(target_os = "linux", test))]
+const ARPHRD_SIT: u32 = 776;
+#[cfg(any(target_os = "linux", test))]
+const ARPHRD_IPGRE: u32 = 778;
+#[cfg(any(target_os = "linux", test))]
+const ARPHRD_IEEE80211: u32 = 801;
+#[cfg(any(target_os = "linux", test))]
+const ARPHRD_NONE: u32 = 65534;
+#[cfg(any(target_os = "linux", test))]
+const IFF_UP: u32 = 0x1;
+#[cfg(any(target_os = "linux", test))]
+const IFF_LOOPBACK: u32 = 0x8;
+#[cfg(any(target_os = "linux", test))]
+const IFF_POINTOPOINT: u32 = 0x10;
+
+/// 物理 Wi-Fi/以太网才返回对应类型且不排除。
+/// 回环、点对点、隧道类型、tun/tap、sysfs virtual，以及没有总线设备的接口都排除。
+/// 元数据不足（读不到总线设备）同样排除，避免把 VPN 或虚拟网卡当成默认 LAN。
+#[cfg(any(target_os = "linux", test))]
+pub(crate) fn linux_link(fact: &LinuxLinkFact) -> (LinkKind, bool) {
+    let loopback = fact.arp_type == ARPHRD_LOOPBACK || fact.flags & IFF_LOOPBACK != 0;
+    let point_to_point = fact.flags & IFF_POINTOPOINT != 0;
+    let tunnel_type = matches!(
+        fact.arp_type,
+        ARPHRD_NONE | ARPHRD_PPP | ARPHRD_TUNNEL | ARPHRD_TUNNEL6 | ARPHRD_SIT | ARPHRD_IPGRE
+    );
+    let unproven = !fact.bus_device || fact.virtual_sysfs || fact.tun_tap;
+    if loopback || point_to_point || tunnel_type || unproven {
+        return (LinkKind::Other, true);
+    }
+    if fact.wireless || fact.arp_type == ARPHRD_IEEE80211 {
+        return (LinkKind::Wifi, false);
+    }
+    if fact.arp_type == ARPHRD_ETHER {
+        return (LinkKind::Ethernet, false);
+    }
+    (LinkKind::Other, true)
+}
+
+/// 管理面 up、operstate 为 up、且 carrier 为 1 才算接通。三者缺一不选。
+#[cfg(any(target_os = "linux", test))]
+pub(crate) fn linux_interface_up(fact: &LinuxLinkFact) -> bool {
+    fact.flags & IFF_UP != 0 && fact.oper_up && fact.carrier_up
+}
+
+/// 只接受可安全拼进 `/sys/class/net/<name>` 的接口名。这是路径约束，不是类型判断。
+#[cfg(any(target_os = "linux", test))]
+pub(crate) fn linux_ifname_safe(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    (1..=15).contains(&bytes.len())
+        && name != "."
+        && !name.contains("..")
+        && bytes
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b':'))
+}
+
+/// `/proc/net/route` 里目的地为 0 的路由 metric。不读取网关，也不产生地址。
+#[cfg(any(target_os = "linux", test))]
+pub(crate) fn linux_default_route_metrics(table: &str) -> HashMap<String, u32> {
+    let mut metrics = HashMap::new();
+    for line in table.lines().skip(1) {
+        let mut cols = line.split_whitespace();
+        let Some(iface) = cols.next() else {
+            continue;
+        };
+        let Some(destination) = cols.next() else {
+            continue;
+        };
+        if destination != "00000000" {
+            continue;
+        }
+        // Gateway, Flags, RefCnt, Use, Metric
+        let Some(metric) = cols.nth(4).and_then(|value| value.parse::<u32>().ok()) else {
+            continue;
+        };
+        metrics
+            .entry(iface.to_string())
+            .and_modify(|current: &mut u32| *current = (*current).min(metric))
+            .or_insert(metric);
+    }
+    metrics
 }
 
 /// route_source_hint 只能给已合格的真实 LAN 地址加优先级，永不作为兜底地址。
@@ -135,13 +246,19 @@ fn collect_platform_addresses<R: Runtime>(
         .collect())
 }
 
-#[cfg(not(any(target_os = "windows", target_os = "android")))]
+#[cfg(target_os = "linux")]
 fn collect_platform_addresses<R: Runtime>(
     _app: &AppHandle<R>,
 ) -> Result<Vec<LocalAddress>, LanSaveError> {
-    // This package ships the LAN feature for Windows and Android only. The
-    // collector entry stays compilable for source tests on other platforms;
-    // the manual bindIp path remains the explicit advanced route.
+    super::linux_addresses::collect()
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "android", target_os = "linux")))]
+fn collect_platform_addresses<R: Runtime>(
+    _app: &AppHandle<R>,
+) -> Result<Vec<LocalAddress>, LanSaveError> {
+    // macOS and other hosts keep the previous disabled collector. Linux has
+    // its own snapshot; manual bindIp remains available everywhere.
     Ok(Vec::new())
 }
 
@@ -357,5 +474,199 @@ mod tests {
         assert_eq!(ranked[0], ethernet);
         assert_eq!(ranked.len(), 2);
         assert!(ranked_addresses([], Some("172.19.0.1".parse().unwrap())).is_empty());
+    }
+
+    fn fact_address(ip: &str, label: &str, fact: LinuxLinkFact) -> LocalAddress {
+        let (kind, excluded) = linux_link(&fact);
+        LocalAddress {
+            ip: ip.parse().unwrap(),
+            interface_id: label.into(),
+            label: label.into(),
+            kind,
+            up: linux_interface_up(&fact),
+            excluded,
+            interface_metric: None,
+        }
+    }
+
+    fn bus_ethernet(up: bool) -> LinuxLinkFact {
+        LinuxLinkFact {
+            arp_type: 1,
+            flags: if up { 0x1003 } else { 0x1002 },
+            oper_up: up,
+            carrier_up: up,
+            bus_device: true,
+            virtual_sysfs: false,
+            wireless: false,
+            tun_tap: false,
+        }
+    }
+
+    #[test]
+    fn linux_facts_keep_real_wifi_and_drop_renamed_virtual_vpn_and_loopback() {
+        let mut wifi = bus_ethernet(true);
+        wifi.wireless = true;
+        let ethernet = bus_ethernet(true);
+        let mut tun = LinuxLinkFact {
+            arp_type: 65534,
+            flags: 0x1091,
+            oper_up: true,
+            carrier_up: true,
+            bus_device: false,
+            virtual_sysfs: true,
+            wireless: false,
+            tun_tap: true,
+        };
+        // 名称像以太网，事实仍是 tun。
+        let vpn = fact_address("10.8.0.1", "eth0", tun);
+        tun.arp_type = 1;
+        tun.tun_tap = true;
+        tun.bus_device = true;
+        tun.virtual_sysfs = false;
+        let tap = fact_address("10.9.0.1", "tap-with-mac", tun);
+        let mut virtual_ethernet = bus_ethernet(true);
+        virtual_ethernet.bus_device = false;
+        virtual_ethernet.virtual_sysfs = true;
+        let bridge = fact_address("192.168.50.1", "br0", virtual_ethernet);
+        let mut no_device = bus_ethernet(true);
+        no_device.bus_device = false;
+        let unproven = fact_address("192.168.51.1", "mystery", no_device);
+        let mut point_to_point = bus_ethernet(true);
+        point_to_point.flags |= 0x10;
+        let p2p = fact_address("10.7.0.1", "ppp0", point_to_point);
+        let loopback = fact_address(
+            "10.255.255.254",
+            "lo",
+            LinuxLinkFact {
+                arp_type: 772,
+                flags: 0x9,
+                oper_up: true,
+                carrier_up: true,
+                bus_device: false,
+                virtual_sysfs: true,
+                wireless: false,
+                tun_tap: false,
+            },
+        );
+        let down = fact_address("192.168.1.2", "unplugged", bus_ethernet(false));
+        let wifi_address = fact_address("192.168.1.8", "renamed-wifi", wifi);
+        let ethernet_address = fact_address("10.0.0.8", "enp1s0", ethernet);
+        let mut ieee = bus_ethernet(true);
+        ieee.arp_type = 801;
+        assert_eq!(linux_link(&ieee).0, LinkKind::Wifi);
+        assert!(!linux_interface_up(&bus_ethernet(false)));
+
+        let result = ranked_addresses(
+            [
+                vpn,
+                tap,
+                bridge,
+                unproven,
+                p2p,
+                loopback,
+                down,
+                ethernet_address.clone(),
+                wifi_address.clone(),
+            ],
+            Some("10.8.0.1".parse().unwrap()),
+        );
+        assert_eq!(result, vec![wifi_address, ethernet_address]);
+        assert!(ranked_addresses(
+            [fact_address(
+                "172.19.0.1",
+                "only-virtual",
+                LinuxLinkFact {
+                    arp_type: 1,
+                    flags: 0x1003,
+                    oper_up: true,
+                    carrier_up: true,
+                    bus_device: false,
+                    virtual_sysfs: true,
+                    wireless: false,
+                    tun_tap: false,
+                }
+            )],
+            Some("172.19.0.1".parse().unwrap()),
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn linux_route_metric_and_ifname_do_not_invent_addresses() {
+        let table = "\
+Iface Destination Gateway Flags RefCnt Use Metric Mask MTU Window IRTT
+eth3 00000000 0100A8C0 0003 0 0 35 00000000 0 0 0
+eth3 0000A8C0 00000000 0001 0 0 291 00FFFFFF 0 0 0
+MetaWSL 000013C6 00000000 0001 0 0 0 FCFFFFFF 0 0 0
+wlan0 00000000 0101A8C0 0003 0 0 600 00000000 0 0 0
+wlan0 00000000 0101A8C0 0003 0 0 50 00000000 0 0 0
+";
+        let metrics = linux_default_route_metrics(table);
+        assert_eq!(metrics.get("eth3"), Some(&35));
+        assert_eq!(metrics.get("wlan0"), Some(&50));
+        assert!(!metrics.contains_key("MetaWSL"));
+        assert!(linux_ifname_safe("eth0"));
+        assert!(linux_ifname_safe("wlp2s0"));
+        assert!(linux_ifname_safe("enp0s31f6"));
+        assert!(!linux_ifname_safe(""));
+        assert!(!linux_ifname_safe("."));
+        assert!(!linux_ifname_safe(".."));
+        assert!(!linux_ifname_safe("../etc"));
+        assert!(!linux_ifname_safe("eth0/dev"));
+        assert!(!linux_ifname_safe(&"a".repeat(16)));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn live_linux_snapshot_matches_sysfs_and_ignores_route_hint() {
+        let raw = super::super::linux_addresses::collect().expect("枚举 Linux 网卡失败");
+        let hint = super::super::pairing::route_source_hint_ipv4();
+        let ranked = ranked_addresses(raw.iter().cloned(), hint);
+        let metrics = std::fs::read_to_string("/proc/net/route")
+            .map(|text| linux_default_route_metrics(&text))
+            .unwrap_or_default();
+        assert!(ranked
+            .iter()
+            .all(|item| raw.iter().any(|source| source.ip == item.ip)));
+        for address in &ranked {
+            assert_ne!(address.ip, Ipv4Addr::new(127, 0, 0, 1));
+            assert!(address.ip.is_private() || address.ip.is_link_local());
+            assert!(address.up && !address.excluded);
+            assert!(matches!(address.kind, LinkKind::Wifi | LinkKind::Ethernet));
+            let fact = super::super::linux_addresses::interface_fact(&address.label)
+                .expect("合格地址必须还能读到 sysfs");
+            assert_eq!(linux_link(&fact), (address.kind, false));
+            assert!(linux_interface_up(&fact));
+            let ifindex =
+                std::fs::read_to_string(format!("/sys/class/net/{}/ifindex", address.label))
+                    .unwrap();
+            assert_eq!(address.interface_id, ifindex.trim());
+            if let Some(metric) = metrics.get(&address.label) {
+                assert_eq!(address.interface_metric, Some(*metric));
+            }
+        }
+        let entries = std::fs::read_dir("/sys/class/net").expect("sysfs 网卡目录");
+        for entry in entries {
+            let entry = entry.unwrap();
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else {
+                continue;
+            };
+            if !linux_ifname_safe(name) {
+                assert!(ranked.iter().all(|item| item.label != name));
+                continue;
+            }
+            let Some(fact) = super::super::linux_addresses::interface_fact(name) else {
+                assert!(ranked.iter().all(|item| item.label != name));
+                continue;
+            };
+            let (_kind, excluded) = linux_link(&fact);
+            if excluded || !linux_interface_up(&fact) {
+                assert!(
+                    ranked.iter().all(|item| item.label != name),
+                    "{name} 不应进入默认 LAN 候选"
+                );
+            }
+        }
     }
 }

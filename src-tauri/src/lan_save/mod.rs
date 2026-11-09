@@ -6,6 +6,8 @@
 //! existing F-N `SaveFileManager` and `save_file` service functions.
 
 mod address_selection;
+#[cfg(target_os = "linux")]
+mod linux_addresses;
 pub(crate) use crate::transfer_policy as bulk_policy;
 mod connection;
 mod error;
