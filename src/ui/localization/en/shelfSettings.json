@@ -21,6 +21,7 @@
   "shelfSettings.library": "Library Folder",
   "shelfSettings.library.unknown": "Couldn't read the location",
   "shelfSettings.library.copy": "Copy books into library on import",
+  "shelfSettings.library.copy.busy": "A library task is running; change this setting later",
   "shelfSettings.library.copy.detail": "When off, only the original file's location is remembered; moving it means relocating the book",
   "shelfSettings.library.copy.detail.files": "When off, files chosen with Import books are read where they are and must stay there; folder import, auto import and the private shelf still copy",
   "shelfSettings.watch": "Auto-import Folder",

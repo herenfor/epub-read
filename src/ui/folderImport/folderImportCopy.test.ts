@@ -53,8 +53,11 @@ it("文件夹导入显示同一个“复制到书库”选择，并在开始时�
     const reactProps = Object.keys(input).find((key) => key.startsWith("__reactProps"))!;
     await shown.dom.run(() => { input[reactProps].onChange({ target: { checked: false } }); });
     expect(onCopyToLibraryChange).toHaveBeenCalledWith(false);
+    // The shared setting may not save while this job holds the import gate
+    // (the prop stays true here); the box and this import follow the click anyway.
+    expect(shown.box()?.checked).toBe(false);
     await shown.dom.click(shown.startButton);
-    expect(shown.start).toHaveBeenCalledWith(expect.objectContaining({ jobId: "j1", copyToLibrary: true }));
+    expect(shown.start).toHaveBeenCalledWith(expect.objectContaining({ jobId: "j1", copyToLibrary: false }));
   } finally {
     await shown.dom.dispose();
   }

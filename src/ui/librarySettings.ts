@@ -126,12 +126,25 @@ export async function keepOriginalOnImportNow(): Promise<boolean | null> {
   return current.error ? null : !current.copyOnImport;
 }
 
-export async function setCopyOnImport(enabled: boolean): Promise<void> {
+function isBusy(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  return code === "busy" || errorText(error).startsWith("busy:");
+}
+
+/**
+ * Saves the shared choice. "busy" (another library task holds the settings)
+ * leaves the view untouched: it is a moment, not a state of the settings, so
+ * the caller decides whether to say so. Other failures keep the last good
+ * values and surface the reason on the view.
+ */
+export async function setCopyOnImport(enabled: boolean): Promise<"saved" | "busy" | "failed"> {
   try {
     publish(await invoke<LibrarySettingsView>("linked_library_settings_set_copy", { enabled }));
+    return "saved";
   } catch (error) {
-    // Keep the last good values; surface why the change did not stick.
+    if (isBusy(error)) return "busy";
     publish({ ...(view ?? UNREADABLE), error: errorText(error) });
+    return "failed";
   }
 }
 

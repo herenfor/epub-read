@@ -56,6 +56,20 @@ it("导入按显示的设置复制：只读一次；读不到设置不当作“�
   expect(invoke).not.toHaveBeenCalled();
 });
 
+it("保存被书库任务占用（busy）时不把报错留在设置上，其他失败照常显示", async () => {
+  invoke.mockResolvedValueOnce(shown);
+  await ensureLibrarySettings();
+  invoke.mockRejectedValueOnce({ code: "failed", message: "busy: 托管书籍导入进行中" });
+  await expect(setCopyOnImport(false)).resolves.toBe("busy");
+  invoke.mockRejectedValueOnce({ code: "busy", message: "书库任务进行中，请稍后再改设置" });
+  await expect(setCopyOnImport(false)).resolves.toBe("busy");
+  await expect(ensureLibrarySettings()).resolves.toMatchObject({ copyOnImport: true, error: null });
+
+  invoke.mockRejectedValueOnce({ code: "failed", message: "书库设置文件已损坏" });
+  await expect(setCopyOnImport(false)).resolves.toBe("failed");
+  await expect(ensureLibrarySettings()).resolves.toMatchObject({ copyOnImport: true, error: "书库设置文件已损坏" });
+});
+
 it("Android keeps the original only on a readable \u201c不复制\u201d; an unreadable setting is not a choice", async () => {
   invoke.mockResolvedValueOnce(shown);
   await expect(keepOriginalOnImportNow()).resolves.toBe(false);

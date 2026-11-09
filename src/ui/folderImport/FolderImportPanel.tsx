@@ -139,6 +139,10 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
   /** One owner per mount; created in the effect so a remount gets a fresh one. */
   const ownerRef = useRef<FolderImportJobOwner | null>(null);
   const [importing, setImporting] = useState(false);
+  // This import's own 复制到书库 choice: it applies at once even when the
+  // shared setting cannot be saved while this job holds the import gate.
+  const [copyChoice, setCopyChoice] = useState<boolean | undefined>(undefined);
+  const copyToLibrary = props.copyToLibrary === undefined ? undefined : (copyChoice ?? props.copyToLibrary);
   const mountedRef = useRef(true);
   const callbacksRef = useRef(props);
   callbacksRef.current = props;
@@ -261,7 +265,6 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
     if (!owner || !plan) return;
     const targets = buildFolderTargets(plan.groups, resolutions, choices);
     if (!targets) return;
-    const { copyToLibrary } = props;
     const started = owner.run({ options, targets, ...(copyToLibrary === undefined ? {} : { copyToLibrary }) }, {
       onProgress: (event) => {
         if (!mountedRef.current) return;
@@ -453,14 +456,14 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
               </fieldset>
             )}
 
-            {props.copyToLibrary !== undefined && (
+            {copyToLibrary !== undefined && (
               <fieldset className="save-file-fieldset">
                 <legend>{t("shelfSettings.library")}</legend>
                 <label className="save-file-radio folder-import-copy">
                   <input
                     type="checkbox"
-                    checked={props.copyToLibrary}
-                    onChange={(event) => props.onCopyToLibraryChange?.(event.target.checked)}
+                    checked={copyToLibrary}
+                    onChange={(event) => { setCopyChoice(event.target.checked); props.onCopyToLibraryChange?.(event.target.checked); }}
                   />
                   <span>{t("shelf.import.copy")}<span className="folder-import-hint">{t("folderImport.copy.hint")}</span></span>
                 </label>

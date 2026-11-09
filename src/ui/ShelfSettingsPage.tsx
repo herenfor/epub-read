@@ -389,7 +389,8 @@ export function ShelfSettingsPage(props: ShelfSettingsPageProps) {
             onClick={() => { setLibraryOpenError(null); void openLibraryFolder().catch((error: unknown) => setLibraryOpenError(String((error as Error).message ?? error))); }} />}
           <SettingsSwitchRow title={t("shelfSettings.library.copy")}
             detail={t(capabilities.platform === "android" ? "shelfSettings.library.copy.detail.files" : "shelfSettings.library.copy.detail")}
-            checked={libraryCopyChoice(library) ?? true} onChange={(copy) => void setCopyOnImport(copy)} />
+            checked={libraryCopyChoice(library) ?? true}
+            onChange={(copy) => { setLibraryOpenError(null); void setCopyOnImport(copy).then((saved) => { if (saved === "busy") setLibraryOpenError(t("shelfSettings.library.copy.busy")); }); }} />
           {capabilities.supportsLibraryFolder && libraryLocationWarning !== undefined && <SettingsRow icon={ROW_ICONS.move} title={t("libraryLocation.row")}
             detail={libraryLocationWarning ?? t("libraryLocation.row.detail")} dot={libraryLocationWarning ?? false}
             onClick={() => setLocationOpen(true)} />}
