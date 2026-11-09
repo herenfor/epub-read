@@ -151,10 +151,51 @@ pub(crate) fn test_set_connection<R: tauri::Runtime>(
     };
 }
 
-pub(super) fn admin_busy(app: &AppHandle) -> Result<bool> {
+/// Capture the lifecycle generation before an upload invocation starts any
+/// disk, credential or Android-bridge preparation. Admin operations and broad
+/// cancel already advance this same generation.
+pub(super) fn upload_start_epoch<R: tauri::Runtime>(app: &AppHandle<R>) -> Result<u64> {
     let manager = app.state::<CloudSyncManager>();
-    let result = manager.lock()?.admin_busy;
-    Ok(result)
+    let epoch = manager.lock()?.epoch;
+    Ok(epoch)
+}
+
+/// Re-check the real lifecycle at the existing lock boundary before and after
+/// registering an upload job. A stale invocation must not create a fresh,
+/// uncancelled token after the context has left the foreground or the
+/// connection/administration generation changed.
+pub(super) fn check_upload_start<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    connection_id: &str,
+    epoch: u64,
+) -> Result<()> {
+    let manager = app.state::<CloudSyncManager>();
+    let control = manager.lock()?;
+    if control.admin_busy {
+        return Err(Failure::new(FailureCode::Busy));
+    }
+    if control.epoch != epoch || !manager.activity.borrow().foreground {
+        return Err(Failure::new(FailureCode::Cancelled));
+    }
+    match control.status.connection.as_ref() {
+        Some(connection) if connection.connection_id == connection_id => Ok(()),
+        _ => Err(Failure::new(FailureCode::ConnectionRequired)),
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn test_apply_context<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    context: Activity,
+) -> Result<()> {
+    apply_context(app, context).map(|_| ())
+}
+
+#[cfg(test)]
+pub(crate) fn test_set_admin_busy<R: tauri::Runtime>(app: &AppHandle<R>, busy: bool) {
+    if let Ok(mut control) = app.state::<CloudSyncManager>().lock() {
+        control.admin_busy = busy;
+    }
 }
 
 fn install(control: &mut Control, session: Option<&Session>) {
@@ -242,6 +283,12 @@ async fn administration(app: &AppHandle, cancel_round: bool) -> Result<Administr
                 control.status.phase = Phase::Idle;
             }
         }
+    }
+    // The job slot may have been claimed after the caller's early
+    // cancel_active and before admin_busy became visible. admin_busy now
+    // rejects new registrations, so cancel any token that already exists.
+    if cancel_round {
+        super::books::cancel_active(app);
     }
     // Construct before waiting: a dropped invocation cannot strand admin_busy.
     let mut operation = Administrative {
@@ -661,21 +708,36 @@ pub async fn cloud_sync_trigger(app: AppHandle, reason: Trigger) -> Result<Statu
     cloud_sync_get_status(app).await
 }
 
-#[tauri::command]
-pub async fn cloud_sync_set_context(app: AppHandle, context: Activity) -> Result<Status> {
-    load_once(&app).await?;
+fn apply_context<R: tauri::Runtime>(app: &AppHandle<R>, context: Activity) -> Result<Activity> {
     let manager = app.state::<CloudSyncManager>();
     let previous = manager.activity.send_replace(context);
     if !context.foreground {
-        super::books::cancel_active(&app);
-        let control = manager.lock()?;
+        super::books::cancel_active(app);
+        let mut control = manager.lock()?;
+        if previous.foreground {
+            // Backgrounding starts a new lifecycle generation. This also
+            // invalidates an upload invocation that captured the old
+            // generation while it was still preparing.
+            control.epoch = control.epoch.wrapping_add(1);
+        }
         control.timer_cancel.cancel();
         control.round_cancel.cancel();
-    } else if !previous.foreground && manager.lock()?.status.connection.is_some() {
-        manager
-            .lock()?
-            .schedule
-            .request(Trigger::Foreground, now_ms());
+    }
+    Ok(previous)
+}
+
+#[tauri::command]
+pub async fn cloud_sync_set_context(app: AppHandle, context: Activity) -> Result<Status> {
+    load_once(&app).await?;
+    let previous = apply_context(&app, context)?;
+    if context.foreground && !previous.foreground {
+        let manager = app.state::<CloudSyncManager>();
+        if manager.lock()?.status.connection.is_some() {
+            manager
+                .lock()?
+                .schedule
+                .request(Trigger::Foreground, now_ms());
+        }
     }
     arm(&app);
     emit(&app);
@@ -696,6 +758,11 @@ pub async fn cloud_sync_cancel(app: AppHandle) -> Result<Status> {
         if control.status.connection.is_some() {
             control.status.phase = Phase::Idle;
         }
+        // Cancel while the generation lock is held. An upload invocation that
+        // registered after the early cancel but before this epoch bump is
+        // caught here; a genuinely new invocation cannot register until the
+        // lock is released and will capture the new generation.
+        super::books::cancel_active(&app);
     }
     emit(&app);
     cloud_sync_get_status(app).await
@@ -715,13 +782,14 @@ pub async fn cloud_sync_disconnect(app: AppHandle) -> Result<Status> {
             Err(error) if error.code == FailureCode::LocalStateInvalid => {
                 store.quarantine()?;
                 store.clear_sources()?;
-                super::books::clear_cleanup(&saved_app);
+                // Unconfirmed pending paths stay owned by their server/space
+                // scope. Disconnecting without network must not lose that
+                // cleanup debt; a later upload to the same origin can retry.
                 return Ok(true);
             }
             Err(error) => return Err(error),
         }
         store.disconnect()?;
-        super::books::clear_cleanup(&saved_app);
         Ok(false)
     })
     .await?;
@@ -808,12 +876,14 @@ pub async fn cloud_sync_cloud_books(app: AppHandle) -> Result<Vec<CloudBook>> {
 }
 
 pub fn shutdown(app: &AppHandle) {
-    super::books::cancel_active(app);
     let manager = app.state::<CloudSyncManager>();
     manager.activity.send_replace(Activity {
         foreground: false,
         interaction_busy: false,
     });
+    // Mark background first, then cancel: a job registering in between is
+    // either rejected by the startup gate or caught by this cancellation.
+    super::books::cancel_active(app);
     if let Ok(mut control) = manager.lock() {
         control.timer_cancel.cancel();
         control.round_cancel.cancel();

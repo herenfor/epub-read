@@ -181,13 +181,13 @@ impl CloudBookUploadManager {
     }
 }
 
-struct ActiveJob {
-    app: AppHandle,
+struct ActiveJob<R: Runtime> {
+    app: AppHandle<R>,
     job_id: String,
     cancel: Cancel,
 }
 
-impl Drop for ActiveJob {
+impl<R: Runtime> Drop for ActiveJob<R> {
     fn drop(&mut self) {
         self.cancel.cancel();
         if let Some(manager) = self.app.try_state::<CloudBookUploadManager>() {
@@ -196,7 +196,7 @@ impl Drop for ActiveJob {
     }
 }
 
-pub(crate) fn cancel_active(app: &AppHandle) {
+pub(crate) fn cancel_active<R: Runtime>(app: &AppHandle<R>) {
     if let Some(manager) = app.try_state::<CloudBookUploadManager>() {
         if let Ok(slot) = manager.job.lock() {
             if let Some(job) = slot.as_ref() {
@@ -206,10 +206,57 @@ pub(crate) fn cancel_active(app: &AppHandle) {
     }
 }
 
-pub(crate) fn clear_cleanup<R: Runtime>(app: &AppHandle<R>) {
-    if let Ok(root) = cleanup_root(app) {
-        let _ = fs::remove_file(cleanup_file(&root));
+struct UploadStart<R: Runtime> {
+    job: Arc<UploadJob>,
+    _active: ActiveJob<R>,
+}
+
+fn start_upload_job<R: Runtime>(
+    app: &AppHandle<R>,
+    job_id: String,
+    connection_id: String,
+    count: usize,
+    epoch: u64,
+) -> Result<UploadStart<R>> {
+    commands::check_upload_start(app, &connection_id, epoch)?;
+    let job = Arc::new(UploadJob {
+        job_id: job_id.clone(),
+        connection_id: connection_id.clone(),
+        cancel: Cancel::default(),
+        latest: Mutex::new(Some(BookUploadProgress {
+            job_id: job_id.clone(),
+            connection_id: connection_id.clone(),
+            phase: "preparing".into(),
+            index: 0,
+            count,
+            content_hash: String::new(),
+            book_sent: 0,
+            book_total: 0,
+            batch_sent: 0,
+            batch_total: 0,
+        })),
+    });
+    app.state::<CloudBookUploadManager>().start(job.clone())?;
+    let active = ActiveJob {
+        app: app.clone(),
+        job_id: job_id.clone(),
+        cancel: job.cancel.clone(),
+    };
+    // The job is now visible to `cancel_active`. Re-check the generation so a
+    // background/admin/connection transition that happened between the first
+    // check and registration cannot leave this token alive.
+    if job.cancel.check().is_err() {
+        drop(active);
+        return Err(Failure::new(FailureCode::Cancelled));
     }
+    if let Err(error) = commands::check_upload_start(app, &connection_id, epoch) {
+        drop(active);
+        return Err(error);
+    }
+    Ok(UploadStart {
+        job,
+        _active: active,
+    })
 }
 
 #[derive(Clone, Debug)]
@@ -354,12 +401,46 @@ pub async fn cloud_book_upload_preview(
     Ok(preview_from_plans(&plans_from_snapshot(&snapshot, &hashes)))
 }
 
-#[derive(Default, Serialize, Deserialize)]
+const CLEANUP_SCHEMA: u64 = 2;
+
+/// Identifies the account/space that owns a pending cleanup entry. The server
+/// key is a hash of the exact remote root and username; it is never used for
+/// network I/O on its own and cannot be confused with another server.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CleanupOwner {
+    server_key: String,
+    space_id: String,
+}
+
+impl CleanupOwner {
+    fn new(remote: &WebDavRemote, space_id: &str) -> Self {
+        Self {
+            server_key: remote.cleanup_owner_key(),
+            space_id: space_id.to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CleanupFile {
     schema_version: u64,
-    connection_id: String,
+    scopes: Vec<CleanupScope>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CleanupScope {
+    server_key: String,
+    space_id: String,
     entries: Vec<String>,
+}
+
+fn empty_cleanup() -> CleanupFile {
+    CleanupFile {
+        schema_version: CLEANUP_SCHEMA,
+        scopes: Vec::new(),
+    }
 }
 
 fn cleanup_root<R: Runtime>(app: &AppHandle<R>) -> std::result::Result<PathBuf, ()> {
@@ -373,49 +454,70 @@ fn cleanup_file(root: &std::path::Path) -> PathBuf {
     root.join(CLEANUP_FILE)
 }
 
-fn read_cleanup(path: &std::path::Path, connection_id: &str) -> (Vec<String>, bool) {
-    let bytes = match fs::read(path) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return (Vec::new(), false),
-        Err(_) => return (Vec::new(), true),
-    };
-    if bytes.len() > CLEANUP_BYTES {
-        return (Vec::new(), true);
-    }
-    let Ok(file) = serde_json::from_slice::<CleanupFile>(&bytes) else {
-        return (Vec::new(), true);
-    };
-    if file.schema_version != 1 || file.entries.len() > CLEANUP_LIMIT {
-        return (Vec::new(), true);
-    }
-    if file.connection_id != connection_id {
-        let _ = fs::remove_file(path);
-        return (Vec::new(), false);
-    }
-    if file.entries.iter().any(|entry| {
-        !entry.starts_with("books/.")
-            || !entry.ends_with(".pending")
-            || entry.contains("..")
-            || RemotePath::new(entry).is_err()
-    }) {
-        return (Vec::new(), true);
-    }
-    (file.entries, false)
+fn valid_cleanup_entry(entry: &str) -> bool {
+    entry.starts_with("books/.")
+        && entry.ends_with(".pending")
+        && !entry.contains("..")
+        && RemotePath::new(entry).is_ok()
 }
 
-fn save_cleanup(path: &std::path::Path, connection_id: &str, entries: &[String]) -> bool {
-    if entries.is_empty() {
+fn read_cleanup(path: &std::path::Path) -> (CleanupFile, bool) {
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return (empty_cleanup(), false),
+        Err(_) => return (empty_cleanup(), true),
+    };
+    if bytes.len() > CLEANUP_BYTES {
+        return (empty_cleanup(), true);
+    }
+    let Ok(file) = serde_json::from_slice::<CleanupFile>(&bytes) else {
+        return (empty_cleanup(), true);
+    };
+    if file.schema_version != CLEANUP_SCHEMA || file.scopes.len() > CLEANUP_LIMIT {
+        return (empty_cleanup(), true);
+    }
+    let mut total = 0usize;
+    let mut seen = BTreeSet::new();
+    for scope in &file.scopes {
+        if !valid_content_hash(&scope.server_key)
+            || !valid_canonical_uuid(&scope.space_id)
+            || !seen.insert((scope.server_key.as_str(), scope.space_id.as_str()))
+        {
+            return (empty_cleanup(), true);
+        }
+        total = match total.checked_add(scope.entries.len()) {
+            Some(total) if total <= CLEANUP_LIMIT => total,
+            _ => return (empty_cleanup(), true),
+        };
+        if scope
+            .entries
+            .iter()
+            .any(|entry| !valid_cleanup_entry(entry))
+        {
+            return (empty_cleanup(), true);
+        }
+    }
+    (file, false)
+}
+
+fn save_cleanup(path: &std::path::Path, file: &CleanupFile) -> bool {
+    let mut file = file.clone();
+    file.schema_version = CLEANUP_SCHEMA;
+    file.scopes.retain(|scope| !scope.entries.is_empty());
+    if file.scopes.is_empty() {
         let _ = fs::remove_file(path);
         return true;
     }
-    if entries.len() > CLEANUP_LIMIT {
+    if file.scopes.len() > CLEANUP_LIMIT
+        || file
+            .scopes
+            .iter()
+            .map(|scope| scope.entries.len())
+            .sum::<usize>()
+            > CLEANUP_LIMIT
+    {
         return false;
     }
-    let file = CleanupFile {
-        schema_version: 1,
-        connection_id: connection_id.to_string(),
-        entries: entries.to_vec(),
-    };
     let Ok(bytes) = serde_json::to_vec(&file) else {
         return false;
     };
@@ -429,24 +531,59 @@ fn save_cleanup(path: &std::path::Path, connection_id: &str, entries: &[String])
     .is_ok()
 }
 
-fn add_cleanup(path: &std::path::Path, connection_id: &str, entry: &str) -> bool {
-    let (mut entries, invalid) = read_cleanup(path, connection_id);
-    if invalid {
-        return false;
-    }
-    if !entries.iter().any(|value| value == entry) {
-        entries.push(entry.to_string());
-    }
-    save_cleanup(path, connection_id, &entries)
+fn cleanup_scope_index(file: &CleanupFile, owner: &CleanupOwner) -> Option<usize> {
+    file.scopes
+        .iter()
+        .position(|scope| scope.server_key == owner.server_key && scope.space_id == owner.space_id)
 }
 
-fn remove_cleanup(path: &std::path::Path, connection_id: &str, entry: &str) -> bool {
-    let (mut entries, invalid) = read_cleanup(path, connection_id);
+fn add_cleanup(path: &std::path::Path, owner: &CleanupOwner, entry: &str) -> bool {
+    if !valid_cleanup_entry(entry) {
+        return false;
+    }
+    let (mut file, invalid) = read_cleanup(path);
     if invalid {
         return false;
     }
-    entries.retain(|value| value != entry);
-    save_cleanup(path, connection_id, &entries)
+    if let Some(index) = cleanup_scope_index(&file, owner) {
+        if file.scopes[index]
+            .entries
+            .iter()
+            .any(|value| value == entry)
+        {
+            return true;
+        }
+    }
+    if file
+        .scopes
+        .iter()
+        .map(|scope| scope.entries.len())
+        .sum::<usize>()
+        >= CLEANUP_LIMIT
+    {
+        return false;
+    }
+    match cleanup_scope_index(&file, owner) {
+        Some(index) => file.scopes[index].entries.push(entry.to_string()),
+        None => file.scopes.push(CleanupScope {
+            server_key: owner.server_key.clone(),
+            space_id: owner.space_id.clone(),
+            entries: vec![entry.to_string()],
+        }),
+    }
+    save_cleanup(path, &file)
+}
+
+fn remove_cleanup(path: &std::path::Path, owner: &CleanupOwner, entry: &str) -> bool {
+    let (mut file, invalid) = read_cleanup(path);
+    if invalid {
+        return false;
+    }
+    let Some(index) = cleanup_scope_index(&file, owner) else {
+        return false;
+    };
+    file.scopes[index].entries.retain(|value| value != entry);
+    save_cleanup(path, &file)
 }
 
 type ProgressSink = Arc<dyn Fn(BookUploadProgress) + Send + Sync>;
@@ -554,6 +691,10 @@ enum SourceState {
     Missing,
     Unreadable,
     Cancelled,
+    /// The HTTP consumer stopped polling before the source was fully sent.
+    /// This is not a user cancellation: an early 401/403/507 response also
+    /// closes the body channel.
+    ConsumerGone,
 }
 
 fn set_source_state(state: &Mutex<SourceState>, value: SourceState) {
@@ -684,7 +825,7 @@ fn source_body<R: Runtime>(
                         std::thread::sleep(Duration::from_millis(5));
                     }
                     Err(_) => {
-                        set_source_state(&state_for_thread, SourceState::Cancelled);
+                        set_source_state(&state_for_thread, SourceState::ConsumerGone);
                         return;
                     }
                 }
@@ -808,11 +949,24 @@ async fn upload_stream<R: Runtime>(
             _ => BookFailure::local("source-unreadable"),
         }),
         Err(error) => {
+            // Only an explicit user/parent cancel or the no-progress watchdog
+            // may project to cancelled/timeout. A server can answer 401/403/507
+            // before consuming the whole body; closing the body channel then
+            // must not hide that known remote error and its stop semantics.
             if cancel.check().is_err() {
                 return Err(BookFailure::local("cancelled"));
             }
             if stalled.load(Ordering::Acquire) {
                 return Err(BookFailure::local("timeout"));
+            }
+            if matches!(
+                error.code,
+                RemoteErrorCode::Authentication
+                    | RemoteErrorCode::PermissionDenied
+                    | RemoteErrorCode::QuotaExceeded
+                    | RemoteErrorCode::Unsupported
+            ) {
+                return Err(remote_failure(error));
             }
             if state == SourceState::Cancelled {
                 return Err(BookFailure::local("cancelled"));
@@ -1006,19 +1160,26 @@ async fn listed_complete(
 async fn cleanup_remote(
     cleanup_path: &std::path::Path,
     remote: &WebDavRemote,
-    connection_id: &str,
+    owner: &CleanupOwner,
     cancel: &Cancel,
 ) -> bool {
-    let (entries, invalid) = read_cleanup(cleanup_path, connection_id);
+    let (mut file, invalid) = read_cleanup(cleanup_path);
     if invalid {
         // Never overwrite/clear an unknown or corrupt local cleanup record.
         return true;
     }
+    let Some(index) = cleanup_scope_index(&file, owner) else {
+        // Records from another server/space stay untouched. Reconnecting to
+        // that origin is the only way they can be cleaned.
+        return false;
+    };
+    let entries = std::mem::take(&mut file.scopes[index].entries);
     let mut cleanup_pending = false;
     let mut remaining = Vec::new();
     for entry in entries {
         let Ok(path) = RemotePath::new(&entry) else {
             cleanup_pending = true;
+            remaining.push(entry);
             continue;
         };
         match remote.delete(&path, false, cancel).await {
@@ -1030,7 +1191,8 @@ async fn cleanup_remote(
             }
         }
     }
-    if !save_cleanup(cleanup_path, connection_id, &remaining) {
+    file.scopes[index].entries = remaining;
+    if !save_cleanup(cleanup_path, &file) {
         cleanup_pending = true;
     }
     cleanup_pending
@@ -1157,6 +1319,7 @@ async fn run_upload<R: Runtime>(
     cancel: &Cancel,
     mut cleanup_pending: bool,
 ) -> Result<BookUploadResult> {
+    let cleanup_owner = CleanupOwner::new(remote, space_id);
     let count = plans.len();
     let batch_total = plans
         .iter()
@@ -1229,7 +1392,7 @@ async fn run_upload<R: Runtime>(
 
     // A failed cleanup is reported, but it does not block this new job.
     cleanup_pending =
-        cleanup_remote(cleanup_path, remote, connection_id, cancel).await || cleanup_pending;
+        cleanup_remote(cleanup_path, remote, &cleanup_owner, cancel).await || cleanup_pending;
 
     let pending_path = RemotePath::new(&format!(
         "books/.{}.{}.pending",
@@ -1389,7 +1552,7 @@ async fn run_upload<R: Runtime>(
             processed_bytes = processed_bytes.saturating_add(plan.bytes);
             continue;
         }
-        if !add_cleanup(cleanup_path, connection_id, &pending_entry) {
+        if !add_cleanup(cleanup_path, &cleanup_owner, &pending_entry) {
             cleanup_pending = true;
             items.push(item_for(plan, "failed", Some("storage-error".into())));
             processed_bytes = processed_bytes.saturating_add(plan.bytes);
@@ -1400,7 +1563,7 @@ async fn run_upload<R: Runtime>(
         if let Err(error) = upload {
             let deleted = delete_own_pending(remote, &pending_path).await;
             if deleted {
-                if !remove_cleanup(cleanup_path, connection_id, &pending_entry) {
+                if !remove_cleanup(cleanup_path, &cleanup_owner, &pending_entry) {
                     cleanup_pending = true;
                 }
             } else {
@@ -1424,7 +1587,7 @@ async fn run_upload<R: Runtime>(
         if cancel.check().is_err() {
             let deleted = delete_own_pending(remote, &pending_path).await;
             if deleted {
-                if !remove_cleanup(cleanup_path, connection_id, &pending_entry) {
+                if !remove_cleanup(cleanup_path, &cleanup_owner, &pending_entry) {
                     cleanup_pending = true;
                 }
             } else {
@@ -1439,7 +1602,7 @@ async fn run_upload<R: Runtime>(
             stop_code = Some("connection-changed".into());
             let deleted = delete_own_pending(remote, &pending_path).await;
             if deleted {
-                if !remove_cleanup(cleanup_path, connection_id, &pending_entry) {
+                if !remove_cleanup(cleanup_path, &cleanup_owner, &pending_entry) {
                     cleanup_pending = true;
                 }
             } else {
@@ -1457,7 +1620,7 @@ async fn run_upload<R: Runtime>(
             .await;
         match moved {
             Ok(()) => {
-                if !remove_cleanup(cleanup_path, connection_id, &pending_entry) {
+                if !remove_cleanup(cleanup_path, &cleanup_owner, &pending_entry) {
                     cleanup_pending = true;
                 }
                 match write_marker(remote, plan, space_id, caps, cancel).await {
@@ -1492,7 +1655,7 @@ async fn run_upload<R: Runtime>(
                     .unwrap_or(false);
                 let deleted = delete_own_pending(remote, &pending_path).await;
                 if deleted {
-                    if !remove_cleanup(cleanup_path, connection_id, &pending_entry) {
+                    if !remove_cleanup(cleanup_path, &cleanup_owner, &pending_entry) {
                         cleanup_pending = true;
                     }
                 } else {
@@ -1563,17 +1726,27 @@ pub async fn cloud_book_upload(
         return Err(Failure::new(FailureCode::InvalidConfig));
     }
     let hashes = unique_hashes(book_hashes)?;
+    let epoch = commands::upload_start_epoch(&app)?;
     commands::load_once(&app).await?;
-    if !commands::native_ready(&app).await {
-        return Err(Failure::new(FailureCode::NativeBridgeUnavailable));
-    }
-    if commands::admin_busy(&app)? {
-        return Err(Failure::new(FailureCode::Busy));
-    }
     let Some(connection) = commands::current_connection(&app)? else {
         return Err(Failure::new(FailureCode::ConnectionRequired));
     };
     let connection_id = connection.connection_id.clone();
+    // Register the cancel ownership before Android bridge setup, credential
+    // disk access and the shelf snapshot. Backgrounding, connect/disconnect,
+    // reset and broad cancel now have a token to invalidate even while this
+    // invocation is still preparing.
+    let start = start_upload_job(
+        &app,
+        job_id.clone(),
+        connection_id.clone(),
+        hashes.len(),
+        epoch,
+    )?;
+    let job = start.job.clone();
+    if !commands::native_ready(&app).await {
+        return Err(Failure::new(FailureCode::NativeBridgeUnavailable));
+    }
     let disk = sync_disk(&app)?;
     let app_for_load = app.clone();
     let expected_connection = connection_id.clone();
@@ -1598,29 +1771,6 @@ pub async fn cloud_book_upload(
         },
     )?;
 
-    let job = Arc::new(UploadJob {
-        job_id: job_id.clone(),
-        connection_id: connection_id.clone(),
-        cancel: Cancel::default(),
-        latest: Mutex::new(Some(BookUploadProgress {
-            job_id: job_id.clone(),
-            connection_id: connection_id.clone(),
-            phase: "preparing".into(),
-            index: 0,
-            count: hashes.len(),
-            content_hash: String::new(),
-            book_sent: 0,
-            book_total: 0,
-            batch_sent: 0,
-            batch_total: 0,
-        })),
-    });
-    app.state::<CloudBookUploadManager>().start(job.clone())?;
-    let _active = ActiveJob {
-        app: app.clone(),
-        job_id: job_id.clone(),
-        cancel: job.cancel.clone(),
-    };
     let channel = on_progress.clone();
     let latest = job.clone();
     let progress_sink: ProgressSink = Arc::new(move |progress| {
@@ -1837,6 +1987,157 @@ mod tests {
         assert_eq!(value["extension"], "epub");
         assert_eq!(value["format"], MARKER_FORMAT);
     }
+
+    fn gate_connection<R: Runtime>(handle: &AppHandle<R>, connection_id: &str) {
+        commands::test_set_connection(
+            handle,
+            crate::cloud_sync::model::ConnectionInfo {
+                connection_id: connection_id.into(),
+                settings: crate::cloud_sync::model::Settings {
+                    base_url: "https://nas.invalid/dav/".into(),
+                    remote_root: "test dir".into(),
+                    username: "test".into(),
+                },
+                space_id: "00000000-0000-4000-8000-000000000103".into(),
+                device_label: "Test".into(),
+            },
+        );
+    }
+
+    #[test]
+    fn upload_job_registers_before_preparation_and_background_cancels_it() {
+        let app = tauri::test::mock_builder()
+            .manage(commands::CloudSyncManager::default())
+            .manage(CloudBookUploadManager::default())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let handle = app.handle().clone();
+        let connection_id = "00000000-0000-4000-8000-000000000102";
+        gate_connection(&handle, connection_id);
+        let epoch = commands::upload_start_epoch(&handle).unwrap();
+        let job_id = "00000000-0000-4000-8000-000000000101";
+        let start =
+            start_upload_job(&handle, job_id.into(), connection_id.into(), 1, epoch).unwrap();
+        assert_eq!(
+            handle
+                .state::<CloudBookUploadManager>()
+                .current()
+                .unwrap()
+                .job_id,
+            job_id
+        );
+
+        // This is the same path used by cloud_sync_set_context(false): it
+        // first changes activity/epoch, then calls cancel_active.
+        commands::test_apply_context(
+            &handle,
+            crate::cloud_sync::model::Activity {
+                foreground: false,
+                interaction_busy: false,
+            },
+        )
+        .unwrap();
+        assert!(start.job.cancel.check().is_err());
+        let error = match start_upload_job(
+            &handle,
+            "00000000-0000-4000-8000-000000000104".into(),
+            connection_id.into(),
+            1,
+            epoch,
+        ) {
+            Ok(_) => panic!("stale startup must be rejected"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code, FailureCode::Cancelled);
+        drop(start);
+        assert!(handle.state::<CloudBookUploadManager>().current().is_none());
+    }
+
+    #[test]
+    fn upload_start_gate_rejects_admin_stale_epoch_and_old_connection() {
+        let app = tauri::test::mock_builder()
+            .manage(commands::CloudSyncManager::default())
+            .manage(CloudBookUploadManager::default())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let handle = app.handle().clone();
+        let connection_id = "00000000-0000-4000-8000-000000000202";
+        gate_connection(&handle, connection_id);
+        let epoch = commands::upload_start_epoch(&handle).unwrap();
+        let job_id = "00000000-0000-4000-8000-000000000201";
+        commands::test_set_admin_busy(&handle, true);
+        let error = match start_upload_job(&handle, job_id.into(), connection_id.into(), 1, epoch) {
+            Ok(_) => panic!("admin operation must reject startup"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code, FailureCode::Busy);
+        commands::test_set_admin_busy(&handle, false);
+
+        let error = match start_upload_job(
+            &handle,
+            job_id.into(),
+            connection_id.into(),
+            1,
+            epoch.wrapping_add(1),
+        ) {
+            Ok(_) => panic!("stale generation must reject startup"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code, FailureCode::Cancelled);
+
+        let error = match start_upload_job(
+            &handle,
+            job_id.into(),
+            "00000000-0000-4000-8000-000000000203".into(),
+            1,
+            epoch,
+        ) {
+            Ok(_) => panic!("old connection must reject startup"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code, FailureCode::ConnectionRequired);
+        assert!(handle.state::<CloudBookUploadManager>().current().is_none());
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn test_cleanup_file(root: &std::path::Path) -> PathBuf {
+    cleanup_file(root)
+}
+
+#[cfg(test)]
+pub(crate) fn test_cleanup_owner(remote: &WebDavRemote, space_id: &str) -> CleanupOwner {
+    CleanupOwner::new(remote, space_id)
+}
+
+#[cfg(test)]
+pub(crate) fn test_add_cleanup(path: &std::path::Path, owner: &CleanupOwner, entry: &str) -> bool {
+    add_cleanup(path, owner, entry)
+}
+
+#[cfg(test)]
+pub(crate) fn test_cleanup_scope_entries(
+    path: &std::path::Path,
+    owner: &CleanupOwner,
+) -> (Vec<String>, bool) {
+    let (file, invalid) = read_cleanup(path);
+    if invalid {
+        return (Vec::new(), true);
+    }
+    let entries = cleanup_scope_index(&file, owner)
+        .map(|index| file.scopes[index].entries.clone())
+        .unwrap_or_default();
+    (entries, false)
+}
+
+#[cfg(test)]
+pub(crate) async fn test_cleanup_remote(
+    path: &std::path::Path,
+    remote: &WebDavRemote,
+    owner: &CleanupOwner,
+    cancel: &Cancel,
+) -> bool {
+    cleanup_remote(path, remote, owner, cancel).await
 }
 
 #[cfg(test)]

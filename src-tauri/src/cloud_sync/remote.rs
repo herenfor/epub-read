@@ -245,6 +245,7 @@ pub trait SyncRemote: Send + Sync {
 pub struct WebDavRemote {
     client: Client,
     upload_client: Client,
+    book_get_client: Client,
     root: Url,
     credentials: Credentials,
 }
@@ -309,10 +310,27 @@ impl WebDavRemote {
             .build()
             .map_err(RemoteError::transport)?;
         // Original books are large. This client deliberately has no total
-        // request timeout; the caller supplies a 60-second no-progress
-        // watchdog and cancellation. It still never follows redirects or
-        // negotiates compression.
+        // request timeout and no fixed read timeout: a normal WebDAV server
+        // does not write the response until the whole PUT body has arrived.
+        // The caller's 60-second no-progress watchdog and cancellation cover
+        // both a stalled body consumer and a server that never answers after
+        // the body is complete. Redirects and compression remain disabled.
         let upload_client = Client::builder()
+            .https_only(!local_test)
+            .redirect(reqwest::redirect::Policy::none())
+            .retry(reqwest::retry::never())
+            .connect_timeout(Duration::from_secs(10))
+            .no_gzip()
+            .no_brotli()
+            .no_deflate()
+            .no_zstd()
+            .user_agent("EPUBReader-WebDAV/1")
+            .build()
+            .map_err(RemoteError::transport)?;
+        // Repairing an object that lost its `.ok` marker streams a completed
+        // remote object through SHA-256. A per-read timeout is appropriate
+        // here (headers and chunks), but there is still no total duration cap.
+        let book_get_client = Client::builder()
             .https_only(!local_test)
             .redirect(reqwest::redirect::Policy::none())
             .retry(reqwest::retry::never())
@@ -328,9 +346,21 @@ impl WebDavRemote {
         Ok(Self {
             client,
             upload_client,
+            book_get_client,
             root,
             credentials,
         })
+    }
+
+    /// Stable ownership key for local pending-cleanup records. It identifies
+    /// the exact remote root and account, so a record from one server can
+    /// never be sent to another server after a reconnect.
+    pub(crate) fn cleanup_owner_key(&self) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(self.root.as_str().as_bytes());
+        hasher.update(b"\0");
+        hasher.update(self.credentials.username.as_bytes());
+        format!("{:x}", hasher.finalize())
     }
 
     fn url(&self, path: &RemotePath, collection: bool) -> Url {
@@ -452,7 +482,7 @@ impl WebDavRemote {
         expected_bytes: u64,
         cancel: &Cancel,
     ) -> Result<HashCheck, RemoteError> {
-        let request = self.request_with(&self.upload_client, Method::GET, path, false);
+        let request = self.request_with(&self.book_get_client, Method::GET, path, false);
         let mut response = self.send_with(request, cancel).await?;
         match response.status() {
             StatusCode::NOT_FOUND => return Ok(HashCheck::Missing),

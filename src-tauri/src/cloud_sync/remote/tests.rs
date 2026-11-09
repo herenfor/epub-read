@@ -10,6 +10,8 @@ struct Store {
     directories: BTreeSet<String>,
     requests: usize,
     fail_put_status: Option<u16>,
+    early_put_status: Option<u16>,
+    fail_delete_status: Option<u16>,
     slow_put: bool,
 }
 
@@ -80,7 +82,13 @@ impl Server {
                         .get("content-length")
                         .and_then(|v| v.parse().ok())
                         .unwrap_or(0);
-                    while input.len() - header_end < length {
+                    let early_put = if method == "PUT" {
+                        shared.lock().unwrap().early_put_status
+                    } else {
+                        None
+                    };
+                    let body_length = if early_put.is_some() { 0 } else { length };
+                    while input.len() - header_end < body_length {
                         let mut buf = [0; 4096];
                         let count = socket.read(&mut buf).await.unwrap();
                         if count == 0 {
@@ -88,7 +96,11 @@ impl Server {
                         }
                         input.extend_from_slice(&buf[..count]);
                     }
-                    let body = &input[header_end..header_end + length];
+                    let body = if early_put.is_some() {
+                        &[][..]
+                    } else {
+                        &input[header_end..header_end + length]
+                    };
                     let (status, result, extra) = {
                         let mut store = shared.lock().unwrap();
                         store.requests += 1;
@@ -124,7 +136,9 @@ impl Server {
                                     }
                                 }
                                 "PUT" => {
-                                    if let Some(code) = store.fail_put_status {
+                                    if let Some(code) = store.early_put_status {
+                                        code
+                                    } else if let Some(code) = store.fail_put_status {
                                         code
                                     } else {
                                         // Deliberately ignores If-None-Match, like the first live service.
@@ -205,12 +219,16 @@ impl Server {
                                     }
                                 }
                                 "DELETE" => {
-                                    store.files.remove(path);
-                                    if store.directories.remove(path) {
-                                        store.files.retain(|p, _| !p.starts_with(path));
-                                        store.directories.retain(|p| !p.starts_with(path));
+                                    if let Some(code) = store.fail_delete_status {
+                                        code
+                                    } else {
+                                        store.files.remove(path);
+                                        if store.directories.remove(path) {
+                                            store.files.retain(|p, _| !p.starts_with(path));
+                                            store.directories.retain(|p| !p.starts_with(path));
+                                        }
+                                        204
                                     }
-                                    204
                                 }
                                 _ => 405,
                             }
@@ -231,6 +249,15 @@ impl Server {
                         packet
                     };
                     let _ = socket.write_all(&packet).await;
+                    if early_put.is_some() {
+                        // The 507 was intentionally sent before the request
+                        // body was consumed. Drain the remaining body so a
+                        // TCP reset cannot erase the response on loopback;
+                        // the client has already stopped writing when hyper
+                        // accepts this early response.
+                        let mut sink = [0u8; 4096];
+                        while matches!(socket.read(&mut sink).await, Ok(count) if count > 0) {}
+                    }
                 });
             }
         });
@@ -247,6 +274,18 @@ impl Server {
 
     fn slow_puts(&self) {
         self.store.lock().unwrap().slow_put = true;
+    }
+
+    fn fail_puts_early(&self, status: u16) {
+        self.store.lock().unwrap().early_put_status = Some(status);
+    }
+
+    fn fail_deletes(&self, status: u16) {
+        self.store.lock().unwrap().fail_delete_status = Some(status);
+    }
+
+    fn allow_deletes(&self) {
+        self.store.lock().unwrap().fail_delete_status = None;
     }
 
     fn seed_dir(&self, relative: &str) {
@@ -911,4 +950,194 @@ async fn dav_original_book_batch_uploads_once_and_reports_partial_success() {
         .all(|name| !name.contains(".pending")));
     let _ = std::fs::remove_file(cancel_file);
     let _ = std::fs::remove_file(quota_file);
+}
+
+#[tokio::test]
+async fn dav_early_quota_response_keeps_quota_and_stop_semantics() {
+    let server = Server::start().await;
+    let remote = server.remote();
+    let cancel = Cancel::default();
+    let cloud_space = space("55555555-5555-4555-8555-555555555555");
+    remote
+        .put(
+            &RemotePath::new("space.json").unwrap(),
+            serde_json::to_vec(&cloud_space).unwrap(),
+            WriteCondition::Any,
+            &cancel,
+        )
+        .await
+        .unwrap();
+
+    let app = tauri::test::mock_builder()
+        .manage(crate::cloud_sync::commands::CloudSyncManager::default())
+        .build(tauri::test::mock_context(tauri::test::noop_assets()))
+        .unwrap();
+    let handle = app.handle().clone();
+    crate::cloud_sync::commands::test_set_connection(
+        &handle,
+        crate::cloud_sync::model::ConnectionInfo {
+            connection_id: "55555555-5555-4555-8555-555555555501".into(),
+            settings: crate::cloud_sync::model::Settings {
+                base_url: "https://nas.invalid/dav/".into(),
+                remote_root: "test dir".into(),
+                username: "test".into(),
+            },
+            space_id: cloud_space.space_id.clone(),
+            device_label: "Test".into(),
+        },
+    );
+
+    let payload = vec![3u8; 512 * 1024];
+    let hash = crate::save_file::hex_digest(&payload);
+    let file = std::env::temp_dir().join(format!(
+        "epub-reader-early-quota-{}.epub",
+        crate::save_file::new_uuid().unwrap()
+    ));
+    std::fs::write(&file, &payload).unwrap();
+    let missing = std::env::temp_dir().join(format!(
+        "epub-reader-early-quota-missing-{}.epub",
+        crate::save_file::new_uuid().unwrap()
+    ));
+    server.fail_puts_early(507);
+    let result = crate::cloud_sync::books::test_run_upload(
+        &handle,
+        &remote,
+        vec![
+            (hash, file.clone(), payload.len() as u64),
+            ("d".repeat(64), missing, 12),
+        ],
+        "55555555-5555-4555-8555-555555555501",
+        &cloud_space.space_id,
+        Capabilities {
+            move_file: true,
+            move_no_replace: true,
+            conditional_create: false,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(result.status, "stopped", "{:?}", result.books);
+    assert_eq!(result.failed, 1);
+    assert_eq!(result.not_attempted, 1);
+    assert_eq!(
+        result.books[0].code.as_deref(),
+        Some("quota-exceeded"),
+        "{:?}",
+        result.books
+    );
+    assert_eq!(result.books[1].outcome, "not-attempted");
+    let _ = std::fs::remove_file(file);
+}
+
+#[tokio::test]
+async fn dav_cleanup_survives_disconnect_and_is_scoped_to_server_and_space() {
+    let server = Server::start().await;
+    let remote = server.remote();
+    let cancel = Cancel::default();
+    let space_id = "66666666-6666-4666-8666-666666666666";
+    let cloud_space = space(space_id);
+    remote
+        .put(
+            &RemotePath::new("space.json").unwrap(),
+            serde_json::to_vec(&cloud_space).unwrap(),
+            WriteCondition::Any,
+            &cancel,
+        )
+        .await
+        .unwrap();
+    let pending = "books/.00000000-0000-4000-8000-000000000001.job.pending";
+    server.seed_file(pending, b"orphan pending".to_vec());
+    let cleanup_root = std::env::temp_dir().join(format!(
+        "epub-reader-er0018-cleanup-{}",
+        crate::save_file::new_uuid().unwrap()
+    ));
+    let cleanup_path = crate::cloud_sync::books::test_cleanup_file(&cleanup_root);
+    let owner = crate::cloud_sync::books::test_cleanup_owner(&remote, space_id);
+    assert!(crate::cloud_sync::books::test_add_cleanup(
+        &cleanup_path,
+        &owner,
+        pending
+    ));
+
+    // A different server, even with the same space id, must never receive
+    // this record. It is not a network cleanup target.
+    let other_server = Server::start().await;
+    let other_remote = other_server.remote();
+    let other_owner = crate::cloud_sync::books::test_cleanup_owner(&other_remote, space_id);
+    let other_before = other_server.store.lock().unwrap().requests;
+    assert!(
+        !crate::cloud_sync::books::test_cleanup_remote(
+            &cleanup_path,
+            &other_remote,
+            &other_owner,
+            &cancel
+        )
+        .await
+    );
+    assert_eq!(other_server.store.lock().unwrap().requests, other_before);
+
+    // The same server but a different space is also a different owner.
+    let other_space_owner = crate::cloud_sync::books::test_cleanup_owner(
+        &remote,
+        "77777777-7777-4777-8777-777777777777",
+    );
+    let before = server.store.lock().unwrap().requests;
+    assert!(
+        !crate::cloud_sync::books::test_cleanup_remote(
+            &cleanup_path,
+            &remote,
+            &other_space_owner,
+            &cancel
+        )
+        .await
+    );
+    assert_eq!(server.store.lock().unwrap().requests, before);
+
+    // Cleanup failure is recorded, then the connection is "disconnected"
+    // without deleting the local record. Rebuilding the remote for the same
+    // root/space can resume and remove the orphan.
+    server.fail_deletes(500);
+    assert!(
+        crate::cloud_sync::books::test_cleanup_remote(&cleanup_path, &remote, &owner, &cancel)
+            .await
+    );
+    assert!(cleanup_path.exists());
+    let (entries, invalid) =
+        crate::cloud_sync::books::test_cleanup_scope_entries(&cleanup_path, &owner);
+    assert!(!invalid);
+    assert_eq!(entries, vec![pending.to_string()]);
+    assert!(server
+        .store
+        .lock()
+        .unwrap()
+        .files
+        .keys()
+        .any(|name| name.ends_with(&format!("/{pending}"))));
+
+    server.allow_deletes();
+    let reconnected = server.remote();
+    let reconnected_owner = crate::cloud_sync::books::test_cleanup_owner(&reconnected, space_id);
+    assert_eq!(reconnected_owner, owner);
+    assert!(
+        !crate::cloud_sync::books::test_cleanup_remote(
+            &cleanup_path,
+            &reconnected,
+            &reconnected_owner,
+            &cancel
+        )
+        .await
+    );
+    let (entries, invalid) =
+        crate::cloud_sync::books::test_cleanup_scope_entries(&cleanup_path, &owner);
+    assert!(!invalid);
+    assert!(entries.is_empty());
+    assert!(!cleanup_path.exists());
+    assert!(!server
+        .store
+        .lock()
+        .unwrap()
+        .files
+        .keys()
+        .any(|name| name.ends_with(&format!("/{pending}"))));
+    let _ = std::fs::remove_dir_all(cleanup_root);
 }
