@@ -2700,6 +2700,7 @@ export default function App() {
                   : (entries?: ShelfEntry[]) => void startBookSourceExport(entries)
               }
               onRevealSource={runtime.supportsRevealSource && libraryServices ? handleRevealSource : undefined}
+              cloudUpload={runtime.supportsCloudSync && libraryServices && shelfSpaces.space.kind !== "private"}
               shelfMove={runtime.supportsPrivateShelf ? {
                 direction: shelfSpaces.space.kind === "private" ? "toLibrary" : "toPrivate",
                 onMove: (entry) => void shelfSpaces.requestMove(entry),

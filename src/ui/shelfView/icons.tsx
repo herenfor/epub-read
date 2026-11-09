@@ -68,6 +68,17 @@ export function ExportIcon() {
   );
 }
 
+/** ER-0151：上传原书到网盘，云朵加向上箭头。 */
+export function CloudUploadIcon() {
+  return (
+    <svg className="shelf-svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M7 18.5h10a4 4 0 0 0 .6-7.96A5.5 5.5 0 0 0 6.9 11.9 3.3 3.3 0 0 0 7 18.5z" />
+      <path d="M12 16v-5.5" />
+      <polyline points="9.8 12.6 12 10.4 14.2 12.6" />
+    </svg>
+  );
+}
+
 /** 设备互传：电脑 + 手机，与互传面板、抽屉入口同一个图标。 */
 export function LanTransferIcon() {
   return (
@@ -266,6 +277,7 @@ export function shelfActionIcon(id: ShelfActionId): ReactNode {
     case "favorite": return <StarIcon />;
     case "unfavorite": return <StarIcon filled />;
     case "exportBook": return <ExportIcon />;
+    case "uploadToCloud": return <CloudUploadIcon />;
     case "moveToPrivate": return <LockIcon />;
     case "moveToLibrary": return <UnlockIcon />;
     case "revealSource":

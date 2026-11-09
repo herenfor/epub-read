@@ -13,6 +13,8 @@ import { useUiText } from "../localization/UiLanguageProvider";
 import type { PlainMessageKey } from "../localization/core";
 import { CHEVRON, Icon, SettingsRow } from "../settingsRows";
 import { adoptCloudSyncStatus, cloudSyncNeedsAttention, refreshCloudSyncStatus, runCloudSyncAction, useCloudSync } from "./cloudSyncStore";
+import { expandCloudBookUpload, useCloudBookUpload } from "./cloudBookUploadStore";
+import { uploadResultTitle } from "./cloudBookUploadText";
 import "./cloudSync.css";
 
 type Translate = ReturnType<typeof useUiText>["t"];
@@ -27,7 +29,39 @@ const ICONS = {
   device: <Icon><rect x="6" y="3" width="12" height="18" rx="2" /><path d="M11 17.5h2" /></Icon>,
   devices: <Icon><rect x="3" y="5" width="12" height="9" rx="1.5" /><rect x="15" y="9" width="6" height="10" rx="1.2" /><path d="M6 18h7" /></Icon>,
   books: <Icon><path d="M5 4.5h5v15H5zM10 4.5h4v15h-4z" /><path d="m15 5.5 3.5-.9 3 14-3.5.9z" /></Icon>,
+  upload: <Icon><path d="M7 18.5h10a4 4 0 0 0 .6-7.96A5.5 5.5 0 0 0 6.9 11.9 3.3 3.3 0 0 0 7 18.5z" /><path d="M12 16v-5.5M9.8 12.6 12 10.4l2.2 2.2" /></Icon>,
 };
+
+/**
+ * ER-0151: original books are uploaded from the shelf, not from here. This
+ * row only explains that, and while a batch runs (or just ended in this run
+ * of the app) shows it and opens its panel. It never reflects sync rounds.
+ */
+function BookUploadRow() {
+  const ui = useUiText();
+  const { t } = ui;
+  const upload = useCloudBookUpload();
+  const panel = upload.panel;
+  let detail = t("cloudSync.upload.row.idle");
+  let viewable = panel.kind !== "closed";
+  if (panel.kind === "running") {
+    const progress = panel.progress;
+    const done = progress ? Math.min(progress.index + 1, panel.count) : 1;
+    const percent = progress && progress.batchTotal > 0 ? Math.floor((progress.batchSent / progress.batchTotal) * 100) : 0;
+    detail = t("cloudSync.upload.row.running", { done, count: panel.count, percent });
+  } else if (panel.kind === "detached") {
+    detail = t("cloudSync.upload.row.detached");
+  } else if (panel.kind === "result") {
+    detail = t("cloudSync.upload.row.last", { title: uploadResultTitle(ui, panel.result) });
+  } else if (upload.last) {
+    detail = t("cloudSync.upload.row.last", { title: uploadResultTitle(ui, upload.last) });
+    viewable = false;
+  } else if (upload.currentUnknown) {
+    detail = t("cloudSync.upload.row.unknown");
+  }
+  return <SettingsRow icon={ICONS.upload} title={t("cloudSync.upload.row")} detail={detail}
+    disabled={!viewable} trailing={viewable ? undefined : <span />} onClick={expandCloudBookUpload} />;
+}
 
 function formatTime(ms: number): string {
   const date = new Date(ms);
@@ -337,6 +371,7 @@ function ConnectedView({ status }: { status: CloudSyncStatus & { connection: Non
           {book.creator && <small>{book.creator}</small>}
         </li>)}</ul>}
       </div>}
+      <BookUploadRow />
     </div>
 
     <div className="shelf-settings-card cloud-sync-disconnect">

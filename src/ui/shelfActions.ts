@@ -7,7 +7,7 @@ import type { PlainMessageKey } from "./localization/core";
  */
 
 export type ShelfActionGroup = "read" | "organize" | "danger";
-export type ShelfBookActionId = "open" | "openInNewTab" | "select" | "favorite" | "unfavorite" | "move" | "removeFromFolder" | "moveToPrivate" | "moveToLibrary" | "exportBook" | "revealSource" | "delete";
+export type ShelfBookActionId = "open" | "openInNewTab" | "select" | "favorite" | "unfavorite" | "move" | "removeFromFolder" | "moveToPrivate" | "moveToLibrary" | "exportBook" | "uploadToCloud" | "revealSource" | "delete";
 export type ShelfFolderActionId = "openFolder" | "renameFolder" | "exportBook" | "dissolveFolder";
 export type ShelfActionId = ShelfBookActionId | ShelfFolderActionId;
 
@@ -36,6 +36,8 @@ export interface ShelfBookActionContext {
   canExport?: boolean;
   /** Another export/import or a LAN transfer holds the save-file slot. */
   exportDisabled?: boolean;
+  /** ER-0151: Windows/Android library shelf can upload the original file to the cloud drive. */
+  cloudUpload?: { disabled: boolean };
   /** Windows: show the book's file in File Explorer. */
   canReveal?: boolean;
   /** The book's file is unavailable (moved or deleted). */
@@ -71,6 +73,7 @@ export function shelfBookActions(ctx: ShelfBookActionContext): ShelfAction[] {
       : { id: "moveToLibrary", group: "organize", label: "shelf.card.moveToLibrary", disabled: ctx.busy || ctx.shelfMove.disabled });
   }
   if (ctx.canExport) actions.push({ id: "exportBook", group: "organize", label: "bookExport.action", disabled: ctx.busy || Boolean(ctx.exportDisabled) });
+  if (ctx.cloudUpload) actions.push({ id: "uploadToCloud", group: "organize", label: "cloudSync.upload.action", disabled: ctx.busy || ctx.cloudUpload.disabled });
   if (ctx.canReveal) actions.push({ id: "revealSource", group: "organize", label: "shelf.card.reveal", disabled: Boolean(ctx.revealDisabled) });
   if (ctx.canSelect) actions.push({ id: "select", group: "organize", label: "shelf.card.select", disabled: false });
   actions.push({ id: "delete", group: "danger", label: "shelf.card.delete", disabled: ctx.busy || ctx.deleteDisabled });

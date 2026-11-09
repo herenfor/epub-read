@@ -1,0 +1,311 @@
+/* ER-0151 original-book upload: centered dialog on desktop, bottom sheet on
+   phones, and a small collapsed card. Theme tokens only. */
+
+.cloud-upload-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-ui-opening) + 20);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.42);
+  animation: var(--scrim-enter);
+}
+
+.cloud-upload-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(440px, 100%);
+  max-height: min(680px, calc(var(--visual-viewport-height, 100vh) - 48px));
+  padding: 18px 20px;
+  overflow: hidden;
+  border: var(--hairline) solid var(--panel-border);
+  border-radius: var(--r-xl);
+  background: var(--panel-bg);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.28);
+  animation: var(--dialog-enter);
+}
+
+.cloud-upload-panel h2 {
+  margin: 0;
+  font-size: var(--fs-title);
+  font-weight: 700;
+  text-wrap: balance;
+}
+
+.cloud-upload-panel h2.is-bad,
+.cloud-upload-error {
+  color: var(--error);
+}
+
+.cloud-upload-text,
+.cloud-upload-error {
+  margin: 0;
+  font-size: var(--fs-body);
+  line-height: 1.55;
+}
+
+.cloud-upload-text.is-muted {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: var(--fs-caption);
+}
+
+.cloud-upload-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: var(--hairline) solid var(--panel-border);
+  border-radius: var(--r-md);
+  background: var(--bg);
+}
+
+.cloud-upload-kv {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  font-size: var(--fs-body);
+}
+
+.cloud-upload-kv.is-small {
+  color: var(--muted);
+  font-size: var(--fs-caption);
+}
+
+.cloud-upload-kv b,
+.cloud-upload-num {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.cloud-upload-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cloud-upload-target {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.cloud-upload-phase {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent);
+  font-size: var(--fs-caption);
+}
+
+.cloud-upload-spinner {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--panel-border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: cloud-upload-spin 0.9s linear infinite;
+}
+
+.cloud-upload-bar {
+  position: relative;
+  height: 6px;
+  overflow: hidden;
+  border-radius: var(--r-full);
+  background: var(--shelf-input-bg);
+}
+
+.cloud-upload-bar > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width var(--motion-base, 220ms) linear;
+}
+
+/* Book list: no frame and no scrollbar; the edge fade shows there is more. */
+.cloud-upload-list {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 220px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+}
+
+.cloud-upload-list > li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex: none;
+  min-width: 0;
+  padding: 9px 0;
+  border-bottom: var(--hairline) solid var(--panel-border);
+  font-size: var(--fs-body);
+}
+
+.cloud-upload-list > li:last-child {
+  border-bottom: 0;
+}
+
+.cloud-upload-meta {
+  flex: none;
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: var(--fs-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.cloud-upload-list > li.is-off .cloud-upload-name {
+  color: var(--muted);
+}
+
+.cloud-upload-list > li.is-bad .cloud-upload-meta {
+  color: var(--error);
+}
+
+.cloud-upload-list > li.cloud-upload-more {
+  justify-content: center;
+  color: var(--muted);
+  font-size: var(--fs-caption);
+}
+
+.cloud-upload-counts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+  gap: 6px;
+}
+
+.cloud-upload-count {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: var(--hairline) solid var(--panel-border);
+  border-radius: var(--r-md);
+  background: var(--bg);
+}
+
+.cloud-upload-count b {
+  font-size: var(--fs-title);
+  font-variant-numeric: tabular-nums;
+}
+
+.cloud-upload-count span {
+  color: var(--muted);
+  font-size: var(--fs-caption);
+}
+
+.cloud-upload-count.is-ok b {
+  color: var(--accent);
+}
+
+.cloud-upload-count.is-bad b {
+  color: var(--error);
+}
+
+.cloud-upload-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Collapsed: bottom right, where the book export progress card sits; lifted
+   above the selection dock while it is open. */
+.cloud-upload-float {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: calc(var(--z-ui-page) + 2);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(320px, calc(100vw - 32px));
+  padding: 12px 14px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--r-md);
+  background: var(--panel-bg);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.2);
+}
+
+.cloud-upload-float .ui-btn {
+  min-height: 30px;
+}
+
+.app:has(.shelf-floating-batch-dock) .cloud-upload-float {
+  bottom: 84px;
+}
+
+@media (max-width: 560px) {
+  .cloud-upload-backdrop {
+    place-items: end stretch;
+    padding: 0;
+  }
+
+  .cloud-upload-panel {
+    position: relative;
+    width: 100%;
+    max-height: calc(var(--visual-viewport-height, 100vh) - 24px);
+    padding: 22px 16px calc(18px + env(safe-area-inset-bottom, 0px));
+    border-width: 1px 0 0;
+    border-radius: var(--r-xl) var(--r-xl) 0 0;
+    animation: var(--sheet-enter);
+  }
+
+  .cloud-upload-panel::before {
+    content: "";
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    width: 36px;
+    height: 4px;
+    margin-left: -18px;
+    border-radius: var(--r-full);
+    background: var(--panel-border);
+  }
+
+  .cloud-upload-float {
+    left: 12px;
+    right: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    width: auto;
+    border-radius: var(--r-lg);
+  }
+
+  /* The phone dock is two rows of icon buttons. */
+  .app:has(.shelf-floating-batch-dock) .cloud-upload-float {
+    bottom: calc(152px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cloud-upload-spinner {
+    animation-duration: 0s;
+  }
+}
+
+@keyframes cloud-upload-spin { to { transform: rotate(360deg); } }

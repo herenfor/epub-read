@@ -62,7 +62,7 @@
  * panel names its surface here; the script sets --edge-fade-gap and
  * --edge-fade-pad-* so the bars cover the padding and add no height.
  */
-:is(.sidebar-drawer, .shelf-action-sheet) {
+:is(.sidebar-drawer, .shelf-action-sheet, .cloud-upload-panel) {
   --edge-fade-color: var(--panel-bg);
 }
 
@@ -70,14 +70,14 @@
   --edge-fade-color: var(--panel-surface);
 }
 
-.app[data-touch-ui="true"] :is(.sidebar-drawer, .shelf-action-sheet, .aa-popover, .shelf-settings-sheet) [data-edge-fade] {
+.app[data-touch-ui="true"] :is(.sidebar-drawer, .shelf-action-sheet, .aa-popover, .shelf-settings-sheet, .cloud-upload-panel) [data-edge-fade] {
   -webkit-mask-image: none;
   mask-image: none;
   animation: none;
 }
 
-.app[data-touch-ui="true"] :is(.sidebar-drawer, .shelf-action-sheet, .aa-popover, .shelf-settings-sheet) [data-edge-fade]::before,
-.app[data-touch-ui="true"] :is(.sidebar-drawer, .shelf-action-sheet, .aa-popover, .shelf-settings-sheet) [data-edge-fade]::after {
+.app[data-touch-ui="true"] :is(.sidebar-drawer, .shelf-action-sheet, .aa-popover, .shelf-settings-sheet, .cloud-upload-panel) [data-edge-fade]::before,
+.app[data-touch-ui="true"] :is(.sidebar-drawer, .shelf-action-sheet, .aa-popover, .shelf-settings-sheet, .cloud-upload-panel) [data-edge-fade]::after {
   content: "";
   position: sticky;
   z-index: 2;
@@ -90,7 +90,7 @@
   transition: opacity var(--ui-control-quick, 150ms) ease;
 }
 
-.app[data-touch-ui="true"] :is(.sidebar-drawer, .shelf-action-sheet, .aa-popover, .shelf-settings-sheet) [data-edge-fade]::before {
+.app[data-touch-ui="true"] :is(.sidebar-drawer, .shelf-action-sheet, .aa-popover, .shelf-settings-sheet, .cloud-upload-panel) [data-edge-fade]::before {
   top: calc(-1 * var(--edge-fade-pad-top, 0px));
   height: 28px;
   margin-top: calc(-1 * var(--edge-fade-pad-top, 0px));
@@ -98,7 +98,7 @@
   background: linear-gradient(to bottom, var(--edge-fade-color), transparent);
 }
 
-.app[data-touch-ui="true"] :is(.sidebar-drawer, .shelf-action-sheet, .aa-popover, .shelf-settings-sheet) [data-edge-fade]::after {
+.app[data-touch-ui="true"] :is(.sidebar-drawer, .shelf-action-sheet, .aa-popover, .shelf-settings-sheet, .cloud-upload-panel) [data-edge-fade]::after {
   bottom: calc(-1 * var(--edge-fade-pad-bottom, 0px));
   height: 36px;
   margin-top: calc(var(--edge-fade-pad-bottom, 0px) - 36px - var(--edge-fade-gap, 0px));
@@ -106,8 +106,8 @@
   background: linear-gradient(to top, var(--edge-fade-color), transparent);
 }
 
-.app[data-touch-ui="true"] :is(.sidebar-drawer, .shelf-action-sheet, .aa-popover, .shelf-settings-sheet) [data-edge-fade~="top"]::before,
-.app[data-touch-ui="true"] :is(.sidebar-drawer, .shelf-action-sheet, .aa-popover, .shelf-settings-sheet) [data-edge-fade~="bottom"]::after {
+.app[data-touch-ui="true"] :is(.sidebar-drawer, .shelf-action-sheet, .aa-popover, .shelf-settings-sheet, .cloud-upload-panel) [data-edge-fade~="top"]::before,
+.app[data-touch-ui="true"] :is(.sidebar-drawer, .shelf-action-sheet, .aa-popover, .shelf-settings-sheet, .cloud-upload-panel) [data-edge-fade~="bottom"]::after {
   opacity: 1;
 }
 

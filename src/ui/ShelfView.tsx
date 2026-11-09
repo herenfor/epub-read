@@ -63,6 +63,8 @@ import "./shelfZen.css";
 import { ShelfFolderAddBooksDialog } from "./ShelfFolderAddBooksDialog";
 import { useAppUpdateDot } from "./appUpdate/appUpdateStore";
 import { useCloudSyncAttention } from "./cloudSync/cloudSyncStore";
+import { CloudBookUploadLayer } from "./cloudSync/CloudBookUploadPanel";
+import { cloudBookUploadBusy, closeCloudBookUpload, requestCloudBookUpload, useCloudBookUpload } from "./cloudSync/cloudBookUploadStore";
 import { uiText, useUiText } from "./localization/UiLanguageProvider";
 import type { PlainMessageKey } from "./localization/core";
 import {
@@ -75,6 +77,7 @@ import {
   DotsVerticalIcon,
   EditIcon,
   ExportIcon,
+  CloudUploadIcon,
   FolderIcon,
   GridIcon,
   LanTransferIcon,
@@ -290,6 +293,8 @@ export interface ShelfViewProps {
   onExportBooks?(selectedEntries?: ShelfEntry[]): void;
   /** Windows: show the book's file in File Explorer; absent hides the action. */
   onRevealSource?(entry: ShelfEntry): void;
+  /** ER-0151: Windows/Android library shelf uploads original files to the connected cloud drive. */
+  cloudUpload?: boolean;
   /** ER-0045: move one book into or out of the private shelf; absent hides the action. */
   shelfMove?: { direction: "toPrivate" | "toLibrary"; onMove(entry: ShelfEntry): void };
   /** Legacy v1/v2 JSON import stays secondary on native; Web can leave this undefined and use its existing entry. */
@@ -456,6 +461,10 @@ export function ShelfView(props: ShelfViewProps) {
   const searchBoxRef = useRef<HTMLDivElement | null>(null);
   const [filters, setFilters] = useState<ShelfFilters>(EMPTY_SHELF_FILTERS);
   const [selectionMode, setSelectionMode] = useState(false);
+  // ER-0151: the upload panel (not its collapsed card) takes back presses; a running job disables new uploads.
+  const cloudUpload = useCloudBookUpload();
+  const cloudUploadOpen = Boolean(props.cloudUpload) && cloudUpload.panel.kind !== "closed" && !cloudUpload.collapsed;
+  const cloudUploadRunning = cloudBookUploadBusy(cloudUpload);
   const [dockClosing, setDockClosing] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleteTargetIds, setDeleteTargetIds] = useState<string[] | null>(null);
@@ -1185,6 +1194,11 @@ export function ShelfView(props: ShelfViewProps) {
   }, []);
 
   const handleRootBack = useCallback((): boolean => {
+    // 原书上传面板在设置之上：返回先收起它（任务进行中只收起，不取消）。
+    if (cloudUploadOpen) {
+      closeCloudBookUpload();
+      return true;
+    }
     // 操作菜单总在最上层（包括文件夹弹窗之上），先关它。
     if (menuRef.current && menuCloseTimerRef.current === null) {
       closeMenu();
@@ -1247,6 +1261,7 @@ export function ShelfView(props: ShelfViewProps) {
     return false;
   }, [
     activeFolderModal,
+    cloudUploadOpen,
     closeMenu,
     closeSettings,
     closeFilter,
@@ -1272,6 +1287,7 @@ export function ShelfView(props: ShelfViewProps) {
   const shelfBackHandlerRef = useRef(handleRootBack);
   shelfBackHandlerRef.current = handleRootBack;
   const shelfBackActive = Boolean(
+    cloudUploadOpen ||
     (menu && !menuClosing) ||
     deleteTargets ||
     pendingMergeBooks ||
@@ -1741,6 +1757,10 @@ export function ShelfView(props: ShelfViewProps) {
         closeMenu({ restoreFocus: false });
         props.onExportBooks?.([entry]);
         return;
+      case "uploadToCloud":
+        closeMenu({ restoreFocus: false });
+        requestCloudBookUpload([entry.contentHash ?? entry.id]);
+        return;
       case "revealSource":
         closeMenu();
         props.onRevealSource?.(entry);
@@ -1823,6 +1843,7 @@ export function ShelfView(props: ShelfViewProps) {
       canRemoveFromFolder: canOrganize,
       canExport: Boolean(props.onExportBooks),
       exportDisabled: Boolean(props.saveFileActive || props.lanTransferActive),
+      cloudUpload: props.cloudUpload ? { disabled: cloudUploadRunning } : undefined,
       canReveal: Boolean(props.onRevealSource),
       revealDisabled: entry.available === false,
       // The move rebinds the original file, so it waits for the file and for imports.
@@ -1844,7 +1865,7 @@ export function ShelfView(props: ShelfViewProps) {
         : entry.title,
       groups: toItems(actions),
     };
-  }, [activeFolders, bookExportDisabled, canOrganize, entriesById, folderBooksMap, menu, menuPending, menuTargetGone, organization, props.busy, props.importActive, props.onExportBooks, props.onRevealSource, props.readerTabs, props.saveFileActive, props.lanTransferActive, props.shelfMove, selectionMode, t, thumbnailProvider, tn]);
+  }, [activeFolders, bookExportDisabled, canOrganize, cloudUploadRunning, entriesById, folderBooksMap, menu, menuPending, menuTargetGone, organization, props.busy, props.cloudUpload, props.importActive, props.onExportBooks, props.onRevealSource, props.readerTabs, props.saveFileActive, props.lanTransferActive, props.shelfMove, selectionMode, t, thumbnailProvider, tn]);
 
   const openMenuKey = menu && !menuClosing
     ? (menu.target.kind === "book"
@@ -2233,6 +2254,7 @@ export function ShelfView(props: ShelfViewProps) {
 
       {/* 设置页：PC 对话框，触屏全屏页 */}
       <ShelfSettingsPage {...settingsPageProps} open={settingsOpen} registerSubmenuBackHandler={registerSubmenuBackHandler} onClose={closeSettings} />
+      {props.cloudUpload && <CloudBookUploadLayer onOpenSync={() => openSettings("sync")} />}
       {settingsWarm && <PanelPaintWarmup active>
         <ShelfSettingsPage {...settingsPageProps} initialSection={undefined} open warm={settingsWarm} onClose={closeSettings} />
       </PanelPaintWarmup>}
@@ -3153,7 +3175,7 @@ export function ShelfView(props: ShelfViewProps) {
               <FolderIcon />
               <span>{t("shelfMain.dock.move")}</span>
             </button>
-            {(props.onExportArchive || props.onExportBooks || (getRuntimeCapabilities().supportsLanTransfer && props.onOpenLanTransfer)) && <span className="shelf-batch-divider" aria-hidden="true" />}
+            {(props.onExportArchive || props.onExportBooks || props.cloudUpload || (getRuntimeCapabilities().supportsLanTransfer && props.onOpenLanTransfer)) && <span className="shelf-batch-divider" aria-hidden="true" />}
             {props.onExportArchive && (
               <button
                 className="shelf-batch-action-btn"
@@ -3197,6 +3219,21 @@ export function ShelfView(props: ShelfViewProps) {
               >
                 <LanTransferIcon />
                 <span>{t("shelfMain.dock.send")}</span>
+              </button>
+            )}
+            {props.cloudUpload && (
+              <button
+                className="shelf-batch-action-btn"
+                type="button"
+                disabled={noneSelected || props.busy || cloudUploadRunning}
+                onClick={() => {
+                  const targets = props.entries.filter((e) => selectedIds.has(e.id));
+                  if (targets.length > 0) requestCloudBookUpload(targets.map((entry) => entry.contentHash ?? entry.id));
+                }}
+                title={t("cloudSync.upload.dock.tip")}
+              >
+                <CloudUploadIcon />
+                <span>{t("cloudSync.upload.dock")}</span>
               </button>
             )}
             <span className="shelf-batch-divider" aria-hidden="true" />

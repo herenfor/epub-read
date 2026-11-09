@@ -177,6 +177,9 @@ describe("shelf action descriptors", () => {
     expect(shelfBookActions({ ...base, deleteDisabled: true }).find((a) => a.id === "delete")?.disabled).toBe(true);
     expect(ids({ ...base, canExport: true } as typeof base)).toEqual(["read:open", "organize:favorite,move,removeFromFolder,exportBook,select", "danger:delete"]);
     expect(shelfBookActions({ ...base, canExport: true, exportDisabled: true }).find((a) => a.id === "exportBook")?.disabled).toBe(true);
+    // ER-0151: upload sits right after export and waits while another upload runs.
+    expect(ids({ ...base, canExport: true, cloudUpload: { disabled: false } } as typeof base)[1]).toBe("organize:favorite,move,removeFromFolder,exportBook,uploadToCloud,select");
+    expect(shelfBookActions({ ...base, cloudUpload: { disabled: true } }).find((a) => a.id === "uploadToCloud")?.disabled).toBe(true);
     // ER-0045: the shelf move sits after the folder actions and waits for busy work and an available file.
     expect(ids({ ...base, shelfMove: { direction: "toPrivate", disabled: false } } as typeof base)[1]).toBe("organize:favorite,move,removeFromFolder,moveToPrivate,select");
     const shelfMove = (direction: "toPrivate" | "toLibrary", disabled: boolean, busy = false) =>
