@@ -246,15 +246,46 @@ fn install(control: &mut Control, session: Option<&Session>) {
 }
 
 /// Android readies its Keystore bridge and certificate verifier on first use;
-/// until that succeeds nothing may connect. Other platforms answer at once.
+/// Linux probes the Secret Service without unlocking it. Until that succeeds
+/// nothing may connect. Windows answers at once.
 pub(super) async fn native_ready(app: &AppHandle) -> bool {
-    if !cfg!(target_os = "android") || secrets::available() {
-        return secrets::available();
-    }
-    let app = app.clone();
-    engine::blocking(move || Ok(secrets::prepare(&app)))
+    native_ready_inner(app, false).await
+}
+
+/// Explicit test/connect/upload is allowed to bypass the Linux status probe
+/// cooldown after the user starts or unlocks the keyring.
+pub(super) async fn native_ready_force(app: &AppHandle) -> bool {
+    native_ready_inner(app, true).await
+}
+
+async fn native_ready_inner(app: &AppHandle, force: bool) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        if secrets::available() {
+            return true;
+        }
+        let app = app.clone();
+        return engine::blocking(move || {
+            Ok(if force {
+                secrets::prepare_force(&app)
+            } else {
+                secrets::prepare(&app)
+            })
+        })
         .await
-        .unwrap_or(false)
+        .unwrap_or(false);
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = force;
+        if !cfg!(target_os = "android") || secrets::available() {
+            return secrets::available();
+        }
+        let app = app.clone();
+        engine::blocking(move || Ok(secrets::prepare(&app)))
+            .await
+            .unwrap_or(false)
+    }
 }
 
 pub(super) async fn load_once(app: &AppHandle) -> Result<()> {
@@ -508,7 +539,7 @@ pub async fn cloud_sync_test_connection(
     app: AppHandle,
     input: ConnectionInput,
 ) -> Result<ConnectionPreview> {
-    if cfg!(target_os = "android") && !native_ready(&app).await {
+    if !native_ready_force(&app).await {
         return Err(Failure::new(FailureCode::NativeBridgeUnavailable));
     }
     load_once(&app).await?;
@@ -579,7 +610,7 @@ pub async fn cloud_sync_connect(
     device_label: String,
 ) -> Result<Status> {
     super::books::cancel_active(&app);
-    if !native_ready(&app).await {
+    if !native_ready_force(&app).await {
         return Err(Failure::new(FailureCode::NativeBridgeUnavailable));
     }
     load_once(&app).await?;

@@ -1756,7 +1756,7 @@ pub async fn cloud_book_upload(
         epoch,
     )?;
     let job = start.job.clone();
-    if !commands::native_ready(&app).await {
+    if !commands::native_ready_force(&app).await {
         return Err(Failure::new(FailureCode::NativeBridgeUnavailable));
     }
     let disk = sync_disk(&app)?;

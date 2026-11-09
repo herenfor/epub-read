@@ -1310,6 +1310,7 @@ dependencies = [
  "webkit2gtk",
  "windows",
  "winreg",
+ "zbus",
  "zip",
 ]
 
