@@ -33,17 +33,16 @@ const ICONS = {
 };
 
 /**
- * ER-0151: original books are uploaded from the shelf, not from here. This
- * row only explains that, and while a batch runs (or just ended in this run
- * of the app) shows it and opens its panel. It never reflects sync rounds.
+ * ER-0151: original books are uploaded from the shelf, not from here. The
+ * row appears only while a batch runs or has just ended (or its state could
+ * not be read), to reopen that batch; it never reflects sync rounds.
  */
 function BookUploadRow() {
   const ui = useUiText();
   const { t } = ui;
   const upload = useCloudBookUpload();
   const panel = upload.panel;
-  let detail = t("cloudSync.upload.row.idle");
-  let viewable = panel.kind !== "closed";
+  let detail: string;
   if (panel.kind === "running") {
     const progress = panel.progress;
     const done = progress ? Math.min(progress.index + 1, panel.count) : 1;
@@ -53,14 +52,15 @@ function BookUploadRow() {
     detail = t("cloudSync.upload.row.detached");
   } else if (panel.kind === "result") {
     detail = t("cloudSync.upload.row.last", { title: uploadResultTitle(ui, panel.result) });
-  } else if (upload.last) {
-    detail = t("cloudSync.upload.row.last", { title: uploadResultTitle(ui, upload.last) });
-    viewable = false;
+  } else if (panel.kind === "failed") {
+    detail = t("cloudSync.upload.title");
   } else if (upload.currentUnknown) {
-    detail = t("cloudSync.upload.row.unknown");
+    return <SettingsRow icon={ICONS.upload} title={t("cloudSync.upload.row")} detail={t("cloudSync.upload.row.unknown")}
+      disabled trailing={<span />} onClick={() => undefined} />;
+  } else {
+    return null;
   }
-  return <SettingsRow icon={ICONS.upload} title={t("cloudSync.upload.row")} detail={detail}
-    disabled={!viewable} trailing={viewable ? undefined : <span />} onClick={expandCloudBookUpload} />;
+  return <SettingsRow icon={ICONS.upload} title={t("cloudSync.upload.row")} detail={detail} onClick={expandCloudBookUpload} />;
 }
 
 function formatTime(ms: number): string {

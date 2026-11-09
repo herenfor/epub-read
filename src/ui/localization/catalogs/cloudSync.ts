@@ -201,7 +201,6 @@ export const cloudSync = defineMessages("cloudSync", {
   "cloudSync.upload.reason.notAttempted": "未开始",
   "cloudSync.upload.reason.unknown": "未上传（{code}）",
   "cloudSync.upload.row": "原书备份",
-  "cloudSync.upload.row.idle": "同步不带原书。要备份，在书架选中书后点「上传网盘」",
   "cloudSync.upload.row.running": { zh: "正在上传 {done}/{count} · 已处理 {percent}%", note: "Settings row while a batch is uploading." },
   "cloudSync.upload.row.last": { zh: "上次：{title}", note: "{title} is the last batch's one-line result." },
   "cloudSync.upload.row.unknown": "读不到上传状态",

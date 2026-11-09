@@ -192,7 +192,6 @@
   "cloudSync.upload.reason.notAttempted": "Not started",
   "cloudSync.upload.reason.unknown": "Not uploaded ({code})",
   "cloudSync.upload.row": "Original Book Backup",
-  "cloudSync.upload.row.idle": "Sync does not include book files. To back them up, select books on the shelf and tap Upload.",
   "cloudSync.upload.row.running": "Uploading {done}/{count} · {percent}% processed",
   "cloudSync.upload.row.last": "Last: {title}",
   "cloudSync.upload.row.unknown": "Upload status unavailable",
