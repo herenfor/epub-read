@@ -88,7 +88,7 @@ describe("第三步补修：书架触摸长按与子菜单 Back", () => {
     }
   });
 
-  it("触屏设置页：所有分组摊在一页上，Back 直接关闭设置", async () => {
+  it("触屏设置页：外观留首页，数据与备份等是下一层，Back 先回首页再关闭", async () => {
     const dom = createReactDomHarness();
     let back: (() => boolean) | null = null;
     try {
@@ -99,12 +99,32 @@ describe("第三步补修：书架触摸长按与子菜单 Back", () => {
         registerBackHandler: (handler: (() => boolean) | null) => { back = handler; },
       }));
       await dom.click(dom.container.querySelector('.shelf-normal-bar-mobile [aria-label="设置"]') as HTMLElement);
-      // One page, no section pages pushed over it.
       expect(dom.container.querySelectorAll(".shelf-settings-sheet")).toHaveLength(1);
       const groups = [...dom.container.querySelectorAll(".shelf-settings-section")].map((item) => item.getAttribute("data-section"));
-      expect(groups).toEqual(expect.arrayContaining(["appearance", "data", "about"]));
-      const labels = [...dom.container.querySelectorAll(".shelf-settings-group-label")].map((item) => item.textContent);
-      expect(labels).toEqual(expect.arrayContaining(["外观", "数据与备份", "关于"]));
+      expect(groups).toContain("appearance");
+      expect(groups).not.toContain("data");
+      expect(groups).not.toContain("about");
+      const entry = (title: string) => [...dom.container.querySelectorAll(".shelf-settings-sheet.is-home .shelf-settings-row")]
+        .find((row) => row.querySelector("strong")?.textContent === title) as HTMLElement | undefined;
+      expect(entry("数据与备份")).toBeDefined();
+      expect(entry("关于")).toBeDefined();
+      const scroll = dom.container.querySelector(".shelf-settings-sheet.is-home .shelf-settings-scroll") as HTMLElement;
+      scroll.scrollTop = 120;
+
+      await dom.click(entry("数据与备份")!);
+      const sub = dom.container.querySelector(".shelf-settings-sheet.is-sub") as HTMLElement;
+      expect(sub.querySelector("h2")?.textContent).toBe("数据与备份");
+      expect(sub.textContent).toContain("导出存档");
+      expect(dom.container.querySelector(".shelf-settings-sheet.is-home")?.className).toContain("is-covered");
+
+      // Back leaves the sub page first; the home underneath was never remounted.
+      await dom.run(() => { expect(back?.()).toBe(true); });
+      expect(dom.container.querySelector(".shelf-settings-sheet.is-sub")?.className).toContain("is-leaving");
+      await dom.run(() => new Promise<void>((resolve) => setTimeout(resolve, PAGE_CLOSE_MS + 20)));
+      expect(dom.container.querySelector(".shelf-settings-sheet.is-sub")).toBeNull();
+      expect(dom.container.querySelector(".shelf-settings-sheet.is-home .shelf-settings-scroll")).toBe(scroll);
+      expect(dom.container.querySelector(".shelf-settings-layer")?.className).not.toContain("is-closing");
+
       await dom.run(() => { expect(back?.()).toBe(true); });
       expect(dom.container.querySelector(".shelf-settings-layer")?.className).toContain("is-closing");
       // The phone settings page leaves as a page, on the page exit time.

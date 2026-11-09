@@ -112,6 +112,11 @@ const EXTERNAL = <svg className="shelf-settings-row-chevron" width="15" height="
   <path d="M14 5h5v5M19 5l-8 8M18 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h4" />
 </svg>;
 
+/** This build's version, or null when the build session is unreadable (the touch settings row). */
+export function aboutVersion(): string | null {
+  return projectAboutInfo(getAppBuildSession(), { version: APP_VERSION, edition: APP_EDITION })?.version ?? null;
+}
+
 /**
  * The About section: one card names the app and carries the update notice,
  * one list holds every action (check, auto check, this version's notes,
