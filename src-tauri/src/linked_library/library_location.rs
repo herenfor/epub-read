@@ -17,6 +17,19 @@ struct Slot {
     readers: usize,
 }
 
+impl LibraryLocationState {
+    /// A move or recovery is reserved. It loaded the library settings when it
+    /// started and writes them back whole when it commits, so another settings
+    /// write in between would be lost. Reservation happens under the library
+    /// write lock, which a settings writer also holds while it checks this.
+    pub(crate) fn job_active(&self) -> Result<bool> {
+        self.0
+            .lock()
+            .map(|slot| slot.job.is_some())
+            .map_err(|_| io_error("书库位置锁已损坏"))
+    }
+}
+
 pub(crate) struct SourceLease(Arc<Mutex<Slot>>);
 impl Drop for SourceLease {
     fn drop(&mut self) {
@@ -914,6 +927,19 @@ pub async fn linked_library_location_recover(app: AppHandle) -> Result<LocationR
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn job_active_follows_the_reserved_move_only() {
+        let state = LibraryLocationState::default();
+        assert!(!state.job_active().unwrap());
+        // Reading books (source leases) is not a move.
+        state.0.lock().unwrap().readers = 2;
+        assert!(!state.job_active().unwrap());
+        state.0.lock().unwrap().job = Some(("move".into(), Arc::new(ImportGate::default())));
+        assert!(state.job_active().unwrap());
+        drop(JobLease { slot: Arc::clone(&state.0), id: "move".into() });
+        assert!(!state.job_active().unwrap());
+    }
     struct Fixture {
         dir: PathBuf,
         root: PathBuf,

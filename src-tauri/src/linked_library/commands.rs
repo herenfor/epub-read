@@ -472,7 +472,12 @@ pub fn linked_library_settings_get(app: AppHandle) -> Result<LibrarySettingsView
 pub fn linked_library_settings_set_copy(app: AppHandle, enabled: bool) -> Result<LibrarySettingsView, LinkedLibraryError> {
     let writes = app.state::<LinkedLibraryWriteState>();
     let _guard = writes.0.try_lock().map_err(|_| LinkedLibraryError::new("busy", "书库任务进行中，请稍后再改设置"))?;
-    ensure_import_idle(&app)?;
+    // Imports carry their own copy choice, so saving the preference while one
+    // runs (or while a folder preview holds the import gate) changes nothing
+    // underway. Only a library move would overwrite it when it commits.
+    if app.try_state::<LibraryLocationState>().is_some_and(|state| state.job_active().unwrap_or(true)) {
+        return Err(LinkedLibraryError::new("busy", "正在更改书库位置，完成后再改这个设置"));
+    }
     let local = app
         .path()
         .app_local_data_dir()
