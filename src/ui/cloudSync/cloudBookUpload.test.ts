@@ -28,10 +28,11 @@ import {
   recoverCloudBookUpload,
   requestCloudBookUpload,
   resetCloudBookUploadStoreForTest,
+  rereadCloudBookUpload,
   retryFailedCloudBookUpload,
 } from "./cloudBookUploadStore";
-import { uploadReasonText, uploadResultTitle } from "./cloudBookUploadText";
-import { resetCloudSyncStoreForTest } from "./cloudSyncStore";
+import { stopCode, uploadReasonText, uploadResultTitle } from "./cloudBookUploadText";
+import { adoptCloudSyncStatus, resetCloudSyncStoreForTest } from "./cloudSyncStore";
 
 const connected: CloudSyncStatus = {
   nativeReady: true,
@@ -39,6 +40,10 @@ const connected: CloudSyncStatus = {
   phase: "idle", lastSuccessAtMs: null, retryAtMs: null, lastError: null, pending: false, localChanged: false,
   issues: [], deviceCount: 1, cloudOnlyBookCount: 0, localRecoverySaved: false,
 };
+
+function connectedTo(connectionId: string): CloudSyncStatus {
+  return { ...connected, connection: { ...connected.connection!, connectionId, baseUrl: `https://${connectionId}.example/dav/`, spaceId: connectionId } };
+}
 
 const looseT = translate as unknown as (locale: string, ...args: unknown[]) => string;
 const looseTn = translatePlural as unknown as (locale: string, ...args: unknown[]) => string;
@@ -70,6 +75,7 @@ function progress(jobId: string, patch: Partial<CloudBookUploadProgress> = {}): 
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+let status: CloudSyncStatus;
 let uploads: Array<{ jobId: string; hashes: string[]; done: ReturnType<typeof deferred<CloudBookUploadResult>> }>;
 
 beforeEach(() => {
@@ -78,6 +84,8 @@ beforeEach(() => {
   invoke.mockReset();
   channels.length = 0;
   uploads = [];
+  status = connected;
+  adoptCloudSyncStatus(connected);
   invoke.mockImplementation(async (command: string, args: Record<string, unknown>) => {
     switch (command) {
       case "cloud_book_upload_preview":
@@ -96,7 +104,7 @@ beforeEach(() => {
       }
       case "cloud_book_upload_cancel": return true;
       case "cloud_book_upload_current": return null;
-      case "cloud_sync_get_status": return connected;
+      case "cloud_sync_get_status": return status;
       default: throw new Error(`unexpected ${command}`);
     }
   });
@@ -155,7 +163,7 @@ describe("upload job ownership", () => {
   it("an unreadable current job is unknown, and a job from before a reload blocks a new batch", async () => {
     invoke.mockImplementationOnce(async () => { throw new Error("ipc"); });
     await recoverCloudBookUpload();
-    expect(cloudBookUploadView()).toMatchObject({ currentUnknown: true, panel: { kind: "closed" } });
+    expect(cloudBookUploadView()).toMatchObject({ current: "unknown", panel: { kind: "closed" } });
 
     resetCloudBookUploadStoreForTest();
     invoke.mockImplementationOnce(async () => ({ jobId: "j-old", connectionId: "c1", progress: null }));
@@ -164,6 +172,87 @@ describe("upload job ownership", () => {
     requestCloudBookUpload(["a"]);
     await flush();
     expect(invoke.mock.calls.some(([command]) => command === "cloud_book_upload_preview")).toBe(false);
+  });
+});
+
+describe("running job state and connection ownership", () => {
+  const uploadCalls = () => invoke.mock.calls.filter(([command]) => command === "cloud_book_upload").length;
+
+  it("waits for a pending recovery, then shows the job it found instead of starting a batch", async () => {
+    const lookup = deferred<unknown>();
+    invoke.mockImplementationOnce(() => lookup.promise);
+    const recovery = recoverCloudBookUpload();
+    requestCloudBookUpload(["a"]);
+    await flush();
+    confirmCloudBookUpload();
+    expect(uploadCalls()).toBe(0);
+    lookup.resolve({ jobId: "native-old", connectionId: "c1", progress: null });
+    await recovery;
+    expect(uploadCalls()).toBe(0);
+    expect(cloudBookUploadView()).toMatchObject({ current: "known", collapsed: false, panel: { kind: "detached", jobId: "native-old" } });
+  });
+
+  it("an unreadable running job blocks a new batch until the user reads it again", async () => {
+    invoke.mockImplementationOnce(async () => { throw new Error("ipc"); });
+    await recoverCloudBookUpload();
+    invoke.mockImplementationOnce(async () => { throw new Error("ipc"); });
+    requestCloudBookUpload(["a"]);
+    await flush();
+    confirmCloudBookUpload();
+    expect(uploadCalls()).toBe(0);
+    expect(cloudBookUploadView().current).toBe("unknown");
+    // Reading again (the panel's or the settings row's button) lets it start.
+    await rereadCloudBookUpload();
+    expect(cloudBookUploadView().current).toBe("known");
+    confirmCloudBookUpload();
+    expect(uploads.map((item) => item.hashes)).toEqual([["a", "c"]]);
+  });
+
+  it("reading again while a read is pending sends no second lookup", async () => {
+    const lookup = deferred<unknown>();
+    invoke.mockImplementationOnce(() => lookup.promise);
+    const recovery = recoverCloudBookUpload();
+    void rereadCloudBookUpload();
+    lookup.resolve(null);
+    await recovery;
+    expect(invoke.mock.calls.filter(([command]) => command === "cloud_book_upload_current")).toHaveLength(1);
+    expect(cloudBookUploadView().current).toBe("known");
+  });
+
+  it("the user switching drives turns a retry into a fresh confirmation for the new drive", async () => {
+    requestCloudBookUpload(["a", "c"]);
+    await flush();
+    confirmCloudBookUpload();
+    const first = uploads[0];
+    first.done.resolve(result(first.jobId, { status: "partial", uploaded: 1, failed: 1, books: [
+      { contentHash: "a", title: "百年孤独", outcome: "uploaded", code: null, bytes: 100 },
+      { contentHash: "c", title: "沙丘", outcome: "failed", code: "network", bytes: 100 },
+    ] }));
+    await flush();
+    // Settings → Sync: disconnect c1, connect c2.
+    status = connectedTo("c2");
+    adoptCloudSyncStatus(status);
+    retryFailedCloudBookUpload();
+    await flush();
+    expect(uploads).toHaveLength(1);
+    expect(cloudBookUploadView().panel).toMatchObject({ kind: "confirm", hashes: ["c"], connectionId: "c2", targetChanged: true });
+    confirmCloudBookUpload();
+    expect(uploads).toHaveLength(2);
+    // The mock preview always answers with its fixed books; the ready ones go.
+    expect(uploads[1].hashes).toEqual(["a", "c"]);
+    expect(cloudBookUploadView().panel).toMatchObject({ kind: "running", connectionId: "c2" });
+  });
+
+  it("a drive switched while the confirm panel is open asks once more before uploading", async () => {
+    requestCloudBookUpload(["a"]);
+    await flush();
+    status = connectedTo("c2");
+    adoptCloudSyncStatus(status);
+    confirmCloudBookUpload();
+    expect(uploads).toHaveLength(0);
+    expect(cloudBookUploadView().panel).toMatchObject({ kind: "confirm", connectionId: "c2", targetChanged: true });
+    confirmCloudBookUpload();
+    expect(uploads).toHaveLength(1);
   });
 });
 
@@ -181,6 +270,12 @@ describe("result wording", () => {
       { contentHash: "b", title: "B", outcome: "failed", code: "network", bytes: 1 },
       { contentHash: "c", title: "C", outcome: "failed", code: "x", bytes: 1 },
     ] }))).toBe("上传结束，有 2 本没成功");
+    // A stop before the first book: every book not attempted, each with the cause.
+    const preflight = result("j", { status: "stopped", notAttempted: 1, books: [
+      { contentHash: "a", title: "A", outcome: "not-attempted", code: "space-mismatch", bytes: 1 },
+    ] });
+    expect(stopCode(preflight)).toBe("space-mismatch");
+    expect(uploadResultTitle(ui, preflight)).not.toBe(looseT("zh-CN", "cloudSync.upload.stopped.other"));
     expect(uploadReasonText(ui.t, "brand-new-code")).toBe("未上传（brand-new-code）");
     expect(uploadReasonText(ui.t, "toString")).toBe("未上传（toString）");
   });

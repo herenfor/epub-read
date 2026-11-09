@@ -69,12 +69,15 @@ export function uploadPhaseText(t: UiText["t"], phase: string | null): string {
   return t(key ?? "cloudSync.upload.phase.preparing");
 }
 
-/** The code that stopped a batch: the first failed book carrying a stop code. */
+/**
+ * The code that stopped a batch: the first failed book carrying a stop code,
+ * else a not-started one (a stop before the first book reports every book as
+ * not attempted, each with the cause).
+ */
 export function stopCode(result: CloudBookUploadResult): string | null {
-  for (const book of result.books) {
-    if (book.outcome === "failed" && book.code && own(STOP_TITLE, book.code)) return book.code;
-  }
-  return null;
+  const find = (outcome: CloudBookUploadResult["books"][number]["outcome"]): string | null =>
+    result.books.find((book) => book.outcome === outcome && book.code && own(STOP_TITLE, book.code))?.code ?? null;
+  return find("failed") ?? find("not-attempted");
 }
 
 /** One line for the whole batch, from the final result only. */

@@ -52,6 +52,11 @@ export function useCloudSync(): CloudSyncView {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
+/** The same view outside React (the upload store reads the current connection). */
+export function cloudSyncView(): CloudSyncView {
+  return view;
+}
+
 /**
  * A failure the backend will not retry on its own: the round stopped in
  * error with no retry time. Backoff (network, rate limit, 5xx) keeps a retry

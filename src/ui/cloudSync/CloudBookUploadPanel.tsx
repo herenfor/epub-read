@@ -5,6 +5,8 @@ import { useScrollEdgeFade } from "../scrollEdgeFade";
 import { cloudSyncFailureText } from "./CloudSyncPanel";
 import {
   cancelCloudBookUpload,
+  cloudBookUploadCanStart,
+  cloudBookUploadOtherTarget,
   closeCloudBookUpload,
   collapseCloudBookUpload,
   confirmCloudBookUpload,
@@ -13,6 +15,7 @@ import {
   readyHashes,
   recoverCloudBookUpload,
   refreshDetached,
+  rereadCloudBookUpload,
   retryFailedCloudBookUpload,
   useCloudBookUpload,
   type CloudBookUploadPanel as PanelState,
@@ -74,6 +77,7 @@ function ResultRow({ book }: { book: CloudBookUploadItem }) {
 function Confirm({ panel, onOpenSync }: { panel: Extract<PanelState, { kind: "confirm" }>; onOpenSync(): void }) {
   const { t, tn } = useUiText();
   const { status } = useCloudSync();
+  const upload = useCloudBookUpload();
   const connection = status?.connection ?? null;
   const preview = panel.preview;
   const ready = preview ? readyHashes(preview).length : 0;
@@ -108,10 +112,17 @@ function Confirm({ panel, onOpenSync }: { panel: Extract<PanelState, { kind: "co
         <MoreRow count={books.length - UPLOAD_LIST_LIMIT} />
       </BookList>
       {ready === 0 && <p className="cloud-upload-text is-muted">{t("cloudSync.upload.noneReady")}</p>}
+      {panel.targetChanged && <p className="cloud-upload-error" role="alert">{t("cloudSync.upload.targetChanged")}</p>}
     </>}
+    {upload.current === "reading" && <p className="cloud-upload-text is-muted"><Spinner />{t("cloudSync.upload.current.reading")}</p>}
+    {upload.current === "unknown" && <p className="cloud-upload-error" role="alert">{t("cloudSync.upload.current.unknown")}</p>}
     <div className="cloud-upload-actions">
       <button type="button" className="ui-btn" onClick={closeCloudBookUpload}>{t("cloudSync.upload.cancel")}</button>
-      <button type="button" className="ui-btn is-primary" disabled={!preview || ready === 0 || !connection} onClick={confirmCloudBookUpload}>
+      {upload.current === "unknown" && <button type="button" className="ui-btn" onClick={() => void rereadCloudBookUpload()}>
+        {t("cloudSync.upload.current.reread")}
+      </button>}
+      <button type="button" className="ui-btn is-primary" disabled={!preview || ready === 0 || !connection || !cloudBookUploadCanStart(upload)}
+        onClick={confirmCloudBookUpload}>
         {t("cloudSync.upload.start")}
       </button>
     </div>
@@ -185,6 +196,9 @@ function Result({ result }: { result: CloudBookUploadResult }) {
     ? missed.filter((book) => book.outcome === "failed")
     : missed;
   const retry = result.status === "partial" || result.status === "completed" ? failedHashes(result).length : 0;
+  // Subscribed so the note follows a connection change while the panel is open.
+  useCloudSync();
+  const otherTarget = cloudBookUploadOtherTarget(result);
   return <>
     <div className="cloud-upload-counts">
       {COUNTS.filter(([field]) => result[field] > 0).map(([field, label, tone]) => <div key={field} className={`cloud-upload-count ${tone}`}>
@@ -200,6 +214,7 @@ function Result({ result }: { result: CloudBookUploadResult }) {
     {(result.status === "stopped" || result.status === "cancelled") && result.uploaded > 0 &&
       <p className="cloud-upload-text is-muted">{tn("cloudSync.upload.keptLine", result.uploaded, { count: result.uploaded })}</p>}
     {result.cleanupPending && <p className="cloud-upload-text is-muted">{t("cloudSync.upload.cleanupPending")}</p>}
+    {otherTarget && <p className="cloud-upload-text is-muted">{t("cloudSync.upload.otherTarget")}</p>}
     <div className="cloud-upload-actions">
       {retry > 0 && <button type="button" className="ui-btn" onClick={retryFailedCloudBookUpload}>{tn("cloudSync.upload.retry", retry, { count: retry })}</button>}
       <button type="button" className="ui-btn is-primary" onClick={closeCloudBookUpload}>{t("cloudSync.upload.done")}</button>

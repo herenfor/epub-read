@@ -113,6 +113,11 @@
   "cloudSync.upload.more.one": "{count} more",
   "cloudSync.upload.loading": "Reading book details…",
   "cloudSync.upload.noneReady": "None of the selected books can be uploaded.",
+  "cloudSync.upload.current.reading": "Checking for an upload in progress…",
+  "cloudSync.upload.current.unknown": "Can't read the upload status, so a new batch can't start yet.",
+  "cloudSync.upload.current.reread": "Check again",
+  "cloudSync.upload.targetChanged": "The cloud drive connection changed. Check the new destination above.",
+  "cloudSync.upload.otherTarget": "This batch went to the previously connected drive. Retrying asks you to confirm the current destination first.",
   "cloudSync.upload.notConnected": "No cloud drive is connected yet. Connect Jianguoyun or another WebDAV drive in Settings → Sync, then come back to upload.",
   "cloudSync.upload.connect": "Connect",
   "cloudSync.upload.start": "Upload",
@@ -194,6 +199,6 @@
   "cloudSync.upload.row": "Original Book Backup",
   "cloudSync.upload.row.running": "Uploading {done}/{count} · {percent}% processed",
   "cloudSync.upload.row.last": "Last: {title}",
-  "cloudSync.upload.row.unknown": "Upload status unavailable",
+  "cloudSync.upload.row.unknown": "Upload status unavailable. Tap to check again.",
   "cloudSync.upload.row.detached": "A batch is uploading"
 }

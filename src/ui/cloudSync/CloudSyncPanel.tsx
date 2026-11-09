@@ -13,7 +13,7 @@ import { useUiText } from "../localization/UiLanguageProvider";
 import type { PlainMessageKey } from "../localization/core";
 import { CHEVRON, Icon, SettingsRow } from "../settingsRows";
 import { adoptCloudSyncStatus, cloudSyncNeedsAttention, refreshCloudSyncStatus, runCloudSyncAction, useCloudSync } from "./cloudSyncStore";
-import { expandCloudBookUpload, useCloudBookUpload } from "./cloudBookUploadStore";
+import { expandCloudBookUpload, rereadCloudBookUpload, useCloudBookUpload } from "./cloudBookUploadStore";
 import { uploadResultTitle } from "./cloudBookUploadText";
 import "./cloudSync.css";
 
@@ -54,9 +54,10 @@ function BookUploadRow() {
     detail = t("cloudSync.upload.row.last", { title: uploadResultTitle(ui, panel.result) });
   } else if (panel.kind === "failed") {
     detail = t("cloudSync.upload.title");
-  } else if (upload.currentUnknown) {
+  } else if (upload.current === "unknown") {
+    // Asking again is the user's call; nothing re-reads on its own.
     return <SettingsRow icon={ICONS.upload} title={t("cloudSync.upload.row")} detail={t("cloudSync.upload.row.unknown")}
-      disabled trailing={<span />} onClick={() => undefined} />;
+      onClick={() => void rereadCloudBookUpload()} />;
   } else {
     return null;
   }
