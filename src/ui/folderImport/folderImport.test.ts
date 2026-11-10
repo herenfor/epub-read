@@ -98,6 +98,56 @@ describe("folder import planner (migrated core)", () => {
       { groupKey: "b", kind: "reuse", folderId: "y" },
     ]);
   });
+
+  it("parents a planned child under the planned parent and the current anchor", () => {
+    const groups = [
+      { groupKey: "parent", sourceSegments: ["parent"], parentGroupKey: null, depth: 1, suggestedName: "Parent" },
+      { groupKey: "child", sourceSegments: ["parent", "child"], parentGroupKey: "parent", depth: 2, suggestedName: "Child" },
+    ];
+    const resolutions = [
+      { groupKey: "parent", kind: "create" as const, name: "Parent" },
+      { groupKey: "child", kind: "create" as const, name: "Child" },
+    ];
+    let seq = 0;
+    const targets = buildFolderTargets(groups, resolutions, {}, () => `id-${++seq}`, "anchor")!;
+    expect(targets).toEqual<FolderTarget[]>([
+      { groupKey: "parent", kind: "create", folderId: "id-1", name: "Parent", parentFolderId: "anchor" },
+      { groupKey: "child", kind: "create", folderId: "id-2", name: "Child", parentFolderId: "id-1" },
+    ]);
+  });
+
+  it("creates planned ancestors in the same transaction and rejects a target moved later", () => {
+    const hash = "a".repeat(64);
+    const envelope: OrganizationEnvelope = { deviceId: "00000000-0000-4000-8000-000000000001", counter: 0, state: emptyOrganization() };
+    const parent: FolderTarget = { groupKey: "parent", kind: "create", folderId: "11111111-1111-4111-8111-111111111111", name: "Parent" };
+    const child: FolderTarget = {
+      groupKey: "child", kind: "create", folderId: "22222222-2222-4222-8222-222222222222", name: "Child",
+      parentFolderId: parent.folderId,
+    };
+    const item = {
+      inputId: "a", contentHash: hash, isExisting: false, target: child,
+      observed: placementSnapshotOf(envelope.state, hash),
+    };
+    const applied = applyDirectoryPlacementBatch(
+      envelope,
+      { policy: "fillUnclassified", items: [item], targets: [parent, child] },
+      new Set([hash]),
+    );
+    expect(effectiveFolderId(applied.envelope.state, hash)).toBe(child.folderId);
+    expect(applied.result.createdFolderIds).toEqual([parent.folderId, child.folderId]);
+    expect(applied.envelope.state.folders[child.folderId].parentId?.value).toBe(parent.folderId);
+
+    // The user moves the already-created target between batches: the next batch
+    // must not silently keep filing books under the changed tree.
+    const moved = applyCommand(applied.envelope, { type: "moveFolder", folderId: child.folderId, parentId: null }, new Set([hash]));
+    const nextHash = "b".repeat(64);
+    const nextItem = { ...item, inputId: "b", contentHash: nextHash, observed: placementSnapshotOf(moved.state, nextHash) };
+    expect(() => applyDirectoryPlacementBatch(
+      moved,
+      { policy: "fillUnclassified", items: [nextItem], targets: [parent, child] },
+      new Set([hash, nextHash]),
+    )).toThrow(/位置已变化/);
+  });
 });
 
 /** In-memory active data source with the real organization reducer. */
@@ -223,7 +273,7 @@ describe("Web directory import port", () => {
     const { result, page } = await importAll(port, memory.state);
     expect(page.bindings).toEqual([]);
     expect(result.status).toBe("completed");
-    expect(result.counts).toMatchObject({ completed: 5, imported: 2, duplicates: 3, failed: 0, placementSkipped: 0, createdFolders: 3 });
+    expect(result.counts).toMatchObject({ completed: 5, imported: 2, duplicates: 3, failed: 0, placementSkipped: 0, createdFolders: 4 });
     const state = memory.state();
     const nameOf = (hash: string) => {
       const id = effectiveFolderId(state, hash);
@@ -235,6 +285,36 @@ describe("Web directory import port", () => {
     expect(nameOf(hashes.hashD)).toBe("历史"); // unclassified existing book: reuses the unique same-name folder
     // Existing canonical rows are never re-saved (no fabricated 0% progress).
     expect([...memory.saves].sort()).toEqual([hashes.hashA, hashes.hashB].sort());
+  });
+
+  it("files books directly into the current fifth-level folder when no new level is possible", async () => {
+    const [a, b] = await Promise.all([epub("A5"), epub("B5")]);
+    const [hashA, hashB] = await Promise.all([sha256Hex(a), sha256Hex(b)]);
+    const memory = memoryStore();
+    const chain = [1, 2, 3, 4, 5].map((n) => `66666666-6666-4666-8666-${String(n).padStart(12, "0")}`);
+    chain.forEach((folderId, index) => memory.userCommand({
+      type: "createFolder", folderId, name: `第${index + 1}层`,
+      ...(index === 0 ? {} : { parentId: chain[index - 1] }),
+    }));
+    const anchor = { folderId: chain[4], depth: 5 };
+    const port = createWebDirectoryImportPort({
+      store: memory.store,
+      pickDirectory: async () => [
+        fakeFile("根/散书.epub", a),
+        fakeFile("根/更深的目录/b.epub", b),
+      ],
+      progressIntervalMs: 0,
+    });
+    const scan = (await port.scan(() => undefined, anchor))!;
+    const page = await port.page(scan.jobId);
+    const plan = planDirectoryImport(scan.root, page.items, auto, anchor);
+    expect(plan.groups).toEqual([]);
+    const active = Object.entries(memory.state().folders).map(([folderId, f]) => ({ folderId, name: f.name.value }));
+    const targets = buildFolderTargets(plan.groups, resolveGroups(plan.groups, active, page.bindings, anchor.folderId), {}, () => OTHER_FOLDER, anchor.folderId)!;
+    const result = await port.start({ jobId: scan.jobId, options: auto, targets, anchor, onProgress: () => undefined });
+    expect(result.counts).toMatchObject({ imported: 2, placementSkipped: 0, createdFolders: 0 });
+    expect(effectiveFolderId(memory.state(), hashA)).toBe(chain[4]);
+    expect(effectiveFolderId(memory.state(), hashB)).toBe(chain[4]);
   });
 
   it("does not overwrite a placement the user changed during the import", async () => {

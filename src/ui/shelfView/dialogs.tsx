@@ -5,6 +5,8 @@ import { MENU_CLOSE_MS } from "../menuMotion";
 import { useUiText } from "../localization/UiLanguageProvider";
 import type { ShelfEntry, ShelfSort } from "../shelf";
 import { isFavorite, type LibraryOrganization } from "../libraryOrganization";
+import { folderAlreadyAt,
+  folderMoveBlockReason, shelfFolderPathLabel, shelfFolderSubtreeHeight } from "../shelfFolderTree";
 import type { ThumbnailProvider } from "../thumbnail";
 import type { ShelfLongPress } from "../shelfPress";
 import {
@@ -218,45 +220,94 @@ export function ShelfDissolveDialog(props: ShelfDissolveDialogProps) {
 }
 
 interface ShelfMoveDialogProps {
-  targets: ShelfEntry[];
+  /** Books choose a destination folder; a folder chooses its new parent. */
+  kind?: "book" | "folder";
+  targets?: ShelfEntry[];
+  folder?: { id: string; name: string };
   currentFolderId: string | null;
-  folders: Array<{ id: string; name: string; count: number }>;
+  folders: Array<{ id: string; name: string; parentId: string | null; depth: number; count: number }>;
+  organization: LibraryOrganization;
   busy: boolean;
   onCancel(): void;
   onMove(targetFolderId: string | null): Promise<void>;
-  onCreateFolder(name: string): Promise<string>;
+  onCreateFolder(name: string, parentId: string | null): Promise<string>;
 }
+
+type MoveBlock = "already" | "self" | "inside" | "too-deep" | "same-name";
+
+const MOVE_BLOCK_LABEL: Record<MoveBlock, "shelfFolder.move.block.already" | "shelfFolder.move.block.self"
+  | "shelfFolder.move.block.inside" | "shelfFolder.move.block.tooDeep" | "shelfFolder.move.block.sameName"> = {
+  already: "shelfFolder.move.block.already",
+  self: "shelfFolder.move.block.self",
+  inside: "shelfFolder.move.block.inside",
+  "too-deep": "shelfFolder.move.block.tooDeep",
+  "same-name": "shelfFolder.move.block.sameName",
+};
 
 export function ShelfMoveDialog(props: ShelfMoveDialogProps) {
   const { t, tn } = useUiText();
   const [isClosing, setIsClosing] = useState(false);
+  const folderKind = props.kind === "folder";
+  const movingFolder = folderKind ? props.folder : undefined;
 
   const handleCancel = () => {
     setIsClosing(true);
     window.setTimeout(props.onCancel, MENU_CLOSE_MS);
   };
 
-  const initialFolderId = useMemo(() => {
-    if (props.currentFolderId === null) {
-      return props.folders.length > 0 ? props.folders[0].id : null;
-    } else {
-      return null;
+  const rows = useMemo(() => {
+    const byParent = new Map<string | null, typeof props.folders>();
+    for (const folder of props.folders) {
+      const list = byParent.get(folder.parentId) ?? [];
+      list.push(folder);
+      byParent.set(folder.parentId, list);
     }
-  }, [props.currentFolderId, props.folders]);
+    const result: Array<{ folder: (typeof props.folders)[number] | null; depth: number }> = [{ folder: null, depth: 0 }];
+    const walk = (parentId: string | null, depth: number): void => {
+      for (const folder of byParent.get(parentId) ?? []) {
+        result.push({ folder, depth });
+        walk(folder.id, depth + 1);
+      }
+    };
+    walk(null, 0);
+    return result;
+  }, [props.folders]);
 
-  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(initialFolderId);
+  const initialSelected = (): string | null => {
+    if (folderKind) return null;
+    return props.currentFolderId === null ? (props.folders[0]?.id ?? null) : null;
+  };
+  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(initialSelected);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
   const [error, setError] = useState<string | null>(null);
 
+  const blockFor = (targetFolderId: string | null): MoveBlock | null => {
+    if (folderKind && movingFolder) {
+      // 以被移动的文件夹自己的上级为准：它不一定是当前打开的那一层。
+      if (targetFolderId === movingFolder.id) return "self";
+      if (folderAlreadyAt(props.organization, movingFolder.id, targetFolderId)) return "already";
+      return folderMoveBlockReason(props.organization, movingFolder.id, targetFolderId);
+    }
+    if (props.currentFolderId === targetFolderId) return "already";
+    return null;
+  };
+
+  const selectedBlock = blockFor(selectedFolderId);
+  const targetLabel = shelfFolderPathLabel(props.organization, selectedFolderId);
+  const rootLabel = folderKind ? t("shelfFolder.move.rootFolder") : t("shelfFolder.move.root");
+
   const handleCreateInline = async (): Promise<void> => {
-    const draft = validateFolderNameDraft(newName, props.folders.map((folder) => folder.name));
+    const existingNames = props.folders
+      .filter((folder) => folder.parentId === selectedFolderId)
+      .map((folder) => folder.name);
+    const draft = validateFolderNameDraft(newName, existingNames);
     if (!draft.ok) {
       setError(folderNameDraftError(draft.code));
       return;
     }
     try {
-      const createdId = await props.onCreateFolder(draft.name);
+      const createdId = await props.onCreateFolder(draft.name, selectedFolderId);
       setSelectedFolderId(createdId);
       setCreating(false);
       setNewName("");
@@ -267,6 +318,7 @@ export function ShelfMoveDialog(props: ShelfMoveDialogProps) {
   };
 
   const handleConfirmMove = async (): Promise<void> => {
+    if (selectedBlock) return;
     try {
       await props.onMove(selectedFolderId);
     } catch (err) {
@@ -274,121 +326,115 @@ export function ShelfMoveDialog(props: ShelfMoveDialogProps) {
     }
   };
 
-  const targetTitle =
-    props.targets.length === 1
+  const targetTitle = folderKind && movingFolder
+    ? t("shelfFolder.move.folderTitle", { name: movingFolder.name })
+    : props.targets && props.targets.length === 1
       ? t("shelfFolder.move.oneBook", { title: props.targets[0].title })
-      : tn("shelfFolder.move.books", props.targets.length, { count: props.targets.length });
-
-  const isRootCurrent = props.currentFolderId === null;
-  const isSelectedSame = selectedFolderId === props.currentFolderId;
+      : tn("shelfFolder.move.books", props.targets?.length ?? 0, { count: props.targets?.length ?? 0 });
+  const subtitle = folderKind && movingFolder
+    ? t("shelfFolder.move.folderHint", { count: Math.max(0, shelfFolderSubtreeHeight(props.organization, movingFolder.id) - 1) })
+    : t("shelfFolder.move.bookHint");
 
   return (
     <div className={`shelf-confirm-backdrop${isClosing ? " is-closing" : ""}`} onClick={handleCancel}>
-      <div className="shelf-confirm shelf-move-dialog" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
-        <div className="shelf-confirm-title">{t("shelfFolder.move.title", { target: targetTitle })}</div>
-        <div className="shelf-move-list" role="radiogroup">
-          <label
-            className={`shelf-move-item${selectedFolderId === null ? " selected" : ""}${isRootCurrent ? " disabled is-current" : ""}`}
-            title={isRootCurrent ? t("shelfFolder.move.current") : undefined}
-          >
-            <input
-              type="radio"
-              name="shelf-move-target"
-              disabled={isRootCurrent}
-              checked={selectedFolderId === null && !isRootCurrent}
-              onChange={() => {
-                if (!isRootCurrent) setSelectedFolderId(null);
-              }}
-            />
-            <span className="shelf-move-item-name">{t("shelfFolder.move.root")}</span>
-            {isRootCurrent && <span className="shelf-move-current-badge">{t("shelfFolder.move.currentBadge")}</span>}
-          </label>
-          {props.folders.map((f) => {
-            const isFolderCurrent = props.currentFolderId === f.id;
+      <div className="shelf-confirm shelf-move-dialog" role="dialog" aria-modal="true" aria-label={targetTitle} onClick={(e) => e.stopPropagation()}>
+        <div className="shelf-confirm-title">{targetTitle}</div>
+        <div className="shelf-move-subtitle">{subtitle}</div>
+        <div className="shelf-move-list" role="radiogroup" aria-label={t("shelfFolder.move.target")}>
+          {rows.map(({ folder, depth }) => {
+            const id = folder?.id ?? null;
+            const block = blockFor(id);
+            const checked = selectedFolderId === id;
             return (
-              <label
-                key={f.id}
-                className={`shelf-move-item${selectedFolderId === f.id ? " selected" : ""}${isFolderCurrent ? " disabled is-current" : ""}`}
-                title={isFolderCurrent ? t("shelfFolder.move.current") : undefined}
+              <button
+                key={id ?? "__root"}
+                className={`shelf-move-item${checked ? " selected" : ""}${block ? " disabled" : ""}`}
+                type="button"
+                role="radio"
+                aria-checked={checked}
+                aria-disabled={block !== null}
+                style={{ paddingLeft: `${10 + depth * 20}px` }}
+                onClick={() => {
+                  if (block) return;
+                  setSelectedFolderId(id);
+                  setError(null);
+                }}
               >
-                <input
-                  type="radio"
-                  name="shelf-move-target"
-                  disabled={isFolderCurrent}
-                  checked={selectedFolderId === f.id && !isFolderCurrent}
-                  onChange={() => {
-                    if (!isFolderCurrent) setSelectedFolderId(f.id);
-                  }}
-                />
+                <span className={`shelf-move-dot${checked ? " checked" : ""}${block ? " disabled" : ""}`} aria-hidden="true" />
                 <span className="shelf-move-item-icon"><FolderIcon /></span>
-                <span className="shelf-move-item-name" title={f.name}>{f.name}</span>
-                <span className="shelf-move-item-count">{tn("shelfFolder.move.count", f.count, { count: f.count })}</span>
-                {isFolderCurrent && <span className="shelf-move-current-badge">{t("shelfFolder.move.currentBadge")}</span>}
-              </label>
+                <span className="shelf-move-item-name" title={folder?.name ?? rootLabel}>
+                  {folder?.name ?? rootLabel}
+                </span>
+                <span className="shelf-move-why" style={block ? undefined : { display: "none" }}>
+                  {block ? t(MOVE_BLOCK_LABEL[block]) : ""}
+                </span>
+              </button>
             );
           })}
         </div>
 
-        {creating ? (
-          <div className="shelf-move-create-box">
-            <FolderNameField
-              value={newName}
-              disabled={props.busy}
-              placeholder={t("shelfFolder.move.newPlaceholder")}
-              error={error}
-              onChange={(value) => {
-                setNewName(value);
-                setError(null);
-              }}
-            />
-            <div className="shelf-move-create-actions">
-              <button
-                className="shelf-selection-cancel"
-                type="button"
-                onClick={() => {
-                  setCreating(false);
-                  setNewName("");
+        <div className="shelf-move-foot">
+          <div className="shelf-move-target-line">{t("shelfFolder.move.to")}<b>{targetLabel}</b></div>
+          {creating ? (
+            <div className="shelf-move-create-box">
+              <FolderNameField
+                value={newName}
+                disabled={props.busy}
+                placeholder={t("shelfFolder.move.newPlaceholder")}
+                error={error}
+                onChange={(value) => {
+                  setNewName(value);
                   setError(null);
                 }}
+              />
+              <div className="shelf-move-create-actions">
+                <button
+                  className="shelf-selection-cancel"
+                  type="button"
+                  onClick={() => {
+                    setCreating(false);
+                    setNewName("");
+                    setError(null);
+                  }}
+                >
+                  {t("shelfFolder.cancel")}
+                </button>
+                <button
+                  className="shelf-confirm-primary"
+                  type="button"
+                  disabled={props.busy}
+                  onClick={() => void handleCreateInline()}
+                >
+                  {t("shelfFolder.move.createAndSelect")}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="shelf-move-actions">
+              <button
+                className="shelf-move-new-btn"
+                type="button"
+                onClick={() => setCreating(true)}
+                disabled={props.busy}
               >
+                <PlusIcon />
+                <span>{t("shelfFolder.move.newInSelected")}</span>
+              </button>
+              <span style={{ flex: 1 }} />
+              <button className="shelf-selection-cancel" type="button" onClick={handleCancel} disabled={props.busy}>
                 {t("shelfFolder.cancel")}
               </button>
               <button
                 className="shelf-confirm-primary"
                 type="button"
-                disabled={props.busy}
-                onClick={() => void handleCreateInline()}
+                disabled={props.busy || selectedBlock !== null}
+                onClick={() => void handleConfirmMove()}
               >
-                {t("shelfFolder.move.createAndSelect")}
+                {props.busy ? t("shelfFolder.moving") : folderKind ? t("shelfFolder.move.confirmFolder") : t("shelfFolder.move.confirm")}
               </button>
             </div>
-          </div>
-        ) : (
-          <button
-            className="shelf-move-new-btn"
-            type="button"
-            onClick={() => setCreating(true)}
-            disabled={props.busy}
-          >
-            <PlusIcon />
-            <span>{t("shelfFolder.move.new")}</span>
-          </button>
-        )}
-
-        {error && !creating && <div className="shelf-dialog-error" role="alert" style={{ marginBottom: 10 }}>{error}</div>}
-
-        <div className="shelf-confirm-actions">
-          <button className="shelf-selection-cancel" type="button" onClick={handleCancel} disabled={props.busy}>
-            {t("shelfFolder.cancel")}
-          </button>
-          <button
-            className="shelf-confirm-primary"
-            type="button"
-            disabled={props.busy || isSelectedSame || (selectedFolderId === null && isRootCurrent)}
-            onClick={() => void handleConfirmMove()}
-          >
-            {props.busy ? t("shelfFolder.moving") : t("shelfFolder.move.confirm")}
-          </button>
+          )}
+          {error && !creating && <div className="shelf-dialog-error" role="alert">{error}</div>}
         </div>
       </div>
     </div>

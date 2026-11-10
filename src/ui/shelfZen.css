@@ -3516,4 +3516,351 @@
     width: 100%;
     max-width: none;
   }
+  }
+
+/* ER-0170：文件夹页的路径栏与下拉树。 */
+.shelf-folder-path-bar {
+  min-width: 0;
+  max-width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--accent, #2563eb) 8%, var(--shelf-card-bg, #fff));
+  border: 1px solid color-mix(in srgb, var(--accent, #2563eb) 22%, var(--shelf-card-border));
+}
+
+.shelf-folder-path-back,
+.shelf-folder-path-more {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: transparent;
+  color: var(--muted, #6b7280);
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .shelf-folder-path-back:hover,
+  .shelf-folder-path-more:hover {
+    background: color-mix(in srgb, var(--accent, #2563eb) 14%, transparent);
+    color: var(--accent, #2563eb);
+  }
+}
+
+.shelf-folder-path-crumbs {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.shelf-folder-path-segment {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.shelf-folder-path-crumb {
+  flex: none;
+  height: 28px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: transparent;
+  color: var(--accent, #2563eb);
+  font: inherit;
+  font-size: var(--fs-body);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+@media (hover: hover) {
+  .shelf-folder-path-crumb:hover {
+    background: color-mix(in srgb, var(--accent, #2563eb) 14%, transparent);
+  }
+}
+
+.shelf-folder-path-sep {
+  flex: none;
+  color: var(--muted, #8b97ad);
+}
+
+.shelf-folder-path-here {
+  padding: 0 6px;
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--fg, #111827);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.shelf-folder-path-count {
+  flex: none;
+  color: var(--muted, #5b6472);
+  font-size: var(--fs-caption);
+  white-space: nowrap;
+}
+
+.shelf-folder-path-spacer {
+  flex: 1;
+  min-width: 4px;
+}
+
+.shelf-folder-path-action {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--shelf-card-border, rgba(0, 0, 0, 0.12));
+  border-radius: var(--r-xs);
+  background: var(--shelf-card-bg, #fff);
+  color: var(--fg, #1f2937);
+  font: inherit;
+  font-size: var(--fs-caption);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+@media (hover: hover) {
+  .shelf-folder-path-action:hover:not(:disabled) {
+    border-color: var(--accent, #2563eb);
+    color: var(--accent, #2563eb);
+  }
+}
+
+.shelf-folder-path-action:disabled {
+  color: var(--muted, #9aa1ad);
+  background: var(--btn-tint, #f1f2f4);
+  cursor: not-allowed;
+}
+
+.shelf-folder-path-bar.is-compact {
+  margin: 0 8px;
+  padding: 2px 2px 2px 4px;
+  gap: 2px;
+}
+
+.shelf-folder-path-bar.is-compact .shelf-folder-path-crumbs {
+  flex: 1;
+  overflow-x: auto;
+  scrollbar-width: none;
+  white-space: nowrap;
+}
+
+.shelf-folder-path-bar.is-compact .shelf-folder-path-crumbs::-webkit-scrollbar {
+  display: none;
+}
+
+.shelf-folder-path-bar.is-compact .shelf-folder-path-back,
+.shelf-folder-path-bar.is-compact .shelf-folder-path-more {
+  width: 38px;
+  height: 38px;
+}
+
+.shelf-folder-path-meta {
+  padding: 2px 12px 0 48px;
+  color: var(--muted, #5b6472);
+  font-size: var(--fs-caption);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.shelf-folder-level-hint {
+  margin: 8px 12px 0;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  background: #fff7e0;
+  border: 1px solid #ecd9a0;
+  color: #5c4a12;
+  font-size: var(--fs-caption);
+  line-height: 1.5;
+}
+
+.shelf-folder-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: var(--r-sm);
+}
+
+.shelf-folder-tree-row.selected {
+  background: color-mix(in srgb, var(--accent, #2563eb) 10%, transparent);
+}
+
+.shelf-folder-tree-row > .shelf-folder-menu-item {
+  flex: 1;
+  min-width: 0;
+}
+
+.shelf-folder-tree-caret {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: transparent;
+  color: var(--muted, #6b7280);
+  cursor: pointer;
+}
+
+.shelf-folder-tree-caret .shelf-svg-icon {
+  transform: rotate(-90deg);
+  transition: transform 0.12s ease;
+}
+
+.shelf-folder-tree-caret.expanded .shelf-svg-icon {
+  transform: rotate(0deg);
+}
+
+.shelf-folder-tree-gap {
+  flex: none;
+  width: 24px;
+}
+
+/* 窄窗口（含手机紧凑模式）：路径栏压成一行横滑，操作收进更多菜单。 */
+.shelf-folder-path-meta {
+  display: none;
+}
+
+.shelf-folder-menu-compact-only {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .shelf-folder-path-bar {
+    gap: 2px;
+    padding: 2px 2px 2px 4px;
+    margin: 0 8px;
+  }
+
+  .shelf-folder-path-action,
+  .shelf-folder-path-count {
+    display: none;
+  }
+
+  .shelf-folder-path-crumbs {
+    flex: 1;
+    overflow-x: auto;
+    scrollbar-width: none;
+    white-space: nowrap;
+  }
+
+  .shelf-folder-path-segment,
+  .shelf-folder-path-here,
+  .shelf-folder-path-sep {
+    flex: none;
+  }
+
+  .shelf-folder-path-crumbs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .shelf-folder-path-back,
+  .shelf-folder-path-more {
+    width: 38px;
+    height: 38px;
+  }
+
+  .shelf-folder-path-meta {
+    display: block;
+    padding: 2px 12px 0 48px;
+    color: var(--muted, #5b6472);
+    font-size: var(--fs-caption);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .shelf-folder-menu-compact-only {
+    display: flex;
+  }
+}
+
+/* ER-0170 整改：路径栏独占一行（在分类轨下面、内容上面），不再挤在胶囊旁边。 */
+.shelf-folder-path-bar,
+.shelf-folder-path-bar.is-compact {
+  margin: -8px 0 16px;
+  padding: 5px 8px 5px 5px;
+  gap: 8px;
+}
+
+.shelf-folder-path-crumbs {
+  flex: 0 1 auto;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.shelf-folder-path-crumbs::-webkit-scrollbar {
+  display: none;
+}
+
+.shelf-folder-path-segment,
+.shelf-folder-path-sep {
+  flex: none;
+}
+
+.shelf-folder-path-sep {
+  padding: 0 1px;
+}
+
+.shelf-folder-path-meta {
+  margin: -10px 0 12px;
+  padding: 0 4px;
+}
+
+.shelf-folder-level-hint {
+  margin: -6px 0 16px;
+  background: color-mix(in srgb, #d18a12 10%, var(--shelf-card-bg, #fff));
+  border-color: color-mix(in srgb, #d18a12 38%, var(--shelf-card-border));
+  color: color-mix(in srgb, #7a5600 70%, var(--fg));
+}
+
+@media (max-width: 720px) {
+  .shelf-folder-path-bar,
+  .shelf-folder-path-bar.is-compact {
+    margin: -8px 0 12px;
+    padding: 2px;
+    gap: 2px;
+  }
+
+  .shelf-folder-path-crumbs {
+    flex: 1;
+  }
+
+  .shelf-folder-path-meta {
+    padding: 0 4px;
+  }
+}
+
+/* 逐级进出文件夹的页面动效：进入浮入，返回从下方回位。只动内容区，路径栏不动。 */
+.shelf-level-page {
+  transform-origin: 50% 240px;
+}
+
+.shelf-level-page[data-level-nav="forward"] {
+  animation: page-arrive var(--page-in) var(--ease-emphasized) both;
+}
+
+.shelf-level-page[data-level-nav="back"] {
+  animation: shelf-level-return var(--page-out) var(--ease-standard) both;
+}
+
+@keyframes shelf-level-return {
+  from { opacity: 0; transform: scale(var(--page-under)); }
 }

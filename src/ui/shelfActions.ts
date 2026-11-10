@@ -8,7 +8,7 @@ import type { PlainMessageKey } from "./localization/core";
 
 export type ShelfActionGroup = "read" | "organize" | "danger";
 export type ShelfBookActionId = "open" | "openInNewTab" | "select" | "favorite" | "unfavorite" | "move" | "removeFromFolder" | "moveToPrivate" | "moveToLibrary" | "exportBook" | "uploadToCloud" | "revealSource" | "delete";
-export type ShelfFolderActionId = "openFolder" | "renameFolder" | "exportBook" | "dissolveFolder";
+export type ShelfFolderActionId = "openFolder" | "renameFolder" | "moveFolder" | "exportBook" | "dissolveFolder";
 export type ShelfActionId = ShelfBookActionId | ShelfFolderActionId;
 
 export interface ShelfAction {
@@ -80,10 +80,17 @@ export function shelfBookActions(ctx: ShelfBookActionContext): ShelfAction[] {
   return actions;
 }
 
-export function shelfFolderActions(ctx: { canOpen: boolean; canExport: boolean; exportDisabled: boolean }): ShelfAction[] {
+export function shelfFolderActions(ctx: {
+  canOpen: boolean;
+  canExport: boolean;
+  exportDisabled: boolean;
+  canMove?: boolean;
+  moveDisabled?: boolean;
+}): ShelfAction[] {
   const actions: ShelfAction[] = [];
   if (ctx.canOpen) actions.push({ id: "openFolder", group: "read", label: "shelfFolder.open", disabled: false });
   actions.push({ id: "renameFolder", group: "organize", label: "shelfFolder.rename", disabled: false });
+  if (ctx.canMove) actions.push({ id: "moveFolder", group: "organize", label: "shelfFolder.moveFolder", disabled: Boolean(ctx.moveDisabled) });
   if (ctx.canExport) actions.push({ id: "exportBook", group: "organize", label: "bookExport.action", disabled: ctx.exportDisabled });
   actions.push({ id: "dissolveFolder", group: "danger", label: "shelfFolder.dissolve", disabled: false });
   return actions;
