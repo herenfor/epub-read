@@ -232,13 +232,16 @@
 
 .app[data-touch-ui="true"] .hl-picker-hex input { height: 44px; }
 
-/* Touch: icon buttons and the swatches beside them are 44px, three rows when the menu is open. */
+/*
+ * Touch: icon buttons and the swatches beside them are 40px (44px from one to
+ * the next with the gap), three rows when the menu is open.
+ */
 .app[data-touch-ui="true"] .reader-context-menu button.sm-btn,
 .app[data-touch-ui="true"] .reader-context-menu .hl-menu-row > button.hl-swatch {
-  width: 44px;
-  height: 44px;
-  min-width: 44px;
-  min-height: 44px;
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
   padding: 0;
 }
 
