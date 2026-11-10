@@ -91,5 +91,5 @@
   "readestImport.reason.text-reconciled": "Matched text across presentation differences",
   "readestImport.reason.cfi-only": "Placed using the source position despite text differences",
   "readestImport.reason.cfi-clamped": "Position clamped to the end of its text node",
-  "readestImport.reason.anchored": "Placed at the nearest available paragraph anchor"
+  "readestImport.reason.anchored": "Placed at the nearest available position"
 }

@@ -297,3 +297,26 @@ it("keeps a ruby annotation as an approximate canonical range, independently of 
   expect(n.value?.selectedText).toBe("伊武圣兰IbuSeira");
   expect(Array.from(n.value!.selectedText).length).toBe(n.value!.endTextOffset - n.value!.startTextOffset);
 });
+
+it("marks a range-end progress fallback as approximate even when the end needs no clamp", async () => {
+  const preview = await convertReadestBook(HASH, config({
+    location: "epubcfi(/6/2!/4,/40/1:0,/4/3:7)",
+    progress: [12, 300],
+  }), target(), NOW);
+  expect(preview.progress).toMatchObject({
+    grade: "approximate",
+    reasons: ["anchored"],
+    value: { locator: { chapterPath: "OEBPS/Text/c1.xhtml" } },
+  });
+});
+
+it("keeps a bookmark whose offset is past the text, marked approximate", async () => {
+  const preview = await convertReadestBook(HASH, config({
+    booknotes: [{ id: "bm-clamped", type: "bookmark", cfi: "epubcfi(/6/2!/4/2[head-1]/1:99)", note: "", createdAt: 1_700_000_000_000, updatedAt: 1 }],
+  }), target(), NOW);
+  expect(preview.bookmarks[0]).toMatchObject({
+    grade: "approximate",
+    reasons: ["anchored"],
+    value: { locator: { chapterPath: "OEBPS/Text/c1.xhtml" } },
+  });
+});

@@ -160,16 +160,24 @@ async function convertProgress(
   const parsed = parseEpubCfi(config.location);
   if (!parsed) return unresolved(sourceKey, source, "bad-cfi");
   let point = await placePoint(collapseCfi(parsed), target, chapters, true);
-  if (!point.ok && parsed.kind === "range") point = await placePoint(collapseCfi(parsed, true), target, chapters, true);
+  let usedRangeEnd = false;
+  if (!point.ok && parsed.kind === "range") {
+    usedRangeEnd = true;
+    point = await placePoint(collapseCfi(parsed, true), target, chapters, true);
+  }
   if (!point.ok) return unresolved(sourceKey, source, point.reason);
   const { placed } = point;
+  // A range whose start cannot be placed but whose end can is still approximate,
+  // even when the end itself needs no clamp.
+  const reasons = usedRangeEnd && !placed.reasons.includes("anchored")
+    ? [...placed.reasons, "anchored" as const] : placed.reasons;
   const pct = config.pages
     ? (config.pages[0] / config.pages[1]) * 100
     : (placed.spineIndex / Math.max(1, target.spineIdrefs.length)) * 100;
   return {
     sourceKey,
-    grade: gradeOf(placed.reasons),
-    reasons: placed.reasons,
+    grade: gradeOf(reasons),
+    reasons,
     // The native progress hint is an integer percentage.
     value: { locator: locatorAt(placed), progressPctHint: Math.round(Math.max(0, Math.min(100, pct))) },
     source,

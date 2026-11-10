@@ -19,7 +19,7 @@ export const readestImport = defineMessages("readestImport", {
   "readestImport.reason.text-reconciled": "排版不同，已按正文内容匹配",
   "readestImport.reason.cfi-only": "原文不同，按来源位置迁入",
   "readestImport.reason.cfi-clamped": "位置超出段落，已放到段落末尾",
-  "readestImport.reason.anchored": "位置不完整，已按最近段落放置",
+  "readestImport.reason.anchored": "位置不完整，已放到最近的可用位置",
 
   "readestImport.title": "从 Readest 迁入",
   "readestImport.entry": { zh: "从 Readest 迁入", note: "Settings row title (Data & Backup)." },

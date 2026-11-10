@@ -25,3 +25,9 @@ it("clamps only on explicit opt in and keeps default CFI resolution strict", () 
   expect(result?.clamped).toBe(true);
   expect(index.offsetAt(result!.point)).toBe(2);
 });
+
+it("matches content across a subscript decoration without moving canonical offsets", () => {
+  const { index } = chapter('<p>甲<sub>•</sub>乙丙丁</p>');
+  expect(index.slice(0, index.totalChars)).toBe("甲•乙丙丁");
+  expect(matchEpubText(index, "甲乙丙丁", null)).toMatchObject({ start: 0, end: 5, kind: "content" });
+});
