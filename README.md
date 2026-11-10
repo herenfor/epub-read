@@ -51,13 +51,13 @@ The app is not distributed through Google Play, so Play Protect may warn about a
 
 ### Linux (experimental)
 
-Linux is not part of the current released packages yet. The packaging candidates below build from source and are not official downloads:
+Starting with 0.4.1 the release page includes an amd64 `.deb` built on Ubuntu 24.04. Linux support is still marked experimental and the minimum distribution range is not final.
 
-- **Debian/Ubuntu `.deb` (candidate)**: a local test package has been built and opened on Debian 13 with software rendering and WebKitGTK 2.54. No official `.deb` is published, and the minimum distribution support is not established. Build it from source with the instructions below.
+- **Debian/Ubuntu `.deb`**: published on the release page, built on Ubuntu 24.04 (glibc 2.39) and requiring GTK 3 and WebKitGTK 4.1; for older distributions build it from source with the instructions below.
 - **Flatpak (candidate)**: a source-built sandbox package, not submitted to Flathub. See [`packaging/flatpak/README.md`](packaging/flatpak/README.md). It opens books through the system file chooser/document portal and does not receive access to the whole home directory.
 - **Arch Linux (AUR candidate)**: the `PKGBUILD` and build notes are in [`packaging/aur/`](packaging/aur/README.md), but the package has not been uploaded to the AUR. Build it only on Arch Linux from the pinned local source archive.
 
-The first Linux scope is local reading. WebDAV sync and LAN transfer are not part of it. The deb was built on Ubuntu 26.04 and tested on Debian 13 with software rendering; file-manager association, native GPU/Wayland behavior and minimum older distributions are not yet verified. Do not install a Linux package from a third party claiming to be an official SeLis release.
+Linux now also has WebDAV sync, LAN transfer and copy-on-import; native GPU/Wayland behavior and minimum older distributions are still unverified. Do not install a Linux package from a third party claiming to be an official SeLis release.
 
 ### Updating
 
@@ -80,7 +80,7 @@ Updating over an existing installation always keeps your library, reading progre
 - **Illustrations and footnotes in place** — click or tap an image to inspect, zoom and pan in an overlay; preview footnotes on hover or pin them to scroll without leaving your page
 - **Organise without moving your files** — import individual files or entire directory trees into matching shelf folders, watch a folder for automatic imports, and choose whether books are read directly from their original location or copied into the library
 - **A private shelf when you need one** — switch to a password-protected shelf whose books, progress, bookmarks and notes are stored separately and excluded from global search, LAN transfer and cloud sync
-- **Local by default, connected when you choose** — transfer books and reading records directly between devices over local Wi‑Fi via QR code, or sync reading data (never book files) through your own WebDAV storage
+- **Local by default, connected when you choose** — transfer books and reading records directly between devices over local Wi‑Fi via QR code, or sync reading data through your own WebDAV storage; book files are not uploaded by sync and can be backed up manually from the book menu
 
 <p align="center"><img src=".github/readme/layout.svg" width="860" alt="The layout panel switching between the Light, Sepia, Gray and Night themes while line height and margins change the page"></p>
 

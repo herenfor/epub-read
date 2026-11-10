@@ -49,7 +49,15 @@ export const RELEASE_NOTES: readonly ReleaseNote[] = [
       },
       {
         category: "new",
+        text: "新增 AZW3（KF8）与 FB2 格式，可导入阅读、保存笔记并导出原书。",
+      },
+      {
+        category: "new",
         text: "支持从 Readest 备份导入书籍与阅读记录，也可导入 KOReader 的阅读进度。",
+      },
+      {
+        category: "new",
+        text: "连接 WebDAV 后可手动把原书备份到网盘，并逐本重试失败项。",
       },
       {
         category: "new",
