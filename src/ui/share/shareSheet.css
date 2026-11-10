@@ -69,6 +69,18 @@
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.2), 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
+/* Long card (ER-0162): as wide as a 3:4 card, scrolled inside the stage. */
+.share-stage[data-long] {
+  max-height: calc(min(470px, 100vh - 200px) + 48px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.share-stage[data-long] .share-canvas {
+  width: 352px;
+  max-height: none;
+}
+
 .share-side {
   display: flex;
   flex-direction: column;
@@ -205,6 +217,29 @@
   color: color-mix(in srgb, var(--ui-warning) 70%, var(--fg));
 }
 
+/* The one-tap way out of a cut passage: a tinted fill, so it reads as a button on touch too. */
+.share-fit-long {
+  min-height: 26px;
+  margin-left: 6px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.share-fit-long:hover {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.share-fit-long:active {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
 .share-actions {
   grid-column: 1 / -1;
   display: flex;
@@ -293,6 +328,29 @@
 
 .app[data-mobile-chrome="true"] .share-canvas {
   max-height: min(400px, 46vh);
+}
+
+.app[data-mobile-chrome="true"] .share-stage[data-long] {
+  max-height: calc(min(400px, 46vh) + 24px);
+}
+
+.app[data-mobile-chrome="true"] .share-stage[data-long] .share-canvas {
+  width: 300px;
+  max-height: none;
+}
+
+/* Phone: the preview takes most of the screen, so the hint and the size sit first. */
+.app[data-mobile-chrome="true"] .share-fit {
+  order: -2;
+  margin-top: 0;
+}
+
+.app[data-mobile-chrome="true"] .share-group.is-ratio {
+  order: -1;
+}
+
+.app[data-mobile-chrome="true"] .share-fit-long {
+  min-height: 30px;
 }
 
 .app[data-mobile-chrome="true"] .share-side {

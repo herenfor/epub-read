@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { breakLines, breakUnits, ellipsize, fitText, verticalGlyph, type Measure } from "./shareLayout";
+import { breakLines, breakParagraphs, breakUnits, ellipsize, fitText, fittedBlockSize, verticalGlyph, type Measure } from "./shareLayout";
 import { formatShareCitation, splitSentences, takeSentences, tidyPassage } from "./shareText";
 import { canUseVertical, resolveAccent, shareCardPalette, shareCardSize } from "./shareCardModel";
 import { contrast, coverToneFromPixels, readableTone } from "./coverTone";
@@ -36,6 +36,17 @@ describe("share card line breaking", () => {
     expect(long.lines.at(-1)!).not.toMatch(/[，、]……$/);
     expect(ellipsize("Pride and Prejudice", 55, 10, measure)).toBe("Pride and…");
     expect(ellipsize("Pride", 55, 10, measure)).toBe("Pride");
+  });
+
+  it("reports where paragraphs begin and leaves room between them when asked", () => {
+    expect(breakParagraphs("第一段很长要换行\n第二段", 50, 10, measure)).toEqual({ lines: ["第一段很长", "要换行", "第二段"], paragraphStarts: [2] });
+    const request = { text: "第一段\n第二段\n第三段", lineLength: 100, lineHeight: 1.5, maxPx: 10, minPx: 10, measure, ellipsis: "……" };
+    // Three lines of 15 fit in 45; with two paragraph gaps of 5 they need 55.
+    expect(fitText({ ...request, blockSize: 45 }).truncated).toBe(false);
+    expect(fitText({ ...request, blockSize: 45, paragraphGap: 0.5 }).truncated).toBe(true);
+    const roomy = fitText({ ...request, blockSize: 55, paragraphGap: 0.5 });
+    expect(roomy).toMatchObject({ truncated: false, paragraphStarts: [1, 2] });
+    expect(fittedBlockSize(roomy, 1.5, 0.5)).toBe(55);
   });
 
   it("draws vertical punctuation with its vertical form", () => {
