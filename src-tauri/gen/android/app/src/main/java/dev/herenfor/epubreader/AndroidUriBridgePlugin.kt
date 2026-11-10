@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.provider.DocumentsContract
 import androidx.activity.result.ActivityResult
+import androidx.core.content.FileProvider
 import app.tauri.annotation.ActivityCallback
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
@@ -24,6 +25,11 @@ import org.json.JSONArray
 @InvokeArg
 class OpenReadOnlyArgs {
     lateinit var uri: String
+}
+
+@InvokeArg
+class StagedBookUriArgs {
+    lateinit var path: String
 }
 
 @InvokeArg
@@ -231,6 +237,28 @@ class AndroidUriBridgePlugin(private val activity: Activity) : Plugin(activity) 
             } else {
                 openReadOnlyOnWorker(invoke, args.uri)
             }
+        }
+    }
+
+    /**
+     * A content URI for a book extracted from a Readest backup, so the document
+     * importer reads it like a picked file. Only files under this app's own
+     * readest-staging cache folder are accepted.
+     */
+    @Command
+    fun stagedBookUri(invoke: Invoke) {
+        val args = invoke.parseArgs(StagedBookUriArgs::class.java)
+        try {
+            val root = File(activity.cacheDir, "readest-staging").canonicalFile
+            val file = File(args.path).canonicalFile
+            if (!file.isFile || !file.path.startsWith(root.path + File.separator)) {
+                invoke.reject("not a staged book")
+                return
+            }
+            val uri = FileProvider.getUriForFile(activity, "${activity.packageName}.fileprovider", file)
+            invoke.resolve(JSObject().apply { put("uri", uri.toString()) })
+        } catch (error: Throwable) {
+            invoke.reject(error.message ?: "unable to share staged book")
         }
     }
 

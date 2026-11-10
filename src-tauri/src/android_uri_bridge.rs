@@ -585,6 +585,31 @@ mod android {
         restricted_reader_from_response(response)
     }
 
+    /// A content URI of this app's own provider for a staged Readest book, so
+    /// the document importer can read it like any picked file.
+    pub(crate) fn cache_file_uri<R: Runtime>(
+        app: &AppHandle<R>,
+        path: &str,
+    ) -> Result<String, RestrictedReadError> {
+        #[derive(Serialize)]
+        struct Request<'a> {
+            path: &'a str,
+        }
+        #[derive(Deserialize)]
+        struct Reply {
+            uri: String,
+        }
+        let bridge = app.state::<AndroidUriBridge<R>>();
+        let reply = bridge
+            .0
+            .run_mobile_plugin::<Reply>("stagedBookUri", Request { path })
+            .map_err(|error| RestrictedReadError::AndroidBridge(error.to_string()))?;
+        if !reply.uri.starts_with("content://") {
+            return Err(RestrictedReadError::InvalidInput("staged book URI is not a content URI"));
+        }
+        Ok(reply.uri)
+    }
+
     /// Owned by the serialized import job. Dropping a failed preparation
     /// only releases a grant that this job introduced. Existing grants may
     /// be referenced by another book or shelf.
@@ -797,7 +822,7 @@ mod android {
 #[cfg(target_os = "android")]
 #[allow(unused_imports)]
 pub(crate) use android::{
-    cancel_write_blocking, delete_created_document_blocking, open_content_uri, pick_directory_tree, pick_watched_directory, release_watched_directory, plugin,
+    cache_file_uri, cancel_write_blocking, delete_created_document_blocking, open_content_uri, pick_directory_tree, pick_watched_directory, release_watched_directory, plugin,
     query_tree_directory, read_content_uri_blocking, write_staged_file_blocking,
     PendingDocumentGrant, open_persisted_document, release_document_read,
     write_text_content_uri_blocking,

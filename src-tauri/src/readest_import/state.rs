@@ -3,6 +3,7 @@ use crate::{native_zip_session::NativeZipSession, portable_state::ReadestTarget}
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
+    path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
@@ -31,14 +32,39 @@ pub(crate) struct JsonEntry {
     pub bytes: u64,
 }
 
+/// Where the session reads from: a backup ZIP, or Readest's own library folder
+/// (entry index -> JSON file).
+#[derive(Clone)]
+pub(super) enum Origin {
+    Zip(Arc<NativeZipSession>),
+    Folder(Arc<BTreeMap<usize, PathBuf>>),
+}
+#[derive(Clone)]
+pub(super) enum BookAt {
+    Zip(usize),
+    File(PathBuf),
+}
+/// The original book file Readest keeps next to a book's `config.json`.
+#[derive(Clone)]
+pub(super) struct BookFile {
+    pub name: String,
+    pub bytes: u64,
+    pub at: BookAt,
+}
+
 pub(super) struct StoredTarget {
     pub token: String,
     pub target: ReadestTarget,
 }
 #[derive(Default)]
 pub(super) struct SessionData {
-    pub archive: Option<Arc<NativeZipSession>>,
+    pub archive: Option<Origin>,
     pub library: Option<JsonEntry>,
+    pub books: BTreeMap<String, BookFile>,
+    /// Folder sources only: one JSON file held from its stable read to its last chunk.
+    pub cache: BTreeMap<usize, Arc<Vec<u8>>>,
+    pub staging: Option<PathBuf>,
+    pub staged: u64,
     pub configs: BTreeMap<String, JsonEntry>,
     pub entries: BTreeMap<usize, (JsonEntry, Option<String>)>,
     pub configs_read: BTreeSet<String>,
@@ -103,7 +129,10 @@ impl Session {
                 config.clone(),
             )
         };
-        let bytes = archive.read_chunk(index, offset).map_err(fault)?;
+        let bytes = match archive {
+            Origin::Zip(archive) => archive.read_chunk(index, offset).map_err(fault)?,
+            Origin::Folder(paths) => self.folder_chunk(&paths, index, offset, &entry, config.is_some())?,
+        };
         self.check()?;
         if offset + bytes.len() as u64 == entry.bytes {
             if let Some(hash) = config {
@@ -115,6 +144,113 @@ impl Session {
             }
         }
         Ok(bytes)
+    }
+    /// Loads one folder JSON file with a before/after snapshot and keeps it until read to EOF.
+    pub fn hold(&self, index: usize, path: &std::path::Path, config: bool) -> PortableResult<Arc<Vec<u8>>> {
+        let limit = if config { CONFIG_LIMIT } else { LIBRARY_LIMIT };
+        let bytes = Arc::new(folder::read_stable(path, limit, &|| self.check())?);
+        let mut data = self
+            .data
+            .lock()
+            .map_err(|_| error("storage-error", "迁入会话锁不可用"))?;
+        if data.cache.len() >= 4 {
+            data.cache.clear();
+        }
+        data.cache.insert(index, bytes.clone());
+        Ok(bytes)
+    }
+    fn folder_chunk(
+        &self,
+        paths: &BTreeMap<usize, PathBuf>,
+        index: usize,
+        offset: u64,
+        entry: &JsonEntry,
+        config: bool,
+    ) -> PortableResult<Vec<u8>> {
+        let held = self
+            .data
+            .lock()
+            .map_err(|_| error("storage-error", "迁入会话锁不可用"))?
+            .cache
+            .get(&index)
+            .cloned();
+        let bytes = match held {
+            Some(bytes) => bytes,
+            None if offset == 0 => {
+                let path = paths
+                    .get(&index)
+                    .ok_or_else(|| error("invalid-request", "只允许读取书目和单书配置"))?;
+                self.hold(index, path, config)?
+            }
+            None => return Err(error("invalid-request", "备份读取范围无效")),
+        };
+        // The size the caller was told is the contract; Readest rewrote the file otherwise.
+        if bytes.len() as u64 != entry.bytes {
+            return Err(error("source-changed", "Readest 正在改动这份资料，请稍后重试"));
+        }
+        if offset > entry.bytes {
+            return Err(error("invalid-request", "备份读取范围无效"));
+        }
+        let start = offset as usize;
+        let end = (start + crate::native_zip_session::CHUNK_BYTES).min(bytes.len());
+        if end == bytes.len() {
+            self.data
+                .lock()
+                .map_err(|_| error("storage-error", "迁入会话锁不可用"))?
+                .cache
+                .remove(&index);
+        }
+        Ok(bytes[start..end].to_vec())
+    }
+    /// A folder config is re-read when asked for, so its size is the one about to be served.
+    pub fn config_entry(&self, hash: &str) -> PortableResult<Option<JsonEntry>> {
+        let (entry, path) = {
+            let data = self
+                .data
+                .lock()
+                .map_err(|_| error("storage-error", "迁入会话锁不可用"))?;
+            let Some(entry) = data.configs.get(hash).cloned() else {
+                return Ok(None);
+            };
+            let path = match &data.archive {
+                Some(Origin::Folder(paths)) => paths.get(&entry.entry_index).cloned(),
+                _ => None,
+            };
+            (entry, path)
+        };
+        let Some(path) = path else {
+            return Ok(Some(entry));
+        };
+        let bytes = self.hold(entry.entry_index, &path, true)?;
+        let fresh = JsonEntry {
+            entry_index: entry.entry_index,
+            bytes: bytes.len() as u64,
+        };
+        let mut data = self
+            .data
+            .lock()
+            .map_err(|_| error("storage-error", "迁入会话锁不可用"))?;
+        data.configs.insert(hash.to_owned(), fresh.clone());
+        data.entries
+            .insert(fresh.entry_index, (fresh.clone(), Some(hash.to_owned())));
+        Ok(Some(fresh))
+    }
+    /// Removes extracted book files; the session can stage again afterwards.
+    pub fn discard_staged(&self) -> PortableResult<()> {
+        let staging = self
+            .data
+            .lock()
+            .map_err(|_| error("storage-error", "迁入状态锁不可用"))?
+            .staging
+            .clone();
+        if let Some(dir) = staging {
+            match std::fs::remove_dir_all(&dir) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(_) => return Err(error("storage-error", "无法清理迁入临时文件")),
+            }
+        }
+        Ok(())
     }
     pub fn close(&self) -> PortableResult<&'static str> {
         // Same gate as SQLite commit: accepted cancellation rolls back, or the
@@ -131,14 +267,19 @@ impl Session {
         };
         self.cancelled.store(true, Ordering::Release);
         drop(disposition);
-        if let Some(archive) = self
-            .data
-            .lock()
-            .map_err(|_| error("storage-error", "迁入状态锁不可用"))?
-            .archive
-            .take()
-        {
+        let (archive, staging) = {
+            let mut data = self
+                .data
+                .lock()
+                .map_err(|_| error("storage-error", "迁入状态锁不可用"))?;
+            data.cache.clear();
+            (data.archive.take(), data.staging.take())
+        };
+        if let Some(Origin::Zip(archive)) = archive {
             archive.close();
+        }
+        if let Some(dir) = staging {
+            let _ = std::fs::remove_dir_all(dir);
         }
         Ok(result)
     }
@@ -152,7 +293,8 @@ impl Session {
             .commit_gate
             .lock()
             .map_err(|_| error("storage-error", "迁入状态锁不可用"))?;
-        if *disposition != Disposition::Pending || !current() {
+        // A large library commits in several batches; only cancellation closes the gate.
+        if *disposition == Disposition::Cancelled || !current() {
             return Err(error("cancelled", "迁入已取消或书架已锁定"));
         }
         self.check()?;
