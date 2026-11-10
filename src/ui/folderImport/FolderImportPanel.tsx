@@ -248,14 +248,17 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
       && items.some((item) => item.relativeParentSegments.length === 0),
     [items],
   );
-  const unresolved = plan
-    ? plan.groups.filter((group, index) => !(choices[group.groupKey] ?? defaultGroupChoice(resolutions[index])))
-    : [];
-  /** Rows that still need a choice come first, so folding never hides them. */
+  /** resolveGroups returns its own order (by depth), so always look up by groupKey. */
   const resolutionByKey = useMemo(
     () => new Map(resolutions.map((resolution) => [resolution.groupKey, resolution])),
     [resolutions],
   );
+  const unresolved = plan
+    ? plan.groups.filter((group) => {
+        const resolution = resolutionByKey.get(group.groupKey);
+        return !(choices[group.groupKey] ?? (resolution ? defaultGroupChoice(resolution) : null));
+      })
+    : [];
 
   /** Rows in source-tree order so a child always follows its planned parent. */
   const treeRows = useMemo(() => {
