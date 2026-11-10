@@ -32,6 +32,7 @@ use crate::linked_library::{new_staging_path, stream_restricted_reader_to_stagin
 use crate::portable_state::{
     DirectoryBindingWrite, DirectoryFolderCreate, DirectoryImportBatchOutcome,
     DirectoryPlacementDecision, DirectoryPlacementRequest, DirectoryPlacementSnapshot,
+    DirectoryTargetSnapshot,
 };
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -212,6 +213,7 @@ struct RunnerState {
     gate: Arc<super::policy::DirectoryJobGate>,
     policy: ExistingPlacement,
     target_specs: HashMap<String, TargetSpec>,
+    target_checks: Vec<DirectoryTargetSnapshot>,
     counts: ImportCounts,
     issue_count: usize,
     seen: SuccessfulSources,
@@ -529,6 +531,7 @@ impl RunnerState {
                     &creates,
                     &requests,
                     &binding_rows,
+                    &self.target_checks,
                     |request, current, target_alive| {
                         let observed = to_planner_placement(&request.observed);
                         let current = to_planner_placement(current);
@@ -1078,6 +1081,32 @@ pub fn run_import(
     let public_entries: Vec<ScannedEpub> = entries.iter().map(|entry| entry.epub.clone()).collect();
     let plan = plan_directory_import(&root, &public_entries, &options, anchor.as_ref());
     let target_specs = target_specs(&plan, &targets)?;
+    let mut checked_ids: std::collections::BTreeSet<String> = target_specs
+        .values()
+        .map(|spec| spec.folder_id.clone())
+        .collect();
+    if let Some(anchor) = &plan.anchor_folder_id {
+        checked_ids.insert(anchor.clone());
+    }
+    let scan_snapshots = job.target_snapshots();
+    let target_checks: Vec<DirectoryTargetSnapshot> = checked_ids
+        .iter()
+        .filter_map(|folder_id| scan_snapshots.get(folder_id).cloned())
+        .collect();
+    if !target_checks.is_empty() {
+        let ids: Vec<String> = checked_ids.iter().cloned().collect();
+        let current = crate::portable_state_commands::with_existing_store(app, |store| {
+            store.directory_target_snapshots_for(&ids)
+        })
+        .map_err(|error| error.to_string())?;
+        if let Some(current) = current {
+            for expected in &target_checks {
+                if current.get(&expected.folder_id) != Some(expected) {
+                    return Err("目录目标文件夹在预览后发生变化，请重新预览".to_string());
+                }
+            }
+        }
+    }
     let root_path = library_root(app)?;
     if copy
         && entries
@@ -1113,6 +1142,7 @@ pub fn run_import(
         gate: job.gate(),
         policy: options.existing_placement,
         target_specs,
+        target_checks,
         counts: ImportCounts::default(),
         issue_count: 0,
         seen: SuccessfulSources::new(),

@@ -122,36 +122,43 @@ export function planDirectoryImport(
     return key;
   };
 
+  // Priority preserves the old cross-batch duplicate rule: deeper categorized
+  // candidates first, then direct-root books, then genuinely unclassified.
   const mapped = entries.map(entry => {
     if (options.grouping === "none") {
-      return { entry, groupKey: null as string | null, directFolderId: anchor.folderId ?? undefined };
+      return { entry, groupKey: null as string | null, directFolderId: anchor.folderId ?? undefined, priority: 0 };
     }
     if (maxNewDepth <= 0) {
       // The current folder itself is the deepest target; no sixth level is made.
-      return { entry, groupKey: null as string | null, directFolderId: anchor.folderId ?? undefined };
+      return { entry, groupKey: null as string | null, directFolderId: anchor.folderId ?? undefined, priority: 1 };
     }
     if (options.grouping === "singleFolder") {
-      return { entry, groupKey: ensureGroup([]), directFolderId: undefined };
+      return { entry, groupKey: ensureGroup([]), directFolderId: undefined, priority: 0 };
     }
     if (entry.relativeParentSegments.length === 0) {
-      // Root-direct books: keep the existing named-folder option. When children
-      // exist, their ancestor chain still creates the selected-root folder.
-      const rootKey = options.looseRootBooks === "namedFolder" || !hasChildren
-        ? ensureGroup([])
-        : null;
-      return { entry, groupKey: rootKey, directFolderId: undefined };
+      // Auto tree default: direct books belong to the selected source-root
+      // layer. The explicit loose-root fallback keeps them in the current
+      // anchor; only a root-shelf anchor means global unclassified.
+      const treeRoot = options.looseRootBooks === "namedFolder" || !hasChildren;
+      if (treeRoot) {
+        return { entry, groupKey: ensureGroup([]), directFolderId: undefined, priority: 1 };
+      }
+      return {
+        entry,
+        groupKey: null,
+        directFolderId: anchor.folderId === null ? undefined : anchor.folderId,
+        priority: anchor.folderId === null ? 2 : 1,
+      };
     }
     const prefix = entry.relativeParentSegments.slice(0, Math.max(0, maxNewDepth - 1));
-    return { entry, groupKey: ensureGroup(prefix), directFolderId: undefined };
+    return { entry, groupKey: ensureGroup(prefix), directFolderId: undefined, priority: 0 };
   });
 
   const flattened = options.grouping === "auto" && entries.some(entry =>
     entry.relativeParentSegments.length > Math.max(0, maxNewDepth - 1));
 
   mapped.sort((a, b) => {
-    const targetOrder = Number(a.groupKey === null && a.directFolderId === undefined)
-      - Number(b.groupKey === null && b.directFolderId === undefined);
-    return targetOrder
+    return a.priority - b.priority
       || compareSegments(
         [...a.entry.relativeParentSegments, a.entry.fileName],
         [...b.entry.relativeParentSegments, b.entry.fileName],

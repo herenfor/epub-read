@@ -304,7 +304,7 @@ fn scan(app: &AppHandle) -> Result<WatchResult, String> {
     let (mut next, candidates) = select_candidates(&mut output, &state.seen);
     result.unchanged = result.scanned - output.entries.len();
     if !output.entries.is_empty() {
-        job.set_scan(output, None);
+        job.set_scan(output, None, Default::default());
         let imported = run_import(
             app,
             job.clone(),

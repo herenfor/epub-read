@@ -49,7 +49,7 @@ describe("folder import planner (migrated core)", () => {
     ], auto);
     expect(mixed.flattened).toBe(false);
     // Categorized candidates precede loose-root duplicates.
-    expect(mixed.inputs.map((i) => [i.inputId, i.groupKey === null])).toEqual([["deep", false], ["loose", true]]);
+    expect(mixed.inputs.map((i) => [i.inputId, i.groupKey === null])).toEqual([["deep", false], ["loose", false]]);
     expect(mixed.groups.map((g) => [g.suggestedName, g.depth, g.parentGroupKey === null]))
       .toEqual([["全部书籍", 1, true], ["分类", 2, false], ["系列", 3, false]]);
     expect(directoryGroupKey(root, ["a · b"])).not.toBe(directoryGroupKey(root, ["a", "b"]));

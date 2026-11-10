@@ -54,7 +54,9 @@ export interface FolderImportPanelProps {
 
 export const DEFAULT_FOLDER_IMPORT_OPTIONS: ImportOptions = {
   grouping: "auto",
-  looseRootBooks: "root",
+  // Auto tree default: the selected source root is the first layer, including
+  // direct books. The explicit "root" option remains an anchor fallback.
+  looseRootBooks: "namedFolder",
   existingPlacement: "fillUnclassified",
 };
 

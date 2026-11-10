@@ -148,55 +148,74 @@ pub fn plan_directory_import(
         None
     };
 
-    let mut mapped: Vec<(Option<String>, Option<String>, &ScannedEpub)> = entries
+    let mut mapped: Vec<(Option<String>, Option<String>, u8, &ScannedEpub)> = entries
         .iter()
         .map(|entry| {
             if direct_anchor.is_some() {
-                return (None, direct_anchor.clone(), entry);
+                return (None, direct_anchor.clone(), 1, entry);
             }
-            let group_key = match options.grouping {
-                GroupingMode::None => None,
-                GroupingMode::SingleFolder => Some(ensure_group(
-                    root,
-                    &[],
-                    anchor_folder_id.as_deref(),
-                    anchor_depth,
-                    &mut groups,
-                    &mut seen,
-                )),
+            match options.grouping {
+                GroupingMode::None => (None, None, 0, entry),
+                GroupingMode::SingleFolder => (
+                    Some(ensure_group(
+                        root,
+                        &[],
+                        anchor_folder_id.as_deref(),
+                        anchor_depth,
+                        &mut groups,
+                        &mut seen,
+                    )),
+                    None,
+                    0,
+                    entry,
+                ),
                 GroupingMode::Auto => {
                     if entry.relative_parent_segments.is_empty() {
                         if options.loose_root_books == super::types::LooseRootBooks::NamedFolder
                             || !has_children
                         {
-                            Some(ensure_group(
-                                root,
-                                &[],
-                                anchor_folder_id.as_deref(),
-                                anchor_depth,
-                                &mut groups,
-                                &mut seen,
-                            ))
+                            (
+                                Some(ensure_group(
+                                    root,
+                                    &[],
+                                    anchor_folder_id.as_deref(),
+                                    anchor_depth,
+                                    &mut groups,
+                                    &mut seen,
+                                )),
+                                None,
+                                1,
+                                entry,
+                            )
                         } else {
-                            None
+                            (
+                                None,
+                                anchor_folder_id.clone(),
+                                if anchor_folder_id.is_none() { 2 } else { 1 },
+                                entry,
+                            )
                         }
                     } else {
                         let prefix_len = entry
                             .relative_parent_segments
                             .len()
                             .min(max_new_depth.saturating_sub(1) as usize);
-                        Some(ensure_group(
-                            root,
-                            &entry.relative_parent_segments[..prefix_len],
-                            anchor_folder_id.as_deref(),
-                            anchor_depth,
-                            &mut groups,
-                            &mut seen,
-                        ))
+                        (
+                            Some(ensure_group(
+                                root,
+                                &entry.relative_parent_segments[..prefix_len],
+                                anchor_folder_id.as_deref(),
+                                anchor_depth,
+                                &mut groups,
+                                &mut seen,
+                            )),
+                            None,
+                            0,
+                            entry,
+                        )
                     }
                 }
-            };
-            (group_key, None, entry)
+            }
         })
         .collect();
 
@@ -206,12 +225,11 @@ pub fn plan_directory_import(
                 > max_new_depth.saturating_sub(1) as usize
         });
 
-    mapped.sort_by(|(left_key, left_direct, left_entry), (right_key, right_direct, right_entry)| {
-        // Targeted candidates precede loose-root duplicates even across batches.
-        let left_targeted = left_key.is_some() || left_direct.is_some();
-        let right_targeted = right_key.is_some() || right_direct.is_some();
-        (right_targeted as u8)
-            .cmp(&(left_targeted as u8))
+    mapped.sort_by(|(_, _, left_priority, left_entry), (_, _, right_priority, right_entry)| {
+        // Deeper categorized candidates precede direct-root books; global
+        // unclassified entries come last across batches.
+        left_priority
+            .cmp(right_priority)
             .then_with(|| {
                 let mut left_path = left_entry.relative_parent_segments.clone();
                 left_path.push(left_entry.file_name.clone());
@@ -227,7 +245,7 @@ pub fn plan_directory_import(
     let inputs = mapped
         .into_iter()
         .enumerate()
-        .map(|(ordinal, (group_key, direct_folder_id, entry))| PlannedInput {
+        .map(|(ordinal, (group_key, direct_folder_id, _, entry))| PlannedInput {
             input_id: entry.input_id.clone(),
             ordinal,
             group_key,
@@ -643,6 +661,39 @@ mod tree_tests {
         assert!(direct.groups.is_empty());
         assert_eq!(direct.inputs[0].group_key, None);
         assert_eq!(direct.inputs[0].direct_folder_id.as_deref(), Some("current"));
+    }
+
+    #[test]
+    fn loose_root_books_follow_the_named_layer_or_current_anchor() {
+        let mut named = options();
+        named.loose_root_books = LooseRootBooks::NamedFolder;
+        let plan = plan_directory_import(
+            &root(),
+            &[entry("loose", &[], "loose.epub"), entry("deep", &["A"], "deep.epub")],
+            &named,
+            None,
+        );
+        let root_group = plan.groups.iter().find(|g| g.source_segments.is_empty()).unwrap();
+        assert_eq!(plan.inputs.iter().find(|i| i.input_id == "loose").unwrap().group_key.as_deref(), Some(root_group.group_key.as_str()));
+
+        let fallback = plan_directory_import(
+            &root(),
+            &[entry("loose", &[], "loose.epub"), entry("deep", &["A"], "deep.epub")],
+            &options(),
+            Some(&ImportAnchor { folder_id: Some("current".into()), depth: 3 }),
+        );
+        let loose = fallback.inputs.iter().find(|i| i.input_id == "loose").unwrap();
+        assert_eq!(loose.group_key, None);
+        assert_eq!(loose.direct_folder_id.as_deref(), Some("current"));
+
+        let root_fallback = plan_directory_import(
+            &root(),
+            &[entry("loose", &[], "loose.epub"), entry("deep", &["A"], "deep.epub")],
+            &options(),
+            None,
+        );
+        let loose = root_fallback.inputs.iter().find(|i| i.input_id == "loose").unwrap();
+        assert!(loose.direct_folder_id.is_none());
     }
 
     #[test]

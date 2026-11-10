@@ -22,6 +22,7 @@ pub struct DirectoryImportJob {
     gate: Arc<super::policy::DirectoryJobGate>,
     root: Mutex<Option<super::types::ImportRoot>>,
     anchor: Mutex<Option<super::types::ImportAnchor>>,
+    target_snapshots: Mutex<BTreeMap<String, crate::portable_state::DirectoryTargetSnapshot>>,
     entries: Mutex<Vec<ScannedEntry>>,
     scan_result: Mutex<Option<ScanResult>>,
     issues: Mutex<Vec<ImportIssue>>,
@@ -67,6 +68,7 @@ impl DirectoryImportJob {
             gate: Arc::new(super::policy::DirectoryJobGate::default()),
             root: Mutex::new(None),
             anchor: Mutex::new(None),
+            target_snapshots: Mutex::new(BTreeMap::new()),
             entries: Mutex::new(Vec::new()),
             scan_result: Mutex::new(None),
             issues: Mutex::new(Vec::new()),
@@ -96,7 +98,12 @@ impl DirectoryImportJob {
         }
     }
 
-    pub fn set_scan(&self, output: ScanOutput, anchor: Option<super::types::ImportAnchor>) -> ScanResult {
+    pub fn set_scan(
+        &self,
+        output: ScanOutput,
+        anchor: Option<super::types::ImportAnchor>,
+        target_snapshots: BTreeMap<String, crate::portable_state::DirectoryTargetSnapshot>,
+    ) -> ScanResult {
         let result = ScanResult {
             job_id: self.id.clone(),
             root: output.root.clone(),
@@ -106,6 +113,7 @@ impl DirectoryImportJob {
         };
         *self.root.lock().unwrap() = Some(output.root);
         *self.anchor.lock().unwrap() = anchor;
+        *self.target_snapshots.lock().unwrap() = target_snapshots;
         *self.entries.lock().unwrap() = output.entries;
         *self.scan_result.lock().unwrap() = Some(result.clone());
         result
@@ -121,6 +129,10 @@ impl DirectoryImportJob {
 
     pub fn anchor(&self) -> Option<super::types::ImportAnchor> {
         self.anchor.lock().unwrap().clone()
+    }
+
+    pub fn target_snapshots(&self) -> BTreeMap<String, crate::portable_state::DirectoryTargetSnapshot> {
+        self.target_snapshots.lock().unwrap().clone()
     }
 
     pub fn entries(&self) -> Vec<ScannedEntry> {
@@ -421,12 +433,28 @@ pub fn scan_job(
         });
     };
     progress(0);
+    // Capture the target tree before the filesystem walk. The preview can take
+    // a while, so a folder moved after this point must fail the later commit.
+    let target_snapshots = crate::portable_state_commands::with_existing_store(app, |store| {
+        store.directory_target_snapshots()
+    })
+    .map_err(|error| error.to_string())?;
+    if let (Some(snapshots), Some(anchor)) = (&target_snapshots, &anchor) {
+        if let Some(folder_id) = &anchor.folder_id {
+            match snapshots.get(folder_id) {
+                Some(snapshot) if snapshot.depth == anchor.depth as usize => {}
+                Some(_) => return Err("当前文件夹层级与扫描结果不一致，请重新扫描".into()),
+                None => return Err("当前文件夹不存在或已解散".into()),
+            }
+        }
+    }
+    let target_snapshots = target_snapshots.unwrap_or_default();
     let cancelled = || job.gate().cancelled();
     let output = scan_source(app, job.source(), &cancelled)?;
     if output.cancelled {
         return Err("目录扫描已取消".to_string());
     }
-    let result = job.set_scan(output, anchor);
+    let result = job.set_scan(output, anchor, target_snapshots);
     progress(result.input_count);
     Ok(result)
 }
@@ -527,6 +555,33 @@ mod tests {
         let bindings = page_bindings(&root, &[item], &known, true, Some(&anchor));
         assert_eq!(bindings.len(), 3);
         assert_eq!(bindings[0].folder_id, "");
+    }
+
+    #[test]
+    fn set_scan_keeps_anchor_and_preview_target_snapshots() {
+        let job = registered_job();
+        let anchor = crate::directory_import::types::ImportAnchor {
+            folder_id: Some("current".into()),
+            depth: 3,
+        };
+        let snapshots = BTreeMap::from([(
+            "current".to_string(),
+            crate::portable_state::DirectoryTargetSnapshot {
+                folder_id: "current".into(),
+                effective_parent_id: Some("parent".into()),
+                depth: 3,
+            },
+        )]);
+        job.set_scan(
+            ScanOutput::new(ImportRoot {
+                source_root_key: "root".into(),
+                name: "全部".into(),
+            }),
+            Some(anchor.clone()),
+            snapshots.clone(),
+        );
+        assert_eq!(job.anchor(), Some(anchor));
+        assert_eq!(job.target_snapshots(), snapshots);
     }
 
     #[test]

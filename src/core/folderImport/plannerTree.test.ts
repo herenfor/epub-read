@@ -59,6 +59,30 @@ describe("tree directory planner", () => {
     expect(deepest.inputs[0].directFolderId).toBe("current");
   });
 
+  it("places loose root books in the selected root layer by default, and anchor fallback when explicitly unclassified", () => {
+    const named = planDirectoryImport(root, [
+      entry("loose", [], "loose.epub"),
+      entry("deep", ["A"], "deep.epub"),
+    ], { ...auto, looseRootBooks: "namedFolder" }, { folderId: null, depth: 0 });
+    const rootGroup = named.groups.find(g => g.sourceSegments.length === 0)!;
+    expect(named.inputs.find(i => i.inputId === "loose")!.groupKey).toBe(rootGroup.groupKey);
+
+    const fallback = planDirectoryImport(root, [
+      entry("loose", [], "loose.epub"),
+      entry("deep", ["A"], "deep.epub"),
+    ], auto, { folderId: "current", depth: 3 });
+    expect(fallback.inputs.find(i => i.inputId === "loose")).toMatchObject({
+      groupKey: null,
+      directFolderId: "current",
+    });
+
+    const rootFallback = planDirectoryImport(root, [
+      entry("loose", [], "loose.epub"),
+      entry("deep", ["A"], "deep.epub"),
+    ], auto, { folderId: null, depth: 0 });
+    expect(rootFallback.inputs.find(i => i.inputId === "loose")!.directFolderId).toBeUndefined();
+  });
+
   it("scopes binding keys to the current folder while preserving legacy root keys", () => {
     const legacy = directoryGroupKey(root, ["A"]);
     expect(legacy).toBe(JSON.stringify([root.sourceRootKey, ["A"]]));
