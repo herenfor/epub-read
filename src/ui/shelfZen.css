@@ -3456,3 +3456,64 @@
 .app[data-touch-ui="true"] .shelf-tab-pick-title {
   font-size: var(--fs-emph);
 }
+
+/* =========================================================================
+ * ER-0172: 窄窗口书架顶栏按手机顺序折行
+ * 宽窗口仍是一行：Logo | 搜索 | 操作。
+ * 非 compact 的窄窗口改成：第一行 Logo + 操作，第二行完整搜索框；
+ * 不再让搜索框留在第一行、把操作按钮挤到下面。
+ * ========================================================================= */
+.shelf-normal-bar-zen {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+}
+
+.shelf-normal-bar-zen .shelf-brand-zone-zen {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.shelf-normal-bar-zen .shelf-quick-filter-anchor {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+}
+
+.shelf-normal-bar-zen .shelf-actions-zone-zen {
+  grid-column: 3;
+  grid-row: 1;
+  justify-self: end;
+}
+
+@media (max-width: 1060px) {
+  .shelf-normal-bar-zen {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "brand actions"
+      "search search";
+    row-gap: 8px;
+  }
+
+  .shelf-normal-bar-zen .shelf-brand-zone-zen {
+    grid-area: brand;
+  }
+
+  .shelf-normal-bar-zen .shelf-actions-zone-zen {
+    grid-area: actions;
+    justify-self: end;
+  }
+
+  .shelf-normal-bar-zen .shelf-quick-filter-anchor {
+    grid-area: search;
+    width: 100%;
+    max-width: none;
+  }
+
+  .shelf-normal-bar-zen .shelf-quick-filter-box,
+  .shelf-normal-bar-zen .shelf-quick-filter-box:focus-within {
+    width: 100%;
+    max-width: none;
+  }
+}
