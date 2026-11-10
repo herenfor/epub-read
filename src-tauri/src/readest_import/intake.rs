@@ -218,8 +218,7 @@ impl Publication {
             return Ok(vec![]);
         }
         let root = library::library_root(app).map_err(storage)?;
-        let books = library::managed_books_directory(&root).map_err(storage)?;
-        fs::create_dir_all(&books).map_err(storage)?;
+        let books = library::writable_books_directory(&root).map_err(storage)?;
         let mut rows = vec![];
         for book in prepared {
             if !book.needs_copy {

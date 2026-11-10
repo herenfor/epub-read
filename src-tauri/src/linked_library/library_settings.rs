@@ -188,4 +188,18 @@ mod tests {
         // Nothing was rewritten while reporting.
         assert!(fs::read_to_string(&path).unwrap().contains("relative"));
     }
+    #[test]
+    fn readest_publication_must_not_recreate_a_missing_custom_library() {
+        let dir = tempfile::tempdir().unwrap();
+        let local = dir.path().join("selis");
+        fs::create_dir_all(&local).unwrap();
+        let absent = dir.path().join("unmounted-library");
+        save_library_settings(&local, &LibrarySettings {
+            custom_base_directory: Some(absent.to_string_lossy().into_owned()),
+            ..LibrarySettings::default()
+        }).unwrap();
+        assert!(writable_books_directory(&local.join("linked-library")).is_err());
+        assert!(!absent.exists());
+    }
+
 }
