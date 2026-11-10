@@ -313,10 +313,11 @@ export function useReadestImport({ shelfEntriesRef, refreshShelfProjection, setS
       setState({ kind: "importing", sourceLabel, done: Math.min(total, done + ahead), total, title, bytesDone, bytesTotal, stopping: stopRef.current });
     };
 
-    let batch: Array<{ title: string; payload: ReadestBookImportPayload; records: number }> = [];
+    let batch: Array<{ title: string; payload: ReadestBookImportPayload; records: number; approximate: ImportResult["approximate"] }> = [];
     const commitBooks = async (items: typeof batch): Promise<void> => {
       const outcome = await commitReadestImport(session.id, items.map((item) => item.payload));
       addOutcome(result, outcome);
+      for (const item of items) result.approximate.push(...item.approximate);
       changed = true;
     };
     const flush = async (): Promise<void> => {
@@ -364,7 +365,7 @@ export function useReadestImport({ shelfEntriesRef, refreshShelfProjection, setS
         const built = bookPayload(row.readestHash, row.title, local, preview, rule);
         result.unplaced.push(...built.unplaced);
         if (built.payload) {
-          batch.push({ title: row.title, payload: built.payload, records: built.records });
+          batch.push({ title: row.title, payload: built.payload, records: built.records, approximate: built.approximate });
           if (batch.length >= COMMIT_BOOKS || batch.reduce((sum, item) => sum + item.records, 0) >= COMMIT_RECORDS) await flush();
         } else if (built.records > 0) {
           result.failed.push({ title: row.title, reason: uiText("readestImport.fail.tooMany") });

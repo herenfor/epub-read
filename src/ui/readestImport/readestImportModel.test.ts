@@ -80,15 +80,27 @@ describe("Readest import model", () => {
     expect(ahead.payload).not.toHaveProperty("progress");
     expect(ahead.records).toBe(2);
     expect(ahead.unplaced).toEqual([
-      { title: "Book", kind: "bookmark", text: "text of b2" },
-      { title: "Book", kind: "note", text: "text of n2" },
+      { title: "Book", kind: "bookmark", text: "text of b2", cfi: "", reason: "outside-text" },
+      { title: "Book", kind: "note", text: "text of n2", cfi: "", reason: "outside-text" },
     ]);
     const taken = bookPayload(hash("1"), "Book", local("x", "1", "x.epub", 60), preview, "readest");
     expect(taken.payload?.progress).toEqual({ locator, progressPctHint: 30 });
 
     const lost: ReadestBookPreview = { progress: candidate<ProgressValue>("p", "unresolved", null), bookmarks: [], notes: [] };
     expect(bookPayload(hash("1"), "Book", local("x", "1"), lost, "farther")).toEqual({
-      payload: null, records: 0, unplaced: [{ title: "Book", kind: "progress", text: null }],
+      payload: null, records: 0, approximate: [], unplaced: [{ title: "Book", kind: "progress", text: "text of p", cfi: "", reason: "outside-text" }],
     });
   });
+});
+
+it("preserves unplaced raw note data and reports approximate records without dropping their payload", () => {
+  const missing = candidate<NoteValue>("raw", "unresolved", null);
+  missing.reasons = ["chapter-missing"];
+  missing.source = { cfi: "epubcfi(/6/99!/4)", text: "原文", content: "笔记正文", style: "underline", color: "red", createdAtMs: 123 };
+  const approximate = candidate<NoteValue>("placed", "approximate", { content: "保留笔记" } as NoteValue);
+  approximate.reasons = ["cfi-only"];
+  const result = bookPayload(hash("1"), "Book", local("x", "1"), { progress: null, bookmarks: [], notes: [missing, approximate] }, "local");
+  expect(result.payload?.notes).toHaveLength(1);
+  expect(result.unplaced[0]).toMatchObject({ ...missing.source, reason: "chapter-missing" });
+  expect(result.approximate).toEqual([{ title: "Book", kind: "note", reasons: ["cfi-only"] }]);
 });

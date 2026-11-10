@@ -205,6 +205,7 @@ function DoneStep({ state, onCancel }: { state: Of<"done">; onCancel(): void }) 
   const { result } = state;
   const [showFailed, setShowFailed] = useState(false);
   const [showUnplaced, setShowUnplaced] = useState(false);
+  const [showApproximate, setShowApproximate] = useState(false);
   return (
     <Shell subtitle={t("readestImport.list.source", { source: state.sourceLabel })}
       actions={<button type="button" className="primary" onClick={onCancel}>{t("readestImport.finish")}</button>}>
@@ -225,6 +226,16 @@ function DoneStep({ state, onCancel }: { state: Of<"done">; onCancel(): void }) 
           ))}
         </div>
       )}
+      {result.approximate.length > 0 && <div className="readest-group">
+        <button type="button" className="readest-fold" aria-expanded={showApproximate} onClick={() => setShowApproximate(!showApproximate)}>
+          {t("readestImport.done.approximate", { count: result.approximate.length })}
+        </button>
+        {showApproximate && result.approximate.map((record, index) => <div className="readest-row readest-static" key={index}>
+          <span className="readest-row-text"><b>{record.title}</b>
+            <span>{t(`readestImport.unplaced.${record.kind}`)} · {record.reasons.map((reason) => t(`readestImport.reason.${reason}`)).join(" · ")}</span>
+          </span>
+        </div>)}
+      </div>}
       {result.unplaced.length > 0 && (
         <div className="readest-group">
           <button type="button" className="readest-fold" aria-expanded={showUnplaced} onClick={() => setShowUnplaced(!showUnplaced)}>
@@ -235,6 +246,10 @@ function DoneStep({ state, onCancel }: { state: Of<"done">; onCancel(): void }) 
               <span className="readest-row-text">
                 <b>{record.title}</b>
                 <span>{t(`readestImport.unplaced.${record.kind}`)}{record.text ? ` · ${record.text}` : ""}</span>
+                <span>{t(`readestImport.reason.${record.reason}`)}</span>
+                <details><summary>{t("readestImport.done.original")}</summary>
+                  <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{JSON.stringify(record, null, 2)}</pre>
+                </details>
               </span>
             </div>
           ))}
