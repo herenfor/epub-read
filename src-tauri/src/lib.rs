@@ -17,6 +17,8 @@ mod linux_webview_recovery;
 #[cfg(target_os = "linux")]
 mod linux_graphics;
 mod external_open;
+#[cfg(desktop)]
+mod window_state;
 #[cfg(test)]
 mod build_info_contract;
 mod directory_import;
@@ -495,6 +497,9 @@ pub fn run() {
     #[cfg(feature = "ai")]
     let builder = builder.manage(reader_tools::ReaderToolsState::default());
 
+    #[cfg(desktop)]
+    let builder = builder.manage(window_state::WindowSizeState::default());
+
     let builder = builder
         .manage(FontWriteState::default())
         .manage(LinkedLibraryWriteState::default())
@@ -557,6 +562,8 @@ pub fn run() {
                     }
                 }
             }
+            #[cfg(desktop)]
+            window_state::restore(app.handle());
             #[cfg(feature = "ai")]
             reader_tools::start(app.handle());
             let _ = save_file::cleanup_stale_staging(app.handle());
@@ -592,6 +599,8 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app, event| {
             if matches!(&event, tauri::RunEvent::Exit) {
+                #[cfg(desktop)]
+                window_state::save_on_exit(app);
                 #[cfg(feature = "ai")]
                 reader_tools::shutdown(app);
                 lan_save::shutdown(app);
@@ -600,6 +609,12 @@ pub fn run() {
                 koreader_import::shutdown(app);
                 linked_library::close_all_native_archives(app);
                 return;
+            }
+            #[cfg(desktop)]
+            if let tauri::RunEvent::WindowEvent { label, event, .. } = &event {
+                if label == "main" {
+                    window_state::handle_window_event(app, event);
+                }
             }
             if let tauri::RunEvent::WindowEvent {
                 event: tauri::WindowEvent::Destroyed,
