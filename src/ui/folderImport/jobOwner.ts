@@ -4,7 +4,7 @@ import type {
   DirectoryProgress,
   FolderTarget,
 } from "../../core/folderImport/contract";
-import type { ImportOptions } from "../../core/folderImport/planner";
+import type { ImportAnchor, ImportOptions } from "../../core/folderImport/planner";
 
 export interface ImportRunHandlers {
   onProgress(event: DirectoryProgress): void;
@@ -69,7 +69,12 @@ export class FolderImportJobOwner {
   }
 
   run(
-    input: { readonly options: ImportOptions; readonly targets: readonly FolderTarget[]; readonly copyToLibrary?: boolean },
+    input: {
+      readonly options: ImportOptions;
+      readonly targets: readonly FolderTarget[];
+      readonly anchor?: ImportAnchor;
+      readonly copyToLibrary?: boolean;
+    },
     handlers: ImportRunHandlers,
   ): boolean {
     const jobId = this.jobId;

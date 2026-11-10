@@ -158,3 +158,95 @@
   min-height: 44px;
   font-size: var(--fs-emph);
 }
+
+/* ER-0170：导入预览改为按 groupKey 的父子树，行内缩进 + 目标选择。 */
+.folder-import-dialog {
+  width: min(680px, 100%);
+}
+
+.folder-import-where {
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--accent) 8%, var(--shelf-card-bg));
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--panel-border));
+  font-size: var(--fs-body);
+  line-height: 1.5;
+}
+
+.folder-import-where b {
+  margin-left: 4px;
+  overflow-wrap: anywhere;
+}
+
+.folder-import-where small {
+  display: block;
+  color: var(--muted);
+  font-size: var(--fs-caption);
+}
+
+.folder-import-tree {
+  display: grid;
+  gap: 4px;
+}
+
+.folder-import-groups .folder-import-tree-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(150px, 210px);
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+}
+
+.folder-import-tree-row.is-fifth {
+  background: color-mix(in srgb, #d18a12 7%, var(--shelf-input-bg));
+}
+
+.folder-import-tree-row.is-anchor {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.folder-import-tree-icon {
+  display: inline-flex;
+  color: var(--muted);
+}
+
+.folder-import-tree-row.is-anchor .folder-import-tree-icon {
+  color: var(--accent);
+}
+
+.folder-import-tree-fixed {
+  color: var(--muted);
+  font-size: var(--fs-caption);
+  white-space: nowrap;
+}
+
+.folder-import-tag {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: #fdecc8;
+  color: #7a5600;
+  font-size: 11px;
+  font-weight: 500;
+  vertical-align: 1px;
+}
+
+.folder-import-groups .folder-import-target {
+  width: 100%;
+}
+
+@media (max-width: 560px) {
+  .folder-import-groups .folder-import-tree-row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .folder-import-groups .folder-import-target {
+    grid-column: 2;
+  }
+
+  .folder-import-tree-fixed {
+    grid-column: 2;
+  }
+}

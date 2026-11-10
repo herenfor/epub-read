@@ -291,14 +291,16 @@ describe("shelf menu and gesture lifecycle", () => {
 
       await shelf.dom.run(() => { vi.advanceTimersByTime(1000); });
       await shelf.dom.click(folder());
-      const dialogExport = () => shelf.doc.querySelector<HTMLButtonElement>(".shelf-folder-modal button[aria-label='导出书籍']")!;
-      await shelf.dom.click(dialogExport());
+      await shelf.dom.click(shelf.dom.container.querySelector(".shelf-folder-path-more")!);
+      const pageExport = () => [...shelf.doc.querySelectorAll<HTMLButtonElement>(".shelf-folder-active-menu button")]
+        .find((button) => button.textContent === "导出书籍")!;
+      await shelf.dom.click(pageExport());
       expect(onExportBooks).toHaveBeenCalledTimes(2);
       expect(onExportBooks.mock.calls[1][0].map((entry: ShelfEntry) => entry.id).sort()).toEqual(["b1", "b2"]);
 
+      // The folder disappeared after export (sync/dissolve): the page self-heals to
+      // the root and no action is fired against the old folder object.
       await shelf.rerender({ organization: folderOrganization([]) });
-      expect(dialogExport().disabled).toBe(true);
-      await shelf.dom.click(dialogExport());
       expect(onExportBooks).toHaveBeenCalledTimes(2);
     } finally {
       await shelf.dom.dispose();
@@ -388,7 +390,7 @@ describe("shelf menu and gesture lifecycle", () => {
     }
   });
 
-  it("Back closes a folder dialog and leaves the folder cards beneath it in place", async () => {
+  it("Back leaves a folder page one level up and keeps the root folder cards in place", async () => {
     let back: (() => boolean) | null = null;
     const shelf = await mount({
       compact: true,
@@ -398,13 +400,12 @@ describe("shelf menu and gesture lifecycle", () => {
     try {
       // The phone shelf shows its folder cards by default.
       await shelf.dom.click(shelf.dom.container.querySelector(".shelf-folder-card")!);
-      expect(shelf.dom.container.querySelector(".shelf-folder-modal")).not.toBeNull();
-      // The dialog's books share the shelf grid: density columns and the touch card buttons.
-      expect(shelf.dom.container.querySelector(".shelf-folder-modal .shelf-grid .shelf-card")).not.toBeNull();
+      expect(shelf.dom.container.querySelector(".shelf-folder-path-bar")).not.toBeNull();
+      // The folder page lists its direct books in the same grid.
+      expect(shelf.dom.container.querySelector("[data-book-id='b1']")).not.toBeNull();
       await shelf.dom.run(() => { expect(back?.()).toBe(true); });
-      await shelf.dom.run(() => { vi.advanceTimersByTime(1000); });
-      expect(shelf.dom.container.querySelector(".shelf-folder-modal")).toBeNull();
-      // Expanded cards are the shelf's normal state, not a layer: Back leaves them alone.
+      expect(shelf.dom.container.querySelector(".shelf-folder-path-bar")).toBeNull();
+      // Folders are the root shelf's normal state, not a layer: Back leaves them alone.
       expect(shelf.dom.container.querySelector(".shelf-folder-card")).not.toBeNull();
       await shelf.dom.run(() => { expect(back?.()).toBe(false); });
       expect(shelf.dom.container.querySelector(".shelf-folder-card")).not.toBeNull();
@@ -413,7 +414,7 @@ describe("shelf menu and gesture lifecycle", () => {
     }
   });
 
-  it("the phone folder dialog keeps title and actions on one row, its actions in the folder menu", async () => {
+  it("the phone folder page keeps its actions in the folder menu", async () => {
     let back: (() => boolean) | null = null;
     const onExportBooks = vi.fn();
     const shelf = await mount({
@@ -424,18 +425,20 @@ describe("shelf menu and gesture lifecycle", () => {
     });
     try {
       await shelf.dom.click(shelf.dom.container.querySelector(".shelf-folder-card")!);
-      const actions = [...shelf.dom.container.querySelectorAll<HTMLButtonElement>(".shelf-folder-modal-actions button")];
-      expect(actions.map((button) => button.getAttribute("aria-label"))).toEqual(["文件夹选项：资料", "关闭文件夹"]);
-      await shelf.dom.click(actions[0]);
-      const labels = [...shelf.menu()!.querySelectorAll<HTMLButtonElement>("button")].map((button) => button.textContent);
-      expect(labels).toEqual(expect.arrayContaining(["重命名", "导出书籍", "解散文件夹"]));
+      const more = shelf.dom.container.querySelector<HTMLButtonElement>(".shelf-folder-path-more")!;
+      await shelf.dom.click(more);
+      const labels = [...shelf.dom.container.querySelectorAll<HTMLButtonElement>(".shelf-folder-active-menu button")]
+        .map((button) => button.textContent);
+      expect(labels).toEqual(expect.arrayContaining(["重命名", "导出书籍", "移动到…", "解散"]));
       expect(labels).not.toContain("打开文件夹");
-      expect(actions[0].getAttribute("aria-expanded")).toBe("true");
-      // Back closes the menu first, then the dialog.
+      expect(more.getAttribute("aria-expanded")).toBe("true");
+      // Back closes the menu first, then goes up one level.
       await shelf.dom.run(() => { expect(back?.()).toBe(true); });
       await shelf.dom.run(() => { vi.advanceTimersByTime(1000); });
-      expect(shelf.menu()).toBeNull();
-      expect(shelf.dom.container.querySelector(".shelf-folder-modal")).not.toBeNull();
+      expect(more.getAttribute("aria-expanded")).toBe("false");
+      expect(shelf.dom.container.querySelector(".shelf-folder-path-bar")).not.toBeNull();
+      await shelf.dom.run(() => { expect(back?.()).toBe(true); });
+      expect(shelf.dom.container.querySelector(".shelf-folder-path-bar")).toBeNull();
     } finally {
       await shelf.dom.dispose();
     }

@@ -97,6 +97,8 @@ export function useBookImportState() {
     port: DirectoryImportPort;
     organization: LibraryOrganization;
     supported: boolean;
+    /** Shelf folder the import is anchored to; null = shelf root. */
+    anchorFolderId: string | null;
     /** Scan on open: the source came with the request (a dropped folder). */
     autoScan?: boolean;
   } | null>(null);
@@ -733,11 +735,13 @@ export function useBookImport({
 export function useFolderImport({
   importState: { nativeImportRef, setFolderImport },
   shelfBusyRef, organizationBusyRef, saveFileJobStateRef, saveFileLaunchRef, lanSaveActiveRef,
-  isTauriEnv, setShelfNotice, refreshShelfProjection,
+  importContextRef, isTauriEnv, setShelfNotice, refreshShelfProjection,
 }: {
   importState: ImportState;
   shelfBusyRef: MutableRefObject<boolean>;
   organizationBusyRef: MutableRefObject<boolean>;
+  /** Shelf folder open right now; the directory import anchors to it. */
+  importContextRef: MutableRefObject<ImportFolderTarget | null>;
   saveFileJobStateRef: MutableRefObject<ReturnType<typeof useSaveFileJob>["state"]>;
   saveFileLaunchRef: MutableRefObject<boolean>;
   lanSaveActiveRef: MutableRefObject<boolean>;
@@ -745,7 +749,10 @@ export function useFolderImport({
   setShelfNotice: SetNotice;
   refreshShelfProjection(): Promise<void>;
 }) {
-  const handleOpenFolderImport = useCallback(async (droppedSource?: NativeDirectorySource): Promise<void> => {
+  const handleOpenFolderImport = useCallback(async (
+    droppedSource?: NativeDirectorySource,
+    anchorOverride?: ImportFolderTarget | null,
+  ): Promise<void> => {
     if (shelfBusyRef.current || organizationBusyRef.current || nativeImportRef.current) {
       setShelfNotice({ kind: "warn", text: uiText("notice.import.busy") });
       return;
@@ -763,11 +770,13 @@ export function useFolderImport({
       }
       const store = getShelfStore();
       const organizationSnapshot = await store.getOrganization();
+      const anchorFolderId = (anchorOverride === undefined ? importContextRef.current : anchorOverride)?.folderId ?? null;
       if (isTauriEnv()) {
         setFolderImport({
           port: createNativeDirectoryImportPort(droppedSource),
           organization: organizationSnapshot,
           supported: true,
+          anchorFolderId,
           autoScan: droppedSource !== undefined,
         });
         return;
@@ -790,6 +799,7 @@ export function useFolderImport({
         port,
         organization: organizationSnapshot,
         supported: supportsWebDirectoryPicker() && commit !== undefined,
+        anchorFolderId,
       });
     } catch (error) {
       if (nativeImportRef.current === FOLDER_IMPORT_SLOT) nativeImportRef.current = null;

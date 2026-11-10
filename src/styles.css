@@ -6217,3 +6217,81 @@ select option {
   pointer-events: none;
 }
 .reader-presentation-host[data-chapter-seam] > .reader-seam-input { pointer-events: auto; }
+
+/* ER-0170：移动目标选择器改为书/文件夹共用的树形单选。 */
+.shelf-move-subtitle {
+  margin: -6px 0 8px;
+  color: var(--muted);
+  font-size: var(--fs-caption);
+  line-height: 1.5;
+}
+
+.shelf-move-dialog .shelf-move-list {
+  max-height: 320px;
+  margin: 8px 0;
+}
+
+.shelf-move-dialog button.shelf-move-item {
+  width: 100%;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+}
+
+.shelf-move-dot {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  box-sizing: border-box;
+  border: 1.5px solid color-mix(in srgb, var(--fg) 45%, transparent);
+  border-radius: 50%;
+  background: var(--bg);
+}
+
+.shelf-move-dot.checked {
+  border: 5px solid var(--accent);
+}
+
+.shelf-move-dot.disabled {
+  border-color: var(--panel-border);
+  background: var(--btn-tint);
+}
+
+.shelf-move-why {
+  flex: none;
+  color: var(--muted);
+  font-size: var(--fs-caption);
+}
+
+.shelf-move-foot {
+  display: grid;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.shelf-move-target-line {
+  color: var(--muted);
+  font-size: var(--fs-caption);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.shelf-move-target-line b {
+  color: var(--fg);
+}
+
+.shelf-move-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.shelf-move-actions .shelf-move-new-btn {
+  width: auto;
+  margin: 0;
+  padding: 8px 10px;
+  justify-content: flex-start;
+  border-style: solid;
+}

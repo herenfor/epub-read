@@ -115,7 +115,7 @@ async function renderShelf(options: RenderOptions = {}) {
   const props: ShelfViewProps = {
     entries: [filedBook, looseBook],
     organization: organizationWithFolder(),
-    scope: options.scope ?? { type: "root" },
+    ...(options.scope ? { scope: options.scope } : {}),
     busy: options.busy ?? false,
     theme: "light",
     onThemeChange: () => {},

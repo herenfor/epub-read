@@ -13,14 +13,17 @@ import {
   type ActiveFolder,
   type DirectoryBinding,
   type GroupResolution,
+  type ImportAnchor,
   type ImportOptions,
   type PlannedGroup,
   type ScannedEpub,
 } from "../../core/folderImport/planner";
-import { effectiveFolderId, type LibraryOrganization } from "../libraryOrganization";
+import { effectiveFolderDepth, effectiveFolderId, effectiveFolderParent, MAX_FOLDER_DEPTH, type LibraryOrganization } from "../libraryOrganization";
+import { shelfFolderPathLabel } from "../shelfFolderTree";
 import { FolderImportJobOwner } from "./jobOwner";
 import "../saveFileDialogs.css";
 import "./folderImportPanel.css";
+import { FolderIcon } from "../shelfView/icons";
 import { uiText, useUiText } from "../localization/UiLanguageProvider";
 import type { PlainMessageKey } from "../localization/core";
 
@@ -50,6 +53,8 @@ export interface FolderImportPanelProps {
   /** Windows and Linux: the shared 复制到书库 choice, sent with this import. Absent = no choice shown. */
   copyToLibrary?: boolean;
   onCopyToLibraryChange?(copy: boolean): void;
+  /** Shelf folder the import is anchored to; null/absent = shelf root. */
+  anchorFolderId?: string | null;
 }
 
 export const DEFAULT_FOLDER_IMPORT_OPTIONS: ImportOptions = {
@@ -80,20 +85,45 @@ export function buildFolderTargets(
   resolutions: readonly GroupResolution[],
   choices: Readonly<Record<string, GroupChoice | undefined>>,
   newFolderId: () => string = () => crypto.randomUUID(),
+  anchorFolderId: string | null = null,
 ): FolderTarget[] | null {
   const byKey = new Map(resolutions.map((resolution) => [resolution.groupKey, resolution]));
-  const targets: FolderTarget[] = [];
+  const ids = new Map<string, string>();
+  const kinds = new Map<string, { kind: "reuse"; folderId: string } | { kind: "create"; name: string }>();
   for (const group of groups) {
     const resolution = byKey.get(group.groupKey);
     if (!resolution) return null;
     const choice = choices[group.groupKey] ?? defaultGroupChoice(resolution);
     if (!choice) return null;
     if (choice.kind === "reuse") {
-      targets.push({ groupKey: group.groupKey, kind: "reuse", folderId: choice.folderId });
+      ids.set(group.groupKey, choice.folderId);
+      kinds.set(group.groupKey, { kind: "reuse", folderId: choice.folderId });
     } else {
       const name = resolution.kind === "create" ? resolution.name : group.suggestedName;
-      targets.push({ groupKey: group.groupKey, kind: "create", folderId: newFolderId(), name });
+      const folderId = newFolderId();
+      ids.set(group.groupKey, folderId);
+      kinds.set(group.groupKey, { kind: "create", name });
     }
+  }
+  // Parents are created first by the caller; a child carries its planned
+  // parent folder so the backend/Web batch never has to guess the anchor.
+  const targets: FolderTarget[] = [];
+  for (const group of groups) {
+    const folderId = ids.get(group.groupKey);
+    const kind = kinds.get(group.groupKey);
+    if (!folderId || !kind) return null;
+    if (kind.kind === "reuse") {
+      targets.push({ groupKey: group.groupKey, kind: "reuse", folderId });
+      continue;
+    }
+    const parentFolderId = group.parentGroupKey === null ? anchorFolderId : ids.get(group.parentGroupKey) ?? null;
+    targets.push({
+      groupKey: group.groupKey,
+      kind: "create",
+      folderId,
+      name: kind.name,
+      ...(parentFolderId === null ? {} : { parentFolderId }),
+    });
   }
   return targets;
 }
@@ -101,7 +131,11 @@ export function buildFolderTargets(
 function activeFoldersOf(organization: LibraryOrganization): ActiveFolder[] {
   return Object.entries(organization.folders)
     .filter(([, folder]) => !folder.deleted)
-    .map(([folderId, folder]) => ({ folderId, name: folder.name.value }));
+    .map(([folderId, folder]) => ({
+      folderId,
+      name: folder.name.value,
+      parentId: effectiveFolderParent(organization, folderId),
+    }));
 }
 
 type Phase =
@@ -166,6 +200,19 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
 
   const scan = phase.kind === "preview" || phase.kind === "listing" || phase.kind === "empty" ? phase.scan : null;
   const activeFolders = useMemo(() => activeFoldersOf(props.organization), [props.organization]);
+  const anchorFolderId = props.anchorFolderId
+    && props.organization.folders[props.anchorFolderId]
+    && !props.organization.folders[props.anchorFolderId].deleted
+    ? props.anchorFolderId
+    : null;
+  const anchorDepth = anchorFolderId ? (effectiveFolderDepth(props.organization, anchorFolderId) ?? 0) : 0;
+  const anchor: ImportAnchor | undefined = useMemo(
+    () => anchorFolderId ? { folderId: anchorFolderId, depth: anchorDepth } : undefined,
+    [anchorFolderId, anchorDepth],
+  );
+  const anchorPathLabel = shelfFolderPathLabel(props.organization, anchorFolderId);
+  const anchorName = anchorFolderId ? props.organization.folders[anchorFolderId]?.name.value ?? null : null;
+  const remainingNewLevels = MAX_FOLDER_DEPTH - anchorDepth;
   /** Book counts tell same-name folders apart in the target list. */
   const folderBookCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -180,12 +227,12 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
     return tn("folderImport.target.existing", count, { name: folder.name, count });
   };
   const plan = useMemo(
-    () => (scan ? planDirectoryImport(scan.root, items, options) : null),
-    [scan, items, options],
+    () => (scan ? planDirectoryImport(scan.root, items, options, anchor) : null),
+    [scan, items, options, anchor],
   );
   const resolutions = useMemo(
-    () => (plan ? resolveGroups(plan.groups, activeFolders, bindings) : []),
-    [plan, activeFolders, bindings],
+    () => (plan ? resolveGroups(plan.groups, activeFolders, bindings, anchorFolderId) : []),
+    [plan, activeFolders, bindings, anchorFolderId],
   );
   const groupCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -205,12 +252,77 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
     ? plan.groups.filter((group, index) => !(choices[group.groupKey] ?? defaultGroupChoice(resolutions[index])))
     : [];
   /** Rows that still need a choice come first, so folding never hides them. */
-  const groupRows = useMemo(() => {
+  const resolutionByKey = useMemo(
+    () => new Map(resolutions.map((resolution) => [resolution.groupKey, resolution])),
+    [resolutions],
+  );
+
+  /** Rows in source-tree order so a child always follows its planned parent. */
+  const treeRows = useMemo(() => {
     if (!plan) return [];
-    const rows = plan.groups.map((group, index) => ({ group, resolution: resolutions[index] }));
-    const needsChoice = (row: (typeof rows)[number]) => row.resolution.kind === "choose";
-    return [...rows.filter(needsChoice), ...rows.filter((row) => !needsChoice(row))];
-  }, [plan, resolutions]);
+    const byParent = new Map<string | null, PlannedGroup[]>();
+    for (const group of plan.groups) {
+      const list = byParent.get(group.parentGroupKey) ?? [];
+      list.push(group);
+      byParent.set(group.parentGroupKey, list);
+    }
+    const rows: PlannedGroup[] = [];
+    const walk = (parentGroupKey: string | null): void => {
+      for (const group of byParent.get(parentGroupKey) ?? []) {
+        rows.push(group);
+        walk(group.groupKey);
+      }
+    };
+    walk(null);
+    return rows;
+  }, [plan]);
+
+  /** Direct + every descendant input, counted by groupKey rather than array order. */
+  const subtreeCounts = useMemo(() => {
+    const direct = groupCounts.counts;
+    const children = new Map<string, string[]>();
+    for (const group of plan?.groups ?? []) {
+      if (group.parentGroupKey === null) continue;
+      const list = children.get(group.parentGroupKey) ?? [];
+      list.push(group.groupKey);
+      children.set(group.parentGroupKey, list);
+    }
+    const memo = new Map<string, number>();
+    const count = (groupKey: string): number => {
+      const cached = memo.get(groupKey);
+      if (cached !== undefined) return cached;
+      const total = (direct.get(groupKey) ?? 0)
+        + (children.get(groupKey) ?? []).reduce((sum, child) => sum + count(child), 0);
+      memo.set(groupKey, total);
+      return total;
+    };
+    for (const group of plan?.groups ?? []) count(group.groupKey);
+    return { direct, total: memo };
+  }, [plan, groupCounts]);
+
+  const createTargetCount = resolutions.filter((resolution) => resolution.kind === "create").length;
+  const usedFolderCount = (plan?.groups.length ?? 0) + (anchorName ? 1 : 0);
+
+  /** Deep source directories the planner had to merge into the fifth level. */
+  const merged = useMemo(() => {
+    if (!plan || !plan.flattened || plan.anchorDepth >= MAX_FOLDER_DEPTH) return null;
+    const keepSegments = Math.max(0, MAX_FOLDER_DEPTH - plan.anchorDepth - 1);
+    const groupByKey = new Map(plan.groups.map((group) => [group.groupKey, group]));
+    const itemByInput = new Map(items.map((item) => [item.inputId, item]));
+    const directories = new Set<string>();
+    let books = 0;
+    let targetName = "";
+    for (const input of plan.inputs) {
+      if (input.groupKey === null) continue;
+      const item = itemByInput.get(input.inputId);
+      if (!item || item.relativeParentSegments.length <= keepSegments) continue;
+      books++;
+      const full = item.relativeParentSegments.join("/");
+      if (full) directories.add(full);
+      if (!targetName) targetName = groupByKey.get(input.groupKey)?.suggestedName ?? "";
+    }
+    return { directories: directories.size, books, targetName };
+  }, [plan]);
 
   const pickAndScan = async () => {
     const owner = ownerRef.current;
@@ -229,7 +341,7 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
       const result = await port.scan((event) => {
         // The first event already names the job, so closing mid-scan can cancel it.
         if (owner.adopt(scanToken, event.jobId)) set({ kind: "scanning", found: event.scannedInputs });
-      });
+      }, anchor);
       if (!result) {
         if (owner.isLive(token)) set({ kind: "intro" });
         return;
@@ -265,9 +377,14 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
   const startImport = () => {
     const owner = ownerRef.current;
     if (!owner || !plan) return;
-    const targets = buildFolderTargets(plan.groups, resolutions, choices);
+    const targets = buildFolderTargets(plan.groups, resolutions, choices, () => crypto.randomUUID(), anchorFolderId);
     if (!targets) return;
-    const started = owner.run({ options, targets, ...(copyToLibrary === undefined ? {} : { copyToLibrary }) }, {
+    const started = owner.run({
+      options,
+      targets,
+      ...(anchor === undefined ? {} : { anchor }),
+      ...(copyToLibrary === undefined ? {} : { copyToLibrary }),
+    }, {
       onProgress: (event) => {
         if (!mountedRef.current) return;
         setPhase((current) => (current.kind === "importing" ? { ...current, progress: event } : current));
@@ -387,13 +504,104 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
           <div className="save-file-dialog-body">
             <dl className="save-file-summary">
               <div><dt>{t("folderImport.candidates")}</dt><dd>{tn("folderImport.candidates.count", items.length, { count: items.length })}</dd></div>
-              <div><dt>{t("folderImport.shelfFolders")}</dt><dd>{tn("folderImport.shelfFolders.count", plan.groups.length, { count: plan.groups.length })}</dd></div>
+              <div><dt>{t("folderImport.shelfFolders")}</dt><dd>{tn("folderImport.shelfFolders.count", usedFolderCount, { count: usedFolderCount })}</dd></div>
+              <div><dt>{t("folderImport.newFolders")}</dt><dd>{tn("folderImport.newFolders", createTargetCount, { count: createTargetCount })}</dd></div>
             </dl>
+            <div className="folder-import-where">
+              <div>{t("folderImport.into")}<b>{anchorPathLabel}</b></div>
+              <small>
+                {anchorFolderId
+                  ? t("folderImport.into.deep", { depth: anchorDepth, remaining: remainingNewLevels })
+                  : t("folderImport.into.root", { remaining: remainingNewLevels })}
+              </small>
+            </div>
             <ScanNotes scan={phase.scan} />
-            {plan.flattened && (
-              <p className="save-file-muted">{t("folderImport.flattened")}</p>
+            {merged && (
+              <p className="folder-import-warning">
+                {t("folderImport.merged", { directories: merged.directories, books: merged.books, name: merged.targetName || rootName })}
+              </p>
             )}
 
+            {plan.groups.length > 0 && (
+              <div className="folder-import-groups">
+                <div className="folder-import-groups-head">
+                  <span>{t("folderImport.treeHead")}</span>
+                  <span className="folder-import-hint">{t("folderImport.treeHint")}</span>
+                </div>
+                {unresolved.length > 0 && (
+                  <p className="folder-import-warning">{tn("folderImport.unresolved", unresolved.length, { count: unresolved.length })}</p>
+                )}
+                <ul className="folder-import-tree">
+                  {anchorName && (
+                    <li className="folder-import-tree-row is-anchor">
+                      <span className="folder-import-tree-icon" aria-hidden="true"><FolderIcon /></span>
+                      <span className="folder-import-group-name">
+                        <strong>{anchorName}</strong>
+                        <span className="folder-import-hint">{t("folderImport.currentFolder")}</span>
+                      </span>
+                      <span className="folder-import-tree-fixed">{t("folderImport.unchanged")}</span>
+                    </li>
+                  )}
+                  {treeRows.slice(0, visibleRows).map((group) => {
+                    const resolution = resolutionByKey.get(group.groupKey);
+                    if (!resolution) return null;
+                    const choice = choices[group.groupKey] ?? defaultGroupChoice(resolution);
+                    const value = !choice ? "" : choice.kind === "create" ? "__create" : choice.folderId;
+                    const createName = resolution.kind === "create" ? resolution.name : group.suggestedName;
+                    const candidates = resolution.kind === "choose" ? resolution.candidates : [];
+                    const others = activeFolders.filter((folder) => !candidates.some((c) => c.folderId === folder.folderId));
+                    const rowDepth = Math.max(0, group.depth - plan.anchorDepth - 1);
+                    const fifth = group.depth >= MAX_FOLDER_DEPTH;
+                    return (
+                      <li
+                        key={group.groupKey}
+                        className={`folder-import-tree-row${choice ? "" : " is-unresolved"}${fifth ? " is-fifth" : ""}`}
+                        style={{ paddingLeft: `${12 + rowDepth * 18 + (anchorName ? 18 : 0)}px` }}
+                      >
+                        <span className="folder-import-tree-icon" aria-hidden="true"><FolderIcon /></span>
+                        <span className="folder-import-group-name">
+                          <strong title={[rootName, ...group.sourceSegments].join(" / ")}>
+                            {group.suggestedName}
+                            {fifth && <span className="folder-import-tag">{t("folderImport.level5")}</span>}
+                          </strong>
+                          <span className="folder-import-hint">
+                            {t("folderImport.groupCounts", {
+                              direct: subtreeCounts.direct.get(group.groupKey) ?? 0,
+                              total: subtreeCounts.total.get(group.groupKey) ?? 0,
+                            })}
+                          </span>
+                        </span>
+                        <select
+                          className="folder-import-target"
+                          aria-label={t("folderImport.groupTarget", { name: group.suggestedName })}
+                          value={value}
+                          onChange={(event) => setChoice(group.groupKey, event.target.value)}
+                        >
+                          {!choice && <option value="" disabled>{t("folderImport.choose")}</option>}
+                          {candidates.map((folder) => (
+                            <option key={folder.folderId} value={folder.folderId}>{folderLabel(folder)}</option>
+                          ))}
+                          <option value="__create">
+                            {resolution.kind === "create" ? t("folderImport.create", { name: createName }) : t("folderImport.createSameName", { name: createName })}
+                          </option>
+                          {others.map((folder) => (
+                            <option key={folder.folderId} value={folder.folderId}>{folderLabel(folder)}</option>
+                          ))}
+                        </select>
+                      </li>
+                    );
+                  })}
+                </ul>
+                {plan.groups.length > visibleRows && (
+                  <button type="button" className="folder-import-more" onClick={() => setVisibleRows(visibleRows + MORE_GROUP_ROWS)}>
+                    {t("folderImport.showMore", { count: plan.groups.length - visibleRows })}
+                  </button>
+                )}
+                {groupCounts.loose > 0 && (
+                  <p className="folder-import-hint">{tn("folderImport.looseCount", groupCounts.loose, { count: groupCounts.loose })}</p>
+                )}
+              </div>
+            )}
             <fieldset className="save-file-fieldset">
               <legend>{t("folderImport.grouping")}</legend>
               {([
@@ -472,57 +680,6 @@ export function FolderImportPanel(props: FolderImportPanelProps) {
               </fieldset>
             )}
 
-            {plan.groups.length > 0 && (
-              <div className="folder-import-groups">
-                <div className="folder-import-groups-head">
-                  <span>{t("folderImport.folders")}</span>
-                  {groupCounts.loose > 0 && <span className="folder-import-hint">{tn("folderImport.looseCount", groupCounts.loose, { count: groupCounts.loose })}</span>}
-                </div>
-                {unresolved.length > 0 && (
-                  <p className="folder-import-warning">{tn("folderImport.unresolved", unresolved.length, { count: unresolved.length })}</p>
-                )}
-                <ul>
-                  {groupRows.slice(0, visibleRows).map(({ group, resolution }) => {
-                    const choice = choices[group.groupKey] ?? defaultGroupChoice(resolution);
-                    const value = !choice ? "" : choice.kind === "create" ? "__create" : choice.folderId;
-                    const createName = resolution.kind === "create" ? resolution.name : group.suggestedName;
-                    const candidates = resolution.kind === "choose" ? resolution.candidates : [];
-                    const others = activeFolders.filter((folder) => !candidates.some((c) => c.folderId === folder.folderId));
-                    return (
-                      <li key={group.groupKey} className={choice ? "" : "is-unresolved"}>
-                        <div className="folder-import-group-name">
-                          <strong>{group.suggestedName}</strong>
-                          <span className="folder-import-hint" title={[rootName, ...group.sourceSegments].join(" / ")}>
-                            {tn("folderImport.groupPath", groupCounts.counts.get(group.groupKey) ?? 0, { path: [rootName, ...group.sourceSegments].join(" / "), count: groupCounts.counts.get(group.groupKey) ?? 0 })}
-                          </span>
-                        </div>
-                        <select
-                          aria-label={t("folderImport.groupTarget", { name: group.suggestedName })}
-                          value={value}
-                          onChange={(event) => setChoice(group.groupKey, event.target.value)}
-                        >
-                          {!choice && <option value="" disabled>{t("folderImport.choose")}</option>}
-                          {candidates.map((folder) => (
-                            <option key={folder.folderId} value={folder.folderId}>{folderLabel(folder)}</option>
-                          ))}
-                          <option value="__create">
-                            {resolution.kind === "create" ? t("folderImport.create", { name: createName }) : t("folderImport.createSameName", { name: createName })}
-                          </option>
-                          {others.map((folder) => (
-                            <option key={folder.folderId} value={folder.folderId}>{folderLabel(folder)}</option>
-                          ))}
-                        </select>
-                      </li>
-                    );
-                  })}
-                </ul>
-                {plan.groups.length > visibleRows && (
-                  <button type="button" className="folder-import-more" onClick={() => setVisibleRows(visibleRows + MORE_GROUP_ROWS)}>
-                    {t("folderImport.showMore", { count: plan.groups.length - visibleRows })}
-                  </button>
-                )}
-              </div>
-            )}
             <p className="save-file-muted">{t("folderImport.duplicatesNote")}</p>
           </div>
         )}

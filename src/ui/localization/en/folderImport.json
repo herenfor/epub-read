@@ -90,5 +90,18 @@
   "folderImport.issue.sourceGone": "Source file no longer available",
   "folderImport.issue.multipleSources": "Same book found in multiple directories; earlier source used ({file})",
   "folderImport.issue.sourceFailed": "{file}: {error}",
-  "folderImport.issue.stopped": "Import stopped; book imported but unfiled"
+  "folderImport.issue.stopped": "Import stopped; book imported but unfiled",
+  "folderImport.newFolders": "New folders",
+  "folderImport.newFolders.other": "{count}",
+  "folderImport.newFolders.one": "{count}",
+  "folderImport.into": "Import into: ",
+  "folderImport.into.root": "At the library root; {remaining} levels available.",
+  "folderImport.into.deep": "This folder is at level {depth}; {remaining} more levels can be created below.",
+  "folderImport.merged": "{directories} directories exceed level five: their {books} books go into \"{name}\" — none are dropped.",
+  "folderImport.treeHead": "Where books will go",
+  "folderImport.treeHint": "Direct = in this folder; total = including all levels below",
+  "folderImport.currentFolder": "Current folder",
+  "folderImport.unchanged": "Unchanged",
+  "folderImport.level5": "Level 5",
+  "folderImport.groupCounts": "{direct} direct · {total} total"
 }

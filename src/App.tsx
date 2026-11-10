@@ -933,7 +933,7 @@ export default function App() {
 
   const { handleOpenFolderImport, closeFolderImport, handleFolderImportSettled } = useFolderImport({
     importState: bookImportState, shelfBusyRef, organizationBusyRef,
-    saveFileJobStateRef, saveFileLaunchRef, lanSaveActiveRef,
+    saveFileJobStateRef, saveFileLaunchRef, lanSaveActiveRef, importContextRef,
     isTauriEnv, setShelfNotice, refreshShelfProjection,
   });
 
@@ -1668,7 +1668,7 @@ export default function App() {
       );
     };
     /** A dropped non-book, non-font item: one folder opens directory import on it. */
-    const openDroppedDirectory = async (paths: readonly string[]): Promise<void> => {
+    const openDroppedDirectory = async (paths: readonly string[], anchorTarget?: ImportFolderTarget | null): Promise<void> => {
       const directories: string[] = [];
       for (const path of paths) {
         try {
@@ -1687,7 +1687,7 @@ export default function App() {
       } else if (directories.length > 1) {
         setShelfNotice({ kind: "warn", text: uiText("notice.drop.oneFolder") });
       } else {
-        await handleOpenFolderImport({ kind: "path", path: directories[0] });
+        await handleOpenFolderImport({ kind: "path", path: directories[0] }, anchorTarget);
       }
     };
     getCurrentWebview()
@@ -1735,7 +1735,7 @@ export default function App() {
               dropTargetAt(p.position).target,
             );
           } else if (dropped.others.length > 0) {
-            void openDroppedDirectory(dropped.others);
+            void openDroppedDirectory(dropped.others, dropTargetAt(p.position).target);
           } else if (dropped.fonts.length > 0) {
             setShelfNotice({ kind: "error", text: uiText("notice.font.dropHere") });
           }
@@ -3470,6 +3470,7 @@ export default function App() {
           onClose={closeFolderImport}
           onUseFileImport={() => void handleChooseBooks()}
           autoScan={folderImport.autoScan}
+          anchorFolderId={folderImport.anchorFolderId}
           copyToLibrary={folderImportCopyChoice(librarySettings)}
           onCopyToLibraryChange={handleCopyToLibraryChange}
         />

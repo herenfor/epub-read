@@ -399,6 +399,8 @@ interface ShelfFolderCardProps {
   id: string;
   name: string;
   books: ShelfEntry[];
+  /** Effective direct child folders; 0 keeps the flat "N books" line. */
+  childCount?: number;
   provider: ThumbnailProvider;
   selectionMode: boolean;
   /** Batch selection: derived from the selected books (see shelfFolderSelection). */
@@ -527,7 +529,11 @@ export const ShelfFolderCard = memo(function ShelfFolderCard(props: ShelfFolderC
       <div className="shelf-card-info">
         <div className="shelf-card-title">{props.name}</div>
         <div className="shelf-card-meta">
-          <span className="shelf-card-creator">{tn("shelfFolder.bookCount", props.books.length, { count: props.books.length })}</span>
+          <span className="shelf-card-creator">
+            {(props.childCount ?? 0) > 0
+              ? t("shelfFolder.card.meta", { books: props.books.length, folders: props.childCount ?? 0 })
+              : tn("shelfFolder.bookCount", props.books.length, { count: props.books.length })}
+          </span>
         </div>
       </div>
     </div>

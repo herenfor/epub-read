@@ -477,6 +477,8 @@ export const ShelfFolderTableRow = memo(function ShelfFolderTableRow(props: {
   id: string;
   name: string;
   books: ShelfEntry[];
+  /** Effective direct child folders; 0 keeps the flat count line. */
+  childCount?: number;
   provider: ThumbnailProvider;
   selectionMode: boolean;
   selectionState: FolderSelectionState;
@@ -536,7 +538,9 @@ export const ShelfFolderTableRow = memo(function ShelfFolderTableRow(props: {
             {props.name}
           </span>
           <span className="shelf-capsule-count">
-            {tn("shelfMain.table.folderCount", props.books.length, { count: props.books.length })}
+            {(props.childCount ?? 0) > 0
+              ? t("shelfFolder.card.meta", { books: props.books.length, folders: props.childCount ?? 0 })
+              : tn("shelfMain.table.folderCount", props.books.length, { count: props.books.length })}
           </span>
         </div>
         {first && (
