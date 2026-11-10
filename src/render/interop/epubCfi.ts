@@ -212,9 +212,10 @@ export interface CfiPointResult {
   point: CfiDomPoint;
   /** The index path did not reach the asserted id; the id was used instead. */
   idCorrected: boolean;
+  clamped?: boolean;
 }
 
-function walkSteps(root: Node, steps: readonly CfiStep[]): CfiDomPoint | null {
+function walkSteps(root: Node, steps: readonly CfiStep[], clamp = false): CfiDomPoint | null {
   let node: IndexedChild = root;
   for (const { index } of steps) {
     if (node === null || typeof node === "string" || Array.isArray(node)) return null;
@@ -231,7 +232,8 @@ function walkSteps(root: Node, steps: readonly CfiStep[]): CfiDomPoint | null {
   if (!Array.isArray(node)) {
     if (offset === undefined) return { node, edge: "before" };
     if (!isText(node)) return null;
-    return offset <= (node.nodeValue ?? "").length ? { node, offset } : null;
+    return offset <= (node.nodeValue ?? "").length || clamp
+      ? { node, offset: Math.min(offset, (node.nodeValue ?? "").length) } : null;
   }
   const target = offset ?? 0;
   let sum = 0;
@@ -240,7 +242,7 @@ function walkSteps(root: Node, steps: readonly CfiStep[]): CfiDomPoint | null {
     if (sum + length >= target) return { node: piece, offset: target - sum };
     sum += length;
   }
-  return null;
+  return clamp && node.length ? { node: node[node.length - 1], offset: (node[node.length - 1].nodeValue ?? "").length } : null;
 }
 
 /**
@@ -248,14 +250,15 @@ function walkSteps(root: Node, steps: readonly CfiStep[]): CfiDomPoint | null {
  * The index path is authoritative when it lands on the asserted element;
  * otherwise an existing asserted id corrects it, as the spec allows.
  */
-export function resolveCfiInDocument(doc: Document, steps: readonly CfiStep[]): CfiPointResult | null {
+export function resolveCfiInDocument(doc: Document, steps: readonly CfiStep[], options: { clampTextOffset?: boolean } = {}): CfiPointResult | null {
   const root = doc.documentElement;
   if (!root || !steps.length) return null;
   // Like foliate-js, content steps index the children of the document
   // element: `/4` is <body> in an ordinary XHTML chapter.
-  const point = walkSteps(root, steps);
+  const strict = walkSteps(root, steps);
+  const point = strict ?? (options.clampTextOffset ? walkSteps(root, steps, true) : null);
   const asserted = [...steps].reverse().find((step) => step.id)?.id;
-  if (point && (!asserted || elementOnPath(root, steps, asserted))) return { point, idCorrected: false };
+  if (point && (!asserted || elementOnPath(root, steps, asserted))) return { point, idCorrected: false, ...(!strict ? { clamped: true } : {}) };
   if (!asserted) return null;
   const element = findElementById(root, asserted);
   if (!element) return null;
@@ -263,8 +266,9 @@ export function resolveCfiInDocument(doc: Document, steps: readonly CfiStep[]): 
   const at = steps.findIndex((step) => step.id === asserted);
   const rest = steps.slice(at + 1);
   if (!rest.length) return { point: { node: element, edge: "before" }, idCorrected: true };
-  const below = walkSteps(element, rest);
-  return below ? { point: below, idCorrected: true } : null;
+  const strictBelow = walkSteps(element, rest);
+  const below = strictBelow ?? (options.clampTextOffset ? walkSteps(element, rest, true) : null);
+  return below ? { point: below, idCorrected: true, ...(!strictBelow ? { clamped: true } : {}) } : null;
 }
 
 function elementOnPath(root: Node, steps: readonly CfiStep[], id: string): Element | null {
@@ -340,6 +344,7 @@ interface IndexedText {
  */
 export class ChapterTextIndex {
   readonly codePoints: string[] = [];
+  readonly annotations: boolean[] = [];
   private readonly texts = new Map<Node, IndexedText>();
   private readonly nodeStart = new Map<Node, number>();
   private readonly nodeEnd = new Map<Node, number>();
@@ -357,7 +362,7 @@ export class ChapterTextIndex {
     return this.codePoints.length;
   }
 
-  private visit(node: Node, excluded: boolean): void {
+  private visit(node: Node, excluded: boolean, annotation = false): void {
     this.nodeStart.set(node, this.codePoints.length);
     if (node.nodeType === 3 && !excluded) {
       const data = node.nodeValue ?? "";
@@ -370,13 +375,14 @@ export class ChapterTextIndex {
           rawStarts.push(raw);
           rawEnds.push(raw + codePoint.length);
           this.codePoints.push(codePoint);
+          this.annotations.push(annotation);
         }
         raw += codePoint.length;
       }
       if (rawStarts.length) this.texts.set(node, { start, rawStarts, rawEnds });
     } else if (isElement(node)) {
-      const hidden = excluded || isStructurallyHiddenElement(node);
-      for (const child of Array.from(node.childNodes)) this.visit(child, hidden);
+      const hidden = excluded || node.localName.toLowerCase() === "rp" || isStructurallyHiddenElement(node);
+      for (const child of Array.from(node.childNodes)) this.visit(child, hidden, annotation || node.localName.toLowerCase() === "rt");
     }
     this.nodeEnd.set(node, this.codePoints.length);
   }

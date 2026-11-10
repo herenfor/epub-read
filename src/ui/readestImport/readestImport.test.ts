@@ -139,9 +139,9 @@ describe("Readest → SeLis preview", () => {
     expect(preview.notes.map((n) => [n.sourceKey.split(":").at(-1), n.grade, n.reasons, n.value?.startTextOffset ?? null])).toEqual([
       ["drift", "approximate", ["text-relocated"], 17],
       ["gone", "approximate", ["text-relocated"], 24],
-      ["ambiguous", "unresolved", ["text-ambiguous"], null],
-      ["edition", "unresolved", ["text-mismatch"], null],
-      ["tie", "unresolved", ["text-ambiguous"], null],
+      ["ambiguous", "approximate", ["anchored"], 0],
+      ["edition", "approximate", ["cfi-only"], 17],
+      ["tie", "approximate", ["cfi-only"], 15],
     ]);
   });
 
@@ -177,7 +177,7 @@ describe("Readest → SeLis preview", () => {
     expect(label).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
   });
 
-  it("never invents a position for missing chapters, bad CFIs or offsets past the text", async () => {
+  it("keeps missing chapters unresolved but clamps an overflowing progress offset", async () => {
     const preview = await convertReadestBook(HASH, config({
       location: "epubcfi(/6/2!/4/4/2/1:99)",
       booknotes: [
@@ -185,7 +185,7 @@ describe("Readest → SeLis preview", () => {
         { id: "b2", type: "bookmark", cfi: "not a cfi", note: "", createdAt: 1, updatedAt: 1 },
       ],
     }), target(), NOW);
-    expect(preview.progress).toMatchObject({ grade: "unresolved", reasons: ["node-missing"], value: null });
+    expect(preview.progress).toMatchObject({ grade: "approximate", reasons: ["cfi-clamped"], value: { locator: { target: { offset: 10 } } } });
     expect(preview.bookmarks.map((b) => [b.grade, b.reasons])).toEqual([
       ["unresolved", ["chapter-missing"]],
       ["unresolved", ["bad-cfi"]],
@@ -282,4 +282,18 @@ describe("ER-0110: Readest highlight migration (style, color, pure highlight, ex
     expect(globals[0].grade).toBe("exact");
     expect(globals[0].value?.startTextOffset).toBe(17);
   });
+});
+
+it("keeps a ruby annotation as an approximate canonical range, independently of clamped progress", async () => {
+  const doc = xml('<html><head/><body><p><ruby>伊武圣兰<rp>（</rp><rt>Ibu Seira</rt><rp>）</rp></ruby>后</p></body></html>', "text/xml");
+  const t: ReadestImportTarget = { spineIdrefs: ["c1", "c2"], chapterPath: () => "c.xhtml", opfDocument: xml(OPF, "text/xml"), loadChapter: async () => doc };
+  const preview = await convertReadestBook(HASH, config({
+    location: "epubcfi(/6/2!/4/2/2/1:99)", progress: [7, 100],
+    booknotes: [note("ruby", "epubcfi(/6/2!/4/2,/2/1:0,/2/4/1:9)", "伊武圣兰（）")],
+  }), t, NOW);
+  expect(preview.progress).toMatchObject({ grade: "approximate", reasons: ["cfi-clamped"] });
+  const n = preview.notes[0];
+  expect(n).toMatchObject({ grade: "approximate", reasons: ["text-reconciled", "ruby-annotation"] });
+  expect(n.value?.selectedText).toBe("伊武圣兰IbuSeira");
+  expect(Array.from(n.value!.selectedText).length).toBe(n.value!.endTextOffset - n.value!.startTextOffset);
 });
